@@ -1,0 +1,17 @@
+apiVersion: sproozi.com/v1alpha1
+kind: AgentRun
+metadata:
+  name: manual-sre-remediation
+  namespace: sproozi-system
+spec:
+  templateRef:
+    name: sre-remediation
+  task: Investigate the failing demo workload and propose a safe correction.
+  eventContext:
+    trigger: manual
+    namespace: sproozi-demo
+    workload: sproozi-demo
+  capabilities:
+    - kubernetes.read
+    - github.pull_request
+    - model.inference

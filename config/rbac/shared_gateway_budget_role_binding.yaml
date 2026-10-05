@@ -1,0 +1,12 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: shared-gateway-budget
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: shared-gateway-budget
+subjects:
+- kind: ServiceAccount
+  name: shared-gateway
+  namespace: system

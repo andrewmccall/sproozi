@@ -1,0 +1,73 @@
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/name: sproozi
+    app.kubernetes.io/component: model-gateway
+    app.kubernetes.io/managed-by: kustomize
+  name: model-gateway
+  namespace: system
+spec:
+  ports:
+  - name: http
+    port: 8080
+    protocol: TCP
+    targetPort: 8080
+  selector:
+    app.kubernetes.io/name: sproozi
+    app.kubernetes.io/component: model-gateway
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/name: sproozi
+    app.kubernetes.io/component: model-gateway
+    app.kubernetes.io/managed-by: kustomize
+  name: model-gateway
+  namespace: system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sproozi
+      app.kubernetes.io/component: model-gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sproozi
+        app.kubernetes.io/component: model-gateway
+    spec:
+      serviceAccountName: model-gateway
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: model-gateway
+        image: controller:latest
+        command:
+        - /model-gateway
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        env:
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: model-gateway-credentials
+              key: openai-api-key
+        securityContext:
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          limits:
+            cpu: 250m
+            memory: 256Mi
+          requests:
+            cpu: 25m
+            memory: 128Mi

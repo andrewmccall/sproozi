@@ -1,0 +1,50 @@
+resources:
+  - ../metrics
+  - monitor.yaml
+
+# [PROMETHEUS-WITH-CERTS] The following patch configures the ServiceMonitor
+# to securely reference certificates created and managed by cert-manager.
+# Additionally, ensure that you enable the metrics-with-cert-manager patch in
+# ../metrics/kustomization.yaml so the controller manager serves the matching certificate.
+#patches:
+#  - path: monitor_tls_patch.yaml
+#    target:
+#      kind: ServiceMonitor
+
+# Uncomment the following replacements to set the Service name and namespace for
+# TLS verification in the Prometheus ServiceMonitor.
+#replacements:
+# - source:
+#     kind: Service
+#     version: v1
+#     name: controller-manager-metrics-service
+#     fieldPath: metadata.name
+#   targets:
+#     - select:
+#         kind: ServiceMonitor
+#         group: monitoring.coreos.com
+#         version: v1
+#         name: controller-manager-metrics-monitor
+#       fieldPaths:
+#         - spec.endpoints.0.tlsConfig.serverName
+#       options:
+#         delimiter: '.'
+#         index: 0
+#         create: true
+# - source:
+#     kind: Service
+#     version: v1
+#     name: controller-manager-metrics-service
+#     fieldPath: metadata.namespace
+#   targets:
+#     - select:
+#         kind: ServiceMonitor
+#         group: monitoring.coreos.com
+#         version: v1
+#         name: controller-manager-metrics-monitor
+#       fieldPaths:
+#         - spec.endpoints.0.tlsConfig.serverName
+#       options:
+#         delimiter: '.'
+#         index: 1
+#         create: true

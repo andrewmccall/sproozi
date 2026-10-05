@@ -1,0 +1,13 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sproozi-webhook-replay
+  namespace: sproozi-webhook-state
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: sproozi-webhook-replay
+subjects:
+- kind: ServiceAccount
+  name: sproozi-webhook
+  namespace: sproozi-system

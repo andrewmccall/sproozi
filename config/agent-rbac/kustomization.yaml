@@ -1,0 +1,5 @@
+namespace: sproozi-agents
+resources:
+- namespace.yaml
+- controller_contract_role.yaml
+- controller_contract_role_binding.yaml

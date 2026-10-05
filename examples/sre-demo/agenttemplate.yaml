@@ -1,0 +1,25 @@
+apiVersion: sproozi.com/v1alpha1
+kind: AgentTemplate
+metadata:
+  name: sre-remediation
+  namespace: sproozi-system
+spec:
+  runtimeRef:
+    name: codex
+  policyRef:
+    name: sre
+  egressProfiles: []
+  instructions: >-
+    Investigate the failing workload in sproozi-demo and propose a safe
+    correction through the shared trusted gateway. Clone example/sproozi-demo
+    and correct demo-workload.yaml, keeping the change limited to the failing
+    container command. The pinned image has patch, Python and kubectl, but not
+    apply_patch or PyYAML. Validate the manifest locally with kubectl set image
+    --local (using a validation-only image in its output, not modifying the file),
+    check the shell command syntax and git diff --check. Create one branch
+    named sproozi/<run UID>/fix-demo, push it once, and open a pull request with
+    main as its base using gh api --method POST repos/example/sproozi-demo/pulls
+    -f base=main -f head=<branch> -f title=<title> -f body=<evidence> --jq .html_url.
+    Use this bounded REST creation operation, not gh pr create's GraphQL queries.
+    Generic repository REST metadata and unrelated GitHub operations are not granted. Do not apply the
+    correction to the cluster or merge the PR.

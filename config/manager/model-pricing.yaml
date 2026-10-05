@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: model-gateway-pricing
+  namespace: system
+data:
+  pricing.json: |
+    {
+      "models": {
+        "gpt-6.1-sol": {
+          "inputMicrosPerMillionTokens": 2000000,
+          "cachedInputMicrosPerMillionTokens": 100000,
+          "outputMicrosPerMillionTokens": 10000000
+        },
+        "gpt-5.3-codex": {
+          "inputMicrosPerMillionTokens": 1750000,
+          "cachedInputMicrosPerMillionTokens": 175000,
+          "outputMicrosPerMillionTokens": 14000000
+        }
+      }
+    }
