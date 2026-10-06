@@ -116,3 +116,10 @@ and cost. The current admission estimate can omit input tokens, and rejection
 after an over-bound settlement does not undo upstream consumption. Other
 endpoints spend one unit
 per authorized upstream request, including each GitHub read-back request.
+
+## Future interoperability
+
+[Capabilities and MCP interoperability](future-architecture/capabilities-and-mcp.md)
+relates the Known/Proxy/Generic design vocabulary to these enforcement tiers
+and describes policy-controlled MCP delivery. It is a future direction; the
+current CLI and HTTP paths remain the implemented capability interfaces.

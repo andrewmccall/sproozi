@@ -2,6 +2,7 @@
 
 Start with the manual guide to run the proven semantic demo. References describe
 the current API and configuration; explanations describe how the code fits together.
+Future architecture is kept separate from implemented behaviour and verified guides.
 
 ## Guides
 
@@ -35,3 +36,13 @@ recovery flow has not been verified end to end.
 - [System architecture](explanations/system-architecture.md)
 - [Run lifecycle](explanations/run-lifecycle.md)
 - [Capabilities and gateways](explanations/capabilities-and-gateways.md)
+
+## Future architecture
+
+Directional designs for extensions to the current Kubernetes/SRE execution model.
+These are not implemented APIs or verified integrations.
+
+- [Overview and evolution](explanations/future-architecture/README.md)
+- [Capabilities and MCP interoperability](explanations/future-architecture/capabilities-and-mcp.md)
+- [Multiple execution runtimes](explanations/future-architecture/execution-runtimes.md)
+- [Harness portability and control](explanations/future-architecture/harness-portability.md)

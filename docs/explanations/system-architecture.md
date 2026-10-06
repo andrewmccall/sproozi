@@ -89,3 +89,10 @@ Kubernetes, model and GitHub path in Kind on 4 October 2026. Those dirty-tree
 runs do not establish release reproducibility or home-ops integration. Current
 model admission, interrupted cleanup and container-completion limitations are
 listed in [security hardening](../reference/security-hardening.md).
+
+## Future architecture
+
+The [future architecture overview](future-architecture/README.md) describes
+evolution toward independent capability interfaces, execution runtimes and
+harnesses. Kubernetes/SRE remains the first proof; Docker, MCP and managed
+harness control are directional extensions rather than current support.
