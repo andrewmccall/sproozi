@@ -1,0 +1,47 @@
+name: E2E Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  test-e2e:
+    permissions:
+      contents: read
+    name: Run on Ubuntu
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
+        with:
+          go-version: '1.26.6'
+
+      - name: Install pinned Kind
+        run: |
+          hack/verify/install-kind.sh "$RUNNER_TEMP/kind-bin"
+          sudo install -m 0755 "$RUNNER_TEMP/kind-bin/kind" /usr/local/bin/kind
+
+      - name: Verify kind installation
+        run: kind version
+
+      - name: Download pinned Calico manifest
+        run: curl --fail --location --silent --show-error https://raw.githubusercontent.com/projectcalico/calico/v3.30.4/manifests/calico.yaml --output "$RUNNER_TEMP/calico-v3.30.4.yaml"
+
+      - name: Run E2E tests with enforcing CNI
+        run: make test-e2e
+        env:
+          SPROOZI_CNI_MANIFEST: ${{ runner.temp }}/calico-v3.30.4.yaml
+          SPROOZI_CNI_SELECTOR: k8s-app=calico-node
+          SPROOZI_CNI_TIMEOUT: 300s

@@ -1,0 +1,69 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/*
+Dockerfile.cross
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Go workspace file
+go.work
+go.work.sum
+
+# Generated CRDs and DeepCopy code are committed; do not ignore them.
+
+# editor and IDE paraphernalia
+.idea
+.vscode
+*.swp
+*.swo
+*~
+
+# Kubeconfig might contain secrets
+*.kubeconfig
+.DS_Store
+/.agents/skills/
+/.claude/skills/
+/skills-lock.json
+/CONTEXT.md
+/docs/PRD.md
+/docs/implementation-plan.md
+/docs/superpowers/
+/docs/impl/
+.local/
+
+# Python and transient tooling output
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+*.prof
+*.log
+*.bundle
+
+# Local task records and agent configuration
+/.engineering/
+/.codex/
+/.aws/
+/.kube/
+
+# Private configuration and credential files
+.env
+.env.*
+!.env.example
+!.env.template
+*.key
+*.pem
+*.p12
+*.pfx
+*.secret.yaml
+*.secret.yml

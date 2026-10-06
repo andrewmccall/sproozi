@@ -1,0 +1,4 @@
+resources:
+- default-deny-ingress.yaml
+- allow-agent-traffic.yaml
+- allow-webhook-traffic.yaml

@@ -1,0 +1,42 @@
+apiVersion: sproozi.com/v1alpha1
+kind: AgentRuntime
+metadata:
+  labels:
+    app.kubernetes.io/name: sproozi
+    app.kubernetes.io/managed-by: kustomize
+  name: codex
+  namespace: sproozi-system
+spec:
+  podTemplate:
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: agent
+        image: ghcr.io/openai/codex-universal@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        resources:
+          limits:
+            cpu: "1"
+            memory: 1Gi
+            ephemeral-storage: 2Gi
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          capabilities:
+            drop: ["ALL"]
+          seccompProfile:
+            type: RuntimeDefault
+  workloadContainers: [agent]
+  clientConfig:
+    trustBundleConfigMap:
+      name: sproozi-sandbox-trust
+      key: ca-bundle.pem
+  ephemeralWorkspace:
+    sizeLimit: 2Gi
+  gatewayEndpoint: https://sproozi-gateway.sproozi-system.svc:8443

@@ -1,0 +1,7 @@
+## Append samples of your project ##
+resources:
+- sproozi_v1alpha1_agentruntime.yaml
+- sproozi_v1alpha1_agentpolicy.yaml
+- sproozi_v1alpha1_agenttemplate.yaml
+- sproozi_v1alpha1_agentrun.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples

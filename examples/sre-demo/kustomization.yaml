@@ -1,0 +1,9 @@
+# This is a reviewable template bundle. Use hack/demo/render.py (normally via
+# make demo) to replace the illustrative image digest and repository before
+# applying it to a cluster.
+resources:
+  - namespaces.yaml
+  - agentruntime.yaml
+  - agentpolicy.yaml
+  - agenttemplate.yaml
+  - demo-workload.yaml

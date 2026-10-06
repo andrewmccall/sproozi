@@ -1,0 +1,42 @@
+apiVersion: sproozi.com/v1alpha1
+kind: AgentPolicy
+metadata:
+  labels:
+    app.kubernetes.io/name: sproozi
+    app.kubernetes.io/managed-by: kustomize
+  name: sre
+  namespace: sproozi-system
+spec:
+  allowedCapabilities:
+    - kubernetes.read
+    - github.pull_request
+    - model.inference
+  kubernetesRead:
+    namespaces:
+      - sproozi-demo
+    resources:
+      - pods
+      - pods/log
+      - events
+      - services
+      - deployments
+      - replicasets
+      - statefulsets
+  githubPullRequest:
+    repositories:
+    - andrewmccall/home-ops
+    allowedBaseBranches:
+    - main
+  egressProfiles:
+    - go-modules
+  budgets:
+    model.inference:
+      maxUnits: 100000
+      maxCostMicros: 500000
+  resourceBounds:
+    max:
+      cpu: "2"
+      memory: 2Gi
+      ephemeral-storage: 4Gi
+  maxExecutionDuration: 1h
+  retentionTTL: 720h

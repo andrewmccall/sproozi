@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: egress-gateway-profiles
+  namespace: system
+data:
+  # The base gateway can start without granting any generic destinations.
+  # Administrators must explicitly configure profiles and policy to use egress.
+  profiles.json: '{}'

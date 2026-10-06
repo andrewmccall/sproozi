@@ -1,0 +1,15 @@
+apiVersion: kind.x-k8s.io/v1alpha4
+kind: Cluster
+nodes:
+- role: control-plane
+- role: worker
+# Kind taints the control plane in a multi-node cluster. Keep sandbox Pods on
+# the worker so the direct API probe does not hit NetworkPolicy's own-node
+# exception. No provider-specific host policy is required.
+networking:
+  disableDefaultCNI: true
+  podSubnet: 192.168.0.0/16
+containerdConfigPatches:
+- |-
+  [plugins."io.containerd.grpc.v1.cri".registry]
+    config_path = "/etc/containerd/certs.d"

@@ -1,0 +1,152 @@
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/name: sproozi
+    app.kubernetes.io/component: shared-gateway
+  name: gateway
+  namespace: system
+spec:
+  ports:
+  - name: proxy
+    port: 8443
+    protocol: TCP
+    targetPort: 8443
+  selector:
+    app.kubernetes.io/name: sproozi
+    app.kubernetes.io/component: shared-gateway
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/name: sproozi
+    app.kubernetes.io/component: shared-gateway
+  name: gateway
+  namespace: system
+spec:
+  replicas: 1
+  # A rotating ChatGPT session has one refresh owner. Do not scale this demo
+  # deployment or share its session with another cluster/process.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sproozi
+      app.kubernetes.io/component: shared-gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sproozi
+        app.kubernetes.io/component: shared-gateway
+    spec:
+      serviceAccountName: shared-gateway
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: shared-gateway
+        image: controller:latest
+        command: ["/gateway"]
+        env:
+        - name: SPROOZI_ENABLED_CAPABILITIES
+          value: kubernetes.read,model.inference,github.pull_request,packages.install,network.egress
+        - name: SPROOZI_GATEWAY_CERT_FILE
+          value: /var/run/sproozi-gateway/tls.crt
+        - name: SPROOZI_GATEWAY_KEY_FILE
+          value: /var/run/sproozi-gateway/tls.key
+        - name: SPROOZI_GATEWAY_HOST
+          value: sproozi-gateway.sproozi-system.svc
+        - name: AGENT_NAMESPACE
+          value: sproozi-agents
+        - name: BUDGET_NAMESPACE
+          value: sproozi-system
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: model-gateway-credentials
+              key: openai-api-key
+              optional: true
+        - name: MODEL_AUTH_MODE
+          valueFrom:
+            configMapKeyRef:
+              name: model-gateway-auth
+              key: mode
+              optional: true
+        - name: GITHUB_APP_ID
+          valueFrom:
+            secretKeyRef:
+              name: capability-proxy-github-app
+              optional: true
+              key: app-id
+        - name: GITHUB_APP_INSTALLATION_ID
+          valueFrom:
+            secretKeyRef:
+              name: capability-proxy-github-app
+              optional: true
+              key: installation-id
+        - name: GITHUB_APP_PRIVATE_KEY_PATH
+          value: /var/run/secrets/sproozi/github-app/private-key.pem
+        - name: EGRESS_PROFILES_PATH
+          value: /etc/sproozi/egress/profiles.json
+        - name: MODEL_PRICING_PATH
+          value: /etc/sproozi/model/pricing.json
+        volumeMounts:
+        - name: gateway-tls
+          mountPath: /var/run/sproozi-gateway
+          readOnly: true
+        - name: github-app
+          mountPath: /var/run/secrets/sproozi/github-app
+          readOnly: true
+        - name: profiles
+          mountPath: /etc/sproozi/egress
+          readOnly: true
+        - name: model-pricing
+          mountPath: /etc/sproozi/model
+          readOnly: true
+        ports:
+        - name: proxy
+          containerPort: 8443
+          protocol: TCP
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 65532
+          runAsGroup: 65532
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 25m
+            memory: 128Mi
+          limits:
+            cpu: 250m
+            memory: 256Mi
+      volumes:
+      - name: gateway-tls
+        secret:
+          secretName: sproozi-gateway-tls
+      - name: github-app
+        secret:
+          optional: true
+          secretName: capability-proxy-github-app
+          items:
+          - key: private-key.pem
+            path: private-key.pem
+      - name: profiles
+        configMap:
+          name: egress-gateway-profiles
+          items:
+          - key: profiles.json
+            path: profiles.json
+      - name: model-pricing
+        configMap:
+          name: model-gateway-pricing
+          items:
+          - key: pricing.json
+            path: pricing.json

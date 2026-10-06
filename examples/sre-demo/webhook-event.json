@@ -1,0 +1,8 @@
+{
+  "id": "alertmanager-sproozi-demo",
+  "eventContext": {
+    "alertname": "CrashLoopBackOff",
+    "namespace": "sproozi-demo",
+    "workload": "sproozi-demo"
+  }
+}

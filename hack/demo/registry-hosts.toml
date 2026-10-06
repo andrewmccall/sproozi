@@ -1,0 +1,4 @@
+# Demo-only containerd mirror. Host pushes use localhost:5001; Kind node pulls
+# reach the same pinned content through the registry's Docker network alias.
+[host."http://sproozi-demo-registry:5000"]
+  capabilities = ["pull", "resolve"]

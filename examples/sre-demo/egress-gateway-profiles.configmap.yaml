@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: egress-gateway-profiles
+  namespace: sproozi-system
+data:
+  profiles.json: |
+    {
+      "go-modules": [
+        { "scheme": "https", "host": "proxy.golang.org", "port": 443 },
+        { "scheme": "https", "host": "sum.golang.org", "port": 443 }
+      ],
+      "pypi": [
+        { "scheme": "https", "host": "pypi.org", "port": 443 },
+        { "scheme": "https", "host": "files.pythonhosted.org", "port": 443 }
+      ]
+    }

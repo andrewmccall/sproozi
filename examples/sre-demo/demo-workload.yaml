@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sproozi-demo
+  namespace: sproozi-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sproozi-demo
+  template:
+    metadata:
+      labels:
+        app: sproozi-demo
+    spec:
+      containers:
+        - name: app
+          image: busybox:1.36
+          command:
+            - /bin/sh
+            - -c
+            - exit 1

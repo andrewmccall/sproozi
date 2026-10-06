@@ -1,0 +1,21 @@
+apiVersion: sproozi.com/v1alpha1
+kind: AgentTemplate
+metadata:
+  labels:
+    app.kubernetes.io/name: sproozi
+    app.kubernetes.io/managed-by: kustomize
+  name: sre-remediation
+  namespace: sproozi-system
+spec:
+  runtimeRef:
+    name: codex
+  policyRef:
+    name: sre
+  instructions: >-
+    Investigate the failing workload and open a pull request when a safe
+    correction is available.
+  egressProfiles:
+    - go-modules
+  successCondition:
+    type: PullRequestCreated
+    repository: andrewmccall/home-ops

@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  labels:
+    sproozi.com/webhook-client: enabled
+  name: sproozi-system
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sproozi-agents
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sproozi-demo
