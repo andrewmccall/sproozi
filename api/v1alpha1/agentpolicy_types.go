@@ -17,17 +17,27 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"strings"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 // AgentPolicySpec defines the live authorization policy for AgentRuns.
 type AgentPolicySpec struct {
 	// AllowedCapabilities lists the capabilities that a run may request.
-	// +kubebuilder:validation:MaxItems=8
+	// +kubebuilder:validation:MaxItems=32
 	// +kubebuilder:validation:MinItems=1
 	AllowedCapabilities []CapabilityKind `json:"allowedCapabilities"`
+
+	// MCPServers constrains named MCP capabilities. Registration URLs and
+	// provider credentials belong exclusively to trusted gateway configuration.
+	// +optional
+	// +kubebuilder:validation:MaxProperties=32
+	// +kubebuilder:validation:XValidation:rule="self.all(k, k.matches('^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$'))",message="MCP server names must be DNS labels"
+	MCPServers map[string]MCPServerScope `json:"mcpServers,omitempty"`
 
 	// KubernetesRead constrains Kubernetes read operations.
 	KubernetesRead KubernetesReadScope `json:"kubernetesRead"`
@@ -46,8 +56,8 @@ type AgentPolicySpec struct {
 	// Budgets optionally bound consumption per capability and AgentRun.
 	// Omitted capabilities have no consumption ceiling.
 	// +optional
-	// +kubebuilder:validation:MaxProperties=5
-	// +kubebuilder:validation:XValidation:rule="self.all(k, k in ['kubernetes.read', 'github.pull_request', 'model.inference', 'network.egress', 'packages.install'])",message="budget keys must be known capabilities"
+	// +kubebuilder:validation:MaxProperties=32
+	// +kubebuilder:validation:XValidation:rule="self.all(k, k.matches('^(kubernetes[.]read|github[.]pull_request|model[.]inference|network[.]egress|packages[.]install|mcp[.][a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)$'))",message="budget keys must be native or named MCP capabilities"
 	Budgets map[CapabilityKind]EndpointBudget `json:"budgets,omitempty"`
 
 	// ResourceBounds caps the resources selected by an AgentRuntime.
@@ -67,8 +77,39 @@ type AgentPolicySpec struct {
 }
 
 // CapabilityKind identifies an operation that may be granted to an AgentRun.
-// +kubebuilder:validation:Enum=kubernetes.read;github.pull_request;model.inference;network.egress;packages.install
+// +kubebuilder:validation:MaxLength=67
+// +kubebuilder:validation:Pattern=`^(kubernetes[.]read|github[.]pull_request|model[.]inference|network[.]egress|packages[.]install|mcp[.][a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)$`
 type CapabilityKind string
+
+// MCPServerName identifies a configured MCP grant without admitting arbitrary
+// capability strings or treating tool installation as authority.
+func (c CapabilityKind) MCPServerName() (string, bool) {
+	if !strings.HasPrefix(string(c), "mcp.") {
+		return "", false
+	}
+	name := strings.TrimPrefix(string(c), "mcp.")
+	return name, len(validation.IsDNS1123Label(name)) == 0
+}
+
+// MCPServerScope grants only explicitly named tools of a registered server.
+type MCPServerScope struct {
+	// Tools is a default-deny map, not a copy of the server's discovered catalogue.
+	// +kubebuilder:validation:MinProperties=1
+	// +kubebuilder:validation:MaxProperties=128
+	// +kubebuilder:validation:XValidation:rule="self.all(k, k.matches('^[A-Za-z0-9_.-]{1,128}$'))",message="invalid MCP tool name"
+	Tools map[string]MCPToolScope `json:"tools"`
+}
+
+// MCPToolScope adds argument predicates to the discovered input schema.
+type MCPToolScope struct {
+	// Arguments is an optional JSON Schema restriction. It cannot replace the
+	// upstream input schema or establish the tool's service semantics.
+	// +optional
+	// +kubebuilder:pruning:PreserveUnknownFields
+	// +kubebuilder:validation:Schemaless
+	// +kubebuilder:validation:Type=object
+	Arguments *runtime.RawExtension `json:"arguments,omitempty"`
+}
 
 const (
 	CapabilityKubernetesRead    CapabilityKind = "kubernetes.read"

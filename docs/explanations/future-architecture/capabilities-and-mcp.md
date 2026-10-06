@@ -1,7 +1,10 @@
 # Capabilities and MCP interoperability
 
-**Status:** future direction. See the [overview](README.md) for the current
-foundation and shared invariants.
+**Status:** native Kubernetes and configured remote HTTPS MCP tools are implemented,
+with [recorded Kind acceptance](../../demos/verified-mcp-demo.md). Current setup is
+in the [configured MCP reference](../../reference/configured-mcp.md); the
+[ADR](../../adr/0001-mcp-capabilities-through-shared-gateway.md) records the decision.
+This document also explores future managed servers and semantic bindings.
 
 MCP should make an approved capability usable by an existing harness. Sproozi
 still owns the execution that receives it, its policy, identity and lifetime.
@@ -22,8 +25,8 @@ second set of API capability names.
 
 | Design vocabulary | Meaning | Relationship to current docs |
 | --- | --- | --- |
-| Known | Enforce service resources and actions, such as observing one Kubernetes namespace or opening a PR in one repository. | Semantic. Native handlers already provide selected integrations. An MCP-backed implementation could provide another delivery path. |
-| Proxy | Mediate a bounded command or protocol request while understanding less about the target service. | Protocol. A standalone bounded-request integration is planned; protocol parsing within a semantic handler does not itself establish this tier. |
+| Known | Enforce service resources and actions, such as observing one Kubernetes namespace or opening a PR in one repository. | Semantic. The native Kubernetes MCP tool already delivers the existing handler; further trusted MCP bindings could provide other semantic integrations. |
+| Proxy | Mediate a bounded command or protocol request while understanding less about the target service. | Protocol. Configured remote MCP tools implement this tier; protocol parsing within a semantic handler does not itself establish this tier. |
 | Generic | Grant explicitly bounded access where richer mediation is unavailable, with the reduced guarantee visible. | Destination is the current network form. Broader filesystem, volume or direct credential delegation would need a separate design and explicit policy. |
 
 These are enforcement tiers, not transports, increasing permission levels or
@@ -34,8 +37,8 @@ only a protocol-level grant.
 
 Use [capabilities and gateways](../capabilities-and-gateways.md) for the current
 module map and [permissions and capabilities](../../reference/permissions-and-capabilities.md)
-for current capability names and scope. This direction does not add arbitrary
-MCP capability strings to the existing API.
+for current capability names and scope. The implemented API accepts named `mcp.<server>` capabilities backed by trusted
+gateway registration and explicit policy tool scope.
 
 ## MCP delivers capabilities; it does not establish semantics
 
@@ -58,7 +61,7 @@ A missing semantic adapter, unsupported operation or failed MCP connection must
 not silently become generic access to the target. The current gateway already
 reserves semantic service addresses against weaker destination fallback.
 
-## Directional preparation flow
+## Preparation flow
 
 1. Resolve the run's requested capabilities against trusted policy and scope.
 2. Select an approved implementation and record the enforcement tier it provides.
@@ -114,7 +117,8 @@ Do not require every harness to read one Sproozi tool manifest. Keep an internal
 description of approved connections and render the selected harness's supported
 configuration at launch. Tool discovery and execution then use MCP.
 
-The eventual adapter may need remote HTTP, local stdio or a small bridge. Choose
+The current Codex renderer delivers broker URLs for registered remote HTTP
+providers. Managed local stdio or a small bridge may be useful later. Choose
 the transport for an actual harness and deployment. A stdio process running
 under the agent's identity cannot safely hold broader upstream credentials.
 Run authentication material may be visible to the workload, just as today's
@@ -125,22 +129,29 @@ Preserve ordinary clients and the [current client contract](../../reference/clie
 MCP should widen the ways an execution can use a capability, not require every
 shell, filesystem or network action to become an MCP tool call.
 
-## First proof and open decisions
+## Proofs and remaining work
 
-Start with one integration in the existing Kubernetes workload. Verify that the
-agent discovers and uses the allowed operation, an unlisted or out-of-scope call
-fails, direct upstream access fails, and cancellation removes authority. Record
-which tier was actually enforced. A second harness should consume the capability
-through its own configuration without changing the grant.
+The native Kubernetes proof is recorded above. Configured remote MCP now has
+local tests against two independent HTTPS SDK servers and stock Codex connection
+loading. It reuses run grants, live policy and accounting; additive JSON Schema
+predicates make argument scope configurable. See the reference for supported
+transport and schema bounds. A
+[deployed fixture run](../../demos/verified-mcp-demo.md#configured-remote-mcp-acceptance)
+now proves stock Codex use of both providers, denied scope/tools/server access,
+direct network denial, request budgets, cancellation and cleanup. The configured
+path enforced Protocol, while native Kubernetes retains Semantic enforcement.
+A second harness should consume the capability through its own configuration
+without changing the grant.
 
 A managed Postgres example would be a useful later test of credential separation,
 server lifecycle and upstream-native restrictions. An arbitrary OCI CLI would
 test the escape hatch without requiring a native connector for every service.
 Neither needs to be part of the first MCP proof.
 
-The implementation should settle where enforcement lives, how remote sessions
-carry run identity, which server behaviour supports Known mappings, and who owns
-managed-server cleanup. Consumption units will differ between services; MCP does
+Remote tool enforcement now lives in the shared gateway, with an independent
+upstream session per incoming request and gateway-only provider credentials.
+Managed-server cleanup and reviewed provider behaviour supporting stronger Known
+mappings remain separate questions. Consumption units will differ between services; MCP does
 not supply one universal budget model. Existing
 [endpoint accounting](../capabilities-and-gateways.md#endpoint-interface-and-spending)
 is a starting point, with its documented limits.

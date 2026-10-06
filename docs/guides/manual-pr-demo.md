@@ -98,8 +98,13 @@ not describe three sandbox modes or stages of authority escalation.
 
 The recorded runs exercised the semantic paths and their shared containment
 boundary. Destination and package handlers exist but were not exercised by this
-demo. Standalone protocol-tier integrations, MCP mediation and dynamic escalation
-remain planned.
+demo. One [native Kubernetes MCP tool](../reference/kubernetes-mcp.md) is available
+through the opt-in demo renderer. A [separate bounded acceptance](../demos/verified-mcp-demo.md)
+verified its use by stock Codex in Kind. The recorded PR demo did not exercise it.
+[Configured remote MCP mediation](../reference/configured-mcp.md) also has a
+[separate two-provider Kind proof](../demos/verified-mcp-demo.md#configured-remote-mcp-acceptance)
+with Protocol enforcement. Dynamic escalation, managed MCP servers and other
+harnesses remain planned.
 
 [Recorded acceptance](../demos/verified-sre-demo.md) passed on 4 October 2026.
 A new checkout or environment still needs its own live report. The model budget

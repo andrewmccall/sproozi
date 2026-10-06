@@ -7,6 +7,7 @@ Future architecture is kept separate from implemented behaviour and verified gui
 ## Guides
 
 - [Manual AgentRun to pull request](guides/manual-pr-demo.md), including Kind setup, example resources and optional monitoring
+- [Recorded native and configured MCP acceptance](demos/verified-mcp-demo.md), including stock Codex tool use, denials and cancellation
 - [Model provider authentication](guides/model-provider-auth.md)
 - [Recorded SRE acceptance](demos/verified-sre-demo.md), with scope and limitations
 
@@ -30,6 +31,8 @@ recovery flow has not been verified end to end.
 - [Required secrets and config](reference/required-secrets-and-config.md)
 - [Agent contract and completion](reference/agent-contract.md)
 - [Standard client compatibility](reference/client-compatibility.md)
+- [Kubernetes MCP delivery](reference/kubernetes-mcp.md)
+- [Configured remote MCP capabilities](reference/configured-mcp.md)
 
 ## Explanations
 
@@ -37,10 +40,19 @@ recovery flow has not been verified end to end.
 - [Run lifecycle](explanations/run-lifecycle.md)
 - [Capabilities and gateways](explanations/capabilities-and-gateways.md)
 
+## Architecture decisions
+
+Architecturally significant changes require an ADR and matching current docs.
+[Decision records and contributor guidance](adr/README.md) describe the process.
+
+- [0001: MCP through the shared capability gateway](adr/0001-mcp-capabilities-through-shared-gateway.md)
+
 ## Future architecture
 
-Directional designs for extensions to the current Kubernetes/SRE execution model.
-These are not implemented APIs or verified integrations.
+Directional designs for extensions to the implemented capability model. Native
+Kubernetes MCP and configured remote HTTPS MCP tools are supported today; the
+references and acceptance report above describe their bounds. Managed servers,
+additional runtimes and other harnesses remain future directions.
 
 - [Overview and evolution](explanations/future-architecture/README.md)
 - [Capabilities and MCP interoperability](explanations/future-architecture/capabilities-and-mcp.md)

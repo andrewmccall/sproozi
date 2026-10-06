@@ -29,10 +29,17 @@ type HandlerConfig struct {
 	AuditLogger      audit.Writer
 }
 
-type Handler struct{ Config HandlerConfig }
+type Handler struct {
+	Config HandlerConfig
+	mcp    http.Handler
+}
 
 // NewHandler constructs a Kubernetes semantic capability handler.
-func NewHandler(config HandlerConfig) *Handler { return &Handler{Config: config} }
+func NewHandler(config HandlerConfig) *Handler {
+	h := &Handler{Config: config}
+	h.mcp = h.newMCPHandler()
+	return h
+}
 
 // ServeHTTP exposes the handler to the shared gateway.
 // It deliberately requires identity in context; Kubernetes never has a
@@ -41,6 +48,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	identity, ok := gateway.IdentityFromContext(req.Context())
 	if !ok {
 		http.Error(w, "gateway identity required", http.StatusUnauthorized)
+		return
+	}
+	if req.URL.Path == "/mcp" && h.mcp != nil {
+		h.serveMCP(w, req, identity)
 		return
 	}
 	response, err := h.authorizeAndForward(req.Context(), identity, req)
@@ -163,7 +174,7 @@ func (b *boundedBody) Read(p []byte) (int, error) {
 }
 
 func allowed(id *gateway.RunIdentity, op Operation) bool {
-	if !contains(id.Run.Spec.Capabilities, sprooziv1alpha1.CapabilityKubernetesRead) || !contains(id.Policy.Spec.AllowedCapabilities, sprooziv1alpha1.CapabilityKubernetesRead) {
+	if !slices.Contains(id.Run.Spec.Capabilities, sprooziv1alpha1.CapabilityKubernetesRead) || !slices.Contains(id.Policy.Spec.AllowedCapabilities, sprooziv1alpha1.CapabilityKubernetesRead) {
 		return false
 	}
 	if op.Discovery {
@@ -180,9 +191,6 @@ func allowed(id *gateway.RunIdentity, op Operation) bool {
 		resource = sprooziv1alpha1.KubernetesReadResource(op.Resource + "/" + op.Subresource)
 	}
 	return slices.Contains(id.Policy.Spec.KubernetesRead.Resources, resource)
-}
-func contains(xs []sprooziv1alpha1.CapabilityKind, x sprooziv1alpha1.CapabilityKind) bool {
-	return slices.Contains(xs, x)
 }
 func containsString(xs []string, x string) bool {
 	return slices.Contains(xs, x)

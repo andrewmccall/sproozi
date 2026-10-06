@@ -89,9 +89,7 @@ func TestChatGPTSerializesRefreshAndPersistsRotatedSession(t *testing.T) {
 	auth.tokenEndpoint = server.URL
 	var wg sync.WaitGroup
 	for range 20 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			req := httptest.NewRequest(http.MethodPost, Resource+"/responses", nil)
 			if err := auth.Authorize(req); err != nil {
 				t.Error(err)
@@ -100,7 +98,7 @@ func TestChatGPTSerializesRefreshAndPersistsRotatedSession(t *testing.T) {
 			if req.Header.Get("Authorization") != "Bearer new-access" {
 				t.Error("stale credentials were injected")
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	if calls.Load() != 1 || store.session.RefreshToken != "new-refresh" || !store.session.SavedAt.After(time.Now().Add(-time.Minute)) {

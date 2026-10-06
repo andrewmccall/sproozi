@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mcp-servers
+  namespace: system
+data:
+  # URLs and credential-file locations are trusted gateway configuration.
+  # Mount selected provider Secrets in the gateway before adding registrations.
+  servers.json: '{"servers":{}}'

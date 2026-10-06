@@ -25,3 +25,5 @@ const (
 	testSproozDemoNamespace = "sproozi-demo"
 	testPodsResource        = "pods"
 )
+
+const testMCPCapability = "mcp.docs"

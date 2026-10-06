@@ -2,6 +2,7 @@ package envtest
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"testing"
 	"time"
@@ -48,6 +49,44 @@ func TestAgentPolicyRejectsUnknownCapability(t *testing.T) {
 	if err := apiClient.Create(context.Background(), policy); err == nil {
 		t.Fatal("Create() error = nil, want API server validation error")
 	}
+	policy = validAgentPolicy()
+	policy.Name = "mcp-policy"
+	policy.Spec.AllowedCapabilities = []sprooziv1alpha1.CapabilityKind{testMCPCapability}
+	arguments := []byte(`{"required":["tenant"],"properties":{"tenant":{"const":"home-ops"}}}`)
+	policy.Spec.MCPServers = map[string]sprooziv1alpha1.MCPServerScope{
+		"docs": {Tools: map[string]sprooziv1alpha1.MCPToolScope{
+			"search": {Arguments: &runtime.RawExtension{Raw: arguments}},
+		}},
+	}
+	policy.Spec.Budgets = map[sprooziv1alpha1.CapabilityKind]sprooziv1alpha1.EndpointBudget{
+		testMCPCapability: {MaxUnits: 5},
+	}
+	if err := apiClient.Create(context.Background(), policy); err != nil {
+		t.Fatal(err)
+	}
+	var stored sprooziv1alpha1.AgentPolicy
+	if err := apiClient.Get(context.Background(), client.ObjectKeyFromObject(policy), &stored); err != nil {
+		t.Fatal(err)
+	}
+	var constraint map[string]any
+	if err := json.Unmarshal(stored.Spec.MCPServers["docs"].Tools["search"].Arguments.Raw, &constraint); err != nil {
+		t.Fatal(err)
+	}
+	tenant := constraint["properties"].(map[string]any)["tenant"].(map[string]any)
+	if tenant["const"] != "home-ops" {
+		t.Fatalf("argument schema was pruned: %v", constraint)
+	}
+	for _, name := range []string{"mcp.", "mcp.Bad", "mcp.bad/name"} {
+		invalid := policy.DeepCopy()
+		invalid.Name = "invalid-mcp"
+		invalid.ResourceVersion = ""
+		invalid.UID = ""
+		invalid.Spec.AllowedCapabilities = []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityKind(name)}
+		if err := apiClient.Create(context.Background(), invalid); err == nil {
+			t.Fatalf("invalid MCP capability accepted: %s", name)
+		}
+	}
+
 }
 
 func TestAgentPolicyRejectsUnsafeKubernetesReadResource(t *testing.T) {

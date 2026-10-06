@@ -1,0 +1,10 @@
+apiVersion: sproozi.com/v1alpha1
+kind: AgentRun
+metadata:
+  generateName: mcp-investigation-
+  namespace: sproozi-system
+spec:
+  templateRef:
+    name: mcp-investigation
+  capabilities: [model.inference, mcp.docs, mcp.inventory]
+  task: Find the DNS outage guide and the servers in rack a.

@@ -166,6 +166,12 @@ type AgentRuntimeSpec struct {
 
 // RuntimeClientConfig selects non-secret, administrator-owned client material.
 type RuntimeClientConfig struct {
+	// Harness selects supported run-local MCP configuration rendering. Empty
+	// leaves delivery to the administrator's own client launch command.
+	// +optional
+	// +kubebuilder:validation:Enum=codex
+	Harness string `json:"harness,omitempty"`
+
 	// TrustBundleConfigMap identifies an immutable certificate-only ConfigMap in the
 	// sproozi-agents namespace. The selected key contains public roots plus the
 	// dedicated inspection CA; private keys and provider credentials are forbidden.

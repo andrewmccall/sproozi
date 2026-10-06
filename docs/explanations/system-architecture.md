@@ -2,7 +2,11 @@
 
 **Audience:** operators, contributors
 
-Sproozi separates **untrusted agent execution** from **trusted policy and credential handling**.
+Sproozi separates untrusted agent execution from trusted policy and credential
+handling. CLI, HTTP and MCP clients use one shared authenticated gateway. Its
+native service handlers enforce Semantic scope, the configured MCP bridge
+provides Protocol mediation, and the destination handler checks exact network
+destinations. These tiers describe the broker's understanding of an operation.
 
 ```mermaid
 graph LR
@@ -11,18 +15,20 @@ graph LR
             C[controller-manager]
             GW[shared authenticated gateway]
             M[semantic model module]
-            G[semantic capability modules]
-            E[egress module]
+            G[semantic service modules]
+            MCP[configured MCP bridge, Protocol]
+            E[destination module]
             W[webhook]
-            CR[(Secrets and Config)]
+            CR[(Trusted Secrets and configuration)]
         end
 
         subgraph Agents[sproozi-agents]
-            S[Sandbox]
+            S[Sandbox with stock agent]
+            Contract[Immutable run contract and Codex MCP fragment]
         end
 
-        subgraph Target[sproozi-demo]
-            D[Broken workload]
+        subgraph Target[Approved target namespace]
+            D[Cluster resources]
         end
 
         R[AgentRun]
@@ -39,43 +45,80 @@ graph LR
     P --> C
     RT --> C
     C --> S
-    S --> GW
+    C --> Contract
+    Contract -. mounted configuration .-> S
+    S -->|CLI, HTTP and MCP through inspected TLS| GW
     GW --> M
     GW --> G
+    GW --> MCP
     GW --> E
-    G -. read-only Kubernetes module .-> D
+    G -. native Kubernetes REST and MCP reads .-> D
+    MCP --> Providers[Approved remote HTTPS MCP servers]
     CR --> M
     CR --> G
+    CR --> MCP
     CR --> E
     CR --> W
 ```
 
-## Trust boundaries
+## Trust and namespace boundaries
 
-- **Trusted:** controller-manager, webhook, shared gateway and its semantic modules
-- **Untrusted:** task text, event payloads, sandbox execution
-
-## Namespace boundaries
-
-- `sproozi-system` holds trusted workloads and credentials
-- `sproozi-agents` holds run-scoped identities, network policies, and sandbox workloads
-- target namespaces such as `sproozi-demo` hold the cluster resources the run may inspect
+- `sproozi-system` holds the trusted controller, webhook and shared gateway,
+  including Semantic, Protocol and Destination handlers and provider credentials.
+- `sproozi-agents` holds run-scoped identities, network policies, immutable
+  contracts and untrusted sandbox workloads.
+- Approved target namespaces such as `sproozi-demo` hold resources the run may inspect.
+- Task text, event payloads and provider output are untrusted. Tool discovery
+  describes an interface; trusted registration and policy determine authority.
 
 ## External-call invariant
 
-With an enforcing CNI and the generated NetworkPolicy, external calls from a workload, including Kubernetes API calls made by
-`kubectl`, should go to the shared authenticated gateway. The generated policy
-grants only DNS and gateway egress. Operators must verify direct API/provider
-denials in their environment; NetworkPolicy alone has node-traffic exceptions.
-Routing selects a module;
-the module still authorizes the normalized operation against the run's
-immutable requested capabilities and current lifecycle/policy state.
+With an enforcing CNI and the generated NetworkPolicy, external calls from a
+workload, including Kubernetes API and MCP calls, go through the shared gateway.
+The generated policy grants only DNS and gateway egress. Operators must verify
+direct API/provider denials in their environment; NetworkPolicy alone has
+node-traffic exceptions. Routing selects a handler. The handler authorizes the
+actual operation against immutable requested capabilities and current
+lifecycle/policy state.
 
 Each run gets one dedicated ServiceAccount. Its gateway-audience token identifies
 the run but does not grant capabilities. The workload Pod has no Sproozi proxy
-sidecar or local proxy process.
+sidecar or local proxy process. Provider credentials remain in the trusted gateway.
 
-## Current-state note
+## MCP is a supported capability interface
+
+| Path | Run grant | Trusted configuration | Enforcement |
+| --- | --- | --- | --- |
+| Native Kubernetes Pod-list tool at `https://kubernetes.default.svc/mcp` | `kubernetes.read` | Existing Kubernetes namespace/resource policy | Semantic, through the same handler as native REST reads |
+| Registered remote tools at the gateway's `/mcp/<server>` path | `mcp.<server>` | Gateway registry plus `AgentPolicy.spec.mcpServers` tool rules and optional argument restrictions | Protocol, using discovered input schemas and independent policy validation |
+
+Adding a compatible remote HTTPS server requires registration and policy, without
+a provider-specific Go adapter. The gateway snapshots exact provider URLs and
+optional bearer credential files at startup. Registration or credential changes
+require a gateway restart; policy remains live. Provider authorities are reserved
+against weaker destination routing.
+
+For each incoming remote MCP request, the bridge initializes a private upstream
+SDK session, discovers and filters approved tools, executes at most one call and
+closes the session. Budgets charge attempted tool invocations under the Run UID
+and named capability; reconnecting does not reset consumption. Cached discovery
+and connection configuration grant no authority. The proxy's live revalidation
+revokes requests when run or policy authority ends.
+
+The controller adds a public `codex-mcp.toml` fragment to the existing immutable
+run contract when `AgentRuntime.spec.clientConfig.harness` is `codex`. The trusted
+launch copies it into disposable Codex configuration. It contains requested
+broker connections, with no upstream URLs or provider credentials.
+
+The [MCP ADR](../adr/0001-mcp-capabilities-through-shared-gateway.md) records why
+registration, grants and session ownership have this shape. See
+[configured MCP capabilities](../reference/configured-mcp.md),
+[native Kubernetes MCP delivery](../reference/kubernetes-mcp.md) and
+[the agent contract](../reference/agent-contract.md) for current configuration and
+limits. The configured bridge supports independent HTTPS tool operations;
+managed stdio, OAuth consent and conversation continuity remain future work.
+
+## Execution and evidence
 
 The execution adapter creates Pods, not external Agent Sandbox custom resources.
 A run receives an immutable input contract, one projected gateway-audience token,
@@ -84,15 +127,19 @@ The token identifies the run; requested capabilities and live policy determine
 its authority. New gateway requests recheck that authority, and open sessions
 close through bounded revalidation.
 
-[Recorded acceptance](../demos/verified-sre-demo.md) demonstrated the semantic
-Kubernetes, model and GitHub path in Kind on 4 October 2026. Those dirty-tree
-runs do not establish release reproducibility or home-ops integration. Current
-model admission, interrupted cleanup and container-completion limitations are
-listed in [security hardening](../reference/security-hardening.md).
+[Recorded SRE acceptance](../demos/verified-sre-demo.md) demonstrated the Semantic
+Kubernetes, model and GitHub paths in Kind on 4 October 2026.
+[Recorded MCP acceptance](../demos/verified-mcp-demo.md) demonstrated stock Codex
+use of native Kubernetes MCP and two configured HTTPS fixture providers on
+6 October 2026, including denials, budgets, cancellation and normal cleanup.
+These dirty-tree runs establish neither universal provider compatibility nor
+release reproducibility or home-ops integration. Current model admission,
+interrupted cleanup and container-completion limitations are listed in
+[security hardening](../reference/security-hardening.md).
 
 ## Future architecture
 
 The [future architecture overview](future-architecture/README.md) describes
-evolution toward independent capability interfaces, execution runtimes and
-harnesses. Kubernetes/SRE remains the first proof; Docker, MCP and managed
-harness control are directional extensions rather than current support.
+extensions to these implemented boundaries. MCP delivery and configurable HTTPS
+provider mediation are current capabilities. Docker placement, additional
+harnesses and managed MCP servers remain directional designs.

@@ -70,6 +70,20 @@ make lint-fix   # Auto-fix code style
 make test       # Run unit tests
 ```
 
+**Documentation is part of completion:**
+
+Include affected documentation and examples in the task's done criteria before
+implementation. Keep them current in the same change, and update the main README
+when supported capabilities change.
+
+Architecturally significant choices MUST follow `docs/adr/README.md`. Record the
+decision, meaningful alternatives, tradeoffs and revisit conditions using the
+retained design and review evidence. This applies to authority/trust boundaries,
+API concepts, integration patterns, ownership/lifecycle, and runtime or harness
+responsibilities. Review decision coverage and descriptions against the actual
+implementation before declaring completion, then run `make verify-docs`. Its
+file/link checks do not establish documentation currency or decision coverage.
+
 ## CLI Commands Cheat Sheet
 
 ### Create API (your own types)

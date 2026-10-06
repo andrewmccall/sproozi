@@ -136,8 +136,11 @@ func permittedEgress(run *sprooziv1alpha1.AgentRun, policy *sprooziv1alpha1.Agen
 			PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{dnsPodLabel: dnsPodValue}},
 		}},
 	}}
-	if capabilityAllowed(run, policy, sprooziv1alpha1.CapabilityKubernetesRead) || capabilityAllowed(run, policy, sprooziv1alpha1.CapabilityModelInference) || capabilityAllowed(run, policy, sprooziv1alpha1.CapabilityGitHubPullRequest) || capabilityAllowed(run, policy, sprooziv1alpha1.CapabilityPackagesInstall) || capabilityAllowed(run, policy, sprooziv1alpha1.CapabilityNetworkEgress) {
-		rules = append(rules, gatewayRule("sproozi-system", "shared-gateway", port8443))
+	for _, capability := range run.Spec.Capabilities {
+		if capabilityAllowed(run, policy, capability) {
+			rules = append(rules, gatewayRule("sproozi-system", "shared-gateway", port8443))
+			break
+		}
 	}
 	return rules
 }

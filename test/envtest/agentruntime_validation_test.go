@@ -51,6 +51,20 @@ func TestAgentRuntimeRejectsRootExecution(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
+	valid := validAgentRuntime()
+	valid.Name = "codex-mcp-runtime"
+	valid.Spec.ClientConfig.Harness = "codex"
+	if err := apiClient.Create(context.Background(), valid); err != nil {
+		t.Fatal(err)
+	}
+	var stored sprooziv1alpha1.AgentRuntime
+	if err := apiClient.Get(context.Background(), client.ObjectKeyFromObject(valid), &stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored.Spec.ClientConfig.Harness != "codex" {
+		t.Fatal("client harness selection was pruned")
+	}
+
 	rt := validAgentRuntime()
 	*rt.Spec.PodTemplate.Spec.SecurityContext.RunAsNonRoot = false
 	if err := apiClient.Create(context.Background(), rt); err == nil {

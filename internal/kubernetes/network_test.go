@@ -47,6 +47,34 @@ func TestEnsureNetworkPolicyCreates(t *testing.T) {
 	}
 }
 
+func TestNamedMCPGrantUsesOnlyExistingGatewayNetworkRoute(t *testing.T) {
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).Build()
+	run := testRun("bbbbbbbb-0000-0000-0000-000000000301")
+	run.Spec.Capabilities = []sprooziv1alpha1.CapabilityKind{testMCPCapability}
+	p := &sprooziv1alpha1.AgentPolicy{Spec: sprooziv1alpha1.AgentPolicySpec{AllowedCapabilities: []sprooziv1alpha1.CapabilityKind{testMCPCapability}}}
+	if err := kubernetes.EnsureNetworkPolicy(t.Context(), c, run, p); err != nil {
+		t.Fatal(err)
+	}
+	var np networkingv1.NetworkPolicy
+	key := client.ObjectKey{Namespace: kubernetes.AgentsNamespace, Name: kubernetes.RunName(run.UID)}
+	if err := c.Get(t.Context(), key, &np); err != nil {
+		t.Fatal(err)
+	}
+	if len(np.Spec.Egress) != 2 || np.Spec.Egress[1].Ports[0].Port.IntVal != 8443 || np.Spec.Egress[1].To[0].PodSelector == nil {
+		t.Fatalf("MCP network route=%+v", np.Spec.Egress)
+	}
+	p.Spec.AllowedCapabilities = nil
+	if err := kubernetes.EnsureNetworkPolicy(t.Context(), c, run, p); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Get(t.Context(), key, &np); err != nil {
+		t.Fatal(err)
+	}
+	if len(np.Spec.Egress) != 1 {
+		t.Fatal("revoked MCP grant retained gateway route")
+	}
+}
+
 func TestNetworkPolicyDeniesAllIngress(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).Build()
 	run := testRun("bbbbbbbb-0000-0000-0000-000000000002")

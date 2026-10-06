@@ -43,6 +43,13 @@ spec:
                 description: ClientConfig selects administrator-owned public client
                   configuration mounted into every Sandbox.
                 properties:
+                  harness:
+                    description: |-
+                      Harness selects supported run-local MCP configuration rendering. Empty
+                      leaves delivery to the administrator's own client launch command.
+                    enum:
+                    - codex
+                    type: string
                   trustBundleConfigMap:
                     description: |-
                       TrustBundleConfigMap identifies an immutable certificate-only ConfigMap in the

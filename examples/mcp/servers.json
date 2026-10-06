@@ -1,0 +1,12 @@
+{
+  "servers": {
+    "docs": {
+      "url": "https://docs.example.com/mcp",
+      "bearerTokenFile": "/var/run/secrets/sproozi/mcp/docs/token"
+    },
+    "inventory": {
+      "url": "https://inventory.example.com/mcp",
+      "bearerTokenFile": "/var/run/secrets/sproozi/mcp/inventory/token"
+    }
+  }
+}

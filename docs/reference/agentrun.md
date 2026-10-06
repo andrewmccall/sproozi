@@ -30,6 +30,12 @@ spec:
   cancel: false
 ```
 
+The same immutable capability list can request configured MCP servers, for
+example `capabilities: [model.inference, mcp.docs]`. The selected policy must allow
+`mcp.docs` and define its permitted tools; the gateway must register `docs`.
+The run cannot choose a provider URL, credential file or tool-policy override.
+See [configured MCP capabilities](configured-mcp.md).
+
 ## Lifecycle
 
 `AgentRun.status.phase` moves through:

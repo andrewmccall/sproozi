@@ -25,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
+	"github.com/andrewmccall/sproozi/internal/mcppolicy"
 	packagepolicy "github.com/andrewmccall/sproozi/internal/packages"
 )
 
@@ -39,6 +40,7 @@ const (
 	// DenialResourceLimitExceeded means the runtime resource limit exceeds the policy bound.
 	DenialResourceLimitExceeded DenialReason = "ResourceLimitExceeded"
 	DenialPackageScopeInvalid   DenialReason = "PackageScopeInvalid"
+	DenialMCPScopeInvalid       DenialReason = "MCPScopeInvalid"
 )
 
 // Denial carries the reason and a non-sensitive explanation for an admission denial.
@@ -77,6 +79,14 @@ func Evaluate(
 			return &Denial{
 				Reason:  DenialCapabilityNotAllowed,
 				Message: fmt.Sprintf("capability %q is not permitted by the policy", c),
+			}
+		}
+		if name, mcp := c.MCPServerName(); mcp {
+			if _, err := mcppolicy.CompileScope(pol.MCPServers[name]); err != nil {
+				return &Denial{Reason: DenialMCPScopeInvalid, Message: "MCP tool scope is missing or invalid"}
+			}
+			if limits := pol.Budgets[c]; limits.MaxCostMicros > 0 {
+				return &Denial{Reason: DenialMCPScopeInvalid, Message: "MCP capabilities have no trusted monetary pricing"}
 			}
 		}
 	}

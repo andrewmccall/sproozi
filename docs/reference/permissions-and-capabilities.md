@@ -12,6 +12,7 @@ Sproozi permissions are easiest to understand from the perspective of a **capabi
 | `github.pull_request` | `AgentRun.spec.capabilities` | `AgentPolicy.githubPullRequest` | shared gateway GitHub module with GitHub App credentials | PR publication against approved repos |
 | `model.inference` | `AgentRun.spec.capabilities` | optional `AgentPolicy.budgets[model.inference]` | shared gateway model module | model access with reservation and usage accounting; current ceiling limitations apply |
 | `packages.install` | `AgentRun.spec.capabilities` | `AgentPolicy.packagesInstall` ecosystem, artifacts, SHA-256 digests and dependencies | shared gateway PyPI module | exact locked wheel downloads |
+| `mcp.<server>` | `AgentRun.spec.capabilities` | `AgentPolicy.mcpServers[server].tools` and optional argument schemas | configured remote MCP bridge, with gateway-only provider credentials | approved tools and bounded argument scope, Protocol tier |
 | `network.egress` | `AgentRun.spec.capabilities` | `AgentPolicy.egressProfiles` and `AgentTemplate.egressProfiles` | shared gateway egress module | exact outbound destinations only |
 
 ## Kubernetes read scope
