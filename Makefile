@@ -97,6 +97,19 @@ verify-fast: verify-assertions ## Run the non-network unit, race, and vet gates 
 verify-api: ## Run API, controller, Kubernetes, and envtest checks without regenerating source artifacts.
 	cache_dir="$$(mktemp -d)" && GOCACHE="$$cache_dir" go test ./api/v1alpha1 ./internal/controller ./internal/kubernetes ./test/envtest
 
+.PHONY: verify-mcp
+verify-mcp: ## Exercise native and configured MCP tools through authenticated TLS CONNECT, including policy and lifecycle denials.
+	go test -race ./internal/endpoints/kubernetes ./internal/endpoints/mcp ./internal/mcppolicy ./internal/harness ./cmd/gateway -count=1
+	python3 hack/verify/mcp-live-test.py
+
+.PHONY: verify-mcp-client
+verify-mcp-client: ## Verify generated run-local configuration with the installed stock Codex CLI, without a model request.
+	python3 hack/verify/mcp-client.py
+
+.PHONY: verify-mcp-kind
+verify-mcp-kind: ## Prove configured providers with stock Codex in owned Kind; requires pinned images, CNI and a single-owner model session.
+	bash hack/verify/mcp-kind.sh
+
 .PHONY: verify-protocol
 verify-protocol: protocol-tools ## Run pinned-client offline fixtures and protocol package tests without silently accepting zero tests.
 	export PATH="$(abspath $(LOCALBIN)/protocol):$$PATH"; cache_dir="$$(mktemp -d)" && SPROOZI_PROTOCOL_FIXTURE=1 GOCACHE="$$cache_dir" hack/verify/go-test-required.sh ./internal/endpoints/github '^(TestPinnedGitReceivePackProtocolFixture|TestPinnedGHPRCreateStartsWithGraphQL|TestPinnedGHAPICreatesPRUsingBoundedREST|TestInspectReceivePack.*|TestParsePushCommands.*|TestGraphQL.*|TestPackage.*)$$' && GOCACHE="$$cache_dir" go test ./internal/endpoints/packages ./internal/budget ./internal/endpoints/destination ./internal/gateway ./internal/endpoints/model ./internal/proxytransport -count=1

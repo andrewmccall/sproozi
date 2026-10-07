@@ -94,6 +94,8 @@ spec:
           value: /etc/sproozi/egress/profiles.json
         - name: MODEL_PRICING_PATH
           value: /etc/sproozi/model/pricing.json
+        - name: MCP_SERVERS_PATH
+          value: /etc/sproozi/mcp/servers.json
         volumeMounts:
         - name: gateway-tls
           mountPath: /var/run/sproozi-gateway
@@ -106,6 +108,9 @@ spec:
           readOnly: true
         - name: model-pricing
           mountPath: /etc/sproozi/model
+          readOnly: true
+        - name: mcp-servers
+          mountPath: /etc/sproozi/mcp
           readOnly: true
         ports:
         - name: proxy
@@ -150,3 +155,9 @@ spec:
           items:
           - key: pricing.json
             path: pricing.json
+      - name: mcp-servers
+        configMap:
+          name: mcp-servers
+          items:
+          - key: servers.json
+            path: servers.json

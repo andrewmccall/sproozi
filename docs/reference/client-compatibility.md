@@ -7,6 +7,15 @@ the approved package client. Every one of these clients, including `kubectl`,
 must use the same shared authenticated gateway. No Sproozi-specific agent
 command or MCP server is required, and no local proxy/sidecar is injected.
 
+The optional [Kubernetes MCP connection](kubernetes-mcp.md) delivers one Pod-list
+tool through the same proxy and semantic grant. Its [recorded Kind acceptance](../demos/verified-mcp-demo.md)
+used stock Codex 0.154.0 and verified network denials, cancellation and scoped cleanup.
+[Configured remote MCP tools](configured-mcp.md) use the same proxy through named
+`mcp.<server>` capabilities. Local official-SDK tests cover two providers; the
+stock Codex configuration check verifies generated connection loading without
+a model request. A separate Kind acceptance run used stock Codex 0.154.0 with
+two configured HTTPS fixture providers, including denials, budgets and cancellation.
+
 ## Verified demo client path
 
 The selected digest-pinned Codex demo image must contain Codex CLI, kubectl, git,

@@ -44,7 +44,7 @@ func TestAgentRunRejectsUnknownPhase(t *testing.T) {
 		Spec: sprooziv1alpha1.AgentRunSpec{
 			TemplateRef:  sprooziv1alpha1.AgentTemplateReference{Name: testPolicyName},
 			Task:         "Investigate the incident.",
-			Capabilities: []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityKubernetesRead},
+			Capabilities: []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityKubernetesRead, testMCPCapability},
 		},
 	}
 	if err := apiClient.Create(context.Background(), run); err != nil {

@@ -17,6 +17,7 @@ import (
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	egress "github.com/andrewmccall/sproozi/internal/endpoints/destination"
+	mcpgateway "github.com/andrewmccall/sproozi/internal/endpoints/mcp"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -34,6 +35,7 @@ func TestGatewaySchemeSupportsRunIdentityAndBudgetObjects(t *testing.T) {
 
 func validGatewayEnvironment(t *testing.T) {
 	t.Helper()
+	t.Setenv("MCP_SERVERS_PATH", "")
 	dir := t.TempDir()
 	certFile, keyFile := filepath.Join(dir, "cert.pem"), filepath.Join(dir, "key.pem")
 	// A matching certificate/key pair is sufficient for tls.LoadX509KeyPair;
@@ -116,6 +118,34 @@ func validGatewayEnvironment(t *testing.T) {
 	t.Setenv("GITHUB_APP_ID", "123")
 	t.Setenv("GITHUB_APP_INSTALLATION_ID", "456")
 	t.Setenv("GITHUB_APP_PRIVATE_KEY_PATH", privateKeyFile)
+}
+
+func TestRegisteredMCPProvidersAndGatewayNeverFallBackToDestinationRoutes(t *testing.T) {
+	profiles, err := egress.LoadProfileStore([]byte(`{"weaker":[
+ {"scheme":"https","host":"remote.example","port":443},
+ {"scheme":"https","host":"sproozi-gateway.sproozi-system.svc","port":8443}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := mcpgateway.LoadRegistry(
+		[]byte(`{"servers":{"docs":{"url":"https://remote.example.:0443/mcp"}}}`),
+		mcpgateway.CredentialDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := &startupConfig{
+		host: defaultHost, enabled: map[api.CapabilityKind]bool{api.CapabilityNetworkEgress: true},
+		profiles: profiles, mcpRegistry: registry,
+	}
+	handlers := map[api.CapabilityKind]http.Handler{api.CapabilityNetworkEgress: http.NotFoundHandler()}
+	routes := composeDispatcher(cfg, handlers, nil)
+	if routes.Allows("remote.example:443") || routes.Allows(defaultHost+":8443") {
+		t.Fatal("reserved MCP addresses acquired destination fallback")
+	}
+	routes = composeDispatcher(cfg, handlers, http.NotFoundHandler())
+	if !routes.Allows(defaultHost+":8443") || routes[defaultHost+":8443"].Tier != audit.TierProtocol {
+		t.Fatal("MCP delivery route was not composed")
+	}
 }
 
 var bigOne = func() *big.Int { return big.NewInt(1) }()
@@ -262,7 +292,7 @@ func TestConfiguredDestinationRoutesAndSemanticPrecedence(t *testing.T) {
 	}
 	cfg := &startupConfig{enabled: map[api.CapabilityKind]bool{api.CapabilityNetworkEgress: true}, profiles: profiles}
 	routes := composeDispatcher(cfg,
-		map[api.CapabilityKind]http.Handler{api.CapabilityNetworkEgress: http.NotFoundHandler()})
+		map[api.CapabilityKind]http.Handler{api.CapabilityNetworkEgress: http.NotFoundHandler()}, nil)
 	if !routes.Allows("registry.example:8443") || routes.Allows("registry.example:443") {
 		t.Fatal("profile route did not preserve exact port")
 	}

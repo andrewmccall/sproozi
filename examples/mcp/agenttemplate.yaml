@@ -1,0 +1,15 @@
+apiVersion: sproozi.com/v1alpha1
+kind: AgentTemplate
+metadata:
+  name: mcp-investigation
+  namespace: sproozi-system
+spec:
+  runtimeRef:
+    name: codex
+  policyRef:
+    name: mcp-investigation
+  egressProfiles: []
+  instructions: >-
+    Use the approved documentation and inventory MCP tools to investigate the
+    task. Search the operations collection and list assets for home-ops.
+    Return a short report with evidence. Do not change the external systems.

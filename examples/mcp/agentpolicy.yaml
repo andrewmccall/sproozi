@@ -1,0 +1,49 @@
+apiVersion: sproozi.com/v1alpha1
+kind: AgentPolicy
+metadata:
+  name: mcp-investigation
+  namespace: sproozi-system
+spec:
+  allowedCapabilities: [model.inference, mcp.docs, mcp.inventory]
+  mcpServers:
+    docs:
+      tools:
+        search:
+          arguments:
+            type: object
+            required: [collection]
+            properties:
+              collection:
+                const: operations
+    inventory:
+      tools:
+        list_assets:
+          arguments:
+            type: object
+            required: [tenant]
+            properties:
+              tenant:
+                const: home-ops
+  # These native scope fields remain required by the current API. They grant
+  # no authority because their capabilities are absent above.
+  kubernetesRead:
+    namespaces: [sproozi-demo]
+    resources: [pods]
+  githubPullRequest:
+    repositories: []
+    allowedBaseBranches: []
+  egressProfiles: []
+  budgets:
+    model.inference:
+      maxUnits: 100000
+    mcp.docs:
+      maxUnits: 10
+    mcp.inventory:
+      maxUnits: 5
+  resourceBounds:
+    max:
+      cpu: "1"
+      memory: 1Gi
+      ephemeral-storage: 2Gi
+  maxExecutionDuration: 10m
+  retentionTTL: 24h

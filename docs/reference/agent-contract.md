@@ -23,6 +23,24 @@ All capabilities share this identity. There are no per-service tokens or gateway
 aliases. The endpoint comes from `AgentRuntime.spec.gatewayEndpoint`. Task and
 event content are not injected into the environment.
 
+## Trusted client configuration
+
+The same immutable ConfigMap also carries the generated kubeconfig. When
+`AgentRuntime.spec.clientConfig.harness` is `codex`, the controller adds
+`codex-mcp.toml` and mounts it at `/etc/sproozi/contract/codex-mcp.toml`. This public
+fragment selects only the run's requested `mcp.<server>` connections at the
+runtime's gateway endpoint. It contains no provider addresses or credentials.
+The trusted runtime launch copies it into disposable Codex configuration before
+starting the agent. Native Kubernetes MCP launch settings remain a separate
+trusted opt-in for the existing `kubernetes.read` capability.
+
+These files supply client configuration; the immutable requested grant and live
+policy remain the authorization boundary. See
+[configured MCP capabilities](configured-mcp.md#deliver-ordinary-codex-configuration)
+and [ADR 0001](../adr/0001-mcp-capabilities-through-shared-gateway.md).
+
+## Completion
+
 Run the CLI in one-shot mode and use `exec` so its exit code becomes the container
 exit code. Sproozi maps zero to `Succeeded` and non-zero or unavailable exit status
 to `Failed`. Explicit cancellation and deadline expiry produce `Cancelled` and

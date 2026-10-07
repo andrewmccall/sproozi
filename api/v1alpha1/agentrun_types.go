@@ -42,6 +42,8 @@ type AgentRunSpec struct {
 	EventContext map[string]string `json:"eventContext,omitempty"`
 
 	// Capabilities is the requested subset of capabilities permitted by the policy.
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=32
 	Capabilities []CapabilityKind `json:"capabilities"`
 
 	// Cancel requests cancellation of an active run.

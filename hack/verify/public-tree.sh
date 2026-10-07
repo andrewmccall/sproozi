@@ -5,6 +5,15 @@ cd "$(git rev-parse --show-toplevel)"
 forbidden=( 'bin/' '.idea/' '.vscode/' 'go.work' '.engineering/' '.codex/' '.aws/' '.kube/' '.agents/skills/' '.claude/skills/' 'skills-lock.json' 'CONTEXT.md' 'docs/PRD.md' 'docs/implementation-plan.md' 'docs/superpowers/' 'docs/impl/' '.DS_Store' 'cover.out' )
 is_forbidden() {
   local path=$1 prefix
+  # This repository-owned verification skill is distributed with the guides.
+  # Other agent configuration and unexpected files in this skill stay private.
+  case "$path" in
+    .agents/skills/verify-sproozi|.agents/skills/verify-sproozi/features|\
+    .agents/skills/verify-sproozi/SKILL.md|.agents/skills/verify-sproozi/features/README.md|\
+    .agents/skills/verify-sproozi/features/dependencies.md|\
+    .agents/skills/verify-sproozi/features/demo.md|\
+    .agents/skills/verify-sproozi/features/exploration.md) return 1 ;;
+  esac
   for prefix in "${forbidden[@]}"; do
     [[ "$path" == "$prefix" || "$path" == "$prefix"* ]] && return 0
   done

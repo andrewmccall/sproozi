@@ -45,14 +45,10 @@ spec:
                 items:
                   description: CapabilityKind identifies an operation that may be
                     granted to an AgentRun.
-                  enum:
-                  - kubernetes.read
-                  - github.pull_request
-                  - model.inference
-                  - network.egress
-                  - packages.install
+                  maxLength: 67
+                  pattern: ^(kubernetes[.]read|github[.]pull_request|model[.]inference|network[.]egress|packages[.]install|mcp[.][a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)$
                   type: string
-                maxItems: 8
+                maxItems: 32
                 minItems: 1
                 type: array
               budgets:
@@ -84,12 +80,11 @@ spec:
                 description: |-
                   Budgets optionally bound consumption per capability and AgentRun.
                   Omitted capabilities have no consumption ceiling.
-                maxProperties: 5
+                maxProperties: 32
                 type: object
                 x-kubernetes-validations:
-                - message: budget keys must be known capabilities
-                  rule: self.all(k, k in ['kubernetes.read', 'github.pull_request',
-                    'model.inference', 'network.egress', 'packages.install'])
+                - message: budget keys must be native or named MCP capabilities
+                  rule: self.all(k, k.matches('^(kubernetes[.]read|github[.]pull_request|model[.]inference|network[.]egress|packages[.]install|mcp[.][a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)$'))
               egressProfiles:
                 description: EgressProfiles lists the named egress profiles available
                   to templates.
@@ -157,6 +152,42 @@ spec:
                 x-kubernetes-validations:
                 - message: must not exceed one hour
                   rule: duration(self) <= duration('1h')
+              mcpServers:
+                additionalProperties:
+                  description: MCPServerScope grants only explicitly named tools of
+                    a registered server.
+                  properties:
+                    tools:
+                      additionalProperties:
+                        description: MCPToolScope adds argument predicates to the
+                          discovered input schema.
+                        properties:
+                          arguments:
+                            description: |-
+                              Arguments is an optional JSON Schema restriction. It cannot replace the
+                              upstream input schema or establish the tool's service semantics.
+                            type: object
+                            x-kubernetes-preserve-unknown-fields: true
+                        type: object
+                      description: Tools is a default-deny map, not a copy of the
+                        server's discovered catalogue.
+                      maxProperties: 128
+                      minProperties: 1
+                      type: object
+                      x-kubernetes-validations:
+                      - message: invalid MCP tool name
+                        rule: self.all(k, k.matches('^[A-Za-z0-9_.-]{1,128}$'))
+                  required:
+                  - tools
+                  type: object
+                description: |-
+                  MCPServers constrains named MCP capabilities. Registration URLs and
+                  provider credentials belong exclusively to trusted gateway configuration.
+                maxProperties: 32
+                type: object
+                x-kubernetes-validations:
+                - message: MCP server names must be DNS labels
+                  rule: self.all(k, k.matches('^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$'))
               packagesInstall:
                 description: PackagesInstall constrains package artifacts that may
                   be downloaded for a run.

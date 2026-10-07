@@ -44,9 +44,7 @@ func TestBudgetConcurrentReservationsAreAtomic(t *testing.T) {
 	var mu sync.Mutex
 	reservations := make([]*budget.Reservation, 0, calls)
 	for range calls {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			reservation, err := bt.Reserve("run-concurrent", limits, 60, 0)
 			if err != nil {
 				return
@@ -54,7 +52,7 @@ func TestBudgetConcurrentReservationsAreAtomic(t *testing.T) {
 			mu.Lock()
 			reservations = append(reservations, reservation)
 			mu.Unlock()
-		}()
+		})
 	}
 	wg.Wait()
 	if len(reservations) != 1 {

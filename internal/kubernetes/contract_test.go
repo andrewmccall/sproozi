@@ -25,6 +25,8 @@ func contractInputs() (*sprooziv1alpha1.AgentRun, *sprooziv1alpha1.AgentTemplate
 	return run, tmpl, testRuntime()
 }
 
+const testMCPCapability = "mcp.docs"
+
 func TestEnsureAgentContractCreatesImmutableSeparatedDocument(t *testing.T) {
 	run, tmpl, rt := contractInputs()
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).Build()
@@ -77,6 +79,35 @@ func TestEnsureAgentContractRejectsConflictingDocument(t *testing.T) {
 	}).Build()
 	if err := kubernetes.EnsureAgentContract(context.Background(), c, run, tmpl, rt); err == nil {
 		t.Fatal("expected conflicting ConfigMap to be rejected")
+	}
+}
+
+func TestRunContractDeliversNamedMCPConfigurationAndRejectsReplacement(t *testing.T) {
+	run, tmpl, rt := contractInputs()
+	run.Spec.Capabilities = []sprooziv1alpha1.CapabilityKind{testMCPCapability}
+	rt.Spec.ClientConfig.Harness = "codex"
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).Build()
+	if err := kubernetes.EnsureAgentContract(t.Context(), c, run, tmpl, rt); err != nil {
+		t.Fatal(err)
+	}
+	var config corev1.ConfigMap
+	key := client.ObjectKey{Namespace: kubernetes.AgentsNamespace, Name: kubernetes.RunName(run.UID)}
+	if err := c.Get(t.Context(), key, &config); err != nil {
+		t.Fatal(err)
+	}
+	want := "[mcp_servers.\"docs\"]\nurl = \"" + rt.Spec.GatewayEndpoint + "/mcp/docs\"\nrequired = true\n\n"
+	if config.Data["codex-mcp.toml"] != want {
+		t.Fatalf("MCP configuration=%q", config.Data["codex-mcp.toml"])
+	}
+	if err := kubernetes.EnsureAgentContract(t.Context(), c, run, tmpl, rt); err != nil {
+		t.Fatal("identical preparation was not idempotent", err)
+	}
+	config.Data["codex-mcp.toml"] = "[mcp_servers.forged]\nurl=\"https://elsewhere\""
+	if err := c.Update(t.Context(), &config); err != nil {
+		t.Fatal(err)
+	}
+	if err := kubernetes.EnsureAgentContract(t.Context(), c, run, tmpl, rt); err == nil {
+		t.Fatal("conflicting MCP configuration accepted")
 	}
 }
 

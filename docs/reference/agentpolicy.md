@@ -9,6 +9,7 @@
 - allowed capability kinds
 - Kubernetes namespace and resource scope
 - GitHub repository scope
+- named MCP server tools and additive argument restrictions
 - named egress profiles
 - optional per-capability consumption budgets
 - package ecosystem, artifact digest and dependency scope
@@ -60,7 +61,7 @@ spec:
 
 - referenced by `AgentTemplate.spec.policyRef`
 - evaluated when a run is admitted
-- consulted again by the shared gateway before each semantic operation during an active run
+- consulted again by the shared gateway before each semantic or MCP operation during an active run
 
 ## Important behavior
 
@@ -97,3 +98,14 @@ in ChatGPT-plan mode uses a token ceiling and `maxCostMicros: 0`.
 Kubernetes namespaces, resources and verbs are checked on each request by the
 Kubernetes endpoint. Workload service accounts have no native read bindings.
 See [Security hardening](security-hardening.md) for deployment controls.
+
+## Named MCP capabilities
+
+Allow `mcp.<server>` and provide an explicit `spec.mcpServers[server].tools` map.
+Optional `arguments` JSON Schema restrictions add tenant, repository or other
+request constraints to the provider's discovered input schema. Missing tools or
+invalid restrictions deny the run at admission or the request at the gateway.
+One MCP budget unit means one attempted tool invocation; discovery is bounded
+but uncharged. Provider URLs and credentials belong to gateway registration,
+not policy or run input. See [configured MCP capabilities](configured-mcp.md) for
+examples, schema bounds and transport limits.

@@ -390,3 +390,22 @@ func TestEvaluateDenialMessage(t *testing.T) {
 		t.Error("Denial.Message must not be empty")
 	}
 }
+
+func TestNamedMCPCapabilityRequiresExplicitScopeAndRejectsUnsupportedPricing(t *testing.T) {
+	p := basePolicy()
+	p.AllowedCapabilities = []sprooziv1alpha1.CapabilityKind{"mcp.docs"}
+	run := baseRun("mcp.docs")
+	denial := policy.Evaluate(p, baseTemplate(), run, baseRuntime())
+	if denial == nil || denial.Reason != policy.DenialMCPScopeInvalid {
+		t.Fatalf("missing scope admitted: %v", denial)
+	}
+	p.MCPServers = map[string]sprooziv1alpha1.MCPServerScope{"docs": {Tools: map[string]sprooziv1alpha1.MCPToolScope{"search": {}}}}
+	if denial := policy.Evaluate(p, baseTemplate(), run, baseRuntime()); denial != nil {
+		t.Fatalf("configured scope rejected: %v", denial)
+	}
+	p.Budgets = map[sprooziv1alpha1.CapabilityKind]sprooziv1alpha1.EndpointBudget{"mcp.docs": {MaxCostMicros: 1}}
+	denial = policy.Evaluate(p, baseTemplate(), run, baseRuntime())
+	if denial == nil || denial.Reason != policy.DenialMCPScopeInvalid {
+		t.Fatalf("unsupported pricing admitted: %v", denial)
+	}
+}

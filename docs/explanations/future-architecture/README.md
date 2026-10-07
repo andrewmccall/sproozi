@@ -2,7 +2,12 @@
 
 **Audience:** contributors, operators evaluating future directions
 
-**Status:** directional design, not an implemented API or compatibility promise.
+**Status:** directional design. The first [native Kubernetes MCP tool](../../reference/kubernetes-mcp.md)
+is implemented with local proxy tests and bounded Kind acceptance.
+[Configured remote MCP tools](../../reference/configured-mcp.md) now have local
+protocol/configuration checks and bounded Kind acceptance with two fixture
+providers. [ADR 0001](../../adr/0001-mcp-capabilities-through-shared-gateway.md)
+records the MCP integration decision. Other extensions remain directional.
 
 Sproozi brokers execution. Given a task and an authorised capability envelope,
 it should prepare a disposable environment, bind identity and policy, connect
@@ -59,8 +64,8 @@ remain authoritative for current behaviour.
 | Requested authority and trusted configuration are separate | [AgentRun](../../reference/agentrun.md), [AgentTemplate](../../reference/agenttemplate.md), [AgentPolicy](../../reference/agentpolicy.md) | Preserve that distinction across local and managed entry points. |
 | A replaceable execution client exists | `internal/kubernetes/sandbox.go` defines `SandboxClient` and `PodSandboxClient` | The client still accepts Kubernetes API types; it is not a portable runtime contract. |
 | Admission and lifecycle control are outside the workload | `internal/controller/reconciler.go`, `internal/policy/evaluator.go` | Identity, resource validation, provisioning and status still depend on Kubernetes. |
-| Delivery and semantic enforcement are separate | `internal/gateway/dispatch.go`, `internal/endpoints`, `internal/proxytransport` | MCP delivery and a standalone Proxy integration remain future work. |
-| The agent reads a bounded input contract | `internal/agentcontract/contract.go`, [agent contract](../../reference/agent-contract.md) | Harness-specific preparation currently lives in the stock Codex runtime command. |
+| Delivery and semantic enforcement are separate | `internal/gateway/dispatch.go`, `internal/endpoints`, `internal/proxytransport` | Native Kubernetes MCP shares semantic enforcement; configured remote MCP provides Protocol mediation. Managed servers remain future work. |
+| The agent reads a bounded input contract | `internal/agentcontract/contract.go`, [agent contract](../../reference/agent-contract.md), `internal/harness` | The controller renders Codex MCP connections; the trusted runtime command installs them. Other harness renderers remain future work. |
 
 The current `AgentRuntime` owns a Pod template and gateway configuration. Its
 name must not be read as evidence of Docker support or a separate harness
@@ -95,11 +100,16 @@ verification are separate work, especially recovery after partial provisioning.
 
 ## A sequence of small proofs
 
-Keep the Kubernetes/SRE path as the baseline. The next useful capability proof
-is one policy-controlled MCP integration injected into the existing workload.
-Local Docker should then demonstrate portable execution with the same bounded
-capability. Add a second CLI harness to show that neither proof depends on
-Codex. Each can be useful before the full target matrix exists.
+Keep the Kubernetes/SRE path as the baseline. One policy-controlled native MCP
+tool is now implemented and available through opt-in trusted Codex configuration.
+Its [recorded Kind acceptance](../../demos/verified-mcp-demo.md) demonstrates
+stock Codex tool use, network and scope denials, cancellation and scoped cleanup.
+Configured remote MCP providers and declarative argument scope are also
+implemented without per-provider Go adapters. A recorded remote MCP Kind run
+proves stock Codex use of two configured HTTPS fixture providers. Local Docker
+would be a separate execution proof with the same bounded capability. Add a
+second CLI harness to show that neither proof depends on Codex. Each can be
+useful before the full target matrix exists.
 
 Remote or managed harness control is a later, separate proof. An external system
 owns the loop while Sproozi owns its execution environment. Together, Docker

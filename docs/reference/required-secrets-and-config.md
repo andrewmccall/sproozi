@@ -108,3 +108,13 @@ clean this durable state.
 
 Transport, GitHub protection, replay retention and trusted-service restrictions
 are documented in [security hardening](security-hardening.md).
+
+## Remote MCP registration
+
+The gateway mounts the `mcp-servers` ConfigMap and reads its `servers.json` through
+`MCP_SERVERS_PATH`. An empty registry enables no remote providers. Provider tokens
+are optional Secret files mounted under `/var/run/secrets/sproozi/mcp` only in the
+gateway; registry entries reference
+their paths with `bearerTokenFile`. Restart after changing either registrations or
+tokens. See [configured MCP capabilities](configured-mcp.md) for the format,
+policy predicates and client preparation.

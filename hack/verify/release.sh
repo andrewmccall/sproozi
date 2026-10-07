@@ -8,6 +8,7 @@ python3 hack/verify/release.py
 make verify-fast
 make verify-api
 make verify-protocol
+make verify-mcp
 make verify-kind
 make verify-live SPROOZI_DEMO_REPO="${SPROOZI_DEMO_REPO:-}"
 make verify-docs

@@ -23,6 +23,14 @@ required_docs = {
     "docs/explanations/capabilities-and-gateways.md",
     "docs/explanations/run-lifecycle.md", "docs/reference/agent-contract.md",
     "docs/reference/client-compatibility.md", "docs/guides/manual-pr-demo.md",
+    "docs/adr/README.md", "docs/adr/0001-mcp-capabilities-through-shared-gateway.md",
+    "docs/reference/kubernetes-mcp.md", "docs/reference/configured-mcp.md",
+    "docs/guides/getting-started.md",
+    ".agents/skills/verify-sproozi/SKILL.md",
+    ".agents/skills/verify-sproozi/features/README.md",
+    ".agents/skills/verify-sproozi/features/dependencies.md",
+    ".agents/skills/verify-sproozi/features/demo.md",
+    ".agents/skills/verify-sproozi/features/exploration.md",
 }
 for required in required_docs:
     if not (root / required).is_file():
@@ -45,7 +53,8 @@ else:
     errors.append("missing demo kustomization: examples/sre-demo/kustomization.yaml")
 
 for path in root.rglob("*.md"):
-    if path.name == "AGENTS.md" or any(part in {".git", ".local", ".agents", ".claude"} for part in path.parts) or "docs/impl" in str(path.relative_to(root)):
+    public_skill = path.is_relative_to(root / ".agents/skills/verify-sproozi")
+    if path.name == "AGENTS.md" or any(part in {".git", ".local", ".claude", ".engineering", ".codex"} for part in path.parts) or (".agents" in path.parts and not public_skill) or "docs/impl" in str(path.relative_to(root)):
         continue
     text = path.read_text(encoding="utf-8")
     for raw_target in re.findall(r"\[[^]]+\]\(([^)]+)\)", text):

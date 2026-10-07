@@ -1,0 +1,86 @@
+# Replace SPROOZI_TOOLS_IMAGE with a pullable repository@sha256:<digest>.
+apiVersion: sproozi.com/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: getting-started
+  namespace: sproozi-system
+spec:
+  podTemplate:
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: agent
+        image: SPROOZI_TOOLS_IMAGE
+        command: ["/bin/sh", "-ec"]
+        args:
+        - |
+          token="$(cat /var/run/sproozi/tokens/gateway/token)"
+          proxy="https://sproozi:${token}@${SPROOZI_GATEWAY#https://}"
+          export HTTP_PROXY="$proxy" HTTPS_PROXY="$proxy" http_proxy="$proxy" https_proxy="$proxy"
+          export NO_PROXY='' no_proxy=''
+          echo 'Listing Pods through the Sproozi gateway'
+          kubectl get pods --namespace sproozi-system
+          echo 'Read succeeded. Keeping this Pod available for inspection for 90 seconds'
+          sleep 90
+        resources:
+          limits:
+            cpu: "1"
+            memory: 512Mi
+            ephemeral-storage: 1Gi
+        securityContext:
+          runAsNonRoot: true
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+          seccompProfile:
+            type: RuntimeDefault
+  workloadContainers: [agent]
+  clientConfig:
+    trustBundleConfigMap:
+      name: sproozi-sandbox-trust
+      key: ca-bundle.pem
+  ephemeralWorkspace:
+    sizeLimit: 256Mi
+  gatewayEndpoint: https://sproozi-gateway.sproozi-system.svc:8443
+---
+apiVersion: sproozi.com/v1alpha1
+kind: AgentPolicy
+metadata:
+  name: getting-started
+  namespace: sproozi-system
+spec:
+  allowedCapabilities: [kubernetes.read]
+  kubernetesRead:
+    namespaces: [sproozi-system]
+    resources: [pods]
+  githubPullRequest:
+    repositories: []
+    allowedBaseBranches: []
+  egressProfiles: []
+  resourceBounds:
+    max:
+      cpu: "1"
+      memory: 512Mi
+      ephemeral-storage: 1Gi
+  maxExecutionDuration: 5m
+  retentionTTL: 24h
+---
+apiVersion: sproozi.com/v1alpha1
+kind: AgentTemplate
+metadata:
+  name: getting-started
+  namespace: sproozi-system
+spec:
+  runtimeRef:
+    name: getting-started
+  policyRef:
+    name: getting-started
+  instructions: List Pods in sproozi-system through the gateway, then exit.
+  egressProfiles: []

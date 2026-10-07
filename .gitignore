@@ -29,7 +29,8 @@ go.work.sum
 # Kubeconfig might contain secrets
 *.kubeconfig
 .DS_Store
-/.agents/skills/
+/.agents/skills/*
+!/.agents/skills/verify-sproozi/
 /.claude/skills/
 /skills-lock.json
 /CONTEXT.md

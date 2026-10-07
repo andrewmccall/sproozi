@@ -48,13 +48,11 @@ spec:
                 items:
                   description: CapabilityKind identifies an operation that may be
                     granted to an AgentRun.
-                  enum:
-                  - kubernetes.read
-                  - github.pull_request
-                  - model.inference
-                  - network.egress
-                  - packages.install
+                  maxLength: 67
+                  pattern: ^(kubernetes[.]read|github[.]pull_request|model[.]inference|network[.]egress|packages[.]install|mcp[.][a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)$
                   type: string
+                maxItems: 32
+                minItems: 1
                 type: array
               eventContext:
                 additionalProperties:

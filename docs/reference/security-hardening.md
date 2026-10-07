@@ -1,7 +1,7 @@
 # Security hardening
 
 Sproozi separates agent execution from trusted policy and credentials. The
-recorded semantic demo passed in an isolated Kind environment; production
+recorded Semantic and MCP demos passed in isolated Kind environments; production
 hardening and the implementation limits below remain relevant.
 
 ## Protect transport and identities
@@ -27,6 +27,28 @@ workloads, ServiceAccounts or runtime templates. Runtime validation rejects init
 and ephemeral containers. All normal containers in a Pod share one run principal.
 For working completion today, use one container named `agent` and no long-running
 ordinary sidecar.
+
+## Constrain remote MCP authority
+
+Treat the gateway's MCP registry and provider credential mounts as
+administrator-owned configuration. Mount provider tokens only in the gateway,
+under `/var/run/secrets/sproozi/mcp`. Registration and credential changes require
+a gateway restart; run and policy authorization remain live.
+
+Select tools explicitly in `AgentPolicy.spec.mcpServers` and use argument
+restrictions for required tenant, namespace or repository scope. Discovered
+schemas and policy predicates constrain request shape. They do not establish
+read-only behaviour or service semantics. Use reviewed providers, restricted
+credentials and upstream-native controls for those guarantees. Registered
+provider authorities are reserved against weaker destination routing; verify
+direct network denial from the sandbox as well.
+
+Configured MCP budgets count attempted tool invocations, including failures.
+They do not price provider work or charge initialization and discovery. See
+[configured MCP capabilities](configured-mcp.md) for supported operations,
+schema bounds and session limits, and
+[ADR 0001](../adr/0001-mcp-capabilities-through-shared-gateway.md) for the boundary
+and ownership decision.
 
 ## Retain GitHub protections
 

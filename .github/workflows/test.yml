@@ -34,5 +34,7 @@ jobs:
         run: make verify-fast
       - name: Verify pinned client protocol fixtures
         run: make verify-protocol
+      - name: Verify MCP capabilities
+        run: make verify-mcp
       - name: Verify documentation
         run: make verify-docs

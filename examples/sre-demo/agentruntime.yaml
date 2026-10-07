@@ -24,6 +24,11 @@ spec:
           proxy="https://sproozi:${token}@${SPROOZI_GATEWAY#https://}"
           export HTTP_PROXY="$proxy" HTTPS_PROXY="$proxy" http_proxy="$proxy" https_proxy="$proxy"
           export HOME=/home/agent
+          # Sproozi renders only requested named MCP connections. Copy this
+          # public fragment into the disposable CLI home; model settings remain
+          # explicit in the trusted command below.
+          mkdir -p "$HOME/.codex"
+          cp /etc/sproozi/contract/codex-mcp.toml "$HOME/.codex/config.toml"
           # Git verifies the HTTPS proxy separately from the inspected target.
           # Use only the mounted gateway CA and the harmless GitHub placeholder.
           export GIT_CONFIG_COUNT=4
@@ -71,6 +76,7 @@ spec:
             type: RuntimeDefault
   workloadContainers: [agent]
   clientConfig:
+    harness: codex
     trustBundleConfigMap:
       name: sproozi-sandbox-trust
       key: ca-bundle.pem

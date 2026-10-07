@@ -15,6 +15,7 @@ import (
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/agentcontract"
+	"github.com/andrewmccall/sproozi/internal/harness"
 )
 
 const (
@@ -28,6 +29,7 @@ const (
 const (
 	contractConfigMapKey   = "input.json"
 	kubeconfigConfigMapKey = "kubeconfig"
+	codexConfigMapKey      = "codex-mcp.toml"
 )
 
 // BuildAgentContract constructs the single strict runner input for an admitted run.
@@ -75,6 +77,13 @@ func EnsureAgentContract(ctx context.Context, c client.Client, run *sprooziv1alp
 			kubeconfigConfigMapKey: generatedKubeconfig(),
 		},
 	}
+	if rt.Spec.ClientConfig.Harness == "codex" {
+		config, err := harness.CodexMCPConfig(input.Capabilities, rt.Spec.GatewayEndpoint)
+		if err != nil {
+			return err
+		}
+		wanted.Data[codexConfigMapKey] = config
+	}
 	if err := c.Create(ctx, wanted); err == nil {
 		return nil
 	} else if !apierrors.IsAlreadyExists(err) {
@@ -86,6 +95,9 @@ func EnsureAgentContract(ctx context.Context, c client.Client, run *sprooziv1alp
 	}
 	if existing.Immutable == nil || !*existing.Immutable || existing.Labels[RunUIDLabel] != string(run.UID) || existing.Data[contractConfigMapKey] != string(document) || existing.Data[kubeconfigConfigMapKey] != generatedKubeconfig() {
 		return fmt.Errorf("existing agent contract %s has different immutable contents", wanted.Name)
+	}
+	if existing.Data[codexConfigMapKey] != wanted.Data[codexConfigMapKey] {
+		return fmt.Errorf("existing MCP client configuration has different immutable contents")
 	}
 	return nil
 }

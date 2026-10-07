@@ -28,6 +28,7 @@ import (
 	egress "github.com/andrewmccall/sproozi/internal/endpoints/destination"
 	githubgateway "github.com/andrewmccall/sproozi/internal/endpoints/github"
 	kubernetesgateway "github.com/andrewmccall/sproozi/internal/endpoints/kubernetes"
+	mcpgateway "github.com/andrewmccall/sproozi/internal/endpoints/mcp"
 	modelgateway "github.com/andrewmccall/sproozi/internal/endpoints/model"
 	packagesgateway "github.com/andrewmccall/sproozi/internal/endpoints/packages"
 	"github.com/andrewmccall/sproozi/internal/gateway"
@@ -58,6 +59,7 @@ type startupConfig struct {
 	appID          int64
 	installationID int64
 	privateKey     []byte
+	mcpRegistry    *mcpgateway.Registry
 }
 
 // semanticAuthorities binds concrete service modules to exact authorities.
@@ -92,6 +94,10 @@ func loadStartupConfig() (*startupConfig, error) {
 		}
 	}
 	profiles, err := egress.LoadProfileStore(profileData)
+	if err != nil {
+		return nil, err
+	}
+	mcpRegistry, err := loadMCPRegistry(host)
 	if err != nil {
 		return nil, err
 	}
@@ -148,16 +154,7 @@ func loadStartupConfig() (*startupConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	hosts := map[string]bool{host: true}
-	for authority, cap := range semanticAuthorities {
-		if enabled[cap] {
-			name, _, _ := net.SplitHostPort(authority)
-			hosts[name] = true
-		}
-	}
-	for _, destination := range profiles.Destinations() {
-		hosts[destination.Host] = true
-	}
+	hosts := inspectionHosts(host, enabled, profiles, mcpRegistry)
 	for name := range hosts {
 		if err := leaf.VerifyHostname(name); err != nil {
 			return nil, fmt.Errorf("gateway certificate does not cover configured host %q", name)
@@ -169,7 +166,49 @@ func loadStartupConfig() (*startupConfig, error) {
 		host:    host, listenerCert: certificate, certificates: certificates,
 		profiles: profiles, pricing: pricing, openAIKey: openAIKey, modelAuthMode: modelAuthMode,
 		appID: appID, installationID: installationID, privateKey: privateKey,
+		mcpRegistry: mcpRegistry,
 	}, nil
+}
+
+func inspectionHosts(host string, enabled map[sprooziv1alpha1.CapabilityKind]bool,
+	profiles *egress.ProfileStore, registry *mcpgateway.Registry,
+) map[string]bool {
+	hosts := map[string]bool{host: true}
+	for authority, cap := range semanticAuthorities {
+		if enabled[cap] {
+			name, _, _ := net.SplitHostPort(authority)
+			hosts[name] = true
+		}
+	}
+	for _, destination := range profiles.Destinations() {
+		if slices.Contains(registry.Authorities(), net.JoinHostPort(destination.Host, strconv.Itoa(destination.Port))) {
+			continue // Remote MCP providers are not inspected workload routes.
+		}
+		hosts[destination.Host] = true
+	}
+	return hosts
+}
+
+func loadMCPRegistry(gatewayHost string) (*mcpgateway.Registry, error) {
+	data := []byte(`{"servers":{}}`)
+	if registryPath := os.Getenv("MCP_SERVERS_PATH"); registryPath != "" {
+		var err error
+		data, err = os.ReadFile(registryPath)
+		if err != nil {
+			return nil, errors.New("MCP registry is unavailable")
+		}
+	}
+	registry, err := mcpgateway.LoadRegistry(data, mcpgateway.CredentialDirectory)
+	if err != nil {
+		return nil, err
+	}
+	for _, authority := range registry.Authorities() {
+		name, _, _ := net.SplitHostPort(authority)
+		if name == gatewayHost {
+			return nil, errors.New("MCP upstream cannot use the gateway host")
+		}
+	}
+	return registry, nil
 }
 
 func enabledCapabilities() (map[sprooziv1alpha1.CapabilityKind]bool, error) {
@@ -203,8 +242,23 @@ func requiredEnvValue(key string) string { return os.Getenv(key) }
 
 func composeDispatcher(
 	cfg *startupConfig, handlers map[sprooziv1alpha1.CapabilityKind]http.Handler,
+	mcpHandler http.Handler,
 ) gateway.Dispatcher {
 	routes := gateway.Dispatcher{}
+	host := cfg.host
+	if host == "" {
+		host = defaultHost
+	}
+	// Named MCP capabilities share the gateway's own authority. The module
+	// chooses the exact account only after authenticating the requested path.
+	for _, port := range []string{"443", "8443"} {
+		routes[net.JoinHostPort(host, port)] = gateway.Route{Tier: audit.TierProtocol, Handler: mcpHandler}
+	}
+	if cfg.mcpRegistry != nil {
+		for _, authority := range cfg.mcpRegistry.Authorities() {
+			routes[authority] = gateway.Route{Tier: audit.TierProtocol}
+		}
+	}
 	for authority, cap := range semanticAuthorities {
 		// Reserve semantic authorities even when a module is disabled. Generic
 		// egress must never become a weaker fallback for a semantic service.
@@ -349,9 +403,11 @@ func main() {
 	handlers[sprooziv1alpha1.CapabilityNetworkEgress] = raw
 
 	// Unknown authorities are absent and are denied before an upstream call.
-	dispatcher := composeDispatcher(cfg, handlers)
 	budgets := budget.NewTrackerWithLedger(budget.NewKubernetesLedger(runtimeClient,
 		envOrDefault("BUDGET_NAMESPACE", "sproozi-system")))
+	mcpHandler := mcpgateway.NewHandler(mcpgateway.HandlerConfig{Registry: cfg.mcpRegistry,
+		Budgets: budgets, AuditLogger: auditLogger})
+	dispatcher := composeDispatcher(cfg, handlers, mcpHandler)
 	for authority, route := range dispatcher {
 		route.Budgets = budgets
 		dispatcher[authority] = route
