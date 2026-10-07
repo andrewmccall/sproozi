@@ -1,0 +1,12 @@
+apiVersion: sproozi.com/v1alpha1
+kind: AgentRun
+metadata:
+  name: getting-started
+  namespace: sproozi-system
+spec:
+  templateRef:
+    name: getting-started
+  task: Check that the first agent Pod can read Pods through the gateway.
+  eventContext:
+    trigger: manual
+  capabilities: [kubernetes.read]

@@ -1,7 +1,16 @@
 # Manual AgentRun to pull request
 
+For a walkthrough from a fresh checkout, start with
+[Getting started](getting-started.md). To deploy on an existing cluster and
+submit a provider-free first run, use [Install on Kubernetes](install-kubernetes.md).
+
 The demonstrated path starts with a human-created `AgentRun` on a disposable
 Kind cluster. The current adapter creates Pods in `sproozi-agents`.
+It needs Sproozi's four CRDs and an enforcing CNI. The default Calico setup
+installs its own networking CRDs. External Kubernetes Agent Sandbox CRDs and
+controllers are not dependencies of this adapter. cert-manager, Prometheus
+Operator, gVisor and Kata are also unnecessary for the base demo. See the
+[dependency table](getting-started.md#cluster-dependencies-and-external-crds).
 
 ## Prerequisites
 
@@ -40,7 +49,9 @@ another enforcing CNI, configure both `SPROOZI_CNI_MANIFEST` and
 `SPROOZI_CNI_SELECTOR` in the local environment before setup.
 
 The setup wizard selects ChatGPT-plan OAuth or API-key billing and asks only
-for missing GitHub App credentials. If the GitHub App is already configured,
+for missing GitHub App credentials. Follow
+[Save the credentials](getting-started.md#save-the-credentials) for the exact
+prompts, private-key location and saved files. If the GitHub App is already configured,
 `make demo-chatgpt-login` reuses or authorizes a session and verifies model access, preserving
 the existing API key and App settings. See
 [model provider authentication](model-provider-auth.md) for storage, refresh,

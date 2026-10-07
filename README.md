@@ -4,11 +4,19 @@ Sproozi runs bounded agent work in disposable Kubernetes Pods. A trusted shared
 gateway checks each run's identity, capabilities and live policy, and supplies
 upstream credentials. The sandbox receives no provider credentials.
 
-## Run the manual demo
+## Get started
 
-Start with the [manual AgentRun-to-PR guide](docs/guides/manual-pr-demo.md).
-It configures a disposable Kind cluster, a digest-pinned Codex image and real
-provider credentials, then verifies a proposed PR, explicit denials and cleanup.
+Follow the [getting started guide](docs/guides/getting-started.md) to explore
+Sproozi in a disposable Kind cluster. It walks through tool installation,
+GitHub repository and App setup, model authentication, running the demo and
+inspecting the proposed PR.
+
+For an existing cluster, use [Install on Kubernetes](docs/guides/install-kubernetes.md).
+It covers image publishing, gateway certificates, deployment and a first
+agent Pod that reads Kubernetes Pods without model or GitHub credentials.
+
+The [manual AgentRun-to-PR guide](docs/guides/manual-pr-demo.md) describes the
+demo's acceptance checks and optional integrations.
 
 [Recorded acceptance](docs/demos/verified-sre-demo.md) passed twice on 4 October
 2026. A stock agent investigated a deliberately failing workload and proposed

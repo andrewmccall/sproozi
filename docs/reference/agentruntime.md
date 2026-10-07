@@ -73,6 +73,10 @@ See [agent contract and completion](agent-contract.md).
 
 The adapter creates disposable Pods. Kubernetes Agent Sandbox integration is
 planned; it is not an installed dependency.
+The current adapter uses no external `Sandbox`, `SandboxTemplate`, `SandboxClaim`
+or `SandboxWarmPool` custom resources or controllers. The default Kind demo
+also selects no custom `RuntimeClass`. See the
+[quickstart dependencies](../guides/getting-started.md#cluster-dependencies-and-external-crds).
 
 ## MCP client preparation
 

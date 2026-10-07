@@ -1,11 +1,15 @@
 # Sproozi docs
 
-Start with the manual guide to run the proven semantic demo. References describe
+Start with the getting started guide to explore the Kind demo, or the Kubernetes
+installation guide to deploy on an existing cluster. References describe
 the current API and configuration; explanations describe how the code fits together.
 Future architecture is kept separate from implemented behaviour and verified guides.
 
 ## Guides
 
+- [Getting started](guides/getting-started.md), from a fresh checkout to a Kind demo and a real pull request
+- [Kind verification skill](../.agents/skills/verify-sproozi/SKILL.md), repeatable dependency checks, demo acceptance and retained proof
+- [Install on Kubernetes and run your first Pod](guides/install-kubernetes.md), including registry images, certificates and a provider-free first run
 - [Manual AgentRun to pull request](guides/manual-pr-demo.md), including Kind setup, example resources and optional monitoring
 - [Recorded native and configured MCP acceptance](demos/verified-mcp-demo.md), including stock Codex tool use, denials and cancellation
 - [Model provider authentication](guides/model-provider-auth.md)

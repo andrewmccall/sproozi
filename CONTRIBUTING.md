@@ -11,3 +11,10 @@ test, including the expected reason and absence of an upstream side effect.
 
 Please do not include credentials, provider responses, patches, or local
 agent configuration in commits.
+
+The repository-owned `verify-sproozi` skill under `.agents/skills/verify-sproozi`
+is distributed with the Kind getting-started guide. Its feature map and
+`hack/verify/quickstart.py` drive the documented paths and retain local proof.
+Start with `python3 hack/verify/quickstart.py doctor`, then run `dependencies`
+or the configured provider-backed `demo` path. Other local agent skills and all
+credential, kubeconfig and verification artefacts remain private.
