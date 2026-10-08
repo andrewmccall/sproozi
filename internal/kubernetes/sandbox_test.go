@@ -61,7 +61,7 @@ func testRuntime() *sprooziv1alpha1.AgentRuntime {
 	runAsNonRoot := true
 	runAsUser := int64(65532)
 	return &sprooziv1alpha1.AgentRuntime{
-		ObjectMeta: metav1.ObjectMeta{Name: "codex", Namespace: testDefaultNS},
+		ObjectMeta: metav1.ObjectMeta{Name: testCodexHarness, Namespace: testDefaultNS},
 		Spec: sprooziv1alpha1.AgentRuntimeSpec{
 			ClientConfig: sprooziv1alpha1.RuntimeClientConfig{
 				TrustBundleConfigMap: sprooziv1alpha1.RuntimeConfigMapKeyReference{

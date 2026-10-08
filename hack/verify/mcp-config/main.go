@@ -2,6 +2,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 
@@ -9,11 +10,15 @@ import (
 )
 
 func main() {
-	config, err := harness.CodexMCPConfig([]string{"mcp.docs", "mcp.inventory"},
+	selected := flag.String("harness", "codex", "Native CLI configuration format")
+	flag.Parse()
+	config, err := harness.MCPConfig(*selected, []string{"mcp.docs", "mcp.inventory"},
 		"https://sproozi-gateway.sproozi-system.svc:8443")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	fmt.Print(config)
+	for _, document := range config {
+		fmt.Print(document)
+	}
 }

@@ -25,29 +25,30 @@ event content are not injected into the environment.
 
 ## Trusted client configuration
 
-The same immutable ConfigMap also carries the generated kubeconfig. When
-`AgentRuntime.spec.clientConfig.harness` is `codex`, the controller adds
-`codex-mcp.toml` and mounts it at `/etc/sproozi/contract/codex-mcp.toml`. This public
-fragment selects only the run's requested `mcp.<server>` connections at the
-runtime's gateway endpoint. It contains no provider addresses or credentials.
-The trusted runtime launch copies it into disposable Codex configuration before
-starting the agent. Native Kubernetes MCP launch settings remain a separate
-trusted opt-in for the existing `kubernetes.read` capability.
+The same immutable ConfigMap carries the generated kubeconfig and the selected
+CLI's native MCP configuration. `clientConfig.harness` supports `codex`,
+`claude-code` and `opencode`; omitted selection leaves preparation to the
+administrator. Native files select only requested `mcp.<server>` connections at
+the gateway, without provider URLs or credentials. Claude Code and OpenCode also
+receive `instructions.txt` and `request.json`, retaining trusted instructions
+and untrusted request data separately. Retries require an exact match of all
+contract files. Native Kubernetes MCP remains an explicit trusted opt-in.
 
-These files supply client configuration; the immutable requested grant and live
-policy remain the authorization boundary. See
+These files supply client configuration; the requested grant and live policy
+remain the authorization boundary. See [harness configuration](harnesses.md),
 [configured MCP capabilities](configured-mcp.md#deliver-ordinary-codex-configuration)
-and [ADR 0001](../adr/0001-mcp-capabilities-through-shared-gateway.md).
+and [ADR 0002](../adr/0002-native-cli-harnesses-and-model-protocols.md).
 
 ## Completion
 
-Run the CLI in one-shot mode and use `exec` so its exit code becomes the container
-exit code. Sproozi maps zero to `Succeeded` and non-zero or unavailable exit status
-to `Failed`. Explicit cancellation and deadline expiry produce `Cancelled` and
-`TimedOut`, followed by Pod deletion. A PR, summary, log line or model response
-never establishes the lifecycle outcome.
+Launch a bounded CLI invocation in the completion container. Codex and Claude
+Code use `exec` so their process status becomes the container status. OpenCode's
+trusted launch adapter supervises the stock CLI and checks its native exported
+session before producing a container status, because OpenCode 1.15.1 can exit
+zero after an API error. The adapter does not interpret task quality or replace
+the agent loop.
 
-The current Pod adapter waits for a terminal Pod and reads the container named
-`agent`. Use one workload container with that name. Long-running ordinary
-sidecars prevent completion; arbitrary container names accepted by validation
-are not supported by completion. See [AgentRuntime](agentruntime.md).
+Sproozi maps zero to `Succeeded` and nonzero or unavailable status to `Failed`.
+Explicit cancellation and deadline expiry produce `Cancelled` and `TimedOut`,
+followed by Pod deletion. A PR, summary or model answer never establishes the
+controller lifecycle outcome. See [harness completion](harnesses.md).

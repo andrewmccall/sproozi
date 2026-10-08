@@ -25,7 +25,7 @@ if [[ ! -s "$work_dir/ca.crt" || ! -s "$work_dir/ca.key" || ! -s "$work_dir/tls.
     -subj "/CN=sproozi-gateway.sproozi-system.svc" \
     -keyout "$work_dir/tls.key" -out "$work_dir/tls.csr" >/dev/null 2>&1
   cat >"$work_dir/extensions.cnf" <<'EOF'
-subjectAltName=DNS:sproozi-gateway.sproozi-system.svc,DNS:sproozi-gateway.sproozi-system.svc.cluster.local,DNS:kubernetes.default.svc,DNS:api.openai.com,DNS:github.com,DNS:api.github.com,DNS:pypi.org,DNS:files.pythonhosted.org,DNS:proxy.golang.org,DNS:sum.golang.org,DNS:egress.sproozi.internal
+subjectAltName=DNS:sproozi-gateway.sproozi-system.svc,DNS:sproozi-gateway.sproozi-system.svc.cluster.local,DNS:kubernetes.default.svc,DNS:api.openai.com,DNS:api.anthropic.com,DNS:github.com,DNS:api.github.com,DNS:pypi.org,DNS:files.pythonhosted.org,DNS:proxy.golang.org,DNS:sum.golang.org,DNS:egress.sproozi.internal
 extendedKeyUsage=serverAuth
 keyUsage=digitalSignature,keyEncipherment
 EOF

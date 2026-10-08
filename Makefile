@@ -106,6 +106,14 @@ verify-mcp: ## Exercise native and configured MCP tools through authenticated TL
 verify-mcp-client: ## Verify generated run-local configuration with the installed stock Codex CLI, without a model request.
 	python3 hack/verify/mcp-client.py
 
+.PHONY: verify-harness-clients
+verify-harness-clients: ## Load generated native MCP configuration with installed stock Codex, Claude Code and OpenCode; no model requests.
+	python3 hack/verify/harness-clients.py
+
+.PHONY: verify-harness-process
+verify-harness-process: ## Run stock Claude Code and OpenCode through the TLS gateway against local mocked model and MCP providers.
+	go run ./hack/verify/harness-process --output .local/verification/harness-process.json
+
 .PHONY: verify-mcp-kind
 verify-mcp-kind: ## Prove configured providers with stock Codex in owned Kind; requires pinned images, CNI and a single-owner model session.
 	bash hack/verify/mcp-kind.sh

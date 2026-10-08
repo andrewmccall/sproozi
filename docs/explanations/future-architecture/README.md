@@ -65,7 +65,7 @@ remain authoritative for current behaviour.
 | A replaceable execution client exists | `internal/kubernetes/sandbox.go` defines `SandboxClient` and `PodSandboxClient` | The client still accepts Kubernetes API types; it is not a portable runtime contract. |
 | Admission and lifecycle control are outside the workload | `internal/controller/reconciler.go`, `internal/policy/evaluator.go` | Identity, resource validation, provisioning and status still depend on Kubernetes. |
 | Delivery and semantic enforcement are separate | `internal/gateway/dispatch.go`, `internal/endpoints`, `internal/proxytransport` | Native Kubernetes MCP shares semantic enforcement; configured remote MCP provides Protocol mediation. Managed servers remain future work. |
-| The agent reads a bounded input contract | `internal/agentcontract/contract.go`, [agent contract](../../reference/agent-contract.md), `internal/harness` | The controller renders Codex MCP connections; the trusted runtime command installs them. Other harness renderers remain future work. |
+| The agent reads a bounded input contract | `internal/agentcontract/contract.go`, [agent contract](../../reference/agent-contract.md), `internal/harness` | The controller renders native Codex, Claude Code and OpenCode MCP connections; trusted launch commands load them. See [current harness support](../../reference/harnesses.md). |
 
 The current `AgentRuntime` owns a Pod template and gateway configuration. Its
 name must not be read as evidence of Docker support or a separate harness

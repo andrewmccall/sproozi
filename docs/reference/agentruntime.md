@@ -80,9 +80,9 @@ also selects no custom `RuntimeClass`. See the
 
 ## MCP client preparation
 
-Optional `spec.clientConfig.harness: codex` adds a native `codex-mcp.toml` fragment
-to the run's immutable contract ConfigMap. The administrator-owned launch command
-must copy it into disposable `$HOME/.codex/config.toml` before invoking Codex.
-Only requested named MCP capabilities appear; provider credentials remain in the
-gateway. The demo runtime contains this launch step. See
-[configured MCP capabilities](configured-mcp.md).
+Optional `spec.clientConfig.harness` selects `codex`, `claude-code` or `opencode`
+native MCP configuration in the immutable contract. The administrator-owned
+launch command loads only that configuration into disposable client state.
+Only requested named MCP capabilities appear; credentials remain in the gateway.
+The [harness reference](harnesses.md) describes formats, trusted launch examples,
+model-provider setup and current verification limits.

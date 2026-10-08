@@ -34,8 +34,12 @@ policy, then request its capability. Sproozi discovers the provider's tool schem
 adding a compatible server requires configuration, without a provider-specific
 Go adapter. Credentials remain behind the gateway.
 
-The trusted Codex runtime receives generated broker connections in its immutable
-run contract. [Recorded MCP acceptance](docs/demos/verified-mcp-demo.md) proves stock
+Codex, Claude Code and OpenCode runtimes receive native broker connections in
+the immutable run contract. The [harness reference](docs/reference/harnesses.md)
+and [stock runtime examples](examples/harnesses/README.md) describe launch and
+provider setup. Claude Code uses Anthropic Messages through the same gateway-owned
+credentials and `model.inference` budget. Additional harness evidence is local
+and uses mocked providers; the recorded deployed proofs remain Codex-specific. [Recorded MCP acceptance](docs/demos/verified-mcp-demo.md) proves stock
 Codex use of the native tool and two configured HTTPS fixture providers, including
 denials, request budgets, cancellation and cleanup. Managed stdio and OAuth
 consent are future work. The [MCP ADR](docs/adr/0001-mcp-capabilities-through-shared-gateway.md)

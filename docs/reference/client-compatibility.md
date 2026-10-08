@@ -46,3 +46,14 @@ client path on 4 October 2026 from a dirty working tree. Other images, client
 versions and configurations require their own verification. A generic runtime
 need not contain Codex or the demo's CLI suite, but its external clients must use
 the authenticated proxy and trust configuration. No per-run bypass is supported.
+
+## Additional CLI harnesses
+
+Native configuration and trusted launch examples also exist for Claude Code and
+OpenCode. Claude Code uses the reserved Anthropic Messages model route; OpenCode
+uses the existing OpenAI route with completion normalization for its native
+session result. [Current harness support](harnesses.md) records configuration,
+provider setup and local mocked-provider evidence. The deployed acceptance above
+remains Codex-specific. Anthropic Messages streaming is buffered and usage-checked
+before delivery, like the OpenAI Responses path. Bedrock, Vertex, Claude
+subscription auth, persistent services and managed loops remain unverified.

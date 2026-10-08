@@ -106,6 +106,11 @@ schemas fail closed, without destination fallback.
 
 ## Deliver ordinary Codex configuration
 
+Set `AgentRuntime.spec.clientConfig.harness` to `codex`, `claude-code` or `opencode`
+for native run-local configuration. See [harness preparation](harnesses.md) for
+the additional launch formats, provider setup and verification limits.
+
+The following Codex example sets `AgentRuntime.spec.clientConfig.harness: codex`.
 Set `AgentRuntime.spec.clientConfig.harness: codex`. Provisioning adds
 `codex-mcp.toml` to the existing immutable run contract ConfigMap. The trusted
 launch command copies it into disposable Codex configuration before `codex exec`:

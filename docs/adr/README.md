@@ -37,3 +37,4 @@ old record superseded and link both records.
 ## Decisions
 
 - [0001: Use MCP through the shared capability gateway](0001-mcp-capabilities-through-shared-gateway.md)
+- [0002: Native CLI harnesses and model protocols](0002-native-cli-harnesses-and-model-protocols.md)

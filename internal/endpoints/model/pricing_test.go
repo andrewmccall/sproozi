@@ -53,12 +53,14 @@ func TestLoadPricingTableAcceptsAdministratorOwnedModelPrices(t *testing.T) {
 
 func TestLoadPricingTableRejectsInvalidOrAmbiguousConfiguration(t *testing.T) {
 	cases := map[string]string{
-		"empty models":       `{"models":{}}`,
-		"unknown field":      `{"models":{"demo":{"inputMicrosPerMillionTokens":1,"cachedInputMicrosPerMillionTokens":1,"outputMicrosPerMillionTokens":1,"secret":"no"}}}`,
-		"zero input price":   `{"models":{"demo":{"inputMicrosPerMillionTokens":0,"cachedInputMicrosPerMillionTokens":1,"outputMicrosPerMillionTokens":1}}}`,
-		"zero cached price":  `{"models":{"demo":{"inputMicrosPerMillionTokens":1,"cachedInputMicrosPerMillionTokens":0,"outputMicrosPerMillionTokens":1}}}`,
-		"zero output price":  `{"models":{"demo":{"inputMicrosPerMillionTokens":1,"cachedInputMicrosPerMillionTokens":1,"outputMicrosPerMillionTokens":0}}}`,
-		"multiple documents": `{"models":{"demo":{"inputMicrosPerMillionTokens":1,"cachedInputMicrosPerMillionTokens":1,"outputMicrosPerMillionTokens":1}}} {}`,
+		"empty models":               `{"models":{}}`,
+		"unknown field":              `{"models":{"demo":{"inputMicrosPerMillionTokens":1,"cachedInputMicrosPerMillionTokens":1,"outputMicrosPerMillionTokens":1,"secret":"no"}}}`,
+		"zero input price":           `{"models":{"demo":{"inputMicrosPerMillionTokens":0,"cachedInputMicrosPerMillionTokens":1,"outputMicrosPerMillionTokens":1}}}`,
+		"zero cached price":          `{"models":{"demo":{"inputMicrosPerMillionTokens":1,"cachedInputMicrosPerMillionTokens":0,"outputMicrosPerMillionTokens":1}}}`,
+		"zero output price":          `{"models":{"demo":{"inputMicrosPerMillionTokens":1,"cachedInputMicrosPerMillionTokens":1,"outputMicrosPerMillionTokens":0}}}`,
+		"negative short cache write": `{"models":{"demo":{"inputMicrosPerMillionTokens":1,"cachedInputMicrosPerMillionTokens":1,"outputMicrosPerMillionTokens":1,"cacheWrite5mMicrosPerMillionTokens":-1}}}`,
+		"negative long cache write":  `{"models":{"demo":{"inputMicrosPerMillionTokens":1,"cachedInputMicrosPerMillionTokens":1,"outputMicrosPerMillionTokens":1,"cacheWrite1hMicrosPerMillionTokens":-1}}}`,
+		"multiple documents":         `{"models":{"demo":{"inputMicrosPerMillionTokens":1,"cachedInputMicrosPerMillionTokens":1,"outputMicrosPerMillionTokens":1}}} {}`,
 	}
 	for name, input := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -66,6 +68,20 @@ func TestLoadPricingTableRejectsInvalidOrAmbiguousConfiguration(t *testing.T) {
 				t.Fatal("expected invalid pricing configuration to fail closed")
 			}
 		})
+	}
+}
+
+func TestLoadPricingTableAcceptsOptionalCacheWriteRates(t *testing.T) {
+	pricing, err := modelgateway.LoadPricingTable(strings.NewReader(`{"models":{"claude-test":{
+		"inputMicrosPerMillionTokens":1,"cachedInputMicrosPerMillionTokens":1,"outputMicrosPerMillionTokens":1,
+		"cacheWrite5mMicrosPerMillionTokens":2,"cacheWrite1hMicrosPerMillionTokens":3
+	}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	price := pricing.Models["claude-test"]
+	if price.CacheWrite5mMicrosPerMillionTokens != 2 || price.CacheWrite1hMicrosPerMillionTokens != 3 {
+		t.Fatalf("cache write rates = %+v", price)
 	}
 }
 

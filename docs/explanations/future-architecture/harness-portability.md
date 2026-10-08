@@ -1,7 +1,9 @@
 # Harness portability and control
 
-**Status:** future direction. The stock Codex SRE path is the demonstrated
-baseline. Other harnesses and managed control need separate verification.
+**Status:** mixed. Native Codex, Claude Code and OpenCode configuration and
+stock launch adapters are implemented. See [current support and evidence](../../reference/harnesses.md).
+The stock Codex SRE path remains the demonstrated deployed baseline. Managed
+control and deployed acceptance for additional harnesses remain future work.
 See the [overview](README.md).
 
 A harness owns the agent loop, model interaction, context and its user
@@ -39,15 +41,15 @@ must all work within the enforced boundary.
 The current [agent contract](../../reference/agent-contract.md) separates trusted
 instructions from untrusted task and event context. It is input, not a model
 session protocol. The stock runtime command in `examples/sre-demo/agentruntime.yaml`
-launches `codex exec`; there is no common harness registry or launch abstraction
-in the current code. Its exit status determines lifecycle success, independently
+launches `codex exec`. Additional [stock runtime examples](../../../examples/harnesses/README.md)
+use Claude Code print mode and OpenCode run mode; there is no common loop registry. Its exit status determines lifecycle success, independently
 of PR or task-quality evidence.
 
 ## Target harnesses
 
 The entry points below come from official documentation checked on 6 October
-2026. They identify candidate launch paths, not a tested Sproozi support matrix
-or final adapter commands. Pin versions and verify each integration before
+2026. They identify target entry points. The current reference records implemented
+CLI adapters separately from remaining candidate and managed paths. Pin versions and verify each integration before
 adding it to [client compatibility](../../reference/client-compatibility.md).
 
 | Harness | Preferred first path | Boundary to establish |

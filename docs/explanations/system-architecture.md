@@ -105,10 +105,13 @@ and named capability; reconnecting does not reset consumption. Cached discovery
 and connection configuration grant no authority. The proxy's live revalidation
 revokes requests when run or policy authority ends.
 
-The controller adds a public `codex-mcp.toml` fragment to the existing immutable
-run contract when `AgentRuntime.spec.clientConfig.harness` is `codex`. The trusted
-launch copies it into disposable Codex configuration. It contains requested
-broker connections, with no upstream URLs or provider credentials.
+The controller renders native Codex, Claude Code or OpenCode MCP configuration
+in the immutable run contract. The administrator-owned launch loads it into
+fresh client state, with no upstream URLs or credentials. Claude Code's native
+Anthropic model route shares the existing `model.inference` account with OpenAI;
+the trusted gateway selects its protocol and credentials. The [harness reference](../reference/harnesses.md)
+and [harness ADR](../adr/0002-native-cli-harnesses-and-model-protocols.md)
+describe launch, completion, accounting and verification limits.
 
 The [MCP ADR](../adr/0001-mcp-capabilities-through-shared-gateway.md) records why
 registration, grants and session ownership have this shape. See
@@ -141,5 +144,6 @@ interrupted cleanup and container-completion limitations are listed in
 
 The [future architecture overview](future-architecture/README.md) describes
 extensions to these implemented boundaries. MCP delivery and configurable HTTPS
-provider mediation are current capabilities. Docker placement, additional
-harnesses and managed MCP servers remain directional designs.
+provider mediation are current capabilities. Docker placement, managed harness control and managed MCP servers remain
+directional designs. Additional stock CLI configuration and Anthropic Messages
+are implemented, with local verification described in the harness reference.

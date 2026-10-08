@@ -49,6 +49,8 @@ spec:
                       leaves delivery to the administrator's own client launch command.
                     enum:
                     - codex
+                    - claude-code
+                    - opencode
                     type: string
                   trustBundleConfigMap:
                     description: |-

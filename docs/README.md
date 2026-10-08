@@ -50,13 +50,16 @@ Architecturally significant changes require an ADR and matching current docs.
 [Decision records and contributor guidance](adr/README.md) describe the process.
 
 - [0001: MCP through the shared capability gateway](adr/0001-mcp-capabilities-through-shared-gateway.md)
+- [0002: Native CLI harnesses and model protocols](adr/0002-native-cli-harnesses-and-model-protocols.md)
 
 ## Future architecture
 
 Directional designs for extensions to the implemented capability model. Native
 Kubernetes MCP and configured remote HTTPS MCP tools are supported today; the
 references and acceptance report above describe their bounds. Managed servers,
-additional runtimes and other harnesses remain future directions.
+additional runtimes and managed harness control remain future directions.
+[Stock CLI harnesses](reference/harnesses.md) describes current Codex, Claude Code
+and OpenCode preparation and its bounded verification evidence.
 
 - [Overview and evolution](explanations/future-architecture/README.md)
 - [Capabilities and MCP interoperability](explanations/future-architecture/capabilities-and-mcp.md)

@@ -42,6 +42,20 @@ type Authenticator interface {
 
 type APIKey struct{ Key string }
 
+// AnthropicAPIKey installs a trusted Messages API credential. A workload's
+// placeholder and account headers never select the provider account.
+type AnthropicAPIKey struct{ Key string }
+
+func (AnthropicAPIKey) Mode() string { return APIKeyMode }
+func (a AnthropicAPIKey) Authorize(r *http.Request) error {
+	if strings.TrimSpace(a.Key) == "" || strings.ContainsAny(a.Key, "\r\n") {
+		return errors.New("provider API key is unavailable")
+	}
+	r.Header.Del("Authorization")
+	r.Header.Set("X-Api-Key", a.Key)
+	return nil
+}
+
 func (APIKey) Mode() string { return APIKeyMode }
 func (a APIKey) Authorize(r *http.Request) error {
 	if strings.TrimSpace(a.Key) == "" || strings.ContainsAny(a.Key, "\r\n") {
