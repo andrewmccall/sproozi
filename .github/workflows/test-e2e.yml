@@ -45,3 +45,16 @@ jobs:
           SPROOZI_CNI_MANIFEST: ${{ runner.temp }}/calico-v3.30.4.yaml
           SPROOZI_CNI_SELECTOR: k8s-app=calico-node
           SPROOZI_CNI_TIMEOUT: 300s
+
+      - name: Retain full-stack acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: orchestration-kind-evidence
+          path: |
+            .local/verification/orchestration-kind/*.json
+            .local/verification/orchestration-kind/*.log
+            .local/verification/orchestration-kind/cron-output.txt
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7

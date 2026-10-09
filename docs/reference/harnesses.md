@@ -1,7 +1,7 @@
 # CLI harnesses
 
 `AgentRuntime.spec.clientConfig.harness` selects generated run-local MCP
-configuration. Supported selectors are `codex`, `claude-code` and `opencode`.
+configuration. Supported selectors are `codex`, `claude-code`, `opencode` and `hermes`.
 An omitted selector leaves client configuration to the administrator's launch
 command. Unknown selectors fail runtime validation and contract preparation.
 
@@ -10,6 +10,7 @@ command. Unknown selectors fail runtime validation and contract preparation.
 | `codex` | `codex-mcp.toml` | Codex `mcp_servers` TOML |
 | `claude-code` | `claude-mcp.json` | Claude Code `mcpServers`, HTTP transport |
 | `opencode` | `opencode-mcp.json` | OpenCode `mcp`, remote transport, OAuth disabled |
+| `hermes` | `hermes-mcp.json` | Hermes `mcp_servers`, Streamable HTTP |
 
 Only requested named `mcp.<server>` connections appear. Each points to the
 shared gateway's `/mcp/<server>` route. Provider URLs and credentials are absent.
@@ -17,7 +18,7 @@ The gateway continues to check the run and live policy on each call; rendered
 configuration cannot grant tools. Native `kubernetes.read` MCP configuration
 remains an explicit trusted launch setting, as in the [Kubernetes MCP reference](kubernetes-mcp.md).
 
-For Claude Code and OpenCode, contract preparation also writes `instructions.txt`
+For Claude Code, OpenCode and Hermes, contract preparation also writes `instructions.txt`
 from the template's trusted instructions and `request.json` from the run's
 untrusted task and event context. The original `input.json` remains available.
 The examples pass these separately through each client's native input mechanism.
@@ -44,6 +45,24 @@ malformed or ambiguous result fails the container. It does not interpret the
 answer or decide whether the task was useful. Export inspection is bounded to
 8 MiB. This is completion normalization around the existing loop.
 
+Hermes 0.21.6 uses `hermes-launch.py` around one native `chat --oneshot`
+invocation. The helper loads fresh native configuration, passes trusted template
+instructions as an ephemeral system prompt, selects only configured MCP toolsets through reserved `sproozi-mcp-<server>`
+aliases. This avoids native built-in toolset name collisions. It disables
+discovered rules. It validates a single successful native terminal
+result, preserves process failure and signals, and publishes its final text in
+the UID-bound termination-file envelope. It truncates by encoded UTF-8 envelope
+size and marks incomplete text explicitly. Missing or malformed native completion
+fails the container; output text does not determine task quality. The helper
+runs as PID 1, forwards signals to the native process group and reaps children.
+The official image's root/s6 startup is bypassed for bounded non-root workers.
+The separate persistent coordinator uses stock image startup and native state.
+
+The Hermes runtime example opts into the gateway's native Kubernetes Pod-list
+MCP connection with `--kubernetes-mcp`. This is trusted configuration; calls
+still require the requested `kubernetes.read` grant and live namespace/resource
+policy. Removing the flag disables the connection.
+
 Client state belongs in disposable `/home/agent`. Do not mount existing user
 homes, authentication stores or sessions. Claude Code's strict MCP flag excludes
 other MCP sources, and its settings flags exclude user/project settings and
@@ -60,7 +79,7 @@ The native formats follow the official [Claude Code CLI reference](https://code.
 
 ## Model providers
 
-Codex and the OpenCode example use the existing OpenAI Responses route.
+Codex, Hermes and the OpenCode example use the existing OpenAI Responses route.
 OpenCode uses a configured bundled OpenAI SDK provider rather than an external
 execution server. OpenAI API-key or ChatGPT authentication remains administrator
 configuration. ChatGPT compatibility is established for the recorded Codex
@@ -126,9 +145,20 @@ sandbox cleanup. `make verify-harness-process` exercises stock model/tool loops 
 providers through the real inspected-TLS proxy, including generated native MCP
 connections, tool invocation, budget settlement and capability denials. It also
 checks the normalized OpenCode launch outcome. It uses no paid provider calls.
-A successful fixture does not establish real Anthropic billing, enforcing CNI
-behavior or a deployed Claude/OpenCode run. The recorded Kind proof remains the
-[Codex MCP acceptance](../demos/verified-mcp-demo.md).
+A successful local process fixture does not establish deployed CNI behavior.
+
+`make test-e2e` builds pinned Codex 0.161.0, Claude Code 2.1.27, OpenCode 1.15.1
+and the official Hermes 0.21.6 image and runs them against the deployed TLS
+gateway in isolated Kind with Calico. It also launches the native persistent
+Hermes API and scheduler through the task MCP service, checks PVC restart,
+retained answers, replay, cancellation, deadlines and direct network denial.
+Image provenance and JSON evidence remain in
+`.local/verification/orchestration-kind/`. This uses deterministic provider
+fixtures, without paid inference or real external channel delivery. See the
+[full-stack setup and test guide](../guides/hermes-orchestration.md).
 
 The [harness and provider ADR](../adr/0002-native-cli-harnesses-and-model-protocols.md)
 records the choices, rejected alternatives and revisit conditions.
+
+[ADR 0003](../adr/0003-persistent-assistants-and-retained-results.md) records
+persistent assistant ownership and retained result publication.

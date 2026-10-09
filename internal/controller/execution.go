@@ -19,6 +19,7 @@ import (
 	"context"
 
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
@@ -59,19 +60,37 @@ func (r *AgentRunReconciler) processSandboxExit(
 ) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	containerExitCode, err := r.SandboxClient.GetExitCode(ctx, sandboxName)
-	if err != nil {
-		logger.Info("Could not determine Sandbox container exit code", "name", run.Name, "error", err)
+	completion, completionErr := r.SandboxClient.GetCompletion(ctx, sandboxName, string(run.UID))
+	// A cancel or concurrent terminal update may arrive while the Pod is read.
+	// Re-fetch before the status write, retaining UID and resource-version checks.
+	var latest sprooziv1alpha1.AgentRun
+	if err := r.Get(ctx, client.ObjectKeyFromObject(run), &latest); err != nil {
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+	if latest.UID != run.UID || IsTerminal(latest.Status.Phase) || !latest.DeletionTimestamp.IsZero() {
+		return ctrl.Result{}, nil
+	}
+	run = &latest
+	if run.Spec.Cancel {
+		run.Status.Result = nil
+		return r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseCancelled, "CancelRequested", "")
+	}
+	if completionErr != nil {
+		logger.Info("Could not determine Sandbox container exit code", "name", run.Name, "error", completionErr)
+		run.Status.Result = nil
 		_, transitionErr := r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseFailed, "SandboxExitUnavailable", "")
 		return ctrl.Result{}, transitionErr
 	}
-	if containerExitCode != 0 {
-		logger.Info("Sandbox container exited unsuccessfully", "name", run.Name, "exitCode", containerExitCode)
+	// Persist result with terminal phase in one status update before cleanup.
+	// This data never participates in the lifecycle success decision.
+	run.Status.Result = completion.Result
+	if completion.ExitCode != 0 {
+		logger.Info("Sandbox container exited unsuccessfully", "name", run.Name, "exitCode", completion.ExitCode)
 		_, err := r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseFailed, "SandboxExitNonZero", "")
 		return ctrl.Result{}, err
 	}
 	logger.Info("Sandbox container exited successfully", "name", run.Name)
-	_, err = r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseSucceeded, "ExecutionSucceeded", "")
+	_, err := r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseSucceeded, "ExecutionSucceeded", "")
 	return ctrl.Result{}, err
 }
 

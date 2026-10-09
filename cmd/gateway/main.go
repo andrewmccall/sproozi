@@ -48,19 +48,20 @@ const defaultHost = "sproozi-gateway.sproozi-system.svc"
 var scheme = runtime.NewScheme()
 
 type startupConfig struct {
-	enabled        map[sprooziv1alpha1.CapabilityKind]bool
-	host           string
-	listenerCert   tls.Certificate
-	certificates   map[string]tls.Certificate
-	profiles       *egress.ProfileStore
-	pricing        *modelgateway.PricingTable
-	openAIKey      string
-	anthropicKey   string
-	modelAuthMode  string
-	appID          int64
-	installationID int64
-	privateKey     []byte
-	mcpRegistry    *mcpgateway.Registry
+	enabled              map[sprooziv1alpha1.CapabilityKind]bool
+	host                 string
+	listenerCert         tls.Certificate
+	certificates         map[string]tls.Certificate
+	profiles             *egress.ProfileStore
+	pricing              *modelgateway.PricingTable
+	openAIKey            string
+	anthropicKey         string
+	anthropicUpstreamURL string
+	modelAuthMode        string
+	appID                int64
+	installationID       int64
+	privateKey           []byte
+	mcpRegistry          *mcpgateway.Registry
 }
 
 // semanticAuthorities binds concrete service modules to exact authorities.
@@ -104,6 +105,7 @@ func loadStartupConfig() (*startupConfig, error) {
 	}
 	var pricing *modelgateway.PricingTable
 	openAIKey, anthropicKey, modelAuthMode := "", "", ""
+	anthropicUpstreamURL := envOrDefault("ANTHROPIC_UPSTREAM_URL", "https://api.anthropic.com")
 	if enabled[sprooziv1alpha1.CapabilityModelInference] {
 		pricingFile, err := os.Open(envOrDefault("MODEL_PRICING_PATH", "/etc/sproozi/model/pricing.json"))
 		if err != nil {
@@ -120,6 +122,9 @@ func loadStartupConfig() (*startupConfig, error) {
 		}
 		openAIKey, anthropicKey, modelAuthMode, err = loadModelCredentials()
 		if err != nil {
+			return nil, err
+		}
+		if err := validateModelUpstream(anthropicUpstreamURL); err != nil {
 			return nil, err
 		}
 	}
@@ -166,7 +171,8 @@ func loadStartupConfig() (*startupConfig, error) {
 		enabled: enabled,
 		host:    host, listenerCert: certificate, certificates: certificates,
 		profiles: profiles, pricing: pricing, openAIKey: openAIKey, anthropicKey: anthropicKey, modelAuthMode: modelAuthMode,
-		appID: appID, installationID: installationID, privateKey: privateKey,
+		anthropicUpstreamURL: anthropicUpstreamURL,
+		appID:                appID, installationID: installationID, privateKey: privateKey,
 		mcpRegistry: mcpRegistry,
 	}, nil
 }
@@ -385,7 +391,7 @@ func main() {
 	if cfg.enabled[sprooziv1alpha1.CapabilityModelInference] && cfg.anthropicKey != "" {
 		anthropicHandler = modelgateway.NewAnthropicHandler(modelgateway.HandlerConfig{
 			Pricing: cfg.pricing, AuditLogger: auditLogger,
-			UpstreamURL:  "https://api.anthropic.com",
+			UpstreamURL:  cfg.anthropicUpstreamURL,
 			ProviderAuth: modelauth.AnthropicAPIKey{Key: cfg.anthropicKey}, HTTPClient: httpClient,
 		})
 	}
@@ -492,4 +498,15 @@ func envOrDefault(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+// Provider destinations are trusted operator configuration; workloads continue
+// to use the reserved semantic authority and cannot choose an upstream.
+func validateModelUpstream(value string) error {
+	upstream, err := url.Parse(value)
+	if err != nil || upstream.Scheme != "https" && upstream.Scheme != "http" || upstream.Host == "" ||
+		upstream.User != nil || value != upstream.Scheme+"://"+upstream.Host {
+		return errors.New("invalid Anthropic upstream origin")
+	}
+	return nil
 }

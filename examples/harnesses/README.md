@@ -1,6 +1,6 @@
 # Stock CLI harness runtimes
 
-These administrator-owned runtime examples launch Claude Code or OpenCode as the
+These administrator-owned runtime examples launch Claude Code, OpenCode or Hermes as the
 `agent` process in a disposable Sproozi Pod. Replace each `example/...@sha256:...`
 image with a reviewed, digest-pinned image containing `/bin/sh`, `cat` and the
 selected stock CLI. The OpenCode image also needs Python 3. Set `SPROOZI_MODEL` to a provider model available to your
@@ -31,7 +31,7 @@ Vertex, managed loops and remote-control sessions are outside these examples.
 `--setting-sources ''` and `--strict-mcp-config` restrict settings and MCP loading;
 hooks and slash-command discovery are disabled. No existing sessions are mounted.
 
-Both CLIs receive harmless model-key placeholders. Provider keys belong only to
+These CLIs receive harmless model-key placeholders. Provider keys belong only to
 the gateway. The gateway certificate must cover the selected provider authority,
 and the mounted trust bundle must contain its inspection CA. Direct network
 access remains subject to the existing enforcing CNI requirement.
@@ -40,3 +40,13 @@ Run `make verify-harness-clients` to check generated configuration loading with
 locally installed stock clients in disposable state. This check performs no model
 request. See [harness reference](../../docs/reference/harnesses.md) for configuration,
 provider setup and the evidence limits of these examples.
+
+
+Hermes uses the pinned official 0.21.6 image. The bounded worker launches its
+bundled interpreter directly, outside the root startup system, with fresh native
+state. Its immutable helper supervises the stock CLI and publishes a bounded
+UID-bound final answer. The example enables the native Kubernetes MCP tool;
+request `kubernetes.read` and configure its namespace/resource policy to use it.
+`make test-e2e` checks the deployed stock loops and persistent coordinator with
+deterministic providers. The [Hermes Kubernetes guide](../../docs/guides/hermes-orchestration.md)
+provides the persistent deployment and schedule setup.

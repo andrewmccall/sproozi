@@ -1,9 +1,10 @@
 # Harness portability and control
 
-**Status:** mixed. Native Codex, Claude Code and OpenCode configuration and
+**Status:** mixed. Native Codex, Claude Code, OpenCode and Hermes configuration and
 stock launch adapters are implemented. See [current support and evidence](../../reference/harnesses.md).
-The stock Codex SRE path remains the demonstrated deployed baseline. Managed
-control and deployed acceptance for additional harnesses remain future work.
+The stock Codex SRE path remains the paid-provider deployed baseline. Full Kind
+acceptance exercises all four stock loops and native persistent Hermes delegation
+with deterministic provider fixtures. Managed turn-level control remains future work.
 See the [overview](README.md).
 
 A harness owns the agent loop, model interaction, context and its user

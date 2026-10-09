@@ -26,16 +26,17 @@ import (
 type FakeSandboxClient struct {
 	// Status is returned by GetStatus.
 	Status SandboxStatus
-	// ExitCode is returned by GetExitCode.
+	// ExitCode and Result are returned by GetCompletion.
 	ExitCode int32
+	Result   *sprooziv1alpha1.AgentRunResult
 	// EnsureName overrides the returned name; defaults to RunName(run.UID).
 	EnsureName string
 	// EnsureErr is returned by Ensure if non-nil.
 	EnsureErr error
 	// StatusErr is returned by GetStatus if non-nil.
 	StatusErr error
-	// ResultErr is returned by GetExitCode if non-nil.
-	ResultErr error
+	// CompletionErr is returned by GetCompletion if non-nil.
+	CompletionErr error
 	// DeleteErr is returned by Delete if non-nil.
 	DeleteErr error
 	// Ensured records the sandbox names returned by Ensure.
@@ -68,9 +69,9 @@ func (f *FakeSandboxClient) GetStatus(_ context.Context, _ string) (SandboxStatu
 	return f.Status, nil
 }
 
-// GetExitCode returns ExitCode and ResultErr.
-func (f *FakeSandboxClient) GetExitCode(_ context.Context, _ string) (int32, error) {
-	return f.ExitCode, f.ResultErr
+// GetCompletion returns the configured terminal observation and CompletionErr.
+func (f *FakeSandboxClient) GetCompletion(_ context.Context, _, _ string) (SandboxCompletion, error) {
+	return SandboxCompletion{ExitCode: f.ExitCode, Result: f.Result}, f.CompletionErr
 }
 
 // Delete records the name and returns DeleteErr.

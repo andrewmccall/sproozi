@@ -38,3 +38,4 @@ old record superseded and link both records.
 
 - [0001: Use MCP through the shared capability gateway](0001-mcp-capabilities-through-shared-gateway.md)
 - [0002: Native CLI harnesses and model protocols](0002-native-cli-harnesses-and-model-protocols.md)
+- [0003: Persistent assistants and retained worker results](0003-persistent-assistants-and-retained-results.md)

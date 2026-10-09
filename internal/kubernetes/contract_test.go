@@ -133,7 +133,7 @@ func TestBuildPodSpecMountsContractReadOnly(t *testing.T) {
 }
 
 func TestRunContractRejectsChangedHarnessAndAdditionalFiles(t *testing.T) {
-	for _, selected := range []string{testCodexHarness, "claude-code", "opencode"} {
+	for _, selected := range []string{testCodexHarness, "claude-code", "opencode", "hermes"} {
 		t.Run(selected, func(t *testing.T) {
 			run, tmpl, rt := contractInputs()
 			run.Spec.Capabilities = []sprooziv1alpha1.CapabilityKind{testMCPCapability}

@@ -51,6 +51,7 @@ spec:
                     - codex
                     - claude-code
                     - opencode
+                    - hermes
                     type: string
                   trustBundleConfigMap:
                     description: |-

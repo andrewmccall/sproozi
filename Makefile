@@ -71,7 +71,7 @@ test-e2e: ## Create an isolated Kind cluster with enforcing CNI and run the e2e 
 
 .PHONY: test-e2e-existing
 test-e2e-existing: ## Run e2e tests against the caller-owned, already-created Kind cluster.
-	@KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) go test -tags=e2e ./test/e2e/ -v -ginkgo.v
+	@KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) go test -tags=e2e ./test/e2e/ -v -timeout=45m -ginkgo.v
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter

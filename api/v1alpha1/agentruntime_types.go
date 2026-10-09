@@ -34,7 +34,7 @@ var digestImagePattern = regexp.MustCompile(`^[A-Za-z0-9./_:-]+@sha256:[a-f0-9]{
 // runtime admission seam. It deliberately fails closed for Pod features that
 // could escape the sandbox or silently weaken its security boundary.
 func (s *AgentRuntimeSpec) ValidateRuntimeTemplate() error {
-	if !slices.Contains([]string{"", "codex", "claude-code", "opencode"}, s.ClientConfig.Harness) {
+	if !slices.Contains([]string{"", "codex", "claude-code", "opencode", "hermes"}, s.ClientConfig.Harness) {
 		return fmt.Errorf("unsupported harness %q", s.ClientConfig.Harness)
 	}
 	if len(s.PodTemplate.Spec.Containers) == 0 {
@@ -180,7 +180,7 @@ type RuntimeClientConfig struct {
 	// Harness selects supported run-local MCP configuration rendering. Empty
 	// leaves delivery to the administrator's own client launch command.
 	// +optional
-	// +kubebuilder:validation:Enum=codex;claude-code;opencode
+	// +kubebuilder:validation:Enum=codex;claude-code;opencode;hermes
 	Harness string `json:"harness,omitempty"`
 
 	// TrustBundleConfigMap identifies an immutable certificate-only ConfigMap in the

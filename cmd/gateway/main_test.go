@@ -152,6 +152,24 @@ func TestRegisteredMCPProvidersAndGatewayNeverFallBackToDestinationRoutes(t *tes
 
 var bigOne = func() *big.Int { return big.NewInt(1) }()
 
+func TestAnthropicUpstreamIsAnAdministratorOwnedOrigin(t *testing.T) {
+	validGatewayEnvironment(t)
+	t.Setenv("ANTHROPIC_UPSTREAM_URL", "http://fixture.sproozi-system.svc:8080")
+	cfg, err := loadStartupConfig()
+	if err != nil || cfg.anthropicUpstreamURL != "http://fixture.sproozi-system.svc:8080" {
+		t.Fatalf("configured provider origin was not retained: %v", err)
+	}
+	for _, value := range []string{
+		"file:///credentials", "https://credential@provider.example", "https://provider.example?token=secret",
+		"https://provider.example/v1/messages", "http://fixture?", "https://provider.example#",
+	} {
+		t.Setenv("ANTHROPIC_UPSTREAM_URL", value)
+		if _, err := loadStartupConfig(); err == nil || strings.Contains(err.Error(), value) {
+			t.Fatalf("invalid origin was accepted or disclosed: %v", err)
+		}
+	}
+}
+
 func TestLoadStartupConfigValidatesAllCompositionInputs(t *testing.T) {
 	validGatewayEnvironment(t)
 	cfg, err := loadStartupConfig()

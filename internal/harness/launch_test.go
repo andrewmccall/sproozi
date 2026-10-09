@@ -13,6 +13,10 @@ import (
 	"github.com/andrewmccall/sproozi/internal/harness"
 )
 
+const (
+	nativeFailureCase = "native-failure"
+)
+
 const successCase = "success"
 
 // fakeOpenCode is an external command fixture. It deliberately returns zero
@@ -71,7 +75,7 @@ func launchFixture(t *testing.T, scenario string) (*exec.Cmd, string) {
 }
 
 func TestOpenCodeLaunchReportsNativeCompletion(t *testing.T) {
-	for _, scenario := range []string{successCase, "error", "incomplete", "wrong-parent", "wrong-finish", "existing", "ambiguous", "malformed", "native-failure"} {
+	for _, scenario := range []string{successCase, "error", "incomplete", "wrong-parent", "wrong-finish", "existing", "ambiguous", "malformed", nativeFailureCase} {
 		t.Run(scenario, func(t *testing.T) {
 			cmd, _ := launchFixture(t, scenario)
 			output, err := cmd.CombinedOutput()
@@ -79,7 +83,7 @@ func TestOpenCodeLaunchReportsNativeCompletion(t *testing.T) {
 			switch scenario {
 			case "success":
 				want = 0
-			case "native-failure":
+			case nativeFailureCase:
 				want = 7
 			}
 			if cmd.ProcessState == nil || cmd.ProcessState.ExitCode() != want {

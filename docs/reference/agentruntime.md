@@ -80,7 +80,7 @@ also selects no custom `RuntimeClass`. See the
 
 ## MCP client preparation
 
-Optional `spec.clientConfig.harness` selects `codex`, `claude-code` or `opencode`
+Optional `spec.clientConfig.harness` selects `codex`, `claude-code`, `opencode` or `hermes`
 native MCP configuration in the immutable contract. The administrator-owned
 launch command loads only that configuration into disposable client state.
 Only requested named MCP capabilities appear; credentials remain in the gateway.

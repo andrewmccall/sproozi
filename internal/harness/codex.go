@@ -13,9 +13,14 @@ import (
 )
 
 const (
+	connectionURL = "url"
+)
+
+const (
 	codexName    = "codex"
 	claudeName   = "claude-code"
 	openCodeName = "opencode"
+	hermesName   = "hermes"
 )
 
 // MCPConfig describes only requested broker connections in the selected CLI's
@@ -25,7 +30,7 @@ func MCPConfig(selected string, capabilities []string, gatewayEndpoint string) (
 	if selected == "" {
 		return nil, nil
 	}
-	if selected != codexName && selected != claudeName && selected != openCodeName {
+	if selected != codexName && selected != claudeName && selected != openCodeName && selected != hermesName {
 		return nil, fmt.Errorf("unsupported harness %q", selected)
 	}
 	endpoint, err := url.Parse(gatewayEndpoint)
@@ -50,9 +55,12 @@ func MCPConfig(selected string, capabilities []string, gatewayEndpoint string) (
 		case codexName:
 			_, _ = fmt.Fprintf(&output, "[mcp_servers.%s]\nurl = %s\nrequired = true\n\n", strconv.Quote(name), strconv.Quote(address))
 		case claudeName:
-			connections[name] = map[string]any{"type": "http", "url": address}
+			connections[name] = map[string]any{"type": "http", connectionURL: address}
+		case hermesName:
+			// Native toolset aliases must not collide with built-ins such as all or terminal.
+			connections["sproozi-mcp-"+name] = map[string]any{connectionURL: address, "enabled": true, "strict_redirect_headers": true, "connect_timeout": 15, "timeout": 60}
 		case openCodeName:
-			connections[name] = map[string]any{"type": "remote", "url": address, "enabled": true, "oauth": false}
+			connections[name] = map[string]any{"type": "remote", connectionURL: address, "enabled": true, "oauth": false}
 		}
 	}
 	if selected == codexName {
@@ -61,6 +69,9 @@ func MCPConfig(selected string, capabilities []string, gatewayEndpoint string) (
 	key, field := "claude-mcp.json", "mcpServers"
 	if selected == openCodeName {
 		key, field = "opencode-mcp.json", "mcp"
+	}
+	if selected == hermesName {
+		key, field = "hermes-mcp.json", "mcp_servers"
 	}
 	document, err := json.Marshal(map[string]any{field: connections})
 	if err != nil {

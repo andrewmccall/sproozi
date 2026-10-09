@@ -85,7 +85,10 @@ func EnsureAgentContract(ctx context.Context, c client.Client, run *sprooziv1alp
 	if rt.Spec.ClientConfig.Harness == "opencode" {
 		wanted.Data["opencode-launch.py"] = harness.OpenCodeLaunch
 	}
-	if rt.Spec.ClientConfig.Harness == "claude-code" || rt.Spec.ClientConfig.Harness == "opencode" {
+	if rt.Spec.ClientConfig.Harness == "hermes" {
+		wanted.Data["hermes-launch.py"] = harness.HermesLaunch
+	}
+	if rt.Spec.ClientConfig.Harness == "claude-code" || rt.Spec.ClientConfig.Harness == "opencode" || rt.Spec.ClientConfig.Harness == "hermes" {
 		request, err := json.Marshal(input.Untrusted)
 		if err != nil {
 			return fmt.Errorf("encode untrusted request: %w", err)
