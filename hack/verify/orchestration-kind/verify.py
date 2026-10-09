@@ -760,10 +760,19 @@ def request(port, path, body=None, token=TOKEN, tls=True):
         data=json.dumps(body).encode() if body is not None else None,
         headers=headers,
     )
-    with urllib.request.urlopen(
-        req, context=CTX if tls else None, timeout=45 if tls else 300
-    ) as response:
-        return json.loads(response.read() or "{}")
+    try:
+        with urllib.request.urlopen(
+            req, context=CTX if tls else None, timeout=45 if tls else 300
+        ) as response:
+            return json.loads(response.read() or "{}")
+    except urllib.error.HTTPError as error:
+        # An unread error body can reset TCP on close and terminate the
+        # pod-bound kubectl port-forward. Keep the HTTP failure, drain its body.
+        try:
+            error.read()
+        finally:
+            error.close()
+        raise
 
 
 def call(name, args, expect_error=False):
@@ -906,6 +915,7 @@ def task_service_checks():
             assert e.code == 401, e.code
         else:
             raise AssertionError("Invalid task bearer accepted")
+    assert call("status", ref(view))["result"]["text"] == ANSWER
     record(
         "task-retained-result-replay-conflict-expiry-uid-auth",
         uid=view["uid"],
