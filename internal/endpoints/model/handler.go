@@ -72,7 +72,23 @@ type HandlerConfig struct {
 // Handler is the HTTP handler for the model gateway.
 type Handler struct {
 	// Config holds all dependencies and configuration for this handler.
-	Config HandlerConfig
+	Config   HandlerConfig
+	protocol providerProtocol
+}
+
+type providerProtocol uint8
+
+const (
+	openAIProtocol providerProtocol = iota
+	anthropicProtocol
+	// AnthropicAuthority is reserved even when its provider is disabled.
+	AnthropicAuthority = "api.anthropic.com:443"
+)
+
+// NewAnthropicHandler uses the same authorization and accounting as OpenAI,
+// with the native Messages protocol selected by trusted gateway composition.
+func NewAnthropicHandler(config HandlerConfig) *Handler {
+	return &Handler{Config: config, protocol: anthropicProtocol}
 }
 
 // requestStreamCheck is used to detect streaming requests before proxying.
@@ -93,19 +109,21 @@ type requestTokenBounds struct {
 // responseUsage is deliberately strict: a successful inference response must
 // include total_tokens so the gateway can settle its admission accurately.
 type responseUsage struct {
-	Usage *struct {
-		TotalTokens        *int64 `json:"total_tokens"`
-		PromptTokens       *int64 `json:"prompt_tokens"`
-		CompletionTokens   *int64 `json:"completion_tokens"`
-		InputTokens        *int64 `json:"input_tokens"`
-		OutputTokens       *int64 `json:"output_tokens"`
-		InputTokensDetails *struct {
-			CachedTokens *int64 `json:"cached_tokens"`
-		} `json:"input_tokens_details"`
-		PromptTokensDetails *struct {
-			CachedTokens *int64 `json:"cached_tokens"`
-		} `json:"prompt_tokens_details"`
-	} `json:"usage"`
+	Usage *tokenUsage `json:"usage"`
+}
+
+type tokenUsage struct {
+	TotalTokens        *int64 `json:"total_tokens"`
+	PromptTokens       *int64 `json:"prompt_tokens"`
+	CompletionTokens   *int64 `json:"completion_tokens"`
+	InputTokens        *int64 `json:"input_tokens"`
+	OutputTokens       *int64 `json:"output_tokens"`
+	InputTokensDetails *struct {
+		CachedTokens *int64 `json:"cached_tokens"`
+	} `json:"input_tokens_details"`
+	PromptTokensDetails *struct {
+		CachedTokens *int64 `json:"cached_tokens"`
+	} `json:"prompt_tokens_details"`
 }
 
 // openAIErrorBody is the OpenAI-compatible error envelope written on denied requests.
@@ -134,6 +152,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	e = identity.AuditEvent(r.URL.Path)
 	e.Service, e.SemanticLevel = "openai", "semantic"
+	if h.protocol == anthropicProtocol {
+		e.Service = "anthropic"
+	}
 	e.Capability = string(sprooziv1alpha1.CapabilityModelInference)
 
 	policyGen := identity.Policy.Generation
@@ -144,7 +165,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	e.TokenBudget = identity.Policy.Spec.Budgets[sprooziv1alpha1.CapabilityModelInference].MaxUnits
 
 	// 4. Check the request path is allowed.
-	if !slices.Contains(allowedPaths, r.URL.Path) {
+	if h.protocol == openAIProtocol && !slices.Contains(allowedPaths, r.URL.Path) {
 		h.deny(w, e, http.StatusForbidden,
 			"path not allowed", "permission_error", "path_not_allowed")
 		return
@@ -167,7 +188,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var check requestStreamCheck
-	if json.Unmarshal(bodyBytes, &check) == nil && check.Stream && r.URL.Path != responsesPath {
+	if h.protocol == anthropicProtocol {
+		bodyBytes, err = h.prepareAnthropic(r, bodyBytes, identity.Policy.Spec.Budgets[sprooziv1alpha1.CapabilityModelInference])
+		if err != nil {
+			h.deny(w, e, http.StatusForbidden, err.Error(), "permission_error", "unsupported_request")
+			return
+		}
+	}
+	if json.Unmarshal(bodyBytes, &check) == nil && check.Stream && r.URL.Path != responsesPath && h.protocol != anthropicProtocol {
 		h.deny(w, e, http.StatusForbidden,
 			"streaming responses are not supported by the model gateway",
 			"permission_error", "streaming_not_supported")
@@ -196,7 +224,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// An explicit output bound is trusted as an admission bound. Without it,
 		// reserve all remaining capacity so unknown input plus output cannot
 		// oversubscribe the hard ceiling.
-		reservation, err = meter.Reserve(requestTokenEstimate(bodyBytes), 0)
+		estimate := requestTokenEstimate(bodyBytes)
+		if h.protocol == anthropicProtocol {
+			// max_tokens bounds output, not input plus cache use. Reserve all
+			// remaining capped capacity until trusted total usage is available.
+			estimate = 0
+		}
+		reservation, err = meter.Reserve(estimate, 0)
 	}
 	if err != nil {
 		h.deny(w, e, http.StatusTooManyRequests, err.Error(), "budget_error", "budget_exhausted")
@@ -215,14 +249,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"failed to build upstream request", "server_error", "upstream_error")
 		return
 	}
-	for k, vv := range r.Header {
-		if strings.EqualFold(k, "Authorization") {
-			continue
-		}
-		for _, v := range vv {
-			upstreamReq.Header.Add(k, v)
-		}
-	}
+	h.copyProviderHeaders(upstreamReq.Header, r.Header)
 	if err = providerAuth.Authorize(upstreamReq); err != nil {
 		if reservation != nil {
 			_ = reservation.Release()
@@ -236,10 +263,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	upstreamReq.Header.Del("Accept-Encoding")
 
 	// 9. Forward request to upstream.
-	resp, err := h.Config.HTTPClient.Do(upstreamReq)
+	providerClient := *h.Config.HTTPClient
+	providerClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	resp, err := providerClient.Do(upstreamReq)
 	if err != nil {
 		if reservation != nil {
-			_ = reservation.Release()
+			_ = reservation.Forfeit()
 		}
 		h.deny(w, e, http.StatusBadGateway,
 			"upstream request failed", "server_error", "upstream_error")
@@ -265,6 +294,9 @@ func (h *Handler) writeProviderResponse(
 	var diagnostic ResponseDiagnostic
 	if h.Config.Diagnostics != nil {
 		credential := strings.TrimPrefix(upstreamReq.Header.Get("Authorization"), "Bearer ")
+		if h.protocol == anthropicProtocol {
+			credential = upstreamReq.Header.Get("X-Api-Key")
+		}
 		diagnostic = describeResponse(resp, body, credential)
 		diagnostic.RunUID = string(identity.Run.UID)
 		defer func() { h.Config.Diagnostics(diagnostic) }()
@@ -272,7 +304,7 @@ func (h *Handler) writeProviderResponse(
 	if err != nil {
 		diagnostic.ValidationError = "response read failed or exceeded body limit"
 		if reservation != nil {
-			_ = reservation.Settle(reservation.ReservedUnits(), 0)
+			_ = reservation.Forfeit()
 		}
 		h.deny(w, e, http.StatusBadGateway,
 			"failed to read upstream response", "server_error", "upstream_error")
@@ -281,15 +313,23 @@ func (h *Handler) writeProviderResponse(
 
 	var tokensUsed int64
 	var costMicros int64
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 && r.URL.Path != modelsPath {
-		usageResp, usageErr := decodeUsage(body, r.URL.Path, stream, resp.Header.Get("Content-Type"))
+	successful := resp.StatusCode >= 200 && resp.StatusCode < 300
+	if h.protocol == anthropicProtocol && !successful {
+		if reservation != nil {
+			_ = reservation.Release()
+		}
+		h.deny(w, e, resp.StatusCode, "provider rejected request", "api_error", "provider_rejected")
+		return
+	}
+	if successful && r.URL.Path != modelsPath {
+		usageResp, anthropic, usageErr := h.providerUsage(body, r.URL.Path, stream, resp.Header.Get("Content-Type"))
 		if invalidTokenUsage(usageResp, usageErr, limits) {
 			diagnostic.ValidationError = "completed response omitted required token usage"
 			if usageErr != nil {
 				diagnostic.ValidationError = usageErr.Error()
 			}
 			if reservation != nil {
-				_ = reservation.Settle(reservation.ReservedUnits(), 0)
+				_ = reservation.Forfeit()
 			}
 			e.UpstreamStatus = resp.StatusCode
 			h.deny(w, e, http.StatusBadGateway,
@@ -298,32 +338,12 @@ func (h *Handler) writeProviderResponse(
 			return
 		}
 		tokensUsed = *usageResp.Usage.TotalTokens
-		cached := int64(0)
-		if usageResp.Usage.PromptTokensDetails != nil && usageResp.Usage.PromptTokensDetails.CachedTokens != nil {
-			cached = *usageResp.Usage.PromptTokensDetails.CachedTokens
-		}
-		var requestModel struct {
-			Model string `json:"model"`
-		}
-		_ = json.Unmarshal(bodyBytes, &requestModel)
-		// Pricing is only part of the contract when the administrator sets a
-		// cost ceiling. The shared gateway normally has a pricing table loaded,
-		// but an uncapped policy must still be able to use any provider model
-		// without being rejected merely because that model is absent from the
-		// optional cost table.
 		if limits.MaxCostMicros > 0 {
-			if h.Config.Pricing == nil {
-				if reservation != nil {
-					_ = reservation.Settle(reservation.ReservedUnits(), 0)
-				}
-				h.deny(w, e, http.StatusBadGateway, "administrator pricing is unavailable", "server_error", "pricing_unavailable")
-				return
-			}
 			var costErr error
-			costMicros, costErr = h.Config.Pricing.Cost(requestModel.Model, *usageResp.Usage.PromptTokens, cached, *usageResp.Usage.CompletionTokens)
+			costMicros, costErr = h.providerCost(bodyBytes, usageResp, anthropic)
 			if costErr != nil {
 				if reservation != nil {
-					_ = reservation.Settle(reservation.ReservedUnits(), 0)
+					_ = reservation.Forfeit()
 				}
 				h.deny(w, e, http.StatusBadGateway, "administrator pricing is unavailable", "server_error", "pricing_unavailable")
 				return
@@ -346,6 +366,9 @@ func (h *Handler) writeProviderResponse(
 
 	// 11. Write upstream response headers and body to the client.
 	for k, vv := range resp.Header {
+		if h.protocol == anthropicProtocol && !strings.EqualFold(k, "Content-Type") && !strings.EqualFold(k, "Request-ID") {
+			continue
+		}
 		for _, v := range vv {
 			w.Header().Add(k, v)
 		}
@@ -414,7 +437,80 @@ func (h *Handler) deny(w http.ResponseWriter, e audit.Event, status int, message
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
+	if h.protocol == anthropicProtocol {
+		_ = json.NewEncoder(w).Encode(map[string]any{"type": errorEventType, "error": map[string]string{"type": errType, "message": message}})
+		return
+	}
 	_ = json.NewEncoder(w).Encode(openAIErrorBody{
 		Error: openAIErrorDetail{Message: message, Type: errType, Code: code},
 	})
+}
+
+func (h *Handler) prepareAnthropic(r *http.Request, body []byte, limits sprooziv1alpha1.EndpointBudget) ([]byte, error) {
+	if err := validateAnthropicRequest(r, body, limits.MaxCostMicros > 0); err != nil {
+		return nil, err
+	}
+	if limits.MaxCostMicros == 0 {
+		return body, nil
+	}
+	var request map[string]json.RawMessage
+	_ = json.Unmarshal(body, &request)
+	var model string
+	_ = json.Unmarshal(request["model"], &model)
+	if h.Config.Pricing == nil {
+		return nil, fmt.Errorf("administrator pricing is unavailable")
+	}
+	if _, priced := h.Config.Pricing.Models[model]; !priced {
+		return nil, fmt.Errorf("administrator pricing is unavailable")
+	}
+	// Omitted service_tier defaults to auto upstream. Capped admission uses
+	// only the administrator's standard pricing, never Priority Tier capacity.
+	request["service_tier"] = json.RawMessage(`"standard_only"`)
+	return json.Marshal(request)
+}
+
+func (h *Handler) copyProviderHeaders(target, source http.Header) {
+	for k, vv := range source {
+		if slices.Contains([]string{"authorization", "x-api-key", "proxy-authorization", "cookie"}, strings.ToLower(k)) {
+			continue
+		}
+		if h.protocol == anthropicProtocol && !slices.Contains([]string{"content-type", "accept", "anthropic-version", "anthropic-beta"}, strings.ToLower(k)) {
+			continue
+		}
+		for _, v := range vv {
+			target.Add(k, v)
+		}
+	}
+	if h.protocol == anthropicProtocol {
+		target.Set("Anthropic-Version", "2023-06-01")
+	}
+}
+
+func (h *Handler) providerUsage(body []byte, path string, stream bool, contentType string) (responseUsage, anthropicUsage, error) {
+	if h.protocol == openAIProtocol {
+		usage, err := decodeUsage(body, path, stream, contentType)
+		return usage, anthropicUsage{}, err
+	}
+	usage, err := decodeAnthropicUsage(body, stream, contentType)
+	input := usage.Total - usage.Output
+	normalized := responseUsage{Usage: &tokenUsage{TotalTokens: &usage.Total, PromptTokens: &input, CompletionTokens: &usage.Output}}
+	return normalized, usage, err
+}
+
+func (h *Handler) providerCost(body []byte, usage responseUsage, anthropic anthropicUsage) (int64, error) {
+	if h.Config.Pricing == nil {
+		return 0, fmt.Errorf("administrator pricing is unavailable")
+	}
+	var requestModel struct {
+		Model string `json:"model"`
+	}
+	_ = json.Unmarshal(body, &requestModel)
+	if h.protocol == anthropicProtocol {
+		return h.Config.Pricing.costAnthropic(requestModel.Model, anthropic)
+	}
+	cached := int64(0)
+	if usage.Usage.PromptTokensDetails != nil && usage.Usage.PromptTokensDetails.CachedTokens != nil {
+		cached = *usage.Usage.PromptTokensDetails.CachedTokens
+	}
+	return h.Config.Pricing.Cost(requestModel.Model, *usage.Usage.PromptTokens, cached, *usage.Usage.CompletionTokens)
 }

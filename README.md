@@ -34,12 +34,30 @@ policy, then request its capability. Sproozi discovers the provider's tool schem
 adding a compatible server requires configuration, without a provider-specific
 Go adapter. Credentials remain behind the gateway.
 
-The trusted Codex runtime receives generated broker connections in its immutable
-run contract. [Recorded MCP acceptance](docs/demos/verified-mcp-demo.md) proves stock
+Codex, Claude Code, OpenCode and Hermes runtimes receive native broker connections in
+the immutable run contract. The [harness reference](docs/reference/harnesses.md)
+and [stock runtime examples](examples/harnesses/README.md) describe launch and
+provider setup. Claude Code uses Anthropic Messages through the same gateway-owned
+credentials and `model.inference` budget. The full Kind E2E launches all four
+stock clients with deterministic provider fixtures.
+[Recorded MCP acceptance](docs/demos/verified-mcp-demo.md) proves stock
 Codex use of the native tool and two configured HTTPS fixture providers, including
 denials, request budgets, cancellation and cleanup. Managed stdio and OAuth
 consent are future work. The [MCP ADR](docs/adr/0001-mcp-capabilities-through-shared-gateway.md)
 records the architectural choice and trade-offs.
+
+## Persistent assistant orchestration
+
+Run stock Hermes in a separate Kubernetes Deployment with native conversation
+state and schedules on a PVC. Its native MCP client submits fixed administrator
+workflows to Sproozi and reads bounded worker answers retained in AgentRun status
+after Pod cleanup. Worker jobs use the existing global queue. Coordinator
+inference and channel credentials belong to the trusted assistant deployment.
+
+The [Hermes guide](docs/guides/hermes-orchestration.md) includes full Kind testing,
+existing-cluster setup, native API chat and schedules. `make test-e2e` launches
+the complete stack in an isolated Kind cluster with an enforcing CNI; no paid
+provider credentials or external bot channels are required.
 
 ## Core concepts
 

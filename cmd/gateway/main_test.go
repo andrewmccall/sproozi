@@ -36,6 +36,7 @@ func TestGatewaySchemeSupportsRunIdentityAndBudgetObjects(t *testing.T) {
 func validGatewayEnvironment(t *testing.T) {
 	t.Helper()
 	t.Setenv("MCP_SERVERS_PATH", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
 	dir := t.TempDir()
 	certFile, keyFile := filepath.Join(dir, "cert.pem"), filepath.Join(dir, "key.pem")
 	// A matching certificate/key pair is sufficient for tls.LoadX509KeyPair;
@@ -57,6 +58,7 @@ func validGatewayEnvironment(t *testing.T) {
 			DNSNames: []string{defaultHost,
 				"kubernetes.default.svc",
 				"api.openai.com",
+				"api.anthropic.com",
 				"github.com",
 				"api.github.com",
 				"pypi.org",
@@ -138,17 +140,35 @@ func TestRegisteredMCPProvidersAndGatewayNeverFallBackToDestinationRoutes(t *tes
 		profiles: profiles, mcpRegistry: registry,
 	}
 	handlers := map[api.CapabilityKind]http.Handler{api.CapabilityNetworkEgress: http.NotFoundHandler()}
-	routes := composeDispatcher(cfg, handlers, nil)
+	routes := composeDispatcher(cfg, handlers, nil, nil)
 	if routes.Allows("remote.example:443") || routes.Allows(defaultHost+":8443") {
 		t.Fatal("reserved MCP addresses acquired destination fallback")
 	}
-	routes = composeDispatcher(cfg, handlers, http.NotFoundHandler())
+	routes = composeDispatcher(cfg, handlers, http.NotFoundHandler(), nil)
 	if !routes.Allows(defaultHost+":8443") || routes[defaultHost+":8443"].Tier != audit.TierProtocol {
 		t.Fatal("MCP delivery route was not composed")
 	}
 }
 
 var bigOne = func() *big.Int { return big.NewInt(1) }()
+
+func TestAnthropicUpstreamIsAnAdministratorOwnedOrigin(t *testing.T) {
+	validGatewayEnvironment(t)
+	t.Setenv("ANTHROPIC_UPSTREAM_URL", "http://fixture.sproozi-system.svc:8080")
+	cfg, err := loadStartupConfig()
+	if err != nil || cfg.anthropicUpstreamURL != "http://fixture.sproozi-system.svc:8080" {
+		t.Fatalf("configured provider origin was not retained: %v", err)
+	}
+	for _, value := range []string{
+		"file:///credentials", "https://credential@provider.example", "https://provider.example?token=secret",
+		"https://provider.example/v1/messages", "http://fixture?", "https://provider.example#",
+	} {
+		t.Setenv("ANTHROPIC_UPSTREAM_URL", value)
+		if _, err := loadStartupConfig(); err == nil || strings.Contains(err.Error(), value) {
+			t.Fatalf("invalid origin was accepted or disclosed: %v", err)
+		}
+	}
+}
 
 func TestLoadStartupConfigValidatesAllCompositionInputs(t *testing.T) {
 	validGatewayEnvironment(t)
@@ -292,7 +312,7 @@ func TestConfiguredDestinationRoutesAndSemanticPrecedence(t *testing.T) {
 	}
 	cfg := &startupConfig{enabled: map[api.CapabilityKind]bool{api.CapabilityNetworkEgress: true}, profiles: profiles}
 	routes := composeDispatcher(cfg,
-		map[api.CapabilityKind]http.Handler{api.CapabilityNetworkEgress: http.NotFoundHandler()}, nil)
+		map[api.CapabilityKind]http.Handler{api.CapabilityNetworkEgress: http.NotFoundHandler()}, nil, nil)
 	if !routes.Allows("registry.example:8443") || routes.Allows("registry.example:443") {
 		t.Fatal("profile route did not preserve exact port")
 	}
@@ -302,5 +322,40 @@ func TestConfiguredDestinationRoutesAndSemanticPrecedence(t *testing.T) {
 	if routes["registry.example:8443"].Tier != audit.TierDestination ||
 		routes["api.github.com:443"].Tier != audit.TierSemantic {
 		t.Fatal("route tiers are incorrect")
+	}
+}
+
+func TestAnthropicStartupAndReservedRoute(t *testing.T) {
+	validGatewayEnvironment(t)
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "anthropic-fixture-key")
+	cfg, err := loadStartupConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.anthropicKey != "anthropic-fixture-key" || cfg.openAIKey != "" {
+		t.Fatal("provider selection not retained")
+	}
+	if _, ok := cfg.certificates["api.anthropic.com"]; !ok {
+		t.Fatal("active Anthropic authority not inspected")
+	}
+	if _, ok := cfg.certificates["api.openai.com"]; ok {
+		t.Fatal("inactive OpenAI authority requires inspection")
+	}
+	routes := composeDispatcher(cfg, nil, nil, http.NotFoundHandler())
+	if !routes.Allows("api.anthropic.com:443") || routes.Allows("api.openai.com:443") {
+		t.Fatal("provider activation incorrect")
+	}
+	cfg.anthropicKey = ""
+	profiles, err := egress.LoadProfileStore([]byte(`{"weaker":[
+ {"scheme":"https","host":"api.anthropic.com","port":443}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.profiles = profiles
+	routes = composeDispatcher(cfg,
+		map[api.CapabilityKind]http.Handler{api.CapabilityNetworkEgress: http.NotFoundHandler()}, nil, nil)
+	if routes.Allows("api.anthropic.com:443") || routes["api.anthropic.com:443"].Tier != audit.TierSemantic {
+		t.Fatal("disabled Anthropic fell back to egress")
 	}
 }

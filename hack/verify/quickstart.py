@@ -216,6 +216,7 @@ def verify(args):
         env["SPROOZI_DEMO_ENV_FILE"] = str(env_file)
         log = directory / "commands.log"
         if args.path == "dependencies":
+            env["SPROOZI_E2E_ORCHESTRATION"] = "0"
             run_command(["bash", "hack/demo/setup.sh", "--network-only"], work, env, log)
             config = capture(["bash", "-c", 'source "$1"; printf "%s\\n%s" "$SPROOZI_CNI_MANIFEST" "$SPROOZI_CNI_SELECTOR"',
                               "cni-config", str(env_file)], cwd=work).splitlines()

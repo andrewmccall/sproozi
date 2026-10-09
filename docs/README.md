@@ -12,6 +12,7 @@ Future architecture is kept separate from implemented behaviour and verified gui
 - [Install on Kubernetes and run your first Pod](guides/install-kubernetes.md), including registry images, certificates and a provider-free first run
 - [Manual AgentRun to pull request](guides/manual-pr-demo.md), including Kind setup, example resources and optional monitoring
 - [Recorded native and configured MCP acceptance](demos/verified-mcp-demo.md), including stock Codex tool use, denials and cancellation
+- [Persistent Hermes orchestration](guides/hermes-orchestration.md), native chat, schedules, PVC state and full Kind testing
 - [Model provider authentication](guides/model-provider-auth.md)
 - [Recorded SRE acceptance](demos/verified-sre-demo.md), with scope and limitations
 
@@ -37,6 +38,8 @@ recovery flow has not been verified end to end.
 - [Standard client compatibility](reference/client-compatibility.md)
 - [Kubernetes MCP delivery](reference/kubernetes-mcp.md)
 - [Configured remote MCP capabilities](reference/configured-mcp.md)
+- [Native CLI harnesses](reference/harnesses.md)
+- [Persistent task MCP interface](reference/orchestration.md)
 
 ## Explanations
 
@@ -50,13 +53,17 @@ Architecturally significant changes require an ADR and matching current docs.
 [Decision records and contributor guidance](adr/README.md) describe the process.
 
 - [0001: MCP through the shared capability gateway](adr/0001-mcp-capabilities-through-shared-gateway.md)
+- [0002: Native CLI harnesses and model protocols](adr/0002-native-cli-harnesses-and-model-protocols.md)
+- [0003: Persistent assistants and retained worker results](adr/0003-persistent-assistants-and-retained-results.md)
 
 ## Future architecture
 
 Directional designs for extensions to the implemented capability model. Native
 Kubernetes MCP and configured remote HTTPS MCP tools are supported today; the
 references and acceptance report above describe their bounds. Managed servers,
-additional runtimes and other harnesses remain future directions.
+additional runtimes and managed harness control remain future directions.
+[Stock CLI harnesses](reference/harnesses.md) describes current Codex, Claude Code
+OpenCode and Hermes preparation and its bounded verification evidence.
 
 - [Overview and evolution](explanations/future-architecture/README.md)
 - [Capabilities and MCP interoperability](explanations/future-architecture/capabilities-and-mcp.md)

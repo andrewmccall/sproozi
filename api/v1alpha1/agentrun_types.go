@@ -93,6 +93,13 @@ type AgentRunStatus struct {
 	// +optional
 	Summary string `json:"summary,omitempty"`
 
+	// Result is optional bounded untrusted final output captured before sandbox cleanup.
+	// Its presence does not determine execution success. Absence means no valid
+	// result was published, including cancellation and deadline termination.
+	// Readers of AgentRun status can read this output until the run retention TTL.
+	// +optional
+	Result *AgentRunResult `json:"result,omitempty"`
+
 	// conditions represent the current state of the AgentRun resource.
 	// Each condition has a unique type and reflects the status of a specific aspect of the resource.
 	//
@@ -106,6 +113,16 @@ type AgentRunStatus struct {
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+}
+
+// AgentRunResult holds workload-controlled final text, independently of lifecycle status.
+type AgentRunResult struct {
+	// Text is UTF-8 final output. An available empty answer is valid.
+	// +kubebuilder:validation:MaxLength=3584
+	Text string `json:"text"`
+
+	// Truncated identifies output shortened to fit the bounded publication envelope.
+	Truncated bool `json:"truncated"`
 }
 
 // AgentRunIdentity identifies disposable resources assigned to an AgentRun.

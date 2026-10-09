@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -29,7 +30,6 @@ const (
 const (
 	contractConfigMapKey   = "input.json"
 	kubeconfigConfigMapKey = "kubeconfig"
-	codexConfigMapKey      = "codex-mcp.toml"
 )
 
 // BuildAgentContract constructs the single strict runner input for an admitted run.
@@ -77,12 +77,24 @@ func EnsureAgentContract(ctx context.Context, c client.Client, run *sprooziv1alp
 			kubeconfigConfigMapKey: generatedKubeconfig(),
 		},
 	}
-	if rt.Spec.ClientConfig.Harness == "codex" {
-		config, err := harness.CodexMCPConfig(input.Capabilities, rt.Spec.GatewayEndpoint)
+	config, err := harness.MCPConfig(rt.Spec.ClientConfig.Harness, input.Capabilities, rt.Spec.GatewayEndpoint)
+	if err != nil {
+		return err
+	}
+	maps.Copy(wanted.Data, config)
+	if rt.Spec.ClientConfig.Harness == "opencode" {
+		wanted.Data["opencode-launch.py"] = harness.OpenCodeLaunch
+	}
+	if rt.Spec.ClientConfig.Harness == "hermes" {
+		wanted.Data["hermes-launch.py"] = harness.HermesLaunch
+	}
+	if rt.Spec.ClientConfig.Harness == "claude-code" || rt.Spec.ClientConfig.Harness == "opencode" || rt.Spec.ClientConfig.Harness == "hermes" {
+		request, err := json.Marshal(input.Untrusted)
 		if err != nil {
-			return err
+			return fmt.Errorf("encode untrusted request: %w", err)
 		}
-		wanted.Data[codexConfigMapKey] = config
+		wanted.Data["instructions.txt"] = input.Trusted.Instructions
+		wanted.Data["request.json"] = string(request)
 	}
 	if err := c.Create(ctx, wanted); err == nil {
 		return nil
@@ -93,11 +105,8 @@ func EnsureAgentContract(ctx context.Context, c client.Client, run *sprooziv1alp
 	if err := c.Get(ctx, client.ObjectKeyFromObject(wanted), &existing); err != nil {
 		return err
 	}
-	if existing.Immutable == nil || !*existing.Immutable || existing.Labels[RunUIDLabel] != string(run.UID) || existing.Data[contractConfigMapKey] != string(document) || existing.Data[kubeconfigConfigMapKey] != generatedKubeconfig() {
+	if existing.Immutable == nil || !*existing.Immutable || existing.Labels[RunUIDLabel] != string(run.UID) || !maps.Equal(existing.Data, wanted.Data) || len(existing.BinaryData) != 0 {
 		return fmt.Errorf("existing agent contract %s has different immutable contents", wanted.Name)
-	}
-	if existing.Data[codexConfigMapKey] != wanted.Data[codexConfigMapKey] {
-		return fmt.Errorf("existing MCP client configuration has different immutable contents")
 	}
 	return nil
 }

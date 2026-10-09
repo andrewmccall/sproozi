@@ -124,6 +124,16 @@ func (r *Reservation) Release() error {
 	}
 	return r.tracker.ledger.Release(context.Background(), r.ledger)
 }
+
+// Forfeit charges all reserved units and cost when upstream consumption cannot
+// be verified. The ledger atomically consumes both bounds and rejects repeats.
+func (r *Reservation) Forfeit() error {
+	if r == nil {
+		return fmt.Errorf("budget: nil budget reservation")
+	}
+	return r.Settle(r.ledger.units, r.ledger.costMicros)
+}
+
 func (r *Reservation) ReservedUnits() int64 {
 	if r == nil || r.ledger == nil {
 		return 0

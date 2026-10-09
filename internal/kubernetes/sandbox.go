@@ -31,9 +31,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
+	"github.com/andrewmccall/sproozi/internal/agentcontract"
 )
 
 const (
+	agentContainerName  = "agent"
 	gatewayTokenPath    = "/var/run/sproozi/tokens/gateway/token"
 	trustBundlePath     = "/etc/sproozi/trust/ca-bundle.pem"
 	kubeconfigPath      = "/etc/sproozi/kubeconfig"
@@ -68,12 +70,19 @@ type SandboxClient interface {
 	// Returns SandboxStatusUnknown if the Pod does not exist.
 	GetStatus(ctx context.Context, name string) (SandboxStatus, error)
 
-	// GetExitCode returns the agent container's actual process exit code.
-	// Only valid when GetStatus returns Succeeded or Failed.
-	GetExitCode(ctx context.Context, name string) (int32, error)
+	// GetCompletion observes actual exit and optional untrusted result from one
+	// UID-owned Pod read. Only valid when the agent container has terminated.
+	GetCompletion(ctx context.Context, name, runUID string) (SandboxCompletion, error)
 
 	// Delete removes the named Sandbox from AgentsNamespace. NotFound is success.
 	Delete(ctx context.Context, name string) error
+}
+
+// SandboxCompletion is one terminal container observation. Result may be nil
+// even when ExitCode is zero; output availability is independent of success.
+type SandboxCompletion struct {
+	ExitCode int32
+	Result   *sprooziv1alpha1.AgentRunResult
 }
 
 // PodSandboxClient implements SandboxClient using a Kubernetes Pod.
@@ -167,19 +176,38 @@ func (p *PodSandboxClient) GetStatus(ctx context.Context, name string) (SandboxS
 	}
 }
 
-// GetExitCode returns the agent container's actual process exit code.
-func (p *PodSandboxClient) GetExitCode(ctx context.Context, name string) (int32, error) {
+// GetCompletion reads exit and bounded result from the same owned Pod incarnation.
+func (p *PodSandboxClient) GetCompletion(ctx context.Context, name, runUID string) (SandboxCompletion, error) {
 	var pod corev1.Pod
 	if err := p.c.Get(ctx, client.ObjectKey{Namespace: AgentsNamespace, Name: name}, &pod); err != nil {
-		return 0, err
+		return SandboxCompletion{}, err
+	}
+	if runUID == "" || !ownedByRun(&pod, runUID) {
+		return SandboxCompletion{}, fmt.Errorf("sandbox does not belong to the expected run")
+	}
+	// FallbackToLogsOnError may expose logs rather than explicit publication.
+	// Only the File policy establishes this result channel.
+	resultFromFile := false
+	for _, container := range pod.Spec.Containers {
+		if container.Name == agentContainerName {
+			resultFromFile = container.TerminationMessagePolicy == corev1.TerminationMessageReadFile
+		}
 	}
 
 	for _, cs := range pod.Status.ContainerStatuses {
-		if cs.Name == "agent" && cs.State.Terminated != nil {
-			return cs.State.Terminated.ExitCode, nil
+		if cs.Name == agentContainerName && cs.State.Terminated != nil {
+			completion := SandboxCompletion{ExitCode: cs.State.Terminated.ExitCode}
+			if !resultFromFile {
+				return completion, nil
+			}
+			result, err := agentcontract.DecodeResult([]byte(cs.State.Terminated.Message), runUID)
+			if err == nil {
+				completion.Result = &sprooziv1alpha1.AgentRunResult{Text: result.Text, Truncated: result.Truncated}
+			}
+			return completion, nil
 		}
 	}
-	return 0, fmt.Errorf("agent container has not terminated")
+	return SandboxCompletion{}, fmt.Errorf("agent container has not terminated")
 }
 
 // Delete removes the named Sandbox from AgentsNamespace. NotFound is success.
@@ -281,7 +309,7 @@ func BuildPodSpec(run *sprooziv1alpha1.AgentRun, rt *sprooziv1alpha1.AgentRuntim
 	}
 	workload := rt.Spec.WorkloadContainers
 	if len(workload) == 0 {
-		workload = []string{"agent"}
+		workload = []string{agentContainerName}
 	}
 	workloadSet := make(map[string]bool, len(workload))
 	for _, name := range workload {

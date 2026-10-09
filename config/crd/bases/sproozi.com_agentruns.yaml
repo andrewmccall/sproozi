@@ -197,6 +197,26 @@ spec:
                 - TimedOut
                 - Cancelled
                 type: string
+              result:
+                description: |-
+                  Result is optional bounded untrusted final output captured before sandbox cleanup.
+                  Its presence does not determine execution success. Absence means no valid
+                  result was published, including cancellation and deadline termination.
+                  Readers of AgentRun status can read this output until the run retention TTL.
+                properties:
+                  text:
+                    description: Text is UTF-8 final output. An available empty answer
+                      is valid.
+                    maxLength: 3584
+                    type: string
+                  truncated:
+                    description: Truncated identifies output shortened to fit the
+                      bounded publication envelope.
+                    type: boolean
+                required:
+                - text
+                - truncated
+                type: object
               startedAt:
                 description: StartedAt records when the run was admitted to execution.
                 format: date-time

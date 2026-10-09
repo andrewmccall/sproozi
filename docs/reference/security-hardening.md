@@ -66,9 +66,10 @@ therefore exceed the reservation. Rejecting a response after settlement fails
 does not undo the provider call, and retained reservations can undercount the
 consumption already incurred.
 
-Administrator-owned pricing converts verified usage into cost. Missing prices
+Administrator-owned pricing converts verified usage into cost. On the OpenAI path, missing prices
 are rejected after the upstream call, so an unpriced model can still consume
-provider resources. Keep the pricing table aligned with approved models and
+provider resources. Anthropic requests with a monetary cap require an exact
+model price before forwarding; unknown consumed categories still fail settlement. Keep the pricing table aligned with approved models and
 use provider-side monitoring and limits. Do not rely on Sproozi token or dollar
 ceilings as hard provider-spending bounds today.
 
@@ -100,3 +101,21 @@ The local demo's short-lived CA and gitignored environment file are disposable
 evaluation inputs. For deployment, supply managed certificates, least-privilege
 credentials, namespace isolation and durable audit collection. The planned
 [home-ops playbook](../guides/home-ops-playbook.md) has not passed full acceptance.
+
+
+## Persistent assistant authority and answers
+
+The Hermes coordinator is a separate trusted workload. It keeps its own model
+and optional channel credentials and persistent state. It has no Kubernetes
+API token; the private task service holds namespaced Run create/observe/patch
+permission and fixes the templates and capability subsets exposed to that
+installation. Use separate task principals and bearer tokens for assistants
+requiring different authority. A shared bot token does not authenticate each
+channel user independently.
+
+Worker final text is untrusted and can contain sensitive scoped tool results.
+It is retained in AgentRun status, visible to authorized Run readers, and expires
+with Run retention. Do not treat it as operating instructions or widen follow-on
+authority because of answer text. Coordinator state has separate retention and
+spending limits. See [orchestration](orchestration.md) for the exact retry and
+result bounds.
