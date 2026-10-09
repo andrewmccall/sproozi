@@ -173,7 +173,12 @@ def deployment(
                 "env": envs or [],
                 "securityContext": sec(),
                 "volumeMounts": mounts or [],
-                "resources": {"limits": {"cpu": "1", "memory": "1Gi"}},
+                # Kubernetes defaults missing requests to limits. Reserve the
+                # fixture's idle footprint so the whole stack fits CI nodes.
+                "resources": {
+                    "requests": {"cpu": "25m", "memory": "128Mi"},
+                    "limits": {"cpu": "1", "memory": "1Gi"},
+                },
             }
         ],
         "volumes": volumes or [],
@@ -1144,6 +1149,7 @@ def coordinator_setup(images):
         "seccompProfile": {"type": "RuntimeDefault"},
     }
     c["resources"]["limits"] = {"cpu": "2", "memory": "2Gi"}
+    c["resources"]["requests"] = {"cpu": "100m", "memory": "512Mi"}
     # Native bootstrap precedes API binding. Wait for the real endpoint before
     # opening port-forward, which exits if its first remote connection is refused.
     c["readinessProbe"] = {
