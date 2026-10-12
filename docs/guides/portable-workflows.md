@@ -191,6 +191,12 @@ downloaded bytes alone cannot activate a writer. The remote catalogue now report
 private directory unique to this trusted installation; copying its principal
 credential into independent homes is unsupported.
 
+The home catalogue enforces `local.retainedBytes` and a finite file count for
+imported artifacts and journals; fresh continuations also use the existing
+initial-execution retention checks. A capacity error leaves downloaded state
+inert and blocks admission. Restore capacity and retry the original operation.
+Keep protected owner/receipt journals intact; deleting them is not recovery.
+
 Resume opens the real native TUI with the same conversation UUID and supported
 Git history, index, staged/unstaged changes and selected files. Its new deadline,
 allowances and gateway identity come from current home approval. Earlier receipts

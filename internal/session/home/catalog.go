@@ -150,7 +150,34 @@ func (s *Service) saveCatalog(r localSession) error {
 	}
 	s.storageMu.Lock()
 	defer s.storageMu.Unlock()
-	return atomicWrite(dir, r.ID+".json", data)
+	return s.writeCatalog(dir, r.ID+".json", data)
+}
+
+// Callers hold storageMu so independent imports cannot over-admit retained
+// bytes. Replacement journals count only their new size; immutable artifacts
+// and crash leftovers remain charged until the operator removes them.
+func (s *Service) writeCatalog(dir, name string, data []byte) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	count := len(entries)
+	bytes := int64(len(data))
+	for _, entry := range entries {
+		if entry.Name() == name {
+			count--
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		bytes += info.Size()
+	}
+	if count >= 512 || bytes > s.config.Local.RetainedBytes {
+		return errors.New("home: catalogue retention limit reached")
+	}
+	return atomicWrite(dir, name, data)
 }
 
 func encodeCatalog(r localSession) ([]byte, error) {
@@ -192,7 +219,7 @@ func (s *Service) retainCatalogArtifact(data []byte, digest string) error {
 	if !os.IsNotExist(err) {
 		return err
 	}
-	return atomicWrite(dir, digest+".checkpoint", data)
+	return s.writeCatalog(dir, digest+".checkpoint", data)
 }
 
 func (s *Service) catalogArtifact(digest string) ([]byte, error) {
@@ -365,10 +392,7 @@ func (s *Service) Resume(ctx context.Context, id, operation string) (Status, err
 		IncludeIgnored: slices.Clone(r.Committed.Launch.IncludeIgnored), Deadline: time.Now().Add(s.duration).UTC(),
 		Allowances: maps.Clone(s.config.Allowances), CheckpointDigest: r.Committed.CheckpointDigest}
 	initial := initial{Version: 1, ProductID: id, Input: checkpointInput, ArtifactDigest: launch.CheckpointDigest, Launch: launch, Stage: initialPreparing}
-	if err = s.writeInitial(execution+".workspace", data); err != nil {
-		return Status{}, err
-	}
-	if err = s.saveInitial(initial); err != nil {
+	if err = s.retainResumedInitial(initial, data); err != nil {
 		return Status{}, err
 	}
 	r.Current = execution
@@ -380,6 +404,18 @@ func (s *Service) Resume(ctx context.Context, id, operation string) (Status, err
 		return Status{}, err
 	}
 	return s.catalogStatus(r)
+}
+
+func (s *Service) retainResumedInitial(r initial, data []byte) error {
+	s.retentionMu.Lock()
+	defer s.retentionMu.Unlock()
+	if err := s.retention(); err != nil {
+		return err
+	}
+	if err := s.writeInitial(r.Launch.SessionID+".workspace", data); err != nil {
+		return err
+	}
+	return s.saveInitial(r)
 }
 
 func (s *Service) startResumed(ctx context.Context, r initial) error {

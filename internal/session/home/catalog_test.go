@@ -244,3 +244,37 @@ func TestIdleStopReplayCannotStopTheFirstContinuation(t *testing.T) {
 		t.Fatal("idle stop replay acquired a later writer")
 	}
 }
+
+func TestPullRetentionRejectionDoesNotClaimOrActivateTheSource(t *testing.T) {
+	s, local, source := importedFixture(t)
+	s.config.Local.RetainedBytes = int64(len(source.export.Checkpoint)) - 1
+	id, operation := source.export.ID, source.export.OperationID
+	if _, err := s.Pull(t.Context(), id, operation, testRemote); err == nil {
+		t.Fatal("oversized retained catalogue admitted")
+	}
+	if source.claims != 0 || local.prepares != 0 || local.activations != 0 {
+		t.Fatal("storage rejection claimed or activated a writer")
+	}
+	s.config.Local.RetainedBytes = 64 << 20
+	if _, err := s.Pull(t.Context(), id, operation, testRemote); err != nil {
+		t.Fatal("original transfer did not recover after capacity was restored", err)
+	}
+}
+
+func TestFreshResumeHonorsExistingExecutionRetentionBounds(t *testing.T) {
+	s, local, source := importedFixture(t)
+	id := source.export.ID
+	if _, err := s.Pull(t.Context(), id, source.export.OperationID, testRemote); err != nil {
+		t.Fatal(err)
+	}
+	s.config.Local.RetainedBytes = s.config.Local.MaxCheckpointBytes + 1
+	if err := os.WriteFile(filepath.Join(s.initialDir, "retained-padding"), []byte("xx"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Resume(t.Context(), id, uuid.NewString()); err == nil {
+		t.Fatal("fresh execution bypassed retention bound")
+	}
+	if local.prepares != 0 || local.activations != 0 {
+		t.Fatal("storage rejection admitted a writer")
+	}
+}

@@ -101,6 +101,11 @@ managed placement pipeline rather than give callers two incompatible lifecycles.
 The remote owner needs private durable storage and a single running process.
 Catalogue and ownership history have bounded retention and require operator
 management; deleting those journals is an administrative reset, not recovery.
+The home catalogue bounds retained artifacts and journals by `retainedBytes`
+and file count under one storage lock. Fresh continuations also reserve existing
+initial-execution storage before preparation. Capacity rejection does not claim
+a source or admit a new writer; recovery retries the original operation after
+the operator restores capacity.
 One-way claim is sufficient for the first workflow. Returning ownership, shared
 homes, federation, HA, session forks and multiplayer remain separate work.
 
