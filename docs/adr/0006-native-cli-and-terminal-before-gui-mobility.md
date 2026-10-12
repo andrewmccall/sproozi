@@ -24,6 +24,12 @@ attachment to the real native CLI remotely. Support detach/reconnect as part of
 that experience. Retain the native harness loop and conversation; a new Sproozi
 chat UI is not required.
 
+The public executable is `sproozi`, selected in the 12 October naming review.
+Keep the existing flat verbs, including `serve`, `start`, `attach` and `move`.
+Session remains the domain term for conversation continuity and internal state;
+the executable identifies the product. The separate `session-profile` command is
+an administrator service rather than the developer entry point.
+
 Defer native GUI/IDE integration to a separate compatibility proof. A CLI resume
 command, app-server protocol or terminal connection does not justify claiming
 that an official GUI can attach to an arbitrary Sproozi execution.
@@ -52,6 +58,12 @@ The accepted experience keeps the existing harness interaction.
 Batch-only resume would reduce interactive transport work, but would not supply
 the selected ability to interact with the session while it runs remotely.
 
+Keeping the generic executable name `session` describes one domain object but
+does not identify Sproozi. A compatibility alias would preserve an unreleased
+name and create another entry point to document. Rename the entry point and its
+callers together. A `sproozi session ...` hierarchy adds an extra level without
+a current conflicting workflow; retain the flat verbs for this release.
+
 ## Accepted costs and consequences
 
 The first experience is terminal-oriented and can involve explicit attachment
@@ -62,7 +74,7 @@ conversation continuity must not depend on reproducing a GUI's private state.
 ## Evidence and reconciliation
 
 The user accepted native CLI locally and terminal attachment remotely during the
-10 October 2026 grilling. The [session CLI](../../cmd/session/README.md),
+10 October 2026 grilling. The [session CLI](../../cmd/sproozi/README.md),
 [native supervisor](../../cmd/native-session/README.md) and
 [fixed remote profile](../../cmd/session-profile/README.md) now expose actual
 terminal attachment. The deterministic Codex core and extended proofs used the
@@ -89,3 +101,5 @@ session, preserve continuity and respect attachment authorization/revocation.
 Revisit its priority if the terminal experience prevents intended users from
 adopting mobility. Revisit a custom UI only if native interfaces cannot meet a
 concrete requirement and its additional ownership cost is accepted explicitly.
+Revisit command grouping when another shipped workflow creates ambiguous root
+verbs. Once an interface is released, weigh compatibility before renaming it.

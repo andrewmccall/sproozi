@@ -381,13 +381,13 @@ def terminal(args):
            "COLORTERM": "truecolor", "LANG": "en_US.UTF-8"}
     command = [str(args.session_binary.resolve()), "attach", "--socket", str(args.socket), "--id", args.session_id]
     evidence = {"command": command, "promptIndex": args.prompt_index,
-                "path": "actual cmd/session byte terminal through production Go PTY", "passed": False}
+                "path": "actual cmd/sproozi byte terminal through production Go PTY", "passed": False}
     write(out / "terminal-evidence.json", evidence)
     supervisor = TUI.Supervisor(command, out, env, "attachment", out)
     try:
         connection = supervisor.connect()
         if not supervisor.wait_text("Codex", args.timeout):
-            raise RuntimeError("Actual native TUI did not render through session attach")
+            raise RuntimeError("Actual native TUI did not render through sproozi attach")
         time.sleep(0.5)
         rendered = TUI.clean_terminal(bytes(supervisor.data))
         if "Trustthisfolder?" in rendered or "Trust this folder?" in rendered:
@@ -405,7 +405,7 @@ def terminal(args):
         while time.monotonic() < end and not supervisor.rpc("status").get("exited"):
             time.sleep(0.05)
         if not supervisor.rpc("status").get("exited") or supervisor.wait(1) != 0:
-            raise RuntimeError("session attach did not detach successfully")
+            raise RuntimeError("sproozi attach did not detach successfully")
         evidence.update(passed=True, cliExitCode=supervisor.returncode, terminalProbes=supervisor.probes,
                         attachmentMetrics=supervisor.metrics,
                         limitation="Terminal output is not the completed-turn/writer fence; placement Stop must independently confirm it")

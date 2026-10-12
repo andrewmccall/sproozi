@@ -356,7 +356,7 @@ def terminal(args):
            "COLORTERM": "truecolor", "LANG": "en_US.UTF-8"}
     command = [str(args.session_binary.resolve()), "attach", "--socket", str(args.socket), "--id", args.session_id]
     evidence = {"passed": False, "harness": "claude-code", "promptIndex": args.prompt_index,
-                "path": "actual production session attach and stock Claude TUI", "command": command}
+                "path": "actual production sproozi attach and stock Claude TUI", "command": command}
     supervisor = tui.Supervisor(command, out, env, "attachment", out)
     try:
         connection = supervisor.connect()

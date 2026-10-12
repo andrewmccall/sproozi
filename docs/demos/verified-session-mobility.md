@@ -2,7 +2,7 @@
 
 On 12 October 2026, stock Codex 0.161.0 and Claude Code 2.1.27 completed real
 interactive Docker-to-Kubernetes-to-Docker sessions through the production
-`session` CLI. The remote placement used a dedicated two-node Kind cluster with
+home CLI, now named `sproozi`. The remote placement used a dedicated two-node Kind cluster with
 Calico 3.30.4 and matching `10.244.0.0/16` Pod/CNI pools. Local execution used
 Docker Desktop Linux containers. Deterministic TLS providers supplied actual
 Responses or Messages streams; no paid-provider request occurred.

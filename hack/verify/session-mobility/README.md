@@ -34,7 +34,7 @@ mkdir -p "$work/bin" "$work/images"
 chmod 700 "$work" "$work/bin" "$work/images"
 python3 -c 'import yaml'
 make kustomize
-go build -o "$work/bin/session" ./cmd/session
+go build -o "$work/bin/sproozi" ./cmd/sproozi
 go build -o "$work/bin/session-profile" ./cmd/session-profile
 go build -o "$work/bin/native-pty" ./hack/verify/native-pty
 go build -o "$work/bin/checkpoint" ./cmd/checkpoint
@@ -179,7 +179,7 @@ codex_provider_pid=$!
 KUBECONFIG="$work/kubeconfig" "$work/bin/session-profile" \
   --config "$codex/profile-config.json" >"$codex/profile.log" 2>&1 &
 codex_profile_pid=$!
-"$work/bin/session" serve --config "$codex/home-config.json" >"$codex/home.log" 2>&1 &
+"$work/bin/sproozi" serve --config "$codex/home-config.json" >"$codex/home.log" 2>&1 &
 codex_home_pid=$!
 ```
 
@@ -223,7 +223,7 @@ PY
 wait_ready "$codex" 18765 18444 30
 python3 hack/verify/session-mobility/extended.py \
   --output-directory "$codex/proof" --home-config "$codex/home-config.json" \
-  --session-binary "$work/bin/session" --pty-helper "$work/bin/native-pty" \
+  --session-binary "$work/bin/sproozi" --pty-helper "$work/bin/native-pty" \
   --checkpoint-binary "$work/bin/checkpoint" --provider-directory "$codex" \
   --kubeconfig "$work/kubeconfig" --kubectl "$(command -v kubectl)" \
   --namespace sproozi-system --agent-namespace sproozi-agents \
@@ -274,12 +274,12 @@ claude_provider_pid=$!
 KUBECONFIG="$work/kubeconfig" "$work/bin/session-profile" \
   --config "$claude/profile-config.json" >"$claude/profile.log" 2>&1 &
 claude_profile_pid=$!
-"$work/bin/session" serve --config "$claude/home-config.json" >"$claude/home.log" 2>&1 &
+"$work/bin/sproozi" serve --config "$claude/home-config.json" >"$claude/home.log" 2>&1 &
 claude_home_pid=$!
 wait_ready "$claude" 18775 18454 30
 python3 hack/verify/session-mobility/claude.py verify \
   --output-directory "$claude/proof" --home-config "$claude/home-config.json" \
-  --session-binary "$work/bin/session" --pty-helper "$work/bin/native-pty" \
+  --session-binary "$work/bin/sproozi" --pty-helper "$work/bin/native-pty" \
   --checkpoint-binary "$work/bin/checkpoint" \
   --admin-probes --kubeconfig "$work/kubeconfig" \
   --namespace sproozi-system --agent-namespace sproozi-agents

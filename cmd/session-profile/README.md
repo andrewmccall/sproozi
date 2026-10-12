@@ -131,7 +131,7 @@ execution or resource-configuration endpoint.
 
 Save the following strict JSON as `profile.json`. Replace the example paths,
 template, instruction digest and approved ceilings. The 30-minute duration and
-unit ceiling match the [home example](../session/README.md); cost is explicitly
+unit ceiling match the [home example](../sproozi/README.md); cost is explicitly
 unbounded here. A bounded positive cost requires corresponding gateway pricing.
 
 ```json
@@ -175,7 +175,7 @@ make an uncertain move proceed.
 
 ## Stop, recover and cancel
 
-The home daemon drives this profile; use the `session` CLI instead of hand-crafted
+The home daemon drives this profile; use the `sproozi` CLI instead of hand-crafted
 HTTP calls. Each visit gets a fresh Run and Pod. Restore is inert until exact
 admission succeeds and initialized budget accounts exist. Actual checkpoint
 UUID, artifact kind, digest and version pin must match trusted intent. The

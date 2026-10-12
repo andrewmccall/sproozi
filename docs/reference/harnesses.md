@@ -81,7 +81,7 @@ The native formats follow the official [Claude Code CLI reference](https://code.
 
 ## Managed interactive sessions
 
-The [session service](../../cmd/session/README.md) preserves a selected stock TUI
+The [session service](../../cmd/sproozi/README.md) preserves a selected stock TUI
 while moving its native conversation and Git workspace from Docker to a fixed
 Kubernetes profile and back. Managed launches require an explicit immutable
 `codex` or `claude-code` selector. Both placements, the profile and the checkpoint

@@ -1,4 +1,4 @@
-// Command session owns the trusted home daemon and its local terminal client.
+// Command sproozi owns the trusted home daemon and its local terminal client.
 package main
 
 import (
@@ -20,17 +20,17 @@ import (
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, "Session failed:", err)
+		_, _ = fmt.Fprintln(os.Stderr, "Sproozi failed:", err)
 		os.Exit(1)
 	}
 }
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return errors.New("use session serve|start|attach|move|status|cancel|recover")
+		return errors.New("use sproozi serve|start|attach|move|status|cancel|recover")
 	}
 	action := args[0]
-	flags := flag.NewFlagSet("session "+action, flag.ContinueOnError)
+	flags := flag.NewFlagSet("sproozi "+action, flag.ContinueOnError)
 	config := flags.String("config", "", "private administrator JSON (serve only)")
 	socket := flags.String("socket", "", "private home control socket")
 	id := flags.String("id", "", "session UUID (start generates one if omitted)")
@@ -55,7 +55,7 @@ func run(args []string) error {
 	defer stop()
 	if action == "serve" {
 		if *config == "" || *socket != "" || *id != "" || *operation != "" || *workspacePath != "" || *destination != "" {
-			return errors.New("use session serve --config FILE")
+			return errors.New("use sproozi serve --config FILE")
 		}
 		return serve(ctx, *config)
 	}

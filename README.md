@@ -73,6 +73,10 @@ working completion semantics yet.
 
 ## Portable native sessions
 
+Build the public CLI with `go build -o bin/sproozi ./cmd/sproozi`. Use
+`sproozi serve` to run the home daemon, then `sproozi start`, `sproozi attach`
+and `sproozi move` to work across local Docker and an approved cluster profile.
+
 The [session guide](docs/guides/session-mobility.md) describes controlled local
 Docker launch, native terminal attachment and moves through a fixed remote
 Kubernetes profile. The developer needs no kubeconfig. Each visit has fresh

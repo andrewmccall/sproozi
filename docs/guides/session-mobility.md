@@ -38,7 +38,7 @@ workspace data, so move it outside the source before capture.
 Build the two host executables from the repository root:
 
 ```sh
-go build -o bin/session ./cmd/session
+go build -o bin/sproozi ./cmd/sproozi
 go build -o bin/session-profile ./cmd/session-profile
 ```
 
@@ -92,7 +92,7 @@ allocation token and a placeholder provider key. Save credentials directly into
 protected files using your credential manager, rather than pasting them into
 chat or writing them into the source workspace.
 
-Use the complete [home configuration example](../../cmd/session/README.md) and
+Use the complete [home configuration example](../../cmd/sproozi/README.md) and
 [configuration schema](../../internal/session/home/config.go). Set the exact
 approved instruction bytes and their SHA-256, model/options, finite positive
 unit allowance, explicit cost allowance, duration and resource/storage limits.
@@ -147,7 +147,7 @@ Keep the daemon process independent of terminal attachments. For a local trial:
 umask 077
 mkdir -p /absolute/private/home
 chmod 700 /absolute/private/home
-nohup bin/session serve --config /absolute/private/session.json \
+nohup bin/sproozi serve --config /absolute/private/session.json \
   </dev/null >/absolute/private/home/daemon.log 2>&1 &
 ```
 
@@ -160,7 +160,7 @@ in the managed Docker workspace.
 Start and retain the printed session and operation UUIDs:
 
 ```sh
-bin/session start --socket /absolute/private/home/control.sock \
+bin/sproozi start --socket /absolute/private/home/control.sock \
   --workspace /absolute/path/to/stopped-repository
 ```
 
@@ -168,7 +168,7 @@ Ignored files are excluded by default. To carry an individual ignored input, use
 repeatable flags at start:
 
 ```sh
-bin/session start --socket /absolute/private/home/control.sock \
+bin/sproozi start --socket /absolute/private/home/control.sock \
   --workspace /absolute/path/to/stopped-repository \
   --include-ignored needed.bin --include-ignored cache/chosen.dat
 ```
@@ -188,7 +188,7 @@ it, and the first successful stopped checkpoint binds that observed UUID once.
 Attach to the selected native TUI:
 
 ```sh
-bin/session attach --socket /absolute/private/home/control.sock --id SESSION_UUID
+bin/sproozi attach --socket /absolute/private/home/control.sock --id SESSION_UUID
 ```
 
 Terminal resize reaches the native client. Ctrl-] detaches the local client while its daemon
@@ -200,12 +200,12 @@ independent container stop/checkpoint boundary.
 Move to the configured remote profile, attach there, then return locally:
 
 ```sh
-bin/session move --socket /absolute/private/home/control.sock \
+bin/sproozi move --socket /absolute/private/home/control.sock \
   --id SESSION_UUID --to remote
-bin/session attach --socket /absolute/private/home/control.sock --id SESSION_UUID
-bin/session move --socket /absolute/private/home/control.sock \
+bin/sproozi attach --socket /absolute/private/home/control.sock --id SESSION_UUID
+bin/sproozi move --socket /absolute/private/home/control.sock \
   --id SESSION_UUID --to local
-bin/session attach --socket /absolute/private/home/control.sock --id SESSION_UUID
+bin/sproozi attach --socket /absolute/private/home/control.sock --id SESSION_UUID
 ```
 
 A graceful move closes the native input gate and waits for the active turn and
@@ -226,8 +226,8 @@ Detaching also leaves the writer's deadline and spending rules in effect.
 For an uncertain response, first inspect the trusted journal:
 
 ```sh
-bin/session status --socket /absolute/private/home/control.sock --id SESSION_UUID
-bin/session recover --socket /absolute/private/home/control.sock --id SESSION_UUID
+bin/sproozi status --socket /absolute/private/home/control.sock --id SESSION_UUID
+bin/sproozi recover --socket /absolute/private/home/control.sock --id SESSION_UUID
 ```
 
 `start`, `move` and `cancel` print an operation UUID before sending their request.
@@ -235,10 +235,10 @@ Retain it even if the command fails. Recover continues the retained stage. To
 retry explicitly, reuse the same session UUID, operation UUID and exact intent:
 
 ```sh
-bin/session start --socket /absolute/private/home/control.sock \
+bin/sproozi start --socket /absolute/private/home/control.sock \
   --id SESSION_UUID --operation START_OPERATION_UUID \
   --workspace /absolute/path/to/stopped-repository --include-ignored needed.bin
-bin/session move --socket /absolute/private/home/control.sock \
+bin/sproozi move --socket /absolute/private/home/control.sock \
   --id SESSION_UUID --operation MOVE_OPERATION_UUID --to remote
 ```
 
@@ -265,7 +265,7 @@ and does not release its allowance or permit another placement.
 Cancellation has different semantics:
 
 ```sh
-bin/session cancel --socket /absolute/private/home/control.sock \
+bin/sproozi cancel --socket /absolute/private/home/control.sock \
   --id SESSION_UUID --operation CANCEL_OPERATION_UUID
 ```
 
