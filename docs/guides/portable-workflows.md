@@ -42,6 +42,37 @@ execution mechanics, not paid inference or a genuine software contribution.
 
 ## Enable retained remote tasks
 
+For Sproozi engineering tasks, prepare an image containing the Go toolchain and
+the repository's public module cache **before** provisioning the fixed local and
+remote placements. The stock native image contains Git and the clients, but no
+Go compiler. Build the [engineering image example](../../examples/portable-workflows/sproozi.Dockerfile)
+from this checkout with your resolved native image:
+
+```sh
+docker build --build-arg NATIVE_IMAGE=APPROVED_NATIVE_IMAGE \
+  -f examples/portable-workflows/sproozi.Dockerfile \
+  -t YOUR_ENGINEERING_IMAGE .
+```
+
+Resolve and retain the resulting Docker content ID for the local configuration
+and canonical registry digest for the remote runtime. Use this image for the
+agent and existing compatible helper/anchor roles from the start of the
+installation; do not replace an existing execution's immutable image binding.
+The inherited supervisor/native pins stay fixed. Go uses image-owned cached
+modules with `GOPROXY=off`, a local toolchain and ephemeral writable build state.
+Build state lives under `/workspace/sproozi-go-build`, outside the transferred
+`/workspace/session` pair; Docker's `/tmp` remains small and non-executable.
+Approve sufficient workspace and memory for compilation before installation:
+for example, a 2 GiB workspace and 3 GiB agent memory, with matching remote
+runtime requests/limits and policy ceilings. The small mobility fixture's
+defaults are for short native conversations, not cold repository compilation.
+Missing or changed dependencies require an operator-built image or separately
+approved package access. Module/build caches are not conversation checkpoints.
+
+This prepares ordinary Go unit/build checks such as `go test ./internal/work
+./internal/session/...`. Full envtest, race and lint checks require their own
+prepared tools and assets; hosted CI remains a separate verification gate.
+
 For local GitHub continuation, merge the following into the full home configuration:
 
 ```json

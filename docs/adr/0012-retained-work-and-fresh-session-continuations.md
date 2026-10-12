@@ -62,6 +62,10 @@ validated stop path without preparing a destination.
 
 Keep one private developer configuration for local launch, named remote profiles
 and external capabilities. Git, shell and compilers are runtime contents.
+The optional engineering image layers a pinned Go toolchain and public dependency
+cache over the native image. Its build context admits only authored manifests
+and the command wrapper; it does not copy a host home or credentials. Build
+scratch space remains ephemeral and cached modules are not portable history.
 GitHub, a specific Kubernetes API and named external MCP services remain gateway
 boundaries. Reuse the existing semantic handlers in Docker, with gateway-owned
 credential files and scoped policy. Regenerate placeholder Kubernetes client

@@ -1,0 +1,5 @@
+# This image needs only authored public dependency manifests and the Go command.
+**
+!go.mod
+!go.sum
+!examples/portable-workflows/go.sh
