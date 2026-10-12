@@ -15,6 +15,7 @@ import (
 	"io"
 	"reflect"
 	"regexp"
+	"strings"
 	"time"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
@@ -80,6 +81,8 @@ type Registration struct {
 	OriginalDeadline  time.Time                                 `json:"originalDeadline"`
 	TemplateName      string                                    `json:"templateName"`
 	Ceilings          map[api.CapabilityKind]api.EndpointBudget `json:"ceilings"`
+	WorkspaceDigest   string                                    `json:"workspaceDigest,omitempty"`
+	Task              string                                    `json:"task,omitempty"`
 	CheckpointDigest  string                                    `json:"checkpointDigest"`
 	IncludeIgnored    []string                                  `json:"includeIgnored,omitempty"`
 	IntendedRunName   string                                    `json:"intendedRunName"`
@@ -174,7 +177,13 @@ func replay(cm *corev1.ConfigMap, registration Registration) (Record, error) {
 	if err != nil {
 		return Record{}, err
 	}
-	if !reflect.DeepEqual(record.Registration, registration) {
+	actual := record.Registration
+	// Initial launch replay retains the original empty native UUID intent. The
+	// genuine UUID is bound once after native observation, never caller-selected.
+	if actual.WorkspaceDigest != "" && registration.NativeUUID == "" {
+		actual.NativeUUID = ""
+	}
+	if !reflect.DeepEqual(actual, registration) {
 		return Record{}, ErrConflict
 	}
 	return record, nil
@@ -249,6 +258,28 @@ func (s *Store) Activate(ctx context.Context, ref Reference) (Record, error) {
 			return ErrConflict
 		}
 		r.Phase = Active
+		return nil
+	})
+}
+
+// BindNative binds the actual first native UUID once for an initial workspace.
+// It neither enables authority nor creates an execution; the trusted placement
+// must observe it on the exact admitted native container before calling this.
+func (s *Store) BindNative(ctx context.Context, ref Reference, nativeUUID string) (Record, error) {
+	if !uuidPattern.MatchString(nativeUUID) {
+		return Record{}, ErrConflict
+	}
+	return s.change(ctx, ref, func(r *stored) error {
+		if r.Registration.WorkspaceDigest == "" {
+			return ErrConflict
+		}
+		if r.Registration.NativeUUID == nativeUUID {
+			return nil
+		}
+		if r.Registration.NativeUUID != "" || r.Phase != Active {
+			return ErrConflict
+		}
+		r.Registration.NativeUUID = nativeUUID
 		return nil
 	})
 }
@@ -421,10 +452,13 @@ func validateRegistration(r Registration) error {
 		return err
 	}
 	if !identifier.MatchString(r.Principal) || !identifier.MatchString(r.SessionID) || !identifier.MatchString(r.OperationID) || r.Epoch == 0 ||
-		!uuidPattern.MatchString(r.NativeUUID) || r.NativePin != version || !digestPattern.MatchString(r.InstructionDigest) ||
-		!digestPattern.MatchString(r.CheckpointDigest) || r.OriginalDeadline.IsZero() || r.OriginalDeadline.Location() != time.UTC || len(validation.IsDNS1123Subdomain(r.TemplateName)) != 0 ||
+		r.NativePin != version || !digestPattern.MatchString(r.InstructionDigest) ||
+		r.OriginalDeadline.IsZero() || r.OriginalDeadline.Location() != time.UTC || len(validation.IsDNS1123Subdomain(r.TemplateName)) != 0 ||
 		len(validation.IsDNS1123Subdomain(r.IntendedRunName)) != 0 || len(r.Ceilings) == 0 || len(r.Ceilings) > 32 {
 		return fmt.Errorf("invalid mobility registration")
+	}
+	if err := validateNativeInput(r); err != nil {
+		return err
 	}
 	for capability, ceiling := range r.Ceilings {
 		_, named := capability.MCPServerName()
@@ -466,6 +500,9 @@ func validateStored(r stored) error {
 		return fmt.Errorf("invalid mobility phase")
 	}
 	if r.Phase == Stopped {
+		if !uuidPattern.MatchString(r.Registration.NativeUUID) {
+			return fmt.Errorf("stopped execution has no native identity")
+		}
 		return validateReceipt(r.Receipt, r.Registration.Ceilings)
 	}
 	if r.Phase == Cancelled && r.Receipt != nil {
@@ -503,6 +540,20 @@ func validateSeals(seals map[api.CapabilityKind]budget.TrustedUsage, ceilings ma
 		if !ok || seal.Units < 0 || seal.CostMicros < 0 || seal.Units > ceiling.MaxUnits || ceiling.MaxCostMicros > 0 && seal.CostMicros > ceiling.MaxCostMicros {
 			return fmt.Errorf("invalid mobility accounting seal")
 		}
+	}
+	return nil
+}
+
+func validateNativeInput(r Registration) error {
+	if len(r.Task) > 32<<10 || strings.ContainsRune(r.Task, 0) || r.Task != "" && (strings.TrimSpace(r.Task) == "" || r.Harness != harness.NativeCodex) {
+		return fmt.Errorf("invalid native task")
+	}
+	if r.WorkspaceDigest != "" {
+		if !digestPattern.MatchString(r.WorkspaceDigest) || r.CheckpointDigest != "" || r.NativeUUID != "" && !uuidPattern.MatchString(r.NativeUUID) {
+			return fmt.Errorf("invalid initial workspace registration")
+		}
+	} else if !uuidPattern.MatchString(r.NativeUUID) || !digestPattern.MatchString(r.CheckpointDigest) {
+		return fmt.Errorf("invalid checkpoint registration")
 	}
 	return nil
 }

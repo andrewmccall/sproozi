@@ -26,6 +26,13 @@ accepted outcome. ADRs [0008](../../adr/0008-selected-native-and-git-checkpoints
 checkpoint, accounting and authority mechanisms. An AgentRun identifies one
 bounded remote visit; a completed or cancelled Run cannot reopen.
 
+Remote-first Codex work and later local continuation are now implemented in the
+[retained-work guide](../../guides/portable-workflows.md), under
+[ADR 0012](../../adr/0012-retained-work-and-fresh-session-continuations.md).
+The remote catalogue accepts tasks independently of the laptop, retains genuine
+stopped state, and transfers ownership once. A later local resume starts a new
+execution with fresh approval; it does not renew the old live-move ledger.
+
 ## Adopt directly started sessions
 
 The first supported entry is Sproozi's controlled Docker launch, selected in

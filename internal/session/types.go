@@ -41,6 +41,7 @@ type Launch struct {
 	Epoch             uint64               `json:"epoch"`
 	Placement         string               `json:"placement"`
 	ThreadID          string               `json:"threadId"`
+	Task              string               `json:"task,omitempty"`
 	InstructionDigest string               `json:"instructionDigest"`
 	Deadline          time.Time            `json:"deadline"`
 	Allowances        map[string]Allowance `json:"allowances"`
@@ -147,6 +148,7 @@ const (
 type Operation struct {
 	ID          string       `json:"id"`
 	Destination string       `json:"destination"`
+	Finalize    bool         `json:"finalize,omitempty"`
 	Launch      *Launch      `json:"launch,omitempty"`
 	Incarnation *Incarnation `json:"incarnation,omitempty"`
 	Stage       string       `json:"stage"`

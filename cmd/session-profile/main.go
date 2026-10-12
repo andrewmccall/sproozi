@@ -13,6 +13,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -21,6 +23,7 @@ import (
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/placement"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
+	"github.com/andrewmccall/sproozi/internal/work"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -42,6 +45,8 @@ type serverConfig struct {
 	Allowances         map[string]session.Allowance `json:"allowances"`
 	MaxDuration        string                       `json:"maxDuration"`
 	MaxCheckpointBytes int64                        `json:"maxCheckpointBytes"`
+	WorkTokenFile      string                       `json:"workTokenFile,omitempty"`
+	Repositories       map[string]work.Repository   `json:"repositories,omitempty"`
 }
 
 func main() {
@@ -124,6 +129,40 @@ func run(args []string) error {
 	})
 	if err != nil {
 		return err
+	}
+	if len(fixed.Repositories) > 0 {
+		owner, openErr := work.Open(work.Config{
+			Directory: filepath.Join(fixed.Directory, "work"), Principal: fixed.Principal,
+			Harness: fixed.Harness, Placement: fixed.PlacementName,
+			InstructionDigest: fixed.InstructionDigest, Allowances: fixed.Allowances,
+			MaxDuration: duration, MaxCheckpointBytes: fixed.MaxCheckpointBytes,
+			Repositories: fixed.Repositories, Backend: backend, Log: os.Stderr,
+		})
+		if openErr != nil {
+			return openErr
+		}
+		defer func() { _ = owner.Close() }()
+		taskToken, readErr := os.ReadFile(fixed.WorkTokenFile)
+		if readErr != nil {
+			return readErr
+		}
+		homeToken, readErr := os.ReadFile(fixed.TokenFile)
+		if readErr != nil {
+			return readErr
+		}
+		workHandler, handlerErr := work.NewHandler(owner,
+			strings.TrimSpace(string(taskToken)), strings.TrimSpace(string(homeToken)))
+		if handlerErr != nil {
+			return handlerErr
+		}
+		profileHandler := handler
+		handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasPrefix(r.URL.Path, "/work/") {
+				workHandler.ServeHTTP(w, r)
+				return
+			}
+			profileHandler.ServeHTTP(w, r)
+		})
 	}
 	server := &http.Server{
 		Addr: fixed.Listen, Handler: handler, TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13},

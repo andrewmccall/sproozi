@@ -25,6 +25,8 @@ import (
 	"github.com/andrewmccall/sproozi/internal/audit"
 	"github.com/andrewmccall/sproozi/internal/budget"
 	budgetfile "github.com/andrewmccall/sproozi/internal/budget/file"
+	githubgateway "github.com/andrewmccall/sproozi/internal/endpoints/github"
+	kubernetesgateway "github.com/andrewmccall/sproozi/internal/endpoints/kubernetes"
 	"github.com/andrewmccall/sproozi/internal/endpoints/mcp"
 	"github.com/andrewmccall/sproozi/internal/endpoints/model"
 	"github.com/andrewmccall/sproozi/internal/gateway"
@@ -32,17 +34,22 @@ import (
 	"github.com/andrewmccall/sproozi/internal/modelauth"
 	"github.com/andrewmccall/sproozi/internal/nativeconfig"
 	runtimedocker "github.com/andrewmccall/sproozi/internal/runtime/docker"
+	runtimekubernetes "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
+	"github.com/andrewmccall/sproozi/internal/work"
+	"k8s.io/apimachinery/pkg/util/validation"
+	"k8s.io/client-go/rest"
 )
 
 type authority struct {
-	owner    *gatewaydocker.Owner
-	endpoint string
-	trust    []byte
-	model    string
-	options  []string
-	kind     harness.NativeKind
+	owner       *gatewaydocker.Owner
+	endpoint    string
+	trust       []byte
+	model       string
+	options     []string
+	kind        harness.NativeKind
+	mcpEndpoint string
 }
 
 const inspectionHost = "api.openai.com"
@@ -62,7 +69,8 @@ func (a *authority) InitializeAllocation(ctx context.Context, l session.Launch, 
 	u, _ := url.Parse(a.endpoint)
 	u.User = url.UserPassword("sproozi", token)
 	env := []string{"PATH=/opt/git/bin:/usr/local/bin:/usr/bin:/bin", "TERM=xterm-256color", "LANG=C.UTF-8",
-		"GIT_TERMINAL_PROMPT=0", "GH_PROMPT_DISABLED=1",
+		"GIT_TERMINAL_PROMPT=0", "GH_PROMPT_DISABLED=1", "GH_TOKEN=sproozi-worker-placeholder",
+		"SPROOZI_EXECUTION_UID=" + i.ResourceUID,
 		"NO_PROXY=", "no_proxy="}
 	if a.kind == harness.NativeClaude {
 		env = append(env, "ANTHROPIC_API_KEY=sproozi-worker-placeholder")
@@ -72,7 +80,22 @@ func (a *authority) InitializeAllocation(ctx context.Context, l session.Launch, 
 	for _, key := range []string{"HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"} {
 		env = append(env, key+"="+u.String())
 	}
-	return runtimedocker.NativeAccess{Env: env, TrustBundlePEM: bytes.Clone(a.trust), Model: a.model, Options: slices.Clone(a.options)}, nil
+	clients := &harness.NativeClientConfig{}
+	for capability := range l.Allowances {
+		if capability == string(api.CapabilityKubernetesRead) {
+			clients.Kubernetes = true
+		}
+		if name, ok := api.CapabilityKind(capability).MCPServerName(); ok {
+			clients.MCPServers = append(clients.MCPServers, name)
+		}
+	}
+	if len(clients.MCPServers) > 0 {
+		clients.MCPGateway = a.mcpEndpoint
+	}
+	if err := clients.Validate(a.kind); err != nil {
+		return runtimedocker.NativeAccess{}, err
+	}
+	return runtimedocker.NativeAccess{Env: env, TrustBundlePEM: bytes.Clone(a.trust), Model: a.model, Options: slices.Clone(a.options), ClientConfig: clients}, nil
 }
 func (a *authority) Activate(ctx context.Context, l session.Launch, i session.Incarnation) error {
 	return a.owner.Activate(ctx, l, i)
@@ -137,7 +160,7 @@ func Open(c Config, log io.Writer) (_ *Service, err error) {
 	if err != nil {
 		return nil, err
 	}
-	s.owner, err = gatewaydocker.Open(gatewaydocker.Config{Directory: filepath.Join(c.Directory, "grants"), Ledger: ledger, Observer: engine, Policy: gateway.PolicySnapshot{Name: "home-policy", Spec: policy}, Template: gateway.TemplateSnapshot{Name: "home-template", Spec: api.AgentTemplateSpec{Instructions: c.Local.Instructions}}})
+	s.owner, err = gatewaydocker.Open(gatewaydocker.Config{Directory: filepath.Join(c.Directory, "grants"), Ledger: ledger, Observer: engine, Policy: gateway.PolicySnapshot{Name: "home-policy", Spec: policy}, Template: gateway.TemplateSnapshot{Name: "home-template", Spec: api.AgentTemplateSpec{Instructions: c.Local.Instructions}}, NativeCapabilities: configuredNative(c)})
 	if err != nil {
 		return nil, err
 	}
@@ -145,13 +168,16 @@ func Open(c Config, log io.Writer) (_ *Service, err error) {
 	if err != nil {
 		return nil, err
 	}
-	auth := &authority{owner: s.owner, endpoint: endpoint, trust: trust, model: c.Model, options: c.NativeOptions, kind: c.Local.Harness}
+	auth := &authority{owner: s.owner, endpoint: endpoint, trust: trust, model: c.Model, options: c.NativeOptions, kind: c.Local.Harness, mcpEndpoint: "https://" + c.Gateway.MCPAuthority}
 	s.local, err = runtimedocker.OpenPlacement(filepath.Join(c.Directory, "docker"), engine, c.Local, auth)
 	if err != nil {
 		return nil, err
 	}
 	s.placements[c.Local.Name] = s.local
 	if err = s.configureRemotes(); err != nil {
+		return nil, err
+	}
+	if err = s.configureWorkSources(); err != nil {
 		return nil, err
 	}
 	s.coordinator, err = session.Open(filepath.Join(c.Directory, "journal"), s.placements, c.Local.MaxCheckpointBytes)
@@ -182,6 +208,9 @@ func Open(c Config, log io.Writer) (_ *Service, err error) {
 		}
 		gatewayConfig.Certificates[host] = certificate
 		gatewayConfig.MCPAuthority = c.Gateway.MCPAuthority
+	}
+	if err = nativeServices(c, certificate, &gatewayConfig); err != nil {
+		return nil, err
 	}
 	handler, err := gatewaydocker.NewGateway(s.owner, gatewayConfig)
 	if err != nil {
@@ -283,15 +312,40 @@ func provider(c GatewayConfig, kind harness.NativeKind) (model.HandlerConfig, er
 
 func approvedPolicy(c Config) (api.AgentPolicySpec, error) {
 	policy := api.AgentPolicySpec{Budgets: map[api.CapabilityKind]api.EndpointBudget{}, MCPServers: c.Gateway.MCPPolicy}
+	if err := nativeScopes(c, &policy); err != nil {
+		return api.AgentPolicySpec{}, err
+	}
 	for name, a := range c.Allowances {
 		if !a.Units.Bounded || a.Units.Value <= 0 || a.CostMicros.Value < 0 || a.CostMicros.Bounded && a.CostMicros.Value == 0 || !a.CostMicros.Bounded && a.CostMicros.Value != 0 {
 			return api.AgentPolicySpec{}, errors.New("home: finite positive unit ceilings required")
 		}
 		capability := api.CapabilityKind(name)
+		_, mcpCapability := capability.MCPServerName()
+		if capability != api.CapabilityModelInference && !mcpCapability && !slices.Contains(configuredNative(c), capability) {
+			return api.AgentPolicySpec{}, errors.New("home: capability lacks configured gateway")
+		}
+		if capability != api.CapabilityModelInference && a.CostMicros.Bounded {
+			return api.AgentPolicySpec{}, errors.New("home: native and MCP capabilities support unit ceilings only")
+		}
+		if mcpCapability && (c.Gateway.MCPRegistryFile == "" || c.Gateway.MCPAuthority == "") {
+			return api.AgentPolicySpec{}, errors.New("home: MCP allocation lacks registered broker")
+		}
 		policy.AllowedCapabilities = append(policy.AllowedCapabilities, capability)
 		policy.Budgets[capability] = api.EndpointBudget{MaxUnits: a.Units.Value, MaxCostMicros: a.CostMicros.Value}
 	}
 	slices.Sort(policy.AllowedCapabilities)
+	clients := &harness.NativeClientConfig{}
+	for _, capability := range policy.AllowedCapabilities {
+		if name, named := capability.MCPServerName(); named {
+			clients.MCPServers = append(clients.MCPServers, name)
+		}
+	}
+	if len(clients.MCPServers) > 0 {
+		clients.MCPGateway = "https://" + c.Gateway.MCPAuthority
+	}
+	if err := clients.Validate(c.Local.Harness); err != nil {
+		return api.AgentPolicySpec{}, err
+	}
 	if fmt.Sprintf("%x", sha256.Sum256([]byte(c.Local.Instructions))) != c.Local.InstructionDigest {
 		return api.AgentPolicySpec{}, errors.New("home: native instruction digest mismatch")
 	}
@@ -316,6 +370,135 @@ func (s *Service) configureRemotes() error {
 	return nil
 }
 
+func (s *Service) configureWorkSources() error {
+	fixed := s.config.WorkSources
+	if len(fixed) == 0 {
+		fixed = s.config.Remote
+	}
+	sources := make(map[string]WorkSource, len(fixed))
+	for name, config := range fixed {
+		if name == "" || len(name) > 128 || config.MaxCheckpointBytes != s.config.Local.MaxCheckpointBytes {
+			return errors.New("home: bounded named work source required")
+		}
+		source, err := work.NewClient(config)
+		if err != nil {
+			for _, opened := range sources {
+				if closer, ok := opened.(io.Closer); ok {
+					_ = closer.Close()
+				}
+			}
+			return err
+		}
+		sources[name] = source
+	}
+	s.SetWorkSources(sources)
+	return nil
+}
+
 func approvedProviderURL(u *url.URL) bool {
 	return u.Scheme == "https" || u.Scheme == "http" && net.ParseIP(u.Hostname()).IsLoopback()
+}
+
+func configuredNative(c Config) []api.CapabilityKind {
+	var capabilities []api.CapabilityKind
+	if c.Gateway.GitHub != nil {
+		if _, enabled := c.Allowances[string(api.CapabilityGitHubPullRequest)]; enabled {
+			capabilities = append(capabilities, api.CapabilityGitHubPullRequest)
+		}
+	}
+	if c.Gateway.Kubernetes != nil {
+		if _, enabled := c.Allowances[string(api.CapabilityKubernetesRead)]; enabled {
+			capabilities = append(capabilities, api.CapabilityKubernetesRead)
+		}
+	}
+	return capabilities
+}
+
+func nativeScopes(c Config, policy *api.AgentPolicySpec) error {
+	if github := c.Gateway.GitHub; github != nil {
+		if github.AppID <= 0 || github.InstallationID <= 0 || len(github.Scope.Repositories) == 0 || len(github.Scope.Repositories) > 32 || len(github.Scope.AllowedBaseBranches) == 0 || len(github.Scope.AllowedBaseBranches) > 32 {
+			return errors.New("home: fixed GitHub App and repository/base branch scope required")
+		}
+		for _, repo := range github.Scope.Repositories {
+			parts := strings.Split(repo, "/")
+			if len(parts) != 2 || parts[0] == "" || parts[1] == "" || strings.ContainsAny(repo, " \t\r\n?#\\") {
+				return errors.New("home: invalid GitHub repository scope")
+			}
+		}
+		policy.GitHubPullRequest = github.Scope
+	}
+	if kube := c.Gateway.Kubernetes; kube != nil {
+		if len(kube.Scope.Namespaces) == 0 || len(kube.Scope.Namespaces) > 32 {
+			return errors.New("home: bounded Kubernetes namespace scope required")
+		}
+		for _, namespace := range kube.Scope.Namespaces {
+			if len(validation.IsDNS1123Label(namespace)) > 0 {
+				return errors.New("home: invalid Kubernetes namespace scope")
+			}
+		}
+		if _, err := runtimekubernetes.KubernetesReadRules(kube.Scope.Resources); err != nil {
+			return err
+		}
+		policy.KubernetesRead = kube.Scope
+	}
+	return nil
+}
+
+func nativeServices(c Config, certificate tls.Certificate, target *gatewaydocker.GatewayConfig) error {
+	leaf, err := x509.ParseCertificate(certificate.Certificate[0])
+	if err != nil {
+		return err
+	}
+	cover := func(hosts ...string) error {
+		for _, host := range hosts {
+			if leaf.VerifyHostname(host) != nil {
+				return errors.New("home: inspection certificate lacks configured native authority")
+			}
+			target.Certificates[host] = certificate
+		}
+		return nil
+	}
+	if github := c.Gateway.GitHub; github != nil {
+		if err := cover("github.com", "api.github.com"); err != nil {
+			return err
+		}
+		key, err := readPrivate(github.PrivateKeyFile, 64<<10)
+		if err != nil {
+			return err
+		}
+		client := &http.Client{Timeout: 120 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+		provider, err := githubgateway.NewAppTokenProvider(github.AppID, github.InstallationID, key, client)
+		if err != nil {
+			return err
+		}
+		target.GitHub = &githubgateway.HandlerConfig{TokenProvider: provider, HTTPClient: client, GitBaseURL: "https://github.com", APIBaseURL: "https://api.github.com"}
+	}
+	if kube := c.Gateway.Kubernetes; kube != nil {
+		if err := cover("kubernetes.default.svc"); err != nil {
+			return err
+		}
+		endpoint, err := url.Parse(kube.UpstreamURL)
+		if err != nil || endpoint.Scheme != "https" || endpoint.Host == "" || endpoint.User != nil || endpoint.Path != "" || endpoint.RawQuery != "" || endpoint.ForceQuery || endpoint.Fragment != "" {
+			return errors.New("home: exact HTTPS Kubernetes API authority required")
+		}
+		token, err := readPrivate(kube.TokenFile, 16<<10)
+		if err != nil {
+			return err
+		}
+		credential := strings.TrimSpace(string(token))
+		if credential == "" || strings.ContainsAny(credential, " \t\r\n\x00") {
+			return errors.New("home: invalid Kubernetes gateway credential")
+		}
+		ca, err := readPrivate(kube.CAFile, 64<<10)
+		if err != nil {
+			return err
+		}
+		client, err := rest.HTTPClientFor(&rest.Config{Host: kube.UpstreamURL, BearerToken: credential, TLSClientConfig: rest.TLSClientConfig{CAData: ca}, Timeout: 120 * time.Second, Proxy: func(*http.Request) (*url.URL, error) { return nil, nil }})
+		if err != nil {
+			return err
+		}
+		client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		target.Kubernetes = &kubernetesgateway.HandlerConfig{Upstream: endpoint, Client: client, MaxResponseBytes: 8 << 20, MaxWatchSeconds: 300}
+	}
+	return nil
 }

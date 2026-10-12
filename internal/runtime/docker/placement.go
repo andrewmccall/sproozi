@@ -48,6 +48,7 @@ type NativeAccess struct {
 	Env            []string
 	Model          string
 	Options        []string
+	ClientConfig   *harness.NativeClientConfig
 }
 
 // Authority is the trusted home gateway/accounting owner. It persists exact
@@ -260,7 +261,7 @@ func (p *Placement) drivePrepare(ctx context.Context, r *placementRecord, data [
 	if err != nil {
 		return err
 	}
-	contract := harness.NativeLaunch{Harness: p.config.Harness, Deadline: r.Launch.Deadline, ThreadID: r.Launch.ThreadID, Instructions: p.config.Instructions, InstructionDigest: p.config.InstructionDigest, Env: access.Env, Model: access.Model, Options: access.Options, TrustBundlePEM: access.TrustBundlePEM, RolloutMaxBytes: p.config.MaxCheckpointBytes}
+	contract := harness.NativeLaunch{Harness: p.config.Harness, Deadline: r.Launch.Deadline, ThreadID: r.Launch.ThreadID, Instructions: p.config.Instructions, InstructionDigest: p.config.InstructionDigest, Env: access.Env, Model: access.Model, Options: access.Options, ClientConfig: access.ClientConfig, TrustBundlePEM: access.TrustBundlePEM, RolloutMaxBytes: p.config.MaxCheckpointBytes}
 	input, err := json.Marshal(contract)
 	if err != nil {
 		return err

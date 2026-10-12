@@ -19,11 +19,13 @@ import (
 const recordSuffix = ".json"
 
 type retained struct {
-	Launch       session.Launch     `json:"launch"`
-	Reference    registry.Reference `json:"reference"`
-	OutputDigest string             `json:"outputDigest,omitempty"`
-	NativeQuiet  bool               `json:"nativeQuiet,omitempty"`
-	WriterFenced bool               `json:"writerFenced,omitempty"`
+	Initial         *session.Launch    `json:"initial,omitempty"`
+	WorkspaceDigest string             `json:"workspaceDigest,omitempty"`
+	Launch          session.Launch     `json:"launch"`
+	Reference       registry.Reference `json:"reference"`
+	OutputDigest    string             `json:"outputDigest,omitempty"`
+	NativeQuiet     bool               `json:"nativeQuiet,omitempty"`
+	WriterFenced    bool               `json:"writerFenced,omitempty"`
 }
 
 func privatePath(path string, dir bool) error {
@@ -94,7 +96,7 @@ func (p *Placement) load(l session.Launch) (retained, error) {
 	if err = decode(data, &r); err != nil {
 		return retained{}, err
 	}
-	if !sameIntent(r.Launch, l) {
+	if !sameIntent(r.Launch, l) && (r.Initial == nil || !sameIntent(*r.Initial, l)) {
 		return retained{}, &profile.Rejection{Code: profile.CodeConflict}
 	}
 	return r, nil

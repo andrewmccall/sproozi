@@ -44,24 +44,26 @@ type Observer interface {
 }
 
 type Config struct {
-	Directory string
-	Ledger    budget.Ledger
-	Observer  Observer
-	Policy    gateway.PolicySnapshot
-	Template  gateway.TemplateSnapshot
+	Directory          string
+	Ledger             budget.Ledger
+	Observer           Observer
+	Policy             gateway.PolicySnapshot
+	Template           gateway.TemplateSnapshot
+	NativeCapabilities []api.CapabilityKind
 }
 
 // Owner retains one private registry writer and fixed administrator snapshots.
 // It owns neither worker checkpoints nor the Docker engine lifecycle itself.
 type Owner struct {
-	mu                sync.Mutex
-	files             *registry
-	ledger            budget.Ledger
-	observer          Observer
-	policy            gateway.PolicySnapshot
-	template          gateway.TemplateSnapshot
-	profileDigest     string
-	instructionDigest string
+	mu                 sync.Mutex
+	files              *registry
+	ledger             budget.Ledger
+	observer           Observer
+	policy             gateway.PolicySnapshot
+	template           gateway.TemplateSnapshot
+	profileDigest      string
+	instructionDigest  string
+	nativeCapabilities []api.CapabilityKind
 }
 
 type record struct {
@@ -85,11 +87,17 @@ func Open(config Config) (*Owner, error) {
 			return nil, errors.New("docker gateway: fixed finite capability ceilings required")
 		}
 	}
+	for _, capability := range config.NativeCapabilities {
+		if capability != api.CapabilityKubernetesRead && capability != api.CapabilityGitHubPullRequest {
+			return nil, errors.New("docker gateway: unsupported configured native capability")
+		}
+	}
 	profile := (&gateway.ExecutionGrant{Policy: config.Policy, Template: config.Template}).Clone()
 	data, err := json.Marshal(struct {
-		Policy   gateway.PolicySnapshot
-		Template gateway.TemplateSnapshot
-	}{profile.Policy, profile.Template})
+		Policy             gateway.PolicySnapshot
+		Template           gateway.TemplateSnapshot
+		NativeCapabilities []api.CapabilityKind
+	}{profile.Policy, profile.Template, config.NativeCapabilities})
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +106,7 @@ func Open(config Config) (*Owner, error) {
 		return nil, err
 	}
 	return &Owner{files: files, ledger: config.Ledger, observer: config.Observer, policy: profile.Policy, template: profile.Template,
-		profileDigest: fmt.Sprintf("%x", sha256.Sum256(data)), instructionDigest: fmt.Sprintf("%x", sha256.Sum256([]byte(profile.Template.Spec.Instructions)))}, nil
+		profileDigest: fmt.Sprintf("%x", sha256.Sum256(data)), instructionDigest: fmt.Sprintf("%x", sha256.Sum256([]byte(profile.Template.Spec.Instructions))), nativeCapabilities: slices.Clone(config.NativeCapabilities)}, nil
 }
 
 func (o *Owner) Close() error { o.mu.Lock(); defer o.mu.Unlock(); return o.files.close() }
@@ -136,11 +144,12 @@ func (o *Owner) validateIntent(launch session.Launch, instance session.Incarnati
 func (o *Owner) validateAllocation(name string, a session.Allowance) error {
 	capability := api.CapabilityKind(name)
 	_, mcp := capability.MCPServerName()
-	if (capability != api.CapabilityModelInference && !mcp) || !slices.Contains(o.policy.Spec.AllowedCapabilities, capability) || !a.Units.Bounded || a.Units.Value <= 0 || a.CostMicros.Value < 0 || (a.CostMicros.Bounded && a.CostMicros.Value == 0) || (!a.CostMicros.Bounded && a.CostMicros.Value != 0) {
+	native := slices.Contains(o.nativeCapabilities, capability)
+	if (capability != api.CapabilityModelInference && !mcp && !native) || !slices.Contains(o.policy.Spec.AllowedCapabilities, capability) || !a.Units.Bounded || a.Units.Value <= 0 || a.CostMicros.Value < 0 || (a.CostMicros.Bounded && a.CostMicros.Value == 0) || (!a.CostMicros.Bounded && a.CostMicros.Value != 0) {
 		return errors.New("docker gateway: launch capability or finite allocation denied")
 	}
 	ceiling := o.policy.Spec.Budgets[capability]
-	if a.Units.Value > ceiling.MaxUnits || (ceiling.MaxCostMicros > 0 && (!a.CostMicros.Bounded || a.CostMicros.Value > ceiling.MaxCostMicros)) || (mcp && a.CostMicros.Bounded) {
+	if a.Units.Value > ceiling.MaxUnits || (ceiling.MaxCostMicros > 0 && (!a.CostMicros.Bounded || a.CostMicros.Value > ceiling.MaxCostMicros)) || ((mcp || native) && a.CostMicros.Bounded) {
 		return errors.New("docker gateway: allocation exceeds approved profile or lacks trusted pricing")
 	}
 	return nil

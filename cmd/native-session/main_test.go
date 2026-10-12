@@ -48,11 +48,11 @@ func writeJournal(t *testing.T, data string) string {
 func TestCompletedTurnObserver(t *testing.T) {
 	home := writeJournal(t, journal(""))
 	id, turn, err := observeTurn(home, selected, digest(), 8192)
-	if err != nil || id != selected || turn != "turn-one" {
+	if err != nil || id != selected || turn != firstFixtureTurn {
 		t.Fatalf("selected completed turn: id=%s turn=%s error=%v", id, turn, err)
 	}
 	id, turn, err = observeTurn(home, "", digest(), 8192)
-	if err != nil || id != selected || turn != "turn-one" {
+	if err != nil || id != selected || turn != firstFixtureTurn {
 		t.Fatalf("new native selection: %s %s %v", id, turn, err)
 	}
 	for _, tc := range []struct{ name, data, hash string }{

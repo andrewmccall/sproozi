@@ -31,6 +31,7 @@ const (
 	initialImported   = "imported"
 	initialCancelling = "cancelling"
 	initialCancelled  = "cancelled"
+	initialStopped    = "stopped"
 )
 
 type localPlacement interface {
@@ -59,6 +60,7 @@ type Service struct {
 	gateway     *http.Server
 	closeOnce   sync.Once
 	closeError  error
+	workSources map[string]WorkSource
 }
 
 type initial struct {
@@ -70,11 +72,15 @@ type initial struct {
 	Stage          string               `json:"stage"`
 	OperationID    string               `json:"operationId,omitempty"`
 	Destination    string               `json:"destination,omitempty"`
+	Input          string               `json:"input,omitempty"`
+	Stopped        *session.Stopped     `json:"stopped,omitempty"`
+	ProductID      string               `json:"productId,omitempty"`
 }
 
 // Status is a trusted journal snapshot. It contains no native history or token.
 type Status struct {
 	ID           string          `json:"id"`
+	ProductID    string          `json:"productId,omitempty"`
 	InitialStage string          `json:"initialStage"`
 	ThreadID     string          `json:"threadId,omitempty"`
 	Deadline     time.Time       `json:"deadline"`
@@ -115,11 +121,19 @@ func (s *Service) readInitial(id string) (initial, error) {
 	if err = workspace.ValidateIgnoredPaths(r.Launch.IncludeIgnored); err != nil {
 		return r, err
 	}
-	if r.Version != 1 || r.Launch.Harness != s.config.Local.Harness || r.Launch.SessionID != id || r.Launch.Placement != s.config.Local.Name || r.Launch.InstructionDigest != s.config.Local.InstructionDigest || !validID(r.Launch.OperationID) || !validID(r.Launch.AllocationID) || r.Launch.Epoch != 1 || r.Launch.Deadline.IsZero() || r.Launch.CheckpointDigest != "" || r.ArtifactDigest == "" {
+	if r.Version != 1 || r.Launch.Harness != s.config.Local.Harness || r.Launch.SessionID != id || r.Launch.Placement != s.config.Local.Name || r.Launch.InstructionDigest != s.config.Local.InstructionDigest || !validID(r.Launch.OperationID) || !validID(r.Launch.AllocationID) || r.Launch.Epoch != 1 || r.Launch.Deadline.IsZero() || r.ArtifactDigest == "" {
 		return r, errors.New("home: initial binding is unavailable")
 	}
+	if (r.Input == "" && r.Launch.CheckpointDigest != "") ||
+		(r.Input == checkpointInput && (r.Launch.CheckpointDigest != r.ArtifactDigest || !validID(r.Launch.ThreadID))) ||
+		(r.Input != "" && r.Input != checkpointInput) {
+		return r, errors.New("home: initial input binding is unavailable")
+	}
+	if r.ProductID != "" && (!validID(r.ProductID) || r.Input != checkpointInput) {
+		return r, errors.New("home: invalid execution owner binding")
+	}
 	switch r.Stage {
-	case initialPreparing, initialActive, initialImporting, initialImported, initialCancelling, initialCancelled:
+	case initialPreparing, initialActive, initialImporting, initialImported, initialCancelling, initialCancelled, initialStopped:
 	default:
 		return r, errors.New("home: invalid initial stage")
 	}
@@ -177,7 +191,7 @@ func (s *Service) status(r initial) (Status, error) {
 	}
 	return out, nil
 }
-func (s *Service) Status(id string) (Status, error) {
+func (s *Service) executionStatus(id string) (Status, error) {
 	unlock, err := s.lockSession(id)
 	if err != nil {
 		return Status{}, err
@@ -295,7 +309,13 @@ func (s *Service) start(ctx context.Context, r initial) (initial, error) {
 		if fmt.Sprintf("%x", sha256.Sum256(data)) != r.ArtifactDigest {
 			return r, errors.New("home: initial workspace changed")
 		}
-		instance, prepareErr := s.local.CreateLocal(ctx, r.Launch, data)
+		var instance session.Incarnation
+		var prepareErr error
+		if r.Input == checkpointInput {
+			instance, prepareErr = s.local.Prepare(ctx, r.Launch, data)
+		} else {
+			instance, prepareErr = s.local.CreateLocal(ctx, r.Launch, data)
+		}
 		if prepareErr != nil {
 			return r, prepareErr
 		}
@@ -323,7 +343,7 @@ func (s *Service) start(ctx context.Context, r initial) (initial, error) {
 	return r, s.saveInitial(r)
 }
 
-func (s *Service) Move(ctx context.Context, id, operationID, destination string) (Status, error) {
+func (s *Service) moveExecution(ctx context.Context, id, operationID, destination string) (Status, error) {
 	unlock, err := s.lockSession(id)
 	if err != nil {
 		return Status{}, err
@@ -358,6 +378,17 @@ func (s *Service) Move(ctx context.Context, id, operationID, destination string)
 
 func (s *Service) prepareInitialMove(ctx context.Context, r initial, operationID, destination string) (initial, error) {
 	var err error
+	if r.Stage == initialStopped {
+		r, err = s.importInitial(ctx, r)
+		if err != nil {
+			return r, err
+		}
+		r.OperationID = operationID
+		r.Destination = destination
+		if err = s.saveInitial(r); err != nil {
+			return r, err
+		}
+	}
 	if r.Stage == initialPreparing {
 		r, err = s.start(ctx, r)
 		if err != nil {
@@ -406,7 +437,7 @@ func (s *Service) importInitial(ctx context.Context, r initial) (initial, error)
 	return r, s.saveInitial(r)
 }
 
-func (s *Service) Recover(ctx context.Context, id string) (Status, error) {
+func (s *Service) recoverExecution(ctx context.Context, id string) (Status, error) {
 	unlock, err := s.lockSession(id)
 	if err != nil {
 		return Status{}, err
@@ -425,16 +456,23 @@ func (s *Service) Recover(ctx context.Context, id string) (Status, error) {
 	case initialPreparing:
 		r, err = s.start(ctx, r)
 	case initialImporting:
-		r, err = s.importInitial(ctx, r)
-		if err == nil {
-			_, err = s.coordinator.Move(ctx, id, r.OperationID, r.Destination)
+		if r.Destination == "" {
+			_, err = s.stopInitial(ctx, r, r.OperationID)
+			if err == nil {
+				r, err = s.readInitial(id)
+			}
+		} else {
+			r, err = s.importInitial(ctx, r)
+			if err == nil {
+				_, err = s.coordinator.Move(ctx, id, r.OperationID, r.Destination)
+			}
 		}
 	case initialCancelling:
 		r, err = s.cancelInitial(ctx, r)
 	case initialImported:
 		var record session.Record
 		record, err = s.coordinator.Inspect(id)
-		if err == nil && record.CancelOperation == "" && !hasOperation(record, r.OperationID) {
+		if err == nil && r.Destination != "" && record.CancelOperation == "" && !hasOperation(record, r.OperationID) {
 			_, err = s.coordinator.Move(ctx, id, r.OperationID, r.Destination)
 		} else if err == nil {
 			_, err = s.coordinator.Recover(ctx, id)
@@ -477,13 +515,13 @@ func (s *Service) checkFirstMove(r initial, id string) error {
 	if err != nil {
 		return err
 	}
-	if !hasOperation(record, r.OperationID) && id != r.OperationID {
+	if r.Destination != "" && !hasOperation(record, r.OperationID) && id != r.OperationID {
 		return errors.New("home: first imported move requires retained operation recovery")
 	}
 	return nil
 }
 
-func (s *Service) Cancel(ctx context.Context, id, operationID string) (Status, error) {
+func (s *Service) cancelExecution(ctx context.Context, id, operationID string) (Status, error) {
 	if !validID(id) || !validID(operationID) {
 		return Status{}, errors.New("home: canonical session and cancellation UUID required")
 	}
@@ -536,11 +574,27 @@ func (s *Service) cancelInitial(ctx context.Context, r initial) (initial, error)
 		// an interrupted activation; cancellation must bypass that recovery path.
 		instance = *r.Incarnation
 	} else {
-		if err := s.local.CancelInitial(ctx, r.Launch); err != nil {
-			return r, err
+		if r.Input == checkpointInput {
+			observation, err := s.local.Inspect(ctx, r.Launch)
+			if err != nil {
+				return r, err
+			}
+			if observation.State != session.PlacementAbsent {
+				if observation.Incarnation.ResourceUID == "" {
+					return r, errors.New("home: resumed preparation stop remains unknown")
+				}
+				instance = observation.Incarnation
+			} else {
+				r.Stage = initialCancelled
+				return r, s.saveInitial(r)
+			}
+		} else {
+			if err := s.local.CancelInitial(ctx, r.Launch); err != nil {
+				return r, err
+			}
+			r.Stage = initialCancelled
+			return r, s.saveInitial(r)
 		}
-		r.Stage = initialCancelled
-		return r, s.saveInitial(r)
 	}
 	if instance.ResourceUID == "" {
 		return r, errors.New("home: cancellation stop remains unknown")
@@ -558,7 +612,7 @@ func (s *Service) cancelInitial(ctx context.Context, r initial) (initial, error)
 	return r, s.saveInitial(r)
 }
 
-func (s *Service) Attach(ctx context.Context, id string, input io.Reader, output io.Writer) error {
+func (s *Service) attachExecution(ctx context.Context, id string, input io.Reader, output io.Writer) error {
 	unlock, err := s.lockSession(id)
 	if err != nil {
 		return err
@@ -608,6 +662,11 @@ func (s *Service) Close() error {
 		}
 		for _, remote := range s.remotes {
 			remote.Close()
+		}
+		for _, source := range s.workSources {
+			if closer, ok := source.(io.Closer); ok {
+				s.closeError = errors.Join(s.closeError, closer.Close())
+			}
 		}
 		if s.owner != nil {
 			s.closeError = errors.Join(s.closeError, s.owner.Close())

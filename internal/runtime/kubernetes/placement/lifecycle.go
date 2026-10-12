@@ -35,11 +35,13 @@ func (p *Placement) retained(ctx context.Context, l session.Launch) (retained, r
 		return local, registry.Record{}, err
 	}
 	if local.Reference.UID == "" {
-		ceilings, err := p.liveProfile(ctx, l)
+		ceilings, err := p.liveProfileInput(ctx, l, local.Initial != nil)
 		if err != nil {
 			return local, registry.Record{}, err
 		}
-		r, err := p.registry.Create(ctx, p.registration(l, ceilings))
+		registration := p.registration(l, ceilings)
+		registration.WorkspaceDigest = local.WorkspaceDigest
+		r, err := p.registry.Create(ctx, registration)
 		if err != nil {
 			return local, r, semantic(err)
 		}
@@ -50,11 +52,18 @@ func (p *Placement) retained(ctx context.Context, l session.Launch) (retained, r
 	if err != nil {
 		return local, r, semantic(err)
 	}
+	if local.Initial != nil && r.NativeUUID != "" && local.Launch.ThreadID == "" {
+		local.Launch.ThreadID = r.NativeUUID
+		if err = p.save(local); err != nil {
+			return local, r, err
+		}
+	}
+	l = local.Launch
 	version, err := harness.NativeVersion(p.config.Harness)
 	if err != nil {
 		return local, r, err
 	}
-	if r.Harness != p.config.Harness || l.Harness != r.Harness || r.Principal != p.config.Principal || r.TemplateName != p.config.TemplateName || r.Epoch != l.Epoch || r.NativePin != version || r.IntendedRunName != runName(l) || r.OperationID != l.OperationID || r.SessionID != l.SessionID || r.NativeUUID != l.ThreadID || r.CheckpointDigest != l.CheckpointDigest || r.InstructionDigest != l.InstructionDigest || !r.OriginalDeadline.Equal(l.Deadline) || !slices.Equal(r.IncludeIgnored, l.IncludeIgnored) || !ceilingsMatch(l, r.Ceilings) {
+	if r.Harness != p.config.Harness || l.Harness != r.Harness || r.Principal != p.config.Principal || r.TemplateName != p.config.TemplateName || r.Epoch != l.Epoch || r.NativePin != version || r.IntendedRunName != runName(l) || r.OperationID != l.OperationID || r.SessionID != l.SessionID || r.WorkspaceDigest != local.WorkspaceDigest || r.Task != l.Task || r.NativeUUID != l.ThreadID || r.CheckpointDigest != l.CheckpointDigest || r.InstructionDigest != l.InstructionDigest || !r.OriginalDeadline.Equal(l.Deadline) || !slices.Equal(r.IncludeIgnored, l.IncludeIgnored) || !ceilingsMatch(l, r.Ceilings) {
 		return local, r, &profile.Rejection{Code: profile.CodeConflict}
 	}
 	return local, r, nil
@@ -123,7 +132,7 @@ func terminated(pod *corev1.Pod) bool {
 }
 func (p *Placement) waitPod(ctx context.Context, r registry.Record, wantRunning bool) (*corev1.Pod, error) {
 	deadline := r.OriginalDeadline
-	if wantRunning {
+	if wantRunning && r.Task == "" {
 		deadline = minTime(deadline, time.Now().Add(2*time.Minute))
 	}
 	ctx, cancel := context.WithDeadline(ctx, deadline)
@@ -162,11 +171,15 @@ func (p *Placement) Activate(ctx context.Context, l session.Launch, i session.In
 		return err
 	}
 	defer unlock()
-	if _, err := p.liveProfile(ctx, l); err != nil {
+	local, r, err := p.retained(ctx, l)
+	if err != nil {
 		return err
 	}
-	_, r, err := p.retained(ctx, l)
-	if err != nil {
+	approved := l
+	if local.Initial != nil {
+		approved = *local.Initial
+	}
+	if _, err = p.liveProfileInput(ctx, approved, local.Initial != nil); err != nil {
 		return err
 	}
 	if inc(r) != i {
@@ -186,11 +199,14 @@ func (p *Placement) Activate(ctx context.Context, l session.Launch, i session.In
 	if _, err = p.registry.Activate(ctx, r.Reference); err != nil {
 		return semantic(err)
 	}
-	output, err := p.control(ctx, pod, nativeContainer, []string{nativePath, "activate"}, nil, 64<<10)
+	output, err := p.control(ctx, pod, nativeContainer, []string{nativePath, nativeActivate}, nil, 64<<10)
 	if err != nil {
 		return err
 	}
-	return nativeReply(output, l.ThreadID, nativeActive)
+	if local.Initial != nil {
+		return initialNativeReply(output, r.NativeUUID, nativeActive)
+	}
+	return nativeReply(output, local.Launch.ThreadID, nativeActive)
 }
 func nativeReply(data []byte, thread, state string) error {
 	var r struct {
@@ -211,6 +227,26 @@ func nativeReply(data []byte, thread, state string) error {
 	}
 	return nil
 }
+
+// initialNativeReply accepts either no UUID yet or the genuinely observed UUID
+// while the immutable initial contract remains empty. A bound registry identity
+// can never be replaced by another response.
+func initialNativeReply(data []byte, bound, state string) error {
+	var reply struct {
+		ThreadID string `json:"threadId"`
+	}
+	if err := json.Unmarshal(data, &reply); err != nil {
+		return err
+	}
+	if reply.ThreadID != "" && (!idValid(reply.ThreadID) || bound != "" && reply.ThreadID != bound) {
+		return errors.New("placement: initial native identity mismatch")
+	}
+	if bound != "" && reply.ThreadID != bound {
+		return errors.New("placement: bound native identity unavailable")
+	}
+	return nativeReply(data, reply.ThreadID, state)
+}
+
 func (p *Placement) Inspect(ctx context.Context, l session.Launch) (session.Observation, error) {
 	unlock, err := p.lockOperation(l)
 	if err != nil {
@@ -232,6 +268,7 @@ func (p *Placement) Inspect(ctx context.Context, l session.Launch) (session.Obse
 	if err != nil {
 		return session.Observation{}, err
 	}
+	l = local.Launch
 	o := session.Observation{Launch: l, Incarnation: inc(r), State: session.PlacementUnknown}
 	switch r.Phase {
 	case registry.Creating:
@@ -282,7 +319,11 @@ func (p *Placement) Inspect(ctx context.Context, l session.Launch) (session.Obse
 		if err != nil {
 			return o, err
 		}
-		if nativeReply(data, l.ThreadID, nativeActive) == nil {
+		activeErr := nativeReply(data, l.ThreadID, nativeActive)
+		if local.Initial != nil {
+			activeErr = initialNativeReply(data, r.NativeUUID, nativeActive)
+		}
+		if activeErr == nil {
 			o.State = session.PlacementActive
 		} else if nativeReply(data, l.ThreadID, nativePrepared) == nil {
 			o.State = session.PlacementPrepared
@@ -345,6 +386,12 @@ func (p *Placement) Stop(ctx context.Context, l session.Launch, i session.Incarn
 	if err != nil {
 		return session.Stopped{}, err
 	}
+	if local.Initial != nil && local.Launch.ThreadID == "" {
+		local, r, err = p.bindInitialNative(ctx, local, r, pod)
+		if err != nil {
+			return session.Stopped{}, err
+		}
+	}
 	local, err = p.quietSource(ctx, local, r, pod)
 	if err != nil {
 		return session.Stopped{}, err
@@ -394,6 +441,48 @@ func (p *Placement) Stop(ctx context.Context, l session.Launch, i session.Incarn
 		return session.Stopped{}, err
 	}
 	return s, nil
+}
+
+// bindInitialNative observes a genuine completed native turn on the exact
+// admitted writer before sealing/capture. Empty caller identity stays retained
+// as the replay key; it can never select or replace the observed UUID.
+func (p *Placement) bindInitialNative(ctx context.Context, local retained, r registry.Record, pod *corev1.Pod) (retained, registry.Record, error) {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if !running(pod, nativeContainer) {
+			return local, r, errors.New("placement: initial native UUID remains unknown")
+		}
+		data, err := p.control(ctx, pod, nativeContainer, []string{nativePath, nativeStatus}, nil, 64<<10)
+		if err != nil {
+			return local, r, err
+		}
+		var reply struct {
+			Op, Error, State string
+			PID              int
+			ThreadID         string          `json:"threadId"`
+			Completion       json.RawMessage `json:"completion"`
+		}
+		if decode(data, &reply) != nil || reply.Error != "" {
+			return local, r, errors.New("placement: initial native UUID observation unavailable")
+		}
+		if idValid(reply.ThreadID) {
+			r, err = p.registry.BindNative(ctx, r.Reference, reply.ThreadID)
+			if err != nil {
+				return local, r, semantic(err)
+			}
+			local.Launch.ThreadID = reply.ThreadID
+			return local, r, p.save(local)
+		}
+		select {
+		case <-ctx.Done():
+			return local, r, ctx.Err()
+		case <-ticker.C:
+			if !time.Now().Before(local.Launch.Deadline) {
+				return local, r, errors.New("placement: initial UUID unavailable before deadline")
+			}
+		}
+	}
 }
 
 // quietSource persists the safe-turn handoff before revoking gateway access.

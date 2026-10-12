@@ -125,7 +125,7 @@ func (c *Coordinator) Move(ctx context.Context, id, operationID, destination str
 	for i := range r.Operations {
 		op := &r.Operations[i]
 		if op.ID == operationID {
-			if op.Destination != destination {
+			if op.Finalize || op.Destination != destination {
 				return r, errors.New("session: operation intent conflict")
 			}
 			if op.Complete {
@@ -197,6 +197,9 @@ func (c *Coordinator) drive(ctx context.Context, r Record, index int) (Record, e
 	r, err = c.stopSource(ctx, r, index)
 	if err != nil {
 		return r, err
+	}
+	if r.Operations[index].Finalize {
+		return c.finishFinalization(r, index)
 	}
 	if err = ctx.Err(); err != nil {
 		return r, err

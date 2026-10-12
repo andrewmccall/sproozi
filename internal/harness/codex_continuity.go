@@ -49,7 +49,7 @@ func validateCodexToolsAndInstructions(data []byte, digest string) error {
 					}
 				}
 			}
-			if p.Type == "message" && (p.Role == "user" || p.Role == "assistant") {
+			if p.Type == "message" && (p.Role == claudeUser || p.Role == "assistant") {
 				initialBlock = false
 			}
 			switch p.Type {

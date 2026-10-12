@@ -9,6 +9,12 @@ local-to-Kubernetes-to-local proofs. Their implementation and limits belong
 in the [current architecture](../system-architecture.md), references and
 [session guide](../../guides/session-mobility.md).
 
+Remote-first Codex task retention, authenticated MCP dispatch and fresh local
+continuation are also implemented. The [workflow guide](../../guides/portable-workflows.md)
+and [ADR 0012](../../adr/0012-retained-work-and-fresh-session-continuations.md)
+describe the remote catalogue, one-way home claim and execution-bound retries.
+Paid-model engineering and personal home-ops acceptance remain unassessed.
+
 This roadmap retains extensions that need further design or native evidence.
 The extended Codex proof adds actual native tools, held-turn handoff, gateway and
 direct-access denials, forced cancellation and immutable accounting replay.

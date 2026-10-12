@@ -271,7 +271,9 @@ func restoreGit(ctx context.Context, g gitRunner, repo string, m manifest, bundl
 	if _, err = g.run(ctx, repo, "bundle", "verify", source); err != nil {
 		return err
 	}
-	if _, err = g.run(ctx, repo, "fetch", "--quiet", "--no-tags", source, "+refs/*:refs/*"); err != nil {
+	// This private inert repository has no user worktree yet. The bundle may
+	// include Git's default unborn HEAD branch, which normal fetch refuses to update.
+	if _, err = g.run(ctx, repo, "fetch", "--quiet", "--no-tags", "--update-head-ok", source, "+refs/*:refs/*"); err != nil {
 		return err
 	}
 	total := int64(0)

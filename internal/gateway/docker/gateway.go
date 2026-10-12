@@ -5,12 +5,15 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"slices"
 
 	"github.com/andrewmccall/sproozi/internal/harness"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/audit"
 	"github.com/andrewmccall/sproozi/internal/budget"
+	githubgateway "github.com/andrewmccall/sproozi/internal/endpoints/github"
+	kubernetesgateway "github.com/andrewmccall/sproozi/internal/endpoints/kubernetes"
 	mcpgateway "github.com/andrewmccall/sproozi/internal/endpoints/mcp"
 	modelgateway "github.com/andrewmccall/sproozi/internal/endpoints/model"
 	"github.com/andrewmccall/sproozi/internal/gateway"
@@ -30,6 +33,8 @@ type GatewayConfig struct {
 	MCPAuthority string
 	MCPClient    *http.Client
 	AuditLogger  audit.Writer
+	GitHub       *githubgateway.HandlerConfig
+	Kubernetes   *kubernetesgateway.HandlerConfig
 }
 
 func NewGateway(owner *Owner, config GatewayConfig) (*proxytransport.Gateway, error) {
@@ -49,12 +54,43 @@ func NewGateway(owner *Owner, config GatewayConfig) (*proxytransport.Gateway, er
 		handler = modelgateway.NewAnthropicHandler(modelConfig)
 	}
 	dispatch := gateway.Dispatcher{authority: {Capability: string(api.CapabilityModelInference), Tier: audit.TierSemantic, Handler: handler, Budgets: tracker}}
+	if err := addNativeRoutes(owner, config, dispatch, tracker); err != nil {
+		return nil, err
+	}
 	if config.MCPRegistry != nil {
 		host, port, err := net.SplitHostPort(config.MCPAuthority)
-		if err != nil || host == "" || port != "443" || (config.MCPAuthority == ModelAuthority || config.MCPAuthority == modelgateway.AnthropicAuthority) {
+		if err != nil || host == "" || port != "443" || dispatch.Allows(config.MCPAuthority) || config.MCPAuthority == ModelAuthority || config.MCPAuthority == modelgateway.AnthropicAuthority || config.MCPAuthority == kubernetesgateway.Authority || config.MCPAuthority == "github.com:443" || config.MCPAuthority == "api.github.com:443" {
 			return nil, errors.New("docker gateway: exact MCP authority on port 443 required")
 		}
 		dispatch[config.MCPAuthority] = gateway.Route{Tier: audit.TierProtocol, Handler: mcpgateway.NewHandler(mcpgateway.HandlerConfig{Registry: config.MCPRegistry, HTTPClient: config.MCPClient, Budgets: tracker, AuditLogger: config.AuditLogger})}
 	}
 	return proxytransport.New(proxytransport.Config{Certificates: config.Certificates, Authenticate: owner.Authenticate, Revalidate: owner.Revalidate, Handler: dispatch, AllowedAuthority: dispatch.Allows})
+}
+
+func addNativeRoutes(owner *Owner, config GatewayConfig, dispatch gateway.Dispatcher, tracker *budget.Tracker) error {
+	if config.GitHub != nil {
+		if config.GitHub.TokenProvider == nil || config.GitHub.HTTPClient == nil || config.GitHub.GitBaseURL == "" || config.GitHub.APIBaseURL == "" {
+			return errors.New("docker gateway: fixed GitHub provider required")
+		}
+		githubConfig := *config.GitHub
+		githubConfig.AuditLogger = config.AuditLogger
+		githubHandler := &githubgateway.Handler{Config: githubConfig}
+		for _, host := range []string{"github.com:443", "api.github.com:443"} {
+			dispatch[host] = gateway.Route{Capability: string(api.CapabilityGitHubPullRequest), Tier: audit.TierSemantic, Handler: githubHandler, Budgets: tracker}
+		}
+	}
+	if config.Kubernetes != nil {
+		if config.Kubernetes.Upstream == nil || config.Kubernetes.Client == nil {
+			return errors.New("docker gateway: fixed Kubernetes provider required")
+		}
+		kubeConfig := *config.Kubernetes
+		kubeConfig.AuditLogger = config.AuditLogger
+		dispatch[kubernetesgateway.Authority] = gateway.Route{Capability: string(api.CapabilityKubernetesRead), Tier: audit.TierSemantic, Handler: kubernetesgateway.NewHandler(kubeConfig), Budgets: tracker}
+	}
+	for _, capability := range owner.nativeCapabilities {
+		if !slices.Contains(owner.policy.Spec.AllowedCapabilities, capability) || capability == api.CapabilityGitHubPullRequest && config.GitHub == nil || capability == api.CapabilityKubernetesRead && config.Kubernetes == nil {
+			return errors.New("docker gateway: configured native allocation lacks handler or policy")
+		}
+	}
+	return nil
 }

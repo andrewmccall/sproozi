@@ -27,7 +27,12 @@ func main() {
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return errors.New("use sproozi serve|start|attach|move|status|cancel|recover")
+		return errors.New("use sproozi run|sessions|pull|resume|stop|serve|start|attach|move|status|cancel|recover")
+	}
+	switch args[0] {
+	case actionRun, home.ActionSessions, home.ActionPull, home.ActionResume,
+		home.ActionStop, home.ActionStatus, home.ActionCancel, home.ActionRecover:
+		return runProduct(args)
 	}
 	action := args[0]
 	flags := flag.NewFlagSet("sproozi "+action, flag.ContinueOnError)

@@ -12,6 +12,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+const fixtureStagedNote = "staged"
+
 const testLimit = int64(8 << 20)
 
 func fixtureGit(t *testing.T, root string, args ...string) string {
@@ -103,8 +105,34 @@ func TestRestoreClearsInheritedSetgidOnlyOnOwnedStaging(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertFile(t, target, "note.txt", []byte("unstaged\n"))
-	if got := fixtureGit(t, target, "show", ":note.txt"); got != "staged" {
+	if got := fixtureGit(t, target, "show", ":note.txt"); got != fixtureStagedNote {
 		t.Fatalf("setgid staging lost index: %q", got)
+	}
+}
+
+func TestRestoreIncludesTheDestinationDefaultBranch(t *testing.T) {
+	probe := t.TempDir()
+	fixtureGit(t, probe, "init", "--quiet", "--template=")
+	branch := fixtureGit(t, probe, "symbolic-ref", "--short", "HEAD")
+	source := newFixture(t)
+	fixtureGit(t, source, "branch", "-m", branch)
+	data, err := Capture(t.Context(), source, nil, testLimit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), "restored")
+	if err = Restore(t.Context(), data, target, testLimit); err != nil {
+		t.Fatal(err)
+	}
+	if got := fixtureGit(t, target, "symbolic-ref", "--short", "HEAD"); got != branch {
+		t.Fatalf("restored branch=%q want=%q", got, branch)
+	}
+	if got := fixtureGit(t, target, "show", ":note.txt"); got != fixtureStagedNote {
+		t.Fatalf("restored index=%q want staged", got)
+	}
+	content, err := os.ReadFile(filepath.Join(target, "note.txt"))
+	if err != nil || string(content) != "unstaged\n" {
+		t.Fatalf("restored working file=%q: %v", content, err)
 	}
 }
 
@@ -183,7 +211,7 @@ func TestRoundTripPreservesGitAndUnfinishedState(t *testing.T) {
 	if got := fixtureGit(t, dst, "for-each-ref", "--format=%(refname)"); got != "refs/heads/main\nrefs/heads/other\nrefs/tags/v1" {
 		t.Errorf("refs: %s", got)
 	}
-	if got := fixtureGit(t, dst, "show", ":note.txt"); got != "staged" {
+	if got := fixtureGit(t, dst, "show", ":note.txt"); got != fixtureStagedNote {
 		t.Errorf("index: %s", got)
 	}
 	if got := fixtureGit(t, dst, "show", ":new.txt"); got != "staged new" {

@@ -89,6 +89,7 @@ type server struct {
 	exitCode        int
 	claude          claudeLifecycle
 	inputGeneration uint64
+	taskBaseline    string
 }
 
 func main() {
@@ -155,6 +156,10 @@ func validateConfig(c config) error {
 		c.Env == nil || c.RolloutMaxBytes <= 0 || c.RolloutMaxBytes > 64<<20 {
 		return errors.New("invalid native launch contract")
 	}
+	if len(c.Task) > 32<<10 || strings.ContainsRune(c.Task, 0) ||
+		c.Task != "" && (strings.TrimSpace(c.Task) == "" || c.Harness != harness.NativeCodex) {
+		return errors.New("native task requires bounded nonempty Codex input")
+	}
 	if c.Instructions == "" || fmt.Sprintf("%x", sha256.Sum256([]byte(c.Instructions))) != c.InstructionDigest {
 		return errors.New("trusted instructions do not match digest")
 	}
@@ -171,11 +176,14 @@ func validateConfig(c config) error {
 		}
 		seen[key] = true
 		switch key {
-		case "HOME", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "PWD",
+		case "HOME", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "PWD", "KUBECONFIG",
 			"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "DISABLE_AUTOUPDATER",
 			"CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION", "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS":
 			return errors.New("native environment cannot replace fixed home or workspace")
 		}
+	}
+	if err := c.ClientConfig.Validate(c.Harness); err != nil {
+		return err
 	}
 	return nativeconfig.ValidateHarness(string(c.Harness), c.Model, c.Options)
 }
@@ -302,6 +310,12 @@ func (s *server) activate() response {
 		r.Error = err.Error()
 		return r
 	}
+	clientEnv, err := installNativeClients(s.config, filepath.Dir(harness.NativeLocalTrustBundle))
+	if err != nil {
+		r.Error = err.Error()
+		return r
+	}
+	env = append(env, clientEnv...)
 	home, path, err := nativePaths(s.config.Harness)
 	if err != nil {
 		r.Error = err.Error()
@@ -312,11 +326,23 @@ func (s *server) activate() response {
 		env = append(env, "CLAUDE_CONFIG_DIR="+home)
 	} else {
 		env = append(env, "CODEX_HOME="+home)
+		if err = installCodexProjectTrust(home); err != nil {
+			r.Error = err.Error()
+			return r
+		}
 	}
 	if err = verifyNativeVersion(context.Background(), s.config.Harness,
 		path, workspace, env, s.config.Deadline); err != nil {
 		r.Error = err.Error()
 		return r
+	}
+	if s.config.Task != "" && s.threadID != "" {
+		_, baseline, err := observeTurn(nativeHome, s.threadID, s.config.InstructionDigest, s.config.RolloutMaxBytes)
+		if err != nil {
+			r.Error = "initial task baseline is unavailable: " + err.Error()
+			return r
+		}
+		s.taskBaseline = baseline
 	}
 	var args []string
 	if s.config.Harness == harness.NativeClaude {

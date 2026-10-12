@@ -207,7 +207,9 @@ func validateOperations(r Record) error {
 	ids := map[string]bool{}
 	pending := false
 	for _, op := range r.Operations {
-		if !validUUID(op.ID) || !validName(op.Destination) || ids[op.ID] {
+		if !validUUID(op.ID) || ids[op.ID] ||
+			(!op.Finalize && !validName(op.Destination)) ||
+			(op.Finalize && (op.Destination != "" || op.Launch != nil || op.Incarnation != nil)) {
 			return errors.New("session: invalid retained operation")
 		}
 		ids[op.ID] = true

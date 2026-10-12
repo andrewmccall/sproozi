@@ -88,6 +88,15 @@ Kubernetes profile and back. Managed launches require an explicit immutable
 must agree; a move cannot switch clients. OpenCode and Hermes ordinary launches
 do not establish managed session mobility support.
 
+The [retained-work workflow](../guides/portable-workflows.md) supports remote-first
+positional tasks only for managed Codex. Its completion observer requires the
+actual submitted user text and a new completed native turn, then the ordinary
+writer-fence/accounting/checkpoint path. Later local resume uses a fresh grant.
+Managed Codex MCP connections and placeholder Kubernetes configuration are
+regenerated for each launch; portable history cannot select upstream credentials
+or server registrations. Managed Claude tasks and MCP remain gated pending their
+own client/tool completion evidence.
+
 | Managed selector | Observed executable pin | Selected native state | Completed-turn observation |
 | --- | --- | --- | --- |
 | `codex` | 0.161.0 | One same-UUID rollout | Native completed turn, resolved supported tools and initial developer instruction digest |

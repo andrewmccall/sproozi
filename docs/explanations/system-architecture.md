@@ -160,11 +160,21 @@ interrupted cleanup and container-completion limitations are listed in
 ## Managed native session continuity
 
 The home daemon starts controlled Docker sessions without Kubernetes credentials.
-Its coordinator owns the logical session, native UUID, selected checkpoints,
+Its coordinator owns one bounded execution's native UUID, selected checkpoints,
 current location, original absolute deadline and remaining escrow. Each visit
 has a fresh allocation and exact execution incarnation. A fixed TLS profile
 owns remote admission and Kubernetes credentials; each remote visit creates a
 new AgentRun under live controller policy.
+
+For [remote-first work](../guides/portable-workflows.md), the profile additionally
+hosts a task catalogue independent of the laptop. It admits an approved Codex
+task, observes genuine completion, fences/seals the worker and retains stopped
+native/Git state under a stable product session ID. Authenticated MCP lets Hermes
+submit and inspect work. Pull commits a one-way claim to the home; later resume
+starts a separately authorized execution with the same native UUID, preserving
+old receipts. Product operations bind to their original execution so delayed
+retries cannot affect a newer continuation. See
+[ADR 0012](../adr/0012-retained-work-and-fresh-session-continuations.md).
 
 ```mermaid
 flowchart LR

@@ -6,11 +6,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -39,6 +41,7 @@ const nativeContainer = "agent"
 const helperPath = "/usr/local/bin/checkpoint"
 const nativePath = "/usr/local/bin/native-session"
 const nativeStatus = "status"
+const nativeActivate = "activate"
 const nativeActive = "active"
 const nativePrepared = "prepared"
 const nativeStopped = "stopped"
@@ -47,6 +50,7 @@ const nativeQuiesce = "quiesce"
 const helperCapture = "capture-stopped"
 const helperFinish = "finish"
 const helperPrepare = "prepare"
+const helperPrepareWorkspace = "prepare-workspace"
 
 // Config is administrator-owned; requests cannot override templates, namespace,
 // credentials, commands or limits. Directory must be private durable storage.
@@ -169,11 +173,12 @@ func account(r registry.Record, name api.CapabilityKind) budget.AccountKey {
 	return budget.AccountKey(r.RunUID + "/" + string(name))
 }
 func (p *Placement) liveProfile(ctx context.Context, l session.Launch) (map[api.CapabilityKind]api.EndpointBudget, error) {
-	if workspace.ValidateIgnoredPaths(l.IncludeIgnored) != nil {
-		return nil, &profile.Rejection{Code: profile.CodeDenied}
-	}
-	if l.Harness != p.config.Harness || !idValid(l.SessionID) || !idValid(l.OperationID) || !idValid(l.AllocationID) || !idValid(l.ThreadID) || l.Epoch == 0 || l.Placement != p.config.Name || !digestValid(l.CheckpointDigest) || l.InstructionDigest != p.config.InstructionDigest || len(l.Allowances) == 0 || len(l.Allowances) > 32 {
-		return nil, &profile.Rejection{Code: profile.CodeDenied}
+	return p.liveProfileInput(ctx, l, false)
+}
+
+func (p *Placement) liveProfileInput(ctx context.Context, l session.Launch, initial bool) (map[api.CapabilityKind]api.EndpointBudget, error) {
+	if err := p.validateInput(l, initial); err != nil {
+		return nil, err
 	}
 	if !time.Now().Before(l.Deadline) {
 		return nil, &profile.Rejection{Code: profile.CodeExpired}
@@ -230,7 +235,7 @@ func (p *Placement) ceilings(l session.Launch, policy api.AgentPolicySpec) (map[
 }
 func (p *Placement) registration(l session.Launch, ceilings map[api.CapabilityKind]api.EndpointBudget) registry.Registration {
 	version, _ := harness.NativeVersion(p.config.Harness)
-	return registry.Registration{Harness: p.config.Harness, Principal: p.config.Principal, SessionID: l.SessionID, Epoch: l.Epoch, OperationID: l.OperationID, NativeUUID: l.ThreadID, NativePin: version, InstructionDigest: l.InstructionDigest, OriginalDeadline: l.Deadline.UTC(), TemplateName: p.config.TemplateName, Ceilings: ceilings, CheckpointDigest: l.CheckpointDigest, IncludeIgnored: append([]string(nil), l.IncludeIgnored...), IntendedRunName: runName(l)}
+	return registry.Registration{Harness: p.config.Harness, Principal: p.config.Principal, SessionID: l.SessionID, Epoch: l.Epoch, OperationID: l.OperationID, NativeUUID: l.ThreadID, NativePin: version, InstructionDigest: l.InstructionDigest, OriginalDeadline: l.Deadline.UTC(), TemplateName: p.config.TemplateName, Ceilings: ceilings, Task: l.Task, CheckpointDigest: l.CheckpointDigest, IncludeIgnored: append([]string(nil), l.IncludeIgnored...), IntendedRunName: runName(l)}
 }
 
 func (p *Placement) Prepare(ctx context.Context, l session.Launch, data []byte) (session.Incarnation, error) {
@@ -264,6 +269,82 @@ func (p *Placement) Prepare(ctx context.Context, l session.Launch, data []byte) 
 	}
 	return p.prepare(ctx, local, record)
 }
+
+// CreateInitial restores a stopped workspace into a fresh native home. Only this
+// explicit entry permits an empty native UUID/checkpoint; the client supplies
+// the genuine UUID and the trusted placement binds it after observation.
+func (p *Placement) CreateInitial(ctx context.Context, l session.Launch, data []byte) (session.Incarnation, error) {
+	unlock, err := p.lockOperation(l)
+	if err != nil {
+		return session.Incarnation{}, err
+	}
+	defer unlock()
+	if l.ThreadID != "" || l.CheckpointDigest != "" {
+		return session.Incarnation{}, &profile.Rejection{Code: profile.CodeInvalid}
+	}
+	if len(data) == 0 || int64(len(data)) > p.config.MaxCheckpointBytes {
+		return session.Incarnation{}, &profile.Rejection{Code: profile.CodeInvalid}
+	}
+	digest := fmt.Sprintf("%x", sha256.Sum256(data))
+	// A lost prepare acknowledgement observes the original exact incarnation,
+	// even after its bounded execution stopped or expired. This grants no activation.
+	existing, loadErr := p.load(l)
+	if loadErr == nil && existing.Initial != nil {
+		if existing.WorkspaceDigest != digest {
+			return session.Incarnation{}, &profile.Rejection{Code: profile.CodeConflict}
+		}
+		if existing.Reference.UID != "" {
+			_, r, err := p.retained(ctx, l)
+			if err != nil {
+				return session.Incarnation{}, semantic(err)
+			}
+			if r.Phase == registry.Prepared || r.Phase == registry.Active || r.Phase == registry.Stopped {
+				return inc(r), nil
+			}
+		}
+	} else if loadErr != nil && !os.IsNotExist(loadErr) {
+		return session.Incarnation{}, loadErr
+	}
+	ceilings, err := p.liveProfileInput(ctx, l, true)
+	if err != nil {
+		return session.Incarnation{}, err
+	}
+	local, err := p.persistIntent(l, data)
+	if err != nil {
+		return session.Incarnation{}, err
+	}
+	retainedInput, err := p.readArtifact(l.AllocationID, "input")
+	if err != nil {
+		return session.Incarnation{}, err
+	}
+	if fmt.Sprintf("%x", sha256.Sum256(retainedInput)) != digest {
+		return session.Incarnation{}, &profile.Rejection{Code: profile.CodeConflict}
+	}
+	if local.Initial == nil {
+		if local.Reference.UID != "" || local.OutputDigest != "" {
+			return session.Incarnation{}, &profile.Rejection{Code: profile.CodeConflict}
+		}
+		original := l
+		local.Initial, local.WorkspaceDigest = &original, digest
+		if err = p.save(local); err != nil {
+			return session.Incarnation{}, err
+		}
+	} else if local.WorkspaceDigest != digest {
+		return session.Incarnation{}, &profile.Rejection{Code: profile.CodeConflict}
+	}
+	registration := p.registration(l, ceilings)
+	registration.WorkspaceDigest = digest
+	r, err := p.registry.Create(ctx, registration)
+	if err != nil {
+		return session.Incarnation{}, semantic(err)
+	}
+	local.Reference = r.Reference
+	if err = p.save(local); err != nil {
+		return session.Incarnation{}, err
+	}
+	return p.prepare(ctx, local, r)
+}
+
 func (p *Placement) prepare(ctx context.Context, local retained, r registry.Record) (session.Incarnation, error) {
 	if r.Phase == registry.Prepared || r.Phase == registry.Active {
 		return inc(r), nil
@@ -291,12 +372,21 @@ func (p *Placement) prepare(ctx context.Context, local retained, r registry.Reco
 	if err != nil {
 		return session.Incarnation{}, err
 	}
-	output, err := p.control(ctx, pod, runtimekube.CaptureContainer, []string{helperPath, helperPrepare, "--harness", string(r.Harness), "--max-bytes", strconv.FormatInt(p.config.MaxCheckpointBytes, 10), "--instruction-digest", r.InstructionDigest}, data, 64<<10)
+	operation := helperPrepare
+	if local.Initial != nil {
+		operation = helperPrepareWorkspace
+	}
+	arguments := []string{helperPath, operation, "--harness", string(r.Harness),
+		"--max-bytes", strconv.FormatInt(p.config.MaxCheckpointBytes, 10)}
+	if local.Initial == nil {
+		arguments = append(arguments, "--instruction-digest", r.InstructionDigest)
+	}
+	output, err := p.control(ctx, pod, runtimekube.CaptureContainer, arguments, data, 64<<10)
 	if err != nil {
 		return session.Incarnation{}, err
 	}
 	var meta checkpoint.Metadata
-	if err = decode(output, &meta); err != nil || meta.Harness != r.Harness || meta.ThreadID != r.NativeUUID || meta.SHA256 != r.CheckpointDigest {
+	if err = decode(output, &meta); err != nil || meta.Harness != r.Harness || (local.Initial == nil && (meta.ThreadID != r.NativeUUID || meta.SHA256 != r.CheckpointDigest) || local.Initial != nil && (meta.ThreadID != "" || meta.SHA256 != local.WorkspaceDigest)) {
 		return session.Incarnation{}, errors.New("placement: restored checkpoint metadata mismatch")
 	}
 	for name := range r.Ceilings {
@@ -313,7 +403,11 @@ func (p *Placement) ensureRun(ctx context.Context, r registry.Record) (*api.Agen
 		caps = append(caps, c)
 	}
 	slices.Sort(caps)
-	wanted := &api.AgentRun{ObjectMeta: metav1.ObjectMeta{Namespace: p.config.Namespace, Name: r.IntendedRunName}, Spec: api.AgentRunSpec{TemplateRef: api.AgentTemplateReference{Name: p.config.TemplateName}, Task: fixedTask, Capabilities: caps}}
+	task := r.Task
+	if task == "" {
+		task = fixedTask
+	}
+	wanted := &api.AgentRun{ObjectMeta: metav1.ObjectMeta{Namespace: p.config.Namespace, Name: r.IntendedRunName}, Spec: api.AgentRunSpec{TemplateRef: api.AgentTemplateReference{Name: p.config.TemplateName}, Task: task, Capabilities: caps}}
 	err := p.config.Kube.Create(ctx, wanted)
 	if err == nil {
 		return wanted, nil
@@ -325,7 +419,7 @@ func (p *Placement) ensureRun(ctx context.Context, r registry.Record) (*api.Agen
 	if err = p.config.Kube.Get(ctx, client.ObjectKeyFromObject(wanted), &existing); err != nil {
 		return nil, err
 	}
-	if existing.Spec.TemplateRef != wanted.Spec.TemplateRef || existing.Spec.Task != fixedTask || !slices.Equal(existing.Spec.Capabilities, caps) || len(existing.Spec.EventContext) != 0 || existing.Spec.Cancel || r.RunUID != "" && string(existing.UID) != r.RunUID {
+	if existing.Spec.TemplateRef != wanted.Spec.TemplateRef || existing.Spec.Task != task || !slices.Equal(existing.Spec.Capabilities, caps) || len(existing.Spec.EventContext) != 0 || existing.Spec.Cancel || r.RunUID != "" && string(existing.UID) != r.RunUID {
 		return nil, &profile.Rejection{Code: profile.CodeConflict}
 	}
 	return &existing, nil
@@ -342,3 +436,16 @@ func semantic(err error) error {
 
 var _ session.Placement = (*Placement)(nil)
 var _ session.TerminalPlacement = (*Placement)(nil)
+
+func (p *Placement) validateInput(l session.Launch, initial bool) error {
+	if workspace.ValidateIgnoredPaths(l.IncludeIgnored) != nil {
+		return &profile.Rejection{Code: profile.CodeDenied}
+	}
+	if l.Harness != p.config.Harness || !idValid(l.SessionID) || !idValid(l.OperationID) || !idValid(l.AllocationID) || (!initial && !idValid(l.ThreadID) || initial && l.ThreadID != "") || l.Epoch == 0 || l.Placement != p.config.Name || (!initial && !digestValid(l.CheckpointDigest) || initial && l.CheckpointDigest != "") || l.InstructionDigest != p.config.InstructionDigest || len(l.Allowances) == 0 || len(l.Allowances) > 32 {
+		return &profile.Rejection{Code: profile.CodeDenied}
+	}
+	if len(l.Task) > 32<<10 || strings.ContainsRune(l.Task, 0) || l.Task != "" && (strings.TrimSpace(l.Task) == "" || l.Harness != harness.NativeCodex) {
+		return &profile.Rejection{Code: profile.CodeDenied}
+	}
+	return nil
+}

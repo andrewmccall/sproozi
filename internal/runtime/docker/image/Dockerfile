@@ -12,7 +12,8 @@ COPY cmd/ cmd/
 COPY internal/ internal/
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -o /native-session ./cmd/native-session && \
     CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -o /checkpoint ./cmd/checkpoint && \
-    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -o /sproozi-network ./cmd/sproozi-network
+    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -o /sproozi-network ./cmd/sproozi-network && \
+    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -o /session-profile ./cmd/session-profile
 
 FROM ${CLIENTS_IMAGE}
 USER 0:0
@@ -26,6 +27,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends iptables && \
 COPY --from=builder /native-session /usr/local/bin/native-session
 COPY --from=builder /checkpoint /usr/local/bin/checkpoint
 COPY --from=builder /sproozi-network /usr/local/bin/sproozi-network
+COPY --from=builder /session-profile /usr/local/bin/session-profile
 USER 1000:1000
 WORKDIR /workspace
 ENTRYPOINT ["/usr/local/bin/native-session"]

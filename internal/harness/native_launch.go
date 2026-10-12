@@ -16,17 +16,19 @@ import (
 // NativeLaunch is the trusted fixed native terminal launch contract. Portable
 // checkpoint contents do not supply these instructions, options or credentials.
 type NativeLaunch struct {
-	Harness           NativeKind     `json:"harness"`
-	Deadline          time.Time      `json:"deadline"`
-	ThreadID          string         `json:"threadId"`
-	Instructions      string         `json:"instructions"`
-	InstructionDigest string         `json:"instructionDigest"`
-	Env               []string       `json:"env"`
-	RolloutMaxBytes   int64          `json:"rolloutMaxBytes"`
-	Model             string         `json:"model,omitempty"`
-	Options           []string       `json:"options,omitempty"`
-	Gateway           *NativeGateway `json:"gateway,omitempty"`
-	TrustBundlePEM    []byte         `json:"trustBundlePEM,omitempty"`
+	Harness           NativeKind          `json:"harness"`
+	Deadline          time.Time           `json:"deadline"`
+	ThreadID          string              `json:"threadId"`
+	ClientConfig      *NativeClientConfig `json:"clientConfig,omitempty"`
+	Task              string              `json:"task,omitempty"`
+	Instructions      string              `json:"instructions"`
+	InstructionDigest string              `json:"instructionDigest"`
+	Env               []string            `json:"env"`
+	RolloutMaxBytes   int64               `json:"rolloutMaxBytes"`
+	Model             string              `json:"model,omitempty"`
+	Options           []string            `json:"options,omitempty"`
+	Gateway           *NativeGateway      `json:"gateway,omitempty"`
+	TrustBundlePEM    []byte              `json:"trustBundlePEM,omitempty"`
 }
 
 // NativeGateway projects a fresh workload token only at activation. Its fixed
@@ -50,7 +52,7 @@ const (
 
 func (g NativeGateway) Validate(env []string) error {
 	endpoint, err := url.Parse(g.Endpoint)
-	if err != nil || endpoint.Scheme != "https" || endpoint.Host == "" || endpoint.User != nil || endpoint.Path != "" || endpoint.RawQuery != "" || endpoint.Fragment != "" || endpoint.ForceQuery || g.TokenPath != NativeGatewayTokenPath || g.TrustBundle != NativeGatewayTrustBundle {
+	if err != nil || endpoint.Scheme != nativeHTTPScheme || endpoint.Host == "" || endpoint.User != nil || endpoint.Path != "" || endpoint.RawQuery != "" || endpoint.Fragment != "" || endpoint.ForceQuery || g.TokenPath != NativeGatewayTokenPath || g.TrustBundle != NativeGatewayTrustBundle {
 		return errors.New("invalid projected native gateway binding")
 	}
 	for _, entry := range env {
@@ -95,7 +97,7 @@ func (c NativeLaunch) Environment() ([]string, error) {
 		return nil, errors.New("invalid projected native token")
 	}
 	proxy, _ := url.Parse(c.Gateway.Endpoint)
-	proxy.User = url.UserPassword("sproozi", token)
+	proxy.User = url.UserPassword(nativeContextName, token)
 	for _, key := range []string{"HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"} {
 		env = append(env, key+"="+proxy.String())
 	}

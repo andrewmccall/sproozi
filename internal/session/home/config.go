@@ -30,6 +30,7 @@ type Config struct {
 	NativeOptions []string                        `json:"nativeOptions,omitempty"`
 	Gateway       GatewayConfig                   `json:"gateway"`
 	Remote        map[string]profile.ClientConfig `json:"remote,omitempty"`
+	WorkSources   map[string]profile.ClientConfig `json:"workSources,omitempty"`
 }
 
 type GatewayConfig struct {
@@ -45,6 +46,25 @@ type GatewayConfig struct {
 	MCPRegistryFile         string                        `json:"mcpRegistryFile,omitempty"`
 	MCPCredentialsDirectory string                        `json:"mcpCredentialsDirectory,omitempty"`
 	MCPPolicy               map[string]api.MCPServerScope `json:"mcpPolicy,omitempty"`
+	GitHub                  *GitHubConfig                 `json:"github,omitempty"`
+	Kubernetes              *KubernetesConfig             `json:"kubernetes,omitempty"`
+}
+
+// Credentials are private gateway-owned files, never worker environment values.
+type GitHubConfig struct {
+	AppID          int64                      `json:"appID"`
+	InstallationID int64                      `json:"installationID"`
+	PrivateKeyFile string                     `json:"privateKeyFile"`
+	Scope          api.GitHubPullRequestScope `json:"scope"`
+}
+
+// KubernetesConfig selects one exact API endpoint and its restricted credential.
+// It intentionally does not import kubeconfig contexts, auth plugins or exec commands.
+type KubernetesConfig struct {
+	UpstreamURL string                  `json:"upstreamURL"`
+	TokenFile   string                  `json:"tokenFile"`
+	CAFile      string                  `json:"caFile"`
+	Scope       api.KubernetesReadScope `json:"scope"`
 }
 
 func private(path string, directory bool) error {

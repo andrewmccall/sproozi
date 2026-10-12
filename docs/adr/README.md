@@ -47,3 +47,4 @@ old record superseded and link both records.
 - [0009: Runtime backends and sealed accounting](0009-runtime-backends-and-sealed-accounting.md)
 - [0010: Managed session authority and fresh admission](0010-managed-session-authority-and-admission.md)
 - [0011: Native session compatibility and completion](0011-native-session-compatibility-and-completion.md)
+- [0012: Retained work and fresh session continuations](0012-retained-work-and-fresh-session-continuations.md)

@@ -77,6 +77,14 @@ Build the public CLI with `go build -o bin/sproozi ./cmd/sproozi`. Use
 `sproozi serve` to run the home daemon, then `sproozi start`, `sproozi attach`
 and `sproozi move` to work across local Docker and an approved cluster profile.
 
+The [retained-work guide](docs/guides/portable-workflows.md) adds remote-first
+Codex tasks through the CLI or authenticated MCP. The remote owner can accept
+work while the laptop is offline. Use `sessions`, `pull`, `resume` and `stop` to
+continue the genuine native conversation locally under a fresh bounded grant.
+The guide includes scoped home-ops setup and one shared external MCP definition.
+Home-ops acceptance against personal infrastructure and paid-model engineering
+contributions remain unassessed.
+
 The [session guide](docs/guides/session-mobility.md) describes controlled local
 Docker launch, native terminal attachment and moves through a fixed remote
 Kubernetes profile. The developer needs no kubeconfig. Each visit has fresh

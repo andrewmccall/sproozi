@@ -13,7 +13,10 @@ Future architecture is kept separate from implemented behaviour and verified gui
 - [Manual AgentRun to pull request](guides/manual-pr-demo.md), including Kind setup, example resources and optional monitoring
 - [Recorded native and configured MCP acceptance](demos/verified-mcp-demo.md), including stock Codex tool use, denials and cancellation
 - [Persistent Hermes orchestration](guides/hermes-orchestration.md), native chat, schedules, PVC state and full Kind testing
-- [Portable native sessions](guides/session-mobility.md), controlled Docker launch, native terminal and fixed Kubernetes profile moves; broader tool/failure acceptance pending
+- [Portable native sessions](guides/session-mobility.md), controlled Docker launch, native terminal and fixed Kubernetes profile moves
+- [Retained remote work](guides/portable-workflows.md), remote-first Codex tasks, MCP dispatch, session pull and fresh local continuation; scoped home-ops setup
+- [Portable workflow verification](../hack/verify/portable-workflows/README.md), deterministic native task and real external MCP checks in isolated infrastructure
+- [Recorded retained-work acceptance](demos/verified-portable-workflows.md), native continuity, fresh grants, real MCP transport and unassessed external acceptance
 - [Model provider authentication](guides/model-provider-auth.md)
 - [Recorded SRE acceptance](demos/verified-sre-demo.md), with scope and limitations
 
@@ -63,13 +66,16 @@ Architecturally significant changes require an ADR and matching current docs.
 - [0008: Selected native and Git checkpoints](adr/0008-selected-native-and-git-checkpoints.md)
 - [0009: Runtime backends and sealed accounting](adr/0009-runtime-backends-and-sealed-accounting.md)
 - [0010: Managed session authority and fresh admission](adr/0010-managed-session-authority-and-admission.md)
+- [0011: Native session compatibility and completion](adr/0011-native-session-compatibility-and-completion.md)
+- [0012: Retained work and fresh session continuations](adr/0012-retained-work-and-fresh-session-continuations.md)
 
 ## Future architecture
 
 Proposals for unimplemented extensions. Completed native/remote HTTPS MCP,
 stock CLI launch and persistent Hermes delegation are documented in the current
-references above. Docker, session mobility, managed servers and deeper harness
-control remain future directions.
+references above. Controlled Docker and Kubernetes mobility and retained Codex
+work are implemented. Existing-session adoption, managed servers, more backends
+and deeper harness control remain future directions.
 
 - [Overview and evolution](explanations/future-architecture/README.md)
 - [Managed MCP servers and further semantic bindings](explanations/future-architecture/managed-mcp-servers.md)

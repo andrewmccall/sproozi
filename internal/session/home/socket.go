@@ -17,14 +17,18 @@ import (
 )
 
 const (
-	ActionStart   = "start"
-	ActionAttach  = "attach"
-	ActionMove    = "move"
-	ActionStatus  = "status"
-	ActionCancel  = "cancel"
-	ActionRecover = "recover"
-	controlLimit  = 32 << 10
-	responseLimit = 2 << 20
+	ActionStart    = "start"
+	ActionAttach   = "attach"
+	ActionMove     = "move"
+	ActionStatus   = "status"
+	ActionCancel   = "cancel"
+	ActionRecover  = "recover"
+	ActionPull     = "pull"
+	ActionResume   = "resume"
+	ActionStop     = "stop"
+	ActionSessions = "sessions"
+	controlLimit   = 32 << 10
+	responseLimit  = 2 << 20
 )
 
 type Request struct {
@@ -34,10 +38,12 @@ type Request struct {
 	Destination    string   `json:"destination,omitempty"`
 	Workspace      string   `json:"workspace,omitempty"`
 	IncludeIgnored []string `json:"includeIgnored,omitempty"`
+	Source         string   `json:"source,omitempty"`
 }
 type Response struct {
-	Status *Status `json:"status,omitempty"`
-	Error  string  `json:"error,omitempty"`
+	Status   *Status  `json:"status,omitempty"`
+	Error    string   `json:"error,omitempty"`
+	Sessions []Status `json:"sessions,omitempty"`
 }
 
 func SocketPath(directory string) string { return filepath.Join(directory, "control.sock") }
@@ -162,6 +168,7 @@ func (s *Service) handle(ctx context.Context, conn net.Conn) {
 		return
 	}
 	var status Status
+	var sessions []Status
 	switch q.Action {
 	case ActionStart:
 		status, err = s.Start(ctx, q.ID, q.OperationID, q.Workspace, q.IncludeIgnored)
@@ -173,8 +180,16 @@ func (s *Service) handle(ctx context.Context, conn net.Conn) {
 		status, err = s.Cancel(ctx, q.ID, q.OperationID)
 	case ActionRecover:
 		status, err = s.Recover(ctx, q.ID)
+	case ActionPull:
+		status, err = s.Pull(ctx, q.ID, q.OperationID, q.Source)
+	case ActionResume:
+		status, err = s.Resume(ctx, q.ID, q.OperationID)
+	case ActionStop:
+		status, err = s.Stop(ctx, q.ID, q.OperationID)
+	case ActionSessions:
+		sessions, err = s.Sessions()
 	}
-	response := Response{}
+	response := Response{Sessions: sessions}
 	if status.ID != "" {
 		response.Status = &status
 	}
@@ -185,11 +200,14 @@ func (s *Service) handle(ctx context.Context, conn net.Conn) {
 	_ = encoder.Encode(response)
 }
 func validateRequest(q Request) error {
-	if err := workspace.ValidateIgnoredPaths(q.IncludeIgnored); err != nil {
+	if err := validateCommonRequest(q); err != nil {
 		return err
 	}
-	if q.Action != ActionStart && len(q.IncludeIgnored) != 0 {
-		return errors.New("home: ignored file selection is start intent")
+	if q.Action == ActionSessions {
+		if q.ID != "" || q.OperationID != "" || q.Workspace != "" || q.Destination != "" {
+			return errors.New("home: unexpected session listing fields")
+		}
+		return nil
 	}
 	if !validID(q.ID) {
 		return errors.New("home: invalid session UUID")
@@ -203,9 +221,13 @@ func validateRequest(q Request) error {
 		if !validID(q.OperationID) || q.Destination == "" || q.Workspace != "" {
 			return errors.New("home: invalid move")
 		}
-	case ActionCancel:
+	case ActionPull:
+		if !validID(q.OperationID) || q.Source == "" || q.Workspace != "" || q.Destination != "" {
+			return errors.New("home: invalid pull")
+		}
+	case ActionResume, ActionStop, ActionCancel:
 		if !validID(q.OperationID) || q.Workspace != "" || q.Destination != "" {
-			return errors.New("home: invalid cancellation")
+			return errors.New("home: invalid execution intent")
 		}
 	case ActionAttach, ActionStatus, ActionRecover:
 		if q.OperationID != "" || q.Workspace != "" || q.Destination != "" {
@@ -263,3 +285,16 @@ func Call(ctx context.Context, path string, q Request) (Response, error) {
 }
 
 var _ io.Closer = (*Service)(nil)
+
+func validateCommonRequest(q Request) error {
+	if err := workspace.ValidateIgnoredPaths(q.IncludeIgnored); err != nil {
+		return err
+	}
+	if q.Action != ActionStart && len(q.IncludeIgnored) != 0 {
+		return errors.New("home: ignored file selection is start intent")
+	}
+	if q.Action != ActionPull && q.Source != "" {
+		return errors.New("home: source is pull intent")
+	}
+	return nil
+}

@@ -2,8 +2,10 @@ package placement
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -163,6 +165,7 @@ type protocolExecutor struct {
 	kube                       client.Client
 	data                       []byte
 	meta                       checkpoint.Metadata
+	initial                    []byte
 	state                      string
 	lostActivate, skipActivate bool
 	finishes                   int
@@ -180,6 +183,15 @@ func (e *protocolExecutor) Execute(ctx context.Context, namespace, pod, containe
 	}
 	if container == runtimekube.CaptureContainer {
 		switch args[1] {
+		case helperPrepareWorkspace:
+			if slices.Contains(args, "--instruction-digest") {
+				return errors.New("initial workspace restore cannot accept resume-only instructions")
+			}
+			data, err := io.ReadAll(input)
+			if err != nil || string(data) != string(e.initial) {
+				return errors.New("invalid initial input")
+			}
+			return json.NewEncoder(output).Encode(checkpoint.Metadata{Harness: harness.NativeCodex, SHA256: fmt.Sprintf("%x", sha256.Sum256(data)), Bytes: len(data)})
 		case helperPrepare:
 			data, err := io.ReadAll(input)
 			if err != nil || string(data) != string(e.data) {
@@ -201,7 +213,7 @@ func (e *protocolExecutor) Execute(ctx context.Context, namespace, pod, containe
 		}
 	}
 	switch args[1] {
-	case "activate":
+	case nativeActivate:
 		if !e.skipActivate {
 			e.state = nativeActive
 		}
@@ -231,7 +243,11 @@ func (e *protocolExecutor) Execute(ctx context.Context, namespace, pod, containe
 	default:
 		return errors.New("unexpected command")
 	}
-	return json.NewEncoder(output).Encode(map[string]any{"op": args[1], "state": e.state, "threadId": fixtureThread})
+	thread := fixtureThread
+	if e.initial != nil && (e.state == nativePrepared || args[1] == nativeActivate) {
+		thread = ""
+	}
+	return json.NewEncoder(output).Encode(map[string]any{"op": args[1], "state": e.state, "threadId": thread})
 }
 
 type observedLedger struct {

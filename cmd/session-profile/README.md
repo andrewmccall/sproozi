@@ -208,3 +208,32 @@ not establish absence, zero usage or a stopped writer. Recover the same operatio
 through the home journal. See the guide's
 [recovery rules](../../docs/guides/session-mobility.md#recover-or-cancel) and
 [ADR 0010](../../docs/adr/0010-managed-session-authority-and-admission.md).
+
+## Retained remote work
+
+To accept new Codex tasks independently of the home daemon, add `workTokenFile`
+and `repositories` to the configuration. The task token must be distinct from
+`tokenFile`, at least 32 characters, and stored privately. Repository entries
+select either an administrator-owned absolute stopped `snapshot` path or an
+approved GitHub `url` with an optional `ref`. URL fetching uses the worker's
+separately scoped GitHub capability; the trusted profile never imports a worker's
+credential configuration.
+
+`/work/mcp` exposes `sproozi_run`, `sproozi_status`, `sproozi_sessions` and
+`sproozi_session_info` to Hermes. Fixed JSON routes also support cancellation and
+recovery. The home principal additionally permits checkpoint export and the
+exclusive one-way claim; the task token cannot claim ownership. TLS and bearer
+validation happen before request decoding.
+
+The protected `directory/work` retains original request/execution identities,
+source receipts, bounded native/Git checkpoints and untrusted final text. Run one
+owner with durable storage. Restart with the same principal and directory;
+changing principals cannot reinterpret retained records. A lost preparation or
+stop reply requires recovery of that exact allocation. Missing stop/accounting
+evidence blocks export, and changing a request's intent on replay is rejected.
+
+The native image includes `/usr/local/bin/session-profile` and Git for this
+trusted service; the scratch controller image does not. A trusted Pod deployment
+needs private persistent storage, TLS/token files and the profile RBAC above.
+See [the full workflow](../../docs/guides/portable-workflows.md) and
+[its isolated fixture](../../hack/verify/portable-workflows/README.md).

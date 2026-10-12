@@ -5,6 +5,15 @@ the home coordinator, and administrator-selected remote HTTPS profiles. Client
 commands use its private Unix socket. A terminal attachment can disconnect while
 the daemon and selected native process keep running.
 
+Remote-first Codex tasks use `run --executor NAME --repository NAME --task-file
+FILE --operation UUID`, followed by `sessions` and `status`. A configured remote
+owner accepts these without a running home daemon. Start the home for `pull
+SESSION_ID --from NAME`, `resume SESSION_ID` and `stop SESSION_ID`. Product
+commands accept `--config FILE`, defaulting to the platform user configuration
+directory's `sproozi/config.json`; legacy `start`, `attach` and `move` use an
+explicit `--socket`. Keep operation UUIDs stable on retries. See the complete
+[retained-work setup](../../docs/guides/portable-workflows.md).
+
 For the local and remote setup sequence, see
 [Move a native session between local and remote execution](../../docs/guides/session-mobility.md).
 Both pinned clients have passed production Docker-to-Kubernetes-to-Docker round

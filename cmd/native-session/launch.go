@@ -26,11 +26,19 @@ func codexArguments(c config, id string) []string {
 	for _, option := range c.Options {
 		args = append(args, "-c", option)
 	}
+	if c.ClientConfig != nil {
+		for _, option := range c.ClientConfig.CodexOptions() {
+			args = append(args, "-c", option)
+		}
+	}
 	if c.Model != "" {
 		args = append(args, "--model", c.Model)
 	}
 	if id != "" {
 		args = append(args, "resume", id)
+	}
+	if c.Task != "" {
+		args = append(args, "--", c.Task)
 	}
 	return args
 }
@@ -38,11 +46,12 @@ func (s *server) observeNativeTurn() (string, string, error) {
 	s.mu.Lock()
 	c := s.config
 	id := s.threadID
+	baseline := s.taskBaseline
 	s.mu.Unlock()
 	if c.Harness == harness.NativeClaude {
 		return s.observeClaudeTurn()
 	}
-	return observeTurn(nativeHome, id, c.InstructionDigest, c.RolloutMaxBytes)
+	return observeTaskTurn(nativeHome, id, c.InstructionDigest, c.RolloutMaxBytes, c.Task, baseline)
 }
 func (s *server) writeInput(a *nativepty.Attachment, data []byte) (int, error) {
 	s.mu.Lock()
