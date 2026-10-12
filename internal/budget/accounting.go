@@ -1,6 +1,17 @@
 package budget
 
-import "fmt"
+import (
+	"fmt"
+	"math"
+)
+
+func validateState(s State) error {
+	if s.UnitsUsed < 0 || s.CostMicros < 0 || s.ReservedUnits < 0 || s.ReservedCostMicros < 0 ||
+		s.UnitsUsed > math.MaxInt64-s.ReservedUnits || s.CostMicros > math.MaxInt64-s.ReservedCostMicros {
+		return fmt.Errorf("budget: negative or overflowing ledger state")
+	}
+	return nil
+}
 
 func reserveState(s *State, req UsageReservation) (*LedgerReservation, error) {
 	if req.MaxUnits < 0 || req.MaxCostMicros < 0 || req.Units < 0 || req.CostMicros < 0 {
@@ -25,6 +36,9 @@ func reserveState(s *State, req UsageReservation) (*LedgerReservation, error) {
 			cost = available
 		}
 	}
+	if units > math.MaxInt64-s.UnitsUsed-s.ReservedUnits || cost > math.MaxInt64-s.CostMicros-s.ReservedCostMicros {
+		return nil, fmt.Errorf("budget: reservation accounting overflows")
+	}
 	s.ReservedUnits += units
 	s.ReservedCostMicros += cost
 	return &LedgerReservation{runID: AccountKey(""), units: units, costMicros: cost, maxUnits: req.MaxUnits, maxCostMicros: req.MaxCostMicros}, nil
@@ -41,6 +55,10 @@ func settleState(s *State, r *LedgerReservation, usage TrustedUsage) error {
 	}
 	if s.ReservedUnits < r.units || s.ReservedCostMicros < r.costMicros {
 		return fmt.Errorf("budget: reservation state is inconsistent")
+	}
+	if usage.Units > math.MaxInt64-s.UnitsUsed-(s.ReservedUnits-r.units) ||
+		usage.CostMicros > math.MaxInt64-s.CostMicros-(s.ReservedCostMicros-r.costMicros) {
+		return fmt.Errorf("budget: settled accounting overflows")
 	}
 	if (r.maxUnits > 0 && usage.Units > r.units) || (r.maxCostMicros > 0 && usage.CostMicros > r.costMicros) || (r.maxUnits > 0 && s.UnitsUsed+usage.Units > r.maxUnits) || (r.maxCostMicros > 0 && s.CostMicros+usage.CostMicros > r.maxCostMicros) {
 		return fmt.Errorf("budget: settled usage exceeds reservation or budget")

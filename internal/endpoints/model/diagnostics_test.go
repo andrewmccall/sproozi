@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	modelgateway "github.com/andrewmccall/sproozi/internal/endpoints/model"
-	"github.com/andrewmccall/sproozi/internal/gateway"
 )
 
 const (
@@ -24,7 +23,7 @@ func TestFailedStreamDiagnosticsPreserveErrorWithoutBypassingUsage(t *testing.T)
 		_, _ = fmt.Fprint(w, stream)
 	}))
 	defer server.Close()
-	h := newHandler(t, nil, &gateway.FakeRunFinder{Identity: testRunIdentity()}, server.URL)
+	h := newHandler(t, testExecutionGrant(), server.URL)
 	var diagnostics []modelgateway.ResponseDiagnostic
 	h.Config.Diagnostics = func(d modelgateway.ResponseDiagnostic) { diagnostics = append(diagnostics, d) }
 	w := httptest.NewRecorder()
@@ -44,7 +43,7 @@ func TestFailedStreamDiagnosticsPreserveErrorWithoutBypassingUsage(t *testing.T)
 		strings.Contains(d.ErrorMessage, "secret-record") || strings.Contains(d.ErrorMessage, "eyJhbGci") {
 		t.Fatal("diagnostics leaked credentials or model output")
 	}
-	state := h.Config.BudgetTracker.State(testRunUID)
+	state := observedState(t, h.Config.BudgetTracker, testRunUID)
 	if state.UnitsUsed != 10_000 || state.ReservedUnits != 0 {
 		t.Fatal("diagnostics weakened conservative settlement")
 	}
@@ -58,11 +57,11 @@ func TestGatewayNormalizesVerifiedHeaderlessSSE(t *testing.T) {
 		_, _ = fmt.Fprint(w, stream)
 	}))
 	defer server.Close()
-	h := newHandler(t, nil, &gateway.FakeRunFinder{Identity: testRunIdentity()}, server.URL)
+	h := newHandler(t, testExecutionGrant(), server.URL)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, testResponsesPath, strings.NewReader(`{"model":"test","stream":true}`)))
 	if w.Code != 200 || w.Header().Get("Content-Type") != "text/event-stream" || w.Body.String() != stream ||
-		h.Config.BudgetTracker.State(testRunUID).UnitsUsed != 12 {
+		observedState(t, h.Config.BudgetTracker, testRunUID).UnitsUsed != 12 {
 		t.Fatalf("verified headerless SSE not normalized or settled: status=%d", w.Code)
 	}
 }

@@ -22,6 +22,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/andrewmccall/sproozi/internal/nativeconfig"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -30,12 +32,17 @@ import (
 
 var digestImagePattern = regexp.MustCompile(`^[A-Za-z0-9./_:-]+@sha256:[a-f0-9]{64}$`)
 
+const codexHarnessSelector = "codex"
+
 // ValidateRuntimeTemplate checks the administrator-owned template at the
 // runtime admission seam. It deliberately fails closed for Pod features that
 // could escape the sandbox or silently weaken its security boundary.
 func (s *AgentRuntimeSpec) ValidateRuntimeTemplate() error {
-	if !slices.Contains([]string{"", "codex", "claude-code", "opencode", "hermes"}, s.ClientConfig.Harness) {
+	if !slices.Contains([]string{"", codexHarnessSelector, "claude-code", "opencode", "hermes"}, s.ClientConfig.Harness) {
 		return fmt.Errorf("unsupported harness %q", s.ClientConfig.Harness)
+	}
+	if err := s.ClientConfig.validateNativeSession(); err != nil {
+		return err
 	}
 	if len(s.PodTemplate.Spec.Containers) == 0 {
 		return fmt.Errorf("podTemplate must contain a container")
@@ -183,10 +190,42 @@ type RuntimeClientConfig struct {
 	// +kubebuilder:validation:Enum=codex;claude-code;opencode;hermes
 	Harness string `json:"harness,omitempty"`
 
+	// NativeSession supplies administrator-owned launch settings for managed
+	// native sessions. Portable checkpoints never supply these options. Provider
+	// credentials belong at the gateway, outside this public runtime resource.
+	// +optional
+	NativeSession *NativeSessionConfig `json:"nativeSession,omitempty"`
+
 	// TrustBundleConfigMap identifies an immutable certificate-only ConfigMap in the
 	// sproozi-agents namespace. The selected key contains public roots plus the
 	// dedicated inspection CA; private keys and provider credentials are forbidden.
 	TrustBundleConfigMap RuntimeConfigMapKeyReference `json:"trustBundleConfigMap"`
+}
+
+// NativeSessionConfig configures an approved pinned native terminal launch.
+type NativeSessionConfig struct {
+	// Model selects the native model; empty uses the stock client's default.
+	// +optional
+	// +kubebuilder:validation:MaxLength=128
+	Model string `json:"model,omitempty"`
+
+	// Options are stock Codex key=TOML-value settings passed at launch. The
+	// initial instructions and update gate are separately owned by Sproozi.
+	// +optional
+	// +kubebuilder:validation:MaxItems=32
+	// +kubebuilder:validation:items:MaxLength=4096
+	Options []string `json:"options,omitempty"`
+}
+
+func (c RuntimeClientConfig) validateNativeSession() error {
+	if c.NativeSession == nil {
+		return nil
+	}
+	native := c.NativeSession
+	if c.Harness != codexHarnessSelector && c.Harness != "claude-code" {
+		return fmt.Errorf("native session options require the Codex harness")
+	}
+	return nativeconfig.ValidateHarness(c.Harness, native.Model, native.Options)
 }
 
 // RuntimeConfigMapKeyReference selects exactly one ConfigMap data key.

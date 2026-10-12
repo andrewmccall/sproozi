@@ -127,7 +127,7 @@ through the production inspected-TLS transport. They do not establish paid
 Anthropic billing or deployed CNI containment. The existing Kind proof remains
 Codex-specific.
 
-Implementation: `internal/harness`, `internal/kubernetes/contract.go`,
+Implementation: `internal/harness`, `internal/runtime/kubernetes/contract.go`,
 `internal/endpoints/model`, `internal/modelauth`, `internal/budget`,
 `cmd/gateway/main.go` and the [stock runtime examples](../../examples/harnesses/README.md).
 Current behavior and verification limits belong in the [harness reference](../reference/harnesses.md),

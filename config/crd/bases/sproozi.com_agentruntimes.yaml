@@ -53,6 +53,27 @@ spec:
                     - opencode
                     - hermes
                     type: string
+                  nativeSession:
+                    description: |-
+                      NativeSession supplies administrator-owned launch settings for managed
+                      native sessions. Portable checkpoints never supply these options. Provider
+                      credentials belong at the gateway, outside this public runtime resource.
+                    properties:
+                      model:
+                        description: Model selects the native model; empty uses the
+                          stock client's default.
+                        maxLength: 128
+                        type: string
+                      options:
+                        description: |-
+                          Options are stock Codex key=TOML-value settings passed at launch. The
+                          initial instructions and update gate are separately owned by Sproozi.
+                        items:
+                          maxLength: 4096
+                          type: string
+                        maxItems: 32
+                        type: array
+                    type: object
                   trustBundleConfigMap:
                     description: |-
                       TrustBundleConfigMap identifies an immutable certificate-only ConfigMap in the

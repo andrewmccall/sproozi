@@ -32,7 +32,7 @@ import (
 	"github.com/andrewmccall/sproozi/internal/audit"
 	"github.com/andrewmccall/sproozi/internal/controller"
 
-	k8sresources "github.com/andrewmccall/sproozi/internal/kubernetes"
+	k8sresources "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
 	"github.com/andrewmccall/sproozi/internal/webhook"
 )
 

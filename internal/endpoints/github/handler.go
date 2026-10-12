@@ -86,13 +86,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	e = identity.AuditEvent(r.Method + " " + r.URL.Path)
 	e.Service, e.SemanticLevel = "github", "semantic"
 	e.Capability = string(sprooziv1alpha1.CapabilityGitHubPullRequest)
-	e.RunID = identity.Run.Namespace + "/" + identity.Run.Name
-	e.RunUID = string(identity.Run.UID)
-	e.PolicyName = identity.Policy.Name
-	e.PolicyGeneration = identity.Policy.Generation
 
 	// 3. Require github.pull_request in both run and policy.
-	hasCapability := slices.Contains(identity.Run.Spec.Capabilities, sprooziv1alpha1.CapabilityGitHubPullRequest) &&
+	hasCapability := slices.Contains(identity.Capabilities, sprooziv1alpha1.CapabilityGitHubPullRequest) &&
 		slices.Contains(identity.Policy.Spec.AllowedCapabilities, sprooziv1alpha1.CapabilityGitHubPullRequest)
 	if !hasCapability {
 		h.deny(w, e, http.StatusForbidden, "github.pull_request capability not granted")
@@ -183,7 +179,7 @@ func parseAPIRepo(path string) (string, bool) {
 }
 
 // handleGit validates and proxies git smart HTTP requests.
-func (h *Handler) handleGit(w http.ResponseWriter, r *http.Request, e audit.Event, identity *gateway.RunIdentity) {
+func (h *Handler) handleGit(w http.ResponseWriter, r *http.Request, e audit.Event, identity *gateway.ExecutionGrant) {
 	ctx := r.Context()
 
 	repo, ok := parseGitRepo(r.URL.Path)
@@ -216,7 +212,7 @@ func (h *Handler) handleGit(w http.ResponseWriter, r *http.Request, e audit.Even
 	// For push operations, parse the complete bounded command section and allow
 	// exactly one creation in this immutable run's branch namespace.
 	if endpoint == receivePackEndpoint {
-		inspectedBody, err := inspectReceivePack(r.Body, string(identity.Run.UID))
+		inspectedBody, err := inspectReceivePack(r.Body, identity.Execution.UID)
 		r.Body = inspectedBody
 		if err != nil {
 			h.deny(w, e, http.StatusForbidden, "push not permitted: "+err.Error())
@@ -235,7 +231,7 @@ func (h *Handler) handleGit(w http.ResponseWriter, r *http.Request, e audit.Even
 }
 
 // handlePRCreate validates and proxies a POST /repos/{owner}/{repo}/pulls request.
-func (h *Handler) handlePRCreate(w http.ResponseWriter, r *http.Request, e audit.Event, identity *gateway.RunIdentity) {
+func (h *Handler) handlePRCreate(w http.ResponseWriter, r *http.Request, e audit.Event, identity *gateway.ExecutionGrant) {
 	ctx := r.Context()
 
 	repo, ok := parseAPIRepo(r.URL.Path)
@@ -261,7 +257,7 @@ func (h *Handler) handlePRCreate(w http.ResponseWriter, r *http.Request, e audit
 		Head string `json:"head"`
 		Base string `json:"base"`
 	}
-	if json.Unmarshal(body, &requested) != nil || !runOwnedBranch(requested.Head, string(identity.Run.UID)) ||
+	if json.Unmarshal(body, &requested) != nil || !runOwnedBranch(requested.Head, identity.Execution.UID) ||
 		!policyBranch(requested.Base, identity.Policy.Spec.GitHubPullRequest.AllowedBaseBranches) {
 		h.deny(w, e, http.StatusForbidden, "pull request head or base is not permitted by policy")
 		return
@@ -299,7 +295,7 @@ type upstreamPullRequest struct {
 	} `json:"base"`
 }
 
-func (h *Handler) forwardPRCreate(w http.ResponseWriter, r *http.Request, e audit.Event, upstreamURL, token string, identity *gateway.RunIdentity, repo string) {
+func (h *Handler) forwardPRCreate(w http.ResponseWriter, r *http.Request, e audit.Event, upstreamURL, token string, identity *gateway.ExecutionGrant, repo string) {
 	response, err := h.doUpstream(r, upstreamURL, token)
 	if err != nil {
 		h.deny(w, e, http.StatusBadGateway, "upstream request failed")
@@ -347,7 +343,7 @@ func (h *Handler) forwardPRCreate(w http.ResponseWriter, r *http.Request, e audi
 		h.deny(w, e, http.StatusForbidden, "pull request base branch not permitted by policy")
 		return
 	}
-	if !runOwnedBranch(verified.Head.Ref, string(identity.Run.UID)) {
+	if !runOwnedBranch(verified.Head.Ref, identity.Execution.UID) {
 		h.deny(w, e, http.StatusForbidden, "pull request head branch is not owned by this run")
 		return
 	}

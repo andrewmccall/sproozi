@@ -1,107 +1,93 @@
-# Harness portability and control
+# Additional harness and client compatibility
 
-**Status:** mixed. Native Codex, Claude Code, OpenCode and Hermes configuration and
-stock launch adapters are implemented. See [current support and evidence](../../reference/harnesses.md).
-The stock Codex SRE path remains the paid-provider deployed baseline. Full Kind
-acceptance exercises all four stock loops and native persistent Hermes delegation
-with deterministic provider fixtures. Managed turn-level control remains future work.
-See the [overview](README.md).
+**Status:** future extensions to the implemented selected native adapters.
+Stock Codex, Claude Code, OpenCode and Hermes launch,
+native MCP configuration and persistent Hermes delegation are implemented. Their
+setup and bounded verification belong in the [harness reference](../../reference/harnesses.md),
+[orchestration reference](../../reference/orchestration.md) and accepted ADRs
+[0002](../../adr/0002-native-cli-harnesses-and-model-protocols.md) and
+[0003](../../adr/0003-persistent-assistants-and-retained-results.md).
+Codex 0.161.0 has selected native resume and remote terminal support under the
+[session guide](../../guides/session-mobility.md), with controlled core and extended
+Docker/Kubernetes/Docker proofs. Claude Code 2.1.27 separately passed its production
+round trip with selected transcript state, trusted native launch/completion,
+same-UUID TUI conversation, foreground Bash and unfinished Git continuity.
+This document covers additional state, harnesses and client control, rather than
+proposing those implemented foundations again.
 
-A harness owns the agent loop, model interaction, context and its user
-experience. Sproozi owns the bounded execution environment and the external
-authority available to work performed there. The model provider is another
-choice: supporting a harness does not automatically make its authentication or
-model traffic compatible with the current gateway.
+A harness owns its agent loop, conversation semantics and user experience.
+Sproozi owns the bounded environment and external authority available there.
+Extend the current launch adapters only when a concrete resume or control proof
+requires it; a generic harness registry is not a prerequisite.
 
-The preferred first integration is to launch an existing CLI in the selected
-sandbox and let it use its local tool executor there. Keep the harness intact.
-A deeper integration should solve a demonstrated requirement for remote control,
-managed sessions or structured interaction, and remain a distinct direction.
+## Session adapters preserve native state
 
-## Launch the CLI before integrating the loop
+For additional [session mobility](session-mobility.md), a harness adapter needs to report
+whether the pinned version and session are movable, reach a supported safe
+boundary, export selected native state, validate compatibility and invoke native
+resume in the restored workspace. Unsupported state must be reported explicitly.
 
-A small harness adapter should prepare the harness's trusted launch settings,
-provide the task and event evidence as data, render approved capability
-connections, and start the process in the approved workspace. Interactive use
-can attach a terminal. Automated runs should use a supported bounded mode with
-observable completion.
+Check path assumptions, environment dependencies, active tools and subprocesses,
+conversation compaction, native session identifiers and state-format versions.
+Do not promise that copying transcript files reproduces the same native session.
+The runtime adapter provisions and stops the environment; the harness adapter
+handles native conversation state. Neither can assume the other has stopped an
+in-flight tool or established exclusive workspace ownership.
 
-The runtime adapter creates and observes the environment; the harness adapter
-chooses how the selected CLI runs in it. A harness's local shell or file executor
-should operate inside that environment. If the harness selects a separate
-executor, Sproozi must establish that it targets the approved sandbox. Passing
-host Docker access or launching commands on the caller's laptop would escape
-the execution boundary.
+Preserve the selected native history's semantics. Codex can retain developer-role
+records and remembered permissions; the adapter does not rewrite them as user
+text. History remains untrusted for Sproozi authority and accounting. Generate
+trusted launch settings and MCP connections again from destination policy.
+Imported global settings, hooks, plugins and credential helpers cannot acquire
+authority through checkpointing. Keep isolated worker homes and a strict state
+allowlist for each separately proved native resume path.
 
-Harness-native approvals may further restrict work, but cannot grant an action
-that Sproozi policy denies. A harness does not need to understand Sproozi's
-semantic policy to be contained by it. Installation alone is not compatibility:
-model connections, subprocesses, configuration loading and lifecycle behaviour
-must all work within the enforced boundary.
+The two implemented adapters deliberately use different completion evidence.
+Codex has a checked final completed-turn event and retained instruction digest.
+Claude has no reliable completed-turn marker or approved instructions in its
+transcript. The trusted launch retains the instruction contract separately, while
+the supervisor checks foreground lifecycle hooks and the selected settled leaf.
+Those workload-accessible hints do not prove source revocation, actual container
+stop or trusted usage. See
+[ADR 0011](../../adr/0011-native-session-compatibility-and-completion.md).
 
-The current [agent contract](../../reference/agent-contract.md) separates trusted
-instructions from untrusted task and event context. It is input, not a model
-session protocol. The stock runtime command in `examples/sre-demo/agentruntime.yaml`
-launches `codex exec`. Additional [stock runtime examples](../../../examples/harnesses/README.md)
-use Claude Code print mode and OpenCode run mode; there is no common loop registry. Its exit status determines lifecycle success, independently
-of PR or task-quality evidence.
+## Client compatibility has separate levels
 
-## Target harnesses
-
-The entry points below come from official documentation checked on 6 October
-2026. They identify target entry points. The current reference records implemented
-CLI adapters separately from remaining candidate and managed paths. Pin versions and verify each integration before
-adding it to [client compatibility](../../reference/client-compatibility.md).
-
-| Harness | Preferred first path | Boundary to establish |
+| Level | User experience | Required proof |
 | --- | --- | --- |
-| Codex | Extend the existing stock CLI path to Docker and generated capability configuration. | Preserve its proxy/trust and model transport settings; interactive mode needs separate acceptance from the existing one-shot SRE run. |
-| Claude Code | Launch the CLI, with print mode for bounded work and run-local MCP configuration. [CLI reference](https://code.claude.com/docs/en/cli-reference). | Verify model authentication and transport, approved configuration loading, approval behaviour and process outcome. |
-| GitHub Copilot | Start with Copilot CLI's interactive or programmatic interface. [CLI concepts](https://docs.github.com/en/copilot/concepts/copilot-surfaces/copilot-cli). | Constrain loaded tools and credentials, including built-in integrations. CLI support does not establish IDE or cloud-agent support. |
-| OpenCode | Use its CLI and non-interactive run path in the approved environment. [Commands](https://opencode.ai/v2/docs/cli/commands/). | Establish where its execution server and tools run, and how provider and MCP connections stay inside the approved boundary. |
-| OpenClaw | Evaluate its local one-shot agent mode before connecting a persistent Gateway. [Agent CLI](https://docs.openclaw.ai/cli/agent). | Use isolated run state and local execution. Messaging channels, persistent sessions and Gateway control need their own scope and lifecycle. |
-| Hermes | Launch the CLI, using single-query mode for bounded work. [CLI interface](https://hermes-agent.nousresearch.com/docs/user-guide/cli/). | Select the tool execution backend deliberately; isolate memory, configuration and optional messaging or scheduled services from the bounded run. |
+| Native CLI resume | Continue using the harness's supported resume mechanism. | Native conversation and workspace continuity with pinned versions and changed host paths |
+| Remote terminal | Attach to the actual running CLI through an authenticated transport. | Owner access, detach/reconnect, revocation and lifecycle control |
+| Native protocol | Connect an IDE or GUI to a remote native session. | The specific official client accepts the supported endpoint and discovers/resumes the correct session |
 
-These are targets, not a requirement to build six deep integrations before the
-first portability proof. Codex plus one additional CLI harness is enough to test
-the separation. Persistent OpenClaw or Hermes assistants may later submit
-bounded work to Sproozi while retaining their own memory and channel state.
-Hosting their full persistent service is a different lifecycle from an AgentRun.
+Further native-protocol integration can investigate official session/server and
+remote-control interfaces. These are separate experiment candidates,
+not claims that the current desktop clients accept arbitrary Sproozi endpoints.
+Vendor-managed cloud continuations are not proof of relocation between our own
+Docker and Kubernetes environments. Recheck current official interfaces when
+implementing; do not rely on undocumented session-file manipulation.
 
-## Configuration adapters belong at launch
+The accepted first client experience is native CLI locally and terminal attachment
+remotely, under [ADR 0006](../../adr/0006-native-cli-and-terminal-before-gui-mobility.md).
+GUI/IDE connection remains a later independent proof. [ADR 0007](../../adr/0007-codex-round-trip-before-harness-expansion.md)
+selects the complete Codex round trip first, followed by Claude Code.
 
-[Capability preparation](capabilities-and-mcp.md) resolves approved operations
-and connections. The harness adapter translates those into the selected CLI's
-supported configuration. Do not assume one MCP configuration file works for all
-harnesses or confuse tool discovery with capability authority.
+The first session starts through Sproozi in local Docker, under
+[ADR 0005](../../adr/0005-controlled-docker-launch-before-session-adoption.md).
+Later adoption of a directly
+started native session requires explicit user selection, safe state import and
+control of the original writer. A copied session cannot import cached approvals
+as a Sproozi grant. If native GUI access is unsupported, retain the proved CLI or
+terminal path and describe that limitation.
 
-Keep configuration local to the run. User-global settings, repository hooks,
-plugins, preconfigured servers, credential helpers and existing sessions must
-not introduce ambient authority. Repository instructions can help the agent do
-its task but cannot select a broader policy. The adapter should report
-unsupported combinations rather than inherit host settings until the CLI works.
+## Remote execution and external loop control
 
-Model-provider access needs its own mediated path and compatibility evidence.
-Today's gateway and recorded Codex configuration support particular HTTP model
-protocols; they are not evidence that Claude, Copilot or every OpenCode/Hermes
-provider will work. Preserve the existing budget limitations and avoid describing
-harness-side cost controls as Sproozi spending guarantees.
-
-## Remote execution and remote harness control are different
-
-A CLI running in a Kubernetes Pod is remote execution with the agent loop in
-the sandbox. It can use the same launch adapter as a local Docker container.
-Moving that workload does not require an API integration with the harness.
-
-With remote harness control, the loop lives elsewhere and sends commands or
-tool requests to an executor in a Sproozi environment. The external service may
-own session history, context compaction and user interaction. Sproozi must still
-own placement, identity, grants, deadlines, cancellation and environment cleanup.
-This division proves that Sproozi need not become an agent framework.
+A stock CLI running in a Pod is remote execution with the agent loop in the
+sandbox. Reattaching a client to that process differs from placing the loop in an
+external service that sends commands to a Sproozi executor.
 
 ```mermaid
 flowchart LR
-    Harness[External or managed agent loop] --> Control[Authenticated executor control connection]
+    Harness[External or managed agent loop] --> Control[Authenticated bounded control connection]
     Control --> Executor[Executor in a Sproozi sandbox]
     Executor --> Broker[Trusted capability enforcement]
     Broker --> Systems[Permitted systems]
@@ -109,56 +95,41 @@ flowchart LR
     Sproozi --> Broker
 ```
 
-A concrete candidate is the OpenAI Agents API's
-[self-hosted environment model](https://developers.openai.com/api/docs/guides/agents-api/environments/self-hosted).
-Its documentation describes an OpenAI-managed Codex loop and a `codex exec-server`
-executor in user-owned compute, connected outbound over WebSocket. It separates
-the application's API key from the restricted environment connection key.
-This is evidence for the integration direction, not an implemented Sproozi
-adapter or a promise that the standard Codex cloud UI can select a Sproozi cluster.
+An external loop could own session history, context compaction and interaction.
+Sproozi must still own executor placement, identity, capability grants, deadlines,
+cancellation and cleanup. Model-provider, executor-control and target-system
+credentials are separate authorities. A generic egress grant alone does not
+establish safe executor control.
 
-The current proxy rejects protocol upgrades, including WebSockets. Supporting
-that control channel therefore needs a deliberate authenticated and bounded
-transport design. A generic egress grant would not by itself establish safe
-remote control. Keep executor connection authority separate from model-provider
-and target-system credentials.
+The current gateway rejects HTTP protocol upgrades in
+`internal/proxytransport/gateway.go`. A native control protocol that requires an
+upgrade therefore needs a deliberate authenticated transport and lifecycle
+design; existing model or MCP compatibility does not supply that control channel.
 
-## What deeper integration must resolve
+Before supporting an external loop, resolve how it binds to one bounded execution,
+which events end a task, who stops an idle executor, and how disconnects, stale
+commands and retries are reconciled. A persistent executor's process exit cannot
+stand in for completion of every turn. Admission must also establish that the
+harness's tools run in the selected environment rather than on an unrestricted
+host or second executor.
 
-An executor can stay alive across turns. Its process exit cannot automatically
-stand in for completion of one task, unlike the current one-shot CLI convention.
-Before integrating a managed loop, establish:
+## Next proofs
 
-- How the remote session and executor bind to a Sproozi execution, and whether
-  one bounded run covers one turn or a longer approved session.
-- Which events establish terminal execution outcomes, independently of task
-  artefacts, and who is responsible for stopping an idle executor.
-- How cancellation, deadline expiry and policy revocation stop remote work,
-  close connections and remove access even during disconnection or reconnection.
-- How retries avoid duplicate work, how stale commands are rejected, and how
-  lost control-plane state is reconciled with owned sandbox resources.
-- Which files, results and session state leave the environment, and what audit
-  attribution remains available when the loop is external.
+OpenCode and Hermes mobility need their own complete placement proof; bounded
+stock launch support does not supply native continuity. For each extension,
+verify earlier-turn conversation facts and Git history, index/working changes,
+untracked files and explicit ignored selection. Keep the verified Codex tool,
+held-move, denial and forced-cancellation checks and Claude foreground Bash round
+trip tied to their actual builds and retained evidence. The final-source
+matched-image Codex rerun passed. Claude's full held placement move/cancel matrix
+still needs its own proof; the native held-turn prerequisite does not supply it.
+Broaden long-history,
+compaction, background/subagent and failure coverage only through explicit tests.
+Verify regenerated MCP connections and authority independently of successful
+task output; a successful model/tool fixture does not prove every configured
+integration.
 
-Sproozi should adapt to the harness's existing control protocol and session
-ownership. It should not invent a common agent conversation protocol, reproduce
-context compaction, or become the owner of every harness's approval UI.
-
-SDK, server or API integration may eventually help a target harness submit work,
-attach an external UI or reuse a managed loop. Those capabilities should be
-added separately from its CLI-spawn adapter. No specific SDK, schema, endpoint
-set or persistent-session design is committed here.
-
-## Proof of portability
-
-For a second CLI harness, verify approved task delivery, scoped capability use,
-out-of-scope and direct-access denials, real exit status, cancellation and cleanup.
-Where MCP is part of that run, verify that the same capability grant works after
-only the harness configuration changes. Reuse the runtime and policy proof;
-avoid adding a new permission model for each CLI.
-
-For a later managed integration, demonstrate the loop outside the sandbox and
-exercise disconnection, reconnection, revocation and explicit task completion.
-A successful remote command alone is insufficient evidence of lifecycle control.
-Keep each verified combination visible alongside its limitations rather than
-claiming every harness, runtime and provider combination is interchangeable.
+Prove each terminal or native-protocol client separately. For an external-loop
+integration, exercise disconnection, reconnection, policy revocation, explicit
+task completion and cleanup. Publish the supported harness/runtime/client matrix
+with its limitations rather than implying every combination is interchangeable.

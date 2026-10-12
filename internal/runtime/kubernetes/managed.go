@@ -1,0 +1,158 @@
+package kubernetes
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"slices"
+	"strconv"
+	"time"
+
+	api "github.com/andrewmccall/sproozi/api/v1alpha1"
+	"github.com/andrewmccall/sproozi/internal/harness"
+	placement "github.com/andrewmccall/sproozi/internal/runtime/kubernetes/session"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+)
+
+const CaptureContainer = "checkpoint"
+
+// ManagedWriterFenceFinalizer retains kubelet termination evidence until the
+// trusted placement has persisted the exact native container's physical fence.
+const ManagedWriterFenceFinalizer = "sessions.sproozi.com/writer-fence"
+const nativeConfigKey = "native.json"
+const checkpointTemporaryVolume = "checkpoint-tmp"
+const workspaceDirectory = "/workspace"
+const workspaceVolume = "workspace"
+const managedTemplateEnabledValue = "true"
+const openAIAPIKey = "OPENAI_API_KEY"
+
+func addManagedNativeContract(ctx context.Context, kube client.Client, run *api.AgentRun, template *api.AgentTemplate,
+	runtime *api.AgentRuntime, data map[string]string,
+) error {
+	binding, err := placement.ResolveRun(ctx, kube, run, template)
+	if err != nil || binding == nil {
+		return err
+	}
+	version, err := harness.NativeVersion(binding.Harness)
+	if err != nil || runtime.Spec.ClientConfig.Harness != string(binding.Harness) || binding.NativePin != version {
+		return fmt.Errorf("managed native runtime does not match registered harness and pin")
+	}
+	launch := harness.NativeLaunch{Harness: binding.Harness, Deadline: binding.OriginalDeadline, ThreadID: binding.NativeUUID,
+		Instructions: template.Spec.Instructions, InstructionDigest: binding.InstructionDigest, RolloutMaxBytes: 64 << 20,
+		Env: []string{"PATH=/opt/git/bin:/usr/local/bin:/usr/bin:/bin", "TERM=xterm-256color", "LANG=C.UTF-8",
+			nativeAPIKey(binding.Harness) + "=" + clientAuthPlaceholder, "GH_TOKEN=" + clientAuthPlaceholder, "GH_PROMPT_DISABLED=1",
+			"GIT_TERMINAL_PROMPT=0"},
+		Gateway: &harness.NativeGateway{Endpoint: runtime.Spec.GatewayEndpoint,
+			TokenPath: harness.NativeGatewayTokenPath, TrustBundle: harness.NativeGatewayTrustBundle}}
+	if native := runtime.Spec.ClientConfig.NativeSession; native != nil {
+		launch.Model, launch.Options = native.Model, slices.Clone(native.Options)
+	}
+	if err = launch.Gateway.Validate(launch.Env); err != nil {
+		return err
+	}
+	document, err := json.Marshal(launch)
+	if err != nil {
+		return err
+	}
+	data[nativeConfigKey] = string(document)
+	return nil
+}
+
+// ManagedSandboxClient provisions an inert native supervisor and a separate
+// trusted storage helper. Ordinary SandboxClient implementations cannot silently
+// ignore a required session binding.
+type ManagedSandboxClient interface {
+	EnsureManaged(context.Context, *api.AgentRun, *api.AgentRuntime, *placement.Record) (string, error)
+}
+
+func (p *PodSandboxClient) EnsureManaged(ctx context.Context, run *api.AgentRun, rt *api.AgentRuntime, binding *placement.Record) (string, error) {
+	if err := rt.Spec.ValidateRuntimeTemplate(); err != nil {
+		return "", err
+	}
+	if err := validateRuntimeTrustBundle(ctx, p.c, rt); err != nil {
+		return "", err
+	}
+	pod, err := BuildManagedPodSpec(run, rt, binding)
+	if err != nil {
+		return "", err
+	}
+	return p.ensurePod(ctx, pod)
+}
+
+func BuildManagedPodSpec(run *api.AgentRun, rt *api.AgentRuntime, binding *placement.Record) (*corev1.Pod, error) {
+	if binding == nil {
+		return nil, fmt.Errorf("managed sandbox requires a native registration")
+	}
+	version, err := harness.NativeVersion(binding.Harness)
+	if err != nil || rt.Spec.ClientConfig.Harness != string(binding.Harness) || binding.NativePin != version {
+		return nil, fmt.Errorf("managed sandbox native harness/pin mismatch")
+	}
+	if binding.RunUID != string(run.UID) || binding.IntendedRunName != run.Name ||
+		binding.TemplateName != run.Spec.TemplateRef.Name || !binding.OriginalDeadline.After(time.Now()) ||
+		binding.Phase == placement.Creating || binding.Phase == placement.Cancelled || binding.Phase == placement.Stopped {
+		return nil, fmt.Errorf("managed sandbox requires a current exact registration")
+	}
+	if len(rt.Spec.WorkloadContainers) != 1 || rt.Spec.WorkloadContainers[0] != agentContainerName ||
+		len(rt.Spec.PodTemplate.Spec.Containers) != 2 {
+		return nil, fmt.Errorf("managed runtime requires one native agent and one checkpoint helper")
+	}
+	helper := slices.IndexFunc(rt.Spec.PodTemplate.Spec.Containers, func(c corev1.Container) bool { return c.Name == CaptureContainer })
+	if helper < 0 {
+		return nil, fmt.Errorf("managed runtime checkpoint helper is missing")
+	}
+	configured := rt.Spec.PodTemplate.Spec.Containers[helper]
+	if len(configured.Env) != 0 || len(configured.EnvFrom) != 0 || len(configured.VolumeMounts) != 0 ||
+		len(configured.VolumeDevices) != 0 || configured.Lifecycle != nil || len(configured.Ports) != 0 {
+		return nil, fmt.Errorf("checkpoint helper cannot receive credentials, mounts or workload hooks")
+	}
+	for _, volume := range rt.Spec.PodTemplate.Spec.Volumes {
+		if volume.Name == checkpointTemporaryVolume {
+			return nil, fmt.Errorf("checkpoint temporary volume is reserved")
+		}
+	}
+	pod := BuildPodSpec(run, rt, run.Status.Identity.ServiceAccountName)
+	pod.Finalizers = append(pod.Finalizers, ManagedWriterFenceFinalizer)
+	pod.Annotations = map[string]string{
+		"sessions.sproozi.com/registry-uid": binding.Reference.UID,
+		"sessions.sproozi.com/epoch":        strconv.FormatUint(binding.Epoch, 10),
+	}
+	size := resource.MustParse("16Mi")
+	pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{Name: checkpointTemporaryVolume,
+		VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{SizeLimit: &size}}})
+	// Memory-backed EmptyDirs apply the size limit at the filesystem rather than
+	// relying on periodic kubelet disk-usage eviction after untrusted extraction.
+	for i := range pod.Spec.Volumes {
+		if volume := &pod.Spec.Volumes[i]; volume.EmptyDir != nil {
+			volume.EmptyDir.Medium = corev1.StorageMediumMemory
+		}
+	}
+	for i := range pod.Spec.Containers {
+		container := &pod.Spec.Containers[i]
+		switch container.Name {
+		case agentContainerName:
+			container.Command = []string{"/usr/local/bin/native-session"}
+			container.Args = []string{"serve", "--config", "/etc/sproozi/native/config.json"}
+			container.WorkingDir = workspaceDirectory
+			container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{Name: contractVolumeName,
+				MountPath: "/etc/sproozi/native/config.json", SubPath: nativeConfigKey, ReadOnly: true})
+		case CaptureContainer:
+			container.Command = []string{"/usr/local/bin/checkpoint"}
+			container.Args = []string{"hold", "--deadline", binding.OriginalDeadline.Format(time.RFC3339Nano)}
+			container.WorkingDir = workspaceDirectory
+			container.VolumeMounts = []corev1.VolumeMount{{Name: workspaceVolume, MountPath: workspaceDirectory},
+				{Name: checkpointTemporaryVolume, MountPath: "/tmp"}}
+		default:
+			return nil, fmt.Errorf("managed runtime contains an unexpected container")
+		}
+	}
+	return pod, nil
+}
+
+func nativeAPIKey(kind harness.NativeKind) string {
+	if kind == harness.NativeClaude {
+		return "ANTHROPIC_API_KEY"
+	}
+	return openAIAPIKey
+}

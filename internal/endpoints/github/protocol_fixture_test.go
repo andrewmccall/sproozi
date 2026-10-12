@@ -31,9 +31,6 @@ import (
 	"strings"
 	"testing"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
-
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/audit"
 	"github.com/andrewmccall/sproozi/internal/gateway"
@@ -55,18 +52,16 @@ type protocolAuditWriter struct{ events []audit.Event }
 
 func (w *protocolAuditWriter) Log(event audit.Event) { w.events = append(w.events, event) }
 
-func protocolIdentity() *gateway.RunIdentity {
-	run := &sprooziv1alpha1.AgentRun{ObjectMeta: metav1.ObjectMeta{
-		Name: "run-abc", Namespace: "default", UID: types.UID("run-abc-uid"),
-	}}
-	run.Spec.Capabilities = []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityGitHubPullRequest}
-	policy := &sprooziv1alpha1.AgentPolicy{ObjectMeta: metav1.ObjectMeta{Name: "fixture-policy", Generation: 7}}
+func protocolIdentity() *gateway.ExecutionGrant {
+	run := gateway.Reference{Backend: gateway.BackendKubernetes, Name: "run-abc", Namespace: "default", UID: "run-abc-uid"}
+	capabilities := []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityGitHubPullRequest}
+	policy := gateway.PolicySnapshot{Name: "fixture-policy", Generation: 7}
 	policy.Spec.AllowedCapabilities = []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityGitHubPullRequest}
 	policy.Spec.GitHubPullRequest = sprooziv1alpha1.GitHubPullRequestScope{
 		Repositories:        []string{"andrewmccall/home-ops"},
 		AllowedBaseBranches: []string{fixtureBaseBranch},
 	}
-	return &gateway.RunIdentity{Run: run, Policy: policy, Template: &sprooziv1alpha1.AgentTemplate{}, SAName: "run-abc-sa"}
+	return &gateway.ExecutionGrant{Execution: run, Capabilities: capabilities, Policy: policy, Template: gateway.TemplateSnapshot{Name: "test-template"}, Authority: gateway.Reference{Backend: gateway.BackendKubernetes, Name: "run-abc-sa"}}
 }
 
 func protocolHandler(client *http.Client, events audit.Writer) *identityHandler {

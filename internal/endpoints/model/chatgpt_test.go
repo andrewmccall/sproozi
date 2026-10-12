@@ -12,7 +12,6 @@ import (
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 
 	"github.com/andrewmccall/sproozi/internal/audit"
-	"github.com/andrewmccall/sproozi/internal/gateway"
 	"github.com/andrewmccall/sproozi/internal/modelauth"
 )
 
@@ -40,7 +39,7 @@ func TestChatGPTGatewayAuthenticatesSettlesAndAuditsResponses(t *testing.T) {
 		_, _ = w.Write([]byte("data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"total_tokens\":12,\"input_tokens\":9,\"output_tokens\":3}}}\n\n"))
 	}))
 	defer server.Close()
-	h := newHandler(t, nil, &gateway.FakeRunFinder{Identity: testRunIdentity()}, server.URL)
+	h := newHandler(t, testExecutionGrant(), server.URL)
 	h.Config.ProviderAuth = modelauth.NewChatGPT(chatGPTStore{}, http.DefaultClient)
 	var logs bytes.Buffer
 	h.Config.AuditLogger = audit.NewLogger(&logs)
@@ -49,7 +48,7 @@ func TestChatGPTGatewayAuthenticatesSettlesAndAuditsResponses(t *testing.T) {
 	r.Header.Set("ChatGPT-Account-ID", "workload-selected-account")
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
-	if w.Code != 200 || !called || h.Config.BudgetTracker.State(testRunUID).UnitsUsed != 12 {
+	if w.Code != 200 || !called || observedState(t, h.Config.BudgetTracker, testRunUID).UnitsUsed != 12 {
 		t.Fatalf("ChatGPT inference did not settle: %d", w.Code)
 	}
 	if !strings.Contains(logs.String(), `"providerAuthMode":"chatgpt"`) || strings.Contains(logs.String(), "fixture-oauth") {
@@ -76,14 +75,14 @@ func TestChatGPTGatewayRejectsIncompatibleRequestsBeforeUpstream(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Error("denied request reached upstream") }))
 			defer server.Close()
-			h := newHandler(t, nil, &gateway.FakeRunFinder{Identity: testRunIdentity()}, server.URL)
+			h := newHandler(t, testExecutionGrant(), server.URL)
 			limits := h.Config.Identity.Policy.Spec.Budgets[sprooziv1alpha1.CapabilityModelInference]
 			limits.MaxCostMicros = tc.cost
 			h.Config.Identity.Policy.Spec.Budgets[sprooziv1alpha1.CapabilityModelInference] = limits
 			h.Config.ProviderAuth = modelauth.NewChatGPT(chatGPTStore{unavailable: tc.unavailable}, http.DefaultClient)
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(tc.body)))
-			state := h.Config.BudgetTracker.State(testRunUID)
+			state := observedState(t, h.Config.BudgetTracker, testRunUID)
 			if w.Code != tc.status || state.UnitsUsed != 0 || state.ReservedUnits != 0 {
 				t.Fatalf("invalid request reached provider or consumed tokens: %d", w.Code)
 			}

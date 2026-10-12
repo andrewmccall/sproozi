@@ -74,7 +74,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.deny(w, event, http.StatusForbidden, "MCP server is not registered")
 		return
 	}
-	if !slices.Contains(identity.Run.Spec.Capabilities, capability) || !slices.Contains(identity.Policy.Spec.AllowedCapabilities, capability) {
+	if !slices.Contains(identity.Capabilities, capability) || !slices.Contains(identity.Policy.Spec.AllowedCapabilities, capability) {
 		h.deny(w, event, http.StatusForbidden, "MCP capability denied")
 		return
 	}
@@ -118,13 +118,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r.Body = io.NopCloser(bytes.NewReader(body))
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	var meter *budget.Meter
-	if limits, configured := identity.Policy.Spec.Budgets[capability]; configured {
-		if h.config.Budgets == nil || limits.MaxCostMicros > 0 {
-			h.deny(w, event, http.StatusServiceUnavailable, "MCP budget accounting unavailable")
-			return
-		}
-		meter = h.config.Budgets.Meter(string(identity.Run.UID)+"/"+string(capability), limits)
+	limits, _, err := identity.BudgetLimits(capability)
+	if err != nil {
+		h.deny(w, event, http.StatusForbidden, "MCP allocation denied")
+		return
+	}
+	if limits.MaxCostMicros > 0 {
+		h.deny(w, event, http.StatusServiceUnavailable, "MCP budget accounting unavailable")
+		return
+	}
+	meter, err := identity.Meter(h.config.Budgets, capability)
+	if err != nil {
+		h.deny(w, event, http.StatusServiceUnavailable, "MCP budget accounting unavailable")
+		return
 	}
 	session, err := h.connect(ctx, registration)
 	if err != nil {

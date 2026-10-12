@@ -30,10 +30,14 @@ type Event struct {
 	// Timestamp is the UTC time the gateway decision was made.
 	Timestamp time.Time `json:"timestamp"`
 
-	// RunID is the AgentRun name (namespace/name) that initiated the request.
+	// ExecutionBackend identifies the authority owner, such as kubernetes or docker.
+	ExecutionBackend string `json:"executionBackend,omitempty"`
+
+	// RunID retains the original wire name for the execution's namespace/name.
+	// Kubernetes executions use an AgentRun; Docker executions have no CRD.
 	RunID string `json:"runID"`
 
-	// RunUID is the immutable Kubernetes UID of the AgentRun.
+	// RunUID retains the original wire name for the immutable execution ID.
 	RunUID string `json:"runUID,omitempty"`
 
 	// SAName is the service account name bound to the AgentRun.
@@ -77,8 +81,8 @@ type Event struct {
 	// TokenBudget is the total token budget configured in the policy.
 	TokenBudget int64 `json:"tokenBudget"`
 
-	// TokensRemaining is the remaining token budget after this request.
-	TokensRemaining int64 `json:"tokensRemaining"`
+	// TokensRemaining is the observed remaining budget; nil means unavailable.
+	TokensRemaining *int64 `json:"tokensRemaining"`
 }
 
 // WebhookEvent is a structured audit record for webhook ingress decisions.

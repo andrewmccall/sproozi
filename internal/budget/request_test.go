@@ -1,6 +1,7 @@
 package budget_test
 
 import (
+	"errors"
 	"testing"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
@@ -27,7 +28,33 @@ func TestCostOnlyBudgetCanSettleUnboundedUnits(t *testing.T) {
 	if err := r.Settle(123, 70); err != nil {
 		t.Fatal(err)
 	}
-	if state := meter.State(); state.UnitsUsed != 123 || state.CostMicros != 70 || state.ReservedCostMicros != 0 {
+	if state := observedMeterState(t, meter); state.UnitsUsed != 123 || state.CostMicros != 70 || state.ReservedCostMicros != 0 {
 		t.Fatalf("unexpected settlement: %+v", state)
+	}
+}
+
+func TestInitializedMeterRequiresAccountForObservationAndSpend(t *testing.T) {
+	tracker := budget.NewTracker()
+	meter := tracker.InitializedMeter("placement/model", api.EndpointBudget{MaxUnits: 10})
+	if _, err := meter.State(); !errors.Is(err, budget.ErrAccountNotFound) {
+		t.Fatalf("missing initialized observation: %v", err)
+	}
+	if err := meter.SpendRequest(); err == nil {
+		t.Fatal("missing initialized account admitted usage")
+	}
+	if err := tracker.Initialize("placement/model"); err != nil {
+		t.Fatal(err)
+	}
+	if err := meter.SpendRequest(); err != nil {
+		t.Fatal(err)
+	}
+	if state, err := meter.State(); err != nil || state.UnitsUsed != 1 {
+		t.Fatalf("initialized usage: %+v %v", state, err)
+	}
+	if _, err := tracker.Seal("placement/model"); err != nil {
+		t.Fatal(err)
+	}
+	if err := meter.SpendRequest(); err == nil {
+		t.Fatal("sealed allocation admitted usage")
 	}
 }

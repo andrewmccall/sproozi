@@ -25,8 +25,6 @@ import (
 	"strings"
 	"testing"
 
-	"k8s.io/apimachinery/pkg/types"
-
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/audit"
 	githubgateway "github.com/andrewmccall/sproozi/internal/endpoints/github"
@@ -46,7 +44,7 @@ const (
 
 // buildHandler returns a Handler wired to in-process upstream handlers.
 // gitSrv and apiSrv capture forwarded requests so tests can assert on them.
-func buildHandler(t *testing.T, identity *gateway.RunIdentity, gitSrv, apiSrv *inProcessServer) *identityHandler {
+func buildHandler(t *testing.T, identity *gateway.ExecutionGrant, gitSrv, apiSrv *inProcessServer) *identityHandler {
 	t.Helper()
 	auditLog := &discardLogger{}
 	return &identityHandler{
@@ -61,20 +59,20 @@ func buildHandler(t *testing.T, identity *gateway.RunIdentity, gitSrv, apiSrv *i
 	}
 }
 
-// makeIdentity builds a RunIdentity with github.pull_request capability and
+// makeIdentity builds a ExecutionGrant with github.pull_request capability and
 // the given repository in the policy.
-func makeIdentity(repos []string) *gateway.RunIdentity {
-	run := &sprooziv1alpha1.AgentRun{}
+func makeIdentity(repos []string) *gateway.ExecutionGrant {
+	run := gateway.Reference{Backend: gateway.BackendKubernetes}
 	run.Name = testRunID
-	run.UID = types.UID("run-abc-uid")
-	run.Spec.Capabilities = []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityGitHubPullRequest}
+	run.UID = "run-abc-uid"
+	capabilities := []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityGitHubPullRequest}
 
-	policy := &sprooziv1alpha1.AgentPolicy{}
+	policy := gateway.PolicySnapshot{}
 	policy.Name = "test-policy"
 	policy.Spec.AllowedCapabilities = []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityGitHubPullRequest}
 	policy.Spec.GitHubPullRequest = sprooziv1alpha1.GitHubPullRequestScope{Repositories: repos, AllowedBaseBranches: []string{testFixtureBaseBranch}}
 
-	return &gateway.RunIdentity{Run: run, Policy: policy, Template: &sprooziv1alpha1.AgentTemplate{}, SAName: testSA}
+	return &gateway.ExecutionGrant{Execution: run, Capabilities: capabilities, Policy: policy, Template: gateway.TemplateSnapshot{Name: "test-template"}, Authority: gateway.Reference{Backend: gateway.BackendKubernetes, Name: testSA}}
 }
 
 // pktLine builds a single git pkt-line for testing.
@@ -388,7 +386,7 @@ func TestMissingCapability(t *testing.T) {
 	defer apiSrv.Close()
 
 	identity := makeIdentity([]string{testRepo})
-	identity.Run.Spec.Capabilities = nil // no capabilities
+	identity.Capabilities = nil // no capabilities
 
 	h := buildHandler(t, identity, gitSrv, apiSrv)
 

@@ -37,8 +37,6 @@ import (
 	"github.com/andrewmccall/sproozi/internal/modelauth"
 	"github.com/andrewmccall/sproozi/internal/proxytransport"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 )
 
 const opencodeHarness = "opencode"
@@ -177,15 +175,17 @@ func run(selected, scenario string, withTool, supervised bool) (result, error) {
 	if scenario == "denied" {
 		runCaps = []api.CapabilityKind{api.CapabilityKind("mcp.fixture")}
 	}
-	identity := &gateway.RunIdentity{Run: &api.AgentRun{ObjectMeta: metav1.ObjectMeta{Name: fixtureName,
-		Namespace: fixtureName,
-		UID:       types.UID("fixture-run")},
-		Spec: api.AgentRunSpec{Capabilities: runCaps}},
-		Policy: &api.AgentPolicy{ObjectMeta: metav1.ObjectMeta{Name: fixtureName,
-			UID: types.UID("fixture-policy")},
+	identity := &gateway.ExecutionGrant{
+		Policy: gateway.PolicySnapshot{
+			Name: fixtureName, UID: "fixture-policy",
 			Spec: api.AgentPolicySpec{AllowedCapabilities: capabilities,
 				Budgets: map[api.CapabilityKind]api.EndpointBudget{api.CapabilityModelInference: {MaxUnits: 1000000},
-					api.CapabilityKind("mcp.fixture"): {MaxUnits: 20}}}}}
+					api.CapabilityKind("mcp.fixture"): {MaxUnits: 20}}}},
+		Execution: gateway.Reference{
+			Backend: gateway.BackendKubernetes, Name: fixtureName, Namespace: fixtureName, UID: "fixture-run",
+		},
+		Capabilities: runCaps,
+		Template:     gateway.TemplateSnapshot{Name: "test-template"}}
 	identity.Policy.Spec.MCPServers = map[string]api.MCPServerScope{
 		fixtureName: {Tools: map[string]api.MCPToolScope{"verify": {}}},
 	}
@@ -264,7 +264,7 @@ func run(selected, scenario string, withTool, supervised bool) (result, error) {
 		"api.anthropic.com": cert,
 		"gateway.fixture":   cert},
 		Authenticate: func(_ context.Context,
-			token string) (*gateway.RunIdentity,
+			token string) (*gateway.ExecutionGrant,
 			error) {
 			if token != proxyToken {
 				return nil, fmt.Errorf("invalid projected token")
@@ -275,7 +275,7 @@ func run(selected, scenario string, withTool, supervised bool) (result, error) {
 			return identity, nil
 		},
 		Revalidate: func(context.Context,
-			*gateway.RunIdentity) error {
+			*gateway.ExecutionGrant) error {
 			return nil
 		},
 		AllowedAuthority: routes.Allows,
@@ -564,10 +564,17 @@ func inspectResult(out result,
 	out.AuthenticatedSessions = f.sessions
 	violations := append([]string{}, f.violations...)
 	f.mu.Unlock()
-	state := ledger.State(context.Background(), budget.AccountKey("fixture-run/model.inference"))
+	state, err := ledger.State(context.Background(), budget.AccountKey("fixture-run/model.inference"))
+	if err != nil {
+		return out, fmt.Errorf("observe model accounting: %w", err)
+	}
 	out.UnitsUsed = state.UnitsUsed
 	out.ReservedUnits = state.ReservedUnits
-	out.ToolUnitsUsed = ledger.State(context.Background(), budget.AccountKey("fixture-run/mcp.fixture")).UnitsUsed
+	toolState, err := ledger.State(context.Background(), budget.AccountKey("fixture-run/mcp.fixture"))
+	if err != nil {
+		return out, fmt.Errorf("observe tool accounting: %w", err)
+	}
+	out.ToolUnitsUsed = toolState.UnitsUsed
 	completed, response := completion(selected, out)
 	if scenario == successScenario {
 		out.Passed = processErr == nil &&

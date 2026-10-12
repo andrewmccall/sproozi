@@ -12,7 +12,7 @@ import (
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/controller"
-	k8sresources "github.com/andrewmccall/sproozi/internal/kubernetes"
+	k8sresources "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
 )
 
 func TestReleaseRetainsNetworkPolicyUntilSandboxTerminates(t *testing.T) {

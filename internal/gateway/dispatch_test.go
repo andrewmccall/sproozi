@@ -7,13 +7,19 @@ import (
 	"testing"
 	"time"
 
-	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/gateway"
+)
+
+const (
+	fixturePolicyName   = "test-policy"
+	fixtureTemplateName = "test-template"
+	fixtureExecutionUID = "test-execution"
+	fixtureAuthority    = "service.test:443"
 )
 
 func TestDispatcherRequiresContextIdentityAndStripsCredentials(t *testing.T) {
 	called := false
-	d := gateway.Dispatcher{"service.test:443": {Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	d := gateway.Dispatcher{fixtureAuthority: {Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
 		if r.Header.Get("Authorization") != "" || r.Header.Get("Proxy-Authorization") != "" || r.Header.Get("Cookie") != "" {
 			t.Error("credentials reached semantic handler")
@@ -29,7 +35,9 @@ func TestDispatcherRequiresContextIdentityAndStripsCredentials(t *testing.T) {
 	if called || denied.Code != http.StatusUnauthorized {
 		t.Fatal("accepted request without context identity")
 	}
-	req = req.WithContext(gateway.WithIdentity(req.Context(), &gateway.RunIdentity{Run: &api.AgentRun{}, Policy: &api.AgentPolicy{}}))
+	req = req.WithContext(gateway.WithIdentity(req.Context(), &gateway.ExecutionGrant{Policy: gateway.PolicySnapshot{Name: fixturePolicyName},
+		Execution: gateway.Reference{Backend: gateway.BackendKubernetes, UID: fixtureExecutionUID},
+		Template:  gateway.TemplateSnapshot{Name: fixtureTemplateName}}))
 	allowed := httptest.NewRecorder()
 	d.ServeHTTP(allowed, req)
 	if !called || allowed.Code != http.StatusNoContent {
@@ -40,14 +48,16 @@ func TestDispatcherRequiresContextIdentityAndStripsCredentials(t *testing.T) {
 func TestDispatcherDeliversFirstChunkBeforeHandlerCompletes(t *testing.T) {
 	release := make(chan struct{})
 	defer close(release)
-	d := gateway.Dispatcher{"service.test:443": {Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	d := gateway.Dispatcher{fixtureAuthority: {Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, "first\n")
 		w.(http.Flusher).Flush()
 		<-release
 	})}}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.Host = "service.test"
-		d.ServeHTTP(w, r.WithContext(gateway.WithIdentity(r.Context(), &gateway.RunIdentity{Run: &api.AgentRun{}, Policy: &api.AgentPolicy{}})))
+		d.ServeHTTP(w, r.WithContext(gateway.WithIdentity(r.Context(), &gateway.ExecutionGrant{Policy: gateway.PolicySnapshot{Name: fixturePolicyName},
+			Execution: gateway.Reference{Backend: gateway.BackendKubernetes, UID: fixtureExecutionUID},
+			Template:  gateway.TemplateSnapshot{Name: fixtureTemplateName}})))
 	}))
 	defer server.Close()
 	got := make(chan error, 1)

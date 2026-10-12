@@ -33,13 +33,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	e := id.AuditEvent("packages.install")
 	e.Service, e.SemanticLevel, e.Capability = "pypi", audit.TierSemantic, string(api.CapabilityPackagesInstall)
-	if !slices.Contains(id.Run.Spec.Capabilities, api.CapabilityPackagesInstall) || !slices.Contains(id.Policy.Spec.AllowedCapabilities, api.CapabilityPackagesInstall) {
+	if !slices.Contains(id.Capabilities, api.CapabilityPackagesInstall) || !slices.Contains(id.Policy.Spec.AllowedCapabilities, api.CapabilityPackagesInstall) {
 		h.deny(w, e, http.StatusForbidden, "packages.install capability not granted")
 		return
 	}
 	h.handlePackage(w, r, e, id)
 }
-func (h *Handler) handlePackage(w http.ResponseWriter, r *http.Request, e audit.Event, identity *gateway.RunIdentity) {
+func (h *Handler) handlePackage(w http.ResponseWriter, r *http.Request, e audit.Event, identity *gateway.ExecutionGrant) {
 	decision := packagepolicy.AuthorizePath(identity.Policy.Spec.PackagesInstall, packagepolicy.Request{Method: r.Method, Host: r.URL.Hostname(), Path: r.URL.Path})
 	if !decision.Allowed {
 		h.deny(w, e, http.StatusForbidden, "package request denied: "+decision.Reason)

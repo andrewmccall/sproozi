@@ -6,6 +6,7 @@ import (
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/budget"
+	budgetkubernetes "github.com/andrewmccall/sproozi/internal/budget/kubernetes"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -17,7 +18,7 @@ func TestLedgerAdaptersAgreeOnFailedSettlement(t *testing.T) {
 		t.Fatal(err)
 	}
 	mem := budget.NewMemoryLedger()
-	kube := budget.NewKubernetesLedger(fake.NewClientBuilder().WithScheme(s).Build(), "ledger")
+	kube := budgetkubernetes.NewLedger(fake.NewClientBuilder().WithScheme(s).Build(), "ledger")
 	ctx := context.Background()
 	for _, l := range []budget.Ledger{mem, kube} {
 		r, err := l.Reserve(ctx, "review", budget.UsageReservation{MaxUnits: 100, Units: 10})
@@ -28,7 +29,7 @@ func TestLedgerAdaptersAgreeOnFailedSettlement(t *testing.T) {
 			t.Fatal("expected over-settlement error")
 		}
 	}
-	a, b := mem.State(ctx, "review"), kube.State(ctx, "review")
+	a, b := observedLedgerState(t, mem, ctx, "review"), observedLedgerState(t, kube, ctx, "review")
 	if a != b {
 		t.Fatalf("same contract, different failed-settlement state: memory=%+v kubernetes=%+v", a, b)
 	}
@@ -44,7 +45,7 @@ func TestReservationForfeitConsumesUnitsAndCostAcrossLedgers(t *testing.T) {
 		ledger budget.Ledger
 	}{
 		{"memory", budget.NewMemoryLedger()},
-		{"kubernetes", budget.NewKubernetesLedger(fake.NewClientBuilder().WithScheme(scheme).Build(), "ledger")},
+		{"kubernetes", budgetkubernetes.NewLedger(fake.NewClientBuilder().WithScheme(scheme).Build(), "ledger")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tracker := budget.NewTrackerWithLedger(tc.ledger)
@@ -57,7 +58,7 @@ func TestReservationForfeitConsumesUnitsAndCostAcrossLedgers(t *testing.T) {
 				t.Fatal(err)
 			}
 			want := budget.State{UnitsUsed: 100, CostMicros: 200}
-			if got := tracker.State("missing-model-usage"); got != want {
+			if got := observedState(t, tracker, "missing-model-usage"); got != want {
 				t.Fatalf("forfeited accounting = %+v, want %+v", got, want)
 			}
 			for _, remainingLimit := range []api.EndpointBudget{{MaxUnits: 100}, {MaxCostMicros: 200}} {
@@ -70,7 +71,7 @@ func TestReservationForfeitConsumesUnitsAndCostAcrossLedgers(t *testing.T) {
 					t.Fatal("settled reservation accepted a second transition")
 				}
 			}
-			if got := tracker.State("missing-model-usage"); got != want {
+			if got := observedState(t, tracker, "missing-model-usage"); got != want {
 				t.Fatalf("repeat changed accounting to %+v", got)
 			}
 		})

@@ -13,6 +13,7 @@ Future architecture is kept separate from implemented behaviour and verified gui
 - [Manual AgentRun to pull request](guides/manual-pr-demo.md), including Kind setup, example resources and optional monitoring
 - [Recorded native and configured MCP acceptance](demos/verified-mcp-demo.md), including stock Codex tool use, denials and cancellation
 - [Persistent Hermes orchestration](guides/hermes-orchestration.md), native chat, schedules, PVC state and full Kind testing
+- [Portable native sessions](guides/session-mobility.md), controlled Docker launch, native terminal and fixed Kubernetes profile moves; broader tool/failure acceptance pending
 - [Model provider authentication](guides/model-provider-auth.md)
 - [Recorded SRE acceptance](demos/verified-sre-demo.md), with scope and limitations
 
@@ -55,17 +56,25 @@ Architecturally significant changes require an ADR and matching current docs.
 - [0001: MCP through the shared capability gateway](adr/0001-mcp-capabilities-through-shared-gateway.md)
 - [0002: Native CLI harnesses and model protocols](adr/0002-native-cli-harnesses-and-model-protocols.md)
 - [0003: Persistent assistants and retained worker results](adr/0003-persistent-assistants-and-retained-results.md)
+- [0004: Portable sessions across bounded executions, mechanisms proposed](adr/0004-portable-sessions-and-bounded-executions.md)
+- [0005: Controlled Docker launch before existing-session adoption](adr/0005-controlled-docker-launch-before-session-adoption.md)
+- [0006: Native CLI and terminal access before GUI mobility](adr/0006-native-cli-and-terminal-before-gui-mobility.md)
+- [0007: Prove the Codex round trip before expanding harness support](adr/0007-codex-round-trip-before-harness-expansion.md)
+- [0008: Selected native and Git checkpoints](adr/0008-selected-native-and-git-checkpoints.md)
+- [0009: Runtime backends and sealed accounting](adr/0009-runtime-backends-and-sealed-accounting.md)
+- [0010: Managed session authority and fresh admission](adr/0010-managed-session-authority-and-admission.md)
 
 ## Future architecture
 
-Directional designs for extensions to the implemented capability model. Native
-Kubernetes MCP and configured remote HTTPS MCP tools are supported today; the
-references and acceptance report above describe their bounds. Managed servers,
-additional runtimes and managed harness control remain future directions.
-[Stock CLI harnesses](reference/harnesses.md) describes current Codex, Claude Code
-OpenCode and Hermes preparation and its bounded verification evidence.
+Proposals for unimplemented extensions. Completed native/remote HTTPS MCP,
+stock CLI launch and persistent Hermes delegation are documented in the current
+references above. Docker, session mobility, managed servers and deeper harness
+control remain future directions.
 
 - [Overview and evolution](explanations/future-architecture/README.md)
-- [Capabilities and MCP interoperability](explanations/future-architecture/capabilities-and-mcp.md)
+- [Managed MCP servers and further semantic bindings](explanations/future-architecture/managed-mcp-servers.md)
 - [Multiple execution runtimes](explanations/future-architecture/execution-runtimes.md)
-- [Harness portability and control](explanations/future-architecture/harness-portability.md)
+- [Harness session adapters and remote control](explanations/future-architecture/harness-portability.md)
+- [Portable agent sessions](explanations/future-architecture/session-mobility.md)
+
+- [Verified native session mobility](demos/verified-session-mobility.md) records Codex and Claude placement, tool, denial and accounting evidence.

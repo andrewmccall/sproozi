@@ -75,7 +75,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	e = identity.AuditEvent(r.Method + " " + r.Host)
 	e.Capability, e.SemanticLevel, e.Service = string(sprooziv1alpha1.CapabilityNetworkEgress), audit.TierDestination, "network"
 
-	if !slices.Contains(identity.Run.Spec.Capabilities, sprooziv1alpha1.CapabilityNetworkEgress) ||
+	if !slices.Contains(identity.Capabilities, sprooziv1alpha1.CapabilityNetworkEgress) ||
 		!slices.Contains(identity.Policy.Spec.AllowedCapabilities, sprooziv1alpha1.CapabilityNetworkEgress) {
 		h.deny(w, e, http.StatusForbidden, "network.egress capability not granted")
 		return

@@ -80,7 +80,7 @@ func isGraphQL(r *http.Request) bool {
 	return r.Method == http.MethodPost && strings.Trim(r.URL.Path, "/") == "graphql"
 }
 
-func (h *Handler) handleGraphQL(w http.ResponseWriter, r *http.Request, e audit.Event, identity *gateway.RunIdentity) {
+func (h *Handler) handleGraphQL(w http.ResponseWriter, r *http.Request, e audit.Event, identity *gateway.ExecutionGrant) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxGraphQLBody+1))
 	if err != nil || len(body) == 0 || len(body) > maxGraphQLBody {
 		h.deny(w, e, http.StatusBadRequest, "GraphQL request body is invalid")
@@ -128,7 +128,7 @@ func (h *Handler) handleGraphQL(w http.ResponseWriter, r *http.Request, e audit.
 	case pullRequestByNumberOperation:
 		repo, err = repositoryFromPRViewVariables(envelope.Variables)
 	case pullRequestCreateOperation:
-		err = validateGraphQLCreateEnvelope(operation, envelope.Variables, string(identity.Run.UID), identity)
+		err = validateGraphQLCreateEnvelope(operation, envelope.Variables, identity.Execution.UID, identity)
 	}
 	if err != nil {
 		h.deny(w, e, http.StatusForbidden, "GraphQL repository or operation is not permitted")
@@ -404,7 +404,7 @@ func graphqlString(raw json.RawMessage) (string, error) {
 	return value, nil
 }
 
-func validateGraphQLCreateEnvelope(operation graphqlOperation, variables map[string]json.RawMessage, runUID string, identity *gateway.RunIdentity) error {
+func validateGraphQLCreateEnvelope(operation graphqlOperation, variables map[string]json.RawMessage, runUID string, identity *gateway.ExecutionGrant) error {
 	if operation.Kind != "mutation" || operation.Root != "createPullRequest" || len(variables) != 1 {
 		return fmt.Errorf("unsupported GraphQL mutation")
 	}
@@ -447,7 +447,7 @@ type graphQLMutationResponse struct {
 	Errors json.RawMessage `json:"errors"`
 }
 
-func (h *Handler) handleGraphQLPRCreate(w http.ResponseWriter, r *http.Request, e audit.Event, identity *gateway.RunIdentity, envelope graphQLEnvelope, token string) {
+func (h *Handler) handleGraphQLPRCreate(w http.ResponseWriter, r *http.Request, e audit.Event, identity *gateway.ExecutionGrant, envelope graphQLEnvelope, token string) {
 	input := make(map[string]json.RawMessage)
 	if err := json.Unmarshal(envelope.Variables[inputVariable], &input); err != nil {
 		h.deny(w, e, http.StatusForbidden, "GraphQL operation is not permitted")
@@ -500,7 +500,7 @@ func (h *Handler) handleGraphQLPRCreate(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	verified, err := h.readBackGraphQLPR(r, token, repo, number)
-	if err != nil || verified.Repository != repo || verified.Number != number || verified.URL != created.Data.CreatePullRequest.PullRequest.URL || !runOwnedBranch(verified.HeadRef, string(identity.Run.UID)) || !policyBranch(verified.BaseRef, identity.Policy.Spec.GitHubPullRequest.AllowedBaseBranches) || !graphqlHexSHA.MatchString(verified.HeadOID) {
+	if err != nil || verified.Repository != repo || verified.Number != number || verified.URL != created.Data.CreatePullRequest.PullRequest.URL || !runOwnedBranch(verified.HeadRef, identity.Execution.UID) || !policyBranch(verified.BaseRef, identity.Policy.Spec.GitHubPullRequest.AllowedBaseBranches) || !graphqlHexSHA.MatchString(verified.HeadOID) {
 		h.deny(w, e, http.StatusBadGateway, "pull request read-back was invalid")
 		return
 	}

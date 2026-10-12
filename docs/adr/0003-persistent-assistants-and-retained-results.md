@@ -152,8 +152,9 @@ All design seats used the available parent model; no cross-family diversity is
 claimed. The judge had authored one candidate, so root also read and assessed
 both candidates.
 
-Implementation reconciliation covered `internal/tasks`, `cmd/tasks`,
-`internal/agentcontract`, `internal/kubernetes`, `internal/controller` and
+Implementation reconciliation covered the neutral MCP transport in `internal/tasks`,
+the AgentRun backend in `internal/tasks/kubernetes`, `cmd/tasks`,
+`internal/agentcontract`, `internal/runtime/kubernetes`, `internal/controller` and
 `internal/harness`. Independent reviews corrected native tool-name collisions,
 inherited stdout completion, per-client acceptance attribution, public cron
 syntax and the scoped Kubernetes acceptance gap. Full deployed acceptance on

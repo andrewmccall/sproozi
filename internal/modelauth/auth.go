@@ -137,7 +137,7 @@ func (a *ChatGPT) Authorize(r *http.Request) error {
 		return err
 	}
 	if a.pending != nil {
-		if sameCredentials(s, a.pendingBefore) {
+		if s.SameCredentials(a.pendingBefore) {
 			if err = a.store.Replace(r.Context(), s, *a.pending); err != nil {
 				return errors.New("could not persist renewed ChatGPT credentials")
 			}
@@ -176,9 +176,11 @@ func (a *ChatGPT) Authorize(r *http.Request) error {
 	return nil
 }
 
-func sameCredentials(a, b Session) bool {
-	return a.ClientID == b.ClientID && a.Subject == b.Subject &&
-		a.AccessToken == b.AccessToken && a.RefreshToken == b.RefreshToken
+// SameCredentials compares the rotating credential identity used by store CAS.
+// Expiry/metadata changes do not turn an unchanged token pair into a new writer.
+func (s Session) SameCredentials(other Session) bool {
+	return s.ClientID == other.ClientID && s.Subject == other.Subject &&
+		s.AccessToken == other.AccessToken && s.RefreshToken == other.RefreshToken
 }
 
 // TokenResponse is decoded only from the fixed trusted OAuth endpoint. Never

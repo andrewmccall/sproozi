@@ -21,7 +21,7 @@ const (
 
 // Identity returns the authenticated, immutable session identity. Semantic handlers
 // must authorize their precise operation against live policy using this identity.
-func Identity(ctx context.Context) *gateway.RunIdentity {
+func Identity(ctx context.Context) *gateway.ExecutionGrant {
 	identity, _ := gateway.IdentityFromContext(ctx)
 	return identity
 }
@@ -29,8 +29,8 @@ func Identity(ctx context.Context) *gateway.RunIdentity {
 type Config struct {
 	// Certificates maps exact DNS names (without port) to inspection certificates.
 	Certificates     map[string]tls.Certificate
-	Authenticate     func(context.Context, string) (*gateway.RunIdentity, error)
-	Revalidate       func(context.Context, *gateway.RunIdentity) error
+	Authenticate     func(context.Context, string) (*gateway.ExecutionGrant, error)
+	Revalidate       func(context.Context, *gateway.ExecutionGrant) error
 	Handler          http.Handler
 	AllowedAuthority func(string) bool
 	// RevocationInterval bounds idle/in-flight sessions after revocation.
@@ -82,10 +82,11 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	identity, err := g.config.Authenticate(r.Context(), token)
-	if err != nil || identity == nil {
+	if err != nil || identity.Validate() != nil {
 		http.Error(w, "invalid gateway identity", http.StatusUnauthorized)
 		return
 	}
+	identity = identity.Clone()
 	if g.config.Revalidate(r.Context(), identity) != nil {
 		http.Error(w, "revoked gateway identity", http.StatusForbidden)
 		return
@@ -155,7 +156,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (g *Gateway) serveInspected(
-	w http.ResponseWriter, request *http.Request, identity *gateway.RunIdentity, host, port string,
+	w http.ResponseWriter, request *http.Request, identity *gateway.ExecutionGrant, host, port string,
 ) {
 	if g.config.Revalidate(request.Context(), identity) != nil {
 		request.Close = true

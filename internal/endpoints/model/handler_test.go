@@ -28,9 +28,6 @@ import (
 
 	"github.com/andrewmccall/sproozi/internal/budget"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
-
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/audit"
 	modelgateway "github.com/andrewmccall/sproozi/internal/endpoints/model"
@@ -51,20 +48,19 @@ func TestHandlerVerifiesUsageWithClientCompressionPreference(t *testing.T) {
 		_ = compressed.Close()
 	}))
 	defer upstream.Close()
-	h := newHandler(t, nil, &gateway.FakeRunFinder{Identity: testRunIdentity()}, upstream.URL)
+	h := newHandler(t, testExecutionGrant(), upstream.URL)
 	request := httptest.NewRequest(http.MethodPost, testResponsesPath, strings.NewReader(`{"model":"test","stream":true}`))
 	request.Header.Set("Accept-Encoding", "gzip, br, zstd")
 	response := httptest.NewRecorder()
 	h.ServeHTTP(response, request)
-	state := h.Config.BudgetTracker.State(testRunUID)
+	state := observedState(t, h.Config.BudgetTracker, testRunUID)
 	if response.Code != 200 || response.Body.String() != stream || state.UnitsUsed != 12 ||
 		response.Header().Get("Content-Encoding") != "" {
 		t.Fatalf("compressed provider stream was not inspected and settled: status=%d state=%+v", response.Code, state)
 	}
 }
 
-// newHandler creates a Handler wired with the given token validator, run finder,
-// and upstream URL. BudgetTracker and AuditLogger use safe no-op defaults.
+// newHandler supplies an authenticated grant and isolated in-memory accounting.
 
 const (
 	testSAName    = "sproozi-uid-test"
@@ -74,11 +70,11 @@ const (
 	testOpenAIKey = "sk-test"
 )
 
-func newHandler(t *testing.T, _ gateway.TokenValidator, rf gateway.RunFinder, upstream string) *identityHandler {
+func newHandler(t *testing.T, identity *gateway.ExecutionGrant, upstream string) *identityHandler {
 	t.Helper()
 	return &identityHandler{
 		Config: identityConfig{
-			Identity:      rf.(*gateway.FakeRunFinder).Identity,
+			Identity:      identity,
 			BudgetTracker: budget.NewTracker(),
 			AuditLogger:   audit.NewLogger(io.Discard),
 			UpstreamURL:   upstream,
@@ -88,27 +84,16 @@ func newHandler(t *testing.T, _ gateway.TokenValidator, rf gateway.RunFinder, up
 	}
 }
 
-// testRunIdentity returns a fully-populated RunIdentity suitable for happy-path tests.
-func testRunIdentity() *gateway.RunIdentity {
-	return &gateway.RunIdentity{
-		SAName: testSAName,
-		Run: &sprooziv1alpha1.AgentRun{
-			ObjectMeta: metav1.ObjectMeta{Name: "test-run", Namespace: testNamespace, UID: types.UID(testRunUID)},
-			Spec: sprooziv1alpha1.AgentRunSpec{
-				Capabilities: []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityModelInference},
-			},
-		},
-		Template: &sprooziv1alpha1.AgentTemplate{
-			ObjectMeta: metav1.ObjectMeta{Name: "tmpl", Namespace: testNamespace},
-		},
-		Policy: &sprooziv1alpha1.AgentPolicy{
-			ObjectMeta: metav1.ObjectMeta{Name: "pol", Namespace: testNamespace, Generation: 1},
-			Spec: sprooziv1alpha1.AgentPolicySpec{
-				AllowedCapabilities: []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityModelInference},
-				Budgets:             map[sprooziv1alpha1.CapabilityKind]sprooziv1alpha1.EndpointBudget{sprooziv1alpha1.CapabilityModelInference: {MaxUnits: 10000}},
-			},
-		},
-	}
+// testExecutionGrant returns a fully-populated ExecutionGrant suitable for happy-path tests.
+func testExecutionGrant() *gateway.ExecutionGrant {
+	return &gateway.ExecutionGrant{Template: gateway.TemplateSnapshot{Name: "tmpl"},
+		Policy: gateway.PolicySnapshot{Name: "pol", Generation: 1, Spec: sprooziv1alpha1.AgentPolicySpec{
+			AllowedCapabilities: []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityModelInference},
+			Budgets:             map[sprooziv1alpha1.CapabilityKind]sprooziv1alpha1.EndpointBudget{sprooziv1alpha1.CapabilityModelInference: {MaxUnits: 10000}},
+		}},
+		Execution:    gateway.Reference{Backend: gateway.BackendKubernetes, Name: "test-run", Namespace: testNamespace, UID: testRunUID},
+		Capabilities: []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityModelInference},
+		Authority:    gateway.Reference{Backend: gateway.BackendKubernetes, Name: testSAName}}
 }
 
 // assertOpenAIErrorBody verifies that body is a valid OpenAI error JSON envelope
@@ -167,7 +152,7 @@ func TestHandlerBuffersResponsesStreamAndSettlesUsageBeforeReturning(t *testing.
 		if !valid {
 			body = strings.Split(stream, "event: response.completed")[0]
 		}
-		h := newHandler(t, nil, &gateway.FakeRunFinder{Identity: testRunIdentity()}, "https://model.test")
+		h := newHandler(t, testExecutionGrant(), "https://model.test")
 		h.Config.HTTPClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 			response := modelResponse(r, body)
 			response.Header.Set("Content-Type", "text/event-stream")
@@ -175,7 +160,7 @@ func TestHandlerBuffersResponsesStreamAndSettlesUsageBeforeReturning(t *testing.
 		})}
 		recorder := httptest.NewRecorder()
 		h.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, testResponsesPath, strings.NewReader(`{"model":"test","stream":true}`)))
-		state := h.Config.BudgetTracker.State(testRunUID)
+		state := observedState(t, h.Config.BudgetTracker, testRunUID)
 		if valid {
 			if recorder.Code != 200 || recorder.Body.String() != stream || state.UnitsUsed != 12 || state.ReservedUnits != 0 {
 				t.Fatalf("valid stream: status=%d state=%+v", recorder.Code, state)
@@ -215,9 +200,9 @@ func TestHandlerRunNotFoundReturns403(t *testing.T) {
 }
 
 func TestHandlerDisallowedPathReturns403(t *testing.T) {
-	tv := &gateway.FakeTokenValidator{SAName: testSAName}
-	rf := &gateway.FakeRunFinder{Identity: testRunIdentity()}
-	h := newHandler(t, tv, rf, "")
+
+	rf := testExecutionGrant()
+	h := newHandler(t, rf, "")
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/unknown", nil)
 	req.Header.Set("Authorization", "Bearer valid-token")
@@ -231,12 +216,11 @@ func TestHandlerDisallowedPathReturns403(t *testing.T) {
 }
 
 func TestHandlerCapabilityNotGrantedReturns403(t *testing.T) {
-	identity := testRunIdentity()
-	identity.Run.Spec.Capabilities = []sprooziv1alpha1.CapabilityKind{}
+	identity := testExecutionGrant()
+	identity.Capabilities = []sprooziv1alpha1.CapabilityKind{}
 
-	tv := &gateway.FakeTokenValidator{SAName: testSAName}
-	rf := &gateway.FakeRunFinder{Identity: identity}
-	h := newHandler(t, tv, rf, "")
+	rf := identity
+	h := newHandler(t, rf, "")
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	req.Header.Set("Authorization", "Bearer valid-token")
@@ -250,15 +234,15 @@ func TestHandlerCapabilityNotGrantedReturns403(t *testing.T) {
 }
 
 func TestHandlerBudgetExhaustedReturns429(t *testing.T) {
-	identity := testRunIdentity()
+	identity := testExecutionGrant()
 	bt := budget.NewTracker()
-	if err := bt.Meter(string(identity.Run.UID), identity.Policy.Spec.Budgets[sprooziv1alpha1.CapabilityModelInference]).Spend(10000, 0); err != nil {
+	if err := bt.Meter(identity.Execution.UID, identity.Policy.Spec.Budgets[sprooziv1alpha1.CapabilityModelInference]).Spend(10000, 0); err != nil {
 		t.Fatal(err)
 	}
 
 	h := &identityHandler{
 		Config: identityConfig{
-			Identity:      testRunIdentity(),
+			Identity:      testExecutionGrant(),
 			BudgetTracker: bt,
 			AuditLogger:   audit.NewLogger(io.Discard),
 			UpstreamURL:   "",
@@ -281,9 +265,8 @@ func TestHandlerBudgetExhaustedReturns429(t *testing.T) {
 func TestHandlerForwardsToUpstreamAndStripsAuth(t *testing.T) {
 	var capturedAuthHeader string
 
-	tv := &gateway.FakeTokenValidator{SAName: testSAName}
-	rf := &gateway.FakeRunFinder{Identity: testRunIdentity()}
-	h := newHandler(t, tv, rf, testModelUpstream)
+	rf := testExecutionGrant()
+	h := newHandler(t, rf, testModelUpstream)
 	h.Config.HTTPClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		capturedAuthHeader = req.Header.Get("Authorization")
 		return modelResponse(req,
@@ -320,7 +303,7 @@ func TestHandlerSuccessRecordsBudgetUsage(t *testing.T) {
 	bt := budget.NewTracker()
 	h := &identityHandler{
 		Config: identityConfig{
-			Identity:      testRunIdentity(),
+			Identity:      testExecutionGrant(),
 			BudgetTracker: bt,
 			AuditLogger:   audit.NewLogger(io.Discard),
 			UpstreamURL:   testModelUpstream,
@@ -341,14 +324,14 @@ func TestHandlerSuccessRecordsBudgetUsage(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body = %s", w.Code, w.Body.String())
 	}
-	s := bt.State(testRunUID) // policyGen=1 matches testRunIdentity
+	s := observedState(t, bt, testRunUID) // policyGen=1 matches testExecutionGrant
 	if s.UnitsUsed != 42 {
 		t.Errorf("TokensUsed = %d, want 42", s.UnitsUsed)
 	}
 }
 
 func TestHandlerPositiveCostBudgetUsesAdministratorPricing(t *testing.T) {
-	identity := testRunIdentity()
+	identity := testExecutionGrant()
 	limits := identity.Policy.Spec.Budgets[sprooziv1alpha1.CapabilityModelInference]
 	limits.MaxCostMicros = 500_000
 	identity.Policy.Spec.Budgets[sprooziv1alpha1.CapabilityModelInference] = limits
@@ -382,7 +365,7 @@ func TestHandlerPositiveCostBudgetUsesAdministratorPricing(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body = %s", w.Code, w.Body.String())
 	}
-	state := bt.State(testRunUID)
+	state := observedState(t, bt, testRunUID)
 	if state.UnitsUsed != 42 || state.CostMicros != 466 {
 		t.Fatalf("budget state = %+v, want 42 tokens and 466 cost micros", state)
 	}
@@ -391,7 +374,7 @@ func TestHandlerPositiveCostBudgetUsesAdministratorPricing(t *testing.T) {
 func TestHandlerUncappedCostBudgetDoesNotRequirePricingForEveryModel(t *testing.T) {
 	h := &identityHandler{
 		Config: identityConfig{
-			Identity:      testRunIdentity(),
+			Identity:      testExecutionGrant(),
 			BudgetTracker: budget.NewTracker(),
 			Pricing:       &modelgateway.PricingTable{Models: map[string]modelgateway.ModelPrice{}},
 			AuditLogger:   audit.NewLogger(io.Discard),
@@ -418,7 +401,7 @@ func TestHandlerAuditLogsAllowedRequest(t *testing.T) {
 	capture := &captureWriter{}
 	h := &identityHandler{
 		Config: identityConfig{
-			Identity:      testRunIdentity(),
+			Identity:      testExecutionGrant(),
 			BudgetTracker: budget.NewTracker(),
 			AuditLogger:   capture,
 			UpstreamURL:   testModelUpstream,
@@ -455,9 +438,9 @@ func TestHandlerAuditLogsAllowedRequest(t *testing.T) {
 }
 
 func TestHandlerRejectsStreamingRequest(t *testing.T) {
-	tv := &gateway.FakeTokenValidator{SAName: testSAName}
-	rf := &gateway.FakeRunFinder{Identity: testRunIdentity()}
-	h := newHandler(t, tv, rf, "http://unused")
+
+	rf := testExecutionGrant()
+	h := newHandler(t, rf, "http://unused")
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
 		strings.NewReader(`{"model":"gpt-4o","messages":[],"stream":true}`))
 	req.Header.Set("Authorization", "Bearer some-token")
@@ -469,13 +452,12 @@ func TestHandlerRejectsStreamingRequest(t *testing.T) {
 }
 
 func TestHandlerMissingUsageConsumesReservationAndDenies(t *testing.T) {
-	identity := testRunIdentity()
+	identity := testExecutionGrant()
 	limits := identity.Policy.Spec.Budgets[sprooziv1alpha1.CapabilityModelInference]
 	limits.MaxUnits = 100
 	identity.Policy.Spec.Budgets[sprooziv1alpha1.CapabilityModelInference] = limits
 	var calls atomic.Int32
-	h := newHandler(t, &gateway.FakeTokenValidator{SAName: testSAName},
-		&gateway.FakeRunFinder{Identity: identity}, testModelUpstream)
+	h := newHandler(t, identity, testModelUpstream)
 	h.Config.HTTPClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		calls.Add(1)
 		return modelResponse(req, `{"id":"x"}`), nil
@@ -496,22 +478,21 @@ func TestHandlerMissingUsageConsumesReservationAndDenies(t *testing.T) {
 	if calls.Load() != 1 {
 		t.Fatalf("upstream calls = %d, want 1", calls.Load())
 	}
-	state := h.Config.BudgetTracker.State(testRunUID)
+	state := observedState(t, h.Config.BudgetTracker, testRunUID)
 	if state.UnitsUsed != 25 || state.ReservedUnits != 0 {
 		t.Fatalf("budget state = %+v, want 25 consumed and no reservation", state)
 	}
 }
 
 func TestHandlerConcurrentRequestsReserveBeforeForwarding(t *testing.T) {
-	identity := testRunIdentity()
+	identity := testExecutionGrant()
 	limits := identity.Policy.Spec.Budgets[sprooziv1alpha1.CapabilityModelInference]
 	limits.MaxUnits = 100
 	identity.Policy.Spec.Budgets[sprooziv1alpha1.CapabilityModelInference] = limits
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})
 	var calls atomic.Int32
-	h := newHandler(t, &gateway.FakeTokenValidator{SAName: testSAName},
-		&gateway.FakeRunFinder{Identity: identity}, testModelUpstream)
+	h := newHandler(t, identity, testModelUpstream)
 	h.Config.HTTPClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		calls.Add(1)
 		started <- struct{}{}
@@ -549,7 +530,7 @@ func TestHandlerConcurrentRequestsReserveBeforeForwarding(t *testing.T) {
 	if first.Code != http.StatusOK {
 		t.Fatalf("first status = %d, want 200; body = %s", first.Code, first.Body.String())
 	}
-	state := h.Config.BudgetTracker.State(testRunUID)
+	state := observedState(t, h.Config.BudgetTracker, testRunUID)
 	if state.UnitsUsed != 20 || state.ReservedUnits != 0 {
 		t.Fatalf("budget state = %+v, want 20 consumed and no reservation", state)
 	}

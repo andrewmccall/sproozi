@@ -15,6 +15,7 @@ import (
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/tasks"
+	taskskubernetes "github.com/andrewmccall/sproozi/internal/tasks/kubernetes"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -34,7 +35,7 @@ func run() error {
 	if len(data) > 64<<10 {
 		return fmt.Errorf("task configuration too large")
 	}
-	var settings tasks.Config
+	var settings taskskubernetes.Config
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	if err = decoder.Decode(&settings); err != nil {
@@ -60,7 +61,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	service, err := tasks.NewService(kube, settings)
+	service, err := taskskubernetes.NewService(kube, settings)
 	if err != nil {
 		return err
 	}
