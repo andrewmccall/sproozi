@@ -14,9 +14,11 @@ const tokensPerMillion = 1_000_000
 // million tokens. Using the provider's published unit preserves fractional
 // micro-dollar per-token rates without floating-point arithmetic.
 type ModelPrice struct {
-	InputMicrosPerMillionTokens       int64 `json:"inputMicrosPerMillionTokens"`
-	CachedInputMicrosPerMillionTokens int64 `json:"cachedInputMicrosPerMillionTokens"`
-	OutputMicrosPerMillionTokens      int64 `json:"outputMicrosPerMillionTokens"`
+	InputMicrosPerMillionTokens        int64 `json:"inputMicrosPerMillionTokens"`
+	CachedInputMicrosPerMillionTokens  int64 `json:"cachedInputMicrosPerMillionTokens"`
+	OutputMicrosPerMillionTokens       int64 `json:"outputMicrosPerMillionTokens"`
+	CacheWrite5mMicrosPerMillionTokens int64 `json:"cacheWrite5mMicrosPerMillionTokens,omitempty"`
+	CacheWrite1hMicrosPerMillionTokens int64 `json:"cacheWrite1hMicrosPerMillionTokens,omitempty"`
 }
 
 // PricingTable contains the exact model identifiers an administrator permits
@@ -51,6 +53,9 @@ func LoadPricingTable(r io.Reader) (*PricingTable, error) {
 		if price.InputMicrosPerMillionTokens <= 0 || price.CachedInputMicrosPerMillionTokens <= 0 || price.OutputMicrosPerMillionTokens <= 0 {
 			return nil, fmt.Errorf("modelgateway: administrator pricing for model %q must contain positive rates", model)
 		}
+		if price.CacheWrite5mMicrosPerMillionTokens < 0 || price.CacheWrite1hMicrosPerMillionTokens < 0 {
+			return nil, fmt.Errorf("modelgateway: administrator cache-write pricing for model %q must not be negative", model)
+		}
 	}
 	return &table, nil
 }
@@ -67,7 +72,33 @@ func (p PricingTable) Cost(model string, input, cachedInput, output int64) (int6
 	numerator.Add(numerator, new(big.Int).Mul(big.NewInt(input-cachedInput), big.NewInt(price.InputMicrosPerMillionTokens)))
 	numerator.Add(numerator, new(big.Int).Mul(big.NewInt(cachedInput), big.NewInt(price.CachedInputMicrosPerMillionTokens)))
 	numerator.Add(numerator, new(big.Int).Mul(big.NewInt(output), big.NewInt(price.OutputMicrosPerMillionTokens)))
+	return roundedCost(numerator)
+}
 
+// costAnthropic prices disjoint usage categories. Optional cache-write rates
+// become required only when the provider reports consumption in that category.
+func (p PricingTable) costAnthropic(model string, usage anthropicUsage) (int64, error) {
+	price, ok := p.Models[model]
+	if !ok {
+		return 0, fmt.Errorf("modelgateway: no administrator pricing for model %q", model)
+	}
+	numerator := new(big.Int)
+	for _, category := range []struct{ tokens, rate int64 }{
+		{usage.Input, price.InputMicrosPerMillionTokens},
+		{usage.CacheRead, price.CachedInputMicrosPerMillionTokens},
+		{usage.CacheWrite5m, price.CacheWrite5mMicrosPerMillionTokens},
+		{usage.CacheWrite1h, price.CacheWrite1hMicrosPerMillionTokens},
+		{usage.Output, price.OutputMicrosPerMillionTokens},
+	} {
+		if category.tokens < 0 || (category.tokens > 0 && category.rate <= 0) {
+			return 0, fmt.Errorf("modelgateway: invalid trusted model usage or missing administrator rate")
+		}
+		numerator.Add(numerator, new(big.Int).Mul(big.NewInt(category.tokens), big.NewInt(category.rate)))
+	}
+	return roundedCost(numerator)
+}
+
+func roundedCost(numerator *big.Int) (int64, error) {
 	// Round any fractional micro-dollar up so accounting never understates the
 	// cost charged against a policy's hard ceiling.
 	quotient, remainder := new(big.Int), new(big.Int)

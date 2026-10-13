@@ -16,6 +16,8 @@ import (
 	"github.com/andrewmccall/sproozi/internal/kubernetes"
 )
 
+const testCodexHarness = "codex"
+
 func contractInputs() (*sprooziv1alpha1.AgentRun, *sprooziv1alpha1.AgentTemplate, *sprooziv1alpha1.AgentRuntime) {
 	run := testRunForSandbox("cccccccc-0000-0000-0000-000000000200")
 	run.Spec.Task = "Investigate the incident without changing production."
@@ -85,7 +87,7 @@ func TestEnsureAgentContractRejectsConflictingDocument(t *testing.T) {
 func TestRunContractDeliversNamedMCPConfigurationAndRejectsReplacement(t *testing.T) {
 	run, tmpl, rt := contractInputs()
 	run.Spec.Capabilities = []sprooziv1alpha1.CapabilityKind{testMCPCapability}
-	rt.Spec.ClientConfig.Harness = "codex"
+	rt.Spec.ClientConfig.Harness = testCodexHarness
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).Build()
 	if err := kubernetes.EnsureAgentContract(t.Context(), c, run, tmpl, rt); err != nil {
 		t.Fatal(err)
@@ -127,5 +129,54 @@ func TestBuildPodSpecMountsContractReadOnly(t *testing.T) {
 	}
 	if !foundVolume || !foundMount {
 		t.Fatal("Pod must mount its run contract as a read-only ConfigMap")
+	}
+}
+
+func TestRunContractRejectsChangedHarnessAndAdditionalFiles(t *testing.T) {
+	for _, selected := range []string{testCodexHarness, "claude-code", "opencode", "hermes"} {
+		t.Run(selected, func(t *testing.T) {
+			run, tmpl, rt := contractInputs()
+			run.Spec.Capabilities = []sprooziv1alpha1.CapabilityKind{testMCPCapability}
+			rt.Spec.ClientConfig.Harness = selected
+			c := fake.NewClientBuilder().WithScheme(testScheme(t)).Build()
+			if err := kubernetes.EnsureAgentContract(t.Context(), c, run, tmpl, rt); err != nil {
+				t.Fatal(err)
+			}
+			if err := kubernetes.EnsureAgentContract(t.Context(), c, run, tmpl, rt); err != nil {
+				t.Fatal(err)
+			}
+			rt.Spec.ClientConfig.Harness = ""
+			if err := kubernetes.EnsureAgentContract(t.Context(), c, run, tmpl, rt); err == nil {
+				t.Fatal("changed harness accepted")
+			}
+			rt.Spec.ClientConfig.Harness = selected
+			var config corev1.ConfigMap
+			key := client.ObjectKey{Namespace: kubernetes.AgentsNamespace, Name: kubernetes.RunName(run.UID)}
+			if err := c.Get(t.Context(), key, &config); err != nil {
+				t.Fatal(err)
+			}
+			if selected != testCodexHarness {
+				if config.Data["instructions.txt"] != "Use only approved capabilities and record evidence." ||
+					config.Data["request.json"] != `{"task":"Investigate the incident without changing production.","eventContext":{"alert":"api latency"}}` {
+					t.Fatal("native launch files did not separate trusted instructions from untrusted request data")
+				}
+			}
+			config.Data["ambient-mcp.json"] = "{}"
+			if err := c.Update(t.Context(), &config); err != nil {
+				t.Fatal(err)
+			}
+			if err := kubernetes.EnsureAgentContract(t.Context(), c, run, tmpl, rt); err == nil {
+				t.Fatal("additional client configuration accepted")
+			}
+		})
+	}
+}
+
+func TestRunContractRejectsUnknownHarness(t *testing.T) {
+	run, tmpl, rt := contractInputs()
+	rt.Spec.ClientConfig.Harness = "unsupported"
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).Build()
+	if err := kubernetes.EnsureAgentContract(t.Context(), c, run, tmpl, rt); err == nil {
+		t.Fatal("unknown harness accepted")
 	}
 }

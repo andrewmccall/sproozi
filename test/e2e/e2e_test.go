@@ -74,11 +74,22 @@ var _ = Describe("Manager", Ordered, func() {
 		Expect(err).NotTo(HaveOccurred(), "Failed to deploy the controller-manager")
 	})
 
-	// After all tests have been executed, clean up by undeploying the controller, uninstalling CRDs,
-	// and deleting the namespace.
+	// Keep the controller and policies available until run finalizers have cleaned
+	// their sandboxes. Removing them first can strand namespace deletion on failure.
 	AfterAll(func() {
+		By("cleaning up AgentRuns while the controller is available")
+		cmd := exec.Command("kubectl", "delete", "agentruns", "--all", "-n", namespace,
+			"--ignore-not-found", "--timeout=90s")
+		_, err := utils.Run(cmd)
+		if err != nil {
+			// Leave the controller and CRDs for diagnosis in a preserved isolated
+			// cluster. The enclosing Kind runner owns whole-cluster cleanup.
+			Fail(fmt.Sprintf("AgentRun cleanup failed: %s", err))
+			return
+		}
 		By("cleaning up the curl pod for metrics")
-		cmd := exec.Command("kubectl", "delete", "pod", "curl-metrics", "-n", namespace)
+		cmd = exec.Command("kubectl", "delete", "pod", "curl-metrics", "-n", namespace,
+			"--ignore-not-found", "--timeout=30s")
 		_, _ = utils.Run(cmd)
 
 		By("undeploying the controller-manager")
@@ -90,7 +101,7 @@ var _ = Describe("Manager", Ordered, func() {
 		_, _ = utils.Run(cmd)
 
 		By("removing manager namespace")
-		cmd = exec.Command("kubectl", "delete", "ns", namespace)
+		cmd = exec.Command("kubectl", "delete", "ns", namespace, "--timeout=90s")
 		_, _ = utils.Run(cmd)
 	})
 
@@ -269,6 +280,17 @@ var _ = Describe("Manager", Ordered, func() {
 				g.Expect(metricsOutput).To(ContainSubstring("< HTTP/1.1 200 OK"))
 			}
 			Eventually(verifyMetricsAvailable, 2*time.Minute).Should(Succeed())
+		})
+
+		It("runs the full native persistent orchestration stack in Kind", func() {
+			if os.Getenv("SPROOZI_E2E_ORCHESTRATION") == "0" {
+				Skip("Explicit dependency-only check omits native orchestration acceptance")
+			}
+			By("proving stock worker loops and persistent Hermes delegation through private MCP")
+			cmd := exec.Command("python3", "hack/verify/orchestration-kind/verify.py", "--manager-image", managerImage)
+			output, err := utils.Run(cmd)
+			_, _ = fmt.Fprint(GinkgoWriter, output)
+			Expect(err).NotTo(HaveOccurred(), "Full-stack Kind evidence is retained in .local/verification/orchestration-kind")
 		})
 
 		// +kubebuilder:scaffold:e2e-webhooks-checks

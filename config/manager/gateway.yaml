@@ -76,6 +76,12 @@ spec:
               name: model-gateway-auth
               key: mode
               optional: true
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: model-gateway-credentials
+              key: anthropic-api-key
+              optional: true
         - name: GITHUB_APP_ID
           valueFrom:
             secretKeyRef:

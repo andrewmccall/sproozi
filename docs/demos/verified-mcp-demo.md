@@ -78,7 +78,8 @@ a hard total-token or spending ceiling. See
 Local integration tests separately cover capability/resource denials, shared
 REST/MCP budgeting, forged arguments/session IDs, input/output limits and
 in-flight cancellation against a fake Kubernetes upstream. Configured remote MCP providers have separate evidence below. Managed stdio
-servers, Docker execution and a second harness remain future work.
+servers and Docker execution remain future work. [Additional CLI adapters](../reference/harnesses.md)
+have local tests; this recorded Kind proof remains Codex-specific.
 
 ## Configured remote MCP acceptance
 

@@ -68,3 +68,11 @@ The only mutable intent in `spec` is `cancel: true`.
 - `status.summary`
 
 Those fields record what Sproozi created and how the run ended without exposing credentials or raw prompt/output content.
+
+
+`status.result` optionally retains `{text, truncated}` from an explicit
+UID-bound worker publication. The controller stores it with terminal phase
+before Pod deletion. It is separate from audit-safe summary and conditions,
+may contain sensitive untrusted output, and expires with Run retention. Missing
+output is unavailable; empty available output is distinct. See
+[result publication](agent-contract.md#retained-final-answers).

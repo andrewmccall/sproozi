@@ -19,7 +19,7 @@ func decodeUsage(body []byte, path string, streaming bool, contentType string) (
 		// framing, terminal-completion and usage checks below still apply. Reject
 		// explicit conflicting media types and malformed nonempty headers.
 		if path != responsesPath || (strings.TrimSpace(contentType) != "" &&
-			(err != nil || mediaType != "text/event-stream")) {
+			(err != nil || mediaType != eventStreamMediaType)) {
 			return result, fmt.Errorf("unsupported streaming response")
 		}
 		result, err = decodeStreamUsage(body)

@@ -23,6 +23,8 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"math/big"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -61,7 +63,7 @@ func testRuntime() *sprooziv1alpha1.AgentRuntime {
 	runAsNonRoot := true
 	runAsUser := int64(65532)
 	return &sprooziv1alpha1.AgentRuntime{
-		ObjectMeta: metav1.ObjectMeta{Name: "codex", Namespace: testDefaultNS},
+		ObjectMeta: metav1.ObjectMeta{Name: testCodexHarness, Namespace: testDefaultNS},
 		Spec: sprooziv1alpha1.AgentRuntimeSpec{
 			ClientConfig: sprooziv1alpha1.RuntimeClientConfig{
 				TrustBundleConfigMap: sprooziv1alpha1.RuntimeConfigMapKeyReference{
@@ -622,8 +624,8 @@ func TestGetStatusUnknownWhenNotFound(t *testing.T) {
 	}
 }
 
-// TestGetExitCode verifies GetExitCode reads the exit code from the agent container status.
-func TestGetExitCode(t *testing.T) {
+// TestGetCompletion reads actual exit independently of optional result availability.
+func TestGetCompletion(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithStatusSubresource(&corev1.Pod{}).WithObjects(testTrustConfigMap(t)).Build()
 	run := testRunForSandbox("cccccccc-0000-0000-0000-000000000020")
 	rt := testRuntime()
@@ -642,11 +644,53 @@ func TestGetExitCode(t *testing.T) {
 	}}
 	_ = c.Status().Update(context.Background(), &pod)
 
-	exitCode, err := sc.GetExitCode(context.Background(), name)
+	completion, err := sc.GetCompletion(context.Background(), name, string(run.UID))
 	if err != nil {
-		t.Fatalf("GetExitCode error: %v", err)
+		t.Fatalf("GetCompletion error: %v", err)
 	}
-	if exitCode != 1 {
-		t.Errorf("exitCode = %d, want 1", exitCode)
+	if completion.ExitCode != 1 || completion.Result != nil {
+		t.Errorf("completion = %#v, want exit 1 with unavailable result", completion)
+	}
+
+	valid := `{"version":"sproozi.run-result/v1","runUID":"cccccccc-0000-0000-0000-000000000020","result":{"text":"Answer café","truncated":true}}`
+	for _, tc := range []struct {
+		name, message string
+		exitCode      int32
+		want          *sprooziv1alpha1.AgentRunResult
+	}{
+		{"success", valid, 0, &sprooziv1alpha1.AgentRunResult{Text: "Answer café", Truncated: true}},
+		{"failure with answer", valid, 7, &sprooziv1alpha1.AgentRunResult{Text: "Answer café", Truncated: true}},
+		{"missing answer", "", 0, nil},
+		{"malformed answer", "{", 0, nil},
+		{"foreign answer", strings.Replace(valid, string(run.UID), "other-run", 1), 0, nil},
+		{"available empty", strings.Replace(valid, "Answer café", "", 1), 0, &sprooziv1alpha1.AgentRunResult{Truncated: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pod.Status.ContainerStatuses[0].State.Terminated = &corev1.ContainerStateTerminated{ExitCode: tc.exitCode, Message: tc.message}
+			if err := c.Status().Update(context.Background(), &pod); err != nil {
+				t.Fatal(err)
+			}
+			got, err := sc.GetCompletion(context.Background(), name, string(run.UID))
+			if err != nil || got.ExitCode != tc.exitCode || !reflect.DeepEqual(got.Result, tc.want) {
+				t.Fatalf("completion = %#v, %v; want exit %d, result %#v", got, err, tc.exitCode, tc.want)
+			}
+		})
+	}
+	// The same well-framed answer cannot be sourced from fallback container logs.
+	pod.Spec.Containers[0].TerminationMessagePolicy = corev1.TerminationMessageFallbackToLogsOnError
+	if err := c.Update(context.Background(), &pod); err != nil {
+		t.Fatal(err)
+	}
+	got, err := sc.GetCompletion(context.Background(), name, string(run.UID))
+	if err != nil || got.ExitCode != 0 || got.Result != nil {
+		t.Fatalf("fallback-log completion = %#v, %v; want exit 0 with unavailable result", got, err)
+	}
+	// Changing only Pod ownership cannot feed a foreign answer or exit into the run.
+	pod.Labels[kubernetes.RunUIDLabel] = "replacement-run"
+	if err := c.Update(context.Background(), &pod); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sc.GetCompletion(context.Background(), name, string(run.UID)); err == nil {
+		t.Fatal("accepted foreign Pod completion")
 	}
 }

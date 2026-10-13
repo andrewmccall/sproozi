@@ -118,3 +118,22 @@ gateway; registry entries reference
 their paths with `bearerTokenFile`. Restart after changing either registrations or
 tokens. See [configured MCP capabilities](configured-mcp.md) for the format,
 policy predicates and client preparation.
+
+
+## Optional persistent orchestration
+
+The [Hermes guide](../guides/hermes-orchestration.md) prepares the private task
+service and trusted coordinator. These credentials stay outside worker Pods:
+
+| Object | Namespace | Purpose |
+| --- | --- | --- |
+| `sproozi-task-token` Secret | `sproozi-system` | Task service bearer token, `token` key |
+| `sproozi-task-tls` Secret | `sproozi-system` | Task server TLS certificate and key |
+| `sproozi-tasks` immutable ConfigMap | `sproozi-system` | Fixed principal and workflow map, `tasks.json` |
+| `hermes-coordinator` Secret | `sproozi-coordinators` | Separate model key, task token and native API key |
+| `hermes-task-trust` ConfigMap | `sproozi-coordinators` | Normal roots plus public task-service CA, `ca-bundle.pem` |
+| `hermes-config` immutable ConfigMap | `sproozi-coordinators` | Reviewed native model, platform and MCP configuration |
+
+Changing service credentials or native environment configuration requires
+restarting the affected Deployment. The stock coordinator keeps writable native
+state in its PVC; the task service keeps no separate persistent ledger.

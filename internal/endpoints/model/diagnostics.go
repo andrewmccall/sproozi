@@ -127,7 +127,7 @@ func describeResponse(resp *http.Response, body []byte, credential string) Respo
 			d.ErrorMessage = diagnosticText(event.Message, credential)
 		}
 	}
-	if mediaType != "text/event-stream" && d.BodyFormat != "sse" {
+	if mediaType != eventStreamMediaType && d.BodyFormat != "sse" {
 		decode(body)
 		return d
 	}

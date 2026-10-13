@@ -48,18 +48,20 @@ const defaultHost = "sproozi-gateway.sproozi-system.svc"
 var scheme = runtime.NewScheme()
 
 type startupConfig struct {
-	enabled        map[sprooziv1alpha1.CapabilityKind]bool
-	host           string
-	listenerCert   tls.Certificate
-	certificates   map[string]tls.Certificate
-	profiles       *egress.ProfileStore
-	pricing        *modelgateway.PricingTable
-	openAIKey      string
-	modelAuthMode  string
-	appID          int64
-	installationID int64
-	privateKey     []byte
-	mcpRegistry    *mcpgateway.Registry
+	enabled              map[sprooziv1alpha1.CapabilityKind]bool
+	host                 string
+	listenerCert         tls.Certificate
+	certificates         map[string]tls.Certificate
+	profiles             *egress.ProfileStore
+	pricing              *modelgateway.PricingTable
+	openAIKey            string
+	anthropicKey         string
+	anthropicUpstreamURL string
+	modelAuthMode        string
+	appID                int64
+	installationID       int64
+	privateKey           []byte
+	mcpRegistry          *mcpgateway.Registry
 }
 
 // semanticAuthorities binds concrete service modules to exact authorities.
@@ -102,7 +104,8 @@ func loadStartupConfig() (*startupConfig, error) {
 		return nil, err
 	}
 	var pricing *modelgateway.PricingTable
-	openAIKey, modelAuthMode := "", ""
+	openAIKey, anthropicKey, modelAuthMode := "", "", ""
+	anthropicUpstreamURL := envOrDefault("ANTHROPIC_UPSTREAM_URL", "https://api.anthropic.com")
 	if enabled[sprooziv1alpha1.CapabilityModelInference] {
 		pricingFile, err := os.Open(envOrDefault("MODEL_PRICING_PATH", "/etc/sproozi/model/pricing.json"))
 		if err != nil {
@@ -117,17 +120,12 @@ func loadStartupConfig() (*startupConfig, error) {
 		if closeErr != nil {
 			return nil, fmt.Errorf("close model pricing: %w", closeErr)
 		}
-		openAIKey = strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
-		modelAuthMode = envOrDefault("MODEL_AUTH_MODE", modelauth.APIKeyMode)
-		if modelAuthMode != modelauth.APIKeyMode && modelAuthMode != modelauth.ChatGPTMode {
-			return nil, errors.New("MODEL_AUTH_MODE must be api_key or chatgpt")
+		openAIKey, anthropicKey, modelAuthMode, err = loadModelCredentials()
+		if err != nil {
+			return nil, err
 		}
-		if modelAuthMode == modelauth.ChatGPTMode &&
-			envOrDefault("OPENAI_UPSTREAM_URL", "https://api.openai.com") != "https://api.openai.com" {
-			return nil, errors.New("ChatGPT plan usage requires the public OpenAI API upstream")
-		}
-		if modelAuthMode == modelauth.APIKeyMode && openAIKey == "" {
-			return nil, errors.New("OPENAI_API_KEY is required")
+		if err := validateModelUpstream(anthropicUpstreamURL); err != nil {
+			return nil, err
 		}
 	}
 	var appID, installationID int64
@@ -155,6 +153,14 @@ func loadStartupConfig() (*startupConfig, error) {
 		return nil, err
 	}
 	hosts := inspectionHosts(host, enabled, profiles, mcpRegistry)
+	if enabled[sprooziv1alpha1.CapabilityModelInference] {
+		if anthropicKey != "" {
+			hosts["api.anthropic.com"] = true
+		}
+		if openAIKey == "" && modelAuthMode == modelauth.APIKeyMode {
+			delete(hosts, "api.openai.com")
+		}
+	}
 	for name := range hosts {
 		if err := leaf.VerifyHostname(name); err != nil {
 			return nil, fmt.Errorf("gateway certificate does not cover configured host %q", name)
@@ -164,10 +170,31 @@ func loadStartupConfig() (*startupConfig, error) {
 	return &startupConfig{
 		enabled: enabled,
 		host:    host, listenerCert: certificate, certificates: certificates,
-		profiles: profiles, pricing: pricing, openAIKey: openAIKey, modelAuthMode: modelAuthMode,
-		appID: appID, installationID: installationID, privateKey: privateKey,
+		profiles: profiles, pricing: pricing, openAIKey: openAIKey, anthropicKey: anthropicKey, modelAuthMode: modelAuthMode,
+		anthropicUpstreamURL: anthropicUpstreamURL,
+		appID:                appID, installationID: installationID, privateKey: privateKey,
 		mcpRegistry: mcpRegistry,
 	}, nil
+}
+
+func loadModelCredentials() (string, string, string, error) {
+	openAIKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
+	anthropicKey := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY"))
+	if strings.ContainsAny(anthropicKey, "\r\n") {
+		return "", "", "", errors.New("ANTHROPIC_API_KEY is invalid")
+	}
+	mode := envOrDefault("MODEL_AUTH_MODE", modelauth.APIKeyMode)
+	if mode != modelauth.APIKeyMode && mode != modelauth.ChatGPTMode {
+		return "", "", "", errors.New("MODEL_AUTH_MODE must be api_key or chatgpt")
+	}
+	if mode == modelauth.ChatGPTMode &&
+		envOrDefault("OPENAI_UPSTREAM_URL", "https://api.openai.com") != "https://api.openai.com" {
+		return "", "", "", errors.New("ChatGPT plan usage requires the public OpenAI API upstream")
+	}
+	if mode == modelauth.APIKeyMode && openAIKey == "" && anthropicKey == "" {
+		return "", "", "", errors.New("OPENAI_API_KEY or ANTHROPIC_API_KEY is required")
+	}
+	return openAIKey, anthropicKey, mode, nil
 }
 
 func inspectionHosts(host string, enabled map[sprooziv1alpha1.CapabilityKind]bool,
@@ -242,7 +269,7 @@ func requiredEnvValue(key string) string { return os.Getenv(key) }
 
 func composeDispatcher(
 	cfg *startupConfig, handlers map[sprooziv1alpha1.CapabilityKind]http.Handler,
-	mcpHandler http.Handler,
+	mcpHandler http.Handler, anthropicHandler http.Handler,
 ) gateway.Dispatcher {
 	routes := gateway.Dispatcher{}
 	host := cfg.host
@@ -268,6 +295,17 @@ func composeDispatcher(
 			route.Handler = handlers[cap]
 			routes[authority] = route
 		}
+	}
+	// The two fixed provider protocols share model.inference accounting, while
+	// credentials and upstream transport remain administrator-owned. Reserve
+	// Anthropic even when disabled so destination egress cannot replace it.
+	routes[modelgateway.AnthropicAuthority] = gateway.Route{
+		Capability: string(sprooziv1alpha1.CapabilityModelInference), Tier: audit.TierSemantic,
+	}
+	if cfg.enabled[sprooziv1alpha1.CapabilityModelInference] && cfg.anthropicKey != "" {
+		route := routes[modelgateway.AnthropicAuthority]
+		route.Handler = anthropicHandler
+		routes[modelgateway.AnthropicAuthority] = route
 	}
 	if cfg.enabled[sprooziv1alpha1.CapabilityNetworkEgress] {
 		for _, destination := range cfg.profiles.Destinations() {
@@ -349,7 +387,16 @@ func main() {
 		MaxResponseBytes: 8 << 20,
 		AuditLogger:      auditLogger})
 	handlers := map[sprooziv1alpha1.CapabilityKind]http.Handler{sprooziv1alpha1.CapabilityKubernetesRead: kube}
-	if cfg.enabled[sprooziv1alpha1.CapabilityModelInference] {
+	var anthropicHandler http.Handler
+	if cfg.enabled[sprooziv1alpha1.CapabilityModelInference] && cfg.anthropicKey != "" {
+		anthropicHandler = modelgateway.NewAnthropicHandler(modelgateway.HandlerConfig{
+			Pricing: cfg.pricing, AuditLogger: auditLogger,
+			UpstreamURL:  cfg.anthropicUpstreamURL,
+			ProviderAuth: modelauth.AnthropicAPIKey{Key: cfg.anthropicKey}, HTTPClient: httpClient,
+		})
+	}
+	openAIEnabled := cfg.openAIKey != "" || cfg.modelAuthMode == modelauth.ChatGPTMode
+	if cfg.enabled[sprooziv1alpha1.CapabilityModelInference] && openAIEnabled {
 		budgetNamespace := envOrDefault("BUDGET_NAMESPACE", "sproozi-system")
 		var providerAuth modelauth.Authenticator = modelauth.APIKey{Key: cfg.openAIKey}
 		if cfg.modelAuthMode == modelauth.ChatGPTMode {
@@ -407,7 +454,7 @@ func main() {
 		envOrDefault("BUDGET_NAMESPACE", "sproozi-system")))
 	mcpHandler := mcpgateway.NewHandler(mcpgateway.HandlerConfig{Registry: cfg.mcpRegistry,
 		Budgets: budgets, AuditLogger: auditLogger})
-	dispatcher := composeDispatcher(cfg, handlers, mcpHandler)
+	dispatcher := composeDispatcher(cfg, handlers, mcpHandler, anthropicHandler)
 	for authority, route := range dispatcher {
 		route.Budgets = budgets
 		dispatcher[authority] = route
@@ -451,4 +498,15 @@ func envOrDefault(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+// Provider destinations are trusted operator configuration; workloads continue
+// to use the reserved semantic authority and cannot choose an upstream.
+func validateModelUpstream(value string) error {
+	upstream, err := url.Parse(value)
+	if err != nil || upstream.Scheme != "https" && upstream.Scheme != "http" || upstream.Host == "" ||
+		upstream.User != nil || value != upstream.Scheme+"://"+upstream.Host {
+		return errors.New("invalid Anthropic upstream origin")
+	}
+	return nil
 }

@@ -687,10 +687,10 @@ func TestReconcilerSandboxFailedTransitionsToFailed(t *testing.T) {
 	}
 }
 
-func TestReconcilerSandboxWithoutExitCodeTransitionsToFailed(t *testing.T) {
+func TestReconcilerSandboxWithoutCompletionTransitionsToFailed(t *testing.T) {
 	sc := &k8sresources.FakeSandboxClient{
-		Status:    k8sresources.SandboxStatusFailed,
-		ResultErr: errors.New("agent container has not terminated"),
+		Status:        k8sresources.SandboxStatusFailed,
+		CompletionErr: errors.New("agent container has not terminated"),
 	}
 	run := newRun("run-sandbox-no-exit")
 	r, c := newReconcilerWithSandbox(sc, append(fixtures(), run)...)

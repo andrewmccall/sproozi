@@ -62,6 +62,13 @@ var _ = BeforeSuite(func() {
 	err = utils.LoadImageToKindClusterWithName(managerImage)
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load the manager image into Kind")
 
+	if os.Getenv("SPROOZI_E2E_ORCHESTRATION") != "0" {
+		By("building and loading pinned native orchestration acceptance clients")
+		cmd = exec.Command("python3", "hack/verify/orchestration-kind/build.py")
+		_, err = utils.Run(cmd)
+		ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to provision native acceptance images")
+	}
+
 	configureKubectlKubeRC()
 	setupCertManager()
 })

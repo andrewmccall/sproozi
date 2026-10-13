@@ -1,0 +1,63 @@
+# Official Hermes v0.21.6 image; administrator must review upgrades and model selection.
+apiVersion: sproozi.com/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: hermes
+  namespace: sproozi-system
+spec:
+  clientConfig:
+    harness: hermes
+    trustBundleConfigMap:
+      key: ca-bundle.pem
+      name: sproozi-sandbox-trust
+  ephemeralWorkspace:
+    sizeLimit: 2Gi
+  gatewayEndpoint: https://sproozi-gateway.sproozi-system.svc:8443
+  podTemplate:
+    spec:
+      automountServiceAccountToken: false
+      containers:
+      - name: agent
+        image: docker.io/nousresearch/hermes-agent@sha256:9774f4f39a9bb8c2f68ce728ed5e99ddbad282163be56764afacf88ed952b784
+        command: [/bin/sh, -ec]
+        args:
+        - |
+          token="$(cat /var/run/sproozi/tokens/gateway/token)"
+          proxy="https://sproozi:${token}@${SPROOZI_GATEWAY#https://}"
+          export HTTP_PROXY="$proxy" HTTPS_PROXY="$proxy" http_proxy="$proxy" https_proxy="$proxy"
+          export NO_PROXY='' no_proxy=''
+          export HOME=/home/agent HERMES_HOME=/home/agent/.hermes
+          export XDG_CONFIG_HOME="$HOME/.config" XDG_DATA_HOME="$HOME/.local/share"
+          export XDG_CACHE_HOME="$HOME/.cache" XDG_STATE_HOME="$HOME/.local/state"
+          export SSL_CERT_FILE=/etc/sproozi/trust/ca-bundle.pem
+          export REQUESTS_CA_BUNDLE="$SSL_CERT_FILE"
+          export HERMES_PYTHON=/opt/hermes/.venv/bin/python
+          export PYTHONDONTWRITEBYTECODE=1
+          cd /workspace
+          exec /opt/hermes/.venv/bin/python \
+            /etc/sproozi/contract/hermes-launch.py --model "$SPROOZI_MODEL" --kubernetes-mcp
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        resources:
+          limits:
+            cpu: '1'
+            ephemeral-storage: 2Gi
+            memory: 2Gi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: [ALL]
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        env:
+        - name: SPROOZI_MODEL
+          value: gpt-5.3-codex
+      securityContext:
+        fsGroup: 10000
+        runAsNonRoot: true
+        runAsUser: 10000
+        seccompProfile:
+          type: RuntimeDefault
+  workloadContainers: [agent]

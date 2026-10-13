@@ -119,4 +119,5 @@ provisioning status or automatic deletion of durable budget state. Observed
 provider usage does not establish hard spending ceilings. Historical SRE
 acceptance predates this MCP route. Configured remote MCP has separate
 [deployed fixture evidence](../demos/verified-mcp-demo.md#configured-remote-mcp-acceptance).
-Managed stdio servers, Docker execution and a second harness remain unverified.
+Managed stdio servers and Docker execution remain unverified. Additional stock
+harnesses have a separate [full Kind gate](../guides/hermes-orchestration.md).

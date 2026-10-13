@@ -24,7 +24,7 @@ graph LR
 
         subgraph Agents[sproozi-agents]
             S[Sandbox with stock agent]
-            Contract[Immutable run contract and Codex MCP fragment]
+            Contract[Immutable run contract and native MCP configuration]
         end
 
         subgraph Target[Approved target namespace]
@@ -105,10 +105,13 @@ and named capability; reconnecting does not reset consumption. Cached discovery
 and connection configuration grant no authority. The proxy's live revalidation
 revokes requests when run or policy authority ends.
 
-The controller adds a public `codex-mcp.toml` fragment to the existing immutable
-run contract when `AgentRuntime.spec.clientConfig.harness` is `codex`. The trusted
-launch copies it into disposable Codex configuration. It contains requested
-broker connections, with no upstream URLs or provider credentials.
+The controller renders native Codex, Claude Code, OpenCode or Hermes MCP configuration
+in the immutable run contract. The administrator-owned launch loads it into
+fresh client state, with no upstream URLs or credentials. Claude Code's native
+Anthropic model route shares the existing `model.inference` account with OpenAI;
+the trusted gateway selects its protocol and credentials. The [harness reference](../reference/harnesses.md)
+and [harness ADR](../adr/0002-native-cli-harnesses-and-model-protocols.md)
+describe launch, completion, accounting and verification limits.
 
 The [MCP ADR](../adr/0001-mcp-capabilities-through-shared-gateway.md) records why
 registration, grants and session ownership have this shape. See
@@ -117,6 +120,23 @@ registration, grants and session ownership have this shape. See
 [the agent contract](../reference/agent-contract.md) for current configuration and
 limits. The configured bridge supports independent HTTPS tool operations;
 managed stdio, OAuth consent and conversation continuity remain future work.
+
+## Persistent assistant delegation
+
+Stock Hermes runs separately with native sessions, memory and schedules on a PVC.
+Its native MCP client calls a private task service. That service owns narrowly
+scoped Kubernetes credentials and maps workflow names to fixed templates and
+capability subsets. The assistant supplies task intent, bounded replay identity
+and UID-bound observation/cancellation; it holds no Kubernetes token.
+
+The controller admits and executes each delegated AgentRun through the existing
+worker queue and shared gateway. It retains optional explicit final text with
+terminal status before deleting the worker Pod. Conversations, schedules and
+coordinator inference belong to Hermes; worker identity and budgets belong to
+Sproozi. The coordinator does not occupy the single worker slot. See
+[the task interface](../reference/orchestration.md),
+[the Kubernetes guide](../guides/hermes-orchestration.md) and
+[ADR 0003](../adr/0003-persistent-assistants-and-retained-results.md).
 
 ## Execution and evidence
 
@@ -141,5 +161,8 @@ interrupted cleanup and container-completion limitations are listed in
 
 The [future architecture overview](future-architecture/README.md) describes
 extensions to these implemented boundaries. MCP delivery and configurable HTTPS
-provider mediation are current capabilities. Docker placement, additional
-harnesses and managed MCP servers remain directional designs.
+provider mediation are current capabilities. Docker placement, managed harness control and managed MCP servers remain
+directional designs. Additional stock CLI configuration and Anthropic Messages
+are implemented. Full Kind acceptance includes all four stock clients and
+persistent Hermes delegation with deterministic providers, as described in the
+harness reference.

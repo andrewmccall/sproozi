@@ -19,6 +19,7 @@ package v1alpha1
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -33,6 +34,9 @@ var digestImagePattern = regexp.MustCompile(`^[A-Za-z0-9./_:-]+@sha256:[a-f0-9]{
 // runtime admission seam. It deliberately fails closed for Pod features that
 // could escape the sandbox or silently weaken its security boundary.
 func (s *AgentRuntimeSpec) ValidateRuntimeTemplate() error {
+	if !slices.Contains([]string{"", "codex", "claude-code", "opencode", "hermes"}, s.ClientConfig.Harness) {
+		return fmt.Errorf("unsupported harness %q", s.ClientConfig.Harness)
+	}
 	if len(s.PodTemplate.Spec.Containers) == 0 {
 		return fmt.Errorf("podTemplate must contain a container")
 	}
@@ -45,15 +49,8 @@ func (s *AgentRuntimeSpec) ValidateRuntimeTemplate() error {
 	if len(s.PodTemplate.Spec.EphemeralContainers) > 0 {
 		return fmt.Errorf("podTemplate ephemeralContainers are forbidden")
 	}
-	if len(s.WorkloadContainers) == 0 {
-		return fmt.Errorf("workloadContainers must not be empty")
-	}
-	selected := map[string]bool{}
-	for _, name := range s.WorkloadContainers {
-		if name == "" || selected[name] {
-			return fmt.Errorf("workloadContainers must contain unique non-empty names")
-		}
-		selected[name] = true
+	if err := validateWorkloadNames(s.WorkloadContainers); err != nil {
+		return err
 	}
 	seen := map[string]bool{}
 	reserved := map[string]bool{"contract": true, "client-trust": true, "workspace": true, "tmp": true, "agent-home": true, "kubernetes-token": true, "gateway-token": true, "egress-token": true}
@@ -97,6 +94,20 @@ func (s *AgentRuntimeSpec) ValidateRuntimeTemplate() error {
 	}
 	if strings.TrimSpace(string(s.PodTemplate.Spec.RestartPolicy)) != "" && s.PodTemplate.Spec.RestartPolicy != corev1.RestartPolicyNever {
 		return fmt.Errorf("restartPolicy must be Never")
+	}
+	return nil
+}
+
+func validateWorkloadNames(names []string) error {
+	if len(names) == 0 {
+		return fmt.Errorf("workloadContainers must not be empty")
+	}
+	selected := map[string]bool{}
+	for _, name := range names {
+		if name == "" || selected[name] {
+			return fmt.Errorf("workloadContainers must contain unique non-empty names")
+		}
+		selected[name] = true
 	}
 	return nil
 }
@@ -169,7 +180,7 @@ type RuntimeClientConfig struct {
 	// Harness selects supported run-local MCP configuration rendering. Empty
 	// leaves delivery to the administrator's own client launch command.
 	// +optional
-	// +kubebuilder:validation:Enum=codex
+	// +kubebuilder:validation:Enum=codex;claude-code;opencode;hermes
 	Harness string `json:"harness,omitempty"`
 
 	// TrustBundleConfigMap identifies an immutable certificate-only ConfigMap in the
