@@ -23,6 +23,7 @@ import (
 
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
 	"github.com/andrewmccall/sproozi/internal/harness"
+	"github.com/andrewmccall/sproozi/internal/project"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/workspace"
 	"github.com/google/uuid"
@@ -52,9 +53,10 @@ type InitialPlacement interface {
 // Repository selects an administrator-owned stopped snapshot, or a GitHub URL
 // the native worker fetches through its separately approved GitHub capability.
 type Repository struct {
-	URL      string `json:"url,omitempty"`
-	Snapshot string `json:"snapshot,omitempty"`
-	Ref      string `json:"ref,omitempty"`
+	URL       string `json:"url,omitempty"`
+	Snapshot  string `json:"snapshot,omitempty"`
+	Ref       string `json:"ref,omitempty"`
+	Reference string `json:"reference,omitempty"`
 }
 
 type Config struct {
@@ -67,58 +69,73 @@ type Config struct {
 	MaxDuration        time.Duration
 	MaxCheckpointBytes int64
 	Repositories       map[string]Repository
+	TemplateName       string
+	Projects           map[project.ID]project.Definition
 	Backend            InitialPlacement
 	Log                io.Writer
 }
 
 type Submit struct {
-	RequestID  string             `json:"requestId"`
-	Repository string             `json:"repository"`
-	Harness    harness.NativeKind `json:"harness"`
-	Executor   string             `json:"executor"`
-	Task       string             `json:"task"`
+	RequestID     string             `json:"requestId"`
+	Repository    string             `json:"repository"`
+	Harness       harness.NativeKind `json:"harness"`
+	Executor      string             `json:"executor"`
+	Task          string             `json:"task"`
+	Project       project.ID         `json:"project,omitempty"`
+	WorkspaceFrom *RevisionSource    `json:"workspaceFrom,omitempty"`
+}
+
+type SessionQuery struct {
+	Project project.ID `json:"project,omitempty"`
 }
 
 type View struct {
-	ID               string             `json:"id"`
-	ExecutionID      string             `json:"executionId"`
-	Harness          harness.NativeKind `json:"harness"`
-	Repository       string             `json:"repository"`
-	Phase            string             `json:"phase"`
-	ThreadID         string             `json:"threadId,omitempty"`
-	Deadline         time.Time          `json:"deadline"`
-	CheckpointDigest string             `json:"checkpointDigest,omitempty"`
-	Result           string             `json:"result,omitempty"`
-	ResultTruncated  bool               `json:"resultTruncated,omitempty"`
-	Problem          string             `json:"problem,omitempty"`
+	project.Association
+	ID               string               `json:"id"`
+	ExecutionID      string               `json:"executionId"`
+	Harness          harness.NativeKind   `json:"harness"`
+	Phase            string               `json:"phase"`
+	ThreadID         string               `json:"threadId,omitempty"`
+	Deadline         time.Time            `json:"deadline"`
+	CheckpointDigest string               `json:"checkpointDigest,omitempty"`
+	Result           string               `json:"result,omitempty"`
+	ResultTruncated  bool                 `json:"resultTruncated,omitempty"`
+	Problem          string               `json:"problem,omitempty"`
+	CheckpointInfo   *checkpoint.Metadata `json:"checkpointInfo,omitempty"`
+	WorkspaceFrom    *RevisionSource      `json:"workspaceFrom,omitempty"`
 }
 
 // Export is transferred over authenticated owner transport. Its source receipt
 // is retained history; a claimed home must independently authorize new execution.
 type Export struct {
-	ID          string             `json:"id"`
-	Harness     harness.NativeKind `json:"harness"`
-	Stopped     session.Stopped    `json:"stopped"`
-	Checkpoint  []byte             `json:"checkpoint"`
-	OperationID string             `json:"operationId"`
-	Claimed     bool               `json:"claimed"`
+	project.Association
+	ID             string               `json:"id"`
+	Harness        harness.NativeKind   `json:"harness"`
+	Stopped        session.Stopped      `json:"stopped"`
+	Checkpoint     []byte               `json:"checkpoint"`
+	OperationID    string               `json:"operationId"`
+	Claimed        bool                 `json:"claimed"`
+	CheckpointInfo *checkpoint.Metadata `json:"checkpointInfo,omitempty"`
 }
 
 type record struct {
-	Version         int                  `json:"version"`
-	Intent          Submit               `json:"intent"`
-	IntentDigest    string               `json:"intentDigest"`
-	Launch          session.Launch       `json:"launch"`
-	Phase           string               `json:"phase"`
-	Progress        string               `json:"progress,omitempty"`
-	Incarnation     *session.Incarnation `json:"incarnation,omitempty"`
-	Stopped         *session.Stopped     `json:"stopped,omitempty"`
-	InputDigest     string               `json:"inputDigest,omitempty"`
-	Result          string               `json:"result,omitempty"`
-	ResultTruncated bool                 `json:"resultTruncated,omitempty"`
-	Problem         string               `json:"problem,omitempty"`
-	Transfer        string               `json:"transfer,omitempty"`
-	CancelOperation string               `json:"cancelOperation,omitempty"`
+	Version          int                  `json:"version"`
+	Intent           Submit               `json:"intent"`
+	IntentDigest     string               `json:"intentDigest"`
+	Launch           session.Launch       `json:"launch"`
+	Phase            string               `json:"phase"`
+	Progress         string               `json:"progress,omitempty"`
+	Incarnation      *session.Incarnation `json:"incarnation,omitempty"`
+	Stopped          *session.Stopped     `json:"stopped,omitempty"`
+	InputDigest      string               `json:"inputDigest,omitempty"`
+	Result           string               `json:"result,omitempty"`
+	ResultTruncated  bool                 `json:"resultTruncated,omitempty"`
+	Problem          string               `json:"problem,omitempty"`
+	Transfer         string               `json:"transfer,omitempty"`
+	CancelOperation  string               `json:"cancelOperation,omitempty"`
+	Association      project.Association  `json:"association,omitempty"`
+	RepositorySource *Repository          `json:"repositorySource,omitempty"`
+	CheckpointInfo   *checkpoint.Metadata `json:"checkpointInfo,omitempty"`
 }
 
 type Owner struct {
@@ -172,6 +189,7 @@ func Open(c Config) (*Owner, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	c.Allowances = maps.Clone(c.Allowances)
 	c.Repositories = maps.Clone(c.Repositories)
+	c.Projects = project.Clone(c.Projects)
 	o := &Owner{config: c, lock: f, ctx: ctx, cancel: cancel, running: map[string]context.CancelFunc{}}
 	entries, err := os.ReadDir(c.Directory)
 	if err != nil {
@@ -184,6 +202,17 @@ func Open(c Config) (*Owner, error) {
 			if readErr != nil {
 				_ = o.Close()
 				return nil, readErr
+			}
+			if !project.Member(c.Projects, r.Association.Project, c.Principal) &&
+				r.Phase != phaseRetained && r.Phase != phaseExporting && r.Phase != phaseHomeOwned && r.Phase != phaseCancelled {
+				if r.CancelOperation == "" {
+					r.CancelOperation = uuid.NewSHA1(uuid.NameSpaceOID, []byte(r.Launch.SessionID+"/project-revoked")).String()
+				}
+				r.Phase = phaseCancelling
+				if err = o.save(r); err != nil {
+					_ = o.Close()
+					return nil, err
+				}
 			}
 			if r.Phase == phasePending || r.Phase == phasePreparing || r.Phase == phaseActive || r.Phase == phaseFinalizing || r.Phase == phaseCancelling {
 				o.dispatch(r.Launch.SessionID)
@@ -227,6 +256,13 @@ func (o *Owner) read(id string) (record, error) {
 	intent, _ := json.Marshal(r.Intent)
 	if r.Version != 1 || o.sessionID(r.Intent.RequestID) != id || r.Launch.SessionID != id || r.IntentDigest != hash(intent) || r.Launch.Harness != o.config.Harness || r.Launch.Placement != o.config.Placement || r.Launch.InstructionDigest != o.config.InstructionDigest || !canonicalID(r.Launch.OperationID) || !canonicalID(r.Launch.AllocationID) {
 		return r, errors.New("work: retained owner binding changed")
+	}
+	if r.Association.Template != "" && r.Association.Template != o.config.TemplateName ||
+		r.Association.Project != r.Intent.Project || r.Association.Project != "" && !project.ValidID(r.Association.Project) {
+		return r, errors.New("work: retained project binding changed")
+	}
+	if err = project.ValidateReference(r.Association.RepositoryReference); err != nil {
+		return r, err
 	}
 	return r, nil
 }
@@ -275,14 +311,14 @@ func (o *Owner) Submit(ctx context.Context, q Submit) (View, error) {
 	if !canonicalID(q.RequestID) || q.Harness != o.config.Harness || q.Executor != o.config.Placement || strings.TrimSpace(q.Task) == "" || len(q.Task) > 16<<10 || !utf8.ValidString(q.Task) || strings.ContainsRune(q.Task, '\x00') {
 		return View{}, errors.New("work: invalid or unsupported task intent")
 	}
-	if _, ok := o.config.Repositories[q.Repository]; !ok {
-		return View{}, errors.New("work: repository not approved")
-	}
 	id := o.sessionID(q.RequestID)
 	b, _ := json.Marshal(q)
 	digest := hash(b)
 	// Submission replay is a metadata read, not a wait for the active native turn.
 	if current, readErr := o.read(id); readErr == nil {
+		if err := o.access(current); err != nil {
+			return View{}, err
+		}
 		if current.IntentDigest != digest {
 			return View{}, errors.New("work: submission intent conflicts")
 		}
@@ -294,6 +330,9 @@ func (o *Owner) Submit(ctx context.Context, q Submit) (View, error) {
 	defer unlock()
 	r, err := o.read(id)
 	if err == nil {
+		if err = o.access(r); err != nil {
+			return View{}, err
+		}
 		if r.IntentDigest != digest {
 			return View{}, errors.New("work: submission intent conflicts")
 		}
@@ -302,6 +341,15 @@ func (o *Owner) Submit(ctx context.Context, q Submit) (View, error) {
 	if !os.IsNotExist(err) {
 		return View{}, err
 	}
+	association, repository, allowances, err := o.resolve(q)
+	if err != nil {
+		return View{}, err
+	}
+	if q.WorkspaceFrom != nil {
+		if _, err = o.revisionSource(*q.WorkspaceFrom, association); err != nil {
+			return View{}, err
+		}
+	}
 	entries, err := os.ReadDir(o.config.Directory)
 	if err != nil {
 		return View{}, err
@@ -309,7 +357,10 @@ func (o *Owner) Submit(ctx context.Context, q Submit) (View, error) {
 	if len(entries) > 1024 {
 		return View{}, errors.New("work: catalogue retention limit reached")
 	}
-	r = record{Version: 1, Intent: q, IntentDigest: digest, Phase: phasePending, Launch: session.Launch{Harness: q.Harness, SessionID: id, OperationID: q.RequestID, AllocationID: uuid.NewString(), Epoch: 1, Placement: q.Executor, InstructionDigest: o.config.InstructionDigest, Deadline: time.Now().Add(o.config.MaxDuration).UTC(), Allowances: maps.Clone(o.config.Allowances), Task: q.Task}}
+	r = record{Version: 1, Intent: q, IntentDigest: digest, Association: association, RepositorySource: &repository,
+		Phase: phasePending, Launch: session.Launch{Harness: q.Harness, SessionID: id, OperationID: q.RequestID,
+			AllocationID: uuid.NewString(), Epoch: 1, Placement: q.Executor, InstructionDigest: o.config.InstructionDigest,
+			Deadline: time.Now().Add(o.config.MaxDuration).UTC(), Allowances: allowances, Task: q.Task}}
 	if err = o.save(r); err != nil {
 		return View{}, err
 	}
@@ -317,7 +368,13 @@ func (o *Owner) Submit(ctx context.Context, q Submit) (View, error) {
 	return view(r), nil
 }
 func view(r record) View {
-	v := View{ID: r.Launch.SessionID, ExecutionID: r.Launch.AllocationID, Harness: r.Launch.Harness, Repository: r.Intent.Repository, Phase: r.Phase, Deadline: r.Launch.Deadline, Result: r.Result, ResultTruncated: r.ResultTruncated, Problem: r.Problem}
+	association := r.Association
+	if association.Repository == "" {
+		association.Repository = r.Intent.Repository
+	}
+	v := View{Association: association, ID: r.Launch.SessionID, ExecutionID: r.Launch.AllocationID, Harness: r.Launch.Harness,
+		Phase: r.Phase, Deadline: r.Launch.Deadline, Result: r.Result, ResultTruncated: r.ResultTruncated, Problem: r.Problem}
+	v.CheckpointInfo, v.WorkspaceFrom = r.CheckpointInfo, r.Intent.WorkspaceFrom
 	if r.Stopped != nil {
 		v.ThreadID = r.Stopped.Launch.ThreadID
 		v.CheckpointDigest = r.Stopped.CheckpointDigest
@@ -326,9 +383,21 @@ func view(r record) View {
 }
 func (o *Owner) Info(_ context.Context, id string) (View, error) {
 	r, e := o.read(id)
+	if e == nil {
+		e = o.access(r)
+	}
+	if e != nil {
+		return View{}, e
+	}
 	return view(r), e
 }
-func (o *Owner) List(ctx context.Context) ([]View, error) {
+func (o *Owner) List(ctx context.Context, q SessionQuery) ([]View, error) {
+	if q.Project != "" && !project.ValidID(q.Project) {
+		return nil, errors.New("work: invalid project filter")
+	}
+	if !project.Member(o.config.Projects, q.Project, o.config.Principal) {
+		return []View{}, nil
+	}
 	entries, e := os.ReadDir(o.config.Directory)
 	if e != nil {
 		return nil, e
@@ -345,7 +414,9 @@ func (o *Owner) List(ctx context.Context) ([]View, error) {
 		if e != nil {
 			return nil, e
 		}
-		result = append(result, view(r))
+		if o.access(r) == nil && (q.Project == "" || r.Association.Project == q.Project) {
+			result = append(result, view(r))
+		}
 	}
 	slices.SortFunc(result, func(a, b View) int { return strings.Compare(a.ID, b.ID) })
 	return result, nil
@@ -411,7 +482,25 @@ func (o *Owner) input(ctx context.Context, r *record) ([]byte, error) {
 		}
 		return b, nil
 	}
+	if r.Intent.WorkspaceFrom != nil {
+		data, err := o.revisionSource(*r.Intent.WorkspaceFrom, r.Association)
+		if err != nil {
+			return nil, err
+		}
+		archive, _, err := checkpoint.Workspace(data, o.config.MaxCheckpointBytes)
+		if err != nil {
+			return nil, err
+		}
+		b, err := workspace.AtRevision(ctx, archive, r.Intent.WorkspaceFrom.Revision, o.config.Directory, o.config.MaxCheckpointBytes)
+		if err != nil {
+			return nil, err
+		}
+		return o.retainInput(r, b)
+	}
 	repo := o.config.Repositories[r.Intent.Repository]
+	if r.RepositorySource != nil {
+		repo = *r.RepositorySource
+	}
 	var b []byte
 	var err error
 	if repo.Snapshot != "" {
@@ -431,16 +520,22 @@ func (o *Owner) input(ctx context.Context, r *record) ([]byte, error) {
 		}
 		b, err = workspace.Capture(ctx, dir, nil, o.config.MaxCheckpointBytes)
 		// The task is data for the native agent; credentials and scope remain at the gateway.
-		r.Launch.Task = fmt.Sprintf("Work in the current controlled workspace. Fetch repository %s through the configured gateway and check out ref %q before performing this task. Do not copy host credentials.\n\n%s", repo.URL, repo.Ref, r.Intent.Task)
+		if repo.URL != "" {
+			r.Launch.Task = fmt.Sprintf("Work in the current controlled workspace. Fetch repository %s through the configured gateway and check out ref %q before performing this task. Do not copy host credentials.\n\n%s", repo.URL, repo.Ref, r.Intent.Task)
+		}
 	}
 	if err != nil {
 		return nil, err
 	}
-	if err = atomic(o.config.Directory, r.Launch.SessionID+".input", b); err != nil {
+	return o.retainInput(r, b)
+}
+
+func (o *Owner) retainInput(r *record, b []byte) ([]byte, error) {
+	if err := atomic(o.config.Directory, r.Launch.SessionID+".input", b); err != nil {
 		return nil, err
 	}
 	r.InputDigest = hash(b)
-	if err = o.save(*r); err != nil {
+	if err := o.save(*r); err != nil {
 		return nil, err
 	}
 	return b, nil
@@ -510,6 +605,11 @@ func (o *Owner) execute(ctx context.Context, r *record) error {
 		if e = atomic(o.config.Directory, r.Launch.SessionID+".checkpoint", stopped.Checkpoint); e != nil {
 			return e
 		}
+		info, e := checkpoint.Inspect(stopped.Checkpoint, o.config.MaxCheckpointBytes)
+		if e != nil {
+			return e
+		}
+		r.CheckpointInfo = &info
 		r.Result, r.ResultTruncated, e = checkpoint.FinalText(stopped.Checkpoint, o.config.MaxCheckpointBytes)
 		if e != nil {
 			return e
@@ -547,6 +647,19 @@ func ValidateExport(e Export, max int64) error {
 	if meta.Harness != e.Harness || meta.ThreadID != s.Launch.ThreadID || meta.SHA256 != s.CheckpointDigest {
 		return errors.New("work: retained checkpoint binding differs")
 	}
+	if e.Project != "" && !project.ValidID(e.Project) {
+		return errors.New("work: invalid portable project identity")
+	}
+	if err = project.ValidateReference(e.RepositoryReference); err != nil {
+		return err
+	}
+	if e.CheckpointInfo != nil {
+		a, _ := json.Marshal(e.CheckpointInfo)
+		b, _ := json.Marshal(meta)
+		if !bytes.Equal(a, b) {
+			return errors.New("work: declared checkpoint metadata differs from retained bytes")
+		}
+	}
 	return checkpoint.ValidateContinuity(e.Checkpoint, e.Harness, s.Launch.InstructionDigest, max)
 }
 func (o *Owner) BeginExport(ctx context.Context, id, operation string) (Export, error) {
@@ -566,6 +679,9 @@ func (o *Owner) export(ctx context.Context, id, operation, digest string, claim 
 	// Re-read under the lock before committing the transfer.
 	current, err := o.read(id)
 	if err != nil {
+		return Export{}, err
+	}
+	if err = o.access(current); err != nil {
 		return Export{}, err
 	}
 	if current.Phase != phaseRetained && current.Phase != phaseExporting && current.Phase != phaseHomeOwned {
@@ -593,7 +709,12 @@ func (o *Owner) export(ctx context.Context, id, operation, digest string, claim 
 	if err != nil {
 		return Export{}, err
 	}
-	e := Export{ID: id, Harness: r.Launch.Harness, Stopped: *r.Stopped, Checkpoint: b, OperationID: operation, Claimed: r.Phase == phaseHomeOwned}
+	info, err := checkpoint.Inspect(b, o.config.MaxCheckpointBytes)
+	if err != nil {
+		return Export{}, err
+	}
+	e := Export{Association: view(r).Association, CheckpointInfo: &info, ID: id, Harness: r.Launch.Harness,
+		Stopped: *r.Stopped, Checkpoint: b, OperationID: operation, Claimed: r.Phase == phaseHomeOwned}
 	if err = ValidateExport(e, o.config.MaxCheckpointBytes); err != nil {
 		return Export{}, err
 	}
@@ -618,6 +739,9 @@ func (o *Owner) Recover(ctx context.Context, id string) (View, error) {
 	defer unlock()
 	r, e := o.read(id)
 	if e != nil {
+		return View{}, e
+	}
+	if e = o.access(r); e != nil {
 		return View{}, e
 	}
 	if r.Phase == phaseUnknown {
@@ -645,6 +769,9 @@ func (o *Owner) Cancel(ctx context.Context, id, operation string) (View, error) 
 	}
 	r, e := o.read(id)
 	if e != nil {
+		return View{}, e
+	}
+	if e = o.access(r); e != nil {
 		return View{}, e
 	}
 	if r.Phase == phaseHomeOwned || r.Phase == phaseExporting || r.Phase == phaseRetained {
@@ -714,13 +841,29 @@ func (o *Owner) Close() error {
 }
 
 func (c Config) validate() error {
-	if !filepath.IsAbs(c.Directory) || c.Principal == "" || c.Harness != harness.NativeCodex || c.Placement == "" || len(c.InstructionDigest) != 64 || c.MaxDuration <= 0 || c.MaxDuration > 24*time.Hour || c.MaxCheckpointBytes <= 0 || c.MaxCheckpointBytes > 64<<20 || c.Backend == nil || len(c.Repositories) == 0 || len(c.Allowances) == 0 {
+	if !filepath.IsAbs(c.Directory) || c.Principal == "" || c.Harness != harness.NativeCodex || c.Placement == "" || len(c.InstructionDigest) != 64 || c.MaxDuration <= 0 || c.MaxDuration > 24*time.Hour || c.MaxCheckpointBytes <= 0 || c.MaxCheckpointBytes > 64<<20 || c.Backend == nil || len(c.Repositories)+len(c.Projects) == 0 || len(c.Allowances) == 0 {
 		return errors.New("work: fixed owner configuration required")
 	}
 	for name, r := range c.Repositories {
 		if name == "" || strings.ContainsAny(name, "/\\\x00") || (r.Snapshot == "" && !strings.HasPrefix(r.URL, "https://github.com/")) || (r.Snapshot != "" && !filepath.IsAbs(r.Snapshot)) {
 			return errors.New("work: approved repository name and source required")
 		}
+		if err := project.ValidateReference(r.Reference); err != nil {
+			return err
+		}
+		if err := project.ValidateReference(r.URL); err != nil {
+			return err
+		}
 	}
-	return nil
+	for id, definition := range c.Projects {
+		r := c.Repositories[definition.Workspace]
+		if definition.Workspace != "" && r.Reference == "" && r.URL == "" {
+			return fmt.Errorf("work: project %q snapshot workspace requires a credential-free repository reference", id)
+		}
+	}
+	repositories := map[string]bool{}
+	for name := range c.Repositories {
+		repositories[name] = true
+	}
+	return project.Validate(c.Projects, c.TemplateName, repositories, c.Allowances)
 }

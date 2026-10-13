@@ -1,7 +1,9 @@
 # Retained remote work and freshly authorized session continuations
 
-Status: Accepted
+Status: accepted
 Date: 2026-10-12
+Reconciled: 2026-10-13
+Implementation: retained Codex work and fresh continuation verified; stock Hermes dispatch verified
 
 ## Problem and constraints
 
@@ -143,6 +145,15 @@ Implementation is in [the remote work owner](../../internal/work/owner.go),
 The [workflow guide](../guides/portable-workflows.md) states setup and support
 limits. The [verification driver](../../hack/verify/portable-workflows/verify.py)
 records actual native evidence and its fixture limitations.
+
+The subsequent stock Hermes fixture discovered and invoked the actual retained-work
+MCP tool, retrieved the completed session after its sandbox stopped, and passed
+one-way pull and same-native-UUID Docker continuation under a fresh execution and
+deadline. A real stock native tool wrote and read the controlled workspace file.
+This resolves the earlier absence of a fresh Hermes harness proof. The
+[recorded acceptance](../demos/verified-portable-workflows.md) separates this
+deterministic-provider evidence from paid inference, real engineering contribution
+and personal home-ops acceptance. It does not expand native-history compatibility.
 
 Live verification exposed an initial helper argument mismatch, default-branch
 workspace restoration, native folder trust, blocking submission replay and

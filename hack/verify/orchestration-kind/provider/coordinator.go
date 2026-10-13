@@ -22,27 +22,10 @@ func (f *fixture) coordinator(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	encoded, _ := json.Marshal(request)
-	marker := "SPROOZI_COORDINATOR_REQUEST="
-	var submit map[string]any
-	var reference map[string]any
-	// Decode the request marker from a string, not from escaped JSON source.
-	visit(request, func(m map[string]any) {
-		for _, v := range m {
-			if s, ok := v.(string); ok {
-				if _, after, ok := strings.Cut(s, marker); ok {
-					decoder := json.NewDecoder(strings.NewReader(after))
-					_ = decoder.Decode(&submit)
-				}
-				if _, after, ok := strings.Cut(s, "SPROOZI_COORDINATOR_REFERENCE="); ok {
-					decoder := json.NewDecoder(strings.NewReader(after))
-					_ = decoder.Decode(&reference)
-				}
-			}
-		}
-	})
+	submit, reference, work := coordinatorIntent(request)
 	var view map[string]any
 	visitToolPayloads(request, func(m map[string]any) {
-		if m["id"] != nil && m["uid"] != nil && m["phase"] != nil {
+		if m["id"] != nil && m["phase"] != nil && (work && m["executionId"] != nil || !work && m["uid"] != nil) {
 			view = m
 		}
 	})
@@ -55,19 +38,34 @@ func (f *fixture) coordinator(w http.ResponseWriter, r *http.Request) {
 	} else if view == nil && submit != nil {
 		action = "submit"
 		args = submit
-	} else if view != nil && view["phase"] != "Succeeded" && view["phase"] != "Failed" && view["phase"] != "Cancelled" && view["phase"] != "TimedOut" {
+	} else if !work && view != nil && view["phase"] != "Succeeded" && view["phase"] != "Failed" && view["phase"] != "Cancelled" && view["phase"] != "TimedOut" {
 		action = "wait"
 		args = map[string]any{"id": view["id"], "uid": view["uid"], "seconds": 30}
+	}
+	serverName := "sproozi_tasks"
+	if work {
+		serverName = "sproozi_work"
+		if action == "submit" {
+			action = "run"
+		}
+		if action != "" {
+			action = "sproozi_" + action
+		}
 	}
 	if action != "" {
 		name = findTool(request, action)
 		if name == "" {
 			name, args = hermesDeferredCall(request, args, func(candidate string) bool {
-				return strings.Contains(candidate, "sproozi_tasks") && strings.HasSuffix(candidate, "__"+action)
+				return strings.Contains(candidate, serverName) && strings.HasSuffix(candidate, "__"+action)
 			})
 		}
 	}
 	text := "SPROOZI_COORDINATOR_COMPLETE"
+	if work {
+		// An observation can be pending. Only the real owner's phase establishes
+		// retention; submitting work does not imply a completed native execution.
+		text = "SPROOZI_WORK_OBSERVED"
+	}
 	if view != nil {
 		textBytes, _ := json.Marshal(view)
 		text += " " + string(textBytes)
@@ -79,6 +77,11 @@ func (f *fixture) coordinator(w http.ResponseWriter, r *http.Request) {
 		"model": request["model"], "action": name, "nativeTaskResult": view != nil}
 	if view != nil {
 		record["taskUID"] = view["uid"]
+		if work {
+			delete(record, "taskUID")
+			record["sessionId"] = view["id"]
+			record["executionId"] = view["executionId"]
+		}
 		record["phase"] = view["phase"]
 	}
 	f.mu.Lock()
@@ -86,6 +89,35 @@ func (f *fixture) coordinator(w http.ResponseWriter, r *http.Request) {
 	f.mu.Unlock()
 	f.sendOpenAI(w, request, name, args, text, r.URL.Path)
 }
+func coordinatorIntent(request map[string]any) (submit, reference map[string]any, work bool) {
+	marker := "SPROOZI_COORDINATOR_REQUEST="
+	// Decode the request marker from a string, not from escaped JSON source.
+	visit(request, func(m map[string]any) {
+		for _, v := range m {
+			if s, ok := v.(string); ok {
+				for _, pair := range []struct {
+					marker string
+					value  *map[string]any
+				}{{"SPROOZI_WORK_REQUEST=", &submit}, {"SPROOZI_WORK_REFERENCE=", &reference}} {
+					if _, after, ok := strings.Cut(s, pair.marker); ok {
+						work = true
+						_ = json.NewDecoder(strings.NewReader(after)).Decode(pair.value)
+					}
+				}
+				if _, after, ok := strings.Cut(s, marker); ok {
+					decoder := json.NewDecoder(strings.NewReader(after))
+					_ = decoder.Decode(&submit)
+				}
+				if _, after, ok := strings.Cut(s, "SPROOZI_COORDINATOR_REFERENCE="); ok {
+					decoder := json.NewDecoder(strings.NewReader(after))
+					_ = decoder.Decode(&reference)
+				}
+			}
+		}
+	})
+	return submit, reference, work
+}
+
 func visit(value any, fn func(map[string]any)) {
 	switch v := value.(type) {
 	case map[string]any:

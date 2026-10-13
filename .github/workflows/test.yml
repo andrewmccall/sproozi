@@ -36,5 +36,7 @@ jobs:
         run: make verify-protocol
       - name: Verify MCP capabilities
         run: make verify-mcp
+      - name: Verify native workflow fixtures
+        run: make verify-workflow-fixtures
       - name: Verify documentation
         run: make verify-docs

@@ -1,7 +1,8 @@
 # 0010: Managed session authority and fresh admission
 
-Status: accepted for implementation foundations
+Status: accepted
 Date: 2026-10-11
+Implementation: verified for the controlled single-owner native session scope
 Live Codex and Claude roundtrips: passed; scope recorded on 2026-10-12
 
 ## Problem and constraints
@@ -197,3 +198,12 @@ Current boundaries live in [gateway grants](../../internal/gateway/grant.go),
 [profile transport](../../internal/session/profile/server.go),
 [native launch](../../cmd/native-session/README.md) and
 [runtime client configuration](../reference/agentruntime.md).
+
+## Subsequent decision
+
+[ADR 0012](0012-retained-work-and-fresh-session-continuations.md) adds retained
+remote work and later fresh executions under a stable product session ID. This
+ADR's original deadline and aggregate allowance apply within each execution's
+live moves. A new continuation has current admission, new accounts and a new
+deadline; it cannot reopen an old allocation or modify sealed usage. Exact writer
+fencing and conservative unknown-state handling remain required in both paths.

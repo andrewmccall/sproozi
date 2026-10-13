@@ -122,6 +122,10 @@ verify-harness-process: ## Run stock Claude Code and OpenCode through the TLS ga
 verify-mcp-kind: ## Prove configured providers with stock Codex in owned Kind; requires pinned images, CNI and a single-owner model session.
 	bash hack/verify/mcp-kind.sh
 
+.PHONY: verify-workflow-fixtures
+verify-workflow-fixtures: ## Check deterministic native workflow protocol fixtures, including genuine tool-result and yielded-cell handling.
+	python3 -m unittest discover -s hack/verify/session-mobility -p '*_test.py'
+
 .PHONY: verify-protocol
 verify-protocol: protocol-tools ## Run pinned-client offline fixtures and protocol package tests without silently accepting zero tests.
 	export PATH="$(abspath $(LOCALBIN)/protocol):$$PATH"; cache_dir="$$(mktemp -d)" && SPROOZI_PROTOCOL_FIXTURE=1 GOCACHE="$$cache_dir" hack/verify/go-test-required.sh ./internal/endpoints/github '^(TestPinnedGitReceivePackProtocolFixture|TestPinnedGHPRCreateStartsWithGraphQL|TestPinnedGHAPICreatesPRUsingBoundedREST|TestInspectReceivePack.*|TestParsePushCommands.*|TestGraphQL.*|TestPackage.*)$$' && GOCACHE="$$cache_dir" go test ./internal/endpoints/packages ./internal/budget ./internal/endpoints/destination ./internal/gateway ./internal/endpoints/model ./internal/proxytransport -count=1

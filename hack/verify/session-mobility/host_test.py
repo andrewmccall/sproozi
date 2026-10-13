@@ -29,7 +29,8 @@ def request(turn):
         items += [message("user", HOST.ALL_PROMPTS[turn])]
     items.insert(0, {"type": "additional_tools", "role": "developer", "tools": [
         {"type": "namespace", "name": "functions", "tools": [
-            {"type": "custom", "name": "exec", "description": "tools.exec_command(args)"}]}]})
+            {"type": "custom", "name": "exec", "description": "tools.exec_command(args)"},
+            {"type": "function", "name": "wait"}]}]})
     return {"model": "fixture-model", "stream": True, "input": items}
 
 
@@ -116,6 +117,24 @@ class FixtureTests(unittest.TestCase):
         followup["input"][-1]["output"] = json.dumps([{"type": "text", "text": json.dumps({
             "exit_code": 0, "output": HOST.TOOL_MARKER + "\n"})}])
         self.assertTrue(HOST.classify_request(followup)["toolOutputValidated"])
+
+    def test_build_waits_for_native_cell_and_validates_actual_success(self):
+        body = request(6)
+        body['input'].append({'type': 'custom_tool_call_output', 'call_id': 'mobility_exec_tool',
+                              'output': 'Script running with cell ID 17\nWall time 31 seconds'})
+        classified = HOST.classify_request(body)
+        self.assertEqual((classified['phase'], classified['waitCell']), ('wait-call', '17'))
+        handler = self.handler(body)
+        handler.do_POST()
+        item = events(handler.wfile)[-1]['response']['output'][0]
+        self.assertEqual((item['type'], item['namespace'], item['name']), ('function_call', 'functions', 'wait'))
+        self.assertEqual(json.loads(item['arguments'])['cell_id'], '17')
+        body['input'].append({'type': 'function_call_output', 'call_id': item['call_id'],
+                              'output': json.dumps({'exit_code': 0, 'output': 'SPROOZI_PACKAGE_TESTS_VERIFIED'})})
+        self.assertTrue(HOST.classify_request(body)['toolOutputValidated'])
+        body['input'][-1]['output'] = json.dumps({'exit_code': 1, 'output': 'SPROOZI_PACKAGE_TESTS_VERIFIED'})
+        with self.assertRaisesRegex(ValueError, 'absent or failed'):
+            HOST.classify_request(body)
 
     def test_old_tool_output_does_not_finish_new_same_prompt(self):
         body = request(3)

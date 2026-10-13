@@ -36,15 +36,27 @@ old record superseded and link both records.
 
 ## Decisions
 
-- [0001: Use MCP through the shared capability gateway](0001-mcp-capabilities-through-shared-gateway.md)
-- [0002: Native CLI harnesses and model protocols](0002-native-cli-harnesses-and-model-protocols.md)
-- [0003: Persistent assistants and retained worker results](0003-persistent-assistants-and-retained-results.md)
-- [0004: Portable sessions across bounded executions](0004-portable-sessions-and-bounded-executions.md)
-- [0005: Controlled Docker launch before existing-session adoption](0005-controlled-docker-launch-before-session-adoption.md)
-- [0006: Native CLI and terminal access before GUI mobility](0006-native-cli-and-terminal-before-gui-mobility.md)
-- [0007: Prove the Codex round trip before expanding harness support](0007-codex-round-trip-before-harness-expansion.md)
-- [0008: Selected native and Git checkpoints](0008-selected-native-and-git-checkpoints.md)
-- [0009: Runtime backends and sealed accounting](0009-runtime-backends-and-sealed-accounting.md)
-- [0010: Managed session authority and fresh admission](0010-managed-session-authority-and-admission.md)
-- [0011: Native session compatibility and completion](0011-native-session-compatibility-and-completion.md)
-- [0012: Retained work and fresh session continuations](0012-retained-work-and-fresh-session-continuations.md)
+Decision status and implementation progress are separate. An implemented choice
+remains accepted while it governs the system. A fulfilled sequencing decision
+remains part of the history. Use superseded only when a later decision replaces
+the choice, with links in both records.
+
+Reviewed on 13 October 2026 against the current checkout and retained evidence.
+All decisions below remain accepted; none is wholly superseded. Fixture acceptance
+is scoped to the versions and scenarios recorded in each ADR and verified demo.
+
+| Decision | Implementation and remaining scope |
+| --- | --- |
+| [0001: MCP through the shared gateway](0001-mcp-capabilities-through-shared-gateway.md) | Implemented. Managed stdio, OAuth and upstream conversation continuity remain deferred. |
+| [0002: Native CLI harnesses and model protocols](0002-native-cli-harnesses-and-model-protocols.md) | Implemented; later four-client Kind acceptance extends the original evidence. |
+| [0003: Persistent assistants and retained answers](0003-persistent-assistants-and-retained-results.md) | Implemented for disposable delegated jobs. ADR 0012 adds retained native work. |
+| [0004: Portable sessions across bounded executions](0004-portable-sessions-and-bounded-executions.md) | Controlled Codex/Claude round trips verified. ADRs 0008–0011 supply the mechanisms; 0012 adds fresh continuations. |
+| [0005: Controlled Docker launch before adoption](0005-controlled-docker-launch-before-session-adoption.md) | Controlled launch implemented. Its round-trip prerequisite is met; unmanaged adoption still needs its own proof. |
+| [0006: Native CLI and terminal before GUI mobility](0006-native-cli-and-terminal-before-gui-mobility.md) | Terminal experience implemented. GUI/IDE integration remains deferred. |
+| [0007: Codex round trip before harness expansion](0007-codex-round-trip-before-harness-expansion.md) | Sequencing fulfilled by Codex followed by Claude. Further harnesses still require independent evidence. |
+| [0008: Selected native and Git checkpoints](0008-selected-native-and-git-checkpoints.md) | Implemented for supported foreground histories and Git layouts. |
+| [0009: Runtime backends and sealed accounting](0009-runtime-backends-and-sealed-accounting.md) | Implemented and exercised by both native round trips. Unknown usage remains conservative. |
+| [0010: Managed session authority and fresh admission](0010-managed-session-authority-and-admission.md) | Implemented within the recorded single-owner placement and failure scope. |
+| [0011: Native compatibility and completion](0011-native-session-compatibility-and-completion.md) | Implemented for pinned Codex/Claude. Claude's full held placement move/cancel matrix remains unassessed. |
+| [0012: Retained work and fresh continuations](0012-retained-work-and-fresh-session-continuations.md) | Implemented for Codex; stock Hermes dispatch and local continuation verified with deterministic providers. |
+| [0013: Configured Projects and workspace revisions](0013-configured-projects-and-workspace-revisions.md) | Implemented. Native development acceptance proves Project association/filtering, independent home approval and fresh conversation at exact retained Git revision. |

@@ -4,6 +4,7 @@ Status: accepted
 Date: 2026-10-10
 Reconciled: 2026-10-12
 Implementation: Codex core/extended and Claude Code production round trips passed
+Sequencing: fulfilled; retained as historical rationale
 
 ## Problem and constraints
 
@@ -100,9 +101,9 @@ and [harness adapters](../explanations/future-architecture/harness-portability.m
 
 ## Revisit conditions
 
-Revisit the order if a controlled Codex experiment cannot establish safe native
-state transfer while Claude can, or intended-user evidence establishes a more
-urgent Claude requirement. Revisit the shared adapter shape after the Claude
-round trip exposes a concrete difference. Add another harness only with its own
+The Codex-first, Claude-second sequence is complete. Claude's different transcript
+and completion requirements are reconciled in ADR 0011; neither proof establishes
+universal portability. Revisit the shared adapter shape when another native
+contract exposes a concrete difference. Add another harness only with its own
 continuity, authority and failure evidence. GUI priority remains independently
 revisitable under [ADR 0006](0006-native-cli-and-terminal-before-gui-mobility.md).

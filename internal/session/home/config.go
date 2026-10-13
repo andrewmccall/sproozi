@@ -13,24 +13,34 @@ import (
 	"time"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
+	"github.com/andrewmccall/sproozi/internal/project"
 	runtimedocker "github.com/andrewmccall/sproozi/internal/runtime/docker"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
 )
 
 type Config struct {
-	Directory     string                          `json:"directory"`
-	DockerBinary  string                          `json:"dockerBinary"`
-	DockerSocket  string                          `json:"dockerSocket"`
-	DockerConfig  string                          `json:"dockerConfig"`
-	Local         runtimedocker.PlacementConfig   `json:"local"`
-	Allowances    map[string]session.Allowance    `json:"allowances"`
-	MaxDuration   string                          `json:"maxDuration"`
-	Model         string                          `json:"model"`
-	NativeOptions []string                        `json:"nativeOptions,omitempty"`
-	Gateway       GatewayConfig                   `json:"gateway"`
-	Remote        map[string]profile.ClientConfig `json:"remote,omitempty"`
-	WorkSources   map[string]profile.ClientConfig `json:"workSources,omitempty"`
+	Directory        string                          `json:"directory"`
+	DockerBinary     string                          `json:"dockerBinary"`
+	DockerSocket     string                          `json:"dockerSocket"`
+	DockerConfig     string                          `json:"dockerConfig"`
+	Local            runtimedocker.PlacementConfig   `json:"local"`
+	Allowances       map[string]session.Allowance    `json:"allowances"`
+	MaxDuration      string                          `json:"maxDuration"`
+	Model            string                          `json:"model"`
+	NativeOptions    []string                        `json:"nativeOptions,omitempty"`
+	Gateway          GatewayConfig                   `json:"gateway"`
+	Remote           map[string]profile.ClientConfig `json:"remote,omitempty"`
+	WorkSources      map[string]profile.ClientConfig `json:"workSources,omitempty"`
+	ProjectApprovals []ProjectApproval               `json:"projectApprovals,omitempty"`
+}
+
+// ProjectApproval is current local authority, qualified by authenticated source.
+// It narrows home ceilings independently of imported project metadata.
+type ProjectApproval struct {
+	Source       string     `json:"source"`
+	Project      project.ID `json:"project"`
+	Capabilities []string   `json:"capabilities"`
 }
 
 type GatewayConfig struct {
@@ -128,6 +138,9 @@ func ReadConfig(path string) (Config, error) {
 	duration, err := time.ParseDuration(c.MaxDuration)
 	if err != nil || duration <= 0 || duration > 24*time.Hour {
 		return c, errors.New("home: duration must be positive and at most 24 hours")
+	}
+	if err = validateProjectApprovals(c); err != nil {
+		return c, err
 	}
 	return c, nil
 }

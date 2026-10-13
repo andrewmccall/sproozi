@@ -1,8 +1,10 @@
 # 0011: Native session compatibility and completion
 
-Status: accepted for implementation foundations
+Status: accepted
 Date: 2026-10-11
-Live extended Codex and full Claude mobility acceptance: passed on 2026-10-12
+Implementation: pinned foreground Codex and Claude compatibility verified
+Live extended Codex and ordinary Claude roundtrip acceptance: passed on 2026-10-12
+Unassessed: Claude's full held placement move/cancel matrix and broader native state
 
 ## Problem and constraints
 

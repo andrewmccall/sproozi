@@ -1,0 +1,267 @@
+{
+  "date": "2026-10-13",
+  "development": {
+    "passed": true,
+    "sourceReportSHA256": "df2b1fa21b1d9b64cf0d4b3901db01accfef9342095f28a93e74274b62d6fc88",
+    "scope": "Stock Hermes and Codex: actual offline Sproozi package tests remote/local, source-qualified Project approval, fresh native conversation at exact recorded revision",
+    "sourceSeed": {
+      "revision": "24c73a3ede0a1b1cfbb978386c47ce6cfbffe688",
+      "repositoryReference": "https://github.com/andrewmccall/sproozi",
+      "source": "public compiler source snapshot; upstream commit provenance is not claimed"
+    },
+    "remoteNativeImage": "docker.io/sproozi-session/native@sha256:afcfd28f17b51b7a14da85392f3f294e89b5297fdcbd809f16164ec4ea1f4d79",
+    "localNativeImageID": "sha256:afcfd28f17b51b7a14da85392f3f294e89b5297fdcbd809f16164ec4ea1f4d79",
+    "sessionId": "b60282d0-4e2f-5df5-9ef7-b2dbd8fafdbe",
+    "remote": {
+      "id": "b60282d0-4e2f-5df5-9ef7-b2dbd8fafdbe",
+      "executionId": "f0e4d311-aa09-43f9-9918-7efa94786b4d",
+      "threadId": "01a13654-1779-7a72-baae-4864fc9cc8a2",
+      "project": "sproozi-dev",
+      "template": "mobility-native",
+      "repositoryReference": "https://github.com/andrewmccall/sproozi",
+      "phase": "retained",
+      "deadline": "2026-10-13T18:04:00.95857143Z",
+      "checkpointDigest": "2bd37c7b72497832b6273d1161b1fbacd4058022acc763490f624a69bd66b2b3",
+      "checkpointInfo": {
+        "bytes": 3966474,
+        "harness": "codex",
+        "sha256": "2bd37c7b72497832b6273d1161b1fbacd4058022acc763490f624a69bd66b2b3",
+        "threadId": "01a13654-1779-7a72-baae-4864fc9cc8a2",
+        "turnId": "01a13654-17f3-7921-8881-fa2f9866a921",
+        "workspace": {
+          "objectFormat": "sha1",
+          "revision": "24c73a3ede0a1b1cfbb978386c47ce6cfbffe688",
+          "sha256": "61baf0d4e102a75c0370a52659b0f97f0ec9ef7ac81d772310103ffcf3a3e66e"
+        }
+      }
+    },
+    "local": {
+      "id": "f2ea5cf6-91e4-4dd3-b628-0ff294d92705",
+      "productId": "b60282d0-4e2f-5df5-9ef7-b2dbd8fafdbe",
+      "threadId": "01a13654-1779-7a72-baae-4864fc9cc8a2",
+      "project": "sproozi-dev",
+      "template": "mobility-native",
+      "repositoryReference": "https://github.com/andrewmccall/sproozi",
+      "deadline": "2026-10-13T18:05:00.315124Z",
+      "checkpointInfo": {
+        "harness": "codex",
+        "threadId": "01a13654-1779-7a72-baae-4864fc9cc8a2",
+        "turnId": "01a13654-17f3-7921-8881-fa2f9866a921",
+        "sha256": "2bd37c7b72497832b6273d1161b1fbacd4058022acc763490f624a69bd66b2b3",
+        "bytes": 3966474,
+        "workspace": {
+          "revision": "24c73a3ede0a1b1cfbb978386c47ce6cfbffe688",
+          "objectFormat": "sha1",
+          "sha256": "61baf0d4e102a75c0370a52659b0f97f0ec9ef7ac81d772310103ffcf3a3e66e"
+        }
+      }
+    },
+    "stopped": {
+      "id": "b60282d0-4e2f-5df5-9ef7-b2dbd8fafdbe",
+      "productId": "b60282d0-4e2f-5df5-9ef7-b2dbd8fafdbe",
+      "threadId": "01a13654-1779-7a72-baae-4864fc9cc8a2",
+      "project": "sproozi-dev",
+      "template": "mobility-native",
+      "repositoryReference": "https://github.com/andrewmccall/sproozi",
+      "deadline": "2026-10-13T18:05:00.315124Z",
+      "checkpointInfo": {
+        "harness": "codex",
+        "threadId": "01a13654-1779-7a72-baae-4864fc9cc8a2",
+        "turnId": "01a13655-062f-7240-b650-609e0f89505e",
+        "sha256": "0dda7fe23b5a93ba4bd6314bf4d0c9ae2311584af690819eb550b523b7980f38",
+        "bytes": 3992746,
+        "workspace": {
+          "revision": "24c73a3ede0a1b1cfbb978386c47ce6cfbffe688",
+          "objectFormat": "sha1",
+          "sha256": "20242192795ffa5e57ec24121eb7a68c2e45f28689e6fa99821d9228f4072c09"
+        }
+      }
+    },
+    "revisionExecution": {
+      "id": "92699e6c-3dac-558b-bf6e-405215adaec1",
+      "executionId": "ea64028f-7c6a-4e88-bdc4-dd40e7523c22",
+      "threadId": "01a13655-e5b0-7153-adc2-eef37f2073e2",
+      "project": "sproozi-dev",
+      "template": "mobility-native",
+      "repositoryReference": "https://github.com/andrewmccall/sproozi",
+      "phase": "retained",
+      "deadline": "2026-10-13T18:05:58.289233721Z",
+      "checkpointDigest": "743e5da4802e1df8427e972c38178f4413937e5b9072a475ef039b8387216fc2",
+      "checkpointInfo": {
+        "bytes": 3969650,
+        "harness": "codex",
+        "sha256": "743e5da4802e1df8427e972c38178f4413937e5b9072a475ef039b8387216fc2",
+        "threadId": "01a13655-e5b0-7153-adc2-eef37f2073e2",
+        "turnId": "01a13655-e608-7001-9ead-420b1983a16b",
+        "workspace": {
+          "objectFormat": "sha1",
+          "revision": "24c73a3ede0a1b1cfbb978386c47ce6cfbffe688",
+          "sha256": "6ff9a7f6bd002b95e8edacef0ee61fcbcc4e9204e07f3580efce301376a136af"
+        }
+      },
+      "workspaceFrom": {
+        "digest": "2bd37c7b72497832b6273d1161b1fbacd4058022acc763490f624a69bd66b2b3",
+        "revision": "24c73a3ede0a1b1cfbb978386c47ce6cfbffe688",
+        "sessionId": "b60282d0-4e2f-5df5-9ef7-b2dbd8fafdbe"
+      }
+    },
+    "steps": [
+      "Stock Hermes discovered and invoked the retained-work MCP tool",
+      "Stock Hermes retrieved the completed native session after its sandbox stopped",
+      "Remote initial native task completed and retained while home was absent",
+      "Claimed checkpoint resumed in local Docker under a fresh execution identity and deadline",
+      "Genuine same-conversation local follow-up completed and checkpointed without another writer",
+      "Actual offline Sproozi package tests passed in both placements",
+      "Stock Hermes launched fresh native conversation/authority from exact retained Git revision; source unchanged"
+    ]
+  },
+  "limitations": [
+    "Deterministic model protocols; autonomous software contribution and paid inference unassessed",
+    "Public compiler-source snapshot; upstream commit provenance and GitHub publication not claimed",
+    "Isolated Kind and Docker; no personal home-network infrastructure",
+    "Governed Pod placement; separate Kubernetes Agent Sandbox operator integration is not implemented"
+  ],
+  "homeOps": {
+    "passed": true,
+    "sourceReportSHA256": "12d3291395efc99d404978244f599ccbd69fb631b3143fe0f0841cd1960013ac",
+    "scope": "Stock Hermes/Codex remote-to-local home-ops Project: approved isolated Pod read and prohibited Secrets read",
+    "remoteNativeImage": "docker.io/sproozi-session/native@sha256:afcfd28f17b51b7a14da85392f3f294e89b5297fdcbd809f16164ec4ea1f4d79",
+    "localNativeImageID": "sha256:afcfd28f17b51b7a14da85392f3f294e89b5297fdcbd809f16164ec4ea1f4d79",
+    "sessionId": "167b111a-b618-5ebe-a5cd-16449b9ec4e4",
+    "remote": {
+      "id": "167b111a-b618-5ebe-a5cd-16449b9ec4e4",
+      "executionId": "101431df-e52a-43eb-96b4-14622abd61a5",
+      "threadId": "01a13657-de9f-7431-ab41-97d4f4bd8c30",
+      "project": "home-ops",
+      "template": "mobility-native",
+      "repositoryReference": "https://github.com/andrewmccall/sproozi",
+      "phase": "retained",
+      "deadline": "2026-10-13T18:08:08.516577336Z",
+      "checkpointDigest": "77c12ce2a35091544943c0bf6e6b68b4caa84951a87397934a7bd37adaa5641d",
+      "checkpointInfo": {
+        "bytes": 3963874,
+        "harness": "codex",
+        "sha256": "77c12ce2a35091544943c0bf6e6b68b4caa84951a87397934a7bd37adaa5641d",
+        "threadId": "01a13657-de9f-7431-ab41-97d4f4bd8c30",
+        "turnId": "01a13657-df26-7613-863c-b215af49bacf",
+        "workspace": {
+          "objectFormat": "sha1",
+          "revision": "24c73a3ede0a1b1cfbb978386c47ce6cfbffe688",
+          "sha256": "5c3f78ecb270090d77f01cda25f4acc98b042625fc11bf471c5442d9c8b742d3"
+        }
+      }
+    },
+    "local": {
+      "id": "81fe57bd-ee72-4f8a-a351-8ca113d8950e",
+      "productId": "167b111a-b618-5ebe-a5cd-16449b9ec4e4",
+      "threadId": "01a13657-de9f-7431-ab41-97d4f4bd8c30",
+      "project": "home-ops",
+      "template": "mobility-native",
+      "repositoryReference": "https://github.com/andrewmccall/sproozi",
+      "deadline": "2026-10-13T18:08:21.803557Z",
+      "checkpointInfo": {
+        "harness": "codex",
+        "threadId": "01a13657-de9f-7431-ab41-97d4f4bd8c30",
+        "turnId": "01a13657-df26-7613-863c-b215af49bacf",
+        "sha256": "77c12ce2a35091544943c0bf6e6b68b4caa84951a87397934a7bd37adaa5641d",
+        "bytes": 3963874,
+        "workspace": {
+          "revision": "24c73a3ede0a1b1cfbb978386c47ce6cfbffe688",
+          "objectFormat": "sha1",
+          "sha256": "5c3f78ecb270090d77f01cda25f4acc98b042625fc11bf471c5442d9c8b742d3"
+        }
+      }
+    },
+    "stopped": {
+      "id": "167b111a-b618-5ebe-a5cd-16449b9ec4e4",
+      "productId": "167b111a-b618-5ebe-a5cd-16449b9ec4e4",
+      "threadId": "01a13657-de9f-7431-ab41-97d4f4bd8c30",
+      "project": "home-ops",
+      "template": "mobility-native",
+      "repositoryReference": "https://github.com/andrewmccall/sproozi",
+      "deadline": "2026-10-13T18:08:21.803557Z",
+      "checkpointInfo": {
+        "harness": "codex",
+        "threadId": "01a13657-de9f-7431-ab41-97d4f4bd8c30",
+        "turnId": "01a13658-1757-7ae3-85f8-417aee5ab1c3",
+        "sha256": "63fef676b3c40081ea0aaace9b331abafe5f13d6f0c42ceac88932beaffc533e",
+        "bytes": 3987530,
+        "workspace": {
+          "revision": "24c73a3ede0a1b1cfbb978386c47ce6cfbffe688",
+          "objectFormat": "sha1",
+          "sha256": "913e3d078f7b7096d7cbc6c7ece409dc457564c2f10acd8a3e42d2efc07b1774"
+        }
+      }
+    },
+    "steps": [
+      "Stock Hermes discovered and invoked the retained-work MCP tool",
+      "Stock Hermes retrieved the completed native session after its sandbox stopped",
+      "Remote initial native task completed and retained while home was absent",
+      "Claimed checkpoint resumed in local Docker under a fresh execution identity and deadline",
+      "Genuine same-conversation local follow-up completed and checkpointed without another writer",
+      "Stock native kubectl observed approved Pod state and visible Secrets denial in both placements"
+    ],
+    "governance": {
+      "audit": {
+        "remote": [
+          {
+            "runUID": "6333aad3-9e5c-4004-abec-179709cc8369",
+            "capability": "kubernetes.read",
+            "allowed": true,
+            "upstreamStatus": 200
+          },
+          {
+            "runUID": "6333aad3-9e5c-4004-abec-179709cc8369",
+            "capability": "kubernetes.read",
+            "allowed": false,
+            "denyReason": "operation not permitted by policy"
+          }
+        ],
+        "local": [
+          {
+            "runUID": "a77af363e3b601110ac2eaead450e63b35739b8d2cf8cf12b6a42ad0a641db9b",
+            "capability": "kubernetes.read",
+            "allowed": true,
+            "upstreamStatus": 200
+          },
+          {
+            "runUID": "a77af363e3b601110ac2eaead450e63b35739b8d2cf8cf12b6a42ad0a641db9b",
+            "capability": "kubernetes.read",
+            "allowed": false,
+            "denyReason": "operation not permitted by policy"
+          }
+        ]
+      },
+      "fixtureCredentialsAbsentFromAuditAndSelectedArtifacts": true,
+      "checkedFixtureCredentials": [
+        "owner home token",
+        "owner task token",
+        "read-only Kubernetes upstream token"
+      ]
+    }
+  },
+  "retainedCancelledAttempts": [
+    {
+      "project": "sproozi-dev",
+      "template": "mobility-native",
+      "repository": "sproozi",
+      "repositoryReference": "https://github.com/andrewmccall/sproozi",
+      "id": "2ef60da7-8e15-5b2a-a4f8-415818d9fd48",
+      "executionId": "1a2a1049-945e-459f-97aa-1b8d24c1700d",
+      "harness": "codex",
+      "phase": "cancelled",
+      "deadline": "2026-10-13T17:45:54.649562844Z"
+    },
+    {
+      "project": "sproozi-dev",
+      "template": "mobility-native",
+      "repository": "sproozi",
+      "repositoryReference": "https://github.com/andrewmccall/sproozi",
+      "id": "db3f864b-141b-5a46-9d38-328f93dceffb",
+      "executionId": "b02d20a5-5f7f-4b66-b939-68d590b26042",
+      "harness": "codex",
+      "phase": "cancelled",
+      "deadline": "2026-10-13T17:52:08.993185253Z"
+    }
+  ]
+}
