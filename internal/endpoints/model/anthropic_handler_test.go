@@ -30,7 +30,7 @@ func TestAnthropicCappedNullableUsageSettlesActualConsumption(t *testing.T) {
 		_, _ = io.WriteString(w, strings.Replace(anthropicSuccess, `"output_tokens":2`, `"output_tokens":2,"cache_read_input_tokens":null,"cache_creation_input_tokens":null,"cache_creation":null`, 1))
 	}))
 	defer upstream.Close()
-	identity := testRunIdentity()
+	identity := testExecutionGrant()
 	identity.Policy.Spec.Budgets[api.CapabilityModelInference] = api.EndpointBudget{MaxUnits: 100, MaxCostMicros: 200}
 	tracker := budget.NewTracker()
 	h := model.NewAnthropicHandler(model.HandlerConfig{
@@ -43,7 +43,7 @@ func TestAnthropicCappedNullableUsageSettlesActualConsumption(t *testing.T) {
 	req = req.WithContext(gateway.WithIdentity(req.Context(), identity))
 	response := httptest.NewRecorder()
 	routes.ServeHTTP(response, req)
-	state := tracker.State(testRunUID + "/model.inference")
+	state := observedState(t, tracker, testRunUID+"/model.inference")
 	if response.Code != 200 || state.UnitsUsed != 22 || state.CostMicros != 22 || state.ReservedUnits != 0 || state.ReservedCostMicros != 0 {
 		t.Fatalf("status=%d body=%s state=%+v", response.Code, response.Body.String(), state)
 	}
@@ -61,7 +61,7 @@ func TestAnthropicHandlerReplacesCredentialsAndSettlesTotalBeyondOutputBound(t *
 		_, _ = io.WriteString(w, anthropicSuccess)
 	}))
 	defer upstream.Close()
-	identity := testRunIdentity()
+	identity := testExecutionGrant()
 	tracker := budget.NewTracker()
 	h := model.NewAnthropicHandler(model.HandlerConfig{ProviderAuth: modelauth.AnthropicAPIKey{Key: testAnthropicSecret}, UpstreamURL: upstream.URL, HTTPClient: upstream.Client(), AuditLogger: audit.NewLogger(io.Discard)})
 	routes := gateway.Dispatcher{model.AnthropicAuthority: {Capability: string(api.CapabilityModelInference), Handler: h, Budgets: tracker}}
@@ -73,14 +73,14 @@ func TestAnthropicHandlerReplacesCredentialsAndSettlesTotalBeyondOutputBound(t *
 	req.Header.Set("Authorization", "Bearer workload-token")
 	response := httptest.NewRecorder()
 	routes.ServeHTTP(response, req)
-	state := tracker.State(testRunUID + "/model.inference")
+	state := observedState(t, tracker, testRunUID+"/model.inference")
 	if response.Code != 200 || response.Body.String() != anthropicSuccess || state.UnitsUsed != 22 || state.ReservedUnits != 0 {
 		t.Fatalf("status=%d body=%s state=%+v", response.Code, response.Body.String(), state)
 	}
 }
 
 func TestAnthropicFailureConsumesBothCapsAndMixedProviderBudget(t *testing.T) {
-	identity := testRunIdentity()
+	identity := testExecutionGrant()
 	identity.Policy.Spec.Budgets[api.CapabilityModelInference] = api.EndpointBudget{MaxUnits: 100, MaxCostMicros: 200}
 	var calls atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -109,7 +109,7 @@ func TestAnthropicFailureConsumesBothCapsAndMixedProviderBudget(t *testing.T) {
 			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 		}
 	}
-	state := tracker.State(testRunUID + "/model.inference")
+	state := observedState(t, tracker, testRunUID+"/model.inference")
 	if calls.Load() != 1 || state.UnitsUsed != 100 || state.CostMicros != 200 || state.ReservedUnits != 0 || state.ReservedCostMicros != 0 {
 		t.Fatalf("calls=%d state=%+v", calls.Load(), state)
 	}
@@ -119,7 +119,7 @@ func TestAnthropicDeniesUnpricedModelBeforeInference(t *testing.T) {
 	var calls atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls.Add(1) }))
 	defer upstream.Close()
-	identity := testRunIdentity()
+	identity := testExecutionGrant()
 	identity.Policy.Spec.Budgets[api.CapabilityModelInference] = api.EndpointBudget{MaxUnits: 100, MaxCostMicros: 200}
 	h := model.NewAnthropicHandler(model.HandlerConfig{ProviderAuth: modelauth.AnthropicAPIKey{Key: testAnthropicSecret}, UpstreamURL: upstream.URL, HTTPClient: upstream.Client(), AuditLogger: audit.NewLogger(io.Discard)})
 	req := httptest.NewRequest(http.MethodPost, "https://api.anthropic.com/v1/messages", strings.NewReader(`{"model":"unpriced","max_tokens":2,"messages":[]}`))

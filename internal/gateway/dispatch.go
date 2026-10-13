@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -40,12 +41,18 @@ func (d Dispatcher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	if limits, configured := identity.Policy.Spec.Budgets[sprooziv1alpha1.CapabilityKind(route.Capability)]; configured {
-		if route.Budgets == nil {
-			http.Error(w, "budget accounting unavailable", http.StatusServiceUnavailable)
+	// Named MCP routes select their capability after parsing the server name.
+	if route.Capability != "" {
+		meter, err := identity.Meter(route.Budgets, sprooziv1alpha1.CapabilityKind(route.Capability))
+		if err != nil {
+			status := http.StatusForbidden
+			if errors.Is(err, ErrBudgetUnavailable) {
+				status = http.StatusServiceUnavailable
+			}
+			http.Error(w, "budget allocation denied or unavailable", status)
 			return
 		}
-		ctx = budget.WithMeter(ctx, route.Budgets.Meter(string(identity.Run.UID)+"/"+route.Capability, limits))
+		ctx = budget.WithMeter(ctx, meter)
 	}
 	clean := r.Clone(ctx)
 	clean.Header.Del("Authorization")

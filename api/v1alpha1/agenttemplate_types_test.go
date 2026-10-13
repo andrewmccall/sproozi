@@ -11,7 +11,7 @@ func TestAgentTemplateJSONRoundTrip(t *testing.T) {
 
 	want := AgentTemplate{
 		Spec: AgentTemplateSpec{
-			RuntimeRef:   AgentRuntimeReference{Name: "codex"},
+			RuntimeRef:   AgentRuntimeReference{Name: "fixture-runtime"},
 			PolicyRef:    AgentPolicyReference{Name: "sre"},
 			Instructions: "Investigate the incident and create a pull request when a safe remediation is found.",
 			EgressProfiles: []string{

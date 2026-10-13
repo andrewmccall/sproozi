@@ -45,7 +45,9 @@ if scenario == "failed-result": record["exit_code"]=1
 if scenario == "long": record["text"]="🌳\""*5000
 if scenario == "detached-stdout":
  child = subprocess.Popen([sys.executable,"-c","import time; time.sleep(30)"],start_new_session=True)
- state.with_suffix(".child-pid").write_text(str(child.pid))
+ pending_pid = state.with_suffix(".child-pid.pending")
+ pending_pid.write_text(str(child.pid))
+ pending_pid.replace(state.with_suffix(".child-pid"))
 print(json.dumps(record))
 if scenario == "duplicate-result": print(json.dumps(record))
 `

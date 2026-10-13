@@ -34,7 +34,7 @@ func MCPConfig(selected string, capabilities []string, gatewayEndpoint string) (
 		return nil, fmt.Errorf("unsupported harness %q", selected)
 	}
 	endpoint, err := url.Parse(gatewayEndpoint)
-	if err != nil || endpoint.Scheme != "https" || endpoint.Host == "" || endpoint.User != nil ||
+	if err != nil || endpoint.Scheme != nativeHTTPScheme || endpoint.Host == "" || endpoint.User != nil ||
 		endpoint.Path != "" || endpoint.RawQuery != "" || endpoint.Fragment != "" || endpoint.ForceQuery {
 		return nil, fmt.Errorf("invalid MCP gateway endpoint")
 	}

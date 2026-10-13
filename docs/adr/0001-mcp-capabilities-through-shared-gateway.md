@@ -143,7 +143,7 @@ an explicit owner for any new lifecycle or authority.
   [agent contract](../reference/agent-contract.md)
 - Registry and bridge: `internal/endpoints/mcp`; policy validation:
   `internal/mcppolicy`; client fragment: `internal/harness`; immutable contract:
-  `internal/kubernetes/contract.go`; gateway wiring: `cmd/gateway/main.go`
+  `internal/runtime/kubernetes/contract.go`; gateway wiring: `cmd/gateway/main.go`
 - [Recorded acceptance](../demos/verified-mcp-demo.md) covers stock Codex use of
   native Kubernetes and two configured HTTPS fixture providers, denials, budgets,
   cancellation and normal cleanup. This is bounded dirty-tree evidence, not

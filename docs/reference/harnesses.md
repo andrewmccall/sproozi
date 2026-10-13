@@ -4,6 +4,8 @@
 configuration. Supported selectors are `codex`, `claude-code`, `opencode` and `hermes`.
 An omitted selector leaves client configuration to the administrator's launch
 command. Unknown selectors fail runtime validation and contract preparation.
+These four selectors describe ordinary `AgentRun` launches. Managed interactive
+sessions have the narrower explicit compatibility contract below.
 
 | Selector | Immutable contract file | Native connection format |
 | --- | --- | --- |
@@ -63,7 +65,7 @@ MCP connection with `--kubernetes-mcp`. This is trusted configuration; calls
 still require the requested `kubernetes.read` grant and live namespace/resource
 policy. Removing the flag disables the connection.
 
-Client state belongs in disposable `/home/agent`. Do not mount existing user
+For ordinary runs, client state belongs in disposable `/home/agent`. Do not mount existing user
 homes, authentication stores or sessions. Claude Code's strict MCP flag excludes
 other MCP sources, and its settings flags exclude user/project settings and
 hooks. OpenCode's custom config normally merges with other settings, so its
@@ -76,6 +78,60 @@ and network controls.
 The native formats follow the official [Claude Code CLI reference](https://code.claude.com/docs/en/cli-reference),
 [OpenCode configuration](https://opencode.ai/docs/config/) and
 [OpenCode MCP reference](https://opencode.ai/docs/mcp-servers/).
+
+## Managed interactive sessions
+
+The [session service](../../cmd/sproozi/README.md) preserves a selected stock TUI
+while moving its native conversation and Git workspace from Docker to a fixed
+Kubernetes profile and back. Managed launches require an explicit immutable
+`codex` or `claude-code` selector. Both placements, the profile and the checkpoint
+must agree; a move cannot switch clients. OpenCode and Hermes ordinary launches
+do not establish managed session mobility support.
+
+The [retained-work workflow](../guides/portable-workflows.md) supports remote-first
+positional tasks only for managed Codex. Its completion observer requires the
+actual submitted user text and a new completed native turn, then the ordinary
+writer-fence/accounting/checkpoint path. Later local resume uses a fresh grant.
+Managed Codex MCP connections and placeholder Kubernetes configuration are
+regenerated for each launch; portable history cannot select upstream credentials
+or server registrations. Managed Claude tasks and MCP remain gated pending their
+own client/tool completion evidence.
+
+| Managed selector | Observed executable pin | Selected native state | Completed-turn observation |
+| --- | --- | --- | --- |
+| `codex` | 0.161.0 | One same-UUID rollout | Native completed turn, resolved supported tools and initial developer instruction digest |
+| `claude-code` | 2.1.27 | One same-UUID primary project transcript | Fresh prompt/tool/Stop hooks plus a settled transcript with paired foreground Bash tools |
+
+The fixed supervisor verifies the executable version before activation and owns
+the PTY across attachment disconnects. The selected state and workspace are
+published together under `/workspace/session`; personal homes, caches, provider
+credentials and previous launch settings are excluded. Every visit supplies
+fresh trusted configuration, gateway access and the same approved instructions.
+Claude's transcript does not itself prove the approved system instructions or
+permissions. Codex's retained initial instruction block is checked against the
+approved digest. The destination still requires fresh admission.
+
+Move gates input, waits for the active supported turn/tools, then revokes access
+and independently confirms the actual worker container stopped before capture.
+Claude uses controlled native process shutdown after its Stop observation;
+Codex uses native quit after its completed-turn observation. Hooks and journals
+are workload-accessible hints, not gateway authority, sealed accounting or a
+whole-container writer fence. Forced cancellation revokes first. See
+[ADR 0011](../adr/0011-native-session-compatibility-and-completion.md).
+
+The managed Codex launch uses `--sandbox danger-full-access` because the actual
+tool fixture could not start the inner bubblewrap sandbox in the restricted
+worker kernel. Claude uses fixed `bypassPermissions` and foreground Bash. Both
+rely on the outer non-root, read-only, capability-restricted container and
+enforced gateway network boundary. Portable history cannot select these settings.
+
+The pinned Claude parser supports the observed bounded 429 retry record followed
+by a genuine successful assistant response. Its error message remains opaque;
+it does not supply usage or authority. A retry invalidates the previous assistant
+leaf, so unresolved retries cannot reuse earlier completion. Other error-record
+shapes, background/parallel tasks, subagents, compaction and imported personal
+settings are outside the managed compatibility contract. Input accepted after a
+completed Claude turn also prevents reuse of its earlier Stop observation.
 
 ## Model providers
 
@@ -131,6 +187,29 @@ cache-write TTLs when the provider reports them. Consult current provider prices
 when creating the administrator table.
 
 ## Verification and limits
+
+`make verify-native-session` is a separate native checkpoint prerequisite. It
+uses stock Codex 0.161.0 and deterministic loopback providers to resume one UUID
+through three fresh homes, transferring a single rollout through the production
+capture/restore helper. It checks cumulative conversation and fresh provider
+bindings. It excludes native configuration and authentication. This does not
+provide a user-facing move command or establish Docker/Kubernetes, terminal,
+long-history or tool-state portability. Original developer instructions persist
+on `exec resume`; changing them is an incompatible restore until proved. See
+[ADR 0008](../adr/0008-selected-native-and-git-checkpoints.md).
+
+The separate [production mobility fixture](../../hack/verify/session-mobility/README.md)
+has passed real Docker-to-Kubernetes-to-Docker round trips for both managed pins.
+Codex's extended gate verifies a real command tool effect, Git and selected
+ignored files, same native UUID/deadline, held-turn graceful movement, forced
+held-turn cancellation, accounting replay and administrator network/mount denial
+probes. Claude's full round trip verifies three genuine TUI turns, foreground
+Bash and its file effect, Git/ignored-file continuity, four stopped visits and
+sealed usage from actual Messages requests. These are deterministic providers
+through production gateways and placements, not paid-provider or broad
+long-history proofs. Claude's round trip alone does not establish Codex's
+extended failure and containment coverage. See the
+[setup guide](../guides/session-mobility.md) for the public CLI path.
 
 `make verify-harness-clients` loads the production renderer using installed
 stock clients in temporary homes and configuration directories, without a model

@@ -24,9 +24,7 @@ import (
 	"time"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/audit"
@@ -97,11 +95,14 @@ func (a *recordedAudit) data() string {
 	return string(raw)
 }
 
+const inventoryCapability api.CapabilityKind = "mcp.inventory"
+
 type fixture struct {
 	client        *http.Client
 	otherClient   *http.Client
-	identity      *gateway.RunIdentity
-	otherIdentity *gateway.RunIdentity
+	identity      *gateway.ExecutionGrant
+	otherIdentity *gateway.ExecutionGrant
+	budgets       *budget.Tracker
 	revoked       atomic.Bool
 	calls         atomic.Int32
 	requests      atomic.Int32
@@ -117,24 +118,24 @@ type fixture struct {
 	cancelled     chan struct{}
 }
 
-func newFixture(t *testing.T, change func(*gateway.RunIdentity)) *fixture {
+func newFixture(t *testing.T, change func(*gateway.ExecutionGrant)) *fixture {
 	t.Helper()
 	f := &fixture{started: make(chan struct{}, 1), cancelled: make(chan struct{}, 1), deleted: make(chan struct{}, 64)}
-	f.identity = &gateway.RunIdentity{Run: &api.AgentRun{
-		ObjectMeta: metav1.ObjectMeta{UID: types.UID("remote-run")},
-		Spec:       api.AgentRunSpec{Capabilities: []api.CapabilityKind{docsCapability, "mcp.inventory"}},
-	}, Policy: &api.AgentPolicy{Spec: api.AgentPolicySpec{
-		AllowedCapabilities: []api.CapabilityKind{docsCapability, "mcp.inventory"},
+	f.identity = &gateway.ExecutionGrant{Policy: gateway.PolicySnapshot{Spec: api.AgentPolicySpec{
+		AllowedCapabilities: []api.CapabilityKind{docsCapability, inventoryCapability},
 		MCPServers: map[string]api.MCPServerScope{
 			docsName:      {Tools: map[string]api.MCPToolScope{searchTool: {Arguments: &runtime.RawExtension{Raw: []byte(`{"type":"object","required":["collection"],"properties":{"collection":{"const":"operations"}}}`)}}}},
 			inventoryName: {Tools: map[string]api.MCPToolScope{inventoryTool: {Arguments: &runtime.RawExtension{Raw: []byte(`{"type":"object","required":["tenant"],"properties":{"tenant":{"const":"home-ops"}}}`)}}}},
 		},
-	}}}
+	}, Name: "test-policy"},
+		Execution:    gateway.Reference{Backend: gateway.BackendKubernetes, UID: "remote-run"},
+		Capabilities: []api.CapabilityKind{docsCapability, inventoryCapability},
+		Template:     gateway.TemplateSnapshot{Name: "test-template"}}
 	if change != nil {
 		change(f.identity)
 	}
-	f.otherIdentity = &gateway.RunIdentity{Run: f.identity.Run.DeepCopy(), Policy: f.identity.Policy.DeepCopy()}
-	f.otherIdentity.Run.UID = "second-run"
+	f.otherIdentity = f.identity.Clone()
+	f.otherIdentity.Execution.UID = "second-run"
 	f.otherIdentity.Policy.Spec.MCPServers[docsName] = api.MCPServerScope{Tools: map[string]api.MCPToolScope{searchTool: {Arguments: &runtime.RawExtension{Raw: []byte(`{"required":["collection"],"properties":{"collection":{"const":"other-team"}}}`)}}}}
 	registry := map[string]any{}
 	credentialDir := t.TempDir()
@@ -219,7 +220,8 @@ func newFixture(t *testing.T, change func(*gateway.RunIdentity)) *fixture {
 	}
 	upstreamTransport := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}}
 	t.Cleanup(upstreamTransport.CloseIdleConnections)
-	handler := remote.NewHandler(remote.HandlerConfig{Registry: registrations, HTTPClient: &http.Client{Transport: upstreamTransport}, Budgets: budget.NewTracker(), AuditLogger: &f.audit})
+	f.budgets = budget.NewTracker()
+	handler := remote.NewHandler(remote.HandlerConfig{Registry: registrations, HTTPClient: &http.Client{Transport: upstreamTransport}, Budgets: f.budgets, AuditLogger: &f.audit})
 	dispatch := gateway.Dispatcher{fixtureHost + ":8443": {Tier: audit.TierProtocol, Handler: handler}}
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -233,15 +235,15 @@ func newFixture(t *testing.T, change func(*gateway.RunIdentity)) *fixture {
 	cert := tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}
 	proxyHandler, err := proxytransport.New(proxytransport.Config{
 		Certificates: map[string]tls.Certificate{fixtureHost: cert}, AllowedAuthority: dispatch.Allows,
-		Authenticate: func(_ context.Context, token string) (*gateway.RunIdentity, error) {
+		Authenticate: func(_ context.Context, token string) (*gateway.ExecutionGrant, error) {
 			if token == "second-token" {
 				return f.otherIdentity, nil
 			}
 			return f.identity, nil
 		},
-		Revalidate: func(context.Context, *gateway.RunIdentity) error {
+		Revalidate: func(context.Context, *gateway.ExecutionGrant) error {
 			if f.revoked.Load() {
-				return gateway.ErrRunNotRunning
+				return gateway.ErrGrantRevoked
 			}
 			return nil
 		},
@@ -312,7 +314,7 @@ func TestConfiguredServersUseDiscoveredSchemasAndPolicyScopes(t *testing.T) {
 }
 
 func TestMCPScopesAndBudgetsCannotBeBypassedByCachedDiscoveryOrReconnect(t *testing.T) {
-	f := newFixture(t, func(id *gateway.RunIdentity) {
+	f := newFixture(t, func(id *gateway.ExecutionGrant) {
 		id.Policy.Spec.Budgets = map[api.CapabilityKind]api.EndpointBudget{docsCapability: {MaxUnits: 1}}
 	})
 	session := f.connect(t, docsName)
@@ -388,7 +390,7 @@ func TestMCPRevocationCancelsRemoteToolAndDeletesItsSession(t *testing.T) {
 }
 
 func TestMCPRequestBoundaryRejectsForgeryBeforeUpstreamContact(t *testing.T) {
-	f := newFixture(t, func(id *gateway.RunIdentity) { id.Run.Spec.Capabilities = []api.CapabilityKind{docsCapability} })
+	f := newFixture(t, func(id *gateway.ExecutionGrant) { id.Capabilities = []api.CapabilityKind{docsCapability} })
 	for _, tc := range []struct {
 		path, body string
 		headers    map[string]string
@@ -441,7 +443,7 @@ func TestRegistryRejectsUnsafeConfiguration(t *testing.T) {
 }
 
 func TestRunsSharingProviderRetainDistinctScopesAndBudgets(t *testing.T) {
-	f := newFixture(t, func(id *gateway.RunIdentity) {
+	f := newFixture(t, func(id *gateway.ExecutionGrant) {
 		id.Policy.Spec.Budgets = map[api.CapabilityKind]api.EndpointBudget{docsCapability: {MaxUnits: 1}}
 	})
 	first := f.connect(t, docsName)
@@ -471,7 +473,7 @@ func TestRunsSharingProviderRetainDistinctScopesAndBudgets(t *testing.T) {
 }
 
 func TestLocalPolicyReferencesRemainRootedAfterSchemaIntersection(t *testing.T) {
-	f := newFixture(t, func(id *gateway.RunIdentity) {
+	f := newFixture(t, func(id *gateway.ExecutionGrant) {
 		id.Policy.Spec.MCPServers[docsName] = api.MCPServerScope{Tools: map[string]api.MCPToolScope{searchTool: {Arguments: &runtime.RawExtension{Raw: []byte(`{"$defs":{"collection":{"const":"operations"}},"required":["collection"],"properties":{"collection":{"$ref":"#/$defs/collection"}}}`)}}}}
 	})
 	session := f.connect(t, docsName)
@@ -487,7 +489,7 @@ func TestLocalPolicyReferencesRemainRootedAfterSchemaIntersection(t *testing.T) 
 }
 
 func TestPolicyDialectRetainsItsOwnArgumentMeaning(t *testing.T) {
-	f := newFixture(t, func(id *gateway.RunIdentity) {
+	f := newFixture(t, func(id *gateway.ExecutionGrant) {
 		id.Policy.Spec.MCPServers[docsName] = api.MCPServerScope{Tools: map[string]api.MCPToolScope{searchTool: {Arguments: &runtime.RawExtension{Raw: []byte(`{"$schema":"http://json-schema.org/draft-07/schema#","properties":{"tenants":{"type":"array","items":[{"const":"approved"}],"additionalItems":false}}}`)}}}}
 	})
 	session := f.connect(t, docsName)
@@ -582,7 +584,7 @@ func TestRegistryCanonicalizesEquivalentProviderAuthorities(t *testing.T) {
 }
 
 func TestOversizedProviderResultFailsAndRetainsAttemptBudget(t *testing.T) {
-	f := newFixture(t, func(id *gateway.RunIdentity) {
+	f := newFixture(t, func(id *gateway.ExecutionGrant) {
 		id.Policy.Spec.Budgets = map[api.CapabilityKind]api.EndpointBudget{docsCapability: {MaxUnits: 1}}
 	})
 	session := f.connect(t, docsName)

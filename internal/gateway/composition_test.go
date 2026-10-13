@@ -23,11 +23,11 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
-func compositionIdentity(cap sprooziv1alpha1.CapabilityKind) *gateway.RunIdentity {
-	return &gateway.RunIdentity{
-		Run:    &sprooziv1alpha1.AgentRun{Spec: sprooziv1alpha1.AgentRunSpec{Capabilities: []sprooziv1alpha1.CapabilityKind{cap}}},
-		Policy: &sprooziv1alpha1.AgentPolicy{Spec: sprooziv1alpha1.AgentPolicySpec{AllowedCapabilities: []sprooziv1alpha1.CapabilityKind{cap}, Budgets: map[sprooziv1alpha1.CapabilityKind]sprooziv1alpha1.EndpointBudget{sprooziv1alpha1.CapabilityModelInference: {MaxUnits: 100}}, KubernetesRead: sprooziv1alpha1.KubernetesReadScope{Namespaces: []string{"demo"}, Resources: []sprooziv1alpha1.KubernetesReadResource{sprooziv1alpha1.KubernetesReadPods}}}},
-	}
+func compositionIdentity(cap sprooziv1alpha1.CapabilityKind) *gateway.ExecutionGrant {
+	return &gateway.ExecutionGrant{Policy: gateway.PolicySnapshot{Spec: sprooziv1alpha1.AgentPolicySpec{AllowedCapabilities: []sprooziv1alpha1.CapabilityKind{cap}, Budgets: map[sprooziv1alpha1.CapabilityKind]sprooziv1alpha1.EndpointBudget{sprooziv1alpha1.CapabilityModelInference: {MaxUnits: 100}}, KubernetesRead: sprooziv1alpha1.KubernetesReadScope{Namespaces: []string{"demo"}, Resources: []sprooziv1alpha1.KubernetesReadResource{sprooziv1alpha1.KubernetesReadPods}}}, Name: fixturePolicyName},
+		Execution:    gateway.Reference{Backend: gateway.BackendKubernetes, UID: fixtureExecutionUID},
+		Capabilities: []sprooziv1alpha1.CapabilityKind{cap},
+		Template:     gateway.TemplateSnapshot{Name: fixtureTemplateName}}
 }
 
 func TestDispatchCompositionReachesKubernetesUpstream(t *testing.T) {
@@ -92,7 +92,7 @@ func TestEndpointBudgetStopsUpstreamAndKeepsCapabilitiesSeparate(t *testing.T) {
 		t.Fatalf("exhausted budget forwarded: status=%d calls=%d", got, calls.Load())
 	}
 	// A separate capability does not inherit this endpoint's consumption.
-	meter := tracker.Meter(string(id.Run.UID)+"/model.inference", sprooziv1alpha1.EndpointBudget{MaxUnits: 1})
+	meter := tracker.Meter(id.Execution.UID+"/model.inference", sprooziv1alpha1.EndpointBudget{MaxUnits: 1})
 	if err := meter.Spend(1, 0); err != nil {
 		t.Fatal(err)
 	}

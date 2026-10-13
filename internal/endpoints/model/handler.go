@@ -157,12 +157,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	e.Capability = string(sprooziv1alpha1.CapabilityModelInference)
 
-	policyGen := identity.Policy.Generation
-	e.RunID = identity.Run.Namespace + "/" + identity.Run.Name
-	e.RunUID = string(identity.Run.UID)
-	e.PolicyName = identity.Policy.Name
-	e.PolicyGeneration = policyGen
-	e.TokenBudget = identity.Policy.Spec.Budgets[sprooziv1alpha1.CapabilityModelInference].MaxUnits
+	limits, _, limitErr := identity.BudgetLimits(sprooziv1alpha1.CapabilityModelInference)
+	if limitErr != nil {
+		h.deny(w, e, http.StatusForbidden, "model allocation denied", "permission_error", "allocation_denied")
+		return
+	}
+	e.TokenBudget = limits.MaxUnits
 
 	// 4. Check the request path is allowed.
 	if h.protocol == openAIProtocol && !slices.Contains(allowedPaths, r.URL.Path) {
@@ -172,7 +172,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 5. Verify model.inference capability is granted by both the run and the policy.
-	if !slices.Contains(identity.Run.Spec.Capabilities, sprooziv1alpha1.CapabilityModelInference) ||
+	if !slices.Contains(identity.Capabilities, sprooziv1alpha1.CapabilityModelInference) ||
 		!slices.Contains(identity.Policy.Spec.AllowedCapabilities, sprooziv1alpha1.CapabilityModelInference) {
 		h.deny(w, e, http.StatusForbidden,
 			"model.inference capability not granted", "permission_error", "capability_not_granted")
@@ -189,7 +189,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	var check requestStreamCheck
 	if h.protocol == anthropicProtocol {
-		bodyBytes, err = h.prepareAnthropic(r, bodyBytes, identity.Policy.Spec.Budgets[sprooziv1alpha1.CapabilityModelInference])
+		bodyBytes, err = h.prepareAnthropic(r, bodyBytes, limits)
 		if err != nil {
 			h.deny(w, e, http.StatusForbidden, err.Error(), "permission_error", "unsupported_request")
 			return
@@ -208,7 +208,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	e.ProviderAuthMode = providerAuth.Mode()
 	if providerAuth.Mode() == modelauth.ChatGPTMode {
-		if err := validateChatGPTRequest(r, bodyBytes, identity.Policy.Spec.Budgets[sprooziv1alpha1.CapabilityModelInference].MaxCostMicros); err != nil {
+		if err := validateChatGPTRequest(r, bodyBytes, limits.MaxCostMicros); err != nil {
 			h.deny(w, e, http.StatusForbidden, err.Error(), "permission_error", "chatgpt_request_not_supported")
 			return
 		}
@@ -285,7 +285,7 @@ func (h *Handler) writeProviderResponse(
 	stream bool, reservation *budget.Reservation,
 ) {
 	identity, _ := gateway.IdentityFromContext(r.Context())
-	limits := identity.Policy.Spec.Budgets[sprooziv1alpha1.CapabilityModelInference]
+	limits, _, _ := identity.BudgetLimits(sprooziv1alpha1.CapabilityModelInference)
 	meter := budget.FromContext(r.Context())
 	// 10. Buffer the response body and parse token usage from 2xx inference
 	// responses. Missing usage is fail-closed: the provider may have consumed
@@ -298,7 +298,7 @@ func (h *Handler) writeProviderResponse(
 			credential = upstreamReq.Header.Get("X-Api-Key")
 		}
 		diagnostic = describeResponse(resp, body, credential)
-		diagnostic.RunUID = string(identity.Run.UID)
+		diagnostic.RunUID = identity.Execution.UID
 		defer func() { h.Config.Diagnostics(diagnostic) }()
 	}
 	if err != nil {
@@ -381,13 +381,7 @@ func (h *Handler) writeProviderResponse(
 	w.WriteHeader(resp.StatusCode)
 	_, _ = w.Write(body)
 
-	// 12. Emit success audit event.
-	state := meter.State()
-	e.Allowed = true
-	e.UpstreamStatus = resp.StatusCode
-	e.TokensUsed = tokensUsed
-	e.TokensRemaining = max(0, limits.MaxUnits-state.UnitsUsed)
-	h.Config.AuditLogger.Log(e)
+	h.auditModelSuccess(e, resp.StatusCode, tokensUsed, meter, limits)
 }
 
 func invalidTokenUsage(
@@ -513,4 +507,23 @@ func (h *Handler) providerCost(body []byte, usage responseUsage, anthropic anthr
 		cached = *usage.Usage.PromptTokensDetails.CachedTokens
 	}
 	return h.Config.Pricing.Cost(requestModel.Model, *usage.Usage.PromptTokens, cached, *usage.Usage.CompletionTokens)
+}
+
+func (h *Handler) auditModelSuccess(e audit.Event, upstreamStatus int, tokensUsed int64, meter *budget.Meter, limits sprooziv1alpha1.EndpointBudget) {
+	state, stateErr := meter.State()
+	// 12. Emit success audit event.
+	e.Allowed = true
+	e.UpstreamStatus = upstreamStatus
+	e.TokensUsed = tokensUsed
+	if stateErr == nil {
+		remaining := max(0, limits.MaxUnits-state.UnitsUsed)
+		e.TokensRemaining = &remaining
+	} else if h.Config.Diagnostics != nil {
+		// The response already succeeded and its trusted usage was settled.
+		// A failed subsequent observation means unknown remaining capacity,
+		// not erased usage or a new request allowance. Do not expose raw errors.
+		h.Config.Diagnostics(ResponseDiagnostic{Kind: "model-budget-observation", RunUID: e.RunUID,
+			ErrorCode: "budget_state_unavailable", ValidationError: "remaining model budget is unavailable"})
+	}
+	h.Config.AuditLogger.Log(e)
 }

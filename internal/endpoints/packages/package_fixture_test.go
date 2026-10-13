@@ -32,7 +32,7 @@ func TestPackageWheelIsVerifiedBeforeForwarding(t *testing.T) {
 	wheel := []byte("fixture-wheel")
 	digest := sha256.Sum256(wheel)
 	identity := protocolIdentity()
-	identity.Run.Spec.Capabilities = []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityPackagesInstall}
+	identity.Capabilities = []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityPackagesInstall}
 	identity.Policy.Spec.AllowedCapabilities = []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityPackagesInstall}
 	identity.Policy.Spec.PackagesInstall = sprooziv1alpha1.PackagesInstallScope{
 		Ecosystems:       []sprooziv1alpha1.PackageEcosystem{sprooziv1alpha1.PackageEcosystemPyPI},
@@ -60,7 +60,7 @@ func TestPackageWheelIsVerifiedBeforeForwarding(t *testing.T) {
 
 func TestPackageWheelDigestMismatchIsDenied(t *testing.T) {
 	identity := protocolIdentity()
-	identity.Run.Spec.Capabilities = []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityPackagesInstall}
+	identity.Capabilities = []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityPackagesInstall}
 	identity.Policy.Spec.AllowedCapabilities = []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityPackagesInstall}
 	identity.Policy.Spec.PackagesInstall = sprooziv1alpha1.PackagesInstallScope{
 		Ecosystems:       []sprooziv1alpha1.PackageEcosystem{sprooziv1alpha1.PackageEcosystemPyPI},
@@ -82,7 +82,7 @@ func TestPackageWheelDigestMismatchIsDenied(t *testing.T) {
 
 func TestPackageCapabilityDoesNotInheritGitHubGrant(t *testing.T) {
 	identity := protocolIdentity()
-	identity.Run.Spec.Capabilities = []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityGitHubPullRequest}
+	identity.Capabilities = []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityGitHubPullRequest}
 	identity.Policy.Spec.AllowedCapabilities = []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityGitHubPullRequest}
 	h := protocolHandler(&http.Client{}, &protocolAuditWriter{})
 	request := httptest.NewRequest(http.MethodGet, "https://pypi.org/simple/demo-tool/", nil)
@@ -97,7 +97,7 @@ func TestPackageCapabilityDoesNotInheritGitHubGrant(t *testing.T) {
 
 func TestPackageRedirectIsNotFollowed(t *testing.T) {
 	identity := protocolIdentity()
-	identity.Run.Spec.Capabilities = []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityPackagesInstall}
+	identity.Capabilities = []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityPackagesInstall}
 	identity.Policy.Spec.AllowedCapabilities = []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityPackagesInstall}
 	identity.Policy.Spec.PackagesInstall = sprooziv1alpha1.PackagesInstallScope{
 		Ecosystems: []sprooziv1alpha1.PackageEcosystem{sprooziv1alpha1.PackageEcosystemPyPI}, MaxDownloadBytes: 1024,
@@ -125,8 +125,10 @@ func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { retu
 type protocolAuditWriter struct{}
 
 func (*protocolAuditWriter) Log(audit.Event) {}
-func protocolIdentity() *gateway.RunIdentity {
-	return &gateway.RunIdentity{Run: &sprooziv1alpha1.AgentRun{}, Policy: &sprooziv1alpha1.AgentPolicy{}}
+func protocolIdentity() *gateway.ExecutionGrant {
+	return &gateway.ExecutionGrant{Policy: gateway.PolicySnapshot{Name: "test-policy"},
+		Execution: gateway.Reference{Backend: gateway.BackendKubernetes, UID: "test-execution"},
+		Template:  gateway.TemplateSnapshot{Name: "test-template"}}
 }
 func protocolHandler(client *http.Client, logger audit.Writer) *Handler {
 	return &Handler{Config: HandlerConfig{HTTPClient: client, AuditLogger: logger}}

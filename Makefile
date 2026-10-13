@@ -91,11 +91,11 @@ verify-assertions: ## Validate the complete, individually named offline assertio
 
 .PHONY: verify-fast
 verify-fast: verify-assertions ## Run the non-network unit, race, and vet gates without changing source artifacts.
-	cache_dir="$$(mktemp -d)" && GOCACHE="$$cache_dir" go test -race ./api/v1alpha1 ./internal/agentcontract ./internal/execution ./internal/kubernetes ./internal/packages ./internal/policy && GOCACHE="$$cache_dir" go vet ./internal/agentcontract ./internal/execution ./internal/kubernetes ./internal/packages ./internal/policy
+	cache_dir="$$(mktemp -d)" && GOCACHE="$$cache_dir" go test -race ./api/v1alpha1 ./internal/agentcontract ./internal/execution ./internal/runtime/kubernetes ./internal/packages ./internal/policy/kubernetes && GOCACHE="$$cache_dir" go vet ./internal/agentcontract ./internal/execution ./internal/runtime/kubernetes ./internal/packages ./internal/policy/kubernetes
 
 .PHONY: verify-api
 verify-api: ## Run API, controller, Kubernetes, and envtest checks without regenerating source artifacts.
-	cache_dir="$$(mktemp -d)" && GOCACHE="$$cache_dir" go test ./api/v1alpha1 ./internal/controller ./internal/kubernetes ./test/envtest
+	cache_dir="$$(mktemp -d)" && GOCACHE="$$cache_dir" go test ./api/v1alpha1 ./internal/controller ./internal/runtime/kubernetes ./test/envtest
 
 .PHONY: verify-mcp
 verify-mcp: ## Exercise native and configured MCP tools through authenticated TLS CONNECT, including policy and lifecycle denials.
@@ -109,6 +109,10 @@ verify-mcp-client: ## Verify generated run-local configuration with the installe
 .PHONY: verify-harness-clients
 verify-harness-clients: ## Load generated native MCP configuration with installed stock Codex, Claude Code and OpenCode; no model requests.
 	python3 hack/verify/harness-clients.py
+
+.PHONY: verify-native-session
+verify-native-session: ## Prove pinned stock Codex resume through production checkpoint capture/restore using isolated homes and local deterministic providers.
+	python3 hack/verify/native-session.py --state rollout
 
 .PHONY: verify-harness-process
 verify-harness-process: ## Run stock Claude Code and OpenCode through the TLS gateway against local mocked model and MCP providers.

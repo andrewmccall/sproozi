@@ -17,13 +17,15 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
-	k8sresources "github.com/andrewmccall/sproozi/internal/kubernetes"
+	k8sresources "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
+	placement "github.com/andrewmccall/sproozi/internal/runtime/kubernetes/session"
 )
 
 // ensureSandbox creates the Sandbox Pod if not yet provisioned and stores its name
@@ -33,12 +35,23 @@ func (r *AgentRunReconciler) ensureSandbox(
 	ctx context.Context,
 	run *sprooziv1alpha1.AgentRun,
 	rt *sprooziv1alpha1.AgentRuntime,
+	binding *placement.Record,
 ) (string, error) {
 	if run.Status.Identity.SandboxName != "" {
 		return run.Status.Identity.SandboxName, nil
 	}
 
-	name, err := r.SandboxClient.Ensure(ctx, run, rt)
+	var name string
+	var err error
+	if binding != nil {
+		managed, supported := r.SandboxClient.(k8sresources.ManagedSandboxClient)
+		if !supported {
+			return "", fmt.Errorf("sandbox client cannot provision a required session binding")
+		}
+		name, err = managed.EnsureManaged(ctx, run, rt, binding)
+	} else {
+		name, err = r.SandboxClient.Ensure(ctx, run, rt)
+	}
 	if err != nil {
 		return "", err
 	}

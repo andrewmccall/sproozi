@@ -10,9 +10,10 @@ import (
 // Meter binds the live limits and durable accounting key for one request.
 // A nil meter means this capability has no configured budget.
 type Meter struct {
-	tracker *Tracker
-	key     string
-	limits  sprooziv1alpha1.EndpointBudget
+	tracker         *Tracker
+	key             string
+	limits          sprooziv1alpha1.EndpointBudget
+	requireExisting bool
 }
 
 type contextKey struct{}
@@ -30,11 +31,24 @@ func (bt *Tracker) Meter(key string, limits sprooziv1alpha1.EndpointBudget) *Met
 	return &Meter{tracker: bt, key: key, limits: limits}
 }
 
+// InitializedMeter binds a managed placement to its pre-created account. A
+// deleted account is unavailable, never a newly unused allowance.
+func (bt *Tracker) InitializedMeter(key string, limits sprooziv1alpha1.EndpointBudget) *Meter {
+	return &Meter{tracker: bt, key: key, limits: limits, requireExisting: true}
+}
+
 func (m *Meter) Reserve(units, costMicros int64) (*Reservation, error) {
 	if m == nil {
 		return nil, nil
 	}
-	return m.tracker.Reserve(m.key, m.limits, units, costMicros)
+	r, err := m.tracker.ledger.Reserve(context.Background(), AccountKey(m.key), UsageReservation{
+		MaxUnits: m.limits.MaxUnits, MaxCostMicros: m.limits.MaxCostMicros,
+		Units: units, CostMicros: costMicros, RequireExisting: m.requireExisting,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &Reservation{tracker: m.tracker, ledger: r}, nil
 }
 
 // Spend charges known usage atomically. Variable-cost requests instead reserve
@@ -59,9 +73,12 @@ func (m *Meter) SpendRequest() error {
 	return m.Spend(1, 0)
 }
 
-func (m *Meter) State() State {
+func (m *Meter) State() (State, error) {
 	if m == nil {
-		return State{}
+		return State{}, nil
+	}
+	if m.requireExisting {
+		return m.tracker.ledger.State(context.Background(), AccountKey(m.key))
 	}
 	return m.tracker.State(m.key)
 }

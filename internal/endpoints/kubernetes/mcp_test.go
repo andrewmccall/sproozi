@@ -21,8 +21,6 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/audit"
@@ -41,35 +39,36 @@ const (
 	podList           = `{"kind":"PodList","items":[{"metadata":{"name":"example"}}]}`
 )
 
+const fixtureExecutionUID = "run-uid"
+
 type mcpFixture struct {
 	client         *http.Client
-	identity       *gateway.RunIdentity
+	identity       *gateway.ExecutionGrant
 	calls          atomic.Int32
 	revoked        atomic.Bool
 	upstreamStatus atomic.Int32
 	upstreamBody   string
 	auditData      bytes.Buffer
-	identities     map[string]*gateway.RunIdentity
+	identities     map[string]*gateway.ExecutionGrant
 	upstreamHook   func(http.ResponseWriter, *http.Request)
 }
 
-func newMCPFixture(t *testing.T, configure func(*gateway.RunIdentity)) *mcpFixture {
+func newMCPFixture(t *testing.T, configure func(*gateway.ExecutionGrant)) *mcpFixture {
 	t.Helper()
 	f := &mcpFixture{upstreamBody: podList}
 	f.upstreamStatus.Store(http.StatusOK)
-	f.identity = &gateway.RunIdentity{
-		Run: &sprooziv1alpha1.AgentRun{ObjectMeta: metav1.ObjectMeta{UID: types.UID("run-uid")},
-			Spec: sprooziv1alpha1.AgentRunSpec{Capabilities: []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityKubernetesRead}}},
-		Policy: &sprooziv1alpha1.AgentPolicy{Spec: sprooziv1alpha1.AgentPolicySpec{
-			AllowedCapabilities: []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityKubernetesRead},
-			KubernetesRead: sprooziv1alpha1.KubernetesReadScope{Namespaces: []string{mcpNamespace},
-				Resources: []sprooziv1alpha1.KubernetesReadResource{sprooziv1alpha1.KubernetesReadPods}},
-		}},
-	}
+	f.identity = &gateway.ExecutionGrant{Policy: gateway.PolicySnapshot{Spec: sprooziv1alpha1.AgentPolicySpec{
+		AllowedCapabilities: []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityKubernetesRead},
+		KubernetesRead: sprooziv1alpha1.KubernetesReadScope{Namespaces: []string{mcpNamespace},
+			Resources: []sprooziv1alpha1.KubernetesReadResource{sprooziv1alpha1.KubernetesReadPods}},
+	}, Name: "test-policy"},
+		Execution:    gateway.Reference{Backend: gateway.BackendKubernetes, UID: fixtureExecutionUID},
+		Capabilities: []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityKubernetesRead},
+		Template:     gateway.TemplateSnapshot{Name: "test-template"}}
 	if configure != nil {
 		configure(f.identity)
 	}
-	f.identities = map[string]*gateway.RunIdentity{"run-token": f.identity}
+	f.identities = map[string]*gateway.ExecutionGrant{"run-token": f.identity}
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.calls.Add(1)
 		if f.upstreamHook != nil {
@@ -102,16 +101,16 @@ func newMCPFixture(t *testing.T, configure func(*gateway.RunIdentity)) *mcpFixtu
 	proxyHandler, err := proxytransport.New(proxytransport.Config{
 		Certificates:     map[string]tls.Certificate{"kubernetes.default.svc": cert},
 		AllowedAuthority: dispatcher.Allows,
-		Authenticate: func(_ context.Context, token string) (*gateway.RunIdentity, error) {
+		Authenticate: func(_ context.Context, token string) (*gateway.ExecutionGrant, error) {
 			identity, ok := f.identities[token]
 			if !ok {
 				return nil, gateway.ErrTokenInvalid
 			}
 			return identity, nil
 		},
-		Revalidate: func(context.Context, *gateway.RunIdentity) error {
+		Revalidate: func(context.Context, *gateway.ExecutionGrant) error {
 			if f.revoked.Load() {
-				return gateway.ErrRunNotRunning
+				return gateway.ErrGrantRevoked
 			}
 			return nil
 		},
@@ -225,7 +224,7 @@ func TestMCPClientOverAuthenticatedProxy(t *testing.T) {
 		t.Fatalf("expected allowed and namespace-denied audit events: %v", events)
 	}
 	for _, event := range events {
-		if event.SemanticLevel != audit.TierSemantic || event.RunUID != "run-uid" || event.Capability != "kubernetes.read" {
+		if event.SemanticLevel != audit.TierSemantic || event.RunUID != fixtureExecutionUID || event.Capability != "kubernetes.read" {
 			t.Fatalf("incorrect attribution or tier: %v", event)
 		}
 	}
@@ -234,10 +233,10 @@ func TestMCPClientOverAuthenticatedProxy(t *testing.T) {
 func TestMCPDiscoveryAndCapabilityDenials(t *testing.T) {
 	for _, remove := range []string{"requested capability", "policy capability", podsResourceCase} {
 		t.Run(remove, func(t *testing.T) {
-			f := newMCPFixture(t, func(id *gateway.RunIdentity) {
+			f := newMCPFixture(t, func(id *gateway.ExecutionGrant) {
 				switch remove {
 				case "requested capability":
-					id.Run.Spec.Capabilities = nil
+					id.Capabilities = nil
 				case "policy capability":
 					id.Policy.Spec.AllowedCapabilities = nil
 				case podsResourceCase:
@@ -268,7 +267,7 @@ func TestMCPDiscoveryAndCapabilityDenials(t *testing.T) {
 }
 
 func TestMCPAndRESTShareBudget(t *testing.T) {
-	f := newMCPFixture(t, func(id *gateway.RunIdentity) {
+	f := newMCPFixture(t, func(id *gateway.ExecutionGrant) {
 		id.Policy.Spec.Budgets = map[sprooziv1alpha1.CapabilityKind]sprooziv1alpha1.EndpointBudget{
 			sprooziv1alpha1.CapabilityKubernetesRead: {MaxUnits: 1},
 		}
@@ -395,13 +394,13 @@ func TestMCPRevocationCancelsInflightUpstream(t *testing.T) {
 }
 
 func TestMCPDoesNotShareRunAuthorityOrBudgets(t *testing.T) {
-	f := newMCPFixture(t, func(id *gateway.RunIdentity) {
+	f := newMCPFixture(t, func(id *gateway.ExecutionGrant) {
 		id.Policy.Spec.Budgets = map[sprooziv1alpha1.CapabilityKind]sprooziv1alpha1.EndpointBudget{
 			sprooziv1alpha1.CapabilityKubernetesRead: {MaxUnits: 1},
 		}
 	})
-	other := &gateway.RunIdentity{Run: f.identity.Run.DeepCopy(), Policy: f.identity.Policy.DeepCopy()}
-	other.Run.UID = "other-run"
+	other := f.identity.Clone()
+	other.Execution.UID = "other-run"
 	other.Policy.Spec.KubernetesRead.Namespaces = []string{"other"}
 	f.identities["other-token"] = other
 	first := f.connect(t)
@@ -440,7 +439,7 @@ func TestMCPDoesNotShareRunAuthorityOrBudgets(t *testing.T) {
 		t.Fatalf("calls=%d", f.calls.Load())
 	}
 	resp := f.post(t, mcpURL, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"kubernetes_list_pods","arguments":{"namespace":"demo"}}}`,
-		map[string]string{"Mcp-Session-Id": "run-uid"})
+		map[string]string{"Mcp-Session-Id": fixtureExecutionUID})
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatal(err)

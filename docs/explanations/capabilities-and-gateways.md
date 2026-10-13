@@ -145,6 +145,6 @@ are separate from tool-call spending.
 [Recorded MCP acceptance](../demos/verified-mcp-demo.md) covers native Kubernetes
 and two configured HTTPS fixture providers through stock Codex, including scope,
 budget and network denials, cancellation and normal cleanup. The
-[interoperability design](future-architecture/capabilities-and-mcp.md) describes
+[managed-server design](future-architecture/managed-mcp-servers.md) describes
 future managed servers and stronger semantic bindings. Ordinary CLI and HTTP
 delivery remain available alongside the implemented MCP paths.

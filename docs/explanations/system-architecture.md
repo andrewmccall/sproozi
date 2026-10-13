@@ -157,12 +157,67 @@ release reproducibility or home-ops integration. Current model admission,
 interrupted cleanup and container-completion limitations are listed in
 [security hardening](../reference/security-hardening.md).
 
+## Managed native session continuity
+
+The home daemon starts controlled Docker sessions without Kubernetes credentials.
+Its coordinator owns one bounded execution's native UUID, selected checkpoints,
+current location, original absolute deadline and remaining escrow. Each visit
+has a fresh allocation and exact execution incarnation. A fixed TLS profile
+owns remote admission and Kubernetes credentials; each remote visit creates a
+new AgentRun under live controller policy.
+
+For [remote-first work](../guides/portable-workflows.md), the profile additionally
+hosts a task catalogue independent of the laptop. It admits an approved Codex
+task, observes genuine completion, fences/seals the worker and retains stopped
+native/Git state under a stable product session ID. Authenticated MCP lets Hermes
+submit and inspect work. Pull commits a one-way claim to the home; later resume
+starts a separately authorized execution with the same native UUID, preserving
+old receipts. Product operations bind to their original execution so delayed
+retries cannot affect a newer continuation. See
+[ADR 0012](../adr/0012-retained-work-and-fresh-session-continuations.md).
+
+```mermaid
+flowchart LR
+    CLI[Native terminal client] --> Home[Home daemon and session journal]
+    Home --> Docker[Controlled Docker placement]
+    Home --> Profile[Authenticated fixed remote profile]
+    Profile --> Run[Fresh Kubernetes AgentRun]
+    Docker --> LocalGateway[Local model gateway and accounts]
+    Run --> Gateway[Shared gateway and managed accounts]
+    Docker --> Checkpoint[Selected native conversation and Git workspace]
+    Run --> Checkpoint
+    Checkpoint --> Home
+```
+
+Checkpoint contents supply untrusted continuity, never spending authority.
+Placements regenerate configuration and access independently. A graceful move
+gates input, waits for the native turn and tools, revokes authority, observes the
+entire source writer stopped, seals accounts and captures state. Only then may a
+new destination activate. Forced cancellation revokes first and needs no fresh
+checkpoint. Unknown stop or accounting retains escrow and blocks activation.
+
+Deterministic stock Codex 0.161.0 and Claude Code 2.1.27 proofs completed native
+terminal roundtrips across Docker, Kubernetes and Docker with unchanged UUID,
+Git state and original deadline. Both executed real tools and passed denied
+capability/direct-HTTP probes on both placements. Codex also passed graceful
+held-turn movement and forced cancellation with conservative receipt replay.
+[Recorded acceptance](../demos/verified-session-mobility.md) separates those checks
+from remaining native-history, platform and provider compatibility limits.
+The [session guide](../guides/session-mobility.md) describes the narrow evaluated
+contract. [ADR 0010](../adr/0010-managed-session-authority-and-admission.md) records
+authority, stop and recovery tradeoffs.
+
+Runtime implementations live in `internal/runtime/kubernetes` and
+`internal/runtime/docker`. Shared harness, checkpoint and workspace code stays
+independent of these backends. Kubernetes budget persistence lives in
+`internal/budget/kubernetes`; shared accounting rules live in `internal/budget`.
+Policy, gateway authentication, model credential storage and task services place
+their Kubernetes implementations in `kubernetes` children too. Controller/API
+scaffold paths remain unchanged. See
+[ADR 0009](../adr/0009-runtime-backends-and-sealed-accounting.md).
+
 ## Future architecture
 
-The [future architecture overview](future-architecture/README.md) describes
-extensions to these implemented boundaries. MCP delivery and configurable HTTPS
-provider mediation are current capabilities. Docker placement, managed harness control and managed MCP servers remain
-directional designs. Additional stock CLI configuration and Anthropic Messages
-are implemented. Full Kind acceptance includes all four stock clients and
-persistent Hermes delegation with deterministic providers, as described in the
-harness reference.
+The [future architecture overview](future-architecture/README.md) retains managed
+MCP servers, further native sessions, GUI/IDE clients, arbitrary-session adoption
+and enterprise profile extensions. Those directions require separate proofs.

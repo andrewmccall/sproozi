@@ -10,7 +10,7 @@ import (
 type identityConfig struct {
 	// Identity is a pre-authenticated Run identity for in-process callers. The
 	// workload-facing shared gateway installs identity in request context instead.
-	Identity *gateway.RunIdentity
+	Identity *gateway.ExecutionGrant
 	// TokenProvider provides GitHub App installation tokens.
 	TokenProvider TokenProvider
 

@@ -71,6 +71,34 @@ integration is planned. The demonstrated runtime uses one completion container
 named `agent`; arbitrary container names and long-running sidecars do not have
 working completion semantics yet.
 
+## Portable native sessions
+
+Build the public CLI with `go build -o bin/sproozi ./cmd/sproozi`. Use
+`sproozi serve` to run the home daemon, then `sproozi start`, `sproozi attach`
+and `sproozi move` to work across local Docker and an approved cluster profile.
+
+The [retained-work guide](docs/guides/portable-workflows.md) adds remote-first
+Codex tasks through the CLI or authenticated MCP. The remote owner can accept
+work while the laptop is offline. Use `sessions`, `pull`, `resume` and `stop` to
+continue the genuine native conversation locally under a fresh bounded grant.
+The guide includes scoped home-ops setup and one shared external MCP definition.
+Home-ops acceptance against personal infrastructure and paid-model engineering
+contributions remain unassessed.
+
+The [session guide](docs/guides/session-mobility.md) describes controlled local
+Docker launch, native terminal attachment and moves through a fixed remote
+Kubernetes profile. The developer needs no kubeconfig. Each visit has fresh
+authority within the original deadline and remaining allowance.
+
+Deterministic stock Codex 0.161.0 and Claude Code 2.1.27 fixtures passed the
+local-to-remote-to-local roundtrip with the same native UUID, original deadline,
+Git history, staged/unstaged changes, untracked files and explicitly selected
+ignored files. Both executed real tools and passed local/remote network and
+capability denials. Codex also passed held-turn movement, forced cancellation
+and conservative accounting replay. [Recorded acceptance](docs/demos/verified-session-mobility.md)
+keeps their proof coverage and current limits separate. Existing-session adoption,
+GUI/IDE attachment and other managed clients remain future work.
+
 ## Boundaries and limitations
 
 | Boundary | Current behavior |
@@ -93,3 +121,7 @@ The [documentation index](docs/README.md) links the guides, API references and
 architecture explanations. The [home-ops playbook](docs/guides/home-ops-playbook.md)
 and [runbook](docs/guides/home-ops-demo-runbook.md) are retained plans for the
 next integration; their alert-to-PR and recovery path has not been accepted.
+
+[Future architecture](docs/explanations/future-architecture/README.md) covers
+remaining extensions, including more session harnesses, arbitrary-session
+adoption, GUI/IDE attachment and managed MCP servers.

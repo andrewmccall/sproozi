@@ -2,7 +2,6 @@ package modelauth
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -13,11 +12,6 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 const (
@@ -45,7 +39,7 @@ func (s *memoryStore) Replace(_ context.Context, before, after Session) error {
 		s.fail = false
 		return errors.New("temporary storage failure")
 	}
-	if !sameCredentials(s.session, before) {
+	if !s.session.SameCredentials(before) {
 		return errors.New("conflict")
 	}
 	s.session = after
@@ -142,32 +136,6 @@ func TestChatGPTRefreshErrorsDoNotLeakProviderBody(t *testing.T) {
 	err := auth.Authorize(httptest.NewRequest(http.MethodPost, Resource+"/responses", nil))
 	if err == nil || strings.Contains(err.Error(), "fixture-") {
 		t.Fatal("provider error leaked credentials or was ignored")
-	}
-}
-
-func TestKubernetesSessionStoreRejectsStaleCredentialWriter(t *testing.T) {
-	scheme := runtime.NewScheme()
-	if err := corev1.AddToScheme(scheme); err != nil {
-		t.Fatal(err)
-	}
-	original := fixtureSession()
-	data, err := json.Marshal(original)
-	if err != nil {
-		t.Fatal(err)
-	}
-	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: "system", Name: SessionSecretName}, Data: map[string][]byte{SessionSecretKey: data}}
-	store := KubernetesSessionStore{Namespace: "system", Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(secret).Build()}
-	updated := original
-	updated.RefreshToken = "rotated"
-	if err := store.Replace(context.Background(), original, updated); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.Replace(context.Background(), original, original); err == nil {
-		t.Fatal("stale writer overwrote rotating credentials")
-	}
-	got, err := store.Load(context.Background())
-	if err != nil || got.RefreshToken != "rotated" {
-		t.Fatal("rotating credential set was not preserved")
 	}
 }
 

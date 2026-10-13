@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/budget"
+	budgetkubernetes "github.com/andrewmccall/sproozi/internal/budget/kubernetes"
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 
@@ -32,7 +33,9 @@ import (
 	modelgateway "github.com/andrewmccall/sproozi/internal/endpoints/model"
 	packagesgateway "github.com/andrewmccall/sproozi/internal/endpoints/packages"
 	"github.com/andrewmccall/sproozi/internal/gateway"
+	gatewaykubernetes "github.com/andrewmccall/sproozi/internal/gateway/kubernetes"
 	"github.com/andrewmccall/sproozi/internal/modelauth"
+	modelauthkube "github.com/andrewmccall/sproozi/internal/modelauth/kubernetes"
 	"github.com/andrewmccall/sproozi/internal/proxytransport"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -346,26 +349,13 @@ func main() {
 		log.Fatal(err)
 	}
 	agentNamespace := envOrDefault("AGENT_NAMESPACE", "sproozi-agents")
-	validator := gateway.NewK8sTokenValidator(clientset, "sproozi-gateway")
-	runFinder := gateway.NewK8sRunFinder(runtimeClient, agentNamespace)
-	authenticator := &gateway.Authenticator{Tokens: validator, Runs: runFinder}
-	authenticate := func(ctx context.Context, token string) (*gateway.RunIdentity, error) {
+	validator := gatewaykubernetes.NewK8sTokenValidator(clientset, "sproozi-gateway")
+	runFinder := gatewaykubernetes.NewK8sRunFinder(runtimeClient, agentNamespace)
+	authenticator := &gatewaykubernetes.Authenticator{Tokens: validator, Runs: runFinder}
+	authenticate := func(ctx context.Context, token string) (*gateway.ExecutionGrant, error) {
 		return authenticator.Authenticate(ctx, token)
 	}
-	revalidate := func(ctx context.Context, identity *gateway.RunIdentity) error {
-		fresh, findErr := runFinder.Find(ctx, gateway.ServiceAccountIdentity{
-			Namespace: identity.SANamespace, Name: identity.SAName, UID: identity.SAUID,
-		})
-		if findErr != nil || fresh == nil || fresh.Run == nil || fresh.Policy == nil {
-			return gateway.ErrRunNotRunning
-		}
-		if string(fresh.Run.UID) != string(identity.Run.UID) ||
-			string(fresh.Policy.UID) != string(identity.Policy.UID) ||
-			fresh.Policy.Generation != identity.Policy.Generation {
-			return gateway.ErrRunNotRunning
-		}
-		return nil
-	}
+	revalidate := runFinder.Revalidate
 	httpClient := &http.Client{Timeout: 120 * time.Second}
 	auditLogger := newAuditLogger(os.Stdout)
 	// The shared gateway is the only component that receives Kubernetes API
@@ -400,7 +390,7 @@ func main() {
 		budgetNamespace := envOrDefault("BUDGET_NAMESPACE", "sproozi-system")
 		var providerAuth modelauth.Authenticator = modelauth.APIKey{Key: cfg.openAIKey}
 		if cfg.modelAuthMode == modelauth.ChatGPTMode {
-			store := modelauth.KubernetesSessionStore{Client: runtimeClient, Namespace: budgetNamespace}
+			store := modelauthkube.SessionStore{Client: runtimeClient, Namespace: budgetNamespace}
 			session, loadErr := store.Load(context.Background())
 			if loadErr != nil {
 				log.Fatal("ChatGPT credential Secret is unavailable")
@@ -450,7 +440,7 @@ func main() {
 	handlers[sprooziv1alpha1.CapabilityNetworkEgress] = raw
 
 	// Unknown authorities are absent and are denied before an upstream call.
-	budgets := budget.NewTrackerWithLedger(budget.NewKubernetesLedger(runtimeClient,
+	budgets := budget.NewTrackerWithLedger(budgetkubernetes.NewLedger(runtimeClient,
 		envOrDefault("BUDGET_NAMESPACE", "sproozi-system")))
 	mcpHandler := mcpgateway.NewHandler(mcpgateway.HandlerConfig{Registry: cfg.mcpRegistry,
 		Budgets: budgets, AuditLogger: auditLogger})

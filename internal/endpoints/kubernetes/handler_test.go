@@ -25,14 +25,14 @@ const (
 	demoSecretsPath = "/api/v1/namespaces/demo/secrets"
 )
 
-func identity() *gateway.RunIdentity {
-	return &gateway.RunIdentity{
-		Run: &sprooziv1alpha1.AgentRun{Spec: sprooziv1alpha1.AgentRunSpec{Capabilities: []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityKubernetesRead}}},
-		Policy: &sprooziv1alpha1.AgentPolicy{Spec: sprooziv1alpha1.AgentPolicySpec{
-			AllowedCapabilities: []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityKubernetesRead},
-			KubernetesRead:      sprooziv1alpha1.KubernetesReadScope{Namespaces: []string{"demo"}, Resources: []sprooziv1alpha1.KubernetesReadResource{sprooziv1alpha1.KubernetesReadPods, sprooziv1alpha1.KubernetesReadPodLogs}},
-		}},
-	}
+func identity() *gateway.ExecutionGrant {
+	return &gateway.ExecutionGrant{Policy: gateway.PolicySnapshot{Spec: sprooziv1alpha1.AgentPolicySpec{
+		AllowedCapabilities: []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityKubernetesRead},
+		KubernetesRead:      sprooziv1alpha1.KubernetesReadScope{Namespaces: []string{"demo"}, Resources: []sprooziv1alpha1.KubernetesReadResource{sprooziv1alpha1.KubernetesReadPods, sprooziv1alpha1.KubernetesReadPodLogs}},
+	}, Name: "test-policy"},
+		Execution:    gateway.Reference{Backend: gateway.BackendKubernetes, UID: "test-execution"},
+		Capabilities: []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityKubernetesRead},
+		Template:     gateway.TemplateSnapshot{Name: "test-template"}}
 }
 
 func TestParseOperationTable(t *testing.T) {

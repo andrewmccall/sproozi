@@ -24,7 +24,7 @@ type waitInput struct {
 
 // NewHandler authenticates every HTTP request before handling stateless MCP.
 // A session identifier is never a credential. Use only behind the TLS listener.
-func NewHandler(service *Service, token string) (http.Handler, error) {
+func NewHandler(service Service, token string) (http.Handler, error) {
 	if len(token) < 32 || strings.TrimSpace(token) != token || strings.ContainsAny(token, "\r\n\t ") {
 		return nil, fmt.Errorf("task token must contain at least 32 non-whitespace characters")
 	}

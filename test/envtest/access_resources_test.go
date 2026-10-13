@@ -28,7 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
-	k8sresources "github.com/andrewmccall/sproozi/internal/kubernetes"
+	k8sresources "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
 )
 
 // ensureNamespace creates the given namespace if it does not exist.

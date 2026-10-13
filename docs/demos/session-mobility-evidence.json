@@ -1,0 +1,73 @@
+{
+  "date": "2026-10-12",
+  "sourceBase": "1369ad4926fe466eedbcba20ddf17e678d836ceb",
+  "sourceState": "working tree before delivery commit",
+  "nativeImage": "docker.io/sproozi-session/native@sha256:984333d96bbaa128aeb819596a6334985caa1512b42c055a3b604a6bcc594068",
+  "controlImage": "docker.io/sproozi-session/control@sha256:deeb88c390a797a4ae4985427a5076641f95da1ada46be4680e9ddbb0ad016b9",
+  "topology": {
+    "local": "Docker Desktop Linux containers",
+    "remote": "dedicated two-node Kind",
+    "cluster": "sproozi-mobility-20261011-v2",
+    "cni": "Calico 3.30.4",
+    "podSubnet": "10.244.0.0/16"
+  },
+  "paidProviderAcceptance": false,
+  "currencyAssessment": null,
+  "clients": {
+    "codex": {
+      "sessionId": "82d57586-a0b0-4f20-983a-b7b87b99098a",
+      "threadId": "01a12ef5-f3d3-7303-b585-14d7caaeed89",
+      "originalDeadline": "2026-10-12T08:13:50.170529Z",
+      "accounting": {
+        "sealedUnits": 200000,
+        "providerCompletedUnits": 165,
+        "conservativeInterruptedInferenceChargeRetained": true,
+        "remainingUnits": 0
+      },
+      "passed": true,
+      "nativeVersion": "0.161.0",
+      "sameNativeUUID": true,
+      "sameOriginalDeadline": true,
+      "gitHistoryIndexWorkingAndUntrackedPreserved": true,
+      "selectedIgnoredFilePreserved": true,
+      "unselectedIgnoredFilesExcluded": true,
+      "actualToolEffect": true,
+      "localAndRemoteDenials": true,
+      "finalPhase": "cancelled",
+      "gracefulHeldTurnMove": true,
+      "forcedHeldTurnCancellation": true,
+      "immutableAccountingReplay": true,
+      "completedNativeTurns": 5,
+      "forcedCancel": {
+        "cancelBoundSeconds": 15,
+        "observedCancelSeconds": 0.40256937500089407,
+        "exactAgentHelperAnchorStopped": true,
+        "noDestinationCreated": true
+      }
+    },
+    "claude-code": {
+      "sessionId": "468d6389-69ae-4302-9d27-dbf85ff63509",
+      "threadId": "bccf9948-3183-40e9-9322-75a27b04f846",
+      "originalDeadline": "2026-10-12T09:22:55.230356Z",
+      "accounting": {
+        "sealedUnits": 320,
+        "providerRequests": 8,
+        "tokensPerRequest": 40,
+        "remainingUnits": 199680
+      },
+      "passed": true,
+      "nativeVersion": "2.1.27",
+      "sameNativeUUID": true,
+      "sameOriginalDeadline": true,
+      "gitHistoryIndexWorkingAndUntrackedPreserved": true,
+      "selectedIgnoredFilePreserved": true,
+      "unselectedIgnoredFilesExcluded": true,
+      "actualToolEffect": true,
+      "localAndRemoteDenials": true,
+      "finalPhase": "cancelled",
+      "completedNativeTurns": 3,
+      "stoppedVisits": 4,
+      "nativeStateIsSelectedTranscriptOnly": true
+    }
+  }
+}

@@ -2,12 +2,40 @@
 package budget_test
 
 import (
+	"context"
 	"sync"
 	"testing"
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/budget"
 )
+
+func observedState(t *testing.T, tracker *budget.Tracker, key string) budget.State {
+	t.Helper()
+	state, err := tracker.State(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return state
+}
+
+func observedLedgerState(t *testing.T, ledger budget.Ledger, ctx context.Context, key budget.AccountKey) budget.State {
+	t.Helper()
+	state, err := ledger.State(ctx, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return state
+}
+
+func observedMeterState(t *testing.T, meter *budget.Meter) budget.State {
+	t.Helper()
+	state, err := meter.State()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return state
+}
 
 func testBudget(maxUnits int64) sprooziv1alpha1.EndpointBudget {
 	return sprooziv1alpha1.EndpointBudget{MaxUnits: maxUnits}
@@ -21,7 +49,7 @@ func TestBudgetReserveCountsInFlightCapacity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first reservation failed: %v", err)
 	}
-	if got := bt.State("run-reserve").ReservedUnits; got != 60 {
+	if got := observedState(t, bt, "run-reserve").ReservedUnits; got != 60 {
 		t.Fatalf("ReservedUnits = %d, want 60", got)
 	}
 	if _, err := bt.Reserve("run-reserve", limits, 60, 0); err == nil {
@@ -30,7 +58,7 @@ func TestBudgetReserveCountsInFlightCapacity(t *testing.T) {
 	if err := first.Settle(40, 0); err != nil {
 		t.Fatalf("settle failed: %v", err)
 	}
-	state := bt.State("run-reserve")
+	state := observedState(t, bt, "run-reserve")
 	if state.UnitsUsed != 40 || state.ReservedUnits != 0 {
 		t.Fatalf("state after settle = %+v, want 40 used and no reservation", state)
 	}
@@ -61,7 +89,7 @@ func TestBudgetConcurrentReservationsAreAtomic(t *testing.T) {
 	if err := reservations[0].Settle(60, 0); err != nil {
 		t.Fatalf("settle failed: %v", err)
 	}
-	if got := bt.State("run-concurrent").UnitsUsed; got != 60 {
+	if got := observedState(t, bt, "run-concurrent").UnitsUsed; got != 60 {
 		t.Errorf("UnitsUsed = %d, want 60", got)
 	}
 }
@@ -96,7 +124,7 @@ func TestBudgetOldGenerationSettlementDoesNotOverwriteNewGeneration(t *testing.T
 	if err := new.Settle(10, 0); err != nil {
 		t.Fatalf("new-generation settle failed: %v", err)
 	}
-	state := bt.State("run-generation")
+	state := observedState(t, bt, "run-generation")
 	if state.UnitsUsed != 90 || state.ReservedUnits != 0 {
 		t.Fatalf("new-generation state = %+v, want cumulative 90 used and no reservation", state)
 	}
@@ -125,7 +153,7 @@ func TestBudgetOverSettlementFailsClosed(t *testing.T) {
 	if err := r.Settle(21, 0); err == nil {
 		t.Fatal("expected over-settlement error")
 	}
-	if got := bt.State("over").UnitsUsed; got != 0 {
+	if got := observedState(t, bt, "over").UnitsUsed; got != 0 {
 		t.Fatalf("over-settlement charged %d units", got)
 	}
 }

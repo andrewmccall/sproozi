@@ -43,7 +43,7 @@ import (
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/controller"
 
-	k8sresources "github.com/andrewmccall/sproozi/internal/kubernetes"
+	k8sresources "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
 )
 
 // testNS is the namespace used across reconciler unit tests.
@@ -51,7 +51,7 @@ const testNS = "default"
 
 // newScheme builds a runtime scheme with the sproozi types plus the built-in
 // Kubernetes types (corev1/rbacv1/networkingv1) needed by the identity provisioning
-// helpers in internal/kubernetes.
+// helpers in internal/runtime/kubernetes.
 func newScheme() *runtime.Scheme {
 	s := runtime.NewScheme()
 	_ = sprooziv1alpha1.AddToScheme(s)

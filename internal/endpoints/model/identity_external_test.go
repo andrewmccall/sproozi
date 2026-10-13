@@ -2,6 +2,7 @@ package model_test
 
 import (
 	"net/http"
+	"testing"
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/budget"
@@ -12,10 +13,19 @@ import (
 	"github.com/andrewmccall/sproozi/internal/modelauth"
 )
 
+func observedState(t *testing.T, tracker *budget.Tracker, key string) budget.State {
+	t.Helper()
+	state, err := tracker.State(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return state
+}
+
 type identityConfig struct {
 	// Identity is a pre-authenticated Run identity for in-process callers. The
 	// workload-facing shared gateway installs identity in request context instead.
-	Identity *gateway.RunIdentity
+	Identity *gateway.ExecutionGrant
 	// budget.Tracker tracks and enforces per-run token budgets.
 	BudgetTracker *budget.Tracker
 
@@ -49,7 +59,7 @@ func (h *identityHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.Config.Identity != nil {
 		r = r.WithContext(gateway.WithIdentity(r.Context(), h.Config.Identity))
 		if limits, ok := h.Config.Identity.Policy.Spec.Budgets[sprooziv1alpha1.CapabilityModelInference]; ok {
-			r = r.WithContext(budget.WithMeter(r.Context(), h.Config.BudgetTracker.Meter(string(h.Config.Identity.Run.UID), limits)))
+			r = r.WithContext(budget.WithMeter(r.Context(), h.Config.BudgetTracker.Meter(h.Config.Identity.Execution.UID, limits)))
 		}
 	}
 	if h.Config.ProviderAuth == nil {

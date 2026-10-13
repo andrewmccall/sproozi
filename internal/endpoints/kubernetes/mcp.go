@@ -58,14 +58,14 @@ func (h *Handler) newMCPHandler() http.Handler {
 	})
 }
 
-func (h *Handler) serveMCP(w http.ResponseWriter, r *http.Request, identity *gateway.RunIdentity) {
+func (h *Handler) serveMCP(w http.ResponseWriter, r *http.Request, identity *gateway.ExecutionGrant) {
 	// This CLI-only connection accepts no browser origins. Proxy authentication
 	// and per-request lifecycle revalidation remain outside the MCP protocol.
 	if len(r.Header.Values("Origin")) != 0 || r.URL.RawQuery != "" || r.URL.RawPath != "" {
 		http.Error(w, "unsupported MCP request", http.StatusForbidden)
 		return
 	}
-	if !slices.Contains(identity.Run.Spec.Capabilities, sprooziv1alpha1.CapabilityKubernetesRead) ||
+	if !slices.Contains(identity.Capabilities, sprooziv1alpha1.CapabilityKubernetesRead) ||
 		!slices.Contains(identity.Policy.Spec.AllowedCapabilities, sprooziv1alpha1.CapabilityKubernetesRead) {
 		http.Error(w, "kubernetes capability denied", http.StatusForbidden)
 		return

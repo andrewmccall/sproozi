@@ -69,8 +69,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	_, _ = io.Copy(flushingWriter{w}, response.Body)
 }
 
-func (h *Handler) authorizeAndForward(ctx context.Context, identity *gateway.RunIdentity, req *http.Request) (response *http.Response, requestErr error) {
-	if identity == nil || identity.Run == nil || identity.Policy == nil {
+func (h *Handler) authorizeAndForward(ctx context.Context, identity *gateway.ExecutionGrant, req *http.Request) (response *http.Response, requestErr error) {
+	if identity == nil || identity.Execution.UID == "" {
 		return nil, fmt.Errorf("kubernetes: missing run identity")
 	}
 	event := identity.AuditEvent("kubernetes.read")
@@ -173,8 +173,8 @@ func (b *boundedBody) Read(p []byte) (int, error) {
 	return n, err
 }
 
-func allowed(id *gateway.RunIdentity, op Operation) bool {
-	if !slices.Contains(id.Run.Spec.Capabilities, sprooziv1alpha1.CapabilityKubernetesRead) || !slices.Contains(id.Policy.Spec.AllowedCapabilities, sprooziv1alpha1.CapabilityKubernetesRead) {
+func allowed(id *gateway.ExecutionGrant, op Operation) bool {
+	if !slices.Contains(id.Capabilities, sprooziv1alpha1.CapabilityKubernetesRead) || !slices.Contains(id.Policy.Spec.AllowedCapabilities, sprooziv1alpha1.CapabilityKubernetesRead) {
 		return false
 	}
 	if op.Discovery {

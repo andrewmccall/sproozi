@@ -21,18 +21,17 @@ const (
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
-func makeIdentity(selected, allowed []string) *gateway.RunIdentity {
-	return &gateway.RunIdentity{
-		Run:      &api.AgentRun{Spec: api.AgentRunSpec{Capabilities: []api.CapabilityKind{api.CapabilityNetworkEgress}}},
-		Policy:   &api.AgentPolicy{Spec: api.AgentPolicySpec{AllowedCapabilities: []api.CapabilityKind{api.CapabilityNetworkEgress}, EgressProfiles: allowed}},
-		Template: &api.AgentTemplate{Spec: api.AgentTemplateSpec{EgressProfiles: selected}},
-	}
+func makeIdentity(selected, allowed []string) *gateway.ExecutionGrant {
+	return &gateway.ExecutionGrant{Policy: gateway.PolicySnapshot{Spec: api.AgentPolicySpec{AllowedCapabilities: []api.CapabilityKind{api.CapabilityNetworkEgress}, EgressProfiles: allowed}, Name: "test-policy"},
+		Template:     gateway.TemplateSnapshot{Spec: api.AgentTemplateSpec{EgressProfiles: selected}, Name: "test-template"},
+		Execution:    gateway.Reference{Backend: gateway.BackendKubernetes, UID: "test-execution"},
+		Capabilities: []api.CapabilityKind{api.CapabilityNetworkEgress}}
 }
 func TestInspectedEgressEnforcesDestinationAndLiveGrant(t *testing.T) {
 	for _, tc := range []struct {
 		name, target string
 		status       int
-		mutate       func(*gateway.RunIdentity)
+		mutate       func(*gateway.ExecutionGrant)
 	}{
 		{"approved", testPackageURL, 200, nil},
 		{"other host", "https://evil.example:8443/pkg", 403, nil},
@@ -41,10 +40,10 @@ func TestInspectedEgressEnforcesDestinationAndLiveGrant(t *testing.T) {
 		{"IP literal", "https://127.0.0.1:8443/pkg", 400, nil},
 		{"trailing dot", "https://registry.example.:8443/pkg", 400, nil},
 		{"plain HTTP", "http://registry.example:8443/pkg", 403, nil},
-		{"unrequested", testPackageURL, 403, func(i *gateway.RunIdentity) { i.Run.Spec.Capabilities = nil }},
-		{"revoked capability", testPackageURL, 403, func(i *gateway.RunIdentity) { i.Policy.Spec.AllowedCapabilities = nil }},
-		{"unselected profile", testPackageURL, 403, func(i *gateway.RunIdentity) { i.Template.Spec.EgressProfiles = nil }},
-		{"revoked profile", testPackageURL, 403, func(i *gateway.RunIdentity) { i.Policy.Spec.EgressProfiles = nil }},
+		{"unrequested", testPackageURL, 403, func(i *gateway.ExecutionGrant) { i.Capabilities = nil }},
+		{"revoked capability", testPackageURL, 403, func(i *gateway.ExecutionGrant) { i.Policy.Spec.AllowedCapabilities = nil }},
+		{"unselected profile", testPackageURL, 403, func(i *gateway.ExecutionGrant) { i.Template.Spec.EgressProfiles = nil }},
+		{"revoked profile", testPackageURL, 403, func(i *gateway.ExecutionGrant) { i.Policy.Spec.EgressProfiles = nil }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			profiles, err := egress.LoadProfileStore([]byte(`{"registry":[{"scheme":"https","host":"registry.example","port":8443}]}`))

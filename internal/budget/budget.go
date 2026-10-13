@@ -2,6 +2,7 @@ package budget
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -18,6 +19,9 @@ type UsageReservation struct {
 	MaxCostMicros int64
 	Units         int64
 	CostMicros    int64
+	// RequireExisting is set for initialized placement allocations. Losing the
+	// record must deny subsequent usage rather than recreate an empty balance.
+	RequireExisting bool
 }
 
 // TrustedUsage is usage returned by a trusted provider adapter.
@@ -29,10 +33,20 @@ type TrustedUsage struct {
 // Ledger is the durable atomic accounting seam. Implementations must
 // atomically reserve, settle, and release against the account key.
 type Ledger interface {
+	// Initialize establishes an expected account before execution activation.
+	// Sealing requires that record to still exist; deletion is not fresh usage.
+	Initialize(context.Context, AccountKey) error
 	Reserve(context.Context, AccountKey, UsageReservation) (*LedgerReservation, error)
 	Settle(context.Context, *LedgerReservation, TrustedUsage) error
 	Release(context.Context, *LedgerReservation) error
-	State(context.Context, AccountKey) State
+	// State returns ErrAccountNotFound for a confirmed absent record, and an
+	// error for unavailable or corrupt accounting. Tracker alone maps ordinary
+	// unused accounts to zero; managed meters require the record.
+	State(context.Context, AccountKey) (State, error)
+	// Seal atomically prevents new reservations and retains the used plus
+	// outstanding reserved usage as an immutable receipt for this account.
+	// Pending unbounded usage and unknown legacy reservation history cannot seal.
+	Seal(context.Context, AccountKey) (TrustedUsage, error)
 }
 
 type State struct {
@@ -55,56 +69,8 @@ type LedgerReservation struct {
 	settled                 bool
 }
 
-// MemoryLedger is a concurrency-safe ledger. It is deliberately
-// injectable and shared between gateway replicas in tests; production can
-// replace it with a transactional Kubernetes/SQL adapter without changing
-// admission or settlement semantics.
-type MemoryLedger struct {
-	mu    sync.Mutex
-	state map[AccountKey]State
-}
-
-func NewMemoryLedger() *MemoryLedger {
-	return &MemoryLedger{state: make(map[AccountKey]State)}
-}
-
-func (l *MemoryLedger) Reserve(_ context.Context, runID AccountKey, req UsageReservation) (*LedgerReservation, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	s := l.state[runID]
-	r, err := reserveState(&s, req)
-	if err != nil {
-		return nil, err
-	}
-	r.runID = runID
-	l.state[runID] = s
-	return r, nil
-}
-
-func (l *MemoryLedger) Settle(_ context.Context, r *LedgerReservation, usage TrustedUsage) error {
-	if r == nil {
-		return fmt.Errorf("budget: nil budget reservation")
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	s := l.state[r.runID]
-	if err := settleState(&s, r, usage); err != nil {
-		return err
-	}
-	l.state[r.runID] = s
-	r.settled = true
-	return nil
-}
-
-func (l *MemoryLedger) Release(ctx context.Context, r *LedgerReservation) error {
-	return l.Settle(ctx, r, TrustedUsage{})
-}
-func (l *MemoryLedger) State(_ context.Context, runID AccountKey) State {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.state[runID]
+func (r *LedgerReservation) unbounded() bool {
+	return r.maxUnits == 0 || r.maxCostMicros == 0
 }
 
 type Reservation struct {
@@ -154,7 +120,18 @@ func (bt *Tracker) Reserve(runID string, budget sprooziv1alpha1.EndpointBudget, 
 	}
 	return &Reservation{tracker: bt, ledger: r}, nil
 }
-func (bt *Tracker) State(runID string) State {
-	s := bt.ledger.State(context.Background(), AccountKey(runID))
-	return s
+func (bt *Tracker) State(runID string) (State, error) {
+	state, err := bt.ledger.State(context.Background(), AccountKey(runID))
+	if errors.Is(err, ErrAccountNotFound) {
+		return State{}, nil
+	}
+	return state, err
+}
+
+func (bt *Tracker) Initialize(runID string) error {
+	return bt.ledger.Initialize(context.Background(), AccountKey(runID))
+}
+
+func (bt *Tracker) Seal(runID string) (TrustedUsage, error) {
+	return bt.ledger.Seal(context.Background(), AccountKey(runID))
 }

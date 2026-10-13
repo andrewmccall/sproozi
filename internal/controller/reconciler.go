@@ -38,8 +38,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
-	k8sresources "github.com/andrewmccall/sproozi/internal/kubernetes"
-	"github.com/andrewmccall/sproozi/internal/policy"
+	policy "github.com/andrewmccall/sproozi/internal/policy/kubernetes"
+	k8sresources "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
+	placement "github.com/andrewmccall/sproozi/internal/runtime/kubernetes/session"
 )
 
 const (
@@ -62,6 +63,7 @@ const (
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;delete
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;create;delete
 // +kubebuilder:rbac:groups="",resources=pods/log,verbs=get
+// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;delete
 
 // AgentRunReconciler reconciles AgentRun objects.
 type AgentRunReconciler struct {
@@ -149,6 +151,14 @@ func (r *AgentRunReconciler) handleQueued(ctx context.Context, run *sprooziv1alp
 		return ctrl.Result{}, nil
 	}
 
+	_, sessionResult, err := r.resolveSession(ctx, run, tmpl)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if sessionResult != nil {
+		return *sessionResult, nil
+	}
+
 	if denial := policy.Evaluate(pol.Spec, tmpl.Spec, run.Spec, rt.Spec); denial != nil {
 		logger.Info("Policy denied AgentRun", "name", run.Name, "reason", denial.Reason)
 		_, err := r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseFailed, string(denial.Reason), denial.Message)
@@ -205,13 +215,21 @@ func (r *AgentRunReconciler) handleAdmitted(ctx context.Context, run *sprooziv1a
 	if pol == nil {
 		return ctrl.Result{}, nil
 	}
+	binding, sessionResult, err := r.resolveSession(ctx, run, tmpl)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if sessionResult != nil {
+		return *sessionResult, nil
+	}
+
 	if denial := policy.Evaluate(pol.Spec, tmpl.Spec, run.Spec, rt.Spec); denial != nil {
 		logger.Info("Policy revoked AgentRun admission", "name", run.Name, "reason", denial.Reason)
 		_, transitionErr := r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseFailed, string(denial.Reason), denial.Message)
 		return ctrl.Result{}, transitionErr
 	}
 
-	deadline := run.Status.StartedAt.Add(pol.Spec.MaxExecutionDuration.Duration)
+	deadline := placement.EffectiveDeadline(run, pol, binding)
 	if time.Now().After(deadline) {
 		logger.Info("Admitted AgentRun deadline exceeded", "name", run.Name)
 		_, err := r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseTimedOut, "MaxExecutionDurationExceeded", "")
@@ -252,6 +270,14 @@ func (r *AgentRunReconciler) handleRunning(ctx context.Context, run *sprooziv1al
 	if pol == nil {
 		return ctrl.Result{}, nil
 	}
+	binding, sessionResult, err := r.resolveSession(ctx, run, tmpl)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if sessionResult != nil {
+		return *sessionResult, nil
+	}
+
 	if denial := policy.Evaluate(pol.Spec, tmpl.Spec, run.Spec, rt.Spec); denial != nil {
 		logger.Info("Policy revoked running AgentRun", "name", run.Name, "reason", denial.Reason)
 		_, transitionErr := r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseFailed, string(denial.Reason), denial.Message)
@@ -272,7 +298,7 @@ func (r *AgentRunReconciler) handleRunning(ctx context.Context, run *sprooziv1al
 		logger.Info("Recovered missing StartedAt on Running run", "name", run.Name)
 	}
 
-	deadline := run.Status.StartedAt.Add(pol.Spec.MaxExecutionDuration.Duration)
+	deadline := placement.EffectiveDeadline(run, pol, binding)
 	if time.Now().After(deadline) {
 		logger.Info("AgentRun deadline exceeded", "name", run.Name)
 		_, err := r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseTimedOut, "MaxExecutionDurationExceeded", "")
@@ -283,7 +309,7 @@ func (r *AgentRunReconciler) handleRunning(ctx context.Context, run *sprooziv1al
 	}
 
 	// Ensure the Sandbox Pod exists.
-	sandboxName, err := r.ensureSandbox(ctx, run, rt)
+	sandboxName, err := r.ensureSandbox(ctx, run, rt, binding)
 	if err != nil {
 		return ctrl.Result{}, err
 	}

@@ -32,6 +32,7 @@ func assertNoForbiddenFields[T any](t *testing.T) {
 }
 
 func TestAuditEventMarshalIncludesRequiredFields(t *testing.T) {
+	remaining := int64(9850)
 	e := audit.Event{
 		Timestamp:        time.Now(),
 		RunID:            "run-abc",
@@ -43,7 +44,7 @@ func TestAuditEventMarshalIncludesRequiredFields(t *testing.T) {
 		UpstreamStatus:   200,
 		TokensUsed:       150,
 		TokenBudget:      10000,
-		TokensRemaining:  9850,
+		TokensRemaining:  &remaining,
 	}
 	data, err := json.Marshal(e)
 	if err != nil {
@@ -52,6 +53,19 @@ func TestAuditEventMarshalIncludesRequiredFields(t *testing.T) {
 	for _, field := range []string{"runID", "saName", "policyName", "policyGeneration", "operation", "allowed", "timestamp"} {
 		if !bytes.Contains(data, []byte(`"`+field+`"`)) {
 			t.Errorf("missing required field %q in JSON", field)
+		}
+	}
+}
+
+func TestAuditRemainingDistinguishesUnavailableFromExhausted(t *testing.T) {
+	zero := int64(0)
+	for _, tc := range []struct {
+		remaining *int64
+		want      string
+	}{{nil, `"tokensRemaining":null`}, {&zero, `"tokensRemaining":0`}} {
+		data, err := json.Marshal(audit.Event{TokensRemaining: tc.remaining})
+		if err != nil || !bytes.Contains(data, []byte(tc.want)) {
+			t.Fatalf("remaining budget: got %s, error %v; want %s", data, err, tc.want)
 		}
 	}
 }

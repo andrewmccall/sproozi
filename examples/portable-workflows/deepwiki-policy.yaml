@@ -1,0 +1,39 @@
+apiVersion: sproozi.com/v1alpha1
+kind: AgentPolicy
+metadata:
+  name: deepwiki-read
+  namespace: sproozi-system
+spec:
+  allowedCapabilities: [model.inference, mcp.docs]
+  mcpServers:
+    docs:
+      tools:
+        read_wiki_structure:
+          arguments:
+            type: object
+            required: [repoName]
+            additionalProperties: false
+            properties:
+              repoName:
+                const: modelcontextprotocol/go-sdk
+  kubernetesRead:
+    namespaces: [sproozi-system]
+    resources: [pods]
+  githubPullRequest:
+    repositories: []
+    allowedBaseBranches: []
+  egressProfiles: []
+  budgets:
+    model.inference:
+      maxUnits: 200000
+      maxCostMicros: 0
+    mcp.docs:
+      maxUnits: 10
+      maxCostMicros: 0
+  resourceBounds:
+    max:
+      cpu: 1500m
+      memory: 1536Mi
+      ephemeral-storage: 512Mi
+  maxExecutionDuration: 30m
+  retentionTTL: 1h
