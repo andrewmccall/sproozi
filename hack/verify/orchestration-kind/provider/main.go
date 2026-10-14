@@ -81,7 +81,11 @@ func main() {
 		}
 		f.model(w, r, selected)
 	})
-	s := &http.Server{Addr: ":8443", Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	listen := os.Getenv("SPROOZI_FIXTURE_LISTEN")
+	if listen == "" {
+		listen = ":8443"
+	}
+	s := &http.Server{Addr: listen, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	if err := s.ListenAndServeTLS(os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE")); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

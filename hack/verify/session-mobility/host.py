@@ -11,8 +11,10 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 import signal
+import shlex
 import ssl
 import subprocess
 import threading
@@ -29,9 +31,13 @@ TOOL_MARKER = "NATIVE_TOOL_EFFECT_fern_badger_451"
 TOOL_FILE = "native-tool-effect.txt"
 TOOL_PROMPT = "Run the controlled fixture exec_command to write native-tool-effect.txt with NATIVE_TOOL_EFFECT_fern_badger_451 and read it back."
 HOLD_PROMPT = "Complete the controlled held mobility reply using the first fixture fact."
+HOMEOPS_PROMPT = "Inspect the approved home-ops fixture Pod through kubernetes.read, attempt the prohibited Secrets read, and report the observed state and denial."
+HOMEOPS_MARKER = "HOMEOPS_CAPABILITIES_VERIFIED"
 PROMPTS = [TUI.FIRST, TUI.SECOND, TUI.THIRD]
-ALL_PROMPTS = [*PROMPTS, TOOL_PROMPT, HOLD_PROMPT]
-ANSWERS = [*TUI.ANSWERS, "TUI_TOOL_COMPLETE", "TUI_HELD_COMPLETE"]
+BUILD_PROMPT = "Run the approved offline Sproozi package tests and report their actual result; retain this native conversation for local continuation."
+BUILD_MARKER = "SPROOZI_PACKAGE_TESTS_VERIFIED"
+ALL_PROMPTS = [*PROMPTS, TOOL_PROMPT, HOLD_PROMPT, HOMEOPS_PROMPT, BUILD_PROMPT]
+ANSWERS = [*TUI.ANSWERS, "TUI_TOOL_COMPLETE", "TUI_HELD_COMPLETE", "HOMEOPS_TASK_COMPLETE", "SPROOZI_BUILD_COMPLETE"]
 TOKEN = "tui-placeholder"
 
 
@@ -64,7 +70,7 @@ def prepare(args):
     leaf, key = out / "gateway.crt", out / "gateway.key"
     if any(path.exists() for path in [ca, ca_key, leaf, key]):
         raise RuntimeError("Use a fresh output directory; retained trust keys cannot be replaced")
-    write(out / "leaf.ext", "subjectAltName=DNS:api.openai.com,DNS:sproozi-gateway.sproozi-system.svc,DNS:sproozi-gateway.sproozi-system.svc.cluster.local,IP:127.0.0.1,IP:" + args.gateway_ip +
+    write(out / "leaf.ext", "subjectAltName=DNS:api.openai.com,DNS:kubernetes.default.svc,DNS:sproozi-work.sproozi-system.svc,DNS:sproozi-gateway.sproozi-system.svc,DNS:sproozi-gateway.sproozi-system.svc.cluster.local,IP:127.0.0.1,IP:" + args.gateway_ip +
           "\nbasicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\n"
           "extendedKeyUsage=serverAuth\nsubjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid,issuer\n")
     run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-sha256", "-days", "2",
@@ -133,21 +139,28 @@ def prepare(args):
                       "profileHints": str(out / "profile-hints.json")}))
 
 
-def successful_exec_output(value):
+def successful_exec_output(value, marker=TOOL_MARKER):
     # functions.exec wraps text() results in native content blocks. Decode the
     # nested JSON at each layer instead of depending on an escaping depth.
     if isinstance(value, str):
         try:
-            return successful_exec_output(json.loads(value))
+            return successful_exec_output(json.loads(value), marker)
         except (ValueError, TypeError):
             return False
     if isinstance(value, list):
-        return any(successful_exec_output(item) for item in value)
+        return any(successful_exec_output(item, marker) for item in value)
     if isinstance(value, dict):
-        if value.get("exit_code") == 0 and TOOL_MARKER in str(value.get("output", "")):
+        if value.get("exit_code") == 0 and marker in str(value.get("output", "")):
             return True
-        return any(successful_exec_output(item) for item in value.values())
+        return any(successful_exec_output(item, marker) for item in value.values())
     return False
+
+
+def advertised(body, name):
+    namespaces = body.get("tools", []) + [tool for item in body.get("input", [])
+        if item.get("type") == "additional_tools" for tool in item.get("tools", [])]
+    return any(tool.get("type") == "namespace" and tool.get("name") == "functions" and
+               any(child.get("name") == name for child in tool.get("tools", [])) for tool in namespaces)
 
 
 def classify_request(body):
@@ -164,22 +177,30 @@ def classify_request(body):
     encoded = json.dumps(body)
     required = [[TUI.FIRST], [TUI.FIRST, ANSWERS[0], TUI.SECOND],
                 [TUI.FIRST, ANSWERS[0], TUI.SECOND, ANSWERS[1], TUI.THIRD],
-                [TUI.FIRST, ANSWERS[0], TOOL_PROMPT], [TUI.FIRST, ANSWERS[0], HOLD_PROMPT]][turn]
+                [TUI.FIRST, ANSWERS[0], TOOL_PROMPT], [TUI.FIRST, ANSWERS[0], HOLD_PROMPT], [HOMEOPS_PROMPT], [BUILD_PROMPT]][turn]
+    if turn in (5, 6) and users.count(ALL_PROMPTS[turn]) > 1:
+        required.append(ANSWERS[turn])
     result = {"kind": "conversation", "turn": turn, "phase": "answer",
               "missingHistory": [text for text in required if text not in encoded]}
-    if turn != 3:
+    if turn not in (3, 5, 6):
         return result
     # A completed earlier tool turn in resumed history is not this turn's result.
     last_user_index = max(i for i, item in enumerate(items) if item.get("role") == "user")
     current = items[last_user_index + 1:]
-    outputs = [item for item in current if item.get("type") == "custom_tool_call_output"
-               and item.get("call_id") == "mobility_exec_tool"]
+    outputs = [item for item in current if item.get("type") in ("custom_tool_call_output", "function_call_output")
+               and (item.get("call_id") == "mobility_exec_tool" or item.get("call_id", "").startswith("mobility_wait_"))]
     if outputs:
         output = json.dumps(outputs)
         result.update(kind="tool-followup", toolOutputSHA256=hashlib.sha256(output.encode()).hexdigest(),
-                      toolOutputValidated=successful_exec_output(outputs))
+                      toolOutputValidated=successful_exec_output(outputs, HOMEOPS_MARKER if turn == 5 else BUILD_MARKER if turn == 6 else TOOL_MARKER))
         if not result["toolOutputValidated"]:
-            raise ValueError("Actual exec_command output is absent or failed")
+            running = re.search(r"Script running with cell ID ([a-zA-Z0-9_-]+)", str(outputs[-1].get("output", "")))
+            if turn == 6 and running:
+                if not advertised(body, "wait"):
+                    raise ValueError("Native functions.wait was not advertised")
+                result.update(phase="wait-call", waitCell=running.group(1))
+            else:
+                raise ValueError("Actual exec_command output is absent or failed")
     else:
         tools = body.get("tools", []) + [tool for item in items if item.get("type") == "additional_tools"
                                         for tool in item.get("tools", [])]
@@ -238,11 +259,23 @@ def await_release(out, hold_id, timeout, stop):
 
 
 def response_output(writer, response, request, index):
-    if request["phase"] == "tool-call":
+    if request["phase"] == "wait-call":
+        item = {"id": "fc_mobility_wait_" + str(index), "type": "function_call",
+                "call_id": "mobility_wait_" + str(index), "status": "completed", "namespace": "functions",
+                "name": "wait", "arguments": json.dumps(dict(cell_id=request["waitCell"], yield_time_ms=10000, max_tokens=1000))}
+        TUI.event(writer, "response.output_item.added", output_index=0, item=item)
+        TUI.event(writer, "response.output_item.done", output_index=0, item=item)
+    elif request["phase"] == "tool-call":
         command = "printf '%s\\n' '" + TOOL_MARKER + "' > " + TOOL_FILE + "; cat " + TOOL_FILE
+        if request["turn"] == 5:
+            command = "node -e " + shlex.quote((ROOT / "hack/verify/portable-workflows/home-ops.js").read_text())
+        if request["turn"] == 6:
+            command = "go test -p 1 ./internal/project ./internal/workspace ./internal/work && printf 'SPROOZI_PACKAGE_TESTS_VERIFIED\\n'"
         arguments = {"cmd": command, "workdir": "/workspace/session/workspace", "login": False,
                      "max_output_tokens": 1000, "yield_time_ms": 1000}
         code = "text(await tools.exec_command(" + json.dumps(arguments) + "));"
+        if request["turn"] == 6:
+            code = "let result = await tools.exec_command(" + json.dumps(arguments) + "); while (result.session_id && result.exit_code == null) { result = await tools.write_stdin({session_id: result.session_id, chars: '', yield_time_ms: 1000, max_output_tokens: 1000}); } text(result);"
         item = {"id": "ctc_mobility_" + str(index), "type": "custom_tool_call",
                 "call_id": "mobility_exec_tool", "status": "completed", "namespace": "functions",
                 "name": "exec", "input": code}

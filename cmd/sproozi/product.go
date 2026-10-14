@@ -15,6 +15,7 @@ import (
 	"syscall"
 
 	"github.com/andrewmccall/sproozi/internal/harness"
+	"github.com/andrewmccall/sproozi/internal/project"
 	"github.com/andrewmccall/sproozi/internal/session/home"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
 	"github.com/andrewmccall/sproozi/internal/work"
@@ -35,6 +36,8 @@ type options struct {
 	action, socket, id, operation, executor, source, kind, repository, task string
 	detach                                                                  bool
 	fixed                                                                   home.Config
+	project                                                                 project.ID
+	workspaceFrom                                                           *work.RevisionSource
 }
 
 func parseProduct(args []string) (options, error) {
@@ -52,6 +55,10 @@ func parseProduct(args []string) (options, error) {
 	source := fs.String("from", "", "configured remote source for pull")
 	kind := fs.String("harness", "", "approved native harness; defaults to global configuration")
 	repository := fs.String("repository", "", "approved repository name")
+	projectID := fs.String("project", "", "configured project; run defaults to its workspace, sessions filters by it")
+	workspaceFrom := fs.String("workspace-from", "", "retained source session for fresh work at recorded HEAD")
+	checkpointDigest := fs.String("checkpoint-digest", "", "exact source checkpoint digest for --workspace-from")
+	revision := fs.String("revision", "", "exact full recorded Git commit for --workspace-from")
 	task := fs.String("task", "", "task text")
 	taskFile := fs.String("task-file", "", "UTF-8 task file")
 	detach := fs.Bool("detach", false, "return after local resume without attaching")
@@ -98,8 +105,27 @@ func parseProduct(args []string) (options, error) {
 	if action != actionRun && (*task != "" || *repository != "" || *kind != "") {
 		return options{}, errors.New("task, repository and harness are run options")
 	}
+	if *projectID != "" && (action != actionRun && action != home.ActionSessions ||
+		!project.ValidID(project.ID(*projectID))) {
+		return options{}, errors.New("--project requires a valid project ID and run or sessions")
+	}
+	from, e := parseRevisionSource(action, *workspaceFrom, *checkpointDigest, *revision)
+	if e != nil {
+		return options{}, e
+	}
 	return options{action: action, socket: *socket, id: *id, operation: *operation, executor: *executor, source: *source,
-		kind: *kind, repository: *repository, task: *task, detach: *detach, fixed: fixed}, nil
+		kind: *kind, repository: *repository, task: *task, detach: *detach, fixed: fixed,
+		project: project.ID(*projectID), workspaceFrom: from}, nil
+}
+
+func parseRevisionSource(action, source, digest, revision string) (*work.RevisionSource, error) {
+	if source == "" && digest == "" && revision == "" {
+		return nil, nil
+	}
+	if action != actionRun || source == "" || digest == "" || revision == "" {
+		return nil, errors.New("run --workspace-from requires --checkpoint-digest and --revision")
+	}
+	return &work.RevisionSource{SessionID: source, Digest: digest, Revision: revision}, nil
 }
 
 func runProduct(args []string) error {
@@ -117,10 +143,10 @@ func runProduct(args []string) error {
 			return errors.New("sessions accepts only configuration, socket and executor")
 		}
 		if q.executor != "" && q.executor != dockerExecutor {
-			return remoteProduct(ctx, q.fixed, q.executor, q.action, "", "")
+			return remoteProduct(ctx, q.fixed, q.executor, q.action, "", "", q.project)
 		}
 		for _, name := range selectedExecutors(q.fixed, q.executor) {
-			if e = remoteProduct(ctx, q.fixed, name, q.action, "", ""); e != nil {
+			if e = remoteProduct(ctx, q.fixed, name, q.action, "", "", q.project); e != nil {
 				return e
 			}
 		}
@@ -129,7 +155,7 @@ func runProduct(args []string) error {
 		} else if err != nil {
 			return err
 		}
-		response, err := home.Call(ctx, q.socket, home.Request{Action: home.ActionSessions})
+		response, err := home.Call(ctx, q.socket, home.Request{Action: home.ActionSessions, Project: q.project})
 		if err != nil {
 			return err
 		}
@@ -146,7 +172,7 @@ func runProduct(args []string) error {
 		if q.action == home.ActionCancel {
 			_, _ = fmt.Fprintf(os.Stderr, "Session %s, operation %s\n", q.id, q.operation)
 		}
-		return remoteProduct(ctx, q.fixed, q.executor, q.action, q.id, q.operation)
+		return remoteProduct(ctx, q.fixed, q.executor, q.action, q.id, q.operation, "")
 	}
 	return q.local(ctx)
 }
@@ -172,7 +198,8 @@ func (q *options) submitRemote(ctx context.Context) error {
 		q.kind = string(q.fixed.Local.Harness)
 	}
 	v, err := client.Submit(ctx, work.Submit{RequestID: q.operation, Repository: q.repository,
-		Harness: harness.NativeKind(q.kind), Executor: q.executor, Task: q.task})
+		Harness: harness.NativeKind(q.kind), Executor: q.executor, Task: q.task, Project: q.project,
+		WorkspaceFrom: q.workspaceFrom})
 	if err != nil {
 		return err
 	}
@@ -229,7 +256,7 @@ func selectedExecutors(c home.Config, selected string) []string {
 	slices.Sort(names)
 	return names
 }
-func remoteProduct(ctx context.Context, c home.Config, name, action, id, operation string) error {
+func remoteProduct(ctx context.Context, c home.Config, name, action, id, operation string, projectID project.ID) error {
 	fixed, ok := workConnection(c, name)
 	if !ok {
 		return errors.New("remote executor is not configured")
@@ -242,7 +269,7 @@ func remoteProduct(ctx context.Context, c home.Config, name, action, id, operati
 	var out any
 	switch action {
 	case home.ActionSessions:
-		out, e = client.List(ctx)
+		out, e = client.List(ctx, work.SessionQuery{Project: projectID})
 	case home.ActionStatus:
 		out, e = client.Info(ctx, id)
 	case home.ActionCancel:

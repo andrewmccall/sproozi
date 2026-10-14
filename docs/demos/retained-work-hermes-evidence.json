@@ -1,0 +1,33 @@
+{
+  "date": "2026-10-13",
+  "passed": true,
+  "sourceReportSHA256": "b66bb67732ef64e01c03a5b9a04daebaa2c9fb0b5a64835428f2a2d53aef3224",
+  "scope": "genuine stock native task via authenticated MCP; remote retention and fresh local resume",
+  "limitations": [
+    "Deterministic provider; no paid inference or real engineering contribution claim",
+    "Text/Git fixture; personal infrastructure is never accessed",
+    "Report does not record a source digest or matched-image assertion; this is retained scenario evidence",
+    "Project and workspace-revision acceptance is separate from this retained-work proof"
+  ],
+  "steps": [
+    "Stock Hermes discovered and invoked the retained-work MCP tool",
+    "Stock Hermes retrieved the completed native session after its sandbox stopped",
+    "Remote initial native task completed and retained while home was absent",
+    "Claimed checkpoint resumed in local Docker under a fresh execution identity and deadline",
+    "Genuine same-conversation local follow-up completed and checkpointed without another writer",
+    "Stock native exec_command wrote and read the controlled workspace file"
+  ],
+  "hermesDeployment": "hermes-coordinator",
+  "sessionId": "ca21f984-4e70-56a6-9438-7f0ed71c38bc",
+  "nativeUUID": "01a1342b-1d12-77f0-98ef-392cad56a4a7",
+  "remote": {
+    "executionId": "cac598d6-eaad-46ac-8664-c68193281897",
+    "phase": "retained",
+    "deadline": "2026-10-13T08:00:00.999401303Z",
+    "checkpointDigest": "b7be51c3a7db6c67dd6601a0ebb1c1d67c647b0e5c4f5ac53e79561a5d880d65"
+  },
+  "local": {
+    "executionId": "7d239113-ca1d-49d8-b767-5ccf4fa53916",
+    "deadline": "2026-10-13T08:00:11.551803Z"
+  }
+}

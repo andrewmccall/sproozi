@@ -176,6 +176,20 @@ old receipts. Product operations bind to their original execution so delayed
 retries cannot affect a newer continuation. See
 [ADR 0012](../adr/0012-retained-work-and-fresh-session-continuations.md).
 
+The stock Hermes retained-work fixture has passed native MCP dispatch, answer
+retrieval and fresh same-conversation local continuation with deterministic
+providers. [Recorded acceptance](../demos/verified-portable-workflows.md) keeps
+that proof separate from paid engineering and personal home-ops outcomes.
+
+[ADR 0013](../adr/0013-configured-projects-and-workspace-revisions.md) records the
+implemented Project and workspace-revision extension: administrator-defined
+grouping narrows admission, imported association supplies provenance, and exact
+clean revision execution remains separate from full native/unfinished-workspace
+resume. Stock Hermes/native development acceptance includes independent local approval,
+Project filtering and workspace-only fresh conversation at the exact retained
+Git revision. [Evidence](../demos/execution-roadmap-evidence.json) records its
+source, selected images and deterministic-model limits.
+
 ```mermaid
 flowchart LR
     CLI[Native terminal client] --> Home[Home daemon and session journal]

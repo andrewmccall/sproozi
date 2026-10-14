@@ -59,6 +59,15 @@ checkpoint references and execution location. It references successive bounded
 executions. Each execution receives current admission and a fresh identity;
 session continuity carries no standing capability grant.
 
+[ADR 0012](0012-retained-work-and-fresh-session-continuations.md) extends retained
+product sessions across independently authorized executions. Live moves within
+one execution keep that execution's original deadline and aggregate allowance.
+Later resume from retained state creates a new execution, deadline, allocation
+and current grant while preserving the product session and native UUID. It does
+not renew the previous execution's ledger or alter its receipts. The home-owned
+live-move topology remains; newly submitted remote work starts in ADR 0012's
+laptop-independent catalogue before an explicit one-way claim to the home.
+
 Use authenticated attachment first, then checkpoint/restore at supported safe
 boundaries. Preserve native harness state rather than inventing a shared
 conversation format. Native GUI attachment remains a separate compatibility

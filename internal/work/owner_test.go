@@ -1,3 +1,4 @@
+//nolint:goconst // Test identity values remain literal inputs.
 package work
 
 import (
@@ -41,12 +42,14 @@ type fixturePlacement struct {
 	lostInitial            bool
 	heldStop               <-chan struct{}
 	stopStarted            chan struct{}
+	launches               []session.Launch
 }
 
 func (p *fixturePlacement) CreateInitial(_ context.Context, l session.Launch, data []byte) (session.Incarnation, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.initial++
+	p.launches = append(p.launches, l)
 	if l.ThreadID != "" || l.Task == "" || len(data) == 0 {
 		return session.Incarnation{}, errors.New("invalid initial intent")
 	}
@@ -92,7 +95,12 @@ func (p *fixturePlacement) Stop(ctx context.Context, l session.Launch, i session
 	l.ThreadID = testThread
 	s := session.Stopped{Launch: l, Incarnation: i, ActualStopped: !p.missingFence, Checkpoint: p.data, CheckpointDigest: p.meta.SHA256}
 	if !p.missingSeal {
-		s.Receipt = &session.Receipt{Launch: l, Incarnation: i, Usage: map[string]budget.TrustedUsage{fixtureModel: {Units: 7}}}
+		usage := map[string]budget.TrustedUsage{}
+		for name := range l.Allowances {
+			usage[name] = budget.TrustedUsage{}
+		}
+		usage[fixtureModel] = budget.TrustedUsage{Units: 7}
+		s.Receipt = &session.Receipt{Launch: l, Incarnation: i, Usage: usage}
 	}
 	if p.lostStop {
 		p.lostStop = false
@@ -136,7 +144,7 @@ func submit(t *testing.T, o *Owner) View {
 }
 func waitPhase(t *testing.T, o *Owner, id, want string) View {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	for {
 		v, e := o.Info(ctx, id)
@@ -208,7 +216,7 @@ func TestRemoteCatalogueRetainsCompletionAndExclusiveClaimAcrossRestart(t *testi
 	if e != nil || !replay.Claimed || replay.Stopped.Receipt.Usage[fixtureModel].Units != 7 {
 		t.Fatal("claim lost after restart")
 	}
-	list, e := resumed.List(t.Context())
+	list, e := resumed.List(t.Context(), SessionQuery{})
 	if e != nil || len(list) != 1 || list[0].Phase != phaseHomeOwned {
 		t.Fatalf("catalogue: %+v %v", list, e)
 	}

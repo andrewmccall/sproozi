@@ -89,6 +89,11 @@ cluster after the Codex evaluation has stopped.
 
 ## Give the service its own authority
 
+The [retained-work Kubernetes example](../../examples/portable-workflows/kubernetes/owner.yaml)
+implements these namespace-scoped roles with a dedicated identity, PVC and TLS
+Service. The [deployment guide](../../docs/guides/retained-work-kubernetes.md)
+includes the managed runtime, distinct task/home credentials and Hermes setup.
+
 For a host-run profile, select an administrator-owned kubeconfig through
 `KUBECONFIG`. For an in-cluster profile, use its dedicated ServiceAccount and
 the normal in-cluster client configuration. Required backend permissions are:
@@ -237,3 +242,10 @@ trusted service; the scratch controller image does not. A trusted Pod deployment
 needs private persistent storage, TLS/token files and the profile RBAC above.
 See [the full workflow](../../docs/guides/portable-workflows.md) and
 [its isolated fixture](../../hack/verify/portable-workflows/README.md).
+
+## Projects and exact revisions
+
+See the [configuration and caller reference](../../docs/reference/projects-and-revisions.md) for optional
+Project grouping, installation membership, independent local approval and fresh
+workspace-only execution at a retained Git revision. Standalone work remains
+valid. Native resume still restores the complete supported unfinished workspace.

@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hermes-config
+  namespace: sproozi-coordinators
+data:
+  config.yaml: |
+    model:
+      default: gpt-5.3-codex
+      provider: openai-api
+    platform_toolsets:
+      api_server: [sproozi-work]
+      cron: [sproozi-work]
+      cli: [sproozi-work]
+    agent:
+      max_turns: 24
+    mcp_servers:
+      sproozi-work:
+        url: https://sproozi-work.sproozi-system.svc:8443/work/mcp
+        enabled: true
+        strict_redirect_headers: true
+        headers:
+          Authorization: "Bearer ${SPROOZI_TASK_TOKEN}"
+        connect_timeout: 15
+        timeout: 40
