@@ -1,3 +1,4 @@
+//nolint:goconst // Keep independent literal behavior expectations.
 package main
 
 import (
@@ -8,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/andrewmccall/sproozi/internal/project"
 	"github.com/andrewmccall/sproozi/internal/session/home"
 	"github.com/google/uuid"
 )
@@ -91,8 +93,12 @@ func TestSessionsWritesOneLabelledCatalogue(t *testing.T) {
 		defer func() { _ = c.Close() }()
 		var request home.Request
 		if e = json.NewDecoder(c).Decode(&request); e == nil {
+			if request.Project != "sproozi-dev" {
+				t.Errorf("project filter lost: %+v", request)
+			}
 			e = json.NewEncoder(c).Encode(home.Response{Sessions: []home.Status{{
-				ID: id, ExecutionID: execution, Ownership: testHomeOwnership, Phase: "active",
+				Association: project.Association{Project: "sproozi-dev", Repository: "sproozi"},
+				ID:          id, ExecutionID: execution, Ownership: testHomeOwnership, Phase: "active",
 			}}})
 		}
 		done <- e
@@ -103,7 +109,7 @@ func TestSessionsWritesOneLabelledCatalogue(t *testing.T) {
 	}
 	original := os.Stdout
 	os.Stdout = w
-	err = run([]string{"sessions", testSocketFlag, socket})
+	err = run([]string{"sessions", testSocketFlag, socket, "--project", "sproozi-dev"})
 	os.Stdout = original
 	_ = w.Close()
 	defer func() { _ = r.Close() }()
@@ -119,11 +125,41 @@ func TestSessionsWritesOneLabelledCatalogue(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(out.Sessions) != 1 || out.Sessions[0].ID != id || out.Sessions[0].ExecutionID != execution ||
+		out.Sessions[0].Project != "sproozi-dev" || out.Sessions[0].Repository != "sproozi" ||
 		out.Sessions[0].Executor != dockerExecutor || out.Sessions[0].Ownership != testHomeOwnership ||
 		len(out.Executors) != 1 || out.Executors[0].Availability != testAvailable {
 		t.Fatalf("unlabelled catalogue: %+v", out)
 	}
 	if decoder.Decode(new(any)) == nil {
 		t.Fatal("multiple top-level JSON values")
+	}
+}
+
+func TestProjectAndRevisionOptionsUseSharedAddressing(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, "config.json")
+	data := `{"directory":"` + dir + `", "model":"fixture", "local":{"Name":"docker"},
+ "allowances":{"model.inference":{"units":{"bounded":true,"value":10}}}, "maxDuration":"1h"}`
+	if err := os.WriteFile(config, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+	source := uuid.NewString()
+	q, err := parseProduct([]string{"run", "--executor", testExecutor, "--config", config,
+		"--project", "sproozi-dev", "--workspace-from", source,
+		"--checkpoint-digest", strings.Repeat("a", 64), "--revision", strings.Repeat("b", 40)})
+	if err != nil || q.project != "sproozi-dev" || q.workspaceFrom == nil || q.workspaceFrom.SessionID != source ||
+		q.workspaceFrom.Digest != strings.Repeat("a", 64) || q.workspaceFrom.Revision != strings.Repeat("b", 40) {
+		t.Fatalf("Project/revision run intent lost: %+v %v", q, err)
+	}
+	for _, args := range [][]string{
+		{"status", source, testSocketFlag, "/unused", "--project", "sproozi-dev"},
+		{"sessions", testSocketFlag, "/unused", "--project", "Invalid"},
+		{"run", "--executor", testExecutor, "--config", config, "--workspace-from", source},
+		{"sessions", testSocketFlag, "/unused", "--workspace-from", source,
+			"--checkpoint-digest", "digest", "--revision", "revision"},
+	} {
+		if _, err = parseProduct(args); err == nil {
+			t.Fatalf("Unsupported Project/revision intent accepted: %v", args)
+		}
 	}
 }

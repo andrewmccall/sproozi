@@ -20,6 +20,7 @@ import (
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/harness"
+	"github.com/andrewmccall/sproozi/internal/project"
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/placement"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
@@ -31,22 +32,23 @@ import (
 )
 
 type serverConfig struct {
-	Harness            harness.NativeKind           `json:"harness"`
-	Listen             string                       `json:"listen"`
-	CertificateFile    string                       `json:"certificateFile"`
-	KeyFile            string                       `json:"keyFile"`
-	TokenFile          string                       `json:"tokenFile"`
-	Principal          string                       `json:"principal"`
-	PlacementName      string                       `json:"placementName"`
-	Namespace          string                       `json:"namespace"`
-	TemplateName       string                       `json:"templateName"`
-	Directory          string                       `json:"directory"`
-	InstructionDigest  string                       `json:"instructionDigest"`
-	Allowances         map[string]session.Allowance `json:"allowances"`
-	MaxDuration        string                       `json:"maxDuration"`
-	MaxCheckpointBytes int64                        `json:"maxCheckpointBytes"`
-	WorkTokenFile      string                       `json:"workTokenFile,omitempty"`
-	Repositories       map[string]work.Repository   `json:"repositories,omitempty"`
+	Harness            harness.NativeKind                `json:"harness"`
+	Listen             string                            `json:"listen"`
+	CertificateFile    string                            `json:"certificateFile"`
+	KeyFile            string                            `json:"keyFile"`
+	TokenFile          string                            `json:"tokenFile"`
+	Principal          string                            `json:"principal"`
+	PlacementName      string                            `json:"placementName"`
+	Namespace          string                            `json:"namespace"`
+	TemplateName       string                            `json:"templateName"`
+	Directory          string                            `json:"directory"`
+	InstructionDigest  string                            `json:"instructionDigest"`
+	Allowances         map[string]session.Allowance      `json:"allowances"`
+	MaxDuration        string                            `json:"maxDuration"`
+	MaxCheckpointBytes int64                             `json:"maxCheckpointBytes"`
+	WorkTokenFile      string                            `json:"workTokenFile,omitempty"`
+	Repositories       map[string]work.Repository        `json:"repositories,omitempty"`
+	Projects           map[project.ID]project.Definition `json:"projects,omitempty"`
 }
 
 func main() {
@@ -130,13 +132,14 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
-	if len(fixed.Repositories) > 0 {
+	if len(fixed.Repositories)+len(fixed.Projects) > 0 {
 		owner, openErr := work.Open(work.Config{
 			Directory: filepath.Join(fixed.Directory, "work"), Principal: fixed.Principal,
 			Harness: fixed.Harness, Placement: fixed.PlacementName,
 			InstructionDigest: fixed.InstructionDigest, Allowances: fixed.Allowances,
 			MaxDuration: duration, MaxCheckpointBytes: fixed.MaxCheckpointBytes,
-			Repositories: fixed.Repositories, Backend: backend, Log: os.Stderr,
+			Repositories: fixed.Repositories, TemplateName: fixed.TemplateName, Projects: fixed.Projects,
+			Backend: backend, Log: os.Stderr,
 		})
 		if openErr != nil {
 			return openErr

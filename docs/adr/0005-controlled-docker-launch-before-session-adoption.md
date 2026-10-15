@@ -84,8 +84,9 @@ accepted outcome; ADR 0010 records the concrete ownership and move mechanisms.
 
 ## Revisit conditions
 
-Revisit adoption when the controlled round trip is proved and native interfaces
-can establish selected-state import and exclusive writer ownership. Revisit
+The controlled round-trip prerequisite is now proved for the pinned Codex and
+Claude paths. Adoption remains deferred until native interfaces can establish
+selected-state import and exclusive control of the original writer. Revisit
 earlier if requiring a launcher prevents the intended developers from using the
 feature. Consider host-process execution only with a concrete user requirement
 and evidence that its containment and authority bounds can be enforced.

@@ -104,7 +104,7 @@ func assertFreshResume(t *testing.T, s *Service, local *placementFixture, source
 	if _, err = s.Resume(t.Context(), id, uuid.NewString()); err == nil {
 		t.Fatal("active prior writer admitted a new envelope")
 	}
-	listed, err := s.Sessions()
+	listed, err := s.Sessions(work.SessionQuery{})
 	if err != nil || len(listed) != 1 || listed[0].ID != id || listed[0].ExecutionID != status.ExecutionID || listed[0].Session != nil {
 		t.Fatalf("product catalog duplicated internal execution: %+v %v", listed, err)
 	}

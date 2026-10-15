@@ -23,6 +23,11 @@ type reference struct {
 	Digest      string `json:"digest,omitempty"`
 }
 
+// MCP outputSchema requires an object at its root, including collection tools.
+type sessionList struct {
+	Sessions []View `json:"sessions"`
+}
+
 func decode(b []byte, v any) error {
 	d := json.NewDecoder(bytes.NewReader(b))
 	d.DisallowUnknownFields()
@@ -51,16 +56,20 @@ func NewHandler(o *Owner, taskToken, homeToken string) (http.Handler, error) {
 		v, e := o.Info(ctx, q.ID)
 		return tool(v, e)
 	})
+	mcp.AddTool(server, &mcp.Tool{Name: "sproozi_cancel", Description: "Cancel this owner's exact session using a stable operationId UUID. Reuse the operation after an uncertain response; cancellation does not promise a resumable completed turn."}, func(ctx context.Context, _ *mcp.CallToolRequest, q reference) (*mcp.CallToolResult, View, error) {
+		v, e := o.Cancel(ctx, q.ID, q.OperationID)
+		return tool(v, e)
+	})
 	mcp.AddTool(server, &mcp.Tool{Name: "sproozi_session_info", Description: "Read the stable session and current remote ownership state."}, func(ctx context.Context, _ *mcp.CallToolRequest, q reference) (*mcp.CallToolResult, View, error) {
 		v, e := o.Info(ctx, q.ID)
 		return tool(v, e)
 	})
-	mcp.AddTool(server, &mcp.Tool{Name: "sproozi_sessions", Description: "List sessions for this fixed authenticated installation owner."}, func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, []View, error) {
-		v, e := o.List(ctx)
+	mcp.AddTool(server, &mcp.Tool{Name: "sproozi_sessions", Description: "List accessible sessions for this installation, optionally filtered by project."}, func(ctx context.Context, _ *mcp.CallToolRequest, q SessionQuery) (*mcp.CallToolResult, sessionList, error) {
+		v, e := o.List(ctx, q)
 		if e != nil {
-			return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: outcomeMessage(e)}}}, nil, nil
+			return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: outcomeMessage(e)}}}, sessionList{}, nil
 		}
-		return nil, v, nil
+		return nil, sessionList{Sessions: v}, nil
 	})
 	stream := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true, DisableLocalhostProtection: true})
 	taskHash, homeHash := sha256.Sum256([]byte(taskToken)), sha256.Sum256([]byte(homeToken))
@@ -128,10 +137,10 @@ func (h *ownerHandler) serveJSON(w http.ResponseWriter, r *http.Request, action 
 			out, e = h.owner.Submit(r.Context(), q)
 		}
 	case "list":
-		var q struct{}
+		var q SessionQuery
 		e = decodeInput(b, &q)
 		if e == nil {
-			out, e = h.owner.List(r.Context())
+			out, e = h.owner.List(r.Context(), q)
 		}
 	default:
 		var q reference
@@ -192,8 +201,8 @@ func (c *Client) Info(ctx context.Context, id string) (v View, e error) {
 	e = c.transport.CallOwner(ctx, "info", reference{ID: id}, &v)
 	return
 }
-func (c *Client) List(ctx context.Context) (v []View, e error) {
-	e = c.transport.CallOwner(ctx, "list", struct{}{}, &v)
+func (c *Client) List(ctx context.Context, q SessionQuery) (v []View, e error) {
+	e = c.transport.CallOwner(ctx, "list", q, &v)
 	return
 }
 func (c *Client) BeginExport(ctx context.Context, id, op string) (v Export, e error) {

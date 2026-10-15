@@ -1,0 +1,181 @@
+# Install alongside the managed native runtime and shared gateway. Set the native
+# image to the reviewed digest; prepare profile config, TLS and distinct tokens.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sproozi-work
+  namespace: sproozi-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: sproozi-work
+  namespace: sproozi-system
+rules:
+- apiGroups: [sproozi.com]
+  resources: [agenttemplates, agentpolicies, agentruntimes]
+  verbs: [get]
+- apiGroups: [sproozi.com]
+  resources: [agentruns]
+  verbs: [get, create, patch]
+- apiGroups: ['']
+  resources: [configmaps]
+  verbs: [get, create, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sproozi-work
+  namespace: sproozi-system
+subjects:
+- kind: ServiceAccount
+  name: sproozi-work
+  namespace: sproozi-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: sproozi-work
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: sproozi-work
+  namespace: sproozi-agents
+rules:
+- apiGroups: ['']
+  resources: [pods]
+  verbs: [get, patch, delete]
+- apiGroups: ['']
+  resources: [pods/exec]
+  verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sproozi-work
+  namespace: sproozi-agents
+subjects:
+- kind: ServiceAccount
+  name: sproozi-work
+  namespace: sproozi-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: sproozi-work
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sproozi-work-state
+  namespace: sproozi-system
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sproozi-work
+  namespace: sproozi-system
+spec:
+  selector:
+    app: sproozi-work
+  ports:
+  - name: https
+    port: 8443
+    targetPort: https
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sproozi-work
+  namespace: sproozi-system
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: sproozi-work
+  template:
+    metadata:
+      labels:
+        app: sproozi-work
+    spec:
+      serviceAccountName: sproozi-work
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: owner
+        image: docker.io/sproozi-session/native:REPLACE_WITH_REVIEWED_DIGEST
+        command: [/usr/local/bin/session-profile]
+        args: [--config, /etc/sproozi-work/profile.json]
+        ports:
+        - name: https
+          containerPort: 8443
+        readinessProbe:
+          tcpSocket:
+            port: https
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: '1'
+            memory: 1Gi
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: [ALL]
+        volumeMounts:
+        - name: config
+          mountPath: /etc/sproozi-work
+          readOnly: true
+        - name: credentials
+          mountPath: /var/run/sproozi-work
+          readOnly: true
+        - name: state
+          mountPath: /state
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: config
+        configMap:
+          name: sproozi-work-profile
+      - name: credentials
+        secret:
+          secretName: sproozi-work-credentials
+          defaultMode: 0440
+      - name: state
+        persistentVolumeClaim:
+          claimName: sproozi-work-state
+      - name: tmp
+        emptyDir:
+          sizeLimit: 64Mi
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sproozi-work-private
+  namespace: sproozi-system
+spec:
+  podSelector:
+    matchLabels:
+      app: sproozi-work
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: sproozi-coordinators
+    ports:
+    - protocol: TCP
+      port: 8443

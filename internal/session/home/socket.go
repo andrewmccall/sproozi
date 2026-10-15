@@ -13,7 +13,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/project"
 	"github.com/andrewmccall/sproozi/internal/proxytransport"
+	"github.com/andrewmccall/sproozi/internal/work"
 	"github.com/andrewmccall/sproozi/internal/workspace"
 )
 
@@ -33,13 +35,14 @@ const (
 )
 
 type Request struct {
-	Action         string   `json:"action"`
-	ID             string   `json:"id"`
-	OperationID    string   `json:"operationId,omitempty"`
-	Destination    string   `json:"destination,omitempty"`
-	Workspace      string   `json:"workspace,omitempty"`
-	IncludeIgnored []string `json:"includeIgnored,omitempty"`
-	Source         string   `json:"source,omitempty"`
+	Action         string     `json:"action"`
+	ID             string     `json:"id"`
+	OperationID    string     `json:"operationId,omitempty"`
+	Destination    string     `json:"destination,omitempty"`
+	Workspace      string     `json:"workspace,omitempty"`
+	IncludeIgnored []string   `json:"includeIgnored,omitempty"`
+	Source         string     `json:"source,omitempty"`
+	Project        project.ID `json:"project,omitempty"`
 }
 type Response struct {
 	Status   *Status  `json:"status,omitempty"`
@@ -192,7 +195,7 @@ func (s *Service) handle(ctx context.Context, conn net.Conn) {
 	case ActionStop:
 		status, err = s.Stop(ctx, q.ID, q.OperationID)
 	case ActionSessions:
-		sessions, err = s.Sessions()
+		sessions, err = s.Sessions(work.SessionQuery{Project: q.Project})
 	}
 	response := Response{Sessions: sessions}
 	if status.ID != "" {
@@ -292,6 +295,10 @@ func Call(ctx context.Context, path string, q Request) (Response, error) {
 var _ io.Closer = (*Service)(nil)
 
 func validateCommonRequest(q Request) error {
+	if q.Project != "" && (q.Action != ActionSessions || !project.ValidID(q.Project)) {
+		return errors.New("home: project filters require sessions and a valid project ID")
+	}
+
 	if err := workspace.ValidateIgnoredPaths(q.IncludeIgnored); err != nil {
 		return err
 	}

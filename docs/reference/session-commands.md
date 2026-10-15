@@ -35,6 +35,12 @@ accept either the first positional UUID or `--id UUID`, never both. UUIDs must
 use canonical lowercase spelling. `sessions` takes no session UUID. `start` can
 create one when omitted; `run` returns the remote owner's stable session ID.
 
+Use `--project ID` to filter discovery to an approved Project, including with
+`--executor docker`. Catalogue rows retain the configured Project association and
+repository provenance. Project filtering does not grant membership or execution
+authority. [Projects and workspace revisions](projects-and-revisions.md) describes
+`run --project ID`, `--workspace-from SESSION_UUID`, and independent home approval.
+
 Use explicit selectors when switching between owners:
 
 ```sh

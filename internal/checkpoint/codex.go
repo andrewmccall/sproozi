@@ -37,11 +37,12 @@ type nativeArtifact struct {
 
 // Metadata describes continuity data, never a placement's stop or usage receipt.
 type Metadata struct {
-	Harness  harness.NativeKind `json:"harness"`
-	ThreadID string             `json:"threadId"`
-	TurnID   string             `json:"turnId"`
-	SHA256   string             `json:"sha256"`
-	Bytes    int                `json:"bytes"`
+	Harness   harness.NativeKind `json:"harness"`
+	ThreadID  string             `json:"threadId"`
+	TurnID    string             `json:"turnId"`
+	SHA256    string             `json:"sha256"`
+	Bytes     int                `json:"bytes"`
+	Workspace workspace.Metadata `json:"workspace"`
 }
 
 // CaptureStopped must run after the placement independently confirms all
@@ -87,6 +88,16 @@ func CaptureStopped(ctx context.Context, kind harness.NativeKind, home, reposito
 func Inspect(data []byte, maxBytes int64) (Metadata, error) {
 	meta, _, err := inspect(data, maxBytes)
 	return meta, err
+}
+
+// Workspace exposes only the validated workspace portion, without native
+// history or authority. Restore still verifies Git objects before activation.
+func Workspace(data []byte, maxBytes int64) ([]byte, workspace.Metadata, error) {
+	meta, artifact, err := inspect(data, maxBytes)
+	if err != nil {
+		return nil, workspace.Metadata{}, err
+	}
+	return artifact.Workspace, meta.Workspace, nil
 }
 
 // ValidateContinuity checks the explicit selected native adapter. Codex also
@@ -177,7 +188,12 @@ func inspect(data []byte, maxBytes int64) (Metadata, nativeArtifact, error) {
 		return Metadata{}, artifact, err
 	}
 	digest := sha256.Sum256(data)
-	return Metadata{Harness: artifact.Harness, ThreadID: id, TurnID: turn, SHA256: hex.EncodeToString(digest[:]), Bytes: len(data)}, artifact, nil
+	workspaceMeta, err := workspace.Inspect(artifact.Workspace, maxBytes)
+	if err != nil {
+		return Metadata{}, artifact, err
+	}
+	return Metadata{Harness: artifact.Harness, ThreadID: id, TurnID: turn,
+		SHA256: hex.EncodeToString(digest[:]), Bytes: len(data), Workspace: workspaceMeta}, artifact, nil
 }
 
 // Restore publishes an inert placement directory containing "workspace" and

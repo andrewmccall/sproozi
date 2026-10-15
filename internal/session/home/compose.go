@@ -104,7 +104,8 @@ func (a *authority) BindNative(ctx context.Context, l session.Launch, i session.
 // Open constructs fixed production adapters. It performs no Docker launch or
 // inference; Serve starts the listener before any control request can activate.
 func Open(c Config, log io.Writer) (_ *Service, err error) {
-	if err := nativeconfig.ValidateHarness(string(c.Local.Harness), c.Model, c.NativeOptions); err != nil {
+	if err := errors.Join(nativeconfig.ValidateHarness(string(c.Local.Harness), c.Model, c.NativeOptions),
+		validateProjectApprovals(c)); err != nil {
 		return nil, err
 	}
 	if log == nil {
@@ -208,6 +209,7 @@ func Open(c Config, log io.Writer) (_ *Service, err error) {
 	}
 	s.gateway = proxytransport.NewServer(c.Gateway.Listen, certificate, handler)
 	s.config.Allowances = maps.Clone(c.Allowances)
+	s.config.ProjectApprovals = cloneProjectApprovals(c.ProjectApprovals)
 	return s, nil
 }
 

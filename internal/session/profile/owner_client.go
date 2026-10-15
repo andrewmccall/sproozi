@@ -66,9 +66,9 @@ func ownerFailure(code Code, status int) error {
 func OwnerOutcomeMessage(code Code) string {
 	switch code {
 	case CodeInvalid:
-		return "Invalid work request; check the session UUID and task options"
+		return "Invalid work request; check the session UUID, Project selector and task options"
 	case CodeDenied:
-		return "Work access denied; check configured credentials and approved repository, harness and executor"
+		return "Work access denied; check configured credentials and approved repository, Project membership, harness and executor"
 	case CodeConflict:
 		return "Work intent conflicts with retained state; inspect status and preserve the original operation UUID on retries"
 	case CodeExpired:

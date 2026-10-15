@@ -146,6 +146,9 @@ profile `placementName`. `workSources` can use separately provisioned owner
 connections; when omitted it uses the same named remote profiles. Both transports
 verify TLS 1.3, use one fixed origin and reject redirects.
 
+For a persistent in-cluster owner and the exact Hermes `/work/mcp` configuration,
+use [Deploy Hermes with retained native work](retained-work-kubernetes.md).
+
 ## Run and inspect work
 
 Build the public CLI:
@@ -361,5 +364,15 @@ stable replay identity, a genuine remote native task while the home is absent,
 retained output, one-way claim, fresh local authorization and same-conversation
 follow-up. Its report states provider and caller limits. Unit tests separately
 exercise lost replies, unknown fence/accounting, new grants and no destination
-activation during stop. Keep actual Hermes usage, paid inference, an engineering
-contribution and personal home-ops diagnosis distinct from those fixture proofs.
+activation during stop. The subsequent stock Hermes fixture passed native MCP
+dispatch and retained-answer retrieval, followed by fresh same-conversation local
+continuation. [Recorded acceptance](../demos/verified-portable-workflows.md)
+separates it from the earlier protocol-only caller. Paid inference, a real
+engineering contribution and personal home-ops diagnosis remain unassessed.
+
+## Projects and exact revisions
+
+See the [configuration and caller reference](../reference/projects-and-revisions.md) for optional
+Project grouping, installation membership, independent local approval and fresh
+workspace-only execution at a retained Git revision. Standalone work remains
+valid. Native resume still restores the complete supported unfinished workspace.

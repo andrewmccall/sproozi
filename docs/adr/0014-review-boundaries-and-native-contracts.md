@@ -1,4 +1,4 @@
-# 0013: Bound shared gateways and unify trusted native contracts
+# 0014: Bound shared gateways and unify trusted native contracts
 
 Status: accepted, 15 October 2026.
 

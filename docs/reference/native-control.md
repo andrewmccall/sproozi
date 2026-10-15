@@ -32,6 +32,6 @@ terminal state and interaction. Neither directly replaces the current native
 control and exact byte acknowledgement contract. A future AHP host can retain
 the stock PTY with negotiated byte extensions; a future ACP backend changes the
 interaction and must establish native checkpoint identity. See
-[ADR 0013](../adr/0013-review-boundaries-and-native-contracts.md) for the compared
+[ADR 0014](../adr/0014-review-boundaries-and-native-contracts.md) for the compared
 alternatives and concrete revisit criteria. Existing configured integrations
 continue to use [MCP](configured-mcp.md).

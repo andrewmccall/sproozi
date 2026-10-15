@@ -16,8 +16,10 @@ import (
 	"time"
 
 	budgetfile "github.com/andrewmccall/sproozi/internal/budget/file"
+	"github.com/andrewmccall/sproozi/internal/checkpoint"
 	gatewaydocker "github.com/andrewmccall/sproozi/internal/gateway/docker"
 	"github.com/andrewmccall/sproozi/internal/harness"
+	"github.com/andrewmccall/sproozi/internal/project"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/internal/lifecycle"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
@@ -81,18 +83,20 @@ type initial struct {
 // Status names the durable session and separately reports its bounded execution.
 // Session retains the execution journal schema and its original authority bindings.
 type Status struct {
-	ID           string               `json:"id"`
-	ExecutionID  string               `json:"executionId,omitempty"`
-	AllocationID string               `json:"allocationId,omitempty"`
-	Incarnation  *session.Incarnation `json:"incarnation,omitempty"`
-	Harness      harness.NativeKind   `json:"harness"`
-	Ownership    string               `json:"ownership"`
-	Phase        string               `json:"phase"`
-	Placement    string               `json:"placement,omitempty"`
-	InitialStage string               `json:"initialStage"`
-	ThreadID     string               `json:"threadId,omitempty"`
-	Deadline     time.Time            `json:"deadline"`
-	Session      *session.Record      `json:"session,omitempty"`
+	project.Association
+	CheckpointInfo *checkpoint.Metadata `json:"checkpointInfo,omitempty"`
+	ID             string               `json:"id"`
+	ExecutionID    string               `json:"executionId,omitempty"`
+	AllocationID   string               `json:"allocationId,omitempty"`
+	Incarnation    *session.Incarnation `json:"incarnation,omitempty"`
+	Harness        harness.NativeKind   `json:"harness"`
+	Ownership      string               `json:"ownership"`
+	Phase          string               `json:"phase"`
+	Placement      string               `json:"placement,omitempty"`
+	InitialStage   string               `json:"initialStage"`
+	ThreadID       string               `json:"threadId,omitempty"`
+	Deadline       time.Time            `json:"deadline"`
+	Session        *session.Record      `json:"session,omitempty"`
 }
 
 // setVisit reports the current visit or the last retained visit when stopped.
@@ -329,6 +333,9 @@ func (s *Service) retention() error {
 }
 
 func (s *Service) start(ctx context.Context, r initial) (initial, error) {
+	if err := s.executionProjectApproval(r); err != nil {
+		return r, err
+	}
 	observation, err := s.local.Inspect(ctx, r.Launch)
 	if err != nil {
 		return r, err
@@ -390,6 +397,9 @@ func (s *Service) moveExecution(ctx context.Context, id, operationID, destinatio
 	}
 	r, err := s.readInitial(id)
 	if err != nil {
+		return Status{}, err
+	}
+	if err = s.executionProjectApproval(r); err != nil {
 		return Status{}, err
 	}
 	ctx, finish, err := s.graceful.Begin(ctx, id)
@@ -500,7 +510,7 @@ func (s *Service) recoverExecution(ctx context.Context, id string) (Status, erro
 			if err == nil {
 				r, err = s.readInitial(id)
 			}
-		} else {
+		} else if err = s.executionProjectApproval(r); err == nil {
 			r, err = s.importInitial(ctx, r)
 			if err == nil {
 				_, err = s.coordinator.Move(ctx, id, r.OperationID, r.Destination)
@@ -511,6 +521,9 @@ func (s *Service) recoverExecution(ctx context.Context, id string) (Status, erro
 	case initialImported:
 		var record session.Record
 		record, err = s.coordinator.Inspect(id)
+		if err == nil && recoveryActivates(r, record) {
+			err = s.executionProjectApproval(r)
+		}
 		if err == nil && r.Destination != "" && record.CancelOperation == "" && !hasOperation(record, r.OperationID) {
 			_, err = s.coordinator.Move(ctx, id, r.OperationID, r.Destination)
 		} else if err == nil {

@@ -26,10 +26,14 @@ func validateOptions(action string, fs *flag.FlagSet, id, executor string) error
 		if !remote || id != "" {
 			return errors.New("run requires an explicitly configured remote --executor")
 		}
-		for _, option := range []string{"operation", "harness", "repository", "task", "task-file"} {
+		for _, option := range []string{
+			"operation", "harness", "repository", "task", "task-file", "project",
+			"workspace-from", "checkpoint-digest", "revision",
+		} {
 			allowed[option] = true
 		}
 	case home.ActionSessions:
+		allowed["project"] = true
 		if id != "" {
 			return errors.New("sessions accepts no session UUID")
 		}

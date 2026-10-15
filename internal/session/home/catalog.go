@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
+	"github.com/andrewmccall/sproozi/internal/project"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/work"
 	"github.com/google/uuid"
@@ -121,6 +122,12 @@ func (s *Service) readCatalog(id string) (localSession, error) {
 		r.Original.OperationID != r.Operation || r.Source == "" ||
 		(r.Current != "" && !validID(r.Current)) || len(r.Executions) > 256 {
 		return r, errors.New("home: invalid retained session binding")
+	}
+	if r.Original.Project != "" && !project.ValidID(r.Original.Project) {
+		return r, errors.New("home: invalid retained project identity")
+	}
+	if err = project.ValidateReference(r.Original.RepositoryReference); err != nil {
+		return r, err
 	}
 	for _, execution := range r.Executions {
 		if !validID(execution) {
@@ -238,6 +245,10 @@ func (s *Service) catalogArtifact(digest string) ([]byte, error) {
 }
 
 func (s *Service) validateExport(e work.Export, id, operation string) error {
+	if err := validateExportAssociation(e); err != nil {
+		return err
+	}
+
 	stopped := e.Stopped
 	if e.ID != id || e.OperationID != operation || e.Harness != s.config.Local.Harness ||
 		stopped.Launch.Harness != e.Harness || !validID(stopped.Launch.ThreadID) ||
@@ -264,6 +275,9 @@ func (s *Service) validateExport(e work.Export, id, operation string) error {
 	}
 	if meta.SHA256 != stopped.CheckpointDigest || meta.Harness != e.Harness || meta.ThreadID != stopped.Launch.ThreadID {
 		return errors.New("home: exported checkpoint conflicts with stopped source")
+	}
+	if e.CheckpointInfo != nil && !reflect.DeepEqual(*e.CheckpointInfo, meta) {
+		return errors.New("home: exported checkpoint metadata differs from its artifact")
 	}
 	return checkpoint.ValidateContinuity(e.Checkpoint, e.Harness, s.config.Local.InstructionDigest, s.config.Local.MaxCheckpointBytes)
 }
@@ -310,12 +324,16 @@ func (s *Service) Pull(ctx context.Context, id, operation, sourceName string) (S
 	if err != nil {
 		return Status{}, err
 	}
+	if err = s.validateExport(e, id, operation); err != nil {
+		return Status{}, err
+	}
 	if !e.Claimed || e.ID != id || e.OperationID != operation || e.Harness != r.Original.Harness ||
 		!sameExportSource(e, r.Original) {
 		return Status{}, errors.New("home: source ownership acknowledgement conflicts")
 	}
 	r.Claimed = true
 	r.Original.Claimed = true
+	r.Original.Association, r.Original.CheckpointInfo = e.Association, e.CheckpointInfo
 	if err = s.saveCatalog(r); err != nil {
 		return Status{}, err
 	}
@@ -323,6 +341,13 @@ func (s *Service) Pull(ctx context.Context, id, operation, sourceName string) (S
 }
 
 func sameExportSource(a, b work.Export) bool {
+	// Metadata is derived from the exact validated artifact and may be added by
+	// an upgraded owner during interrupted claim replay. Old standalone exports
+	// had no association; descriptive provenance may be added, but never a Project.
+	a.CheckpointInfo, b.CheckpointInfo = nil, nil
+	if b.Association == (project.Association{}) && a.Project == "" {
+		b.Association = a.Association
+	}
 	a.Checkpoint, b.Checkpoint = nil, nil
 	a.Stopped.Checkpoint, b.Stopped.Checkpoint = nil, nil
 	a.Claimed, b.Claimed = false, false
@@ -351,6 +376,10 @@ func (s *Service) Resume(ctx context.Context, id, operation string) (Status, err
 	}
 	if !r.Claimed {
 		return Status{}, errors.New("home: imported session ownership is not acknowledged")
+	}
+	allowances, err := s.projectAllowances(r)
+	if err != nil {
+		return Status{}, err
 	}
 	if previous, exists := r.Operations[operation]; operation == r.Operation || exists && previous.Action != ActionResume {
 		return Status{}, errors.New("home: resume operation intent conflicts")
@@ -390,7 +419,7 @@ func (s *Service) Resume(ctx context.Context, id, operation string) (Status, err
 		AllocationID: uuid.NewString(), Epoch: 1, Placement: s.config.Local.Name,
 		ThreadID: r.Committed.Launch.ThreadID, InstructionDigest: s.config.Local.InstructionDigest,
 		IncludeIgnored: slices.Clone(r.Committed.Launch.IncludeIgnored), Deadline: time.Now().Add(s.duration).UTC(),
-		Allowances: maps.Clone(s.config.Allowances), CheckpointDigest: r.Committed.CheckpointDigest}
+		Allowances: allowances, CheckpointDigest: r.Committed.CheckpointDigest}
 	initial := initial{Version: 1, ProductID: id, Input: checkpointInput, ArtifactDigest: launch.CheckpointDigest, Launch: launch, Stage: initialPreparing}
 	if err = s.retainResumedInitial(initial, data); err != nil {
 		return Status{}, err
@@ -434,9 +463,22 @@ func (s *Service) startResumed(ctx context.Context, r initial) error {
 }
 
 func (s *Service) catalogStatus(r localSession) (Status, error) {
+	var info *checkpoint.Metadata
+	if r.Committed.CheckpointDigest != "" {
+		data, err := s.catalogArtifact(r.Committed.CheckpointDigest)
+		if err != nil {
+			return Status{}, err
+		}
+		meta, err := checkpoint.Inspect(data, s.config.Local.MaxCheckpointBytes)
+		if err != nil {
+			return Status{}, err
+		}
+		info = &meta
+	}
 	if r.Current != "" {
 		status, err := s.executionStatus(r.Current)
 		status.ID = r.ID
+		status.Association, status.CheckpointInfo = r.Original.Association, info
 		return status, err
 	}
 	stage := "importing"
@@ -445,8 +487,11 @@ func (s *Service) catalogStatus(r localSession) (Status, error) {
 		stage = stageRetained
 		ownership = "home"
 	}
-	return Status{ID: r.ID, Ownership: ownership, ExecutionID: r.Committed.Launch.SessionID, AllocationID: r.Committed.Launch.AllocationID, Incarnation: &r.Committed.Incarnation, Placement: r.Committed.Launch.Placement, Phase: stage, Harness: r.Committed.Launch.Harness, InitialStage: stage, ThreadID: r.Committed.Launch.ThreadID,
-		Deadline: r.Committed.Launch.Deadline}, nil
+	return Status{Association: r.Original.Association, CheckpointInfo: info,
+		ID: r.ID, Ownership: ownership, ExecutionID: r.Committed.Launch.SessionID,
+		AllocationID: r.Committed.Launch.AllocationID, Incarnation: &r.Committed.Incarnation,
+		Placement: r.Committed.Launch.Placement, Phase: stage, Harness: r.Committed.Launch.Harness,
+		InitialStage: stage, ThreadID: r.Committed.Launch.ThreadID, Deadline: r.Committed.Launch.Deadline}, nil
 }
 
 func (s *Service) resolveSession(id string) (string, string, error) {
@@ -593,7 +638,7 @@ func (s *Service) Attach(ctx context.Context, id string, input io.Reader, output
 }
 
 // Sessions enumerates compact owner metadata rather than native transcripts.
-func (s *Service) Sessions() ([]Status, error) {
+func (s *Service) Sessions(q work.SessionQuery) ([]Status, error) {
 	dir, err := s.catalogDir()
 	if err != nil {
 		return nil, err
@@ -618,7 +663,9 @@ func (s *Service) Sessions() ([]Status, error) {
 		}
 		// Discovery exposes compact facts; detailed execution journals use Status.
 		status.Session = nil
-		statuses = append(statuses, status)
+		if q.Project == "" || r.Original.Project == q.Project {
+			statuses = append(statuses, status)
+		}
 		for _, execution := range r.Executions {
 			internal[execution] = true
 		}
@@ -641,7 +688,16 @@ func (s *Service) Sessions() ([]Status, error) {
 		}
 		// Discovery exposes compact facts; detailed execution journals use Status.
 		status.Session = nil
-		statuses = append(statuses, status)
+		if q.Project == "" {
+			statuses = append(statuses, status)
+		}
 	}
 	return statuses, nil
+}
+
+func validateExportAssociation(e work.Export) error {
+	if e.Project != "" && !project.ValidID(e.Project) {
+		return errors.New("home: invalid exported project identity")
+	}
+	return project.ValidateReference(e.RepositoryReference)
 }

@@ -16,7 +16,7 @@ Future architecture is kept separate from implemented behaviour and verified gui
 - [Portable native sessions](guides/session-mobility.md), controlled Docker launch, native terminal and fixed Kubernetes profile moves
 - [Retained remote work](guides/portable-workflows.md), remote-first Codex tasks, MCP dispatch, session pull and fresh local continuation; scoped home-ops setup
 - [Portable workflow verification](../hack/verify/portable-workflows/README.md), deterministic native task and real external MCP checks in isolated infrastructure
-- [Recorded retained-work acceptance](demos/verified-portable-workflows.md), native continuity, fresh grants, real MCP transport and unassessed external acceptance
+- [Recorded retained-work acceptance](demos/verified-portable-workflows.md), stock Hermes dispatch, native continuity, fresh grants and real MCP transport; paid contributions and personal home-ops remain unassessed
 - [Model provider authentication](guides/model-provider-auth.md)
 - [Recorded SRE acceptance](demos/verified-sre-demo.md), with scope and limitations
 
@@ -47,6 +47,8 @@ recovery flow has not been verified end to end.
 - [Session commands, identities and work outcomes](reference/session-commands.md)
 - [Native launch and control boundary](reference/native-control.md)
 
+- [Projects and workspace revisions](reference/projects-and-revisions.md), configuration, membership, local approval and exact-revision fresh work
+
 ## Explanations
 
 - [System architecture](explanations/system-architecture.md)
@@ -61,16 +63,17 @@ Architecturally significant changes require an ADR and matching current docs.
 - [0001: MCP through the shared capability gateway](adr/0001-mcp-capabilities-through-shared-gateway.md)
 - [0002: Native CLI harnesses and model protocols](adr/0002-native-cli-harnesses-and-model-protocols.md)
 - [0003: Persistent assistants and retained worker results](adr/0003-persistent-assistants-and-retained-results.md)
-- [0004: Portable sessions across bounded executions, mechanisms proposed](adr/0004-portable-sessions-and-bounded-executions.md)
+- [0004: Portable sessions across bounded executions, controlled round trips verified](adr/0004-portable-sessions-and-bounded-executions.md)
 - [0005: Controlled Docker launch before existing-session adoption](adr/0005-controlled-docker-launch-before-session-adoption.md)
 - [0006: Native CLI and terminal access before GUI mobility](adr/0006-native-cli-and-terminal-before-gui-mobility.md)
-- [0007: Prove the Codex round trip before expanding harness support](adr/0007-codex-round-trip-before-harness-expansion.md)
+- [0007: Codex then Claude round trips, sequencing fulfilled](adr/0007-codex-round-trip-before-harness-expansion.md)
 - [0008: Selected native and Git checkpoints](adr/0008-selected-native-and-git-checkpoints.md)
 - [0009: Runtime backends and sealed accounting](adr/0009-runtime-backends-and-sealed-accounting.md)
 - [0010: Managed session authority and fresh admission](adr/0010-managed-session-authority-and-admission.md)
 - [0011: Native session compatibility and completion](adr/0011-native-session-compatibility-and-completion.md)
 - [0012: Retained work and fresh session continuations](adr/0012-retained-work-and-fresh-session-continuations.md)
-- [0013: Review boundaries and shared native contracts](adr/0013-review-boundaries-and-native-contracts.md)
+- [0014: Review boundaries and shared native contracts](adr/0014-review-boundaries-and-native-contracts.md)
+- [0013: Configured Projects and workspace revisions](adr/0013-configured-projects-and-workspace-revisions.md)
 
 ## Future architecture
 

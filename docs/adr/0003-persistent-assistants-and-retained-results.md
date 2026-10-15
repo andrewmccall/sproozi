@@ -172,6 +172,15 @@ real chat-channel delivery or production reliability.
 
 Current contract: [orchestration reference](../reference/orchestration.md).
 
+## Subsequent decision
+
+[ADR 0012](0012-retained-work-and-fresh-session-continuations.md) adds remote-first
+managed Codex work with retained native conversation and Git state, an explicit
+one-way home claim and freshly authorized local continuation. This ADR continues
+to govern ordinary disposable delegated jobs and their bounded text answers.
+Those answers alone are not portable native sessions. Hermes remains a separately
+trusted persistent coordinator in both workflows.
+
 ## Revisit conditions
 
 Revisit coordinator choice if community-interest evidence changes or native

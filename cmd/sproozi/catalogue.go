@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/harness"
+	"github.com/andrewmccall/sproozi/internal/project"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/home"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
@@ -24,6 +25,7 @@ const ownershipHome = "home"
 // untrusted final answers. Executor labels the catalogue queried; placement
 // separately names the current execution destination.
 type catalogueRow struct {
+	project.Association
 	ID           string               `json:"id"`
 	Executor     string               `json:"executor"`
 	Ownership    string               `json:"ownership"`
@@ -73,11 +75,11 @@ func discoverSessions(ctx context.Context, q options) catalogue {
 			defer cancel()
 			v := discovered{availability: executorAvailability{Executor: name, Availability: availabilityAvailable}}
 			if name == dockerExecutor {
-				response, err := home.Call(requestCtx, q.socket, home.Request{Action: home.ActionSessions})
+				response, err := home.Call(requestCtx, q.socket, home.Request{Action: home.ActionSessions, Project: q.project})
 				v.err = err
 				for _, status := range response.Sessions {
 					row := catalogueRow{
-						ID: status.ID, Executor: name, Ownership: status.Ownership, Phase: status.Phase,
+						Association: status.Association, ID: status.ID, Executor: name, Ownership: status.Ownership, Phase: status.Phase,
 						Harness: status.Harness, ExecutionID: status.ExecutionID, AllocationID: status.AllocationID,
 						Incarnation: status.Incarnation, Placement: status.Placement, ThreadID: status.ThreadID,
 						Deadline: status.Deadline,
@@ -92,7 +94,7 @@ func discoverSessions(ctx context.Context, q options) catalogue {
 					client, err := work.NewClient(fixed)
 					v.err = err
 					if err == nil {
-						rows, err := client.List(requestCtx)
+						rows, err := client.List(requestCtx, work.SessionQuery{Project: q.project})
 						_ = client.Close()
 						v.err = err
 						for _, row := range rows {
@@ -101,7 +103,8 @@ func discoverSessions(ctx context.Context, q options) catalogue {
 								ownership = ownershipHome
 							}
 							v.rows = append(v.rows, catalogueRow{
-								ID: row.ID, Executor: name, Ownership: ownership, Phase: row.Phase, Harness: row.Harness,
+								Association: row.Association, ID: row.ID, Executor: name,
+								Ownership: ownership, Phase: row.Phase, Harness: row.Harness,
 								ExecutionID: row.ExecutionID, AllocationID: row.AllocationID, Incarnation: row.Incarnation,
 								Placement: row.Placement, ThreadID: row.ThreadID, Deadline: row.Deadline,
 							})

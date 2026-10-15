@@ -28,4 +28,4 @@ trust and workload-token boundaries. DNS authorization must not be inferred from
 HTTP destination permissions.
 
 See [security hardening](../../reference/security-hardening.md) and
-[the review-hardening decision](../../adr/0013-review-boundaries-and-native-contracts.md).
+[the review-hardening decision](../../adr/0014-review-boundaries-and-native-contracts.md).
