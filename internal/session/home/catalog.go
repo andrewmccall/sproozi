@@ -436,14 +436,16 @@ func (s *Service) startResumed(ctx context.Context, r initial) error {
 func (s *Service) catalogStatus(r localSession) (Status, error) {
 	if r.Current != "" {
 		status, err := s.executionStatus(r.Current)
-		status.ProductID = r.ID
+		status.ID = r.ID
 		return status, err
 	}
 	stage := "importing"
+	ownership := "source"
 	if r.Claimed {
 		stage = stageRetained
+		ownership = "home"
 	}
-	return Status{ID: r.ID, ProductID: r.ID, InitialStage: stage, ThreadID: r.Committed.Launch.ThreadID,
+	return Status{ID: r.ID, Ownership: ownership, ExecutionID: r.Committed.Launch.SessionID, AllocationID: r.Committed.Launch.AllocationID, Incarnation: &r.Committed.Incarnation, Placement: r.Committed.Launch.Placement, Phase: stage, Harness: r.Committed.Launch.Harness, InitialStage: stage, ThreadID: r.Committed.Launch.ThreadID,
 		Deadline: r.Committed.Launch.Deadline}, nil
 }
 
@@ -519,7 +521,9 @@ func (s *Service) Move(ctx context.Context, id, operation, destination string) (
 		return Status{}, err
 	}
 	status, err := s.moveExecution(ctx, execution, operation, destination)
-	status.ProductID = product
+	if product != "" {
+		status.ID = product
+	}
 	return status, err
 }
 
@@ -530,7 +534,9 @@ func (s *Service) Recover(ctx context.Context, id string) (Status, error) {
 	}
 	defer unlock()
 	status, err := s.recoverExecution(ctx, execution)
-	status.ProductID = product
+	if product != "" {
+		status.ID = product
+	}
 	return status, err
 }
 
@@ -572,7 +578,9 @@ func (s *Service) Cancel(ctx context.Context, id, operation string) (Status, err
 		}
 	}
 	status, err := s.cancelExecution(ctx, execution, operation)
-	status.ProductID = product
+	if product != "" {
+		status.ID = product
+	}
 	return status, err
 }
 
@@ -608,6 +616,8 @@ func (s *Service) Sessions() ([]Status, error) {
 		if readErr != nil {
 			return nil, readErr
 		}
+		// Discovery exposes compact facts; detailed execution journals use Status.
+		status.Session = nil
 		statuses = append(statuses, status)
 		for _, execution := range r.Executions {
 			internal[execution] = true
@@ -629,6 +639,8 @@ func (s *Service) Sessions() ([]Status, error) {
 		if readErr != nil {
 			return nil, readErr
 		}
+		// Discovery exposes compact facts; detailed execution journals use Status.
+		status.Session = nil
 		statuses = append(statuses, status)
 	}
 	return statuses, nil

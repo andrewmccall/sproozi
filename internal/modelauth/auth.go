@@ -17,20 +17,23 @@ import (
 )
 
 const (
-	APIKeyMode        = "api_key"
-	ChatGPTMode       = "chatgpt"
-	Issuer            = "https://auth.openai.com"
-	Resource          = "https://api.openai.com/v1"
-	TokenEndpoint     = Issuer + "/api/accounts/oauth/token"
-	PlanScope         = "chatgpt.tokens.use.direct"
-	clientIDField     = "client_id"
-	refreshTokenField = "refresh_token"
-	nonceField        = "nonce"
-	dynamicClientID   = "dynamic_agent_client"
-	resourceField     = "resource"
-	stateField        = "state"
-	codeField         = "code"
-	errorField        = "error"
+	APIKeyMode               = "api_key"
+	chatGPTAccountHeader     = "ChatGPT-Account-ID"
+	openAIOrganizationHeader = "OpenAI-Organization"
+	openAIProjectHeader      = "OpenAI-Project"
+	ChatGPTMode              = "chatgpt"
+	Issuer                   = "https://auth.openai.com"
+	Resource                 = "https://api.openai.com/v1"
+	TokenEndpoint            = Issuer + "/api/accounts/oauth/token"
+	PlanScope                = "chatgpt.tokens.use.direct"
+	clientIDField            = "client_id"
+	refreshTokenField        = "refresh_token"
+	nonceField               = "nonce"
+	dynamicClientID          = "dynamic_agent_client"
+	resourceField            = "resource"
+	stateField               = "state"
+	codeField                = "code"
+	errorField               = "error"
 )
 
 // Authenticator authenticates an already-authorized request to the provider.
@@ -61,8 +64,15 @@ func (a APIKey) Authorize(r *http.Request) error {
 	if strings.TrimSpace(a.Key) == "" || strings.ContainsAny(a.Key, "\r\n") {
 		return errors.New("provider API key is unavailable")
 	}
+	removeOpenAIAccountHeaders(r.Header)
 	r.Header.Set("Authorization", "Bearer "+a.Key)
 	return nil
+}
+
+func removeOpenAIAccountHeaders(headers http.Header) {
+	for _, header := range []string{openAIOrganizationHeader, openAIProjectHeader, chatGPTAccountHeader} {
+		headers.Del(header)
+	}
 }
 
 // Session is a protected SIWC credential record, not a Codex auth.json file.
@@ -124,9 +134,8 @@ func (*ChatGPT) Mode() string { return ChatGPTMode }
 
 func (a *ChatGPT) Authorize(r *http.Request) error {
 	// The administrator's OAuth session selects the account, not a workload.
-	for _, header := range []string{"Authorization", "OpenAI-Organization", "OpenAI-Project", "ChatGPT-Account-ID"} {
-		r.Header.Del(header)
-	}
+	r.Header.Del("Authorization")
+	removeOpenAIAccountHeaders(r.Header)
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	s, err := a.store.Load(r.Context())

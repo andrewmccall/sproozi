@@ -45,36 +45,23 @@ func addManagedNativeContract(ctx context.Context, kube client.Client, run *api.
 		// UUID is bound, so controller retries never rewrite immutable config.
 		thread = ""
 	}
+	env, err := harness.NativeBaseEnvironment(binding.Harness, string(run.UID))
+	if err != nil {
+		return err
+	}
+	clients, err := harness.NativeClients(binding.Harness, run.Spec.Capabilities, runtime.Spec.GatewayEndpoint)
+	if err != nil {
+		return err
+	}
 	launch := harness.NativeLaunch{Harness: binding.Harness, Deadline: binding.OriginalDeadline, ThreadID: thread, Task: binding.Task,
-		Instructions: template.Spec.Instructions, InstructionDigest: binding.InstructionDigest, RolloutMaxBytes: 64 << 20,
-		Env: []string{"PATH=/opt/git/bin:/usr/local/bin:/usr/bin:/bin", "TERM=xterm-256color", "LANG=C.UTF-8",
-			"SPROOZI_EXECUTION_UID=" + string(run.UID),
-			nativeAPIKey(binding.Harness) + "=" + clientAuthPlaceholder, "GH_TOKEN=" + clientAuthPlaceholder, "GH_PROMPT_DISABLED=1",
-			"GIT_TERMINAL_PROMPT=0"},
+		Instructions: template.Spec.Instructions, InstructionDigest: binding.InstructionDigest, RolloutMaxBytes: harness.NativeRolloutMaxBytes,
+		Env: env, ClientConfig: clients,
 		Gateway: &harness.NativeGateway{Endpoint: runtime.Spec.GatewayEndpoint,
 			TokenPath: harness.NativeGatewayTokenPath, TrustBundle: harness.NativeGatewayTrustBundle}}
-	clientConfig := &harness.NativeClientConfig{}
-	for _, capability := range run.Spec.Capabilities {
-		if capability == api.CapabilityKubernetesRead {
-			clientConfig.Kubernetes = true
-		}
-		if name, ok := capability.MCPServerName(); ok {
-			clientConfig.MCPServers = append(clientConfig.MCPServers, name)
-		}
-	}
-	if len(clientConfig.MCPServers) != 0 {
-		clientConfig.MCPGateway = runtime.Spec.GatewayEndpoint
-	}
-	if clientConfig.Kubernetes || len(clientConfig.MCPServers) != 0 {
-		if err := clientConfig.Validate(binding.Harness); err != nil {
-			return err
-		}
-		launch.ClientConfig = clientConfig
-	}
 	if native := runtime.Spec.ClientConfig.NativeSession; native != nil {
 		launch.Model, launch.Options = native.Model, slices.Clone(native.Options)
 	}
-	if err = launch.Gateway.Validate(launch.Env); err != nil {
+	if err = launch.Validate(time.Now()); err != nil {
 		return err
 	}
 	document, err := json.Marshal(launch)
@@ -173,11 +160,4 @@ func BuildManagedPodSpec(run *api.AgentRun, rt *api.AgentRuntime, binding *place
 		}
 	}
 	return pod, nil
-}
-
-func nativeAPIKey(kind harness.NativeKind) string {
-	if kind == harness.NativeClaude {
-		return "ANTHROPIC_API_KEY"
-	}
-	return openAIAPIKey
 }

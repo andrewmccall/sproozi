@@ -71,9 +71,11 @@ def main():
     view = tool("sproozi_run", intent, 2)
     report["sessionId"] = view["id"]
     report["executionId"] = view["executionId"]
+    report["allocationId"] = view["allocationId"]
     save()
     replay = tool("sproozi_run", intent, 3)
-    check(replay["id"] == view["id"] and replay["executionId"] == view["executionId"], "Submission replay launched another execution")
+    check(replay["id"] == view["id"] and replay["executionId"] == view["executionId"] and
+          replay["allocationId"] == view["allocationId"], "Submission replay launched another execution/allocation")
     deadline = time.monotonic() + 240
     number = 4
     while time.monotonic() < deadline:
@@ -110,7 +112,9 @@ def main():
             number += 1
             check(after["phase"] == "home-owned", "Remote owner did not commit exclusive handoff")
             resumed = command("resume", view["id"], "--detach")
-            check(resumed["productId"] == view["id"] and resumed["threadId"] == current["threadId"], "Resume lost product/native identity")
+            check(resumed["id"] == view["id"] and resumed["threadId"] == current["threadId"], "Resume lost product/native identity")
+            check(resumed["executionId"] != view["executionId"] and resumed["allocationId"] != view["allocationId"],
+                  "Resume did not create a fresh bounded execution/allocation")
             check(resumed["deadline"] > current["deadline"], "Later local execution did not receive a fresh deadline")
             report["local"] = resumed
             report["steps"].append("Claimed checkpoint resumed in local Docker under a fresh execution identity and deadline")

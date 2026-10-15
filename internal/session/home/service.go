@@ -17,6 +17,7 @@ import (
 
 	budgetfile "github.com/andrewmccall/sproozi/internal/budget/file"
 	gatewaydocker "github.com/andrewmccall/sproozi/internal/gateway/docker"
+	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/internal/lifecycle"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
@@ -77,14 +78,40 @@ type initial struct {
 	ProductID      string               `json:"productId,omitempty"`
 }
 
-// Status is a trusted journal snapshot. It contains no native history or token.
+// Status names the durable session and separately reports its bounded execution.
+// Session retains the execution journal schema and its original authority bindings.
 type Status struct {
-	ID           string          `json:"id"`
-	ProductID    string          `json:"productId,omitempty"`
-	InitialStage string          `json:"initialStage"`
-	ThreadID     string          `json:"threadId,omitempty"`
-	Deadline     time.Time       `json:"deadline"`
-	Session      *session.Record `json:"session,omitempty"`
+	ID           string               `json:"id"`
+	ExecutionID  string               `json:"executionId,omitempty"`
+	AllocationID string               `json:"allocationId,omitempty"`
+	Incarnation  *session.Incarnation `json:"incarnation,omitempty"`
+	Harness      harness.NativeKind   `json:"harness"`
+	Ownership    string               `json:"ownership"`
+	Phase        string               `json:"phase"`
+	Placement    string               `json:"placement,omitempty"`
+	InitialStage string               `json:"initialStage"`
+	ThreadID     string               `json:"threadId,omitempty"`
+	Deadline     time.Time            `json:"deadline"`
+	Session      *session.Record      `json:"session,omitempty"`
+}
+
+// setVisit reports the current visit or the last retained visit when stopped.
+func (s *Status) setVisit(r session.Record) {
+	if r.Phase != "" {
+		s.Phase = string(r.Phase)
+	}
+	var visit *session.Visit
+	if r.Active != nil {
+		visit = r.Active
+	} else if len(r.Visits) > 0 {
+		visit = &r.Visits[len(r.Visits)-1]
+	}
+	if visit != nil {
+		s.Placement = visit.Launch.Placement
+		s.AllocationID = visit.Launch.AllocationID
+		inc := visit.Incarnation
+		s.Incarnation = &inc
+	}
 }
 
 func validID(id string) bool {
@@ -179,15 +206,24 @@ func (s *Service) writeInitial(name string, data []byte) error {
 	return atomicWrite(s.initialDir, name, data)
 }
 
+func initialStatus(r initial) Status {
+	out := Status{ID: r.Launch.SessionID, ExecutionID: r.Launch.SessionID, AllocationID: r.Launch.AllocationID, Incarnation: r.Incarnation, Harness: r.Launch.Harness, Ownership: "home", Phase: r.Stage, Placement: r.Launch.Placement, InitialStage: r.Stage, ThreadID: r.Launch.ThreadID, Deadline: r.Launch.Deadline}
+	if r.ProductID != "" {
+		out.ID = r.ProductID
+	}
+	return out
+}
+
 func (s *Service) status(r initial) (Status, error) {
-	out := Status{ID: r.Launch.SessionID, InitialStage: r.Stage, ThreadID: r.Launch.ThreadID, Deadline: r.Launch.Deadline}
+	out := initialStatus(r)
 	if r.Stage == initialImported {
-		record, err := s.coordinator.Inspect(out.ID)
+		record, err := s.coordinator.Inspect(r.Launch.SessionID)
 		if err != nil {
 			return out, err
 		}
 		out.Session = &record
 		out.ThreadID = record.ThreadID
+		out.setVisit(record)
 	}
 	return out, nil
 }
@@ -372,7 +408,10 @@ func (s *Service) moveExecution(ctx context.Context, id, operationID, destinatio
 		return Status{}, err
 	}
 	record, err := s.coordinator.Move(ctx, id, operationID, destination)
-	out := Status{ID: id, InitialStage: r.Stage, ThreadID: record.ThreadID, Deadline: r.Launch.Deadline, Session: &record}
+	out := initialStatus(r)
+	out.ThreadID = record.ThreadID
+	out.Session = &record
+	out.setVisit(record)
 	return out, err
 }
 
@@ -544,7 +583,9 @@ func (s *Service) cancelExecution(ctx context.Context, id, operationID string) (
 	}
 	if r.Stage == initialImported {
 		record, cancelErr := s.coordinator.Cancel(ctx, id, operationID)
-		out := Status{ID: id, InitialStage: r.Stage, ThreadID: r.Launch.ThreadID, Deadline: r.Launch.Deadline, Session: &record}
+		out := initialStatus(r)
+		out.Session = &record
+		out.setVisit(record)
 		return out, cancelErr
 	}
 	if r.Stage == initialCancelling || r.Stage == initialCancelled {

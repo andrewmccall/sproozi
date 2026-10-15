@@ -73,6 +73,25 @@ These constraints follow the provider's
 
 ## Protocol and budgets
 
+OpenAI admission accepts `GET /v1/models` and inference through
+`POST /v1/responses` or `POST /v1/chat/completions`. Query strings, an explicit
+empty query and escaped-path variants are rejected. Bodyless model discovery
+does not require a pricing row. Both API-key and ChatGPT authentication remove
+workload `OpenAI-Organization`, `OpenAI-Project` and `ChatGPT-Account-ID` headers.
+The configured credential selects provider identity; use an appropriately scoped
+API key rather than worker-supplied account selectors.
+
+Cost-bounded API-key inference requires the exact requested model's positive
+administrator input, cached-input and output rates before forwarding. Omitted
+`service_tier` becomes `default`; explicit nondefault tiers are refused so the
+gateway's standard token rates do not knowingly price a different tier.
+Token-only requests retain their existing behavior without a pricing requirement.
+The [pricing format](../reference/required-secrets-and-config.md#model-pricing-format)
+describes the table. The table still omits non-token billing, and the API-key
+route has no complete billable-field allowlist. Provider-hosted tool, storage and
+image/audio charges require separate coverage; native client-executed tools keep
+their existing request semantics.
+
 ChatGPT mode uses the public `https://api.openai.com/v1/responses` endpoint,
 not a ChatGPT backend endpoint. Inference requires `store:false`, `stream:true`
 and an input array. Unsupported request fields are rejected, not silently
@@ -96,8 +115,8 @@ ceiling: the preview does not accept `max_output_tokens`, and an unexpectedly
 large response can consume tokens before the gateway verifies usage.
 
 To switch back to API-key billing, select `api_key` in
-`bash hack/demo/configure.sh`. API-key mode retains existing token and dollar
-budget behavior. Authentication mode is not selectable by an AgentRun.
+`bash hack/demo/configure.sh`. API-key mode uses the preflight pricing and standard-tier checks above and
+retains the documented reservation/settlement limits. Authentication mode is not selectable by an AgentRun.
 
 ## Verification status
 

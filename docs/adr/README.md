@@ -48,3 +48,5 @@ old record superseded and link both records.
 - [0010: Managed session authority and fresh admission](0010-managed-session-authority-and-admission.md)
 - [0011: Native session compatibility and completion](0011-native-session-compatibility-and-completion.md)
 - [0012: Retained work and fresh session continuations](0012-retained-work-and-fresh-session-continuations.md)
+
+- [0013: Bound shared gateways and unify trusted native contracts](0013-review-boundaries-and-native-contracts.md)

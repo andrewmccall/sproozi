@@ -74,7 +74,7 @@ type proxySession struct {
 	serveDone chan struct{}
 }
 
-func startProxySession(t *testing.T, g *Gateway, auth string, serverName string) proxySession {
+func startProxySession(t *testing.T, g *Gateway, auth string) proxySession {
 	t.Helper()
 	serverConn, clientConn := net.Pipe()
 	request := &http.Request{Method: http.MethodConnect, Host: testServiceAuthority, URL: &url.URL{Host: testServiceAuthority}, Header: http.Header{proxyAuthorizationHeader: []string{auth}}}
@@ -88,7 +88,7 @@ func startProxySession(t *testing.T, g *Gateway, auth string, serverName string)
 	if _, err := clientReader.ReadString('\n'); err != nil {
 		t.Fatal(err)
 	}
-	tlsClient := tls.Client(&bufferedConn{Conn: clientConn, reader: clientReader}, &tls.Config{InsecureSkipVerify: true, ServerName: serverName, MinVersion: tls.VersionTLS12})
+	tlsClient := tls.Client(&bufferedConn{Conn: clientConn, reader: clientReader}, &tls.Config{InsecureSkipVerify: true, ServerName: testServiceHost, MinVersion: tls.VersionTLS12})
 	if err := tlsClient.Handshake(); err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ func TestGatewayProxyTokenModes(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			s := startProxySession(t, g, tc.auth, testServiceHost)
+			s := startProxySession(t, g, tc.auth)
 			defer func() { _ = s.client.Close() }()
 			if _, err := io.WriteString(s.client, "GET / HTTP/1.1\r\nHost: service.test\r\nAuthorization: Bearer upstream\r\nProxy-Authorization: Basic leaked\r\nConnection: close\r\n\r\n"); err != nil {
 				t.Fatal(err)
@@ -260,7 +260,7 @@ func TestGatewaySessionLifetimeClosesConnection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := startProxySession(t, g, testProxyAuthorization, testServiceHost)
+	s := startProxySession(t, g, testProxyAuthorization)
 	defer func() { _ = s.client.Close() }()
 	_ = s.client.SetReadDeadline(time.Now().Add(2 * time.Second))
 	buf := make([]byte, 1)
@@ -289,7 +289,7 @@ func TestGatewayRevocationClosesActiveSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := startProxySession(t, g, testProxyAuthorization, testServiceHost)
+	s := startProxySession(t, g, testProxyAuthorization)
 	mu.Lock()
 	revoked = true
 	mu.Unlock()

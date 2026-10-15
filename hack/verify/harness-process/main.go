@@ -12,6 +12,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -44,6 +45,7 @@ const modelFlag = "--model"
 const fixtureName = "fixture"
 const claudeHarness = "claude-code"
 const successScenario = "success"
+const deniedScenario = "denied"
 
 const answer = "SPROOZI_FIXTURE_COMPLETE"
 const providerKey = "fixture-gateway-provider-key"
@@ -60,9 +62,9 @@ type result struct {
 	ToolCalls              int    `json:"toolCalls"`
 	ReceivedToolResult     bool   `json:"receivedToolResult"`
 	AuthenticatedSessions  int    `json:"authenticatedSessions"`
-	UnitsUsed              int64  `json:"unitsUsed"`
-	ReservedUnits          int64  `json:"reservedUnits"`
-	ToolUnitsUsed          int64  `json:"toolUnitsUsed"`
+	UnitsUsed              *int64 `json:"unitsUsed"`
+	ReservedUnits          *int64 `json:"reservedUnits"`
+	ToolUnitsUsed          *int64 `json:"toolUnitsUsed"`
 	MissingIdentityDenied  bool   `json:"missingIdentityDenied"`
 	UnknownAuthorityDenied bool   `json:"unknownAuthorityDenied"`
 	Output                 string `json:"output"`
@@ -94,7 +96,7 @@ func main() {
 			modes = append(modes, true)
 		}
 		for _, supervised := range modes {
-			for _, scenario := range []string{successScenario, "denied"} {
+			for _, scenario := range []string{successScenario, deniedScenario} {
 				r, err := run(name, scenario, *withTool, supervised)
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
@@ -102,14 +104,14 @@ func main() {
 				}
 				results = append(results, r)
 				passed = passed && r.Passed
-				fmt.Printf("%s %s %s: passed=%v exit=%d model_requests=%d tool_calls=%d units=%d\n",
+				fmt.Printf("%s %s %s: passed=%v exit=%d model_requests=%d tool_calls=%d units=%s\n",
 					name, r.Mode,
 					scenario,
 					r.Passed,
 					r.ExitCode,
 					r.ModelRequests,
 					r.ToolCalls,
-					r.UnitsUsed)
+					displayUnits(r.UnitsUsed))
 			}
 		}
 	}
@@ -172,7 +174,7 @@ func run(selected, scenario string, withTool, supervised bool) (result, error) {
 	tracker := budget.NewTrackerWithLedger(ledger)
 	capabilities := []api.CapabilityKind{api.CapabilityModelInference, api.CapabilityKind("mcp.fixture")}
 	runCaps := capabilities
-	if scenario == "denied" {
+	if scenario == deniedScenario {
 		runCaps = []api.CapabilityKind{api.CapabilityKind("mcp.fixture")}
 	}
 	identity := &gateway.ExecutionGrant{
@@ -549,6 +551,16 @@ func clientCommand(directory, selected string, withTool bool, env []string) ([]s
 	return env, args, nil
 }
 
+// Absent counters remain null: rejection before admission does not create a
+// budget account or establish a sealed zero-usage receipt. Other lookup failures
+// remain failures, even when the local provider observed no requests.
+func displayUnits(units *int64) string {
+	if units == nil {
+		return "absent"
+	}
+	return fmt.Sprint(*units)
+}
+
 func inspectResult(out result,
 	f *fixture,
 	ledger *budget.MemoryLedger,
@@ -564,36 +576,22 @@ func inspectResult(out result,
 	out.AuthenticatedSessions = f.sessions
 	violations := append([]string{}, f.violations...)
 	f.mu.Unlock()
-	state, err := ledger.State(context.Background(), budget.AccountKey("fixture-run/model.inference"))
+	var err error
+	out, err = observeAccounting(out, ledger)
 	if err != nil {
-		return out, fmt.Errorf("observe model accounting: %w", err)
+		return out, err
 	}
-	out.UnitsUsed = state.UnitsUsed
-	out.ReservedUnits = state.ReservedUnits
-	toolState, err := ledger.State(context.Background(), budget.AccountKey("fixture-run/mcp.fixture"))
-	if err != nil {
-		return out, fmt.Errorf("observe tool accounting: %w", err)
-	}
-	out.ToolUnitsUsed = toolState.UnitsUsed
 	completed, response := completion(selected, out)
 	if scenario == successScenario {
-		out.Passed = processErr == nil &&
-			!out.TimedOut &&
-			completed &&
-			response == answer &&
-			out.ModelRequests > 0 &&
-			out.AuthenticatedSessions > 0 &&
-			out.UnitsUsed == int64(15*out.ModelRequests) &&
-			out.ReservedUnits == 0 &&
-			(!withTool ||
-				(out.ToolCalls == 1 &&
-					out.ToolUnitsUsed == 1 && out.ReceivedToolResult)) &&
-			len(violations) == 0
+		out.Passed = processErr == nil && !out.TimedOut && completed && response == answer &&
+			out.AuthenticatedSessions > 0 && successfulUsage(out, withTool) && len(violations) == 0
 	} else {
 		out.Passed = !out.TimedOut &&
 			!completed &&
 			out.ModelRequests == 0 &&
-			out.UnitsUsed == 0 &&
+			(out.UnitsUsed == nil || *out.UnitsUsed == 0) &&
+			(out.ReservedUnits == nil || *out.ReservedUnits == 0) &&
+			out.ToolCalls == 0 && (out.ToolUnitsUsed == nil || *out.ToolUnitsUsed == 0) &&
 			out.AuthenticatedSessions > 0 &&
 			(strings.Contains(out.Output+out.SessionExport,
 				"capability_not_granted") ||
@@ -617,6 +615,35 @@ func inspectResult(out result,
 				out.Output)
 	}
 	return out, nil
+}
+
+func observeAccounting(out result, ledger *budget.MemoryLedger) (result, error) {
+	state, err := ledger.State(context.Background(), budget.AccountKey("fixture-run/model.inference"))
+	if err != nil && (out.Scenario != deniedScenario || out.ModelRequests != 0 ||
+		!errors.Is(err, budget.ErrAccountNotFound)) {
+		return out, fmt.Errorf("observe model accounting: %w", err)
+	}
+	if err == nil {
+		out.UnitsUsed = &state.UnitsUsed
+		out.ReservedUnits = &state.ReservedUnits
+	}
+	toolState, err := ledger.State(context.Background(), budget.AccountKey("fixture-run/mcp.fixture"))
+	if err != nil && (out.ToolCalls != 0 || !errors.Is(err, budget.ErrAccountNotFound)) {
+		return out, fmt.Errorf("observe tool accounting: %w", err)
+	}
+	if err == nil {
+		out.ToolUnitsUsed = &toolState.UnitsUsed
+	}
+	return out, nil
+}
+
+func successfulUsage(out result, withTool bool) bool {
+	modelUsage := out.ModelRequests > 0 && out.UnitsUsed != nil &&
+		*out.UnitsUsed == int64(15*out.ModelRequests) &&
+		out.ReservedUnits != nil && *out.ReservedUnits == 0
+	tool := !withTool || (out.ToolCalls == 1 && out.ToolUnitsUsed != nil &&
+		*out.ToolUnitsUsed == 1 && out.ReceivedToolResult)
+	return modelUsage && tool
 }
 
 func recoveredAnswer(output string) string {

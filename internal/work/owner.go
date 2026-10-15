@@ -24,6 +24,7 @@ import (
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/session"
+	"github.com/andrewmccall/sproozi/internal/session/profile"
 	"github.com/andrewmccall/sproozi/internal/workspace"
 	"github.com/google/uuid"
 )
@@ -80,17 +81,20 @@ type Submit struct {
 }
 
 type View struct {
-	ID               string             `json:"id"`
-	ExecutionID      string             `json:"executionId"`
-	Harness          harness.NativeKind `json:"harness"`
-	Repository       string             `json:"repository"`
-	Phase            string             `json:"phase"`
-	ThreadID         string             `json:"threadId,omitempty"`
-	Deadline         time.Time          `json:"deadline"`
-	CheckpointDigest string             `json:"checkpointDigest,omitempty"`
-	Result           string             `json:"result,omitempty"`
-	ResultTruncated  bool               `json:"resultTruncated,omitempty"`
-	Problem          string             `json:"problem,omitempty"`
+	ID               string               `json:"id"`
+	ExecutionID      string               `json:"executionId"`
+	AllocationID     string               `json:"allocationId"`
+	Placement        string               `json:"placement"`
+	Incarnation      *session.Incarnation `json:"incarnation,omitempty"`
+	Harness          harness.NativeKind   `json:"harness"`
+	Repository       string               `json:"repository"`
+	Phase            string               `json:"phase"`
+	ThreadID         string               `json:"threadId,omitempty"`
+	Deadline         time.Time            `json:"deadline"`
+	CheckpointDigest string               `json:"checkpointDigest,omitempty"`
+	Result           string               `json:"result,omitempty"`
+	ResultTruncated  bool                 `json:"resultTruncated,omitempty"`
+	Problem          string               `json:"problem,omitempty"`
 }
 
 // Export is transferred over authenticated owner transport. Its source receipt
@@ -208,7 +212,7 @@ func (o *Owner) path(id, suffix string) string { return filepath.Join(o.config.D
 func (o *Owner) read(id string) (record, error) {
 	var r record
 	if !canonicalID(id) {
-		return r, errors.New("work: canonical session UUID required")
+		return r, &profile.Rejection{Code: profile.CodeInvalid}
 	}
 	p := o.path(id, ".json")
 	if err := private(p, false); err != nil {
@@ -272,11 +276,17 @@ func (o *Owner) Submit(ctx context.Context, q Submit) (View, error) {
 	if ctx.Err() != nil {
 		return View{}, ctx.Err()
 	}
-	if !canonicalID(q.RequestID) || q.Harness != o.config.Harness || q.Executor != o.config.Placement || strings.TrimSpace(q.Task) == "" || len(q.Task) > 16<<10 || !utf8.ValidString(q.Task) || strings.ContainsRune(q.Task, '\x00') {
-		return View{}, errors.New("work: invalid or unsupported task intent")
+	if !canonicalID(q.RequestID) || strings.TrimSpace(q.Task) == "" || len(q.Task) > 16<<10 || !utf8.ValidString(q.Task) || strings.ContainsRune(q.Task, '\x00') {
+		return View{}, &profile.Rejection{Code: profile.CodeInvalid}
+	}
+	if q.Harness != o.config.Harness {
+		return View{}, &profile.Rejection{Code: profile.CodeUnsupported}
+	}
+	if q.Executor != o.config.Placement {
+		return View{}, &profile.Rejection{Code: profile.CodeDenied}
 	}
 	if _, ok := o.config.Repositories[q.Repository]; !ok {
-		return View{}, errors.New("work: repository not approved")
+		return View{}, &profile.Rejection{Code: profile.CodeDenied}
 	}
 	id := o.sessionID(q.RequestID)
 	b, _ := json.Marshal(q)
@@ -284,7 +294,7 @@ func (o *Owner) Submit(ctx context.Context, q Submit) (View, error) {
 	// Submission replay is a metadata read, not a wait for the active native turn.
 	if current, readErr := o.read(id); readErr == nil {
 		if current.IntentDigest != digest {
-			return View{}, errors.New("work: submission intent conflicts")
+			return View{}, &profile.Rejection{Code: profile.CodeConflict}
 		}
 		return view(current), nil
 	} else if !os.IsNotExist(readErr) {
@@ -295,7 +305,7 @@ func (o *Owner) Submit(ctx context.Context, q Submit) (View, error) {
 	r, err := o.read(id)
 	if err == nil {
 		if r.IntentDigest != digest {
-			return View{}, errors.New("work: submission intent conflicts")
+			return View{}, &profile.Rejection{Code: profile.CodeConflict}
 		}
 		return view(r), nil
 	}
@@ -307,7 +317,7 @@ func (o *Owner) Submit(ctx context.Context, q Submit) (View, error) {
 		return View{}, err
 	}
 	if len(entries) > 1024 {
-		return View{}, errors.New("work: catalogue retention limit reached")
+		return View{}, &profile.Rejection{Code: profile.CodeUnavailable}
 	}
 	r = record{Version: 1, Intent: q, IntentDigest: digest, Phase: phasePending, Launch: session.Launch{Harness: q.Harness, SessionID: id, OperationID: q.RequestID, AllocationID: uuid.NewString(), Epoch: 1, Placement: q.Executor, InstructionDigest: o.config.InstructionDigest, Deadline: time.Now().Add(o.config.MaxDuration).UTC(), Allowances: maps.Clone(o.config.Allowances), Task: q.Task}}
 	if err = o.save(r); err != nil {
@@ -317,7 +327,7 @@ func (o *Owner) Submit(ctx context.Context, q Submit) (View, error) {
 	return view(r), nil
 }
 func view(r record) View {
-	v := View{ID: r.Launch.SessionID, ExecutionID: r.Launch.AllocationID, Harness: r.Launch.Harness, Repository: r.Intent.Repository, Phase: r.Phase, Deadline: r.Launch.Deadline, Result: r.Result, ResultTruncated: r.ResultTruncated, Problem: r.Problem}
+	v := View{ID: r.Launch.SessionID, ExecutionID: r.Launch.SessionID, AllocationID: r.Launch.AllocationID, Placement: r.Launch.Placement, Incarnation: r.Incarnation, Harness: r.Launch.Harness, Repository: r.Intent.Repository, Phase: r.Phase, Deadline: r.Launch.Deadline, Result: r.Result, ResultTruncated: r.ResultTruncated, Problem: r.Problem}
 	if r.Stopped != nil {
 		v.ThreadID = r.Stopped.Launch.ThreadID
 		v.CheckpointDigest = r.Stopped.CheckpointDigest
@@ -326,6 +336,9 @@ func view(r record) View {
 }
 func (o *Owner) Info(_ context.Context, id string) (View, error) {
 	r, e := o.read(id)
+	if os.IsNotExist(e) {
+		return View{}, &profile.Rejection{Code: profile.CodeInvalid}
+	}
 	return view(r), e
 }
 func (o *Owner) List(ctx context.Context) ([]View, error) {
@@ -390,7 +403,7 @@ func (o *Owner) drive(ctx context.Context, id string) {
 			o.abort(o.ctx, latest)
 			return
 		}
-		latest.Problem = "Execution requires recovery; no writer or usage assumption was made"
+		latest.Problem = outcomeMessage(err) + "; inspect status and recover this session; writer stop and usage remain unconfirmed"
 		latest.Progress = latest.Phase
 		latest.Phase = phaseUnknown
 		_ = o.save(latest)
@@ -527,27 +540,30 @@ func (o *Owner) execute(ctx context.Context, r *record) error {
 func ValidateExport(e Export, max int64) error {
 	s := e.Stopped
 	if !canonicalID(e.ID) || s.Launch.SessionID != e.ID || e.Harness != s.Launch.Harness || !s.ActualStopped || s.Receipt == nil || s.Receipt.Incarnation != s.Incarnation || s.Receipt.Launch.ThreadID != s.Launch.ThreadID || len(s.Receipt.Usage) != len(s.Launch.Allowances) {
-		return errors.New("work: trusted writer fence and complete accounting required")
+		return &profile.Rejection{Code: profile.CodeUnavailable}
 	}
 	for cap, a := range s.Launch.Allowances {
 		u, ok := s.Receipt.Usage[cap]
 		if !ok || u.Units < 0 || u.CostMicros < 0 || a.Units.Bounded && u.Units > a.Units.Value || a.CostMicros.Bounded && u.CostMicros > a.CostMicros.Value {
-			return errors.New("work: invalid source usage")
+			return &profile.Rejection{Code: profile.CodeUnavailable}
 		}
 	}
 	a, _ := json.Marshal(s.Launch)
 	b, _ := json.Marshal(s.Receipt.Launch)
 	if string(a) != string(b) {
-		return errors.New("work: source receipt intent differs")
+		return &profile.Rejection{Code: profile.CodeUnavailable}
 	}
 	meta, err := checkpoint.Inspect(e.Checkpoint, max)
 	if err != nil {
-		return err
+		return &profile.Rejection{Code: profile.CodeUnsupported}
 	}
 	if meta.Harness != e.Harness || meta.ThreadID != s.Launch.ThreadID || meta.SHA256 != s.CheckpointDigest {
-		return errors.New("work: retained checkpoint binding differs")
+		return &profile.Rejection{Code: profile.CodeUnsupported}
 	}
-	return checkpoint.ValidateContinuity(e.Checkpoint, e.Harness, s.Launch.InstructionDigest, max)
+	if checkpoint.ValidateContinuity(e.Checkpoint, e.Harness, s.Launch.InstructionDigest, max) != nil {
+		return &profile.Rejection{Code: profile.CodeUnsupported}
+	}
+	return nil
 }
 func (o *Owner) BeginExport(ctx context.Context, id, operation string) (Export, error) {
 	return o.export(ctx, id, operation, "", false)
@@ -557,7 +573,7 @@ func (o *Owner) Claim(ctx context.Context, id, operation, digest string) (Export
 }
 func (o *Owner) export(ctx context.Context, id, operation, digest string, claim bool) (Export, error) {
 	if !canonicalID(id) || !canonicalID(operation) {
-		return Export{}, errors.New("work: canonical transfer UUIDs required")
+		return Export{}, &profile.Rejection{Code: profile.CodeInvalid}
 	}
 	if ctx.Err() != nil {
 		return Export{}, ctx.Err()
@@ -569,7 +585,7 @@ func (o *Owner) export(ctx context.Context, id, operation, digest string, claim 
 		return Export{}, err
 	}
 	if current.Phase != phaseRetained && current.Phase != phaseExporting && current.Phase != phaseHomeOwned {
-		return Export{}, errors.New("work: completed retained execution required")
+		return Export{}, &profile.Rejection{Code: profile.CodeConflict}
 	}
 	unlock := o.jobs.Lock(id)
 	defer unlock()
@@ -578,13 +594,13 @@ func (o *Owner) export(ctx context.Context, id, operation, digest string, claim 
 		return Export{}, err
 	}
 	if r.Phase != phaseRetained && r.Phase != phaseExporting && r.Phase != phaseHomeOwned || r.Stopped == nil || r.CancelOperation != "" {
-		return Export{}, errors.New("work: completed retained execution required")
+		return Export{}, &profile.Rejection{Code: profile.CodeConflict}
 	}
 	if r.Transfer != "" && r.Transfer != operation {
-		return Export{}, errors.New("work: transfer operation conflicts")
+		return Export{}, &profile.Rejection{Code: profile.CodeConflict}
 	}
 	if claim && (r.Transfer != operation || digest != r.Stopped.CheckpointDigest) {
-		return Export{}, errors.New("work: claim binding differs")
+		return Export{}, &profile.Rejection{Code: profile.CodeConflict}
 	}
 	if err = private(o.path(id, ".checkpoint"), false); err != nil {
 		return Export{}, err
@@ -595,6 +611,9 @@ func (o *Owner) export(ctx context.Context, id, operation, digest string, claim 
 	}
 	e := Export{ID: id, Harness: r.Launch.Harness, Stopped: *r.Stopped, Checkpoint: b, OperationID: operation, Claimed: r.Phase == phaseHomeOwned}
 	if err = ValidateExport(e, o.config.MaxCheckpointBytes); err != nil {
+		if o.config.Log != nil {
+			_, _ = fmt.Fprintf(o.config.Log, "Could not export work session %s: %v\n", id, err)
+		}
 		return Export{}, err
 	}
 	r.Transfer = operation
@@ -628,7 +647,7 @@ func (o *Owner) Recover(ctx context.Context, id string) (View, error) {
 			case phasePending, phasePreparing, phaseActive, phaseFinalizing:
 				r.Phase = r.Progress
 			default:
-				return View{}, errors.New("work: recoverable stage unavailable")
+				return View{}, &profile.Rejection{Code: profile.CodeUnavailable}
 			}
 		}
 		r.Problem = ""
@@ -641,17 +660,17 @@ func (o *Owner) Recover(ctx context.Context, id string) (View, error) {
 }
 func (o *Owner) Cancel(ctx context.Context, id, operation string) (View, error) {
 	if !canonicalID(operation) {
-		return View{}, errors.New("work: canonical cancellation UUID required")
+		return View{}, &profile.Rejection{Code: profile.CodeInvalid}
 	}
 	r, e := o.read(id)
 	if e != nil {
 		return View{}, e
 	}
 	if r.Phase == phaseHomeOwned || r.Phase == phaseExporting || r.Phase == phaseRetained {
-		return View{}, errors.New("work: task already retained or transferred")
+		return View{}, &profile.Rejection{Code: profile.CodeConflict}
 	}
 	if r.CancelOperation != "" && r.CancelOperation != operation {
-		return View{}, errors.New("work: cancellation conflicts")
+		return View{}, &profile.Rejection{Code: profile.CodeConflict}
 	}
 	r.CancelOperation = operation
 	r.Phase = phaseCancelling

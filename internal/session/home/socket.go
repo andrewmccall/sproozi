@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/proxytransport"
 	"github.com/andrewmccall/sproozi/internal/workspace"
 )
 
@@ -54,9 +55,15 @@ func SocketPath(directory string) string { return filepath.Join(directory, "cont
 // service's operation control before waiting for its journal mutation mutex.
 // Daemon shutdown releases ownership; it does not claim allocations stopped.
 func (s *Service) Serve(ctx context.Context) error {
+	run, cancel := context.WithCancel(ctx)
+	defer cancel()
+	s.gateway.BaseContext = func(net.Listener) context.Context { return run }
 	gatewayListener, err := net.Listen("tcp4", s.gateway.Addr)
 	if err != nil {
 		return err
+	}
+	if gateway, ok := s.gateway.Handler.(*proxytransport.Gateway); ok {
+		gatewayListener = gateway.LimitListener(gatewayListener)
 	}
 	done := make(chan error, 1)
 	go func() { done <- s.gateway.Serve(tls.NewListener(gatewayListener, s.gateway.TLSConfig)) }()
@@ -80,8 +87,6 @@ func (s *Service) Serve(ctx context.Context) error {
 	if err = os.Chmod(path, 0600); err != nil {
 		return err
 	}
-	run, cancel := context.WithCancel(ctx)
-	defer cancel()
 	var workers sync.WaitGroup
 	var connections sync.Map
 	shutdown := make(chan struct{})

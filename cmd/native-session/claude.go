@@ -50,16 +50,7 @@ type claudeLifecycle struct {
 
 // Completion diagnostics describe the observer's state without disclosing
 // prompts, tool arguments, native journal bytes or selected filesystem paths.
-type claudeCompletion struct {
-	Started          bool   `json:"started"`
-	Completed        bool   `json:"completed"`
-	PendingTools     int    `json:"pendingTools"`
-	PromptGeneration uint64 `json:"promptGeneration"`
-	InputGeneration  uint64 `json:"inputGeneration"`
-	LastEvent        string `json:"lastEvent,omitempty"`
-	Rejected         string `json:"rejected,omitempty"`
-	Observation      string `json:"observation"`
-}
+type claudeCompletion = harness.NativeCompletion
 
 func (s *server) claudeCompletion() *claudeCompletion {
 	s.mu.Lock()

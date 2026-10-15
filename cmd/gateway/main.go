@@ -460,27 +460,16 @@ func main() {
 		log.Fatal(err)
 	}
 	log.Printf("shared gateway listening on :8443 for %s", host)
-	log.Fatal(newProxyServer(cfg.listenerCert, transport).ListenAndServeTLS("", ""))
+	listener, err := net.Listen("tcp", ":8443")
+	if err != nil {
+		log.Fatal(err)
+	}
+	server := proxytransport.NewServer(":8443", cfg.listenerCert, transport)
+	log.Fatal(server.ServeTLS(transport.LimitListener(listener), "", ""))
 }
 
 func newAuditLogger(output io.Writer) audit.Writer {
 	return audit.NewLogger(output)
-}
-
-func newProxyServer(certificate tls.Certificate, handler http.Handler) *http.Server {
-	return &http.Server{
-		Addr:              ":8443",
-		Handler:           handler,
-		ReadHeaderTimeout: 10 * time.Second,
-		// CONNECT inspection takes ownership of the HTTP/1.1 connection after
-		// authentication. Disable HTTP/2 so every accepted proxy request has the
-		// same hijackable transport semantics across clients.
-		TLSNextProto: map[string]func(*http.Server, *tls.Conn, http.Handler){},
-		TLSConfig: &tls.Config{
-			MinVersion:   tls.VersionTLS13,
-			Certificates: []tls.Certificate{certificate},
-		},
-	}
 }
 
 func envOrDefault(key, fallback string) string {

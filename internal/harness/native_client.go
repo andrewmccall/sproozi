@@ -86,3 +86,28 @@ func NativeKubeconfig(trustPath string) string {
 	data, _ := json.Marshal(document)
 	return strings.TrimSpace(string(data)) + "\n"
 }
+
+// NativeClients renders only the declared broker capabilities. Backend callers
+// supply their trusted gateway origin, never checkpoint-provided configuration.
+func NativeClients(kind NativeKind, capabilities []api.CapabilityKind, gateway string) (*NativeClientConfig, error) {
+	config := &NativeClientConfig{}
+	for _, capability := range capabilities {
+		if capability == api.CapabilityKubernetesRead {
+			config.Kubernetes = true
+		}
+		if name, ok := capability.MCPServerName(); ok {
+			config.MCPServers = append(config.MCPServers, name)
+		}
+	}
+	if len(config.MCPServers) != 0 {
+		config.MCPGateway = gateway
+		slices.Sort(config.MCPServers)
+	}
+	if err := config.Validate(kind); err != nil {
+		return nil, err
+	}
+	if !config.Kubernetes && len(config.MCPServers) == 0 {
+		return nil, nil
+	}
+	return config, nil
+}

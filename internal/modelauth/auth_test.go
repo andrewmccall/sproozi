@@ -49,11 +49,19 @@ func (s *memoryStore) Replace(_ context.Context, before, after Session) error {
 func TestAPIKeyReplacesWorkloadAuthorization(t *testing.T) {
 	r := httptest.NewRequest(http.MethodPost, Resource+"/responses", nil)
 	r.Header.Set("Authorization", "Bearer workload-placeholder")
+	for _, header := range []string{openAIOrganizationHeader, openAIProjectHeader, chatGPTAccountHeader} {
+		r.Header.Set(header, "workload-selected-account")
+	}
 	if err := (APIKey{Key: "fixture-api-key"}).Authorize(r); err != nil {
 		t.Fatal(err)
 	}
 	if r.Header.Get("Authorization") != "Bearer fixture-api-key" {
 		t.Fatal("API key was not injected")
+	}
+	for _, header := range []string{openAIOrganizationHeader, openAIProjectHeader, chatGPTAccountHeader} {
+		if r.Header.Get(header) != "" {
+			t.Fatalf("workload selected provider identity through %s", header)
+		}
 	}
 	for _, key := range []string{"", "\r\ninvalid"} {
 		if err := (APIKey{Key: key}).Authorize(r); err == nil {

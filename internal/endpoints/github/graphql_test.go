@@ -124,7 +124,7 @@ func TestGraphQLCreateResolvesAndReadsBack(t *testing.T) {
 	query := pullRequestCreateDocument
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, graphqlRequest(t, query, map[string]any{inputVariable: map[string]any{
-		baseRefNameField: fixtureBaseBranch, "body": "fixture body", "draft": false,
+		baseRefNameField: fixtureBaseBranch, bodyField: "fixture body", "draft": false,
 		headRefNameField: fixtureRunBranch, "maintainerCanModify": true,
 		repositoryIDField: fixtureRepositoryID, titleField: "fixture change",
 	}}))
@@ -241,7 +241,7 @@ func TestGraphQLPRViewForwardsPolicyListedRepository(t *testing.T) {
 	handler := protocolHandler(client, events)
 	query := `query PullRequestByNumber($owner: String!, $repo: String!, $pr_number: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $pr_number) { number } } }`
 	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, graphqlRequest(t, query, map[string]any{ownerVariable: fixtureRepositoryOwner, repoVariable: fixtureRepositoryName, "pr_number": 42}))
+	handler.ServeHTTP(response, graphqlRequest(t, query, map[string]any{ownerVariable: fixtureRepositoryOwner, repoVariable: fixtureRepositoryName, prNumberVariable: 42}))
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"number":42`) || len(events.events) != 1 || !events.events[0].Allowed {
 		t.Fatalf("PR view was not forwarded: %d %s events=%#v", response.Code, response.Body.String(), events.events)
 	}

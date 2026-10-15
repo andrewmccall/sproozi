@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 )
 
 func TestNativeMCPConnectionsRejectClientAuthorityAndUnsupportedHarness(t *testing.T) {
@@ -53,5 +55,27 @@ func TestStockCodexParsesGeneratedNativeMCPConnections(t *testing.T) {
 	}
 	if err = json.Unmarshal(data, &connections); err != nil || len(connections) != 1 || connections[0].Name != fixtureMCPName || !connections[0].Enabled || connections[0].Transport.URL != "https://sproozi-mcp.example/mcp/docs" || strings.Contains(string(data), "token_file") {
 		t.Fatalf("stock connections=%s err=%v", data, err)
+	}
+}
+
+const nativeFixtureMCPCapability api.CapabilityKind = "mcp.alpha"
+
+func TestNativeClientsRendersDeclaredCapabilitiesInStableOrder(t *testing.T) {
+	c, err := NativeClients(NativeCodex, []api.CapabilityKind{"mcp.zeta", api.CapabilityKubernetesRead, nativeFixtureMCPCapability}, "https://gateway.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c == nil || !c.Kubernetes || c.MCPGateway != "https://gateway.test" || strings.Join(c.MCPServers, ",") != "alpha,zeta" {
+		t.Fatalf("clients=%+v", c)
+	}
+	if _, err = NativeClients(NativeClaude, []api.CapabilityKind{nativeFixtureMCPCapability}, "https://gateway.test"); err == nil {
+		t.Fatal("unsupported Claude MCP admitted")
+	}
+	if _, err = NativeClients(NativeCodex, []api.CapabilityKind{nativeFixtureMCPCapability, nativeFixtureMCPCapability}, "https://gateway.test"); err == nil {
+		t.Fatal("duplicate MCP admitted")
+	}
+	c, err = NativeClients(NativeCodex, nil, "")
+	if err != nil || c != nil {
+		t.Fatalf("empty declared clients=%+v error=%v", c, err)
 	}
 }

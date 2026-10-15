@@ -154,6 +154,21 @@ func waitPhase(t *testing.T, o *Owner, id, want string) View {
 	}
 }
 
+func assertRemoteSubmissionReplay(t *testing.T, o *Owner, q Submit, v View) {
+	t.Helper()
+	if v.ExecutionID != v.ID || !canonicalID(v.AllocationID) || v.AllocationID == v.ExecutionID {
+		t.Fatalf("session, bounded execution and allocation identities differ: %+v", v)
+	}
+	again, e := o.Submit(t.Context(), q)
+	if e != nil || again.ID != v.ID || again.ExecutionID != v.ExecutionID || again.AllocationID != v.AllocationID || again.Placement != executorKubernetes {
+		t.Fatalf("submission replay: %+v %v", again, e)
+	}
+	q.Task = "A different task"
+	if _, e = o.Submit(t.Context(), q); e == nil {
+		t.Fatal("conflicting task accepted")
+	}
+}
+
 func TestRemoteCatalogueRetainsCompletionAndExclusiveClaimAcrossRestart(t *testing.T) {
 	c, p := fixture(t)
 	o, e := Open(c)
@@ -166,16 +181,9 @@ func TestRemoteCatalogueRetainsCompletionAndExclusiveClaimAcrossRestart(t *testi
 	if e != nil {
 		t.Fatal(e)
 	}
-	again, e := o.Submit(t.Context(), q)
-	if e != nil || again.ID != v.ID || again.ExecutionID != v.ExecutionID {
-		t.Fatalf("submission replay: %+v %v", again, e)
-	}
-	q.Task = "A different task"
-	if _, e = o.Submit(t.Context(), q); e == nil {
-		t.Fatal("conflicting task accepted")
-	}
+	assertRemoteSubmissionReplay(t, o, q, v)
 	done := waitPhase(t, o, v.ID, phaseRetained)
-	if done.ThreadID != testThread || done.Result != testResult || done.CheckpointDigest != p.meta.SHA256 {
+	if done.ID != v.ID || done.ExecutionID != v.ExecutionID || done.AllocationID != v.AllocationID || done.Incarnation == nil || done.ThreadID != testThread || done.Result != testResult || done.CheckpointDigest != p.meta.SHA256 {
 		t.Fatalf("missing retained result: %+v", done)
 	}
 	op := uuid.NewString()
@@ -311,7 +319,7 @@ func TestSubmissionReplayDoesNotWaitForHeldNativeWork(t *testing.T) {
 	go func() { v, _ := o.Submit(t.Context(), q); done <- v }()
 	select {
 	case v := <-done:
-		if v.ID != initial.ID || v.ExecutionID != initial.ExecutionID {
+		if v.ID != initial.ID || v.ExecutionID != initial.ExecutionID || v.AllocationID != initial.AllocationID {
 			t.Fatal("replay changed identity")
 		}
 	case <-time.After(300 * time.Millisecond):

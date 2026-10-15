@@ -60,6 +60,24 @@ boundary; an ordinary helper requiring independent authority needs its own
 workload. The managed checkpoint helper below receives no workload token and
 has a separate private control volume.
 
+Every container must drop `ALL` Linux capabilities and declare no additions,
+use RuntimeDefault seccomp, disable privilege escalation and use a read-only root.
+Shared process namespaces are forbidden. `envFrom` and environment
+`valueFrom.secretKeyRef` are rejected. An explicit public ConfigMap key reference
+or literal environment value is allowed; the runtime author must keep credentials
+out of both.
+
+Template volumes must have exactly one source: `emptyDir` with a positive
+`sizeLimit`, `configMap` or `downwardAPI`. Secret, projected-token, persistent,
+host and other sources are rejected. The controller injects its own gateway token
+and managed-session continuity volumes through separate construction. These
+restrictions apply to helper containers as well as the selected workload.
+
+Custom runtimes using earlier broader volume or environment settings must move
+provider credentials into trusted gateway configuration and replace workload
+mounts with public configuration or bounded scratch space. Do not substitute a
+literal credential for a rejected Secret reference.
+
 The trust ConfigMap must be in `sproozi-agents`, immutable and contain public CA
 material only. Runtime, policy, template and run references resolve within the
 run's namespace.
@@ -151,6 +169,7 @@ answer or grant authority. Both native kinds passed production Docker/Kind round
 trips; Codex additionally passed the extended held-turn, forced-cancellation and
 denial checks. See the [profile setup](../../cmd/session-profile/README.md),
 [supervisor contract](../../cmd/native-session/README.md),
+[shared native launch and control boundary](native-control.md),
 [checkpoint helper](../../cmd/checkpoint/README.md),
 [ADR 0011](../adr/0011-native-session-compatibility-and-completion.md) and
 [repeatable fixture](../../hack/verify/session-mobility/README.md).

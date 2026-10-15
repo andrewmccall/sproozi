@@ -87,25 +87,25 @@ func assertFreshResume(t *testing.T, s *Service, local *placementFixture, source
 	before, _ := json.Marshal(source.export.Stopped.Receipt)
 	resume := uuid.NewString()
 	status, err := s.Resume(t.Context(), id, resume)
-	if err != nil || status.ProductID != id || status.ID == id || status.InitialStage != "active" || status.ThreadID != testNativeUUID {
+	if err != nil || status.ID != id || status.ExecutionID == id || status.InitialStage != "active" || status.ThreadID != testNativeUUID {
 		t.Fatalf("fresh native resume: %+v %v", status, err)
 	}
-	r, err := s.readInitial(status.ID)
+	r, err := s.readInitial(status.ExecutionID)
 	if err != nil || r.Input != checkpointInput || r.Launch.Allowances[testCapability].Units.Value != 10 || !r.Launch.Deadline.After(time.Now()) || r.Launch.AllocationID == source.export.Stopped.Launch.AllocationID {
 		t.Fatalf("new admission credited source authority: %+v %v", r, err)
 	}
-	if _, err = os.Stat(filepath.Join(s.config.Directory, "journal", status.ID+".json")); !os.IsNotExist(err) {
+	if _, err = os.Stat(filepath.Join(s.config.Directory, "journal", status.ExecutionID+".json")); !os.IsNotExist(err) {
 		t.Fatal("resume invented a previous source receipt in its coordinator")
 	}
 	replayed, err := s.Resume(t.Context(), id, resume)
-	if err != nil || replayed.ID != status.ID || local.activations != 1 || local.initials != 0 || local.prepares != 1 {
+	if err != nil || replayed.ID != id || replayed.ExecutionID != status.ExecutionID || local.activations != 1 || local.initials != 0 || local.prepares != 1 {
 		t.Fatalf("resume replay: %+v %v, activations=%d", replayed, err, local.activations)
 	}
 	if _, err = s.Resume(t.Context(), id, uuid.NewString()); err == nil {
 		t.Fatal("active prior writer admitted a new envelope")
 	}
 	listed, err := s.Sessions()
-	if err != nil || len(listed) != 1 || listed[0].ProductID != id {
+	if err != nil || len(listed) != 1 || listed[0].ID != id || listed[0].ExecutionID != status.ExecutionID || listed[0].Session != nil {
 		t.Fatalf("product catalog duplicated internal execution: %+v %v", listed, err)
 	}
 	assertCompletedResumeCycle(t, s, local, source, status, before)
@@ -116,11 +116,11 @@ func assertCompletedResumeCycle(t *testing.T, s *Service, local *placementFixtur
 	id := source.export.ID
 	stopOperation := uuid.NewString()
 	stopped, err := s.Stop(t.Context(), id, stopOperation)
-	if err != nil || stopped.InitialStage != stageRetained || stopped.ThreadID != testNativeUUID {
+	if err != nil || stopped.ID != id || stopped.ExecutionID != status.ExecutionID || stopped.AllocationID != status.AllocationID || stopped.Incarnation == nil || stopped.InitialStage != stageRetained || stopped.ThreadID != testNativeUUID {
 		t.Fatalf("stopped product checkpoint: %+v %v", stopped, err)
 	}
 	next, err := s.Resume(t.Context(), id, uuid.NewString())
-	if err != nil || next.ID == status.ID || local.activations != 2 {
+	if err != nil || next.ID != id || next.ExecutionID == status.ExecutionID || local.activations != 2 {
 		t.Fatalf("separate later envelope: %+v %v", next, err)
 	}
 	if _, err = s.Stop(t.Context(), id, stopOperation); err == nil {
@@ -133,14 +133,14 @@ func assertCompletedResumeCycle(t *testing.T, s *Service, local *placementFixtur
 		t.Fatal("old stop operation moved a later execution")
 	}
 	active, err := s.Status(id)
-	if err != nil || active.ID != next.ID || active.InitialStage != initialActive {
+	if err != nil || active.ID != id || active.ExecutionID != next.ExecutionID || active.InitialStage != initialActive {
 		t.Fatalf("replay affected later writer: %+v %v", active, err)
 	}
 	after, _ := json.Marshal(source.export.Stopped.Receipt)
 	if string(before) != string(after) {
 		t.Fatal("local execution rewrote remote sealed accounts")
 	}
-	old, err := s.readInitial(status.ID)
+	old, err := s.readInitial(status.ExecutionID)
 	if err != nil || old.Stopped == nil || old.Stopped.Receipt.Usage[testCapability].Units != 2 {
 		t.Fatalf("previous local spent accounting unavailable: %+v %v", old, err)
 	}

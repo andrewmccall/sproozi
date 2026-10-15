@@ -11,13 +11,13 @@ import (
 	"os/signal"
 	"path/filepath"
 	"slices"
-	"strings"
 	"syscall"
 
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/session/home"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
 	"github.com/andrewmccall/sproozi/internal/work"
+	"github.com/andrewmccall/sproozi/internal/workspace"
 	"github.com/google/uuid"
 )
 
@@ -34,6 +34,8 @@ func defaultConfigPath() (string, error) {
 type options struct {
 	action, socket, id, operation, executor, source, kind, repository, task string
 	detach                                                                  bool
+	workspace, destination                                                  string
+	includeIgnored                                                          []string
 	fixed                                                                   home.Config
 }
 
@@ -48,58 +50,78 @@ func parseProduct(args []string) (options, error) {
 	socket := fs.String("socket", "", "private home socket; defaults to configured home")
 	id := fs.String("id", "", "stable session UUID; may also be the first positional argument")
 	operation := fs.String("operation", "", "stable operation UUID; preserve on retries")
-	executor := fs.String("executor", "", "configured remote executor; resume uses docker")
+	executor := fs.String("executor", "", "configured executor; local control uses docker")
 	source := fs.String("from", "", "configured remote source for pull")
 	kind := fs.String("harness", "", "approved native harness; defaults to global configuration")
 	repository := fs.String("repository", "", "approved repository name")
 	task := fs.String("task", "", "task text")
 	taskFile := fs.String("task-file", "", "UTF-8 task file")
 	detach := fs.Bool("detach", false, "return after local resume without attaching")
-	parseArgs := args[1:]
-	if len(parseArgs) > 0 && !strings.HasPrefix(parseArgs[0], "-") {
-		*id = parseArgs[0]
-		parseArgs = parseArgs[1:]
+	workspacePath := fs.String("workspace", "", "stopped ordinary Git directory for start")
+	destination := fs.String("to", "", "configured destination for move")
+	var includeIgnored []string
+	fs.Func("include-ignored", "ignored file for every visit; repeatable start intent", func(v string) error {
+		includeIgnored = append(includeIgnored, v)
+		return workspace.ValidateIgnoredPaths(includeIgnored)
+	})
+	if err := parseSessionArguments(fs, args[1:], id); err != nil {
+		return options{}, err
 	}
-	if e = fs.Parse(parseArgs); e != nil {
-		return options{}, e
+	q := options{
+		action: action, socket: *socket, id: *id, operation: *operation, executor: *executor, source: *source,
+		kind: *kind, repository: *repository, task: *task, detach: *detach,
+		workspace: *workspacePath, destination: *destination, includeIgnored: includeIgnored,
 	}
-	if fs.NArg() != 0 {
-		return options{}, errors.New("unexpected arguments")
+	if err := q.prepareAddress(fs); err != nil {
+		return options{}, err
 	}
-	var fixed home.Config
-	needsConfig := action == actionRun || *socket == "" ||
-		*executor != "" && *executor != dockerExecutor
-	if needsConfig {
-		fixed, e = home.ReadConfig(*config)
-		if e != nil {
-			return options{}, e
-		}
-		if *socket == "" {
-			*socket = home.SocketPath(fixed.Directory)
-		}
+	if err := q.loadConfiguration(fs, *config); err != nil {
+		return options{}, err
 	}
-	if *taskFile != "" {
-		if *task != "" {
-			return options{}, errors.New("choose --task or --task-file")
+	q.task, e = readTaskText(q.task, *taskFile)
+	return q, e
+}
+
+func (q *options) loadConfiguration(fs *flag.FlagSet, path string) error {
+	needsConfig := q.action == actionRun || q.socket == "" || q.executor != "" && q.executor != dockerExecutor
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "config" {
+			needsConfig = true
 		}
-		f, readErr := os.Open(*taskFile)
-		if readErr != nil {
-			return options{}, readErr
-		}
-		b, readErr := io.ReadAll(io.LimitReader(f, (16<<10)+1))
-		if readErr = errors.Join(readErr, f.Close()); readErr != nil {
-			return options{}, readErr
-		}
-		if len(b) > 16<<10 {
-			return options{}, errors.New("task exceeds 16 KiB")
-		}
-		*task = string(b)
+	})
+	if !needsConfig {
+		return nil
 	}
-	if action != actionRun && (*task != "" || *repository != "" || *kind != "") {
-		return options{}, errors.New("task, repository and harness are run options")
+	fixed, err := home.ReadConfig(path)
+	if err != nil {
+		return err
 	}
-	return options{action: action, socket: *socket, id: *id, operation: *operation, executor: *executor, source: *source,
-		kind: *kind, repository: *repository, task: *task, detach: *detach, fixed: fixed}, nil
+	q.fixed = fixed
+	if q.socket == "" {
+		q.socket = home.SocketPath(fixed.Directory)
+	}
+	return nil
+}
+
+func readTaskText(task, path string) (string, error) {
+	if path == "" {
+		return task, nil
+	}
+	if task != "" {
+		return "", errors.New("choose --task or --task-file")
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	b, err := io.ReadAll(io.LimitReader(f, (16<<10)+1))
+	if err = errors.Join(err, f.Close()); err != nil {
+		return "", err
+	}
+	if len(b) > 16<<10 {
+		return "", errors.New("task exceeds 16 KiB")
+	}
+	return string(b), nil
 }
 
 func runProduct(args []string) error {
@@ -113,31 +135,10 @@ func runProduct(args []string) error {
 		return q.submitRemote(ctx)
 	}
 	if q.action == home.ActionSessions {
-		if q.id != "" || q.operation != "" || q.source != "" {
-			return errors.New("sessions accepts only configuration, socket and executor")
-		}
-		if q.executor != "" && q.executor != dockerExecutor {
-			return remoteProduct(ctx, q.fixed, q.executor, q.action, "", "")
-		}
-		for _, name := range selectedExecutors(q.fixed, q.executor) {
-			if e = remoteProduct(ctx, q.fixed, name, q.action, "", ""); e != nil {
-				return e
-			}
-		}
-		if _, err := os.Stat(q.socket); os.IsNotExist(err) {
-			return nil
-		} else if err != nil {
-			return err
-		}
-		response, err := home.Call(ctx, q.socket, home.Request{Action: home.ActionSessions})
-		if err != nil {
-			return err
-		}
-		return json.NewEncoder(os.Stdout).Encode(response.Sessions)
+		catalogue := discoverSessions(ctx, q)
+		return json.NewEncoder(os.Stdout).Encode(catalogue)
 	}
-	if q.id == "" {
-		return errors.New("stable session UUID required")
-	}
+
 	if (q.action == home.ActionStatus || q.action == home.ActionCancel || q.action == home.ActionRecover) &&
 		q.executor != "" && q.executor != dockerExecutor {
 		if q.action == home.ActionCancel && q.operation == "" {
@@ -152,9 +153,6 @@ func runProduct(args []string) error {
 }
 
 func (q *options) submitRemote(ctx context.Context) error {
-	if q.id != "" || q.source != "" || q.executor == "" || q.executor == dockerExecutor {
-		return errors.New("run requires an explicitly configured remote --executor")
-	}
 	remote, ok := workConnection(q.fixed, q.executor)
 	if !ok {
 		return errors.New("executor is not configured")
@@ -188,17 +186,20 @@ func (q *options) local(ctx context.Context) error {
 			return errors.New("pull requires --from configured-source")
 		}
 	}
-	if q.action == home.ActionResume && q.executor != "" && q.executor != dockerExecutor {
-		return errors.New("resume requires local Docker; use move for an active remote visit")
-	}
-	if q.action == home.ActionPull || q.action == home.ActionResume ||
-		q.action == home.ActionStop || q.action == home.ActionCancel {
+	switch q.action {
+	case home.ActionStart, home.ActionMove, home.ActionPull, home.ActionResume, home.ActionStop, home.ActionCancel:
 		if q.operation == "" {
 			q.operation = uuid.NewString()
 		}
 		_, _ = fmt.Fprintf(os.Stderr, "Session %s, operation %s\n", q.id, q.operation)
 	}
-	request := home.Request{Action: q.action, ID: q.id, OperationID: q.operation, Source: q.source}
+	if q.action == home.ActionAttach {
+		return attach(ctx, q.socket, q.id)
+	}
+	request := home.Request{
+		Action: q.action, ID: q.id, OperationID: q.operation, Source: q.source,
+		Workspace: q.workspace, Destination: q.destination, IncludeIgnored: q.includeIgnored,
+	}
 	response, err := home.Call(ctx, q.socket, request)
 	if response.Status != nil {
 		if e := json.NewEncoder(os.Stdout).Encode(response.Status); e != nil {
@@ -219,9 +220,15 @@ func selectedExecutors(c home.Config, selected string) []string {
 	}
 	names := make([]string, 0, len(c.Remote)+len(c.WorkSources))
 	for name := range c.Remote {
+		if name == dockerExecutor {
+			continue
+		}
 		names = append(names, name)
 	}
 	for name := range c.WorkSources {
+		if name == dockerExecutor {
+			continue
+		}
 		if _, exists := c.Remote[name]; !exists {
 			names = append(names, name)
 		}

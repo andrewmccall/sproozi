@@ -81,6 +81,8 @@ The [retained-work guide](docs/guides/portable-workflows.md) adds remote-first
 Codex tasks through the CLI or authenticated MCP. The remote owner can accept
 work while the laptop is offline. Use `sessions`, `pull`, `resume` and `stop` to
 continue the genuine native conversation locally under a fresh bounded grant.
+The [session command reference](docs/reference/session-commands.md) describes
+explicit owner selection, the labelled catalogue and stable session/execution IDs.
 The guide includes scoped home-ops setup and one shared external MCP definition.
 Home-ops acceptance against personal infrastructure and paid-model engineering
 contributions remain unassessed.
@@ -103,12 +105,12 @@ GUI/IDE attachment and other managed clients remain future work.
 
 | Boundary | Current behavior |
 | --- | --- |
-| Pod security | Runtime validation requires non-root execution, dropped capabilities, RuntimeDefault seccomp, a read-only root and bounded writable volumes. |
+| Pod security | Runtime validation requires non-root execution, drop ALL with no added capabilities, RuntimeDefault seccomp and a read-only root. Template volumes and environment sources are explicitly restricted. |
 | Identity | Each run has a dedicated ServiceAccount without direct Kubernetes grants. The gateway checks live run identity and policy. |
 | Network | Policy grants DNS and gateway egress. An enforcing CNI and actual direct-access probes are required; node-traffic exceptions prevent a blanket isolation guarantee. |
-| Transport | CLI, HTTP and MCP clients use one authenticated inspected-TLS proxy. Native handlers enforce service scope; the configured MCP bridge filters approved tools and validates argument schemas. |
+| Transport | Both backends bound connections and sessions per execution, with deadlines for authentication and live authority checks. Native handlers enforce service scope; configured MCP validates approved tools and arguments. |
 | Budgets | Kubernetes-backed accounting survives gateway restarts. Model reservations can underestimate total usage, so token and cost limits are not hard provider-spending ceilings. |
-| Cleanup | Recorded runs removed their sandbox resources. Interrupted provisioning can leave resources when status writes are lost; budget ConfigMaps have no automatic retention cleanup. |
+| Cleanup | Release recovers deterministic resources after missing status writes and retains containment for unknown Pod state or ownership. Managed writer fencing remains separate; budget ConfigMaps have no automatic retention cleanup. |
 | Audit | The gateway logs redacted decisions. Operators supply durable storage and review proposed changes before merging. |
 
 See [security hardening](docs/reference/security-hardening.md) for deployment

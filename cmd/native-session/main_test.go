@@ -101,7 +101,7 @@ func TestTrustedContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.Env = append(c.Env, "CODEX_HOME=/untrusted")
-	if validateConfig(c) == nil {
+	if c.Validate(time.Now()) == nil {
 		t.Fatal("caller override of native home accepted")
 	}
 	if err = os.Chmod(path, 0600); err != nil {
@@ -117,7 +117,7 @@ func TestNativeLaunchRejectsReservedAndUnboundedOptions(t *testing.T) {
 		InstructionDigest: digest(),
 		Env:               []string{testPathEnvironment}, RolloutMaxBytes: 8192}
 	c.Options = []string{`projects."/workspace/session/workspace".trust_level="trusted"`}
-	if err := validateConfig(c); err != nil {
+	if err := c.Validate(time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	for _, options := range [][]string{
@@ -125,7 +125,7 @@ func TestNativeLaunchRejectsReservedAndUnboundedOptions(t *testing.T) {
 		{`=true`}, {strings.Repeat("x", 4097)}, make([]string, 33),
 	} {
 		c.Options = options
-		if err := validateConfig(c); err == nil {
+		if err := c.Validate(time.Now()); err == nil {
 			t.Fatal("unsafe native launch contract accepted")
 		}
 	}
@@ -143,7 +143,7 @@ func TestFixedAttachmentReconnectAndGate(t *testing.T) {
 		defer cancel()
 		_, _ = native.Stop(ctx)
 	})
-	s := &server{native: native, state: stateActive, done: make(chan struct{}),
+	s := &server{native: native, state: stateActive, threadID: selected, done: make(chan struct{}),
 		config:   config{Harness: harness.NativeCodex, Deadline: time.Now().Add(15 * time.Second)},
 		deadline: time.Now().Add(15 * time.Second)}
 	connect := func() (net.Conn, *json.Decoder) {
@@ -191,7 +191,16 @@ func TestFixedAttachmentReconnectAndGate(t *testing.T) {
 	if err := d.Decode(&replay); err != nil || !strings.Contains(string(replay.Data), "SEEN:first") {
 		t.Fatalf("reconnect replay: %+v %v", replay, err)
 	}
-	native.GateInput()
+	if r := s.activate(); r.Error != "" || r.PID != native.PID() {
+		t.Fatalf("activate replay started new process: %+v", r)
+	}
+	gate, err := json.Marshal(s.gate())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = harness.DecodeNativeReply(gate, opGate, stateStopping, selected); err != nil {
+		t.Fatal(err)
+	}
 	if err := json.NewEncoder(client).Encode(request{Op: opWrite, Data: []byte("rejected\r")}); err != nil {
 		t.Fatal(err)
 	}
@@ -204,14 +213,8 @@ func TestFixedAttachmentReconnectAndGate(t *testing.T) {
 		t.Fatal("attachment gate stopped active native process")
 	default:
 	}
-	if r := s.activate(); r.Error != "" || r.PID != native.PID() {
-		t.Fatalf("activate replay started new process: %+v", r)
-	}
-	s.mu.Lock()
-	s.state = stateStopping
-	s.mu.Unlock()
-	if r := s.activate(); r.Error == "" {
-		t.Fatal("launch gate reopened after move")
+	if r := s.activate(); r.Error == "" || r.State != stateStopping {
+		t.Fatalf("activate reopened gated process: %+v", r)
 	}
 }
 
@@ -252,10 +255,10 @@ func TestBootstrapConfigurationIsImmutable(t *testing.T) {
 	deadline := time.Now().UTC().Add(time.Minute)
 	s := &server{config: config{Harness: harness.NativeCodex, Deadline: deadline}, deadline: deadline,
 		state: stateUnconfigured, done: make(chan struct{})}
-	approved := config{Harness: harness.NativeCodex, Deadline: deadline, Instructions: instructions,
+	approved := config{Harness: harness.NativeCodex, Deadline: deadline, ThreadID: selected, Instructions: instructions,
 		InstructionDigest: digest(),
 		Env:               []string{}, RolloutMaxBytes: 8192}
-	if r := s.configure(&approved); r.Error != "" || r.State != statePrepared {
+	if r := s.configure(&approved); r.Error != "" || r.State != statePrepared || r.ThreadID != approved.ThreadID {
 		t.Fatalf("configure: %+v", r)
 	}
 	if r := s.configure(&approved); r.Error != "" {

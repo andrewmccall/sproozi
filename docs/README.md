@@ -44,6 +44,8 @@ recovery flow has not been verified end to end.
 - [Configured remote MCP capabilities](reference/configured-mcp.md)
 - [Native CLI harnesses](reference/harnesses.md)
 - [Persistent task MCP interface](reference/orchestration.md)
+- [Session commands, identities and work outcomes](reference/session-commands.md)
+- [Native launch and control boundary](reference/native-control.md)
 
 ## Explanations
 
@@ -68,6 +70,7 @@ Architecturally significant changes require an ADR and matching current docs.
 - [0010: Managed session authority and fresh admission](adr/0010-managed-session-authority-and-admission.md)
 - [0011: Native session compatibility and completion](adr/0011-native-session-compatibility-and-completion.md)
 - [0012: Retained work and fresh session continuations](adr/0012-retained-work-and-fresh-session-continuations.md)
+- [0013: Review boundaries and shared native contracts](adr/0013-review-boundaries-and-native-contracts.md)
 
 ## Future architecture
 

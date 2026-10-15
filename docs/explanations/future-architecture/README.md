@@ -29,6 +29,7 @@ client/state/failure proofs remain scoped extensions. The
 
 | Direction | Question | Next proof |
 | --- | --- | --- |
+| [DNS egress containment](dns-egress.md) | Which names need resolution without unrestricted recursive egress? | Isolated allowed/internal and refused/external UDP/TCP behavior |
 | [Managed MCP](managed-mcp-servers.md) | How should Sproozi own server lifecycle and upstream restrictions? | One isolated managed server with revocation and cleanup |
 | [Further runtimes](execution-runtimes.md) | Which additional placements can enforce the approved intent? | One concrete backend with admission, network, stop and accounting evidence |
 | [Harness and client compatibility](harness-portability.md) | Which additional native sessions and clients support continuity? | Another pinned harness or separately proved GUI/IDE attachment |

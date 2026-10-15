@@ -2,6 +2,7 @@ package harness
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
@@ -11,7 +12,13 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/andrewmccall/sproozi/internal/nativeconfig"
 )
+
+const NativeRolloutMaxBytes int64 = 64 << 20
+const nativeOpenAIKey = "OPENAI_API_KEY"
+const nativeAnthropicKey = "ANTHROPIC_API_KEY"
 
 // NativeLaunch is the trusted fixed native terminal launch contract. Portable
 // checkpoint contents do not supply these instructions, options or credentials.
@@ -141,4 +148,60 @@ func installNativeTrust(data []byte) error {
 	}
 	_, err = f.Write(data)
 	return errors.Join(err, f.Close())
+}
+
+// Validate checks the trusted launch at the native process boundary.
+func (c NativeLaunch) Validate(now time.Time) error {
+	if err := c.Harness.Validate(); err != nil {
+		return err
+	}
+	if !c.Deadline.After(now) || (c.ThreadID != "" && !codexThreadID.MatchString(c.ThreadID)) ||
+		c.Env == nil || c.RolloutMaxBytes <= 0 || c.RolloutMaxBytes > NativeRolloutMaxBytes {
+		return errors.New("invalid native launch contract")
+	}
+	if len(c.Task) > 32<<10 || strings.ContainsRune(c.Task, 0) ||
+		c.Task != "" && (strings.TrimSpace(c.Task) == "" || c.Harness != NativeCodex) {
+		return errors.New("native task requires bounded nonempty Codex input")
+	}
+	if c.Instructions == "" || fmt.Sprintf("%x", sha256.Sum256([]byte(c.Instructions))) != c.InstructionDigest {
+		return errors.New("trusted instructions do not match digest")
+	}
+	if c.Gateway != nil {
+		if err := c.Gateway.Validate(c.Env); err != nil {
+			return err
+		}
+	}
+	seen := map[string]bool{}
+	for _, entry := range c.Env {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok || key == "" || strings.ContainsAny(key+value, "\x00") || seen[key] {
+			return errors.New("invalid explicit native environment")
+		}
+		seen[key] = true
+		switch key {
+		case "HOME", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "PWD", "KUBECONFIG",
+			"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "DISABLE_AUTOUPDATER",
+			"CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION", "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS":
+			return errors.New("native environment cannot replace fixed home or workspace")
+		}
+	}
+	if err := c.ClientConfig.Validate(c.Harness); err != nil {
+		return err
+	}
+	return nativeconfig.ValidateHarness(string(c.Harness), c.Model, c.Options)
+}
+
+// NativeBaseEnvironment is the public, credential-free environment shared by
+// both backends. Each authority adds its own fresh proxy/token binding.
+func NativeBaseEnvironment(kind NativeKind, executionUID string) ([]string, error) {
+	if err := kind.Validate(); err != nil {
+		return nil, err
+	}
+	apiKey := nativeOpenAIKey
+	if kind == NativeClaude {
+		apiKey = nativeAnthropicKey
+	}
+	return []string{"PATH=/opt/git/bin:/usr/local/bin:/usr/bin:/bin", "TERM=xterm-256color", "LANG=C.UTF-8",
+		"GIT_TERMINAL_PROMPT=0", "GH_PROMPT_DISABLED=1", "GH_TOKEN=sproozi-worker-placeholder",
+		"SPROOZI_EXECUTION_UID=" + executionUID, apiKey + "=sproozi-worker-placeholder"}, nil
 }

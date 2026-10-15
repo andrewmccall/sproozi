@@ -2,7 +2,6 @@ package placement
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -204,49 +203,12 @@ func (p *Placement) Activate(ctx context.Context, l session.Launch, i session.In
 		return err
 	}
 	if local.Initial != nil {
-		return initialNativeReply(output, r.NativeUUID, nativeActive)
-	}
-	return nativeReply(output, local.Launch.ThreadID, nativeActive)
-}
-func nativeReply(data []byte, thread, state string) error {
-	var r struct {
-		Op, Error, State string
-		PID              int
-		ThreadID         string `json:"threadId"`
-		TurnID           string `json:"turnId"`
-		Exit             any
-		Cursor           uint64
-		Gap              bool
-		Completion       json.RawMessage `json:"completion"`
-	}
-	if err := decode(data, &r); err != nil {
+		_, err = harness.DecodeInitialNativeReply(output, nativeActivate, nativeActive, r.NativeUUID)
 		return err
 	}
-	if r.Error != "" || r.State != state || r.ThreadID != thread {
-		return errors.New("placement: native state unconfirmed")
-	}
-	return nil
+	_, err = harness.DecodeNativeReply(output, nativeActivate, nativeActive, local.Launch.ThreadID)
+	return err
 }
-
-// initialNativeReply accepts either no UUID yet or the genuinely observed UUID
-// while the immutable initial contract remains empty. A bound registry identity
-// can never be replaced by another response.
-func initialNativeReply(data []byte, bound, state string) error {
-	var reply struct {
-		ThreadID string `json:"threadId"`
-	}
-	if err := json.Unmarshal(data, &reply); err != nil {
-		return err
-	}
-	if reply.ThreadID != "" && (!idValid(reply.ThreadID) || bound != "" && reply.ThreadID != bound) {
-		return errors.New("placement: initial native identity mismatch")
-	}
-	if bound != "" && reply.ThreadID != bound {
-		return errors.New("placement: bound native identity unavailable")
-	}
-	return nativeReply(data, reply.ThreadID, state)
-}
-
 func (p *Placement) Inspect(ctx context.Context, l session.Launch) (session.Observation, error) {
 	unlock, err := p.lockOperation(l)
 	if err != nil {
@@ -304,7 +266,7 @@ func (p *Placement) Inspect(ctx context.Context, l session.Launch) (session.Obse
 		if err != nil {
 			return o, err
 		}
-		if nativeReply(data, l.ThreadID, nativePrepared) == nil {
+		if _, err := harness.DecodeNativeReply(data, nativeStatus, nativePrepared, l.ThreadID); err == nil {
 			o.State = session.PlacementPrepared
 		}
 	case registry.Active:
@@ -319,13 +281,13 @@ func (p *Placement) Inspect(ctx context.Context, l session.Launch) (session.Obse
 		if err != nil {
 			return o, err
 		}
-		activeErr := nativeReply(data, l.ThreadID, nativeActive)
+		_, activeErr := harness.DecodeNativeReply(data, nativeStatus, nativeActive, l.ThreadID)
 		if local.Initial != nil {
-			activeErr = initialNativeReply(data, r.NativeUUID, nativeActive)
+			_, activeErr = harness.DecodeInitialNativeReply(data, nativeStatus, nativeActive, r.NativeUUID)
 		}
 		if activeErr == nil {
 			o.State = session.PlacementActive
-		} else if nativeReply(data, l.ThreadID, nativePrepared) == nil {
+		} else if _, err := harness.DecodeNativeReply(data, nativeStatus, nativePrepared, l.ThreadID); err == nil {
 			o.State = session.PlacementPrepared
 		}
 	case registry.Stopped, registry.Cancelled:
@@ -457,14 +419,9 @@ func (p *Placement) bindInitialNative(ctx context.Context, local retained, r reg
 		if err != nil {
 			return local, r, err
 		}
-		var reply struct {
-			Op, Error, State string
-			PID              int
-			ThreadID         string          `json:"threadId"`
-			Completion       json.RawMessage `json:"completion"`
-		}
-		if decode(data, &reply) != nil || reply.Error != "" {
-			return local, r, errors.New("placement: initial native UUID observation unavailable")
+		reply, err := harness.DecodeInitialNativeReply(data, nativeStatus, nativeActive, r.NativeUUID)
+		if err != nil {
+			return local, r, err
 		}
 		if idValid(reply.ThreadID) {
 			r, err = p.registry.BindNative(ctx, r.Reference, reply.ThreadID)
@@ -501,18 +458,25 @@ func (p *Placement) quietSource(ctx context.Context, local retained, r registry.
 	if !terminated(pod) {
 		if r.Phase == registry.Stopping {
 			data, err := p.control(ctx, pod, nativeContainer, []string{nativePath, nativeStatus}, nil, 64<<10)
-			if err != nil || nativeReply(data, local.Launch.ThreadID, nativeStopped) != nil {
-				return local, errors.New("placement: revoked source quiescence remains unknown")
-			}
-		} else {
-			if _, err := p.control(ctx, pod, nativeContainer, []string{nativePath, nativeGate}, nil, 64<<10); err != nil {
-				return local, err
-			}
-			data, err := p.control(ctx, pod, nativeContainer, []string{nativePath, nativeQuiesce}, nil, 64<<10)
 			if err != nil {
 				return local, err
 			}
-			if err = nativeReply(data, local.Launch.ThreadID, nativeStopped); err != nil {
+			if _, err := harness.DecodeNativeReply(data, nativeStatus, nativeStopped, local.Launch.ThreadID); err != nil {
+				return local, errors.New("placement: revoked source quiescence remains unknown")
+			}
+		} else {
+			data, err := p.control(ctx, pod, nativeContainer, []string{nativePath, nativeGate}, nil, 64<<10)
+			if err != nil {
+				return local, err
+			}
+			if _, err = harness.DecodeNativeReply(data, nativeGate, "stopping", local.Launch.ThreadID); err != nil {
+				return local, err
+			}
+			data, err = p.control(ctx, pod, nativeContainer, []string{nativePath, nativeQuiesce}, nil, 64<<10)
+			if err != nil {
+				return local, err
+			}
+			if _, err = harness.DecodeNativeReply(data, nativeQuiesce, nativeStopped, local.Launch.ThreadID); err != nil {
 				return local, err
 			}
 		}

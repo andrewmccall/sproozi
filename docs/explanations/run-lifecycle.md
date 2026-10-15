@@ -56,11 +56,14 @@ Normal terminal handling and explicit deletion remove the recorded Pod before
 releasing its contract ConfigMap, NetworkPolicy and ServiceAccount. The Run record
 remains until the policy's `retentionTTL` expires unless explicitly deleted.
 
-Cleanup relies on identity fields persisted in status. Lost provisioning status
-writes can leave resources behind, including a running Pod whose NetworkPolicy
-is removed. The normal cleanup path is therefore not a guarantee of recovery
-from partial provisioning. Budget ConfigMaps and unique webhook replay records
-also have no automatic retention cleanup. See
+If provisioning created a Pod before its status write succeeded, release
+recovers its deterministic name and verifies the managed-by and immutable Run UID
+labels. It also recovers the deterministic identity/network names. An existing
+Unknown or empty-phase Pod keeps containment; only a successful absent lookup or
+terminal Pod status permits release. Lookup errors and ownership mismatches block
+cleanup. Managed writer finalizers still require their independent termination
+and accounting evidence. Budget ConfigMaps and unique webhook replay records
+have no automatic retention cleanup. See
 [security hardening](../reference/security-hardening.md).
 
 ## Gateway revocation
@@ -68,7 +71,11 @@ also have no automatic retention cleanup. See
 One projected gateway-audience token has a two-hour lifetime; policy bounds
 execution to one hour. The demo reads the token once. Token expiry is not the
 revocation boundary. New requests check active Run identity and policy; existing
-sessions close through bounded revalidation. The workload has no Sproozi proxy
+sessions close through bounded revalidation. Each authority lookup has a
+five-second deadline; the default periodic interval is one second. Transport
+closure does not prove dependency or upstream work stopped. See the
+[transport limits](../reference/security-hardening.md#protect-transport-and-identities).
+The workload has no Sproozi proxy
 sidecar or local proxy process.
 
 [Recorded acceptance](../demos/verified-sre-demo.md) covers successful semantic

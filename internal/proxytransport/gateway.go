@@ -36,9 +36,20 @@ type Config struct {
 	// RevocationInterval bounds idle/in-flight sessions after revocation.
 	RevocationInterval time.Duration
 	SessionLifetime    time.Duration
+	// AuthorityTimeout bounds authentication and each live authority lookup.
+	AuthorityTimeout        time.Duration
+	MaxConnections          int
+	MaxSessionsPerExecution int
 }
 
-type Gateway struct{ config Config }
+type Gateway struct {
+	config         Config
+	connections    chan struct{}
+	requests       chan struct{}
+	authorityCalls chan struct{}
+	sessionsMu     sync.Mutex
+	sessions       map[gateway.Reference]int
+}
 
 func New(c Config) (*Gateway, error) {
 	if len(c.Certificates) == 0 || len(c.Certificates) > 64 || c.Authenticate == nil || c.Revalidate == nil || c.Handler == nil {
@@ -61,10 +72,31 @@ func New(c Config) (*Gateway, error) {
 	if c.RevocationInterval < 10*time.Millisecond || c.RevocationInterval > 5*time.Second || c.SessionLifetime < time.Second || c.SessionLifetime > 5*time.Minute {
 		return nil, fmt.Errorf("invalid session bounds")
 	}
-	return &Gateway{config: c}, nil
+	if c.AuthorityTimeout == 0 {
+		c.AuthorityTimeout = 5 * time.Second
+	}
+	if c.MaxConnections == 0 {
+		c.MaxConnections = 128
+	}
+	if c.MaxSessionsPerExecution == 0 {
+		c.MaxSessionsPerExecution = min(8, c.MaxConnections)
+	}
+	if c.AuthorityTimeout < 10*time.Millisecond || c.AuthorityTimeout > 10*time.Second ||
+		c.MaxConnections < 1 || c.MaxConnections > 4096 || c.MaxSessionsPerExecution < 1 ||
+		c.MaxSessionsPerExecution > 128 || c.MaxSessionsPerExecution > c.MaxConnections {
+		return nil, fmt.Errorf("invalid authority or admission bounds")
+	}
+	return &Gateway{config: c, connections: make(chan struct{}, c.MaxConnections),
+		requests: make(chan struct{}, c.MaxConnections), authorityCalls: make(chan struct{}, c.MaxConnections),
+		sessions: make(map[gateway.Reference]int)}, nil
 }
 
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if !acquire(g.requests) {
+		http.Error(w, "gateway capacity unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	defer func() { <-g.requests }()
 	if r.Method != http.MethodConnect {
 		http.Error(w, "CONNECT required", http.StatusMethodNotAllowed)
 		return
@@ -81,16 +113,23 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "gateway identity required", http.StatusUnauthorized)
 		return
 	}
-	identity, err := g.config.Authenticate(r.Context(), token)
+	identity, err := authorityCall(r.Context(), g, func(ctx context.Context) (*gateway.ExecutionGrant, error) {
+		return g.config.Authenticate(ctx, token)
+	})
 	if err != nil || identity.Validate() != nil {
 		http.Error(w, "invalid gateway identity", http.StatusUnauthorized)
 		return
 	}
 	identity = identity.Clone()
-	if g.config.Revalidate(r.Context(), identity) != nil {
+	if g.revalidate(r.Context(), identity) != nil {
 		http.Error(w, "revoked gateway identity", http.StatusForbidden)
 		return
 	}
+	if !g.acquireSession(identity.Execution) {
+		http.Error(w, "execution session capacity unavailable", http.StatusTooManyRequests)
+		return
+	}
+	defer g.releaseSession(identity.Execution)
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
 		http.Error(w, "unsupported transport", http.StatusInternalServerError)
@@ -101,6 +140,10 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = connection.Close() }()
+	ctx, cancel := context.WithTimeout(gateway.WithIdentity(r.Context(), identity), g.config.SessionLifetime)
+	defer cancel()
+	deadline, _ := ctx.Deadline()
+	_ = connection.SetDeadline(minDeadline(deadline, time.Now().Add(10*time.Second)))
 	// No TLS bytes should precede CONNECT acknowledgement. Reject instead of losing
 	// buffered bytes or accidentally treating them as an uninspected protocol.
 	if buffered.Reader.Buffered() != 0 {
@@ -110,8 +153,6 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if buffered.Flush() != nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(gateway.WithIdentity(r.Context(), identity), g.config.SessionLifetime)
-	defer cancel()
 	tlsConnection := tls.Server(connection, &tls.Config{
 		MinVersion: tls.VersionTLS12, NextProtos: []string{"http/1.1"},
 		GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
@@ -121,14 +162,15 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return &certificate, nil
 		},
 	})
-	_ = connection.SetDeadline(time.Now().Add(10 * time.Second))
 	if tlsConnection.HandshakeContext(ctx) != nil {
 		return
 	}
-	_ = connection.SetDeadline(time.Now().Add(g.config.SessionLifetime))
-	listener := newSessionListener(tlsConnection)
+	_ = connection.SetDeadline(deadline)
+	listener := newSessionListener(tlsConnection, connection)
 	defer func() { _ = listener.Close() }()
+	monitorDone := make(chan struct{})
 	go func() {
+		defer close(monitorDone)
 		ticker := time.NewTicker(g.config.RevocationInterval)
 		defer ticker.Stop()
 		for {
@@ -137,7 +179,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				_ = listener.Close()
 				return
 			case <-ticker.C:
-				if g.config.Revalidate(ctx, identity) != nil {
+				if g.revalidate(ctx, identity) != nil {
 					cancel()
 					_ = listener.Close()
 					return
@@ -145,6 +187,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}()
+	defer func() { cancel(); _ = listener.Close(); <-monitorDone }()
 	server := &http.Server{
 		ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 32 << 10,
 		BaseContext: func(net.Listener) context.Context { return ctx },
@@ -158,7 +201,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (g *Gateway) serveInspected(
 	w http.ResponseWriter, request *http.Request, identity *gateway.ExecutionGrant, host, port string,
 ) {
-	if g.config.Revalidate(request.Context(), identity) != nil {
+	if g.revalidate(request.Context(), identity) != nil {
 		request.Close = true
 		http.Error(w, "revoked gateway identity", http.StatusForbidden)
 		return
@@ -202,14 +245,15 @@ func proxyToken(values []string) (string, bool) {
 
 type sessionListener struct {
 	connection net.Conn
+	transport  net.Conn
 	mu         sync.Mutex
 	accepted   bool
 	done       chan struct{}
 	once       sync.Once
 }
 
-func newSessionListener(connection net.Conn) *sessionListener {
-	return &sessionListener{connection: connection, done: make(chan struct{})}
+func newSessionListener(connection, transport net.Conn) *sessionListener {
+	return &sessionListener{connection: connection, transport: transport, done: make(chan struct{})}
 }
 func (l *sessionListener) Accept() (net.Conn, error) {
 	l.mu.Lock()
@@ -224,7 +268,9 @@ func (l *sessionListener) Accept() (net.Conn, error) {
 }
 func (l *sessionListener) Addr() net.Addr { return l.connection.LocalAddr() }
 func (l *sessionListener) Close() error {
-	l.once.Do(func() { _ = l.connection.Close(); close(l.done) })
+	// Revocation closes the underlying carrier directly: TLS Close may wait
+	// for a close-notify writer, which is not part of the authority deadline.
+	l.once.Do(func() { _ = l.transport.Close(); close(l.done) })
 	return nil
 }
 

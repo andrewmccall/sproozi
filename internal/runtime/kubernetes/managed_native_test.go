@@ -66,7 +66,7 @@ func TestManagedLaunchProjectsFreshKindSpecificPlaceholderAndHarness(t *testing.
 				key, other = other, key
 			}
 			if launch.Harness != kind || launch.Model != "approved-model" || launch.ThreadID != intent.NativeUUID ||
-				!launch.Deadline.Equal(intent.OriginalDeadline) || !slices.Contains(launch.Env, key+"="+clientAuthPlaceholder) {
+				!launch.Deadline.Equal(intent.OriginalDeadline) || !slices.Contains(launch.Env, key+"=sproozi-worker-placeholder") {
 				t.Fatalf("wrong trusted native launch: %+v", launch)
 			}
 			for _, entry := range launch.Env {
