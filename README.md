@@ -1,261 +1,115 @@
 # Sproozi
 
-Sproozi runs existing AI agents in controlled environments, governs their access
-to external systems, and preserves their conversations and workspaces so you can
-continue the work elsewhere.
+**YOLO your agents. Not your infrastructure.**
 
-You can ask Codex to investigate a problem in Kubernetes, let it finish while
-your laptop is offline, then pull the session and continue the same conversation
-locally. Or start an interactive session in Docker and move it to an approved
-cluster while keeping its unfinished work. Sproozi manages execution, access and
-continuity; the native agent still decides how to carry out the task.
+I want to give an AI agent a job and let it get on with it. No approving every shell command. No sitting around waiting for it to finish.
 
-This is a preview for evaluation. The concepts below describe the implemented
-architecture; [support and verification](#support-and-verification) lists the
-tested paths and their limits.
+But I don't want to give it my personal credentials, let it delete my home directory, or discover that an innocent-looking task turned into something much less innocent. I'd rather it didn't hack Hugging Face or turn the world into paperclips, either.
 
-Start with the [Kind walkthrough](docs/guides/getting-started.md),
-[install on an existing cluster](docs/guides/install-kubernetes.md), or read on
-for the architecture.
+Sproozi runs **existing AI agents in isolated environments**, controls what they can access outside those environments, and lets you bring their conversations and unfinished work back to your own machine.
 
-## An agent works inside a sandbox
+It's not another agent or coding assistant. It's a way to run the agents you already use with more freedom **inside boundaries you choose**.
 
-A harness such as Codex or Claude Code owns the agent loop. It reads the task,
-calls the model and chooses tools. Its runtime supplies the filesystem and local
-tools, such as a shell, Git or a compiler. A Docker or Kubernetes executor
-provides the isolated environment in which that harness runs.
+> **Project status:** Early open-source preview. The core paths described below have been tested in specific scenarios, but this isn't a production-ready security boundary. See [what works today](#what-works-today) and [security limitations](#security-limitations).
 
-```mermaid
-flowchart LR
-    subgraph Sandbox[Sandbox on Docker or Kubernetes]
-        Harness[Agent harness] --> Tools[Shell, Git, compiler and files]
-    end
-    Harness -->|Model and external tool calls| Gateway[Trusted gateway]
-    Tools --> Gateway
-    Gateway --> Services[Approved external systems]
-```
+## What can I do with it?
 
-The useful boundary is external access. `git diff` works on local files;
-fetching a repository or publishing a pull request reaches another system.
-Installing `kubectl` gives the agent a command, while a capability determines
-which cluster resources it may access.
+**Let an agent investigate your infrastructure.** Ask an agent to diagnose a failing Kubernetes workload and propose a fix, without giving it your personal cluster-admin credentials. Define which Kubernetes resources it may read and which repository it may propose changes to.
 
-The gateway checks the live run identity and policy, authorises the operation,
-and supplies upstream credentials. Provider credentials stay outside the sandbox.
-Enforcing this route requires network isolation as well as gateway checks. On
-Kubernetes, Sproozi generates policy allowing DNS and gateway egress. Operators
-must use an enforcing CNI and probe direct access, accounting for NetworkPolicy's
-node-traffic exceptions.
+**Run coding agents away from your laptop.** Run Codex in Kubernetes while your laptop is offline, then pull the stopped session back and continue the same conversation in local Docker, including unfinished Git changes.
 
-The [harness reference](docs/reference/harnesses.md) distinguishes ordinary runs
-with Codex, Claude Code, OpenCode and Hermes from managed session movement,
-which currently supports Codex and Claude Code.
+**Give assistants disposable workers.** Keep an assistant such as Hermes running for conversations and scheduled tasks, while individual jobs execute in restricted environments and end when their work is done.
 
-## Capabilities control external access
+## How it works
 
-Sproozi can understand an external call at three levels. The level determines
-what the gateway can check about the operation.
+Sproozi combines three things:
 
-```mermaid
-flowchart LR
-    Access[External access] --> Known[Known capability: Semantic]
-    Access --> MCP[Configured MCP server: Protocol]
-    Access --> Generic[Generic HTTPS access: Destination]
-    Known --> Actions[Service resources and actions]
-    MCP --> Tools[Approved tools and arguments]
-    Generic --> Hosts[Exact host and port]
-```
+1. **Isolation.** The agent runs in a dedicated Docker container or Kubernetes environment rather than directly on your everyday machine. It can use ordinary tools such as a shell, Git and compilers inside that environment.
+2. **Controlled access.** The agent doesn't need your broad personal credentials. When it needs an external service, Sproozi can route the request through a gateway that checks what the agent is allowed to do and supplies the necessary credentials. For example, you can grant access to a particular Kubernetes namespace instead of handing over unrestricted cluster access.
+3. **Portable work.** Sproozi can preserve a supported agent's conversation and Git workspace, so you can stop work in one environment and resume it in another. Permissions are checked again when work resumes; they don't travel with the session.
 
-A known capability has a service-specific handler. It can check a Kubernetes
-namespace or the repository and branch involved in a GitHub operation. A
-configured MCP capability exposes selected tools from an approved HTTPS server,
-with discovered schemas and optional policy restrictions on arguments. A generic
-destination grant permits an exact HTTPS destination, with less understanding of
-the request's meaning.
+This is about giving an agent autonomy *within a defined boundary*. It does not make untrusted code harmless or eliminate every security risk.
 
-Adding a compatible MCP server requires registration and policy configuration,
-without a provider-specific Go adapter.
+## Use the agents you already like
 
-These levels are independent of how the agent makes the call. CLI, HTTP and MCP
-are interfaces. The native Kubernetes MCP tool still receives Semantic
-checks through the Kubernetes handler. Configured remote MCP tools receive
-Protocol checks. Discovering a tool does not grant permission to call it.
+Sproozi does not replace an agent's own reasoning or tools. It launches an existing agent, provides an environment for it to work in, and enforces the access that you configure.
 
-[Capabilities and gateways](docs/explanations/capabilities-and-gateways.md)
-explains each boundary. [Configured MCP](docs/reference/configured-mcp.md)
-supports compatible HTTPS tool servers; managed stdio servers and OAuth consent
-remain future work.
+- **Codex and Claude Code:** supported for Kubernetes jobs. Session movement between Docker and Kubernetes has been tested with Codex 0.161.0 and Claude Code 2.1.27.
+- **OpenCode and Hermes:** supported for Kubernetes jobs; portable sessions aren't yet supported for these agents.
 
-## Administrators define the bounds; a run supplies the task
-
-An administrator decides which environment, instructions and permissions are
-available. A caller selects an approved template and supplies a task with an
-explicit capability subset. Task text cannot expand those permissions.
-
-```mermaid
-flowchart TD
-    Run[AgentRun: task and requested capabilities] --> Template[AgentTemplate: trusted instructions]
-    Template --> Runtime[AgentRuntime: launch environment]
-    Template --> Policy[AgentPolicy: permissions and limits]
-```
-
-[`AgentTemplate`](docs/reference/agenttemplate.md) binds the trusted instructions
-to an [`AgentRuntime`](docs/reference/agentruntime.md) and an
-[`AgentPolicy`](docs/reference/agentpolicy.md). The runtime resource specifies the
-administrator-owned Pod configuration, image, client launch, workspace and
-gateway connection. This Kubernetes resource is distinct from the Docker or
-Kubernetes executor.
-
-`AgentPolicy` restricts capabilities and their resource scope, sets resource and
-lifetime limits, and supports optional consumption budgets.
-[`AgentRun`](docs/reference/agentrun.md) records the immutable task, event and
-requested capabilities; cancellation remains available after submission.
-The gateway continues to check live authority as the agent works.
-
-The [system architecture](docs/explanations/system-architecture.md) describes how
-these resources produce a sandbox, its identity and its immutable run contract.
-
-## A session outlives an execution
-
-A session identifies the conversation and working state you want to continue.
-An execution is one authorised period of work, with its own deadline and
-allowance. A placement is one visit to an executor during that execution.
-
-```mermaid
-flowchart LR
-    subgraph Session[One session and native conversation]
-        subgraph First[Execution 1: original deadline and remaining allowance]
-            Local[Docker placement] -->|move| Remote[Kubernetes placement]
-        end
-        Remote -->|stop, retain, later resume| Next[Execution 2: fresh authority and deadline]
-    end
-```
-
-Moving a running session preserves the execution's original deadline and
-remaining allowance. Each placement receives a fresh allocation and identity;
-each Kubernetes visit creates a fresh `AgentRun`. An execution can therefore
-include several placements and several Kubernetes runs.
-
-Resuming retained work later starts a fresh execution under a new grant while
-continuing the same native conversation and Git workspace. The
-[session guide](docs/guides/session-mobility.md) covers movement, and the
-[retained-work guide](docs/guides/portable-workflows.md) covers remote Codex work
-that you can pull and resume locally.
-
-## Move the work; authorise the destination
-
-A checkpoint contains selected native conversation state and the Git workspace,
-including unfinished changes. This lets the agent continue the work it was doing.
-Permissions, credentials and spending authority come from the destination's
-trusted configuration and admission checks.
-
-```mermaid
-flowchart LR
-    Source[Source writer] --> Fence[Stop writer and seal accounting]
-    Fence --> State[Capture conversation and Git state]
-    State --> Admission[Fresh destination admission]
-    Admission --> Writer[Activate one destination writer]
-```
-
-For a graceful move, Sproozi gates input, waits for supported active tools,
-revokes access and confirms the source writer has stopped. It seals accounting
-before capturing state. If stopping or usage remains uncertain, the destination
-cannot activate. A checkpoint alone proves neither permission nor unused budget.
-
-Pulling retained work first validates its stopped state and transfers ownership
-to the home daemon. Pull does not start an agent; resume obtains fresh authority
-and starts the next execution. The
-[checkpoint decision](docs/adr/0008-selected-native-and-git-checkpoints.md) and
-[retained-work decision](docs/adr/0012-retained-work-and-fresh-session-continuations.md)
-describe these guarantees and their costs.
-
-## A persistent assistant delegates bounded work
-
-A persistent assistant can keep your conversation, memory and schedules while
-individual workers start and finish. Stock Hermes runs separately with its
-native state on persistent storage. Sproozi owns the workers' bounds and lifetime.
-
-```mermaid
-flowchart LR
-    Hermes[Persistent Hermes assistant] --> Tasks[Fixed-workflow task service]
-    Tasks --> Run[Bounded worker]
-    Run --> Answer[Final answer retained in AgentRun status]
-    Hermes --> Owner[Retained-work owner]
-    Owner --> Codex[Bounded native Codex work]
-    Codex --> Session[Stopped session ready for pull and resume]
-```
-
-These paths preserve different results. The task service maps approved workflow
-names to fixed templates and capability subsets, retaining the final answer
-before worker cleanup. The retained-work owner also preserves native conversation
-and Git state so someone can continue that work later. Neither path gives Hermes
-Kubernetes control credentials.
-
-Use the [Hermes orchestration guide](docs/guides/hermes-orchestration.md) for
-fixed workflows and answers, or the
-[retained-work deployment guide](docs/guides/retained-work-kubernetes.md) for
-remote Codex work and local continuation.
+[Agent support and details](docs/reference/harnesses.md)
 
 ## Get started
 
-Choose the workflow you want to try. Each guide includes its prerequisites and
-administrator setup.
+Try the infrastructure-investigation demo in a local Kubernetes cluster.
 
-| Goal | Guide |
+**[Run the Kind walkthrough →](docs/guides/getting-started.md)**
+
+Or choose a path closer to what you want to do:
+
+| I want to… | Start here |
 | --- | --- |
-| Run an agent that investigates a failing workload and proposes a PR | [Getting started in Kind](docs/guides/getting-started.md), with [manual acceptance checks](docs/guides/manual-pr-demo.md) |
-| Install on an existing cluster and run a first credential-free Kubernetes read | [Install on Kubernetes](docs/guides/install-kubernetes.md) |
-| Start a native terminal session and move between Docker and Kubernetes | [Session mobility](docs/guides/session-mobility.md) |
-| Submit remote Codex work, then pull and resume it locally | [Retained work](docs/guides/portable-workflows.md) |
-| Connect persistent Hermes to retained native work in Kubernetes | [Kubernetes deployment walkthrough](docs/guides/retained-work-kubernetes.md) |
-| Run Hermes schedules and delegate disposable worker jobs | [Hermes orchestration](docs/guides/hermes-orchestration.md) |
+| Install on an existing Kubernetes cluster | [Kubernetes installation](docs/guides/install-kubernetes.md) |
+| Move an interactive session between Docker and Kubernetes | [Session mobility](docs/guides/session-mobility.md) |
+| Run Codex remotely, then pull its work back to my machine | [Remote work and local resume](docs/guides/portable-workflows.md) |
+| Have Hermes delegate bounded tasks | [Hermes orchestration](docs/guides/hermes-orchestration.md) |
+| Check the investigation-to-PR demo manually | [Manual acceptance checks](docs/guides/manual-pr-demo.md) |
+| Connect persistent Hermes to retained Codex work | [Retained-work deployment](docs/guides/retained-work-kubernetes.md) |
 
-The public CLI builds with `go build -o bin/sproozi ./cmd/sproozi`. The session
-guides cover `serve`, `start`, `attach` and `move`; the retained-work guide adds
-`sessions`, `pull`, `resume` and `stop`.
+The CLI can be built with:
 
-## Support and verification
+```bash
+go build -o bin/sproozi ./cmd/sproozi
+```
 
-| Path | Current support and evidence |
+The linked guides cover configuration and prerequisites. This is not yet a one-command install.
+
+## What works today
+
+There's working code and recorded tests, but support varies by workflow:
+
+| Area | Current state |
 | --- | --- |
-| Ordinary Kubernetes workers | Codex, Claude Code, OpenCode and Hermes. The [stock runtime examples](examples/harnesses/README.md) cover launch configuration; the isolated Kind E2E exercises all four with deterministic providers. |
-| Investigation to proposed PR | [Recorded SRE runs](docs/demos/verified-sre-demo.md) used a real model and GitHub to propose a correction. They did not merge or deploy it. |
-| MCP access | [Recorded MCP acceptance](docs/demos/verified-mcp-demo.md) covers stock Codex, native Kubernetes tools and two configured HTTPS fixture providers, including scope and budget denials. |
-| Interactive session movement | Pinned Codex 0.161.0 and Claude Code 2.1.27 passed [round trips between Docker and Kubernetes](docs/demos/verified-session-mobility.md) with native conversation and unfinished Git state. Providers were deterministic; the report distinguishes each client's failure-path coverage. |
-| Retained remote work | Codex tasks, stock Hermes dispatch, Project filtering, exact Git revision replay and fresh local continuation passed the [retained-work fixture](docs/demos/verified-portable-workflows.md). Actual Sproozi package tests and isolated home-ops reads/denials passed remotely and locally with deterministic models. Paid-model engineering contributions and personal home-ops acceptance remain unassessed. |
+| Kubernetes-based agent jobs | Tested with Codex, Claude Code, OpenCode and Hermes using deterministic providers |
+| Controlled access to Kubernetes and external tools | [Recorded tool-access acceptance](docs/demos/verified-mcp-demo.md) with a real model, including native Kubernetes reads, configured HTTPS test servers and denied operations |
+| Docker ↔ Kubernetes session movement | [Recorded round trips](docs/demos/verified-session-mobility.md) with the pinned clients above and deterministic providers, including unfinished Git changes |
+| Remote Codex work followed by local continuation | [Recorded retained-work acceptance](docs/demos/verified-portable-workflows.md) with deterministic models, actual package checks and isolated Kubernetes reads/denials |
+| Infrastructure investigation and proposed GitHub fix | [Recorded SRE runs](docs/demos/verified-sre-demo.md) with a real model and GitHub; no merge or deployment |
 
-These reports record specific scenarios and working trees. They do not establish
-release reproducibility or production readiness. Configured Projects and exact
-workspace revisions are [implemented](docs/reference/projects-and-revisions.md), with
-[recorded native development acceptance](docs/demos/execution-roadmap-evidence.json).
-Arbitrary existing-session
-adoption, GUI/IDE attachment, additional movable clients, managed stdio MCP and
-OAuth consent remain [future work](docs/explanations/future-architecture/README.md).
+These are **specific verified scenarios**, not a claim that every configuration works or that the project is ready for production. The [verification reports](docs/demos/README.md) give the evidence, and the [agent reference](docs/reference/harnesses.md) documents the supported paths.
 
-## Boundaries and limitations
+## Security limitations
 
-| Boundary | Current behaviour |
-| --- | --- |
-| Pod security | Runtime validation requires non-root execution, dropped capabilities, RuntimeDefault seccomp, a read-only root and bounded writable volumes. |
-| Identity | Each run has a dedicated ServiceAccount without direct Kubernetes grants. The gateway checks live run identity and policy. |
-| Network | Policy grants DNS and gateway egress. An enforcing CNI and actual direct-access probes are required; node-traffic exceptions prevent a blanket isolation guarantee. |
-| Transport | CLI, HTTP and MCP clients use one authenticated inspected-TLS proxy. Native handlers enforce service scope; the configured MCP bridge filters approved tools and validates argument schemas. |
-| Budgets | Kubernetes-backed accounting survives gateway restarts. Model reservations can underestimate total usage, so token and cost limits are not hard provider-spending ceilings. |
-| Completion | Kubernetes workers use a completion container named `agent`. Arbitrary container names and long-running sidecars do not yet have working completion semantics. Successful completion does not establish the correctness of the answer. |
-| Cleanup | Recorded runs removed their sandbox resources. Interrupted provisioning can leave resources when status writes are lost; budget ConfigMaps have no automatic retention cleanup. |
-| Audit | The gateway logs redacted decisions. Operators supply durable storage and review proposed changes before merging. |
+Isolation only works if the environment is configured and enforced correctly. In particular:
 
-See [security hardening](docs/reference/security-hardening.md) for deployment
-controls and known implementation limits. The current Kubernetes backend creates
-Pods; Kubernetes Agent Sandbox integration is planned.
+- Kubernetes network restrictions require an enforcing network plugin and verification that agents cannot bypass the gateway. Kubernetes NetworkPolicy permits traffic involving a Pod's own node, so policy alone is not a complete isolation guarantee.
+- Rules can restrict external operations, but their precision depends on the integration. A service-aware permission can constrain particular actions. Configured Model Context Protocol (MCP) access checks tools and arguments, while a generic HTTPS allowance only constrains the destination.
+- Resource and usage limits exist, but model-token and cost estimates are **not** hard guarantees against provider spend.
+- A sandbox does not guarantee that an agent's answer, code or proposed fix is correct. Review changes before deploying or merging them.
 
-The [documentation index](docs/README.md) links all guides and references.
-The [system architecture](docs/explanations/system-architecture.md) connects the
-components in more detail, and the [ADRs](docs/adr/README.md) record the decisions
-and tradeoffs. The [home-ops playbook](docs/guides/home-ops-playbook.md) and
-[runbook](docs/guides/home-ops-demo-runbook.md) retain the planned alert-to-PR and
-recovery workflow, which has not been accepted.
+Read the [security hardening guide](docs/reference/security-hardening.md) before using Sproozi with sensitive infrastructure.
 
-Project grouping, independent home approval and clean Git revision launch are
-described in the [Project reference](docs/reference/projects-and-revisions.md).
-Seven collaboration directions remain [deferred architecture notes](docs/explanations/future-architecture/README.md#execution-roadmap-extensions).
+## Where this is going
+
+The aim is simple: **your agents, your infrastructure, your rules, and your sessions wherever you want to continue them.**
+
+That opens the door to agents triggered by incidents, pull requests and persistent assistants; people taking over work started by an agent; and, eventually, agents collaborating without having to share one giant set of credentials.
+
+Some of that is still future architecture, not shipped functionality. The [future architecture notes](docs/explanations/future-architecture/README.md) separate planned ideas from the working paths.
+
+## Dig deeper
+
+- [Architecture](docs/explanations/system-architecture.md)
+- [Capabilities and gateways](docs/explanations/capabilities-and-gateways.md)
+- [Projects and workspaces](docs/reference/projects-and-revisions.md)
+- [Full documentation index](docs/README.md)
+- [Stock runtime examples](examples/harnesses/README.md)
+- [Session command reference](docs/reference/session-commands.md)
+- [Configured MCP tools](docs/reference/configured-mcp.md)
+- Kubernetes resource references: [runtime](docs/reference/agentruntime.md), [policy](docs/reference/agentpolicy.md), [template](docs/reference/agenttemplate.md) and [run](docs/reference/agentrun.md)
+- [Architecture decisions](docs/adr/README.md), including [what a checkpoint contains](docs/adr/0008-selected-native-and-git-checkpoints.md) and [retained work with fresh permissions](docs/adr/0012-retained-work-and-fresh-session-continuations.md)
+- [Project and Git revision acceptance evidence](docs/demos/execution-roadmap-evidence.json)
+- Planned home-ops workflow: [playbook](docs/guides/home-ops-playbook.md) and [runbook](docs/guides/home-ops-demo-runbook.md). This alert-to-PR and recovery workflow has not passed end-to-end acceptance.
+- [Future collaboration directions](docs/explanations/future-architecture/README.md#execution-roadmap-extensions)
+
+Sproozi is open source and evolving. If you're trying to let agents do useful work without handing them the keys to everything, I'd love to hear what you're building.
