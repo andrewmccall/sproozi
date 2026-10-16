@@ -7,6 +7,7 @@ Future architecture is kept separate from implemented behaviour and verified gui
 
 ## Guides
 
+- [Verification reports](demos/README.md), recorded scenarios, model sources and evidence limits
 - [Getting started](guides/getting-started.md), from a fresh checkout to a Kind demo and a real pull request
 - [Kind verification skill](../.agents/skills/verify-sproozi/SKILL.md), repeatable dependency checks, demo acceptance and retained proof
 - [Install on Kubernetes and run your first Pod](guides/install-kubernetes.md), including registry images, certificates and a provider-free first run
@@ -43,6 +44,7 @@ recovery flow has not been verified end to end.
 - [Kubernetes MCP delivery](reference/kubernetes-mcp.md)
 - [Configured remote MCP capabilities](reference/configured-mcp.md)
 - [Native CLI harnesses](reference/harnesses.md)
+- [Session commands](reference/session-commands.md), remote tasks, local continuation and interactive movement
 - [Persistent task MCP interface](reference/orchestration.md)
 
 - [Projects and workspace revisions](reference/projects-and-revisions.md), configuration, membership, local approval and exact-revision fresh work
