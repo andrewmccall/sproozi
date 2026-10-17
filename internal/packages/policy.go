@@ -65,7 +65,7 @@ func ValidateScope(scope sprooziv1alpha1.PackagesInstallScope) error {
 	}
 	for _, a := range scope.Artifacts {
 		for _, dep := range a.Dependencies {
-			name, err := NormalizeName(dep.Name)
+			name, err := normalizeName(dep.Name)
 			if err != nil || name != dep.Name || dep.Version == "" {
 				return fmt.Errorf("dependency %q is invalid", dep.Name)
 			}
@@ -77,8 +77,8 @@ func ValidateScope(scope sprooziv1alpha1.PackagesInstallScope) error {
 	return nil
 }
 
-// NormalizeName applies the PEP 503 canonicalization used by the simple API.
-func NormalizeName(name string) (string, error) {
+// normalizeName applies the PEP 503 canonicalization used by the simple API.
+func normalizeName(name string) (string, error) {
 	name = strings.ToLower(strings.TrimSpace(name))
 	name = strings.Trim(name, "-")
 	name = regexp.MustCompile(`[-_.]+`).ReplaceAllString(name, "-")
@@ -106,7 +106,7 @@ func AuthorizePath(scope sprooziv1alpha1.PackagesInstallScope, req Request) Deci
 	}
 	if after, ok := strings.CutPrefix(req.Path, "/simple/"); ok {
 		name := strings.TrimSuffix(after, "/")
-		normalized, err := NormalizeName(name)
+		normalized, err := normalizeName(name)
 		if err != nil || normalized != name {
 			return Decision{Reason: "package_metadata_not_normalized"}
 		}
@@ -188,7 +188,7 @@ func VerifyMetadata(scope sprooziv1alpha1.PackagesInstallScope, r io.Reader) ([]
 }
 
 func validArtifact(a *sprooziv1alpha1.PackageArtifact) bool {
-	name, err := NormalizeName(a.Name)
+	name, err := normalizeName(a.Name)
 	return err == nil && name == a.Name && validVersion(a.Version) && validFilename(a.Filename) && digestPattern.MatchString(a.SHA256)
 }
 
@@ -222,18 +222,4 @@ func hasArtifactName(artifacts []sprooziv1alpha1.PackageArtifact, name string) b
 
 func containsEcosystem(ecosystems []sprooziv1alpha1.PackageEcosystem, want sprooziv1alpha1.PackageEcosystem) bool {
 	return slices.Contains(ecosystems, want)
-}
-
-// ArtifactURL validates that a URL is HTTPS, has no credentials/query/fragment,
-// and points to the exact filename approved by the policy. Redirect targets must
-// be passed through this function again; callers must not follow redirects blindly.
-func ArtifactURL(raw string, artifact sprooziv1alpha1.PackageArtifact) error {
-	u, err := url.Parse(raw)
-	if err != nil || u.Scheme != "https" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Host != pythonFilesHost && u.Host != pypiHost) {
-		return fmt.Errorf("artifact URL is outside the approved registry")
-	}
-	if !validArtifact(&artifact) || !strings.HasSuffix(u.Path, "/"+artifact.Filename) {
-		return fmt.Errorf("artifact URL does not match the approved artifact")
-	}
-	return nil
 }
