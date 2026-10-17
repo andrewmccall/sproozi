@@ -109,7 +109,7 @@ the agent loop or using model text to decide lifecycle success.
 
 Result text is untrusted and can contain sensitive scoped tool data. It lives in
 `AgentRun.status.result` and is visible to authorized AgentRun readers. It does
-not enter audit-safe summary, conditions or lifecycle audit events. Treat it as
+not enter conditions or lifecycle audit events. Treat it as
 data, and apply the same fixed workflow authority to follow-on work. The answer
 survives Pod cleanup and controller restart, but expires with AgentRun retention.
 After Run deletion, status returns unavailable; persistent assistant conversation

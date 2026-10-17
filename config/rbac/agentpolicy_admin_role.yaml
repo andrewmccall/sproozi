@@ -19,9 +19,3 @@ rules:
   - agentpolicies
   verbs:
   - '*'
-- apiGroups:
-  - sproozi.com
-  resources:
-  - agentpolicies/status
-  verbs:
-  - get

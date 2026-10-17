@@ -221,10 +221,6 @@ spec:
                 description: StartedAt records when the run was admitted to execution.
                 format: date-time
                 type: string
-              summary:
-                description: Summary is an audit-safe brief summary of the completed
-                  run (max 500 chars).
-                type: string
             type: object
         required:
         - spec

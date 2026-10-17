@@ -25,9 +25,3 @@ rules:
   - patch
   - update
   - watch
-- apiGroups:
-  - sproozi.com
-  resources:
-  - agentpolicies/status
-  verbs:
-  - get
