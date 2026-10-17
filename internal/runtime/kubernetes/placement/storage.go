@@ -2,6 +2,7 @@ package placement
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"io"
@@ -18,8 +19,9 @@ import (
 
 const recordSuffix = ".json"
 
+// retained keeps the launch exactly as prepared. A first visit's genuine
+// native UUID is bound in the registry record (NativeUUID), never in Launch.
 type retained struct {
-	Initial         *session.Launch    `json:"initial,omitempty"`
 	WorkspaceDigest string             `json:"workspaceDigest,omitempty"`
 	Launch          session.Launch     `json:"launch"`
 	Reference       registry.Reference `json:"reference"`
@@ -96,11 +98,21 @@ func (p *Placement) load(l session.Launch) (retained, error) {
 	if err = decode(data, &r); err != nil {
 		return retained{}, err
 	}
-	if !sameIntent(r.Launch, l) && (r.Initial == nil || !sameIntent(*r.Initial, l)) {
+	if !sameIntent(r.Launch, l) {
 		return retained{}, &profile.Rejection{Code: profile.CodeConflict}
 	}
 	return r, nil
 }
+
+// fresh reports a first visit started from a Git workspace rather than a checkpoint.
+func (r retained) fresh() bool { return r.Launch.CheckpointDigest == "" }
+
+// thread is the native thread the visit runs: the launch's, or the genuine one
+// a first visit bound in the registry.
+func (r retained) thread(record registry.Record) string {
+	return cmp.Or(r.Launch.ThreadID, record.NativeUUID)
+}
+
 func (p *Placement) save(r retained) error {
 	data, err := json.Marshal(r)
 	if err != nil {

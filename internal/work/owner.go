@@ -4,6 +4,7 @@ package work
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -389,7 +390,7 @@ func view(r record) View {
 		Result: r.Result, ResultTruncated: r.ResultTruncated, Problem: r.Problem}
 	v.CheckpointInfo, v.WorkspaceFrom = r.CheckpointInfo, r.Intent.WorkspaceFrom
 	if r.Stopped != nil {
-		v.ThreadID = r.Stopped.Launch.ThreadID
+		v.ThreadID = cmp.Or(r.Stopped.ThreadID, r.Stopped.Launch.ThreadID)
 		v.CheckpointDigest = r.Stopped.CheckpointDigest
 	}
 	return v
@@ -605,18 +606,15 @@ func (o *Owner) execute(ctx context.Context, r *record) error {
 		if e != nil {
 			return e
 		}
-		if e = ValidateExport(Export{ID: r.Launch.SessionID, Harness: r.Launch.Harness, Stopped: stopped, Checkpoint: stopped.Checkpoint}, o.config.MaxCheckpointBytes); e != nil {
-			return e
-		}
-		if stopped.Launch.OperationID != r.Launch.OperationID || stopped.Launch.AllocationID != r.Launch.AllocationID || stopped.Incarnation != *r.Incarnation {
+		if stopped.Incarnation != *r.Incarnation {
 			return errors.New("work: stopped execution binding mismatch")
 		}
-		bound := stopped.Launch
-		bound.ThreadID = r.Launch.ThreadID
-		expected, _ := json.Marshal(r.Launch)
-		actual, _ := json.Marshal(bound)
-		if !bytes.Equal(expected, actual) {
+		if !session.SameLaunch(stopped.Launch, r.Launch) {
 			return errors.New("work: stopped launch intent changed")
+		}
+		stopped = exportedStop(stopped)
+		if e = ValidateExport(Export{ID: r.Launch.SessionID, Harness: r.Launch.Harness, Stopped: stopped, Checkpoint: stopped.Checkpoint}, o.config.MaxCheckpointBytes); e != nil {
+			return e
 		}
 		if e = atomic(o.config.Directory, r.Launch.SessionID+".checkpoint", stopped.Checkpoint); e != nil {
 			return e
@@ -637,6 +635,20 @@ func (o *Owner) execute(ctx context.Context, r *record) error {
 		return o.save(*r)
 	}
 	return nil
+}
+
+// exportedStop describes a stopped visit as an exported continuation, whose
+// launch and receipt name the native thread to resume. The placement reports a
+// first visit's genuine thread separately because its launch never changes.
+func exportedStop(s session.Stopped) session.Stopped {
+	thread := cmp.Or(s.ThreadID, s.Launch.ThreadID)
+	s.Launch.ThreadID, s.ThreadID = thread, ""
+	if s.Receipt != nil {
+		receipt := *s.Receipt
+		receipt.Launch.ThreadID = thread
+		s.Receipt = &receipt
+	}
+	return s
 }
 
 // ValidateExport keeps transcript validation separate from trusted stop/seal evidence.

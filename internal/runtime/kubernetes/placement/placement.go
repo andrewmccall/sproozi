@@ -281,7 +281,7 @@ func (p *Placement) CreateInitial(ctx context.Context, l session.Launch, data []
 	// A lost prepare acknowledgement observes the original exact incarnation,
 	// even after its bounded execution stopped or expired. This grants no activation.
 	existing, loadErr := p.load(l)
-	if loadErr == nil && existing.Initial != nil {
+	if loadErr == nil && existing.WorkspaceDigest != "" {
 		if existing.WorkspaceDigest != digest {
 			return session.Incarnation{}, &profile.Rejection{Code: profile.CodeConflict}
 		}
@@ -312,12 +312,11 @@ func (p *Placement) CreateInitial(ctx context.Context, l session.Launch, data []
 	if fmt.Sprintf("%x", sha256.Sum256(retainedInput)) != digest {
 		return session.Incarnation{}, &profile.Rejection{Code: profile.CodeConflict}
 	}
-	if local.Initial == nil {
+	if local.WorkspaceDigest == "" {
 		if local.Reference.UID != "" || local.OutputDigest != "" {
 			return session.Incarnation{}, &profile.Rejection{Code: profile.CodeConflict}
 		}
-		original := l
-		local.Initial, local.WorkspaceDigest = &original, digest
+		local.WorkspaceDigest = digest
 		if err = p.save(local); err != nil {
 			return session.Incarnation{}, err
 		}
@@ -365,12 +364,12 @@ func (p *Placement) prepare(ctx context.Context, local retained, r registry.Reco
 		return session.Incarnation{}, err
 	}
 	operation := helperPrepare
-	if local.Initial != nil {
+	if local.fresh() {
 		operation = helperPrepareWorkspace
 	}
 	arguments := []string{helperPath, operation, "--harness", string(r.Harness),
 		"--max-bytes", strconv.FormatInt(p.config.MaxCheckpointBytes, 10)}
-	if local.Initial == nil {
+	if !local.fresh() {
 		arguments = append(arguments, "--instruction-digest", r.InstructionDigest)
 	}
 	output, err := p.control(ctx, pod, runtimekube.CaptureContainer, arguments, data, 64<<10)
@@ -378,7 +377,7 @@ func (p *Placement) prepare(ctx context.Context, local retained, r registry.Reco
 		return session.Incarnation{}, err
 	}
 	var meta checkpoint.Metadata
-	if err = decode(output, &meta); err != nil || meta.Harness != r.Harness || (local.Initial == nil && (meta.ThreadID != r.NativeUUID || meta.SHA256 != r.CheckpointDigest) || local.Initial != nil && (meta.ThreadID != "" || meta.SHA256 != local.WorkspaceDigest)) {
+	if err = decode(output, &meta); err != nil || meta.Harness != r.Harness || (!local.fresh() && (meta.ThreadID != r.NativeUUID || meta.SHA256 != r.CheckpointDigest) || local.fresh() && (meta.ThreadID != "" || meta.SHA256 != local.WorkspaceDigest)) {
 		return session.Incarnation{}, errors.New("placement: restored checkpoint metadata mismatch")
 	}
 	for name := range r.Ceilings {
