@@ -12,7 +12,7 @@ The tool delivers the existing `kubernetes.read` capability at the Semantic tier
 The run must request that capability, current policy must allow it, and policy
 must include both the namespace and `pods` resource. Discovery omits the tool
 when Pod reads are unavailable; actual calls still authorize their namespace.
-Installing a connection or forging an MCP session ID grants no authority.
+Opening a connection or forging an MCP session ID grants no permission.
 
 ## Identity and lifetime
 

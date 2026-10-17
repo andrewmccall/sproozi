@@ -83,14 +83,16 @@ fail in their environment. NetworkPolicy has exceptions for node traffic.
 
 Each run has a dedicated ServiceAccount and a token for the gateway audience.
 The token identifies the run. Its requested capabilities and current policy
-determine permission. New requests check that the run is active; open sessions
-close after bounded revalidation. The agent Pod has no Sproozi proxy sidecar.
+determine permission. Each new request checks that the run is still active,
+and open connections close soon after it stops. The agent Pod has no Sproozi
+proxy sidecar.
 
-Both backends limit connections before TLS, sessions per execution and authority
-lookups. Authentication and live lookups have short deadlines. Late lookup
-results cannot restore permission, and lookup capacity stays occupied until the
-dependency returns. [Transport limits](../reference/security-hardening.md#protect-transport-and-identities)
-give the defaults and explain why closing a connection does not prove that
+Both gateway backends cap connections, sessions per execution and pending
+policy lookups, and give authentication and lookups short deadlines. A late
+lookup result can't restore permission. A slow policy lookup keeps its slot
+until it returns, even after timing out.
+[Transport limits](../reference/security-hardening.md#protect-transport-and-identities)
+give the defaults and explain why closing a connection doesn't prove that
 upstream work stopped.
 
 The gateway routes each request to a handler. A handler can check service
@@ -132,7 +134,7 @@ design decision.
 
 ## Persistent assistant delegation
 
-Hermes runs separately from worker Pods. It keeps its native sessions, memory
+Hermes runs separately from agent Pods. It keeps its native sessions, memory
 and schedules on a persistent volume. Its MCP client submits tasks to a private
 service that maps workflow names to fixed templates and capability subsets.
 Hermes receives no Kubernetes token.
@@ -148,15 +150,16 @@ guide](../guides/hermes-orchestration.md) and [ADR
 
 ## Kubernetes execution
 
-The Kubernetes adapter creates disposable Pods directly. It does not use the
-external Kubernetes Agent Sandbox operator. Each run receives an immutable input
+The Kubernetes adapter creates disposable Pods directly; see
+[cluster dependencies](../reference/dependencies.md). Each run receives an immutable input
 contract, a projected gateway token and a run-specific NetworkPolicy. Its
 ServiceAccount has no direct Kubernetes read grant.
 
 ## Managed native session continuity
 
-A home daemon manages controlled Docker sessions. It connects to a fixed remote
-profile service for Kubernetes placement. The profile holds Kubernetes
+The [home daemon](../../GLOSSARY.md#home-daemon) manages controlled Docker
+sessions. It connects to a [profile service](../../GLOSSARY.md#profile-service)
+to place work on Kubernetes. The profile holds Kubernetes
 credentials; the home daemon does not need them. Each remote visit creates a
 fresh `AgentRun` and must pass current policy checks.
 
@@ -164,7 +167,7 @@ fresh `AgentRun` and must pass current policy checks.
 flowchart LR
     CLI[Native terminal client] --> Home[Home daemon and session journal]
     Home --> Docker[Controlled Docker placement]
-    Home --> Profile[Authenticated fixed remote profile]
+    Home --> Profile[Authenticated profile service]
     Profile --> Run[Fresh Kubernetes AgentRun]
     Docker --> LocalGateway[Local model gateway and accounts]
     Run --> Gateway[Shared gateway and managed accounts]
@@ -173,24 +176,26 @@ flowchart LR
     Checkpoint --> Home
 ```
 
-During a live move, the execution keeps its native conversation ID, original
-deadline and total usage allowance. Each visit has a fresh allocation and
-placement identity. A checkpoint carries the supported conversation and Git
+During a live move, the [execution](../../GLOSSARY.md#execution) keeps its
+native conversation ID, original deadline and total
+[allowance](../../GLOSSARY.md#allowance). Each [visit](../../GLOSSARY.md#visit)
+gets a fresh allocation and placement identity. A checkpoint carries the supported conversation and Git
 workspace. It carries no credentials or permission to spend.
 
 To move safely, Sproozi blocks new input, waits for the current turn and tools,
-revokes access and confirms that all source writers have stopped. It then
-finalizes usage accounting and captures the checkpoint. Only then can the
-destination start. If stop or usage remains unknown, the reserved allowance
-stays held and the destination cannot start. Forced cancellation revokes access
+revokes access and confirms that every source [writer](../../GLOSSARY.md#writer)
+has stopped. It then records [finalized usage](../../GLOSSARY.md#finalized-usage)
+and captures the checkpoint. Only then can the destination start. If Sproozi
+can't confirm the stop or the usage, the reserved allowance stays held and the
+destination doesn't start. Forced cancellation revokes access
 first and does not require a fresh checkpoint.
 
-[Remote-first tasks](../guides/portable-workflows.md) use a catalogue hosted by
+[Remote work and local resume](../guides/portable-workflows.md) uses a catalogue hosted by
 the profile service. It runs independently of the laptop. After a Codex task
 finishes, it stops the worker, finalizes usage and retains native and Git state.
 Hermes can submit and inspect tasks through authenticated MCP.
 
-Pull transfers ownership to the home installation without starting an agent. A
+Pull transfers ownership to the home daemon without starting an agent. A
 later resume starts a new execution with current local approval and the same
 native conversation ID. Old usage receipts remain unchanged. Retried operations
 stay bound to their original execution, so they cannot affect a later resume.
@@ -204,17 +209,17 @@ changes or the old conversation. See [Projects and workspace
 revisions](../reference/projects-and-revisions.md) and [ADR
 0013](../adr/0013-configured-projects-and-workspace-revisions.md).
 
-Both placements share trusted native launch settings and strict checks of the
-operation, state and native conversation ID in control replies. Each backend
-still owns physical stop and usage-accounting checks. See [native
+Docker and Kubernetes share the same trusted launch settings, and both check
+that every control reply names the expected operation, state and conversation
+ID. Each backend still confirms its own container stop and usage. See [native
 control](../reference/native-control.md) and [ADR
 0014](../adr/0014-review-boundaries-and-native-contracts.md). ACP and AHP are
 possible future integrations; neither is exposed as a Sproozi endpoint.
 
-The public `id` addresses the durable Sproozi session. `executionId`,
-`allocationId` and `incarnation` identify the current execution, visit and exact
-writer separately. See [session commands](../reference/session-commands.md) for
-owner selection and catalogue provenance.
+The public `id` names the [session](../../GLOSSARY.md#session).
+`executionId`, `allocationId` and `incarnation` name the current execution,
+visit and writer. See [session commands](../reference/session-commands.md) for
+choosing an owner and reading the catalogue.
 
 ## Implementation locations
 
@@ -233,5 +238,5 @@ boundaries.
 
 The [future architecture overview](future-architecture/README.md) covers managed
 MCP servers, more harnesses, GUI and IDE clients, adoption of existing sessions,
-and broader remote profiles. Each extension needs its own implementation and
+and broader profile services. Each extension needs its own implementation and
 tests.

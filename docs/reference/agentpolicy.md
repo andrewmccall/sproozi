@@ -87,33 +87,22 @@ separate accounts for each Run UID and capability. Policy changes do not reset
 consumption. Non-model endpoints spend one request unit before each authorized
 upstream call.
 
-Within one gateway process, model inference calls that share a budget account
-run one at a time. A second call waits for the first to settle usage. Cancellation
-and execution deadlines still apply while it waits. Calls using different accounts remain
-independent.
+`maxCostMicros` requires trusted endpoint pricing:
 
-OpenAI requests reserve the requested output limit, or remaining capacity when
-no output limit is supplied. They then settle provider-reported total usage.
-Input tokens can exceed the reservation. Anthropic reserves all remaining
-configured capacity before inference. Rejected settlement retains the reservation.
-It does not undo upstream consumption or fully record it. Token and cost limits
-are not hard provider-spending ceilings. See [security hardening](security-hardening.md).
+- Model inference uses the administrator's pricing table. Cost-bounded OpenAI
+  API-key and Anthropic requests need an exact model row with positive input,
+  cached-input and output rates before the gateway forwards them.
+- Cost-bounded OpenAI requests use `service_tier: default`. The gateway inserts
+  it when missing and rejects other tiers. Anthropic has its own standard-tier
+  and cache rules.
+- Other endpoints have no trusted pricing, so they reject a cost limit.
+- In ChatGPT-plan mode, set a token limit and `maxCostMicros: 0`.
 
-`maxCostMicros` requires trusted endpoint pricing. Model inference uses the
-administrator's pricing table. Cost-bounded OpenAI API-key and Anthropic requests
-require an exact model row with positive input, cached-input and output rates
-before provider work. OpenAI also selects `service_tier: default` and rejects
-explicit nondefault tiers; Anthropic has its own standard-tier/cache rules.
-Unknown consumed categories and non-token provider charges remain limitations.
-Other endpoints reject a monetary ceiling because they do not have trusted
-pricing. A configured budget in ChatGPT-plan mode uses a token ceiling and
-`maxCostMicros: 0`.
-
-Anthropic requests reserve all remaining configured token and monetary capacity.
-When a monetary cap applies, the gateway requires an exact model price before
-forwarding. Missing rates for a consumed category can still fail settlement.
-Neither provider route guarantees a hard spending ceiling. See
-[model providers](harnesses.md#model-providers) for the protocol-specific rules.
+Token and cost limits are not hard provider-spending ceilings.
+[Security hardening](security-hardening.md#model-budgets-are-not-hard-spending-ceilings)
+explains how reservations and settlement work and what they miss.
+[Model providers](harnesses.md#model-providers) lists the protocol-specific
+rules.
 
 Kubernetes namespaces, resources and verbs are checked on each request by the
 Kubernetes endpoint. Workload service accounts have no native read bindings.

@@ -10,7 +10,7 @@ conversation and unfinished workspace unchanged.
 ## Desired behaviour
 
 An authorised caller selects a checkpoint from a stopped session and its
-workspace revision. The fork gets a new Sproozi session ID and fresh
+workspace revision. The fork gets a new session ID and fresh
 permissions. It records its source, which remains available.
 
 ## Proposed parts

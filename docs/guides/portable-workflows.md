@@ -1,4 +1,4 @@
-# Start remote work and continue the same session locally
+# Remote work and local resume
 
 Start a Codex task in Kubernetes through Hermes or the CLI. Sproozi saves its
 conversation and Git workspace so you can resume it later in local Docker. The
@@ -11,7 +11,7 @@ The workflow has four steps:
 3. Pull the stopped session to your local installation.
 4. Resume the same conversation with current local permissions.
 
-Pull does not start an agent. Resume starts a new Sproozi execution with a new
+Pull does not start an agent. Resume starts a new execution with a new
 deadline and allowance. See [core concepts](../explanations/core-concepts.md)
 for the difference between a session and an execution.
 
@@ -34,7 +34,7 @@ personal-session adoption are not part of this workflow.
    not receive those credentials.
 3. Configure the [home daemon](../../cmd/sproozi/README.md) with one private JSON
    file. It selects local Docker images/network, gateway TLS/provider credential
-   files, finite allowances and named remote profiles. Keep it outside any
+   files, finite allowances and named profile services. Keep it outside any
    transferred repository. Use `--config FILE` consistently or put it at the
    platform's user configuration directory under `sproozi/config.json`.
 4. Configure scoped GitHub access through the existing GitHub App gateway for
@@ -131,7 +131,7 @@ connections; when omitted it uses the same named remote profiles. Both transport
 verify TLS 1.3, use one fixed origin and reject redirects.
 
 For a persistent in-cluster owner and the exact Hermes `/work/mcp` configuration,
-use [Deploy Hermes with retained native work](retained-work-kubernetes.md).
+use [Hermes with retained work](retained-work-kubernetes.md).
 
 ## Run and inspect work
 
@@ -199,7 +199,7 @@ native state.
 
 ## Pull and resume locally
 
-Start the home service, then transfer the completed session:
+Start the home daemon, then transfer the completed session:
 
 ```sh
 bin/sproozi serve --config /private/sproozi/config.json
@@ -280,7 +280,7 @@ Resolve and retain the resulting Docker content ID for the local configuration
 and canonical registry digest for the remote runtime. Use this image for the
 agent and existing compatible helper/anchor roles from the start of the
 installation; do not replace an existing execution's immutable image binding.
-The image inherits the native clients and supervisor from its approved base. Go uses image-owned cached
+The image inherits the harnesses and supervisor from its approved base. Go uses image-owned cached
 modules with `GOPROXY=off`, a local toolchain and ephemeral writable build state.
 Build state lives under `/workspace/sproozi-go-build`, outside the transferred
 `/workspace/session` pair; Docker's `/tmp` remains small and non-executable.

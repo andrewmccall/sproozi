@@ -1,4 +1,4 @@
-# Default agent clients and gateway compatibility
+# 0015: Default agent clients and gateway compatibility
 
 Status: accepted
 Date: 2026-10-16
@@ -56,7 +56,8 @@ source of budget authority. Restarting the gateway cannot release an unknown
 reservation. Discovery requests do not enter this queue.
 
 This replaces the version-pinning portions of ADRs 0008, 0010 and 0011, and the
-combined discovery-schema presentation in ADR 0001. Their state, lifecycle,
+combined discovery-schema presentation in ADR 0001. It also replaces the pinned
+client versions described in ADRs 0002, 0003, 0007 and 0012. Their state, lifecycle,
 credential and authorization boundaries remain in effect.
 The shared native launch and reply checks in [ADR
 0014](0014-review-boundaries-and-native-contracts.md) also remain in effect.

@@ -1,8 +1,9 @@
 # Capabilities and gateways
 
-A run requests capabilities. Policy decides which requests are allowed and sets
-their limits. The gateway checks each service operation against the run and
-current policy. Provider credentials stay in the gateway.
+A run requests [capabilities](../../GLOSSARY.md#capability). Policy decides
+which requests are allowed and sets their limits. The
+[gateway](../../GLOSSARY.md#gateway) checks each service operation against the
+run and current policy. Provider credentials stay in the gateway.
 
 Read [core concepts](core-concepts.md) for an introduction to runs, templates,
 runtimes and policies. This page explains how their permission checks combine.
@@ -54,9 +55,9 @@ The resources have separate responsibilities:
 ### `model.inference`
 
 The run must request `model.inference`, and current policy must allow it. An
-optional `AgentPolicy.spec.budgets[model.inference]` entry adds usage
-reservations and accounting. Admission can underestimate total model
-consumption. Token and cost limits are not hard provider-spending ceilings.
+optional `AgentPolicy.spec.budgets[model.inference]` entry limits tokens and
+cost. These limits are not hard spending ceilings; see
+[security hardening](../reference/security-hardening.md#model-budgets-are-not-hard-spending-ceilings).
 
 ### `network.egress`
 
@@ -93,10 +94,10 @@ capabilities](../reference/permissions-and-capabilities.md).
 
 ## Why this matters
 
-Prompts cannot grant permissions. The network boundary, run identity, requested
-capabilities, current policy and upstream restrictions all constrain a request.
-These checks must hold even if task text is hostile or the sandbox is
-compromised.
+Prompts can't grant permissions. Every request must get past the network
+boundary, the run identity, the requested capabilities, current policy and the
+upstream service's own restrictions. These checks must hold even if the task
+text is hostile or the sandbox is compromised.
 
 Deployment still requires enforced network isolation, inspected TLS, namespace
 separation, GitHub protections and durable gateway state. See [security
@@ -141,13 +142,12 @@ storage adapters. `Meter.Spend` charges known usage before forwarding.
 `Meter.Reserve` holds capacity for variable usage. The handler then settles
 actual usage or releases the reservation.
 
-Model handlers use provider-reported usage and administrator pricing. The
-current admission estimate can omit input tokens. Rejecting an excessive
-settlement does not undo provider consumption. Native non-model handlers charge
-one unit per authorized upstream request, including each GitHub read-back
-request. Configured MCP charges before a tool invocation, including failed
-attempts. Its initialization and discovery are bounded separately and do not
-consume tool-call units.
+Model handlers settle provider-reported usage at administrator prices.
+[Security hardening](../reference/security-hardening.md#model-budgets-are-not-hard-spending-ceilings)
+explains why that is not a hard ceiling. Other native handlers charge one unit
+per authorized upstream request, including each GitHub read-back request.
+Configured MCP charges one unit before each tool call, including calls that
+fail. Its initialization and discovery have separate limits and cost no units.
 
 ## Future extensions
 

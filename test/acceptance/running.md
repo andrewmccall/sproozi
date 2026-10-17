@@ -67,7 +67,7 @@ export KUBECONFIG="$SPROOZI_QUICKSTART_EVIDENCE/cluster.kubeconfig"
 python3 hack/verify/quickstart.py doctor --evidence "$SPROOZI_QUICKSTART_EVIDENCE"
 ```
 
-Use the [exploration commands](../../docs/guides/getting-started.md#6-inspect-the-result-and-explore). Finish with:
+Use the [exploration commands](../../docs/guides/getting-started.md#8-inspect-the-result-and-explore). Finish with:
 
 ```sh
 python3 hack/verify/quickstart.py cleanup "$SPROOZI_QUICKSTART_EVIDENCE"

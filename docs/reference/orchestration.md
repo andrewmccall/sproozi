@@ -2,8 +2,8 @@
 
 This task service lets a persistent assistant submit disposable jobs. It retains
 status and an optional final answer, not the worker's native conversation or
-workspace. For resumable work, use the [retained-work
-service](../guides/portable-workflows.md).
+workspace. For resumable work, use the retained-work service described in
+[remote work and local resume](../guides/portable-workflows.md).
 
 A persistent assistant owns its conversations, memory, channels and schedules.
 Sproozi owns the admission, identity, budget, deadline and cleanup of every
