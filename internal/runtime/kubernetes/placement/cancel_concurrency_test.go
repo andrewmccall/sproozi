@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
@@ -112,7 +113,7 @@ type heldQuiesceExecutor struct {
 }
 
 func (e *heldQuiesceExecutor) Execute(ctx context.Context, namespace, pod, container string, args []string, input io.Reader, output, errout io.Writer) error {
-	if pod == e.pod && len(args) == 2 && args[1] == nativeQuiesce {
+	if pod == e.pod && len(args) == 2 && args[1] == string(harness.NativeQuiesce) {
 		close(e.entered)
 		<-ctx.Done()
 		return ctx.Err()

@@ -21,10 +21,10 @@ const (
 	claudeBash         = "Bash"
 	claudeHooksKey     = "hooks"
 
-	opClaudeHook     = "observe-claude"
-	claudeSettings   = "/tmp/sproozi-native/claude-settings.json"
-	claudeHome       = "/workspace/session/claude"
-	claudeExecutable = "/usr/local/bin/claude"
+	opClaudeHook     harness.NativeOp = "observe-claude"
+	claudeSettings                    = "/tmp/sproozi-native/claude-settings.json"
+	claudeHome                        = "/workspace/session/claude"
+	claudeExecutable                  = "/usr/local/bin/claude"
 )
 
 // Native hooks and their journal are workload-accessible completion hints. They
@@ -100,7 +100,7 @@ func (s *server) claudeHook(h *claudeHook) response {
 	defer s.mu.Unlock()
 	r := response{Op: opClaudeHook, State: s.state}
 	if h == nil || s.config.Harness != harness.NativeClaude ||
-		(s.state != stateActive && s.state != stateStopping) {
+		(s.state != harness.NativeActive && s.state != harness.NativeStopping) {
 		r.Error = "Claude lifecycle observer is unavailable"
 		s.claude.rejected = "observer_unavailable"
 		return r

@@ -269,11 +269,11 @@ func (p *Placement) drivePrepare(ctx context.Context, r *placementRecord, data [
 	if err != nil {
 		return err
 	}
-	output, err := p.engine.NativeOperation(ctx, *r.Agent, "configure", input)
+	output, err := p.engine.NativeOperation(ctx, *r.Agent, harness.NativeConfigure, input)
 	if err != nil {
 		return err
 	}
-	if _, err = harness.DecodeNativeReply(output, "configure", phasePrepared, contract.ThreadID); err != nil {
+	if _, err = harness.DecodeNativeReply(output, harness.NativeConfigure, harness.NativePrepared, contract.ThreadID); err != nil {
 		return err
 	}
 	r.Phase = phasePrepared
@@ -350,11 +350,11 @@ func (p *Placement) activate(ctx context.Context, r *placementRecord, i session.
 	if err := p.authority.Activate(ctx, r.Launch, i); err != nil {
 		return err
 	}
-	output, err := p.engine.NativeOperation(ctx, *r.Agent, "activate", nil)
+	output, err := p.engine.NativeOperation(ctx, *r.Agent, harness.NativeActivate, nil)
 	if err != nil {
 		return err
 	}
-	if _, err = harness.DecodeInitialNativeReply(output, "activate", phaseActive, r.Launch.ThreadID); err != nil {
+	if _, err = harness.DecodeInitialNativeReply(output, harness.NativeActivate, harness.NativeActive, r.Launch.ThreadID); err != nil {
 		return err
 	}
 	r.Phase = phaseActive
@@ -526,35 +526,6 @@ func (p *Placement) Stop(ctx context.Context, l session.Launch, i session.Incarn
 	_ = p.engine.Stop(ctx, *r.Anchor)
 	return p.stopped(r)
 }
-func (p *Placement) bindObservedNative(ctx context.Context, r *placementRecord, i session.Incarnation) error {
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		output, err := p.engine.NativeOperation(ctx, *r.Agent, "status", nil)
-		if err != nil {
-			return err
-		}
-		status, err := harness.DecodeInitialNativeReply(output, "status", phaseStopping, r.Launch.ThreadID)
-		if err != nil {
-			return err
-		}
-		if validUUID(status.ThreadID) {
-			if err = p.authority.BindNative(ctx, *r.Initial, i, status.ThreadID); err != nil {
-				return err
-			}
-			r.Launch.ThreadID = status.ThreadID
-			return p.save(*r)
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-			if !r.Launch.Deadline.After(time.Now()) {
-				return errors.New("native UUID unavailable before deadline")
-			}
-		}
-	}
-}
 func (p *Placement) seal(ctx context.Context, r *placementRecord, i session.Incarnation) error {
 	if r.Receipt != nil {
 		return nil
@@ -563,14 +534,8 @@ func (p *Placement) seal(ctx context.Context, r *placementRecord, i session.Inca
 	if err != nil {
 		return err
 	}
-	if len(usage) != len(r.Launch.Allowances) {
-		return errors.New("docker sealed receipt omits capability")
-	}
-	for name, allowance := range r.Launch.Allowances {
-		u, ok := usage[name]
-		if !ok || u.Units < 0 || u.CostMicros < 0 || (allowance.Units.Bounded && u.Units > allowance.Units.Value) || (allowance.CostMicros.Bounded && u.CostMicros > allowance.CostMicros.Value) {
-			return errors.New("docker sealed receipt exceeds allocation")
-		}
+	if err = session.CheckUsage(r.Launch.Allowances, usage); err != nil {
+		return err
 	}
 	r.Receipt = &session.Receipt{Launch: r.Launch, Incarnation: i, Usage: usage}
 	return p.save(*r)
@@ -753,29 +718,25 @@ func (p *Placement) quiesceNative(ctx context.Context, r *placementRecord, i ses
 		return err
 	}
 	if state.Running {
-		output, err := p.engine.NativeOperation(ctx, *r.Agent, "gate", nil)
-		if err != nil {
-			return err
+		control := func(ctx context.Context, op harness.NativeOp) ([]byte, error) {
+			return p.engine.NativeOperation(ctx, *r.Agent, op, nil)
 		}
-		if _, err = harness.DecodeInitialNativeReply(output, "gate", phaseStopping, r.Launch.ThreadID); err != nil {
-			return err
-		}
-		if r.Initial != nil && r.Launch.ThreadID == "" {
-			if err = p.bindObservedNative(ctx, r, i); err != nil {
+		bind := func(ctx context.Context, thread string) error {
+			if err := p.authority.BindNative(ctx, *r.Initial, i, thread); err != nil {
 				return err
 			}
+			r.Launch.ThreadID = thread
+			return p.save(*r)
 		}
-		output, err = p.engine.NativeOperation(ctx, *r.Agent, "quiesce", nil)
-		if err != nil {
-			if r.Launch.Harness == harness.NativeClaude {
-				return err
-			}
-			// A lost reply is resolved by actual container state and final native state.
+		_, err = harness.QuiesceNative(ctx, control, r.Launch.ThreadID, r.Launch.Deadline, bind)
+		if errors.Is(err, harness.ErrQuiesceUnacknowledged) && r.Launch.Harness != harness.NativeClaude {
+			// A lost Codex reply is resolved by the actual stopped container.
 			observed, observeErr := p.engine.Observe(ctx, *r.Agent)
-			if observeErr != nil || observed.Running || observed.PID != 0 {
-				return err
+			if observeErr == nil && !observed.Running && observed.PID == 0 {
+				err = nil
 			}
-		} else if _, err = harness.DecodeNativeReply(output, "quiesce", phaseStopped, r.Launch.ThreadID); err != nil {
+		}
+		if err != nil {
 			return err
 		}
 	} else if r.Launch.Harness == harness.NativeClaude {

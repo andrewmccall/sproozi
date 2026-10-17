@@ -29,33 +29,26 @@ const (
 	nativeHome    = "/workspace/session/codex"
 	workspace     = "/workspace/session/workspace"
 	executable    = "/usr/local/bin/codex"
-	opActivate    = "activate"
-	opAttach      = "attach"
-	opWrite       = "write"
-	stateActive   = "active"
-	stateStopped  = "stopped"
-	stateStopping = "stopping"
+	inactiveError = "native execution is not active"
 )
 
+// Attachment frames and the Claude hook use the supervisor socket as well. The
+// placement-facing operations and states are defined once in harness.
 const (
-	opQuiesce         = "quiesce"
-	opConfigure       = "configure"
-	opStatus          = "status"
-	opGate            = "gate"
-	statePrepared     = "prepared"
-	stateUnconfigured = "unconfigured"
-	inactiveError     = "native execution is not active"
+	opWrite  harness.NativeOp = "write"
+	opResize harness.NativeOp = "resize"
+	opOutput harness.NativeOp = "output"
 )
 
 type config = harness.NativeLaunch
 type request struct {
-	Op      string      `json:"op"`
-	Hook    *claudeHook `json:"hook,omitempty"`
-	Config  *config     `json:"config,omitempty"`
-	Data    []byte      `json:"data,omitempty"`
-	Cursor  uint64      `json:"cursor,omitempty"`
-	Rows    uint16      `json:"rows,omitempty"`
-	Columns uint16      `json:"columns,omitempty"`
+	Op      harness.NativeOp `json:"op"`
+	Hook    *claudeHook      `json:"hook,omitempty"`
+	Config  *config          `json:"config,omitempty"`
+	Data    []byte           `json:"data,omitempty"`
+	Cursor  uint64           `json:"cursor,omitempty"`
+	Rows    uint16           `json:"rows,omitempty"`
+	Columns uint16           `json:"columns,omitempty"`
 }
 type response = harness.NativeReply
 
@@ -65,7 +58,7 @@ type server struct {
 	mu              sync.Mutex
 	action          sync.Mutex
 	native          *nativepty.Supervisor
-	state           string
+	state           harness.NativeState
 	threadID        string
 	done            chan struct{}
 	stopOnce        sync.Once
@@ -99,9 +92,9 @@ func run(args []string) error {
 	if len(args) != 1 {
 		return errors.New("use serve --config /etc/sproozi/native/config.json, activate, status, attach, or quiesce")
 	}
-	switch args[0] {
-	case opActivate, opStatus, opAttach, opQuiesce, opConfigure, opGate, opClaudeHook:
-		return control(args[0])
+	switch op := harness.NativeOp(args[0]); op {
+	case harness.NativeActivate, harness.NativeStatus, harness.NativeAttach, harness.NativeQuiesce, harness.NativeConfigure, harness.NativeGate, opClaudeHook:
+		return control(op)
 	default:
 		return errors.New("unknown native session operation")
 	}
@@ -144,9 +137,9 @@ func serve(c config, bootstrap bool) error {
 	if err = os.Chmod(socketPath, 0600); err != nil {
 		return err
 	}
-	s := &server{config: c, deadline: c.Deadline, state: statePrepared, threadID: c.ThreadID, done: make(chan struct{})}
+	s := &server{config: c, deadline: c.Deadline, state: harness.NativePrepared, threadID: c.ThreadID, done: make(chan struct{})}
 	if bootstrap {
-		s.state = stateUnconfigured
+		s.state = harness.NativeUnconfigured
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
@@ -184,7 +177,7 @@ func serve(c config, bootstrap bool) error {
 func (s *server) stop() {
 	s.mu.Lock()
 	n := s.native
-	s.state = stateStopped
+	s.state = harness.NativeStopped
 	s.exitCode = 1
 	s.mu.Unlock()
 	if n != nil {
@@ -205,7 +198,7 @@ func (s *server) configure(c *config) response {
 	defer s.action.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	r := response{Op: opConfigure, State: s.state, ThreadID: s.threadID}
+	r := response{Op: harness.NativeConfigure, State: s.state, ThreadID: s.threadID}
 	if c == nil {
 		r.Error = "configure requires trusted launch configuration"
 		return r
@@ -218,7 +211,7 @@ func (s *server) configure(c *config) response {
 		r.Error = err.Error()
 		return r
 	}
-	if s.state != stateUnconfigured {
+	if s.state != harness.NativeUnconfigured {
 		old, _ := json.Marshal(s.config)
 		newConfig, _ := json.Marshal(c)
 		if string(old) != string(newConfig) {
@@ -228,7 +221,7 @@ func (s *server) configure(c *config) response {
 	}
 	s.config = *c
 	s.threadID = c.ThreadID
-	s.state = statePrepared
+	s.state = harness.NativePrepared
 	r.State, r.ThreadID = s.state, s.threadID
 	return r
 }
@@ -237,12 +230,12 @@ func (s *server) activate() response {
 	defer s.action.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	r := response{Op: opActivate, State: s.state, ThreadID: s.threadID}
-	if s.state == stateActive {
+	r := response{Op: harness.NativeActivate, State: s.state, ThreadID: s.threadID}
+	if s.state == harness.NativeActive {
 		r.PID = s.native.PID()
 		return r
 	}
-	if s.state != statePrepared {
+	if s.state != harness.NativePrepared {
 		r.Error = "native launch gate cannot reopen"
 		return r
 	}
@@ -300,19 +293,19 @@ func (s *server) activate() response {
 		r.Error = err.Error()
 		return r
 	}
-	s.native, s.state = n, stateActive
+	s.native, s.state = n, harness.NativeActive
 	r.PID, r.State = n.PID(), s.state
 	go func() {
 		<-n.Done()
 		exit, waitErr := n.Wait(context.Background())
 		s.mu.Lock()
-		quiescing := s.state == stateStopping
+		quiescing := s.state == harness.NativeStopping
 		if !quiescing {
 			s.exitCode = exit.Code
 			if waitErr != nil && s.exitCode == 0 {
 				s.exitCode = 1
 			}
-			s.state = stateStopped
+			s.state = harness.NativeStopped
 		}
 		s.mu.Unlock()
 		if !quiescing {
@@ -328,7 +321,7 @@ func (s *server) status() response {
 	n := s.native
 	kind := s.config.Harness
 	s.mu.Unlock()
-	if id == "" && (state == stateActive || state == stateStopping) {
+	if id == "" && (state == harness.NativeActive || state == harness.NativeStopping) {
 		observed, _, err := s.observeNativeTurn()
 		if err == nil {
 			s.mu.Lock()
@@ -339,7 +332,7 @@ func (s *server) status() response {
 			s.mu.Unlock()
 		}
 	}
-	r := response{Op: opStatus, State: state, ThreadID: id}
+	r := response{Op: harness.NativeStatus, State: state, ThreadID: id}
 	if kind == harness.NativeClaude {
 		r.Completion = s.claudeCompletion()
 	}
@@ -353,30 +346,30 @@ func (s *server) gate() response {
 	defer s.action.Unlock()
 	s.mu.Lock()
 	n := s.native
-	if s.state != stateActive &&
-		s.state != stateStopping {
-		r := response{Op: opGate, State: s.state, Error: inactiveError}
+	if s.state != harness.NativeActive &&
+		s.state != harness.NativeStopping {
+		r := response{Op: harness.NativeGate, State: s.state, Error: inactiveError}
 		s.mu.Unlock()
 		return r
 	}
-	s.state = stateStopping
+	s.state = harness.NativeStopping
 	thread := s.threadID
 	s.mu.Unlock()
 	n.GateInput()
-	return response{Op: opGate, State: stateStopping, ThreadID: thread}
+	return response{Op: harness.NativeGate, State: harness.NativeStopping, ThreadID: thread}
 }
 func (s *server) quiesce() response {
 	s.action.Lock()
 	defer s.action.Unlock()
 	s.mu.Lock()
 	n := s.native
-	if s.state != stateActive &&
-		s.state != stateStopping {
-		r := response{Op: opQuiesce, State: s.state, Error: inactiveError}
+	if s.state != harness.NativeActive &&
+		s.state != harness.NativeStopping {
+		r := response{Op: harness.NativeQuiesce, State: s.state, Error: inactiveError}
 		s.mu.Unlock()
 		return r
 	}
-	s.state = stateStopping
+	s.state = harness.NativeStopping
 	s.mu.Unlock()
 	n.GateInput()
 	ctx, cancel := context.WithDeadline(context.Background(), s.deadline)
@@ -393,10 +386,10 @@ func (s *server) quiesce() response {
 		select {
 		case <-ctx.Done():
 			s.stop()
-			return response{Op: opQuiesce, State: stateStopping, Error: "no completed safe native turn before deadline"}
+			return response{Op: harness.NativeQuiesce, State: harness.NativeStopping, Error: "no completed safe native turn before deadline"}
 		case <-n.Done():
 			s.stop()
-			return response{Op: opQuiesce, State: stateStopping,
+			return response{Op: harness.NativeQuiesce, State: harness.NativeStopping,
 				Error: "native process stopped before completed turn observation"}
 		case <-timer.C:
 		}
@@ -410,10 +403,10 @@ func (s *server) quiesce() response {
 	}
 	if err != nil {
 		s.stop()
-		return response{Op: opQuiesce, State: stateStopping, Error: err.Error()}
+		return response{Op: harness.NativeQuiesce, State: harness.NativeStopping, Error: err.Error()}
 	}
 	s.mu.Lock()
-	s.threadID, s.state = id, stateStopped
+	s.threadID, s.state = id, harness.NativeStopped
 	s.exitCode = exit.Code
 	if s.config.Harness == harness.NativeClaude {
 		s.exitCode = 0
@@ -422,7 +415,7 @@ func (s *server) quiesce() response {
 		s.exitCode = 1
 	}
 	s.mu.Unlock()
-	r := response{Op: opQuiesce, State: stateStopped, ThreadID: id, TurnID: turn,
+	r := response{Op: harness.NativeQuiesce, State: harness.NativeStopped, ThreadID: id, TurnID: turn,
 		Exit: &harness.NativeExit{Code: exit.Code, Reason: string(exit.Reason)}}
 	if s.config.Harness == harness.NativeClaude {
 		if exit.Reason != nativepty.ForcedStop {
@@ -450,22 +443,22 @@ func (s *server) handle(conn net.Conn) {
 	switch q.Op {
 	case opClaudeHook:
 		_ = encoder.Encode(s.claudeHook(q.Hook))
-	case opConfigure:
+	case harness.NativeConfigure:
 		_ = encoder.Encode(s.configure(q.Config))
-	case opGate:
+	case harness.NativeGate:
 		_ = encoder.Encode(s.gate())
-	case opActivate:
+	case harness.NativeActivate:
 		_ = encoder.Encode(s.activate())
-	case opStatus:
+	case harness.NativeStatus:
 		_ = encoder.Encode(s.status())
-	case opQuiesce:
+	case harness.NativeQuiesce:
 		_ = conn.SetDeadline(s.deadline)
 		r := s.quiesce()
 		_ = encoder.Encode(r)
-		if r.State == stateStopped {
+		if r.State == harness.NativeStopped {
 			s.stopOnce.Do(func() { close(s.done) })
 		}
-	case opAttach:
+	case harness.NativeAttach:
 		_ = conn.SetDeadline(s.deadline)
 		s.attach(conn, scanner, encoder, q.Cursor)
 	default:
@@ -488,13 +481,13 @@ func (s *server) attach(conn net.Conn, scanner *bufio.Scanner, encoder *json.Enc
 	s.mu.Lock()
 	n, state := s.native, s.state
 	s.mu.Unlock()
-	if n == nil || state != stateActive {
-		_ = encoder.Encode(response{Op: opAttach, Error: inactiveError})
+	if n == nil || state != harness.NativeActive {
+		_ = encoder.Encode(response{Op: harness.NativeAttach, Error: inactiveError})
 		return
 	}
 	a, err := n.Attach(cursor)
 	if err != nil {
-		_ = encoder.Encode(response{Op: opAttach, Error: err.Error()})
+		_ = encoder.Encode(response{Op: harness.NativeAttach, Error: err.Error()})
 		return
 	}
 	defer func() { _ = a.Close() }()
@@ -505,7 +498,7 @@ func (s *server) attach(conn net.Conn, scanner *bufio.Scanner, encoder *json.Enc
 		_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 		return encoder.Encode(r)
 	}
-	if emit(response{Op: opAttach, PID: n.PID(), State: state}) != nil {
+	if emit(response{Op: harness.NativeAttach, PID: n.PID(), State: state}) != nil {
 		return
 	}
 	ctx, cancel := context.WithDeadline(context.Background(), s.deadline)
@@ -518,7 +511,7 @@ func (s *server) attach(conn net.Conn, scanner *bufio.Scanner, encoder *json.Enc
 			if err != nil {
 				return
 			}
-			if emit(response{Op: "output", Data: out.Data, Cursor: out.Next, Gap: out.Gap}) != nil || out.Exited {
+			if emit(response{Op: opOutput, Data: out.Data, Cursor: out.Next, Gap: out.Gap}) != nil || out.Exited {
 				return
 			}
 		}
@@ -531,7 +524,7 @@ func (s *server) attach(conn net.Conn, scanner *bufio.Scanner, encoder *json.Enc
 			switch q.Op {
 			case opWrite:
 				r.Written, err = s.writeInput(a, q.Data)
-			case "resize":
+			case opResize:
 				err = a.Resize(nativepty.Size{Rows: q.Rows, Columns: q.Columns})
 			default:
 				err = errors.New("attachment permits only write and resize")
@@ -545,7 +538,7 @@ func (s *server) attach(conn net.Conn, scanner *bufio.Scanner, encoder *json.Enc
 		}
 	}
 }
-func control(op string) error {
+func control(op harness.NativeOp) error {
 	conn, err := net.DialTimeout("unix", socketPath, 3*time.Second)
 	if err != nil {
 		return err
@@ -558,7 +551,7 @@ func control(op string) error {
 			return err
 		}
 	}
-	if op == opConfigure {
+	if op == harness.NativeConfigure {
 		var c config
 		decoder := json.NewDecoder(io.LimitReader(os.Stdin, 256<<10))
 		decoder.DisallowUnknownFields()
@@ -574,7 +567,7 @@ func control(op string) error {
 	if err = json.NewEncoder(conn).Encode(q); err != nil {
 		return err
 	}
-	if op == opAttach {
+	if op == harness.NativeAttach {
 		go func() { _, _ = io.Copy(conn, os.Stdin); _ = conn.Close() }()
 		_, err = io.Copy(os.Stdout, conn)
 		return err

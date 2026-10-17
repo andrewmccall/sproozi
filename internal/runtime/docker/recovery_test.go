@@ -466,7 +466,7 @@ func TestGracefulStopPreservesAdmittedTurnUntilQuiet(t *testing.T) {
 			if !a.active || a.revoked || a.seals != 0 || !f.containers[instance.ResourceUID].State.Running {
 				t.Fatal("graceful move interrupted admitted capability work before native quiet")
 			}
-			if f.containers[instance.ResourceUID].nativeState != phaseStopping {
+			if f.containers[instance.ResourceUID].nativeState != harness.NativeStopping {
 				t.Fatal("new native input was not gated")
 			}
 			if canceled {

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/budget"
 	"github.com/andrewmccall/sproozi/internal/workspace"
 	"github.com/google/uuid"
 )
@@ -80,26 +81,39 @@ func sameAllowances(a, b map[string]Allowance) bool {
 	}
 	return true
 }
+
+// CheckUsage is the one sealed-usage rule shared by placements, transports and
+// the coordinator: usage names exactly the allocated capabilities, is never
+// negative and stays within every bounded ceiling.
+func CheckUsage(allowances map[string]Allowance, usage map[string]budget.TrustedUsage) error {
+	if len(usage) != len(allowances) {
+		return errors.New("session: incomplete accounting receipt")
+	}
+	for name, ceiling := range allowances {
+		used, ok := usage[name]
+		if !ok || used.Units < 0 || used.CostMicros < 0 {
+			return errors.New("session: invalid trusted usage")
+		}
+		if ceiling.Units.Bounded && used.Units > ceiling.Units.Value {
+			return errors.New("session: receipt exceeds units allocation")
+		}
+		if ceiling.CostMicros.Bounded && used.CostMicros > ceiling.CostMicros.Value {
+			return errors.New("session: receipt exceeds cost allocation")
+		}
+	}
+	return nil
+}
 func subtract(remaining map[string]Allowance, receipt Receipt) (map[string]Allowance, error) {
-	if len(receipt.Usage) != len(remaining) {
-		return nil, errors.New("session: incomplete accounting receipt")
+	if err := CheckUsage(remaining, receipt.Usage); err != nil {
+		return nil, err
 	}
 	next := cloneAllowances(remaining)
 	for name, current := range remaining {
-		usage, ok := receipt.Usage[name]
-		if !ok || usage.Units < 0 || usage.CostMicros < 0 {
-			return nil, errors.New("session: invalid trusted usage")
-		}
+		usage := receipt.Usage[name]
 		if current.Units.Bounded {
-			if usage.Units > current.Units.Value {
-				return nil, errors.New("session: receipt exceeds units allocation")
-			}
 			current.Units.Value -= usage.Units
 		}
 		if current.CostMicros.Bounded {
-			if usage.CostMicros > current.CostMicros.Value {
-				return nil, errors.New("session: receipt exceeds cost allocation")
-			}
 			current.CostMicros.Value -= usage.CostMicros
 		}
 		next[name] = current

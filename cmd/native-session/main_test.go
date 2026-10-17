@@ -143,14 +143,14 @@ func TestFixedAttachmentReconnectAndGate(t *testing.T) {
 		defer cancel()
 		_, _ = native.Stop(ctx)
 	})
-	s := &server{native: native, state: stateActive, threadID: selected, done: make(chan struct{}),
+	s := &server{native: native, state: harness.NativeActive, threadID: selected, done: make(chan struct{}),
 		config:   config{Harness: harness.NativeCodex, Deadline: time.Now().Add(15 * time.Second)},
 		deadline: time.Now().Add(15 * time.Second)}
 	connect := func() (net.Conn, *json.Decoder) {
 		client, backend := net.Pipe()
 		go s.handle(backend)
 		_ = client.SetDeadline(time.Now().Add(3 * time.Second))
-		if err := json.NewEncoder(client).Encode(request{Op: opAttach}); err != nil {
+		if err := json.NewEncoder(client).Encode(request{Op: harness.NativeAttach}); err != nil {
 			t.Fatal(err)
 		}
 		d := json.NewDecoder(bufio.NewReader(client))
@@ -198,7 +198,7 @@ func TestFixedAttachmentReconnectAndGate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = harness.DecodeNativeReply(gate, opGate, stateStopping, selected); err != nil {
+	if _, err = harness.DecodeNativeReply(gate, harness.NativeGate, harness.NativeStopping, selected); err != nil {
 		t.Fatal(err)
 	}
 	if err := json.NewEncoder(client).Encode(request{Op: opWrite, Data: []byte("rejected\r")}); err != nil {
@@ -213,7 +213,7 @@ func TestFixedAttachmentReconnectAndGate(t *testing.T) {
 		t.Fatal("attachment gate stopped active native process")
 	default:
 	}
-	if r := s.activate(); r.Error == "" || r.State != stateStopping {
+	if r := s.activate(); r.Error == "" || r.State != harness.NativeStopping {
 		t.Fatalf("activate reopened gated process: %+v", r)
 	}
 }
@@ -254,11 +254,11 @@ func TestRecordedStockTUIObserver(t *testing.T) {
 func TestBootstrapConfigurationIsImmutable(t *testing.T) {
 	deadline := time.Now().UTC().Add(time.Minute)
 	s := &server{config: config{Harness: harness.NativeCodex, Deadline: deadline}, deadline: deadline,
-		state: stateUnconfigured, done: make(chan struct{})}
+		state: harness.NativeUnconfigured, done: make(chan struct{})}
 	approved := config{Harness: harness.NativeCodex, Deadline: deadline, ThreadID: selected, Instructions: instructions,
 		InstructionDigest: digest(),
 		Env:               []string{}, RolloutMaxBytes: 8192}
-	if r := s.configure(&approved); r.Error != "" || r.State != statePrepared || r.ThreadID != approved.ThreadID {
+	if r := s.configure(&approved); r.Error != "" || r.State != harness.NativePrepared || r.ThreadID != approved.ThreadID {
 		t.Fatalf("configure: %+v", r)
 	}
 	if r := s.configure(&approved); r.Error != "" {

@@ -194,15 +194,15 @@ func (p *Placement) Activate(ctx context.Context, l session.Launch, i session.In
 	if _, err = p.registry.Activate(ctx, r.Reference); err != nil {
 		return semantic(err)
 	}
-	output, err := p.control(ctx, pod, nativeContainer, []string{nativePath, nativeActivate}, nil, 64<<10)
+	output, err := p.native(pod)(ctx, harness.NativeActivate)
 	if err != nil {
 		return err
 	}
 	if local.Initial != nil {
-		_, err = harness.DecodeInitialNativeReply(output, nativeActivate, nativeActive, r.NativeUUID)
+		_, err = harness.DecodeInitialNativeReply(output, harness.NativeActivate, harness.NativeActive, r.NativeUUID)
 		return err
 	}
-	_, err = harness.DecodeNativeReply(output, nativeActivate, nativeActive, local.Launch.ThreadID)
+	_, err = harness.DecodeNativeReply(output, harness.NativeActivate, harness.NativeActive, local.Launch.ThreadID)
 	return err
 }
 func (p *Placement) Inspect(ctx context.Context, l session.Launch) (session.Observation, error) {
@@ -258,11 +258,11 @@ func (p *Placement) Inspect(ctx context.Context, l session.Launch) (session.Obse
 		if !running(pod, nativeContainer) {
 			return o, nil
 		}
-		data, err := p.control(ctx, pod, nativeContainer, []string{nativePath, nativeStatus}, nil, 64<<10)
+		data, err := p.native(pod)(ctx, harness.NativeStatus)
 		if err != nil {
 			return o, err
 		}
-		if _, err := harness.DecodeNativeReply(data, nativeStatus, nativePrepared, l.ThreadID); err == nil {
+		if _, err := harness.DecodeNativeReply(data, harness.NativeStatus, harness.NativePrepared, l.ThreadID); err == nil {
 			o.State = session.PlacementPrepared
 		}
 	case registry.Active:
@@ -273,17 +273,17 @@ func (p *Placement) Inspect(ctx context.Context, l session.Launch) (session.Obse
 		if !running(pod, nativeContainer) || !pod.DeletionTimestamp.IsZero() {
 			return o, nil
 		}
-		data, err := p.control(ctx, pod, nativeContainer, []string{nativePath, nativeStatus}, nil, 64<<10)
+		data, err := p.native(pod)(ctx, harness.NativeStatus)
 		if err != nil {
 			return o, err
 		}
-		_, activeErr := harness.DecodeNativeReply(data, nativeStatus, nativeActive, l.ThreadID)
+		_, activeErr := harness.DecodeNativeReply(data, harness.NativeStatus, harness.NativeActive, l.ThreadID)
 		if local.Initial != nil {
-			_, activeErr = harness.DecodeInitialNativeReply(data, nativeStatus, nativeActive, r.NativeUUID)
+			_, activeErr = harness.DecodeInitialNativeReply(data, harness.NativeStatus, harness.NativeActive, r.NativeUUID)
 		}
 		if activeErr == nil {
 			o.State = session.PlacementActive
-		} else if _, err := harness.DecodeNativeReply(data, nativeStatus, nativePrepared, l.ThreadID); err == nil {
+		} else if _, err := harness.DecodeNativeReply(data, harness.NativeStatus, harness.NativePrepared, l.ThreadID); err == nil {
 			o.State = session.PlacementPrepared
 		}
 	case registry.Stopped, registry.Cancelled:
@@ -344,13 +344,7 @@ func (p *Placement) Stop(ctx context.Context, l session.Launch, i session.Incarn
 	if err != nil {
 		return session.Stopped{}, err
 	}
-	if local.Initial != nil && local.Launch.ThreadID == "" {
-		local, r, err = p.bindInitialNative(ctx, local, r, pod)
-		if err != nil {
-			return session.Stopped{}, err
-		}
-	}
-	local, err = p.quietSource(ctx, local, r, pod)
+	local, r, err = p.quietSource(ctx, local, r, pod)
 	if err != nil {
 		return session.Stopped{}, err
 	}
@@ -401,84 +395,57 @@ func (p *Placement) Stop(ctx context.Context, l session.Launch, i session.Incarn
 	return s, nil
 }
 
-// bindInitialNative observes a genuine completed native turn on the exact
-// admitted writer before sealing/capture. Empty caller identity stays retained
-// as the replay key; it can never select or replace the observed UUID.
-func (p *Placement) bindInitialNative(ctx context.Context, local retained, r registry.Record, pod *corev1.Pod) (retained, registry.Record, error) {
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		if !running(pod, nativeContainer) {
-			return local, r, errors.New("placement: initial native UUID remains unknown")
-		}
-		data, err := p.control(ctx, pod, nativeContainer, []string{nativePath, nativeStatus}, nil, 64<<10)
-		if err != nil {
-			return local, r, err
-		}
-		reply, err := harness.DecodeInitialNativeReply(data, nativeStatus, nativeActive, r.NativeUUID)
-		if err != nil {
-			return local, r, err
-		}
-		if idValid(reply.ThreadID) {
-			r, err = p.registry.BindNative(ctx, r.Reference, reply.ThreadID)
-			if err != nil {
-				return local, r, semantic(err)
-			}
-			local.Launch.ThreadID = reply.ThreadID
-			return local, r, p.save(local)
-		}
-		select {
-		case <-ctx.Done():
-			return local, r, ctx.Err()
-		case <-ticker.C:
-			if !time.Now().Before(local.Launch.Deadline) {
-				return local, r, errors.New("placement: initial UUID unavailable before deadline")
-			}
-		}
-	}
-}
-
 // quietSource persists the safe-turn handoff before revoking gateway access.
 // Revocation while a turn has outstanding upstream/tools could prevent that turn
 // completing. A retained quiet marker permits retries without reopening grants.
-func (p *Placement) quietSource(ctx context.Context, local retained, r registry.Record, pod *corev1.Pod) (retained, error) {
+// A first visit binds its genuine native UUID on the exact admitted writer
+// during the handoff; the caller's empty identity can never select it.
+func (p *Placement) quietSource(ctx context.Context, local retained, r registry.Record, pod *corev1.Pod) (retained, registry.Record, error) {
 	if r.Phase != registry.Active && r.Phase != registry.Stopping {
-		return local, &profile.Rejection{Code: profile.CodeConflict}
+		return local, r, &profile.Rejection{Code: profile.CodeConflict}
 	}
 	if local.NativeQuiet {
-		return local, nil
+		return local, r, nil
 	}
 	if r.Harness == harness.NativeClaude && (terminated(pod) || r.Phase == registry.Stopping) {
-		return local, errors.New("placement: Claude graceful completion acknowledgement unavailable")
+		return local, r, errors.New("placement: Claude graceful completion acknowledgement unavailable")
 	}
-	if !terminated(pod) {
-		if r.Phase == registry.Stopping {
-			data, err := p.control(ctx, pod, nativeContainer, []string{nativePath, nativeStatus}, nil, 64<<10)
+	switch {
+	case terminated(pod):
+		if local.Launch.ThreadID == "" {
+			return local, r, errors.New("placement: initial native UUID remains unknown")
+		}
+	case r.Phase == registry.Stopping:
+		data, err := p.native(pod)(ctx, harness.NativeStatus)
+		if err != nil {
+			return local, r, err
+		}
+		if _, err := harness.DecodeNativeReply(data, harness.NativeStatus, harness.NativeStopped, local.Launch.ThreadID); err != nil {
+			return local, r, errors.New("placement: revoked source quiescence remains unknown")
+		}
+	default:
+		bind := func(ctx context.Context, thread string) error {
+			bound, err := p.registry.BindNative(ctx, r.Reference, thread)
 			if err != nil {
-				return local, err
+				return semantic(err)
 			}
-			if _, err := harness.DecodeNativeReply(data, nativeStatus, nativeStopped, local.Launch.ThreadID); err != nil {
-				return local, errors.New("placement: revoked source quiescence remains unknown")
-			}
-		} else {
-			data, err := p.control(ctx, pod, nativeContainer, []string{nativePath, nativeGate}, nil, 64<<10)
-			if err != nil {
-				return local, err
-			}
-			if _, err = harness.DecodeNativeReply(data, nativeGate, "stopping", local.Launch.ThreadID); err != nil {
-				return local, err
-			}
-			data, err = p.control(ctx, pod, nativeContainer, []string{nativePath, nativeQuiesce}, nil, 64<<10)
-			if err != nil {
-				return local, err
-			}
-			if _, err = harness.DecodeNativeReply(data, nativeQuiesce, nativeStopped, local.Launch.ThreadID); err != nil {
-				return local, err
-			}
+			r = bound
+			local.Launch.ThreadID = thread
+			return p.save(local)
+		}
+		if _, err := harness.QuiesceNative(ctx, p.native(pod), local.Launch.ThreadID, local.Launch.Deadline, bind); err != nil {
+			return local, r, err
 		}
 	}
 	local.NativeQuiet = true
-	return local, p.save(local)
+	return local, r, p.save(local)
+}
+
+// native runs fixed supervisor operations on the exact admitted native container.
+func (p *Placement) native(pod *corev1.Pod) harness.NativeControl {
+	return func(ctx context.Context, op harness.NativeOp) ([]byte, error) {
+		return p.control(ctx, pod, nativeContainer, []string{nativePath, string(op)}, nil, 64<<10)
+	}
 }
 
 func (p *Placement) capture(ctx context.Context, local retained, pod *corev1.Pod) (retained, error) {
@@ -769,5 +736,5 @@ func (p *Placement) Attach(ctx context.Context, l session.Launch, i session.Inca
 			}
 		}
 	}()
-	return p.exec.Execute(ctx, pod.Namespace, pod.Name, nativeContainer, []string{nativePath, "attach"}, input, output, &boundedOutput{max: 16 << 10})
+	return p.exec.Execute(ctx, pod.Namespace, pod.Name, nativeContainer, []string{nativePath, string(harness.NativeAttach)}, input, output, &boundedOutput{max: 16 << 10})
 }

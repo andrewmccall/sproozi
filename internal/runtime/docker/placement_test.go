@@ -56,7 +56,7 @@ type fakeContainer struct {
 		Status  string
 		Pid     int
 	}
-	nativeState string
+	nativeState harness.NativeState
 	configured  []byte
 }
 type fakeDocker struct {
@@ -249,21 +249,21 @@ func (f *fakeDocker) execCommand(ctx context.Context, args []string, input []byt
 			return nil, errors.New("configuration changed")
 		}
 		c.configured = append([]byte{}, input...)
-		c.nativeState = phasePrepared
+		c.nativeState = harness.NativePrepared
 	case "activate":
 		if f.rejectNativeActivation {
-			return json.Marshal(map[string]any{"Error": "native version gate rejected activation", stateField: phasePrepared})
+			return json.Marshal(map[string]any{"Error": "native version gate rejected activation", stateField: harness.NativePrepared})
 		}
-		c.nativeState = phaseActive
+		c.nativeState = harness.NativeActive
 		if f.failActivationAck {
 			f.failActivationAck = false
 			return nil, errors.New("activation acknowledgement lost")
 		}
 	case "gate":
-		c.nativeState = phaseStopping
+		c.nativeState = harness.NativeStopping
 	case "status":
 		return json.Marshal(map[string]any{"op": op, stateField: c.nativeState, threadField: fixtureThread})
-	case quiesceCommand:
+	case string(harness.NativeQuiesce):
 		if f.quiesceStarted != nil {
 			close(f.quiesceStarted)
 			select {
@@ -273,7 +273,7 @@ func (f *fakeDocker) execCommand(ctx context.Context, args []string, input []byt
 			}
 		}
 		if f.quiesceAcknowledgesOnly {
-			return json.Marshal(map[string]any{"op": op, stateField: phaseStopped, threadField: fixtureThread})
+			return json.Marshal(map[string]any{"op": op, stateField: harness.NativeStopped, threadField: fixtureThread})
 		}
 		c.State.Running = false
 		c.State.Status = exitedStatus
@@ -281,7 +281,7 @@ func (f *fakeDocker) execCommand(ctx context.Context, args []string, input []byt
 		if f.lostQuiesceAck {
 			return nil, errors.New("lost quiesce acknowledgement")
 		}
-		return json.Marshal(map[string]any{"op": op, stateField: phaseStopped, threadField: fixtureThread})
+		return json.Marshal(map[string]any{"op": op, stateField: harness.NativeStopped, threadField: fixtureThread})
 	}
 	var launch harness.NativeLaunch
 	if err := json.Unmarshal(c.configured, &launch); err != nil {

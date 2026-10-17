@@ -166,7 +166,7 @@ type protocolExecutor struct {
 	data                       []byte
 	meta                       checkpoint.Metadata
 	initial                    []byte
-	state                      string
+	state                      harness.NativeState
 	lostActivate, skipActivate bool
 	finishes                   int
 	onCommand                  func(string) error
@@ -213,21 +213,21 @@ func (e *protocolExecutor) Execute(ctx context.Context, namespace, pod, containe
 		}
 	}
 	switch args[1] {
-	case nativeActivate:
+	case string(harness.NativeActivate):
 		if !e.skipActivate {
-			e.state = nativeActive
+			e.state = harness.NativeActive
 		}
 		if e.lostActivate {
 			e.lostActivate = false
 			return errors.New("lost native acknowledgement")
 		}
-	case nativeGate:
-		e.state = "stopping"
-	case nativeQuiesce:
+	case string(harness.NativeGate):
+		e.state = harness.NativeStopping
+	case string(harness.NativeQuiesce):
 		if e.failQuiesce {
 			return errors.New("native completed turn remains unavailable")
 		}
-		e.state = nativeStopped
+		e.state = harness.NativeStopped
 		var actual corev1.Pod
 		if err := e.kube.Get(ctx, client.ObjectKey{Namespace: namespace, Name: pod}, &actual); err != nil {
 			return err
@@ -239,12 +239,12 @@ func (e *protocolExecutor) Execute(ctx context.Context, namespace, pod, containe
 		if e.lostQuiesce {
 			return errors.New("lost completed-turn acknowledgement")
 		}
-	case nativeStatus:
+	case string(harness.NativeStatus):
 	default:
 		return errors.New("unexpected command")
 	}
 	thread := fixtureThread
-	if e.initial != nil && (e.state == nativePrepared || args[1] == nativeActivate) {
+	if e.initial != nil && (e.state == harness.NativePrepared || args[1] == string(harness.NativeActivate)) {
 		thread = ""
 	}
 	return json.NewEncoder(output).Encode(map[string]any{"op": args[1], "state": e.state, "threadId": thread})
@@ -278,7 +278,7 @@ func TestMoveStopWaitsForNativeTurnBeforeGatewayRevocationAndSeal(t *testing.T) 
 	}
 	var events []string
 	e.onCommand = func(command string) error {
-		if command == nativeGate || command == nativeQuiesce {
+		if command == string(harness.NativeGate) || command == string(harness.NativeQuiesce) {
 			r, err := p.registry.Get(ctx, local.Reference)
 			if err != nil {
 				return err
@@ -528,7 +528,7 @@ func setupKind(t *testing.T, kind harness.NativeKind) (*Placement, *admissionCli
 	}
 	t.Cleanup(func() { _ = p.Close() })
 	data, meta := fixtureArtifactKind(t, kind)
-	executor := &protocolExecutor{kube: kube, data: data, meta: meta, state: nativePrepared}
+	executor := &protocolExecutor{kube: kube, data: data, meta: meta, state: harness.NativePrepared}
 	p.exec = executor
 	l := session.Launch{Harness: kind, SessionID: uuid.NewString(), AllocationID: uuid.NewString(), OperationID: uuid.NewString(), ThreadID: fixtureThread, Epoch: 2, Placement: "remote", InstructionDigest: p.config.InstructionDigest, Deadline: time.Now().Add(30 * time.Minute).UTC(), Allowances: a, CheckpointDigest: meta.SHA256}
 	return p, kube, executor, l, data
