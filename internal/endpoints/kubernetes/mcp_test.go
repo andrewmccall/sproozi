@@ -43,6 +43,7 @@ const fixtureExecutionUID = "run-uid"
 
 type mcpFixture struct {
 	client         *http.Client
+	upstreamClient *http.Client
 	identity       *gateway.ExecutionGrant
 	calls          atomic.Int32
 	revoked        atomic.Bool
@@ -90,8 +91,9 @@ func newMCPFixture(t *testing.T, configure func(*gateway.ExecutionGrant)) *mcpFi
 	if err != nil {
 		t.Fatal(err)
 	}
+	f.upstreamClient = upstream.Client()
 	handler := kubernetesgateway.NewHandler(kubernetesgateway.HandlerConfig{
-		Upstream: u, Client: upstream.Client(), AuditLogger: audit.NewLogger(&f.auditData),
+		Upstream: u, Client: f.upstreamClient, AuditLogger: audit.NewLogger(&f.auditData),
 	})
 	dispatcher := gateway.Dispatcher{kubernetesgateway.Authority: {
 		Capability: string(sprooziv1alpha1.CapabilityKubernetesRead), Tier: audit.TierSemantic,
@@ -350,13 +352,55 @@ func TestMCPRedactsUpstreamFailures(t *testing.T) {
 }
 
 func TestMCPBoundsResponse(t *testing.T) {
-	f := newMCPFixture(t, nil)
-	f.upstreamBody = strings.Repeat("x", (8<<20)+1)
-	result, err := f.connect(t).CallTool(t.Context(), &mcp.CallToolParams{Name: podTool, Arguments: map[string]any{namespaceArgument: mcpNamespace}})
-	if err != nil || !result.IsError {
-		t.Fatalf("unbounded response: %v %v", result, err)
+	for _, tc := range []struct {
+		name, content, wantText string
+		wantError               bool
+		wantRead                int64
+	}{
+		{"within limit", podList, podList, false, int64(len(podList))},
+		{"over limit", strings.Repeat("x", (8<<20)+2), "kubernetes response exceeded bounds or failed", true, (8 << 20) + 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newMCPFixture(t, nil)
+			body := &observedMCPBody{Reader: strings.NewReader(tc.content)}
+			// Keep MCP and authenticated proxy traffic real. Supply the upstream
+			// body directly so this byte-limit check does not time a bulk transfer.
+			f.upstreamClient.Transport = mcpRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+				f.calls.Add(1)
+				return &http.Response{StatusCode: http.StatusOK, Body: body, ContentLength: -1, Request: req}, nil
+			})
+			result, err := f.connect(t).CallTool(t.Context(), &mcp.CallToolParams{Name: podTool, Arguments: map[string]any{namespaceArgument: mcpNamespace}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.IsError != tc.wantError || len(result.Content) != 1 || result.Content[0].(*mcp.TextContent).Text != tc.wantText {
+				t.Fatalf("response = %+v, want error=%v text=%q", result, tc.wantError, tc.wantText)
+			}
+			if body.read.Load() != tc.wantRead || !body.closed.Load() || f.calls.Load() != 1 {
+				t.Fatalf("upstream read=%d closed=%v calls=%d, want read=%d closed=true calls=1",
+					body.read.Load(), body.closed.Load(), f.calls.Load(), tc.wantRead)
+			}
+		})
 	}
 }
+
+type mcpRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f mcpRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
+type observedMCPBody struct {
+	io.Reader
+	read   atomic.Int64
+	closed atomic.Bool
+}
+
+func (b *observedMCPBody) Read(p []byte) (int, error) {
+	n, err := b.Reader.Read(p)
+	b.read.Add(int64(n))
+	return n, err
+}
+
+func (b *observedMCPBody) Close() error { b.closed.Store(true); return nil }
 
 func TestMCPRevocationCancelsInflightUpstream(t *testing.T) {
 	f := newMCPFixture(t, nil)
