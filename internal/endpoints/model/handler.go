@@ -418,13 +418,14 @@ func requestTokenEstimate(body []byte) int64 {
 }
 
 // unambiguousJSON rejects request bodies whose meaning depends on the parser.
-// The budget and pricing checks decode with encoding/json, which keeps the last
-// duplicate key and matches struct fields regardless of case. A provider that
-// keeps the first key, or matches exactly, could then bill a value those checks
-// never saw. Keys within one object must therefore differ after case folding.
+// encoding/json keeps the last duplicate key, while a provider may keep the
+// first, so no object may repeat a key exactly. encoding/json also matches
+// struct fields regardless of case, while providers match exactly, so the
+// objects the gateway inspects must not contain keys that differ only by case.
+// Other content, such as tool schemas and message text, keeps its own keys.
 func unambiguousJSON(body []byte) error {
 	decoder := json.NewDecoder(bytes.NewReader(body))
-	if err := inspectJSONValue(decoder, 0); err != nil {
+	if err := inspectJSONValue(decoder, inspectedRequest, 0); err != nil {
 		return err
 	}
 	if _, err := decoder.Token(); err != io.EOF {
@@ -433,7 +434,28 @@ func unambiguousJSON(body []byte) error {
 	return nil
 }
 
-func inspectJSONValue(decoder *json.Decoder, depth int) error {
+// inspectedObject identifies the request objects that the budget and pricing
+// checks decode, so their keys must be unambiguous regardless of case.
+type inspectedObject uint8
+
+const (
+	opaqueContent inspectedObject = iota
+	inspectedRequest
+	inspectedMessage
+	inspectedBlock
+	inspectedCacheControl
+)
+
+// inspectedChildren maps an inspected object's field to the kind of object, or
+// array elements, that the checks decode from it.
+var inspectedChildren = map[inspectedObject]map[string]inspectedObject{
+	inspectedRequest: {"messages": inspectedMessage, "system": inspectedBlock, "tools": inspectedBlock,
+		"cache_control": inspectedCacheControl},
+	inspectedMessage: {"content": inspectedBlock},
+	inspectedBlock:   {"cache_control": inspectedCacheControl, "content": inspectedBlock},
+}
+
+func inspectJSONValue(decoder *json.Decoder, kind inspectedObject, depth int) error {
 	// encoding/json refuses deeper nesting, so no check would accept it either.
 	if depth > 10000 {
 		return fmt.Errorf("model request nesting exceeds bounds")
@@ -446,20 +468,24 @@ func inspectJSONValue(decoder *json.Decoder, depth int) error {
 	if !ok {
 		return nil
 	}
-	keys := map[string]bool{}
+	keys, folded := map[string]bool{}, map[string]bool{}
 	for decoder.More() {
+		child := kind // array elements share the array's kind
 		if delimiter == '{' {
-			key, err := decoder.Token()
+			token, err := decoder.Token()
 			if err != nil {
 				return fmt.Errorf("invalid model request JSON")
 			}
-			folded := strings.ToLower(strings.ToUpper(key.(string)))
-			if keys[folded] {
+			key := token.(string)
+			fold := strings.ToLower(strings.ToUpper(key))
+			if keys[key] || kind != opaqueContent && folded[fold] {
 				return fmt.Errorf("model request has duplicate key")
 			}
-			keys[folded] = true
+			keys[key], folded[fold] = true, true
+			// Struct decoding selects the field regardless of case.
+			child = inspectedChildren[kind][fold]
 		}
-		if err := inspectJSONValue(decoder, depth+1); err != nil {
+		if err := inspectJSONValue(decoder, child, depth+1); err != nil {
 			return err
 		}
 	}

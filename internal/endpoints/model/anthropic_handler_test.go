@@ -56,6 +56,7 @@ func TestAnthropicCappedNullableUsageSettlesActualConsumption(t *testing.T) {
 // Go keeps the last duplicate key and matches struct fields without regard to
 // case. A provider that keeps the first key, or matches exactly, would bill a
 // value the cost checks never saw, so ambiguous bodies never reach upstream.
+// Only objects the checks decode reject keys that differ only by case.
 func TestModelRequestsWithAmbiguousJSONKeysAreDenied(t *testing.T) {
 	var calls atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -71,19 +72,27 @@ func TestModelRequestsWithAmbiguousJSONKeysAreDenied(t *testing.T) {
 		HTTPClient: upstream.Client(), AuditLogger: audit.NewLogger(io.Discard),
 	})
 	routes := gateway.Dispatcher{model.AnthropicAuthority: {Capability: string(api.CapabilityModelInference), Handler: h, Budgets: budget.NewTracker()}}
-	for name, body := range map[string]string{
-		"duplicate nested cache TTL": `{"model":"claude-fixture","max_tokens":2,"messages":[{"role":"user","content":[{"type":"text","text":"hi","cache_control":{"type":"ephemeral","ttl":"1h","ttl":"5m"}}]}]}`,
-		"duplicate top-level key":    `{"model":"claude-fixture","max_tokens":2,"max_tokens":1,"messages":[{"role":"user","content":"hello"}]}`,
-		"case-variant key":           `{"model":"claude-fixture","max_tokens":2,"messages":[{"role":"user","content":[{"type":"text","text":"hi","cache_control":{"type":"ephemeral","ttl":"1h"}}]}],"Messages":[]}`,
-		"trailing value":             `{"model":"claude-fixture","max_tokens":2,"messages":[]} {"stream":true}`,
+	for _, tc := range []struct {
+		name, body string
+		status     int
+	}{
+		{"duplicate nested cache TTL", `{"model":"claude-fixture","max_tokens":2,"messages":[{"role":"user","content":[{"type":"text","text":"hi","cache_control":{"type":"ephemeral","ttl":"1h","ttl":"5m"}}]}]}`, http.StatusBadRequest},
+		{"duplicate top-level key", `{"model":"claude-fixture","max_tokens":2,"max_tokens":1,"messages":[{"role":"user","content":"hello"}]}`, http.StatusBadRequest},
+		{"duplicate key in user content", `{"model":"claude-fixture","max_tokens":2,"tools":[{"name":"t","input_schema":{"type":"object","type":"array"}}],"messages":[]}`, http.StatusBadRequest},
+		{"case-variant top-level key", `{"model":"claude-fixture","max_tokens":2,"messages":[{"role":"user","content":[{"type":"text","text":"hi","cache_control":{"type":"ephemeral","ttl":"1h"}}]}],"Messages":[]}`, http.StatusBadRequest},
+		{"trailing value", `{"model":"claude-fixture","max_tokens":2,"messages":[]} {"stream":true}`, http.StatusBadRequest},
+		// The checks never decode tool schemas, so their own keys may differ only by case.
+		{"case-variant tool schema properties", `{"model":"claude-fixture","max_tokens":2,"tools":[{"name":"t","input_schema":{"type":"object","properties":{"Name":{"type":"string"},"name":{"type":"string"}}}}],"messages":[{"role":"user","content":"hello"}]}`, http.StatusOK},
 	} {
-		t.Run(name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, "https://api.anthropic.com/v1/messages", strings.NewReader(body))
+		t.Run(tc.name, func(t *testing.T) {
+			before := calls.Load()
+			req := httptest.NewRequest(http.MethodPost, "https://api.anthropic.com/v1/messages", strings.NewReader(tc.body))
 			req = req.WithContext(gateway.WithIdentity(req.Context(), identity))
 			response := httptest.NewRecorder()
 			routes.ServeHTTP(response, req)
-			if response.Code != http.StatusBadRequest || calls.Load() != 0 {
-				t.Fatalf("status=%d upstream calls=%d body=%s", response.Code, calls.Load(), response.Body.String())
+			forwarded := calls.Load() - before
+			if response.Code != tc.status || (forwarded == 1) != (tc.status == http.StatusOK) {
+				t.Fatalf("status=%d upstream calls=%d body=%s", response.Code, forwarded, response.Body.String())
 			}
 		})
 	}

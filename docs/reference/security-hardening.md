@@ -106,9 +106,10 @@ can still withhold a response after provider consumption. Keep the table aligned
 with approved models and use provider-side monitoring and limits.
 
 Model handlers refuse a request body that is not one JSON value, or that
-repeats a key within one object, comparing keys without regard to case. The
-gateway's checks and the provider could otherwise read different values from
-the same body. `OPENAI_UPSTREAM_URL` and `ANTHROPIC_UPSTREAM_URL` must be bare
+repeats a key within one object. In the objects the gateway's checks decode,
+such as the top-level request, messages, content blocks and `cache_control`,
+keys that differ only by case are also refused. The gateway's checks and the
+provider could otherwise read different values from the same body. `OPENAI_UPSTREAM_URL` and `ANTHROPIC_UPSTREAM_URL` must be bare
 `https` origins.
 
 OpenAI admission accepts only `GET /v1/models`, `POST /v1/responses` and
