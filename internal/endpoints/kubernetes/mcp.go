@@ -56,7 +56,7 @@ func (h *Handler) newMCPHandler() http.Handler {
 	})
 }
 
-func (h *Handler) serveMCP(w http.ResponseWriter, r *http.Request, identity *gateway.ExecutionGrant) {
+func (h *Handler) serveMCP(w http.ResponseWriter, r *http.Request) {
 	// This CLI-only connection accepts no browser origins. Proxy authentication
 	// and per-request lifecycle revalidation remain outside the MCP protocol.
 	if len(r.Header.Values("Origin")) != 0 || r.URL.RawQuery != "" || r.URL.RawPath != "" {

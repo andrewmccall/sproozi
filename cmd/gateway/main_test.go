@@ -156,7 +156,9 @@ func TestModelUpstreamsAreAdministratorOwnedHTTPSOrigins(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			retained := map[string]string{"OPENAI_UPSTREAM_URL": cfg.openAIUpstreamURL, "ANTHROPIC_UPSTREAM_URL": cfg.anthropicUpstreamURL}
+			retained := map[string]string{
+				"OPENAI_UPSTREAM_URL": cfg.openAIUpstreamURL, "ANTHROPIC_UPSTREAM_URL": cfg.anthropicUpstreamURL,
+			}
 			if retained[key] != "https://fixture.sproozi-system.svc:8443" {
 				t.Fatalf("configured provider origin was not retained: %q", retained[key])
 			}

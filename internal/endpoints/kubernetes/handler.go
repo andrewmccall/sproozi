@@ -51,7 +51,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	if req.URL.Path == "/mcp" && h.mcp != nil {
-		h.serveMCP(w, req, identity)
+		h.serveMCP(w, req)
 		return
 	}
 	response, err := h.authorizeAndForward(req.Context(), identity, req)

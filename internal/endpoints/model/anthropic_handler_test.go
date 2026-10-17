@@ -21,6 +21,10 @@ const anthropicSuccess = `{"type":"message","role":"assistant","id":"msg-fixture
 
 const testAnthropicSecret = "trusted-secret"
 
+func anthropicFixturePricing() *model.PricingTable {
+	return &model.PricingTable{Models: map[string]model.ModelPrice{"claude-fixture": {InputMicrosPerMillionTokens: 1000000, CachedInputMicrosPerMillionTokens: 1000000, OutputMicrosPerMillionTokens: 1000000}}}
+}
+
 func TestAnthropicCappedNullableUsageSettlesActualConsumption(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request map[string]any
@@ -34,7 +38,7 @@ func TestAnthropicCappedNullableUsageSettlesActualConsumption(t *testing.T) {
 	identity.Policy.Spec.Budgets[api.CapabilityModelInference] = api.EndpointBudget{MaxUnits: 100, MaxCostMicros: 200}
 	tracker := budget.NewTracker()
 	h := model.NewAnthropicHandler(model.HandlerConfig{
-		Pricing:      &model.PricingTable{Models: map[string]model.ModelPrice{"claude-fixture": {InputMicrosPerMillionTokens: 1000000, CachedInputMicrosPerMillionTokens: 1000000, OutputMicrosPerMillionTokens: 1000000}}},
+		Pricing:      anthropicFixturePricing(),
 		ProviderAuth: modelauth.AnthropicAPIKey{Key: testAnthropicSecret}, UpstreamURL: upstream.URL,
 		HTTPClient: upstream.Client(), AuditLogger: audit.NewLogger(io.Discard),
 	})
@@ -62,7 +66,7 @@ func TestModelRequestsWithAmbiguousJSONKeysAreDenied(t *testing.T) {
 	identity := testExecutionGrant()
 	identity.Policy.Spec.Budgets[api.CapabilityModelInference] = api.EndpointBudget{MaxUnits: 100, MaxCostMicros: 200}
 	h := model.NewAnthropicHandler(model.HandlerConfig{
-		Pricing:      &model.PricingTable{Models: map[string]model.ModelPrice{"claude-fixture": {InputMicrosPerMillionTokens: 1000000, CachedInputMicrosPerMillionTokens: 1000000, OutputMicrosPerMillionTokens: 1000000}}},
+		Pricing:      anthropicFixturePricing(),
 		ProviderAuth: modelauth.AnthropicAPIKey{Key: testAnthropicSecret}, UpstreamURL: upstream.URL,
 		HTTPClient: upstream.Client(), AuditLogger: audit.NewLogger(io.Discard),
 	})
