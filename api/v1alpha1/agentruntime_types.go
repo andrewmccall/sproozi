@@ -40,9 +40,6 @@ const runtimeDropAll corev1.Capability = "ALL"
 // runtime admission seam. It deliberately fails closed for Pod features that
 // could escape the sandbox or silently weaken its security boundary.
 func (s *AgentRuntimeSpec) ValidateRuntimeTemplate() error {
-	if !slices.Contains([]string{"", codexHarnessSelector, "claude-code", "opencode", "hermes"}, s.ClientConfig.Harness) {
-		return fmt.Errorf("unsupported harness %q", s.ClientConfig.Harness)
-	}
 	if err := s.ClientConfig.validateNativeSession(); err != nil {
 		return err
 	}
@@ -255,7 +252,7 @@ func (c RuntimeClientConfig) validateNativeSession() error {
 	}
 	native := c.NativeSession
 	if c.Harness != codexHarnessSelector && c.Harness != "claude-code" {
-		return fmt.Errorf("native session options require the Codex harness")
+		return fmt.Errorf("native session options require the codex or claude-code harness")
 	}
 	return nativeconfig.ValidateHarness(c.Harness, native.Model, native.Options)
 }
@@ -281,31 +278,7 @@ type EphemeralWorkspaceSpec struct {
 	SizeLimit resource.Quantity `json:"sizeLimit"`
 }
 
-// AgentRuntimeStatus defines the observed state of AgentRuntime.
-type AgentRuntimeStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-
-	// For Kubernetes API conventions, see:
-	// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties
-
-	// conditions represent the current state of the AgentRuntime resource.
-	// Each condition has a unique type and reflects the status of a specific aspect of the resource.
-	//
-	// Standard condition types include:
-	// - "Available": the resource is fully functional
-	// - "Progressing": the resource is being created or updated
-	// - "Degraded": the resource failed to reach or maintain its desired state
-	//
-	// The status of each condition is one of True, False, or Unknown.
-	// +listType=map
-	// +listMapKey=type
-	// +optional
-	Conditions []metav1.Condition `json:"conditions,omitempty"`
-}
-
 // +kubebuilder:object:root=true
-// +kubebuilder:subresource:status
 
 // AgentRuntime is the Schema for the agentruntimes API
 type AgentRuntime struct {
@@ -318,10 +291,6 @@ type AgentRuntime struct {
 	// spec defines the desired state of AgentRuntime
 	// +required
 	Spec AgentRuntimeSpec `json:"spec"`
-
-	// status defines the observed state of AgentRuntime
-	// +optional
-	Status AgentRuntimeStatus `json:"status,omitzero"`
 }
 
 // +kubebuilder:object:root=true

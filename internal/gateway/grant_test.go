@@ -38,7 +38,7 @@ func TestDockerGrantEnforcesInitializedAllocationWithoutAgentRun(t *testing.T) {
 	}
 	calls := 0
 	dispatch := gateway.Dispatcher{fixtureAuthority: {Capability: string(api.CapabilityKubernetesRead), Budgets: tracker, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := budget.FromContext(r.Context()).SpendRequest(); err != nil {
+		if err := budget.FromContext(r.Context()).SpendRequest(r.Context()); err != nil {
 			w.WriteHeader(http.StatusTooManyRequests)
 			return
 		}

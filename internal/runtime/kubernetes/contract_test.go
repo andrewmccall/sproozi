@@ -2,6 +2,7 @@ package kubernetes_test
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -44,8 +45,8 @@ func TestEnsureAgentContractCreatesImmutableSeparatedDocument(t *testing.T) {
 	if configMap.Immutable == nil || !*configMap.Immutable {
 		t.Fatal("contract ConfigMap must be immutable")
 	}
-	input, err := agentcontract.DecodeInput([]byte(configMap.Data["input.json"]))
-	if err != nil {
+	var input agentcontract.Input
+	if err := json.Unmarshal([]byte(configMap.Data["input.json"]), &input); err != nil || input.Validate() != nil {
 		t.Fatalf("stored contract was invalid: %v", err)
 	}
 	if input.Trusted.Instructions != tmpl.Spec.Instructions || input.Untrusted.Task != run.Spec.Task {

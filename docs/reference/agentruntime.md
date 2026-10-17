@@ -99,6 +99,13 @@ The trust ConfigMap must be in `sproozi-agents`, immutable and contain public CA
 material only. Runtime, policy, template and run references resolve within the
 run's namespace.
 
+These rules are checked when a run is admitted, not when the `AgentRuntime` is
+created, and again on every later reconcile of an active run. A runtime that breaks
+any of them fails the run with reason `RuntimeInvalid` before it takes the
+active slot. The `Ready` condition message names the runtime and the rule, for
+example `AgentRuntime codex: cannot launch a sandbox: container "agent" image
+must be digest pinned`. Fix the runtime, then create a new run.
+
 ## Ordinary run completion
 
 For the current adapter, use one workload container named `agent`. Validation

@@ -89,10 +89,6 @@ type AgentRunStatus struct {
 	// +optional
 	CompletedAt *metav1.Time `json:"completedAt,omitempty"`
 
-	// Summary is an audit-safe brief summary of the completed run (max 500 chars).
-	// +optional
-	Summary string `json:"summary,omitempty"`
-
 	// Result is optional bounded untrusted final output captured before sandbox cleanup.
 	// Its presence does not determine execution success. Absence means no valid
 	// result was published, including cancellation and deadline termination.

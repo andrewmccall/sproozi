@@ -43,6 +43,13 @@ See [configured MCP capabilities](configured-mcp.md).
 Queued -> Admitted -> Running -> Succeeded | Failed | TimedOut | Cancelled
 ```
 
+While a run is `Queued`, `Admitted` or `Running`, each reconcile re-checks it
+against its live template, policy, runtime and session binding. A missing
+reference, a policy denial or an `AgentRuntime` that cannot launch a sandbox
+(`RuntimeInvalid`) moves it to `Failed`. The `Ready` condition holds the reason
+and message. A queued run that fails this check never takes the single active
+slot.
+
 Success uses the process exit of the container named `agent`, after the Pod
 becomes terminal. Review a proposed PR separately. See
 [agent contract and completion](agent-contract.md).
@@ -64,7 +71,6 @@ The only mutable intent in `spec` is `cancel: true`.
 - `status.identity.sandboxName`
 - `status.startedAt`
 - `status.completedAt`
-- `status.summary`
 
 These fields record created resources and the run outcome. They contain no
 credentials or raw prompt and output text.
@@ -72,6 +78,6 @@ credentials or raw prompt and output text.
 A worker can explicitly publish a final answer tied to its Run UID. The
 controller saves it as `status.result`, with `{text, truncated}`, before
 deleting the Pod. This field can contain sensitive, untrusted output. It is
-separate from the audit-safe summary and conditions and expires with the Run. A
+separate from the conditions and expires with the Run. A
 missing result means unavailable; an available result can have empty text. See
 [result publication](agent-contract.md#retained-final-answers).

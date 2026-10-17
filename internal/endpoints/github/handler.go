@@ -377,7 +377,7 @@ func (h *Handler) doHTTP(request *http.Request) (*http.Response, error) {
 	}
 	client := *h.Config.HTTPClient
 	client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
-	if err := budget.FromContext(request.Context()).SpendRequest(); err != nil {
+	if err := budget.FromContext(request.Context()).SpendRequest(request.Context()); err != nil {
 		return nil, err
 	}
 	return client.Do(request)

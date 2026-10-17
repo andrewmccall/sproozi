@@ -131,7 +131,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.deny(w, event, http.StatusServiceUnavailable, "MCP budget accounting unavailable")
 		return
 	}
-	meter, err := identity.Meter(h.config.Budgets, capability)
+	meter, err := identity.Meter(r.Context(), h.config.Budgets, capability)
 	if err != nil {
 		h.deny(w, event, http.StatusServiceUnavailable, "MCP budget accounting unavailable")
 		return
@@ -223,7 +223,7 @@ func (h *Handler) prepare(ctx context.Context, upstream *sdk.ClientSession,
 						callEvent.DenyReason = "MCP arguments denied"
 						return nil, fmt.Errorf("MCP arguments denied")
 					}
-					if workCtx.Err() != nil || meter.SpendRequest() != nil {
+					if workCtx.Err() != nil || meter.SpendRequest(workCtx) != nil {
 						callEvent.DenyReason = "MCP authority or budget unavailable"
 						return nil, fmt.Errorf("MCP authority or budget unavailable")
 					}

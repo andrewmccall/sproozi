@@ -140,7 +140,7 @@ func (h *Handler) authorizeAndForward(ctx context.Context, identity *gateway.Exe
 		// The body owns cancellation after headers have been returned.
 		forward = forward.WithContext(callCtx)
 	}
-	if err := budget.FromContext(ctx).SpendRequest(); err != nil {
+	if err := budget.FromContext(ctx).SpendRequest(ctx); err != nil {
 		cancel()
 		return nil, err
 	}

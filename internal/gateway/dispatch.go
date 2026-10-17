@@ -70,7 +70,7 @@ func (d Dispatcher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeDenial(w, http.StatusForbidden, "permission_error", "capability_denied", reason)
 			return
 		}
-		meter, err := identity.Meter(route.Budgets, capability)
+		meter, err := identity.Meter(ctx, route.Budgets, capability)
 		if errors.Is(err, ErrBudgetUnavailable) {
 			writeDenial(w, http.StatusServiceUnavailable, "api_error", "budget_unavailable",
 				"budget accounting for "+route.Capability+" is unavailable; retry later")

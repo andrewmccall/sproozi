@@ -106,11 +106,11 @@ func TestLocalOwnerActivationReservationRevocationAndReceipt(t *testing.T) {
 	if grant.Execution.Backend != gateway.BackendDocker || grant.Execution.UID != f.instance.ResourceUID {
 		t.Fatal("grant did not bind actual Docker incarnation")
 	}
-	meter, err := grant.Meter(budget.NewTrackerWithLedger(f.ledger), api.CapabilityModelInference)
+	meter, err := grant.Meter(t.Context(), budget.NewTrackerWithLedger(f.ledger), api.CapabilityModelInference)
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, err := meter.Reserve(4, 40)
+	r, err := meter.Reserve(t.Context(), 4, 40)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +137,7 @@ func TestLocalOwnerActivationReservationRevocationAndReceipt(t *testing.T) {
 	if err = f.owner.Activate(t.Context(), f.launch, f.instance); err == nil {
 		t.Fatal("revoked execution reopened")
 	}
-	if _, err = meter.Reserve(1, 1); err == nil {
+	if _, err = meter.Reserve(t.Context(), 1, 1); err == nil {
 		t.Fatal("sealed account admitted usage")
 	}
 }
@@ -152,11 +152,11 @@ func TestLocalOwnerRestartRetainsGrantAndAccounting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	meter, err := grant.Meter(budget.NewTrackerWithLedger(f.ledger), api.CapabilityModelInference)
+	meter, err := grant.Meter(t.Context(), budget.NewTrackerWithLedger(f.ledger), api.CapabilityModelInference)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = meter.Spend(2, 20); err != nil {
+	if err = meter.Spend(t.Context(), 2, 20); err != nil {
 		t.Fatal(err)
 	}
 	if err = f.owner.Close(); err != nil {
@@ -178,11 +178,11 @@ func TestLocalOwnerRestartRetainsGrantAndAccounting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	meter, err = grant.Meter(budget.NewTrackerWithLedger(f.ledger), api.CapabilityModelInference)
+	meter, err = grant.Meter(t.Context(), budget.NewTrackerWithLedger(f.ledger), api.CapabilityModelInference)
 	if err != nil {
 		t.Fatal(err)
 	}
-	state, err := meter.State()
+	state, err := meter.State(t.Context())
 	if err != nil || state.UnitsUsed != 2 || state.CostMicros != 20 {
 		t.Fatalf("restart lost usage: %+v %v", state, err)
 	}
@@ -247,7 +247,7 @@ func TestLocalOwnerRecordLossCannotResetAnAllocation(t *testing.T) {
 				if _, err = f.owner.Authenticate(t.Context(), token); err == nil {
 					t.Fatal("deleted registry authenticated")
 				}
-			} else if _, err = grant.Meter(budget.NewTrackerWithLedger(f.ledger), api.CapabilityModelInference); err == nil {
+			} else if _, err = grant.Meter(t.Context(), budget.NewTrackerWithLedger(f.ledger), api.CapabilityModelInference); err == nil {
 				t.Fatal("deleted ledger authorized")
 			}
 		})

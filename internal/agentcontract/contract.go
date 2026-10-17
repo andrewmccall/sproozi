@@ -20,19 +20,15 @@ const (
 	// Version identifies this contract revision. Consumers reject other values.
 	Version = "sproozi.agentcontract/v1alpha1"
 
-	maxInputBytes        = 64 << 10
-	maxEventBytes        = 4 << 10
 	maxInstructionsRunes = 16 << 10
 	maxTaskRunes         = 16 << 10
 	maxEventContextBytes = 16 << 10
 	maxCapabilities      = 32
-	maxLifecycleEvents   = 1 << 20
 )
 
 var (
 	errInvalidContract = errors.New("agentcontract: invalid contract")
 	dnsLabel           = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
-	repositoryName     = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 	identifier         = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,127}$`)
 	uid                = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
 )
@@ -70,44 +66,6 @@ type UntrustedInput struct {
 type GatewayBinding struct {
 	Endpoint  string `json:"endpoint"`
 	TokenPath string `json:"tokenPath"`
-}
-
-// LifecycleEvent is an audit-safe, fixed-shape event. It deliberately has no
-// prompt, response, command, output, patch, payload, or credential field.
-type LifecycleEvent struct {
-	Version       string      `json:"version"`
-	Run           RunIdentity `json:"run"`
-	Sequence      uint64      `json:"sequence"`
-	Type          string      `json:"type"`
-	Component     string      `json:"component"`
-	Operation     string      `json:"operation"`
-	Outcome       string      `json:"outcome"`
-	Reason        string      `json:"reason,omitempty"`
-	Repository    string      `json:"repository,omitempty"`
-	PRNumber      int64       `json:"prNumber,omitempty"`
-	CorrelationID string      `json:"correlationID,omitempty"`
-}
-
-func DecodeInput(data []byte) (Input, error) {
-	var input Input
-	if err := decodeStrict(data, maxInputBytes, &input); err != nil {
-		return Input{}, err
-	}
-	if err := input.Validate(); err != nil {
-		return Input{}, err
-	}
-	return input, nil
-}
-
-func DecodeLifecycleEvent(data []byte) (LifecycleEvent, error) {
-	var event LifecycleEvent
-	if err := decodeStrict(data, maxEventBytes, &event); err != nil {
-		return LifecycleEvent{}, err
-	}
-	if err := event.Validate(); err != nil {
-		return LifecycleEvent{}, err
-	}
-	return event, nil
 }
 
 func (i Input) Validate() error {
@@ -149,35 +107,6 @@ func (i Input) Validate() error {
 		return invalid("invalid gateway endpoint")
 	}
 
-	return nil
-}
-
-func (e LifecycleEvent) Validate() error {
-	if e.Version != Version {
-		return invalid("unsupported version")
-	}
-	if err := e.Run.validate(); err != nil {
-		return err
-	}
-	if e.Sequence == 0 || e.Sequence > maxLifecycleEvents {
-		return invalid("invalid event sequence")
-	}
-	for _, value := range []string{e.Type, e.Component, e.Operation, e.Outcome} {
-		if !identifier.MatchString(value) {
-			return invalid("invalid lifecycle field")
-		}
-	}
-	for _, value := range []string{e.Reason, e.CorrelationID} {
-		if value != "" && !identifier.MatchString(value) {
-			return invalid("invalid lifecycle metadata")
-		}
-	}
-	if e.Repository != "" && !repositoryName.MatchString(e.Repository) {
-		return invalid("invalid lifecycle repository")
-	}
-	if e.PRNumber < 0 || (e.PRNumber > 0 && e.Repository == "") {
-		return invalid("invalid lifecycle pull request")
-	}
 	return nil
 }
 

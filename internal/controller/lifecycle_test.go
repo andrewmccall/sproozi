@@ -23,7 +23,7 @@ func TestReleaseRetainsNetworkPolicyUntilSandboxTerminates(t *testing.T) {
 	np := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: k8sresources.RunName(run.UID), Namespace: k8sresources.AgentsNamespace, Labels: map[string]string{k8sresources.ManagedByLabel: k8sresources.ManagedByValue, k8sresources.RunUIDLabel: string(run.UID)}}}
 	c := fake.NewClientBuilder().WithScheme(newScheme()).WithObjects(run, np).Build()
 	sandbox := &k8sresources.FakeSandboxClient{Status: k8sresources.SandboxStatusRunning}
-	r := &controller.AgentRunReconciler{Client: c, SandboxClient: sandbox}
+	r := &controller.AgentRunReconciler{Client: c, APIReader: c, SandboxClient: sandbox}
 	complete, err := r.ReconcileRelease(context.Background(), run)
 	if err != nil || complete {
 		t.Fatalf("release = (%v, %v), want incomplete without error", complete, err)

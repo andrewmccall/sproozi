@@ -5,8 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-
-	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
+	"time"
 )
 
 // AccountKey combines the immutable Run UID and capability to partition usage.
@@ -73,22 +72,35 @@ func (r *LedgerReservation) unbounded() bool {
 	return r.maxUnits == 0 || r.maxCostMicros == 0
 }
 
+// settlementTimeout bounds one settlement, release or forfeit.
+const settlementTimeout = 30 * time.Second
+
+// Reservation is capacity held for one request until it settles.
 type Reservation struct {
 	tracker *Tracker
 	ledger  *LedgerReservation
+	// settleCtx is the reserving request's context without its cancellation.
+	// Settlement follows the upstream response, so a client disconnect must
+	// not cancel it: a lost settlement leaves capacity reserved or usage
+	// unrecorded. settlementTimeout bounds it instead.
+	settleCtx context.Context
 }
 
 func (r *Reservation) Settle(units, cost int64) error {
 	if r == nil {
 		return fmt.Errorf("budget: nil budget reservation")
 	}
-	return r.tracker.ledger.Settle(context.Background(), r.ledger, TrustedUsage{Units: units, CostMicros: cost})
+	ctx, cancel := context.WithTimeout(r.settleCtx, settlementTimeout)
+	defer cancel()
+	return r.tracker.ledger.Settle(ctx, r.ledger, TrustedUsage{Units: units, CostMicros: cost})
 }
 func (r *Reservation) Release() error {
 	if r == nil {
 		return fmt.Errorf("budget: nil budget reservation")
 	}
-	return r.tracker.ledger.Release(context.Background(), r.ledger)
+	ctx, cancel := context.WithTimeout(r.settleCtx, settlementTimeout)
+	defer cancel()
+	return r.tracker.ledger.Release(ctx, r.ledger)
 }
 
 // Forfeit charges all reserved units and cost when upstream consumption cannot
@@ -98,13 +110,6 @@ func (r *Reservation) Forfeit() error {
 		return fmt.Errorf("budget: nil budget reservation")
 	}
 	return r.Settle(r.ledger.units, r.ledger.costMicros)
-}
-
-func (r *Reservation) ReservedUnits() int64 {
-	if r == nil || r.ledger == nil {
-		return 0
-	}
-	return r.ledger.units
 }
 
 type Tracker struct {
@@ -117,13 +122,6 @@ func NewTracker() *Tracker { return NewTrackerWithLedger(NewMemoryLedger()) }
 func NewTrackerWithLedger(ledger Ledger) *Tracker {
 	return &Tracker{ledger: ledger}
 }
-func (bt *Tracker) Reserve(runID string, budget sprooziv1alpha1.EndpointBudget, units, cost int64) (*Reservation, error) {
-	r, err := bt.ledger.Reserve(context.Background(), AccountKey(runID), UsageReservation{MaxUnits: budget.MaxUnits, MaxCostMicros: budget.MaxCostMicros, Units: units, CostMicros: cost})
-	if err != nil {
-		return nil, err
-	}
-	return &Reservation{tracker: bt, ledger: r}, nil
-}
 func (bt *Tracker) State(runID string) (State, error) {
 	state, err := bt.ledger.State(context.Background(), AccountKey(runID))
 	if errors.Is(err, ErrAccountNotFound) {
@@ -134,8 +132,4 @@ func (bt *Tracker) State(runID string) (State, error) {
 
 func (bt *Tracker) Initialize(runID string) error {
 	return bt.ledger.Initialize(context.Background(), AccountKey(runID))
-}
-
-func (bt *Tracker) Seal(runID string) (TrustedUsage, error) {
-	return bt.ledger.Seal(context.Background(), AccountKey(runID))
 }

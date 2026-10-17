@@ -218,7 +218,7 @@ func TestHandlerDisallowedPathReturns403(t *testing.T) {
 func TestHandlerBudgetExhaustedReturns429(t *testing.T) {
 	identity := testExecutionGrant()
 	bt := budget.NewTracker()
-	if err := bt.Meter(identity.Execution.UID, identity.Policy.Spec.Budgets[sprooziv1alpha1.CapabilityModelInference]).Spend(10000, 0); err != nil {
+	if err := bt.Meter(identity.Execution.UID, identity.Policy.Spec.Budgets[sprooziv1alpha1.CapabilityModelInference]).Spend(t.Context(), 10000, 0); err != nil {
 		t.Fatal(err)
 	}
 
