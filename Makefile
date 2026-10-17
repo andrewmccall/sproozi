@@ -61,9 +61,14 @@ fmt: ## Run go fmt against code.
 vet: ## Run go vet against code.
 	go vet ./...
 
+# Every package except the Kind-only e2e suite. Envtest packages need the
+# downloaded API server binaries, so both test targets export their path.
+UNIT_PACKAGES = $$(go list ./... | grep -v /e2e)
+ENVTEST_ASSETS = KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)"
+
 .PHONY: test
-test: manifests generate fmt vet setup-envtest ## Run tests.
-	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
+test: manifests generate fmt vet setup-envtest ## Regenerate, vet and run every non-e2e package, including envtest. CI.
+	$(ENVTEST_ASSETS) go test $(UNIT_PACKAGES) -coverprofile cover.out
 
 .PHONY: test-e2e
 test-e2e: ## Create an isolated Kind cluster with enforcing CNI and run the e2e tests.
@@ -86,12 +91,9 @@ lint-config: golangci-lint ## Verify golangci-lint linter configuration
 	"$(GOLANGCI_LINT)" config verify
 
 .PHONY: verify-fast
-verify-fast: ## Run the non-network unit, race, and vet gates without changing source artifacts.
-	cache_dir="$$(mktemp -d)" && GOCACHE="$$cache_dir" go test -race ./api/v1alpha1 ./internal/agentcontract ./internal/execution ./internal/runtime/kubernetes ./internal/packages ./internal/policy/kubernetes && GOCACHE="$$cache_dir" go vet ./internal/agentcontract ./internal/execution ./internal/runtime/kubernetes ./internal/packages ./internal/policy/kubernetes
-
-.PHONY: verify-api
-verify-api: ## Run API, controller, Kubernetes, and envtest checks without regenerating source artifacts.
-	cache_dir="$$(mktemp -d)" && GOCACHE="$$cache_dir" go test ./api/v1alpha1 ./internal/controller ./internal/runtime/kubernetes ./test/envtest
+verify-fast: setup-envtest ## Vet and race-test every non-e2e package without regenerating sources. CI.
+	go vet ./...
+	$(ENVTEST_ASSETS) go test -race $(UNIT_PACKAGES)
 
 .PHONY: verify-mcp
 verify-mcp: ## Exercise native and configured MCP tools through authenticated TLS CONNECT, including policy and lifecycle denials.
