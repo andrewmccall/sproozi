@@ -9,7 +9,7 @@ import (
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/audit"
-	egress "github.com/andrewmccall/sproozi/internal/endpoints/destination"
+	"github.com/andrewmccall/sproozi/internal/endpoints/destination"
 	"github.com/andrewmccall/sproozi/internal/gateway"
 )
 
@@ -46,13 +46,13 @@ func TestInspectedEgressEnforcesDestinationAndLiveGrant(t *testing.T) {
 		{"revoked profile", testPackageURL, 403, func(i *gateway.ExecutionGrant) { i.Policy.Spec.EgressProfiles = nil }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			profiles, err := egress.LoadProfileStore([]byte(`{"registry":[{"scheme":"https","host":"registry.example","port":8443}]}`))
+			profiles, err := destination.LoadProfileStore([]byte(`{"registry":[{"scheme":"https","host":"registry.example","port":8443}]}`))
 			if err != nil {
 				t.Fatal(err)
 			}
 			calls := 0
 			var events strings.Builder
-			h := &egress.Handler{Config: egress.HandlerConfig{Profiles: profiles, AuditLogger: audit.NewLogger(&events), HTTPClient: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			h := &destination.Handler{Config: destination.HandlerConfig{Profiles: profiles, AuditLogger: audit.NewLogger(&events), HTTPClient: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 				calls++
 				if r.Header.Get("Authorization") != "" || r.Header.Get("Proxy-Authorization") != "" {
 					t.Error("forwarded credentials")
@@ -68,7 +68,14 @@ func TestInspectedEgressEnforcesDestinationAndLiveGrant(t *testing.T) {
 			req.Header.Set("Proxy-Authorization", "secret")
 			req = req.WithContext(gateway.WithIdentity(req.Context(), id))
 			rr := httptest.NewRecorder()
-			h.ServeHTTP(rr, req)
+			// Production routes each approved authority here; the handler must
+			// still deny a request whose own target is not approved.
+			authority := req.Host
+			if !strings.Contains(authority, ":") {
+				authority += ":443"
+			}
+			gateway.Dispatcher{authority: {Capability: string(api.CapabilityNetworkEgress), Tier: audit.TierDestination,
+				AuditLogger: h.Config.AuditLogger, Handler: h}}.ServeHTTP(rr, req)
 			if rr.Code != tc.status {
 				t.Fatalf("status=%d want=%d body=%s", rr.Code, tc.status, rr.Body)
 			}
@@ -82,9 +89,9 @@ func TestInspectedEgressEnforcesDestinationAndLiveGrant(t *testing.T) {
 	}
 }
 func TestEgressRedirectRequiresNewAuthorization(t *testing.T) {
-	ps, _ := egress.LoadProfileStore([]byte(`{"registry":[{"scheme":"https","host":"registry.example","port":443}]}`))
+	ps, _ := destination.LoadProfileStore([]byte(`{"registry":[{"scheme":"https","host":"registry.example","port":443}]}`))
 	calls := 0
-	h := &egress.Handler{Config: egress.HandlerConfig{Profiles: ps, AuditLogger: audit.NewLogger(io.Discard), HTTPClient: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+	h := &destination.Handler{Config: destination.HandlerConfig{Profiles: ps, AuditLogger: audit.NewLogger(io.Discard), HTTPClient: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		calls++
 		return &http.Response{StatusCode: 302, Header: http.Header{"Location": []string{"https://evil.example"}}, Body: http.NoBody}, nil
 	})}}}
@@ -97,8 +104,8 @@ func TestEgressRedirectRequiresNewAuthorization(t *testing.T) {
 	}
 }
 func TestEgressDeniesRawTunnelAndMissingIdentity(t *testing.T) {
-	ps, _ := egress.LoadProfileStore([]byte(`{}`))
-	h := &egress.Handler{Config: egress.HandlerConfig{Profiles: ps, AuditLogger: audit.NewLogger(io.Discard)}}
+	ps, _ := destination.LoadProfileStore([]byte(`{}`))
+	h := &destination.Handler{Config: destination.HandlerConfig{Profiles: ps, AuditLogger: audit.NewLogger(io.Discard)}}
 	req := httptest.NewRequest("CONNECT", "https://registry.example", nil)
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)

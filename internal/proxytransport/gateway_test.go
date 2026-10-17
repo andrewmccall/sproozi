@@ -62,6 +62,8 @@ func testCertificate(t *testing.T) tls.Certificate {
 	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}
 }
 
+func onlyTestService(authority string) bool { return authority == testServiceAuthority }
+
 func testIdentity() *gateway.ExecutionGrant {
 	return &gateway.ExecutionGrant{Authority: gateway.Reference{Backend: gateway.BackendKubernetes, Name: "run-sa", Namespace: "agents", UID: "sa-uid"},
 		Execution: gateway.Reference{Backend: gateway.BackendKubernetes, UID: "test-execution"},
@@ -117,18 +119,18 @@ func TestGatewayProxyTokenModes(t *testing.T) {
 				}
 				return identity, nil
 			}, Revalidate: func(context.Context, *gateway.ExecutionGrant) error { return nil }, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				got = Identity(r.Context())
-				if r.Header.Get("Authorization") != "" || r.Header.Get(proxyAuthorizationHeader) != "" {
+				got, _ = gateway.IdentityFromContext(r.Context())
+				if r.Header.Get("Authorization") != "" || r.Header.Get(proxyAuthorizationHeader) != "" || r.Header.Get("Cookie") != "" {
 					t.Error("proxy credentials reached semantic handler")
 				}
 				_, _ = io.WriteString(w, "ok")
-			}), RevocationInterval: 20 * time.Millisecond, SessionLifetime: time.Second})
+			}), AllowedAuthority: onlyTestService, RevocationInterval: 20 * time.Millisecond, SessionLifetime: time.Second})
 			if err != nil {
 				t.Fatal(err)
 			}
 			s := startProxySession(t, g, tc.auth)
 			defer func() { _ = s.client.Close() }()
-			if _, err := io.WriteString(s.client, "GET / HTTP/1.1\r\nHost: service.test\r\nAuthorization: Bearer upstream\r\nProxy-Authorization: Basic leaked\r\nConnection: close\r\n\r\n"); err != nil {
+			if _, err := io.WriteString(s.client, "GET / HTTP/1.1\r\nHost: service.test\r\nAuthorization: Bearer upstream\r\nProxy-Authorization: Basic leaked\r\nCookie: session=leaked\r\nConnection: close\r\n\r\n"); err != nil {
 				t.Fatal(err)
 			}
 			response, err := http.ReadResponse(bufio.NewReader(s.client), nil)
@@ -203,7 +205,7 @@ func TestStandardClientUsesTLSAuthenticatedProxyAndInspectedTLS(t *testing.T) {
 func TestGatewayDeniesUnknownHostAndSNIMismatchWithoutHandler(t *testing.T) {
 	called := 0
 	identity := testIdentity()
-	g, err := New(Config{Certificates: map[string]tls.Certificate{testServiceHost: testCertificate(t)}, Authenticate: func(context.Context, string) (*gateway.ExecutionGrant, error) { return identity, nil }, Revalidate: func(context.Context, *gateway.ExecutionGrant) error { return nil }, Handler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called++ })})
+	g, err := New(Config{Certificates: map[string]tls.Certificate{testServiceHost: testCertificate(t)}, Authenticate: func(context.Context, string) (*gateway.ExecutionGrant, error) { return identity, nil }, Revalidate: func(context.Context, *gateway.ExecutionGrant) error { return nil }, Handler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called++ }), AllowedAuthority: onlyTestService})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +228,7 @@ func TestGatewayDeniesUnknownHostAndSNIMismatchWithoutHandler(t *testing.T) {
 
 func TestGatewayRejectsAuthorityDisagreementAndSNI(t *testing.T) {
 	identity := testIdentity()
-	g, err := New(Config{Certificates: map[string]tls.Certificate{testServiceHost: testCertificate(t)}, Authenticate: func(context.Context, string) (*gateway.ExecutionGrant, error) { return identity, nil }, Revalidate: func(context.Context, *gateway.ExecutionGrant) error { return nil }, Handler: http.NotFoundHandler()})
+	g, err := New(Config{Certificates: map[string]tls.Certificate{testServiceHost: testCertificate(t)}, Authenticate: func(context.Context, string) (*gateway.ExecutionGrant, error) { return identity, nil }, Revalidate: func(context.Context, *gateway.ExecutionGrant) error { return nil }, Handler: http.NotFoundHandler(), AllowedAuthority: onlyTestService})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,7 +258,7 @@ func TestGatewayRejectsAuthorityDisagreementAndSNI(t *testing.T) {
 
 func TestGatewaySessionLifetimeClosesConnection(t *testing.T) {
 	identity := testIdentity()
-	g, err := New(Config{Certificates: map[string]tls.Certificate{testServiceHost: testCertificate(t)}, Authenticate: func(context.Context, string) (*gateway.ExecutionGrant, error) { return identity, nil }, Revalidate: func(context.Context, *gateway.ExecutionGrant) error { return nil }, Handler: http.NotFoundHandler(), SessionLifetime: time.Second, RevocationInterval: 20 * time.Millisecond})
+	g, err := New(Config{Certificates: map[string]tls.Certificate{testServiceHost: testCertificate(t)}, Authenticate: func(context.Context, string) (*gateway.ExecutionGrant, error) { return identity, nil }, Revalidate: func(context.Context, *gateway.ExecutionGrant) error { return nil }, Handler: http.NotFoundHandler(), AllowedAuthority: onlyTestService, SessionLifetime: time.Second, RevocationInterval: 20 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +287,7 @@ func TestGatewayRevocationClosesActiveSession(t *testing.T) {
 			return fmt.Errorf("revoked")
 		}
 		return nil
-	}, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-r.Context().Done() }), RevocationInterval: 20 * time.Millisecond, SessionLifetime: time.Second})
+	}, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-r.Context().Done() }), AllowedAuthority: onlyTestService, RevocationInterval: 20 * time.Millisecond, SessionLifetime: time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}

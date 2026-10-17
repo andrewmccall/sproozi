@@ -1,9 +1,7 @@
----
-status: accepted
-date: 2026-10-06
----
+# 0001: Use MCP through the shared capability gateway
 
-# Use MCP through the shared capability gateway
+Status: accepted
+Date: 2026-10-06
 
 MCP already supplies tool discovery, descriptions and input schemas. Adding each
 provider should require trusted configuration and policy, without a Sproozi

@@ -31,7 +31,7 @@ func TestReleaseRecoversSandboxAndRetainsUncertainContainment(t *testing.T) {
 				np := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: k8sresources.AgentsNamespace, Labels: labels}}
 				pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: k8sresources.AgentsNamespace, UID: "pod-incarnation", Labels: labels, Finalizers: []string{k8sresources.ManagedWriterFenceFinalizer}}, Status: corev1.PodStatus{Phase: phase}}
 				c := fake.NewClientBuilder().WithScheme(newScheme()).WithStatusSubresource(&corev1.Pod{}).WithObjects(run, np, pod).Build()
-				r := &controller.AgentRunReconciler{Client: c, SandboxClient: k8sresources.NewPodSandboxClient(c)}
+				r := &controller.AgentRunReconciler{Client: c, APIReader: c, SandboxClient: k8sresources.NewPodSandboxClient(c, c)}
 				for range 2 {
 					complete, err := r.ReconcileRelease(ctx, run)
 					if err != nil || complete {
@@ -71,7 +71,7 @@ func TestReleaseDoesNotAdoptDifferentRunAndCleansAbsentRun(t *testing.T) {
 	np := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: k8sresources.AgentsNamespace, Labels: map[string]string{k8sresources.ManagedByLabel: k8sresources.ManagedByValue, k8sresources.RunUIDLabel: string(run.UID)}}}
 	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: k8sresources.AgentsNamespace, Labels: map[string]string{k8sresources.ManagedByLabel: k8sresources.ManagedByValue, k8sresources.RunUIDLabel: "different-run"}}}
 	c := fake.NewClientBuilder().WithScheme(newScheme()).WithObjects(run, np, pod).Build()
-	r := &controller.AgentRunReconciler{Client: c, SandboxClient: k8sresources.NewPodSandboxClient(c)}
+	r := &controller.AgentRunReconciler{Client: c, APIReader: c, SandboxClient: k8sresources.NewPodSandboxClient(c, c)}
 	complete, err := r.ReconcileRelease(ctx, run)
 	if err == nil || complete {
 		t.Fatalf("foreign recovery=(%v,%v)", complete, err)

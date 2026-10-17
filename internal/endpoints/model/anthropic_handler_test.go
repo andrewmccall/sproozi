@@ -21,6 +21,10 @@ const anthropicSuccess = `{"type":"message","role":"assistant","id":"msg-fixture
 
 const testAnthropicSecret = "trusted-secret"
 
+func anthropicFixturePricing() *model.PricingTable {
+	return &model.PricingTable{Models: map[string]model.ModelPrice{"claude-fixture": {InputMicrosPerMillionTokens: 1000000, CachedInputMicrosPerMillionTokens: 1000000, OutputMicrosPerMillionTokens: 1000000}}}
+}
+
 func TestAnthropicCappedNullableUsageSettlesActualConsumption(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request map[string]any
@@ -34,7 +38,7 @@ func TestAnthropicCappedNullableUsageSettlesActualConsumption(t *testing.T) {
 	identity.Policy.Spec.Budgets[api.CapabilityModelInference] = api.EndpointBudget{MaxUnits: 100, MaxCostMicros: 200}
 	tracker := budget.NewTracker()
 	h := model.NewAnthropicHandler(model.HandlerConfig{
-		Pricing:      &model.PricingTable{Models: map[string]model.ModelPrice{"claude-fixture": {InputMicrosPerMillionTokens: 1000000, CachedInputMicrosPerMillionTokens: 1000000, OutputMicrosPerMillionTokens: 1000000}}},
+		Pricing:      anthropicFixturePricing(),
 		ProviderAuth: modelauth.AnthropicAPIKey{Key: testAnthropicSecret}, UpstreamURL: upstream.URL,
 		HTTPClient: upstream.Client(), AuditLogger: audit.NewLogger(io.Discard),
 	})
@@ -46,6 +50,51 @@ func TestAnthropicCappedNullableUsageSettlesActualConsumption(t *testing.T) {
 	state := observedState(t, tracker, testRunUID+"/model.inference")
 	if response.Code != 200 || state.UnitsUsed != 22 || state.CostMicros != 22 || state.ReservedUnits != 0 || state.ReservedCostMicros != 0 {
 		t.Fatalf("status=%d body=%s state=%+v", response.Code, response.Body.String(), state)
+	}
+}
+
+// Go keeps the last duplicate key and matches struct fields without regard to
+// case. A provider that keeps the first key, or matches exactly, would bill a
+// value the cost checks never saw, so ambiguous bodies never reach upstream.
+// Only objects the checks decode reject keys that differ only by case.
+func TestModelRequestsWithAmbiguousJSONKeysAreDenied(t *testing.T) {
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		_, _ = io.WriteString(w, anthropicSuccess)
+	}))
+	defer upstream.Close()
+	identity := testExecutionGrant()
+	identity.Policy.Spec.Budgets[api.CapabilityModelInference] = api.EndpointBudget{MaxUnits: 100, MaxCostMicros: 200}
+	h := model.NewAnthropicHandler(model.HandlerConfig{
+		Pricing:      anthropicFixturePricing(),
+		ProviderAuth: modelauth.AnthropicAPIKey{Key: testAnthropicSecret}, UpstreamURL: upstream.URL,
+		HTTPClient: upstream.Client(), AuditLogger: audit.NewLogger(io.Discard),
+	})
+	routes := gateway.Dispatcher{model.AnthropicAuthority: {Capability: string(api.CapabilityModelInference), Handler: h, Budgets: budget.NewTracker()}}
+	for _, tc := range []struct {
+		name, body string
+		status     int
+	}{
+		{"duplicate nested cache TTL", `{"model":"claude-fixture","max_tokens":2,"messages":[{"role":"user","content":[{"type":"text","text":"hi","cache_control":{"type":"ephemeral","ttl":"1h","ttl":"5m"}}]}]}`, http.StatusBadRequest},
+		{"duplicate top-level key", `{"model":"claude-fixture","max_tokens":2,"max_tokens":1,"messages":[{"role":"user","content":"hello"}]}`, http.StatusBadRequest},
+		{"duplicate key in user content", `{"model":"claude-fixture","max_tokens":2,"tools":[{"name":"t","input_schema":{"type":"object","type":"array"}}],"messages":[]}`, http.StatusBadRequest},
+		{"case-variant top-level key", `{"model":"claude-fixture","max_tokens":2,"messages":[{"role":"user","content":[{"type":"text","text":"hi","cache_control":{"type":"ephemeral","ttl":"1h"}}]}],"Messages":[]}`, http.StatusBadRequest},
+		{"trailing value", `{"model":"claude-fixture","max_tokens":2,"messages":[]} {"stream":true}`, http.StatusBadRequest},
+		// The checks never decode tool schemas, so their own keys may differ only by case.
+		{"case-variant tool schema properties", `{"model":"claude-fixture","max_tokens":2,"tools":[{"name":"t","input_schema":{"type":"object","properties":{"Name":{"type":"string"},"name":{"type":"string"}}}}],"messages":[{"role":"user","content":"hello"}]}`, http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			before := calls.Load()
+			req := httptest.NewRequest(http.MethodPost, "https://api.anthropic.com/v1/messages", strings.NewReader(tc.body))
+			req = req.WithContext(gateway.WithIdentity(req.Context(), identity))
+			response := httptest.NewRecorder()
+			routes.ServeHTTP(response, req)
+			forwarded := calls.Load() - before
+			if response.Code != tc.status || (forwarded == 1) != (tc.status == http.StatusOK) {
+				t.Fatalf("status=%d upstream calls=%d body=%s", response.Code, forwarded, response.Body.String())
+			}
+		})
 	}
 }
 

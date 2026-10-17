@@ -23,6 +23,7 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"flag"
 	"net/http"
 	"os"
@@ -71,10 +72,23 @@ func main() {
 		os.Exit(1)
 	}
 
+	replay := webhook.NewK8sReplayStore(runtimeClient, envOrDefault("REPLAY_NAMESPACE", "sproozi-webhook-state"))
+	// Each accepted event leaves a replay record. Sweep once per replay window
+	// so a record outlives its window by at most one more.
+	go func() {
+		for range time.Tick(webhook.DefaultReplayWindow) {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+			if err := replay.SweepExpired(ctx); err != nil {
+				log.Error(err, "Failed to sweep expired webhook replay records")
+			}
+			cancel()
+		}
+	}()
+
 	h := &webhook.Handler{
 		Config: webhook.HandlerConfig{
 			Client:      runtimeClient,
-			Replay:      webhook.NewK8sReplayStore(runtimeClient, envOrDefault("REPLAY_NAMESPACE", "sproozi-webhook-state")),
+			Replay:      replay,
 			AuditLogger: audit.NewLogger(os.Stdout),
 		},
 	}

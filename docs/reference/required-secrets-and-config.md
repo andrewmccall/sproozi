@@ -127,7 +127,7 @@ policy predicates and client preparation.
 ## Optional persistent orchestration
 
 The [Hermes guide](../guides/hermes-orchestration.md) prepares the private task
-service and trusted coordinator. These credentials stay outside worker Pods:
+service and trusted coordinator. These credentials stay outside agent Pods:
 
 | Object | Namespace | Purpose |
 | --- | --- | --- |

@@ -197,7 +197,7 @@ This decision refines the mechanisms in [ADR 0004](0004-portable-sessions-and-bo
 Current boundaries live in [gateway grants](../../internal/gateway/grant.go),
 [local authority](../../internal/gateway/docker/owner.go),
 [Docker placement](../../internal/runtime/docker/README.md),
-[remote registry](../../internal/runtime/kubernetes/session/registry.go),
+[remote registry](../../internal/runtime/kubernetes/registry/registry.go),
 [remote placement](../../internal/runtime/kubernetes/placement/placement.go),
 [home composition](../../internal/session/home/compose.go),
 [profile transport](../../internal/session/profile/server.go),

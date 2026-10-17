@@ -7,7 +7,8 @@ import (
 	"testing"
 	"time"
 
-	registry "github.com/andrewmccall/sproozi/internal/runtime/kubernetes/session"
+	"github.com/andrewmccall/sproozi/internal/harness"
+	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
 	"github.com/google/uuid"
@@ -16,7 +17,7 @@ import (
 func TestAbortIndependentAllocationWhileAnotherStopIsHeld(t *testing.T) {
 	p, _, _, first, data := setup(t)
 	second := first
-	second.SessionID, second.OperationID, second.AllocationID = uuid.NewString(), uuid.NewString(), uuid.NewString()
+	second.ExecutionID, second.OperationID, second.AllocationID = uuid.NewString(), uuid.NewString(), uuid.NewString()
 	var firstInc, secondInc session.Incarnation
 	for index, l := range []session.Launch{first, second} {
 		i, err := p.Prepare(t.Context(), l, data)
@@ -112,7 +113,7 @@ type heldQuiesceExecutor struct {
 }
 
 func (e *heldQuiesceExecutor) Execute(ctx context.Context, namespace, pod, container string, args []string, input io.Reader, output, errout io.Writer) error {
-	if pod == e.pod && len(args) == 2 && args[1] == nativeQuiesce {
+	if pod == e.pod && len(args) == 2 && args[1] == string(harness.NativeQuiesce) {
 		close(e.entered)
 		<-ctx.Done()
 		return ctx.Err()

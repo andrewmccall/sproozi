@@ -165,7 +165,7 @@ func validateLaunch(l session.Launch) error {
 	if err := workspace.ValidateIgnoredPaths(l.IncludeIgnored); err != nil {
 		return err
 	}
-	if l.Harness.Validate() != nil || !validID(l.SessionID) || !validID(l.OperationID) || !validID(l.AllocationID) || !validID(l.ThreadID) || l.Epoch == 0 || !validName(l.Placement) || !validDigest(l.InstructionDigest) || !validDigest(l.CheckpointDigest) || l.Deadline.IsZero() || len(l.Allowances) == 0 || len(l.Allowances) > 32 {
+	if l.Harness.Validate() != nil || !validID(l.ExecutionID) || !validID(l.OperationID) || !validID(l.AllocationID) || !validID(l.ThreadID) || l.Epoch == 0 || !validName(l.Placement) || !validDigest(l.InstructionDigest) || !validDigest(l.CheckpointDigest) || l.Deadline.IsZero() || len(l.Allowances) == 0 || len(l.Allowances) > 32 {
 		return errors.New("profile: invalid launch")
 	}
 	for capability, a := range l.Allowances {

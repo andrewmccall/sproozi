@@ -26,13 +26,6 @@ func testScope(data []byte) sprooziv1alpha1.PackagesInstallScope {
 	return sprooziv1alpha1.PackagesInstallScope{Ecosystems: []sprooziv1alpha1.PackageEcosystem{sprooziv1alpha1.PackageEcosystemPyPI}, MaxDownloadBytes: 1024, Artifacts: []sprooziv1alpha1.PackageArtifact{{Name: "demo-tool", Version: "1.0.0", SHA256: hex.EncodeToString(h[:]), Filename: "demo_tool-1.0.0-py3-none-any.whl"}}}
 }
 
-func TestNormalizeName(t *testing.T) {
-	got, err := packages.NormalizeName(" Demo_Tool ")
-	if err != nil || got != "demo-tool" {
-		t.Fatalf("NormalizeName() = %q, %v", got, err)
-	}
-}
-
 func TestAuthorizePathOnlyAllowsExactMetadataAndWheel(t *testing.T) {
 	scope := testScope([]byte("wheel"))
 	for _, tc := range []struct {
@@ -40,6 +33,7 @@ func TestAuthorizePathOnlyAllowsExactMetadataAndWheel(t *testing.T) {
 		allowed                  bool
 	}{
 		{"metadata", testMethodGet, testPypiHost, demoToolIndexPath, true},
+		{"unnormalized metadata", testMethodGet, testPypiHost, "/simple/Demo_Tool/", false},
 		{"wheel", testMethodGet, pythonFilesHost, "/packages/aa/demo_tool-1.0.0-py3-none-any.whl", true},
 		{"wrong version", testMethodGet, pythonFilesHost, "/packages/demo_tool-2.0.0-py3-none-any.whl", false},
 		{"source", testMethodGet, pythonFilesHost, "/packages/demo_tool-1.0.0.tar.gz", false},
@@ -68,19 +62,6 @@ func TestVerifyArtifactBoundsAndDigest(t *testing.T) {
 	scope.MaxDownloadBytes = 3
 	if _, err := packages.VerifyArtifact(scope, a, bytes.NewReader(data)); err == nil {
 		t.Fatal("oversized artifact was accepted")
-	}
-}
-
-func TestArtifactURLRequiresExactApprovedWheel(t *testing.T) {
-	scope := testScope([]byte("wheel"))
-	a := scope.Artifacts[0]
-	if err := packages.ArtifactURL("https://files.pythonhosted.org/packages/x/"+a.Filename, a); err != nil {
-		t.Fatal(err)
-	}
-	for _, raw := range []string{"http://files.pythonhosted.org/packages/x/" + a.Filename, "https://files.pythonhosted.org/other.whl?x=1", "https://evil.example/" + a.Filename} {
-		if err := packages.ArtifactURL(raw, a); err == nil {
-			t.Errorf("accepted out-of-scope URL %q", raw)
-		}
 	}
 }
 

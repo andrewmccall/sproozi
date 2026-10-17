@@ -1,6 +1,7 @@
 package session
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -27,7 +28,7 @@ const testIgnoredFile = "needed.bin"
 func TestCancelUnknownActivationWithExactKnownIncarnation(t *testing.T) {
 	c, _, _, remote, start := setup(t)
 	remote.lostActivate = true
-	r, err := c.Move(context.Background(), start.Source.SessionID, uuid.NewString(), testRemote)
+	r, err := c.Move(context.Background(), start.Source.ExecutionID, uuid.NewString(), testRemote)
 	if err == nil || r.Phase != PhaseActivating {
 		t.Fatalf("expected retained activation intent: %+v %v", r, err)
 	}
@@ -35,12 +36,101 @@ func TestCancelUnknownActivationWithExactKnownIncarnation(t *testing.T) {
 	o := remote.records[op.Launch.AllocationID]
 	o.State = PlacementUnknown
 	remote.records[op.Launch.AllocationID] = o
-	r, err = c.Cancel(context.Background(), r.ID, uuid.NewString())
-	if err != nil || remote.aborted != 1 || r.Phase != PhaseCancelled || r.Uncertainty != PhaseUnknownUsage || r.Active == nil || !r.Active.ActualStopped {
-		t.Fatalf("cancel unknown exact incarnation: %+v %v", r, err)
+	r, err = c.Cancel(context.Background(), r.ID, uuid.NewString(), nil)
+	if err != nil {
+		t.Fatalf("cancel unknown exact incarnation: %v", err)
 	}
-	if r.Remaining[testCapability].Units.Value != 18 || r.Checkpoint.Metadata.SHA256 != start.Stopped.CheckpointDigest {
-		t.Fatal("cancel refunded usage or replaced the committed checkpoint")
+	if remote.aborted != 1 {
+		t.Errorf("aborts = %d, want 1 on the exact known incarnation", remote.aborted)
+	}
+	if r.Phase != PhaseUnknownUsage || r.CancelOperation == "" {
+		t.Errorf("phase = %s, cancellation = %q; want retained cancellation with unknown usage", r.Phase, r.CancelOperation)
+	}
+	if r.Active == nil || !r.Active.ActualStopped {
+		t.Fatalf("active = %+v, want the aborted incarnation retained as a fenced writer", r.Active)
+	}
+	if got := r.Remaining[testCapability].Units.Value; got != afterSeedUnits {
+		t.Errorf("remaining units = %d, want %d: cancellation refunded unknown usage", got, afterSeedUnits)
+	}
+	if r.Checkpoint.Metadata.SHA256 != start.Stopped.CheckpointDigest {
+		t.Error("cancellation replaced the committed checkpoint")
+	}
+}
+
+// The coordinator distinguishes the Placement.Stop outcomes: a fenced writer
+// with unsealed usage is unknown usage, any other failure is an unknown stop.
+// Neither releases the allocation or prepares the destination.
+func TestStopOutcomeSeparatesUnsealedUsageFromUnknownStop(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		unsealed   bool
+		wantPhase  Phase
+		wantFenced bool
+	}{
+		{name: "fenced writer, unsealed usage", unsealed: true, wantPhase: PhaseUnknownUsage, wantFenced: true},
+		{name: "unreachable placement", wantPhase: PhaseUnknownStop},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _, local, remote, start := setup(t)
+			r, err := c.Move(t.Context(), start.Source.ExecutionID, uuid.NewString(), testRemote)
+			if err != nil {
+				t.Fatal(err)
+			}
+			remote.unsealed, remote.unknownStop = tc.unsealed, !tc.unsealed
+			r, err = c.Move(t.Context(), r.ID, uuid.NewString(), testLocal)
+			if err == nil {
+				t.Fatal("move succeeded without sealed source usage")
+			}
+			if r.Phase != tc.wantPhase {
+				t.Errorf("phase = %s, want %s", r.Phase, tc.wantPhase)
+			}
+			if r.Active == nil || r.Active.ActualStopped != tc.wantFenced {
+				t.Errorf("active visit = %+v, want fenced=%v", r.Active, tc.wantFenced)
+			}
+			if local.prepareCalls != 0 {
+				t.Errorf("destination prepared %d times before the source was accounted", local.prepareCalls)
+			}
+		})
+	}
+}
+
+// A new execution starts from a Git workspace with no native thread. The
+// coordinator drives its first visit like any other, keeps the launch
+// unchanged, and binds the genuine thread reported by the first stop.
+func TestFirstVisitFromWorkspaceBindsGenuineThreadAtFirstStop(t *testing.T) {
+	c, _, local, remote, start := setup(t)
+	first := start.Source
+	first.ExecutionID, first.OperationID, first.AllocationID = uuid.NewString(), uuid.NewString(), uuid.NewString()
+	first.ThreadID, first.CheckpointDigest = "", ""
+	workspace := []byte("captured git workspace")
+	r, err := c.Create(first, workspace, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Phase != PhasePreparing || r.ThreadID != "" || r.Workspace == "" || r.Checkpoint != (Checkpoint{}) {
+		t.Fatalf("new execution = %+v, want a preparing first visit without thread or checkpoint", r)
+	}
+	if _, err = c.Create(first, []byte("different workspace"), ""); err == nil {
+		t.Fatal("retry replaced the retained workspace input")
+	}
+	if r, err = c.Recover(t.Context(), first.ExecutionID); err != nil || r.Phase != PhaseActive {
+		t.Fatalf("first visit did not activate: %+v %v", r, err)
+	}
+	if local.activated != 1 {
+		t.Fatalf("local activations = %d, want 1", local.activated)
+	}
+	r, err = c.Move(t.Context(), first.ExecutionID, uuid.NewString(), testRemote)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.ThreadID != testThread {
+		t.Errorf("execution thread = %q, want the stopped visit's %q", r.ThreadID, testThread)
+	}
+	if !SameLaunch(r.Visits[0].Launch, first) || r.Visits[0].Launch.ThreadID != "" {
+		t.Errorf("first visit launch changed after binding: %+v", r.Visits[0].Launch)
+	}
+	if r.Active.Launch.ThreadID != testThread || remote.activated != 1 {
+		t.Errorf("destination launch = %+v, want the bound thread", r.Active.Launch)
 	}
 }
 
@@ -54,20 +144,21 @@ type fakePlacement struct {
 	prepareCalls                          int
 	unknownStop                           bool
 	missingUsage                          bool
+	unsealed                              bool
 	corruptReceipt                        func(*Receipt)
 	charge                                budget.TrustedUsage
 }
 
 func newPlacement(data []byte, digest string) *fakePlacement {
-	return &fakePlacement{data: data, digest: digest, records: map[string]Observation{}, charge: budget.TrustedUsage{Units: 5, CostMicros: 7}}
+	return &fakePlacement{data: data, digest: digest, records: map[string]Observation{}, charge: budget.TrustedUsage{Units: visitUnits, CostMicros: visitCost}}
 }
 func (p *fakePlacement) Prepare(_ context.Context, l Launch, data []byte) (Incarnation, error) {
 	p.prepareCalls++
-	if l.CheckpointDigest != p.digest || string(data) != string(p.data) {
+	if l.CheckpointDigest == "" && len(data) == 0 || l.CheckpointDigest != "" && (l.CheckpointDigest != p.digest || string(data) != string(p.data)) {
 		return Incarnation{}, errors.New("wrong checkpoint")
 	}
 	if o, ok := p.records[l.AllocationID]; ok {
-		if !sameLaunch(l, o.Launch) {
+		if !SameLaunch(l, o.Launch) {
 			return Incarnation{}, errors.New("conflict")
 		}
 		if o.State == PlacementPreparing {
@@ -93,7 +184,7 @@ func (p *fakePlacement) Prepare(_ context.Context, l Launch, data []byte) (Incar
 }
 func (p *fakePlacement) Activate(_ context.Context, l Launch, i Incarnation) error {
 	o, ok := p.records[l.AllocationID]
-	if !ok || !sameLaunch(l, o.Launch) || o.Incarnation != i {
+	if !ok || !SameLaunch(l, o.Launch) || o.Incarnation != i {
 		return errors.New("unknown execution")
 	}
 	if o.State == PlacementActive {
@@ -122,8 +213,11 @@ func (p *fakePlacement) Stop(_ context.Context, l Launch, i Incarnation) (Stoppe
 		return Stopped{}, errors.New("unreachable placement")
 	}
 	o, ok := p.records[l.AllocationID]
-	if !ok || o.Incarnation != i || !sameLaunch(o.Launch, l) {
+	if !ok || o.Incarnation != i || !SameLaunch(o.Launch, l) {
 		return Stopped{}, errors.New("stale execution")
+	}
+	if p.unsealed {
+		return Stopped{Launch: l, Incarnation: i, ActualStopped: true, ThreadID: l.ThreadID}, ErrUsageUnsealed
 	}
 	if o.Stopped != nil {
 		return *o.Stopped, nil
@@ -136,7 +230,7 @@ func (p *fakePlacement) Stop(_ context.Context, l Launch, i Incarnation) (Stoppe
 	if p.missingUsage {
 		r = nil
 	}
-	stopped := Stopped{Launch: l, Incarnation: i, ActualStopped: true, Receipt: r, Checkpoint: p.data, CheckpointDigest: p.digest}
+	stopped := Stopped{Launch: l, Incarnation: i, ActualStopped: true, ThreadID: cmp.Or(l.ThreadID, testThread), Receipt: r, Checkpoint: p.data, CheckpointDigest: p.digest}
 	o.State = PlacementStopped
 	o.Stopped = &stopped
 	p.records[l.AllocationID] = o
@@ -148,7 +242,7 @@ func (p *fakePlacement) Stop(_ context.Context, l Launch, i Incarnation) (Stoppe
 }
 func (p *fakePlacement) Abort(_ context.Context, l Launch, i Incarnation) (Observation, error) {
 	o, ok := p.records[l.AllocationID]
-	if !ok || o.Incarnation != i || !sameLaunch(l, o.Launch) {
+	if !ok || o.Incarnation != i || !SameLaunch(l, o.Launch) {
 		return Observation{}, errors.New("stale abort")
 	}
 	p.aborted++
@@ -188,7 +282,34 @@ func artifact(t *testing.T) ([]byte, string) {
 	}
 	return data, meta.SHA256
 }
-func setup(t *testing.T, includeIgnored ...string) (*Coordinator, string, *fakePlacement, *fakePlacement, Start) {
+
+// Fixture allowance and charges. setup's first visit seals seed usage; every
+// later visit seals visit usage unless a test sets another charge.
+const (
+	testAllowanceUnits = 20
+	testAllowanceCost  = 100
+	seedUnits          = 2
+	seedCost           = 3
+	visitUnits         = 5
+	visitCost          = 7
+	// Remaining after the seed visit, and after one more charged visit.
+	afterSeedUnits  = testAllowanceUnits - seedUnits
+	afterSeedCost   = testAllowanceCost - seedCost
+	afterVisitUnits = afterSeedUnits - visitUnits
+	afterVisitCost  = afterSeedCost - visitCost
+)
+
+// seed is the stopped first visit that setup leaves behind.
+type seed struct {
+	Source  Launch
+	Stopped Stopped
+	Input   []byte
+}
+
+// setup returns an idle execution whose first local visit ran and stopped with
+// seedUsage sealed, so later moves start from a committed checkpoint. Placement
+// counters are reset afterwards.
+func setup(t *testing.T, includeIgnored ...string) (*Coordinator, string, *fakePlacement, *fakePlacement, seed) {
 	t.Helper()
 	data, digest := artifact(t)
 	local, remote := newPlacement(data, digest), newPlacement(data, digest)
@@ -198,21 +319,54 @@ func setup(t *testing.T, includeIgnored ...string) (*Coordinator, string, *fakeP
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = c.Close() })
-	source := Launch{Harness: harness.NativeCodex, SessionID: uuid.NewString(), OperationID: uuid.NewString(), AllocationID: uuid.NewString(), Epoch: 1, Placement: testLocal, ThreadID: testThread, InstructionDigest: strings.Repeat("a", 64), Deadline: time.Now().Add(time.Hour).UTC(), Allowances: map[string]Allowance{testCapability: {Units: Limit{Bounded: true, Value: 20}, CostMicros: Limit{Bounded: true, Value: 100}}}}
-	source.IncludeIgnored = includeIgnored
-	i := Incarnation{ExecutionID: uuid.NewString(), ResourceUID: uuid.NewString()}
-	receipt := &Receipt{Launch: source, Incarnation: i, Usage: map[string]budget.TrustedUsage{testCapability: {Units: 2, CostMicros: 3}}}
-	start := Start{Source: source, Incarnation: i, Stopped: Stopped{Launch: source, Incarnation: i, ActualStopped: true, Receipt: receipt, Checkpoint: data, CheckpointDigest: digest}}
-	if _, err = c.Create(context.Background(), start); err != nil {
+	source := Launch{
+		Harness:      harness.NativeCodex,
+		ExecutionID:  uuid.NewString(),
+		OperationID:  uuid.NewString(),
+		AllocationID: uuid.NewString(),
+		Epoch:        1,
+		Placement:    testLocal,
+		// The execution resumes the fixture conversation from its checkpoint.
+		ThreadID:          testThread,
+		CheckpointDigest:  digest,
+		InstructionDigest: strings.Repeat("a", 64),
+		Deadline:          time.Now().Add(time.Hour).UTC(),
+		Allowances: map[string]Allowance{testCapability: {
+			Units:      Limit{Bounded: true, Value: testAllowanceUnits},
+			CostMicros: Limit{Bounded: true, Value: testAllowanceCost},
+		}},
+		IncludeIgnored: includeIgnored,
+	}
+	return c, dir, local, remote, seedExecution(t, c, local, source, data)
+}
+
+// seedExecution creates source's execution, runs its first visit on local and
+// stops it with seedUsage, then resets local's counters.
+func seedExecution(t *testing.T, c *Coordinator, local *fakePlacement, source Launch, data []byte) seed {
+	t.Helper()
+	if _, err := c.Create(source, data, ""); err != nil {
 		t.Fatal(err)
 	}
-	return c, dir, local, remote, start
+	if _, err := c.Recover(t.Context(), source.ExecutionID); err != nil {
+		t.Fatal(err)
+	}
+	charge := local.charge
+	local.charge = budget.TrustedUsage{Units: seedUnits, CostMicros: seedCost}
+	r, err := c.Finalize(t.Context(), source.ExecutionID, uuid.NewString())
+	if err != nil {
+		t.Fatal(err)
+	}
+	local.charge = charge
+	local.prepared, local.activated, local.stopped, local.prepareCalls = 0, 0, 0, 0
+	first := r.Visits[0]
+	stopped := Stopped{Launch: first.Launch, Incarnation: first.Incarnation, ActualStopped: true, ThreadID: r.ThreadID, Receipt: first.Receipt, Checkpoint: data, CheckpointDigest: first.CheckpointDigest}
+	return seed{Source: source, Stopped: stopped, Input: data}
 }
 
 func TestIgnoredSelectionSurvivesEveryMoveAndCannotAmendSeed(t *testing.T) {
 	c, _, _, _, start := setup(t, testIgnoredFile)
 	for _, destination := range []string{testRemote, testLocal, testRemote} {
-		r, err := c.Move(t.Context(), start.Source.SessionID, uuid.NewString(), destination)
+		r, err := c.Move(t.Context(), start.Source.ExecutionID, uuid.NewString(), destination)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -226,9 +380,7 @@ func TestIgnoredSelectionSurvivesEveryMoveAndCannotAmendSeed(t *testing.T) {
 		}
 	}
 	start.Source.IncludeIgnored = []string{"other.bin"}
-	start.Stopped.Launch = start.Source
-	start.Stopped.Receipt.Launch = start.Source
-	if _, err := c.Create(t.Context(), start); err == nil {
+	if _, err := c.Create(start.Source, start.Input, ""); err == nil {
 		t.Fatal("import retry changed immutable ignored file selection")
 	}
 }
@@ -236,12 +388,15 @@ func TestRoundTripMaintainsOriginalAuthorityAndReceipts(t *testing.T) {
 	c, dir, local, remote, start := setup(t)
 	ctx := context.Background()
 	remoteOp, localOp := uuid.NewString(), uuid.NewString()
-	r, err := c.Move(ctx, start.Source.SessionID, remoteOp, testRemote)
+	r, err := c.Move(ctx, start.Source.ExecutionID, remoteOp, testRemote)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Phase != PhaseActive || r.Epoch != 2 || r.Remaining[testCapability].Units.Value != 18 || r.Remaining[testCapability].CostMicros.Value != 97 {
-		t.Fatalf("first placement: %+v", r)
+	if r.Phase != PhaseActive || r.Epoch != 2 {
+		t.Fatalf("first move: phase %s epoch %d, want active epoch 2", r.Phase, r.Epoch)
+	}
+	if got := r.Remaining[testCapability]; got.Units.Value != afterSeedUnits || got.CostMicros.Value != afterSeedCost {
+		t.Fatalf("remaining after first move = %+v, want %d units and %d micros", got, afterSeedUnits, afterSeedCost)
 	}
 	if !r.Active.Launch.Deadline.Equal(start.Source.Deadline) || r.Active.Launch.InstructionDigest != start.Source.InstructionDigest || r.Active.Launch.ThreadID != testThread {
 		t.Fatal("authority widened or identity replaced")
@@ -256,10 +411,16 @@ func TestRoundTripMaintainsOriginalAuthorityAndReceipts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Phase != PhaseActive || r.Epoch != 3 || r.Remaining[testCapability].Units.Value != 13 || r.Remaining[testCapability].CostMicros.Value != 90 || remote.stopped != 1 || local.activated != 1 {
-		t.Fatalf("return trip: %+v", r)
+	if r.Phase != PhaseActive || r.Epoch != 3 {
+		t.Fatalf("return trip: phase %s epoch %d, want active epoch 3", r.Phase, r.Epoch)
 	}
-	if _, err = c.Create(ctx, start); err != nil {
+	if got := r.Remaining[testCapability]; got.Units.Value != afterVisitUnits || got.CostMicros.Value != afterVisitCost {
+		t.Fatalf("remaining after return trip = %+v, want %d units and %d micros", got, afterVisitUnits, afterVisitCost)
+	}
+	if remote.stopped != 1 || local.activated != 1 {
+		t.Fatalf("remote stops = %d, local activations = %d; want 1 each", remote.stopped, local.activated)
+	}
+	if _, err = c.Create(start.Source, start.Input, ""); err != nil {
 		t.Fatal(err)
 	}
 	if err = c.Close(); err != nil {
@@ -274,7 +435,7 @@ func TestRoundTripMaintainsOriginalAuthorityAndReceipts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Epoch != 3 || got.Remaining[testCapability].Units.Value != 13 || got.Active.Incarnation != r.Active.Incarnation {
+	if got.Epoch != 3 || got.Remaining[testCapability].Units.Value != afterVisitUnits || got.Active.Incarnation != r.Active.Incarnation {
 		t.Fatalf("durable recovery: %+v", got)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, got.Checkpoint.Path))
@@ -295,11 +456,11 @@ func TestLostRepliesRecoverSameAllocation(t *testing.T) {
 			} else {
 				remote.lostActivate = true
 			}
-			r, err := c.Move(context.Background(), start.Source.SessionID, uuid.NewString(), testRemote)
+			r, err := c.Move(context.Background(), start.Source.ExecutionID, uuid.NewString(), testRemote)
 			if err == nil {
 				t.Fatal("fixture did not lose reply")
 			}
-			allocation := r.Operations[0].Launch.AllocationID
+			allocation := r.Operations[len(r.Operations)-1].Launch.AllocationID
 			if err = c.Close(); err != nil {
 				t.Fatal(err)
 			}
@@ -322,11 +483,11 @@ func TestLostRepliesRecoverSameAllocation(t *testing.T) {
 func TestPartialPreparationRecoversThroughExplicitPrepareWithoutReplacingIncarnation(t *testing.T) {
 	c, _, _, remote, start := setup(t)
 	remote.partialPrepare = true
-	r, err := c.Move(t.Context(), start.Source.SessionID, uuid.NewString(), testRemote)
+	r, err := c.Move(t.Context(), start.Source.ExecutionID, uuid.NewString(), testRemote)
 	if err == nil || r.Phase != PhasePreparing {
 		t.Fatalf("expected retained incomplete preparation: %+v %v", r, err)
 	}
-	allocation := r.Operations[0].Launch.AllocationID
+	allocation := r.Operations[len(r.Operations)-1].Launch.AllocationID
 	exact := remote.records[allocation].Incarnation
 	remote.partialPrepare = false
 	r, err = c.Recover(t.Context(), r.ID)
@@ -341,25 +502,25 @@ func TestPartialPreparationCancellationNeverRetriesFailedRestoreOrRefundsUnknown
 		t.Run(name, func(t *testing.T) {
 			c, _, _, remote, start := setup(t)
 			remote.partialPrepare = true
-			r, err := c.Move(t.Context(), start.Source.SessionID, uuid.NewString(), testRemote)
+			r, err := c.Move(t.Context(), start.Source.ExecutionID, uuid.NewString(), testRemote)
 			if err == nil {
 				t.Fatal("incomplete preparation hidden")
 			}
-			allocation := r.Operations[0].Launch.AllocationID
+			allocation := r.Operations[len(r.Operations)-1].Launch.AllocationID
 			if !identityKnown {
 				o := remote.records[allocation]
 				o.Incarnation = Incarnation{}
 				remote.records[allocation] = o
 			}
-			r, err = c.Cancel(t.Context(), r.ID, uuid.NewString())
+			r, err = c.Cancel(t.Context(), r.ID, uuid.NewString(), nil)
 			if identityKnown {
-				if err != nil || remote.aborted != 1 || r.Uncertainty != PhaseUnknownUsage || r.Active == nil || !r.Active.ActualStopped {
+				if err != nil || remote.aborted != 1 || r.Phase != PhaseUnknownUsage || r.Active == nil || !r.Active.ActualStopped {
 					t.Fatalf("exact partial preparation not stopped: %+v %v", r, err)
 				}
-			} else if err == nil || remote.aborted != 0 || r.Uncertainty != PhaseUnknownStop {
+			} else if err == nil || remote.aborted != 0 || r.Phase != PhaseUnknownStop {
 				t.Fatalf("unobserved resource accepted as stopped: %+v %v", r, err)
 			}
-			if remote.prepareCalls != 1 || remote.activated != 0 || r.Remaining[testCapability].Units.Value != 18 ||
+			if remote.prepareCalls != 1 || remote.activated != 0 || r.Remaining[testCapability].Units.Value != afterSeedUnits ||
 				r.Checkpoint.Metadata.SHA256 != start.Stopped.CheckpointDigest {
 				t.Fatal("cancellation retried restore, activated destination, refunded unknown usage or replaced checkpoint")
 			}
@@ -386,7 +547,7 @@ func TestUnknownStopOrUsagePreventsNextWriter(t *testing.T) {
 	for name, configure := range cases {
 		t.Run(name, func(t *testing.T) {
 			c, _, local, remote, start := setup(t)
-			r, err := c.Move(context.Background(), start.Source.SessionID, uuid.NewString(), testRemote)
+			r, err := c.Move(context.Background(), start.Source.ExecutionID, uuid.NewString(), testRemote)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -395,7 +556,7 @@ func TestUnknownStopOrUsagePreventsNextWriter(t *testing.T) {
 			if err == nil {
 				t.Fatal("accepted unknown usage/stop")
 			}
-			if got.Active == nil || got.Remaining[testCapability].Units.Value != 18 || local.prepared != 0 || got.Phase != PhaseUnknownStop && got.Phase != PhaseUnknownUsage {
+			if got.Active == nil || got.Remaining[testCapability].Units.Value != afterSeedUnits || local.prepared != 0 || got.Phase != PhaseUnknownStop && got.Phase != PhaseUnknownUsage {
 				t.Fatalf("released encumbered capacity: %+v", got)
 			}
 		})
@@ -403,16 +564,16 @@ func TestUnknownStopOrUsagePreventsNextWriter(t *testing.T) {
 }
 func TestCancellationPersistsBeforeAbortAndNeverRefundsUnknownUsage(t *testing.T) {
 	c, _, local, remote, start := setup(t)
-	r, err := c.Move(context.Background(), start.Source.SessionID, uuid.NewString(), testRemote)
+	r, err := c.Move(context.Background(), start.Source.ExecutionID, uuid.NewString(), testRemote)
 	if err != nil {
 		t.Fatal(err)
 	}
 	cancelOp := uuid.NewString()
-	r, err = c.Cancel(context.Background(), r.ID, cancelOp)
+	r, err = c.Cancel(context.Background(), r.ID, cancelOp, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Phase != PhaseCancelled || r.Uncertainty != PhaseUnknownUsage || r.Active == nil || !r.Active.ActualStopped || r.Remaining[testCapability].Units.Value != 18 || remote.aborted != 1 {
+	if r.Phase != PhaseUnknownUsage || r.CancelOperation == "" || r.Active == nil || !r.Active.ActualStopped || r.Remaining[testCapability].Units.Value != afterSeedUnits || remote.aborted != 1 {
 		t.Fatalf("cancel refund/fence: %+v", r)
 	}
 	if _, err = c.Move(context.Background(), r.ID, uuid.NewString(), testLocal); err == nil {
@@ -421,7 +582,7 @@ func TestCancellationPersistsBeforeAbortAndNeverRefundsUnknownUsage(t *testing.T
 	if local.prepared != 0 {
 		t.Fatal("destination prepared after cancellation")
 	}
-	if _, err = c.Cancel(context.Background(), r.ID, uuid.NewString()); err == nil {
+	if _, err = c.Cancel(context.Background(), r.ID, uuid.NewString(), nil); err == nil {
 		t.Fatal("accepted conflicting cancel")
 	}
 }
@@ -430,18 +591,18 @@ func TestLimitsAndReplayIntent(t *testing.T) {
 	changed := start
 	changed.Source = sourceCopy(start.Source)
 	changed.Source.Allowances[testCapability] = Allowance{Units: Limit{Bounded: true, Value: 21}, CostMicros: Limit{Bounded: true, Value: 100}}
-	if _, err := c.Create(context.Background(), changed); err == nil {
+	if _, err := c.Create(changed.Source, start.Input, ""); err == nil {
 		t.Fatal("accepted widened seed")
 	}
 	op := uuid.NewString()
-	r, err := c.Move(context.Background(), start.Source.SessionID, op, testRemote)
+	r, err := c.Move(context.Background(), start.Source.ExecutionID, op, testRemote)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err = c.Move(context.Background(), r.ID, op, testLocal); err == nil {
 		t.Fatal("accepted replay destination change")
 	}
-	remote.charge = budget.TrustedUsage{Units: 18, CostMicros: 97}
+	remote.charge = budget.TrustedUsage{Units: afterSeedUnits, CostMicros: afterSeedCost}
 	got, err := c.Move(context.Background(), r.ID, uuid.NewString(), testLocal)
 	if err == nil {
 		t.Fatal("exhausted bounded allowance became unlimited")
@@ -463,7 +624,7 @@ func TestPrivateJournalAndCorruptionFailClosed(t *testing.T) {
 		_ = other.Close()
 		t.Fatal("two journal owners")
 	}
-	for _, path := range []string{dir, filepath.Join(dir, "checkpoints"), filepath.Join(dir, "owner.lock"), filepath.Join(dir, start.Source.SessionID+".json")} {
+	for _, path := range []string{dir, filepath.Join(dir, "checkpoints"), filepath.Join(dir, "owner.lock"), filepath.Join(dir, start.Source.ExecutionID+".json")} {
 		info, err := os.Lstat(path)
 		if err != nil {
 			t.Fatal(err)
@@ -472,7 +633,7 @@ func TestPrivateJournalAndCorruptionFailClosed(t *testing.T) {
 			t.Fatal("private journal became public")
 		}
 	}
-	record, err := c.Inspect(start.Source.SessionID)
+	record, err := c.Inspect(start.Source.ExecutionID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -497,14 +658,17 @@ func TestConcurrentReplayHasOneWriter(t *testing.T) {
 	op := uuid.NewString()
 	results := make(chan error, 2)
 	for range 2 {
-		go func() { _, err := c.Move(context.Background(), start.Source.SessionID, op, testRemote); results <- err }()
+		go func() {
+			_, err := c.Move(context.Background(), start.Source.ExecutionID, op, testRemote)
+			results <- err
+		}()
 	}
 	for range 2 {
 		if err := <-results; err != nil {
 			t.Fatal(err)
 		}
 	}
-	r, err := c.Inspect(start.Source.SessionID)
+	r, err := c.Inspect(start.Source.ExecutionID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -514,11 +678,11 @@ func TestConcurrentReplayHasOneWriter(t *testing.T) {
 }
 func TestUnknownUsageCancellationSurvivesReopen(t *testing.T) {
 	c, dir, local, remote, start := setup(t)
-	r, err := c.Move(context.Background(), start.Source.SessionID, uuid.NewString(), testRemote)
+	r, err := c.Move(context.Background(), start.Source.ExecutionID, uuid.NewString(), testRemote)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = c.Cancel(context.Background(), r.ID, uuid.NewString()); err != nil {
+	if _, err = c.Cancel(context.Background(), r.ID, uuid.NewString(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if err = c.Close(); err != nil {
@@ -533,7 +697,7 @@ func TestUnknownUsageCancellationSurvivesReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Phase != PhaseCancelled || got.Uncertainty != PhaseUnknownUsage || got.Active == nil || !got.Active.ActualStopped || got.Remaining[testCapability].Units.Value != 18 {
+	if got.Phase != PhaseUnknownUsage || got.CancelOperation == "" || got.Active == nil || !got.Active.ActualStopped || got.Remaining[testCapability].Units.Value != afterSeedUnits {
 		t.Fatalf("cancel recovery refunded unknown usage: %+v", got)
 	}
 }
@@ -541,14 +705,14 @@ func TestUnboundedKeyChangeIsStillAConflict(t *testing.T) {
 	if sameAllowances(map[string]Allowance{"model.inference": {}}, map[string]Allowance{"github.pullRequest": {}}) {
 		t.Fatal("unbounded key change authorized another capability")
 	}
-	if sameReceipt(&Receipt{Usage: map[string]budget.TrustedUsage{"model.inference": {}}}, &Receipt{Usage: map[string]budget.TrustedUsage{"github.pullRequest": {}}}) {
+	if CheckUsage(map[string]Allowance{"model.inference": {}}, map[string]budget.TrustedUsage{"github.pullRequest": {}}) == nil {
 		t.Fatal("zero-charge receipt key change accepted")
 	}
 }
 
 func TestLostStopReplyLeavesEscrowUntilSameReceiptRecovered(t *testing.T) {
 	c, _, local, remote, start := setup(t)
-	r, err := c.Move(context.Background(), start.Source.SessionID, uuid.NewString(), testRemote)
+	r, err := c.Move(context.Background(), start.Source.ExecutionID, uuid.NewString(), testRemote)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -557,20 +721,20 @@ func TestLostStopReplyLeavesEscrowUntilSameReceiptRecovered(t *testing.T) {
 	if err == nil {
 		t.Fatal("fixture did not lose stop reply")
 	}
-	if r.Phase != PhaseUnknownStop || r.Active == nil || r.Remaining[testCapability].Units.Value != 18 || local.prepared != 0 {
+	if r.Phase != PhaseUnknownStop || r.Active == nil || r.Remaining[testCapability].Units.Value != afterSeedUnits || local.prepared != 0 {
 		t.Fatalf("lost stop refunded escrow: %+v", r)
 	}
 	got, err := c.Recover(context.Background(), r.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Phase != PhaseActive || got.Active.Launch.Placement != testLocal || got.Remaining[testCapability].Units.Value != 13 || remote.stopped != 1 || local.activated != 1 {
+	if got.Phase != PhaseActive || got.Active.Launch.Placement != testLocal || got.Remaining[testCapability].Units.Value != afterVisitUnits || remote.stopped != 1 || local.activated != 1 {
 		t.Fatalf("stop recovery repeated usage/activation: %+v", got)
 	}
 }
 func TestCheckpointDigestMismatchCannotActivateDestination(t *testing.T) {
 	c, _, local, remote, start := setup(t)
-	r, err := c.Move(context.Background(), start.Source.SessionID, uuid.NewString(), testRemote)
+	r, err := c.Move(context.Background(), start.Source.ExecutionID, uuid.NewString(), testRemote)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -579,30 +743,19 @@ func TestCheckpointDigestMismatchCannotActivateDestination(t *testing.T) {
 	if err == nil {
 		t.Fatal("accepted checkpoint with false digest")
 	}
-	if got.Active == nil || local.prepared != 0 || got.Remaining[testCapability].Units.Value != 18 {
+	if got.Active == nil || local.prepared != 0 || got.Remaining[testCapability].Units.Value != afterSeedUnits {
 		t.Fatalf("bad checkpoint released source escrow: %+v", got)
 	}
 }
 func TestExpiredOriginalDeadlinePreventsPreparation(t *testing.T) {
-	_, _, local, remote, start := setup(t)
-	deadline := time.Now().Add(100 * time.Millisecond).UTC()
-	start.Source.SessionID = uuid.NewString()
-	start.Source.Deadline = deadline
-	start.Stopped.Launch = start.Source
-	copyReceipt := *start.Stopped.Receipt
-	copyReceipt.Launch = start.Source
-	start.Stopped.Receipt = &copyReceipt
-	c, err := Open(filepath.Join(t.TempDir(), "expired"), map[string]Placement{testLocal: local, testRemote: remote}, testMaxCheckpoint)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = c.Close() }()
-	r, err := c.Create(context.Background(), start)
-	if err != nil {
-		t.Fatal(err)
-	}
+	c, _, local, remote, start := setup(t)
+	deadline := time.Now().Add(time.Second).UTC()
+	source := start.Source
+	source.ExecutionID, source.OperationID, source.AllocationID = uuid.NewString(), uuid.NewString(), uuid.NewString()
+	source.Deadline = deadline
+	expiring := seedExecution(t, c, local, source, start.Input)
 	<-time.After(time.Until(deadline) + 10*time.Millisecond)
-	if _, err = c.Move(context.Background(), r.ID, uuid.NewString(), testRemote); err == nil {
+	if _, err := c.Move(context.Background(), expiring.Source.ExecutionID, uuid.NewString(), testRemote); err == nil {
 		t.Fatal("move reset expired deadline")
 	}
 	if remote.prepared != 0 || remote.activated != 0 {

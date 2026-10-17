@@ -17,7 +17,7 @@ import (
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/agentcontract"
 	"github.com/andrewmccall/sproozi/internal/harness"
-	placement "github.com/andrewmccall/sproozi/internal/runtime/kubernetes/session"
+	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
 )
 
 const (
@@ -51,7 +51,7 @@ func BuildAgentContract(run *sprooziv1alpha1.AgentRun, tmpl *sprooziv1alpha1.Age
 		Workspace:    workspaceDirectory,
 		Gateway:      agentcontract.GatewayBinding{Endpoint: rt.Spec.GatewayEndpoint, TokenPath: gatewayTokenPath},
 	}
-	if tmpl.Annotations[placement.ManagedTemplateAnnotation] == managedTemplateEnabledValue {
+	if tmpl.Annotations[registry.ManagedTemplateAnnotation] == managedTemplateEnabledValue {
 		input.Workspace = "/workspace/session/workspace"
 	}
 	if err := input.Validate(); err != nil {

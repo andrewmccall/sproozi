@@ -16,9 +16,7 @@ import (
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/project"
 	"github.com/andrewmccall/sproozi/internal/session/home"
-	"github.com/andrewmccall/sproozi/internal/session/profile"
 	"github.com/andrewmccall/sproozi/internal/work"
-	"github.com/andrewmccall/sproozi/internal/workspace"
 	"github.com/google/uuid"
 )
 
@@ -35,79 +33,67 @@ func defaultConfigPath() (string, error) {
 type options struct {
 	action, socket, id, operation, executor, source, kind, repository, task string
 	detach                                                                  bool
-	workspace, destination                                                  string
+	workspace, destination, configPath                                      string
 	includeIgnored                                                          []string
 	fixed                                                                   home.Config
 	project                                                                 project.ID
 	workspaceFrom                                                           *work.RevisionSource
+	out                                                                     io.Writer
 }
 
+// parseProduct parses one command line, args[0] naming the command. It returns
+// flag.ErrHelp when help was requested.
 func parseProduct(args []string) (options, error) {
-	action := args[0]
-	fs := flag.NewFlagSet("sproozi "+action, flag.ContinueOnError)
-	configPath, e := defaultConfigPath()
-	if e != nil {
+	c, ok := findCommand(args[0])
+	if !ok {
+		return options{}, fmt.Errorf("unknown command %q; run \"sproozi -h\" for commands", args[0])
+	}
+	if _, e := defaultConfigPath(); e != nil && c.name != actionServe {
 		return options{}, e
 	}
-	config := fs.String("config", configPath, "private global Sproozi configuration")
-	socket := fs.String("socket", "", "private home socket; defaults to configured home")
-	id := fs.String("id", "", "stable session UUID; may also be the first positional argument")
-	operation := fs.String("operation", "", "stable operation UUID; preserve on retries")
-	executor := fs.String("executor", "", "configured executor; local control uses docker")
-	source := fs.String("from", "", "configured remote source for pull")
-	kind := fs.String("harness", "", "approved native harness; defaults to global configuration")
-	repository := fs.String("repository", "", "approved repository name")
-	projectID := fs.String("project", "", "configured project; run defaults to its workspace, sessions filters by it")
-	workspaceFrom := fs.String("workspace-from", "", "retained source session for fresh work at recorded HEAD")
-	checkpointDigest := fs.String("checkpoint-digest", "", "exact source checkpoint digest for --workspace-from")
-	revision := fs.String("revision", "", "exact full recorded Git commit for --workspace-from")
-	task := fs.String("task", "", "task text")
-	taskFile := fs.String("task-file", "", "UTF-8 task file")
-	detach := fs.Bool("detach", false, "return after local resume without attaching")
-	workspacePath := fs.String("workspace", "", "stopped ordinary Git directory for start")
-	destination := fs.String("to", "", "configured destination for move")
-	var includeIgnored []string
-	fs.Func("include-ignored", "ignored file for every visit; repeatable start intent", func(v string) error {
-		includeIgnored = append(includeIgnored, v)
-		return workspace.ValidateIgnoredPaths(includeIgnored)
-	})
-	if err := parseSessionArguments(fs, args[1:], id); err != nil {
+	q := options{action: c.name}
+	var in inputs
+	fs := c.flagSet(&q, &in)
+	if err := parseSessionArguments(c, fs, args[1:], &q.id); err != nil {
 		return options{}, err
 	}
-	q := options{
-		action: action, socket: *socket, id: *id, operation: *operation, executor: *executor, source: *source,
-		kind: *kind, repository: *repository, task: *task, detach: *detach,
-		workspace: *workspacePath, destination: *destination, includeIgnored: includeIgnored,
-		project: project.ID(*projectID),
+	q.configPath = in.config
+	if c.name == actionServe {
+		if q.configPath == "" {
+			return options{}, errors.New("serve requires --config FILE")
+		}
+		return q, nil
 	}
+	q.project = project.ID(in.project)
 	if q.project != "" && !project.ValidID(q.project) {
 		return options{}, errors.New("--project requires a valid project ID")
 	}
-	q.workspaceFrom, e = parseRevisionSource(action, *workspaceFrom, *checkpointDigest, *revision)
+	var e error
+	q.workspaceFrom, e = parseRevisionSource(in.workspaceFrom, in.checkpointDigest, in.revision)
 	if e != nil {
 		return options{}, e
 	}
-	if err := q.prepareAddress(fs); err != nil {
+	if err := q.prepareAddress(c); err != nil {
 		return options{}, err
 	}
-	if err := q.loadConfiguration(fs, *config); err != nil {
+	if err := q.loadConfiguration(fs); err != nil {
 		return options{}, err
 	}
-	q.task, e = readTaskText(q.task, *taskFile)
+	q.task, e = readTaskText(q.task, in.taskFile)
 	return q, e
 }
 
-func (q *options) loadConfiguration(fs *flag.FlagSet, path string) error {
+func (q *options) loadConfiguration(fs *flag.FlagSet) error {
 	needsConfig := q.action == actionRun || q.socket == "" || q.executor != "" && q.executor != dockerExecutor
 	fs.Visit(func(f *flag.Flag) {
-		if f.Name == "config" {
+		if f.Name == configFlag {
 			needsConfig = true
 		}
 	})
 	if !needsConfig {
 		return nil
 	}
-	fixed, err := home.ReadConfig(path)
+	fixed, err := home.ReadConfig(q.configPath)
 	if err != nil {
 		return err
 	}
@@ -139,46 +125,44 @@ func readTaskText(task, path string) (string, error) {
 	return string(b), nil
 }
 
-func parseRevisionSource(action, source, digest, revision string) (*work.RevisionSource, error) {
+func parseRevisionSource(source, digest, revision string) (*work.RevisionSource, error) {
 	if source == "" && digest == "" && revision == "" {
 		return nil, nil
 	}
-	if action != actionRun || source == "" || digest == "" || revision == "" {
+	if source == "" || digest == "" || revision == "" {
 		return nil, errors.New("run --workspace-from requires --checkpoint-digest and --revision")
 	}
 	return &work.RevisionSource{SessionID: source, Digest: digest, Revision: revision}, nil
 }
 
-func runProduct(args []string) error {
+func runProduct(args []string, stdout io.Writer) error {
 	q, e := parseProduct(args)
+	if errors.Is(e, flag.ErrHelp) {
+		c, _ := findCommand(args[0])
+		c.usage(stdout)
+		return nil
+	}
 	if e != nil {
 		return e
 	}
+	q.out = stdout
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if q.action == actionRun {
+	switch {
+	case q.action == actionServe:
+		return serve(ctx, q.configPath)
+	case q.action == actionRun:
 		return q.submitRemote(ctx)
-	}
-	if q.action == home.ActionSessions {
-		catalogue := discoverSessions(ctx, q)
-		return json.NewEncoder(os.Stdout).Encode(catalogue)
-	}
-
-	if (q.action == home.ActionStatus || q.action == home.ActionCancel || q.action == home.ActionRecover) &&
-		q.executor != "" && q.executor != dockerExecutor {
-		if q.action == home.ActionCancel && q.operation == "" {
-			q.operation = uuid.NewString()
-		}
-		if q.action == home.ActionCancel {
-			_, _ = fmt.Fprintf(os.Stderr, "Session %s, operation %s\n", q.id, q.operation)
-		}
-		return remoteProduct(ctx, q.fixed, q.executor, q.action, q.id, q.operation, "")
+	case q.action == home.ActionSessions:
+		return json.NewEncoder(q.out).Encode(discoverSessions(ctx, q))
+	case q.executor != "" && q.executor != dockerExecutor && q.action != home.ActionPull:
+		return q.remote(ctx)
 	}
 	return q.local(ctx)
 }
 
 func (q *options) submitRemote(ctx context.Context) error {
-	remote, ok := workConnection(q.fixed, q.executor)
+	remote, ok := q.fixed.WorkConnections()[q.executor]
 	if !ok {
 		return errors.New("executor is not configured")
 	}
@@ -200,18 +184,10 @@ func (q *options) submitRemote(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return json.NewEncoder(os.Stdout).Encode(v)
+	return json.NewEncoder(q.out).Encode(v)
 }
 
 func (q *options) local(ctx context.Context) error {
-	if q.action == home.ActionPull {
-		if q.source == "" {
-			q.source = q.executor
-		}
-		if q.source == "" {
-			return errors.New("pull requires --from configured-source")
-		}
-	}
 	switch q.action {
 	case home.ActionStart, home.ActionMove, home.ActionPull, home.ActionResume, home.ActionStop, home.ActionCancel:
 		if q.operation == "" {
@@ -228,7 +204,7 @@ func (q *options) local(ctx context.Context) error {
 	}
 	response, err := home.Call(ctx, q.socket, request)
 	if response.Status != nil {
-		if e := json.NewEncoder(os.Stdout).Encode(response.Status); e != nil {
+		if e := json.NewEncoder(q.out).Encode(response.Status); e != nil {
 			return e
 		}
 	}
@@ -240,30 +216,25 @@ func (q *options) local(ctx context.Context) error {
 	}
 	return nil
 }
+
+// selectedExecutors names the remote catalogues discovery queries by default.
 func selectedExecutors(c home.Config, selected string) []string {
 	if selected == dockerExecutor {
 		return nil
 	}
-	names := make([]string, 0, len(c.Remote)+len(c.WorkSources))
-	for name := range c.Remote {
-		if name == dockerExecutor {
-			continue
-		}
-		names = append(names, name)
-	}
-	for name := range c.WorkSources {
-		if name == dockerExecutor {
-			continue
-		}
-		if _, exists := c.Remote[name]; !exists {
+	names := []string{}
+	for name := range c.WorkConnections() {
+		if name != dockerExecutor {
 			names = append(names, name)
 		}
 	}
 	slices.Sort(names)
 	return names
 }
-func remoteProduct(ctx context.Context, c home.Config, name, action, id, operation string, projectID project.ID) error {
-	fixed, ok := workConnection(c, name)
+
+// remote sends status, cancel or recover to the selected remote owner.
+func (q *options) remote(ctx context.Context) error {
+	fixed, ok := q.fixed.WorkConnections()[q.executor]
 	if !ok {
 		return errors.New("remote executor is not configured")
 	}
@@ -273,28 +244,22 @@ func remoteProduct(ctx context.Context, c home.Config, name, action, id, operati
 	}
 	defer func() { _ = client.Close() }()
 	var out any
-	switch action {
-	case home.ActionSessions:
-		out, e = client.List(ctx, work.SessionQuery{Project: projectID})
+	switch q.action {
 	case home.ActionStatus:
-		out, e = client.Info(ctx, id)
+		out, e = client.Info(ctx, q.id)
 	case home.ActionCancel:
-		out, e = client.Cancel(ctx, id, operation)
+		if q.operation == "" {
+			q.operation = uuid.NewString()
+		}
+		_, _ = fmt.Fprintf(os.Stderr, "Session %s, operation %s\n", q.id, q.operation)
+		out, e = client.Cancel(ctx, q.id, q.operation)
 	case home.ActionRecover:
-		out, e = client.Recover(ctx, id)
+		out, e = client.Recover(ctx, q.id)
 	default:
 		return errors.New("unsupported remote action")
 	}
 	if e != nil {
 		return e
 	}
-	return json.NewEncoder(os.Stdout).Encode(out)
-}
-
-func workConnection(c home.Config, name string) (profile.ClientConfig, bool) {
-	if fixed, ok := c.WorkSources[name]; ok {
-		return fixed, true
-	}
-	fixed, ok := c.Remote[name]
-	return fixed, ok
+	return json.NewEncoder(q.out).Encode(out)
 }

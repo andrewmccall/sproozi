@@ -1,4 +1,4 @@
-# Start remote work and continue the same session locally
+# Remote work and local resume
 
 Start a Codex task in Kubernetes through Hermes or the CLI. Sproozi saves its
 conversation and Git workspace so you can resume it later in local Docker. The
@@ -11,7 +11,7 @@ The workflow has four steps:
 3. Pull the stopped session to your local installation.
 4. Resume the same conversation with current local permissions.
 
-Pull does not start an agent. Resume starts a new Sproozi execution with a new
+Pull does not start an agent. Resume starts a new execution with a new
 deadline and allowance. See [core concepts](../explanations/core-concepts.md)
 for the difference between a session and an execution.
 
@@ -34,7 +34,7 @@ personal-session adoption are not part of this workflow.
    not receive those credentials.
 3. Configure the [home daemon](../../cmd/sproozi/README.md) with one private JSON
    file. It selects local Docker images/network, gateway TLS/provider credential
-   files, finite allowances and named remote profiles. Keep it outside any
+   files, finite allowances and named profile services. Keep it outside any
    transferred repository. Use `--config FILE` consistently or put it at the
    platform's user configuration directory under `sproozi/config.json`.
 4. Configure scoped GitHub access through the existing GitHub App gateway for
@@ -126,12 +126,14 @@ Pod-control permissions. Workers cannot use it to execute arbitrary commands.
 
 Put the profile's HTTPS origin, public CA and home principal token file in the
 global home configuration's `remote` map. The map name must equal the configured
-profile `placementName`. `workSources` can use separately provisioned owner
-connections; when omitted it uses the same named remote profiles. Both transports
+profile `placementName`. A `workSources` entry gives an owner a separately
+provisioned connection. Every executor or source name resolves to its
+`workSources` entry when one exists, otherwise to the same-named `remote`
+profile. Both transports
 verify TLS 1.3, use one fixed origin and reject redirects.
 
 For a persistent in-cluster owner and the exact Hermes `/work/mcp` configuration,
-use [Deploy Hermes with retained native work](retained-work-kubernetes.md).
+use [Hermes with retained work](retained-work-kubernetes.md).
 
 ## Run and inspect work
 
@@ -177,8 +179,8 @@ refund evidence.
 
 Use the existing persistent [Hermes deployment and native MCP setup](hermes-orchestration.md).
 Register the profile's `/work/mcp` URL with its task bearer token and public CA.
-The supported tools are `sproozi_run`, `sproozi_status`, `sproozi_sessions` and
-`sproozi_session_info`. Hermes supplies this intent, without images, PodSpecs,
+The supported tools are `sproozi_run`, `sproozi_status`, `sproozi_cancel` and
+`sproozi_sessions`. Hermes supplies this intent, without images, PodSpecs,
 Kubernetes tokens or native-state paths:
 
 ```json
@@ -199,19 +201,20 @@ native state.
 
 ## Pull and resume locally
 
-Start the home service, then transfer the completed session:
+Start the home daemon, then transfer the completed session:
 
 ```sh
 bin/sproozi serve --config /private/sproozi/config.json
 # In another terminal:
-bin/sproozi pull SESSION_ID --config /private/sproozi/config.json \
-  --from engineering --operation ORIGINAL_PULL_UUID
+bin/sproozi pull SESSION_ID --config /private/sproozi/config.json --from engineering
 bin/sproozi resume SESSION_ID --executor docker --config /private/sproozi/config.json
 ```
 
 Pull validates and saves the conversation and Git checkpoint without starting an
-agent. It then records the remote owner's one-way ownership transfer. If the
-reply is lost, retry the same pull operation. Downloading a checkpoint alone
+agent. It then records the remote owner's one-way ownership transfer. The pull
+operation UUID comes from the session ID and source, so if the reply is lost,
+run the same command again. An explicit `--operation UUID` overrides it; retry
+with that same UUID. Downloading a checkpoint alone
 does not permit local execution. The remote catalogue now reports `home-owned`
 and cannot reopen that task session. Keep the home configuration and private
 directory unique to this trusted installation; copying its principal credential
@@ -280,7 +283,7 @@ Resolve and retain the resulting Docker content ID for the local configuration
 and canonical registry digest for the remote runtime. Use this image for the
 agent and existing compatible helper/anchor roles from the start of the
 installation; do not replace an existing execution's immutable image binding.
-The image inherits the native clients and supervisor from its approved base. Go uses image-owned cached
+The image inherits the harnesses and supervisor from its approved base. Go uses image-owned cached
 modules with `GOPROXY=off`, a local toolchain and ephemeral writable build state.
 Build state lives under `/workspace/sproozi-go-build`, outside the transferred
 `/workspace/session` pair; Docker's `/tmp` remains small and non-executable.

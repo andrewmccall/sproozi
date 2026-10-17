@@ -62,7 +62,7 @@ python3 hack/verify/quickstart.py doctor --evidence "$SPROOZI_QUICKSTART_EVIDENC
 
 Use the recipes in [dependencies](features/dependencies.md),
 [demo](features/demo.md) and [exploration](features/exploration.md).
-The helper runs the repository's existing `make verify-kind` and `make demo`
+The helper runs the repository's existing `make test-e2e` and `make demo`
 paths. Interactive GitHub App creation and model consent remain human setup
 steps; the helper reuses configured inputs. Inspect the guide whenever its
 commands or prerequisites change. Do not substitute the existing-cluster guide

@@ -349,23 +349,6 @@ func TestKindDemoDisablesDefaultCNI(t *testing.T) {
 	}
 }
 
-func TestDemoUsesExplicitKindKubeconfig(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join(repoRoot(t), "Makefile"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(data)
-	for _, required := range []string{
-		`--kubeconfig "$$kubeconfig"`,
-		`export KUBECONFIG="$$kubeconfig"`,
-		`KUBECTL='$(KUBECTL)' bash hack/demo/prepare.sh`,
-	} {
-		if !strings.Contains(text, required) {
-			t.Fatalf("demo target is missing explicit cluster isolation %q", required)
-		}
-	}
-}
-
 func TestSharedGatewayRBACOwnsOnlyBoundedKubernetesReads(t *testing.T) {
 	docs := renderDefault(t)
 	var role map[string]any
@@ -473,25 +456,6 @@ func TestRenderedDeploymentsUseDistinctServiceAccounts(t *testing.T) {
 		if expected, ok := want[name]; ok && got != expected {
 			t.Fatalf("expected deployment %q to use service account %q, got %q", name, expected, got)
 		}
-	}
-}
-
-func TestDemoUsesTheVanillaCodexImage(t *testing.T) {
-	root := repoRoot(t)
-	makefile, err := os.ReadFile(filepath.Join(root, "Makefile"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(makefile), "CODEX_IMAGE") {
-		t.Fatal("demo must require a caller-selected Codex image")
-	}
-
-	prepare, err := os.ReadFile(filepath.Join(root, "hack", "demo", "prepare.sh"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(prepare), "create configmap sproozi-controller-trust -n sproozi-system") {
-		t.Fatal("demo preparation must create controller trust")
 	}
 }
 

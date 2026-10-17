@@ -5,12 +5,9 @@ For a walkthrough from a fresh checkout, start with
 submit a provider-free first run, use [Install on Kubernetes](install-kubernetes.md).
 
 The demonstrated path starts with a human-created `AgentRun` on a disposable
-Kind cluster. The current adapter creates Pods in `sproozi-agents`.
-It needs Sproozi's four CRDs and an enforcing CNI. The default Calico setup
-installs its own networking CRDs. External Kubernetes Agent Sandbox CRDs and
-controllers are not dependencies of this adapter. cert-manager, Prometheus
-Operator, gVisor and Kata are also unnecessary for the base demo. See the
-[dependency table](getting-started.md#cluster-dependencies-and-external-crds).
+Kind cluster. The controller creates the agent Pod in `sproozi-agents`.
+[Cluster dependencies](../reference/dependencies.md) lists what the cluster
+needs and what it doesn't.
 
 ## Prerequisites
 
@@ -128,7 +125,7 @@ Before configuring providers, test deployment and NetworkPolicy enforcement:
 ```sh
 export SPROOZI_CNI_MANIFEST=/absolute/path/to/pinned-enforcing-cni.yaml
 export SPROOZI_CNI_SELECTOR='<your CNI agent label selector>'
-CERT_MANAGER_INSTALL_SKIP=true make verify-kind
+CERT_MANAGER_INSTALL_SKIP=true make test-e2e
 ```
 
 This gate creates and deletes a disposable Kind cluster. It verifies that a

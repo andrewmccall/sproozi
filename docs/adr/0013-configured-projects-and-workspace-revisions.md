@@ -1,4 +1,4 @@
-# Configured Projects and exact workspace revisions
+# 0013: Configured Projects and exact workspace revisions
 
 Status: accepted
 Date: 2026-10-13
@@ -140,7 +140,7 @@ configuration](../../internal/project/project.go), [owner
 selection](../../internal/work/project.go), [revision source
 binding](../../internal/work/revision.go), [workspace revision
 reconstruction](../../internal/workspace/revision.go) and [checkpoint
-metadata](../../internal/checkpoint/codex.go). Local resume belongs to the
+metadata](../../internal/checkpoint/artifact.go). Local resume belongs to the
 [existing home catalogue](../../internal/session/home/catalog.go). Current
 configuration and callers are documented in the [Project/revision
 reference](../reference/projects-and-revisions.md), with the [deployment

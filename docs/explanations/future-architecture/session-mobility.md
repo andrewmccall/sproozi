@@ -13,7 +13,7 @@ checkpoint, accounting and authority mechanisms. An AgentRun identifies one
 bounded remote visit; a completed or cancelled Run cannot reopen.
 
 Remote-first Codex work and later local resume are now implemented in the
-[retained-work guide](../../guides/portable-workflows.md), under [ADR
+[remote work and local resume guide](../../guides/portable-workflows.md), under [ADR
 0012](../../adr/0012-retained-work-and-fresh-session-continuations.md). The
 remote catalogue accepts tasks independently of the laptop, retains genuine
 stopped state, and transfers ownership once. A later local resume starts a new

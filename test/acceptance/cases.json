@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Required Sproozi acceptance assertions. This file declares the contract; a declaration is not evidence of a passing runtime test.",
+  "description": "Planned Sproozi acceptance scenarios. This is a catalogue for test design; no automated gate checks it and no test references these IDs.",
   "assertions": [
     {"id":"API-01","domain":"api","description":"Task and template immutability","expected_decision":"allow valid object; deny mutation","forbidden_side_effects":"persist mutated object"},
     {"id":"API-02","domain":"api","description":"Capability immutability","expected_decision":"deny capability mutation","forbidden_side_effects":"persist changed capability"},

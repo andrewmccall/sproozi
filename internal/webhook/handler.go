@@ -14,6 +14,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// Package webhook is the signed inbound event receiver. It verifies an
+// HMAC-signed HTTP POST and creates one AgentRun from the receiving template.
+// It is not a Kubernetes admission webhook.
 package webhook
 
 import (
@@ -28,6 +31,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
@@ -99,14 +103,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	tmpl, policy, err := h.resolveTemplate(r.Context(), namespace, receiver)
 	if err != nil {
-		status := http.StatusNotFound
-		switch err {
-		case errTemplateAmbiguous:
-			status = http.StatusConflict
-		case errSecretNameMissing:
-			status = http.StatusInternalServerError
+		// Anything other than a definite lookup result is transient; the sender
+		// should retry rather than treat the receiver as missing.
+		status, reason := http.StatusServiceUnavailable, "webhook: receiving template lookup failed"
+		switch {
+		case errors.Is(err, errTemplateNotFound), apierrors.IsNotFound(err):
+			status, reason = http.StatusNotFound, err.Error()
+		case errors.Is(err, errTemplateAmbiguous):
+			status, reason = http.StatusConflict, err.Error()
+		case errors.Is(err, errSecretNameMissing):
+			status, reason = http.StatusInternalServerError, err.Error()
 		}
-		h.deny(w, event, status, err.Error())
+		h.deny(w, event, status, reason)
 		return
 	}
 	event.TemplateName = tmpl.Name

@@ -7,6 +7,36 @@ Provider-backed tests consume model usage and can create branches and PRs.
 The [test requirements](README.md) describe the behaviours to check. These
 instructions describe how to run the existing drivers.
 
+## Which command proves what
+
+Every verification target, what a pass establishes, and whether CI runs it.
+The `Tests` workflow runs its rows in table order; `Lint` and `E2E` are separate
+workflows. `make help` prints the same summaries.
+
+| Target | A pass proves | CI | Needs |
+| --- | --- | --- | --- |
+| `make test` | After regenerating code and manifests, every non-e2e Go test passes: unit, rendered manifests, envtest API validation, integration and offline acceptance helpers. | Tests | Go; downloads envtest binaries |
+| `make verify-fast` | The same packages pass under the race detector and `go vet` is clean, without regenerating sources. | Tests | Go; envtest binaries |
+| `make verify-protocol` | Pinned `gh` and `git` clients produce the GitHub protocol the gateway inspects. Zero matched or skipped tests fail. | Tests | Downloads the checksum-pinned `gh` |
+| `make verify-mcp` | MCP and gateway packages pass under race, and the live MCP verifier's safety and failure reports pass offline. | Tests | Go, Python 3 |
+| `make verify-workflow-fixtures` | Session-mobility protocol fixtures, quickstart ownership and CRD checks, Kind bootstrap readiness ordering, and demo setup credential preservation and registry wiring. Stubs replace Docker and Kind. | Tests | Python 3, Bash; fetches the pinned Calico manifest into `.local/cni` on first run |
+| `make verify-docs` | Local Markdown links resolve and no private-plan paths are referenced. It does not establish that documentation is current. | Tests | Python 3 |
+| `make lint` | golangci-lint reports no issues; `make lint-config` checks its configuration. | Lint | Go |
+| `make test-e2e` | The full stack works in an owned two-node Kind cluster with enforcing CNI. See [Harnesses and Hermes in Kind](#harnesses-and-hermes-in-kind). | E2E | Docker, Kind, kubectl, pinned CNI manifest |
+| `make test-e2e-existing` | The same e2e suite passes against a Kind cluster you created (`KIND_CLUSTER`). | No | An existing dedicated Kind cluster |
+| `make verify-mcp-client` | Generated run-local MCP configuration loads in installed stock Codex. No model request. | No | Codex CLI |
+| `make verify-harness-clients` | Generated native MCP configuration loads in installed Codex, Claude Code and OpenCode. No model request. | No | All three CLIs |
+| `make verify-native-session` | Installed stock Codex resumes through production checkpoint capture and restore against a local provider. | No | Codex CLI |
+| `make verify-harness-process` | Installed Claude Code and OpenCode complete model and tool loops through the inspected-TLS gateway with local providers. | No | Claude Code, OpenCode |
+| `make verify-mcp-kind` | Configured MCP providers work with stock Codex in an owned Kind cluster, including denials, budgets and revocation. Real model requests. | No | See [Configured MCP in Kind](#configured-mcp-in-kind) |
+| `make verify-live` | One real AgentRun on a provisioned cluster opens a scoped PR in `SPROOZI_DEMO_REPO` and its denial probes fail closed. | No | Provisioned cluster and credentials; creates a PR |
+| `make verify-public-tree` | No private local material is tracked. | No | Git |
+| `make verify-release` | Release inputs are pinned, then `test`, `lint`, every `Tests` row, `test-e2e`, `verify-live` and `verify-public-tree` pass and the release image builds. A missing prerequisite fails. No push. | No | Everything above; `RELEASE_BUILD=1`, `SPROOZI_DEMO_REPO` |
+
+`make verify-release` does not run the installed-client targets or
+`verify-mcp-kind`; run those when changing client configuration or configured MCP.
+[cases.json](cases.json) is a catalogue of planned scenarios, not a gate.
+
 ## Getting-started guide
 
 The repository includes the
@@ -25,6 +55,10 @@ then removes its owned cluster and scratch files. This command consumes model
 usage and creates a real branch and PR. Interactive App creation and sign-in
 remain the setup steps above.
 
+If the demo cannot start the stock Codex image, run `bash hack/demo/image-test.sh`
+after `make demo-setup` with `KIND_NODE_IMAGE` set. It runs only that image's tools
+in a disposable Kind cluster without CNI, so it isolates image and registry faults.
+
 Add `--keep-cluster` to inspect a passing demo. Set
 `SPROOZI_QUICKSTART_EVIDENCE` to the exact directory printed by the helper, then:
 
@@ -33,7 +67,7 @@ export KUBECONFIG="$SPROOZI_QUICKSTART_EVIDENCE/cluster.kubeconfig"
 python3 hack/verify/quickstart.py doctor --evidence "$SPROOZI_QUICKSTART_EVIDENCE"
 ```
 
-Use the [exploration commands](../../docs/guides/getting-started.md#6-inspect-the-result-and-explore). Finish with:
+Use the [exploration commands](../../docs/guides/getting-started.md#8-inspect-the-result-and-explore). Finish with:
 
 ```sh
 python3 hack/verify/quickstart.py cleanup "$SPROOZI_QUICKSTART_EVIDENCE"
@@ -162,16 +196,9 @@ for recovery instead of losing the newest credential.
 
 ## Native clients and session movement
 
-Use these targets from the repository root:
-
-| Target | Purpose |
-| --- | --- |
-| `make verify-native-session` | Check native checkpoint capture and resume with stock Codex. |
-| `make verify-harness-clients` | Load generated configuration in installed stock clients without a model request. |
-| `make verify-harness-process` | Run model and tool loops through the inspected-TLS proxy with local provider fixtures. |
-| `make test-e2e` | Deploy the clients, gateway, task service and persistent Hermes in isolated Kind. |
-
-For Docker-to-Kubernetes movement, use the
+`make verify-native-session`, `make verify-harness-clients` and
+`make verify-harness-process` cover installed clients on the host; see the
+[command map](#which-command-proves-what). For Docker-to-Kubernetes movement, use the
 [session movement driver](../../hack/verify/session-mobility/README.md).
 It covers both selected clients and provides Codex held-turn and cancellation
 scenarios. Run the complete placement failure matrix for each client when changing
@@ -195,14 +222,3 @@ Its report separates native client/lifecycle proof from model quality. The model
 fixtures direct real stock Hermes MCP calls and stock Codex execution; they do
 not establish a paid-model Sproozi contribution or a personal home-ops diagnosis.
 Keep the report and private logs before deleting the dedicated cluster.
-
-## Local MCP checks
-
-Run these from the repository root. The client check needs installed stock Codex
-and makes no model request. `make test` uses envtest for API-server validation.
-
-```sh
-make verify-mcp
-make verify-mcp-client  # installed stock Codex; no model request
-make test              # includes real API-server validation through envtest
-```

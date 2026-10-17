@@ -263,21 +263,6 @@ func (s *Supervisor) GateInput() {
 	s.mu.Unlock()
 }
 
-func (s *Supervisor) ResumeInput() error {
-	s.input.Lock()
-	defer s.input.Unlock()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.exited {
-		return ErrExited
-	}
-	if s.quitting {
-		return errors.New("native terminal quit is in progress")
-	}
-	s.gated = false
-	return nil
-}
-
 // QuitAfterCompletedTurn requires the caller to gate input, observe a genuine
 // completed native turn and resolve pending tools first. It does not infer that
 // boundary from terminal text. It discards an unsubmitted composer draft, sends

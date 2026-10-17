@@ -135,18 +135,12 @@ func Open(c Config, log io.Writer) (_ *Service, err error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Service{config: c, duration: duration, ledger: ledger, initialDir: filepath.Join(c.Directory, "initial"), placements: map[string]session.Placement{}}
+	s := &Service{config: c, duration: duration, ledger: ledger, placements: map[string]session.Placement{}}
 	defer func() {
 		if err != nil {
 			_ = s.Close()
 		}
 	}()
-	if err = os.MkdirAll(s.initialDir, 0700); err != nil {
-		return nil, err
-	}
-	if err = private(s.initialDir, true); err != nil {
-		return nil, err
-	}
 	policy, err := approvedPolicy(c)
 	if err != nil {
 		return nil, err
@@ -363,10 +357,7 @@ func (s *Service) configureRemotes() error {
 }
 
 func (s *Service) configureWorkSources() error {
-	fixed := s.config.WorkSources
-	if len(fixed) == 0 {
-		fixed = s.config.Remote
-	}
+	fixed := s.config.WorkConnections()
 	sources := make(map[string]WorkSource, len(fixed))
 	for name, config := range fixed {
 		if name == "" || len(name) > 128 || config.MaxCheckpointBytes != s.config.Local.MaxCheckpointBytes {

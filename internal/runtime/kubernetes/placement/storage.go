@@ -2,24 +2,25 @@ package placement
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"io"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strconv"
 	"syscall"
 
-	registry "github.com/andrewmccall/sproozi/internal/runtime/kubernetes/session"
+	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
 )
 
 const recordSuffix = ".json"
 
+// retained keeps the launch exactly as prepared. A first visit's genuine
+// native UUID is bound in the registry record (NativeUUID), never in Launch.
 type retained struct {
-	Initial         *session.Launch    `json:"initial,omitempty"`
 	WorkspaceDigest string             `json:"workspaceDigest,omitempty"`
 	Launch          session.Launch     `json:"launch"`
 	Reference       registry.Reference `json:"reference"`
@@ -43,13 +44,6 @@ func privatePath(path string, dir bool) error {
 	}
 	return nil
 }
-func sameIntent(a, b session.Launch) bool {
-	a.Deadline = a.Deadline.UTC()
-	b.Deadline = b.Deadline.UTC()
-	a.IncludeIgnored = append([]string(nil), a.IncludeIgnored...)
-	b.IncludeIgnored = append([]string(nil), b.IncludeIgnored...)
-	return reflect.DeepEqual(a, b)
-}
 func (p *Placement) persistIntent(l session.Launch, data []byte) (retained, error) {
 	l.Deadline = l.Deadline.UTC()
 	old, err := p.load(l)
@@ -61,10 +55,10 @@ func (p *Placement) persistIntent(l session.Launch, data []byte) (retained, erro
 	}
 	// One allocation per principal/session epoch prevents alternative allocation
 	// IDs from replaying the same epoch through another deterministic Run name.
-	epochPath := filepath.Join(p.config.Directory, "epoch-"+l.SessionID+"-"+strconv.FormatUint(l.Epoch, 10)+recordSuffix)
+	epochPath := filepath.Join(p.config.Directory, "epoch-"+l.ExecutionID+"-"+strconv.FormatUint(l.Epoch, 10)+recordSuffix)
 	var previous session.Launch
 	if epochData, readErr := p.read(epochPath, 64<<10); readErr == nil {
-		if decode(epochData, &previous) != nil || !sameIntent(l, previous) {
+		if decode(epochData, &previous) != nil || !session.SameLaunch(l, previous) {
 			return retained{}, &profile.Rejection{Code: profile.CodeConflict}
 		}
 	} else if !os.IsNotExist(readErr) {
@@ -96,11 +90,21 @@ func (p *Placement) load(l session.Launch) (retained, error) {
 	if err = decode(data, &r); err != nil {
 		return retained{}, err
 	}
-	if !sameIntent(r.Launch, l) && (r.Initial == nil || !sameIntent(*r.Initial, l)) {
+	if !session.SameLaunch(r.Launch, l) {
 		return retained{}, &profile.Rejection{Code: profile.CodeConflict}
 	}
 	return r, nil
 }
+
+// fresh reports a first visit started from a Git workspace rather than a checkpoint.
+func (r retained) fresh() bool { return r.Launch.CheckpointDigest == "" }
+
+// thread is the native thread the visit runs: the launch's, or the genuine one
+// a first visit bound in the registry.
+func (r retained) thread(record registry.Record) string {
+	return cmp.Or(r.Launch.ThreadID, record.NativeUUID)
+}
+
 func (p *Placement) save(r retained) error {
 	data, err := json.Marshal(r)
 	if err != nil {

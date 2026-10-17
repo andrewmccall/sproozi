@@ -50,7 +50,7 @@ func TestReservationForfeitConsumesUnitsAndCostAcrossLedgers(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			tracker := budget.NewTrackerWithLedger(tc.ledger)
 			limits := api.EndpointBudget{MaxUnits: 100, MaxCostMicros: 200}
-			reservation, err := tracker.Reserve("missing-model-usage", limits, 0, 0)
+			reservation, err := tracker.Meter("missing-model-usage", limits).Reserve(t.Context(), 0, 0)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -62,7 +62,7 @@ func TestReservationForfeitConsumesUnitsAndCostAcrossLedgers(t *testing.T) {
 				t.Fatalf("forfeited accounting = %+v, want %+v", got, want)
 			}
 			for _, remainingLimit := range []api.EndpointBudget{{MaxUnits: 100}, {MaxCostMicros: 200}} {
-				if _, err := tracker.Reserve("missing-model-usage", remainingLimit, 1, 1); err == nil {
+				if _, err := tracker.Meter("missing-model-usage", remainingLimit).Reserve(t.Context(), 1, 1); err == nil {
 					t.Fatal("forfeited capacity became available again")
 				}
 			}

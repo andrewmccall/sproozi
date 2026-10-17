@@ -22,7 +22,7 @@ cannot establish a placement's usage or process-stop receipt.
 
 Keep execution implementations under `internal/runtime/kubernetes` and
 `internal/runtime/docker`. Kubernetes registration belongs in the nested
-`internal/runtime/kubernetes/session` package. Shared native state, PTY,
+`internal/runtime/kubernetes/registry` package. Shared native state, PTY,
 checkpoint and workspace behavior remains independent of these backends.
 API types, controllers and webhooks retain Kubebuilder scaffold locations.
 

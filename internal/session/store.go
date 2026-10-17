@@ -2,12 +2,14 @@ package session
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 
@@ -17,9 +19,16 @@ import (
 	"github.com/andrewmccall/sproozi/internal/session/internal/lifecycle"
 )
 
-const journalVersion = 1
+// journalVersion 2 starts each execution at its first visit. Version 1
+// journals, which began at an imported stopped visit, are not read.
+const journalVersion = 2
 const maxJournalBytes = int64(1 << 20)
 const maxOperations = 1000
+const checkpointsDir = "checkpoints"
+const workspacesDir = "workspaces"
+
+func checkpointPath(digest string) string { return filepath.Join(checkpointsDir, digest+".json") }
+func workspacePath(digest string) string  { return filepath.Join(workspacesDir, digest+".workspace") }
 
 // Coordinator exclusively owns one protected directory and its placements.
 // Close releases the cross-process lock. Placement implementations enforce the
@@ -80,14 +89,16 @@ func Open(dir string, placements map[string]Placement, maxCheckpointBytes int64)
 		return nil, fmt.Errorf("session: coordinator already owned: %w", err)
 	}
 	c := &Coordinator{dir: dir, placements: configured, maxCheckpoint: maxCheckpointBytes, lock: lock}
-	checkpoints := filepath.Join(dir, "checkpoints")
-	if err = os.MkdirAll(checkpoints, 0700); err != nil {
-		_ = c.Close()
-		return nil, err
-	}
-	if err = privatePath(checkpoints, true); err != nil {
-		_ = c.Close()
-		return nil, err
+	for _, name := range []string{checkpointsDir, workspacesDir} {
+		sub := filepath.Join(dir, name)
+		if err = os.MkdirAll(sub, 0700); err != nil {
+			_ = c.Close()
+			return nil, err
+		}
+		if err = privatePath(sub, true); err != nil {
+			_ = c.Close()
+			return nil, err
+		}
 	}
 	return c, nil
 }
@@ -221,21 +232,51 @@ func (c *Coordinator) commitCheckpoint(data []byte, kind harness.NativeKind, thr
 	if meta.Harness != kind || meta.ThreadID != thread || meta.SHA256 != digest {
 		return Checkpoint{}, errors.New("session: checkpoint identity/digest mismatch")
 	}
-	name := meta.SHA256 + ".json"
-	path := filepath.Join("checkpoints", name)
-	existing, err := readFile(filepath.Join(c.dir, path), c.maxCheckpoint)
-	if err == nil {
-		if !bytes.Equal(existing, data) {
-			return Checkpoint{}, errors.New("session: checkpoint collision")
-		}
-	} else if os.IsNotExist(err) {
-		if err = atomicFile(filepath.Join(c.dir, "checkpoints"), name, data); err != nil {
-			return Checkpoint{}, err
-		}
-	} else {
+	path := checkpointPath(meta.SHA256)
+	if err = c.retainImmutable(path, data); err != nil {
 		return Checkpoint{}, err
 	}
 	return Checkpoint{Metadata: meta, Path: path}, nil
+}
+
+// retainWorkspace keeps a new execution's captured Git workspace input.
+func (c *Coordinator) retainWorkspace(data []byte) (string, error) {
+	if len(data) == 0 || int64(len(data)) > c.maxCheckpoint {
+		return "", errors.New("session: workspace input exceeds bound")
+	}
+	digest := fmt.Sprintf("%x", sha256.Sum256(data))
+	return digest, c.retainImmutable(workspacePath(digest), data)
+}
+
+// retainImmutable writes content-addressed data once; a retry must match it.
+func (c *Coordinator) retainImmutable(path string, data []byte) error {
+	existing, err := readFile(filepath.Join(c.dir, path), c.maxCheckpoint)
+	if err == nil {
+		if !bytes.Equal(existing, data) {
+			return errors.New("session: retained input collision")
+		}
+		return nil
+	}
+	if !os.IsNotExist(err) {
+		return err
+	}
+	return atomicFile(filepath.Join(c.dir, filepath.Dir(path)), filepath.Base(path), data)
+}
+
+// input reads what a launch restores: the committed checkpoint it names, or the
+// execution's retained workspace for a first visit started from Git. Both are
+// content-addressed and immutable, so a retry reads the same bytes even after
+// later visits committed newer checkpoints.
+func (c *Coordinator) input(r Record, l Launch) ([]byte, error) {
+	path, digest := checkpointPath(l.CheckpointDigest), l.CheckpointDigest
+	if digest == "" {
+		path, digest = workspacePath(r.Workspace), r.Workspace
+	}
+	data, err := readFile(filepath.Join(c.dir, path), c.maxCheckpoint)
+	if err == nil && fmt.Sprintf("%x", sha256.Sum256(data)) != digest {
+		err = errors.New("session: retained input changed")
+	}
+	return data, err
 }
 func (c *Coordinator) checkpointBytes(r Record) ([]byte, error) {
 	data, err := readFile(filepath.Join(c.dir, r.Checkpoint.Path), c.maxCheckpoint)
@@ -250,4 +291,61 @@ func (c *Coordinator) checkpointBytes(r Record) ([]byte, error) {
 		return nil, errors.New("session: committed checkpoint changed")
 	}
 	return data, nil
+}
+
+// Checkpoint returns the execution's last committed checkpoint bytes.
+func (c *Coordinator) Checkpoint(id string) ([]byte, error) {
+	unlock, err := c.lockSession(id)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	r, err := c.load(id)
+	if err != nil {
+		return nil, err
+	}
+	if !r.hasCheckpoint() {
+		return nil, errors.New("session: execution has no committed checkpoint")
+	}
+	return c.checkpointBytes(r)
+}
+
+// List returns the IDs of every retained execution journal.
+func (c *Coordinator) List() ([]string, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if err := c.ready(); err != nil {
+		return nil, err
+	}
+	entries, err := os.ReadDir(c.dir)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for _, entry := range entries {
+		if id, ok := strings.CutSuffix(entry.Name(), ".json"); ok && validUUID(id) {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
+}
+
+// Retained reports the executions and total bytes kept in the coordinator
+// directory, including inputs and checkpoints, so an owner can bound storage.
+func (c *Coordinator) Retained() (executions int, size int64, err error) {
+	ids, err := c.List()
+	if err != nil {
+		return 0, 0, err
+	}
+	err = filepath.WalkDir(c.dir, func(_ string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil || entry.IsDir() {
+			return walkErr
+		}
+		info, err := entry.Info()
+		if err == nil {
+			size += info.Size()
+		}
+		return err
+	})
+	return len(ids), size, err
 }

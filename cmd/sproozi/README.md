@@ -10,8 +10,9 @@ FILE --operation UUID`, followed by `sessions` and `status`. A configured remote
 owner accepts these without a running home daemon. Start the home for `pull
 SESSION_ID --from NAME`, `resume SESSION_ID` and `stop SESSION_ID`. Product
 commands accept `--config FILE`, defaulting to the platform user configuration
-directory's `sproozi/config.json`. All client commands share configuration and
-session selectors. A remote `--executor` never falls back home; local controls
+directory's `sproozi/config.json`. Each command accepts only its own flags;
+`sproozi -h` lists the commands and `sproozi COMMAND -h` prints one command's
+flags. A remote `--executor` never falls back home; local controls
 use `--executor docker` or omit it. Keep operation UUIDs stable on retries.
 See the [command and output reference](../../docs/reference/session-commands.md)
 for socket overrides, session lists and IDs, and the complete

@@ -93,7 +93,7 @@ func TestEndpointBudgetStopsUpstreamAndKeepsCapabilitiesSeparate(t *testing.T) {
 	}
 	// A separate capability does not inherit this endpoint's consumption.
 	meter := tracker.Meter(id.Execution.UID+"/model.inference", sprooziv1alpha1.EndpointBudget{MaxUnits: 1})
-	if err := meter.Spend(1, 0); err != nil {
+	if err := meter.Spend(t.Context(), 1, 0); err != nil {
 		t.Fatal(err)
 	}
 	// Removing a limit means no consumption ceiling, while authorization remains.

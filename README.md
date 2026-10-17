@@ -41,7 +41,9 @@ Sproozi does not replace an agent's own reasoning or tools. It launches an exist
 
 ## Get started
 
-Try the infrastructure-investigation demo in a local Kubernetes cluster.
+Start with a local Kind cluster. The first check needs no accounts at all; then
+the infrastructure-investigation demo has Codex open a real PR in a throwaway
+repository.
 
 **[Run the Kind walkthrough →](docs/guides/getting-started.md)**
 
@@ -54,7 +56,7 @@ Or choose a path closer to what you want to do:
 | Run Codex remotely, then pull its work back to my machine | [Remote work and local resume](docs/guides/portable-workflows.md) |
 | Have Hermes delegate bounded tasks | [Hermes orchestration](docs/guides/hermes-orchestration.md) |
 | Check the investigation-to-PR demo manually | [Manual acceptance checks](docs/guides/manual-pr-demo.md) |
-| Connect persistent Hermes to retained Codex work | [Retained-work deployment](docs/guides/retained-work-kubernetes.md) |
+| Connect persistent Hermes to retained Codex work | [Hermes with retained work](docs/guides/retained-work-kubernetes.md) |
 
 The CLI can be built with:
 
@@ -75,19 +77,19 @@ There's working code and recorded tests, but support varies by workflow:
 | Kubernetes-based agent jobs | Tested with Codex, Claude Code, OpenCode and Hermes using deterministic providers |
 | Controlled access to Kubernetes and external tools | [Recorded tool-access acceptance](test/acceptance/reports/verified-mcp-demo.md) with a real model, including native Kubernetes reads, configured HTTPS test servers and denied operations |
 | Docker ↔ Kubernetes session movement | [Recorded round trips](test/acceptance/reports/verified-session-mobility.md) with Codex, Claude Code and deterministic providers, including unfinished Git changes |
-| Remote Codex work followed by local resume | [Recorded retained-work acceptance](test/acceptance/reports/verified-portable-workflows.md) with deterministic models, actual package checks and isolated Kubernetes reads/denials |
+| Remote Codex work followed by local resume | [Recorded remote-work acceptance](test/acceptance/reports/verified-portable-workflows.md) with deterministic models, actual package checks and isolated Kubernetes reads/denials |
 | Infrastructure investigation and proposed GitHub fix | [Recorded SRE runs](test/acceptance/reports/verified-sre-demo.md) with a real model and GitHub; no merge or deployment |
 
-These are **specific verified scenarios**, not a claim that every configuration works or that the project is ready for production. The [verification reports](test/acceptance/reports/README.md) give the evidence, and the [agent reference](docs/reference/harnesses.md) documents the supported paths.
+These are **specific verified scenarios**, not a claim that every configuration works or that the project is ready for production. The [recorded test reports](test/acceptance/reports/README.md) give the evidence for each run, and the [agent reference](docs/reference/harnesses.md) documents the supported paths.
 
 ## Security limitations
 
 Isolation only works if the environment is configured and enforced correctly. In particular:
 
 - Kubernetes network restrictions require an enforcing network plugin and verification that agents cannot bypass the gateway. Kubernetes NetworkPolicy permits traffic involving a Pod's own node, so policy alone is not a complete isolation guarantee.
-- Rules can restrict external operations, but their precision depends on the integration. A service-aware permission can constrain particular actions. Configured Model Context Protocol (MCP) access checks tools and arguments, while a generic HTTPS allowance only constrains the destination.
-- Runtime validation requires non-root execution, no added Linux capabilities, RuntimeDefault seccomp and a read-only root filesystem. Template volumes and environment sources are restricted.
-- Both gateway backends limit connections and sessions, with deadlines for authentication and live permission checks. Cleanup keeps identity and network controls while a Pod's state or ownership is uncertain.
+- Rules can restrict external operations, but their precision depends on the integration. A service-aware permission can constrain particular actions. Configured Model Context Protocol (MCP) access checks tools and arguments, while generic HTTPS egress only constrains the destination.
+- Agent containers must run locked down: non-root, read-only, no extra Linux capabilities and no mounted secrets.
+- The gateway limits how many connections and sessions an agent can open, and cleanup keeps network controls in place until Sproozi is sure an agent has stopped.
 - Resource and usage limits exist, but model-token and cost estimates are **not** hard guarantees against provider spend.
 - A sandbox does not guarantee that an agent's answer, code or proposed fix is correct. Review changes before deploying or merging them.
 
@@ -103,17 +105,10 @@ Some of that is still future architecture, not shipped functionality. The [futur
 
 ## Dig deeper
 
+- [Core concepts](docs/explanations/core-concepts.md) and [terms](GLOSSARY.md)
 - [Architecture](docs/explanations/system-architecture.md)
 - [Capabilities and gateways](docs/explanations/capabilities-and-gateways.md)
-- [Projects and workspaces](docs/reference/projects-and-revisions.md)
+- [Architecture decisions](docs/adr/README.md)
 - [Full documentation index](docs/README.md)
-- [Stock runtime examples](examples/harnesses/README.md)
-- [Session command reference](docs/reference/session-commands.md)
-- [Configured MCP tools](docs/reference/configured-mcp.md)
-- Kubernetes resource references: [runtime](docs/reference/agentruntime.md), [policy](docs/reference/agentpolicy.md), [template](docs/reference/agenttemplate.md) and [run](docs/reference/agentrun.md)
-- [Architecture decisions](docs/adr/README.md), including [what a checkpoint contains](docs/adr/0008-selected-native-and-git-checkpoints.md) and [retained work with fresh permissions](docs/adr/0012-retained-work-and-fresh-session-continuations.md)
-- [Project and Git revision acceptance evidence](test/acceptance/reports/execution-roadmap-evidence.json)
-- Planned home-ops workflow: [playbook](docs/guides/home-ops-playbook.md) and [runbook](test/acceptance/home-ops.md). This alert-to-PR and recovery workflow has not passed end-to-end acceptance.
-- [Future collaboration directions](docs/explanations/future-architecture/README.md#execution-roadmap-extensions)
 
 Sproozi is open source and evolving. If you're trying to let agents do useful work without handing them the keys to everything, I'd love to hear what you're building.

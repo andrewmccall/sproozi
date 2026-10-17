@@ -51,7 +51,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	if req.URL.Path == "/mcp" && h.mcp != nil {
-		h.serveMCP(w, req, identity)
+		h.serveMCP(w, req)
 		return
 	}
 	response, err := h.authorizeAndForward(req.Context(), identity, req)
@@ -70,12 +70,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 }
 
 func (h *Handler) authorizeAndForward(ctx context.Context, identity *gateway.ExecutionGrant, req *http.Request) (response *http.Response, requestErr error) {
-	if identity == nil || identity.Execution.UID == "" {
-		return nil, fmt.Errorf("kubernetes: missing run identity")
-	}
-	event := identity.AuditEvent("kubernetes.read")
-	event.Capability = string(sprooziv1alpha1.CapabilityKubernetesRead)
-	event.SemanticLevel, event.Service = "semantic", "kubernetes"
+	event := gateway.AuditEvent(ctx, "kubernetes.read")
+	event.Service = "kubernetes"
 	defer func() {
 		if h.Config.AuditLogger == nil {
 			return
@@ -144,7 +140,7 @@ func (h *Handler) authorizeAndForward(ctx context.Context, identity *gateway.Exe
 		// The body owns cancellation after headers have been returned.
 		forward = forward.WithContext(callCtx)
 	}
-	if err := budget.FromContext(ctx).SpendRequest(); err != nil {
+	if err := budget.FromContext(ctx).SpendRequest(ctx); err != nil {
 		cancel()
 		return nil, err
 	}
@@ -178,9 +174,6 @@ func (b *boundedBody) Read(p []byte) (int, error) {
 }
 
 func allowed(id *gateway.ExecutionGrant, op Operation) bool {
-	if !slices.Contains(id.Capabilities, sprooziv1alpha1.CapabilityKubernetesRead) || !slices.Contains(id.Policy.Spec.AllowedCapabilities, sprooziv1alpha1.CapabilityKubernetesRead) {
-		return false
-	}
 	if op.Discovery {
 		return (op.APIGroup == "" || op.APIGroup == appsAPIGroup) && (op.Version == "" || op.Version == "v1")
 	}

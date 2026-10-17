@@ -25,7 +25,7 @@ import (
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/gateway"
-	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/session"
+	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
 	authv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -44,7 +44,7 @@ const (
 	managedByValue    = "sproozi-controller"
 )
 
-// Sentinel errors returned by TokenValidator and RunFinder implementations.
+// Sentinel errors returned by Authenticator.
 var (
 	// ErrTokenInvalid is returned when a bearer token is invalid or expired.
 	ErrTokenInvalid = gateway.ErrTokenInvalid
@@ -69,82 +69,56 @@ type ServiceAccountIdentity struct {
 	UID       string
 }
 
-// Authenticator composes token validation and run lookup at the shared
-// gateway identity seam.
+// Authenticator is the Kubernetes execution authority at the shared gateway
+// identity seam. It resolves a projected ServiceAccount token to the owning
+// active AgentRun, and resolves the same owner again on every revalidation.
+// Lookups read through to the API server so revocation takes effect promptly.
 type Authenticator struct {
-	Tokens TokenValidator
-	Runs   RunFinder
+	clientset      kubernetes.Interface
+	audience       string
+	client         client.Client
+	agentNamespace string
 }
 
-func (a Authenticator) Authenticate(ctx context.Context, token string) (*gateway.ExecutionGrant, error) {
-	if a.Tokens == nil || a.Runs == nil || token == "" {
+// NewAuthenticator validates tokens for audience through the TokenReview API
+// and resolves their owners in agentNamespace with the controller-runtime client.
+func NewAuthenticator(clientset kubernetes.Interface, audience string, c client.Client, agentNamespace string) *Authenticator {
+	return &Authenticator{clientset: clientset, audience: audience, client: c, agentNamespace: agentNamespace}
+}
+
+func (a *Authenticator) Authenticate(ctx context.Context, token string) (*gateway.ExecutionGrant, error) {
+	if token == "" {
 		return nil, ErrTokenInvalid
 	}
-	sa, err := a.Tokens.Validate(ctx, token)
+	serviceAccount, err := a.reviewToken(ctx, token)
 	if err != nil {
 		return nil, err
 	}
-	identity, err := a.Runs.Find(ctx, sa)
-	if err != nil {
-		return nil, err
-	}
-	if identity == nil || identity.Execution.UID == "" {
-		return nil, ErrRunNotFound
-	}
-	if err := identity.Validate(); err != nil {
-		return nil, err
-	}
-	return identity, nil
+	return a.Find(ctx, serviceAccount)
 }
 
 // Revalidate resolves the owning resources again, binding an inspected session
 // to the same execution, policy, template and placement allocation.
-func (f *K8sRunFinder) Revalidate(ctx context.Context, grant *gateway.ExecutionGrant) error {
+func (a *Authenticator) Revalidate(ctx context.Context, grant *gateway.ExecutionGrant) error {
 	if grant == nil || grant.Execution.Backend != gateway.BackendKubernetes || grant.Authority.Backend != gateway.BackendKubernetes {
 		return gateway.ErrGrantRevoked
 	}
-	fresh, err := f.Find(ctx, ServiceAccountIdentity{Namespace: grant.Authority.Namespace, Name: grant.Authority.Name, UID: grant.Authority.UID})
-	if err != nil || fresh == nil || !reflect.DeepEqual(fresh, grant) {
+	fresh, err := a.Find(ctx, ServiceAccountIdentity{Namespace: grant.Authority.Namespace, Name: grant.Authority.Name, UID: grant.Authority.UID})
+	if err != nil || !reflect.DeepEqual(fresh, grant) {
 		return gateway.ErrGrantRevoked
 	}
 	return nil
 }
 
-// TokenValidator validates a bearer token and returns the complete ServiceAccount identity.
-type TokenValidator interface {
-	Validate(ctx context.Context, token string) (ServiceAccountIdentity, error)
-}
-
-// RunFinder resolves a ServiceAccount identity to the owning active AgentRun with its policy.
-type RunFinder interface {
-	Find(ctx context.Context, serviceAccount ServiceAccountIdentity) (*gateway.ExecutionGrant, error)
-}
-
-// K8sTokenValidator validates bearer tokens via the Kubernetes TokenReview API.
-type K8sTokenValidator struct {
-	// clientset is used to call the TokenReview API.
-	clientset kubernetes.Interface
-
-	// audience is the expected token audience.
-	audience string
-}
-
-// NewK8sTokenValidator returns a K8sTokenValidator backed by the given clientset
-// that validates tokens for the specified audience.
-func NewK8sTokenValidator(clientset kubernetes.Interface, audience string) *K8sTokenValidator {
-	return &K8sTokenValidator{clientset: clientset, audience: audience}
-}
-
-// Validate submits a TokenReview to the Kubernetes API and returns the
-// ServiceAccount namespace and name on success.
-func (v *K8sTokenValidator) Validate(ctx context.Context, token string) (ServiceAccountIdentity, error) {
+// reviewToken submits a TokenReview and returns the complete ServiceAccount subject.
+func (a *Authenticator) reviewToken(ctx context.Context, token string) (ServiceAccountIdentity, error) {
 	tr := &authv1.TokenReview{
 		Spec: authv1.TokenReviewSpec{
 			Token:     token,
-			Audiences: []string{v.audience},
+			Audiences: []string{a.audience},
 		},
 	}
-	result, err := v.clientset.AuthenticationV1().TokenReviews().Create(ctx, tr, metav1.CreateOptions{})
+	result, err := a.clientset.AuthenticationV1().TokenReviews().Create(ctx, tr, metav1.CreateOptions{})
 	if err != nil {
 		return ServiceAccountIdentity{}, fmt.Errorf("%w: %w", ErrTokenInvalid, err)
 	}
@@ -161,31 +135,17 @@ func (v *K8sTokenValidator) Validate(ctx context.Context, token string) (Service
 	return ServiceAccountIdentity{Namespace: namespace, Name: name, UID: result.Status.User.UID}, nil
 }
 
-// K8sRunFinder resolves AgentRuns through the immutable ServiceAccount owner
-// labels. This keeps authentication bounded to the named ServiceAccount, run,
-// template, and policy rather than scanning every run in the cluster.
-type K8sRunFinder struct {
-	// client is the controller-runtime client used to list and get resources.
-	client         client.Client
-	agentNamespace string
-}
-
-// NewK8sRunFinder returns a K8sRunFinder backed by the given controller-runtime client.
-func NewK8sRunFinder(c client.Client, agentNamespace string) *K8sRunFinder {
-	return &K8sRunFinder{client: c, agentNamespace: agentNamespace}
-}
-
 // Find returns the active AgentRun owned by the complete ServiceAccount
 // identity. ServiceAccount name reuse and stale owner labels fail closed.
-func (f *K8sRunFinder) Find(ctx context.Context, serviceAccount ServiceAccountIdentity) (*gateway.ExecutionGrant, error) {
-	if serviceAccount.Namespace != f.agentNamespace {
+func (a *Authenticator) Find(ctx context.Context, serviceAccount ServiceAccountIdentity) (*gateway.ExecutionGrant, error) {
+	if serviceAccount.Namespace != a.agentNamespace {
 		return nil, ErrWrongAgentNamespace
 	}
 	if serviceAccount.Name == "" || serviceAccount.UID == "" {
 		return nil, ErrTokenInvalid
 	}
 	var serviceAccountObject corev1.ServiceAccount
-	if err := f.client.Get(ctx, client.ObjectKey{Namespace: serviceAccount.Namespace, Name: serviceAccount.Name}, &serviceAccountObject); err != nil {
+	if err := a.client.Get(ctx, client.ObjectKey{Namespace: serviceAccount.Namespace, Name: serviceAccount.Name}, &serviceAccountObject); err != nil {
 		return nil, ErrRunNotFound
 	}
 	if string(serviceAccountObject.UID) != serviceAccount.UID || serviceAccountObject.Labels[managedByLabel] != managedByValue {
@@ -197,7 +157,7 @@ func (f *K8sRunFinder) Find(ctx context.Context, serviceAccount ServiceAccountId
 		return nil, ErrServiceAccountMismatch
 	}
 	var run sprooziv1alpha1.AgentRun
-	if err := f.client.Get(ctx, client.ObjectKey{Namespace: runNamespace, Name: runName}, &run); err != nil {
+	if err := a.client.Get(ctx, client.ObjectKey{Namespace: runNamespace, Name: runName}, &run); err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil, ErrRunNotFound
 		}
@@ -209,12 +169,8 @@ func (f *K8sRunFinder) Find(ctx context.Context, serviceAccount ServiceAccountId
 	if run.Status.Phase != sprooziv1alpha1.AgentRunPhaseRunning || run.Spec.Cancel || !run.DeletionTimestamp.IsZero() {
 		return nil, ErrRunNotRunning
 	}
-	if runName == "" {
-		return nil, ErrRunNotFound
-	}
-
 	var tmpl sprooziv1alpha1.AgentTemplate
-	if err := f.client.Get(ctx, client.ObjectKey{
+	if err := a.client.Get(ctx, client.ObjectKey{
 		Namespace: run.Namespace,
 		Name:      run.Spec.TemplateRef.Name,
 	}, &tmpl); err != nil {
@@ -222,20 +178,20 @@ func (f *K8sRunFinder) Find(ctx context.Context, serviceAccount ServiceAccountId
 	}
 
 	var pol sprooziv1alpha1.AgentPolicy
-	if err := f.client.Get(ctx, client.ObjectKey{
+	if err := a.client.Get(ctx, client.ObjectKey{
 		Namespace: run.Namespace,
 		Name:      tmpl.Spec.PolicyRef.Name,
 	}, &pol); err != nil {
 		return nil, err
 	}
-	record, err := session.ResolveRun(ctx, f.client, &run, &tmpl)
+	record, err := registry.ResolveRun(ctx, a.client, &run, &tmpl)
 	if err != nil {
 		return nil, err
 	}
-	if err := session.RequireActive(ctx, f.client, &run, record, f.agentNamespace); err != nil {
+	if err := registry.RequireActive(ctx, a.client, &run, record, a.agentNamespace); err != nil {
 		return nil, err
 	}
-	if deadline := session.EffectiveDeadline(&run, &pol, record); !deadline.IsZero() && !deadline.After(time.Now()) {
+	if deadline := registry.EffectiveDeadline(&run, &pol, record); !deadline.IsZero() && !deadline.After(time.Now()) {
 		return nil, ErrRunNotRunning
 	}
 

@@ -10,6 +10,7 @@ import (
 
 	"github.com/andrewmccall/sproozi/internal/project"
 	"github.com/andrewmccall/sproozi/internal/session"
+	"github.com/andrewmccall/sproozi/internal/session/profile"
 	"github.com/andrewmccall/sproozi/internal/work"
 	"github.com/google/uuid"
 )
@@ -38,11 +39,11 @@ func TestImportedProjectNeedsIndependentLocalApprovalAndKeepsAssociation(t *test
 	if err != nil || resumed.Project != "sproozi-dev" || resumed.ThreadID != testNativeUUID {
 		t.Fatalf("Approved same-conversation continuation failed: %#v %v", resumed, err)
 	}
-	admitted, err := s.readInitial(resumed.ExecutionID)
-	if err != nil || !reflect.DeepEqual(admitted.Launch.Allowances, map[string]session.Allowance{
+	admitted, err := s.coordinator.Inspect(resumed.ExecutionID)
+	if err != nil || !reflect.DeepEqual(admitted.Ceiling, map[string]session.Allowance{
 		"model.inference": {Units: session.Limit{Bounded: true, Value: 10}},
 	}) {
-		t.Fatalf("Project widened fresh local authority: %#v %v", admitted.Launch.Allowances, err)
+		t.Fatalf("Project widened fresh local authority: %#v %v", admitted.Ceiling, err)
 	}
 	status, err := s.Stop(t.Context(), id, uuid.NewString())
 	if err != nil || status.Project != "sproozi-dev" || status.CheckpointInfo == nil ||
@@ -157,5 +158,22 @@ func TestRemovedProjectApprovalDoesNotBlockInterruptedFinalStopRecovery(t *testi
 	}
 	if remote.prepares != prepared || remote.activations != activated {
 		t.Fatal("Cleanup activated a new destination")
+	}
+}
+
+func TestWorkConnectionsPreferWorkSourcesPerName(t *testing.T) {
+	c := Config{
+		WorkSources: map[string]profile.ClientConfig{"a": {URL: "https://work-a.example"}},
+		Remote: map[string]profile.ClientConfig{"a": {URL: "https://remote-a.example"},
+			"b": {URL: "https://remote-b.example"}},
+	}
+	got := c.WorkConnections()
+	if len(got) != 2 || got["a"].URL != "https://work-a.example" || got["b"].URL != "https://remote-b.example" {
+		t.Fatalf("Work connections did not resolve per name: %#v", got)
+	}
+	c.ProjectApprovals = []ProjectApproval{{Source: "b", Project: "sproozi-dev", Capabilities: []string{"model.inference"}}}
+	c.Allowances = map[string]session.Allowance{"model.inference": {Units: session.Limit{Bounded: true, Value: 1}}}
+	if err := validateProjectApprovals(c); err != nil {
+		t.Fatalf("Approval for a remote-only source was rejected: %v", err)
 	}
 }

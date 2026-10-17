@@ -166,6 +166,14 @@ func TestNextQueued(t *testing.T) {
 			wantName: "",
 		},
 		{
+			name: "earlier uninitialized run keeps its place",
+			runs: []sprooziv1alpha1.AgentRun{
+				runWithPhase("b", sprooziv1alpha1.AgentRunPhaseQueued, t2),
+				runWithPhase("a", "", t1),
+			},
+			wantName: "a",
+		},
+		{
 			name: "queued selected from mixed phases",
 			runs: []sprooziv1alpha1.AgentRun{
 				runWithPhase("a", sprooziv1alpha1.AgentRunPhaseSucceeded, t1),

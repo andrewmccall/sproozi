@@ -12,6 +12,7 @@ import (
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/audit"
 	"github.com/andrewmccall/sproozi/internal/budget"
+	"github.com/andrewmccall/sproozi/internal/endpoints"
 	githubgateway "github.com/andrewmccall/sproozi/internal/endpoints/github"
 	kubernetesgateway "github.com/andrewmccall/sproozi/internal/endpoints/kubernetes"
 	mcpgateway "github.com/andrewmccall/sproozi/internal/endpoints/mcp"
@@ -19,8 +20,6 @@ import (
 	"github.com/andrewmccall/sproozi/internal/gateway"
 	"github.com/andrewmccall/sproozi/internal/proxytransport"
 )
-
-const ModelAuthority = "api.openai.com:443"
 
 // GatewayConfig fixes the model provider and named MCP registrations. The root
 // service separately owns outer listener TLS and worker proxy/CA configuration.
@@ -47,19 +46,20 @@ func NewGateway(owner *Owner, config GatewayConfig) (*proxytransport.Gateway, er
 	tracker := budget.NewTrackerWithLedger(owner.ledger)
 	modelConfig := config.Model
 	modelConfig.AuditLogger = config.AuditLogger
-	authority := ModelAuthority
+	authority := modelgateway.OpenAIAuthority
 	handler := &modelgateway.Handler{Config: modelConfig}
 	if config.Harness == harness.NativeClaude {
 		authority = modelgateway.AnthropicAuthority
 		handler = modelgateway.NewAnthropicHandler(modelConfig)
 	}
-	dispatch := gateway.Dispatcher{authority: {Capability: string(api.CapabilityModelInference), Tier: audit.TierSemantic, Handler: handler, Budgets: tracker}}
+	dispatch := gateway.Dispatcher{authority: {Capability: string(api.CapabilityModelInference), Tier: audit.TierSemantic, Handler: handler, Budgets: tracker, AuditLogger: config.AuditLogger}}
 	if err := addNativeRoutes(owner, config, dispatch, tracker); err != nil {
 		return nil, err
 	}
 	if config.MCPRegistry != nil {
 		host, port, err := net.SplitHostPort(config.MCPAuthority)
-		if err != nil || host == "" || port != "443" || dispatch.Allows(config.MCPAuthority) || config.MCPAuthority == ModelAuthority || config.MCPAuthority == modelgateway.AnthropicAuthority || config.MCPAuthority == kubernetesgateway.Authority || config.MCPAuthority == "github.com:443" || config.MCPAuthority == "api.github.com:443" {
+		_, reserved := endpoints.SemanticAuthorities[config.MCPAuthority]
+		if err != nil || host == "" || port != "443" || reserved {
 			return nil, errors.New("docker gateway: exact MCP authority on port 443 required")
 		}
 		dispatch[config.MCPAuthority] = gateway.Route{Tier: audit.TierProtocol, Handler: mcpgateway.NewHandler(mcpgateway.HandlerConfig{Registry: config.MCPRegistry, HTTPClient: config.MCPClient, Budgets: tracker, AuditLogger: config.AuditLogger})}
@@ -75,8 +75,8 @@ func addNativeRoutes(owner *Owner, config GatewayConfig, dispatch gateway.Dispat
 		githubConfig := *config.GitHub
 		githubConfig.AuditLogger = config.AuditLogger
 		githubHandler := &githubgateway.Handler{Config: githubConfig}
-		for _, host := range []string{"github.com:443", "api.github.com:443"} {
-			dispatch[host] = gateway.Route{Capability: string(api.CapabilityGitHubPullRequest), Tier: audit.TierSemantic, Handler: githubHandler, Budgets: tracker}
+		for _, host := range []string{githubgateway.GitAuthority, githubgateway.APIAuthority} {
+			dispatch[host] = gateway.Route{Capability: string(api.CapabilityGitHubPullRequest), Tier: audit.TierSemantic, Handler: githubHandler, Budgets: tracker, AuditLogger: config.AuditLogger}
 		}
 	}
 	if config.Kubernetes != nil {
@@ -85,7 +85,7 @@ func addNativeRoutes(owner *Owner, config GatewayConfig, dispatch gateway.Dispat
 		}
 		kubeConfig := *config.Kubernetes
 		kubeConfig.AuditLogger = config.AuditLogger
-		dispatch[kubernetesgateway.Authority] = gateway.Route{Capability: string(api.CapabilityKubernetesRead), Tier: audit.TierSemantic, Handler: kubernetesgateway.NewHandler(kubeConfig), Budgets: tracker}
+		dispatch[kubernetesgateway.Authority] = gateway.Route{Capability: string(api.CapabilityKubernetesRead), Tier: audit.TierSemantic, Handler: kubernetesgateway.NewHandler(kubeConfig), Budgets: tracker, AuditLogger: config.AuditLogger}
 	}
 	for _, capability := range owner.nativeCapabilities {
 		if !slices.Contains(owner.policy.Spec.AllowedCapabilities, capability) || capability == api.CapabilityGitHubPullRequest && config.GitHub == nil || capability == api.CapabilityKubernetesRead && config.Kubernetes == nil {

@@ -599,9 +599,9 @@ func inspectResult(out result,
 			out.ToolCalls == 0 && (out.ToolUnitsUsed == nil || *out.ToolUnitsUsed == 0) &&
 			out.AuthenticatedSessions > 0 &&
 			(strings.Contains(out.Output+out.SessionExport,
-				"capability_not_granted") ||
+				"capability_denied") ||
 				strings.Contains(out.Output+out.SessionExport,
-					"model.inference capability not granted"))
+					"does not request capability model.inference"))
 	}
 	out.Passed = out.Passed && out.MissingIdentityDenied && out.UnknownAuthorityDenied
 	if out.Mode == "supervised" {

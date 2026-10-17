@@ -213,7 +213,7 @@ kubectl --kubeconfig "$work/kubeconfig" -n sproozi-system rollout status deploym
 ```
 
 Restart profile and home with the same protected directories, then resume a
-retained product session with `sproozi resume SESSION_ID --config FILE --detach`.
+retained session with `sproozi resume SESSION_ID --config FILE --detach`.
 The fresh grant has ten `mcp.docs` calls. Run `mcp-probe.js` through the exact
 fixture's active agent, first with `docker exec -i CONTAINER_ID node`, then with
 `kubectl --kubeconfig FILE -n sproozi-agents exec -i POD -c agent -- node` after a

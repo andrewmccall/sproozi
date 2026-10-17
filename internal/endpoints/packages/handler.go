@@ -5,11 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"slices"
 
 	"github.com/andrewmccall/sproozi/internal/budget"
 
-	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/audit"
 	"github.com/andrewmccall/sproozi/internal/gateway"
 	packagepolicy "github.com/andrewmccall/sproozi/internal/packages"
@@ -17,6 +15,9 @@ import (
 
 const (
 	pythonFilesHost = "files.pythonhosted.org"
+	// The handler serves the PyPI index and the file host it links to.
+	IndexAuthority = "pypi.org:443"
+	FilesAuthority = pythonFilesHost + ":443"
 )
 
 type HandlerConfig struct {
@@ -31,12 +32,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "gateway identity required", http.StatusUnauthorized)
 		return
 	}
-	e := id.AuditEvent("packages.install")
-	e.Service, e.SemanticLevel, e.Capability = "pypi", audit.TierSemantic, string(api.CapabilityPackagesInstall)
-	if !slices.Contains(id.Capabilities, api.CapabilityPackagesInstall) || !slices.Contains(id.Policy.Spec.AllowedCapabilities, api.CapabilityPackagesInstall) {
-		h.deny(w, e, http.StatusForbidden, "packages.install capability not granted")
-		return
-	}
+	e := gateway.AuditEvent(r.Context(), "packages.install")
+	e.Service = "pypi"
 	h.handlePackage(w, r, e, id)
 }
 func (h *Handler) handlePackage(w http.ResponseWriter, r *http.Request, e audit.Event, identity *gateway.ExecutionGrant) {
@@ -66,7 +63,7 @@ func (h *Handler) handlePackage(w http.ResponseWriter, r *http.Request, e audit.
 	packageClient.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
 		return http.ErrUseLastResponse
 	}
-	if err := budget.FromContext(r.Context()).SpendRequest(); err != nil {
+	if err := budget.FromContext(r.Context()).SpendRequest(r.Context()); err != nil {
 		h.deny(w, e, http.StatusTooManyRequests, err.Error())
 		return
 	}

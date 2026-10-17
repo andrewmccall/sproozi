@@ -25,7 +25,7 @@ import (
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 	k8sresources "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
-	placement "github.com/andrewmccall/sproozi/internal/runtime/kubernetes/session"
+	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
 )
 
 // ensureSandbox creates the Sandbox Pod if not yet provisioned and stores its name
@@ -35,7 +35,7 @@ func (r *AgentRunReconciler) ensureSandbox(
 	ctx context.Context,
 	run *sprooziv1alpha1.AgentRun,
 	rt *sprooziv1alpha1.AgentRuntime,
-	binding *placement.Record,
+	binding *registry.Record,
 ) (string, error) {
 	if run.Status.Identity.SandboxName != "" {
 		return run.Status.Identity.SandboxName, nil
@@ -105,27 +105,4 @@ func (r *AgentRunReconciler) processSandboxExit(
 	logger.Info("Sandbox container exited successfully", "name", run.Name)
 	_, err := r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseSucceeded, "ExecutionSucceeded", "")
 	return ctrl.Result{}, err
-}
-
-// revokeSandbox deletes the Sandbox Pod if SandboxName is set.
-// Called at the start of handleTerminal before identity revocation.
-// Safe to call with a nil SandboxClient or empty SandboxName.
-func (r *AgentRunReconciler) revokeSandbox(ctx context.Context, run *sprooziv1alpha1.AgentRun) error {
-	if r.SandboxClient == nil || run.Status.Identity.SandboxName == "" {
-		return nil
-	}
-	return r.SandboxClient.Delete(ctx, run.Status.Identity.SandboxName)
-}
-
-// sandboxPhaseToRunPhase maps an abnormal Sandbox status to the appropriate
-// AgentRunPhase transition. Returns ("", "") if no transition is needed.
-func sandboxPhaseToRunPhase(status k8sresources.SandboxStatus) (sprooziv1alpha1.AgentRunPhase, string) {
-	switch status {
-	case k8sresources.SandboxStatusFailed:
-		return sprooziv1alpha1.AgentRunPhaseFailed, "SandboxFailed"
-	case k8sresources.SandboxStatusAbsent:
-		return sprooziv1alpha1.AgentRunPhaseFailed, "SandboxGone"
-	default:
-		return "", ""
-	}
 }

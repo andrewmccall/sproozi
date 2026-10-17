@@ -20,6 +20,7 @@ import (
 	"context"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"reflect"
 	"slices"
@@ -62,9 +63,19 @@ const (
 	SandboxStatusUnknown SandboxStatus = "Unknown"
 )
 
+// ErrInvalidRuntime marks an AgentRuntime that cannot launch a sandbox until an
+// operator fixes it. Other ValidateRuntime errors are transient.
+var ErrInvalidRuntime = errors.New("cannot launch a sandbox")
+
 // SandboxClient abstracts Sandbox Pod lifecycle operations for unit-testable reconciliation.
 type SandboxClient interface {
+	// ValidateRuntime checks that rt can launch a sandbox. Run admission calls
+	// it so an unlaunchable runtime fails the run before it takes the active
+	// slot. Errors wrapping ErrInvalidRuntime are permanent.
+	ValidateRuntime(ctx context.Context, rt *sprooziv1alpha1.AgentRuntime) error
+
 	// Ensure creates the Sandbox Pod if it does not already exist. Idempotent.
+	// rt must already have passed ValidateRuntime.
 	// Returns the sandbox name (always RunName(run.UID)).
 	Ensure(ctx context.Context, run *sprooziv1alpha1.AgentRun, rt *sprooziv1alpha1.AgentRuntime) (string, error)
 
@@ -76,8 +87,9 @@ type SandboxClient interface {
 	// UID-owned Pod read. Only valid when the agent container has terminated.
 	GetCompletion(ctx context.Context, name, runUID string) (SandboxCompletion, error)
 
-	// Delete removes the named Sandbox from AgentsNamespace. NotFound is success.
-	Delete(ctx context.Context, name string) error
+	// DeleteForRun removes the named Sandbox only while it still belongs to
+	// runUID. NotFound is success.
+	DeleteForRun(ctx context.Context, name, runUID string) error
 }
 
 // SandboxCompletion is one terminal container observation. Result may be nil
@@ -90,21 +102,27 @@ type SandboxCompletion struct {
 // PodSandboxClient implements SandboxClient using a Kubernetes Pod.
 type PodSandboxClient struct {
 	c client.Client
+	// live reads the API server directly. Absent ends a run, so GetStatus
+	// confirms a cached NotFound with it: the cache can lag a Pod just created.
+	live client.Reader
 }
 
-// NewPodSandboxClient returns the Pod-backed execution adapter.
-func NewPodSandboxClient(c client.Client) *PodSandboxClient {
-	return &PodSandboxClient{c: c}
+// NewPodSandboxClient returns the Pod-backed execution adapter. live must read
+// the API server directly, not through the cache that backs c.
+func NewPodSandboxClient(c client.Client, live client.Reader) *PodSandboxClient {
+	return &PodSandboxClient{c: c, live: live}
+}
+
+// ValidateRuntime checks the Pod template and the trust bundle ConfigMap it mounts.
+func (p *PodSandboxClient) ValidateRuntime(ctx context.Context, rt *sprooziv1alpha1.AgentRuntime) error {
+	if err := rt.Spec.ValidateRuntimeTemplate(); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidRuntime, err)
+	}
+	return validateRuntimeTrustBundle(ctx, p.c, rt)
 }
 
 // Ensure creates the Sandbox Pod if it does not already exist. Idempotent.
 func (p *PodSandboxClient) Ensure(ctx context.Context, run *sprooziv1alpha1.AgentRun, rt *sprooziv1alpha1.AgentRuntime) (string, error) {
-	if err := rt.Spec.ValidateRuntimeTemplate(); err != nil {
-		return "", fmt.Errorf("validate runtime template: %w", err)
-	}
-	if err := validateRuntimeTrustBundle(ctx, p.c, rt); err != nil {
-		return "", err
-	}
 	saName := run.Status.Identity.ServiceAccountName
 	pod := BuildPodSpec(run, rt, saName)
 	return p.ensurePod(ctx, pod)
@@ -166,7 +184,12 @@ func validateExistingSandbox(existing, wanted *corev1.Pod) error {
 // GetStatus returns the current lifecycle status of the named Sandbox.
 func (p *PodSandboxClient) GetStatus(ctx context.Context, name string) (SandboxStatus, error) {
 	var pod corev1.Pod
-	if err := p.c.Get(ctx, client.ObjectKey{Namespace: AgentsNamespace, Name: name}, &pod); err != nil {
+	key := client.ObjectKey{Namespace: AgentsNamespace, Name: name}
+	err := p.c.Get(ctx, key, &pod)
+	if apierrors.IsNotFound(err) {
+		err = p.live.Get(ctx, key, &pod)
+	}
+	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return SandboxStatusAbsent, nil
 		}
@@ -218,17 +241,6 @@ func (p *PodSandboxClient) GetCompletion(ctx context.Context, name, runUID strin
 		}
 	}
 	return SandboxCompletion{}, fmt.Errorf("agent container has not terminated")
-}
-
-// Delete removes the named Sandbox from AgentsNamespace. NotFound is success.
-func (p *PodSandboxClient) Delete(ctx context.Context, name string) error {
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: AgentsNamespace},
-	}
-	if err := p.c.Delete(ctx, pod); err != nil && !apierrors.IsNotFound(err) {
-		return err
-	}
-	return nil
 }
 
 // DeleteForRun removes a sandbox only when its immutable run identity still
@@ -381,34 +393,37 @@ func BuildPodSpec(run *sprooziv1alpha1.AgentRun, rt *sprooziv1alpha1.AgentRuntim
 func validateRuntimeTrustBundle(ctx context.Context, c client.Client, rt *sprooziv1alpha1.AgentRuntime) error {
 	reference := rt.Spec.ClientConfig.TrustBundleConfigMap
 	if reference.Name == "" || reference.Key == "" {
-		return fmt.Errorf("runtime client trust bundle reference is required")
+		return fmt.Errorf("%w: runtime client trust bundle reference is required", ErrInvalidRuntime)
 	}
 	var configMap corev1.ConfigMap
 	if err := c.Get(ctx, client.ObjectKey{Namespace: AgentsNamespace, Name: reference.Name}, &configMap); err != nil {
+		if apierrors.IsNotFound(err) {
+			return fmt.Errorf("%w: runtime trust bundle ConfigMap %s/%s not found", ErrInvalidRuntime, AgentsNamespace, reference.Name)
+		}
 		return fmt.Errorf("get runtime trust bundle: %w", err)
 	}
 	if configMap.Immutable == nil || !*configMap.Immutable {
-		return fmt.Errorf("runtime trust bundle ConfigMap must be immutable")
+		return fmt.Errorf("%w: runtime trust bundle ConfigMap must be immutable", ErrInvalidRuntime)
 	}
 	bundle, ok := configMap.Data[reference.Key]
 	if !ok || len(bundle) == 0 || len(bundle) > maxTrustBundleBytes {
-		return fmt.Errorf("runtime trust bundle is missing or exceeds %d bytes", maxTrustBundleBytes)
+		return fmt.Errorf("%w: runtime trust bundle is missing or exceeds %d bytes", ErrInvalidRuntime, maxTrustBundleBytes)
 	}
 	remaining := []byte(bundle)
 	certificates := 0
 	for len(bytes.TrimSpace(remaining)) > 0 {
 		block, rest := pem.Decode(remaining)
 		if block == nil || block.Type != "CERTIFICATE" || len(block.Headers) != 0 {
-			return fmt.Errorf("runtime trust bundle must contain only PEM certificates")
+			return fmt.Errorf("%w: runtime trust bundle must contain only PEM certificates", ErrInvalidRuntime)
 		}
 		if _, err := x509.ParseCertificate(block.Bytes); err != nil {
-			return fmt.Errorf("runtime trust bundle contains an invalid certificate: %w", err)
+			return fmt.Errorf("%w: runtime trust bundle contains an invalid certificate: %w", ErrInvalidRuntime, err)
 		}
 		certificates++
 		remaining = rest
 	}
 	if certificates == 0 {
-		return fmt.Errorf("runtime trust bundle must contain at least one certificate")
+		return fmt.Errorf("%w: runtime trust bundle must contain at least one certificate", ErrInvalidRuntime)
 	}
 	return nil
 }

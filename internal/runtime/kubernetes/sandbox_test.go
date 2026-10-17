@@ -22,6 +22,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"math/big"
 	"reflect"
 	"strings"
@@ -434,7 +435,7 @@ func TestEnsureSandboxCreates(t *testing.T) {
 	run := testRunForSandbox("cccccccc-0000-0000-0000-000000000008")
 	rt := testRuntime()
 
-	sc := kubernetes.NewPodSandboxClient(c) // nil logsFn; not called on create
+	sc := kubernetes.NewPodSandboxClient(c, c) // nil logsFn; not called on create
 	name, err := sc.Ensure(context.Background(), run, rt)
 	if err != nil {
 		t.Fatalf("Ensure error: %v", err)
@@ -454,7 +455,7 @@ func TestEnsureSandboxIdempotent(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(testTrustConfigMap(t)).Build()
 	run := testRunForSandbox("cccccccc-0000-0000-0000-000000000009")
 	rt := testRuntime()
-	sc := kubernetes.NewPodSandboxClient(c)
+	sc := kubernetes.NewPodSandboxClient(c, c)
 
 	if _, err := sc.Ensure(context.Background(), run, rt); err != nil {
 		t.Fatalf("first Ensure error: %v", err)
@@ -472,7 +473,7 @@ func TestEnsureSandboxRejectsPreexistingIdentityCollision(t *testing.T) {
 	collision.Spec.Containers[0].Image = "attacker.invalid/runner:latest"
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(testTrustConfigMap(t), collision).Build()
 
-	if _, err := kubernetes.NewPodSandboxClient(c).Ensure(context.Background(), run, rt); err == nil {
+	if _, err := kubernetes.NewPodSandboxClient(c, c).Ensure(context.Background(), run, rt); err == nil {
 		t.Fatal("Ensure accepted a preexisting Pod with a different image")
 	}
 }
@@ -485,7 +486,7 @@ func TestEnsureSandboxRejectsMismatchedRunLabels(t *testing.T) {
 	collision.Labels[kubernetes.RunUIDLabel] = "different-run-uid"
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(testTrustConfigMap(t), collision).Build()
 
-	if _, err := kubernetes.NewPodSandboxClient(c).Ensure(context.Background(), run, rt); err == nil {
+	if _, err := kubernetes.NewPodSandboxClient(c, c).Ensure(context.Background(), run, rt); err == nil {
 		t.Fatal("Ensure accepted a preexisting Pod with a different run UID")
 	}
 }
@@ -516,14 +517,23 @@ func TestEnsureSandboxRejectsMismatchedAdditionalContainers(t *testing.T) {
 			tc.mutate(collision)
 			c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(testTrustConfigMap(t), collision).Build()
 
-			if _, err := kubernetes.NewPodSandboxClient(c).Ensure(context.Background(), run, rt); err == nil {
+			if _, err := kubernetes.NewPodSandboxClient(c, c).Ensure(context.Background(), run, rt); err == nil {
 				t.Fatalf("Ensure accepted a preexisting Pod with an unexpected %s", tc.name)
 			}
 		})
 	}
 }
 
-func TestEnsureSandboxFailsClosedWithoutImmutableCertificateOnlyTrustBundle(t *testing.T) {
+func TestValidateRuntimeRejectsUnsafeTemplate(t *testing.T) {
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(testTrustConfigMap(t)).Build()
+	rt := testRuntime()
+	rt.Spec.PodTemplate.Spec.HostNetwork = true
+	if err := kubernetes.NewPodSandboxClient(c, c).ValidateRuntime(context.Background(), rt); !errors.Is(err, kubernetes.ErrInvalidRuntime) {
+		t.Fatalf("ValidateRuntime error = %v, want ErrInvalidRuntime", err)
+	}
+}
+
+func TestValidateRuntimeFailsClosedWithoutImmutableCertificateOnlyTrustBundle(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		configMap *corev1.ConfigMap
@@ -546,38 +556,33 @@ func TestEnsureSandboxFailsClosedWithoutImmutableCertificateOnlyTrustBundle(t *t
 				builder = builder.WithObjects(tc.configMap)
 			}
 			c := builder.Build()
-			run := testRunForSandbox("cccccccc-0000-0000-0000-000000000097")
-			_, err := kubernetes.NewPodSandboxClient(c).Ensure(context.Background(), run, testRuntime())
-			if err == nil {
-				t.Fatal("Ensure must reject unavailable, mutable, or non-certificate trust material")
-			}
-			var pod corev1.Pod
-			if getErr := c.Get(context.Background(), client.ObjectKey{Namespace: kubernetes.AgentsNamespace, Name: kubernetes.RunName(run.UID)}, &pod); getErr == nil {
-				t.Fatal("Ensure created a Pod after trust validation failed")
+			err := kubernetes.NewPodSandboxClient(c, c).ValidateRuntime(context.Background(), testRuntime())
+			if !errors.Is(err, kubernetes.ErrInvalidRuntime) {
+				t.Fatalf("ValidateRuntime error = %v, want ErrInvalidRuntime for unavailable, mutable, or non-certificate trust material", err)
 			}
 		})
 	}
 }
 
-// TestDeleteSandboxNotFoundIsOK verifies Delete on a missing Pod does not error.
+// TestDeleteSandboxNotFoundIsOK verifies DeleteForRun on a missing Pod does not error.
 func TestDeleteSandboxNotFoundIsOK(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).Build()
-	sc := kubernetes.NewPodSandboxClient(c)
-	if err := sc.Delete(context.Background(), "sproozi-nonexistent"); err != nil {
-		t.Errorf("Delete on missing Pod should not error: %v", err)
+	sc := kubernetes.NewPodSandboxClient(c, c)
+	if err := sc.DeleteForRun(context.Background(), "sproozi-nonexistent", "missing-run"); err != nil {
+		t.Errorf("DeleteForRun on missing Pod should not error: %v", err)
 	}
 }
 
-// TestDeleteSandboxDeletes verifies Delete removes the Pod.
+// TestDeleteSandboxDeletes verifies DeleteForRun removes the run's Pod.
 func TestDeleteSandboxDeletes(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(testTrustConfigMap(t)).Build()
 	run := testRunForSandbox("cccccccc-0000-0000-0000-000000000010")
 	rt := testRuntime()
-	sc := kubernetes.NewPodSandboxClient(c)
+	sc := kubernetes.NewPodSandboxClient(c, c)
 
 	name, _ := sc.Ensure(context.Background(), run, rt)
-	if err := sc.Delete(context.Background(), name); err != nil {
-		t.Fatalf("Delete error: %v", err)
+	if err := sc.DeleteForRun(context.Background(), name, string(run.UID)); err != nil {
+		t.Fatalf("DeleteForRun error: %v", err)
 	}
 
 	var pod corev1.Pod
@@ -591,7 +596,7 @@ func TestGetStatusRunning(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithStatusSubresource(&corev1.Pod{}).WithObjects(testTrustConfigMap(t)).Build()
 	run := testRunForSandbox("cccccccc-0000-0000-0000-000000000011")
 	rt := testRuntime()
-	sc := kubernetes.NewPodSandboxClient(c)
+	sc := kubernetes.NewPodSandboxClient(c, c)
 
 	name, _ := sc.Ensure(context.Background(), run, rt)
 
@@ -613,7 +618,7 @@ func TestGetStatusRunning(t *testing.T) {
 // TestGetStatusAbsentWhenNotFound verifies GetStatus returns Absent for missing Pod.
 func TestGetStatusAbsentWhenNotFound(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).Build()
-	sc := kubernetes.NewPodSandboxClient(c)
+	sc := kubernetes.NewPodSandboxClient(c, c)
 
 	status, err := sc.GetStatus(context.Background(), "sproozi-doesnotexist")
 	if err != nil {
@@ -629,7 +634,7 @@ func TestGetCompletion(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithStatusSubresource(&corev1.Pod{}).WithObjects(testTrustConfigMap(t)).Build()
 	run := testRunForSandbox("cccccccc-0000-0000-0000-000000000020")
 	rt := testRuntime()
-	sc := kubernetes.NewPodSandboxClient(c)
+	sc := kubernetes.NewPodSandboxClient(c, c)
 
 	name, _ := sc.Ensure(context.Background(), run, rt)
 
@@ -699,9 +704,24 @@ func TestGetStatusUnknownForExistingUncertainPod(t *testing.T) {
 	for _, phase := range []corev1.PodPhase{"", corev1.PodUnknown} {
 		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "uncertain", Namespace: kubernetes.AgentsNamespace}, Status: corev1.PodStatus{Phase: phase}}
 		c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(pod).Build()
-		status, err := kubernetes.NewPodSandboxClient(c).GetStatus(context.Background(), pod.Name)
+		status, err := kubernetes.NewPodSandboxClient(c, c).GetStatus(context.Background(), pod.Name)
 		if err != nil || status != kubernetes.SandboxStatusUnknown {
 			t.Fatalf("existing phase %q = (%s,%v)", phase, status, err)
 		}
+	}
+}
+
+func TestGetStatusConfirmsCachedAbsenceWithLiveRead(t *testing.T) {
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "just-created", Namespace: kubernetes.AgentsNamespace}, Status: corev1.PodStatus{Phase: corev1.PodPending}}
+	cache := fake.NewClientBuilder().WithScheme(testScheme(t)).Build()
+	live := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(pod).Build()
+	// A cache that has not yet observed the Pod must not end the run.
+	status, err := kubernetes.NewPodSandboxClient(cache, live).GetStatus(context.Background(), pod.Name)
+	if err != nil || status != kubernetes.SandboxStatusPending {
+		t.Fatalf("lagging cache = (%s,%v); want Pending", status, err)
+	}
+	status, err = kubernetes.NewPodSandboxClient(cache, cache).GetStatus(context.Background(), pod.Name)
+	if err != nil || status != kubernetes.SandboxStatusAbsent {
+		t.Fatalf("confirmed absence = (%s,%v); want Absent", status, err)
 	}
 }
