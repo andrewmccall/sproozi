@@ -1,8 +1,9 @@
 # Capabilities and gateways
 
-A run requests capabilities. Policy decides which requests are allowed and sets
-their limits. The gateway checks each service operation against the run and
-current policy. Provider credentials stay in the gateway.
+A run requests [capabilities](../../GLOSSARY.md#capability). Policy decides
+which requests are allowed and sets their limits. The
+[gateway](../../GLOSSARY.md#gateway) checks each service operation against the
+run and current policy. Provider credentials stay in the gateway.
 
 Read [core concepts](core-concepts.md) for an introduction to runs, templates,
 runtimes and policies. This page explains how their permission checks combine.

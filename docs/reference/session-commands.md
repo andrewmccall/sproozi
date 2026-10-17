@@ -10,7 +10,7 @@ These commands require administrator configuration, approved images and prepared
 execution environments. Building the CLI does not install a cluster or start an
 agent.
 
-A Sproozi session tracks the native conversation across executions. Each
+A [session](../../GLOSSARY.md#session) tracks the native conversation across executions. Each
 execution needs separate approval and has its own deadline and usage allowance.
 Each [visit](../../GLOSSARY.md#visit) to a placement gets a new allocation
 and backend resource identity. Knowing a session or conversation ID doesn't give

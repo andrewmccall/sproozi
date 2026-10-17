@@ -6,16 +6,16 @@ Provider credentials stay in the gateway.
 
 This guide has two parts:
 
-1. **Check your setup, no accounts needed.** Build Sproozi, deploy it to a
-   throwaway Kind cluster and prove that its network enforcement works. This
-   takes one command once your tools are installed.
-2. **Run the investigation-to-PR demo.** Codex investigates a broken workload
-   and opens a pull request in your own disposable GitHub repository. This needs
-   a model account and a GitHub App.
+1. **Check your setup, no accounts needed** (steps 1 and 2). Build Sproozi,
+   deploy it to a throwaway Kind cluster and prove that its network enforcement
+   works.
+2. **Run the investigation-to-PR demo** (steps 3 to 8). Codex investigates a
+   broken workload and opens a pull request in your own disposable GitHub
+   repository. This needs a model account and a GitHub App.
 
 Already have a cluster? [Install on Kubernetes](install-kubernetes.md) instead.
-Its first agent Pod lists other Pods through the gateway and also needs no model
-account or GitHub App.
+Its first agent Pod lists other Pods through the gateway. It needs an image
+registry, but no model account or GitHub App.
 
 Sproozi is a preview. Start in an evaluation environment and read the
 [deployment limitations](../reference/security-hardening.md) before using it for

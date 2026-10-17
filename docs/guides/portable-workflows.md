@@ -11,7 +11,7 @@ The workflow has four steps:
 3. Pull the stopped session to your local installation.
 4. Resume the same conversation with current local permissions.
 
-Pull does not start an agent. Resume starts a new Sproozi execution with a new
+Pull does not start an agent. Resume starts a new execution with a new
 deadline and allowance. See [core concepts](../explanations/core-concepts.md)
 for the difference between a session and an execution.
 
