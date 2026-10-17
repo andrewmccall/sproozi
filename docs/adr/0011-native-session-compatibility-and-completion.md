@@ -175,7 +175,7 @@ and reliable completion under the managed terminal protocol.
 
 Implementation lives in [native kind selection](../../internal/harness/native_kind.go),
 [trusted launch](../../internal/harness/native_launch.go),
-[checkpoint transfer](../../internal/checkpoint/codex.go),
+[checkpoint transfer](../../internal/checkpoint/artifact.go),
 [Claude state validation](../../internal/harness/claude_state.go),
 [native supervisor](../../cmd/native-session/main.go),
 [Claude lifecycle observation](../../cmd/native-session/claude.go) and
