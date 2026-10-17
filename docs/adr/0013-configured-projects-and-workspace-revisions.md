@@ -1,4 +1,4 @@
-# Configured Projects and exact workspace revisions
+# 0013: Configured Projects and exact workspace revisions
 
 Status: accepted
 Date: 2026-10-13

@@ -1,6 +1,7 @@
 # 0014: Bound shared gateways and unify trusted native contracts
 
-Status: accepted, 15 October 2026.
+Status: accepted
+Date: 2026-10-15
 
 ## Context and constraints
 

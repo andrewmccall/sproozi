@@ -3,6 +3,8 @@
 Status: accepted
 Date: 2026-10-08
 
+Partly superseded: [ADR 0015](0015-default-clients-and-native-tool-schemas.md) replaces pinned native client versions. The verification record below describes the clients pinned at the time. Other decisions in this record remain in effect.
+
 ## Problem and constraints
 
 A persistent assistant must accept tasks and routines, delegate bounded work,
