@@ -118,15 +118,18 @@ verify-harness-process: ## Run stock Claude Code and OpenCode through the TLS ga
 
 .PHONY: verify-mcp-kind
 verify-mcp-kind: ## Prove configured providers with stock Codex in owned Kind; requires pinned images, CNI and a single-owner model session.
-	bash hack/verify/mcp-kind.sh
+	KIND_NODE_IMAGE='$(KIND_NODE_IMAGE)' bash hack/verify/mcp-kind.sh
 
 .PHONY: verify-workflow-fixtures
 verify-workflow-fixtures: ## Check deterministic native workflow protocol fixtures, including genuine tool-result and yielded-cell handling.
 	python3 -m unittest discover -s hack/verify/session-mobility -p '*_test.py'
+	python3 hack/verify/quickstart_test.py
+	bash hack/verify/kind-test.sh
+	bash hack/demo/setup-test.sh
 
 .PHONY: verify-protocol
 verify-protocol: protocol-tools ## Run pinned-client offline fixtures and protocol package tests without silently accepting zero tests.
-	export PATH="$(abspath $(LOCALBIN)/protocol):$$PATH"; cache_dir="$$(mktemp -d)" && SPROOZI_PROTOCOL_FIXTURE=1 GOCACHE="$$cache_dir" hack/verify/go-test-required.sh ./internal/endpoints/github '^(TestPinnedGitReceivePackProtocolFixture|TestPinnedGHPRCreateStartsWithGraphQL|TestPinnedGHAPICreatesPRUsingBoundedREST|TestInspectReceivePack.*|TestParsePushCommands.*|TestGraphQL.*|TestPackage.*)$$' && GOCACHE="$$cache_dir" go test ./internal/endpoints/packages ./internal/budget ./internal/endpoints/destination ./internal/gateway ./internal/endpoints/model ./internal/proxytransport -count=1
+	export PATH="$(abspath $(LOCALBIN)/protocol):$$PATH"; SPROOZI_PROTOCOL_FIXTURE=1 hack/verify/go-test-required.sh ./internal/endpoints/github '^(TestPinnedGitReceivePackProtocolFixture|TestPinnedGHPRCreateStartsWithGraphQL|TestPinnedGHAPICreatesPRUsingBoundedREST|TestInspectReceivePack.*|TestParsePushCommands.*|TestGraphQL.*|TestPackage.*)$$'
 
 .PHONY: protocol-tools
 protocol-tools: $(LOCALBIN) ## Install the checksum-pinned gh client used by the protocol fixtures.
@@ -153,13 +156,8 @@ demo: demo-check ## Build/load, deploy, and start the manual AgentRun demo on Ki
 	cluster='$(KIND_CLUSTER)'; \
 	mkdir -p '$(CURDIR)/.local/demo'; \
 	kubeconfig='$(CURDIR)/.local/demo/'"$$cluster"'.kubeconfig'; \
-	case "$$($(KIND) get clusters 2>/dev/null)" in *"$$cluster"*) echo "Cluster $$cluster already exists; choose a new KIND_CLUSTER or delete the disposable cluster" >&2; exit 1 ;; esac; \
-	$(KIND) create cluster --name "$$cluster" --config hack/kind-cluster.yaml --image '$(KIND_NODE_IMAGE)' --kubeconfig "$$kubeconfig"; \
-	chmod 600 "$$kubeconfig"; \
+	KIND='$(KIND)' KUBECTL='$(KUBECTL)' KIND_NODE_IMAGE='$(KIND_NODE_IMAGE)' bash hack/kind-up.sh "$$cluster" "$$kubeconfig"; \
 	export KUBECONFIG="$$kubeconfig"; \
-	$(KUBECTL) apply --filename "$$SPROOZI_CNI_MANIFEST"; \
-	$(KUBECTL) wait --namespace kube-system --for=create pods --selector "$$SPROOZI_CNI_SELECTOR" --timeout="$${SPROOZI_CNI_TIMEOUT:-180s}"; \
-	$(KUBECTL) wait --namespace kube-system --for=condition=Ready pods --selector "$$SPROOZI_CNI_SELECTOR" --timeout="$${SPROOZI_CNI_TIMEOUT:-180s}"; \
 	$(MAKE) docker-build IMG='$(IMG)'; \
 	$(CONTAINER_TOOL) pull "$$CODEX_IMAGE"; \
 	$(KIND) load docker-image '$(IMG)' --name "$$cluster"; \

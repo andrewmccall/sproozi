@@ -2,15 +2,15 @@
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/env.sh"
 demo_env_load
+source "$demo_repo_root/hack/kind-up.sh"
 : "${CODEX_IMAGE:?Run make demo-setup first}"
 : "${KIND_NODE_IMAGE:?Supply the pinned Kind node image}"
 cluster="sproozi-image-check-$(date -u +%Y%m%d%H%M%S)-$$"
 test_dir="$(mktemp -d)"
 kubeconfig="$test_dir/kubeconfig"
-created=0
 cleanup() {
   status=$?
-  if [[ "$created" == 1 ]]; then
+  if (( kind_cluster_created )); then
     if [[ "$status" != 0 && -f "$kubeconfig" ]]; then
       kubectl --kubeconfig "$kubeconfig" get pod sproozi-image-check -o wide || true
       kubectl --kubeconfig "$kubeconfig" describe pod sproozi-image-check || true
@@ -26,12 +26,9 @@ cleanup() {
   exit "$status"
 }
 trap cleanup EXIT
-kind get clusters | grep -Fxq "$cluster" && { echo 'Refusing cluster reuse' >&2; exit 1; }
 # No CNI is needed for this host-networked, explicitly node-bound tool check.
 # This does not demonstrate AgentRun execution or NetworkPolicy enforcement.
-created=1
-kind create cluster --name "$cluster" --config "$demo_repo_root/hack/kind-cluster.yaml" \
-  --image "$KIND_NODE_IMAGE" --kubeconfig "$kubeconfig"
+kind_up "$cluster" "$kubeconfig" --no-cni
 docker pull "$CODEX_IMAGE"
 bash "$demo_repo_root/hack/demo/load-image.sh" "$cluster"
 kubectl --kubeconfig "$kubeconfig" wait --for=create serviceaccount/default --timeout=30s
