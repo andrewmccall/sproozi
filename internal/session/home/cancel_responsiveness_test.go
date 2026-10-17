@@ -52,7 +52,7 @@ func TestCancelInterruptsDisconnectedInitialMove(t *testing.T) {
 			t.Fatal(err)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("forced cancellation did not interrupt the held initial move")
+		t.Fatal("forced cancellation did not interrupt the held first-visit move")
 	}
 	awaitHomeSignal(t, aborted)
 	status, err := s.Status(id)
@@ -125,7 +125,7 @@ func TestCancelIndependentInitialSessionWhileAnotherMoveIsHeld(t *testing.T) {
 	awaitHomeResult(t, cancelDone, false)
 	select {
 	case err := <-moveDone:
-		t.Fatalf("cancelling B interrupted A's graceful initial move: %v", err)
+		t.Fatalf("cancelling B interrupted A's graceful first-visit move: %v", err)
 	default:
 	}
 	status, err := s.Status(cancelledID)
