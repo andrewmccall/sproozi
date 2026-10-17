@@ -120,7 +120,8 @@ execution grant once, at that boundary. `Dispatcher` in
 `internal/gateway/dispatch.go` selects the `Route` for an exact authority. The
 route is the single source of the capability and enforcement tier. Before any
 handler runs, the dispatcher denies and audits a request whose run or current
-policy does not grant the route's capability. Handlers start audit events with
+policy does not grant the route's capability. Dispatcher denials use one JSON
+error body that Anthropic and OpenAI clients parse. Handlers start audit events with
 `gateway.AuditEvent`, which copies the route's capability and tier, and then
 check the operation itself. The MCP route has no fixed capability. Its handler
 selects the named capability from the validated gateway path and checks it with

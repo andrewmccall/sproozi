@@ -32,7 +32,8 @@ The route is the single authority for its capability and enforcement tier.
 `Dispatcher.ServeHTTP` stores the route in the request context. For a route with
 a fixed capability, it calls `ExecutionGrant.Permits` before selecting a meter
 or calling the handler. A request that the run or current policy does not grant
-receives 403. The dispatcher writes an audit event with the route's capability
+receives 403 with a JSON error naming the capability and what must grant it.
+The dispatcher writes an audit event with the route's capability
 and tier, and the handler never runs. The MCP handler calls the same `Permits`
 once it has selected the named capability. Handlers create audit events with
 `gateway.AuditEvent`, which copies the route's capability and tier, and set only
@@ -54,9 +55,12 @@ the revalidation interval.
 Deleting `Route.Tier` and documenting that handlers own the tier would remove a
 field. However, it would keep seven copies of the capability check, each of
 which could drift. Enforcing at the dispatcher puts the denial before any
-handler code. The cost is that this denial is a plain-text 403. Previously, the
-model handler returned an error in the provider's JSON format. Budget allocation
-denials at the dispatcher already used plain text.
+handler code. Because the dispatcher answers before any provider-specific
+handler, every dispatcher denial uses one JSON error body that both the
+Anthropic and OpenAI SDK families parse:
+`{"type":"error","error":{"type":"permission_error","message":"...","code":"capability_denied"}}`.
+The message names the missing capability and whether the run or the policy
+must grant it. Other services' clients receive the same body.
 
 Each revalidation makes four uncached GET requests for an ordinary run: the
 ServiceAccount, AgentRun, AgentTemplate and AgentPolicy. A managed execution

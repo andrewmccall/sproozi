@@ -89,9 +89,10 @@ func TestManagedDispatchDeniesMissingOrExhaustedAllocations(t *testing.T) {
 			r := httptest.NewRequest(http.MethodGet, "https://service.test/path", nil)
 			w := httptest.NewRecorder()
 			dispatch.ServeHTTP(w, r.WithContext(gateway.WithIdentity(r.Context(), grant)))
-			if w.Code != http.StatusForbidden || calls != 0 {
-				t.Fatalf("allocation denial: status=%d forwarded=%d", w.Code, calls)
+			if calls != 0 {
+				t.Fatalf("allocation denial forwarded %d requests", calls)
 			}
+			assertDenial(t, w, http.StatusForbidden, "permission_error", "allocation_denied", string(cap))
 		})
 	}
 }

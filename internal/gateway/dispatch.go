@@ -2,8 +2,10 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
@@ -38,12 +40,14 @@ func (d Dispatcher) Allows(authority string) bool {
 func (d Dispatcher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	identity, ok := IdentityFromContext(r.Context())
 	if !ok {
-		http.Error(w, "gateway identity required", http.StatusUnauthorized)
+		writeDenial(w, http.StatusUnauthorized, "authentication_error", "identity_required",
+			"gateway identity required; connect through the gateway proxy with the run's token")
 		return
 	}
 	route, ok := d[normalizeAuthority(r.Host)]
 	if !ok || route.Handler == nil {
-		http.Error(w, "gateway destination denied", http.StatusForbidden)
+		writeDenial(w, http.StatusForbidden, "permission_error", "destination_denied",
+			"destination "+r.Host+" is not enabled at this gateway")
 		return
 	}
 	ctx := context.WithValue(r.Context(), routeContextKey{}, route)
@@ -52,26 +56,52 @@ func (d Dispatcher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if route.Capability != "" {
 		capability := sprooziv1alpha1.CapabilityKind(route.Capability)
 		if !identity.Permits(capability) {
+			reason := "the run does not request capability " + route.Capability +
+				"; add it to the run's capabilities"
+			if slices.Contains(identity.Capabilities, capability) {
+				reason = "policy " + identity.Policy.Name + " does not allow capability " + route.Capability +
+					"; add it to the policy's allowedCapabilities"
+			}
 			if route.AuditLogger != nil {
 				event := AuditEvent(ctx, route.Capability)
-				event.DenyReason = "capability not granted"
+				event.DenyReason = reason
 				route.AuditLogger.Log(event)
 			}
-			http.Error(w, route.Capability+" capability not granted", http.StatusForbidden)
+			writeDenial(w, http.StatusForbidden, "permission_error", "capability_denied", reason)
 			return
 		}
 		meter, err := identity.Meter(route.Budgets, capability)
+		if errors.Is(err, ErrBudgetUnavailable) {
+			writeDenial(w, http.StatusServiceUnavailable, "api_error", "budget_unavailable",
+				"budget accounting for "+route.Capability+" is unavailable; retry later")
+			return
+		}
 		if err != nil {
-			status := http.StatusForbidden
-			if errors.Is(err, ErrBudgetUnavailable) {
-				status = http.StatusServiceUnavailable
-			}
-			http.Error(w, "budget allocation denied or unavailable", status)
+			writeDenial(w, http.StatusForbidden, "permission_error", "allocation_denied",
+				"the "+route.Capability+" allocation for this run is missing or exhausted")
 			return
 		}
 		ctx = budget.WithMeter(ctx, meter)
 	}
 	route.Handler.ServeHTTP(w, r.WithContext(ctx))
+}
+
+// writeDenial writes the one error body that both the Anthropic and OpenAI
+// SDK families parse, so a gateway denial reaches the agent as a readable error.
+func writeDenial(w http.ResponseWriter, status int, errorType, code, message string) {
+	var body struct {
+		Type  string `json:"type"`
+		Error struct {
+			Type    string `json:"type"`
+			Message string `json:"message"`
+			Code    string `json:"code"`
+		} `json:"error"`
+	}
+	body.Type, body.Error.Type, body.Error.Message, body.Error.Code = "error", errorType, message, code
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(body)
 }
 
 func normalizeAuthority(authority string) string {
