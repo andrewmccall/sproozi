@@ -87,12 +87,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleHTTP(w http.ResponseWriter, r *http.Request, e audit.Event, dests []Destination) {
-	defaultPort := "80"
-	if r.URL.Scheme == httpsScheme {
-		defaultPort = "443"
-	}
-
-	host, port, err := parseAuthority(r.URL.Host, defaultPort)
+	host, port, err := parseAuthority(r.URL.Host, "443")
 	if err != nil {
 		h.deny(w, e, http.StatusBadRequest, err.Error())
 		return

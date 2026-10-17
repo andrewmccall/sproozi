@@ -117,7 +117,7 @@ func TestGatewayProxyTokenModes(t *testing.T) {
 				}
 				return identity, nil
 			}, Revalidate: func(context.Context, *gateway.ExecutionGrant) error { return nil }, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				got = Identity(r.Context())
+				got, _ = gateway.IdentityFromContext(r.Context())
 				if r.Header.Get("Authorization") != "" || r.Header.Get(proxyAuthorizationHeader) != "" || r.Header.Get("Cookie") != "" {
 					t.Error("proxy credentials reached semantic handler")
 				}

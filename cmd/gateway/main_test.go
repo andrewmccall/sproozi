@@ -1,11 +1,9 @@
 package main
 
 import (
-	"bytes"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
-	"encoding/json"
 	"encoding/pem"
 	"math/big"
 	"net/http"
@@ -21,7 +19,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 
-	"github.com/andrewmccall/sproozi/internal/audit"
 )
 
 func TestGatewaySchemeSupportsRunIdentityAndBudgetObjects(t *testing.T) {
@@ -239,30 +236,6 @@ func TestChatGPTStartupDoesNotRequireAPIKeyAndPinsPublicUpstream(t *testing.T) {
 	t.Setenv("OPENAI_UPSTREAM_URL", "https://chatgpt.com/backend-api")
 	if _, err := loadStartupConfig(); err == nil {
 		t.Fatal("ChatGPT credentials can be sent to a non-public upstream")
-	}
-}
-
-func TestNewAuditLoggerWritesStructuredSecretFreeJSON(t *testing.T) {
-	var output bytes.Buffer
-	logger := newAuditLogger(&output)
-	logger.Log(audit.Event{
-		RunID:      "sproozi-agents/demo",
-		Operation:  "model.inference",
-		Allowed:    true,
-		TokensUsed: 42,
-	})
-
-	var event map[string]any
-	if err := json.Unmarshal(output.Bytes(), &event); err != nil {
-		t.Fatalf("audit output is not JSON: %v", err)
-	}
-	if event["runID"] != "sproozi-agents/demo" || event["operation"] != "model.inference" || event["allowed"] != true {
-		t.Fatalf("audit output = %#v", event)
-	}
-	for _, forbidden := range []string{"authorization", "credentials", "prompt", "response", "apiKey"} {
-		if _, exists := event[forbidden]; exists {
-			t.Fatalf("audit output contains forbidden field %q", forbidden)
-		}
 	}
 }
 

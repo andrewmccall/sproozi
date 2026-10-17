@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"net/http"
@@ -133,7 +132,7 @@ func loadStartupConfig() (*startupConfig, error) {
 		if err != nil {
 			return nil, err
 		}
-		privateKey, err = os.ReadFile(requiredEnvValue("GITHUB_APP_PRIVATE_KEY_PATH"))
+		privateKey, err = os.ReadFile(os.Getenv("GITHUB_APP_PRIVATE_KEY_PATH"))
 		if err != nil {
 			return nil, fmt.Errorf("read GitHub App private key: %w", err)
 		}
@@ -259,8 +258,6 @@ func positiveEnvInteger(key string) (int64, error) {
 	return value, nil
 }
 
-func requiredEnvValue(key string) string { return os.Getenv(key) }
-
 func composeDispatcher(
 	cfg *startupConfig, handlers map[sprooziv1alpha1.CapabilityKind]http.Handler,
 	mcpHandler http.Handler, anthropicHandler http.Handler,
@@ -338,7 +335,7 @@ func main() {
 	agentNamespace := envOrDefault("AGENT_NAMESPACE", "sproozi-agents")
 	authenticator := gatewaykubernetes.NewAuthenticator(clientset, "sproozi-gateway", runtimeClient, agentNamespace)
 	httpClient := &http.Client{Timeout: 120 * time.Second}
-	auditLogger := newAuditLogger(os.Stdout)
+	auditLogger := audit.NewLogger(os.Stdout)
 	// The shared gateway is the only component that receives Kubernetes API
 	// credentials. Build the upstream transport from its own in-cluster
 	// rest.Config so workload ServiceAccount tokens can never be forwarded to
@@ -447,10 +444,6 @@ func main() {
 	}
 	server := proxytransport.NewServer(":8443", cfg.listenerCert, transport)
 	log.Fatal(server.ServeTLS(transport.LimitListener(listener), "", ""))
-}
-
-func newAuditLogger(output io.Writer) audit.Writer {
-	return audit.NewLogger(output)
 }
 
 func envOrDefault(key, fallback string) string {

@@ -19,13 +19,6 @@ const (
 	proxyAuthorizationHeader = "Proxy-Authorization"
 )
 
-// Identity returns the authenticated, immutable session identity. Semantic handlers
-// must authorize their precise operation against live policy using this identity.
-func Identity(ctx context.Context) *gateway.ExecutionGrant {
-	identity, _ := gateway.IdentityFromContext(ctx)
-	return identity
-}
-
 type Config struct {
 	// Certificates maps exact DNS names (without port) to inspection certificates.
 	Certificates     map[string]tls.Certificate
