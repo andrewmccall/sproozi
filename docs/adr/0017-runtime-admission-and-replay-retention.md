@@ -35,6 +35,12 @@ failed ConfigMap read, are retried and do not fail the run.
 `Ensure` and `EnsureManaged` no longer repeat the check. Their only caller runs
 in the same reconcile, directly after `resolveAdmission`.
 
+The slot decision itself lists AgentRuns through the manager's API reader, not
+the informer cache. The cache can lag the reconciler's own admission write, and
+under load that let a second run be admitted. Reconciles are serialized, so a
+live list reflects every earlier decision. The cost is one uncached cluster-wide
+List per queued-run reconcile.
+
 The event receiver sweeps expired replay records once per replay window. It
 lists records by label in pages and deletes expired ones with UID and
 resource-version preconditions, so concurrent replicas do not conflict. A
