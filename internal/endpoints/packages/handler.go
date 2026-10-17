@@ -66,7 +66,7 @@ func (h *Handler) handlePackage(w http.ResponseWriter, r *http.Request, e audit.
 	packageClient.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
 		return http.ErrUseLastResponse
 	}
-	if err := budget.FromContext(r.Context()).SpendRequest(); err != nil {
+	if err := budget.FromContext(r.Context()).SpendRequest(r.Context()); err != nil {
 		h.deny(w, e, http.StatusTooManyRequests, err.Error())
 		return
 	}

@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"maps"
@@ -113,7 +114,7 @@ func tighter(policy, allocation int64) int64 {
 }
 
 // Meter selects the account and limits together for every capability entrypoint.
-func (g *ExecutionGrant) Meter(tracker *budget.Tracker, cap api.CapabilityKind) (*budget.Meter, error) {
+func (g *ExecutionGrant) Meter(ctx context.Context, tracker *budget.Tracker, cap api.CapabilityKind) (*budget.Meter, error) {
 	limits, configured, err := g.BudgetLimits(cap)
 	if err != nil || !configured {
 		return nil, err
@@ -123,7 +124,7 @@ func (g *ExecutionGrant) Meter(tracker *budget.Tracker, cap api.CapabilityKind) 
 	}
 	if g.Managed {
 		meter := tracker.InitializedMeter(g.Allocations[cap].AccountKey, limits)
-		if _, err := meter.State(); err != nil {
+		if _, err := meter.State(ctx); err != nil {
 			return nil, err
 		}
 		return meter, nil

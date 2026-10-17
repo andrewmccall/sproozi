@@ -30,7 +30,7 @@ func observedLedgerState(t *testing.T, ledger budget.Ledger, ctx context.Context
 
 func observedMeterState(t *testing.T, meter *budget.Meter) budget.State {
 	t.Helper()
-	state, err := meter.State()
+	state, err := meter.State(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,14 +45,14 @@ func TestBudgetReserveCountsInFlightCapacity(t *testing.T) {
 	bt := budget.NewTracker()
 	limits := testBudget(100)
 
-	first, err := bt.Reserve("run-reserve", limits, 60, 0)
+	first, err := bt.Meter("run-reserve", limits).Reserve(t.Context(), 60, 0)
 	if err != nil {
 		t.Fatalf("first reservation failed: %v", err)
 	}
 	if got := observedState(t, bt, "run-reserve").ReservedUnits; got != 60 {
 		t.Fatalf("ReservedUnits = %d, want 60", got)
 	}
-	if _, err := bt.Reserve("run-reserve", limits, 60, 0); err == nil {
+	if _, err := bt.Meter("run-reserve", limits).Reserve(t.Context(), 60, 0); err == nil {
 		t.Fatal("second reservation unexpectedly succeeded despite insufficient remaining capacity")
 	}
 	if err := first.Settle(40, 0); err != nil {
@@ -73,7 +73,7 @@ func TestBudgetConcurrentReservationsAreAtomic(t *testing.T) {
 	reservations := make([]*budget.Reservation, 0, calls)
 	for range calls {
 		wg.Go(func() {
-			reservation, err := bt.Reserve("run-concurrent", limits, 60, 0)
+			reservation, err := bt.Meter("run-concurrent", limits).Reserve(t.Context(), 60, 0)
 			if err != nil {
 				return
 			}
@@ -96,25 +96,25 @@ func TestBudgetConcurrentReservationsAreAtomic(t *testing.T) {
 
 func TestBudgetReservationReleaseAllowsRetry(t *testing.T) {
 	bt := budget.NewTracker()
-	reservation, err := bt.Reserve("run-release", testBudget(100), 100, 0)
+	reservation, err := bt.Meter("run-release", testBudget(100)).Reserve(t.Context(), 100, 0)
 	if err != nil {
 		t.Fatalf("reserve failed: %v", err)
 	}
 	if err := reservation.Release(); err != nil {
 		t.Fatalf("release failed: %v", err)
 	}
-	if _, err := bt.Reserve("run-release", testBudget(100), 100, 0); err != nil {
+	if _, err := bt.Meter("run-release", testBudget(100)).Reserve(t.Context(), 100, 0); err != nil {
 		t.Fatalf("retry reservation failed after release: %v", err)
 	}
 }
 
 func TestBudgetOldGenerationSettlementDoesNotOverwriteNewGeneration(t *testing.T) {
 	bt := budget.NewTracker()
-	old, err := bt.Reserve("run-generation", testBudget(100), 80, 0)
+	old, err := bt.Meter("run-generation", testBudget(100)).Reserve(t.Context(), 80, 0)
 	if err != nil {
 		t.Fatalf("old-generation reserve failed: %v", err)
 	}
-	new, err := bt.Reserve("run-generation", testBudget(100), 20, 0)
+	new, err := bt.Meter("run-generation", testBudget(100)).Reserve(t.Context(), 20, 0)
 	if err != nil {
 		t.Fatalf("new-generation reserve failed: %v", err)
 	}
@@ -132,21 +132,21 @@ func TestBudgetOldGenerationSettlementDoesNotOverwriteNewGeneration(t *testing.T
 
 func TestBudgetPolicyTighteningUsesCumulativeUsage(t *testing.T) {
 	bt := budget.NewTracker()
-	r, err := bt.Reserve("tighten", testBudget(100), 40, 0)
+	r, err := bt.Meter("tighten", testBudget(100)).Reserve(t.Context(), 40, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := r.Settle(40, 0); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := bt.Reserve("tighten", testBudget(50), 11, 0); err == nil {
+	if _, err := bt.Meter("tighten", testBudget(50)).Reserve(t.Context(), 11, 0); err == nil {
 		t.Fatal("expected tightened policy to reject usage beyond 50")
 	}
 }
 
 func TestBudgetOverSettlementFailsClosed(t *testing.T) {
 	bt := budget.NewTracker()
-	r, err := bt.Reserve("over", testBudget(100), 20, 0)
+	r, err := bt.Meter("over", testBudget(100)).Reserve(t.Context(), 20, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

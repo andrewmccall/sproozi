@@ -18,6 +18,7 @@ package model
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -240,7 +241,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// remaining capped capacity until trusted total usage is available.
 			estimate = 0
 		}
-		reservation, err = meter.Reserve(estimate, 0)
+		reservation, err = meter.Reserve(r.Context(), estimate, 0)
 	}
 	if err != nil {
 		h.deny(w, e, http.StatusTooManyRequests, err.Error(), "budget_error", "budget_exhausted")
@@ -391,7 +392,7 @@ func (h *Handler) writeProviderResponse(
 	w.WriteHeader(resp.StatusCode)
 	_, _ = w.Write(body)
 
-	h.auditModelSuccess(e, resp.StatusCode, tokensUsed, meter, limits)
+	h.auditModelSuccess(r.Context(), e, resp.StatusCode, tokensUsed, meter, limits)
 }
 
 func invalidTokenUsage(
@@ -519,8 +520,8 @@ func (h *Handler) providerCost(body []byte, usage responseUsage, anthropic anthr
 	return h.Config.Pricing.Cost(requestModel.Model, *usage.Usage.PromptTokens, cached, *usage.Usage.CompletionTokens)
 }
 
-func (h *Handler) auditModelSuccess(e audit.Event, upstreamStatus int, tokensUsed int64, meter *budget.Meter, limits sprooziv1alpha1.EndpointBudget) {
-	state, stateErr := meter.State()
+func (h *Handler) auditModelSuccess(ctx context.Context, e audit.Event, upstreamStatus int, tokensUsed int64, meter *budget.Meter, limits sprooziv1alpha1.EndpointBudget) {
+	state, stateErr := meter.State(ctx)
 	// 12. Emit success audit event.
 	e.Allowed = true
 	e.UpstreamStatus = upstreamStatus

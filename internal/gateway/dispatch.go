@@ -43,7 +43,7 @@ func (d Dispatcher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	// Named MCP routes select their capability after parsing the server name.
 	if route.Capability != "" {
-		meter, err := identity.Meter(route.Budgets, sprooziv1alpha1.CapabilityKind(route.Capability))
+		meter, err := identity.Meter(ctx, route.Budgets, sprooziv1alpha1.CapabilityKind(route.Capability))
 		if err != nil {
 			status := http.StatusForbidden
 			if errors.Is(err, ErrBudgetUnavailable) {
