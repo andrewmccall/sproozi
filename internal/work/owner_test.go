@@ -26,6 +26,7 @@ import (
 const fixtureResource = "exact-resource"
 const fixtureTask = "Fix the repository"
 const fixtureModel = "model.inference"
+const quietArg = "--quiet"
 const executorKubernetes = "kubernetes"
 const repositorySproozi = "sproozi"
 
@@ -171,7 +172,7 @@ func waitPhase(t *testing.T, o *Owner, id string, want Phase) View {
 
 func assertRemoteSubmissionReplay(t *testing.T, o *Owner, q Submit, v View) {
 	t.Helper()
-	if v.ExecutionID != v.ID || !canonicalID(v.AllocationID) || v.AllocationID == v.ExecutionID {
+	if v.ExecutionID != v.ID || !CanonicalID(v.AllocationID) || v.AllocationID == v.ExecutionID {
 		t.Fatalf("session, bounded execution and allocation identities differ: %+v", v)
 	}
 	again, e := o.Submit(t.Context(), q)
@@ -388,7 +389,7 @@ func TestCancellationObservesIncarnationAfterLostPreparationReply(t *testing.T) 
 	if retried, err := o.Cancel(t.Context(), v.ID, operation); err != nil || retried.Phase != phaseCancelled || p.aborts != 1 {
 		t.Fatalf("retried cancellation aborted again: %+v %v aborts=%d", retried, err, p.aborts)
 	}
-	if _, err := o.Cancel(t.Context(), v.ID, uuid.NewString()); outcomeCode(err) != profile.CodeConflict {
+	if _, err := o.Cancel(t.Context(), v.ID, uuid.NewString()); OutcomeCode(err) != profile.CodeConflict {
 		t.Fatalf("another cancellation operation accepted: %v", err)
 	}
 	r, err := o.read(v.ID)

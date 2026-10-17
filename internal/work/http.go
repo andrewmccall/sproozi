@@ -160,7 +160,7 @@ func (h *ownerHandler) serveJSON(w http.ResponseWriter, r *http.Request, action 
 		}
 	}
 	if e != nil {
-		code := outcomeCode(e)
+		code := OutcomeCode(e)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(outcomeStatus(code))
 		_ = json.NewEncoder(w).Encode(struct {

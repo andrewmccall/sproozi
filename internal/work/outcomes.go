@@ -15,7 +15,9 @@ func decodeInput(b []byte, v any) error {
 	return nil
 }
 
-func outcomeCode(err error) profile.Code {
+// OutcomeCode maps an owner error to its public code. Only semantic rejections
+// keep their own code; everything else is unavailable.
+func OutcomeCode(err error) profile.Code {
 	var rejection *profile.Rejection
 	if errors.As(err, &rejection) {
 		return rejection.Code
@@ -47,6 +49,6 @@ func outcomeStatus(code profile.Code) int {
 }
 
 func outcomeMessage(err error) string {
-	code := outcomeCode(err)
+	code := OutcomeCode(err)
 	return fmt.Sprintf("%s: %s", code, profile.OwnerOutcomeMessage(code))
 }

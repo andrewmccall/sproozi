@@ -12,7 +12,6 @@ import (
 	"io"
 	"maps"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -29,8 +28,6 @@ import (
 	"github.com/andrewmccall/sproozi/internal/workspace"
 	"github.com/google/uuid"
 )
-
-const quietArg = "--quiet"
 
 // Phase is a work session's retained lifecycle position, reported in View.
 type Phase string
@@ -170,7 +167,9 @@ type Owner struct {
 	closeError error
 }
 
-func canonicalID(s string) bool {
+// CanonicalID reports whether s is a non-nil UUID in canonical lowercase form,
+// the only spelling accepted for session and operation IDs.
+func CanonicalID(s string) bool {
 	u, e := uuid.Parse(s)
 	return e == nil && u != uuid.Nil && u.String() == s
 }
@@ -254,7 +253,7 @@ func private(path string, dir bool) error {
 func (o *Owner) path(id, suffix string) string { return filepath.Join(o.config.Directory, id+suffix) }
 func (o *Owner) read(id string) (record, error) {
 	var r record
-	if !canonicalID(id) {
+	if !CanonicalID(id) {
 		return r, &profile.Rejection{Code: profile.CodeInvalid}
 	}
 	p := o.path(id, ".json")
@@ -272,7 +271,7 @@ func (o *Owner) read(id string) (record, error) {
 		return r, err
 	}
 	intent, _ := json.Marshal(r.Intent)
-	if r.Version != 1 || o.sessionID(r.Intent.RequestID) != id || r.Launch.SessionID != id || r.IntentDigest != hash(intent) || r.Launch.Harness != o.config.Harness || r.Launch.Placement != o.config.Placement || r.Launch.InstructionDigest != o.config.InstructionDigest || !canonicalID(r.Launch.OperationID) || !canonicalID(r.Launch.AllocationID) {
+	if r.Version != 1 || o.sessionID(r.Intent.RequestID) != id || r.Launch.SessionID != id || r.IntentDigest != hash(intent) || r.Launch.Harness != o.config.Harness || r.Launch.Placement != o.config.Placement || r.Launch.InstructionDigest != o.config.InstructionDigest || !CanonicalID(r.Launch.OperationID) || !CanonicalID(r.Launch.AllocationID) {
 		return r, errors.New("work: retained owner binding changed")
 	}
 	if r.Association.Template != "" && r.Association.Template != o.config.TemplateName ||
@@ -326,7 +325,7 @@ func (o *Owner) Submit(ctx context.Context, q Submit) (View, error) {
 	if ctx.Err() != nil {
 		return View{}, ctx.Err()
 	}
-	if !canonicalID(q.RequestID) || strings.TrimSpace(q.Task) == "" || len(q.Task) > 16<<10 || !utf8.ValidString(q.Task) || strings.ContainsRune(q.Task, '\x00') {
+	if !CanonicalID(q.RequestID) || strings.TrimSpace(q.Task) == "" || len(q.Task) > 16<<10 || !utf8.ValidString(q.Task) || strings.ContainsRune(q.Task, '\x00') {
 		return View{}, &profile.Rejection{Code: profile.CodeInvalid}
 	}
 	if q.Harness != o.config.Harness {
@@ -340,31 +339,14 @@ func (o *Owner) Submit(ctx context.Context, q Submit) (View, error) {
 	b, _ := json.Marshal(q)
 	digest := hash(b)
 	// Submission replay is a metadata read, not a wait for the active native turn.
-	if current, readErr := o.read(id); readErr == nil {
-		if err := o.access(current); err != nil {
-			return View{}, err
-		}
-		if current.IntentDigest != digest {
-			return View{}, &profile.Rejection{Code: profile.CodeConflict}
-		}
-		return view(current), nil
-	} else if !os.IsNotExist(readErr) {
-		return View{}, readErr
+	// Check again under the lock before creating the session.
+	if v, replayed, err := o.replay(id, digest); replayed {
+		return v, err
 	}
 	unlock := o.jobs.Lock(id)
 	defer unlock()
-	r, err := o.read(id)
-	if err == nil {
-		if err = o.access(r); err != nil {
-			return View{}, err
-		}
-		if r.IntentDigest != digest {
-			return View{}, &profile.Rejection{Code: profile.CodeConflict}
-		}
-		return view(r), nil
-	}
-	if !os.IsNotExist(err) {
-		return View{}, err
+	if v, replayed, err := o.replay(id, digest); replayed {
+		return v, err
 	}
 	association, repository, allowances, err := o.resolve(q)
 	if err != nil {
@@ -382,7 +364,7 @@ func (o *Owner) Submit(ctx context.Context, q Submit) (View, error) {
 	if len(entries) > 1024 {
 		return View{}, &profile.Rejection{Code: profile.CodeUnavailable}
 	}
-	r = record{Version: 1, Intent: q, IntentDigest: digest, Association: association, RepositorySource: &repository,
+	r := record{Version: 1, Intent: q, IntentDigest: digest, Association: association, RepositorySource: &repository,
 		Phase: phasePending, Launch: session.Launch{Harness: q.Harness, SessionID: id, OperationID: q.RequestID,
 			AllocationID: uuid.NewString(), Epoch: 1, Placement: q.Executor, InstructionDigest: o.config.InstructionDigest,
 			Deadline: time.Now().Add(o.config.MaxDuration).UTC(), Allowances: allowances, Task: q.Task}}
@@ -391,6 +373,25 @@ func (o *Owner) Submit(ctx context.Context, q Submit) (View, error) {
 	}
 	o.dispatch(id)
 	return view(r), nil
+}
+
+// replay answers a repeated submission from its retained session. replayed is
+// false only when no session exists yet.
+func (o *Owner) replay(id, digest string) (View, bool, error) {
+	r, err := o.read(id)
+	if os.IsNotExist(err) {
+		return View{}, false, nil
+	}
+	if err == nil {
+		err = o.access(r)
+	}
+	if err == nil && r.IntentDigest != digest {
+		err = &profile.Rejection{Code: profile.CodeConflict}
+	}
+	if err != nil {
+		return View{}, true, err
+	}
+	return view(r), true, nil
 }
 func view(r record) View {
 	association := r.Association
@@ -536,19 +537,7 @@ func (o *Owner) input(ctx context.Context, r *record) ([]byte, error) {
 	if repo.Snapshot != "" {
 		b, err = workspace.Capture(ctx, repo.Snapshot, nil, o.config.MaxCheckpointBytes)
 	} else {
-		dir, e := os.MkdirTemp(o.config.Directory, ".seed-")
-		if e != nil {
-			return nil, e
-		}
-		defer func() { _ = os.RemoveAll(dir) }()
-		for _, args := range [][]string{{"init", quietArg, "--template=", dir}, {"-C", dir, "-c", "user.name=Sproozi", "-c", "user.email=bootstrap@sproozi.invalid", "commit", quietArg, "--allow-empty", "-m", "Initialize controlled workspace"}} {
-			cmd := exec.CommandContext(ctx, "git", args...)
-			cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + dir, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_TERMINAL_PROMPT=0"}
-			if out, e := cmd.CombinedOutput(); e != nil {
-				return nil, fmt.Errorf("work: seed repository: %w: %.1024s", e, out)
-			}
-		}
-		b, err = workspace.Capture(ctx, dir, nil, o.config.MaxCheckpointBytes)
+		b, err = workspace.Empty(ctx, o.config.Directory, o.config.MaxCheckpointBytes)
 		// The task is data for the native agent; credentials and scope remain at the gateway.
 		if repo.URL != "" {
 			r.Launch.Task = fmt.Sprintf("Work in the current controlled workspace. Fetch repository %s through the configured gateway and check out ref %q before performing this task. Do not copy host credentials.\n\n%s", repo.URL, repo.Ref, r.Intent.Task)
@@ -656,7 +645,7 @@ func (o *Owner) execute(ctx context.Context, r *record) error {
 // ValidateExport keeps transcript validation separate from trusted stop/seal evidence.
 func ValidateExport(e Export, max int64) error {
 	s := e.Stopped
-	if !canonicalID(e.ID) || s.Launch.SessionID != e.ID || e.Harness != s.Launch.Harness || !s.ActualStopped || s.Receipt == nil || s.Receipt.Incarnation != s.Incarnation || s.Receipt.Launch.ThreadID != s.Launch.ThreadID || len(s.Receipt.Usage) != len(s.Launch.Allowances) {
+	if !CanonicalID(e.ID) || s.Launch.SessionID != e.ID || e.Harness != s.Launch.Harness || !s.ActualStopped || s.Receipt == nil || s.Receipt.Incarnation != s.Incarnation || s.Receipt.Launch.ThreadID != s.Launch.ThreadID || len(s.Receipt.Usage) != len(s.Launch.Allowances) {
 		return &profile.Rejection{Code: profile.CodeUnavailable}
 	}
 	for cap, a := range s.Launch.Allowances {
@@ -702,7 +691,7 @@ func (o *Owner) Claim(ctx context.Context, id, operation, digest string) (Export
 	return o.export(ctx, id, operation, digest, true)
 }
 func (o *Owner) export(ctx context.Context, id, operation, digest string, claim bool) (Export, error) {
-	if !canonicalID(id) || !canonicalID(operation) {
+	if !CanonicalID(id) || !CanonicalID(operation) {
 		return Export{}, &profile.Rejection{Code: profile.CodeInvalid}
 	}
 	if ctx.Err() != nil {
@@ -800,7 +789,7 @@ func (o *Owner) Recover(ctx context.Context, id string) (View, error) {
 	return view(r), nil
 }
 func (o *Owner) Cancel(ctx context.Context, id, operation string) (View, error) {
-	if !canonicalID(operation) {
+	if !CanonicalID(operation) {
 		return View{}, &profile.Rejection{Code: profile.CodeInvalid}
 	}
 	r, e := o.read(id)

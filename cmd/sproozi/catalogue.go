@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"slices"
 	"strings"
 	"time"
@@ -119,14 +118,7 @@ func discoverSessions(ctx context.Context, q options) catalogue {
 		v := <-results
 		if v.err != nil {
 			v.availability.Availability = availabilityUnavailable
-			v.availability.Error = profile.CodeUnavailable
-			var remote *profile.RemoteError
-			var rejection *profile.Rejection
-			if errors.As(v.err, &remote) {
-				v.availability.Error = remote.Code
-			} else if errors.As(v.err, &rejection) {
-				v.availability.Error = rejection.Code
-			}
+			v.availability.Error = work.OutcomeCode(v.err)
 		} else {
 			out.Sessions = append(out.Sessions, v.rows...)
 		}

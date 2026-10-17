@@ -40,3 +40,17 @@ func TestRecordedRevisionProducesCleanFreshWorkspaceWithoutChangingSource(t *tes
 		t.Fatal("A short ambiguous revision selected a workspace")
 	}
 }
+
+func TestEmptyWorkspaceHasOneCleanCommit(t *testing.T) {
+	data, err := Empty(t.Context(), t.TempDir(), testLimit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), "seed")
+	if err = Restore(t.Context(), data, target, testLimit); err != nil {
+		t.Fatal(err)
+	}
+	if fixtureGit(t, target, "rev-list", "--count", "HEAD") != "1" || fixtureGit(t, target, "status", "--porcelain") != "" {
+		t.Fatal("Empty seed is not one clean commit")
+	}
+}

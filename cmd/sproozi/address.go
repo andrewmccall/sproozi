@@ -8,13 +8,9 @@ import (
 	"strings"
 
 	"github.com/andrewmccall/sproozi/internal/session/home"
+	"github.com/andrewmccall/sproozi/internal/work"
 	"github.com/google/uuid"
 )
-
-func canonicalUUID(id string) bool {
-	u, err := uuid.Parse(id)
-	return err == nil && u != uuid.Nil && u.String() == id
-}
 
 // validateOptions resolves supported command/target choices before reading
 // credentials or making a request. A selected remote owner never falls back home.
@@ -73,7 +69,7 @@ func validateOptions(action string, fs *flag.FlagSet, id, executor string) error
 	if err != nil {
 		return err
 	}
-	if id != "" && !canonicalUUID(id) {
+	if id != "" && !work.CanonicalID(id) {
 		return errors.New("canonical stable session UUID required")
 	}
 	if id == "" && action != actionRun && action != home.ActionSessions && action != home.ActionStart {
@@ -130,7 +126,7 @@ func (q *options) prepareAddress(fs *flag.FlagSet) error {
 	if q.action == home.ActionMove && q.destination == "" {
 		return errors.New("move requires --to configured-destination")
 	}
-	if q.operation != "" && !canonicalUUID(q.operation) {
+	if q.operation != "" && !work.CanonicalID(q.operation) {
 		return errors.New("canonical operation UUID required")
 	}
 	return nil
