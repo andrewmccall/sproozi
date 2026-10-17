@@ -51,14 +51,16 @@ Run the gates that match the change before declaring it done:
 | --- | --- |
 | `*_types.go` or kubebuilder markers | `make manifests generate`, then `make test` |
 | Any Go code | `make lint-fix`, `make test`, `make verify-fast` |
-| Controller, gateway, network policy or install manifests | also `make verify-kind` (alias `make test-e2e`; creates and removes its own Kind cluster) |
+| Controller, gateway, network policy or install manifests | also `make test-e2e` (creates and removes its own Kind cluster) |
 | Documentation | `make verify-docs` |
 | Release candidate | `make verify-release` |
 
-`make help` lists every target; `test/acceptance/README.md` defines the
-behaviours that tests must preserve, and `test/acceptance/running.md` explains
-the slower acceptance targets. Run cluster tests only in a dedicated Kind
-cluster, never against a real dev or prod context.
+`make help` lists every target, and
+[which command proves what](test/acceptance/running.md#which-command-proves-what)
+maps each one to what it checks, whether CI runs it and what it needs.
+`test/acceptance/README.md` defines the behaviours that tests must preserve.
+Run cluster tests only in a dedicated Kind cluster, never against a real dev or
+prod context.
 
 ## Documentation and decisions
 
