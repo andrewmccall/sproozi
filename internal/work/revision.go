@@ -1,11 +1,11 @@
 package work
 
 import (
-	"errors"
 	"os"
 
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
 	"github.com/andrewmccall/sproozi/internal/project"
+	"github.com/andrewmccall/sproozi/internal/session/profile"
 )
 
 // RevisionSource binds a fresh conversation to an immutable stopped workspace,
@@ -25,14 +25,14 @@ func (o *Owner) revisionSource(source RevisionSource, target project.Association
 		return nil, err
 	}
 	if r.Stopped == nil || r.Phase != phaseRetained && r.Phase != phaseHomeOwned && r.Phase != phaseExporting {
-		return nil, errors.New("work: a completed retained source workspace is required")
+		return nil, &profile.Rejection{Code: profile.CodeConflict}
 	}
 	association := view(r).Association
 	if association.Repository != target.Repository || association.RepositoryReference != target.RepositoryReference {
-		return nil, errors.New("work: source and target repository identities differ")
+		return nil, &profile.Rejection{Code: profile.CodeDenied}
 	}
 	if source.Digest == "" || source.Digest != r.Stopped.CheckpointDigest {
-		return nil, errors.New("work: select the exact recorded source checkpoint digest")
+		return nil, &profile.Rejection{Code: profile.CodeInvalid}
 	}
 	p := o.path(source.SessionID, ".checkpoint")
 	if err = private(p, false); err != nil {
@@ -51,7 +51,7 @@ func (o *Owner) revisionSource(source RevisionSource, target project.Association
 		return nil, err
 	}
 	if source.Revision == "" || source.Revision != meta.Workspace.Revision {
-		return nil, errors.New("work: select the exact full recorded workspace revision")
+		return nil, &profile.Rejection{Code: profile.CodeInvalid}
 	}
 	return data, nil
 }

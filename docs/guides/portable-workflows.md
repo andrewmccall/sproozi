@@ -170,11 +170,18 @@ bin/sproozi status SESSION_ID --config /private/sproozi/config.json --executor e
 ```
 
 Preserve the request UUID when retrying. Repeating identical intent returns the
-same session and execution; changed intent is rejected. The session ID outlives
+same session and execution; changed intent is rejected. Public `id` is the stable
+session operand; `executionId`, `allocationId` and `incarnation` separately describe
+the bounded execution, visit and exact writer. The session ID outlives
 the Pod. Status returns lifecycle and a bounded final answer labelled as untrusted
 workload output. `retained` requires compatible native completion, exact writer
 termination, complete sealed accounting and a stored checkpoint. An `unknown`
 status cannot be pulled or silently interpreted as stopped.
+
+`sessions` returns one labelled JSON catalogue. Check `executors` for unavailable
+owners and `truncated` for omitted results; a missing home daemon does not erase
+successful remote rows. The [command reference](../reference/session-commands.md)
+explains owner selection, JSON fields and safe error categories.
 
 For a known recoverable interruption, use `sproozi recover SESSION_ID --executor
 engineering --config FILE`. Cancel uses a separate stable `--operation UUID` and
@@ -215,7 +222,7 @@ bin/sproozi serve --config /private/sproozi/config.json
 # In another terminal:
 bin/sproozi pull SESSION_ID --config /private/sproozi/config.json \
   --from engineering --operation ORIGINAL_PULL_UUID
-bin/sproozi resume SESSION_ID --config /private/sproozi/config.json
+bin/sproozi resume SESSION_ID --executor docker --config /private/sproozi/config.json
 ```
 
 Pull stores the validated native/Git checkpoint inertly, then commits the remote
@@ -237,7 +244,8 @@ allowances and gateway identity come from current home approval. Earlier receipt
 remain unchanged. `--detach` starts without attaching; `attach --socket PATH
 --id SESSION_ID` reconnects, and Ctrl-] detaches without stopping work.
 
-After reviewing and changing the work, use `sproozi stop SESSION_ID --config FILE`
+After reviewing and changing the work, use
+`sproozi stop SESSION_ID --executor docker --config FILE`
 to wait for the current foreground turn/tools, fence the writer, seal usage and
 retain the new checkpoint. It does not launch a destination. Later resume starts
 another independently authorized execution. Use the existing `move` command for
@@ -252,11 +260,20 @@ For GitHub publication, create a branch for the current execution:
 ```sh
 git switch -c "sproozi/$SPROOZI_EXECUTION_UID/review"
 git push -u origin HEAD
-gh pr create --base APPROVED_BASE_BRANCH
 ```
 
 The old branch can remain in local history, but its name is not authority to
-overwrite another execution's published branch. Confirm the exact changes and
+overwrite another execution's published branch. The pinned gh client's
+`gh pr create` uses unsupported GraphQL fragments and is denied by the current
+bounded gateway contract. Publish through its supported REST operation instead:
+
+```sh
+gh api --method POST repos/OWNER/REPO/pulls \
+  -f title='Describe the reviewed change' -f head="$(git branch --show-current)" \
+  -f base=APPROVED_BASE_BRANCH -f body='Describe the change and completed checks'
+```
+
+Confirm the exact changes and
 checks before publishing. A successful infrastructure task is not evidence that
 its proposed fix is correct or merged.
 

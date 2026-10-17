@@ -58,12 +58,12 @@ func TestTaskContractRejectsUnsupportedAndUnboundedInput(t *testing.T) {
 		Env: []string{testPathEnvironment}, RolloutMaxBytes: 8192}
 	for _, task := range []string{" ", "task\x00other", strings.Repeat("x", (32<<10)+1)} {
 		c.Task = task
-		if validateConfig(c) == nil {
+		if c.Validate(time.Now()) == nil {
 			t.Fatal("invalid task accepted")
 		}
 	}
 	c.Task, c.Harness = "Task", harness.NativeClaude
-	if validateConfig(c) == nil {
+	if c.Validate(time.Now()) == nil {
 		t.Fatal("unproven Claude task accepted")
 	}
 }

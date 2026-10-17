@@ -122,6 +122,7 @@ def main():
         view = tool("sproozi_run", intent, 2)
     report["sessionId"] = view["id"]
     report["executionId"] = view["executionId"]
+    report["allocationId"] = view["allocationId"]
     save()
     if args.request_id and view["phase"] == "unknown":
         recovered = subprocess.run([str(args.session_binary.resolve()), "recover", view["id"],
@@ -131,7 +132,8 @@ def main():
         report['recovery'] = json.loads(recovered.stdout)
         report["steps"].append("Recovered the exact retained request without replacing identity or its grant")
     replay = tool("sproozi_run", intent, 3)
-    check(replay["id"] == view["id"] and replay["executionId"] == view["executionId"], "Submission replay launched another execution")
+    check(replay["id"] == view["id"] and replay["executionId"] == view["executionId"] and
+          replay["allocationId"] == view["allocationId"], "Submission replay launched another execution/allocation")
     deadline = time.monotonic() + (600 if args.build_sproozi else 240)
     number = 4
     while time.monotonic() < deadline:
@@ -181,7 +183,9 @@ def main():
             number += 1
             check(after["phase"] == "home-owned", "Remote owner did not commit exclusive handoff")
             resumed = command("resume", view["id"], "--detach")
-            check(resumed["productId"] == view["id"] and resumed["threadId"] == current["threadId"], "Resume lost product/native identity")
+            check(resumed["id"] == view["id"] and resumed["threadId"] == current["threadId"], "Resume lost product/native identity")
+            check(resumed["executionId"] != view["executionId"] and resumed["allocationId"] != view["allocationId"],
+                  "Resume did not create a fresh bounded execution/allocation")
             check(resumed["deadline"] > current["deadline"], "Later local execution did not receive a fresh deadline")
             report["local"] = resumed
             report["steps"].append("Claimed checkpoint resumed in local Docker under a fresh execution identity and deadline")
@@ -199,8 +203,8 @@ def main():
             check(stopped["initialStage"] == "retained" and stopped["threadId"] == current["threadId"], "Local follow-up did not retain native state")
             report["stopped"] = stopped
             if args.project:
-                local_sessions = command("sessions", "--executor", "docker", "--project", args.project)
-                check(any(item['productId'] == view['id'] for item in local_sessions), "Project-filtered CLI catalogue omitted local work")
+                local_sessions = command("sessions", "--executor", "docker", "--project", args.project)["sessions"]
+                check(any(item['id'] == view['id'] for item in local_sessions), "Project-filtered CLI catalogue omitted local work")
                 check(all(item.get('project') == args.project for item in local_sessions), "CLI Project filter leaked another scope")
                 check(stopped.get('project') == args.project and stopped.get('repositoryReference') == current.get('repositoryReference'),
                       "Native local continuation lost immutable project/repository association")
@@ -216,7 +220,7 @@ def main():
                     sessionId=view['id'], digest=current['checkpointDigest'], revision=current['checkpointInfo']['workspace']['revision']))
                 fresh = native_hermes("SPROOZI_WORK_REQUEST=", fresh_intent, "hermes-recorded-revision") if args.hermes_deployment else tool("sproozi_run", fresh_intent, number)
                 number += 1
-                check(fresh['id'] != view['id'] and fresh['executionId'] != current['executionId'], "Revision launch reused old authority")
+                check(fresh['id'] != view['id'] and fresh['executionId'] != current['executionId'] and fresh['allocationId'] != current['allocationId'], "Revision launch reused old authority")
                 report['revisionExecution'] = fresh
                 save()
                 deadline = time.monotonic() + (600 if args.build_sproozi else 240)

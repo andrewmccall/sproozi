@@ -88,23 +88,23 @@ func TestClaudeHookBoundedPinnedPayload(t *testing.T) {
 func TestExplicitHarnessContractAndClaudeOptionBoundary(t *testing.T) {
 	c := config{Harness: harness.NativeClaude, Deadline: time.Now().Add(time.Minute), Instructions: instructions,
 		InstructionDigest: digest(), Env: []string{testPathEnvironment}, RolloutMaxBytes: 8192, Model: "claude-sonnet-4-5"}
-	if err := validateConfig(c); err != nil {
+	if err := c.Validate(time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	for _, kind := range []harness.NativeKind{"", "unknown"} {
 		c.Harness = kind
-		if validateConfig(c) == nil {
+		if c.Validate(time.Now()) == nil {
 			t.Fatal("implicit or unknown harness accepted")
 		}
 	}
 	c.Harness = harness.NativeClaude
 	c.Options = []string{"developer_instructions=\"changed\""}
-	if validateConfig(c) == nil {
+	if c.Validate(time.Now()) == nil {
 		t.Fatal("Codex option reinterpreted for Claude")
 	}
 	c.Options = nil
 	c.Env = append(c.Env, "CLAUDE_CONFIG_DIR=/untrusted")
-	if validateConfig(c) == nil {
+	if c.Validate(time.Now()) == nil {
 		t.Fatal("portable home override accepted")
 	}
 }

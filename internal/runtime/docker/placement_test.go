@@ -262,7 +262,7 @@ func (f *fakeDocker) execCommand(ctx context.Context, args []string, input []byt
 	case "gate":
 		c.nativeState = phaseStopping
 	case "status":
-		return json.Marshal(map[string]any{stateField: c.nativeState, threadField: fixtureThread})
+		return json.Marshal(map[string]any{"op": op, stateField: c.nativeState, threadField: fixtureThread})
 	case quiesceCommand:
 		if f.quiesceStarted != nil {
 			close(f.quiesceStarted)
@@ -273,7 +273,7 @@ func (f *fakeDocker) execCommand(ctx context.Context, args []string, input []byt
 			}
 		}
 		if f.quiesceAcknowledgesOnly {
-			return json.Marshal(map[string]any{stateField: phaseStopped, threadField: fixtureThread})
+			return json.Marshal(map[string]any{"op": op, stateField: phaseStopped, threadField: fixtureThread})
 		}
 		c.State.Running = false
 		c.State.Status = exitedStatus
@@ -281,9 +281,13 @@ func (f *fakeDocker) execCommand(ctx context.Context, args []string, input []byt
 		if f.lostQuiesceAck {
 			return nil, errors.New("lost quiesce acknowledgement")
 		}
-		return json.Marshal(map[string]any{stateField: phaseStopped, threadField: fixtureThread})
+		return json.Marshal(map[string]any{"op": op, stateField: phaseStopped, threadField: fixtureThread})
 	}
-	return json.Marshal(map[string]any{stateField: c.nativeState})
+	var launch harness.NativeLaunch
+	if err := json.Unmarshal(c.configured, &launch); err != nil {
+		return nil, err
+	}
+	return json.Marshal(map[string]any{"op": op, stateField: c.nativeState, threadField: launch.ThreadID})
 }
 
 type fakeAuthority struct {
@@ -667,5 +671,27 @@ func TestNativeAcknowledgementIsNotAWriterFence(t *testing.T) {
 	stopped, err := p.Stop(context.Background(), l, inc)
 	if err != nil || !stopped.ActualStopped || stopped.Receipt == nil {
 		t.Fatalf("actual fence recovery: %+v %v", stopped, err)
+	}
+}
+
+func TestPreparedNativeLaunchCarriesTaskAndIndependentRolloutLimit(t *testing.T) {
+	data := fixtureArtifact(t)
+	engine := newFakeDocker()
+	p := openFixture(t, t.TempDir(), engine, &fakeAuthority{engine: engine})
+	launch := fixtureLaunch(t, data)
+	launch.Task = "Inspect the workspace and report the result."
+	if _, err := p.Prepare(context.Background(), launch, data); err != nil {
+		t.Fatal(err)
+	}
+	var configured harness.NativeLaunch
+	for _, container := range engine.containers {
+		if len(container.configured) > 0 {
+			if err := json.Unmarshal(container.configured, &configured); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if configured.Task != launch.Task || configured.ThreadID != fixtureThread || configured.RolloutMaxBytes != 64<<20 || configured.RolloutMaxBytes == p.config.MaxCheckpointBytes {
+		t.Fatalf("native task/thread/observer bound lost: %+v", configured)
 	}
 }

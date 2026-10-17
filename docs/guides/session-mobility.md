@@ -221,6 +221,13 @@ deadline persist. Remaining allowance decreases by sealed usage, including
 outstanding reservations. A move does not refill a budget or extend the deadline.
 Detaching also leaves the writer's deadline and spending rules in effect.
 
+The positional `SESSION_UUID` form also works for all these client commands.
+An explicit `--socket` selects home; `--executor docker --config FILE` uses the
+configured home socket. For remote task-owner inspection, select that owner with
+`--executor NAME`. `move --to NAME` still asks home to manage a placement visit.
+See [session commands](../reference/session-commands.md) for the complete routing
+and identity contract.
+
 ## Recover or cancel
 
 For an uncertain response, first inspect the trusted journal:

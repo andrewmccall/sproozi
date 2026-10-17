@@ -6,7 +6,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,14 +14,12 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/harness"
-	"github.com/andrewmccall/sproozi/internal/nativeconfig"
 	"github.com/andrewmccall/sproozi/internal/nativepty"
 )
 
@@ -50,8 +47,6 @@ const (
 	inactiveError     = "native execution is not active"
 )
 
-var threadPattern = regexp.MustCompile(`^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$`)
-
 type config = harness.NativeLaunch
 type request struct {
 	Op      string      `json:"op"`
@@ -62,20 +57,8 @@ type request struct {
 	Rows    uint16      `json:"rows,omitempty"`
 	Columns uint16      `json:"columns,omitempty"`
 }
-type response struct {
-	Op         string            `json:"op"`
-	Error      string            `json:"error,omitempty"`
-	State      string            `json:"state,omitempty"`
-	PID        int               `json:"pid,omitempty"`
-	ThreadID   string            `json:"threadId,omitempty"`
-	TurnID     string            `json:"turnId,omitempty"`
-	Data       []byte            `json:"data,omitempty"`
-	Cursor     uint64            `json:"cursor,omitempty"`
-	Gap        bool              `json:"gap,omitempty"`
-	Written    int               `json:"written,omitempty"`
-	Exit       *nativepty.Exit   `json:"exit,omitempty"`
-	Completion *claudeCompletion `json:"completion,omitempty"`
-}
+type response = harness.NativeReply
+
 type server struct {
 	config          config
 	deadline        time.Time
@@ -146,47 +129,9 @@ func loadConfig(path string) (config, error) {
 	if decoder.Decode(&extra) != io.EOF {
 		return c, errors.New("native launch contract has extra JSON")
 	}
-	return c, validateConfig(c)
+	return c, c.Validate(time.Now())
 }
-func validateConfig(c config) error {
-	if err := c.Harness.Validate(); err != nil {
-		return err
-	}
-	if !c.Deadline.After(time.Now()) || (c.ThreadID != "" && !threadPattern.MatchString(c.ThreadID)) ||
-		c.Env == nil || c.RolloutMaxBytes <= 0 || c.RolloutMaxBytes > 64<<20 {
-		return errors.New("invalid native launch contract")
-	}
-	if len(c.Task) > 32<<10 || strings.ContainsRune(c.Task, 0) ||
-		c.Task != "" && (strings.TrimSpace(c.Task) == "" || c.Harness != harness.NativeCodex) {
-		return errors.New("native task requires bounded nonempty Codex input")
-	}
-	if c.Instructions == "" || fmt.Sprintf("%x", sha256.Sum256([]byte(c.Instructions))) != c.InstructionDigest {
-		return errors.New("trusted instructions do not match digest")
-	}
-	if c.Gateway != nil {
-		if err := c.Gateway.Validate(c.Env); err != nil {
-			return err
-		}
-	}
-	seen := map[string]bool{}
-	for _, entry := range c.Env {
-		key, value, ok := strings.Cut(entry, "=")
-		if !ok || key == "" || strings.ContainsAny(key+value, "\x00") || seen[key] {
-			return errors.New("invalid explicit native environment")
-		}
-		seen[key] = true
-		switch key {
-		case "HOME", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "PWD", "KUBECONFIG",
-			"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "DISABLE_AUTOUPDATER",
-			"CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION", "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS":
-			return errors.New("native environment cannot replace fixed home or workspace")
-		}
-	}
-	if err := c.ClientConfig.Validate(c.Harness); err != nil {
-		return err
-	}
-	return nativeconfig.ValidateHarness(string(c.Harness), c.Model, c.Options)
-}
+
 func serve(c config, bootstrap bool) error {
 	if err := os.Mkdir(filepath.Dir(socketPath), 0700); err != nil {
 		return fmt.Errorf("create private supervisor directory: %w", err)
@@ -260,7 +205,7 @@ func (s *server) configure(c *config) response {
 	defer s.action.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	r := response{Op: opConfigure, State: s.state}
+	r := response{Op: opConfigure, State: s.state, ThreadID: s.threadID}
 	if c == nil {
 		r.Error = "configure requires trusted launch configuration"
 		return r
@@ -269,7 +214,7 @@ func (s *server) configure(c *config) response {
 		r.Error = "configure cannot change initial deadline"
 		return r
 	}
-	if err := validateConfig(*c); err != nil {
+	if err := c.Validate(time.Now()); err != nil {
 		r.Error = err.Error()
 		return r
 	}
@@ -284,7 +229,7 @@ func (s *server) configure(c *config) response {
 	s.config = *c
 	s.threadID = c.ThreadID
 	s.state = statePrepared
-	r.State = s.state
+	r.State, r.ThreadID = s.state, s.threadID
 	return r
 }
 func (s *server) activate() response {
@@ -420,9 +365,10 @@ func (s *server) gate() response {
 		return r
 	}
 	s.state = stateStopping
+	thread := s.threadID
 	s.mu.Unlock()
 	n.GateInput()
-	return response{Op: opGate, State: stateStopping}
+	return response{Op: opGate, State: stateStopping, ThreadID: thread}
 }
 func (s *server) quiesce() response {
 	s.action.Lock()
@@ -481,7 +427,8 @@ func (s *server) quiesce() response {
 		s.exitCode = 1
 	}
 	s.mu.Unlock()
-	r := response{Op: opQuiesce, State: stateStopped, ThreadID: id, TurnID: turn, Exit: &exit}
+	r := response{Op: opQuiesce, State: stateStopped, ThreadID: id, TurnID: turn,
+		Exit: &harness.NativeExit{Code: exit.Code, Reason: string(exit.Reason)}}
 	if s.config.Harness == harness.NativeClaude {
 		if exit.Reason != nativepty.ForcedStop {
 			r.Error = "native controlled stop did not finish"

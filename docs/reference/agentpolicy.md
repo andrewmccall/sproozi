@@ -83,17 +83,22 @@ The deployed Kubernetes ledger shares accounting across gateway replicas,
 partitioned by Run UID and capability. Policy changes do not reset consumption.
 Non-model endpoints spend one request unit before each authorized upstream call.
 
-Model requests reserve the requested output limit, or remaining capacity when no
-output limit is supplied, then settle provider-reported total usage. Input tokens
-can exceed the reservation. Rejected settlement retains the reservation but does
+OpenAI requests reserve the requested output limit, or remaining capacity when no
+output limit is supplied, then settle provider-reported total usage. OpenAI input
+tokens can exceed that reservation. Anthropic reserves all remaining configured
+capacity before inference. Rejected settlement retains the reservation but does
 not undo upstream consumption or fully record it. Token and cost limits are not
 hard provider-spending ceilings. See [security hardening](security-hardening.md).
 
 `maxCostMicros` requires trusted endpoint pricing. Model inference uses the
-administrator's pricing table, but missing prices are rejected during settlement
-after the provider call. Other endpoints reject a monetary ceiling because they
-do not have trusted pricing. A configured budget
-in ChatGPT-plan mode uses a token ceiling and `maxCostMicros: 0`.
+administrator's pricing table. Cost-bounded OpenAI API-key and Anthropic requests
+require an exact model row with positive input, cached-input and output rates
+before provider work. OpenAI also selects `service_tier: default` and rejects
+explicit nondefault tiers; Anthropic has its own standard-tier/cache rules.
+Unknown consumed categories and non-token provider charges remain limitations.
+Other endpoints reject a monetary ceiling because they do not have trusted
+pricing. A configured budget in ChatGPT-plan mode uses a token ceiling and
+`maxCostMicros: 0`.
 
 Kubernetes namespaces, resources and verbs are checked on each request by the
 Kubernetes endpoint. Workload service accounts have no native read bindings.

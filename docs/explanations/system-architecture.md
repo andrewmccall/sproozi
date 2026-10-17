@@ -145,7 +145,11 @@ A run receives an immutable input contract, one projected gateway-audience token
 a ServiceAccount without direct Kubernetes grants, and a run-scoped NetworkPolicy.
 The token identifies the run; requested capabilities and live policy determine
 its authority. New gateway requests recheck that authority, and open sessions
-close through bounded revalidation.
+close through bounded revalidation. Both backends bound pre-TLS connections
+and sessions per execution. Authentication and live lookups have short deadlines;
+late callback results cannot restore authority and their worker slots remain held
+until the dependency returns. [Transport limits](../reference/security-hardening.md#protect-transport-and-identities)
+state the defaults and distinguish transport shutdown from upstream termination.
 
 [Recorded SRE acceptance](../demos/verified-sre-demo.md) demonstrated the Semantic
 Kubernetes, model and GitHub paths in Kind on 4 October 2026.
@@ -172,7 +176,10 @@ task, observes genuine completion, fences/seals the worker and retains stopped
 native/Git state under a stable product session ID. Authenticated MCP lets Hermes
 submit and inspect work. Pull commits a one-way claim to the home; later resume
 starts a separately authorized execution with the same native UUID, preserving
-old receipts. Product operations bind to their original execution so delayed
+old receipts. Public `id` always addresses the durable session; `executionId`,
+`allocationId` and `incarnation` identify the current bounded execution and exact
+visit separately. The [session command reference](../reference/session-commands.md)
+describes catalogue provenance and owner selection. Product operations bind to their original execution so delayed
 retries cannot affect a newer continuation. See
 [ADR 0012](../adr/0012-retained-work-and-fresh-session-continuations.md).
 
@@ -219,7 +226,13 @@ held-turn movement and forced cancellation with conservative receipt replay.
 from remaining native-history, platform and provider compatibility limits.
 The [session guide](../guides/session-mobility.md) describes the narrow evaluated
 contract. [ADR 0010](../adr/0010-managed-session-authority-and-admission.md) records
-authority, stop and recovery tradeoffs.
+authority, stop and recovery tradeoffs. Both placements share trusted native
+launch configuration and strict operation/state/thread reply validation through
+`internal/harness`. Their physical stop and accounting evidence remains
+backend-owned. See [native control](../reference/native-control.md) and
+[ADR 0014](../adr/0014-review-boundaries-and-native-contracts.md) for the private
+control contract and the ACP/AHP comparison. Neither standard is exposed as a
+Sproozi endpoint today.
 
 Runtime implementations live in `internal/runtime/kubernetes` and
 `internal/runtime/docker`. Shared harness, checkpoint and workspace code stays

@@ -610,8 +610,8 @@ func TestGetStatusRunning(t *testing.T) {
 	}
 }
 
-// TestGetStatusUnknownWhenNotFound verifies GetStatus returns Unknown for missing Pod.
-func TestGetStatusUnknownWhenNotFound(t *testing.T) {
+// TestGetStatusAbsentWhenNotFound verifies GetStatus returns Absent for missing Pod.
+func TestGetStatusAbsentWhenNotFound(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).Build()
 	sc := kubernetes.NewPodSandboxClient(c)
 
@@ -619,8 +619,8 @@ func TestGetStatusUnknownWhenNotFound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetStatus error: %v", err)
 	}
-	if status != kubernetes.SandboxStatusUnknown {
-		t.Errorf("status = %q, want Unknown", status)
+	if status != kubernetes.SandboxStatusAbsent {
+		t.Errorf("status = %q, want Absent", status)
 	}
 }
 
@@ -692,5 +692,16 @@ func TestGetCompletion(t *testing.T) {
 	}
 	if _, err := sc.GetCompletion(context.Background(), name, string(run.UID)); err == nil {
 		t.Fatal("accepted foreign Pod completion")
+	}
+}
+
+func TestGetStatusUnknownForExistingUncertainPod(t *testing.T) {
+	for _, phase := range []corev1.PodPhase{"", corev1.PodUnknown} {
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "uncertain", Namespace: kubernetes.AgentsNamespace}, Status: corev1.PodStatus{Phase: phase}}
+		c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(pod).Build()
+		status, err := kubernetes.NewPodSandboxClient(c).GetStatus(context.Background(), pod.Name)
+		if err != nil || status != kubernetes.SandboxStatusUnknown {
+			t.Fatalf("existing phase %q = (%s,%v)", phase, status, err)
+		}
 	}
 }

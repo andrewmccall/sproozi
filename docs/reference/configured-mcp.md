@@ -110,8 +110,7 @@ Set `AgentRuntime.spec.clientConfig.harness` to `codex`, `claude-code`, `opencod
 for native run-local configuration. See [harness preparation](harnesses.md) for
 the additional launch formats, provider setup and verification limits.
 
-The following Codex example sets `AgentRuntime.spec.clientConfig.harness: codex`.
-Set `AgentRuntime.spec.clientConfig.harness: codex`. Provisioning adds
+With `AgentRuntime.spec.clientConfig.harness: codex`, provisioning adds
 `codex-mcp.toml` to the existing immutable run contract ConfigMap. The trusted
 launch command copies it into disposable Codex configuration before `codex exec`:
 
@@ -134,7 +133,8 @@ required = true
 Codex uses the existing authenticated HTTPS proxy and trust bundle. MCP connection
 configuration contains no provider credentials or upstream URLs. Other clients
 can use these broker URLs through the same proxy; automatic configuration
-rendering currently supports Codex only. MCP resources and prompts are not exposed.
+rendering supports the four selectors above. MCP resources and prompts are not
+exposed.
 
 ## Bounds and evidence
 
@@ -146,9 +146,20 @@ unsupported. Standalone SSE listeners, sampling, elicitation, roots, managed std
 and OAuth consent flows are outside this implementation. JSON or request-local
 SSE responses use the official SDK with redirects and retries disabled.
 
-Tool work and upstream HTTP operations have 30-second timeouts. Cancellation
-notification delivery can take up to five additional seconds before session
-teardown. Request bodies are limited to 64 KiB and upstream responses to 8 MiB. Discovery is bounded to eight pages and 256 tools; policy selects
+Before upstream setup, the SDK decodes the JSON-RPC envelope. The bridge admits
+`server/discover`, `initialize`, `tools/list`, `tools/call` and `ping` calls plus
+initialization and cancellation notifications. Unsupported methods and retained
+`subscriptions/listen` requests are rejected before upstream setup.
+
+One overall 30-second request context covers protocol negotiation, legacy
+initialization fallback, discovery and tool work. Upstream HTTP exchanges also
+have a 30-second timeout. The SDK keeps its connection reader independent of
+individual call cancellation so bounded cancellation notifications can be sent.
+Notification delivery can take up to five additional seconds, and detached SDK
+cleanup DELETE can use its separate HTTP timeout. The overall handler wall-clock
+time can therefore exceed 30 seconds during cleanup. Request bodies are limited
+to 64 KiB and upstream responses to 8 MiB. Discovery is bounded to eight pages
+and 256 tools; policy selects
 at most 128 tools per server and the registry holds at most 32 servers. Session
 DELETE is attempted on close with the bounded HTTP timeout; provider-side
 cleanup still depends on the remote server honouring deletion. Cancellation cannot
@@ -162,7 +173,9 @@ by Run UID and capability. Failed upstream attempts remain charged. Reconnecting
 or changing policy does not reset consumption. Omitted budgets are uncapped;
 monetary ceilings are rejected because MCP supplies no trusted pricing. Discovery
 and initialization have fixed per-request bounds but do not consume tool-call
-units. Audit records the run, named capability, Protocol tier, approved tool and
+units. The shared proxy also admits at most 128 connections and eight inspected
+sessions per execution by default; see [transport limits](security-hardening.md#protect-transport-and-identities).
+Audit records the run, named capability, Protocol tier, approved tool and
 fixed outcome, without argument values, results or provider diagnostics. Provider
 failures return fixed messages; successful tool output remains provider content.
 

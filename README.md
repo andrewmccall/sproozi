@@ -62,7 +62,9 @@ The CLI can be built with:
 go build -o bin/sproozi ./cmd/sproozi
 ```
 
-The linked guides cover configuration and prerequisites. This is not yet a one-command install.
+The [session command reference](docs/reference/session-commands.md) explains owner
+selection, discovery and session/execution IDs. The linked guides cover
+configuration and prerequisites. This is not yet a one-command install.
 
 ## What works today
 
@@ -84,6 +86,8 @@ Isolation only works if the environment is configured and enforced correctly. In
 
 - Kubernetes network restrictions require an enforcing network plugin and verification that agents cannot bypass the gateway. Kubernetes NetworkPolicy permits traffic involving a Pod's own node, so policy alone is not a complete isolation guarantee.
 - Rules can restrict external operations, but their precision depends on the integration. A service-aware permission can constrain particular actions. Configured Model Context Protocol (MCP) access checks tools and arguments, while a generic HTTPS allowance only constrains the destination.
+- Runtime validation requires non-root execution, no added Linux capabilities, RuntimeDefault seccomp and a read-only root filesystem. Template volumes and environment sources are restricted.
+- Both gateway backends bound connections and sessions, with deadlines for authentication and live authority checks. Cleanup retains containment while a Pod's state or ownership is uncertain.
 - Resource and usage limits exist, but model-token and cost estimates are **not** hard guarantees against provider spend.
 - A sandbox does not guarantee that an agent's answer, code or proposed fix is correct. Review changes before deploying or merging them.
 

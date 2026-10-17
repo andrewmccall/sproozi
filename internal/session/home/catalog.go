@@ -477,15 +477,20 @@ func (s *Service) catalogStatus(r localSession) (Status, error) {
 	}
 	if r.Current != "" {
 		status, err := s.executionStatus(r.Current)
-		status.ProductID = r.ID
+		status.ID = r.ID
 		status.Association, status.CheckpointInfo = r.Original.Association, info
 		return status, err
 	}
 	stage := "importing"
+	ownership := "source"
 	if r.Claimed {
 		stage = stageRetained
+		ownership = "home"
 	}
-	return Status{Association: r.Original.Association, CheckpointInfo: info, ID: r.ID, ProductID: r.ID,
+	return Status{Association: r.Original.Association, CheckpointInfo: info,
+		ID: r.ID, Ownership: ownership, ExecutionID: r.Committed.Launch.SessionID,
+		AllocationID: r.Committed.Launch.AllocationID, Incarnation: &r.Committed.Incarnation,
+		Placement: r.Committed.Launch.Placement, Phase: stage, Harness: r.Committed.Launch.Harness,
 		InitialStage: stage, ThreadID: r.Committed.Launch.ThreadID, Deadline: r.Committed.Launch.Deadline}, nil
 }
 
@@ -561,7 +566,9 @@ func (s *Service) Move(ctx context.Context, id, operation, destination string) (
 		return Status{}, err
 	}
 	status, err := s.moveExecution(ctx, execution, operation, destination)
-	status.ProductID = product
+	if product != "" {
+		status.ID = product
+	}
 	return status, err
 }
 
@@ -572,7 +579,9 @@ func (s *Service) Recover(ctx context.Context, id string) (Status, error) {
 	}
 	defer unlock()
 	status, err := s.recoverExecution(ctx, execution)
-	status.ProductID = product
+	if product != "" {
+		status.ID = product
+	}
 	return status, err
 }
 
@@ -614,7 +623,9 @@ func (s *Service) Cancel(ctx context.Context, id, operation string) (Status, err
 		}
 	}
 	status, err := s.cancelExecution(ctx, execution, operation)
-	status.ProductID = product
+	if product != "" {
+		status.ID = product
+	}
 	return status, err
 }
 
@@ -650,6 +661,8 @@ func (s *Service) Sessions(q work.SessionQuery) ([]Status, error) {
 		if readErr != nil {
 			return nil, readErr
 		}
+		// Discovery exposes compact facts; detailed execution journals use Status.
+		status.Session = nil
 		if q.Project == "" || r.Original.Project == q.Project {
 			statuses = append(statuses, status)
 		}
@@ -673,6 +686,8 @@ func (s *Service) Sessions(q work.SessionQuery) ([]Status, error) {
 		if readErr != nil {
 			return nil, readErr
 		}
+		// Discovery exposes compact facts; detailed execution journals use Status.
+		status.Session = nil
 		if q.Project == "" {
 			statuses = append(statuses, status)
 		}

@@ -63,7 +63,7 @@ func TestChatGPTGatewayRejectsIncompatibleRequestsBeforeUpstream(t *testing.T) {
 		unavailable      bool
 		status           int
 	}{
-		{"chat completions", "/v1/chat/completions", `{"model":"test"}`, 0, false, 403},
+		{"chat completions", testChatCompletionsPath, `{"model":"test"}`, 0, false, 403},
 		{"stored responses", testResponsesPath, `{"store":true,"stream":true,"input":[]}`, 0, false, 403},
 		{"non-streaming", testResponsesPath, `{"store":false,"stream":false,"input":[]}`, 0, false, 403},
 		{"output bound unsupported", testResponsesPath, `{"store":false,"stream":true,"input":[],"max_output_tokens":100}`, 0, false, 403},

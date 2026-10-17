@@ -111,7 +111,7 @@ func (h *Handler) authorizeAndForward(ctx context.Context, identity *gateway.Exe
 	}
 	for k, values := range req.Header {
 		for _, value := range values {
-			if !strings.EqualFold(k, "Authorization") && !strings.EqualFold(k, "Proxy-Authorization") && !strings.EqualFold(k, "Impersonate-User") && !strings.HasPrefix(strings.ToLower(k), "impersonate-extra-") {
+			if !strings.EqualFold(k, "Authorization") && !strings.EqualFold(k, "Proxy-Authorization") && !strings.HasPrefix(strings.ToLower(k), "impersonate-") {
 				forward.Header.Add(k, value)
 			}
 		}
@@ -123,6 +123,10 @@ func (h *Handler) authorizeAndForward(ctx context.Context, identity *gateway.Exe
 	if client == nil {
 		client = http.DefaultClient
 	}
+	// Copy the caller-owned client: every composition must refuse redirects,
+	// including transports that inject credentials on each request.
+	upstreamClient := *client
+	upstreamClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	callCtx := forward.Context()
 	cancel := func() {}
 	if op.Watch {
@@ -144,7 +148,7 @@ func (h *Handler) authorizeAndForward(ctx context.Context, identity *gateway.Exe
 		cancel()
 		return nil, err
 	}
-	resp, err := client.Do(forward)
+	resp, err := upstreamClient.Do(forward)
 	if err != nil {
 		cancel()
 		return nil, err
@@ -180,7 +184,7 @@ func allowed(id *gateway.ExecutionGrant, op Operation) bool {
 	if op.Discovery {
 		return (op.APIGroup == "" || op.APIGroup == appsAPIGroup) && (op.Version == "" || op.Version == "v1")
 	}
-	if op.APIGroup != "" && op.APIGroup != appsAPIGroup || op.Version == "" {
+	if !supportedResource(op) {
 		return false
 	}
 	if op.Namespace == "" || !containsString(id.Policy.Spec.KubernetesRead.Namespaces, op.Namespace) {
@@ -219,4 +223,21 @@ func (w flushingWriter) Write(p []byte) (int, error) {
 		f.Flush()
 	}
 	return n, err
+}
+
+// Resource names are meaningful only within their supported group and version.
+func supportedResource(op Operation) bool {
+	if op.Version != "v1" {
+		return false
+	}
+	switch op.Resource {
+	case "pods":
+		return op.APIGroup == "" && (op.Subresource == "" || op.Subresource == "log")
+	case "events", "services":
+		return op.APIGroup == "" && op.Subresource == ""
+	case "deployments", "replicasets", "statefulsets":
+		return op.APIGroup == appsAPIGroup && op.Subresource == ""
+	default:
+		return false
+	}
 }

@@ -39,8 +39,10 @@ import (
 )
 
 const (
-	titleField   = "title"
-	nameVariable = "name"
+	titleField       = "title"
+	bodyField        = "body"
+	prNumberVariable = "pr_number"
+	nameVariable     = "name"
 )
 
 const (
@@ -111,6 +113,14 @@ func (h *Handler) handleGraphQL(w http.ResponseWriter, r *http.Request, e audit.
 		h.deny(w, e, http.StatusForbidden, "GraphQL operation is not permitted")
 		return
 	}
+	if operation.Name != pullRequestCreateOperation {
+		document, documentErr := boundedReadDocument(operation.Name, envelope.Query)
+		if documentErr != nil {
+			h.deny(w, e, http.StatusForbidden, "GraphQL operation is not permitted")
+			return
+		}
+		envelope.Query = document
+	}
 	if operation.Name == pullRequestCreateOperation {
 		if err := validatePullRequestCreateDocument(envelope.Query); err != nil {
 			h.deny(w, e, http.StatusForbidden, "GraphQL operation is not permitted")
@@ -153,7 +163,15 @@ func (h *Handler) handleGraphQL(w http.ResponseWriter, r *http.Request, e audit.
 			h.deny(w, e, http.StatusInternalServerError, "failed to build upstream URL")
 			return
 		}
-		h.forward(w, r, e, upstream, "bearer", ghToken)
+		payload, err := json.Marshal(envelope)
+		if err != nil {
+			h.deny(w, e, http.StatusBadRequest, "GraphQL request body is invalid")
+			return
+		}
+		forwarded := r.Clone(r.Context())
+		forwarded.Body = io.NopCloser(bytes.NewReader(payload))
+		forwarded.ContentLength = int64(len(payload))
+		h.forward(w, forwarded, e, upstream, "bearer", ghToken)
 		return
 	}
 
@@ -175,7 +193,7 @@ func decodeGraphQLEnvelope(body []byte) (graphQLEnvelope, error) {
 }
 
 // classifyGraphQL extracts only the operation header and its direct root
-// field. The lexer ignores comments and strings, so a forbidden field in a
+// field. The lexer ignores comments and treats strings as opaque tokens, so a field in a
 // title/body/string literal cannot influence the decision.
 func classifyGraphQL(query string) (graphqlOperation, error) {
 	tokens, err := lexGraphQL(query)
@@ -278,6 +296,7 @@ func lexGraphQL(query string) ([]string, error) {
 				i++
 			}
 		case '"':
+			tokens = append(tokens, "<string>")
 			if i+2 < len(query) && query[i:i+3] == "\"\"\"" {
 				i += 3
 				end := strings.Index(query[i:], "\"\"\"")
@@ -367,7 +386,7 @@ func repositoryFromPRViewVariables(variables map[string]json.RawMessage) (string
 	if len(variables) != 3 {
 		return "", fmt.Errorf("unexpected GraphQL variables")
 	}
-	if _, err := graphqlPositiveInt(variables["pr_number"]); err != nil {
+	if _, err := graphqlPositiveInt(variables[prNumberVariable]); err != nil {
 		return "", err
 	}
 	return repositoryFromVariables(map[string]json.RawMessage{
@@ -414,7 +433,7 @@ func validateGraphQLCreateEnvelope(operation graphqlOperation, variables map[str
 	}
 	for key := range input {
 		switch key {
-		case baseRefNameField, "body", "draft", headRefNameField, "maintainerCanModify", repositoryIDField, titleField:
+		case baseRefNameField, bodyField, "draft", headRefNameField, "maintainerCanModify", repositoryIDField, titleField:
 		default:
 			return fmt.Errorf("unsupported GraphQL mutation input")
 		}
@@ -569,7 +588,7 @@ func parseGitHubPRURL(value string) (string, int64, error) {
 func (h *Handler) readBackGraphQLPR(r *http.Request, token, repository string, number int64) (verifiedGraphQLPR, error) {
 	parts := strings.Split(repository, "/")
 	query := `query PullRequestByNumber($owner: String!, $repo: String!, $pr_number: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $pr_number) { number url headRefName headRefOid baseRefName repository { nameWithOwner } } } }`
-	payload, _ := json.Marshal(map[string]any{graphqlQuery: query, variablesField: map[string]any{ownerVariable: parts[0], repoVariable: parts[1], "pr_number": number}})
+	payload, _ := json.Marshal(map[string]any{graphqlQuery: query, variablesField: map[string]any{ownerVariable: parts[0], repoVariable: parts[1], prNumberVariable: number}})
 	request, _ := http.NewRequestWithContext(r.Context(), http.MethodPost, h.Config.APIBaseURL+"/graphql", bytes.NewReader(payload))
 	request.Header.Set("Content-Type", "application/json")
 	response, err := h.doUpstream(request, request.URL.String(), token)
