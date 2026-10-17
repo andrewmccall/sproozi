@@ -265,6 +265,7 @@ func TestWebhookTriggeredRunReachesSucceeded(t *testing.T) {
 	}
 	reconciler := &controller.AgentRunReconciler{
 		Client:        c,
+		APIReader:     c,
 		SandboxClient: sandbox,
 	}
 	reconcileRunNTimes(t, reconciler, run.Name, 4)

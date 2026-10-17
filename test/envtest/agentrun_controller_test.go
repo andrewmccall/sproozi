@@ -41,6 +41,15 @@ import (
 	k8sresources "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
 )
 
+const (
+	// controllerTimeout bounds each wait for a controller transition.
+	controllerTimeout = 30 * time.Second
+	// slotHoldDuration is how long a queued run is watched to stay queued
+	// while another run holds the single active slot.
+	slotHoldDuration = 2 * time.Second
+	pollInterval     = 100 * time.Millisecond
+)
+
 // startAgentRunController starts an envtest environment with the AgentRun controller
 // running. Returns the manager client and a cleanup function.
 func startAgentRunController(t *testing.T) (client.Client, context.Context) {
@@ -85,6 +94,7 @@ func startAgentRunController(t *testing.T) (client.Client, context.Context) {
 
 	if err := (&controller.AgentRunReconciler{
 		Client:        mgr.GetClient(),
+		APIReader:     mgr.GetAPIReader(),
 		SandboxClient: k8sresources.NewPodSandboxClient(mgr.GetClient()),
 	}).SetupWithManager(mgr); err != nil {
 		t.Fatalf("SetupWithManager() error = %v", err)
@@ -214,7 +224,7 @@ func TestAgentRunControllerSingleActiveRun(t *testing.T) {
 			return ""
 		}
 		return r.Status.Phase
-	}, 30*time.Second, 100*time.Millisecond).Should(gomega.BeElementOf(
+	}, controllerTimeout, pollInterval).Should(gomega.BeElementOf(
 		sprooziv1alpha1.AgentRunPhaseAdmitted,
 		sprooziv1alpha1.AgentRunPhaseRunning,
 	), "run1 should be Admitted")
@@ -230,7 +240,7 @@ func TestAgentRunControllerSingleActiveRun(t *testing.T) {
 			return "", err
 		}
 		return r.Status.Phase, nil
-	}, 2*time.Second, 100*time.Millisecond).Should(
+	}, slotHoldDuration, pollInterval).Should(
 		gomega.BeElementOf(sprooziv1alpha1.AgentRunPhaseQueued, sprooziv1alpha1.AgentRunPhase("")),
 		"run2 must not be admitted while run1 is active",
 	)
@@ -252,7 +262,7 @@ func TestAgentRunControllerSingleActiveRun(t *testing.T) {
 			return ""
 		}
 		return r.Status.Phase
-	}, 30*time.Second, 100*time.Millisecond).Should(gomega.Equal(sprooziv1alpha1.AgentRunPhaseCancelled),
+	}, controllerTimeout, pollInterval).Should(gomega.Equal(sprooziv1alpha1.AgentRunPhaseCancelled),
 		"run1 should be Cancelled after cancel request")
 
 	// run2 should now be Admitted.
@@ -262,7 +272,7 @@ func TestAgentRunControllerSingleActiveRun(t *testing.T) {
 			return ""
 		}
 		return r.Status.Phase
-	}, 30*time.Second, 100*time.Millisecond).Should(gomega.BeElementOf(
+	}, controllerTimeout, pollInterval).Should(gomega.BeElementOf(
 		sprooziv1alpha1.AgentRunPhaseAdmitted,
 		sprooziv1alpha1.AgentRunPhaseRunning,
 	), "run2 should be Admitted after run1 is cancelled")
@@ -295,7 +305,7 @@ func TestAgentRunControllerFailsMissingTemplate(t *testing.T) {
 			return ""
 		}
 		return r.Status.Phase
-	}, 30*time.Second, 100*time.Millisecond).Should(gomega.Equal(sprooziv1alpha1.AgentRunPhaseFailed),
+	}, controllerTimeout, pollInterval).Should(gomega.Equal(sprooziv1alpha1.AgentRunPhaseFailed),
 		"run with missing template should be Failed")
 }
 
@@ -320,7 +330,7 @@ func TestAgentRunControllerCrossNamespaceSlot(t *testing.T) {
 			return ""
 		}
 		return r.Status.Phase
-	}, 30*time.Second, 100*time.Millisecond).Should(gomega.BeElementOf(
+	}, controllerTimeout, pollInterval).Should(gomega.BeElementOf(
 		sprooziv1alpha1.AgentRunPhaseAdmitted,
 		sprooziv1alpha1.AgentRunPhaseRunning,
 	), "run1 should be Admitted")
@@ -349,7 +359,7 @@ func TestAgentRunControllerCrossNamespaceSlot(t *testing.T) {
 			return "", err
 		}
 		return r.Status.Phase, nil
-	}, 2*time.Second, 100*time.Millisecond).Should(
+	}, slotHoldDuration, pollInterval).Should(
 		gomega.BeElementOf(sprooziv1alpha1.AgentRunPhaseQueued, sprooziv1alpha1.AgentRunPhase("")),
 		"run2 in team-b must not be admitted while run1 holds the global slot",
 	)
@@ -375,7 +385,7 @@ func TestAgentRunControllerPolicyChangeRequeues(t *testing.T) {
 			return ""
 		}
 		return r.Status.Phase
-	}, 30*time.Second, 100*time.Millisecond).Should(gomega.BeElementOf(
+	}, controllerTimeout, pollInterval).Should(gomega.BeElementOf(
 		sprooziv1alpha1.AgentRunPhaseAdmitted,
 		sprooziv1alpha1.AgentRunPhaseRunning,
 	), "run1 should be Admitted to hold the slot")
@@ -391,7 +401,7 @@ func TestAgentRunControllerPolicyChangeRequeues(t *testing.T) {
 			return ""
 		}
 		return r.Status.Phase
-	}, 30*time.Second, 100*time.Millisecond).Should(gomega.Equal(sprooziv1alpha1.AgentRunPhaseQueued),
+	}, controllerTimeout, pollInterval).Should(gomega.Equal(sprooziv1alpha1.AgentRunPhaseQueued),
 		"run2 should be Queued while slot is occupied")
 
 	// Patch the policy to revoke KubernetesRead.
@@ -411,9 +421,6 @@ func TestAgentRunControllerPolicyChangeRequeues(t *testing.T) {
 			return ""
 		}
 		return r.Status.Phase
-	}, 30*time.Second, 100*time.Millisecond).Should(gomega.Equal(sprooziv1alpha1.AgentRunPhaseFailed),
+	}, controllerTimeout, pollInterval).Should(gomega.Equal(sprooziv1alpha1.AgentRunPhaseFailed),
 		"run2 should be Failed after policy revokes KubernetesRead")
 }
-
-// startAgentRunController starts an envtest environment with the AgentRun controller
-// running. Returns the manager client and a cleanup function.

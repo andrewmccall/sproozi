@@ -171,6 +171,7 @@ func main() {
 
 	if err := (&sproozictrl.AgentRunReconciler{
 		Client:        mgr.GetClient(),
+		APIReader:     mgr.GetAPIReader(),
 		SandboxClient: k8sresources.NewPodSandboxClient(mgr.GetClient()),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to set up AgentRun controller")

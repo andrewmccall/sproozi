@@ -41,6 +41,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
@@ -129,7 +130,7 @@ func newRun(name string) *sprooziv1alpha1.AgentRun {
 
 func reconcileRun(t *testing.T, c client.Client, name string) (ctrl.Result, error) {
 	t.Helper()
-	r := &controller.AgentRunReconciler{Client: c, SandboxClient: &k8sresources.FakeSandboxClient{}}
+	r := &controller.AgentRunReconciler{Client: c, APIReader: c, SandboxClient: &k8sresources.FakeSandboxClient{}}
 	return r.Reconcile(context.Background(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: name, Namespace: testNS},
 	})
@@ -144,6 +145,7 @@ func newReconcilerWithSandbox(sc k8sresources.SandboxClient, objs ...client.Obje
 		Build()
 	r := &controller.AgentRunReconciler{
 		Client:        c,
+		APIReader:     c,
 		SandboxClient: sc,
 	}
 	return r, c
@@ -222,6 +224,47 @@ func TestReconcilerQueuedRunAdmittedWhenNoActiveRun(t *testing.T) {
 	}
 	if got.Status.StartedAt == nil {
 		t.Error("StartedAt should be set when run is admitted")
+	}
+}
+
+// The informer cache can lag the reconciler's own admission write. A cached
+// list that still shows the admitted run as Queued must not let a run that
+// sorts ahead of it take the slot as well.
+func TestReconcilerQueuedRunIgnoresStaleCacheForSlot(t *testing.T) {
+	t.Parallel()
+
+	// Equal creation timestamps: "a-queued" sorts first by name.
+	admitted := newRun("z-admitted")
+	admitted.Status.Phase = sprooziv1alpha1.AgentRunPhaseAdmitted
+	queued := newRun("a-queued")
+	queued.Status.Phase = sprooziv1alpha1.AgentRunPhaseQueued
+	live := fake.NewClientBuilder().
+		WithScheme(newScheme()).
+		WithObjects(append(fixtures(), admitted, queued)...).
+		WithStatusSubresource(&sprooziv1alpha1.AgentRun{}).
+		Build()
+	stale := interceptor.NewClient(live.(client.WithWatch), interceptor.Funcs{
+		List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+			if err := c.List(ctx, list, opts...); err != nil {
+				return err
+			}
+			if runs, ok := list.(*sprooziv1alpha1.AgentRunList); ok {
+				for i := range runs.Items {
+					if runs.Items[i].Name == admitted.Name {
+						runs.Items[i].Status.Phase = sprooziv1alpha1.AgentRunPhaseQueued
+					}
+				}
+			}
+			return nil
+		},
+	})
+	r := &controller.AgentRunReconciler{Client: stale, APIReader: live, SandboxClient: &k8sresources.FakeSandboxClient{}}
+
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: queued.Name, Namespace: testNS}}); err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+	if phase := getPhase(t, live, queued.Name); phase != sprooziv1alpha1.AgentRunPhaseQueued {
+		t.Fatalf("%s phase = %q, want Queued while %s holds the slot", queued.Name, phase, admitted.Name)
 	}
 }
 

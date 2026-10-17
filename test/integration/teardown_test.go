@@ -28,6 +28,7 @@ func TestCancelledRunCleansUpRunScopedResources(t *testing.T) {
 	sandbox := &k8sresources.FakeSandboxClient{Status: k8sresources.SandboxStatusRunning}
 	reconciler := &controller.AgentRunReconciler{
 		Client:        c,
+		APIReader:     c,
 		SandboxClient: sandbox,
 	}
 

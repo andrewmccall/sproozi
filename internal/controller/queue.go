@@ -39,11 +39,13 @@ func ActiveRun(runs []sprooziv1alpha1.AgentRun) *sprooziv1alpha1.AgentRun {
 // NextQueued returns the Queued AgentRun with the earliest creation timestamp,
 // breaking ties by namespace then name (lexical ascending). The cluster-wide
 // sort includes namespace so the ordering is stable when equal timestamps
-// appear across different namespaces. Returns nil if no Queued runs exist.
+// appear across different namespaces. A run not yet initialized (empty phase)
+// keeps its place, so a later run cannot overtake it while its first status
+// write is pending. Returns nil if no such runs exist.
 func NextQueued(runs []sprooziv1alpha1.AgentRun) *sprooziv1alpha1.AgentRun {
 	queued := make([]*sprooziv1alpha1.AgentRun, 0, len(runs))
 	for i := range runs {
-		if runs[i].Status.Phase == sprooziv1alpha1.AgentRunPhaseQueued {
+		if phase := runs[i].Status.Phase; phase == sprooziv1alpha1.AgentRunPhaseQueued || phase == "" {
 			queued = append(queued, &runs[i])
 		}
 	}

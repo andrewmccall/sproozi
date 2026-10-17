@@ -68,6 +68,9 @@ const (
 // AgentRunReconciler reconciles AgentRun objects.
 type AgentRunReconciler struct {
 	client.Client
+	// APIReader reads the API server directly. The single-slot admission
+	// decision uses it because the cache can lag this reconciler's own writes.
+	APIReader     client.Reader
 	SandboxClient k8sresources.SandboxClient
 }
 
@@ -208,8 +211,12 @@ func (r *AgentRunReconciler) resolveAdmission(ctx context.Context, run *sprooziv
 func (r *AgentRunReconciler) handleQueued(ctx context.Context, run *sprooziv1alpha1.AgentRun) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
+	// A cached list can miss an admission this reconciler has just written,
+	// or a run it has not yet seen initialized, and so admit a second run or
+	// let a later run overtake an earlier one. Reconciles are serialized, so a
+	// live list reflects every earlier admission decision.
 	var allRuns sprooziv1alpha1.AgentRunList
-	if err := r.List(ctx, &allRuns); err != nil {
+	if err := r.APIReader.List(ctx, &allRuns); err != nil {
 		return ctrl.Result{}, err
 	}
 
