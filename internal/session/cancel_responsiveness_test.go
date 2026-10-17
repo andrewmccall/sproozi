@@ -46,7 +46,7 @@ func TestCancelInterruptsHeldMove(t *testing.T) {
 	if r.Phase != PhaseUnknownUsage || r.CancelOperation == "" || local.prepared != 0 || remote.aborted != 1 {
 		t.Fatalf("forced cancellation or source-only fencing changed: %+v", r)
 	}
-	if r.Checkpoint.Metadata.SHA256 != start.Stopped.CheckpointDigest || r.Remaining[testCapability].Units.Value != 18 {
+	if r.Checkpoint.Metadata.SHA256 != start.Stopped.CheckpointDigest || r.Remaining[testCapability].Units.Value != afterSeedUnits {
 		t.Fatal("cancel replaced the last committed checkpoint or refunded unknown usage")
 	}
 	if _, err = c.Cancel(t.Context(), r.ID, r.CancelOperation, nil); err != nil {
@@ -261,7 +261,7 @@ func TestCancelCommitsCompletedSourceWithoutPreparingDestination(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Phase != PhaseCancelled || len(r.Visits) != 2 || r.Remaining[testCapability].Units.Value != 13 || r.Active != nil {
+	if r.Phase != PhaseCancelled || len(r.Visits) != 2 || r.Remaining[testCapability].Units.Value != afterVisitUnits || r.Active != nil {
 		t.Fatalf("genuine completed receipt was discarded: %+v", r)
 	}
 	if local.prepared != 0 || local.activated != 0 || remote.stopped != 1 || remote.aborted != 0 {

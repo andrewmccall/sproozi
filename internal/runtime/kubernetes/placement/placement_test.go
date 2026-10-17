@@ -134,8 +134,34 @@ func (c *admissionClient) Create(ctx context.Context, obj client.Object, options
 	if err := c.Client.Create(ctx, run, options...); err != nil {
 		return err
 	}
-	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: runtimekube.AgentsNamespace, Name: run.Status.Identity.SandboxName, UID: types.UID(uuid.NewString()), Finalizers: []string{runtimekube.ManagedWriterFenceFinalizer}, Labels: map[string]string{runtimekube.RunUIDLabel: string(run.UID), runtimekube.RunNamespaceLabel: run.Namespace}}, Spec: corev1.PodSpec{ServiceAccountName: "approved-worker"}, Status: corev1.PodStatus{Phase: corev1.PodRunning, ContainerStatuses: []corev1.ContainerStatus{{Name: nativeContainer, ContainerID: "containerd://native", State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}}, {Name: runtimekube.CaptureContainer, ContainerID: "containerd://helper", State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}}}}}
-	return c.Client.Create(ctx, pod)
+	return c.Client.Create(ctx, admittedPod(run))
+}
+
+// admittedPod is the running managed worker Pod the controller would create
+// for run: writer-fence finalizer, Run labels, and both the native container
+// and the capture helper running.
+func admittedPod(run *api.AgentRun) *corev1.Pod {
+	running := corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace:  runtimekube.AgentsNamespace,
+			Name:       run.Status.Identity.SandboxName,
+			UID:        types.UID(uuid.NewString()),
+			Finalizers: []string{runtimekube.ManagedWriterFenceFinalizer},
+			Labels: map[string]string{
+				runtimekube.RunUIDLabel:       string(run.UID),
+				runtimekube.RunNamespaceLabel: run.Namespace,
+			},
+		},
+		Spec: corev1.PodSpec{ServiceAccountName: "approved-worker"},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			ContainerStatuses: []corev1.ContainerStatus{
+				{Name: nativeContainer, ContainerID: "containerd://native", State: running},
+				{Name: runtimekube.CaptureContainer, ContainerID: "containerd://helper", State: running},
+			},
+		},
+	}
 }
 
 // The API finalizer retains the object; this separate fixture observation models
