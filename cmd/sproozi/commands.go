@@ -116,7 +116,7 @@ func (c command) flagSet(q *options, in *inputs) *flag.FlagSet {
 	fs := flag.NewFlagSet("sproozi "+c.name, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	values := map[string]*string{
-		"config": &in.config, "socket": &q.socket, "executor": &q.executor, "id": &q.id,
+		"socket": &q.socket, "executor": &q.executor, "id": &q.id,
 		"operation": &q.operation, "from": &q.source, "harness": &q.kind, "repository": &q.repository,
 		"project": &in.project, "task": &q.task, "task-file": &in.taskFile, "workspace-from": &in.workspaceFrom,
 		"checkpoint-digest": &in.checkpointDigest, "revision": &in.revision, "workspace": &q.workspace,
