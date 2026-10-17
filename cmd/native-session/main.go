@@ -1,6 +1,6 @@
-// Command native-session owns one fixed stock Codex PTY inside a managed agent
-// container. Its private socket is a workload-accessible control channel, never
-// authority or evidence that every container writer stopped.
+// Command native-session owns one fixed stock Codex or Claude Code PTY inside a
+// managed agent container. Its private socket is a workload-accessible control
+// channel, never authority or evidence that every container writer stopped.
 package main
 
 import (
@@ -93,7 +93,8 @@ func run(args []string) error {
 		return errors.New("use serve --config /etc/sproozi/native/config.json, activate, status, attach, or quiesce")
 	}
 	switch op := harness.NativeOp(args[0]); op {
-	case harness.NativeActivate, harness.NativeStatus, harness.NativeAttach, harness.NativeQuiesce, harness.NativeConfigure, harness.NativeGate, opClaudeHook:
+	case harness.NativeActivate, harness.NativeStatus, harness.NativeAttach, harness.NativeQuiesce,
+		harness.NativeConfigure, harness.NativeGate, opClaudeHook:
 		return control(op)
 	default:
 		return errors.New("unknown native session operation")
@@ -137,7 +138,8 @@ func serve(c config, bootstrap bool) error {
 	if err = os.Chmod(socketPath, 0600); err != nil {
 		return err
 	}
-	s := &server{config: c, deadline: c.Deadline, state: harness.NativePrepared, threadID: c.ThreadID, done: make(chan struct{})}
+	s := &server{config: c, deadline: c.Deadline, state: harness.NativePrepared, threadID: c.ThreadID,
+		done: make(chan struct{})}
 	if bootstrap {
 		s.state = harness.NativeUnconfigured
 	}
@@ -254,21 +256,12 @@ func (s *server) activate() response {
 		return r
 	}
 	env = append(env, clientEnv...)
-	home, path, err := nativePaths(s.config.Harness)
+	adapter, err := adapterFor(s.config.Harness)
 	if err != nil {
 		r.Error = err.Error()
 		return r
 	}
 	env = append(env, "HOME=/home/agent")
-	if s.config.Harness == harness.NativeClaude {
-		env = append(env, "CLAUDE_CONFIG_DIR="+home)
-	} else {
-		env = append(env, "CODEX_HOME="+home)
-		if err = installCodexProjectTrust(home); err != nil {
-			r.Error = err.Error()
-			return r
-		}
-	}
 	if s.config.Task != "" && s.threadID != "" {
 		_, baseline, err := observeTurn(nativeHome, s.threadID, s.config.InstructionDigest, s.config.RolloutMaxBytes)
 		if err != nil {
@@ -277,17 +270,12 @@ func (s *server) activate() response {
 		}
 		s.taskBaseline = baseline
 	}
-	var args []string
-	if s.config.Harness == harness.NativeClaude {
-		args, env, err = prepareClaudeLaunch(s.config, env)
-	} else {
-		args = codexArguments(s.config, s.threadID)
-	}
+	args, env, err := adapter.prepare(s.config, s.threadID, env)
 	if err != nil {
 		r.Error = err.Error()
 		return r
 	}
-	n, err := nativepty.Start(nativepty.Launch{Executable: path, Args: args, Env: env,
+	n, err := nativepty.Start(nativepty.Launch{Executable: adapter.executable, Args: args, Env: env,
 		Dir: workspace, Deadline: s.config.Deadline, Size: nativepty.Size{Rows: 40, Columns: 140}})
 	if err != nil {
 		r.Error = err.Error()
@@ -333,8 +321,8 @@ func (s *server) status() response {
 		}
 	}
 	r := response{Op: harness.NativeStatus, State: state, ThreadID: id}
-	if kind == harness.NativeClaude {
-		r.Completion = s.claudeCompletion()
+	if adapter, err := adapterFor(kind); err == nil && adapter.completion != nil {
+		r.Completion = adapter.completion(s)
 	}
 	if n != nil {
 		r.PID = n.PID()
@@ -386,7 +374,8 @@ func (s *server) quiesce() response {
 		select {
 		case <-ctx.Done():
 			s.stop()
-			return response{Op: harness.NativeQuiesce, State: harness.NativeStopping, Error: "no completed safe native turn before deadline"}
+			return response{Op: harness.NativeQuiesce, State: harness.NativeStopping,
+				Error: "no completed safe native turn before deadline"}
 		case <-n.Done():
 			s.stop()
 			return response{Op: harness.NativeQuiesce, State: harness.NativeStopping,
@@ -394,37 +383,22 @@ func (s *server) quiesce() response {
 		case <-timer.C:
 		}
 	}
-	var exit nativepty.Exit
-	var err error
-	if s.config.Harness == harness.NativeClaude {
-		exit, err = n.Stop(ctx)
-	} else {
-		exit, err = n.QuitAfterCompletedTurn(ctx)
-	}
+	adapter, err := adapterFor(s.config.Harness)
 	if err != nil {
 		s.stop()
 		return response{Op: harness.NativeQuiesce, State: harness.NativeStopping, Error: err.Error()}
 	}
+	exit, err := adapter.finish(n, ctx)
+	if err != nil {
+		s.stop()
+		return response{Op: harness.NativeQuiesce, State: harness.NativeStopping, Error: err.Error()}
+	}
+	code, problem := adapter.settle(exit)
 	s.mu.Lock()
-	s.threadID, s.state = id, harness.NativeStopped
-	s.exitCode = exit.Code
-	if s.config.Harness == harness.NativeClaude {
-		s.exitCode = 0
-	}
-	if s.config.Harness != harness.NativeClaude && exit.Reason != nativepty.NativeExit && s.exitCode == 0 {
-		s.exitCode = 1
-	}
+	s.threadID, s.state, s.exitCode = id, harness.NativeStopped, code
 	s.mu.Unlock()
-	r := response{Op: harness.NativeQuiesce, State: harness.NativeStopped, ThreadID: id, TurnID: turn,
-		Exit: &harness.NativeExit{Code: exit.Code, Reason: string(exit.Reason)}}
-	if s.config.Harness == harness.NativeClaude {
-		if exit.Reason != nativepty.ForcedStop {
-			r.Error = "native controlled stop did not finish"
-		}
-	} else if exit.Code != 0 || exit.Reason != nativepty.NativeExit {
-		r.Error = "native quit did not exit normally"
-	}
-	return r
+	return response{Op: harness.NativeQuiesce, State: harness.NativeStopped, ThreadID: id, TurnID: turn,
+		Exit: &harness.NativeExit{Code: exit.Code, Reason: string(exit.Reason)}, Error: problem}
 }
 func (s *server) handle(conn net.Conn) {
 	defer func() { _ = conn.Close() }()

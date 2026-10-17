@@ -21,11 +21,12 @@ const (
 	claudeBash         = "Bash"
 	claudeHooksKey     = "hooks"
 
-	opClaudeHook     harness.NativeOp = "observe-claude"
-	claudeSettings                    = "/tmp/sproozi-native/claude-settings.json"
-	claudeHome                        = "/workspace/session/claude"
-	claudeExecutable                  = "/usr/local/bin/claude"
+	claudeSettings   = "/tmp/sproozi-native/claude-settings.json"
+	claudeHome       = "/workspace/session/claude"
+	claudeExecutable = "/usr/local/bin/claude"
 )
+
+const opClaudeHook harness.NativeOp = "observe-claude"
 
 // Native hooks and their journal are workload-accessible completion hints. They
 // authorize only controlled process shutdown, never accounting or writer fences.
@@ -195,7 +196,8 @@ func (s *server) observeClaudeTurn() (string, string, error) {
 	return c.id, leaf, err
 }
 
-func prepareClaudeLaunch(c config, env []string) ([]string, []string, error) {
+func prepareClaudeLaunch(c config, _ string, env []string) ([]string, []string, error) {
+	env = append(env, "CLAUDE_CONFIG_DIR="+claudeHome)
 	key := ""
 	for _, entry := range env {
 		if after, ok := strings.CutPrefix(entry, "ANTHROPIC_API_KEY="); ok {
