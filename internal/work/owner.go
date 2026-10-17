@@ -642,10 +642,13 @@ func (o *Owner) execute(ctx context.Context, r *record) error {
 	return nil
 }
 
-// ValidateExport keeps transcript validation separate from trusted stop/seal evidence.
+// ValidateExport checks an export's writer stop, sealed usage and checkpoint
+// evidence, keeping transcript validation separate from that evidence. The
+// stopped launch can belong to a later execution of the exported session, so
+// callers bind the execution themselves.
 func ValidateExport(e Export, max int64) error {
 	s := e.Stopped
-	if !CanonicalID(e.ID) || s.Launch.SessionID != e.ID || e.Harness != s.Launch.Harness || !s.ActualStopped || s.Receipt == nil || s.Receipt.Incarnation != s.Incarnation || s.Receipt.Launch.ThreadID != s.Launch.ThreadID || len(s.Receipt.Usage) != len(s.Launch.Allowances) {
+	if !CanonicalID(e.ID) || e.Harness != s.Launch.Harness || !s.ActualStopped || s.Receipt == nil || s.Receipt.Incarnation != s.Incarnation || s.Receipt.Launch.ThreadID != s.Launch.ThreadID || len(s.Receipt.Usage) != len(s.Launch.Allowances) {
 		return &profile.Rejection{Code: profile.CodeUnavailable}
 	}
 	for cap, a := range s.Launch.Allowances {
