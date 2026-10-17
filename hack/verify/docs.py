@@ -53,8 +53,11 @@ else:
     errors.append("missing demo kustomization: examples/sre-demo/kustomization.yaml")
 
 for path in root.rglob("*.md"):
-    public_skill = path.is_relative_to(root / ".agents/skills/verify-sproozi")
-    if path.name == "AGENTS.md" or any(part in {".git", ".local", ".claude", ".engineering", ".codex"} for part in path.parts) or (".agents" in path.parts and not public_skill) or "docs/impl" in str(path.relative_to(root)):
+    # Filter on the path inside the repository so a checkout under a hidden
+    # directory (for example a .claude worktree) is still checked.
+    rel = path.relative_to(root)
+    public_skill = rel.is_relative_to(".agents/skills/verify-sproozi")
+    if path.name == "AGENTS.md" or any(part in {".git", ".local", ".claude", ".engineering", ".codex"} for part in rel.parts) or (".agents" in rel.parts and not public_skill) or "docs/impl" in str(rel):
         continue
     text = path.read_text(encoding="utf-8")
     for raw_target in re.findall(r"\[[^]]+\]\(([^)]+)\)", text):
