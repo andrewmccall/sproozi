@@ -297,7 +297,8 @@ func (s *Service) Pull(ctx context.Context, id, operation, sourceName string) (S
 	r, err := s.readCatalog(id)
 	if err == nil {
 		if r.Source != sourceName || r.Operation != operation {
-			return Status{}, errors.New("home: pull intent conflicts")
+			return Status{}, fmt.Errorf("home: this session's pull from %q is retained as operation %s; "+
+				"retry it with --from %s --operation %s", r.Source, r.Operation, r.Source, r.Operation)
 		}
 		if r.Claimed {
 			return s.catalogStatus(r)

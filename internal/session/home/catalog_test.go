@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -74,6 +75,10 @@ func TestPullClaimReplayAndFreshResumePreserveSourceAccounts(t *testing.T) {
 	}
 	if _, err := s.Resume(t.Context(), id, uuid.NewString()); err == nil || local.prepares != 0 {
 		t.Fatal("downloaded bytes acquired activation authority")
+	}
+	if _, err := s.Pull(t.Context(), id, uuid.NewString(), testRemote); err == nil ||
+		!strings.Contains(err.Error(), "--from "+testRemote+" --operation "+operation) {
+		t.Fatalf("conflicting pull did not name the retained operation: %v", err)
 	}
 	status, err := s.Pull(t.Context(), id, operation, testRemote)
 	if err != nil || source.begins != 1 || source.claims != 2 || status.InitialStage != stageRetained || status.ThreadID != testNativeUUID {
