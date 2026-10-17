@@ -86,7 +86,7 @@ func discoverSessions(ctx context.Context, q options) catalogue {
 					v.rows = append(v.rows, row)
 				}
 			} else {
-				fixed, ok := workConnection(q.fixed, name)
+				fixed, ok := q.fixed.WorkConnections()[name]
 				if !ok {
 					v.err = &profile.Rejection{Code: profile.CodeInvalid}
 				} else {

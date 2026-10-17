@@ -2,7 +2,9 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -36,7 +38,7 @@ func TestLocalCommandsUseSharedSessionAddressing(t *testing.T) {
 
 func TestRemoteTargetsRejectUnsupportedControlsBeforeConfiguration(t *testing.T) {
 	for _, action := range []string{"stop", "resume", home.ActionStart, home.ActionAttach, home.ActionMove} {
-		err := run([]string{action, uuid.NewString(), "--executor", testExecutor, "--config", "/missing/config"})
+		err := run([]string{action, uuid.NewString(), "--executor", testExecutor, "--config", "/missing/config"}, io.Discard)
 		if err == nil || !strings.Contains(err.Error(), "requires the local home owner") {
 			t.Fatalf("%s used configuration before rejecting target: %v", action, err)
 		}
@@ -103,23 +105,14 @@ func TestSessionsWritesOneLabelledCatalogue(t *testing.T) {
 		}
 		done <- e
 	}()
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	original := os.Stdout
-	os.Stdout = w
-	err = run([]string{"sessions", testSocketFlag, socket, "--project", "sproozi-dev"})
-	os.Stdout = original
-	_ = w.Close()
-	defer func() { _ = r.Close() }()
-	if err != nil {
+	var stdout bytes.Buffer
+	if err = run([]string{"sessions", testSocketFlag, socket, "--project", "sproozi-dev"}, &stdout); err != nil {
 		t.Fatal(err)
 	}
 	if err = <-done; err != nil {
 		t.Fatal(err)
 	}
-	decoder := json.NewDecoder(r)
+	decoder := json.NewDecoder(&stdout)
 	var out catalogue
 	if err = decoder.Decode(&out); err != nil {
 		t.Fatal(err)
@@ -161,5 +154,38 @@ func TestProjectAndRevisionOptionsUseSharedAddressing(t *testing.T) {
 		if _, err = parseProduct(args); err == nil {
 			t.Fatalf("Unsupported Project/revision intent accepted: %v", args)
 		}
+	}
+}
+
+func TestPlainPullRetryRepeatsTheSameOperation(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, "config.json")
+	data := `{"directory":"` + dir + `", "model":"fixture", "local":{"Name":"docker"},
+ "allowances":{"model.inference":{"units":{"bounded":true,"value":10}}}, "maxDuration":"1h"}`
+	if err := os.WriteFile(config, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+	id := uuid.NewString()
+	parse := func(args ...string) options {
+		t.Helper()
+		q, err := parseProduct(append([]string{"pull", id, "--config", config}, args...))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return q
+	}
+	first, retry := parse("--from", testExecutor), parse("--executor", testExecutor)
+	if first.source != testExecutor || retry.source != testExecutor || first.operation == "" || retry.operation != first.operation {
+		t.Fatalf("Pull retry changed intent: %+v %+v", first, retry)
+	}
+	if other := parse("--from", sharedOwner); other.operation == first.operation {
+		t.Fatal("Another source reused the pull operation")
+	}
+	explicit := uuid.NewString()
+	if q := parse("--from", testExecutor, "--operation", explicit); q.operation != explicit {
+		t.Fatalf("Explicit pull operation replaced: %s", q.operation)
+	}
+	if _, err := parseProduct([]string{"pull", id, "--config", config}); err == nil {
+		t.Fatal("Pull without a source accepted")
 	}
 }

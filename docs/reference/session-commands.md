@@ -51,10 +51,49 @@ your laptop still requires the laptop and Docker engine to remain available.
 Follow [session mobility](../guides/session-mobility.md) for the complete setup,
 commands, supported clients and movement limits.
 
+## Command flags
+
+Each command accepts only the flags listed here. `sproozi -h` lists the
+commands, and `sproozi COMMAND -h` prints one command's usage and flags. Any
+other flag is rejected before configuration is read or a request is sent.
+
+| Command | Flags |
+| --- | --- |
+| `run` | `--config`, `--executor`, `--operation`, `--harness`, `--repository`, `--project`, `--task`, `--task-file`, `--workspace-from`, `--checkpoint-digest`, `--revision` |
+| `sessions` | `--config`, `--socket`, `--executor`, `--project` |
+| `status` | `--config`, `--socket`, `--executor`, `--id` |
+| `pull` | `--config`, `--socket`, `--executor`, `--id`, `--operation`, `--from` |
+| `resume` | `--config`, `--socket`, `--executor`, `--id`, `--operation`, `--detach` |
+| `stop` | `--config`, `--socket`, `--executor`, `--id`, `--operation` |
+| `cancel` | `--config`, `--socket`, `--executor`, `--id`, `--operation` |
+| `recover` | `--config`, `--socket`, `--executor`, `--id` |
+| `serve` | `--config` |
+| `start` | `--config`, `--socket`, `--executor`, `--id`, `--operation`, `--workspace`, `--include-ignored` |
+| `attach` | `--config`, `--socket`, `--executor`, `--id` |
+| `move` | `--config`, `--socket`, `--executor`, `--id`, `--operation`, `--to` |
+
+| Flag | Meaning |
+| --- | --- |
+| `--config FILE` | Private global configuration. `serve` requires it; other commands default to the platform path described below. |
+| `--socket PATH` | Private home socket, overriding the configured home. |
+| `--executor NAME` | Owner to address; `docker` selects home. See [Select the owner](#select-the-owner). |
+| `--id UUID` | Stable session UUID. Commands that take a session also accept it as the first argument. |
+| `--operation UUID` | Stable operation UUID. Reuse it when retrying a mutation. |
+| `--from NAME` | Configured remote source for `pull`. |
+| `--harness NAME` | Approved native harness for `run`; defaults to `local.harness`. |
+| `--repository NAME` | Approved repository for `run`. |
+| `--project ID` | Approved Project for `run`, or a filter for `sessions`. |
+| `--task TEXT`, `--task-file FILE` | Task for `run`, inline or from a UTF-8 file of at most 16 KiB. Choose one. |
+| `--workspace-from UUID`, `--checkpoint-digest SHA256`, `--revision COMMIT` | Start `run` from a retained session's exact recorded commit. All three are required together. |
+| `--detach` | Return after `resume` without attaching the terminal. |
+| `--workspace PATH` | Stopped ordinary Git directory that seeds `start`. |
+| `--include-ignored PATH` | Ignored file `start` carries on every visit. Repeat it for each file. |
+| `--to NAME` | Configured destination for `move`. |
+
 ## Select the owner
 
-Every client command accepts `--config FILE` and a home `--socket PATH` override.
-Configuration defaults to the platform user configuration directory at
+Every client command except `run` accepts `--config FILE` and a home
+`--socket PATH` override. Configuration defaults to the platform user configuration directory at
 `sproozi/config.json`. A socket-only local invocation skips that default file;
 for example, `sessions --socket PATH` queries only home. Supply
 `--config FILE --socket PATH` to combine configured remote sources with a socket
@@ -92,7 +131,9 @@ sproozi stop SESSION_UUID --executor docker --config /private/sproozi/config.jso
   --operation ORIGINAL_STOP_UUID
 ```
 
-Keep the operation UUID and exact intent when retrying a mutation. A timeout is
+Keep the operation UUID and exact intent when retrying a mutation. `pull`
+derives its operation from the session ID and source unless `--operation` is
+given, so repeating the same `pull` command retries it. A timeout is
 an uncertain result; inspect the selected owner's retained status before choosing
 a next step. `recover` continues retained intent and does not accept a replacement
 operation UUID. `stop` waits for supported foreground work and seals a checkpoint;
