@@ -176,6 +176,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"request body exceeds gateway limit", "invalid_request_error", "request_too_large")
 		return
 	}
+	if len(bodyBytes) != 0 && unambiguousJSON(bodyBytes) != nil {
+		h.deny(w, e, http.StatusBadRequest,
+			"request body must be one JSON value without duplicate keys", "invalid_request_error", "ambiguous_json")
+		return
+	}
 	var check requestStreamCheck
 	if h.protocol == anthropicProtocol {
 		bodyBytes, err = h.prepareAnthropic(r, bodyBytes, limits)
@@ -410,6 +415,56 @@ func requestTokenEstimate(body []byte) int64 {
 		}
 	}
 	return estimate
+}
+
+// unambiguousJSON rejects request bodies whose meaning depends on the parser.
+// The budget and pricing checks decode with encoding/json, which keeps the last
+// duplicate key and matches struct fields regardless of case. A provider that
+// keeps the first key, or matches exactly, could then bill a value those checks
+// never saw. Keys within one object must therefore differ after case folding.
+func unambiguousJSON(body []byte) error {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	if err := inspectJSONValue(decoder, 0); err != nil {
+		return err
+	}
+	if _, err := decoder.Token(); err != io.EOF {
+		return fmt.Errorf("model request has trailing data")
+	}
+	return nil
+}
+
+func inspectJSONValue(decoder *json.Decoder, depth int) error {
+	// encoding/json refuses deeper nesting, so no check would accept it either.
+	if depth > 10000 {
+		return fmt.Errorf("model request nesting exceeds bounds")
+	}
+	token, err := decoder.Token()
+	if err != nil {
+		return fmt.Errorf("invalid model request JSON")
+	}
+	delimiter, ok := token.(json.Delim)
+	if !ok {
+		return nil
+	}
+	keys := map[string]bool{}
+	for decoder.More() {
+		if delimiter == '{' {
+			key, err := decoder.Token()
+			if err != nil {
+				return fmt.Errorf("invalid model request JSON")
+			}
+			folded := strings.ToLower(strings.ToUpper(key.(string)))
+			if keys[folded] {
+				return fmt.Errorf("model request has duplicate key")
+			}
+			keys[folded] = true
+		}
+		if err := inspectJSONValue(decoder, depth+1); err != nil {
+			return err
+		}
+	}
+	_, err = decoder.Token() // closing delimiter
+	return err
 }
 
 func readBounded(reader io.Reader, limit int64) ([]byte, error) {

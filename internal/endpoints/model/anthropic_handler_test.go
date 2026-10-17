@@ -49,6 +49,42 @@ func TestAnthropicCappedNullableUsageSettlesActualConsumption(t *testing.T) {
 	}
 }
 
+// Go keeps the last duplicate key and matches struct fields without regard to
+// case. A provider that keeps the first key, or matches exactly, would bill a
+// value the cost checks never saw, so ambiguous bodies never reach upstream.
+func TestModelRequestsWithAmbiguousJSONKeysAreDenied(t *testing.T) {
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		_, _ = io.WriteString(w, anthropicSuccess)
+	}))
+	defer upstream.Close()
+	identity := testExecutionGrant()
+	identity.Policy.Spec.Budgets[api.CapabilityModelInference] = api.EndpointBudget{MaxUnits: 100, MaxCostMicros: 200}
+	h := model.NewAnthropicHandler(model.HandlerConfig{
+		Pricing:      &model.PricingTable{Models: map[string]model.ModelPrice{"claude-fixture": {InputMicrosPerMillionTokens: 1000000, CachedInputMicrosPerMillionTokens: 1000000, OutputMicrosPerMillionTokens: 1000000}}},
+		ProviderAuth: modelauth.AnthropicAPIKey{Key: testAnthropicSecret}, UpstreamURL: upstream.URL,
+		HTTPClient: upstream.Client(), AuditLogger: audit.NewLogger(io.Discard),
+	})
+	routes := gateway.Dispatcher{model.AnthropicAuthority: {Capability: string(api.CapabilityModelInference), Handler: h, Budgets: budget.NewTracker()}}
+	for name, body := range map[string]string{
+		"duplicate nested cache TTL": `{"model":"claude-fixture","max_tokens":2,"messages":[{"role":"user","content":[{"type":"text","text":"hi","cache_control":{"type":"ephemeral","ttl":"1h","ttl":"5m"}}]}]}`,
+		"duplicate top-level key":    `{"model":"claude-fixture","max_tokens":2,"max_tokens":1,"messages":[{"role":"user","content":"hello"}]}`,
+		"case-variant key":           `{"model":"claude-fixture","max_tokens":2,"messages":[{"role":"user","content":[{"type":"text","text":"hi","cache_control":{"type":"ephemeral","ttl":"1h"}}]}],"Messages":[]}`,
+		"trailing value":             `{"model":"claude-fixture","max_tokens":2,"messages":[]} {"stream":true}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "https://api.anthropic.com/v1/messages", strings.NewReader(body))
+			req = req.WithContext(gateway.WithIdentity(req.Context(), identity))
+			response := httptest.NewRecorder()
+			routes.ServeHTTP(response, req)
+			if response.Code != http.StatusBadRequest || calls.Load() != 0 {
+				t.Fatalf("status=%d upstream calls=%d body=%s", response.Code, calls.Load(), response.Body.String())
+			}
+		})
+	}
+}
+
 func TestAnthropicHandlerReplacesCredentialsAndSettlesTotalBeyondOutputBound(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("x-api-key") != testAnthropicSecret || r.Header.Get("Authorization") != "" || r.Header.Get("Cookie") != "" || r.Header.Get("Anthropic-Organization") != "" {
