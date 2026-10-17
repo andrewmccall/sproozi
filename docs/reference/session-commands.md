@@ -113,11 +113,11 @@ execution and cannot affect a later resume.
 | `executor` | In catalogue rows, the owner catalogue queried. |
 | `placement` | Current or last retained execution destination. It can differ from the queried owner. |
 
-Home status also retains `initialStage` and the existing nested `session`
-execution journal for detailed inspection. That nested journal keeps its original
-execution-bound identifiers and receipts. Remote work status can include bounded
-untrusted final text and checkpoint facts. Discovery omits full journals and final
-answers.
+Home status also includes the nested `session` execution journal for detailed
+inspection, and `initialStage`, which repeats `phase` for older clients. That
+nested journal keeps its original execution-bound identifiers and receipts.
+Remote work status can include bounded untrusted final text and checkpoint
+facts. Discovery omits full journals and final answers.
 
 `sessions` writes one JSON document containing `sessions`, `executors` and
 `truncated`. It queries at most 32 catalogues concurrently, with a five-second

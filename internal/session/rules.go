@@ -1,6 +1,7 @@
 package session
 
 import (
+	"cmp"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -50,7 +51,10 @@ func validateAllowance(a map[string]Allowance) error {
 	return nil
 }
 func validateLaunch(l Launch) error {
-	if l.Harness.Validate() != nil || !validUUID(l.SessionID) || !validUUID(l.OperationID) || !validUUID(l.AllocationID) || !validUUID(l.ThreadID) || !validName(l.Placement) || l.Epoch == 0 || !validDigest(l.InstructionDigest) || l.Deadline.IsZero() || (!validDigest(l.CheckpointDigest) && l.CheckpointDigest != "") {
+	// Only a first visit from a Git workspace lacks a thread, and it then has
+	// no checkpoint either; every other launch names both.
+	fresh := l.ThreadID == "" && l.CheckpointDigest == ""
+	if l.Harness.Validate() != nil || !validUUID(l.SessionID) || !validUUID(l.OperationID) || !validUUID(l.AllocationID) || !fresh && (!validUUID(l.ThreadID) || !validDigest(l.CheckpointDigest)) || !validName(l.Placement) || l.Epoch == 0 || !validDigest(l.InstructionDigest) || l.Deadline.IsZero() {
 		return errors.New("session: invalid launch identity")
 	}
 	if err := workspace.ValidateIgnoredPaths(l.IncludeIgnored); err != nil {
@@ -58,12 +62,15 @@ func validateLaunch(l Launch) error {
 	}
 	return validateAllowance(l.Allowances)
 }
-func sameLaunch(a, b Launch) bool {
+
+// SameLaunch is the one equality for immutable launch intent. JSON encoding
+// normalises map order and empty slices; deadlines compare in UTC.
+func SameLaunch(a, b Launch) bool {
 	a.Deadline = a.Deadline.UTC()
 	b.Deadline = b.Deadline.UTC()
-	x, _ := json.Marshal(a)
-	y, _ := json.Marshal(b)
-	return string(x) == string(y)
+	x, errA := json.Marshal(a)
+	y, errB := json.Marshal(b)
+	return errA == nil && errB == nil && string(x) == string(y)
 }
 func cloneAllowances(a map[string]Allowance) map[string]Allowance {
 	copy := make(map[string]Allowance, len(a))
@@ -124,21 +131,37 @@ func validateReceipt(launch Launch, inc Incarnation, receipt *Receipt) error {
 	if receipt == nil {
 		return errors.New("session: accounting remains unknown")
 	}
-	if !sameLaunch(launch, receipt.Launch) || inc != receipt.Incarnation {
+	if !SameLaunch(launch, receipt.Launch) || inc != receipt.Incarnation {
 		return errors.New("session: receipt allocation/incarnation mismatch")
 	}
 	_, err := subtract(launch.Allowances, *receipt)
 	return err
 }
 func validateStop(launch Launch, inc Incarnation, s Stopped) error {
-	if !sameLaunch(launch, s.Launch) || inc != s.Incarnation || !s.ActualStopped {
+	if !fencedBy(launch, inc, s) {
 		return errors.New("session: source stop remains unknown")
 	}
 	return validateReceipt(launch, inc, s.Receipt)
 }
-func launchBelongs(r Record, l Launch) bool {
-	return l.Harness == r.Harness && l.SessionID == r.ID && l.ThreadID == r.ThreadID && l.InstructionDigest == r.InstructionDigest && l.Deadline.Equal(r.Deadline) && slices.Equal(l.IncludeIgnored, r.IncludeIgnored)
+
+// fencedBy reports that s proves the exact launch and incarnation stopped and
+// names a thread consistent with the launch.
+func fencedBy(launch Launch, inc Incarnation, s Stopped) bool {
+	thread := s.ThreadID == "" || s.ThreadID == launch.ThreadID || launch.ThreadID == "" && validUUID(s.ThreadID)
+	return s.ActualStopped && SameLaunch(launch, s.Launch) && inc == s.Incarnation && thread
 }
+
+// stoppedThread is the native thread a stopped visit ran.
+func stoppedThread(s Stopped) string { return cmp.Or(s.ThreadID, s.Launch.ThreadID) }
+
+// launchBelongs checks a launch against the execution's fixed identity. Only
+// the first visit of an execution started from a workspace lacks the thread.
+func launchBelongs(r Record, l Launch) bool {
+	thread := l.ThreadID == r.ThreadID || l.ThreadID == "" && l.Epoch == 1 && r.Workspace != ""
+	return thread && l.Harness == r.Harness && l.SessionID == r.ID && l.InstructionDigest == r.InstructionDigest && l.Deadline.Equal(r.Deadline) && slices.Equal(l.IncludeIgnored, r.IncludeIgnored)
+}
+
+func (r Record) hasCheckpoint() bool { return r.Checkpoint.Path != "" }
 func validateRecord(r Record) error {
 	if err := validateJournalIdentity(r); err != nil {
 		return err
@@ -159,8 +182,11 @@ func validateJournalIdentity(r Record) error {
 	if err := workspace.ValidateIgnoredPaths(r.IncludeIgnored); err != nil {
 		return err
 	}
-	if r.Harness.Validate() != nil || r.Version != journalVersion || !validUUID(r.ID) || !validUUID(r.ThreadID) || !validDigest(r.InstructionDigest) || r.Deadline.IsZero() || r.Epoch == 0 || len(r.Operations) > maxOperations || len(r.Visits) == 0 {
+	if r.Harness.Validate() != nil || r.Version != journalVersion || !validUUID(r.ID) || r.Session != "" && !validUUID(r.Session) || !validDigest(r.InstructionDigest) || r.Deadline.IsZero() || len(r.Operations) == 0 || len(r.Operations) > maxOperations {
 		return errors.New("session: invalid journal identity")
+	}
+	if r.Workspace != "" && !validDigest(r.Workspace) {
+		return errors.New("session: invalid retained workspace")
 	}
 	if err := validateAllowance(r.Ceiling); err != nil {
 		return err
@@ -168,7 +194,15 @@ func validateJournalIdentity(r Record) error {
 	if err := validateAllowance(r.Remaining); err != nil {
 		return err
 	}
-	if r.Checkpoint.Metadata.Harness != r.Harness || r.Checkpoint.Metadata.ThreadID != r.ThreadID || !validDigest(r.Checkpoint.Metadata.SHA256) || r.Checkpoint.Path != "checkpoints/"+r.Checkpoint.Metadata.SHA256+".json" || r.Checkpoint.Metadata.Bytes <= 0 {
+	// The thread and its checkpoint are committed together: from the first
+	// visit's input when resuming, otherwise by the first stop.
+	if !r.hasCheckpoint() {
+		if r.ThreadID != "" || r.Workspace == "" || r.Checkpoint != (Checkpoint{}) {
+			return errors.New("session: execution has neither checkpoint nor workspace input")
+		}
+		return nil
+	}
+	if !validUUID(r.ThreadID) || r.Checkpoint.Metadata.Harness != r.Harness || r.Checkpoint.Metadata.ThreadID != r.ThreadID || !validDigest(r.Checkpoint.Metadata.SHA256) || r.Checkpoint.Path != checkpointPath(r.Checkpoint.Metadata.SHA256) || r.Checkpoint.Metadata.Bytes <= 0 {
 		return errors.New("session: invalid committed checkpoint")
 	}
 	return nil
@@ -181,7 +215,9 @@ func validateHistory(r Record) (uint64, map[string]bool, error) {
 		if err := validateLaunch(visit.Launch); err != nil {
 			return 0, nil, err
 		}
-		if !launchBelongs(r, visit.Launch) || !validIncarnation(visit.Incarnation) || seenAlloc[visit.Launch.AllocationID] || !visit.ActualStopped || !validDigest(visit.CheckpointDigest) || visit.Launch.Epoch <= lastEpoch {
+		// A visit cancelled before any checkpoint existed retains none.
+		checkpointed := validDigest(visit.CheckpointDigest) || visit.CheckpointDigest == "" && !r.hasCheckpoint()
+		if !launchBelongs(r, visit.Launch) || !validIncarnation(visit.Incarnation) || seenAlloc[visit.Launch.AllocationID] || !visit.ActualStopped || !checkpointed || visit.Launch.Epoch <= lastEpoch {
 			return 0, nil, errors.New("session: invalid retained visit")
 		}
 		if !sameAllowances(remaining, visit.Launch.Allowances) {
@@ -218,6 +254,10 @@ func validateActive(r Record, lastEpoch uint64, seenAlloc map[string]bool) error
 	return nil
 }
 func validateOperations(r Record) error {
+	if first := r.Operations[0]; first.Finalize || first.Launch == nil || first.Launch.Epoch != 1 ||
+		(first.Launch.CheckpointDigest == "") != (r.Workspace != "") {
+		return errors.New("session: execution lacks its first visit")
+	}
 	ids := map[string]bool{}
 	for i, op := range r.Operations {
 		if !validUUID(op.ID) || ids[op.ID] ||
@@ -263,6 +303,30 @@ func pendingStage(r Record) Stage {
 	return r.Operations[len(r.Operations)-1].Stage
 }
 
+// phaseFacts is the structure a phase summarises.
+type phaseFacts struct {
+	pending Stage // next step of the pending operation, or "" when none
+	writer  bool  // an active visit exists, running or fenced
+	running bool  // the active writer may still run
+	fenced  bool  // the active writer is proven stopped
+	cancel  bool  // cancellation was requested
+}
+
+// phaseRules says, for each phase, which structures it may describe.
+var phaseRules = map[Phase]func(phaseFacts) bool{
+	PhaseIdle:       func(f phaseFacts) bool { return !f.writer && f.pending == "" && !f.cancel },
+	PhasePreparing:  func(f phaseFacts) bool { return !f.writer && f.pending == stagePrepare && !f.cancel },
+	PhaseActivating: func(f phaseFacts) bool { return !f.writer && f.pending == stageActivate && !f.cancel },
+	PhaseActive:     func(f phaseFacts) bool { return f.running && f.pending == "" && !f.cancel },
+	PhaseStopping:   func(f phaseFacts) bool { return f.running && f.pending == stageStop && !f.cancel },
+	PhaseUnknownStop: func(f phaseFacts) bool {
+		return f.running && (f.pending == stageStop || f.cancel) || !f.writer && f.pending != "" && f.cancel
+	},
+	PhaseUnknownUsage: func(f phaseFacts) bool { return f.fenced && (f.pending == stageStop || f.cancel) },
+	PhaseCancelling:   func(f phaseFacts) bool { return f.cancel },
+	PhaseCancelled:    func(f phaseFacts) bool { return f.cancel && !f.writer && f.pending == "" },
+}
+
 // validatePhase checks that the phase describes the record's actual structure:
 // whether a writer may run (Active), whether it is fenced (ActualStopped),
 // which step is pending and whether cancellation was requested.
@@ -270,34 +334,14 @@ func validatePhase(r Record) error {
 	if r.CancelOperation != "" && !validUUID(r.CancelOperation) {
 		return errors.New("session: invalid cancellation intent")
 	}
-	pending := pendingStage(r)
-	running := r.Active != nil && !r.Active.ActualStopped
-	fenced := r.Active != nil && r.Active.ActualStopped
-	cancelling := r.CancelOperation != ""
-	var valid bool
-	switch r.Phase {
-	case PhaseIdle:
-		valid = r.Active == nil && pending == "" && !cancelling
-	case PhasePreparing:
-		valid = r.Active == nil && pending == stagePrepare && !cancelling
-	case PhaseActivating:
-		valid = r.Active == nil && pending == stageActivate && !cancelling
-	case PhaseActive:
-		valid = running && pending == "" && !cancelling
-	case PhaseStopping:
-		valid = running && pending == stageStop && !cancelling
-	case PhaseUnknownStop:
-		valid = running && (pending == stageStop || cancelling) || r.Active == nil && pending != "" && cancelling
-	case PhaseUnknownUsage:
-		valid = fenced && (pending == stageStop || cancelling)
-	case PhaseCancelling:
-		valid = cancelling
-	case PhaseCancelled:
-		valid = cancelling && r.Active == nil && pending == ""
-	default:
+	rule, ok := phaseRules[r.Phase]
+	if !ok {
 		return fmt.Errorf("session: invalid phase %q", r.Phase)
 	}
-	if !valid {
+	facts := phaseFacts{pending: pendingStage(r), writer: r.Active != nil, cancel: r.CancelOperation != ""}
+	facts.running = facts.writer && !r.Active.ActualStopped
+	facts.fenced = facts.writer && r.Active.ActualStopped
+	if !rule(facts) {
 		return fmt.Errorf("session: phase %q contradicts the retained execution", r.Phase)
 	}
 	return nil

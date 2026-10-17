@@ -87,15 +87,19 @@ func assertFreshResume(t *testing.T, s *Service, local *placementFixture, source
 	before, _ := json.Marshal(source.export.Stopped.Receipt)
 	resume := uuid.NewString()
 	status, err := s.Resume(t.Context(), id, resume)
-	if err != nil || status.ID != id || status.ExecutionID == id || status.InitialStage != "active" || status.ThreadID != testNativeUUID {
+	if err != nil || status.ID != id || status.ExecutionID == id || status.Phase != string(session.PhaseActive) || status.ThreadID != testNativeUUID {
 		t.Fatalf("fresh native resume: %+v %v", status, err)
 	}
-	r, err := s.readInitial(status.ExecutionID)
-	if err != nil || r.Input != checkpointInput || r.Launch.Allowances[testCapability].Units.Value != 10 || !r.Launch.Deadline.After(time.Now()) || r.Launch.AllocationID == source.export.Stopped.Launch.AllocationID {
-		t.Fatalf("new admission credited source authority: %+v %v", r, err)
+	r, err := s.coordinator.Inspect(status.ExecutionID)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err = os.Stat(filepath.Join(s.config.Directory, "journal", status.ExecutionID+".json")); !os.IsNotExist(err) {
-		t.Fatal("resume invented a previous source receipt in its coordinator")
+	first := r.Operations[0].Launch
+	if first.CheckpointDigest != source.export.Stopped.CheckpointDigest || first.Allowances[testCapability].Units.Value != 10 || !first.Deadline.After(time.Now()) || first.AllocationID == source.export.Stopped.Launch.AllocationID {
+		t.Fatalf("new admission credited source authority: %+v", r)
+	}
+	if len(r.Visits) != 0 || !reflect.DeepEqual(r.Remaining, r.Ceiling) {
+		t.Fatalf("resume invented a previous source receipt in its coordinator: %+v", r)
 	}
 	replayed, err := s.Resume(t.Context(), id, resume)
 	if err != nil || replayed.ID != id || replayed.ExecutionID != status.ExecutionID || local.activations != 1 || local.initials != 0 || local.prepares != 1 {
@@ -133,15 +137,15 @@ func assertCompletedResumeCycle(t *testing.T, s *Service, local *placementFixtur
 		t.Fatal("old stop operation moved a later execution")
 	}
 	active, err := s.Status(id)
-	if err != nil || active.ID != id || active.ExecutionID != next.ExecutionID || active.InitialStage != initialActive {
+	if err != nil || active.ID != id || active.ExecutionID != next.ExecutionID || active.Phase != string(session.PhaseActive) {
 		t.Fatalf("replay affected later writer: %+v %v", active, err)
 	}
 	after, _ := json.Marshal(source.export.Stopped.Receipt)
 	if string(before) != string(after) {
 		t.Fatal("local execution rewrote remote sealed accounts")
 	}
-	old, err := s.readInitial(status.ExecutionID)
-	if err != nil || old.Stopped == nil || old.Stopped.Receipt.Usage[testCapability].Units != 2 {
+	old, err := s.coordinator.Inspect(status.ExecutionID)
+	if err != nil || len(old.Visits) != 1 || old.Visits[0].Receipt.Usage[testCapability].Units != 2 {
 		t.Fatalf("previous local spent accounting unavailable: %+v %v", old, err)
 	}
 }
@@ -268,7 +272,7 @@ func TestFreshResumeHonorsExistingExecutionRetentionBounds(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.config.Local.RetainedBytes = s.config.Local.MaxCheckpointBytes + 1
-	if err := os.WriteFile(filepath.Join(s.initialDir, "retained-padding"), []byte("xx"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(s.config.Directory, "journal", "retained-padding"), []byte("xx"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Resume(t.Context(), id, uuid.NewString()); err == nil {

@@ -298,6 +298,7 @@ func TestStopCanSealExpiredOriginalLaunch(t *testing.T) {
 		t.Fatalf("expired source sealing: %+v %v", s, err)
 	}
 }
+
 // The transport must keep the Placement.Stop contract: a fenced writer with
 // unsealed usage arrives as a stopped result plus ErrUsageUnsealed, never as an
 // unknown stop or as a receipt.

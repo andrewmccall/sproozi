@@ -8,7 +8,12 @@ import (
 // Cancel durably prevents activation before asking a placement to revoke and
 // forcibly stop. Unknown stop or usage never refunds the encumbered allocation.
 // Unlike a move, cancellation can preserve the last checkpoint without a new one.
-func (c *Coordinator) Cancel(ctx context.Context, id, operationID string) (Record, error) {
+//
+// Cancel first interrupts any graceful operation on the execution, so it never
+// waits for a native turn. admit, when non-nil, runs next and before the intent
+// is persisted: an owner uses it to take its own lock and bind the request, and
+// the returned release runs when Cancel returns.
+func (c *Coordinator) Cancel(ctx context.Context, id, operationID string, admit func() (func(), error)) (Record, error) {
 	if !validUUID(id) || !validUUID(operationID) {
 		return Record{}, errors.New("session: invalid session or cancellation ID")
 	}
@@ -20,6 +25,13 @@ func (c *Coordinator) Cancel(ctx context.Context, id, operationID string) (Recor
 		return Record{}, err
 	}
 	defer finish()
+	if admit != nil {
+		release, err := admit()
+		if err != nil {
+			return Record{}, err
+		}
+		defer release()
+	}
 	unlock, err := c.lockSession(id)
 	if err != nil {
 		return Record{}, err
@@ -73,8 +85,9 @@ func (c *Coordinator) abort(ctx context.Context, r Record) (Record, error) {
 
 // claimPendingWriter makes a pending destination the active visit so that it
 // can be aborted. A known prepared incarnation is used directly: inspecting it
-// could replay an interrupted activation. resolved reports that nothing was
-// ever prepared, so cancellation is complete.
+// could replay an interrupted activation. A placement that can fence an
+// unreported preparation does so without inspecting it. resolved reports that
+// no writer can exist, so cancellation is complete.
 func (c *Coordinator) claimPendingWriter(ctx context.Context, r Record) (Record, bool, error) {
 	op := &r.Operations[len(r.Operations)-1]
 	if op.Launch == nil {
@@ -84,10 +97,21 @@ func (c *Coordinator) claimPendingWriter(ctx context.Context, r Record) (Record,
 	if !ok {
 		return r, false, errors.New("session: pending placement unavailable")
 	}
-	incarnation := Incarnation{}
-	if op.Incarnation != nil {
+	var incarnation Incarnation
+	aborter, fencesPreparation := p.(PreparationAborter)
+	switch {
+	case op.Incarnation != nil:
 		incarnation = *op.Incarnation
-	} else {
+	case fencesPreparation:
+		if err := aborter.AbortPreparation(ctx, *op.Launch); err != nil {
+			r.Phase = PhaseUnknownStop
+			return r, false, errors.Join(err, c.save(r))
+		}
+		op.Stage = stageCancelled
+		r.PendingOperation = ""
+		r.Phase = PhaseCancelled
+		return r, true, c.save(r)
+	default:
 		o, err := p.Inspect(ctx, *op.Launch)
 		if err != nil {
 			r.Phase = PhaseUnknownStop
@@ -142,16 +166,13 @@ func (c *Coordinator) abortActive(ctx context.Context, r Record) (Record, error)
 	if err != nil {
 		return r, err
 	}
-	cp := r.Checkpoint
-	if len(o.Stopped.Checkpoint) > 0 {
-		cp, err = c.commitCheckpoint(o.Stopped.Checkpoint, r.Harness, r.ThreadID, o.Stopped.CheckpointDigest)
-		if err != nil {
-			return r, err
-		}
+	thread, cp, err := c.commitStopped(r, *o.Stopped)
+	if err != nil {
+		return r, err
 	}
 	r.Visits = append(r.Visits, Visit{Launch: active.Launch, Incarnation: active.Incarnation, ActualStopped: true, Receipt: o.Stopped.Receipt, CheckpointDigest: cp.Metadata.SHA256})
 	r.Remaining = remaining
-	r.Checkpoint = cp
+	r.ThreadID, r.Checkpoint = thread, cp
 	r.Active = nil
 	return r, nil
 }

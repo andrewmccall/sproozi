@@ -38,11 +38,11 @@ func TestImportedProjectNeedsIndependentLocalApprovalAndKeepsAssociation(t *test
 	if err != nil || resumed.Project != "sproozi-dev" || resumed.ThreadID != testNativeUUID {
 		t.Fatalf("Approved same-conversation continuation failed: %#v %v", resumed, err)
 	}
-	admitted, err := s.readInitial(resumed.ExecutionID)
-	if err != nil || !reflect.DeepEqual(admitted.Launch.Allowances, map[string]session.Allowance{
+	admitted, err := s.coordinator.Inspect(resumed.ExecutionID)
+	if err != nil || !reflect.DeepEqual(admitted.Ceiling, map[string]session.Allowance{
 		"model.inference": {Units: session.Limit{Bounded: true, Value: 10}},
 	}) {
-		t.Fatalf("Project widened fresh local authority: %#v %v", admitted.Launch.Allowances, err)
+		t.Fatalf("Project widened fresh local authority: %#v %v", admitted.Ceiling, err)
 	}
 	status, err := s.Stop(t.Context(), id, uuid.NewString())
 	if err != nil || status.Project != "sproozi-dev" || status.CheckpointInfo == nil ||

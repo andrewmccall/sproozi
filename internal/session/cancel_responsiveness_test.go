@@ -27,7 +27,7 @@ func TestCancelInterruptsHeldMove(t *testing.T) {
 	awaitResponsivenessSignal(t, held.entered)
 	cancelDone := make(chan error, 1)
 	go func() {
-		_, err := c.Cancel(t.Context(), start.Source.SessionID, uuid.NewString())
+		_, err := c.Cancel(t.Context(), start.Source.SessionID, uuid.NewString(), nil)
 		cancelDone <- err
 	}()
 	// Cancel must release the graceful operation itself, without the caller
@@ -49,10 +49,10 @@ func TestCancelInterruptsHeldMove(t *testing.T) {
 	if r.Checkpoint.Metadata.SHA256 != start.Stopped.CheckpointDigest || r.Remaining[testCapability].Units.Value != 18 {
 		t.Fatal("cancel replaced the last committed checkpoint or refunded unknown usage")
 	}
-	if _, err = c.Cancel(t.Context(), r.ID, r.CancelOperation); err != nil {
+	if _, err = c.Cancel(t.Context(), r.ID, r.CancelOperation, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = c.Cancel(t.Context(), r.ID, uuid.NewString()); err == nil {
+	if _, err = c.Cancel(t.Context(), r.ID, uuid.NewString(), nil); err == nil {
 		t.Fatal("retry changed retained cancellation identity")
 	}
 }
@@ -93,12 +93,12 @@ func TestCancelDoesNotInterruptUnrelatedSession(t *testing.T) {
 		moveDone <- err
 	}()
 	awaitResponsivenessSignal(t, held.entered)
-	if _, err := c.Cancel(t.Context(), start.Source.SessionID, "not-a-uuid"); err == nil {
+	if _, err := c.Cancel(t.Context(), start.Source.SessionID, "not-a-uuid", nil); err == nil {
 		t.Fatal("invalid cancellation ID accepted")
 	}
 	unrelated := make(chan error, 1)
 	go func() {
-		_, err := c.Cancel(t.Context(), uuid.NewString(), uuid.NewString())
+		_, err := c.Cancel(t.Context(), uuid.NewString(), uuid.NewString(), nil)
 		unrelated <- err
 	}()
 	select {
@@ -108,7 +108,7 @@ func TestCancelDoesNotInterruptUnrelatedSession(t *testing.T) {
 	}
 	cancelDone := make(chan error, 1)
 	go func() {
-		_, err := c.Cancel(t.Context(), start.Source.SessionID, uuid.NewString())
+		_, err := c.Cancel(t.Context(), start.Source.SessionID, uuid.NewString(), nil)
 		cancelDone <- err
 	}()
 	if err := awaitResponsivenessResult(t, cancelDone); err != nil {
@@ -123,16 +123,10 @@ func TestCancelDoesNotInterruptUnrelatedSession(t *testing.T) {
 }
 
 func TestCancelIndependentSessionWhileAnotherMoveIsHeld(t *testing.T) {
-	c, _, _, remote, start := setup(t)
-	other := start
-	other.Source.SessionID = uuid.NewString()
-	other.Source.OperationID = uuid.NewString()
-	other.Source.AllocationID = uuid.NewString()
-	other.Stopped.Launch = other.Source
-	other.Stopped.Receipt = &Receipt{Launch: other.Source, Incarnation: other.Incarnation, Usage: start.Stopped.Receipt.Usage}
-	if _, err := c.Create(t.Context(), other); err != nil {
-		t.Fatal(err)
-	}
+	c, _, local, remote, start := setup(t)
+	source := start.Source
+	source.SessionID, source.OperationID, source.AllocationID = uuid.NewString(), uuid.NewString(), uuid.NewString()
+	other := seedExecution(t, c, local, source, start.Input)
 	for _, id := range []string{start.Source.SessionID, other.Source.SessionID} {
 		if _, err := c.Move(t.Context(), id, uuid.NewString(), testRemote); err != nil {
 			t.Fatal(err)
@@ -150,7 +144,7 @@ func TestCancelIndependentSessionWhileAnotherMoveIsHeld(t *testing.T) {
 	awaitResponsivenessSignal(t, held.entered)
 	cancelDone := make(chan error, 1)
 	go func() {
-		_, err := c.Cancel(t.Context(), other.Source.SessionID, uuid.NewString())
+		_, err := c.Cancel(t.Context(), other.Source.SessionID, uuid.NewString(), nil)
 		cancelDone <- err
 	}()
 	if err := awaitResponsivenessResult(t, cancelDone); err != nil {
@@ -195,7 +189,7 @@ func TestCancelInterruptsHeldRecovery(t *testing.T) {
 	awaitResponsivenessSignal(t, held.entered)
 	cancelDone := make(chan error, 1)
 	go func() {
-		_, err := c.Cancel(t.Context(), start.Source.SessionID, uuid.NewString())
+		_, err := c.Cancel(t.Context(), start.Source.SessionID, uuid.NewString(), nil)
 		cancelDone <- err
 	}()
 	if err := awaitResponsivenessResult(t, cancelDone); err != nil {
@@ -223,7 +217,7 @@ func TestCancelPreventsActivationAfterRetainedInspectReply(t *testing.T) {
 	awaitResponsivenessSignal(t, held.entered)
 	cancelDone := make(chan error, 1)
 	go func() {
-		_, err := c.Cancel(t.Context(), start.Source.SessionID, uuid.NewString())
+		_, err := c.Cancel(t.Context(), start.Source.SessionID, uuid.NewString(), nil)
 		cancelDone <- err
 	}()
 	if err := awaitResponsivenessResult(t, cancelDone); err != nil {
@@ -254,7 +248,7 @@ func TestCancelCommitsCompletedSourceWithoutPreparingDestination(t *testing.T) {
 	awaitResponsivenessSignal(t, held.entered)
 	cancelDone := make(chan error, 1)
 	go func() {
-		_, err := c.Cancel(t.Context(), start.Source.SessionID, uuid.NewString())
+		_, err := c.Cancel(t.Context(), start.Source.SessionID, uuid.NewString(), nil)
 		cancelDone <- err
 	}()
 	if err := awaitResponsivenessResult(t, cancelDone); err != nil {

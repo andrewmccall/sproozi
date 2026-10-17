@@ -557,7 +557,7 @@ func TestInitialNativeGateRejectionCanAbortWithoutActivationOrCheckpoint(t *test
 	f.rejectNativeActivation, f.failCapture = true, true
 	a := &fakeAuthority{engine: f}
 	p := openFixture(t, t.TempDir(), f, a)
-	inc, err := p.CreateLocal(t.Context(), l, []byte("workspace-continuity"))
+	inc, err := p.Prepare(t.Context(), l, []byte("workspace-continuity"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -595,7 +595,7 @@ func TestFirstLocalSessionBindsGeneratedNativeUUID(t *testing.T) {
 	f.capture = data
 	a := &fakeAuthority{engine: f}
 	p := openFixture(t, t.TempDir(), f, a)
-	inc, err := p.CreateLocal(context.Background(), l, []byte("workspace-continuity"))
+	inc, err := p.Prepare(context.Background(), l, []byte("workspace-continuity"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -606,12 +606,20 @@ func TestFirstLocalSessionBindsGeneratedNativeUUID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !a.bound || stopped.Launch.ThreadID != fixtureThread || stopped.Receipt == nil || stopped.Receipt.Launch.ThreadID != fixtureThread {
+	if !a.bound || stopped.ThreadID != fixtureThread || stopped.Receipt == nil {
 		t.Fatalf("first local binding: %+v", stopped)
 	}
-	replay, err := p.Stop(context.Background(), stopped.Launch, inc)
-	if err != nil || replay.CheckpointDigest != stopped.CheckpointDigest {
-		t.Fatalf("bound launch replay: %+v %v", replay, err)
+	if !session.SameLaunch(stopped.Launch, l) || !session.SameLaunch(stopped.Receipt.Launch, l) {
+		t.Fatalf("binding rewrote the immutable launch: %+v", stopped.Launch)
+	}
+	replay, err := p.Stop(context.Background(), l, inc)
+	if err != nil || replay.CheckpointDigest != stopped.CheckpointDigest || replay.ThreadID != fixtureThread {
+		t.Fatalf("launch replay: %+v %v", replay, err)
+	}
+	rewritten := l
+	rewritten.ThreadID = fixtureThread
+	if _, err = p.Stop(context.Background(), rewritten, inc); err == nil {
+		t.Fatal("a launch rewritten with the bound thread replayed the stop")
 	}
 }
 func TestCaptureFailureKeepsActualStopAndBlocksActivation(t *testing.T) {

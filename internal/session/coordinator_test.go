@@ -1,6 +1,7 @@
 package session
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -35,7 +36,7 @@ func TestCancelUnknownActivationWithExactKnownIncarnation(t *testing.T) {
 	o := remote.records[op.Launch.AllocationID]
 	o.State = PlacementUnknown
 	remote.records[op.Launch.AllocationID] = o
-	r, err = c.Cancel(context.Background(), r.ID, uuid.NewString())
+	r, err = c.Cancel(context.Background(), r.ID, uuid.NewString(), nil)
 	if err != nil || remote.aborted != 1 || r.Phase != PhaseUnknownUsage || r.CancelOperation == "" || r.Active == nil || !r.Active.ActualStopped {
 		t.Fatalf("cancel unknown exact incarnation: %+v %v", r, err)
 	}
@@ -81,6 +82,46 @@ func TestStopOutcomeSeparatesUnsealedUsageFromUnknownStop(t *testing.T) {
 	}
 }
 
+// A new execution starts from a Git workspace with no native thread. The
+// coordinator drives its first visit like any other, keeps the launch
+// unchanged, and binds the genuine thread reported by the first stop.
+func TestFirstVisitFromWorkspaceBindsGenuineThreadAtFirstStop(t *testing.T) {
+	c, _, local, remote, start := setup(t)
+	first := start.Source
+	first.SessionID, first.OperationID, first.AllocationID = uuid.NewString(), uuid.NewString(), uuid.NewString()
+	first.ThreadID, first.CheckpointDigest = "", ""
+	workspace := []byte("captured git workspace")
+	r, err := c.Create(first, workspace, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Phase != PhasePreparing || r.ThreadID != "" || r.Workspace == "" || r.Checkpoint != (Checkpoint{}) {
+		t.Fatalf("new execution = %+v, want a preparing first visit without thread or checkpoint", r)
+	}
+	if _, err = c.Create(first, []byte("different workspace"), ""); err == nil {
+		t.Fatal("retry replaced the retained workspace input")
+	}
+	if r, err = c.Recover(t.Context(), first.SessionID); err != nil || r.Phase != PhaseActive {
+		t.Fatalf("first visit did not activate: %+v %v", r, err)
+	}
+	if local.activated != 1 {
+		t.Fatalf("local activations = %d, want 1", local.activated)
+	}
+	r, err = c.Move(t.Context(), first.SessionID, uuid.NewString(), testRemote)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.ThreadID != testThread {
+		t.Errorf("execution thread = %q, want the stopped visit's %q", r.ThreadID, testThread)
+	}
+	if !SameLaunch(r.Visits[0].Launch, first) || r.Visits[0].Launch.ThreadID != "" {
+		t.Errorf("first visit launch changed after binding: %+v", r.Visits[0].Launch)
+	}
+	if r.Active.Launch.ThreadID != testThread || remote.activated != 1 {
+		t.Errorf("destination launch = %+v, want the bound thread", r.Active.Launch)
+	}
+}
+
 type fakePlacement struct {
 	data                                  []byte
 	digest                                string
@@ -101,11 +142,11 @@ func newPlacement(data []byte, digest string) *fakePlacement {
 }
 func (p *fakePlacement) Prepare(_ context.Context, l Launch, data []byte) (Incarnation, error) {
 	p.prepareCalls++
-	if l.CheckpointDigest != p.digest || string(data) != string(p.data) {
+	if l.CheckpointDigest == "" && len(data) == 0 || l.CheckpointDigest != "" && (l.CheckpointDigest != p.digest || string(data) != string(p.data)) {
 		return Incarnation{}, errors.New("wrong checkpoint")
 	}
 	if o, ok := p.records[l.AllocationID]; ok {
-		if !sameLaunch(l, o.Launch) {
+		if !SameLaunch(l, o.Launch) {
 			return Incarnation{}, errors.New("conflict")
 		}
 		if o.State == PlacementPreparing {
@@ -131,7 +172,7 @@ func (p *fakePlacement) Prepare(_ context.Context, l Launch, data []byte) (Incar
 }
 func (p *fakePlacement) Activate(_ context.Context, l Launch, i Incarnation) error {
 	o, ok := p.records[l.AllocationID]
-	if !ok || !sameLaunch(l, o.Launch) || o.Incarnation != i {
+	if !ok || !SameLaunch(l, o.Launch) || o.Incarnation != i {
 		return errors.New("unknown execution")
 	}
 	if o.State == PlacementActive {
@@ -160,11 +201,11 @@ func (p *fakePlacement) Stop(_ context.Context, l Launch, i Incarnation) (Stoppe
 		return Stopped{}, errors.New("unreachable placement")
 	}
 	o, ok := p.records[l.AllocationID]
-	if !ok || o.Incarnation != i || !sameLaunch(o.Launch, l) {
+	if !ok || o.Incarnation != i || !SameLaunch(o.Launch, l) {
 		return Stopped{}, errors.New("stale execution")
 	}
 	if p.unsealed {
-		return Stopped{Launch: l, Incarnation: i, ActualStopped: true}, ErrUsageUnsealed
+		return Stopped{Launch: l, Incarnation: i, ActualStopped: true, ThreadID: l.ThreadID}, ErrUsageUnsealed
 	}
 	if o.Stopped != nil {
 		return *o.Stopped, nil
@@ -177,7 +218,7 @@ func (p *fakePlacement) Stop(_ context.Context, l Launch, i Incarnation) (Stoppe
 	if p.missingUsage {
 		r = nil
 	}
-	stopped := Stopped{Launch: l, Incarnation: i, ActualStopped: true, Receipt: r, Checkpoint: p.data, CheckpointDigest: p.digest}
+	stopped := Stopped{Launch: l, Incarnation: i, ActualStopped: true, ThreadID: cmp.Or(l.ThreadID, testThread), Receipt: r, Checkpoint: p.data, CheckpointDigest: p.digest}
 	o.State = PlacementStopped
 	o.Stopped = &stopped
 	p.records[l.AllocationID] = o
@@ -189,7 +230,7 @@ func (p *fakePlacement) Stop(_ context.Context, l Launch, i Incarnation) (Stoppe
 }
 func (p *fakePlacement) Abort(_ context.Context, l Launch, i Incarnation) (Observation, error) {
 	o, ok := p.records[l.AllocationID]
-	if !ok || o.Incarnation != i || !sameLaunch(l, o.Launch) {
+	if !ok || o.Incarnation != i || !SameLaunch(l, o.Launch) {
 		return Observation{}, errors.New("stale abort")
 	}
 	p.aborted++
@@ -229,7 +270,27 @@ func artifact(t *testing.T) ([]byte, string) {
 	}
 	return data, meta.SHA256
 }
-func setup(t *testing.T, includeIgnored ...string) (*Coordinator, string, *fakePlacement, *fakePlacement, Start) {
+
+// Fixture allowance and the first visit's sealed usage. Every test that starts
+// from setup sees testAllowance minus seedUsage remaining.
+const (
+	testAllowanceUnits = 20
+	testAllowanceCost  = 100
+	seedUnits          = 2
+	seedCost           = 3
+)
+
+// seed is the stopped first visit that setup leaves behind.
+type seed struct {
+	Source  Launch
+	Stopped Stopped
+	Input   []byte
+}
+
+// setup returns an idle execution whose first local visit ran and stopped with
+// seedUsage sealed, so later moves start from a committed checkpoint. Placement
+// counters are reset afterwards.
+func setup(t *testing.T, includeIgnored ...string) (*Coordinator, string, *fakePlacement, *fakePlacement, seed) {
 	t.Helper()
 	data, digest := artifact(t)
 	local, remote := newPlacement(data, digest), newPlacement(data, digest)
@@ -239,15 +300,33 @@ func setup(t *testing.T, includeIgnored ...string) (*Coordinator, string, *fakeP
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = c.Close() })
-	source := Launch{Harness: harness.NativeCodex, SessionID: uuid.NewString(), OperationID: uuid.NewString(), AllocationID: uuid.NewString(), Epoch: 1, Placement: testLocal, ThreadID: testThread, InstructionDigest: strings.Repeat("a", 64), Deadline: time.Now().Add(time.Hour).UTC(), Allowances: map[string]Allowance{testCapability: {Units: Limit{Bounded: true, Value: 20}, CostMicros: Limit{Bounded: true, Value: 100}}}}
+	source := Launch{Harness: harness.NativeCodex, SessionID: uuid.NewString(), OperationID: uuid.NewString(), AllocationID: uuid.NewString(), Epoch: 1, Placement: testLocal, ThreadID: testThread, CheckpointDigest: digest, InstructionDigest: strings.Repeat("a", 64), Deadline: time.Now().Add(time.Hour).UTC(),
+		Allowances: map[string]Allowance{testCapability: {Units: Limit{Bounded: true, Value: testAllowanceUnits}, CostMicros: Limit{Bounded: true, Value: testAllowanceCost}}}}
 	source.IncludeIgnored = includeIgnored
-	i := Incarnation{ExecutionID: uuid.NewString(), ResourceUID: uuid.NewString()}
-	receipt := &Receipt{Launch: source, Incarnation: i, Usage: map[string]budget.TrustedUsage{testCapability: {Units: 2, CostMicros: 3}}}
-	start := Start{Source: source, Incarnation: i, Stopped: Stopped{Launch: source, Incarnation: i, ActualStopped: true, Receipt: receipt, Checkpoint: data, CheckpointDigest: digest}}
-	if _, err = c.Create(context.Background(), start); err != nil {
+	return c, dir, local, remote, seedExecution(t, c, local, source, data)
+}
+
+// seedExecution creates source's execution, runs its first visit on local and
+// stops it with seedUsage, then resets local's counters.
+func seedExecution(t *testing.T, c *Coordinator, local *fakePlacement, source Launch, data []byte) seed {
+	t.Helper()
+	if _, err := c.Create(source, data, ""); err != nil {
 		t.Fatal(err)
 	}
-	return c, dir, local, remote, start
+	if _, err := c.Recover(t.Context(), source.SessionID); err != nil {
+		t.Fatal(err)
+	}
+	charge := local.charge
+	local.charge = budget.TrustedUsage{Units: seedUnits, CostMicros: seedCost}
+	r, err := c.Finalize(t.Context(), source.SessionID, uuid.NewString())
+	if err != nil {
+		t.Fatal(err)
+	}
+	local.charge = charge
+	local.prepared, local.activated, local.stopped, local.prepareCalls = 0, 0, 0, 0
+	first := r.Visits[0]
+	stopped := Stopped{Launch: first.Launch, Incarnation: first.Incarnation, ActualStopped: true, ThreadID: r.ThreadID, Receipt: first.Receipt, Checkpoint: data, CheckpointDigest: first.CheckpointDigest}
+	return seed{Source: source, Stopped: stopped, Input: data}
 }
 
 func TestIgnoredSelectionSurvivesEveryMoveAndCannotAmendSeed(t *testing.T) {
@@ -267,9 +346,7 @@ func TestIgnoredSelectionSurvivesEveryMoveAndCannotAmendSeed(t *testing.T) {
 		}
 	}
 	start.Source.IncludeIgnored = []string{"other.bin"}
-	start.Stopped.Launch = start.Source
-	start.Stopped.Receipt.Launch = start.Source
-	if _, err := c.Create(t.Context(), start); err == nil {
+	if _, err := c.Create(start.Source, start.Input, ""); err == nil {
 		t.Fatal("import retry changed immutable ignored file selection")
 	}
 }
@@ -300,7 +377,7 @@ func TestRoundTripMaintainsOriginalAuthorityAndReceipts(t *testing.T) {
 	if r.Phase != PhaseActive || r.Epoch != 3 || r.Remaining[testCapability].Units.Value != 13 || r.Remaining[testCapability].CostMicros.Value != 90 || remote.stopped != 1 || local.activated != 1 {
 		t.Fatalf("return trip: %+v", r)
 	}
-	if _, err = c.Create(ctx, start); err != nil {
+	if _, err = c.Create(start.Source, start.Input, ""); err != nil {
 		t.Fatal(err)
 	}
 	if err = c.Close(); err != nil {
@@ -340,7 +417,7 @@ func TestLostRepliesRecoverSameAllocation(t *testing.T) {
 			if err == nil {
 				t.Fatal("fixture did not lose reply")
 			}
-			allocation := r.Operations[0].Launch.AllocationID
+			allocation := r.Operations[len(r.Operations)-1].Launch.AllocationID
 			if err = c.Close(); err != nil {
 				t.Fatal(err)
 			}
@@ -367,7 +444,7 @@ func TestPartialPreparationRecoversThroughExplicitPrepareWithoutReplacingIncarna
 	if err == nil || r.Phase != PhasePreparing {
 		t.Fatalf("expected retained incomplete preparation: %+v %v", r, err)
 	}
-	allocation := r.Operations[0].Launch.AllocationID
+	allocation := r.Operations[len(r.Operations)-1].Launch.AllocationID
 	exact := remote.records[allocation].Incarnation
 	remote.partialPrepare = false
 	r, err = c.Recover(t.Context(), r.ID)
@@ -386,13 +463,13 @@ func TestPartialPreparationCancellationNeverRetriesFailedRestoreOrRefundsUnknown
 			if err == nil {
 				t.Fatal("incomplete preparation hidden")
 			}
-			allocation := r.Operations[0].Launch.AllocationID
+			allocation := r.Operations[len(r.Operations)-1].Launch.AllocationID
 			if !identityKnown {
 				o := remote.records[allocation]
 				o.Incarnation = Incarnation{}
 				remote.records[allocation] = o
 			}
-			r, err = c.Cancel(t.Context(), r.ID, uuid.NewString())
+			r, err = c.Cancel(t.Context(), r.ID, uuid.NewString(), nil)
 			if identityKnown {
 				if err != nil || remote.aborted != 1 || r.Phase != PhaseUnknownUsage || r.Active == nil || !r.Active.ActualStopped {
 					t.Fatalf("exact partial preparation not stopped: %+v %v", r, err)
@@ -449,7 +526,7 @@ func TestCancellationPersistsBeforeAbortAndNeverRefundsUnknownUsage(t *testing.T
 		t.Fatal(err)
 	}
 	cancelOp := uuid.NewString()
-	r, err = c.Cancel(context.Background(), r.ID, cancelOp)
+	r, err = c.Cancel(context.Background(), r.ID, cancelOp, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -462,7 +539,7 @@ func TestCancellationPersistsBeforeAbortAndNeverRefundsUnknownUsage(t *testing.T
 	if local.prepared != 0 {
 		t.Fatal("destination prepared after cancellation")
 	}
-	if _, err = c.Cancel(context.Background(), r.ID, uuid.NewString()); err == nil {
+	if _, err = c.Cancel(context.Background(), r.ID, uuid.NewString(), nil); err == nil {
 		t.Fatal("accepted conflicting cancel")
 	}
 }
@@ -471,7 +548,7 @@ func TestLimitsAndReplayIntent(t *testing.T) {
 	changed := start
 	changed.Source = sourceCopy(start.Source)
 	changed.Source.Allowances[testCapability] = Allowance{Units: Limit{Bounded: true, Value: 21}, CostMicros: Limit{Bounded: true, Value: 100}}
-	if _, err := c.Create(context.Background(), changed); err == nil {
+	if _, err := c.Create(changed.Source, start.Input, ""); err == nil {
 		t.Fatal("accepted widened seed")
 	}
 	op := uuid.NewString()
@@ -559,7 +636,7 @@ func TestUnknownUsageCancellationSurvivesReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = c.Cancel(context.Background(), r.ID, uuid.NewString()); err != nil {
+	if _, err = c.Cancel(context.Background(), r.ID, uuid.NewString(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if err = c.Close(); err != nil {
@@ -582,7 +659,7 @@ func TestUnboundedKeyChangeIsStillAConflict(t *testing.T) {
 	if sameAllowances(map[string]Allowance{"model.inference": {}}, map[string]Allowance{"github.pullRequest": {}}) {
 		t.Fatal("unbounded key change authorized another capability")
 	}
-	if sameReceipt(&Receipt{Usage: map[string]budget.TrustedUsage{"model.inference": {}}}, &Receipt{Usage: map[string]budget.TrustedUsage{"github.pullRequest": {}}}) {
+	if CheckUsage(map[string]Allowance{"model.inference": {}}, map[string]budget.TrustedUsage{"github.pullRequest": {}}) == nil {
 		t.Fatal("zero-charge receipt key change accepted")
 	}
 }
@@ -625,25 +702,14 @@ func TestCheckpointDigestMismatchCannotActivateDestination(t *testing.T) {
 	}
 }
 func TestExpiredOriginalDeadlinePreventsPreparation(t *testing.T) {
-	_, _, local, remote, start := setup(t)
-	deadline := time.Now().Add(100 * time.Millisecond).UTC()
-	start.Source.SessionID = uuid.NewString()
-	start.Source.Deadline = deadline
-	start.Stopped.Launch = start.Source
-	copyReceipt := *start.Stopped.Receipt
-	copyReceipt.Launch = start.Source
-	start.Stopped.Receipt = &copyReceipt
-	c, err := Open(filepath.Join(t.TempDir(), "expired"), map[string]Placement{testLocal: local, testRemote: remote}, testMaxCheckpoint)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = c.Close() }()
-	r, err := c.Create(context.Background(), start)
-	if err != nil {
-		t.Fatal(err)
-	}
+	c, _, local, remote, start := setup(t)
+	deadline := time.Now().Add(time.Second).UTC()
+	source := start.Source
+	source.SessionID, source.OperationID, source.AllocationID = uuid.NewString(), uuid.NewString(), uuid.NewString()
+	source.Deadline = deadline
+	expiring := seedExecution(t, c, local, source, start.Input)
 	<-time.After(time.Until(deadline) + 10*time.Millisecond)
-	if _, err = c.Move(context.Background(), r.ID, uuid.NewString(), testRemote); err == nil {
+	if _, err := c.Move(context.Background(), expiring.Source.SessionID, uuid.NewString(), testRemote); err == nil {
 		t.Fatal("move reset expired deadline")
 	}
 	if remote.prepared != 0 || remote.activated != 0 {

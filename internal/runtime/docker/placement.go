@@ -42,6 +42,7 @@ const (
 
 var _ session.Placement = (*Placement)(nil)
 var _ session.TerminalPlacement = (*Placement)(nil)
+var _ session.PreparationAborter = (*Placement)(nil)
 
 type NativeAccess struct {
 	TrustBundlePEM []byte
@@ -101,7 +102,11 @@ func validUUID(s string) bool {
 	u, err := uuid.Parse(s)
 	return err == nil && u.String() == s && u != uuid.Nil
 }
-func (p *Placement) validateLaunch(l session.Launch, initial bool) error {
+
+// validateLaunch checks a launch against this placement. A first visit from a
+// Git workspace names neither a native thread nor a checkpoint.
+func (p *Placement) validateLaunch(l session.Launch) error {
+	initial := l.CheckpointDigest == ""
 	if err := workspace.ValidateIgnoredPaths(l.IncludeIgnored); err != nil {
 		return err
 	}
@@ -118,42 +123,35 @@ func (p *Placement) validateLaunch(l session.Launch, initial bool) error {
 	}
 	return nil
 }
+
+// Prepare restores a checkpoint, or for a first visit a captured Git workspace,
+// into a fresh inert container. A first visit has no fabricated native UUID:
+// the graceful stop binds the genuine one once, without changing the launch.
 func (p *Placement) Prepare(ctx context.Context, l session.Launch, data []byte) (session.Incarnation, error) {
 	unlock, err := p.lockOperation(l)
 	if err != nil {
 		return session.Incarnation{}, err
 	}
 	defer unlock()
-	if err := p.validateLaunch(l, false); err != nil {
+	if err := p.validateLaunch(l); err != nil {
 		return session.Incarnation{}, err
 	}
-	meta, err := checkpoint.Inspect(data, p.config.MaxCheckpointBytes)
-	if err != nil {
-		return session.Incarnation{}, err
+	if l.CheckpointDigest == "" {
+		if int64(len(data)) > p.config.MaxCheckpointBytes {
+			return session.Incarnation{}, errors.New("invalid initial workspace artifact")
+		}
+	} else {
+		meta, err := checkpoint.Inspect(data, p.config.MaxCheckpointBytes)
+		if err != nil {
+			return session.Incarnation{}, err
+		}
+		if meta.Harness != l.Harness || meta.ThreadID != l.ThreadID || meta.SHA256 != l.CheckpointDigest {
+			return session.Incarnation{}, errors.New("docker checkpoint identity mismatch")
+		}
 	}
-	if meta.Harness != l.Harness || meta.ThreadID != l.ThreadID || meta.SHA256 != l.CheckpointDigest {
-		return session.Incarnation{}, errors.New("docker checkpoint identity mismatch")
-	}
-	return p.prepare(ctx, l, data, false)
+	return p.prepare(ctx, l, data)
 }
-
-// CreateLocal creates a fresh managed native session. Its immutable initial
-// launch has no fabricated native UUID; BindNative records the real UUID once.
-func (p *Placement) CreateLocal(ctx context.Context, l session.Launch, workspaceArtifact []byte) (session.Incarnation, error) {
-	unlock, err := p.lockOperation(l)
-	if err != nil {
-		return session.Incarnation{}, err
-	}
-	defer unlock()
-	if err := p.validateLaunch(l, true); err != nil {
-		return session.Incarnation{}, err
-	}
-	if l.CheckpointDigest != "" || int64(len(workspaceArtifact)) > p.config.MaxCheckpointBytes {
-		return session.Incarnation{}, errors.New("invalid initial workspace artifact")
-	}
-	return p.prepare(ctx, l, workspaceArtifact, true)
-}
-func (p *Placement) prepare(ctx context.Context, l session.Launch, data []byte, initial bool) (session.Incarnation, error) {
+func (p *Placement) prepare(ctx context.Context, l session.Launch, data []byte) (session.Incarnation, error) {
 	l.Deadline = l.Deadline.UTC()
 	l.IncludeIgnored = append([]string(nil), l.IncludeIgnored...)
 	if !l.Deadline.After(time.Now()) {
@@ -162,9 +160,6 @@ func (p *Placement) prepare(ctx context.Context, l session.Launch, data []byte, 
 	r, err := p.load(l)
 	if os.IsNotExist(err) {
 		r = placementRecord{Version: recordVersion, ConfigDigest: p.digest, Launch: l, Execution: "spz-" + operationKey(l)[:32], InputDigest: fmt.Sprintf("%x", sha256.Sum256(data)), Phase: phaseCreating}
-		if initial {
-			r.Initial = &l
-		}
 		if err = p.retain(operationKey(l)+".input", data); err != nil {
 			return session.Incarnation{}, err
 		}
@@ -200,11 +195,7 @@ func (p *Placement) spec(r placementRecord, role string) ManagedSpec {
 		}
 	}
 	spec := ManagedSpec{Name: r.Execution + "-" + role, Execution: r.Launch.AllocationID, Role: role, ImageID: image, NetworkMode: network, MemoryBytes: limits.MemoryBytes, CPUMilli: limits.CPUMilli, PIDs: limits.PIDs, Deadline: r.Launch.Deadline.Format(time.RFC3339Nano), GatewayIPv4: p.config.GatewayIPv4, GatewayPort: p.config.GatewayPort}
-	intent := r.Launch
-	if r.Initial != nil {
-		intent = *r.Initial
-	}
-	encoded, _ := json.Marshal(intent)
+	encoded, _ := json.Marshal(r.Launch)
 	spec.IntentDigest = fmt.Sprintf("%x", sha256.Sum256(append(encoded, []byte(r.ConfigDigest+r.InputDigest)...)))
 	if role != roleAnchor {
 		spec.Volume = r.Volume
@@ -247,7 +238,7 @@ func (p *Placement) drivePrepare(ctx context.Context, r *placementRecord, data [
 	if err := p.resource(ctx, r, roleHelper, &r.Helper); err != nil {
 		return err
 	}
-	if err := p.engine.PrepareArtifact(ctx, *r.Helper, p.config.Harness, data, p.config.MaxCheckpointBytes, p.config.InstructionDigest, r.Initial != nil); err != nil {
+	if err := p.engine.PrepareArtifact(ctx, *r.Helper, p.config.Harness, data, p.config.MaxCheckpointBytes, p.config.InstructionDigest, r.fresh()); err != nil {
 		return err
 	}
 	if err := p.resource(ctx, r, roleAgent, &r.Agent); err != nil {
@@ -424,14 +415,14 @@ func (p *Placement) stopped(r placementRecord) (session.Stopped, error) {
 	if err != nil {
 		return session.Stopped{}, err
 	}
-	stopped := session.Stopped{Launch: r.Launch, Incarnation: inc, ActualStopped: r.ActualStopped, Receipt: r.Receipt, CheckpointDigest: r.CheckpointDigest}
+	stopped := session.Stopped{Launch: r.Launch, Incarnation: inc, ActualStopped: r.ActualStopped, ThreadID: r.thread(), Receipt: r.Receipt, CheckpointDigest: r.CheckpointDigest}
 	if r.CheckpointDigest != "" {
 		data, err := p.read("out-"+r.CheckpointDigest+".checkpoint", p.config.MaxCheckpointBytes)
 		if err != nil {
 			return stopped, err
 		}
 		meta, err := checkpoint.Inspect(data, p.config.MaxCheckpointBytes)
-		if err != nil || meta.SHA256 != r.CheckpointDigest || meta.Harness != r.Launch.Harness || meta.ThreadID != r.Launch.ThreadID {
+		if err != nil || meta.SHA256 != r.CheckpointDigest || meta.Harness != r.Launch.Harness || meta.ThreadID != r.thread() {
 			return stopped, errors.New("retained Docker checkpoint changed")
 		}
 		stopped.Checkpoint = data
@@ -485,7 +476,7 @@ func (p *Placement) Stop(ctx context.Context, l session.Launch, i session.Incarn
 		}
 	}
 
-	if !validUUID(r.Launch.ThreadID) {
+	if !validUUID(r.thread()) {
 		return session.Stopped{}, errors.New("initial native UUID remains unknown")
 	}
 	if err = p.seal(ctx, &r, i); err != nil {
@@ -496,7 +487,7 @@ func (p *Placement) Stop(ctx context.Context, l session.Launch, i session.Incarn
 		if err = p.engine.VerifyManaged(ctx, *r.Helper, p.spec(r, roleHelper)); err != nil {
 			return session.Stopped{}, err
 		}
-		data, err := p.engine.CaptureCheckpoint(ctx, *r.Helper, p.config.Harness, r.Launch.ThreadID, r.Launch.IncludeIgnored, p.config.MaxCheckpointBytes)
+		data, err := p.engine.CaptureCheckpoint(ctx, *r.Helper, p.config.Harness, r.thread(), r.Launch.IncludeIgnored, p.config.MaxCheckpointBytes)
 		if err != nil {
 			return session.Stopped{}, err
 		}
@@ -504,7 +495,7 @@ func (p *Placement) Stop(ctx context.Context, l session.Launch, i session.Incarn
 			return session.Stopped{}, err
 		}
 		meta, err := checkpoint.Inspect(data, p.config.MaxCheckpointBytes)
-		if err != nil || meta.Harness != r.Launch.Harness || meta.ThreadID != r.Launch.ThreadID {
+		if err != nil || meta.Harness != r.Launch.Harness || meta.ThreadID != r.thread() {
 			return session.Stopped{}, errors.New("docker capture identity mismatch")
 		}
 		if err = p.retain("out-"+meta.SHA256+".checkpoint", data); err != nil {
@@ -607,11 +598,11 @@ func (p *Placement) abort(ctx context.Context, r placementRecord, i session.Inca
 	return o, err
 }
 
-// CancelInitial fences an initial allocation even when preparation failed before
-// it could return a native incarnation. Lookup resolves lost create replies but
-// never creates or starts resources. Bootstrap-only records grant no authority;
-// this cancellation returns no accounting or native continuity receipt.
-func (p *Placement) CancelInitial(ctx context.Context, l session.Launch) error {
+// AbortPreparation fences an allocation even when preparation failed before it
+// could return a native incarnation. Lookup resolves lost create replies but
+// never creates or starts resources. Records that never activated grant no
+// authority; this cancellation returns no accounting or native continuity receipt.
+func (p *Placement) AbortPreparation(ctx context.Context, l session.Launch) error {
 	unlock, err := p.lockOperation(l)
 	if err != nil {
 		return err
@@ -623,9 +614,6 @@ func (p *Placement) CancelInitial(ctx context.Context, l session.Launch) error {
 	}
 	if err != nil {
 		return err
-	}
-	if r.Initial == nil {
-		return errors.New("initial cancellation requires an initial allocation")
 	}
 	if r.Phase == phaseCreating {
 		r.Phase = phasePreparationAborting
@@ -722,13 +710,13 @@ func (p *Placement) quiesceNative(ctx context.Context, r *placementRecord, i ses
 			return p.engine.NativeOperation(ctx, *r.Agent, op, nil)
 		}
 		bind := func(ctx context.Context, thread string) error {
-			if err := p.authority.BindNative(ctx, *r.Initial, i, thread); err != nil {
+			if err := p.authority.BindNative(ctx, r.Launch, i, thread); err != nil {
 				return err
 			}
-			r.Launch.ThreadID = thread
+			r.Thread = thread
 			return p.save(*r)
 		}
-		_, err = harness.QuiesceNative(ctx, control, r.Launch.ThreadID, r.Launch.Deadline, bind)
+		_, err = harness.QuiesceNative(ctx, control, r.thread(), r.Launch.Deadline, bind)
 		if errors.Is(err, harness.ErrQuiesceUnacknowledged) && r.Launch.Harness != harness.NativeClaude {
 			// A lost Codex reply is resolved by the actual stopped container.
 			observed, observeErr := p.engine.Observe(ctx, *r.Agent)

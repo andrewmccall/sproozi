@@ -157,7 +157,7 @@ func TestClaudeGracefulStopRequiresPersistedAcknowledgement(t *testing.T) {
 			t.Cleanup(func() { _ = p.Close() })
 			l := fixtureLaunch(t, fixtureArtifact(t))
 			l.Harness, l.ThreadID, l.CheckpointDigest = harness.NativeClaude, "", ""
-			i, err := p.CreateLocal(t.Context(), l, []byte("workspace-continuity"))
+			i, err := p.Prepare(t.Context(), l, []byte("workspace-continuity"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -204,7 +204,7 @@ func TestClaudeDurableAcknowledgementSurvivesCaptureFailure(t *testing.T) {
 	t.Cleanup(func() { _ = p.Close() })
 	l := fixtureLaunch(t, fixtureArtifact(t))
 	l.Harness, l.ThreadID, l.CheckpointDigest = harness.NativeClaude, "", ""
-	i, err := p.CreateLocal(t.Context(), l, []byte("workspace-continuity"))
+	i, err := p.Prepare(t.Context(), l, []byte("workspace-continuity"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,7 +262,7 @@ func TestPartialInitialCancellationOnlyObservesAndFencesExistingResources(t *tes
 			}
 			l := fixtureLaunch(t, fixtureArtifact(t))
 			l.ThreadID, l.CheckpointDigest = "", ""
-			if _, err := p.CreateLocal(t.Context(), l, []byte("workspace-continuity")); err == nil {
+			if _, err := p.Prepare(t.Context(), l, []byte("workspace-continuity")); err == nil {
 				t.Fatal("partial preparation unexpectedly succeeded")
 			}
 			calls := len(f.calls)
@@ -271,7 +271,7 @@ func TestPartialInitialCancellationOnlyObservesAndFencesExistingResources(t *tes
 				t.Fatalf("inspection retried preparation: %+v %v", o, err)
 			}
 			created := f.next
-			if err = p.CancelInitial(t.Context(), l); err != nil {
+			if err = p.AbortPreparation(t.Context(), l); err != nil {
 				t.Fatal(err)
 			}
 			if f.next != created || a.init != 0 || a.activate != 0 || a.seals != 0 {
@@ -289,10 +289,10 @@ func TestPartialInitialCancellationOnlyObservesAndFencesExistingResources(t *tes
 			if lostCreateReply && r.Agent == nil {
 				t.Fatal("lost create acknowledgement was not bound to its exact container")
 			}
-			if err = p.CancelInitial(t.Context(), l); err != nil {
+			if err = p.AbortPreparation(t.Context(), l); err != nil {
 				t.Fatal(err)
 			}
-			if _, err = p.CreateLocal(t.Context(), l, []byte("workspace-continuity")); err == nil {
+			if _, err = p.Prepare(t.Context(), l, []byte("workspace-continuity")); err == nil {
 				t.Fatal("cancelled preparation reopened")
 			}
 			if f.next != created {
@@ -314,7 +314,7 @@ func TestPartialInitialCancellationRejectsReplacementOrUnavailableEngine(t *test
 		}
 		return original(ctx, input, max, args)
 	}
-	if _, err := p.CreateLocal(t.Context(), l, []byte("workspace-continuity")); err == nil {
+	if _, err := p.Prepare(t.Context(), l, []byte("workspace-continuity")); err == nil {
 		t.Fatal("expected failed preparation")
 	}
 	r, err := p.load(l)
@@ -323,14 +323,14 @@ func TestPartialInitialCancellationRejectsReplacementOrUnavailableEngine(t *test
 	}
 	anchor := f.containers[r.Anchor.ID]
 	anchor.Config.Labels[ownerLabel] = "replacement"
-	if err = p.CancelInitial(t.Context(), l); err == nil || !anchor.State.Running {
+	if err = p.AbortPreparation(t.Context(), l); err == nil || !anchor.State.Running {
 		t.Fatal("cancellation accepted or stopped a replacement")
 	}
 	anchor.Config.Labels[ownerLabel] = l.AllocationID
 	p.engine.execute = func(context.Context, []byte, int, []string) ([]byte, error) {
 		return nil, errors.New("engine unavailable")
 	}
-	if err = p.CancelInitial(t.Context(), l); err == nil {
+	if err = p.AbortPreparation(t.Context(), l); err == nil {
 		t.Fatal("engine failure became stopped evidence")
 	}
 	r, err = p.load(l)
@@ -338,7 +338,7 @@ func TestPartialInitialCancellationRejectsReplacementOrUnavailableEngine(t *test
 		t.Fatalf("unknown stop was accepted: %+v %v", r, err)
 	}
 	p.engine.execute = original
-	if err = p.CancelInitial(t.Context(), l); err != nil {
+	if err = p.AbortPreparation(t.Context(), l); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -350,24 +350,13 @@ func TestCoordinatorRecoversExactDockerActivationAfterLostReply(t *testing.T) {
 	sourceEngine := newFakeDocker()
 	sourceEngine.capture = data
 	source := openFixture(t, t.TempDir(), sourceEngine, &fakeAuthority{engine: sourceEngine})
-	instance, err := source.Prepare(ctx, launch, data)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = source.Activate(ctx, launch, instance); err != nil {
-		t.Fatal(err)
-	}
-	stopped, err := source.Stop(ctx, launch, instance)
-	if err != nil {
-		t.Fatal(err)
-	}
 	const destination = "destination"
 	f := newFakeDocker()
 	a := &fakeAuthority{engine: f}
 	cfg := fixtureConfig()
 	cfg.Name = destination
 	dir := t.TempDir()
-	if err = os.Chmod(dir, 0700); err != nil {
+	if err := os.Chmod(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	p, err := OpenPlacement(dir, &Engine{execute: f.run}, cfg, a)
@@ -385,7 +374,14 @@ func TestCoordinatorRecoversExactDockerActivationAfterLostReply(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = c.Close() })
-	if _, err = c.Create(ctx, session.Start{Source: launch, Incarnation: instance, Stopped: stopped}); err != nil {
+	// The coordinator runs the first visit on the source, then stops it.
+	if _, err = c.Create(launch, data, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = c.Recover(ctx, launch.SessionID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = c.Finalize(ctx, launch.SessionID, uuid.NewString()); err != nil {
 		t.Fatal(err)
 	}
 	f.failActivationAck = true
@@ -393,7 +389,8 @@ func TestCoordinatorRecoversExactDockerActivationAfterLostReply(t *testing.T) {
 	if err == nil || pending.Phase != session.PhaseActivating {
 		t.Fatalf("lost activation acknowledgement: phase=%s error=%v", pending.Phase, err)
 	}
-	want := *pending.Operations[0].Incarnation
+	move := pending.Operations[len(pending.Operations)-1]
+	want := *move.Incarnation
 	if !f.containers[want.ResourceUID].State.Running || f.next != 3 {
 		t.Fatal("native activation did not occur on the original incarnation")
 	}
@@ -426,7 +423,7 @@ func TestCoordinatorRecoversExactDockerActivationAfterLostReply(t *testing.T) {
 		recovered.Phase != session.PhaseActive || recovered.PendingOperation != "" || f.next != 3 {
 		t.Fatalf("same-incarnation recovery: record=%+v error=%v", recovered, err)
 	}
-	if recovered.Active.Launch.AllocationID != pending.Operations[0].Launch.AllocationID {
+	if recovered.Active.Launch.AllocationID != move.Launch.AllocationID {
 		t.Fatal("recovery changed the retained allocation")
 	}
 }

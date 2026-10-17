@@ -1,6 +1,7 @@
 package session
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -9,90 +10,72 @@ import (
 	"github.com/google/uuid"
 )
 
-// Create imports a trusted source's first stopped native checkpoint. Repeated
-// imports must carry exactly the same intent, receipt and artifact digest.
-func (c *Coordinator) Create(ctx context.Context, start Start) (Record, error) {
-	unlock, err := c.lockSession(start.Source.SessionID)
+// Create retains a new execution and its first visit without starting it;
+// Recover then prepares and activates that visit like any other destination.
+// first is the epoch-1 launch whose ID becomes the execution ID. input is the
+// checkpoint named by first.CheckpointDigest, or a captured Git workspace when
+// the launch has no checkpoint or thread. session names the owning durable
+// session when it differs from the execution. A retry must repeat the same
+// launch and input; it returns the retained execution unchanged.
+func (c *Coordinator) Create(first Launch, input []byte, session string) (Record, error) {
+	unlock, err := c.lockSession(first.SessionID)
 	if err != nil {
 		return Record{}, err
 	}
 	defer unlock()
-	if err := ctx.Err(); err != nil {
+	first.Deadline = first.Deadline.UTC()
+	if err = validateLaunch(first); err != nil {
 		return Record{}, err
 	}
-	source := start.Source
-	source.Deadline = source.Deadline.UTC()
-	if err := validateLaunch(source); err != nil {
-		return Record{}, err
+	if first.Epoch != 1 || session != "" && (!validUUID(session) || session == first.SessionID) {
+		return Record{}, errors.New("session: invalid first visit")
 	}
-	if _, ok := c.placements[source.Placement]; !ok {
-		return Record{}, errors.New("session: source placement unavailable")
+	if _, ok := c.placements[first.Placement]; !ok {
+		return Record{}, errors.New("session: first placement unavailable")
 	}
-	if !validIncarnation(start.Incarnation) {
-		return Record{}, errors.New("session: source incarnation required")
-	}
-	if err := validateStop(source, start.Incarnation, start.Stopped); err != nil {
-		return Record{}, err
-	}
-	existing, err := c.load(source.SessionID)
+	existing, err := c.load(first.SessionID)
 	if err == nil {
-		if _, err = c.commitCheckpoint(start.Stopped.Checkpoint, source.Harness, source.ThreadID, start.Stopped.CheckpointDigest); err != nil {
-			return Record{}, err
+		if !SameLaunch(*existing.Operations[0].Launch, first) || existing.Session != session {
+			return existing, errors.New("session: first visit conflicts with retained execution")
 		}
-		first := existing.Visits[0]
-		if !sameLaunch(first.Launch, source) || first.Incarnation != start.Incarnation || !sameReceipt(first.Receipt, start.Stopped.Receipt) || existing.Visits[0].Receipt == nil || existing.Visits[0].Receipt.Launch.CheckpointDigest != source.CheckpointDigest {
-			return Record{}, errors.New("session: import intent conflicts with retained session")
-		}
-		// Import retries never replace a later committed checkpoint.
-		if start.Stopped.CheckpointDigest != checkpointDigestForSeed(existing) {
-			return Record{}, errors.New("session: import checkpoint conflicts")
+		if retained, err := c.input(existing, first); err != nil || string(retained) != string(input) {
+			return existing, errors.Join(errors.New("session: first visit input conflicts"), err)
 		}
 		return existing, nil
 	}
 	if !os.IsNotExist(err) {
 		return Record{}, err
 	}
-	if err = beforeDeadline(source); err != nil {
+	if err = beforeDeadline(first); err != nil {
 		return Record{}, err
 	}
-	cp, err := c.commitCheckpoint(start.Stopped.Checkpoint, source.Harness, source.ThreadID, start.Stopped.CheckpointDigest)
+	r := Record{Version: journalVersion, ID: first.SessionID, Session: session, Harness: first.Harness,
+		ThreadID: first.ThreadID, InstructionDigest: first.InstructionDigest,
+		IncludeIgnored: append([]string(nil), first.IncludeIgnored...), Deadline: first.Deadline,
+		Ceiling: cloneAllowances(first.Allowances), Remaining: cloneAllowances(first.Allowances),
+		Phase: PhasePreparing, PendingOperation: first.OperationID,
+		Operations: []Operation{{ID: first.OperationID, Destination: first.Placement, Launch: &first, Stage: stagePrepare}}}
+	if first.CheckpointDigest == "" {
+		r.Workspace, err = c.retainWorkspace(input)
+	} else {
+		r.Checkpoint, err = c.commitCheckpoint(input, first.Harness, first.ThreadID, first.CheckpointDigest)
+	}
 	if err != nil {
 		return Record{}, err
 	}
-	remaining, err := subtract(source.Allowances, *start.Stopped.Receipt)
-	if err != nil {
-		return Record{}, err
-	}
-	r := Record{Version: journalVersion, ID: source.SessionID, Harness: source.Harness, ThreadID: source.ThreadID, InstructionDigest: source.InstructionDigest, IncludeIgnored: append([]string(nil), source.IncludeIgnored...), Deadline: source.Deadline, Ceiling: cloneAllowances(source.Allowances), Remaining: remaining, Checkpoint: cp, Phase: PhaseIdle, Epoch: source.Epoch, Visits: []Visit{{Launch: source, Incarnation: start.Incarnation, Receipt: start.Stopped.Receipt, ActualStopped: true}}}
-	// Retain the initial checkpoint identity in the source visit rather than infer
-	// it from a later checkpoint when replaying Create.
-	r.Visits[0].CheckpointDigest = cp.Metadata.SHA256
 	return r, c.save(r)
 }
-func sameReceipt(a, b *Receipt) bool {
-	if a == nil || b == nil {
-		return a == b
-	}
-	if !sameLaunch(a.Launch, b.Launch) || a.Incarnation != b.Incarnation || len(a.Usage) != len(b.Usage) {
-		return false
-	}
-	for k, v := range a.Usage {
-		if value, ok := b.Usage[k]; !ok || value != v {
-			return false
-		}
-	}
-	return true
-}
-func checkpointDigestForSeed(r Record) string { return r.Visits[0].CheckpointDigest }
 
-// Inspect reads a durable snapshot; it does not turn backend unavailability into
-// a new placement, stopped source, zero usage or refunded capacity.
+// Inspect reads the last durable snapshot; it does not turn backend
+// unavailability into a new placement, stopped source, zero usage or refunded
+// capacity. Journals are replaced atomically, so Inspect does not wait for an
+// operation in progress, such as a move waiting for a native turn.
 func (c *Coordinator) Inspect(id string) (Record, error) {
-	unlock, err := c.lockSession(id)
-	if err != nil {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if err := c.ready(); err != nil {
 		return Record{}, err
 	}
-	defer unlock()
 	return c.load(id)
 }
 
@@ -225,8 +208,8 @@ func (c *Coordinator) stopSource(ctx context.Context, r Record, index int) (Reco
 			return r, errors.New("session: source placement unavailable")
 		}
 		stopped, err := p.Stop(ctx, source.Launch, source.Incarnation)
-		fenced := stopped.ActualStopped && sameLaunch(source.Launch, stopped.Launch) && source.Incarnation == stopped.Incarnation
-		if err != nil && !(errors.Is(err, ErrUsageUnsealed) && fenced) {
+		fenced := fencedBy(source.Launch, source.Incarnation, stopped)
+		if err != nil && (!errors.Is(err, ErrUsageUnsealed) || !fenced) {
 			r.Phase = PhaseUnknownStop
 			return r, errors.Join(err, c.save(r))
 		}
@@ -243,7 +226,10 @@ func (c *Coordinator) stopSource(ctx context.Context, r Record, index int) (Reco
 			r.Phase = PhaseUnknownUsage
 			return r, errors.Join(err, c.save(r))
 		}
-		cp, err := c.commitCheckpoint(stopped.Checkpoint, r.Harness, r.ThreadID, stopped.CheckpointDigest)
+		if len(stopped.Checkpoint) == 0 {
+			return r, errors.New("session: graceful stop returned no checkpoint")
+		}
+		thread, cp, err := c.commitStopped(r, stopped)
 		if err != nil {
 			return r, err
 		}
@@ -254,7 +240,7 @@ func (c *Coordinator) stopSource(ctx context.Context, r Record, index int) (Reco
 		}
 		r.Visits = append(r.Visits, Visit{Launch: source.Launch, Incarnation: source.Incarnation, Receipt: stopped.Receipt, ActualStopped: true, CheckpointDigest: cp.Metadata.SHA256})
 		r.Remaining = remaining
-		r.Checkpoint = cp
+		r.ThreadID, r.Checkpoint = thread, cp
 		r.Active = nil
 		op.Stage = stagePrepare
 		r.Phase = PhasePreparing
@@ -264,12 +250,31 @@ func (c *Coordinator) stopSource(ctx context.Context, r Record, index int) (Reco
 	}
 	return r, nil
 }
+
+// commitStopped commits a stop's checkpoint. The first one also binds the
+// execution's genuine native thread; later ones must name the same thread.
+// A stop without a checkpoint keeps the previous one.
+func (c *Coordinator) commitStopped(r Record, s Stopped) (string, Checkpoint, error) {
+	if len(s.Checkpoint) == 0 {
+		return r.ThreadID, r.Checkpoint, nil
+	}
+	observed := stoppedThread(s)
+	thread := cmp.Or(r.ThreadID, observed)
+	if !validUUID(thread) || observed != thread {
+		return "", Checkpoint{}, errors.New("session: stopped native thread conflicts with the execution")
+	}
+	cp, err := c.commitCheckpoint(s.Checkpoint, r.Harness, thread, s.CheckpointDigest)
+	return thread, cp, err
+}
 func (c *Coordinator) prepareDestination(ctx context.Context, r Record, index int) (Record, error) {
 	op := &r.Operations[index]
 	if op.Stage == stagePrepare {
 		if op.Launch == nil {
 			if r.Epoch == ^uint64(0) {
 				return r, errors.New("session: epoch exhausted")
+			}
+			if !r.hasCheckpoint() {
+				return r, errors.New("session: execution has no checkpoint to move")
 			}
 			launch := Launch{Harness: r.Harness, SessionID: r.ID, OperationID: op.ID, AllocationID: uuid.NewString(), Epoch: r.Epoch + 1, Placement: op.Destination, ThreadID: r.ThreadID, InstructionDigest: r.InstructionDigest, IncludeIgnored: append([]string(nil), r.IncludeIgnored...), Deadline: r.Deadline, Allowances: cloneAllowances(r.Remaining), CheckpointDigest: r.Checkpoint.Metadata.SHA256}
 			op.Launch = &launch
@@ -300,7 +305,7 @@ func (c *Coordinator) prepareDestination(ctx context.Context, r Record, index in
 			if err := ctx.Err(); err != nil {
 				return r, err
 			}
-			data, err := c.checkpointBytes(r)
+			data, err := c.input(r, *op.Launch)
 			if err != nil {
 				return r, err
 			}
@@ -370,7 +375,7 @@ func (c *Coordinator) activateDestination(ctx context.Context, r Record, index i
 	return r, nil
 }
 func checkObservation(l Launch, o Observation) error {
-	if !sameLaunch(l, o.Launch) {
+	if !SameLaunch(l, o.Launch) {
 		return errors.New("session: observation operation/allocation mismatch")
 	}
 	switch o.State {

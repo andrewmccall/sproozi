@@ -2,6 +2,7 @@ package docker
 
 import (
 	"bytes"
+	"cmp"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -15,18 +16,22 @@ import (
 	"github.com/andrewmccall/sproozi/internal/session"
 )
 
-const recordVersion = 1
+// recordVersion 2 keeps Launch exactly as prepared and records a first visit's
+// bound native thread in Thread. Version 1 records rewrote Launch.ThreadID.
+const recordVersion = 2
 const maxRecordBytes = int64(1 << 20)
 
 type placementRecord struct {
-	Version               int             `json:"version"`
-	ConfigDigest          string          `json:"configDigest"`
-	Launch                session.Launch  `json:"launch"`
-	Initial               *session.Launch `json:"initial,omitempty"`
-	InputDigest           string          `json:"inputDigest"`
-	Execution             string          `json:"execution"`
-	Phase                 string          `json:"phase"`
-	Volume                *Volume         `json:"volume,omitempty"`
+	Version      int            `json:"version"`
+	ConfigDigest string         `json:"configDigest"`
+	Launch       session.Launch `json:"launch"`
+	// Thread is the genuine native thread a first visit bound; resumed
+	// launches name theirs in Launch.ThreadID.
+	Thread                string  `json:"thread,omitempty"`
+	InputDigest           string  `json:"inputDigest"`
+	Execution             string  `json:"execution"`
+	Phase                 string  `json:"phase"`
+	Volume                *Volume `json:"volume,omitempty"`
 	Agent, Helper, Anchor *Instance
 	ActualStopped         bool             `json:"actualStopped"`
 	NativeQuiet           bool             `json:"nativeQuiet,omitempty"`
@@ -207,7 +212,7 @@ func (p *Placement) load(l session.Launch) (placementRecord, error) {
 	if decoder.Decode(new(any)) != io.EOF {
 		return r, errors.New("docker placement has trailing journal data")
 	}
-	if r.Version != recordVersion || r.ConfigDigest != p.digest || r.Execution != "spz-"+operationKey(l)[:32] || !sameIntent(r.Launch, l, r.Initial) {
+	if r.Version != recordVersion || r.ConfigDigest != p.digest || r.Execution != "spz-"+operationKey(l)[:32] || !session.SameLaunch(r.Launch, l) {
 		return r, errors.New("docker placement immutable intent conflict")
 	}
 	return r, nil
@@ -222,22 +227,13 @@ func (p *Placement) save(r placementRecord) error {
 	}
 	return p.write(operationKey(r.Launch)+".json", data)
 }
-func sameIntent(a, b session.Launch, initial *session.Launch) bool {
-	a.Deadline = a.Deadline.UTC()
-	b.Deadline = b.Deadline.UTC()
-	x, _ := json.Marshal(a)
-	y, _ := json.Marshal(b)
-	if bytes.Equal(x, y) {
-		return true
-	}
-	if initial != nil {
-		copyInitial := *initial
-		copyInitial.Deadline = copyInitial.Deadline.UTC()
-		x, _ = json.Marshal(copyInitial)
-		return bytes.Equal(x, y)
-	}
-	return false
-}
+
+// fresh reports a first visit started from a Git workspace rather than a checkpoint.
+func (r placementRecord) fresh() bool { return r.Launch.CheckpointDigest == "" }
+
+// thread is the native thread the visit runs, once known.
+func (r placementRecord) thread() string { return cmp.Or(r.Launch.ThreadID, r.Thread) }
+
 func (p *Placement) retain(name string, data []byte) error {
 	p.storageMu.Lock()
 	defer p.storageMu.Unlock()

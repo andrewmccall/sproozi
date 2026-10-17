@@ -23,10 +23,7 @@ import (
 	"github.com/google/uuid"
 )
 
-const (
-	checkpointInput = "checkpoint"
-	stageRetained   = "retained"
-)
+const stageRetained = "retained"
 
 // WorkSource is authenticated trusted-owner transport, configured by the home
 // administrator. Artifact contents and private socket arguments cannot claim a
@@ -354,11 +351,6 @@ func sameExportSource(a, b work.Export) bool {
 	return reflect.DeepEqual(a, b)
 }
 
-func exportFromStopped(stopped session.Stopped, id, operation string) work.Export {
-	return work.Export{ID: id, Harness: stopped.Launch.Harness, Stopped: stopped,
-		Checkpoint: stopped.Checkpoint, OperationID: operation}
-}
-
 // Resume admits a new execution from claimed continuity. Its new UUID,
 // allocation, deadline and allowances never modify or credit the source receipt.
 func (s *Service) Resume(ctx context.Context, id, operation string) (Status, error) {
@@ -385,18 +377,16 @@ func (s *Service) Resume(ctx context.Context, id, operation string) (Status, err
 		return Status{}, errors.New("home: resume operation intent conflicts")
 	}
 	for _, execution := range r.Executions {
-		prior, readErr := s.readInitial(execution)
-		if readErr != nil {
-			return Status{}, readErr
+		prior, inspectErr := s.coordinator.Inspect(execution)
+		if inspectErr != nil {
+			return Status{}, inspectErr
 		}
-		if prior.Launch.OperationID == operation {
+		if prior.Operations[0].ID == operation {
 			if r.Current != execution {
 				return Status{}, errors.New("home: resume operation belongs to an earlier execution")
 			}
-			if prior.Stage == initialPreparing {
-				if err = s.startResumed(ctx, prior); err != nil {
-					return Status{}, err
-				}
+			if _, err = s.startFirstVisit(ctx, prior); err != nil {
+				return Status{}, err
 			}
 			return s.catalogStatus(r)
 		}
@@ -414,52 +404,24 @@ func (s *Service) Resume(ctx context.Context, id, operation string) (Status, err
 	if err = checkpoint.ValidateContinuity(data, s.config.Local.Harness, s.config.Local.InstructionDigest, s.config.Local.MaxCheckpointBytes); err != nil {
 		return Status{}, err
 	}
-	execution := uuid.NewString()
-	launch := session.Launch{Harness: s.config.Local.Harness, SessionID: execution, OperationID: operation,
+	first := session.Launch{Harness: s.config.Local.Harness, SessionID: uuid.NewString(), OperationID: operation,
 		AllocationID: uuid.NewString(), Epoch: 1, Placement: s.config.Local.Name,
 		ThreadID: r.Committed.Launch.ThreadID, InstructionDigest: s.config.Local.InstructionDigest,
 		IncludeIgnored: slices.Clone(r.Committed.Launch.IncludeIgnored), Deadline: time.Now().Add(s.duration).UTC(),
 		Allowances: allowances, CheckpointDigest: r.Committed.CheckpointDigest}
-	initial := initial{Version: 1, ProductID: id, Input: checkpointInput, ArtifactDigest: launch.CheckpointDigest, Launch: launch, Stage: initialPreparing}
-	if err = s.retainResumedInitial(initial, data); err != nil {
+	execution, err := s.createExecution(first, id, func() ([]byte, error) { return data, nil })
+	if err != nil {
 		return Status{}, err
 	}
-	r.Current = execution
-	r.Executions = append(r.Executions, execution)
-	if err = s.bindCatalogOperation(&r, operation, catalogOperation{Action: ActionResume, Execution: execution}); err != nil {
+	r.Current = execution.ID
+	r.Executions = append(r.Executions, execution.ID)
+	if err = s.bindCatalogOperation(&r, operation, catalogOperation{Action: ActionResume, Execution: execution.ID}); err != nil {
 		return Status{}, err
 	}
-	if err = s.startResumed(ctx, initial); err != nil {
+	if _, err = s.startFirstVisit(ctx, execution); err != nil {
 		return Status{}, err
 	}
 	return s.catalogStatus(r)
-}
-
-func (s *Service) retainResumedInitial(r initial, data []byte) error {
-	s.retentionMu.Lock()
-	defer s.retentionMu.Unlock()
-	if err := s.retention(); err != nil {
-		return err
-	}
-	if err := s.writeInitial(r.Launch.SessionID+".workspace", data); err != nil {
-		return err
-	}
-	return s.saveInitial(r)
-}
-
-func (s *Service) startResumed(ctx context.Context, r initial) error {
-	unlock, err := s.lockSession(r.Launch.SessionID)
-	if err != nil {
-		return err
-	}
-	defer unlock()
-	ctx, finish, err := s.graceful.Begin(ctx, r.Launch.SessionID)
-	if err != nil {
-		return err
-	}
-	defer finish()
-	_, err = s.start(ctx, r)
-	return err
 }
 
 func (s *Service) catalogStatus(r localSession) (Status, error) {
@@ -476,10 +438,13 @@ func (s *Service) catalogStatus(r localSession) (Status, error) {
 		info = &meta
 	}
 	if r.Current != "" {
-		status, err := s.executionStatus(r.Current)
-		status.ID = r.ID
+		execution, err := s.coordinator.Inspect(r.Current)
+		if err != nil {
+			return Status{}, err
+		}
+		status := executionStatus(execution)
 		status.Association, status.CheckpointInfo = r.Original.Association, info
-		return status, err
+		return status, nil
 	}
 	stage := "importing"
 	ownership := "source"
@@ -494,22 +459,25 @@ func (s *Service) catalogStatus(r localSession) (Status, error) {
 		InitialStage: stage, ThreadID: r.Committed.Launch.ThreadID, Deadline: r.Committed.Launch.Deadline}, nil
 }
 
+// resolveSession maps a session or execution ID to the execution to act on
+// and, when catalogued, its durable session. An execution belonging to a
+// catalogued session must still be that session's current writer.
 func (s *Service) resolveSession(id string) (string, string, error) {
 	r, err := s.readCatalog(id)
 	if os.IsNotExist(err) {
-		initial, readErr := s.readInitial(id)
-		if readErr == nil && initial.ProductID != "" {
-			owner, ownerErr := s.readCatalog(initial.ProductID)
+		execution, inspectErr := s.coordinator.Inspect(id)
+		if inspectErr == nil && execution.Session != "" {
+			owner, ownerErr := s.readCatalog(execution.Session)
 			if ownerErr != nil {
 				return "", "", ownerErr
 			}
 			if owner.Current != id {
 				return "", "", errors.New("home: execution is no longer the current session writer")
 			}
-			return id, initial.ProductID, nil
+			return id, execution.Session, nil
 		}
-		if readErr != nil && !os.IsNotExist(readErr) {
-			return "", "", readErr
+		if inspectErr != nil && !os.IsNotExist(inspectErr) {
+			return "", "", inspectErr
 		}
 		return id, "", nil
 	}
@@ -553,7 +521,11 @@ func (s *Service) Status(id string) (Status, error) {
 	if !os.IsNotExist(err) {
 		return Status{}, err
 	}
-	return s.executionStatus(id)
+	execution, err := s.coordinator.Inspect(id)
+	if err != nil {
+		return Status{}, err
+	}
+	return executionStatus(execution), nil
 }
 
 func (s *Service) Move(ctx context.Context, id, operation, destination string) (Status, error) {
@@ -602,31 +574,29 @@ func (s *Service) Cancel(ctx context.Context, id, operation string) (Status, err
 			return Status{}, err
 		}
 	}
-	// Interrupt before waiting on product ownership, including a blocked resume.
-	finish, err := s.graceful.RequestCancel(execution, operation)
-	if err != nil {
-		return Status{}, err
-	}
-	defer finish()
-	if product != "" {
+	// The coordinator interrupts graceful work on the execution, including a
+	// blocked resume, before admit waits on the durable session's lock.
+	admit := func() (func(), error) {
+		if product == "" {
+			return func() {}, nil
+		}
 		unlock, lockErr := s.lockSession(product)
 		if lockErr != nil {
-			return Status{}, lockErr
+			return nil, lockErr
 		}
-		defer unlock()
 		current, _, resolveErr := s.resolveSession(id)
 		if resolveErr != nil || current != execution {
-			return Status{}, errors.New("home: cancellation target is no longer the current writer")
+			unlock()
+			return nil, errors.New("home: cancellation target is no longer the current writer")
 		}
-		if err = s.bindProductOperation(product, operation, ActionCancel, execution, ""); err != nil {
-			return Status{}, err
+		if bindErr := s.bindProductOperation(product, operation, ActionCancel, execution, ""); bindErr != nil {
+			unlock()
+			return nil, bindErr
 		}
+		return unlock, nil
 	}
-	status, err := s.cancelExecution(ctx, execution, operation)
-	if product != "" {
-		status.ID = product
-	}
-	return status, err
+	r, err := s.coordinator.Cancel(ctx, execution, operation, admit)
+	return executionStatus(r), err
 }
 
 func (s *Service) Attach(ctx context.Context, id string, input io.Reader, output io.Writer) error {
@@ -670,22 +640,24 @@ func (s *Service) Sessions(q work.SessionQuery) ([]Status, error) {
 			internal[execution] = true
 		}
 	}
-	entries, err = os.ReadDir(s.initialDir)
+	executions, err := s.coordinator.List()
 	if err != nil {
 		return nil, err
 	}
-	for _, entry := range entries {
-		if !strings.HasSuffix(entry.Name(), ".json") {
-			continue
-		}
-		id := strings.TrimSuffix(entry.Name(), ".json")
+	for _, id := range executions {
 		if internal[id] {
 			continue
 		}
-		status, readErr := s.executionStatus(id)
+		execution, readErr := s.coordinator.Inspect(id)
 		if readErr != nil {
 			return nil, readErr
 		}
+		// An execution that a catalogued session never recorded (an interrupted
+		// resume) is not a session of its own.
+		if execution.Session != "" {
+			continue
+		}
+		status := executionStatus(execution)
 		// Discovery exposes compact facts; detailed execution journals use Status.
 		status.Session = nil
 		if q.Project == "" {

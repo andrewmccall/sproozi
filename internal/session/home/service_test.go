@@ -40,33 +40,46 @@ type placementFixture struct {
 	partialCreate                                  bool
 	inspections                                    int
 	charge                                         int64
+	// Non-nil hold channels are closed when the call is reached; the call then
+	// waits for its context, as a native turn that has not completed would.
+	holdPrepare, holdStop chan struct{}
+	// abortEntered, when non-nil, is closed by the first Abort.
+	abortEntered chan struct{}
 }
 
-func (p *placementFixture) prepare(l session.Launch) (session.Incarnation, error) {
+func (p *placementFixture) prepare(l session.Launch) session.Incarnation {
 	if r, ok := p.rows[l.AllocationID]; ok && r.State != session.PlacementPreparing {
-		return r.Incarnation, nil
+		return r.Incarnation
 	}
 	i := session.Incarnation{ExecutionID: l.AllocationID, ResourceUID: uuid.NewString()}
 	p.rows[l.AllocationID] = session.Observation{Launch: l, Incarnation: i, State: session.PlacementPrepared}
+	return i
+}
+
+// Prepare restores a captured workspace for a first visit, which must not name
+// a native thread, or the retained checkpoint for any other visit.
+func (p *placementFixture) Prepare(ctx context.Context, l session.Launch, data []byte) (session.Incarnation, error) {
+	if l.CheckpointDigest == "" {
+		if l.ThreadID != "" || len(data) == 0 {
+			return session.Incarnation{}, errors.New("initial session fabricated native state")
+		}
+		p.initials++
+		if p.partialCreate {
+			p.rows[l.AllocationID] = session.Observation{Launch: l, State: session.PlacementPreparing}
+			return session.Incarnation{}, errors.New("partial initial preparation")
+		}
+	} else {
+		if l.ThreadID != testNativeUUID || l.CheckpointDigest != p.digest || string(data) != string(p.artifact) {
+			return session.Incarnation{}, errors.New("native continuity changed")
+		}
+		p.prepares++
+	}
+	i := p.prepare(l)
+	if p.holdPrepare != nil {
+		close(p.holdPrepare)
+		<-ctx.Done()
+	}
 	return i, nil
-}
-func (p *placementFixture) CreateLocal(_ context.Context, l session.Launch, _ []byte) (session.Incarnation, error) {
-	if l.ThreadID != "" || l.CheckpointDigest != "" {
-		return session.Incarnation{}, errors.New("initial session fabricated native state")
-	}
-	p.initials++
-	if p.partialCreate {
-		p.rows[l.AllocationID] = session.Observation{Launch: l, State: session.PlacementPreparing}
-		return session.Incarnation{}, errors.New("partial initial preparation")
-	}
-	return p.prepare(l)
-}
-func (p *placementFixture) Prepare(_ context.Context, l session.Launch, data []byte) (session.Incarnation, error) {
-	if l.ThreadID != testNativeUUID || l.CheckpointDigest != p.digest || string(data) != string(p.artifact) {
-		return session.Incarnation{}, errors.New("native continuity changed")
-	}
-	p.prepares++
-	return p.prepare(l)
 }
 func (p *placementFixture) Activate(_ context.Context, l session.Launch, i session.Incarnation) error {
 	r := p.rows[l.AllocationID]
@@ -99,7 +112,15 @@ func (p *placementFixture) Inspect(_ context.Context, l session.Launch) (session
 	}
 	return session.Observation{Launch: l, State: session.PlacementAbsent}, nil
 }
-func (p *placementFixture) Stop(_ context.Context, l session.Launch, i session.Incarnation) (session.Stopped, error) {
+
+// Stop reports the genuine native thread separately; the launch is unchanged.
+func (p *placementFixture) Stop(ctx context.Context, l session.Launch, i session.Incarnation) (session.Stopped, error) {
+	if hold := p.holdStop; hold != nil {
+		p.holdStop = nil
+		close(hold)
+		<-ctx.Done()
+		return session.Stopped{}, ctx.Err()
+	}
 	r := p.rows[l.AllocationID]
 	if r.Incarnation != i {
 		return session.Stopped{}, errors.New("wrong stop incarnation")
@@ -108,14 +129,12 @@ func (p *placementFixture) Stop(_ context.Context, l session.Launch, i session.I
 		return *r.Stopped, nil
 	}
 	p.stops++
-	l.ThreadID = testNativeUUID
-	stopped := session.Stopped{Launch: l, Incarnation: i, ActualStopped: true, Checkpoint: p.artifact, CheckpointDigest: p.digest, Receipt: &session.Receipt{Launch: l, Incarnation: i, Usage: map[string]budget.TrustedUsage{testCapability: {Units: p.charge}}}}
+	stopped := session.Stopped{Launch: l, Incarnation: i, ActualStopped: true, ThreadID: testNativeUUID, Checkpoint: p.artifact, CheckpointDigest: p.digest, Receipt: p.receipt(l, i)}
 	if p.unknownUsage {
 		stopped.Receipt = nil
 	}
 	r.State = session.PlacementStopped
 	r.Stopped = &stopped
-	r.Launch = l
 	p.rows[l.AllocationID] = r
 	if p.lostStop {
 		p.lostStop = false
@@ -123,18 +142,28 @@ func (p *placementFixture) Stop(_ context.Context, l session.Launch, i session.I
 	}
 	return stopped, nil
 }
+func (p *placementFixture) receipt(l session.Launch, i session.Incarnation) *session.Receipt {
+	return &session.Receipt{Launch: l, Incarnation: i, Usage: map[string]budget.TrustedUsage{testCapability: {Units: p.charge}}}
+}
+
+// Abort fences the writer and seals its usage, as the Docker placement does
+// even when an earlier graceful stop could not seal it.
 func (p *placementFixture) Abort(_ context.Context, l session.Launch, i session.Incarnation) (session.Observation, error) {
 	p.aborts++
+	if p.abortEntered != nil {
+		close(p.abortEntered)
+		p.abortEntered = nil
+	}
 	r := p.rows[l.AllocationID]
 	if r.Incarnation != i {
 		return r, errors.New("wrong abort incarnation")
 	}
 	r.State = session.PlacementStopped
-	r.Stopped = &session.Stopped{Launch: l, Incarnation: i, ActualStopped: true}
+	r.Stopped = &session.Stopped{Launch: l, Incarnation: i, ActualStopped: true, Receipt: p.receipt(l, i)}
 	p.rows[l.AllocationID] = r
 	return r, nil
 }
-func (p *placementFixture) CancelInitial(ctx context.Context, l session.Launch) error {
+func (p *placementFixture) AbortPreparation(ctx context.Context, l session.Launch) error {
 	r, found := p.rows[l.AllocationID]
 	if !found {
 		return nil
@@ -190,17 +219,13 @@ func testService(t *testing.T) (*Service, *placementFixture, *placementFixture, 
 	local := &placementFixture{rows: map[string]session.Observation{}, artifact: data, digest: digest, charge: 2}
 	remote := &placementFixture{rows: map[string]session.Observation{}, artifact: data, digest: digest, charge: 3}
 	dir := filepath.Join(t.TempDir(), "home")
-	initialDir := filepath.Join(dir, "initial")
-	if err := os.MkdirAll(initialDir, 0700); err != nil {
-		t.Fatal(err)
-	}
 	config := Config{Directory: dir, Local: runtimedocker.PlacementConfig{Harness: harness.NativeCodex, Name: testLocal, InstructionDigest: fmt.Sprintf("%x", sha256.Sum256([]byte(testInstructions))), MaxCheckpointBytes: testLimit, RetainedBytes: 64 << 20}, Allowances: map[string]session.Allowance{testCapability: {Units: session.Limit{Bounded: true, Value: 10}}}}
 	placements := map[string]session.Placement{testLocal: local, testRemote: remote}
 	coordinator, err := session.Open(filepath.Join(dir, "journal"), placements, testLimit)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &Service{config: config, duration: time.Hour, initialDir: initialDir, local: local, placements: placements, coordinator: coordinator}
+	s := &Service{config: config, duration: time.Hour, local: local, placements: placements, coordinator: coordinator}
 	t.Cleanup(func() { _ = s.Close() })
 	return s, local, remote, repo
 }
@@ -221,11 +246,12 @@ func TestStartIgnoredOptInRetainsBytesAndImmutableSelectionAcrossVisits(t *testi
 	if _, err := s.Start(t.Context(), id, operation, repo, []string{testIgnoredFile}); err != nil {
 		t.Fatal(err)
 	}
-	initial, err := s.readInitial(id)
+	execution, err := s.coordinator.Inspect(id)
 	if err != nil {
 		t.Fatal(err)
 	}
-	input, err := os.ReadFile(filepath.Join(s.initialDir, id+".workspace"))
+	first := execution.Operations[0].Launch
+	input, err := os.ReadFile(filepath.Join(s.config.Directory, "journal", "workspaces", execution.Workspace+".workspace"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,7 +266,7 @@ func TestStartIgnoredOptInRetainsBytesAndImmutableSelectionAcrossVisits(t *testi
 	if _, err = os.Stat(filepath.Join(restored, ".env")); !os.IsNotExist(err) {
 		t.Fatal("default excluded ignored file was transferred")
 	}
-	if len(initial.Launch.IncludeIgnored) != 1 || initial.Launch.IncludeIgnored[0] != testIgnoredFile {
+	if len(first.IncludeIgnored) != 1 || first.IncludeIgnored[0] != testIgnoredFile {
 		t.Fatal("initial launch omitted the approved ignored file")
 	}
 	if _, err = s.Start(t.Context(), id, operation, repo, nil); err == nil {
@@ -267,7 +293,7 @@ func TestInitialSessionImportRoundTripAndLostReplies(t *testing.T) {
 		t.Fatal("lost activation reply succeeded")
 	}
 	status, err := s.Recover(t.Context(), id)
-	if err != nil || status.InitialStage != initialActive || status.ThreadID != "" {
+	if err != nil || status.Phase != string(session.PhaseActive) || status.ThreadID != "" {
 		t.Fatalf("initial recovery: %+v %v", status, err)
 	}
 	if local.initials != 1 || local.activations != 1 {
@@ -303,26 +329,19 @@ func TestInitialSessionImportRoundTripAndLostReplies(t *testing.T) {
 	}
 }
 
-func TestRecoverImportBeforeFirstMoveWasJournaled(t *testing.T) {
-	s, _, remote, repo := testService(t)
+// A first move interrupted after its source stopped resumes after a restart
+// as the same retained operation; a different move cannot replace it.
+func TestRecoverFirstMoveRetainedBeforeRestart(t *testing.T) {
+	s, local, remote, repo := testService(t)
 	id := uuid.NewString()
 	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, nil); err != nil {
 		t.Fatal(err)
 	}
-	r, err := s.readInitial(id)
-	if err != nil {
-		t.Fatal(err)
+	local.lostStop = true
+	if _, err := s.Move(t.Context(), id, uuid.NewString(), testRemote); err == nil {
+		t.Fatal("lost stop reply succeeded")
 	}
-	r.Stage = initialImporting
-	r.OperationID = uuid.NewString()
-	r.Destination = testRemote
-	if err = s.saveInitial(r); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = s.importInitial(t.Context(), r); err != nil {
-		t.Fatal(err)
-	}
-	// Emulate restart after durable import and before Coordinator.Move saved.
+	var err error
 	if err = s.coordinator.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -346,15 +365,15 @@ func TestRejectedInitialActivationCancelsWithoutInspectingOrCompletingNativeTurn
 	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, nil); err == nil {
 		t.Fatal("native activation rejection hidden")
 	}
-	retained, err := s.readInitial(id)
-	if err != nil || retained.Stage != initialPreparing || retained.Incarnation == nil {
+	retained, err := s.coordinator.Inspect(id)
+	if err != nil || retained.Phase != session.PhaseActivating || retained.Operations[0].Incarnation == nil {
 		t.Fatalf("failed activation lost exact incarnation: %+v %v", retained, err)
 	}
 	local.failInspect = true
 	inspections := local.inspections
 	operation := uuid.NewString()
 	status, err := s.Cancel(t.Context(), id, operation)
-	if err != nil || status.InitialStage != initialCancelled {
+	if err != nil || status.Phase != string(session.PhaseCancelled) {
 		t.Fatalf("rejected initial activation cancellation: %+v %v", status, err)
 	}
 	if local.inspections != inspections || local.activations != 1 || local.aborts != 1 || local.stops != 0 {
@@ -375,14 +394,14 @@ func TestPartiallyCreatedInitialSessionCancelsWithoutProvisioning(t *testing.T) 
 	if _, err := s.Start(t.Context(), id, operation, repo, nil); err == nil {
 		t.Fatal("expected failed initial prepare")
 	}
-	r, err := s.readInitial(id)
-	if err != nil || r.Incarnation != nil || r.Stage != initialPreparing {
+	r, err := s.coordinator.Inspect(id)
+	if err != nil || r.Operations[0].Incarnation != nil || r.Phase != session.PhasePreparing {
 		t.Fatalf("unexpected partial initial: %+v %v", r, err)
 	}
 	inspections := local.inspections
 	local.failInspect = true
 	status, err := s.Cancel(t.Context(), id, uuid.NewString())
-	if err != nil || status.InitialStage != initialCancelled || status.ThreadID != "" {
+	if err != nil || status.Phase != string(session.PhaseCancelled) || status.ThreadID != "" {
 		t.Fatalf("partial initial cancellation: %+v %v", status, err)
 	}
 	if local.initials != 1 || local.activations != 0 || local.inspections != inspections || local.aborts != 1 || remote.prepares != 0 {
@@ -399,7 +418,7 @@ func TestPreparingInitialSessionRetriesCreateOnlyThroughStart(t *testing.T) {
 	}
 	local.partialCreate = false
 	status, err := s.Start(t.Context(), id, operation, repo, nil)
-	if err != nil || status.InitialStage != initialActive || local.initials != 2 || local.activations != 1 {
+	if err != nil || status.Phase != string(session.PhaseActive) || local.initials != 2 || local.activations != 1 {
 		t.Fatalf("explicit preparation retry: %+v %v", status, err)
 	}
 }
@@ -418,7 +437,7 @@ func TestUnknownInitialUsageNeverStartsRemoteAndCanCancel(t *testing.T) {
 		t.Fatal("unknown usage became zero")
 	}
 	status, err := s.Cancel(t.Context(), id, uuid.NewString())
-	if err != nil || status.InitialStage != initialCancelled {
+	if err != nil || status.Phase != string(session.PhaseCancelled) {
 		t.Fatalf("initial cancellation: %+v %v", status, err)
 	}
 	if _, err = s.Move(t.Context(), id, uuid.NewString(), testRemote); err == nil {
