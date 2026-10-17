@@ -72,6 +72,13 @@ func (g *ExecutionGrant) Validate() error {
 	return nil
 }
 
+// Permits reports whether both the execution and its live policy grant the
+// capability. The Dispatcher checks it for fixed routes; MCP checks it once the
+// server name has selected the capability.
+func (g *ExecutionGrant) Permits(capability api.CapabilityKind) bool {
+	return slices.Contains(g.Capabilities, capability) && slices.Contains(g.Policy.Spec.AllowedCapabilities, capability)
+}
+
 // Clone freezes administrator-owned input before the transport retains it.
 func (g *ExecutionGrant) Clone() *ExecutionGrant {
 	if g == nil {

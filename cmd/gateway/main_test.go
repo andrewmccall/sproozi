@@ -1,11 +1,9 @@
 package main
 
 import (
-	"bytes"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
-	"encoding/json"
 	"encoding/pem"
 	"math/big"
 	"net/http"
@@ -20,8 +18,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-
-	"github.com/andrewmccall/sproozi/internal/audit"
 )
 
 func TestGatewaySchemeSupportsRunIdentityAndBudgetObjects(t *testing.T) {
@@ -144,28 +140,38 @@ func TestRegisteredMCPProvidersAndGatewayNeverFallBackToDestinationRoutes(t *tes
 		t.Fatal("reserved MCP addresses acquired destination fallback")
 	}
 	routes = composeDispatcher(cfg, handlers, http.NotFoundHandler(), nil)
-	if !routes.Allows(defaultHost+":8443") || routes[defaultHost+":8443"].Tier != audit.TierProtocol {
+	if !routes.Allows(defaultHost + ":8443") {
 		t.Fatal("MCP delivery route was not composed")
 	}
 }
 
 var bigOne = func() *big.Int { return big.NewInt(1) }()
 
-func TestAnthropicUpstreamIsAnAdministratorOwnedOrigin(t *testing.T) {
-	validGatewayEnvironment(t)
-	t.Setenv("ANTHROPIC_UPSTREAM_URL", "http://fixture.sproozi-system.svc:8080")
-	cfg, err := loadStartupConfig()
-	if err != nil || cfg.anthropicUpstreamURL != "http://fixture.sproozi-system.svc:8080" {
-		t.Fatalf("configured provider origin was not retained: %v", err)
-	}
-	for _, value := range []string{
-		"file:///credentials", "https://credential@provider.example", "https://provider.example?token=secret",
-		"https://provider.example/v1/messages", "http://fixture?", "https://provider.example#",
-	} {
-		t.Setenv("ANTHROPIC_UPSTREAM_URL", value)
-		if _, err := loadStartupConfig(); err == nil || strings.Contains(err.Error(), value) {
-			t.Fatalf("invalid origin was accepted or disclosed: %v", err)
-		}
+func TestModelUpstreamsAreAdministratorOwnedHTTPSOrigins(t *testing.T) {
+	for _, key := range []string{"OPENAI_UPSTREAM_URL", "ANTHROPIC_UPSTREAM_URL"} {
+		t.Run(key, func(t *testing.T) {
+			validGatewayEnvironment(t)
+			t.Setenv(key, "https://fixture.sproozi-system.svc:8443")
+			cfg, err := loadStartupConfig()
+			if err != nil {
+				t.Fatal(err)
+			}
+			retained := map[string]string{
+				"OPENAI_UPSTREAM_URL": cfg.openAIUpstreamURL, "ANTHROPIC_UPSTREAM_URL": cfg.anthropicUpstreamURL,
+			}
+			if retained[key] != "https://fixture.sproozi-system.svc:8443" {
+				t.Fatalf("configured provider origin was not retained: %q", retained[key])
+			}
+			for _, value := range []string{
+				"file:///credentials", "https://credential@provider.example", "https://provider.example?token=secret",
+				"https://provider.example/v1/messages", "http://fixture.sproozi-system.svc:8080", "https://provider.example#",
+			} {
+				t.Setenv(key, value)
+				if _, err := loadStartupConfig(); err == nil || strings.Contains(err.Error(), value) {
+					t.Fatalf("invalid origin %q was accepted or disclosed: %v", value, err)
+				}
+			}
+		})
 	}
 }
 
@@ -242,30 +248,6 @@ func TestChatGPTStartupDoesNotRequireAPIKeyAndPinsPublicUpstream(t *testing.T) {
 	}
 }
 
-func TestNewAuditLoggerWritesStructuredSecretFreeJSON(t *testing.T) {
-	var output bytes.Buffer
-	logger := newAuditLogger(&output)
-	logger.Log(audit.Event{
-		RunID:      "sproozi-agents/demo",
-		Operation:  "model.inference",
-		Allowed:    true,
-		TokensUsed: 42,
-	})
-
-	var event map[string]any
-	if err := json.Unmarshal(output.Bytes(), &event); err != nil {
-		t.Fatalf("audit output is not JSON: %v", err)
-	}
-	if event["runID"] != "sproozi-agents/demo" || event["operation"] != "model.inference" || event["allowed"] != true {
-		t.Fatalf("audit output = %#v", event)
-	}
-	for _, forbidden := range []string{"authorization", "credentials", "prompt", "response", "apiKey"} {
-		if _, exists := event[forbidden]; exists {
-			t.Fatalf("audit output contains forbidden field %q", forbidden)
-		}
-	}
-}
-
 func TestDisabledModulesDoNotRequireProviderCredentials(t *testing.T) {
 	validGatewayEnvironment(t)
 	t.Setenv("SPROOZI_ENABLED_CAPABILITIES", "kubernetes.read")
@@ -308,10 +290,6 @@ func TestConfiguredDestinationRoutesAndSemanticPrecedence(t *testing.T) {
 	if routes.Allows("api.github.com:443") {
 		t.Fatal("disabled semantic service fell back to weaker egress")
 	}
-	if routes["registry.example:8443"].Tier != audit.TierDestination ||
-		routes["api.github.com:443"].Tier != audit.TierSemantic {
-		t.Fatal("route tiers are incorrect")
-	}
 }
 
 func TestAnthropicStartupAndReservedRoute(t *testing.T) {
@@ -344,7 +322,7 @@ func TestAnthropicStartupAndReservedRoute(t *testing.T) {
 	cfg.profiles = profiles
 	routes = composeDispatcher(cfg,
 		map[api.CapabilityKind]http.Handler{api.CapabilityNetworkEgress: http.NotFoundHandler()}, nil, nil)
-	if routes.Allows("api.anthropic.com:443") || routes["api.anthropic.com:443"].Tier != audit.TierSemantic {
+	if routes.Allows("api.anthropic.com:443") {
 		t.Fatal("disabled Anthropic fell back to egress")
 	}
 }

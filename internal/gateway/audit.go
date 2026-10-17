@@ -1,14 +1,25 @@
 package gateway
 
 import (
+	"context"
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/audit"
 )
 
-// AuditEvent creates the canonical authenticated identity enrichment shared by
-// every capability handler. Callers only supply the operation-specific value.
-func (i *ExecutionGrant) AuditEvent(operation string) audit.Event {
+// AuditEvent creates the canonical audit record shared by every capability
+// handler: the authenticated identity plus the dispatching route's capability
+// and tier. Callers only supply the operation-specific value.
+func AuditEvent(ctx context.Context, operation string) audit.Event {
+	identity, _ := IdentityFromContext(ctx)
+	event := identity.auditEvent(operation)
+	if route, ok := ctx.Value(routeContextKey{}).(Route); ok {
+		event.Capability, event.SemanticLevel = route.Capability, route.Tier
+	}
+	return event
+}
+
+func (i *ExecutionGrant) auditEvent(operation string) audit.Event {
 	if i == nil || i.Execution.UID == "" {
 		return audit.Event{Timestamp: time.Now().UTC(), Operation: operation}
 	}

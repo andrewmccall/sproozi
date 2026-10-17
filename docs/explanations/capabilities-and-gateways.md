@@ -115,11 +115,22 @@ shared gateway routes requests to these handlers.
 | Protocol | `internal/endpoints/mcp` | Registered remote tools, discovered input schemas and additional policy argument restrictions. |
 | Destination | `internal/endpoints/destination` | Inspected HTTPS to exact profile hosts and ports. |
 
-`internal/proxytransport` handles authentication, TLS inspection and session
-revocation. `Dispatcher` in `internal/gateway/dispatch.go` selects an exact
-authority and records its enforcement tier. Each handler checks the operation
-against the run and current policy, then records its tier in audit output. The
-MCP handler selects the named capability from the validated gateway path.
+`internal/proxytransport` handles authentication, TLS inspection, session
+revocation and removal of workload credential headers. It validates each
+execution grant once, at that boundary. `Dispatcher` in
+`internal/gateway/dispatch.go` selects the `Route` for an exact authority. The
+route is the single source of the capability and enforcement tier. Before any
+handler runs, the dispatcher denies and audits a request whose run or current
+policy does not grant the route's capability. Dispatcher denials use one JSON
+error body that Anthropic and OpenAI clients parse. Handlers start audit events with
+`gateway.AuditEvent`, which copies the route's capability and tier, and then
+check the operation itself. The MCP route has no fixed capability. Its handler
+selects the named capability from the validated gateway path and checks it with
+the same `ExecutionGrant.Permits`.
+
+`internal/endpoints/authorities.go` lists the semantic service authorities.
+Each endpoint package owns its own authority constant, and both the shared and
+Docker gateways reserve every listed authority.
 
 Destination routes come from configured egress profiles. The inspection
 certificate must cover every workload destination host. Registered MCP provider
@@ -133,8 +144,9 @@ to verify usage.
 
 ## Endpoint interface and spending
 
-The dispatcher supplies the authenticated run in request context. For fixed
-native capabilities it also supplies an optional `budget.Meter`. The MCP handler
+The dispatcher supplies the authenticated run and its route in request context.
+For fixed native capabilities it checks the capability grant and supplies an
+optional `budget.Meter`. The MCP handler
 resolves its named capability and meter from the path and current policy.
 
 `internal/budget` defines shared accounting rules and memory and Kubernetes

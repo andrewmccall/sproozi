@@ -78,7 +78,8 @@ type providerProtocol uint8
 const (
 	openAIProtocol providerProtocol = iota
 	anthropicProtocol
-	// AnthropicAuthority is reserved even when its provider is disabled.
+	// Provider authorities are reserved even when their provider is disabled.
+	OpenAIAuthority    = "api.openai.com:443"
 	AnthropicAuthority = "api.anthropic.com:443"
 )
 
@@ -147,12 +148,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.deny(w, e, http.StatusUnauthorized, "gateway identity required", "auth_error", "missing_gateway_identity")
 		return
 	}
-	e = identity.AuditEvent(r.URL.Path)
-	e.Service, e.SemanticLevel = "openai", "semantic"
+	e = gateway.AuditEvent(ctx, r.URL.Path)
+	e.Service = "openai"
 	if h.protocol == anthropicProtocol {
 		e.Service = "anthropic"
 	}
-	e.Capability = string(sprooziv1alpha1.CapabilityModelInference)
 
 	limits, _, limitErr := identity.BudgetLimits(sprooziv1alpha1.CapabilityModelInference)
 	if limitErr != nil {
@@ -168,20 +168,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 5. Verify model.inference capability is granted by both the run and the policy.
-	if !slices.Contains(identity.Capabilities, sprooziv1alpha1.CapabilityModelInference) ||
-		!slices.Contains(identity.Policy.Spec.AllowedCapabilities, sprooziv1alpha1.CapabilityModelInference) {
-		h.deny(w, e, http.StatusForbidden,
-			"model.inference capability not granted", "permission_error", "capability_not_granted")
-		return
-	}
-
-	// 6. Responses SSE is buffered until usage is verified. Other streaming
+	// Responses SSE is buffered until usage is verified. Other streaming
 	// protocols are denied before reserving capacity.
 	bodyBytes, err := readBounded(r.Body, maxModelBodyBytes)
 	if err != nil {
 		h.deny(w, e, http.StatusRequestEntityTooLarge,
 			"request body exceeds gateway limit", "invalid_request_error", "request_too_large")
+		return
+	}
+	if len(bodyBytes) != 0 && unambiguousJSON(bodyBytes) != nil {
+		h.deny(w, e, http.StatusBadRequest,
+			"request body must be one JSON value without duplicate keys", "invalid_request_error", "ambiguous_json")
 		return
 	}
 	var check requestStreamCheck
@@ -217,7 +214,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 7. Reserve token capacity atomically before forwarding. Inference
+	// Reserve token capacity atomically before forwarding. Inference
 	// requests with an explicit output bound reserve that bound; requests
 	// without one reserve all remaining capacity. The models discovery endpoint
 	// does not consume model tokens and therefore has no reservation.
@@ -247,7 +244,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 8. Build the upstream request.
+	// Build the upstream request.
 	upstreamReq, err := http.NewRequestWithContext(
 		ctx, r.Method, h.Config.UpstreamURL+r.URL.RequestURI(), bytes.NewReader(bodyBytes),
 	)
@@ -272,7 +269,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// expose compressed bytes to the usage verifier instead of Responses SSE.
 	upstreamReq.Header.Del("Accept-Encoding")
 
-	// 9. Forward request to upstream.
+	// Forward request to upstream.
 	providerClient := *h.Config.HTTPClient
 	providerClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	resp, err := providerClient.Do(upstreamReq)
@@ -286,18 +283,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	h.writeProviderResponse(w, r, e, upstreamReq, resp, bodyBytes, check.Stream, reservation)
+	h.writeProviderResponse(w, r, e, identity, limits, upstreamReq, resp, bodyBytes, check.Stream, reservation)
 }
 
 func (h *Handler) writeProviderResponse(
 	w http.ResponseWriter, r *http.Request, e audit.Event,
+	identity *gateway.ExecutionGrant, limits sprooziv1alpha1.EndpointBudget,
 	upstreamReq *http.Request, resp *http.Response, bodyBytes []byte,
 	stream bool, reservation *budget.Reservation,
 ) {
-	identity, _ := gateway.IdentityFromContext(r.Context())
-	limits, _, _ := identity.BudgetLimits(sprooziv1alpha1.CapabilityModelInference)
 	meter := budget.FromContext(r.Context())
-	// 10. Buffer the response body and parse token usage from 2xx inference
+	// Buffer the response body and parse token usage from 2xx inference
 	// responses. Missing usage is fail-closed: the provider may have consumed
 	// the entire reserved bound, so charge that bound before denying the call.
 	body, err := readBounded(resp.Body, maxModelBodyBytes)
@@ -374,7 +370,7 @@ func (h *Handler) writeProviderResponse(
 		_ = reservation.Release()
 	}
 
-	// 11. Write upstream response headers and body to the client.
+	// Write upstream response headers and body to the client.
 	for k, vv := range resp.Header {
 		if h.protocol == anthropicProtocol && !strings.EqualFold(k, "Content-Type") && !strings.EqualFold(k, "Request-ID") {
 			continue
@@ -419,6 +415,82 @@ func requestTokenEstimate(body []byte) int64 {
 		}
 	}
 	return estimate
+}
+
+// unambiguousJSON rejects request bodies whose meaning depends on the parser.
+// encoding/json keeps the last duplicate key, while a provider may keep the
+// first, so no object may repeat a key exactly. encoding/json also matches
+// struct fields regardless of case, while providers match exactly, so the
+// objects the gateway inspects must not contain keys that differ only by case.
+// Other content, such as tool schemas and message text, keeps its own keys.
+func unambiguousJSON(body []byte) error {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	if err := inspectJSONValue(decoder, inspectedRequest, 0); err != nil {
+		return err
+	}
+	if _, err := decoder.Token(); err != io.EOF {
+		return fmt.Errorf("model request has trailing data")
+	}
+	return nil
+}
+
+// inspectedObject identifies the request objects that the budget and pricing
+// checks decode, so their keys must be unambiguous regardless of case.
+type inspectedObject uint8
+
+const (
+	opaqueContent inspectedObject = iota
+	inspectedRequest
+	inspectedMessage
+	inspectedBlock
+	inspectedCacheControl
+)
+
+// inspectedChildren maps an inspected object's field to the kind of object, or
+// array elements, that the checks decode from it.
+var inspectedChildren = map[inspectedObject]map[string]inspectedObject{
+	inspectedRequest: {"messages": inspectedMessage, "system": inspectedBlock, "tools": inspectedBlock,
+		"cache_control": inspectedCacheControl},
+	inspectedMessage: {"content": inspectedBlock},
+	inspectedBlock:   {"cache_control": inspectedCacheControl, "content": inspectedBlock},
+}
+
+func inspectJSONValue(decoder *json.Decoder, kind inspectedObject, depth int) error {
+	// encoding/json refuses deeper nesting, so no check would accept it either.
+	if depth > 10000 {
+		return fmt.Errorf("model request nesting exceeds bounds")
+	}
+	token, err := decoder.Token()
+	if err != nil {
+		return fmt.Errorf("invalid model request JSON")
+	}
+	delimiter, ok := token.(json.Delim)
+	if !ok {
+		return nil
+	}
+	keys, folded := map[string]bool{}, map[string]bool{}
+	for decoder.More() {
+		child := kind // array elements share the array's kind
+		if delimiter == '{' {
+			token, err := decoder.Token()
+			if err != nil {
+				return fmt.Errorf("invalid model request JSON")
+			}
+			key := token.(string)
+			fold := strings.ToLower(strings.ToUpper(key))
+			if keys[key] || kind != opaqueContent && folded[fold] {
+				return fmt.Errorf("model request has duplicate key")
+			}
+			keys[key], folded[fold] = true, true
+			// Struct decoding selects the field regardless of case.
+			child = inspectedChildren[kind][fold]
+		}
+		if err := inspectJSONValue(decoder, child, depth+1); err != nil {
+			return err
+		}
+	}
+	_, err = decoder.Token() // closing delimiter
+	return err
 }
 
 func readBounded(reader io.Reader, limit int64) ([]byte, error) {
@@ -521,7 +593,7 @@ func (h *Handler) providerCost(body []byte, usage responseUsage, anthropic anthr
 
 func (h *Handler) auditModelSuccess(e audit.Event, upstreamStatus int, tokensUsed int64, meter *budget.Meter, limits sprooziv1alpha1.EndpointBudget) {
 	state, stateErr := meter.State()
-	// 12. Emit success audit event.
+	// Emit success audit event.
 	e.Allowed = true
 	e.UpstreamStatus = upstreamStatus
 	e.TokensUsed = tokensUsed

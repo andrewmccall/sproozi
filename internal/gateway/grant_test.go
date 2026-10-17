@@ -1,6 +1,7 @@
 package gateway_test
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -62,7 +63,7 @@ func TestDockerGrantEnforcesInitializedAllocationWithoutAgentRun(t *testing.T) {
 	if err != nil || state.UnitsUsed != 2 {
 		t.Fatalf("allocation accounting: %+v %v", state, err)
 	}
-	if event := grant.AuditEvent("read"); event.ExecutionBackend != "docker" || event.RunUID != "container-incarnation" || event.SAUID != "" {
+	if event := gateway.AuditEvent(gateway.WithIdentity(context.Background(), grant), "read"); event.ExecutionBackend != "docker" || event.RunUID != "container-incarnation" || event.SAUID != "" {
 		t.Fatalf("Docker audit invented Kubernetes authority: %+v", event)
 	}
 }
@@ -88,9 +89,10 @@ func TestManagedDispatchDeniesMissingOrExhaustedAllocations(t *testing.T) {
 			r := httptest.NewRequest(http.MethodGet, "https://service.test/path", nil)
 			w := httptest.NewRecorder()
 			dispatch.ServeHTTP(w, r.WithContext(gateway.WithIdentity(r.Context(), grant)))
-			if w.Code != http.StatusForbidden || calls != 0 {
-				t.Fatalf("allocation denial: status=%d forwarded=%d", w.Code, calls)
+			if calls != 0 {
+				t.Fatalf("allocation denial forwarded %d requests", calls)
 			}
+			assertDenial(t, w, http.StatusForbidden, "permission_error", "allocation_denied", string(cap))
 		})
 	}
 }
