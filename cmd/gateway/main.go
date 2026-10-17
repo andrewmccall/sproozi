@@ -26,6 +26,7 @@ import (
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 
 	"github.com/andrewmccall/sproozi/internal/audit"
+	"github.com/andrewmccall/sproozi/internal/endpoints"
 	"github.com/andrewmccall/sproozi/internal/endpoints/destination"
 	githubgateway "github.com/andrewmccall/sproozi/internal/endpoints/github"
 	kubernetesgateway "github.com/andrewmccall/sproozi/internal/endpoints/kubernetes"
@@ -65,16 +66,6 @@ type startupConfig struct {
 	installationID       int64
 	privateKey           []byte
 	mcpRegistry          *mcpgateway.Registry
-}
-
-// semanticAuthorities binds concrete service modules to exact authorities.
-var semanticAuthorities = map[string]sprooziv1alpha1.CapabilityKind{
-	kubernetesgateway.Authority:  sprooziv1alpha1.CapabilityKubernetesRead,
-	"api.openai.com:443":         sprooziv1alpha1.CapabilityModelInference,
-	"github.com:443":             sprooziv1alpha1.CapabilityGitHubPullRequest,
-	"api.github.com:443":         sprooziv1alpha1.CapabilityGitHubPullRequest,
-	"pypi.org:443":               sprooziv1alpha1.CapabilityPackagesInstall,
-	"files.pythonhosted.org:443": sprooziv1alpha1.CapabilityPackagesInstall,
 }
 
 func loadStartupConfig() (*startupConfig, error) {
@@ -157,8 +148,8 @@ func loadStartupConfig() (*startupConfig, error) {
 	}
 	hosts := inspectionHosts(host, enabled, profiles, mcpRegistry)
 	if enabled[sprooziv1alpha1.CapabilityModelInference] {
-		if anthropicKey != "" {
-			hosts["api.anthropic.com"] = true
+		if anthropicKey == "" {
+			delete(hosts, "api.anthropic.com")
 		}
 		if openAIKey == "" && modelAuthMode == modelauth.APIKeyMode {
 			delete(hosts, "api.openai.com")
@@ -204,7 +195,7 @@ func inspectionHosts(host string, enabled map[sprooziv1alpha1.CapabilityKind]boo
 	profiles *destination.ProfileStore, registry *mcpgateway.Registry,
 ) map[string]bool {
 	hosts := map[string]bool{host: true}
-	for authority, cap := range semanticAuthorities {
+	for authority, cap := range endpoints.SemanticAuthorities {
 		if enabled[cap] {
 			name, _, _ := net.SplitHostPort(authority)
 			hosts[name] = true
@@ -289,27 +280,23 @@ func composeDispatcher(
 			routes[authority] = gateway.Route{Tier: audit.TierProtocol}
 		}
 	}
-	for authority, cap := range semanticAuthorities {
+	for authority, cap := range endpoints.SemanticAuthorities {
 		// Reserve semantic authorities even when a module is disabled. Generic
 		// egress must never become a weaker fallback for a semantic service.
-		routes[authority] = gateway.Route{Capability: string(cap), Tier: audit.TierSemantic}
+		route := gateway.Route{Capability: string(cap), Tier: audit.TierSemantic}
 		if cfg.enabled[cap] {
-			route := routes[authority]
 			route.Handler = handlers[cap]
-			routes[authority] = route
 		}
+		routes[authority] = route
 	}
 	// The two fixed provider protocols share model.inference accounting, while
-	// credentials and upstream transport remain administrator-owned. Reserve
-	// Anthropic even when disabled so destination egress cannot replace it.
-	routes[modelgateway.AnthropicAuthority] = gateway.Route{
-		Capability: string(sprooziv1alpha1.CapabilityModelInference), Tier: audit.TierSemantic,
-	}
+	// credentials and upstream transport remain administrator-owned.
+	anthropic := routes[modelgateway.AnthropicAuthority]
+	anthropic.Handler = nil
 	if cfg.enabled[sprooziv1alpha1.CapabilityModelInference] && cfg.anthropicKey != "" {
-		route := routes[modelgateway.AnthropicAuthority]
-		route.Handler = anthropicHandler
-		routes[modelgateway.AnthropicAuthority] = route
+		anthropic.Handler = anthropicHandler
 	}
+	routes[modelgateway.AnthropicAuthority] = anthropic
 	if cfg.enabled[sprooziv1alpha1.CapabilityNetworkEgress] {
 		for _, dest := range cfg.profiles.Destinations() {
 			authority := net.JoinHostPort(dest.Host, strconv.Itoa(dest.Port))

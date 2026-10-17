@@ -46,6 +46,12 @@ const (
 	receivePackEndpoint = "git-receive-pack"
 )
 
+// The handler serves git smart HTTP and the REST/GraphQL API authorities.
+const (
+	GitAuthority = "github.com:443"
+	APIAuthority = "api.github.com:443"
+)
+
 // HandlerConfig holds all dependencies for Handler.
 type HandlerConfig struct {
 	// TokenProvider provides GitHub App installation tokens.

@@ -15,6 +15,9 @@ import (
 
 const (
 	pythonFilesHost = "files.pythonhosted.org"
+	// The handler serves the PyPI index and the file host it links to.
+	IndexAuthority = "pypi.org:443"
+	FilesAuthority = pythonFilesHost + ":443"
 )
 
 type HandlerConfig struct {
