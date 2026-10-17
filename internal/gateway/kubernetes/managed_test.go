@@ -25,7 +25,7 @@ const fixtureExecutionUID = "run-uid"
 
 type managedFixture struct {
 	kube     client.Client
-	finder   *gatewaykube.K8sRunFinder
+	finder   *gatewaykube.Authenticator
 	subject  gatewaykube.ServiceAccountIdentity
 	store    *registry.Store
 	ref      registry.Reference
@@ -52,7 +52,7 @@ func managedExecution(t *testing.T, register bool) *managedFixture {
 		}
 		return c.Create(ctx, obj, opts...)
 	}}).Build()
-	f.finder = gatewaykube.NewK8sRunFinder(f.kube, testAgentsNamespace)
+	f.finder = gatewaykube.NewAuthenticator(nil, "", f.kube, testAgentsNamespace)
 	var err error
 	f.store, err = registry.NewStore(f.kube, testNamespace)
 	if err != nil {

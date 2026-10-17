@@ -349,13 +349,7 @@ func main() {
 		log.Fatal(err)
 	}
 	agentNamespace := envOrDefault("AGENT_NAMESPACE", "sproozi-agents")
-	validator := gatewaykubernetes.NewK8sTokenValidator(clientset, "sproozi-gateway")
-	runFinder := gatewaykubernetes.NewK8sRunFinder(runtimeClient, agentNamespace)
-	authenticator := &gatewaykubernetes.Authenticator{Tokens: validator, Runs: runFinder}
-	authenticate := func(ctx context.Context, token string) (*gateway.ExecutionGrant, error) {
-		return authenticator.Authenticate(ctx, token)
-	}
-	revalidate := runFinder.Revalidate
+	authenticator := gatewaykubernetes.NewAuthenticator(clientset, "sproozi-gateway", runtimeClient, agentNamespace)
 	httpClient := &http.Client{Timeout: 120 * time.Second}
 	auditLogger := newAuditLogger(os.Stdout)
 	// The shared gateway is the only component that receives Kubernetes API
@@ -451,8 +445,8 @@ func main() {
 	}
 	transport, err := proxytransport.New(proxytransport.Config{
 		Certificates:     cfg.certificates,
-		Authenticate:     authenticate,
-		Revalidate:       revalidate,
+		Authenticate:     authenticator.Authenticate,
+		Revalidate:       authenticator.Revalidate,
 		Handler:          dispatcher,
 		AllowedAuthority: dispatcher.Allows,
 	})

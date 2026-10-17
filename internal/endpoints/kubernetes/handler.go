@@ -70,9 +70,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 }
 
 func (h *Handler) authorizeAndForward(ctx context.Context, identity *gateway.ExecutionGrant, req *http.Request) (response *http.Response, requestErr error) {
-	if identity == nil || identity.Execution.UID == "" {
-		return nil, fmt.Errorf("kubernetes: missing run identity")
-	}
 	event := gateway.AuditEvent(ctx, "kubernetes.read")
 	event.Service = "kubernetes"
 	defer func() {
