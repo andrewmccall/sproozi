@@ -1,3 +1,4 @@
+//nolint:goconst // Keep independent literal behavior expectations.
 package main
 
 import (
@@ -14,7 +15,7 @@ import (
 func helpFlags(t *testing.T, text string) []string {
 	t.Helper()
 	var names []string
-	for _, line := range strings.Split(text, "\n") {
+	for line := range strings.SplitSeq(text, "\n") {
 		if rest, ok := strings.CutPrefix(line, "  -"); ok {
 			names = append(names, strings.Fields(rest)[0])
 		}

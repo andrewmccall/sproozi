@@ -1,16 +1,21 @@
+//nolint:goconst // Flag names read best as literals in the command table.
 package main
 
 import (
 	"flag"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/andrewmccall/sproozi/internal/session/home"
 	"github.com/andrewmccall/sproozi/internal/workspace"
 )
 
-const actionServe = "serve"
+const (
+	actionServe = "serve"
+	configFlag  = "config"
+)
 
 // owner says which session owner a command may address through --executor.
 type owner int
@@ -97,13 +102,8 @@ func findCommand(name string) (command, bool) {
 	return command{}, false
 }
 
-func (c command) accepts(flag string) bool {
-	for _, name := range c.flags {
-		if name == flag {
-			return true
-		}
-	}
-	return false
+func (c command) accepts(name string) bool {
+	return slices.Contains(c.flags, name)
 }
 
 // inputs holds flag values that are checked or combined before they become options.
@@ -131,7 +131,7 @@ func (c command) flagSet(q *options, in *inputs) *flag.FlagSet {
 				q.includeIgnored = append(q.includeIgnored, v)
 				return workspace.ValidateIgnoredPaths(q.includeIgnored)
 			})
-		case "config":
+		case configFlag:
 			fs.StringVar(&in.config, name, c.defaultConfig(), flagHelp[name])
 		default:
 			fs.StringVar(values[name], name, "", flagHelp[name])
@@ -171,5 +171,5 @@ func usage(w io.Writer) {
 }
 
 func helpRequested(arg string) bool {
-	return arg == "help" || strings.TrimLeft(arg, "-") == "h" || strings.TrimLeft(arg, "-") == "help"
+	return slices.Contains([]string{"help", "-h", "-help", "--help"}, arg)
 }

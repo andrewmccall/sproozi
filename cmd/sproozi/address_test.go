@@ -175,7 +175,8 @@ func TestPlainPullRetryRepeatsTheSameOperation(t *testing.T) {
 		return q
 	}
 	first, retry := parse("--from", testExecutor), parse("--executor", testExecutor)
-	if first.source != testExecutor || retry.source != testExecutor || first.operation == "" || retry.operation != first.operation {
+	if first.source != testExecutor || retry.source != testExecutor ||
+		first.operation == "" || retry.operation != first.operation {
 		t.Fatalf("Pull retry changed intent: %+v %+v", first, retry)
 	}
 	if other := parse("--from", sharedOwner); other.operation == first.operation {

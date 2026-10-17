@@ -19,6 +19,7 @@ const catalogueExecutors = 32
 const availabilityAvailable = "available"
 const availabilityUnavailable = "unavailable"
 const ownershipHome = "home"
+const ownershipExecutor = "executor"
 
 // Catalogue rows are compact discovery facts, not full execution journals or
 // untrusted final answers. Executor labels the catalogue queried; placement
@@ -97,7 +98,7 @@ func discoverSessions(ctx context.Context, q options) catalogue {
 						_ = client.Close()
 						v.err = err
 						for _, row := range rows {
-							ownership := "executor"
+							ownership := ownershipExecutor
 							if row.Phase == work.PhaseHomeOwned {
 								ownership = ownershipHome
 							}

@@ -86,7 +86,7 @@ func parseProduct(args []string) (options, error) {
 func (q *options) loadConfiguration(fs *flag.FlagSet) error {
 	needsConfig := q.action == actionRun || q.socket == "" || q.executor != "" && q.executor != dockerExecutor
 	fs.Visit(func(f *flag.Flag) {
-		if f.Name == "config" {
+		if f.Name == configFlag {
 			needsConfig = true
 		}
 	})
