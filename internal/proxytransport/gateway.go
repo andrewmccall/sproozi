@@ -45,8 +45,8 @@ type Gateway struct {
 }
 
 func New(c Config) (*Gateway, error) {
-	if len(c.Certificates) == 0 || len(c.Certificates) > 64 || c.Authenticate == nil || c.Revalidate == nil || c.Handler == nil {
-		return nil, fmt.Errorf("inspection requires bounded hosts, identity, revalidation and semantic handler")
+	if len(c.Certificates) == 0 || len(c.Certificates) > 64 || c.Authenticate == nil || c.Revalidate == nil || c.Handler == nil || c.AllowedAuthority == nil {
+		return nil, fmt.Errorf("inspection requires bounded hosts, identity, revalidation, semantic handler and authority routing")
 	}
 	certificates := make(map[string]tls.Certificate, len(c.Certificates))
 	for host, cert := range c.Certificates {
@@ -96,7 +96,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	host, port, err := net.SplitHostPort(r.Host)
 	certificate, allowed := g.config.Certificates[host]
-	if err != nil || !allowed || (g.config.AllowedAuthority == nil && port != "443") || (g.config.AllowedAuthority != nil && !g.config.AllowedAuthority(r.Host)) || (r.URL.Host != "" && r.URL.Host != r.Host) || (r.URL.Opaque != "" && r.URL.Opaque != r.Host) {
+	if err != nil || !allowed || !g.config.AllowedAuthority(r.Host) || (r.URL.Host != "" && r.URL.Host != r.Host) || (r.URL.Opaque != "" && r.URL.Opaque != r.Host) {
 		http.Error(w, "unsupported destination", http.StatusForbidden)
 		return
 	}
