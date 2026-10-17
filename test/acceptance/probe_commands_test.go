@@ -8,7 +8,8 @@ import (
 
 func TestLiveErrorsRedactCredentialsBeforeTruncation(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "provider-test-secret")
-	input := "provider-test-secret https://sproozi:eyJtest.abcdefghijk.abcdefghijkl@gateway:8443 sk-test-secret ghs_testsecret " + strings.Repeat("x", 600)
+	input := "provider-test-secret https://sproozi:eyJtest.abcdefghijk.abcdefghijkl@gateway:8443 " +
+		"sk-test-secret ghs_testsecret " + strings.Repeat("x", 600)
 	got := redact(input)
 	for _, secret := range []string{"provider-test-secret", "eyJtest", "sk-test-secret", "ghs_testsecret"} {
 		if strings.Contains(got, secret) {
