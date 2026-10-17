@@ -25,7 +25,7 @@ import (
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/gateway"
-	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/session"
+	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
 	authv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -228,14 +228,14 @@ func (f *K8sRunFinder) Find(ctx context.Context, serviceAccount ServiceAccountId
 	}, &pol); err != nil {
 		return nil, err
 	}
-	record, err := session.ResolveRun(ctx, f.client, &run, &tmpl)
+	record, err := registry.ResolveRun(ctx, f.client, &run, &tmpl)
 	if err != nil {
 		return nil, err
 	}
-	if err := session.RequireActive(ctx, f.client, &run, record, f.agentNamespace); err != nil {
+	if err := registry.RequireActive(ctx, f.client, &run, record, f.agentNamespace); err != nil {
 		return nil, err
 	}
-	if deadline := session.EffectiveDeadline(&run, &pol, record); !deadline.IsZero() && !deadline.After(time.Now()) {
+	if deadline := registry.EffectiveDeadline(&run, &pol, record); !deadline.IsZero() && !deadline.After(time.Now()) {
 		return nil, ErrRunNotRunning
 	}
 

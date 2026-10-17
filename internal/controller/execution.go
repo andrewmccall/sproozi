@@ -25,7 +25,7 @@ import (
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 	k8sresources "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
-	placement "github.com/andrewmccall/sproozi/internal/runtime/kubernetes/session"
+	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
 )
 
 // ensureSandbox creates the Sandbox Pod if not yet provisioned and stores its name
@@ -35,7 +35,7 @@ func (r *AgentRunReconciler) ensureSandbox(
 	ctx context.Context,
 	run *sprooziv1alpha1.AgentRun,
 	rt *sprooziv1alpha1.AgentRuntime,
-	binding *placement.Record,
+	binding *registry.Record,
 ) (string, error) {
 	if run.Status.Identity.SandboxName != "" {
 		return run.Status.Identity.SandboxName, nil

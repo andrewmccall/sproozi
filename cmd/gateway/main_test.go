@@ -15,7 +15,7 @@ import (
 	"testing"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
-	egress "github.com/andrewmccall/sproozi/internal/endpoints/destination"
+	"github.com/andrewmccall/sproozi/internal/endpoints/destination"
 	mcpgateway "github.com/andrewmccall/sproozi/internal/endpoints/mcp"
 
 	corev1 "k8s.io/api/core/v1"
@@ -122,7 +122,7 @@ func validGatewayEnvironment(t *testing.T) {
 }
 
 func TestRegisteredMCPProvidersAndGatewayNeverFallBackToDestinationRoutes(t *testing.T) {
-	profiles, err := egress.LoadProfileStore([]byte(`{"weaker":[
+	profiles, err := destination.LoadProfileStore([]byte(`{"weaker":[
  {"scheme":"https","host":"remote.example","port":443},
  {"scheme":"https","host":"sproozi-gateway.sproozi-system.svc","port":8443}]}`))
 	if err != nil {
@@ -282,7 +282,7 @@ func TestDisabledModulesDoNotRequireProviderCredentials(t *testing.T) {
 	}
 }
 func TestConfiguredDestinationRoutesAndSemanticPrecedence(t *testing.T) {
-	profiles, err := egress.LoadProfileStore([]byte(`{
+	profiles, err := destination.LoadProfileStore([]byte(`{
   "custom": [
     {
       "scheme": "https",
@@ -336,7 +336,7 @@ func TestAnthropicStartupAndReservedRoute(t *testing.T) {
 		t.Fatal("provider activation incorrect")
 	}
 	cfg.anthropicKey = ""
-	profiles, err := egress.LoadProfileStore([]byte(`{"weaker":[
+	profiles, err := destination.LoadProfileStore([]byte(`{"weaker":[
  {"scheme":"https","host":"api.anthropic.com","port":443}]}`))
 	if err != nil {
 		t.Fatal(err)

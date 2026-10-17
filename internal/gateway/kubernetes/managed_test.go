@@ -12,7 +12,7 @@ import (
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/gateway"
 	gatewaykube "github.com/andrewmccall/sproozi/internal/gateway/kubernetes"
-	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/session"
+	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -27,8 +27,8 @@ type managedFixture struct {
 	kube     client.Client
 	finder   *gatewaykube.K8sRunFinder
 	subject  gatewaykube.ServiceAccountIdentity
-	store    *session.Store
-	ref      session.Reference
+	store    *registry.Store
+	ref      registry.Reference
 	run      *api.AgentRun
 	template *api.AgentTemplate
 	policy   *api.AgentPolicy
@@ -41,7 +41,7 @@ func managedExecution(t *testing.T, register bool) *managedFixture {
 	f := &managedFixture{
 		subject:  gatewaykube.ServiceAccountIdentity{Namespace: testAgentsNamespace, Name: testRunServiceAccount, UID: "sa-uid"},
 		run:      &api.AgentRun{ObjectMeta: metav1.ObjectMeta{Name: "visit-1", Namespace: testNamespace, UID: fixtureExecutionUID}, Spec: api.AgentRunSpec{TemplateRef: api.AgentTemplateReference{Name: testTemplateName}, Capabilities: []api.CapabilityKind{cap}}, Status: api.AgentRunStatus{Phase: api.AgentRunPhaseRunning, StartedAt: &metav1.Time{Time: time.Now()}, Identity: api.AgentRunIdentity{ServiceAccountName: testRunServiceAccount, SandboxName: "worker"}}},
-		template: &api.AgentTemplate{ObjectMeta: metav1.ObjectMeta{Name: testTemplateName, Namespace: testNamespace, UID: "template-uid", Annotations: map[string]string{session.ManagedTemplateAnnotation: "true"}}, Spec: api.AgentTemplateSpec{PolicyRef: api.AgentPolicyReference{Name: testPolicyName}, Instructions: "trusted instructions"}},
+		template: &api.AgentTemplate{ObjectMeta: metav1.ObjectMeta{Name: testTemplateName, Namespace: testNamespace, UID: "template-uid", Annotations: map[string]string{registry.ManagedTemplateAnnotation: "true"}}, Spec: api.AgentTemplateSpec{PolicyRef: api.AgentPolicyReference{Name: testPolicyName}, Instructions: "trusted instructions"}},
 		policy:   &api.AgentPolicy{ObjectMeta: metav1.ObjectMeta{Name: testPolicyName, Namespace: testNamespace, UID: "policy-uid", Generation: 1}, Spec: api.AgentPolicySpec{MaxExecutionDuration: metav1.Duration{Duration: time.Hour}, AllowedCapabilities: []api.CapabilityKind{cap}, Budgets: map[api.CapabilityKind]api.EndpointBudget{cap: {MaxUnits: 100}}}},
 		pod:      &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "worker", Namespace: testAgentsNamespace, UID: "pod-uid", Labels: map[string]string{testRunUIDLabel: fixtureExecutionUID}}, Spec: corev1.PodSpec{ServiceAccountName: testRunServiceAccount}, Status: corev1.PodStatus{Phase: corev1.PodRunning, ContainerStatuses: []corev1.ContainerStatus{{Name: "agent", ContainerID: "container://native", State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}}}}},
 	}
@@ -54,12 +54,12 @@ func managedExecution(t *testing.T, register bool) *managedFixture {
 	}}).Build()
 	f.finder = gatewaykube.NewK8sRunFinder(f.kube, testAgentsNamespace)
 	var err error
-	f.store, err = session.NewStore(f.kube, testNamespace)
+	f.store, err = registry.NewStore(f.kube, testNamespace)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if register {
-		record, err := f.store.Create(t.Context(), session.Registration{Harness: harness.NativeCodex, Principal: "operator", SessionID: "session-1", Epoch: 1, OperationID: "move-1", NativeUUID: "12345678-1234-1234-1234-123456789abc", InstructionDigest: session.InstructionsDigest(f.template.Spec.Instructions), OriginalDeadline: time.Now().Add(time.Hour), TemplateName: f.template.Name, Ceilings: map[api.CapabilityKind]api.EndpointBudget{cap: {MaxUnits: 2}}, CheckpointDigest: strings.Repeat("b", 64), IntendedRunName: f.run.Name})
+		record, err := f.store.Create(t.Context(), registry.Registration{Harness: harness.NativeCodex, Principal: "operator", SessionID: "session-1", Epoch: 1, OperationID: "move-1", NativeUUID: "12345678-1234-1234-1234-123456789abc", InstructionDigest: registry.InstructionsDigest(f.template.Spec.Instructions), OriginalDeadline: time.Now().Add(time.Hour), TemplateName: f.template.Name, Ceilings: map[api.CapabilityKind]api.EndpointBudget{cap: {MaxUnits: 2}}, CheckpointDigest: strings.Repeat("b", 64), IntendedRunName: f.run.Name})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -128,7 +128,7 @@ func TestManagedRunFinderRevalidatesNativeWorkerAndTrustedInstructions(t *testin
 				f.policy.Spec.Budgets[api.CapabilityModelInference] = api.EndpointBudget{MaxUnits: 1}
 				err = f.kube.Update(t.Context(), f.policy)
 			case "ordinary expired deadline":
-				delete(f.template.Annotations, session.ManagedTemplateAnnotation)
+				delete(f.template.Annotations, registry.ManagedTemplateAnnotation)
 				err = f.kube.Update(t.Context(), f.template)
 				if err == nil {
 					f.run.Status.StartedAt = &metav1.Time{Time: time.Now().Add(-2 * time.Hour)}

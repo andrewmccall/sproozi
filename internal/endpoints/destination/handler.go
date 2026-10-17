@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package egress implements inspected HTTPS destination enforcement
+// Package destination implements inspected HTTPS destination enforcement
 // that enforces template/policy-approved destination profiles. Every decision
 // is audited; request bodies and credential-bearing URLs are never logged.
 package destination

@@ -40,7 +40,7 @@ import (
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 	policy "github.com/andrewmccall/sproozi/internal/policy/kubernetes"
 	k8sresources "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
-	placement "github.com/andrewmccall/sproozi/internal/runtime/kubernetes/session"
+	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
 )
 
 const (
@@ -229,7 +229,7 @@ func (r *AgentRunReconciler) handleAdmitted(ctx context.Context, run *sprooziv1a
 		return ctrl.Result{}, transitionErr
 	}
 
-	deadline := placement.EffectiveDeadline(run, pol, binding)
+	deadline := registry.EffectiveDeadline(run, pol, binding)
 	if time.Now().After(deadline) {
 		logger.Info("Admitted AgentRun deadline exceeded", "name", run.Name)
 		_, err := r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseTimedOut, "MaxExecutionDurationExceeded", "")
@@ -298,7 +298,7 @@ func (r *AgentRunReconciler) handleRunning(ctx context.Context, run *sprooziv1al
 		logger.Info("Recovered missing StartedAt on Running run", "name", run.Name)
 	}
 
-	deadline := placement.EffectiveDeadline(run, pol, binding)
+	deadline := registry.EffectiveDeadline(run, pol, binding)
 	if time.Now().After(deadline) {
 		logger.Info("AgentRun deadline exceeded", "name", run.Name)
 		_, err := r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseTimedOut, "MaxExecutionDurationExceeded", "")

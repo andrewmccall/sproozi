@@ -10,7 +10,7 @@ import (
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/harness"
-	placement "github.com/andrewmccall/sproozi/internal/runtime/kubernetes/session"
+	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -31,7 +31,7 @@ const openAIAPIKey = "OPENAI_API_KEY"
 func addManagedNativeContract(ctx context.Context, kube client.Client, run *api.AgentRun, template *api.AgentTemplate,
 	runtime *api.AgentRuntime, data map[string]string,
 ) error {
-	binding, err := placement.ResolveRun(ctx, kube, run, template)
+	binding, err := registry.ResolveRun(ctx, kube, run, template)
 	if err != nil || binding == nil {
 		return err
 	}
@@ -75,10 +75,10 @@ func addManagedNativeContract(ctx context.Context, kube client.Client, run *api.
 // trusted storage helper. Ordinary SandboxClient implementations cannot silently
 // ignore a required session binding.
 type ManagedSandboxClient interface {
-	EnsureManaged(context.Context, *api.AgentRun, *api.AgentRuntime, *placement.Record) (string, error)
+	EnsureManaged(context.Context, *api.AgentRun, *api.AgentRuntime, *registry.Record) (string, error)
 }
 
-func (p *PodSandboxClient) EnsureManaged(ctx context.Context, run *api.AgentRun, rt *api.AgentRuntime, binding *placement.Record) (string, error) {
+func (p *PodSandboxClient) EnsureManaged(ctx context.Context, run *api.AgentRun, rt *api.AgentRuntime, binding *registry.Record) (string, error) {
 	if err := rt.Spec.ValidateRuntimeTemplate(); err != nil {
 		return "", err
 	}
@@ -92,7 +92,7 @@ func (p *PodSandboxClient) EnsureManaged(ctx context.Context, run *api.AgentRun,
 	return p.ensurePod(ctx, pod)
 }
 
-func BuildManagedPodSpec(run *api.AgentRun, rt *api.AgentRuntime, binding *placement.Record) (*corev1.Pod, error) {
+func BuildManagedPodSpec(run *api.AgentRun, rt *api.AgentRuntime, binding *registry.Record) (*corev1.Pod, error) {
 	if binding == nil {
 		return nil, fmt.Errorf("managed sandbox requires a native registration")
 	}
@@ -101,7 +101,7 @@ func BuildManagedPodSpec(run *api.AgentRun, rt *api.AgentRuntime, binding *place
 	}
 	if binding.RunUID != string(run.UID) || binding.IntendedRunName != run.Name ||
 		binding.TemplateName != run.Spec.TemplateRef.Name || !binding.OriginalDeadline.After(time.Now()) ||
-		binding.Phase == placement.Creating || binding.Phase == placement.Cancelled || binding.Phase == placement.Stopped {
+		binding.Phase == registry.Creating || binding.Phase == registry.Cancelled || binding.Phase == registry.Stopped {
 		return nil, fmt.Errorf("managed sandbox requires a current exact registration")
 	}
 	if len(rt.Spec.WorkloadContainers) != 1 || rt.Spec.WorkloadContainers[0] != agentContainerName ||

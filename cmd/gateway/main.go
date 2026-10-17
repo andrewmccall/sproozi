@@ -26,7 +26,7 @@ import (
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 
 	"github.com/andrewmccall/sproozi/internal/audit"
-	egress "github.com/andrewmccall/sproozi/internal/endpoints/destination"
+	"github.com/andrewmccall/sproozi/internal/endpoints/destination"
 	githubgateway "github.com/andrewmccall/sproozi/internal/endpoints/github"
 	kubernetesgateway "github.com/andrewmccall/sproozi/internal/endpoints/kubernetes"
 	mcpgateway "github.com/andrewmccall/sproozi/internal/endpoints/mcp"
@@ -55,7 +55,7 @@ type startupConfig struct {
 	host                 string
 	listenerCert         tls.Certificate
 	certificates         map[string]tls.Certificate
-	profiles             *egress.ProfileStore
+	profiles             *destination.ProfileStore
 	pricing              *modelgateway.PricingTable
 	openAIKey            string
 	anthropicKey         string
@@ -98,7 +98,7 @@ func loadStartupConfig() (*startupConfig, error) {
 			return nil, fmt.Errorf("read egress profiles: %w", err)
 		}
 	}
-	profiles, err := egress.LoadProfileStore(profileData)
+	profiles, err := destination.LoadProfileStore(profileData)
 	if err != nil {
 		return nil, err
 	}
@@ -201,7 +201,7 @@ func loadModelCredentials() (string, string, string, error) {
 }
 
 func inspectionHosts(host string, enabled map[sprooziv1alpha1.CapabilityKind]bool,
-	profiles *egress.ProfileStore, registry *mcpgateway.Registry,
+	profiles *destination.ProfileStore, registry *mcpgateway.Registry,
 ) map[string]bool {
 	hosts := map[string]bool{host: true}
 	for authority, cap := range semanticAuthorities {
@@ -210,11 +210,11 @@ func inspectionHosts(host string, enabled map[sprooziv1alpha1.CapabilityKind]boo
 			hosts[name] = true
 		}
 	}
-	for _, destination := range profiles.Destinations() {
-		if slices.Contains(registry.Authorities(), net.JoinHostPort(destination.Host, strconv.Itoa(destination.Port))) {
+	for _, dest := range profiles.Destinations() {
+		if slices.Contains(registry.Authorities(), net.JoinHostPort(dest.Host, strconv.Itoa(dest.Port))) {
 			continue // Remote MCP providers are not inspected workload routes.
 		}
-		hosts[destination.Host] = true
+		hosts[dest.Host] = true
 	}
 	return hosts
 }
@@ -311,8 +311,8 @@ func composeDispatcher(
 		routes[modelgateway.AnthropicAuthority] = route
 	}
 	if cfg.enabled[sprooziv1alpha1.CapabilityNetworkEgress] {
-		for _, destination := range cfg.profiles.Destinations() {
-			authority := net.JoinHostPort(destination.Host, strconv.Itoa(destination.Port))
+		for _, dest := range cfg.profiles.Destinations() {
+			authority := net.JoinHostPort(dest.Host, strconv.Itoa(dest.Port))
 			if _, semantic := routes[authority]; semantic {
 				continue
 			}
@@ -433,7 +433,7 @@ func main() {
 	handlers[sprooziv1alpha1.CapabilityPackagesInstall] = &packagesgateway.Handler{Config: packagesgateway.HandlerConfig{
 		HTTPClient:  httpClient,
 		AuditLogger: auditLogger}}
-	raw := &egress.Handler{Config: egress.HandlerConfig{Profiles: cfg.profiles,
+	raw := &destination.Handler{Config: destination.HandlerConfig{Profiles: cfg.profiles,
 		AuditLogger: auditLogger,
 		HTTPClient:  httpClient}}
 
