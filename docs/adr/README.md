@@ -69,3 +69,4 @@ and the combined MCP discovery schema.
 | [0013](0013-configured-projects-and-workspace-revisions.md) | Configured Projects and workspace revisions. |
 | [0014](0014-review-boundaries-and-native-contracts.md) | Shared gateway limits, native contracts and CLI identities. |
 | [0015](0015-default-clients-and-native-tool-schemas.md) | Default clients, MCP schemas and model requests sharing an allowance. |
+| [0016](0016-dispatcher-capability-enforcement-and-fresh-revalidation.md) | Capability checks at the gateway dispatcher and fresh revalidation reads. |
