@@ -864,7 +864,7 @@ def stock_clients():
             check(not data["status"].get("result"), data)
             audit = gateway_audit(data["metadata"]["uid"])
             reason = (
-                "capability not granted" if scenario == "denied" else "budget exhausted"
+                "does not request capability model.inference" if scenario == "denied" else "budget exhausted"
             )
             budget_state = None
             if harness == "claude-code" and scenario == "budget":
