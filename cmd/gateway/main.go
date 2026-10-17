@@ -59,6 +59,7 @@ type startupConfig struct {
 	pricing              *modelgateway.PricingTable
 	openAIKey            string
 	anthropicKey         string
+	openAIUpstreamURL    string
 	anthropicUpstreamURL string
 	modelAuthMode        string
 	appID                int64
@@ -98,6 +99,7 @@ func loadStartupConfig() (*startupConfig, error) {
 	}
 	var pricing *modelgateway.PricingTable
 	openAIKey, anthropicKey, modelAuthMode := "", "", ""
+	openAIUpstreamURL := envOrDefault("OPENAI_UPSTREAM_URL", "https://api.openai.com")
 	anthropicUpstreamURL := envOrDefault("ANTHROPIC_UPSTREAM_URL", "https://api.anthropic.com")
 	if enabled[sprooziv1alpha1.CapabilityModelInference] {
 		pricingFile, err := os.Open(envOrDefault("MODEL_PRICING_PATH", "/etc/sproozi/model/pricing.json"))
@@ -113,11 +115,14 @@ func loadStartupConfig() (*startupConfig, error) {
 		if closeErr != nil {
 			return nil, fmt.Errorf("close model pricing: %w", closeErr)
 		}
-		openAIKey, anthropicKey, modelAuthMode, err = loadModelCredentials()
+		openAIKey, anthropicKey, modelAuthMode, err = loadModelCredentials(openAIUpstreamURL)
 		if err != nil {
 			return nil, err
 		}
-		if err := validateModelUpstream(anthropicUpstreamURL); err != nil {
+		if err := validateModelUpstream("OPENAI_UPSTREAM_URL", openAIUpstreamURL); err != nil {
+			return nil, err
+		}
+		if err := validateModelUpstream("ANTHROPIC_UPSTREAM_URL", anthropicUpstreamURL); err != nil {
 			return nil, err
 		}
 	}
@@ -164,13 +169,13 @@ func loadStartupConfig() (*startupConfig, error) {
 		enabled: enabled,
 		host:    host, listenerCert: certificate, certificates: certificates,
 		profiles: profiles, pricing: pricing, openAIKey: openAIKey, anthropicKey: anthropicKey, modelAuthMode: modelAuthMode,
-		anthropicUpstreamURL: anthropicUpstreamURL,
-		appID:                appID, installationID: installationID, privateKey: privateKey,
+		openAIUpstreamURL: openAIUpstreamURL, anthropicUpstreamURL: anthropicUpstreamURL,
+		appID: appID, installationID: installationID, privateKey: privateKey,
 		mcpRegistry: mcpRegistry,
 	}, nil
 }
 
-func loadModelCredentials() (string, string, string, error) {
+func loadModelCredentials(openAIUpstreamURL string) (string, string, string, error) {
 	openAIKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
 	anthropicKey := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY"))
 	if strings.ContainsAny(anthropicKey, "\r\n") {
@@ -180,8 +185,7 @@ func loadModelCredentials() (string, string, string, error) {
 	if mode != modelauth.APIKeyMode && mode != modelauth.ChatGPTMode {
 		return "", "", "", errors.New("MODEL_AUTH_MODE must be api_key or chatgpt")
 	}
-	if mode == modelauth.ChatGPTMode &&
-		envOrDefault("OPENAI_UPSTREAM_URL", "https://api.openai.com") != "https://api.openai.com" {
+	if mode == modelauth.ChatGPTMode && openAIUpstreamURL != "https://api.openai.com" {
 		return "", "", "", errors.New("ChatGPT plan usage requires the public OpenAI API upstream")
 	}
 	if mode == modelauth.APIKeyMode && openAIKey == "" && anthropicKey == "" {
@@ -384,7 +388,7 @@ func main() {
 		}
 		model := &modelgateway.Handler{Config: modelgateway.HandlerConfig{
 			Pricing: cfg.pricing, AuditLogger: auditLogger,
-			UpstreamURL:  envOrDefault("OPENAI_UPSTREAM_URL", "https://api.openai.com"),
+			UpstreamURL:  cfg.openAIUpstreamURL,
 			ProviderAuth: providerAuth, HTTPClient: httpClient,
 		}}
 		if os.Getenv("MODEL_DIAGNOSTICS") == "true" {
@@ -454,12 +458,13 @@ func envOrDefault(key, fallback string) string {
 }
 
 // Provider destinations are trusted operator configuration; workloads continue
-// to use the reserved semantic authority and cannot choose an upstream.
-func validateModelUpstream(value string) error {
+// to use the reserved semantic authority and cannot choose an upstream. Both
+// providers receive credentials, so each must be a bare https origin.
+func validateModelUpstream(name, value string) error {
 	upstream, err := url.Parse(value)
-	if err != nil || upstream.Scheme != "https" && upstream.Scheme != "http" || upstream.Host == "" ||
-		upstream.User != nil || value != upstream.Scheme+"://"+upstream.Host {
-		return errors.New("invalid Anthropic upstream origin")
+	if err != nil || upstream.Scheme != "https" || upstream.Host == "" ||
+		upstream.User != nil || value != "https://"+upstream.Host {
+		return fmt.Errorf("%s must be an https origin", name)
 	}
 	return nil
 }

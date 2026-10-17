@@ -18,7 +18,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-
 )
 
 func TestGatewaySchemeSupportsRunIdentityAndBudgetObjects(t *testing.T) {
@@ -148,21 +147,29 @@ func TestRegisteredMCPProvidersAndGatewayNeverFallBackToDestinationRoutes(t *tes
 
 var bigOne = func() *big.Int { return big.NewInt(1) }()
 
-func TestAnthropicUpstreamIsAnAdministratorOwnedOrigin(t *testing.T) {
-	validGatewayEnvironment(t)
-	t.Setenv("ANTHROPIC_UPSTREAM_URL", "http://fixture.sproozi-system.svc:8080")
-	cfg, err := loadStartupConfig()
-	if err != nil || cfg.anthropicUpstreamURL != "http://fixture.sproozi-system.svc:8080" {
-		t.Fatalf("configured provider origin was not retained: %v", err)
-	}
-	for _, value := range []string{
-		"file:///credentials", "https://credential@provider.example", "https://provider.example?token=secret",
-		"https://provider.example/v1/messages", "http://fixture?", "https://provider.example#",
-	} {
-		t.Setenv("ANTHROPIC_UPSTREAM_URL", value)
-		if _, err := loadStartupConfig(); err == nil || strings.Contains(err.Error(), value) {
-			t.Fatalf("invalid origin was accepted or disclosed: %v", err)
-		}
+func TestModelUpstreamsAreAdministratorOwnedHTTPSOrigins(t *testing.T) {
+	for _, key := range []string{"OPENAI_UPSTREAM_URL", "ANTHROPIC_UPSTREAM_URL"} {
+		t.Run(key, func(t *testing.T) {
+			validGatewayEnvironment(t)
+			t.Setenv(key, "https://fixture.sproozi-system.svc:8443")
+			cfg, err := loadStartupConfig()
+			if err != nil {
+				t.Fatal(err)
+			}
+			retained := map[string]string{"OPENAI_UPSTREAM_URL": cfg.openAIUpstreamURL, "ANTHROPIC_UPSTREAM_URL": cfg.anthropicUpstreamURL}
+			if retained[key] != "https://fixture.sproozi-system.svc:8443" {
+				t.Fatalf("configured provider origin was not retained: %q", retained[key])
+			}
+			for _, value := range []string{
+				"file:///credentials", "https://credential@provider.example", "https://provider.example?token=secret",
+				"https://provider.example/v1/messages", "http://fixture.sproozi-system.svc:8080", "https://provider.example#",
+			} {
+				t.Setenv(key, value)
+				if _, err := loadStartupConfig(); err == nil || strings.Contains(err.Error(), value) {
+					t.Fatalf("invalid origin %q was accepted or disclosed: %v", value, err)
+				}
+			}
+		})
 	}
 }
 
