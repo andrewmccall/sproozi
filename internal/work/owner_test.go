@@ -19,6 +19,7 @@ import (
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/session"
+	"github.com/andrewmccall/sproozi/internal/session/profile"
 	"github.com/google/uuid"
 )
 
@@ -38,6 +39,7 @@ type fixturePlacement struct {
 	data                   []byte
 	meta                   checkpoint.Metadata
 	initial, active, stops int
+	aborts                 int
 	lostStop               bool
 	missingSeal            bool
 	missingFence           bool
@@ -75,6 +77,9 @@ func (p *fixturePlacement) Inspect(_ context.Context, l session.Launch) (session
 		Incarnation: session.Incarnation{ExecutionID: l.AllocationID, ResourceUID: fixtureResource}}, nil
 }
 func (p *fixturePlacement) Abort(_ context.Context, l session.Launch, i session.Incarnation) (session.Observation, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.aborts++
 	if i.ResourceUID != fixtureResource {
 		return session.Observation{}, errors.New("exact incarnation required")
 	}
@@ -375,9 +380,16 @@ func TestCancellationObservesIncarnationAfterLostPreparationReply(t *testing.T) 
 	defer func() { _ = o.Close() }()
 	v := submit(t, o)
 	waitPhase(t, o, v.ID, phaseUnknown)
-	cancelled, err := o.Cancel(t.Context(), v.ID, uuid.NewString())
+	operation := uuid.NewString()
+	cancelled, err := o.Cancel(t.Context(), v.ID, operation)
 	if err != nil || cancelled.Phase != phaseCancelled {
 		t.Fatalf("failed to cancel exact observed incarnation: %+v %v", cancelled, err)
+	}
+	if retried, err := o.Cancel(t.Context(), v.ID, operation); err != nil || retried.Phase != phaseCancelled || p.aborts != 1 {
+		t.Fatalf("retried cancellation aborted again: %+v %v aborts=%d", retried, err, p.aborts)
+	}
+	if _, err := o.Cancel(t.Context(), v.ID, uuid.NewString()); outcomeCode(err) != profile.CodeConflict {
+		t.Fatalf("another cancellation operation accepted: %v", err)
 	}
 	r, err := o.read(v.ID)
 	if err != nil || r.Incarnation == nil || r.Incarnation.ResourceUID != fixtureResource {

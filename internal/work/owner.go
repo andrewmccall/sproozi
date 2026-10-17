@@ -816,6 +816,10 @@ func (o *Owner) Cancel(ctx context.Context, id, operation string) (View, error) 
 	if r.CancelOperation != "" && r.CancelOperation != operation {
 		return View{}, &profile.Rejection{Code: profile.CodeConflict}
 	}
+	// A retried cancellation reports its settled outcome without aborting again.
+	if r.Phase == phaseCancelled {
+		return view(r), nil
+	}
 	r.CancelOperation = operation
 	r.Phase = phaseCancelling
 	if e = o.save(r); e != nil {
