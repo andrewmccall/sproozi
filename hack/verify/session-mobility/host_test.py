@@ -92,6 +92,15 @@ class FixtureTests(unittest.TestCase):
         denied.do_POST()
         self.assertEqual(denied.status, 403)
 
+    def test_title_response_obeys_native_structured_output(self):
+        title = {"model": "fixture-model", "text": {"format": {"type": "json_schema"}},
+                 "input": [message("user", "Generate a concise, single-line task title now")]}
+        handler = self.handler(title)
+        handler.do_POST()
+        response = events(handler.wfile)[-1]["response"]
+        self.assertEqual(json.loads(response["output"][0]["content"][0]["text"]),
+                         {"title": "Remember TUI facts"})
+
     def test_tool_call_then_actual_matching_successful_output(self):
         first = self.handler(request(3))
         first.do_POST()

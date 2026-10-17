@@ -14,7 +14,6 @@ RUN curl --fail --location --output /tmp/git.tar.xz "https://www.kernel.org/pub/
 
 FROM node:22.16.0-bookworm@sha256:71bcbb3b215b3fa84b5b167585675072f4c270855e37a599803f1a58141a0716
 ARG TARGETARCH
-ARG CODEX_VERSION=0.154.0
 ARG KUBECTL_VERSION=v1.34.1
 ARG GH_VERSION=2.97.0
 RUN apt-get update \
@@ -22,7 +21,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=git-build /opt/git /opt/git
 ENV PATH="/opt/git/bin:${PATH}"
-RUN npm install --global --ignore-scripts @openai/codex@$CODEX_VERSION
+RUN npm install --global --ignore-scripts @openai/codex
 RUN case "$TARGETARCH" in \
       amd64) expected=7721f265e18709862655affba5343e85e1980639395d5754473dafaadcaa69e3 ;; \
       arm64) expected=420e6110e3ba7ee5a3927b5af868d18df17aae36b720529ffa4e9e945aa95450 ;; \

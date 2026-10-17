@@ -1,10 +1,11 @@
 # Model provider authentication
 
-The trusted gateway supports two administrator-selected authentication modes.
-`MODEL_AUTH_MODE=api_key` is the default and uses `OPENAI_API_KEY`.
-`MODEL_AUTH_MODE=chatgpt` uses an independently authorized ChatGPT-plan OAuth
-session. It does not read Codex's login cache and does not fall back to an API
-key if OAuth fails.
+This guide covers OpenAI authentication for the Kubernetes gateway. An
+administrator selects one of two modes. For Anthropic configuration, see [model
+providers](../reference/harnesses.md#model-providers). `MODEL_AUTH_MODE=api_key`
+is the default and uses `OPENAI_API_KEY`. `MODEL_AUTH_MODE=chatgpt` uses an
+independently authorized ChatGPT-plan OAuth session. It does not read Codex's
+login cache and does not fall back to an API key if OAuth fails.
 
 This is separate from workload authentication. AgentRuns still authenticate to
 the shared gateway with their projected `sproozi-gateway` ServiceAccount token.
@@ -101,35 +102,25 @@ See the provider's
 [inference contract](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference)
 and [preview limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations).
 
-Both modes retain capability checks, live policy, token admission, completed
-response/usage verification, accounting and audit. Audit events include the
-non-secret `providerAuthMode`. ChatGPT mode requires a token-only policy:
-the demo renderer sets `spec.budgets["model.inference"]` to
-`maxCostMicros: 0` and `maxUnits: 300000`. Stock Codex
-resends its instructions and conversation on each turn; the original 100000
-token demo allowance was exhausted before creating a PR. API-key mode retains
-100000 tokens and its 500000-microdollar cap.
-A nonzero API-dollar cap is rejected before inference because API pricing is
-not the cost of subscription usage. This is not a provider-side output-token
-ceiling: the preview does not accept `max_output_tokens`, and an unexpectedly
-large response can consume tokens before the gateway verifies usage.
+Both modes check capabilities, current policy and token admission. They verify
+completed responses and usage, then record accounting and audit events. Audit
+events include the non-secret `providerAuthMode`. ChatGPT mode requires a
+token-only policy: the demo renderer sets `spec.budgets["model.inference"]` to
+`maxCostMicros: 0` and `maxUnits: 300000`. Stock Codex resends its instructions
+and conversation on each turn; the original 100000 token demo allowance was
+exhausted before creating a PR. API-key mode retains 100000 tokens and its
+500000-microdollar cap. A nonzero API-dollar cap is rejected before inference
+because API pricing is not the cost of subscription usage. This is not a
+provider-side output-token ceiling: the preview does not accept
+`max_output_tokens`, and an unexpectedly large response can consume tokens
+before the gateway verifies usage.
 
 To switch back to API-key billing, select `api_key` in
-`bash hack/demo/configure.sh`. API-key mode uses the preflight pricing and standard-tier checks above and
-retains the documented reservation/settlement limits. Authentication mode is not selectable by an AgentRun.
+`bash hack/demo/configure.sh`. API-key mode uses the pricing and standard-tier
+checks above and retains the documented reservation and settlement limits.
+An AgentRun cannot select the authentication mode.
 
-## Verification status
+## Current limits
 
-Local tests cover the browser callback/code exchange against a mock provider,
-PKCE, identity validation, account preservation, private storage, serialized
-rotation, persistence retry, stale-writer rejection, both gateway auth modes,
-Responses usage settlement and rendered RBAC/policy configuration.
-
-These tests alone are not a ChatGPT-backed acceptance result. The
-[recorded 4 October acceptance](../demos/verified-sre-demo.md) verified two
-real inference-to-PR runs, explicit denials and scoped cleanup using the
-stock CLI and bounded REST PR creation. Those are isolated demo results,
-not general provider/client compatibility or production readiness. This narrow local demo
-does not implement a multi-account UI, sign-out/revocation command or
-multi-replica session coordination. Access can be disconnected in ChatGPT
-Settings.
+This setup has no multi-account UI, sign-out command or multi-replica session
+coordination. You can disconnect access in ChatGPT Settings.

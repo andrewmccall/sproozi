@@ -10,7 +10,7 @@ import (
 )
 
 // Validate accepts bounded administrator-selected Codex launch settings. Values
-// remain native TOML, interpreted by the pinned client; this is not a TOML parser.
+// remain native TOML, interpreted by the native client; this is not a TOML parser.
 // Keys use a restricted dotted grammar so alternative spellings cannot replace
 // the separately owned developer instructions or startup update gate.
 func Validate(model string, options []string) error {

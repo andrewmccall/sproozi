@@ -59,7 +59,7 @@ func managedExecution(t *testing.T, register bool) *managedFixture {
 		t.Fatal(err)
 	}
 	if register {
-		record, err := f.store.Create(t.Context(), session.Registration{Harness: harness.NativeCodex, Principal: "operator", SessionID: "session-1", Epoch: 1, OperationID: "move-1", NativeUUID: "12345678-1234-1234-1234-123456789abc", NativePin: "0.161.0", InstructionDigest: session.InstructionsDigest(f.template.Spec.Instructions), OriginalDeadline: time.Now().Add(time.Hour), TemplateName: f.template.Name, Ceilings: map[api.CapabilityKind]api.EndpointBudget{cap: {MaxUnits: 2}}, CheckpointDigest: strings.Repeat("b", 64), IntendedRunName: f.run.Name})
+		record, err := f.store.Create(t.Context(), session.Registration{Harness: harness.NativeCodex, Principal: "operator", SessionID: "session-1", Epoch: 1, OperationID: "move-1", NativeUUID: "12345678-1234-1234-1234-123456789abc", InstructionDigest: session.InstructionsDigest(f.template.Spec.Instructions), OriginalDeadline: time.Now().Add(time.Hour), TemplateName: f.template.Name, Ceilings: map[api.CapabilityKind]api.EndpointBudget{cap: {MaxUnits: 2}}, CheckpointDigest: strings.Repeat("b", 64), IntendedRunName: f.run.Name})
 		if err != nil {
 			t.Fatal(err)
 		}

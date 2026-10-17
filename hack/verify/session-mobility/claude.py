@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Credential-free Claude 2.1.27 mobility fixture and public-CLI proof.
+"""Credential-free Claude mobility fixture and public-CLI proof.
 
 prepare/serve/render are administrator helpers; verify uses only the production
 session socket and checkpoint CLI. TLS keys, journals and terminal diagnostics
@@ -41,7 +41,6 @@ BASE = module("claude_mobility_base", HERE / "verify.py")
 KUBE = module("claude_mobility_kube", HERE / "kubernetes.py")
 PROBES = module("claude_mobility_probes", HERE / "admin_probes.py")
 TOKEN = "claude-fixture-placeholder"
-VERSION = "2.1.27"
 MODEL = "claude-sonnet-4-5"
 INSTRUCTIONS = "Only this deterministic local fixture is approved. INITIAL_CLAUDE_111."
 TOOL_MARKER = "TOOL_FACT=ochre-mole-392"
@@ -86,7 +85,7 @@ def prepare(args):
         "MaxCheckpointBytes": args.max_checkpoint_bytes}}
     HOST.write(out / "home-config.json", config)
     hints = json.loads((out / "profile-hints.json").read_text())
-    hints.update(harness="claude-code", nativeVersion=VERSION, model=MODEL, nativeOptions=[],
+    hints.update(harness="claude-code", model=MODEL, nativeOptions=[],
                  providerToken=TOKEN, providerURLFromKind=UPSTREAM, prompts=PROMPTS[:3], answers=ANSWERS[:3],
                  heldPrompt=PROMPTS[3], heldAnswer=ANSWERS[3],
                  limitations=["Deterministic Messages fixture, not live Anthropic service acceptance",
@@ -101,7 +100,7 @@ def prepare(args):
 def classify(body):
     messages = body.get("messages", [])
     system = "\n".join(c.get("text", "") for c in body.get("system", []) if isinstance(c, dict))
-    # The pinned native TUI issues these auxiliary Haiku calls independently of
+    # The native TUI issues these auxiliary Haiku calls independently of
     # the main conversation. They carry no approved instructions or history;
     # classify them explicitly rather than pretending they are resumed turns.
     if body.get("model") == "claude-haiku-4-5-20251001":
@@ -282,13 +281,12 @@ def render(args):
     import yaml
     BASE.check(args.hints.stat().st_size <= 64 << 10, "Profile hints exceed fixture bound")
     hints = json.loads(args.hints.read_text())
-    BASE.check(hints["harness"] == "claude-code" and hints["nativeVersion"] == VERSION and
+    BASE.check(hints["harness"] == "claude-code" and
                hints["providerToken"] == TOKEN and hints["providerURLFromKind"] == UPSTREAM and
-               hints["nativeOptions"] == [] and hints["model"] == MODEL, "Only the pinned Claude fixture is permitted")
+               hints["nativeOptions"] == [] and hints["model"] == MODEL, "Only the configured Claude fixture is permitted")
     # Existing validator checks all shared bounds and exact instruction digest;
     # these three local substitutions select its infrastructure-only contract.
-    validation = {**hints, "providerToken": HOST.TOKEN, "providerURLFromKind": KUBE.UPSTREAM,
-                  "nativeVersion": "0.161.0"}
+    validation = {**hints, "providerToken": HOST.TOKEN, "providerURLFromKind": KUBE.UPSTREAM}
     scratch = args.profile_config_output.parent / ("validate-" + uuid.uuid4().hex + ".json")
     HOST.write(scratch, validation)
     try:
@@ -389,12 +387,12 @@ class Proof(BASE.Proof):
         BASE.check(self.config["local"]["Harness"] == "claude-code" and self.config["model"] == MODEL and
                    not self.config.get("nativeOptions") and hints["prompts"] == PROMPTS[:3] and hints["answers"] == ANSWERS[:3] and
                    Path(self.config["gateway"]["providerTokenFile"]).read_text().strip() == TOKEN,
-                   "Only the pinned public Claude fixture configuration is allowed")
+                   "Only the configured public Claude fixture configuration is allowed")
         self.socket = Path(self.config["directory"]) / "control.sock"
         self.id = str(uuid.uuid4())
         self.env = {"PATH": os.environ["PATH"], "HOME": str(self.out), "LANG": "C.UTF-8",
                     "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull, "GIT_TERMINAL_PROMPT": "0"}
-        self.report = {"passed": False, "harness": "claude-code", "nativeVersion": VERSION, "sessionId": self.id,
+        self.report = {"passed": False, "harness": "claude-code", "sessionId": self.id,
                        "fixtureCredentialIsPublicPlaceholder": True, "steps": [],
                        "scope": "stock Claude TUI and actual Bash through production session placements",
                        "limitations": ["Deterministic Messages provider; no paid Anthropic request",
@@ -462,8 +460,8 @@ class Proof(BASE.Proof):
         records = [e for e in events if e.get("type") in ("user", "assistant") and not e.get("isSidechain")]
         BASE.check(records and records[-1]["uuid"] == checkpoint["metadata"]["turnId"],
                    "Trusted stopped checkpoint does not bind actual native transcript leaf")
-        BASE.check(all(e.get("sessionId") == record["threadId"] and e.get("version") == VERSION for e in records),
-                   "Transcript is not the genuine pinned selected conversation")
+        BASE.check(all(e.get("sessionId") == record["threadId"] and bool(e.get("version")) for e in records),
+                   "Transcript is not the genuine selected conversation")
         for answer in ANSWERS[:count]:
             BASE.check(any(block.get("type") == "text" and block.get("text") == answer
                           for e in records if e["type"] == "assistant" for block in e["message"].get("content", [])),
@@ -480,7 +478,7 @@ class Proof(BASE.Proof):
         BASE.check(len(portable_files) == 1 and portable_files[0].endswith("/" + record["threadId"] + ".jsonl"),
                    "Native restore included credentials, settings or unrelated session state")
         return {"sha256": BASE.digest(artifact), "bytes": len(artifact), "nativeTranscriptSHA256": BASE.digest(transcript),
-                "stoppedNativeLeaf": records[-1]["uuid"], "nativeVersion": VERSION, "gitWorkspaceMatches": True,
+                "stoppedNativeLeaf": records[-1]["uuid"], "nativeVersion": records[-1]["version"], "gitWorkspaceMatches": True,
                 "actualBashFilePreserved": count >= 2, "ignoredFilesExcluded": True, "selectedIgnoredFilePreserved": True,
                 "portableNativeStateIsTranscriptOnly": True,
                 "completionEvidence": "production placement Stop hook, actual writer fence and immutable receipt; leaf is compatibility evidence"}

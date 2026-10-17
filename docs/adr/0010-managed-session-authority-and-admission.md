@@ -5,14 +5,19 @@ Date: 2026-10-11
 Implementation: verified for the controlled single-owner native session scope
 Live Codex and Claude roundtrips: passed; scope recorded on 2026-10-12
 
+Current compatibility policy: [ADR 0015](0015-default-clients-and-native-tool-schemas.md)
+replaces exact client-version selection and the combined MCP discovery schema.
+Other decisions in this record remain in effect.
+
 ## Problem and constraints
 
-The accepted [portable-session outcome](0004-portable-sessions-and-bounded-executions.md)
-requires a native local terminal, remote continuation and return to local execution.
-Local launch must work without a cluster. A native checkpoint carries conversation
-and workspace continuity, but cannot carry permission to spend, destination policy,
-provider credentials or proof that its source stopped. The developer must reach
-the remote placement without Kubernetes credentials.
+The accepted [portable-session
+outcome](0004-portable-sessions-and-bounded-executions.md) requires a native
+local terminal, remote work and return to local execution. Local launch must
+work without a cluster. A native checkpoint carries conversation and workspace
+continuity, but cannot carry permission to spend, destination policy, provider
+credentials or proof that its source stopped. The developer must reach the
+remote placement without Kubernetes credentials.
 
 The retained design synthesis selected a home coordinator with placement-owned
 admission and accounting. It rejected the alternative that required cluster
@@ -171,7 +176,7 @@ The later matched-image Codex proof passed real tool execution, held-turn
 handoff, both-placement capability/direct-HTTP denials, forced cancellation and
 immutable conservative receipt replay. Claude separately passed its complete
 TUI/Bash/Git roundtrip and both-placement denials with exact usage conservation.
-[Recorded acceptance](../demos/verified-session-mobility.md) retains their scope.
+[Recorded acceptance](../../test/acceptance/reports/verified-session-mobility.md) retains their scope.
 The fixtures do not establish arbitrary tools, compaction, all failure modes or
 paid-provider compatibility.
 
@@ -204,6 +209,7 @@ Current boundaries live in [gateway grants](../../internal/gateway/grant.go),
 [ADR 0012](0012-retained-work-and-fresh-session-continuations.md) adds retained
 remote work and later fresh executions under a stable product session ID. This
 ADR's original deadline and aggregate allowance apply within each execution's
-live moves. A new continuation has current admission, new accounts and a new
-deadline; it cannot reopen an old allocation or modify sealed usage. Exact writer
-fencing and conservative unknown-state handling remain required in both paths.
+live moves. A new execution has current admission, new accounts and a new
+deadline; it cannot reopen an old allocation or modify sealed usage. Exact
+writer fencing and conservative unknown-state handling remain required in both
+paths.

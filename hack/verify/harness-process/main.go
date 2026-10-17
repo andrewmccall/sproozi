@@ -171,6 +171,11 @@ func run(selected, scenario string, withTool, supervised bool) (result, error) {
 	}))
 	defer upstream.Close()
 	ledger := budget.NewMemoryLedger()
+	for _, key := range []budget.AccountKey{"fixture-run/model.inference", "fixture-run/mcp.fixture"} {
+		if err := ledger.Initialize(context.Background(), key); err != nil {
+			return out, err
+		}
+	}
 	tracker := budget.NewTrackerWithLedger(ledger)
 	capabilities := []api.CapabilityKind{api.CapabilityModelInference, api.CapabilityKind("mcp.fixture")}
 	runCaps := capabilities

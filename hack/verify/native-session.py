@@ -4,7 +4,7 @@
 The loopback provider makes no paid requests. This gate proves short text history
 across isolated native homes; Docker/Kind, tool state and fencing have separate
 acceptance gates. --change-instructions is an expected-failure diagnostic: the
-pinned exec resume path retains the original developer instructions.
+native exec resume path retains the original developer instructions.
 """
 import argparse
 import hashlib
@@ -116,7 +116,6 @@ def main():
     (version_home / ".codex").mkdir()
     version_env = {"PATH": os.environ["PATH"], "HOME": str(version_home), "CODEX_HOME": str(version_home / ".codex")}
     version = subprocess.check_output(["codex", "--version"], env=version_env, text=True).strip()
-    assert version == "codex-cli 0.161.0", "Unsupported native version: " + version
     servers = [ThreadingHTTPServer(("127.0.0.1", 0), Provider) for _ in range(3)]
     for server in servers:
         threading.Thread(target=server.serve_forever, daemon=True).start()

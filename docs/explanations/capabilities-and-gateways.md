@@ -1,8 +1,11 @@
 # Capabilities and gateways
 
-**Audience:** operators, contributors
+A run requests capabilities. Policy decides which requests are allowed and sets
+their limits. The gateway checks each service operation against the run and
+current policy. Provider credentials stay in the gateway.
 
-Sproozi does not treat permissions as a single allowlist. A capability becomes usable only when multiple layers agree.
+Read [core concepts](core-concepts.md) for an introduction to runs, templates,
+runtimes and policies. This page explains how their permission checks combine.
 
 ```mermaid
 flowchart LR
@@ -20,131 +23,134 @@ flowchart LR
 
 ## Mental model
 
-The broker can enforce three levels of understanding, selected per operation:
+The gateway checks different information for different types of request. The
+implementation calls these enforcement tiers:
 
-| Tier | Enforced boundary | Example |
+| Tier | What the gateway checks | Example |
 | --- | --- | --- |
-| Semantic | Meaningful service resources and actions | Read pods in one namespace; create a PR from a run-owned branch |
-| Protocol | A bounded service interface and request shape | Permit selected MCP tools with argument predicates |
-| Destination | Exact network destinations and protocols | Permit HTTPS to one approved host |
+| Semantic | Service resources and actions. | Read Pods in one namespace or create a PR from a run-owned branch. |
+| Protocol | Allowed operations and request arguments. | Call selected MCP tools with restricted arguments. |
+| Destination | Exact network host, port and protocol. | Send HTTPS requests to one approved host. |
 
-CLI, HTTP proxy and MCP are delivery interfaces. The demo's `kubectl`, `git` and
-`gh` calls are semantic requests because the broker checks their resources and
-actions. Installing a tool grants no external authority. One run may use
-different tiers, always within its statically declared capability envelope.
+These tiers describe what the gateway understands. They are not increasing
+permission levels. Destination access cannot restrict service actions as
+precisely as a handler that understands those actions.
 
-The [recorded demo](../demos/verified-sre-demo.md) exercised semantic paths. It
-did not exercise protocol-only integrations, generic destination access, package
-installation or MCP mediation.
+CLI, HTTP proxy and MCP are ways to send requests. They do not determine the
+enforcement tier. For example, the demo's `kubectl`, `git` and `gh` calls use
+Semantic checks because the gateway checks their resources and actions.
+Installing a tool does not grant service access.
 
-- `AgentRun` asks for an explicit capability subset
-- `AgentPolicy` says whether that subset is legal
-- `AgentTemplate` adds trusted context such as selected egress profiles and instructions
-- `AgentRuntime` tells the sandbox where the shared trusted gateway lives
-- the gateway authenticates the run, then the selected handler enforces its capability and tier
+The resources have separate responsibilities:
+
+- `AgentRun` requests an explicit capability subset.
+- `AgentPolicy` allows or denies that subset and sets limits.
+- `AgentTemplate` supplies trusted instructions and selects egress profiles.
+- `AgentRuntime` selects the gateway endpoint and Pod configuration.
+- The gateway authenticates the run and checks the requested operation.
 
 ## How capability grants become usable
 
 ### `model.inference`
 
-`model.inference` requires live capability authorization. An optional
-`AgentPolicy.spec.budgets[model.inference]` entry adds reservation and settlement
-accounting. Model admission can underestimate total consumption; this accounting
-is not a hard provider-spending ceiling.
+The run must request `model.inference`, and current policy must allow it. An
+optional `AgentPolicy.spec.budgets[model.inference]` entry adds usage
+reservations and accounting. Admission can underestimate total model
+consumption. Token and cost limits are not hard provider-spending ceilings.
 
 ### `network.egress`
 
-`network.egress` only becomes useful when:
+All of these conditions must hold:
 
-1. the run requests `network.egress`
-2. the policy lists the profile name
-3. the template also selects the same profile
-4. the shared gateway destination module approves the exact destination tuple
+1. The run requests `network.egress`.
+2. The policy permits the named egress profile.
+3. The template selects the same profile.
+4. The gateway approves the exact destination host, port and protocol.
 
 ### `github.pull_request`
 
-The sandbox never gets GitHub credentials. It asks the shared gateway's GitHub
-module to publish a PR, and that module validates the run, repository scope, and
-revision contract first.
+The run requests `github.pull_request`. The gateway checks the run, approved
+repository scope and revision contract before publishing a PR. The sandbox
+receives no GitHub provider credentials.
 
 ### `mcp.<server>`
 
-A configured remote server becomes usable when the gateway registry contains its
-approved HTTPS endpoint, the run requests its named capability, and current
-policy allows that capability with an explicit tool scope. Discovery supplies
-input schemas and descriptions. Optional policy argument predicates add scope;
-the gateway validates both schemas independently and reports Protocol enforcement.
-Provider credentials remain behind the gateway. Each incoming request owns a
-private upstream session. Attempted tool calls charge the Run UID and named
-capability account.
+A remote MCP server must have an approved HTTPS endpoint in the gateway
+registry. The run must request its named capability, and current policy must
+explicitly allow its tools. The gateway checks arguments against the discovered
+input schema and any additional policy restrictions.
 
-Native Kubernetes MCP instead uses `kubernetes.read` and the existing Semantic
-handler. See [configured MCP capabilities](../reference/configured-mcp.md),
-[Kubernetes MCP delivery](../reference/kubernetes-mcp.md) and
-[ADR 0001](../adr/0001-mcp-capabilities-through-shared-gateway.md).
+Each incoming request uses a private upstream session. Attempted tool calls
+count against the Run UID and named capability budget. Provider credentials stay
+in the gateway. Native Kubernetes MCP instead uses `kubernetes.read` and the
+same Semantic handler as Kubernetes REST reads.
+
+See [configured MCP](../reference/configured-mcp.md), [native Kubernetes
+MCP](../reference/kubernetes-mcp.md) and [ADR
+0001](../adr/0001-mcp-capabilities-through-shared-gateway.md). For the full
+capability list, including package downloads, see [permissions and
+capabilities](../reference/permissions-and-capabilities.md).
 
 ## Why this matters
 
-This split keeps the agent flexible without making prompts the source of truth for authorization. Policy, RBAC, and gateways remain authoritative even if the sandbox is compromised or the task/event text is hostile.
+Prompts cannot grant permissions. The network boundary, run identity, requested
+capabilities, current policy and upstream restrictions all constrain a request.
+These checks must hold even if task text is hostile or the sandbox is
+compromised.
 
-The production story still depends on operator hardening around inspected TLS,
-namespace isolation, GitHub-side protections, and durable gateway state. The
-recorded semantic runs establish scoped historical acceptance, not production
-readiness. See [Security hardening](../reference/security-hardening.md).
+Deployment still requires enforced network isolation, inspected TLS, namespace
+separation, GitHub protections and durable gateway state. See [security
+hardening](../reference/security-hardening.md) for the controls and known
+limits.
 
 ## Implementation map
 
-The tiers describe how much a module understands about the permitted operation.
-They are not transports and are not increasing permission levels.
+Each service handler implements `http.Handler` beneath `internal/endpoints`. The
+shared gateway routes requests to these handlers.
 
-| Tier | Module | Status |
+| Tier | Module | Supported behaviour |
 | --- | --- | --- |
-| Semantic | `internal/endpoints/kubernetes`, `internal/endpoints/github`, `internal/endpoints/model`, `internal/endpoints/packages` | Implemented |
-| Protocol | `internal/endpoints/mcp` | Configured remote tools, discovered input schemas and additive policy predicates |
-| Destination | `internal/endpoints/destination` | Inspected HTTPS to exact profile hosts and ports |
+| Semantic | `internal/endpoints/kubernetes`, `internal/endpoints/github`, `internal/endpoints/model`, `internal/endpoints/packages` | Service-specific action checks. |
+| Protocol | `internal/endpoints/mcp` | Registered remote tools, discovered input schemas and additional policy argument restrictions. |
+| Destination | `internal/endpoints/destination` | Inspected HTTPS to exact profile hosts and ports. |
 
-`internal/proxytransport` provides authentication, TLS inspection and session
-revocation for all routed tiers. `Dispatcher` in `internal/gateway/dispatch.go` selects an exact
-authority and records the route's enforcement tier in its static definition.
-The MCP handler selects its named capability from the validated broker path.
-Each handler still authorizes the actual operation against the run and live
-policy and writes its tier in audit output.
+`internal/proxytransport` handles authentication, TLS inspection and session
+revocation. `Dispatcher` in `internal/gateway/dispatch.go` selects an exact
+authority and records its enforcement tier. Each handler checks the operation
+against the run and current policy, then records its tier in audit output. The
+MCP handler selects the named capability from the validated gateway path.
 
-Destination routes are derived from configured egress profiles. The inspection
-certificate must cover every workload destination host. Registered remote MCP
-authorities are reserved denied routes; their TLS is validated by the gateway
-using ordinary upstream trust. Semantic service addresses are
-reserved even when their module is disabled, so generic egress cannot provide a
-weaker fallback. Raw CONNECT tunnels, plaintext HTTP and protocol upgrades are
-unsupported. Model responses are deliberately buffered for usage verification;
-the shared dispatcher itself preserves streaming response behaviour.
+Destination routes come from configured egress profiles. The inspection
+certificate must cover every workload destination host. Registered MCP provider
+addresses are reserved against destination routing; the gateway validates their
+upstream TLS separately. Semantic service addresses stay reserved even if their
+handler is disabled. Generic egress cannot bypass a disabled service handler.
+
+Raw CONNECT tunnels, plaintext HTTP and protocol upgrades are unsupported. The
+shared dispatcher preserves streaming responses. Model handlers buffer responses
+to verify usage.
 
 ## Endpoint interface and spending
 
-The gateway is the shared service. Each implementation lives beneath
-`internal/endpoints` in service-specific subpackages and implements
-`http.Handler`. There is no plugin lifecycle, custom forwarding interface, or
-per-service executable. The dispatcher supplies the authenticated run and, for fixed native
-capabilities, an optional `budget.Meter` in request context. The configured MCP
-handler resolves the named capability and meter from the broker path and live
-policy. Each handler authorizes the operation.
+The dispatcher supplies the authenticated run in request context. For fixed
+native capabilities it also supplies an optional `budget.Meter`. The MCP handler
+resolves its named capability and meter from the path and current policy.
 
-`internal/budget` owns the shared accounting contract and its memory and Kubernetes
-storage adapters. `Meter.Spend` charges known usage before forwarding;
-`Meter.Reserve` returns a reservation for variable usage, which the endpoint
-settles or releases. Models translate provider-reported usage and administrator pricing into units
-and cost. The current admission estimate can omit input tokens, and rejection
-after an over-bound settlement does not undo upstream consumption. Other
-native endpoints spend one unit per authorized upstream request, including each
-GitHub read-back request. Configured MCP spends one unit before an upstream tool
-invocation, including failed attempts. Its bounded initialization and discovery
-are separate from tool-call spending.
+`internal/budget` defines shared accounting rules and memory and Kubernetes
+storage adapters. `Meter.Spend` charges known usage before forwarding.
+`Meter.Reserve` holds capacity for variable usage. The handler then settles
+actual usage or releases the reservation.
 
-## MCP evidence and further directions
+Model handlers use provider-reported usage and administrator pricing. The
+current admission estimate can omit input tokens. Rejecting an excessive
+settlement does not undo provider consumption. Native non-model handlers charge
+one unit per authorized upstream request, including each GitHub read-back
+request. Configured MCP charges before a tool invocation, including failed
+attempts. Its initialization and discovery are bounded separately and do not
+consume tool-call units.
 
-[Recorded MCP acceptance](../demos/verified-mcp-demo.md) covers native Kubernetes
-and two configured HTTPS fixture providers through stock Codex, including scope,
-budget and network denials, cancellation and normal cleanup. The
-[managed-server design](future-architecture/managed-mcp-servers.md) describes
-future managed servers and stronger semantic bindings. Ordinary CLI and HTTP
-delivery remain available alongside the implemented MCP paths.
+## Future extensions
+
+The [managed-server proposal](future-architecture/managed-mcp-servers.md) describes
+server lifecycle support and stronger service-specific checks. CLI and HTTP
+delivery remain available alongside MCP.

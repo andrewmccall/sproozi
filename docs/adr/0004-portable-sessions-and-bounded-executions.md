@@ -171,6 +171,6 @@ conversation continuity through successive bounded executions. Revisit native
 state ownership if supported cross-host export/resume cannot be established.
 Consider process migration only when a concrete workload requires it and its
 authority and side effects can be bounded. Expand adoption or GUI integration
-after pinned-client evidence proves it. Revisit the selected storage, fencing and
+after client acceptance tests prove it. Revisit the selected storage, fencing and
 accounting mechanisms under ADRs 0008-0010 when deployment requirements exceed
 their single-owner and trusted-administrator assumptions.

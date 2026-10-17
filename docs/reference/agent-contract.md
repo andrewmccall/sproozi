@@ -1,9 +1,11 @@
 # Agent contract and completion
 
-The controller mounts a versioned JSON input document at
+The input contract gives the agent its task, trusted instructions, run identity
+and gateway settings. The controller mounts this JSON document at
 `/etc/sproozi/contract/input.json` in selected workload containers. Its version
-is `sproozi.agentcontract/v1alpha1`. The controller creates the immutable contract
-ConfigMap for the run; the runtime command chooses how the agent reads it.
+is `sproozi.agentcontract/v1alpha1`. The controller creates the immutable
+contract ConfigMap for the run; the runtime command chooses how the agent reads
+it.
 
 | Field | Source and meaning |
 | --- | --- |
@@ -44,7 +46,7 @@ and [ADR 0002](../adr/0002-native-cli-harnesses-and-model-protocols.md).
 Launch a bounded CLI invocation in the completion container. Codex and Claude
 Code use `exec` so their process status becomes the container status. OpenCode's
 trusted launch adapter supervises the stock CLI and checks its native exported
-session before producing a container status, because OpenCode 1.15.1 can exit
+session before producing a container status, because OpenCode can exit
 zero after an API error. The adapters do not interpret task quality or replace
 the agent loop. Hermes supervises a native one-shot invocation and requires a
 successful terminal result before publishing its bounded answer.
@@ -56,20 +58,20 @@ controller lifecycle outcome. See [harness completion](harnesses.md).
 
 ## Retained final answers
 
-A worker may explicitly publish a bounded result at its configured termination
-message path with `terminationMessagePolicy: File`:
+A worker can publish a size-limited final answer at its configured termination
+message path. Set `terminationMessagePolicy: File` and use this envelope:
 
 ```json
 {"version":"sproozi.run-result/v1","runUID":"<exact AgentRun UID>","result":{"text":"Final untrusted answer","truncated":false}}
 ```
 
-The controller validates the envelope and captures it with the actual exit code
-from the same owned Pod observation. It persists optional `status.result` with
-terminal phase before cleanup. The envelope must contain all fields, use valid
-UTF-8 and fit within 3,584 encoded bytes; duplicate, unknown, missing or foreign
-fields fail result publication. An unavailable answer does not change process
-success. Fallback logs are never results. Hermes' launch adapter publishes its
-native final text; the other stock examples currently publish no answer envelope.
+The controller validates the envelope and reads the exit code from the same
+owned Pod. It saves optional `status.result` with terminal status before
+cleanup. The envelope must contain all fields, use valid UTF-8 and fit within
+3,584 encoded bytes; duplicate, unknown, missing or foreign fields fail result
+publication. An unavailable answer does not change process success. Fallback
+logs are never results. Hermes' launch adapter publishes its native final text;
+the other stock examples currently publish no answer envelope.
 
 Result text is untrusted, can contain sensitive tool data, and is visible to
 AgentRun readers. It expires with the Run rather than Pod cleanup. See

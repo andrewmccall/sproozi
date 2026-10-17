@@ -101,28 +101,16 @@ it can be stopped with `docker stop sproozi-demo-registry`. Restart it with
 
 ## What the architecture demonstrates
 
-The broker understands Kubernetes resources and GitHub actions, so these are
-semantic capabilities even though the agent uses ordinary CLI clients over an
-HTTP proxy. The three tiers describe the broker's understanding of each request:
-service actions, a bounded service protocol, or a permitted destination. They do
-not describe three sandbox modes or stages of authority escalation.
+The gateway checks Kubernetes resources and GitHub actions. These are Semantic
+checks even though the agent uses ordinary CLI clients through an HTTP proxy.
+The enforcement tier describes what the gateway checks: service actions,
+protocol operations or exact destinations. See [capabilities and
+gateways](../explanations/capabilities-and-gateways.md).
 
-The recorded runs exercised the semantic paths and their shared containment
-boundary. Destination and package handlers exist but were not exercised by this
-demo. One [native Kubernetes MCP tool](../reference/kubernetes-mcp.md) is available
-through the opt-in demo renderer. A [separate bounded acceptance](../demos/verified-mcp-demo.md)
-verified its use by stock Codex in Kind. The recorded PR demo did not exercise it.
-[Configured remote MCP mediation](../reference/configured-mcp.md) also has a
-[separate two-provider Kind proof](../demos/verified-mcp-demo.md#configured-remote-mcp-acceptance)
-with Protocol enforcement. [Additional CLI harness preparation](../reference/harnesses.md)
-is implemented with local tests; this recorded demo remains Codex-specific.
-Dynamic escalation and managed MCP servers remain planned.
-
-[Recorded acceptance](../demos/verified-sre-demo.md) passed on 4 October 2026.
-A new checkout or environment still needs its own live report. The model budget
-is not a hard total-token ceiling, cleanup has an interrupted-provisioning gap,
-and the supported completion convention is one container named `agent`.
-See [security hardening](../reference/security-hardening.md).
+The PR workflow needs `kubernetes.read`, `github.pull_request` and
+`model.inference`. Generic egress and package installation are unnecessary.
+To use the Pod-list MCP tool instead of REST reads, see
+[native Kubernetes MCP](../reference/kubernetes-mcp.md).
 
 ## Example resources
 

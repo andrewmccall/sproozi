@@ -7,25 +7,6 @@ The developer can claim that stopped session and continue it in local Docker.
 The existing [Hermes task guide](hermes-orchestration.md) serves the separate
 bounded task API, which retains answers without native session retrieval.
 
-## Credential-free Kind walkthrough
-
-Use the [complete mobility setup](../../hack/verify/session-mobility/README.md)
-to create a dedicated two-node Kind cluster with enforcing Calico, build the
-approved native/helper images, prepare TLS and install the controller/gateway.
-The [stock Hermes walkthrough](../../hack/verify/portable-workflows/README.md#stock-hermes-and-a-persistent-kubernetes-owner)
-then installs this owner and coordinator and runs the complete native round trip.
-It needs Docker, Kind, kubectl, Git, Go 1.26.6, OpenSSL, Python 3 and PyYAML.
-It selects no personal credentials or home-network resources. The development
-fixture seeds only public Sproozi compiler sources. Follow the
-[Project dogfooding walkthrough](../../hack/verify/portable-workflows/README.md#development-and-governed-home-ops-projects)
-for actual package checks, exact revision replay and scoped Pod-read/Secrets-denial
-checks in both placements.
-
-Its report separates native client/lifecycle proof from model quality. The model
-fixtures direct real stock Hermes MCP calls and stock Codex execution; they do
-not establish a paid-model Sproozi contribution or a personal home-ops diagnosis.
-Keep the report and private logs before deleting the dedicated cluster.
-
 ## Existing-cluster deployment
 
 Follow [Install on Kubernetes](install-kubernetes.md), including enforcing CNI,
@@ -34,7 +15,7 @@ This adapter uses ordinary Pods. Kubernetes Agent Sandbox CRDs are not required;
 integration with that operator remains planned.
 
 Build and publish the [native image](../../internal/runtime/docker/image/Dockerfile)
-with the approved Codex 0.161.0/Claude Code 2.1.27 clients, supervisor, checkpoint
+with the approved Codex/Claude Code clients, supervisor, checkpoint
 helper and profile executable. Select its immutable registry digest. It must be
 available on every execution node. The owner uses this image because it also
 needs Git to prepare workspace inputs; the smaller controller image does not
@@ -46,8 +27,7 @@ namespace-scoped roles, persistent owner storage, private TLS Service and the
 persistent Hermes Deployment. You need a default StorageClass or explicit PVC
 `storageClassName` values. Use quota-enforced owner storage: Git revision
 restoration stages retained objects on that PVC under the owner container's
-resource limits. The Kind fixture checks ordinary bounded inputs, not storage
-exhaustion. It selects the same Hermes coordinator names as the
+resource limits. It selects the same Hermes coordinator names as the
 older example; choose the intended MCP configuration before installation.
 
 Render and review a private copy:
@@ -66,7 +46,7 @@ resources and policy ceilings, and select an immutable certificate-only trust
 ConfigMap named `portable-codex-trust` in `sproozi-agents`. Create it from the
 installed gateway's public CA bundle with `immutable: true`, using the same
 procedure as the install guide. Its CA must verify the gateway certificate.
-Keep the selected native pin and instruction bytes identical to the home config.
+Use the same harness and instruction bytes as the home configuration.
 The example's model-only policy deliberately needs additional reviewed grants
 before accessing GitHub or Kubernetes.
 
@@ -165,11 +145,12 @@ kubectl -n sproozi-system rollout status deployment/sproozi-work --timeout=180s
 kubectl -n sproozi-coordinators rollout status deployment/hermes-coordinator --timeout=180s
 ```
 
-Keep one owner replica and its PVC. Recreate replacement and the process lock
-prevent two owners of the same directory. The owner requires Pod exec/patch/delete
-in the isolated worker namespace to drive fixed native lifecycle operations.
-It is trusted control-plane software; workers and Hermes receive no such grants.
-Kubernetes RBAC does not limit this role to dynamically created Pod names.
+Keep one owner replica and its PVC. The Deployment uses the Recreate strategy. A
+process lock also prevents two owners from using the same directory. The owner
+requires Pod exec/patch/delete in the isolated worker namespace to drive fixed
+native lifecycle operations. It is trusted control-plane software; workers and
+Hermes receive no such grants. Kubernetes RBAC does not limit this role to
+dynamically created Pod names.
 
 ## Trigger, inspect, retrieve and resume
 
@@ -206,10 +187,10 @@ bin/sproozi resume SESSION_UUID
 bin/sproozi stop SESSION_UUID
 ```
 
-Only a completed, fenced, accounted checkpoint can be claimed. Local resume
-receives a new bounded execution and current local authority; old history does
-not grant access. The stock client uses its same native conversation. Cross-client
-handoff is a separate deferred feature.
+You can claim a checkpoint only after the task completes, the worker stops and
+usage accounting finishes. Local resume starts a new execution with current
+local permissions. Saved history grants no access. The agent resumes its native
+conversation. Cross-client handoff is a separate deferred feature.
 
 ## Failures and cleanup
 
@@ -218,7 +199,7 @@ handoff is a separate deferred feature.
 | Hermes cannot discover tools | Inspect its native logs and owner TLS/CA/token configuration. All MCP output schemas must have object roots. |
 | Owner is unready | Inspect its logs, PVC permissions, mounted config/credentials and namespace-scoped RBAC. |
 | Remote phase is `unknown` | Preserve the session/operation UUID and journals. Inspect the Pod and owner logs, then use `recover`; do not manufacture a new submission. |
-| Native state is missing or incompatible | Retain the source evidence. Use the pinned harness/version and matching instructions; do not treat another client as native resume. |
+| Native state is missing or incompatible | Retain the source evidence. Use the same harness and matching instructions. Check whether its saved state is supported. |
 | A deadline or cancellation stops work | Inspect status. Deadline/cancellation does not guarantee a resumable completed turn. Unknown stop or accounting prevents export. |
 | Home storage is full | Resolve capacity before pull/resume. A failed capacity check does not transfer ownership or start another writer. |
 
@@ -231,5 +212,4 @@ ordinary log lifetime. Owner and Hermes logs are separate from native checkpoint
 Stop or cancel active sessions before removing the deployment. Back up owner and
 Hermes PVCs if their sessions must survive. Deleting the rendered stack also
 deletes those PVCs. Worker Runs, controller installation and gateway credentials
-have separate lifecycles. Delete only the dedicated Kind cluster for a fixture
-cleanup; this guide does not operate the user's personal home-ops infrastructure.
+have separate lifecycles. For a local trial, delete only the dedicated Kind cluster you created.

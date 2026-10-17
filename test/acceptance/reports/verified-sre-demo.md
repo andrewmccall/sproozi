@@ -32,7 +32,7 @@ denial probes and scoped cleanup. The probes verified:
 
 The separate acceptance suite read the real PR back and checked its branch,
 commit and file scope. AgentRun success itself came from container exit code 0.
-See the [manual guide](../guides/manual-pr-demo.md) to run the current path.
+See the [manual guide](../../../docs/guides/manual-pr-demo.md) to run the current path.
 
 ## Scope of this evidence
 
@@ -51,5 +51,5 @@ Cleanup checks covered run-labelled sandbox and invocation resources. They did
 not cover durable budget ConfigMaps or recovery after lost provisioning status.
 The current implementation has limitations in model admission, interrupted
 cleanup and container completion. See
-[security hardening](../reference/security-hardening.md). Release verification
+[security hardening](../../../docs/reference/security-hardening.md). Release verification
 and lint were not established as passing by these acceptance reports.

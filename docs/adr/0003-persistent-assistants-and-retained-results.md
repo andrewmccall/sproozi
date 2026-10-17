@@ -174,12 +174,12 @@ Current contract: [orchestration reference](../reference/orchestration.md).
 
 ## Subsequent decision
 
-[ADR 0012](0012-retained-work-and-fresh-session-continuations.md) adds remote-first
-managed Codex work with retained native conversation and Git state, an explicit
-one-way home claim and freshly authorized local continuation. This ADR continues
-to govern ordinary disposable delegated jobs and their bounded text answers.
-Those answers alone are not portable native sessions. Hermes remains a separately
-trusted persistent coordinator in both workflows.
+[ADR 0012](0012-retained-work-and-fresh-session-continuations.md) adds
+remote-first managed Codex work with retained native conversation and Git state,
+an explicit one-way home claim and local resume with fresh permissions. This ADR
+continues to govern ordinary disposable delegated jobs and their bounded text
+answers. Those answers alone are not portable native sessions. Hermes remains a
+separately trusted persistent coordinator in both workflows.
 
 ## Revisit conditions
 
@@ -188,5 +188,5 @@ integration limitations appear in real operation. Add separate principals or
 authenticated sender attribution when multiple users require independent
 authority. Add receipts/artifact storage when requirements exceed Run retention
 or the small answer bound. Revisit worker concurrency when real queueing demands
-parallel admission. Simplify launch adapters when pinned native releases provide
+parallel admission. Simplify launch adapters when native clients provide
 reliable final-file output and completion semantics directly.

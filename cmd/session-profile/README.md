@@ -4,7 +4,7 @@
 authenticated TLS. The developer receives its fixed HTTPS URL, CA certificate
 and principal token file. Kubernetes credentials remain with the profile service.
 See the [session mobility guide](../../docs/guides/session-mobility.md) for the
-local/remote command sequence. Both pinned clients have passed production
+local/remote command sequence. Both selected clients have passed production
 Docker-to-Kubernetes-to-Docker round trips through this profile. Codex's extended
 proof also covers held-turn movement, forced cancellation and denial probes;
 Claude's full round trip establishes foreground Bash, workspace continuity and
@@ -28,20 +28,20 @@ does not provide managed registration or active-allocation checks.
 
 The administrator creates an `AgentRuntime`, `AgentPolicy` and `AgentTemplate`
 in the profile's fixed namespace. The worker namespace is `sproozi-agents`.
-The runtime selects an explicit native client: stock Codex 0.161.0 (`codex`) or
-Claude Code 2.1.27 (`claude-code`), with Git, `native-session` and `checkpoint`
+The runtime selects an explicit native client: stock Codex (`codex`) or
+Claude Code (`claude-code`), with Git, `native-session` and `checkpoint`
 from the approved [native image](../../internal/runtime/docker/image/Dockerfile).
 Use an immutable `repository@sha256:...` image reference available on cluster
 nodes. Configure exactly two containers named `agent` and `checkpoint`, with
 `workloadContainers: [agent]`, and `clientConfig.harness` matching the profile
 configuration below. The administrator selects `clientConfig.nativeSession.model`.
 Codex also accepts its validated `options`; Claude rejects that field. A missing
-harness, another client kind or an unproved native version is rejected. The
+harness or another client kind is rejected. The
 checkpoint retains the selected kind, and both placements must use it throughout
 the session.
 This two-client contract is separate from the four ordinary run harness selectors.
 OpenCode and Hermes runtimes cannot become managed destinations through their
-ordinary launch support. Activation checks the actual selected executable pin;
+ordinary launch support. Activation uses the installed executable;
 checkpoint metadata does not replace that observation.
 
 Set `automountServiceAccountToken: false`, non-root UID/GID 1000, RuntimeDefault
@@ -183,7 +183,7 @@ make an uncertain move proceed.
 The home daemon drives this profile; use the `sproozi` CLI instead of hand-crafted
 HTTP calls. Each visit gets a fresh Run and Pod. Restore is inert until exact
 admission succeeds and initialized budget accounts exist. Actual checkpoint
-UUID, artifact kind, digest and version pin must match trusted intent. The
+UUID, artifact kind and digest must match trusted intent. The
 registration retains the approved instruction digest independently of native
 history; Claude transcripts do not themselves establish which instructions were
 approved. A checkpoint never selects a provider credential or runtime profile.

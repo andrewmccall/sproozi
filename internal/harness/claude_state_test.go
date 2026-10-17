@@ -276,8 +276,8 @@ func TestClaudeIncompleteForeignOrUnsupportedStateRejected(t *testing.T) {
 		"path traversal": func(s *ClaudeState) { s.Path = "../" + s.Path },
 		"wrong project":  func(s *ClaudeState) { s.Workspace = "/other/workspace" },
 		"foreign ID":     func(s *ClaudeState) { s.ThreadID = "00000000-0000-0000-0000-000000000000" },
-		"different version": func(s *ClaudeState) {
-			s.Transcript = bytes.ReplaceAll(s.Transcript, []byte("2.1.27"), []byte("2.1.28"))
+		"missing version": func(s *ClaudeState) {
+			s.Transcript = bytes.ReplaceAll(s.Transcript, []byte("2.1.27"), []byte(""))
 		},
 		"sidechain": func(s *ClaudeState) {
 			s.Transcript = bytes.ReplaceAll(s.Transcript, []byte(`"isSidechain":false`), []byte(`"isSidechain":true`))
@@ -636,5 +636,17 @@ func TestClaudeActualControlledStopFreshHomeResumeLeaf(t *testing.T) {
 	leaf, err := ClaudeTranscriptLeaf(state, 32768)
 	if err != nil || leaf != "f85e025f-40ec-4f72-8cae-c80072a5313c" {
 		t.Fatalf("actual resumed leaf=%q error=%v", leaf, err)
+	}
+}
+
+func TestClaudeConversationCanSpanClientVersions(t *testing.T) {
+	state := claudeProofState(t)
+	state.Transcript = bytes.Replace(state.Transcript, []byte(`"version":"2.1.27"`), []byte(`"version":"upstream-default"`), 1)
+	if _, err := ClaudeTranscriptLeaf(state, 8192); err != nil {
+		t.Fatal(err)
+	}
+	destination := t.TempDir()
+	if err := RestoreClaudeState(destination, claudeProofWorkspace, state, 8192); err != nil {
+		t.Fatal(err)
 	}
 }

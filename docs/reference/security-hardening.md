@@ -1,8 +1,8 @@
 # Security hardening
 
-Sproozi separates agent execution from trusted policy and credentials. The
-recorded Semantic and MCP demos passed in isolated Kind environments; production
-hardening and the implementation limits below remain relevant.
+Sproozi separates agent execution from trusted policy and credentials. Use the
+controls below when deploying it, and account for the current implementation
+limits.
 
 ## Protect transport and identities
 
@@ -49,7 +49,7 @@ DownwardAPI source. The controller alone injects the gateway token and managed
 continuity volumes. Runtime authors remain trusted: public ConfigMaps and literal
 environment values must not contain provider credentials.
 
-## Constrain remote MCP authority
+## Restrict remote MCP access
 
 Treat the gateway's MCP registry and provider credential mounts as
 administrator-owned configuration. Mount provider tokens only in the gateway,
@@ -58,11 +58,11 @@ a gateway restart; run and policy authorization remain live.
 
 Select tools explicitly in `AgentPolicy.spec.mcpServers` and use argument
 restrictions for required tenant, namespace or repository scope. Discovered
-schemas and policy predicates constrain request shape. They do not establish
-read-only behaviour or service semantics. Use reviewed providers, restricted
-credentials and upstream-native controls for those guarantees. Registered
-provider authorities are reserved against weaker destination routing; verify
-direct network denial from the sandbox as well.
+schemas and policy restrictions check request arguments. They cannot prove that
+a tool is read-only or that the server respects the requested resource scope.
+Use reviewed providers, restricted credentials and upstream-native controls for
+those guarantees. Registered provider authorities are reserved against weaker
+destination routing; verify direct network denial from the sandbox as well.
 
 Configured MCP budgets count attempted tool invocations, including failures.
 They do not price provider work or charge initialization and discovery. See
@@ -149,11 +149,11 @@ even though budget and replay state are shared. See
 
 The local demo's short-lived CA and gitignored environment file are disposable
 evaluation inputs. For deployment, supply managed certificates, least-privilege
-credentials, namespace isolation and durable audit collection. The planned
-[home-ops playbook](../guides/home-ops-playbook.md) has not passed full acceptance.
+credentials, namespace isolation and durable audit collection. The [home-ops playbook](../guides/home-ops-playbook.md) describes a planned
+integration; its Alertmanager converter and signer are not supplied.
 
 
-## Persistent assistant authority and answers
+## Persistent assistant permissions and answers
 
 The Hermes coordinator is a separate trusted workload. It keeps its own model
 and optional channel credentials and persistent state. It has no Kubernetes
@@ -163,9 +163,9 @@ installation. Use separate task principals and bearer tokens for assistants
 requiring different authority. A shared bot token does not authenticate each
 channel user independently.
 
-Worker final text is untrusted and can contain sensitive scoped tool results.
-It is retained in AgentRun status, visible to authorized Run readers, and expires
-with Run retention. Do not treat it as operating instructions or widen follow-on
-authority because of answer text. Coordinator state has separate retention and
-spending limits. See [orchestration](orchestration.md) for the exact retry and
-result bounds.
+Worker final text is untrusted and can contain sensitive scoped tool results. It
+is retained in AgentRun status, visible to authorized Run readers, and expires
+with Run retention. Do not treat it as operating instructions or grant more
+permissions to a later task because of answer text. Coordinator state has
+separate retention and spending limits. See [orchestration](orchestration.md)
+for the exact retry and result bounds.

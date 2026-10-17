@@ -276,11 +276,6 @@ func (s *server) activate() response {
 			return r
 		}
 	}
-	if err = verifyNativeVersion(context.Background(), s.config.Harness,
-		path, workspace, env, s.config.Deadline); err != nil {
-		r.Error = err.Error()
-		return r
-	}
 	if s.config.Task != "" && s.threadID != "" {
 		_, baseline, err := observeTurn(nativeHome, s.threadID, s.config.InstructionDigest, s.config.RolloutMaxBytes)
 		if err != nil {

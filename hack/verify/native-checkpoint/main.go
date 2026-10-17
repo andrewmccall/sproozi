@@ -37,7 +37,6 @@ func main() {
 	}
 	digest := sha256.Sum256(state.Rollout)
 	metadata := struct {
-		Version   string `json:"version"`
 		ThreadID  string `json:"threadId"`
 		TurnID    string `json:"turnId"`
 		Workspace string `json:"originalWorkspace"`
@@ -45,7 +44,7 @@ func main() {
 		Bytes     int    `json:"bytes"`
 		SHA256    string `json:"sha256"`
 		Restored  bool   `json:"restored"`
-	}{harness.CodexSessionVersion, state.ThreadID, turn, state.Workspace, state.Path,
+	}{state.ThreadID, turn, state.Workspace, state.Path,
 		len(state.Rollout), hex.EncodeToString(digest[:]), *destination != ""}
 	if err := json.NewEncoder(os.Stdout).Encode(metadata); err != nil {
 		fail(err)

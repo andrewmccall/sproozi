@@ -1,8 +1,12 @@
 # Run lifecycle
 
-An `AgentRun` records one requested execution and its immutable capabilities,
-untrusted task and event context. The template, policy and runtime are
-administrator-owned.
+An `AgentRun` requests one task through an administrator-owned template. It
+records the requested capabilities, task text and event context. The controller
+checks the request, starts the agent Pod, records its outcome and cleans up.
+
+Read [core concepts](core-concepts.md) for the resource names. This page
+describes the ordinary Kubernetes run lifecycle. Managed session stop and move
+operations have [additional checks](../guides/session-mobility.md).
 
 ```mermaid
 sequenceDiagram
@@ -33,19 +37,22 @@ sequenceDiagram
 Queued -> Admitted -> Running -> Succeeded | Failed | TimedOut | Cancelled
 ```
 
-Admission resolves references, checks requested capabilities and resources, and
-provisions a dedicated ServiceAccount and NetworkPolicy. The controller creates
-an immutable contract ConfigMap and the runtime-derived Pod. It does not create
-per-run target-namespace Roles or RoleBindings. The ServiceAccount has no direct
-Kubernetes grant; the shared gateway authorizes Kubernetes reads.
+Before admission, the controller resolves the template, policy and runtime
+references. It checks the requested capabilities and resource limits.
+
+After admission, the controller creates a dedicated ServiceAccount,
+NetworkPolicy and immutable input ConfigMap. It creates the Pod from the runtime
+configuration. The workload ServiceAccount has no direct Kubernetes read
+permissions. The gateway checks Kubernetes reads; the controller creates no
+target-namespace Roles or RoleBindings for the run.
 
 ## Completion
 
 The Pod adapter waits for the whole Pod to become terminal, then reads the exit
-code of the container named `agent`. Zero means `Succeeded`; non-zero or unavailable
-exit means `Failed`. Use one workload container with that name. Long-running
-ordinary sidecars prevent completion. A PR or agent summary is separate task
-evidence, not the lifecycle success condition.
+code of the container named `agent`. Zero means `Succeeded`; non-zero or
+unavailable exit means `Failed`. Use one workload container with that name.
+Long-running ordinary sidecars prevent completion. Review the task result
+separately. A PR or agent summary does not determine run success.
 
 Explicit cancellation and deadline expiry record `Cancelled` or `TimedOut` and
 start Pod cleanup. They do not depend on the agent reporting an outcome.
@@ -53,30 +60,27 @@ start Pod cleanup. They do not depend on the agent reporting an outcome.
 ## Cleanup and retention
 
 Normal terminal handling and explicit deletion remove the recorded Pod before
-releasing its contract ConfigMap, NetworkPolicy and ServiceAccount. The Run record
-remains until the policy's `retentionTTL` expires unless explicitly deleted.
+releasing its contract ConfigMap, NetworkPolicy and ServiceAccount. The
+`AgentRun` record remains until the policy's `retentionTTL` expires, unless you
+delete it first.
 
-If provisioning created a Pod before its status write succeeded, release
-recovers its deterministic name and verifies the managed-by and immutable Run UID
-labels. It also recovers the deterministic identity/network names. An existing
-Unknown or empty-phase Pod keeps containment; only a successful absent lookup or
-terminal Pod status permits release. Lookup errors and ownership mismatches block
-cleanup. Managed writer finalizers still require their independent termination
-and accounting evidence. Budget ConfigMaps and unique webhook replay records
-have no automatic retention cleanup. See
-[security hardening](../reference/security-hardening.md).
+If provisioning stopped before status was saved, cleanup looks up the Pod and
+checks that it belongs to the run. It keeps identity and network controls until
+the Pod is confirmed absent or terminal. Lookup errors, unknown Pod state and
+ownership mismatches block cleanup. Managed sessions also require separate
+writer-stop and usage-accounting checks.
+
+Budget ConfigMaps and unique webhook replay records have no automatic retention
+cleanup. See [security hardening](../reference/security-hardening.md#cleanup-and-state-retention)
+for ownership checks and retained state.
 
 ## Gateway revocation
 
-One projected gateway-audience token has a two-hour lifetime; policy bounds
-execution to one hour. The demo reads the token once. Token expiry is not the
-revocation boundary. New requests check active Run identity and policy; existing
-sessions close through bounded revalidation. Each authority lookup has a
-five-second deadline; the default periodic interval is one second. Transport
-closure does not prove dependency or upstream work stopped. See the
-[transport limits](../reference/security-hardening.md#protect-transport-and-identities).
-The workload has no Sproozi proxy
-sidecar or local proxy process.
-
-[Recorded acceptance](../demos/verified-sre-demo.md) covers successful semantic
-runs and scoped sandbox cleanup. It does not cover partial-provisioning recovery.
+The projected gateway token lasts two hours; policy limits execution to one
+hour. The demo reads the token once. The gateway does not wait for token expiry
+to revoke access. It checks active run identity and policy on new requests and
+rechecks existing sessions every second by default. Each authority lookup has a
+five-second deadline. Closing a transport does not prove that a dependency or
+upstream operation has stopped. See the [transport
+limits](../reference/security-hardening.md#protect-transport-and-identities).
+The workload has no Sproozi proxy sidecar or local proxy process.

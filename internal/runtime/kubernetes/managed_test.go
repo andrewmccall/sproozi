@@ -22,7 +22,7 @@ func managedFixture() (*api.AgentRun, *api.AgentRuntime, *registry.Record) {
 	helper.Name = kubernetes.CaptureContainer
 	runtime.Spec.PodTemplate.Spec.Containers = append(runtime.Spec.PodTemplate.Spec.Containers, helper)
 	binding := &registry.Record{Reference: registry.Reference{UID: "registry-uid", Epoch: 2},
-		Registration: registry.Registration{Harness: harness.NativeCodex, NativePin: harness.CodexSessionVersion, TemplateName: run.Spec.TemplateRef.Name, IntendedRunName: run.Name,
+		Registration: registry.Registration{Harness: harness.NativeCodex, TemplateName: run.Spec.TemplateRef.Name, IntendedRunName: run.Name,
 			OriginalDeadline: time.Now().UTC().Add(5 * time.Minute), Epoch: 2},
 		RunUID: string(run.UID), Phase: registry.Bound}
 	return run, runtime, binding
@@ -92,30 +92,21 @@ func TestManagedPodRejectsWrongBindingOrHelperCredentialConfiguration(t *testing
 	}
 }
 
-func TestManagedPodNativeKindMustMatchRegisteredVersion(t *testing.T) {
+func TestManagedPodNativeKindMustMatchRegistration(t *testing.T) {
 	for _, kind := range []harness.NativeKind{harness.NativeCodex, harness.NativeClaude} {
 		t.Run(string(kind), func(t *testing.T) {
 			run, runtime, binding := managedFixture()
-			version, err := harness.NativeVersion(kind)
-			if err != nil {
-				t.Fatal(err)
-			}
-			binding.Harness, binding.NativePin = kind, version
+			binding.Harness = kind
 			runtime.Spec.ClientConfig.Harness = string(kind)
-			if _, err = kubernetes.BuildManagedPodSpec(run, runtime, binding); err != nil {
+			if _, err := kubernetes.BuildManagedPodSpec(run, runtime, binding); err != nil {
 				t.Fatal(err)
 			}
-			binding.NativePin = "unproved-version"
-			if _, err = kubernetes.BuildManagedPodSpec(run, runtime, binding); err == nil {
-				t.Fatal("unproved pin admitted")
-			}
-			binding.NativePin = version
 			runtime.Spec.ClientConfig.Harness = "different-client"
-			if _, err = kubernetes.BuildManagedPodSpec(run, runtime, binding); err == nil {
+			if _, err := kubernetes.BuildManagedPodSpec(run, runtime, binding); err == nil {
 				t.Fatal("mismatched runtime client admitted")
 			}
 			binding.Harness = ""
-			if _, err = kubernetes.BuildManagedPodSpec(run, runtime, binding); err == nil {
+			if _, err := kubernetes.BuildManagedPodSpec(run, runtime, binding); err == nil {
 				t.Fatal("empty kind selected Codex")
 			}
 		})

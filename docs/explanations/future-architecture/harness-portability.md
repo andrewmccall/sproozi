@@ -1,29 +1,21 @@
 # Additional harness and client compatibility
 
-**Status:** future extensions to the implemented selected native adapters.
-Stock Codex, Claude Code, OpenCode and Hermes launch,
-native MCP configuration and persistent Hermes delegation are implemented. Their
-setup and bounded verification belong in the [harness reference](../../reference/harnesses.md),
-[orchestration reference](../../reference/orchestration.md) and accepted ADRs
-[0002](../../adr/0002-native-cli-harnesses-and-model-protocols.md) and
-[0003](../../adr/0003-persistent-assistants-and-retained-results.md).
-Codex 0.161.0 has selected native resume and remote terminal support under the
-[session guide](../../guides/session-mobility.md), with controlled core and extended
-Docker/Kubernetes/Docker proofs. Claude Code 2.1.27 separately passed its production
-round trip with selected transcript state, trusted native launch/completion,
-same-UUID TUI conversation, foreground Bash and unfinished Git continuity.
-This document covers additional state, harnesses and client control, rather than
-proposing those implemented foundations again.
+Status: future extensions to the supported clients.
+
+Sproozi supports ordinary launches for Codex, Claude Code, OpenCode and Hermes.
+Managed session movement supports Codex and Claude Code. See the
+[harness reference](../../reference/harnesses.md) for configuration and limits.
+This page covers additional state formats and client connections.
 
 A harness owns its agent loop, conversation semantics and user experience.
 Sproozi owns the bounded environment and external authority available there.
-Extend the current launch adapters only when a concrete resume or control proof
-requires it; a generic harness registry is not a prerequisite.
+Extend the current launch adapters only when a concrete resume or control requirement
+needs it; a generic harness registry is not a prerequisite.
 
 ## Session adapters preserve native state
 
 For additional [session mobility](session-mobility.md), a harness adapter needs to report
-whether the pinned version and session are movable, reach a supported safe
+whether the installed version and session are movable, reach a supported safe
 boundary, export selected native state, validate compatibility and invoke native
 resume in the restored workspace. Unsupported state must be reported explicitly.
 
@@ -53,22 +45,22 @@ stop or trusted usage. See
 
 ## Client compatibility has separate levels
 
-| Level | User experience | Required proof |
+| Client connection | Purpose | Current support |
 | --- | --- | --- |
-| Native CLI resume | Continue using the harness's supported resume mechanism. | Native conversation and workspace continuity with pinned versions and changed host paths |
-| Remote terminal | Attach to the actual running CLI through an authenticated transport. | Owner access, detach/reconnect, revocation and lifecycle control |
-| Native protocol | Connect an IDE or GUI to a remote native session. | The specific official client accepts the supported endpoint and discovers/resumes the correct session |
+| Native CLI resume | Resume through the client's own command. | Pinned Codex and Claude Code. |
+| Remote terminal | Attach to the running CLI. | Managed Docker and Kubernetes sessions. |
+| Native protocol | Connect an IDE or GUI to a remote session. | Future extension. |
 
 Further native-protocol integration can investigate official session/server and
-remote-control interfaces. These are separate experiment candidates,
-not claims that the current desktop clients accept arbitrary Sproozi endpoints.
-Vendor-managed cloud continuations are not proof of relocation between our own
-Docker and Kubernetes environments. Recheck current official interfaces when
+remote-control interfaces. These are separate experiment candidates, not claims
+that the current desktop clients accept arbitrary Sproozi endpoints.
+Vendor-managed cloud sessions are not proof of relocation between our own Docker
+and Kubernetes environments. Recheck current official interfaces when
 implementing; do not rely on undocumented session-file manipulation.
 
 The accepted first client experience is native CLI locally and terminal attachment
 remotely, under [ADR 0006](../../adr/0006-native-cli-and-terminal-before-gui-mobility.md).
-GUI/IDE connection remains a later independent proof. [ADR 0007](../../adr/0007-codex-round-trip-before-harness-expansion.md)
+GUI/IDE connection remains a future extension. [ADR 0007](../../adr/0007-codex-round-trip-before-harness-expansion.md)
 selects the complete Codex round trip first, followed by Claude Code.
 
 The first session starts through Sproozi in local Docker, under
@@ -113,23 +105,7 @@ stand in for completion of every turn. Admission must also establish that the
 harness's tools run in the selected environment rather than on an unrestricted
 host or second executor.
 
-## Next proofs
+## Testing requirements
 
-OpenCode and Hermes mobility need their own complete placement proof; bounded
-stock launch support does not supply native continuity. For each extension,
-verify earlier-turn conversation facts and Git history, index/working changes,
-untracked files and explicit ignored selection. Keep the verified Codex tool,
-held-move, denial and forced-cancellation checks and Claude foreground Bash round
-trip tied to their actual builds and retained evidence. The final-source
-matched-image Codex rerun passed. Claude's full held placement move/cancel matrix
-still needs its own proof; the native held-turn prerequisite does not supply it.
-Broaden long-history,
-compaction, background/subagent and failure coverage only through explicit tests.
-Verify regenerated MCP connections and authority independently of successful
-task output; a successful model/tool fixture does not prove every configured
-integration.
-
-Prove each terminal or native-protocol client separately. For an external-loop
-integration, exercise disconnection, reconnection, policy revocation, explicit
-task completion and cleanup. Publish the supported harness/runtime/client matrix
-with its limitations rather than implying every combination is interchangeable.
+See [harness and client requirements](../../../test/acceptance/README.md#harness-and-client-extensions)
+for state, connection, completion and failure checks.

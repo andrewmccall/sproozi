@@ -10,19 +10,18 @@ These commands require administrator configuration, approved images and prepared
 execution environments. Building the CLI does not install a cluster or start an
 agent.
 
-The public `sproozi` executable addresses durable sessions. A session can retain
-its native conversation across several independently authorized executions. Each
-execution has its own deadline and ceiling, and each placement visit has a fresh
-allocation and exact backend incarnation. A catalogue entry or native thread UUID
-is an observation, not permission to activate a writer.
+A Sproozi session tracks the native conversation across executions. Each
+execution needs separate approval and has its own deadline and usage allowance.
+Each placement visit gets a new allocation and backend resource identity.
+Finding a session or native conversation ID does not grant permission to run it.
 
 Use [retained remote work](../guides/portable-workflows.md) for remote task setup,
-pull and local continuation, or [native session mobility](../guides/session-mobility.md)
+pull and local resume, or [native session mobility](../guides/session-mobility.md)
 for interactive moves within one bounded execution. The
 [home configuration reference](../../cmd/sproozi/README.md) describes private files,
 images, gateway credentials and remote profiles.
 
-## Remote work and local continuation
+## Remote work and local resume
 
 | Command | Purpose |
 | --- | --- |
@@ -31,9 +30,14 @@ images, gateway credentials and remote profiles.
 | `status` | Inspect one session by its stable session UUID. |
 | `pull` | Claim a stopped remote session and import its conversation and Git workspace. This does not start an agent. |
 | `resume` | Start a new local execution of retained work with fresh permissions. It attaches the terminal unless `--detach` is selected. |
-| `stop` | Stop local work and retain its supported state for later continuation. |
+| `stop` | Stop local work and retain its supported state for later resume. |
 | `cancel` | Cancel an execution, including unfinished work that cannot stop gracefully. |
 | `recover` | Continue a journaled operation after an uncertain response or interruption. |
+
+The harness also has a native conversation UUID. It is separate from Sproozi's
+session and execution IDs. See [core concepts](../explanations/core-concepts.md)
+and [Projects and workspace revisions](projects-and-revisions.md) for the basic
+model and exact-commit launches.
 
 ## Interactive sessions and movement
 
@@ -45,7 +49,7 @@ client commands accept the configuration and socket selectors described below.
 Detaching the terminal does not stop the daemon or agent. Running a container on
 your laptop still requires the laptop and Docker engine to remain available.
 Follow [session mobility](../guides/session-mobility.md) for the complete setup,
-commands, supported client versions and movement limits.
+commands, supported clients and movement limits.
 
 ## Select the owner
 
@@ -100,7 +104,7 @@ execution and cannot affect a later resume.
 | Public field | Meaning |
 | --- | --- |
 | `id` | Durable session UUID and operand for subsequent session commands. |
-| `executionId` | Current or last retained bounded execution UUID. Initially it can equal `id`; a fresh continuation gets another execution. |
+| `executionId` | Current or last retained bounded execution UUID. Initially it can equal `id`; a later resume gets another execution. |
 | `allocationId` | Current or last retained visit allocation, distinct from the execution envelope. |
 | `incarnation` | Backend `executionId` and immutable `resourceUid` for the exact physical writer. The nested backend ID is distinct from the top-level bounded execution ID. These opaque fields do not establish stopped state by themselves. |
 | `threadId` | Retained native conversation UUID for the selected harness. It is not a session command operand or gateway credential. |
@@ -135,8 +139,8 @@ Here engineering has an empty successful catalogue; home could not be queried.
 An unavailable source does not establish an empty catalogue or an absent writer.
 Successful rows survive another source's failure. Discovery can exit successfully
 with unavailable sources, so inspect the JSON as well as the command exit status.
-`truncated: true` means the
-source or row bound omitted results. A remote `home-owned` mirror and its local
+`truncated: true` means a source or row limit omitted results. A remote
+`home-owned` mirror and its local
 import remain separate rows labelled by catalogue; matching session IDs do not
 merge their provenance.
 

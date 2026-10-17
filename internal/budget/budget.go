@@ -107,7 +107,11 @@ func (r *Reservation) ReservedUnits() int64 {
 	return r.ledger.units
 }
 
-type Tracker struct{ ledger Ledger }
+type Tracker struct {
+	ledger         Ledger
+	requests       sync.Mutex
+	activeRequests map[string]*requestSlot
+}
 
 func NewTracker() *Tracker { return NewTrackerWithLedger(NewMemoryLedger()) }
 func NewTrackerWithLedger(ledger Ledger) *Tracker {

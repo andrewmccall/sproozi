@@ -124,10 +124,10 @@ func artifactKind(t *testing.T, kind harness.NativeKind) ([]byte, string) {
 	} else {
 		userID, assistantID := "12345678-1234-1234-1234-123456789abc", "22345678-1234-1234-1234-123456789abc"
 		user, _ := json.Marshal(map[string]any{fixtureTypeKey: "user", "sessionId": testThread,
-			"version": harness.ClaudeSessionVersion, "uuid": userID, "parentUuid": nil, "isSidechain": false,
+			"version": "2.1.27", "uuid": userID, "parentUuid": nil, "isSidechain": false,
 			"cwd": repo, "message": map[string]any{"role": "user", "content": "Fixture question"}})
 		assistant, _ := json.Marshal(map[string]any{fixtureTypeKey: "assistant", "sessionId": testThread,
-			"version": harness.ClaudeSessionVersion, "uuid": assistantID, "parentUuid": userID, "isSidechain": false,
+			"version": "2.1.27", "uuid": assistantID, "parentUuid": userID, "isSidechain": false,
 			"cwd": repo, "message": map[string]any{"role": "assistant",
 				"content": []map[string]any{{fixtureTypeKey: "text", "text": "Claude fixture complete"}}}})
 		path, err := harness.ClaudeProjectPath(repo, testThread)

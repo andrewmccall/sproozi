@@ -1,8 +1,8 @@
 # Webhook contract
 
-**Audience:** operators, contributors
-
-The webhook is a cluster-internal adapter that turns a signed event into one bounded `AgentRun`.
+The cluster-internal webhook converts a signed event into one `AgentRun`. The
+template and policy determine its runtime and permissions. To connect
+Alertmanager, you must supply a notification converter and HMAC signer.
 
 ## URL shape
 
@@ -25,12 +25,12 @@ http://sproozi-webhook.sproozi-system.svc.cluster.local:8083/webhook/sproozi-sys
 
 ## Operational caveats
 
-- the deployed webhook stores replay keys atomically in Kubernetes ConfigMaps in `sproozi-webhook-state`, configurable with `REPLAY_NAMESPACE`
-- records survive restarts and are shared across replicas
-- expired records are removed when the same event key is checked again; unique records have no periodic cleanup
-- replay recording happens before AgentRun creation; a creation failure can consume the event ID, so replay storage does not guarantee successful delivery
+- The webhook stores replay keys atomically in ConfigMaps in `sproozi-webhook-state`. Set `REPLAY_NAMESPACE` to use another namespace.
+- Records survive restarts and are shared across replicas
+- Expired records are removed when the same event key is checked again; unique records have no periodic cleanup
+- The webhook records the event before creating the AgentRun. A failed creation can consume the event ID. Replay protection does not guarantee delivery.
 - Alertmanager integration needs a notification converter and HMAC signer; this repository does not supply that adapter
-- for broader deployment guidance, see [Security hardening](security-hardening.md)
+- For broader deployment guidance, see [Security hardening](security-hardening.md)
 
 ## Body
 

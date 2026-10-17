@@ -1,6 +1,6 @@
 # Managed native terminal command
 
-Build this command into the pinned agent image at `/usr/local/bin/native-session`.
+Build this command into the approved agent image at `/usr/local/bin/native-session`.
 Use it as the agent container's PID 1:
 
 ```sh
@@ -25,10 +25,10 @@ It supplies these JSON fields:
 
 The selected executable and native home are fixed:
 
-| Harness | Executable | Required version | Portable native home |
-| --- | --- | --- | --- |
-| `codex` | `/usr/local/bin/codex` | 0.161.0 | `/workspace/session/codex` |
-| `claude-code` | `/usr/local/bin/claude` | 2.1.27 | `/workspace/session/claude` |
+| Harness | Executable | Portable native home |
+| --- | --- | --- |
+| `codex` | `/usr/local/bin/codex` | `/workspace/session/codex` |
+| `claude-code` | `/usr/local/bin/claude` | `/workspace/session/claude` |
 
 The workspace is `/workspace/session/workspace`. `HOME` is `/home/agent`, separate
 from portable state; Codex receives `CODEX_HOME` and Claude receives
@@ -47,7 +47,7 @@ values. Keys use dotted bare ASCII segments or double-quoted segments, supportin
 project paths and named MCP/provider settings. Whitespace outside quoted keys is
 rejected. Normalized top-level `developer_instructions` and
 `check_for_update_on_startup` remain reserved even when quoted or escaped.
-Sproozi validates this restricted key boundary; the pinned client interprets the
+Sproozi validates this restricted key boundary; the selected client interprets the
 administrator-selected TOML values.
 Claude rejects these options and receives fixed foreground Bash tools, empty MCP
 configuration, explicit fresh completion hooks and `bypassPermissions`. User and
@@ -58,10 +58,8 @@ prompt suggestions are disabled. Codex uses `--sandbox danger-full-access
 worker kernel. Both clients rely on independently enforced outer container
 confinement; see [ADR 0011](../../docs/adr/0011-native-session-compatibility-and-completion.md).
 
-Activation first observes the actual fixed executable's `--version` with the
-explicit launch environment. It requires the exact selected pin, bounds output to
-128 bytes and execution to five seconds or the original deadline. A mismatch,
-failed observation or expired deadline leaves the native launch gate closed.
+Activation uses the installed executable. Sproozi checks native state structure,
+conversation identity and completion without an exact-version allowlist.
 
 Docker starts an inert bootstrap supervisor before the gateway allocation is
 initialized:
@@ -120,7 +118,7 @@ replay survive. Reconnect replays the retained tail; it may include prior output
 The caller implements authenticated transport, terminal probe handling and
 backpressure. A stalled attachment cannot block PTY output draining.
 
-`quiesce` blocks new input immediately. For Codex, it polls the selected pinned
+`quiesce` blocks new input immediately. For Codex, it polls the selected native
 journal for a completed final turn, matching initial approved instructions and
 resolved function/custom-tool and native exec/MCP/patch activity. Partial rows,
 unknown tool calls, unresolved calls, incompatible metadata or instruction
@@ -128,7 +126,7 @@ mismatch fail closed. The first new session requires exactly one native journal.
 For Claude, it requires a matching native `Stop`, no pending foreground Bash
 tools, and a settled selected primary transcript. `UserPromptSubmit` clears
 earlier completion; accepted attachment writes after that prompt's generation
-prevent reuse of its Stop. The parser checks the exact UUID/version, primary
+prevent reuse of its Stop. The parser checks the exact UUID, primary
 chain and supported tool pairs. The observed bounded recovered 429 record clears
 the previous assistant leaf and needs a later successful assistant response.
 Other native error shapes, subagents, compaction and background/parallel work are
@@ -145,7 +143,7 @@ does not include tools that escape into other groups or sessions.
 
 Once Codex's observed turn completes, the supervisor sends native `/quit` and
 requires normal exit. Claude instead uses controlled process-group shutdown
-after its completed-turn gate; the pinned `/quit` input was not a reliable native
+after its completed-turn gate; the `/quit` input was not a reliable native
 shutdown operation. The supervisor returns the selected UUID/turn and exit,
 then exits PID 1. Forced deadline/signal stops do not establish graceful completion.
 The placement persists its accepted quiescence acknowledgement before revocation;
@@ -173,7 +171,7 @@ prove Docker/Kubernetes fencing, tool side effects or remote admission. Raw
 requests/history remain in a temporary private evidence directory; the report
 contains outcomes, census and source/binary digests.
 
-Both pinned clients also passed the separate production Docker/Kind round-trip
+Both selected clients also passed the separate production Docker/Kind round-trip
 fixture. Codex's extended proof covers real tool effects, held moves, forced
 cancellation and denials; Claude's round trip covers genuine TUI turns,
 foreground Bash, Git/ignored-file continuity and sealed Messages usage. See the

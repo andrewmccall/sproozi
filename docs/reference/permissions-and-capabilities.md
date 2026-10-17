@@ -1,8 +1,9 @@
 # Permissions and capabilities
 
-**Audience:** operators, contributors
-
-Sproozi permissions are easiest to understand from the perspective of a **capability request**, not from raw RBAC alone.
+A run requests capabilities. Policy sets their scope, and the gateway checks
+each operation. Kubernetes RBAC limits the trusted services separately. See
+[capabilities and gateways](../explanations/capabilities-and-gateways.md) for
+the model behind these checks.
 
 ## Capability matrix
 
@@ -57,10 +58,9 @@ access is not a supported path.
 - `model.inference` reservations survive gateway restarts, but output-only admission estimates can undercount total consumption; token and cost limits are not hard spending ceilings
 - for operator compensating controls, see [Security hardening](security-hardening.md)
 
-## Why capabilities are not just credentials
+## Capabilities and credentials
 
-Capabilities describe **authorized intent**, layered through containment, run
-identity, immutable requested capabilities, live policy/lifecycle checks, semantic
-authorization, and upstream-native restrictions. The sandbox does not receive
-provider credentials directly. It asks the shared gateway to perform bounded
-work on its behalf.
+A capability names an operation the run requests. It does not contain provider
+credentials or bypass other checks. The sandbox asks the gateway to perform
+approved work. The gateway checks run identity, capabilities, current policy,
+lifecycle and operation scope. Network and upstream restrictions also apply.

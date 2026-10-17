@@ -1,10 +1,8 @@
 # Home-ops demo runbook
 
-**Audience:** operators, evaluators
-
-This runbook is the planned end-to-end demo path for showing Sproozi on a real
-`home-ops` cluster. It is not a claim that this acceptance has run in the
-current checkout:
+This runbook describes a planned end-to-end test on a real `home-ops` cluster.
+It has not passed acceptance. The Alertmanager converter and signer still need
+implementation. The intended sequence is:
 
 1. build and publish Sproozi
 2. install it into `home-ops`
@@ -19,7 +17,7 @@ If the live acceptance succeeds, it will show:
 
 - Sproozi installed as a bounded control-plane service
 - a broken deployment landing through GitOps
-- Alertmanager creating an `AgentRun`
+- Alertmanager sending a notification through a converter and signer to the webhook, which creates an `AgentRun`
 - the trusted services provisioning a sandbox in `sproozi-agents`
 - the agent proposing a fix against `andrewmccall/home-ops`
 - the sandbox staying inside its RBAC, filesystem, and network bounds
@@ -38,7 +36,7 @@ You need:
 
 ## 1. Build and publish Sproozi
 
-Follow the release-artifact steps in the [home-ops playbook](home-ops-playbook.md).
+Follow the release-artifact steps in the [home-ops playbook](../../docs/guides/home-ops-playbook.md).
 Use the pinned image and generated install bundle for this scenario.
 
 ## 2. Update home-ops
@@ -85,7 +83,7 @@ In `home-ops`, add:
 
 The converter/signer is still required work. It must produce `{id,eventContext}`
 and the timestamp/signature headers in the
-[webhook contract](../reference/webhook-contract.md). A receiver URL alone is
+[webhook contract](../../docs/reference/webhook-contract.md). A receiver URL alone is
 insufficient to connect native Alertmanager notifications.
 
 Receiver target:
@@ -124,7 +122,8 @@ Expected result:
 
 ## 6. Seed the broken deployment
 
-For the cleanest story, introduce the fault **through `home-ops` GitOps**, not by patching the live cluster.
+Introduce the fault through a commit in `home-ops`, so Flux applies and records
+the change.
 
 Use a visible one-line break in `cluster/apps/sproozi/demo-workload.yaml`, for example:
 
@@ -141,7 +140,7 @@ command:
   - exit 1
 ```
 
-The first option is easier to explain on screen because `ImagePullBackOff` is obvious in `kubectl get pods`.
+The first option produces `ImagePullBackOff`, visible in `kubectl get pods`.
 
 Commit that broken change to the branch Flux reconciles.
 
@@ -179,7 +178,7 @@ What you want to see:
 
 1. the demo workload goes unhealthy
 2. Prometheus fires the rule
-3. Alertmanager calls the webhook
+3. Alertmanager sends a notification through the converter and signer
 4. the webhook creates an `AgentRun`
 5. the controller provisions a sandbox pod in `sproozi-agents`
 
@@ -191,21 +190,21 @@ Use the GitHub UI or `gh` in a separate browser window or fifth pane:
 gh pr list --repo andrewmccall/home-ops --limit 5
 ```
 
-In the PR, highlight:
+Check that:
 
 - the change is proposed against `home-ops`, not applied directly to the cluster
 - the repository target matches `AgentPolicy.githubPullRequest.repositories`
 - the fix is narrow and auditable
 - a human still reviews and merges it
 
-If you want a deterministic demo, prepare the expected good state in advance so the likely remediation is obvious:
+Record the known-good state before introducing the fault. For example:
 
 - broken state: `busybox:does-not-exist`
 - proposed fix: restore the known-good image tag
 
 ## 9. Show the sandbox is bounded
 
-This segment is important because it turns the demo from “AI that writes PRs” into “AI inside a constrained system.”
+Check filesystem, identity and network restrictions while the agent Pod is active.
 
 ### 9.1 Show the sandbox pod security context
 
@@ -233,7 +232,7 @@ kubectl exec -n sproozi-agents "$POD" -c agent -- /bin/sh -lc 'id && touch /work
 
 If your runtime image does not include a shell, skip this step and rely on the pod spec plus the run-scoped NetworkPolicy and RBAC checks below.
 
-Expected story:
+Expected results:
 
 - writing under the bounded `/workspace`, `/tmp` and `/home/agent` mounts works
 - writing under the image root filesystem fails
@@ -264,7 +263,7 @@ kubectl get networkpolicy -n sproozi-agents
 kubectl describe networkpolicy -n sproozi-agents
 ```
 
-Narrate that:
+Verify that:
 
 - the sandbox does not receive raw GitHub or OpenAI credentials
 - Kubernetes reads, model inference and PR actions go through one shared authenticated gateway
@@ -292,7 +291,7 @@ Point out:
 - the repository scope is fixed
 - the Kubernetes namespace scope is fixed
 
-## 10. Close the loop
+## 10. Check recovery
 
 After the PR is created:
 
@@ -322,11 +321,11 @@ If you want a short video or GIF, use four panes plus a browser window:
 
 Suggested narration:
 
-1. “Here is the broken GitOps deployment landing in `sproozi-demo`.”
-2. “Prometheus and Alertmanager turn that into a signed webhook event.”
-3. “Sproozi creates a bounded `AgentRun` and a sandbox in `sproozi-agents`.”
-4. “The agent proposes a PR against `home-ops` rather than mutating the cluster directly.”
-5. “The sandbox is non-root, read-only, and limited to run-scoped identity, semantic capabilities, and the shared gateway.”
+1. Show the failing workload in `sproozi-demo`.
+2. Show the Alertmanager notification and the converter's signed event.
+3. Show the resulting `AgentRun` and agent Pod.
+4. Show the proposed PR and its file scope.
+5. Show the allowed and denied operations, Pod security settings and network checks.
 
 ## Optional terminal-only capture
 
@@ -360,4 +359,4 @@ kubectl get pods -n sproozi-agents
 - keep `sproozi-agents` reserved for Sproozi-managed identities
 - use the shared inspected-TLS gateway and record actual home-ops evidence before calling this integration accepted
 - budget and replay state use Kubernetes ConfigMaps; ChatGPT refresh still requires one active gateway process
-- model reservations can undercount total usage, and interrupted provisioning can evade cleanup; see [security hardening](../reference/security-hardening.md)
+- model reservations can undercount total usage, and interrupted provisioning can evade cleanup; see [security hardening](../../docs/reference/security-hardening.md)

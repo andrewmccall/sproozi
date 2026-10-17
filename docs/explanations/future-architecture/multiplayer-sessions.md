@@ -4,20 +4,29 @@ Status: deferred
 
 ## Problem
 
-Multiple people may need to inspect an investigation and deliberately take control of its next turn.
+Several people may need to inspect an investigation and take turns controlling
+the agent.
 
 ## Desired behaviour
 
-Authenticated participants can discover permitted sessions, read bounded observations and request explicit control transfer. At every moment one trusted owner controls native input and workspace writes.
+Authenticated participants can find permitted sessions, read size-limited output
+and request control. One trusted owner controls agent input and workspace writes
+at a time.
 
-## Proposed primitives
+## Proposed parts
 
-Participant identity and role; viewer versus writer permission; control lease/epoch; retained transfer intent; bounded observation and audit.
+- Participant identity and role.
+- Separate permissions to view and control a session.
+- A control lease and version to reject stale requests.
+- Saved control-transfer requests and audit records.
 
 ## Open questions
 
-What authentication identifies a person rather than a bot installation? Which native clients support multiple viewers? How are disconnects, stale terminals and conflicting transfer requests resolved?
+How do we identify a person separately from a bot installation? Which clients
+support multiple viewers? How should disconnects, stale terminals and
+conflicting control requests work?
 
-## Non-goals and next evidence
+## Scope
 
-No shared stdin by default, implied control from membership or collaborative editor. Demonstrate two authenticated viewers and one explicit writer transfer before adding broad participation.
+Membership alone does not grant control. This proposal includes neither shared
+terminal input by default nor a collaborative editor.

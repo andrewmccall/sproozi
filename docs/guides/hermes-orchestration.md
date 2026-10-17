@@ -1,51 +1,19 @@
 # Run a persistent Hermes assistant on Kubernetes
 
 Hermes keeps conversation history, memory and schedules on a persistent volume.
-Its native MCP client delegates each approved task to a disposable Sproozi
-worker and reads its retained answer after Pod cleanup. The initial workflow
-lists Pods in `sproozi-demo`; it grants no Kubernetes mutations or GitHub writes.
+Its native MCP client submits approved tasks to disposable Sproozi workers. It
+can read a saved final answer after the worker Pod is deleted. The initial
+workflow lists Pods in `sproozi-demo`; it grants no Kubernetes mutations or
+GitHub writes.
 
-This follows the persistent stock-agent pattern in the upstream
-[Agent Sandbox Hermes example](https://agent-sandbox.sigs.k8s.io/docs/use-cases/examples/hermes-agent/).
+This guide uses disposable jobs. To save the worker conversation and workspace
+for later resume, use [Hermes with retained work](retained-work-kubernetes.md).
+
+The deployment follows the persistent-agent pattern in the upstream [Agent
+Sandbox Hermes
+example](https://agent-sandbox.sigs.k8s.io/docs/use-cases/examples/hermes-agent/).
 This release uses Sproozi's current Pod execution adapter and a separate
 coordinator Deployment. External Agent Sandbox CRDs are not required.
-
-## Try the complete stack in Kind
-
-Install Docker, Python 3, Go 1.26.6, kubectl and Kind. Docker must be running;
-the cluster and four stock clients need several GiB of memory and disk. From
-the repository root:
-
-```sh
-mkdir -p .local/verification
-curl --fail --location --silent --show-error \
-  https://raw.githubusercontent.com/projectcalico/calico/v3.30.4/manifests/calico.yaml \
-  --output .local/verification/calico-v3.30.4.yaml
-GOTOOLCHAIN=go1.26.6 \
-SPROOZI_CNI_MANIFEST="$PWD/.local/verification/calico-v3.30.4.yaml" \
-SPROOZI_CNI_SELECTOR=k8s-app=calico-node \
-make test-e2e
-```
-
-The command owns a dedicated two-node Kind cluster, builds and loads the release
-image, fixture providers and pinned stock clients, and launches the complete
-controller, TLS gateway, task service and persistent Hermes coordinator. Native
-API chat and a native scheduled job delegate real AgentRuns. The suite checks
-all four stock worker loops, denials, budgets, cancellation, deadlines, UID-bound
-replay, result retention, PVC restart and direct-network isolation. It removes
-its cluster on completion. Set `SPROOZI_PRESERVE_ON_FAILURE=1` to retain an owned
-failed cluster for investigation.
-
-The acceptance runtime sets Claude Code's supported retry count to zero for
-intentional denials. Stock OpenCode retries exhausted-budget responses, so its
-budget case uses a short run deadline and requires `TimedOut` with sandbox
-cleanup. The public runtime examples retain administrator-owned retry behavior.
-
-Evidence and image provenance remain in
-`.local/verification/orchestration-kind/`. Local fixture responses replace paid
-inference. This tests native protocols, deployment and policy behavior; it does
-not measure model quality, real billing or external bot delivery. No provider
-credentials or existing bot configuration are loaded.
 
 ## Deploy with your own model account
 
@@ -70,12 +38,13 @@ cp examples/harnesses/agentruntime-hermes.yaml .local/orchestration/agentruntime
 ```
 
 Replace `controller:latest` in the task service with the same reviewed published
-Sproozi image used by your controller. Review the digest-pinned Hermes image,
+Sproozi image used by your controller. Pull the default Hermes image with `docker pull nousresearch/hermes-agent`.
+Use its resolved `RepoDigests` value in the local worker runtime. Review the
 model selection in both runtime and coordinator, target namespace, policy
 budgets and resources. The worker example explicitly enables the native
-Kubernetes Pod-list MCP tool. The task service fixes the workflow's authority;
-chat text cannot change the runtime or policy. Keep policy retention longer
-than 65 minutes for bounded retry protection.
+Kubernetes Pod-list MCP tool. The task service fixes the workflow's template and
+capabilities. Chat text cannot change the runtime or policy. Keep policy
+retention longer than 65 minutes for bounded retry protection.
 
 Create the namespaces and workload configuration:
 
@@ -134,11 +103,10 @@ kubectl create secret generic hermes-coordinator -n sproozi-coordinators \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
 
-Combine the image's normal public roots with the task-service public CA. Set
-`HERMES_IMAGE` to the reviewed digest from the coordinator manifest:
+Combine the image's normal public roots with the task-service public CA. Use the default Hermes image:
 
 ```sh
-HERMES_IMAGE=docker.io/nousresearch/hermes-agent@sha256:9774f4f39a9bb8c2f68ce728ed5e99ddbad282163be56764afacf88ed952b784
+HERMES_IMAGE=docker.io/nousresearch/hermes-agent
 docker run --rm --entrypoint /bin/cat "$HERMES_IMAGE" /etc/ssl/certs/ca-certificates.crt \
   > .local/orchestration/ca-bundle.pem
 cat .local/orchestration/task-ca.crt >> .local/orchestration/ca-bundle.pem
@@ -151,17 +119,17 @@ kubectl rollout status deployment/sproozi-tasks -n sproozi-system --timeout=180s
 kubectl rollout status deployment/hermes-coordinator -n sproozi-coordinators --timeout=180s
 ```
 
-The coordinator lets the official image's native s6 profile supervisor own the
-gateway. `HERMES_GATEWAY_BOOTSTRAP_STATE=running` seeds first-boot state; later
-boots honor the saved state on the PVC. The container main program sleeps while
-that supervised gateway serves API requests and cron. Do not also run a foreground
+The official image's s6 profile supervisor runs the Hermes gateway.
+`HERMES_GATEWAY_BOOTSTRAP_STATE=running` seeds first-boot state; later boots
+honor the saved state on the PVC. The container main program sleeps while that
+supervised gateway serves API requests and cron. Do not also run a foreground
 `hermes gateway run`, which competes with the restored profile service.
 
 The coordinator uses the official root bootstrap to prepare the volume and drop
 to the Hermes runtime user. Its configuration is mounted read-only. It has no
 Kubernetes token or host mounts. The disposable worker bypasses that bootstrap,
 executes as UID 10000 with a read-only root, and uses only its projected gateway
-identity. These are separate trust and lifecycle responsibilities.
+identity. The coordinator and worker have separate credentials and lifetimes.
 
 ## Chat and schedules
 

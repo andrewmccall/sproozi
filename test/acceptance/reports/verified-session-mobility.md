@@ -50,7 +50,7 @@ a transcript ending at the retry cannot reuse an earlier completed leaf.
 
 ## Reproduce and assess the limits
 
-Follow the [complete isolated fixture setup](../../hack/verify/session-mobility/README.md).
+Follow the [complete isolated fixture setup](../../../hack/verify/session-mobility/README.md).
 The public `extended.py` driver exercises Codex tools, held movement, denials and
 forced cancellation. For Claude, use `claude.py verify --admin-probes` with the
 explicit dedicated kubeconfig to include both-placement denial checks. Without
@@ -64,7 +64,7 @@ The fixture does not establish paid-provider compatibility, arbitrary native
 versions, all tools or failure modes, background/subagent continuity, compacted
 histories, existing-session adoption, GUI/IDE ownership, or other platforms.
 
-The [session guide](../guides/session-mobility.md) gives the user-facing commands.
-[ADR 0010](../adr/0010-managed-session-authority-and-admission.md) records authority
-and lifecycle choices; [ADR 0011](../adr/0011-native-session-compatibility-and-completion.md)
+The [session guide](../../../docs/guides/session-mobility.md) gives the user-facing commands.
+[ADR 0010](../../../docs/adr/0010-managed-session-authority-and-admission.md) records authority
+and lifecycle choices; [ADR 0011](../../../docs/adr/0011-native-session-compatibility-and-completion.md)
 records native compatibility, completion and accepted availability costs.

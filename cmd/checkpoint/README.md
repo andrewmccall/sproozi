@@ -7,8 +7,7 @@ quota-backed storage, actual writer fencing and activation. This command does
 not infer a fence from a native journal, hook or process exit.
 
 New artifacts use version 2 with explicit `harness: codex` or `claude-code`,
-exactly one matching native component, and the workspace component. The pins are
-Codex 0.161.0 and Claude Code 2.1.27. Version 1 Codex artifacts have a separate
+exactly one matching native component, and the workspace component. Client versions do not determine compatibility. Version 1 Codex artifacts have a separate
 explicit decoder; they do not create a default client for new launches. A move
 cannot switch kind. Metadata contains `harness`, `threadId`, `turnId`, `sha256`
 and `bytes`; it describes continuity, not authority or sealed usage.
@@ -102,7 +101,7 @@ Operations default to 64 MiB and one minute; explicit bounds allow at most 1 GiB
 and ten minutes. Managed callers supply their smaller approved checkpoint limit.
 Encoded-byte limits alone do not bound Git extraction: the caller also needs
 quota-backed staging and process/resource limits. Native parsing stays within
-the pinned compatibility subset, including supported foreground tools and the
+the supported state subset, including supported foreground tools and the
 observed recovered Claude 429 shape followed by a new successful assistant leaf.
 Claude transcript inspection does not establish its live Stop acknowledgement.
 An unresolved retry cannot reuse earlier completion. Background tasks, subagents,

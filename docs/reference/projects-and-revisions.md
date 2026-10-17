@@ -1,9 +1,12 @@
 # Projects and workspace revisions
 
-Projects group retained work under administrator configuration. They reference
-independent execution templates; each configured executor still owns one fixed
-template, harness, instruction digest and placement. Use separate executors when
-projects need different templates. Existing sessions without a Project remain valid.
+A Project groups retained sessions and limits who can access them. An
+administrator configures its template, capabilities and members. Projects are
+optional; sessions without a Project remain valid.
+
+Each configured executor uses one fixed template, harness, instruction digest
+and placement. Use separate executors when Projects need different templates.
+See [core concepts](../explanations/core-concepts.md) for the session model.
 
 ## Owner configuration
 
@@ -84,11 +87,12 @@ cancel it before starting a fresh resume. Stop/cancellation recovery still fence
 and accounts without an approval. Configuration removal
 is not a storage deletion or an accounting refund.
 
-## Independent local continuation approval
+## Independent local resume approval
 
-Pull remains an inert, authenticated import. A Project association in a checkpoint
-supplies history; the home must approve the next execution itself. Add this fragment
-to the private home configuration, using the exact configured source name:
+Pull authenticates the source and imports saved work without starting an agent.
+The checkpoint records its Project association. The home must independently
+approve the next execution. Add this fragment to the private home configuration,
+using the exact configured source name:
 
 ```json
 {
@@ -107,17 +111,18 @@ to the private home configuration, using the exact configured source name:
 }
 ```
 
-These subsets use the home's current allowance ceilings. They do not copy remote
-remaining authority. Missing approval produces an actionable resume error before
-preparing a writer. An approval for a different source with the same Project name
-does not match. Project/template/repository association remains visible after local
-resume and stop; local filtering uses `sproozi sessions --executor docker --project ID`.
+These capability subsets use the home's current usage limits. They do not copy
+the remote grant or remaining allowance. Missing approval produces an actionable
+resume error before preparing a worker. An approval for a different source with
+the same Project name does not match. Project/template/repository association
+remains visible after local resume and stop; local filtering uses `sproozi
+sessions --executor docker --project ID`.
 
 ## Conversation checkpoint and Git revision
 
 Retained status exposes independent identities:
 
-- `threadId`: the pinned harness's native conversation UUID.
+- `threadId`: the harness's native conversation UUID.
 - `checkpointDigest`: SHA256 of the complete stopped conversation/workspace artifact.
 - `repositoryReference`: immutable descriptive repository identity from owner configuration.
 - `checkpointInfo.workspace.revision`: full Git HEAD captured with the selected workspace.
@@ -127,8 +132,9 @@ Retained status exposes independent identities:
 
 Local status reports the last committed checkpoint while a writer is active;
 this is not a live filesystem revision. Bounded inspection validates manifest
-metadata. Inert restore additionally verifies the actual Git objects. A configured
-fetch instruction or repository label alone does not prove an upstream checkout.
+metadata. Restore also verifies the actual Git objects before starting an agent.
+A configured fetch instruction or repository label alone does not prove an
+upstream checkout.
 
 Native resume restores the same conversation and complete supported unfinished
 workspace. To start a **fresh conversation** at the clean committed revision:
@@ -141,19 +147,21 @@ sproozi run --executor remote --project sproozi-dev --harness codex \
   --task 'Run the package checks against this recorded commit'
 ```
 
-All three source flags are required together. The source must be retained,
-exporting or home-owned with stopped/sealed evidence, accessible to the current
-principal, and have the same approved repository alias and reference as the target.
-The full requested revision must equal that source checkpoint's recorded HEAD;
-a branch, short commit, arbitrary ancestor or moving ref is rejected.
+All three source flags are required together. The source must be in `retained`,
+`exporting` or `home-owned` state, with confirmed stop and finalized usage
+records. The current principal must have access. Its approved repository alias
+and reference must match the target. The full requested revision must equal that
+source checkpoint's recorded HEAD; a branch, short commit, arbitrary ancestor or
+moving ref is rejected.
 
-The owner reconstructs a clean detached checkout from retained objects in private
-staging and durably records its input before preparing the destination. Dirty and
+The owner creates a clean detached checkout from saved Git objects in private
+staging. It saves the input record before preparing the destination. Dirty and
 untracked changes and native conversation history are excluded from this fresh
 workspace-only execution. No network fetch or Git service is needed. The source
-checkpoint, receipt and ownership remain unchanged, even for unpublished commits.
-The destination has a fresh native UUID, allocation, deadline and independent grant.
-This workflow neither publishes commits nor gives permission to push them.
+checkpoint, receipt and ownership remain unchanged, even for unpublished
+commits. The destination has a fresh native UUID, allocation, deadline and
+independent grant. This workflow neither publishes commits nor gives permission
+to push them.
 
 See [ADR 0013](../adr/0013-configured-projects-and-workspace-revisions.md) for
 alternatives, accepted costs and revisit conditions, and the

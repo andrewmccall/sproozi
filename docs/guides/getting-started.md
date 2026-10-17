@@ -4,6 +4,9 @@ Sproozi runs an agent in a disposable Kubernetes Pod. The agent reaches approved
 services through a shared gateway, which checks the run's identity and policy.
 Provider credentials stay in the gateway.
 
+If you want an introduction to the resource names, read [core
+concepts](../explanations/core-concepts.md).
+
 Choose the path you want:
 
 - **Explore locally:** follow the Kind demo below. Codex investigates a broken
@@ -365,42 +368,3 @@ These commands keep the local configuration, image cache and GitHub repository.
 Close the demo PRs and remove the disposable repository and App installation
 through GitHub when you no longer need them. Before another local demo, restart
 the registry with `docker start sproozi-demo-registry`.
-
-## Repeatable verification for contributors
-
-The repository includes the
-[`verify-sproozi` skill](../../.agents/skills/verify-sproozi/SKILL.md) for checking
-this Kind guide. After configuring your demo environment, run:
-
-```sh
-python3 hack/verify/quickstart.py doctor --env-file "$PWD/.local/demo.env"
-python3 hack/verify/quickstart.py demo --env-file "$PWD/.local/demo.env"
-```
-
-The helper runs the same `make demo` path against an isolated copy of the current
-checkout, so deployment-time manifest edits stay out of your working tree. It
-retains the command log, source and guide hashes, observed CRDs and live report,
-then removes its owned cluster and scratch files. This command consumes model
-usage and creates a real branch and PR. Interactive App creation and sign-in
-remain the setup steps above.
-
-Add `--keep-cluster` to inspect a passing demo. Set
-`SPROOZI_QUICKSTART_EVIDENCE` to the exact directory printed by the helper, then:
-
-```sh
-export KUBECONFIG="$SPROOZI_QUICKSTART_EVIDENCE/cluster.kubeconfig"
-python3 hack/verify/quickstart.py doctor --evidence "$SPROOZI_QUICKSTART_EVIDENCE"
-```
-
-Use the exploration commands in step 6. Finish with:
-
-```sh
-python3 hack/verify/quickstart.py cleanup "$SPROOZI_QUICKSTART_EVIDENCE"
-unset KUBECONFIG
-```
-
-Only one helper invocation can drive the shared local Docker images and registry
-at a time. A retained demo holds its lock until cleanup. For ChatGPT mode, use a
-newly authorised session that no other gateway is refreshing. Keep the generated
-proof under `.local`; keep the skill and its feature map current with
-`/maintain-verification-skill`.

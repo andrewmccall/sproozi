@@ -5,6 +5,10 @@ Date: 2026-10-10
 Reconciled: 2026-10-12
 Implementation: selected Codex and Claude checkpoints verified through both placements
 
+Current compatibility policy: [ADR 0015](0015-default-clients-and-native-tool-schemas.md)
+replaces exact client-version selection and the combined MCP discovery schema.
+Other decisions in this record remain in effect.
+
 ## Problem and constraints
 
 The accepted [session outcome](0004-portable-sessions-and-bounded-executions.md)

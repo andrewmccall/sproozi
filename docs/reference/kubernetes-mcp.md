@@ -1,17 +1,12 @@
 # Kubernetes MCP delivery
 
-**Status:** one native semantic tool is implemented. Stock Codex used it against
-real Kubernetes in dedicated Kind with Calico on 6 October 2026. The
-[recorded acceptance](../demos/verified-mcp-demo.md) covers allowed tool use,
-network and scope denials, cancellation and scoped cleanup. Local integration
-tests also use the official MCP client over TLS CONNECT with a fake upstream.
-
 The shared gateway serves Streamable HTTP MCP at
 `https://kubernetes.default.svc/mcp`. It exposes `kubernetes_list_pods` with one
 required string argument, `namespace`. The tool maps to a fixed Kubernetes GET
 for Pods in that namespace with `limit=100`. The result is a JSON PodList in MCP
-text content, including Kubernetes pagination metadata when more Pods remain.
-This first tool has no continuation, watch, log, mutation or arbitrary URL input.
+text content. It includes Kubernetes pagination metadata when more Pods remain,
+but this tool cannot request another page. It accepts no pagination token. It
+also supports no watches, logs, mutations or arbitrary URLs.
 
 The tool delivers the existing `kubernetes.read` capability at the Semantic tier.
 The run must request that capability, current policy must allow it, and policy
@@ -71,53 +66,3 @@ start its investigation with the Pod-list tool. It requires the demo's existing
 `kubernetes.read` grant. Review and apply the rendered manifest only in the
 isolated demo cluster. `required=true` makes a failed MCP startup fail the launch.
 The default demo renderer remains unchanged.
-
-## Verification
-
-```sh
-make verify-mcp
-```
-
-The tests exercise discovery, allowed calls, forged arguments and tools,
-namespace/resource/capability denials, shared REST/MCP budgeting, separate run
-budgets, oversized inputs and outputs, redacted upstream errors, and revocation
-of both existing clients and in-flight upstream work. The same gate runs offline
-verifier checks for partial creation, ambiguous create timeouts, cleanup failures,
-redacted reports and Secret references in every Pod container and volume source.
-These checks make no model requests.
-
-For a caller-provisioned, dedicated multi-node Kind cluster, render the bounded
-fixture and run the live gate. The fixture renderer requires PyYAML. Supply a
-digest-pinned stock Codex image with curl and the selected model-auth mode.
-The cluster needs the current controller/gateway, `config/agent-rbac`, Calico,
-gateway TLS and controller/sandbox trust ConfigMaps, and valid model credentials
-in the trusted namespace. See the [manual setup](../guides/manual-pr-demo.md)
-and [model authentication](../guides/model-provider-auth.md) for those inputs.
-The gate expects no competing active runs. It does not provision a cluster or
-credentials and does not create a GitHub PR.
-
-```sh
-python3 hack/verify/render-mcp-fixture.py \
-  --codex-image "$CODEX_IMAGE" --model-auth chatgpt > /tmp/sproozi-mcp-proof.yaml
-kubectl --kubeconfig "$MCP_KUBECONFIG" apply -f /tmp/sproozi-mcp-proof.yaml
-python3 hack/verify/mcp-live.py \
-  --kubeconfig "$MCP_KUBECONFIG" --cluster "$MCP_KIND_CLUSTER" \
-  --report .local/verification/mcp-live.json
-```
-
-The fixture grants only `kubernetes.read` and `model.inference` and scopes Pod
-reads to `sproozi-demo`. Its stock CLI prints JSON tool events and an exit marker,
-then holds the Pod for verifier probes. The gate requires successful CLI exit
-and a completed tool result containing the real demo Pod. It then verifies
-namespace and unknown-tool denials, direct service/node API timeouts, cancellation,
-stale-token denial from an independently isolated witness and removal of
-run-labelled invocation resources. It deletes its own Run and witness and
-writes a redacted report. The fixture resources and cluster remain caller-owned.
-
-This proves normal provisioned-run cancellation, not recovery from lost
-provisioning status or automatic deletion of durable budget state. Observed
-provider usage does not establish hard spending ceilings. Historical SRE
-acceptance predates this MCP route. Configured remote MCP has separate
-[deployed fixture evidence](../demos/verified-mcp-demo.md#configured-remote-mcp-acceptance).
-Managed stdio servers and Docker execution remain unverified. Additional stock
-harnesses have a separate [full Kind gate](../guides/hermes-orchestration.md).

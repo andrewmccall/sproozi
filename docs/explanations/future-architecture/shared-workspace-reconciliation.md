@@ -4,20 +4,29 @@ Status: deferred
 
 ## Problem
 
-Independent agents working on a project can propose incompatible changes to its ordinary Git repository.
+Agents working on the same Project can propose conflicting Git changes.
 
 ## Desired behaviour
 
-Each agent works in its own workspace. Proposed commits retain source revision and execution lineage. A deliberate reconciliation step detects conflicts and records the selected merged result.
+Each agent uses a separate workspace. Proposed commits record their base
+revision and source execution. A review step detects conflicts and records the
+chosen merged result.
 
-## Proposed primitives
+## Proposed parts
 
-Independent Git checkout; immutable base and proposed commit; change owner; reconciliation intent/result; separately authorised publication.
+- Separate Git checkouts.
+- Immutable base and proposed commits.
+- An owner for each change.
+- Saved merge intent and result.
+- Separate permission to publish the result.
 
 ## Open questions
 
-Who chooses between conflicting proposals? Which checks must pass before publication? Can ordinary branches and pull requests contain the first workflow? How are abandoned proposals retained?
+Who chooses between conflicting proposals? Which checks must pass before
+publication? Can ordinary branches and pull requests meet the first use case?
+How long should abandoned proposals remain available?
 
-## Non-goals and next evidence
+## Scope
 
-No concurrent writes to one directory, proprietary Git service or automatic conflict resolution. First reconcile two isolated proposals with a visible conflict.
+This proposal excludes concurrent writes to one directory, a proprietary Git
+service and automatic conflict resolution.

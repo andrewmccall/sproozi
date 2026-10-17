@@ -75,8 +75,6 @@ def hints_from(path):
         raise ValueError("Fixture model units must be finite")
     if hints.get("providerToken") != "tui-placeholder" or hints.get("providerURLFromKind") != UPSTREAM:
         raise ValueError("Only the public placeholder HTTPS fixture upstream is supported")
-    if hints.get("nativeVersion") != "0.161.0":
-        raise ValueError("Fixture requires the approved native version")
     if not re.fullmatch(r"[1-9][0-9]*[smh]", hints["maxDuration"]):
         raise ValueError("Fixture duration must be a positive whole seconds, minutes or hours value")
     number, unit = int(hints["maxDuration"][:-1]), hints["maxDuration"][-1]

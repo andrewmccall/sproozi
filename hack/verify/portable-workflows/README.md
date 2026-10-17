@@ -1,9 +1,9 @@
 # Verify retained remote work
 
 This fixture drives the production task owner, managed Kubernetes placement,
-stock Codex 0.161.0, home daemon and Docker continuation. It uses the existing
+stock Codex, home daemon and Docker continuation. It uses the existing
 public deterministic TLS provider. The default authenticated MCP caller follows
-Hermes's native client protocol. The Kubernetes caller below runs the pinned stock
+Hermes's native client protocol. The Kubernetes caller below runs the stock
 Hermes itself. Neither mode establishes a paid-model software contribution.
 Personal infrastructure is never selected.
 
@@ -47,10 +47,10 @@ retries the original submission instead of manufacturing a replacement.
 
 Prepare the same dedicated mobility cluster, images, gateway and Codex fixture.
 Use a fresh fixture directory and do not start the host profile or home. Pull the
-pinned Hermes image and include it when importing images:
+default Hermes image and include it when importing images:
 
 ```sh
-HERMES_IMAGE=docker.io/nousresearch/hermes-agent@sha256:9774f4f39a9bb8c2f68ce728ed5e99ddbad282163be56764afacf88ed952b784
+HERMES_IMAGE=docker.io/nousresearch/hermes-agent
 docker pull "$HERMES_IMAGE"
 docker tag "$HERMES_IMAGE" docker.io/sproozi-kind/hermes:acceptance
 python3 hack/verify/session-mobility/images.py \

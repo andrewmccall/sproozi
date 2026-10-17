@@ -57,7 +57,7 @@ func TestCodexIncompleteAndIncompatibleStateRejected(t *testing.T) {
 	for _, change := range []func(*CodexState){
 		func(s *CodexState) { s.Path = "sessions/x" },
 		func(s *CodexState) { s.Path = "../" + s.Path },
-		func(s *CodexState) { s.Rollout = []byte(strings.ReplaceAll(string(s.Rollout), "0.161.0", "0.162.0")) },
+		func(s *CodexState) { s.Rollout = []byte(strings.ReplaceAll(string(s.Rollout), "0.161.0", "")) },
 		func(s *CodexState) {
 			s.Rollout = append(s.Rollout, []byte(`{"type":"event_msg","payload":{"type":"task_started","turn_id":"pending"}}`)...)
 		},
@@ -97,5 +97,18 @@ func TestCodexRestoreRejectsSymlink(t *testing.T) {
 	files, err := os.ReadDir(outside)
 	if err != nil || len(files) != 0 {
 		t.Fatalf("outside directory changed: %v, %v", files, err)
+	}
+}
+
+func TestCodexRestoreUsesStateContractNotClientVersion(t *testing.T) {
+	state := completedNativeState()
+	state.Rollout = []byte(strings.ReplaceAll(string(state.Rollout), "0.161.0", "upstream-default"))
+	home := t.TempDir()
+	if err := RestoreCodexState(home, state, 8192); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := CaptureCodexState(home, nativeThread, 8192)
+	if err != nil || string(restored.Rollout) != string(state.Rollout) {
+		t.Fatalf("changed client version lost conversation: %v", err)
 	}
 }

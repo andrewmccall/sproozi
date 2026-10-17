@@ -13,7 +13,7 @@ to 4096 bytes; retain an unwritten suffix when `ErrInputBusy` is returned. Termi
 size changes propagate to the native PTY.
 
 `GateInput` serializes with admitted writes and rejects subsequent client input
-without interrupting the active turn. The caller observes the pinned harness's
+without interrupting the active turn. The caller observes the harness's
 completed turn and resolves pending tools before calling
 `QuitAfterCompletedTurn`. That method clears an unsubmitted composer draft and
 sends native `/quit` with a distinct Enter key event. It does not parse terminal

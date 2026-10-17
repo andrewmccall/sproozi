@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build real pinned clients and retain the canonical Kind containerd digests."""
+"""Build default clients and retain the canonical Kind containerd digests."""
 import hashlib
 import json
 import os
@@ -160,6 +160,8 @@ def main():
             run(
                 "docker",
                 "build",
+                "--pull",
+                "--no-cache",
                 "-t",
                 tag,
                 "-f",
@@ -170,25 +172,14 @@ def main():
             )
         require_unchanged_sources(source_snapshot)
         images[name] = load(tag)
-    # Official coordinator and bounded worker use the same pinned native release.
-    hermes = "nousresearch/hermes-agent@sha256:9774f4f39a9bb8c2f68ce728ed5e99ddbad282163be56764afacf88ed952b784"
+    # Official coordinator and bounded worker use the same default upstream image.
+    hermes = "nousresearch/hermes-agent"
     run("docker", "pull", hermes)
     run("docker", "tag", hermes, "docker.io/sproozi-kind/hermes:acceptance")
     images["hermes"] = load("docker.io/sproozi-kind/hermes:acceptance")
-    images["hermes"].update(
-        {
-            "upstreamImage": hermes,
-            "upstreamVersion": "0.21.6",
-            "sourceCommit": "818c13be1dc4fd28987e1e881a9408224afd4535",
-        }
-    )
+    images["hermes"]["upstreamImage"] = hermes
     images["buildSourceSHA256"] = source_snapshot
-    images["versions"] = {
-        "codex": "0.161.0",
-        "claude-code": "2.1.27",
-        "opencode": "1.15.1",
-        "hermes": "0.21.6",
-    }
+    images["versions"] = {}
     observed = {}
     for name, binary in [
         ("codex", "codex"),
@@ -208,9 +199,10 @@ def main():
             "--version",
         )
         match = re.search(r"\b(\d+\.\d+\.\d+)\b", version)
-        if not match or match.group(1) != images["versions"][name]:
+        if not match:
             raise RuntimeError("Unexpected native " + name + " version: " + version)
         observed[name] = version
+        images["versions"][name] = match.group(1)
     stamp = json.loads(
         output(
             "docker",
@@ -237,24 +229,15 @@ def main():
             "/opt/hermes/install-stamp.json",
         )
     )
-    if (
-        install_stamp["baseVersion"] != images["versions"]["hermes"]
-        or install_stamp["displayVersion"] != images["versions"]["hermes"]
-        or install_stamp["commit"] != images["hermes"]["sourceCommit"]
-        or stamp["revision"] != install_stamp["commit"]
-    ):
-        raise RuntimeError(
-            "Official Hermes install stamp disagrees with selected release"
-        )
-    # The image-provenance marker declares 0.0.0 in this upstream image; retain
-    # that observed metadata without treating it as the CLI release version.
+    images["versions"]["hermes"] = install_stamp["displayVersion"]
+    images["hermes"]["sourceCommit"] = install_stamp["commit"]
     observed["hermes"] = {"installStamp": install_stamp, "imageProvenance": stamp}
     images["observedVersions"] = observed
     require_unchanged_sources(source_snapshot)
     images["sourceSnapshotVerified"] = True
     (OUT / "images.json").write_text(json.dumps(images, indent=2) + "\n")
     print(
-        "Built and loaded pinned acceptance images; provenance: "
+        "Built and loaded default upstream clients; provenance: "
         + str(OUT / "images.json")
     )
 

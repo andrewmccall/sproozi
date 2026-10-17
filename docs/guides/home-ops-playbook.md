@@ -1,8 +1,9 @@
 # Home-ops playbook
 
-**Audience:** operators
-
-This guide is the concrete playbook for adding Sproozi to [`andrewmccall/home-ops`](https://github.com/andrewmccall/home-ops). It stays separate from the core docs so the product model is not coupled to one personal GitOps repository.
+This guide describes a planned Sproozi installation in
+[`andrewmccall/home-ops`](https://github.com/andrewmccall/home-ops). It uses
+that repository's Flux layout. For a working first installation, start with
+[Install on Kubernetes](install-kubernetes.md).
 
 This is a planned integration. The recorded manual Kind runs did not exercise
 Alertmanager delivery, a home-ops PR or Flux recovery.
@@ -18,13 +19,13 @@ You will add:
 
 ## Expected home-ops layout
 
-Use these paths as the concrete playbook shape:
+Use these paths in the home-ops repository:
 
 | Path | Purpose |
 | --- | --- |
 | `cluster/apps/sproozi/` | Sproozi app bundle, namespaces, CRs, ConfigMaps, and SOPS-managed Secrets |
 | `cluster/apps/monitoring/alerts/prometheus-rules.yaml` | demo alert rule |
-| `cluster/apps/monitoring/alerts/alertmanager-config.yaml` | route to the Sproozi webhook receiver |
+| `cluster/apps/monitoring/alerts/alertmanager-config.yaml` | Route to a converter and signer that calls the Sproozi webhook. |
 
 ## 1. Publish a pinned Sproozi release artifact
 
@@ -91,8 +92,8 @@ The first `home-ops` template should:
 
 ## 5. Add the broken demo workload
 
-Place the workload under `cluster/apps/sproozi/` in `sproozi-demo`. The verified
-manual scenario uses `exit 1`, which produces `CrashLoopBackOff`. An invalid image
+Place the workload under `cluster/apps/sproozi/` in `sproozi-demo`. The
+manual demo uses `exit 1`, which produces `CrashLoopBackOff`. An invalid image
 tag instead produces `ImagePullBackOff`.
 
 Adapt trusted template instructions to the home-ops path
@@ -111,8 +112,7 @@ Keep monitoring-owned changes in `cluster/apps/monitoring/alerts/`:
 The adapter must translate Alertmanager notifications into `{id,eventContext}`
 and sign the timestamp plus exact request bytes with the per-template HMAC key.
 This repository implements the [signed receiver contract](../reference/webhook-contract.md),
-but supplies no Alertmanager converter/signer. That adapter and full alert-to-PR
-acceptance remain to be completed.
+but supplies no Alertmanager converter/signer. Implement that adapter before connecting Alertmanager to this workflow.
 
 Make sure the namespace hosting the sender is allowed by the webhook NetworkPolicy label contract:
 
@@ -122,7 +122,7 @@ metadata:
     sproozi.com/webhook-client: enabled
 ```
 
-## 7. Reconcile and observe the proof path
+## 7. Reconcile and observe the workflow
 
 ```mermaid
 sequenceDiagram
@@ -158,9 +158,7 @@ kubectl get pods -n sproozi-agents
 
 ## Scope of this playbook
 
-This guide is intentionally concrete about `home-ops` repository layout. The
-product-wide object model, shared-gateway design, and capability semantics stay
-in the core docs so they remain reusable outside that one GitOps repo. The
-layout remains planned until a report from the actual home-ops integration proves
-signed alert delivery, the scoped PR, boundary denials and cleanup. Record Flux
-recovery separately after human review and merge.
+The integration is planned. After the agent proposes a PR, review and merge it
+before Flux applies the change. The [core
+concepts](../explanations/core-concepts.md) apply outside this repository
+layout.

@@ -10,18 +10,16 @@ FILE --operation UUID`, followed by `sessions` and `status`. A configured remote
 owner accepts these without a running home daemon. Start the home for `pull
 SESSION_ID --from NAME`, `resume SESSION_ID` and `stop SESSION_ID`. Product
 commands accept `--config FILE`, defaulting to the platform user configuration
-directory's `sproozi/config.json`. All client verbs, including `start`, `attach`
-and `move`, share config defaults, an optional `--socket` override and positional
-session UUID or `--id`. A remote `--executor` never falls back home; local controls
-use `--executor docker` or omit it. `sessions` emits one labelled catalogue with
-per-owner availability and explicit truncation. Keep operation UUIDs stable on
-retries. See the [command and output reference](../../docs/reference/session-commands.md)
-and the complete
+directory's `sproozi/config.json`. All client commands share configuration and
+session selectors. A remote `--executor` never falls back home; local controls
+use `--executor docker` or omit it. Keep operation UUIDs stable on retries.
+See the [command and output reference](../../docs/reference/session-commands.md)
+for socket overrides, session lists and IDs, and the complete
 [retained-work setup](../../docs/guides/portable-workflows.md).
 
 For the local and remote setup sequence, see
 [Move a native session between local and remote execution](../../docs/guides/session-mobility.md).
-Both pinned clients have passed production Docker-to-Kubernetes-to-Docker round
+Both selected clients have passed production Docker-to-Kubernetes-to-Docker round
 trips. Codex also passed the extended tool, held-move, forced-cancellation and
 denial checks. Claude's round trip covers foreground Bash, workspace continuity
 and sealed Messages usage; it does not imply the same extended failure coverage.
@@ -34,7 +32,7 @@ Build the executable:
 go build -o bin/sproozi ./cmd/sproozi
 ```
 
-Prepare the pinned native/helper/anchor images and the administrator-created bridge
+Prepare the selected native/helper/anchor images and the administrator-created bridge
 network used by `internal/runtime/docker`. The gateway IPv4 must be reachable from
 that network, including across Docker Desktop's VM boundary. The anchor permits
 worker traffic only to that fixed IPv4 and port. Image IDs are immutable Docker
@@ -124,8 +122,7 @@ remote gateway's administrator-owned upstream TLS configuration.
 
 Set `local.harness` explicitly to `codex` or `claude-code`; it must match every
 remote profile and runtime used by this session. There is no default or client
-switch during a move. The compatibility pins are Codex 0.161.0 and Claude Code
-2.1.27. For Claude, use an approved Anthropic model/provider URL, omit
+switch during a move. Client packages use upstream defaults without version selectors. For Claude, use an approved Anthropic model/provider URL, omit
 `nativeOptions`, and cover `api.anthropic.com` in the inspection certificate.
 The managed Claude launch fixes its tools, permissions and completion hooks;
 portable transcripts cannot replace them. Foreground Bash is supported;
@@ -133,7 +130,9 @@ background/parallel tasks and imported personal settings are excluded. See
 [ADR 0011](../../docs/adr/0011-native-session-compatibility-and-completion.md).
 The selected Claude transcript accepts the observed bounded 429 retry shape only
 when a later successful assistant response establishes a new leaf. Retry messages
-remain opaque and cannot grant access or supply usage. Unsupported native error
+remain opaque and cannot grant access or supply usage. Native context and prompt
+snapshots are also history; [ADR 0015](../../docs/adr/0015-default-clients-and-native-tool-schemas.md)
+describes the supported records. Unsupported native error
 records, subagents, compaction and broad long-history portability are unproved.
 
 For Codex, named MCP is optional: configure `gateway.mcpAuthority` as an exact DNS authority
@@ -147,10 +146,10 @@ stock Codex MCP client configuration; checkpoint contents supply none of it.
 Every remote profile must use the same checkpoint byte limit. Its separate profile
 service pins its own approved template, capabilities, ceilings and maximum
 duration. The home service holds only that profile's CA and bearer token, never
-Kubernetes credentials. Keep instructions and the pinned native version identical
+Kubernetes credentials. Keep approved instructions identical
 through every visit: native resume retains the original developer instruction
 block. Claude receives the approved instructions through its fresh managed launch;
-its transcript cannot supply instructions, settings or permissions. Restart the home service with the same profile while allocations remain
+its transcript cannot authorize instructions, settings or permissions. Restart the home service with the same profile while allocations remain
 active; changed placement or authority configuration fails closed against
 retained records.
 
@@ -259,7 +258,7 @@ import and move, conservative unknown usage, cancellation and partial terminal
 writes. Isolated journal tests use synthetic native checkpoints; native adapter
 tests also validate captured stock-client transcripts. Live Docker/Kind round-trip acceptance must use the stock-client verifier
 and genuine terminal/native evidence; compiling this command is not that proof.
-The live fixture passed for stock Codex 0.161.0 and Claude Code 2.1.27, with the
+The live fixture passed for stock Codex and Claude Code, with the
 same native UUID and original deadline across placements. Codex's extended proof
 includes real tool effects, held moves, forced cancellation, denial probes and
 accounting replay. Claude's proof includes three genuine TUI turns, a real Bash

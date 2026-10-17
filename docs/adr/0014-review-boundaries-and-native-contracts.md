@@ -131,7 +131,7 @@ Revisit AHP when a real external host/GUI client is in scope; require an actual
 SDK client round trip, negotiated byte extensions, uncertain-delivery handling,
 exclusive input, bounded replay, incarnation revalidation and detach/move/cancel
 acceptance. Revisit ACP with a requested structured interaction and proof of
-native UUID/checkpoint continuity for each pinned adapter. Revisit template and
+native UUID/checkpoint continuity for each supported adapter. Revisit template and
 gateway limits with a concrete supported workload and measured isolated tests,
 without weakening unknown-state containment or physical fencing.
 

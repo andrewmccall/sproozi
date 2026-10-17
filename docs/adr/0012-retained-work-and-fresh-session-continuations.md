@@ -1,9 +1,9 @@
-# Retained remote work and freshly authorized session continuations
+# Retained remote work and local session resume with fresh permissions
 
 Status: accepted
 Date: 2026-10-12
 Reconciled: 2026-10-13
-Implementation: retained Codex work and fresh continuation verified; stock Hermes dispatch verified
+Implementation: retained Codex work and local resume verified; stock Hermes dispatch verified
 
 ## Problem and constraints
 
@@ -45,17 +45,18 @@ reply never reclaims ownership. The registered principal represents one trusted
 home installation; sharing its credential between independent homes is outside
 this ownership model.
 
-A local continuation gets a fresh internal execution identity, allocation,
-deadline and current administrator-approved grant. The product session ID and
-genuine native UUID remain stable. Retain prior execution records and accounting
-receipts unchanged. Reuse the initial home journal with a checkpoint input; only
-that new execution's real first stop enters the existing move coordinator. No
-synthetic receipt, renewed old ledger or compatibility layer is needed.
+Local resume starts a new execution with its own identity, allocation and
+deadline. It uses a current administrator-approved grant. The product session ID
+and genuine native UUID remain stable. Retain prior execution records and
+accounting receipts unchanged. Reuse the initial home journal with a checkpoint
+input; only that new execution's real first stop enters the existing move
+coordinator. No synthetic receipt, renewed old ledger or compatibility layer is
+needed.
 
 Bind each product resume, move, stop and cancellation operation to its original
 internal execution and intent. A delayed request against the stable product ID
-cannot acquire a later continuation. Even an idle stop acknowledgement retains
-its operation binding, so replay cannot stop a writer created afterward.
+cannot acquire a later execution. Even an idle stop acknowledgement retains its
+operation binding, so replay cannot stop a writer created afterward.
 
 The claimed home can request later Kubernetes visits through the existing fixed
 profile. Its live-move coordinator owns those visits; the remote task catalogue
@@ -93,7 +94,7 @@ would add another public API for this single-owner workflow. Protected owner
 files reuse the current placement topology with less new machinery.
 
 A permanent cluster lease for every local activation would avoid handoff, but
-would make local continuation depend on cluster reachability. Timeout-based lease
+would make local resume depend on cluster reachability. Timeout-based lease
 recovery cannot establish physical writer termination. Explicit one-way transfer
 supports offline local execution and preserves conservative unknown states.
 
@@ -107,13 +108,13 @@ managed placement pipeline rather than give callers two incompatible lifecycles.
 The remote owner needs private durable storage and a single running process.
 Catalogue and ownership history have bounded retention and require operator
 management; deleting those journals is an administrative reset, not recovery.
-The home catalogue bounds retained artifacts and journals by `retainedBytes`
-and file count under one storage lock. Fresh continuations also reserve existing
+The home catalogue bounds retained artifacts and journals by `retainedBytes` and
+file count under one storage lock. New executions also reserve existing
 initial-execution storage before preparation. Capacity rejection does not claim
 a source or admit a new writer; recovery retries the original operation after
-the operator restores capacity.
-One-way claim is sufficient for the first workflow. Returning ownership, shared
-homes, federation, HA, session forks and multiplayer remain separate work.
+the operator restores capacity. One-way claim is sufficient for the first
+workflow. Returning ownership, shared homes, federation, HA, session forks and
+multiplayer remain separate work.
 
 Native state retains its original instruction compatibility requirement. New
 authorization changes grants and environment, not a pinned Codex conversation's
@@ -122,11 +123,12 @@ fail closed. Unknown writer stop or missing usage prevents export and new writer
 admission. Interrupted preparation can also retain conservative accounting even
 when no final answer was produced.
 
-GitHub branches remain owned by the current execution UID. A local continuation
-can preserve the old branch as history and create a new publishing branch under
-`sproozi/$SPROOZI_EXECUTION_UID/`. Retaining a branch does not grant permission to
-overwrite another execution's published branch. Kubernetes remains read-only;
-reviewable GitOps changes use separately approved GitHub access.
+GitHub branches remain owned by the current execution UID. A resumed local
+session can preserve the old branch as history and create a new publishing
+branch under `sproozi/$SPROOZI_EXECUTION_UID/`. Retaining a branch does not
+grant permission to overwrite another execution's published branch. Kubernetes
+remains read-only; reviewable GitOps changes use separately approved GitHub
+access.
 
 ## Evidence and reconciliation
 
@@ -146,14 +148,16 @@ The [workflow guide](../guides/portable-workflows.md) states setup and support
 limits. The [verification driver](../../hack/verify/portable-workflows/verify.py)
 records actual native evidence and its fixture limitations.
 
-The subsequent stock Hermes fixture discovered and invoked the actual retained-work
-MCP tool, retrieved the completed session after its sandbox stopped, and passed
-one-way pull and same-native-UUID Docker continuation under a fresh execution and
-deadline. A real stock native tool wrote and read the controlled workspace file.
-This resolves the earlier absence of a fresh Hermes harness proof. The
-[recorded acceptance](../demos/verified-portable-workflows.md) separates this
-deterministic-provider evidence from paid inference, real engineering contribution
-and personal home-ops acceptance. It does not expand native-history compatibility.
+The subsequent stock Hermes fixture discovered and invoked the actual
+retained-work MCP tool, retrieved the completed session after its sandbox
+stopped, and passed one-way pull and Docker resume with the same native UUID
+under a fresh execution and deadline. A real stock native tool wrote and read
+the controlled workspace file. This resolves the earlier absence of a fresh
+Hermes harness proof. The [recorded
+acceptance](../../test/acceptance/reports/verified-portable-workflows.md) separates this
+deterministic-provider evidence from paid inference, real engineering
+contribution and personal home-ops acceptance. It does not expand native-history
+compatibility.
 
 Live verification exposed an initial helper argument mismatch, default-branch
 workspace restoration, native folder trust, blocking submission replay and

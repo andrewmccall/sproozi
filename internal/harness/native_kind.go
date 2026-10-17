@@ -2,7 +2,7 @@ package harness
 
 import "errors"
 
-// NativeKind selects an explicit, evidence-pinned interactive client. The zero
+// NativeKind selects an explicit interactive client. The zero
 // value is invalid: an incoming launch never silently selects another harness.
 type NativeKind string
 
@@ -12,18 +12,11 @@ const (
 )
 
 func (k NativeKind) Validate() error {
-	_, err := NativeVersion(k)
-	return err
-}
-
-func NativeVersion(k NativeKind) (string, error) {
 	switch k {
-	case NativeCodex:
-		return CodexSessionVersion, nil
-	case NativeClaude:
-		return ClaudeSessionVersion, nil
+	case NativeCodex, NativeClaude:
+		return nil
 	default:
-		return "", errors.New("unsupported native harness")
+		return errors.New("unsupported native harness")
 	}
 }
 

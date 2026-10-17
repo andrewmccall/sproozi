@@ -126,7 +126,7 @@ def prepare(args):
         cfg["gateway"]["providerCAFile"] = str(ca)
     write(out / "home-config.json", cfg)
     write(out / "profile-hints.json", {"instructions": instructions, "instructionDigest": digest,
-          "allowances": allowances, "nativeOptions": options, "nativeVersion": "0.161.0",
+          "allowances": allowances, "nativeOptions": options,
           "providerToken": TOKEN, "providerURLFromKind": ("https" if args.provider_tls else "http") + "://" + args.gateway_ip + ":" + str(args.provider_port),
           "providerCAFile": str(ca) if args.provider_tls else None,
           "strictCertificateChainValidated": True,
@@ -283,6 +283,8 @@ def response_output(writer, response, request, index):
         TUI.event(writer, "response.output_item.done", output_index=0, item=item)
     else:
         answer = "Remember TUI facts" if request["kind"] == "title" else ANSWERS[request["turn"]]
+        if request["kind"] == "title" and request["body"].get("text", {}).get("format", {}).get("type") == "json_schema":
+            answer = json.dumps({"title": answer})
         item = {"id": "msg_mobility_" + str(index), "type": "message", "status": "in_progress",
                 "role": "assistant", "content": []}
         part = {"type": "output_text", "text": "", "annotations": []}

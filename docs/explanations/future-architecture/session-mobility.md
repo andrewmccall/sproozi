@@ -1,23 +1,9 @@
 # Session mobility extensions
 
-**Status:** future extensions to controlled Codex and Claude Code session mobility.
-The [current session guide](../../guides/session-mobility.md) describes native
-terminal attachment, selected conversation/Git checkpoints, protected home
-journals, fixed remote profiles and fresh per-visit admission. A deterministic
-three-turn Docker-to-Kubernetes-to-Docker core proof passed with the same native
-UUID, workspace, original deadline and sealed usage. The extended Codex proof
-also passed actual native tool effects, a held remote move, both placements'
-gateway/direct-access denials, forced held-turn cancellation and immutable
-accounting replay. The final-source matched-image Codex rerun passed.
-The production Claude Code 2.1.27 round trip separately passed three genuine
-terminal turns, same-UUID conversation, actual foreground Bash and exact
-unfinished Git state. It retained selected ignored files, the original deadline
-and 320 sealed units across eight deterministic Messages requests. Its optional
-administrator probes passed both-placement gateway/direct-access denials.
-Claude's full held placement move/cancel matrix remains unassessed; the native
-held-turn prerequisite is a separate observation. These fixtures do not establish
-long histories, compaction, background tasks or every failure. See the
-[verified demo](../../demos/verified-session-mobility.md) for the exact scope.
+Status: future extensions to controlled Codex and Claude Code session movement.
+
+The [current session guide](../../guides/session-mobility.md) describes managed
+Codex and Claude Code sessions. This page covers extensions to that workflow.
 
 [ADR 0004](../../adr/0004-portable-sessions-and-bounded-executions.md) records the
 accepted outcome. ADRs [0008](../../adr/0008-selected-native-and-git-checkpoints.md),
@@ -26,10 +12,10 @@ accepted outcome. ADRs [0008](../../adr/0008-selected-native-and-git-checkpoints
 checkpoint, accounting and authority mechanisms. An AgentRun identifies one
 bounded remote visit; a completed or cancelled Run cannot reopen.
 
-Remote-first Codex work and later local continuation are now implemented in the
-[retained-work guide](../../guides/portable-workflows.md), under
-[ADR 0012](../../adr/0012-retained-work-and-fresh-session-continuations.md).
-The remote catalogue accepts tasks independently of the laptop, retains genuine
+Remote-first Codex work and later local resume are now implemented in the
+[retained-work guide](../../guides/portable-workflows.md), under [ADR
+0012](../../adr/0012-retained-work-and-fresh-session-continuations.md). The
+remote catalogue accepts tasks independently of the laptop, retains genuine
 stopped state, and transfers ownership once. A later local resume starts a new
 execution with fresh approval; it does not renew the old live-move ledger.
 
@@ -37,33 +23,34 @@ execution with fresh approval; it does not renew the old live-move ledger.
 
 The first supported entry is Sproozi's controlled Docker launch, selected in
 [ADR 0005](../../adr/0005-controlled-docker-launch-before-session-adoption.md).
-Adopting an arbitrary local Codex or Claude conversation needs explicit selection,
-compatible native state, inspection of workspace dependencies and control of the
-original writer before any continuation starts. Imported credentials, hooks,
-plugins and cached approvals cannot become trusted destination configuration.
+Adopting an arbitrary local Codex or Claude conversation needs explicit
+selection, compatible native state, inspection of workspace dependencies and
+control of the original writer before a resumed agent starts. Imported
+credentials, hooks, plugins and cached approvals cannot become trusted
+destination configuration.
 
 A copied transcript alone cannot prove ownership or safe completion. Define how
 the original process and all tool descendants stop, how uncertainty is reported,
-and what happens when the original environment cannot be fenced. Keep refusal
-explicit when those guarantees cannot be established.
+and what happens when the original environment cannot be stopped and denied
+access. Keep refusal explicit when those guarantees cannot be established.
 
 ## Additional native sessions and clients
 
 [ADR 0007](../../adr/0007-codex-round-trip-before-harness-expansion.md) selects
-Claude Code after Codex. Both exact pins now have production placement proofs.
-The selected Claude 2.1.27 transcript adapter and completion path are recorded under
-[ADR 0011](../../adr/0011-native-session-compatibility-and-completion.md).
-OpenCode and Hermes mobility remain later candidates. Each further adapter needs
-evidence for its pinned native version, state format, completion boundary, tool
-records and resume command.
+Claude Code after Codex. The current workflow supports those two selected clients.
+[ADR 0011](../../adr/0011-native-session-compatibility-and-completion.md) records
+the Claude transcript and completion contract. [ADR 0015](../../adr/0015-default-clients-and-native-tool-schemas.md)
+removes exact-version checks.
+OpenCode and Hermes mobility remain later candidates. Each adapter must handle the client's state format, completion,
+tool records and resume command.
 Preserve native semantics rather than translating history into a new common chat
-protocol. Background tasks, subagents and compaction need their own compatibility
-proofs. The current selected checkpoint does not transfer running memory or tools.
+protocol. Background tasks, subagents and compaction are outside the current supported
+state. The current selected checkpoint does not transfer running memory or tools.
 
 Native GUI/IDE access remains a separate extension under
 [ADR 0006](../../adr/0006-native-cli-and-terminal-before-gui-mobility.md).
 A supported CLI resume command does not prove an official desktop client accepts
-an arbitrary Sproozi endpoint. Test each pinned client, its authentication,
+an arbitrary Sproozi endpoint. Test each selected client, its authentication,
 session discovery, detach/reconnect and revocation separately. See
 [harness and client compatibility](harness-portability.md).
 
@@ -81,18 +68,7 @@ delete/export controls and encryption require explicit operational requirements.
 Do not grant authority from imported history or relax unknown-stop/accounting
 rules to simplify storage recovery.
 
-## Proofs before implementation claims
+## Testing requirements
 
-| Milestone | Required evidence |
-| --- | --- |
-| Claude held placement behavior | Wait for the held turn before moving; force cancel with an actual writer fence, no destination and unknown or conservatively sealed usage |
-| Broader failures | Extend retained failure evidence for capture/restore/admission, restart, stale owners and unknown stop/accounting |
-| Broader native and failure coverage | Extend the two verified foreground contracts with specific tools/states and failure cases; verify each independently |
-| Additional native state | Separate evidence for compaction, background tasks, subagents or another pinned version without importing configuration/authority |
-| Session adoption | Explicit original-writer control, compatible selected state and rejection of imported authority |
-| Native client connection | Separate pinned CLI, terminal and GUI/IDE proofs; unavailable paths stated explicitly |
-| Enterprise access | Owner isolation, approved profiles, quotas and audit without developer cloud/Kubernetes credentials |
-
-Successful output alone does not prove the whole matrix. Record each observed
-result against the actual artifact, native client version and backend; preserve
-failed proof evidence and distinguish unknown usage from known zero.
+See [session movement requirements](../../../test/acceptance/README.md#session-movement-extensions)
+for checks required before extending support.

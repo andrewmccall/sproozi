@@ -1,37 +1,40 @@
-# Native launch and control boundary
+# Native launch and control
 
-Both controlled Docker and Kubernetes placements use the same trusted
-`harness.NativeLaunch` contract, common environment/client-binding helpers and
-strict native reply validators. The supervisor executes a fixed supported stock
-CLI. Approved capability names determine broker client bindings; they do not
-carry provider credentials or checkpoint-supplied upstream addresses.
+Controlled Docker and Kubernetes sessions share the `harness.NativeLaunch`
+contract and control-reply checks. Each placement supplies fresh gateway access
+and approved client connections. Checkpoints cannot supply provider credentials,
+launch settings or upstream addresses.
 
-Task intent, selected native thread, deadline, administrator model/options and
-instructions have the same meaning in each placement. Native rollout observation
-has a 64 MiB limit, separate from the aggregate checkpoint artifact limit.
-Docker acquires fresh workload access through its home authority; Kubernetes
-reads projected access at fixed runtime-owned paths. Their provisioning and
-physical writer-stop evidence remain different backend responsibilities.
+## Launch settings
 
-The fixed control replies bind operation, state and expected native thread.
-First launch explicitly permits an empty thread only until the genuine native
-UUID is observed and bound. Resuming a selected checkpoint requires that exact
-thread. A malformed, oversized, trailing or incompatible reply is unavailable
-native evidence. Acknowledged quiescence does not replace physical container
-termination, sealed accounting or the selected checkpoint verification.
+Task input, native conversation ID, deadline, model options and trusted
+instructions have the same meaning in both placements. Native transcript
+observation has a 64 MiB limit, separate from the total checkpoint size limit.
+Docker obtains gateway access through home. Kubernetes reads projected access
+from fixed runtime-owned paths.
 
-Terminal attachment carries bounded raw bytes and actual partial-write
-acknowledgements. The client retries only the unwritten suffix, and disconnect
-ends attachment rather than the execution. Output has a bounded replay cursor
-and an explicit gap indication. No unacknowledged input is automatically replayed
-across reconnects. These are private Sproozi native controls, not an ACP or AHP
-endpoint.
+Each backend remains responsible for provisioning its resources, confirming
+that writers have stopped and finalizing usage accounting.
 
-ACP provides structured conversation methods, while AHP provides host-facing
-terminal state and interaction. Neither directly replaces the current native
-control and exact byte acknowledgement contract. A future AHP host can retain
-the stock PTY with negotiated byte extensions; a future ACP backend changes the
-interaction and must establish native checkpoint identity. See
-[ADR 0014](../adr/0014-review-boundaries-and-native-contracts.md) for the compared
-alternatives and concrete revisit criteria. Existing configured integrations
-continue to use [MCP](configured-mcp.md).
+## Control replies
+
+Sproozi checks the operation, state and expected native conversation ID together.
+The first launch can report an empty ID until the client creates its conversation.
+Once recorded, that ID cannot change. Resume must use the checkpoint's exact ID.
+
+Malformed, oversized or incompatible replies, including trailing data, leave
+native state unconfirmed. A reply that says the client is quiet does not prove
+container termination, finalized accounting or a valid checkpoint. Those checks
+remain separate.
+
+## Terminal attachment
+
+The terminal sends raw bytes in bounded messages. Each input acknowledgement
+reports how many bytes were written. The client retries only the unwritten part.
+Disconnecting ends attachment; it does not stop the execution.
+
+Output has a replay cursor and reports gaps. Reconnecting does not automatically
+replay unacknowledged input. This private control API does not expose an ACP or
+AHP endpoint. See [ADR 0014](../adr/0014-review-boundaries-and-native-contracts.md)
+for the protocol alternatives and conditions for revisiting this choice.
+Configured tool integrations use [MCP](configured-mcp.md).

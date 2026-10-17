@@ -23,10 +23,6 @@ const (
 func TestManagedLaunchProjectsFreshKindSpecificPlaceholderAndHarness(t *testing.T) {
 	for _, kind := range []harness.NativeKind{harness.NativeCodex, harness.NativeClaude} {
 		t.Run(string(kind), func(t *testing.T) {
-			version, err := harness.NativeVersion(kind)
-			if err != nil {
-				t.Fatal(err)
-			}
 			run := &api.AgentRun{ObjectMeta: metav1.ObjectMeta{Namespace: "runs", Name: "native-run", UID: "run-uid"},
 				Spec: api.AgentRunSpec{TemplateRef: api.AgentTemplateReference{Name: managedFixtureTemplate},
 					Capabilities: []api.CapabilityKind{api.CapabilityModelInference}}}
@@ -34,8 +30,7 @@ func TestManagedLaunchProjectsFreshKindSpecificPlaceholderAndHarness(t *testing.
 				Annotations: map[string]string{registry.ManagedTemplateAnnotation: managedTemplateEnabledValue}},
 				Spec: api.AgentTemplateSpec{Instructions: "Approved native instructions"}}
 			intent := registry.Registration{Harness: kind, Principal: "operator", SessionID: "session-1", Epoch: 1,
-				OperationID: "move-1", NativeUUID: "12345678-1234-1234-1234-123456789abc", NativePin: version,
-				InstructionDigest: registry.InstructionsDigest(template.Spec.Instructions), OriginalDeadline: time.Now().UTC().Add(time.Hour),
+				OperationID: "move-1", NativeUUID: "12345678-1234-1234-1234-123456789abc", InstructionDigest: registry.InstructionsDigest(template.Spec.Instructions), OriginalDeadline: time.Now().UTC().Add(time.Hour),
 				TemplateName: template.Name, Ceilings: map[api.CapabilityKind]api.EndpointBudget{api.CapabilityModelInference: {MaxUnits: 20}},
 				CheckpointDigest: strings.Repeat("a", 64), IntendedRunName: run.Name}
 			data, err := json.Marshal(map[string]any{"version": 1, "registration": intent, "runUid": string(run.UID),
@@ -85,7 +80,7 @@ func TestManagedLaunchProjectsFreshKindSpecificPlaceholderAndHarness(t *testing.
 func TestInitialNativeContractRetainsTaskAndEmptyThreadAfterBinding(t *testing.T) {
 	run := &api.AgentRun{ObjectMeta: metav1.ObjectMeta{Namespace: "runs", Name: "initial-run", UID: "run-uid"}, Spec: api.AgentRunSpec{TemplateRef: api.AgentTemplateReference{Name: managedFixtureTemplate}, Capabilities: []api.CapabilityKind{api.CapabilityModelInference}}}
 	template := &api.AgentTemplate{ObjectMeta: metav1.ObjectMeta{Namespace: run.Namespace, Name: managedFixtureTemplate, Annotations: map[string]string{registry.ManagedTemplateAnnotation: managedTemplateEnabledValue}}, Spec: api.AgentTemplateSpec{Instructions: "Approved native instructions"}}
-	intent := registry.Registration{Harness: harness.NativeCodex, Principal: "operator", SessionID: "session-1", Epoch: 1, OperationID: "initial-1", NativePin: harness.CodexSessionVersion, InstructionDigest: registry.InstructionsDigest(template.Spec.Instructions), OriginalDeadline: time.Now().UTC().Add(time.Hour), TemplateName: template.Name, Ceilings: map[api.CapabilityKind]api.EndpointBudget{api.CapabilityModelInference: {MaxUnits: 20}}, WorkspaceDigest: strings.Repeat("a", 64), Task: "Fix the fixture", IntendedRunName: run.Name}
+	intent := registry.Registration{Harness: harness.NativeCodex, Principal: "operator", SessionID: "session-1", Epoch: 1, OperationID: "initial-1", InstructionDigest: registry.InstructionsDigest(template.Spec.Instructions), OriginalDeadline: time.Now().UTC().Add(time.Hour), TemplateName: template.Name, Ceilings: map[api.CapabilityKind]api.EndpointBudget{api.CapabilityModelInference: {MaxUnits: 20}}, WorkspaceDigest: strings.Repeat("a", 64), Task: "Fix the fixture", IntendedRunName: run.Name}
 	scheme := runtime.NewScheme()
 	if err := corev1.AddToScheme(scheme); err != nil {
 		t.Fatal(err)

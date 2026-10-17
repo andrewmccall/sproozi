@@ -14,4 +14,4 @@ COPY examples/portable-workflows/go.sh /usr/local/bin/go
 RUN chmod 0755 /usr/local/bin/go && \
     ln -s /usr/local/go/bin/gofmt /usr/local/bin/gofmt
 USER 1000:1000
-# The pinned native supervisor and its entrypoint are inherited unchanged.
+# The native supervisor and its entrypoint are inherited unchanged.

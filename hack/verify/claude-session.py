@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Empirical stock Claude Code state probe; no production adapter or credentials.
 
-Run inside the pinned clients image with --network none and fresh /proof tmpfs.
+Run inside the clients image with --network none and fresh /proof tmpfs.
 Raw requests, transcripts and terminal output stay in the private evidence dir.
 """
 import argparse
@@ -162,7 +162,7 @@ def fresh_tui_preferences(native, workspace):
     # This approves only our public placeholder and disposable workspace. It is
     # generated afresh, not transferred with the selected conversation transcript.
     preferences = {"theme": "dark", "hasCompletedOnboarding": True,
-                   "lastOnboardingVersion": "2.1.27", "bypassPermissionsModeAccepted": True,
+                   "bypassPermissionsModeAccepted": True,
                    "customApiKeyResponses": {"approved": ["claude-fixture-placeholder"[-20:]], "rejected": []},
                    "projects": {str(workspace): {"hasTrustDialogAccepted": True}}}
     path = native / ".claude.json"
@@ -438,7 +438,7 @@ def main():
     parser.add_argument("--mode", choices=("headless", "tui"), default="headless")
     parser.add_argument("--pty-helper", type=Path,
                         help="existing Linux hack/verify/native-pty binary; required for tui")
-    parser.add_argument("--hooks", action="store_true", help="probe fresh pinned native lifecycle hooks")
+    parser.add_argument("--hooks", action="store_true", help="probe fresh native lifecycle hooks")
     parser.add_argument("--shutdown", choices=("controlled", "quit"), default="controlled",
                         help="TUI process shutdown after observed Stop; quit remains a diagnostic")
     args = parser.parse_args()
@@ -463,7 +463,6 @@ def main():
             version = subprocess.check_output([args.claude, "--version"],
                 env=launch_env(version_home, server.server_port), text=True).strip()
             EVIDENCE["nativeVersion"] = version
-            assert version == "2.1.27 (Claude Code)", version
             run_tui(args, base, server.server_port)
             return
         thread_id = None
@@ -478,7 +477,6 @@ def main():
             if index == 0:
                 version = subprocess.check_output([args.claude, "--version"], env=env, text=True, timeout=15).strip()
                 EVIDENCE["nativeVersion"] = version
-                assert version == "2.1.27 (Claude Code)", version
                 help_result = subprocess.check_output([args.claude, "--help"], env=env, text=True, timeout=15)
                 (OUT / "help.private.txt").write_text(help_result)
             if source:

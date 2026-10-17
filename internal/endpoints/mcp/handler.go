@@ -191,14 +191,18 @@ func (h *Handler) prepare(ctx context.Context, upstream *sdk.ClientSession,
 			if !permitted {
 				continue
 			}
-			schema, resolved, err := compileInput(tool.InputSchema, constraint)
+			schema, resolved, err := compileInput(tool.InputSchema)
 			if err != nil {
 				return nil, err
 			}
 			name := tool.Name
 			// Copy only supported, non-authoritative discovery metadata. Do not
 			// inherit remote parameter/header annotations or execution controls.
-			server.AddTool(&sdk.Tool{Name: name, Description: tool.Description, InputSchema: schema},
+			description := tool.Description
+			if constraint != nil {
+				description += "\nAdditional argument restrictions enforced by Sproozi: " + string(constraint.Schema())
+			}
+			server.AddTool(&sdk.Tool{Name: name, Description: description, InputSchema: schema},
 				func(callCtx context.Context, req *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
 					workCtx, cancel := context.WithCancel(ctx)
 					stop := context.AfterFunc(callCtx, cancel)
@@ -251,7 +255,7 @@ func (h *Handler) prepare(ctx context.Context, upstream *sdk.ClientSession,
 	return nil, fmt.Errorf("MCP pagination exceeded bounds")
 }
 
-func compileInput(input any, constraint *mcppolicy.Constraint) (*jsonschema.Schema, *jsonschema.Resolved, error) {
+func compileInput(input any) (*jsonschema.Schema, *jsonschema.Resolved, error) {
 	raw, err := json.Marshal(input)
 	if err != nil || len(raw) > 32<<10 || input == nil {
 		return nil, nil, fmt.Errorf("invalid MCP input schema")
@@ -260,33 +264,17 @@ func compileInput(input any, constraint *mcppolicy.Constraint) (*jsonschema.Sche
 		return nil, nil, fmt.Errorf("ambiguous MCP input schema")
 	}
 	var remote jsonschema.Schema
-	if err := json.Unmarshal(raw, &remote); err != nil {
-		return nil, nil, fmt.Errorf("invalid MCP input schema")
+	if err := json.Unmarshal(raw, &remote); err != nil || remote.Type != "object" {
+		return nil, nil, fmt.Errorf("MCP input schema must describe an object")
 	}
 	if err := mcppolicy.CheckSchema(&remote); err != nil {
 		return nil, nil, err
-	}
-	// Give each embedded schema its own resource identity so local $refs keep
-	// their original root when discovery advertises the allOf intersection.
-	if remote.ID == "" {
-		remote.ID = "urn:sproozi:mcp:input"
 	}
 	resolved, err := remote.Resolve(nil)
 	if err != nil {
 		return nil, nil, fmt.Errorf("unsupported MCP input schema")
 	}
-	schema := &jsonschema.Schema{Type: "object", AllOf: []*jsonschema.Schema{&remote}}
-	if constraint != nil {
-		var restriction jsonschema.Schema
-		if err := json.Unmarshal(constraint.Schema(), &restriction); err != nil {
-			return nil, nil, fmt.Errorf("invalid MCP argument restriction")
-		}
-		if restriction.ID == "" {
-			restriction.ID = "urn:sproozi:mcp:scope"
-		}
-		schema.AllOf = append(schema.AllOf, &restriction)
-	}
-	return schema, resolved, nil
+	return &remote, resolved, nil
 }
 
 func (h *Handler) connect(ctx context.Context, registration registration) (*sdk.ClientSession, error) {

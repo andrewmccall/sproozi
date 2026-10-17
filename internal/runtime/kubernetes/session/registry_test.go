@@ -66,8 +66,7 @@ func TestIgnoredSelectionIsImmutableRegistration(t *testing.T) {
 
 func registration() Registration {
 	return Registration{Harness: harness.NativeCodex, Principal: "alice", SessionID: "spr-1", Epoch: 2, OperationID: "move-1",
-		NativeUUID: "12345678-1234-1234-1234-123456789abc", NativePin: "0.161.0",
-		InstructionDigest: strings.Repeat("a", 64), OriginalDeadline: testNow.Add(time.Hour),
+		NativeUUID: "12345678-1234-1234-1234-123456789abc", InstructionDigest: strings.Repeat("a", 64), OriginalDeadline: testNow.Add(time.Hour),
 		TemplateName: fixtureTemplate, Ceilings: map[api.CapabilityKind]api.EndpointBudget{
 			api.CapabilityModelInference: {MaxUnits: 100, MaxCostMicros: 200}},
 		CheckpointDigest: strings.Repeat("b", 64), IntendedRunName: fixtureRunName}
@@ -422,7 +421,6 @@ func TestInvalidRegistrationAndSeals(t *testing.T) {
 		"negative cost": func(r *Registration) {
 			r.Ceilings[api.CapabilityModelInference] = api.EndpointBudget{MaxUnits: 1, MaxCostMicros: -1}
 		},
-		"wrong pin":         func(r *Registration) { r.NativePin = "new-version" },
 		"invalid native id": func(r *Registration) { r.NativeUUID = "not-a-uuid" },
 		"missing digest":    func(r *Registration) { r.CheckpointDigest = "" },
 	} {
@@ -497,26 +495,49 @@ func TestCorruptRegistryFailsClosed(t *testing.T) {
 	}
 }
 
-func TestRegistryNativeKindAndVersionAreRequiredAndImmutable(t *testing.T) {
-	for _, kind := range []harness.NativeKind{"", "unknown", harness.NativeClaude} {
+func TestRegistryNativeKindIsRequiredAndImmutable(t *testing.T) {
+	for _, kind := range []harness.NativeKind{"", "unknown"} {
 		t.Run(string(kind), func(t *testing.T) {
 			s, _ := registry(t, nil)
 			intent := registration()
-			intent.Harness = kind // Retains Codex pin: Claude must not adopt it.
+			intent.Harness = kind
 			if _, err := s.Create(t.Context(), intent); err == nil {
-				t.Fatal("invalid kind/version accepted")
+				t.Fatal("invalid kind accepted")
 			}
 		})
 	}
 	s, _ := registry(t, nil)
 	intent := registration()
-	intent.Harness, intent.NativePin = harness.NativeClaude, harness.ClaudeSessionVersion
+	intent.Harness = harness.NativeClaude
 	record, err := s.Create(t.Context(), intent)
-	if err != nil || record.Harness != harness.NativeClaude || record.NativePin != harness.ClaudeSessionVersion {
+	if err != nil || record.Harness != harness.NativeClaude {
 		t.Fatalf("Claude registration: %+v %v", record, err)
 	}
-	intent.Harness, intent.NativePin = harness.NativeCodex, harness.CodexSessionVersion
+	intent.Harness = harness.NativeCodex
 	if _, err = s.Create(t.Context(), intent); !errors.Is(err, ErrConflict) {
 		t.Fatalf("native kind mutation: %v", err)
+	}
+}
+
+func TestRetiredVersionFieldDoesNotBlockLifecycleRecovery(t *testing.T) {
+	store, kube := registry(t, nil)
+	record, err := store.Create(t.Context(), registration())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cm corev1.ConfigMap
+	if err = kube.Get(t.Context(), types.NamespacedName{Namespace: fixtureNamespace, Name: record.Reference.Name}, &cm); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(cm.Data[dataKey], "nativePin") {
+		t.Fatal("new registration pins a client version")
+	}
+	cm.Data[dataKey] = strings.Replace(cm.Data[dataKey], `"registration":{`, `"registration":{"nativePin":"historical-client-version",`, 1)
+	if err = kube.Update(t.Context(), &cm); err != nil {
+		t.Fatal(err)
+	}
+	observed, err := store.Get(t.Context(), record.Reference)
+	if err != nil || observed.Harness != harness.NativeCodex || observed.Phase != Creating {
+		t.Fatalf("historical record cannot recover: %+v %v", observed, err)
 	}
 }

@@ -1,5 +1,10 @@
 # Persistent assistant orchestration
 
+This task service lets a persistent assistant submit disposable jobs. It retains
+status and an optional final answer, not the worker's native conversation or
+workspace. For resumable work, use the [retained-work
+service](../guides/portable-workflows.md).
+
 A persistent assistant owns its conversations, memory, channels and schedules.
 Sproozi owns the admission, identity, budget, deadline and cleanup of every
 delegated `AgentRun`. The assistant runs in its own Deployment and persistent
@@ -55,7 +60,7 @@ provides private Service ingress, TLS and namespaced permissions.
 | Tool | Arguments | Behavior |
 | --- | --- | --- |
 | `submit` | `workflow`, `requestId`, `expiresAt`, `task` | Atomically creates the fixed workflow's Run or returns the exact matching retained Run |
-| `status` | `id`, `uid` | Returns the caller-owned exact incarnation's lifecycle and optional untrusted result |
+| `status` | `id`, `uid` | Returns the lifecycle of the exact Run UID owned by the caller and optional untrusted result |
 | `wait` | `id`, `uid`, `seconds` | Observes for 1–30 seconds; a nonterminal response requires another wait |
 | `cancel` | `id`, `uid` | Sets cancellation to true with current UID and resource-version preconditions |
 
@@ -112,12 +117,12 @@ history has its own separate retention.
 
 ## Execution and inference ownership
 
-The existing single global worker slot remains: several delegated jobs queue;
-this integration does not implement concurrent worker teams or a DAG scheduler.
-The persistent assistant does not occupy that slot. Its model account, memory
-and channel credentials belong to the trusted assistant deployment. Worker
-inference uses Sproozi's projected Run identity, gateway-owned provider credentials
-and per-Run budgets. Coordinator inference is accounted for separately by its
+The controller runs one worker at a time. Additional delegated jobs queue. This
+integration has no concurrent worker teams or dependency-graph scheduler. The
+persistent assistant does not occupy that slot. Its model account, memory and
+channel credentials belong to the trusted assistant deployment. Worker inference
+uses Sproozi's projected Run identity, gateway-owned provider credentials and
+per-Run budgets. Coordinator inference is accounted for separately by its
 configured provider; worker budgets do not cap the coordinator's spending.
 
 The [orchestration ADR](../adr/0003-persistent-assistants-and-retained-results.md)

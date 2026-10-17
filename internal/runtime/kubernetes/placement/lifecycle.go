@@ -58,11 +58,7 @@ func (p *Placement) retained(ctx context.Context, l session.Launch) (retained, r
 		}
 	}
 	l = local.Launch
-	version, err := harness.NativeVersion(p.config.Harness)
-	if err != nil {
-		return local, r, err
-	}
-	if r.Harness != p.config.Harness || l.Harness != r.Harness || r.Principal != p.config.Principal || r.TemplateName != p.config.TemplateName || r.Epoch != l.Epoch || r.NativePin != version || r.IntendedRunName != runName(l) || r.OperationID != l.OperationID || r.SessionID != l.SessionID || r.WorkspaceDigest != local.WorkspaceDigest || r.Task != l.Task || r.NativeUUID != l.ThreadID || r.CheckpointDigest != l.CheckpointDigest || r.InstructionDigest != l.InstructionDigest || !r.OriginalDeadline.Equal(l.Deadline) || !slices.Equal(r.IncludeIgnored, l.IncludeIgnored) || !ceilingsMatch(l, r.Ceilings) {
+	if r.Harness != p.config.Harness || l.Harness != r.Harness || r.Principal != p.config.Principal || r.TemplateName != p.config.TemplateName || r.Epoch != l.Epoch || r.IntendedRunName != runName(l) || r.OperationID != l.OperationID || r.SessionID != l.SessionID || r.WorkspaceDigest != local.WorkspaceDigest || r.Task != l.Task || r.NativeUUID != l.ThreadID || r.CheckpointDigest != l.CheckpointDigest || r.InstructionDigest != l.InstructionDigest || !r.OriginalDeadline.Equal(l.Deadline) || !slices.Equal(r.IncludeIgnored, l.IncludeIgnored) || !ceilingsMatch(l, r.Ceilings) {
 		return local, r, &profile.Rejection{Code: profile.CodeConflict}
 	}
 	return local, r, nil

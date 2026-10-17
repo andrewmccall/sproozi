@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-// ValidateCodexContinuity validates the pinned completed-turn shape, initial
+// ValidateCodexContinuity validates the supported completed-turn shape, initial
 // approved developer block and resolved supported tool activity. It supplies no
 // authority and is never evidence that every native/workspace writer stopped.
 func ValidateCodexContinuity(state CodexState, instructionDigest string, maxBytes int64) error {

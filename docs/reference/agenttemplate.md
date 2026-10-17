@@ -1,10 +1,10 @@
 # AgentTemplate
 
-**Audience:** operators, contributors
+`AgentTemplate` defines a named type of task. An administrator selects its
+runtime and policy and supplies trusted instructions. Each `AgentRun` references
+one template.
 
-`AgentTemplate` is the trusted, administrator-managed description of a class of work. It is the object that turns a runtime and a policy into a named operational workflow.
-
-## What it owns
+## What it defines
 
 - one runtime reference
 - one policy reference
@@ -48,4 +48,4 @@ The webhook path depends on object metadata as well as `spec`:
 - label: `sproozi.com/webhook-receiver=<receiver>`
 - annotation: `sproozi.com/webhook-secret=<secret-name>`
 
-That keeps receiver discovery explicit and per-template.
+The webhook uses this metadata to find the receiving template.

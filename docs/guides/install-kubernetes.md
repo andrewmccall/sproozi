@@ -4,12 +4,15 @@ This guide installs Sproozi from this checkout on an existing cluster, then
 creates an `AgentRun`. Its Pod uses kubectl to list Pods through the gateway,
 waits 90 seconds so you can inspect it, and exits. This checks the controller,
 run identity, gateway and completion path without model or GitHub credentials.
-It does not run an LLM. For that, continue with the
-[Kind AgentRun-to-PR demo](getting-started.md).
+It does not run a model. For that, continue with the [Kind AgentRun-to-PR
+demo](getting-started.md).
 
 Use an evaluation cluster for your first installation. The current release is a
 preview; [security hardening](../reference/security-hardening.md) describes its
 limits and the controls needed for a longer-lived deployment.
+
+Read [core concepts](../explanations/core-concepts.md) if you are new to runs,
+runtimes, templates and policies.
 
 ## 1. Check the prerequisites and select the cluster
 
@@ -75,7 +78,7 @@ docker buildx imagetools inspect "$SPROOZI_TOOLS_TAG"
 
 You can set `SPROOZI_PLATFORMS` to just `linux/amd64` or `linux/arm64` if all your
 nodes use that architecture. The tools Dockerfile supports those two architectures.
-The first build downloads dependencies and compiles the pinned tools.
+The first build downloads dependencies and installs the client tools.
 
 Copy the top-level `Digest` from each inspection into these values, replacing
 `<controller-digest>` and `<tools-digest>` with the 64 hexadecimal characters:
@@ -129,10 +132,11 @@ kubectl create configmap sproozi-sandbox-trust -n sproozi-agents \
 ```
 
 Only the public CA goes into the sandbox trust ConfigMap. The gateway Secret
-contains its certificate and private key. Keep the CA private key on your computer.
-Reuse these files if you repeat the install. The trust ConfigMap is immutable, so replacing its CA needs
-a new ConfigMap name and matching runtime configuration. For a persistent
-installation, arrange certificate renewal before expiry.
+contains its certificate and private key. Keep the CA private key on your
+computer. Reuse these files if you repeat the install. The trust ConfigMap is
+immutable. To replace its CA, use a new ConfigMap name and update the runtime
+reference. For a persistent installation, arrange certificate renewal before
+expiry.
 
 ### If your images are private
 

@@ -49,18 +49,31 @@ func event(w io.Writer, name string, data any) {
 }
 
 func (f *fixture) anthropic(w http.ResponseWriter, request map[string]any) {
+	name := f.toolName(request)
+	messageID := fmt.Sprintf("msg_fixture_%d", time.Now().UnixNano())
+	toolID := fmt.Sprintf("toolu_fixture_%d", time.Now().UnixNano())
+	input := map[string]any{}
+	if name == "ToolSearch" {
+		input = map[string]any{"query": "select:mcp__fixture__verify", "max_results": 1}
+	}
+	encodedInput, _ := json.Marshal(input)
 	if request["stream"] != true {
+		content := []any{map[string]any{"type": "text", "text": answer}}
+		stop := "end_turn"
+		if name != "" {
+			content = []any{map[string]any{"type": "tool_use", "id": toolID, "name": name, "input": input}}
+			stop = "tool_use"
+		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"id": "msg_fixture", "type": "message", "role": "assistant", "model": request["model"], "content": []any{map[string]any{"type": "text", "text": answer}}, "stop_reason": "end_turn", "stop_sequence": nil, "usage": map[string]any{"input_tokens": 10, "output_tokens": 5}})
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": messageID, "type": "message", "role": "assistant", "model": request["model"], "content": content, "stop_reason": stop, "stop_sequence": nil, "usage": map[string]any{"input_tokens": 10, "output_tokens": 5}})
 		return
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	modelName, _ := request["model"].(string)
-	name := f.toolName(request)
-	event(w, "message_start", map[string]any{"type": "message_start", "message": map[string]any{"id": "msg_fixture", "type": "message", "role": "assistant", "content": []any{}, "model": modelName, "stop_reason": nil, "stop_sequence": nil, "usage": map[string]any{"input_tokens": 10, "output_tokens": 0}}})
+	event(w, "message_start", map[string]any{"type": "message_start", "message": map[string]any{"id": messageID, "type": "message", "role": "assistant", "content": []any{}, "model": modelName, "stop_reason": nil, "stop_sequence": nil, "usage": map[string]any{"input_tokens": 10, "output_tokens": 0}}})
 	if name != "" {
-		event(w, "content_block_start", map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "tool_use", "id": "toolu_fixture", "name": name, "input": map[string]any{}}})
-		event(w, "content_block_delta", map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "input_json_delta", "partial_json": "{}"}})
+		event(w, "content_block_start", map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "tool_use", "id": toolID, "name": name, "input": map[string]any{}}})
+		event(w, "content_block_delta", map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "input_json_delta", "partial_json": string(encodedInput)}})
 		event(w, "content_block_stop", map[string]any{"type": "content_block_stop", "index": 0})
 		event(w, "message_delta", map[string]any{"type": "message_delta", "delta": map[string]any{"stop_reason": "tool_use", "stop_sequence": nil}, "usage": map[string]any{"output_tokens": 5}})
 		event(w, "message_stop", map[string]any{"type": "message_stop"})
@@ -124,6 +137,12 @@ func (f *fixture) toolName(request map[string]any) string {
 		name, _ := tool["name"].(string)
 		if strings.Contains(name, "fixture") && strings.Contains(name, "verify") {
 			return name
+		}
+	}
+	for _, value := range tools {
+		tool, _ := value.(map[string]any)
+		if tool["name"] == "ToolSearch" {
+			return "ToolSearch"
 		}
 	}
 	return ""

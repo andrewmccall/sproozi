@@ -67,6 +67,7 @@ const (
 )
 
 const registryURLField = "url"
+const objectSchemaType = "object"
 
 const fixtureHost = "sproozi-gateway.sproozi-system.svc"
 
@@ -146,7 +147,7 @@ func newFixture(t *testing.T, change func(*gateway.ExecutionGrant)) *fixture {
 		if name == docsName {
 			f.docsServer = server
 			sdk.AddTool(server, &sdk.Tool{Name: searchTool, Description: "Search a collection", InputSchema: map[string]any{
-				schemaTypeField: "object", "$defs": map[string]any{"text": map[string]any{schemaTypeField: "string"}},
+				schemaTypeField: objectSchemaType, "$defs": map[string]any{"text": map[string]any{schemaTypeField: "string"}},
 				"required": []string{collectionField, queryField}, "properties": map[string]any{
 					collectionField: map[string]any{schemaRefField: "#/$defs/text"}, queryField: map[string]any{schemaRefField: "#/$defs/text"},
 				},
@@ -526,7 +527,7 @@ func TestProviderDiagnosticsNeverReachClientOrAudit(t *testing.T) {
 
 func TestUnsupportedProviderSchemaFailsBeforeToolExecution(t *testing.T) {
 	f := newFixture(t, nil)
-	f.docsServer.AddTool(&sdk.Tool{Name: searchTool, InputSchema: map[string]any{schemaTypeField: "object", schemaRefField: "#"}},
+	f.docsServer.AddTool(&sdk.Tool{Name: searchTool, InputSchema: map[string]any{schemaTypeField: objectSchemaType, schemaRefField: "#"}},
 		func(context.Context, *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
 			f.calls.Add(1)
 			return &sdk.CallToolResult{}, nil
@@ -602,6 +603,33 @@ func TestOversizedProviderResultFailsAndRetainsAttemptBudget(t *testing.T) {
 	}
 	if f.calls.Load() != 1 {
 		t.Fatalf("failed attempt reset budget: calls=%d", f.calls.Load())
+	}
+}
+
+func TestMCPDiscoveryKeepsProviderSchemaForNativeClients(t *testing.T) {
+	f := newFixture(t, nil)
+	session := f.connect(t, docsName)
+	tools, err := session.ListTools(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tools.Tools) != 1 || tools.Tools[0].Name != searchTool {
+		t.Fatalf("unexpected tools: %+v", tools.Tools)
+	}
+	tool := tools.Tools[0]
+	raw, err := json.Marshal(tool.InputSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema map[string]any
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		t.Fatal(err)
+	}
+	if schema[schemaTypeField] != objectSchemaType || schema["allOf"] != nil || schema["properties"] == nil {
+		t.Fatalf("native client cannot use provider schema: %s", raw)
+	}
+	if !strings.Contains(tool.Description, "Additional argument restrictions") || !strings.Contains(tool.Description, "operations") {
+		t.Fatalf("policy scope absent from discovery: %s", tool.Description)
 	}
 }
 

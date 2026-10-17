@@ -482,10 +482,10 @@ func fixtureArtifactKind(t *testing.T, kind harness.NativeKind) ([]byte, checkpo
 	} else {
 		userID, assistantID := "12345678-1234-1234-1234-123456789abc", "22345678-1234-1234-1234-123456789abc"
 		user, _ := json.Marshal(map[string]any{fixtureTypeKey: "user", "sessionId": fixtureThread,
-			"version": harness.ClaudeSessionVersion, "uuid": userID, "parentUuid": nil,
+			"version": "2.1.27", "uuid": userID, "parentUuid": nil,
 			"isSidechain": false, "cwd": repo, "message": map[string]any{"role": "user", "content": "Fixture question"}})
 		assistant, _ := json.Marshal(map[string]any{fixtureTypeKey: "assistant", "sessionId": fixtureThread,
-			"version": harness.ClaudeSessionVersion, "uuid": assistantID, "parentUuid": userID,
+			"version": "2.1.27", "uuid": assistantID, "parentUuid": userID,
 			"isSidechain": false, "cwd": repo, "message": map[string]any{"role": "assistant",
 				"content": []map[string]any{{fixtureTypeKey: "text", "text": "Claude fixture complete"}}}})
 		path, err := harness.ClaudeProjectPath(repo, fixtureThread)
@@ -1082,7 +1082,7 @@ func TestClaudePlacementRetainsKindPinAndUsesClaudeCheckpointHome(t *testing.T) 
 		t.Fatal(err)
 	}
 	_, registered, err := p.retained(t.Context(), l)
-	if err != nil || registered.Harness != harness.NativeClaude || registered.NativePin != harness.ClaudeSessionVersion {
+	if err != nil || registered.Harness != harness.NativeClaude {
 		t.Fatalf("wrong native registration: %+v %v", registered, err)
 	}
 	if err = p.Activate(t.Context(), l, i); err != nil {
