@@ -146,17 +146,42 @@ type Visit struct {
 	Incarnation      Incarnation `json:"incarnation"`
 	Receipt          *Receipt    `json:"receipt,omitempty"`
 }
+// Phase summarises the execution for callers. Every save checks it against the
+// structure it describes (see validatePhase), so a phase never contradicts the
+// active visit, the pending operation or the cancellation intent.
 type Phase string
 
 const (
-	PhaseIdle         Phase = "idle"
-	PhaseActive       Phase = "active"
-	PhaseStopping     Phase = "stopping"
-	PhaseUnknownStop  Phase = "unknown-stop"
+	// PhaseIdle has no writer and nothing in progress.
+	PhaseIdle Phase = "idle"
+	// PhasePreparing and PhaseActivating have a pending operation whose
+	// destination is not yet active, and no other writer.
+	PhasePreparing  Phase = "preparing"
+	PhaseActivating Phase = "activating"
+	// PhaseActive has one admitted writer and nothing in progress.
+	PhaseActive Phase = "active"
+	// PhaseStopping is a graceful stop of the active writer in progress.
+	PhaseStopping Phase = "stopping"
+	// PhaseUnknownStop is a stop or cancellation that could not prove the
+	// writer stopped. The allocation stays encumbered.
+	PhaseUnknownStop Phase = "unknown-stop"
+	// PhaseUnknownUsage has a fenced writer whose usage is not sealed.
 	PhaseUnknownUsage Phase = "unknown-usage"
-	PhasePreparing    Phase = "preparing"
-	PhaseActivating   Phase = "activating"
-	PhaseCancelled    Phase = "cancelled"
+	// PhaseCancelling has durable cancellation intent not yet carried out.
+	PhaseCancelling Phase = "cancelling"
+	// PhaseCancelled has carried out cancellation; nothing can start again.
+	PhaseCancelled Phase = "cancelled"
+)
+
+// Stage is the next step of an operation. Done stages are terminal.
+type Stage string
+
+const (
+	stagePrepare   Stage = "prepare"
+	stageActivate  Stage = "activate"
+	stageStop      Stage = "stop"
+	stageComplete  Stage = "complete"
+	stageCancelled Stage = "cancelled"
 )
 
 // Operation is the durable move intent. Recovery uses its same allocation and epoch.
@@ -166,11 +191,13 @@ type Operation struct {
 	Finalize    bool         `json:"finalize,omitempty"`
 	Launch      *Launch      `json:"launch,omitempty"`
 	Incarnation *Incarnation `json:"incarnation,omitempty"`
-	Stage       string       `json:"stage"`
-	Complete    bool         `json:"complete"`
+	Stage       Stage        `json:"stage"`
 }
 
+func (o Operation) done() bool { return o.Stage == stageComplete || o.Stage == stageCancelled }
+
 // Record is a read-only caller snapshot; mutations go through Coordinator.
+// PendingOperation names the one unfinished operation, always the last one.
 type Record struct {
 	Harness           harness.NativeKind   `json:"harness"`
 	Version           int                  `json:"version"`
@@ -189,13 +216,4 @@ type Record struct {
 	Operations        []Operation          `json:"operations"`
 	PendingOperation  string               `json:"pendingOperation,omitempty"`
 	CancelOperation   string               `json:"cancelOperation,omitempty"`
-	Uncertainty       Phase                `json:"uncertainty,omitempty"`
 }
-
-const (
-	stagePrepare   = "prepare"
-	stageActivate  = "activate"
-	stageStop      = "stop"
-	stageComplete  = "complete"
-	stageCancelled = "cancelled"
-)

@@ -43,7 +43,7 @@ func TestCancelInterruptsHeldMove(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Phase != PhaseCancelled || r.Uncertainty != PhaseUnknownUsage || local.prepared != 0 || remote.aborted != 1 {
+	if r.Phase != PhaseUnknownUsage || r.CancelOperation == "" || local.prepared != 0 || remote.aborted != 1 {
 		t.Fatalf("forced cancellation or source-only fencing changed: %+v", r)
 	}
 	if r.Checkpoint.Metadata.SHA256 != start.Stopped.CheckpointDigest || r.Remaining[testCapability].Units.Value != 18 {
@@ -162,7 +162,7 @@ func TestCancelIndependentSessionWhileAnotherMoveIsHeld(t *testing.T) {
 	default:
 	}
 	r, err := c.Inspect(other.Source.SessionID)
-	if err != nil || r.Phase != PhaseCancelled || remote.aborted != 1 {
+	if err != nil || r.CancelOperation == "" || r.Phase != PhaseUnknownUsage || remote.aborted != 1 {
 		t.Fatalf("independent cancellation: %+v %v", r, err)
 	}
 	// A remains graceful; only cleanup cancels its caller context after B's

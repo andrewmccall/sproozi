@@ -128,7 +128,7 @@ func (c *Coordinator) Move(ctx context.Context, id, operationID, destination str
 			if op.Finalize || op.Destination != destination {
 				return r, errors.New("session: operation intent conflict")
 			}
-			if op.Complete {
+			if op.done() {
 				return r, nil
 			}
 			return c.drive(ctx, r, i)
@@ -363,7 +363,6 @@ func (c *Coordinator) activateDestination(ctx context.Context, r Record, index i
 		r.Active = &Visit{Launch: *op.Launch, Incarnation: *op.Incarnation}
 		r.Epoch = op.Launch.Epoch
 		r.Phase = PhaseActive
-		op.Complete = true
 		op.Stage = stageComplete
 		r.PendingOperation = ""
 		return r, c.save(r)

@@ -219,14 +219,22 @@ func validateActive(r Record, lastEpoch uint64, seenAlloc map[string]bool) error
 }
 func validateOperations(r Record) error {
 	ids := map[string]bool{}
-	pending := false
-	for _, op := range r.Operations {
+	for i, op := range r.Operations {
 		if !validUUID(op.ID) || ids[op.ID] ||
 			(!op.Finalize && !validName(op.Destination)) ||
 			(op.Finalize && (op.Destination != "" || op.Launch != nil || op.Incarnation != nil)) {
 			return errors.New("session: invalid retained operation")
 		}
 		ids[op.ID] = true
+		switch op.Stage {
+		case stagePrepare, stageActivate, stageStop, stageComplete, stageCancelled:
+		default:
+			return errors.New("session: invalid operation stage")
+		}
+		// Only the last operation can be unfinished, and only while pending.
+		if !op.done() && (i != len(r.Operations)-1 || op.ID != r.PendingOperation) {
+			return errors.New("session: unfinished operation is not pending")
+		}
 		if op.Launch != nil {
 			if err := validateLaunch(*op.Launch); err != nil {
 				return err
@@ -238,23 +246,59 @@ func validateOperations(r Record) error {
 		if op.Incarnation != nil && !validIncarnation(*op.Incarnation) {
 			return errors.New("session: invalid prepared incarnation")
 		}
-		if op.ID == r.PendingOperation {
-			pending = !op.Complete
-		}
 	}
-	if r.PendingOperation != "" && !pending {
-		return errors.New("session: missing pending operation")
+	if r.PendingOperation != "" {
+		if len(r.Operations) == 0 || r.Operations[len(r.Operations)-1].ID != r.PendingOperation || r.Operations[len(r.Operations)-1].done() {
+			return errors.New("session: missing pending operation")
+		}
 	}
 	return nil
 }
+
+// pendingStage is the next step of the pending operation, or "" when none.
+func pendingStage(r Record) Stage {
+	if r.PendingOperation == "" {
+		return ""
+	}
+	return r.Operations[len(r.Operations)-1].Stage
+}
+
+// validatePhase checks that the phase describes the record's actual structure:
+// whether a writer may run (Active), whether it is fenced (ActualStopped),
+// which step is pending and whether cancellation was requested.
 func validatePhase(r Record) error {
+	if r.CancelOperation != "" && !validUUID(r.CancelOperation) {
+		return errors.New("session: invalid cancellation intent")
+	}
+	pending := pendingStage(r)
+	running := r.Active != nil && !r.Active.ActualStopped
+	fenced := r.Active != nil && r.Active.ActualStopped
+	cancelling := r.CancelOperation != ""
+	var valid bool
 	switch r.Phase {
-	case PhaseIdle, PhaseActive, PhaseStopping, PhaseUnknownStop, PhaseUnknownUsage, PhasePreparing, PhaseActivating, PhaseCancelled:
+	case PhaseIdle:
+		valid = r.Active == nil && pending == "" && !cancelling
+	case PhasePreparing:
+		valid = r.Active == nil && pending == stagePrepare && !cancelling
+	case PhaseActivating:
+		valid = r.Active == nil && pending == stageActivate && !cancelling
+	case PhaseActive:
+		valid = running && pending == "" && !cancelling
+	case PhaseStopping:
+		valid = running && pending == stageStop && !cancelling
+	case PhaseUnknownStop:
+		valid = running && (pending == stageStop || cancelling) || r.Active == nil && pending != "" && cancelling
+	case PhaseUnknownUsage:
+		valid = fenced && (pending == stageStop || cancelling)
+	case PhaseCancelling:
+		valid = cancelling
+	case PhaseCancelled:
+		valid = cancelling && r.Active == nil && pending == ""
 	default:
 		return fmt.Errorf("session: invalid phase %q", r.Phase)
 	}
-	if r.CancelOperation != "" && (!validUUID(r.CancelOperation) || r.Phase != PhaseCancelled) {
-		return errors.New("session: invalid cancellation intent")
+	if !valid {
+		return fmt.Errorf("session: phase %q contradicts the retained execution", r.Phase)
 	}
 	return nil
 }

@@ -36,7 +36,7 @@ func TestCancelUnknownActivationWithExactKnownIncarnation(t *testing.T) {
 	o.State = PlacementUnknown
 	remote.records[op.Launch.AllocationID] = o
 	r, err = c.Cancel(context.Background(), r.ID, uuid.NewString())
-	if err != nil || remote.aborted != 1 || r.Phase != PhaseCancelled || r.Uncertainty != PhaseUnknownUsage || r.Active == nil || !r.Active.ActualStopped {
+	if err != nil || remote.aborted != 1 || r.Phase != PhaseUnknownUsage || r.CancelOperation == "" || r.Active == nil || !r.Active.ActualStopped {
 		t.Fatalf("cancel unknown exact incarnation: %+v %v", r, err)
 	}
 	if r.Remaining[testCapability].Units.Value != 18 || r.Checkpoint.Metadata.SHA256 != start.Stopped.CheckpointDigest {
@@ -394,10 +394,10 @@ func TestPartialPreparationCancellationNeverRetriesFailedRestoreOrRefundsUnknown
 			}
 			r, err = c.Cancel(t.Context(), r.ID, uuid.NewString())
 			if identityKnown {
-				if err != nil || remote.aborted != 1 || r.Uncertainty != PhaseUnknownUsage || r.Active == nil || !r.Active.ActualStopped {
+				if err != nil || remote.aborted != 1 || r.Phase != PhaseUnknownUsage || r.Active == nil || !r.Active.ActualStopped {
 					t.Fatalf("exact partial preparation not stopped: %+v %v", r, err)
 				}
-			} else if err == nil || remote.aborted != 0 || r.Uncertainty != PhaseUnknownStop {
+			} else if err == nil || remote.aborted != 0 || r.Phase != PhaseUnknownStop {
 				t.Fatalf("unobserved resource accepted as stopped: %+v %v", r, err)
 			}
 			if remote.prepareCalls != 1 || remote.activated != 0 || r.Remaining[testCapability].Units.Value != 18 ||
@@ -453,7 +453,7 @@ func TestCancellationPersistsBeforeAbortAndNeverRefundsUnknownUsage(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Phase != PhaseCancelled || r.Uncertainty != PhaseUnknownUsage || r.Active == nil || !r.Active.ActualStopped || r.Remaining[testCapability].Units.Value != 18 || remote.aborted != 1 {
+	if r.Phase != PhaseUnknownUsage || r.CancelOperation == "" || r.Active == nil || !r.Active.ActualStopped || r.Remaining[testCapability].Units.Value != 18 || remote.aborted != 1 {
 		t.Fatalf("cancel refund/fence: %+v", r)
 	}
 	if _, err = c.Move(context.Background(), r.ID, uuid.NewString(), testLocal); err == nil {
@@ -574,7 +574,7 @@ func TestUnknownUsageCancellationSurvivesReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Phase != PhaseCancelled || got.Uncertainty != PhaseUnknownUsage || got.Active == nil || !got.Active.ActualStopped || got.Remaining[testCapability].Units.Value != 18 {
+	if got.Phase != PhaseUnknownUsage || got.CancelOperation == "" || got.Active == nil || !got.Active.ActualStopped || got.Remaining[testCapability].Units.Value != 18 {
 		t.Fatalf("cancel recovery refunded unknown usage: %+v", got)
 	}
 }
