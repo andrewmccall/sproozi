@@ -21,6 +21,11 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
 	"github.com/andrewmccall/sproozi/internal/webhook"
 )
 
@@ -89,5 +94,36 @@ func TestReplayStore_ConcurrentSafeFirstWriterWins(t *testing.T) {
 	}
 	if successCount != 1 {
 		t.Errorf("exactly one goroutine should succeed, got %d", successCount)
+	}
+}
+
+func TestK8sReplayStoreSweepRemovesOnlyExpiredRecords(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).Build()
+	s := webhook.NewK8sReplayStore(c, "replay-state")
+	ctx := context.Background()
+	if err := s.CheckAndRecord(ctx, "expired", time.Now().Add(-time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CheckAndRecord(ctx, "live", time.Now().Add(5*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.SweepExpired(ctx); err != nil {
+		t.Fatalf("SweepExpired: %v", err)
+	}
+
+	var records corev1.ConfigMapList
+	if err := c.List(ctx, &records, client.InNamespace("replay-state")); err != nil {
+		t.Fatal(err)
+	}
+	if len(records.Items) != 1 || records.Items[0].Data["event"] != "live" {
+		t.Fatalf("records after sweep = %v, want only the live record", records.Items)
+	}
+	if err := s.CheckAndRecord(ctx, "live", time.Now().Add(5*time.Minute)); err != webhook.ErrReplay {
+		t.Fatalf("live record after sweep: got %v, want ErrReplay", err)
 	}
 }

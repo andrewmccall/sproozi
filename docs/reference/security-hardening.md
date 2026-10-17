@@ -134,8 +134,8 @@ finalizers or infer sealed usage from Pod deletion.
 `retentionTTL` governs the AgentRun record. Budget ConfigMaps have no automatic
 retention/deletion path. Webhook replay keys are stored atomically in ConfigMaps
 in `sproozi-webhook-state`; they survive restarts and are shared by replicas.
-Expired replay entries are removed only when the same event key is checked again,
-so unique records accumulate. Operators must account for this retained state.
+The webhook deletes expired replay entries once per replay window, so this state
+stays bounded by recent event volume.
 
 ## Restrict trusted services
 
