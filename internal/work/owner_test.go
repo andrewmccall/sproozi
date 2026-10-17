@@ -25,6 +25,8 @@ import (
 const fixtureResource = "exact-resource"
 const fixtureTask = "Fix the repository"
 const fixtureModel = "model.inference"
+const executorKubernetes = "kubernetes"
+const repositorySproozi = "sproozi"
 
 const testThread = "01a126e8-288d-7350-9b52-627e16048343"
 const testInstructions = "Act only within the approved task"
@@ -142,7 +144,7 @@ func submit(t *testing.T, o *Owner) View {
 	}
 	return v
 }
-func waitPhase(t *testing.T, o *Owner, id, want string) View {
+func waitPhase(t *testing.T, o *Owner, id string, want Phase) View {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
@@ -225,7 +227,7 @@ func TestRemoteCatalogueRetainsCompletionAndExclusiveClaimAcrossRestart(t *testi
 		t.Fatal("claim lost after restart")
 	}
 	list, e := resumed.List(t.Context(), SessionQuery{})
-	if e != nil || len(list) != 1 || list[0].Phase != phaseHomeOwned {
+	if e != nil || len(list) != 1 || list[0].Phase != PhaseHomeOwned {
 		t.Fatalf("catalogue: %+v %v", list, e)
 	}
 	p.mu.Lock()

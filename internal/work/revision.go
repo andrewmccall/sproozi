@@ -24,7 +24,7 @@ func (o *Owner) revisionSource(source RevisionSource, target project.Association
 	if err = o.access(r); err != nil {
 		return nil, err
 	}
-	if r.Stopped == nil || r.Phase != phaseRetained && r.Phase != phaseHomeOwned && r.Phase != phaseExporting {
+	if r.Stopped == nil || !r.Phase.stopped() {
 		return nil, &profile.Rejection{Code: profile.CodeConflict}
 	}
 	association := view(r).Association

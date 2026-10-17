@@ -99,12 +99,12 @@ func discoverSessions(ctx context.Context, q options) catalogue {
 						v.err = err
 						for _, row := range rows {
 							ownership := "executor"
-							if row.Phase == "home-owned" {
+							if row.Phase == work.PhaseHomeOwned {
 								ownership = ownershipHome
 							}
 							v.rows = append(v.rows, catalogueRow{
 								Association: row.Association, ID: row.ID, Executor: name,
-								Ownership: ownership, Phase: row.Phase, Harness: row.Harness,
+								Ownership: ownership, Phase: string(row.Phase), Harness: row.Harness,
 								ExecutionID: row.ExecutionID, AllocationID: row.AllocationID, Incarnation: row.Incarnation,
 								Placement: row.Placement, ThreadID: row.ThreadID, Deadline: row.Deadline,
 							})

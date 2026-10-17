@@ -30,21 +30,36 @@ import (
 	"github.com/google/uuid"
 )
 
+const quietArg = "--quiet"
+
+// Phase is a work session's retained lifecycle position, reported in View.
+type Phase string
+
 const (
-	quietArg           = "--quiet"
-	phaseActive        = "active"
-	phaseCancelled     = "cancelled"
-	phaseCancelling    = "cancelling"
-	phaseExporting     = "exporting"
-	phaseFinalizing    = "finalizing"
-	phaseHomeOwned     = "home-owned"
-	executorKubernetes = "kubernetes"
-	phasePending       = "pending"
-	phasePreparing     = "preparing"
-	phaseRetained      = "retained"
-	repositorySproozi  = "sproozi"
-	phaseUnknown       = "unknown"
+	phasePending    Phase = "pending"
+	phasePreparing  Phase = "preparing"
+	phaseActive     Phase = "active"
+	phaseFinalizing Phase = "finalizing"
+	phaseRetained   Phase = "retained"
+	phaseExporting  Phase = "exporting"
+	// PhaseHomeOwned means a home claimed the stopped session; this owner
+	// keeps only its read-only record.
+	PhaseHomeOwned  Phase = "home-owned"
+	phaseCancelling Phase = "cancelling"
+	phaseCancelled  Phase = "cancelled"
+	phaseUnknown    Phase = "unknown"
 )
+
+// stopped reports a confirmed writer stop with a stored checkpoint, which can
+// seed fresh work or transfer to a home.
+func (p Phase) stopped() bool {
+	return p == phaseRetained || p == phaseExporting || p == PhaseHomeOwned
+}
+
+// live reports a phase the owner drives in the background until it settles.
+func (p Phase) live() bool {
+	return p == phasePending || p == phasePreparing || p == phaseActive || p == phaseFinalizing || p == phaseCancelling
+}
 
 type InitialPlacement interface {
 	session.Placement
@@ -98,7 +113,7 @@ type View struct {
 	Placement        string               `json:"placement"`
 	Incarnation      *session.Incarnation `json:"incarnation,omitempty"`
 	Harness          harness.NativeKind   `json:"harness"`
-	Phase            string               `json:"phase"`
+	Phase            Phase                `json:"phase"`
 	ThreadID         string               `json:"threadId,omitempty"`
 	Deadline         time.Time            `json:"deadline"`
 	CheckpointDigest string               `json:"checkpointDigest,omitempty"`
@@ -127,8 +142,8 @@ type record struct {
 	Intent           Submit               `json:"intent"`
 	IntentDigest     string               `json:"intentDigest"`
 	Launch           session.Launch       `json:"launch"`
-	Phase            string               `json:"phase"`
-	Progress         string               `json:"progress,omitempty"`
+	Phase            Phase                `json:"phase"`
+	Progress         Phase                `json:"progress,omitempty"`
 	Incarnation      *session.Incarnation `json:"incarnation,omitempty"`
 	Stopped          *session.Stopped     `json:"stopped,omitempty"`
 	InputDigest      string               `json:"inputDigest,omitempty"`
@@ -207,8 +222,7 @@ func Open(c Config) (*Owner, error) {
 				_ = o.Close()
 				return nil, readErr
 			}
-			if !project.Member(c.Projects, r.Association.Project, c.Principal) &&
-				r.Phase != phaseRetained && r.Phase != phaseExporting && r.Phase != phaseHomeOwned && r.Phase != phaseCancelled {
+			if !project.Member(c.Projects, r.Association.Project, c.Principal) && !r.Phase.stopped() && r.Phase != phaseCancelled {
 				if r.CancelOperation == "" {
 					r.CancelOperation = uuid.NewSHA1(uuid.NameSpaceOID, []byte(r.Launch.SessionID+"/project-revoked")).String()
 				}
@@ -218,7 +232,7 @@ func Open(c Config) (*Owner, error) {
 					return nil, err
 				}
 			}
-			if r.Phase == phasePending || r.Phase == phasePreparing || r.Phase == phaseActive || r.Phase == phaseFinalizing || r.Phase == phaseCancelling {
+			if r.Phase.live() {
 				o.dispatch(r.Launch.SessionID)
 			}
 		}
@@ -703,7 +717,7 @@ func (o *Owner) export(ctx context.Context, id, operation, digest string, claim 
 	if err = o.access(current); err != nil {
 		return Export{}, err
 	}
-	if current.Phase != phaseRetained && current.Phase != phaseExporting && current.Phase != phaseHomeOwned {
+	if !current.Phase.stopped() {
 		return Export{}, &profile.Rejection{Code: profile.CodeConflict}
 	}
 	unlock := o.jobs.Lock(id)
@@ -712,7 +726,7 @@ func (o *Owner) export(ctx context.Context, id, operation, digest string, claim 
 	if err != nil {
 		return Export{}, err
 	}
-	if r.Phase != phaseRetained && r.Phase != phaseExporting && r.Phase != phaseHomeOwned || r.Stopped == nil || r.CancelOperation != "" {
+	if !r.Phase.stopped() || r.Stopped == nil || r.CancelOperation != "" {
 		return Export{}, &profile.Rejection{Code: profile.CodeConflict}
 	}
 	if r.Transfer != "" && r.Transfer != operation {
@@ -733,7 +747,7 @@ func (o *Owner) export(ctx context.Context, id, operation, digest string, claim 
 		return Export{}, err
 	}
 	e := Export{Association: view(r).Association, CheckpointInfo: &info, ID: id, Harness: r.Launch.Harness,
-		Stopped: *r.Stopped, Checkpoint: b, OperationID: operation, Claimed: r.Phase == phaseHomeOwned}
+		Stopped: *r.Stopped, Checkpoint: b, OperationID: operation, Claimed: r.Phase == PhaseHomeOwned}
 	if err = ValidateExport(e, o.config.MaxCheckpointBytes); err != nil {
 		if o.config.Log != nil {
 			_, _ = fmt.Fprintf(o.config.Log, "Could not export work session %s: %v\n", id, err)
@@ -742,9 +756,9 @@ func (o *Owner) export(ctx context.Context, id, operation, digest string, claim 
 	}
 	r.Transfer = operation
 	if claim {
-		r.Phase = phaseHomeOwned
+		r.Phase = PhaseHomeOwned
 		e.Claimed = true
-	} else if r.Phase != phaseHomeOwned {
+	} else if r.Phase != PhaseHomeOwned {
 		r.Phase = phaseExporting
 	}
 	if err = o.save(r); err != nil {
@@ -796,7 +810,7 @@ func (o *Owner) Cancel(ctx context.Context, id, operation string) (View, error) 
 	if e = o.access(r); e != nil {
 		return View{}, e
 	}
-	if r.Phase == phaseHomeOwned || r.Phase == phaseExporting || r.Phase == phaseRetained {
+	if r.Phase.stopped() {
 		return View{}, &profile.Rejection{Code: profile.CodeConflict}
 	}
 	if r.CancelOperation != "" && r.CancelOperation != operation {
