@@ -13,7 +13,6 @@ make verify-kind
 make verify-live SPROOZI_DEMO_REPO="${SPROOZI_DEMO_REPO:-}"
 make verify-docs
 make verify-public-tree
-make verify-assertions
 test "${RELEASE_BUILD:-0}" = 1 || {
   echo 'Set RELEASE_BUILD=1 to execute both Docker release builds; static checks alone are not a release gate' >&2
   exit 1

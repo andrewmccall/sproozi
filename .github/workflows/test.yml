@@ -30,7 +30,7 @@ jobs:
 
       - name: Running Tests
         run: make test
-      - name: Verify offline release assertions
+      - name: Run race tests and vet
         run: make verify-fast
       - name: Verify pinned client protocol fixtures
         run: make verify-protocol

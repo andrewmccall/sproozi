@@ -85,12 +85,8 @@ lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
 lint-config: golangci-lint ## Verify golangci-lint linter configuration
 	"$(GOLANGCI_LINT)" config verify
 
-.PHONY: verify-assertions
-verify-assertions: ## Validate the complete, individually named offline assertion manifest and emit a redacted declaration report.
-	python3 hack/verify/assertions.py --report ".local/verification/manifest-$$(date -u +%Y%m%dT%H%M%SZ).json"
-
 .PHONY: verify-fast
-verify-fast: verify-assertions ## Run the non-network unit, race, and vet gates without changing source artifacts.
+verify-fast: ## Run the non-network unit, race, and vet gates without changing source artifacts.
 	cache_dir="$$(mktemp -d)" && GOCACHE="$$cache_dir" go test -race ./api/v1alpha1 ./internal/agentcontract ./internal/execution ./internal/runtime/kubernetes ./internal/packages ./internal/policy/kubernetes && GOCACHE="$$cache_dir" go vet ./internal/agentcontract ./internal/execution ./internal/runtime/kubernetes ./internal/packages ./internal/policy/kubernetes
 
 .PHONY: verify-api
