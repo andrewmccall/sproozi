@@ -224,9 +224,8 @@ approved GitHub `url` with an optional `ref`. URL fetching uses the worker's
 separately scoped GitHub capability; the trusted profile never imports a worker's
 credential configuration.
 
-`/work/mcp` exposes `sproozi_run`, `sproozi_status`, `sproozi_sessions` and
-`sproozi_session_info` to Hermes. Fixed JSON routes also support cancellation and
-recovery. The home principal additionally permits checkpoint export and the
+`/work/mcp` exposes `sproozi_run`, `sproozi_status`, `sproozi_cancel` and
+`sproozi_sessions` to Hermes. Fixed JSON routes also support recovery. The home principal additionally permits checkpoint export and the
 exclusive one-way claim; the task token cannot claim ownership. TLS and bearer
 validation happen before request decoding.
 

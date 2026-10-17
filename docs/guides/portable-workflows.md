@@ -177,8 +177,8 @@ refund evidence.
 
 Use the existing persistent [Hermes deployment and native MCP setup](hermes-orchestration.md).
 Register the profile's `/work/mcp` URL with its task bearer token and public CA.
-The supported tools are `sproozi_run`, `sproozi_status`, `sproozi_sessions` and
-`sproozi_session_info`. Hermes supplies this intent, without images, PodSpecs,
+The supported tools are `sproozi_run`, `sproozi_status`, `sproozi_cancel` and
+`sproozi_sessions`. Hermes supplies this intent, without images, PodSpecs,
 Kubernetes tokens or native-state paths:
 
 ```json
