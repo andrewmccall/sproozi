@@ -105,6 +105,12 @@ cache-category checks. Missing consumed-category pricing or uncertain settlement
 can still withhold a response after provider consumption. Keep the table aligned
 with approved models and use provider-side monitoring and limits.
 
+Model handlers refuse a request body that is not one JSON value, or that
+repeats a key within one object, comparing keys without regard to case. The
+gateway's checks and the provider could otherwise read different values from
+the same body. `OPENAI_UPSTREAM_URL` and `ANTHROPIC_UPSTREAM_URL` must be bare
+`https` origins.
+
 OpenAI admission accepts only `GET /v1/models`, `POST /v1/responses` and
 `POST /v1/chat/completions`, without query strings or escaped paths. ChatGPT
 retains its narrower Responses contract. Both OpenAI authentication modes remove
