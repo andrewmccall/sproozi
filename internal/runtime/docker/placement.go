@@ -261,7 +261,10 @@ func (p *Placement) drivePrepare(ctx context.Context, r *placementRecord, data [
 	if err != nil {
 		return err
 	}
-	contract := harness.NativeLaunch{Harness: p.config.Harness, Deadline: r.Launch.Deadline, ThreadID: r.Launch.ThreadID, Instructions: p.config.Instructions, InstructionDigest: p.config.InstructionDigest, Env: access.Env, Model: access.Model, Options: access.Options, ClientConfig: access.ClientConfig, TrustBundlePEM: access.TrustBundlePEM, RolloutMaxBytes: p.config.MaxCheckpointBytes}
+	contract := harness.NativeLaunch{Harness: p.config.Harness, Deadline: r.Launch.Deadline, ThreadID: r.Launch.ThreadID, Task: r.Launch.Task, Instructions: p.config.Instructions, InstructionDigest: p.config.InstructionDigest, Env: access.Env, Model: access.Model, Options: access.Options, ClientConfig: access.ClientConfig, TrustBundlePEM: access.TrustBundlePEM, RolloutMaxBytes: harness.NativeRolloutMaxBytes}
+	if err := contract.Validate(time.Now()); err != nil {
+		return err
+	}
 	input, err := json.Marshal(contract)
 	if err != nil {
 		return err
@@ -270,7 +273,7 @@ func (p *Placement) drivePrepare(ctx context.Context, r *placementRecord, data [
 	if err != nil {
 		return err
 	}
-	if err = nativeReply(output, phasePrepared); err != nil {
+	if _, err = harness.DecodeNativeReply(output, "configure", phasePrepared, contract.ThreadID); err != nil {
 		return err
 	}
 	r.Phase = phasePrepared
@@ -292,13 +295,6 @@ func (p *Placement) bound(l session.Launch, i session.Incarnation) (placementRec
 		return r, errors.New("docker execution incarnation mismatch")
 	}
 	return r, nil
-}
-func nativeReply(data []byte, state string) error {
-	var reply struct{ Error, State string }
-	if json.Unmarshal(data, &reply) != nil || reply.Error != "" || reply.State != state {
-		return errors.New("native fixed operation was not acknowledged")
-	}
-	return nil
 }
 func (p *Placement) verify(ctx context.Context, r placementRecord) error {
 	if r.Agent == nil || r.Anchor == nil || r.Helper == nil || r.Volume == nil {
@@ -358,7 +354,7 @@ func (p *Placement) activate(ctx context.Context, r *placementRecord, i session.
 	if err != nil {
 		return err
 	}
-	if err = nativeReply(output, phaseActive); err != nil {
+	if _, err = harness.DecodeInitialNativeReply(output, "activate", phaseActive, r.Launch.ThreadID); err != nil {
 		return err
 	}
 	r.Phase = phaseActive
@@ -538,9 +534,9 @@ func (p *Placement) bindObservedNative(ctx context.Context, r *placementRecord, 
 		if err != nil {
 			return err
 		}
-		var status struct{ Error, State, ThreadID string }
-		if json.Unmarshal(output, &status) != nil || status.Error != "" {
-			return errors.New("native UUID observation unavailable")
+		status, err := harness.DecodeInitialNativeReply(output, "status", phaseStopping, r.Launch.ThreadID)
+		if err != nil {
+			return err
 		}
 		if validUUID(status.ThreadID) {
 			if err = p.authority.BindNative(ctx, *r.Initial, i, status.ThreadID); err != nil {
@@ -761,7 +757,7 @@ func (p *Placement) quiesceNative(ctx context.Context, r *placementRecord, i ses
 		if err != nil {
 			return err
 		}
-		if err = nativeReply(output, phaseStopping); err != nil {
+		if _, err = harness.DecodeInitialNativeReply(output, "gate", phaseStopping, r.Launch.ThreadID); err != nil {
 			return err
 		}
 		if r.Initial != nil && r.Launch.ThreadID == "" {
@@ -779,7 +775,7 @@ func (p *Placement) quiesceNative(ctx context.Context, r *placementRecord, i ses
 			if observeErr != nil || observed.Running || observed.PID != 0 {
 				return err
 			}
-		} else if err = nativeReply(output, phaseStopped); err != nil {
+		} else if _, err = harness.DecodeNativeReply(output, "quiesce", phaseStopped, r.Launch.ThreadID); err != nil {
 			return err
 		}
 	} else if r.Launch.Harness == harness.NativeClaude {

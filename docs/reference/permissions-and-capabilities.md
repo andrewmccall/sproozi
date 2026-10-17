@@ -22,8 +22,14 @@ The workload ServiceAccount has no Kubernetes API grant. The shared gateway's
 resource-read permissions for agent investigation are:
 
 - `get`, `list`, `watch`
-- core resources: `pods`, `pods/log`, `events`, `services`
-- apps resources: `deployments`, `replicasets`, `statefulsets`
+- core/v1 resources: `pods`, `pods/log`, `events`, `services`
+- apps/v1 resources: `deployments`, `replicasets`, `statefulsets`
+
+The group/version/resource combination is part of authorization. A matching
+resource name under another API group or version is denied. Only `pods/log` is
+an allowed subresource. Discovery is limited to the supported core/apps v1 paths.
+The handler removes all `Impersonate-*` headers and refuses redirects so the
+forwarded operation stays bound to the authorized target.
 
 The investigation route does not authorize:
 

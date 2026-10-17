@@ -86,6 +86,13 @@ The token identifies the run. Its requested capabilities and current policy
 determine permission. New requests check that the run is active; open sessions
 close after bounded revalidation. The agent Pod has no Sproozi proxy sidecar.
 
+Both backends limit connections before TLS, sessions per execution and authority
+lookups. Authentication and live lookups have short deadlines. Late lookup
+results cannot restore permission, and lookup capacity stays occupied until the
+dependency returns. [Transport limits](../reference/security-hardening.md#protect-transport-and-identities)
+give the defaults and explain why closing a connection does not prove that
+upstream work stopped.
+
 The gateway routes each request to a handler. A handler can check service
 actions, MCP tools and arguments, or an exact network destination. These checks
 have different limits. See [capabilities and
@@ -196,6 +203,18 @@ conversation at the checkpoint's Git commit. It does not restore unfinished
 changes or the old conversation. See [Projects and workspace
 revisions](../reference/projects-and-revisions.md) and [ADR
 0013](../adr/0013-configured-projects-and-workspace-revisions.md).
+
+Both placements share trusted native launch settings and strict checks of the
+operation, state and native conversation ID in control replies. Each backend
+still owns physical stop and usage-accounting checks. See [native
+control](../reference/native-control.md) and [ADR
+0014](../adr/0014-review-boundaries-and-native-contracts.md). ACP and AHP are
+possible future integrations; neither is exposed as a Sproozi endpoint.
+
+The public `id` addresses the durable Sproozi session. `executionId`,
+`allocationId` and `incarnation` identify the current execution, visit and exact
+writer separately. See [session commands](../reference/session-commands.md) for
+owner selection and catalogue provenance.
 
 ## Implementation locations
 

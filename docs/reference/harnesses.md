@@ -173,8 +173,14 @@ This serializes capped calls within a run, because `max_tokens` limits output
 rather than total input and output. Ambiguous provider consumption forfeits
 reserved tokens and dollars. Successful provider usage settles the actual
 consumption; known rejected provider responses release the reservation.
-OpenAI's output-bound admission behavior remains unchanged and can underestimate
-total usage. Neither route provides a hard provider-spending guarantee.
+OpenAI's output-bound admission can underestimate total usage. Cost-bounded
+API-key inference now requires an exact positive input/cached/output price row
+before provider work and selects `service_tier: default`, refusing explicit
+nondefault tiers. Workload account/project selector headers are removed in both
+OpenAI authentication modes. The API-key route still lacks a complete billable-field
+allowlist and pricing for all hosted/non-token work. Native client-executed tool
+declarations are preserved. Neither route provides a hard provider-spending
+guarantee. See [model admission](../guides/model-provider-auth.md#protocol-and-budgets).
 
 For a monetary cap, configure an exact model row in administrator pricing with
 positive input, cached input and output rates. Cache creation also requires

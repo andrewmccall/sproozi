@@ -10,7 +10,7 @@ provider should require trusted configuration and policy, without a Sproozi
 adapter for every server. Deliver native semantic tools and configured remote
 MCP tools through the existing authenticated gateway and run capability model.
 
-Current compatibility policy: [ADR 0014](0014-default-clients-and-native-tool-schemas.md)
+Current compatibility policy: [ADR 0015](0015-default-clients-and-native-tool-schemas.md)
 replaces exact client-version selection and the combined MCP discovery schema.
 Other decisions in this record remain in effect.
 

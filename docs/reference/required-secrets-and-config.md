@@ -74,10 +74,13 @@ Never mount these credentials directly into sandbox workloads.
 When `model.inference` is enabled, the shared gateway loads `MODEL_PRICING_PATH` at startup (default
 `/etc/sproozi/model/pricing.json`). Startup fails closed if the file is absent,
 malformed, empty, or contains non-positive prices. Model inference under a
-positive `budgets[model.inference].maxCostMicros` on the OpenAI path rejects a
-successful response for an unpriced model during settlement, after the upstream
-call. Anthropic requires the model price before forwarding a cost-capped request. A missing price
-does not prevent provider consumption.
+positive `budgets[model.inference].maxCostMicros` requires an exact model row with
+positive input, cached-input and output rates before OpenAI API-key or Anthropic
+inference. OpenAI selects the standard `default` service tier and refuses explicit
+nondefault tiers under that cap. Token-only API-key requests and model discovery
+do not require a price row. Unknown consumed categories can still fail settlement
+after provider work. This table does not price all non-token provider charges or
+establish a hard spending ceiling.
 
 Prices are integer millionths of a US dollar per million tokens:
 

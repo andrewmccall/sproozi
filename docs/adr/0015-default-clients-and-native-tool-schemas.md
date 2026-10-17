@@ -58,6 +58,10 @@ reservation. Discovery requests do not enter this queue.
 This replaces the version-pinning portions of ADRs 0008, 0010 and 0011, and the
 combined discovery-schema presentation in ADR 0001. Their state, lifecycle,
 credential and authorization boundaries remain in effect.
+The shared native launch and reply checks in [ADR
+0014](0014-review-boundaries-and-native-contracts.md) also remain in effect.
+They validate the launch contract and selected conversation without selecting
+an exact client release.
 
 ## Alternatives and tradeoffs
 

@@ -39,7 +39,7 @@ access. Keep refusal explicit when those guarantees cannot be established.
 [ADR 0007](../../adr/0007-codex-round-trip-before-harness-expansion.md) selects
 Claude Code after Codex. The current workflow supports those two selected clients.
 [ADR 0011](../../adr/0011-native-session-compatibility-and-completion.md) records
-the Claude transcript and completion contract. [ADR 0014](../../adr/0014-default-clients-and-native-tool-schemas.md)
+the Claude transcript and completion contract. [ADR 0015](../../adr/0015-default-clients-and-native-tool-schemas.md)
 removes exact-version checks.
 OpenCode and Hermes mobility remain later candidates. Each adapter must handle the client's state format, completion,
 tool records and resume command.

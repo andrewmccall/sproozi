@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/jsonschema-go/jsonschema"
+	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
@@ -23,6 +24,7 @@ import (
 )
 
 const maxResponseBytes = 8 << 20
+const discoverMethod = "server/discover"
 
 type HandlerConfig struct {
 	Registry    *Registry
@@ -98,18 +100,21 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.deny(w, event, http.StatusBadRequest, "invalid MCP request JSON")
 		return
 	}
-	var envelope struct {
-		Method string `json:"method"`
-		Params struct {
-			Name string `json:"name"`
-		} `json:"params"`
+	message, err := jsonrpc.DecodeMessage(body)
+	request, supported := message.(*jsonrpc.Request)
+	if err != nil || !supported || !supportedRequest(request) {
+		h.deny(w, event, http.StatusBadRequest, "unsupported MCP request envelope")
+		return
 	}
-	if err := json.Unmarshal(body, &envelope); err != nil {
+	var params struct {
+		Name string `json:"name"`
+	}
+	if len(request.Params) != 0 && json.Unmarshal(request.Params, &params) != nil {
 		h.deny(w, event, http.StatusBadRequest, "invalid MCP request envelope")
 		return
 	}
-	if envelope.Method == "tools/call" {
-		if _, permitted := rules[envelope.Params.Name]; !permitted {
+	if request.Method == "tools/call" {
+		if _, permitted := rules[params.Name]; !permitted {
 			event.Operation = "mcp.tools.call"
 			h.deny(w, event, http.StatusForbidden, "MCP tool denied")
 			return
@@ -146,6 +151,20 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	sdk.NewStreamableHTTPHandler(func(*http.Request) *sdk.Server { return server }, &sdk.StreamableHTTPOptions{
 		Stateless: true, JSONResponse: true, MaxRequestBodyBytes: 64 << 10, DisableLocalhostProtection: true,
 	}).ServeHTTP(w, r.WithContext(ctx))
+}
+
+// The SDK still owns JSON-RPC decoding and dispatch. This request-local tool
+// adapter admits its supported calls and notifications before expensive setup;
+// retained downstream subscriptions are outside its lifetime and authority.
+func supportedRequest(request *jsonrpc.Request) bool {
+	switch request.Method {
+	case discoverMethod, "initialize", "tools/list", "tools/call", "ping":
+		return request.IsCall()
+	case "notifications/initialized", "notifications/cancelled":
+		return !request.IsCall()
+	default:
+		return false
+	}
 }
 
 func (h *Handler) prepare(ctx context.Context, upstream *sdk.ClientSession,
@@ -264,13 +283,12 @@ func (h *Handler) connect(ctx context.Context, registration registration) (*sdk.
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	// Keep the SDK's session reader alive while the per-call context sends its
-	// bounded cancellation notification. Closing the reader with the request
-	// can discard that notification before the remote tool observes revocation.
-	// HTTPClient bounds initialization; discovery and calls still use ctx, and
-	// ServeHTTP closes this exclusively owned session on every exit path.
+	// Connect and discovery share the overall request deadline, so negotiation
+	// cannot extend setup by consuming several independent HTTP timeouts. The
+	// SDK detaches its connection reader internally; cancellation notifications
+	// still have that independent reader until our owned session is closed.
 	return sdk.NewClient(&sdk.Implementation{Name: "sproozi-mcp", Version: "v0.1.0"}, &sdk.ClientOptions{Logger: logger}).Connect(
-		context.WithoutCancel(ctx), &sdk.StreamableClientTransport{Endpoint: registration.endpoint.String(), HTTPClient: client,
+		ctx, &sdk.StreamableClientTransport{Endpoint: registration.endpoint.String(), HTTPClient: client,
 			DisableStandaloneSSE: true, MaxRetries: -1}, nil)
 }
 

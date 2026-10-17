@@ -25,7 +25,7 @@ func TestRuntimeDigestPinAllowsLocalRegistryPort(t *testing.T) {
 				Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1"), corev1.ResourceMemory: resource.MustParse("1Gi")}},
 				SecurityContext: &corev1.SecurityContext{
 					AllowPrivilegeEscalation: boolPtr(false), ReadOnlyRootFilesystem: boolPtr(true), RunAsNonRoot: boolPtr(true),
-					Capabilities:   &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
+					Capabilities:   &corev1.Capabilities{Drop: []corev1.Capability{runtimeDropAll}},
 					SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 				},
 			}},
@@ -86,7 +86,7 @@ func TestValidateRuntimeTemplateRejectsAdditionalContainerClasses(t *testing.T) 
 							AllowPrivilegeEscalation: &allowPrivilegeEscalation,
 							ReadOnlyRootFilesystem:   &readOnlyRootFilesystem,
 							RunAsNonRoot:             &runAsNonRoot,
-							Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
+							Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{runtimeDropAll}},
 							SeccompProfile:           &corev1.SeccompProfile{Type: runtimeDefault},
 						},
 					}},

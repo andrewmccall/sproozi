@@ -56,7 +56,9 @@ const (
 	SandboxStatusRunning   SandboxStatus = "Running"
 	SandboxStatusSucceeded SandboxStatus = "Succeeded"
 	SandboxStatusFailed    SandboxStatus = "Failed"
-	// SandboxStatusUnknown is returned when the Pod does not exist.
+	// SandboxStatusAbsent means a successful read established that the Pod is missing.
+	SandboxStatusAbsent SandboxStatus = "Absent"
+	// SandboxStatusUnknown means an existing Pod has an uncertain lifecycle phase.
 	SandboxStatusUnknown SandboxStatus = "Unknown"
 )
 
@@ -67,7 +69,7 @@ type SandboxClient interface {
 	Ensure(ctx context.Context, run *sprooziv1alpha1.AgentRun, rt *sprooziv1alpha1.AgentRuntime) (string, error)
 
 	// GetStatus returns the current lifecycle status of the named Sandbox.
-	// Returns SandboxStatusUnknown if the Pod does not exist.
+	// Returns SandboxStatusAbsent if the Pod does not exist.
 	GetStatus(ctx context.Context, name string) (SandboxStatus, error)
 
 	// GetCompletion observes actual exit and optional untrusted result from one
@@ -148,6 +150,7 @@ func validateExistingSandbox(existing, wanted *corev1.Pod) error {
 	if existing.Spec.ServiceAccountName != wanted.Spec.ServiceAccountName ||
 		existing.Spec.AutomountServiceAccountToken == nil || !reflect.DeepEqual(existing.Spec.AutomountServiceAccountToken, wanted.Spec.AutomountServiceAccountToken) ||
 		existing.Spec.HostNetwork != wanted.Spec.HostNetwork || existing.Spec.HostPID != wanted.Spec.HostPID || existing.Spec.HostIPC != wanted.Spec.HostIPC ||
+		(existing.Spec.ShareProcessNamespace != nil && *existing.Spec.ShareProcessNamespace) ||
 		existing.Spec.RestartPolicy != wanted.Spec.RestartPolicy ||
 		!reflect.DeepEqual(existing.Spec.SecurityContext, wanted.Spec.SecurityContext) ||
 		existing.Spec.RuntimeClassName != wanted.Spec.RuntimeClassName ||
@@ -165,7 +168,7 @@ func (p *PodSandboxClient) GetStatus(ctx context.Context, name string) (SandboxS
 	var pod corev1.Pod
 	if err := p.c.Get(ctx, client.ObjectKey{Namespace: AgentsNamespace, Name: name}, &pod); err != nil {
 		if apierrors.IsNotFound(err) {
-			return SandboxStatusUnknown, nil
+			return SandboxStatusAbsent, nil
 		}
 		return SandboxStatusUnknown, err
 	}

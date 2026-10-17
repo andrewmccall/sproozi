@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/andrewmccall/sproozi/internal/session/profile"
 	"github.com/andrewmccall/sproozi/internal/workspace"
 	"github.com/google/uuid"
 )
@@ -56,12 +57,12 @@ func TestFreshNativeWorkStartsAtRecordedCommitAndKeepsSourceReceipt(t *testing.T
 	}
 	q.RequestID = uuid.NewString()
 	q.WorkspaceFrom.Digest = "wrong-digest"
-	if _, err = o.Submit(t.Context(), q); err == nil {
+	if _, err = o.Submit(t.Context(), q); err == nil || outcomeCode(err) != profile.CodeInvalid {
 		t.Fatal("Unbound checkpoint selected a fresh execution")
 	}
 	q.WorkspaceFrom.Digest = source.CheckpointDigest
 	q.WorkspaceFrom.Revision = "main"
-	if _, err = o.Submit(t.Context(), q); err == nil {
+	if _, err = o.Submit(t.Context(), q); err == nil || outcomeCode(err) != profile.CodeInvalid {
 		t.Fatal("A moving ref selected an exact recorded revision")
 	}
 	p.mu.Lock()

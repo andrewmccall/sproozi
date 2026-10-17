@@ -321,14 +321,14 @@ func (r *AgentRunReconciler) handleRunning(ctx context.Context, run *sprooziv1al
 	}
 
 	switch sandboxStatus {
-	case k8sresources.SandboxStatusPending, k8sresources.SandboxStatusRunning:
+	case k8sresources.SandboxStatusPending, k8sresources.SandboxStatusRunning, k8sresources.SandboxStatusUnknown:
 		remaining := time.Until(deadline)
 		return ctrl.Result{RequeueAfter: remaining}, nil
 
 	case k8sresources.SandboxStatusSucceeded, k8sresources.SandboxStatusFailed:
 		return r.processSandboxExit(ctx, run, sandboxName)
 
-	case k8sresources.SandboxStatusUnknown:
+	case k8sresources.SandboxStatusAbsent:
 		phase, reason := sandboxPhaseToRunPhase(sandboxStatus)
 		logger.Info("Sandbox terminated abnormally", "name", run.Name, "sandboxStatus", sandboxStatus)
 		_, err := r.transitionPhase(ctx, run, phase, reason, "")
@@ -345,14 +345,14 @@ func (r *AgentRunReconciler) handleRunning(ctx context.Context, run *sprooziv1al
 func (r *AgentRunReconciler) handleTerminal(ctx context.Context, run *sprooziv1alpha1.AgentRun) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	if run.Status.Identity.ServiceAccountName != "" || run.Status.Identity.SandboxName != "" {
-		complete, err := r.ReconcileRelease(ctx, run)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
-		if !complete {
-			return ctrl.Result{RequeueAfter: time.Second}, nil
-		}
+	complete, err := r.ReconcileRelease(ctx, run)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if !complete {
+		return ctrl.Result{RequeueAfter: time.Second}, nil
+	}
+	if run.Status.Identity.ServiceAccountName != "" || run.Status.Identity.SandboxName != "" || len(run.Status.Identity.GrantedNamespaces) != 0 {
 		run.Status.Identity = sprooziv1alpha1.AgentRunIdentity{}
 		if err := r.Status().Update(ctx, run); err != nil {
 			return ctrl.Result{}, err
@@ -385,6 +385,24 @@ func (r *AgentRunReconciler) handleTerminal(ctx context.Context, run *sprooziv1a
 // retention and explicit deletion. Network isolation is deliberately retained
 // until the sandbox is observed stopped or absent.
 func (r *AgentRunReconciler) ReconcileRelease(ctx context.Context, run *sprooziv1alpha1.AgentRun) (bool, error) {
+	// A Pod create may succeed before the status write. Recover only the
+	// deterministic object bearing this immutable Run identity.
+	if run.UID == "" {
+		return false, errors.New("cannot release AgentRun without UID")
+	}
+	if run.Status.Identity.SandboxName == "" {
+		var pod corev1.Pod
+		err := r.Get(ctx, client.ObjectKey{Namespace: k8sresources.AgentsNamespace, Name: k8sresources.RunName(run.UID)}, &pod)
+		if err != nil && !apierrors.IsNotFound(err) {
+			return false, err
+		}
+		if err == nil {
+			if pod.Labels[k8sresources.ManagedByLabel] != k8sresources.ManagedByValue || pod.Labels[k8sresources.RunUIDLabel] != string(run.UID) {
+				return false, errors.New("cannot recover sandbox with different Run identity")
+			}
+			run.Status.Identity.SandboxName = pod.Name
+		}
+	}
 	if run.Status.Identity.SandboxName != "" {
 		if r.SandboxClient == nil {
 			return false, errors.New("cannot release AgentRun without sandbox client")
@@ -402,7 +420,7 @@ func (r *AgentRunReconciler) ReconcileRelease(ctx context.Context, run *sprooziv
 		if err != nil {
 			return false, err
 		}
-		if status == k8sresources.SandboxStatusPending || status == k8sresources.SandboxStatusRunning {
+		if status != k8sresources.SandboxStatusAbsent && status != k8sresources.SandboxStatusSucceeded && status != k8sresources.SandboxStatusFailed {
 			return false, nil
 		}
 	}
@@ -411,13 +429,15 @@ func (r *AgentRunReconciler) ReconcileRelease(ctx context.Context, run *sprooziv
 	if err := k8sresources.RevokeAgentContract(ctx, r.Client, run, string(run.UID)); err != nil {
 		return false, err
 	}
-	if saName := run.Status.Identity.ServiceAccountName; saName != "" {
-		if err := k8sresources.RevokeNetworkPolicy(ctx, r.Client, saName, string(run.UID)); err != nil {
-			return false, err
-		}
-		if err := k8sresources.RevokeServiceAccount(ctx, r.Client, saName, string(run.UID)); err != nil {
-			return false, err
-		}
+	saName := run.Status.Identity.ServiceAccountName
+	if saName == "" {
+		saName = k8sresources.RunName(run.UID)
+	}
+	if err := k8sresources.RevokeNetworkPolicy(ctx, r.Client, saName, string(run.UID)); err != nil {
+		return false, err
+	}
+	if err := k8sresources.RevokeServiceAccount(ctx, r.Client, saName, string(run.UID)); err != nil {
+		return false, err
 	}
 	return true, nil
 }

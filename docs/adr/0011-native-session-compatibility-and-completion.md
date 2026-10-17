@@ -6,7 +6,7 @@ Implementation: pinned foreground Codex and Claude compatibility verified
 Live extended Codex and ordinary Claude roundtrip acceptance: passed on 2026-10-12
 Unassessed: Claude's full held placement move/cancel matrix and broader native state
 
-Current compatibility policy: [ADR 0014](0014-default-clients-and-native-tool-schemas.md)
+Current compatibility policy: [ADR 0015](0015-default-clients-and-native-tool-schemas.md)
 replaces exact client-version selection and extends supported native context
 records. Identity, completion, writer-fencing and accounting rules remain in effect.
 

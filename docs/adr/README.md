@@ -49,7 +49,7 @@ the old record superseded and link both records.
 ## Decisions
 
 These records preserve the reasons for each design. A later record can replace
-part of an earlier decision. ADR 0014 replaces exact client-version selection
+part of an earlier decision. ADR 0015 replaces exact client-version selection
 and the combined MCP discovery schema.
 
 | Decision | Topic |
@@ -67,4 +67,5 @@ and the combined MCP discovery schema.
 | [0011](0011-native-session-compatibility-and-completion.md) | Native state compatibility and completion. |
 | [0012](0012-retained-work-and-fresh-session-continuations.md) | Retained work and local resume. |
 | [0013](0013-configured-projects-and-workspace-revisions.md) | Configured Projects and workspace revisions. |
-| [0014](0014-default-clients-and-native-tool-schemas.md) | Default clients, MCP schemas and model requests sharing an allowance. |
+| [0014](0014-review-boundaries-and-native-contracts.md) | Shared gateway limits, native contracts and CLI identities. |
+| [0015](0015-default-clients-and-native-tool-schemas.md) | Default clients, MCP schemas and model requests sharing an allowance. |

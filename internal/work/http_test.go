@@ -11,14 +11,19 @@ import (
 )
 
 func TestMCPDiscoveryAndSessionListingUseObjectSchemas(t *testing.T) {
-	c, _ := fixture(t)
+	c, _ := projectFixture(t)
 	o, err := Open(c)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = o.Close() }()
-	v := submit(t, o)
+	v, err := o.Submit(t.Context(), projectRequest("sproozi-dev"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	waitPhase(t, o, v.ID, phaseRetained)
+	standalone := submit(t, o)
+	waitPhase(t, o, standalone.ID, phaseRetained)
 	token := strings.Repeat("t", 32)
 	h, err := NewHandler(o, token, strings.Repeat("h", 32))
 	if err != nil {
@@ -49,14 +54,39 @@ func TestMCPDiscoveryAndSessionListingUseObjectSchemas(t *testing.T) {
 			t.Fatalf("MCP output schema rejects stock client discovery: %#v", definition)
 		}
 	}
-	result := call(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"sproozi_sessions","arguments":{}}}`)
+	result := call(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"sproozi_sessions","arguments":{"project":"sproozi-dev"}}}`)
 	content := result["structuredContent"].(map[string]any)
 	sessions := content["sessions"].([]any)
 	if len(sessions) != 1 {
 		t.Fatalf("Missing retained native job: %#v", result)
 	}
 	view := sessions[0].(map[string]any)
-	if view["id"] != v.ID || view["phase"] != "retained" || view["repository"] != "sproozi" || view["result"] != "Verified the repository change" {
+	if view["id"] != v.ID || view["executionId"] != v.ID || view["allocationId"] != v.AllocationID || view["placement"] != "kubernetes" || view["project"] != "sproozi-dev" || view["phase"] != "retained" || view["repository"] != "sproozi" || view["result"] != "Verified the repository change" {
 		t.Fatalf("Unexpected native catalogue response: %#v", view)
+	}
+	for _, tc := range []struct {
+		body   string
+		want   string
+		status int
+	}{
+		{`{"project":"sproozi-dev"}`, v.ID, http.StatusOK},
+		{`{"project":"home-ops"}`, "[]", http.StatusOK},
+		{`{"project":"private"}`, "[]", http.StatusOK},
+		{`{"project":"bad/project"}`, `{"error":"invalid_request"}`, http.StatusBadRequest},
+		{`{"project":1}`, `{"error":"invalid_request"}`, http.StatusBadRequest},
+	} {
+		r := httptest.NewRequest(http.MethodPost, "/work/list", strings.NewReader(tc.body))
+		r.TLS = &tls.ConnectionState{Version: tls.VersionTLS13}
+		r.Header.Set("Authorization", "Bearer "+token)
+		r.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != tc.status || !strings.Contains(w.Body.String(), tc.want) || strings.Contains(w.Body.String(), standalone.ID) {
+			t.Fatalf("Filtered catalogue %s returned %d %s", tc.body, w.Code, w.Body.String())
+		}
+	}
+	invalid := call(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"sproozi_sessions","arguments":{"project":"bad/project"}}}`)
+	if invalid["isError"] != true || !strings.Contains(invalid["content"].([]any)[0].(map[string]any)["text"].(string), "invalid_request:") {
+		t.Fatalf("Invalid project filter lost its safe outcome: %#v", invalid)
 	}
 }

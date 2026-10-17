@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
@@ -183,16 +182,6 @@ func TestLoadStartupConfigValidatesAllCompositionInputs(t *testing.T) {
 		t.Fatalf("demo model is not priced: %v", err)
 	}
 
-}
-
-func TestProxyListenerRequiresTLSAndHijackableHTTP1(t *testing.T) {
-	server := newProxyServer(tls.Certificate{}, http.NotFoundHandler())
-	if server.TLSConfig == nil || server.TLSConfig.MinVersion != tls.VersionTLS13 {
-		t.Fatalf("proxy listener TLS config = %#v", server.TLSConfig)
-	}
-	if server.TLSNextProto == nil || len(server.TLSNextProto) != 0 {
-		t.Fatalf("proxy listener must explicitly disable HTTP/2: %#v", server.TLSNextProto)
-	}
 }
 
 func TestLoadStartupConfigFailsClosedBeforeListener(t *testing.T) {

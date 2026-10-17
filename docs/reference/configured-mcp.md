@@ -88,12 +88,10 @@ array rules can restrict tenants, repositories, namespaces or other tool inputs.
 Use `required` when an argument must be present. These predicates constrain the
 request; they do not verify a server's interpretation of it.
 
-The gateway validates the discovered schema and policy restriction
-independently, so a policy restriction cannot weaken the provider schema or
-change its dialect. Discovery preserves the provider schema. Additional policy argument restrictions
-appear in the tool description. The gateway validates both independently before
-forwarding a call. Draft 2020-12 and draft-07
-are supported. Schemas are bounded to 32 KiB, 256 schema nodes and 4096 expanded
+Discovery preserves the provider's input schema and describes additional policy
+restrictions in the tool description. Before forwarding a call, the gateway
+validates both independently. A policy restriction cannot weaken the provider
+schema or change its dialect. Draft 2020-12 and draft-07 are supported. Schemas are bounded to 32 KiB, 256 schema nodes and 4096 expanded
 evaluation nodes. Acyclic local JSON Pointer references are supported; external
 or cyclic references, dynamic references, anchors and nested resource IDs are
 rejected. Policy restrictions also reject unknown keywords, format assertions
@@ -150,9 +148,20 @@ unsupported. Standalone SSE listeners, sampling, elicitation, roots, managed std
 and OAuth consent flows are outside this implementation. JSON or request-local
 SSE responses use the official SDK with redirects and retries disabled.
 
-Tool work and upstream HTTP operations have 30-second timeouts. Cancellation
-notification delivery can take up to five additional seconds before session
-teardown. Request bodies are limited to 64 KiB and upstream responses to 8 MiB. Discovery is bounded to eight pages and 256 tools; policy selects
+Before upstream setup, the SDK decodes the JSON-RPC envelope. The bridge admits
+`server/discover`, `initialize`, `tools/list`, `tools/call` and `ping` calls plus
+initialization and cancellation notifications. Unsupported methods and retained
+`subscriptions/listen` requests are rejected before upstream setup.
+
+One overall 30-second request context covers protocol negotiation, legacy
+initialization fallback, discovery and tool work. Upstream HTTP exchanges also
+have a 30-second timeout. The SDK keeps its connection reader independent of
+individual call cancellation so bounded cancellation notifications can be sent.
+Notification delivery can take up to five additional seconds, and detached SDK
+cleanup DELETE can use its separate HTTP timeout. The overall handler wall-clock
+time can therefore exceed 30 seconds during cleanup. Request bodies are limited
+to 64 KiB and upstream responses to 8 MiB. Discovery is bounded to eight pages
+and 256 tools; policy selects
 at most 128 tools per server and the registry holds at most 32 servers. Session
 DELETE is attempted on close with the bounded HTTP timeout; provider-side
 cleanup still depends on the remote server honouring deletion. Cancellation cannot
@@ -164,7 +173,9 @@ by Run UID and capability. Failed upstream attempts remain charged. Reconnecting
 or changing policy does not reset consumption. Omitted budgets are uncapped;
 monetary ceilings are rejected because MCP supplies no trusted pricing. Discovery
 and initialization have fixed per-request bounds but do not consume tool-call
-units. Audit records the run, named capability, Protocol tier, approved tool and
+units. The shared proxy also admits at most 128 connections and eight inspected
+sessions per execution by default; see [transport limits](security-hardening.md#protect-transport-and-identities).
+Audit records the run, named capability, Protocol tier, approved tool and
 fixed outcome, without argument values, results or provider diagnostics. Provider
 failures return fixed messages; successful tool output remains provider content.
 

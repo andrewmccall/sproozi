@@ -15,6 +15,7 @@ guide](../../guides/portable-workflows.md) for setup and limits.
 
 | Direction | Question | Main constraint |
 | --- | --- | --- |
+| [DNS egress containment](dns-egress.md) | Which names need resolution without unrestricted external DNS? | Enforce allowed internal queries and refused external queries over UDP and TCP |
 | [Managed MCP](managed-mcp-servers.md) | How should Sproozi own server lifecycle and upstream restrictions? | Separate server credentials and lifecycle |
 | [Further runtimes](execution-runtimes.md) | Which additional placements can enforce the approved intent? | Equivalent permission, network, stop and accounting guarantees |
 | [Harness and client compatibility](harness-portability.md) | Which additional native sessions and clients support continuity? | Client-specific state and connection support |

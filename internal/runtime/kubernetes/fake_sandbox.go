@@ -58,13 +58,13 @@ func (f *FakeSandboxClient) Ensure(_ context.Context, run *sprooziv1alpha1.Agent
 	return name, nil
 }
 
-// GetStatus returns Status (or SandboxStatusUnknown if zero) and StatusErr.
+// GetStatus returns Status (or SandboxStatusAbsent if zero) and StatusErr.
 func (f *FakeSandboxClient) GetStatus(_ context.Context, _ string) (SandboxStatus, error) {
 	if f.StatusErr != nil {
 		return SandboxStatusUnknown, f.StatusErr
 	}
 	if f.Status == "" {
-		return SandboxStatusUnknown, nil
+		return SandboxStatusAbsent, nil
 	}
 	return f.Status, nil
 }

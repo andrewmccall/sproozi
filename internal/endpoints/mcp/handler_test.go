@@ -632,3 +632,35 @@ func TestMCPDiscoveryKeepsProviderSchemaForNativeClients(t *testing.T) {
 		t.Fatalf("policy scope absent from discovery: %s", tool.Description)
 	}
 }
+
+func TestUnsupportedMCPMethodsAreRejectedBeforeSetup(t *testing.T) {
+	f := newFixture(t, nil)
+	for _, method := range []string{"resources/list", "subscriptions/listen"} {
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "https://"+fixtureHost+":8443"+docsPath,
+			strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"`+method+`","params":{}}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Accept", "application/json, text/event-stream")
+		response, err := f.client.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = response.Body.Close()
+		if response.StatusCode != http.StatusBadRequest {
+			t.Fatalf("unsupported %s status = %d", method, response.StatusCode)
+		}
+	}
+	if f.requests.Load() != 0 {
+		t.Fatalf("unsupported methods opened upstream requests: %d", f.requests.Load())
+	}
+	session := f.connect(t, docsName)
+	tools, err := session.ListTools(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tools.Tools) != 1 || tools.Tools[0].Name != "search" {
+		t.Fatalf("supported discovery = %+v", tools.Tools)
+	}
+}

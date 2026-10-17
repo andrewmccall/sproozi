@@ -25,6 +25,26 @@ support is limited to exact, SHA-256-locked wheels when the independent
 be denied by the trusted gateway, rather than silently treated as an allowed
 host connection.
 
+## Bounded GraphQL reads
+
+The GraphQL route accepts the named `RepositoryInfo` and `PullRequestByNumber`
+queries with exact declared variables and repository/PR argument bindings. It
+validates the selected fields and forwards a reconstructed document. Fields may
+be reordered or omitted within these allowed selections:
+
+| Operation and declared variables | Allowed fields |
+| --- | --- |
+| `RepositoryInfo($owner: String!, $name: String!)` | `id`, `name`, `nameWithOwner`, `owner { login }`, `defaultBranchRef { name }` |
+| `PullRequestByNumber($owner: String!, $repo: String!, $pr_number: Int!)` | `id`, `number`, `url`, `title`, `body`, `state`, `headRefName`, `headRefOid`, `baseRefName`, `repository { nameWithOwner }` |
+
+Aliases, directives, fragments, additional variables, argument rebinding, extra
+fields and trailing operations are rejected. This is a finite client contract;
+registering an allowed repository does not authorize arbitrary GraphQL. The
+existing narrow PR mutation path has its own validation and repository read-back.
+Use the bounded REST `gh api` workflow above for the pinned gh client.
+
+## Model responses
+
 The model path accepts JSON responses and Responses API SSE. SSE is buffered
 within the gateway's body and time limits until a single successful
 `response.completed` event supplies usage; the budget is settled before any

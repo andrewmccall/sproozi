@@ -154,11 +154,18 @@ bin/sproozi status SESSION_ID --config /private/sproozi/config.json --executor e
 ```
 
 Preserve the request UUID when retrying. Repeating identical intent returns the
-same session and execution; changed intent is rejected. The session ID outlives
-the Pod. Status returns the task phase and a size-limited final answer marked as
-untrusted output. The owner reports `retained` only after native completion,
-confirmed worker stop, finalized usage accounting and checkpoint storage. An
-`unknown` status cannot be pulled or silently interpreted as stopped.
+same session and execution; changed intent is rejected. Public `id` addresses
+the stable session. `executionId`, `allocationId` and `incarnation` identify the
+execution, visit and exact writer separately. The session ID outlives the Pod.
+Status returns the task phase and a size-limited final answer marked as
+untrusted output. The owner reports `retained` only after compatible native
+completion, confirmed worker stop, finalized usage accounting and checkpoint
+storage. An `unknown` status cannot be pulled or silently interpreted as stopped.
+
+`sessions` returns one labelled JSON catalogue. Check `executors` for unavailable
+owners and `truncated` for omitted results; a missing home daemon does not erase
+successful remote rows. The [command reference](../reference/session-commands.md)
+explains owner selection, JSON fields and safe error categories.
 
 For a known recoverable interruption, use `sproozi recover SESSION_ID --executor
 engineering --config FILE`. Cancel uses a separate stable `--operation UUID` and
@@ -199,7 +206,7 @@ bin/sproozi serve --config /private/sproozi/config.json
 # In another terminal:
 bin/sproozi pull SESSION_ID --config /private/sproozi/config.json \
   --from engineering --operation ORIGINAL_PULL_UUID
-bin/sproozi resume SESSION_ID --config /private/sproozi/config.json
+bin/sproozi resume SESSION_ID --executor docker --config /private/sproozi/config.json
 ```
 
 Pull validates and saves the conversation and Git checkpoint without starting an
@@ -223,26 +230,35 @@ allowances and gateway identity come from current home approval. Earlier receipt
 remain unchanged. `--detach` starts without attaching; `attach --socket PATH
 --id SESSION_ID` reconnects, and Ctrl-] detaches without stopping work.
 
-After reviewing and changing the work, use `sproozi stop SESSION_ID --config
-FILE` to wait for the current turn and foreground tools, stop the worker,
-finalize usage accounting and save a new checkpoint. It does not launch a
-destination. A later resume starts another execution with current approval. Use
-the existing `move` command for live visits within one execution; its original
-deadline and aggregate allowance continue across those visits. Keep the original
-operation UUID when retrying. Product operations remain bound to the execution
-they addressed; an old stop, move or cancel request cannot act on a later
-resume, even though its product session ID is the same.
+After reviewing and changing the work, use
+`sproozi stop SESSION_ID --executor docker --config FILE` to wait for the current
+turn and foreground tools, stop the worker, finalize usage accounting and save a
+new checkpoint. It does not launch a destination. A later resume starts another
+execution with current approval. Use `move` for live visits within one
+execution; its original deadline and aggregate allowance continue across those
+visits. Keep the original operation UUID when retrying. Product operations stay
+bound to the execution they addressed. An old stop, move or cancel request
+cannot act on a later resume, even though its session ID is the same.
 
 For GitHub publication, create a branch for the current execution:
 
 ```sh
 git switch -c "sproozi/$SPROOZI_EXECUTION_UID/review"
 git push -u origin HEAD
-gh pr create --base APPROVED_BASE_BRANCH
 ```
 
 The old branch can remain in local history, but its name is not authority to
-overwrite another execution's published branch. Confirm the exact changes and
+overwrite another execution's published branch. The pinned gh client's
+`gh pr create` uses unsupported GraphQL fragments and is denied by the current
+bounded gateway contract. Publish through its supported REST operation instead:
+
+```sh
+gh api --method POST repos/OWNER/REPO/pulls \
+  -f title='Describe the reviewed change' -f head="$(git branch --show-current)" \
+  -f base=APPROVED_BASE_BRANCH -f body='Describe the change and completed checks'
+```
+
+Confirm the exact changes and
 checks before publishing. A successful infrastructure task is not evidence that
 its proposed fix is correct or merged.
 

@@ -704,14 +704,14 @@ func TestReconcilerSandboxWithoutCompletionTransitionsToFailed(t *testing.T) {
 	}
 }
 
-func TestReconcilerSandboxUnknownTransitionsToFailed(t *testing.T) {
+func TestReconcilerSandboxAbsentTransitionsToFailed(t *testing.T) {
 	t.Parallel()
-	sc := &k8sresources.FakeSandboxClient{Status: k8sresources.SandboxStatusUnknown}
+	sc := &k8sresources.FakeSandboxClient{Status: k8sresources.SandboxStatusAbsent}
 	run := newRun("run-sandbox-4")
 	r, c := newReconcilerWithSandbox(sc, append(fixtures(), run)...)
 
 	driveToRunning(t, r, c, "run-sandbox-4")
-	// First reconcile of Running: creates sandbox, gets Unknown → transitions to Failed
+	// First reconcile of Running: creates sandbox, gets Absent → transitions to Failed
 	if _, err := r.Reconcile(context.Background(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: "run-sandbox-4", Namespace: testNS},
 	}); err != nil {
@@ -720,7 +720,7 @@ func TestReconcilerSandboxUnknownTransitionsToFailed(t *testing.T) {
 
 	got := getRun(t, c, "run-sandbox-4")
 	if got.Status.Phase != sprooziv1alpha1.AgentRunPhaseFailed {
-		t.Fatalf("expected Failed on Unknown sandbox, got %q", got.Status.Phase)
+		t.Fatalf("expected Failed on Absent sandbox, got %q", got.Status.Phase)
 	}
 }
 

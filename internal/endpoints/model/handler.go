@@ -39,9 +39,6 @@ const (
 	errorEventType = "error"
 )
 
-// allowedPaths lists the upstream API paths this gateway will proxy.
-var allowedPaths = []string{"/v1/chat/completions", responsesPath, modelsPath}
-
 const maxModelBodyBytes = 1 << 20
 const responsesPath = "/v1/responses"
 
@@ -164,10 +161,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	e.TokenBudget = limits.MaxUnits
 
-	// 4. Check the request path is allowed.
-	if h.protocol == openAIProtocol && !slices.Contains(allowedPaths, r.URL.Path) {
+	// Resolve the supported operation before admission or provider credentials.
+	if h.protocol == openAIProtocol && !validOpenAIOperation(r) {
 		h.deny(w, e, http.StatusForbidden,
-			"path not allowed", "permission_error", "path_not_allowed")
+			"unsupported OpenAI operation", "permission_error", "path_not_allowed")
 		return
 	}
 
@@ -210,6 +207,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if providerAuth.Mode() == modelauth.ChatGPTMode {
 		if err := validateChatGPTRequest(r, bodyBytes, limits.MaxCostMicros); err != nil {
 			h.deny(w, e, http.StatusForbidden, err.Error(), "permission_error", "chatgpt_request_not_supported")
+			return
+		}
+	} else if h.protocol == openAIProtocol {
+		bodyBytes, err = h.prepareOpenAI(r, bodyBytes, limits)
+		if err != nil {
+			h.deny(w, e, http.StatusForbidden, err.Error(), "permission_error", "unsupported_request")
 			return
 		}
 	}

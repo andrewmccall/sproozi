@@ -67,7 +67,7 @@ func NewHandler(o *Owner, taskToken, homeToken string) (http.Handler, error) {
 	mcp.AddTool(server, &mcp.Tool{Name: "sproozi_sessions", Description: "List accessible sessions for this installation, optionally filtered by project."}, func(ctx context.Context, _ *mcp.CallToolRequest, q SessionQuery) (*mcp.CallToolResult, sessionList, error) {
 		v, e := o.List(ctx, q)
 		if e != nil {
-			return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: "Session catalogue unavailable"}}}, sessionList{}, nil
+			return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: outcomeMessage(e)}}}, sessionList{}, nil
 		}
 		return nil, sessionList{Sessions: v}, nil
 	})
@@ -132,19 +132,19 @@ func (h *ownerHandler) serveJSON(w http.ResponseWriter, r *http.Request, action 
 	switch action {
 	case "run":
 		var q Submit
-		e = decode(b, &q)
+		e = decodeInput(b, &q)
 		if e == nil {
 			out, e = h.owner.Submit(r.Context(), q)
 		}
 	case "list":
 		var q SessionQuery
-		e = decode(b, &q)
+		e = decodeInput(b, &q)
 		if e == nil {
 			out, e = h.owner.List(r.Context(), q)
 		}
 	default:
 		var q reference
-		e = decode(b, &q)
+		e = decodeInput(b, &q)
 		if e == nil {
 			switch action {
 			case "info":
@@ -164,7 +164,12 @@ func (h *ownerHandler) serveJSON(w http.ResponseWriter, r *http.Request, action 
 		}
 	}
 	if e != nil {
-		http.Error(w, "Work request rejected or unavailable", http.StatusConflict)
+		code := outcomeCode(e)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(outcomeStatus(code))
+		_ = json.NewEncoder(w).Encode(struct {
+			Error profile.Code `json:"error"`
+		}{Error: code})
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -173,7 +178,7 @@ func (h *ownerHandler) serveJSON(w http.ResponseWriter, r *http.Request, action 
 
 func tool(v View, e error) (*mcp.CallToolResult, View, error) {
 	if e != nil {
-		return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: "Work request rejected or unavailable"}}}, View{}, nil
+		return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: outcomeMessage(e)}}}, View{}, nil
 	}
 	return nil, v, nil
 }

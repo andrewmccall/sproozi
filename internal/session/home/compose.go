@@ -33,6 +33,7 @@ import (
 	gatewaydocker "github.com/andrewmccall/sproozi/internal/gateway/docker"
 	"github.com/andrewmccall/sproozi/internal/modelauth"
 	"github.com/andrewmccall/sproozi/internal/nativeconfig"
+	"github.com/andrewmccall/sproozi/internal/proxytransport"
 	runtimedocker "github.com/andrewmccall/sproozi/internal/runtime/docker"
 	runtimekubernetes "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
 	"github.com/andrewmccall/sproozi/internal/session"
@@ -68,31 +69,20 @@ func (a *authority) InitializeAllocation(ctx context.Context, l session.Launch, 
 	}
 	u, _ := url.Parse(a.endpoint)
 	u.User = url.UserPassword("sproozi", token)
-	env := []string{"PATH=/opt/git/bin:/usr/local/bin:/usr/bin:/bin", "TERM=xterm-256color", "LANG=C.UTF-8",
-		"GIT_TERMINAL_PROMPT=0", "GH_PROMPT_DISABLED=1", "GH_TOKEN=sproozi-worker-placeholder",
-		"SPROOZI_EXECUTION_UID=" + i.ResourceUID,
-		"NO_PROXY=", "no_proxy="}
-	if a.kind == harness.NativeClaude {
-		env = append(env, "ANTHROPIC_API_KEY=sproozi-worker-placeholder")
-	} else {
-		env = append(env, "OPENAI_API_KEY=sproozi-worker-placeholder")
+	env, err := harness.NativeBaseEnvironment(a.kind, i.ResourceUID)
+	if err != nil {
+		return runtimedocker.NativeAccess{}, err
 	}
+	env = append(env, "NO_PROXY=", "no_proxy=")
 	for _, key := range []string{"HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"} {
 		env = append(env, key+"="+u.String())
 	}
-	clients := &harness.NativeClientConfig{}
+	capabilities := make([]api.CapabilityKind, 0, len(l.Allowances))
 	for capability := range l.Allowances {
-		if capability == string(api.CapabilityKubernetesRead) {
-			clients.Kubernetes = true
-		}
-		if name, ok := api.CapabilityKind(capability).MCPServerName(); ok {
-			clients.MCPServers = append(clients.MCPServers, name)
-		}
+		capabilities = append(capabilities, api.CapabilityKind(capability))
 	}
-	if len(clients.MCPServers) > 0 {
-		clients.MCPGateway = a.mcpEndpoint
-	}
-	if err := clients.Validate(a.kind); err != nil {
+	clients, err := harness.NativeClients(a.kind, capabilities, a.mcpEndpoint)
+	if err != nil {
 		return runtimedocker.NativeAccess{}, err
 	}
 	return runtimedocker.NativeAccess{Env: env, TrustBundlePEM: bytes.Clone(a.trust), Model: a.model, Options: slices.Clone(a.options), ClientConfig: clients}, nil
@@ -217,7 +207,7 @@ func Open(c Config, log io.Writer) (_ *Service, err error) {
 	if err != nil {
 		return nil, err
 	}
-	s.gateway = &http.Server{Addr: c.Gateway.Listen, Handler: handler, TLSConfig: &tls.Config{Certificates: []tls.Certificate{certificate}, MinVersion: tls.VersionTLS13}, ReadHeaderTimeout: 10 * time.Second, MaxHeaderBytes: 16 << 10}
+	s.gateway = proxytransport.NewServer(c.Gateway.Listen, certificate, handler)
 	s.config.Allowances = maps.Clone(c.Allowances)
 	s.config.ProjectApprovals = cloneProjectApprovals(c.ProjectApprovals)
 	return s, nil

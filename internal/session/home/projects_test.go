@@ -38,7 +38,7 @@ func TestImportedProjectNeedsIndependentLocalApprovalAndKeepsAssociation(t *test
 	if err != nil || resumed.Project != "sproozi-dev" || resumed.ThreadID != testNativeUUID {
 		t.Fatalf("Approved same-conversation continuation failed: %#v %v", resumed, err)
 	}
-	admitted, err := s.readInitial(resumed.ID)
+	admitted, err := s.readInitial(resumed.ExecutionID)
 	if err != nil || !reflect.DeepEqual(admitted.Launch.Allowances, map[string]session.Allowance{
 		"model.inference": {Units: session.Limit{Bounded: true, Value: 10}},
 	}) {

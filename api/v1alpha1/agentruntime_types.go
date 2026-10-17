@@ -18,6 +18,7 @@ package v1alpha1
 
 import (
 	"fmt"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -33,6 +34,7 @@ import (
 var digestImagePattern = regexp.MustCompile(`^[A-Za-z0-9./_:-]+@sha256:[a-f0-9]{64}$`)
 
 const codexHarnessSelector = "codex"
+const runtimeDropAll corev1.Capability = "ALL"
 
 // ValidateRuntimeTemplate checks the administrator-owned template at the
 // runtime admission seam. It deliberately fails closed for Pod features that
@@ -72,6 +74,14 @@ func (s *AgentRuntimeSpec) ValidateRuntimeTemplate() error {
 		if c.Resources.Limits == nil || c.Resources.Limits.Cpu().IsZero() || c.Resources.Limits.Memory().IsZero() {
 			return fmt.Errorf("container %q must declare CPU and memory limits", c.Name)
 		}
+		if len(c.EnvFrom) != 0 {
+			return fmt.Errorf("container %q envFrom is forbidden; use explicit non-secret configuration", c.Name)
+		}
+		for _, env := range c.Env {
+			if env.ValueFrom != nil && env.ValueFrom.SecretKeyRef != nil {
+				return fmt.Errorf("container %q Secret environment references are forbidden", c.Name)
+			}
+		}
 		if unsafeContainerSecurity(c.SecurityContext) {
 			return fmt.Errorf("container %q has unsafe security settings", c.Name)
 		}
@@ -92,15 +102,35 @@ func (s *AgentRuntimeSpec) ValidateRuntimeTemplate() error {
 		if reserved[v.Name] {
 			return fmt.Errorf("podTemplate volume %q is reserved", v.Name)
 		}
-		if v.HostPath != nil || v.PersistentVolumeClaim != nil || v.CSI != nil || v.Ephemeral != nil {
-			return fmt.Errorf("volume %q uses an unapproved source", v.Name)
-		}
-		if v.EmptyDir != nil && v.EmptyDir.SizeLimit == nil {
-			return fmt.Errorf("writable volume %q must have a size limit", v.Name)
+		if err := validateRuntimeVolume(v); err != nil {
+			return err
 		}
 	}
 	if strings.TrimSpace(string(s.PodTemplate.Spec.RestartPolicy)) != "" && s.PodTemplate.Spec.RestartPolicy != corev1.RestartPolicyNever {
 		return fmt.Errorf("restartPolicy must be Never")
+	}
+	return nil
+}
+
+func validateRuntimeVolume(v corev1.Volume) error {
+	// Template volumes carry bounded scratch space or public configuration.
+	// Credentials and projected tokens are injected only by the controller.
+	approved := corev1.VolumeSource{EmptyDir: v.EmptyDir, ConfigMap: v.ConfigMap, DownwardAPI: v.DownwardAPI}
+	sources := 0
+	if v.EmptyDir != nil {
+		sources++
+	}
+	if v.ConfigMap != nil {
+		sources++
+	}
+	if v.DownwardAPI != nil {
+		sources++
+	}
+	if sources != 1 || !reflect.DeepEqual(v.VolumeSource, approved) {
+		return fmt.Errorf("volume %q uses an unapproved source", v.Name)
+	}
+	if v.EmptyDir != nil && (v.EmptyDir.SizeLimit == nil || v.EmptyDir.SizeLimit.Sign() <= 0) {
+		return fmt.Errorf("writable volume %q must have a positive size limit", v.Name)
 	}
 	return nil
 }
@@ -131,7 +161,8 @@ func unsafeContainerSecurity(security *corev1.SecurityContext) bool {
 		security.SeccompProfile == nil ||
 		security.SeccompProfile.Type != corev1.SeccompProfileTypeRuntimeDefault ||
 		security.Capabilities == nil ||
-		len(security.Capabilities.Drop) == 0
+		!slices.Contains(security.Capabilities.Drop, runtimeDropAll) ||
+		len(security.Capabilities.Add) != 0
 }
 
 func missingNonRootPodUser(security *corev1.PodSecurityContext) bool {
@@ -146,6 +177,7 @@ func forbiddenPodSecurity(p corev1.PodSpec) bool {
 	return p.HostNetwork ||
 		p.HostPID ||
 		p.HostIPC ||
+		(p.ShareProcessNamespace != nil && *p.ShareProcessNamespace) ||
 		(p.HostUsers != nil && !*p.HostUsers) ||
 		p.ServiceAccountName != "" ||
 		p.AutomountServiceAccountToken == nil ||

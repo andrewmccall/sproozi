@@ -5,7 +5,7 @@ Date: 2026-10-11
 Implementation: verified for the controlled single-owner native session scope
 Live Codex and Claude roundtrips: passed; scope recorded on 2026-10-12
 
-Current compatibility policy: [ADR 0014](0014-default-clients-and-native-tool-schemas.md)
+Current compatibility policy: [ADR 0015](0015-default-clients-and-native-tool-schemas.md)
 replaces exact client-version selection and the combined MCP discovery schema.
 Other decisions in this record remain in effect.
 

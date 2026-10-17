@@ -3,18 +3,14 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 
 	"github.com/andrewmccall/sproozi/internal/session/home"
-	"github.com/andrewmccall/sproozi/internal/workspace"
-	"github.com/google/uuid"
 	"golang.org/x/term"
 )
 
@@ -29,80 +25,20 @@ func run(args []string) error {
 	if len(args) == 0 {
 		return errors.New("use sproozi run|sessions|pull|resume|stop|serve|start|attach|move|status|cancel|recover")
 	}
-	switch args[0] {
-	case actionRun, home.ActionSessions, home.ActionPull, home.ActionResume,
-		home.ActionStop, home.ActionStatus, home.ActionCancel, home.ActionRecover:
+	if args[0] != "serve" {
 		return runProduct(args)
 	}
-	action := args[0]
-	flags := flag.NewFlagSet("sproozi "+action, flag.ContinueOnError)
-	config := flags.String("config", "", "private administrator JSON (serve only)")
-	socket := flags.String("socket", "", "private home control socket")
-	id := flags.String("id", "", "session UUID (start generates one if omitted)")
-	operation := flags.String("operation", "", "stable operation UUID (start/move/cancel generate if omitted)")
-	var includeIgnored []string
-	flags.Func("include-ignored", "ignored file for every visit; repeatable at start", func(value string) error {
-		includeIgnored = append(includeIgnored, value)
-		return workspace.ValidateIgnoredPaths(includeIgnored)
-	})
-	workspacePath := flags.String("workspace", "", "stopped ordinary Git directory (start only)")
-	destination := flags.String("to", "", "configured destination name (move only)")
+	flags := flag.NewFlagSet("sproozi serve", flag.ContinueOnError)
+	config := flags.String("config", "", "private administrator JSON")
 	if err := flags.Parse(args[1:]); err != nil {
 		return err
 	}
-	if flags.NArg() != 0 {
-		return errors.New("unexpected arguments")
-	}
-	if action != home.ActionStart && len(includeIgnored) != 0 {
-		return errors.New("--include-ignored is immutable start intent")
+	if *config == "" || flags.NArg() != 0 {
+		return errors.New("use sproozi serve --config FILE")
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if action == "serve" {
-		if *config == "" || *socket != "" || *id != "" || *operation != "" || *workspacePath != "" || *destination != "" {
-			return errors.New("use sproozi serve --config FILE")
-		}
-		return serve(ctx, *config)
-	}
-	if *config != "" || *socket == "" {
-		return errors.New("client commands require --socket PATH")
-	}
-	if action == home.ActionStart {
-		if *id == "" {
-			*id = uuid.NewString()
-		}
-		if *workspacePath == "" {
-			return errors.New("start requires --workspace PATH")
-		}
-		absolute, err := filepath.Abs(*workspacePath)
-		if err != nil {
-			return err
-		}
-		*workspacePath = absolute
-	}
-	if action == home.ActionStart || action == home.ActionMove || action == home.ActionCancel {
-		if *operation == "" {
-			*operation = uuid.NewString()
-		}
-		_, _ = fmt.Fprintf(os.Stderr, "Session %s, operation %s\n", *id, *operation)
-	}
-	if action == home.ActionAttach {
-		if *operation != "" || *workspacePath != "" || *destination != "" {
-			return errors.New("attach accepts only --socket and --id")
-		}
-		return attach(ctx, *socket, *id)
-	}
-	request := home.Request{
-		Action: action, ID: *id, OperationID: *operation, Workspace: *workspacePath, Destination: *destination,
-		IncludeIgnored: includeIgnored,
-	}
-	response, err := home.Call(ctx, *socket, request)
-	if response.Status != nil {
-		if encodeErr := json.NewEncoder(os.Stdout).Encode(response.Status); encodeErr != nil {
-			return encodeErr
-		}
-	}
-	return err
+	return serve(ctx, *config)
 }
 
 func serve(ctx context.Context, path string) error {
@@ -152,7 +88,7 @@ func attach(ctx context.Context, socket, id string) error {
 				}
 			}
 		}()
-		_, _ = fmt.Fprintln(os.Stderr, "Attach native Codex; Ctrl-] detaches")
+		_, _ = fmt.Fprintln(os.Stderr, "Attach native terminal; Ctrl-] detaches")
 		return home.AttachTerminal(run, socket, id, os.Stdin, os.Stdout, sizes)
 	}
 	ctx, cancel := context.WithCancel(ctx)

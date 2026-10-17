@@ -123,7 +123,7 @@ func sandboxPhaseToRunPhase(status k8sresources.SandboxStatus) (sprooziv1alpha1.
 	switch status {
 	case k8sresources.SandboxStatusFailed:
 		return sprooziv1alpha1.AgentRunPhaseFailed, "SandboxFailed"
-	case k8sresources.SandboxStatusUnknown:
+	case k8sresources.SandboxStatusAbsent:
 		return sprooziv1alpha1.AgentRunPhaseFailed, "SandboxGone"
 	default:
 		return "", ""
