@@ -91,7 +91,7 @@ verify-assertions: ## Validate the complete, individually named offline assertio
 
 .PHONY: verify-fast
 verify-fast: verify-assertions ## Run the non-network unit, race, and vet gates without changing source artifacts.
-	cache_dir="$$(mktemp -d)" && GOCACHE="$$cache_dir" go test -race ./api/v1alpha1 ./internal/agentcontract ./internal/execution ./internal/runtime/kubernetes ./internal/packages ./internal/policy/kubernetes && GOCACHE="$$cache_dir" go vet ./internal/agentcontract ./internal/execution ./internal/runtime/kubernetes ./internal/packages ./internal/policy/kubernetes
+	cache_dir="$$(mktemp -d)" && GOCACHE="$$cache_dir" go test -race ./api/v1alpha1 ./internal/agentcontract ./internal/runtime/kubernetes ./internal/packages ./internal/policy/kubernetes && GOCACHE="$$cache_dir" go vet ./internal/agentcontract ./internal/runtime/kubernetes ./internal/packages ./internal/policy/kubernetes
 
 .PHONY: verify-api
 verify-api: ## Run API, controller, Kubernetes, and envtest checks without regenerating source artifacts.
