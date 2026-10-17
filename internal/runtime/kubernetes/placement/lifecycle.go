@@ -3,6 +3,7 @@ package placement
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"slices"
@@ -367,7 +368,8 @@ func (p *Placement) Stop(ctx context.Context, l session.Launch, i session.Incarn
 	for name := range r.Ceilings {
 		seal, err := p.ledger.Seal(ctx, account(r, name))
 		if err != nil {
-			return session.Stopped{}, err
+			fenced := session.Stopped{Launch: local.Launch, Incarnation: inc(r), ActualStopped: true}
+			return fenced, fmt.Errorf("%w: %w", session.ErrUsageUnsealed, err)
 		}
 		seals[name] = seal
 	}

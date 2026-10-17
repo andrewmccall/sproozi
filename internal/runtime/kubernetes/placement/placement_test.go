@@ -372,6 +372,38 @@ func TestUnknownNativeQuiescenceKeepsGatewayAndAllocationUntilRetry(t *testing.T
 	}
 }
 
+// A failed seal after the exact Pod terminated is the Placement.Stop
+// "fenced, usage unsealed" outcome, the same as Docker's, not an unknown stop.
+func TestSealFailureAfterFenceReportsStoppedWriterWithUnsealedUsage(t *testing.T) {
+	p, _, _, l, data := setup(t)
+	ctx := context.Background()
+	i, err := p.Prepare(ctx, l, data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = p.Activate(ctx, l, i); err != nil {
+		t.Fatal(err)
+	}
+	ledgerDown := true
+	p.ledger = &observedLedger{Ledger: p.ledger, beforeSeal: func(context.Context, budget.AccountKey) error {
+		if ledgerDown {
+			return errors.New("ledger unavailable")
+		}
+		return nil
+	}}
+	stopped, err := p.Stop(ctx, l, i)
+	if !errors.Is(err, session.ErrUsageUnsealed) {
+		t.Fatalf("seal failure error = %v, want ErrUsageUnsealed", err)
+	}
+	if !stopped.ActualStopped || stopped.Receipt != nil || stopped.Incarnation != i {
+		t.Fatalf("seal failure result = %+v, want fenced writer without receipt", stopped)
+	}
+	ledgerDown = false
+	if stopped, err = p.Stop(ctx, l, i); err != nil || stopped.Receipt == nil {
+		t.Fatalf("retried stop did not seal: %+v %v", stopped, err)
+	}
+}
+
 func TestRevokedStoppingRetryNeedsPositiveNativeQuietObservation(t *testing.T) {
 	p, _, e, l, data := setup(t)
 	ctx := context.Background()

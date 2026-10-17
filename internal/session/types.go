@@ -5,6 +5,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"io"
 	"time"
 
@@ -96,9 +97,23 @@ type Observation struct {
 	Stopped     *Stopped
 }
 
+// ErrUsageUnsealed reports that a placement proved the exact writer stopped but
+// could not seal its usage. The allocation stays encumbered; retrying Stop
+// repeats only the seal and capture, never the native handoff.
+var ErrUsageUnsealed = errors.New("session: writer stopped but usage is not sealed")
+
 // Placement must retain exact intent on retries. Prepare is inert, Activate is
 // idempotent for its incarnation, and Stop retains an immutable sealed receipt.
 // Inspect errors/unknown observations cannot be converted into absence or zero.
+//
+// Stop has exactly three outcomes:
+//   - nil error: the writer is fenced, Receipt is sealed and Checkpoint is captured.
+//   - an error wrapping ErrUsageUnsealed: Stopped reports ActualStopped with a
+//     nil Receipt. The writer is fenced; only accounting is unknown.
+//   - any other error: whether the writer stopped is unknown.
+//
+// Abort reports a fenced writer as PlacementStopped; a nil Stopped.Receipt
+// there likewise means the writer stopped but its usage is not sealed.
 type Placement interface {
 	Prepare(context.Context, Launch, []byte) (Incarnation, error)
 	Activate(context.Context, Launch, Incarnation) error

@@ -110,6 +110,12 @@ func (c *Client) Stop(ctx context.Context, l session.Launch, i session.Incarnati
 		return session.Stopped{}, err
 	}
 	r.Stopped.Checkpoint = r.Checkpoint
+	if r.Stopped.Receipt == nil {
+		if !r.Stopped.ActualStopped {
+			return session.Stopped{}, errors.New("profile: remote stop remains unknown")
+		}
+		return *r.Stopped, session.ErrUsageUnsealed
+	}
 	return *r.Stopped, nil
 }
 func (c *Client) Inspect(ctx context.Context, l session.Launch) (session.Observation, error) {

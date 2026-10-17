@@ -489,8 +489,8 @@ func (p *Placement) Stop(ctx context.Context, l session.Launch, i session.Incarn
 		return session.Stopped{}, errors.New("initial native UUID remains unknown")
 	}
 	if err = p.seal(ctx, &r, i); err != nil {
-		stopped, _ := p.stopped(r)
-		return stopped, nil
+		stopped, stoppedErr := p.stopped(r)
+		return stopped, errors.Join(fmt.Errorf("%w: %w", session.ErrUsageUnsealed, err), stoppedErr)
 	}
 	if r.CheckpointDigest == "" {
 		if err = p.engine.VerifyManaged(ctx, *r.Helper, p.spec(r, roleHelper)); err != nil {

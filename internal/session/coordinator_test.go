@@ -44,6 +44,43 @@ func TestCancelUnknownActivationWithExactKnownIncarnation(t *testing.T) {
 	}
 }
 
+// The coordinator distinguishes the Placement.Stop outcomes: a fenced writer
+// with unsealed usage is unknown usage, any other failure is an unknown stop.
+// Neither releases the allocation or prepares the destination.
+func TestStopOutcomeSeparatesUnsealedUsageFromUnknownStop(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		unsealed   bool
+		wantPhase  Phase
+		wantFenced bool
+	}{
+		{name: "fenced writer, unsealed usage", unsealed: true, wantPhase: PhaseUnknownUsage, wantFenced: true},
+		{name: "unreachable placement", wantPhase: PhaseUnknownStop},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _, local, remote, start := setup(t)
+			r, err := c.Move(t.Context(), start.Source.SessionID, uuid.NewString(), testRemote)
+			if err != nil {
+				t.Fatal(err)
+			}
+			remote.unsealed, remote.unknownStop = tc.unsealed, !tc.unsealed
+			r, err = c.Move(t.Context(), r.ID, uuid.NewString(), testLocal)
+			if err == nil {
+				t.Fatal("move succeeded without sealed source usage")
+			}
+			if r.Phase != tc.wantPhase {
+				t.Errorf("phase = %s, want %s", r.Phase, tc.wantPhase)
+			}
+			if r.Active == nil || r.Active.ActualStopped != tc.wantFenced {
+				t.Errorf("active visit = %+v, want fenced=%v", r.Active, tc.wantFenced)
+			}
+			if local.prepareCalls != 0 {
+				t.Errorf("destination prepared %d times before the source was accounted", local.prepareCalls)
+			}
+		})
+	}
+}
+
 type fakePlacement struct {
 	data                                  []byte
 	digest                                string
@@ -54,6 +91,7 @@ type fakePlacement struct {
 	prepareCalls                          int
 	unknownStop                           bool
 	missingUsage                          bool
+	unsealed                              bool
 	corruptReceipt                        func(*Receipt)
 	charge                                budget.TrustedUsage
 }
@@ -124,6 +162,9 @@ func (p *fakePlacement) Stop(_ context.Context, l Launch, i Incarnation) (Stoppe
 	o, ok := p.records[l.AllocationID]
 	if !ok || o.Incarnation != i || !sameLaunch(o.Launch, l) {
 		return Stopped{}, errors.New("stale execution")
+	}
+	if p.unsealed {
+		return Stopped{Launch: l, Incarnation: i, ActualStopped: true}, ErrUsageUnsealed
 	}
 	if o.Stopped != nil {
 		return *o.Stopped, nil

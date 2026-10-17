@@ -225,15 +225,20 @@ func (c *Coordinator) stopSource(ctx context.Context, r Record, index int) (Reco
 			return r, errors.New("session: source placement unavailable")
 		}
 		stopped, err := p.Stop(ctx, source.Launch, source.Incarnation)
-		if err != nil {
+		fenced := stopped.ActualStopped && sameLaunch(source.Launch, stopped.Launch) && source.Incarnation == stopped.Incarnation
+		if err != nil && !(errors.Is(err, ErrUsageUnsealed) && fenced) {
 			r.Phase = PhaseUnknownStop
 			return r, errors.Join(err, c.save(r))
 		}
-		if !stopped.ActualStopped || !sameLaunch(source.Launch, stopped.Launch) || source.Incarnation != stopped.Incarnation {
+		if !fenced {
 			r.Phase = PhaseUnknownStop
 			return r, errors.Join(errors.New("session: source stop remains unknown"), c.save(r))
 		}
 		source.ActualStopped = true
+		if err != nil {
+			r.Phase = PhaseUnknownUsage
+			return r, errors.Join(err, c.save(r))
+		}
 		if err = validateReceipt(source.Launch, source.Incarnation, stopped.Receipt); err != nil {
 			r.Phase = PhaseUnknownUsage
 			return r, errors.Join(err, c.save(r))

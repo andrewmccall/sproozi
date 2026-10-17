@@ -222,6 +222,12 @@ func (h *handler) perform(r *http.Request, action string, input request) (respon
 		}
 	case actionStop:
 		s, err := p.Stop(r.Context(), input.Launch, *input.Incarnation)
+		// A fenced writer with unsealed usage is a stop result, not a failure:
+		// its nil receipt tells the client to keep the allocation encumbered.
+		if errors.Is(err, session.ErrUsageUnsealed) && s.ActualStopped {
+			s.Receipt, s.Checkpoint, s.CheckpointDigest = nil, nil, ""
+			err = nil
+		}
 		if err != nil {
 			return output, err
 		}

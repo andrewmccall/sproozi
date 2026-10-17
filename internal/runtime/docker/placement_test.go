@@ -513,7 +513,7 @@ func TestUnknownStopAndUsageNeverBecomeZero(t *testing.T) {
 	}
 	a.sealFail = true
 	stopped, err := p.Stop(context.Background(), l, inc)
-	if err != nil || !stopped.ActualStopped || stopped.Receipt != nil {
+	if !errors.Is(err, session.ErrUsageUnsealed) || !stopped.ActualStopped || stopped.Receipt != nil {
 		t.Fatalf("unknown accounting: %+v %v", stopped, err)
 	}
 	a.sealFail = false
