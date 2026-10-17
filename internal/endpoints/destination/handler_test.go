@@ -68,7 +68,14 @@ func TestInspectedEgressEnforcesDestinationAndLiveGrant(t *testing.T) {
 			req.Header.Set("Proxy-Authorization", "secret")
 			req = req.WithContext(gateway.WithIdentity(req.Context(), id))
 			rr := httptest.NewRecorder()
-			h.ServeHTTP(rr, req)
+			// Production routes each approved authority here; the handler must
+			// still deny a request whose own target is not approved.
+			authority := req.Host
+			if !strings.Contains(authority, ":") {
+				authority += ":443"
+			}
+			gateway.Dispatcher{authority: {Capability: string(api.CapabilityNetworkEgress), Tier: audit.TierDestination,
+				AuditLogger: h.Config.AuditLogger, Handler: h}}.ServeHTTP(rr, req)
 			if rr.Code != tc.status {
 				t.Fatalf("status=%d want=%d body=%s", rr.Code, tc.status, rr.Body)
 			}

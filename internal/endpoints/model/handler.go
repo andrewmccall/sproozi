@@ -147,12 +147,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.deny(w, e, http.StatusUnauthorized, "gateway identity required", "auth_error", "missing_gateway_identity")
 		return
 	}
-	e = identity.AuditEvent(r.URL.Path)
-	e.Service, e.SemanticLevel = "openai", "semantic"
+	e = gateway.AuditEvent(ctx, r.URL.Path)
+	e.Service = "openai"
 	if h.protocol == anthropicProtocol {
 		e.Service = "anthropic"
 	}
-	e.Capability = string(sprooziv1alpha1.CapabilityModelInference)
 
 	limits, _, limitErr := identity.BudgetLimits(sprooziv1alpha1.CapabilityModelInference)
 	if limitErr != nil {
@@ -165,14 +164,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.protocol == openAIProtocol && !validOpenAIOperation(r) {
 		h.deny(w, e, http.StatusForbidden,
 			"unsupported OpenAI operation", "permission_error", "path_not_allowed")
-		return
-	}
-
-	// 5. Verify model.inference capability is granted by both the run and the policy.
-	if !slices.Contains(identity.Capabilities, sprooziv1alpha1.CapabilityModelInference) ||
-		!slices.Contains(identity.Policy.Spec.AllowedCapabilities, sprooziv1alpha1.CapabilityModelInference) {
-		h.deny(w, e, http.StatusForbidden,
-			"model.inference capability not granted", "permission_error", "capability_not_granted")
 		return
 	}
 

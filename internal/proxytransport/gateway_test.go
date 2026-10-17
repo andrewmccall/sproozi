@@ -118,7 +118,7 @@ func TestGatewayProxyTokenModes(t *testing.T) {
 				return identity, nil
 			}, Revalidate: func(context.Context, *gateway.ExecutionGrant) error { return nil }, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				got = Identity(r.Context())
-				if r.Header.Get("Authorization") != "" || r.Header.Get(proxyAuthorizationHeader) != "" {
+				if r.Header.Get("Authorization") != "" || r.Header.Get(proxyAuthorizationHeader) != "" || r.Header.Get("Cookie") != "" {
 					t.Error("proxy credentials reached semantic handler")
 				}
 				_, _ = io.WriteString(w, "ok")
@@ -128,7 +128,7 @@ func TestGatewayProxyTokenModes(t *testing.T) {
 			}
 			s := startProxySession(t, g, tc.auth)
 			defer func() { _ = s.client.Close() }()
-			if _, err := io.WriteString(s.client, "GET / HTTP/1.1\r\nHost: service.test\r\nAuthorization: Bearer upstream\r\nProxy-Authorization: Basic leaked\r\nConnection: close\r\n\r\n"); err != nil {
+			if _, err := io.WriteString(s.client, "GET / HTTP/1.1\r\nHost: service.test\r\nAuthorization: Bearer upstream\r\nProxy-Authorization: Basic leaked\r\nCookie: session=leaked\r\nConnection: close\r\n\r\n"); err != nil {
 				t.Fatal(err)
 			}
 			response, err := http.ReadResponse(bufio.NewReader(s.client), nil)

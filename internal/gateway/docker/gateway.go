@@ -53,7 +53,7 @@ func NewGateway(owner *Owner, config GatewayConfig) (*proxytransport.Gateway, er
 		authority = modelgateway.AnthropicAuthority
 		handler = modelgateway.NewAnthropicHandler(modelConfig)
 	}
-	dispatch := gateway.Dispatcher{authority: {Capability: string(api.CapabilityModelInference), Tier: audit.TierSemantic, Handler: handler, Budgets: tracker}}
+	dispatch := gateway.Dispatcher{authority: {Capability: string(api.CapabilityModelInference), Tier: audit.TierSemantic, Handler: handler, Budgets: tracker, AuditLogger: config.AuditLogger}}
 	if err := addNativeRoutes(owner, config, dispatch, tracker); err != nil {
 		return nil, err
 	}
@@ -76,7 +76,7 @@ func addNativeRoutes(owner *Owner, config GatewayConfig, dispatch gateway.Dispat
 		githubConfig.AuditLogger = config.AuditLogger
 		githubHandler := &githubgateway.Handler{Config: githubConfig}
 		for _, host := range []string{"github.com:443", "api.github.com:443"} {
-			dispatch[host] = gateway.Route{Capability: string(api.CapabilityGitHubPullRequest), Tier: audit.TierSemantic, Handler: githubHandler, Budgets: tracker}
+			dispatch[host] = gateway.Route{Capability: string(api.CapabilityGitHubPullRequest), Tier: audit.TierSemantic, Handler: githubHandler, Budgets: tracker, AuditLogger: config.AuditLogger}
 		}
 	}
 	if config.Kubernetes != nil {
@@ -85,7 +85,7 @@ func addNativeRoutes(owner *Owner, config GatewayConfig, dispatch gateway.Dispat
 		}
 		kubeConfig := *config.Kubernetes
 		kubeConfig.AuditLogger = config.AuditLogger
-		dispatch[kubernetesgateway.Authority] = gateway.Route{Capability: string(api.CapabilityKubernetesRead), Tier: audit.TierSemantic, Handler: kubernetesgateway.NewHandler(kubeConfig), Budgets: tracker}
+		dispatch[kubernetesgateway.Authority] = gateway.Route{Capability: string(api.CapabilityKubernetesRead), Tier: audit.TierSemantic, Handler: kubernetesgateway.NewHandler(kubeConfig), Budgets: tracker, AuditLogger: config.AuditLogger}
 	}
 	for _, capability := range owner.nativeCapabilities {
 		if !slices.Contains(owner.policy.Spec.AllowedCapabilities, capability) || capability == api.CapabilityGitHubPullRequest && config.GitHub == nil || capability == api.CapabilityKubernetesRead && config.Kubernetes == nil {

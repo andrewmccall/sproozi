@@ -29,7 +29,6 @@ import (
 
 	"github.com/andrewmccall/sproozi/internal/budget"
 
-	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/audit"
 	"github.com/andrewmccall/sproozi/internal/gateway"
 )
@@ -72,14 +71,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.deny(w, e, http.StatusUnauthorized, "gateway identity required")
 		return
 	}
-	e = identity.AuditEvent(r.Method + " " + r.Host)
-	e.Capability, e.SemanticLevel, e.Service = string(sprooziv1alpha1.CapabilityNetworkEgress), audit.TierDestination, "network"
-
-	if !slices.Contains(identity.Capabilities, sprooziv1alpha1.CapabilityNetworkEgress) ||
-		!slices.Contains(identity.Policy.Spec.AllowedCapabilities, sprooziv1alpha1.CapabilityNetworkEgress) {
-		h.deny(w, e, http.StatusForbidden, "network.egress capability not granted")
-		return
-	}
+	e = gateway.AuditEvent(ctx, r.Method+" "+r.Host)
+	e.Service = "network"
 
 	dests := h.Config.Profiles.ActiveDestinations(
 		identity.Template.Spec.EgressProfiles,

@@ -446,7 +446,7 @@ func main() {
 		Budgets: budgets, AuditLogger: auditLogger})
 	dispatcher := composeDispatcher(cfg, handlers, mcpHandler, anthropicHandler)
 	for authority, route := range dispatcher {
-		route.Budgets = budgets
+		route.Budgets, route.AuditLogger = budgets, auditLogger
 		dispatcher[authority] = route
 	}
 	transport, err := proxytransport.New(proxytransport.Config{

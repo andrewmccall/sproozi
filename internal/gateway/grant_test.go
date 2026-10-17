@@ -1,6 +1,7 @@
 package gateway_test
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -62,7 +63,7 @@ func TestDockerGrantEnforcesInitializedAllocationWithoutAgentRun(t *testing.T) {
 	if err != nil || state.UnitsUsed != 2 {
 		t.Fatalf("allocation accounting: %+v %v", state, err)
 	}
-	if event := grant.AuditEvent("read"); event.ExecutionBackend != "docker" || event.RunUID != "container-incarnation" || event.SAUID != "" {
+	if event := gateway.AuditEvent(gateway.WithIdentity(context.Background(), grant), "read"); event.ExecutionBackend != "docker" || event.RunUID != "container-incarnation" || event.SAUID != "" {
 		t.Fatalf("Docker audit invented Kubernetes authority: %+v", event)
 	}
 }

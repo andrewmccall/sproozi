@@ -73,9 +73,8 @@ func (h *Handler) authorizeAndForward(ctx context.Context, identity *gateway.Exe
 	if identity == nil || identity.Execution.UID == "" {
 		return nil, fmt.Errorf("kubernetes: missing run identity")
 	}
-	event := identity.AuditEvent("kubernetes.read")
-	event.Capability = string(sprooziv1alpha1.CapabilityKubernetesRead)
-	event.SemanticLevel, event.Service = "semantic", "kubernetes"
+	event := gateway.AuditEvent(ctx, "kubernetes.read")
+	event.Service = "kubernetes"
 	defer func() {
 		if h.Config.AuditLogger == nil {
 			return
@@ -178,9 +177,6 @@ func (b *boundedBody) Read(p []byte) (int, error) {
 }
 
 func allowed(id *gateway.ExecutionGrant, op Operation) bool {
-	if !slices.Contains(id.Capabilities, sprooziv1alpha1.CapabilityKubernetesRead) || !slices.Contains(id.Policy.Spec.AllowedCapabilities, sprooziv1alpha1.CapabilityKubernetesRead) {
-		return false
-	}
 	if op.Discovery {
 		return (op.APIGroup == "" || op.APIGroup == appsAPIGroup) && (op.Version == "" || op.Version == "v1")
 	}

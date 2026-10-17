@@ -215,24 +215,6 @@ func TestHandlerDisallowedPathReturns403(t *testing.T) {
 	assertOpenAIErrorBody(t, rr.Body.Bytes())
 }
 
-func TestHandlerCapabilityNotGrantedReturns403(t *testing.T) {
-	identity := testExecutionGrant()
-	identity.Capabilities = []sprooziv1alpha1.CapabilityKind{}
-
-	rf := identity
-	h := newHandler(t, rf, "")
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	req.Header.Set("Authorization", "Bearer valid-token")
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", rr.Code)
-	}
-	assertOpenAIErrorBody(t, rr.Body.Bytes())
-}
-
 func TestHandlerBudgetExhaustedReturns429(t *testing.T) {
 	identity := testExecutionGrant()
 	bt := budget.NewTracker()

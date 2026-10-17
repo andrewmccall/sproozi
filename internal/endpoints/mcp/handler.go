@@ -8,7 +8,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"slices"
 	"strings"
 	"time"
 
@@ -61,8 +60,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	name := strings.TrimPrefix(r.URL.Path, "/mcp/")
 	capability := api.CapabilityKind("mcp." + name)
-	event := identity.AuditEvent("mcp.request")
-	event.Capability, event.SemanticLevel, event.Service = string(capability), audit.TierProtocol, "mcp"
+	event := gateway.AuditEvent(r.Context(), "mcp.request")
+	event.Capability, event.Service = string(capability), "mcp"
 	if _, valid := capability.MCPServerName(); !valid || r.URL.Path != "/mcp/"+name ||
 		r.URL.RawPath != "" || r.URL.RawQuery != "" || r.URL.ForceQuery || len(r.Header.Values("Origin")) != 0 {
 		// Do not audit unvalidated path data, which might contain a secret.
@@ -76,7 +75,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.deny(w, event, http.StatusForbidden, "MCP server is not registered")
 		return
 	}
-	if !slices.Contains(identity.Capabilities, capability) || !slices.Contains(identity.Policy.Spec.AllowedCapabilities, capability) {
+	if !identity.Permits(capability) {
 		h.deny(w, event, http.StatusForbidden, "MCP capability denied")
 		return
 	}

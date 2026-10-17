@@ -144,7 +144,7 @@ func TestRegisteredMCPProvidersAndGatewayNeverFallBackToDestinationRoutes(t *tes
 		t.Fatal("reserved MCP addresses acquired destination fallback")
 	}
 	routes = composeDispatcher(cfg, handlers, http.NotFoundHandler(), nil)
-	if !routes.Allows(defaultHost+":8443") || routes[defaultHost+":8443"].Tier != audit.TierProtocol {
+	if !routes.Allows(defaultHost + ":8443") {
 		t.Fatal("MCP delivery route was not composed")
 	}
 }
@@ -308,10 +308,6 @@ func TestConfiguredDestinationRoutesAndSemanticPrecedence(t *testing.T) {
 	if routes.Allows("api.github.com:443") {
 		t.Fatal("disabled semantic service fell back to weaker egress")
 	}
-	if routes["registry.example:8443"].Tier != audit.TierDestination ||
-		routes["api.github.com:443"].Tier != audit.TierSemantic {
-		t.Fatal("route tiers are incorrect")
-	}
 }
 
 func TestAnthropicStartupAndReservedRoute(t *testing.T) {
@@ -344,7 +340,7 @@ func TestAnthropicStartupAndReservedRoute(t *testing.T) {
 	cfg.profiles = profiles
 	routes = composeDispatcher(cfg,
 		map[api.CapabilityKind]http.Handler{api.CapabilityNetworkEgress: http.NotFoundHandler()}, nil, nil)
-	if routes.Allows("api.anthropic.com:443") || routes["api.anthropic.com:443"].Tier != audit.TierSemantic {
+	if routes.Allows("api.anthropic.com:443") {
 		t.Fatal("disabled Anthropic fell back to egress")
 	}
 }

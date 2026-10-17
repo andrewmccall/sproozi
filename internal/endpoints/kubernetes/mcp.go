@@ -5,12 +5,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"slices"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"k8s.io/apimachinery/pkg/util/validation"
 
-	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/gateway"
 )
 
@@ -63,11 +61,6 @@ func (h *Handler) serveMCP(w http.ResponseWriter, r *http.Request, identity *gat
 	// and per-request lifecycle revalidation remain outside the MCP protocol.
 	if len(r.Header.Values("Origin")) != 0 || r.URL.RawQuery != "" || r.URL.RawPath != "" {
 		http.Error(w, "unsupported MCP request", http.StatusForbidden)
-		return
-	}
-	if !slices.Contains(identity.Capabilities, sprooziv1alpha1.CapabilityKubernetesRead) ||
-		!slices.Contains(identity.Policy.Spec.AllowedCapabilities, sprooziv1alpha1.CapabilityKubernetesRead) {
-		http.Error(w, "kubernetes capability denied", http.StatusForbidden)
 		return
 	}
 	h.mcp.ServeHTTP(w, r)

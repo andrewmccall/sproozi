@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -12,15 +13,20 @@ import (
 )
 
 // Route declares the guarantee and capability of an exact upstream authority.
-// Authentication belongs to proxytransport; handlers authorize the operation.
+// It is the single source of both: the Dispatcher enforces the capability and
+// AuditEvent copies both into every handler's record. Authentication belongs
+// to proxytransport; handlers authorize the operation.
 type Route struct {
-	Capability string
-	Tier       audit.EnforcementTier
-	Handler    http.Handler
-	Budgets    *budget.Tracker
+	Capability  string
+	Tier        audit.EnforcementTier
+	Handler     http.Handler
+	Budgets     *budget.Tracker
+	AuditLogger audit.Writer
 }
 
 type Dispatcher map[string]Route
+
+type routeContextKey struct{}
 
 func (d Dispatcher) Allows(authority string) bool {
 	route, ok := d[normalizeAuthority(authority)]
@@ -40,10 +46,21 @@ func (d Dispatcher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "gateway destination denied", http.StatusForbidden)
 		return
 	}
-	ctx := r.Context()
-	// Named MCP routes select their capability after parsing the server name.
+	ctx := context.WithValue(r.Context(), routeContextKey{}, route)
+	// Named MCP routes select their capability after parsing the server name
+	// and check it with the same Permits.
 	if route.Capability != "" {
-		meter, err := identity.Meter(route.Budgets, sprooziv1alpha1.CapabilityKind(route.Capability))
+		capability := sprooziv1alpha1.CapabilityKind(route.Capability)
+		if !identity.Permits(capability) {
+			if route.AuditLogger != nil {
+				event := AuditEvent(ctx, route.Capability)
+				event.DenyReason = "capability not granted"
+				route.AuditLogger.Log(event)
+			}
+			http.Error(w, route.Capability+" capability not granted", http.StatusForbidden)
+			return
+		}
+		meter, err := identity.Meter(route.Budgets, capability)
 		if err != nil {
 			status := http.StatusForbidden
 			if errors.Is(err, ErrBudgetUnavailable) {
@@ -54,11 +71,7 @@ func (d Dispatcher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		ctx = budget.WithMeter(ctx, meter)
 	}
-	clean := r.Clone(ctx)
-	clean.Header.Del("Authorization")
-	clean.Header.Del("Proxy-Authorization")
-	clean.Header.Del("Cookie")
-	route.Handler.ServeHTTP(w, clean)
+	route.Handler.ServeHTTP(w, r.WithContext(ctx))
 }
 
 func normalizeAuthority(authority string) string {

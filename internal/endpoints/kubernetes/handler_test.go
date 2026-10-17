@@ -126,11 +126,10 @@ func TestKubernetesAuditRecordsAllowedReadAndPolicyDenial(t *testing.T) {
 	var output bytes.Buffer
 	u, _ := url.Parse("https://kubernetes.test")
 	h := NewHandler(HandlerConfig{Upstream: u, AuditLogger: audit.NewLogger(&output), Client: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) { return response(), nil })}})
+	routes := gateway.Dispatcher{Authority: {Capability: string(sprooziv1alpha1.CapabilityKubernetesRead), Tier: audit.TierSemantic, Handler: h}}
 	for _, path := range []string{demoPodsPath, demoSecretsPath} {
-		resp, _ := h.authorizeAndForward(context.Background(), identity(), httptest.NewRequest(http.MethodGet, path, nil))
-		if resp != nil {
-			_ = resp.Body.Close()
-		}
+		req := httptest.NewRequest(http.MethodGet, "https://"+Authority+path, nil)
+		routes.ServeHTTP(httptest.NewRecorder(), req.WithContext(gateway.WithIdentity(req.Context(), identity())))
 	}
 	decoder := json.NewDecoder(&output)
 	var allowed, denied audit.Event
