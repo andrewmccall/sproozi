@@ -234,8 +234,7 @@ func (p *Placement) ceilings(l session.Launch, policy api.AgentPolicySpec) (map[
 	return ceilings, nil
 }
 func (p *Placement) registration(l session.Launch, ceilings map[api.CapabilityKind]api.EndpointBudget) registry.Registration {
-	version, _ := harness.NativeVersion(p.config.Harness)
-	return registry.Registration{Harness: p.config.Harness, Principal: p.config.Principal, SessionID: l.SessionID, Epoch: l.Epoch, OperationID: l.OperationID, NativeUUID: l.ThreadID, NativePin: version, InstructionDigest: l.InstructionDigest, OriginalDeadline: l.Deadline.UTC(), TemplateName: p.config.TemplateName, Ceilings: ceilings, Task: l.Task, CheckpointDigest: l.CheckpointDigest, IncludeIgnored: append([]string(nil), l.IncludeIgnored...), IntendedRunName: runName(l)}
+	return registry.Registration{Harness: p.config.Harness, Principal: p.config.Principal, SessionID: l.SessionID, Epoch: l.Epoch, OperationID: l.OperationID, NativeUUID: l.ThreadID, InstructionDigest: l.InstructionDigest, OriginalDeadline: l.Deadline.UTC(), TemplateName: p.config.TemplateName, Ceilings: ceilings, Task: l.Task, CheckpointDigest: l.CheckpointDigest, IncludeIgnored: append([]string(nil), l.IncludeIgnored...), IntendedRunName: runName(l)}
 }
 
 func (p *Placement) Prepare(ctx context.Context, l session.Launch, data []byte) (session.Incarnation, error) {

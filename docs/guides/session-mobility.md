@@ -1,21 +1,17 @@
 # Move a native session between local and remote execution
 
-The implemented session service starts stock Codex in a controlled local Docker
-workspace, attaches its native terminal, and coordinates moves to an
-administrator-approved Kubernetes profile and back. It preserves the genuine
-native conversation UUID and selected Git workspace state. Each visit receives
-fresh execution identity and access within the original deadline and remaining
-allowance.
+Use this guide to move a managed Codex or Claude Code session between local
+Docker and an approved Kubernetes environment. You use the agent's native
+terminal. The conversation ID and supported Git workspace state stay the same.
 
-The deterministic Codex fixture has completed a Docker-to-Kubernetes-to-Docker
-conversation with real tool execution, Git state and the same native UUID,
-original deadline and sealed usage. It also passed a held-turn move, input gating,
-network/capability denials and forced cancellation during a move. Claude Code's
-complete TUI/Bash/Git roundtrip and both-placement denial checks also passed.
-Use this as an evaluation setup guide. The native pins are Codex 0.161.0 and
-Claude Code 2.1.27; a session keeps one selected client throughout its lifetime. This path
-starts a new managed conversation, rather than importing a personal Codex home
-or adopting an arbitrary running local conversation.
+A move keeps the execution's original deadline and total usage allowance. Each
+destination gets fresh identity and access. For a completed remote task that you
+want to resume later, use [retained remote work](portable-workflows.md).
+
+This setup uses Codex and Claude Code with their upstream default versions. A session
+keeps one selected client throughout its lifetime. Start a new managed
+conversation; importing a personal agent home or adopting an existing running
+session is not supported.
 
 ## Prepare the administrator-owned setup
 
@@ -42,11 +38,11 @@ go build -o bin/sproozi ./cmd/sproozi
 go build -o bin/session-profile ./cmd/session-profile
 ```
 
-Build and approve the stock-client image with
-[`hack/demo/codex.Dockerfile`](../../hack/demo/codex.Dockerfile), explicitly setting
-`CODEX_VERSION=0.161.0`. Its default version is for the ordinary demo and differs
-from the mobility contract. Add pinned Claude Code 2.1.27 using the
-[combined client image](../../internal/runtime/docker/image/clients.Dockerfile).
+Build the stock-client image with
+[`hack/demo/codex.Dockerfile`](../../hack/demo/codex.Dockerfile). It installs Codex
+without a version selector. Add Claude Code with the
+[combined client image](../../internal/runtime/docker/image/clients.Dockerfile),
+which also uses the default package version.
 Then build the
 [native session image](../../internal/runtime/docker/image/Dockerfile) with an
 immutable `CLIENTS_IMAGE=repository@sha256:...` reference. That image adds the
@@ -73,14 +69,14 @@ available to cluster nodes separately.
 
 The home gateway's fixed IPv4 and port must be reachable from the chosen Docker
 network. Select the actual host/VM address for your platform; `192.168.65.254` in
-the example is a Docker Desktop fixture address, not a universal host address.
+the example is specific to its Docker Desktop setup. It is not a universal host address.
 The trusted network anchor permits worker traffic only to that fixed gateway
 endpoint, with IPv4/IPv6 restrictions. The anchor has NET_ADMIN for its fixed
 firewall; the native worker has no capabilities or host/Docker socket mounts.
 Choose cluster Pod and CNI address pools that do not overlap that host address
-or your Docker networks. The dedicated fixture uses `10.244.0.0/16` for both Kind's
-Pod subnet and Calico's IPv4 pool. Calico's default `192.168.0.0/16` overlaps the
-Docker Desktop fixture host address and prevented Pods from reaching its provider.
+or your Docker networks. For example, Calico's default `192.168.0.0/16`
+contains `192.168.65.254`. If you use that host address, choose a different Pod
+subnet and CNI address pool.
 
 Create a private owned configuration directory with `umask 077`, mode `0700` for
 directories and `0600` for regular files. Configure the local TLS certificate to
@@ -92,7 +88,7 @@ allocation token and a placeholder provider key. Save credentials directly into
 protected files using your credential manager, rather than pasting them into
 chat or writing them into the source workspace.
 
-Use the complete [home configuration example](../../cmd/sproozi/README.md) and
+Use the [home configuration example](../../cmd/sproozi/README.md) and
 [configuration schema](../../internal/session/home/config.go). Set the exact
 approved instruction bytes and their SHA-256, model/options, finite positive
 unit allowance, explicit cost allowance, duration and resource/storage limits.
@@ -130,15 +126,6 @@ sends the token only to that exact origin, with no redirect or environment-proxy
 fallback. Keep the token and CA file paths in the home configuration; do not copy
 the profile's kubeconfig to the developer, worker or portable pair.
 
-The credential-free [fixture helper](../../hack/verify/session-mobility/host.py),
-[Kubernetes renderer](../../hack/verify/session-mobility/kubernetes.py) and
-[round-trip driver](../../hack/verify/session-mobility/verify.py) use a deterministic
-Responses fixture with a public placeholder token. The
-[complete fixture setup](../../hack/verify/session-mobility/README.md) also covers
-real tool, held-move and forced-cancellation checks and the separate Claude
-Messages fixture. The administrator owns image approval, isolated Kind deployment,
-TLS keys and containment checks.
-
 ## Start the daemon and conversation
 
 Keep the daemon process independent of terminal attachments. For a local trial:
@@ -173,12 +160,12 @@ bin/sproozi start --socket /absolute/private/home/control.sock \
   --include-ignored needed.bin --include-ignored cache/chosen.dat
 ```
 
-The selection is immutable session intent and persists through every visit and
-sealed receipt. It accepts at most 32 clean relative file paths of at most 512
-bytes each. It rejects traversal, absolute paths, `.git` control paths, symlinks,
-external mounts and special files. Each selected path must remain an ignored
-regular file at capture; a missing or unsupported selection fails the checkpoint.
-Do not opt credentials into the portable pair.
+The ignored-file selection cannot change after start. It remains recorded for
+every visit and usage receipt. It accepts at most 32 clean relative file paths
+of at most 512 bytes each. It rejects traversal, absolute paths, `.git` control
+paths, symlinks, external mounts and special files. Each selected path must
+remain an ignored regular file at capture; a missing or unsupported selection
+fails the checkpoint. Do not include credential files in the checkpoint.
 
 An initial status can have an empty native UUID. The managed native process creates
 it, and the first successful stopped checkpoint binds that observed UUID once.
@@ -208,18 +195,20 @@ bin/sproozi move --socket /absolute/private/home/control.sock \
 bin/sproozi attach --socket /absolute/private/home/control.sock --id SESSION_UUID
 ```
 
-A graceful move closes the native input gate and waits for the active turn and
-supported tools to complete within the original deadline. Source gateway access
-remains available during that wait. After native quiet, the placement revokes
-access and independently observes the exact native container stopped. It seals
-trusted usage and commits the conversation/workspace checkpoint before preparing
-and activating the next writer. Each destination restores inertly and admits a
-fresh allocation; it cannot reopen a terminal Run or reuse old worker credentials.
+A graceful move blocks new terminal input and waits for the current turn and
+supported tools to finish within the original deadline. Source gateway access
+remains available during that wait. After the turn and tools finish, the
+placement revokes access and confirms that the exact agent container has
+stopped. It finalizes usage accounting and saves the checkpoint before preparing
+another agent. The destination restores state without starting the agent, then
+checks a fresh allocation. It cannot reopen a terminal Run or reuse old worker
+credentials.
 
 The original native UUID, instructions, ignored-file selection and absolute
-deadline persist. Remaining allowance decreases by sealed usage, including
-outstanding reservations. A move does not refill a budget or extend the deadline.
-Detaching also leaves the writer's deadline and spending rules in effect.
+deadline persist. Remaining allowance decreases by finalized usage, including
+outstanding reservations. A move does not refill a budget or extend the
+deadline. Detaching also leaves the writer's deadline and spending rules in
+effect.
 
 ## Recover or cancel
 
@@ -248,12 +237,13 @@ default to 45 seconds; a slower completed-turn wait can return uncertainty with
 input gated. Repeat the exact intent or recover after the backend can establish
 its retained state. Attachment disconnects do not cancel the native turn.
 
-Unknown stop, unreachable execution or missing usage keeps the allocation
-encumbered and blocks destination activation. A lost reply is not proof of
-absence or zero consumption. Keep the home and profile journals intact, restore
-backend connectivity, and recover the existing operation. Restart a daemon/profile
-with the same protected state and configuration; stopping those processes alone
-does not establish a stopped writer. The native original deadline still applies.
+If stop is unknown, the execution is unreachable or usage is missing, the
+allocation stays held. The destination cannot start. A lost reply is not proof
+of absence or zero consumption. Keep the home and profile journals intact,
+restore backend connectivity, and recover the existing operation. Restart a
+daemon/profile with the same protected state and configuration; stopping those
+processes alone does not establish a stopped writer. The native original
+deadline still applies.
 
 Managed remote Pods retain a writer-fence finalizer until the profile records
 termination of their exact native container. A stopped helper or lost profile can
@@ -262,7 +252,7 @@ operation. Keep its journal and checkpoint artifacts. Removing the finalizer or
 force-deleting a Pod before that evidence is recorded leaves the writer unknown
 and does not release its allowance or permit another placement.
 
-Cancellation has different semantics:
+Cancellation forces the execution to stop:
 
 ```sh
 bin/sproozi cancel --socket /absolute/private/home/control.sock \
@@ -271,13 +261,13 @@ bin/sproozi cancel --socket /absolute/private/home/control.sock \
 
 Cancel persists intent, revokes access first and forces the exact execution to
 stop. It preserves the last committed checkpoint and does not wait for a fresh
-completed turn. Without independently sealed usage, allowance stays encumbered.
-A cancelled session cannot move again. Retry with the same cancellation UUID or
+completed turn. Without finalized usage accounting, the allowance stays held. A
+cancelled session cannot move again. Retry with the same cancellation UUID or
 recover; editing a journal or deleting a registration cannot safely refill it.
 
 ## Current limits
 
-The native checkpoint must match the selected pinned client and a genuine UUID.
+The native checkpoint must match the selected selected client and a genuine UUID.
 Codex requires its approved initial instructions and a completed final turn/tools
 boundary. Claude requires a compatible primary transcript and trusted placement
 quiescence acknowledgement; an assistant leaf alone is insufficient. Selected
@@ -290,11 +280,8 @@ and special files. Large archives, unsupported state and bounded storage failure
 stop explicitly. Journals and retained artifacts also have limits; there is no
 automatic garbage-collection or budget-reset command.
 
-Unit protocol/recovery tests use controlled fixtures. The
-[recorded matched-image proofs](../demos/verified-session-mobility.md) passed for
-both selected clients. GUI ownership, existing-session adoption, other platforms,
-large/compacted native histories and broader tool-effect continuity need separate
-proof before support can expand.
+GUI and IDE attachment, adoption of existing sessions, large or compacted
+histories, background tools and subagents are outside the supported workflow.
 
 The reasons for these boundaries are recorded in
 [ADR 0008](../adr/0008-selected-native-and-git-checkpoints.md),

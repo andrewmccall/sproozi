@@ -1,10 +1,9 @@
 # AgentRun
 
-**Audience:** operators, contributors
+`AgentRun` requests one task through a trusted `AgentTemplate`. It supplies task
+text and requested capabilities. The template selects the runtime and policy.
 
-`AgentRun` is one bounded request to execute a trusted `AgentTemplate`.
-
-## What it owns
+## What it records
 
 - the referenced template
 - untrusted task text
@@ -45,7 +44,7 @@ Queued -> Admitted -> Running -> Succeeded | Failed | TimedOut | Cancelled
 ```
 
 Success uses the process exit of the container named `agent`, after the Pod
-becomes terminal. A proposed PR is separate evidence. See
+becomes terminal. Review a proposed PR separately. See
 [agent contract and completion](agent-contract.md).
 
 ## Immutability
@@ -67,12 +66,12 @@ The only mutable intent in `spec` is `cancel: true`.
 - `status.completedAt`
 - `status.summary`
 
-Those fields record what Sproozi created and how the run ended without exposing credentials or raw prompt/output content.
+These fields record created resources and the run outcome. They contain no
+credentials or raw prompt and output text.
 
-
-`status.result` optionally retains `{text, truncated}` from an explicit
-UID-bound worker publication. The controller stores it with terminal phase
-before Pod deletion. It is separate from audit-safe summary and conditions,
-may contain sensitive untrusted output, and expires with Run retention. Missing
-output is unavailable; empty available output is distinct. See
+A worker can explicitly publish a final answer tied to its Run UID. The
+controller saves it as `status.result`, with `{text, truncated}`, before
+deleting the Pod. This field can contain sensitive, untrusted output. It is
+separate from the audit-safe summary and conditions and expires with the Run. A
+missing result means unavailable; an available result can have empty text. See
 [result publication](agent-contract.md#retained-final-answers).

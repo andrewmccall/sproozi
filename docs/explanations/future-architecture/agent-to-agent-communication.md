@@ -4,20 +4,29 @@ Status: deferred
 
 ## Problem
 
-An agent needs to delegate a bounded subtask or consult another agent while retaining attribution and control of cost.
+An agent may need to ask another agent for help. The caller must keep control of
+permissions, cost and cancellation.
 
 ## Desired behaviour
 
-A permitted caller addresses an independently governed agent through a supported protocol. Delegation has a durable intent, bounded authority, observable result and cancellation ownership.
+An authenticated agent delegates a task to an approved agent. The system saves
+the request, gives the child execution separate permissions and records its
+result. It defines who can cancel the child.
 
-## Proposed primitives
+## Proposed parts
 
-Authenticated caller identity; destination allowlist; immutable delegation intent; separate child execution grant; result and lifecycle references.
+- Authenticated caller and approved destination.
+- Saved task request that cannot change on retry.
+- Separate permissions and limits for the child execution.
+- References to the child status and result.
 
 ## Open questions
 
-Can existing MCP delegation meet the first use case? What context may leave the source? Who pays for and cancels a child when its parent stops? Which protocol requires conversation continuity?
+Can existing MCP delegation meet the first use case? What context can leave the
+source? Who pays for the child and cancels it if the parent stops? Does the
+protocol need to preserve a conversation between calls?
 
-## Non-goals and next evidence
+## Scope
 
-No unrestricted peer discovery, artifact-derived grants or shared native session. Start with one scoped delegation whose denial and cleanup can be reproduced.
+This proposal does not include unrestricted peer discovery or shared native
+sessions. Imported files cannot grant permissions.

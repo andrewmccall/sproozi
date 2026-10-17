@@ -1,10 +1,9 @@
 # Required secrets and config
 
-**Audience:** operators
-
-Sproozi keeps credentials and destination policy in trusted cluster objects, not
-in sandbox pods. The sandbox receives only standard client configuration and a
-per-run gateway identity token.
+This page lists credentials and configuration for the Kubernetes deployment.
+Provider credentials stay in trusted cluster objects. Agent Pods receive client
+configuration, public trust material and a gateway identity token for the run.
+Follow [Install on Kubernetes](../guides/install-kubernetes.md) for setup steps.
 
 ## Objects
 
@@ -28,8 +27,8 @@ egress profiles. Startup checks that the certificate covers every host.
 `SPROOZI_ENABLED_CAPABILITIES` selects installed modules as a comma-separated
 list. The binary defaults to `kubernetes.read`; the demo Deployment explicitly
 enables all implemented capabilities. Disabled model and GitHub modules need no
-provider credentials. Module availability never grants a run authority: the run
-and live policy must still permit every request.
+provider credentials. Enabling a module does not grant access. The run and
+current policy must still permit every request.
 
 The shared gateway writes newline-delimited, secret-free JSON audit events to
 container stdout. Operators should collect that stream from the shared gateway
@@ -43,10 +42,11 @@ setup, token-only subscription budget and single-refresh-owner limitation.
 
 ## Egress profile format
 
-`profiles.json` maps a profile name to exact inspected HTTPS destination tuples.
-Ports are exact and may differ from 443; plaintext HTTP is rejected at startup.
-Adding a profile creates its route, but the template and live policy must both
-select it. The TLS certificate must include each profile host:
+`profiles.json` maps a profile name to exact inspected HTTPS combinations of
+scheme, host and port. Ports are exact and may differ from 443; plaintext HTTP
+is rejected at startup. Adding a profile creates its route, but the template and
+live policy must both select it. The TLS certificate must include each profile
+host:
 
 
 ```json
@@ -74,8 +74,9 @@ Never mount these credentials directly into sandbox workloads.
 When `model.inference` is enabled, the shared gateway loads `MODEL_PRICING_PATH` at startup (default
 `/etc/sproozi/model/pricing.json`). Startup fails closed if the file is absent,
 malformed, empty, or contains non-positive prices. Model inference under a
-positive `budgets[model.inference].maxCostMicros` rejects a successful response
-for an unpriced model during settlement, after the upstream call. A missing price
+positive `budgets[model.inference].maxCostMicros` on the OpenAI path rejects a
+successful response for an unpriced model during settlement, after the upstream
+call. Anthropic requires the model price before forwarding a cost-capped request. A missing price
 does not prevent provider consumption.
 
 Prices are integer millionths of a US dollar per million tokens:

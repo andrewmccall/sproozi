@@ -53,7 +53,7 @@ and private session file before that gateway was restored.
 
 ## Repeat the bounded check
 
-[Kubernetes MCP delivery](../reference/kubernetes-mcp.md#verification) describes
+[Kubernetes MCP delivery](../running.md#kubernetes-mcp) describes
 the caller-provisioned cluster prerequisites and commands. The repository retains
 `hack/verify/render-mcp-fixture.py` and `hack/verify/mcp-live.py`. The fixture
 uses the actual opt-in demo renderer, narrows its grants and holds the completed
@@ -73,12 +73,12 @@ an AgentRun `Succeeded` transition. Cleanup covers normal recorded provisioning
 and run-labelled invocation resources. It does not cover lost provisioning
 status or deletion of durable budget ConfigMaps. Observed usage does not prove
 a hard total-token or spending ceiling. See
-[security hardening](../reference/security-hardening.md).
+[security hardening](../../../docs/reference/security-hardening.md).
 
 Local integration tests separately cover capability/resource denials, shared
 REST/MCP budgeting, forged arguments/session IDs, input/output limits and
 in-flight cancellation against a fake Kubernetes upstream. Configured remote MCP providers have separate evidence below. Managed stdio
-servers and Docker execution remain future work. [Additional CLI adapters](../reference/harnesses.md)
+servers and Docker execution remain future work. [Additional CLI adapters](../../../docs/reference/harnesses.md)
 have local tests; this recorded Kind proof remains Codex-specific.
 
 ## Configured remote MCP acceptance
@@ -125,7 +125,7 @@ These were fresh builds from the dirty tree over the same base commit. The
 fixture server command is under `hack/verify/mcp-provider/` and is verification
 code, not an integration adapter.
 
-[Configured MCP verification](../reference/configured-mcp.md#deployed-verification)
+[Configured MCP verification](../running.md#configured-mcp-in-kind)
 describes `make verify-mcp-kind`. The first setup needed its sandbox trust
 ConfigMap marked immutable; this correction is retained in the setup script.
 The gate, including its corrected trust requirement, passed against the real

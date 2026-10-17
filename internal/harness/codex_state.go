@@ -10,10 +10,6 @@ import (
 	"regexp"
 )
 
-// CodexSessionVersion is the native state version exercised by the resume gate.
-// A different client needs its own resume proof before this allowlist changes.
-const CodexSessionVersion = "0.161.0"
-
 var codexThreadID = regexp.MustCompile(`^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$`)
 var codexRolloutPath = regexp.MustCompile(`^sessions/[0-9]{4}/[0-9]{2}/[0-9]{2}/rollout-[0-9T-]+-[0-9a-f-]+\.jsonl$`)
 
@@ -30,7 +26,7 @@ type CodexState struct {
 
 // CaptureCodexState selects one native rollout after the supervisor has stopped
 // every native writer. A completed-turn marker alone does not prove process stop.
-// Only the pinned native session file is selected; no home or index DB is copied.
+// Only the selected native session file is selected; no home or index DB is copied.
 func CaptureCodexState(home, threadID string, maxBytes int64) (CodexState, error) {
 	if !codexThreadID.MatchString(threadID) || maxBytes <= 0 {
 		return CodexState{}, fmt.Errorf("invalid Codex checkpoint selection")
@@ -85,7 +81,7 @@ func CaptureCodexState(home, threadID string, maxBytes int64) (CodexState, error
 	return result, nil
 }
 
-// CompletedCodexTurn observes the pinned native completion event. The supervisor
+// CompletedCodexTurn observes the native completion event. The supervisor
 // must separately block input and confirm native process/descendant termination.
 func CompletedCodexTurn(state CodexState, maxBytes int64) (string, error) {
 	_, turn, err := inspectCodexState(state, maxBytes)
@@ -165,7 +161,7 @@ func inspectCodexState(state CodexState, maxBytes int64) (string, string, error)
 				Version string `json:"cli_version"`
 				Cwd     string `json:"cwd"`
 			}
-			if err := json.Unmarshal(event.Payload, &value); err != nil || meta || value.ID != state.ThreadID || value.Version != CodexSessionVersion || !filepath.IsAbs(value.Cwd) {
+			if err := json.Unmarshal(event.Payload, &value); err != nil || meta || value.ID != state.ThreadID || value.Version == "" || !filepath.IsAbs(value.Cwd) {
 				return "", "", fmt.Errorf("incompatible native session metadata")
 			}
 			workspace, meta = value.Cwd, true

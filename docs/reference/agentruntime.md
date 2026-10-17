@@ -1,10 +1,12 @@
 # AgentRuntime
 
-`AgentRuntime` defines the administrator-owned execution environment. Its
-`podTemplate.spec` is the authoritative source of container images, resources
-and security settings. It also selects ordinary run commands; the managed native
-path below fixes its supervisor/helper commands through the controller. There
-are no duplicate top-level resource or security fields. Images must be pinned by digest.
+`AgentRuntime` defines how the agent runs. An administrator sets container
+images, resources, commands and security settings in `podTemplate.spec`. Images
+must be pinned by digest.
+
+Ordinary runs use the configured command. For managed native sessions, the
+controller sets fixed supervisor and checkpoint-helper commands. There are no
+separate top-level resource or security fields.
 
 ```yaml
 spec:
@@ -71,7 +73,7 @@ accepts other names, but completion reads only `agent` after the whole Pod
 becomes terminal. Long-running ordinary sidecars prevent completion.
 
 Run the CLI in one-shot mode and replace the shell with `exec`. The container's
-actual exit code determines success or failure; a PR is independent evidence.
+actual exit code determines success or failure; review the proposed PR separately.
 See [agent contract and completion](agent-contract.md).
 
 The adapter creates disposable Pods. Kubernetes Agent Sandbox integration is
@@ -88,15 +90,14 @@ native MCP configuration in the immutable contract. The administrator-owned
 launch command loads only that configuration into disposable client state.
 Only requested named MCP capabilities appear; credentials remain in the gateway.
 The [harness reference](harnesses.md) describes formats, trusted launch examples,
-model-provider setup and current verification limits.
+model-provider setup and supported configurations.
 
 ## Managed native sessions
 
 Managed sessions require explicit `clientConfig.harness: codex` or `claude-code`;
-the ordinary OpenCode/Hermes selectors do not make those clients movable. The
-executable pins are Codex 0.161.0 and Claude Code 2.1.27. The fixed supervisor
-observes the actual executable version before activation, independently of
-checkpoint metadata. Native kind cannot change during a move.
+the ordinary OpenCode/Hermes selectors do not make those clients movable. Client installs use upstream defaults. Sproozi checks supported native state and
+completion records without requiring an exact client version. A move keeps the
+same harness kind.
 
 `clientConfig.nativeSession.model` selects the administrator's native model and
 is bounded to 128 bytes without NUL or line breaks. Empty uses the stock default.
@@ -123,8 +124,8 @@ named `agent` and `checkpoint`, `workloadContainers: [agent]`, non-root UID/GID
 bounded memory-backed workspace. The controller sets the fixed supervisor and
 helper commands. The helper mounts the workspace and its private temporary
 volume, with no provider credentials, token mounts or native client environment.
-Ordinary Pod terminal completion does not replace managed per-visit stop/seal
-and restore behavior.
+Managed visits require additional stop, usage-accounting and restore checks.
+Ordinary Pod terminal completion does not replace them.
 
 The managed template carries `sessions.sproozi.com/managed: "true"`; each visit
 gets fresh admission and gateway access. Trusted launch configuration supplies
@@ -134,23 +135,22 @@ foreground Bash, fixed completion hooks, permission mode and settings; its
 transcript cannot assert any of those permissions. Both clients rely on the
 outer container and enforced gateway network boundary.
 
-Checkpoint version 2 contains an explicit kind, its selected native state and
-the Git workspace. An inert restore publishes `workspace` plus `codex` or
-`claude` under `/workspace/session`; it transfers no gateway credentials, launch
-configuration or personal native home. The legacy version 1 decoder recognizes
-Codex only. A native completion hint does not fence all writers: the placement
-must retain the accepted quiescence acknowledgement, revoke access, independently
-observe the actual container stopped, and seal usage before capture/next activation.
-A lost Claude completion acknowledgement remains unconfirmed even when the
-container is terminated and its transcript appears settled.
+Checkpoint version 2 records the harness kind, selected native state and Git
+workspace. Restoring without starting an agent creates `workspace` plus `codex`
+or `claude` under `/workspace/session`; it transfers no gateway credentials,
+launch configuration or personal native home. The legacy version 1 decoder
+recognizes Codex only. A native completion hint does not prove that all writers
+have stopped. The placement must save the accepted acknowledgement that the turn
+and tools have finished. It must revoke access, confirm that the actual
+container stopped and finalize usage accounting. These checks must finish before
+capture or destination activation. A lost Claude completion acknowledgement
+remains unconfirmed even when the container is terminated and its transcript
+appears settled.
 
-The pinned subset supports foreground tools and excludes background/subagent
+The supported state subset supports foreground tools and excludes background/subagent
 state and compaction. The observed recovered Claude 429 history record needs a
 later genuine successful assistant leaf; unresolved retries cannot reuse an old
-answer or grant authority. Both native kinds passed production Docker/Kind round
-trips; Codex additionally passed the extended held-turn, forced-cancellation and
-denial checks. See the [profile setup](../../cmd/session-profile/README.md),
+answer or grant authority. See the [profile setup](../../cmd/session-profile/README.md),
 [supervisor contract](../../cmd/native-session/README.md),
 [checkpoint helper](../../cmd/checkpoint/README.md),
-[ADR 0011](../adr/0011-native-session-compatibility-and-completion.md) and
-[repeatable fixture](../../hack/verify/session-mobility/README.md).
+[ADR 0011](../adr/0011-native-session-compatibility-and-completion.md).

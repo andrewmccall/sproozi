@@ -76,7 +76,6 @@ type Registration struct {
 	Epoch             uint64                                    `json:"epoch"`
 	OperationID       string                                    `json:"operationId"`
 	NativeUUID        string                                    `json:"nativeUuid"`
-	NativePin         string                                    `json:"nativePin"`
 	InstructionDigest string                                    `json:"instructionDigest"`
 	OriginalDeadline  time.Time                                 `json:"originalDeadline"`
 	TemplateName      string                                    `json:"templateName"`
@@ -107,12 +106,19 @@ type Record struct {
 // stored is the storage boundary; fields are checked together before conversion
 // into a Record. Object UID comes from Kubernetes metadata, not stored JSON.
 type stored struct {
-	Version      int          `json:"version"`
-	Registration Registration `json:"registration"`
-	RunUID       string       `json:"runUid"`
-	PodUID       string       `json:"podUid"`
-	Phase        Phase        `json:"phase"`
-	Receipt      *StopReceipt `json:"receipt,omitempty"`
+	Version      int                `json:"version"`
+	Registration storedRegistration `json:"registration"`
+	RunUID       string             `json:"runUid"`
+	PodUID       string             `json:"podUid"`
+	Phase        Phase              `json:"phase"`
+	Receipt      *StopReceipt       `json:"receipt,omitempty"`
+}
+
+// storedRegistration accepts the retired nativePin field only when reading an
+// existing journal. It grants no authority and is omitted from all new writes.
+type storedRegistration struct {
+	Registration
+	RetiredNativePin json.RawMessage `json:"nativePin,omitempty"`
 }
 
 type Store struct {
@@ -153,7 +159,7 @@ func (s *Store) Create(ctx context.Context, registration Registration) (Record, 
 	if !registration.OriginalDeadline.After(s.now()) {
 		return Record{}, ErrExpired
 	}
-	document, err := encode(stored{Version: 1, Registration: registration, Phase: Creating})
+	document, err := encode(stored{Version: 1, Registration: storedRegistration{Registration: registration}, Phase: Creating})
 	if err != nil {
 		return Record{}, err
 	}
@@ -381,7 +387,7 @@ func (s *Store) change(ctx context.Context, ref Reference, mutate func(*stored) 
 		if err != nil {
 			return Record{}, err
 		}
-		state := stored{Version: 1, Registration: record.Registration, RunUID: record.RunUID, PodUID: record.PodUID, Phase: record.Phase, Receipt: record.Receipt}
+		state := stored{Version: 1, Registration: storedRegistration{Registration: record.Registration}, RunUID: record.RunUID, PodUID: record.PodUID, Phase: record.Phase, Receipt: record.Receipt}
 		if err = mutate(&state); err != nil {
 			return Record{}, err
 		}
@@ -437,22 +443,21 @@ func read(cm *corev1.ConfigMap) (Record, error) {
 	if cm.Name != NameForRun(value.Registration.IntendedRunName) {
 		return Record{}, fmt.Errorf("mobility record name mismatch")
 	}
-	return Record{Reference: Reference{Name: cm.Name, UID: string(cm.UID), Epoch: value.Registration.Epoch}, Registration: value.Registration,
+	return Record{Reference: Reference{Name: cm.Name, UID: string(cm.UID), Epoch: value.Registration.Epoch}, Registration: value.Registration.Registration,
 		RunUID: value.RunUID, PodUID: value.PodUID, Phase: value.Phase, Receipt: value.Receipt}, nil
 }
 
 func validUID(uid string) bool { return identifier.MatchString(uid) }
 
 func validateRegistration(r Registration) error {
-	version, err := harness.NativeVersion(r.Harness)
-	if err != nil {
+	if err := r.Harness.Validate(); err != nil {
 		return err
 	}
 	if err := workspace.ValidateIgnoredPaths(r.IncludeIgnored); err != nil {
 		return err
 	}
 	if !identifier.MatchString(r.Principal) || !identifier.MatchString(r.SessionID) || !identifier.MatchString(r.OperationID) || r.Epoch == 0 ||
-		r.NativePin != version || !digestPattern.MatchString(r.InstructionDigest) ||
+		!digestPattern.MatchString(r.InstructionDigest) ||
 		r.OriginalDeadline.IsZero() || r.OriginalDeadline.Location() != time.UTC || len(validation.IsDNS1123Subdomain(r.TemplateName)) != 0 ||
 		len(validation.IsDNS1123Subdomain(r.IntendedRunName)) != 0 || len(r.Ceilings) == 0 || len(r.Ceilings) > 32 {
 		return fmt.Errorf("invalid mobility registration")
@@ -476,7 +481,7 @@ func validateStored(r stored) error {
 	if r.Version != 1 {
 		return fmt.Errorf("unsupported mobility record version")
 	}
-	if err := validateRegistration(r.Registration); err != nil {
+	if err := validateRegistration(r.Registration.Registration); err != nil {
 		return err
 	}
 	if r.RunUID != "" && !validUID(r.RunUID) || r.PodUID != "" && (!validUID(r.PodUID) || r.RunUID == "") {

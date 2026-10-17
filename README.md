@@ -34,7 +34,7 @@ This is about giving an agent autonomy *within a defined boundary*. It does not 
 
 Sproozi does not replace an agent's own reasoning or tools. It launches an existing agent, provides an environment for it to work in, and enforces the access that you configure.
 
-- **Codex and Claude Code:** supported for Kubernetes jobs. Session movement between Docker and Kubernetes has been tested with Codex 0.161.0 and Claude Code 2.1.27.
+- **Codex and Claude Code:** supported for Kubernetes jobs. Both support controlled session movement between Docker and Kubernetes.
 - **OpenCode and Hermes:** supported for Kubernetes jobs; portable sessions aren't yet supported for these agents.
 
 [Agent support and details](docs/reference/harnesses.md)
@@ -71,12 +71,12 @@ There's working code and recorded tests, but support varies by workflow:
 | Area | Current state |
 | --- | --- |
 | Kubernetes-based agent jobs | Tested with Codex, Claude Code, OpenCode and Hermes using deterministic providers |
-| Controlled access to Kubernetes and external tools | [Recorded tool-access acceptance](docs/demos/verified-mcp-demo.md) with a real model, including native Kubernetes reads, configured HTTPS test servers and denied operations |
-| Docker ↔ Kubernetes session movement | [Recorded round trips](docs/demos/verified-session-mobility.md) with the pinned clients above and deterministic providers, including unfinished Git changes |
-| Remote Codex work followed by local continuation | [Recorded retained-work acceptance](docs/demos/verified-portable-workflows.md) with deterministic models, actual package checks and isolated Kubernetes reads/denials |
-| Infrastructure investigation and proposed GitHub fix | [Recorded SRE runs](docs/demos/verified-sre-demo.md) with a real model and GitHub; no merge or deployment |
+| Controlled access to Kubernetes and external tools | [Recorded tool-access acceptance](test/acceptance/reports/verified-mcp-demo.md) with a real model, including native Kubernetes reads, configured HTTPS test servers and denied operations |
+| Docker ↔ Kubernetes session movement | [Recorded round trips](test/acceptance/reports/verified-session-mobility.md) with Codex, Claude Code and deterministic providers, including unfinished Git changes |
+| Remote Codex work followed by local resume | [Recorded retained-work acceptance](test/acceptance/reports/verified-portable-workflows.md) with deterministic models, actual package checks and isolated Kubernetes reads/denials |
+| Infrastructure investigation and proposed GitHub fix | [Recorded SRE runs](test/acceptance/reports/verified-sre-demo.md) with a real model and GitHub; no merge or deployment |
 
-These are **specific verified scenarios**, not a claim that every configuration works or that the project is ready for production. The [verification reports](docs/demos/README.md) give the evidence, and the [agent reference](docs/reference/harnesses.md) documents the supported paths.
+These are **specific verified scenarios**, not a claim that every configuration works or that the project is ready for production. The [verification reports](test/acceptance/reports/README.md) give the evidence, and the [agent reference](docs/reference/harnesses.md) documents the supported paths.
 
 ## Security limitations
 
@@ -108,8 +108,8 @@ Some of that is still future architecture, not shipped functionality. The [futur
 - [Configured MCP tools](docs/reference/configured-mcp.md)
 - Kubernetes resource references: [runtime](docs/reference/agentruntime.md), [policy](docs/reference/agentpolicy.md), [template](docs/reference/agenttemplate.md) and [run](docs/reference/agentrun.md)
 - [Architecture decisions](docs/adr/README.md), including [what a checkpoint contains](docs/adr/0008-selected-native-and-git-checkpoints.md) and [retained work with fresh permissions](docs/adr/0012-retained-work-and-fresh-session-continuations.md)
-- [Project and Git revision acceptance evidence](docs/demos/execution-roadmap-evidence.json)
-- Planned home-ops workflow: [playbook](docs/guides/home-ops-playbook.md) and [runbook](docs/guides/home-ops-demo-runbook.md). This alert-to-PR and recovery workflow has not passed end-to-end acceptance.
+- [Project and Git revision acceptance evidence](test/acceptance/reports/execution-roadmap-evidence.json)
+- Planned home-ops workflow: [playbook](docs/guides/home-ops-playbook.md) and [runbook](test/acceptance/home-ops.md). This alert-to-PR and recovery workflow has not passed end-to-end acceptance.
 - [Future collaboration directions](docs/explanations/future-architecture/README.md#execution-roadmap-extensions)
 
 Sproozi is open source and evolving. If you're trying to let agents do useful work without handing them the keys to everything, I'd love to hear what you're building.

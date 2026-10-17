@@ -2,7 +2,9 @@
 
 Sproozi is a Kubernetes operator. Start with the repository-specific rules in
 `AGENTS.md`, then run the narrowest relevant verification target before
-opening a change.
+opening a change. The [testing requirements](test/acceptance/README.md) describe
+expected behaviour; [test commands](test/acceptance/running.md) describe setup
+and execution.
 
 Generated CRDs, RBAC, and deepcopy files must be regenerated with the
 Kubebuilder commands described in `AGENTS.md`; do not edit generated output by

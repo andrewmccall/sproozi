@@ -4,20 +4,29 @@ Status: deferred
 
 ## Problem
 
-A developer needs to explore a second approach without changing the source conversation or unfinished workspace.
+A developer may want to try another approach while keeping the source
+conversation and unfinished workspace unchanged.
 
 ## Desired behaviour
 
-An authorised caller selects a stopped conversation checkpoint and workspace revision. Each branch receives a new product identity, native history lineage and fresh execution authority; the source remains retrievable.
+An authorised caller selects a checkpoint from a stopped session and its
+workspace revision. The fork gets a new Sproozi session ID and fresh
+permissions. It records its source, which remains available.
 
-## Proposed primitives
+## Proposed parts
 
-Immutable source checkpoint digest; parent session/execution references; separately selected dirty workspace or committed revision; independent destination admission.
+- An immutable source-checkpoint digest.
+- References to the parent session and execution.
+- An explicit choice of unfinished workspace or committed revision.
+- Independent permission checks at the destination.
 
 ## Open questions
 
-Which pinned clients can safely import history into a new native conversation? What retention contract keeps a parent available? How should a caller distinguish a conversation fork from today's workspace-only revision launch?
+Which selected clients can import history into a new native conversation safely?
+How long must the parent remain available? How should callers distinguish a
+conversation fork from the current workspace-only revision launch?
 
-## Non-goals and next evidence
+## Scope
 
-No active-writer cloning, inherited grants, automated merge or cross-harness native resume. First prove one supported client fork against retained stopped state.
+This proposal excludes cloning active workers, inherited permissions, automatic
+merges and cross-harness native resume.

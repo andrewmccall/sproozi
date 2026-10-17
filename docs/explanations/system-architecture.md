@@ -1,12 +1,13 @@
 # System architecture
 
-**Audience:** operators, contributors
+Sproozi separates agent execution from permission checks and provider
+credentials. The agent runs in a sandbox. A trusted gateway checks its service
+requests. A controller creates and cleans up Kubernetes runs.
 
-Sproozi separates untrusted agent execution from trusted policy and credential
-handling. CLI, HTTP and MCP clients use one shared authenticated gateway. Its
-native service handlers enforce Semantic scope, the configured MCP bridge
-provides Protocol mediation, and the destination handler checks exact network
-destinations. These tiers describe the broker's understanding of an operation.
+Read [core concepts](core-concepts.md) first if the resource and session names
+are new to you. This page explains where the components run and what they own.
+
+## Kubernetes components
 
 ```mermaid
 graph LR
@@ -63,132 +64,94 @@ graph LR
 
 ## Trust and namespace boundaries
 
-- `sproozi-system` holds the trusted controller, webhook and shared gateway,
-  including Semantic, Protocol and Destination handlers and provider credentials.
-- `sproozi-agents` holds run-scoped identities, network policies, immutable
-  contracts and untrusted sandbox workloads.
-- Approved target namespaces such as `sproozi-demo` hold resources the run may inspect.
-- Task text, event payloads and provider output are untrusted. Tool discovery
-  describes an interface; trusted registration and policy determine authority.
+The system uses separate namespaces:
+
+- `sproozi-system` holds the trusted controller, webhook, gateway and provider credentials.
+- `sproozi-agents` holds untrusted agent Pods and their run identities, network policies and input contracts.
+- Approved target namespaces, such as `sproozi-demo`, hold resources that an agent can inspect.
+
+Task text, event payloads and provider output are untrusted. They cannot grant
+permissions. The administrator controls runtimes, templates, policies and
+gateway configuration.
 
 ## External-call invariant
 
-With an enforcing CNI and the generated NetworkPolicy, external calls from a
-workload, including Kubernetes API and MCP calls, go through the shared gateway.
-The generated policy grants only DNS and gateway egress. Operators must verify
-direct API/provider denials in their environment; NetworkPolicy alone has
-node-traffic exceptions. Routing selects a handler. The handler authorizes the
-actual operation against immutable requested capabilities and current
-lifecycle/policy state.
+With an enforcing CNI and the generated NetworkPolicy, external calls go through
+the gateway. This includes Kubernetes API and MCP calls. The policy allows only
+DNS and gateway egress. Operators must check that direct API and provider calls
+fail in their environment. NetworkPolicy has exceptions for node traffic.
 
-Each run gets one dedicated ServiceAccount. Its gateway-audience token identifies
-the run but does not grant capabilities. The workload Pod has no Sproozi proxy
-sidecar or local proxy process. Provider credentials remain in the trusted gateway.
+Each run has a dedicated ServiceAccount and a token for the gateway audience.
+The token identifies the run. Its requested capabilities and current policy
+determine permission. New requests check that the run is active; open sessions
+close after bounded revalidation. The agent Pod has no Sproozi proxy sidecar.
+
+The gateway routes each request to a handler. A handler can check service
+actions, MCP tools and arguments, or an exact network destination. These checks
+have different limits. See [capabilities and
+gateways](capabilities-and-gateways.md).
 
 ## MCP is a supported capability interface
 
-| Path | Run grant | Trusted configuration | Enforcement |
-| --- | --- | --- | --- |
-| Native Kubernetes Pod-list tool at `https://kubernetes.default.svc/mcp` | `kubernetes.read` | Existing Kubernetes namespace/resource policy | Semantic, through the same handler as native REST reads |
-| Registered remote tools at the gateway's `/mcp/<server>` path | `mcp.<server>` | Gateway registry plus `AgentPolicy.spec.mcpServers` tool rules and optional argument restrictions | Protocol, using discovered input schemas and independent policy validation |
+MCP clients use the same gateway and run identity as CLI and HTTP clients.
 
-Adding a compatible remote HTTPS server requires registration and policy, without
-a provider-specific Go adapter. The gateway snapshots exact provider URLs and
-optional bearer credential files at startup. Registration or credential changes
-require a gateway restart; policy remains live. Provider authorities are reserved
-against weaker destination routing.
+| Path | Required capability | What the gateway checks |
+| --- | --- | --- |
+| Native Kubernetes Pod-list tool at `https://kubernetes.default.svc/mcp` | `kubernetes.read` | The same namespace and resource rules as Kubernetes REST reads. |
+| Registered remote tools at `/mcp/<server>` | `mcp.<server>` | Registered endpoint, allowed tools, discovered input schemas and optional policy argument restrictions. |
 
-For each incoming remote MCP request, the bridge initializes a private upstream
-SDK session, discovers and filters approved tools, executes at most one call and
-closes the session. Budgets charge attempted tool invocations under the Run UID
-and named capability; reconnecting does not reset consumption. Cached discovery
-and connection configuration grant no authority. The proxy's live revalidation
-revokes requests when run or policy authority ends.
+A compatible remote HTTPS MCP server needs registration and policy
+configuration. It does not need a provider-specific Go adapter. The gateway
+loads provider URLs and credential-file references at startup. Restart it to
+apply registration or credential changes. Policy changes apply to later requests
+without a restart.
 
-The controller renders native Codex, Claude Code, OpenCode or Hermes MCP configuration
-in the immutable run contract. The administrator-owned launch loads it into
-fresh client state, with no upstream URLs or credentials. Claude Code's native
-Anthropic model route shares the existing `model.inference` account with OpenAI;
-the trusted gateway selects its protocol and credentials. The [harness reference](../reference/harnesses.md)
-and [harness ADR](../adr/0002-native-cli-harnesses-and-model-protocols.md)
-describe launch, completion, accounting and verification limits.
+Each incoming remote MCP request gets a private upstream session. The bridge
+initializes it, discovers approved tools, makes at most one tool call and closes
+it. Attempted calls count against the run's named capability budget.
+Reconnecting does not reset usage. Tool discovery supplies interface
+information, not permission.
 
-The [MCP ADR](../adr/0001-mcp-capabilities-through-shared-gateway.md) records why
-registration, grants and session ownership have this shape. See
-[configured MCP capabilities](../reference/configured-mcp.md),
-[native Kubernetes MCP delivery](../reference/kubernetes-mcp.md) and
-[the agent contract](../reference/agent-contract.md) for current configuration and
-limits. The configured bridge supports independent HTTPS tool operations;
-managed stdio, OAuth consent and conversation continuity remain future work.
+The controller generates native MCP settings for Codex, Claude Code, OpenCode or
+Hermes. The administrator's launch command loads these settings into fresh
+client state. The settings contain gateway addresses, not provider credentials.
+
+See [configured MCP](../reference/configured-mcp.md), [native Kubernetes
+MCP](../reference/kubernetes-mcp.md) and [harnesses](../reference/harnesses.md)
+for configuration and support limits. Managed stdio servers, OAuth consent and
+upstream conversation continuity remain future work. [ADR
+0001](../adr/0001-mcp-capabilities-through-shared-gateway.md) records the MCP
+design decision.
 
 ## Persistent assistant delegation
 
-Stock Hermes runs separately with native sessions, memory and schedules on a PVC.
-Its native MCP client calls a private task service. That service owns narrowly
-scoped Kubernetes credentials and maps workflow names to fixed templates and
-capability subsets. The assistant supplies task intent, bounded replay identity
-and UID-bound observation/cancellation; it holds no Kubernetes token.
+Hermes runs separately from worker Pods. It keeps its native sessions, memory
+and schedules on a persistent volume. Its MCP client submits tasks to a private
+service that maps workflow names to fixed templates and capability subsets.
+Hermes receives no Kubernetes token.
 
-The controller admits and executes each delegated AgentRun through the existing
-worker queue and shared gateway. It retains optional explicit final text with
-terminal status before deleting the worker Pod. Conversations, schedules and
-coordinator inference belong to Hermes; worker identity and budgets belong to
-Sproozi. The coordinator does not occupy the single worker slot. See
-[the task interface](../reference/orchestration.md),
-[the Kubernetes guide](../guides/hermes-orchestration.md) and
-[ADR 0003](../adr/0003-persistent-assistants-and-retained-results.md).
+The task service holds the Kubernetes credentials needed to create approved
+`AgentRun` requests. The controller runs them through the ordinary worker queue
+and gateway. It saves terminal status and optional final text before deleting
+the Pod. The persistent assistant does not occupy the single worker slot.
 
-## Execution and evidence
+See [the task interface](../reference/orchestration.md), [the Hermes
+guide](../guides/hermes-orchestration.md) and [ADR
+0003](../adr/0003-persistent-assistants-and-retained-results.md).
 
-The execution adapter creates Pods, not external Agent Sandbox custom resources.
-A run receives an immutable input contract, one projected gateway-audience token,
-a ServiceAccount without direct Kubernetes grants, and a run-scoped NetworkPolicy.
-The token identifies the run; requested capabilities and live policy determine
-its authority. New gateway requests recheck that authority, and open sessions
-close through bounded revalidation.
+## Kubernetes execution
 
-[Recorded SRE acceptance](../demos/verified-sre-demo.md) demonstrated the Semantic
-Kubernetes, model and GitHub paths in Kind on 4 October 2026.
-[Recorded MCP acceptance](../demos/verified-mcp-demo.md) demonstrated stock Codex
-use of native Kubernetes MCP and two configured HTTPS fixture providers on
-6 October 2026, including denials, budgets, cancellation and normal cleanup.
-These dirty-tree runs establish neither universal provider compatibility nor
-release reproducibility or home-ops integration. Current model admission,
-interrupted cleanup and container-completion limitations are listed in
-[security hardening](../reference/security-hardening.md).
+The Kubernetes adapter creates disposable Pods directly. It does not use the
+external Kubernetes Agent Sandbox operator. Each run receives an immutable input
+contract, a projected gateway token and a run-specific NetworkPolicy. Its
+ServiceAccount has no direct Kubernetes read grant.
 
 ## Managed native session continuity
 
-The home daemon starts controlled Docker sessions without Kubernetes credentials.
-Its coordinator owns one bounded execution's native UUID, selected checkpoints,
-current location, original absolute deadline and remaining escrow. Each visit
-has a fresh allocation and exact execution incarnation. A fixed TLS profile
-owns remote admission and Kubernetes credentials; each remote visit creates a
-new AgentRun under live controller policy.
-
-For [remote-first work](../guides/portable-workflows.md), the profile additionally
-hosts a task catalogue independent of the laptop. It admits an approved Codex
-task, observes genuine completion, fences/seals the worker and retains stopped
-native/Git state under a stable product session ID. Authenticated MCP lets Hermes
-submit and inspect work. Pull commits a one-way claim to the home; later resume
-starts a separately authorized execution with the same native UUID, preserving
-old receipts. Product operations bind to their original execution so delayed
-retries cannot affect a newer continuation. See
-[ADR 0012](../adr/0012-retained-work-and-fresh-session-continuations.md).
-
-The stock Hermes retained-work fixture has passed native MCP dispatch, answer
-retrieval and fresh same-conversation local continuation with deterministic
-providers. [Recorded acceptance](../demos/verified-portable-workflows.md) keeps
-that proof separate from paid engineering and personal home-ops outcomes.
-
-[ADR 0013](../adr/0013-configured-projects-and-workspace-revisions.md) records the
-implemented Project and workspace-revision extension: administrator-defined
-grouping narrows admission, imported association supplies provenance, and exact
-clean revision execution remains separate from full native/unfinished-workspace
-resume. Stock Hermes/native development acceptance includes independent local approval,
-Project filtering and workspace-only fresh conversation at the exact retained
-Git revision. [Evidence](../demos/execution-roadmap-evidence.json) records its
-source, selected images and deterministic-model limits.
+A home daemon manages controlled Docker sessions. It connects to a fixed remote
+profile service for Kubernetes placement. The profile holds Kubernetes
+credentials; the home daemon does not need them. Each remote visit creates a
+fresh `AgentRun` and must pass current policy checks.
 
 ```mermaid
 flowchart LR
@@ -203,35 +166,53 @@ flowchart LR
     Checkpoint --> Home
 ```
 
-Checkpoint contents supply untrusted continuity, never spending authority.
-Placements regenerate configuration and access independently. A graceful move
-gates input, waits for the native turn and tools, revokes authority, observes the
-entire source writer stopped, seals accounts and captures state. Only then may a
-new destination activate. Forced cancellation revokes first and needs no fresh
-checkpoint. Unknown stop or accounting retains escrow and blocks activation.
+During a live move, the execution keeps its native conversation ID, original
+deadline and total usage allowance. Each visit has a fresh allocation and
+placement identity. A checkpoint carries the supported conversation and Git
+workspace. It carries no credentials or permission to spend.
 
-Deterministic stock Codex 0.161.0 and Claude Code 2.1.27 proofs completed native
-terminal roundtrips across Docker, Kubernetes and Docker with unchanged UUID,
-Git state and original deadline. Both executed real tools and passed denied
-capability/direct-HTTP probes on both placements. Codex also passed graceful
-held-turn movement and forced cancellation with conservative receipt replay.
-[Recorded acceptance](../demos/verified-session-mobility.md) separates those checks
-from remaining native-history, platform and provider compatibility limits.
-The [session guide](../guides/session-mobility.md) describes the narrow evaluated
-contract. [ADR 0010](../adr/0010-managed-session-authority-and-admission.md) records
-authority, stop and recovery tradeoffs.
+To move safely, Sproozi blocks new input, waits for the current turn and tools,
+revokes access and confirms that all source writers have stopped. It then
+finalizes usage accounting and captures the checkpoint. Only then can the
+destination start. If stop or usage remains unknown, the reserved allowance
+stays held and the destination cannot start. Forced cancellation revokes access
+first and does not require a fresh checkpoint.
 
-Runtime implementations live in `internal/runtime/kubernetes` and
-`internal/runtime/docker`. Shared harness, checkpoint and workspace code stays
-independent of these backends. Kubernetes budget persistence lives in
-`internal/budget/kubernetes`; shared accounting rules live in `internal/budget`.
-Policy, gateway authentication, model credential storage and task services place
-their Kubernetes implementations in `kubernetes` children too. Controller/API
-scaffold paths remain unchanged. See
-[ADR 0009](../adr/0009-runtime-backends-and-sealed-accounting.md).
+[Remote-first tasks](../guides/portable-workflows.md) use a catalogue hosted by
+the profile service. It runs independently of the laptop. After a Codex task
+finishes, it stops the worker, finalizes usage and retains native and Git state.
+Hermes can submit and inspect tasks through authenticated MCP.
+
+Pull transfers ownership to the home installation without starting an agent. A
+later resume starts a new execution with current local approval and the same
+native conversation ID. Old usage receipts remain unchanged. Retried operations
+stay bound to their original execution, so they cannot affect a later resume.
+See [ADR 0012](../adr/0012-retained-work-and-fresh-session-continuations.md).
+
+Projects group retained work and restrict access under administrator
+configuration. A saved Project association records where work came from; local
+resume still requires local approval. An exact-revision launch starts a fresh
+conversation at the checkpoint's Git commit. It does not restore unfinished
+changes or the old conversation. See [Projects and workspace
+revisions](../reference/projects-and-revisions.md) and [ADR
+0013](../adr/0013-configured-projects-and-workspace-revisions.md).
+
+## Implementation locations
+
+Runtime implementations are in `internal/runtime/kubernetes` and
+`internal/runtime/docker`. Shared harness, checkpoint and workspace code is
+independent of those backends. Shared accounting rules are in `internal/budget`;
+Kubernetes persistence is in `internal/budget/kubernetes`.
+
+Policy, gateway authentication, model credentials and task services also keep
+Kubernetes-specific code in `kubernetes` subpackages. Controller and API
+scaffold paths remain unchanged. [ADR
+0009](../adr/0009-runtime-backends-and-sealed-accounting.md) records these
+boundaries.
 
 ## Future architecture
 
-The [future architecture overview](future-architecture/README.md) retains managed
-MCP servers, further native sessions, GUI/IDE clients, arbitrary-session adoption
-and enterprise profile extensions. Those directions require separate proofs.
+The [future architecture overview](future-architecture/README.md) covers managed
+MCP servers, more harnesses, GUI and IDE clients, adoption of existing sessions,
+and broader remote profiles. Each extension needs its own implementation and
+tests.

@@ -20,7 +20,7 @@ uses the bundled `@ai-sdk/openai` integration. Project configuration, discovered
 skills, default plugins, model catalog downloads, sharing and LSP downloads are
 disabled. The runtime never attaches to an execution server outside the Pod. The trusted
 `opencode-launch.py` asset supervises one stock invocation and checks its native
-export before exiting. OpenCode 1.15.1's raw exit code can report zero after an
+export before exiting. OpenCode's raw exit code can report zero after an
 API error, so the adapter reports failure when terminal session evidence is
 missing or contains a native error. It requires fresh state and does not judge
 task quality.
@@ -42,7 +42,7 @@ request. See [harness reference](../../docs/reference/harnesses.md) for configur
 provider setup and the evidence limits of these examples.
 
 
-Hermes uses the pinned official 0.21.6 image. The bounded worker launches its
+Hermes uses the default official image. The bounded worker launches its
 bundled interpreter directly, outside the root startup system, with fresh native
 state. Its immutable helper supervises the stock CLI and publishes a bounded
 UID-bound final answer. The example enables the native Kubernetes MCP tool;

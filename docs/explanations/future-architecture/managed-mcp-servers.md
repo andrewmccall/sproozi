@@ -31,32 +31,25 @@ these boundaries. Choose one concrete deployment before designing a general
 server scheduler. OAuth consent, token storage and renewal require an explicit
 trusted ownership design; they are outside current remote HTTPS configuration.
 
-## Semantic bindings require service evidence
+## Service-specific permission checks
 
-The [current enforcement tiers](../capabilities-and-gateways.md) remain Semantic,
-Protocol and Destination. MCP delivery does not promote Protocol mediation into
-Semantic enforcement. A recognized tool name and an input schema do not establish
-read-only behavior or service-resource scope.
+The [current enforcement tiers](../capabilities-and-gateways.md) remain
+Semantic, Protocol and Destination. MCP transport alone does not provide
+service-specific permission checks. A recognized tool name and an input schema
+do not establish read-only behavior or service-resource scope.
 
-A future binding needs a trusted mapping from tool arguments to service authority,
-supported by reviewed provider behavior and upstream restrictions. For example,
-a Postgres `query` tool needs a restricted database role and bounded target before
-claiming read-only access. Otherwise describe the weaker boundary actually proved.
+A future binding must map tool arguments to permitted service actions and
+resources. Provider review and upstream restrictions must support that mapping.
+For example, a Postgres `query` tool needs a restricted database role and
+bounded target before claiming read-only access. Otherwise describe the weaker
+boundary actually proved.
 
 Unsupported semantics or an unavailable server must fail rather than fall back
 to broader destination access. Direct credential delegation, if later required,
 would be an explicitly weaker mode in which agent code can read the secret. It is
 not supplied by the current gateway-isolated credential model.
 
-## Next proof
+## Testing requirements
 
-A managed Postgres example would test separate server identity, credential
-isolation, native database restrictions, allowed and denied calls, live
-revocation and cleanup after restart. Verify any reuse with two independently
-scoped executions and an attempted cross-run request. Keep ordinary CLI/HTTP
-delivery available; MCP does not need to replace every tool interface.
-
-An arbitrary approved OCI CLI could separately test integration without a native
-connector. Neither proof requires a marketplace or a new per-provider coded
-server. Consumption units remain service-specific and inherit the documented
-[accounting limits](../capabilities-and-gateways.md#endpoint-interface-and-spending).
+See [managed MCP server requirements](../../../test/acceptance/README.md#managed-mcp-servers)
+for credential isolation, service restrictions, revocation and cleanup checks.

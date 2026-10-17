@@ -4,20 +4,31 @@ Status: deferred
 
 ## Problem
 
-A developer may want a different native client to continue an investigation whose history has a proprietary shape.
+A developer may want to use another agent client for an existing investigation.
+The destination may not understand the source client's conversation format.
 
 ## Desired behaviour
 
-A handoff explicitly transfers selected task context and workspace state to a fresh destination conversation. It records source lineage and losses, while same-client compatible native resume remains the stronger continuity contract.
+A handoff copies selected task context and workspace state into a new
+destination conversation. It records the source and any omitted information.
+This differs from native resume, which restores a compatible conversation in the
+same client.
 
-## Proposed primitives
+## Proposed parts
 
-Versioned context manifest; bounded selected messages and artifact references; repository/revision identity; source lineage; compatibility and omission report; fresh grant.
+- A versioned description of the selected context.
+- Size-limited messages and references to saved files.
+- Repository, revision and source-session identities.
+- A report of unsupported or omitted state.
+- Fresh destination permissions.
 
 ## Open questions
 
-What minimum context is useful across the first two clients? Which tool outputs can be represented safely? How does the destination confirm what was omitted? Which client import mechanisms are supported?
+What context is useful for the first two clients? Which tool outputs can
+transfer safely? How does the destination report omissions? Which import methods
+do the clients support?
 
-## Non-goals and next evidence
+## Scope
 
-No claim of preserving native UUID, hidden client state or source authority. Demonstrate a useful bounded context transfer before standardising a format.
+A handoff does not preserve the native conversation ID, hidden client state or
+source permissions.

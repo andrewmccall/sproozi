@@ -238,8 +238,8 @@ class Proof:
         for answer in HOST.TUI.ANSWERS[:count]:
             check(answer.encode() in history, "Final native history lacks completed fixture answer")
         metas = [e["payload"] for e in events if e.get("type") == "session_meta"]
-        check(metas and all(m["id"] == record["threadId"] and m["cli_version"] == "0.161.0" for m in metas),
-              "Checkpoint is not the pinned genuine native session")
+        check(metas and all(m["id"] == record["threadId"] and bool(m.get("cli_version")) for m in metas),
+              "Checkpoint is not the genuine selected native session")
         binary = self.checkpoint_binary
         if binary is None:
             binary = self.out / "checkpoint"
@@ -253,7 +253,7 @@ class Proof:
         check(not (restored / "workspace/.env").exists() and not (restored / "workspace/ignored").exists(),
               "Unselected ignored files were transferred")
         return {"sha256": digest(artifact), "bytes": len(artifact), "nativeRolloutSHA256": digest(history),
-                "completedNativeTurnIds": complete, "nativeVersion": "0.161.0",
+                "completedNativeTurnIds": complete, "nativeVersion": metas[-1]["cli_version"],
                 "gitWorkspaceMatches": True, "ignoredFilesExcluded": True, "selectedIgnoredFilePreserved": True,
                 "workspaceSnapshotSHA256": digest(json.dumps(actual, sort_keys=True).encode())}
 

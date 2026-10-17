@@ -12,10 +12,6 @@ import (
 	"strings"
 )
 
-// ClaudeSessionVersion is the native version exercised by the transcript-only
-// fresh-home resume gate. A different version requires new native evidence.
-const ClaudeSessionVersion = "2.1.27"
-
 const (
 	claudeUser      = "user"
 	claudeAssistant = "assistant"
@@ -24,6 +20,7 @@ const (
 
 var claudeSessionID = regexp.MustCompile(`^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$`)
 var claudeProjectCharacters = regexp.MustCompile(`[^a-zA-Z0-9]`)
+var claudeCacheHash = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // ClaudeState selects one primary conversation transcript, excluding credential
 // and settings files, indexes, shell snapshots and subagent state. Historical
@@ -31,8 +28,8 @@ var claudeProjectCharacters = regexp.MustCompile(`[^a-zA-Z0-9]`)
 // destination permissions independently, with native override behavior verified.
 // Workspace selects the native project directory; historical cwd fields remain
 // opaque and are not rewritten when the destination workspace changes.
-// The pinned transcript does not contain approved system instructions or a
-// reliable completed-turn event. Those require independent trusted observations.
+// Native context and prompt snapshots remain history, not proof of approved
+// instructions or completion. Both require independent trusted observations.
 type ClaudeState struct {
 	ThreadID   string
 	Workspace  string
@@ -40,7 +37,7 @@ type ClaudeState struct {
 	Transcript []byte
 }
 
-// ClaudeProjectPath returns the exact project path exercised by the pinned
+// ClaudeProjectPath returns the exact project path exercised by the native
 // client. Lookup never scans another project or adopts a different native ID.
 func ClaudeProjectPath(workspace, threadID string) (string, error) {
 	if !claudeSessionID.MatchString(threadID) || !filepath.IsAbs(workspace) ||
@@ -140,21 +137,35 @@ func claudeDirectories(home, relative string, create bool) error {
 }
 
 type claudeRecord struct {
-	Type       string          `json:"type"`
-	Operation  string          `json:"operation"`
-	SessionID  string          `json:"sessionId"`
-	Version    string          `json:"version"`
-	UUID       string          `json:"uuid"`
-	ParentUUID *string         `json:"parentUuid"`
-	Sidechain  *bool           `json:"isSidechain"`
-	Cwd        string          `json:"cwd"`
-	SourceTool string          `json:"sourceToolAssistantUUID"`
-	ToolResult json.RawMessage `json:"toolUseResult"`
-	APIError   bool            `json:"isApiErrorMessage"`
-	Subtype    string          `json:"subtype"`
-	ToolUseID  string          `json:"toolUseID"`
-	ParentTool string          `json:"parentToolUseID"`
-	Data       struct {
+	Type           string          `json:"type"`
+	Operation      string          `json:"operation"`
+	SessionID      string          `json:"sessionId"`
+	Version        string          `json:"version"`
+	UUID           string          `json:"uuid"`
+	ParentUUID     *string         `json:"parentUuid"`
+	Sidechain      *bool           `json:"isSidechain"`
+	Cwd            string          `json:"cwd"`
+	SourceTool     string          `json:"sourceToolAssistantUUID"`
+	ToolResult     json.RawMessage `json:"toolUseResult"`
+	APIError       bool            `json:"isApiErrorMessage"`
+	Subtype        string          `json:"subtype"`
+	Mode           string          `json:"mode"`
+	PermissionMode string          `json:"permissionMode"`
+	Atis           string          `json:"atis"`
+	LastPrompt     string          `json:"lastPrompt"`
+	LeafUUID       string          `json:"leafUuid"`
+	CacheHash      string          `json:"hash"`
+	ShapeHash      string          `json:"shapeHash"`
+	RequestID      string          `json:"id"`
+	Attachment     struct {
+		Type string `json:"type"`
+	} `json:"attachment"`
+	RenderedRole string `json:"renderedRole"`
+	DurationMS   *int64 `json:"durationMs"`
+	MessageCount *int   `json:"messageCount"`
+	ToolUseID    string `json:"toolUseID"`
+	ParentTool   string `json:"parentToolUseID"`
+	Data         struct {
 		Type    string `json:"type"`
 		Event   string `json:"hookEvent"`
 		Name    string `json:"hookName"`
@@ -196,9 +207,9 @@ type claudeBlock struct {
 }
 
 // ClaudeTranscriptLeaf returns a candidate settled assistant leaf UUID after
-// validating the pinned primary chain and paired supported tools. This is NOT a
+// validating the selected primary chain and paired supported tools. This is NOT a
 // completed-turn observer: 2.1.27 writes assistant text with stop_reason:null,
-// and no trusted instruction block is present in these native transcript bytes.
+// and native prompt snapshots cannot establish the trusted launch configuration.
 func ClaudeTranscriptLeaf(state ClaudeState, maxBytes int64) (string, error) {
 	path, err := ClaudeProjectPath(state.Workspace, state.ThreadID)
 	if err != nil || path != state.Path || maxBytes <= 0 || len(state.Transcript) == 0 ||
@@ -238,6 +249,9 @@ func (c *claudeChain) accept(line []byte, id string) error {
 	if row.SessionID != id {
 		return errors.New("foreign Claude transcript")
 	}
+	if metadata, err := validateClaudeMetadata(row); metadata {
+		return err
+	}
 	if row.Type == "queue-operation" {
 		if row.Operation != "dequeue" {
 			return errors.New("unsupported Claude queue operation")
@@ -254,10 +268,21 @@ func (c *claudeChain) accept(line []byte, id string) error {
 		err = c.message(row)
 	case "progress":
 		err = validateClaudeProgress(row, c.pending, c.tools, c.stops, c.leaf)
+	case "attachment":
+		err = validateClaudeAttachment(row)
 	case "system":
 		switch row.Subtype {
 		case "stop_hook_summary":
-			err = validateClaudeSummary(row, c.stops)
+			if c.leaf == "" || len(c.pending) != 0 {
+				err = errors.New("stop summary has no settled Claude assistant leaf")
+			} else {
+				err = validateClaudeSummary(row, c.stops)
+			}
+		case "turn_duration":
+			if c.leaf == "" || len(c.pending) != 0 || row.DurationMS == nil || *row.DurationMS < 0 ||
+				row.MessageCount == nil || *row.MessageCount < 0 {
+				err = errors.New("unsupported Claude turn duration")
+			}
 		case "api_error":
 			err = validateClaudeRetry(row, c.pending)
 			c.leaf = ""
@@ -272,6 +297,51 @@ func (c *claudeChain) accept(line []byte, id string) error {
 	}
 	c.seen[row.UUID], c.previous = true, row.UUID
 	return nil
+}
+
+// These native caches are outside the primary message chain. They neither
+// change its leaf nor supply destination configuration or completion evidence.
+func validateClaudeMetadata(row claudeRecord) (bool, error) {
+	valid := false
+	messageCache := false
+	switch row.Type {
+	case "mode":
+		valid = row.Mode == "normal"
+	case "permission-mode":
+		valid = row.PermissionMode == "bypassPermissions"
+	case "atis-latch":
+		valid = row.Atis == ""
+	case "last-prompt":
+		valid = row.LastPrompt != "" && claudeSessionID.MatchString(row.LeafUUID)
+	case "api-request-shape":
+		valid = row.Version != "" && claudeCacheHash.MatchString(row.ShapeHash)
+	case "api-request-blob":
+		messageCache = true
+		valid = claudeCacheHash.MatchString(row.CacheHash) && len(row.Message.Content) != 0 &&
+			(row.Message.Role == claudeUser || row.Message.Role == claudeAssistant)
+	case "api-request":
+		valid = row.Version != "" && claudeSessionID.MatchString(row.RequestID) && claudeCacheHash.MatchString(row.ShapeHash)
+	default:
+		return false, nil
+	}
+	if !valid || row.UUID != "" || row.ParentUUID != nil || row.Sidechain != nil ||
+		(!messageCache && (row.Message.Role != "" || len(row.Message.Content) != 0)) || row.ToolUseID != "" || row.APIError {
+		return true, errors.New("unsupported Claude session metadata")
+	}
+	return true, nil
+}
+
+func validateClaudeAttachment(row claudeRecord) error {
+	if row.Message.Role != "" || len(row.Message.Content) != 0 || row.ToolUseID != "" ||
+		(row.RenderedRole != "" && row.RenderedRole != "user" && row.RenderedRole != "system") {
+		return errors.New("unsupported Claude context attachment")
+	}
+	switch row.Attachment.Type {
+	case "environment", "model", "total_tokens_reminder", "session_context", "date", "remote_session_change", "prompt_snapshot":
+		return nil
+	default:
+		return errors.New("unsupported Claude context attachment")
+	}
 }
 func (c *claudeChain) message(row claudeRecord) error {
 	blocks, err := claudeContent(row)
@@ -299,7 +369,7 @@ func validateClaudeRecord(row claudeRecord, previous string, seen map[string]boo
 		parent == row.SourceTool && seen[parent]
 	message := row.Type == claudeUser || row.Type == claudeAssistant
 	if (message && row.Message.Role != row.Type) || row.APIError ||
-		row.Version != ClaudeSessionVersion || row.Sidechain == nil || *row.Sidechain ||
+		row.Version == "" || row.Sidechain == nil || *row.Sidechain ||
 		!claudeSessionID.MatchString(row.UUID) || seen[row.UUID] || (parent != previous && !toolParent) ||
 		!filepath.IsAbs(row.Cwd) || (previous == "" && row.Type != claudeUser) {
 		return errors.New("incompatible Claude primary transcript chain")
@@ -343,7 +413,8 @@ func validateClaudeProgress(row claudeRecord, pending map[string]string, seen, s
 }
 
 func validateClaudeSummary(row claudeRecord, stops map[string]bool) error {
-	if row.Subtype != "stop_hook_summary" || !stops[row.ToolUseID] || row.HookCount != 1 ||
+	if row.Subtype != "stop_hook_summary" || !claudeSessionID.MatchString(row.ToolUseID) ||
+		(len(stops) != 0 && !stops[row.ToolUseID]) || row.HookCount != 1 ||
 		len(row.HookInfos) != 1 || row.HookInfos[0].Command == "" || row.HookErrors == nil ||
 		len(row.HookErrors) != 0 || row.Prevented == nil || *row.Prevented || row.StopReason != "" ||
 		row.HasOutput == nil || *row.HasOutput || row.Level != "suggestion" {
@@ -353,7 +424,7 @@ func validateClaudeSummary(row claudeRecord, stops map[string]bool) error {
 	return nil
 }
 
-// The pinned TUI records a recoverable 429 while another conservative gateway
+// The native TUI records a recoverable 429 while another conservative gateway
 // reservation is active. This is opaque history, never accounting evidence or
 // completion. Its primary-chain successor must establish a new assistant leaf.
 func validateClaudeRetry(row claudeRecord, pending map[string]string) error {

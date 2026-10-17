@@ -1,4 +1,4 @@
-# Build pinned clients with clients.Dockerfile and the Codex 0.161.0 base.
+# Build clients with clients.Dockerfile and the default Codex package.
 # CLIENTS_IMAGE must be the administrator-selected immutable client image.
 ARG CLIENTS_IMAGE
 FROM golang:1.26-bookworm@sha256:e8c859f5632dcfde7b32d2012b4351728f6437930887c2f6a91ea242459e5514 AS builder
@@ -21,8 +21,8 @@ USER 0:0
 # containers run UID1000 with no capabilities and cannot alter their rules.
 RUN apt-get update && apt-get install -y --no-install-recommends iptables && \
     rm -rf /var/lib/apt/lists/* && \
-    test "$(codex --version)" = "codex-cli 0.161.0" && \
-    test "$(claude --version)" = "2.1.27 (Claude Code)" && git --version && \
+    codex --version && \
+    claude --version && git --version && \
     mkdir -p /workspace /home/agent && chown 1000:1000 /workspace /home/agent
 COPY --from=builder /native-session /usr/local/bin/native-session
 COPY --from=builder /checkpoint /usr/local/bin/checkpoint

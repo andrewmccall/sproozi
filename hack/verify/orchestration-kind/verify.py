@@ -844,8 +844,9 @@ def stock_clients():
             uid=data["metadata"]["uid"],
             proof=proof,
         )
-        # Capability denial and exhausted admission budget exercise the stock CLI in
-        # an actual sandbox. Success must never come from its error reporting quirk.
+        # Capability and budget denials exercise the stock CLI in an actual sandbox.
+        # Anthropic reserves remaining capacity and can fail at usage settlement.
+        # Success must never come from a client error-reporting quirk.
         for scenario, caps, suffix in [
             ("denied", ["mcp.fixture"], ""),
             ("budget", CAPS, "-budget"),
@@ -863,6 +864,20 @@ def stock_clients():
             reason = (
                 "capability not granted" if scenario == "denied" else "budget exhausted"
             )
+            budget_state = None
+            if harness == "claude-code" and scenario == "budget":
+                reason = "failed to settle model budget reservation"
+                # The fixture reports more usage than the one-token reservation.
+                # Its response must be withheld and the entire allowance held.
+                key = data["metadata"]["uid"] + "/model.inference"
+                ledger_name = "sproozi-budget-" + hashlib.sha256(key.encode()).hexdigest()[:20]
+                ledger = json.loads(k("get", "configmap", ledger_name, "-n", SYSTEM, "-o", "json"))
+                budget_state = json.loads(ledger["data"]["state"])
+                assert budget_state["UnitsUsed"] == 0 and budget_state["ReservedUnits"] == 1, budget_state
+                assert budget_state["pendingReservations"] == 1, budget_state
+                assert not any(event.get("allowed") for event in audit), audit
+                attempts = [event for event in audit if event.get("upstreamStatus") == 200]
+                assert len(attempts) == 1, attempts
             denied = [
                 event
                 for event in audit
@@ -875,6 +890,7 @@ def stock_clients():
                 uid=data["metadata"]["uid"],
                 phase=data["status"]["phase"],
                 gatewayDenials=denied,
+                budgetState=budget_state,
             )
 
 

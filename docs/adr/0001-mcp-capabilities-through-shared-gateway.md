@@ -10,6 +10,10 @@ provider should require trusted configuration and policy, without a Sproozi
 adapter for every server. Deliver native semantic tools and configured remote
 MCP tools through the existing authenticated gateway and run capability model.
 
+Current compatibility policy: [ADR 0014](0014-default-clients-and-native-tool-schemas.md)
+replaces exact client-version selection and the combined MCP discovery schema.
+Other decisions in this record remain in effect.
+
 ## Decision
 
 Native MCP delivery reuses the existing service handler and capability. The
@@ -144,7 +148,7 @@ an explicit owner for any new lifecycle or authority.
 - Registry and bridge: `internal/endpoints/mcp`; policy validation:
   `internal/mcppolicy`; client fragment: `internal/harness`; immutable contract:
   `internal/runtime/kubernetes/contract.go`; gateway wiring: `cmd/gateway/main.go`
-- [Recorded acceptance](../demos/verified-mcp-demo.md) covers stock Codex use of
+- [Recorded acceptance](../../test/acceptance/reports/verified-mcp-demo.md) covers stock Codex use of
   native Kubernetes and two configured HTTPS fixture providers, denials, budgets,
   cancellation and normal cleanup. This is bounded dirty-tree evidence, not
   universal MCP compatibility or a release claim.

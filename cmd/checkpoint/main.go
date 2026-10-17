@@ -76,7 +76,7 @@ type command struct {
 func parseCommand(operation string, args []string) (command, error) {
 	flags := flag.NewFlagSet(operation, flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
-	kind := flags.String("harness", "", "explicit pinned native harness")
+	kind := flags.String("harness", "", "explicit native harness")
 	home := flags.String("home", "", "source Codex home after writer fencing")
 	repository := flags.String("workspace", "", "source Git workspace after writer fencing")
 	thread := flags.String("thread", "", "exact native UUID")

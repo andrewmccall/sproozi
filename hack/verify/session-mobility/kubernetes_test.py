@@ -41,7 +41,7 @@ class TrustRotationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=self.root) as directory:
             out = Path(directory)
             instructions = CLAUDE.INSTRUCTIONS if harness == "claude-code" else CLAUDE.HOST.INSTRUCTIONS
-            hints = {"harness": harness, "nativeVersion": CLAUDE.VERSION if harness == "claude-code" else "0.161.0",
+            hints = {"harness": harness,
                      "providerToken": CLAUDE.TOKEN if harness == "claude-code" else CLAUDE.HOST.TOKEN,
                      "providerURLFromKind": CLAUDE.UPSTREAM if harness == "claude-code" else KUBE.UPSTREAM,
                      "model": CLAUDE.MODEL if harness == "claude-code" else "gpt-6.1-sol", "nativeOptions": [],

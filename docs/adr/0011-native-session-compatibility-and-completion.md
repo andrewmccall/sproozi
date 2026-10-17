@@ -6,6 +6,10 @@ Implementation: pinned foreground Codex and Claude compatibility verified
 Live extended Codex and ordinary Claude roundtrip acceptance: passed on 2026-10-12
 Unassessed: Claude's full held placement move/cancel matrix and broader native state
 
+Current compatibility policy: [ADR 0014](0014-default-clients-and-native-tool-schemas.md)
+replaces exact client-version selection and extends supported native context
+records. Identity, completion, writer-fencing and accounting rules remain in effect.
+
 ## Problem and constraints
 
 [ADR 0007](0007-codex-round-trip-before-harness-expansion.md) selected a complete
@@ -155,7 +159,7 @@ turns, real Bash execution and Git restoration across Docker/Kubernetes/Docker;
 eight deterministic Messages requests matched 320 sealed units. Both clients
 passed denied capability/direct-HTTP probes on each placement. The Codex proof
 also exercised graceful held-turn movement, forced cancellation and conservative
-immutable accounting replay. See [recorded acceptance](../demos/verified-session-mobility.md).
+immutable accounting replay. See [recorded acceptance](../../test/acceptance/reports/verified-session-mobility.md).
 These proofs do not establish paid-provider, background/subagent or compacted
 history compatibility.
 

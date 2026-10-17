@@ -96,6 +96,8 @@ class Provider(BaseHTTPRequestHandler):
                 EVIDENCE["providerReleaseTimeout"] = True
                 persist()
         answer = "Remember TUI facts" if is_title else ANSWERS[turn_index]
+        if is_title and body.get("text", {}).get("format", {}).get("type") == "json_schema":
+            answer = json.dumps({"title": answer})
         event(self, "response.output_item.added", output_index=0, item=item)
         event(self, "response.content_part.added", item_id=item["id"], output_index=0, content_index=0, part=part)
         event(self, "response.output_text.delta", item_id=item["id"], output_index=0, content_index=0, delta=answer)
@@ -358,7 +360,6 @@ def main():
                 "temporaryRoot": str(base), "command": cmd, "steps": [], "passed": False,
                 "limitations": ["Production Go PTY on this host; no Docker/Kubernetes containment proof",
                                 "Fixture emits text only; no tool subprocess or interrupted side-effect proof"]}
-    assert EVIDENCE["version"] == "codex-cli 0.161.0", EVIDENCE["version"]
     persist()
     supervisor = None
     resumed = None

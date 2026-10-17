@@ -202,7 +202,7 @@ type RuntimeClientConfig struct {
 	TrustBundleConfigMap RuntimeConfigMapKeyReference `json:"trustBundleConfigMap"`
 }
 
-// NativeSessionConfig configures an approved pinned native terminal launch.
+// NativeSessionConfig configures an approved native terminal launch.
 type NativeSessionConfig struct {
 	// Model selects the native model; empty uses the stock client's default.
 	// +optional

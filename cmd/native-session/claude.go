@@ -219,9 +219,9 @@ func prepareClaudeLaunch(c config, env []string) ([]string, []string, error) {
 		tail = tail[len(tail)-20:]
 	}
 	preferences := map[string]any{"theme": "dark", "hasCompletedOnboarding": true,
-		"lastOnboardingVersion": harness.ClaudeSessionVersion, "bypassPermissionsModeAccepted": true,
-		"customApiKeyResponses": map[string]any{"approved": []string{tail}, "rejected": []string{}},
-		"projects":              map[string]any{workspace: map[string]any{"hasTrustDialogAccepted": true}}}
+		"bypassPermissionsModeAccepted": true,
+		"customApiKeyResponses":         map[string]any{"approved": []string{tail}, "rejected": []string{}},
+		"projects":                      map[string]any{workspace: map[string]any{"hasTrustDialogAccepted": true}}}
 	if err := installClaudeJSON(filepath.Join(claudeHome, ".claude.json"), preferences); err != nil {
 		return nil, nil, err
 	}

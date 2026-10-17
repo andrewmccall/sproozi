@@ -4,20 +4,28 @@ Status: deferred
 
 ## Problem
 
-Durable repository artifacts and task history can be difficult to search when beginning related work.
+Saved repository files and task history can be hard to search when starting
+related work.
 
 ## Desired behaviour
 
-An optional index helps an authorised execution find relevant context and cite its source. Ordinary Git, artifacts and retained records remain authoritative; deleting the index loses no unique work.
+An optional index helps an authorised execution find context and cite its
+source. Git, saved files and retained records remain the sources of truth.
+Deleting the index loses no unique work.
 
-## Proposed primitives
+## Proposed parts
 
-Repository/revision identity; selected artifact provenance; derived searchable index; access filter; invalidation and deletion records.
+- Repository and revision identities.
+- Source references for selected files.
+- A searchable index derived from those sources.
+- Access filters, invalidation rules and deletion records.
 
 ## Open questions
 
-Which concrete retrieval task benefits from indexing? What files must be excluded? How does revoked access remove derived context? How is an outdated hit distinguished from current source?
+Which search task would benefit? What files must be excluded? How does access
+removal affect indexed context? How should results identify outdated sources?
 
-## Non-goals and next evidence
+## Scope
 
-No required memory database, credential indexing or implicit trust in retrieved instructions. Prove one useful query with reproducible source attribution before choosing storage.
+No memory database is required. Credentials must not be indexed, and retrieved
+instructions remain untrusted.

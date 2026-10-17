@@ -264,8 +264,8 @@ class ExtendedProof(BASE.Proof):
         complete = completed_turns(events, self.completed_ids, len(answers), checkpoint["metadata"]["turnId"])
         check(all(answer.encode() in history for answer in answers), "Persisted native answers absent")
         metas = [event["payload"] for event in events if event.get("type") == "session_meta"]
-        check(metas and all(meta["id"] == record["threadId"] and meta["cli_version"] == "0.161.0" for meta in metas),
-              "Actual pinned stock client identity changed")
+        check(metas and all(meta["id"] == record["threadId"] and bool(meta.get("cli_version")) for meta in metas),
+              "Actual stock client identity changed")
         if HOST.ANSWERS[3] in answers:
             check(b'custom_tool_call' in history and b'custom_tool_call_output' in history and
                   HOST.TOOL_MARKER.encode() in history and b'exec_command' in history, "Real native tool history absent")
@@ -369,13 +369,13 @@ class ExtendedProof(BASE.Proof):
         if self.args.resume_first_move_report:
             previous = json.loads(self.args.resume_first_move_report.read_text())
             check(not previous["passed"] and [step["turn"] for step in previous["steps"] if "turn" in step] == [0]
-                  and previous.get("threadId") and not previous.get("firstCheckpoint"),
+                  and not previous.get("firstCheckpoint"),
                   "First move recovery requires the retained single completed local turn")
             self.id, self.report = previous["sessionId"], previous
             self.report.pop("failure", None)
             self.report["recoveredFirstMoveReport"] = str(self.args.resume_first_move_report.resolve())
             deadline = previous["originalDeadline"]
-            remote = self.validate_record(self.cli("status"), deadline, previous["threadId"], self.args.remote_name)
+            remote = self.validate_record(self.cli("status"), deadline, previous.get("threadId"), self.args.remote_name)
             check(remote["epoch"] == 2 and len(remote["visits"]) == 1,
                   "Retained first move has additional visits")
             expected = json.loads((self.args.resume_first_move_report.parent / "expected-workspace.json").read_text())

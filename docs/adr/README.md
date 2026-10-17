@@ -1,62 +1,70 @@
 # Architecture decisions
 
-Architecturally significant changes MUST include an ADR and update the current
-documentation in the same change. This applies to changes in authority or trust
-boundaries, public API concepts, integration patterns, ownership and lifecycle,
-and runtime or harness responsibilities.
+Architecture decision records explain why Sproozi uses a design. Current guides
+and references describe how to use it. An accepted decision can remain valid
+after its initial implementation is complete.
 
-Include the ADR and affected documentation in the task's done criteria before
-implementation. Capture consequential choices as they are made, then reconcile
-them with the implementation before completion.
+## When to add a record
 
-Record the problem and constraints, selected decision, reasons, meaningful
-alternatives and their benefits and rejection reasons, accepted tradeoffs and
-consequences, and conditions that would justify revisiting the choice. Link the
-affected architecture/reference docs and implementation. Keep operational
-instructions and current support limits in those docs; the ADR preserves why the
-choice was made. Use `NNNN-short-description.md`, incrementing the highest number,
-and include an accepted/proposed status and date.
+Architecturally significant changes MUST include an ADR and updated docs in the
+same change. This applies to trust boundaries, public API concepts, integration
+patterns, ownership, lifecycle, and runtime or harness responsibilities.
 
-When completing or revising an ADR, inventory the task's retained grounding,
-alternative designs, synthesis, implementation reconciliation, review and TODO
-records. Account for each material choice in the task evidence with its public
-record or a reason it does not need an ADR. One coherent ADR can cover related
-choices. Separate selected decisions, rejected proposals, later fixes and deferred
-directions; check candidate claims against the actual implementation. Preserve
-the original records so the reasoning remains reviewable.
+Include the ADR and affected docs in the task's done criteria before
+implementation. Record consequential choices as you make them. Before
+completion, check that the record describes the actual implementation.
 
-Before declaring the change complete, update the affected explanations, references
-and examples. Update the main README when supported capabilities change. Check
-claims against code and evidence, then run `make verify-docs`. This gate checks
-required documents and links; review documentation currency and decision coverage
-separately. Passing the command alone does not complete that review.
+## What to record
 
-Preserve accepted decision history. To replace a decision, add a new ADR, mark the
-old record superseded and link both records.
+Use `NNNN-short-description.md` with the next available number. Include a date
+and an accepted or proposed status. Record:
+
+- The problem and constraints.
+- The selected decision and reasons.
+- Meaningful alternatives, their benefits and why they were rejected.
+- Accepted tradeoffs, costs and consequences.
+- Conditions that would justify revisiting the decision.
+- Links to affected explanations, references and implementation.
+
+Keep operational steps and current support limits in guides and references. The
+ADR preserves the reasons for the choice.
+
+## Review before completion
+
+Review the task's retained source evidence, candidate designs, design synthesis,
+implementation checks, reviews and TODO records. For each material choice, link
+its public decision record or explain in the task evidence why it needs no ADR.
+One coherent ADR can cover related choices. Distinguish selected decisions,
+rejected proposals, later fixes and deferred work. Preserve the original
+evidence.
+
+Update affected explanations, references and examples. Update the main README
+when supported capabilities change. Compare claims with code and test evidence,
+then run `make verify-docs`. The command checks required documents and links. It
+does not check documentation accuracy or decision coverage.
+
+Preserve accepted decision history. To replace a decision, add a new ADR, mark
+the old record superseded and link both records.
 
 ## Decisions
 
-Decision status and implementation progress are separate. An implemented choice
-remains accepted while it governs the system. A fulfilled sequencing decision
-remains part of the history. Use superseded only when a later decision replaces
-the choice, with links in both records.
+These records preserve the reasons for each design. A later record can replace
+part of an earlier decision. ADR 0014 replaces exact client-version selection
+and the combined MCP discovery schema.
 
-Reviewed on 13 October 2026 against the current checkout and retained evidence.
-All decisions below remain accepted; none is wholly superseded. Fixture acceptance
-is scoped to the versions and scenarios recorded in each ADR and verified demo.
-
-| Decision | Implementation and remaining scope |
+| Decision | Topic |
 | --- | --- |
-| [0001: MCP through the shared gateway](0001-mcp-capabilities-through-shared-gateway.md) | Implemented. Managed stdio, OAuth and upstream conversation continuity remain deferred. |
-| [0002: Native CLI harnesses and model protocols](0002-native-cli-harnesses-and-model-protocols.md) | Implemented; later four-client Kind acceptance extends the original evidence. |
-| [0003: Persistent assistants and retained answers](0003-persistent-assistants-and-retained-results.md) | Implemented for disposable delegated jobs. ADR 0012 adds retained native work. |
-| [0004: Portable sessions across bounded executions](0004-portable-sessions-and-bounded-executions.md) | Controlled Codex/Claude round trips verified. ADRs 0008–0011 supply the mechanisms; 0012 adds fresh continuations. |
-| [0005: Controlled Docker launch before adoption](0005-controlled-docker-launch-before-session-adoption.md) | Controlled launch implemented. Its round-trip prerequisite is met; unmanaged adoption still needs its own proof. |
-| [0006: Native CLI and terminal before GUI mobility](0006-native-cli-and-terminal-before-gui-mobility.md) | Terminal experience implemented. GUI/IDE integration remains deferred. |
-| [0007: Codex round trip before harness expansion](0007-codex-round-trip-before-harness-expansion.md) | Sequencing fulfilled by Codex followed by Claude. Further harnesses still require independent evidence. |
-| [0008: Selected native and Git checkpoints](0008-selected-native-and-git-checkpoints.md) | Implemented for supported foreground histories and Git layouts. |
-| [0009: Runtime backends and sealed accounting](0009-runtime-backends-and-sealed-accounting.md) | Implemented and exercised by both native round trips. Unknown usage remains conservative. |
-| [0010: Managed session authority and fresh admission](0010-managed-session-authority-and-admission.md) | Implemented within the recorded single-owner placement and failure scope. |
-| [0011: Native compatibility and completion](0011-native-session-compatibility-and-completion.md) | Implemented for pinned Codex/Claude. Claude's full held placement move/cancel matrix remains unassessed. |
-| [0012: Retained work and fresh continuations](0012-retained-work-and-fresh-session-continuations.md) | Implemented for Codex; stock Hermes dispatch and local continuation verified with deterministic providers. |
-| [0013: Configured Projects and workspace revisions](0013-configured-projects-and-workspace-revisions.md) | Implemented. Native development acceptance proves Project association/filtering, independent home approval and fresh conversation at exact retained Git revision. |
+| [0001](0001-mcp-capabilities-through-shared-gateway.md) | MCP access through the shared gateway. |
+| [0002](0002-native-cli-harnesses-and-model-protocols.md) | Native CLI harnesses and model protocols. |
+| [0003](0003-persistent-assistants-and-retained-results.md) | Persistent assistants and retained job answers. |
+| [0004](0004-portable-sessions-and-bounded-executions.md) | Sessions across bounded executions. |
+| [0005](0005-controlled-docker-launch-before-session-adoption.md) | Controlled Docker launch before adopting existing sessions. |
+| [0006](0006-native-cli-and-terminal-before-gui-mobility.md) | Native CLI and terminal access before GUI integration. |
+| [0007](0007-codex-round-trip-before-harness-expansion.md) | Codex before additional session adapters. |
+| [0008](0008-selected-native-and-git-checkpoints.md) | Selected conversation and Git checkpoints. |
+| [0009](0009-runtime-backends-and-sealed-accounting.md) | Runtime backends and finalized usage accounting. |
+| [0010](0010-managed-session-authority-and-admission.md) | Managed-session permissions and destination admission. |
+| [0011](0011-native-session-compatibility-and-completion.md) | Native state compatibility and completion. |
+| [0012](0012-retained-work-and-fresh-session-continuations.md) | Retained work and local resume. |
+| [0013](0013-configured-projects-and-workspace-revisions.md) | Configured Projects and workspace revisions. |
+| [0014](0014-default-clients-and-native-tool-schemas.md) | Default clients, MCP schemas and model requests sharing an allowance. |

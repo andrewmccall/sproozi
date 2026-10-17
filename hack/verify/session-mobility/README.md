@@ -6,7 +6,7 @@ profile, Kubernetes placement and stock native terminal. The provider is a
 deterministic local HTTPS fixture; it needs no personal credentials or paid model
 account. Codex's extended production roundtrip and Claude's complete TUI/Bash/Git
 roundtrip with both-placement denial probes passed on 12 October 2026. See
-[recorded acceptance](../../../docs/demos/verified-session-mobility.md) for exact
+[recorded acceptance](../../../test/acceptance/reports/verified-session-mobility.md) for exact
 coverage; rerun these commands against the images you intend to evaluate.
 
 This setup is for Docker Desktop with the host reachable from containers at
@@ -91,21 +91,21 @@ actual forbidden network probes establish enforcement for this fixture.
 
 ## Build and resolve the images
 
-The Codex base Dockerfile has an older default, so supply `CODEX_VERSION`
-explicitly. The combined clients image adds Claude Code 2.1.27; the native image
-adds the production supervisor, checkpoint helper and fixed network command.
+The client Dockerfiles install the default Codex and Claude Code packages without
+version selectors. The first build pulls its public base. Both client builds use
+`--no-cache` to run the installers again; the second uses the local image from
+the first build. The native image adds the supervisor, checkpoint helper and
+network command.
 Build logs retain the parent resolution. `images.py` exports and imports the
 final images into every Kind node, verifies CRI resolution, and records canonical
 `repository@sha256` references in `images.json`.
 
 ```sh
-docker build -f hack/demo/codex.Dockerfile \
-  --build-arg CODEX_VERSION=0.161.0 \
-  -t sproozi-session/clients:codex-0.161.0 . >"$work/codex-build.log" 2>&1
-docker image inspect sproozi-session/clients:codex-0.161.0 >"$work/codex-image.json"
-docker build -f internal/runtime/docker/image/clients.Dockerfile \
-  --build-arg CODEX_CLIENTS_IMAGE=sproozi-session/clients:codex-0.161.0 \
-  --build-arg CLAUDE_VERSION=2.1.27 \
+docker build --pull --no-cache -f hack/demo/codex.Dockerfile \
+  -t sproozi-session/clients:codex . >"$work/codex-build.log" 2>&1
+docker image inspect sproozi-session/clients:codex >"$work/codex-image.json"
+docker build --no-cache -f internal/runtime/docker/image/clients.Dockerfile \
+  --build-arg CODEX_CLIENTS_IMAGE=sproozi-session/clients:codex \
   -t sproozi-session/clients:mobility . >"$work/clients-build.log" 2>&1
 docker image inspect sproozi-session/clients:mobility >"$work/clients-image.json"
 docker build -f internal/runtime/docker/image/Dockerfile \

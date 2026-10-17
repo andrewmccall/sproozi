@@ -4,20 +4,31 @@ Status: deferred
 
 ## Problem
 
-Team access needs finer attribution than the current configuration-based installation principal.
+Current Project membership identifies an installation. Team access may need to
+identify individual people and agents.
 
 ## Desired behaviour
 
-Authenticated people and agents receive explicit project roles and capability constraints. Revocation prevents new reads and admission while trusted lifecycle services still fence existing writers and retain accounting.
+Authenticated people and agents receive explicit Project roles and capability
+limits. Removing access prevents new reads and executions. Trusted services must
+still be able to stop existing workers and finish usage accounting.
 
-## Proposed primitives
+## Proposed parts
 
-Authenticated subject; project membership/role; capability ceiling; source-qualified destination approval; revocation version and audit.
+- Authenticated person or agent identity.
+- Project membership, role and capability limits.
+- Destination approval tied to the source installation.
+- Versioned revocation records and audit history.
 
 ## Open questions
 
-Which workflow first needs individual identities or live membership changes? Who administers roles? What should happen to already admitted executions on revocation? How are shared homes partitioned?
+Which workflow first needs individual identities or live membership changes? Who
+administers roles? What happens to active executions when access is removed? How
+should shared home installations separate access?
 
-## Non-goals and next evidence
+## Scope
 
-No roles inferred from bot display names, portable grants or authority from project labels. Current configured Projects stay valid until a real team workflow earns new identity and ownership boundaries.
+Bot display names and Project labels do not grant permissions. Checkpoints
+cannot carry grants to another installation. Keep current configured Projects
+until a team workflow establishes the need for different identity and ownership
+rules.

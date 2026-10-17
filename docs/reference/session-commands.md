@@ -11,7 +11,7 @@ execution environments. The [home service reference](../../cmd/sproozi/README.md
 describes that configuration. Building the CLI does not install a cluster or
 start an agent.
 
-## Remote work and local continuation
+## Remote work and local resume
 
 | Command | Purpose |
 | --- | --- |
@@ -20,16 +20,17 @@ start an agent.
 | `status` | Inspect one session by its stable session UUID. |
 | `pull` | Claim a stopped remote session and import its conversation and Git workspace. This does not start an agent. |
 | `resume` | Start a new local execution of retained work with fresh permissions. It attaches the terminal unless `--detach` is selected. |
-| `stop` | Stop local work and retain its supported state for later continuation. |
+| `stop` | Stop local work and retain its supported state for later resume. |
 | `cancel` | Cancel an execution, including unfinished work that cannot stop gracefully. |
 | `recover` | Continue a journaled operation after an uncertain response or interruption. |
 
-These commands accept `--config FILE`, defaulting to `sproozi/config.json`
-under the platform's user configuration directory. `--executor NAME` selects a
-configured remote owner; `pull` selects its source with `--from NAME`. Preserve
-the session and operation UUIDs when retrying the same operation. A native
-conversation UUID identifies the agent's conversation and is distinct from the
-session and its individual executions.
+These commands accept `--config FILE`, defaulting to `sproozi/config.json` under
+the platform's user configuration directory. `--executor NAME` selects a
+configured remote task service; `pull` selects its source with `--from NAME`.
+Preserve the session and operation UUIDs when retrying the same operation. The
+harness also has a native conversation UUID. It is separate from the Sproozi
+session ID and execution IDs. See [core
+concepts](../explanations/core-concepts.md) for these distinctions.
 
 Follow [retained remote work](../guides/portable-workflows.md) for complete
 commands and prerequisites, and [Projects and workspace revisions](projects-and-revisions.md)

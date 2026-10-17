@@ -221,6 +221,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	meter := budget.FromContext(ctx)
 	var reservation *budget.Reservation
 	if r.URL.Path != modelsPath {
+		release, waitErr := meter.AcquireRequest(ctx)
+		if waitErr != nil {
+			h.deny(w, e, http.StatusRequestTimeout, "model request cancelled while waiting for its allowance",
+				"server_error", "request_cancelled")
+			return
+		}
+		defer release()
 		// An explicit output bound is trusted as an admission bound. Without it,
 		// reserve all remaining capacity so unknown input plus output cannot
 		// oversubscribe the hard ceiling.

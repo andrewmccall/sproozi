@@ -45,16 +45,17 @@ Keep template, instruction and placement configuration compatible while old writ
 remain unresolved. Configuration is loaded by its owning service; this decision
 does not introduce a live distributed membership service.
 
-Carry optional Project/template/repository provenance through authenticated catalogue
-and export records, including a credential-free repository reference captured from
-trusted configuration. Importing that association supplies history only. Local
-continuation requires independent current home approval qualified by source and
-Project, narrowing the fresh local grant. Standalone work retains its existing
-approval path. Every local preparation/activation path, including interrupted
-resume replay, recovery and movement, rechecks the source-qualified approval.
-A narrowed current ceiling cannot rewrite an admitted allocation; cancellation
-precedes a fresh smaller grant. Stop-only and cancellation recovery remain
-available independently of approval. Membership and Project labels never establish artifact authority.
+Carry optional Project/template/repository provenance through authenticated
+catalogue and export records, including a credential-free repository reference
+captured from trusted configuration. Importing that association supplies history
+only. Local resume requires independent current home approval qualified by
+source and Project, narrowing the fresh local grant. Standalone work retains its
+existing approval path. Every local preparation/activation path, including
+interrupted resume replay, recovery and movement, rechecks the source-qualified
+approval. A narrowed current ceiling cannot rewrite an admitted allocation;
+cancellation precedes a fresh smaller grant. Stop-only and cancellation recovery
+remain available independently of approval. Membership and Project labels never
+establish artifact authority.
 
 Expose the selected workspace's full Git HEAD, object format and complete workspace
 archive digest separately from native UUID and aggregate checkpoint digest. Bounded
@@ -94,7 +95,7 @@ unfinished workspace. Neither path publishes commits or grants GitHub access.
   reproduces retained objects without requiring upstream fetch or a new Git service.
 - Reusing full native resume for every revision launch preserves more state but
   conflates a clean committed checkout with unfinished work and conversation
-  continuation. Separate fresh workspace-only execution preserves both meanings.
+  resume. Separate fresh workspace-only execution preserves both meanings.
 
 ## Accepted costs and consequences
 
@@ -134,22 +135,23 @@ design/review records, not end-to-end runtime acceptance.
 | Multi-template routing and a new CRD/store | Alternatives rejected above |
 | Multiplayer, HA and automatic publication | Deferred with revisit conditions below |
 
-The current implementation is in [Project configuration](../../internal/project/project.go),
-[owner selection](../../internal/work/project.go),
-[revision source binding](../../internal/work/revision.go),
-[workspace revision reconstruction](../../internal/workspace/revision.go) and
-[checkpoint metadata](../../internal/checkpoint/codex.go). Home continuation belongs
-to the [existing home catalogue](../../internal/session/home/catalog.go).
-Current configuration and callers are documented in the
-[Project/revision reference](../reference/projects-and-revisions.md), with the
-[deployment guide](../guides/retained-work-kubernetes.md) and repeatable
-[fixture workflow](../../hack/verify/portable-workflows/README.md#development-and-governed-home-ops-projects).
+The current implementation is in [Project
+configuration](../../internal/project/project.go), [owner
+selection](../../internal/work/project.go), [revision source
+binding](../../internal/work/revision.go), [workspace revision
+reconstruction](../../internal/workspace/revision.go) and [checkpoint
+metadata](../../internal/checkpoint/codex.go). Local resume belongs to the
+[existing home catalogue](../../internal/session/home/catalog.go). Current
+configuration and callers are documented in the [Project/revision
+reference](../reference/projects-and-revisions.md), with the [deployment
+guide](../guides/retained-work-kubernetes.md) and repeatable [fixture
+workflow](../../hack/verify/portable-workflows/README.md#development-and-governed-home-ops-projects).
 
 The stock Hermes/native development proof passed actual Sproozi package tests in
 Kubernetes and after same-conversation local Docker resume. It checked Project
 filtering/association and launched another independently admitted native conversation
 at the exact source checkpoint's recorded Git revision. The source checkpoint and
-ownership remained unchanged. [Sanitized evidence](../demos/execution-roadmap-evidence.json)
+ownership remained unchanged. [Sanitized evidence](../../test/acceptance/reports/execution-roadmap-evidence.json)
 records the public source snapshot and selected image identities. Deterministic
 models establish execution/continuity behavior, not autonomous contribution quality.
 

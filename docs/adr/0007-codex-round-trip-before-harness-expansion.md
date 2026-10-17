@@ -75,7 +75,7 @@ sealed usage. The extended proof passed actual native tools, a held remote move,
 capability/direct-access denials in both placements, forced held-turn cancellation
 and immutable accounting replay. The final-source matched-image rerun passed
 after the writer-fence finalizer and actual-termination corrections. The
-[verified demo](../demos/verified-session-mobility.md) records its exact scope.
+[verified demo](../../test/acceptance/reports/verified-session-mobility.md) records its exact scope.
 
 Claude Code 2.1.27 separately completed three production terminal turns across
 Docker, Kubernetes and Docker, including actual foreground Bash. The proof retained
@@ -96,7 +96,7 @@ Claude-specific completion observation. Sharing placement and authority contract
 does not turn Codex's completion marker or instruction checks into a universal
 native contract. OpenCode and Hermes have no mobility claim from this work.
 
-Related design: [mobility acceptance criteria](../explanations/future-architecture/session-mobility.md#proofs-before-implementation-claims)
+Related design: [mobility acceptance criteria](../../test/acceptance/README.md#session-movement-extensions)
 and [harness adapters](../explanations/future-architecture/harness-portability.md).
 
 ## Revisit conditions

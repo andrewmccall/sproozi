@@ -3,18 +3,12 @@ package harness
 import "testing"
 
 func TestNativeKindHasNoImplicitSelection(t *testing.T) {
-	for _, tc := range []struct {
-		kind               NativeKind
-		version, directory string
-	}{
-		{NativeCodex, "0.161.0", "codex"}, {NativeClaude, "2.1.27", "claude"},
-	} {
-		version, err := NativeVersion(tc.kind)
-		if err != nil || version != tc.version {
-			t.Fatalf("native version: %q %v", version, err)
+	for kind, expected := range map[NativeKind]string{NativeCodex: "codex", NativeClaude: "claude"} {
+		if err := kind.Validate(); err != nil {
+			t.Fatal(err)
 		}
-		directory, err := NativeDirectory(tc.kind)
-		if err != nil || directory != tc.directory {
+		directory, err := NativeDirectory(kind)
+		if err != nil || directory != expected {
 			t.Fatalf("native directory: %q %v", directory, err)
 		}
 	}

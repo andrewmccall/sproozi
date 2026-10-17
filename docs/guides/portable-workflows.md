@@ -1,14 +1,24 @@
 # Start remote work and continue the same session locally
 
-Use this workflow when Hermes or the CLI should start a Codex task in Kubernetes,
-retain its native conversation and Git workspace, and let you continue it later
-in local Docker. The remote task service runs independently of the laptop. Pull
-does not start a writer; resume obtains a new bounded execution grant.
+Start a Codex task in Kubernetes through Hermes or the CLI. Sproozi saves its
+conversation and Git workspace so you can resume it later in local Docker. The
+remote task service runs independently of your laptop.
 
-The initial task harness is Codex 0.161.0. Existing Codex and Claude interactive
-live moves remain documented in the [session guide](session-mobility.md).
-Automated Claude tasks, IDE/GUI attachment, background tools, multiplayer and
-existing personal-session adoption are not part of this workflow.
+The workflow has four steps:
+
+1. Submit a task to an approved remote executor.
+2. Wait for completion and inspect the saved result.
+3. Pull the stopped session to your local installation.
+4. Resume the same conversation with current local permissions.
+
+Pull does not start an agent. Resume starts a new Sproozi execution with a new
+deadline and allowance. See [core concepts](../explanations/core-concepts.md)
+for the difference between a session and an execution.
+
+This workflow supports Codex. Existing Codex and Claude interactive live
+moves remain documented in the [session guide](session-mobility.md). Automated
+Claude tasks, IDE/GUI attachment, background tools, multiplayer and existing
+personal-session adoption are not part of this workflow.
 
 ## Prepare the installation
 
@@ -16,7 +26,7 @@ existing personal-session adoption are not part of this workflow.
    gateway and enforcing CNI. Use a dedicated Kind cluster for evaluation; use
    [the Kubernetes installation guide](install-kubernetes.md) for an operator-owned
    cluster. Do not use a personal current kubeconfig context implicitly.
-2. Build the pinned native image and provision its managed runtime/template/policy
+2. Build the selected native image and provision its managed runtime/template/policy
    using [the complete mobility setup](../../hack/verify/session-mobility/README.md).
    The image contains Git, the native supervisor, checkpoint helper and
    `/usr/local/bin/session-profile`. The profile service needs private durable
@@ -31,49 +41,22 @@ existing personal-session adoption are not part of this workflow.
    engineering work. Use approved repositories/base branches and finite budgets.
    The worker gets a placeholder `GH_TOKEN`, never the App private key. Add the
    corresponding `gateway.github` block and `github.pull_request` allowance to
-   the home configuration when local continuation should publish work.
+   the home configuration when the resumed local agent should publish work.
 
 Keep provider credentials in owned files with mode `0600`, referenced by the
 gateway configuration. For the first live engineering run, save an API key with
 your local secret tooling and configure `providerTokenFile`; do not paste it into
-chat, put it in a task or commit it. Provider keys stay in the gateway. The
-documented fixture uses a public deterministic placeholder and establishes
-execution mechanics, not paid inference or a genuine software contribution.
+chat, put it in a task or commit it. Provider keys stay in the gateway. The test setup uses a placeholder credential. Replace it with your provider
+credential for normal use.
 
 ## Enable retained remote tasks
 
-For Sproozi engineering tasks, prepare an image containing the Go toolchain and
-the repository's public module cache **before** provisioning the fixed local and
-remote placements. The stock native image contains Git and the clients, but no
-Go compiler. Build the [engineering image example](../../examples/portable-workflows/sproozi.Dockerfile)
-from this checkout with your resolved native image:
+For tasks that compile Go code, also [prepare a Go development
+image](#prepare-a-go-development-image) before you configure the local and
+remote environments. The standard native image contains Git and the agent
+clients, but no Go compiler.
 
-```sh
-docker build --build-arg NATIVE_IMAGE=APPROVED_NATIVE_IMAGE \
-  -f examples/portable-workflows/sproozi.Dockerfile \
-  -t YOUR_ENGINEERING_IMAGE .
-```
-
-Resolve and retain the resulting Docker content ID for the local configuration
-and canonical registry digest for the remote runtime. Use this image for the
-agent and existing compatible helper/anchor roles from the start of the
-installation; do not replace an existing execution's immutable image binding.
-The inherited supervisor/native pins stay fixed. Go uses image-owned cached
-modules with `GOPROXY=off`, a local toolchain and ephemeral writable build state.
-Build state lives under `/workspace/sproozi-go-build`, outside the transferred
-`/workspace/session` pair; Docker's `/tmp` remains small and non-executable.
-Approve sufficient workspace and memory for compilation before installation:
-for example, a 2 GiB workspace and 3 GiB agent memory, with matching remote
-runtime requests/limits and policy ceilings. The small mobility fixture's
-defaults are for short native conversations, not cold repository compilation.
-Missing or changed dependencies require an operator-built image or separately
-approved package access. Module/build caches are not conversation checkpoints.
-
-This prepares ordinary Go unit/build checks such as `go test ./internal/work
-./internal/session/...`. Full envtest, race and lint checks require their own
-prepared tools and assets; hosted CI remains a separate verification gate.
-
-For local GitHub continuation, merge the following into the full home configuration:
+To use GitHub after local resume, merge the following into the full home configuration:
 
 ```json
 {
@@ -130,15 +113,16 @@ An approved repository can instead specify an absolute `snapshot` path to a
 stopped ordinary Git checkout owned by the administrator. The owner captures it
 before dispatch. A URL source starts from a controlled seed repository and asks
 the native worker to fetch that approved source through its GitHub capability.
-The repository's files never supply launch instructions or credential references.
+Repository files cannot supply trusted launch instructions or credential
+references.
 
 Run `session-profile --config FILE` with the explicit administrator kubeconfig,
-or deploy `/usr/local/bin/session-profile --config /etc/sproozi/profile.json` in a
-trusted Pod with the native image, a private persistent directory, its TLS/token
-files and narrowly scoped placement credentials. Use one replica and an owner
-lock; restarting it recovers the same stored execution intents. Its placement
-credentials need the existing managed Run/registry and exact Pod-control access.
-It is not a worker-facing arbitrary exec service.
+or deploy `/usr/local/bin/session-profile --config /etc/sproozi/profile.json` in
+a trusted Pod with the native image, a private persistent directory, its
+TLS/token files and narrowly scoped placement credentials. Use one replica and
+an owner lock; restarting it recovers the same stored execution intents. Its
+Kubernetes credentials need the documented managed-Run, registration and
+Pod-control permissions. Workers cannot use it to execute arbitrary commands.
 
 Put the profile's HTTPS origin, public CA and home principal token file in the
 global home configuration's `remote` map. The map name must equal the configured
@@ -171,10 +155,10 @@ bin/sproozi status SESSION_ID --config /private/sproozi/config.json --executor e
 
 Preserve the request UUID when retrying. Repeating identical intent returns the
 same session and execution; changed intent is rejected. The session ID outlives
-the Pod. Status returns lifecycle and a bounded final answer labelled as untrusted
-workload output. `retained` requires compatible native completion, exact writer
-termination, complete sealed accounting and a stored checkpoint. An `unknown`
-status cannot be pulled or silently interpreted as stopped.
+the Pod. Status returns the task phase and a size-limited final answer marked as
+untrusted output. The owner reports `retained` only after native completion,
+confirmed worker stop, finalized usage accounting and checkpoint storage. An
+`unknown` status cannot be pulled or silently interpreted as stopped.
 
 For a known recoverable interruption, use `sproozi recover SESSION_ID --executor
 engineering --config FILE`. Cancel uses a separate stable `--operation UUID` and
@@ -218,18 +202,20 @@ bin/sproozi pull SESSION_ID --config /private/sproozi/config.json \
 bin/sproozi resume SESSION_ID --config /private/sproozi/config.json
 ```
 
-Pull stores the validated native/Git checkpoint inertly, then commits the remote
-owner's one-way claim. A lost acknowledgement retries the same pull operation;
-downloaded bytes alone cannot activate a writer. The remote catalogue now reports
-`home-owned` and cannot reopen that task session. Keep the home configuration and
-private directory unique to this trusted installation; copying its principal
-credential into independent homes is unsupported.
+Pull validates and saves the conversation and Git checkpoint without starting an
+agent. It then records the remote owner's one-way ownership transfer. If the
+reply is lost, retry the same pull operation. Downloading a checkpoint alone
+does not permit local execution. The remote catalogue now reports `home-owned`
+and cannot reopen that task session. Keep the home configuration and private
+directory unique to this trusted installation; copying its principal credential
+into independent homes is unsupported.
 
 The home catalogue enforces `local.retainedBytes` and a finite file count for
-imported artifacts and journals; fresh continuations also use the existing
-initial-execution retention checks. A capacity error leaves downloaded state
-inert and blocks admission. Restore capacity and retry the original operation.
-Keep protected owner/receipt journals intact; deleting them is not recovery.
+imported artifacts and journals; new executions also use the existing
+initial-execution retention checks. A capacity error keeps downloaded state
+stopped and prevents a new execution. Restore capacity and retry the original
+operation. Keep protected owner/receipt journals intact; deleting them is not
+recovery.
 
 Resume opens the real native TUI with the same conversation UUID and supported
 Git history, index, staged/unstaged changes and selected files. Its new deadline,
@@ -237,15 +223,15 @@ allowances and gateway identity come from current home approval. Earlier receipt
 remain unchanged. `--detach` starts without attaching; `attach --socket PATH
 --id SESSION_ID` reconnects, and Ctrl-] detaches without stopping work.
 
-After reviewing and changing the work, use `sproozi stop SESSION_ID --config FILE`
-to wait for the current foreground turn/tools, fence the writer, seal usage and
-retain the new checkpoint. It does not launch a destination. Later resume starts
-another independently authorized execution. Use the existing `move` command for
-live visits within one execution; its original deadline and aggregate allowance
-continue across those visits.
-Keep the original operation UUID when retrying. Product operations remain bound
-to the execution they addressed; an old stop, move or cancel request cannot act
-on a later resume, even though its product session ID is the same.
+After reviewing and changing the work, use `sproozi stop SESSION_ID --config
+FILE` to wait for the current turn and foreground tools, stop the worker,
+finalize usage accounting and save a new checkpoint. It does not launch a
+destination. A later resume starts another execution with current approval. Use
+the existing `move` command for live visits within one execution; its original
+deadline and aggregate allowance continue across those visits. Keep the original
+operation UUID when retrying. Product operations remain bound to the execution
+they addressed; an old stop, move or cancel request cannot act on a later
+resume, even though its product session ID is the same.
 
 For GitHub publication, create a branch for the current execution:
 
@@ -259,6 +245,39 @@ The old branch can remain in local history, but its name is not authority to
 overwrite another execution's published branch. Confirm the exact changes and
 checks before publishing. A successful infrastructure task is not evidence that
 its proposed fix is correct or merged.
+
+## Prepare a Go development image
+
+For Sproozi engineering tasks, prepare an image containing the Go toolchain and
+the repository's public module cache **before** provisioning the fixed local and
+remote placements. The stock native image contains Git and the clients, but no
+Go compiler. Build the [engineering image example](../../examples/portable-workflows/sproozi.Dockerfile)
+from this checkout with your resolved native image:
+
+```sh
+docker build --build-arg NATIVE_IMAGE=APPROVED_NATIVE_IMAGE \
+  -f examples/portable-workflows/sproozi.Dockerfile \
+  -t YOUR_ENGINEERING_IMAGE .
+```
+
+Resolve and retain the resulting Docker content ID for the local configuration
+and canonical registry digest for the remote runtime. Use this image for the
+agent and existing compatible helper/anchor roles from the start of the
+installation; do not replace an existing execution's immutable image binding.
+The image inherits the native clients and supervisor from its approved base. Go uses image-owned cached
+modules with `GOPROXY=off`, a local toolchain and ephemeral writable build state.
+Build state lives under `/workspace/sproozi-go-build`, outside the transferred
+`/workspace/session` pair; Docker's `/tmp` remains small and non-executable.
+Approve sufficient workspace and memory for compilation before installation:
+for example, a 2 GiB workspace and 3 GiB agent memory, with matching remote
+runtime requests/limits and policy ceilings. The small session setup's defaults are intended for short conversations.
+Increase them before compiling the repository.
+Missing or changed dependencies require an operator-built image or separately
+approved package access. Module/build caches are not conversation checkpoints.
+
+This prepares ordinary Go unit/build checks such as `go test ./internal/work
+./internal/session/...`. Full envtest, race and lint checks require their own
+prepared tools and assets; hosted CI remains a separate verification gate.
 
 ## Home-ops setup and use
 
@@ -314,8 +333,7 @@ limits of its diagnosis. Pull the retained session, resume locally and ask follo
 questions. A remediation through GitOps requires a fresh, separately approved
 repository grant and a reviewed proposed change. Direct Kubernetes mutation is
 not supported by `kubernetes.read`; do not supply cluster-admin to make it work.
-This guide describes the setup. Verification uses isolated fixture infrastructure
-and does not access or change your personal home network.
+Use only the approved endpoint and namespaces in your home configuration.
 
 ## One external MCP definition across executors
 
@@ -328,30 +346,16 @@ The policy example permits only `read_wiki_structure` for the public
 `modelcontextprotocol/go-sdk` repository, with a finite `mcp.docs` allowance.
 Keep the local copy outside the repository, owned and mode `0600`. Both copies
 must contain the same registration bytes; restart gateways after registry edits.
-The [isolated verification setup](../../hack/verify/portable-workflows/README.md)
-renders both copies and their matching policy from these examples.
+Use the same registration and policy on both gateways.
 
-Regenerate connection settings at each native launch. Registry configuration does
-not itself grant a running execution: matching named capability, tool/argument
-policy, budget and active lifecycle are required. Restart the owning gateways to
-apply registry or credential changes; removing a grant must deny later calls.
-Codex managed-native MCP is supported; managed Claude MCP remains gated pending
-its client/tool completion proof. No provider-specific server code, catalogue,
-OAuth enrollment or stdio lifecycle is required for this HTTPS example.
-
-## Verify and interpret the result
-
-The [portable workflow driver](../../hack/verify/portable-workflows/verify.py)
-extends the dedicated mobility fixture. It checks authenticated MCP submission,
-stable replay identity, a genuine remote native task while the home is absent,
-retained output, one-way claim, fresh local authorization and same-conversation
-follow-up. Its report states provider and caller limits. Unit tests separately
-exercise lost replies, unknown fence/accounting, new grants and no destination
-activation during stop. The subsequent stock Hermes fixture passed native MCP
-dispatch and retained-answer retrieval, followed by fresh same-conversation local
-continuation. [Recorded acceptance](../demos/verified-portable-workflows.md)
-separates it from the earlier protocol-only caller. Paid inference, a real
-engineering contribution and personal home-ops diagnosis remain unassessed.
+Regenerate connection settings at each native launch. Registry configuration
+alone does not grant access. Each execution needs the named capability, matching
+tool and argument policy, an available budget and active run status. Restart the
+owning gateways to apply registry or credential changes; removing a grant must
+deny later calls. Codex managed-native MCP is supported; managed Claude MCP
+is not supported. No provider-specific
+server code, catalogue, OAuth enrollment or stdio lifecycle is required for this
+HTTPS example.
 
 ## Projects and exact revisions
 

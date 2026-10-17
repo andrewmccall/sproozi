@@ -35,9 +35,8 @@ func addManagedNativeContract(ctx context.Context, kube client.Client, run *api.
 	if err != nil || binding == nil {
 		return err
 	}
-	version, err := harness.NativeVersion(binding.Harness)
-	if err != nil || runtime.Spec.ClientConfig.Harness != string(binding.Harness) || binding.NativePin != version {
-		return fmt.Errorf("managed native runtime does not match registered harness and pin")
+	if err := binding.Harness.Validate(); err != nil || runtime.Spec.ClientConfig.Harness != string(binding.Harness) {
+		return fmt.Errorf("managed native runtime does not match registered harness")
 	}
 	thread := binding.NativeUUID
 	if binding.WorkspaceDigest != "" {
@@ -110,9 +109,8 @@ func BuildManagedPodSpec(run *api.AgentRun, rt *api.AgentRuntime, binding *place
 	if binding == nil {
 		return nil, fmt.Errorf("managed sandbox requires a native registration")
 	}
-	version, err := harness.NativeVersion(binding.Harness)
-	if err != nil || rt.Spec.ClientConfig.Harness != string(binding.Harness) || binding.NativePin != version {
-		return nil, fmt.Errorf("managed sandbox native harness/pin mismatch")
+	if err := binding.Harness.Validate(); err != nil || rt.Spec.ClientConfig.Harness != string(binding.Harness) {
+		return nil, fmt.Errorf("managed sandbox native harness mismatch")
 	}
 	if binding.RunUID != string(run.UID) || binding.IntendedRunName != run.Name ||
 		binding.TemplateName != run.Spec.TemplateRef.Name || !binding.OriginalDeadline.After(time.Now()) ||

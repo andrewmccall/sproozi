@@ -96,7 +96,7 @@ and [session mobility](../explanations/future-architecture/session-mobility.md).
 
 ## Revisit conditions
 
-Add a native GUI/IDE path when a supported pinned client can select the remote
+Add a native GUI/IDE path when a supported client can select the remote
 session, preserve continuity and respect attachment authorization/revocation.
 Revisit its priority if the terminal experience prevents intended users from
 adopting mobility. Revisit a custom UI only if native interfaces cannot meet a
