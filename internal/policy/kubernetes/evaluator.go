@@ -55,15 +55,17 @@ type Denial struct {
 // the policy, or nil if the run is permitted. All inputs are treated as read-only.
 //
 // Checks performed (in order):
-//  1. Requested capabilities ⊆ AllowedCapabilities
-//  2. Template egress profiles ⊆ policy EgressProfiles
-//  3. Runtime resource limits ≤ policy ResourceBounds.Max (fails closed: a missing
-//     limit for a policy-bounded resource is treated as unbounded and denied)
-//  4. Runtime EphemeralWorkspace.SizeLimit ≤ ResourceBounds.Max[ephemeral-storage]
+//  1. Requested capabilities ⊆ AllowedCapabilities; each requested MCP
+//     capability has a valid tool scope and no monetary budget
+//  2. A requested packages.install capability has a valid package scope
+//  3. Template egress profiles ⊆ policy EgressProfiles
+//  4. Combined runtime container limits ≤ policy ResourceBounds.Max (fails
+//     closed: a missing limit for a policy-bounded resource is denied)
+//  5. Runtime EphemeralWorkspace.SizeLimit ≤ ResourceBounds.Max[ephemeral-storage]
 //
-// Note: namespace and repository scoping are enforced by the respective gateways
-// in Phases 5–7, not at controller admission time, because AgentRun and
-// AgentTemplate do not carry target-namespace or repository fields.
+// Namespace, repository and MCP tool scoping are enforced per request by the
+// gateway, not here, because AgentRun and AgentTemplate do not carry
+// target-namespace or repository fields.
 func Evaluate(
 	pol sprooziv1alpha1.AgentPolicySpec,
 	tmpl sprooziv1alpha1.AgentTemplateSpec,
