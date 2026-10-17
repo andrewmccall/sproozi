@@ -20,6 +20,7 @@ import (
 	"github.com/andrewmccall/sproozi/internal/project"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
+	"github.com/andrewmccall/sproozi/internal/work"
 	"github.com/andrewmccall/sproozi/internal/workspace"
 	"github.com/google/uuid"
 )
@@ -106,14 +107,9 @@ func executionStatus(r session.Record) Status {
 	return out
 }
 
-func validID(id string) bool {
-	u, err := uuid.Parse(id)
-	return err == nil && u != uuid.Nil && u.String() == id
-}
-
 // lockSession serializes one catalogued durable session.
 func (s *Service) lockSession(id string) (func(), error) {
-	if !validID(id) {
+	if !work.CanonicalID(id) {
 		return nil, errors.New("home: canonical session UUID required")
 	}
 	s.mu.RLock()
@@ -180,7 +176,7 @@ func (s *Service) Start(ctx context.Context, id, operationID, path string, inclu
 	if err := workspace.ValidateIgnoredPaths(includeIgnored); err != nil {
 		return Status{}, err
 	}
-	if !validID(id) || !validID(operationID) || !filepath.IsAbs(path) {
+	if !work.CanonicalID(id) || !work.CanonicalID(operationID) || !filepath.IsAbs(path) {
 		return Status{}, errors.New("home: UUIDs and absolute stopped workspace required")
 	}
 	r, err := s.coordinator.Inspect(id)
@@ -224,7 +220,7 @@ func (s *Service) startFirstVisit(ctx context.Context, r session.Record) (Status
 }
 
 func (s *Service) moveExecution(ctx context.Context, id, operationID, destination string) (Status, error) {
-	if !validID(operationID) || s.placements[destination] == nil {
+	if !work.CanonicalID(operationID) || s.placements[destination] == nil {
 		return Status{}, errors.New("home: canonical operation UUID and configured destination required")
 	}
 	r, err := s.coordinator.Inspect(id)

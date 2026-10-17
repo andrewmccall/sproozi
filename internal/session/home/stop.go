@@ -6,12 +6,13 @@ import (
 	"os"
 
 	"github.com/andrewmccall/sproozi/internal/session"
+	"github.com/andrewmccall/sproozi/internal/work"
 )
 
 // Stop commits selected native/workspace continuity without preparing another
 // writer. Durable sessions retain it independently of the finished execution.
 func (s *Service) Stop(ctx context.Context, id, operation string) (Status, error) {
-	if !validID(operation) {
+	if !work.CanonicalID(operation) {
 		return Status{}, errors.New("home: stop operation UUID required")
 	}
 	if execution, err := s.coordinator.Inspect(id); err == nil && execution.Session != "" {

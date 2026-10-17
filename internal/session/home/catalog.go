@@ -57,7 +57,7 @@ type catalogOperation struct {
 }
 
 func checkCatalogOperation(r localSession, operation string, intent catalogOperation) error {
-	if !validID(operation) || operation == r.Operation {
+	if !work.CanonicalID(operation) || operation == r.Operation {
 		return errors.New("home: distinct session operation UUID required")
 	}
 	if previous, ok := r.Operations[operation]; ok && previous != intent {
@@ -101,7 +101,7 @@ func (s *Service) catalogDir() (string, error) {
 
 func (s *Service) readCatalog(id string) (localSession, error) {
 	var r localSession
-	if !validID(id) {
+	if !work.CanonicalID(id) {
 		return r, errors.New("home: canonical session UUID required")
 	}
 	dir, err := s.catalogDir()
@@ -115,9 +115,9 @@ func (s *Service) readCatalog(id string) (localSession, error) {
 	if err = decode(data, &r); err != nil {
 		return r, err
 	}
-	if r.Version != 1 || r.ID != id || r.Original.ID != id || !validID(r.Operation) ||
+	if r.Version != 1 || r.ID != id || r.Original.ID != id || !work.CanonicalID(r.Operation) ||
 		r.Original.OperationID != r.Operation || r.Source == "" ||
-		(r.Current != "" && !validID(r.Current)) || len(r.Executions) > 256 {
+		(r.Current != "" && !work.CanonicalID(r.Current)) || len(r.Executions) > 256 {
 		return r, errors.New("home: invalid retained session binding")
 	}
 	if r.Original.Project != "" && !project.ValidID(r.Original.Project) {
@@ -127,7 +127,7 @@ func (s *Service) readCatalog(id string) (localSession, error) {
 		return r, err
 	}
 	for _, execution := range r.Executions {
-		if !validID(execution) {
+		if !work.CanonicalID(execution) {
 			return r, errors.New("home: invalid retained execution reference")
 		}
 	}
@@ -135,7 +135,7 @@ func (s *Service) readCatalog(id string) (localSession, error) {
 		return r, errors.New("home: invalid retained session operations")
 	}
 	for operation, intent := range r.Operations {
-		if !validID(operation) || (intent.Execution != "" || intent.Action != ActionStop) && !slices.Contains(r.Executions, intent.Execution) ||
+		if !work.CanonicalID(operation) || (intent.Execution != "" || intent.Action != ActionStop) && !slices.Contains(r.Executions, intent.Execution) ||
 			(intent.Action != ActionResume && intent.Action != ActionStop && intent.Action != ActionMove && intent.Action != ActionCancel) {
 			return r, errors.New("home: invalid retained session operation binding")
 		}
@@ -249,7 +249,7 @@ func (s *Service) validateExport(e work.Export, id, operation string) error {
 	}
 	launch := e.Stopped.Launch
 	if e.ID != id || e.OperationID != operation || e.Harness != s.config.Local.Harness ||
-		!validID(launch.ThreadID) || launch.InstructionDigest != s.config.Local.InstructionDigest ||
+		!work.CanonicalID(launch.ThreadID) || launch.InstructionDigest != s.config.Local.InstructionDigest ||
 		e.Stopped.Incarnation.ResourceUID == "" || len(launch.Allowances) == 0 {
 		return errors.New("home: export does not match this pull or this home's native binding")
 	}
@@ -265,7 +265,7 @@ func (s *Service) Pull(ctx context.Context, id, operation, sourceName string) (S
 		return Status{}, err
 	}
 	defer unlock()
-	if !validID(operation) || s.workSources[sourceName] == nil {
+	if !work.CanonicalID(operation) || s.workSources[sourceName] == nil {
 		return Status{}, errors.New("home: configured source and operation UUID required")
 	}
 	r, err := s.readCatalog(id)
@@ -337,7 +337,7 @@ func (s *Service) Resume(ctx context.Context, id, operation string) (Status, err
 		return Status{}, err
 	}
 	defer unlock()
-	if !validID(operation) {
+	if !work.CanonicalID(operation) {
 		return Status{}, errors.New("home: resume operation UUID required")
 	}
 	r, err := s.readCatalog(id)
@@ -534,7 +534,7 @@ func (s *Service) Cancel(ctx context.Context, id, operation string) (Status, err
 	if err != nil {
 		return Status{}, err
 	}
-	if !validID(operation) {
+	if !work.CanonicalID(operation) {
 		return Status{}, errors.New("home: cancellation operation UUID required")
 	}
 	if sessionID != "" {
