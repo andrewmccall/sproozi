@@ -323,16 +323,17 @@ func TestReconcilerQueuedRunFailsWhenRuntimeMissing(t *testing.T) {
 func TestReconcilerQueuedRunWithInvalidRuntimeFailsWithoutTakingSlot(t *testing.T) {
 	t.Parallel()
 
+	const brokenName = "broken"
 	objs := fixtures()
 	broken := objs[0].(*sprooziv1alpha1.AgentRuntime).DeepCopy()
-	broken.Name = "broken"
+	broken.Name = brokenName
 	broken.Spec.PodTemplate.Spec.Containers[0].Image = "ghcr.io/openai/codex:latest"
 	brokenTemplate := objs[2].(*sprooziv1alpha1.AgentTemplate).DeepCopy()
-	brokenTemplate.Name = "broken"
-	brokenTemplate.Spec.RuntimeRef.Name = "broken"
+	brokenTemplate.Name = brokenName
+	brokenTemplate.Spec.RuntimeRef.Name = brokenName
 
 	bad := newRun("bad")
-	bad.Spec.TemplateRef.Name = "broken"
+	bad.Spec.TemplateRef.Name = brokenName
 	bad.Status.Phase = sprooziv1alpha1.AgentRunPhaseQueued
 	bad.CreationTimestamp = metav1.NewTime(time.Now().Add(-time.Minute))
 	good := newRun("good")
