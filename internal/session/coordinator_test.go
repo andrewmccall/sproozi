@@ -28,7 +28,7 @@ const testIgnoredFile = "needed.bin"
 func TestCancelUnknownActivationWithExactKnownIncarnation(t *testing.T) {
 	c, _, _, remote, start := setup(t)
 	remote.lostActivate = true
-	r, err := c.Move(context.Background(), start.Source.SessionID, uuid.NewString(), testRemote)
+	r, err := c.Move(context.Background(), start.Source.ExecutionID, uuid.NewString(), testRemote)
 	if err == nil || r.Phase != PhaseActivating {
 		t.Fatalf("expected retained activation intent: %+v %v", r, err)
 	}
@@ -60,7 +60,7 @@ func TestStopOutcomeSeparatesUnsealedUsageFromUnknownStop(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c, _, local, remote, start := setup(t)
-			r, err := c.Move(t.Context(), start.Source.SessionID, uuid.NewString(), testRemote)
+			r, err := c.Move(t.Context(), start.Source.ExecutionID, uuid.NewString(), testRemote)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -88,7 +88,7 @@ func TestStopOutcomeSeparatesUnsealedUsageFromUnknownStop(t *testing.T) {
 func TestFirstVisitFromWorkspaceBindsGenuineThreadAtFirstStop(t *testing.T) {
 	c, _, local, remote, start := setup(t)
 	first := start.Source
-	first.SessionID, first.OperationID, first.AllocationID = uuid.NewString(), uuid.NewString(), uuid.NewString()
+	first.ExecutionID, first.OperationID, first.AllocationID = uuid.NewString(), uuid.NewString(), uuid.NewString()
 	first.ThreadID, first.CheckpointDigest = "", ""
 	workspace := []byte("captured git workspace")
 	r, err := c.Create(first, workspace, "")
@@ -101,13 +101,13 @@ func TestFirstVisitFromWorkspaceBindsGenuineThreadAtFirstStop(t *testing.T) {
 	if _, err = c.Create(first, []byte("different workspace"), ""); err == nil {
 		t.Fatal("retry replaced the retained workspace input")
 	}
-	if r, err = c.Recover(t.Context(), first.SessionID); err != nil || r.Phase != PhaseActive {
+	if r, err = c.Recover(t.Context(), first.ExecutionID); err != nil || r.Phase != PhaseActive {
 		t.Fatalf("first visit did not activate: %+v %v", r, err)
 	}
 	if local.activated != 1 {
 		t.Fatalf("local activations = %d, want 1", local.activated)
 	}
-	r, err = c.Move(t.Context(), first.SessionID, uuid.NewString(), testRemote)
+	r, err = c.Move(t.Context(), first.ExecutionID, uuid.NewString(), testRemote)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,7 +300,7 @@ func setup(t *testing.T, includeIgnored ...string) (*Coordinator, string, *fakeP
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = c.Close() })
-	source := Launch{Harness: harness.NativeCodex, SessionID: uuid.NewString(), OperationID: uuid.NewString(), AllocationID: uuid.NewString(), Epoch: 1, Placement: testLocal, ThreadID: testThread, CheckpointDigest: digest, InstructionDigest: strings.Repeat("a", 64), Deadline: time.Now().Add(time.Hour).UTC(),
+	source := Launch{Harness: harness.NativeCodex, ExecutionID: uuid.NewString(), OperationID: uuid.NewString(), AllocationID: uuid.NewString(), Epoch: 1, Placement: testLocal, ThreadID: testThread, CheckpointDigest: digest, InstructionDigest: strings.Repeat("a", 64), Deadline: time.Now().Add(time.Hour).UTC(),
 		Allowances: map[string]Allowance{testCapability: {Units: Limit{Bounded: true, Value: testAllowanceUnits}, CostMicros: Limit{Bounded: true, Value: testAllowanceCost}}}}
 	source.IncludeIgnored = includeIgnored
 	return c, dir, local, remote, seedExecution(t, c, local, source, data)
@@ -313,12 +313,12 @@ func seedExecution(t *testing.T, c *Coordinator, local *fakePlacement, source La
 	if _, err := c.Create(source, data, ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.Recover(t.Context(), source.SessionID); err != nil {
+	if _, err := c.Recover(t.Context(), source.ExecutionID); err != nil {
 		t.Fatal(err)
 	}
 	charge := local.charge
 	local.charge = budget.TrustedUsage{Units: seedUnits, CostMicros: seedCost}
-	r, err := c.Finalize(t.Context(), source.SessionID, uuid.NewString())
+	r, err := c.Finalize(t.Context(), source.ExecutionID, uuid.NewString())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -332,7 +332,7 @@ func seedExecution(t *testing.T, c *Coordinator, local *fakePlacement, source La
 func TestIgnoredSelectionSurvivesEveryMoveAndCannotAmendSeed(t *testing.T) {
 	c, _, _, _, start := setup(t, testIgnoredFile)
 	for _, destination := range []string{testRemote, testLocal, testRemote} {
-		r, err := c.Move(t.Context(), start.Source.SessionID, uuid.NewString(), destination)
+		r, err := c.Move(t.Context(), start.Source.ExecutionID, uuid.NewString(), destination)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -354,7 +354,7 @@ func TestRoundTripMaintainsOriginalAuthorityAndReceipts(t *testing.T) {
 	c, dir, local, remote, start := setup(t)
 	ctx := context.Background()
 	remoteOp, localOp := uuid.NewString(), uuid.NewString()
-	r, err := c.Move(ctx, start.Source.SessionID, remoteOp, testRemote)
+	r, err := c.Move(ctx, start.Source.ExecutionID, remoteOp, testRemote)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -413,7 +413,7 @@ func TestLostRepliesRecoverSameAllocation(t *testing.T) {
 			} else {
 				remote.lostActivate = true
 			}
-			r, err := c.Move(context.Background(), start.Source.SessionID, uuid.NewString(), testRemote)
+			r, err := c.Move(context.Background(), start.Source.ExecutionID, uuid.NewString(), testRemote)
 			if err == nil {
 				t.Fatal("fixture did not lose reply")
 			}
@@ -440,7 +440,7 @@ func TestLostRepliesRecoverSameAllocation(t *testing.T) {
 func TestPartialPreparationRecoversThroughExplicitPrepareWithoutReplacingIncarnation(t *testing.T) {
 	c, _, _, remote, start := setup(t)
 	remote.partialPrepare = true
-	r, err := c.Move(t.Context(), start.Source.SessionID, uuid.NewString(), testRemote)
+	r, err := c.Move(t.Context(), start.Source.ExecutionID, uuid.NewString(), testRemote)
 	if err == nil || r.Phase != PhasePreparing {
 		t.Fatalf("expected retained incomplete preparation: %+v %v", r, err)
 	}
@@ -459,7 +459,7 @@ func TestPartialPreparationCancellationNeverRetriesFailedRestoreOrRefundsUnknown
 		t.Run(name, func(t *testing.T) {
 			c, _, _, remote, start := setup(t)
 			remote.partialPrepare = true
-			r, err := c.Move(t.Context(), start.Source.SessionID, uuid.NewString(), testRemote)
+			r, err := c.Move(t.Context(), start.Source.ExecutionID, uuid.NewString(), testRemote)
 			if err == nil {
 				t.Fatal("incomplete preparation hidden")
 			}
@@ -504,7 +504,7 @@ func TestUnknownStopOrUsagePreventsNextWriter(t *testing.T) {
 	for name, configure := range cases {
 		t.Run(name, func(t *testing.T) {
 			c, _, local, remote, start := setup(t)
-			r, err := c.Move(context.Background(), start.Source.SessionID, uuid.NewString(), testRemote)
+			r, err := c.Move(context.Background(), start.Source.ExecutionID, uuid.NewString(), testRemote)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -521,7 +521,7 @@ func TestUnknownStopOrUsagePreventsNextWriter(t *testing.T) {
 }
 func TestCancellationPersistsBeforeAbortAndNeverRefundsUnknownUsage(t *testing.T) {
 	c, _, local, remote, start := setup(t)
-	r, err := c.Move(context.Background(), start.Source.SessionID, uuid.NewString(), testRemote)
+	r, err := c.Move(context.Background(), start.Source.ExecutionID, uuid.NewString(), testRemote)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -552,7 +552,7 @@ func TestLimitsAndReplayIntent(t *testing.T) {
 		t.Fatal("accepted widened seed")
 	}
 	op := uuid.NewString()
-	r, err := c.Move(context.Background(), start.Source.SessionID, op, testRemote)
+	r, err := c.Move(context.Background(), start.Source.ExecutionID, op, testRemote)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -581,7 +581,7 @@ func TestPrivateJournalAndCorruptionFailClosed(t *testing.T) {
 		_ = other.Close()
 		t.Fatal("two journal owners")
 	}
-	for _, path := range []string{dir, filepath.Join(dir, "checkpoints"), filepath.Join(dir, "owner.lock"), filepath.Join(dir, start.Source.SessionID+".json")} {
+	for _, path := range []string{dir, filepath.Join(dir, "checkpoints"), filepath.Join(dir, "owner.lock"), filepath.Join(dir, start.Source.ExecutionID+".json")} {
 		info, err := os.Lstat(path)
 		if err != nil {
 			t.Fatal(err)
@@ -590,7 +590,7 @@ func TestPrivateJournalAndCorruptionFailClosed(t *testing.T) {
 			t.Fatal("private journal became public")
 		}
 	}
-	record, err := c.Inspect(start.Source.SessionID)
+	record, err := c.Inspect(start.Source.ExecutionID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -615,14 +615,17 @@ func TestConcurrentReplayHasOneWriter(t *testing.T) {
 	op := uuid.NewString()
 	results := make(chan error, 2)
 	for range 2 {
-		go func() { _, err := c.Move(context.Background(), start.Source.SessionID, op, testRemote); results <- err }()
+		go func() {
+			_, err := c.Move(context.Background(), start.Source.ExecutionID, op, testRemote)
+			results <- err
+		}()
 	}
 	for range 2 {
 		if err := <-results; err != nil {
 			t.Fatal(err)
 		}
 	}
-	r, err := c.Inspect(start.Source.SessionID)
+	r, err := c.Inspect(start.Source.ExecutionID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -632,7 +635,7 @@ func TestConcurrentReplayHasOneWriter(t *testing.T) {
 }
 func TestUnknownUsageCancellationSurvivesReopen(t *testing.T) {
 	c, dir, local, remote, start := setup(t)
-	r, err := c.Move(context.Background(), start.Source.SessionID, uuid.NewString(), testRemote)
+	r, err := c.Move(context.Background(), start.Source.ExecutionID, uuid.NewString(), testRemote)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -666,7 +669,7 @@ func TestUnboundedKeyChangeIsStillAConflict(t *testing.T) {
 
 func TestLostStopReplyLeavesEscrowUntilSameReceiptRecovered(t *testing.T) {
 	c, _, local, remote, start := setup(t)
-	r, err := c.Move(context.Background(), start.Source.SessionID, uuid.NewString(), testRemote)
+	r, err := c.Move(context.Background(), start.Source.ExecutionID, uuid.NewString(), testRemote)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -688,7 +691,7 @@ func TestLostStopReplyLeavesEscrowUntilSameReceiptRecovered(t *testing.T) {
 }
 func TestCheckpointDigestMismatchCannotActivateDestination(t *testing.T) {
 	c, _, local, remote, start := setup(t)
-	r, err := c.Move(context.Background(), start.Source.SessionID, uuid.NewString(), testRemote)
+	r, err := c.Move(context.Background(), start.Source.ExecutionID, uuid.NewString(), testRemote)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -705,11 +708,11 @@ func TestExpiredOriginalDeadlinePreventsPreparation(t *testing.T) {
 	c, _, local, remote, start := setup(t)
 	deadline := time.Now().Add(time.Second).UTC()
 	source := start.Source
-	source.SessionID, source.OperationID, source.AllocationID = uuid.NewString(), uuid.NewString(), uuid.NewString()
+	source.ExecutionID, source.OperationID, source.AllocationID = uuid.NewString(), uuid.NewString(), uuid.NewString()
 	source.Deadline = deadline
 	expiring := seedExecution(t, c, local, source, start.Input)
 	<-time.After(time.Until(deadline) + 10*time.Millisecond)
-	if _, err := c.Move(context.Background(), expiring.Source.SessionID, uuid.NewString(), testRemote); err == nil {
+	if _, err := c.Move(context.Background(), expiring.Source.ExecutionID, uuid.NewString(), testRemote); err == nil {
 		t.Fatal("move reset expired deadline")
 	}
 	if remote.prepared != 0 || remote.activated != 0 {

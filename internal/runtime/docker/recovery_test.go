@@ -378,14 +378,14 @@ func TestCoordinatorRecoversExactDockerActivationAfterLostReply(t *testing.T) {
 	if _, err = c.Create(launch, data, ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = c.Recover(ctx, launch.SessionID); err != nil {
+	if _, err = c.Recover(ctx, launch.ExecutionID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = c.Finalize(ctx, launch.SessionID, uuid.NewString()); err != nil {
+	if _, err = c.Finalize(ctx, launch.ExecutionID, uuid.NewString()); err != nil {
 		t.Fatal(err)
 	}
 	f.failActivationAck = true
-	pending, err := c.Move(ctx, launch.SessionID, uuid.NewString(), destination)
+	pending, err := c.Move(ctx, launch.ExecutionID, uuid.NewString(), destination)
 	if err == nil || pending.Phase != session.PhaseActivating {
 		t.Fatalf("lost activation acknowledgement: phase=%s error=%v", pending.Phase, err)
 	}
@@ -411,14 +411,14 @@ func TestCoordinatorRecoversExactDockerActivationAfterLostReply(t *testing.T) {
 	}
 	// Retained activation intent does not bypass current gateway authority.
 	a.activateErr = errors.New("current allocation admission denied")
-	if _, err = c.Recover(ctx, launch.SessionID); err == nil {
+	if _, err = c.Recover(ctx, launch.ExecutionID); err == nil {
 		t.Fatal("recovery bypassed fresh authority admission")
 	}
 	if f.next != 3 {
 		t.Fatal("failed recovery created a replacement")
 	}
 	a.activateErr = nil
-	recovered, err := c.Recover(ctx, launch.SessionID)
+	recovered, err := c.Recover(ctx, launch.ExecutionID)
 	if err != nil || recovered.Active == nil || recovered.Active.Incarnation != want ||
 		recovered.Phase != session.PhaseActive || recovered.PendingOperation != "" || f.next != 3 {
 		t.Fatalf("same-incarnation recovery: record=%+v error=%v", recovered, err)

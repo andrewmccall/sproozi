@@ -73,7 +73,7 @@ func newOwner(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	f := &fixture{owner: owner, ledger: ledger, config: config, observer: observer, instance: instance,
-		launch: session.Launch{Harness: harness.NativeCodex, SessionID: "session-1", OperationID: "move-1", AllocationID: allocationID, Epoch: 1, Placement: "local", ThreadID: observedNativeUUID, InstructionDigest: fmt.Sprintf("%x", sha256.Sum256([]byte(instructions))), Deadline: time.Now().Add(time.Hour), CheckpointDigest: strings.Repeat("b", 64), Allowances: map[string]session.Allowance{modelCapability: {Units: session.Limit{Bounded: true, Value: 5}, CostMicros: session.Limit{Bounded: true, Value: 50}}}}}
+		launch: session.Launch{Harness: harness.NativeCodex, ExecutionID: "session-1", OperationID: "move-1", AllocationID: allocationID, Epoch: 1, Placement: "local", ThreadID: observedNativeUUID, InstructionDigest: fmt.Sprintf("%x", sha256.Sum256([]byte(instructions))), Deadline: time.Now().Add(time.Hour), CheckpointDigest: strings.Repeat("b", 64), Allowances: map[string]session.Allowance{modelCapability: {Units: session.Limit{Bounded: true, Value: 5}, CostMicros: session.Limit{Bounded: true, Value: 50}}}}}
 	t.Cleanup(func() { _ = f.owner.Close(); _ = f.ledger.Close() })
 	return f
 }

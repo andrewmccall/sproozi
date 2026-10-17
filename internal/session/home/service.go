@@ -198,7 +198,7 @@ func (s *Service) Start(ctx context.Context, id, operationID, path string, inclu
 }
 
 func (s *Service) createWorkspaceExecution(ctx context.Context, id, operationID, path string, includeIgnored []string) (session.Record, error) {
-	first := session.Launch{Harness: s.config.Local.Harness, SessionID: id, OperationID: operationID,
+	first := session.Launch{Harness: s.config.Local.Harness, ExecutionID: id, OperationID: operationID,
 		AllocationID: uuid.NewString(), Epoch: 1, Placement: s.config.Local.Name,
 		InstructionDigest: s.config.Local.InstructionDigest, IncludeIgnored: slices.Clone(includeIgnored),
 		Deadline: time.Now().Add(s.duration).UTC(), Allowances: maps.Clone(s.config.Allowances)}

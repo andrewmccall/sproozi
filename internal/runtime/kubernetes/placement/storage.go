@@ -55,7 +55,7 @@ func (p *Placement) persistIntent(l session.Launch, data []byte) (retained, erro
 	}
 	// One allocation per principal/session epoch prevents alternative allocation
 	// IDs from replaying the same epoch through another deterministic Run name.
-	epochPath := filepath.Join(p.config.Directory, "epoch-"+l.SessionID+"-"+strconv.FormatUint(l.Epoch, 10)+recordSuffix)
+	epochPath := filepath.Join(p.config.Directory, "epoch-"+l.ExecutionID+"-"+strconv.FormatUint(l.Epoch, 10)+recordSuffix)
 	var previous session.Launch
 	if epochData, readErr := p.read(epochPath, 64<<10); readErr == nil {
 		if decode(epochData, &previous) != nil || !session.SameLaunch(l, previous) {

@@ -110,7 +110,7 @@ func (p *Placement) validateLaunch(l session.Launch) error {
 	if err := workspace.ValidateIgnoredPaths(l.IncludeIgnored); err != nil {
 		return err
 	}
-	if l.Harness != p.config.Harness || !validUUID(l.SessionID) || !validUUID(l.OperationID) || !validUUID(l.AllocationID) || l.Epoch == 0 || l.Placement != p.config.Name || l.InstructionDigest != p.config.InstructionDigest || l.Deadline.IsZero() || len(l.Allowances) == 0 || len(l.Allowances) > 32 {
+	if l.Harness != p.config.Harness || !validUUID(l.ExecutionID) || !validUUID(l.OperationID) || !validUUID(l.AllocationID) || l.Epoch == 0 || l.Placement != p.config.Name || l.InstructionDigest != p.config.InstructionDigest || l.Deadline.IsZero() || len(l.Allowances) == 0 || len(l.Allowances) > 32 {
 		return errors.New("invalid Docker launch binding")
 	}
 	if (!initial && !validUUID(l.ThreadID)) || (initial && l.ThreadID != "") {

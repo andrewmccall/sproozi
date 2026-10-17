@@ -18,7 +18,7 @@ import (
 // session when it differs from the execution. A retry must repeat the same
 // launch and input; it returns the retained execution unchanged.
 func (c *Coordinator) Create(first Launch, input []byte, session string) (Record, error) {
-	unlock, err := c.lockSession(first.SessionID)
+	unlock, err := c.lockSession(first.ExecutionID)
 	if err != nil {
 		return Record{}, err
 	}
@@ -27,13 +27,13 @@ func (c *Coordinator) Create(first Launch, input []byte, session string) (Record
 	if err = validateLaunch(first); err != nil {
 		return Record{}, err
 	}
-	if first.Epoch != 1 || session != "" && (!validUUID(session) || session == first.SessionID) {
+	if first.Epoch != 1 || session != "" && (!validUUID(session) || session == first.ExecutionID) {
 		return Record{}, errors.New("session: invalid first visit")
 	}
 	if _, ok := c.placements[first.Placement]; !ok {
 		return Record{}, errors.New("session: first placement unavailable")
 	}
-	existing, err := c.load(first.SessionID)
+	existing, err := c.load(first.ExecutionID)
 	if err == nil {
 		if !SameLaunch(*existing.Operations[0].Launch, first) || existing.Session != session {
 			return existing, errors.New("session: first visit conflicts with retained execution")
@@ -49,7 +49,7 @@ func (c *Coordinator) Create(first Launch, input []byte, session string) (Record
 	if err = beforeDeadline(first); err != nil {
 		return Record{}, err
 	}
-	r := Record{Version: journalVersion, ID: first.SessionID, Session: session, Harness: first.Harness,
+	r := Record{Version: journalVersion, ID: first.ExecutionID, Session: session, Harness: first.Harness,
 		ThreadID: first.ThreadID, InstructionDigest: first.InstructionDigest,
 		IncludeIgnored: append([]string(nil), first.IncludeIgnored...), Deadline: first.Deadline,
 		Ceiling: cloneAllowances(first.Allowances), Remaining: cloneAllowances(first.Allowances),
@@ -276,7 +276,7 @@ func (c *Coordinator) prepareDestination(ctx context.Context, r Record, index in
 			if !r.hasCheckpoint() {
 				return r, errors.New("session: execution has no checkpoint to move")
 			}
-			launch := Launch{Harness: r.Harness, SessionID: r.ID, OperationID: op.ID, AllocationID: uuid.NewString(), Epoch: r.Epoch + 1, Placement: op.Destination, ThreadID: r.ThreadID, InstructionDigest: r.InstructionDigest, IncludeIgnored: append([]string(nil), r.IncludeIgnored...), Deadline: r.Deadline, Allowances: cloneAllowances(r.Remaining), CheckpointDigest: r.Checkpoint.Metadata.SHA256}
+			launch := Launch{Harness: r.Harness, ExecutionID: r.ID, OperationID: op.ID, AllocationID: uuid.NewString(), Epoch: r.Epoch + 1, Placement: op.Destination, ThreadID: r.ThreadID, InstructionDigest: r.InstructionDigest, IncludeIgnored: append([]string(nil), r.IncludeIgnored...), Deadline: r.Deadline, Allowances: cloneAllowances(r.Remaining), CheckpointDigest: r.Checkpoint.Metadata.SHA256}
 			op.Launch = &launch
 			if err := c.save(r); err != nil {
 				return r, err

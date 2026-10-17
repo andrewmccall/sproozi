@@ -58,10 +58,10 @@ type catalogOperation struct {
 
 func checkCatalogOperation(r localSession, operation string, intent catalogOperation) error {
 	if !validID(operation) || operation == r.Operation {
-		return errors.New("home: distinct product operation UUID required")
+		return errors.New("home: distinct session operation UUID required")
 	}
 	if previous, ok := r.Operations[operation]; ok && previous != intent {
-		return errors.New("home: product operation belongs to another execution or intent")
+		return errors.New("home: session operation belongs to another execution or intent")
 	}
 	return nil
 }
@@ -71,7 +71,7 @@ func (s *Service) bindCatalogOperation(r *localSession, operation string, intent
 		return err
 	}
 	if _, exists := r.Operations[operation]; !exists && len(r.Operations) >= 1024 {
-		return errors.New("home: product operation retention limit reached")
+		return errors.New("home: session operation retention limit reached")
 	}
 	if r.Operations == nil {
 		r.Operations = map[string]catalogOperation{}
@@ -80,11 +80,11 @@ func (s *Service) bindCatalogOperation(r *localSession, operation string, intent
 	return s.saveCatalog(*r)
 }
 
-func (s *Service) bindProductOperation(product, operation, action, execution, destination string) error {
-	if product == "" {
+func (s *Service) bindSessionOperation(sessionID, operation, action, execution, destination string) error {
+	if sessionID == "" {
 		return nil
 	}
-	r, err := s.readCatalog(product)
+	r, err := s.readCatalog(sessionID)
 	if err != nil {
 		return err
 	}
@@ -102,7 +102,7 @@ func (s *Service) catalogDir() (string, error) {
 func (s *Service) readCatalog(id string) (localSession, error) {
 	var r localSession
 	if !validID(id) {
-		return r, errors.New("home: canonical product session UUID required")
+		return r, errors.New("home: canonical session UUID required")
 	}
 	dir, err := s.catalogDir()
 	if err != nil {
@@ -132,12 +132,12 @@ func (s *Service) readCatalog(id string) (localSession, error) {
 		}
 	}
 	if len(r.Operations) > 1024 {
-		return r, errors.New("home: invalid retained product operations")
+		return r, errors.New("home: invalid retained session operations")
 	}
 	for operation, intent := range r.Operations {
 		if !validID(operation) || (intent.Execution != "" || intent.Action != ActionStop) && !slices.Contains(r.Executions, intent.Execution) ||
 			(intent.Action != ActionResume && intent.Action != ActionStop && intent.Action != ActionMove && intent.Action != ActionCancel) {
-			return r, errors.New("home: invalid retained product operation binding")
+			return r, errors.New("home: invalid retained session operation binding")
 		}
 	}
 	return r, nil
@@ -404,7 +404,7 @@ func (s *Service) Resume(ctx context.Context, id, operation string) (Status, err
 	if err = checkpoint.ValidateContinuity(data, s.config.Local.Harness, s.config.Local.InstructionDigest, s.config.Local.MaxCheckpointBytes); err != nil {
 		return Status{}, err
 	}
-	first := session.Launch{Harness: s.config.Local.Harness, SessionID: uuid.NewString(), OperationID: operation,
+	first := session.Launch{Harness: s.config.Local.Harness, ExecutionID: uuid.NewString(), OperationID: operation,
 		AllocationID: uuid.NewString(), Epoch: 1, Placement: s.config.Local.Name,
 		ThreadID: r.Committed.Launch.ThreadID, InstructionDigest: s.config.Local.InstructionDigest,
 		IncludeIgnored: slices.Clone(r.Committed.Launch.IncludeIgnored), Deadline: time.Now().Add(s.duration).UTC(),
@@ -453,7 +453,7 @@ func (s *Service) catalogStatus(r localSession) (Status, error) {
 		ownership = "home"
 	}
 	return Status{Association: r.Original.Association, CheckpointInfo: info,
-		ID: r.ID, Ownership: ownership, ExecutionID: r.Committed.Launch.SessionID,
+		ID: r.ID, Ownership: ownership, ExecutionID: r.Committed.Launch.ExecutionID,
 		AllocationID: r.Committed.Launch.AllocationID, Incarnation: &r.Committed.Incarnation,
 		Placement: r.Committed.Launch.Placement, Phase: stage, Harness: r.Committed.Launch.Harness,
 		InitialStage: stage, ThreadID: r.Committed.Launch.ThreadID, Deadline: r.Committed.Launch.Deadline}, nil
@@ -490,15 +490,17 @@ func (s *Service) resolveSession(id string) (string, string, error) {
 	return r.Current, id, nil
 }
 
-func (s *Service) lockProductExecution(id string) (string, string, func(), error) {
-	execution, product, err := s.resolveSession(id)
+// lockSessionExecution resolves id like resolveSession and, for a catalogued
+// session, holds its lock while the execution is still its current writer.
+func (s *Service) lockSessionExecution(id string) (string, string, func(), error) {
+	execution, sessionID, err := s.resolveSession(id)
 	if err != nil {
 		return "", "", nil, err
 	}
-	if product == "" {
-		return execution, product, func() {}, nil
+	if sessionID == "" {
+		return execution, sessionID, func() {}, nil
 	}
-	unlock, err := s.lockSession(product)
+	unlock, err := s.lockSession(sessionID)
 	if err != nil {
 		return "", "", nil, err
 	}
@@ -510,7 +512,7 @@ func (s *Service) lockProductExecution(id string) (string, string, func(), error
 		}
 		return "", "", nil, err
 	}
-	return execution, product, unlock, nil
+	return execution, sessionID, unlock, nil
 }
 
 func (s *Service) Status(id string) (Status, error) {
@@ -529,44 +531,36 @@ func (s *Service) Status(id string) (Status, error) {
 }
 
 func (s *Service) Move(ctx context.Context, id, operation, destination string) (Status, error) {
-	execution, product, unlock, err := s.lockProductExecution(id)
+	execution, sessionID, unlock, err := s.lockSessionExecution(id)
 	if err != nil {
 		return Status{}, err
 	}
 	defer unlock()
-	if err = s.bindProductOperation(product, operation, ActionMove, execution, destination); err != nil {
+	if err = s.bindSessionOperation(sessionID, operation, ActionMove, execution, destination); err != nil {
 		return Status{}, err
 	}
-	status, err := s.moveExecution(ctx, execution, operation, destination)
-	if product != "" {
-		status.ID = product
-	}
-	return status, err
+	return s.moveExecution(ctx, execution, operation, destination)
 }
 
 func (s *Service) Recover(ctx context.Context, id string) (Status, error) {
-	execution, product, unlock, err := s.lockProductExecution(id)
+	execution, _, unlock, err := s.lockSessionExecution(id)
 	if err != nil {
 		return Status{}, err
 	}
 	defer unlock()
-	status, err := s.recoverExecution(ctx, execution)
-	if product != "" {
-		status.ID = product
-	}
-	return status, err
+	return s.recoverExecution(ctx, execution)
 }
 
 func (s *Service) Cancel(ctx context.Context, id, operation string) (Status, error) {
-	execution, product, err := s.resolveSession(id)
+	execution, sessionID, err := s.resolveSession(id)
 	if err != nil {
 		return Status{}, err
 	}
 	if !validID(operation) {
 		return Status{}, errors.New("home: cancellation operation UUID required")
 	}
-	if product != "" {
-		r, readErr := s.readCatalog(product)
+	if sessionID != "" {
+		r, readErr := s.readCatalog(sessionID)
 		if readErr != nil {
 			return Status{}, readErr
 		}
@@ -577,10 +571,10 @@ func (s *Service) Cancel(ctx context.Context, id, operation string) (Status, err
 	// The coordinator interrupts graceful work on the execution, including a
 	// blocked resume, before admit waits on the durable session's lock.
 	admit := func() (func(), error) {
-		if product == "" {
+		if sessionID == "" {
 			return func() {}, nil
 		}
-		unlock, lockErr := s.lockSession(product)
+		unlock, lockErr := s.lockSession(sessionID)
 		if lockErr != nil {
 			return nil, lockErr
 		}
@@ -589,7 +583,7 @@ func (s *Service) Cancel(ctx context.Context, id, operation string) (Status, err
 			unlock()
 			return nil, errors.New("home: cancellation target is no longer the current writer")
 		}
-		if bindErr := s.bindProductOperation(product, operation, ActionCancel, execution, ""); bindErr != nil {
+		if bindErr := s.bindSessionOperation(sessionID, operation, ActionCancel, execution, ""); bindErr != nil {
 			unlock()
 			return nil, bindErr
 		}

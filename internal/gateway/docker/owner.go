@@ -124,7 +124,7 @@ func (o *Owner) validateIntent(launch session.Launch, instance session.Incarnati
 	if err := workspace.ValidateIgnoredPaths(launch.IncludeIgnored); err != nil {
 		return err
 	}
-	for _, name := range []string{launch.AllocationID, launch.SessionID, launch.OperationID, launch.Placement} {
+	for _, name := range []string{launch.AllocationID, launch.ExecutionID, launch.OperationID, launch.Placement} {
 		if !identifier.MatchString(name) {
 			return errors.New("docker gateway: invalid launch name")
 		}

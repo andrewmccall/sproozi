@@ -10,7 +10,7 @@ import (
 // real active record and introduces one contradiction that save and load reject.
 func TestRecordRejectsPhaseThatContradictsItsStructure(t *testing.T) {
 	c, _, _, _, start := setup(t)
-	active, err := c.Move(t.Context(), start.Source.SessionID, uuid.NewString(), testRemote)
+	active, err := c.Move(t.Context(), start.Source.ExecutionID, uuid.NewString(), testRemote)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -145,7 +145,7 @@ func (p *Placement) lockOperation(l session.Launch) (func(), error) {
 	return func() { unlock(); p.mu.RUnlock() }, nil
 }
 func operationKey(l session.Launch) string {
-	return fmt.Sprintf("%x", sha256.Sum256([]byte(l.SessionID+"\x00"+l.OperationID)))
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(l.ExecutionID+"\x00"+l.OperationID)))
 }
 func (p *Placement) read(name string, limit int64) ([]byte, error) {
 	path := filepath.Join(p.dir, name)

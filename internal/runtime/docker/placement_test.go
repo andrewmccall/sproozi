@@ -386,7 +386,7 @@ func fixtureLaunch(t *testing.T, data []byte) session.Launch {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return session.Launch{Harness: harness.NativeCodex, SessionID: uuid.NewString(), OperationID: uuid.NewString(), AllocationID: uuid.NewString(), Epoch: 1, Placement: localVolumeDriver, ThreadID: fixtureThread, InstructionDigest: fixtureConfig().InstructionDigest, Deadline: time.Now().UTC().Add(time.Minute), Allowances: map[string]session.Allowance{modelFixtureCapability: {Units: session.Limit{Bounded: true, Value: 100}, CostMicros: session.Limit{Bounded: true, Value: 1000}}}, CheckpointDigest: meta.SHA256}
+	return session.Launch{Harness: harness.NativeCodex, ExecutionID: uuid.NewString(), OperationID: uuid.NewString(), AllocationID: uuid.NewString(), Epoch: 1, Placement: localVolumeDriver, ThreadID: fixtureThread, InstructionDigest: fixtureConfig().InstructionDigest, Deadline: time.Now().UTC().Add(time.Minute), Allowances: map[string]session.Allowance{modelFixtureCapability: {Units: session.Limit{Bounded: true, Value: 100}, CostMicros: session.Limit{Bounded: true, Value: 1000}}}, CheckpointDigest: meta.SHA256}
 }
 func openFixture(t *testing.T, dir string, f *fakeDocker, a *fakeAuthority) *Placement {
 	t.Helper()

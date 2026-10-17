@@ -38,8 +38,10 @@ type Allowance struct {
 // CheckpointDigest: the placement observes the genuine native thread during the
 // visit and reports it in Stopped.ThreadID. No layer rewrites a Launch.
 type Launch struct {
-	Harness           harness.NativeKind   `json:"harness"`
-	SessionID         string               `json:"sessionId"`
+	Harness harness.NativeKind `json:"harness"`
+	// ExecutionID is the public executionId. Its wire name predates the split
+	// between durable sessions and their executions.
+	ExecutionID       string               `json:"sessionId"`
 	OperationID       string               `json:"operationId"`
 	AllocationID      string               `json:"allocationId"`
 	Epoch             uint64               `json:"epoch"`
@@ -216,8 +218,9 @@ func (o Operation) done() bool { return o.Stage == stageComplete || o.Stage == s
 // owns the execution; it is empty when the execution is the session itself.
 // PendingOperation names the one unfinished operation, always the last one.
 type Record struct {
-	Harness           harness.NativeKind   `json:"harness"`
-	Version           int                  `json:"version"`
+	Harness harness.NativeKind `json:"harness"`
+	Version int                `json:"version"`
+	// ID is the public executionId.
 	ID                string               `json:"id"`
 	Session           string               `json:"session,omitempty"`
 	ThreadID          string               `json:"threadId,omitempty"`

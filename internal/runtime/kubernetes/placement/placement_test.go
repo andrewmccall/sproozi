@@ -562,7 +562,7 @@ func setupKind(t *testing.T, kind harness.NativeKind) (*Placement, *admissionCli
 	data, meta := fixtureArtifactKind(t, kind)
 	executor := &protocolExecutor{kube: kube, data: data, meta: meta, state: harness.NativePrepared}
 	p.exec = executor
-	l := session.Launch{Harness: kind, SessionID: uuid.NewString(), AllocationID: uuid.NewString(), OperationID: uuid.NewString(), ThreadID: fixtureThread, Epoch: 2, Placement: "remote", InstructionDigest: p.config.InstructionDigest, Deadline: time.Now().Add(30 * time.Minute).UTC(), Allowances: a, CheckpointDigest: meta.SHA256}
+	l := session.Launch{Harness: kind, ExecutionID: uuid.NewString(), AllocationID: uuid.NewString(), OperationID: uuid.NewString(), ThreadID: fixtureThread, Epoch: 2, Placement: "remote", InstructionDigest: p.config.InstructionDigest, Deadline: time.Now().Add(30 * time.Minute).UTC(), Allowances: a, CheckpointDigest: meta.SHA256}
 	return p, kube, executor, l, data
 }
 

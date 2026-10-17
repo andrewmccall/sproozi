@@ -54,7 +54,7 @@ func validateLaunch(l Launch) error {
 	// Only a first visit from a Git workspace lacks a thread, and it then has
 	// no checkpoint either; every other launch names both.
 	fresh := l.ThreadID == "" && l.CheckpointDigest == ""
-	if l.Harness.Validate() != nil || !validUUID(l.SessionID) || !validUUID(l.OperationID) || !validUUID(l.AllocationID) || !fresh && (!validUUID(l.ThreadID) || !validDigest(l.CheckpointDigest)) || !validName(l.Placement) || l.Epoch == 0 || !validDigest(l.InstructionDigest) || l.Deadline.IsZero() {
+	if l.Harness.Validate() != nil || !validUUID(l.ExecutionID) || !validUUID(l.OperationID) || !validUUID(l.AllocationID) || !fresh && (!validUUID(l.ThreadID) || !validDigest(l.CheckpointDigest)) || !validName(l.Placement) || l.Epoch == 0 || !validDigest(l.InstructionDigest) || l.Deadline.IsZero() {
 		return errors.New("session: invalid launch identity")
 	}
 	if err := workspace.ValidateIgnoredPaths(l.IncludeIgnored); err != nil {
@@ -158,7 +158,7 @@ func stoppedThread(s Stopped) string { return cmp.Or(s.ThreadID, s.Launch.Thread
 // the first visit of an execution started from a workspace lacks the thread.
 func launchBelongs(r Record, l Launch) bool {
 	thread := l.ThreadID == r.ThreadID || l.ThreadID == "" && l.Epoch == 1 && r.Workspace != ""
-	return thread && l.Harness == r.Harness && l.SessionID == r.ID && l.InstructionDigest == r.InstructionDigest && l.Deadline.Equal(r.Deadline) && slices.Equal(l.IncludeIgnored, r.IncludeIgnored)
+	return thread && l.Harness == r.Harness && l.ExecutionID == r.ID && l.InstructionDigest == r.InstructionDigest && l.Deadline.Equal(r.Deadline) && slices.Equal(l.IncludeIgnored, r.IncludeIgnored)
 }
 
 func (r Record) hasCheckpoint() bool { return r.Checkpoint.Path != "" }

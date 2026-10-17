@@ -152,7 +152,7 @@ func artifactKind(t *testing.T, kind harness.NativeKind) ([]byte, string) {
 	return data, meta.SHA256
 }
 func launch(digest string) session.Launch {
-	return session.Launch{Harness: harness.NativeCodex, SessionID: uuid.NewString(), OperationID: uuid.NewString(), AllocationID: uuid.NewString(), ThreadID: testThread, Epoch: 2, Placement: "remote", InstructionDigest: strings.Repeat("a", 64), CheckpointDigest: digest, Deadline: time.Now().Add(30 * time.Minute).UTC(), Allowances: map[string]session.Allowance{testCapability: {Units: session.Limit{Bounded: true, Value: 20}, CostMicros: session.Limit{Bounded: true, Value: 100}}}}
+	return session.Launch{Harness: harness.NativeCodex, ExecutionID: uuid.NewString(), OperationID: uuid.NewString(), AllocationID: uuid.NewString(), ThreadID: testThread, Epoch: 2, Placement: "remote", InstructionDigest: strings.Repeat("a", 64), CheckpointDigest: digest, Deadline: time.Now().Add(30 * time.Minute).UTC(), Allowances: map[string]session.Allowance{testCapability: {Units: session.Limit{Bounded: true, Value: 20}, CostMicros: session.Limit{Bounded: true, Value: 100}}}}
 }
 func tokenFile(t *testing.T) string {
 	t.Helper()

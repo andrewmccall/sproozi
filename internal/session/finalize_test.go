@@ -8,7 +8,7 @@ import (
 
 func TestFinalizeRecoversStopWithoutPreparingDestination(t *testing.T) {
 	c, _, local, remote, start := setup(t)
-	id := start.Source.SessionID
+	id := start.Source.ExecutionID
 	if _, err := c.Move(t.Context(), id, uuid.NewString(), testRemote); err != nil {
 		t.Fatal(err)
 	}
@@ -37,11 +37,11 @@ func TestFinalizeRecoversStopWithoutPreparingDestination(t *testing.T) {
 
 func TestFinalizeMissingAccountingRetainsAllocation(t *testing.T) {
 	c, _, _, remote, start := setup(t)
-	if _, err := c.Move(t.Context(), start.Source.SessionID, uuid.NewString(), testRemote); err != nil {
+	if _, err := c.Move(t.Context(), start.Source.ExecutionID, uuid.NewString(), testRemote); err != nil {
 		t.Fatal(err)
 	}
 	remote.missingUsage = true
-	r, err := c.Finalize(t.Context(), start.Source.SessionID, uuid.NewString())
+	r, err := c.Finalize(t.Context(), start.Source.ExecutionID, uuid.NewString())
 	if err == nil || r.Phase != PhaseUnknownUsage || r.Active == nil || r.Remaining[testCapability].Units.Value != 18 {
 		t.Fatalf("unknown accounting refunded capacity: %+v %v", r, err)
 	}

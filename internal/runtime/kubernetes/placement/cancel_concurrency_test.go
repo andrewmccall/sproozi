@@ -17,7 +17,7 @@ import (
 func TestAbortIndependentAllocationWhileAnotherStopIsHeld(t *testing.T) {
 	p, _, _, first, data := setup(t)
 	second := first
-	second.SessionID, second.OperationID, second.AllocationID = uuid.NewString(), uuid.NewString(), uuid.NewString()
+	second.ExecutionID, second.OperationID, second.AllocationID = uuid.NewString(), uuid.NewString(), uuid.NewString()
 	var firstInc, secondInc session.Incarnation
 	for index, l := range []session.Launch{first, second} {
 		i, err := p.Prepare(t.Context(), l, data)

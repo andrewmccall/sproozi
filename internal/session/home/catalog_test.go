@@ -49,7 +49,7 @@ func importedFixture(t *testing.T) (*Service, *placementFixture, *workSourceFixt
 	t.Helper()
 	s, local, _, _ := testService(t)
 	id, operation := uuid.NewString(), uuid.NewString()
-	launch := session.Launch{Harness: s.config.Local.Harness, SessionID: uuid.NewString(),
+	launch := session.Launch{Harness: s.config.Local.Harness, ExecutionID: uuid.NewString(),
 		OperationID: uuid.NewString(), AllocationID: uuid.NewString(), Epoch: 1, Placement: testRemote,
 		ThreadID: testNativeUUID, InstructionDigest: s.config.Local.InstructionDigest,
 		Deadline:   time.Now().Add(-time.Hour).UTC(),
@@ -110,7 +110,7 @@ func assertFreshResume(t *testing.T, s *Service, local *placementFixture, source
 	}
 	listed, err := s.Sessions(work.SessionQuery{})
 	if err != nil || len(listed) != 1 || listed[0].ID != id || listed[0].ExecutionID != status.ExecutionID || listed[0].Session != nil {
-		t.Fatalf("product catalog duplicated internal execution: %+v %v", listed, err)
+		t.Fatalf("session catalogue duplicated internal execution: %+v %v", listed, err)
 	}
 	assertCompletedResumeCycle(t, s, local, source, status, before)
 }
@@ -121,7 +121,7 @@ func assertCompletedResumeCycle(t *testing.T, s *Service, local *placementFixtur
 	stopOperation := uuid.NewString()
 	stopped, err := s.Stop(t.Context(), id, stopOperation)
 	if err != nil || stopped.ID != id || stopped.ExecutionID != status.ExecutionID || stopped.AllocationID != status.AllocationID || stopped.Incarnation == nil || stopped.InitialStage != stageRetained || stopped.ThreadID != testNativeUUID {
-		t.Fatalf("stopped product checkpoint: %+v %v", stopped, err)
+		t.Fatalf("stopped session checkpoint: %+v %v", stopped, err)
 	}
 	next, err := s.Resume(t.Context(), id, uuid.NewString())
 	if err != nil || next.ID != id || next.ExecutionID == status.ExecutionID || local.activations != 2 {

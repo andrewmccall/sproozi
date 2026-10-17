@@ -132,13 +132,13 @@ func (p *Placement) Close() error {
 }
 
 func (p *Placement) lockOperation(l session.Launch) (func(), error) {
-	if l.Harness != p.config.Harness || !idValid(l.SessionID) || !idValid(l.AllocationID) {
+	if l.Harness != p.config.Harness || !idValid(l.ExecutionID) || !idValid(l.AllocationID) {
 		return nil, &profile.Rejection{Code: profile.CodeInvalid}
 	}
 	p.mu.RLock()
 	// The epoch replay record is shared by allocations in one logical session;
 	// allocation files must also remain exclusive under conflicting session IDs.
-	unlockSession := p.journals.Lock("session/" + l.SessionID)
+	unlockSession := p.journals.Lock("session/" + l.ExecutionID)
 	unlockAllocation := p.journals.Lock("allocation/" + l.AllocationID)
 	unlock := func() { unlockAllocation(); unlockSession(); p.mu.RUnlock() }
 	if p.lock == nil {
@@ -227,7 +227,7 @@ func (p *Placement) ceilings(l session.Launch, policy api.AgentPolicySpec) (map[
 	return ceilings, nil
 }
 func (p *Placement) registration(l session.Launch, ceilings map[api.CapabilityKind]api.EndpointBudget) registry.Registration {
-	return registry.Registration{Harness: p.config.Harness, Principal: p.config.Principal, SessionID: l.SessionID, Epoch: l.Epoch, OperationID: l.OperationID, NativeUUID: l.ThreadID, InstructionDigest: l.InstructionDigest, OriginalDeadline: l.Deadline.UTC(), TemplateName: p.config.TemplateName, Ceilings: ceilings, Task: l.Task, CheckpointDigest: l.CheckpointDigest, IncludeIgnored: append([]string(nil), l.IncludeIgnored...), IntendedRunName: runName(l)}
+	return registry.Registration{Harness: p.config.Harness, Principal: p.config.Principal, SessionID: l.ExecutionID, Epoch: l.Epoch, OperationID: l.OperationID, NativeUUID: l.ThreadID, InstructionDigest: l.InstructionDigest, OriginalDeadline: l.Deadline.UTC(), TemplateName: p.config.TemplateName, Ceilings: ceilings, Task: l.Task, CheckpointDigest: l.CheckpointDigest, IncludeIgnored: append([]string(nil), l.IncludeIgnored...), IntendedRunName: runName(l)}
 }
 
 func (p *Placement) Prepare(ctx context.Context, l session.Launch, data []byte) (session.Incarnation, error) {
@@ -432,7 +432,7 @@ func (p *Placement) validateInput(l session.Launch, initial bool) error {
 	if workspace.ValidateIgnoredPaths(l.IncludeIgnored) != nil {
 		return &profile.Rejection{Code: profile.CodeDenied}
 	}
-	if l.Harness != p.config.Harness || !idValid(l.SessionID) || !idValid(l.OperationID) || !idValid(l.AllocationID) || (!initial && !idValid(l.ThreadID) || initial && l.ThreadID != "") || l.Epoch == 0 || l.Placement != p.config.Name || (!initial && !digestValid(l.CheckpointDigest) || initial && l.CheckpointDigest != "") || l.InstructionDigest != p.config.InstructionDigest || len(l.Allowances) == 0 || len(l.Allowances) > 32 {
+	if l.Harness != p.config.Harness || !idValid(l.ExecutionID) || !idValid(l.OperationID) || !idValid(l.AllocationID) || (!initial && !idValid(l.ThreadID) || initial && l.ThreadID != "") || l.Epoch == 0 || l.Placement != p.config.Name || (!initial && !digestValid(l.CheckpointDigest) || initial && l.CheckpointDigest != "") || l.InstructionDigest != p.config.InstructionDigest || len(l.Allowances) == 0 || len(l.Allowances) > 32 {
 		return &profile.Rejection{Code: profile.CodeDenied}
 	}
 	if len(l.Task) > 32<<10 || strings.ContainsRune(l.Task, 0) || l.Task != "" && (strings.TrimSpace(l.Task) == "" || l.Harness != harness.NativeCodex) {

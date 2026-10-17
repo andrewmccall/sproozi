@@ -211,7 +211,7 @@ func Open(c Config) (*Owner, error) {
 			if !project.Member(c.Projects, r.Association.Project, c.Principal) &&
 				r.Phase != phaseRetained && r.Phase != phaseExporting && r.Phase != phaseHomeOwned && r.Phase != phaseCancelled {
 				if r.CancelOperation == "" {
-					r.CancelOperation = uuid.NewSHA1(uuid.NameSpaceOID, []byte(r.Launch.SessionID+"/project-revoked")).String()
+					r.CancelOperation = uuid.NewSHA1(uuid.NameSpaceOID, []byte(r.Launch.ExecutionID+"/project-revoked")).String()
 				}
 				r.Phase = phaseCancelling
 				if err = o.save(r); err != nil {
@@ -220,7 +220,7 @@ func Open(c Config) (*Owner, error) {
 				}
 			}
 			if r.Phase == phasePending || r.Phase == phasePreparing || r.Phase == phaseActive || r.Phase == phaseFinalizing || r.Phase == phaseCancelling {
-				o.dispatch(r.Launch.SessionID)
+				o.dispatch(r.Launch.ExecutionID)
 			}
 		}
 	}
@@ -259,7 +259,7 @@ func (o *Owner) read(id string) (record, error) {
 		return r, err
 	}
 	intent, _ := json.Marshal(r.Intent)
-	if r.Version != 1 || o.sessionID(r.Intent.RequestID) != id || r.Launch.SessionID != id || r.IntentDigest != hash(intent) || r.Launch.Harness != o.config.Harness || r.Launch.Placement != o.config.Placement || r.Launch.InstructionDigest != o.config.InstructionDigest || !canonicalID(r.Launch.OperationID) || !canonicalID(r.Launch.AllocationID) {
+	if r.Version != 1 || o.sessionID(r.Intent.RequestID) != id || r.Launch.ExecutionID != id || r.IntentDigest != hash(intent) || r.Launch.Harness != o.config.Harness || r.Launch.Placement != o.config.Placement || r.Launch.InstructionDigest != o.config.InstructionDigest || !canonicalID(r.Launch.OperationID) || !canonicalID(r.Launch.AllocationID) {
 		return r, errors.New("work: retained owner binding changed")
 	}
 	if r.Association.Template != "" && r.Association.Template != o.config.TemplateName ||
@@ -296,7 +296,7 @@ func atomic(dir, name string, b []byte) error {
 func (o *Owner) save(r record) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	current, err := o.read(r.Launch.SessionID)
+	current, err := o.read(r.Launch.ExecutionID)
 	if err == nil && current.CancelOperation != "" && r.CancelOperation == "" {
 		return errors.New("work: cancellation wins")
 	}
@@ -307,7 +307,7 @@ func (o *Owner) save(r record) error {
 	if err != nil {
 		return err
 	}
-	return atomic(o.config.Directory, r.Launch.SessionID+".json", b)
+	return atomic(o.config.Directory, r.Launch.ExecutionID+".json", b)
 }
 func (o *Owner) Submit(ctx context.Context, q Submit) (View, error) {
 	if ctx.Err() != nil {
@@ -370,7 +370,7 @@ func (o *Owner) Submit(ctx context.Context, q Submit) (View, error) {
 		return View{}, &profile.Rejection{Code: profile.CodeUnavailable}
 	}
 	r = record{Version: 1, Intent: q, IntentDigest: digest, Association: association, RepositorySource: &repository,
-		Phase: phasePending, Launch: session.Launch{Harness: q.Harness, SessionID: id, OperationID: q.RequestID,
+		Phase: phasePending, Launch: session.Launch{Harness: q.Harness, ExecutionID: id, OperationID: q.RequestID,
 			AllocationID: uuid.NewString(), Epoch: 1, Placement: q.Executor, InstructionDigest: o.config.InstructionDigest,
 			Deadline: time.Now().Add(o.config.MaxDuration).UTC(), Allowances: allowances, Task: q.Task}}
 	if err = o.save(r); err != nil {
@@ -384,7 +384,7 @@ func view(r record) View {
 	if association.Repository == "" {
 		association.Repository = r.Intent.Repository
 	}
-	v := View{Association: association, ID: r.Launch.SessionID, ExecutionID: r.Launch.SessionID,
+	v := View{Association: association, ID: r.Launch.ExecutionID, ExecutionID: r.Launch.ExecutionID,
 		AllocationID: r.Launch.AllocationID, Placement: r.Launch.Placement, Incarnation: r.Incarnation,
 		Harness: r.Launch.Harness, Phase: r.Phase, Deadline: r.Launch.Deadline,
 		Result: r.Result, ResultTruncated: r.ResultTruncated, Problem: r.Problem}
@@ -485,7 +485,7 @@ func (o *Owner) drive(ctx context.Context, id string) {
 	}
 }
 func (o *Owner) input(ctx context.Context, r *record) ([]byte, error) {
-	p := o.path(r.Launch.SessionID, ".input")
+	p := o.path(r.Launch.ExecutionID, ".input")
 	if r.InputDigest != "" {
 		if e := private(p, false); e != nil {
 			return nil, e
@@ -548,7 +548,7 @@ func (o *Owner) input(ctx context.Context, r *record) ([]byte, error) {
 }
 
 func (o *Owner) retainInput(r *record, b []byte) ([]byte, error) {
-	if err := atomic(o.config.Directory, r.Launch.SessionID+".input", b); err != nil {
+	if err := atomic(o.config.Directory, r.Launch.ExecutionID+".input", b); err != nil {
 		return nil, err
 	}
 	r.InputDigest = hash(b)
@@ -613,10 +613,10 @@ func (o *Owner) execute(ctx context.Context, r *record) error {
 			return errors.New("work: stopped launch intent changed")
 		}
 		stopped = exportedStop(stopped)
-		if e = ValidateExport(Export{ID: r.Launch.SessionID, Harness: r.Launch.Harness, Stopped: stopped, Checkpoint: stopped.Checkpoint}, o.config.MaxCheckpointBytes); e != nil {
+		if e = ValidateExport(Export{ID: r.Launch.ExecutionID, Harness: r.Launch.Harness, Stopped: stopped, Checkpoint: stopped.Checkpoint}, o.config.MaxCheckpointBytes); e != nil {
 			return e
 		}
-		if e = atomic(o.config.Directory, r.Launch.SessionID+".checkpoint", stopped.Checkpoint); e != nil {
+		if e = atomic(o.config.Directory, r.Launch.ExecutionID+".checkpoint", stopped.Checkpoint); e != nil {
 			return e
 		}
 		info, e := checkpoint.Inspect(stopped.Checkpoint, o.config.MaxCheckpointBytes)
@@ -654,7 +654,7 @@ func exportedStop(s session.Stopped) session.Stopped {
 // ValidateExport keeps transcript validation separate from trusted stop/seal evidence.
 func ValidateExport(e Export, max int64) error {
 	s := e.Stopped
-	if !canonicalID(e.ID) || s.Launch.SessionID != e.ID || e.Harness != s.Launch.Harness || !s.ActualStopped || s.Receipt == nil || s.Receipt.Incarnation != s.Incarnation || s.Receipt.Launch.ThreadID != s.Launch.ThreadID || len(s.Receipt.Usage) != len(s.Launch.Allowances) {
+	if !canonicalID(e.ID) || s.Launch.ExecutionID != e.ID || e.Harness != s.Launch.Harness || !s.ActualStopped || s.Receipt == nil || s.Receipt.Incarnation != s.Incarnation || s.Receipt.Launch.ThreadID != s.Launch.ThreadID || len(s.Receipt.Usage) != len(s.Launch.Allowances) {
 		return &profile.Rejection{Code: profile.CodeUnavailable}
 	}
 	for cap, a := range s.Launch.Allowances {
@@ -848,7 +848,7 @@ func (o *Owner) abort(ctx context.Context, r record) {
 	}
 	obs, e := o.config.Backend.Abort(ctx, r.Launch, i)
 	if e != nil && o.config.Log != nil {
-		_, _ = fmt.Fprintf(o.config.Log, "Could not cancel work session %s: %v\n", r.Launch.SessionID, e)
+		_, _ = fmt.Fprintf(o.config.Log, "Could not cancel work session %s: %v\n", r.Launch.ExecutionID, e)
 	}
 	r.Phase = phaseUnknown
 	r.Problem = "Cancellation requires recovery"
