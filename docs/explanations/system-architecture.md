@@ -185,6 +185,14 @@ destination start. If stop or usage remains unknown, the reserved allowance
 stays held and the destination cannot start. Forced cancellation revokes access
 first and does not require a fresh checkpoint.
 
+The home coordinator records each execution from its first visit. `start` and
+`resume` save that visit before any container starts. The coordinator then
+prepares, activates, stops, moves, cancels and recovers every visit the same
+way. A visit started from a Git workspace has no native conversation ID until
+the client creates one. Its first graceful stop records that ID separately,
+because a visit's launch settings never change. See [ADR
+0018](../adr/0018-coordinator-owns-every-visit.md).
+
 [Remote-first tasks](../guides/portable-workflows.md) use a catalogue hosted by
 the profile service. It runs independently of the laptop. After a Codex task
 finishes, it stops the worker, finalizes usage and retains native and Git state.

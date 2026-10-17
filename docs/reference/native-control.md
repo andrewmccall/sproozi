@@ -29,7 +29,7 @@ Once recorded, that ID cannot change. Resume must use the checkpoint's exact ID.
 
 Both placements run the same graceful handoff. They gate new input, then record
 the genuine conversation ID if the launch had none, then wait for the completed
-turn. Gateway access stays open until that point. Revoking access, confirming
+turn. The ID is recorded beside the launch; the launch itself never changes. Gateway access stays open until that point. Revoking access, confirming
 that the writer stopped and finalizing usage remain backend steps.
 
 Malformed, oversized or incompatible replies, including trailing data, leave

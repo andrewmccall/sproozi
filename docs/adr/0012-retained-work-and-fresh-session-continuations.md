@@ -5,6 +5,10 @@ Date: 2026-10-12
 Reconciled: 2026-10-13
 Implementation: retained Codex work and local resume verified; stock Hermes dispatch verified
 
+Superseded in part: [ADR 0018](0018-coordinator-owns-every-visit.md) replaces
+reusing the initial home journal for a resumed execution's first visit. The
+coordinator now owns that visit. Other decisions in this record remain in effect.
+
 ## Problem and constraints
 
 Hermes must start useful native work in Kubernetes, observe its answer, and leave
