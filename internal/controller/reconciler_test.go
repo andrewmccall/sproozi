@@ -243,7 +243,7 @@ func TestReconcilerQueuedRunIgnoresStaleCacheForSlot(t *testing.T) {
 		WithObjects(append(fixtures(), admitted, queued)...).
 		WithStatusSubresource(&sprooziv1alpha1.AgentRun{}).
 		Build()
-	stale := interceptor.NewClient(live.(client.WithWatch), interceptor.Funcs{
+	stale := interceptor.NewClient(live, interceptor.Funcs{
 		List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
 			if err := c.List(ctx, list, opts...); err != nil {
 				return err
