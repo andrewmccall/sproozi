@@ -22,6 +22,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"math/big"
 	"reflect"
 	"strings"
@@ -523,7 +524,16 @@ func TestEnsureSandboxRejectsMismatchedAdditionalContainers(t *testing.T) {
 	}
 }
 
-func TestEnsureSandboxFailsClosedWithoutImmutableCertificateOnlyTrustBundle(t *testing.T) {
+func TestValidateRuntimeRejectsUnsafeTemplate(t *testing.T) {
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(testTrustConfigMap(t)).Build()
+	rt := testRuntime()
+	rt.Spec.PodTemplate.Spec.HostNetwork = true
+	if err := kubernetes.NewPodSandboxClient(c).ValidateRuntime(context.Background(), rt); !errors.Is(err, kubernetes.ErrInvalidRuntime) {
+		t.Fatalf("ValidateRuntime error = %v, want ErrInvalidRuntime", err)
+	}
+}
+
+func TestValidateRuntimeFailsClosedWithoutImmutableCertificateOnlyTrustBundle(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		configMap *corev1.ConfigMap
@@ -546,29 +556,24 @@ func TestEnsureSandboxFailsClosedWithoutImmutableCertificateOnlyTrustBundle(t *t
 				builder = builder.WithObjects(tc.configMap)
 			}
 			c := builder.Build()
-			run := testRunForSandbox("cccccccc-0000-0000-0000-000000000097")
-			_, err := kubernetes.NewPodSandboxClient(c).Ensure(context.Background(), run, testRuntime())
-			if err == nil {
-				t.Fatal("Ensure must reject unavailable, mutable, or non-certificate trust material")
-			}
-			var pod corev1.Pod
-			if getErr := c.Get(context.Background(), client.ObjectKey{Namespace: kubernetes.AgentsNamespace, Name: kubernetes.RunName(run.UID)}, &pod); getErr == nil {
-				t.Fatal("Ensure created a Pod after trust validation failed")
+			err := kubernetes.NewPodSandboxClient(c).ValidateRuntime(context.Background(), testRuntime())
+			if !errors.Is(err, kubernetes.ErrInvalidRuntime) {
+				t.Fatalf("ValidateRuntime error = %v, want ErrInvalidRuntime for unavailable, mutable, or non-certificate trust material", err)
 			}
 		})
 	}
 }
 
-// TestDeleteSandboxNotFoundIsOK verifies Delete on a missing Pod does not error.
+// TestDeleteSandboxNotFoundIsOK verifies DeleteForRun on a missing Pod does not error.
 func TestDeleteSandboxNotFoundIsOK(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).Build()
 	sc := kubernetes.NewPodSandboxClient(c)
-	if err := sc.Delete(context.Background(), "sproozi-nonexistent"); err != nil {
-		t.Errorf("Delete on missing Pod should not error: %v", err)
+	if err := sc.DeleteForRun(context.Background(), "sproozi-nonexistent", "missing-run"); err != nil {
+		t.Errorf("DeleteForRun on missing Pod should not error: %v", err)
 	}
 }
 
-// TestDeleteSandboxDeletes verifies Delete removes the Pod.
+// TestDeleteSandboxDeletes verifies DeleteForRun removes the run's Pod.
 func TestDeleteSandboxDeletes(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(testTrustConfigMap(t)).Build()
 	run := testRunForSandbox("cccccccc-0000-0000-0000-000000000010")
@@ -576,8 +581,8 @@ func TestDeleteSandboxDeletes(t *testing.T) {
 	sc := kubernetes.NewPodSandboxClient(c)
 
 	name, _ := sc.Ensure(context.Background(), run, rt)
-	if err := sc.Delete(context.Background(), name); err != nil {
-		t.Fatalf("Delete error: %v", err)
+	if err := sc.DeleteForRun(context.Background(), name, string(run.UID)); err != nil {
+		t.Fatalf("DeleteForRun error: %v", err)
 	}
 
 	var pod corev1.Pod

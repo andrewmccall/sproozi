@@ -19,6 +19,8 @@ package controller_test
 import (
 	"context"
 	"errors"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -27,6 +29,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	networkingv1 "k8s.io/api/networking/v1"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -69,7 +72,7 @@ func fixtures() []client.Object {
 
 			EphemeralWorkspace: sprooziv1alpha1.EphemeralWorkspaceSpec{SizeLimit: resource.MustParse("2Gi")},
 
-			PodTemplate: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "agent", Image: "ghcr.io/openai/codex@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Resources: corev1.ResourceRequirements{
+			PodTemplate: corev1.PodTemplateSpec{Spec: corev1.PodSpec{AutomountServiceAccountToken: ptr.To(false), Containers: []corev1.Container{{Name: "agent", Image: "ghcr.io/openai/codex@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Resources: corev1.ResourceRequirements{
 				Limits: corev1.ResourceList{
 					corev1.ResourceCPU:    resource.MustParse("1"),
 					corev1.ResourceMemory: resource.MustParse("1Gi"),
@@ -126,7 +129,7 @@ func newRun(name string) *sprooziv1alpha1.AgentRun {
 
 func reconcileRun(t *testing.T, c client.Client, name string) (ctrl.Result, error) {
 	t.Helper()
-	r := &controller.AgentRunReconciler{Client: c, Scheme: newScheme()}
+	r := &controller.AgentRunReconciler{Client: c, SandboxClient: &k8sresources.FakeSandboxClient{}}
 	return r.Reconcile(context.Background(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: name, Namespace: testNS},
 	})
@@ -141,7 +144,6 @@ func newReconcilerWithSandbox(sc k8sresources.SandboxClient, objs ...client.Obje
 		Build()
 	r := &controller.AgentRunReconciler{
 		Client:        c,
-		Scheme:        newScheme(),
 		SandboxClient: sc,
 	}
 	return r, c
@@ -150,7 +152,7 @@ func newReconcilerWithSandbox(sc k8sresources.SandboxClient, objs ...client.Obje
 // driveToRunning runs 3 reconcile cycles to get a run from "" → Queued → Admitted → Running.
 // The sandbox is NOT yet created after this call; the first handleRunning invocation
 // (reconcile 4) is what calls ensureSandbox.
-func driveToRunning(t *testing.T, r *controller.AgentRunReconciler, _ client.Client, name string) {
+func driveToRunning(t *testing.T, r *controller.AgentRunReconciler, name string) {
 	t.Helper()
 	for i := range 3 {
 		if _, err := r.Reconcile(context.Background(), ctrl.Request{
@@ -312,6 +314,49 @@ func TestReconcilerQueuedRunFailsWhenRuntimeMissing(t *testing.T) {
 
 	if phase := getPhase(t, c, "run1"); phase != sprooziv1alpha1.AgentRunPhaseFailed {
 		t.Errorf("phase = %q, want %q", phase, sprooziv1alpha1.AgentRunPhaseFailed)
+	}
+}
+
+// An unlaunchable runtime must fail the run at admission. If it were admitted,
+// every Pod create would fail and the run would hold the single active slot
+// until its execution deadline.
+func TestReconcilerQueuedRunWithInvalidRuntimeFailsWithoutTakingSlot(t *testing.T) {
+	t.Parallel()
+
+	objs := fixtures()
+	broken := objs[0].(*sprooziv1alpha1.AgentRuntime).DeepCopy()
+	broken.Name = "broken"
+	broken.Spec.PodTemplate.Spec.Containers[0].Image = "ghcr.io/openai/codex:latest"
+	brokenTemplate := objs[2].(*sprooziv1alpha1.AgentTemplate).DeepCopy()
+	brokenTemplate.Name = "broken"
+	brokenTemplate.Spec.RuntimeRef.Name = "broken"
+
+	bad := newRun("bad")
+	bad.Spec.TemplateRef.Name = "broken"
+	bad.Status.Phase = sprooziv1alpha1.AgentRunPhaseQueued
+	bad.CreationTimestamp = metav1.NewTime(time.Now().Add(-time.Minute))
+	good := newRun("good")
+	good.Status.Phase = sprooziv1alpha1.AgentRunPhaseQueued
+	good.CreationTimestamp = metav1.NewTime(time.Now())
+
+	r, c := newReconcilerWithSandbox(&k8sresources.FakeSandboxClient{}, append(objs, broken, brokenTemplate, bad, good)...)
+	for _, name := range []string{"bad", "good"} {
+		if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: name, Namespace: testNS}}); err != nil {
+			t.Fatalf("reconcile %s: %v", name, err)
+		}
+	}
+
+	failed := getRun(t, c, "bad")
+	ready := apimeta.FindStatusCondition(failed.Status.Conditions, "Ready")
+	if failed.Status.Phase != sprooziv1alpha1.AgentRunPhaseFailed || ready == nil || ready.Reason != "RuntimeInvalid" ||
+		!strings.Contains(ready.Message, `AgentRuntime broken`) || !strings.Contains(ready.Message, "digest pinned") {
+		t.Fatalf("invalid runtime run = phase %q condition %#v, want Failed/RuntimeInvalid naming the runtime and problem", failed.Status.Phase, ready)
+	}
+	if failed.Status.StartedAt != nil {
+		t.Fatal("invalid runtime run must never be admitted")
+	}
+	if phase := getPhase(t, c, "good"); phase != sprooziv1alpha1.AgentRunPhaseAdmitted {
+		t.Fatalf("valid run phase = %q, want Admitted after the invalid run failed", phase)
 	}
 }
 
@@ -619,7 +664,7 @@ func TestReconcilerSandboxCreatedOnRunning(t *testing.T) {
 	run := newRun("run-sandbox-1")
 	r, c := newReconcilerWithSandbox(sc, append(fixtures(), run)...)
 
-	driveToRunning(t, r, c, "run-sandbox-1")
+	driveToRunning(t, r, "run-sandbox-1")
 
 	// After driveToRunning, we're at Running. Now reconcile once more to trigger
 	// the sandbox creation path in handleRunning.
@@ -633,11 +678,8 @@ func TestReconcilerSandboxCreatedOnRunning(t *testing.T) {
 	if got.Status.Phase != sprooziv1alpha1.AgentRunPhaseRunning {
 		t.Fatalf("expected Running, got %q", got.Status.Phase)
 	}
-	if got.Status.Identity.SandboxName == "" {
-		t.Error("SandboxName must be set after Running")
-	}
-	if len(sc.Ensured) == 0 {
-		t.Error("Ensure must have been called at least once")
+	if got.Status.Identity.SandboxName != k8sresources.RunName(run.UID) {
+		t.Errorf("SandboxName = %q, want the run's sandbox %q", got.Status.Identity.SandboxName, k8sresources.RunName(run.UID))
 	}
 }
 
@@ -651,7 +693,7 @@ func TestReconcilerSandboxSucceededTransitionsToSucceeded(t *testing.T) {
 	run := newRun("run-sandbox-2")
 	r, c := newReconcilerWithSandbox(sc, append(fixtures(), run)...)
 
-	driveToRunning(t, r, c, "run-sandbox-2")
+	driveToRunning(t, r, "run-sandbox-2")
 	// Reconcile while Succeeded
 	if _, err := r.Reconcile(context.Background(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: "run-sandbox-2", Namespace: testNS},
@@ -674,7 +716,7 @@ func TestReconcilerSandboxFailedTransitionsToFailed(t *testing.T) {
 	run := newRun("run-sandbox-3")
 	r, c := newReconcilerWithSandbox(sc, append(fixtures(), run)...)
 
-	driveToRunning(t, r, c, "run-sandbox-3")
+	driveToRunning(t, r, "run-sandbox-3")
 	if _, err := r.Reconcile(context.Background(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: "run-sandbox-3", Namespace: testNS},
 	}); err != nil {
@@ -694,7 +736,7 @@ func TestReconcilerSandboxWithoutCompletionTransitionsToFailed(t *testing.T) {
 	}
 	run := newRun("run-sandbox-no-exit")
 	r, c := newReconcilerWithSandbox(sc, append(fixtures(), run)...)
-	driveToRunning(t, r, c, run.Name)
+	driveToRunning(t, r, run.Name)
 	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: run.Name, Namespace: testNS}}); err != nil {
 		t.Fatalf("reconcile error: %v", err)
 	}
@@ -710,7 +752,7 @@ func TestReconcilerSandboxAbsentTransitionsToFailed(t *testing.T) {
 	run := newRun("run-sandbox-4")
 	r, c := newReconcilerWithSandbox(sc, append(fixtures(), run)...)
 
-	driveToRunning(t, r, c, "run-sandbox-4")
+	driveToRunning(t, r, "run-sandbox-4")
 	// First reconcile of Running: creates sandbox, gets Absent → transitions to Failed
 	if _, err := r.Reconcile(context.Background(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: "run-sandbox-4", Namespace: testNS},
@@ -733,7 +775,7 @@ func TestReconcilerSandboxDeletedOnTerminal(t *testing.T) {
 	run := newRun("run-sandbox-5")
 	r, c := newReconcilerWithSandbox(sc, append(fixtures(), run)...)
 
-	driveToRunning(t, r, c, "run-sandbox-5")
+	driveToRunning(t, r, "run-sandbox-5")
 	// Reconcile: Running → Succeeded (Sandbox succeeded)
 	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: "run-sandbox-5", Namespace: testNS}}); err != nil {
 		t.Fatalf("reconcile error: %v", err)
@@ -743,7 +785,16 @@ func TestReconcilerSandboxDeletedOnTerminal(t *testing.T) {
 		t.Fatalf("reconcile error: %v", err)
 	}
 
-	if len(sc.Deleted) == 0 {
-		t.Error("Delete must have been called at least once for terminal run")
+	got := getRun(t, c, "run-sandbox-5")
+	if got.Status.Phase != sprooziv1alpha1.AgentRunPhaseSucceeded || got.Status.Identity.SandboxName != "" || got.Status.Identity.ServiceAccountName != "" {
+		t.Fatalf("terminal run status = phase %q identity %#v, want Succeeded with identity revoked", got.Status.Phase, got.Status.Identity)
+	}
+	// The ServiceAccount is revoked only after the sandbox is released.
+	var sa corev1.ServiceAccount
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: k8sresources.AgentsNamespace, Name: k8sresources.RunName(run.UID)}, &sa); err == nil {
+		t.Fatal("run ServiceAccount still exists after terminal release")
+	}
+	if want := []string{k8sresources.RunName(run.UID)}; !slices.Equal(sc.Deleted, want) {
+		t.Fatalf("deleted sandboxes = %v, want %v", sc.Deleted, want)
 	}
 }

@@ -78,13 +78,9 @@ type ManagedSandboxClient interface {
 	EnsureManaged(context.Context, *api.AgentRun, *api.AgentRuntime, *registry.Record) (string, error)
 }
 
+// EnsureManaged creates the managed sandbox Pod. rt must already have passed
+// ValidateRuntime.
 func (p *PodSandboxClient) EnsureManaged(ctx context.Context, run *api.AgentRun, rt *api.AgentRuntime, binding *registry.Record) (string, error) {
-	if err := rt.Spec.ValidateRuntimeTemplate(); err != nil {
-		return "", err
-	}
-	if err := validateRuntimeTrustBundle(ctx, p.c, rt); err != nil {
-		return "", err
-	}
 	pod, err := BuildManagedPodSpec(run, rt, binding)
 	if err != nil {
 		return "", err

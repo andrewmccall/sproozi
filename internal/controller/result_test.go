@@ -29,7 +29,7 @@ func TestReconcilerRetainsAnswerWithProcessOutcomeAfterCleanup(t *testing.T) {
 			sc := &k8sresources.FakeSandboxClient{Status: k8sresources.SandboxStatusSucceeded, ExitCode: tc.exit, Result: tc.result}
 			run := newRun("retained-answer")
 			r, c := newReconcilerWithSandbox(sc, append(fixtures(), run)...)
-			driveToRunning(t, r, c, run.Name)
+			driveToRunning(t, r, run.Name)
 			request := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: testNS, Name: run.Name}}
 			if _, err := r.Reconcile(context.Background(), request); err != nil {
 				t.Fatal(err)
@@ -76,7 +76,7 @@ func TestReconcilerCancellationDuringCompletionWinsWithoutAnswer(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	driveToRunning(t, r, c, run.Name)
+	driveToRunning(t, r, run.Name)
 	request := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: testNS, Name: run.Name}}
 	if _, err := r.Reconcile(context.Background(), request); err != nil {
 		t.Fatal(err)
@@ -114,7 +114,7 @@ func TestReconcilerRetriesAtomicTerminalAnswerBeforeCleanup(t *testing.T) {
 		Result: &sprooziv1alpha1.AgentRunResult{Text: "durable answer"}}
 	run := newRun("retry-result-write")
 	r, c := newReconcilerWithSandbox(sc, append(fixtures(), run)...)
-	driveToRunning(t, r, c, run.Name)
+	driveToRunning(t, r, run.Name)
 	r.Client = &failTerminalStatusClient{Client: c, fail: true}
 	request := ctrl.Request{NamespacedName: types.NamespacedName{Namespace: testNS, Name: run.Name}}
 	if _, err := r.Reconcile(context.Background(), request); err == nil {

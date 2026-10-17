@@ -85,7 +85,6 @@ func startAgentRunController(t *testing.T) (client.Client, context.Context) {
 
 	if err := (&controller.AgentRunReconciler{
 		Client:        mgr.GetClient(),
-		Scheme:        mgr.GetScheme(),
 		SandboxClient: k8sresources.NewPodSandboxClient(mgr.GetClient()),
 	}).SetupWithManager(mgr); err != nil {
 		t.Fatalf("SetupWithManager() error = %v", err)

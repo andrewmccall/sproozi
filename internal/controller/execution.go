@@ -106,26 +106,3 @@ func (r *AgentRunReconciler) processSandboxExit(
 	_, err := r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseSucceeded, "ExecutionSucceeded", "")
 	return ctrl.Result{}, err
 }
-
-// revokeSandbox deletes the Sandbox Pod if SandboxName is set.
-// Called at the start of handleTerminal before identity revocation.
-// Safe to call with a nil SandboxClient or empty SandboxName.
-func (r *AgentRunReconciler) revokeSandbox(ctx context.Context, run *sprooziv1alpha1.AgentRun) error {
-	if r.SandboxClient == nil || run.Status.Identity.SandboxName == "" {
-		return nil
-	}
-	return r.SandboxClient.Delete(ctx, run.Status.Identity.SandboxName)
-}
-
-// sandboxPhaseToRunPhase maps an abnormal Sandbox status to the appropriate
-// AgentRunPhase transition. Returns ("", "") if no transition is needed.
-func sandboxPhaseToRunPhase(status k8sresources.SandboxStatus) (sprooziv1alpha1.AgentRunPhase, string) {
-	switch status {
-	case k8sresources.SandboxStatusFailed:
-		return sprooziv1alpha1.AgentRunPhaseFailed, "SandboxFailed"
-	case k8sresources.SandboxStatusAbsent:
-		return sprooziv1alpha1.AgentRunPhaseFailed, "SandboxGone"
-	default:
-		return "", ""
-	}
-}
