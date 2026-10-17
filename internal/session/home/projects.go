@@ -15,11 +15,11 @@ func validateProjectApprovals(c Config) error {
 		return errors.New("home: at most 64 source-qualified project approvals are supported")
 	}
 	seen := map[string]bool{}
+	sources := c.WorkConnections()
 	for _, approval := range c.ProjectApprovals {
 		key := approval.Source + "/" + string(approval.Project)
-		_, remote := c.Remote[approval.Source]
-		_, source := c.WorkSources[approval.Source]
-		if !project.ValidID(approval.Project) || !remote && !source || seen[key] {
+		_, source := sources[approval.Source]
+		if !project.ValidID(approval.Project) || !source || seen[key] {
 			return fmt.Errorf("home: invalid, unconfigured or duplicate project approval %q", key)
 		}
 		seen[key] = true

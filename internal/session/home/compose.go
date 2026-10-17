@@ -363,10 +363,7 @@ func (s *Service) configureRemotes() error {
 }
 
 func (s *Service) configureWorkSources() error {
-	fixed := s.config.WorkSources
-	if len(fixed) == 0 {
-		fixed = s.config.Remote
-	}
+	fixed := s.config.WorkConnections()
 	sources := make(map[string]WorkSource, len(fixed))
 	for name, config := range fixed {
 		if name == "" || len(name) > 128 || config.MaxCheckpointBytes != s.config.Local.MaxCheckpointBytes {

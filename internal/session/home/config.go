@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -33,6 +34,16 @@ type Config struct {
 	Remote           map[string]profile.ClientConfig `json:"remote,omitempty"`
 	WorkSources      map[string]profile.ClientConfig `json:"workSources,omitempty"`
 	ProjectApprovals []ProjectApproval               `json:"projectApprovals,omitempty"`
+}
+
+// WorkConnections resolves remote work owners by name, for run, discovery,
+// remote control and pull alike. A workSources entry wins; any other name uses
+// its remote profile.
+func (c Config) WorkConnections() map[string]profile.ClientConfig {
+	connections := make(map[string]profile.ClientConfig, len(c.Remote)+len(c.WorkSources))
+	maps.Copy(connections, c.Remote)
+	maps.Copy(connections, c.WorkSources)
+	return connections
 }
 
 // ProjectApproval is current local authority, qualified by authenticated source.
