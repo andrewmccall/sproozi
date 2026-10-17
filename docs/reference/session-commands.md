@@ -1,5 +1,15 @@
 # Session commands and identities
 
+The public executable is `sproozi`. Build it from the repository root:
+
+```sh
+go build -o bin/sproozi ./cmd/sproozi
+```
+
+These commands require administrator configuration, approved images and prepared
+execution environments. Building the CLI does not install a cluster or start an
+agent.
+
 The public `sproozi` executable addresses durable sessions. A session can retain
 its native conversation across several independently authorized executions. Each
 execution has its own deadline and ceiling, and each placement visit has a fresh
@@ -11,6 +21,31 @@ pull and local continuation, or [native session mobility](../guides/session-mobi
 for interactive moves within one bounded execution. The
 [home configuration reference](../../cmd/sproozi/README.md) describes private files,
 images, gateway credentials and remote profiles.
+
+## Remote work and local continuation
+
+| Command | Purpose |
+| --- | --- |
+| `run` | Submit a Codex task to a configured remote executor. |
+| `sessions` | List accessible sessions, optionally filtered by executor or Project. |
+| `status` | Inspect one session by its stable session UUID. |
+| `pull` | Claim a stopped remote session and import its conversation and Git workspace. This does not start an agent. |
+| `resume` | Start a new local execution of retained work with fresh permissions. It attaches the terminal unless `--detach` is selected. |
+| `stop` | Stop local work and retain its supported state for later continuation. |
+| `cancel` | Cancel an execution, including unfinished work that cannot stop gracefully. |
+| `recover` | Continue a journaled operation after an uncertain response or interruption. |
+
+## Interactive sessions and movement
+
+`serve --config FILE` starts the home daemon. `start` seeds a managed Docker
+workspace from a stopped Git repository, `attach` connects its native terminal,
+and `move` transfers the supported state to a configured destination. These
+client commands accept the configuration and socket selectors described below.
+
+Detaching the terminal does not stop the daemon or agent. Running a container on
+your laptop still requires the laptop and Docker engine to remain available.
+Follow [session mobility](../guides/session-mobility.md) for the complete setup,
+commands, supported client versions and movement limits.
 
 ## Select the owner
 

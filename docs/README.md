@@ -7,6 +7,7 @@ Future architecture is kept separate from implemented behaviour and verified gui
 
 ## Guides
 
+- [Verification reports](demos/README.md), recorded scenarios, model sources and evidence limits
 - [Getting started](guides/getting-started.md), from a fresh checkout to a Kind demo and a real pull request
 - [Kind verification skill](../.agents/skills/verify-sproozi/SKILL.md), repeatable dependency checks, demo acceptance and retained proof
 - [Install on Kubernetes and run your first Pod](guides/install-kubernetes.md), including registry images, certificates and a provider-free first run
