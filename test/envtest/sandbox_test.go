@@ -91,7 +91,7 @@ func TestAgentRunSandboxPodCreatedOnRunning(t *testing.T) {
 	if err := c.Get(ctx, client.ObjectKey{Namespace: testNamespace, Name: testRuntimeName}, &rt); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := k8sresources.NewPodSandboxClient(c).Ensure(ctx, &r, &rt); err != nil {
+	if _, err := k8sresources.NewPodSandboxClient(c, c).Ensure(ctx, &r, &rt); err != nil {
 		t.Fatalf("reconcile API-defaulted sandbox: %v", err)
 	}
 }

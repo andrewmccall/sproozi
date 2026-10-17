@@ -41,6 +41,11 @@ under load that let a second run be admitted. Reconciles are serialized, so a
 live list reflects every earlier decision. The cost is one uncached cluster-wide
 List per queued-run reconcile.
 
+The same lag can hide a sandbox Pod the reconciler has just created. A missing
+Pod fails the run, so `PodSandboxClient.GetStatus` confirms a cached NotFound
+with one uncached Get before it reports the sandbox absent. Found Pods are
+still read from the cache.
+
 The event receiver sweeps expired replay records once per replay window. It
 lists records by label in pages and deletes expired ones with UID and
 resource-version preconditions, so concurrent replicas do not conflict. A

@@ -102,11 +102,15 @@ type SandboxCompletion struct {
 // PodSandboxClient implements SandboxClient using a Kubernetes Pod.
 type PodSandboxClient struct {
 	c client.Client
+	// live reads the API server directly. Absent ends a run, so GetStatus
+	// confirms a cached NotFound with it: the cache can lag a Pod just created.
+	live client.Reader
 }
 
-// NewPodSandboxClient returns the Pod-backed execution adapter.
-func NewPodSandboxClient(c client.Client) *PodSandboxClient {
-	return &PodSandboxClient{c: c}
+// NewPodSandboxClient returns the Pod-backed execution adapter. live must read
+// the API server directly, not through the cache that backs c.
+func NewPodSandboxClient(c client.Client, live client.Reader) *PodSandboxClient {
+	return &PodSandboxClient{c: c, live: live}
 }
 
 // ValidateRuntime checks the Pod template and the trust bundle ConfigMap it mounts.
@@ -180,7 +184,12 @@ func validateExistingSandbox(existing, wanted *corev1.Pod) error {
 // GetStatus returns the current lifecycle status of the named Sandbox.
 func (p *PodSandboxClient) GetStatus(ctx context.Context, name string) (SandboxStatus, error) {
 	var pod corev1.Pod
-	if err := p.c.Get(ctx, client.ObjectKey{Namespace: AgentsNamespace, Name: name}, &pod); err != nil {
+	key := client.ObjectKey{Namespace: AgentsNamespace, Name: name}
+	err := p.c.Get(ctx, key, &pod)
+	if apierrors.IsNotFound(err) {
+		err = p.live.Get(ctx, key, &pod)
+	}
+	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return SandboxStatusAbsent, nil
 		}
