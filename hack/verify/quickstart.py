@@ -223,7 +223,7 @@ def verify(args):
             env.update(SPROOZI_CNI_MANIFEST=config[0], SPROOZI_CNI_SELECTOR=config[1])
             kubeconfig = directory / "cluster.kubeconfig"
             env.update(SPROOZI_KUBECONFIG=str(kubeconfig), KUBECONFIG=str(kubeconfig))
-            command = ["make", "verify-kind"]
+            command = ["make", "test-e2e"]
         else:
             kubeconfig = local / "demo" / (cluster + ".kubeconfig")
             command = ["make", "demo", "IMG=controller:sproozi-quickstart-" + run_id,

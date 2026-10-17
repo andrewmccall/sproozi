@@ -2,6 +2,8 @@
 # Isolated, model-backed configured MCP acceptance. The caller owns the session.
 set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$repo_root/hack/kind-up.sh"
+: "${KIND_NODE_IMAGE:?Supply the pinned Kind node image; make verify-mcp-kind sets it}"
 : "${MCP_PROOF_IMAGE:?Supply the freshly built controller/gateway image}"
 : "${MCP_PROVIDER_IMAGE:?Build hack/verify/mcp-provider/Dockerfile first}"
 : "${CODEX_IMAGE:?Supply a pinned stock Codex image}"
@@ -16,7 +18,6 @@ cluster="sproozi-mcp-verify-$(date -u +%Y%m%d%H%M%S)-$$"
 umask 077
 work_dir="$(mktemp -d)"
 export KUBECONFIG="$work_dir/kubeconfig"
-created=false
 session_loaded=false
 cleanup() {
   result=$?
@@ -41,7 +42,7 @@ PY
       exit 1
     fi
   fi
-  if [[ "$created" == true ]]; then
+  if (( kind_cluster_created )); then
     if ! kind delete cluster --name "$cluster"; then
       echo "Could not remove proof cluster $cluster; private directory $work_dir retained" >&2
       exit 1
@@ -51,11 +52,8 @@ PY
   exit "$result"
 }
 trap cleanup EXIT
-created=true
-kind create cluster --name "$cluster" --config "$repo_root/hack/kind-cluster.yaml" \
-  --image kindest/node@sha256:050072256b9a903bd914c0b2866828150cb229cea0efe5892e2b644d5dd3b34f
-kubectl apply -f "$SPROOZI_CNI_MANIFEST" >/dev/null
-kubectl wait pods -n kube-system -l k8s-app=calico-node --for=condition=Ready --timeout=180s
+export SPROOZI_CNI_SELECTOR=k8s-app=calico-node
+kind_up "$cluster" "$KUBECONFIG"
 kind load docker-image "$MCP_PROOF_IMAGE" "$MCP_PROVIDER_IMAGE" --name "$cluster"
 bash "$repo_root/hack/demo/load-image.sh" "$cluster"
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj '/CN=MCP proof CA' \

@@ -30,7 +30,8 @@ Tests must check that:
 
 The PR demo must also check the target repository, base branch, run-owned branch,
 commit and allowed file changes. It must not merge or deploy a proposed fix.
-The individual scenarios are listed in [cases.json](cases.json). The planned
+[cases.json](cases.json) catalogues planned acceptance scenarios. It is a design
+checklist, not evidence: no gate or test checks its entries. The planned
 [home-ops acceptance procedure](home-ops.md) covers alert delivery, a GitOps PR
 and recovery after review and merge.
 
