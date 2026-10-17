@@ -150,9 +150,20 @@ func submit(t *testing.T, o *Owner) View {
 	}
 	return v
 }
+
+// untilDeadline bounds a wait for owner progress only by the test binary's own
+// deadline. Each step runs real Git capture, which has no dependable duration
+// on a loaded machine, so a fixed bound turns slowness into failure.
+func untilDeadline(t *testing.T) (context.Context, context.CancelFunc) {
+	if deadline, ok := t.Deadline(); ok {
+		return context.WithDeadline(t.Context(), deadline.Add(-5*time.Second))
+	}
+	return context.WithCancel(t.Context())
+}
+
 func waitPhase(t *testing.T, o *Owner, id string, want Phase) View {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	ctx, cancel := untilDeadline(t)
 	defer cancel()
 	for {
 		v, e := o.Info(ctx, id)
@@ -326,9 +337,21 @@ func TestSubmissionReplayDoesNotWaitForHeldNativeWork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Native stop stays held until the test returns, so replay and export can
+	// only answer while it is in progress; waiting for it would never return.
+	// stillHeld confirms each answer arrived while the driver was in Stop.
+	stillHeld := func(what string) {
+		o.mu.Lock()
+		defer o.mu.Unlock()
+		if o.running[initial.ID] == nil {
+			t.Fatalf("%s answered after native work finished", what)
+		}
+	}
+	wait, cancel := untilDeadline(t)
+	defer cancel()
 	select {
 	case <-p.stopStarted:
-	case <-time.After(3 * time.Second):
+	case <-wait.Done():
 		t.Fatal("task did not reach held work")
 	}
 	done := make(chan View, 1)
@@ -338,7 +361,8 @@ func TestSubmissionReplayDoesNotWaitForHeldNativeWork(t *testing.T) {
 		if v.ID != initial.ID || v.ExecutionID != initial.ExecutionID || v.AllocationID != initial.AllocationID {
 			t.Fatal("replay changed identity")
 		}
-	case <-time.After(300 * time.Millisecond):
+		stillHeld("submission replay")
+	case <-wait.Done():
 		t.Fatal("submission replay waited for native completion")
 	}
 	exportDone := make(chan error, 1)
@@ -348,7 +372,8 @@ func TestSubmissionReplayDoesNotWaitForHeldNativeWork(t *testing.T) {
 		if e == nil {
 			t.Fatal("export accepted an active writer")
 		}
-	case <-time.After(300 * time.Millisecond):
+		stillHeld("export")
+	case <-wait.Done():
 		t.Fatal("export waited for native completion instead of rejecting")
 	}
 }

@@ -464,9 +464,11 @@ func (o *Owner) dispatch(id string) {
 	o.mu.Unlock()
 	go func() {
 		defer o.wg.Done()
-		defer func() { cancel(); o.mu.Lock(); delete(o.running, id); o.mu.Unlock() }()
 		unlock := o.jobs.Lock(id)
 		defer unlock()
+		// Leave running before releasing the job lock: a Recover waiting on that
+		// lock dispatches again, which a stale entry would silently drop.
+		defer func() { cancel(); o.mu.Lock(); delete(o.running, id); o.mu.Unlock() }()
 		o.drive(ctx, id)
 	}()
 }
