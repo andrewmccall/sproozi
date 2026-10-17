@@ -244,42 +244,19 @@ func (s *Service) catalogArtifact(digest string) ([]byte, error) {
 	return data, err
 }
 
+// validateExport checks the source's stop, accounting and checkpoint evidence,
+// then that the export belongs to this request and this home's native binding.
 func (s *Service) validateExport(e work.Export, id, operation string) error {
-	if err := validateExportAssociation(e); err != nil {
-		return err
+	if err := work.ValidateExport(e, s.config.Local.MaxCheckpointBytes); err != nil {
+		return fmt.Errorf("home: exported stop, accounting or checkpoint is invalid: %w", err)
 	}
-
-	stopped := e.Stopped
+	launch := e.Stopped.Launch
 	if e.ID != id || e.OperationID != operation || e.Harness != s.config.Local.Harness ||
-		stopped.Launch.Harness != e.Harness || !validID(stopped.Launch.ThreadID) ||
-		stopped.Launch.InstructionDigest != s.config.Local.InstructionDigest ||
-		!stopped.ActualStopped || stopped.Receipt == nil ||
-		!reflect.DeepEqual(stopped.Receipt.Launch, stopped.Launch) ||
-		stopped.Receipt.Incarnation != stopped.Incarnation || stopped.Incarnation.ResourceUID == "" {
-		return errors.New("home: exported writer stop, accounting or native binding is unavailable")
+		!validID(launch.ThreadID) || launch.InstructionDigest != s.config.Local.InstructionDigest ||
+		e.Stopped.Incarnation.ResourceUID == "" || len(launch.Allowances) == 0 {
+		return errors.New("home: export does not match this pull or this home's native binding")
 	}
-	if len(stopped.Launch.Allowances) == 0 || len(stopped.Receipt.Usage) != len(stopped.Launch.Allowances) {
-		return errors.New("home: exported accounting is incomplete")
-	}
-	for name, allowance := range stopped.Launch.Allowances {
-		usage, ok := stopped.Receipt.Usage[name]
-		if !ok || usage.Units < 0 || usage.CostMicros < 0 ||
-			(allowance.Units.Bounded && usage.Units > allowance.Units.Value) ||
-			(allowance.CostMicros.Bounded && usage.CostMicros > allowance.CostMicros.Value) {
-			return errors.New("home: exported accounting is invalid")
-		}
-	}
-	meta, err := checkpoint.Inspect(e.Checkpoint, s.config.Local.MaxCheckpointBytes)
-	if err != nil {
-		return err
-	}
-	if meta.SHA256 != stopped.CheckpointDigest || meta.Harness != e.Harness || meta.ThreadID != stopped.Launch.ThreadID {
-		return errors.New("home: exported checkpoint conflicts with stopped source")
-	}
-	if e.CheckpointInfo != nil && !reflect.DeepEqual(*e.CheckpointInfo, meta) {
-		return errors.New("home: exported checkpoint metadata differs from its artifact")
-	}
-	return checkpoint.ValidateContinuity(e.Checkpoint, e.Harness, s.config.Local.InstructionDigest, s.config.Local.MaxCheckpointBytes)
+	return nil
 }
 
 // Pull persists downloaded continuity inertly, then obtains and retains an
@@ -297,7 +274,8 @@ func (s *Service) Pull(ctx context.Context, id, operation, sourceName string) (S
 	r, err := s.readCatalog(id)
 	if err == nil {
 		if r.Source != sourceName || r.Operation != operation {
-			return Status{}, errors.New("home: pull intent conflicts")
+			return Status{}, fmt.Errorf("home: this session's pull from %q is retained as operation %s; "+
+				"retry it with --from %s --operation %s", r.Source, r.Operation, r.Source, r.Operation)
 		}
 		if r.Claimed {
 			return s.catalogStatus(r)
@@ -693,11 +671,4 @@ func (s *Service) Sessions(q work.SessionQuery) ([]Status, error) {
 		}
 	}
 	return statuses, nil
-}
-
-func validateExportAssociation(e work.Export) error {
-	if e.Project != "" && !project.ValidID(e.Project) {
-		return errors.New("home: invalid exported project identity")
-	}
-	return project.ValidateReference(e.RepositoryReference)
 }

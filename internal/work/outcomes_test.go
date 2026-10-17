@@ -119,7 +119,7 @@ func TestExportProjectMetadataRejectionsRemainUnsupported(t *testing.T) {
 				invalid.CheckpointInfo = &metadata
 			}
 			err := ValidateExport(invalid, c.MaxCheckpointBytes)
-			if err == nil || outcomeCode(err) != profile.CodeUnsupported {
+			if err == nil || OutcomeCode(err) != profile.CodeUnsupported {
 				t.Fatalf("Invalid %s lost safe compatibility outcome: %v", name, err)
 			}
 		})

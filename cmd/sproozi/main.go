@@ -3,9 +3,8 @@ package main
 
 import (
 	"context"
-	"errors"
-	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"syscall"
@@ -15,30 +14,24 @@ import (
 )
 
 func main() {
-	if err := run(os.Args[1:]); err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, "Sproozi failed:", err)
-		os.Exit(1)
-	}
+	os.Exit(cli(os.Args[1:], os.Stdout, os.Stderr))
 }
 
-func run(args []string) error {
-	if len(args) == 0 {
-		return errors.New("use sproozi run|sessions|pull|resume|stop|serve|start|attach|move|status|cancel|recover")
+// cli runs one command line and returns its exit status. Help exits 0.
+func cli(args []string, stdout, stderr io.Writer) int {
+	if err := run(args, stdout); err != nil {
+		_, _ = fmt.Fprintln(stderr, "Sproozi failed:", err)
+		return 1
 	}
-	if args[0] != "serve" {
-		return runProduct(args)
+	return 0
+}
+
+func run(args []string, stdout io.Writer) error {
+	if len(args) == 0 || helpRequested(args[0]) {
+		usage(stdout)
+		return nil
 	}
-	flags := flag.NewFlagSet("sproozi serve", flag.ContinueOnError)
-	config := flags.String("config", "", "private administrator JSON")
-	if err := flags.Parse(args[1:]); err != nil {
-		return err
-	}
-	if *config == "" || flags.NArg() != 0 {
-		return errors.New("use sproozi serve --config FILE")
-	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	return serve(ctx, *config)
+	return runProduct(args, stdout)
 }
 
 func serve(ctx context.Context, path string) error {

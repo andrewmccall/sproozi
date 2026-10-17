@@ -60,10 +60,6 @@ func NewHandler(o *Owner, taskToken, homeToken string) (http.Handler, error) {
 		v, e := o.Cancel(ctx, q.ID, q.OperationID)
 		return tool(v, e)
 	})
-	mcp.AddTool(server, &mcp.Tool{Name: "sproozi_session_info", Description: "Read the stable session and current remote ownership state."}, func(ctx context.Context, _ *mcp.CallToolRequest, q reference) (*mcp.CallToolResult, View, error) {
-		v, e := o.Info(ctx, q.ID)
-		return tool(v, e)
-	})
 	mcp.AddTool(server, &mcp.Tool{Name: "sproozi_sessions", Description: "List accessible sessions for this installation, optionally filtered by project."}, func(ctx context.Context, _ *mcp.CallToolRequest, q SessionQuery) (*mcp.CallToolResult, sessionList, error) {
 		v, e := o.List(ctx, q)
 		if e != nil {
@@ -164,7 +160,7 @@ func (h *ownerHandler) serveJSON(w http.ResponseWriter, r *http.Request, action 
 		}
 	}
 	if e != nil {
-		code := outcomeCode(e)
+		code := OutcomeCode(e)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(outcomeStatus(code))
 		_ = json.NewEncoder(w).Encode(struct {

@@ -19,12 +19,16 @@ import (
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/session"
+	"github.com/andrewmccall/sproozi/internal/session/profile"
 	"github.com/google/uuid"
 )
 
 const fixtureResource = "exact-resource"
 const fixtureTask = "Fix the repository"
 const fixtureModel = "model.inference"
+const quietArg = "--quiet"
+const executorKubernetes = "kubernetes"
+const repositorySproozi = "sproozi"
 
 const testThread = "01a126e8-288d-7350-9b52-627e16048343"
 const testInstructions = "Act only within the approved task"
@@ -36,6 +40,7 @@ type fixturePlacement struct {
 	data                   []byte
 	meta                   checkpoint.Metadata
 	initial, active, stops int
+	aborts                 int
 	lostStop               bool
 	missingSeal            bool
 	missingFence           bool
@@ -73,6 +78,9 @@ func (p *fixturePlacement) Inspect(_ context.Context, l session.Launch) (session
 		Incarnation: session.Incarnation{ExecutionID: l.AllocationID, ResourceUID: fixtureResource}}, nil
 }
 func (p *fixturePlacement) Abort(_ context.Context, l session.Launch, i session.Incarnation) (session.Observation, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.aborts++
 	if i.ResourceUID != fixtureResource {
 		return session.Observation{}, errors.New("exact incarnation required")
 	}
@@ -142,9 +150,20 @@ func submit(t *testing.T, o *Owner) View {
 	}
 	return v
 }
-func waitPhase(t *testing.T, o *Owner, id, want string) View {
+
+// untilDeadline bounds a wait for owner progress only by the test binary's own
+// deadline. Each step runs real Git capture, which has no dependable duration
+// on a loaded machine, so a fixed bound turns slowness into failure.
+func untilDeadline(t *testing.T) (context.Context, context.CancelFunc) {
+	if deadline, ok := t.Deadline(); ok {
+		return context.WithDeadline(t.Context(), deadline.Add(-5*time.Second))
+	}
+	return context.WithCancel(t.Context())
+}
+
+func waitPhase(t *testing.T, o *Owner, id string, want Phase) View {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	ctx, cancel := untilDeadline(t)
 	defer cancel()
 	for {
 		v, e := o.Info(ctx, id)
@@ -164,7 +183,7 @@ func waitPhase(t *testing.T, o *Owner, id, want string) View {
 
 func assertRemoteSubmissionReplay(t *testing.T, o *Owner, q Submit, v View) {
 	t.Helper()
-	if v.ExecutionID != v.ID || !canonicalID(v.AllocationID) || v.AllocationID == v.ExecutionID {
+	if v.ExecutionID != v.ID || !CanonicalID(v.AllocationID) || v.AllocationID == v.ExecutionID {
 		t.Fatalf("session, bounded execution and allocation identities differ: %+v", v)
 	}
 	again, e := o.Submit(t.Context(), q)
@@ -225,7 +244,7 @@ func TestRemoteCatalogueRetainsCompletionAndExclusiveClaimAcrossRestart(t *testi
 		t.Fatal("claim lost after restart")
 	}
 	list, e := resumed.List(t.Context(), SessionQuery{})
-	if e != nil || len(list) != 1 || list[0].Phase != phaseHomeOwned {
+	if e != nil || len(list) != 1 || list[0].Phase != PhaseHomeOwned {
 		t.Fatalf("catalogue: %+v %v", list, e)
 	}
 	p.mu.Lock()
@@ -318,9 +337,21 @@ func TestSubmissionReplayDoesNotWaitForHeldNativeWork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Native stop stays held until the test returns, so replay and export can
+	// only answer while it is in progress; waiting for it would never return.
+	// stillHeld confirms each answer arrived while the driver was in Stop.
+	stillHeld := func(what string) {
+		o.mu.Lock()
+		defer o.mu.Unlock()
+		if o.running[initial.ID] == nil {
+			t.Fatalf("%s answered after native work finished", what)
+		}
+	}
+	wait, cancel := untilDeadline(t)
+	defer cancel()
 	select {
 	case <-p.stopStarted:
-	case <-time.After(3 * time.Second):
+	case <-wait.Done():
 		t.Fatal("task did not reach held work")
 	}
 	done := make(chan View, 1)
@@ -330,7 +361,8 @@ func TestSubmissionReplayDoesNotWaitForHeldNativeWork(t *testing.T) {
 		if v.ID != initial.ID || v.ExecutionID != initial.ExecutionID || v.AllocationID != initial.AllocationID {
 			t.Fatal("replay changed identity")
 		}
-	case <-time.After(300 * time.Millisecond):
+		stillHeld("submission replay")
+	case <-wait.Done():
 		t.Fatal("submission replay waited for native completion")
 	}
 	exportDone := make(chan error, 1)
@@ -340,7 +372,8 @@ func TestSubmissionReplayDoesNotWaitForHeldNativeWork(t *testing.T) {
 		if e == nil {
 			t.Fatal("export accepted an active writer")
 		}
-	case <-time.After(300 * time.Millisecond):
+		stillHeld("export")
+	case <-wait.Done():
 		t.Fatal("export waited for native completion instead of rejecting")
 	}
 }
@@ -373,9 +406,16 @@ func TestCancellationObservesIncarnationAfterLostPreparationReply(t *testing.T) 
 	defer func() { _ = o.Close() }()
 	v := submit(t, o)
 	waitPhase(t, o, v.ID, phaseUnknown)
-	cancelled, err := o.Cancel(t.Context(), v.ID, uuid.NewString())
+	operation := uuid.NewString()
+	cancelled, err := o.Cancel(t.Context(), v.ID, operation)
 	if err != nil || cancelled.Phase != phaseCancelled {
 		t.Fatalf("failed to cancel exact observed incarnation: %+v %v", cancelled, err)
+	}
+	if retried, err := o.Cancel(t.Context(), v.ID, operation); err != nil || retried.Phase != phaseCancelled || p.aborts != 1 {
+		t.Fatalf("retried cancellation aborted again: %+v %v aborts=%d", retried, err, p.aborts)
+	}
+	if _, err := o.Cancel(t.Context(), v.ID, uuid.NewString()); OutcomeCode(err) != profile.CodeConflict {
+		t.Fatalf("another cancellation operation accepted: %v", err)
 	}
 	r, err := o.read(v.ID)
 	if err != nil || r.Incarnation == nil || r.Incarnation.ResourceUID != fixtureResource {

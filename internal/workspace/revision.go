@@ -56,3 +56,26 @@ func AtRevision(ctx context.Context, data []byte, revision, scratch string, maxB
 	}
 	return Capture(ctx, repo, nil, maxBytes)
 }
+
+// Empty captures a fresh repository holding one empty commit: the seed for a
+// task whose native worker fetches its own source. scratch must be private
+// storage, as for AtRevision.
+func Empty(ctx context.Context, scratch string, maxBytes int64) ([]byte, error) {
+	dir, err := os.MkdirTemp(scratch, ".sproozi-empty-")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	if err = os.Chmod(dir, 0700); err != nil {
+		return nil, err
+	}
+	repo := filepath.Join(dir, "workspace")
+	g := gitRunner{home: dir, limit: maxBytes}
+	if _, err = g.run(ctx, dir, "init", "--quiet", "--template=", repo); err != nil {
+		return nil, err
+	}
+	if _, err = g.run(ctx, repo, "commit", "--quiet", "--allow-empty", "-m", "Initialize controlled workspace"); err != nil {
+		return nil, err
+	}
+	return Capture(ctx, repo, nil, maxBytes)
+}

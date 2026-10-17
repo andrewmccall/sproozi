@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"slices"
 	"strings"
 	"time"
@@ -20,6 +19,7 @@ const catalogueExecutors = 32
 const availabilityAvailable = "available"
 const availabilityUnavailable = "unavailable"
 const ownershipHome = "home"
+const ownershipExecutor = "executor"
 
 // Catalogue rows are compact discovery facts, not full execution journals or
 // untrusted final answers. Executor labels the catalogue queried; placement
@@ -87,7 +87,7 @@ func discoverSessions(ctx context.Context, q options) catalogue {
 					v.rows = append(v.rows, row)
 				}
 			} else {
-				fixed, ok := workConnection(q.fixed, name)
+				fixed, ok := q.fixed.WorkConnections()[name]
 				if !ok {
 					v.err = &profile.Rejection{Code: profile.CodeInvalid}
 				} else {
@@ -98,13 +98,13 @@ func discoverSessions(ctx context.Context, q options) catalogue {
 						_ = client.Close()
 						v.err = err
 						for _, row := range rows {
-							ownership := "executor"
-							if row.Phase == "home-owned" {
+							ownership := ownershipExecutor
+							if row.Phase == work.PhaseHomeOwned {
 								ownership = ownershipHome
 							}
 							v.rows = append(v.rows, catalogueRow{
 								Association: row.Association, ID: row.ID, Executor: name,
-								Ownership: ownership, Phase: row.Phase, Harness: row.Harness,
+								Ownership: ownership, Phase: string(row.Phase), Harness: row.Harness,
 								ExecutionID: row.ExecutionID, AllocationID: row.AllocationID, Incarnation: row.Incarnation,
 								Placement: row.Placement, ThreadID: row.ThreadID, Deadline: row.Deadline,
 							})
@@ -119,14 +119,7 @@ func discoverSessions(ctx context.Context, q options) catalogue {
 		v := <-results
 		if v.err != nil {
 			v.availability.Availability = availabilityUnavailable
-			v.availability.Error = profile.CodeUnavailable
-			var remote *profile.RemoteError
-			var rejection *profile.Rejection
-			if errors.As(v.err, &remote) {
-				v.availability.Error = remote.Code
-			} else if errors.As(v.err, &rejection) {
-				v.availability.Error = rejection.Code
-			}
+			v.availability.Error = work.OutcomeCode(v.err)
 		} else {
 			out.Sessions = append(out.Sessions, v.rows...)
 		}

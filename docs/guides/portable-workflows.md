@@ -126,8 +126,10 @@ Pod-control permissions. Workers cannot use it to execute arbitrary commands.
 
 Put the profile's HTTPS origin, public CA and home principal token file in the
 global home configuration's `remote` map. The map name must equal the configured
-profile `placementName`. `workSources` can use separately provisioned owner
-connections; when omitted it uses the same named remote profiles. Both transports
+profile `placementName`. A `workSources` entry gives an owner a separately
+provisioned connection. Every executor or source name resolves to its
+`workSources` entry when one exists, otherwise to the same-named `remote`
+profile. Both transports
 verify TLS 1.3, use one fixed origin and reject redirects.
 
 For a persistent in-cluster owner and the exact Hermes `/work/mcp` configuration,
@@ -177,8 +179,8 @@ refund evidence.
 
 Use the existing persistent [Hermes deployment and native MCP setup](hermes-orchestration.md).
 Register the profile's `/work/mcp` URL with its task bearer token and public CA.
-The supported tools are `sproozi_run`, `sproozi_status`, `sproozi_sessions` and
-`sproozi_session_info`. Hermes supplies this intent, without images, PodSpecs,
+The supported tools are `sproozi_run`, `sproozi_status`, `sproozi_cancel` and
+`sproozi_sessions`. Hermes supplies this intent, without images, PodSpecs,
 Kubernetes tokens or native-state paths:
 
 ```json
@@ -204,14 +206,15 @@ Start the home daemon, then transfer the completed session:
 ```sh
 bin/sproozi serve --config /private/sproozi/config.json
 # In another terminal:
-bin/sproozi pull SESSION_ID --config /private/sproozi/config.json \
-  --from engineering --operation ORIGINAL_PULL_UUID
+bin/sproozi pull SESSION_ID --config /private/sproozi/config.json --from engineering
 bin/sproozi resume SESSION_ID --executor docker --config /private/sproozi/config.json
 ```
 
 Pull validates and saves the conversation and Git checkpoint without starting an
-agent. It then records the remote owner's one-way ownership transfer. If the
-reply is lost, retry the same pull operation. Downloading a checkpoint alone
+agent. It then records the remote owner's one-way ownership transfer. The pull
+operation UUID comes from the session ID and source, so if the reply is lost,
+run the same command again. An explicit `--operation UUID` overrides it; retry
+with that same UUID. Downloading a checkpoint alone
 does not permit local execution. The remote catalogue now reports `home-owned`
 and cannot reopen that task session. Keep the home configuration and private
 directory unique to this trusted installation; copying its principal credential

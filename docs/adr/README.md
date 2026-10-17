@@ -70,3 +70,5 @@ and the combined MCP discovery schema.
 | [0014](0014-review-boundaries-and-native-contracts.md) | Shared gateway limits, native contracts and CLI identities. |
 | [0015](0015-default-clients-and-native-tool-schemas.md) | Default clients, MCP schemas and model requests sharing an allowance. |
 | [0016](0016-dispatcher-capability-enforcement-and-fresh-revalidation.md) | Capability checks at the gateway dispatcher and fresh revalidation reads. |
+| [0017](0017-runtime-admission-and-replay-retention.md) | Runtime validation at admission, live slot and sandbox reads, and bounded replay records. |
+| [0019](0019-pull-operations-and-work-owner-names.md) | Derived pull operations and one rule for resolving work owner names. |
