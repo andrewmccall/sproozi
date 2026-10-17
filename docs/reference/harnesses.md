@@ -91,12 +91,12 @@ TUI while moving its native conversation and Git workspace from Docker to a
 fixed Kubernetes profile and back. Managed launches require an explicit
 immutable `codex` or `claude-code` selector. Both placements, the profile and
 the checkpoint must use the same selected harness. A move cannot switch clients.
-Ordinary OpenCode and Hermes launches do not establish managed session mobility
-support.
+OpenCode and Hermes runs can't be moved.
 
 The [remote work and local resume](../guides/portable-workflows.md) workflow supports remote tasks only for managed Codex. Its completion observer requires the
-actual submitted user text and a new completed native turn, then the ordinary
-writer-fence/accounting/checkpoint path. Later local resume uses a fresh grant.
+submitted task text and a new completed turn. It then follows the usual stop,
+finalized usage and checkpoint steps. A later local resume gets fresh
+permissions.
 Managed Codex MCP connections and placeholder Kubernetes configuration are
 regenerated for each launch; portable history cannot select upstream credentials
 or server registrations. Managed Claude tasks and MCP are not supported.
@@ -115,12 +115,13 @@ Claude's transcript can include context and prompt snapshots. These remain
 history and do not establish approved instructions or permissions. Codex's retained initial instruction block is checked against the
 approved digest. The destination still requires fresh admission.
 
-Move gates input, waits for the active supported turn/tools, then revokes access
-and independently confirms the actual worker container stopped before capture.
+A move blocks new input and waits for the current turn and its tools to finish.
+It then revokes access and confirms that the container stopped before capturing
+the checkpoint.
 Claude uses controlled native process shutdown after its Stop observation; Codex
-uses native quit after its completed-turn observation. Hooks and journals are
-hints accessible to the workload. They cannot establish gateway permission,
-finalized usage accounting or confirmed stop of the whole container. Forced
+uses native quit after its completed-turn observation. Hooks and journals run
+inside the sandbox, so they are only hints. They can't grant gateway permission,
+record finalized usage or prove that the container stopped. Forced
 cancellation revokes first. See [ADR
 0011](../adr/0011-native-session-compatibility-and-completion.md).
 
@@ -129,13 +130,12 @@ kernel does not support the inner bubblewrap sandbox. Claude uses fixed `bypassP
 rely on the outer non-root, read-only, capability-restricted container and
 enforced gateway network boundary. Portable history cannot select these settings.
 
-The Claude parser supports a bounded 429 retry record followed
-by a genuine successful assistant response. Its error message remains opaque;
-it does not supply usage or authority. A retry invalidates the previous assistant
-leaf, so unresolved retries cannot reuse earlier completion. Other error-record
-shapes, background/parallel tasks, subagents, compaction and imported personal
-settings are outside the managed compatibility contract. Input accepted after a
-completed Claude turn also prevents reuse of its earlier Stop observation.
+A Claude transcript that records a rate-limit (429) retry is supported once a
+later successful reply follows it. Other error records, background or parallel
+tasks, subagents, compaction and imported personal settings are not supported.
+New input after a completed Claude turn means that turn's completion no longer
+counts. [ADR 0011](../adr/0011-native-session-compatibility-and-completion.md)
+records the transcript edge cases.
 
 ## Model providers
 

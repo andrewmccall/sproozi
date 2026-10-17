@@ -83,8 +83,8 @@ instructions, placement and principal compatible with the retained catalogue;
 a different template cannot reinterpret existing work. Local resume, recovery and
 placement movement recheck current Project approval before preparing or activating
 a writer. If an interrupted execution's immutable grant exceeds narrowed approval,
-cancel it before starting a fresh resume. Stop/cancellation recovery still fences
-and accounts without an approval. Configuration removal
+cancel it before starting a fresh resume. Recovering a stop or cancellation
+still stops the agent and finalizes usage, even without approval. Configuration removal
 is not a storage deletion or an accounting refund.
 
 ## Independent local resume approval

@@ -93,10 +93,10 @@ capabilities](../reference/permissions-and-capabilities.md).
 
 ## Why this matters
 
-Prompts cannot grant permissions. The network boundary, run identity, requested
-capabilities, current policy and upstream restrictions all constrain a request.
-These checks must hold even if task text is hostile or the sandbox is
-compromised.
+Prompts can't grant permissions. Every request must get past the network
+boundary, the run identity, the requested capabilities, current policy and the
+upstream service's own restrictions. These checks must hold even if the task
+text is hostile or the sandbox is compromised.
 
 Deployment still requires enforced network isolation, inspected TLS, namespace
 separation, GitHub protections and durable gateway state. See [security

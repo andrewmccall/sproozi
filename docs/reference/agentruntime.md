@@ -58,7 +58,7 @@ endpoint. Client-specific destination URLs belong in ordinary client settings.
 No additional egress token or local proxy process is injected.
 
 `AgentRun` cannot change the template, image, environment or security settings.
-Containers share the Pod's network boundary; an ordinary helper requiring independent authority needs its own
+Containers share the Pod's network boundary; a helper that needs different permissions needs its own
 workload. The managed checkpoint helper below receives no workload token and
 has a separate private control volume.
 

@@ -249,15 +249,16 @@ allocation stays held. The destination cannot start. A lost reply is not proof
 of absence or zero consumption. Keep the home and profile journals intact,
 restore backend connectivity, and recover the existing operation. Restart a
 daemon/profile with the same protected state and configuration; stopping those
-processes alone does not establish a stopped writer. The native original
+processes alone doesn't prove that the agent stopped. The native original
 deadline still applies.
 
-Managed remote Pods retain a writer-fence finalizer until the profile records
-termination of their exact native container. A stopped helper or lost profile can
-leave a Pod terminating; restart the same profile and recover the retained
-operation. Keep its journal and checkpoint artifacts. Removing the finalizer or
-force-deleting a Pod before that evidence is recorded leaves the writer unknown
-and does not release its allowance or permit another placement.
+Managed remote Pods keep a Sproozi finalizer until the profile service records
+that their harness container stopped. A stopped helper or lost profile service
+can leave a Pod stuck terminating. Restart the same profile service and run
+`recover` for the original operation, and keep its journal and checkpoint files.
+Don't remove the finalizer or force-delete the Pod: Sproozi then can't tell
+whether the agent stopped, so the allowance stays held and the session can't
+move.
 
 Cancellation forces the execution to stop:
 
@@ -267,17 +268,18 @@ bin/sproozi cancel --socket /absolute/private/home/control.sock \
 ```
 
 Cancel persists intent, revokes access first and forces the exact execution to
-stop. It preserves the last committed checkpoint and does not wait for a fresh
-completed turn. Without finalized usage accounting, the allowance stays held. A
+stop. It keeps the last saved checkpoint and doesn't wait for the current turn
+to finish. Until usage is finalized, the allowance stays held. A
 cancelled session cannot move again. Retry with the same cancellation UUID or
 recover; editing a journal or deleting a registration cannot safely refill it.
 
 ## Current limits
 
-The native checkpoint must match the selected selected client and a genuine UUID.
-Codex requires its approved initial instructions and a completed final turn/tools
-boundary. Claude requires a compatible primary transcript and trusted placement
-quiescence acknowledgement; an assistant leaf alone is insufficient. Selected
+The checkpoint must match the selected harness and a real conversation UUID.
+Codex needs its approved initial instructions and a finished final turn with its
+tools. Claude Code needs a compatible primary transcript and the placement's
+saved acknowledgement that the turn finished; a final assistant reply alone is
+not enough. Selected
 native history travels with sanitized Git state;
 whole home directories, authentication files, hooks and Git config do not.
 

@@ -12,8 +12,9 @@ agent.
 
 A Sproozi session tracks the native conversation across executions. Each
 execution needs separate approval and has its own deadline and usage allowance.
-Each placement visit gets a new allocation and backend resource identity.
-Finding a session or native conversation ID does not grant permission to run it.
+Each [visit](../../GLOSSARY.md#visit) to a placement gets a new allocation
+and backend resource identity. Knowing a session or conversation ID doesn't give
+you permission to run it.
 
 Use [remote work and local resume](../guides/portable-workflows.md) for remote task setup,
 pull and local resume, or [native session mobility](../guides/session-mobility.md)
@@ -92,10 +93,10 @@ sproozi stop SESSION_UUID --executor docker --config /private/sproozi/config.jso
   --operation ORIGINAL_STOP_UUID
 ```
 
-Keep the operation UUID and exact intent when retrying a mutation. A timeout is
-an uncertain result; inspect the selected owner's retained status before choosing
-a next step. `recover` continues retained intent and does not accept a replacement
-operation UUID. `stop` waits for supported foreground work and saves a checkpoint;
+When you retry a command that changes state, reuse its operation UUID and
+arguments. A timeout means the outcome is unknown: check `status` on the same
+owner before deciding what to do. `recover` finishes the original operation and
+doesn't accept a new operation UUID. `stop` waits for supported foreground work and saves a checkpoint;
 `cancel` revokes before forced stop. An old operation remains bound to its original
 execution and cannot affect a later resume.
 
@@ -135,9 +136,9 @@ session ID. Check each executor's availability independently:
 }
 ```
 
-Here engineering has an empty successful catalogue; home could not be queried.
-An unavailable source does not establish an empty catalogue or an absent writer.
-Successful rows survive another source's failure. Discovery can exit successfully
+Here engineering returned an empty catalogue, and home could not be queried.
+An unavailable source doesn't mean its catalogue is empty or that nothing is
+running there. Rows from sources that answered are still returned. Discovery can exit successfully
 with unavailable sources, so inspect the JSON as well as the command exit status.
 `truncated: true` means a source or row limit omitted results. A remote
 `home-owned` mirror and its local
