@@ -10,7 +10,7 @@ make verify-fast
 make verify-protocol
 make verify-mcp
 make verify-workflow-fixtures
-make verify-kind
+make test-e2e
 make verify-live SPROOZI_DEMO_REPO="${SPROOZI_DEMO_REPO:-}"
 make verify-docs
 make verify-public-tree

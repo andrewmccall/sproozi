@@ -128,7 +128,7 @@ Before configuring providers, test deployment and NetworkPolicy enforcement:
 ```sh
 export SPROOZI_CNI_MANIFEST=/absolute/path/to/pinned-enforcing-cni.yaml
 export SPROOZI_CNI_SELECTOR='<your CNI agent label selector>'
-CERT_MANAGER_INSTALL_SKIP=true make verify-kind
+CERT_MANAGER_INSTALL_SKIP=true make test-e2e
 ```
 
 This gate creates and deletes a disposable Kind cluster. It verifies that a

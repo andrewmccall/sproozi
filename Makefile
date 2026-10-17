@@ -41,7 +41,7 @@ all: build
 
 .PHONY: help
 help: ## Display this help.
-	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
 ##@ Development
 
@@ -67,19 +67,19 @@ UNIT_PACKAGES = $$(go list ./... | grep -v /e2e)
 ENVTEST_ASSETS = KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)"
 
 .PHONY: test
-test: manifests generate fmt vet setup-envtest ## Regenerate, vet and run every non-e2e package, including envtest. CI.
+test: manifests generate fmt vet setup-envtest ## Regenerate, vet and run every non-e2e Go test, including envtest. CI.
 	$(ENVTEST_ASSETS) go test $(UNIT_PACKAGES) -coverprofile cover.out
 
 .PHONY: test-e2e
-test-e2e: ## Create an isolated Kind cluster with enforcing CNI and run the e2e tests.
+test-e2e: ## Create an owned Kind cluster with enforcing CNI and run the e2e suite. CI (E2E).
 	@KIND_NODE_IMAGE='$(KIND_NODE_IMAGE)' bash hack/verify/kind.sh
 
 .PHONY: test-e2e-existing
-test-e2e-existing: ## Run e2e tests against the caller-owned, already-created Kind cluster.
+test-e2e-existing: ## Run the e2e suite against an existing caller-owned Kind cluster (KIND_CLUSTER).
 	@KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) go test -tags=e2e ./test/e2e/ -v -timeout=45m -ginkgo.v
 
 .PHONY: lint
-lint: golangci-lint ## Run golangci-lint linter
+lint: golangci-lint ## Run golangci-lint. CI (Lint).
 	"$(GOLANGCI_LINT)" run
 
 .PHONY: lint-fix
@@ -87,8 +87,10 @@ lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
 	"$(GOLANGCI_LINT)" run --fix
 
 .PHONY: lint-config
-lint-config: golangci-lint ## Verify golangci-lint linter configuration
+lint-config: golangci-lint ## Verify golangci-lint configuration. CI (Lint).
 	"$(GOLANGCI_LINT)" config verify
+
+##@ Verification (see test/acceptance/running.md)
 
 .PHONY: verify-fast
 verify-fast: setup-envtest ## Vet and race-test every non-e2e package without regenerating sources. CI.
@@ -96,44 +98,62 @@ verify-fast: setup-envtest ## Vet and race-test every non-e2e package without re
 	$(ENVTEST_ASSETS) go test -race $(UNIT_PACKAGES)
 
 .PHONY: verify-mcp
-verify-mcp: ## Exercise native and configured MCP tools through authenticated TLS CONNECT, including policy and lifecycle denials.
+verify-mcp: ## Race-test the MCP and gateway packages and the live MCP verifier offline. CI.
 	go test -race ./internal/endpoints/kubernetes ./internal/endpoints/mcp ./internal/mcppolicy ./internal/harness ./cmd/gateway -count=1
 	python3 hack/verify/mcp-live-test.py
 
 .PHONY: verify-mcp-client
-verify-mcp-client: ## Verify generated run-local configuration with the installed stock Codex CLI, without a model request.
+verify-mcp-client: ## Load generated MCP config in the installed stock Codex CLI; no model request.
 	python3 hack/verify/mcp-client.py
 
 .PHONY: verify-harness-clients
-verify-harness-clients: ## Load generated native MCP configuration with installed stock Codex, Claude Code and OpenCode; no model requests.
+verify-harness-clients: ## Load generated MCP config in installed Codex, Claude Code and OpenCode; no model request.
 	python3 hack/verify/harness-clients.py
 
 .PHONY: verify-native-session
-verify-native-session: ## Prove pinned stock Codex resume through production checkpoint capture/restore using isolated homes and local deterministic providers.
+verify-native-session: ## Resume installed stock Codex across checkpoint capture/restore with a local provider.
 	python3 hack/verify/native-session.py --state rollout
 
 .PHONY: verify-harness-process
-verify-harness-process: ## Run stock Claude Code and OpenCode through the TLS gateway against local mocked model and MCP providers.
+verify-harness-process: ## Run installed Claude Code and OpenCode through the TLS gateway with local providers.
 	go run ./hack/verify/harness-process --output .local/verification/harness-process.json
 
 .PHONY: verify-mcp-kind
-verify-mcp-kind: ## Prove configured providers with stock Codex in owned Kind; requires pinned images, CNI and a single-owner model session.
+verify-mcp-kind: ## Prove configured MCP with stock Codex in an owned Kind cluster; real model session.
 	KIND_NODE_IMAGE='$(KIND_NODE_IMAGE)' bash hack/verify/mcp-kind.sh
 
 .PHONY: verify-workflow-fixtures
-verify-workflow-fixtures: ## Check deterministic native workflow protocol fixtures, including genuine tool-result and yielded-cell handling.
+verify-workflow-fixtures: ## Run offline Python and shell regressions for fixtures, quickstart, Kind and demo scripts. CI.
 	python3 -m unittest discover -s hack/verify/session-mobility -p '*_test.py'
 	python3 hack/verify/quickstart_test.py
 	bash hack/verify/kind-test.sh
 	bash hack/demo/setup-test.sh
 
 .PHONY: verify-protocol
-verify-protocol: protocol-tools ## Run pinned-client offline fixtures and protocol package tests without silently accepting zero tests.
+verify-protocol: protocol-tools ## Run the pinned gh/git protocol fixtures; zero matched or skipped tests fail. CI.
 	export PATH="$(abspath $(LOCALBIN)/protocol):$$PATH"; SPROOZI_PROTOCOL_FIXTURE=1 hack/verify/go-test-required.sh ./internal/endpoints/github '^(TestPinnedGitReceivePackProtocolFixture|TestPinnedGHPRCreateStartsWithGraphQL|TestPinnedGHAPICreatesPRUsingBoundedREST|TestInspectReceivePack.*|TestParsePushCommands.*|TestGraphQL.*|TestPackage.*)$$'
 
 .PHONY: protocol-tools
 protocol-tools: $(LOCALBIN) ## Install the checksum-pinned gh client used by the protocol fixtures.
 	bash hack/verify/install-gh.sh "$(LOCALBIN)/protocol"
+
+.PHONY: verify-live
+verify-live: ## Run opt-in live acceptance on a provisioned cluster; creates a real PR in SPROOZI_DEMO_REPO.
+	bash hack/verify/live.sh
+
+.PHONY: verify-release
+verify-release: ## Run the CI gates, Kind e2e, live acceptance and the release image build; no push.
+	bash hack/verify/release.sh
+
+.PHONY: verify-docs
+verify-docs: ## Check local Markdown links and private-plan references. CI.
+	python3 hack/verify/docs.py
+
+.PHONY: verify-public-tree
+verify-public-tree: ## Check that private local material is absent from the tracked tree.
+	bash hack/verify/public-tree.sh
+
+##@ Demo
 
 .PHONY: demo-check
 demo-check: demo-setup ## Check local prerequisites for the disposable manual AgentRun demo.
@@ -171,26 +191,6 @@ demo: demo-check ## Build/load, deploy, and start the manual AgentRun demo on Ki
 	python3 hack/demo/render.py --codex-image "$$CODEX_IMAGE" --repository "$$SPROOZI_DEMO_REPOSITORY" --model-auth "$${MODEL_AUTH_MODE:-api_key}" | $(KUBECTL) apply -f -; \
 	SPROOZI_LIVE_ACCEPT=1 SPROOZI_DEMO_REPO="$$SPROOZI_DEMO_REPOSITORY" SPROOZI_KUBECONFIG="$$kubeconfig" bash hack/verify/live.sh; \
 	echo "Export the isolated context with: export KUBECONFIG=$$kubeconfig"
-
-.PHONY: verify-kind
-verify-kind: ## Run the real Kind acceptance gate with an explicit kubeconfig and enforcing CNI.
-	KIND_NODE_IMAGE='$(KIND_NODE_IMAGE)' bash hack/verify/kind.sh
-
-.PHONY: verify-live
-verify-live: ## Run opt-in live acceptance; creates a real PR in SPROOZI_DEMO_REPO.
-	bash hack/verify/live.sh
-
-.PHONY: verify-release
-verify-release: ## Run every required verification gate without publishing or pushing.
-	bash hack/verify/release.sh
-
-.PHONY: verify-docs
-verify-docs: ## Check local Markdown links and private-plan references.
-	python3 hack/verify/docs.py
-
-.PHONY: verify-public-tree
-verify-public-tree: ## Check that private local material is absent from the tracked tree.
-	bash hack/verify/public-tree.sh
 
 ##@ Build
 
