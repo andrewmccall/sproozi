@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strconv"
 	"syscall"
 
@@ -45,13 +44,6 @@ func privatePath(path string, dir bool) error {
 	}
 	return nil
 }
-func sameIntent(a, b session.Launch) bool {
-	a.Deadline = a.Deadline.UTC()
-	b.Deadline = b.Deadline.UTC()
-	a.IncludeIgnored = append([]string(nil), a.IncludeIgnored...)
-	b.IncludeIgnored = append([]string(nil), b.IncludeIgnored...)
-	return reflect.DeepEqual(a, b)
-}
 func (p *Placement) persistIntent(l session.Launch, data []byte) (retained, error) {
 	l.Deadline = l.Deadline.UTC()
 	old, err := p.load(l)
@@ -66,7 +58,7 @@ func (p *Placement) persistIntent(l session.Launch, data []byte) (retained, erro
 	epochPath := filepath.Join(p.config.Directory, "epoch-"+l.SessionID+"-"+strconv.FormatUint(l.Epoch, 10)+recordSuffix)
 	var previous session.Launch
 	if epochData, readErr := p.read(epochPath, 64<<10); readErr == nil {
-		if decode(epochData, &previous) != nil || !sameIntent(l, previous) {
+		if decode(epochData, &previous) != nil || !session.SameLaunch(l, previous) {
 			return retained{}, &profile.Rejection{Code: profile.CodeConflict}
 		}
 	} else if !os.IsNotExist(readErr) {
@@ -98,7 +90,7 @@ func (p *Placement) load(l session.Launch) (retained, error) {
 	if err = decode(data, &r); err != nil {
 		return retained{}, err
 	}
-	if !sameIntent(r.Launch, l) {
+	if !session.SameLaunch(r.Launch, l) {
 		return retained{}, &profile.Rejection{Code: profile.CodeConflict}
 	}
 	return r, nil

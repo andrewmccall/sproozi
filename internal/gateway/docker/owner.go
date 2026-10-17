@@ -228,7 +228,7 @@ func (o *Owner) matched(launch session.Launch, instance session.Incarnation) (re
 	if err != nil {
 		return record{}, err
 	}
-	if !reflect.DeepEqual(r.Launch, launch) || r.Incarnation != instance {
+	if !session.SameLaunch(r.Launch, launch) || r.Incarnation != instance {
 		return record{}, errors.New("docker gateway: allocation intent changed")
 	}
 	return r, nil
@@ -277,7 +277,7 @@ func (o *Owner) Initialize(ctx context.Context, launch session.Launch, instance 
 	} else if err != nil {
 		return "", err
 	}
-	if !reflect.DeepEqual(r.Launch, launch) || r.Incarnation != instance || r.Phase == revoked {
+	if !session.SameLaunch(r.Launch, launch) || r.Incarnation != instance || r.Phase == revoked {
 		return "", errors.New("docker gateway: allocation intent changed or revoked")
 	}
 	if r.Phase == initializing {
