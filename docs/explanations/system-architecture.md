@@ -132,7 +132,7 @@ design decision.
 
 ## Persistent assistant delegation
 
-Hermes runs separately from worker Pods. It keeps its native sessions, memory
+Hermes runs separately from agent Pods. It keeps its native sessions, memory
 and schedules on a persistent volume. Its MCP client submits tasks to a private
 service that maps workflow names to fixed templates and capability subsets.
 Hermes receives no Kubernetes token.
@@ -148,8 +148,8 @@ guide](../guides/hermes-orchestration.md) and [ADR
 
 ## Kubernetes execution
 
-The Kubernetes adapter creates disposable Pods directly. It does not use the
-external Kubernetes Agent Sandbox operator. Each run receives an immutable input
+The Kubernetes adapter creates disposable Pods directly; see
+[cluster dependencies](../reference/dependencies.md). Each run receives an immutable input
 contract, a projected gateway token and a run-specific NetworkPolicy. Its
 ServiceAccount has no direct Kubernetes read grant.
 
@@ -164,7 +164,7 @@ fresh `AgentRun` and must pass current policy checks.
 flowchart LR
     CLI[Native terminal client] --> Home[Home daemon and session journal]
     Home --> Docker[Controlled Docker placement]
-    Home --> Profile[Authenticated fixed remote profile]
+    Home --> Profile[Authenticated profile service]
     Profile --> Run[Fresh Kubernetes AgentRun]
     Docker --> LocalGateway[Local model gateway and accounts]
     Run --> Gateway[Shared gateway and managed accounts]
@@ -185,12 +185,12 @@ destination start. If stop or usage remains unknown, the reserved allowance
 stays held and the destination cannot start. Forced cancellation revokes access
 first and does not require a fresh checkpoint.
 
-[Remote-first tasks](../guides/portable-workflows.md) use a catalogue hosted by
+[Remote work and local resume](../guides/portable-workflows.md) uses a catalogue hosted by
 the profile service. It runs independently of the laptop. After a Codex task
 finishes, it stops the worker, finalizes usage and retains native and Git state.
 Hermes can submit and inspect tasks through authenticated MCP.
 
-Pull transfers ownership to the home installation without starting an agent. A
+Pull transfers ownership to the home daemon without starting an agent. A
 later resume starts a new execution with current local approval and the same
 native conversation ID. Old usage receipts remain unchanged. Retried operations
 stay bound to their original execution, so they cannot affect a later resume.
@@ -233,5 +233,5 @@ boundaries.
 
 The [future architecture overview](future-architecture/README.md) covers managed
 MCP servers, more harnesses, GUI and IDE clients, adoption of existing sessions,
-and broader remote profiles. Each extension needs its own implementation and
+and broader profile services. Each extension needs its own implementation and
 tests.

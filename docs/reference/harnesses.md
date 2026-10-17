@@ -94,7 +94,7 @@ the checkpoint must use the same selected harness. A move cannot switch clients.
 Ordinary OpenCode and Hermes launches do not establish managed session mobility
 support.
 
-The [retained-work workflow](../guides/portable-workflows.md) supports remote tasks only for managed Codex. Its completion observer requires the
+The [remote work and local resume](../guides/portable-workflows.md) workflow supports remote tasks only for managed Codex. Its completion observer requires the
 actual submitted user text and a new completed native turn, then the ordinary
 writer-fence/accounting/checkpoint path. Later local resume uses a fresh grant.
 Managed Codex MCP connections and placeholder Kubernetes configuration are

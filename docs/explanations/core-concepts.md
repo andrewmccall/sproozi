@@ -19,8 +19,8 @@ it. Docker and Kubernetes provide the environments where containers run.
 
 The **sandbox** is the isolated environment where the harness runs. For an
 ordinary Kubernetes run, it is a disposable Pod with its own identity and network
-policy. Sproozi currently creates Pods directly. The separate Kubernetes Agent
-Sandbox operator is not required.
+policy. Sproozi creates these Pods directly; see
+[cluster dependencies](../reference/dependencies.md).
 
 The **gateway** checks requests from the sandbox to approved services. It holds
 provider credentials and checks the run's identity, permissions and current
@@ -116,11 +116,12 @@ There are two task services. The disposable-job service retains status and an
 optional final answer. The retained-work service also saves supported native
 conversation and workspace state for later resume. Choose the
 [Hermes job guide](../guides/hermes-orchestration.md) or the
-[retained-work guide](../guides/portable-workflows.md) for the workflow you need.
+[Hermes with retained work](../guides/retained-work-kubernetes.md) guide for the
+workflow you need.
 
 ## Choose a next step
 
 - [Getting started](../guides/getting-started.md) runs the Kind demo.
 - [Install on Kubernetes](../guides/install-kubernetes.md) runs a first Pod on an existing cluster.
-- [Retained remote work](../guides/portable-workflows.md) starts a remote task that you can continue locally.
+- [Remote work and local resume](../guides/portable-workflows.md) starts a remote task that you can continue locally.
 - [System architecture](system-architecture.md) explains the components and trust boundaries.

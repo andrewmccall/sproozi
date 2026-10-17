@@ -6,7 +6,7 @@ terminal. The conversation ID and supported Git workspace state stay the same.
 
 A move keeps the execution's original deadline and total usage allowance. Each
 destination gets fresh identity and access. For a completed remote task that you
-want to resume later, use [retained remote work](portable-workflows.md).
+want to resume later, use [remote work and local resume](portable-workflows.md).
 
 This setup uses Codex and Claude Code with their upstream default versions. A session
 keeps one selected client throughout its lifetime. Start a new managed
@@ -17,7 +17,7 @@ session is not supported.
 
 The trusted home daemon owns a local Unix Docker socket, fixed image IDs, its TLS
 gateway, provider credentials and protected journals. Local start requires no
-cluster or kubeconfig. A developer can use the fixed remote profile after an
+cluster or kubeconfig. A developer can use the profile service after an
 administrator provisions it. The remote service holds its own Kubernetes
 credentials; the developer receives only the profile URL, public CA and protected
 principal token file.
@@ -101,10 +101,10 @@ its fixed HTTPS origin, principal token file, CA file and checkpoint byte limit.
 The remote placement alias must match the profile's `placementName`. All
 placements must use the same checkpoint byte limit and approve the same initial
 instructions and native version. The original home duration must also fit the
-remote profile and live policy; Kubernetes policy currently permits at most one
+profile service and live policy; Kubernetes policy currently permits at most one
 hour. Moving does not restart the lifetime clock.
 
-## Provision the fixed remote profile
+## Provision the profile service
 
 Follow [the profile setup](../../cmd/session-profile/README.md) to install the
 current controller/shared gateway and generated CRDs in an evaluation cluster
@@ -178,13 +178,13 @@ Attach to the selected native TUI:
 bin/sproozi attach --socket /absolute/private/home/control.sock --id SESSION_UUID
 ```
 
-Terminal resize reaches the native client. Ctrl-] detaches the local client while its daemon
+Terminal resize reaches the harness. Ctrl-] detaches the local client while its daemon
 and native process remain alive; attach again with the same command. Ctrl-C while
-attached reaches the native client. A reconnect replays a bounded terminal output tail. Avoid
+attached reaches the harness. A reconnect replays a bounded terminal output tail. Avoid
 native `/quit` when you intend to move; the placement owns graceful quit and the
 independent container stop/checkpoint boundary.
 
-Move to the configured remote profile, attach there, then return locally:
+Move to the configured profile service, attach there, then return locally:
 
 ```sh
 bin/sproozi move --socket /absolute/private/home/control.sock \

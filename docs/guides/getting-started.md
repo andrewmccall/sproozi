@@ -4,40 +4,24 @@ Sproozi runs an agent in a disposable Kubernetes Pod. The agent reaches approved
 services through a shared gateway, which checks the run's identity and policy.
 Provider credentials stay in the gateway.
 
-If you want an introduction to the resource names, read [core
-concepts](../explanations/core-concepts.md).
+This guide has two parts:
 
-Choose the path you want:
+1. **Check your setup, no accounts needed.** Build Sproozi, deploy it to a
+   throwaway Kind cluster and prove that its network enforcement works. This
+   takes one command once your tools are installed.
+2. **Run the investigation-to-PR demo.** Codex investigates a broken workload
+   and opens a pull request in your own disposable GitHub repository. This needs
+   a model account and a GitHub App.
 
-- **Explore locally:** follow the Kind demo below. Codex investigates a broken
-  workload and opens a pull request in your disposable GitHub repository.
-- **Use an existing Kubernetes cluster:** follow [Install on Kubernetes](install-kubernetes.md).
-  Start with a Pod that lists other Pods through the gateway. That first check
-  needs no model account or GitHub App.
+Already have a cluster? [Install on Kubernetes](install-kubernetes.md) instead.
+Its first agent Pod lists other Pods through the gateway and also needs no model
+account or GitHub App.
 
 Sproozi is a preview. Start in an evaluation environment and read the
 [deployment limitations](../reference/security-hardening.md) before using it for
-other workloads. The demo proposes a correction; it does not merge the PR or
-repair the running workload.
-
-## What you will create
-
-The Kind demo creates a dedicated two-node cluster with Calico for NetworkPolicy
-enforcement, Sproozi's controller and gateway, and a deliberately failing
-workload. It submits one `AgentRun` and checks the resulting PR, policy denials
-and sandbox cleanup.
-
-These four resources describe a run:
-
-| Resource | Purpose |
-| --- | --- |
-| `AgentRuntime` | Fixes the image, command and Pod security settings. |
-| `AgentPolicy` | Limits capabilities, resource access, consumption and lifetime. |
-| `AgentTemplate` | Selects a runtime and policy and supplies trusted instructions. |
-| `AgentRun` | Requests one task and a subset of the policy's capabilities. |
-
-The first three are administrator-owned. Creating a run does not let the caller
-choose a different image or grant itself more access.
+other workloads. The demo proposes a fix; it does not merge the PR or repair
+the running workload. If the resource names are new to you, read
+[core concepts](../explanations/core-concepts.md) first.
 
 ## 1. Prepare your computer
 
@@ -51,15 +35,13 @@ make sure they are on your `PATH`:
   1.33.1, so use kubectl 1.32, 1.33 or 1.34, within Kubernetes' supported
   [version skew](https://kubernetes.io/releases/version-skew-policy/#kubectl).
 - Git and the [GitHub CLI](https://cli.github.com/).
-- [Go 1.26.6](https://go.dev/dl/), Make, OpenSSL, Python 3, curl and `shasum`.
-  Go 1.26.6 is the repository's CI toolchain.
+- [Go](https://go.dev/dl/) 1.25 or later (CI uses 1.26.6), Make, OpenSSL,
+  Python 3, curl and `shasum`.
 
-Check Docker and sign in to GitHub:
+Check Docker:
 
 ```sh
 docker info
-gh auth login
-gh auth status
 ```
 
 Clone the repository and run the rest of this guide from its root:
@@ -87,58 +69,42 @@ export PATH="$PWD/.local/bin:$PATH"
 kubectl version --client
 ```
 
-You also need either an OpenAI API key with access to the demo's `gpt-6.1-sol`
-model or a ChatGPT plan that supports the repository's sign-in flow. The
-credential wizard lets you choose. API-key mode incurs API usage charges;
-ChatGPT mode consumes your plan's allowance. See
-[model provider authentication](model-provider-auth.md) for the details.
+## 2. Check your setup without any accounts
 
-### Cluster dependencies and external CRDs
-
-You need Docker and the host tools above before starting. `make demo` installs
-the cluster components below automatically in its dedicated Kind cluster.
-
-| Dependency | Needed for this demo? | How it is supplied |
-| --- | --- | --- |
-| Sproozi CRDs: `AgentRuntime`, `AgentPolicy`, `AgentTemplate`, `AgentRun` | Yes | `make install` installs the four definitions from this checkout. |
-| NetworkPolicy-enforcing CNI | Yes | Setup downloads pinned Calico 3.30.4. The demo installs its controller components, `crd.projectcalico.org` CRDs, and its bundled `AdminNetworkPolicy` and `BaselineAdminNetworkPolicy` definitions under `policy.networking.k8s.io`. |
-| External Kubernetes Agent Sandbox controller and CRDs | No | The current Sproozi adapter creates ordinary Pods in `sproozi-agents`. |
-| cert-manager and its CRDs | No | The demo creates its gateway certificate with OpenSSL. |
-| Prometheus Operator and monitoring CRDs | No | Only the optional monitoring overlays need an existing monitoring installation. |
-| gVisor, Kata Containers or a custom `RuntimeClass` | No | The demo uses Kind's default container runtime. |
-| Model account and GitHub App | Yes for the PR demo | You configure these in steps 2 to 4. They are external services, not cluster CRDs. |
-
-Here, "sandbox" means Sproozi's disposable agent Pod and its run-scoped
-identity, network policy and input contract. It does not mean the `Sandbox`
-resource from the separate
-[Kubernetes Agent Sandbox project](https://github.com/kubernetes-sigs/agent-sandbox).
-You do not need that project's `Sandbox`, `SandboxTemplate`, `SandboxClaim` or
-`SandboxWarmPool` CRDs or controllers. Installing them does not switch Sproozi
-to that adapter; integration is planned.
-
-Calico's pinned manifest is for this disposable Kind cluster. Sproozi requires
-an enforcing CNI, rather than Calico specifically. The
-[manual demo guide](manual-pr-demo.md) describes custom CNI inputs and optional
-monitoring. The base demo needs no external sandbox operator, admission webhook
-certificate manager or monitoring stack.
-
-### Optional: check dependencies before configuring providers
-
-From the repository root, you can first prove that Kind, the controller and
-NetworkPolicy enforcement work without a model account or GitHub App:
+Run:
 
 ```sh
 python3 hack/verify/quickstart.py doctor
 python3 hack/verify/quickstart.py dependencies
 ```
 
-This runs the repository's real Kind gate with cert-manager and optional metrics
-disabled. It checks a working connection, blocks it with deny-egress, then
-restores it after removing the policy. It observes the installed CRDs and
-removes its temporary cluster. Logs and `result.json` remain under
-`.local/verification/quickstart/`. This check does not run Codex or open a PR.
+`doctor` checks your host tools and Docker. `dependencies` builds the real
+controller image and deploys it to a temporary Kind cluster with Calico. It then
+proves that the network rules work: a test connection succeeds, a deny-egress
+policy blocks it, and removing the policy restores it. It skips the optional
+cert-manager and metrics checks, which the demo doesn't use.
 
-## 2. Create the disposable GitHub repository
+When it passes, the temporary cluster is deleted. Logs and `result.json` stay
+under `.local/verification/quickstart/`. This check doesn't run Codex or open a
+PR. [Cluster dependencies](../reference/dependencies.md) lists what the demo
+installs and what it doesn't need.
+
+## 3. Choose a model account
+
+The PR demo needs either an OpenAI API key with access to the demo's
+`gpt-6.1-sol` model or a ChatGPT plan that supports the repository's sign-in
+flow. The credential wizard in step 6 lets you choose. API-key mode incurs API
+usage charges; ChatGPT mode uses your plan's allowance. See
+[model provider authentication](model-provider-auth.md) for the details.
+
+Sign in to GitHub on your computer too:
+
+```sh
+gh auth login
+gh auth status
+```
+
+## 4. Create the disposable GitHub repository
 
 The agent will push a branch and open a real PR here. Use an unused repository
 name. These commands create a private repository with the expected file on its
@@ -159,7 +125,7 @@ the commit. If you already have a disposable repository, use that instead and
 put `demo-workload.yaml` from the example at its root on `main`. The automatic
 setup does not create or seed a repository.
 
-## 3. Create a GitHub App
+## 5. Create a GitHub App
 
 Sproozi uses a GitHub App installation to access the disposable repository.
 Your host's `gh` login lets the demo inspect the PR; it is a separate credential
@@ -193,7 +159,7 @@ The wizard will ask for the absolute path, which is
 `$PWD/.local/credentials/github-app.pem` from the repository root. It saves that
 path, rather than copying the key into the environment file.
 
-## 4. Configure the demo
+## 6. Configure the demo
 
 ```sh
 export IMG=controller:sproozi-demo
@@ -259,7 +225,7 @@ See [model provider authentication](model-provider-auth.md) for the lifecycle.
 Demo prerequisites and private configuration are available
 ```
 
-## 5. Run it
+## 7. Run it
 
 ```sh
 make demo IMG="$IMG" KIND_CLUSTER=sproozi-demo
@@ -289,7 +255,7 @@ kubectl get agentruns -n sproozi-system -w
 The target workload is deliberately broken. Its failing Pod is expected.
 The agent Pod appears in `sproozi-agents` and is removed when its run ends.
 
-## 6. Inspect the result and explore
+## 8. Inspect the result and explore
 
 After `make demo` finishes, select the demo context in your terminal:
 

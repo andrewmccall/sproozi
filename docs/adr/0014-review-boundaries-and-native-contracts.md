@@ -151,3 +151,13 @@ The [current architecture](../explanations/system-architecture.md),
 implemented behavior and limits. Regression and integration results are recorded
 in the task evidence; this ADR makes no new live provider, CNI, throughput or
 full native failure-matrix claim.
+
+## Implementation notes
+
+Release treats an existing Pod with `Unknown` or empty phase as present, so it
+keeps the contract, NetworkPolicy and ServiceAccount. When a provisioning status
+write is missing, release looks up the deterministic Pod name and adopts the
+Pod only when its managed-by label and exact Run UID label match. It recovers
+the deterministic identity and network names the same way. A lookup error or
+ownership mismatch blocks cleanup. This recovery never removes managed writer
+finalizers and never infers finalized usage from Pod deletion.

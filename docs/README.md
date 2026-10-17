@@ -11,8 +11,8 @@ to do. The main [README](../README.md) gives the project overview.
 | Understand the basic model | [Core concepts](explanations/core-concepts.md) |
 | Try the local Kind demo | [Getting started](guides/getting-started.md) |
 | Install on an existing cluster | [Install on Kubernetes and run a first Pod](guides/install-kubernetes.md) |
-| Check deployment requirements and limits | [Security hardening](reference/security-hardening.md) |
-| Start a remote task and continue locally | [Retained remote work](guides/portable-workflows.md) |
+| Check deployment requirements and limits | [Cluster dependencies](reference/dependencies.md), [security hardening](reference/security-hardening.md) |
+| Start a remote task and continue locally | [Remote work and local resume](guides/portable-workflows.md) |
 
 ## Task guides
 
@@ -21,7 +21,7 @@ These guides give prerequisites, steps and checks for specific tasks.
 - [Manual AgentRun to pull request](guides/manual-pr-demo.md)
 - [Model provider authentication](guides/model-provider-auth.md)
 - [Run disposable jobs through Hermes](guides/hermes-orchestration.md)
-- [Deploy Hermes with retained native work](guides/retained-work-kubernetes.md)
+- [Hermes with retained work](guides/retained-work-kubernetes.md)
 - [Move a native session between Docker and Kubernetes](guides/session-mobility.md)
 
 ## Understand the system

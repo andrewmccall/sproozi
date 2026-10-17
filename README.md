@@ -54,7 +54,7 @@ Or choose a path closer to what you want to do:
 | Run Codex remotely, then pull its work back to my machine | [Remote work and local resume](docs/guides/portable-workflows.md) |
 | Have Hermes delegate bounded tasks | [Hermes orchestration](docs/guides/hermes-orchestration.md) |
 | Check the investigation-to-PR demo manually | [Manual acceptance checks](docs/guides/manual-pr-demo.md) |
-| Connect persistent Hermes to retained Codex work | [Retained-work deployment](docs/guides/retained-work-kubernetes.md) |
+| Connect persistent Hermes to retained Codex work | [Hermes with retained work](docs/guides/retained-work-kubernetes.md) |
 
 The CLI can be built with:
 
@@ -85,7 +85,7 @@ These are **specific verified scenarios**, not a claim that every configuration 
 Isolation only works if the environment is configured and enforced correctly. In particular:
 
 - Kubernetes network restrictions require an enforcing network plugin and verification that agents cannot bypass the gateway. Kubernetes NetworkPolicy permits traffic involving a Pod's own node, so policy alone is not a complete isolation guarantee.
-- Rules can restrict external operations, but their precision depends on the integration. A service-aware permission can constrain particular actions. Configured Model Context Protocol (MCP) access checks tools and arguments, while a generic HTTPS allowance only constrains the destination.
+- Rules can restrict external operations, but their precision depends on the integration. A service-aware permission can constrain particular actions. Configured Model Context Protocol (MCP) access checks tools and arguments, while generic HTTPS egress only constrains the destination.
 - Runtime validation requires non-root execution, no added Linux capabilities, RuntimeDefault seccomp and a read-only root filesystem. Template volumes and environment sources are restricted.
 - Both gateway backends limit connections and sessions, with deadlines for authentication and live permission checks. Cleanup keeps identity and network controls while a Pod's state or ownership is uncertain.
 - Resource and usage limits exist, but model-token and cost estimates are **not** hard guarantees against provider spend.

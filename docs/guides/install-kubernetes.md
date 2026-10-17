@@ -23,13 +23,10 @@ You need:
 - Administrator access to create CRDs, ClusterRoles, namespaces and workloads.
 - An image registry that your build machine can push to and your cluster nodes
   can pull from. If images are private, use the optional registry steps below.
-- Docker with Buildx, Git, kubectl, Go 1.26.6, Make, OpenSSL and Python 3 on your computer.
+- Docker with Buildx, Git, kubectl, Go 1.25 or later (CI uses 1.26.6), Make, OpenSSL and Python 3 on your computer.
 
-The repository's Kind checks use Kubernetes 1.33.1. This is a tested baseline,
-not a compatibility claim for every Kubernetes version. The tools image uses
-kubectl 1.34.1; check the
-[kubectl version skew policy](https://kubernetes.io/releases/version-skew-policy/#kubectl)
-against your cluster version before using it.
+[Cluster dependencies](../reference/dependencies.md) lists what the cluster
+needs and the Kubernetes and kubectl versions that have been tested.
 
 Start from the repository root. If you have not cloned it yet:
 

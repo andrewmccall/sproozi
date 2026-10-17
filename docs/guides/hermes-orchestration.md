@@ -2,7 +2,7 @@
 
 Hermes keeps conversation history, memory and schedules on a persistent volume.
 Its native MCP client submits approved tasks to disposable Sproozi workers. It
-can read a saved final answer after the worker Pod is deleted. The initial
+can read a saved final answer after the agent Pod is deleted. The initial
 workflow lists Pods in `sproozi-demo`; it grants no Kubernetes mutations or
 GitHub writes.
 
@@ -12,8 +12,8 @@ for later resume, use [Hermes with retained work](retained-work-kubernetes.md).
 The deployment follows the persistent-agent pattern in the upstream [Agent
 Sandbox Hermes
 example](https://agent-sandbox.sigs.k8s.io/docs/use-cases/examples/hermes-agent/).
-This release uses Sproozi's current Pod execution adapter and a separate
-coordinator Deployment. External Agent Sandbox CRDs are not required.
+Sproozi runs it as a separate coordinator Deployment and creates agent Pods
+directly; see [cluster dependencies](../reference/dependencies.md).
 
 ## Deploy with your own model account
 

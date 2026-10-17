@@ -165,4 +165,4 @@ to push them.
 
 See [ADR 0013](../adr/0013-configured-projects-and-workspace-revisions.md) for
 alternatives, accepted costs and revisit conditions, and the
-[retained-work deployment guide](../guides/retained-work-kubernetes.md) for setup.
+[Hermes with retained work](../guides/retained-work-kubernetes.md) guide for setup.

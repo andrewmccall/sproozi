@@ -15,39 +15,38 @@ alone when the API server is on that node. See
 [Kubernetes NetworkPolicy semantics](https://kubernetes.io/docs/concepts/services-networking/network-policies/).
 
 The gateway validates the ServiceAccount namespace, name, UID, audience and
-active Run state. It checks new requests against live policy and closes existing
-sessions through bounded revalidation. Authentication and each live authority
-lookup have a five-second deadline. The default one-second revalidation interval
-can therefore take up to another five seconds to resolve a slow lookup before
-closing the session. A timeout does not prove the dependency or upstream work
-stopped, and revocation cannot reverse committed side effects.
+active Run state. It checks each new request against live policy. It rechecks
+open connections every second and closes them once the run is no longer active
+or allowed. Authentication and each live policy lookup have a five-second
+deadline, so a slow lookup can delay that close by up to five more seconds. A
+timeout doesn't prove that the lookup or the upstream work stopped, and
+revoking access can't undo changes an upstream service already made.
 
-Both gateway backends admit at most 128 TCP connections before TLS/header parsing
-and eight inspected sessions per execution by default. Excess connections close;
-CONNECT capacity exhaustion returns 503 and per-execution session exhaustion
-returns 429. Sessions retain an absolute five-minute lifetime, including CONNECT
-acknowledgment and TLS setup. The transport also bounds pending authority callback
-workers and retains their slots until those callbacks return. These are finite
-concurrency limits, not traffic-rate fairness or a measured capacity guarantee.
-The typed transport configuration validates changes; there are no deployment
-environment overrides for these bounds.
+Both gateway backends (Kubernetes and Docker) apply these default limits:
+
+| Limit | Default | When exceeded |
+| --- | --- | --- |
+| TCP connections before TLS and header parsing | 128 | Excess connections close. Exhausted CONNECT capacity returns 503. |
+| Inspected sessions per execution | 8 | The gateway returns 429. |
+| Session lifetime, including CONNECT and TLS setup | 5 minutes | The session closes. |
+| Authentication and live policy lookup | 5 seconds each | The lookup times out; see above. |
+
+Pending policy lookups also have a fixed number of slots. A slow lookup keeps
+its slot until it returns, even after timing out. These limits bound
+concurrency; they don't provide rate fairness or a measured capacity guarantee.
+You can't override them with deployment environment variables.
 
 The projected token lifetime is two hours; policy limits execution to one hour.
 The demo reads the token once. Revocation depends on live gateway checks rather
 than waiting for token expiry.
 
 Keep `sproozi-agents` dedicated to managed sandboxes. Restrict who can create
-workloads, ServiceAccounts or runtime templates. Runtime validation rejects init
-and ephemeral containers. All normal containers in a Pod share one run principal.
-For working completion today, use one container named `agent` and no long-running
-ordinary sidecar. Every container must drop ALL Linux capabilities and add none,
-use RuntimeDefault seccomp and a read-only root filesystem, and prohibit privilege
-escalation. Shared process namespaces, envFrom, Secret environment references and
-template-provided Secret or projected volumes are rejected. Allowed template
-volumes contain exactly one positive size-limited EmptyDir, ConfigMap or
-DownwardAPI source. The controller alone injects the gateway token and managed
-continuity volumes. Runtime authors remain trusted: public ConfigMaps and literal
-environment values must not contain provider credentials.
+workloads, ServiceAccounts or runtimes. All containers in a Pod share one run
+identity. For completion to work today, use one container named `agent` and no
+long-running sidecar. The [AgentRuntime container
+rules](agentruntime.md#container-validation-rules) list what admission rejects.
+Runtime authors are trusted: keep provider credentials out of public ConfigMaps
+and literal environment values.
 
 ## Restrict remote MCP access
 
@@ -89,21 +88,30 @@ See [the resource scope](permissions-and-capabilities.md#kubernetes-read-scope).
 
 ## Model budgets are not hard spending ceilings
 
-The deployed gateway stores reservations atomically in Kubernetes, keyed by Run
-UID and capability. Requests with an output-token limit reserve that limit,
-while provider settlement counts total input and output tokens. Input usage can
-therefore exceed the reservation. Rejecting a response after settlement fails
-does not undo the provider call, and retained reservations can undercount the
-consumption already incurred.
+This section is the reference for how budget limits behave. Field syntax is in
+[AgentPolicy budgets](agentpolicy.md#endpoint-budgets).
 
-Administrator-owned pricing converts verified usage into cost. Cost-bounded
-OpenAI API-key and Anthropic inference require an exact model row with positive
-input, cached-input and output rates before provider work. OpenAI cost-bounded
-requests select `service_tier: default`; omission inserts that value and explicit
-nondefault tiers are refused. Anthropic retains its separate standard-tier and
-cache-category checks. Missing consumed-category pricing or uncertain settlement
-can still withhold a response after provider consumption. Keep the table aligned
-with approved models and use provider-side monitoring and limits.
+The deployed gateway stores reservations atomically in Kubernetes, keyed by Run
+UID and capability. Before a model call, the gateway reserves capacity:
+
+- OpenAI requests reserve the requested output-token limit, or all remaining
+  capacity when the request sets none.
+- Anthropic requests reserve all remaining token and cost capacity.
+
+After the call, the gateway settles the provider-reported input and output
+tokens. Input tokens can push usage past the reservation. If settlement fails,
+the gateway withholds the response, but the provider has already done the work,
+and the kept reservation can undercount what was spent.
+
+Within one gateway process, model calls that share a budget account run one at
+a time. Cancellation and execution deadlines still apply while a call waits.
+
+Administrator-owned pricing converts verified usage into cost; the
+[pricing rules](agentpolicy.md#endpoint-budgets) say which rows a cost limit
+needs. A missing price for a category the provider charged, or an uncertain
+settlement, can still withhold a response after the provider did the work. Keep
+the pricing table aligned with approved models, and use the provider's own
+monitoring and spending limits.
 
 OpenAI admission accepts only `GET /v1/models`, `POST /v1/responses` and
 `POST /v1/chat/completions`, without query strings or escaped paths. ChatGPT
@@ -112,24 +120,21 @@ workload organization, project and account selector headers before applying the
 trusted provider credential. Use a suitably scoped key; workload headers cannot
 select the provider identity.
 
-The API-key route still has no complete billable-field allowlist. The token
-ledger does not price all provider-hosted tools, storage, image/audio work or
-other non-token charges. Native client-executed tool declarations remain supported
-and must not be confused with provider-hosted execution. These changes do not
-make token or cost ceilings hard provider-spending bounds. See
+The API-key route has no complete allowlist of billable request fields. The
+token ledger does not price provider-hosted tools, storage, image or audio work,
+or other non-token charges. (Tools that the harness runs itself are supported;
+they are not provider-hosted.) See
 [model authentication and admission](../guides/model-provider-auth.md#protocol-and-budgets).
 
 ## Cleanup and state retention
 
-Terminal handling and explicit deletion retain containment until the Pod is
-observed absent or terminal. An existing Pod with Unknown or empty phase does not
-establish absence and keeps its contract, NetworkPolicy and ServiceAccount.
-When a provisioning status write is missing, release looks up the deterministic
-Pod name and requires its managed-by and exact Run UID labels before adoption.
-It also recovers the deterministic identity/network names. Lookup errors or
-ownership mismatches block cleanup. Inspect ownership and containment after
-interrupted runs; this recovery does not justify forced removal of managed writer
-finalizers or infer sealed usage from Pod deletion.
+Sproozi keeps a run's NetworkPolicy, ServiceAccount and contract until it sees
+the Pod gone or terminal. A Pod in `Unknown` phase counts as still running. If
+Sproozi can't confirm which Pod belongs to a run, cleanup waits. After an
+interrupted run, check the Pod and its containment yourself. Don't remove
+Sproozi finalizers by hand. A deleted Pod doesn't mean its usage was recorded.
+[ADR 0014](../adr/0014-review-boundaries-and-native-contracts.md#implementation-notes)
+records how release recovers ownership.
 
 `retentionTTL` governs the AgentRun record. Budget ConfigMaps have no automatic
 retention/deletion path. Webhook replay keys are stored atomically in ConfigMaps

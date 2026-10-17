@@ -54,9 +54,9 @@ The resources have separate responsibilities:
 ### `model.inference`
 
 The run must request `model.inference`, and current policy must allow it. An
-optional `AgentPolicy.spec.budgets[model.inference]` entry adds usage
-reservations and accounting. Admission can underestimate total model
-consumption. Token and cost limits are not hard provider-spending ceilings.
+optional `AgentPolicy.spec.budgets[model.inference]` entry limits tokens and
+cost. These limits are not hard spending ceilings; see
+[security hardening](../reference/security-hardening.md#model-budgets-are-not-hard-spending-ceilings).
 
 ### `network.egress`
 
@@ -141,13 +141,12 @@ storage adapters. `Meter.Spend` charges known usage before forwarding.
 `Meter.Reserve` holds capacity for variable usage. The handler then settles
 actual usage or releases the reservation.
 
-Model handlers use provider-reported usage and administrator pricing. The
-current admission estimate can omit input tokens. Rejecting an excessive
-settlement does not undo provider consumption. Native non-model handlers charge
-one unit per authorized upstream request, including each GitHub read-back
-request. Configured MCP charges before a tool invocation, including failed
-attempts. Its initialization and discovery are bounded separately and do not
-consume tool-call units.
+Model handlers settle provider-reported usage at administrator prices.
+[Security hardening](../reference/security-hardening.md#model-budgets-are-not-hard-spending-ceilings)
+explains why that is not a hard ceiling. Other native handlers charge one unit
+per authorized upstream request, including each GitHub read-back request.
+Configured MCP charges one unit before each tool call, including calls that
+fail. Its initialization and discovery have separate limits and cost no units.
 
 ## Future extensions
 
