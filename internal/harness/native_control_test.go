@@ -1,8 +1,12 @@
 package harness
 
 import (
+	"context"
+	"errors"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNativeReplyBindsOperationStateAndThread(t *testing.T) {
@@ -42,5 +46,65 @@ func TestInitialNativeReplyBindsObservedIdentityOnce(t *testing.T) {
 		if (err == nil) != tc.ok || err == nil && reply.ThreadID != tc.want {
 			t.Fatalf("bound=%q reply=%+v error=%v", tc.bound, reply, err)
 		}
+	}
+}
+
+func TestQuiesceNativeBindsObservedThreadBeforeCompletedTurn(t *testing.T) {
+	const thread = "12345678-1234-1234-1234-123456789abc"
+	var calls []NativeOp
+	var bound string
+	statusPolls := 0
+	control := func(_ context.Context, op NativeOp) ([]byte, error) {
+		calls = append(calls, op)
+		switch op {
+		case NativeGate:
+			return []byte(`{"op":"gate","state":"stopping"}`), nil
+		case NativeStatus:
+			statusPolls++
+			if statusPolls == 1 {
+				return []byte(`{"op":"status","state":"stopping"}`), nil
+			}
+			return []byte(`{"op":"status","state":"stopping","threadId":"` + thread + `"}`), nil
+		case NativeQuiesce:
+			if bound == "" {
+				return nil, errors.New("quiesce before binding")
+			}
+			return []byte(`{"op":"quiesce","state":"stopped","threadId":"` + thread + `"}`), nil
+		}
+		return nil, errors.New("unexpected operation")
+	}
+	bind := func(_ context.Context, observed string) error { bound = observed; return nil }
+	got, err := QuiesceNative(t.Context(), control, "", time.Now().Add(time.Minute), bind)
+	if err != nil || got != thread || bound != thread {
+		t.Fatalf("thread=%q bound=%q error=%v", got, bound, err)
+	}
+	want := []NativeOp{NativeGate, NativeStatus, NativeStatus, NativeQuiesce}
+	if !slices.Equal(calls, want) {
+		t.Fatalf("operations = %v, want %v", calls, want)
+	}
+}
+
+func TestQuiesceNativeSeparatesLostReplyFromRejectedTurn(t *testing.T) {
+	const thread = "12345678-1234-1234-1234-123456789abc"
+	gate := []byte(`{"op":"gate","state":"stopping","threadId":"` + thread + `"}`)
+	noBind := func(context.Context, string) error { return errors.New("a bound thread must not be rebound") }
+	lost := func(_ context.Context, op NativeOp) ([]byte, error) {
+		if op == NativeGate {
+			return gate, nil
+		}
+		return nil, errors.New("connection reset")
+	}
+	if _, err := QuiesceNative(t.Context(), lost, thread, time.Now().Add(time.Minute), noBind); !errors.Is(err, ErrQuiesceUnacknowledged) {
+		t.Fatalf("lost quiesce reply: %v", err)
+	}
+	rejected := func(_ context.Context, op NativeOp) ([]byte, error) {
+		if op == NativeGate {
+			return gate, nil
+		}
+		return []byte(`{"op":"quiesce","state":"stopping","error":"no completed turn"}`), nil
+	}
+	_, err := QuiesceNative(t.Context(), rejected, thread, time.Now().Add(time.Minute), noBind)
+	if err == nil || errors.Is(err, ErrQuiesceUnacknowledged) {
+		t.Fatalf("a rejected quiesce must not look like a lost reply: %v", err)
 	}
 }

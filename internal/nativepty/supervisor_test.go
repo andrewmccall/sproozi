@@ -103,12 +103,6 @@ done`
 	if n, err := b.Write([]byte("rejected\r")); n != 0 || !errors.Is(err, nativepty.ErrGated) {
 		t.Fatalf("gated write: %d %v", n, err)
 	}
-	if err := s.ResumeInput(); err != nil {
-		t.Fatal(err)
-	}
-	write(t, b, "accepted\r")
-	until(t, b, "INPUT:<accepted>")
-	s.GateInput()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	exit, err := s.QuitAfterCompletedTurn(ctx)

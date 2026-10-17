@@ -100,8 +100,7 @@ func (p *fixturePlacement) Stop(ctx context.Context, l session.Launch, i session
 			return session.Stopped{}, ctx.Err()
 		}
 	}
-	l.ThreadID = testThread
-	s := session.Stopped{Launch: l, Incarnation: i, ActualStopped: !p.missingFence, Checkpoint: p.data, CheckpointDigest: p.meta.SHA256}
+	s := session.Stopped{Launch: l, Incarnation: i, ActualStopped: !p.missingFence, ThreadID: testThread, Checkpoint: p.data, CheckpointDigest: p.meta.SHA256}
 	if !p.missingSeal {
 		usage := map[string]budget.TrustedUsage{}
 		for name := range l.Allowances {

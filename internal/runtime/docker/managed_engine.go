@@ -21,7 +21,6 @@ import (
 )
 
 const (
-	quiesceCommand    = "quiesce"
 	harnessFlag       = "--harness"
 	exitedStatus      = "exited"
 	localVolumeDriver = "local"
@@ -218,20 +217,20 @@ func (e *Engine) VerifyManaged(ctx context.Context, i Instance, s ManagedSpec) e
 	}
 	return nil
 }
-func (e *Engine) NativeOperation(ctx context.Context, i Instance, op string, input []byte) ([]byte, error) {
+func (e *Engine) NativeOperation(ctx context.Context, i Instance, op harness.NativeOp, input []byte) ([]byte, error) {
 	switch op {
-	case "activate", "status", quiesceCommand, "gate":
+	case harness.NativeActivate, harness.NativeStatus, harness.NativeQuiesce, harness.NativeGate:
 		if len(input) != 0 {
 			return nil, errors.New("unexpected native operation input")
 		}
-	case "configure":
+	case harness.NativeConfigure:
 		if len(input) > 256<<10 {
 			return nil, errors.New("native configuration exceeds limit")
 		}
 	default:
 		return nil, errors.New("unknown fixed native operation")
 	}
-	return e.exec(ctx, i, []string{nativeCommandPath, op}, input, 64<<10)
+	return e.exec(ctx, i, []string{nativeCommandPath, string(op)}, input, 64<<10)
 }
 func (e *Engine) CaptureCheckpoint(ctx context.Context, i Instance, kind harness.NativeKind, thread string, includeIgnored []string, maxBytes int64) ([]byte, error) {
 	if err := workspace.ValidateIgnoredPaths(includeIgnored); err != nil {
@@ -312,7 +311,7 @@ func (e *Engine) AttachNative(ctx context.Context, i Instance, input io.Reader, 
 	if !state.Running || state.PID <= 0 {
 		return errors.New("native attachment requires running bound container")
 	}
-	args := []string{"--host", "unix://" + e.socket, "--config", e.config, execCommand, "--interactive", i.ID, nativeCommandPath, "attach"}
+	args := []string{"--host", "unix://" + e.socket, "--config", e.config, execCommand, "--interactive", i.ID, nativeCommandPath, string(harness.NativeAttach)}
 	cmd := exec.CommandContext(ctx, e.binary, args...)
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + e.config, "LC_ALL=C"}
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = input, output, &boundedOutput{limit: 4096}

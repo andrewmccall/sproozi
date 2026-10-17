@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/session"
 )
 
@@ -33,7 +34,7 @@ func TestAbortIndependentAllocationWhileAnotherStopIsHeld(t *testing.T) {
 	entered := make(chan struct{})
 	original := p.engine.execute
 	p.engine.execute = func(ctx context.Context, input []byte, max int, args []string) ([]byte, error) {
-		if len(args) == 5 && args[0] == execCommand && args[2] == firstInc.ResourceUID && args[3] == nativeCommandPath && args[4] == quiesceCommand {
+		if len(args) == 5 && args[0] == execCommand && args[2] == firstInc.ResourceUID && args[3] == nativeCommandPath && args[4] == string(harness.NativeQuiesce) {
 			close(entered)
 			<-ctx.Done()
 			return nil, ctx.Err()

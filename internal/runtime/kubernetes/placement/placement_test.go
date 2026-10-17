@@ -134,8 +134,34 @@ func (c *admissionClient) Create(ctx context.Context, obj client.Object, options
 	if err := c.Client.Create(ctx, run, options...); err != nil {
 		return err
 	}
-	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: runtimekube.AgentsNamespace, Name: run.Status.Identity.SandboxName, UID: types.UID(uuid.NewString()), Finalizers: []string{runtimekube.ManagedWriterFenceFinalizer}, Labels: map[string]string{runtimekube.RunUIDLabel: string(run.UID), runtimekube.RunNamespaceLabel: run.Namespace}}, Spec: corev1.PodSpec{ServiceAccountName: "approved-worker"}, Status: corev1.PodStatus{Phase: corev1.PodRunning, ContainerStatuses: []corev1.ContainerStatus{{Name: nativeContainer, ContainerID: "containerd://native", State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}}, {Name: runtimekube.CaptureContainer, ContainerID: "containerd://helper", State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}}}}}
-	return c.Client.Create(ctx, pod)
+	return c.Client.Create(ctx, admittedPod(run))
+}
+
+// admittedPod is the running managed worker Pod the controller would create
+// for run: writer-fence finalizer, Run labels, and both the native container
+// and the capture helper running.
+func admittedPod(run *api.AgentRun) *corev1.Pod {
+	running := corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace:  runtimekube.AgentsNamespace,
+			Name:       run.Status.Identity.SandboxName,
+			UID:        types.UID(uuid.NewString()),
+			Finalizers: []string{runtimekube.ManagedWriterFenceFinalizer},
+			Labels: map[string]string{
+				runtimekube.RunUIDLabel:       string(run.UID),
+				runtimekube.RunNamespaceLabel: run.Namespace,
+			},
+		},
+		Spec: corev1.PodSpec{ServiceAccountName: "approved-worker"},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			ContainerStatuses: []corev1.ContainerStatus{
+				{Name: nativeContainer, ContainerID: "containerd://native", State: running},
+				{Name: runtimekube.CaptureContainer, ContainerID: "containerd://helper", State: running},
+			},
+		},
+	}
 }
 
 // The API finalizer retains the object; this separate fixture observation models
@@ -166,7 +192,7 @@ type protocolExecutor struct {
 	data                       []byte
 	meta                       checkpoint.Metadata
 	initial                    []byte
-	state                      string
+	state                      harness.NativeState
 	lostActivate, skipActivate bool
 	finishes                   int
 	onCommand                  func(string) error
@@ -213,21 +239,21 @@ func (e *protocolExecutor) Execute(ctx context.Context, namespace, pod, containe
 		}
 	}
 	switch args[1] {
-	case nativeActivate:
+	case string(harness.NativeActivate):
 		if !e.skipActivate {
-			e.state = nativeActive
+			e.state = harness.NativeActive
 		}
 		if e.lostActivate {
 			e.lostActivate = false
 			return errors.New("lost native acknowledgement")
 		}
-	case nativeGate:
-		e.state = "stopping"
-	case nativeQuiesce:
+	case string(harness.NativeGate):
+		e.state = harness.NativeStopping
+	case string(harness.NativeQuiesce):
 		if e.failQuiesce {
 			return errors.New("native completed turn remains unavailable")
 		}
-		e.state = nativeStopped
+		e.state = harness.NativeStopped
 		var actual corev1.Pod
 		if err := e.kube.Get(ctx, client.ObjectKey{Namespace: namespace, Name: pod}, &actual); err != nil {
 			return err
@@ -239,12 +265,12 @@ func (e *protocolExecutor) Execute(ctx context.Context, namespace, pod, containe
 		if e.lostQuiesce {
 			return errors.New("lost completed-turn acknowledgement")
 		}
-	case nativeStatus:
+	case string(harness.NativeStatus):
 	default:
 		return errors.New("unexpected command")
 	}
 	thread := fixtureThread
-	if e.initial != nil && (e.state == nativePrepared || args[1] == nativeActivate) {
+	if e.initial != nil && (e.state == harness.NativePrepared || args[1] == string(harness.NativeActivate)) {
 		thread = ""
 	}
 	return json.NewEncoder(output).Encode(map[string]any{"op": args[1], "state": e.state, "threadId": thread})
@@ -278,7 +304,7 @@ func TestMoveStopWaitsForNativeTurnBeforeGatewayRevocationAndSeal(t *testing.T) 
 	}
 	var events []string
 	e.onCommand = func(command string) error {
-		if command == nativeGate || command == nativeQuiesce {
+		if command == string(harness.NativeGate) || command == string(harness.NativeQuiesce) {
 			r, err := p.registry.Get(ctx, local.Reference)
 			if err != nil {
 				return err
@@ -369,6 +395,38 @@ func TestUnknownNativeQuiescenceKeepsGatewayAndAllocationUntilRetry(t *testing.T
 	e.failQuiesce = false
 	if _, err = p.Stop(ctx, l, i); err != nil || sealed != 1 {
 		t.Fatalf("completed turn retry: %v seals=%d", err, sealed)
+	}
+}
+
+// A failed seal after the exact Pod terminated is the Placement.Stop
+// "fenced, usage unsealed" outcome, the same as Docker's, not an unknown stop.
+func TestSealFailureAfterFenceReportsStoppedWriterWithUnsealedUsage(t *testing.T) {
+	p, _, _, l, data := setup(t)
+	ctx := context.Background()
+	i, err := p.Prepare(ctx, l, data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = p.Activate(ctx, l, i); err != nil {
+		t.Fatal(err)
+	}
+	ledgerDown := true
+	p.ledger = &observedLedger{Ledger: p.ledger, beforeSeal: func(context.Context, budget.AccountKey) error {
+		if ledgerDown {
+			return errors.New("ledger unavailable")
+		}
+		return nil
+	}}
+	stopped, err := p.Stop(ctx, l, i)
+	if !errors.Is(err, session.ErrUsageUnsealed) {
+		t.Fatalf("seal failure error = %v, want ErrUsageUnsealed", err)
+	}
+	if !stopped.ActualStopped || stopped.Receipt != nil || stopped.Incarnation != i {
+		t.Fatalf("seal failure result = %+v, want fenced writer without receipt", stopped)
+	}
+	ledgerDown = false
+	if stopped, err = p.Stop(ctx, l, i); err != nil || stopped.Receipt == nil {
+		t.Fatalf("retried stop did not seal: %+v %v", stopped, err)
 	}
 }
 
@@ -528,9 +586,9 @@ func setupKind(t *testing.T, kind harness.NativeKind) (*Placement, *admissionCli
 	}
 	t.Cleanup(func() { _ = p.Close() })
 	data, meta := fixtureArtifactKind(t, kind)
-	executor := &protocolExecutor{kube: kube, data: data, meta: meta, state: nativePrepared}
+	executor := &protocolExecutor{kube: kube, data: data, meta: meta, state: harness.NativePrepared}
 	p.exec = executor
-	l := session.Launch{Harness: kind, SessionID: uuid.NewString(), AllocationID: uuid.NewString(), OperationID: uuid.NewString(), ThreadID: fixtureThread, Epoch: 2, Placement: "remote", InstructionDigest: p.config.InstructionDigest, Deadline: time.Now().Add(30 * time.Minute).UTC(), Allowances: a, CheckpointDigest: meta.SHA256}
+	l := session.Launch{Harness: kind, ExecutionID: uuid.NewString(), AllocationID: uuid.NewString(), OperationID: uuid.NewString(), ThreadID: fixtureThread, Epoch: 2, Placement: "remote", InstructionDigest: p.config.InstructionDigest, Deadline: time.Now().Add(30 * time.Minute).UTC(), Allowances: a, CheckpointDigest: meta.SHA256}
 	return p, kube, executor, l, data
 }
 

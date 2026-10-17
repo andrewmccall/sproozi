@@ -8,10 +8,10 @@ The registry requires an owned private directory, uses a single-owner file lock
 and retains atomic records before external mutations. Reopening requires the
 same placement configuration.
 
-`CreateLocal` accepts a workspace artifact and an initial `session.Launch` with
-empty native thread and checkpoint IDs. `Prepare` accepts a known native UUID
-and an aggregate checkpoint whose digest matches the immutable launch. Both
-create an inert native container, a separate checkpoint helper and a network
+`Prepare` accepts either a workspace artifact for a first visit, whose
+`session.Launch` has empty native thread and checkpoint IDs, or a known native
+UUID and an aggregate checkpoint whose digest matches the immutable launch. It
+creates an inert native container, a separate checkpoint helper and a network
 anchor. After actual container registration, `InitializeAllocation` supplies
 fresh native environment, optional model/options and public gateway trust.
 `Activate` opens gateway authority before the fixed native activation operation.
@@ -21,10 +21,10 @@ retained activating intent through the same authority admission and native gate,
 so lost activation replies recover on the original allocation and incarnation.
 Admission errors remain unknown and cannot become prepared or active.
 Inspection of a creating record is observation-only and returns `preparing`;
-`CreateLocal`/`Prepare` explicitly retry that intent. `CancelInitial` handles a
-partial initial launch by discovering and fencing only exact already-created
-fixed roles, including lost create replies. It creates no container or authority
-and invents no native UUID or usage receipt.
+`Prepare` explicitly retries that intent. `AbortPreparation` handles a partial
+preparation whose incarnation was never reported by discovering and fencing only
+exact already-created fixed roles, including lost create replies. It creates no
+container or authority and invents no native UUID or usage receipt.
 
 The home gateway implements these hooks:
 
@@ -65,8 +65,9 @@ rejected after the move gate closes.
 `Stop` gates input and preserves admitted gateway work while the supported final
 native turn completes. After native quiet, it revokes gateway authority and
 independently stops the actual container before capture. For the first local
-session, it binds and persists the observed native UUID before quitting; the
-returned `Stopped.Launch` contains that UUID for coordinator registration. The
+session, it binds and persists the observed native UUID before quitting. The
+launch never changes: `Stopped.ThreadID` reports that UUID, and
+`Stopped.Launch` and the receipt keep the launch as prepared. The
 supervisor socket and journal are workload-accessible diagnostics. Neither a
 quit acknowledgement nor PTY process-group exit proves every tool stopped.
 Docker must independently report the exact native container as stopped with

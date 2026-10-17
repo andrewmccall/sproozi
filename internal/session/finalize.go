@@ -34,7 +34,7 @@ func (c *Coordinator) Finalize(ctx context.Context, id, operationID string) (Rec
 			if !op.Finalize {
 				return r, errors.New("session: operation intent conflict")
 			}
-			if op.Complete {
+			if op.done() {
 				return r, nil
 			}
 			return c.drive(ctx, r, i)
@@ -51,13 +51,14 @@ func (c *Coordinator) Finalize(ctx context.Context, id, operationID string) (Rec
 	if len(r.Operations) >= maxOperations {
 		return r, errors.New("session: operation retention limit reached")
 	}
-	stage := stagePrepare
-	if r.Active != nil {
-		stage = stageStop
-		r.Phase = PhaseStopping
+	if r.Active == nil {
+		// Nothing runs: retain the operation binding so a replay stays idle.
+		r.Operations = append(r.Operations, Operation{ID: operationID, Finalize: true, Stage: stageComplete})
+		return r, c.save(r)
 	}
-	r.Operations = append(r.Operations, Operation{ID: operationID, Finalize: true, Stage: stage})
+	r.Operations = append(r.Operations, Operation{ID: operationID, Finalize: true, Stage: stageStop})
 	r.PendingOperation = operationID
+	r.Phase = PhaseStopping
 	if err = c.save(r); err != nil {
 		return r, err
 	}
@@ -68,7 +69,6 @@ func (c *Coordinator) finishFinalization(r Record, index int) (Record, error) {
 	if r.Active != nil || r.Operations[index].Stage != stagePrepare {
 		return r, errors.New("session: finalization stop remains unresolved")
 	}
-	r.Operations[index].Complete = true
 	r.Operations[index].Stage = stageComplete
 	r.PendingOperation = ""
 	r.Phase = PhaseIdle

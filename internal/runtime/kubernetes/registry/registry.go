@@ -21,6 +21,7 @@ import (
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/budget"
 	"github.com/andrewmccall/sproozi/internal/harness"
+	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/workspace"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -537,14 +538,18 @@ func validateCancellationReceipt(r *StopReceipt, ceilings map[api.CapabilityKind
 }
 
 func validateSeals(seals map[api.CapabilityKind]budget.TrustedUsage, ceilings map[api.CapabilityKind]api.EndpointBudget) error {
-	if len(seals) != len(ceilings) {
-		return fmt.Errorf("incomplete mobility accounting seals")
-	}
+	// Registry ceilings always bound units; zero cost means unbounded spend.
+	allowances := make(map[string]session.Allowance, len(ceilings))
+	usage := make(map[string]budget.TrustedUsage, len(seals))
 	for capability, ceiling := range ceilings {
-		seal, ok := seals[capability]
-		if !ok || seal.Units < 0 || seal.CostMicros < 0 || seal.Units > ceiling.MaxUnits || ceiling.MaxCostMicros > 0 && seal.CostMicros > ceiling.MaxCostMicros {
-			return fmt.Errorf("invalid mobility accounting seal")
-		}
+		allowances[string(capability)] = session.Allowance{Units: session.Limit{Bounded: true, Value: ceiling.MaxUnits},
+			CostMicros: session.Limit{Bounded: ceiling.MaxCostMicros > 0, Value: ceiling.MaxCostMicros}}
+	}
+	for capability, seal := range seals {
+		usage[string(capability)] = seal
+	}
+	if err := session.CheckUsage(allowances, usage); err != nil {
+		return fmt.Errorf("invalid mobility accounting seal: %w", err)
 	}
 	return nil
 }
