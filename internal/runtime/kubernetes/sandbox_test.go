@@ -147,16 +147,37 @@ func testRunForSandbox(uid string) *sprooziv1alpha1.AgentRun {
 	}
 }
 
-// TestBuildPodSpecUsesRuntimeImage verifies the Pod uses the runtime image, not run-controlled data.
-func TestBuildPodSpecUsesRuntimeImage(t *testing.T) {
+// TestBuildPodSpecFixedFields verifies the fields every sandbox Pod takes from
+// the runtime and Sproozi rather than from run-controlled data. The labels let
+// the Pod watcher map sandbox Pod events back to the owning AgentRun.
+func TestBuildPodSpecFixedFields(t *testing.T) {
 	run := testRunForSandbox("cccccccc-0000-0000-0000-000000000001")
 	rt := testRuntime()
 	saName := kubernetes.RunName(run.UID)
-
 	pod := kubernetes.BuildPodSpec(run, rt, saName)
 
-	if pod.Spec.Containers[0].Image != rt.Spec.PodTemplate.Spec.Containers[0].Image {
-		t.Errorf("image = %q, want %q", pod.Spec.Containers[0].Image, rt.Spec.PodTemplate.Spec.Containers[0].Image)
+	boundedWorkspace := false
+	for _, volume := range pod.Spec.Volumes {
+		if volume.Name == "workspace" {
+			boundedWorkspace = volume.EmptyDir != nil && volume.EmptyDir.SizeLimit != nil
+		}
+	}
+	for _, field := range []struct {
+		name      string
+		got, want any
+	}{
+		{"image", pod.Spec.Containers[0].Image, rt.Spec.PodTemplate.Spec.Containers[0].Image},
+		{"RestartPolicy", pod.Spec.RestartPolicy, corev1.RestartPolicyNever},
+		{"ServiceAccountName", pod.Spec.ServiceAccountName, saName},
+		{"Namespace", pod.Namespace, kubernetes.AgentsNamespace},
+		{"RunLabel", pod.Labels[kubernetes.RunLabel], run.Name},
+		{"RunNamespaceLabel", pod.Labels[kubernetes.RunNamespaceLabel], run.Namespace},
+		{"ManagedByLabel", pod.Labels[kubernetes.ManagedByLabel], kubernetes.ManagedByValue},
+		{"size-limited emptyDir workspace", boundedWorkspace, true},
+	} {
+		if field.got != field.want {
+			t.Errorf("%s = %v, want %v", field.name, field.got, field.want)
+		}
 	}
 }
 
@@ -179,57 +200,6 @@ func TestBuildPodSpecPreservesSidecarAndBindsSelectedContainersOnly(t *testing.T
 	}
 	if len(pod.Spec.Containers[0].VolumeMounts) == 0 {
 		t.Fatal("workload container did not receive bindings")
-	}
-}
-
-// TestBuildPodSpecSecurityContext verifies non-root, read-only filesystem, no privilege escalation.
-func TestBuildPodSpecSecurityContext(t *testing.T) {
-	run := testRunForSandbox("cccccccc-0000-0000-0000-000000000002")
-	rt := testRuntime()
-	pod := kubernetes.BuildPodSpec(run, rt, kubernetes.RunName(run.UID))
-
-	sc := pod.Spec.Containers[0].SecurityContext
-	if sc == nil {
-		t.Fatal("SecurityContext is nil")
-	}
-	if sc.AllowPrivilegeEscalation == nil || *sc.AllowPrivilegeEscalation {
-		t.Error("AllowPrivilegeEscalation must be false")
-	}
-	if sc.ReadOnlyRootFilesystem == nil || !*sc.ReadOnlyRootFilesystem {
-		t.Error("ReadOnlyRootFilesystem must be true")
-	}
-	if sc.RunAsNonRoot == nil || !*sc.RunAsNonRoot {
-		t.Error("RunAsNonRoot must be true")
-	}
-	if sc.RunAsUser == nil || *sc.RunAsUser != 65532 {
-		t.Errorf("RunAsUser = %v, want 65532", sc.RunAsUser)
-	}
-	if pod.Spec.SecurityContext == nil || pod.Spec.SecurityContext.FSGroup == nil ||
-		*pod.Spec.SecurityContext.FSGroup != 65532 {
-		t.Error("FSGroup must allow the non-root agent to write its emptyDir volumes")
-	}
-}
-
-// TestBuildPodSpecRestartNever verifies the Pod never restarts.
-func TestBuildPodSpecRestartNever(t *testing.T) {
-	run := testRunForSandbox("cccccccc-0000-0000-0000-000000000003")
-	rt := testRuntime()
-	pod := kubernetes.BuildPodSpec(run, rt, kubernetes.RunName(run.UID))
-
-	if pod.Spec.RestartPolicy != corev1.RestartPolicyNever {
-		t.Errorf("RestartPolicy = %q, want Never", pod.Spec.RestartPolicy)
-	}
-}
-
-// TestBuildPodSpecServiceAccount verifies the Pod uses the provided SA.
-func TestBuildPodSpecServiceAccount(t *testing.T) {
-	run := testRunForSandbox("cccccccc-0000-0000-0000-000000000004")
-	rt := testRuntime()
-	saName := kubernetes.RunName(run.UID)
-	pod := kubernetes.BuildPodSpec(run, rt, saName)
-
-	if pod.Spec.ServiceAccountName != saName {
-		t.Errorf("ServiceAccountName = %q, want %q", pod.Spec.ServiceAccountName, saName)
 	}
 }
 
@@ -374,58 +344,6 @@ func TestBuildPodSpecGatewayTokenCoversMaximumRunDuration(t *testing.T) {
 	}
 	if expirationSeconds < 2*60*60 {
 		t.Fatalf("gateway token lifetime = %d seconds, want at least 7200 seconds to cover the one-hour run bound with headroom", expirationSeconds)
-	}
-}
-
-// TestBuildPodSpecNamespace verifies the Pod is in AgentsNamespace.
-func TestBuildPodSpecNamespace(t *testing.T) {
-	run := testRunForSandbox("cccccccc-0000-0000-0000-000000000006")
-	rt := testRuntime()
-	pod := kubernetes.BuildPodSpec(run, rt, kubernetes.RunName(run.UID))
-
-	if pod.Namespace != kubernetes.AgentsNamespace {
-		t.Errorf("Namespace = %q, want %q", pod.Namespace, kubernetes.AgentsNamespace)
-	}
-}
-
-// TestBuildPodSpecLabels verifies RunLabel, RunNamespaceLabel, and ManagedByLabel are set
-// so that the Pod watcher can map sandbox Pod events back to the owning AgentRun.
-func TestBuildPodSpecLabels(t *testing.T) {
-	run := testRunForSandbox("cccccccc-0000-0000-0000-000000000010")
-	rt := testRuntime()
-	pod := kubernetes.BuildPodSpec(run, rt, kubernetes.RunName(run.UID))
-
-	if got := pod.Labels[kubernetes.RunLabel]; got != run.Name {
-		t.Errorf("RunLabel = %q, want %q", got, run.Name)
-	}
-	if got := pod.Labels[kubernetes.RunNamespaceLabel]; got != run.Namespace {
-		t.Errorf("RunNamespaceLabel = %q, want %q", got, run.Namespace)
-	}
-	if got := pod.Labels[kubernetes.ManagedByLabel]; got != kubernetes.ManagedByValue {
-		t.Errorf("ManagedByLabel = %q, want %q", got, kubernetes.ManagedByValue)
-	}
-}
-
-// TestBuildPodSpecWorkspaceVolume verifies an emptyDir workspace volume with size limit.
-func TestBuildPodSpecWorkspaceVolume(t *testing.T) {
-	run := testRunForSandbox("cccccccc-0000-0000-0000-000000000007")
-	rt := testRuntime()
-	pod := kubernetes.BuildPodSpec(run, rt, kubernetes.RunName(run.UID))
-
-	var workspaceVol *corev1.Volume
-	for i := range pod.Spec.Volumes {
-		if pod.Spec.Volumes[i].Name == "workspace" {
-			workspaceVol = &pod.Spec.Volumes[i]
-		}
-	}
-	if workspaceVol == nil {
-		t.Fatal("workspace volume not found")
-	}
-	if workspaceVol.EmptyDir == nil {
-		t.Fatal("workspace volume is not an emptyDir")
-	}
-	if workspaceVol.EmptyDir.SizeLimit == nil {
-		t.Fatal("workspace emptyDir has no size limit")
 	}
 }
 

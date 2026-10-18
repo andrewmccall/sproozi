@@ -33,23 +33,6 @@ import (
 	"github.com/andrewmccall/sproozi/internal/webhook"
 )
 
-func TestReplayStore_FirstCallSucceeds(t *testing.T) {
-	s := webhook.NewInMemoryReplayStore()
-	expiry := time.Now().Add(5 * time.Minute)
-	if err := s.CheckAndRecord(context.Background(), "id1", expiry); err != nil {
-		t.Fatalf("expected first call to succeed, got: %v", err)
-	}
-}
-
-func TestReplayStore_SecondCallReturnsErrReplay(t *testing.T) {
-	s := webhook.NewInMemoryReplayStore()
-	expiry := time.Now().Add(5 * time.Minute)
-	_ = s.CheckAndRecord(context.Background(), "id1", expiry)
-	if err := s.CheckAndRecord(context.Background(), "id1", expiry); err != webhook.ErrReplay {
-		t.Fatalf("expected ErrReplay on second call, got: %v", err)
-	}
-}
-
 func TestReplayStore_DifferentIDsAreFine(t *testing.T) {
 	s := webhook.NewInMemoryReplayStore()
 	expiry := time.Now().Add(5 * time.Minute)

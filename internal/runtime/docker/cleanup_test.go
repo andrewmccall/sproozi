@@ -84,6 +84,7 @@ func TestStopRemovesVisitResourcesAndReplaysRetainedResult(t *testing.T) {
 }
 
 func TestAbortRemovesVisitResourcesAndReplaysRetainedResult(t *testing.T) {
+	t.Parallel()
 	p, f, a, l, i := activeFixture(t, t.TempDir())
 	o, err := p.Abort(t.Context(), l, i)
 	if err != nil || o.Stopped == nil || o.Stopped.Receipt == nil {
@@ -100,6 +101,7 @@ func TestAbortRemovesVisitResourcesAndReplaysRetainedResult(t *testing.T) {
 }
 
 func TestMissingContainerWithoutRemovalRecordIsNotStopped(t *testing.T) {
+	t.Parallel()
 	t.Run("active", func(t *testing.T) {
 		p, f, a, l, i := activeFixture(t, t.TempDir())
 		delete(f.containers, i.ResourceUID)
@@ -193,6 +195,7 @@ func TestRemovalConvergesAfterEngineFailure(t *testing.T) {
 }
 
 func TestCancelledPreparationRemovesCreatedResources(t *testing.T) {
+	t.Parallel()
 	f := newFakeDocker()
 	a := &fakeAuthority{engine: f}
 	p := openFixture(t, t.TempDir(), f, a)

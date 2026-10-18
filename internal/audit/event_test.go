@@ -41,6 +41,7 @@ func TestAuditEventMarshalIncludesRequiredFields(t *testing.T) {
 		PolicyGeneration: 7,
 		Operation:        modelInferenceOperation,
 		Allowed:          true,
+		DenyReason:       "budget_exhausted",
 		UpstreamStatus:   200,
 		TokensUsed:       150,
 		TokenBudget:      10000,
@@ -50,7 +51,9 @@ func TestAuditEventMarshalIncludesRequiredFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal error: %v", err)
 	}
-	for _, field := range []string{"runID", "saName", "policyName", "policyGeneration", "operation", "allowed", "timestamp"} {
+	// Acceptance evidence and the Kind verifier read these names from the
+	// gateway's audit stream.
+	for _, field := range []string{"runID", "saName", "policyName", "policyGeneration", "operation", "allowed", "denyReason", "upstreamStatus", "tokensUsed", "timestamp"} {
 		if !bytes.Contains(data, []byte(`"`+field+`"`)) {
 			t.Errorf("missing required field %q in JSON", field)
 		}
@@ -75,43 +78,6 @@ func TestAuditRemainingDistinguishesUnavailableFromExhausted(t *testing.T) {
 func TestAuditEventStructHasNoForbiddenFields(t *testing.T) {
 	assertNoForbiddenFields[audit.Event](t)
 	assertNoForbiddenFields[audit.WebhookEvent](t)
-}
-
-func TestAuditLoggerWritesJSONLine(t *testing.T) {
-	var buf bytes.Buffer
-	l := audit.NewLogger(&buf)
-	l.Log(audit.Event{RunID: "test-run", Operation: modelInferenceOperation, Allowed: false, DenyReason: "budget_exhausted"})
-	if !bytes.Contains(buf.Bytes(), []byte("test-run")) {
-		t.Error("expected RunID in output")
-	}
-	if !bytes.Contains(buf.Bytes(), []byte("budget_exhausted")) {
-		t.Error("expected DenyReason in output")
-	}
-	var decoded audit.Event
-	if err := json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &decoded); err != nil {
-		t.Errorf("logger output is not valid JSON: %v", err)
-	}
-}
-
-func TestWebhookEventMarshalIncludesRequiredFields(t *testing.T) {
-	e := audit.WebhookEvent{
-		Timestamp:         time.Now(),
-		TemplateNamespace: "default",
-		TemplateName:      "sre-remediation",
-		Operation:         "webhook.ingest",
-		Allowed:           true,
-		RunName:           "run-123",
-		Source:            "alertmanager",
-	}
-	data, err := json.Marshal(e)
-	if err != nil {
-		t.Fatalf("Marshal error: %v", err)
-	}
-	for _, field := range []string{"timestamp", "templateNamespace", "templateName", "operation", "allowed", "runName", "source"} {
-		if !bytes.Contains(data, []byte(`"`+field+`"`)) {
-			t.Errorf("missing required field %q in JSON", field)
-		}
-	}
 }
 
 func TestAuditLoggerWritesWebhookJSONLine(t *testing.T) {

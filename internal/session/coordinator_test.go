@@ -1,6 +1,7 @@
 package session
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"encoding/json"
@@ -9,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -26,6 +28,7 @@ const testRemote = "remote"
 const testIgnoredFile = "needed.bin"
 
 func TestCancelUnknownActivationWithExactKnownIncarnation(t *testing.T) {
+	t.Parallel()
 	c, _, _, remote, start := setup(t)
 	remote.lostActivate = true
 	r, err := c.Move(context.Background(), start.Source.ExecutionID, uuid.NewString(), testRemote)
@@ -61,6 +64,7 @@ func TestCancelUnknownActivationWithExactKnownIncarnation(t *testing.T) {
 // with unsealed usage is unknown usage, any other failure is an unknown stop.
 // Neither releases the allocation or prepares the destination.
 func TestStopOutcomeSeparatesUnsealedUsageFromUnknownStop(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name       string
 		unsealed   bool
@@ -98,6 +102,7 @@ func TestStopOutcomeSeparatesUnsealedUsageFromUnknownStop(t *testing.T) {
 // coordinator drives its first visit like any other, keeps the launch
 // unchanged, and binds the genuine thread reported by the first stop.
 func TestFirstVisitFromWorkspaceBindsGenuineThreadAtFirstStop(t *testing.T) {
+	t.Parallel()
 	c, _, local, remote, start := setup(t)
 	first := start.Source
 	first.ExecutionID, first.OperationID, first.AllocationID = uuid.NewString(), uuid.NewString(), uuid.NewString()
@@ -251,7 +256,29 @@ func (p *fakePlacement) Abort(_ context.Context, l Launch, i Incarnation) (Obser
 	p.records[l.AllocationID] = o
 	return o, nil
 }
+
+// fixtureArtifact is the stopped checkpoint every test starts from. Its Git
+// capture is slow, so it is built once per test binary.
+var fixtureArtifact struct {
+	once   sync.Once
+	built  bool
+	data   []byte
+	digest string
+}
+
 func artifact(t *testing.T) ([]byte, string) {
+	t.Helper()
+	fixtureArtifact.once.Do(func() {
+		fixtureArtifact.data, fixtureArtifact.digest = buildArtifact(t)
+		fixtureArtifact.built = true
+	})
+	if !fixtureArtifact.built {
+		t.Fatal("fixture checkpoint failed to build in another test")
+	}
+	return bytes.Clone(fixtureArtifact.data), fixtureArtifact.digest
+}
+
+func buildArtifact(t *testing.T) ([]byte, string) {
 	t.Helper()
 	repo, home := t.TempDir(), t.TempDir()
 	run := func(args ...string) {
@@ -364,6 +391,7 @@ func seedExecution(t *testing.T, c *Coordinator, local *fakePlacement, source La
 }
 
 func TestIgnoredSelectionSurvivesEveryMoveAndCannotAmendSeed(t *testing.T) {
+	t.Parallel()
 	c, _, _, _, start := setup(t, testIgnoredFile)
 	for _, destination := range []string{testRemote, testLocal, testRemote} {
 		r, err := c.Move(t.Context(), start.Source.ExecutionID, uuid.NewString(), destination)
@@ -481,6 +509,7 @@ func TestLostRepliesRecoverSameAllocation(t *testing.T) {
 }
 
 func TestPartialPreparationRecoversThroughExplicitPrepareWithoutReplacingIncarnation(t *testing.T) {
+	t.Parallel()
 	c, _, _, remote, start := setup(t)
 	remote.partialPrepare = true
 	r, err := c.Move(t.Context(), start.Source.ExecutionID, uuid.NewString(), testRemote)
@@ -498,6 +527,7 @@ func TestPartialPreparationRecoversThroughExplicitPrepareWithoutReplacingIncarna
 }
 
 func TestPartialPreparationCancellationNeverRetriesFailedRestoreOrRefundsUnknownUsage(t *testing.T) {
+	t.Parallel()
 	for name, identityKnown := range map[string]bool{"observed": true, "unobserved": false} {
 		t.Run(name, func(t *testing.T) {
 			c, _, _, remote, start := setup(t)
@@ -528,6 +558,7 @@ func TestPartialPreparationCancellationNeverRetriesFailedRestoreOrRefundsUnknown
 	}
 }
 func TestUnknownStopOrUsagePreventsNextWriter(t *testing.T) {
+	t.Parallel()
 	cases := map[string]func(*fakePlacement){
 		"unreachable":  func(p *fakePlacement) { p.unknownStop = true },
 		"missing seal": func(p *fakePlacement) { p.missingUsage = true },
@@ -563,6 +594,7 @@ func TestUnknownStopOrUsagePreventsNextWriter(t *testing.T) {
 	}
 }
 func TestCancellationPersistsBeforeAbortAndNeverRefundsUnknownUsage(t *testing.T) {
+	t.Parallel()
 	c, _, local, remote, start := setup(t)
 	r, err := c.Move(context.Background(), start.Source.ExecutionID, uuid.NewString(), testRemote)
 	if err != nil {
@@ -587,6 +619,7 @@ func TestCancellationPersistsBeforeAbortAndNeverRefundsUnknownUsage(t *testing.T
 	}
 }
 func TestLimitsAndReplayIntent(t *testing.T) {
+	t.Parallel()
 	c, _, _, remote, start := setup(t)
 	changed := start
 	changed.Source = sourceCopy(start.Source)
@@ -619,6 +652,7 @@ func sourceCopy(source Launch) Launch {
 	return source
 }
 func TestPrivateJournalAndCorruptionFailClosed(t *testing.T) {
+	t.Parallel()
 	c, dir, local, remote, start := setup(t)
 	if other, err := Open(dir, map[string]Placement{testLocal: local, testRemote: remote}, testMaxCheckpoint); err == nil {
 		_ = other.Close()
@@ -654,6 +688,7 @@ func TestPrivateJournalAndCorruptionFailClosed(t *testing.T) {
 }
 
 func TestConcurrentReplayHasOneWriter(t *testing.T) {
+	t.Parallel()
 	c, _, _, remote, start := setup(t)
 	op := uuid.NewString()
 	results := make(chan error, 2)
@@ -702,6 +737,7 @@ func TestUnknownUsageCancellationSurvivesReopen(t *testing.T) {
 	}
 }
 func TestUnboundedKeyChangeIsStillAConflict(t *testing.T) {
+	t.Parallel()
 	if sameAllowances(map[string]Allowance{"model.inference": {}}, map[string]Allowance{"github.pullRequest": {}}) {
 		t.Fatal("unbounded key change authorized another capability")
 	}
@@ -711,6 +747,7 @@ func TestUnboundedKeyChangeIsStillAConflict(t *testing.T) {
 }
 
 func TestLostStopReplyLeavesEscrowUntilSameReceiptRecovered(t *testing.T) {
+	t.Parallel()
 	c, _, local, remote, start := setup(t)
 	r, err := c.Move(context.Background(), start.Source.ExecutionID, uuid.NewString(), testRemote)
 	if err != nil {
@@ -733,6 +770,7 @@ func TestLostStopReplyLeavesEscrowUntilSameReceiptRecovered(t *testing.T) {
 	}
 }
 func TestCheckpointDigestMismatchCannotActivateDestination(t *testing.T) {
+	t.Parallel()
 	c, _, local, remote, start := setup(t)
 	r, err := c.Move(context.Background(), start.Source.ExecutionID, uuid.NewString(), testRemote)
 	if err != nil {
@@ -748,13 +786,15 @@ func TestCheckpointDigestMismatchCannotActivateDestination(t *testing.T) {
 	}
 }
 func TestExpiredOriginalDeadlinePreventsPreparation(t *testing.T) {
+	t.Parallel()
 	c, _, local, remote, start := setup(t)
 	deadline := time.Now().Add(time.Second).UTC()
 	source := start.Source
 	source.ExecutionID, source.OperationID, source.AllocationID = uuid.NewString(), uuid.NewString(), uuid.NewString()
 	source.Deadline = deadline
 	expiring := seedExecution(t, c, local, source, start.Input)
-	<-time.After(time.Until(deadline) + 10*time.Millisecond)
+	// The deadline passes on the coordinator's clock without waiting for it.
+	c.now = func() time.Time { return deadline }
 	if _, err := c.Move(context.Background(), expiring.Source.ExecutionID, uuid.NewString(), testRemote); err == nil {
 		t.Fatal("move reset expired deadline")
 	}

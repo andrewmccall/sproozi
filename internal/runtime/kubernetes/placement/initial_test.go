@@ -34,6 +34,7 @@ func initialWorkspace(t *testing.T, data []byte) []byte {
 }
 
 func TestFreshRemoteWorkspaceStopsWithActualUUIDAndImmutableReceipt(t *testing.T) {
+	t.Parallel()
 	p, kube, e, l, checkpointData := setup(t)
 	l.ThreadID, l.CheckpointDigest, l.Task = "", "", initialFixtureTask
 	e.initial = initialWorkspace(t, checkpointData)
@@ -103,6 +104,7 @@ func TestFreshRemoteWorkspaceStopsWithActualUUIDAndImmutableReceipt(t *testing.T
 }
 
 func TestInitialUnknownTurnCannotSealOrCapture(t *testing.T) {
+	t.Parallel()
 	p, _, e, l, data := setup(t)
 	l.ThreadID, l.CheckpointDigest, l.Task = "", "", initialFixtureTask
 	e.initial = initialWorkspace(t, data)
@@ -127,6 +129,7 @@ func TestInitialUnknownTurnCannotSealOrCapture(t *testing.T) {
 }
 
 func TestInitialTaskRejectsUnsupportedHarness(t *testing.T) {
+	t.Parallel()
 	p, _, _, l, data := setupKind(t, harness.NativeClaude)
 	l.ThreadID, l.CheckpointDigest, l.Task = "", "", "Task"
 	_, err := p.CreateInitial(context.Background(), l, initialWorkspace(t, data))

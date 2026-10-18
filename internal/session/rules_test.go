@@ -9,6 +9,7 @@ import (
 // A saved phase must describe the record's structure. Each case starts from a
 // real active record and introduces one contradiction that save and load reject.
 func TestRecordRejectsPhaseThatContradictsItsStructure(t *testing.T) {
+	t.Parallel()
 	c, _, _, _, start := setup(t)
 	active, err := c.Move(t.Context(), start.Source.ExecutionID, uuid.NewString(), testRemote)
 	if err != nil {

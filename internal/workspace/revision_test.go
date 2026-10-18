@@ -7,6 +7,7 @@ import (
 )
 
 func TestRecordedRevisionProducesCleanFreshWorkspaceWithoutChangingSource(t *testing.T) {
+	t.Parallel()
 	root := newFixture(t)
 	head := fixtureGit(t, root, "rev-parse", "HEAD")
 	data, err := Capture(t.Context(), root, nil, testLimit)
@@ -42,6 +43,7 @@ func TestRecordedRevisionProducesCleanFreshWorkspaceWithoutChangingSource(t *tes
 }
 
 func TestEmptyWorkspaceHasOneCleanCommit(t *testing.T) {
+	t.Parallel()
 	data, err := Empty(t.Context(), t.TempDir(), testLimit)
 	if err != nil {
 		t.Fatal(err)

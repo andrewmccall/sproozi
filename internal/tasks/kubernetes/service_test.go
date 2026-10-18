@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -214,21 +215,30 @@ func TestInvalidSubmissionDoesNotCreateWork(t *testing.T) {
 	}
 }
 
-type stalledReader struct{ client.Client }
+// stalledReader blocks every read until its context ends. A read without a
+// deadline is refused at once and recorded, so an unbounded wait fails the
+// test instead of hanging it.
+type stalledReader struct {
+	client.Client
+	unbounded *atomic.Bool
+}
 
 func (s stalledReader) Get(ctx context.Context, _ client.ObjectKey, _ client.Object, _ ...client.GetOption) error {
+	if _, bounded := ctx.Deadline(); !bounded {
+		s.unbounded.Store(true)
+		return errors.New("unbounded API read")
+	}
 	<-ctx.Done()
 	return ctx.Err()
 }
 
 func TestWaitBoundsAStalledAPIRead(t *testing.T) {
 	service, kube := fixtureService(t)
-	service.kube = stalledReader{Client: kube}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	start := time.Now()
-	_, err := service.Wait(ctx, tasks.Reference{ID: "task-stalled", UID: fixtureUID}, 25*time.Millisecond)
-	if !errors.Is(err, tasks.ErrUnavailable) || time.Since(start) > time.Second {
-		t.Fatalf("wait did not bound a stalled API read: %v after %v", err, time.Since(start))
+	reader := stalledReader{Client: kube, unbounded: &atomic.Bool{}}
+	service.kube = reader
+	// The caller sets no deadline, so any bound on the read comes from Wait.
+	_, err := service.Wait(t.Context(), tasks.Reference{ID: "task-stalled", UID: fixtureUID}, 25*time.Millisecond)
+	if !errors.Is(err, tasks.ErrUnavailable) || reader.unbounded.Load() {
+		t.Fatalf("wait did not bound a stalled API read: %v", err)
 	}
 }

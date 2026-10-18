@@ -1,15 +1,18 @@
 package home
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -175,9 +178,74 @@ func (p *placementFixture) Attach(context.Context, session.Launch, session.Incar
 	return nil
 }
 
-func testWorkspace(t *testing.T) string {
+// template is the workspace and checkpoint every testService starts from.
+// Git makes both slow, so they are built once per test binary; each test
+// gets a private copy of the workspace.
+var template struct {
+	once   sync.Once
+	built  bool
+	root   string
+	repo   string
+	data   []byte
+	digest string
+}
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if template.root != "" {
+		_ = os.RemoveAll(template.root)
+	}
+	os.Exit(code)
+}
+
+// testWorkspace returns a private copy of the template workspace and its
+// checkpoint. The copy keeps each file's mode, so it captures identically.
+func testWorkspace(t *testing.T) (string, []byte, string) {
 	t.Helper()
-	repo, home := t.TempDir(), t.TempDir()
+	template.once.Do(func() {
+		root, err := os.MkdirTemp("", "sproozi-home-fixture-")
+		if err != nil {
+			t.Fatal(err)
+		}
+		template.root = root
+		template.repo = filepath.Join(root, "repository")
+		createWorkspace(t, template.repo)
+		template.data, template.digest = testArtifact(t, template.repo)
+		template.built = true
+	})
+	if !template.built {
+		t.Fatal("fixture workspace failed to build in another test")
+	}
+	repo := filepath.Join(t.TempDir(), "repository")
+	if err := os.CopyFS(repo, os.DirFS(template.repo)); err != nil {
+		t.Fatal(err)
+	}
+	err := filepath.WalkDir(template.repo, func(path string, _ fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		info, err := os.Lstat(path)
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(template.repo, path)
+		if err != nil {
+			return err
+		}
+		return os.Chmod(filepath.Join(repo, rel), info.Mode().Perm())
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return repo, bytes.Clone(template.data), template.digest
+}
+
+func createWorkspace(t *testing.T, repo string) {
+	t.Helper()
+	home := t.TempDir()
+	if err := os.Mkdir(repo, 0700); err != nil {
+		t.Fatal(err)
+	}
 	for _, args := range [][]string{{"init", "--quiet", "--template=", "-b", "main"}, {"-c", "user.name=Fixture", "-c", "user.email=fixture@invalid", "commit", "--quiet", "--allow-empty", "-m", "Fixture"}} {
 		cmd := exec.Command("git", args...)
 		cmd.Dir = repo
@@ -189,7 +257,6 @@ func testWorkspace(t *testing.T) string {
 	if err := os.WriteFile(filepath.Join(repo, "unfinished.txt"), []byte("unfinished work\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	return repo
 }
 
 // Synthetic native files are unit fixtures only; the production verifier owns
@@ -214,8 +281,7 @@ func testArtifact(t *testing.T, repo string, includeIgnored ...string) ([]byte, 
 
 func testService(t *testing.T) (*Service, *placementFixture, *placementFixture, string) {
 	t.Helper()
-	repo := testWorkspace(t)
-	data, digest := testArtifact(t, repo)
+	repo, data, digest := testWorkspace(t)
 	local := &placementFixture{rows: map[string]session.Observation{}, artifact: data, digest: digest, charge: 2}
 	remote := &placementFixture{rows: map[string]session.Observation{}, artifact: data, digest: digest, charge: 3}
 	dir := filepath.Join(t.TempDir(), "home")
@@ -231,6 +297,7 @@ func testService(t *testing.T) (*Service, *placementFixture, *placementFixture, 
 }
 
 func TestStartIgnoredOptInRetainsBytesAndImmutableSelectionAcrossVisits(t *testing.T) {
+	t.Parallel()
 	s, local, remote, repo := testService(t)
 	for name, data := range map[string][]byte{
 		".gitignore": []byte("needed.bin\n.env\n"), testIgnoredFile: {0, 1, 255, 254},
@@ -286,6 +353,7 @@ func TestStartIgnoredOptInRetainsBytesAndImmutableSelectionAcrossVisits(t *testi
 }
 
 func TestInitialSessionImportRoundTripAndLostReplies(t *testing.T) {
+	t.Parallel()
 	s, local, remote, repo := testService(t)
 	id, startOp, moveOp := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	local.lostActivate = true
@@ -359,6 +427,7 @@ func TestRecoverFirstMoveRetainedBeforeRestart(t *testing.T) {
 }
 
 func TestRejectedInitialActivationCancelsWithoutInspectingOrCompletingNativeTurn(t *testing.T) {
+	t.Parallel()
 	s, local, _, repo := testService(t)
 	id := uuid.NewString()
 	local.rejectActivate = true
@@ -388,6 +457,7 @@ func TestRejectedInitialActivationCancelsWithoutInspectingOrCompletingNativeTurn
 }
 
 func TestPartiallyCreatedInitialSessionCancelsWithoutProvisioning(t *testing.T) {
+	t.Parallel()
 	s, local, remote, repo := testService(t)
 	id, operation := uuid.NewString(), uuid.NewString()
 	local.partialCreate = true
@@ -410,6 +480,7 @@ func TestPartiallyCreatedInitialSessionCancelsWithoutProvisioning(t *testing.T) 
 }
 
 func TestPreparingInitialSessionRetriesCreateOnlyThroughStart(t *testing.T) {
+	t.Parallel()
 	s, local, _, repo := testService(t)
 	id, operation := uuid.NewString(), uuid.NewString()
 	local.partialCreate = true
@@ -424,6 +495,7 @@ func TestPreparingInitialSessionRetriesCreateOnlyThroughStart(t *testing.T) {
 }
 
 func TestUnknownInitialUsageNeverStartsRemoteAndCanCancel(t *testing.T) {
+	t.Parallel()
 	s, local, remote, repo := testService(t)
 	id := uuid.NewString()
 	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, nil); err != nil {
@@ -446,6 +518,7 @@ func TestUnknownInitialUsageNeverStartsRemoteAndCanCancel(t *testing.T) {
 }
 
 func TestPrivateConfigRejectsAuthorityFieldsAndSharedFiles(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "config.json")
 	for _, data := range []string{`{"directory":"/tmp/home","model":"fixture","local":{"Name":"local"},"maxDuration":"1h","allowances":{"model.inference":{"units":{"bounded":true,"value":10}}},"authorityFromCheckpoint":true}`, `{} {}`} {
 		if err := os.WriteFile(path, []byte(data), 0600); err != nil {
@@ -464,6 +537,7 @@ func TestPrivateConfigRejectsAuthorityFieldsAndSharedFiles(t *testing.T) {
 }
 
 func TestTerminalInputRetainsPartialBusySuffixAndDetaches(t *testing.T) {
+	t.Parallel()
 	acks := make(chan terminalFrame, 1)
 	var received []byte
 	calls := 0

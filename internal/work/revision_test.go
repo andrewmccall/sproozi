@@ -12,6 +12,7 @@ import (
 )
 
 func TestFreshNativeWorkStartsAtRecordedCommitAndKeepsSourceReceipt(t *testing.T) {
+	t.Parallel()
 	c, p := projectFixture(t)
 	o, err := Open(c)
 	if err != nil {

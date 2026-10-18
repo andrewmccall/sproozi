@@ -3,10 +3,12 @@ package workspace
 import (
 	"bytes"
 	"context"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"golang.org/x/sys/unix"
@@ -40,9 +42,71 @@ func writeFixture(t *testing.T, root, name string, b []byte, mode os.FileMode) {
 		t.Fatal(err)
 	}
 }
+
+// fixtureTemplate is the repository newFixture copies. Building it takes many
+// Git calls, so it is built once per test binary.
+var fixtureTemplate struct {
+	once  sync.Once
+	built bool
+	root  string
+}
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if fixtureTemplate.root != "" {
+		_ = os.RemoveAll(fixtureTemplate.root)
+	}
+	os.Exit(code)
+}
+
+// newFixture returns a private copy of a repository with committed, staged,
+// unstaged, deleted, untracked and ignored changes. The copy keeps each
+// file's exact mode; Git rehashes the copied files, so its state is the same.
 func newFixture(t *testing.T) string {
 	t.Helper()
-	root := t.TempDir()
+	fixtureTemplate.once.Do(func() {
+		parent, err := os.MkdirTemp("", "sproozi-workspace-fixture-")
+		if err != nil {
+			t.Fatal(err)
+		}
+		fixtureTemplate.root = parent
+		root := filepath.Join(parent, "repository")
+		if err = os.Mkdir(root, 0700); err != nil {
+			t.Fatal(err)
+		}
+		buildFixture(t, root)
+		fixtureTemplate.built = true
+	})
+	if !fixtureTemplate.built {
+		t.Fatal("fixture repository failed to build in another test")
+	}
+	src := filepath.Join(fixtureTemplate.root, "repository")
+	root := filepath.Join(t.TempDir(), "repository")
+	if err := os.CopyFS(root, os.DirFS(src)); err != nil {
+		t.Fatal(err)
+	}
+	err := filepath.WalkDir(src, func(path string, _ fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		info, err := os.Lstat(path)
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		return os.Chmod(filepath.Join(root, rel), info.Mode().Perm())
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func buildFixture(t *testing.T, root string) {
+	t.Helper()
 	fixtureGit(t, root, "init", "--quiet", "--template=", "-b", "main")
 	writeFixture(t, root, ".gitignore", []byte("ignored.dat\n"), 0644)
 	writeFixture(t, root, "note.txt", []byte("original\n"), 0644)
@@ -66,10 +130,10 @@ func newFixture(t *testing.T) string {
 	}
 	writeFixture(t, root, "loose/runner", []byte{0, 9, 8, 7}, 0755)
 	writeFixture(t, root, "ignored.dat", []byte("private opt-in\n"), 0755)
-	return root
 }
 
 func TestRestoreClearsInheritedSetgidOnlyOnOwnedStaging(t *testing.T) {
+	t.Parallel()
 	source := newFixture(t)
 	data, err := Capture(t.Context(), source, nil, testLimit)
 	if err != nil {
@@ -111,6 +175,7 @@ func TestRestoreClearsInheritedSetgidOnlyOnOwnedStaging(t *testing.T) {
 }
 
 func TestRestoreIncludesTheDestinationDefaultBranch(t *testing.T) {
+	t.Parallel()
 	probe := t.TempDir()
 	fixtureGit(t, probe, "init", "--quiet", "--template=")
 	branch := fixtureGit(t, probe, "symbolic-ref", "--short", "HEAD")
@@ -173,6 +238,7 @@ func assertFile(t *testing.T, root, name string, want []byte) {
 	}
 }
 func TestRoundTripPreservesGitAndUnfinishedState(t *testing.T) {
+	t.Parallel()
 	root := newFixture(t)
 	head := fixtureGit(t, root, "rev-parse", "HEAD")
 	// Commands configured by an untrusted repository must never run at capture.
@@ -255,6 +321,7 @@ func TestRoundTripPreservesGitAndUnfinishedState(t *testing.T) {
 	fixtureGit(t, dst, "fsck", "--full", "--strict")
 }
 func TestIgnoredSelectionAndDetachedHead(t *testing.T) {
+	t.Parallel()
 	root := newFixture(t)
 	fixtureGit(t, root, "checkout", "--quiet", "--detach")
 	data, err := Capture(context.Background(), root, []string{"ignored.dat"}, testLimit)
@@ -276,13 +343,16 @@ func TestIgnoredSelectionAndDetachedHead(t *testing.T) {
 	if head, err := os.ReadFile(filepath.Join(dst, ".git", "HEAD")); err != nil || strings.HasPrefix(string(head), "ref:") {
 		t.Fatalf("not detached: %s %v", head, err)
 	}
-	for _, p := range []string{"../escape", "/absolute", ".git/config", "note.txt", "loose"} {
+	// TestIgnoredSelectionBoundary covers every unsafe path. One here proves
+	// that Capture applies that check.
+	for _, p := range []string{"../escape", "note.txt", "loose"} {
 		if _, err = Capture(context.Background(), root, []string{p}, testLimit); err == nil {
 			t.Errorf("accepted ignored selection %q", p)
 		}
 	}
 }
 func TestInvalidArchiveNeverPublishesDestination(t *testing.T) {
+	t.Parallel()
 	data, err := Capture(context.Background(), newFixture(t), nil, testLimit)
 	if err != nil {
 		t.Fatal(err)
@@ -349,6 +419,7 @@ func TestInvalidArchiveNeverPublishesDestination(t *testing.T) {
 	assertFile(t, existing, "sentinel", []byte("original"))
 }
 func TestUnsupportedSourceFailsExplicitly(t *testing.T) {
+	t.Parallel()
 	t.Run("unborn", func(t *testing.T) {
 		root := t.TempDir()
 		fixtureGit(t, root, "init", "--quiet", "--template=")
@@ -394,6 +465,7 @@ func TestUnsupportedSourceFailsExplicitly(t *testing.T) {
 }
 
 func TestExcludedIgnoredLayoutsDoNotBlockCheckpoint(t *testing.T) {
+	t.Parallel()
 	root := newFixture(t)
 	writeFixture(t, root, ".gitignore", []byte("ignored.dat\nignored-layout/\n"), 0644)
 	ignored := filepath.Join(root, "ignored-layout")

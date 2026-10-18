@@ -46,7 +46,7 @@ func (c *Coordinator) Create(first Launch, input []byte, session string) (Record
 	if !os.IsNotExist(err) {
 		return Record{}, err
 	}
-	if err = beforeDeadline(first); err != nil {
+	if err = c.beforeDeadline(first); err != nil {
 		return Record{}, err
 	}
 	r := Record{Version: journalVersion, ID: first.ExecutionID, Session: session, Harness: first.Harness,
@@ -282,7 +282,7 @@ func (c *Coordinator) prepareDestination(ctx context.Context, r Record, index in
 				return r, err
 			}
 		}
-		if err := beforeDeadline(*op.Launch); err != nil {
+		if err := c.beforeDeadline(*op.Launch); err != nil {
 			return r, err
 		}
 		if err := spendable(op.Launch.Allowances); err != nil {
@@ -355,7 +355,7 @@ func (c *Coordinator) activateDestination(ctx context.Context, r Record, index i
 			if err = ctx.Err(); err != nil {
 				return r, err
 			}
-			if err = beforeDeadline(*op.Launch); err != nil {
+			if err = c.beforeDeadline(*op.Launch); err != nil {
 				return r, err
 			}
 			if err = p.Activate(ctx, *op.Launch, *op.Incarnation); err != nil {

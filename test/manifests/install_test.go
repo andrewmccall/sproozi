@@ -21,7 +21,10 @@ esac
 	if err := os.WriteFile(kubectl, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("make", "install", "KUBECTL="+kubectl)
+	// -o manifests runs the install recipe without its manifests prerequisite,
+	// so controller-gen does not rewrite config/crd/bases while other test
+	// packages read it. make manifests owns regeneration.
+	cmd := exec.Command("make", "-o", "manifests", "install", "KUBECTL="+kubectl)
 	cmd.Dir = repoRoot(t)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("CRD installation used client-side apply: %v\n%s", err, out)

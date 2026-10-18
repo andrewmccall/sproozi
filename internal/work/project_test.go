@@ -16,6 +16,11 @@ import (
 func projectFixture(t *testing.T) (Config, *fixturePlacement) {
 	t.Helper()
 	c, p := fixture(t)
+	return withProjects(c), p
+}
+
+// withProjects adds the project definitions to an owner configuration.
+func withProjects(c Config) Config {
 	c.TemplateName = "portable-codex"
 	c.Allowances["github.pull_request"] = session.Allowance{Units: session.Limit{Bounded: true, Value: 30}}
 	c.Allowances["kubernetes.read"] = session.Allowance{Units: session.Limit{Bounded: true, Value: 50}}
@@ -30,7 +35,7 @@ func projectFixture(t *testing.T) (Config, *fixturePlacement) {
 		"private": {Template: "portable-codex", Members: []string{"another-installation"},
 			Capabilities: []string{"model.inference"}},
 	}
-	return c, p
+	return c
 }
 
 func projectRequest(id project.ID) Submit {
@@ -39,6 +44,7 @@ func projectRequest(id project.ID) Submit {
 }
 
 func TestProjectsGroupSessionsAndNarrowActualAdmission(t *testing.T) {
+	t.Parallel()
 	c, p := projectFixture(t)
 	o, err := Open(c)
 	if err != nil {
@@ -214,9 +220,13 @@ func TestConfiguredTemplateCannotRebindRetainedAssociation(t *testing.T) {
 }
 
 func TestInvalidProjectConfigurationCannotStartAnOwner(t *testing.T) {
+	t.Parallel()
 	for _, invalid := range []string{"template", "repository", "capability", "members", "identity", "credential"} {
 		t.Run(invalid, func(t *testing.T) {
-			c, p := projectFixture(t)
+			// Validation rejects each configuration before any Git runs, so
+			// no snapshot repository is built.
+			p := &fixturePlacement{}
+			c := withProjects(fixtureConfig(t, t.TempDir(), p))
 			d := c.Projects["sproozi-dev"]
 			switch invalid {
 			case "template":

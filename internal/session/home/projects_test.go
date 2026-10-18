@@ -16,6 +16,7 @@ import (
 )
 
 func TestImportedProjectNeedsIndependentLocalApprovalAndKeepsAssociation(t *testing.T) {
+	t.Parallel()
 	s, local, source := importedFixture(t)
 	source.export.Association = project.Association{Project: "sproozi-dev", Template: "portable-codex",
 		Repository: "sproozi", RepositoryReference: "https://github.com/andrewmccall/sproozi"}
@@ -59,6 +60,7 @@ func TestImportedProjectNeedsIndependentLocalApprovalAndKeepsAssociation(t *test
 }
 
 func TestInterruptedProjectAdmissionRechecksApprovalOnEveryActivationPath(t *testing.T) {
+	t.Parallel()
 	for _, change := range []string{"removed", "narrowed"} {
 		for _, action := range []string{"resume", "recover", "move"} {
 			t.Run(change+"/"+action, func(t *testing.T) {
@@ -101,6 +103,7 @@ func TestInterruptedProjectAdmissionRechecksApprovalOnEveryActivationPath(t *tes
 }
 
 func TestInterruptedLegacyClaimAcceptsDerivedMetadataButNotNewProject(t *testing.T) {
+	t.Parallel()
 	for _, changedProject := range []bool{false, true} {
 		t.Run(fmt.Sprint(changedProject), func(t *testing.T) {
 			s, _, source := importedFixture(t)
@@ -132,6 +135,7 @@ func TestInterruptedLegacyClaimAcceptsDerivedMetadataButNotNewProject(t *testing
 }
 
 func TestRemovedProjectApprovalDoesNotBlockInterruptedFinalStopRecovery(t *testing.T) {
+	t.Parallel()
 	s, _, source := importedFixture(t)
 	source.export.Project = "sproozi-dev"
 	s.config.ProjectApprovals = []ProjectApproval{{Source: testRemote, Project: "sproozi-dev",
@@ -162,6 +166,7 @@ func TestRemovedProjectApprovalDoesNotBlockInterruptedFinalStopRecovery(t *testi
 }
 
 func TestWorkConnectionsPreferWorkSourcesPerName(t *testing.T) {
+	t.Parallel()
 	c := Config{
 		WorkSources: map[string]profile.ClientConfig{"a": {URL: "https://work-a.example"}},
 		Remote: map[string]profile.ClientConfig{"a": {URL: "https://remote-a.example"},

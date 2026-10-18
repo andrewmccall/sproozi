@@ -39,46 +39,64 @@ func assertAbsent(t *testing.T, root, name string) {
 	}
 }
 
-func TestCaptureLocalAppliesUserExcludesFiles(t *testing.T) {
-	cases := map[string]func(t *testing.T, home, root string){
-		"default global ignore": func(t *testing.T, home, _ string) {
+// TestUserExcludesFileResolvesEveryUserScope checks that each place the
+// user's Git reads core.excludesFile from resolves to that file.
+func TestUserExcludesFileResolvesEveryUserScope(t *testing.T) {
+	cases := map[string]func(t *testing.T, home, root string) string{
+		"default global ignore": func(t *testing.T, home, _ string) string {
 			writeFixture(t, home, ".config/git/ignore", []byte(fixtureSecret+"\n"), 0600)
+			return filepath.Join(home, ".config/git/ignore")
 		},
-		"XDG global ignore": func(t *testing.T, home, _ string) {
+		"XDG global ignore": func(t *testing.T, home, _ string) string {
 			t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "xdg"))
 			writeFixture(t, home, "xdg/git/ignore", []byte(fixtureSecret+"\n"), 0600)
+			return filepath.Join(home, "xdg/git/ignore")
 		},
-		"global core.excludesFile with tilde": func(t *testing.T, home, _ string) {
+		"global core.excludesFile with tilde": func(t *testing.T, home, _ string) string {
 			writeFixture(t, home, ".gitignore_global", []byte(fixtureSecret+"\n"), 0600)
 			writeFixture(t, home, ".gitconfig", []byte("[core]\n\texcludesFile = ~/.gitignore_global\n"), 0600)
+			return filepath.Join(home, ".gitignore_global")
 		},
-		"repository core.excludesFile relative to the work tree": func(t *testing.T, _, root string) {
+		"repository core.excludesFile relative to the work tree": func(t *testing.T, _, root string) string {
 			writeFixture(t, root, "ignore-rules", []byte(fixtureSecret+"\n"), 0644)
 			fixtureGit(t, root, "config", "core.excludesFile", "ignore-rules")
+			return filepath.Join(root, "ignore-rules")
 		},
 	}
 	for name, setup := range cases {
 		t.Run(name, func(t *testing.T) {
 			home := userHome(t)
 			root := newFixture(t)
-			writeFixture(t, root, fixtureSecret, []byte("TOKEN=secret\n"), 0600)
-			setup(t, home, root)
-
-			data, err := CaptureLocal(t.Context(), root, nil, testLimit)
-			if err != nil {
-				t.Fatal(err)
+			want := setup(t, home, root)
+			got, err := userExcludesFile(t.Context(), root)
+			if err != nil || got != want {
+				t.Fatalf("excludes file = %q, %v; want %q", got, err, want)
 			}
-			dst := restoredFiles(t, data)
-			assertAbsent(t, dst, fixtureSecret)
-			assertFile(t, dst, "new.txt", []byte("unstaged new\n"))
-
-			data, err = CaptureLocal(t.Context(), root, []string{fixtureSecret}, testLimit)
-			if err != nil {
-				t.Fatalf("explicit selection of a globally ignored file: %v", err)
-			}
-			assertFile(t, restoredFiles(t, data), fixtureSecret, []byte("TOKEN=secret\n"))
 		})
 	}
+}
+
+// TestCaptureLocalAppliesUserExcludesFile checks that a file ignored only by
+// the user's excludes file stays out of a capture unless it is selected.
+func TestCaptureLocalAppliesUserExcludesFile(t *testing.T) {
+	home := userHome(t)
+	root := newFixture(t)
+	writeFixture(t, root, fixtureSecret, []byte("TOKEN=secret\n"), 0600)
+	writeFixture(t, home, ".config/git/ignore", []byte(fixtureSecret+"\n"), 0600)
+
+	data, err := CaptureLocal(t.Context(), root, nil, testLimit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dst := restoredFiles(t, data)
+	assertAbsent(t, dst, fixtureSecret)
+	assertFile(t, dst, "new.txt", []byte("unstaged new\n"))
+
+	data, err = CaptureLocal(t.Context(), root, []string{fixtureSecret}, testLimit)
+	if err != nil {
+		t.Fatalf("explicit selection of a globally ignored file: %v", err)
+	}
+	assertFile(t, restoredFiles(t, data), fixtureSecret, []byte("TOKEN=secret\n"))
 }
 
 func TestCaptureLocalRepositoryExcludesFileOverridesGlobal(t *testing.T) {

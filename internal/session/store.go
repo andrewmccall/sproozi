@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/andrewmccall/sproozi/internal/harness"
 
@@ -42,6 +43,8 @@ type Coordinator struct {
 	journals      JournalLocks
 	graceful      lifecycle.Control
 	closed        bool
+	// now reads the clock for original-deadline checks.
+	now func() time.Time
 }
 
 // Open takes a nonblocking owner lock. Existing directories/files must be private
@@ -88,7 +91,7 @@ func Open(dir string, placements map[string]Placement, maxCheckpointBytes int64)
 		_ = lock.Close()
 		return nil, fmt.Errorf("session: coordinator already owned: %w", err)
 	}
-	c := &Coordinator{dir: dir, placements: configured, maxCheckpoint: maxCheckpointBytes, lock: lock}
+	c := &Coordinator{dir: dir, placements: configured, maxCheckpoint: maxCheckpointBytes, lock: lock, now: time.Now}
 	for _, name := range []string{checkpointsDir, workspacesDir} {
 		sub := filepath.Join(dir, name)
 		if err = os.MkdirAll(sub, 0700); err != nil {

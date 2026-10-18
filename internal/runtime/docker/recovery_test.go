@@ -139,6 +139,7 @@ func TestAbortedDockerRetriesExistingAccountingWithoutInitializing(t *testing.T)
 }
 
 func TestClaudeGracefulStopRequiresPersistedAcknowledgement(t *testing.T) {
+	t.Parallel()
 	for _, lostReply := range []bool{false, true} {
 		name := "already-stopped"
 		if lostReply {
@@ -247,6 +248,7 @@ func TestClaudeDurableAcknowledgementSurvivesCaptureFailure(t *testing.T) {
 }
 
 func TestPartialInitialCancellationOnlyObservesAndFencesExistingResources(t *testing.T) {
+	t.Parallel()
 	for _, failedRole := range []string{roleAnchor, roleHelper, roleAgent} {
 		t.Run(failedRole, func(t *testing.T) {
 			f := newFakeDocker()
@@ -306,6 +308,7 @@ func TestPartialInitialCancellationOnlyObservesAndFencesExistingResources(t *tes
 }
 
 func TestPartialInitialCancellationRejectsReplacementOrUnavailableEngine(t *testing.T) {
+	t.Parallel()
 	f := newFakeDocker()
 	p := openFixture(t, t.TempDir(), f, &fakeAuthority{engine: f})
 	l := fixtureLaunch(t, fixtureArtifact(t))

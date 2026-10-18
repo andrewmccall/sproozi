@@ -1,6 +1,7 @@
 package placement
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -12,6 +13,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -49,6 +51,7 @@ func fixtureTermination(containerID string, exitCode int32) corev1.ContainerStat
 }
 
 func TestWriterFenceRejectsSyntheticUnknownContainerTermination(t *testing.T) {
+	t.Parallel()
 	p, kube, _, l, data := setup(t)
 	i, err := p.Prepare(t.Context(), l, data)
 	if err != nil {
@@ -289,6 +292,7 @@ func (l *observedLedger) Seal(ctx context.Context, key budget.AccountKey) (budge
 }
 
 func TestMoveStopWaitsForNativeTurnBeforeGatewayRevocationAndSeal(t *testing.T) {
+	t.Parallel()
 	p, kube, e, l, data := setup(t)
 	ctx := context.Background()
 	i, err := p.Prepare(ctx, l, data)
@@ -366,6 +370,7 @@ func TestMoveStopWaitsForNativeTurnBeforeGatewayRevocationAndSeal(t *testing.T) 
 }
 
 func TestUnknownNativeQuiescenceKeepsGatewayAndAllocationUntilRetry(t *testing.T) {
+	t.Parallel()
 	p, _, e, l, data := setup(t)
 	ctx := context.Background()
 	i, err := p.Prepare(ctx, l, data)
@@ -401,6 +406,7 @@ func TestUnknownNativeQuiescenceKeepsGatewayAndAllocationUntilRetry(t *testing.T
 // A failed seal after the exact Pod terminated is the Placement.Stop
 // "fenced, usage unsealed" outcome, the same as Docker's, not an unknown stop.
 func TestSealFailureAfterFenceReportsStoppedWriterWithUnsealedUsage(t *testing.T) {
+	t.Parallel()
 	p, _, _, l, data := setup(t)
 	ctx := context.Background()
 	i, err := p.Prepare(ctx, l, data)
@@ -431,6 +437,7 @@ func TestSealFailureAfterFenceReportsStoppedWriterWithUnsealedUsage(t *testing.T
 }
 
 func TestRevokedStoppingRetryNeedsPositiveNativeQuietObservation(t *testing.T) {
+	t.Parallel()
 	p, _, e, l, data := setup(t)
 	ctx := context.Background()
 	i, err := p.Prepare(ctx, l, data)
@@ -458,6 +465,7 @@ func TestRevokedStoppingRetryNeedsPositiveNativeQuietObservation(t *testing.T) {
 }
 
 func TestStoppingRetryReusesDurableQuietHandoffAfterCaptureFailure(t *testing.T) {
+	t.Parallel()
 	p, _, e, l, data := setupKind(t, harness.NativeClaude)
 	ctx := context.Background()
 	i, err := p.Prepare(ctx, l, data)
@@ -508,7 +516,34 @@ func approvedRuntime() *api.AgentRuntime {
 func fixtureArtifact(t *testing.T) ([]byte, checkpoint.Metadata) {
 	return fixtureArtifactKind(t, harness.NativeCodex)
 }
+
+// builtArtifact is one native kind's stopped checkpoint fixture.
+type builtArtifact struct {
+	once  sync.Once
+	built bool
+	data  []byte
+	meta  checkpoint.Metadata
+}
+
+// fixtureArtifacts caches each native kind's fixture checkpoint. Its Git
+// capture is slow, so each kind is built once per test binary.
+var fixtureArtifacts sync.Map // harness.NativeKind -> *builtArtifact
+
 func fixtureArtifactKind(t *testing.T, kind harness.NativeKind) ([]byte, checkpoint.Metadata) {
+	t.Helper()
+	value, _ := fixtureArtifacts.LoadOrStore(kind, &builtArtifact{})
+	a := value.(*builtArtifact)
+	a.once.Do(func() {
+		a.data, a.meta = buildFixtureArtifactKind(t, kind)
+		a.built = true
+	})
+	if !a.built {
+		t.Fatalf("%s fixture checkpoint failed to build in another test", kind)
+	}
+	return bytes.Clone(a.data), a.meta
+}
+
+func buildFixtureArtifactKind(t *testing.T, kind harness.NativeKind) ([]byte, checkpoint.Metadata) {
 	t.Helper()
 	repo := t.TempDir()
 	git := func(args ...string) {
@@ -593,6 +628,7 @@ func setupKind(t *testing.T, kind harness.NativeKind) (*Placement, *admissionCli
 }
 
 func TestIgnoredSelectionBindsRemoteVisitAndFixedCapture(t *testing.T) {
+	t.Parallel()
 	p, _, e, l, data := setup(t)
 	l.IncludeIgnored = []string{"needed.bin", "cache/chosen.bin"}
 	i, err := p.Prepare(t.Context(), l, data)
@@ -666,6 +702,7 @@ func TestPrepareActivateStopRetainsExactExecutionAndUsage(t *testing.T) {
 	}
 }
 func TestLostActivationBeforeNativeEffectRecoversSamePreparedIncarnation(t *testing.T) {
+	t.Parallel()
 	p, kube, e, l, data := setup(t)
 	i, err := p.Prepare(context.Background(), l, data)
 	if err != nil {
@@ -686,6 +723,7 @@ func TestLostActivationBeforeNativeEffectRecoversSamePreparedIncarnation(t *test
 	}
 }
 func TestMissingRunDoesNotProveLivePodStopped(t *testing.T) {
+	t.Parallel()
 	p, kube, _, l, data := setup(t)
 	ctx := context.Background()
 	i, err := p.Prepare(ctx, l, data)
@@ -712,6 +750,7 @@ func TestMissingRunDoesNotProveLivePodStopped(t *testing.T) {
 	}
 }
 func TestAbortUsesExactPodAndSealsKnownZeroUsage(t *testing.T) {
+	t.Parallel()
 	p, kube, _, l, data := setup(t)
 	ctx := context.Background()
 	i, err := p.Prepare(ctx, l, data)
@@ -802,6 +841,7 @@ func TestCancellationSealsUsedAndOutstandingUsageAndReplaysAfterSettlement(t *te
 }
 
 func TestCancellationMissingOrCorruptAccountRemainsUnknownAfterActualFence(t *testing.T) {
+	t.Parallel()
 	for _, corruption := range []string{"missing", "corrupt"} {
 		t.Run(corruption, func(t *testing.T) {
 			p, kube, _, l, data := setup(t)
@@ -850,6 +890,7 @@ func TestCancellationMissingOrCorruptAccountRemainsUnknownAfterActualFence(t *te
 }
 
 func TestMissingPodWithoutRetainedTerminationCannotSealOrRefund(t *testing.T) {
+	t.Parallel()
 	p, kube, _, l, data := setup(t)
 	i, err := p.Prepare(t.Context(), l, data)
 	if err != nil {
@@ -946,6 +987,7 @@ func TestDeleteRetainsPodUntilObservedTerminationAndPersistentFence(t *testing.T
 }
 
 func TestGracefulStopReleasesFenceOnlyAfterCheckpointAndReceipt(t *testing.T) {
+	t.Parallel()
 	p, kube, e, l, data := setup(t)
 	i, err := p.Prepare(t.Context(), l, data)
 	if err != nil {
@@ -995,6 +1037,7 @@ func TestGracefulStopReleasesFenceOnlyAfterCheckpointAndReceipt(t *testing.T) {
 }
 
 func TestIncompleteRestorePinsPodAndRecoversThroughExplicitPrepare(t *testing.T) {
+	t.Parallel()
 	p, kube, e, l, data := setup(t)
 	commands := 0
 	e.onCommand = func(string) error {
@@ -1040,6 +1083,7 @@ func TestIncompleteRestorePinsPodAndRecoversThroughExplicitPrepare(t *testing.T)
 }
 
 func TestOldPartialPreparationObservesAndCancelsWithoutHelperOrAdmission(t *testing.T) {
+	t.Parallel()
 	p, kube, e, l, data := setup(t)
 	local, err := p.persistIntent(l, data)
 	if err != nil {
@@ -1110,6 +1154,7 @@ func TestOldPartialPreparationObservesAndCancelsWithoutHelperOrAdmission(t *test
 	}
 }
 func TestRemoteDiskLossAndEpochReplayDoNotCreateFreshAuthority(t *testing.T) {
+	t.Parallel()
 	p, _, _, l, data := setup(t)
 	ctx := context.Background()
 	if _, err := p.Prepare(ctx, l, data); err != nil {
@@ -1134,6 +1179,7 @@ func TestRemoteDiskLossAndEpochReplayDoNotCreateFreshAuthority(t *testing.T) {
 }
 
 func TestClaudePlacementRetainsKindPinAndUsesClaudeCheckpointHome(t *testing.T) {
+	t.Parallel()
 	p, _, e, l, data := setupKind(t, harness.NativeClaude)
 	i, err := p.Prepare(t.Context(), l, data)
 	if err != nil {
@@ -1169,6 +1215,7 @@ func TestClaudePlacementRetainsKindPinAndUsesClaudeCheckpointHome(t *testing.T) 
 }
 
 func TestClaudeCannotRecoverUnacknowledgedQuiescenceFromTerminatedContainer(t *testing.T) {
+	t.Parallel()
 	for _, lostReply := range []bool{false, true} {
 		name := "already-terminated"
 		if lostReply {
@@ -1217,6 +1264,7 @@ func TestClaudeCannotRecoverUnacknowledgedQuiescenceFromTerminatedContainer(t *t
 }
 
 func TestPlacementRejectsEmptyMismatchedHarnessAndForeignCheckpoint(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []harness.NativeKind{"", harness.NativeClaude} {
 		t.Run(string(kind), func(t *testing.T) {
 			p, kube, _, l, data := setup(t)

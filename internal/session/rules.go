@@ -9,7 +9,6 @@ import (
 	"maps"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/andrewmccall/sproozi/internal/budget"
 	"github.com/andrewmccall/sproozi/internal/workspace"
@@ -346,8 +345,8 @@ func validatePhase(r Record) error {
 	}
 	return nil
 }
-func beforeDeadline(l Launch) error {
-	if !time.Now().Before(l.Deadline) {
+func (c *Coordinator) beforeDeadline(l Launch) error {
+	if !c.now().Before(l.Deadline) {
 		return errors.New("session: original deadline expired")
 	}
 	return nil
