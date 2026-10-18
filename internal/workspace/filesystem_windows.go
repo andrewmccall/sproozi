@@ -5,12 +5,23 @@ package workspace
 import (
 	"errors"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"golang.org/x/sys/windows"
 )
 
 func inspectFilesystemPath(path string, _ os.FileInfo) (uint64, bool, error) {
-	name, err := windows.UTF16PtrFromString(path)
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return 0, false, err
+	}
+	if strings.HasPrefix(absolute, `\\`) {
+		absolute = `\\?\UNC\` + strings.TrimPrefix(absolute, `\\`)
+	} else {
+		absolute = `\\?\` + absolute
+	}
+	name, err := windows.UTF16PtrFromString(absolute)
 	if err != nil {
 		return 0, false, err
 	}

@@ -6,10 +6,33 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"golang.org/x/sys/windows"
 )
+
+func TestWindowsLongPrivatePaths(t *testing.T) {
+	dir := testDirectory(t)
+	for len(dir) < 300 {
+		dir = filepath.Join(dir, strings.Repeat("long", 8))
+	}
+	if err := EnsureDir(dir); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := Lock(filepath.Join(dir, "owner.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = UnlockClose(lock) }()
+	if err = Replace(dir, "record.json", []byte(`{"value":"complete"}`)); err != nil {
+		t.Fatal(err)
+	}
+	data, err := ReadFile(filepath.Join(dir, "record.json"), 128)
+	if err != nil || string(data) != `{"value":"complete"}` {
+		t.Fatalf("long-path record: %q, %v", data, err)
+	}
+}
 
 func setDACL(t *testing.T, path, sddl string) {
 	t.Helper()

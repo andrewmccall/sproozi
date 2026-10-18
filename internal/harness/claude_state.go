@@ -41,8 +41,8 @@ type ClaudeState struct {
 // ClaudeProjectPath returns the exact project path exercised by the native
 // client. Lookup never scans another project or adopts a different native ID.
 func ClaudeProjectPath(workspace, threadID string) (string, error) {
-	if !claudeSessionID.MatchString(threadID) || !posixpath.IsAbs(workspace) ||
-		posixpath.Clean(workspace) != workspace || strings.ContainsRune(workspace, 0) {
+	if !claudeSessionID.MatchString(threadID) || (!posixpath.IsAbs(workspace) && !filepath.IsAbs(workspace)) ||
+		(posixpath.Clean(workspace) != workspace && filepath.Clean(workspace) != workspace) || strings.ContainsRune(workspace, 0) {
 		return "", errors.New("invalid Claude checkpoint selection")
 	}
 	project := claudeProjectCharacters.ReplaceAllString(workspace, "-")
@@ -372,7 +372,7 @@ func validateClaudeRecord(row claudeRecord, previous string, seen map[string]boo
 	if (message && row.Message.Role != row.Type) || row.APIError ||
 		row.Version == "" || row.Sidechain == nil || *row.Sidechain ||
 		!claudeSessionID.MatchString(row.UUID) || seen[row.UUID] || (parent != previous && !toolParent) ||
-		!posixpath.IsAbs(row.Cwd) || (previous == "" && row.Type != claudeUser) {
+		(!posixpath.IsAbs(row.Cwd) && !filepath.IsAbs(row.Cwd)) || (previous == "" && row.Type != claudeUser) {
 		return errors.New("incompatible Claude primary transcript chain")
 	}
 	return nil

@@ -125,7 +125,7 @@ func TestSessionsWritesOneLabelledCatalogue(t *testing.T) {
 func TestProjectAndRevisionOptionsUseSharedAddressing(t *testing.T) {
 	dir := testutil.PrivateDir(t)
 	config := filepath.Join(dir, "config.json")
-	data := `{"directory":"` + dir + `", "model":"fixture", "local":{"Name":"docker"},
+	data := `{"directory":` + strconv.Quote(dir) + `, "model":"fixture", "local":{"Name":"docker"},
  "allowances":{"model.inference":{"units":{"bounded":true,"value":10}}}, "maxDuration":"1h"}`
 	if err := testutil.WriteFile(config, []byte(data), 0600); err != nil {
 		t.Fatal(err)
@@ -154,7 +154,7 @@ func TestProjectAndRevisionOptionsUseSharedAddressing(t *testing.T) {
 func TestPlainPullRetryRepeatsTheSameOperation(t *testing.T) {
 	dir := testutil.PrivateDir(t)
 	config := filepath.Join(dir, "config.json")
-	data := `{"directory":"` + dir + `", "model":"fixture", "local":{"Name":"docker"},
+	data := `{"directory":` + strconv.Quote(dir) + `, "model":"fixture", "local":{"Name":"docker"},
  "allowances":{"model.inference":{"units":{"bounded":true,"value":10}}}, "maxDuration":"1h"}`
 	if err := testutil.WriteFile(config, []byte(data), 0600); err != nil {
 		t.Fatal(err)

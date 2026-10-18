@@ -54,7 +54,7 @@ func noReparse(path string) error {
 		return unsafePath(path)
 	}
 	for {
-		p, err := windows.UTF16PtrFromString(path)
+		p, err := nativePath(path)
 		if err != nil {
 			return err
 		}
@@ -139,7 +139,7 @@ func Check(path string, directory bool) error {
 	if err := noReparse(path); err != nil {
 		return err
 	}
-	p, err := windows.UTF16PtrFromString(path)
+	p, err := nativePath(path)
 	if err != nil {
 		return err
 	}
@@ -191,7 +191,7 @@ func mkdir(path string) error {
 	if err != nil {
 		return err
 	}
-	p, err := windows.UTF16PtrFromString(path)
+	p, err := nativePath(path)
 	if err != nil {
 		return err
 	}
@@ -226,7 +226,7 @@ func open(path string, access, disposition, share uint32) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	p, err := windows.UTF16PtrFromString(path)
+	p, err := nativePath(path)
 	if err != nil {
 		return nil, err
 	}
@@ -264,11 +264,11 @@ func UnlockClose(f *os.File) error {
 }
 
 func replaceFile(temp, target, _ string) error {
-	from, err := windows.UTF16PtrFromString(temp)
+	from, err := nativePath(temp)
 	if err != nil {
 		return err
 	}
-	to, err := windows.UTF16PtrFromString(target)
+	to, err := nativePath(target)
 	if err != nil {
 		return err
 	}
@@ -278,4 +278,14 @@ func replaceFile(temp, target, _ string) error {
 		return &os.PathError{Op: "replace", Path: target, Err: err}
 	}
 	return Check(target, false)
+}
+
+// nativePath is used only after validation of normal local drive paths.
+// Extended Win32 syntax prevents MAX_PATH truncation and alias expansion.
+func nativePath(path string) (*uint16, error) {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	return windows.UTF16PtrFromString(`\\?\` + absolute)
 }

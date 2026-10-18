@@ -412,7 +412,7 @@ func TestUnsupportedSourceFailsExplicitly(t *testing.T) {
 }
 
 func TestCaptureRejectsWindowsPathAliasesInGitTrees(t *testing.T) {
-	for _, name := range []string{"CON.txt", "trailing.", "NOTE.TXT"} {
+	for _, name := range []string{"CON.txt", "trailing.", "NOTE.TXT", "GIT~1/config"} {
 		t.Run(name, func(t *testing.T) {
 			root := newFixture(t)
 			blob := fixtureGit(t, root, "rev-parse", "HEAD:note.txt")

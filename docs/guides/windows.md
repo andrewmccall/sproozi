@@ -66,7 +66,7 @@ git update-index --chmod=+x script.sh
 
 Windows cannot represent all Linux filenames or permissions. Sproozi rejects
 reserved names, alternate data streams, trailing dots or spaces, and names
-that collide when case is ignored. Use ordinary directories, not linked
+that collide when case is ignored. DOS short-name aliases are also rejected. Use ordinary directories, not linked
 worktrees, junctions or symlinks.
 
 Start the configured home with `sproozi serve --config PATH`. Use

@@ -73,7 +73,7 @@ func (b *boundedBuffer) Write(p []byte) (int, error) {
 }
 func (g gitRunner) run(ctx context.Context, root string, args ...string) ([]byte, error) {
 	base := make([]string, 0, 20+len(args))
-	base = append(base, "-c", "core.hooksPath="+os.DevNull, "-c", "core.fsmonitor=false", "-c", "core.attributesFile="+os.DevNull, "-c", "core.autocrlf=false", "-c", "core.fileMode=true", "-c", "core.ignoreCase=false", "-c", "protocol.allow=never", "-c", "protocol.file.allow=always", "-c", "fetch.fsckObjects=true", "-c", "transfer.fsckObjects=true")
+	base = append(base, "-c", "core.hooksPath="+os.DevNull, "-c", "core.fsmonitor=false", "-c", "core.attributesFile="+os.DevNull, "-c", "core.autocrlf=false", "-c", "core.fileMode=true", "-c", "core.longpaths=true", "-c", "core.ignoreCase=false", "-c", "protocol.allow=never", "-c", "protocol.file.allow=always", "-c", "fetch.fsckObjects=true", "-c", "transfer.fsckObjects=true")
 	if g.excludes != "" {
 		base = append(base, "-c", "core.excludesFile="+g.excludes)
 	}
@@ -90,8 +90,13 @@ func (g gitRunner) run(ctx context.Context, root string, args ...string) ([]byte
 	return out.Bytes(), nil
 }
 func validPath(p string) bool {
-	if p == "" || p == "." || len(p) > 4096 || path.IsAbs(p) || path.Clean(p) != p || strings.ContainsAny(p, "\\\x00\r\n:") {
+	if p == "" || p == "." || len(p) > 4096 || path.IsAbs(p) || path.Clean(p) != p || strings.ContainsAny(p, "\\\x00\r\n:<>\"|?*") {
 		return false
+	}
+	for _, character := range p {
+		if character < 32 {
+			return false
+		}
 	}
 	for part := range strings.SplitSeq(p, "/") {
 		if part == ".." || strings.HasSuffix(part, ".") || strings.HasSuffix(part, " ") || windowsReservedName(part) || strings.EqualFold(strings.TrimRight(part, ". "), ".git") || strings.EqualFold(part, ".gitmodules") {
@@ -103,11 +108,26 @@ func validPath(p string) bool {
 
 func windowsReservedName(name string) bool {
 	base := name
+	extension := ""
 	if i := strings.IndexByte(base, '.'); i >= 0 {
+		extension = base[i+1:]
 		base = base[:i]
 	}
+	// A short-name alias such as GIT~1 can address .git or another existing
+	// long name on NTFS. Reject that spelling before restoring any file.
+	if prefix, suffix, found := strings.Cut(base, "~"); found && prefix != "" && suffix != "" && len(base) <= 8 && len(extension) <= 3 {
+		digits := true
+		for _, character := range suffix {
+			if character < '0' || character > '9' {
+				digits = false
+			}
+		}
+		if digits {
+			return true
+		}
+	}
 	switch strings.ToUpper(base) {
-	case "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9":
+	case "CON", "CONIN$", "CONOUT$", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9", "COM¹", "COM²", "COM³", "LPT¹", "LPT²", "LPT³":
 		return true
 	default:
 		return false
