@@ -42,7 +42,11 @@ var (
 	ErrInvalidTimestamp       = errors.New("webhook: invalid X-Sproozi-Timestamp header")
 	ErrStaleTimestamp         = errors.New("webhook: event timestamp is outside replay window")
 	ErrNoHMACKey              = errors.New("webhook: secret does not contain 'hmac-key' entry")
+	ErrShortHMACKey           = errors.New("webhook: secret 'hmac-key' entry is shorter than 32 bytes")
 )
+
+// MinHMACKeyBytes is the shortest accepted HMAC key: the SHA-256 output size.
+const MinHMACKeyBytes = 32
 
 // SignedHeaders holds the signature and timestamp headers after their format
 // and age are checked. They need no body, Secret or API server call.

@@ -63,6 +63,8 @@ then does it read the body, resolve the receiver and check the signature.
 `id` must be non-empty. `eventContext` is a string-to-string map. The timestamp
 must fall within the replay window, five minutes by default. Receiver metadata
 and a Secret containing `hmac-key` are required; the manual example supplies neither.
+The key must be at least 32 bytes; use random bytes. A shorter or empty key
+returns `500`, and the webhook logs the Secret's name, never the key.
 
 ## Receiver resolution
 

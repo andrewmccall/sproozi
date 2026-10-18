@@ -17,6 +17,7 @@ limitations under the License.
 package webhook_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -34,6 +35,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/audit"
@@ -141,7 +144,7 @@ func listRuns(t *testing.T, c client.Client) []sprooziv1alpha1.AgentRun {
 }
 
 func TestHandler_CreatesOneRunWithTemplateFixedFields(t *testing.T) {
-	key := []byte("webhook-secret")
+	key := []byte(testHMACKey)
 	body := `{"id":"evt-123","eventContext":{"alertname":"CrashLoopBackOff","namespace":"sproozi-demo"},"capabilities":["network.egress"],"templateRef":{"name":"evil"},"policyRef":{"name":"evil"},"runtimeRef":{"name":"evil"},"maxExecutionDuration":"24h"}`
 	ts := fmt.Sprintf("%d", time.Now().Unix())
 
@@ -206,7 +209,7 @@ func TestHandler_CreatesOneRunWithTemplateFixedFields(t *testing.T) {
 }
 
 func TestHandler_ReusedEventIDIsRejected(t *testing.T) {
-	key := []byte("webhook-secret")
+	key := []byte(testHMACKey)
 	body := `{"id":"evt-duplicate","eventContext":{"alertname":"CrashLoopBackOff"}}`
 
 	c := webhookClient(t,
@@ -251,7 +254,7 @@ func TestHandler_ReusedEventIDIsRejected(t *testing.T) {
 }
 
 func TestHandler_MissingEventIDRejected(t *testing.T) {
-	key := []byte("webhook-secret")
+	key := []byte(testHMACKey)
 	body := `{"eventContext":{"alertname":"CrashLoopBackOff"}}`
 	ts := fmt.Sprintf("%d", time.Now().Unix())
 
@@ -284,7 +287,7 @@ func TestHandler_MissingEventIDRejected(t *testing.T) {
 }
 
 func TestHandler_MissingSignatureRejected(t *testing.T) {
-	key := []byte("webhook-secret")
+	key := []byte(testHMACKey)
 	body := testAlertBody
 	ts := fmt.Sprintf("%d", time.Now().Unix())
 
@@ -316,7 +319,7 @@ func TestHandler_MissingSignatureRejected(t *testing.T) {
 }
 
 func TestHandler_StaleSignatureRejected(t *testing.T) {
-	key := []byte("webhook-secret")
+	key := []byte(testHMACKey)
 	body := testAlertBody
 	ts := fmt.Sprintf("%d", time.Now().Add(-10*time.Minute).Unix())
 
@@ -350,7 +353,7 @@ func TestHandler_StaleSignatureRejected(t *testing.T) {
 }
 
 func TestHandler_MalformedJSONRejected(t *testing.T) {
-	key := []byte("webhook-secret")
+	key := []byte(testHMACKey)
 	body := `{"id":"evt-123","eventContext":`
 	ts := fmt.Sprintf("%d", time.Now().Unix())
 
@@ -383,7 +386,7 @@ func TestHandler_MalformedJSONRejected(t *testing.T) {
 }
 
 func TestHandler_AmbiguousReceiverRejected(t *testing.T) {
-	key := []byte("webhook-secret")
+	key := []byte(testHMACKey)
 	body := testAlertBody
 	ts := fmt.Sprintf("%d", time.Now().Unix())
 
@@ -447,10 +450,43 @@ func TestHandler_ReceiverLookupStatus(t *testing.T) {
 			}}
 
 			resp := httptest.NewRecorder()
-			handler.ServeHTTP(resp, signedRequest(testAlertBody, []byte("webhook-secret")))
+			handler.ServeHTTP(resp, signedRequest(testAlertBody, []byte(testHMACKey)))
 
 			if resp.Code != tc.want {
 				t.Fatalf("status = %d, want %d (body=%s)", resp.Code, tc.want, resp.Body.String())
+			}
+		})
+	}
+}
+
+// TestHandler_ShortHMACKeyRefused verifies that an empty or short key cannot
+// authenticate events, and that the log names the Secret but not the key.
+func TestHandler_ShortHMACKeyRefused(t *testing.T) {
+	for _, key := range []string{"", "webhook-secret", strings.Repeat("k", webhook.MinHMACKeyBytes-1)} {
+		t.Run(fmt.Sprintf("%d bytes", len(key)), func(t *testing.T) {
+			c := webhookClient(t, webhookPolicy(), webhookTemplate(), webhookSecret([]byte(key)))
+			handler := &webhook.Handler{Config: webhook.HandlerConfig{
+				Client:      c,
+				Replay:      webhook.NewInMemoryReplayStore(),
+				AuditLogger: &captureWebhookLogger{},
+			}}
+			var logs bytes.Buffer
+			req := signedRequest(testAlertBody, []byte(key))
+			req = req.WithContext(log.IntoContext(req.Context(), zap.New(zap.WriteTo(&logs))))
+			resp := httptest.NewRecorder()
+			handler.ServeHTTP(resp, req)
+
+			if resp.Code != http.StatusInternalServerError {
+				t.Fatalf("status = %d, want 500 (body=%s)", resp.Code, resp.Body.String())
+			}
+			if runs := listRuns(t, c); len(runs) != 0 {
+				t.Fatalf("expected no AgentRuns for a short key, got %d", len(runs))
+			}
+			if !strings.Contains(logs.String(), "alertmanager-secret") {
+				t.Fatalf("log does not name the Secret: %s", logs.String())
+			}
+			if key != "" && (strings.Contains(logs.String(), key) || strings.Contains(resp.Body.String(), key)) {
+				t.Fatal("log or response contains the HMAC key")
 			}
 		})
 	}
@@ -483,7 +519,7 @@ func (c *countingReader) Read(p []byte) (int, error) {
 func TestHandler_UnauthenticatedRequestCostsNoBodyOrAPICall(t *testing.T) {
 	now := time.Now()
 	current := fmt.Sprintf("%d", now.Unix())
-	valid := webhook.ComputeSignature(current, []byte(testAlertBody), []byte("webhook-secret"))
+	valid := webhook.ComputeSignature(current, []byte(testAlertBody), []byte(testHMACKey))
 	for _, tc := range []struct {
 		name, signature, timestamp string
 	}{
@@ -506,7 +542,7 @@ func TestHandler_UnauthenticatedRequestCostsNoBodyOrAPICall(t *testing.T) {
 					apiCalls++
 					return c.List(ctx, list, opts...)
 				},
-			}).WithObjects(webhookPolicy(), webhookTemplate(), webhookSecret([]byte("webhook-secret"))).Build()
+			}).WithObjects(webhookPolicy(), webhookTemplate(), webhookSecret([]byte(testHMACKey))).Build()
 			handler := &webhook.Handler{Config: webhook.HandlerConfig{
 				Client:      c,
 				Replay:      webhook.NewInMemoryReplayStore(),

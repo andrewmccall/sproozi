@@ -17,7 +17,7 @@ Follow [Install on Kubernetes](../guides/install-kubernetes.md) for setup steps.
 | `egress-gateway-profiles` | `sproozi-system` | `ConfigMap` | shared gateway egress module | `profiles.json` |
 | `sproozi-gateway-tls` | `sproozi-system` | `Secret` | shared gateway inspection certificate | `tls.crt`, `tls.key` |
 | `sproozi-sandbox-trust` | `sproozi-agents` | immutable `ConfigMap` | sandbox clients | `ca-bundle.pem`, public CA only |
-| `<template secret>` | template namespace | `Secret` | webhook | `hmac-key` |
+| `<template secret>` | template namespace | `Secret` | webhook | `hmac-key`, at least 32 random bytes |
 
 The shared gateway deployment mounts `sproozi-gateway-tls` and requires
 `SPROOZI_GATEWAY_CERT_FILE` and `SPROOZI_GATEWAY_KEY_FILE` to point at the

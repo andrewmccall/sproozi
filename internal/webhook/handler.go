@@ -33,6 +33,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/audit"
@@ -141,6 +142,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	key, ok := secret.Data[hmacKeyField]
 	if !ok {
 		h.deny(w, event, http.StatusInternalServerError, ErrNoHMACKey.Error())
+		return
+	}
+	// An empty or short key would let anyone who can guess it create runs.
+	// Name the Secret for the administrator, never the key or its length.
+	if len(key) < MinHMACKeyBytes {
+		log.FromContext(r.Context()).Error(ErrShortHMACKey, "Refused webhook HMAC Secret",
+			"namespace", namespace, "name", secretName)
+		h.deny(w, event, http.StatusInternalServerError, ErrShortHMACKey.Error())
 		return
 	}
 
