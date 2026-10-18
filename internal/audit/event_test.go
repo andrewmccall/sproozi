@@ -20,12 +20,12 @@ func assertNoForbiddenFields[T any](t *testing.T) {
 	t.Helper()
 	forbidden := []string{"prompt", "credential", "authorization", "apikey", "response", "body", "password", "header", "patch"}
 	typ := reflect.TypeFor[T]()
-	for i := range typ.NumField() {
-		name := strings.ToLower(typ.Field(i).Name)
-		tag := strings.ToLower(typ.Field(i).Tag.Get("json"))
+	for field := range typ.Fields() {
+		name := strings.ToLower(field.Name)
+		tag := strings.ToLower(field.Tag.Get("json"))
 		for _, bad := range forbidden {
 			if strings.Contains(name, bad) || strings.Contains(tag, bad) {
-				t.Errorf("forbidden field %q found in %s", typ.Field(i).Name, typ.Name())
+				t.Errorf("forbidden field %q found in %s", field.Name, typ.Name())
 			}
 		}
 	}
