@@ -110,7 +110,6 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           repository: andrewmccall/homebrew-tap
-          ref: d456b3d151ed6c16c08213098c76624331a4ec52
           path: .local/tap
           persist-credentials: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
