@@ -66,9 +66,12 @@ asynchronous shutdown.
 
 ## Harnesses and persistent Hermes
 
-Install agent clients without version selectors and use the default upstream
-Hermes image. Record observed versions and resolved image identities in test
-output. Do not reject a client solely because its version differs from a past run.
+Install agent clients from the pinned lockfiles in `hack/clients` with install
+scripts disabled, and run the Hermes image by its pinned digest
+([ADR 0021](../../docs/adr/0021-pinned-ci-inputs-and-latest-client-canary.md)).
+Record observed versions and resolved image identities in test output. Product
+code must not reject a client solely because its version differs from a past
+run; the weekly latest-clients canary runs the same tests on newer releases.
 
 For each supported ordinary harness, tests must check generated configuration,
 trusted launch settings, a real model/tool loop and completion handling. An API

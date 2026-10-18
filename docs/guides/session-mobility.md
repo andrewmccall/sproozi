@@ -8,7 +8,8 @@ A move keeps the execution's original deadline and total usage allowance. Each
 destination gets fresh identity and access. For a completed remote task that you
 want to resume later, use [remote work and local resume](portable-workflows.md).
 
-This setup uses Codex and Claude Code with their upstream default versions. A session
+This setup uses the Codex and Claude Code releases pinned in
+[`hack/clients`](../../hack/clients/README.md). A session
 keeps one selected client throughout its lifetime. Start a new managed
 conversation; importing a personal agent home or adopting an existing running
 session is not supported.
@@ -39,10 +40,11 @@ go build -o bin/session-profile ./cmd/session-profile
 ```
 
 Build the stock-client image with
-[`hack/demo/codex.Dockerfile`](../../hack/demo/codex.Dockerfile). It installs Codex
-without a version selector. Add Claude Code with the
+[`hack/demo/codex.Dockerfile`](../../hack/demo/codex.Dockerfile), from the
+repository root. It installs the Codex release pinned in
+[`hack/clients`](../../hack/clients/README.md). Add Claude Code with the
 [combined client image](../../internal/runtime/docker/image/clients.Dockerfile),
-which also uses the default package version.
+which installs the pinned Claude Code release the same way.
 Then build the
 [native session image](../../internal/runtime/docker/image/Dockerfile) with an
 immutable `CLIENTS_IMAGE=repository@sha256:...` reference. That image adds the
