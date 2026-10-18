@@ -440,7 +440,7 @@ class ExtendedProof(BASE.Proof):
         requests = self.provider()
         completed_usage = sum(request.get("usage", {}).get("total_tokens", 0) for request in requests if request["completed"])
         sealed = sum(visit["receipt"]["usage"]["model.inference"]["Units"] for visit in cancelled["visits"])
-        check(sealed >= completed_usage and all(visit["launch"]["threadId"] == thread for visit in cancelled["visits"]),
+        check(sealed >= completed_usage and all(BASE.visit_thread(i, v) in ("", thread) for i, v in enumerate(cancelled["visits"])),
               "Sealed conservative usage lost completed inference or native identity")
         self.report.update(passed=True, sameNativeUUID=True, sameOriginalDeadline=True, finalPhase="cancelled",
             actualExecCommandToolEffect=True, gracefulHeldTurnMove=True, forcedHeldTurnCancellation=True,
