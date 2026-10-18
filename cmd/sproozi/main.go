@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/signal"
-	"syscall"
 
 	"github.com/andrewmccall/sproozi/internal/session/home"
 	"golang.org/x/term"
@@ -27,6 +25,9 @@ func cli(args []string, stdout, stderr io.Writer) int {
 }
 
 func run(args []string, stdout io.Writer) error {
+	if len(args) == 1 && args[0] == "--version" {
+		args = []string{actionVersion}
+	}
 	if len(args) == 0 || helpRequested(args[0]) {
 		usage(stdout)
 		return nil
@@ -56,31 +57,25 @@ func attach(ctx context.Context, socket, id string) error {
 			return err
 		}
 		defer func() { _ = term.Restore(fd, state) }()
-		resize := make(chan os.Signal, 1)
-		signal.Notify(resize, syscall.SIGWINCH)
-		defer signal.Stop(resize)
+		var last home.TerminalSize
 		update := func() {
-			columns, rows, err := term.GetSize(fd)
+			columns, rows, err := terminalSize(fd)
 			if err == nil && columns > 0 && rows > 0 && columns <= 65535 && rows <= 65535 {
+				size := home.TerminalSize{Rows: uint16(rows), Columns: uint16(columns)}
+				if size == last {
+					return
+				}
 				select {
-				case sizes <- home.TerminalSize{Rows: uint16(rows), Columns: uint16(columns)}:
+				case sizes <- size:
+					last = size
 				default:
 				}
 			}
 		}
-		update()
 		run, cancel := context.WithCancel(ctx)
 		defer cancel()
-		go func() {
-			for {
-				select {
-				case <-run.Done():
-					return
-				case <-resize:
-					update()
-				}
-			}
-		}()
+		stopResize := watchResize(run, update)
+		defer stopResize()
 		_, _ = fmt.Fprintln(os.Stderr, "Attach native terminal; Ctrl-] detaches")
 		return home.AttachTerminal(run, socket, id, os.Stdin, os.Stdout, sizes)
 	}

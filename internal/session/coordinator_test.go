@@ -14,9 +14,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/testutil"
+
 	"github.com/andrewmccall/sproozi/internal/budget"
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
 	"github.com/andrewmccall/sproozi/internal/harness"
+	"github.com/andrewmccall/sproozi/internal/privatefs"
 	"github.com/google/uuid"
 )
 
@@ -280,7 +283,7 @@ func artifact(t *testing.T) ([]byte, string) {
 
 func buildArtifact(t *testing.T) ([]byte, string) {
 	t.Helper()
-	repo, home := t.TempDir(), t.TempDir()
+	repo, home := testutil.PrivateDir(t), testutil.PrivateDir(t)
 	run := func(args ...string) {
 		t.Helper()
 		cmd := exec.Command("git", args...)
@@ -291,7 +294,7 @@ func buildArtifact(t *testing.T) ([]byte, string) {
 		}
 	}
 	run("init", "--quiet", "--template=", "-b", "main")
-	if err := os.WriteFile(filepath.Join(repo, "note"), []byte("initial\n"), 0600); err != nil {
+	if err := testutil.WriteFile(filepath.Join(repo, "note"), []byte("initial\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	run("add", ".")
@@ -340,7 +343,7 @@ func setup(t *testing.T, includeIgnored ...string) (*Coordinator, string, *fakeP
 	t.Helper()
 	data, digest := artifact(t)
 	local, remote := newPlacement(data, digest), newPlacement(data, digest)
-	dir := filepath.Join(t.TempDir(), "journal")
+	dir := filepath.Join(testutil.PrivateDir(t), "journal")
 	c, err := Open(dir, map[string]Placement{testLocal: local, testRemote: remote}, testMaxCheckpoint)
 	if err != nil {
 		t.Fatal(err)
@@ -663,8 +666,8 @@ func TestPrivateJournalAndCorruptionFailClosed(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if info.Mode().Perm()&0077 != 0 {
-			t.Fatal("private journal became public")
+		if err := privatefs.Check(path, info.IsDir()); err != nil {
+			t.Fatalf("private journal became public: %v", err)
 		}
 	}
 	record, err := c.Inspect(start.Source.ExecutionID)
@@ -676,7 +679,7 @@ func TestPrivateJournalAndCorruptionFailClosed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = os.WriteFile(filepath.Join(dir, record.ID+".json"), data, 0600); err != nil {
+	if err = testutil.WriteFile(filepath.Join(dir, record.ID+".json"), data, 0600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = c.Recover(context.Background(), record.ID); err == nil {

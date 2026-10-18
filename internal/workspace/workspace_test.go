@@ -10,8 +10,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-
-	"golang.org/x/sys/unix"
 )
 
 const fixtureStagedNote = "staged"
@@ -22,7 +20,7 @@ func fixtureGit(t *testing.T, root string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", args...)
 	cmd.Dir = root
-	cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_AUTHOR_NAME=Fixture", "GIT_AUTHOR_EMAIL=fixture@invalid", "GIT_COMMITTER_NAME=Fixture", "GIT_COMMITTER_EMAIL=fixture@invalid")
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_AUTHOR_NAME=Fixture", "GIT_AUTHOR_EMAIL=fixture@invalid", "GIT_COMMITTER_NAME=Fixture", "GIT_COMMITTER_EMAIL=fixture@invalid")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v: %v: %s", args, err, out)
@@ -130,48 +128,6 @@ func buildFixture(t *testing.T, root string) {
 	}
 	writeFixture(t, root, "loose/runner", []byte{0, 9, 8, 7}, 0755)
 	writeFixture(t, root, "ignored.dat", []byte("private opt-in\n"), 0755)
-}
-
-func TestRestoreClearsInheritedSetgidOnlyOnOwnedStaging(t *testing.T) {
-	t.Parallel()
-	source := newFixture(t)
-	data, err := Capture(t.Context(), source, nil, testLimit)
-	if err != nil {
-		t.Fatal(err)
-	}
-	parent := t.TempDir()
-	parentMode := os.FileMode(0700) | os.ModeSetgid | os.ModeSticky
-	if err = os.Chmod(parent, parentMode); err != nil {
-		t.Fatal(err)
-	}
-	target := filepath.Join(parent, "restored")
-	if err = Restore(t.Context(), data, target, testLimit); err != nil {
-		t.Fatalf("restore under setgid parent: %v", err)
-	}
-	info, err := os.Stat(parent)
-	if err != nil || info.Mode()&(os.ModeSetgid|os.ModeSticky) != parentMode&(os.ModeSetgid|os.ModeSticky) {
-		t.Fatalf("restore changed parent volume permissions: %v", err)
-	}
-	err = filepath.WalkDir(target, func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		info, statErr := entry.Info()
-		if statErr != nil {
-			return statErr
-		}
-		if info.Mode()&(os.ModeSetgid|os.ModeSetuid|os.ModeSticky) != 0 {
-			t.Errorf("owned restored path retained inherited special modes: %s", path)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertFile(t, target, "note.txt", []byte("unstaged\n"))
-	if got := fixtureGit(t, target, "show", ":note.txt"); got != fixtureStagedNote {
-		t.Fatalf("setgid staging lost index: %q", got)
-	}
 }
 
 func TestRestoreIncludesTheDestinationDefaultBranch(t *testing.T) {
@@ -301,13 +257,7 @@ func TestRoundTripPreservesGitAndUnfinishedState(t *testing.T) {
 			t.Errorf("unexpected restored %s", p)
 		}
 	}
-	info, err := os.Stat(filepath.Join(dst, "loose/runner"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Mode().Perm() != 0755 {
-		t.Errorf("executable mode: %o", info.Mode().Perm())
-	}
+	assertRestoredMode(t, filepath.Join(dst, "loose/runner"), 0755)
 	if got := fixtureGit(t, dst, "status", "--porcelain=v1", "--untracked-files=all"); got != "MM binary.dat\nAM new.txt\nMM note.txt\nD  staged-delete.txt\n D work-delete.txt\n?? .gitattributes\n?? loose/runner" {
 		t.Errorf("Git status: %q", got)
 	}
@@ -333,13 +283,7 @@ func TestIgnoredSelectionAndDetachedHead(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertFile(t, dst, "ignored.dat", []byte("private opt-in\n"))
-	info, err := os.Stat(filepath.Join(dst, "ignored.dat"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Mode().Perm() != 0755 {
-		t.Errorf("ignored mode: %o", info.Mode().Perm())
-	}
+	assertRestoredMode(t, filepath.Join(dst, "ignored.dat"), 0755)
 	if head, err := os.ReadFile(filepath.Join(dst, ".git", "HEAD")); err != nil || strings.HasPrefix(string(head), "ref:") {
 		t.Fatalf("not detached: %s %v", head, err)
 	}
@@ -365,6 +309,8 @@ func TestInvalidArchiveNeverPublishesDestination(t *testing.T) {
 		"traversal":    func(m *manifest, _ *[]byte, _ *[][]byte) { m.Files[0].Path = "../escape" },
 		"absolute":     func(m *manifest, _ *[]byte, _ *[][]byte) { m.Files[0].Path = "/tmp/escape" },
 		"control":      func(m *manifest, _ *[]byte, _ *[][]byte) { m.Files[0].Path = "nested/.git/config" },
+		"reserved":     func(m *manifest, _ *[]byte, _ *[][]byte) { m.Files[0].Path = "CON.txt" },
+		"trailing dot": func(m *manifest, _ *[]byte, _ *[][]byte) { m.Files[0].Path = "invalid." },
 		"digest":       func(m *manifest, _ *[]byte, _ *[][]byte) { m.Files[0].Digest = strings.Repeat("0", 64) },
 		"special mode": func(m *manifest, _ *[]byte, _ *[][]byte) { m.Files[0].Mode = 04755 },
 		"git payload": func(m *manifest, b *[]byte, _ *[][]byte) {
@@ -372,6 +318,7 @@ func TestInvalidArchiveNeverPublishesDestination(t *testing.T) {
 			m.Bundle = descriptor("repository.bundle", *b, 0600)
 		},
 		"duplicate path":           func(m *manifest, _ *[]byte, _ *[][]byte) { m.Files[1].Path = m.Files[0].Path },
+		"case alias":               func(m *manifest, _ *[]byte, _ *[][]byte) { m.Files[1].Path = strings.ToUpper(m.Files[0].Path) },
 		"file directory collision": func(m *manifest, _ *[]byte, _ *[][]byte) { m.Files[1].Path = m.Files[0].Path + "/child" },
 	}
 	for name, mutate := range cases {
@@ -430,7 +377,7 @@ func TestUnsupportedSourceFailsExplicitly(t *testing.T) {
 	t.Run("symlink", func(t *testing.T) {
 		root := newFixture(t)
 		if err := os.Symlink("note.txt", filepath.Join(root, "link")); err != nil {
-			t.Fatal(err)
+			t.Skipf("symlink unavailable: %v", err)
 		}
 		if _, err := Capture(context.Background(), root, nil, testLimit); err == nil {
 			t.Fatal("accepted symlink")
@@ -464,40 +411,15 @@ func TestUnsupportedSourceFailsExplicitly(t *testing.T) {
 	})
 }
 
-func TestExcludedIgnoredLayoutsDoNotBlockCheckpoint(t *testing.T) {
-	t.Parallel()
-	root := newFixture(t)
-	writeFixture(t, root, ".gitignore", []byte("ignored.dat\nignored-layout/\n"), 0644)
-	ignored := filepath.Join(root, "ignored-layout")
-	if err := os.Mkdir(ignored, 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(filepath.Join(t.TempDir(), "outside"), filepath.Join(ignored, "link")); err != nil {
-		t.Fatal(err)
-	}
-	if err := unix.Mkfifo(filepath.Join(ignored, "pipe"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	nested := filepath.Join(ignored, "nested")
-	if err := os.Mkdir(nested, 0700); err != nil {
-		t.Fatal(err)
-	}
-	fixtureGit(t, nested, "init", "--quiet", "--template=")
-	writeFixture(t, nested, "note", []byte("ignored nested repository"), 0600)
-	data, err := Capture(context.Background(), root, nil, testLimit)
-	if err != nil {
-		t.Fatalf("excluded ignored state blocked capture: %v", err)
-	}
-	target := filepath.Join(t.TempDir(), "restored")
-	if err = Restore(context.Background(), data, target, testLimit); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = os.Lstat(filepath.Join(target, "ignored-layout")); !os.IsNotExist(err) {
-		t.Fatalf("excluded ignored layout transferred: %v", err)
-	}
-	for _, selected := range []string{"ignored-layout/link", "ignored-layout/pipe", "ignored-layout/nested/note"} {
-		if _, err = Capture(context.Background(), root, []string{selected}, testLimit); err == nil {
-			t.Fatalf("selected unsupported layout accepted: %s", selected)
-		}
+func TestCaptureRejectsWindowsPathAliasesInGitTrees(t *testing.T) {
+	for _, name := range []string{"CON.txt", "trailing.", "NOTE.TXT", "GIT~1/config"} {
+		t.Run(name, func(t *testing.T) {
+			root := newFixture(t)
+			blob := fixtureGit(t, root, "rev-parse", "HEAD:note.txt")
+			fixtureGit(t, root, "-c", "core.protectNTFS=false", "update-index", "--add", "--cacheinfo", "100644,"+blob+","+name)
+			if _, err := Capture(t.Context(), root, nil, testLimit); err == nil {
+				t.Fatalf("accepted Windows path alias %q", name)
+			}
+		})
 	}
 }

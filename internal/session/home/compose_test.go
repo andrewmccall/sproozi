@@ -16,9 +16,12 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/andrewmccall/sproozi/internal/testutil"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	gatewaydocker "github.com/andrewmccall/sproozi/internal/gateway/docker"
@@ -32,7 +35,7 @@ const fixtureCertificatePEM = "CERTIFICATE"
 
 func composedConfig(t *testing.T) Config {
 	t.Helper()
-	root := t.TempDir()
+	root := testutil.PrivateDir(t)
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -57,7 +60,7 @@ func composedConfig(t *testing.T) Config {
 	}
 	files := map[string][]byte{"ca.pem": pem.EncodeToMemory(&pem.Block{Type: fixtureCertificatePEM, Bytes: der}), "gateway.crt": pem.EncodeToMemory(&pem.Block{Type: fixtureCertificatePEM, Bytes: cert}), "gateway.key": pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyBytes}), "provider-token": []byte("public-fixture-placeholder")}
 	for name, bytes := range files {
-		if err = os.WriteFile(filepath.Join(root, name), bytes, 0600); err != nil {
+		if err = testutil.WriteFile(filepath.Join(root, name), bytes, 0600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -67,7 +70,11 @@ func composedConfig(t *testing.T) Config {
 	}
 	limits := runtimedocker.ResourceLimits{MemoryBytes: 64 << 20, CPUMilli: 500, PIDs: 64}
 	image := "sha256:" + strings.Repeat("a", 64)
-	return Config{Directory: filepath.Join(root, "home"), DockerBinary: binary, DockerSocket: filepath.Join(root, "docker.sock"), DockerConfig: filepath.Join(root, "docker-cli"), MaxDuration: "1h", Model: "fixture", Allowances: map[string]session.Allowance{testCapability: {Units: session.Limit{Bounded: true, Value: 10}}}, Local: runtimedocker.PlacementConfig{Harness: harness.NativeCodex, Name: testLocal, NativeImageID: image, HelperImageID: image, AnchorImageID: image, NetworkName: "bridge-fixture", GatewayIPv4: "192.168.65.254", GatewayPort: 18443, Instructions: testInstructions, InstructionDigest: fmt.Sprintf("%x", sha256.Sum256([]byte(testInstructions))), AgentLimits: limits, HelperLimits: limits, AnchorLimits: limits, VolumeBytes: 64 << 20, MaxCheckpointBytes: testLimit, RetainedBytes: 32 << 20}, Gateway: GatewayConfig{Listen: "0.0.0.0:18443", CertificateFile: filepath.Join(root, "gateway.crt"), KeyFile: filepath.Join(root, "gateway.key"), TrustBundleFile: filepath.Join(root, "ca.pem"), ProviderURL: "http://127.0.0.1:18765", ProviderTokenFile: filepath.Join(root, "provider-token")}}
+	socket := filepath.Join(root, "docker.sock")
+	if runtime.GOOS == "windows" {
+		socket = "npipe:////./pipe/sproozi-fixture"
+	}
+	return Config{Directory: filepath.Join(root, "home"), DockerBinary: binary, DockerSocket: socket, DockerConfig: filepath.Join(root, "docker-cli"), MaxDuration: "1h", Model: "fixture", Allowances: map[string]session.Allowance{testCapability: {Units: session.Limit{Bounded: true, Value: 10}}}, Local: runtimedocker.PlacementConfig{Harness: harness.NativeCodex, Name: testLocal, NativeImageID: image, HelperImageID: image, AnchorImageID: image, NetworkName: "bridge-fixture", GatewayIPv4: "192.168.65.254", GatewayPort: 18443, Instructions: testInstructions, InstructionDigest: fmt.Sprintf("%x", sha256.Sum256([]byte(testInstructions))), AgentLimits: limits, HelperLimits: limits, AnchorLimits: limits, VolumeBytes: 64 << 20, MaxCheckpointBytes: testLimit, RetainedBytes: 32 << 20}, Gateway: GatewayConfig{Listen: "0.0.0.0:18443", CertificateFile: filepath.Join(root, "gateway.crt"), KeyFile: filepath.Join(root, "gateway.key"), TrustBundleFile: filepath.Join(root, "ca.pem"), ProviderURL: "http://127.0.0.1:18765", ProviderTokenFile: filepath.Join(root, "provider-token")}}
 }
 
 func TestProductionCompositionTakesExclusiveOwnershipWithoutLaunching(t *testing.T) {
@@ -111,10 +118,10 @@ func TestKubernetesConfigKeepsCredentialInGatewayAndRejectsUnsafeScopes(t *testi
 	defer upstream.Close()
 	directory := filepath.Dir(c.Gateway.ProviderTokenFile)
 	token, ca := filepath.Join(directory, "kube-token"), filepath.Join(directory, "kube-ca")
-	if err := os.WriteFile(token, []byte("gateway-only-kube-token"), 0600); err != nil {
+	if err := testutil.WriteFile(token, []byte("gateway-only-kube-token"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: fixtureCertificatePEM, Bytes: upstream.Certificate().Raw}), 0600); err != nil {
+	if err := testutil.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: fixtureCertificatePEM, Bytes: upstream.Certificate().Raw}), 0600); err != nil {
 		t.Fatal(err)
 	}
 	c.Gateway.Kubernetes = &KubernetesConfig{UpstreamURL: upstream.URL, TokenFile: token, CAFile: ca, Scope: api.KubernetesReadScope{Namespaces: []string{"ops"}, Resources: []api.KubernetesReadResource{api.KubernetesReadPods, api.KubernetesReadPodLogs}}}
@@ -145,7 +152,7 @@ func TestKubernetesConfigKeepsCredentialInGatewayAndRejectsUnsafeScopes(t *testi
 		t.Fatal("sensitive resource admitted into global native scope")
 	}
 	c.Gateway.Kubernetes.Scope.Resources = []api.KubernetesReadResource{api.KubernetesReadPods}
-	if err := os.Chmod(token, 0644); err != nil {
+	if err := makeTestPathPublic(token); err != nil {
 		t.Fatal(err)
 	}
 	if err := nativeServices(c, certificate, target); err == nil {

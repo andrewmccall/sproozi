@@ -9,7 +9,7 @@ const missingFixtureAccount = "missing"
 func TestManagedAnchorCapabilitySpellings(t *testing.T) {
 	t.Parallel()
 	s := ManagedSpec{Name: "anchor", Role: roleAnchor, ImageID: "sha256:fixed", NetworkMode: fixtureBridge, IntentDigest: "intent"}
-	i := Instance{ID: "container"}
+	i := Instance{ID: "container-id"}
 	cmd := []string{networkCommandPath, "192.168.65.254", "18443"}
 	r := managedInspection{ID: i.ID, Image: s.ImageID, Name: "/anchor"}
 	r.Config.User = "0:0"

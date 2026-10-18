@@ -1,0 +1,48 @@
+name: Native platforms
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call:
+
+concurrency:
+  group: native-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  targets:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.targets.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - id: targets
+        run: echo "matrix=$(python3 -c 'import json; print(json.dumps({"include":json.load(open("hack/release/targets.json"))}))')" >> "$GITHUB_OUTPUT"
+  native:
+    needs: targets
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.targets.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - name: Test host boundaries and recovery
+        run: go test -race -v -timeout=5m ./internal/privatefs ./internal/workspace ./internal/runtime/docker ./internal/session/home ./internal/budget/file ./internal/gateway/docker ./internal/session ./internal/work ./cmd/sproozi
+      - name: Build and run CLI
+        shell: bash
+        run: |
+          go build -o "${RUNNER_TEMP}/sproozi.exe" ./cmd/sproozi
+          "${RUNNER_TEMP}/sproozi.exe" --version
+          "${RUNNER_TEMP}/sproozi.exe" --help

@@ -9,6 +9,7 @@ to do. The main [README](../README.md) gives the project overview.
 | I want to… | Read |
 | --- | --- |
 | Understand the basic model | [Core concepts](explanations/core-concepts.md) |
+| Install the CLI | [Homebrew and binary downloads](guides/install.md) |
 | Try the local Kind demo | [Getting started](guides/getting-started.md) |
 | Install on an existing cluster | [Install on Kubernetes and run a first Pod](guides/install-kubernetes.md) |
 | Check deployment requirements and limits | [Cluster dependencies](reference/dependencies.md), [security hardening](reference/security-hardening.md) |
@@ -23,6 +24,7 @@ These guides give prerequisites, steps and checks for specific tasks.
 - [Run disposable jobs through Hermes](guides/hermes-orchestration.md)
 - [Hermes with retained work](guides/retained-work-kubernetes.md)
 - [Move a native session between Docker and Kubernetes](guides/session-mobility.md)
+- [Use the native Windows CLI](guides/windows.md)
 
 ## Understand the system
 
@@ -63,3 +65,5 @@ For contributor test requirements and commands, see
 [Testing](../test/acceptance/README.md). The
 [recorded test reports](../test/acceptance/reports/README.md) hold the evidence
 from specific acceptance runs.
+
+Maintainers can follow [the release steps](contributing/releases.md).

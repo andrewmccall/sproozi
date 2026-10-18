@@ -68,3 +68,6 @@ venv/
 *.pfx
 *.secret.yaml
 *.secret.yml
+
+# GoReleaser output
+/dist/

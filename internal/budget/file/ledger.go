@@ -6,13 +6,12 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sync"
-	"syscall"
 
 	"github.com/andrewmccall/sproozi/internal/budget"
+	"github.com/andrewmccall/sproozi/internal/privatefs"
 )
 
 const maxRecordBytes = 16 << 10
@@ -35,27 +34,12 @@ func NewLedger(dir string) (*Ledger, error) {
 	if !filepath.IsAbs(dir) {
 		return nil, errors.New("budget: absolute private directory required")
 	}
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := privatefs.EnsureDir(dir); err != nil {
 		return nil, err
 	}
-	if err := private(dir, true); err != nil {
-		return nil, err
-	}
-	path := filepath.Join(dir, "owner.lock")
-	if _, err := os.Lstat(path); err == nil {
-		if err := private(path, false); err != nil {
-			return nil, err
-		}
-	} else if !os.IsNotExist(err) {
-		return nil, err
-	}
-	lock, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
+	lock, err := privatefs.Lock(filepath.Join(dir, "owner.lock"))
 	if err != nil {
-		return nil, err
-	}
-	if err = syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		_ = lock.Close()
-		return nil, errors.New("budget: ledger already owned")
+		return nil, fmt.Errorf("budget: ledger already owned: %w", err)
 	}
 	s := &store{dir: dir, lock: lock}
 	return &Ledger{Ledger: budget.NewLedger(s), store: s}, nil
@@ -69,18 +53,7 @@ func (l *Ledger) Close() error {
 		return nil
 	}
 	s.closed = true
-	return errors.Join(syscall.Flock(int(s.lock.Fd()), syscall.LOCK_UN), s.lock.Close())
-}
-
-func private(path string, directory bool) error {
-	info, err := os.Lstat(path)
-	if err != nil {
-		return err
-	}
-	if info.Mode()&os.ModeSymlink != 0 || info.IsDir() != directory || (!directory && !info.Mode().IsRegular()) || info.Mode().Perm()&0077 != 0 || info.Sys().(*syscall.Stat_t).Uid != uint32(os.Geteuid()) {
-		return errors.New("budget: ledger paths must be owned and private")
-	}
-	return nil
+	return privatefs.UnlockClose(s.lock)
 }
 
 func (s *store) path(key budget.AccountKey) string {
@@ -89,23 +62,12 @@ func (s *store) path(key budget.AccountKey) string {
 
 func (s *store) read(key budget.AccountKey) (*budget.Record, error) {
 	path := s.path(key)
-	if err := private(path, false); err != nil {
+	data, err := privatefs.ReadFile(path, maxRecordBytes)
+	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, budget.ErrAccountNotFound
 		}
 		return nil, err
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	data, err := io.ReadAll(io.LimitReader(f, maxRecordBytes+1))
-	err = errors.Join(err, f.Close())
-	if err != nil {
-		return nil, err
-	}
-	if len(data) > maxRecordBytes {
-		return nil, errors.New("budget: ledger record exceeds bound")
 	}
 	return budget.DecodeRecord(string(data))
 }
@@ -148,24 +110,5 @@ func (s *store) Update(ctx context.Context, key budget.AccountKey, mutate func(*
 	if len(data) > maxRecordBytes {
 		return errors.New("budget: ledger record exceeds bound")
 	}
-	temp, err := os.CreateTemp(s.dir, ".pending-")
-	if err != nil {
-		return err
-	}
-	defer func() { _ = os.Remove(temp.Name()) }()
-	if _, err = temp.WriteString(data); err == nil {
-		err = temp.Sync()
-	}
-	err = errors.Join(err, temp.Close())
-	if err != nil {
-		return err
-	}
-	if err = os.Rename(temp.Name(), s.path(key)); err != nil {
-		return err
-	}
-	parent, err := os.Open(s.dir)
-	if err != nil {
-		return err
-	}
-	return errors.Join(parent.Sync(), parent.Close())
+	return privatefs.Replace(s.dir, filepath.Base(s.path(key)), []byte(data))
 }

@@ -28,7 +28,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"syscall"
+
+	"github.com/andrewmccall/sproozi/internal/privatefs"
 )
 
 const version = 1
@@ -72,13 +73,13 @@ func (b *boundedBuffer) Write(p []byte) (int, error) {
 }
 func (g gitRunner) run(ctx context.Context, root string, args ...string) ([]byte, error) {
 	base := make([]string, 0, 20+len(args))
-	base = append(base, "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "core.attributesFile=/dev/null", "-c", "core.autocrlf=false", "-c", "core.fileMode=true", "-c", "core.ignoreCase=false", "-c", "protocol.allow=never", "-c", "protocol.file.allow=always", "-c", "fetch.fsckObjects=true", "-c", "transfer.fsckObjects=true")
+	base = append(base, "-c", "core.hooksPath="+os.DevNull, "-c", "core.fsmonitor=false", "-c", "core.attributesFile="+os.DevNull, "-c", "core.autocrlf=false", "-c", "core.fileMode=true", "-c", "core.longpaths=true", "-c", "core.ignoreCase=false", "-c", "protocol.allow=never", "-c", "protocol.file.allow=always", "-c", "fetch.fsckObjects=true", "-c", "transfer.fsckObjects=true")
 	if g.excludes != "" {
 		base = append(base, "-c", "core.excludesFile="+g.excludes)
 	}
 	cmd := exec.CommandContext(ctx, "git", append(base, args...)...)
 	cmd.Dir = root
-	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + g.home, "XDG_CONFIG_HOME=" + g.home, "LC_ALL=C", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_ATTR_NOSYSTEM=1", "GIT_TERMINAL_PROMPT=0", "GIT_NO_REPLACE_OBJECTS=1", "GIT_OPTIONAL_LOCKS=0", "GIT_AUTHOR_NAME=Sproozi", "GIT_AUTHOR_EMAIL=checkpoint@invalid", "GIT_COMMITTER_NAME=Sproozi", "GIT_COMMITTER_EMAIL=checkpoint@invalid"}
+	cmd.Env = append(gitPlatformEnvironment(), "PATH="+os.Getenv("PATH"), "HOME="+g.home, "XDG_CONFIG_HOME="+g.home, "LC_ALL=C", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_ATTR_NOSYSTEM=1", "GIT_TERMINAL_PROMPT=0", "GIT_NO_REPLACE_OBJECTS=1", "GIT_OPTIONAL_LOCKS=0", "GIT_AUTHOR_NAME=Sproozi", "GIT_AUTHOR_EMAIL=checkpoint@invalid", "GIT_COMMITTER_NAME=Sproozi", "GIT_COMMITTER_EMAIL=checkpoint@invalid")
 	out := &boundedBuffer{limit: g.limit}
 	stderr := &boundedBuffer{limit: 4096}
 	cmd.Stdout = out
@@ -89,15 +90,63 @@ func (g gitRunner) run(ctx context.Context, root string, args ...string) ([]byte
 	return out.Bytes(), nil
 }
 func validPath(p string) bool {
-	if p == "" || p == "." || len(p) > 4096 || path.IsAbs(p) || path.Clean(p) != p || strings.ContainsAny(p, "\\\x00\r\n:") {
+	if p == "" || p == "." || len(p) > 4096 || path.IsAbs(p) || path.Clean(p) != p || strings.ContainsAny(p, "\\\x00\r\n:<>\"|?*") {
 		return false
 	}
+	for _, character := range p {
+		if character < 32 {
+			return false
+		}
+	}
 	for part := range strings.SplitSeq(p, "/") {
-		if part == ".." || strings.EqualFold(strings.TrimRight(part, ". "), ".git") || strings.EqualFold(part, ".gitmodules") {
+		if part == ".." || strings.HasSuffix(part, ".") || strings.HasSuffix(part, " ") || windowsReservedName(part) || strings.EqualFold(strings.TrimRight(part, ". "), ".git") || strings.EqualFold(part, ".gitmodules") {
 			return false
 		}
 	}
 	return true
+}
+
+func windowsReservedName(name string) bool {
+	base := name
+	extension := ""
+	if i := strings.IndexByte(base, '.'); i >= 0 {
+		extension = base[i+1:]
+		base = base[:i]
+	}
+	// A short-name alias such as GIT~1 can address .git or another existing
+	// long name on NTFS. Reject that spelling before restoring any file.
+	if prefix, suffix, found := strings.Cut(base, "~"); found && prefix != "" && suffix != "" && len(base) <= 8 && len(extension) <= 3 {
+		digits := true
+		for _, character := range suffix {
+			if character < '0' || character > '9' {
+				digits = false
+			}
+		}
+		if digits {
+			return true
+		}
+	}
+	switch strings.ToUpper(base) {
+	case "CON", "CONIN$", "CONOUT$", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9", "COM¹", "COM²", "COM³", "LPT¹", "LPT²", "LPT³":
+		return true
+	default:
+		return false
+	}
+}
+
+// recordPortablePath rejects names which address the same path on a
+// case-insensitive Windows filesystem, including aliases in parent directories.
+func recordPortablePath(seen map[string]string, name string) error {
+	parts := strings.Split(name, "/")
+	for i := range parts {
+		actual := strings.Join(parts[:i+1], "/")
+		key := strings.ToLower(actual)
+		if previous, ok := seen[key]; ok && previous != actual {
+			return fmt.Errorf("workspace: Windows path alias %q conflicts with %q", actual, previous)
+		}
+		seen[key] = actual
+	}
+	return nil
 }
 func digest(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
 func descriptor(p string, b []byte, mode int64) entry {
@@ -139,7 +188,13 @@ func inspect(root string) error {
 	if !base.IsDir() || base.Mode()&os.ModeSymlink != 0 {
 		return errors.New("workspace: root must be a real directory")
 	}
-	dev := base.Sys().(*syscall.Stat_t).Dev
+	volume, reparse, err := inspectFilesystemPath(root, base)
+	if err != nil {
+		return err
+	}
+	if reparse {
+		return errors.New("workspace: root must not be a reparse point")
+	}
 	count := 0
 	return filepath.WalkDir(root, func(p string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -153,10 +208,14 @@ func inspect(root string) error {
 		if err != nil {
 			return err
 		}
-		if info.Sys().(*syscall.Stat_t).Dev != dev {
+		entryVolume, entryReparse, err := inspectFilesystemPath(p, info)
+		if err != nil {
+			return err
+		}
+		if entryVolume != volume {
 			return errors.New("workspace: external mounts are unsupported")
 		}
-		if info.Mode()&(os.ModeSetuid|os.ModeSetgid|os.ModeSticky) != 0 {
+		if entryReparse || info.Mode()&(os.ModeSetuid|os.ModeSetgid|os.ModeSticky) != 0 {
 			return errors.New("workspace: special permissions unsupported")
 		}
 		if !info.IsDir() && !info.Mode().IsRegular() {
@@ -178,7 +237,10 @@ func sourceEntry(root, relative string) (os.FileInfo, error) {
 	if err != nil || !base.IsDir() || base.Mode()&os.ModeSymlink != 0 {
 		return nil, errors.New("workspace: root must be a real directory")
 	}
-	device := base.Sys().(*syscall.Stat_t).Dev
+	volume, reparse, err := inspectFilesystemPath(root, base)
+	if err != nil || reparse {
+		return nil, errors.New("workspace: root must be a real directory")
+	}
 	current := root
 	parts := strings.Split(filepath.ToSlash(relative), "/")
 	for i, part := range parts {
@@ -190,7 +252,11 @@ func sourceEntry(root, relative string) (os.FileInfo, error) {
 		if err != nil {
 			return nil, err
 		}
-		if info.Sys().(*syscall.Stat_t).Dev != device || info.Mode()&(os.ModeSymlink|os.ModeSetuid|os.ModeSetgid|os.ModeSticky) != 0 {
+		entryVolume, entryReparse, inspectErr := inspectFilesystemPath(current, info)
+		if inspectErr != nil {
+			return nil, inspectErr
+		}
+		if entryVolume != volume || entryReparse || info.Mode()&(os.ModeSymlink|os.ModeSetuid|os.ModeSetgid|os.ModeSticky) != 0 {
 			return nil, fmt.Errorf("workspace: unsupported selected path %q", relative)
 		}
 		if i < len(parts)-1 && !info.IsDir() || !info.IsDir() && !info.Mode().IsRegular() {
@@ -235,7 +301,7 @@ func capture(ctx context.Context, root string, selectedIgnored []string, exclude
 	if err != nil || gi == nil || !gi.IsDir() {
 		return nil, errors.New("workspace: ordinary Git directory required")
 	}
-	scratch, err := os.MkdirTemp("", "sproozi-workspace-capture-")
+	scratch, err := privatefs.TempDir("", "sproozi-workspace-capture-")
 	if err != nil {
 		return nil, err
 	}
@@ -387,6 +453,7 @@ func checkTree(ctx context.Context, g gitRunner, repo, tree string) error {
 	if err != nil {
 		return err
 	}
+	seen := map[string]string{}
 	for _, item := range splitZero(out) {
 		parts := strings.SplitN(item, "\t", 2)
 		if len(parts) != 2 {
@@ -395,6 +462,9 @@ func checkTree(ctx context.Context, g gitRunner, repo, tree string) error {
 		fields := strings.Fields(parts[0])
 		if len(fields) != 3 || fields[1] != "blob" || (fields[0] != "100644" && fields[0] != "100755") || !validPath(parts[1]) {
 			return errors.New("workspace: unsupported tree path or mode")
+		}
+		if err = recordPortablePath(seen, parts[1]); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -479,6 +549,10 @@ func captureWorkingFiles(run func(...string) ([]byte, error), root string, selec
 	for _, name := range splitZero(names) {
 		selected[name] = true
 	}
+	indexModes, err := capturedIndexModes(run)
+	if err != nil {
+		return nil, nil, 0, err
+	}
 	for _, name := range selectedIgnored {
 		if !validPath(name) {
 			return nil, nil, 0, fmt.Errorf("workspace: invalid ignored path %q", name)
@@ -506,11 +580,15 @@ func captureWorkingFiles(run func(...string) ([]byte, error), root string, selec
 		ordered = append(ordered, name)
 	}
 	slices.Sort(ordered)
+	aliases := map[string]string{}
 	files := make([][]byte, 0, len(ordered))
 	total := int64(0)
 	for _, name := range ordered {
 		if !validPath(name) {
 			return nil, nil, 0, fmt.Errorf("workspace: invalid file path %q", name)
+		}
+		if err = recordPortablePath(aliases, name); err != nil {
+			return nil, nil, 0, err
 		}
 		file := filepath.Join(root, filepath.FromSlash(name))
 		info, err := sourceEntry(root, name)
@@ -528,9 +606,31 @@ func captureWorkingFiles(run func(...string) ([]byte, error), root string, selec
 			return nil, nil, 0, err
 		}
 		total += int64(len(b))
-		mode := int64(info.Mode().Perm())
+		indexMode, tracked := indexModes[name]
+		mode := capturedFileMode(info, indexMode, tracked)
 		entries = append(entries, descriptor(name, b, mode))
 		files = append(files, b)
 	}
 	return entries, files, total, nil
+}
+
+func capturedIndexModes(run func(...string) ([]byte, error)) (map[string]int64, error) {
+	out, err := run("ls-files", "--stage", "-z")
+	if err != nil {
+		return nil, err
+	}
+	modes := make(map[string]int64)
+	for _, item := range splitZero(out) {
+		meta, name, ok := strings.Cut(item, "\t")
+		fields := strings.Fields(meta)
+		if !ok || len(fields) != 3 || fields[2] != "0" || (fields[0] != "100644" && fields[0] != "100755") {
+			return nil, errors.New("workspace: unsupported index path or mode")
+		}
+		mode, parseErr := strconv.ParseInt(fields[0], 8, 64)
+		if parseErr != nil {
+			return nil, errors.New("workspace: invalid index mode")
+		}
+		modes[name] = mode
+	}
+	return modes, nil
 }

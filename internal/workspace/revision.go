@@ -5,6 +5,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+
+	"github.com/andrewmccall/sproozi/internal/privatefs"
 )
 
 // Metadata separates a committed Git revision from the complete unfinished
@@ -40,7 +42,7 @@ func AtRevision(ctx context.Context, data []byte, revision, scratch string, maxB
 	if revision == "" || revision != meta.Revision {
 		return nil, errors.New("workspace: request the exact full recorded Git revision")
 	}
-	dir, err := os.MkdirTemp(scratch, ".sproozi-revision-")
+	dir, err := privatefs.TempDir(scratch, ".sproozi-revision-")
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +68,7 @@ func AtRevision(ctx context.Context, data []byte, revision, scratch string, maxB
 // task whose native worker fetches its own source. scratch must be private
 // storage, as for AtRevision.
 func Empty(ctx context.Context, scratch string, maxBytes int64) ([]byte, error) {
-	dir, err := os.MkdirTemp(scratch, ".sproozi-empty-")
+	dir, err := privatefs.TempDir(scratch, ".sproozi-empty-")
 	if err != nil {
 		return nil, err
 	}

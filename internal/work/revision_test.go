@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/andrewmccall/sproozi/internal/testutil"
+
 	"github.com/andrewmccall/sproozi/internal/session/profile"
 	"github.com/andrewmccall/sproozi/internal/workspace"
 	"github.com/google/uuid"
@@ -43,7 +45,7 @@ func TestFreshNativeWorkStartsAtRecordedCommitAndKeepsSourceReceipt(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	target := filepath.Join(t.TempDir(), "checkout")
+	target := filepath.Join(testutil.PrivateDir(t), "checkout")
 	if err = workspace.Restore(t.Context(), data, target, testLimit); err != nil {
 		t.Fatal(err)
 	}

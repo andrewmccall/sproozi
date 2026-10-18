@@ -1,9 +1,8 @@
 package work
 
 import (
-	"os"
-
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
+	"github.com/andrewmccall/sproozi/internal/privatefs"
 	"github.com/andrewmccall/sproozi/internal/project"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
 )
@@ -35,10 +34,7 @@ func (o *Owner) revisionSource(source RevisionSource, target project.Association
 		return nil, &profile.Rejection{Code: profile.CodeInvalid}
 	}
 	p := o.path(source.SessionID, ".checkpoint")
-	if err = private(p, false); err != nil {
-		return nil, err
-	}
-	data, err := os.ReadFile(p)
+	data, err := privatefs.ReadFile(p, o.config.MaxCheckpointBytes)
 	if err != nil {
 		return nil, err
 	}

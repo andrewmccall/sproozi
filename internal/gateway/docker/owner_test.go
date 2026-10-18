@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/testutil"
+
 	"github.com/andrewmccall/sproozi/internal/harness"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
@@ -57,7 +59,7 @@ type fixture struct {
 
 func newOwner(t *testing.T) *fixture {
 	t.Helper()
-	dir := t.TempDir()
+	dir := testutil.PrivateDir(t)
 	ledger, err := budgetfile.NewLedger(filepath.Join(dir, "accounting"))
 	if err != nil {
 		t.Fatal(err)

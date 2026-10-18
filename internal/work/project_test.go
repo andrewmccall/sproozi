@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/testutil"
+
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/project"
 	"github.com/andrewmccall/sproozi/internal/session"
@@ -226,7 +228,7 @@ func TestInvalidProjectConfigurationCannotStartAnOwner(t *testing.T) {
 			// Validation rejects each configuration before any Git runs, so
 			// no snapshot repository is built.
 			p := &fixturePlacement{}
-			c := withProjects(fixtureConfig(t, t.TempDir(), p))
+			c := withProjects(fixtureConfig(t, testutil.PrivateDir(t), p))
 			d := c.Projects["sproozi-dev"]
 			switch invalid {
 			case "template":

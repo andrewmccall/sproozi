@@ -7,39 +7,47 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
+
+	"github.com/andrewmccall/sproozi/internal/privatefs"
 )
 
 var objectID = regexp.MustCompile(`^[0-9a-f]{64}$`)
 var resourceName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$`)
 
 const createdStatus = "created"
+const containerCommand = "container"
 
 const ownerLabel = "sproozi.com/execution"
 
-// Engine speaks only to the administrator-selected local Unix socket, with no
-// inherited Docker contexts, CLI plugins or credential-helper configuration.
+// Engine speaks only to the administrator-selected local engine endpoint, with
+// no inherited Docker contexts, CLI plugins or credential-helper configuration.
 type Engine struct {
-	binary  string
-	socket  string
-	config  string
-	execute func(context.Context, []byte, int, []string) ([]byte, error)
+	binary     string
+	endpoint   string
+	config     string
+	execute    func(context.Context, []byte, int, []string) ([]byte, error)
+	linuxMu    sync.Mutex
+	linuxReady bool
 }
 
 func NewEngine(binary, socket, privateConfig string) (*Engine, error) {
-	if !filepath.IsAbs(binary) || !filepath.IsAbs(socket) || !filepath.IsAbs(privateConfig) {
-		return nil, errors.New("docker requires absolute executable, local socket and private configuration paths")
+	if !filepath.IsAbs(binary) || !filepath.IsAbs(privateConfig) {
+		return nil, errors.New("docker requires absolute executable and private configuration paths")
 	}
-	info, err := os.Lstat(privateConfig)
-	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0077 != 0 {
+	endpoint, err := localDockerEndpoint(socket)
+	if err != nil {
+		return nil, err
+	}
+	if err = privatefs.Check(privateConfig, true); err != nil {
 		return nil, errors.New("docker configuration must be an owned private directory")
 	}
-	return &Engine{binary: binary, socket: socket, config: privateConfig}, nil
+	return &Engine{binary: binary, endpoint: endpoint, config: privateConfig}, nil
 }
 
 // Instance selects an immutable container incarnation, never a reusable name.
@@ -106,7 +114,7 @@ func (e *Engine) Observe(ctx context.Context, instance Instance) (Observation, e
 	if !objectID.MatchString(instance.ID) || !resourceName.MatchString(instance.Execution) {
 		return Observation{}, errors.New("invalid Docker incarnation")
 	}
-	data, err := e.command(ctx, "container", "inspect", instance.ID)
+	data, err := e.command(ctx, containerCommand, "inspect", instance.ID)
 	if err != nil {
 		return Observation{}, err
 	}
@@ -140,7 +148,7 @@ func (e *Engine) Start(ctx context.Context, instance Instance) error {
 	if before.Status != createdStatus || before.PID != 0 {
 		return errors.New("docker execution cannot be reopened")
 	}
-	_, err = e.command(ctx, "container", "start", instance.ID)
+	_, err = e.command(ctx, containerCommand, "start", instance.ID)
 	return err
 }
 
@@ -152,7 +160,7 @@ func (e *Engine) Stop(ctx context.Context, instance Instance) error {
 		return err
 	}
 	if before.Running {
-		if _, err = e.command(ctx, "container", "stop", "--time", "10", instance.ID); err != nil {
+		if _, err = e.command(ctx, containerCommand, "stop", "--time", "10", instance.ID); err != nil {
 			return err
 		}
 	}
@@ -174,7 +182,7 @@ func (e *Engine) RemoveStopped(ctx context.Context, instance Instance) error {
 	if state.Running || state.PID != 0 || (state.Status != exitedStatus && state.Status != createdStatus) {
 		return errors.New("docker container must be stopped before removal")
 	}
-	_, err = e.command(ctx, "container", "rm", instance.ID)
+	_, err = e.command(ctx, containerCommand, "rm", instance.ID)
 	return err
 }
 

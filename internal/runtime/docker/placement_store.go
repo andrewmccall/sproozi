@@ -11,8 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"syscall"
 
+	"github.com/andrewmccall/sproozi/internal/privatefs"
 	"github.com/andrewmccall/sproozi/internal/session"
 )
 
@@ -58,17 +58,6 @@ type Placement struct {
 	authority Authority
 }
 
-func privateFile(path string, directory bool) error {
-	info, err := os.Lstat(path)
-	if err != nil {
-		return err
-	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || info.Mode()&os.ModeSymlink != 0 || info.IsDir() != directory || (!directory && !info.Mode().IsRegular()) || info.Mode().Perm()&0077 != 0 || stat.Uid != uint32(os.Geteuid()) {
-		return errors.New("docker placement path must be owned and private")
-	}
-	return nil
-}
 func OpenPlacement(dir string, engine *Engine, cfg PlacementConfig, authority Authority) (*Placement, error) {
 	if engine == nil || authority == nil {
 		return nil, errors.New("docker placement requires engine and trusted authority")
@@ -80,31 +69,16 @@ func OpenPlacement(dir string, engine *Engine, cfg PlacementConfig, authority Au
 	if err != nil {
 		return nil, err
 	}
-	if err = os.MkdirAll(dir, 0700); err != nil {
-		return nil, err
-	}
-	if err = privateFile(dir, true); err != nil {
+	if err = privatefs.EnsureDir(dir); err != nil {
 		return nil, err
 	}
 	dir, err = filepath.EvalSymlinks(dir)
 	if err != nil {
 		return nil, err
 	}
-	path := filepath.Join(dir, "owner.lock")
-	if _, err = os.Lstat(path); err == nil {
-		if err = privateFile(path, false); err != nil {
-			return nil, err
-		}
-	} else if !os.IsNotExist(err) {
-		return nil, err
-	}
-	lock, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
+	lock, err := privatefs.Lock(filepath.Join(dir, "owner.lock"))
 	if err != nil {
-		return nil, err
-	}
-	if err = syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		_ = lock.Close()
-		return nil, errors.New("docker placement directory already owned")
+		return nil, fmt.Errorf("docker placement directory already owned: %w", err)
 	}
 	encoded, err := json.Marshal(cfg)
 	if err != nil {
@@ -131,7 +105,7 @@ func (p *Placement) Close() error {
 		return nil
 	}
 	p.closed = true
-	return errors.Join(syscall.Flock(int(p.lock.Fd()), syscall.LOCK_UN), p.lock.Close())
+	return privatefs.UnlockClose(p.lock)
 }
 func (p *Placement) ready() error {
 	if p.closed {
@@ -154,23 +128,7 @@ func operationKey(l session.Launch) string {
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(l.ExecutionID+"\x00"+l.OperationID)))
 }
 func (p *Placement) read(name string, limit int64) ([]byte, error) {
-	path := filepath.Join(p.dir, name)
-	if err := privateFile(path, false); err != nil {
-		return nil, err
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = f.Close() }()
-	data, err := io.ReadAll(io.LimitReader(f, limit+1))
-	if err != nil {
-		return nil, err
-	}
-	if int64(len(data)) > limit {
-		return nil, errors.New("docker placement file exceeds limit")
-	}
-	return data, nil
+	return privatefs.ReadFile(filepath.Join(p.dir, name), limit)
 }
 func (p *Placement) write(name string, data []byte) error {
 	p.storageMu.Lock()
@@ -179,30 +137,7 @@ func (p *Placement) write(name string, data []byte) error {
 }
 
 func (p *Placement) writeUnlocked(name string, data []byte) error {
-	f, err := os.CreateTemp(p.dir, ".pending-")
-	if err != nil {
-		return err
-	}
-	temp := f.Name()
-	defer func() { _ = os.Remove(temp) }()
-	if err = f.Chmod(0600); err == nil {
-		_, err = f.Write(data)
-	}
-	if err == nil {
-		err = f.Sync()
-	}
-	err = errors.Join(err, f.Close())
-	if err != nil {
-		return err
-	}
-	if err = os.Rename(temp, filepath.Join(p.dir, name)); err != nil {
-		return err
-	}
-	parent, err := os.Open(p.dir)
-	if err != nil {
-		return err
-	}
-	return errors.Join(parent.Sync(), parent.Close())
+	return privatefs.Replace(p.dir, name, data)
 }
 func (p *Placement) load(l session.Launch) (placementRecord, error) {
 	var r placementRecord

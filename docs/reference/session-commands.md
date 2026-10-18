@@ -24,6 +24,16 @@ images, gateway credentials and profile services.
 
 ## Remote work and local resume
 
+`sproozi --help` lists commands. `sproozi --version` prints the product version,
+commit and build date. Neither command reads home configuration.
+`sproozi init [--directory PATH]` creates or validates a private directory for
+configuration and credentials. It does not overwrite files or start a service.
+The default is the platform user configuration directory's `sproozi` directory.
+
+Local commands use a private Unix socket on macOS and Linux, or a private named
+pipe on Windows. See [Windows setup](../guides/windows.md) for native platform
+requirements and workspace limits.
+
 | Command | Purpose |
 | --- | --- |
 | `run` | Submit a Codex task to a configured remote executor. |
@@ -60,6 +70,8 @@ other flag is rejected before configuration is read or a request is sent.
 
 | Command | Flags |
 | --- | --- |
+| `init` | `--directory` |
+| `version` |  |
 | `run` | `--config`, `--executor`, `--operation`, `--harness`, `--repository`, `--project`, `--task`, `--task-file`, `--workspace-from`, `--checkpoint-digest`, `--revision` |
 | `sessions` | `--config`, `--socket`, `--executor`, `--project` |
 | `status` | `--config`, `--socket`, `--executor`, `--id` |
@@ -75,6 +87,7 @@ other flag is rejected before configuration is read or a request is sent.
 
 | Flag | Meaning |
 | --- | --- |
+| `--directory PATH` | Private configuration directory; defaults to the platform user configuration directory plus `sproozi`. |
 | `--config FILE` | Private global configuration. `serve` requires it; other commands default to the platform path described below. |
 | `--socket PATH` | Private home socket, overriding the configured home. |
 | `--executor NAME` | Owner to address; `docker` selects home. See [Select the owner](#select-the-owner). |

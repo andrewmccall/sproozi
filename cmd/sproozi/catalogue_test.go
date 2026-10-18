@@ -7,10 +7,11 @@ import (
 	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/andrewmccall/sproozi/internal/testutil"
 
 	"github.com/andrewmccall/sproozi/internal/project"
 	"github.com/andrewmccall/sproozi/internal/session/home"
@@ -42,13 +43,13 @@ func TestCatalogueKeepsPartialAvailabilityAndBoundsResults(t *testing.T) {
 	server.TLS = &tls.Config{MinVersion: tls.VersionTLS13}
 	server.StartTLS()
 	defer server.Close()
-	dir := t.TempDir()
+	dir := testutil.PrivateDir(t)
 	ca, token := filepath.Join(dir, "ca.pem"), filepath.Join(dir, "token")
 	certificate := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})
-	if err := os.WriteFile(ca, certificate, 0600); err != nil {
+	if err := testutil.WriteFile(ca, certificate, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(token, []byte(strings.Repeat("t", 32)), 0600); err != nil {
+	if err := testutil.WriteFile(token, []byte(strings.Repeat("t", 32)), 0600); err != nil {
 		t.Fatal(err)
 	}
 	connection := profile.ClientConfig{URL: server.URL, TokenFile: token, CAFile: ca, MaxCheckpointBytes: 1 << 20}

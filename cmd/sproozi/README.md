@@ -2,7 +2,7 @@
 
 `sproozi serve` owns one local Docker placement, its private gateway and accounting,
 the home coordinator, and administrator-selected remote HTTPS profiles. Client
-commands use its private Unix socket. A terminal attachment can disconnect while
+commands use a private Unix socket or Windows named pipe. A terminal attachment can disconnect while
 the daemon and selected native process keep running.
 
 Remote-first Codex tasks use `run --executor NAME --repository NAME --task-file
@@ -33,6 +33,12 @@ Build the executable:
 go build -o bin/sproozi ./cmd/sproozi
 ```
 
+For packaged downloads and Homebrew, see [installation](../../docs/guides/install.md).
+`sproozi --help` and `sproozi --version` do not require configuration.
+`sproozi init` creates a private configuration directory. It does not start the
+home or create credentials. Windows users should read
+[Windows setup](../../docs/guides/windows.md) for path and permission rules.
+
 Prepare the selected native/helper/anchor images and the administrator-created bridge
 network used by `internal/runtime/docker`. The gateway IPv4 must be reachable from
 that network, including across Docker Desktop's VM boundary. The anchor permits
@@ -44,7 +50,9 @@ Keep configuration, provider keys, profile tokens and TLS keys outside the worke
 workspace. Directories must be owned and mode `0700`; files must be owned, regular,
 mode `0600` (or stricter), and selected by absolute path. `dockerConfig` is a fresh
 private Docker CLI directory, not a personal Docker configuration. The engine uses
-only the configured local Unix socket and executable.
+only the configured local Unix socket or Windows named pipe and executable.
+The Docker engine must use Linux containers. Windows private files use account
+ownership and restrictive ACLs rather than Unix mode bits.
 
 The following JSON shows the supported configuration shape. Replace the example
 image IDs, paths, instruction digest, model and network address with approved

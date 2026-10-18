@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/andrewmccall/sproozi/internal/testutil"
+
 	"github.com/andrewmccall/sproozi/internal/budget"
 	budgetfile "github.com/andrewmccall/sproozi/internal/budget/file"
 )
@@ -15,7 +17,7 @@ import (
 const accountKey budget.AccountKey = "visit/model.inference"
 
 func TestDurableReservationAndImmutableSealSurviveRestart(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "ledger")
+	dir := filepath.Join(testutil.PrivateDir(t), "ledger")
 	ctx := context.Background()
 	ledger, err := budgetfile.NewLedger(dir)
 	if err != nil {
@@ -57,7 +59,7 @@ func TestDurableReservationAndImmutableSealSurviveRestart(t *testing.T) {
 }
 
 func TestFileLedgerReserveAndSealAreAtomic(t *testing.T) {
-	ledger, err := budgetfile.NewLedger(filepath.Join(t.TempDir(), "ledger"))
+	ledger, err := budgetfile.NewLedger(filepath.Join(testutil.PrivateDir(t), "ledger"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +104,7 @@ func TestFileLedgerReserveAndSealAreAtomic(t *testing.T) {
 }
 
 func TestFileLedgerPrivateOwnershipAndRecordLoss(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "ledger")
+	dir := filepath.Join(testutil.PrivateDir(t), "ledger")
 	ctx := context.Background()
 	ledger, err := budgetfile.NewLedger(dir)
 	if err != nil {
@@ -120,7 +122,7 @@ func TestFileLedgerPrivateOwnershipAndRecordLoss(t *testing.T) {
 	if err != nil || len(paths) != 1 {
 		t.Fatalf("records=%v err=%v", paths, err)
 	}
-	if err = os.WriteFile(paths[0], []byte(`{"UnitsUsed":-1}`), 0600); err != nil {
+	if err = testutil.WriteFile(paths[0], []byte(`{"UnitsUsed":-1}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = ledger.State(ctx, accountKey); err == nil {
@@ -141,16 +143,16 @@ func TestFileLedgerPrivateOwnershipAndRecordLoss(t *testing.T) {
 }
 
 func TestFileLedgerRejectsSharedOrSymlinkStorage(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.Chmod(dir, 0755); err != nil {
+	dir := testutil.PrivateDir(t)
+	if err := makeTestPathPublic(dir); err != nil {
 		t.Fatal(err)
 	}
 	if ledger, err := budgetfile.NewLedger(dir); err == nil {
 		_ = ledger.Close()
 		t.Fatal("shared directory accepted")
 	}
-	link := filepath.Join(t.TempDir(), "ledger")
-	if err := os.Symlink(t.TempDir(), link); err != nil {
+	link := filepath.Join(testutil.PrivateDir(t), "ledger")
+	if err := os.Symlink(testutil.PrivateDir(t), link); err != nil {
 		t.Fatal(err)
 	}
 	if ledger, err := budgetfile.NewLedger(link); err == nil {

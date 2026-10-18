@@ -4,12 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/andrewmccall/sproozi/internal/testutil"
 
 	"github.com/andrewmccall/sproozi/internal/budget"
 	"github.com/andrewmccall/sproozi/internal/session"
@@ -284,7 +285,7 @@ func TestFreshResumeHonorsExistingExecutionRetentionBounds(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.config.Local.RetainedBytes = s.config.Local.MaxCheckpointBytes + 1
-	if err := os.WriteFile(filepath.Join(s.config.Directory, "journal", "retained-padding"), []byte("xx"), 0600); err != nil {
+	if err := testutil.WriteFile(filepath.Join(s.config.Directory, "journal", "retained-padding"), []byte("xx"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Resume(t.Context(), id, uuid.NewString()); err == nil {

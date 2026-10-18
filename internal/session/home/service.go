@@ -17,6 +17,7 @@ import (
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
 	gatewaydocker "github.com/andrewmccall/sproozi/internal/gateway/docker"
 	"github.com/andrewmccall/sproozi/internal/harness"
+	"github.com/andrewmccall/sproozi/internal/privatefs"
 	"github.com/andrewmccall/sproozi/internal/project"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
@@ -123,26 +124,7 @@ func (s *Service) lockSession(id string) (func(), error) {
 }
 
 func atomicWrite(directory, name string, data []byte) error {
-	temp, err := os.CreateTemp(directory, ".pending-")
-	if err != nil {
-		return err
-	}
-	defer func() { _ = os.Remove(temp.Name()) }()
-	if _, err = temp.Write(data); err == nil {
-		err = temp.Sync()
-	}
-	err = errors.Join(err, temp.Close())
-	if err != nil {
-		return err
-	}
-	if err = os.Rename(temp.Name(), filepath.Join(directory, name)); err != nil {
-		return err
-	}
-	parent, err := os.Open(directory)
-	if err != nil {
-		return err
-	}
-	return errors.Join(parent.Sync(), parent.Close())
+	return privatefs.Replace(directory, name, data)
 }
 
 // createExecution retains a new execution within the configured retention

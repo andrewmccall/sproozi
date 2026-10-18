@@ -33,7 +33,7 @@ func defaultConfigPath() (string, error) {
 type options struct {
 	action, socket, id, operation, executor, source, kind, repository, task string
 	detach                                                                  bool
-	workspace, destination, configPath                                      string
+	workspace, destination, configPath, directory                           string
 	includeIgnored                                                          []string
 	fixed                                                                   home.Config
 	project                                                                 project.ID
@@ -48,7 +48,7 @@ func parseProduct(args []string) (options, error) {
 	if !ok {
 		return options{}, fmt.Errorf("unknown command %q; run \"sproozi -h\" for commands", args[0])
 	}
-	if _, e := defaultConfigPath(); e != nil && c.name != actionServe {
+	if _, e := defaultConfigPath(); e != nil && c.name != actionServe && c.name != actionVersion && c.name != actionInit {
 		return options{}, e
 	}
 	q := options{action: c.name}
@@ -58,6 +58,9 @@ func parseProduct(args []string) (options, error) {
 		return options{}, err
 	}
 	q.configPath = in.config
+	if c.name == actionInit || c.name == actionVersion {
+		return q, nil
+	}
 	if c.name == actionServe {
 		if q.configPath == "" {
 			return options{}, errors.New("serve requires --config FILE")
@@ -149,6 +152,11 @@ func runProduct(args []string, stdout io.Writer) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	switch {
+	case q.action == actionInit:
+		return initialize(q.directory, stdout)
+	case q.action == actionVersion:
+		_, err := fmt.Fprintf(stdout, "sproozi %s (commit %s, built %s)\n", version, commit, date)
+		return err
 	case q.action == actionServe:
 		return serve(ctx, q.configPath)
 	case q.action == actionRun:

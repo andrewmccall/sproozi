@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 )
@@ -103,7 +104,7 @@ func RestoreCodexState(home string, state CodexState, maxBytes int64) error {
 		return fmt.Errorf("native home must be an owned directory")
 	}
 	dir := home
-	parts := bytes.SplitSeq([]byte(filepath.Dir(state.Path)), []byte{'/'})
+	parts := bytes.SplitSeq([]byte(path.Dir(state.Path)), []byte{'/'})
 	for part := range parts {
 		dir = filepath.Join(dir, string(part))
 		if err = os.Mkdir(dir, 0700); err != nil && !os.IsExist(err) {
@@ -161,7 +162,7 @@ func inspectCodexState(state CodexState, maxBytes int64) (string, string, error)
 				Version string `json:"cli_version"`
 				Cwd     string `json:"cwd"`
 			}
-			if err := json.Unmarshal(event.Payload, &value); err != nil || meta || value.ID != state.ThreadID || value.Version == "" || !filepath.IsAbs(value.Cwd) {
+			if err := json.Unmarshal(event.Payload, &value); err != nil || meta || value.ID != state.ThreadID || value.Version == "" || (!path.IsAbs(value.Cwd) && !filepath.IsAbs(value.Cwd)) {
 				return "", "", fmt.Errorf("incompatible native session metadata")
 			}
 			workspace, meta = value.Cwd, true

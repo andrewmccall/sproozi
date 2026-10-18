@@ -48,9 +48,13 @@ func userExcludesFile(ctx context.Context, root string) (string, error) {
 	if value == "" {
 		config := os.Getenv("XDG_CONFIG_HOME")
 		if config == "" {
-			home, err := os.UserHomeDir()
-			if err != nil {
-				return "", nil
+			home := os.Getenv("HOME")
+			if home == "" {
+				var err error
+				home, err = os.UserHomeDir()
+				if err != nil {
+					return "", nil
+				}
 			}
 			config = filepath.Join(home, ".config")
 		}
@@ -60,6 +64,7 @@ func userExcludesFile(ctx context.Context, root string) (string, error) {
 		// Git opens a relative excludes file from the top of the work tree.
 		value = filepath.Join(root, value)
 	}
+	value = filepath.Clean(value)
 	info, err := os.Stat(value)
 	if err != nil || !info.Mode().IsRegular() {
 		return "", nil

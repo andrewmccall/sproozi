@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"net/netip"
-	"os"
 	"os/exec"
 	"reflect"
 	"strconv"
@@ -158,7 +157,7 @@ func (e *Engine) EnsureManaged(ctx context.Context, s ManagedSpec) (Instance, er
 	return instance, nil
 }
 func (e *Engine) lookup(ctx context.Context, name, execution string) (Instance, bool, error) {
-	data, err := e.command(ctx, "container", "ls", "--all", "--no-trunc", "--filter", "name=^/"+name+"$", "--format", "{{.ID}}")
+	data, err := e.command(ctx, containerCommand, "ls", "--all", "--no-trunc", "--filter", "name=^/"+name+"$", "--format", "{{.ID}}")
 	if err != nil {
 		return Instance{}, false, err
 	}
@@ -175,7 +174,7 @@ func (e *Engine) VerifyManaged(ctx context.Context, i Instance, s ManagedSpec) e
 	if _, err := e.Observe(ctx, i); err != nil {
 		return err
 	}
-	data, err := e.command(ctx, "container", "inspect", i.ID)
+	data, err := e.command(ctx, containerCommand, "inspect", i.ID)
 	if err != nil {
 		return err
 	}
@@ -263,8 +262,16 @@ func (e *Engine) commandInput(ctx context.Context, input []byte, maxOutput int, 
 	if e.execute != nil {
 		return e.execute(ctx, input, maxOutput, args)
 	}
-	cmd := exec.CommandContext(ctx, e.binary, append([]string{"--host", "unix://" + e.socket, "--config", e.config}, args...)...)
-	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + e.config, "LC_ALL=C"}
+	if mutatesDocker(args) {
+		if err := e.ensureLinux(ctx); err != nil {
+			return nil, err
+		}
+	}
+	return e.runCommand(ctx, input, maxOutput, args...)
+}
+
+func (e *Engine) runCommand(ctx context.Context, input []byte, maxOutput int, args ...string) ([]byte, error) {
+	cmd := e.dockerCommand(ctx, args...)
 	cmd.Stdin = bytes.NewReader(input)
 	out, errout := &boundedOutput{limit: maxOutput}, &boundedOutput{limit: 4096}
 	cmd.Stdout, cmd.Stderr = out, errout
@@ -272,6 +279,51 @@ func (e *Engine) commandInput(ctx context.Context, input []byte, maxOutput int, 
 		return nil, fmt.Errorf("docker fixed operation failed: %w", err)
 	}
 	return io.ReadAll(out)
+}
+
+func (e *Engine) dockerCommand(ctx context.Context, args ...string) *exec.Cmd {
+	all := append([]string{"--host", e.endpoint, "--config", e.config}, args...)
+	cmd := exec.CommandContext(ctx, e.binary, all...)
+	cmd.Env = dockerProcessEnvironment(e.config)
+	return cmd
+}
+
+func (e *Engine) ensureLinux(ctx context.Context) error {
+	if e.execute != nil {
+		// Tests inject an already-scoped engine protocol fixture. Production
+		// engines always use the executable boundary below.
+		return nil
+	}
+	e.linuxMu.Lock()
+	defer e.linuxMu.Unlock()
+	if e.linuxReady {
+		return nil
+	}
+	output, err := e.runCommand(ctx, nil, 4096, "info", "--format", "{{.OSType}}")
+	if err != nil {
+		return fmt.Errorf("docker Linux engine check failed: %w", err)
+	}
+	if strings.TrimSpace(string(output)) != "linux" {
+		return errors.New("docker local engine must run Linux containers")
+	}
+	e.linuxReady = true
+	return nil
+}
+
+func mutatesDocker(args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+	switch args[0] {
+	case createCommand, execCommand:
+		return true
+	case containerCommand:
+		return len(args) > 1 && (args[1] == "create" || args[1] == "start" || args[1] == "stop" || args[1] == "rm")
+	case volumeCommand:
+		return len(args) > 1 && (args[1] == createCommand || args[1] == "rm")
+	default:
+		return false
+	}
 }
 
 func (e *Engine) PrepareArtifact(ctx context.Context, i Instance, kind harness.NativeKind, data []byte, maxBytes int64, digest string, initial bool) error {
@@ -311,9 +363,10 @@ func (e *Engine) AttachNative(ctx context.Context, i Instance, input io.Reader, 
 	if !state.Running || state.PID <= 0 {
 		return errors.New("native attachment requires running bound container")
 	}
-	args := []string{"--host", "unix://" + e.socket, "--config", e.config, execCommand, "--interactive", i.ID, nativeCommandPath, string(harness.NativeAttach)}
-	cmd := exec.CommandContext(ctx, e.binary, args...)
-	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + e.config, "LC_ALL=C"}
+	if err = e.ensureLinux(ctx); err != nil {
+		return err
+	}
+	cmd := e.dockerCommand(ctx, execCommand, "--interactive", i.ID, nativeCommandPath, string(harness.NativeAttach))
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = input, output, &boundedOutput{limit: 4096}
 	if err = cmd.Run(); err != nil {
 		return errors.New("docker native attachment failed")

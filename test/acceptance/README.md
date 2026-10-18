@@ -193,3 +193,5 @@ that a database operation is read-only.
 [Archived reports](reports/README.md) preserve earlier observations and source
 versions. They help diagnose regressions. They do not replace these requirements
 or establish that the current checkout passes them.
+
+Native host and release checks are specified in [platform requirements](platforms.md).
