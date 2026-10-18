@@ -102,9 +102,14 @@ UID and capability. Before a model call, the gateway reserves capacity:
 - Anthropic requests reserve all remaining token and cost capacity.
 
 After the call, the gateway settles the provider-reported input and output
-tokens. Input tokens can push usage past the reservation. If settlement fails,
-the gateway withholds the response, but the provider has already done the work,
-and the kept reservation can undercount what was spent.
+tokens. Input tokens can push usage past the reservation. When trusted usage
+exceeds the reservation or the remaining allowance, the gateway withholds the
+response and records the usage, capped at the allowance. The account is then
+charged what the provider reported or is exhausted, and later requests are
+refused, so repeating an oversized request cannot spend without limit. The
+provider has already done the work, and usage above the allowance is not
+recorded. If the accounting store itself fails, the response is withheld and
+the reservation stays charged, which can undercount what was spent.
 
 Within one gateway process, model calls that share a budget account run one at
 a time. Cancellation and execution deadlines still apply while a call waits.

@@ -357,6 +357,8 @@ func (h *Handler) writeProviderResponse(
 			}
 		}
 		if reservation != nil {
+			// Usage above the reservation or allowance is still recorded, up to
+			// the allowance, and reported as an error. Withhold the response.
 			if err := reservation.Settle(tokensUsed, costMicros); err != nil {
 				e.UpstreamStatus = resp.StatusCode
 				h.deny(w, e, http.StatusBadGateway,

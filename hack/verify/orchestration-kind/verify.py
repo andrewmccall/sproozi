@@ -870,13 +870,14 @@ def stock_clients():
             if harness == "claude-code" and scenario == "budget":
                 reason = "failed to settle model budget reservation"
                 # The fixture reports more usage than the one-token reservation.
-                # Its response must be withheld and the entire allowance held.
+                # Its response must be withheld and the trusted usage recorded,
+                # capped at the one-token allowance, so the account is exhausted.
                 key = data["metadata"]["uid"] + "/model.inference"
                 ledger_name = "sproozi-budget-" + hashlib.sha256(key.encode()).hexdigest()[:20]
                 ledger = json.loads(k("get", "configmap", ledger_name, "-n", SYSTEM, "-o", "json"))
                 budget_state = json.loads(ledger["data"]["state"])
-                check(budget_state["UnitsUsed"] == 0 and budget_state["ReservedUnits"] == 1, budget_state)
-                check(budget_state["pendingReservations"] == 1, budget_state)
+                check(budget_state["UnitsUsed"] == 1 and budget_state["ReservedUnits"] == 0, budget_state)
+                check(budget_state["pendingReservations"] == 0, budget_state)
                 check(not any(event.get("allowed") for event in audit), audit)
                 attempts = [event for event in audit if event.get("upstreamStatus") == 200]
                 check(len(attempts) == 1, attempts)

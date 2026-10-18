@@ -100,9 +100,11 @@ func (l *ledger) Settle(ctx context.Context, r *LedgerReservation, usage Trusted
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	var exceeded bool
 	err := l.store.Update(ctx, r.runID, func(record *Record, _ bool) error {
 		s := &record.state
-		if err := settleState(&s.State, r, usage); err != nil {
+		var err error
+		if exceeded, err = settleState(&s.State, r, usage); err != nil {
 			return err
 		}
 		if s.Pending != nil {
@@ -113,10 +115,14 @@ func (l *ledger) Settle(ctx context.Context, r *LedgerReservation, usage Trusted
 		}
 		return nil
 	})
-	if err == nil {
-		r.settled = true
+	if err != nil {
+		return err
 	}
-	return err
+	r.settled = true
+	if exceeded {
+		return ErrUsageExceeded
+	}
+	return nil
 }
 
 func (l *ledger) Release(ctx context.Context, r *LedgerReservation) error {
