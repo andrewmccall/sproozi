@@ -81,9 +81,42 @@ jobs:
           RELEASE_VERSION: ${{ needs.package.outputs.version }}
         run: python3 hack/release/verify.py --version "$RELEASE_VERSION" --native
         shell: bash
+  homebrew:
+    needs: package
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, ubuntu-24.04]
+    runs-on: ${{ matrix.runner }}
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+      HOMEBREW_NO_INSTALL_CLEANUP: '1'
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - name: Read the tap's source formula
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          repository: andrewmccall/homebrew-tap
+          ref: d456b3d151ed6c16c08213098c76624331a4ec52
+          path: .local/tap
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release-assets
+          path: dist
+      - name: Add Homebrew to PATH
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            echo /home/linuxbrew/.linuxbrew/bin >> "$GITHUB_PATH"
+          fi
+      - name: Build and test the source formula offline
+        run: python3 hack/release/brew.py
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [package, smoke, native]
+    needs: [package, smoke, native, homebrew]
     runs-on: ubuntu-latest
     permissions:
       contents: write
