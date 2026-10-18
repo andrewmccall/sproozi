@@ -19,7 +19,10 @@ limitations under the License.
 // +kubebuilder:rbac:groups=sproozi.com,resources=agentruns,verbs=create
 // +kubebuilder:rbac:groups=sproozi.com,resources=agentpolicies,verbs=get;list;watch
 // +kubebuilder:rbac:groups=sproozi.com,resources=agenttemplates,verbs=get;list;watch
-// +kubebuilder:rbac:groups="",resources=secrets,verbs=get
+//
+// HMAC Secret reads are granted only in the HMAC Secret namespace, by the
+// hand-written Role in config/webhook-secrets, never cluster-wide or in the
+// namespace that holds provider and GitHub credentials.
 package main
 
 import (
@@ -87,22 +90,37 @@ func main() {
 
 	h := &webhook.Handler{
 		Config: webhook.HandlerConfig{
-			Client:      runtimeClient,
-			Replay:      replay,
-			AuditLogger: audit.NewLogger(os.Stdout),
+			Client:          runtimeClient,
+			Replay:          replay,
+			AuditLogger:     audit.NewLogger(os.Stdout),
+			SecretNamespace: envOrDefault("HMAC_SECRET_NAMESPACE", webhook.DefaultSecretNamespace),
 		},
 	}
 
 	log.Info("Starting webhook", "addr", listenAddr)
 
-	srv := &http.Server{
-		Addr:              listenAddr,
-		Handler:           h,
-		ReadHeaderTimeout: 10 * time.Second,
-	}
-	if err := srv.ListenAndServe(); err != nil {
+	if err := newServer(listenAddr, h).ListenAndServe(); err != nil {
 		log.Error(err, "Server exited")
 		os.Exit(1)
+	}
+}
+
+// maxHeaderBytes bounds the request headers a sender can make the receiver
+// hold. Signed event requests carry only a few short headers.
+const maxHeaderBytes = 64 << 10
+
+// newServer bounds every phase of a connection. The receiver is reachable
+// before authentication, so a slow or idle sender must not hold a connection
+// or a request body open indefinitely.
+func newServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       45 * time.Second,
+		WriteTimeout:      45 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    maxHeaderBytes,
 	}
 }
 

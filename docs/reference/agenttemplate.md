@@ -39,8 +39,9 @@ spec:
 ## Optional webhook receiver metadata
 
 The base install deploys the webhook, but these metadata fields and a Secret
-with key `hmac-key` must be configured before it can receive events. They are not
-needed for the manual `AgentRun` path. The template has no external success
+in `sproozi-webhooks` with key `hmac-key`, at least 32 random bytes, must be
+configured before it can receive events. They are not needed for the manual
+`AgentRun` path. The template has no external success
 condition field; lifecycle success uses the workload's process exit code.
 
 The webhook path depends on object metadata as well as `spec`:

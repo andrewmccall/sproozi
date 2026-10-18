@@ -433,6 +433,41 @@ func TestHandlerRejectsStreamingRequest(t *testing.T) {
 	}
 }
 
+// TestHandlerUsageAboveReservationExhaustsAllowance verifies that trusted usage
+// above a small output reservation is recorded up to the allowance. Keeping
+// only the reservation would let a large input repeat without limit.
+func TestHandlerUsageAboveReservationExhaustsAllowance(t *testing.T) {
+	identity := testExecutionGrant()
+	limits := identity.Policy.Spec.Budgets[sprooziv1alpha1.CapabilityModelInference]
+	limits.MaxUnits = 100
+	identity.Policy.Spec.Budgets[sprooziv1alpha1.CapabilityModelInference] = limits
+	var calls atomic.Int32
+	h := newHandler(t, identity, testModelUpstream)
+	h.Config.HTTPClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		calls.Add(1)
+		return modelResponse(req,
+			`{"id":"x","usage":{"total_tokens":5016,"prompt_tokens":5000,"completion_tokens":16}}`), nil
+	})}
+
+	send := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
+			strings.NewReader(`{"model":"gpt-4o","messages":[],"max_tokens":16}`))
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		return w
+	}
+	if w := send(); w.Code != http.StatusBadGateway || strings.Contains(w.Body.String(), `"id":"x"`) {
+		t.Fatalf("status = %d, body = %s; want the response withheld with 502", w.Code, w.Body.String())
+	}
+	state := observedState(t, h.Config.BudgetTracker, testRunUID)
+	if state.UnitsUsed != 100 || state.ReservedUnits != 0 {
+		t.Fatalf("budget state = %+v, want the allowance of 100 used and no reservation", state)
+	}
+	if w := send(); w.Code != http.StatusTooManyRequests || calls.Load() != 1 {
+		t.Fatalf("second request status = %d after %d provider calls, want 429 after 1", w.Code, calls.Load())
+	}
+}
+
 func TestHandlerMissingUsageConsumesReservationAndDenies(t *testing.T) {
 	identity := testExecutionGrant()
 	limits := identity.Policy.Spec.Budgets[sprooziv1alpha1.CapabilityModelInference]

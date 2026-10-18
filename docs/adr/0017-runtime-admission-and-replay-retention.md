@@ -49,10 +49,18 @@ still read from the cache.
 The event receiver sweeps expired replay records once per replay window. It
 lists records by label in pages and deletes expired ones with UID and
 resource-version preconditions, so concurrent replicas do not conflict. A
-record therefore outlives its window by at most one more window. A record with
+record therefore outlives its expiry by at most one more window. A record with
 a missing or unreadable expiry is kept and keeps blocking its event. The replay
 Role gains `list` for the sweep. The delete-on-collision path remains, because
 a replayed ID can arrive before the next sweep.
+
+Amendment: a record's expiry is two replay windows after the event's
+timestamp, not one. Each replica accepts an event until one window after its
+timestamp by its own clock, while expiry is judged by whichever replica reads
+or sweeps the record. With a one-window expiry, a replica whose clock ran ahead
+could remove the record while a replica whose clock ran behind still accepted
+the event. The extra window tolerates up to one window of clock difference and
+keeps each record one window longer.
 
 ## Alternatives and tradeoffs
 

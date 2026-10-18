@@ -5,7 +5,7 @@ metadata:
     app.kubernetes.io/name: sproozi
     app.kubernetes.io/managed-by: kustomize
   name: webhook-rolebinding
-  namespace: sproozi-system
+  namespace: system
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -13,4 +13,4 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: webhook
-  namespace: sproozi-system
+  namespace: system

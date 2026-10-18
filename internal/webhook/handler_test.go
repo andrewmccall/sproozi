@@ -17,12 +17,14 @@ limitations under the License.
 package webhook_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -34,6 +36,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/audit"
@@ -41,6 +45,9 @@ import (
 )
 
 const testAlertBody = `{"id":"evt-123","eventContext":{"alertname":"CrashLoopBackOff"}}`
+
+// testHMACKey is long enough for the receiver's minimum key length.
+const testHMACKey = "webhook-secret-of-at-least-32-bytes"
 
 const (
 	testTemplateName = "sre-remediation"
@@ -107,11 +114,13 @@ func webhookTemplate() *sprooziv1alpha1.AgentTemplate {
 	}
 }
 
+// webhookSecret returns the receiver's HMAC Secret in the HMAC Secret
+// namespace, which is separate from the template namespace.
 func webhookSecret(key []byte) *corev1.Secret {
 	return &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "alertmanager-secret",
-			Namespace: webhookTestNamespace,
+			Namespace: webhook.DefaultSecretNamespace,
 		},
 		Data: map[string][]byte{
 			"hmac-key": key,
@@ -138,7 +147,7 @@ func listRuns(t *testing.T, c client.Client) []sprooziv1alpha1.AgentRun {
 }
 
 func TestHandler_CreatesOneRunWithTemplateFixedFields(t *testing.T) {
-	key := []byte("webhook-secret")
+	key := []byte(testHMACKey)
 	body := `{"id":"evt-123","eventContext":{"alertname":"CrashLoopBackOff","namespace":"sproozi-demo"},"capabilities":["network.egress"],"templateRef":{"name":"evil"},"policyRef":{"name":"evil"},"runtimeRef":{"name":"evil"},"maxExecutionDuration":"24h"}`
 	ts := fmt.Sprintf("%d", time.Now().Unix())
 
@@ -203,7 +212,7 @@ func TestHandler_CreatesOneRunWithTemplateFixedFields(t *testing.T) {
 }
 
 func TestHandler_ReusedEventIDIsRejected(t *testing.T) {
-	key := []byte("webhook-secret")
+	key := []byte(testHMACKey)
 	body := `{"id":"evt-duplicate","eventContext":{"alertname":"CrashLoopBackOff"}}`
 
 	c := webhookClient(t,
@@ -248,7 +257,7 @@ func TestHandler_ReusedEventIDIsRejected(t *testing.T) {
 }
 
 func TestHandler_MissingEventIDRejected(t *testing.T) {
-	key := []byte("webhook-secret")
+	key := []byte(testHMACKey)
 	body := `{"eventContext":{"alertname":"CrashLoopBackOff"}}`
 	ts := fmt.Sprintf("%d", time.Now().Unix())
 
@@ -281,7 +290,7 @@ func TestHandler_MissingEventIDRejected(t *testing.T) {
 }
 
 func TestHandler_MissingSignatureRejected(t *testing.T) {
-	key := []byte("webhook-secret")
+	key := []byte(testHMACKey)
 	body := testAlertBody
 	ts := fmt.Sprintf("%d", time.Now().Unix())
 
@@ -313,7 +322,7 @@ func TestHandler_MissingSignatureRejected(t *testing.T) {
 }
 
 func TestHandler_StaleSignatureRejected(t *testing.T) {
-	key := []byte("webhook-secret")
+	key := []byte(testHMACKey)
 	body := testAlertBody
 	ts := fmt.Sprintf("%d", time.Now().Add(-10*time.Minute).Unix())
 
@@ -347,7 +356,7 @@ func TestHandler_StaleSignatureRejected(t *testing.T) {
 }
 
 func TestHandler_MalformedJSONRejected(t *testing.T) {
-	key := []byte("webhook-secret")
+	key := []byte(testHMACKey)
 	body := `{"id":"evt-123","eventContext":`
 	ts := fmt.Sprintf("%d", time.Now().Unix())
 
@@ -380,7 +389,7 @@ func TestHandler_MalformedJSONRejected(t *testing.T) {
 }
 
 func TestHandler_AmbiguousReceiverRejected(t *testing.T) {
-	key := []byte("webhook-secret")
+	key := []byte(testHMACKey)
 	body := testAlertBody
 	ts := fmt.Sprintf("%d", time.Now().Unix())
 
@@ -444,10 +453,168 @@ func TestHandler_ReceiverLookupStatus(t *testing.T) {
 			}}
 
 			resp := httptest.NewRecorder()
-			handler.ServeHTTP(resp, httptest.NewRequest(http.MethodPost, "/webhook/default/"+webhookReceiver, strings.NewReader(testAlertBody)))
+			handler.ServeHTTP(resp, signedRequest(testAlertBody, []byte(testHMACKey)))
 
 			if resp.Code != tc.want {
 				t.Fatalf("status = %d, want %d (body=%s)", resp.Code, tc.want, resp.Body.String())
+			}
+		})
+	}
+}
+
+// TestHandler_ShortHMACKeyRefused verifies that an empty or short key cannot
+// authenticate events, and that the log names the Secret but not the key.
+func TestHandler_ShortHMACKeyRefused(t *testing.T) {
+	for _, key := range []string{"", "webhook-secret", strings.Repeat("k", webhook.MinHMACKeyBytes-1)} {
+		t.Run(fmt.Sprintf("%d bytes", len(key)), func(t *testing.T) {
+			c := webhookClient(t, webhookPolicy(), webhookTemplate(), webhookSecret([]byte(key)))
+			handler := &webhook.Handler{Config: webhook.HandlerConfig{
+				Client:      c,
+				Replay:      webhook.NewInMemoryReplayStore(),
+				AuditLogger: &captureWebhookLogger{},
+			}}
+			var logs bytes.Buffer
+			req := signedRequest(testAlertBody, []byte(key))
+			req = req.WithContext(log.IntoContext(req.Context(), zap.New(zap.WriteTo(&logs))))
+			resp := httptest.NewRecorder()
+			handler.ServeHTTP(resp, req)
+
+			if resp.Code != http.StatusInternalServerError {
+				t.Fatalf("status = %d, want 500 (body=%s)", resp.Code, resp.Body.String())
+			}
+			if runs := listRuns(t, c); len(runs) != 0 {
+				t.Fatalf("expected no AgentRuns for a short key, got %d", len(runs))
+			}
+			if !strings.Contains(logs.String(), "alertmanager-secret") {
+				t.Fatalf("log does not name the Secret: %s", logs.String())
+			}
+			if key != "" && (strings.Contains(logs.String(), key) || strings.Contains(resp.Body.String(), key)) {
+				t.Fatal("log or response contains the HMAC key")
+			}
+		})
+	}
+}
+
+// TestHandler_ReadsHMACSecretOnlyFromSecretNamespace verifies that the webhook
+// reads the annotated Secret from the HMAC Secret namespace, never from the
+// template namespace, where its RBAC grants no Secret access.
+func TestHandler_ReadsHMACSecretOnlyFromSecretNamespace(t *testing.T) {
+	inTemplateNamespace := webhookSecret([]byte(testHMACKey))
+	inTemplateNamespace.Namespace = webhookTestNamespace
+	for _, tc := range []struct {
+		name            string
+		secret          *corev1.Secret
+		secretNamespace string
+		want            int
+	}{
+		{name: "default secret namespace", secret: webhookSecret([]byte(testHMACKey)), want: http.StatusCreated},
+		{name: "configured secret namespace", secret: func() *corev1.Secret {
+			s := webhookSecret([]byte(testHMACKey))
+			s.Namespace = "hmac-keys"
+			return s
+		}(), secretNamespace: "hmac-keys", want: http.StatusCreated},
+		{name: "template namespace", secret: inTemplateNamespace, want: http.StatusInternalServerError},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var secretReads []string
+			c := fake.NewClientBuilder().WithScheme(webhookScheme(t)).WithInterceptorFuncs(interceptor.Funcs{
+				Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+					if _, ok := obj.(*corev1.Secret); ok {
+						secretReads = append(secretReads, key.Namespace)
+					}
+					return c.Get(ctx, key, obj, opts...)
+				},
+			}).WithObjects(webhookPolicy(), webhookTemplate(), tc.secret).Build()
+			handler := &webhook.Handler{Config: webhook.HandlerConfig{
+				Client:          c,
+				Replay:          webhook.NewInMemoryReplayStore(),
+				AuditLogger:     &captureWebhookLogger{},
+				SecretNamespace: tc.secretNamespace,
+			}}
+			resp := httptest.NewRecorder()
+			handler.ServeHTTP(resp, signedRequest(testAlertBody, []byte(testHMACKey)))
+
+			if resp.Code != tc.want {
+				t.Fatalf("status = %d, want %d (body=%s)", resp.Code, tc.want, resp.Body.String())
+			}
+			if slices.Contains(secretReads, webhookTestNamespace) {
+				t.Fatalf("webhook read a Secret in the template namespace: %v", secretReads)
+			}
+		})
+	}
+}
+
+// signedRequest returns a receiver request with a current, well-formed
+// signature, so it passes the checks that need no Secret.
+func signedRequest(body string, key []byte) *http.Request {
+	ts := fmt.Sprintf("%d", time.Now().Unix())
+	req := httptest.NewRequest(http.MethodPost, "/webhook/default/"+webhookReceiver, strings.NewReader(body))
+	req.Header.Set(webhook.TimestampHeader, ts)
+	req.Header.Set(webhook.SignatureHeader, webhook.ComputeSignature(ts, []byte(body), key))
+	return req
+}
+
+// countingReader records whether the handler read the request body.
+type countingReader struct {
+	reads int
+	body  *strings.Reader
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	c.reads++
+	return c.body.Read(p)
+}
+
+// TestHandler_UnauthenticatedRequestCostsNoBodyOrAPICall verifies that a
+// request with missing, malformed or stale signature headers is refused
+// before the handler reads its body or calls the API server.
+func TestHandler_UnauthenticatedRequestCostsNoBodyOrAPICall(t *testing.T) {
+	now := time.Now()
+	current := fmt.Sprintf("%d", now.Unix())
+	valid := webhook.ComputeSignature(current, []byte(testAlertBody), []byte(testHMACKey))
+	for _, tc := range []struct {
+		name, signature, timestamp string
+	}{
+		{name: "missing signature", timestamp: current},
+		{name: "malformed signature", signature: "sha256=zz", timestamp: current},
+		{name: "short signature", signature: "sha256=abcd", timestamp: current},
+		{name: "wrong scheme", signature: "sha1=" + strings.TrimPrefix(valid, "sha256="), timestamp: current},
+		{name: "missing timestamp", signature: valid},
+		{name: "malformed timestamp", signature: valid, timestamp: "yesterday"},
+		{name: "stale timestamp", signature: valid, timestamp: fmt.Sprintf("%d", now.Add(-time.Hour).Unix())},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var apiCalls int
+			c := fake.NewClientBuilder().WithScheme(webhookScheme(t)).WithInterceptorFuncs(interceptor.Funcs{
+				Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+					apiCalls++
+					return c.Get(ctx, key, obj, opts...)
+				},
+				List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+					apiCalls++
+					return c.List(ctx, list, opts...)
+				},
+			}).WithObjects(webhookPolicy(), webhookTemplate(), webhookSecret([]byte(testHMACKey))).Build()
+			handler := &webhook.Handler{Config: webhook.HandlerConfig{
+				Client:      c,
+				Replay:      webhook.NewInMemoryReplayStore(),
+				AuditLogger: &captureWebhookLogger{},
+				Now:         func() time.Time { return now },
+			}}
+			body := &countingReader{body: strings.NewReader(testAlertBody)}
+			req := httptest.NewRequest(http.MethodPost, "/webhook/default/"+webhookReceiver, body)
+			if tc.signature != "" {
+				req.Header.Set(webhook.SignatureHeader, tc.signature)
+			}
+			if tc.timestamp != "" {
+				req.Header.Set(webhook.TimestampHeader, tc.timestamp)
+			}
+			resp := httptest.NewRecorder()
+			handler.ServeHTTP(resp, req)
+
+			if resp.Code != http.StatusUnauthorized || body.reads != 0 || apiCalls != 0 {
+				t.Fatalf("status = %d, body reads = %d, API calls = %d; want 401 with no reads or calls",
+					resp.Code, body.reads, apiCalls)
 			}
 		})
 	}

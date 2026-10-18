@@ -39,6 +39,7 @@ import (
 const (
 	e2eNamespace = "default"
 	e2eReceiver  = "alertmanager"
+	e2eHMACKey   = "webhook-secret-of-at-least-32-bytes"
 )
 
 type discardWebhookLogger struct{}
@@ -168,10 +169,10 @@ func e2eSecret() *corev1.Secret {
 	return &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "alertmanager-secret",
-			Namespace: e2eNamespace,
+			Namespace: webhook.DefaultSecretNamespace,
 		},
 		Data: map[string][]byte{
-			"hmac-key": []byte("webhook-secret"),
+			"hmac-key": []byte(e2eHMACKey),
 		},
 	}
 }
@@ -227,7 +228,7 @@ func createRunViaWebhook(t *testing.T, c client.Client, body string) sprooziv1al
 	ts := fmt.Sprintf("%d", time.Now().Unix())
 	req := httptest.NewRequest(http.MethodPost, "/webhook/"+e2eNamespace+"/"+e2eReceiver, strings.NewReader(body))
 	req.Header.Set(webhook.TimestampHeader, ts)
-	req.Header.Set(webhook.SignatureHeader, webhook.ComputeSignature(ts, []byte(body), []byte("webhook-secret")))
+	req.Header.Set(webhook.SignatureHeader, webhook.ComputeSignature(ts, []byte(body), []byte(e2eHMACKey)))
 
 	resp := httptest.NewRecorder()
 	handler.ServeHTTP(resp, req)

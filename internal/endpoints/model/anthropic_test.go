@@ -139,6 +139,36 @@ func TestAnthropicRequestValidatesOperationAndBillableOptions(t *testing.T) {
 	}
 }
 
+// TestAnthropicCostCapRefusesLongContextBeta verifies that a cost-capped
+// request cannot select premium long-context pricing that the administrator
+// table prices at standard rates, while ordinary client betas still pass.
+func TestAnthropicCostCapRefusesLongContextBeta(t *testing.T) {
+	body := []byte(`{"model":"claude-test","max_tokens":128,"messages":[{"role":"user","content":"Hi"}]}`)
+	request := func(betas ...string) *http.Request {
+		r := httptest.NewRequest(http.MethodPost, "https://api.anthropic.com/v1/messages?beta=true", nil)
+		for _, beta := range betas {
+			r.Header.Add("Anthropic-Beta", beta)
+		}
+		return r
+	}
+	for _, betas := range [][]string{
+		{"context-1m-2025-08-07"},
+		{"interleaved-thinking-2025-05-14, Context-1M-2025-08-07"},
+		{"claude-code-20250219", "context-1m-2025-08-07"},
+	} {
+		if err := validateAnthropicRequest(request(betas...), body, true); err == nil {
+			t.Fatalf("cost-capped long-context beta accepted: %q", betas)
+		}
+		if err := validateAnthropicRequest(request(betas...), body, false); err != nil {
+			t.Fatalf("uncapped long-context beta rejected: %v", err)
+		}
+	}
+	ordinary := request("claude-code-20250219,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14")
+	if err := validateAnthropicRequest(ordinary, body, true); err != nil {
+		t.Fatalf("ordinary client betas rejected: %v", err)
+	}
+}
+
 func TestAnthropicStreamUsesUpdatedCumulativeInputCounts(t *testing.T) {
 	stream := anthropicTestStart + strings.Replace(anthropicTestFinish, `"output_tokens":3`, `"output_tokens":3,"input_tokens":12,"cache_read_input_tokens":22,"cache_creation_input_tokens":10`, 1)
 	got, err := decodeAnthropicUsage([]byte(stream), true, "text/event-stream")

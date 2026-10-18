@@ -18,6 +18,10 @@ package webhook_test
 
 import (
 	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -94,6 +98,49 @@ func TestReplayStore_ConcurrentSafeFirstWriterWins(t *testing.T) {
 	}
 	if successCount != 1 {
 		t.Errorf("exactly one goroutine should succeed, got %d", successCount)
+	}
+}
+
+// TestReplayRecordOutlivesAcceptanceAcrossClockSkew verifies that a replica
+// whose clock runs behind cannot accept an event again after a replica whose
+// clock runs ahead has swept its record. The sweeping store judges expiry by
+// the test's clock; the accepting handler's clock is almost a window behind.
+func TestReplayRecordOutlivesAcceptanceAcrossClockSkew(t *testing.T) {
+	window := webhook.DefaultReplayWindow
+	skew := window - 10*time.Second
+	behind := time.Now().Add(-skew)
+	eventTime := behind.Add(-skew)
+	ts := fmt.Sprintf("%d", eventTime.Unix())
+	key := []byte(testHMACKey)
+
+	c := webhookClient(t, webhookPolicy(), webhookTemplate(), webhookSecret(key))
+	store := webhook.NewK8sReplayStore(c, "replay-state")
+	// Advance the handler's clock slightly on each call so run names differ.
+	var ticks time.Duration
+	handler := &webhook.Handler{Config: webhook.HandlerConfig{
+		Client: c, Replay: store, AuditLogger: &captureWebhookLogger{},
+		ReplayWindow: window, Now: func() time.Time { ticks++; return behind.Add(ticks) },
+	}}
+	deliver := func() int {
+		req := httptest.NewRequest(http.MethodPost, "/webhook/default/"+webhookReceiver, strings.NewReader(testAlertBody))
+		req.Header.Set(webhook.TimestampHeader, ts)
+		req.Header.Set(webhook.SignatureHeader, webhook.ComputeSignature(ts, []byte(testAlertBody), key))
+		resp := httptest.NewRecorder()
+		handler.ServeHTTP(resp, req)
+		return resp.Code
+	}
+
+	if code := deliver(); code != http.StatusCreated {
+		t.Fatalf("first delivery status = %d, want 201", code)
+	}
+	if err := store.SweepExpired(t.Context()); err != nil {
+		t.Fatalf("SweepExpired: %v", err)
+	}
+	if code := deliver(); code != http.StatusConflict {
+		t.Fatalf("redelivery after sweep status = %d, want 409", code)
+	}
+	if runs := listRuns(t, c); len(runs) != 1 {
+		t.Fatalf("expected one AgentRun, got %d", len(runs))
 	}
 }
 
