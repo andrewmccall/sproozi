@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
@@ -63,24 +64,51 @@ func renderInstall(t *testing.T) []map[string]any {
 	return renderKustomization(t, filepath.Join(repoRoot(t), "config", "install"))
 }
 
+// renders holds each kustomization's build output for the package run, so
+// tests share one kustomize build per path. Callers decode their own copy.
+var (
+	kustomizeOnce sync.Once
+	kustomizeErr  error
+	renders       sync.Map // path -> *render
+)
+
+type render struct {
+	once sync.Once
+	out  []byte
+	err  error
+}
+
 func renderKustomization(t *testing.T, path string) []map[string]any {
 	t.Helper()
 	root := repoRoot(t)
 
-	makeCmd := exec.Command("make", "kustomize")
-	makeCmd.Dir = root
-	if out, err := makeCmd.CombinedOutput(); err != nil {
-		t.Fatalf("make kustomize: %v\n%s", err, out)
+	kustomizeOnce.Do(func() {
+		makeCmd := exec.Command("make", "kustomize")
+		makeCmd.Dir = root
+		if out, err := makeCmd.CombinedOutput(); err != nil {
+			kustomizeErr = fmt.Errorf("make kustomize: %w\n%s", err, out)
+		}
+	})
+	if kustomizeErr != nil {
+		t.Fatal(kustomizeErr)
 	}
 
-	buildCmd := exec.Command(filepath.Join(root, "bin", "kustomize"), "build", path)
-	buildCmd.Dir = root
-	out, err := buildCmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("kustomize build: %v\n%s", err, out)
+	cached, _ := renders.LoadOrStore(path, &render{})
+	r := cached.(*render)
+	r.once.Do(func() {
+		buildCmd := exec.Command(filepath.Join(root, "bin", "kustomize"), "build", path)
+		buildCmd.Dir = root
+		out, err := buildCmd.CombinedOutput()
+		if err != nil {
+			r.err = fmt.Errorf("kustomize build: %w\n%s", err, out)
+		}
+		r.out = out
+	})
+	if r.err != nil {
+		t.Fatal(r.err)
 	}
 
-	decoder := yaml.NewYAMLOrJSONDecoder(bytes.NewReader(out), 4096)
+	decoder := yaml.NewYAMLOrJSONDecoder(bytes.NewReader(r.out), 4096)
 	var docs []map[string]any
 	for {
 		var doc map[string]any
@@ -245,6 +273,20 @@ func TestRenderedDefaultIncludesCurrentServiceAccounts(t *testing.T) {
 	} {
 		if !slices.Contains(names, want) {
 			t.Fatalf("expected rendered service account %q, got %v", want, names)
+		}
+	}
+
+	// Each component runs as its own identity rather than a shared one.
+	for _, doc := range objectsOfKind(docs, "Deployment") {
+		name := metadataName(doc)
+		if name != controllerManagerName && name != webhookName {
+			continue
+		}
+		spec, _ := doc["spec"].(map[string]any)
+		template, _ := spec["template"].(map[string]any)
+		podSpec, _ := template["spec"].(map[string]any)
+		if got, _ := podSpec["serviceAccountName"].(string); got != name {
+			t.Fatalf("expected deployment %q to use service account %q, got %q", name, name, got)
 		}
 	}
 }
@@ -509,30 +551,6 @@ func TestSharedGatewayHasNamespacedDurableBudgetRBAC(t *testing.T) {
 	}
 	if !foundRole || !foundNamespaceEnv {
 		t.Fatalf("shared gateway durable budget configuration missing (role=%v env=%v)", foundRole, foundNamespaceEnv)
-	}
-}
-
-func TestRenderedDeploymentsUseDistinctServiceAccounts(t *testing.T) {
-	docs := renderDefault(t)
-
-	want := map[string]string{
-		controllerManagerName:      controllerManagerName,
-		retiredModelGatewayName:    retiredModelGatewayName,
-		retiredCapabilityProxyName: retiredCapabilityProxyName,
-		retiredEgressGatewayName:   retiredEgressGatewayName,
-		webhookName:                webhookName,
-	}
-
-	for _, doc := range objectsOfKind(docs, "Deployment") {
-		name := metadataName(doc)
-		spec, _ := doc["spec"].(map[string]any)
-		template, _ := spec["template"].(map[string]any)
-		podSpecHolder, _ := template["spec"].(map[string]any)
-		got, _ := podSpecHolder["serviceAccountName"].(string)
-
-		if expected, ok := want[name]; ok && got != expected {
-			t.Fatalf("expected deployment %q to use service account %q, got %q", name, expected, got)
-		}
 	}
 }
 
