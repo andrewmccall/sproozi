@@ -203,7 +203,7 @@ def verify(args):
         env = os.environ.copy()
         # Use only this run's context and evidence. Never inherit a developer cluster.
         env.update(SPROOZI_PRESERVE_ON_FAILURE="0", SPROOZI_VERIFY_ID=run_id,
-                   CERT_MANAGER_INSTALL_SKIP="true", SPROOZI_E2E_METRICS="0",
+                   SPROOZI_E2E_METRICS="0",
                    SPROOZI_LIVE_REPORT=str(directory / "live.json"))
         local = work / ".local"
         local.mkdir()

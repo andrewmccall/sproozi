@@ -39,6 +39,6 @@ Preconditions:
 
 - The gate builds the actual controller image. It is not an offline manifest check.
 - Default Kind networking does not enforce the required NetworkPolicy boundary.
-- This path explicitly skips cert-manager and optional metrics. It neither
+- This path explicitly skips optional metrics. It neither
   configures nor proves model inference, the shared gateway or GitHub PR creation.
 - The current Pod adapter needs no external Agent Sandbox CRDs or controller.
