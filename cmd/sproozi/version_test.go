@@ -1,3 +1,4 @@
+//nolint:goconst // Command spellings are independent behavior inputs.
 package main
 
 import (

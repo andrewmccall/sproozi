@@ -35,7 +35,7 @@ jobs:
           go-version-file: go.mod
           check-latest: true
       - name: Test host boundaries and recovery
-        run: go test -race ./internal/privatefs ./internal/workspace ./internal/runtime/docker ./internal/session/home ./internal/budget/file ./internal/gateway/docker ./internal/session ./internal/work ./cmd/sproozi
+        run: go test -race -v -timeout=5m ./internal/privatefs ./internal/workspace ./internal/runtime/docker ./internal/session/home ./internal/budget/file ./internal/gateway/docker ./internal/session ./internal/work ./cmd/sproozi
       - name: Build and run CLI
         shell: bash
         run: |

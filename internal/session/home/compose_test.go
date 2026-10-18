@@ -16,6 +16,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -69,7 +70,11 @@ func composedConfig(t *testing.T) Config {
 	}
 	limits := runtimedocker.ResourceLimits{MemoryBytes: 64 << 20, CPUMilli: 500, PIDs: 64}
 	image := "sha256:" + strings.Repeat("a", 64)
-	return Config{Directory: filepath.Join(root, "home"), DockerBinary: binary, DockerSocket: filepath.Join(root, "docker.sock"), DockerConfig: filepath.Join(root, "docker-cli"), MaxDuration: "1h", Model: "fixture", Allowances: map[string]session.Allowance{testCapability: {Units: session.Limit{Bounded: true, Value: 10}}}, Local: runtimedocker.PlacementConfig{Harness: harness.NativeCodex, Name: testLocal, NativeImageID: image, HelperImageID: image, AnchorImageID: image, NetworkName: "bridge-fixture", GatewayIPv4: "192.168.65.254", GatewayPort: 18443, Instructions: testInstructions, InstructionDigest: fmt.Sprintf("%x", sha256.Sum256([]byte(testInstructions))), AgentLimits: limits, HelperLimits: limits, AnchorLimits: limits, VolumeBytes: 64 << 20, MaxCheckpointBytes: testLimit, RetainedBytes: 32 << 20}, Gateway: GatewayConfig{Listen: "0.0.0.0:18443", CertificateFile: filepath.Join(root, "gateway.crt"), KeyFile: filepath.Join(root, "gateway.key"), TrustBundleFile: filepath.Join(root, "ca.pem"), ProviderURL: "http://127.0.0.1:18765", ProviderTokenFile: filepath.Join(root, "provider-token")}}
+	socket := filepath.Join(root, "docker.sock")
+	if runtime.GOOS == "windows" {
+		socket = "npipe:////./pipe/sproozi-fixture"
+	}
+	return Config{Directory: filepath.Join(root, "home"), DockerBinary: binary, DockerSocket: socket, DockerConfig: filepath.Join(root, "docker-cli"), MaxDuration: "1h", Model: "fixture", Allowances: map[string]session.Allowance{testCapability: {Units: session.Limit{Bounded: true, Value: 10}}}, Local: runtimedocker.PlacementConfig{Harness: harness.NativeCodex, Name: testLocal, NativeImageID: image, HelperImageID: image, AnchorImageID: image, NetworkName: "bridge-fixture", GatewayIPv4: "192.168.65.254", GatewayPort: 18443, Instructions: testInstructions, InstructionDigest: fmt.Sprintf("%x", sha256.Sum256([]byte(testInstructions))), AgentLimits: limits, HelperLimits: limits, AnchorLimits: limits, VolumeBytes: 64 << 20, MaxCheckpointBytes: testLimit, RetainedBytes: 32 << 20}, Gateway: GatewayConfig{Listen: "0.0.0.0:18443", CertificateFile: filepath.Join(root, "gateway.crt"), KeyFile: filepath.Join(root, "gateway.key"), TrustBundleFile: filepath.Join(root, "ca.pem"), ProviderURL: "http://127.0.0.1:18765", ProviderTokenFile: filepath.Join(root, "provider-token")}}
 }
 
 func TestProductionCompositionTakesExclusiveOwnershipWithoutLaunching(t *testing.T) {
