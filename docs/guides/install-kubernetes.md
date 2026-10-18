@@ -96,6 +96,10 @@ kubectl apply -k config/agent-rbac
 mkdir -p .local/install/tls
 ```
 
+`config/agent-rbac` creates `sproozi-agents` and the only Role that lets the
+controller create sandbox Pods, ServiceAccounts, NetworkPolicies and contract
+ConfigMaps. Runs cannot start without it.
+
 The gateway terminates both the proxy connection and the inspected Kubernetes
 connection. Its certificate therefore needs the gateway hostname and
 `kubernetes.default.svc`. For this evaluation, create a private CA and a

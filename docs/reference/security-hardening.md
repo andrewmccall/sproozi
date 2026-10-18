@@ -151,9 +151,13 @@ stays bounded by recent event volume.
 
 ## Restrict trusted services
 
-The installed controller-manager can manage Pods, identities, NetworkPolicies
-and RBAC objects. Its binding does not grant Secret reads; the optional metrics
-overlay adds TokenReviews and SubjectAccessReviews. Restrict exec/debug access
+The installed controller-manager reads Pods, ServiceAccounts, NetworkPolicies
+and ConfigMaps across the cluster. It creates and deletes Pods, ServiceAccounts,
+NetworkPolicies and ConfigMaps only in `sproozi-agents`, through the Role in
+`config/agent-rbac`. It cannot read Secrets through the API, but a Pod it
+creates can mount any Secret in `sproozi-agents`, so keep Secrets out of that
+namespace. The optional metrics overlay adds TokenReviews and
+SubjectAccessReviews. Restrict exec/debug access
 and reuse of trusted service accounts. The gateway holds provider credentials
 and may update its rotating ChatGPT session Secret. ChatGPT refresh requires one active gateway process,
 even though budget and replay state are shared. See
