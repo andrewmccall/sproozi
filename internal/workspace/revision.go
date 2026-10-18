@@ -25,8 +25,13 @@ func Inspect(data []byte, maxBytes int64) (Metadata, error) {
 
 // AtRevision creates a clean, detached workspace-only archive at recorded HEAD.
 // It reads retained objects, performs no network operation and never changes the
-// source. scratch must be private quota-backed storage with process limits, as
-// required by Restore. The caller must independently authorize the new execution.
+// source. scratch must be private storage. Restore rejects the archive before
+// checkout unless the expanded size of every Git object plus the selected files
+// fits maxBytes (checkObjects), so scratch use stays within a small multiple of
+// maxBytes: the bundle, its stored objects, the restored files and the clean
+// checkout. Restore cannot bound Git's time or memory; callers handling an
+// untrusted archive must pass a context with a deadline. The caller must
+// independently authorize the new execution.
 func AtRevision(ctx context.Context, data []byte, revision, scratch string, maxBytes int64) ([]byte, error) {
 	meta, err := Inspect(data, maxBytes)
 	if err != nil {

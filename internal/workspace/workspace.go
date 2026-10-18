@@ -4,8 +4,11 @@
 // hooks, credentials and linked worktree metadata are not transferred.
 //
 // maxBytes bounds the encoded archive, selected file bytes and inspected Git object
-// sizes. Git unpacks before object-size inspection: callers handling untrusted
-// archives must also provide quota-backed staging storage and process limits.
+// sizes. Git fetches the bundle before object-size inspection, so it stores at
+// most the bundle's compressed objects before Restore rejects an oversized
+// archive and before any checkout. That inspection does not bound Git's time or
+// memory: callers handling untrusted archives must pass a context with a
+// deadline, and should run under process limits where the platform offers them.
 package workspace
 
 import (
