@@ -26,7 +26,7 @@ var _ = Describe("NetworkPolicy enforcement", func() {
 	It("blocks an established destination and restores access after policy removal", func() {
 		image := os.Getenv("SPROOZI_E2E_PROBE_IMAGE")
 		if image == "" {
-			image = "curlimages/curl@sha256:94e9e444bcba979c2ea12e27ae39bee4cd10bc7041a472c4727a558e213744e6"
+			image = curlImage
 		}
 		Expect(image).To(ContainSubstring("@sha256:"), "Provide a digest-pinned curl probe image")
 		const probeName = "network-policy-probe"

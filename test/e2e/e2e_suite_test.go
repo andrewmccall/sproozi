@@ -36,6 +36,10 @@ import (
 // the image itself.
 var managerImage = envOr("SPROOZI_E2E_MANAGER_IMAGE", "example.com/sproozi:v0.0.1")
 
+// curlImage is the digest-pinned curl client for the metrics and network
+// policy probes.
+const curlImage = "curlimages/curl@sha256:94e9e444bcba979c2ea12e27ae39bee4cd10bc7041a472c4727a558e213744e6"
+
 func envOr(name, fallback string) string {
 	if value := os.Getenv(name); value != "" {
 		return value
