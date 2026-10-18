@@ -10,16 +10,17 @@ These commands require administrator configuration, approved images and prepared
 execution environments. Building the CLI does not install a cluster or start an
 agent.
 
-A Sproozi session tracks the native conversation across executions. Each
+A [session](../../GLOSSARY.md#session) tracks the native conversation across executions. Each
 execution needs separate approval and has its own deadline and usage allowance.
-Each placement visit gets a new allocation and backend resource identity.
-Finding a session or native conversation ID does not grant permission to run it.
+Each [visit](../../GLOSSARY.md#visit) to a placement gets a new allocation
+and backend resource identity. Knowing a session or conversation ID doesn't give
+you permission to run it.
 
-Use [retained remote work](../guides/portable-workflows.md) for remote task setup,
+Use [remote work and local resume](../guides/portable-workflows.md) for remote task setup,
 pull and local resume, or [native session mobility](../guides/session-mobility.md)
 for interactive moves within one bounded execution. The
 [home configuration reference](../../cmd/sproozi/README.md) describes private files,
-images, gateway credentials and remote profiles.
+images, gateway credentials and profile services.
 
 ## Remote work and local resume
 
@@ -51,10 +52,49 @@ your laptop still requires the laptop and Docker engine to remain available.
 Follow [session mobility](../guides/session-mobility.md) for the complete setup,
 commands, supported clients and movement limits.
 
+## Command flags
+
+Each command accepts only the flags listed here. `sproozi -h` lists the
+commands, and `sproozi COMMAND -h` prints one command's usage and flags. Any
+other flag is rejected before configuration is read or a request is sent.
+
+| Command | Flags |
+| --- | --- |
+| `run` | `--config`, `--executor`, `--operation`, `--harness`, `--repository`, `--project`, `--task`, `--task-file`, `--workspace-from`, `--checkpoint-digest`, `--revision` |
+| `sessions` | `--config`, `--socket`, `--executor`, `--project` |
+| `status` | `--config`, `--socket`, `--executor`, `--id` |
+| `pull` | `--config`, `--socket`, `--executor`, `--id`, `--operation`, `--from` |
+| `resume` | `--config`, `--socket`, `--executor`, `--id`, `--operation`, `--detach` |
+| `stop` | `--config`, `--socket`, `--executor`, `--id`, `--operation` |
+| `cancel` | `--config`, `--socket`, `--executor`, `--id`, `--operation` |
+| `recover` | `--config`, `--socket`, `--executor`, `--id` |
+| `serve` | `--config` |
+| `start` | `--config`, `--socket`, `--executor`, `--id`, `--operation`, `--workspace`, `--include-ignored` |
+| `attach` | `--config`, `--socket`, `--executor`, `--id` |
+| `move` | `--config`, `--socket`, `--executor`, `--id`, `--operation`, `--to` |
+
+| Flag | Meaning |
+| --- | --- |
+| `--config FILE` | Private global configuration. `serve` requires it; other commands default to the platform path described below. |
+| `--socket PATH` | Private home socket, overriding the configured home. |
+| `--executor NAME` | Owner to address; `docker` selects home. See [Select the owner](#select-the-owner). |
+| `--id UUID` | Stable session UUID. Commands that take a session also accept it as the first argument. |
+| `--operation UUID` | Stable operation UUID. Reuse it when retrying a mutation. |
+| `--from NAME` | Configured remote source for `pull`. |
+| `--harness NAME` | Approved native harness for `run`; defaults to `local.harness`. |
+| `--repository NAME` | Approved repository for `run`. |
+| `--project ID` | Approved Project for `run`, or a filter for `sessions`. |
+| `--task TEXT`, `--task-file FILE` | Task for `run`, inline or from a UTF-8 file of at most 16 KiB. Choose one. |
+| `--workspace-from UUID`, `--checkpoint-digest SHA256`, `--revision COMMIT` | Start `run` from a retained session's exact recorded commit. All three are required together. |
+| `--detach` | Return after `resume` without attaching the terminal. |
+| `--workspace PATH` | Stopped ordinary Git directory that seeds `start`. |
+| `--include-ignored PATH` | Ignored file `start` carries on every visit. Repeat it for each file. |
+| `--to NAME` | Configured destination for `move`. |
+
 ## Select the owner
 
-Every client command accepts `--config FILE` and a home `--socket PATH` override.
-Configuration defaults to the platform user configuration directory at
+Every client command except `run` accepts `--config FILE` and a home
+`--socket PATH` override. Configuration defaults to the platform user configuration directory at
 `sproozi/config.json`. A socket-only local invocation skips that default file;
 for example, `sessions --socket PATH` queries only home. Supply
 `--config FILE --socket PATH` to combine configured remote sources with a socket
@@ -92,10 +132,12 @@ sproozi stop SESSION_UUID --executor docker --config /private/sproozi/config.jso
   --operation ORIGINAL_STOP_UUID
 ```
 
-Keep the operation UUID and exact intent when retrying a mutation. A timeout is
-an uncertain result; inspect the selected owner's retained status before choosing
-a next step. `recover` continues retained intent and does not accept a replacement
-operation UUID. `stop` waits for supported foreground work and seals a checkpoint;
+When you retry a command that changes state, reuse its operation UUID and
+arguments. `pull` derives its operation from the session ID and source unless
+`--operation` is given, so repeating the same `pull` command retries it. A
+timeout means the outcome is unknown: check `status` on the same owner before
+deciding what to do. `recover` finishes the original operation and doesn't
+accept a new operation UUID. `stop` waits for supported foreground work and saves a checkpoint;
 `cancel` revokes before forced stop. An old operation remains bound to its original
 execution and cannot affect a later resume.
 
@@ -113,11 +155,11 @@ execution and cannot affect a later resume.
 | `executor` | In catalogue rows, the owner catalogue queried. |
 | `placement` | Current or last retained execution destination. It can differ from the queried owner. |
 
-Home status also retains `initialStage` and the existing nested `session`
-execution journal for detailed inspection. That nested journal keeps its original
-execution-bound identifiers and receipts. Remote work status can include bounded
-untrusted final text and checkpoint facts. Discovery omits full journals and final
-answers.
+Home status also includes the nested `session` execution journal for detailed
+inspection, and `initialStage`, which repeats `phase` for older clients. That
+nested journal keeps its original execution-bound identifiers and receipts.
+Remote work status can include bounded untrusted final text and checkpoint
+facts. Discovery omits full journals and final answers.
 
 `sessions` writes one JSON document containing `sessions`, `executors` and
 `truncated`. It queries at most 32 catalogues concurrently, with a five-second
@@ -135,9 +177,9 @@ session ID. Check each executor's availability independently:
 }
 ```
 
-Here engineering has an empty successful catalogue; home could not be queried.
-An unavailable source does not establish an empty catalogue or an absent writer.
-Successful rows survive another source's failure. Discovery can exit successfully
+Here engineering returned an empty catalogue, and home could not be queried.
+An unavailable source doesn't mean its catalogue is empty or that nothing is
+running there. Rows from sources that answered are still returned. Discovery can exit successfully
 with unavailable sources, so inspect the JSON as well as the command exit status.
 `truncated: true` means a source or row limit omitted results. A remote
 `home-owned` mirror and its local
@@ -146,12 +188,13 @@ merge their provenance.
 
 ## Handle work outcomes
 
-The remote work HTTP interface returns a fixed JSON error code, and MCP tool
-failures include that same code with fixed guidance. The owner client preserves
-recognized code/status pairs and does not expose upstream error bodies or private
-transport diagnostics. A retained asynchronous work status `problem` uses the
-same safe code and recovery guidance. An unavailable problem keeps writer-stop
-and usage unconfirmed; inspect or recover it before any fresh activation.
+The remote work HTTP interface returns one of the fixed JSON error codes below.
+MCP tool failures carry the same code with fixed guidance, and so does the
+`problem` field of a retained work status. The CLI shows the recognized code and
+HTTP status. It never shows upstream error bodies or private transport details.
+
+If status says `unavailable`, Sproozi can't yet confirm that the agent stopped
+or how much it used. Run `recover` before starting new work.
 
 | Code | HTTP status | Next step |
 | --- | --- | --- |
@@ -162,23 +205,6 @@ and usage unconfirmed; inspect or recover it before any fresh activation.
 | `unsupported` | 422 | Check harness support and retained native checkpoint compatibility. |
 | `unavailable` | 503 | Restore owner/backend connectivity or storage, inspect status, then retry the same operation. |
 
-Missing writer-stop or accounting evidence remains unavailable. An incompatible
-checkpoint is unsupported. Neither outcome permits a fresh destination writer,
-refund or deadline extension. Unknown filesystem/transport failures are not
-interpreted as semantic rejection or known absence.
-
-## Migrate output consumers
-
-The unreleased public home `productId` field has been removed. Read `id` for the
-stable session operand. Remote work `executionId` now names the bounded execution;
-its former allocation meaning moved to `allocationId`. Read `incarnation` for
-exact resource identity. Internal retained launch journals keep their historical
-field meanings and should not be edited or migrated by clients.
-
-Consumers of `sessions` must decode the single labelled catalogue document rather
-than concatenate independent owner arrays. Always inspect `executors` and
-`truncated` before treating discovery as complete.
-
-Update the CLI, home daemon and remote owners together when adopting the corrected
-output contract. Socket-only local commands can still run without a global
-configuration file.
+Neither `unavailable` nor `unsupported` lets you start the work elsewhere,
+refunds usage or extends the deadline. Sproozi never treats an unknown filesystem
+or transport error as a rejection or as proof that nothing is running.

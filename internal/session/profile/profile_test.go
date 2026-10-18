@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -38,6 +39,7 @@ type retainedBackend struct {
 	digest       string
 	prepareCalls int
 	failure      error
+	unsealed     bool
 }
 
 func (p *retainedBackend) Prepare(_ context.Context, l session.Launch, data []byte) (session.Incarnation, error) {
@@ -68,6 +70,9 @@ func (p *retainedBackend) Activate(_ context.Context, l session.Launch, i sessio
 func (p *retainedBackend) Stop(_ context.Context, l session.Launch, i session.Incarnation) (session.Stopped, error) {
 	if !sameLaunch(l, p.state.Launch) || i != p.state.Incarnation {
 		return session.Stopped{}, &Rejection{Code: CodeConflict}
+	}
+	if p.unsealed {
+		return session.Stopped{Launch: l, Incarnation: i, ActualStopped: true}, fmt.Errorf("%w: ledger unavailable", session.ErrUsageUnsealed)
 	}
 	s := session.Stopped{Launch: l, Incarnation: i, ActualStopped: true, Checkpoint: p.data, CheckpointDigest: p.digest, Receipt: &session.Receipt{Launch: l, Incarnation: i, Usage: map[string]budget.TrustedUsage{testCapability: {Units: 2, CostMicros: 3}}}}
 	p.state.State = session.PlacementStopped
@@ -147,7 +152,7 @@ func artifactKind(t *testing.T, kind harness.NativeKind) ([]byte, string) {
 	return data, meta.SHA256
 }
 func launch(digest string) session.Launch {
-	return session.Launch{Harness: harness.NativeCodex, SessionID: uuid.NewString(), OperationID: uuid.NewString(), AllocationID: uuid.NewString(), ThreadID: testThread, Epoch: 2, Placement: "remote", InstructionDigest: strings.Repeat("a", 64), CheckpointDigest: digest, Deadline: time.Now().Add(30 * time.Minute).UTC(), Allowances: map[string]session.Allowance{testCapability: {Units: session.Limit{Bounded: true, Value: 20}, CostMicros: session.Limit{Bounded: true, Value: 100}}}}
+	return session.Launch{Harness: harness.NativeCodex, ExecutionID: uuid.NewString(), OperationID: uuid.NewString(), AllocationID: uuid.NewString(), ThreadID: testThread, Epoch: 2, Placement: "remote", InstructionDigest: strings.Repeat("a", 64), CheckpointDigest: digest, Deadline: time.Now().Add(30 * time.Minute).UTC(), Allowances: map[string]session.Allowance{testCapability: {Units: session.Limit{Bounded: true, Value: 20}, CostMicros: session.Limit{Bounded: true, Value: 100}}}}
 }
 func tokenFile(t *testing.T) string {
 	t.Helper()
@@ -293,6 +298,28 @@ func TestStopCanSealExpiredOriginalLaunch(t *testing.T) {
 		t.Fatalf("expired source sealing: %+v %v", s, err)
 	}
 }
+
+// The transport must keep the Placement.Stop contract: a fenced writer with
+// unsealed usage arrives as a stopped result plus ErrUsageUnsealed, never as an
+// unknown stop or as a receipt.
+func TestStopReportsFencedWriterWithUnsealedUsage(t *testing.T) {
+	c, b, _, l, _ := fixture(t)
+	i := session.Incarnation{ExecutionID: l.AllocationID, ResourceUID: uuid.NewString()}
+	b.state = session.Observation{Launch: l, Incarnation: i, State: session.PlacementActive}
+	b.unsealed = true
+	s, err := c.Stop(context.Background(), l, i)
+	if !errors.Is(err, session.ErrUsageUnsealed) {
+		t.Fatalf("unsealed stop error = %v, want ErrUsageUnsealed", err)
+	}
+	if !s.ActualStopped || s.Receipt != nil || s.Incarnation != i || len(s.Checkpoint) != 0 {
+		t.Fatalf("unsealed stop result = %+v, want fenced writer without receipt or checkpoint", s)
+	}
+	b.unsealed = false
+	if s, err = c.Stop(context.Background(), l, i); err != nil || s.Receipt == nil {
+		t.Fatalf("retried stop did not seal: %+v %v", s, err)
+	}
+}
+
 func TestAdmissionRejectsImmutableIntentWidening(t *testing.T) {
 	c, b, _, original, data := fixture(t)
 	cases := map[string]func(*session.Launch){

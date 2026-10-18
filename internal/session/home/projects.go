@@ -15,11 +15,11 @@ func validateProjectApprovals(c Config) error {
 		return errors.New("home: at most 64 source-qualified project approvals are supported")
 	}
 	seen := map[string]bool{}
+	sources := c.WorkConnections()
 	for _, approval := range c.ProjectApprovals {
 		key := approval.Source + "/" + string(approval.Project)
-		_, remote := c.Remote[approval.Source]
-		_, source := c.WorkSources[approval.Source]
-		if !project.ValidID(approval.Project) || !remote && !source || seen[key] {
+		_, source := sources[approval.Source]
+		if !project.ValidID(approval.Project) || !source || seen[key] {
 			return fmt.Errorf("home: invalid, unconfigured or duplicate project approval %q", key)
 		}
 		seen[key] = true
@@ -54,11 +54,11 @@ func cloneProjectApprovals(approvals []ProjectApproval) []ProjectApproval {
 // Check every path that can prepare or activate an imported Project execution.
 // Cancellation and stop deliberately bypass this gate so revocation cannot
 // strand a writer or its sealed accounting.
-func (s *Service) executionProjectApproval(r initial) error {
-	if r.ProductID == "" {
+func (s *Service) executionProjectApproval(r session.Record) error {
+	if r.Session == "" {
 		return nil
 	}
-	owner, err := s.readCatalog(r.ProductID)
+	owner, err := s.readCatalog(r.Session)
 	if err != nil {
 		return err
 	}
@@ -69,7 +69,7 @@ func (s *Service) executionProjectApproval(r initial) error {
 	if err != nil {
 		return err
 	}
-	for name, want := range r.Launch.Allowances {
+	for name, want := range r.Ceiling {
 		ceiling, ok := ceilings[name]
 		if !ok || !projectLimitFits(want.Units, ceiling.Units) || !projectLimitFits(want.CostMicros, ceiling.CostMicros) {
 			return fmt.Errorf("home: retained execution capability %q exceeds current Project approval; cancel it before a fresh resume", name)
@@ -83,12 +83,9 @@ func projectLimitFits(want, ceiling session.Limit) bool {
 }
 
 // A retained stop or cancellation only fences/accounts; it needs no new grant.
-func recoveryActivates(r initial, record session.Record) bool {
+func recoveryActivates(record session.Record) bool {
 	if record.CancelOperation != "" {
 		return false
-	}
-	if r.Destination != "" && !hasOperation(record, r.OperationID) {
-		return true
 	}
 	for _, operation := range record.Operations {
 		if operation.ID == record.PendingOperation {

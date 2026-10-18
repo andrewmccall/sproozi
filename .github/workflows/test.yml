@@ -30,13 +30,13 @@ jobs:
 
       - name: Running Tests
         run: make test
-      - name: Verify offline release assertions
+      - name: Run race tests and vet
         run: make verify-fast
       - name: Verify pinned client protocol fixtures
         run: make verify-protocol
       - name: Verify MCP capabilities
         run: make verify-mcp
-      - name: Verify native workflow fixtures
+      - name: Run offline fixture and script regressions
         run: make verify-workflow-fixtures
       - name: Verify documentation
         run: make verify-docs

@@ -112,19 +112,19 @@ func TestProjectAccessGatesSubmitAndEveryRetainedRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = o.Close() }()
-	if leaked, infoErr := o.Info(t.Context(), v.ID); outcomeCode(infoErr) != profile.CodeDenied || leaked.ID != "" {
+	if leaked, infoErr := o.Info(t.Context(), v.ID); OutcomeCode(infoErr) != profile.CodeDenied || leaked.ID != "" {
 		t.Fatalf("Revoked membership revealed retained work: %#v %v", leaked, infoErr)
 	}
-	if _, err = o.Submit(t.Context(), q); outcomeCode(err) != profile.CodeDenied {
+	if _, err = o.Submit(t.Context(), q); OutcomeCode(err) != profile.CodeDenied {
 		t.Fatal("Submission replay bypassed membership")
 	}
-	if _, err = o.BeginExport(t.Context(), v.ID, uuid.NewString()); outcomeCode(err) != profile.CodeDenied {
+	if _, err = o.BeginExport(t.Context(), v.ID, uuid.NewString()); OutcomeCode(err) != profile.CodeDenied {
 		t.Fatal("Export bypassed membership")
 	}
-	if _, err = o.Recover(t.Context(), v.ID); outcomeCode(err) != profile.CodeDenied {
+	if _, err = o.Recover(t.Context(), v.ID); OutcomeCode(err) != profile.CodeDenied {
 		t.Fatal("Recovery exposed revoked project")
 	}
-	if _, err = o.Cancel(t.Context(), v.ID, uuid.NewString()); outcomeCode(err) != profile.CodeDenied {
+	if _, err = o.Cancel(t.Context(), v.ID, uuid.NewString()); OutcomeCode(err) != profile.CodeDenied {
 		t.Fatal("Cancellation exposed revoked project")
 	}
 	list, err := o.List(t.Context(), SessionQuery{})

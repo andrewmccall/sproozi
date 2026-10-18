@@ -8,8 +8,8 @@ persistent Hermes delegation are implemented. Controlled Codex and Claude Code
 sessions can move between Docker and Kubernetes. Retained remote tasks, local
 resume, configured Projects and exact-revision launches are also implemented.
 See the [current architecture](../system-architecture.md), [session
-guide](../../guides/session-mobility.md) and [retained-work
-guide](../../guides/portable-workflows.md) for setup and limits.
+guide](../../guides/session-mobility.md) and [remote work and
+local resume guide](../../guides/portable-workflows.md) for setup and limits.
 
 ## Remaining directions
 

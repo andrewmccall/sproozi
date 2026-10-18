@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"net/http"
@@ -26,7 +25,8 @@ import (
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 
 	"github.com/andrewmccall/sproozi/internal/audit"
-	egress "github.com/andrewmccall/sproozi/internal/endpoints/destination"
+	"github.com/andrewmccall/sproozi/internal/endpoints"
+	"github.com/andrewmccall/sproozi/internal/endpoints/destination"
 	githubgateway "github.com/andrewmccall/sproozi/internal/endpoints/github"
 	kubernetesgateway "github.com/andrewmccall/sproozi/internal/endpoints/kubernetes"
 	mcpgateway "github.com/andrewmccall/sproozi/internal/endpoints/mcp"
@@ -55,26 +55,17 @@ type startupConfig struct {
 	host                 string
 	listenerCert         tls.Certificate
 	certificates         map[string]tls.Certificate
-	profiles             *egress.ProfileStore
+	profiles             *destination.ProfileStore
 	pricing              *modelgateway.PricingTable
 	openAIKey            string
 	anthropicKey         string
+	openAIUpstreamURL    string
 	anthropicUpstreamURL string
 	modelAuthMode        string
 	appID                int64
 	installationID       int64
 	privateKey           []byte
 	mcpRegistry          *mcpgateway.Registry
-}
-
-// semanticAuthorities binds concrete service modules to exact authorities.
-var semanticAuthorities = map[string]sprooziv1alpha1.CapabilityKind{
-	kubernetesgateway.Authority:  sprooziv1alpha1.CapabilityKubernetesRead,
-	"api.openai.com:443":         sprooziv1alpha1.CapabilityModelInference,
-	"github.com:443":             sprooziv1alpha1.CapabilityGitHubPullRequest,
-	"api.github.com:443":         sprooziv1alpha1.CapabilityGitHubPullRequest,
-	"pypi.org:443":               sprooziv1alpha1.CapabilityPackagesInstall,
-	"files.pythonhosted.org:443": sprooziv1alpha1.CapabilityPackagesInstall,
 }
 
 func loadStartupConfig() (*startupConfig, error) {
@@ -98,7 +89,7 @@ func loadStartupConfig() (*startupConfig, error) {
 			return nil, fmt.Errorf("read egress profiles: %w", err)
 		}
 	}
-	profiles, err := egress.LoadProfileStore(profileData)
+	profiles, err := destination.LoadProfileStore(profileData)
 	if err != nil {
 		return nil, err
 	}
@@ -108,6 +99,7 @@ func loadStartupConfig() (*startupConfig, error) {
 	}
 	var pricing *modelgateway.PricingTable
 	openAIKey, anthropicKey, modelAuthMode := "", "", ""
+	openAIUpstreamURL := envOrDefault("OPENAI_UPSTREAM_URL", "https://api.openai.com")
 	anthropicUpstreamURL := envOrDefault("ANTHROPIC_UPSTREAM_URL", "https://api.anthropic.com")
 	if enabled[sprooziv1alpha1.CapabilityModelInference] {
 		pricingFile, err := os.Open(envOrDefault("MODEL_PRICING_PATH", "/etc/sproozi/model/pricing.json"))
@@ -123,11 +115,14 @@ func loadStartupConfig() (*startupConfig, error) {
 		if closeErr != nil {
 			return nil, fmt.Errorf("close model pricing: %w", closeErr)
 		}
-		openAIKey, anthropicKey, modelAuthMode, err = loadModelCredentials()
+		openAIKey, anthropicKey, modelAuthMode, err = loadModelCredentials(openAIUpstreamURL)
 		if err != nil {
 			return nil, err
 		}
-		if err := validateModelUpstream(anthropicUpstreamURL); err != nil {
+		if err := validateModelUpstream("OPENAI_UPSTREAM_URL", openAIUpstreamURL); err != nil {
+			return nil, err
+		}
+		if err := validateModelUpstream("ANTHROPIC_UPSTREAM_URL", anthropicUpstreamURL); err != nil {
 			return nil, err
 		}
 	}
@@ -142,7 +137,7 @@ func loadStartupConfig() (*startupConfig, error) {
 		if err != nil {
 			return nil, err
 		}
-		privateKey, err = os.ReadFile(requiredEnvValue("GITHUB_APP_PRIVATE_KEY_PATH"))
+		privateKey, err = os.ReadFile(os.Getenv("GITHUB_APP_PRIVATE_KEY_PATH"))
 		if err != nil {
 			return nil, fmt.Errorf("read GitHub App private key: %w", err)
 		}
@@ -157,8 +152,8 @@ func loadStartupConfig() (*startupConfig, error) {
 	}
 	hosts := inspectionHosts(host, enabled, profiles, mcpRegistry)
 	if enabled[sprooziv1alpha1.CapabilityModelInference] {
-		if anthropicKey != "" {
-			hosts["api.anthropic.com"] = true
+		if anthropicKey == "" {
+			delete(hosts, "api.anthropic.com")
 		}
 		if openAIKey == "" && modelAuthMode == modelauth.APIKeyMode {
 			delete(hosts, "api.openai.com")
@@ -174,13 +169,13 @@ func loadStartupConfig() (*startupConfig, error) {
 		enabled: enabled,
 		host:    host, listenerCert: certificate, certificates: certificates,
 		profiles: profiles, pricing: pricing, openAIKey: openAIKey, anthropicKey: anthropicKey, modelAuthMode: modelAuthMode,
-		anthropicUpstreamURL: anthropicUpstreamURL,
-		appID:                appID, installationID: installationID, privateKey: privateKey,
+		openAIUpstreamURL: openAIUpstreamURL, anthropicUpstreamURL: anthropicUpstreamURL,
+		appID: appID, installationID: installationID, privateKey: privateKey,
 		mcpRegistry: mcpRegistry,
 	}, nil
 }
 
-func loadModelCredentials() (string, string, string, error) {
+func loadModelCredentials(openAIUpstreamURL string) (string, string, string, error) {
 	openAIKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
 	anthropicKey := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY"))
 	if strings.ContainsAny(anthropicKey, "\r\n") {
@@ -190,8 +185,7 @@ func loadModelCredentials() (string, string, string, error) {
 	if mode != modelauth.APIKeyMode && mode != modelauth.ChatGPTMode {
 		return "", "", "", errors.New("MODEL_AUTH_MODE must be api_key or chatgpt")
 	}
-	if mode == modelauth.ChatGPTMode &&
-		envOrDefault("OPENAI_UPSTREAM_URL", "https://api.openai.com") != "https://api.openai.com" {
+	if mode == modelauth.ChatGPTMode && openAIUpstreamURL != "https://api.openai.com" {
 		return "", "", "", errors.New("ChatGPT plan usage requires the public OpenAI API upstream")
 	}
 	if mode == modelauth.APIKeyMode && openAIKey == "" && anthropicKey == "" {
@@ -201,20 +195,20 @@ func loadModelCredentials() (string, string, string, error) {
 }
 
 func inspectionHosts(host string, enabled map[sprooziv1alpha1.CapabilityKind]bool,
-	profiles *egress.ProfileStore, registry *mcpgateway.Registry,
+	profiles *destination.ProfileStore, registry *mcpgateway.Registry,
 ) map[string]bool {
 	hosts := map[string]bool{host: true}
-	for authority, cap := range semanticAuthorities {
+	for authority, cap := range endpoints.SemanticAuthorities {
 		if enabled[cap] {
 			name, _, _ := net.SplitHostPort(authority)
 			hosts[name] = true
 		}
 	}
-	for _, destination := range profiles.Destinations() {
-		if slices.Contains(registry.Authorities(), net.JoinHostPort(destination.Host, strconv.Itoa(destination.Port))) {
+	for _, dest := range profiles.Destinations() {
+		if slices.Contains(registry.Authorities(), net.JoinHostPort(dest.Host, strconv.Itoa(dest.Port))) {
 			continue // Remote MCP providers are not inspected workload routes.
 		}
-		hosts[destination.Host] = true
+		hosts[dest.Host] = true
 	}
 	return hosts
 }
@@ -268,8 +262,6 @@ func positiveEnvInteger(key string) (int64, error) {
 	return value, nil
 }
 
-func requiredEnvValue(key string) string { return os.Getenv(key) }
-
 func composeDispatcher(
 	cfg *startupConfig, handlers map[sprooziv1alpha1.CapabilityKind]http.Handler,
 	mcpHandler http.Handler, anthropicHandler http.Handler,
@@ -289,30 +281,26 @@ func composeDispatcher(
 			routes[authority] = gateway.Route{Tier: audit.TierProtocol}
 		}
 	}
-	for authority, cap := range semanticAuthorities {
+	for authority, cap := range endpoints.SemanticAuthorities {
 		// Reserve semantic authorities even when a module is disabled. Generic
 		// egress must never become a weaker fallback for a semantic service.
-		routes[authority] = gateway.Route{Capability: string(cap), Tier: audit.TierSemantic}
+		route := gateway.Route{Capability: string(cap), Tier: audit.TierSemantic}
 		if cfg.enabled[cap] {
-			route := routes[authority]
 			route.Handler = handlers[cap]
-			routes[authority] = route
 		}
+		routes[authority] = route
 	}
 	// The two fixed provider protocols share model.inference accounting, while
-	// credentials and upstream transport remain administrator-owned. Reserve
-	// Anthropic even when disabled so destination egress cannot replace it.
-	routes[modelgateway.AnthropicAuthority] = gateway.Route{
-		Capability: string(sprooziv1alpha1.CapabilityModelInference), Tier: audit.TierSemantic,
-	}
+	// credentials and upstream transport remain administrator-owned.
+	anthropic := routes[modelgateway.AnthropicAuthority]
+	anthropic.Handler = nil
 	if cfg.enabled[sprooziv1alpha1.CapabilityModelInference] && cfg.anthropicKey != "" {
-		route := routes[modelgateway.AnthropicAuthority]
-		route.Handler = anthropicHandler
-		routes[modelgateway.AnthropicAuthority] = route
+		anthropic.Handler = anthropicHandler
 	}
+	routes[modelgateway.AnthropicAuthority] = anthropic
 	if cfg.enabled[sprooziv1alpha1.CapabilityNetworkEgress] {
-		for _, destination := range cfg.profiles.Destinations() {
-			authority := net.JoinHostPort(destination.Host, strconv.Itoa(destination.Port))
+		for _, dest := range cfg.profiles.Destinations() {
+			authority := net.JoinHostPort(dest.Host, strconv.Itoa(dest.Port))
 			if _, semantic := routes[authority]; semantic {
 				continue
 			}
@@ -349,15 +337,9 @@ func main() {
 		log.Fatal(err)
 	}
 	agentNamespace := envOrDefault("AGENT_NAMESPACE", "sproozi-agents")
-	validator := gatewaykubernetes.NewK8sTokenValidator(clientset, "sproozi-gateway")
-	runFinder := gatewaykubernetes.NewK8sRunFinder(runtimeClient, agentNamespace)
-	authenticator := &gatewaykubernetes.Authenticator{Tokens: validator, Runs: runFinder}
-	authenticate := func(ctx context.Context, token string) (*gateway.ExecutionGrant, error) {
-		return authenticator.Authenticate(ctx, token)
-	}
-	revalidate := runFinder.Revalidate
+	authenticator := gatewaykubernetes.NewAuthenticator(clientset, "sproozi-gateway", runtimeClient, agentNamespace)
 	httpClient := &http.Client{Timeout: 120 * time.Second}
-	auditLogger := newAuditLogger(os.Stdout)
+	auditLogger := audit.NewLogger(os.Stdout)
 	// The shared gateway is the only component that receives Kubernetes API
 	// credentials. Build the upstream transport from its own in-cluster
 	// rest.Config so workload ServiceAccount tokens can never be forwarded to
@@ -406,7 +388,7 @@ func main() {
 		}
 		model := &modelgateway.Handler{Config: modelgateway.HandlerConfig{
 			Pricing: cfg.pricing, AuditLogger: auditLogger,
-			UpstreamURL:  envOrDefault("OPENAI_UPSTREAM_URL", "https://api.openai.com"),
+			UpstreamURL:  cfg.openAIUpstreamURL,
 			ProviderAuth: providerAuth, HTTPClient: httpClient,
 		}}
 		if os.Getenv("MODEL_DIAGNOSTICS") == "true" {
@@ -433,7 +415,7 @@ func main() {
 	handlers[sprooziv1alpha1.CapabilityPackagesInstall] = &packagesgateway.Handler{Config: packagesgateway.HandlerConfig{
 		HTTPClient:  httpClient,
 		AuditLogger: auditLogger}}
-	raw := &egress.Handler{Config: egress.HandlerConfig{Profiles: cfg.profiles,
+	raw := &destination.Handler{Config: destination.HandlerConfig{Profiles: cfg.profiles,
 		AuditLogger: auditLogger,
 		HTTPClient:  httpClient}}
 
@@ -446,13 +428,13 @@ func main() {
 		Budgets: budgets, AuditLogger: auditLogger})
 	dispatcher := composeDispatcher(cfg, handlers, mcpHandler, anthropicHandler)
 	for authority, route := range dispatcher {
-		route.Budgets = budgets
+		route.Budgets, route.AuditLogger = budgets, auditLogger
 		dispatcher[authority] = route
 	}
 	transport, err := proxytransport.New(proxytransport.Config{
 		Certificates:     cfg.certificates,
-		Authenticate:     authenticate,
-		Revalidate:       revalidate,
+		Authenticate:     authenticator.Authenticate,
+		Revalidate:       authenticator.Revalidate,
 		Handler:          dispatcher,
 		AllowedAuthority: dispatcher.Allows,
 	})
@@ -468,10 +450,6 @@ func main() {
 	log.Fatal(server.ServeTLS(transport.LimitListener(listener), "", ""))
 }
 
-func newAuditLogger(output io.Writer) audit.Writer {
-	return audit.NewLogger(output)
-}
-
 func envOrDefault(key, fallback string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
@@ -480,12 +458,13 @@ func envOrDefault(key, fallback string) string {
 }
 
 // Provider destinations are trusted operator configuration; workloads continue
-// to use the reserved semantic authority and cannot choose an upstream.
-func validateModelUpstream(value string) error {
+// to use the reserved semantic authority and cannot choose an upstream. Both
+// providers receive credentials, so each must be a bare https origin.
+func validateModelUpstream(name, value string) error {
 	upstream, err := url.Parse(value)
-	if err != nil || upstream.Scheme != "https" && upstream.Scheme != "http" || upstream.Host == "" ||
-		upstream.User != nil || value != upstream.Scheme+"://"+upstream.Host {
-		return errors.New("invalid Anthropic upstream origin")
+	if err != nil || upstream.Scheme != "https" || upstream.Host == "" ||
+		upstream.User != nil || value != "https://"+upstream.Host {
+		return fmt.Errorf("%s must be an https origin", name)
 	}
 	return nil
 }

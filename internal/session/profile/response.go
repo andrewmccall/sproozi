@@ -84,14 +84,8 @@ func validateStopped(l session.Launch, i session.Incarnation, s *session.Stopped
 	if s.Receipt == nil {
 		return nil
 	} // Unknown usage remains unknown.
-	if !sameLaunch(l, s.Receipt.Launch) || s.Receipt.Incarnation != i || len(s.Receipt.Usage) != len(l.Allowances) {
+	if !sameLaunch(l, s.Receipt.Launch) || s.Receipt.Incarnation != i {
 		return errors.New("profile: accounting intent mismatch")
 	}
-	for name, allowance := range l.Allowances {
-		usage, ok := s.Receipt.Usage[name]
-		if !ok || usage.Units < 0 || usage.CostMicros < 0 || allowance.Units.Bounded && usage.Units > allowance.Units.Value || allowance.CostMicros.Bounded && usage.CostMicros > allowance.CostMicros.Value {
-			return errors.New("profile: invalid trusted usage")
-		}
-	}
-	return nil
+	return session.CheckUsage(l.Allowances, s.Receipt.Usage)
 }

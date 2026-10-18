@@ -217,24 +217,24 @@ func validateRequest(q Request) error {
 		}
 		return nil
 	}
-	if !validID(q.ID) {
+	if !work.CanonicalID(q.ID) {
 		return errors.New("home: invalid session UUID")
 	}
 	switch q.Action {
 	case ActionStart:
-		if !validID(q.OperationID) || !filepath.IsAbs(q.Workspace) || q.Destination != "" {
+		if !work.CanonicalID(q.OperationID) || !filepath.IsAbs(q.Workspace) || q.Destination != "" {
 			return errors.New("home: invalid start")
 		}
 	case ActionMove:
-		if !validID(q.OperationID) || q.Destination == "" || q.Workspace != "" {
+		if !work.CanonicalID(q.OperationID) || q.Destination == "" || q.Workspace != "" {
 			return errors.New("home: invalid move")
 		}
 	case ActionPull:
-		if !validID(q.OperationID) || q.Source == "" || q.Workspace != "" || q.Destination != "" {
+		if !work.CanonicalID(q.OperationID) || q.Source == "" || q.Workspace != "" || q.Destination != "" {
 			return errors.New("home: invalid pull")
 		}
 	case ActionResume, ActionStop, ActionCancel:
-		if !validID(q.OperationID) || q.Workspace != "" || q.Destination != "" {
+		if !work.CanonicalID(q.OperationID) || q.Workspace != "" || q.Destination != "" {
 			return errors.New("home: invalid execution intent")
 		}
 	case ActionAttach, ActionStatus, ActionRecover:

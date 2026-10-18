@@ -49,6 +49,12 @@ def run(*args, input=None, timeout=300, check=True):
     return p
 
 
+def check(condition, detail="acceptance check failed"):
+    # Unlike a bare assert, this still fails under python -O.
+    if not condition:
+        raise AssertionError(detail)
+
+
 def k(*args, **kw):
     return run("kubectl", *args, **kw).stdout
 
@@ -246,12 +252,8 @@ def patch_deployment(name, patch):
 def setup(images, manager_image):
     cluster = os.environ.get("KIND_CLUSTER", "")
     expected = "kind-" + cluster
-    assert cluster and os.environ.get(
-        "KUBECONFIG"
-    ), "Explicit Kind cluster and kubeconfig required"
-    assert (
-        k("config", "current-context").strip() == expected
-    ), "Refusing nonselected cluster"
+    check(cluster and os.environ.get("KUBECONFIG"), "Explicit Kind cluster and kubeconfig required")
+    check(k("config", "current-context").strip() == expected, "Refusing nonselected cluster")
     # Existing Manager Ordered spec owns the manager installation and cleanup.
     k("get", "deployment", "sproozi-controller-manager", "-n", SYSTEM)
     k("apply", "-k", "config/agent-rbac")
@@ -678,7 +680,7 @@ def waitrun(name, phase=None, timeout=180):
 
     completed = eventually(terminal, timeout)
     if phase is not None:
-        assert completed["status"]["phase"] == phase, completed
+        check(completed["status"]["phase"] == phase, completed)
     return completed
 
 
@@ -787,7 +789,7 @@ def call(name, args, expect_error=False):
         },
     )
     result = response.get("result", {})
-    assert bool(result.get("isError")) == expect_error, response
+    check(bool(result.get("isError")) == expect_error, response)
     if expect_error:
         return result
     if result.get("structuredContent"):
@@ -837,7 +839,7 @@ def stock_clients():
             }
         )
         if harness == "hermes":
-            assert data["status"]["result"]["text"] == ANSWER, data
+            check(data["status"]["result"]["text"] == ANSWER, data)
         proof = worker_proof(name)
         record(
             "stock-" + harness + "-native-model-mcp-loop",
@@ -859,10 +861,10 @@ def stock_clients():
                 else "Failed"
             )
             data = cleaned(waitrun(name, expected, 240))
-            assert not data["status"].get("result"), data
+            check(not data["status"].get("result"), data)
             audit = gateway_audit(data["metadata"]["uid"])
             reason = (
-                "capability not granted" if scenario == "denied" else "budget exhausted"
+                "does not request capability model.inference" if scenario == "denied" else "budget exhausted"
             )
             budget_state = None
             if harness == "claude-code" and scenario == "budget":
@@ -873,18 +875,18 @@ def stock_clients():
                 ledger_name = "sproozi-budget-" + hashlib.sha256(key.encode()).hexdigest()[:20]
                 ledger = json.loads(k("get", "configmap", ledger_name, "-n", SYSTEM, "-o", "json"))
                 budget_state = json.loads(ledger["data"]["state"])
-                assert budget_state["UnitsUsed"] == 0 and budget_state["ReservedUnits"] == 1, budget_state
-                assert budget_state["pendingReservations"] == 1, budget_state
-                assert not any(event.get("allowed") for event in audit), audit
+                check(budget_state["UnitsUsed"] == 0 and budget_state["ReservedUnits"] == 1, budget_state)
+                check(budget_state["pendingReservations"] == 1, budget_state)
+                check(not any(event.get("allowed") for event in audit), audit)
                 attempts = [event for event in audit if event.get("upstreamStatus") == 200]
-                assert len(attempts) == 1, attempts
+                check(len(attempts) == 1, attempts)
             denied = [
                 event
                 for event in audit
                 if event.get("allowed") is False
                 and reason in event.get("denyReason", "")
             ]
-            assert denied, audit
+            check(denied, audit)
             record(
                 "stock-" + harness + "-" + scenario,
                 uid=data["metadata"]["uid"],
@@ -899,8 +901,8 @@ def task_service_checks():
     view = call("submit", candidate)
     data = cleaned(waitrun(view["id"], "Succeeded", 240))
     status = call("status", ref(view))
-    assert status["result"]["text"] == ANSWER, status
-    assert call("submit", candidate)["uid"] == view["uid"]
+    check(status["result"]["text"] == ANSWER, status)
+    check(call("submit", candidate)["uid"] == view["uid"])
     for changed in [
         {**candidate, "task": "different"},
         {**candidate, "expiresAt": submission("ignored", minutes=30)["expiresAt"]},
@@ -928,10 +930,10 @@ def task_service_checks():
                 token=token,
             )
         except urllib.error.HTTPError as e:
-            assert e.code == 401, e.code
+            check(e.code == 401, e.code)
         else:
             raise AssertionError("Invalid task bearer accepted")
-    assert call("status", ref(view))["result"]["text"] == ANSWER
+    check(call("status", ref(view))["result"]["text"] == ANSWER)
     record(
         "task-retained-result-replay-conflict-expiry-uid-auth",
         uid=view["uid"],
@@ -970,15 +972,15 @@ def gateway_and_cni(pod):
     name = pod["metadata"]["name"]
     ps = pod["spec"]
     sa = ps["serviceAccountName"]
-    assert ps["automountServiceAccountToken"] == False
-    assert all(
+    check(ps["automountServiceAccountToken"] == False)
+    check(all(
         v.get("projected", {})
         .get("sources", [{}])[0]
         .get("serviceAccountToken", {})
         .get("audience")
         != "https://kubernetes.default.svc"
         for v in ps["volumes"]
-    )
+    ))
     for verb in ["get", "create", "patch"]:
         denied = k(
             "auth",
@@ -990,26 +992,28 @@ def gateway_and_cni(pod):
             "--as=system:serviceaccount:" + AGENTS + ":" + sa,
             check=False,
         ).strip()
-        assert denied == "no", denied
+        check(denied == "no", denied)
     script = """import json,os,socket,ssl
 from pathlib import Path
 ctx=ssl.create_default_context(cafile=os.environ['SSL_CERT_FILE'])
 token=Path('/var/run/sproozi/tokens/gateway/token').read_text().strip()
+def check(condition,detail='acceptance check failed'):
+ if not condition:raise AssertionError(detail)
 def connect(authority,auth):
  s=ctx.wrap_socket(socket.create_connection(('sproozi-gateway.sproozi-system.svc',8443),timeout=5),server_hostname='sproozi-gateway.sproozi-system.svc')
  header=('Proxy-Authorization: Bearer '+auth+'\\r\\n') if auth else ''
  s.sendall(('CONNECT '+authority+' HTTP/1.1\\r\\nHost: '+authority+'\\r\\n'+header+'\\r\\n').encode())
  response=s.recv(4096).decode().split('\\r\\n')[0];s.close();return int(response.split()[1])
-assert connect('api.openai.com:443','')==401
-assert connect('api.openai.com:443','invalid')==401
-assert connect('unregistered.fixture:443',token)==403
-assert connect('api.openai.com:443',token)==200
+check(connect('api.openai.com:443','')==401)
+check(connect('api.openai.com:443','invalid')==401)
+check(connect('unregistered.fixture:443',token)==403)
+check(connect('api.openai.com:443',token)==200)
 blocked=0
 for host,port in [('orchestration-provider.sproozi-system.svc',8443),('kubernetes.default.svc',443)]:
  try:s=socket.create_connection((host,port),timeout=3);s.close()
  except TimeoutError:blocked+=1
-assert blocked==2,blocked
-assert not Path('/var/run/secrets/kubernetes.io/serviceaccount/token').exists()
+check(blocked==2,blocked)
+check(not Path('/var/run/secrets/kubernetes.io/serviceaccount/token').exists())
 print(json.dumps({'gatewayAuthenticated':True,'missingIdentityDenied':True,'unknownAuthorityDenied':True,'directProviderAndKubernetesBlocked':True,'noKubernetesCredential':True}))
 """
     result = k(
@@ -1028,7 +1032,7 @@ def cancellation_and_deadline():
     eventually(
         lambda: getrun(second["id"]).get("status", {}).get("phase") == "Queued", 30
     )
-    assert not json.loads(
+    check(not json.loads(
         k(
             "get",
             "pods",
@@ -1039,12 +1043,12 @@ def cancellation_and_deadline():
             "-o",
             "json",
         )
-    )["items"]
+    )["items"])
     first = call("cancel", ref(held))
-    assert first["cancellationRequested"]
-    assert call("cancel", ref(held))["cancellationRequested"]
+    check(first["cancellationRequested"])
+    check(call("cancel", ref(held))["cancellationRequested"])
     stopped = cleaned(waitrun(held["id"], "Cancelled", 60))
-    assert not stopped["status"].get("result")
+    check(not stopped["status"].get("result"))
     cleaned(waitrun(second["id"], "Succeeded", 240))
     record(
         "single-global-slot-monotonic-cancel-cleanup",
@@ -1058,7 +1062,7 @@ def cancellation_and_deadline():
         task="SPROOZI_HOLD; call fixture verify.",
     )
     deadline = cleaned(waitrun("kind-hermes-deadline", "TimedOut", 90))
-    assert not deadline["status"].get("result")
+    check(not deadline["status"].get("result"))
     record("native-worker-deadline-cleanup", uid=deadline["metadata"]["uid"])
 
 
@@ -1227,7 +1231,7 @@ print(json.dumps({'gatewayActors':actors,'memoryEvents':Path('/sys/fs/cgroup/mem
             script,
         )
     )
-    assert len(census["gatewayActors"]) == 1, census
+    check(len(census["gatewayActors"]) == 1, census)
     record("native-gateway-single-owner-" + stage, **census)
 
 
@@ -1256,10 +1260,10 @@ def coordinator_proof(images):
         )
         (OUT / "coordinator-api.json").write_text(json.dumps(response, indent=2) + "\n")
         text = response["choices"][0]["message"]["content"]
-        assert ANSWER in text, response
+        check(ANSWER in text, response)
         view = call("submit", s)
         cleaned(waitrun(view["id"], "Succeeded", 240))
-        assert call("status", ref(view))["result"]["text"] == ANSWER
+        check(call("status", ref(view))["result"]["text"] == ANSWER)
         retrieval_prompt = (
             "SPROOZI_COORDINATOR_REFERENCE="
             + json.dumps(ref(view))
@@ -1277,7 +1281,7 @@ def coordinator_proof(images):
             False,
         )
         retained_text = retained["choices"][0]["message"]["content"]
-        assert ANSWER in retained_text, retained
+        check(ANSWER in retained_text, retained)
         (OUT / "coordinator-retained-result.json").write_text(
             json.dumps(retained, indent=2) + "\n"
         )
@@ -1336,8 +1340,8 @@ def coordinator_proof(images):
         )
         (OUT / "cron-before-restart.json").write_text(before)
         jobs = json.loads(before)["jobs"]
-        assert len(jobs) == 1 and jobs[0]["repeat"]["completed"] == 0, jobs
-        assert jobs[0]["last_run_at"] is None, jobs
+        check(len(jobs) == 1 and jobs[0]["repeat"]["completed"] == 0, jobs)
+        check(jobs[0]["last_run_at"] is None, jobs)
         old_pod = json.loads(
             k("get", "pods", "-n", COORD, "-l", "app=hermes-coordinator", "-o", "json")
         )["items"][0]
@@ -1358,10 +1362,11 @@ def coordinator_proof(images):
         replacement = [
             p for p in replacement if not p["metadata"].get("deletionTimestamp")
         ]
-        assert (
+        check(
             len(replacement) == 1
-            and replacement[0]["metadata"]["uid"] != old_pod["metadata"]["uid"]
-        ), replacement
+            and replacement[0]["metadata"]["uid"] != old_pod["metadata"]["uid"],
+            replacement,
+        )
         replacement = replacement[0]
         coordinator_gateway_owner("pvc-restart")
         cron_name = (
@@ -1387,10 +1392,10 @@ def coordinator_proof(images):
 
         data = eventually(find_cron, 240)
         data = cleaned(waitrun(data["metadata"]["name"], "Succeeded", 240))
-        assert (
-            data["metadata"]["creationTimestamp"]
-            >= replacement["metadata"]["creationTimestamp"]
-        ), data
+        check(
+            data["metadata"]["creationTimestamp"] >= replacement["metadata"]["creationTimestamp"],
+            data,
+        )
         after = k(
             "exec",
             "-n",
@@ -1461,9 +1466,7 @@ def main():
     processes = []
     worker_logs = WorkerLogCapture(AGENTS, OUT)
     try:
-        assert (
-            images.get("sourceSnapshotVerified") is True
-        ), "Build provenance lacks a verified source snapshot"
+        check(images.get("sourceSnapshotVerified") is True, "Build provenance lacks a verified source snapshot")
         current_build_source = build_source_hashes()
         changed = [
             name
@@ -1472,9 +1475,7 @@ def main():
             )
             if images["buildSourceSHA256"].get(name) != current_build_source.get(name)
         ]
-        assert (
-            not changed
-        ), "Acceptance image source differs from driver checkout: " + ", ".join(changed)
+        check(not changed, "Acceptance image source differs from driver checkout: " + ", ".join(changed))
         record("compiled-fixture-source-snapshot-matches-checkout")
         setup(images, args.manager_image)
         worker_logs.start()
@@ -1489,8 +1490,8 @@ def main():
         proc.wait(timeout=10)
         proc, TASKPORT = portforward("sproozi-tasks")
         processes.append(proc)
-        assert call("submit", candidate)["uid"] == view["uid"]
-        assert call("status", ref(view))["result"]["text"] == ANSWER
+        check(call("submit", candidate)["uid"] == view["uid"])
+        check(call("status", ref(view))["result"]["text"] == ANSWER)
         record("task-facade-restart-retained-replay", uid=view["uid"])
         cancellation_and_deadline()
         coordinator_proof(images)
@@ -1498,8 +1499,8 @@ def main():
         processes.append(provider_proc)
         provider = request(provider_port, "/evidence")
         EVIDENCE["provider"] = provider
-        assert not provider["violations"], provider
-        assert provider["tools"] >= 6 and provider["receivedToolResult"], provider
+        check(not provider["violations"], provider)
+        check(provider["tools"] >= 6 and provider["receivedToolResult"], provider)
         ledger = json.loads(
             k(
                 "get",
@@ -1516,7 +1517,7 @@ def main():
             {"name": v["metadata"]["name"], "state": json.loads(v["data"]["state"])}
             for v in ledger["items"]
         ]
-        assert EVIDENCE["budgetLedgers"]
+        check(EVIDENCE["budgetLedgers"])
         record(
             "upstream-credential-separation-native-tool-results-durable-budget",
             modelRequests=provider["requests"],
@@ -1605,12 +1606,12 @@ def worker_proof(case_id, expected_tools=1, native_kubernetes=False):
     model_requests = [r for r in records if r.get("kind") == "model"]
     calls = [r for r in records if r.get("kind") == "tool"]
     consumed = [r for r in model_requests if r.get("toolResultConsumed")]
-    assert len(model_requests) >= 2, records
-    assert consumed, records
+    check(len(model_requests) >= 2, records)
+    check(consumed, records)
     if native_kubernetes:
-        assert not calls, records
+        check(not calls, records)
     else:
-        assert len(calls) == expected_tools, records
+        check(len(calls) == expected_tools, records)
     return {
         "case": case_id,
         "modelRequests": len(model_requests),
@@ -1686,9 +1687,7 @@ def kubernetes_worker_proof(images):
         task=task,
     )
     completed = cleaned(waitrun("kind-hermes-kubernetes", "Succeeded", 240))
-    assert (
-        completed["status"]["result"]["text"] == ANSWER + " orchestration-observed"
-    ), completed
+    check(completed["status"]["result"]["text"] == ANSWER + " orchestration-observed", completed)
     proof = worker_proof(case_id, native_kubernetes=True)
     audit = gateway_audit(created["metadata"]["uid"])
     matching = [
@@ -1698,7 +1697,7 @@ def kubernetes_worker_proof(images):
         and event.get("operation") == "kubernetes.list"
         and event.get("resource") == "/api/v1/namespaces/" + target_namespace + "/pods"
     ]
-    assert len(matching) == 1, audit
+    check(len(matching) == 1, audit)
     record(
         "native-hermes-scoped-kubernetes-pod-list",
         uid=created["metadata"]["uid"],

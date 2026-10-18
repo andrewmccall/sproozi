@@ -84,12 +84,13 @@ func TestPackageCapabilityDoesNotInheritGitHubGrant(t *testing.T) {
 	identity := protocolIdentity()
 	identity.Capabilities = []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityGitHubPullRequest}
 	identity.Policy.Spec.AllowedCapabilities = []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityGitHubPullRequest}
-	h := protocolHandler(&http.Client{}, &protocolAuditWriter{})
+	routes := gateway.Dispatcher{"pypi.org:443": {Capability: string(sprooziv1alpha1.CapabilityPackagesInstall),
+		Handler: protocolHandler(&http.Client{}, &protocolAuditWriter{})}}
 	request := httptest.NewRequest(http.MethodGet, "https://pypi.org/simple/demo-tool/", nil)
 	request.Host = "pypi.org"
 	request.Header.Set("Authorization", "Bearer projected-run-token")
 	response := httptest.NewRecorder()
-	h.ServeHTTP(response, request.WithContext(gateway.WithIdentity(request.Context(), identity)))
+	routes.ServeHTTP(response, request.WithContext(gateway.WithIdentity(request.Context(), identity)))
 	if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "packages.install") {
 		t.Fatalf("missing package capability response = %d %q", response.Code, response.Body.String())
 	}

@@ -21,7 +21,7 @@ func admissionConfig(t *testing.T) Config {
 	return Config{Certificates: map[string]tls.Certificate{testServiceHost: testCertificate(t)},
 		Authenticate: func(context.Context, string) (*gateway.ExecutionGrant, error) { return testIdentity(), nil },
 		Revalidate:   func(context.Context, *gateway.ExecutionGrant) error { return nil },
-		Handler:      http.NotFoundHandler(), AuthorityTimeout: 40 * time.Millisecond}
+		Handler:      http.NotFoundHandler(), AllowedAuthority: onlyTestService, AuthorityTimeout: 40 * time.Millisecond}
 }
 
 func connectRequest(token string) *http.Request {
@@ -257,5 +257,13 @@ func TestListenerAdmissionClosesExcessAndRecoversAfterClose(t *testing.T) {
 		_ = recovered.Close()
 	case <-time.After(time.Second):
 		t.Fatal("listener admission did not recover")
+	}
+}
+
+func TestGatewayRequiresAuthorityRouting(t *testing.T) {
+	config := admissionConfig(t)
+	config.AllowedAuthority = nil
+	if _, err := New(config); err == nil {
+		t.Fatal("gateway accepted no authority routing")
 	}
 }

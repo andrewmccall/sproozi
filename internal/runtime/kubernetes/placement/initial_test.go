@@ -9,7 +9,7 @@ import (
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
 	"github.com/andrewmccall/sproozi/internal/harness"
-	registry "github.com/andrewmccall/sproozi/internal/runtime/kubernetes/session"
+	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
 	"github.com/andrewmccall/sproozi/internal/workspace"
@@ -73,19 +73,24 @@ func TestFreshRemoteWorkspaceStopsWithActualUUIDAndImmutableReceipt(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stopped.Launch.ThreadID != fixtureThread || stopped.Launch.Task != initialFixtureTask || !stopped.ActualStopped || stopped.Receipt == nil || string(stopped.Checkpoint) != string(checkpointData) {
+	if stopped.ThreadID != fixtureThread || stopped.Launch.Task != initialFixtureTask || !stopped.ActualStopped || stopped.Receipt == nil || string(stopped.Checkpoint) != string(checkpointData) {
 		t.Fatalf("incomplete initial result: %+v", stopped)
+	}
+	if !session.SameLaunch(stopped.Launch, l) || !session.SameLaunch(stopped.Receipt.Launch, l) {
+		t.Fatalf("binding rewrote the immutable launch: %+v", stopped.Launch)
 	}
 	retry, err = p.CreateInitial(t.Context(), l, e.initial)
 	if err != nil || retry != i {
 		t.Fatal("stopped creation retry", retry, err)
 	}
 	repeated, err := p.Stop(t.Context(), l, i)
-	if err != nil || repeated.CheckpointDigest != stopped.CheckpointDigest || repeated.Receipt.Launch.ThreadID != fixtureThread || e.finishes != 1 {
+	if err != nil || repeated.CheckpointDigest != stopped.CheckpointDigest || repeated.ThreadID != fixtureThread || e.finishes != 1 {
 		t.Fatal("original launch replay failed", repeated, err)
 	}
-	if _, err = p.Inspect(t.Context(), stopped.Launch); err != nil {
-		t.Fatal("bound launch replay failed", err)
+	rewritten := l
+	rewritten.ThreadID = fixtureThread
+	if _, err = p.Inspect(t.Context(), rewritten); err == nil {
+		t.Fatal("a launch rewritten with the bound thread was accepted")
 	}
 	changed := l
 	changed.Task = "A different task"

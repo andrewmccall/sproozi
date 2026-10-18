@@ -9,7 +9,7 @@ describe those parts and how they fit together.
 
 ## The agent and its environment
 
-The **harness** is the program that runs the agent. Codex, Claude Code, OpenCode
+The **[harness](../../GLOSSARY.md#harness)** is the program that runs the agent. Codex, Claude Code, OpenCode
 and Hermes are supported harnesses. The harness manages the conversation and
 tool calls.
 
@@ -17,10 +17,10 @@ The **AgentRuntime** resource holds Kubernetes configuration for the container
 image, launch command, resources and security settings. An administrator controls
 it. Docker and Kubernetes provide the environments where containers run.
 
-The **sandbox** is the isolated environment where the harness runs. For an
+The **[sandbox](../../GLOSSARY.md#sandbox)** is the isolated environment where the harness runs. For an
 ordinary Kubernetes run, it is a disposable Pod with its own identity and network
-policy. Sproozi currently creates Pods directly. The separate Kubernetes Agent
-Sandbox operator is not required.
+policy. Sproozi creates these Pods directly; see
+[cluster dependencies](../reference/dependencies.md).
 
 The **gateway** checks requests from the sandbox to approved services. It holds
 provider credentials and checks the run's identity, permissions and current
@@ -62,15 +62,18 @@ or [capabilities and gateways](capabilities-and-gateways.md) for permission chec
 ## Continuing work
 
 A single task can finish in one disposable run. If you want to continue the
-conversation later, use a managed **Sproozi session**. It tracks the agent
-conversation and Git workspace across executions.
+conversation later, use a managed **[session](../../GLOSSARY.md#session)**. It
+tracks the agent conversation and Git workspace across executions.
 
 | Concept | Meaning |
 | --- | --- |
-| Sproozi session | The record tracking the conversation and workspace, with a stable Sproozi session ID. |
-| Sproozi execution | One period of work with its own approved permissions, usage allowance and deadline. |
+| Session | The record tracking the conversation and workspace, with a stable session ID. |
+| Execution | One period of work with its own approved permissions, allowance and deadline. |
 | Placement | Where an execution runs, such as local Docker or remote Kubernetes. |
-| Sproozi checkpoint | The saved conversation and Git workspace from a stopped agent. |
+| Visit | One stay of an execution at one placement. A move starts a new visit with fresh access. |
+| Checkpoint | The saved conversation and Git workspace from a stopped agent. |
+
+The [glossary](../../GLOSSARY.md) defines these and the other terms.
 
 The harness also has a native conversation ID. It is separate from the Sproozi
 session ID and execution ID.
@@ -80,13 +83,13 @@ These operations serve different purposes:
 - `pull` imports stopped remote work. It does not start the agent.
 - `resume` starts a new execution with current approval. It restores the same
   supported native conversation and unfinished workspace.
-- `move` transfers an active execution between placements. Its original deadline
-  and total allowance still apply.
+- `move` transfers an active execution to another placement, as a new visit.
+  Its original deadline and total allowance still apply.
 - `stop` stops local work and saves supported state for a later resume.
 
 A checkpoint contains work, not permission to run it. Sproozi creates fresh
 access at the destination. Before a move can start another agent, Sproozi must
-confirm that the source has stopped and finish its usage accounting.
+confirm that the source has stopped and record its finalized usage.
 
 Managed remote tasks currently use Codex. Controlled interactive moves support
 Codex and Claude Code. Support for a harness in ordinary
@@ -116,11 +119,12 @@ There are two task services. The disposable-job service retains status and an
 optional final answer. The retained-work service also saves supported native
 conversation and workspace state for later resume. Choose the
 [Hermes job guide](../guides/hermes-orchestration.md) or the
-[retained-work guide](../guides/portable-workflows.md) for the workflow you need.
+[Hermes with retained work](../guides/retained-work-kubernetes.md) guide for the
+workflow you need.
 
 ## Choose a next step
 
 - [Getting started](../guides/getting-started.md) runs the Kind demo.
 - [Install on Kubernetes](../guides/install-kubernetes.md) runs a first Pod on an existing cluster.
-- [Retained remote work](../guides/portable-workflows.md) starts a remote task that you can continue locally.
+- [Remote work and local resume](../guides/portable-workflows.md) starts a remote task that you can continue locally.
 - [System architecture](system-architecture.md) explains the components and trust boundaries.

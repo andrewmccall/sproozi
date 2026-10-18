@@ -1,4 +1,4 @@
-# Deploy Hermes with retained native work
+# Hermes with retained work
 
 This deployment connects the persistent stock Hermes coordinator to the native
 work owner at `/work/mcp`. A managed Codex task runs in `sproozi-agents`; its
@@ -11,8 +11,7 @@ bounded task API, which retains answers without native session retrieval.
 
 Follow [Install on Kubernetes](install-kubernetes.md), including enforcing CNI,
 shared gateway TLS/provider credentials and the immutable worker trust bundle.
-This adapter uses ordinary Pods. Kubernetes Agent Sandbox CRDs are not required;
-integration with that operator remains planned.
+[Cluster dependencies](../reference/dependencies.md) lists what else the cluster needs.
 
 Build and publish the [native image](../../internal/runtime/docker/image/Dockerfile)
 with the approved Codex/Claude Code clients, supervisor, checkpoint
@@ -176,7 +175,7 @@ remain untrusted. Requests cannot select images, templates, credentials or polic
 Expose the owner's TLS origin through a reviewed private endpoint, or port-forward
 its Service for a local evaluation. Configure the home `remote` entry with that
 origin, the public owner CA and protected home-token file. Use the same approved
-native instructions and byte limits. The [portable workflow guide](portable-workflows.md)
+native instructions and byte limits. The [remote work and local resume guide](portable-workflows.md)
 contains the complete global home configuration and client sequence:
 
 ```sh

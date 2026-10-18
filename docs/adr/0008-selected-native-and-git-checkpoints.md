@@ -113,7 +113,7 @@ remain move-coordinator and runtime obligations.
 
 Implementation: [native Codex state](../../internal/harness/codex_state.go),
 [native Claude state](../../internal/harness/claude_state.go),
-[aggregate checkpoints](../../internal/checkpoint/codex.go),
+[aggregate checkpoints](../../internal/checkpoint/artifact.go),
 [workspace capture](../../internal/workspace/workspace.go) and
 [workspace restore](../../internal/workspace/restore.go). Pair restoration uses
 private staging and publishes neither component after a failed restore. Native

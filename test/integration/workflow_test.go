@@ -1,4 +1,4 @@
-package e2e_test
+package integration_test
 
 import (
 	"context"
@@ -265,7 +265,7 @@ func TestWebhookTriggeredRunReachesSucceeded(t *testing.T) {
 	}
 	reconciler := &controller.AgentRunReconciler{
 		Client:        c,
-		Scheme:        e2eScheme(t),
+		APIReader:     c,
 		SandboxClient: sandbox,
 	}
 	reconcileRunNTimes(t, reconciler, run.Name, 4)

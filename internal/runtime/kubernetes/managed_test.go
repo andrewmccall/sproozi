@@ -8,7 +8,7 @@ import (
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
-	registry "github.com/andrewmccall/sproozi/internal/runtime/kubernetes/session"
+	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
 	corev1 "k8s.io/api/core/v1"
 )
 

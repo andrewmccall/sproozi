@@ -3,6 +3,7 @@ package placement
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"slices"
@@ -14,7 +15,7 @@ import (
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	runtimekube "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
-	registry "github.com/andrewmccall/sproozi/internal/runtime/kubernetes/session"
+	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
 	corev1 "k8s.io/api/core/v1"
@@ -34,7 +35,7 @@ func (p *Placement) retained(ctx context.Context, l session.Launch) (retained, r
 		return local, registry.Record{}, err
 	}
 	if local.Reference.UID == "" {
-		ceilings, err := p.liveProfileInput(ctx, l, local.Initial != nil)
+		ceilings, err := p.liveProfileInput(ctx, l, local.fresh())
 		if err != nil {
 			return local, registry.Record{}, err
 		}
@@ -51,14 +52,10 @@ func (p *Placement) retained(ctx context.Context, l session.Launch) (retained, r
 	if err != nil {
 		return local, r, semantic(err)
 	}
-	if local.Initial != nil && r.NativeUUID != "" && local.Launch.ThreadID == "" {
-		local.Launch.ThreadID = r.NativeUUID
-		if err = p.save(local); err != nil {
-			return local, r, err
-		}
-	}
 	l = local.Launch
-	if r.Harness != p.config.Harness || l.Harness != r.Harness || r.Principal != p.config.Principal || r.TemplateName != p.config.TemplateName || r.Epoch != l.Epoch || r.IntendedRunName != runName(l) || r.OperationID != l.OperationID || r.SessionID != l.SessionID || r.WorkspaceDigest != local.WorkspaceDigest || r.Task != l.Task || r.NativeUUID != l.ThreadID || r.CheckpointDigest != l.CheckpointDigest || r.InstructionDigest != l.InstructionDigest || !r.OriginalDeadline.Equal(l.Deadline) || !slices.Equal(r.IncludeIgnored, l.IncludeIgnored) || !ceilingsMatch(l, r.Ceilings) {
+	// Only a first visit's registration gains a native UUID after its launch.
+	thread := r.NativeUUID == l.ThreadID || local.fresh() && l.ThreadID == ""
+	if r.Harness != p.config.Harness || l.Harness != r.Harness || r.Principal != p.config.Principal || r.TemplateName != p.config.TemplateName || r.Epoch != l.Epoch || r.IntendedRunName != runName(l) || r.OperationID != l.OperationID || r.SessionID != l.ExecutionID || r.WorkspaceDigest != local.WorkspaceDigest || r.Task != l.Task || !thread || r.CheckpointDigest != l.CheckpointDigest || r.InstructionDigest != l.InstructionDigest || !r.OriginalDeadline.Equal(l.Deadline) || !slices.Equal(r.IncludeIgnored, l.IncludeIgnored) || !ceilingsMatch(l, r.Ceilings) {
 		return local, r, &profile.Rejection{Code: profile.CodeConflict}
 	}
 	return local, r, nil
@@ -170,11 +167,7 @@ func (p *Placement) Activate(ctx context.Context, l session.Launch, i session.In
 	if err != nil {
 		return err
 	}
-	approved := l
-	if local.Initial != nil {
-		approved = *local.Initial
-	}
-	if _, err = p.liveProfileInput(ctx, approved, local.Initial != nil); err != nil {
+	if _, err = p.liveProfileInput(ctx, local.Launch, local.fresh()); err != nil {
 		return err
 	}
 	if inc(r) != i {
@@ -194,15 +187,15 @@ func (p *Placement) Activate(ctx context.Context, l session.Launch, i session.In
 	if _, err = p.registry.Activate(ctx, r.Reference); err != nil {
 		return semantic(err)
 	}
-	output, err := p.control(ctx, pod, nativeContainer, []string{nativePath, nativeActivate}, nil, 64<<10)
+	output, err := p.native(pod)(ctx, harness.NativeActivate)
 	if err != nil {
 		return err
 	}
-	if local.Initial != nil {
-		_, err = harness.DecodeInitialNativeReply(output, nativeActivate, nativeActive, r.NativeUUID)
+	if local.fresh() {
+		_, err = harness.DecodeInitialNativeReply(output, harness.NativeActivate, harness.NativeActive, r.NativeUUID)
 		return err
 	}
-	_, err = harness.DecodeNativeReply(output, nativeActivate, nativeActive, local.Launch.ThreadID)
+	_, err = harness.DecodeNativeReply(output, harness.NativeActivate, harness.NativeActive, local.Launch.ThreadID)
 	return err
 }
 func (p *Placement) Inspect(ctx context.Context, l session.Launch) (session.Observation, error) {
@@ -258,11 +251,11 @@ func (p *Placement) Inspect(ctx context.Context, l session.Launch) (session.Obse
 		if !running(pod, nativeContainer) {
 			return o, nil
 		}
-		data, err := p.control(ctx, pod, nativeContainer, []string{nativePath, nativeStatus}, nil, 64<<10)
+		data, err := p.native(pod)(ctx, harness.NativeStatus)
 		if err != nil {
 			return o, err
 		}
-		if _, err := harness.DecodeNativeReply(data, nativeStatus, nativePrepared, l.ThreadID); err == nil {
+		if _, err := harness.DecodeNativeReply(data, harness.NativeStatus, harness.NativePrepared, l.ThreadID); err == nil {
 			o.State = session.PlacementPrepared
 		}
 	case registry.Active:
@@ -273,17 +266,17 @@ func (p *Placement) Inspect(ctx context.Context, l session.Launch) (session.Obse
 		if !running(pod, nativeContainer) || !pod.DeletionTimestamp.IsZero() {
 			return o, nil
 		}
-		data, err := p.control(ctx, pod, nativeContainer, []string{nativePath, nativeStatus}, nil, 64<<10)
+		data, err := p.native(pod)(ctx, harness.NativeStatus)
 		if err != nil {
 			return o, err
 		}
-		_, activeErr := harness.DecodeNativeReply(data, nativeStatus, nativeActive, l.ThreadID)
-		if local.Initial != nil {
-			_, activeErr = harness.DecodeInitialNativeReply(data, nativeStatus, nativeActive, r.NativeUUID)
+		_, activeErr := harness.DecodeNativeReply(data, harness.NativeStatus, harness.NativeActive, l.ThreadID)
+		if local.fresh() {
+			_, activeErr = harness.DecodeInitialNativeReply(data, harness.NativeStatus, harness.NativeActive, r.NativeUUID)
 		}
 		if activeErr == nil {
 			o.State = session.PlacementActive
-		} else if _, err := harness.DecodeNativeReply(data, nativeStatus, nativePrepared, l.ThreadID); err == nil {
+		} else if _, err := harness.DecodeNativeReply(data, harness.NativeStatus, harness.NativePrepared, l.ThreadID); err == nil {
 			o.State = session.PlacementPrepared
 		}
 	case registry.Stopped, registry.Cancelled:
@@ -307,7 +300,7 @@ func (p *Placement) inspectStopped(ctx context.Context, local retained, r regist
 		}
 		return o, nil
 	}
-	stopped := cancelledStopped(o.Launch, r)
+	stopped := cancelledStopped(local, r)
 	if r.Phase == registry.Stopped {
 		stopped, err = p.stopped(local, r)
 		if err != nil {
@@ -344,13 +337,7 @@ func (p *Placement) Stop(ctx context.Context, l session.Launch, i session.Incarn
 	if err != nil {
 		return session.Stopped{}, err
 	}
-	if local.Initial != nil && local.Launch.ThreadID == "" {
-		local, r, err = p.bindInitialNative(ctx, local, r, pod)
-		if err != nil {
-			return session.Stopped{}, err
-		}
-	}
-	local, err = p.quietSource(ctx, local, r, pod)
+	local, r, err = p.quietSource(ctx, local, r, pod)
 	if err != nil {
 		return session.Stopped{}, err
 	}
@@ -373,14 +360,15 @@ func (p *Placement) Stop(ctx context.Context, l session.Launch, i session.Incarn
 	for name := range r.Ceilings {
 		seal, err := p.ledger.Seal(ctx, account(r, name))
 		if err != nil {
-			return session.Stopped{}, err
+			fenced := session.Stopped{Launch: local.Launch, Incarnation: inc(r), ActualStopped: true, ThreadID: local.thread(r)}
+			return fenced, fmt.Errorf("%w: %w", session.ErrUsageUnsealed, err)
 		}
 		seals[name] = seal
 	}
 	if !terminated(pod) || !running(pod, runtimekube.CaptureContainer) {
 		return session.Stopped{}, errors.New("placement: exact stopped writer and capture helper unavailable")
 	}
-	local, err = p.capture(ctx, local, pod)
+	local, err = p.capture(ctx, local, local.thread(r), pod)
 	if err != nil {
 		return session.Stopped{}, err
 	}
@@ -401,87 +389,59 @@ func (p *Placement) Stop(ctx context.Context, l session.Launch, i session.Incarn
 	return s, nil
 }
 
-// bindInitialNative observes a genuine completed native turn on the exact
-// admitted writer before sealing/capture. Empty caller identity stays retained
-// as the replay key; it can never select or replace the observed UUID.
-func (p *Placement) bindInitialNative(ctx context.Context, local retained, r registry.Record, pod *corev1.Pod) (retained, registry.Record, error) {
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		if !running(pod, nativeContainer) {
-			return local, r, errors.New("placement: initial native UUID remains unknown")
-		}
-		data, err := p.control(ctx, pod, nativeContainer, []string{nativePath, nativeStatus}, nil, 64<<10)
-		if err != nil {
-			return local, r, err
-		}
-		reply, err := harness.DecodeInitialNativeReply(data, nativeStatus, nativeActive, r.NativeUUID)
-		if err != nil {
-			return local, r, err
-		}
-		if idValid(reply.ThreadID) {
-			r, err = p.registry.BindNative(ctx, r.Reference, reply.ThreadID)
-			if err != nil {
-				return local, r, semantic(err)
-			}
-			local.Launch.ThreadID = reply.ThreadID
-			return local, r, p.save(local)
-		}
-		select {
-		case <-ctx.Done():
-			return local, r, ctx.Err()
-		case <-ticker.C:
-			if !time.Now().Before(local.Launch.Deadline) {
-				return local, r, errors.New("placement: initial UUID unavailable before deadline")
-			}
-		}
-	}
-}
-
 // quietSource persists the safe-turn handoff before revoking gateway access.
 // Revocation while a turn has outstanding upstream/tools could prevent that turn
 // completing. A retained quiet marker permits retries without reopening grants.
-func (p *Placement) quietSource(ctx context.Context, local retained, r registry.Record, pod *corev1.Pod) (retained, error) {
+// A first visit binds its genuine native UUID on the exact admitted writer
+// during the handoff; the caller's empty identity can never select it.
+func (p *Placement) quietSource(ctx context.Context, local retained, r registry.Record, pod *corev1.Pod) (retained, registry.Record, error) {
 	if r.Phase != registry.Active && r.Phase != registry.Stopping {
-		return local, &profile.Rejection{Code: profile.CodeConflict}
+		return local, r, &profile.Rejection{Code: profile.CodeConflict}
 	}
 	if local.NativeQuiet {
-		return local, nil
+		return local, r, nil
 	}
 	if r.Harness == harness.NativeClaude && (terminated(pod) || r.Phase == registry.Stopping) {
-		return local, errors.New("placement: Claude graceful completion acknowledgement unavailable")
+		return local, r, errors.New("placement: Claude graceful completion acknowledgement unavailable")
 	}
-	if !terminated(pod) {
-		if r.Phase == registry.Stopping {
-			data, err := p.control(ctx, pod, nativeContainer, []string{nativePath, nativeStatus}, nil, 64<<10)
+	switch {
+	case terminated(pod):
+		if local.thread(r) == "" {
+			return local, r, errors.New("placement: initial native UUID remains unknown")
+		}
+	case r.Phase == registry.Stopping:
+		data, err := p.native(pod)(ctx, harness.NativeStatus)
+		if err != nil {
+			return local, r, err
+		}
+		if _, err := harness.DecodeNativeReply(data, harness.NativeStatus, harness.NativeStopped, local.thread(r)); err != nil {
+			return local, r, errors.New("placement: revoked source quiescence remains unknown")
+		}
+	default:
+		bind := func(ctx context.Context, thread string) error {
+			bound, err := p.registry.BindNative(ctx, r.Reference, thread)
 			if err != nil {
-				return local, err
+				return semantic(err)
 			}
-			if _, err := harness.DecodeNativeReply(data, nativeStatus, nativeStopped, local.Launch.ThreadID); err != nil {
-				return local, errors.New("placement: revoked source quiescence remains unknown")
-			}
-		} else {
-			data, err := p.control(ctx, pod, nativeContainer, []string{nativePath, nativeGate}, nil, 64<<10)
-			if err != nil {
-				return local, err
-			}
-			if _, err = harness.DecodeNativeReply(data, nativeGate, "stopping", local.Launch.ThreadID); err != nil {
-				return local, err
-			}
-			data, err = p.control(ctx, pod, nativeContainer, []string{nativePath, nativeQuiesce}, nil, 64<<10)
-			if err != nil {
-				return local, err
-			}
-			if _, err = harness.DecodeNativeReply(data, nativeQuiesce, nativeStopped, local.Launch.ThreadID); err != nil {
-				return local, err
-			}
+			r = bound
+			return nil
+		}
+		if _, err := harness.QuiesceNative(ctx, p.native(pod), local.thread(r), local.Launch.Deadline, bind); err != nil {
+			return local, r, err
 		}
 	}
 	local.NativeQuiet = true
-	return local, p.save(local)
+	return local, r, p.save(local)
 }
 
-func (p *Placement) capture(ctx context.Context, local retained, pod *corev1.Pod) (retained, error) {
+// native runs fixed supervisor operations on the exact admitted native container.
+func (p *Placement) native(pod *corev1.Pod) harness.NativeControl {
+	return func(ctx context.Context, op harness.NativeOp) ([]byte, error) {
+		return p.control(ctx, pod, nativeContainer, []string{nativePath, string(op)}, nil, 64<<10)
+	}
+}
+
+func (p *Placement) capture(ctx context.Context, local retained, thread string, pod *corev1.Pod) (retained, error) {
 	if local.OutputDigest != "" {
 		return local, nil
 	}
@@ -490,7 +450,7 @@ func (p *Placement) capture(ctx context.Context, local retained, pod *corev1.Pod
 	if err != nil {
 		return local, err
 	}
-	args := []string{helperPath, helperCapture, "--harness", string(l.Harness), "--home", "/workspace/session/" + directory, "--workspace", "/workspace/session/workspace", "--thread", l.ThreadID, "--instruction-digest", l.InstructionDigest, "--max-bytes", strconv.FormatInt(p.config.MaxCheckpointBytes, 10)}
+	args := []string{helperPath, helperCapture, "--harness", string(l.Harness), "--home", "/workspace/session/" + directory, "--workspace", "/workspace/session/workspace", "--thread", thread, "--instruction-digest", l.InstructionDigest, "--max-bytes", strconv.FormatInt(p.config.MaxCheckpointBytes, 10)}
 	for _, name := range l.IncludeIgnored {
 		args = append(args, "--include-ignored", name)
 	}
@@ -499,7 +459,7 @@ func (p *Placement) capture(ctx context.Context, local retained, pod *corev1.Pod
 		return local, err
 	}
 	meta, err := checkpoint.Inspect(data, p.config.MaxCheckpointBytes)
-	if err != nil || meta.Harness != l.Harness || meta.ThreadID != l.ThreadID {
+	if err != nil || meta.Harness != l.Harness || meta.ThreadID != thread {
 		return local, errors.New("placement: captured checkpoint invalid")
 	}
 	if err = checkpoint.ValidateContinuity(data, l.Harness, l.InstructionDigest, p.config.MaxCheckpointBytes); err != nil {
@@ -520,7 +480,7 @@ func (p *Placement) stopped(local retained, r registry.Record) (session.Stopped,
 		return session.Stopped{}, err
 	}
 	meta, err := checkpoint.Inspect(data, p.config.MaxCheckpointBytes)
-	if err != nil || meta.SHA256 != local.OutputDigest || meta.Harness != local.Launch.Harness || meta.ThreadID != local.Launch.ThreadID {
+	if err != nil || meta.SHA256 != local.OutputDigest || meta.Harness != local.Launch.Harness || meta.ThreadID != local.thread(r) {
 		return session.Stopped{}, errors.New("placement: retained checkpoint invalid")
 	}
 	usage := make(map[string]budget.TrustedUsage, len(r.Receipt.Seals))
@@ -528,7 +488,7 @@ func (p *Placement) stopped(local retained, r registry.Record) (session.Stopped,
 		usage[string(name)] = value
 	}
 	i := inc(r)
-	return session.Stopped{Launch: local.Launch, Incarnation: i, ActualStopped: true, Checkpoint: data, CheckpointDigest: local.OutputDigest, Receipt: &session.Receipt{Launch: local.Launch, Incarnation: i, Usage: usage}}, nil
+	return session.Stopped{Launch: local.Launch, Incarnation: i, ActualStopped: true, ThreadID: local.thread(r), Checkpoint: data, CheckpointDigest: local.OutputDigest, Receipt: &session.Receipt{Launch: local.Launch, Incarnation: i, Usage: usage}}, nil
 }
 func (p *Placement) physicalFence(ctx context.Context, local *retained, r registry.Record) (bool, error) {
 	if r.RunUID == "" {
@@ -675,7 +635,7 @@ func (p *Placement) Abort(ctx context.Context, l session.Launch, i session.Incar
 			if err = p.releaseWriterFence(ctx, local, r); err != nil {
 				return o, err
 			}
-			stopped := cancelledStopped(l, r)
+			stopped := cancelledStopped(local, r)
 			o.Stopped = &stopped
 			return o, nil
 		}
@@ -702,9 +662,9 @@ func (p *Placement) sealCancellation(ctx context.Context, r registry.Record) (re
 
 // Called only after independently observing the exact writer fence. A nil
 // registry receipt is explicit unknown usage; it is never synthesized as zero.
-func cancelledStopped(l session.Launch, r registry.Record) session.Stopped {
-	i := inc(r)
-	s := session.Stopped{Launch: l, Incarnation: i, ActualStopped: true}
+func cancelledStopped(local retained, r registry.Record) session.Stopped {
+	l, i := local.Launch, inc(r)
+	s := session.Stopped{Launch: l, Incarnation: i, ActualStopped: true, ThreadID: local.thread(r)}
 	if r.Receipt != nil {
 		usage := make(map[string]budget.TrustedUsage, len(r.Receipt.Seals))
 		for name, value := range r.Receipt.Seals {
@@ -769,5 +729,5 @@ func (p *Placement) Attach(ctx context.Context, l session.Launch, i session.Inca
 			}
 		}
 	}()
-	return p.exec.Execute(ctx, pod.Namespace, pod.Name, nativeContainer, []string{nativePath, "attach"}, input, output, &boundedOutput{max: 16 << 10})
+	return p.exec.Execute(ctx, pod.Namespace, pod.Name, nativeContainer, []string{nativePath, string(harness.NativeAttach)}, input, output, &boundedOutput{max: 16 << 10})
 }

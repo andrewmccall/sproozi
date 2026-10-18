@@ -21,8 +21,7 @@ func TestCancelInterruptsDisconnectedInitialMove(t *testing.T) {
 	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, nil); err != nil {
 		t.Fatal(err)
 	}
-	held := &heldInitialStop{placementFixture: local, entered: make(chan struct{}), aborted: make(chan struct{})}
-	s.local = held
+	entered, aborted := holdStop(local)
 	moveCtx, releaseMove := context.WithCancel(t.Context())
 	defer releaseMove()
 	server, client := net.Pipe()
@@ -32,7 +31,7 @@ func TestCancelInterruptsDisconnectedInitialMove(t *testing.T) {
 	if err := json.NewEncoder(client).Encode(Request{Action: ActionMove, ID: id, OperationID: uuid.NewString(), Destination: testRemote}); err != nil {
 		t.Fatal(err)
 	}
-	awaitHomeSignal(t, held.entered)
+	awaitHomeSignal(t, entered)
 	if err := client.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -53,18 +52,14 @@ func TestCancelInterruptsDisconnectedInitialMove(t *testing.T) {
 			t.Fatal(err)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("forced cancellation did not interrupt the held initial move")
+		t.Fatal("forced cancellation did not interrupt the held first-visit move")
 	}
-	awaitHomeSignal(t, held.aborted)
+	awaitHomeSignal(t, aborted)
 	status, err := s.Status(id)
-	if err != nil || status.InitialStage != initialCancelled || local.aborts != 1 || remote.prepares != 0 {
+	if err != nil || status.Phase != string(session.PhaseCancelled) || local.aborts != 1 || remote.prepares != 0 {
 		t.Fatalf("initial source cancellation: %+v %v", status, err)
 	}
-	r, err := s.readInitial(id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = s.Cancel(t.Context(), id, r.OperationID); err != nil {
+	if _, err = s.Cancel(t.Context(), id, status.Session.CancelOperation); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = s.Cancel(t.Context(), id, uuid.NewString()); err == nil || local.aborts != 1 {
@@ -84,8 +79,7 @@ func TestCancelInterruptsInitialRecovery(t *testing.T) {
 	if _, err := s.Move(t.Context(), id, uuid.NewString(), testRemote); err == nil {
 		t.Fatal("lost stop reply did not retain initial recovery intent")
 	}
-	held := &heldInitialStop{placementFixture: local, entered: make(chan struct{}), aborted: make(chan struct{})}
-	s.local = held
+	entered, _ := holdStop(local)
 	ctx, release := context.WithCancel(t.Context())
 	defer release()
 	recoveryDone := make(chan error, 1)
@@ -93,7 +87,7 @@ func TestCancelInterruptsInitialRecovery(t *testing.T) {
 		_, err := s.Recover(ctx, id)
 		recoveryDone <- err
 	}()
-	awaitHomeSignal(t, held.entered)
+	awaitHomeSignal(t, entered)
 	cancelDone := make(chan error, 1)
 	go func() {
 		_, err := s.Cancel(t.Context(), id, uuid.NewString())
@@ -114,8 +108,7 @@ func TestCancelIndependentInitialSessionWhileAnotherMoveIsHeld(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	held := &heldInitialStop{placementFixture: local, entered: make(chan struct{}), aborted: make(chan struct{})}
-	s.local = held
+	entered, _ := holdStop(local)
 	ctx, release := context.WithCancel(t.Context())
 	defer release()
 	moveDone := make(chan error, 1)
@@ -123,7 +116,7 @@ func TestCancelIndependentInitialSessionWhileAnotherMoveIsHeld(t *testing.T) {
 		_, err := s.Move(ctx, heldID, uuid.NewString(), testRemote)
 		moveDone <- err
 	}()
-	awaitHomeSignal(t, held.entered)
+	awaitHomeSignal(t, entered)
 	cancelDone := make(chan error, 1)
 	go func() {
 		_, err := s.Cancel(t.Context(), cancelledID, uuid.NewString())
@@ -132,11 +125,11 @@ func TestCancelIndependentInitialSessionWhileAnotherMoveIsHeld(t *testing.T) {
 	awaitHomeResult(t, cancelDone, false)
 	select {
 	case err := <-moveDone:
-		t.Fatalf("cancelling B interrupted A's graceful initial move: %v", err)
+		t.Fatalf("cancelling B interrupted A's graceful first-visit move: %v", err)
 	default:
 	}
 	status, err := s.Status(cancelledID)
-	if err != nil || status.InitialStage != initialCancelled || local.aborts != 1 || remote.prepares != 0 {
+	if err != nil || status.Phase != string(session.PhaseCancelled) || local.aborts != 1 || remote.prepares != 0 {
 		t.Fatalf("independent initial cancellation: %+v %v", status, err)
 	}
 	release()
@@ -145,8 +138,7 @@ func TestCancelIndependentInitialSessionWhileAnotherMoveIsHeld(t *testing.T) {
 
 func TestCancelPreventsInitialActivationAfterPreparedReply(t *testing.T) {
 	s, local, _, repo := testService(t)
-	held := &heldInitialPrepare{placementFixture: local, entered: make(chan struct{})}
-	s.local = held
+	local.holdPrepare = make(chan struct{})
 	id := uuid.NewString()
 	ctx, release := context.WithCancel(t.Context())
 	defer release()
@@ -154,7 +146,7 @@ func TestCancelPreventsInitialActivationAfterPreparedReply(t *testing.T) {
 	// Capture runs real Git subprocesses and is setup for this test's prepared
 	// reply boundary. Keep it outside the cancellation responsiveness guard;
 	// Start must recover the same durable preparing intent without recapturing.
-	if _, err := s.captureInitial(ctx, id, operationID, repo, nil); err != nil {
+	if _, err := s.createWorkspaceExecution(ctx, id, operationID, repo, nil); err != nil {
 		t.Fatal(err)
 	}
 	startDone := make(chan error, 1)
@@ -163,7 +155,7 @@ func TestCancelPreventsInitialActivationAfterPreparedReply(t *testing.T) {
 		startDone <- err
 	}()
 	select {
-	case <-held.entered:
+	case <-local.holdPrepare:
 	case err := <-startDone:
 		t.Fatalf("Start returned before the held preparation boundary: %v", err)
 	case <-time.After(2 * time.Second):
@@ -177,40 +169,17 @@ func TestCancelPreventsInitialActivationAfterPreparedReply(t *testing.T) {
 	awaitHomeResult(t, startDone, true)
 	awaitHomeResult(t, cancelDone, false)
 	status, err := s.Status(id)
-	if err != nil || status.InitialStage != initialCancelled || local.initials != 1 || local.activations != 0 || local.aborts != 1 {
+	if err != nil || status.Phase != string(session.PhaseCancelled) || local.initials != 1 || local.activations != 0 || local.aborts != 1 {
 		t.Fatalf("cancelled initial preparation activated: %+v %v", status, err)
 	}
 }
 
-type heldInitialPrepare struct {
-	*placementFixture
-	entered chan struct{}
-}
-
-func (p *heldInitialPrepare) CreateLocal(ctx context.Context, l session.Launch, data []byte) (session.Incarnation, error) {
-	i, err := p.placementFixture.CreateLocal(ctx, l, data)
-	if err != nil {
-		return i, err
-	}
-	close(p.entered)
-	<-ctx.Done()
-	return i, nil
-}
-
-type heldInitialStop struct {
-	*placementFixture
-	entered, aborted chan struct{}
-}
-
-func (p *heldInitialStop) Stop(ctx context.Context, _ session.Launch, _ session.Incarnation) (session.Stopped, error) {
-	close(p.entered)
-	<-ctx.Done()
-	return session.Stopped{}, ctx.Err()
-}
-
-func (p *heldInitialStop) Abort(ctx context.Context, l session.Launch, i session.Incarnation) (session.Observation, error) {
-	close(p.aborted)
-	return p.placementFixture.Abort(ctx, l, i)
+// holdStop makes the placement's next graceful stop wait for its context, as
+// an unfinished native turn would. It returns channels closed when that stop
+// and the next abort are reached.
+func holdStop(p *placementFixture) (entered, aborted <-chan struct{}) {
+	p.holdStop, p.abortEntered = make(chan struct{}), make(chan struct{})
+	return p.holdStop, p.abortEntered
 }
 
 func awaitHomeSignal(t *testing.T, signal <-chan struct{}) {

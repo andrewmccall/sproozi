@@ -19,13 +19,13 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -40,7 +40,7 @@ import (
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 	policy "github.com/andrewmccall/sproozi/internal/policy/kubernetes"
 	k8sresources "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
-	placement "github.com/andrewmccall/sproozi/internal/runtime/kubernetes/session"
+	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
 )
 
 const (
@@ -68,15 +68,19 @@ const (
 // AgentRunReconciler reconciles AgentRun objects.
 type AgentRunReconciler struct {
 	client.Client
-	Scheme        *runtime.Scheme
+	// APIReader reads the API server directly. The single-slot admission
+	// decision uses it because the cache can lag this reconciler's own writes.
+	APIReader     client.Reader
 	SandboxClient k8sresources.SandboxClient
 }
 
-// RunResourcesReleaser is the lifecycle seam for revoking all authority and
-// disposable state belonging to a run. Implementations are idempotent: a
-// retry after a partial failure resumes at the first resource still present.
-type RunResourcesReleaser interface {
-	ReconcileRelease(context.Context, *sprooziv1alpha1.AgentRun) (complete bool, err error)
+// admission holds the live objects a non-terminal run was last admitted against.
+type admission struct {
+	template *sprooziv1alpha1.AgentTemplate
+	policy   *sprooziv1alpha1.AgentPolicy
+	runtime  *sprooziv1alpha1.AgentRuntime
+	binding  *registry.Record
+	deadline time.Time
 }
 
 // Reconcile drives an AgentRun through its lifecycle phases.
@@ -109,13 +113,18 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return r.transitionPhase(ctx, &run, sprooziv1alpha1.AgentRunPhaseCancelled, "CancelRequested", "")
 	}
 
+	admitted, result, err := r.resolveAdmission(ctx, &run)
+	if admitted == nil {
+		return result, err
+	}
+
 	switch run.Status.Phase {
 	case sprooziv1alpha1.AgentRunPhaseQueued:
 		return r.handleQueued(ctx, &run)
 	case sprooziv1alpha1.AgentRunPhaseAdmitted:
-		return r.handleAdmitted(ctx, &run)
+		return r.handleAdmitted(ctx, &run, admitted)
 	case sprooziv1alpha1.AgentRunPhaseRunning:
-		return r.handleRunning(ctx, &run)
+		return r.handleRunning(ctx, &run, admitted)
 	}
 
 	return ctrl.Result{}, nil
@@ -136,38 +145,78 @@ func (r *AgentRunReconciler) finalizeDeletion(ctx context.Context, run *sprooziv
 	return ctrl.Result{}, r.Update(ctx, run)
 }
 
-// handleQueued evaluates policy, enforces the single-active-run invariant, and
-// either admits the run or leaves it queued. The active-run list is cluster-wide
-// to enforce the single global active-run slot (PRD §6).
-func (r *AgentRunReconciler) handleQueued(ctx context.Context, run *sprooziv1alpha1.AgentRun) (ctrl.Result, error) {
+// resolveAdmission checks a non-terminal run against its live template, policy,
+// runtime and session binding on every reconcile, so a change to any of them
+// re-evaluates queued and active runs alike. A nil admission means the run was
+// failed, timed out or must wait; the caller returns the result and error.
+func (r *AgentRunReconciler) resolveAdmission(ctx context.Context, run *sprooziv1alpha1.AgentRun) (*admission, ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
 	tmpl, pol, rt, err := r.resolveRefs(ctx, run)
-	if err != nil {
-		return ctrl.Result{}, err
+	if err != nil || tmpl == nil {
+		return nil, ctrl.Result{}, err
 	}
-	if tmpl == nil {
-		// resolveRefs already transitioned run to Failed.
-		return ctrl.Result{}, nil
-	}
-
-	_, sessionResult, err := r.resolveSession(ctx, run, tmpl)
+	binding, sessionResult, err := r.resolveSession(ctx, run, tmpl)
 	if err != nil {
-		return ctrl.Result{}, err
+		return nil, ctrl.Result{}, err
 	}
 	if sessionResult != nil {
-		return *sessionResult, nil
+		return nil, *sessionResult, nil
+	}
+
+	// Reject a runtime that cannot launch before the run takes the active slot.
+	if err := r.SandboxClient.ValidateRuntime(ctx, rt); err != nil {
+		if !errors.Is(err, k8sresources.ErrInvalidRuntime) {
+			return nil, ctrl.Result{}, err
+		}
+		logger.Info("AgentRuntime cannot launch AgentRun", "name", run.Name, "runtime", rt.Name, "error", err)
+		message := fmt.Sprintf("AgentRuntime %s: %v", rt.Name, err)
+		_, err := r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseFailed, "RuntimeInvalid", message)
+		return nil, ctrl.Result{}, err
 	}
 
 	if denial := policy.Evaluate(pol.Spec, tmpl.Spec, run.Spec, rt.Spec); denial != nil {
-		logger.Info("Policy denied AgentRun", "name", run.Name, "reason", denial.Reason)
+		logger.Info("Policy denied AgentRun", "name", run.Name, "phase", run.Status.Phase, "reason", denial.Reason)
 		_, err := r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseFailed, string(denial.Reason), denial.Message)
-		return ctrl.Result{}, err
+		return nil, ctrl.Result{}, err
 	}
 
-	// Cluster-wide list enforces the single global active-run slot.
+	if run.Status.Phase == sprooziv1alpha1.AgentRunPhaseQueued {
+		return &admission{template: tmpl, policy: pol, runtime: rt, binding: binding}, ctrl.Result{}, nil
+	}
+
+	// transitionPhase records StartedAt with Admitted. If that write was lost,
+	// recover it rather than computing the deadline from zero, which would time
+	// the run out at once.
+	if run.Status.StartedAt == nil {
+		now := metav1.Now()
+		run.Status.StartedAt = &now
+		if err := r.Status().Update(ctx, run); err != nil {
+			return nil, ctrl.Result{}, err
+		}
+		logger.Info("Recovered missing StartedAt on AgentRun", "name", run.Name, "phase", run.Status.Phase)
+	}
+	deadline := registry.EffectiveDeadline(run, pol, binding)
+	if time.Now().After(deadline) {
+		logger.Info("AgentRun deadline exceeded", "name", run.Name, "phase", run.Status.Phase)
+		_, err := r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseTimedOut, "MaxExecutionDurationExceeded", "")
+		return nil, ctrl.Result{}, err
+	}
+	return &admission{template: tmpl, policy: pol, runtime: rt, binding: binding, deadline: deadline}, ctrl.Result{}, nil
+}
+
+// handleQueued enforces the single-active-run invariant and either admits the
+// run or leaves it queued. The active-run list is cluster-wide to enforce the
+// single global active-run slot.
+func (r *AgentRunReconciler) handleQueued(ctx context.Context, run *sprooziv1alpha1.AgentRun) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	// A cached list can miss an admission this reconciler has just written,
+	// or a run it has not yet seen initialized, and so admit a second run or
+	// let a later run overtake an earlier one. Reconciles are serialized, so a
+	// live list reflects every earlier admission decision.
 	var allRuns sprooziv1alpha1.AgentRunList
-	if err := r.List(ctx, &allRuns); err != nil {
+	if err := r.APIReader.List(ctx, &allRuns); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -183,65 +232,23 @@ func (r *AgentRunReconciler) handleQueued(ctx context.Context, run *sprooziv1alp
 	}
 
 	logger.Info("Admitting AgentRun", "name", run.Name)
-	_, err = r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseAdmitted, "", "")
-	return ctrl.Result{}, err
+	return r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseAdmitted, "", "")
 }
 
-// handleAdmitted checks the execution deadline for an admitted run, provisions
-// the per-run identity resources (ServiceAccount and NetworkPolicy), and
-// transitions the run to Running once identity is in place. Kubernetes API
-// authorization is deliberately owned by the shared gateway; the workload
-// ServiceAccount is an immutable run identity only and is never bound to
-// namespace Roles.
-func (r *AgentRunReconciler) handleAdmitted(ctx context.Context, run *sprooziv1alpha1.AgentRun) (ctrl.Result, error) {
+// handleAdmitted provisions the per-run identity resources (ServiceAccount and
+// NetworkPolicy) and transitions the run to Running once identity is in place.
+// Kubernetes API authorization is deliberately owned by the shared gateway; the
+// workload ServiceAccount is an immutable run identity only and is never bound
+// to namespace Roles.
+func (r *AgentRunReconciler) handleAdmitted(ctx context.Context, run *sprooziv1alpha1.AgentRun, admitted *admission) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
-
-	// StartedAt must be set when the run is admitted. If it is somehow absent
-	// (e.g. a status patch was lost), set it now — do not loop forever, which
-	// would deadlock the entire cluster-wide queue.
-	if run.Status.StartedAt == nil {
-		now := metav1.Now()
-		run.Status.StartedAt = &now
-		if err := r.Status().Update(ctx, run); err != nil {
-			return ctrl.Result{}, err
-		}
-		logger.Info("Recovered missing StartedAt on Admitted run", "name", run.Name)
-	}
-
-	tmpl, pol, rt, err := r.resolveRefs(ctx, run)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-	if pol == nil {
-		return ctrl.Result{}, nil
-	}
-	binding, sessionResult, err := r.resolveSession(ctx, run, tmpl)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-	if sessionResult != nil {
-		return *sessionResult, nil
-	}
-
-	if denial := policy.Evaluate(pol.Spec, tmpl.Spec, run.Spec, rt.Spec); denial != nil {
-		logger.Info("Policy revoked AgentRun admission", "name", run.Name, "reason", denial.Reason)
-		_, transitionErr := r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseFailed, string(denial.Reason), denial.Message)
-		return ctrl.Result{}, transitionErr
-	}
-
-	deadline := placement.EffectiveDeadline(run, pol, binding)
-	if time.Now().After(deadline) {
-		logger.Info("Admitted AgentRun deadline exceeded", "name", run.Name)
-		_, err := r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseTimedOut, "MaxExecutionDurationExceeded", "")
-		return ctrl.Result{}, err
-	}
 
 	if run.Status.Identity.ServiceAccountName == "" {
 		saName, err := k8sresources.EnsureServiceAccount(ctx, r.Client, run)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
-		if err := k8sresources.EnsureNetworkPolicy(ctx, r.Client, run, pol); err != nil {
+		if err := k8sresources.EnsureNetworkPolicy(ctx, r.Client, run, admitted.policy); err != nil {
 			return ctrl.Result{}, err
 		}
 
@@ -254,89 +261,43 @@ func (r *AgentRunReconciler) handleAdmitted(ctx context.Context, run *sprooziv1a
 		logger.Info("Provisioned run identity", "name", run.Name, "serviceAccount", saName)
 	}
 
-	_, err = r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseRunning, "", "")
-	return ctrl.Result{}, err
+	return r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseRunning, "", "")
 }
 
 // handleRunning creates the Sandbox Pod, monitors its lifecycle, and transitions
-// the run to Succeeded, Failed, or TimedOut based on sandbox phase.
-func (r *AgentRunReconciler) handleRunning(ctx context.Context, run *sprooziv1alpha1.AgentRun) (ctrl.Result, error) {
+// the run to Succeeded or Failed based on sandbox phase.
+func (r *AgentRunReconciler) handleRunning(ctx context.Context, run *sprooziv1alpha1.AgentRun, admitted *admission) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	tmpl, pol, rt, err := r.resolveRefs(ctx, run)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-	if pol == nil {
-		return ctrl.Result{}, nil
-	}
-	binding, sessionResult, err := r.resolveSession(ctx, run, tmpl)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-	if sessionResult != nil {
-		return *sessionResult, nil
-	}
-
-	if denial := policy.Evaluate(pol.Spec, tmpl.Spec, run.Spec, rt.Spec); denial != nil {
-		logger.Info("Policy revoked running AgentRun", "name", run.Name, "reason", denial.Reason)
-		_, transitionErr := r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseFailed, string(denial.Reason), denial.Message)
-		return ctrl.Result{}, transitionErr
-	}
 	if run.Status.Identity.ServiceAccountName != "" {
-		if err := k8sresources.EnsureNetworkPolicy(ctx, r.Client, run, pol); err != nil {
+		if err := k8sresources.EnsureNetworkPolicy(ctx, r.Client, run, admitted.policy); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
-
-	if run.Status.StartedAt == nil {
-		now := metav1.Now()
-		run.Status.StartedAt = &now
-		if err := r.Status().Update(ctx, run); err != nil {
-			return ctrl.Result{}, err
-		}
-		logger.Info("Recovered missing StartedAt on Running run", "name", run.Name)
-	}
-
-	deadline := placement.EffectiveDeadline(run, pol, binding)
-	if time.Now().After(deadline) {
-		logger.Info("AgentRun deadline exceeded", "name", run.Name)
-		_, err := r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseTimedOut, "MaxExecutionDurationExceeded", "")
-		return ctrl.Result{}, err
-	}
-	if err := k8sresources.EnsureAgentContract(ctx, r.Client, run, tmpl, rt); err != nil {
+	if err := k8sresources.EnsureAgentContract(ctx, r.Client, run, admitted.template, admitted.runtime); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	// Ensure the Sandbox Pod exists.
-	sandboxName, err := r.ensureSandbox(ctx, run, rt, binding)
+	sandboxName, err := r.ensureSandbox(ctx, run, admitted.runtime, admitted.binding)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-
-	// Check Sandbox status.
 	sandboxStatus, err := r.SandboxClient.GetStatus(ctx, sandboxName)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 
 	switch sandboxStatus {
-	case k8sresources.SandboxStatusPending, k8sresources.SandboxStatusRunning, k8sresources.SandboxStatusUnknown:
-		remaining := time.Until(deadline)
-		return ctrl.Result{RequeueAfter: remaining}, nil
-
 	case k8sresources.SandboxStatusSucceeded, k8sresources.SandboxStatusFailed:
 		return r.processSandboxExit(ctx, run, sandboxName)
 
 	case k8sresources.SandboxStatusAbsent:
-		phase, reason := sandboxPhaseToRunPhase(sandboxStatus)
 		logger.Info("Sandbox terminated abnormally", "name", run.Name, "sandboxStatus", sandboxStatus)
-		_, err := r.transitionPhase(ctx, run, phase, reason, "")
-		return ctrl.Result{}, err
+		return r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseFailed, "SandboxGone", "")
 	}
 
-	remaining := time.Until(deadline)
-	return ctrl.Result{RequeueAfter: remaining}, nil
+	// Pending, Running or Unknown: wake at the deadline; Pod events wake sooner.
+	return ctrl.Result{RequeueAfter: time.Until(admitted.deadline)}, nil
 }
 
 // handleTerminal revokes any provisioned identity resources and then deletes
@@ -404,16 +365,7 @@ func (r *AgentRunReconciler) ReconcileRelease(ctx context.Context, run *sprooziv
 		}
 	}
 	if run.Status.Identity.SandboxName != "" {
-		if r.SandboxClient == nil {
-			return false, errors.New("cannot release AgentRun without sandbox client")
-		}
-		if releaser, ok := r.SandboxClient.(interface {
-			DeleteForRun(context.Context, string, string) error
-		}); ok {
-			if err := releaser.DeleteForRun(ctx, run.Status.Identity.SandboxName, string(run.UID)); err != nil {
-				return false, err
-			}
-		} else if err := r.revokeSandbox(ctx, run); err != nil {
+		if err := r.SandboxClient.DeleteForRun(ctx, run.Status.Identity.SandboxName, string(run.UID)); err != nil {
 			return false, err
 		}
 		status, err := r.SandboxClient.GetStatus(ctx, run.Status.Identity.SandboxName)

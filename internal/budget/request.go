@@ -2,6 +2,7 @@ package budget
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
@@ -37,27 +38,29 @@ func (bt *Tracker) InitializedMeter(key string, limits sprooziv1alpha1.EndpointB
 	return &Meter{tracker: bt, key: key, limits: limits, requireExisting: true}
 }
 
-func (m *Meter) Reserve(units, costMicros int64) (*Reservation, error) {
+// Reserve holds capacity for one request. ctx bounds the reservation itself;
+// the returned Reservation settles under ctx's values but not its cancellation.
+func (m *Meter) Reserve(ctx context.Context, units, costMicros int64) (*Reservation, error) {
 	if m == nil {
 		return nil, nil
 	}
-	r, err := m.tracker.ledger.Reserve(context.Background(), AccountKey(m.key), UsageReservation{
+	r, err := m.tracker.ledger.Reserve(ctx, AccountKey(m.key), UsageReservation{
 		MaxUnits: m.limits.MaxUnits, MaxCostMicros: m.limits.MaxCostMicros,
 		Units: units, CostMicros: costMicros, RequireExisting: m.requireExisting,
 	})
 	if err != nil {
 		return nil, err
 	}
-	return &Reservation{tracker: m.tracker, ledger: r}, nil
+	return &Reservation{tracker: m.tracker, ledger: r, settleCtx: context.WithoutCancel(ctx)}, nil
 }
 
 // Spend charges known usage atomically. Variable-cost requests instead reserve
 // a conservative bound, then settle against trusted upstream usage.
-func (m *Meter) Spend(units, costMicros int64) error {
+func (m *Meter) Spend(ctx context.Context, units, costMicros int64) error {
 	if m == nil {
 		return nil
 	}
-	r, err := m.Reserve(units, costMicros)
+	r, err := m.Reserve(ctx, units, costMicros)
 	if err != nil {
 		return err
 	}
@@ -66,19 +69,22 @@ func (m *Meter) Spend(units, costMicros int64) error {
 
 // SpendRequest charges a single upstream request. These endpoints have no
 // trusted dollar pricing, so a monetary ceiling cannot be silently ignored.
-func (m *Meter) SpendRequest() error {
+func (m *Meter) SpendRequest(ctx context.Context) error {
 	if m != nil && m.limits.MaxCostMicros > 0 {
 		return fmt.Errorf("budget: endpoint has no trusted monetary pricing")
 	}
-	return m.Spend(1, 0)
+	return m.Spend(ctx, 1, 0)
 }
 
-func (m *Meter) State() (State, error) {
+// State reads the account. An ordinary meter treats an absent account as
+// unused; an initialized meter requires the record.
+func (m *Meter) State(ctx context.Context) (State, error) {
 	if m == nil {
 		return State{}, nil
 	}
-	if m.requireExisting {
-		return m.tracker.ledger.State(context.Background(), AccountKey(m.key))
+	state, err := m.tracker.ledger.State(ctx, AccountKey(m.key))
+	if !m.requireExisting && errors.Is(err, ErrAccountNotFound) {
+		return State{}, nil
 	}
-	return m.tracker.State(m.key)
+	return state, err
 }

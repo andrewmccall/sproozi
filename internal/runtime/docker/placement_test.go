@@ -24,10 +24,11 @@ import (
 
 const fixtureInstructions = "Approved test instructions."
 const (
-	modelFixtureCapability = "model"
-	threadField            = "threadId"
-	stateField             = "state"
-	typeField              = "type"
+	modelFixtureCapability  = "model"
+	threadField             = "threadId"
+	stateField              = "state"
+	typeField               = "type"
+	containerFixtureCommand = "container"
 )
 
 const fixtureThread = "01234567-89ab-cdef-0123-456789abcdef"
@@ -56,7 +57,7 @@ type fakeContainer struct {
 		Status  string
 		Pid     int
 	}
-	nativeState string
+	nativeState harness.NativeState
 	configured  []byte
 }
 type fakeDocker struct {
@@ -65,6 +66,7 @@ type fakeDocker struct {
 	next                                     int
 	capture                                  []byte
 	failStop, failCapture, failActivationAck bool
+	failRemove                               bool
 	rejectNativeActivation                   bool
 	quiesceAcknowledgesOnly                  bool
 	lostQuiesceAck                           bool
@@ -76,6 +78,13 @@ type fakeDocker struct {
 func newFakeDocker() *fakeDocker {
 	return &fakeDocker{containers: map[string]*fakeContainer{}, volumes: map[string]map[string]any{}}
 }
+
+// running reports a present, running container. A removed container is not
+// running; tests that need its absence assert that separately.
+func (f *fakeDocker) running(id string) bool {
+	c := f.containers[id]
+	return c != nil && c.State.Running
+}
 func (f *fakeDocker) run(ctx context.Context, input []byte, _ int, args []string) ([]byte, error) {
 	f.calls = append(f.calls, strings.Join(args, " "))
 	switch args[0] {
@@ -83,7 +92,7 @@ func (f *fakeDocker) run(ctx context.Context, input []byte, _ int, args []string
 		return f.volumeCommand(args)
 	case createCommand:
 		return f.createCommand(args)
-	case "container":
+	case containerFixtureCommand:
 		return f.containerCommand(args)
 	case execCommand:
 		return f.execCommand(ctx, args, input)
@@ -107,6 +116,32 @@ func (f *fakeDocker) volumeCommand(args []string) ([]byte, error) {
 			}
 		}
 		return []byte(name), nil
+	}
+	switch args[1] {
+	case "ls":
+		var names []string
+		for name := range f.volumes {
+			if strings.Contains(name, strings.TrimPrefix(args[4], "name=")) {
+				names = append(names, name)
+			}
+		}
+		return []byte(strings.Join(names, "\n")), nil
+	case "rm":
+		if f.failRemove {
+			return nil, errors.New("engine volume removal failed")
+		}
+		if f.volumes[args[2]] == nil {
+			return nil, errors.New("volume unavailable")
+		}
+		for _, c := range f.containers {
+			for _, m := range c.Mounts {
+				if m.Name == args[2] {
+					return nil, errors.New("volume in use")
+				}
+			}
+		}
+		delete(f.volumes, args[2])
+		return nil, nil
 	}
 	v := f.volumes[args[2]]
 	if v == nil {
@@ -213,6 +248,12 @@ func (f *fakeDocker) containerCommand(args []string) ([]byte, error) {
 		c.State.Pid = 0
 		return []byte(c.ID), nil
 	case "rm":
+		if f.failRemove {
+			return nil, errors.New("engine container removal failed")
+		}
+		if c.State.Running {
+			return nil, errors.New("container is running")
+		}
 		delete(f.containers, c.ID)
 		return nil, nil
 	}
@@ -249,21 +290,21 @@ func (f *fakeDocker) execCommand(ctx context.Context, args []string, input []byt
 			return nil, errors.New("configuration changed")
 		}
 		c.configured = append([]byte{}, input...)
-		c.nativeState = phasePrepared
+		c.nativeState = harness.NativePrepared
 	case "activate":
 		if f.rejectNativeActivation {
-			return json.Marshal(map[string]any{"Error": "native version gate rejected activation", stateField: phasePrepared})
+			return json.Marshal(map[string]any{"Error": "native version gate rejected activation", stateField: harness.NativePrepared})
 		}
-		c.nativeState = phaseActive
+		c.nativeState = harness.NativeActive
 		if f.failActivationAck {
 			f.failActivationAck = false
 			return nil, errors.New("activation acknowledgement lost")
 		}
 	case "gate":
-		c.nativeState = phaseStopping
+		c.nativeState = harness.NativeStopping
 	case "status":
 		return json.Marshal(map[string]any{"op": op, stateField: c.nativeState, threadField: fixtureThread})
-	case quiesceCommand:
+	case string(harness.NativeQuiesce):
 		if f.quiesceStarted != nil {
 			close(f.quiesceStarted)
 			select {
@@ -273,7 +314,7 @@ func (f *fakeDocker) execCommand(ctx context.Context, args []string, input []byt
 			}
 		}
 		if f.quiesceAcknowledgesOnly {
-			return json.Marshal(map[string]any{"op": op, stateField: phaseStopped, threadField: fixtureThread})
+			return json.Marshal(map[string]any{"op": op, stateField: harness.NativeStopped, threadField: fixtureThread})
 		}
 		c.State.Running = false
 		c.State.Status = exitedStatus
@@ -281,7 +322,7 @@ func (f *fakeDocker) execCommand(ctx context.Context, args []string, input []byt
 		if f.lostQuiesceAck {
 			return nil, errors.New("lost quiesce acknowledgement")
 		}
-		return json.Marshal(map[string]any{"op": op, stateField: phaseStopped, threadField: fixtureThread})
+		return json.Marshal(map[string]any{"op": op, stateField: harness.NativeStopped, threadField: fixtureThread})
 	}
 	var launch harness.NativeLaunch
 	if err := json.Unmarshal(c.configured, &launch); err != nil {
@@ -386,7 +427,7 @@ func fixtureLaunch(t *testing.T, data []byte) session.Launch {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return session.Launch{Harness: harness.NativeCodex, SessionID: uuid.NewString(), OperationID: uuid.NewString(), AllocationID: uuid.NewString(), Epoch: 1, Placement: localVolumeDriver, ThreadID: fixtureThread, InstructionDigest: fixtureConfig().InstructionDigest, Deadline: time.Now().UTC().Add(time.Minute), Allowances: map[string]session.Allowance{modelFixtureCapability: {Units: session.Limit{Bounded: true, Value: 100}, CostMicros: session.Limit{Bounded: true, Value: 1000}}}, CheckpointDigest: meta.SHA256}
+	return session.Launch{Harness: harness.NativeCodex, ExecutionID: uuid.NewString(), OperationID: uuid.NewString(), AllocationID: uuid.NewString(), Epoch: 1, Placement: localVolumeDriver, ThreadID: fixtureThread, InstructionDigest: fixtureConfig().InstructionDigest, Deadline: time.Now().UTC().Add(time.Minute), Allowances: map[string]session.Allowance{modelFixtureCapability: {Units: session.Limit{Bounded: true, Value: 100}, CostMicros: session.Limit{Bounded: true, Value: 1000}}}, CheckpointDigest: meta.SHA256}
 }
 func openFixture(t *testing.T, dir string, f *fakeDocker, a *fakeAuthority) *Placement {
 	t.Helper()
@@ -483,8 +524,11 @@ func TestPlacementDurablePrepareActivateStop(t *testing.T) {
 	if !stopped.ActualStopped || stopped.Receipt == nil || stopped.Receipt.Usage[modelFixtureCapability].Units != 17 || stopped.CheckpointDigest != l.CheckpointDigest {
 		t.Fatalf("stopped receipt: %+v", stopped)
 	}
-	if !a.revoked || f.containers[inc.ResourceUID].State.Running {
+	if !a.revoked || f.running(inc.ResourceUID) {
 		t.Fatal("source authority or native writers remain")
+	}
+	if len(f.containers) != 0 || len(f.volumes) != 0 {
+		t.Fatalf("stopped visit left resources: %d containers, %d volumes", len(f.containers), len(f.volumes))
 	}
 	before := a.seals
 	_ = p.Close()
@@ -513,7 +557,7 @@ func TestUnknownStopAndUsageNeverBecomeZero(t *testing.T) {
 	}
 	a.sealFail = true
 	stopped, err := p.Stop(context.Background(), l, inc)
-	if err != nil || !stopped.ActualStopped || stopped.Receipt != nil {
+	if !errors.Is(err, session.ErrUsageUnsealed) || !stopped.ActualStopped || stopped.Receipt != nil {
 		t.Fatalf("unknown accounting: %+v %v", stopped, err)
 	}
 	a.sealFail = false
@@ -557,7 +601,7 @@ func TestInitialNativeGateRejectionCanAbortWithoutActivationOrCheckpoint(t *test
 	f.rejectNativeActivation, f.failCapture = true, true
 	a := &fakeAuthority{engine: f}
 	p := openFixture(t, t.TempDir(), f, a)
-	inc, err := p.CreateLocal(t.Context(), l, []byte("workspace-continuity"))
+	inc, err := p.Prepare(t.Context(), l, []byte("workspace-continuity"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -595,7 +639,7 @@ func TestFirstLocalSessionBindsGeneratedNativeUUID(t *testing.T) {
 	f.capture = data
 	a := &fakeAuthority{engine: f}
 	p := openFixture(t, t.TempDir(), f, a)
-	inc, err := p.CreateLocal(context.Background(), l, []byte("workspace-continuity"))
+	inc, err := p.Prepare(context.Background(), l, []byte("workspace-continuity"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -606,12 +650,20 @@ func TestFirstLocalSessionBindsGeneratedNativeUUID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !a.bound || stopped.Launch.ThreadID != fixtureThread || stopped.Receipt == nil || stopped.Receipt.Launch.ThreadID != fixtureThread {
+	if !a.bound || stopped.ThreadID != fixtureThread || stopped.Receipt == nil {
 		t.Fatalf("first local binding: %+v", stopped)
 	}
-	replay, err := p.Stop(context.Background(), stopped.Launch, inc)
-	if err != nil || replay.CheckpointDigest != stopped.CheckpointDigest {
-		t.Fatalf("bound launch replay: %+v %v", replay, err)
+	if !session.SameLaunch(stopped.Launch, l) || !session.SameLaunch(stopped.Receipt.Launch, l) {
+		t.Fatalf("binding rewrote the immutable launch: %+v", stopped.Launch)
+	}
+	replay, err := p.Stop(context.Background(), l, inc)
+	if err != nil || replay.CheckpointDigest != stopped.CheckpointDigest || replay.ThreadID != fixtureThread {
+		t.Fatalf("launch replay: %+v %v", replay, err)
+	}
+	rewritten := l
+	rewritten.ThreadID = fixtureThread
+	if _, err = p.Stop(context.Background(), rewritten, inc); err == nil {
+		t.Fatal("a launch rewritten with the bound thread replayed the stop")
 	}
 }
 func TestCaptureFailureKeepsActualStopAndBlocksActivation(t *testing.T) {

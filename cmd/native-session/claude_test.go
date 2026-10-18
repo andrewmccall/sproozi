@@ -49,7 +49,7 @@ func TestClaudeLifecycleWaitsForForegroundToolsAndFreshInput(t *testing.T) {
 }
 
 func TestClaudeHookBoundToExactNativeSelection(t *testing.T) {
-	s := server{config: config{Harness: harness.NativeClaude, ThreadID: selected}, state: stateActive}
+	s := server{config: config{Harness: harness.NativeClaude, ThreadID: selected}, state: harness.NativeActive}
 	path, _ := harness.ClaudeProjectPath(workspace, selected)
 	h := &claudeHook{SessionID: selected, TranscriptPath: claudeHome + "/" + path, Cwd: workspace,
 		Event: claudePromptSubmit}
@@ -65,7 +65,7 @@ func TestClaudeHookBoundToExactNativeSelection(t *testing.T) {
 	if got := s.claudeHook(h); got.Error == "" {
 		t.Fatal("foreign native hook ID accepted")
 	}
-	s.state = statePrepared
+	s.state = harness.NativePrepared
 	if got := s.claudeHook(h); got.Error == "" {
 		t.Fatal("inert worker could emit a completion hint")
 	}
@@ -127,7 +127,7 @@ func TestClaudePrivateSettingsRetryIsExact(t *testing.T) {
 
 func TestClaudeStatusExplainsCompletionBarrierWithoutPayloads(t *testing.T) {
 	s := server{config: config{Harness: harness.NativeClaude, ThreadID: selected},
-		state: stateStopping, threadID: selected}
+		state: harness.NativeStopping, threadID: selected}
 	path, _ := harness.ClaudeProjectPath(workspace, selected)
 	h := &claudeHook{SessionID: selected, TranscriptPath: claudeHome + "/" + path, Cwd: workspace,
 		Event: claudePromptSubmit}

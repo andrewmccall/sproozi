@@ -34,7 +34,6 @@ import (
 
 	"github.com/andrewmccall/sproozi/internal/budget"
 
-	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/audit"
 	"github.com/andrewmccall/sproozi/internal/gateway"
 )
@@ -45,6 +44,12 @@ const (
 
 const (
 	receivePackEndpoint = "git-receive-pack"
+)
+
+// The handler serves git smart HTTP and the REST/GraphQL API authorities.
+const (
+	GitAuthority = "github.com:443"
+	APIAuthority = "api.github.com:443"
 )
 
 // HandlerConfig holds all dependencies for Handler.
@@ -83,19 +88,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.deny(w, e, http.StatusUnauthorized, "gateway identity required")
 		return
 	}
-	e = identity.AuditEvent(r.Method + " " + r.URL.Path)
-	e.Service, e.SemanticLevel = "github", "semantic"
-	e.Capability = string(sprooziv1alpha1.CapabilityGitHubPullRequest)
+	e = gateway.AuditEvent(ctx, r.Method+" "+r.URL.Path)
+	e.Service = "github"
 
-	// 3. Require github.pull_request in both run and policy.
-	hasCapability := slices.Contains(identity.Capabilities, sprooziv1alpha1.CapabilityGitHubPullRequest) &&
-		slices.Contains(identity.Policy.Spec.AllowedCapabilities, sprooziv1alpha1.CapabilityGitHubPullRequest)
-	if !hasCapability {
-		h.deny(w, e, http.StatusForbidden, "github.pull_request capability not granted")
-		return
-	}
-
-	// 3. Route to the appropriate operation handler.
+	// Route to the appropriate operation handler.
 	switch {
 	case isGitPath(r.URL.Path):
 		h.handleGit(w, r, e, identity)
@@ -381,7 +377,7 @@ func (h *Handler) doHTTP(request *http.Request) (*http.Response, error) {
 	}
 	client := *h.Config.HTTPClient
 	client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
-	if err := budget.FromContext(request.Context()).SpendRequest(); err != nil {
+	if err := budget.FromContext(request.Context()).SpendRequest(request.Context()); err != nil {
 		return nil, err
 	}
 	return client.Do(request)

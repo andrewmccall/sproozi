@@ -27,7 +27,7 @@ http://sproozi-webhook.sproozi-system.svc.cluster.local:8083/webhook/sproozi-sys
 
 - The webhook stores replay keys atomically in ConfigMaps in `sproozi-webhook-state`. Set `REPLAY_NAMESPACE` to use another namespace.
 - Records survive restarts and are shared across replicas
-- Expired records are removed when the same event key is checked again; unique records have no periodic cleanup
+- The webhook deletes expired records once per replay window, so a record outlives its window by at most one more window
 - The webhook records the event before creating the AgentRun. A failed creation can consume the event ID. Replay protection does not guarantee delivery.
 - Alertmanager integration needs a notification converter and HMAC signer; this repository does not supply that adapter
 - For broader deployment guidance, see [Security hardening](security-hardening.md)
@@ -55,7 +55,9 @@ The webhook looks up exactly one `AgentTemplate` in `<namespace>` with:
 - label `sproozi.com/webhook-receiver=<receiver>`
 - annotation `sproozi.com/webhook-secret=<secret-name>`
 
-If zero or multiple templates match, the request is denied.
+If zero or multiple templates match, the request is denied with `404` or `409`.
+A transient failure to read the template or its policy returns `503`; retry
+the event.
 
 ## What the webhook creates
 

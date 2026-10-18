@@ -67,8 +67,8 @@ delete it first.
 If provisioning stopped before status was saved, cleanup looks up the Pod and
 checks that it belongs to the run. It keeps identity and network controls until
 the Pod is confirmed absent or terminal. Lookup errors, unknown Pod state and
-ownership mismatches block cleanup. Managed sessions also require separate
-writer-stop and usage-accounting checks.
+ownership mismatches block cleanup. Managed sessions also need confirmation
+that the writer stopped and its usage was finalized.
 
 Budget ConfigMaps and unique webhook replay records have no automatic retention
 cleanup. See [security hardening](../reference/security-hardening.md#cleanup-and-state-retention)
@@ -78,9 +78,9 @@ for ownership checks and retained state.
 
 The projected gateway token lasts two hours; policy limits execution to one
 hour. The demo reads the token once. The gateway does not wait for token expiry
-to revoke access. It checks active run identity and policy on new requests and
-rechecks existing sessions every second by default. Each authority lookup has a
-five-second deadline. Closing a transport does not prove that a dependency or
-upstream operation has stopped. See the [transport
+to revoke access. It checks run identity and policy on every new request and
+rechecks open connections every second by default. Each policy lookup has a
+five-second deadline. Closing a connection doesn't prove that the upstream work
+stopped. See the [transport
 limits](../reference/security-hardening.md#protect-transport-and-identities).
 The workload has no Sproozi proxy sidecar or local proxy process.

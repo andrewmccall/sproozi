@@ -4,6 +4,7 @@ package work
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -12,7 +13,6 @@ import (
 	"io"
 	"maps"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -30,21 +30,34 @@ import (
 	"github.com/google/uuid"
 )
 
+// Phase is a work session's retained lifecycle position, reported in View.
+type Phase string
+
 const (
-	quietArg           = "--quiet"
-	phaseActive        = "active"
-	phaseCancelled     = "cancelled"
-	phaseCancelling    = "cancelling"
-	phaseExporting     = "exporting"
-	phaseFinalizing    = "finalizing"
-	phaseHomeOwned     = "home-owned"
-	executorKubernetes = "kubernetes"
-	phasePending       = "pending"
-	phasePreparing     = "preparing"
-	phaseRetained      = "retained"
-	repositorySproozi  = "sproozi"
-	phaseUnknown       = "unknown"
+	phasePending    Phase = "pending"
+	phasePreparing  Phase = "preparing"
+	phaseActive     Phase = "active"
+	phaseFinalizing Phase = "finalizing"
+	phaseRetained   Phase = "retained"
+	phaseExporting  Phase = "exporting"
+	// PhaseHomeOwned means a home claimed the stopped session; this owner
+	// keeps only its read-only record.
+	PhaseHomeOwned  Phase = "home-owned"
+	phaseCancelling Phase = "cancelling"
+	phaseCancelled  Phase = "cancelled"
+	phaseUnknown    Phase = "unknown"
 )
+
+// stopped reports a confirmed writer stop with a stored checkpoint, which can
+// seed fresh work or transfer to a home.
+func (p Phase) stopped() bool {
+	return p == phaseRetained || p == phaseExporting || p == PhaseHomeOwned
+}
+
+// live reports a phase the owner drives in the background until it settles.
+func (p Phase) live() bool {
+	return p == phasePending || p == phasePreparing || p == phaseActive || p == phaseFinalizing || p == phaseCancelling
+}
 
 type InitialPlacement interface {
 	session.Placement
@@ -98,7 +111,7 @@ type View struct {
 	Placement        string               `json:"placement"`
 	Incarnation      *session.Incarnation `json:"incarnation,omitempty"`
 	Harness          harness.NativeKind   `json:"harness"`
-	Phase            string               `json:"phase"`
+	Phase            Phase                `json:"phase"`
 	ThreadID         string               `json:"threadId,omitempty"`
 	Deadline         time.Time            `json:"deadline"`
 	CheckpointDigest string               `json:"checkpointDigest,omitempty"`
@@ -127,8 +140,8 @@ type record struct {
 	Intent           Submit               `json:"intent"`
 	IntentDigest     string               `json:"intentDigest"`
 	Launch           session.Launch       `json:"launch"`
-	Phase            string               `json:"phase"`
-	Progress         string               `json:"progress,omitempty"`
+	Phase            Phase                `json:"phase"`
+	Progress         Phase                `json:"progress,omitempty"`
 	Incarnation      *session.Incarnation `json:"incarnation,omitempty"`
 	Stopped          *session.Stopped     `json:"stopped,omitempty"`
 	InputDigest      string               `json:"inputDigest,omitempty"`
@@ -155,7 +168,9 @@ type Owner struct {
 	closeError error
 }
 
-func canonicalID(s string) bool {
+// CanonicalID reports whether s is a non-nil UUID in canonical lowercase form,
+// the only spelling accepted for session and operation IDs.
+func CanonicalID(s string) bool {
 	u, e := uuid.Parse(s)
 	return e == nil && u != uuid.Nil && u.String() == s
 }
@@ -207,10 +222,9 @@ func Open(c Config) (*Owner, error) {
 				_ = o.Close()
 				return nil, readErr
 			}
-			if !project.Member(c.Projects, r.Association.Project, c.Principal) &&
-				r.Phase != phaseRetained && r.Phase != phaseExporting && r.Phase != phaseHomeOwned && r.Phase != phaseCancelled {
+			if !project.Member(c.Projects, r.Association.Project, c.Principal) && !r.Phase.stopped() && r.Phase != phaseCancelled {
 				if r.CancelOperation == "" {
-					r.CancelOperation = uuid.NewSHA1(uuid.NameSpaceOID, []byte(r.Launch.SessionID+"/project-revoked")).String()
+					r.CancelOperation = uuid.NewSHA1(uuid.NameSpaceOID, []byte(r.Launch.ExecutionID+"/project-revoked")).String()
 				}
 				r.Phase = phaseCancelling
 				if err = o.save(r); err != nil {
@@ -218,8 +232,8 @@ func Open(c Config) (*Owner, error) {
 					return nil, err
 				}
 			}
-			if r.Phase == phasePending || r.Phase == phasePreparing || r.Phase == phaseActive || r.Phase == phaseFinalizing || r.Phase == phaseCancelling {
-				o.dispatch(r.Launch.SessionID)
+			if r.Phase.live() {
+				o.dispatch(r.Launch.ExecutionID)
 			}
 		}
 	}
@@ -240,7 +254,7 @@ func private(path string, dir bool) error {
 func (o *Owner) path(id, suffix string) string { return filepath.Join(o.config.Directory, id+suffix) }
 func (o *Owner) read(id string) (record, error) {
 	var r record
-	if !canonicalID(id) {
+	if !CanonicalID(id) {
 		return r, &profile.Rejection{Code: profile.CodeInvalid}
 	}
 	p := o.path(id, ".json")
@@ -258,7 +272,7 @@ func (o *Owner) read(id string) (record, error) {
 		return r, err
 	}
 	intent, _ := json.Marshal(r.Intent)
-	if r.Version != 1 || o.sessionID(r.Intent.RequestID) != id || r.Launch.SessionID != id || r.IntentDigest != hash(intent) || r.Launch.Harness != o.config.Harness || r.Launch.Placement != o.config.Placement || r.Launch.InstructionDigest != o.config.InstructionDigest || !canonicalID(r.Launch.OperationID) || !canonicalID(r.Launch.AllocationID) {
+	if r.Version != 1 || o.sessionID(r.Intent.RequestID) != id || r.Launch.ExecutionID != id || r.IntentDigest != hash(intent) || r.Launch.Harness != o.config.Harness || r.Launch.Placement != o.config.Placement || r.Launch.InstructionDigest != o.config.InstructionDigest || !CanonicalID(r.Launch.OperationID) || !CanonicalID(r.Launch.AllocationID) {
 		return r, errors.New("work: retained owner binding changed")
 	}
 	if r.Association.Template != "" && r.Association.Template != o.config.TemplateName ||
@@ -295,7 +309,7 @@ func atomic(dir, name string, b []byte) error {
 func (o *Owner) save(r record) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	current, err := o.read(r.Launch.SessionID)
+	current, err := o.read(r.Launch.ExecutionID)
 	if err == nil && current.CancelOperation != "" && r.CancelOperation == "" {
 		return errors.New("work: cancellation wins")
 	}
@@ -306,13 +320,13 @@ func (o *Owner) save(r record) error {
 	if err != nil {
 		return err
 	}
-	return atomic(o.config.Directory, r.Launch.SessionID+".json", b)
+	return atomic(o.config.Directory, r.Launch.ExecutionID+".json", b)
 }
 func (o *Owner) Submit(ctx context.Context, q Submit) (View, error) {
 	if ctx.Err() != nil {
 		return View{}, ctx.Err()
 	}
-	if !canonicalID(q.RequestID) || strings.TrimSpace(q.Task) == "" || len(q.Task) > 16<<10 || !utf8.ValidString(q.Task) || strings.ContainsRune(q.Task, '\x00') {
+	if !CanonicalID(q.RequestID) || strings.TrimSpace(q.Task) == "" || len(q.Task) > 16<<10 || !utf8.ValidString(q.Task) || strings.ContainsRune(q.Task, '\x00') {
 		return View{}, &profile.Rejection{Code: profile.CodeInvalid}
 	}
 	if q.Harness != o.config.Harness {
@@ -326,31 +340,14 @@ func (o *Owner) Submit(ctx context.Context, q Submit) (View, error) {
 	b, _ := json.Marshal(q)
 	digest := hash(b)
 	// Submission replay is a metadata read, not a wait for the active native turn.
-	if current, readErr := o.read(id); readErr == nil {
-		if err := o.access(current); err != nil {
-			return View{}, err
-		}
-		if current.IntentDigest != digest {
-			return View{}, &profile.Rejection{Code: profile.CodeConflict}
-		}
-		return view(current), nil
-	} else if !os.IsNotExist(readErr) {
-		return View{}, readErr
+	// Check again under the lock before creating the session.
+	if v, replayed, err := o.replay(id, digest); replayed {
+		return v, err
 	}
 	unlock := o.jobs.Lock(id)
 	defer unlock()
-	r, err := o.read(id)
-	if err == nil {
-		if err = o.access(r); err != nil {
-			return View{}, err
-		}
-		if r.IntentDigest != digest {
-			return View{}, &profile.Rejection{Code: profile.CodeConflict}
-		}
-		return view(r), nil
-	}
-	if !os.IsNotExist(err) {
-		return View{}, err
+	if v, replayed, err := o.replay(id, digest); replayed {
+		return v, err
 	}
 	association, repository, allowances, err := o.resolve(q)
 	if err != nil {
@@ -368,8 +365,8 @@ func (o *Owner) Submit(ctx context.Context, q Submit) (View, error) {
 	if len(entries) > 1024 {
 		return View{}, &profile.Rejection{Code: profile.CodeUnavailable}
 	}
-	r = record{Version: 1, Intent: q, IntentDigest: digest, Association: association, RepositorySource: &repository,
-		Phase: phasePending, Launch: session.Launch{Harness: q.Harness, SessionID: id, OperationID: q.RequestID,
+	r := record{Version: 1, Intent: q, IntentDigest: digest, Association: association, RepositorySource: &repository,
+		Phase: phasePending, Launch: session.Launch{Harness: q.Harness, ExecutionID: id, OperationID: q.RequestID,
 			AllocationID: uuid.NewString(), Epoch: 1, Placement: q.Executor, InstructionDigest: o.config.InstructionDigest,
 			Deadline: time.Now().Add(o.config.MaxDuration).UTC(), Allowances: allowances, Task: q.Task}}
 	if err = o.save(r); err != nil {
@@ -378,18 +375,37 @@ func (o *Owner) Submit(ctx context.Context, q Submit) (View, error) {
 	o.dispatch(id)
 	return view(r), nil
 }
+
+// replay answers a repeated submission from its retained session. replayed is
+// false only when no session exists yet.
+func (o *Owner) replay(id, digest string) (View, bool, error) {
+	r, err := o.read(id)
+	if os.IsNotExist(err) {
+		return View{}, false, nil
+	}
+	if err == nil {
+		err = o.access(r)
+	}
+	if err == nil && r.IntentDigest != digest {
+		err = &profile.Rejection{Code: profile.CodeConflict}
+	}
+	if err != nil {
+		return View{}, true, err
+	}
+	return view(r), true, nil
+}
 func view(r record) View {
 	association := r.Association
 	if association.Repository == "" {
 		association.Repository = r.Intent.Repository
 	}
-	v := View{Association: association, ID: r.Launch.SessionID, ExecutionID: r.Launch.SessionID,
+	v := View{Association: association, ID: r.Launch.ExecutionID, ExecutionID: r.Launch.ExecutionID,
 		AllocationID: r.Launch.AllocationID, Placement: r.Launch.Placement, Incarnation: r.Incarnation,
 		Harness: r.Launch.Harness, Phase: r.Phase, Deadline: r.Launch.Deadline,
 		Result: r.Result, ResultTruncated: r.ResultTruncated, Problem: r.Problem}
 	v.CheckpointInfo, v.WorkspaceFrom = r.CheckpointInfo, r.Intent.WorkspaceFrom
 	if r.Stopped != nil {
-		v.ThreadID = r.Stopped.Launch.ThreadID
+		v.ThreadID = cmp.Or(r.Stopped.ThreadID, r.Stopped.Launch.ThreadID)
 		v.CheckpointDigest = r.Stopped.CheckpointDigest
 	}
 	return v
@@ -449,9 +465,11 @@ func (o *Owner) dispatch(id string) {
 	o.mu.Unlock()
 	go func() {
 		defer o.wg.Done()
-		defer func() { cancel(); o.mu.Lock(); delete(o.running, id); o.mu.Unlock() }()
 		unlock := o.jobs.Lock(id)
 		defer unlock()
+		// Leave running before releasing the job lock: a Recover waiting on that
+		// lock dispatches again, which a stale entry would silently drop.
+		defer func() { cancel(); o.mu.Lock(); delete(o.running, id); o.mu.Unlock() }()
 		o.drive(ctx, id)
 	}()
 }
@@ -484,7 +502,7 @@ func (o *Owner) drive(ctx context.Context, id string) {
 	}
 }
 func (o *Owner) input(ctx context.Context, r *record) ([]byte, error) {
-	p := o.path(r.Launch.SessionID, ".input")
+	p := o.path(r.Launch.ExecutionID, ".input")
 	if r.InputDigest != "" {
 		if e := private(p, false); e != nil {
 			return nil, e
@@ -522,19 +540,7 @@ func (o *Owner) input(ctx context.Context, r *record) ([]byte, error) {
 	if repo.Snapshot != "" {
 		b, err = workspace.Capture(ctx, repo.Snapshot, nil, o.config.MaxCheckpointBytes)
 	} else {
-		dir, e := os.MkdirTemp(o.config.Directory, ".seed-")
-		if e != nil {
-			return nil, e
-		}
-		defer func() { _ = os.RemoveAll(dir) }()
-		for _, args := range [][]string{{"init", quietArg, "--template=", dir}, {"-C", dir, "-c", "user.name=Sproozi", "-c", "user.email=bootstrap@sproozi.invalid", "commit", quietArg, "--allow-empty", "-m", "Initialize controlled workspace"}} {
-			cmd := exec.CommandContext(ctx, "git", args...)
-			cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + dir, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_TERMINAL_PROMPT=0"}
-			if out, e := cmd.CombinedOutput(); e != nil {
-				return nil, fmt.Errorf("work: seed repository: %w: %.1024s", e, out)
-			}
-		}
-		b, err = workspace.Capture(ctx, dir, nil, o.config.MaxCheckpointBytes)
+		b, err = workspace.Empty(ctx, o.config.Directory, o.config.MaxCheckpointBytes)
 		// The task is data for the native agent; credentials and scope remain at the gateway.
 		if repo.URL != "" {
 			r.Launch.Task = fmt.Sprintf("Work in the current controlled workspace. Fetch repository %s through the configured gateway and check out ref %q before performing this task. Do not copy host credentials.\n\n%s", repo.URL, repo.Ref, r.Intent.Task)
@@ -547,7 +553,7 @@ func (o *Owner) input(ctx context.Context, r *record) ([]byte, error) {
 }
 
 func (o *Owner) retainInput(r *record, b []byte) ([]byte, error) {
-	if err := atomic(o.config.Directory, r.Launch.SessionID+".input", b); err != nil {
+	if err := atomic(o.config.Directory, r.Launch.ExecutionID+".input", b); err != nil {
 		return nil, err
 	}
 	r.InputDigest = hash(b)
@@ -605,20 +611,17 @@ func (o *Owner) execute(ctx context.Context, r *record) error {
 		if e != nil {
 			return e
 		}
-		if e = ValidateExport(Export{ID: r.Launch.SessionID, Harness: r.Launch.Harness, Stopped: stopped, Checkpoint: stopped.Checkpoint}, o.config.MaxCheckpointBytes); e != nil {
-			return e
-		}
-		if stopped.Launch.OperationID != r.Launch.OperationID || stopped.Launch.AllocationID != r.Launch.AllocationID || stopped.Incarnation != *r.Incarnation {
+		if stopped.Incarnation != *r.Incarnation {
 			return errors.New("work: stopped execution binding mismatch")
 		}
-		bound := stopped.Launch
-		bound.ThreadID = r.Launch.ThreadID
-		expected, _ := json.Marshal(r.Launch)
-		actual, _ := json.Marshal(bound)
-		if !bytes.Equal(expected, actual) {
+		if !session.SameLaunch(stopped.Launch, r.Launch) {
 			return errors.New("work: stopped launch intent changed")
 		}
-		if e = atomic(o.config.Directory, r.Launch.SessionID+".checkpoint", stopped.Checkpoint); e != nil {
+		stopped = exportedStop(stopped)
+		if e = ValidateExport(Export{ID: r.Launch.ExecutionID, Harness: r.Launch.Harness, Stopped: stopped, Checkpoint: stopped.Checkpoint}, o.config.MaxCheckpointBytes); e != nil {
+			return e
+		}
+		if e = atomic(o.config.Directory, r.Launch.ExecutionID+".checkpoint", stopped.Checkpoint); e != nil {
 			return e
 		}
 		info, e := checkpoint.Inspect(stopped.Checkpoint, o.config.MaxCheckpointBytes)
@@ -639,10 +642,27 @@ func (o *Owner) execute(ctx context.Context, r *record) error {
 	return nil
 }
 
-// ValidateExport keeps transcript validation separate from trusted stop/seal evidence.
+// exportedStop describes a stopped visit as an exported continuation, whose
+// launch and receipt name the native thread to resume. The placement reports a
+// first visit's genuine thread separately because its launch never changes.
+func exportedStop(s session.Stopped) session.Stopped {
+	thread := cmp.Or(s.ThreadID, s.Launch.ThreadID)
+	s.Launch.ThreadID, s.ThreadID = thread, ""
+	if s.Receipt != nil {
+		receipt := *s.Receipt
+		receipt.Launch.ThreadID = thread
+		s.Receipt = &receipt
+	}
+	return s
+}
+
+// ValidateExport checks an export's writer stop, sealed usage and checkpoint
+// evidence, keeping transcript validation separate from that evidence. The
+// stopped launch can belong to a later execution of the exported session, so
+// callers bind the execution themselves.
 func ValidateExport(e Export, max int64) error {
 	s := e.Stopped
-	if !canonicalID(e.ID) || s.Launch.SessionID != e.ID || e.Harness != s.Launch.Harness || !s.ActualStopped || s.Receipt == nil || s.Receipt.Incarnation != s.Incarnation || s.Receipt.Launch.ThreadID != s.Launch.ThreadID || len(s.Receipt.Usage) != len(s.Launch.Allowances) {
+	if !CanonicalID(e.ID) || e.Harness != s.Launch.Harness || !s.ActualStopped || s.Receipt == nil || s.Receipt.Incarnation != s.Incarnation || s.Receipt.Launch.ThreadID != s.Launch.ThreadID || len(s.Receipt.Usage) != len(s.Launch.Allowances) {
 		return &profile.Rejection{Code: profile.CodeUnavailable}
 	}
 	for cap, a := range s.Launch.Allowances {
@@ -688,7 +708,7 @@ func (o *Owner) Claim(ctx context.Context, id, operation, digest string) (Export
 	return o.export(ctx, id, operation, digest, true)
 }
 func (o *Owner) export(ctx context.Context, id, operation, digest string, claim bool) (Export, error) {
-	if !canonicalID(id) || !canonicalID(operation) {
+	if !CanonicalID(id) || !CanonicalID(operation) {
 		return Export{}, &profile.Rejection{Code: profile.CodeInvalid}
 	}
 	if ctx.Err() != nil {
@@ -703,7 +723,7 @@ func (o *Owner) export(ctx context.Context, id, operation, digest string, claim 
 	if err = o.access(current); err != nil {
 		return Export{}, err
 	}
-	if current.Phase != phaseRetained && current.Phase != phaseExporting && current.Phase != phaseHomeOwned {
+	if !current.Phase.stopped() {
 		return Export{}, &profile.Rejection{Code: profile.CodeConflict}
 	}
 	unlock := o.jobs.Lock(id)
@@ -712,7 +732,7 @@ func (o *Owner) export(ctx context.Context, id, operation, digest string, claim 
 	if err != nil {
 		return Export{}, err
 	}
-	if r.Phase != phaseRetained && r.Phase != phaseExporting && r.Phase != phaseHomeOwned || r.Stopped == nil || r.CancelOperation != "" {
+	if !r.Phase.stopped() || r.Stopped == nil || r.CancelOperation != "" {
 		return Export{}, &profile.Rejection{Code: profile.CodeConflict}
 	}
 	if r.Transfer != "" && r.Transfer != operation {
@@ -733,7 +753,7 @@ func (o *Owner) export(ctx context.Context, id, operation, digest string, claim 
 		return Export{}, err
 	}
 	e := Export{Association: view(r).Association, CheckpointInfo: &info, ID: id, Harness: r.Launch.Harness,
-		Stopped: *r.Stopped, Checkpoint: b, OperationID: operation, Claimed: r.Phase == phaseHomeOwned}
+		Stopped: *r.Stopped, Checkpoint: b, OperationID: operation, Claimed: r.Phase == PhaseHomeOwned}
 	if err = ValidateExport(e, o.config.MaxCheckpointBytes); err != nil {
 		if o.config.Log != nil {
 			_, _ = fmt.Fprintf(o.config.Log, "Could not export work session %s: %v\n", id, err)
@@ -742,9 +762,9 @@ func (o *Owner) export(ctx context.Context, id, operation, digest string, claim 
 	}
 	r.Transfer = operation
 	if claim {
-		r.Phase = phaseHomeOwned
+		r.Phase = PhaseHomeOwned
 		e.Claimed = true
-	} else if r.Phase != phaseHomeOwned {
+	} else if r.Phase != PhaseHomeOwned {
 		r.Phase = phaseExporting
 	}
 	if err = o.save(r); err != nil {
@@ -786,7 +806,7 @@ func (o *Owner) Recover(ctx context.Context, id string) (View, error) {
 	return view(r), nil
 }
 func (o *Owner) Cancel(ctx context.Context, id, operation string) (View, error) {
-	if !canonicalID(operation) {
+	if !CanonicalID(operation) {
 		return View{}, &profile.Rejection{Code: profile.CodeInvalid}
 	}
 	r, e := o.read(id)
@@ -796,11 +816,15 @@ func (o *Owner) Cancel(ctx context.Context, id, operation string) (View, error) 
 	if e = o.access(r); e != nil {
 		return View{}, e
 	}
-	if r.Phase == phaseHomeOwned || r.Phase == phaseExporting || r.Phase == phaseRetained {
+	if r.Phase.stopped() {
 		return View{}, &profile.Rejection{Code: profile.CodeConflict}
 	}
 	if r.CancelOperation != "" && r.CancelOperation != operation {
 		return View{}, &profile.Rejection{Code: profile.CodeConflict}
+	}
+	// A retried cancellation reports its settled outcome without aborting again.
+	if r.Phase == phaseCancelled {
+		return view(r), nil
 	}
 	r.CancelOperation = operation
 	r.Phase = phaseCancelling
@@ -836,7 +860,7 @@ func (o *Owner) abort(ctx context.Context, r record) {
 	}
 	obs, e := o.config.Backend.Abort(ctx, r.Launch, i)
 	if e != nil && o.config.Log != nil {
-		_, _ = fmt.Fprintf(o.config.Log, "Could not cancel work session %s: %v\n", r.Launch.SessionID, e)
+		_, _ = fmt.Fprintf(o.config.Log, "Could not cancel work session %s: %v\n", r.Launch.ExecutionID, e)
 	}
 	r.Phase = phaseUnknown
 	r.Problem = "Cancellation requires recovery"

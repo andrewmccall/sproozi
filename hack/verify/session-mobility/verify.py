@@ -32,6 +32,14 @@ def check(condition, message):
         raise RuntimeError(message)
 
 
+def visit_thread(index, visit):
+    """Returns a visit's launch thread. Only the first visit may have none: it
+    starts from a Git workspace, and the record keeps the thread it bound."""
+    thread = visit["launch"]["threadId"]
+    check(thread or index == 0, "A later visit launched without the native UUID")
+    return thread
+
+
 def digest(data):
     return hashlib.sha256(data).hexdigest()
 
@@ -196,9 +204,9 @@ class Proof:
             check(active["deadline"] == deadline and active["threadId"] == native and
                   active["allowances"] == record["remaining"] and active.get("includeIgnored") == ["needed.bin"],
                   "Activated destination changed trusted continuity or remaining allocation")
-        for visit in record["visits"]:
+        for index, visit in enumerate(record["visits"]):
             check(visit["actualStopped"] and visit.get("receipt"), "Stopped writer or trusted usage is unknown")
-            check(visit["launch"]["deadline"] == deadline and visit["launch"]["threadId"] == native,
+            check(visit["launch"]["deadline"] == deadline and visit_thread(index, visit) in ("", native),
                   "Stopped visit lost original deadline or native UUID")
             check(visit["launch"].get("includeIgnored") == ["needed.bin"],
                   "Stopped visit lost the administrator's ignored-file selection")

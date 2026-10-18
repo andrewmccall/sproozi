@@ -101,7 +101,7 @@ rejected.
 
 Every request reloads authorization through the shared proxy. Removing a capability
 or its tool, changing scope, stopping the run or cancelling it denies subsequent
-requests. Proxy revalidation cancels active requests when run authority ends.
+requests. When the run stops or loses permission, the gateway cancels its active requests.
 A discovered or cached tool is not a grant. Missing approved tools or unsupported
 schemas fail closed, without destination fallback.
 

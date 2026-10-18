@@ -33,6 +33,13 @@ import (
 
 var ErrReplay = errors.New("webhook: replayed event")
 
+const (
+	replayLabel            = "sproozi.com/managed-by"
+	replayLabelValue       = "sproozi-webhook-replay"
+	replayExpiryAnnotation = "sproozi.com/expires-at"
+	replaySweepPageSize    = 500
+)
+
 type ReplayStore interface {
 	CheckAndRecord(context.Context, string, time.Time) error
 }
@@ -60,7 +67,7 @@ func (s *K8sReplayStore) CheckAndRecord(ctx context.Context, id string, expiry t
 	}
 	sum := sha256.Sum256([]byte(id))
 	name := "sproozi-webhook-replay-" + hex.EncodeToString(sum[:])[:32]
-	obj := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: s.namespace, Labels: map[string]string{"sproozi.com/managed-by": "sproozi-webhook-replay"}, Annotations: map[string]string{"sproozi.com/expires-at": expiry.UTC().Format(time.RFC3339Nano)}}, Immutable: boolPtr(true), Data: map[string]string{"event": id}}
+	obj := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: s.namespace, Labels: map[string]string{replayLabel: replayLabelValue}, Annotations: map[string]string{replayExpiryAnnotation: expiry.UTC().Format(time.RFC3339Nano)}}, Immutable: boolPtr(true), Data: map[string]string{"event": id}}
 	if err := s.client.Create(ctx, obj); err == nil {
 		return nil
 	} else if !apierrors.IsAlreadyExists(err) {
@@ -73,13 +80,52 @@ func (s *K8sReplayStore) CheckAndRecord(ctx context.Context, id string, expiry t
 		}
 		return err
 	}
-	if raw := existing.Annotations["sproozi.com/expires-at"]; raw != "" {
-		if until, err := time.Parse(time.RFC3339Nano, raw); err == nil && !until.After(time.Now()) {
-			_ = s.client.Delete(ctx, &existing, client.Preconditions{UID: &existing.UID, ResourceVersion: &existing.ResourceVersion})
-			return s.CheckAndRecord(ctx, id, expiry)
-		}
+	if replayExpired(&existing, time.Now()) {
+		_ = s.deleteRecord(ctx, &existing)
+		return s.CheckAndRecord(ctx, id, expiry)
 	}
 	return ErrReplay
+}
+
+// SweepExpired deletes every replay record whose window has passed. Each
+// accepted event leaves one record, so without a sweep unique event IDs would
+// accumulate for ever. Replicas may sweep concurrently: preconditions make a
+// record deleted or replaced by another writer a no-op.
+func (s *K8sReplayStore) SweepExpired(ctx context.Context) error {
+	now := time.Now()
+	page := ""
+	for {
+		var records corev1.ConfigMapList
+		if err := s.client.List(ctx, &records, client.InNamespace(s.namespace), client.MatchingLabels{replayLabel: replayLabelValue},
+			client.Limit(replaySweepPageSize), client.Continue(page)); err != nil {
+			return fmt.Errorf("webhook: list replay records: %w", err)
+		}
+		for i := range records.Items {
+			if replayExpired(&records.Items[i], now) {
+				if err := s.deleteRecord(ctx, &records.Items[i]); err != nil {
+					return err
+				}
+			}
+		}
+		if page = records.Continue; page == "" {
+			return nil
+		}
+	}
+}
+
+func (s *K8sReplayStore) deleteRecord(ctx context.Context, record *corev1.ConfigMap) error {
+	err := s.client.Delete(ctx, record, client.Preconditions{UID: &record.UID, ResourceVersion: &record.ResourceVersion})
+	if err != nil && !apierrors.IsNotFound(err) && !apierrors.IsConflict(err) {
+		return fmt.Errorf("webhook: delete replay record: %w", err)
+	}
+	return nil
+}
+
+// replayExpired reports whether a record's window has passed. A record with a
+// missing or unreadable expiry is kept, so it keeps blocking its event.
+func replayExpired(record *corev1.ConfigMap, now time.Time) bool {
+	until, err := time.Parse(time.RFC3339Nano, record.Annotations[replayExpiryAnnotation])
+	return err == nil && !until.After(now)
 }
 
 func NewInMemoryReplayStore() *InMemoryReplayStore {

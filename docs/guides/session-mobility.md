@@ -6,7 +6,7 @@ terminal. The conversation ID and supported Git workspace state stay the same.
 
 A move keeps the execution's original deadline and total usage allowance. Each
 destination gets fresh identity and access. For a completed remote task that you
-want to resume later, use [retained remote work](portable-workflows.md).
+want to resume later, use [remote work and local resume](portable-workflows.md).
 
 This setup uses Codex and Claude Code with their upstream default versions. A session
 keeps one selected client throughout its lifetime. Start a new managed
@@ -17,7 +17,7 @@ session is not supported.
 
 The trusted home daemon owns a local Unix Docker socket, fixed image IDs, its TLS
 gateway, provider credentials and protected journals. Local start requires no
-cluster or kubeconfig. A developer can use the fixed remote profile after an
+cluster or kubeconfig. A developer can use the profile service after an
 administrator provisions it. The remote service holds its own Kubernetes
 credentials; the developer receives only the profile URL, public CA and protected
 principal token file.
@@ -101,10 +101,10 @@ its fixed HTTPS origin, principal token file, CA file and checkpoint byte limit.
 The remote placement alias must match the profile's `placementName`. All
 placements must use the same checkpoint byte limit and approve the same initial
 instructions and native version. The original home duration must also fit the
-remote profile and live policy; Kubernetes policy currently permits at most one
+profile service and live policy; Kubernetes policy currently permits at most one
 hour. Moving does not restart the lifetime clock.
 
-## Provision the fixed remote profile
+## Provision the profile service
 
 Follow [the profile setup](../../cmd/session-profile/README.md) to install the
 current controller/shared gateway and generated CRDs in an evaluation cluster
@@ -178,13 +178,13 @@ Attach to the selected native TUI:
 bin/sproozi attach --socket /absolute/private/home/control.sock --id SESSION_UUID
 ```
 
-Terminal resize reaches the native client. Ctrl-] detaches the local client while its daemon
+Terminal resize reaches the harness. Ctrl-] detaches the local client while its daemon
 and native process remain alive; attach again with the same command. Ctrl-C while
-attached reaches the native client. A reconnect replays a bounded terminal output tail. Avoid
+attached reaches the harness. A reconnect replays a bounded terminal output tail. Avoid
 native `/quit` when you intend to move; the placement owns graceful quit and the
 independent container stop/checkpoint boundary.
 
-Move to the configured remote profile, attach there, then return locally:
+Move to the configured profile service, attach there, then return locally:
 
 ```sh
 bin/sproozi move --socket /absolute/private/home/control.sock \
@@ -249,15 +249,22 @@ allocation stays held. The destination cannot start. A lost reply is not proof
 of absence or zero consumption. Keep the home and profile journals intact,
 restore backend connectivity, and recover the existing operation. Restart a
 daemon/profile with the same protected state and configuration; stopping those
-processes alone does not establish a stopped writer. The native original
+processes alone doesn't prove that the agent stopped. The native original
 deadline still applies.
 
-Managed remote Pods retain a writer-fence finalizer until the profile records
-termination of their exact native container. A stopped helper or lost profile can
-leave a Pod terminating; restart the same profile and recover the retained
-operation. Keep its journal and checkpoint artifacts. Removing the finalizer or
-force-deleting a Pod before that evidence is recorded leaves the writer unknown
-and does not release its allowance or permit another placement.
+Managed remote Pods keep a Sproozi finalizer until the profile service records
+that their harness container stopped. A stopped helper or lost profile service
+can leave a Pod stuck terminating. Restart the same profile service and run
+`recover` for the original operation, and keep its journal and checkpoint files.
+Don't remove the finalizer or force-delete the Pod: Sproozi then can't tell
+whether the agent stopped, so the allowance stays held and the session can't
+move.
+
+Local Docker visits remove their `spz-...` containers and workspace volume
+after the stop and finalized usage are saved. A visit whose usage is still
+unknown keeps its containers until a retried cancel or recover finalizes it.
+Don't remove a visit's containers by hand before then: Sproozi treats a missing
+container it did not remove as an unknown stop.
 
 Cancellation forces the execution to stop:
 
@@ -267,17 +274,18 @@ bin/sproozi cancel --socket /absolute/private/home/control.sock \
 ```
 
 Cancel persists intent, revokes access first and forces the exact execution to
-stop. It preserves the last committed checkpoint and does not wait for a fresh
-completed turn. Without finalized usage accounting, the allowance stays held. A
+stop. It keeps the last saved checkpoint and doesn't wait for the current turn
+to finish. Until usage is finalized, the allowance stays held. A
 cancelled session cannot move again. Retry with the same cancellation UUID or
 recover; editing a journal or deleting a registration cannot safely refill it.
 
 ## Current limits
 
-The native checkpoint must match the selected selected client and a genuine UUID.
-Codex requires its approved initial instructions and a completed final turn/tools
-boundary. Claude requires a compatible primary transcript and trusted placement
-quiescence acknowledgement; an assistant leaf alone is insufficient. Selected
+The checkpoint must match the selected harness and a real conversation UUID.
+Codex needs its approved initial instructions and a finished final turn with its
+tools. Claude Code needs a compatible primary transcript and the placement's
+saved acknowledgement that the turn finished; a final assistant reply alone is
+not enough. Selected
 native history travels with sanitized Git state;
 whole home directories, authentication files, hooks and Git config do not.
 

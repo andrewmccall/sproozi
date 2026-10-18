@@ -24,7 +24,7 @@ still be able to stop existing workers and finish usage accounting.
 
 Which workflow first needs individual identities or live membership changes? Who
 administers roles? What happens to active executions when access is removed? How
-should shared home installations separate access?
+should shared home daemons separate access?
 
 ## Scope
 

@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package egress implements inspected HTTPS destination enforcement
+// Package destination implements inspected HTTPS destination enforcement
 // that enforces template/policy-approved destination profiles. Every decision
 // is audited; request bodies and credential-bearing URLs are never logged.
 package destination
@@ -29,7 +29,6 @@ import (
 
 	"github.com/andrewmccall/sproozi/internal/budget"
 
-	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/audit"
 	"github.com/andrewmccall/sproozi/internal/gateway"
 )
@@ -72,14 +71,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.deny(w, e, http.StatusUnauthorized, "gateway identity required")
 		return
 	}
-	e = identity.AuditEvent(r.Method + " " + r.Host)
-	e.Capability, e.SemanticLevel, e.Service = string(sprooziv1alpha1.CapabilityNetworkEgress), audit.TierDestination, "network"
-
-	if !slices.Contains(identity.Capabilities, sprooziv1alpha1.CapabilityNetworkEgress) ||
-		!slices.Contains(identity.Policy.Spec.AllowedCapabilities, sprooziv1alpha1.CapabilityNetworkEgress) {
-		h.deny(w, e, http.StatusForbidden, "network.egress capability not granted")
-		return
-	}
+	e = gateway.AuditEvent(ctx, r.Method+" "+r.Host)
+	e.Service = "network"
 
 	dests := h.Config.Profiles.ActiveDestinations(
 		identity.Template.Spec.EgressProfiles,
@@ -94,12 +87,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleHTTP(w http.ResponseWriter, r *http.Request, e audit.Event, dests []Destination) {
-	defaultPort := "80"
-	if r.URL.Scheme == httpsScheme {
-		defaultPort = "443"
-	}
-
-	host, port, err := parseAuthority(r.URL.Host, defaultPort)
+	host, port, err := parseAuthority(r.URL.Host, "443")
 	if err != nil {
 		h.deny(w, e, http.StatusBadRequest, err.Error())
 		return
@@ -130,7 +118,7 @@ func (h *Handler) handleHTTP(w http.ResponseWriter, r *http.Request, e audit.Eve
 	client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
 		return http.ErrUseLastResponse
 	}
-	if err := budget.FromContext(r.Context()).SpendRequest(); err != nil {
+	if err := budget.FromContext(r.Context()).SpendRequest(r.Context()); err != nil {
 		h.deny(w, e, http.StatusTooManyRequests, err.Error())
 		return
 	}

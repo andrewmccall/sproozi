@@ -136,6 +136,15 @@ class ExtendedProof(BASE.Proof):
               "Actual Docker incarnation changed")
         return data[0]
 
+    def writer_stopped(self, record, role="Agent"):
+        """Checks a stopped visit's container: absent once the placement recorded
+        its removal, otherwise present and not running."""
+        if record.get("removed"):
+            check(not self.docker("container", "ls", "--all", "--quiet", "--filter", "id=" + record[role]["ID"]).strip(),
+                  "Docker placement recorded removal but its container remains")
+            return
+        check(not self.container(record[role])["State"]["Running"], "Stopped Docker writer remains running")
+
     def kube(self, namespace, *arguments):
         return self.run([str(self.args.kubectl), "--kubeconfig", str(self.args.kubeconfig.resolve()),
                          "--namespace", namespace, *arguments], "kube-probe", timeout=35)
@@ -156,8 +165,7 @@ class ExtendedProof(BASE.Proof):
         if destination == self.config["local"]["Name"]:
             for record in self.docker_records():
                 if record.get("Agent"):
-                    check(not self.container(record["Agent"])["State"]["Running"],
-                          "Existing local destination native writer is running")
+                    self.writer_stopped(record)
             return
         records = self.registries()
         check(all(record["phase"] in ["stopped", "cancelled"] for record in records),
@@ -340,8 +348,9 @@ class ExtendedProof(BASE.Proof):
         check(move.finish(10, success=False)[0] != 0, "Cancelled graceful Move falsely returned success")
         records = [record for record in self.docker_records() if record["launch"] == active["launch"]]
         check(len(records) == 1 and records[0]["actualStopped"], "Local cancellation lacks actual stopped observation")
+        check(records[0].get("removed"), "Cancelled Docker visit kept its containers")
         for role in ["Agent", "Helper", "Anchor"]:
-            check(not self.container(records[0][role])["State"]["Running"], "Cancelled exact Docker writer remains running")
+            self.writer_stopped(records[0], role)
         check([record["uid"] for record in self.registries()] == registry_before,
               "Forced cancelled move created a remote destination")
         self.no_destination_writer(destination)
@@ -440,7 +449,7 @@ class ExtendedProof(BASE.Proof):
         requests = self.provider()
         completed_usage = sum(request.get("usage", {}).get("total_tokens", 0) for request in requests if request["completed"])
         sealed = sum(visit["receipt"]["usage"]["model.inference"]["Units"] for visit in cancelled["visits"])
-        check(sealed >= completed_usage and all(visit["launch"]["threadId"] == thread for visit in cancelled["visits"]),
+        check(sealed >= completed_usage and all(BASE.visit_thread(i, v) in ("", thread) for i, v in enumerate(cancelled["visits"])),
               "Sealed conservative usage lost completed inference or native identity")
         self.report.update(passed=True, sameNativeUUID=True, sameOriginalDeadline=True, finalPhase="cancelled",
             actualExecCommandToolEffect=True, gracefulHeldTurnMove=True, forcedHeldTurnCancellation=True,

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -174,6 +175,41 @@ func (e *Engine) RemoveStopped(ctx context.Context, instance Instance) error {
 		return errors.New("docker container must be stopped before removal")
 	}
 	_, err = e.command(ctx, "container", "rm", instance.ID)
+	return err
+}
+
+// removeManaged stops and removes the exact incarnation registered under name.
+// It is used only after the placement has durably recorded that it is removing
+// its own resources: an absent name, or one now held by a different
+// container, then means this incarnation is already gone.
+func (e *Engine) removeManaged(ctx context.Context, instance Instance, name string) error {
+	current, found, err := e.lookup(ctx, name, instance.Execution)
+	if err != nil || !found || current.ID != instance.ID {
+		return err
+	}
+	if err = e.Stop(ctx, instance); err != nil {
+		return err
+	}
+	return e.RemoveStopped(ctx, instance)
+}
+
+// RemoveVolume removes the exact retained tmpfs volume. An absent volume is
+// already removed; a replacement with different identity is never removed.
+func (e *Engine) RemoveVolume(ctx context.Context, v Volume) error {
+	if !resourceName.MatchString(v.Name) {
+		return errors.New("invalid Docker tmpfs volume")
+	}
+	data, err := e.command(ctx, volumeCommand, "ls", "--quiet", "--filter", "name="+v.Name)
+	if err != nil {
+		return err
+	}
+	if !slices.Contains(strings.Fields(string(data)), v.Name) {
+		return nil
+	}
+	if _, err = e.volume(ctx, v); err != nil {
+		return err
+	}
+	_, err = e.command(ctx, volumeCommand, "rm", v.Name)
 	return err
 }
 

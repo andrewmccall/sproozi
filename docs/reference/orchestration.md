@@ -2,8 +2,8 @@
 
 This task service lets a persistent assistant submit disposable jobs. It retains
 status and an optional final answer, not the worker's native conversation or
-workspace. For resumable work, use the [retained-work
-service](../guides/portable-workflows.md).
+workspace. For resumable work, use the retained-work service described in
+[remote work and local resume](../guides/portable-workflows.md).
 
 A persistent assistant owns its conversations, memory, channels and schedules.
 Sproozi owns the admission, identity, budget, deadline and cleanup of every
@@ -109,7 +109,7 @@ the agent loop or using model text to decide lifecycle success.
 
 Result text is untrusted and can contain sensitive scoped tool data. It lives in
 `AgentRun.status.result` and is visible to authorized AgentRun readers. It does
-not enter audit-safe summary, conditions or lifecycle audit events. Treat it as
+not enter conditions or lifecycle audit events. Treat it as
 data, and apply the same fixed workflow authority to follow-on work. The answer
 survives Pod cleanup and controller restart, but expires with AgentRun retention.
 After Run deletion, status returns unavailable; persistent assistant conversation

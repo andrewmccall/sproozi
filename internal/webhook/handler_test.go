@@ -17,7 +17,9 @@ limitations under the License.
 package webhook_test
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -31,6 +33,7 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/audit"
@@ -411,5 +414,41 @@ func TestHandler_AmbiguousReceiverRejected(t *testing.T) {
 	}
 	if runs := listRuns(t, c); len(runs) != 0 {
 		t.Fatalf("expected no AgentRuns for ambiguous receiver, got %d", len(runs))
+	}
+}
+
+// A sender must retry after a transient lookup failure, so it must not be
+// told that the receiver does not exist.
+func TestHandler_ReceiverLookupStatus(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		listErr error
+		want    int
+	}{
+		{name: "missing receiver", want: http.StatusNotFound},
+		{name: "transient list failure", listErr: errors.New("etcdserver: request timed out"), want: http.StatusServiceUnavailable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := fake.NewClientBuilder().WithScheme(webhookScheme(t)).WithInterceptorFuncs(interceptor.Funcs{
+				List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+					if tc.listErr != nil {
+						return tc.listErr
+					}
+					return c.List(ctx, list, opts...)
+				},
+			}).Build()
+			handler := &webhook.Handler{Config: webhook.HandlerConfig{
+				Client:      c,
+				Replay:      webhook.NewInMemoryReplayStore(),
+				AuditLogger: &captureWebhookLogger{},
+			}}
+
+			resp := httptest.NewRecorder()
+			handler.ServeHTTP(resp, httptest.NewRequest(http.MethodPost, "/webhook/default/"+webhookReceiver, strings.NewReader(testAlertBody)))
+
+			if resp.Code != tc.want {
+				t.Fatalf("status = %d, want %d (body=%s)", resp.Code, tc.want, resp.Body.String())
+			}
+		})
 	}
 }

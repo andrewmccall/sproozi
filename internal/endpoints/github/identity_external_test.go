@@ -3,6 +3,7 @@ package github_test
 import (
 	"net/http"
 
+	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/audit"
 	githubgateway "github.com/andrewmccall/sproozi/internal/endpoints/github"
 	"github.com/andrewmccall/sproozi/internal/gateway"
@@ -34,5 +35,8 @@ func (h *identityHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r = r.WithContext(gateway.WithIdentity(r.Context(), h.Config.Identity))
 	}
 	real := &githubgateway.Handler{Config: githubgateway.HandlerConfig{TokenProvider: h.Config.TokenProvider, AuditLogger: h.Config.AuditLogger, GitBaseURL: h.Config.GitBaseURL, APIBaseURL: h.Config.APIBaseURL, HTTPClient: h.Config.HTTPClient}}
-	real.ServeHTTP(w, r)
+	// Dispatch as production does, so the route grants and audits the capability.
+	r.Host = "api.github.com"
+	gateway.Dispatcher{"api.github.com:443": {Capability: string(sprooziv1alpha1.CapabilityGitHubPullRequest),
+		Tier: audit.TierSemantic, Handler: real}}.ServeHTTP(w, r)
 }

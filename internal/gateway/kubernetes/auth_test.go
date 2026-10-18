@@ -173,7 +173,7 @@ func TestFindRunBySAReturnsRunningRun(t *testing.T) {
 		}}).
 		Build()
 
-	finder := gateway.NewK8sRunFinder(c, testAgentsNamespace)
+	finder := gateway.NewAuthenticator(nil, "", c, testAgentsNamespace)
 	identity, err := finder.Find(context.Background(), gateway.ServiceAccountIdentity{Namespace: testAgentsNamespace, Name: testFirstServiceAccount, UID: "service-account-uid-001"})
 	if err != nil {
 		t.Fatalf("Find() error = %v", err)
@@ -191,7 +191,7 @@ func TestFindRunBySAReturnsRunningRun(t *testing.T) {
 
 func TestFindRunBySAReturnsErrRunNotFound(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).Build()
-	finder := gateway.NewK8sRunFinder(c, testAgentsNamespace)
+	finder := gateway.NewAuthenticator(nil, "", c, testAgentsNamespace)
 	_, err := finder.Find(context.Background(), gateway.ServiceAccountIdentity{Namespace: testAgentsNamespace, Name: "sproozi-nobody", UID: "missing"})
 	if err != gateway.ErrRunNotFound {
 		t.Errorf("err = %v, want ErrRunNotFound", err)
@@ -208,7 +208,7 @@ func TestFindRunRejectsWrongNamespaceAndServiceAccountUID(t *testing.T) {
 		Labels: map[string]string{testManagedByLabel: testManagedByValue, testRunLabel: run.Name, testRunNamespaceLabel: run.Namespace, testRunUIDLabel: string(run.UID)},
 	}}
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(run, sa).Build()
-	finder := gateway.NewK8sRunFinder(c, testAgentsNamespace)
+	finder := gateway.NewAuthenticator(nil, "", c, testAgentsNamespace)
 	for _, test := range []struct {
 		name     string
 		identity gateway.ServiceAccountIdentity
@@ -245,7 +245,7 @@ func TestFindRunUsesImmutableLabelsToResolveNameCollision(t *testing.T) {
 	// The second run cannot pass the immutable label test, which is exactly the
 	// intended collision defense; preserve an explicit assertion for that path.
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(first, second, sa, tmpl, policy).Build()
-	finder := gateway.NewK8sRunFinder(c, testAgentsNamespace)
+	finder := gateway.NewAuthenticator(nil, "", c, testAgentsNamespace)
 	identity, err := finder.Find(context.Background(), gateway.ServiceAccountIdentity{Namespace: sa.Namespace, Name: sa.Name, UID: string(sa.UID)})
 	if err != nil || identity.Execution.Name != first.Name {
 		t.Fatalf("immutable labels must select exactly one run, identity=%#v err=%v", identity, err)
@@ -273,7 +273,7 @@ func TestFindRunBySAReturnsErrRunNotRunning(t *testing.T) {
 		Labels: map[string]string{testManagedByLabel: testManagedByValue, testRunLabel: run.Name, testRunNamespaceLabel: run.Namespace, testRunUIDLabel: string(run.UID)},
 	}}
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(run, sa).Build()
-	finder := gateway.NewK8sRunFinder(c, testAgentsNamespace)
+	finder := gateway.NewAuthenticator(nil, "", c, testAgentsNamespace)
 	_, err := finder.Find(context.Background(), gateway.ServiceAccountIdentity{Namespace: testAgentsNamespace, Name: testSecondServiceAccount, UID: "service-account-uid-002"})
 	if err != gateway.ErrRunNotRunning {
 		t.Errorf("err = %v, want ErrRunNotRunning", err)
@@ -291,40 +291,37 @@ func TestFindRunRejectsCancelledRunningRun(t *testing.T) {
 		Labels: map[string]string{testManagedByLabel: testManagedByValue, testRunLabel: run.Name, testRunNamespaceLabel: run.Namespace, testRunUIDLabel: string(run.UID)},
 	}}
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(run, sa).Build()
-	_, err := gateway.NewK8sRunFinder(c, testAgentsNamespace).Find(context.Background(), gateway.ServiceAccountIdentity{Namespace: sa.Namespace, Name: sa.Name, UID: string(sa.UID)})
+	_, err := gateway.NewAuthenticator(nil, "", c, testAgentsNamespace).Find(context.Background(), gateway.ServiceAccountIdentity{Namespace: sa.Namespace, Name: sa.Name, UID: string(sa.UID)})
 	if err != gateway.ErrRunNotRunning {
 		t.Fatalf("Find() error = %v, want ErrRunNotRunning", err)
 	}
 }
 
-func TestK8sTokenValidatorAuthenticates(t *testing.T) {
-	clientset := k8sfake.NewSimpleClientset()
-	clientset.PrependReactor("create", "tokenreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
-		review := &authv1.TokenReview{
-			Status: authv1.TokenReviewStatus{
-				Authenticated: true,
-				User: authv1.UserInfo{
-					Username: "system:serviceaccount:sproozi-agents:sproozi-abc123", UID: "service-account-uid",
-				},
-			},
-		}
-		return true, review, nil
-	})
-
-	v := gateway.NewK8sTokenValidator(clientset, "sproozi-model-gateway")
-	identity, err := v.Validate(context.Background(), "valid-token")
-	if err != nil {
-		t.Fatalf("Validate() error = %v", err)
-	}
-	if identity.Namespace != testAgentsNamespace {
-		t.Errorf("Namespace = %q, want %q", identity.Namespace, testAgentsNamespace)
-	}
-	if identity.Name != "sproozi-abc123" || identity.UID != "service-account-uid" {
-		t.Errorf("identity = %#v, want complete ServiceAccount identity", identity)
+func TestAuthenticateResolvesTokenReviewSubjectToItsRun(t *testing.T) {
+	f := managedExecution(t, true)
+	for _, tc := range []struct {
+		name, uid string
+		want      error
+	}{{"complete subject", f.subject.UID, nil}, {"missing UID", "", gateway.ErrTokenInvalid}} {
+		t.Run(tc.name, func(t *testing.T) {
+			clientset := k8sfake.NewSimpleClientset()
+			clientset.PrependReactor("create", "tokenreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
+				return true, &authv1.TokenReview{Status: authv1.TokenReviewStatus{Authenticated: true, User: authv1.UserInfo{
+					Username: "system:serviceaccount:" + f.subject.Namespace + ":" + f.subject.Name, UID: tc.uid,
+				}}}, nil
+			})
+			grant, err := gateway.NewAuthenticator(clientset, "sproozi-gateway", f.kube, testAgentsNamespace).Authenticate(context.Background(), "valid-token")
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("Authenticate() error = %v, want %v", err, tc.want)
+			}
+			if tc.want == nil && (grant.Authority.Name != f.subject.Name || grant.Authority.UID != f.subject.UID || grant.Execution.UID != fixtureExecutionUID) {
+				t.Errorf("grant = %#v, want the complete ServiceAccount subject and its run", grant)
+			}
+		})
 	}
 }
 
-func TestK8sTokenValidatorReturnsErrTokenInvalidWhenNotAuthenticated(t *testing.T) {
+func TestAuthenticateReturnsErrTokenInvalidWhenNotAuthenticated(t *testing.T) {
 	clientset := k8sfake.NewSimpleClientset()
 	clientset.PrependReactor("create", "tokenreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		review := &authv1.TokenReview{
@@ -335,14 +332,14 @@ func TestK8sTokenValidatorReturnsErrTokenInvalidWhenNotAuthenticated(t *testing.
 		return true, review, nil
 	})
 
-	v := gateway.NewK8sTokenValidator(clientset, "sproozi-model-gateway")
-	_, err := v.Validate(context.Background(), "invalid-token")
+	v := gateway.NewAuthenticator(clientset, "sproozi-model-gateway", fake.NewClientBuilder().WithScheme(testScheme(t)).Build(), testAgentsNamespace)
+	_, err := v.Authenticate(context.Background(), "invalid-token")
 	if err != gateway.ErrTokenInvalid {
 		t.Errorf("err = %v, want ErrTokenInvalid", err)
 	}
 }
 
-func TestK8sTokenValidatorReturnsErrNotServiceAccountForNonSAUser(t *testing.T) {
+func TestAuthenticateReturnsErrNotServiceAccountForNonSAUser(t *testing.T) {
 	clientset := k8sfake.NewSimpleClientset()
 	clientset.PrependReactor("create", "tokenreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		review := &authv1.TokenReview{
@@ -356,8 +353,8 @@ func TestK8sTokenValidatorReturnsErrNotServiceAccountForNonSAUser(t *testing.T) 
 		return true, review, nil
 	})
 
-	v := gateway.NewK8sTokenValidator(clientset, "sproozi-model-gateway")
-	_, err := v.Validate(context.Background(), "node-token")
+	v := gateway.NewAuthenticator(clientset, "sproozi-model-gateway", fake.NewClientBuilder().WithScheme(testScheme(t)).Build(), testAgentsNamespace)
+	_, err := v.Authenticate(context.Background(), "node-token")
 	if err != gateway.ErrNotServiceAccount {
 		t.Errorf("err = %v, want ErrNotServiceAccount", err)
 	}

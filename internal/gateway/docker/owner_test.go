@@ -73,7 +73,7 @@ func newOwner(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	f := &fixture{owner: owner, ledger: ledger, config: config, observer: observer, instance: instance,
-		launch: session.Launch{Harness: harness.NativeCodex, SessionID: "session-1", OperationID: "move-1", AllocationID: allocationID, Epoch: 1, Placement: "local", ThreadID: observedNativeUUID, InstructionDigest: fmt.Sprintf("%x", sha256.Sum256([]byte(instructions))), Deadline: time.Now().Add(time.Hour), CheckpointDigest: strings.Repeat("b", 64), Allowances: map[string]session.Allowance{modelCapability: {Units: session.Limit{Bounded: true, Value: 5}, CostMicros: session.Limit{Bounded: true, Value: 50}}}}}
+		launch: session.Launch{Harness: harness.NativeCodex, ExecutionID: "session-1", OperationID: "move-1", AllocationID: allocationID, Epoch: 1, Placement: "local", ThreadID: observedNativeUUID, InstructionDigest: fmt.Sprintf("%x", sha256.Sum256([]byte(instructions))), Deadline: time.Now().Add(time.Hour), CheckpointDigest: strings.Repeat("b", 64), Allowances: map[string]session.Allowance{modelCapability: {Units: session.Limit{Bounded: true, Value: 5}, CostMicros: session.Limit{Bounded: true, Value: 50}}}}}
 	t.Cleanup(func() { _ = f.owner.Close(); _ = f.ledger.Close() })
 	return f
 }
@@ -106,11 +106,11 @@ func TestLocalOwnerActivationReservationRevocationAndReceipt(t *testing.T) {
 	if grant.Execution.Backend != gateway.BackendDocker || grant.Execution.UID != f.instance.ResourceUID {
 		t.Fatal("grant did not bind actual Docker incarnation")
 	}
-	meter, err := grant.Meter(budget.NewTrackerWithLedger(f.ledger), api.CapabilityModelInference)
+	meter, err := grant.Meter(t.Context(), budget.NewTrackerWithLedger(f.ledger), api.CapabilityModelInference)
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, err := meter.Reserve(4, 40)
+	r, err := meter.Reserve(t.Context(), 4, 40)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +137,7 @@ func TestLocalOwnerActivationReservationRevocationAndReceipt(t *testing.T) {
 	if err = f.owner.Activate(t.Context(), f.launch, f.instance); err == nil {
 		t.Fatal("revoked execution reopened")
 	}
-	if _, err = meter.Reserve(1, 1); err == nil {
+	if _, err = meter.Reserve(t.Context(), 1, 1); err == nil {
 		t.Fatal("sealed account admitted usage")
 	}
 }
@@ -152,11 +152,11 @@ func TestLocalOwnerRestartRetainsGrantAndAccounting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	meter, err := grant.Meter(budget.NewTrackerWithLedger(f.ledger), api.CapabilityModelInference)
+	meter, err := grant.Meter(t.Context(), budget.NewTrackerWithLedger(f.ledger), api.CapabilityModelInference)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = meter.Spend(2, 20); err != nil {
+	if err = meter.Spend(t.Context(), 2, 20); err != nil {
 		t.Fatal(err)
 	}
 	if err = f.owner.Close(); err != nil {
@@ -178,11 +178,11 @@ func TestLocalOwnerRestartRetainsGrantAndAccounting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	meter, err = grant.Meter(budget.NewTrackerWithLedger(f.ledger), api.CapabilityModelInference)
+	meter, err = grant.Meter(t.Context(), budget.NewTrackerWithLedger(f.ledger), api.CapabilityModelInference)
 	if err != nil {
 		t.Fatal(err)
 	}
-	state, err := meter.State()
+	state, err := meter.State(t.Context())
 	if err != nil || state.UnitsUsed != 2 || state.CostMicros != 20 {
 		t.Fatalf("restart lost usage: %+v %v", state, err)
 	}
@@ -247,7 +247,7 @@ func TestLocalOwnerRecordLossCannotResetAnAllocation(t *testing.T) {
 				if _, err = f.owner.Authenticate(t.Context(), token); err == nil {
 					t.Fatal("deleted registry authenticated")
 				}
-			} else if _, err = grant.Meter(budget.NewTrackerWithLedger(f.ledger), api.CapabilityModelInference); err == nil {
+			} else if _, err = grant.Meter(t.Context(), budget.NewTrackerWithLedger(f.ledger), api.CapabilityModelInference); err == nil {
 				t.Fatal("deleted ledger authorized")
 			}
 		})
@@ -295,11 +295,10 @@ func TestInitialOwnerBindsNativeWithEquivalentEmptyIgnoredSelection(t *testing.T
 	f.initialized(t)
 	f.launch.IncludeIgnored = []string{}
 	bound, err := f.owner.BindNative(t.Context(), f.launch, f.instance, observedNativeUUID)
-	if err != nil || bound.IncludeIgnored != nil {
-		t.Fatalf("empty ignored native binding: %+v %v", bound.IncludeIgnored, err)
+	if err != nil || bound != observedNativeUUID {
+		t.Fatalf("empty ignored native binding: %q %v", bound, err)
 	}
-	bound.IncludeIgnored = []string{}
-	if err = f.owner.Revoke(t.Context(), bound, f.instance); err != nil {
+	if err = f.owner.Revoke(t.Context(), f.launch, f.instance); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -325,8 +324,8 @@ func TestLocalOwnerIgnoredSelectionCannotChangeOnRetryOrNativeBinding(t *testing
 		t.Fatalf("original ignored selection lost: equal=%v err=%v", retry == token, err)
 	}
 	bound, err := f.owner.BindNative(t.Context(), f.launch, f.instance, actual)
-	if err != nil || len(bound.IncludeIgnored) != 1 || bound.IncludeIgnored[0] != selectedIgnoredFile {
-		t.Fatalf("observed native binding lost ignored selection: %+v %v", bound.IncludeIgnored, err)
+	if err != nil || bound != actual {
+		t.Fatalf("observed native binding with original ignored selection: %q %v", bound, err)
 	}
 }
 
@@ -352,20 +351,20 @@ func TestInitialAllocationBindsOneObservedNativeUUID(t *testing.T) {
 	}
 	actual := observedNativeUUID
 	bound, err := f.owner.BindNative(t.Context(), original, f.instance, actual)
-	if err != nil || bound.ThreadID != actual {
-		t.Fatalf("bind: %+v %v", bound, err)
+	if err != nil || bound != actual {
+		t.Fatalf("bind: %q %v", bound, err)
 	}
 	retry, err := f.owner.BindNative(t.Context(), original, f.instance, actual)
-	if err != nil || retry.ThreadID != actual {
-		t.Fatalf("bind retry: %+v %v", retry, err)
+	if err != nil || retry != actual {
+		t.Fatalf("bind retry: %q %v", retry, err)
 	}
 	if _, err = f.owner.BindNative(t.Context(), original, f.instance, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"); err == nil {
 		t.Fatal("native UUID rebound")
 	}
-	if err = f.owner.Revoke(t.Context(), bound, f.instance); err != nil {
+	if err = f.owner.Revoke(t.Context(), original, f.instance); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = f.owner.Seal(t.Context(), bound, f.instance); err != nil {
+	if _, err = f.owner.Seal(t.Context(), original, f.instance); err != nil {
 		t.Fatal(err)
 	}
 }

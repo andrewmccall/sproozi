@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"maps"
@@ -72,6 +73,13 @@ func (g *ExecutionGrant) Validate() error {
 	return nil
 }
 
+// Permits reports whether both the execution and its live policy grant the
+// capability. The Dispatcher checks it for fixed routes; MCP checks it once the
+// server name has selected the capability.
+func (g *ExecutionGrant) Permits(capability api.CapabilityKind) bool {
+	return slices.Contains(g.Capabilities, capability) && slices.Contains(g.Policy.Spec.AllowedCapabilities, capability)
+}
+
 // Clone freezes administrator-owned input before the transport retains it.
 func (g *ExecutionGrant) Clone() *ExecutionGrant {
 	if g == nil {
@@ -113,7 +121,7 @@ func tighter(policy, allocation int64) int64 {
 }
 
 // Meter selects the account and limits together for every capability entrypoint.
-func (g *ExecutionGrant) Meter(tracker *budget.Tracker, cap api.CapabilityKind) (*budget.Meter, error) {
+func (g *ExecutionGrant) Meter(ctx context.Context, tracker *budget.Tracker, cap api.CapabilityKind) (*budget.Meter, error) {
 	limits, configured, err := g.BudgetLimits(cap)
 	if err != nil || !configured {
 		return nil, err
@@ -123,7 +131,7 @@ func (g *ExecutionGrant) Meter(tracker *budget.Tracker, cap api.CapabilityKind) 
 	}
 	if g.Managed {
 		meter := tracker.InitializedMeter(g.Allocations[cap].AccountKey, limits)
-		if _, err := meter.State(); err != nil {
+		if _, err := meter.State(ctx); err != nil {
 			return nil, err
 		}
 		return meter, nil

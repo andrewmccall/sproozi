@@ -6,6 +6,8 @@ Reconciled: 2026-10-12
 Implementation: Codex core/extended and Claude Code production round trips passed
 Sequencing: fulfilled; retained as historical rationale
 
+Partly superseded: [ADR 0015](0015-default-clients-and-native-tool-schemas.md) replaces the use of pinned harness versions. Selected native state and the shared execution and permission boundaries remain in effect.
+
 ## Problem and constraints
 
 Existing Codex, Claude Code, OpenCode and Hermes launch support did not establish
