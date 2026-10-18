@@ -260,6 +260,12 @@ Don't remove the finalizer or force-delete the Pod: Sproozi then can't tell
 whether the agent stopped, so the allowance stays held and the session can't
 move.
 
+Local Docker visits remove their `spz-...` containers and workspace volume
+after the stop and finalized usage are saved. A visit whose usage is still
+unknown keeps its containers until a retried cancel or recover finalizes it.
+Don't remove a visit's containers by hand before then: Sproozi treats a missing
+container it did not remove as an unknown stop.
+
 Cancellation forces the execution to stop:
 
 ```sh
