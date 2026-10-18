@@ -17,6 +17,7 @@ import (
 )
 
 func TestWorkHTTPAndMCPShareActionableRejections(t *testing.T) {
+	t.Parallel()
 	c, _ := projectFixture(t)
 	o, err := Open(c)
 	if err != nil {
@@ -72,6 +73,7 @@ func (p refusedPlacement) CreateInitial(context.Context, session.Launch, []byte)
 }
 
 func TestWorkStatusRetainsSafeAsyncRecoveryCategory(t *testing.T) {
+	t.Parallel()
 	c, p := fixture(t)
 	c.Backend = refusedPlacement{p}
 	o, err := Open(c)
@@ -90,6 +92,7 @@ func TestWorkStatusRetainsSafeAsyncRecoveryCategory(t *testing.T) {
 }
 
 func TestExportProjectMetadataRejectionsRemainUnsupported(t *testing.T) {
+	t.Parallel()
 	c, _ := projectFixture(t)
 	o, err := Open(c)
 	if err != nil {

@@ -11,6 +11,7 @@ import (
 )
 
 func TestMCPDiscoveryAndSessionListingUseObjectSchemas(t *testing.T) {
+	t.Parallel()
 	c, _ := projectFixture(t)
 	o, err := Open(c)
 	if err != nil {

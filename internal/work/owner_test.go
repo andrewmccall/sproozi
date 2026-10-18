@@ -2,9 +2,11 @@
 package work
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -115,14 +117,44 @@ func (p *fixturePlacement) Stop(ctx context.Context, l session.Launch, i session
 	}
 	return s, nil
 }
-func fixture(t *testing.T) (Config, *fixturePlacement) {
-	t.Helper()
-	repo, home := t.TempDir(), t.TempDir()
+
+// template is the Git snapshot and stopped checkpoint every fixture starts
+// from. It is built once per test binary; each test gets a private copy of
+// the repository, so tests cannot change one another's snapshot.
+var template struct {
+	once sync.Once
+	root string
+	repo string
+	data []byte
+	meta checkpoint.Metadata
+	err  error
+}
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if template.root != "" {
+		_ = os.RemoveAll(template.root)
+	}
+	os.Exit(code)
+}
+
+func buildTemplate() error {
+	root, err := os.MkdirTemp("", "sproozi-work-fixture-")
+	if err != nil {
+		return err
+	}
+	template.root = root
+	repo, home := filepath.Join(root, "repository"), filepath.Join(root, "home")
+	for _, dir := range []string{repo, home} {
+		if err = os.Mkdir(dir, 0700); err != nil {
+			return err
+		}
+	}
 	for _, args := range [][]string{{"init", quietArg, "--template=", repo}, {"-C", repo, "-c", "user.name=Fixture", "-c", "user.email=fixture@invalid", "commit", quietArg, "--allow-empty", "-m", "Fixture"}} {
 		cmd := exec.Command("git", args...)
 		cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null"}
 		if out, e := cmd.CombinedOutput(); e != nil {
-			t.Fatalf("Git fixture: %v %s", e, out)
+			return fmt.Errorf("git fixture: %w %s", e, out)
 		}
 	}
 	rollout := `{"type":"session_meta","payload":{"id":"` + testThread + `","cli_version":"0.161.0","cwd":"/workspace/session/workspace"}}` + "\n" +
@@ -130,16 +162,33 @@ func fixture(t *testing.T) (Config, *fixturePlacement) {
 		`{"type":"event_msg","payload":{"type":"task_started","turn_id":"task-turn"}}` + "\n" +
 		`{"type":"event_msg","payload":{"type":"task_complete","turn_id":"task-turn","last_agent_message":"` + testResult + `"}}` + "\n"
 	state := harness.CodexState{ThreadID: testThread, Path: "sessions/2026/10/12/rollout-2026-10-12T12-00-00-" + testThread + ".jsonl", Rollout: []byte(rollout)}
-	if e := harness.RestoreCodexState(home, state, testLimit); e != nil {
-		t.Fatal(e)
+	if err = harness.RestoreCodexState(home, state, testLimit); err != nil {
+		return err
 	}
-	data, meta, e := checkpoint.CaptureStopped(t.Context(), harness.NativeCodex, home, repo, testThread, nil, testLimit)
-	if e != nil {
-		t.Fatal(e)
+	template.data, template.meta, err = checkpoint.CaptureStopped(context.Background(), harness.NativeCodex, home, repo, testThread, nil, testLimit)
+	template.repo = repo
+	return err
+}
+
+func fixture(t *testing.T) (Config, *fixturePlacement) {
+	t.Helper()
+	template.once.Do(func() { template.err = buildTemplate() })
+	if template.err != nil {
+		t.Fatalf("build fixture template: %v", template.err)
 	}
-	p := &fixturePlacement{data: data, meta: meta}
-	c := Config{Directory: filepath.Join(t.TempDir(), "catalog"), Principal: "hermes", Harness: harness.NativeCodex, Placement: executorKubernetes, InstructionDigest: hash([]byte(testInstructions)), Allowances: map[string]session.Allowance{fixtureModel: {Units: session.Limit{Bounded: true, Value: 100}}}, MaxDuration: time.Minute, MaxCheckpointBytes: testLimit, Repositories: map[string]Repository{repositorySproozi: {Snapshot: repo}}, Backend: p}
-	return c, p
+	repo := filepath.Join(t.TempDir(), "repository")
+	if err := os.CopyFS(repo, os.DirFS(template.repo)); err != nil {
+		t.Fatal(err)
+	}
+	p := &fixturePlacement{data: bytes.Clone(template.data), meta: template.meta}
+	return fixtureConfig(t, repo, p), p
+}
+
+// fixtureConfig is the owner configuration for a snapshot repository. It runs
+// no Git, so tests of configuration validation need no repository.
+func fixtureConfig(t *testing.T, repo string, p *fixturePlacement) Config {
+	t.Helper()
+	return Config{Directory: filepath.Join(t.TempDir(), "catalog"), Principal: "hermes", Harness: harness.NativeCodex, Placement: executorKubernetes, InstructionDigest: hash([]byte(testInstructions)), Allowances: map[string]session.Allowance{fixtureModel: {Units: session.Limit{Bounded: true, Value: 100}}}, MaxDuration: time.Minute, MaxCheckpointBytes: testLimit, Repositories: map[string]Repository{repositorySproozi: {Snapshot: repo}}, Backend: p}
 }
 func submit(t *testing.T, o *Owner) View {
 	t.Helper()
@@ -196,6 +245,7 @@ func assertRemoteSubmissionReplay(t *testing.T, o *Owner, q Submit, v View) {
 }
 
 func TestRemoteCatalogueRetainsCompletionAndExclusiveClaimAcrossRestart(t *testing.T) {
+	t.Parallel()
 	c, p := fixture(t)
 	o, e := Open(c)
 	if e != nil {
@@ -253,6 +303,7 @@ func TestRemoteCatalogueRetainsCompletionAndExclusiveClaimAcrossRestart(t *testi
 	}
 }
 func TestUnknownStopOrAccountingCannotExport(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"fence", "accounting"} {
 		t.Run(name, func(t *testing.T) {
 			c, p := fixture(t)
@@ -272,6 +323,7 @@ func TestUnknownStopOrAccountingCannotExport(t *testing.T) {
 	}
 }
 func TestLostStopReplyRecoversWithoutReactivation(t *testing.T) {
+	t.Parallel()
 	c, p := fixture(t)
 	p.lostStop = true
 	o, e := Open(c)
@@ -292,6 +344,7 @@ func TestLostStopReplyRecoversWithoutReactivation(t *testing.T) {
 	}
 }
 func TestTaskCredentialCannotClaimHomeOwnership(t *testing.T) {
+	t.Parallel()
 	c, _ := fixture(t)
 	o, e := Open(c)
 	if e != nil {
@@ -320,6 +373,7 @@ func TestTaskCredentialCannotClaimHomeOwnership(t *testing.T) {
 }
 
 func TestSubmissionReplayDoesNotWaitForHeldNativeWork(t *testing.T) {
+	t.Parallel()
 	c, p := fixture(t)
 	release := make(chan struct{})
 	p.heldStop = release
@@ -378,6 +432,7 @@ func TestSubmissionReplayDoesNotWaitForHeldNativeWork(t *testing.T) {
 }
 
 func TestCatalogueRejectsReusedDirectoryForAnotherPrincipal(t *testing.T) {
+	t.Parallel()
 	c, _ := fixture(t)
 	o, err := Open(c)
 	if err != nil {
@@ -396,6 +451,7 @@ func TestCatalogueRejectsReusedDirectoryForAnotherPrincipal(t *testing.T) {
 	}
 }
 func TestCancellationObservesIncarnationAfterLostPreparationReply(t *testing.T) {
+	t.Parallel()
 	c, p := fixture(t)
 	p.lostInitial = true
 	o, err := Open(c)
