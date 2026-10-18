@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -100,7 +101,33 @@ func (p *retainedBackend) Abort(_ context.Context, l session.Launch, i session.I
 func artifact(t *testing.T) ([]byte, string) {
 	return artifactKind(t, harness.NativeCodex)
 }
+// builtArtifact is one native kind's stopped checkpoint fixture.
+type builtArtifact struct {
+	once   sync.Once
+	built  bool
+	data   []byte
+	digest string
+}
+
+// artifacts caches each native kind's fixture checkpoint. Its Git capture is
+// slow, so each kind is built once per test binary.
+var artifacts sync.Map // harness.NativeKind -> *builtArtifact
+
 func artifactKind(t *testing.T, kind harness.NativeKind) ([]byte, string) {
+	t.Helper()
+	value, _ := artifacts.LoadOrStore(kind, &builtArtifact{})
+	a := value.(*builtArtifact)
+	a.once.Do(func() {
+		a.data, a.digest = buildArtifactKind(t, kind)
+		a.built = true
+	})
+	if !a.built {
+		t.Fatalf("%s fixture checkpoint failed to build in another test", kind)
+	}
+	return bytes.Clone(a.data), a.digest
+}
+
+func buildArtifactKind(t *testing.T, kind harness.NativeKind) ([]byte, string) {
 	t.Helper()
 	repo, home := t.TempDir(), t.TempDir()
 	run := func(args ...string) {
@@ -193,6 +220,7 @@ func fixture(t *testing.T) (*Client, *retainedBackend, *httptest.Server, session
 }
 
 func TestIgnoredSelectionCrossesTLSAndBindsReplay(t *testing.T) {
+	t.Parallel()
 	c, _, _, l, data := fixture(t)
 	l.IncludeIgnored = []string{testIgnoredFile}
 	i, err := c.Prepare(t.Context(), l, data)
@@ -221,6 +249,7 @@ func TestIgnoredSelectionCrossesTLSAndBindsReplay(t *testing.T) {
 }
 
 func TestPlacementActionsPreserveIdentityAndSealedCheckpoint(t *testing.T) {
+	t.Parallel()
 	c, b, _, l, data := fixture(t)
 	ctx := context.Background()
 	o, err := c.Inspect(ctx, l)
@@ -262,6 +291,7 @@ func remoteCode(t *testing.T, err error, code Code, status int) {
 	}
 }
 func TestUnknownAndSemanticFailureStayDistinct(t *testing.T) {
+	t.Parallel()
 	c, b, _, l, _ := fixture(t)
 	ctx := context.Background()
 	b.failure = &Rejection{Code: CodeConflict}
@@ -289,6 +319,7 @@ func TestUnknownAndSemanticFailureStayDistinct(t *testing.T) {
 }
 
 func TestStopCanSealExpiredOriginalLaunch(t *testing.T) {
+	t.Parallel()
 	c, b, _, l, data := fixture(t)
 	l.Deadline = time.Now().Add(-time.Second).UTC()
 	i := session.Incarnation{ExecutionID: l.AllocationID, ResourceUID: uuid.NewString()}
@@ -303,6 +334,7 @@ func TestStopCanSealExpiredOriginalLaunch(t *testing.T) {
 // unsealed usage arrives as a stopped result plus ErrUsageUnsealed, never as an
 // unknown stop or as a receipt.
 func TestStopReportsFencedWriterWithUnsealedUsage(t *testing.T) {
+	t.Parallel()
 	c, b, _, l, _ := fixture(t)
 	i := session.Incarnation{ExecutionID: l.AllocationID, ResourceUID: uuid.NewString()}
 	b.state = session.Observation{Launch: l, Incarnation: i, State: session.PlacementActive}
@@ -321,6 +353,7 @@ func TestStopReportsFencedWriterWithUnsealedUsage(t *testing.T) {
 }
 
 func TestAdmissionRejectsImmutableIntentWidening(t *testing.T) {
+	t.Parallel()
 	c, b, _, original, data := fixture(t)
 	cases := map[string]func(*session.Launch){
 		"units": func(l *session.Launch) {
@@ -393,6 +426,7 @@ func raw(t *testing.T, s *httptest.Server, path string, data []byte, headers map
 	return resp.StatusCode, body, resp.Header
 }
 func TestHTTPBoundaryRejectsMalformedAndBrowserRequests(t *testing.T) {
+	t.Parallel()
 	_, b, s, l, data := fixture(t)
 	valid, err := json.Marshal(request{Version: protocolVersion, Launch: l, Checkpoint: data})
 	if err != nil {
@@ -441,6 +475,7 @@ func TestHTTPBoundaryRejectsMalformedAndBrowserRequests(t *testing.T) {
 }
 
 func TestClientRequiresVerifiedTLSAndFixedOrigin(t *testing.T) {
+	t.Parallel()
 	token := tokenFile(t)
 	for _, origin := range []string{"http://example.com", "https://user:pass@example.com", "https://example.com/path", "https://example.com?q=1", "https://example.com/#fragment"} {
 		if _, err := NewClient(ClientConfig{URL: origin, TokenFile: token, MaxCheckpointBytes: testMax}); err == nil {
@@ -469,6 +504,7 @@ func TestClientRequiresVerifiedTLSAndFixedOrigin(t *testing.T) {
 }
 
 func TestClientRejectsRedirectAndInvalidBackendResults(t *testing.T) {
+	t.Parallel()
 	l := launch(strings.Repeat("c", 64))
 	token := tokenFile(t)
 	targetCalls := 0
@@ -517,6 +553,7 @@ func TestClientRejectsRedirectAndInvalidBackendResults(t *testing.T) {
 }
 
 func TestProfileExplicitClaudeKindAndCheckpointCompatibility(t *testing.T) {
+	t.Parallel()
 	data, digest := artifactKind(t, harness.NativeClaude)
 	l := launch(digest)
 	l.Harness = harness.NativeClaude
