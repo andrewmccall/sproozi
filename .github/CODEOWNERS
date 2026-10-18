@@ -1,0 +1,13 @@
+# Changes to what CI executes, builds or installs need the maintainer's review.
+# See docs/adr/0021-pinned-ci-inputs-and-latest-client-canary.md.
+/.github/          @andrewmccall
+/hack/             @andrewmccall
+/config/           @andrewmccall
+/Makefile          @andrewmccall
+Dockerfile         @andrewmccall
+*.Dockerfile       @andrewmccall
+.dockerignore      @andrewmccall
+/go.mod            @andrewmccall
+/go.sum            @andrewmccall
+package.json       @andrewmccall
+package-lock.json  @andrewmccall
