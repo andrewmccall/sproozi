@@ -12,10 +12,12 @@ concurrency:
 permissions: {}
 
 jobs:
-  test:
+  # The race run proves everything a plain run does, so CI runs the unit
+  # packages once, under -race with coverage, split into two shards.
+  race-1:
     permissions:
       contents: read
-    name: Unit and integration tests
+    name: Generated code, vet and race tests (1 of 2)
     runs-on: ubuntu-latest
     steps:
       - name: Clone the code
@@ -28,13 +30,17 @@ jobs:
         with:
           go-version: '1.26.6'
 
-      - name: Running Tests
-        run: make test
+      - name: Check generated code, manifests and formatting
+        run: make verify-generated
+      - name: Run go vet
+        run: make vet
+      - name: Run race tests with coverage (test/ and internal/session)
+        run: make verify-race RACE_SHARD=1
 
-  race:
+  race-2:
     permissions:
       contents: read
-    name: Race tests and vet
+    name: Race tests (2 of 2)
     runs-on: ubuntu-latest
     steps:
       - name: Clone the code
@@ -47,8 +53,8 @@ jobs:
         with:
           go-version: '1.26.6'
 
-      - name: Run race tests and vet
-        run: make verify-fast
+      - name: Run race tests with coverage (all other packages)
+        run: make verify-race RACE_SHARD=2
 
   checks:
     permissions:

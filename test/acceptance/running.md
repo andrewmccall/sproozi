@@ -10,15 +10,19 @@ instructions describe how to run the existing drivers.
 ## Which command proves what
 
 Every verification target, what a pass establishes, and whether CI runs it.
-The `Tests` workflow runs three parallel jobs: `test` runs `make test`, `race`
-runs `make verify-fast`, and `checks` runs the remaining `Tests` rows in table
-order. `Lint` and `E2E` are separate workflows. `make help` prints the same
-summaries.
+The `Tests` workflow runs three parallel jobs. `race-1` runs
+`make verify-generated`, `make vet` and `make verify-race RACE_SHARD=1`;
+`race-2` runs `make verify-race RACE_SHARD=2`; and `checks` runs the remaining
+`Tests` rows in table order. The race run proves everything a plain run does,
+so CI does not run `make test`. `Lint` and `E2E` are separate workflows.
+`make help` prints the same summaries.
 
 | Target | A pass proves | CI | Needs |
 | --- | --- | --- | --- |
-| `make test` | After regenerating code and manifests, every non-e2e Go test passes: unit, rendered manifests, envtest API validation, integration and offline acceptance helpers. | Tests (`test`) | Go; downloads envtest binaries |
-| `make verify-fast` | The same packages pass under the race detector and `go vet` is clean, without regenerating sources. | Tests (`race`) | Go; downloads envtest binaries |
+| `make test` | After regenerating code and manifests, every non-e2e Go test passes: unit, rendered manifests, envtest API validation, integration and offline acceptance helpers. | No; CI runs the same packages under race | Go; downloads envtest binaries |
+| `make verify-generated` | Regenerating code and manifests and running `go fmt` leaves the tree unchanged, so committed generated files are current. Fails on any uncommitted change. | Tests (`race-1`) | Go, Git |
+| `make verify-fast` | `go vet` is clean and every non-e2e package passes under the race detector with coverage, without regenerating sources. | Tests (`race-1` and `race-2`, as `vet` and `verify-race`) | Go; downloads envtest binaries |
+| `make verify-race` | The race-and-coverage half of `verify-fast`. `RACE_SHARD=1` runs `test/` and `internal/session`, `RACE_SHARD=2` every other package; the two shards together cover every non-e2e package. | Tests (`race-1`, `race-2`) | Go; downloads envtest binaries |
 | `make verify-protocol` | Pinned `gh` and `git` clients produce the GitHub protocol the gateway inspects. Zero matched or skipped tests fail. | Tests (`checks`) | Downloads the checksum-pinned `gh` |
 | `make verify-mcp` | MCP and gateway packages pass under race, and the live MCP verifier's safety and failure reports pass offline. | Tests (`checks`) | Go, Python 3 |
 | `make verify-workflow-fixtures` | Session-mobility protocol fixtures, quickstart ownership and CRD checks, Kind bootstrap readiness ordering, Kind image import and build cache selection, and demo setup credential preservation and registry wiring. Stubs replace Docker and Kind. | Tests (`checks`) | Python 3, Bash; fetches the pinned Calico manifest into `.local/cni` on first run |
