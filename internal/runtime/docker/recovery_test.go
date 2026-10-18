@@ -49,6 +49,7 @@ func (a *accountingAuthority) Seal(ctx context.Context, _ session.Launch, i sess
 }
 
 func TestAbortedDockerRetriesExistingAccountingWithoutInitializing(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{transientFixtureAccount, missingFixtureAccount, "corrupt"} {
 		t.Run(name, func(t *testing.T) {
 			data := fixtureArtifact(t)
@@ -139,6 +140,7 @@ func TestAbortedDockerRetriesExistingAccountingWithoutInitializing(t *testing.T)
 }
 
 func TestClaudeGracefulStopRequiresPersistedAcknowledgement(t *testing.T) {
+	t.Parallel()
 	for _, lostReply := range []bool{false, true} {
 		name := "already-stopped"
 		if lostReply {
@@ -191,6 +193,7 @@ func TestClaudeGracefulStopRequiresPersistedAcknowledgement(t *testing.T) {
 }
 
 func TestClaudeDurableAcknowledgementSurvivesCaptureFailure(t *testing.T) {
+	t.Parallel()
 	f := newFakeDocker()
 	f.failCapture = true
 	a := &fakeAuthority{engine: f}
@@ -247,6 +250,7 @@ func TestClaudeDurableAcknowledgementSurvivesCaptureFailure(t *testing.T) {
 }
 
 func TestPartialInitialCancellationOnlyObservesAndFencesExistingResources(t *testing.T) {
+	t.Parallel()
 	for _, failedRole := range []string{roleAnchor, roleHelper, roleAgent} {
 		t.Run(failedRole, func(t *testing.T) {
 			f := newFakeDocker()
@@ -306,6 +310,7 @@ func TestPartialInitialCancellationOnlyObservesAndFencesExistingResources(t *tes
 }
 
 func TestPartialInitialCancellationRejectsReplacementOrUnavailableEngine(t *testing.T) {
+	t.Parallel()
 	f := newFakeDocker()
 	p := openFixture(t, t.TempDir(), f, &fakeAuthority{engine: f})
 	l := fixtureLaunch(t, fixtureArtifact(t))
@@ -347,6 +352,7 @@ func TestPartialInitialCancellationRejectsReplacementOrUnavailableEngine(t *test
 }
 
 func TestCoordinatorRecoversExactDockerActivationAfterLostReply(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	data := fixtureArtifact(t)
 	launch := fixtureLaunch(t, data)

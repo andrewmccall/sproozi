@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -381,7 +383,27 @@ func fixtureConfig() PlacementConfig {
 	limits := ResourceLimits{MemoryBytes: 128 << 20, CPUMilli: 500, PIDs: 64}
 	return PlacementConfig{Harness: harness.NativeCodex, Name: localVolumeDriver, NativeImageID: "sha256:" + strings.Repeat("a", 64), HelperImageID: "sha256:" + strings.Repeat("b", 64), AnchorImageID: "sha256:" + strings.Repeat("c", 64), NetworkName: fixtureBridge, GatewayIPv4: "192.168.65.254", GatewayPort: 8844, Instructions: fixtureInstructions, InstructionDigest: hash, AgentLimits: limits, HelperLimits: limits, AnchorLimits: limits, VolumeBytes: 64 << 20, MaxCheckpointBytes: 1 << 20, RetainedBytes: 8 << 20}
 }
+// builtArtifact is the stopped checkpoint every test starts from. Its Git
+// capture is slow, so it is built once per test binary.
+var builtArtifact struct {
+	once  sync.Once
+	built bool
+	data  []byte
+}
+
 func fixtureArtifact(t *testing.T) []byte {
+	t.Helper()
+	builtArtifact.once.Do(func() {
+		builtArtifact.data = buildFixtureArtifact(t)
+		builtArtifact.built = true
+	})
+	if !builtArtifact.built {
+		t.Fatal("fixture checkpoint failed to build in another test")
+	}
+	return bytes.Clone(builtArtifact.data)
+}
+
+func buildFixtureArtifact(t *testing.T) []byte {
 	t.Helper()
 	root := t.TempDir()
 	repo := filepath.Join(root, "repository")
@@ -443,6 +465,7 @@ func openFixture(t *testing.T, dir string, f *fakeDocker, a *fakeAuthority) *Pla
 }
 
 func TestIgnoredSelectionBindsDockerVisitAndFixedCapture(t *testing.T) {
+	t.Parallel()
 	data := fixtureArtifact(t)
 	l := fixtureLaunch(t, data)
 	l.IncludeIgnored = []string{"needed.bin", "cache/chosen.bin"}
@@ -480,6 +503,7 @@ func TestIgnoredSelectionBindsDockerVisitAndFixedCapture(t *testing.T) {
 }
 
 func TestPlacementDurablePrepareActivateStop(t *testing.T) {
+	t.Parallel()
 	data := fixtureArtifact(t)
 	l := fixtureLaunch(t, data)
 	f := newFakeDocker()
@@ -542,6 +566,7 @@ func TestPlacementDurablePrepareActivateStop(t *testing.T) {
 	}
 }
 func TestUnknownStopAndUsageNeverBecomeZero(t *testing.T) {
+	t.Parallel()
 	data := fixtureArtifact(t)
 	l := fixtureLaunch(t, data)
 	f := newFakeDocker()
@@ -567,6 +592,7 @@ func TestUnknownStopAndUsageNeverBecomeZero(t *testing.T) {
 	}
 }
 func TestIncarnationQuotaAndOwnerChecks(t *testing.T) {
+	t.Parallel()
 	data := fixtureArtifact(t)
 	l := fixtureLaunch(t, data)
 	f := newFakeDocker()
@@ -594,6 +620,7 @@ func TestIncarnationQuotaAndOwnerChecks(t *testing.T) {
 }
 
 func TestInitialNativeGateRejectionCanAbortWithoutActivationOrCheckpoint(t *testing.T) {
+	t.Parallel()
 	data := fixtureArtifact(t)
 	l := fixtureLaunch(t, data)
 	l.ThreadID, l.CheckpointDigest = "", ""
@@ -631,6 +658,7 @@ func TestInitialNativeGateRejectionCanAbortWithoutActivationOrCheckpoint(t *test
 }
 
 func TestFirstLocalSessionBindsGeneratedNativeUUID(t *testing.T) {
+	t.Parallel()
 	data := fixtureArtifact(t)
 	l := fixtureLaunch(t, data)
 	l.ThreadID = ""
@@ -667,6 +695,7 @@ func TestFirstLocalSessionBindsGeneratedNativeUUID(t *testing.T) {
 	}
 }
 func TestCaptureFailureKeepsActualStopAndBlocksActivation(t *testing.T) {
+	t.Parallel()
 	data := fixtureArtifact(t)
 	l := fixtureLaunch(t, data)
 	f := newFakeDocker()
@@ -698,6 +727,7 @@ func TestCaptureFailureKeepsActualStopAndBlocksActivation(t *testing.T) {
 }
 
 func TestNativeAcknowledgementIsNotAWriterFence(t *testing.T) {
+	t.Parallel()
 	data := fixtureArtifact(t)
 	l := fixtureLaunch(t, data)
 	f := newFakeDocker()
@@ -727,6 +757,7 @@ func TestNativeAcknowledgementIsNotAWriterFence(t *testing.T) {
 }
 
 func TestPreparedNativeLaunchCarriesTaskAndIndependentRolloutLimit(t *testing.T) {
+	t.Parallel()
 	data := fixtureArtifact(t)
 	engine := newFakeDocker()
 	p := openFixture(t, t.TempDir(), engine, &fakeAuthority{engine: engine})
