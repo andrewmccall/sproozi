@@ -224,24 +224,21 @@ func TestNetworkPolicyRemovesRoutesWhenLivePolicyTightens(t *testing.T) {
 		sprooziv1alpha1.CapabilityNetworkEgress,
 	}
 	policy := &sprooziv1alpha1.AgentPolicy{}
-	policy.Spec.AllowedCapabilities = slices.Clone(run.Spec.Capabilities)
-	if err := kubernetes.EnsureNetworkPolicy(context.Background(), c, run, policy); err != nil {
-		t.Fatal(err)
-	}
-	policy.Spec.AllowedCapabilities = []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityModelInference}
-	if err := kubernetes.EnsureNetworkPolicy(context.Background(), c, run, policy); err != nil {
-		t.Fatal(err)
-	}
-	var np networkingv1.NetworkPolicy
-	if err := c.Get(context.Background(), client.ObjectKey{Namespace: kubernetes.AgentsNamespace, Name: kubernetes.RunName(run.UID)}, &np); err != nil {
-		t.Fatal(err)
-	}
-	for _, rule := range np.Spec.Egress {
-		for _, port := range rule.Ports {
-			if port.Port != nil && (port.Port.IntVal == 8081 || port.Port.IntVal == 8082) {
-				t.Fatalf("revoked policy route remained on port %d", port.Port.IntVal)
-			}
+	for _, step := range []struct {
+		allowed []sprooziv1alpha1.CapabilityKind
+		gateway bool
+	}{
+		{allowed: slices.Clone(run.Spec.Capabilities), gateway: true},
+		// One requested capability is still allowed, so the gateway route stays.
+		{allowed: []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityModelInference}, gateway: true},
+		// No requested capability is allowed any more, so only DNS remains.
+		{allowed: []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityKubernetesRead}, gateway: false},
+	} {
+		policy.Spec.AllowedCapabilities = step.allowed
+		if err := kubernetes.EnsureNetworkPolicy(context.Background(), c, run, policy); err != nil {
+			t.Fatal(err)
 		}
+		assertEgressRoutes(t, c, run, step.gateway)
 	}
 }
 
@@ -263,20 +260,46 @@ func TestEnsureNetworkPolicyTightensExistingRoutes(t *testing.T) {
 	if err := kubernetes.EnsureNetworkPolicy(context.Background(), c, run); err != nil {
 		t.Fatal(err)
 	}
-	run.Spec.Capabilities = []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityModelInference}
+	assertEgressRoutes(t, c, run, true)
+	// The existing policy is updated in place, not left with its old routes.
+	run.Spec.Capabilities = nil
 	if err := kubernetes.EnsureNetworkPolicy(context.Background(), c, run); err != nil {
 		t.Fatal(err)
 	}
+	assertEgressRoutes(t, c, run, false)
+}
+
+// assertEgressRoutes checks the run's stored egress rules exactly: the kube-dns
+// rule always, followed by the shared gateway route only when gateway is true.
+func assertEgressRoutes(t *testing.T, c client.Client, run *sprooziv1alpha1.AgentRun, gateway bool) {
+	t.Helper()
 	var np networkingv1.NetworkPolicy
 	if err := c.Get(context.Background(), client.ObjectKey{Namespace: kubernetes.AgentsNamespace, Name: kubernetes.RunName(run.UID)}, &np); err != nil {
 		t.Fatal(err)
 	}
-	for _, rule := range np.Spec.Egress {
-		for _, port := range rule.Ports {
-			if port.Port != nil && port.Port.IntVal == 8082 {
-				t.Fatal("revoked network.egress route remained")
-			}
-		}
+	want := 1
+	if gateway {
+		want = 2
+	}
+	if len(np.Spec.Egress) != want {
+		t.Fatalf("egress rules = %+v, want %d", np.Spec.Egress, want)
+	}
+	dns := np.Spec.Egress[0]
+	if len(dns.Ports) != 2 || len(dns.To) != 1 ||
+		*dns.Ports[0].Protocol != corev1.ProtocolUDP || dns.Ports[0].Port.IntVal != 53 ||
+		*dns.Ports[1].Protocol != corev1.ProtocolTCP || dns.Ports[1].Port.IntVal != 53 ||
+		dns.To[0].PodSelector == nil || dns.To[0].PodSelector.MatchLabels["k8s-app"] != "kube-dns" {
+		t.Fatalf("first egress rule = %+v, want kube-dns on UDP and TCP 53", dns)
+	}
+	if !gateway {
+		return
+	}
+	route := np.Spec.Egress[1]
+	if len(route.Ports) != 1 || len(route.To) != 1 ||
+		*route.Ports[0].Protocol != corev1.ProtocolTCP || route.Ports[0].Port.IntVal != 8443 ||
+		route.To[0].NamespaceSelector == nil || route.To[0].NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"] != "sproozi-system" ||
+		route.To[0].PodSelector == nil || route.To[0].PodSelector.MatchLabels["app.kubernetes.io/component"] != "shared-gateway" {
+		t.Fatalf("second egress rule = %+v, want the shared gateway Pods on TCP 8443", route)
 	}
 }
 

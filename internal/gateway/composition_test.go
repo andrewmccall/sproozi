@@ -91,8 +91,16 @@ func TestEndpointBudgetStopsUpstreamAndKeepsCapabilitiesSeparate(t *testing.T) {
 	if got := request(); got == http.StatusOK || calls.Load() != 1 {
 		t.Fatalf("exhausted budget forwarded: status=%d calls=%d", got, calls.Load())
 	}
-	// A separate capability does not inherit this endpoint's consumption.
-	meter := tracker.Meter(id.Execution.UID+"/model.inference", sprooziv1alpha1.EndpointBudget{MaxUnits: 1})
+	// A separate capability does not inherit this endpoint's consumption: the
+	// grant selects another account on the same tracker, still unspent.
+	id.Policy.Spec.Budgets[sprooziv1alpha1.CapabilityModelInference] = sprooziv1alpha1.EndpointBudget{MaxUnits: 1}
+	meter, err := id.Meter(t.Context(), tracker, sprooziv1alpha1.CapabilityModelInference)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state, err := meter.State(t.Context()); err != nil || state.UnitsUsed != 0 {
+		t.Fatalf("model.inference account after kubernetes.read exhaustion: %+v %v", state, err)
+	}
 	if err := meter.Spend(t.Context(), 1, 0); err != nil {
 		t.Fatal(err)
 	}
