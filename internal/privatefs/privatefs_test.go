@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -221,5 +222,30 @@ func TestReadersObserveCompleteReplacements(t *testing.T) {
 	}
 	if err := <-done; err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestReplacementKeepsOpenReaderSnapshot(t *testing.T) {
+	dir := testDirectory(t)
+	if err := Replace(dir, "journal", []byte("old complete record")); err != nil {
+		t.Fatal(err)
+	}
+	reader, err := openFile(filepath.Join(dir, "journal"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = reader.Close() }()
+	for range 10 {
+		if err = Replace(dir, "journal", []byte("new complete record")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old, err := io.ReadAll(reader)
+	if err != nil || string(old) != "old complete record" {
+		t.Fatalf("retained reader: %q, %v", old, err)
+	}
+	current, err := ReadFile(filepath.Join(dir, "journal"), 128)
+	if err != nil || string(current) != "new complete record" {
+		t.Fatalf("current journal: %q, %v", current, err)
 	}
 }

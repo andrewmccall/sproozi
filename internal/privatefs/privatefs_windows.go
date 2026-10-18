@@ -263,18 +263,44 @@ func UnlockClose(f *os.File) error {
 	return errors.Join(windows.UnlockFileEx(windows.Handle(f.Fd()), 0, 1, 0, &windows.Overlapped{}), f.Close())
 }
 
+// fileRenameInfo matches FILE_RENAME_INFO, including native handle alignment.
+type fileRenameInfo struct {
+	Flags          uint32
+	RootDirectory  windows.Handle
+	FileNameLength uint32
+	FileName       [1]uint16
+}
+
 func replaceFile(temp, target, _ string) error {
-	from, err := nativePath(temp)
-	if err != nil {
-		return err
-	}
 	to, err := nativePath(target)
 	if err != nil {
 		return err
 	}
-	// Same-volume rename preserves the private temporary file's DACL. Windows has
-	// no Unix parent-directory Sync equivalent; request documented write-through.
-	if err = windows.MoveFileEx(from, to, windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH); err != nil {
+	name := windows.UTF16PtrToString(to)
+	encoded, err := windows.UTF16FromString(name)
+	if err != nil {
+		return err
+	}
+	var layout fileRenameInfo
+	offset := int(unsafe.Offsetof(layout.FileName))
+	buffer := make([]byte, offset+len(encoded)*2)
+	info := (*fileRenameInfo)(unsafe.Pointer(&buffer[0]))
+	info.Flags = windows.FILE_RENAME_REPLACE_IF_EXISTS | windows.FILE_RENAME_POSIX_SEMANTICS
+	info.FileNameLength = uint32((len(encoded) - 1) * 2)
+	copy(unsafe.Slice(&info.FileName[0], len(encoded)), encoded)
+	f, err := open(temp, windows.GENERIC_READ|windows.GENERIC_WRITE|windows.READ_CONTROL|windows.DELETE, windows.OPEN_EXISTING, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE)
+	if err != nil {
+		return err
+	}
+	// POSIX replacement keeps existing readers on their old snapshot, while new
+	// readers open the new file. MoveFileEx can deny replacement during a read.
+	// Lock handles still omit delete sharing and cannot be replaced.
+	err = windows.SetFileInformationByHandle(windows.Handle(f.Fd()), windows.FileRenameInfoEx, &buffer[0], uint32(len(buffer)))
+	if err == nil {
+		err = f.Sync()
+	}
+	err = errors.Join(err, f.Close())
+	if err != nil {
 		return &os.PathError{Op: "replace", Path: target, Err: err}
 	}
 	return Check(target, false)

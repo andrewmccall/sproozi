@@ -1,7 +1,7 @@
 # Use Sproozi on Windows
 
 Install the x86-64 ZIP from [the release](install.md). Run commands in
-PowerShell or Windows Terminal. You can submit work to configured remote owners
+PowerShell or Windows Terminal on Windows 11 or Windows Server 2025. You can submit work to configured remote owners
 without running Docker locally. Local agent sessions require Docker Desktop
 using Linux containers, plus the home configuration in the
 [session mobility guide](session-mobility.md).

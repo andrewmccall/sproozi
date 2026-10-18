@@ -27,8 +27,13 @@ directory sync. Windows requires current-user ownership, a non-null DACL that
 grants access only to the user and privileged system accounts, and ordinary
 files on a local NTFS drive. New private directories receive a protected DACL
 at creation. Reparse points and network shares fail validation. Windows uses
-retained nonblocking `LockFileEx` locks and flushed same-directory replacement.
+retained nonblocking `LockFileEx` locks and flushed same-directory replacement
+with `FileRenameInfoEx` and POSIX replacement semantics. Existing readers retain
+the old file; new readers open the replacement. Lock handles forbid delete
+sharing and cannot be replaced.
 These operations do not establish an independent hardware power-loss guarantee.
+The [Windows rename contract](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/ns-ntifs-_file_rename_information)
+defines how open readers retain their file after replacement.
 
 Local control keeps the shared request and terminal protocol. Windows uses a
 named pipe with an explicit current-user and SYSTEM DACL, remote-client
