@@ -156,6 +156,9 @@ records how release recovers ownership.
 `retentionTTL` governs the AgentRun record. Budget ConfigMaps have no automatic
 retention/deletion path. Webhook replay keys are stored atomically in ConfigMaps
 in `sproozi-webhook-state`; they survive restarts and are shared by replicas.
+Each record is kept for two replay windows after its event's timestamp, so
+replicas whose clocks differ by less than one window cannot accept an event
+again after another replica removes its record.
 The webhook deletes expired replay entries once per replay window, so this state
 stays bounded by recent event volume.
 

@@ -42,6 +42,9 @@ import (
 
 const testAlertBody = `{"id":"evt-123","eventContext":{"alertname":"CrashLoopBackOff"}}`
 
+// testHMACKey is long enough for the receiver's minimum key length.
+const testHMACKey = "webhook-secret-of-at-least-32-bytes"
+
 const (
 	testTemplateName = "sre-remediation"
 )

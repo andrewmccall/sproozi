@@ -42,7 +42,8 @@ then does it read the body, resolve the receiver and check the signature.
 
 - The webhook stores replay keys atomically in ConfigMaps in `sproozi-webhook-state`. Set `REPLAY_NAMESPACE` to use another namespace.
 - Records survive restarts and are shared across replicas
-- The webhook deletes expired records once per replay window, so a record outlives its window by at most one more window
+- A record expires two replay windows after the event's timestamp. A replica accepts the event only within one window of its own clock, so the extra window keeps the record while any replica whose clock is within one window of the others could still accept the event
+- The webhook deletes expired records once per replay window, so a record outlives its expiry by at most one more window
 - The webhook records the event before creating the AgentRun. A failed creation can consume the event ID. Replay protection does not guarantee delivery.
 - Alertmanager integration needs a notification converter and HMAC signer; this repository does not supply that adapter
 - For broader deployment guidance, see [Security hardening](security-hardening.md)

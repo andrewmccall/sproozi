@@ -164,7 +164,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.deny(w, event, http.StatusServiceUnavailable, "webhook: replay store unavailable")
 		return
 	}
-	if err := h.Config.Replay.CheckAndRecord(r.Context(), replayKey(namespace, receiver, req.ID), eventTime.Add(window)); err != nil {
+	if err := h.Config.Replay.CheckAndRecord(r.Context(), replayKey(namespace, receiver, req.ID), ReplayExpiry(eventTime, window)); err != nil {
 		h.deny(w, event, http.StatusConflict, err.Error())
 		return
 	}
@@ -231,6 +231,15 @@ func parsePath(path string) (string, string, bool) {
 func replayKey(namespace, receiver, eventID string) string {
 	sum := sha256.Sum256([]byte(namespace + "\n" + receiver + "\n" + eventID))
 	return hex.EncodeToString(sum[:])
+}
+
+// ReplayExpiry returns when an accepted event's replay record may be removed.
+// A replica accepts the event until eventTime+window by its own clock, while
+// the record's expiry is judged by whichever replica reads or sweeps it. The
+// extra window keeps the record until every replica whose clock is within one
+// window of the others has stopped accepting the event.
+func ReplayExpiry(eventTime time.Time, window time.Duration) time.Time {
+	return eventTime.Add(2 * window)
 }
 
 // signatureDenyReason names a stale timestamp, which a sender can correct, and
