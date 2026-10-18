@@ -400,7 +400,6 @@ func TestInitialSessionImportRoundTripAndLostReplies(t *testing.T) {
 // A first move interrupted after its source stopped resumes after a restart
 // as the same retained operation; a different move cannot replace it.
 func TestRecoverFirstMoveRetainedBeforeRestart(t *testing.T) {
-	t.Parallel()
 	s, local, remote, repo := testService(t)
 	id := uuid.NewString()
 	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, nil); err != nil {

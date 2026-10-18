@@ -65,7 +65,6 @@ func assertAnsweredFromRecord(t *testing.T, p *Placement, f *fakeDocker, l sessi
 }
 
 func TestStopRemovesVisitResourcesAndReplaysRetainedResult(t *testing.T) {
-	t.Parallel()
 	dir := t.TempDir()
 	p, f, a, l, i := activeFixture(t, dir)
 	stopped, err := p.Stop(t.Context(), l, i)
@@ -141,7 +140,6 @@ func TestMissingContainerWithoutRemovalRecordIsNotStopped(t *testing.T) {
 }
 
 func TestRemovalConvergesAfterEngineFailure(t *testing.T) {
-	t.Parallel()
 	t.Run("stop", func(t *testing.T) {
 		dir := t.TempDir()
 		p, f, a, l, i := activeFixture(t, dir)

@@ -504,7 +504,6 @@ func TestIgnoredSelectionBindsDockerVisitAndFixedCapture(t *testing.T) {
 }
 
 func TestPlacementDurablePrepareActivateStop(t *testing.T) {
-	t.Parallel()
 	data := fixtureArtifact(t)
 	l := fixtureLaunch(t, data)
 	f := newFakeDocker()

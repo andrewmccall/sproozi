@@ -49,7 +49,6 @@ func (a *accountingAuthority) Seal(ctx context.Context, _ session.Launch, i sess
 }
 
 func TestAbortedDockerRetriesExistingAccountingWithoutInitializing(t *testing.T) {
-	t.Parallel()
 	for _, name := range []string{transientFixtureAccount, missingFixtureAccount, "corrupt"} {
 		t.Run(name, func(t *testing.T) {
 			data := fixtureArtifact(t)
@@ -193,7 +192,6 @@ func TestClaudeGracefulStopRequiresPersistedAcknowledgement(t *testing.T) {
 }
 
 func TestClaudeDurableAcknowledgementSurvivesCaptureFailure(t *testing.T) {
-	t.Parallel()
 	f := newFakeDocker()
 	f.failCapture = true
 	a := &fakeAuthority{engine: f}
@@ -352,7 +350,6 @@ func TestPartialInitialCancellationRejectsReplacementOrUnavailableEngine(t *test
 }
 
 func TestCoordinatorRecoversExactDockerActivationAfterLostReply(t *testing.T) {
-	t.Parallel()
 	ctx := t.Context()
 	data := fixtureArtifact(t)
 	launch := fixtureLaunch(t, data)

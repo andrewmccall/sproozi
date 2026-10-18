@@ -245,7 +245,6 @@ func assertRemoteSubmissionReplay(t *testing.T, o *Owner, q Submit, v View) {
 }
 
 func TestRemoteCatalogueRetainsCompletionAndExclusiveClaimAcrossRestart(t *testing.T) {
-	t.Parallel()
 	c, p := fixture(t)
 	o, e := Open(c)
 	if e != nil {
@@ -432,7 +431,6 @@ func TestSubmissionReplayDoesNotWaitForHeldNativeWork(t *testing.T) {
 }
 
 func TestCatalogueRejectsReusedDirectoryForAnotherPrincipal(t *testing.T) {
-	t.Parallel()
 	c, _ := fixture(t)
 	o, err := Open(c)
 	if err != nil {

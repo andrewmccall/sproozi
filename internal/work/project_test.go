@@ -93,7 +93,6 @@ func TestProjectsGroupSessionsAndNarrowActualAdmission(t *testing.T) {
 }
 
 func TestProjectAccessGatesSubmitAndEveryRetainedRead(t *testing.T) {
-	t.Parallel()
 	c, p := projectFixture(t)
 	o, err := Open(c)
 	if err != nil {
@@ -196,7 +195,6 @@ func TestRevokedProjectStillFencesUnfinishedWriterAfterRestart(t *testing.T) {
 }
 
 func TestConfiguredTemplateCannotRebindRetainedAssociation(t *testing.T) {
-	t.Parallel()
 	c, _ := projectFixture(t)
 	o, err := Open(c)
 	if err != nil {

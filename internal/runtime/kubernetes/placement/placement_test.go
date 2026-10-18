@@ -656,7 +656,6 @@ func TestIgnoredSelectionBindsRemoteVisitAndFixedCapture(t *testing.T) {
 }
 
 func TestPrepareActivateStopRetainsExactExecutionAndUsage(t *testing.T) {
-	t.Parallel()
 	p, kube, e, l, data := setup(t)
 	ctx := context.Background()
 	i, err := p.Prepare(ctx, l, data)
@@ -789,7 +788,6 @@ func TestAbortUsesExactPodAndSealsKnownZeroUsage(t *testing.T) {
 }
 
 func TestCancellationSealsUsedAndOutstandingUsageAndReplaysAfterSettlement(t *testing.T) {
-	t.Parallel()
 	p, _, _, l, data := setup(t)
 	i, err := p.Prepare(t.Context(), l, data)
 	if err != nil {
@@ -938,7 +936,6 @@ func TestMissingPodWithoutRetainedTerminationCannotSealOrRefund(t *testing.T) {
 }
 
 func TestDeleteRetainsPodUntilObservedTerminationAndPersistentFence(t *testing.T) {
-	t.Parallel()
 	p, kube, _, l, data := setup(t)
 	i, err := p.Prepare(t.Context(), l, data)
 	if err != nil {

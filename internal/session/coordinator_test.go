@@ -413,7 +413,6 @@ func TestIgnoredSelectionSurvivesEveryMoveAndCannotAmendSeed(t *testing.T) {
 	}
 }
 func TestRoundTripMaintainsOriginalAuthorityAndReceipts(t *testing.T) {
-	t.Parallel()
 	c, dir, local, remote, start := setup(t)
 	ctx := context.Background()
 	remoteOp, localOp := uuid.NewString(), uuid.NewString()
@@ -477,7 +476,6 @@ func TestRoundTripMaintainsOriginalAuthorityAndReceipts(t *testing.T) {
 	}
 }
 func TestLostRepliesRecoverSameAllocation(t *testing.T) {
-	t.Parallel()
 	for _, stage := range []string{"prepare", "activate"} {
 		t.Run(stage, func(t *testing.T) {
 			c, dir, local, remote, start := setup(t)
@@ -714,7 +712,6 @@ func TestConcurrentReplayHasOneWriter(t *testing.T) {
 	}
 }
 func TestUnknownUsageCancellationSurvivesReopen(t *testing.T) {
-	t.Parallel()
 	c, dir, local, remote, start := setup(t)
 	r, err := c.Move(context.Background(), start.Source.ExecutionID, uuid.NewString(), testRemote)
 	if err != nil {
