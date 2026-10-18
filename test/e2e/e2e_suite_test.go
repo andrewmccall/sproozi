@@ -67,6 +67,14 @@ var _ = BeforeSuite(func() {
 	configureKubectlKubeRC()
 })
 
+// disposableCluster reports whether the caller deletes the cluster as soon as
+// the suite ends. hack/verify/kind.sh sets SPROOZI_E2E_DISPOSABLE_CLUSTER=1, so
+// teardown that only removes resources is skipped. make test-e2e-existing runs
+// against a caller-owned cluster and still cleans up.
+func disposableCluster() bool {
+	return os.Getenv("SPROOZI_E2E_DISPOSABLE_CLUSTER") == "1"
+}
+
 // Disable kubectl kuberc by default for test isolation.
 // This prevents local kubectl configurations from affecting test behavior.
 // To enable kuberc, set: KUBECTL_KUBERC=true

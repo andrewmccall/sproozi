@@ -40,6 +40,8 @@ kind_up "$cluster" "$kubeconfig"
 
 # This script owns creation and cleanup of the cluster; the e2e suite must not
 # delete it. The suite receives the explicit cluster name and kubeconfig and
-# never falls back to the operator's default context.
-make test-e2e-existing KIND_CLUSTER="$cluster" KIND_NODE_IMAGE="${KIND_NODE_IMAGE}" KIND=kind KUBECTL="kubectl"
+# never falls back to the operator's default context. The cluster is deleted
+# right after the suite, so the suite skips teardown that only removes
+# resources.
+SPROOZI_E2E_DISPOSABLE_CLUSTER=1 make test-e2e-existing KIND_CLUSTER="$cluster" KIND_NODE_IMAGE="${KIND_NODE_IMAGE}" KIND=kind KUBECTL="kubectl"
 echo "Kind verification passed for $cluster"

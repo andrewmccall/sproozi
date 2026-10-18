@@ -25,7 +25,7 @@ summaries.
 | `make verify-docs` | Local Markdown links resolve and no private-plan paths are referenced. It does not establish that documentation is current. | Tests (`checks`) | Python 3 |
 | `make lint` | golangci-lint reports no issues; `make lint-config` checks its configuration. | Lint | Go |
 | `make test-e2e` | The full stack works in an owned two-node Kind cluster with enforcing CNI, using the pinned clients and Hermes digest. See [Harnesses and Hermes in Kind](#harnesses-and-hermes-in-kind). | E2E | Docker, Kind, kubectl, Calico from `hack/verify/fetch-calico.sh` |
-| `make test-e2e-existing` | The same e2e suite passes against a Kind cluster you created (`KIND_CLUSTER`). | No | An existing dedicated Kind cluster |
+| `make test-e2e-existing` | The same e2e suite passes against a Kind cluster you created (`KIND_CLUSTER`), then removes the controller, CRDs and test namespaces. `make test-e2e` skips that teardown because it deletes the whole cluster. | No | An existing dedicated Kind cluster |
 | `make verify-mcp-client` | Generated run-local MCP configuration loads in installed stock Codex. No model request. | No | Codex CLI |
 | `make verify-harness-clients` | Generated native MCP configuration loads in installed Codex, Claude Code and OpenCode. No model request. | No | All three CLIs |
 | `make verify-native-session` | Installed stock Codex resumes through production checkpoint capture and restore against a local provider. | No | Codex CLI |

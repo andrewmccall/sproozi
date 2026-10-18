@@ -38,7 +38,7 @@ var _ = Describe("NetworkPolicy enforcement", func() {
 			Expect(err).NotTo(HaveOccurred())
 		})
 
-		no, yes, uid := false, true, int64(1000)
+		no, yes, uid, noGrace := false, true, int64(1000), int64(0)
 		pod := corev1.Pod{
 			TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Pod"},
 			ObjectMeta: metav1.ObjectMeta{Name: probeName, Namespace: probeNamespace,
@@ -46,6 +46,8 @@ var _ = Describe("NetworkPolicy enforcement", func() {
 			Spec: corev1.PodSpec{
 				AutomountServiceAccountToken: &no,
 				RestartPolicy:                corev1.RestartPolicyNever,
+				// The probe only sleeps; a grace period would delay namespace deletion.
+				TerminationGracePeriodSeconds: &noGrace,
 				SecurityContext: &corev1.PodSecurityContext{
 					RunAsNonRoot: &yes, RunAsUser: &uid,
 					SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},

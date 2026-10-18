@@ -87,6 +87,11 @@ var _ = Describe("Manager", Ordered, func() {
 			Fail(fmt.Sprintf("AgentRun cleanup failed: %s", err))
 			return
 		}
+		if disposableCluster() {
+			_, _ = fmt.Fprintf(GinkgoWriter,
+				"Skipping controller teardown: the Kind runner deletes this cluster next\n")
+			return
+		}
 		By("cleaning up the curl pod for metrics")
 		cmd = exec.Command("kubectl", "delete", "pod", "curl-metrics", "-n", namespace,
 			"--ignore-not-found", "--timeout=30s")
