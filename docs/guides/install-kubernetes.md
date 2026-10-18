@@ -44,8 +44,8 @@ kubectl cluster-info
 kubectl get nodes -o wide
 ```
 
-The commands below install into `sproozi-system`, `sproozi-agents` and
-`sproozi-webhook-state`. Use a cluster without an existing Sproozi installation
+The commands below install into `sproozi-system`, `sproozi-agents`,
+`sproozi-webhook-state` and `sproozi-webhooks`. Use a cluster without an existing Sproozi installation
 for this walkthrough. Keep the chosen `KUBECONFIG` exported throughout it.
 
 ## 2. Build and publish the images
@@ -67,7 +67,7 @@ docker buildx build --platform "$SPROOZI_PLATFORMS" \
   --tag "$SPROOZI_CONTROLLER_TAG" --push .
 docker buildx build --platform "$SPROOZI_PLATFORMS" \
   --file hack/demo/codex.Dockerfile --tag "$SPROOZI_TOOLS_TAG" \
-  --push hack/demo
+  --push .
 
 docker buildx imagetools inspect "$SPROOZI_CONTROLLER_TAG"
 docker buildx imagetools inspect "$SPROOZI_TOOLS_TAG"
@@ -95,6 +95,10 @@ kubectl create namespace sproozi-system --dry-run=client -o yaml | kubectl apply
 kubectl apply -k config/agent-rbac
 mkdir -p .local/install/tls
 ```
+
+`config/agent-rbac` creates `sproozi-agents` and the only Role that lets the
+controller create sandbox Pods, ServiceAccounts, NetworkPolicies and contract
+ConfigMaps. Runs cannot start without it.
 
 The gateway terminates both the proxy connection and the inspected Kubernetes
 connection. Its certificate therefore needs the gateway hostname and

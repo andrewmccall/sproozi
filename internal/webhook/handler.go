@@ -33,6 +33,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/audit"
@@ -57,7 +58,14 @@ type HandlerConfig struct {
 	AuditLogger  audit.WebhookWriter
 	ReplayWindow time.Duration
 	Now          func() time.Time
+	// SecretNamespace holds every receiver's HMAC Secret. It is separate from
+	// the template namespace, so the webhook can read HMAC keys without being
+	// able to read the provider and GitHub credentials beside the templates.
+	SecretNamespace string
 }
+
+// DefaultSecretNamespace is the installed namespace for HMAC Secrets.
+const DefaultSecretNamespace = "sproozi-webhooks"
 
 type Handler struct {
 	Config HandlerConfig
@@ -92,6 +100,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	window := h.Config.ReplayWindow
+	if window == 0 {
+		window = DefaultReplayWindow
+	}
+	// Refuse an unsigned, malformed or stale request before reading its body
+	// or calling the API server. Only a request that could be authentic costs
+	// a body read, a template and policy lookup and a Secret read.
+	signed, err := ParseSignedHeaders(r.Header.Get(SignatureHeader), r.Header.Get(TimestampHeader), now(), window)
+	if err != nil {
+		h.deny(w, event, http.StatusUnauthorized, signatureDenyReason(err))
+		return
+	}
+
 	body := http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	defer func() { _ = body.Close() }()
 
@@ -119,9 +140,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	event.TemplateName = tmpl.Name
 
+	secretNamespace := h.Config.SecretNamespace
+	if secretNamespace == "" {
+		secretNamespace = DefaultSecretNamespace
+	}
 	secretName := tmpl.Annotations[SecretNameAnnotation]
 	var secret corev1.Secret
-	if err := h.Config.Client.Get(r.Context(), client.ObjectKey{Namespace: namespace, Name: secretName}, &secret); err != nil {
+	if err := h.Config.Client.Get(r.Context(), client.ObjectKey{Namespace: secretNamespace, Name: secretName}, &secret); err != nil {
 		h.deny(w, event, http.StatusInternalServerError, "webhook: failed to load HMAC secret")
 		return
 	}
@@ -130,27 +155,20 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.deny(w, event, http.StatusInternalServerError, ErrNoHMACKey.Error())
 		return
 	}
-
-	window := h.Config.ReplayWindow
-	if window == 0 {
-		window = DefaultReplayWindow
-	}
-	eventTime, err := VerifySignature(
-		r.Header.Get(SignatureHeader),
-		r.Header.Get(TimestampHeader),
-		rawBody,
-		key,
-		now(),
-		window,
-	)
-	if err != nil {
-		reason := "signature verification failed"
-		if errors.Is(err, ErrStaleTimestamp) {
-			reason = ErrStaleTimestamp.Error()
-		}
-		h.deny(w, event, http.StatusUnauthorized, reason)
+	// An empty or short key would let anyone who can guess it create runs.
+	// Name the Secret for the administrator, never the key or its length.
+	if len(key) < MinHMACKeyBytes {
+		log.FromContext(r.Context()).Error(ErrShortHMACKey, "Refused webhook HMAC Secret",
+			"namespace", secretNamespace, "name", secretName)
+		h.deny(w, event, http.StatusInternalServerError, ErrShortHMACKey.Error())
 		return
 	}
+
+	if err := signed.Verify(rawBody, key); err != nil {
+		h.deny(w, event, http.StatusUnauthorized, signatureDenyReason(err))
+		return
+	}
+	eventTime := signed.EventTime
 
 	var req payload
 	if err := json.Unmarshal(rawBody, &req); err != nil {
@@ -166,7 +184,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.deny(w, event, http.StatusServiceUnavailable, "webhook: replay store unavailable")
 		return
 	}
-	if err := h.Config.Replay.CheckAndRecord(r.Context(), replayKey(namespace, receiver, req.ID), eventTime.Add(window)); err != nil {
+	if err := h.Config.Replay.CheckAndRecord(r.Context(), replayKey(namespace, receiver, req.ID), ReplayExpiry(eventTime, window)); err != nil {
 		h.deny(w, event, http.StatusConflict, err.Error())
 		return
 	}
@@ -233,6 +251,24 @@ func parsePath(path string) (string, string, bool) {
 func replayKey(namespace, receiver, eventID string) string {
 	sum := sha256.Sum256([]byte(namespace + "\n" + receiver + "\n" + eventID))
 	return hex.EncodeToString(sum[:])
+}
+
+// ReplayExpiry returns when an accepted event's replay record may be removed.
+// A replica accepts the event until eventTime+window by its own clock, while
+// the record's expiry is judged by whichever replica reads or sweeps it. The
+// extra window keeps the record until every replica whose clock is within one
+// window of the others has stopped accepting the event.
+func ReplayExpiry(eventTime time.Time, window time.Duration) time.Time {
+	return eventTime.Add(2 * window)
+}
+
+// signatureDenyReason names a stale timestamp, which a sender can correct, and
+// otherwise does not say which check failed.
+func signatureDenyReason(err error) string {
+	if errors.Is(err, ErrStaleTimestamp) {
+		return ErrStaleTimestamp.Error()
+	}
+	return "signature verification failed"
 }
 
 func (h *Handler) deny(w http.ResponseWriter, event audit.WebhookEvent, status int, reason string) {

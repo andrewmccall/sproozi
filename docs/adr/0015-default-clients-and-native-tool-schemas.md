@@ -1,6 +1,6 @@
 # 0015: Default agent clients and gateway compatibility
 
-Status: accepted
+Status: accepted; package selection replaced by [ADR 0021](0021-pinned-ci-inputs-and-latest-client-canary.md)
 Date: 2026-10-16
 
 ## Problem and constraints
@@ -24,6 +24,9 @@ settling. The TUI treated that temporary contention as a failed turn.
 Install Codex, Claude Code and OpenCode with unversioned package names. Pull the
 official Hermes image without a release tag or digest in the authored source.
 Rebuild client images with fresh package resolution in acceptance tests.
+[ADR 0021](0021-pinned-ci-inputs-and-latest-client-canary.md) replaces this
+paragraph: CI and the verifiers now install pinned lockfiles and a Hermes
+digest, and a weekly canary tests the latest releases.
 
 Remove exact-version checks from activation, state parsing and registration.
 Keep explicit harness selection, conversation identity, supported state formats,

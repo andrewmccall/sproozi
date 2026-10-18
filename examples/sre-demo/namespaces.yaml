@@ -8,6 +8,9 @@ metadata:
 apiVersion: v1
 kind: Namespace
 metadata:
+  # Keep config/agent-rbac's labels: a client-side apply removes any it omits.
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
   name: sproozi-agents
 ---
 apiVersion: v1

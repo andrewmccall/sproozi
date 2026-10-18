@@ -48,6 +48,9 @@ func validateAnthropicRequest(r *http.Request, body []byte, costCapped bool) err
 	if !costCapped {
 		return nil
 	}
+	if longContextBeta(r.Header) {
+		return fmt.Errorf("anthropic: long-context beta has no administrator pricing")
+	}
 	for key, allowed := range map[string]string{"service_tier": "standard_only", "speed": "standard", "inference_geo": "global"} {
 		if raw, present := request[key]; present {
 			var value string
@@ -76,6 +79,22 @@ func validateAnthropicRequest(r *http.Request, body []byte, costCapped bool) err
 		}
 	}
 	return validateAnthropicCacheControls(body)
+}
+
+// longContextBeta reports whether any anthropic-beta value selects the 1M
+// token context window. Anthropic bills long-context requests at a premium
+// rate that the administrator pricing table does not model, so a cost cap
+// would price them at standard rates. Stock clients send other betas, such as
+// interleaved thinking and tool streaming, that do not change token prices.
+func longContextBeta(header http.Header) bool {
+	for _, value := range header.Values("Anthropic-Beta") {
+		for beta := range strings.SplitSeq(value, ",") {
+			if strings.HasPrefix(strings.ToLower(strings.TrimSpace(beta)), "context-1m") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Inspect protocol metadata only. Tool input and JSON schemas may contain

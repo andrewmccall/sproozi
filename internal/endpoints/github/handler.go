@@ -241,23 +241,35 @@ func (h *Handler) handlePRCreate(w http.ResponseWriter, r *http.Request, e audit
 		h.deny(w, e, http.StatusForbidden, "repository not permitted by policy")
 		return
 	}
+	// Query parameters are not part of pull request creation, and forwarding
+	// them would pass sandbox input that no check has read.
+	if r.URL.RawQuery != "" {
+		h.deny(w, e, http.StatusForbidden, "pull request query parameters are not permitted")
+		return
+	}
 	// Validate requested head/base before contacting GitHub. A denied request
 	// must not create an out-of-scope PR and only be rejected after read-back.
-	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
-	if err != nil || len(body) == 0 {
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxPRCreateBody+1))
+	if err != nil || len(body) == 0 || len(body) > maxPRCreateBody {
 		h.deny(w, e, http.StatusBadRequest, "pull request body is invalid")
 		return
 	}
-	r.Body = io.NopCloser(bytes.NewReader(body))
-	var requested struct {
-		Head string `json:"head"`
-		Base string `json:"base"`
-	}
-	if json.Unmarshal(body, &requested) != nil || !runOwnedBranch(requested.Head, identity.Execution.UID) ||
+	requested, err := decodePRCreate(body)
+	if err != nil || !runOwnedBranch(requested.Head, identity.Execution.UID) ||
 		!policyBranch(requested.Base, identity.Policy.Spec.GitHubPullRequest.AllowedBaseBranches) {
 		h.deny(w, e, http.StatusForbidden, "pull request head or base is not permitted by policy")
 		return
 	}
+	// Forward only the validated values, as the GraphQL path does. GitHub must
+	// not read a field, case variant or duplicate key that the gateway did not.
+	payload, err := json.Marshal(requested)
+	if err != nil {
+		h.deny(w, e, http.StatusBadRequest, "pull request body is invalid")
+		return
+	}
+	forwarded := r.Clone(ctx)
+	forwarded.Body = io.NopCloser(bytes.NewReader(payload))
+	forwarded.ContentLength = int64(len(payload))
 
 	ghToken, err := h.Config.TokenProvider.Token(ctx)
 	if err != nil {
@@ -270,10 +282,98 @@ func (h *Handler) handlePRCreate(w http.ResponseWriter, r *http.Request, e audit
 		h.deny(w, e, http.StatusInternalServerError, "failed to build upstream URL")
 		return
 	}
-	if r.URL.RawQuery != "" {
-		upstream += "?" + r.URL.RawQuery
+	h.forwardPRCreate(w, forwarded, e, upstream, ghToken, identity, repo)
+}
+
+// maxPRCreateBody bounds a pull request creation body. GitHub limits the
+// description to 65536 characters, which UTF-8 and JSON escaping can expand.
+const maxPRCreateBody = 1 << 20
+
+// prCreateRequest holds the only pull request creation fields the gateway
+// forwards. GitHub reads other fields, such as head_repo and issue, that would
+// change what the request creates.
+type prCreateRequest struct {
+	Title               *string `json:"title,omitempty"`
+	Body                *string `json:"body,omitempty"`
+	Head                string  `json:"head"`
+	Base                string  `json:"base"`
+	Draft               *bool   `json:"draft,omitempty"`
+	MaintainerCanModify *bool   `json:"maintainer_can_modify,omitempty"`
+}
+
+// decodePRCreate parses a pull request creation body with exact, unique keys.
+// encoding/json matches field names regardless of case and keeps the last
+// duplicate, so a struct decode alone could validate a different head or base
+// from the one GitHub reads.
+func decodePRCreate(body []byte) (prCreateRequest, error) {
+	var request prCreateRequest
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	if token, err := decoder.Token(); err != nil || token != json.Delim('{') {
+		return request, fmt.Errorf("pull request body must be an object")
 	}
-	h.forwardPRCreate(w, r, e, upstream, ghToken, identity, repo)
+	seen := map[string]bool{}
+	for decoder.More() {
+		token, err := decoder.Token()
+		key, ok := token.(string)
+		if err != nil || !ok || seen[key] {
+			return request, fmt.Errorf("pull request body has an invalid or duplicate key")
+		}
+		seen[key] = true
+		var raw json.RawMessage
+		if err := decoder.Decode(&raw); err != nil {
+			return request, fmt.Errorf("invalid pull request body")
+		}
+		var value *string
+		switch key {
+		case titleField:
+			request.Title, err = prString(raw)
+		case bodyField:
+			request.Body, err = prString(raw)
+		case "head":
+			if value, err = prString(raw); err == nil {
+				request.Head = *value
+			}
+		case "base":
+			if value, err = prString(raw); err == nil {
+				request.Base = *value
+			}
+		case draftField:
+			request.Draft, err = prBool(raw)
+		case "maintainer_can_modify":
+			request.MaintainerCanModify, err = prBool(raw)
+		default:
+			return request, fmt.Errorf("pull request field is not permitted")
+		}
+		if err != nil {
+			return request, err
+		}
+	}
+	if _, err := decoder.Token(); err != nil {
+		return request, fmt.Errorf("invalid pull request body")
+	}
+	if _, err := decoder.Token(); err != io.EOF {
+		return request, fmt.Errorf("pull request body has trailing data")
+	}
+	if request.Head == "" || request.Base == "" {
+		return request, fmt.Errorf("pull request head and base are required")
+	}
+	return request, nil
+}
+
+func prString(raw json.RawMessage) (*string, error) {
+	var value string
+	if !bytes.HasPrefix(raw, []byte(`"`)) || json.Unmarshal(raw, &value) != nil {
+		return nil, fmt.Errorf("pull request field must be a string")
+	}
+	return &value, nil
+}
+
+func prBool(raw json.RawMessage) (*bool, error) {
+	var value bool
+	if (string(raw) != "true" && string(raw) != "false") || json.Unmarshal(raw, &value) != nil {
+		return nil, fmt.Errorf("pull request field must be a boolean")
+	}
+	return &value, nil
 }
 
 type upstreamPullRequest struct {

@@ -30,6 +30,10 @@ import (
 	"github.com/google/uuid"
 )
 
+// revisionTimeout bounds the in-process restore of a sandbox-produced
+// checkpoint when new work starts from a retained revision.
+const revisionTimeout = 5 * time.Minute
+
 // Phase is a work session's retained lifecycle position, reported in View.
 type Phase string
 
@@ -525,7 +529,11 @@ func (o *Owner) input(ctx context.Context, r *record) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		b, err := workspace.AtRevision(ctx, archive, r.Intent.WorkspaceFrom.Revision, o.config.Directory, o.config.MaxCheckpointBytes)
+		// The archive came from a sandbox. AtRevision bounds its object and
+		// file bytes; this deadline bounds Git's time on it.
+		revisionCtx, cancel := context.WithTimeout(ctx, revisionTimeout)
+		b, err := workspace.AtRevision(revisionCtx, archive, r.Intent.WorkspaceFrom.Revision, o.config.Directory, o.config.MaxCheckpointBytes)
+		cancel()
 		if err != nil {
 			return nil, err
 		}

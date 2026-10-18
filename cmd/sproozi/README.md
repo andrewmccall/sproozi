@@ -123,7 +123,8 @@ remote gateway's administrator-owned upstream TLS configuration.
 
 Set `local.harness` explicitly to `codex` or `claude-code`; it must match every
 remote profile and runtime used by this session. There is no default or client
-switch during a move. Client packages use upstream defaults without version selectors. For Claude, use an approved Anthropic model/provider URL, omit
+switch during a move. Sproozi checks no client version; the repository's client images install the
+releases pinned in `hack/clients`. For Claude, use an approved Anthropic model/provider URL, omit
 `nativeOptions`, and cover `api.anthropic.com` in the inspection certificate.
 The managed Claude launch fixes its tools, permissions and completion hooks;
 portable transcripts cannot replace them. Foreground Bash is supported;

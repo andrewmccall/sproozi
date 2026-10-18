@@ -131,8 +131,9 @@ model-provider setup and supported configurations.
 ## Managed native sessions
 
 Managed sessions require explicit `clientConfig.harness: codex` or `claude-code`.
-Selecting OpenCode or Hermes does not make those harnesses movable. Client
-installs use upstream defaults. Sproozi checks supported native state and
+Selecting OpenCode or Hermes does not make those harnesses movable. The
+repository's client images pin their releases in
+[`hack/clients`](../../hack/clients/README.md). Sproozi checks supported native state and
 completion records without requiring an exact client version. A move keeps the
 same harness.
 

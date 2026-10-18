@@ -18,7 +18,7 @@ import (
 // sibling directory before publishing target. Target must not exist; its parent
 // must be a trusted directory without concurrent writers. No config or hooks from
 // the original repository are installed. A caller handling untrusted Git packs
-// must quota-limit the staging filesystem; see the package byte-limit contract.
+// must pass a context with a deadline; see the package byte-limit contract.
 func Restore(ctx context.Context, data []byte, target string, maxBytes int64) error {
 	m, bundle, files, err := decode(data, maxBytes)
 	if err != nil {

@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/util/yaml"
 	sigyaml "sigs.k8s.io/yaml"
 )
@@ -309,6 +310,82 @@ func TestInstallBundleIncludesWebhookReplayIsolation(t *testing.T) {
 		t.Fatalf("install bundle must create webhook replay state and bind the webhook (namespace=%v binding=%v)",
 			foundNamespace,
 			foundReplayBinding)
+	}
+}
+
+// TestInstallBundleScopesWebhookSecretReads verifies that the webhook can read
+// Secrets only in the HMAC Secret namespace. sproozi-system holds the provider
+// and GitHub credentials, so no role bound to the webhook may grant Secret
+// access there or cluster-wide.
+func TestInstallBundleScopesWebhookSecretReads(t *testing.T) {
+	const (
+		secretNamespace = "sproozi-webhooks"
+		roleBindingKind = "RoleBinding"
+		getVerb         = "get"
+	)
+	docs := renderInstall(t)
+	roles := map[string][]rbacv1.PolicyRule{}
+	for _, kind := range []string{"Role", "ClusterRole"} {
+		for _, doc := range objectsOfKind(docs, kind) {
+			var role rbacv1.ClusterRole
+			decodeObject(t, doc, &role)
+			roles[kind+"/"+metadataNamespace(doc)+"/"+role.Name] = role.Rules
+		}
+	}
+	foundNamespace := false
+	for _, doc := range objectsOfKind(docs, "Namespace") {
+		foundNamespace = foundNamespace || metadataName(doc) == secretNamespace
+	}
+	foundSecretRead, foundTemplateRead := false, false
+	for _, kind := range []string{roleBindingKind, "ClusterRoleBinding"} {
+		for _, doc := range objectsOfKind(docs, kind) {
+			var binding rbacv1.RoleBinding
+			decodeObject(t, doc, &binding)
+			if !slices.ContainsFunc(binding.Subjects, func(s rbacv1.Subject) bool {
+				return s.Kind == rbacv1.ServiceAccountKind && s.Name == webhookName && s.Namespace == systemNamespace
+			}) {
+				continue
+			}
+			roleNamespace := binding.Namespace
+			if binding.RoleRef.Kind == "ClusterRole" {
+				roleNamespace = ""
+			}
+			rules, ok := roles[binding.RoleRef.Kind+"/"+roleNamespace+"/"+binding.RoleRef.Name]
+			if !ok {
+				t.Fatalf("%s %s binds the webhook to missing %s %s", kind, binding.Name, binding.RoleRef.Kind, binding.RoleRef.Name)
+			}
+			for _, rule := range rules {
+				if binding.Namespace == systemNamespace && slices.Contains(rule.Resources, "agenttemplates") {
+					foundTemplateRead = true
+				}
+				if !slices.Contains(rule.Resources, "secrets") && !slices.Contains(rule.Resources, "*") {
+					continue
+				}
+				if kind != roleBindingKind || binding.Namespace != secretNamespace ||
+					!slices.Equal(rule.Verbs, []string{getVerb}) || len(rule.Resources) != 1 {
+					t.Fatalf("%s %s grants the webhook Secret access outside %s: %+v", kind, binding.Name, secretNamespace, rule)
+				}
+				foundSecretRead = true
+			}
+		}
+	}
+	// The rendered webhook ServiceAccount must also be bound to its template
+	// role, or this check would pass for a webhook with no bindings at all.
+	if !foundNamespace || !foundSecretRead || !foundTemplateRead {
+		t.Fatalf("install bundle must create %s, let the webhook get Secrets there and read templates in %s "+
+			"(namespace=%v secrets=%v templates=%v)",
+			secretNamespace, systemNamespace, foundNamespace, foundSecretRead, foundTemplateRead)
+	}
+}
+
+func decodeObject(t *testing.T, doc map[string]any, into any) {
+	t.Helper()
+	data, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, into); err != nil {
+		t.Fatal(err)
 	}
 }
 

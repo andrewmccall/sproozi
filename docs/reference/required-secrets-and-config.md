@@ -17,7 +17,7 @@ Follow [Install on Kubernetes](../guides/install-kubernetes.md) for setup steps.
 | `egress-gateway-profiles` | `sproozi-system` | `ConfigMap` | shared gateway egress module | `profiles.json` |
 | `sproozi-gateway-tls` | `sproozi-system` | `Secret` | shared gateway inspection certificate | `tls.crt`, `tls.key` |
 | `sproozi-sandbox-trust` | `sproozi-agents` | immutable `ConfigMap` | sandbox clients | `ca-bundle.pem`, public CA only |
-| `<template secret>` | template namespace | `Secret` | webhook | `hmac-key` |
+| `<template secret>` | `sproozi-webhooks` | `Secret` | webhook | `hmac-key`, at least 32 random bytes |
 
 The shared gateway deployment mounts `sproozi-gateway-tls` and requires
 `SPROOZI_GATEWAY_CERT_FILE` and `SPROOZI_GATEWAY_KEY_FILE` to point at the
@@ -109,6 +109,12 @@ The deployed budget ledger writes ConfigMaps in `sproozi-system`, selected by
 `sproozi-webhook-state`, selected by `REPLAY_NAMESPACE`. The install includes
 the webhook state namespace and namespaced state RBAC; `retentionTTL` does not
 clean this durable state.
+
+The webhook reads HMAC Secrets only in `sproozi-webhooks`, selected by
+`HMAC_SECRET_NAMESPACE`, never in the template's namespace. The install
+creates that namespace and a Role there that grants only Secret `get`. If you
+change the variable, create the Role and RoleBinding in the new namespace.
+See [ADR 0022](../adr/0022-webhook-hmac-secrets-in-own-namespace.md).
 
 Transport, GitHub protection, replay retention and trusted-service restrictions
 are documented in [security hardening](security-hardening.md).

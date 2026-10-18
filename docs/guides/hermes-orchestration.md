@@ -38,8 +38,10 @@ cp examples/harnesses/agentruntime-hermes.yaml .local/orchestration/agentruntime
 ```
 
 Replace `controller:latest` in the task service with the same reviewed published
-Sproozi image used by your controller. Pull the default Hermes image with `docker pull nousresearch/hermes-agent`.
-Use its resolved `RepoDigests` value in the local worker runtime. Review the
+Sproozi image used by your controller. Pull the Hermes image that Sproozi's
+tests pin, Hermes 0.22.2, by digest:
+`docker pull docker.io/nousresearch/hermes-agent@sha256:36099926da316742423544e055d4734777105ffe6341873af5459b957d0c2919`.
+Use the same digest reference in the local worker runtime. Review the
 model selection in both runtime and coordinator, target namespace, policy
 budgets and resources. The worker example explicitly enables the native
 Kubernetes Pod-list MCP tool. The task service fixes the workflow's template and
@@ -103,10 +105,11 @@ kubectl create secret generic hermes-coordinator -n sproozi-coordinators \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
 
-Combine the image's normal public roots with the task-service public CA. Use the default Hermes image:
+Combine the image's normal public roots with the task-service public CA. Use the
+same pinned Hermes image:
 
 ```sh
-HERMES_IMAGE=docker.io/nousresearch/hermes-agent
+HERMES_IMAGE=docker.io/nousresearch/hermes-agent@sha256:36099926da316742423544e055d4734777105ffe6341873af5459b957d0c2919
 docker run --rm --entrypoint /bin/cat "$HERMES_IMAGE" /etc/ssl/certs/ca-certificates.crt \
   > .local/orchestration/ca-bundle.pem
 cat .local/orchestration/task-ca.crt >> .local/orchestration/ca-bundle.pem

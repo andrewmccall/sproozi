@@ -1,4 +1,4 @@
-# Build clients with clients.Dockerfile and the default Codex package.
+# Build clients with clients.Dockerfile and the pinned Codex package.
 # CLIENTS_IMAGE must be the administrator-selected immutable client image.
 ARG CLIENTS_IMAGE
 FROM golang:1.26-bookworm@sha256:e8c859f5632dcfde7b32d2012b4351728f6437930887c2f6a91ea242459e5514 AS builder

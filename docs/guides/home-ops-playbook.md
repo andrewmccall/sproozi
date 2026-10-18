@@ -73,7 +73,7 @@ A practical starter set is:
 - `Secret/sproozi-gateway-tls` with managed inspection TLS in `sproozi-system`
 - immutable `ConfigMap/sproozi-sandbox-trust` in `sproozi-agents`, referenced by the runtime's client trust configuration
 - the model pricing and authentication configuration described in [required secrets and config](../reference/required-secrets-and-config.md)
-- one random per-template HMAC Secret with key `hmac-key` in the template namespace
+- one random per-template HMAC Secret with key `hmac-key`, at least 32 bytes, in `sproozi-webhooks`
 
 Keep static credentials in SOPS-managed manifests in `cluster/apps/sproozi/`.
 For ChatGPT authentication, the gateway owns the rotating live session Secret;

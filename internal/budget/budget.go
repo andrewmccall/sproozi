@@ -53,6 +53,11 @@ type State struct {
 	ReservedUnits, ReservedCostMicros int64
 }
 
+// ErrUsageExceeded reports that trusted usage exceeded its reservation or the
+// allowance. Settlement still recorded the usage, capped at the allowance, and
+// the reservation is settled; callers must not release or forfeit it.
+var ErrUsageExceeded = errors.New("budget: settled usage exceeds reservation or budget")
+
 type ErrExhausted struct{ UnitsUsed, MaxUnits int64 }
 
 func (e *ErrExhausted) Error() string {

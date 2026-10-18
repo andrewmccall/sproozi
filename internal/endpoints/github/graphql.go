@@ -41,6 +41,7 @@ import (
 const (
 	titleField       = "title"
 	bodyField        = "body"
+	draftField       = "draft"
 	prNumberVariable = "pr_number"
 	nameVariable     = "name"
 )
@@ -433,7 +434,7 @@ func validateGraphQLCreateEnvelope(operation graphqlOperation, variables map[str
 	}
 	for key := range input {
 		switch key {
-		case baseRefNameField, bodyField, "draft", headRefNameField, "maintainerCanModify", repositoryIDField, titleField:
+		case baseRefNameField, bodyField, draftField, headRefNameField, "maintainerCanModify", repositoryIDField, titleField:
 		default:
 			return fmt.Errorf("unsupported GraphQL mutation input")
 		}

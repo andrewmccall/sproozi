@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build default clients and retain the canonical Kind containerd digests."""
+"""Build pinned clients and retain the canonical Kind containerd digests."""
 import hashlib
 import json
 import os
@@ -10,6 +10,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 OUT = ROOT / ".local/verification/orchestration-kind"
+# Hermes 0.22.2. Bump with the steps in hack/clients/README.md; the weekly
+# latest-clients workflow sets SPROOZI_HERMES_IMAGE to test the newest image.
+HERMES_IMAGE = "docker.io/nousresearch/hermes-agent@sha256:36099926da316742423544e055d4734777105ffe6341873af5459b957d0c2919"  # noqa: E501
 
 
 def run(*args, **kw):
@@ -26,6 +29,8 @@ def build_source_hashes():
     paths = (
         list((ROOT / "hack/verify/orchestration-kind/provider").glob("*.go"))
         + list((ROOT / "hack/verify/orchestration-kind").rglob("*Dockerfile"))
+        + list((ROOT / "hack/clients").glob("*/package*.json"))
+        + [ROOT / "hack/clients/install.sh"]
         + [Path(__file__), ROOT / "go.mod", ROOT / "go.sum", ROOT / ".dockerignore"]
     )
     return {
@@ -172,8 +177,8 @@ def main():
             )
         require_unchanged_sources(source_snapshot)
         images[name] = load(tag)
-    # Official coordinator and bounded worker use the same default upstream image.
-    hermes = "nousresearch/hermes-agent"
+    # Official coordinator and bounded worker use the same pinned upstream image.
+    hermes = os.environ.get("SPROOZI_HERMES_IMAGE") or HERMES_IMAGE
     run("docker", "pull", hermes)
     run("docker", "tag", hermes, "docker.io/sproozi-kind/hermes:acceptance")
     images["hermes"] = load("docker.io/sproozi-kind/hermes:acceptance")
@@ -237,7 +242,7 @@ def main():
     images["sourceSnapshotVerified"] = True
     (OUT / "images.json").write_text(json.dumps(images, indent=2) + "\n")
     print(
-        "Built and loaded default upstream clients; provenance: "
+        "Built and loaded pinned upstream clients; provenance: "
         + str(OUT / "images.json")
     )
 

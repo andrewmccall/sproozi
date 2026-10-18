@@ -478,6 +478,23 @@ func TestEnsureSandboxRejectsPreexistingIdentityCollision(t *testing.T) {
 	}
 }
 
+func TestEnsureSandboxComparesRuntimeClassByValue(t *testing.T) {
+	run := testRunForSandbox("cccccccc-0000-0000-0000-000000000103")
+	rt := testRuntime()
+	rt.Spec.RuntimeClassName = "gvisor"
+	existing := kubernetes.BuildPodSpec(run, rt, run.Status.Identity.ServiceAccountName)
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(testTrustConfigMap(t), existing).Build()
+	sc := kubernetes.NewPodSandboxClient(c, c)
+
+	if _, err := sc.Ensure(context.Background(), run, rt); err != nil {
+		t.Fatalf("Ensure rejected a matching Pod with a runtime class: %v", err)
+	}
+	rt.Spec.RuntimeClassName = "runc"
+	if _, err := sc.Ensure(context.Background(), run, rt); err == nil {
+		t.Fatal("Ensure accepted a preexisting Pod with a different runtime class")
+	}
+}
+
 func TestEnsureSandboxRejectsMismatchedRunLabels(t *testing.T) {
 	run := testRunForSandbox("cccccccc-0000-0000-0000-000000000099")
 	rt := testRuntime()

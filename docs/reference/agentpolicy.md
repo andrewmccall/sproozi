@@ -94,7 +94,8 @@ upstream call.
   cached-input and output rates before the gateway forwards them.
 - Cost-bounded OpenAI requests use `service_tier: default`. The gateway inserts
   it when missing and rejects other tiers. Anthropic has its own standard-tier
-  and cache rules.
+  and cache rules, and refuses `context-1m` long-context betas, which the
+  pricing table cannot price.
 - Other endpoints have no trusted pricing, so they reject a cost limit.
 - In ChatGPT-plan mode, set a token limit and `maxCostMicros: 0`.
 

@@ -48,6 +48,18 @@ rules](agentruntime.md#container-validation-rules) list what admission rejects.
 Runtime authors are trusted: keep provider credentials out of public ConfigMaps
 and literal environment values.
 
+## Treat runtime and policy authors as administrators
+
+`AgentRuntime` and `AgentPolicy` are namespaced, but their authority is not.
+A runtime's Pod template runs in the shared `sproozi-agents` namespace, and a
+policy can grant gateway reads in any namespace it names. Anyone who can write
+either object in any namespace is therefore a cluster administrator for
+Sproozi. Grant the scaffolded `sproozi-agentruntime-editor-role`,
+`sproozi-agentruntime-admin-role`, `sproozi-agentpolicy-editor-role` and
+`sproozi-agentpolicy-admin-role` ClusterRoles only to administrators, including
+through namespaced RoleBindings. Users who only start work need `AgentRun`
+access and read access to templates.
+
 ## Restrict remote MCP access
 
 Treat the gateway's MCP registry and provider credential mounts as
@@ -80,7 +92,10 @@ GraphQL reads validate the bounded document, repository argument bindings and
 selected fields before forwarding. The supported subset is listed in
 [client compatibility](client-compatibility.md); unsupported fragments, aliases
 and selections are rejected. The pinned `gh pr create` workflow remains outside
-that subset; use the documented bounded REST PR operation.
+that subset; use the documented bounded REST PR operation. Like GraphQL, REST PR
+creation forwards a body rebuilt from the checked fields, so a case variant,
+duplicate key, extra field or query parameter cannot change the head, base or
+source repository that GitHub uses.
 
 The Kubernetes route binds resources to core/v1 or apps/v1, removes the entire
 Impersonate-* header family and refuses upstream redirects in every composition.
@@ -99,9 +114,14 @@ UID and capability. Before a model call, the gateway reserves capacity:
 - Anthropic requests reserve all remaining token and cost capacity.
 
 After the call, the gateway settles the provider-reported input and output
-tokens. Input tokens can push usage past the reservation. If settlement fails,
-the gateway withholds the response, but the provider has already done the work,
-and the kept reservation can undercount what was spent.
+tokens. Input tokens can push usage past the reservation. When trusted usage
+exceeds the reservation or the remaining allowance, the gateway withholds the
+response and records the usage, capped at the allowance. The account is then
+charged what the provider reported or is exhausted, and later requests are
+refused, so repeating an oversized request cannot spend without limit. The
+provider has already done the work, and usage above the allowance is not
+recorded. If the accounting store itself fails, the response is withheld and
+the reservation stays charged, which can undercount what was spent.
 
 Within one gateway process, model calls that share a budget account run one at
 a time. Cancellation and execution deadlines still apply while a call waits.
@@ -109,7 +129,9 @@ a time. Cancellation and execution deadlines still apply while a call waits.
 Administrator-owned pricing converts verified usage into cost; the
 [pricing rules](agentpolicy.md#endpoint-budgets) say which rows a cost limit
 needs. A missing price for a category the provider charged, or an uncertain
-settlement, can still withhold a response after the provider did the work. Keep
+settlement, can still withhold a response after the provider did the work.
+Under a cost limit, Anthropic requests that select a `context-1m` long-context
+beta are refused, because the table has no premium long-context rate. Keep
 the pricing table aligned with approved models, and use the provider's own
 monitoring and spending limits.
 
@@ -146,18 +168,36 @@ records how release recovers ownership.
 `retentionTTL` governs the AgentRun record. Budget ConfigMaps have no automatic
 retention/deletion path. Webhook replay keys are stored atomically in ConfigMaps
 in `sproozi-webhook-state`; they survive restarts and are shared by replicas.
+Each record is kept for two replay windows after its event's timestamp, so
+replicas whose clocks differ by less than one window cannot accept an event
+again after another replica removes its record.
 The webhook deletes expired replay entries once per replay window, so this state
 stays bounded by recent event volume.
 
 ## Restrict trusted services
 
-The installed controller-manager can manage Pods, identities, NetworkPolicies
-and RBAC objects. Its binding does not grant Secret reads; the optional metrics
-overlay adds TokenReviews and SubjectAccessReviews. Restrict exec/debug access
+The installed controller-manager reads Pods, ServiceAccounts, NetworkPolicies
+and ConfigMaps across the cluster. It creates and deletes Pods, ServiceAccounts,
+NetworkPolicies and ConfigMaps only in `sproozi-agents`, through the Role in
+`config/agent-rbac`. It cannot read Secrets through the API, but a Pod it
+creates can mount any Secret in `sproozi-agents`, so keep Secrets out of that
+namespace. The optional metrics overlay adds TokenReviews and
+SubjectAccessReviews. Restrict exec/debug access
 and reuse of trusted service accounts. The gateway holds provider credentials
 and may update its rotating ChatGPT session Secret. ChatGPT refresh requires one active gateway process,
 even though budget and replay state are shared. See
 [model provider authentication](../guides/model-provider-auth.md).
+
+The webhook receiver refuses a request with missing, malformed or stale
+signature headers before it reads the body or calls the API server, and bounds
+header, body, read, write and idle time. See the
+[webhook contract](webhook-contract.md#request-checks-and-limits).
+It can read Secrets only in `sproozi-webhooks`, which holds HMAC keys alone, so
+a compromised receiver or a template annotation cannot reach the provider,
+GitHub or TLS credentials in `sproozi-system`
+([ADR 0022](../adr/0022-webhook-hmac-secrets-in-own-namespace.md)). Restrict
+who can create Secrets in `sproozi-webhooks` and edit `AgentTemplate`
+annotations, since either can choose which key authenticates a receiver.
 
 The local demo's short-lived CA and gitignored environment file are disposable
 evaluation inputs. For deployment, supply managed certificates, least-privilege

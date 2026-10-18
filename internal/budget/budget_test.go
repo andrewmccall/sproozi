@@ -3,6 +3,7 @@ package budget_test
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 
@@ -144,16 +145,33 @@ func TestBudgetPolicyTighteningUsesCumulativeUsage(t *testing.T) {
 	}
 }
 
-func TestBudgetOverSettlementFailsClosed(t *testing.T) {
-	bt := budget.NewTracker()
-	r, err := bt.Meter("over", testBudget(100)).Reserve(t.Context(), 20, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := r.Settle(21, 0); err == nil {
-		t.Fatal("expected over-settlement error")
-	}
-	if got := observedState(t, bt, "over").UnitsUsed; got != 0 {
-		t.Fatalf("over-settlement charged %d units", got)
+// TestBudgetOverSettlementRecordsUsageCappedAtAllowance verifies that usage
+// above the reservation is reported and recorded, up to the allowance, rather
+// than leaving only the smaller reservation charged.
+func TestBudgetOverSettlementRecordsUsageCappedAtAllowance(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		used, want int64
+	}{
+		{name: "within allowance", used: 21, want: 21},
+		{name: "beyond allowance", used: 500, want: 100},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bt := budget.NewTracker()
+			meter := bt.Meter("over", testBudget(100))
+			r, err := meter.Reserve(t.Context(), 20, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := r.Settle(tc.used, 0); !errors.Is(err, budget.ErrUsageExceeded) {
+				t.Fatalf("Settle error = %v, want ErrUsageExceeded", err)
+			}
+			if state := observedState(t, bt, "over"); state.UnitsUsed != tc.want || state.ReservedUnits != 0 {
+				t.Fatalf("over-settlement state = %+v, want %d used and no reservation", state, tc.want)
+			}
+			if err := r.Release(); err == nil {
+				t.Fatal("an exceeded settlement must not be released afterwards")
+			}
+		})
 	}
 }
