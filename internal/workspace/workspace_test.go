@@ -343,7 +343,9 @@ func TestIgnoredSelectionAndDetachedHead(t *testing.T) {
 	if head, err := os.ReadFile(filepath.Join(dst, ".git", "HEAD")); err != nil || strings.HasPrefix(string(head), "ref:") {
 		t.Fatalf("not detached: %s %v", head, err)
 	}
-	for _, p := range []string{"../escape", "/absolute", ".git/config", "note.txt", "loose"} {
+	// TestIgnoredSelectionBoundary covers every unsafe path. One here proves
+	// that Capture applies that check.
+	for _, p := range []string{"../escape", "note.txt", "loose"} {
 		if _, err = Capture(context.Background(), root, []string{p}, testLimit); err == nil {
 			t.Errorf("accepted ignored selection %q", p)
 		}
