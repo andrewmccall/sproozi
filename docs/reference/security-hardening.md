@@ -169,6 +169,11 @@ and may update its rotating ChatGPT session Secret. ChatGPT refresh requires one
 even though budget and replay state are shared. See
 [model provider authentication](../guides/model-provider-auth.md).
 
+The webhook receiver refuses a request with missing, malformed or stale
+signature headers before it reads the body or calls the API server, and bounds
+header, body, read, write and idle time. See the
+[webhook contract](webhook-contract.md#request-checks-and-limits).
+
 The local demo's short-lived CA and gitignored environment file are disposable
 evaluation inputs. For deployment, supply managed certificates, least-privilege
 credentials, namespace isolation and durable audit collection. The [home-ops playbook](../guides/home-ops-playbook.md) describes a planned

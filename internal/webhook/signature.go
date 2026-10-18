@@ -44,41 +44,71 @@ var (
 	ErrNoHMACKey              = errors.New("webhook: secret does not contain 'hmac-key' entry")
 )
 
-func VerifySignature(signatureHeader, timestampHeader string, rawBody, key []byte, now time.Time, replayWindow time.Duration) (time.Time, error) {
+// SignedHeaders holds the signature and timestamp headers after their format
+// and age are checked. They need no body, Secret or API server call.
+type SignedHeaders struct {
+	signature []byte
+	timestamp string
+	// EventTime is the sender's signed timestamp.
+	EventTime time.Time
+}
+
+// ParseSignedHeaders checks that both headers are present and well formed and
+// that the timestamp is within the replay window. The handler calls it before
+// reading the body or calling the API server, so an unsigned or stale request
+// costs neither.
+func ParseSignedHeaders(signatureHeader, timestampHeader string, now time.Time, replayWindow time.Duration) (SignedHeaders, error) {
 	if signatureHeader == "" {
-		return time.Time{}, ErrMissingSignature
+		return SignedHeaders{}, ErrMissingSignature
 	}
-	if !strings.HasPrefix(signatureHeader, "sha256=") {
-		return time.Time{}, ErrInvalidSignatureFormat
+	sigHex, ok := strings.CutPrefix(signatureHeader, "sha256=")
+	if !ok {
+		return SignedHeaders{}, ErrInvalidSignatureFormat
 	}
-	sigHex := strings.TrimPrefix(signatureHeader, "sha256=")
 	sigBytes, err := hex.DecodeString(sigHex)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("%w: %w", ErrInvalidSignatureFormat, err)
+		return SignedHeaders{}, fmt.Errorf("%w: %w", ErrInvalidSignatureFormat, err)
+	}
+	if len(sigBytes) != sha256.Size {
+		return SignedHeaders{}, ErrInvalidSignatureFormat
 	}
 
 	if timestampHeader == "" {
-		return time.Time{}, ErrMissingTimestamp
+		return SignedHeaders{}, ErrMissingTimestamp
 	}
 	tsUnix, err := strconv.ParseInt(timestampHeader, 10, 64)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("%w: %w", ErrInvalidTimestamp, err)
+		return SignedHeaders{}, fmt.Errorf("%w: %w", ErrInvalidTimestamp, err)
 	}
 
 	eventTime := time.Unix(tsUnix, 0)
 	age := now.Sub(eventTime)
 	if age > replayWindow || age < -replayWindow {
-		return time.Time{}, ErrStaleTimestamp
+		return SignedHeaders{}, ErrStaleTimestamp
 	}
+	return SignedHeaders{signature: sigBytes, timestamp: timestampHeader, EventTime: eventTime}, nil
+}
 
+// Verify checks the signature over the timestamp and body.
+func (s SignedHeaders) Verify(rawBody, key []byte) error {
 	mac := hmac.New(sha256.New, key)
-	_, _ = mac.Write([]byte(timestampHeader))
+	_, _ = mac.Write([]byte(s.timestamp))
 	_, _ = mac.Write(rawBody)
-	if !hmac.Equal(mac.Sum(nil), sigBytes) {
-		return time.Time{}, ErrSignatureMismatch
+	if !hmac.Equal(mac.Sum(nil), s.signature) {
+		return ErrSignatureMismatch
 	}
+	return nil
+}
 
-	return eventTime, nil
+func VerifySignature(signatureHeader, timestampHeader string, rawBody, key []byte, now time.Time, replayWindow time.Duration) (time.Time, error) {
+	headers, err := ParseSignedHeaders(signatureHeader, timestampHeader, now, replayWindow)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if err := headers.Verify(rawBody, key); err != nil {
+		return time.Time{}, err
+	}
+	return headers.EventTime, nil
 }
 
 func ComputeSignature(timestampHeader string, rawBody, key []byte) string {

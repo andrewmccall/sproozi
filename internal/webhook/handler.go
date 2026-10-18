@@ -92,6 +92,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	window := h.Config.ReplayWindow
+	if window == 0 {
+		window = DefaultReplayWindow
+	}
+	// Refuse an unsigned, malformed or stale request before reading its body
+	// or calling the API server. Only a request that could be authentic costs
+	// a body read, a template and policy lookup and a Secret read.
+	signed, err := ParseSignedHeaders(r.Header.Get(SignatureHeader), r.Header.Get(TimestampHeader), now(), window)
+	if err != nil {
+		h.deny(w, event, http.StatusUnauthorized, signatureDenyReason(err))
+		return
+	}
+
 	body := http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	defer func() { _ = body.Close() }()
 
@@ -131,26 +144,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	window := h.Config.ReplayWindow
-	if window == 0 {
-		window = DefaultReplayWindow
-	}
-	eventTime, err := VerifySignature(
-		r.Header.Get(SignatureHeader),
-		r.Header.Get(TimestampHeader),
-		rawBody,
-		key,
-		now(),
-		window,
-	)
-	if err != nil {
-		reason := "signature verification failed"
-		if errors.Is(err, ErrStaleTimestamp) {
-			reason = ErrStaleTimestamp.Error()
-		}
-		h.deny(w, event, http.StatusUnauthorized, reason)
+	if err := signed.Verify(rawBody, key); err != nil {
+		h.deny(w, event, http.StatusUnauthorized, signatureDenyReason(err))
 		return
 	}
+	eventTime := signed.EventTime
 
 	var req payload
 	if err := json.Unmarshal(rawBody, &req); err != nil {
@@ -233,6 +231,15 @@ func parsePath(path string) (string, string, bool) {
 func replayKey(namespace, receiver, eventID string) string {
 	sum := sha256.Sum256([]byte(namespace + "\n" + receiver + "\n" + eventID))
 	return hex.EncodeToString(sum[:])
+}
+
+// signatureDenyReason names a stale timestamp, which a sender can correct, and
+// otherwise does not say which check failed.
+func signatureDenyReason(err error) string {
+	if errors.Is(err, ErrStaleTimestamp) {
+		return ErrStaleTimestamp.Error()
+	}
+	return "signature verification failed"
 }
 
 func (h *Handler) deny(w http.ResponseWriter, event audit.WebhookEvent, status int, reason string) {

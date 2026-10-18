@@ -444,10 +444,86 @@ func TestHandler_ReceiverLookupStatus(t *testing.T) {
 			}}
 
 			resp := httptest.NewRecorder()
-			handler.ServeHTTP(resp, httptest.NewRequest(http.MethodPost, "/webhook/default/"+webhookReceiver, strings.NewReader(testAlertBody)))
+			handler.ServeHTTP(resp, signedRequest(testAlertBody, []byte("webhook-secret")))
 
 			if resp.Code != tc.want {
 				t.Fatalf("status = %d, want %d (body=%s)", resp.Code, tc.want, resp.Body.String())
+			}
+		})
+	}
+}
+
+// signedRequest returns a receiver request with a current, well-formed
+// signature, so it passes the checks that need no Secret.
+func signedRequest(body string, key []byte) *http.Request {
+	ts := fmt.Sprintf("%d", time.Now().Unix())
+	req := httptest.NewRequest(http.MethodPost, "/webhook/default/"+webhookReceiver, strings.NewReader(body))
+	req.Header.Set(webhook.TimestampHeader, ts)
+	req.Header.Set(webhook.SignatureHeader, webhook.ComputeSignature(ts, []byte(body), key))
+	return req
+}
+
+// countingReader records whether the handler read the request body.
+type countingReader struct {
+	reads int
+	body  *strings.Reader
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	c.reads++
+	return c.body.Read(p)
+}
+
+// TestHandler_UnauthenticatedRequestCostsNoBodyOrAPICall verifies that a
+// request with missing, malformed or stale signature headers is refused
+// before the handler reads its body or calls the API server.
+func TestHandler_UnauthenticatedRequestCostsNoBodyOrAPICall(t *testing.T) {
+	now := time.Now()
+	current := fmt.Sprintf("%d", now.Unix())
+	valid := webhook.ComputeSignature(current, []byte(testAlertBody), []byte("webhook-secret"))
+	for _, tc := range []struct {
+		name, signature, timestamp string
+	}{
+		{name: "missing signature", timestamp: current},
+		{name: "malformed signature", signature: "sha256=zz", timestamp: current},
+		{name: "short signature", signature: "sha256=abcd", timestamp: current},
+		{name: "wrong scheme", signature: "sha1=" + strings.TrimPrefix(valid, "sha256="), timestamp: current},
+		{name: "missing timestamp", signature: valid},
+		{name: "malformed timestamp", signature: valid, timestamp: "yesterday"},
+		{name: "stale timestamp", signature: valid, timestamp: fmt.Sprintf("%d", now.Add(-time.Hour).Unix())},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var apiCalls int
+			c := fake.NewClientBuilder().WithScheme(webhookScheme(t)).WithInterceptorFuncs(interceptor.Funcs{
+				Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+					apiCalls++
+					return c.Get(ctx, key, obj, opts...)
+				},
+				List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+					apiCalls++
+					return c.List(ctx, list, opts...)
+				},
+			}).WithObjects(webhookPolicy(), webhookTemplate(), webhookSecret([]byte("webhook-secret"))).Build()
+			handler := &webhook.Handler{Config: webhook.HandlerConfig{
+				Client:      c,
+				Replay:      webhook.NewInMemoryReplayStore(),
+				AuditLogger: &captureWebhookLogger{},
+				Now:         func() time.Time { return now },
+			}}
+			body := &countingReader{body: strings.NewReader(testAlertBody)}
+			req := httptest.NewRequest(http.MethodPost, "/webhook/default/"+webhookReceiver, body)
+			if tc.signature != "" {
+				req.Header.Set(webhook.SignatureHeader, tc.signature)
+			}
+			if tc.timestamp != "" {
+				req.Header.Set(webhook.TimestampHeader, tc.timestamp)
+			}
+			resp := httptest.NewRecorder()
+			handler.ServeHTTP(resp, req)
+
+			if resp.Code != http.StatusUnauthorized || body.reads != 0 || apiCalls != 0 {
+				t.Fatalf("status = %d, body reads = %d, API calls = %d; want 401 with no reads or calls",
+					resp.Code, body.reads, apiCalls)
 			}
 		})
 	}

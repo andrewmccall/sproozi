@@ -95,14 +95,28 @@ func main() {
 
 	log.Info("Starting webhook", "addr", listenAddr)
 
-	srv := &http.Server{
-		Addr:              listenAddr,
-		Handler:           h,
-		ReadHeaderTimeout: 10 * time.Second,
-	}
-	if err := srv.ListenAndServe(); err != nil {
+	if err := newServer(listenAddr, h).ListenAndServe(); err != nil {
 		log.Error(err, "Server exited")
 		os.Exit(1)
+	}
+}
+
+// maxHeaderBytes bounds the request headers a sender can make the receiver
+// hold. Signed event requests carry only a few short headers.
+const maxHeaderBytes = 64 << 10
+
+// newServer bounds every phase of a connection. The receiver is reachable
+// before authentication, so a slow or idle sender must not hold a connection
+// or a request body open indefinitely.
+func newServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       45 * time.Second,
+		WriteTimeout:      45 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    maxHeaderBytes,
 	}
 }
 
