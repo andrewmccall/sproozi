@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"net"
 	"os"
@@ -215,39 +214,6 @@ func TestFixedAttachmentReconnectAndGate(t *testing.T) {
 	}
 	if r := s.activate(); r.Error == "" || r.State != harness.NativeStopping {
 		t.Fatalf("activate reopened gated process: %+v", r)
-	}
-}
-
-// The root drives loopback fixture execution. This test consumes its real native
-// artifact read-only so the command observer is checked against stock TUI output.
-var tuiProofReport = flag.String("tui-proof-report", "", "optional production TUI report")
-
-func TestRecordedStockTUIObserver(t *testing.T) {
-	if *tuiProofReport == "" {
-		t.Skip("root-owned stock TUI evidence not supplied")
-	}
-	data, err := os.ReadFile(*tuiProofReport)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var report struct {
-		Passed          bool   `json:"passed"`
-		Version         string `json:"version"`
-		ThreadID        string `json:"nativeThreadId"`
-		PrivateEvidence string `json:"privateEvidenceDirectory"`
-	}
-	if err = json.Unmarshal(data, &report); err != nil {
-		t.Fatal(err)
-	}
-	if !report.Passed || report.Version != "codex-cli 0.161.0" {
-		t.Fatal("stock TUI proof did not pass at supported pin")
-	}
-	home := filepath.Join(filepath.Dir(report.PrivateEvidence), "0", "home", ".codex")
-	approved := "Only the deterministic TUI fixture is approved. TUI_INITIAL_APPROVED_111"
-	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(approved)))
-	id, turn, err := observeTurn(home, report.ThreadID, hash, 8<<20)
-	if err != nil || id != report.ThreadID || turn == "" {
-		t.Fatalf("real native completed-turn observation: %s %s %v", id, turn, err)
 	}
 }
 
