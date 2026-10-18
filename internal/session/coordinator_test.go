@@ -754,7 +754,8 @@ func TestExpiredOriginalDeadlinePreventsPreparation(t *testing.T) {
 	source.ExecutionID, source.OperationID, source.AllocationID = uuid.NewString(), uuid.NewString(), uuid.NewString()
 	source.Deadline = deadline
 	expiring := seedExecution(t, c, local, source, start.Input)
-	<-time.After(time.Until(deadline) + 10*time.Millisecond)
+	// The deadline passes on the coordinator's clock without waiting for it.
+	c.now = func() time.Time { return deadline }
 	if _, err := c.Move(context.Background(), expiring.Source.ExecutionID, uuid.NewString(), testRemote); err == nil {
 		t.Fatal("move reset expired deadline")
 	}
