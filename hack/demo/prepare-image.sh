@@ -29,7 +29,7 @@ done
 architecture="$("$docker_bin" info --format '{{.Architecture}}')"
 case "$architecture" in aarch64|arm64) architecture=arm64 ;; x86_64|amd64) architecture=amd64 ;; *) exit 1 ;; esac
 "$docker_bin" build --build-arg TARGETARCH="$architecture" \
-  -f "$demo_repo_root/hack/demo/codex.Dockerfile" -t "$image" "$demo_repo_root/hack/demo"
+  -f "$demo_repo_root/hack/demo/codex.Dockerfile" -t "$image" "$demo_repo_root"
 "$docker_bin" run --rm --read-only --tmpfs /tmp --entrypoint /bin/sh "$image" -ec '
   codex --version
   git --version

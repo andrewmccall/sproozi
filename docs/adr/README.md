@@ -50,7 +50,8 @@ the old record superseded and link both records.
 
 These records preserve the reasons for each design. A later record can replace
 part of an earlier decision. ADR 0015 replaces exact client-version selection
-and the combined MCP discovery schema.
+and the combined MCP discovery schema. ADR 0021 replaces ADR 0015's unversioned
+client installs with pinned lockfiles and digests for CI and the verifiers.
 
 | Decision | Topic |
 | --- | --- |
@@ -74,3 +75,4 @@ and the combined MCP discovery schema.
 | [0018](0018-coordinator-owns-every-visit.md) | The home coordinator owns every visit, including the first, and launches never change. |
 | [0019](0019-pull-operations-and-work-owner-names.md) | Derived pull operations and one rule for resolving work owner names. |
 | [0020](0020-docker-placement-removes-stopped-visits.md) | The Docker placement removes a stopped visit's containers and volume after recording it. |
+| [0021](0021-pinned-ci-inputs-and-latest-client-canary.md) | Pull request CI runs only pinned clients, images and manifests; a weekly canary reports upstream drift. |

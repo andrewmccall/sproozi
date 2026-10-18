@@ -33,8 +33,10 @@ files, binary data, changed selectors and changed instructions fail closed.
 
 ## Launch and configuration ownership
 
-The administrator owns the image, model and Pod command. Client installation
-uses upstream defaults; Sproozi does not require a fixed client release. Sproozi
+The administrator owns the image, model and Pod command. Sproozi does not
+require a fixed client release. The repository's client images install the
+releases pinned in [`hack/clients`](../../hack/clients/README.md); build with
+other releases by changing those lockfiles. Sproozi
 renders public connection configuration and owns Pod identity, network access,
 deadlines, cancellation and cleanup. It does not replace the CLI's agent loop.
 Use the [stock runtime examples](../../examples/harnesses/README.md), supply reviewed

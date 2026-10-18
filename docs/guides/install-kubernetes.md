@@ -67,7 +67,7 @@ docker buildx build --platform "$SPROOZI_PLATFORMS" \
   --tag "$SPROOZI_CONTROLLER_TAG" --push .
 docker buildx build --platform "$SPROOZI_PLATFORMS" \
   --file hack/demo/codex.Dockerfile --tag "$SPROOZI_TOOLS_TAG" \
-  --push hack/demo
+  --push .
 
 docker buildx imagetools inspect "$SPROOZI_CONTROLLER_TAG"
 docker buildx imagetools inspect "$SPROOZI_TOOLS_TAG"

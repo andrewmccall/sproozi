@@ -22,7 +22,7 @@ workflows. `make help` prints the same summaries.
 | `make verify-workflow-fixtures` | Session-mobility protocol fixtures, quickstart ownership and CRD checks, Kind bootstrap readiness ordering, and demo setup credential preservation and registry wiring. Stubs replace Docker and Kind. | Tests | Python 3, Bash; fetches the pinned Calico manifest into `.local/cni` on first run |
 | `make verify-docs` | Local Markdown links resolve and no private-plan paths are referenced. It does not establish that documentation is current. | Tests | Python 3 |
 | `make lint` | golangci-lint reports no issues; `make lint-config` checks its configuration. | Lint | Go |
-| `make test-e2e` | The full stack works in an owned two-node Kind cluster with enforcing CNI. See [Harnesses and Hermes in Kind](#harnesses-and-hermes-in-kind). | E2E | Docker, Kind, kubectl, pinned CNI manifest |
+| `make test-e2e` | The full stack works in an owned two-node Kind cluster with enforcing CNI, using the pinned clients and Hermes digest. See [Harnesses and Hermes in Kind](#harnesses-and-hermes-in-kind). | E2E | Docker, Kind, kubectl, Calico from `hack/verify/fetch-calico.sh` |
 | `make test-e2e-existing` | The same e2e suite passes against a Kind cluster you created (`KIND_CLUSTER`). | No | An existing dedicated Kind cluster |
 | `make verify-mcp-client` | Generated run-local MCP configuration loads in installed stock Codex. No model request. | No | Codex CLI |
 | `make verify-harness-clients` | Generated native MCP configuration loads in installed Codex, Claude Code and OpenCode. No model request. | No | All three CLIs |
@@ -35,6 +35,11 @@ workflows. `make help` prints the same summaries.
 
 `make verify-release` does not run the installed-client targets or
 `verify-mcp-kind`; run those when changing client configuration or configured MCP.
+The `Latest Clients Canary` workflow is not a target: weekly and on manual
+dispatch, it runs the client `--version` checks and `make test-e2e` with the
+newest upstream releases and opens or updates a tracking issue when they differ
+from the pins or fail. Pull requests never run it. See
+[bumping pinned clients](../../hack/clients/README.md#bumping-pinned-clients).
 [cases.json](cases.json) is a catalogue of planned scenarios, not a gate.
 
 ## Getting-started guide
@@ -87,10 +92,7 @@ the cluster and four stock clients need several GiB of memory and disk. From
 the repository root:
 
 ```sh
-mkdir -p .local/verification
-curl --fail --location --silent --show-error \
-  https://raw.githubusercontent.com/projectcalico/calico/v3.30.4/manifests/calico.yaml \
-  --output .local/verification/calico-v3.30.4.yaml
+bash hack/verify/fetch-calico.sh .local/verification/calico-v3.30.4.yaml
 GOTOOLCHAIN=go1.26.6 \
 SPROOZI_CNI_MANIFEST="$PWD/.local/verification/calico-v3.30.4.yaml" \
 SPROOZI_CNI_SELECTOR=k8s-app=calico-node \
@@ -98,13 +100,21 @@ make test-e2e
 ```
 
 The command owns a dedicated two-node Kind cluster, builds and loads the release
-image, fixture providers and pinned stock clients, and launches the complete
+image, fixture providers and stock clients, and launches the complete
 controller, TLS gateway, task service and persistent Hermes coordinator. Native
 API chat and a native scheduled job delegate real AgentRuns. The suite checks
 all four stock worker loops, denials, budgets, cancellation, deadlines, UID-bound
 replay, result retention, PVC restart and direct-network isolation. It removes
 its cluster on completion. Set `SPROOZI_PRESERVE_ON_FAILURE=1` to retain an owned
 failed cluster for investigation.
+
+The clients come from the lockfiles in [`hack/clients`](../../hack/clients/README.md),
+installed with `npm ci --ignore-scripts`, and Hermes runs by the digest in
+`hack/verify/orchestration-kind/build.py`. `fetch-calico.sh` refuses a manifest
+whose SHA-256 differs from its pin. Set `SPROOZI_HERMES_IMAGE` to a
+`repository@sha256:...` reference to test another Hermes image; the canary uses
+it for the latest release. To move a pin, follow
+[bumping pinned clients](../../hack/clients/README.md#bumping-pinned-clients).
 
 The acceptance runtime sets Claude Code's supported retry count to zero for
 intentional denials. Stock OpenCode retries exhausted-budget responses, so its
@@ -162,9 +172,9 @@ writes a redacted report. The fixture resources and cluster remain caller-owned.
 ## Configured MCP in Kind
 
 `make verify-mcp-kind` creates and removes its own two-node Kind cluster. Supply
-Docker, Kind, kubectl, OpenSSL, PyYAML, the checksum-pinned Calico v3.30.4 manifest,
-a digest-pinned stock Codex tools image and a dedicated single-owner ChatGPT
-session file. The check uses real model requests. Do not share that rotating
+Docker, Kind, kubectl, OpenSSL, PyYAML, the Calico v3.30.4 manifest verified by
+`hack/verify/fetch-calico.sh`, a digest-pinned stock Codex tools image and a
+dedicated single-owner ChatGPT session file. The check uses real model requests. Do not share that rotating
 session with another running gateway; the script returns its newest replacement
 to the supplied file before deleting the cluster.
 
@@ -175,7 +185,8 @@ export MCP_PROOF_IMAGE=controller:mcp-proof
 export MCP_PROVIDER_IMAGE=mcp-provider:proof
 export CODEX_IMAGE="<stock-codex-image>@sha256:<digest>"
 export CHATGPT_SESSION_FILE="<private-single-owner-session.json>"
-export SPROOZI_CNI_MANIFEST="<pinned-calico-v3.30.4.yaml>"
+bash hack/verify/fetch-calico.sh .local/verification/calico-v3.30.4.yaml
+export SPROOZI_CNI_MANIFEST="$PWD/.local/verification/calico-v3.30.4.yaml"
 export MCP_PROOF_REPORT=.local/verification/configured-mcp-live.json
 make verify-mcp-kind
 ```

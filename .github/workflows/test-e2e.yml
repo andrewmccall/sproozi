@@ -36,8 +36,8 @@ jobs:
       - name: Verify kind installation
         run: kind version
 
-      - name: Download pinned Calico manifest
-        run: curl --fail --location --silent --show-error https://raw.githubusercontent.com/projectcalico/calico/v3.30.4/manifests/calico.yaml --output "$RUNNER_TEMP/calico-v3.30.4.yaml"
+      - name: Download and verify pinned Calico manifest
+        run: hack/verify/fetch-calico.sh "$RUNNER_TEMP/calico-v3.30.4.yaml"
 
       - name: Run E2E tests with enforcing CNI
         run: make test-e2e

@@ -1,0 +1,187 @@
+name: Latest Clients Canary
+
+# Pull request CI builds only the pinned clients in hack/clients and the pinned
+# Hermes digest. This scheduled run is the only place that installs the newest
+# upstream releases. It reports drift in one tracking issue and never changes
+# the pins. See docs/adr/0021-pinned-ci-inputs-and-latest-client-canary.md.
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  canary:
+    permissions:
+      contents: read
+    name: Build and test the latest clients
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    outputs:
+      pinned: ${{ steps.resolve.outputs.pinned }}
+      latest: ${{ steps.resolve.outputs.latest }}
+      drift: ${{ steps.resolve.outputs.drift }}
+      clients: ${{ steps.clients.outcome }}
+      e2e: ${{ steps.e2e.outcome }}
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
+        with:
+          go-version: '1.26.6'
+
+      - name: Resolve the latest client releases
+        id: resolve
+        run: |
+          set -euo pipefail
+          version='^[a-z-]+=[0-9]{1,9}\.[0-9]{1,9}\.[0-9]{1,9}(-[0-9A-Za-z.]{1,32})?$'
+          digest='^hermes=sha256:[0-9a-f]{64}$'
+          check() {
+            local line
+            while IFS= read -r line; do
+              [[ "$line" =~ $version || "$line" =~ $digest ]] || {
+                echo "Unexpected version line: $line" >&2
+                exit 1
+              }
+            done <<<"$1"
+          }
+          pinned="$(hack/clients/update.sh --print)"
+          pinned+=$'\n'"hermes=$(grep -oE 'sha256:[0-9a-f]{64}' hack/verify/orchestration-kind/build.py)"
+          # Rewrites hack/clients lockfiles in this checkout only.
+          latest="$(hack/clients/update.sh latest)"
+          hermes="$(docker buildx imagetools inspect docker.io/nousresearch/hermes-agent:latest \
+            --format '{{json .Manifest}}' | jq -r .digest)"
+          latest+=$'\n'"hermes=$hermes"
+          check "$pinned"
+          check "$latest"
+          drift=false
+          [[ "$pinned" == "$latest" ]] || drift=true
+          printf 'Pinned:\n%s\nLatest:\n%s\n' "$pinned" "$latest"
+          {
+            echo "pinned=$(paste -sd ' ' <<<"$pinned")"
+            echo "latest=$(paste -sd ' ' <<<"$latest")"
+            echo "drift=$drift"
+            echo "hermes=docker.io/nousresearch/hermes-agent@$hermes"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Build the latest clients without install scripts
+        id: clients
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          docker build --pull --no-cache -t sproozi-canary/clients:latest \
+            -f hack/verify/orchestration-kind/clients.Dockerfile .
+          for binary in codex claude opencode; do
+            docker run --rm --network none --env HOME=/tmp \
+              sproozi-canary/clients:latest "$binary" --version
+          done
+
+      - name: Install pinned Kind
+        if: steps.clients.outcome == 'success'
+        run: |
+          hack/verify/install-kind.sh "$RUNNER_TEMP/kind-bin"
+          sudo install -m 0755 "$RUNNER_TEMP/kind-bin/kind" /usr/local/bin/kind
+
+      - name: Download and verify pinned Calico manifest
+        if: steps.clients.outcome == 'success'
+        run: hack/verify/fetch-calico.sh "$RUNNER_TEMP/calico-v3.30.4.yaml"
+
+      - name: Run E2E tests with the latest clients and Hermes
+        id: e2e
+        if: steps.clients.outcome == 'success'
+        continue-on-error: true
+        run: make test-e2e
+        env:
+          SPROOZI_CNI_MANIFEST: ${{ runner.temp }}/calico-v3.30.4.yaml
+          SPROOZI_CNI_SELECTOR: k8s-app=calico-node
+          SPROOZI_CNI_TIMEOUT: 300s
+          SPROOZI_HERMES_IMAGE: ${{ steps.resolve.outputs.hermes }}
+
+      - name: Retain canary evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: latest-clients-evidence
+          path: |
+            hack/clients/*/package.json
+            hack/clients/*/package-lock.json
+            .local/verification/orchestration-kind/*.json
+            .local/verification/orchestration-kind/*.log
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Fail when the latest clients fail
+        if: steps.clients.outcome != 'success' || steps.e2e.outcome != 'success'
+        run: |
+          echo 'The latest clients failed; the report job opens or updates the tracking issue' >&2
+          exit 1
+
+  report:
+    # Runs no repository or upstream code: only gh with fixed text and the
+    # canary's validated outputs.
+    needs: canary
+    if: ${{ !cancelled() }}
+    permissions:
+      issues: write
+    name: Open or update the drift issue
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Report drift or failure
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          CANARY: ${{ needs.canary.result }}
+          PINNED: ${{ needs.canary.outputs.pinned }}
+          LATEST: ${{ needs.canary.outputs.latest }}
+          DRIFT: ${{ needs.canary.outputs.drift }}
+          CLIENTS: ${{ needs.canary.outputs.clients }}
+          E2E: ${{ needs.canary.outputs.e2e }}
+        run: |
+          set -euo pipefail
+          entry='([a-z-]+=[0-9]{1,9}\.[0-9]{1,9}\.[0-9]{1,9}(-[0-9A-Za-z.]{1,32})?|hermes=sha256:[0-9a-f]{64})'
+          list="^$entry( $entry){0,7}$"
+          outcome='^(success|failure|cancelled|skipped)$'
+          [[ "$PINNED" =~ $list ]] || PINNED=unavailable
+          [[ "$LATEST" =~ $list ]] || LATEST=unavailable
+          [[ "$DRIFT" == true || "$DRIFT" == false ]] || DRIFT=unknown
+          [[ "$CANARY" =~ $outcome ]] || CANARY=unknown
+          [[ "$CLIENTS" =~ $outcome ]] || CLIENTS=unknown
+          [[ "$E2E" =~ $outcome ]] || E2E=unknown
+          if [[ "$DRIFT" == false && "$CANARY" == success && "$CLIENTS" == success && "$E2E" == success ]]; then
+            echo 'Pinned clients are current and pass; no issue update'
+            exit 0
+          fi
+          title='Latest clients canary: pins differ from upstream or fail'
+          run="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          body="$RUNNER_TEMP/body.md"
+          {
+            echo "The weekly latest-clients canary found drift or a failure."
+            echo
+            echo "- Run: $run"
+            echo "- Pinned: \`$PINNED\`"
+            echo "- Latest: \`$LATEST\`"
+            echo "- Differs from pins: $DRIFT"
+            echo "- Latest clients build and \`--version\`: $CLIENTS"
+            echo "- E2E with latest clients and Hermes: $E2E"
+            echo "- Canary job: $CANARY"
+            echo
+            echo "To move the pins, follow hack/clients/README.md in a pull request."
+          } >"$body"
+          number="$(gh issue list --state open --search "in:title \"$title\"" \
+            --json number,title --jq "map(select(.title == \"$title\")) | .[0].number // empty")"
+          if [[ -n "$number" ]]; then
+            gh issue comment "$number" --body-file "$body"
+          else
+            gh issue create --title "$title" --body-file "$body"
+          fi
