@@ -17,6 +17,14 @@ endif
 # tools. (i.e. podman)
 CONTAINER_TOOL ?= docker
 DEPLOY_KUSTOMIZATION ?= config/install
+# SPROOZI_BUILD_CACHE=gha builds with buildx and the GitHub Actions cache
+# backend. Only the E2E workflow sets it; local builds use plain docker build.
+SPROOZI_BUILD_CACHE ?=
+ifeq ($(SPROOZI_BUILD_CACHE),gha)
+DOCKER_BUILD_MANAGER = buildx build --load --cache-from type=gha,scope=manager --cache-to type=gha,mode=max,scope=manager
+else
+DOCKER_BUILD_MANAGER = build
+endif
 
 # Setting SHELL to bash allows bash commands to be executed by recipes.
 # Options are set to exit when a recipe line exits non-zero or a piped command fails.
@@ -125,6 +133,7 @@ verify-mcp-kind: ## Prove configured MCP with stock Codex in an owned Kind clust
 .PHONY: verify-workflow-fixtures
 verify-workflow-fixtures: ## Run offline Python and shell regressions for fixtures, quickstart, Kind and demo scripts. CI.
 	python3 -m unittest discover -s hack/verify/session-mobility -p '*_test.py'
+	python3 -m unittest discover -s hack/verify/orchestration-kind -p '*_test.py'
 	python3 hack/verify/quickstart_test.py
 	bash hack/verify/kind-test.sh
 	bash hack/demo/setup-test.sh
@@ -207,7 +216,8 @@ run: manifests generate fmt vet ## Run a controller from your host.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 .PHONY: docker-build
 docker-build: ## Build docker image with the manager.
-	$(CONTAINER_TOOL) build -t ${IMG} .
+	@case '$(SPROOZI_BUILD_CACHE)' in ''|gha) ;; *) echo 'SPROOZI_BUILD_CACHE must be empty or gha' >&2; exit 1 ;; esac
+	$(CONTAINER_TOOL) $(DOCKER_BUILD_MANAGER) -t ${IMG} .
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
