@@ -67,6 +67,7 @@ func importedFixture(t *testing.T) (*Service, *placementFixture, *workSourceFixt
 }
 
 func TestPullClaimReplayAndFreshResumePreserveSourceAccounts(t *testing.T) {
+	t.Parallel()
 	s, local, source := importedFixture(t)
 	id, operation := source.export.ID, source.export.OperationID
 	source.lostClaim = true
@@ -156,6 +157,7 @@ func assertCompletedResumeCycle(t *testing.T, s *Service, local *placementFixtur
 }
 
 func TestPullRejectsUnknownSourceAndChangedClaim(t *testing.T) {
+	t.Parallel()
 	for _, scenario := range []string{"writer", "accounting", "native", "artifact", "unacknowledged"} {
 		t.Run(scenario, func(t *testing.T) {
 			s, local, source := importedFixture(t)
@@ -182,6 +184,7 @@ func TestPullRejectsUnknownSourceAndChangedClaim(t *testing.T) {
 }
 
 func TestImportedResumeLostActivationAndUnknownStopKeepOneWriter(t *testing.T) {
+	t.Parallel()
 	s, local, source := importedFixture(t)
 	id := source.export.ID
 	if _, err := s.Pull(t.Context(), id, source.export.OperationID, testRemote); err != nil {
@@ -210,6 +213,7 @@ func TestImportedResumeLostActivationAndUnknownStopKeepOneWriter(t *testing.T) {
 }
 
 func TestStopMovedProductFinalizesWithoutDestinationAndRemainsReplayable(t *testing.T) {
+	t.Parallel()
 	s, local, source := importedFixture(t)
 	remote := s.placements[testRemote].(*placementFixture)
 	id := source.export.ID
@@ -237,6 +241,7 @@ func TestStopMovedProductFinalizesWithoutDestinationAndRemainsReplayable(t *test
 }
 
 func TestIdleStopReplayCannotStopTheFirstContinuation(t *testing.T) {
+	t.Parallel()
 	s, _, source := importedFixture(t)
 	id := source.export.ID
 	if _, err := s.Pull(t.Context(), id, source.export.OperationID, testRemote); err != nil {
@@ -255,6 +260,7 @@ func TestIdleStopReplayCannotStopTheFirstContinuation(t *testing.T) {
 }
 
 func TestPullRetentionRejectionDoesNotClaimOrActivateTheSource(t *testing.T) {
+	t.Parallel()
 	s, local, source := importedFixture(t)
 	s.config.Local.RetainedBytes = int64(len(source.export.Checkpoint)) - 1
 	id, operation := source.export.ID, source.export.OperationID
@@ -271,6 +277,7 @@ func TestPullRetentionRejectionDoesNotClaimOrActivateTheSource(t *testing.T) {
 }
 
 func TestFreshResumeHonorsExistingExecutionRetentionBounds(t *testing.T) {
+	t.Parallel()
 	s, local, source := importedFixture(t)
 	id := source.export.ID
 	if _, err := s.Pull(t.Context(), id, source.export.OperationID, testRemote); err != nil {
