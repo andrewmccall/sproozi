@@ -74,8 +74,10 @@ jobs:
 
       - name: Verify pinned client protocol fixtures
         run: make verify-protocol
-      - name: Verify MCP capabilities
-        run: make verify-mcp
+      # make verify-mcp also race-tests five packages that race-1 and race-2
+      # already cover; CI runs only its offline verifier part here.
+      - name: Verify the live MCP verifier offline
+        run: python3 hack/verify/mcp-live-test.py
       - name: Run offline fixture and script regressions
         run: make verify-workflow-fixtures
       - name: Verify documentation

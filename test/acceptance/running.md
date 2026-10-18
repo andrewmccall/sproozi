@@ -13,7 +13,7 @@ Every verification target, what a pass establishes, and whether CI runs it.
 The `Tests` workflow runs three parallel jobs. `race-1` runs
 `make verify-generated`, `make vet` and `make verify-race RACE_SHARD=1`;
 `race-2` runs `make verify-race RACE_SHARD=2`; and `checks` runs the remaining
-`Tests` rows in table order. The race run proves everything a plain run does,
+`Tests` rows in table order, taking only the offline verifier from `verify-mcp`. The race run proves everything a plain run does,
 so CI does not run `make test`. `Lint` and `E2E` are separate workflows.
 `make help` prints the same summaries.
 
@@ -24,7 +24,7 @@ so CI does not run `make test`. `Lint` and `E2E` are separate workflows.
 | `make verify-fast` | `go vet` is clean and every non-e2e package passes under the race detector with coverage, without regenerating sources. | Tests (`race-1` and `race-2`, as `vet` and `verify-race`) | Go; downloads envtest binaries |
 | `make verify-race` | The race-and-coverage half of `verify-fast`. `RACE_SHARD=1` runs `test/` and `internal/session`, `RACE_SHARD=2` every other package; the two shards together cover every non-e2e package. | Tests (`race-1`, `race-2`) | Go; downloads envtest binaries |
 | `make verify-protocol` | Pinned `gh` and `git` clients produce the GitHub protocol the gateway inspects. Zero matched or skipped tests fail. | Tests (`checks`) | Downloads the checksum-pinned `gh` |
-| `make verify-mcp` | MCP and gateway packages pass under race, and the live MCP verifier's safety and failure reports pass offline. | Tests (`checks`) | Go, Python 3 |
+| `make verify-mcp` | MCP and gateway packages pass under race, and the live MCP verifier's safety and failure reports pass offline. | Tests: `checks` runs the offline verifier, `python3 hack/verify/mcp-live-test.py`; the race shards cover the packages | Go, Python 3 |
 | `make verify-workflow-fixtures` | Session-mobility protocol fixtures, quickstart ownership and CRD checks, Kind bootstrap readiness ordering, Kind image import and build cache selection, and demo setup credential preservation and registry wiring. Stubs replace Docker and Kind. | Tests (`checks`) | Python 3, Bash; fetches the pinned Calico manifest into `.local/cni` on first run |
 | `make verify-docs` | Local Markdown links resolve and no private-plan paths are referenced. It does not establish that documentation is current. | Tests (`checks`) | Python 3 |
 | `make lint` | golangci-lint reports no issues; `make lint-config` checks its configuration. | Lint | Go; downloads the checksum-pinned golangci-lint release |
