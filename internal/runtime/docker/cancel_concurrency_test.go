@@ -71,7 +71,7 @@ func TestAbortIndependentAllocationWhileAnotherStopIsHeld(t *testing.T) {
 		t.Fatalf("independent abort interrupted the first allocation: %v", err)
 	default:
 	}
-	if !f.containers[firstInc.ResourceUID].State.Running || f.containers[secondInc.ResourceUID].State.Running {
+	if !f.containers[firstInc.ResourceUID].State.Running || f.running(secondInc.ResourceUID) {
 		t.Fatal("forced abort fenced the wrong actual container")
 	}
 	release()

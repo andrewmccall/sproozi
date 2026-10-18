@@ -440,6 +440,8 @@ func (p *Placement) Stop(ctx context.Context, l session.Launch, i session.Incarn
 		return session.Stopped{}, err
 	}
 	if r.Phase == phaseStopped {
+		// The stop is durable; removal failure is retried by the next call.
+		_ = p.release(ctx, &r)
 		return p.stopped(r)
 	}
 	if r.Phase == phaseAborted {
@@ -515,6 +517,7 @@ func (p *Placement) Stop(ctx context.Context, l session.Launch, i session.Incarn
 	_ = p.engine.FinishHelper(ctx, *r.Helper)
 	_ = p.engine.Stop(ctx, *r.Helper)
 	_ = p.engine.Stop(ctx, *r.Anchor)
+	_ = p.release(ctx, &r)
 	return p.stopped(r)
 }
 func (p *Placement) seal(ctx context.Context, r *placementRecord, i session.Incarnation) error {
@@ -550,13 +553,17 @@ func (p *Placement) abort(ctx context.Context, r placementRecord, i session.Inca
 	var err error
 	if r.Phase == phaseStopped || r.Phase == phaseAborted {
 		// A retained receipt cannot substitute for current exact writer evidence.
-		if err = p.engine.Stop(ctx, *r.Agent); err != nil {
-			return o, err
-		}
-		if r.Receipt == nil {
-			// Retry existing accounting after a transient failure; Seal never
-			// initializes a missing account or changes an existing receipt.
-			_ = p.seal(ctx, &r, i)
+		// Only this placement's own recorded removal replaces that evidence.
+		if !r.Removed {
+			if err = p.fenced(ctx, r); err != nil {
+				return o, err
+			}
+			if r.Receipt == nil {
+				// Retry existing accounting after a transient failure; Seal never
+				// initializes a missing account or changes an existing receipt.
+				_ = p.seal(ctx, &r, i)
+			}
+			_ = p.release(ctx, &r)
 		}
 		s, err := p.stopped(r)
 		o.State, o.Stopped = session.PlacementStopped, &s
@@ -595,7 +602,75 @@ func (p *Placement) abort(ctx context.Context, r placementRecord, i session.Inca
 	if r.Anchor != nil {
 		_ = p.engine.Stop(ctx, *r.Anchor)
 	}
+	_ = p.release(ctx, &r)
 	return o, err
+}
+
+// fenced confirms the exact agent container is stopped. Once the record says
+// this placement is removing its containers, an absent agent is accepted as
+// one it removed. Without that record, absence remains an error.
+func (p *Placement) fenced(ctx context.Context, r placementRecord) error {
+	if r.Removing {
+		current, found, err := p.engine.lookup(ctx, r.Execution+"-"+roleAgent, r.Agent.Execution)
+		if err != nil {
+			return err
+		}
+		if !found || current.ID != r.Agent.ID {
+			return nil
+		}
+	}
+	return p.engine.Stop(ctx, *r.Agent)
+}
+
+// releasable reports a durable stop whose receipt and checkpoint are retained,
+// or a cancelled preparation that never granted authority. Usage that is still
+// unknown keeps the containers so a later Abort can retry sealing.
+func (r placementRecord) releasable() bool {
+	switch r.Phase {
+	case phaseStopped, phaseAborted:
+		return r.ActualStopped && r.Receipt != nil
+	case phasePreparationAborting:
+		return r.ActualStopped
+	}
+	return false
+}
+
+// release removes the visit's containers and workspace volume. It confirms
+// every recorded container is stopped and saves Removing before the first
+// removal, and Removed after the last, so each retry converges.
+func (p *Placement) release(ctx context.Context, r *placementRecord) error {
+	if r.Removed || !r.releasable() {
+		return nil
+	}
+	roles := []string{roleAgent, roleHelper, roleAnchor}
+	instances := []*Instance{r.Agent, r.Helper, r.Anchor}
+	if !r.Removing {
+		for _, instance := range instances {
+			if instance != nil {
+				if err := p.engine.Stop(ctx, *instance); err != nil {
+					return err
+				}
+			}
+		}
+		r.Removing = true
+		if err := p.save(*r); err != nil {
+			return err
+		}
+	}
+	for index, instance := range instances {
+		if instance != nil {
+			if err := p.engine.removeManaged(ctx, *instance, r.Execution+"-"+roles[index]); err != nil {
+				return err
+			}
+		}
+	}
+	if r.Volume != nil {
+		if err := p.engine.RemoveVolume(ctx, *r.Volume); err != nil {
+			return err
+		}
+	}
+	r.Removed = true
+	return p.save(*r)
 }
 
 // AbortPreparation fences an allocation even when preparation failed before it
@@ -621,7 +696,15 @@ func (p *Placement) AbortPreparation(ctx context.Context, l session.Launch) erro
 			return err
 		}
 	}
+	if r.Removing && r.Phase == phasePreparationAborting {
+		_ = p.release(ctx, &r)
+		return nil
+	}
+	// Removed resources are answered from the record, never looked up again.
 	for _, role := range []string{roleAnchor, roleHelper, roleAgent} {
+		if r.Removing {
+			break
+		}
 		target := &r.Anchor
 		switch role {
 		case roleHelper:
@@ -651,7 +734,11 @@ func (p *Placement) AbortPreparation(ctx context.Context, l session.Launch) erro
 		}
 	}
 	r.ActualStopped = true
-	return p.save(r)
+	if err = p.save(r); err != nil {
+		return err
+	}
+	_ = p.release(ctx, &r)
+	return nil
 }
 
 func (p *Placement) observeResource(ctx context.Context, r *placementRecord, role string, target **Instance) error {

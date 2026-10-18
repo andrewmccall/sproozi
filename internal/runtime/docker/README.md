@@ -86,6 +86,18 @@ native turn or a fresh checkpoint, and retains the same accounting uncertainty
 when independent sealing is unavailable. Backend uncertainty never becomes an
 absent or safely stopped placement.
 
+Once the stop, sealed receipt and any checkpoint are retained, `Stop` and
+`Abort` remove the visit's agent, helper and anchor containers and its
+workspace volume. A cancelled preparation removes whatever it created. The
+placement confirms each container stopped and records `removing` before the
+first removal, then `removed` after the last. Only that record lets a missing
+container count as removed; without it, a missing container is still an error.
+After `removed`, retried `Stop`, `Abort` and `Inspect` calls answer from the
+record without Docker. A removal failure leaves the recorded stop intact, and
+the next `Stop` or `Abort` for the visit retries it. A visit whose usage is
+still unknown keeps its containers until an `Abort` retry seals it. See
+[ADR 0020](../../../docs/adr/0020-docker-placement-removes-stopped-visits.md).
+
 Targeted behavior tests run with:
 
 ```sh

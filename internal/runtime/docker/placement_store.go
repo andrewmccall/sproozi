@@ -37,6 +37,12 @@ type placementRecord struct {
 	NativeQuiet           bool             `json:"nativeQuiet,omitempty"`
 	Receipt               *session.Receipt `json:"receipt,omitempty"`
 	CheckpointDigest      string           `json:"checkpointDigest,omitempty"`
+	// Removing is saved after the placement confirmed every recorded container
+	// stopped and before it removes any of them. From then on an absent
+	// container is one this placement removed, not missing writer evidence.
+	Removing bool `json:"removing,omitempty"`
+	// Removed records that the containers and workspace volume are gone.
+	Removed bool `json:"removed,omitempty"`
 }
 
 type Placement struct {
