@@ -7,6 +7,7 @@ import (
 )
 
 func TestFinalizeRecoversStopWithoutPreparingDestination(t *testing.T) {
+	t.Parallel()
 	c, _, local, remote, start := setup(t)
 	id := start.Source.ExecutionID
 	if _, err := c.Move(t.Context(), id, uuid.NewString(), testRemote); err != nil {
@@ -36,6 +37,7 @@ func TestFinalizeRecoversStopWithoutPreparingDestination(t *testing.T) {
 }
 
 func TestFinalizeMissingAccountingRetainsAllocation(t *testing.T) {
+	t.Parallel()
 	c, _, _, remote, start := setup(t)
 	if _, err := c.Move(t.Context(), start.Source.ExecutionID, uuid.NewString(), testRemote); err != nil {
 		t.Fatal(err)
