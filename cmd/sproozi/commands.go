@@ -13,8 +13,9 @@ import (
 )
 
 const (
-	actionServe = "serve"
-	configFlag  = "config"
+	actionServe   = "serve"
+	actionVersion = "version"
+	configFlag    = "config"
 )
 
 // owner says which session owner a command may address through --executor.
@@ -37,6 +38,8 @@ type command struct {
 // commands lists every subcommand in help order. A command with an "id" flag
 // requires a session UUID, except start, which creates one when omitted.
 var commands = []command{
+	{name: actionInit, summary: "Create a private configuration directory", flags: []string{"directory"}},
+	{name: actionVersion, summary: "Show the installed product version"},
 	{name: actionRun, operands: "--executor NAME (--task TEXT | --task-file FILE)",
 		summary: "Submit a Codex task to a configured remote executor", owner: remoteOwner,
 		flags: []string{"config", "executor", "operation", "harness", "repository", "project", "task", "task-file",
@@ -73,6 +76,7 @@ var commands = []command{
 
 // flagHelp describes each flag once. A backquoted word names its value in help.
 var flagHelp = map[string]string{
+	"directory":         "private configuration directory `PATH`",
 	"config":            "private global Sproozi configuration `FILE`",
 	"socket":            "private home socket `PATH`; defaults to the configured home",
 	"executor":          "configured executor `NAME`; docker selects home",
@@ -120,7 +124,8 @@ func (c command) flagSet(q *options, in *inputs) *flag.FlagSet {
 		"operation": &q.operation, "from": &q.source, "harness": &q.kind, "repository": &q.repository,
 		"project": &in.project, "task": &q.task, "task-file": &in.taskFile, "workspace-from": &in.workspaceFrom,
 		"checkpoint-digest": &in.checkpointDigest, "revision": &in.revision, "workspace": &q.workspace,
-		"to": &q.destination,
+		"to":        &q.destination,
+		"directory": &q.directory,
 	}
 	for _, name := range c.flags {
 		switch name {

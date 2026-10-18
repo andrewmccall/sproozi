@@ -17,12 +17,12 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 	"unicode/utf8"
 
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
 	"github.com/andrewmccall/sproozi/internal/harness"
+	"github.com/andrewmccall/sproozi/internal/privatefs"
 	"github.com/andrewmccall/sproozi/internal/project"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
@@ -187,27 +187,12 @@ func Open(c Config) (*Owner, error) {
 	if err := c.validate(); err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(c.Directory, 0700); err != nil {
+	if err := privatefs.EnsureDir(c.Directory); err != nil {
 		return nil, err
 	}
-	if err := private(c.Directory, true); err != nil {
-		return nil, err
-	}
-	lockPath := filepath.Join(c.Directory, "owner.lock")
-	if _, err := os.Lstat(lockPath); err == nil {
-		if err = private(lockPath, false); err != nil {
-			return nil, err
-		}
-	} else if !os.IsNotExist(err) {
-		return nil, err
-	}
-	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
+	f, err := privatefs.Lock(filepath.Join(c.Directory, "owner.lock"))
 	if err != nil {
-		return nil, err
-	}
-	if err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		_ = f.Close()
-		return nil, errors.New("work: catalogue already owned")
+		return nil, fmt.Errorf("work: catalogue already owned: %w", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	c.Allowances = maps.Clone(c.Allowances)
@@ -244,17 +229,6 @@ func Open(c Config) (*Owner, error) {
 	return o, nil
 }
 
-func private(path string, dir bool) error {
-	i, e := os.Lstat(path)
-	if e != nil {
-		return e
-	}
-	s, ok := i.Sys().(*syscall.Stat_t)
-	if !ok || i.IsDir() != dir || i.Mode()&os.ModeSymlink != 0 || (!dir && !i.Mode().IsRegular()) || i.Mode().Perm()&0077 != 0 || s.Uid != uint32(os.Geteuid()) {
-		return errors.New("work: owned private path required")
-	}
-	return nil
-}
 func (o *Owner) path(id, suffix string) string { return filepath.Join(o.config.Directory, id+suffix) }
 func (o *Owner) read(id string) (record, error) {
 	var r record
@@ -262,15 +236,9 @@ func (o *Owner) read(id string) (record, error) {
 		return r, &profile.Rejection{Code: profile.CodeInvalid}
 	}
 	p := o.path(id, ".json")
-	if err := private(p, false); err != nil {
-		return r, err
-	}
-	b, err := os.ReadFile(p)
+	b, err := privatefs.ReadFile(p, 256<<10)
 	if err != nil {
 		return r, err
-	}
-	if len(b) > 256<<10 {
-		return r, errors.New("work: catalogue record exceeds limit")
 	}
 	if err = decode(b, &r); err != nil {
 		return r, err
@@ -288,28 +256,6 @@ func (o *Owner) read(id string) (record, error) {
 	}
 	return r, nil
 }
-func atomic(dir, name string, b []byte) error {
-	f, e := os.CreateTemp(dir, ".pending-")
-	if e != nil {
-		return e
-	}
-	defer func() { _ = os.Remove(f.Name()) }()
-	if _, e = f.Write(b); e == nil {
-		e = f.Sync()
-	}
-	e = errors.Join(e, f.Close())
-	if e != nil {
-		return e
-	}
-	if e = os.Rename(f.Name(), filepath.Join(dir, name)); e != nil {
-		return e
-	}
-	parent, e := os.Open(dir)
-	if e != nil {
-		return e
-	}
-	return errors.Join(parent.Sync(), parent.Close())
-}
 func (o *Owner) save(r record) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -324,7 +270,7 @@ func (o *Owner) save(r record) error {
 	if err != nil {
 		return err
 	}
-	return atomic(o.config.Directory, r.Launch.ExecutionID+".json", b)
+	return privatefs.Replace(o.config.Directory, r.Launch.ExecutionID+".json", b)
 }
 func (o *Owner) Submit(ctx context.Context, q Submit) (View, error) {
 	if ctx.Err() != nil {
@@ -508,10 +454,7 @@ func (o *Owner) drive(ctx context.Context, id string) {
 func (o *Owner) input(ctx context.Context, r *record) ([]byte, error) {
 	p := o.path(r.Launch.ExecutionID, ".input")
 	if r.InputDigest != "" {
-		if e := private(p, false); e != nil {
-			return nil, e
-		}
-		b, e := os.ReadFile(p)
+		b, e := privatefs.ReadFile(p, o.config.MaxCheckpointBytes)
 		if e != nil {
 			return nil, e
 		}
@@ -561,7 +504,7 @@ func (o *Owner) input(ctx context.Context, r *record) ([]byte, error) {
 }
 
 func (o *Owner) retainInput(r *record, b []byte) ([]byte, error) {
-	if err := atomic(o.config.Directory, r.Launch.ExecutionID+".input", b); err != nil {
+	if err := privatefs.Replace(o.config.Directory, r.Launch.ExecutionID+".input", b); err != nil {
 		return nil, err
 	}
 	r.InputDigest = hash(b)
@@ -629,7 +572,7 @@ func (o *Owner) execute(ctx context.Context, r *record) error {
 		if e = ValidateExport(Export{ID: r.Launch.ExecutionID, Harness: r.Launch.Harness, Stopped: stopped, Checkpoint: stopped.Checkpoint}, o.config.MaxCheckpointBytes); e != nil {
 			return e
 		}
-		if e = atomic(o.config.Directory, r.Launch.ExecutionID+".checkpoint", stopped.Checkpoint); e != nil {
+		if e = privatefs.Replace(o.config.Directory, r.Launch.ExecutionID+".checkpoint", stopped.Checkpoint); e != nil {
 			return e
 		}
 		info, e := checkpoint.Inspect(stopped.Checkpoint, o.config.MaxCheckpointBytes)
@@ -749,10 +692,7 @@ func (o *Owner) export(ctx context.Context, id, operation, digest string, claim 
 	if claim && (r.Transfer != operation || digest != r.Stopped.CheckpointDigest) {
 		return Export{}, &profile.Rejection{Code: profile.CodeConflict}
 	}
-	if err = private(o.path(id, ".checkpoint"), false); err != nil {
-		return Export{}, err
-	}
-	b, err := os.ReadFile(o.path(id, ".checkpoint"))
+	b, err := privatefs.ReadFile(o.path(id, ".checkpoint"), o.config.MaxCheckpointBytes)
 	if err != nil {
 		return Export{}, err
 	}
@@ -889,7 +829,7 @@ func (o *Owner) Close() error {
 		}
 		o.mu.Unlock()
 		o.wg.Wait()
-		o.closeError = errors.Join(syscall.Flock(int(o.lock.Fd()), syscall.LOCK_UN), o.lock.Close())
+		o.closeError = privatefs.UnlockClose(o.lock)
 	})
 	return o.closeError
 }

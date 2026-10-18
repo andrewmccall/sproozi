@@ -13,13 +13,13 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/harness"
+	"github.com/andrewmccall/sproozi/internal/privatefs"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/audit"
@@ -114,17 +114,14 @@ func Open(c Config, log io.Writer) (_ *Service, err error) {
 	if !filepath.IsAbs(c.Directory) {
 		return nil, errors.New("home: absolute directory required")
 	}
-	if err = os.MkdirAll(c.Directory, 0700); err != nil {
-		return nil, err
-	}
-	if err = private(c.Directory, true); err != nil {
+	if err = privatefs.EnsureDir(c.Directory); err != nil {
 		return nil, err
 	}
 	duration, err := time.ParseDuration(c.MaxDuration)
 	if err != nil || duration <= 0 || duration > 24*time.Hour {
 		return nil, errors.New("home: invalid duration")
 	}
-	if err = os.MkdirAll(c.DockerConfig, 0700); err != nil {
+	if err = privatefs.EnsureDir(c.DockerConfig); err != nil {
 		return nil, err
 	}
 	engine, err := runtimedocker.NewEngine(c.DockerBinary, c.DockerSocket, c.DockerConfig)

@@ -142,7 +142,7 @@ func TestFileLedgerPrivateOwnershipAndRecordLoss(t *testing.T) {
 
 func TestFileLedgerRejectsSharedOrSymlinkStorage(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.Chmod(dir, 0755); err != nil {
+	if err := makeTestPathPublic(dir); err != nil {
 		t.Fatal(err)
 	}
 	if ledger, err := budgetfile.NewLedger(dir); err == nil {

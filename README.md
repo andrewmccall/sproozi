@@ -58,13 +58,16 @@ Or choose a path closer to what you want to do:
 | Check the investigation-to-PR demo manually | [Manual acceptance checks](docs/guides/manual-pr-demo.md) |
 | Connect persistent Hermes to retained Codex work | [Hermes with retained work](docs/guides/retained-work-kubernetes.md) |
 
-The CLI can be built with:
+Install the CLI on macOS or Linux with Homebrew:
 
 ```bash
-go build -o bin/sproozi ./cmd/sproozi
+brew install andrewmccall/tap/sproozi
+sproozi --version
 ```
 
-The [session command reference](docs/reference/session-commands.md) explains owner
+The [installation guide](docs/guides/install.md) covers Windows downloads, other
+binary downloads and source builds. The
+[session command reference](docs/reference/session-commands.md) explains owner
 selection, discovery and session/execution IDs. The linked guides cover
 configuration and prerequisites. This is not yet a one-command install.
 

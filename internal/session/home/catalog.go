@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
+	"github.com/andrewmccall/sproozi/internal/privatefs"
 	"github.com/andrewmccall/sproozi/internal/project"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/work"
@@ -93,10 +94,10 @@ func (s *Service) bindSessionOperation(sessionID, operation, action, execution, 
 
 func (s *Service) catalogDir() (string, error) {
 	dir := filepath.Join(s.config.Directory, "sessions")
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := privatefs.EnsureDir(dir); err != nil {
 		return "", err
 	}
-	return dir, private(dir, true)
+	return dir, nil
 }
 
 func (s *Service) readCatalog(id string) (localSession, error) {

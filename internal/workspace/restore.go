@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/andrewmccall/sproozi/internal/privatefs"
 	"io"
 	"os"
 	"path/filepath"
@@ -24,21 +25,11 @@ func Restore(ctx context.Context, data []byte, target string, maxBytes int64) er
 	if err != nil {
 		return err
 	}
-	target, err = filepath.Abs(target)
+	parent, target, err := restoreDestination(target)
 	if err != nil {
 		return err
 	}
-	if _, err = os.Lstat(target); !os.IsNotExist(err) {
-		return errors.New("workspace: destination must not exist")
-	}
-	parent := filepath.Dir(target)
-	canonical, err := filepath.EvalSymlinks(parent)
-	if err != nil {
-		return err
-	}
-	parent = canonical
-	target = filepath.Join(parent, filepath.Base(target))
-	staging, err := os.MkdirTemp(parent, ".sproozi-workspace-restore-")
+	staging, err := privatefs.TempDir(parent, ".sproozi-workspace-restore-")
 	if err != nil {
 		return err
 	}
@@ -105,7 +96,7 @@ func Restore(ctx context.Context, data []byte, target string, maxBytes int64) er
 		return err
 	}
 	// Persist safe local defaults, never the source configuration.
-	for _, setting := range [][2]string{{"core.hooksPath", "/dev/null"}, {"core.fsmonitor", gitFalse}, {"core.autocrlf", gitFalse}, {"core.fileMode", "true"}, {"core.ignoreCase", gitFalse}} {
+	for _, setting := range [][2]string{{"core.hooksPath", os.DevNull}, {"core.fsmonitor", gitFalse}, {"core.autocrlf", gitFalse}, {"core.fileMode", "true"}, {"core.ignoreCase", gitFalse}} {
 		if _, err = g.run(ctx, repo, "config", "--local", setting[0], setting[1]); err != nil {
 			return err
 		}
@@ -118,6 +109,32 @@ func Restore(ctx context.Context, data []byte, target string, maxBytes int64) er
 	}
 	return os.Rename(repo, target)
 }
+
+func restoreDestination(target string) (string, string, error) {
+	target, err := filepath.Abs(target)
+	if err != nil {
+		return "", "", err
+	}
+	if _, err = os.Lstat(target); !os.IsNotExist(err) {
+		return "", "", errors.New("workspace: destination must not exist")
+	}
+	parent := filepath.Dir(target)
+	parentInfo, err := os.Lstat(parent)
+	if err != nil {
+		return "", "", err
+	}
+	if _, reparse, inspectErr := inspectFilesystemPath(parent, parentInfo); inspectErr != nil {
+		return "", "", inspectErr
+	} else if reparse {
+		return "", "", errors.New("workspace: restore parent must not be a reparse point")
+	}
+	canonical, err := filepath.EvalSymlinks(parent)
+	if err != nil {
+		return "", "", err
+	}
+	return canonical, filepath.Join(canonical, filepath.Base(target)), nil
+}
+
 func removeEmptyDirs(root string) error {
 	var dirs []string
 	err := filepath.WalkDir(root, func(p string, d os.DirEntry, e error) error {
@@ -176,10 +193,14 @@ func decode(data []byte, max int64) (manifest, []byte, [][]byte, error) {
 	}
 	files := make([][]byte, 0, len(m.Files))
 	seen := map[string]bool{}
+	aliases := map[string]string{}
 	total := int64(0)
 	for i, e := range m.Files {
 		if !validPath(e.Path) || seen[e.Path] || (e.Mode < 0 || e.Mode > 0777) {
 			return m, nil, nil, errors.New("workspace: invalid file descriptor")
+		}
+		if err = recordPortablePath(aliases, e.Path); err != nil {
+			return m, nil, nil, err
 		}
 		seen[e.Path] = true
 		b, err := read(fmt.Sprintf("files/%08d", i))

@@ -528,7 +528,7 @@ func TestPrivateConfigRejectsAuthorityFieldsAndSharedFiles(t *testing.T) {
 			t.Fatal("invalid configuration admitted")
 		}
 	}
-	if err := os.Chmod(path, 0644); err != nil {
+	if err := makeTestPathPublic(path); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := ReadConfig(path); err == nil {

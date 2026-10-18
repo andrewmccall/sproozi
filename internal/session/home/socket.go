@@ -8,7 +8,6 @@ import (
 	"errors"
 	"io"
 	"net"
-	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -50,7 +49,8 @@ type Response struct {
 	Sessions []Status `json:"sessions,omitempty"`
 }
 
-func SocketPath(directory string) string { return filepath.Join(directory, "control.sock") }
+// SocketPath returns the private local control address for a home directory.
+func SocketPath(directory string) string { return socketPath(directory) }
 
 // Serve starts the home gateway before the private control socket. Disconnecting
 // a client does not cancel its durable start/move intent or the native process.
@@ -72,24 +72,11 @@ func (s *Service) Serve(ctx context.Context) error {
 	go func() { done <- s.gateway.Serve(tls.NewListener(gatewayListener, s.gateway.TLSConfig)) }()
 	defer func() { _ = s.gateway.Close() }()
 	path := SocketPath(s.config.Directory)
-	if info, statErr := os.Lstat(path); statErr == nil {
-		if info.Mode()&os.ModeSocket == 0 || info.Mode().Perm()&0077 != 0 {
-			return errors.New("home: unsafe stale control path")
-		}
-		if err = os.Remove(path); err != nil {
-			return err
-		}
-	} else if !os.IsNotExist(statErr) {
-		return statErr
-	}
-	listener, err := net.Listen("unix", path)
+	listener, err := listenControl(path)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = listener.Close() }()
-	if err = os.Chmod(path, 0600); err != nil {
-		return err
-	}
 	var workers sync.WaitGroup
 	var connections sync.Map
 	shutdown := make(chan struct{})
@@ -251,15 +238,7 @@ func connect(ctx context.Context, path string, q Request) (net.Conn, *bufio.Read
 	if err := validateRequest(q); err != nil {
 		return nil, nil, err
 	}
-	if err := private(filepath.Dir(path), true); err != nil {
-		return nil, nil, err
-	}
-	info, err := os.Lstat(path)
-	if err != nil || info.Mode()&os.ModeSocket == 0 || info.Mode().Perm()&0077 != 0 {
-		return nil, nil, errors.New("home: private control socket unavailable")
-	}
-	dialer := net.Dialer{Timeout: 5 * time.Second}
-	conn, err := dialer.DialContext(ctx, "unix", path)
+	conn, err := dialControl(ctx, path)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -145,7 +145,7 @@ func TestKubernetesConfigKeepsCredentialInGatewayAndRejectsUnsafeScopes(t *testi
 		t.Fatal("sensitive resource admitted into global native scope")
 	}
 	c.Gateway.Kubernetes.Scope.Resources = []api.KubernetesReadResource{api.KubernetesReadPods}
-	if err := os.Chmod(token, 0644); err != nil {
+	if err := makeTestPathPublic(token); err != nil {
 		t.Fatal(err)
 	}
 	if err := nativeServices(c, certificate, target); err == nil {

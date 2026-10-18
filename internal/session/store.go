@@ -11,10 +11,10 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/harness"
+	"github.com/andrewmccall/sproozi/internal/privatefs"
 
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
 	"github.com/andrewmccall/sproozi/internal/session/internal/lifecycle"
@@ -58,10 +58,7 @@ func Open(dir string, placements map[string]Placement, maxCheckpointBytes int64)
 	if err != nil {
 		return nil, err
 	}
-	if err = os.MkdirAll(dir, 0700); err != nil {
-		return nil, err
-	}
-	if err = privatePath(dir, true); err != nil {
+	if err = privatefs.EnsureDir(dir); err != nil {
 		return nil, err
 	}
 	dir, err = filepath.EvalSymlinks(dir)
@@ -75,46 +72,25 @@ func Open(dir string, placements map[string]Placement, maxCheckpointBytes int64)
 		}
 		configured[name] = p
 	}
-	lockPath := filepath.Join(dir, "owner.lock")
-	if _, err = os.Lstat(lockPath); err == nil {
-		if err = privatePath(lockPath, false); err != nil {
-			return nil, err
-		}
-	} else if !os.IsNotExist(err) {
-		return nil, err
-	}
-	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
+	lock, err := privatefs.Lock(filepath.Join(dir, "owner.lock"))
 	if err != nil {
-		return nil, err
-	}
-	if err = syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		_ = lock.Close()
 		return nil, fmt.Errorf("session: coordinator already owned: %w", err)
 	}
 	c := &Coordinator{dir: dir, placements: configured, maxCheckpoint: maxCheckpointBytes, lock: lock, now: time.Now}
 	for _, name := range []string{checkpointsDir, workspacesDir} {
 		sub := filepath.Join(dir, name)
-		if err = os.MkdirAll(sub, 0700); err != nil {
+		if err = privatefs.EnsureDir(sub); err != nil {
 			_ = c.Close()
 			return nil, err
 		}
-		if err = privatePath(sub, true); err != nil {
+		if err = privatefs.Check(sub, true); err != nil {
 			_ = c.Close()
 			return nil, err
 		}
 	}
 	return c, nil
 }
-func privatePath(p string, directory bool) error {
-	info, err := os.Lstat(p)
-	if err != nil {
-		return err
-	}
-	if info.Mode()&os.ModeSymlink != 0 || info.IsDir() != directory || (!directory && !info.Mode().IsRegular()) || info.Mode().Perm()&0077 != 0 || info.Sys().(*syscall.Stat_t).Uid != uint32(os.Geteuid()) {
-		return fmt.Errorf("session: path must be owned and private: %s", p)
-	}
-	return nil
-}
+
 func (c *Coordinator) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -122,8 +98,7 @@ func (c *Coordinator) Close() error {
 		return nil
 	}
 	c.closed = true
-	unlock := syscall.Flock(int(c.lock.Fd()), syscall.LOCK_UN)
-	return errors.Join(unlock, c.lock.Close())
+	return privatefs.UnlockClose(c.lock)
 }
 func (c *Coordinator) ready() error {
 	if c.closed {
@@ -145,32 +120,7 @@ func (c *Coordinator) lockSession(id string) (func(), error) {
 	}
 	return func() { unlock(); c.mu.RUnlock() }, nil
 }
-func atomicFile(dir, name string, data []byte) error {
-	temp, err := os.CreateTemp(dir, ".pending-")
-	if err != nil {
-		return err
-	}
-	nameTemp := temp.Name()
-	defer func() { _ = os.Remove(nameTemp) }()
-	if err = temp.Chmod(0600); err == nil {
-		_, err = temp.Write(data)
-	}
-	if err == nil {
-		err = temp.Sync()
-	}
-	err = errors.Join(err, temp.Close())
-	if err != nil {
-		return err
-	}
-	if err = os.Rename(nameTemp, filepath.Join(dir, name)); err != nil {
-		return err
-	}
-	parent, err := os.Open(dir)
-	if err != nil {
-		return err
-	}
-	return errors.Join(parent.Sync(), parent.Close())
-}
+
 func (c *Coordinator) save(r Record) error {
 	if err := validateRecord(r); err != nil {
 		return err
@@ -182,26 +132,9 @@ func (c *Coordinator) save(r Record) error {
 	if int64(len(data)) > maxJournalBytes {
 		return errors.New("session: journal exceeds bound")
 	}
-	return atomicFile(c.dir, r.ID+".json", data)
+	return privatefs.Replace(c.dir, r.ID+".json", data)
 }
-func readFile(p string, max int64) ([]byte, error) {
-	if err := privatePath(p, false); err != nil {
-		return nil, err
-	}
-	f, err := os.Open(p)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = f.Close() }()
-	data, err := io.ReadAll(io.LimitReader(f, max+1))
-	if err != nil {
-		return nil, err
-	}
-	if int64(len(data)) > max {
-		return nil, errors.New("session: file exceeds bound")
-	}
-	return data, nil
-}
+func readFile(p string, max int64) ([]byte, error) { return privatefs.ReadFile(p, max) }
 func (c *Coordinator) load(id string) (Record, error) {
 	var r Record
 	if !validUUID(id) {
@@ -263,7 +196,7 @@ func (c *Coordinator) retainImmutable(path string, data []byte) error {
 	if !os.IsNotExist(err) {
 		return err
 	}
-	return atomicFile(filepath.Join(c.dir, filepath.Dir(path)), filepath.Base(path), data)
+	return privatefs.Replace(filepath.Join(c.dir, filepath.Dir(path)), filepath.Base(path), data)
 }
 
 // input reads what a launch restores: the committed checkpoint it names, or the

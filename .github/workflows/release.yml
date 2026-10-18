@@ -1,0 +1,102 @@
+name: Releases
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  targets:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.targets.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - id: targets
+        run: echo "matrix=$(python3 -c 'import json; print(json.dumps({"include":json.load(open("hack/release/targets.json"))}))')" >> "$GITHUB_OUTPUT"
+  native:
+    if: startsWith(github.ref, 'refs/tags/v')
+    uses: ./.github/workflows/platforms.yml
+  package:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - name: Build CLI archives
+        uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de
+        with:
+          version: latest
+          args: release --clean --skip=publish ${{ startsWith(github.ref, 'refs/tags/v') && '' || '--snapshot' }}
+      - id: version
+        name: Bundle source and verify the complete inventory
+        run: |
+          version=$(python3 -c 'import json; print(json.load(open("dist/metadata.json"))["version"])')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          python3 hack/release/source.py --version "$version" --output "dist/sproozi_${version}_source.tar.gz"
+          (cd dist && sha256sum "sproozi_${version}_source.tar.gz" >> checksums.txt)
+          python3 hack/release/verify.py --version "$version"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-assets
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/checksums.txt
+            dist/metadata.json
+          retention-days: 7
+  smoke:
+    needs: [package, targets]
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.targets.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release-assets
+          path: dist
+      - name: Verify and execute the extracted release
+        env:
+          RELEASE_VERSION: ${{ needs.package.outputs.version }}
+        run: python3 hack/release/verify.py --version "$RELEASE_VERSION" --native
+        shell: bash
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [package, smoke, native]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release-assets
+          path: dist
+      - name: Publish verified CLI release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: python3 hack/release/publish.py --tag "$RELEASE_TAG" --directory dist

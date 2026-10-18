@@ -8,12 +8,11 @@ import (
 	"errors"
 	"io"
 	"maps"
-	"os"
 	"path/filepath"
-	"syscall"
 	"time"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
+	"github.com/andrewmccall/sproozi/internal/privatefs"
 	"github.com/andrewmccall/sproozi/internal/project"
 	runtimedocker "github.com/andrewmccall/sproozi/internal/runtime/docker"
 	"github.com/andrewmccall/sproozi/internal/session"
@@ -88,38 +87,11 @@ type KubernetesConfig struct {
 	Scope       api.KubernetesReadScope `json:"scope"`
 }
 
-func private(path string, directory bool) error {
-	i, err := os.Lstat(path)
-	if err != nil {
-		return err
-	}
-	s, ok := i.Sys().(*syscall.Stat_t)
-	if !ok || i.Mode()&os.ModeSymlink != 0 || i.IsDir() != directory || (!directory && !i.Mode().IsRegular()) || i.Mode().Perm()&0077 != 0 || s.Uid != uint32(os.Geteuid()) {
-		return errors.New("home: path must be owned and private")
-	}
-	return nil
-}
-
 func readPrivate(path string, max int64) ([]byte, error) {
 	if !filepath.IsAbs(path) {
 		return nil, errors.New("home: absolute private file required")
 	}
-	if err := private(path, false); err != nil {
-		return nil, err
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	b, err := io.ReadAll(io.LimitReader(f, max+1))
-	err = errors.Join(err, f.Close())
-	if err != nil {
-		return nil, err
-	}
-	if int64(len(b)) > max {
-		return nil, errors.New("home: file exceeds bound")
-	}
-	return b, nil
+	return privatefs.ReadFile(path, max)
 }
 
 func decode(data []byte, target any) error {
