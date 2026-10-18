@@ -15,7 +15,7 @@ jobs:
   test:
     permissions:
       contents: read
-    name: Run on Ubuntu
+    name: Unit and integration tests
     runs-on: ubuntu-latest
     steps:
       - name: Clone the code
@@ -30,8 +30,42 @@ jobs:
 
       - name: Running Tests
         run: make test
+
+  race:
+    permissions:
+      contents: read
+    name: Race tests and vet
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
+        with:
+          go-version: '1.26.6'
+
       - name: Run race tests and vet
         run: make verify-fast
+
+  checks:
+    permissions:
+      contents: read
+    name: Protocol, MCP, fixture and docs checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
+        with:
+          go-version: '1.26.6'
+
       - name: Verify pinned client protocol fixtures
         run: make verify-protocol
       - name: Verify MCP capabilities

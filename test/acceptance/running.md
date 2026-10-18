@@ -10,17 +10,19 @@ instructions describe how to run the existing drivers.
 ## Which command proves what
 
 Every verification target, what a pass establishes, and whether CI runs it.
-The `Tests` workflow runs its rows in table order; `Lint` and `E2E` are separate
-workflows. `make help` prints the same summaries.
+The `Tests` workflow runs three parallel jobs: `test` runs `make test`, `race`
+runs `make verify-fast`, and `checks` runs the remaining `Tests` rows in table
+order. `Lint` and `E2E` are separate workflows. `make help` prints the same
+summaries.
 
 | Target | A pass proves | CI | Needs |
 | --- | --- | --- | --- |
-| `make test` | After regenerating code and manifests, every non-e2e Go test passes: unit, rendered manifests, envtest API validation, integration and offline acceptance helpers. | Tests | Go; downloads envtest binaries |
-| `make verify-fast` | The same packages pass under the race detector and `go vet` is clean, without regenerating sources. | Tests | Go; envtest binaries |
-| `make verify-protocol` | Pinned `gh` and `git` clients produce the GitHub protocol the gateway inspects. Zero matched or skipped tests fail. | Tests | Downloads the checksum-pinned `gh` |
-| `make verify-mcp` | MCP and gateway packages pass under race, and the live MCP verifier's safety and failure reports pass offline. | Tests | Go, Python 3 |
-| `make verify-workflow-fixtures` | Session-mobility protocol fixtures, quickstart ownership and CRD checks, Kind bootstrap readiness ordering, and demo setup credential preservation and registry wiring. Stubs replace Docker and Kind. | Tests | Python 3, Bash; fetches the pinned Calico manifest into `.local/cni` on first run |
-| `make verify-docs` | Local Markdown links resolve and no private-plan paths are referenced. It does not establish that documentation is current. | Tests | Python 3 |
+| `make test` | After regenerating code and manifests, every non-e2e Go test passes: unit, rendered manifests, envtest API validation, integration and offline acceptance helpers. | Tests (`test`) | Go; downloads envtest binaries |
+| `make verify-fast` | The same packages pass under the race detector and `go vet` is clean, without regenerating sources. | Tests (`race`) | Go; downloads envtest binaries |
+| `make verify-protocol` | Pinned `gh` and `git` clients produce the GitHub protocol the gateway inspects. Zero matched or skipped tests fail. | Tests (`checks`) | Downloads the checksum-pinned `gh` |
+| `make verify-mcp` | MCP and gateway packages pass under race, and the live MCP verifier's safety and failure reports pass offline. | Tests (`checks`) | Go, Python 3 |
+| `make verify-workflow-fixtures` | Session-mobility protocol fixtures, quickstart ownership and CRD checks, Kind bootstrap readiness ordering, and demo setup credential preservation and registry wiring. Stubs replace Docker and Kind. | Tests (`checks`) | Python 3, Bash; fetches the pinned Calico manifest into `.local/cni` on first run |
+| `make verify-docs` | Local Markdown links resolve and no private-plan paths are referenced. It does not establish that documentation is current. | Tests (`checks`) | Python 3 |
 | `make lint` | golangci-lint reports no issues; `make lint-config` checks its configuration. | Lint | Go |
 | `make test-e2e` | The full stack works in an owned two-node Kind cluster with enforcing CNI, using the pinned clients and Hermes digest. See [Harnesses and Hermes in Kind](#harnesses-and-hermes-in-kind). | E2E | Docker, Kind, kubectl, Calico from `hack/verify/fetch-calico.sh` |
 | `make test-e2e-existing` | The same e2e suite passes against a Kind cluster you created (`KIND_CLUSTER`). | No | An existing dedicated Kind cluster |
