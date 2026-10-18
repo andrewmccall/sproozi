@@ -70,6 +70,41 @@ rest of ADR 0015 stands. The product still has no exact-version checks in
 activation, state parsing or registration, and an administrator can build
 images with any client release.
 
+## Amendment: CI caching
+
+Added 2026-10-18. With every input pinned, CI reuses earlier work instead of
+rebuilding it on each run:
+
+- **Go modules and build output.** `actions/setup-go` caches them, keyed on
+  `go.sum`.
+- **golangci-lint.** `make lint` installs the release archive checked against a
+  pinned SHA-256, then builds the logcheck plugin binary from the pinned
+  `.custom-gcl.yml`. The `Lint` workflow caches that binary, keyed on the files
+  that define it, and the analysis cache, keyed on the golangci-lint version,
+  `go.sum` and `.golangci.yml`.
+- **Docker layers.** In the `E2E` workflow, `SPROOZI_BUILD_CACHE=gha` makes
+  `make docker-build` and `build.py` build with buildx and the GitHub Actions
+  cache backend, then load the image into Docker for Kind. The BuildKit image
+  is pinned by digest. Local builds use plain `docker build`.
+
+This is safe because a cached result can only come from the same pinned
+inputs: lockfiles with integrity hashes, base images by digest and modules
+checked by `go.sum`. So `build.py` no longer passes `--pull --no-cache`. A
+cache hit skips repeating work; it does not choose different code. The
+canary still builds with `--pull --no-cache`, because it resolves new releases.
+
+Cache scope: only caches written by pushes to `main` are shared with pull
+requests. GitHub scopes a cache written by a pull request run to that pull
+request's ref, so it can read `main`'s caches but not another pull request's,
+and its own writes reach no other branch. The workflows rely on this rule
+rather than adding their own. The `E2E` workflow passes the Actions cache
+service variables to the `make test-e2e` step because buildx reads them from
+the environment. Code in that job could already reach them through the
+runner, so this grants no new access.
+
+Revisit if a cached input stops being pinned, if GitHub changes cache scoping
+for pull requests, or if a cache hit is ever found to hide a build failure.
+
 ## Alternatives and tradeoffs
 
 - **Keep upstream defaults in PR CI.** This finds upstream breakage sooner
@@ -112,6 +147,8 @@ need a separate client release policy.
   [client image Dockerfiles](../../hack/verify/orchestration-kind/clients.Dockerfile),
   [`build.py`](../../hack/verify/orchestration-kind/build.py),
   [`fetch-calico.sh`](../../hack/verify/fetch-calico.sh),
+  [`install-golangci-lint.sh`](../../hack/verify/install-golangci-lint.sh),
+  [`lint.yml`](../../.github/workflows/lint.yml),
   [`test-e2e.yml`](../../.github/workflows/test-e2e.yml) and
   [`latest-clients.yml`](../../.github/workflows/latest-clients.yml).
 - [Running acceptance checks](../../test/acceptance/running.md#harnesses-and-hermes-in-kind).

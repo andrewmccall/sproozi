@@ -23,7 +23,7 @@ summaries.
 | `make verify-mcp` | MCP and gateway packages pass under race, and the live MCP verifier's safety and failure reports pass offline. | Tests (`checks`) | Go, Python 3 |
 | `make verify-workflow-fixtures` | Session-mobility protocol fixtures, quickstart ownership and CRD checks, Kind bootstrap readiness ordering, Kind image import and build cache selection, and demo setup credential preservation and registry wiring. Stubs replace Docker and Kind. | Tests (`checks`) | Python 3, Bash; fetches the pinned Calico manifest into `.local/cni` on first run |
 | `make verify-docs` | Local Markdown links resolve and no private-plan paths are referenced. It does not establish that documentation is current. | Tests (`checks`) | Python 3 |
-| `make lint` | golangci-lint reports no issues; `make lint-config` checks its configuration. | Lint | Go |
+| `make lint` | golangci-lint reports no issues; `make lint-config` checks its configuration. | Lint | Go; downloads the checksum-pinned golangci-lint release |
 | `make test-e2e` | The full stack works in an owned two-node Kind cluster with enforcing CNI, using the pinned clients and Hermes digest. See [Harnesses and Hermes in Kind](#harnesses-and-hermes-in-kind). | E2E | Docker, Kind, kubectl, Calico from `hack/verify/fetch-calico.sh` |
 | `make test-e2e-existing` | The same e2e suite passes against a Kind cluster you created (`KIND_CLUSTER`), then removes the controller, CRDs and test namespaces. `make test-e2e` skips that teardown because it deletes the whole cluster. | No | An existing dedicated Kind cluster |
 | `make verify-mcp-client` | Generated run-local MCP configuration loads in installed stock Codex. No model request. | No | Codex CLI |
@@ -43,6 +43,14 @@ newest upstream releases and opens or updates a tracking issue when they differ
 from the pins or fail. Pull requests never run it. See
 [bumping pinned clients](../../hack/clients/README.md#bumping-pinned-clients).
 [cases.json](cases.json) is a catalogue of planned scenarios, not a gate.
+
+CI caches Go modules and build output, the golangci-lint plugin binary and
+analysis cache, and, in `E2E`, Docker layers for the manager, provider and
+clients images. Only caches written by pushes to `main` are shared with pull
+requests. `SPROOZI_BUILD_CACHE=gha` selects the Docker layer cache and works
+only inside GitHub Actions; leave it unset locally. See the
+[CI caching amendment](../../docs/adr/0021-pinned-ci-inputs-and-latest-client-canary.md#amendment-ci-caching)
+to ADR 0021.
 
 ## Getting-started guide
 
