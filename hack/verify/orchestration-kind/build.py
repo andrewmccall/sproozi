@@ -221,10 +221,64 @@ def load(tag):
     }
 
 
+def pull_on_nodes(reference):
+    """Have every Kind node pull the pinned Hermes image itself, in parallel.
+
+    The reference is pinned by digest, so each node's containerd verifies the
+    exact manifest. This skips a host pull, save and import of a large image.
+    """
+    if not re.fullmatch(r"[a-z0-9./_-]+@sha256:[0-9a-f]{64}", reference):
+        raise RuntimeError("Hermes must be pinned by digest: " + reference)
+    nodes = kind_nodes()
+
+    def pull(node):
+        run("docker", "exec", node, "crictl", "pull", reference, capture_output=True)
+        inspected = json.loads(
+            output("docker", "exec", node, "crictl", "inspecti", reference)
+        )
+        repo_digests = inspected["status"]["repoDigests"]
+        if reference not in repo_digests:
+            raise RuntimeError(
+                "Kind CRI could not resolve " + reference + " on " + node
+            )
+        return {"resolvedRepoDigests": repo_digests}
+
+    with ThreadPoolExecutor(max_workers=len(nodes)) as pool:
+        resolved = list(pool.map(pull, nodes))
+    return {
+        "image": reference,
+        "manifestDigest": reference.rsplit("@", 1)[1],
+        "pulledByNodes": True,
+        "nodes": nodes,
+        "criResolution": dict(zip(nodes, resolved)),
+    }
+
+
+def pulled_hermes(reference):
+    """Return pull-hermes's record for this cluster's nodes, or pull now."""
+    record = OUT / "hermes.json"
+    if record.exists():
+        pulled = json.loads(record.read_text())
+        if pulled["image"] == reference and pulled["nodes"] == kind_nodes():
+            return pulled
+    return pull_on_nodes(reference)
+
+
+def hermes_stamp(reference, path):
+    """Read a provenance file from the Hermes image on a Kind node."""
+    node = kind_nodes()[0]
+    name = "sproozi-stamp-" + hashlib.sha256(path.encode()).hexdigest()[:12]
+    return json.loads(
+        output(
+            "docker", "exec", node, "ctr", "-n", "k8s.io", "run", "--rm",
+            reference, name, "/bin/cat", path,
+        )
+    )
+
+
 IMAGES = {
     "provider": "hack/verify/orchestration-kind/provider/Dockerfile",
     "clients": "hack/verify/orchestration-kind/clients.Dockerfile",
-    "hermes": None,
 }
 
 
@@ -232,14 +286,10 @@ def acceptance_tag(name):
     return "docker.io/sproozi-kind/" + name + ":acceptance"
 
 
-def prepare(name, source_snapshot, hermes):
-    """Build an acceptance image, or pull and tag Hermes; return its tag."""
+def prepare(name, source_snapshot):
+    """Build an acceptance image and return its tag."""
     tag = acceptance_tag(name)
     dockerfile = IMAGES[name]
-    if dockerfile is None:
-        run("docker", "pull", hermes)
-        run("docker", "tag", hermes, tag)
-        return tag
     log = OUT / (name + "-build.log")
     with log.open("w") as stream:
         run(
@@ -251,7 +301,7 @@ def prepare(name, source_snapshot, hermes):
     return tag
 
 
-def inspect_versions(hermes):
+def inspect_versions():
     versions = {}
     observed = {}
     for name, binary in [
@@ -276,44 +326,22 @@ def inspect_versions(hermes):
             raise RuntimeError("Unexpected native " + name + " version: " + version)
         observed[name] = version
         versions[name] = match.group(1)
-    stamp = json.loads(
-        output(
-            "docker",
-            "run",
-            "--rm",
-            "--network",
-            "none",
-            "--entrypoint",
-            "/bin/cat",
-            hermes,
-            "/etc/hermes/image-provenance.json",
-        )
-    )
-    install_stamp = json.loads(
-        output(
-            "docker",
-            "run",
-            "--rm",
-            "--network",
-            "none",
-            "--entrypoint",
-            "/bin/cat",
-            hermes,
-            "/opt/hermes/install-stamp.json",
-        )
-    )
-    versions["hermes"] = install_stamp["displayVersion"]
-    observed["hermes"] = {"installStamp": install_stamp, "imageProvenance": stamp}
-    return versions, observed, install_stamp["commit"]
+    return versions, observed
 
 
 def write_images(loaded, built):
     images = dict(loaded)
-    images["hermes"]["upstreamImage"] = built["hermes"]
-    images["hermes"]["sourceCommit"] = built["hermesSourceCommit"]
+    hermes = built["hermes"]
+    stamp = hermes_stamp(hermes, "/etc/hermes/image-provenance.json")
+    install_stamp = hermes_stamp(hermes, "/opt/hermes/install-stamp.json")
+    images["hermes"]["upstreamImage"] = hermes
+    images["hermes"]["sourceCommit"] = install_stamp["commit"]
     images["buildSourceSHA256"] = built["buildSourceSHA256"]
-    images["versions"] = built["versions"]
-    images["observedVersions"] = built["observedVersions"]
+    images["versions"] = dict(built["versions"], hermes=install_stamp["displayVersion"])
+    images["observedVersions"] = dict(
+        built["observedVersions"],
+        hermes={"installStamp": install_stamp, "imageProvenance": stamp},
+    )
     require_unchanged_sources(built["buildSourceSHA256"])
     images["sourceSnapshotVerified"] = True
     (OUT / "images.json").write_text(json.dumps(images, indent=2) + "\n")
@@ -339,10 +367,9 @@ def start():
 
 
 def built_record(source_snapshot, hermes):
-    versions, observed, commit = inspect_versions(hermes)
+    versions, observed = inspect_versions()
     return {
         "hermes": hermes,
-        "hermesSourceCommit": commit,
         "buildSourceSHA256": source_snapshot,
         "versions": versions,
         "observedVersions": observed,
@@ -352,39 +379,48 @@ def built_record(source_snapshot, hermes):
 def main(argv):
     """Build, load or both.
 
-    build: build the images and pull Hermes, needing no cluster; writes
-    built.json. load: import the images that build recorded into KIND_CLUSTER.
+    build: build the images, needing no cluster; writes built.json.
+    pull-hermes: have each KIND_CLUSTER node pull the pinned Hermes image;
+    writes hermes.json. load: import the images that build recorded, and use
+    pull-hermes's record when it matches these nodes (otherwise pull now).
     Without an argument, each image is loaded as soon as it is ready.
     """
     mode = argv[0] if argv else "all"
-    if mode not in ["all", "build", "load"]:
-        raise SystemExit("usage: build.py [build|load]")
+    if mode not in ["all", "build", "load", "pull-hermes"]:
+        raise SystemExit("usage: build.py [build|load|pull-hermes]")
+    if mode == "pull-hermes":
+        hermes = os.environ.get("SPROOZI_HERMES_IMAGE") or HERMES_IMAGE
+        OUT.mkdir(parents=True, exist_ok=True)
+        (OUT / "hermes.json").write_text(json.dumps(pull_on_nodes(hermes), indent=2) + "\n")
+        return
     if mode == "load":
         built = json.loads((OUT / "built.json").read_text())
         require_unchanged_sources(built["buildSourceSHA256"])
-        with ThreadPoolExecutor(max_workers=len(IMAGES)) as pool:
+        with ThreadPoolExecutor(max_workers=len(IMAGES) + 1) as pool:
             futures = {
                 name: pool.submit(load, acceptance_tag(name)) for name in IMAGES
             }
+            futures["hermes"] = pool.submit(pulled_hermes, built["hermes"])
             loaded = {name: future.result() for name, future in futures.items()}
         write_images(loaded, built)
         return
     source_snapshot, hermes = start()
     # The builds, the Hermes pull and each image's import are independent;
     # every image still passes the same digest and CRI checks.
-    with ThreadPoolExecutor(max_workers=len(IMAGES)) as pool:
+    with ThreadPoolExecutor(max_workers=len(IMAGES) + 1) as pool:
         if mode == "build":
             futures = {
-                name: pool.submit(prepare, name, source_snapshot, hermes)
+                name: pool.submit(prepare, name, source_snapshot)
                 for name in IMAGES
             }
         else:
             futures = {
                 name: pool.submit(
-                    lambda n: load(prepare(n, source_snapshot, hermes)), name
+                    lambda n: load(prepare(n, source_snapshot)), name
                 )
                 for name in IMAGES
             }
+            futures["hermes"] = pool.submit(pull_on_nodes, hermes)
         results = {name: future.result() for name, future in futures.items()}
     built = built_record(source_snapshot, hermes)
     if mode == "build":

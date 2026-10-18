@@ -122,8 +122,9 @@ replay, result retention, PVC restart and direct-network isolation. It removes
 its cluster on completion. Set `SPROOZI_PRESERVE_ON_FAILURE=1` to retain an owned
 failed cluster for investigation.
 
-`hack/verify/kind.sh` builds the images, pulls Hermes and compiles the suite
-while the cluster starts, then loads each image into both nodes at once. The
+`hack/verify/kind.sh` builds the images and compiles the suite while the
+cluster starts. Once the cluster is up, both nodes pull the digest-pinned Hermes
+image themselves while the built images are loaded into both nodes at once. The
 first of these jobs to fail stops the run and prints its log. The suite then
 skips its own image step, because `kind.sh` sets `SPROOZI_E2E_IMAGES_LOADED=1`.
 `make test-e2e-existing` builds and loads the images inside the suite, using

@@ -25,8 +25,8 @@ kubeconfig="${SPROOZI_KUBECONFIG:-$(mktemp -p "${TMPDIR:-/tmp}" sproozi-kind.XXX
 manager_image="${SPROOZI_E2E_MANAGER_IMAGE:-example.com/sproozi:v0.0.1}"
 logs="$(mktemp -d -p "${TMPDIR:-/tmp}" sproozi-kind-jobs.XXXXXX)"
 
-# Independent setup runs as background jobs: the cluster, the image builds and
-# the Hermes pull, and the e2e test compile. Each job writes its own log, and
+# Independent setup runs as background jobs: the cluster, the image builds,
+# the nodes' Hermes pull, and the e2e test compile. Each job writes its own log, and
 # the first job to fail stops the run and prints that log.
 job_pids=()
 job_names=()
@@ -118,11 +118,19 @@ start_job cluster kind_up "$cluster" "$kubeconfig"
 wait_jobs cluster
 cat "$logs/cluster.log"
 export KUBECONFIG="$kubeconfig"
+if (( orchestration )); then
+  # The nodes pull the digest-pinned Hermes image themselves while the
+  # remaining images build and load.
+  pull_hermes() {
+    KIND_CLUSTER="$cluster" KIND=kind python3 hack/verify/orchestration-kind/build.py pull-hermes
+  }
+  start_job hermes-pull pull_hermes
+fi
 
 wait_jobs manager-image
 start_job manager-load kind load docker-image "$manager_image" --name "$cluster"
 if (( orchestration )); then
-  wait_jobs acceptance-images
+  wait_jobs acceptance-images hermes-pull
   load_acceptance_images() {
     KIND_CLUSTER="$cluster" KIND=kind python3 hack/verify/orchestration-kind/build.py load
   }

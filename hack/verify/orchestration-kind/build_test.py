@@ -94,5 +94,47 @@ class BuildCommandTest(unittest.TestCase):
                 build.build_command("clients", "t:1", "Dockerfile")
 
 
+PINNED = "docker.io/nousresearch/hermes-agent@sha256:" + "a" * 64
+
+
+class HermesNodePullTest(unittest.TestCase):
+    def test_tag_reference_is_refused_before_any_pull(self):
+        with mock.patch.object(build, "kind_nodes") as nodes:
+            with self.assertRaises(RuntimeError):
+                build.pull_on_nodes("docker.io/nousresearch/hermes-agent:latest")
+        nodes.assert_not_called()
+
+    def test_each_node_pulls_and_must_resolve_the_digest(self):
+        calls = []
+
+        def run(*args, **kw):
+            calls.append(args)
+
+        def output(*args):
+            node = args[2]
+            digests = [PINNED] if node == "worker" else ["other@sha256:" + "b" * 64]
+            return '{"status": {"repoDigests": %s}}' % str(digests).replace("'", '"')
+
+        with mock.patch.object(build, "kind_nodes", return_value=["worker", "control"]), \
+                mock.patch.object(build, "run", side_effect=run), \
+                mock.patch.object(build, "output", side_effect=output):
+            with self.assertRaises(RuntimeError):
+                build.pull_on_nodes(PINNED)
+        self.assertEqual(sorted(c[2] for c in calls), ["control", "worker"])
+        self.assertTrue(all(c[3:] == ("crictl", "pull", PINNED) for c in calls))
+
+    def test_record_for_other_nodes_is_not_reused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            (out / "hermes.json").write_text(
+                '{"image": "%s", "nodes": ["old-control"]}' % PINNED
+            )
+            with mock.patch.object(build, "OUT", out), \
+                    mock.patch.object(build, "kind_nodes", return_value=["new-control"]), \
+                    mock.patch.object(build, "pull_on_nodes", return_value={"fresh": True}) as pull:
+                self.assertEqual(build.pulled_hermes(PINNED), {"fresh": True})
+            pull.assert_called_once_with(PINNED)
+
+
 if __name__ == "__main__":
     unittest.main()
