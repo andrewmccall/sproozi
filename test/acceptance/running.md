@@ -122,6 +122,13 @@ replay, result retention, PVC restart and direct-network isolation. It removes
 its cluster on completion. Set `SPROOZI_PRESERVE_ON_FAILURE=1` to retain an owned
 failed cluster for investigation.
 
+`hack/verify/kind.sh` builds the images, pulls Hermes and compiles the suite
+while the cluster starts, then loads each image into both nodes at once. The
+first of these jobs to fail stops the run and prints its log. The suite then
+skips its own image step, because `kind.sh` sets `SPROOZI_E2E_IMAGES_LOADED=1`.
+`make test-e2e-existing` builds and loads the images inside the suite, using
+`build.py` without arguments.
+
 The clients come from the lockfiles in [`hack/clients`](../../hack/clients/README.md),
 installed with `npm ci --ignore-scripts`, and Hermes runs by the digest in
 `hack/verify/orchestration-kind/build.py`. `fetch-calico.sh` refuses a manifest

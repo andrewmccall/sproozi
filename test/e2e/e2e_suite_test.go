@@ -31,10 +31,17 @@ import (
 	"github.com/andrewmccall/sproozi/test/utils"
 )
 
-var (
-	// managerImage is the manager image to be built and loaded for testing.
-	managerImage = "example.com/sproozi:v0.0.1"
-)
+// managerImage is the manager image to be built and loaded for testing.
+// hack/verify/kind.sh names it with SPROOZI_E2E_MANAGER_IMAGE when it builds
+// the image itself.
+var managerImage = envOr("SPROOZI_E2E_MANAGER_IMAGE", "example.com/sproozi:v0.0.1")
+
+func envOr(name, fallback string) string {
+	if value := os.Getenv(name); value != "" {
+		return value
+	}
+	return fallback
+}
 
 // TestE2E runs the e2e test suite to validate the solution in an isolated environment.
 // The default setup requires Kind.
@@ -48,6 +55,14 @@ func TestE2E(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
+	configureKubectlKubeRC()
+	// hack/verify/kind.sh builds the images while the cluster starts, loads
+	// them and sets SPROOZI_E2E_IMAGES_LOADED=1. Other callers build here.
+	if os.Getenv("SPROOZI_E2E_IMAGES_LOADED") == "1" {
+		_, _ = fmt.Fprintf(GinkgoWriter, "Using images built and loaded by hack/verify/kind.sh\n")
+		return
+	}
+
 	By("building the manager image")
 	cmd := exec.Command("make", "docker-build", fmt.Sprintf("IMG=%s", managerImage))
 	_, err := utils.Run(cmd)
@@ -63,8 +78,6 @@ var _ = BeforeSuite(func() {
 		_, err = utils.Run(cmd)
 		ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to provision native acceptance images")
 	}
-
-	configureKubectlKubeRC()
 })
 
 // disposableCluster reports whether the caller deletes the cluster as soon as

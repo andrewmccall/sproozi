@@ -23,6 +23,17 @@ jobs:
         with:
           persist-credentials: false
 
+      # Start the two largest downloads, the Kind node image and Hermes, while
+      # Go, Kind and buildx are set up. Both are pinned by digest and pulled
+      # again where they are used, so a failure here only loses the head start.
+      - name: Pre-pull pinned images in the background
+        run: |
+          node_image="$(sed -n 's/^KIND_NODE_IMAGE ?= //p' Makefile)"
+          hermes="$(grep -oE 'docker\.io/nousresearch/hermes-agent@sha256:[0-9a-f]{64}' hack/verify/orchestration-kind/build.py)"
+          for image in "$node_image" "$hermes"; do
+            nohup docker pull --quiet "$image" >>"$RUNNER_TEMP/pre-pull.log" 2>&1 &
+          done
+
       - name: Setup Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:

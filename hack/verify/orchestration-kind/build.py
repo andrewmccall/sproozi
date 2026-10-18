@@ -5,6 +5,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -220,8 +221,25 @@ def load(tag):
     }
 
 
-def build_and_load(name, dockerfile, source_snapshot):
-    tag = "docker.io/sproozi-kind/" + name + ":acceptance"
+IMAGES = {
+    "provider": "hack/verify/orchestration-kind/provider/Dockerfile",
+    "clients": "hack/verify/orchestration-kind/clients.Dockerfile",
+    "hermes": None,
+}
+
+
+def acceptance_tag(name):
+    return "docker.io/sproozi-kind/" + name + ":acceptance"
+
+
+def prepare(name, source_snapshot, hermes):
+    """Build an acceptance image, or pull and tag Hermes; return its tag."""
+    tag = acceptance_tag(name)
+    dockerfile = IMAGES[name]
+    if dockerfile is None:
+        run("docker", "pull", hermes)
+        run("docker", "tag", hermes, tag)
+        return tag
     log = OUT / (name + "-build.log")
     with log.open("w") as stream:
         run(
@@ -230,48 +248,11 @@ def build_and_load(name, dockerfile, source_snapshot):
             stderr=subprocess.STDOUT,
         )
     require_unchanged_sources(source_snapshot)
-    return load(tag)
+    return tag
 
 
-def pull_and_load(hermes):
-    run("docker", "pull", hermes)
-    run("docker", "tag", hermes, "docker.io/sproozi-kind/hermes:acceptance")
-    return load("docker.io/sproozi-kind/hermes:acceptance")
-
-
-def main():
-    OUT.mkdir(parents=True, exist_ok=True)
-    # Snapshot before Docker reads its contexts. Never attribute a compiled
-    # image to files that were edited while the build or import was in flight.
-    source_snapshot = build_source_hashes()
-    (OUT / "build-source-snapshot.json").write_text(
-        json.dumps(source_snapshot, indent=2) + "\n"
-    )
-    (OUT / "images.json").unlink(missing_ok=True)
-    # Official coordinator and bounded worker use the same pinned upstream image.
-    hermes = os.environ.get("SPROOZI_HERMES_IMAGE") or HERMES_IMAGE
-    # The builds, the Hermes pull and each image's import are independent;
-    # every image still passes the same digest and CRI checks.
-    with ThreadPoolExecutor(max_workers=3) as pool:
-        futures = {
-            "provider": pool.submit(
-                build_and_load,
-                "provider",
-                "hack/verify/orchestration-kind/provider/Dockerfile",
-                source_snapshot,
-            ),
-            "clients": pool.submit(
-                build_and_load,
-                "clients",
-                "hack/verify/orchestration-kind/clients.Dockerfile",
-                source_snapshot,
-            ),
-            "hermes": pool.submit(pull_and_load, hermes),
-        }
-        images = {name: future.result() for name, future in futures.items()}
-    images["hermes"]["upstreamImage"] = hermes
-    images["buildSourceSHA256"] = source_snapshot
-    images["versions"] = {}
+def inspect_versions(hermes):
+    versions = {}
     observed = {}
     for name, binary in [
         ("codex", "codex"),
@@ -286,7 +267,7 @@ def main():
             "none",
             "--env",
             "HOME=/tmp",
-            "docker.io/sproozi-kind/clients:acceptance",
+            acceptance_tag("clients"),
             binary,
             "--version",
         )
@@ -294,7 +275,7 @@ def main():
         if not match:
             raise RuntimeError("Unexpected native " + name + " version: " + version)
         observed[name] = version
-        images["versions"][name] = match.group(1)
+        versions[name] = match.group(1)
     stamp = json.loads(
         output(
             "docker",
@@ -321,11 +302,19 @@ def main():
             "/opt/hermes/install-stamp.json",
         )
     )
-    images["versions"]["hermes"] = install_stamp["displayVersion"]
-    images["hermes"]["sourceCommit"] = install_stamp["commit"]
+    versions["hermes"] = install_stamp["displayVersion"]
     observed["hermes"] = {"installStamp": install_stamp, "imageProvenance": stamp}
-    images["observedVersions"] = observed
-    require_unchanged_sources(source_snapshot)
+    return versions, observed, install_stamp["commit"]
+
+
+def write_images(loaded, built):
+    images = dict(loaded)
+    images["hermes"]["upstreamImage"] = built["hermes"]
+    images["hermes"]["sourceCommit"] = built["hermesSourceCommit"]
+    images["buildSourceSHA256"] = built["buildSourceSHA256"]
+    images["versions"] = built["versions"]
+    images["observedVersions"] = built["observedVersions"]
+    require_unchanged_sources(built["buildSourceSHA256"])
     images["sourceSnapshotVerified"] = True
     (OUT / "images.json").write_text(json.dumps(images, indent=2) + "\n")
     print(
@@ -334,5 +323,76 @@ def main():
     )
 
 
+def start():
+    OUT.mkdir(parents=True, exist_ok=True)
+    # Snapshot before Docker reads its contexts. Never attribute a compiled
+    # image to files that were edited while the build or import was in flight.
+    source_snapshot = build_source_hashes()
+    (OUT / "build-source-snapshot.json").write_text(
+        json.dumps(source_snapshot, indent=2) + "\n"
+    )
+    (OUT / "images.json").unlink(missing_ok=True)
+    (OUT / "built.json").unlink(missing_ok=True)
+    # Official coordinator and bounded worker use the same pinned upstream image.
+    hermes = os.environ.get("SPROOZI_HERMES_IMAGE") or HERMES_IMAGE
+    return source_snapshot, hermes
+
+
+def built_record(source_snapshot, hermes):
+    versions, observed, commit = inspect_versions(hermes)
+    return {
+        "hermes": hermes,
+        "hermesSourceCommit": commit,
+        "buildSourceSHA256": source_snapshot,
+        "versions": versions,
+        "observedVersions": observed,
+    }
+
+
+def main(argv):
+    """Build, load or both.
+
+    build: build the images and pull Hermes, needing no cluster; writes
+    built.json. load: import the images that build recorded into KIND_CLUSTER.
+    Without an argument, each image is loaded as soon as it is ready.
+    """
+    mode = argv[0] if argv else "all"
+    if mode not in ["all", "build", "load"]:
+        raise SystemExit("usage: build.py [build|load]")
+    if mode == "load":
+        built = json.loads((OUT / "built.json").read_text())
+        require_unchanged_sources(built["buildSourceSHA256"])
+        with ThreadPoolExecutor(max_workers=len(IMAGES)) as pool:
+            futures = {
+                name: pool.submit(load, acceptance_tag(name)) for name in IMAGES
+            }
+            loaded = {name: future.result() for name, future in futures.items()}
+        write_images(loaded, built)
+        return
+    source_snapshot, hermes = start()
+    # The builds, the Hermes pull and each image's import are independent;
+    # every image still passes the same digest and CRI checks.
+    with ThreadPoolExecutor(max_workers=len(IMAGES)) as pool:
+        if mode == "build":
+            futures = {
+                name: pool.submit(prepare, name, source_snapshot, hermes)
+                for name in IMAGES
+            }
+        else:
+            futures = {
+                name: pool.submit(
+                    lambda n: load(prepare(n, source_snapshot, hermes)), name
+                )
+                for name in IMAGES
+            }
+        results = {name: future.result() for name, future in futures.items()}
+    built = built_record(source_snapshot, hermes)
+    if mode == "build":
+        (OUT / "built.json").write_text(json.dumps(built, indent=2) + "\n")
+        print("Built pinned upstream clients: " + str(OUT / "built.json"))
+        return
+    write_images(results, built)
+
+
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])
