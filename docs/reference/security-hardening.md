@@ -117,7 +117,9 @@ a time. Cancellation and execution deadlines still apply while a call waits.
 Administrator-owned pricing converts verified usage into cost; the
 [pricing rules](agentpolicy.md#endpoint-budgets) say which rows a cost limit
 needs. A missing price for a category the provider charged, or an uncertain
-settlement, can still withhold a response after the provider did the work. Keep
+settlement, can still withhold a response after the provider did the work.
+Under a cost limit, Anthropic requests that select a `context-1m` long-context
+beta are refused, because the table has no premium long-context rate. Keep
 the pricing table aligned with approved models, and use the provider's own
 monitoring and spending limits.
 

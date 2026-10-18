@@ -188,8 +188,11 @@ positive input, cached input and output rates. Cache creation also requires
 any consumed category. Rates are microdollars per million tokens. Missing model
 pricing denies Anthropic requests before inference; missing consumed-category
 rates forfeit the reservation and withhold output. Explicit one-hour cache
-requests, hosted billable tools, nonstandard service tiers and other unpriced
-extras are denied under a monetary cap. Capped requests select `standard_only`
+requests, hosted billable tools, nonstandard service tiers, `context-1m`
+long-context betas in `anthropic-beta` and other unpriced extras are denied
+under a monetary cap. The pricing table has no long-context premium rate.
+Other `anthropic-beta` values, such as those the stock client sends, are
+forwarded. Capped requests select `standard_only`
 explicitly, including when the client omits its service tier, because the
 provider defaults to automatic Priority capacity selection
 ([service tiers](https://platform.claude.com/docs/en/api/service-tiers)). The verifier still accounts for separate
