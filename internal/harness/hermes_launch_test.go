@@ -77,6 +77,7 @@ func hermesFixture(t *testing.T, scenario string) (*exec.Cmd, string, string) {
 func TestHermesLaunchPublishesOnlyNativeSuccessfulResult(t *testing.T) {
 	for _, scenario := range []string{successCase, longCase, "missing", "malformed", "duplicate-key", "duplicate-result", "error", "failed-result", "native-failure"} {
 		t.Run(scenario, func(t *testing.T) {
+			t.Parallel()
 			cmd, result, _ := hermesFixture(t, scenario)
 			output, err := cmd.CombinedOutput()
 			want := 1
