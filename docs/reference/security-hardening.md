@@ -48,6 +48,18 @@ rules](agentruntime.md#container-validation-rules) list what admission rejects.
 Runtime authors are trusted: keep provider credentials out of public ConfigMaps
 and literal environment values.
 
+## Treat runtime and policy authors as administrators
+
+`AgentRuntime` and `AgentPolicy` are namespaced, but their authority is not.
+A runtime's Pod template runs in the shared `sproozi-agents` namespace, and a
+policy can grant gateway reads in any namespace it names. Anyone who can write
+either object in any namespace is therefore a cluster administrator for
+Sproozi. Grant the scaffolded `sproozi-agentruntime-editor-role`,
+`sproozi-agentruntime-admin-role`, `sproozi-agentpolicy-editor-role` and
+`sproozi-agentpolicy-admin-role` ClusterRoles only to administrators, including
+through namespaced RoleBindings. Users who only start work need `AgentRun`
+access and read access to templates.
+
 ## Restrict remote MCP access
 
 Treat the gateway's MCP registry and provider credential mounts as
