@@ -23,6 +23,15 @@ jobs:
         with:
           persist-credentials: false
 
+      # Start the Kind node image download while Go, Kind and buildx are set
+      # up. It is pinned by digest and pulled again where it is used, so a
+      # failure here only loses the head start. The Kind nodes pull Hermes
+      # themselves once the cluster is up (hack/verify/kind.sh).
+      - name: Pre-pull the Kind node image in the background
+        run: |
+          node_image="$(sed -n 's/^KIND_NODE_IMAGE ?= //p' Makefile)"
+          nohup docker pull --quiet "$node_image" >>"$RUNNER_TEMP/pre-pull.log" 2>&1 &
+
       - name: Setup Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
@@ -39,9 +48,29 @@ jobs:
       - name: Download and verify pinned Calico manifest
         run: hack/verify/fetch-calico.sh "$RUNNER_TEMP/calico-v3.30.4.yaml"
 
+      # Layer caching for the manager, provider and clients images. The
+      # BuildKit image is pinned by digest like every other CI input.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          driver-opts: image=moby/buildkit:v0.33.1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
+
+      # buildx reads the Actions cache service from the environment, which
+      # GitHub gives only to actions. Code in this job can already reach it
+      # through the runner, and GitHub scopes a pull request's cache writes to
+      # that pull request, so only pushes to main write caches PRs can read.
+      - name: Expose the Actions cache to buildx
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            for (const name of ['ACTIONS_CACHE_URL', 'ACTIONS_RESULTS_URL', 'ACTIONS_RUNTIME_TOKEN', 'ACTIONS_CACHE_SERVICE_V2']) {
+              if (process.env[name]) core.exportVariable(name, process.env[name]);
+            }
+
       - name: Run E2E tests with enforcing CNI
         run: make test-e2e
         env:
+          SPROOZI_BUILD_CACHE: gha
           SPROOZI_CNI_MANIFEST: ${{ runner.temp }}/calico-v3.30.4.yaml
           SPROOZI_CNI_SELECTOR: k8s-app=calico-node
           SPROOZI_CNI_TIMEOUT: 300s

@@ -87,6 +87,11 @@ var _ = Describe("Manager", Ordered, func() {
 			Fail(fmt.Sprintf("AgentRun cleanup failed: %s", err))
 			return
 		}
+		if disposableCluster() {
+			_, _ = fmt.Fprintf(GinkgoWriter,
+				"Skipping controller teardown: the Kind runner deletes this cluster next\n")
+			return
+		}
 		By("cleaning up the curl pod for metrics")
 		cmd = exec.Command("kubectl", "delete", "pod", "curl-metrics", "-n", namespace,
 			"--ignore-not-found", "--timeout=30s")
@@ -231,13 +236,13 @@ var _ = Describe("Manager", Ordered, func() {
 			By("creating the curl-metrics pod to access the metrics endpoint")
 			cmd = exec.Command("kubectl", "run", "curl-metrics", "--restart=Never",
 				"--namespace", namespace,
-				"--image=curlimages/curl:latest",
+				"--image="+curlImage,
 				"--overrides",
 				fmt.Sprintf(`{
 					"spec": {
 						"containers": [{
 							"name": "curl",
-							"image": "curlimages/curl:latest",
+							"image": "%s",
 							"command": ["/bin/sh", "-c"],
 							"args": [
 								"for i in $(seq 1 30); do curl -v -k -H 'Authorization: Bearer %s' https://%s.%s.svc.cluster.local:8443/metrics && exit 0 || sleep 2; done; exit 1"
@@ -257,7 +262,7 @@ var _ = Describe("Manager", Ordered, func() {
 						}],
 						"serviceAccountName": "%s"
 					}
-				}`, token, metricsServiceName, namespace, serviceAccountName))
+				}`, curlImage, token, metricsServiceName, namespace, serviceAccountName))
 			_, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Failed to create curl-metrics pod")
 

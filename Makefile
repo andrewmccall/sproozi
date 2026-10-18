@@ -17,6 +17,14 @@ endif
 # tools. (i.e. podman)
 CONTAINER_TOOL ?= docker
 DEPLOY_KUSTOMIZATION ?= config/install
+# SPROOZI_BUILD_CACHE=gha builds with buildx and the GitHub Actions cache
+# backend. Only the E2E workflow sets it; local builds use plain docker build.
+SPROOZI_BUILD_CACHE ?=
+ifeq ($(SPROOZI_BUILD_CACHE),gha)
+DOCKER_BUILD_MANAGER = buildx build --load --cache-from type=gha,scope=manager --cache-to type=gha,mode=max,scope=manager
+else
+DOCKER_BUILD_MANAGER = build
+endif
 
 # Setting SHELL to bash allows bash commands to be executed by recipes.
 # Options are set to exit when a recipe line exits non-zero or a piped command fails.
@@ -64,10 +72,24 @@ vet: ## Run go vet against code.
 # Every package except the Kind-only e2e suite. Envtest packages need the
 # downloaded API server binaries, so both test targets export their path.
 UNIT_PACKAGES = $$(go list ./... | grep -v /e2e)
+# RACE_SHARD splits UNIT_PACKAGES into two halves of similar race-test time
+# for parallel CI jobs: 1 is test/ and internal/session, 2 is everything else.
+# Empty runs every package. Together the shards cover UNIT_PACKAGES exactly.
+RACE_SHARD ?=
+RACE_SHARD_1 = /test/|/internal/session
+ifeq ($(RACE_SHARD),)
+RACE_PACKAGES = $(UNIT_PACKAGES)
+else ifeq ($(RACE_SHARD),1)
+RACE_PACKAGES = $$(go list ./... | grep -v /e2e | grep -E '$(RACE_SHARD_1)')
+else ifeq ($(RACE_SHARD),2)
+RACE_PACKAGES = $$(go list ./... | grep -v /e2e | grep -vE '$(RACE_SHARD_1)')
+else
+$(error RACE_SHARD must be empty, 1 or 2)
+endif
 ENVTEST_ASSETS = KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)"
 
 .PHONY: test
-test: manifests generate fmt vet setup-envtest ## Regenerate, vet and run every non-e2e Go test, including envtest. CI.
+test: manifests generate fmt vet setup-envtest ## Regenerate, vet and run every non-e2e Go test, including envtest.
 	$(ENVTEST_ASSETS) go test $(UNIT_PACKAGES) -coverprofile cover.out
 
 .PHONY: test-e2e
@@ -92,10 +114,19 @@ lint-config: golangci-lint ## Verify golangci-lint configuration. CI (Lint).
 
 ##@ Verification (see test/acceptance/running.md)
 
+# The committed header year is kept, so a new calendar year is not a diff.
+.PHONY: verify-generated
+verify-generated: ## Regenerate code and manifests and run go fmt; fail if the tree changes. CI.
+	@year="$$(sed -n 's/^Copyright \([0-9]*\)\.$$/\1/p' api/v1alpha1/zz_generated.deepcopy.go)"; \
+	$(MAKE) --no-print-directory manifests generate fmt YEAR="$$year"
+	@git diff --exit-code || { echo 'Generated code, manifests or formatting are stale: run make manifests generate fmt and commit the result' >&2; exit 1; }
+
 .PHONY: verify-fast
-verify-fast: setup-envtest ## Vet and race-test every non-e2e package without regenerating sources. CI.
-	go vet ./...
-	$(ENVTEST_ASSETS) go test -race $(UNIT_PACKAGES)
+verify-fast: vet verify-race ## Vet and race-test every non-e2e package with coverage, without regenerating sources. CI.
+
+.PHONY: verify-race
+verify-race: setup-envtest ## Race-test the non-e2e packages (RACE_SHARD=1 or 2 for half) with coverage. CI.
+	$(ENVTEST_ASSETS) go test -race -coverprofile cover.out $(RACE_PACKAGES)
 
 .PHONY: verify-mcp
 verify-mcp: ## Race-test the MCP and gateway packages and the live MCP verifier offline. CI.
@@ -125,6 +156,7 @@ verify-mcp-kind: ## Prove configured MCP with stock Codex in an owned Kind clust
 .PHONY: verify-workflow-fixtures
 verify-workflow-fixtures: ## Run offline Python and shell regressions for fixtures, quickstart, Kind and demo scripts. CI.
 	python3 -m unittest discover -s hack/verify/session-mobility -p '*_test.py'
+	python3 -m unittest discover -s hack/verify/orchestration-kind -p '*_test.py'
 	python3 hack/verify/quickstart_test.py
 	bash hack/verify/kind-test.sh
 	bash hack/demo/setup-test.sh
@@ -207,7 +239,8 @@ run: manifests generate fmt vet ## Run a controller from your host.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 .PHONY: docker-build
 docker-build: ## Build docker image with the manager.
-	$(CONTAINER_TOOL) build -t ${IMG} .
+	@case '$(SPROOZI_BUILD_CACHE)' in ''|gha) ;; *) echo 'SPROOZI_BUILD_CACHE must be empty or gha' >&2; exit 1 ;; esac
+	$(CONTAINER_TOOL) $(DOCKER_BUILD_MANAGER) -t ${IMG} .
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
@@ -324,7 +357,9 @@ $(ENVTEST): | $(LOCALBIN)
 .PHONY: golangci-lint
 golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.
 $(GOLANGCI_LINT): | $(LOCALBIN)
-	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/v2/cmd/golangci-lint,$(GOLANGCI_LINT_VERSION))
+	@[ -f "$(GOLANGCI_LINT)-$(GOLANGCI_LINT_VERSION)" ] || \
+		GOLANGCI_LINT_VERSION='$(GOLANGCI_LINT_VERSION)' bash hack/verify/install-golangci-lint.sh "$(GOLANGCI_LINT)-$(GOLANGCI_LINT_VERSION)"
+	@ln -sf "$$(realpath "$(GOLANGCI_LINT)-$(GOLANGCI_LINT_VERSION)")" "$(GOLANGCI_LINT)"
 	@test -f .custom-gcl.yml && { \
 		echo "Building custom golangci-lint with plugins..." && \
 		$(GOLANGCI_LINT) custom --destination $(LOCALBIN) --name golangci-lint-custom && \

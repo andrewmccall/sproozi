@@ -26,7 +26,7 @@ var _ = Describe("NetworkPolicy enforcement", func() {
 	It("blocks an established destination and restores access after policy removal", func() {
 		image := os.Getenv("SPROOZI_E2E_PROBE_IMAGE")
 		if image == "" {
-			image = "curlimages/curl@sha256:94e9e444bcba979c2ea12e27ae39bee4cd10bc7041a472c4727a558e213744e6"
+			image = curlImage
 		}
 		Expect(image).To(ContainSubstring("@sha256:"), "Provide a digest-pinned curl probe image")
 		const probeName = "network-policy-probe"
@@ -38,7 +38,7 @@ var _ = Describe("NetworkPolicy enforcement", func() {
 			Expect(err).NotTo(HaveOccurred())
 		})
 
-		no, yes, uid := false, true, int64(1000)
+		no, yes, uid, noGrace := false, true, int64(1000), int64(0)
 		pod := corev1.Pod{
 			TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Pod"},
 			ObjectMeta: metav1.ObjectMeta{Name: probeName, Namespace: probeNamespace,
@@ -46,6 +46,8 @@ var _ = Describe("NetworkPolicy enforcement", func() {
 			Spec: corev1.PodSpec{
 				AutomountServiceAccountToken: &no,
 				RestartPolicy:                corev1.RestartPolicyNever,
+				// The probe only sleeps; a grace period would delay namespace deletion.
+				TerminationGracePeriodSeconds: &noGrace,
 				SecurityContext: &corev1.PodSecurityContext{
 					RunAsNonRoot: &yes, RunAsUser: &uid,
 					SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},

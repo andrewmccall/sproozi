@@ -82,7 +82,7 @@ python3 hack/verify/quickstart.py dependencies
 controller image and deploys it to a temporary Kind cluster with Calico. It then
 proves that the network rules work: a test connection succeeds, a deny-egress
 policy blocks it, and removing the policy restores it. It skips the optional
-cert-manager and metrics checks, which the demo doesn't use.
+metrics check, which the demo doesn't use.
 
 When it passes, the temporary cluster is deleted. Logs and `result.json` stay
 under `.local/verification/quickstart/`. This check doesn't run Codex or open a

@@ -31,19 +31,27 @@ import (
 	"github.com/andrewmccall/sproozi/test/utils"
 )
 
-var (
-	// managerImage is the manager image to be built and loaded for testing.
-	managerImage = "example.com/sproozi:v0.0.1"
-	// shouldCleanupCertManager tracks whether CertManager was installed by this suite.
-	shouldCleanupCertManager = false
-)
+// managerImage is the manager image to be built and loaded for testing.
+// hack/verify/kind.sh names it with SPROOZI_E2E_MANAGER_IMAGE when it builds
+// the image itself.
+var managerImage = envOr("SPROOZI_E2E_MANAGER_IMAGE", "example.com/sproozi:v0.0.1")
+
+// curlImage is the digest-pinned curl client for the metrics and network
+// policy probes.
+const curlImage = "curlimages/curl@sha256:94e9e444bcba979c2ea12e27ae39bee4cd10bc7041a472c4727a558e213744e6"
+
+func envOr(name, fallback string) string {
+	if value := os.Getenv(name); value != "" {
+		return value
+	}
+	return fallback
+}
 
 // TestE2E runs the e2e test suite to validate the solution in an isolated environment.
-// The default setup requires Kind and CertManager.
+// The default setup requires Kind.
 //
 // To enable kubectl kuberc (use custom kubectl configurations), set: KUBECTL_KUBERC=true
 // By default, kuberc is disabled to ensure consistent test behavior across different environments.
-// To skip CertManager installation, set: CERT_MANAGER_INSTALL_SKIP=true
 func TestE2E(t *testing.T) {
 	RegisterFailHandler(Fail)
 	_, _ = fmt.Fprintf(GinkgoWriter, "Starting sproozi e2e test suite\n")
@@ -51,6 +59,14 @@ func TestE2E(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
+	configureKubectlKubeRC()
+	// hack/verify/kind.sh builds the images while the cluster starts, loads
+	// them and sets SPROOZI_E2E_IMAGES_LOADED=1. Other callers build here.
+	if os.Getenv("SPROOZI_E2E_IMAGES_LOADED") == "1" {
+		_, _ = fmt.Fprintf(GinkgoWriter, "Using images built and loaded by hack/verify/kind.sh\n")
+		return
+	}
+
 	By("building the manager image")
 	cmd := exec.Command("make", "docker-build", fmt.Sprintf("IMG=%s", managerImage))
 	_, err := utils.Run(cmd)
@@ -66,14 +82,15 @@ var _ = BeforeSuite(func() {
 		_, err = utils.Run(cmd)
 		ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to provision native acceptance images")
 	}
-
-	configureKubectlKubeRC()
-	setupCertManager()
 })
 
-var _ = AfterSuite(func() {
-	teardownCertManager()
-})
+// disposableCluster reports whether the caller deletes the cluster as soon as
+// the suite ends. hack/verify/kind.sh sets SPROOZI_E2E_DISPOSABLE_CLUSTER=1, so
+// teardown that only removes resources is skipped. make test-e2e-existing runs
+// against a caller-owned cluster and still cleans up.
+func disposableCluster() bool {
+	return os.Getenv("SPROOZI_E2E_DISPOSABLE_CLUSTER") == "1"
+}
 
 // Disable kubectl kuberc by default for test isolation.
 // This prevents local kubectl configurations from affecting test behavior.
@@ -88,37 +105,4 @@ func configureKubectlKubeRC() {
 	} else {
 		_, _ = fmt.Fprintf(GinkgoWriter, "kubectl kuberc enabled (KUBECTL_KUBERC=true)\n")
 	}
-}
-
-// setupCertManager installs CertManager if needed for webhook tests.
-// Skips installation if CERT_MANAGER_INSTALL_SKIP=true or if already present.
-func setupCertManager() {
-	if os.Getenv("CERT_MANAGER_INSTALL_SKIP") == "true" {
-		_, _ = fmt.Fprintf(GinkgoWriter, "Skipping CertManager installation (CERT_MANAGER_INSTALL_SKIP=true)\n")
-		return
-	}
-
-	By("checking if CertManager is already installed")
-	if utils.IsCertManagerCRDsInstalled() {
-		_, _ = fmt.Fprintf(GinkgoWriter, "CertManager is already installed. Skipping installation.\n")
-		return
-	}
-
-	// Mark for cleanup before installation to handle interruptions and partial installs.
-	shouldCleanupCertManager = true
-
-	By("installing CertManager")
-	Expect(utils.InstallCertManager()).To(Succeed(), "Failed to install CertManager")
-}
-
-// teardownCertManager uninstalls CertManager if it was installed by setupCertManager.
-// This ensures we only remove what we installed.
-func teardownCertManager() {
-	if !shouldCleanupCertManager {
-		_, _ = fmt.Fprintf(GinkgoWriter, "Skipping CertManager cleanup (not installed by this suite)\n")
-		return
-	}
-
-	By("uninstalling CertManager")
-	utils.UninstallCertManager()
 }

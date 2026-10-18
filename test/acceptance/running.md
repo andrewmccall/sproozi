@@ -10,20 +10,26 @@ instructions describe how to run the existing drivers.
 ## Which command proves what
 
 Every verification target, what a pass establishes, and whether CI runs it.
-The `Tests` workflow runs its rows in table order; `Lint` and `E2E` are separate
-workflows. `make help` prints the same summaries.
+The `Tests` workflow runs three parallel jobs. `race-1` runs
+`make verify-generated`, `make vet` and `make verify-race RACE_SHARD=1`;
+`race-2` runs `make verify-race RACE_SHARD=2`; and `checks` runs the remaining
+`Tests` rows in table order, taking only the offline verifier from `verify-mcp`. The race run proves everything a plain run does,
+so CI does not run `make test`. `Lint` and `E2E` are separate workflows.
+`make help` prints the same summaries.
 
 | Target | A pass proves | CI | Needs |
 | --- | --- | --- | --- |
-| `make test` | After regenerating code and manifests, every non-e2e Go test passes: unit, rendered manifests, envtest API validation, integration and offline acceptance helpers. | Tests | Go; downloads envtest binaries |
-| `make verify-fast` | The same packages pass under the race detector and `go vet` is clean, without regenerating sources. | Tests | Go; envtest binaries |
-| `make verify-protocol` | Pinned `gh` and `git` clients produce the GitHub protocol the gateway inspects. Zero matched or skipped tests fail. | Tests | Downloads the checksum-pinned `gh` |
-| `make verify-mcp` | MCP and gateway packages pass under race, and the live MCP verifier's safety and failure reports pass offline. | Tests | Go, Python 3 |
-| `make verify-workflow-fixtures` | Session-mobility protocol fixtures, quickstart ownership and CRD checks, Kind bootstrap readiness ordering, and demo setup credential preservation and registry wiring. Stubs replace Docker and Kind. | Tests | Python 3, Bash; fetches the pinned Calico manifest into `.local/cni` on first run |
-| `make verify-docs` | Local Markdown links resolve and no private-plan paths are referenced. It does not establish that documentation is current. | Tests | Python 3 |
-| `make lint` | golangci-lint reports no issues; `make lint-config` checks its configuration. | Lint | Go |
+| `make test` | After regenerating code and manifests, every non-e2e Go test passes: unit, rendered manifests, envtest API validation, integration and offline acceptance helpers. | No; CI runs the same packages under race | Go; downloads envtest binaries |
+| `make verify-generated` | Regenerating code and manifests and running `go fmt` leaves the tree unchanged, so committed generated files are current. Fails on any uncommitted change. | Tests (`race-1`) | Go, Git |
+| `make verify-fast` | `go vet` is clean and every non-e2e package passes under the race detector with coverage, without regenerating sources. | Tests (`race-1` and `race-2`, as `vet` and `verify-race`) | Go; downloads envtest binaries |
+| `make verify-race` | The race-and-coverage half of `verify-fast`. `RACE_SHARD=1` runs `test/` and `internal/session`, `RACE_SHARD=2` every other package; the two shards together cover every non-e2e package. | Tests (`race-1`, `race-2`) | Go; downloads envtest binaries |
+| `make verify-protocol` | Pinned `gh` and `git` clients produce the GitHub protocol the gateway inspects. Zero matched or skipped tests fail. | Tests (`checks`) | Downloads the checksum-pinned `gh` |
+| `make verify-mcp` | MCP and gateway packages pass under race, and the live MCP verifier's safety and failure reports pass offline. | Tests: `checks` runs the offline verifier, `python3 hack/verify/mcp-live-test.py`; the race shards cover the packages | Go, Python 3 |
+| `make verify-workflow-fixtures` | Session-mobility protocol fixtures, quickstart ownership and CRD checks, Kind bootstrap readiness ordering, Kind image import and build cache selection, and demo setup credential preservation and registry wiring. Stubs replace Docker and Kind. | Tests (`checks`) | Python 3, Bash; fetches the pinned Calico manifest into `.local/cni` on first run |
+| `make verify-docs` | Local Markdown links resolve and no private-plan paths are referenced. It does not establish that documentation is current. | Tests (`checks`) | Python 3 |
+| `make lint` | golangci-lint reports no issues; `make lint-config` checks its configuration. | Lint | Go; downloads the checksum-pinned golangci-lint release |
 | `make test-e2e` | The full stack works in an owned two-node Kind cluster with enforcing CNI, using the pinned clients and Hermes digest. See [Harnesses and Hermes in Kind](#harnesses-and-hermes-in-kind). | E2E | Docker, Kind, kubectl, Calico from `hack/verify/fetch-calico.sh` |
-| `make test-e2e-existing` | The same e2e suite passes against a Kind cluster you created (`KIND_CLUSTER`). | No | An existing dedicated Kind cluster |
+| `make test-e2e-existing` | The same e2e suite passes against a Kind cluster you created (`KIND_CLUSTER`), then removes the controller, CRDs and test namespaces. `make test-e2e` skips that teardown because it deletes the whole cluster. | No | An existing dedicated Kind cluster |
 | `make verify-mcp-client` | Generated run-local MCP configuration loads in installed stock Codex. No model request. | No | Codex CLI |
 | `make verify-harness-clients` | Generated native MCP configuration loads in installed Codex, Claude Code and OpenCode. No model request. | No | All three CLIs |
 | `make verify-native-session` | Installed stock Codex resumes through production checkpoint capture and restore against a local provider. | No | Codex CLI |
@@ -41,6 +47,14 @@ newest upstream releases and opens or updates a tracking issue when they differ
 from the pins or fail. Pull requests never run it. See
 [bumping pinned clients](../../hack/clients/README.md#bumping-pinned-clients).
 [cases.json](cases.json) is a catalogue of planned scenarios, not a gate.
+
+CI caches Go modules and build output, the golangci-lint plugin binary and
+analysis cache, and, in `E2E`, Docker layers for the manager, provider and
+clients images. Only caches written by pushes to `main` are shared with pull
+requests. `SPROOZI_BUILD_CACHE=gha` selects the Docker layer cache and works
+only inside GitHub Actions; leave it unset locally. See the
+[CI caching amendment](../../docs/adr/0021-pinned-ci-inputs-and-latest-client-canary.md#amendment-ci-caching)
+to ADR 0021.
 
 ## Getting-started guide
 
@@ -107,6 +121,14 @@ all four stock worker loops, denials, budgets, cancellation, deadlines, UID-boun
 replay, result retention, PVC restart and direct-network isolation. It removes
 its cluster on completion. Set `SPROOZI_PRESERVE_ON_FAILURE=1` to retain an owned
 failed cluster for investigation.
+
+`hack/verify/kind.sh` builds the images and compiles the suite while the
+cluster starts. Once the cluster is up, both nodes pull the digest-pinned Hermes
+image themselves while the built images are loaded into both nodes at once. The
+first of these jobs to fail stops the run and prints its log. The suite then
+skips its own image step, because `kind.sh` sets `SPROOZI_E2E_IMAGES_LOADED=1`.
+`make test-e2e-existing` builds and loads the images inside the suite, using
+`build.py` without arguments.
 
 The clients come from the lockfiles in [`hack/clients`](../../hack/clients/README.md),
 installed with `npm ci --ignore-scripts`, and Hermes runs by the digest in
