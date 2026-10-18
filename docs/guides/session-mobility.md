@@ -151,8 +151,11 @@ bin/sproozi start --socket /absolute/private/home/control.sock \
   --workspace /absolute/path/to/stopped-repository
 ```
 
-Ignored files are excluded by default. To carry an individual ignored input, use
-repeatable flags at start:
+Ignored files are excluded by default. Start applies the same rules as your Git:
+`.gitignore` files, `.git/info/exclude` and the effective `core.excludesFile`
+(from the repository config, then your global config, then
+`~/.config/git/ignore`). It reads that value without following config includes.
+To carry an individual ignored input, use repeatable flags at start:
 
 ```sh
 bin/sproozi start --socket /absolute/private/home/control.sock \

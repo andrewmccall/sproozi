@@ -199,7 +199,7 @@ func (s *Service) createWorkspaceExecution(ctx context.Context, id, operationID,
 		InstructionDigest: s.config.Local.InstructionDigest, IncludeIgnored: slices.Clone(includeIgnored),
 		Deadline: time.Now().Add(s.duration).UTC(), Allowances: maps.Clone(s.config.Allowances)}
 	return s.createExecution(first, "", func() ([]byte, error) {
-		return workspace.Capture(ctx, path, includeIgnored, s.config.Local.MaxCheckpointBytes)
+		return workspace.CaptureLocal(ctx, path, includeIgnored, s.config.Local.MaxCheckpointBytes)
 	})
 }
 
