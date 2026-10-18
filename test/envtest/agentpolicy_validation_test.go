@@ -1,9 +1,7 @@
 package envtest
 
 import (
-	"context"
 	"encoding/json"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -13,7 +11,6 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 )
@@ -21,35 +18,15 @@ import (
 func TestAgentPolicyRejectsUnknownCapability(t *testing.T) {
 	t.Parallel()
 
-	scheme := runtime.NewScheme()
-	if err := sprooziv1alpha1.AddToScheme(scheme); err != nil {
-		t.Fatalf("AddToScheme() error = %v", err)
-	}
+	apiClient := testClient
+	ns := newNamespace(t)
 
-	testEnvironment := &envtest.Environment{
-		CRDDirectoryPaths: []string{filepath.Join("..", "..", "config", "crd", "bases")},
-	}
-	configuration, err := testEnvironment.Start()
-	if err != nil {
-		t.Fatalf("Start() error = %v", err)
-	}
-	t.Cleanup(func() {
-		if err := testEnvironment.Stop(); err != nil {
-			t.Errorf("Stop() error = %v", err)
-		}
-	})
-
-	apiClient, err := client.New(configuration, client.Options{Scheme: scheme})
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-
-	policy := validAgentPolicy()
+	policy := validAgentPolicy(ns)
 	policy.Spec.AllowedCapabilities = []sprooziv1alpha1.CapabilityKind{"unknown.capability"}
-	if err := apiClient.Create(context.Background(), policy); err == nil {
+	if err := apiClient.Create(t.Context(), policy); err == nil {
 		t.Fatal("Create() error = nil, want API server validation error")
 	}
-	policy = validAgentPolicy()
+	policy = validAgentPolicy(ns)
 	policy.Name = "mcp-policy"
 	policy.Spec.AllowedCapabilities = []sprooziv1alpha1.CapabilityKind{testMCPCapability}
 	arguments := []byte(`{"required":["tenant"],"properties":{"tenant":{"const":"home-ops"}}}`)
@@ -61,11 +38,11 @@ func TestAgentPolicyRejectsUnknownCapability(t *testing.T) {
 	policy.Spec.Budgets = map[sprooziv1alpha1.CapabilityKind]sprooziv1alpha1.EndpointBudget{
 		testMCPCapability: {MaxUnits: 5},
 	}
-	if err := apiClient.Create(context.Background(), policy); err != nil {
+	if err := apiClient.Create(t.Context(), policy); err != nil {
 		t.Fatal(err)
 	}
 	var stored sprooziv1alpha1.AgentPolicy
-	if err := apiClient.Get(context.Background(), client.ObjectKeyFromObject(policy), &stored); err != nil {
+	if err := apiClient.Get(t.Context(), client.ObjectKeyFromObject(policy), &stored); err != nil {
 		t.Fatal(err)
 	}
 	var constraint map[string]any
@@ -82,7 +59,7 @@ func TestAgentPolicyRejectsUnknownCapability(t *testing.T) {
 		invalid.ResourceVersion = ""
 		invalid.UID = ""
 		invalid.Spec.AllowedCapabilities = []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityKind(name)}
-		if err := apiClient.Create(context.Background(), invalid); err == nil {
+		if err := apiClient.Create(t.Context(), invalid); err == nil {
 			t.Fatalf("invalid MCP capability accepted: %s", name)
 		}
 	}
@@ -92,29 +69,11 @@ func TestAgentPolicyRejectsUnknownCapability(t *testing.T) {
 func TestAgentPolicyRejectsUnsafeKubernetesReadResource(t *testing.T) {
 	t.Parallel()
 
-	scheme := runtime.NewScheme()
-	if err := sprooziv1alpha1.AddToScheme(scheme); err != nil {
-		t.Fatalf("AddToScheme() error = %v", err)
-	}
-	testEnvironment := &envtest.Environment{
-		CRDDirectoryPaths: []string{filepath.Join("..", "..", "config", "crd", "bases")},
-	}
-	configuration, err := testEnvironment.Start()
-	if err != nil {
-		t.Fatalf("Start() error = %v", err)
-	}
-	t.Cleanup(func() {
-		if err := testEnvironment.Stop(); err != nil {
-			t.Errorf("Stop() error = %v", err)
-		}
-	})
-	apiClient, err := client.New(configuration, client.Options{Scheme: scheme})
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	policy := validAgentPolicy()
+	apiClient := testClient
+	ns := newNamespace(t)
+	policy := validAgentPolicy(ns)
 	policy.Spec.KubernetesRead.Resources = []sprooziv1alpha1.KubernetesReadResource{"secrets"}
-	if err := apiClient.Create(context.Background(), policy); err == nil {
+	if err := apiClient.Create(t.Context(), policy); err == nil {
 		t.Fatal("Create() error = nil, want API server validation error for Secrets")
 	}
 }
@@ -122,30 +81,10 @@ func TestAgentPolicyRejectsUnsafeKubernetesReadResource(t *testing.T) {
 func TestAgentPolicyDefaultsDurations(t *testing.T) {
 	t.Parallel()
 
-	scheme := runtime.NewScheme()
-	if err := sprooziv1alpha1.AddToScheme(scheme); err != nil {
-		t.Fatalf("AddToScheme() error = %v", err)
-	}
+	apiClient := testClient
+	ns := newNamespace(t)
 
-	testEnvironment := &envtest.Environment{
-		CRDDirectoryPaths: []string{filepath.Join("..", "..", "config", "crd", "bases")},
-	}
-	configuration, err := testEnvironment.Start()
-	if err != nil {
-		t.Fatalf("Start() error = %v", err)
-	}
-	t.Cleanup(func() {
-		if err := testEnvironment.Stop(); err != nil {
-			t.Errorf("Stop() error = %v", err)
-		}
-	})
-
-	apiClient, err := client.New(configuration, client.Options{Scheme: scheme})
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-
-	policy := validAgentPolicy()
+	policy := validAgentPolicy(ns)
 	policyObject, err := runtime.DefaultUnstructuredConverter.ToUnstructured(policy)
 	if err != nil {
 		t.Fatalf("ToUnstructured() error = %v", err)
@@ -155,12 +94,12 @@ func TestAgentPolicyDefaultsDurations(t *testing.T) {
 	unstructuredPolicy := &unstructured.Unstructured{Object: policyObject}
 	unstructuredPolicy.SetAPIVersion(sprooziv1alpha1.GroupVersion.String())
 	unstructuredPolicy.SetKind("AgentPolicy")
-	if err := apiClient.Create(context.Background(), unstructuredPolicy); err != nil {
+	if err := apiClient.Create(t.Context(), unstructuredPolicy); err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
 
 	var got sprooziv1alpha1.AgentPolicy
-	if err := apiClient.Get(context.Background(), client.ObjectKeyFromObject(policy), &got); err != nil {
+	if err := apiClient.Get(t.Context(), client.ObjectKeyFromObject(policy), &got); err != nil {
 		t.Fatalf("Get() error = %v", err)
 	}
 
@@ -175,39 +114,19 @@ func TestAgentPolicyDefaultsDurations(t *testing.T) {
 func TestAgentPolicyRejectsExecutionDurationAboveOneHour(t *testing.T) {
 	t.Parallel()
 
-	scheme := runtime.NewScheme()
-	if err := sprooziv1alpha1.AddToScheme(scheme); err != nil {
-		t.Fatalf("AddToScheme() error = %v", err)
-	}
+	apiClient := testClient
+	ns := newNamespace(t)
 
-	testEnvironment := &envtest.Environment{
-		CRDDirectoryPaths: []string{filepath.Join("..", "..", "config", "crd", "bases")},
-	}
-	configuration, err := testEnvironment.Start()
-	if err != nil {
-		t.Fatalf("Start() error = %v", err)
-	}
-	t.Cleanup(func() {
-		if err := testEnvironment.Stop(); err != nil {
-			t.Errorf("Stop() error = %v", err)
-		}
-	})
-
-	apiClient, err := client.New(configuration, client.Options{Scheme: scheme})
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-
-	policy := validAgentPolicy()
+	policy := validAgentPolicy(ns)
 	policy.Spec.MaxExecutionDuration = metav1.Duration{Duration: time.Hour + time.Minute}
-	if err := apiClient.Create(context.Background(), policy); err == nil {
+	if err := apiClient.Create(t.Context(), policy); err == nil {
 		t.Fatal("Create() error = nil, want API server validation error")
 	}
 }
 
-func validAgentPolicy() *sprooziv1alpha1.AgentPolicy {
+func validAgentPolicy(ns string) *sprooziv1alpha1.AgentPolicy {
 	return &sprooziv1alpha1.AgentPolicy{
-		ObjectMeta: metav1.ObjectMeta{Name: testPolicyName, Namespace: testNamespace},
+		ObjectMeta: metav1.ObjectMeta{Name: testPolicyName, Namespace: ns},
 		Spec: sprooziv1alpha1.AgentPolicySpec{
 			AllowedCapabilities: []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityKubernetesRead},
 			KubernetesRead: sprooziv1alpha1.KubernetesReadScope{
@@ -242,26 +161,8 @@ func validAgentPolicy() *sprooziv1alpha1.AgentPolicy {
 
 func TestAgentPolicyAllowsTokenOnlyBudgetButRejectsInvalidLimits(t *testing.T) {
 	t.Parallel()
-	scheme := runtime.NewScheme()
-	if err := sprooziv1alpha1.AddToScheme(scheme); err != nil {
-		t.Fatal(err)
-	}
-	environment := &envtest.Environment{
-		CRDDirectoryPaths: []string{filepath.Join("..", "..", "config", "crd", "bases")},
-	}
-	configuration, err := environment.Start()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := environment.Stop(); err != nil {
-			t.Error(err)
-		}
-	})
-	apiClient, err := client.New(configuration, client.Options{Scheme: scheme})
-	if err != nil {
-		t.Fatal(err)
-	}
+	apiClient := testClient
+	ns := newNamespace(t)
 	for _, tc := range []struct {
 		name         string
 		tokens, cost int64
@@ -272,31 +173,31 @@ func TestAgentPolicyAllowsTokenOnlyBudgetButRejectsInvalidLimits(t *testing.T) {
 		{"zero-tokens", 0, 0, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			policy := validAgentPolicy()
+			policy := validAgentPolicy(ns)
 			policy.Name = tc.name
 			policy.Spec.Budgets[sprooziv1alpha1.CapabilityModelInference] = sprooziv1alpha1.EndpointBudget{MaxUnits: tc.tokens,
 				MaxCostMicros: tc.cost}
-			err := apiClient.Create(context.Background(), policy)
+			err := apiClient.Create(t.Context(), policy)
 			if (err == nil) != tc.valid {
 				t.Fatalf("Create() error = %v, valid = %t", err, tc.valid)
 			}
 		})
 	}
 	t.Run("omitted-budget", func(t *testing.T) {
-		policy := validAgentPolicy()
+		policy := validAgentPolicy(ns)
 		policy.Name = "omitted-budget"
 		policy.Spec.Budgets = nil
-		if err := apiClient.Create(context.Background(), policy); err != nil {
+		if err := apiClient.Create(t.Context(), policy); err != nil {
 			t.Fatal(err)
 		}
 	})
 	t.Run("unknown-budget-capability", func(t *testing.T) {
-		policy := validAgentPolicy()
+		policy := validAgentPolicy(ns)
 		policy.Name = "unknown-budget"
 		policy.Spec.Budgets = map[sprooziv1alpha1.CapabilityKind]sprooziv1alpha1.EndpointBudget{
 			"model.inferance": {MaxUnits: 100},
 		}
-		if err := apiClient.Create(context.Background(), policy); err == nil {
+		if err := apiClient.Create(t.Context(), policy); err == nil {
 			t.Fatal("accepted misspelled budget capability")
 		}
 	})

@@ -18,7 +18,6 @@ package envtest
 
 // Shared constants used across envtest test files to satisfy goconst lint rules.
 const (
-	testNamespace           = "default"
 	testRuntimeName         = "codex"
 	testPolicyName          = "sre"
 	testEgressModule        = "go-modules"

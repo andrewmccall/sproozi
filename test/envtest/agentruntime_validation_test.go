@@ -1,14 +1,12 @@
 package envtest
 
 import (
-	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"math/big"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -18,9 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 )
@@ -28,55 +24,35 @@ import (
 func TestAgentRuntimeRejectsRootExecution(t *testing.T) {
 	t.Parallel()
 
-	scheme := runtime.NewScheme()
-	if err := sprooziv1alpha1.AddToScheme(scheme); err != nil {
-		t.Fatalf("AddToScheme() error = %v", err)
-	}
+	apiClient := testClient
+	ns := newNamespace(t)
 
-	testEnvironment := &envtest.Environment{
-		CRDDirectoryPaths: []string{filepath.Join("..", "..", "config", "crd", "bases")},
-	}
-	configuration, err := testEnvironment.Start()
-	if err != nil {
-		t.Fatalf("Start() error = %v", err)
-	}
-	t.Cleanup(func() {
-		if err := testEnvironment.Stop(); err != nil {
-			t.Errorf("Stop() error = %v", err)
-		}
-	})
-
-	apiClient, err := client.New(configuration, client.Options{Scheme: scheme})
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-
-	valid := validAgentRuntime()
+	valid := validAgentRuntime(ns)
 	valid.Name = "codex-mcp-runtime"
 	valid.Spec.ClientConfig.Harness = "codex"
-	if err := apiClient.Create(context.Background(), valid); err != nil {
+	if err := apiClient.Create(t.Context(), valid); err != nil {
 		t.Fatal(err)
 	}
 	var stored sprooziv1alpha1.AgentRuntime
-	if err := apiClient.Get(context.Background(), client.ObjectKeyFromObject(valid), &stored); err != nil {
+	if err := apiClient.Get(t.Context(), client.ObjectKeyFromObject(valid), &stored); err != nil {
 		t.Fatal(err)
 	}
 	if stored.Spec.ClientConfig.Harness != "codex" {
 		t.Fatal("client harness selection was pruned")
 	}
 
-	rt := validAgentRuntime()
+	rt := validAgentRuntime(ns)
 	*rt.Spec.PodTemplate.Spec.SecurityContext.RunAsNonRoot = false
-	if err := apiClient.Create(context.Background(), rt); err == nil {
+	if err := apiClient.Create(t.Context(), rt); err == nil {
 		t.Fatal("Create() error = nil, want API server validation error")
 	}
 }
 
-func validAgentRuntime() *sprooziv1alpha1.AgentRuntime {
+func validAgentRuntime(ns string) *sprooziv1alpha1.AgentRuntime {
 	allowPrivEsc, readOnly, nonRoot := false, true, true
 	automount := false
 	return &sprooziv1alpha1.AgentRuntime{
-		ObjectMeta: metav1.ObjectMeta{Name: testRuntimeName, Namespace: testNamespace},
+		ObjectMeta: metav1.ObjectMeta{Name: testRuntimeName, Namespace: ns},
 		Spec: sprooziv1alpha1.AgentRuntimeSpec{
 			ClientConfig: sprooziv1alpha1.RuntimeClientConfig{
 				TrustBundleConfigMap: sprooziv1alpha1.RuntimeConfigMapKeyReference{
