@@ -61,7 +61,8 @@ spec:
           type: RuntimeDefault
       containers:
       - name: hermes
-        image: docker.io/nousresearch/hermes-agent
+        # Hermes 0.22.2, pinned by digest like the acceptance tests.
+        image: docker.io/nousresearch/hermes-agent@sha256:36099926da316742423544e055d4734777105ffe6341873af5459b957d0c2919
         # Native s6 owns the gateway; a second foreground gateway conflicts on PVC restart.
         args: [sleep, infinity]
         env:

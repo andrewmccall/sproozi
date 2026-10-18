@@ -53,12 +53,7 @@ kind create cluster --name "$cluster" --config "$work/kind.yaml" \
   --image kindest/node:v1.33.1@sha256:050072256b9a903bd914c0b2866828150cb229cea0efe5892e2b644d5dd3b34f \
   --kubeconfig "$work/kubeconfig"
 
-curl --fail --location --silent --show-error \
-  https://raw.githubusercontent.com/projectcalico/calico/v3.30.4/manifests/calico.yaml \
-  -o "$work/calico-original.yaml"
-printf '%s  %s\n' \
-  1e0f605a1f0a337a198a6ed8512c4ade67a2d8ab239f0bb67062a663fed84e6d \
-  "$work/calico-original.yaml" | shasum -a 256 -c -
+bash hack/verify/fetch-calico.sh "$work/calico-original.yaml"
 python3 - "$work/calico-original.yaml" "$work/calico.yaml" <<'PY'
 import sys
 from pathlib import Path
@@ -91,8 +86,9 @@ actual forbidden network probes establish enforcement for this fixture.
 
 ## Build and resolve the images
 
-The client Dockerfiles install the default Codex and Claude Code packages without
-version selectors. The first build pulls its public base. Both client builds use
+The client Dockerfiles install the Codex and Claude Code releases pinned in
+[`hack/clients`](../../clients/README.md), with install scripts disabled. The
+first build pulls its public base. Both client builds use
 `--no-cache` to run the installers again; the second uses the local image from
 the first build. The native image adds the supervisor, checkpoint helper and
 network command.
