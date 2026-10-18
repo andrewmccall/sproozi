@@ -171,7 +171,7 @@ func validateExistingSandbox(existing, wanted *corev1.Pod) error {
 		(existing.Spec.ShareProcessNamespace != nil && *existing.Spec.ShareProcessNamespace) ||
 		existing.Spec.RestartPolicy != wanted.Spec.RestartPolicy ||
 		!reflect.DeepEqual(existing.Spec.SecurityContext, wanted.Spec.SecurityContext) ||
-		existing.Spec.RuntimeClassName != wanted.Spec.RuntimeClassName ||
+		!reflect.DeepEqual(existing.Spec.RuntimeClassName, wanted.Spec.RuntimeClassName) ||
 		!apiequality.Semantic.DeepEqual(existing.Spec.Containers, wanted.Spec.Containers) ||
 		!reflect.DeepEqual(existing.Spec.InitContainers, wanted.Spec.InitContainers) ||
 		!reflect.DeepEqual(existing.Spec.EphemeralContainers, wanted.Spec.EphemeralContainers) ||

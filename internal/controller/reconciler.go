@@ -59,11 +59,15 @@ const (
 // +kubebuilder:rbac:groups=sproozi.com,resources=agenttemplates,verbs=get;list;watch
 // +kubebuilder:rbac:groups=sproozi.com,resources=agentpolicies,verbs=get;list;watch
 // +kubebuilder:rbac:groups=sproozi.com,resources=agentruntimes,verbs=get;list;watch
-// +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create;delete
-// +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;delete
-// +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;create;delete
-// +kubebuilder:rbac:groups="",resources=pods/log,verbs=get
-// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;delete
+// +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch
+// +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get
+
+// Sandbox writes (Pods, ServiceAccounts, NetworkPolicies and contract
+// ConfigMaps) happen only in sproozi-agents. The Role in config/agent-rbac
+// grants them there; markers cannot express it because the default
+// kustomization moves every generated object into sproozi-system.
 
 // AgentRunReconciler reconciles AgentRun objects.
 type AgentRunReconciler struct {

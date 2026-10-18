@@ -4,8 +4,11 @@
 // hooks, credentials and linked worktree metadata are not transferred.
 //
 // maxBytes bounds the encoded archive, selected file bytes and inspected Git object
-// sizes. Git unpacks before object-size inspection: callers handling untrusted
-// archives must also provide quota-backed staging storage and process limits.
+// sizes. Git fetches the bundle before object-size inspection, so it stores at
+// most the bundle's compressed objects before Restore rejects an oversized
+// archive and before any checkout. That inspection does not bound Git's time or
+// memory: callers handling untrusted archives must pass a context with a
+// deadline, and should run under process limits where the platform offers them.
 package workspace
 
 import (
@@ -52,8 +55,9 @@ type manifest struct {
 	Files   []entry `json:"files"`
 }
 type gitRunner struct {
-	home  string
-	limit int64
+	home     string
+	limit    int64
+	excludes string
 }
 type boundedBuffer struct {
 	bytes.Buffer
@@ -69,6 +73,9 @@ func (b *boundedBuffer) Write(p []byte) (int, error) {
 func (g gitRunner) run(ctx context.Context, root string, args ...string) ([]byte, error) {
 	base := make([]string, 0, 20+len(args))
 	base = append(base, "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "core.attributesFile=/dev/null", "-c", "core.autocrlf=false", "-c", "core.fileMode=true", "-c", "core.ignoreCase=false", "-c", "protocol.allow=never", "-c", "protocol.file.allow=always", "-c", "fetch.fsckObjects=true", "-c", "transfer.fsckObjects=true")
+	if g.excludes != "" {
+		base = append(base, "-c", "core.excludesFile="+g.excludes)
+	}
 	cmd := exec.CommandContext(ctx, "git", append(base, args...)...)
 	cmd.Dir = root
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + g.home, "XDG_CONFIG_HOME=" + g.home, "LC_ALL=C", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_ATTR_NOSYSTEM=1", "GIT_TERMINAL_PROMPT=0", "GIT_NO_REPLACE_OBJECTS=1", "GIT_OPTIONAL_LOCKS=0", "GIT_AUTHOR_NAME=Sproozi", "GIT_AUTHOR_EMAIL=checkpoint@invalid", "GIT_COMMITTER_NAME=Sproozi", "GIT_COMMITTER_EMAIL=checkpoint@invalid"}
@@ -207,7 +214,13 @@ func sourceEntry(root, relative string) (os.FileInfo, error) {
 // selectedIgnored names individual ignored regular files relative to root.
 // Unborn, conflicted, shallow/partial, sparse/split-index, submodule, symlink and
 // linked-worktree repositories are unsupported in this first version.
+// Capture applies .gitignore files and .git/info/exclude but no core.excludesFile;
+// use CaptureLocal for a workspace on the user's own machine.
 func Capture(ctx context.Context, root string, selectedIgnored []string, maxBytes int64) ([]byte, error) {
+	return capture(ctx, root, selectedIgnored, "", maxBytes)
+}
+
+func capture(ctx context.Context, root string, selectedIgnored []string, excludes string, maxBytes int64) ([]byte, error) {
 	if err := ValidateIgnoredPaths(selectedIgnored); err != nil {
 		return nil, err
 	}
@@ -227,7 +240,7 @@ func Capture(ctx context.Context, root string, selectedIgnored []string, maxByte
 		return nil, err
 	}
 	defer func() { _ = os.RemoveAll(scratch) }()
-	g := gitRunner{home: scratch, limit: maxBytes}
+	g := gitRunner{home: scratch, limit: maxBytes, excludes: excludes}
 	// Read only this specific config value; never execute commands with source config.
 	format := sha1Format
 	if _, err = sourceEntry(root, ".git/config"); err != nil {

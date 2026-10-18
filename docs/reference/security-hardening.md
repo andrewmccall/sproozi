@@ -48,6 +48,18 @@ rules](agentruntime.md#container-validation-rules) list what admission rejects.
 Runtime authors are trusted: keep provider credentials out of public ConfigMaps
 and literal environment values.
 
+## Treat runtime and policy authors as administrators
+
+`AgentRuntime` and `AgentPolicy` are namespaced, but their authority is not.
+A runtime's Pod template runs in the shared `sproozi-agents` namespace, and a
+policy can grant gateway reads in any namespace it names. Anyone who can write
+either object in any namespace is therefore a cluster administrator for
+Sproozi. Grant the scaffolded `sproozi-agentruntime-editor-role`,
+`sproozi-agentruntime-admin-role`, `sproozi-agentpolicy-editor-role` and
+`sproozi-agentpolicy-admin-role` ClusterRoles only to administrators, including
+through namespaced RoleBindings. Users who only start work need `AgentRun`
+access and read access to templates.
+
 ## Restrict remote MCP access
 
 Treat the gateway's MCP registry and provider credential mounts as
@@ -164,9 +176,13 @@ stays bounded by recent event volume.
 
 ## Restrict trusted services
 
-The installed controller-manager can manage Pods, identities, NetworkPolicies
-and RBAC objects. Its binding does not grant Secret reads; the optional metrics
-overlay adds TokenReviews and SubjectAccessReviews. Restrict exec/debug access
+The installed controller-manager reads Pods, ServiceAccounts, NetworkPolicies
+and ConfigMaps across the cluster. It creates and deletes Pods, ServiceAccounts,
+NetworkPolicies and ConfigMaps only in `sproozi-agents`, through the Role in
+`config/agent-rbac`. It cannot read Secrets through the API, but a Pod it
+creates can mount any Secret in `sproozi-agents`, so keep Secrets out of that
+namespace. The optional metrics overlay adds TokenReviews and
+SubjectAccessReviews. Restrict exec/debug access
 and reuse of trusted service accounts. The gateway holds provider credentials
 and may update its rotating ChatGPT session Secret. ChatGPT refresh requires one active gateway process,
 even though budget and replay state are shared. See

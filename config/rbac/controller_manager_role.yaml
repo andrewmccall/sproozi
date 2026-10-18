@@ -1,3 +1,7 @@
+# Cluster-wide reads only. The controller watches sandbox Pods and caches
+# ServiceAccounts and NetworkPolicies, and reads a managed run's registry
+# ConfigMap in the run namespace. It writes sandbox objects only in
+# sproozi-agents, through the Role in config/agent-rbac.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -12,8 +16,6 @@ rules:
   - pods
   - serviceaccounts
   verbs:
-  - create
-  - delete
   - get
   - list
   - watch
@@ -22,36 +24,12 @@ rules:
   resources:
   - configmaps
   verbs:
-  - create
-  - delete
-  - get
-  - list
-  - watch
-- apiGroups:
-  - ""
-  resources:
-  - pods/log
-  verbs:
   - get
 - apiGroups:
   - networking.k8s.io
   resources:
   - networkpolicies
   verbs:
-  - create
-  - delete
-  - get
-  - list
-  - update
-  - watch
-- apiGroups:
-  - rbac.authorization.k8s.io
-  resources:
-  - rolebindings
-  - roles
-  verbs:
-  - create
-  - delete
   - get
   - list
   - watch

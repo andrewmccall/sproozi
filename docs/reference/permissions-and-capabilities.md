@@ -47,7 +47,7 @@ access is not a supported path.
 
 | ServiceAccount | Main permissions |
 | --- | --- |
-| `controller-manager` | manage Run status, Pods, ServiceAccounts, NetworkPolicies and RBAC objects; read Pod logs and runtime/policy/template objects; write contract ConfigMaps in `sproozi-agents`. The optional metrics overlay adds TokenReviews and SubjectAccessReviews |
+| `controller-manager` | cluster-wide: manage Run status; read runtime/policy/template objects; get, list and watch Pods, ServiceAccounts and NetworkPolicies; get ConfigMaps. In `sproozi-agents` only (`config/agent-rbac`): create and delete Pods, ServiceAccounts and contract ConfigMaps, and create, update and delete NetworkPolicies. The optional metrics overlay adds TokenReviews and SubjectAccessReviews |
 | `shared-gateway` | `tokenreviews`, read ServiceAccounts and run/policy/template objects, bounded Kubernetes reads, namespaced budget state, mounted provider credentials, and get/update of the rotating ChatGPT session Secret |
 | `webhook` | create `AgentRun` and read policy/template objects in `sproozi-system`, with no Secret access there; get Secrets only in `sproozi-webhooks`; and get/create/list/delete replay ConfigMaps in `sproozi-webhook-state` |
 
