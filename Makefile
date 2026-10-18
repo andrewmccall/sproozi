@@ -324,7 +324,9 @@ $(ENVTEST): | $(LOCALBIN)
 .PHONY: golangci-lint
 golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.
 $(GOLANGCI_LINT): | $(LOCALBIN)
-	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/v2/cmd/golangci-lint,$(GOLANGCI_LINT_VERSION))
+	@[ -f "$(GOLANGCI_LINT)-$(GOLANGCI_LINT_VERSION)" ] || \
+		GOLANGCI_LINT_VERSION='$(GOLANGCI_LINT_VERSION)' bash hack/verify/install-golangci-lint.sh "$(GOLANGCI_LINT)-$(GOLANGCI_LINT_VERSION)"
+	@ln -sf "$$(realpath "$(GOLANGCI_LINT)-$(GOLANGCI_LINT_VERSION)")" "$(GOLANGCI_LINT)"
 	@test -f .custom-gcl.yml && { \
 		echo "Building custom golangci-lint with plugins..." && \
 		$(GOLANGCI_LINT) custom --destination $(LOCALBIN) --name golangci-lint-custom && \
