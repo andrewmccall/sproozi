@@ -34,7 +34,10 @@ archives and a source bundle with vendored Go modules. It verifies checksums,
 tests each archive on its native runner, builds and tests the Homebrew source
 formula on macOS and Linux, uploads a draft, downloads the assets
 again and compares their hashes before publishing. A public release cannot be
-overwritten. An interrupted draft can be retried.
+overwritten. To retry a failed release, run **Releases** manually and enter the
+existing tag in the `tag` field. This checks out that tag and repeats every
+release gate. Leave the field empty to test a snapshot without publishing.
+An interrupted draft can be retried.
 
 The public [Homebrew tap](https://github.com/andrewmccall/homebrew-tap) checks
 stable releases every hour. To update immediately, run its **Update Sproozi**

@@ -5,6 +5,12 @@ on:
   push:
     branches: [main]
   workflow_call:
+    inputs:
+      ref:
+        description: Source revision for release verification
+        required: false
+        type: string
+        default: ''
 
 concurrency:
   group: native-${{ github.workflow }}-${{ github.ref }}
@@ -22,6 +28,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           persist-credentials: false
+          ref: ${{ inputs.ref || github.ref }}
       - id: targets
         run: echo "matrix=$(python3 -c 'import json; print(json.dumps({"include":json.load(open("hack/release/targets.json"))}))')" >> "$GITHUB_OUTPUT"
   native:
@@ -34,6 +41,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           persist-credentials: false
+          ref: ${{ inputs.ref || github.ref }}
       - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417
         with:
           go-version-file: go.mod

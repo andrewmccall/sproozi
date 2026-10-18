@@ -5,12 +5,17 @@ on:
     tags: ['v*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to publish or retry; leave empty for a snapshot
+        required: false
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.tag || github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -22,11 +27,14 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           persist-credentials: false
+          ref: ${{ inputs.tag || github.ref }}
       - id: targets
         run: echo "matrix=$(python3 -c 'import json; print(json.dumps({"include":json.load(open("hack/release/targets.json"))}))')" >> "$GITHUB_OUTPUT"
   native:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.tag != ''
     uses: ./.github/workflows/platforms.yml
+    with:
+      ref: ${{ inputs.tag || github.ref }}
   package:
     runs-on: ubuntu-latest
     outputs:
@@ -36,6 +44,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+          ref: ${{ inputs.tag || github.ref }}
       - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417
         with:
           go-version-file: go.mod
@@ -44,7 +53,7 @@ jobs:
         uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de
         with:
           version: latest
-          args: release --clean --skip=publish ${{ startsWith(github.ref, 'refs/tags/v') && '' || '--snapshot' }}
+          args: ${{ (startsWith(github.ref, 'refs/tags/v') || inputs.tag != '') && 'release --clean --skip=publish' || 'release --clean --skip=publish --snapshot' }}
       - id: version
         name: Bundle source and verify the complete inventory
         run: |
@@ -72,6 +81,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           persist-credentials: false
+          ref: ${{ inputs.tag || github.ref }}
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: release-assets
@@ -95,6 +105,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           persist-credentials: false
+          ref: ${{ inputs.tag || github.ref }}
       - name: Read the tap's source formula
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
@@ -115,7 +126,7 @@ jobs:
       - name: Build and test the source formula offline
         run: python3 hack/release/brew.py
   publish:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.tag != ''
     needs: [package, smoke, native, homebrew]
     runs-on: ubuntu-latest
     permissions:
@@ -124,6 +135,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           persist-credentials: false
+          ref: ${{ inputs.tag || github.ref }}
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: release-assets
@@ -131,5 +143,5 @@ jobs:
       - name: Publish verified CLI release
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: python3 hack/release/publish.py --tag "$RELEASE_TAG" --directory dist
