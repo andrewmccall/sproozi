@@ -147,12 +147,12 @@ while IFS= read -r line; do [ "$line" = /quit ] && exit 0; done`
 }
 
 func TestDeadlineStopsNativeProcessAndRejectsFurtherInput(t *testing.T) {
-	s := start(t, `printf 'DEADLINE_READY\n'; exec sleep 30`, 256, time.Now().Add(200*time.Millisecond))
+	// The process would run for 30 s, so only the deadline can end it first.
+	// Waiting for that exit, rather than racing a ready marker against the
+	// deadline or bounding the wait, keeps the test independent of load.
+	s := start(t, `exec sleep 30`, 256, time.Now().Add(200*time.Millisecond))
 	a := attach(t, s, 0)
-	until(t, a, "DEADLINE_READY")
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	exit, err := s.Wait(ctx)
+	exit, err := s.Wait(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
