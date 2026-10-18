@@ -20,7 +20,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/andrewmccall/sproozi/internal/privatefs"
 	"io"
 	"os"
 	"os/exec"
@@ -29,6 +28,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/andrewmccall/sproozi/internal/privatefs"
 )
 
 const version = 1

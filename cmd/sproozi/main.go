@@ -59,7 +59,7 @@ func attach(ctx context.Context, socket, id string) error {
 		defer func() { _ = term.Restore(fd, state) }()
 		var last home.TerminalSize
 		update := func() {
-			columns, rows, err := term.GetSize(fd)
+			columns, rows, err := terminalSize(fd)
 			if err == nil && columns > 0 && rows > 0 && columns <= 65535 && rows <= 65535 {
 				size := home.TerminalSize{Rows: uint16(rows), Columns: uint16(columns)}
 				if size == last {

@@ -416,7 +416,7 @@ func TestCaptureRejectsWindowsPathAliasesInGitTrees(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			root := newFixture(t)
 			blob := fixtureGit(t, root, "rev-parse", "HEAD:note.txt")
-			fixtureGit(t, root, "update-index", "--add", "--cacheinfo", "100644,"+blob+","+name)
+			fixtureGit(t, root, "-c", "core.protectNTFS=false", "update-index", "--add", "--cacheinfo", "100644,"+blob+","+name)
 			if _, err := Capture(t.Context(), root, nil, testLimit); err == nil {
 				t.Fatalf("accepted Windows path alias %q", name)
 			}

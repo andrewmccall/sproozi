@@ -7,12 +7,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/andrewmccall/sproozi/internal/privatefs"
 	"io"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/andrewmccall/sproozi/internal/privatefs"
 )
 
 // Restore validates the complete archive and reconstructs Git state in a private

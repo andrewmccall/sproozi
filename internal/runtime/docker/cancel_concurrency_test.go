@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/testutil"
+
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/session"
 )
@@ -13,7 +15,7 @@ import (
 func TestAbortIndependentAllocationWhileAnotherStopIsHeld(t *testing.T) {
 	f := newFakeDocker()
 	a := &fakeAuthority{engine: f}
-	p := openFixture(t, t.TempDir(), f, a)
+	p := openFixture(t, testutil.PrivateDir(t), f, a)
 	data := fixtureArtifact(t)
 	first, second := fixtureLaunch(t, data), fixtureLaunch(t, data)
 	var firstInc, secondInc session.Incarnation

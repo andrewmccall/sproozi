@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 )
@@ -161,7 +162,7 @@ func inspectCodexState(state CodexState, maxBytes int64) (string, string, error)
 				Version string `json:"cli_version"`
 				Cwd     string `json:"cwd"`
 			}
-			if err := json.Unmarshal(event.Payload, &value); err != nil || meta || value.ID != state.ThreadID || value.Version == "" || !filepath.IsAbs(value.Cwd) {
+			if err := json.Unmarshal(event.Payload, &value); err != nil || meta || value.ID != state.ThreadID || value.Version == "" || !path.IsAbs(value.Cwd) {
 				return "", "", fmt.Errorf("incompatible native session metadata")
 			}
 			workspace, meta = value.Cwd, true

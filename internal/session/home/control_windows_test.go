@@ -239,7 +239,10 @@ func TestWindowsControlRejectsOtherUserBeforeRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err = cmd.Start(); err != nil {
-		t.Skipf("runner cannot start a process as the fixture account: %v", err)
+		if errors.Is(err, windows.ERROR_PRIVILEGE_NOT_HELD) {
+			t.Skipf("runner lacks CreateProcessAsUser privilege: %v", err)
+		}
+		t.Fatalf("start second-user fixture: %v", err)
 	}
 	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
 	reader := bufio.NewReader(output)

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/andrewmccall/sproozi/internal/testutil"
+
 	"github.com/andrewmccall/sproozi/internal/session"
 )
 
@@ -65,7 +67,7 @@ func assertAnsweredFromRecord(t *testing.T, p *Placement, f *fakeDocker, l sessi
 }
 
 func TestStopRemovesVisitResourcesAndReplaysRetainedResult(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.PrivateDir(t)
 	p, f, a, l, i := activeFixture(t, dir)
 	stopped, err := p.Stop(t.Context(), l, i)
 	if err != nil || stopped.Receipt == nil || stopped.CheckpointDigest == "" {
@@ -85,7 +87,7 @@ func TestStopRemovesVisitResourcesAndReplaysRetainedResult(t *testing.T) {
 
 func TestAbortRemovesVisitResourcesAndReplaysRetainedResult(t *testing.T) {
 	t.Parallel()
-	p, f, a, l, i := activeFixture(t, t.TempDir())
+	p, f, a, l, i := activeFixture(t, testutil.PrivateDir(t))
 	o, err := p.Abort(t.Context(), l, i)
 	if err != nil || o.Stopped == nil || o.Stopped.Receipt == nil {
 		t.Fatalf("abort: %+v %v", o, err)
@@ -103,7 +105,7 @@ func TestAbortRemovesVisitResourcesAndReplaysRetainedResult(t *testing.T) {
 func TestMissingContainerWithoutRemovalRecordIsNotStopped(t *testing.T) {
 	t.Parallel()
 	t.Run("active", func(t *testing.T) {
-		p, f, a, l, i := activeFixture(t, t.TempDir())
+		p, f, a, l, i := activeFixture(t, testutil.PrivateDir(t))
 		delete(f.containers, i.ResourceUID)
 		if o, err := p.Inspect(t.Context(), l); err == nil || o.State == session.PlacementStopped {
 			t.Fatalf("missing writer inspected as stopped: %+v %v", o, err)
@@ -117,7 +119,7 @@ func TestMissingContainerWithoutRemovalRecordIsNotStopped(t *testing.T) {
 		}
 	})
 	t.Run("unknown-usage", func(t *testing.T) {
-		p, f, a, l, i := activeFixture(t, t.TempDir())
+		p, f, a, l, i := activeFixture(t, testutil.PrivateDir(t))
 		a.sealFail = true
 		o, err := p.Abort(t.Context(), l, i)
 		if err != nil || o.Stopped == nil || o.Stopped.Receipt != nil {
@@ -141,7 +143,7 @@ func TestMissingContainerWithoutRemovalRecordIsNotStopped(t *testing.T) {
 
 func TestRemovalConvergesAfterEngineFailure(t *testing.T) {
 	t.Run("stop", func(t *testing.T) {
-		dir := t.TempDir()
+		dir := testutil.PrivateDir(t)
 		p, f, a, l, i := activeFixture(t, dir)
 		f.failRemove = true
 		stopped, err := p.Stop(t.Context(), l, i)
@@ -169,7 +171,7 @@ func TestRemovalConvergesAfterEngineFailure(t *testing.T) {
 		assertAnsweredFromRecord(t, p, f, l, i, stopped, true)
 	})
 	t.Run("partial", func(t *testing.T) {
-		p, f, _, l, i := activeFixture(t, t.TempDir())
+		p, f, _, l, i := activeFixture(t, testutil.PrivateDir(t))
 		original := p.engine.execute
 		p.engine.execute = func(ctx context.Context, input []byte, max int, args []string) ([]byte, error) {
 			if len(args) > 2 && args[0] == containerFixtureCommand && args[1] == "rm" && args[2] != i.ResourceUID {
@@ -198,7 +200,7 @@ func TestCancelledPreparationRemovesCreatedResources(t *testing.T) {
 	t.Parallel()
 	f := newFakeDocker()
 	a := &fakeAuthority{engine: f}
-	p := openFixture(t, t.TempDir(), f, a)
+	p := openFixture(t, testutil.PrivateDir(t), f, a)
 	original := p.engine.execute
 	p.engine.execute = func(ctx context.Context, input []byte, max int, args []string) ([]byte, error) {
 		if args[0] == createCommand && strings.HasSuffix(args[2], "-"+roleAgent) {

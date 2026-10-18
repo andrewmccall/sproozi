@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/andrewmccall/sproozi/internal/testutil"
+
 	"github.com/andrewmccall/sproozi/internal/privatefs"
 )
 
@@ -34,7 +36,7 @@ func captureCLIOutput(t *testing.T, args []string) string {
 }
 
 func TestInitCreatesPrivateDirectoryAndPreservesFiles(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "configuration")
+	path := filepath.Join(testutil.PrivateDir(t), "configuration")
 	output := captureCLIOutput(t, []string{actionInit, "--directory", path})
 	if strings.TrimSpace(output) != path {
 		t.Fatalf("unexpected directory: %q", output)
@@ -43,7 +45,7 @@ func TestInitCreatesPrivateDirectoryAndPreservesFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	file := filepath.Join(path, "config.json")
-	if err := os.WriteFile(file, []byte("keep this"), 0600); err != nil {
+	if err := testutil.WriteFile(file, []byte("keep this"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	captureCLIOutput(t, []string{actionInit, "--directory", path})

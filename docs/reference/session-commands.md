@@ -71,9 +71,8 @@ other flag is rejected before configuration is read or a request is sent.
 | Command | Flags |
 | --- | --- |
 | `init` | `--directory` |
-| `version` | |
-| `run` | `--directory PATH` | Private configuration directory; defaults to the platform user configuration directory plus `sproozi`. |
-| `--config`, `--executor`, `--operation`, `--harness`, `--repository`, `--project`, `--task`, `--task-file`, `--workspace-from`, `--checkpoint-digest`, `--revision` |
+| `version` |  |
+| `run` | `--config`, `--executor`, `--operation`, `--harness`, `--repository`, `--project`, `--task`, `--task-file`, `--workspace-from`, `--checkpoint-digest`, `--revision` |
 | `sessions` | `--config`, `--socket`, `--executor`, `--project` |
 | `status` | `--config`, `--socket`, `--executor`, `--id` |
 | `pull` | `--config`, `--socket`, `--executor`, `--id`, `--operation`, `--from` |
@@ -88,6 +87,7 @@ other flag is rejected before configuration is read or a request is sent.
 
 | Flag | Meaning |
 | --- | --- |
+| `--directory PATH` | Private configuration directory; defaults to the platform user configuration directory plus `sproozi`. |
 | `--config FILE` | Private global configuration. `serve` requires it; other commands default to the platform path described below. |
 | `--socket PATH` | Private home socket, overriding the configured home. |
 | `--executor NAME` | Owner to address; `docker` selects home. See [Select the owner](#select-the-owner). |

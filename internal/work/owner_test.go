@@ -17,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/testutil"
+
 	"github.com/andrewmccall/sproozi/internal/budget"
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
 	"github.com/andrewmccall/sproozi/internal/harness"
@@ -146,7 +148,7 @@ func buildTemplate() error {
 	template.root = root
 	repo, home := filepath.Join(root, "repository"), filepath.Join(root, "home")
 	for _, dir := range []string{repo, home} {
-		if err = os.Mkdir(dir, 0700); err != nil {
+		if err = testutil.Mkdir(dir, 0700); err != nil {
 			return err
 		}
 	}
@@ -176,7 +178,7 @@ func fixture(t *testing.T) (Config, *fixturePlacement) {
 	if template.err != nil {
 		t.Fatalf("build fixture template: %v", template.err)
 	}
-	repo := filepath.Join(t.TempDir(), "repository")
+	repo := filepath.Join(testutil.PrivateDir(t), "repository")
 	if err := os.CopyFS(repo, os.DirFS(template.repo)); err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +190,7 @@ func fixture(t *testing.T) (Config, *fixturePlacement) {
 // no Git, so tests of configuration validation need no repository.
 func fixtureConfig(t *testing.T, repo string, p *fixturePlacement) Config {
 	t.Helper()
-	return Config{Directory: filepath.Join(t.TempDir(), "catalog"), Principal: "hermes", Harness: harness.NativeCodex, Placement: executorKubernetes, InstructionDigest: hash([]byte(testInstructions)), Allowances: map[string]session.Allowance{fixtureModel: {Units: session.Limit{Bounded: true, Value: 100}}}, MaxDuration: time.Minute, MaxCheckpointBytes: testLimit, Repositories: map[string]Repository{repositorySproozi: {Snapshot: repo}}, Backend: p}
+	return Config{Directory: filepath.Join(testutil.PrivateDir(t), "catalog"), Principal: "hermes", Harness: harness.NativeCodex, Placement: executorKubernetes, InstructionDigest: hash([]byte(testInstructions)), Allowances: map[string]session.Allowance{fixtureModel: {Units: session.Limit{Bounded: true, Value: 100}}}, MaxDuration: time.Minute, MaxCheckpointBytes: testLimit, Repositories: map[string]Repository{repositorySproozi: {Snapshot: repo}}, Backend: p}
 }
 func submit(t *testing.T, o *Owner) View {
 	t.Helper()

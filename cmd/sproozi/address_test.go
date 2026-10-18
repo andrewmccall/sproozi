@@ -5,11 +5,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
-	"net"
-	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/andrewmccall/sproozi/internal/testutil"
 
 	"github.com/andrewmccall/sproozi/internal/project"
 	"github.com/andrewmccall/sproozi/internal/session/home"
@@ -22,7 +23,7 @@ func TestLocalCommandsUseSharedSessionAddressing(t *testing.T) {
 		action string
 		flags  []string
 	}{
-		{home.ActionStart, []string{"--workspace", t.TempDir()}},
+		{home.ActionStart, []string{"--workspace", testutil.PrivateDir(t)}},
 		{home.ActionAttach, nil}, {home.ActionMove, []string{"--to", testExecutor}},
 	} {
 		args := append([]string{tc.action, id, testSocketFlag, "/unused/private/socket"}, tc.flags...)
@@ -46,11 +47,11 @@ func TestRemoteTargetsRejectUnsupportedControlsBeforeConfiguration(t *testing.T)
 }
 
 func TestLocalCommandsReadExplicitConfigurationWithSocketOverride(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.PrivateDir(t)
 	config := filepath.Join(dir, "config.json")
-	data := `{"directory":` + `"` + dir + `", "model":"fixture", "local":{"Name":"docker"},
+	data := `{"directory":` + strconv.Quote(dir) + `, "model":"fixture", "local":{"Name":"docker"},
  "allowances":{"model.inference":{"units":{"bounded":true,"value":10}}}, "maxDuration":"1h"}`
-	if err := os.WriteFile(config, []byte(data), 0600); err != nil {
+	if err := testutil.WriteFile(config, []byte(data), 0600); err != nil {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
@@ -70,20 +71,13 @@ func TestLocalCommandsReadExplicitConfigurationWithSocketOverride(t *testing.T) 
 }
 
 func TestSessionsWritesOneLabelledCatalogue(t *testing.T) {
-	dir, err := os.MkdirTemp("", "sproozi-catalogue-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-	socket := filepath.Join(dir, "control.sock")
-	l, err := net.Listen("unix", socket)
+	dir := testutil.PrivateDir(t)
+	socket := home.SocketPath(dir)
+	l, err := listenTestControl(socket)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = l.Close() }()
-	if err = os.Chmod(socket, 0600); err != nil {
-		t.Fatal(err)
-	}
 	id, execution := uuid.NewString(), uuid.NewString()
 	done := make(chan error, 1)
 	go func() {
@@ -129,11 +123,11 @@ func TestSessionsWritesOneLabelledCatalogue(t *testing.T) {
 }
 
 func TestProjectAndRevisionOptionsUseSharedAddressing(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.PrivateDir(t)
 	config := filepath.Join(dir, "config.json")
 	data := `{"directory":"` + dir + `", "model":"fixture", "local":{"Name":"docker"},
  "allowances":{"model.inference":{"units":{"bounded":true,"value":10}}}, "maxDuration":"1h"}`
-	if err := os.WriteFile(config, []byte(data), 0600); err != nil {
+	if err := testutil.WriteFile(config, []byte(data), 0600); err != nil {
 		t.Fatal(err)
 	}
 	source := uuid.NewString()
@@ -158,11 +152,11 @@ func TestProjectAndRevisionOptionsUseSharedAddressing(t *testing.T) {
 }
 
 func TestPlainPullRetryRepeatsTheSameOperation(t *testing.T) {
-	dir := t.TempDir()
+	dir := testutil.PrivateDir(t)
 	config := filepath.Join(dir, "config.json")
 	data := `{"directory":"` + dir + `", "model":"fixture", "local":{"Name":"docker"},
  "allowances":{"model.inference":{"units":{"bounded":true,"value":10}}}, "maxDuration":"1h"}`
-	if err := os.WriteFile(config, []byte(data), 0600); err != nil {
+	if err := testutil.WriteFile(config, []byte(data), 0600); err != nil {
 		t.Fatal(err)
 	}
 	id := uuid.NewString()

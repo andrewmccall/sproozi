@@ -93,6 +93,17 @@ func verifyControlServer(conn net.Conn, user *windows.SID) error {
 	if !ok {
 		return errors.New("home: control pipe handle unavailable")
 	}
+	// Check the pipe itself as well as the process token. A process ID can be
+	// reused before OpenProcess obtains its handle; the connected object's owner
+	// remains bound to this pipe instance.
+	descriptor, err := windows.GetSecurityInfo(windows.Handle(file.Fd()), windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION)
+	if err != nil {
+		return err
+	}
+	pipeOwner, _, err := descriptor.Owner()
+	if err != nil || pipeOwner == nil || !pipeOwner.Equals(user) {
+		return errors.New("home: control pipe belongs to another user")
+	}
 	var pid uint32
 	if err := windows.GetNamedPipeServerProcessId(windows.Handle(file.Fd()), &pid); err != nil {
 		return err

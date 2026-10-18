@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/testutil"
+
 	"github.com/andrewmccall/sproozi/internal/harness"
 
 	"github.com/andrewmccall/sproozi/internal/budget"
@@ -406,9 +408,9 @@ func fixtureArtifact(t *testing.T) []byte {
 
 func buildFixtureArtifact(t *testing.T) []byte {
 	t.Helper()
-	root := t.TempDir()
+	root := testutil.PrivateDir(t)
 	repo := filepath.Join(root, "repository")
-	if err := os.Mkdir(repo, 0700); err != nil {
+	if err := testutil.Mkdir(repo, 0700); err != nil {
 		t.Fatal(err)
 	}
 	git := func(args ...string) {
@@ -421,21 +423,21 @@ func buildFixtureArtifact(t *testing.T) []byte {
 		}
 	}
 	git("init")
-	if err := os.WriteFile(filepath.Join(repo, "fact.txt"), []byte("fixture fact\n"), 0600); err != nil {
+	if err := testutil.WriteFile(filepath.Join(repo, "fact.txt"), []byte("fixture fact\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	git("add", "fact.txt")
 	git("commit", "-m", "fixture")
 	home := filepath.Join(root, "codex")
 	dir := filepath.Join(home, "sessions", "2026", "10", "11")
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := testutil.MkdirAll(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	meta, _ := json.Marshal(map[string]any{typeField: "session_meta", "payload": map[string]any{"id": fixtureThread, "cli_version": "0.161.0", "cwd": repo}})
 	dev, _ := json.Marshal(map[string]any{typeField: "response_item", "payload": map[string]any{typeField: "message", "role": "developer", "content": []map[string]string{{typeField: "input_text", "text": fixtureInstructions}}}})
 	journal := string(meta) + "\n" + string(dev) + `\n`
 	journal = strings.TrimSuffix(journal, `\n`) + "\n" + `{"type":"event_msg","payload":{"type":"task_started","turn_id":"turn-one"}}` + "\n" + `{"type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-one"}}` + "\n"
-	if err := os.WriteFile(filepath.Join(dir, "rollout-2026-10-11T12-00-00-"+fixtureThread+".jsonl"), []byte(journal), 0600); err != nil {
+	if err := testutil.WriteFile(filepath.Join(dir, "rollout-2026-10-11T12-00-00-"+fixtureThread+".jsonl"), []byte(journal), 0600); err != nil {
 		t.Fatal(err)
 	}
 	data, _, err := checkpoint.CaptureStopped(context.Background(), harness.NativeCodex, home, repo, fixtureThread, nil, 1<<20)
@@ -472,7 +474,7 @@ func TestIgnoredSelectionBindsDockerVisitAndFixedCapture(t *testing.T) {
 	l.IncludeIgnored = []string{"needed.bin", "cache/chosen.bin"}
 	f := newFakeDocker()
 	f.capture = data
-	p := openFixture(t, t.TempDir(), f, &fakeAuthority{engine: f})
+	p := openFixture(t, testutil.PrivateDir(t), f, &fakeAuthority{engine: f})
 	i, err := p.Prepare(t.Context(), l, data)
 	if err != nil {
 		t.Fatal(err)
@@ -509,7 +511,7 @@ func TestPlacementDurablePrepareActivateStop(t *testing.T) {
 	f := newFakeDocker()
 	f.capture = data
 	a := &fakeAuthority{engine: f}
-	dir := t.TempDir()
+	dir := testutil.PrivateDir(t)
 	p := openFixture(t, dir, f, a)
 	inc, err := p.Prepare(context.Background(), l, data)
 	if err != nil {
@@ -572,7 +574,7 @@ func TestUnknownStopAndUsageNeverBecomeZero(t *testing.T) {
 	f := newFakeDocker()
 	f.capture = data
 	a := &fakeAuthority{engine: f}
-	p := openFixture(t, t.TempDir(), f, a)
+	p := openFixture(t, testutil.PrivateDir(t), f, a)
 	inc, err := p.Prepare(context.Background(), l, data)
 	if err != nil {
 		t.Fatal(err)
@@ -597,7 +599,7 @@ func TestIncarnationQuotaAndOwnerChecks(t *testing.T) {
 	l := fixtureLaunch(t, data)
 	f := newFakeDocker()
 	a := &fakeAuthority{engine: f}
-	dir := t.TempDir()
+	dir := testutil.PrivateDir(t)
 	p := openFixture(t, dir, f, a)
 	inc, err := p.Prepare(context.Background(), l, data)
 	if err != nil {
@@ -627,7 +629,7 @@ func TestInitialNativeGateRejectionCanAbortWithoutActivationOrCheckpoint(t *test
 	f := newFakeDocker()
 	f.rejectNativeActivation, f.failCapture = true, true
 	a := &fakeAuthority{engine: f}
-	p := openFixture(t, t.TempDir(), f, a)
+	p := openFixture(t, testutil.PrivateDir(t), f, a)
 	inc, err := p.Prepare(t.Context(), l, []byte("workspace-continuity"))
 	if err != nil {
 		t.Fatal(err)
@@ -666,7 +668,7 @@ func TestFirstLocalSessionBindsGeneratedNativeUUID(t *testing.T) {
 	f := newFakeDocker()
 	f.capture = data
 	a := &fakeAuthority{engine: f}
-	p := openFixture(t, t.TempDir(), f, a)
+	p := openFixture(t, testutil.PrivateDir(t), f, a)
 	inc, err := p.Prepare(context.Background(), l, []byte("workspace-continuity"))
 	if err != nil {
 		t.Fatal(err)
@@ -702,7 +704,7 @@ func TestCaptureFailureKeepsActualStopAndBlocksActivation(t *testing.T) {
 	f.capture = data
 	f.failCapture = true
 	a := &fakeAuthority{engine: f}
-	p := openFixture(t, t.TempDir(), f, a)
+	p := openFixture(t, testutil.PrivateDir(t), f, a)
 	inc, err := p.Prepare(context.Background(), l, data)
 	if err != nil {
 		t.Fatal(err)
@@ -733,7 +735,7 @@ func TestNativeAcknowledgementIsNotAWriterFence(t *testing.T) {
 	f := newFakeDocker()
 	f.capture = data
 	a := &fakeAuthority{engine: f}
-	p := openFixture(t, t.TempDir(), f, a)
+	p := openFixture(t, testutil.PrivateDir(t), f, a)
 	inc, err := p.Prepare(context.Background(), l, data)
 	if err != nil {
 		t.Fatal(err)
@@ -760,7 +762,7 @@ func TestPreparedNativeLaunchCarriesTaskAndIndependentRolloutLimit(t *testing.T)
 	t.Parallel()
 	data := fixtureArtifact(t)
 	engine := newFakeDocker()
-	p := openFixture(t, t.TempDir(), engine, &fakeAuthority{engine: engine})
+	p := openFixture(t, testutil.PrivateDir(t), engine, &fakeAuthority{engine: engine})
 	launch := fixtureLaunch(t, data)
 	launch.Task = "Inspect the workspace and report the result."
 	if _, err := p.Prepare(context.Background(), launch, data); err != nil {

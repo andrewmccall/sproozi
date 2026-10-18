@@ -20,6 +20,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/testutil"
+
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	gatewaydocker "github.com/andrewmccall/sproozi/internal/gateway/docker"
 	"github.com/andrewmccall/sproozi/internal/harness"
@@ -32,7 +34,7 @@ const fixtureCertificatePEM = "CERTIFICATE"
 
 func composedConfig(t *testing.T) Config {
 	t.Helper()
-	root := t.TempDir()
+	root := testutil.PrivateDir(t)
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -57,7 +59,7 @@ func composedConfig(t *testing.T) Config {
 	}
 	files := map[string][]byte{"ca.pem": pem.EncodeToMemory(&pem.Block{Type: fixtureCertificatePEM, Bytes: der}), "gateway.crt": pem.EncodeToMemory(&pem.Block{Type: fixtureCertificatePEM, Bytes: cert}), "gateway.key": pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyBytes}), "provider-token": []byte("public-fixture-placeholder")}
 	for name, bytes := range files {
-		if err = os.WriteFile(filepath.Join(root, name), bytes, 0600); err != nil {
+		if err = testutil.WriteFile(filepath.Join(root, name), bytes, 0600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -111,10 +113,10 @@ func TestKubernetesConfigKeepsCredentialInGatewayAndRejectsUnsafeScopes(t *testi
 	defer upstream.Close()
 	directory := filepath.Dir(c.Gateway.ProviderTokenFile)
 	token, ca := filepath.Join(directory, "kube-token"), filepath.Join(directory, "kube-ca")
-	if err := os.WriteFile(token, []byte("gateway-only-kube-token"), 0600); err != nil {
+	if err := testutil.WriteFile(token, []byte("gateway-only-kube-token"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: fixtureCertificatePEM, Bytes: upstream.Certificate().Raw}), 0600); err != nil {
+	if err := testutil.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: fixtureCertificatePEM, Bytes: upstream.Certificate().Raw}), 0600); err != nil {
 		t.Fatal(err)
 	}
 	c.Gateway.Kubernetes = &KubernetesConfig{UpstreamURL: upstream.URL, TokenFile: token, CAFile: ca, Scope: api.KubernetesReadScope{Namespaces: []string{"ops"}, Resources: []api.KubernetesReadResource{api.KubernetesReadPods, api.KubernetesReadPodLogs}}}

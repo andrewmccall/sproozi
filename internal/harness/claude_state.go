@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -371,7 +372,7 @@ func validateClaudeRecord(row claudeRecord, previous string, seen map[string]boo
 	if (message && row.Message.Role != row.Type) || row.APIError ||
 		row.Version == "" || row.Sidechain == nil || *row.Sidechain ||
 		!claudeSessionID.MatchString(row.UUID) || seen[row.UUID] || (parent != previous && !toolParent) ||
-		!filepath.IsAbs(row.Cwd) || (previous == "" && row.Type != claudeUser) {
+		!path.IsAbs(row.Cwd) || (previous == "" && row.Type != claudeUser) {
 		return errors.New("incompatible Claude primary transcript chain")
 	}
 	return nil

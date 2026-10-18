@@ -7,7 +7,11 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+
+	"golang.org/x/term"
 )
+
+func terminalSize(fd int) (int, int, error) { return term.GetSize(fd) }
 
 func watchResize(ctx context.Context, update func()) func() {
 	ctx, cancel := context.WithCancel(ctx)

@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/testutil"
+
 	"github.com/andrewmccall/sproozi/internal/budget"
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
 	"github.com/andrewmccall/sproozi/internal/harness"
@@ -216,7 +218,7 @@ func testWorkspace(t *testing.T) (string, []byte, string) {
 	if !template.built {
 		t.Fatal("fixture workspace failed to build in another test")
 	}
-	repo := filepath.Join(t.TempDir(), "repository")
+	repo := filepath.Join(testutil.PrivateDir(t), "repository")
 	if err := os.CopyFS(repo, os.DirFS(template.repo)); err != nil {
 		t.Fatal(err)
 	}
@@ -242,8 +244,8 @@ func testWorkspace(t *testing.T) (string, []byte, string) {
 
 func createWorkspace(t *testing.T, repo string) {
 	t.Helper()
-	home := t.TempDir()
-	if err := os.Mkdir(repo, 0700); err != nil {
+	home := testutil.PrivateDir(t)
+	if err := testutil.Mkdir(repo, 0700); err != nil {
 		t.Fatal(err)
 	}
 	for _, args := range [][]string{{"init", "--quiet", "--template=", "-b", "main"}, {"-c", "user.name=Fixture", "-c", "user.email=fixture@invalid", "commit", "--quiet", "--allow-empty", "-m", "Fixture"}} {
@@ -254,7 +256,7 @@ func createWorkspace(t *testing.T, repo string) {
 			t.Fatalf("Git fixture: %v %s", err, output)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(repo, "unfinished.txt"), []byte("unfinished work\n"), 0600); err != nil {
+	if err := testutil.WriteFile(filepath.Join(repo, "unfinished.txt"), []byte("unfinished work\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -263,7 +265,7 @@ func createWorkspace(t *testing.T, repo string) {
 // the empirical stock-client proof and cannot use these as mobility evidence.
 func testArtifact(t *testing.T, repo string, includeIgnored ...string) ([]byte, string) {
 	t.Helper()
-	home := t.TempDir()
+	home := testutil.PrivateDir(t)
 	state := harness.CodexState{ThreadID: testNativeUUID, Path: "sessions/2026/10/10/rollout-2026-10-10T18-41-51-" + testNativeUUID + ".jsonl", Rollout: []byte(`{"type":"session_meta","payload":{"id":"` + testNativeUUID + `","cli_version":"0.161.0","cwd":"/workspace"}}
 {"type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"` + testInstructions + `"}]}}
 {"type":"event_msg","payload":{"type":"task_started","turn_id":"fixture-turn"}}
@@ -284,7 +286,7 @@ func testService(t *testing.T) (*Service, *placementFixture, *placementFixture, 
 	repo, data, digest := testWorkspace(t)
 	local := &placementFixture{rows: map[string]session.Observation{}, artifact: data, digest: digest, charge: 2}
 	remote := &placementFixture{rows: map[string]session.Observation{}, artifact: data, digest: digest, charge: 3}
-	dir := filepath.Join(t.TempDir(), "home")
+	dir := filepath.Join(testutil.PrivateDir(t), "home")
 	config := Config{Directory: dir, Local: runtimedocker.PlacementConfig{Harness: harness.NativeCodex, Name: testLocal, InstructionDigest: fmt.Sprintf("%x", sha256.Sum256([]byte(testInstructions))), MaxCheckpointBytes: testLimit, RetainedBytes: 64 << 20}, Allowances: map[string]session.Allowance{testCapability: {Units: session.Limit{Bounded: true, Value: 10}}}}
 	placements := map[string]session.Placement{testLocal: local, testRemote: remote}
 	coordinator, err := session.Open(filepath.Join(dir, "journal"), placements, testLimit)
@@ -303,7 +305,7 @@ func TestStartIgnoredOptInRetainsBytesAndImmutableSelectionAcrossVisits(t *testi
 		".gitignore": []byte("needed.bin\n.env\n"), testIgnoredFile: {0, 1, 255, 254},
 		".env": []byte("excluded fixture credential"),
 	} {
-		if err := os.WriteFile(filepath.Join(repo, name), data, 0600); err != nil {
+		if err := testutil.WriteFile(filepath.Join(repo, name), data, 0600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -322,7 +324,7 @@ func TestStartIgnoredOptInRetainsBytesAndImmutableSelectionAcrossVisits(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	restored := filepath.Join(t.TempDir(), "restored")
+	restored := filepath.Join(testutil.PrivateDir(t), "restored")
 	if err = workspace.Restore(t.Context(), input, restored, testLimit); err != nil {
 		t.Fatal(err)
 	}
@@ -519,9 +521,9 @@ func TestUnknownInitialUsageNeverStartsRemoteAndCanCancel(t *testing.T) {
 
 func TestPrivateConfigRejectsAuthorityFieldsAndSharedFiles(t *testing.T) {
 	t.Parallel()
-	path := filepath.Join(t.TempDir(), "config.json")
+	path := filepath.Join(testutil.PrivateDir(t), "config.json")
 	for _, data := range []string{`{"directory":"/tmp/home","model":"fixture","local":{"Name":"local"},"maxDuration":"1h","allowances":{"model.inference":{"units":{"bounded":true,"value":10}}},"authorityFromCheckpoint":true}`, `{} {}`} {
-		if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+		if err := testutil.WriteFile(path, []byte(data), 0600); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := ReadConfig(path); err == nil {

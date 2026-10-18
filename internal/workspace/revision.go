@@ -3,9 +3,10 @@ package workspace
 import (
 	"context"
 	"errors"
-	"github.com/andrewmccall/sproozi/internal/privatefs"
 	"os"
 	"path/filepath"
+
+	"github.com/andrewmccall/sproozi/internal/privatefs"
 )
 
 // Metadata separates a committed Git revision from the complete unfinished

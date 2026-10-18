@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/testutil"
+
 	"github.com/andrewmccall/sproozi/internal/budget"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/session"
@@ -59,7 +61,7 @@ func TestAbortedDockerRetriesExistingAccountingWithoutInitializing(t *testing.T)
 				ledger = budget.NewLedger(corruptAccountingStore{})
 			}
 			a := &accountingAuthority{fakeAuthority: &fakeAuthority{engine: f}, ledger: ledger}
-			dir := t.TempDir()
+			dir := testutil.PrivateDir(t)
 			if err := os.Chmod(dir, 0700); err != nil {
 				t.Fatal(err)
 			}
@@ -150,7 +152,7 @@ func TestClaudeGracefulStopRequiresPersistedAcknowledgement(t *testing.T) {
 			a := &fakeAuthority{engine: f}
 			cfg := fixtureConfig()
 			cfg.Harness = harness.NativeClaude
-			dir := t.TempDir()
+			dir := testutil.PrivateDir(t)
 			if err := os.Chmod(dir, 0700); err != nil {
 				t.Fatal(err)
 			}
@@ -197,7 +199,7 @@ func TestClaudeDurableAcknowledgementSurvivesCaptureFailure(t *testing.T) {
 	a := &fakeAuthority{engine: f}
 	cfg := fixtureConfig()
 	cfg.Harness = harness.NativeClaude
-	dir := t.TempDir()
+	dir := testutil.PrivateDir(t)
 	if err := os.Chmod(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -253,7 +255,7 @@ func TestPartialInitialCancellationOnlyObservesAndFencesExistingResources(t *tes
 		t.Run(failedRole, func(t *testing.T) {
 			f := newFakeDocker()
 			a := &fakeAuthority{engine: f}
-			p := openFixture(t, t.TempDir(), f, a)
+			p := openFixture(t, testutil.PrivateDir(t), f, a)
 			original := p.engine.execute
 			lostCreateReply := failedRole == roleAgent
 			p.engine.execute = func(ctx context.Context, input []byte, max int, args []string) ([]byte, error) {
@@ -310,7 +312,7 @@ func TestPartialInitialCancellationOnlyObservesAndFencesExistingResources(t *tes
 func TestPartialInitialCancellationRejectsReplacementOrUnavailableEngine(t *testing.T) {
 	t.Parallel()
 	f := newFakeDocker()
-	p := openFixture(t, t.TempDir(), f, &fakeAuthority{engine: f})
+	p := openFixture(t, testutil.PrivateDir(t), f, &fakeAuthority{engine: f})
 	l := fixtureLaunch(t, fixtureArtifact(t))
 	l.ThreadID, l.CheckpointDigest = "", ""
 	original := p.engine.execute
@@ -355,13 +357,13 @@ func TestCoordinatorRecoversExactDockerActivationAfterLostReply(t *testing.T) {
 	launch := fixtureLaunch(t, data)
 	sourceEngine := newFakeDocker()
 	sourceEngine.capture = data
-	source := openFixture(t, t.TempDir(), sourceEngine, &fakeAuthority{engine: sourceEngine})
+	source := openFixture(t, testutil.PrivateDir(t), sourceEngine, &fakeAuthority{engine: sourceEngine})
 	const destination = "destination"
 	f := newFakeDocker()
 	a := &fakeAuthority{engine: f}
 	cfg := fixtureConfig()
 	cfg.Name = destination
-	dir := t.TempDir()
+	dir := testutil.PrivateDir(t)
 	if err := os.Chmod(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -370,7 +372,7 @@ func TestCoordinatorRecoversExactDockerActivationAfterLostReply(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = p.Close() })
-	coordinatorDir := t.TempDir()
+	coordinatorDir := testutil.PrivateDir(t)
 	if err = os.Chmod(coordinatorDir, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -449,7 +451,7 @@ func TestGracefulStopPreservesAdmittedTurnUntilQuiet(t *testing.T) {
 			complete := make(chan struct{})
 			f.completeTurn = complete
 			a := &fakeAuthority{engine: f}
-			p := openFixture(t, t.TempDir(), f, a)
+			p := openFixture(t, testutil.PrivateDir(t), f, a)
 			instance, err := p.Prepare(t.Context(), launch, data)
 			if err != nil {
 				t.Fatal(err)

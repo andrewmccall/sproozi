@@ -51,6 +51,9 @@ func TestWindowsCaptureUsesIndexExecutableModeAndSafeNewFileMode(t *testing.T) {
 func TestWindowsCaptureRejectsJunction(t *testing.T) {
 	root := newFixture(t)
 	target := t.TempDir()
+	if err := os.WriteFile(filepath.Join(target, "selected"), []byte("selected"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	junction := filepath.Join(root, "junction")
 	cmd := exec.Command("cmd", "/c", "mklink", "/J", junction, target)
 	if output, err := cmd.CombinedOutput(); err != nil {
