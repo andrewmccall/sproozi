@@ -27,7 +27,7 @@ func TestAgentRBACBootstrapsNamespaceAndBindsController(t *testing.T) {
 		subjects, _ := doc["subjects"].([]any)
 		for _, raw := range subjects {
 			subject, _ := raw.(map[string]any)
-			controllerBinding = controllerBinding || (subject["kind"] == "ServiceAccount" &&
+			controllerBinding = controllerBinding || (subject["kind"] == rbacv1.ServiceAccountKind &&
 				subject["name"] == controllerManagerName && subject["namespace"] == systemNamespace)
 		}
 	}
@@ -98,7 +98,7 @@ func sandboxWriterRules(t *testing.T) []rbacv1.PolicyRule {
 		subjects, _ := doc["subjects"].([]any)
 		for _, raw := range subjects {
 			subject, _ := raw.(map[string]any)
-			if subject["kind"] == "ServiceAccount" && subject["name"] == controllerManagerName &&
+			if subject["kind"] == rbacv1.ServiceAccountKind && subject["name"] == controllerManagerName &&
 				subject["namespace"] == systemNamespace {
 				ref, _ := doc["roleRef"].(map[string]any)
 				roleName, _ = ref["name"].(string)

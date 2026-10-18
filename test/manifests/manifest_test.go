@@ -342,7 +342,7 @@ func TestInstallBundleScopesWebhookSecretReads(t *testing.T) {
 			var binding rbacv1.RoleBinding
 			decodeObject(t, doc, &binding)
 			if !slices.ContainsFunc(binding.Subjects, func(s rbacv1.Subject) bool {
-				return s.Kind == "ServiceAccount" && s.Name == webhookName && s.Namespace == systemNamespace
+				return s.Kind == rbacv1.ServiceAccountKind && s.Name == webhookName && s.Namespace == systemNamespace
 			}) {
 				continue
 			}
