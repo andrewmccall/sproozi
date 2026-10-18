@@ -13,7 +13,7 @@ func inspectFilesystemPath(_ string, info os.FileInfo) (uint64, bool, error) {
 	if !ok {
 		return 0, false, errors.New("workspace: filesystem identity unavailable")
 	}
-	return uint64(stat.Dev), info.Mode()&os.ModeSymlink != 0, nil
+	return uint64(stat.Dev), info.Mode()&os.ModeSymlink != 0, nil //nolint:unconvert // Dev is int32 on Darwin and uint64 on Linux.
 }
 
 func capturedFileMode(info os.FileInfo, _ int64, _ bool) int64 {
