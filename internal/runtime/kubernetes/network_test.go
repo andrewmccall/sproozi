@@ -127,91 +127,24 @@ func TestNetworkPolicyAllowsDNS(t *testing.T) {
 	}
 }
 
-func TestNetworkPolicyAllowsSproozSystem(t *testing.T) {
-	c := fake.NewClientBuilder().WithScheme(testScheme(t)).Build()
-	run := testRun("bbbbbbbb-0000-0000-0000-000000000004")
-	run.Spec.Capabilities = []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityModelInference, sprooziv1alpha1.CapabilityGitHubPullRequest, sprooziv1alpha1.CapabilityNetworkEgress}
-	_ = kubernetes.EnsureNetworkPolicy(context.Background(), c, run)
-	npName := kubernetes.RunName(run.UID)
-	var np networkingv1.NetworkPolicy
-	_ = c.Get(context.Background(), client.ObjectKey{Namespace: kubernetes.AgentsNamespace, Name: npName}, &np)
-
-	foundSproozi := false
-	foundPorts := map[int32]bool{8443: false}
-	for _, rule := range np.Spec.Egress {
-		for _, peer := range rule.To {
-			if peer.NamespaceSelector != nil {
-				if v, ok := peer.NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"]; ok && v == "sproozi-system" {
-					foundSproozi = true
-					if peer.PodSelector == nil || peer.PodSelector.MatchLabels["app.kubernetes.io/component"] != "shared-gateway" {
-						t.Error("gateway egress must select labelled gateway Pods, not the whole namespace")
-					}
-					for _, port := range rule.Ports {
-						if port.Port != nil {
-							if _, ok := foundPorts[port.Port.IntVal]; ok && port.Protocol != nil && *port.Protocol == corev1.ProtocolTCP {
-								foundPorts[port.Port.IntVal] = true
-							}
-						}
-					}
-				}
+// TestNetworkPolicyRoutesCapabilitiesOnlyThroughSharedGateway verifies that
+// every capability, including network.egress and packages.install, reaches
+// only the labelled shared gateway Pods, never a raw egress or retired port.
+func TestNetworkPolicyRoutesCapabilitiesOnlyThroughSharedGateway(t *testing.T) {
+	for name, capabilities := range map[string][]sprooziv1alpha1.CapabilityKind{
+		"model, pull request and egress": {sprooziv1alpha1.CapabilityModelInference, sprooziv1alpha1.CapabilityGitHubPullRequest, sprooziv1alpha1.CapabilityNetworkEgress},
+		"model only":                     {sprooziv1alpha1.CapabilityModelInference},
+		"packages only":                  {sprooziv1alpha1.CapabilityPackagesInstall},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := fake.NewClientBuilder().WithScheme(testScheme(t)).Build()
+			run := testRun("bbbbbbbb-0000-0000-0000-000000000004")
+			run.Spec.Capabilities = capabilities
+			if err := kubernetes.EnsureNetworkPolicy(context.Background(), c, run); err != nil {
+				t.Fatal(err)
 			}
-		}
-	}
-	if !foundSproozi {
-		t.Error("NetworkPolicy missing egress rule for sproozi-system namespace")
-	}
-	for port, found := range foundPorts {
-		if !found {
-			t.Errorf("NetworkPolicy missing TCP %d egress rule for sproozi-system namespace", port)
-		}
-	}
-}
-
-func TestNetworkPolicyRemovesGatewayRoutesWithoutCapability(t *testing.T) {
-	c := fake.NewClientBuilder().WithScheme(testScheme(t)).Build()
-	run := testRun("bbbbbbbb-0000-0000-0000-000000000007")
-	run.Spec.Capabilities = []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityModelInference}
-	if err := kubernetes.EnsureNetworkPolicy(context.Background(), c, run); err != nil {
-		t.Fatal(err)
-	}
-	var np networkingv1.NetworkPolicy
-	if err := c.Get(context.Background(), client.ObjectKey{Namespace: kubernetes.AgentsNamespace, Name: kubernetes.RunName(run.UID)}, &np); err != nil {
-		t.Fatal(err)
-	}
-	ports := map[int32]bool{}
-	for _, rule := range np.Spec.Egress {
-		for _, port := range rule.Ports {
-			if port.Port != nil {
-				ports[port.Port.IntVal] = true
-			}
-		}
-	}
-	if !ports[8443] || ports[8080] || ports[8081] || ports[8082] || ports[443] {
-		t.Fatalf("gateway routes = %#v, want only shared gateway route", ports)
-	}
-}
-
-func TestNetworkPolicyAddsPackageRouteWithoutRawEgress(t *testing.T) {
-	c := fake.NewClientBuilder().WithScheme(testScheme(t)).Build()
-	run := testRun("bbbbbbbb-0000-0000-0000-000000000009")
-	run.Spec.Capabilities = []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityPackagesInstall}
-	if err := kubernetes.EnsureNetworkPolicy(context.Background(), c, run); err != nil {
-		t.Fatal(err)
-	}
-	var np networkingv1.NetworkPolicy
-	if err := c.Get(context.Background(), client.ObjectKey{Namespace: kubernetes.AgentsNamespace, Name: kubernetes.RunName(run.UID)}, &np); err != nil {
-		t.Fatal(err)
-	}
-	ports := map[int32]bool{}
-	for _, rule := range np.Spec.Egress {
-		for _, port := range rule.Ports {
-			if port.Port != nil {
-				ports[port.Port.IntVal] = true
-			}
-		}
-	}
-	if !ports[53] || !ports[8443] || ports[8080] || ports[8081] || ports[8082] || ports[443] {
-		t.Fatalf("package-only routes = %#v, want DNS and shared gateway only", ports)
+			assertEgressRoutes(t, c, run, true)
+		})
 	}
 }
 

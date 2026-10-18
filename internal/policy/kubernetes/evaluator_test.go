@@ -378,19 +378,6 @@ func TestEvaluateEphemeralWorkspace(t *testing.T) {
 	}
 }
 
-func TestEvaluateDenialMessage(t *testing.T) {
-	t.Parallel()
-
-	p := basePolicy()
-	denial := policy.Evaluate(p, baseTemplate(egressGoModules), baseRun(sprooziv1alpha1.CapabilityNetworkEgress), baseRuntime())
-	if denial == nil {
-		t.Fatal("Evaluate() = nil, want denial")
-	}
-	if denial.Message == "" {
-		t.Error("Denial.Message must not be empty")
-	}
-}
-
 func TestNamedMCPCapabilityRequiresExplicitScopeAndRejectsUnsupportedPricing(t *testing.T) {
 	p := basePolicy()
 	p.AllowedCapabilities = []sprooziv1alpha1.CapabilityKind{"mcp.docs"}

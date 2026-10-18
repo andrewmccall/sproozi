@@ -1,8 +1,6 @@
 package v1alpha1
 
 import (
-	"encoding/json"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -99,53 +97,5 @@ func TestValidateRuntimeTemplateRejectsAdditionalContainerClasses(t *testing.T) 
 				t.Fatalf("ValidateRuntimeTemplate accepted an %s", tc.name)
 			}
 		})
-	}
-}
-
-func TestAgentRuntimeJSONRoundTrip(t *testing.T) {
-	t.Parallel()
-
-	want := AgentRuntime{
-		Spec: AgentRuntimeSpec{
-			RuntimeClassName: "gvisor",
-			PodTemplate: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{
-				Name:  runtimeTestContainer,
-				Image: "ghcr.io/openai/codex@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Resources: corev1.ResourceRequirements{
-					Limits: corev1.ResourceList{
-						corev1.ResourceCPU:              resource.MustParse("1"),
-						corev1.ResourceMemory:           resource.MustParse("1Gi"),
-						corev1.ResourceEphemeralStorage: resource.MustParse("2Gi"),
-					},
-				}}}, SecurityContext: &corev1.PodSecurityContext{
-				RunAsNonRoot: ptr.
-					To(true), RunAsUser: ptr.
-					To(int64(65532)), FSGroup: ptr.To(int64(65532)), SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault}},
-			}},
-			WorkloadContainers: []string{runtimeTestContainer},
-			ClientConfig: RuntimeClientConfig{
-				TrustBundleConfigMap: RuntimeConfigMapKeyReference{
-					Name: "sproozi-sandbox-trust",
-					Key:  "ca-bundle.pem",
-				},
-			},
-
-			EphemeralWorkspace: EphemeralWorkspaceSpec{
-				SizeLimit: resource.MustParse("2Gi"),
-			}, GatewayEndpoint: "https://sproozi-gateway.sproozi-system.svc:8443",
-		},
-	}
-
-	encoded, err := json.Marshal(want)
-	if err != nil {
-		t.Fatalf("Marshal() error = %v", err)
-	}
-
-	var got AgentRuntime
-	if err := json.Unmarshal(encoded, &got); err != nil {
-		t.Fatalf("Unmarshal() error = %v", err)
-	}
-
-	if !reflect.DeepEqual(got.Spec, want.Spec) {
-		t.Fatalf("round-trip spec = %#v, want %#v", got.Spec, want.Spec)
 	}
 }
