@@ -24,10 +24,11 @@ import (
 
 const fixtureInstructions = "Approved test instructions."
 const (
-	modelFixtureCapability = "model"
-	threadField            = "threadId"
-	stateField             = "state"
-	typeField              = "type"
+	modelFixtureCapability  = "model"
+	threadField             = "threadId"
+	stateField              = "state"
+	typeField               = "type"
+	containerFixtureCommand = "container"
 )
 
 const fixtureThread = "01234567-89ab-cdef-0123-456789abcdef"
@@ -65,6 +66,7 @@ type fakeDocker struct {
 	next                                     int
 	capture                                  []byte
 	failStop, failCapture, failActivationAck bool
+	failRemove                               bool
 	rejectNativeActivation                   bool
 	quiesceAcknowledgesOnly                  bool
 	lostQuiesceAck                           bool
@@ -76,6 +78,13 @@ type fakeDocker struct {
 func newFakeDocker() *fakeDocker {
 	return &fakeDocker{containers: map[string]*fakeContainer{}, volumes: map[string]map[string]any{}}
 }
+
+// running reports a present, running container. A removed container is not
+// running; tests that need its absence assert that separately.
+func (f *fakeDocker) running(id string) bool {
+	c := f.containers[id]
+	return c != nil && c.State.Running
+}
 func (f *fakeDocker) run(ctx context.Context, input []byte, _ int, args []string) ([]byte, error) {
 	f.calls = append(f.calls, strings.Join(args, " "))
 	switch args[0] {
@@ -83,7 +92,7 @@ func (f *fakeDocker) run(ctx context.Context, input []byte, _ int, args []string
 		return f.volumeCommand(args)
 	case createCommand:
 		return f.createCommand(args)
-	case "container":
+	case containerFixtureCommand:
 		return f.containerCommand(args)
 	case execCommand:
 		return f.execCommand(ctx, args, input)
@@ -107,6 +116,32 @@ func (f *fakeDocker) volumeCommand(args []string) ([]byte, error) {
 			}
 		}
 		return []byte(name), nil
+	}
+	switch args[1] {
+	case "ls":
+		var names []string
+		for name := range f.volumes {
+			if strings.Contains(name, strings.TrimPrefix(args[4], "name=")) {
+				names = append(names, name)
+			}
+		}
+		return []byte(strings.Join(names, "\n")), nil
+	case "rm":
+		if f.failRemove {
+			return nil, errors.New("engine volume removal failed")
+		}
+		if f.volumes[args[2]] == nil {
+			return nil, errors.New("volume unavailable")
+		}
+		for _, c := range f.containers {
+			for _, m := range c.Mounts {
+				if m.Name == args[2] {
+					return nil, errors.New("volume in use")
+				}
+			}
+		}
+		delete(f.volumes, args[2])
+		return nil, nil
 	}
 	v := f.volumes[args[2]]
 	if v == nil {
@@ -213,6 +248,12 @@ func (f *fakeDocker) containerCommand(args []string) ([]byte, error) {
 		c.State.Pid = 0
 		return []byte(c.ID), nil
 	case "rm":
+		if f.failRemove {
+			return nil, errors.New("engine container removal failed")
+		}
+		if c.State.Running {
+			return nil, errors.New("container is running")
+		}
 		delete(f.containers, c.ID)
 		return nil, nil
 	}
@@ -483,8 +524,11 @@ func TestPlacementDurablePrepareActivateStop(t *testing.T) {
 	if !stopped.ActualStopped || stopped.Receipt == nil || stopped.Receipt.Usage[modelFixtureCapability].Units != 17 || stopped.CheckpointDigest != l.CheckpointDigest {
 		t.Fatalf("stopped receipt: %+v", stopped)
 	}
-	if !a.revoked || f.containers[inc.ResourceUID].State.Running {
+	if !a.revoked || f.running(inc.ResourceUID) {
 		t.Fatal("source authority or native writers remain")
+	}
+	if len(f.containers) != 0 || len(f.volumes) != 0 {
+		t.Fatalf("stopped visit left resources: %d containers, %d volumes", len(f.containers), len(f.volumes))
 	}
 	before := a.seals
 	_ = p.Close()

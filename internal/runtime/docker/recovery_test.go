@@ -100,6 +100,9 @@ func TestAbortedDockerRetriesExistingAccountingWithoutInitializing(t *testing.T)
 				t.Fatal(err)
 			}
 			a.err = nil
+			// Failed removal keeps the containers, so the replays below still
+			// observe the exact engine fence rather than a recorded removal.
+			f.failRemove = true
 			o, err = p.Abort(t.Context(), l, i)
 			if err != nil || o.Stopped == nil {
 				t.Fatalf("replay: %+v %v", o, err)
@@ -485,7 +488,7 @@ func TestGracefulStopPreservesAdmittedTurnUntilQuiet(t *testing.T) {
 			} else if err != nil {
 				t.Fatal(err)
 			}
-			if !a.revoked || a.active || f.containers[instance.ResourceUID].State.Running || a.seals != 1 {
+			if !a.revoked || a.active || f.running(instance.ResourceUID) || a.seals != 1 {
 				t.Fatal("quiet/abort did not revoke, independently fence and settle")
 			}
 		})
