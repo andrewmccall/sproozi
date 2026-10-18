@@ -135,14 +135,20 @@ func modelResponse(req *http.Request, body string) *http.Response {
 func TestHandlerMissingGatewayIdentityReturns401(t *testing.T) {
 	h := &identityHandler{Config: identityConfig{BudgetTracker: budget.NewTracker(), AuditLogger: audit.NewLogger(io.Discard)}}
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	// A workload-supplied bearer token is not a gateway identity.
+	for _, authorization := range []string{"", "Bearer bad-token"} {
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+		if authorization != "" {
+			req.Header.Set("Authorization", authorization)
+		}
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", rr.Code)
+		if rr.Code != http.StatusUnauthorized {
+			t.Fatalf("Authorization %q: status = %d, want 401", authorization, rr.Code)
+		}
+		assertOpenAIErrorBody(t, rr.Body.Bytes())
 	}
-	assertOpenAIErrorBody(t, rr.Body.Bytes())
 }
 
 func TestHandlerBuffersResponsesStreamAndSettlesUsageBeforeReturning(t *testing.T) {
@@ -169,34 +175,6 @@ func TestHandlerBuffersResponsesStreamAndSettlesUsageBeforeReturning(t *testing.
 			t.Fatalf("incomplete stream escaped or failed to charge reservation: status=%d state=%+v", recorder.Code, state)
 		}
 	}
-}
-
-func TestHandlerInvalidTokenReturns401(t *testing.T) {
-	h := &identityHandler{Config: identityConfig{BudgetTracker: budget.NewTracker(), AuditLogger: audit.NewLogger(io.Discard)}}
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	req.Header.Set("Authorization", "Bearer bad-token")
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", rr.Code)
-	}
-	assertOpenAIErrorBody(t, rr.Body.Bytes())
-}
-
-func TestHandlerRunNotFoundReturns403(t *testing.T) {
-	h := &identityHandler{Config: identityConfig{BudgetTracker: budget.NewTracker(), AuditLogger: audit.NewLogger(io.Discard)}}
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	req.Header.Set("Authorization", "Bearer valid-token")
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", rr.Code)
-	}
-	assertOpenAIErrorBody(t, rr.Body.Bytes())
 }
 
 func TestHandlerDisallowedPathReturns403(t *testing.T) {

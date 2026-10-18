@@ -289,72 +289,6 @@ func TestHandler_MissingEventIDRejected(t *testing.T) {
 	}
 }
 
-func TestHandler_MissingSignatureRejected(t *testing.T) {
-	key := []byte(testHMACKey)
-	body := testAlertBody
-	ts := fmt.Sprintf("%d", time.Now().Unix())
-
-	c := webhookClient(t,
-		webhookPolicy(),
-		webhookTemplate(),
-		webhookSecret(key),
-	)
-	handler := &webhook.Handler{
-		Config: webhook.HandlerConfig{
-			Client:      c,
-			Replay:      webhook.NewInMemoryReplayStore(),
-			AuditLogger: &captureWebhookLogger{},
-		},
-	}
-
-	req := httptest.NewRequest(http.MethodPost, "/webhook/default/"+webhookReceiver, strings.NewReader(body))
-	req.Header.Set(webhook.TimestampHeader, ts)
-
-	resp := httptest.NewRecorder()
-	handler.ServeHTTP(resp, req)
-
-	if resp.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401 for missing signature, got %d body=%s", resp.Code, resp.Body.String())
-	}
-	if runs := listRuns(t, c); len(runs) != 0 {
-		t.Fatalf("expected no AgentRuns for unsigned request, got %d", len(runs))
-	}
-}
-
-func TestHandler_StaleSignatureRejected(t *testing.T) {
-	key := []byte(testHMACKey)
-	body := testAlertBody
-	ts := fmt.Sprintf("%d", time.Now().Add(-10*time.Minute).Unix())
-
-	c := webhookClient(t,
-		webhookPolicy(),
-		webhookTemplate(),
-		webhookSecret(key),
-	)
-	handler := &webhook.Handler{
-		Config: webhook.HandlerConfig{
-			Client:       c,
-			Replay:       webhook.NewInMemoryReplayStore(),
-			AuditLogger:  &captureWebhookLogger{},
-			ReplayWindow: webhook.DefaultReplayWindow,
-		},
-	}
-
-	req := httptest.NewRequest(http.MethodPost, "/webhook/default/"+webhookReceiver, strings.NewReader(body))
-	req.Header.Set(webhook.TimestampHeader, ts)
-	req.Header.Set(webhook.SignatureHeader, webhook.ComputeSignature(ts, []byte(body), key))
-
-	resp := httptest.NewRecorder()
-	handler.ServeHTTP(resp, req)
-
-	if resp.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401 for stale signature, got %d body=%s", resp.Code, resp.Body.String())
-	}
-	if runs := listRuns(t, c); len(runs) != 0 {
-		t.Fatalf("expected no AgentRuns for stale request, got %d", len(runs))
-	}
-}
-
 func TestHandler_MalformedJSONRejected(t *testing.T) {
 	key := []byte(testHMACKey)
 	body := `{"id":"evt-123","eventContext":`
@@ -615,6 +549,9 @@ func TestHandler_UnauthenticatedRequestCostsNoBodyOrAPICall(t *testing.T) {
 			if resp.Code != http.StatusUnauthorized || body.reads != 0 || apiCalls != 0 {
 				t.Fatalf("status = %d, body reads = %d, API calls = %d; want 401 with no reads or calls",
 					resp.Code, body.reads, apiCalls)
+			}
+			if runs := listRuns(t, c); len(runs) != 0 {
+				t.Fatalf("unauthenticated request created %d AgentRuns", len(runs))
 			}
 		})
 	}

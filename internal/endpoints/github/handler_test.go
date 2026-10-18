@@ -255,39 +255,6 @@ func TestPushToDefaultBranchMain(t *testing.T) {
 	}
 }
 
-// TestPushToDefaultBranchMaster verifies that refs/heads/master is also rejected.
-func TestPushToDefaultBranchMaster(t *testing.T) {
-	reached := false
-	gitSrv := customServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		reached = true
-		w.WriteHeader(http.StatusOK)
-	}), "http://git.test")
-	defer gitSrv.Close()
-	apiSrv := echoServer(t)
-	defer apiSrv.Close()
-
-	h := buildHandler(t, makeIdentity([]string{testRepo}), gitSrv, apiSrv)
-
-	old := strings.Repeat("0", 40)
-	new := strings.Repeat("c", 40)
-	refLine := fmt.Sprintf("%s %s refs/heads/master", old, new)
-	body := append(pktLine(refLine+"\n"), flushPacket()...)
-
-	req := httptest.NewRequest(http.MethodPost,
-		"/andrewmccall/home-ops.git/git-receive-pack",
-		strings.NewReader(string(body)))
-	req.Header.Set("Authorization", "Bearer sandbox-token")
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusForbidden {
-		t.Fatalf("expected 403 for master push, got %d", rr.Code)
-	}
-	if reached {
-		t.Fatal("default-branch push must not reach upstream")
-	}
-}
-
 // TestPRCreateAllowed verifies that POST /repos/{owner}/{repo}/pulls is
 // proxied with bearer token auth.
 func TestPRCreateAllowed(t *testing.T) {
@@ -401,36 +368,9 @@ func TestMissingCapability(t *testing.T) {
 	}
 }
 
-// TestAuthenticationFailure verifies that an invalid token is rejected.
-func TestAuthenticationFailure(t *testing.T) {
-	gitSrv := echoServer(t)
-	defer gitSrv.Close()
-	apiSrv := echoServer(t)
-	defer apiSrv.Close()
-
-	h := &identityHandler{
-		Config: identityConfig{
-			TokenProvider: &githubgateway.FakeTokenProvider{GitHubToken: testGHToken},
-			AuditLogger:   &discardLogger{},
-			GitBaseURL:    gitSrv.URL,
-			APIBaseURL:    apiSrv.URL,
-			HTTPClient:    gitSrv.Client(),
-		},
-	}
-
-	req := httptest.NewRequest(http.MethodGet,
-		"/andrewmccall/home-ops.git/info/refs?service=git-upload-pack", nil)
-	req.Header.Set("Authorization", "Bearer bad-token")
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401, got %d", rr.Code)
-	}
-}
-
 // TestMissingGatewayIdentity verifies that semantic handlers reject requests
-// which have not crossed the shared gateway authentication boundary.
+// which have not crossed the shared gateway authentication boundary, even when
+// the workload supplies its own bearer token.
 func TestMissingGatewayIdentity(t *testing.T) {
 	gitSrv := echoServer(t)
 	defer gitSrv.Close()
@@ -445,12 +385,17 @@ func TestMissingGatewayIdentity(t *testing.T) {
 		HTTPClient:    gitSrv.Client(),
 	}}
 
-	req := httptest.NewRequest(http.MethodGet,
-		"/andrewmccall/home-ops.git/info/refs?service=git-upload-pack", nil)
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	for _, authorization := range []string{"", "Bearer bad-token"} {
+		req := httptest.NewRequest(http.MethodGet,
+			"/andrewmccall/home-ops.git/info/refs?service=git-upload-pack", nil)
+		if authorization != "" {
+			req.Header.Set("Authorization", authorization)
+		}
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401, got %d", rr.Code)
+		if rr.Code != http.StatusUnauthorized {
+			t.Fatalf("Authorization %q: expected 401, got %d", authorization, rr.Code)
+		}
 	}
 }

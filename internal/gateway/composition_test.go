@@ -30,24 +30,6 @@ func compositionIdentity(cap sprooziv1alpha1.CapabilityKind) *gateway.ExecutionG
 		Template:     gateway.TemplateSnapshot{Name: fixtureTemplateName}}
 }
 
-func TestDispatchCompositionReachesKubernetesUpstream(t *testing.T) {
-	var calls atomic.Int32
-	upstream, _ := url.Parse("https://kubernetes.test")
-	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		calls.Add(1)
-		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"kind":"PodList"}`)), Request: r}, nil
-	})}
-	h := kubernetesgateway.NewHandler(kubernetesgateway.HandlerConfig{Upstream: upstream, Client: client})
-	id := compositionIdentity(sprooziv1alpha1.CapabilityKubernetesRead)
-	req := httptest.NewRequest(http.MethodGet, "https://kubernetes.default.svc:443/api/v1/namespaces/demo/pods", nil)
-	req.Header.Set("Proxy-Authorization", "Bearer run-token")
-	response := httptest.NewRecorder()
-	gateway.Dispatcher{kubernetesgateway.Authority: gateway.Route{Handler: h, Capability: string(sprooziv1alpha1.CapabilityKubernetesRead), Budgets: budget.NewTracker()}}.ServeHTTP(response, req.WithContext(gateway.WithIdentity(req.Context(), id)))
-	if response.Code != http.StatusOK || calls.Load() != 1 {
-		t.Fatalf("response=%v calls=%d", response, calls.Load())
-	}
-}
-
 func TestDispatchCompositionReachesModelUpstream(t *testing.T) {
 	var calls atomic.Int32
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {

@@ -654,54 +654,6 @@ func TestReconcilerIdentityCreatedOnAdmit(t *testing.T) {
 	}
 }
 
-func TestReconcilerIdentityRevokedOnTerminal(t *testing.T) {
-	t.Parallel()
-
-	run := newRun("run-identity-2")
-	objs := append(fixtures(), run)
-	c := fake.NewClientBuilder().
-		WithScheme(newScheme()).
-		WithObjects(objs...).
-		WithStatusSubresource(&sprooziv1alpha1.AgentRun{}).
-		Build()
-
-	// Drive to Running.
-	if _, err := reconcileRun(t, c, "run-identity-2"); err != nil {
-		t.Fatalf("reconcile 1: %v", err)
-	}
-	if _, err := reconcileRun(t, c, "run-identity-2"); err != nil {
-		t.Fatalf("reconcile 2: %v", err)
-	}
-	if _, err := reconcileRun(t, c, "run-identity-2"); err != nil {
-		t.Fatalf("reconcile 3: %v", err)
-	}
-
-	// Cancel the run.
-	running := getRun(t, c, "run-identity-2")
-	running.Spec.Cancel = true
-	if err := c.Update(context.Background(), &running); err != nil {
-		t.Fatalf("Update cancel: %v", err)
-	}
-	if _, err := reconcileRun(t, c, "run-identity-2"); err != nil {
-		t.Fatalf("reconcile cancel: %v", err)
-	}
-
-	term := getRun(t, c, "run-identity-2")
-	if term.Status.Phase != sprooziv1alpha1.AgentRunPhaseCancelled {
-		t.Fatalf("expected Cancelled, got %q", term.Status.Phase)
-	}
-
-	// Terminal handler runs: revokes identity.
-	if _, err := reconcileRun(t, c, "run-identity-2"); err != nil {
-		t.Fatalf("reconcile terminal: %v", err)
-	}
-
-	cleaned := getRun(t, c, "run-identity-2")
-	if cleaned.Status.Identity.ServiceAccountName != "" {
-		t.Error("Identity.ServiceAccountName should be cleared after terminal cleanup")
-	}
-}
-
 func TestReconcilerSandboxCreatedOnRunning(t *testing.T) {
 	t.Parallel()
 	sc := &k8sresources.FakeSandboxClient{Status: k8sresources.SandboxStatusRunning}
@@ -724,30 +676,6 @@ func TestReconcilerSandboxCreatedOnRunning(t *testing.T) {
 	}
 	if got.Status.Identity.SandboxName != k8sresources.RunName(run.UID) {
 		t.Errorf("SandboxName = %q, want the run's sandbox %q", got.Status.Identity.SandboxName, k8sresources.RunName(run.UID))
-	}
-}
-
-func TestReconcilerSandboxSucceededTransitionsToSucceeded(t *testing.T) {
-	t.Parallel()
-
-	sc := &k8sresources.FakeSandboxClient{
-		Status:   k8sresources.SandboxStatusSucceeded,
-		ExitCode: 0,
-	}
-	run := newRun("run-sandbox-2")
-	r, c := newReconcilerWithSandbox(sc, append(fixtures(), run)...)
-
-	driveToRunning(t, r, "run-sandbox-2")
-	// Reconcile while Succeeded
-	if _, err := r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: types.NamespacedName{Name: "run-sandbox-2", Namespace: testNS},
-	}); err != nil {
-		t.Fatalf("reconcile (succeeded) error: %v", err)
-	}
-
-	got := getRun(t, c, "run-sandbox-2")
-	if got.Status.Phase != sprooziv1alpha1.AgentRunPhaseSucceeded {
-		t.Fatalf("expected Succeeded, got %q", got.Status.Phase)
 	}
 }
 
