@@ -516,6 +516,7 @@ func approvedRuntime() *api.AgentRuntime {
 func fixtureArtifact(t *testing.T) ([]byte, checkpoint.Metadata) {
 	return fixtureArtifactKind(t, harness.NativeCodex)
 }
+
 // builtArtifact is one native kind's stopped checkpoint fixture.
 type builtArtifact struct {
 	once  sync.Once

@@ -383,6 +383,7 @@ func fixtureConfig() PlacementConfig {
 	limits := ResourceLimits{MemoryBytes: 128 << 20, CPUMilli: 500, PIDs: 64}
 	return PlacementConfig{Harness: harness.NativeCodex, Name: localVolumeDriver, NativeImageID: "sha256:" + strings.Repeat("a", 64), HelperImageID: "sha256:" + strings.Repeat("b", 64), AnchorImageID: "sha256:" + strings.Repeat("c", 64), NetworkName: fixtureBridge, GatewayIPv4: "192.168.65.254", GatewayPort: 8844, Instructions: fixtureInstructions, InstructionDigest: hash, AgentLimits: limits, HelperLimits: limits, AnchorLimits: limits, VolumeBytes: 64 << 20, MaxCheckpointBytes: 1 << 20, RetainedBytes: 8 << 20}
 }
+
 // builtArtifact is the stopped checkpoint every test starts from. Its Git
 // capture is slow, so it is built once per test binary.
 var builtArtifact struct {

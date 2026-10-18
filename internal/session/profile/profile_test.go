@@ -101,6 +101,7 @@ func (p *retainedBackend) Abort(_ context.Context, l session.Launch, i session.I
 func artifact(t *testing.T) ([]byte, string) {
 	return artifactKind(t, harness.NativeCodex)
 }
+
 // builtArtifact is one native kind's stopped checkpoint fixture.
 type builtArtifact struct {
 	once   sync.Once

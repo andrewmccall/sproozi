@@ -256,6 +256,7 @@ func (p *fakePlacement) Abort(_ context.Context, l Launch, i Incarnation) (Obser
 	p.records[l.AllocationID] = o
 	return o, nil
 }
+
 // fixtureArtifact is the stopped checkpoint every test starts from. Its Git
 // capture is slow, so it is built once per test binary.
 var fixtureArtifact struct {
