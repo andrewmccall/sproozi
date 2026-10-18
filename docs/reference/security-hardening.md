@@ -80,7 +80,10 @@ GraphQL reads validate the bounded document, repository argument bindings and
 selected fields before forwarding. The supported subset is listed in
 [client compatibility](client-compatibility.md); unsupported fragments, aliases
 and selections are rejected. The pinned `gh pr create` workflow remains outside
-that subset; use the documented bounded REST PR operation.
+that subset; use the documented bounded REST PR operation. Like GraphQL, REST PR
+creation forwards a body rebuilt from the checked fields, so a case variant,
+duplicate key, extra field or query parameter cannot change the head, base or
+source repository that GitHub uses.
 
 The Kubernetes route binds resources to core/v1 or apps/v1, removes the entire
 Impersonate-* header family and refuses upstream redirects in every composition.

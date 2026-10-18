@@ -15,7 +15,12 @@ servers](configured-mcp.md) use named `mcp.<server>` capabilities.
 
 The approved Codex demo image must contain Codex CLI, kubectl,
 git, gh and curl. Supported operations include Kubernetes discovery, Git smart HTTP clone/fetch/push and GitHub
-REST PR creation through `gh api --method POST repos/OWNER/REPO/pulls`. The
+REST PR creation through `gh api --method POST repos/OWNER/REPO/pulls`. That
+request takes no query string, and its body is a JSON object with exact,
+unique keys: the string fields `head`, `base`, `title` and `body`, and the
+boolean fields `draft` and `maintainer_can_modify`. The gateway refuses any
+other field, such as `head_repo` or `issue`, and forwards a body rebuilt from
+the checked values. The
 gateway also implements a narrow GraphQL subset, but `gh pr
 create` can use fragments and parent-repository selections outside that
 subset and is denied. The demo deliberately uses the REST operation rather than
