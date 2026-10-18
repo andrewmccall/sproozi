@@ -74,3 +74,4 @@ and the combined MCP discovery schema.
 | [0018](0018-coordinator-owns-every-visit.md) | The home coordinator owns every visit, including the first, and launches never change. |
 | [0019](0019-pull-operations-and-work-owner-names.md) | Derived pull operations and one rule for resolving work owner names. |
 | [0020](0020-docker-placement-removes-stopped-visits.md) | The Docker placement removes a stopped visit's containers and volume after recording it. |
+| [0022](0022-webhook-hmac-secrets-in-own-namespace.md) | Webhook HMAC Secrets live in their own namespace, away from provider credentials. |

@@ -1,3 +1,4 @@
 resources:
 - ../default
 - ../webhook-state-rbac
+- ../webhook-secrets

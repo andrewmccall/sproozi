@@ -44,8 +44,8 @@ kubectl cluster-info
 kubectl get nodes -o wide
 ```
 
-The commands below install into `sproozi-system`, `sproozi-agents` and
-`sproozi-webhook-state`. Use a cluster without an existing Sproozi installation
+The commands below install into `sproozi-system`, `sproozi-agents`,
+`sproozi-webhook-state` and `sproozi-webhooks`. Use a cluster without an existing Sproozi installation
 for this walkthrough. Keep the chosen `KUBECONFIG` exported throughout it.
 
 ## 2. Build and publish the images

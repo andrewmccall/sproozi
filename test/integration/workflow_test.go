@@ -169,7 +169,7 @@ func e2eSecret() *corev1.Secret {
 	return &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "alertmanager-secret",
-			Namespace: e2eNamespace,
+			Namespace: webhook.DefaultSecretNamespace,
 		},
 		Data: map[string][]byte{
 			"hmac-key": []byte(e2eHMACKey),

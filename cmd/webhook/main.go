@@ -19,7 +19,10 @@ limitations under the License.
 // +kubebuilder:rbac:groups=sproozi.com,resources=agentruns,verbs=create
 // +kubebuilder:rbac:groups=sproozi.com,resources=agentpolicies,verbs=get;list;watch
 // +kubebuilder:rbac:groups=sproozi.com,resources=agenttemplates,verbs=get;list;watch
-// +kubebuilder:rbac:groups="",resources=secrets,verbs=get
+//
+// HMAC Secret reads are granted only in the HMAC Secret namespace, by the
+// hand-written Role in config/webhook-secrets, never cluster-wide or in the
+// namespace that holds provider and GitHub credentials.
 package main
 
 import (
@@ -87,9 +90,10 @@ func main() {
 
 	h := &webhook.Handler{
 		Config: webhook.HandlerConfig{
-			Client:      runtimeClient,
-			Replay:      replay,
-			AuditLogger: audit.NewLogger(os.Stdout),
+			Client:          runtimeClient,
+			Replay:          replay,
+			AuditLogger:     audit.NewLogger(os.Stdout),
+			SecretNamespace: envOrDefault("HMAC_SECRET_NAMESPACE", webhook.DefaultSecretNamespace),
 		},
 	}
 

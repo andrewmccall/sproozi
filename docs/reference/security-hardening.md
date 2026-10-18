@@ -176,6 +176,12 @@ The webhook receiver refuses a request with missing, malformed or stale
 signature headers before it reads the body or calls the API server, and bounds
 header, body, read, write and idle time. See the
 [webhook contract](webhook-contract.md#request-checks-and-limits).
+It can read Secrets only in `sproozi-webhooks`, which holds HMAC keys alone, so
+a compromised receiver or a template annotation cannot reach the provider,
+GitHub or TLS credentials in `sproozi-system`
+([ADR 0022](../adr/0022-webhook-hmac-secrets-in-own-namespace.md)). Restrict
+who can create Secrets in `sproozi-webhooks` and edit `AgentTemplate`
+annotations, since either can choose which key authenticates a receiver.
 
 The local demo's short-lived CA and gitignored environment file are disposable
 evaluation inputs. For deployment, supply managed certificates, least-privilege

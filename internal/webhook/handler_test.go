@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -113,11 +114,13 @@ func webhookTemplate() *sprooziv1alpha1.AgentTemplate {
 	}
 }
 
+// webhookSecret returns the receiver's HMAC Secret in the HMAC Secret
+// namespace, which is separate from the template namespace.
 func webhookSecret(key []byte) *corev1.Secret {
 	return &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "alertmanager-secret",
-			Namespace: webhookTestNamespace,
+			Namespace: webhook.DefaultSecretNamespace,
 		},
 		Data: map[string][]byte{
 			"hmac-key": key,
@@ -487,6 +490,55 @@ func TestHandler_ShortHMACKeyRefused(t *testing.T) {
 			}
 			if key != "" && (strings.Contains(logs.String(), key) || strings.Contains(resp.Body.String(), key)) {
 				t.Fatal("log or response contains the HMAC key")
+			}
+		})
+	}
+}
+
+// TestHandler_ReadsHMACSecretOnlyFromSecretNamespace verifies that the webhook
+// reads the annotated Secret from the HMAC Secret namespace, never from the
+// template namespace, where its RBAC grants no Secret access.
+func TestHandler_ReadsHMACSecretOnlyFromSecretNamespace(t *testing.T) {
+	inTemplateNamespace := webhookSecret([]byte(testHMACKey))
+	inTemplateNamespace.Namespace = webhookTestNamespace
+	for _, tc := range []struct {
+		name            string
+		secret          *corev1.Secret
+		secretNamespace string
+		want            int
+	}{
+		{name: "default secret namespace", secret: webhookSecret([]byte(testHMACKey)), want: http.StatusCreated},
+		{name: "configured secret namespace", secret: func() *corev1.Secret {
+			s := webhookSecret([]byte(testHMACKey))
+			s.Namespace = "hmac-keys"
+			return s
+		}(), secretNamespace: "hmac-keys", want: http.StatusCreated},
+		{name: "template namespace", secret: inTemplateNamespace, want: http.StatusInternalServerError},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var secretReads []string
+			c := fake.NewClientBuilder().WithScheme(webhookScheme(t)).WithInterceptorFuncs(interceptor.Funcs{
+				Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+					if _, ok := obj.(*corev1.Secret); ok {
+						secretReads = append(secretReads, key.Namespace)
+					}
+					return c.Get(ctx, key, obj, opts...)
+				},
+			}).WithObjects(webhookPolicy(), webhookTemplate(), tc.secret).Build()
+			handler := &webhook.Handler{Config: webhook.HandlerConfig{
+				Client:          c,
+				Replay:          webhook.NewInMemoryReplayStore(),
+				AuditLogger:     &captureWebhookLogger{},
+				SecretNamespace: tc.secretNamespace,
+			}}
+			resp := httptest.NewRecorder()
+			handler.ServeHTTP(resp, signedRequest(testAlertBody, []byte(testHMACKey)))
+
+			if resp.Code != tc.want {
+				t.Fatalf("status = %d, want %d (body=%s)", resp.Code, tc.want, resp.Body.String())
+			}
+			if slices.Contains(secretReads, webhookTestNamespace) {
+				t.Fatalf("webhook read a Secret in the template namespace: %v", secretReads)
 			}
 		})
 	}

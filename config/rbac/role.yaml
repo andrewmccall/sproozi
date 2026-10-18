@@ -20,7 +20,6 @@ rules:
   - ""
   resources:
   - pods/log
-  - secrets
   verbs:
   - get
 - apiGroups:

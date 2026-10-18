@@ -58,7 +58,14 @@ type HandlerConfig struct {
 	AuditLogger  audit.WebhookWriter
 	ReplayWindow time.Duration
 	Now          func() time.Time
+	// SecretNamespace holds every receiver's HMAC Secret. It is separate from
+	// the template namespace, so the webhook can read HMAC keys without being
+	// able to read the provider and GitHub credentials beside the templates.
+	SecretNamespace string
 }
+
+// DefaultSecretNamespace is the installed namespace for HMAC Secrets.
+const DefaultSecretNamespace = "sproozi-webhooks"
 
 type Handler struct {
 	Config HandlerConfig
@@ -133,9 +140,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	event.TemplateName = tmpl.Name
 
+	secretNamespace := h.Config.SecretNamespace
+	if secretNamespace == "" {
+		secretNamespace = DefaultSecretNamespace
+	}
 	secretName := tmpl.Annotations[SecretNameAnnotation]
 	var secret corev1.Secret
-	if err := h.Config.Client.Get(r.Context(), client.ObjectKey{Namespace: namespace, Name: secretName}, &secret); err != nil {
+	if err := h.Config.Client.Get(r.Context(), client.ObjectKey{Namespace: secretNamespace, Name: secretName}, &secret); err != nil {
 		h.deny(w, event, http.StatusInternalServerError, "webhook: failed to load HMAC secret")
 		return
 	}
@@ -148,7 +159,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Name the Secret for the administrator, never the key or its length.
 	if len(key) < MinHMACKeyBytes {
 		log.FromContext(r.Context()).Error(ErrShortHMACKey, "Refused webhook HMAC Secret",
-			"namespace", namespace, "name", secretName)
+			"namespace", secretNamespace, "name", secretName)
 		h.deny(w, event, http.StatusInternalServerError, ErrShortHMACKey.Error())
 		return
 	}

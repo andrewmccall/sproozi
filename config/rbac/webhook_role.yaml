@@ -6,13 +6,9 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: webhook-role
   namespace: sproozi-system
+# No Secret access here: this namespace holds provider and GitHub credentials.
+# HMAC Secrets are read only in sproozi-webhooks (config/webhook-secrets).
 rules:
-- apiGroups:
-  - ""
-  resources:
-  - secrets
-  verbs:
-  - get
 - apiGroups:
   - sproozi.com
   resources:

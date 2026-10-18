@@ -67,6 +67,8 @@ graph LR
 The system uses separate namespaces:
 
 - `sproozi-system` holds the trusted controller, webhook, gateway and provider credentials.
+- `sproozi-webhooks` holds only webhook HMAC Secrets, the one place the webhook can read Secrets ([ADR 0022](../adr/0022-webhook-hmac-secrets-in-own-namespace.md)).
+- `sproozi-webhook-state` holds the webhook's replay records.
 - `sproozi-agents` holds untrusted agent Pods and their run identities, network policies and input contracts.
 - Approved target namespaces, such as `sproozi-demo`, hold resources that an agent can inspect.
 
