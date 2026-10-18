@@ -71,7 +71,8 @@ func TestCommandReferenceListsEachCommandsFlags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, section, _ := strings.Cut(string(data), "\n## Command flags\n")
+	text := strings.ReplaceAll(string(data), "\r\n", "\n")
+	_, section, _ := strings.Cut(text, "\n## Command flags\n")
 	section, _, _ = strings.Cut(section, "\n## ")
 	row := regexp.MustCompile("(?m)^\\| `([a-z]+)` \\| (.*) \\|$")
 	flagName := regexp.MustCompile("`--([a-z-]+)`")

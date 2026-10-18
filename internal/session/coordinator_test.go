@@ -19,6 +19,7 @@ import (
 	"github.com/andrewmccall/sproozi/internal/budget"
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
 	"github.com/andrewmccall/sproozi/internal/harness"
+	"github.com/andrewmccall/sproozi/internal/privatefs"
 	"github.com/google/uuid"
 )
 
@@ -665,8 +666,8 @@ func TestPrivateJournalAndCorruptionFailClosed(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if info.Mode().Perm()&0077 != 0 {
-			t.Fatal("private journal became public")
+		if err := privatefs.Check(path, info.IsDir()); err != nil {
+			t.Fatalf("private journal became public: %v", err)
 		}
 	}
 	record, err := c.Inspect(start.Source.ExecutionID)

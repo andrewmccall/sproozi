@@ -31,7 +31,8 @@ git push origin v0.1.0
 
 Replace `v0.1.0` with the new version. The **Releases** workflow builds the
 archives and a source bundle with vendored Go modules. It verifies checksums,
-tests each archive on its native runner, uploads a draft, downloads the assets
+tests each archive on its native runner, builds and tests the Homebrew source
+formula on macOS and Linux, uploads a draft, downloads the assets
 again and compares their hashes before publishing. A public release cannot be
 overwritten. An interrupted draft can be retried.
 

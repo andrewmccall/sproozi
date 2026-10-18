@@ -190,8 +190,17 @@ func fixture(t *testing.T) (Config, *fixturePlacement) {
 // no Git, so tests of configuration validation need no repository.
 func fixtureConfig(t *testing.T, repo string, p *fixturePlacement) Config {
 	t.Helper()
-	return Config{Directory: filepath.Join(testutil.PrivateDir(t), "catalog"), Principal: "hermes", Harness: harness.NativeCodex, Placement: executorKubernetes, InstructionDigest: hash([]byte(testInstructions)), Allowances: map[string]session.Allowance{fixtureModel: {Units: session.Limit{Bounded: true, Value: 100}}}, MaxDuration: time.Minute, MaxCheckpointBytes: testLimit, Repositories: map[string]Repository{repositorySproozi: {Snapshot: repo}}, Backend: p}
+	return Config{Directory: filepath.Join(testutil.PrivateDir(t), "catalog"), Principal: "hermes", Harness: harness.NativeCodex, Placement: executorKubernetes, InstructionDigest: hash([]byte(testInstructions)), Allowances: map[string]session.Allowance{fixtureModel: {Units: session.Limit{Bounded: true, Value: 100}}}, MaxDuration: time.Minute, MaxCheckpointBytes: testLimit, Repositories: map[string]Repository{repositorySproozi: {Snapshot: repo}}, Backend: p, Log: fixtureLog{t}}
 }
+
+type fixtureLog struct{ t *testing.T }
+
+func (l fixtureLog) Write(p []byte) (int, error) {
+	l.t.Helper()
+	l.t.Log(strings.TrimSpace(string(p)))
+	return len(p), nil
+}
+
 func submit(t *testing.T, o *Owner) View {
 	t.Helper()
 	v, e := o.Submit(t.Context(), Submit{RequestID: uuid.NewString(), Repository: repositorySproozi, Harness: harness.NativeCodex, Executor: executorKubernetes, Task: fixtureTask})
@@ -222,6 +231,9 @@ func waitPhase(t *testing.T, o *Owner, id string, want Phase) View {
 		}
 		if v.Phase == want {
 			return v
+		}
+		if v.Phase == phaseUnknown {
+			t.Fatalf("phase=%s want=%s problem=%s", v.Phase, want, v.Problem)
 		}
 		select {
 		case <-ctx.Done():
