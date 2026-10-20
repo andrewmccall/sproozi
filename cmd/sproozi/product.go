@@ -455,7 +455,12 @@ func (q *options) checkSocket() error {
 	if problem := home.SocketPathProblem(q.socket); problem != "" {
 		return errors.New(problem + "; use a shorter --socket path")
 	}
-	if info, err := os.Stat(q.socket); err == nil && info.Mode()&os.ModeSocket == 0 && runtime.GOOS != goosWindows {
+	// On Windows the socket is a named pipe, and stat opens it as a client,
+	// taking the instance the request needs.
+	if runtime.GOOS == goosWindows {
+		return nil
+	}
+	if info, err := os.Stat(q.socket); err == nil && info.Mode()&os.ModeSocket == 0 {
 		kind := "a regular file"
 		if info.IsDir() {
 			kind = "a directory"
