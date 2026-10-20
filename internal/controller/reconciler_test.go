@@ -29,6 +29,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	networkingv1 "k8s.io/api/networking/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 
@@ -768,5 +769,54 @@ func TestReconcilerSandboxDeletedOnTerminal(t *testing.T) {
 	}
 	if want := []string{k8sresources.RunName(run.UID)}; !slices.Equal(sc.Deleted, want) {
 		t.Fatalf("deleted sandboxes = %v, want %v", sc.Deleted, want)
+	}
+}
+
+// A lost write of the sandbox name made every later reconcile re-check the
+// existing Pod against the current runtime. Once those differed, the run
+// could never record its sandbox and timed out although the Pod completed.
+func TestReconcilerRecordsSandboxNameAfterStatusConflict(t *testing.T) {
+	t.Parallel()
+
+	run := newRun("run1")
+	run.Status.Phase = sprooziv1alpha1.AgentRunPhaseRunning
+	run.Status.Identity.ServiceAccountName = "sproozi-run1"
+	startedAt := metav1.NewTime(time.Now().Add(-time.Minute))
+	run.Status.StartedAt = &startedAt
+	live := fake.NewClientBuilder().
+		WithScheme(newScheme()).
+		WithObjects(append(fixtures(), run)...).
+		WithStatusSubresource(&sprooziv1alpha1.AgentRun{}).
+		Build()
+	conflicts := 1
+	c := interceptor.NewClient(live, interceptor.Funcs{
+		SubResourceUpdate: func(ctx context.Context, c client.Client, sub string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+			if r, ok := obj.(*sprooziv1alpha1.AgentRun); ok && r.Status.Identity.SandboxName != "" && conflicts > 0 {
+				conflicts--
+				// A concurrent writer changed the run since it was read.
+				var latest sprooziv1alpha1.AgentRun
+				if err := c.Get(ctx, client.ObjectKeyFromObject(r), &latest); err != nil {
+					return err
+				}
+				latest.Annotations = map[string]string{"touched": "true"}
+				if err := c.Update(ctx, &latest); err != nil {
+					return err
+				}
+				return apierrors.NewConflict(sprooziv1alpha1.GroupVersion.WithResource("agentruns").GroupResource(), r.Name, errors.New("modified"))
+			}
+			return c.SubResource(sub).Update(ctx, obj, opts...)
+		},
+	})
+	r := &controller.AgentRunReconciler{Client: c, APIReader: live, SandboxClient: &k8sresources.FakeSandboxClient{}}
+
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: run.Name, Namespace: testNS}}); err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+	var got sprooziv1alpha1.AgentRun
+	if err := live.Get(context.Background(), client.ObjectKeyFromObject(run), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status.Identity.SandboxName == "" || got.Annotations["touched"] != "true" {
+		t.Fatalf("sandbox name not recorded after a conflict: %+v", got.Status.Identity)
 	}
 }
