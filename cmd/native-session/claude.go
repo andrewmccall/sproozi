@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/andrewmccall/sproozi/internal/agentprofile"
 	"github.com/andrewmccall/sproozi/internal/harness"
 )
 
@@ -229,7 +231,15 @@ func prepareClaudeLaunch(c config, _ string, env []string) ([]string, []string, 
 	if err := installManagedClaudePlugin(claudePlugin); err != nil {
 		return nil, nil, err
 	}
-	args := claudeArguments(c, claudePlugin)
+	profile, err := loadProfile()
+	if err != nil {
+		return nil, nil, fmt.Errorf("profile: %w", err)
+	}
+	withSkills, err := installProfilePlugin(profilePlugin, profile)
+	if err != nil {
+		return nil, nil, err
+	}
+	args := claudeArguments(c, profile, withSkills)
 	env = append(env,
 		"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1", "DISABLE_AUTOUPDATER=1",
 		"CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false", "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1")
@@ -237,14 +247,18 @@ func prepareClaudeLaunch(c config, _ string, env []string) ([]string, []string, 
 }
 
 // claudeArguments keeps every setting source disabled. Sproozi instructions
-// follow the approved instructions; the skill and control connection come only
-// from the supervisor's plugin and MCP configuration.
-func claudeArguments(c config, plugin string) []string {
+// follow the approved instructions, and the profile's follow those; skills and
+// the control connection come only from the supervisor's plugins and MCP
+// configuration.
+func claudeArguments(c config, profile agentprofile.Profile, withSkills bool) []string {
 	tools := claudeBash + ",Skill"
 	args := []string{"--tools", tools, "--allowedTools", tools,
-		"--strict-mcp-config", "--mcp-config", c.ClientConfig.ClaudeMCPConfig(), "--plugin-dir", plugin,
-		"--setting-sources", "", "--settings", claudeSettings, "--permission-mode", "bypassPermissions",
-		"--append-system-prompt", c.Instructions + "\n\n" + harness.ManagedInstructions}
+		"--strict-mcp-config", "--mcp-config", c.ClientConfig.ClaudeMCPConfig(), "--plugin-dir", claudePlugin}
+	if withSkills {
+		args = append(args, "--plugin-dir", profilePlugin)
+	}
+	args = append(args, "--setting-sources", "", "--settings", claudeSettings, "--permission-mode", "bypassPermissions",
+		"--append-system-prompt", c.Instructions+"\n\n"+profileInstructions(profile))
 	if c.Model != "" {
 		args = append(args, "--model", c.Model)
 	}

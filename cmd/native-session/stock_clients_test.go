@@ -107,7 +107,7 @@ func TestStockCodexLoadsTheSprooziIntegration(t *testing.T) {
 	if err = os.WriteFile(filepath.Join(repository, "AGENTS.md"), []byte(hostileRepository), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err = installManagedCodex(home); err != nil {
+	if err = installManagedCodex(home, testProfile); err != nil {
 		t.Fatal(err)
 	}
 	c := config{Instructions: instructions, Model: "fixture",
@@ -138,10 +138,13 @@ func TestStockCodexLoadsTheSprooziIntegration(t *testing.T) {
 		strings.ReplaceAll(strings.Split(instructions, "\n")[0], `"`, `\"`),
 		managedHeading,
 		"- " + harness.ManagedSkillName + ":",
+		"- review: PROFILE_SKILL_MARKER",
+		profileMarker,
 		"diagnose",
 	})
-	if strings.Index(body, managedHeading) > strings.Index(body, "HOSTILE_REPOSITORY_INSTRUCTION") {
-		t.Fatal("repository instructions preceded the Sproozi environment instructions")
+	managed, profile := strings.Index(body, managedHeading), strings.Index(body, profileMarker)
+	if managed > profile || profile > strings.Index(body, "HOSTILE_REPOSITORY_INSTRUCTION") {
+		t.Fatal("expected Sproozi, then profile, then repository instructions")
 	}
 }
 
@@ -151,7 +154,8 @@ func TestStockClaudeLoadsTheSprooziIntegration(t *testing.T) {
 		t.Skip("stock Claude Code not installed")
 	}
 	root := t.TempDir()
-	plugin, repository := filepath.Join(root, "plugin"), filepath.Join(root, "workspace")
+	plugin, profile := filepath.Join(root, "plugin"), filepath.Join(root, "profile")
+	repository := filepath.Join(root, "workspace")
 	settings := filepath.Join(root, "settings.json")
 	if err = os.MkdirAll(repository, 0700); err != nil {
 		t.Fatal(err)
@@ -162,11 +166,15 @@ func TestStockClaudeLoadsTheSprooziIntegration(t *testing.T) {
 	if err = installManagedClaudePlugin(plugin); err != nil {
 		t.Fatal(err)
 	}
+	if _, err = installProfilePlugin(profile, testProfile); err != nil {
+		t.Fatal(err)
+	}
 	if err = installClaudeJSON(settings, map[string]any{claudeHooksKey: map[string]any{}}); err != nil {
 		t.Fatal(err)
 	}
 	c := config{Instructions: instructions, ClientConfig: &harness.NativeClientConfig{MCPGateway: controlServer(t).URL}}
-	launch := fixedPath(claudeArguments(c, plugin), claudeSettings, settings)
+	launch := fixedPath(fixedPath(fixedPath(claudeArguments(c, testProfile, true),
+		claudeSettings, settings), claudePlugin, plugin), profilePlugin, profile)
 	args := append([]string{"-p", "fixture prompt", "--max-turns", "1"}, launch...)
 	env := []string{"HOME=" + root, "CLAUDE_CONFIG_DIR=" + filepath.Join(root, "claude"),
 		"ANTHROPIC_BASE_URL=FIXTURE_PROVIDER_URL", "ANTHROPIC_API_KEY=fixture",
@@ -176,6 +184,8 @@ func TestStockClaudeLoadsTheSprooziIntegration(t *testing.T) {
 		strings.Split(instructions, "\n")[0],
 		managedHeading,
 		"- sproozi:" + harness.ManagedSkillName + ":",
+		"- profile:review: PROFILE_SKILL_MARKER",
+		profileMarker,
 		`"name":"mcp__sproozi__diagnose"`,
 	})
 	if strings.Contains(body, "HOSTILE_REPOSITORY_INSTRUCTION") {

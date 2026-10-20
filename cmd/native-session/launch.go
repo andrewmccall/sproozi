@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/nativepty"
@@ -75,7 +76,11 @@ func prepareCodexLaunch(c config, thread string, env []string) ([]string, []stri
 	if err := installCodexProjectTrust(nativeHome); err != nil {
 		return nil, nil, err
 	}
-	if err := installManagedCodex(nativeHome); err != nil {
+	profile, err := loadProfile()
+	if err != nil {
+		return nil, nil, fmt.Errorf("profile: %w", err)
+	}
+	if err := installManagedCodex(nativeHome, profile); err != nil {
 		return nil, nil, err
 	}
 	return codexArguments(c, thread), append(env, "CODEX_HOME="+nativeHome), nil
