@@ -20,8 +20,8 @@ Run:
 sproozi init
 ```
 
-This creates `%APPDATA%\sproozi` with private Windows permissions and prints its
-path. It grants access to your account and SYSTEM. It rejects an existing
+This creates `%USERPROFILE%\.sproozi` with private Windows permissions, and the
+`profile` folder inside it, and prints its path. It grants access to your account and SYSTEM. It rejects an existing
 directory that grants access to other ordinary users. It does not change
 permissions on existing files.
 
@@ -34,10 +34,10 @@ Use absolute Windows paths in configuration. Escape backslashes in JSON:
 
 ```json
 {
-  "directory": "C:\\Users\\you\\AppData\\Roaming\\sproozi\\home",
+  "directory": "C:\\Users\\you\\.sproozi\\state",
   "dockerBinary": "C:\\Program Files\\Docker\\Docker\\resources\\bin\\docker.exe",
   "dockerSocket": "npipe:////./pipe/dockerDesktopLinuxEngine",
-  "dockerConfig": "C:\\Users\\you\\AppData\\Roaming\\sproozi\\docker"
+  "dockerConfig": "C:\\Users\\you\\.sproozi\\docker"
 }
 ```
 

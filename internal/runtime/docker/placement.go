@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/netip"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
@@ -206,7 +207,9 @@ func (p *Placement) spec(r placementRecord, role string) ManagedSpec {
 	if role != roleAnchor {
 		spec.Volume = r.Volume
 	}
-	if role == roleAgent {
+	// Docker Desktop on Windows may report a translated bind source that exact
+	// adoption cannot match; Windows hosts keep the unmounted contract.
+	if role == roleAgent && runtime.GOOS != "windows" {
 		spec.ProfileDirectory = p.config.ProfileDirectory
 	}
 	return spec

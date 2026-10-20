@@ -102,7 +102,7 @@ the normal in-cluster client configuration. Required backend permissions are:
 | --- | --- | --- |
 | Configured Run namespace | `sproozi.com/agentruns` | `get`, `create`, `patch` |
 | Configured Run namespace | `sproozi.com/agenttemplates`, `agentpolicies`, `agentruntimes` | `get` |
-| Configured Run namespace | Core `configmaps` for registrations and accounts | `get`, `create`, `update` |
+| Configured Run namespace | Core `configmaps` for registrations, accounts and stored profiles | `get`, `create`, `update` |
 | `sproozi-agents` | Core `pods` | `get`, `patch`, `delete` |
 | `sproozi-agents` | Core `pods/exec` | `create` |
 

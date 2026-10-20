@@ -35,8 +35,9 @@ personal-session adoption are not part of this workflow.
 3. Configure the [home daemon](../../cmd/sproozi/README.md) with one private JSON
    file. It selects local Docker images/network, gateway TLS/provider credential
    files, finite allowances and named remote executors. Keep it outside any
-   transferred repository. Use `--config FILE` consistently or put it at the
-   platform's user configuration directory under `sproozi/config.json`.
+   transferred repository. Use `--config FILE` consistently or put it at
+   `~/.sproozi/config.json`. Your [profile](../reference/profile.md) lives
+   beside it in `~/.sproozi/profile`.
 4. Configure scoped GitHub access through the existing GitHub App gateway for
    engineering work. Use approved repositories/base branches and finite budgets.
    The worker gets a placeholder `GH_TOKEN`, never the App private key. Add the

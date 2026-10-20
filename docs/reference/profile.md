@@ -69,6 +69,24 @@ Executable bits on skill files are kept.
 `/etc/sproozi/profile`. The agent cannot change it. Changes reach a session at
 its next launch: `start`, `resume` or a move back to Docker.
 
+**Kubernetes.** A Kubernetes visit gets the profile as it was when the visit
+was launched:
+
+- `move` archives the profile when it creates the destination launch. A
+  retried or recovered move sends the same archive.
+- `run` sends the profile with the submission. Retrying the same
+  `--operation` after editing the profile is rejected as a conflict.
+
+The executor stores each archive once as an immutable ConfigMap named
+`sproozi-profile-<digest prefix>` in its run namespace. The controller checks
+the archive against its digest, copies it into the run's contract and mounts it
+at `/etc/sproozi/profile-archive/profile.tar.gz`. An empty profile sends
+nothing.
+
+Stored profiles are not deleted, like session registrations. Each distinct
+profile adds one ConfigMap; an administrator can delete ones no retained
+session still names.
+
 ## Limitations
 
 - On Linux hosts, the agent container runs as UID 1000. Profile files and
@@ -76,4 +94,11 @@ its next launch: `start`, `resume` or a move back to Docker.
   not.
 - The Docker engine must be able to bind-mount the profile folder. Docker
   Desktop shares your home directory by default.
+- On Windows hosts, Docker sessions do not receive the profile yet; moves to
+  Kubernetes still carry it.
+- A compressed profile over 640 KiB cannot go to Kubernetes; `run` and `move`
+  refuse it.
 - Ordinary AgentRuns do not receive the profile.
+
+[ADR 0026](../adr/0026-user-profile-for-managed-sessions.md) records the
+design and its tradeoffs.
