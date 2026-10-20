@@ -231,7 +231,7 @@ func prepareClaudeLaunch(c config, _ string, env []string) ([]string, []string, 
 	if err := installManagedClaudePlugin(claudePlugin); err != nil {
 		return nil, nil, err
 	}
-	profile, err := loadProfile()
+	profile, err := loadProfile(c)
 	if err != nil {
 		return nil, nil, fmt.Errorf("profile: %w", err)
 	}

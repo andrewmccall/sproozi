@@ -538,11 +538,7 @@ func TestProfileFolderIsBesideTheConfigurationFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolved, err := filepath.EvalSymlinks(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if c.Local.ProfileDirectory != filepath.Join(resolved, ProfileFolder) {
+	if c.Local.ProfileDirectory != filepath.Join(dir, ProfileFolder) {
 		t.Fatalf("profile folder = %q", c.Local.ProfileDirectory)
 	}
 }

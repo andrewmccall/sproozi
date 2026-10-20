@@ -36,7 +36,7 @@ const (
 	MaxBytes             = 4 << 20
 	// MaxArchiveBytes keeps the compressed archive, base64 encoded, inside one
 	// Kubernetes ConfigMap.
-	MaxArchiveBytes = 640 << 10
+	MaxArchiveBytes = harness.NativeProfileArchiveMaxBytes
 	// EncodedArchiveBytes bounds an archive carried as base64 in JSON.
 	EncodedArchiveBytes = ((MaxArchiveBytes + 2) / 3) * 4
 )

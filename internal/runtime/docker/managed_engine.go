@@ -10,7 +10,6 @@ import (
 	"io"
 	"net/netip"
 	"os/exec"
-	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
@@ -79,23 +78,14 @@ func (e *Engine) volume(ctx context.Context, v Volume) (Volume, error) {
 	return v, nil
 }
 
-// ProfileMountPath is where the agent container sees the user's profile
-// folder, mounted read-only and live from the home.
-const ProfileMountPath = harness.NativeProfileDirectory
-
-const bindMount = "bind"
-
 type ManagedSpec struct {
 	Name, Execution, ImageID, Role, NetworkMode string
 	IntentDigest                                string
 	Volume                                      *Volume
-	// ProfileDirectory is the absolute host folder mounted read-only at
-	// ProfileMountPath; agent containers only.
-	ProfileDirectory            string
-	MemoryBytes, CPUMilli, PIDs int64
-	Deadline                    string
-	GatewayIPv4                 string
-	GatewayPort                 uint16
+	MemoryBytes, CPUMilli, PIDs                 int64
+	Deadline                                    string
+	GatewayIPv4                                 string
+	GatewayPort                                 uint16
 }
 
 func (s ManagedSpec) command() ([]string, error) {
@@ -117,9 +107,6 @@ func (s ManagedSpec) command() ([]string, error) {
 func (e *Engine) EnsureManaged(ctx context.Context, s ManagedSpec) (Instance, error) {
 	if !resourceName.MatchString(s.Name) || !resourceName.MatchString(s.Execution) || !strings.HasPrefix(s.ImageID, "sha256:") || !objectID.MatchString(strings.TrimPrefix(s.ImageID, "sha256:")) || s.MemoryBytes < 16<<20 || s.MemoryBytes > 16<<30 || s.CPUMilli < 1 || s.CPUMilli > 16000 || s.PIDs < 1 || s.PIDs > 1024 {
 		return Instance{}, errors.New("invalid managed Docker limits")
-	}
-	if s.ProfileDirectory != "" && (s.Role != roleAgent || !validProfileDirectory(s.ProfileDirectory)) {
-		return Instance{}, errors.New("invalid managed Docker profile mount")
 	}
 	cmd, err := s.command()
 	if err != nil {
@@ -151,9 +138,6 @@ func (e *Engine) EnsureManaged(ctx context.Context, s ManagedSpec) (Instance, er
 				return Instance{}, err
 			}
 			args = append(args, "--mount", "type=volume,source="+s.Volume.Name+",target=/workspace,volume-nocopy")
-		}
-		if s.ProfileDirectory != "" {
-			args = append(args, "--mount", "type="+bindMount+",source="+s.ProfileDirectory+",target="+ProfileMountPath+",readonly")
 		}
 		args = append(args, "--entrypoint", cmd[0], s.ImageID)
 		args = append(args, cmd[1:]...)
@@ -218,51 +202,19 @@ func (e *Engine) VerifyManaged(ctx context.Context, i Instance, s ManagedSpec) e
 	if !reflect.DeepEqual(h.Tmpfs, tmpfs) {
 		return errors.New("docker temporary storage contract changed")
 	}
-	if !matchesManagedMounts(r.Mounts, s) {
-		return errors.New("docker workspace or profile mount changed")
-	}
-	if s.Volume != nil {
+	if s.Volume == nil {
+		if len(r.Mounts) != 0 {
+			return errors.New("docker unexpected mount")
+		}
+	} else {
+		if len(r.Mounts) != 1 || r.Mounts[0].Type != volumeCommand || r.Mounts[0].Name != s.Volume.Name || r.Mounts[0].Destination != "/workspace" || !r.Mounts[0].RW {
+			return errors.New("docker workspace mount changed")
+		}
 		if _, err = e.volume(ctx, *s.Volume); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-// matchesManagedMounts accepts exactly the writable workspace volume and the
-// read-only profile folder that the spec names, in any order.
-func matchesManagedMounts(mounts []managedMount, s ManagedSpec) bool {
-	want := 0
-	for _, m := range mounts {
-		switch {
-		case s.Volume != nil && m.Type == volumeCommand && m.Name == s.Volume.Name && m.Destination == "/workspace" && m.RW:
-		case s.ProfileDirectory != "" && m.Type == bindMount && sameHostPath(m.Source, s.ProfileDirectory) &&
-			m.Destination == ProfileMountPath && !m.RW:
-		default:
-			return false
-		}
-		want++
-	}
-	expected := 0
-	if s.Volume != nil {
-		expected++
-	}
-	if s.ProfileDirectory != "" {
-		expected++
-	}
-	return want == expected
-}
-
-// sameHostPath accepts the engine's report of a bind source. Docker Desktop's
-// raw engine socket reports host paths under a mount prefix such as
-// /host_mnt; the absolute host path must still match in full.
-func sameHostPath(reported, host string) bool {
-	return reported == host || strings.HasSuffix(reported, host)
-}
-
-// validProfileDirectory keeps the path expressible in a --mount argument.
-func validProfileDirectory(path string) bool {
-	return filepath.IsAbs(path) && filepath.Clean(path) == path && !strings.ContainsAny(path, ",=\"\n")
 }
 func (e *Engine) NativeOperation(ctx context.Context, i Instance, op harness.NativeOp, input []byte) ([]byte, error) {
 	switch op {
@@ -271,7 +223,7 @@ func (e *Engine) NativeOperation(ctx context.Context, i Instance, op harness.Nat
 			return nil, errors.New("unexpected native operation input")
 		}
 	case harness.NativeConfigure:
-		if len(input) > 256<<10 {
+		if len(input) > harness.NativeConfigureMaxBytes {
 			return nil, errors.New("native configuration exceeds limit")
 		}
 	default:
@@ -438,11 +390,10 @@ type managedInspection struct {
 		Labels          map[string]string
 	}
 	HostConfig managedHost
-	Mounts     []managedMount
-}
-type managedMount struct {
-	Type, Name, Source, Destination string
-	RW                              bool
+	Mounts     []struct {
+		Type, Name, Destination string
+		RW                      bool
+	}
 }
 
 func matchesManagedLaunch(r managedInspection, i Instance, s ManagedSpec, cmd []string) bool {

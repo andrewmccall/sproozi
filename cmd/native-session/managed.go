@@ -21,24 +21,24 @@ const (
 	profilePlugin = "/tmp/sproozi-native/profile-plugin"
 )
 
-// Docker mounts the user's live profile folder read-only; Kubernetes mounts
-// the profile archive recorded for the session.
-var (
-	profileDirectory = harness.NativeProfileDirectory
-	profileArchive   = harness.NativeProfileArchive
-)
+// profileArchive is where Kubernetes mounts the session's stored profile.
+var profileArchive = harness.NativeProfileArchive
 
-// loadProfile reads the profile this launch received. Without either mount
-// the session has an empty profile.
-func loadProfile() (agentprofile.Profile, error) {
-	data, err := os.ReadFile(profileArchive)
-	if err == nil {
-		return agentprofile.FromArchive(data)
+// loadProfile reads the profile this launch received: from its Docker launch
+// configuration, or from the archive Kubernetes mounts. Without either the
+// session has an empty profile.
+func loadProfile(c config) (agentprofile.Profile, error) {
+	if len(c.ProfileArchive) > 0 {
+		return agentprofile.FromArchive(c.ProfileArchive)
 	}
-	if !errors.Is(err, fs.ErrNotExist) {
+	data, err := os.ReadFile(profileArchive)
+	if errors.Is(err, fs.ErrNotExist) {
+		return agentprofile.Profile{}, nil
+	}
+	if err != nil {
 		return agentprofile.Profile{}, err
 	}
-	return agentprofile.LoadDirectory(profileDirectory)
+	return agentprofile.FromArchive(data)
 }
 
 // profileInstructions follows the Sproozi text with the user's instructions.

@@ -76,7 +76,7 @@ func prepareCodexLaunch(c config, thread string, env []string) ([]string, []stri
 	if err := installCodexProjectTrust(nativeHome); err != nil {
 		return nil, nil, err
 	}
-	profile, err := loadProfile()
+	profile, err := loadProfile(c)
 	if err != nil {
 		return nil, nil, fmt.Errorf("profile: %w", err)
 	}

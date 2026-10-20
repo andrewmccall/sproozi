@@ -71,9 +71,9 @@ Tests must check:
   request must contain all three beside unchanged approved instructions, and
   repository `AGENTS.md` or `CLAUDE.md` must not remove them.
 - A managed session receives the user's profile after the Sproozi
-  instructions: Docker reads the live folder through a read-only mount that
-  adoption verifies, and a Kubernetes visit reads the archive named by its
-  launch digest, which the executor and the controller each verify. A retried
+  instructions: a Docker launch carries the profile archive in its native
+  configuration, without any host mount, and a Kubernetes visit reads the
+  archive named by its launch digest, which the executor and the controller each verify. A retried
   move sends the archive its launch named, and a profile over the ConfigMap
   limit is refused before submission.
 

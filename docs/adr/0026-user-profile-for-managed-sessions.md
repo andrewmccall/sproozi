@@ -1,4 +1,4 @@
-# One user profile, mounted live in Docker and stored by digest for Kubernetes
+# One user profile, sent with each Docker launch and stored by digest for Kubernetes
 
 Status: accepted
 Date: 2026-10-20
@@ -40,7 +40,7 @@ The home takes its location from the configuration file's location, never from
 its contents. `sproozi init` creates it. Sproozi never reads `~/.codex` or
 `~/.claude`.
 
-**One set of rules.** `internal/agentprofile` reads the live folder or a
+**One set of rules.** `internal/agentprofile` reads the folder or a
 reproducible tar.gz archive with the same validation: regular files only, no
 `sproozi-access` skill, 512 files, 4 MiB, 64 KiB of instructions, and a
 compressed archive of at most 640 KiB so it fits a ConfigMap. Its digest is
@@ -52,9 +52,13 @@ Profile skills sit beside `sproozi-access` for Codex and form a `profile`
 plugin for Claude Code. Each launch rebuilds them. Approved instructions and
 their digest are unchanged.
 
-**Docker sees the live folder.** The agent container mounts the profile folder
-read-only at `/etc/sproozi/profile`. Adoption accepts exactly the workspace
-volume and that mount.
+**Docker launches carry the archive.** When the home prepares a Docker visit it
+archives the profile folder and sends it in the launch configuration over the
+supervisor's control channel. The container keeps its workspace-only mount
+contract on every host platform. An earlier version bind-mounted the folder
+read-only; Docker Desktop reported the source under `/host_mnt` on macOS and an
+unverified form on Windows, so exact mount adoption needed platform-specific
+matching and Windows was left without a profile.
 
 **Kubernetes visits get the archive taken when the visit was launched.** A move
 archives the profile into the home's content-addressed store as it creates the
@@ -83,9 +87,12 @@ program is a remote executor in documentation, matching `--executor`.
   by the owner as more than a demo needs.
 - **Several named profiles selected by `--profile`, project or workspace.**
   Rejected for now as additional concepts without a demonstrated need.
-- **A snapshot for Docker too, refreshed by `resume --update-profile`.** The
-  owner chose the live folder for Docker. With every Kubernetes visit starting
+- **A snapshot for Docker too, refreshed by `resume --update-profile`.** Docker
+  reads the folder at each launch. With every Kubernetes visit also starting
   from the home, the flag had no remaining case, so it was not built.
+- **A read-only bind mount of the live folder.** Built first at the owner's
+  request, then replaced: Docker reports bind sources differently by platform
+  and engine socket, and exact mount adoption could not match them all.
 - **Carry the profile inside the checkpoint artifact.** Moves would get it
   without new storage, but `run` has no checkpoint and the checkpoint is
   defined as work, not configuration.
@@ -101,16 +108,12 @@ program is a remote executor in documentation, matching `--executor`.
   what its first launch showed the model: Codex in its history, Claude Code in
   its saved system prompt and skill listing. Each launch still installs the
   current files; session mobility checks the rendered profile per visit.
-- A compressed profile over 640 KiB cannot go to Kubernetes.
+- A compressed profile over 640 KiB cannot be sent to Docker or Kubernetes.
+  The native configure bound grows by the encoded archive size.
 - Stored profiles, like registrations, are never deleted. Each distinct profile
   sent to an executor adds one ConfigMap.
 - The digest is part of a visit's launch, so editing the profile between
   retries of the same `run` operation is a conflict.
-- On Linux hosts the profile must be readable by container UID 1000; `doctor`
-  warns otherwise. Docker must be able to bind-mount the folder.
-- Windows hosts do not mount the profile into Docker: Docker Desktop may report
-  a translated bind source that exact adoption would refuse, and this was not
-  verified. Their moves to Kubernetes still carry it.
 - The agent can read its profile but not change the source. As in ADR 0025, it
   can edit its own copies inside the session until the next launch.
 - Default configuration moved from the platform configuration directory to

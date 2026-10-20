@@ -404,7 +404,7 @@ func (s *server) handle(conn net.Conn) {
 	defer func() { _ = conn.Close() }()
 	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
 	scanner := bufio.NewScanner(conn)
-	scanner.Buffer(make([]byte, 4096), 256<<10)
+	scanner.Buffer(make([]byte, 4096), harness.NativeConfigureMaxBytes+64<<10)
 	if !scanner.Scan() {
 		return
 	}
@@ -527,7 +527,7 @@ func control(op harness.NativeOp) error {
 	}
 	if op == harness.NativeConfigure {
 		var c config
-		decoder := json.NewDecoder(io.LimitReader(os.Stdin, 256<<10))
+		decoder := json.NewDecoder(io.LimitReader(os.Stdin, harness.NativeConfigureMaxBytes))
 		decoder.DisallowUnknownFields()
 		if err = decoder.Decode(&c); err != nil {
 			return err

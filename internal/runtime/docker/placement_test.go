@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/agentprofile"
 	"github.com/andrewmccall/sproozi/internal/testutil"
 
 	"github.com/andrewmccall/sproozi/internal/harness"
@@ -52,8 +53,11 @@ type fakeContainer struct {
 		PidsLimit                           *int64
 		Tmpfs                               map[string]string
 	}
-	Mounts []managedMount
-	State  struct {
+	Mounts []struct {
+		Type, Name, Destination string
+		RW                      bool
+	}
+	State struct {
 		Running bool
 		Status  string
 		Pid     int
@@ -203,24 +207,16 @@ func (f *fakeDocker) createCommand(args []string) ([]byte, error) {
 			k, value, _ := strings.Cut(v, ":")
 			c.HostConfig.Tmpfs[k] = value
 		case "--mount":
-			m := managedMount{RW: true}
+			var name string
 			for field := range strings.SplitSeq(v, ",") {
-				key, value, _ := strings.Cut(field, "=")
-				switch key {
-				case "type":
-					m.Type = value
-				case "source":
-					m.Source = value
-				case "target":
-					m.Destination = value
-				case "readonly":
-					m.RW = false
+				if source, ok := strings.CutPrefix(field, "source="); ok {
+					name = source
 				}
 			}
-			if m.Type == volumeCommand {
-				m.Name, m.Source = m.Source, ""
-			}
-			c.Mounts = append(c.Mounts, m)
+			c.Mounts = append(c.Mounts, struct {
+				Type, Name, Destination string
+				RW                      bool
+			}{volumeCommand, name, "/workspace", true})
 		}
 	}
 	f.containers[c.ID] = c
@@ -791,70 +787,68 @@ func TestPreparedNativeLaunchCarriesTaskAndIndependentRolloutLimit(t *testing.T)
 	}
 }
 
-// Only the agent sees the profile, read-only and live, and a container whose
-// profile mount was made writable or redirected is not adopted.
-func TestAgentMountsTheLiveProfileReadOnly(t *testing.T) {
+func writeProfileFixture(t *testing.T, folder, skill, instructions string) {
+	t.Helper()
+	path := filepath.Join(folder, "skills", skill, "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("---\nname: "+skill+"\ndescription: Fixture skill\n---\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(folder, "AGENTS.md"), []byte(instructions), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The profile travels in the launch configuration, so the agent container
+// keeps its workspace-only mount contract on every host platform.
+func TestLaunchConfigurationCarriesTheProfileAsItIsNow(t *testing.T) {
 	t.Parallel()
 	data := fixtureArtifact(t)
 	l := fixtureLaunch(t, data)
 	f := newFakeDocker()
 	a := &fakeAuthority{engine: f}
 	config := fixtureConfig()
-	config.ProfileDirectory = "/Users/fixture/.sproozi/profile"
+	config.ProfileDirectory = filepath.Join(t.TempDir(), "profile")
+	writeProfileFixture(t, config.ProfileDirectory, "review", "Profile instructions")
 	p := openFixtureWith(t, testutil.PrivateDir(t), f, a, config)
-	inc, err := p.Prepare(context.Background(), l, data)
-	if err != nil {
+	if _, err := p.Prepare(context.Background(), l, data); err != nil {
 		t.Fatal(err)
 	}
-	profileMounts := 0
-	var agent *fakeContainer
+	found := false
 	for _, c := range f.containers {
-		for _, m := range c.Mounts {
-			if m.Type == bindMount {
-				profileMounts++
-				agent = c
-				if m.Source != config.ProfileDirectory || m.Destination != ProfileMountPath || m.RW {
-					t.Fatalf("profile mount = %+v", m)
-				}
-			}
+		if len(c.Mounts) > 1 {
+			t.Fatalf("container %s gained a mount: %+v", c.Name, c.Mounts)
 		}
-	}
-	if profileMounts != 1 || !strings.HasSuffix(agent.Name, "-"+roleAgent) {
-		t.Fatalf("profile mounts = %d on %v", profileMounts, agent)
-	}
-	// Docker Desktop's raw engine socket reports the host path under a prefix.
-	for i, m := range agent.Mounts {
-		if m.Type == bindMount {
-			agent.Mounts[i].Source = "/host_mnt" + m.Source
+		if len(c.configured) == 0 {
+			continue
 		}
-	}
-	if err = p.Activate(context.Background(), l, inc); err != nil {
-		t.Fatalf("prefixed host path refused: %v", err)
-	}
-	for _, tamper := range []func(*managedMount){
-		func(m *managedMount) { m.RW = true },
-		func(m *managedMount) { m.Source = "/host_mnt/Users/fixture/.sproozi/other" },
-		func(m *managedMount) { m.Source = config.ProfileDirectory + "-other" },
-	} {
-		for i, m := range agent.Mounts {
-			if m.Type == bindMount {
-				original := m
-				tamper(&agent.Mounts[i])
-				if err = p.Activate(context.Background(), l, inc); err == nil {
-					t.Fatalf("tampered profile mount %+v adopted", agent.Mounts[i])
-				}
-				agent.Mounts[i] = original
-			}
+		var launch harness.NativeLaunch
+		if err := json.Unmarshal(c.configured, &launch); err != nil {
+			t.Fatal(err)
 		}
+		profile, err := agentprofile.FromArchive(launch.ProfileArchive)
+		if err != nil || profile.Instructions != "Profile instructions" || len(profile.Skills) != 1 {
+			t.Fatalf("configured profile=%+v err=%v", profile, err)
+		}
+		found = true
+	}
+	if !found {
+		t.Fatal("agent was not configured")
 	}
 }
 
-func TestPlacementRejectsAnUnmountableProfileFolder(t *testing.T) {
-	for _, folder := range []string{"relative/profile", "/a,b/profile", "/a/../profile"} {
-		config := fixtureConfig()
-		config.ProfileDirectory = folder
-		if config.validate() == nil {
-			t.Fatalf("profile folder %q accepted", folder)
-		}
+func TestInvalidProfileStopsPreparation(t *testing.T) {
+	t.Parallel()
+	data := fixtureArtifact(t)
+	l := fixtureLaunch(t, data)
+	f := newFakeDocker()
+	config := fixtureConfig()
+	config.ProfileDirectory = filepath.Join(t.TempDir(), "profile")
+	writeProfileFixture(t, config.ProfileDirectory, "sproozi-access", "Profile instructions")
+	p := openFixtureWith(t, testutil.PrivateDir(t), f, &fakeAuthority{engine: f}, config)
+	if _, err := p.Prepare(context.Background(), l, data); err == nil || !strings.Contains(err.Error(), "profile") {
+		t.Fatalf("prepare with reserved profile skill = %v", err)
 	}
 }

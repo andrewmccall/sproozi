@@ -27,8 +27,8 @@ func initialize(directory string, out io.Writer) error {
 	if err = privatefs.EnsureDir(absolute); err != nil {
 		return err
 	}
-	// The agent container reads the profile, so it is not private like the
-	// directory holding credentials.
+	// The profile holds guidance, not credentials, so it keeps ordinary
+	// permissions inside the private directory.
 	if err = os.MkdirAll(filepath.Join(absolute, home.ProfileFolder, "skills"), 0755); err != nil {
 		return err
 	}

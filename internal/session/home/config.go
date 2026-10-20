@@ -129,16 +129,10 @@ func ReadConfig(path string) (Config, error) {
 	if err != nil {
 		return c, err
 	}
-	// Resolve the existing configuration directory so Docker reports the same
-	// host path it was given, for example /private/tmp rather than /tmp.
-	directory := filepath.Dir(absolute)
-	if resolved, err := filepath.EvalSymlinks(directory); err == nil {
-		directory = resolved
-	}
-	c.Local.ProfileDirectory = filepath.Join(directory, ProfileFolder)
+	c.Local.ProfileDirectory = filepath.Join(filepath.Dir(absolute), ProfileFolder)
 	return c, nil
 }
 
-// ProfileFolder is the user's profile, beside the configuration file. Docker
-// sessions see it live and read-only.
+// ProfileFolder is the user's profile, beside the configuration file. Each
+// Docker launch sends it as it is then.
 const ProfileFolder = "profile"

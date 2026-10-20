@@ -36,6 +36,9 @@ type NativeLaunch struct {
 	Options           []string            `json:"options,omitempty"`
 	Gateway           *NativeGateway      `json:"gateway,omitempty"`
 	TrustBundlePEM    []byte              `json:"trustBundlePEM,omitempty"`
+	// ProfileArchive is the user's profile for a Docker launch. Kubernetes
+	// mounts the stored archive at NativeProfileArchive instead.
+	ProfileArchive []byte `json:"profileArchive,omitempty"`
 }
 
 // NativeGateway projects a fresh workload token only at activation. Its fixed
@@ -55,10 +58,13 @@ const (
 	NativeLocalTrustBundle   = "/tmp/sproozi-native/ca.pem"
 	NativeGatewayTokenPath   = "/var/run/sproozi/tokens/gateway/token"
 	NativeGatewayTrustBundle = "/etc/sproozi/trust/ca-bundle.pem"
-	// NativeProfileArchive is the session's stored profile on Kubernetes;
-	// NativeProfileDirectory is the live folder Docker mounts.
-	NativeProfileArchive   = "/etc/sproozi/profile-archive/profile.tar.gz"
-	NativeProfileDirectory = "/etc/sproozi/profile"
+	// NativeProfileArchive is the session's stored profile on Kubernetes.
+	NativeProfileArchive = "/etc/sproozi/profile-archive/profile.tar.gz"
+	// NativeProfileArchiveMaxBytes bounds a compressed profile so it fits a
+	// ConfigMap; NativeConfigureMaxBytes leaves room for it, base64 encoded,
+	// beside the rest of a launch configuration.
+	NativeProfileArchiveMaxBytes = 640 << 10
+	NativeConfigureMaxBytes      = 256<<10 + ((NativeProfileArchiveMaxBytes+2)/3)*4
 )
 
 func (g NativeGateway) Validate(env []string) error {
@@ -160,7 +166,8 @@ func (c NativeLaunch) Validate(now time.Time) error {
 		return err
 	}
 	if !c.Deadline.After(now) || (c.ThreadID != "" && !codexThreadID.MatchString(c.ThreadID)) ||
-		c.Env == nil || c.RolloutMaxBytes <= 0 || c.RolloutMaxBytes > NativeRolloutMaxBytes {
+		c.Env == nil || c.RolloutMaxBytes <= 0 || c.RolloutMaxBytes > NativeRolloutMaxBytes ||
+		len(c.ProfileArchive) > NativeProfileArchiveMaxBytes {
 		return errors.New("invalid native launch contract")
 	}
 	if len(c.Task) > 32<<10 || strings.ContainsRune(c.Task, 0) ||

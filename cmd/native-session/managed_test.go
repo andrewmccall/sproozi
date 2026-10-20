@@ -114,28 +114,22 @@ func TestClaudeProfilePluginIsOnlyLoadedWithSkills(t *testing.T) {
 	}
 }
 
-// Kubernetes mounts the session's archive; Docker mounts the live folder.
-func TestLoadProfilePrefersTheSessionArchive(t *testing.T) {
+// Docker sends the profile in the launch configuration; Kubernetes mounts the
+// session's stored archive.
+func TestLoadProfileFromLaunchOrStoredArchive(t *testing.T) {
 	root := t.TempDir()
-	profileDirectory, profileArchive = filepath.Join(root, "profile"), filepath.Join(root, "archive", "profile.tar.gz")
-	t.Cleanup(func() {
-		profileDirectory, profileArchive = harness.NativeProfileDirectory, harness.NativeProfileArchive
-	})
-	if p, err := loadProfile(); err != nil || p.Instructions != "" || len(p.Skills) != 0 {
+	profileArchive = filepath.Join(root, "archive", "profile.tar.gz")
+	t.Cleanup(func() { profileArchive = harness.NativeProfileArchive })
+	if p, err := loadProfile(config{}); err != nil || p.Instructions != "" || len(p.Skills) != 0 {
 		t.Fatalf("missing profile=%+v err=%v", p, err)
-	}
-	if err := os.MkdirAll(profileDirectory, 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(profileDirectory, "AGENTS.md"), []byte("live"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if p, err := loadProfile(); err != nil || p.Instructions != "live" {
-		t.Fatalf("live profile=%+v err=%v", p, err)
 	}
 	archive, _, err := testProfile.Archive()
 	if err != nil {
 		t.Fatal(err)
+	}
+	p, err := loadProfile(config{ProfileArchive: archive})
+	if err != nil || p.Instructions != profileMarker || len(p.Skills) != 1 {
+		t.Fatalf("launch profile=%+v err=%v", p, err)
 	}
 	if err = os.MkdirAll(filepath.Dir(profileArchive), 0700); err != nil {
 		t.Fatal(err)
@@ -143,14 +137,17 @@ func TestLoadProfilePrefersTheSessionArchive(t *testing.T) {
 	if err = os.WriteFile(profileArchive, archive, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if p, err := loadProfile(); err != nil || p.Instructions != profileMarker || len(p.Skills) != 1 {
-		t.Fatalf("archived profile=%+v err=%v", p, err)
+	if p, err := loadProfile(config{}); err != nil || p.Instructions != profileMarker || len(p.Skills) != 1 {
+		t.Fatalf("stored profile=%+v err=%v", p, err)
+	}
+	if _, err := loadProfile(config{ProfileArchive: archive[:len(archive)/2]}); err == nil {
+		t.Fatal("damaged launch archive accepted")
 	}
 	if err = os.WriteFile(profileArchive, archive[:len(archive)/2], 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := loadProfile(); err == nil {
-		t.Fatal("damaged archive accepted")
+	if _, err := loadProfile(config{}); err == nil {
+		t.Fatal("damaged stored archive accepted")
 	}
 }
 

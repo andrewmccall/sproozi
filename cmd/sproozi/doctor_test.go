@@ -41,7 +41,7 @@ func runDoctor(t *testing.T, root string) (string, error) {
 	return out.String(), err
 }
 
-func TestDoctorReportsTheProfileAndItsKubernetesSize(t *testing.T) {
+func TestDoctorReportsTheProfileAndItsSize(t *testing.T) {
 	root := testutil.PrivateDir(t)
 	skill := []byte("---\nname: review\ndescription: Review code\n---\n")
 	writeProfileFile(t, root, "AGENTS.md", []byte("Be brief.\n"))
@@ -54,13 +54,13 @@ func TestDoctorReportsTheProfileAndItsKubernetesSize(t *testing.T) {
 
 	writeProfileFile(t, root, "skills/review/data.bin", incompressible(agentprofile.MaxArchiveBytes*7/8))
 	out, err = runDoctor(t, root)
-	if err != nil || !strings.Contains(out, "near the Kubernetes limit") {
+	if err != nil || !strings.Contains(out, "near the profile size limit") {
 		t.Fatalf("near limit = %q, %v", out, err)
 	}
 
 	writeProfileFile(t, root, "skills/review/data.bin", incompressible(agentprofile.MaxArchiveBytes+1024))
 	out, err = runDoctor(t, root)
-	if err == nil || !strings.Contains(out, "error profile") || !strings.Contains(out, "cannot move to Kubernetes") {
+	if err == nil || !strings.Contains(out, "error profile") || !strings.Contains(out, "cannot be sent to a session") {
 		t.Fatalf("over limit = %q, %v", out, err)
 	}
 }

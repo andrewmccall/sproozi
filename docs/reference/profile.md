@@ -48,9 +48,9 @@ Other files in the folder are ignored.
 | Total size | At most 4 MiB |
 | Compressed archive for Kubernetes | At most 640 KiB |
 
-An invalid profile stops the session from launching. Run `sproozi doctor` to
-check it first; it warns when the archive passes three quarters of the
-Kubernetes limit.
+An invalid or oversized profile stops the session from launching. Run
+`sproozi doctor` to check it first; it warns when the archive passes three
+quarters of the limit.
 
 ## What each harness receives
 
@@ -75,9 +75,11 @@ continued conversation differs by harness:
   listing it started with. The reinstalled profile files are present, but the
   model is not shown the changed instructions or skill descriptions.
 
-**Docker.** The agent container mounts the profile folder read-only at
-`/etc/sproozi/profile`. The agent cannot change it. Changes are installed at the
-session's next launch: `start`, `resume` or a move back to Docker.
+**Docker.** The home daemon archives the profile folder when it prepares each
+visit and sends it with the launch configuration; nothing from your machine is
+mounted into the container. Changes are installed at the session's next
+launch: `start`, `resume` or a move back to Docker. The agent cannot change
+your folder.
 
 **Kubernetes.** A Kubernetes visit gets the profile as it was when the visit
 was launched:
@@ -99,15 +101,8 @@ session still names.
 
 ## Limitations
 
-- On Linux hosts, the agent container runs as UID 1000. Profile files and
-  folders must be readable by that UID; `sproozi doctor` warns when they are
-  not.
-- The Docker engine must be able to bind-mount the profile folder. Docker
-  Desktop shares your home directory by default.
-- On Windows hosts, Docker sessions do not receive the profile yet; moves to
-  Kubernetes still carry it.
-- A compressed profile over 640 KiB cannot go to Kubernetes; `run` and `move`
-  refuse it.
+- A compressed profile over 640 KiB cannot be sent: Docker launches, `run` and
+  `move` refuse it.
 - Ordinary AgentRuns do not receive the profile.
 
 [ADR 0026](../adr/0026-user-profile-for-managed-sessions.md) records the
