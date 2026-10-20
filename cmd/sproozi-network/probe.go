@@ -54,6 +54,8 @@ func reach(host, port, nonce string, stdout io.Writer) error {
 		return fmt.Errorf("resolve %s: %w", host, err)
 	}
 	for _, address := range addresses {
+		// The resolver can return IPv4-mapped IPv6 forms even for "ip4".
+		address = address.Unmap()
 		target := net.JoinHostPort(address.String(), port)
 		conn, err := (&net.Dialer{}).DialContext(ctx, tcp4, target)
 		if err != nil {

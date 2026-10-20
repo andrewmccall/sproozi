@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/andrewmccall/sproozi/internal/harness"
+	"github.com/andrewmccall/sproozi/internal/privatefs"
 	"github.com/andrewmccall/sproozi/internal/testutil"
 )
 
@@ -15,7 +16,7 @@ func agentsRoot(t *testing.T) string {
 	t.Helper()
 	root := filepath.Join(testutil.PrivateDir(t), "agents")
 	for _, dir := range []string{root, filepath.Join(root, "shared"), filepath.Join(root, "codex"), filepath.Join(root, "claude")} {
-		if err := os.Mkdir(dir, 0o700); err != nil {
+		if err := privatefs.EnsureDir(dir); err != nil {
 			t.Fatal(err)
 		}
 	}
