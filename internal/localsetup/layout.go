@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/agentprofile"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/privatefs"
 	"github.com/andrewmccall/sproozi/internal/session/home"
@@ -25,7 +26,7 @@ import (
 //
 //	config.json        trusted home configuration
 //	installation.json  provisioning journal and owned resource identities
-//	agents/            shared native agent settings (never credentials or keys)
+//	profile/           the user profile every session receives (never credentials or keys)
 //	credentials/       gateway-owned upstream credentials; never worker-mounted
 //	pki/               private CA keys, serving leaf and public trust
 //	state/             home journals, accounting, grants and checkpoints
@@ -35,7 +36,7 @@ type Layout struct{ Root string }
 
 func (l Layout) Config() string       { return filepath.Join(l.Root, "config.json") }
 func (l Layout) Installation() string { return filepath.Join(l.Root, "installation.json") }
-func (l Layout) Agents() string       { return filepath.Join(l.Root, "agents") }
+func (l Layout) Profile() string      { return filepath.Join(l.Root, home.ProfileFolder) }
 func (l Layout) Credentials() string  { return filepath.Join(l.Root, "credentials") }
 func (l Layout) PKI() string          { return filepath.Join(l.Root, "pki") }
 func (l Layout) State() string        { return filepath.Join(l.Root, "state") }
@@ -207,15 +208,15 @@ func (l Layout) lock() (func(), error) {
 // ensureDirectories creates the private layout. Existing directories must
 // already be private; they are never repaired.
 func (l Layout) ensureDirectories() error {
-	for _, dir := range []string{l.Root, l.Credentials(), l.PKI(), l.State(), l.DockerCLI(), l.Logs(), l.Agents()} {
+	for _, dir := range []string{l.Root, l.Credentials(), l.PKI(), l.State(), l.DockerCLI(), l.Logs(), l.Profile()} {
 		if err := privatefs.EnsureDir(dir); err != nil {
 			return fmt.Errorf("private directory %s: %w", dir, err)
 		}
 	}
-	// Shared native settings. Workers receive only allowlisted instruction
-	// files from these directories, freshly on every visit.
-	for _, name := range append(home.AgentFiles(harness.NativeCodex), home.AgentFiles(harness.NativeClaude)...) {
-		if err := privatefs.EnsureDir(filepath.Join(l.Agents(), filepath.Dir(name))); err != nil {
+	// The profile's folders, so the user can see where each file goes. Each
+	// launch archives the profile as it is then.
+	for _, name := range append(agentprofile.HarnessFiles(), agentprofile.SkillsDirectory+"/") {
+		if err := privatefs.EnsureDir(filepath.Join(l.Profile(), filepath.Dir(name))); err != nil {
 			return err
 		}
 	}

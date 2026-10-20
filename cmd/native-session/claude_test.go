@@ -87,7 +87,8 @@ func TestClaudeHookBoundedPinnedPayload(t *testing.T) {
 }
 func TestExplicitHarnessContractAndClaudeOptionBoundary(t *testing.T) {
 	c := config{Harness: harness.NativeClaude, Deadline: time.Now().Add(time.Minute), Instructions: instructions,
-		InstructionDigest: digest(), Env: []string{testPathEnvironment}, RolloutMaxBytes: 8192, Model: "claude-sonnet-4-5"}
+		InstructionDigest: digest(), ClientConfig: testClients, Env: []string{testPathEnvironment},
+		RolloutMaxBytes: 8192, Model: "claude-sonnet-4-5"}
 	if err := c.Validate(time.Now()); err != nil {
 		t.Fatal(err)
 	}
@@ -108,18 +109,6 @@ func TestExplicitHarnessContractAndClaudeOptionBoundary(t *testing.T) {
 		t.Fatal("portable home override accepted")
 	}
 }
-func TestClaudeSystemPromptAppendsUserPreferencesAfterApprovedInstructions(t *testing.T) {
-	c := config{Instructions: instructions}
-	if claudeSystemPrompt(c) != instructions {
-		t.Fatal("empty preferences changed the approved prompt")
-	}
-	c.UserInstructions = preferences
-	prompt := claudeSystemPrompt(c)
-	if !strings.HasPrefix(prompt, instructions+"\n\n# User preferences") || !strings.HasSuffix(prompt, preferences) {
-		t.Fatalf("prompt %q", prompt)
-	}
-}
-
 func TestClaudePrivateSettingsRetryIsExact(t *testing.T) {
 	path := t.TempDir() + "/settings.json"
 	value := map[string]any{claudeHooksKey: map[string]any{}}

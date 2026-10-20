@@ -28,13 +28,13 @@ session is not supported.
 
 For local sessions only, `sproozi init --local` prepares everything in this
 section; see [local sessions](local-sessions.md). Use the steps below when you
-also need a profile service or want to manage the configuration by hand.
+also need a remote executor or want to manage the configuration by hand.
 
 ## Prepare the administrator-owned setup
 
 The trusted home daemon owns a local Unix Docker socket, fixed image IDs, its TLS
 gateway, provider credentials and protected journals. Local start requires no
-cluster or kubeconfig. A developer can use the profile service after an
+cluster or kubeconfig. A developer can use the remote executor after an
 administrator provisions it. The remote service holds its own Kubernetes
 credentials; the developer receives only the profile URL, public CA and protected
 [home principal token](../../GLOSSARY.md#home-principal-token) file.
@@ -51,13 +51,13 @@ workspace data, so move it outside the source before capture.
 [Install the CLI](install.md) on the developer's machine. It provides
 `sproozi serve`, the home daemon, and the session commands below.
 
-The profile service and the native image have no release download, so
+The remote executor and the native image have no release download, so
 build them from a checkout of this repository that matches your CLI. Run
 `sproozi --version`. Release binaries print a version, so check out its tag,
 for example `git checkout v0.1.0`. A source build prints `dev` and a commit, so
 build the other components from that commit (`git checkout <commit>`). If it
 prints `source build`, use the checkout you built from. The home daemon,
-profile service and native supervisor reject messages they don't recognise, so
+remote executor and native supervisor reject messages they don't recognise, so
 mixing releases can fail. From the repository root:
 
 ```sh
@@ -384,15 +384,15 @@ administrator pricing in `gateway.pricingFile`.
 
 For a local-only session, leave `remote` empty, as `init` writes it. If a
 setting is missing or invalid, `sproozi serve` names it by JSON key. For remote
-moves, add a `remote` entry with the profile service's fixed HTTPS origin,
+moves, add a `remote` entry with the remote executor's fixed HTTPS origin,
 home principal token file, CA file and checkpoint byte limit.
 The remote placement alias must match the profile's `placementName`. All
 placements must use the same checkpoint byte limit and approve the same initial
 instructions and native version. The original home duration must also fit the
-profile service and live policy; Kubernetes policy currently permits at most one
+remote executor and live policy; Kubernetes policy currently permits at most one
 hour. Moving does not restart the lifetime clock.
 
-## Provision the profile service
+## Provision the remote executor
 
 Follow [the profile setup](../../cmd/session-profile/README.md) to install the
 current controller/shared gateway and generated CRDs in an evaluation cluster
@@ -400,7 +400,7 @@ with a NetworkPolicy-enforcing CNI. The administrator supplies the managed nativ
 runtime, approved template/policy, immutable certificate-only sandbox trust bundle,
 shared gateway TLS and gateway-owned provider credentials.
 
-The profile service uses either its protected host kubeconfig or an in-cluster
+The remote executor uses either its protected host kubeconfig or an in-cluster
 ServiceAccount with the documented scoped Run/registration/account/Pod permissions.
 It fixes the principal, Run namespace, template, ceilings and maximum duration in
 private JSON. Incoming move requests cannot select images, environment variables,
@@ -492,7 +492,7 @@ attached reaches the harness. A reconnect replays a bounded terminal output tail
 native `/quit` when you intend to move; the placement owns graceful quit and the
 independent container stop/checkpoint boundary.
 
-Move to the configured profile service, attach there, then return to local
+Move to the configured remote executor, attach there, then return to local
 Docker. `--to` takes a placement name from the home configuration: `engineering` is
 a key of its `remote` map and `local` is its `local.name`, as in the
 [configuration example](../../cmd/sproozi/README.md).
@@ -533,10 +533,10 @@ effect.
   in `sessions` show the placement in their `placement` field: the
   `local.name` value or a name under `remote`, empty until the first launch.
 - `pull --from NAME` names the remote executor to pull from, configured under
-  `remote` or `workSources`: the profile service that owns the session and
+  `remote` or `workSources`: the remote executor that owns the session and
   hands it over to the home daemon. Afterwards `sessions` lists the session
   twice: a `docker` row with `"ownership": "home"`, and a read-only mirror row
-  from the profile service that also says `"ownership": "home"`. See
+  from the remote executor that also says `"ownership": "home"`. See
   [ownership values](../reference/session-commands.md#ownership-values).
 - `move --to NAME` names the placement for the next visit. The home daemon
   stays the owner whichever placement runs the execution.
@@ -583,9 +583,9 @@ daemon/profile with the same protected state and configuration; stopping those
 processes alone doesn't prove that the agent stopped. The native original
 deadline still applies.
 
-Managed remote Pods keep a Sproozi finalizer until the profile service records
-that their harness container stopped. A stopped helper or lost profile service
-can leave a Pod stuck terminating. Restart the same profile service and run
+Managed remote Pods keep a Sproozi finalizer until the remote executor records
+that their harness container stopped. A stopped helper or lost remote executor
+can leave a Pod stuck terminating. Restart the same remote executor and run
 `recover` for the original operation, and keep its journal and checkpoint files.
 Don't remove the finalizer or force-delete the Pod: Sproozi then can't tell
 whether the agent stopped, so the allowance stays held and the session can't

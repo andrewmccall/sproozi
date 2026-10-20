@@ -49,7 +49,7 @@ type Options struct {
 type Result struct {
 	Root         string        `json:"root"`
 	Config       string        `json:"config"`
-	Agents       string        `json:"agents"`
+	Profile      string        `json:"profile"`
 	Installation string        `json:"installation"`
 	Image        Image         `json:"image"`
 	Network      Network       `json:"network"`
@@ -160,7 +160,7 @@ func openInstaller(o Options) (*installer, func(), error) {
 		i.inst, err = LoadInstallation(l)
 	}
 	if err == nil {
-		i.step("Using local installation %s; shared agent files live in %s", root, l.Agents())
+		i.step("Using local installation %s; your profile is %s", root, l.Profile())
 		err = i.save("root")
 	}
 	if err != nil {
@@ -348,7 +348,7 @@ func (i *installer) writeConfiguration(context.Context) error {
 // restricted worker path before reporting ready.
 func (i *installer) serve(ctx context.Context) (Result, error) {
 	l, inst := i.l, i.inst
-	result := Result{Root: l.Root, Config: l.Config(), Agents: l.Agents(), Installation: inst.ID, Image: *inst.Image,
+	result := Result{Root: l.Root, Config: l.Config(), Profile: l.Profile(), Installation: inst.ID, Image: *inst.Image,
 		Network: *inst.Network, Endpoint: *inst.Endpoint, Harnesses: inst.Harnesses}
 	if !i.o.StartService {
 		result.Service = ServiceState(ctx, l, i.config)
@@ -444,12 +444,16 @@ var codexOptions = []string{
 	`projects."/workspace/session/workspace".trust_level="trusted"`,
 }
 
+// MCPAuthority is the name workers use for the gateway's MCP endpoint, which
+// always serves the Sproozi control connection. The home's certificate
+// authority issues the gateway a certificate that covers it.
+const MCPAuthority = "mcp.sproozi.internal:443"
+
 func renderConfig(l Layout, inst Installation, instructions string) home.Config {
 	primary := inst.Harnesses[0]
 	digest := fmt.Sprintf("%x", sha256.Sum256([]byte(instructions)))
 	c := home.Config{
 		Directory: l.State(), DockerBinary: inst.Docker.Binary, DockerSocket: inst.Docker.Socket, DockerConfig: l.DockerCLI(),
-		AgentsDirectory: l.Agents(),
 		Local: runtimedocker.PlacementConfig{Harness: primary.Harness, Name: primary.Name,
 			NativeImageID: inst.Image.ID, HelperImageID: inst.Image.ID, AnchorImageID: inst.Image.ID,
 			NetworkName: inst.Network.Name, GatewayIPv4: inst.Endpoint.GatewayIPv4, GatewayPort: primary.Port,
@@ -459,7 +463,8 @@ func renderConfig(l Layout, inst Installation, instructions string) home.Config 
 		Allowances:  map[string]session.Allowance{"model.inference": {Units: session.Limit{Bounded: true, Value: 200000}}},
 		MaxDuration: "30m", Model: primary.Model, NativeOptions: nativeOptions(primary.Harness),
 		Gateway: home.GatewayConfig{Listen: fmt.Sprintf("%s:%d", inst.Endpoint.ListenHost, primary.Port), PKIDirectory: l.PKI(),
-			ProviderURL: primary.ProviderURL, ProviderTokenFile: primary.Credential, ProviderCAFile: primary.ProviderCAFile},
+			ProviderURL: primary.ProviderURL, ProviderTokenFile: primary.Credential, ProviderCAFile: primary.ProviderCAFile,
+			MCPAuthority: MCPAuthority},
 	}
 	for _, h := range inst.Harnesses[1:] {
 		c.Harnesses = append(c.Harnesses, home.LocalHarness{Harness: h.Harness, Name: h.Name, GatewayPort: h.Port, Model: h.Model,
@@ -505,8 +510,8 @@ func mergeConfig(existing, rendered home.Config) (home.Config, bool, error) {
 			"run sproozi doctor; changing images, network or gateway address needs a drained migration")
 	}
 	changed := false
-	if existing.AgentsDirectory == "" {
-		existing.AgentsDirectory, changed = rendered.AgentsDirectory, true
+	if existing.Gateway.MCPAuthority == "" {
+		existing.Gateway.MCPAuthority, changed = rendered.Gateway.MCPAuthority, true
 	}
 	for _, h := range rendered.Harnesses {
 		if !slices.ContainsFunc(existing.Harnesses, func(e home.LocalHarness) bool { return e.Harness == h.Harness }) {

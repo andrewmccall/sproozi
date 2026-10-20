@@ -7,6 +7,7 @@ import (
 	"cmp"
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +21,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/andrewmccall/sproozi/internal/agentprofile"
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/privatefs"
@@ -66,6 +68,7 @@ func (p Phase) live() bool {
 type InitialPlacement interface {
 	session.Placement
 	CreateInitial(context.Context, session.Launch, []byte) (session.Incarnation, error)
+	StoreProfile(ctx context.Context, digest string, archive []byte) error
 }
 
 // Repository selects an administrator-owned stopped snapshot, or a GitHub URL
@@ -101,6 +104,11 @@ type Submit struct {
 	Task          string             `json:"task"`
 	Project       project.ID         `json:"project,omitempty"`
 	WorkspaceFrom *RevisionSource    `json:"workspaceFrom,omitempty"`
+	// Profile is the caller's profile archive. The owner replaces it with
+	// ProfileDigest before retaining or comparing the submission; callers never
+	// set ProfileDigest themselves.
+	Profile       []byte `json:"profile,omitempty"`
+	ProfileDigest string `json:"profileDigest,omitempty"`
 }
 
 type SessionQuery struct {
@@ -286,6 +294,17 @@ func (o *Owner) Submit(ctx context.Context, q Submit) (View, error) {
 		return View{}, &profile.Rejection{Code: profile.CodeDenied}
 	}
 
+	archive := q.Profile
+	if q.ProfileDigest != "" {
+		return View{}, &profile.Rejection{Code: profile.CodeInvalid}
+	}
+	if len(archive) > 0 {
+		sum := sha256.Sum256(archive)
+		q.Profile, q.ProfileDigest = nil, "sha256:"+hex.EncodeToString(sum[:])
+		if agentprofile.Verify(q.ProfileDigest, archive) != nil {
+			return View{}, &profile.Rejection{Code: profile.CodeInvalid}
+		}
+	}
 	id := o.sessionID(q.RequestID)
 	b, _ := json.Marshal(q)
 	digest := hash(b)
@@ -303,6 +322,11 @@ func (o *Owner) Submit(ctx context.Context, q Submit) (View, error) {
 	if err != nil {
 		return View{}, err
 	}
+	if q.ProfileDigest != "" {
+		if err = o.config.Backend.StoreProfile(ctx, q.ProfileDigest, archive); err != nil {
+			return View{}, err
+		}
+	}
 	if q.WorkspaceFrom != nil {
 		if _, err = o.revisionSource(*q.WorkspaceFrom, association); err != nil {
 			return View{}, err
@@ -318,7 +342,8 @@ func (o *Owner) Submit(ctx context.Context, q Submit) (View, error) {
 	r := record{Version: 1, Intent: q, IntentDigest: digest, Association: association, RepositorySource: &repository,
 		Phase: phasePending, Launch: session.Launch{Harness: q.Harness, ExecutionID: id, OperationID: q.RequestID,
 			AllocationID: uuid.NewString(), Epoch: 1, Placement: q.Executor, InstructionDigest: o.config.InstructionDigest,
-			Deadline: time.Now().Add(o.config.MaxDuration).UTC(), Allowances: allowances, Task: q.Task}}
+			Deadline: time.Now().Add(o.config.MaxDuration).UTC(), Allowances: allowances, Task: q.Task,
+			ProfileDigest: q.ProfileDigest}}
 	if err = o.save(r); err != nil {
 		return View{}, err
 	}

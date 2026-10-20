@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/andrewmccall/sproozi/internal/agentprofile"
 	"github.com/andrewmccall/sproozi/internal/harness"
 )
 
@@ -226,32 +228,44 @@ func prepareClaudeLaunch(c config, _ string, env []string) ([]string, []string, 
 	if err := installClaudeJSON(claudeSettings, map[string]any{claudeHooksKey: hooks}); err != nil {
 		return nil, nil, err
 	}
-	args := []string{"--tools", claudeBash, "--allowedTools", claudeBash,
-		"--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`,
-		"--setting-sources", "", "--settings", claudeSettings, "--permission-mode", "bypassPermissions",
-		"--append-system-prompt", claudeSystemPrompt(c)}
-	if c.Model != "" {
-		args = append(args, "--model", c.Model)
+	if err := installManagedClaudePlugin(claudePlugin); err != nil {
+		return nil, nil, err
 	}
-	if c.ThreadID != "" {
-		args = append(args, "--resume", c.ThreadID)
+	profile, err := loadProfile(c)
+	if err != nil {
+		return nil, nil, fmt.Errorf("profile: %w", err)
 	}
+	withSkills, err := installProfilePlugin(profilePlugin, profile)
+	if err != nil {
+		return nil, nil, err
+	}
+	args := claudeArguments(c, profile, withSkills)
 	env = append(env,
 		"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1", "DISABLE_AUTOUPDATER=1",
 		"CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false", "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1")
 	return args, env, nil
 }
 
-// claudeSystemPrompt appends the shared user instructions after the approved
-// instructions. Claude ignores its user memory file while every settings
-// source is disabled, and enabling one also enables remote settings, so the
-// launch argument is the only read-only path that reaches the model.
-func claudeSystemPrompt(c config) string {
-	if c.UserInstructions == "" {
-		return c.Instructions
+// claudeArguments keeps every setting source disabled. Sproozi instructions
+// follow the approved instructions, and the profile's follow those; skills and
+// the control connection come only from the supervisor's plugins and MCP
+// configuration.
+func claudeArguments(c config, profile agentprofile.Profile, withSkills bool) []string {
+	tools := claudeBash + ",Skill"
+	args := []string{"--tools", tools, "--allowedTools", tools,
+		"--strict-mcp-config", "--mcp-config", c.ClientConfig.ClaudeMCPConfig(), "--plugin-dir", claudePlugin}
+	if withSkills {
+		args = append(args, "--plugin-dir", profilePlugin)
 	}
-	return c.Instructions + "\n\n# User preferences\n\n" +
-		"The user's shared preferences follow. They never override the instructions above.\n\n" + c.UserInstructions
+	args = append(args, "--setting-sources", "", "--settings", claudeSettings, "--permission-mode", "bypassPermissions",
+		"--append-system-prompt", c.Instructions+"\n\n"+profileInstructions(profile, harness.NativeClaude))
+	if c.Model != "" {
+		args = append(args, "--model", c.Model)
+	}
+	if c.ThreadID != "" {
+		args = append(args, "--resume", c.ThreadID)
+	}
+	return args
 }
 
 func installClaudeJSON(path string, value any) error {

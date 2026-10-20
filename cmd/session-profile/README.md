@@ -1,8 +1,8 @@
-# Fixed Kubernetes session profile
+# Remote executor (`session-profile`)
 
 `session-profile` serves one administrator-approved Kubernetes placement over
 authenticated TLS. The developer receives its fixed HTTPS URL, CA certificate
-and [home principal token](../../GLOSSARY.md#home-principal-token) file. Kubernetes credentials remain with the profile service.
+and [home principal token](../../GLOSSARY.md#home-principal-token) file. Kubernetes credentials remain with the remote executor.
 See [Move a live session between Docker and Kubernetes](../../docs/guides/session-mobility.md) for the
 local/remote command sequence. Both supported harnesses have passed production
 Docker-to-Kubernetes-to-Docker round trips through this profile. Codex's extended
@@ -102,7 +102,7 @@ the normal in-cluster client configuration. Required backend permissions are:
 | --- | --- | --- |
 | Configured Run namespace | `sproozi.com/agentruns` | `get`, `create`, `patch` |
 | Configured Run namespace | `sproozi.com/agenttemplates`, `agentpolicies`, `agentruntimes` | `get` |
-| Configured Run namespace | Core `configmaps` for registrations and accounts | `get`, `create`, `update` |
+| Configured Run namespace | Core `configmaps` for registrations, accounts and stored profiles | `get`, `create`, `update` |
 | `sproozi-agents` | Core `pods` | `get`, `patch`, `delete` |
 | `sproozi-agents` | Core `pods/exec` | `create` |
 
@@ -231,7 +231,7 @@ validation happen before request decoding.
 
 The protected `directory/work` retains original request/execution identities,
 source receipts, bounded native/Git checkpoints and untrusted final text. Run one
-profile service per state directory, with durable storage. Restart with the same principal and directory;
+remote executor per state directory, with durable storage. Restart with the same principal and directory;
 changing principals cannot reinterpret retained records. A lost preparation or
 stop reply requires recovery of that exact allocation. Missing stop/accounting
 evidence blocks export, and changing a request's intent on replay is rejected.

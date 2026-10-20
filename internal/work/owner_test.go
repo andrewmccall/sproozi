@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/agentprofile"
 	"github.com/andrewmccall/sproozi/internal/testutil"
 
 	"github.com/andrewmccall/sproozi/internal/budget"
@@ -52,6 +54,17 @@ type fixturePlacement struct {
 	heldStop               <-chan struct{}
 	stopStarted            chan struct{}
 	launches               []session.Launch
+	profiles               map[string][]byte
+}
+
+func (p *fixturePlacement) StoreProfile(_ context.Context, digest string, archive []byte) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.profiles == nil {
+		p.profiles = map[string][]byte{}
+	}
+	p.profiles[digest] = archive
+	return nil
 }
 
 func (p *fixturePlacement) CreateInitial(_ context.Context, l session.Launch, data []byte) (session.Incarnation, error) {
@@ -490,5 +503,53 @@ func TestCancellationObservesIncarnationAfterLostPreparationReply(t *testing.T) 
 	}
 	if p.active != 0 {
 		t.Fatal("cancellation activated unfinished preparation")
+	}
+}
+
+// A submitted profile reaches the placement once and the launch names it; the
+// catalogue retains only the digest.
+func TestSubmissionStoresItsProfileAndLaunchesWithItsDigest(t *testing.T) {
+	c, p := fixture(t)
+	o, e := Open(c)
+	if e != nil {
+		t.Fatal(e)
+	}
+	t.Cleanup(func() { _ = o.Close() })
+	archive, digest, e := agentprofile.Profile{Instructions: "Profile instructions"}.Archive()
+	if e != nil {
+		t.Fatal(e)
+	}
+	q := Submit{RequestID: uuid.NewString(), Repository: repositorySproozi, Harness: harness.NativeCodex,
+		Executor: executorKubernetes, Task: fixtureTask, Profile: []byte("not an archive")}
+	if _, e = o.Submit(t.Context(), q); e == nil {
+		t.Fatal("invalid profile archive accepted")
+	}
+	q.RequestID, q.Profile, q.ProfileDigest = uuid.NewString(), nil, digest
+	if _, e = o.Submit(t.Context(), q); e == nil {
+		t.Fatal("caller named a profile digest without its archive")
+	}
+	q.RequestID, q.Profile, q.ProfileDigest = uuid.NewString(), archive, ""
+	v, e := o.Submit(t.Context(), q)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if again, e := o.Submit(t.Context(), q); e != nil || again.ID != v.ID {
+		t.Fatalf("profile submission replay: %+v %v", again, e)
+	}
+	waitPhase(t, o, v.ID, phaseRetained)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if string(p.profiles[digest]) != string(archive) || len(p.launches) == 0 || p.launches[0].ProfileDigest != digest {
+		t.Fatalf("profile not stored or named: %d stored, launches %+v", len(p.profiles), p.launches)
+	}
+	entries, e := os.ReadDir(c.Directory)
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, entry := range entries {
+		data, _ := os.ReadFile(filepath.Join(c.Directory, entry.Name()))
+		if bytes.Contains(data, []byte(base64.StdEncoding.EncodeToString(archive)[:32])) {
+			t.Fatalf("catalogue record %s retained the archive", entry.Name())
+		}
 	}
 }

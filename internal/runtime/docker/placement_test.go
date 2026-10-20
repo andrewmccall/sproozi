@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/agentprofile"
 	"github.com/andrewmccall/sproozi/internal/testutil"
 
 	"github.com/andrewmccall/sproozi/internal/harness"
@@ -345,7 +346,7 @@ type fakeAuthority struct {
 
 func (a *fakeAuthority) InitializeAllocation(context.Context, session.Launch, session.Incarnation) (NativeAccess, error) {
 	a.init++
-	return NativeAccess{Env: []string{"PATH=/usr/bin:/bin"}}, nil
+	return NativeAccess{Env: []string{"PATH=/usr/bin:/bin"}, ClientConfig: &harness.NativeClientConfig{MCPGateway: "https://sproozi-gateway.test"}}, nil
 }
 func (a *fakeAuthority) Activate(context.Context, session.Launch, session.Incarnation) error {
 	if a.activateErr != nil {
@@ -456,10 +457,15 @@ func fixtureLaunch(t *testing.T, data []byte) session.Launch {
 }
 func openFixture(t *testing.T, dir string, f *fakeDocker, a *fakeAuthority) *Placement {
 	t.Helper()
+	return openFixtureWith(t, dir, f, a, fixtureConfig())
+}
+
+func openFixtureWith(t *testing.T, dir string, f *fakeDocker, a *fakeAuthority, config PlacementConfig) *Placement {
+	t.Helper()
 	if err := os.Chmod(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	p, err := OpenPlacement(dir, &Engine{execute: f.run}, fixtureConfig(), a)
+	p, err := OpenPlacement(dir, &Engine{execute: f.run}, config, a)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -818,5 +824,72 @@ func TestPreparedNativeLaunchCarriesTaskAndIndependentRolloutLimit(t *testing.T)
 	}
 	if configured.Task != launch.Task || configured.ThreadID != fixtureThread || configured.RolloutMaxBytes != 64<<20 || configured.RolloutMaxBytes == p.config.MaxCheckpointBytes {
 		t.Fatalf("native task/thread/observer bound lost: %+v", configured)
+	}
+}
+
+func writeProfileFixture(t *testing.T, folder, skill, instructions string) {
+	t.Helper()
+	path := filepath.Join(folder, "skills", skill, "SKILL.md")
+	// Profile folders must be private to their owner, as they are on Windows.
+	if err := testutil.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.WriteFile(path, []byte("---\nname: "+skill+"\ndescription: Fixture skill\n---\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.WriteFile(filepath.Join(folder, "AGENTS.md"), []byte(instructions), 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The profile travels in the launch configuration, so the agent container
+// keeps its workspace-only mount contract on every host platform.
+func TestLaunchConfigurationCarriesTheProfileAsItIsNow(t *testing.T) {
+	t.Parallel()
+	data := fixtureArtifact(t)
+	l := fixtureLaunch(t, data)
+	f := newFakeDocker()
+	a := &fakeAuthority{engine: f}
+	config := fixtureConfig()
+	config.ProfileDirectory = filepath.Join(testutil.PrivateDir(t), "profile")
+	writeProfileFixture(t, config.ProfileDirectory, "review", "Profile instructions")
+	p := openFixtureWith(t, testutil.PrivateDir(t), f, a, config)
+	if _, err := p.Prepare(context.Background(), l, data); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, c := range f.containers {
+		if len(c.Mounts) > 1 {
+			t.Fatalf("container %s gained a mount: %+v", c.Name, c.Mounts)
+		}
+		if len(c.configured) == 0 {
+			continue
+		}
+		var launch harness.NativeLaunch
+		if err := json.Unmarshal(c.configured, &launch); err != nil {
+			t.Fatal(err)
+		}
+		profile, err := agentprofile.FromArchive(launch.ProfileArchive)
+		if err != nil || profile.Instructions != "Profile instructions" || len(profile.Skills) != 1 {
+			t.Fatalf("configured profile=%+v err=%v", profile, err)
+		}
+		found = true
+	}
+	if !found {
+		t.Fatal("agent was not configured")
+	}
+}
+
+func TestInvalidProfileStopsPreparation(t *testing.T) {
+	t.Parallel()
+	data := fixtureArtifact(t)
+	l := fixtureLaunch(t, data)
+	f := newFakeDocker()
+	config := fixtureConfig()
+	config.ProfileDirectory = filepath.Join(testutil.PrivateDir(t), "profile")
+	writeProfileFixture(t, config.ProfileDirectory, "sproozi-access", "Profile instructions")
+	p := openFixtureWith(t, testutil.PrivateDir(t), f, &fakeAuthority{engine: f}, config)
+	if _, err := p.Prepare(context.Background(), l, data); err == nil || !strings.Contains(err.Error(), "profile") {
+		t.Fatalf("prepare with reserved profile skill = %v", err)
 	}
 }

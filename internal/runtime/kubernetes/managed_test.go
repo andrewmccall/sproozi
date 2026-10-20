@@ -2,6 +2,7 @@ package kubernetes_test
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -110,5 +111,33 @@ func TestManagedPodNativeKindMustMatchRegistration(t *testing.T) {
 				t.Fatal("empty kind selected Codex")
 			}
 		})
+	}
+}
+
+// Only an agent whose registration names a profile mounts the archive, read-only.
+func TestManagedPodMountsTheProfileArchiveOnlyWhenRegistered(t *testing.T) {
+	run, runtime, binding := managedFixture()
+	mounted := func() []corev1.VolumeMount {
+		pod, err := kubernetes.BuildManagedPodSpec(run, runtime, binding)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var found []corev1.VolumeMount
+		for _, c := range pod.Spec.Containers {
+			for _, m := range c.VolumeMounts {
+				if m.SubPath == registry.ProfileArchiveKey {
+					found = append(found, m)
+				}
+			}
+		}
+		return found
+	}
+	if got := mounted(); len(got) != 0 {
+		t.Fatalf("profile mounted without registration: %+v", got)
+	}
+	binding.ProfileDigest = "sha256:" + strings.Repeat("0", 64)
+	got := mounted()
+	if len(got) != 1 || got[0].MountPath != "/etc/sproozi/profile-archive/profile.tar.gz" || !got[0].ReadOnly {
+		t.Fatalf("profile mounts = %+v", got)
 	}
 }

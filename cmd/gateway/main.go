@@ -38,6 +38,7 @@ import (
 	"github.com/andrewmccall/sproozi/internal/audit"
 	"github.com/andrewmccall/sproozi/internal/budget"
 	budgetkubernetes "github.com/andrewmccall/sproozi/internal/budget/kubernetes"
+	"github.com/andrewmccall/sproozi/internal/diagnose"
 	"github.com/andrewmccall/sproozi/internal/endpoints"
 	"github.com/andrewmccall/sproozi/internal/endpoints/destination"
 	githubgateway "github.com/andrewmccall/sproozi/internal/endpoints/github"
@@ -427,8 +428,9 @@ func composeDispatcher(
 	if host == "" {
 		host = defaultHost
 	}
-	// Named MCP capabilities share the gateway's own authority. The module
-	// chooses the exact account only after authenticating the requested path.
+	// Named MCP capabilities and the Sproozi control connection share the
+	// gateway's own authority. The module chooses the exact account only after
+	// authenticating the requested path.
 	for _, port := range []string{"443", "8443"} {
 		routes[net.JoinHostPort(host, port)] = gateway.Route{Tier: audit.TierProtocol, Handler: mcpHandler}
 	}
@@ -516,7 +518,9 @@ func main() {
 		WithWatchCache(authorityClient)
 	httpClient := &http.Client{Timeout: upstreamCallTimeout}
 	modelClient := newModelClient()
-	auditLogger := audit.NewLogger(os.Stdout)
+	// The journal forwards every audit record unchanged and retains recent
+	// denials for each execution's own sproozi diagnose tool.
+	auditLogger := diagnose.NewJournal(audit.NewLogger(os.Stdout), diagnose.Limits{})
 	// The shared gateway is the only component that receives Kubernetes API
 	// credentials. Build the upstream transport from its own in-cluster
 	// rest.Config so workload ServiceAccount tokens can never be forwarded to
@@ -609,8 +613,9 @@ func main() {
 		go retryLegacySweep(context.Background(), legacySweep, time.Second, budgetkubernetes.SweepInterval)
 	}
 	go sweepLedgers(context.Background(), runtimeClient, budgetNamespace, budgetkubernetes.SweepInterval)
-	mcpHandler := mcpgateway.NewHandler(mcpgateway.HandlerConfig{Registry: cfg.mcpRegistry,
+	named := mcpgateway.NewHandler(mcpgateway.HandlerConfig{Registry: cfg.mcpRegistry,
 		Budgets: budgets, AuditLogger: auditLogger})
+	mcpHandler := diagnose.NewControl(auditLogger, named)
 	dispatcher := composeDispatcher(cfg, handlers, mcpHandler, anthropicHandler)
 	for authority, route := range dispatcher {
 		route.Budgets, route.AuditLogger = budgets, auditLogger
@@ -627,6 +632,7 @@ func main() {
 		Revalidate:       authenticator.Revalidate,
 		Handler:          dispatcher,
 		AllowedAuthority: dispatcher.Allows,
+		AuditLogger:      auditLogger,
 
 		MaxConnections:          cfg.admission.maxConnections,
 		MaxSessionsPerExecution: cfg.admission.maxSessionsPerExecution,

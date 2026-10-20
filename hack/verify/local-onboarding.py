@@ -113,9 +113,9 @@ def main():
         both = json.loads(result.stdout)
         report["steps"]["addClaude"] = {"ready": both["ready"], "harnesses": [(h["harness"], h["port"]) for h in both["harnesses"]],
                                         "paths": both["paths"]}
-        write_private(root / "agents/shared/AGENTS.md", f"Shared preference {SHARED_MARKER}.\n")
-        write_private(root / "agents/codex/AGENTS.md", f"Codex preference {CODEX_MARKER}.\n")
-        write_private(root / "agents/claude/CLAUDE.md", f"Claude preference {CLAUDE_MARKER}.\n")
+        write_private(root / "profile/AGENTS.md", f"Shared preference {SHARED_MARKER}.\n")
+        write_private(root / "profile/codex/AGENTS.md", f"Codex preference {CODEX_MARKER}.\n")
+        write_private(root / "profile/claude/CLAUDE.md", f"Claude preference {CLAUDE_MARKER}.\n")
         doctor = json.loads(sproozi("doctor", "--root", str(root), "--json").stdout)
         report["steps"]["doctor"] = {"ok": doctor["ok"], "failed": [c for c in doctor["checks"] if not c["ok"]]}
 

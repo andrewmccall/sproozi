@@ -60,6 +60,23 @@ Tests must check:
 - Upstream cancellation and session deletion use bounded timeouts. A committed
   provider side effect cannot be reversed by cancelling its request.
 
+- The `sproozi` control connection returns only the calling execution's
+  denials. A CONNECT to an unenabled destination by an authenticated execution
+  is recorded for that execution; an unauthenticated one is not. A failure the
+  gateway never saw is reported as `not_observed`, never as a denial. An agent
+  whose own request the gateway refused learns that refusal by calling
+  `diagnose` through the gateway proxy.
+- Every harness launch carries the Sproozi instructions, the `sproozi-access`
+  skill and the control connection. Test with the pinned clients: the model
+  request must contain all three beside unchanged approved instructions, and
+  repository `AGENTS.md` or `CLAUDE.md` must not remove them.
+- A managed session receives the user's profile after the Sproozi
+  instructions: a Docker launch carries the profile archive in its native
+  configuration, without any host mount, and a Kubernetes visit reads the
+  archive named by its launch digest, which the executor and the controller each verify. A retried
+  move sends the archive its launch named, and a profile over the ConfigMap
+  limit is refused before submission.
+
 When changing the MCP SDK, include revocation during an in-flight call and
 session teardown. The tests must detect cancellation notifications lost during
 asynchronous shutdown.
@@ -159,9 +176,8 @@ Tests must check that:
   reach those paths, so the check is shown to discriminate.
 - Each harness's worker reaches only its own gateway port and provider key.
 - Provider keys, CA keys and journals never reach worker mounts, environment,
-  checkpoints or the shared agent files. Shared agent files reach only harnesses
-  that load them, are rejected when they are links or unsafe files, and never
-  enter a checkpoint.
+  checkpoints or the profile. Profile files are rejected when they are links,
+  unsafe files or not the user's own, and never enter a checkpoint.
 - A renewed leaf reaches new connections without restarting the gateway, an
   invalid replacement keeps the previous leaf, and a leaf never outlives its
   issuer. Rotation keeps old and new trust until every recorded consumer has

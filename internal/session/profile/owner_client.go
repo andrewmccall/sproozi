@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+
+	"github.com/andrewmccall/sproozi/internal/agentprofile"
 )
 
 // CallOwner shares the fixed verified origin and private credential with the
@@ -18,8 +20,12 @@ func (c *Client) CallOwner(ctx context.Context, action string, input, output any
 	default:
 		return errors.New("profile: unsupported owner action")
 	}
+	limit := metadataLimit
+	if action == "run" {
+		limit += agentprofile.EncodedArchiveBytes
+	}
 	b, err := json.Marshal(input)
-	if err != nil || int64(len(b)) > metadataLimit {
+	if err != nil || int64(len(b)) > limit {
 		return errors.New("profile: owner request exceeds bound")
 	}
 	r, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/work/"+action, bytes.NewReader(b))

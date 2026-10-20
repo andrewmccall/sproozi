@@ -13,7 +13,10 @@ import (
 )
 
 const (
-	connectionURL = "url"
+	connectionURL  = "url"
+	connectionType = "type"
+	// httpTransport is Claude Code's MCP transport name for Streamable HTTP.
+	httpTransport = "http"
 )
 
 const (
@@ -23,9 +26,10 @@ const (
 	hermesName   = "hermes"
 )
 
-// MCPConfig describes only requested broker connections in the selected CLI's
-// native format. Empty selection leaves configuration to the administrator.
-// It contains no upstream addresses or credentials.
+// MCPConfig describes the requested broker connections and the Sproozi control
+// connection in the selected CLI's native format. Empty selection leaves
+// configuration to the administrator. It contains no upstream addresses or
+// credentials.
 func MCPConfig(selected string, capabilities []string, gatewayEndpoint string) (map[string]string, error) {
 	if selected == "" {
 		return nil, nil
@@ -47,20 +51,23 @@ func MCPConfig(selected string, capabilities []string, gatewayEndpoint string) (
 		}
 	}
 	slices.Sort(names)
+	// Every selected harness receives the control connection; MCPServerName
+	// never admits its reserved name as a grant, so it cannot duplicate.
+	names = append(slices.Compact(names), api.ControlMCPServer)
 	var output strings.Builder
 	connections := make(map[string]any)
-	for _, name := range slices.Compact(names) {
+	for _, name := range names {
 		address := gatewayEndpoint + "/mcp/" + name
 		switch selected {
 		case codexName:
 			_, _ = fmt.Fprintf(&output, "[mcp_servers.%s]\nurl = %s\nrequired = true\n\n", strconv.Quote(name), strconv.Quote(address))
 		case claudeName:
-			connections[name] = map[string]any{"type": "http", connectionURL: address}
+			connections[name] = map[string]any{connectionType: httpTransport, connectionURL: address}
 		case hermesName:
 			// Native toolset aliases must not collide with built-ins such as all or terminal.
 			connections["sproozi-mcp-"+name] = map[string]any{connectionURL: address, "enabled": true, "strict_redirect_headers": true, "connect_timeout": 15, "timeout": 60}
 		case openCodeName:
-			connections[name] = map[string]any{"type": "remote", connectionURL: address, "enabled": true, "oauth": false}
+			connections[name] = map[string]any{connectionType: "remote", connectionURL: address, "enabled": true, "oauth": false}
 		}
 	}
 	if selected == codexName {

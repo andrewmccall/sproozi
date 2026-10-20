@@ -212,7 +212,7 @@ service and trusted coordinator. These credentials stay outside agent Pods:
 | `sproozi-task-token` Secret | `sproozi-system` | Task service bearer token, `token` key |
 | `sproozi-task-tls` Secret | `sproozi-system` | Task server TLS certificate and key |
 | `sproozi-tasks` immutable ConfigMap | `sproozi-system` | Fixed principal and workflow map, `tasks.json` |
-| `hermes-coordinator` Secret | `sproozi-coordinators` | Separate model key, native API key and the `task-token` key: the task service token, or the profile service's work token in [Hermes with remote work](../guides/retained-work-kubernetes.md) |
+| `hermes-coordinator` Secret | `sproozi-coordinators` | Separate model key, native API key and the `task-token` key: the task service token, or the remote executor's work token in [Hermes with remote work](../guides/retained-work-kubernetes.md) |
 | `hermes-task-trust` ConfigMap | `sproozi-coordinators` | Normal roots plus public task-service CA, `ca-bundle.pem` |
 | `hermes-config` immutable ConfigMap | `sproozi-coordinators` | Reviewed native model, platform and MCP configuration |
 

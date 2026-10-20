@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/agentprofile"
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
 	"github.com/andrewmccall/sproozi/internal/session"
 )
@@ -70,7 +71,12 @@ type Client struct {
 	http          *http.Client
 	maxCheckpoint int64
 	maxBody       int64
+	profiles      func(digest string) ([]byte, error)
 }
+
+// SetProfileSource supplies retained profile archives for launches that name
+// one. Without it such launches fail before any request.
+func (c *Client) SetProfileSource(source func(digest string) ([]byte, error)) { c.profiles = source }
 
 // NewClient validates the fixed origin and constructs a CA-verified TLS 1.3
 // transport. Credentials are read once and sent only to that origin.
@@ -127,7 +133,21 @@ func (c *Client) Prepare(ctx context.Context, l session.Launch, data []byte) (se
 	if err := validateCheckpoint(data, l, l.CheckpointDigest, c.maxCheckpoint); err != nil {
 		return session.Incarnation{}, err
 	}
-	r, err := c.call(ctx, actionPrepare, request{Launch: l, Checkpoint: data})
+	input := request{Launch: l, Checkpoint: data}
+	if l.ProfileDigest != "" {
+		if c.profiles == nil {
+			return session.Incarnation{}, errors.New("profile: no retained profile archives")
+		}
+		archive, err := c.profiles(l.ProfileDigest)
+		if err != nil {
+			return session.Incarnation{}, err
+		}
+		if err = agentprofile.Verify(l.ProfileDigest, archive); err != nil {
+			return session.Incarnation{}, err
+		}
+		input.Profile = archive
+	}
+	r, err := c.call(ctx, actionPrepare, input)
 	if err != nil {
 		return session.Incarnation{}, err
 	}

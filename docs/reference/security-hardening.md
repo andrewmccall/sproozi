@@ -115,8 +115,8 @@ emergency that removes every running Pod's trust in the gateway. See
 
 A [local installation](local-installation.md) keeps its CA key, provider keys
 and journals in owner-only files. Its gateway listens on loopback when the
-engine forwards there, as Docker Desktop does. The shared `agents/` directory
-reaches every Codex session of that user and is not isolation between
+engine forwards there, as Docker Desktop does. The user's
+[profile](profile.md) reaches every session of that user and is not isolation between
 untrusted users or agents. Anyone controlling the user account or the Docker
 engine controls the local installation.
 
@@ -467,9 +467,9 @@ everything its account had left, so upgrade while no model calls are in
 flight.
 
 Rolling back is a risk. Older versions of every binary that reads budget
-records, the shared gateway and the profile service (budget ConfigMaps) and
+records, the shared gateway and the remote executor (budget ConfigMaps) and
 the home daemon (its ledger files), refuse a record that holds leases, so that
-account's model calls, and the profile service's seals, fail until a current
+account's model calls, and the remote executor's seals, fail until a current
 binary settles them. Every pending reservation a current binary makes, model
 call or not, holds a lease, so a record has leases whenever such a call is in
 flight or a lease was abandoned. Before rolling

@@ -226,8 +226,27 @@ func (p *Placement) ceilings(l session.Launch, policy api.AgentPolicySpec) (map[
 	}
 	return ceilings, nil
 }
+
+// StoreProfile retains a profile archive that a later launch names by digest.
+func (p *Placement) StoreProfile(ctx context.Context, digest string, archive []byte) error {
+	return registry.StoreProfile(ctx, p.config.Kube, p.config.Namespace, digest, archive)
+}
+
+// requireProfile refuses a launch naming a profile this executor never stored,
+// before any registration or run exists.
+func (p *Placement) requireProfile(ctx context.Context, l session.Launch) error {
+	if l.ProfileDigest == "" {
+		return nil
+	}
+	_, err := registry.ReadProfile(ctx, p.config.Kube, p.config.Namespace, l.ProfileDigest)
+	if apierrors.IsNotFound(err) || errors.Is(err, registry.ErrConflict) {
+		return &profile.Rejection{Code: profile.CodeInvalid}
+	}
+	return err
+}
+
 func (p *Placement) registration(l session.Launch, ceilings map[api.CapabilityKind]api.EndpointBudget) registry.Registration {
-	return registry.Registration{Harness: p.config.Harness, Principal: p.config.Principal, SessionID: l.ExecutionID, Epoch: l.Epoch, OperationID: l.OperationID, NativeUUID: l.ThreadID, InstructionDigest: l.InstructionDigest, OriginalDeadline: l.Deadline.UTC(), TemplateName: p.config.TemplateName, Ceilings: ceilings, Task: l.Task, CheckpointDigest: l.CheckpointDigest, IncludeIgnored: append([]string(nil), l.IncludeIgnored...), IntendedRunName: runName(l)}
+	return registry.Registration{Harness: p.config.Harness, Principal: p.config.Principal, SessionID: l.ExecutionID, Epoch: l.Epoch, OperationID: l.OperationID, NativeUUID: l.ThreadID, InstructionDigest: l.InstructionDigest, OriginalDeadline: l.Deadline.UTC(), TemplateName: p.config.TemplateName, Ceilings: ceilings, Task: l.Task, CheckpointDigest: l.CheckpointDigest, IncludeIgnored: append([]string(nil), l.IncludeIgnored...), IntendedRunName: runName(l), ProfileDigest: l.ProfileDigest}
 }
 
 func (p *Placement) Prepare(ctx context.Context, l session.Launch, data []byte) (session.Incarnation, error) {
@@ -246,6 +265,9 @@ func (p *Placement) Prepare(ctx context.Context, l session.Launch, data []byte) 
 	}
 	if err = checkpoint.ValidateContinuity(data, l.Harness, l.InstructionDigest, p.config.MaxCheckpointBytes); err != nil {
 		return session.Incarnation{}, &profile.Rejection{Code: profile.CodeInvalid}
+	}
+	if err = p.requireProfile(ctx, l); err != nil {
+		return session.Incarnation{}, err
 	}
 	local, err := p.persistIntent(l, data)
 	if err != nil {
@@ -322,6 +344,9 @@ func (p *Placement) CreateInitial(ctx context.Context, l session.Launch, data []
 		}
 	} else if local.WorkspaceDigest != digest {
 		return session.Incarnation{}, &profile.Rejection{Code: profile.CodeConflict}
+	}
+	if err = p.requireProfile(ctx, l); err != nil {
+		return session.Incarnation{}, err
 	}
 	registration := p.registration(l, ceilings)
 	registration.WorkspaceDigest = digest

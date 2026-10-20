@@ -81,7 +81,7 @@ func EnsureAgentContract(ctx context.Context, c client.Client, run *sprooziv1alp
 			kubeconfigConfigMapKey: generatedKubeconfig(),
 		},
 	}
-	if err = addManagedNativeContract(ctx, c, run, tmpl, rt, wanted.Data); err != nil {
+	if err = addManagedNativeContract(ctx, c, run, tmpl, rt, wanted); err != nil {
 		return err
 	}
 	config, err := harness.MCPConfig(rt.Spec.ClientConfig.Harness, input.Capabilities, rt.Spec.GatewayEndpoint)
@@ -89,6 +89,9 @@ func EnsureAgentContract(ctx context.Context, c client.Client, run *sprooziv1alp
 		return err
 	}
 	maps.Copy(wanted.Data, config)
+	if rt.Spec.ClientConfig.Harness != "" {
+		maps.Copy(wanted.Data, harness.ManagedContract())
+	}
 	if rt.Spec.ClientConfig.Harness == "opencode" {
 		wanted.Data["opencode-launch.py"] = harness.OpenCodeLaunch
 	}
@@ -112,7 +115,8 @@ func EnsureAgentContract(ctx context.Context, c client.Client, run *sprooziv1alp
 	if err := c.Get(ctx, client.ObjectKeyFromObject(wanted), &existing); err != nil {
 		return err
 	}
-	if existing.Immutable == nil || !*existing.Immutable || existing.Labels[RunUIDLabel] != string(run.UID) || !maps.Equal(existing.Data, wanted.Data) || len(existing.BinaryData) != 0 {
+	if existing.Immutable == nil || !*existing.Immutable || existing.Labels[RunUIDLabel] != string(run.UID) || !maps.Equal(existing.Data, wanted.Data) ||
+		!maps.EqualFunc(existing.BinaryData, wanted.BinaryData, bytes.Equal) {
 		return fmt.Errorf("existing agent contract %s has different immutable contents", wanted.Name)
 	}
 	return nil

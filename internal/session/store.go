@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/agentprofile"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/privatefs"
 
@@ -27,9 +28,13 @@ const maxJournalBytes = int64(1 << 20)
 const maxOperations = 1000
 const checkpointsDir = "checkpoints"
 const workspacesDir = "workspaces"
+const profilesDir = "profiles"
 
 func checkpointPath(digest string) string { return filepath.Join(checkpointsDir, digest+".json") }
 func workspacePath(digest string) string  { return filepath.Join(workspacesDir, digest+".workspace") }
+func profilePath(digest string) string {
+	return filepath.Join(profilesDir, strings.TrimPrefix(digest, "sha256:")+".tar.gz")
+}
 
 // Coordinator exclusively owns one protected directory and its placements.
 // Close releases the cross-process lock. Placement implementations enforce the
@@ -45,6 +50,9 @@ type Coordinator struct {
 	closed        bool
 	// now reads the clock for original-deadline checks.
 	now func() time.Time
+	// profile archives the user's current profile for a new visit; an empty
+	// digest means there is none.
+	profile func() (archive []byte, digest string, err error)
 }
 
 // Open takes a nonblocking owner lock. Existing directories/files must be private
@@ -77,7 +85,7 @@ func Open(dir string, placements map[string]Placement, maxCheckpointBytes int64)
 		return nil, fmt.Errorf("session: coordinator already owned: %w", err)
 	}
 	c := &Coordinator{dir: dir, placements: configured, maxCheckpoint: maxCheckpointBytes, lock: lock, now: time.Now}
-	for _, name := range []string{checkpointsDir, workspacesDir} {
+	for _, name := range []string{checkpointsDir, workspacesDir, profilesDir} {
 		sub := filepath.Join(dir, name)
 		if err = privatefs.EnsureDir(sub); err != nil {
 			_ = c.Close()
@@ -89,6 +97,30 @@ func Open(dir string, placements map[string]Placement, maxCheckpointBytes int64)
 		}
 	}
 	return c, nil
+}
+
+// SetProfileSource archives the user's profile when each move creates its
+// launch. Retries reuse the journaled launch and its retained archive.
+func (c *Coordinator) SetProfileSource(source func() ([]byte, string, error)) { c.profile = source }
+
+// ProfileArchive returns a retained profile archive by digest.
+func (c *Coordinator) ProfileArchive(digest string) ([]byte, error) {
+	if !agentprofile.ValidDigest(digest) {
+		return nil, errors.New("session: invalid profile digest")
+	}
+	return readFile(filepath.Join(c.dir, profilePath(digest)), agentprofile.MaxArchiveBytes)
+}
+
+// retainProfile archives the current profile for a new launch.
+func (c *Coordinator) retainProfile() (string, error) {
+	if c.profile == nil {
+		return "", nil
+	}
+	archive, digest, err := c.profile()
+	if err != nil || digest == "" {
+		return "", err
+	}
+	return digest, c.retainImmutable(profilePath(digest), archive)
 }
 
 func (c *Coordinator) Close() error {

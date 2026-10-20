@@ -146,7 +146,7 @@ verify-native-session: ## Resume installed stock Codex across checkpoint capture
 	python3 hack/verify/native-session.py --state rollout
 
 .PHONY: verify-harness-process
-verify-harness-process: ## Run installed Claude Code and OpenCode through the TLS gateway with local providers.
+verify-harness-process: ## Run installed Claude Code and OpenCode through the TLS gateway with local providers, including diagnose.
 	go run ./hack/verify/harness-process --output .local/verification/harness-process.json
 
 .PHONY: verify-mcp-kind
@@ -154,7 +154,7 @@ verify-mcp-kind: ## Prove configured MCP with stock Codex in an owned Kind clust
 	KIND_NODE_IMAGE='$(KIND_NODE_IMAGE)' bash hack/verify/mcp-kind.sh
 
 .PHONY: verify-local-onboarding
-verify-local-onboarding: ## Prove init --local, both harnesses, shared instructions and renewal on this Docker engine with local providers.
+verify-local-onboarding: ## Prove init --local, both harnesses, profile instructions and renewal on this Docker engine with local providers.
 	python3 hack/verify/local-onboarding.py
 
 .PHONY: verify-kubernetes-release

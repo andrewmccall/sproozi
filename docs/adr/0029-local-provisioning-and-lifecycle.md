@@ -113,6 +113,10 @@ an absent service for a provisioned installation.
 
 ### Shared agent files are a launch-time snapshot
 
+> Superseded by [ADR 0031](0031-user-profile-for-managed-sessions.md): the
+> user profile replaces the `agents/` directory, keeps its ownership checks and
+> Claude Code's `# User preferences` section, and also reaches Kubernetes.
+
 The `agents/` directory holds the allowlisted shared agent files. The trusted home
 reads them on every launch, rejecting links, special files, foreign or
 writable-by-others files, oversized and non-UTF-8 text. The launch contract

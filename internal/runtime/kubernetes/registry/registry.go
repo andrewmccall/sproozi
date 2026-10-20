@@ -1,5 +1,5 @@
 // Package session retains trusted remote execution registration and fencing.
-// Only the profile service may write this store. Native workers, checkpoints
+// Only the remote executor may write this store. Native workers, checkpoints
 // and Run annotations do not supply authority. Callers confirm restoration,
 // native-container termination and ledger seals before recording those effects.
 package registry
@@ -19,6 +19,7 @@ import (
 	"time"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
+	"github.com/andrewmccall/sproozi/internal/agentprofile"
 	"github.com/andrewmccall/sproozi/internal/budget"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/session"
@@ -86,6 +87,9 @@ type Registration struct {
 	CheckpointDigest  string                                    `json:"checkpointDigest"`
 	IncludeIgnored    []string                                  `json:"includeIgnored,omitempty"`
 	IntendedRunName   string                                    `json:"intendedRunName"`
+	// ProfileDigest names the stored profile archive copied into the run's
+	// agent contract.
+	ProfileDigest string `json:"profileDigest,omitempty"`
 }
 
 // StopReceipt contains only trusted ledger seals and checkpoint identity.
@@ -465,6 +469,9 @@ func validateRegistration(r Registration) error {
 	}
 	if err := validateNativeInput(r); err != nil {
 		return err
+	}
+	if r.ProfileDigest != "" && !agentprofile.ValidDigest(r.ProfileDigest) {
+		return fmt.Errorf("invalid mobility profile digest")
 	}
 	for capability, ceiling := range r.Ceilings {
 		_, named := capability.MCPServerName()

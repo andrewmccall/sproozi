@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/andrewmccall/sproozi/internal/harness"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/clientcmd"
@@ -98,9 +100,15 @@ func TestRunContractDeliversNamedMCPConfigurationAndRejectsReplacement(t *testin
 	if err := c.Get(t.Context(), key, &config); err != nil {
 		t.Fatal(err)
 	}
-	want := "[mcp_servers.\"docs\"]\nurl = \"" + rt.Spec.GatewayEndpoint + "/mcp/docs\"\nrequired = true\n\n"
+	want := "[mcp_servers.\"docs\"]\nurl = \"" + rt.Spec.GatewayEndpoint + "/mcp/docs\"\nrequired = true\n\n" +
+		"[mcp_servers.\"sproozi\"]\nurl = \"" + rt.Spec.GatewayEndpoint + "/mcp/sproozi\"\nrequired = true\n\n"
 	if config.Data["codex-mcp.toml"] != want {
 		t.Fatalf("MCP configuration=%q", config.Data["codex-mcp.toml"])
+	}
+	for key, value := range harness.ManagedContract() {
+		if config.Data[key] != value || value == "" {
+			t.Fatalf("contract lacks Sproozi file %s", key)
+		}
 	}
 	if err := kubernetes.EnsureAgentContract(t.Context(), c, run, tmpl, rt); err != nil {
 		t.Fatal("identical preparation was not idempotent", err)

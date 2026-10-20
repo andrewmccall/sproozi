@@ -22,7 +22,7 @@ terms. The main [README](../README.md) gives the project overview.
 
 "Checkout and Make" guides run from a clone of this repository and never call
 `sproozi`. The CLI guides use the installed `sproozi` command, and build images
-and the profile service from a checkout of the same release as the CLI. Before
+and the remote executor from a checkout of the same release as the CLI. Before
 a deployment, check [cluster dependencies](reference/dependencies.md) and
 [security hardening](reference/security-hardening.md).
 
@@ -53,8 +53,8 @@ References describe exact fields, commands and supported behaviour.
 | Access and credentials | [Permissions and capabilities](reference/permissions-and-capabilities.md), [security hardening](reference/security-hardening.md) |
 | Installation | [Local installation](reference/local-installation.md), [cluster dependencies](reference/dependencies.md), [required secrets and config](reference/required-secrets-and-config.md) |
 | Harnesses | [Harnesses](reference/harnesses.md), [stock runtime examples](../examples/harnesses/README.md), [client compatibility](reference/client-compatibility.md), [input contract and completion](reference/agent-contract.md), [native launch and control](reference/native-control.md) |
-| MCP tools | [Native Kubernetes MCP](reference/kubernetes-mcp.md), [configured remote MCP](reference/configured-mcp.md) |
-| Sessions and remote work | [Session commands](reference/session-commands.md), [Projects and workspace revisions](reference/projects-and-revisions.md) |
+| MCP tools | [Native Kubernetes MCP](reference/kubernetes-mcp.md), [configured remote MCP](reference/configured-mcp.md), [Sproozi integration and diagnose](reference/sproozi-integration.md) |
+| Sessions and remote work | [Session commands](reference/session-commands.md), [profile](reference/profile.md), [Projects and workspace revisions](reference/projects-and-revisions.md) |
 | Task submission services | [Task service MCP interface](reference/orchestration.md), [webhook contract](reference/webhook-contract.md) |
 
 ## Decisions and future work

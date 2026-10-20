@@ -8,7 +8,7 @@ for administrators who write or adjust it by hand.
 `sproozi serve` runs the [home daemon](../../GLOSSARY.md#home-daemon). It owns a
 local Docker placement for each configured harness, with its private gateway, and the accounting, the session journal,
 and HTTPS connections to administrator-selected
-[profile services](../../GLOSSARY.md#profile-service). Client
+[remote executors](../../GLOSSARY.md#remote-executor). Client
 commands use a private Unix socket or Windows named pipe. A terminal attachment can disconnect while
 the daemon and selected native process keep running.
 
@@ -29,7 +29,7 @@ value or a name under `remote`. It is empty until the session's first launch. Re
 
 Remote-first tasks use `run --executor NAME --repository NAME --task-file
 FILE --operation UUID`, followed by `sessions` and `status`. A configured
-profile service accepts these without a running home daemon. Start the home
+remote executor accepts these without a running home daemon. Start the home
 daemon for `pull SESSION_UUID --from NAME`, `resume SESSION_UUID` and `stop
 SESSION_UUID`. `--from NAME` names the remote executor to pull from,
 configured under `remote` or `workSources`. Product
@@ -83,7 +83,7 @@ empty one as `model (model name the harness requests)`. Then edit it for one of 
 
 - Remote work: add an executor under `remote` (see the example below), then run
   `sproozi sessions` and `sproozi run --executor NAME`.
-  [Run a task remotely, then resume it locally](../../docs/guides/portable-workflows.md) sets up the profile service.
+  [Run a task remotely, then resume it locally](../../docs/guides/portable-workflows.md) sets up the remote executor.
 - Local sessions: replace the placeholder `model`, then add the Docker paths,
   the `local` images, network, instructions and digest, resource limits and
   storage sizes, and the `gateway` certificates and provider, then run
@@ -213,7 +213,7 @@ by its key, for example `local.gatewayPort: number -1 is not a whole number from
 }
 ```
 
-Each `remote` entry is a [profile service](../../GLOSSARY.md#profile-service):
+Each `remote` entry is a [remote executor](../../GLOSSARY.md#remote-executor):
 a placement that `move --to NAME` can use and an executor for `run`,
 `sessions`, `status`, `cancel`, `recover` and `pull`. `url` is its fixed HTTPS
 origin, `tokenFile` the absolute path of its
@@ -233,11 +233,11 @@ daemon, and local.name names home's local placement for "move --to"`. An unknown
 with the entry that holds it, such as `remote.engineering: unknown key "bogus"`.
 
 `workSources` takes entries of the same shape. Use it for an executor that is
-not a placement, such as a profile service reached only for remote work through
+not a placement, such as a remote executor reached only for remote work through
 `run`, `sessions`, `status`, `cancel`, `recover` and `pull`, or to give a
 `remote` executor a separately provisioned connection for those commands. When
 both maps hold the same name, those commands use the `workSources` entry and
-`move --to` uses the `remote` one. Use `remote` alone when one profile service
+`move --to` uses the `remote` one. Use `remote` alone when one remote executor
 is both your placement and your executor.
 
 ### Fields for home-managed certificates, harnesses and shared instructions
@@ -258,8 +258,8 @@ These optional fields are what `init --local` writes:
   source. Each harness has its own grants and placement directories.
   `start --harness` selects one; `move --to` with any local placement name
   returns a session to its own harness's placement.
-- `agentsDirectory` names the shared agent files read for every launch; see
-  [shared agent files](../../docs/reference/local-installation.md#shared-agent-files).
+- The [profile](../../docs/reference/profile.md) is the `profile` folder
+  beside the configuration file; it is not a setting.
 - `gateway.listen` may name a loopback address when the engine forwards its host
   address to host loopback, as Docker Desktop does.
 
@@ -304,7 +304,7 @@ estimate, because the provider already had the request. See
 ## Native clients
 
 Set `local.harness` explicitly to `codex` or `claude-code`; it must match every
-profile service and runtime used by this session. There is no default or client
+remote executor and runtime used by this session. There is no default or client
 switch during a move. Sproozi checks no client version; the repository's client images install the
 releases pinned in `hack/clients`. For Claude, use an approved Anthropic model/provider URL, omit
 `nativeOptions`, and cover `api.anthropic.com` in the inspection certificate.
@@ -329,15 +329,15 @@ authority. Bounded monetary MCP allowances are rejected because trusted MCP cost
 pricing is not implemented. Administrator `nativeOptions` supplies the matching
 stock Codex MCP client configuration; checkpoint contents supply none of it.
 
-## Profile services
+## Remote executors
 
-Every profile service must use the same checkpoint byte limit. Each one pins its
+Every remote executor must use the same checkpoint byte limit. Each one pins its
 own approved template, capabilities, ceilings and maximum duration. The home
-daemon holds only that profile service's CA and bearer token, never
+daemon holds only that remote executor's CA and bearer token, never
 Kubernetes credentials. Keep approved instructions identical
 through every visit: native resume retains the original developer instruction
 block. Claude receives the approved instructions through its fresh managed launch;
-its transcript cannot authorize instructions, settings or permissions. Restart the home daemon with the same profile service configuration while
+its transcript cannot authorize instructions, settings or permissions. Restart the home daemon with the same remote executor configuration while
 visits remain active; changed placement or authority configuration fails closed against
 retained records.
 
@@ -435,7 +435,7 @@ Codex uses native quit; Claude uses controlled process shutdown after its observ
 Stop and settled transcript. Accepted input after a Claude turn prevents reuse of
 its earlier Stop, so finish a new turn before requesting that graceful move.
 
-After a completed turn, move to the profile service's placement, named `engineering`
+After a completed turn, move to the remote executor's placement, named `engineering`
 in the example configuration, and return to the local placement, `local.name`:
 
 ```sh
@@ -492,7 +492,7 @@ unavailable. Stopping the daemon releases its private ownership locks and socket
 it is not a claim that an execution stopped. Restart with the same configuration
 and recover the retained operation.
 
-Remote control requests to a profile service default to a
+Remote control requests to a remote executor default to a
 45-second timeout. This is separate from the home gateway's 45-second wait for
 a model provider's response headers, described in
 [long model calls](../../docs/guides/model-provider-auth.md#long-model-calls).

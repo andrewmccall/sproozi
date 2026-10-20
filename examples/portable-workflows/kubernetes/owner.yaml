@@ -1,4 +1,4 @@
-# The profile service (sproozi-work), the owner of its remote work: see "Owner"
+# The remote executor (sproozi-work), the owner of its remote work: see "Owner"
 # in GLOSSARY.md. Install alongside the managed native runtime and shared
 # gateway. Set the native image to the reviewed digest; prepare profile config,
 # TLS and the distinct home and work tokens.

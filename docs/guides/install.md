@@ -66,7 +66,7 @@ executors. These guides use it:
 
 `sproozi init --local` pulls the release's worker image and prepares the
 network, certificates and credentials. The other guides build images and the
-profile service from a checkout of this repository. Use the checkout of the
+remote executor from a checkout of this repository. Use the checkout of the
 same release as your CLI: `sproozi --version` prints the version, and its tag
 is that version with a `v` prefix, for example `git checkout v0.1.0`. The CLI
 archive does not contain sandbox images.

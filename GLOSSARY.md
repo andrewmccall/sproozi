@@ -29,6 +29,33 @@ through. It holds provider credentials, identifies the run and checks each
 request against current policy. See
 [capabilities and gateways](docs/explanations/capabilities-and-gateways.md).
 
+### Control connection
+
+The `sproozi` MCP server that every execution reaches on its own gateway. Its
+`diagnose` tool explains the execution's recent gateway refusals. It needs no
+capability and grants none. See
+[Sproozi integration and diagnose](docs/reference/sproozi-integration.md).
+
+### Denial journal
+
+The gateway's bounded, in-memory record of each execution's recent refused
+requests, kept from its audit records. `diagnose` reads it.
+
+### Sproozi integration
+
+What Sproozi adds to every harness it launches: environment instructions, the
+`sproozi-access` skill and the control connection. It is guidance, not
+authority. Also seen as: managed harness configuration.
+
+### Profile
+
+Your own instructions and skills, in the `profile` folder beside the home
+configuration (`~/sproozi/profile` for a local installation), that every
+managed Codex and Claude Code session receives after the Sproozi integration.
+Like the integration, it is guidance, not authority. See
+[Profile](docs/reference/profile.md). Also seen as: shared agent files, agents
+directory, user preferences.
+
 ### Inspected connection
 
 One CONNECT tunnel from a sandbox whose TLS the gateway terminates and checks.
@@ -269,7 +296,7 @@ Its ID is `executionId`. Also seen as: Sproozi execution.
 ### Placement
 
 Where an execution runs: local Docker, managed by the home daemon, or a
-Kubernetes cluster reached through a profile service.
+Kubernetes cluster reached through a remote executor.
 
 ### Visit
 
@@ -306,7 +333,7 @@ commit with a clean checkout and a fresh conversation. See
 
 ### Remote work
 
-A session that a profile service runs in a Kubernetes sandbox and keeps in its
+A session that a remote executor runs in a Kubernetes sandbox and keeps in its
 catalogue after the sandbox stops. It starts from `sproozi run --executor` or a
 coordinator's request. Once the writer has stopped, usage is finalized and the
 checkpoint is stored, its phase is `retained`: it can seed fresh work at its
@@ -324,14 +351,14 @@ template, capability limits and explicit membership. See
 
 ### Owner
 
-The home daemon or profile service whose catalogue holds a session. Only the
+The home daemon or remote executor whose catalogue holds a session. Only the
 owner starts, stops or hands over that session's executions. The owner is not
 the placement: the home daemon stays the owner when `move` runs an execution in
-Kubernetes. A successful `pull` transfers ownership from a profile service to
+Kubernetes. A successful `pull` transfers ownership from a remote executor to
 the home daemon, one way. Catalogue rows report it as `ownership`: `home`
-when the home daemon owns the session, `executor` when the profile service the
+when the home daemon owns the session, `executor` when the remote executor the
 row came from owns it, or `source` while a pull is unacknowledged. After a
-pull, the profile service still lists a read-only mirror row with
+pull, the remote executor still lists a read-only mirror row with
 `"executor": "engineering"` (its name) and `"ownership": "home"`. See
 [ownership values](docs/reference/session-commands.md#ownership-values).
 An owner lock is the lock on an owner's state directory that stops a second
@@ -353,17 +380,9 @@ rejected), home service.
 
 The private directory, `~/sproozi` by default, that `sproozi init --local`
 provisions for the home daemon: its configuration, provider credentials,
-certificate authority, journals and shared agent files. See
+certificate authority, journals and profile. See
 [local installation](docs/reference/local-installation.md). Also seen as:
 installation root.
-
-### Shared agent files
-
-User instructions in a local installation's `agents/` directory that the home
-daemon gives every launch of a harness that supports them. They never replace
-approved instructions or reach a checkpoint. See
-[shared agent files](docs/reference/local-installation.md#shared-agent-files).
-Also seen as: agents root, agents directory.
 
 ### Trust generation
 
@@ -377,19 +396,19 @@ The optional `/certificates` program in a Kubernetes installation. It keeps the
 gateway's private CA, serving certificate and immutable trust ConfigMaps
 without cert-manager. See [Kubernetes installation](docs/guides/install-kubernetes.md#maintain-gateway-certificates).
 
-### Profile service
+### Remote executor
 
 The `session-profile` program. It serves one administrator-approved Kubernetes
 placement, holds that cluster's credentials and hosts a catalogue of remote
 work. Its work token (`workTokenFile`) is the bearer token a coordinator uses
 for `/work/mcp`; it differs from the home principal token (`tokenFile`), which
-also permits pull, and from the task service's token. Also seen as: remote
-profile, fixed remote profile, work owner, native work owner, remote work
+also permits pull, and from the task service's token. Also seen as: profile
+service, remote profile, fixed remote profile, work owner, native work owner, remote work
 service.
 
 ### Home principal token
 
-The bearer token a home daemon presents to a profile service. The profile
+The bearer token a home daemon presents to a remote executor. The profile
 service reads it from its `tokenFile`, and the home configuration names the
 same secret in `remote.NAME.tokenFile` or `workSources.NAME.tokenFile`. It
 permits remote work, moves and pull, unlike the work token. It needs at least
@@ -399,9 +418,9 @@ profile principal token, profile token, remote token.
 ### Executor
 
 The owner a CLI command addresses, selected with `--executor NAME`. `docker`
-means the home daemon; any other name is a profile service from the home
+means the home daemon; any other name is a remote executor from the home
 configuration. The `ownership` value `executor` in catalogue rows means the
-remote kind: a profile service owns the session, never the home daemon
+remote kind: a remote executor owns the session, never the home daemon
 addressed by `--executor docker`. `pull --from NAME` also names an owner, the
 one giving the session up, while `move --to NAME` names a placement, not an owner. The
 configuration's `local.name` names home's local placement, which `move --to`
@@ -413,7 +432,7 @@ characters; `docker`, `home` and the configured `local.name` are reserved. See
 ### Work source
 
 An entry in the home configuration's `workSources` map: a connection to a
-profile service that `run`, `sessions`, `status`, `cancel`, `recover` and
+remote executor that `run`, `sessions`, `status`, `cancel`, `recover` and
 `pull` use but `move --to` does not, because it is not a placement. Entries
 take the same fields and name rules as `remote` entries. When both maps hold
 the same name, those commands use the `workSources` entry and `move --to` uses
@@ -430,7 +449,7 @@ catalogues of the home daemon and configured executors. See
 ### Coordinator
 
 A persistent assistant, currently Hermes, that starts delegated runs through
-the task service or a profile service's remote work. It runs outside the
+the task service or a remote executor's remote work. It runs outside the
 sandboxes it starts.
 
 ### Delegated run

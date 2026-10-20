@@ -34,10 +34,10 @@ Use absolute Windows paths in configuration. Escape backslashes in JSON:
 
 ```json
 {
-  "directory": "C:\\Users\\you\\AppData\\Roaming\\sproozi\\home",
+  "directory": "C:\\Users\\you\\.sproozi\\state",
   "dockerBinary": "C:\\Program Files\\Docker\\Docker\\resources\\bin\\docker.exe",
   "dockerSocket": "npipe:////./pipe/dockerDesktopLinuxEngine",
-  "dockerConfig": "C:\\Users\\you\\AppData\\Roaming\\sproozi\\docker"
+  "dockerConfig": "C:\\Users\\you\\.sproozi\\docker"
 }
 ```
 

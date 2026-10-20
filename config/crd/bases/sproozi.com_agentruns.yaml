@@ -64,6 +64,9 @@ spec:
                   maxLength: 67
                   pattern: ^(kubernetes[.]read|github[.]pull_request|model[.]inference|network[.]egress|packages[.]install|mcp[.][a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)$
                   type: string
+                  x-kubernetes-validations:
+                  - message: mcp.sproozi is reserved for the Sproozi control connection
+                    rule: self != 'mcp.sproozi'
                 maxItems: 32
                 minItems: 1
                 type: array

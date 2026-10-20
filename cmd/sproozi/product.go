@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/agentprofile"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/localsetup"
 	"github.com/andrewmccall/sproozi/internal/project"
@@ -244,9 +245,15 @@ func (q *options) submitRemote(ctx context.Context) error {
 	if q.kind == "" {
 		q.kind = string(q.fixed.Local.Harness)
 	}
+	// The remote session receives the profile as it is now; a profile over the
+	// Kubernetes limit refuses the run before anything is submitted.
+	archive, _, err := agentprofile.ArchiveDirectory(q.fixed.Local.ProfileDirectory)
+	if err != nil {
+		return fmt.Errorf("profile: %w", err)
+	}
 	v, err := client.Submit(ctx, work.Submit{RequestID: q.operation, Repository: q.repository,
 		Harness: harness.NativeKind(q.kind), Executor: q.executor, Task: q.task, Project: q.project,
-		WorkspaceFrom: q.workspaceFrom})
+		WorkspaceFrom: q.workspaceFrom, Profile: archive})
 	if err != nil {
 		return fmt.Errorf("%w; to retry, repeat the command with --operation %s", err, q.operation)
 	}

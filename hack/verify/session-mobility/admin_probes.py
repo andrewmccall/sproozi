@@ -93,6 +93,18 @@ class NativeDenials:
                 "Remote native source lost its actual UUID")
         return ["kube", name], {"allocationId": launch["allocationId"], "runUid": r["runUid"], "podUid": r["podUid"]}, confirm
 
+    def read(self, active, *paths):
+        """Returns the named files from the exact admitted native container."""
+        p = self.proof
+        local = active["launch"]["placement"] == p.config["local"]["Name"]
+        target, _, confirm = self.local(active) if local else self.remote(active)
+        if local:
+            data = self.docker("exec", "--user", "1000", target[1], "cat", *paths)
+        else:
+            data = self.kube(p.args.agent_namespace, "exec", target[1], "-c", "agent", "--", "cat", *paths)
+        confirm()
+        return data.decode()
+
     def run(self, active=None):
         p = self.proof
         local = active is None or active["launch"]["placement"] == p.config["local"]["Name"]

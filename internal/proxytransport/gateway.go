@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	api "github.com/andrewmccall/sproozi/api/v1alpha1"
+	"github.com/andrewmccall/sproozi/internal/audit"
 	"github.com/andrewmccall/sproozi/internal/gateway"
 )
 
@@ -67,6 +69,8 @@ type Config struct {
 	Revalidate       func(context.Context, *gateway.ExecutionGrant) error
 	Handler          http.Handler
 	AllowedAuthority func(string) bool
+	// AuditLogger, when set, records authenticated destination denials.
+	AuditLogger audit.Writer
 	// RevocationInterval bounds idle/in-flight sessions after revocation.
 	RevocationInterval time.Duration
 	// SessionLifetime bounds one inspected connection. Zero selects
@@ -155,6 +159,29 @@ func New(c Config) (*Gateway, error) {
 		limitRejected: newLimitLog(c.Logger), logger: logger}, nil
 }
 
+// authenticate returns the CONNECT's current execution identity, or writes
+// the refusal and reports false.
+func (g *Gateway) authenticate(w http.ResponseWriter, r *http.Request) (*gateway.ExecutionGrant, bool) {
+	token, valid := proxyToken(r.Header.Values(proxyAuthorizationHeader))
+	if !valid {
+		http.Error(w, "gateway identity required", http.StatusUnauthorized)
+		return nil, false
+	}
+	identity, err := authorityCall(r.Context(), g, func(ctx context.Context) (*gateway.ExecutionGrant, error) {
+		return g.config.Authenticate(ctx, token)
+	})
+	if err != nil || identity.Validate() != nil {
+		http.Error(w, "invalid gateway identity", http.StatusUnauthorized)
+		return nil, false
+	}
+	identity = identity.Clone()
+	if g.revalidate(r.Context(), identity) != nil {
+		http.Error(w, "revoked gateway identity", http.StatusForbidden)
+		return nil, false
+	}
+	return identity, true
+}
+
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !acquire(g.requests) {
 		http.Error(w, "gateway capacity unavailable", http.StatusServiceUnavailable)
@@ -166,27 +193,25 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	host, port, err := net.SplitHostPort(r.Host)
-	certificate, allowed := g.config.Certificates[host]
-	if err != nil || !allowed || !g.config.AllowedAuthority(r.Host) || (r.URL.Host != "" && r.URL.Host != r.Host) || (r.URL.Opaque != "" && r.URL.Opaque != r.Host) {
+	if err != nil || (r.URL.Host != "" && r.URL.Host != r.Host) || (r.URL.Opaque != "" && r.URL.Opaque != r.Host) {
 		http.Error(w, "unsupported destination", http.StatusForbidden)
 		return
 	}
-	auth := r.Header.Values(proxyAuthorizationHeader)
-	token, valid := proxyToken(auth)
-	if !valid {
-		http.Error(w, "gateway identity required", http.StatusUnauthorized)
+	identity, ok := g.authenticate(w, r)
+	if !ok {
 		return
 	}
-	identity, err := authorityCall(r.Context(), g, func(ctx context.Context) (*gateway.ExecutionGrant, error) {
-		return g.config.Authenticate(ctx, token)
-	})
-	if err != nil || identity.Validate() != nil {
-		http.Error(w, "invalid gateway identity", http.StatusUnauthorized)
-		return
-	}
-	identity = identity.Clone()
-	if g.revalidate(r.Context(), identity) != nil {
-		http.Error(w, "revoked gateway identity", http.StatusForbidden)
+	// Authenticate before routing so a destination denial is attributed to
+	// its execution and can be diagnosed by that execution alone.
+	certificate, allowed := g.config.Certificates[host]
+	if !allowed || !g.config.AllowedAuthority(r.Host) {
+		if g.config.AuditLogger != nil {
+			event := gateway.AuditEvent(gateway.WithIdentity(r.Context(), identity), http.MethodConnect+" "+r.Host)
+			event.Capability, event.Service = string(api.CapabilityNetworkEgress), "network"
+			event.DenyReason = "destination " + r.Host + " is not enabled at this gateway"
+			g.config.AuditLogger.Log(event)
+		}
+		http.Error(w, "unsupported destination", http.StatusForbidden)
 		return
 	}
 	if !g.acquireSession(identity.Execution) {

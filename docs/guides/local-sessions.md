@@ -108,18 +108,19 @@ reverse. Setup restarts the home daemon to load the new harness when no session
 is active. If a session is running, setup writes the configuration and asks you
 to restart the home daemon once the session stops.
 
-## Share your instructions
+## Add your instructions and skills
 
-Put instructions that every session should follow in
-`~/sproozi/agents/shared/AGENTS.md`. Add harness-specific ones in
-`~/sproozi/agents/codex/AGENTS.md` or `~/sproozi/agents/claude/CLAUDE.md`.
-Sproozi reads them freshly for each launch and gives the agent a read-only
-copy. Edit them on your computer; changes apply to the next launch. Approved
-developer instructions still come from the configuration and take precedence.
+Your [profile](../reference/profile.md) is `~/sproozi/profile`. Put
+instructions that every session should follow in `AGENTS.md` there, and
+harness-specific ones in `codex/AGENTS.md` or `claude/CLAUDE.md`. Add skills as
+`skills/<name>/SKILL.md`. Sproozi sends the profile with each launch, and the
+agent gets its own copy. Edit it on your computer; changes apply to the next
+launch. Approved developer instructions still come from the configuration and
+take precedence.
 
-The [harness table](../reference/local-installation.md#shared-agent-files)
-shows how each harness receives them. `sproozi doctor` reports any file in
-`agents/` that no harness reads.
+The [profile reference](../reference/profile.md#what-each-harness-receives)
+shows how each harness receives them. `sproozi doctor` checks the profile and
+reports any file in it that no harness reads.
 
 ## Check and maintain the installation
 
@@ -186,8 +187,8 @@ automatically.
 
 - The agent can run any command inside its container, including tools that
   change the managed workspace. Review its changes before using them.
-- Every local session uses the same `agents/` directory. Anything you place
-  there reaches every Codex session. It is a convenience for one user, not
+- Every local session uses the same profile. Anything you place there reaches
+  every Codex and Claude Code session. It is a convenience for one user, not
   isolation between untrusted users or agents.
 - The trusted home daemon controls Docker. Anyone who controls your account or
   Docker engine controls Sproozi too.

@@ -9,9 +9,11 @@ import (
 	"io"
 	"net/netip"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/agentprofile"
 	"github.com/andrewmccall/sproozi/internal/budget"
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
 	"github.com/andrewmccall/sproozi/internal/harness"
@@ -50,8 +52,6 @@ type NativeAccess struct {
 	Model          string
 	Options        []string
 	ClientConfig   *harness.NativeClientConfig
-	// UserInstructions are shared user preferences, never approved instructions.
-	UserInstructions string
 }
 
 // Authority is the trusted home gateway/accounting owner. It persists exact
@@ -75,6 +75,10 @@ type PlacementConfig struct {
 	InstructionDigest                              string
 	AgentLimits, HelperLimits, AnchorLimits        ResourceLimits
 	VolumeBytes, MaxCheckpointBytes, RetainedBytes int64
+	// ProfileDirectory is the user's profile folder, set by the home from the
+	// configuration file's location, never from its contents. Each launch
+	// sends the profile as it is then.
+	ProfileDirectory string `json:"-"`
 }
 
 func (c PlacementConfig) validate() error {
@@ -87,6 +91,9 @@ func (c PlacementConfig) validate() error {
 	ip, err := netip.ParseAddr(c.GatewayIPv4)
 	if !resourceName.MatchString(c.Name) || !resourceName.MatchString(c.NetworkName) || err != nil || !ip.Is4() || ip.IsUnspecified() || ip.IsMulticast() || c.GatewayPort == 0 || c.Instructions == "" || fmt.Sprintf("%x", sha256.Sum256([]byte(c.Instructions))) != c.InstructionDigest || c.VolumeBytes < 16<<20 || c.VolumeBytes > 4<<30 || c.MaxCheckpointBytes <= 0 || c.MaxCheckpointBytes > 64<<20 || c.RetainedBytes < c.MaxCheckpointBytes*2 {
 		return errors.New("invalid Docker placement configuration")
+	}
+	if c.ProfileDirectory != "" && !filepath.IsAbs(c.ProfileDirectory) {
+		return errors.New("docker placement profile folder must be absolute")
 	}
 	for _, image := range []string{c.NativeImageID, c.HelperImageID, c.AnchorImageID} {
 		if !strings.HasPrefix(image, "sha256:") || !objectID.MatchString(strings.TrimPrefix(image, "sha256:")) {
@@ -254,7 +261,14 @@ func (p *Placement) drivePrepare(ctx context.Context, r *placementRecord, data [
 	if err != nil {
 		return err
 	}
-	contract := harness.NativeLaunch{Harness: p.config.Harness, Deadline: r.Launch.Deadline, ThreadID: r.Launch.ThreadID, Task: r.Launch.Task, Instructions: p.config.Instructions, InstructionDigest: p.config.InstructionDigest, Env: access.Env, Model: access.Model, Options: access.Options, ClientConfig: access.ClientConfig, TrustBundlePEM: access.TrustBundlePEM, UserInstructions: access.UserInstructions, RolloutMaxBytes: harness.NativeRolloutMaxBytes}
+	// The profile travels with the launch configuration rather than a host
+	// mount, so every platform delivers it the same way and the container
+	// keeps its workspace-only mount contract.
+	profile, _, err := agentprofile.ArchiveDirectory(p.config.ProfileDirectory)
+	if err != nil {
+		return fmt.Errorf("profile: %w", err)
+	}
+	contract := harness.NativeLaunch{Harness: p.config.Harness, Deadline: r.Launch.Deadline, ThreadID: r.Launch.ThreadID, Task: r.Launch.Task, Instructions: p.config.Instructions, InstructionDigest: p.config.InstructionDigest, Env: access.Env, Model: access.Model, Options: access.Options, ClientConfig: access.ClientConfig, TrustBundlePEM: access.TrustBundlePEM, RolloutMaxBytes: harness.NativeRolloutMaxBytes, ProfileArchive: profile}
 	if err := contract.Validate(time.Now()); err != nil {
 		return err
 	}

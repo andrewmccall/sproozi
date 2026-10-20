@@ -182,7 +182,8 @@ def provider_class(args, out, stop, records, lock):
                 self.send_error(404)
                 return
             fields = ("kind", "turn", "phase", "completed", "missingHistory", "placeholderAuth", "usage", "held",
-                      "holdID", "released", "streamError", "toolOutputSHA256", "toolOutputValidated")
+                      "holdID", "released", "streamError", "toolOutputSHA256", "toolOutputValidated", "profileMarkers",
+                      "profileSkill")
             with lock:
                 data = json.dumps({"requests": [{k: r[k] for k in fields if k in r} for r in records]}).encode()
             self.send_response(200)
@@ -215,7 +216,9 @@ def provider_class(args, out, stop, records, lock):
                     self.send_error(404)
                     return
                 request = classify(body)
-                request.update(body=body, placeholderAuth=True, completed=False)
+                request.update(body=body, placeholderAuth=True, completed=False,
+                               profileMarkers=BASE.profile_markers(json.dumps(body)),
+                               profileSkill=("profile:" + BASE.PROFILE_SKILL) in json.dumps(body))
                 with lock:
                     if len(records) >= 128:
                         self.send_error(429)
@@ -485,6 +488,11 @@ class Proof(BASE.Proof):
 
     def execute(self):
         BASE.check(not self.provider(), "Use a fresh fixture provider")
+        # Each visit's launch must carry the profile as it was when that visit
+        # began: Docker reads the live folder, Kubernetes the archived copy.
+        markers = ["PROFILE_MARKER_DOCKER_FIRST", "PROFILE_MARKER_KUBERNETES", "PROFILE_MARKER_DOCKER_EDITED",
+                   "PROFILE_MARKER_KUBERNETES_FINAL"]
+        BASE.write_profile(self.fixture, markers[0])
         repo, expected = self.seed()
         start = self.cli("start", operation=uuid.uuid4(), workspace=repo, **{"include-ignored": ["needed.bin"]})
         BASE.check(start["initialStage"] == "active" and not start.get("threadId"), "Initial native identity fabricated or launch inactive")
@@ -493,6 +501,21 @@ class Proof(BASE.Proof):
         self.save()
         for index, destination in enumerate((self.args.remote_name, self.config["local"]["Name"], self.args.remote_name)):
             self.terminal(index)
+            # Claude Code resumes a conversation with the system prompt and skill
+            # listing it started with, so model requests keep the first visit's
+            # profile; each visit's own launch must still render its profile.
+            turns = [r for r in self.provider(quiet=True) if r["kind"] == "conversation" and r["turn"] == index]
+            BASE.check(turns and all(r["profileMarkers"] == [markers[0]] and r["profileSkill"] for r in turns),
+                       "Turn %d model requests lost the conversation's profile" % index)
+            step = {"turn": index, "requestProfileMarker": markers[0], "profileSkill": True}
+            if self.probes:
+                active = self.cli("status")["session"]["active"]
+                rendered = self.probes.read(active, "/tmp/sproozi-native/profile-plugin/skills/" + BASE.PROFILE_SKILL + "/SKILL.md")
+                BASE.check(BASE.profile_markers(rendered) == [markers[index]],
+                           "Visit %d did not render the profile as it was at launch" % index)
+                step.update(renderedProfileMarker=markers[index], placement=active["launch"]["placement"])
+            self.report["steps"].append(step)
+            BASE.write_profile(self.fixture, markers[index + 1])
             if self.probes and index < 2:
                 active = None if index == 0 else self.cli("status")["session"]["active"]
                 self.probes.run(active)

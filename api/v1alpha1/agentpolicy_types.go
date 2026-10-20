@@ -19,6 +19,8 @@ package v1alpha1
 import (
 	"strings"
 
+	"github.com/andrewmccall/sproozi/internal/nativeconfig"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -101,7 +103,12 @@ type AgentPolicySpec struct {
 // CapabilityKind identifies an operation that may be granted to an AgentRun.
 // +kubebuilder:validation:MaxLength=67
 // +kubebuilder:validation:Pattern=`^(kubernetes[.]read|github[.]pull_request|model[.]inference|network[.]egress|packages[.]install|mcp[.][a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)$`
+// +kubebuilder:validation:XValidation:rule="self != 'mcp.sproozi'",message="mcp.sproozi is reserved for the Sproozi control connection"
 type CapabilityKind string
+
+// ControlMCPServer names the Sproozi control connection every managed execution
+// receives. It is not a grantable capability and no registration may use it.
+const ControlMCPServer = nativeconfig.ControlMCPServer
 
 // MCPServerName identifies a configured MCP grant without admitting arbitrary
 // capability strings or treating tool installation as authority.
@@ -110,7 +117,7 @@ func (c CapabilityKind) MCPServerName() (string, bool) {
 		return "", false
 	}
 	name := strings.TrimPrefix(string(c), "mcp.")
-	return name, len(validation.IsDNS1123Label(name)) == 0
+	return name, name != ControlMCPServer && len(validation.IsDNS1123Label(name)) == 0
 }
 
 // MCPServerScope grants only explicitly named tools of a registered server.

@@ -137,3 +137,17 @@ func TestClaudeCachedToolResultCannotResolvePrimaryCall(t *testing.T) {
 		t.Fatalf("cached tool result changed primary completion: %v", err)
 	}
 }
+
+// A loaded plugin skill makes Claude Code record its skill listing as context.
+// It carries no conversation or tool content and must not block a checkpoint.
+func TestClaudeSkillListingIsContext(t *testing.T) {
+	state := contextClaudeState(t)
+	changed := bytes.Replace(state.Transcript, []byte(`"type":"environment"`), []byte(`"type":"skill_listing"`), 1)
+	if bytes.Equal(changed, state.Transcript) {
+		t.Fatal("fixture mutation did not match")
+	}
+	state.Transcript = changed
+	if leaf, err := ClaudeTranscriptLeaf(state, 1<<20); err != nil || leaf != "4bbd9195-8dac-47c9-b201-fabb1d4f24bd" {
+		t.Fatalf("skill listing changed the assistant leaf: %q %v", leaf, err)
+	}
+}

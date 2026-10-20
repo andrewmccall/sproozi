@@ -64,8 +64,8 @@ func TestRenderedConfigIsAcceptedByTheHomeService(t *testing.T) {
 		t.Fatal("starter worker limits differ from the proposal")
 	}
 	for _, path := range []string{read.Directory, read.DockerConfig, read.Gateway.ProviderTokenFile} {
-		if strings.HasPrefix(path, l.Agents()) {
-			t.Fatalf("trusted path %s is inside the agents root", path)
+		if strings.HasPrefix(path, l.Profile()) {
+			t.Fatalf("trusted path %s is inside the profile", path)
 		}
 	}
 }
@@ -95,6 +95,19 @@ func TestMergeKeepsUserEditsAddsHarnessesAndRefusesPlacementChanges(t *testing.T
 	}
 	if _, _, err = mergeConfig(merged, renderConfig(l, inst, "other approved instructions")); err == nil {
 		t.Fatal("conflicting instructions accepted")
+	}
+	// A configuration from before the control connection gains its MCP
+	// authority; one the user set is kept.
+	older := renderConfig(l, inst, DefaultInstructions)
+	older.Gateway.MCPAuthority = ""
+	if added, changed, err := mergeConfig(older, renderConfig(l, inst, DefaultInstructions)); err != nil || !changed ||
+		added.Gateway.MCPAuthority != MCPAuthority {
+		t.Fatalf("missing MCP authority: changed=%v err=%v authority=%q", changed, err, added.Gateway.MCPAuthority)
+	}
+	older.Gateway.MCPAuthority = "tools.example:443"
+	if kept, _, err := mergeConfig(older, renderConfig(l, inst, DefaultInstructions)); err != nil ||
+		kept.Gateway.MCPAuthority != "tools.example:443" {
+		t.Fatalf("user MCP authority replaced: %q %v", kept.Gateway.MCPAuthority, err)
 	}
 }
 

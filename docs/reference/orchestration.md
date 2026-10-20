@@ -3,7 +3,7 @@
 The task service, `sproozi-tasks`, lets a persistent assistant start delegated
 runs. Each delegated run is an AgentRun in its own sandbox. The service retains
 its status and an optional final answer, not the harness conversation
-or workspace. For resumable work, use a profile service's remote work, described in
+or workspace. For resumable work, use a remote executor's remote work, described in
 [Run a task remotely, then resume it locally](../guides/portable-workflows.md).
 
 A persistent assistant owns its conversations, memory, channels and schedules.

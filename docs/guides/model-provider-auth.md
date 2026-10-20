@@ -232,7 +232,7 @@ Three other timers apply to a model call:
   503 with `the model gateway is shutting down; retry the call` (for OpenAI,
   code `gateway_stopping`; `endReason` `gateway_restart`). Either way the
   provider already had the request, so the call is charged an estimate; see [interrupted calls](#interrupted-calls). The home gateway's wait is separate from the CLI's 45-second
-  timeout for requests to a profile service, described in
+  timeout for requests to a remote executor, described in
   [the home CLI reference](../../cmd/sproozi/README.md#recover-or-cancel).
 - **Idle provider.** The gateway ends a response that sends nothing for 5
   minutes, and charges it as [interrupted](#interrupted-calls) (`endReason`

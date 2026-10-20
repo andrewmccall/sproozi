@@ -12,7 +12,6 @@ import (
 	"os"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/andrewmccall/sproozi/internal/nativeconfig"
 )
@@ -37,18 +36,13 @@ type NativeLaunch struct {
 	Options           []string            `json:"options,omitempty"`
 	Gateway           *NativeGateway      `json:"gateway,omitempty"`
 	TrustBundlePEM    []byte              `json:"trustBundlePEM,omitempty"`
-	// UserInstructions are the user's shared native preferences: Codex's
-	// user-level instruction file, or a section after Claude's approved system
-	// prompt. They never replace Instructions, the approved developer
-	// instructions.
-	UserInstructions string `json:"userInstructions,omitempty"`
+	// ProfileArchive is the user's profile for a Docker launch. Kubernetes
+	// mounts the stored archive at NativeProfileArchive instead.
+	ProfileArchive []byte `json:"profileArchive,omitempty"`
 }
 
-// MaxUserInstructions bounds the shared user instruction text.
-const MaxUserInstructions = 64 << 10
-
 // NativeUserInstructionsFile is the native user-level instruction file name
-// inside each harness's native home.
+// inside each harness's native home, and of its harness's profile instructions.
 func NativeUserInstructionsFile(kind NativeKind) string {
 	if kind == NativeClaude {
 		return "CLAUDE.md"
@@ -73,6 +67,13 @@ const (
 	NativeLocalTrustBundle   = "/tmp/sproozi-native/ca.pem"
 	NativeGatewayTokenPath   = "/var/run/sproozi/tokens/gateway/token"
 	NativeGatewayTrustBundle = "/etc/sproozi/trust/ca-bundle.pem"
+	// NativeProfileArchive is the session's stored profile on Kubernetes.
+	NativeProfileArchive = "/etc/sproozi/profile-archive/profile.tar.gz"
+	// NativeProfileArchiveMaxBytes bounds a compressed profile so it fits a
+	// ConfigMap; NativeConfigureMaxBytes leaves room for it, base64 encoded,
+	// beside the rest of a launch configuration.
+	NativeProfileArchiveMaxBytes = 640 << 10
+	NativeConfigureMaxBytes      = 256<<10 + ((NativeProfileArchiveMaxBytes+2)/3)*4
 )
 
 func (g NativeGateway) Validate(env []string) error {
@@ -174,7 +175,8 @@ func (c NativeLaunch) Validate(now time.Time) error {
 		return err
 	}
 	if !c.Deadline.After(now) || (c.ThreadID != "" && !codexThreadID.MatchString(c.ThreadID)) ||
-		c.Env == nil || c.RolloutMaxBytes <= 0 || c.RolloutMaxBytes > NativeRolloutMaxBytes {
+		c.Env == nil || c.RolloutMaxBytes <= 0 || c.RolloutMaxBytes > NativeRolloutMaxBytes ||
+		len(c.ProfileArchive) > NativeProfileArchiveMaxBytes {
 		return errors.New("invalid native launch contract")
 	}
 	if len(c.Task) > 32<<10 || strings.ContainsRune(c.Task, 0) ||
@@ -183,9 +185,6 @@ func (c NativeLaunch) Validate(now time.Time) error {
 	}
 	if c.Instructions == "" || fmt.Sprintf("%x", sha256.Sum256([]byte(c.Instructions))) != c.InstructionDigest {
 		return errors.New("trusted instructions do not match digest")
-	}
-	if len(c.UserInstructions) > MaxUserInstructions || !utf8.ValidString(c.UserInstructions) || strings.ContainsRune(c.UserInstructions, 0) {
-		return errors.New("user instructions must be bounded UTF-8 text")
 	}
 	if c.Gateway != nil {
 		if err := c.Gateway.Validate(c.Env); err != nil {

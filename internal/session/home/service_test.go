@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -517,6 +518,34 @@ func TestUnknownInitialUsageNeverStartsRemoteAndCanCancel(t *testing.T) {
 	}
 	if _, err = s.Move(t.Context(), id, uuid.NewString(), testRemote); err == nil {
 		t.Fatal("cancelled session moved")
+	}
+}
+
+func TestProfileFolderIsBesideTheConfigurationFile(t *testing.T) {
+	t.Parallel()
+	dir := testutil.PrivateDir(t)
+	path := filepath.Join(dir, "config.json")
+	home, err := json.Marshal(filepath.Join(dir, "home"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := `{"directory":` + string(home) + `,"model":"fixture","local":{"Name":"local"PROFILE},` +
+		`"maxDuration":"1h","allowances":{"model.inference":{"units":{"bounded":true,"value":10}}}}`
+	if err := testutil.WriteFile(path, []byte(strings.Replace(data, "PROFILE", `,"ProfileDirectory":"/x"`, 1)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadConfig(path); err == nil {
+		t.Fatal("configuration chose its own profile folder")
+	}
+	if err := testutil.WriteFile(path, []byte(strings.Replace(data, "PROFILE", "", 1)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := ReadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Local.ProfileDirectory != filepath.Join(dir, ProfileFolder) {
+		t.Fatalf("profile folder = %q", c.Local.ProfileDirectory)
 	}
 }
 

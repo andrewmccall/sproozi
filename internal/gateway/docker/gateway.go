@@ -13,6 +13,7 @@ import (
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/audit"
 	"github.com/andrewmccall/sproozi/internal/budget"
+	"github.com/andrewmccall/sproozi/internal/diagnose"
 	"github.com/andrewmccall/sproozi/internal/endpoints"
 	githubgateway "github.com/andrewmccall/sproozi/internal/endpoints/github"
 	kubernetesgateway "github.com/andrewmccall/sproozi/internal/endpoints/kubernetes"
@@ -50,6 +51,10 @@ func NewGateway(owner *Owner, config GatewayConfig) (*proxytransport.Gateway, er
 		return nil, errors.New("docker gateway: trusted model pricing required")
 	}
 	tracker := budget.NewTrackerWithLedger(owner.ledger)
+	// Every native execution reaches the Sproozi control connection on the MCP
+	// authority; the journal forwards each audit record unchanged.
+	journal := diagnose.NewJournal(config.AuditLogger, diagnose.Limits{})
+	config.AuditLogger = journal
 	modelConfig := config.Model
 	modelConfig.AuditLogger = config.AuditLogger
 	authority := modelgateway.OpenAIAuthority
@@ -62,15 +67,17 @@ func NewGateway(owner *Owner, config GatewayConfig) (*proxytransport.Gateway, er
 	if err := addNativeRoutes(owner, config, dispatch, tracker); err != nil {
 		return nil, err
 	}
-	if config.MCPRegistry != nil {
-		host, port, err := net.SplitHostPort(config.MCPAuthority)
-		_, reserved := endpoints.SemanticAuthorities[config.MCPAuthority]
-		if err != nil || host == "" || port != "443" || reserved {
-			return nil, errors.New("docker gateway: exact MCP authority on port 443 required")
-		}
-		dispatch[config.MCPAuthority] = gateway.Route{Tier: audit.TierProtocol, Handler: mcpgateway.NewHandler(mcpgateway.HandlerConfig{Registry: config.MCPRegistry, HTTPClient: config.MCPClient, Budgets: tracker, AuditLogger: config.AuditLogger})}
+	host, port, err := net.SplitHostPort(config.MCPAuthority)
+	_, reserved := endpoints.SemanticAuthorities[config.MCPAuthority]
+	if _, covered := config.Certificates[host]; err != nil || host == "" || port != "443" || reserved || !covered {
+		return nil, errors.New("docker gateway: exact certified MCP authority on port 443 required")
 	}
-	return proxytransport.New(proxytransport.Config{Certificates: config.Certificates, Serving: config.Serving, Authenticate: owner.Authenticate, Revalidate: owner.Revalidate, Handler: dispatch, AllowedAuthority: dispatch.Allows, MaxModelCallDuration: config.MaxModelCall})
+	var named = http.NotFoundHandler()
+	if config.MCPRegistry != nil {
+		named = mcpgateway.NewHandler(mcpgateway.HandlerConfig{Registry: config.MCPRegistry, HTTPClient: config.MCPClient, Budgets: tracker, AuditLogger: journal})
+	}
+	dispatch[config.MCPAuthority] = gateway.Route{Tier: audit.TierProtocol, Handler: diagnose.NewControl(journal, named)}
+	return proxytransport.New(proxytransport.Config{Certificates: config.Certificates, Serving: config.Serving, Authenticate: owner.Authenticate, Revalidate: owner.Revalidate, Handler: dispatch, AllowedAuthority: dispatch.Allows, AuditLogger: journal, MaxModelCallDuration: config.MaxModelCall})
 }
 
 func addNativeRoutes(owner *Owner, config GatewayConfig, dispatch gateway.Dispatcher, tracker *budget.Tracker) error {

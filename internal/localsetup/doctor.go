@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/agentprofile"
 	"github.com/andrewmccall/sproozi/internal/pki"
 	"github.com/andrewmccall/sproozi/internal/privatefs"
 	"github.com/andrewmccall/sproozi/internal/session/home"
@@ -53,7 +54,7 @@ func Doctor(ctx context.Context, l Layout, checkProvider bool) (r Report) {
 			r.OK = r.OK && c.OK
 		}
 	}()
-	for _, dir := range []string{l.Root, l.Credentials(), l.PKI(), l.State(), l.DockerCLI(), l.Logs(), l.Agents()} {
+	for _, dir := range []string{l.Root, l.Credentials(), l.PKI(), l.State(), l.DockerCLI(), l.Logs(), l.Profile()} {
 		if err := privatefs.Check(dir, true); err != nil {
 			r.add("permissions", fail("permissions", err, "restore owner-only mode 0700 on "+dir), "")
 			return r
@@ -70,17 +71,7 @@ func Doctor(ctx context.Context, l Layout, checkProvider bool) (r Report) {
 	if err != nil {
 		return r
 	}
-	for _, h := range inst.Harnesses {
-		_, err = home.UserInstructions(config.AgentsDirectory, h.Harness)
-		detail := fmt.Sprintf("%s reads %v from %s", h.Harness, home.AgentFiles(h.Harness), config.AgentsDirectory)
-		if len(home.AgentFiles(h.Harness)) == 0 {
-			detail = fmt.Sprintf("%s does not read shared instructions in this release", h.Harness)
-		}
-		r.add("agents", err, detail)
-	}
-	if ignored, err := home.UnsupportedAgentEntries(config.AgentsDirectory); err == nil && len(ignored) > 0 {
-		r.add("agents", nil, "ignored because no harness reads them: "+strings.Join(ignored, ", "))
-	}
+	checkProfile(&r, config.Local.ProfileDirectory)
 	docker, err := DiscoverDocker(ctx, l.DockerCLI())
 	r.add("docker", err, "engine at "+docker.Socket+" runs Linux containers")
 	if err != nil {
@@ -238,4 +229,33 @@ func ports(inst Installation) []uint16 {
 		out = append(out, h.Port)
 	}
 	return out
+}
+
+// checkProfile reports the profile every launch sends. Each launch archives
+// it, so it warns before the archive outgrows its limit.
+func checkProfile(r *Report, folder string) {
+	profile, err := agentprofile.LoadDirectory(folder)
+	if err != nil {
+		r.add("profile", fail("profile", err, "fix "+folder+"; see the profile reference"), "")
+		return
+	}
+	archive, _, err := profile.Archive()
+	if err != nil {
+		r.add("profile", fail("profile", fmt.Errorf("profile %s cannot be sent to a session: %w", folder, err),
+			"remove skill files from "+folder), "")
+		return
+	}
+	names := make([]string, 0, len(profile.Skills))
+	for _, s := range profile.Skills {
+		names = append(names, s.Name)
+	}
+	detail := fmt.Sprintf("%s: %d skills [%s], archive %d of %d bytes", folder, len(names), strings.Join(names, ", "),
+		len(archive), agentprofile.MaxArchiveBytes)
+	if len(archive) > agentprofile.MaxArchiveBytes*3/4 {
+		detail = "warning: " + detail + "; near the profile size limit"
+	}
+	r.add("profile", nil, detail)
+	if ignored, err := agentprofile.Ignored(folder); err == nil && len(ignored) > 0 {
+		r.add("profile", nil, "ignored because no harness reads them: "+strings.Join(ignored, ", "))
+	}
 }

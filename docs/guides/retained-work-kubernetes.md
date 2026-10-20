@@ -1,7 +1,7 @@
 # Hermes with remote work
 
 This deployment connects the persistent stock Hermes coordinator to the remote
-work endpoint of a [profile service](../../GLOSSARY.md#profile-service) at
+work endpoint of a [remote executor](../../GLOSSARY.md#remote-executor) at
 `/work/mcp`. Each Codex [remote work](../../GLOSSARY.md#remote-work) session runs
 in `sproozi-agents`; its conversation, supported Git workspace and bounded final
 answer survive the Pod. The developer can claim that stopped session and
@@ -26,16 +26,16 @@ immutable sandbox trust bundle.
 Build and publish the [native image](../../internal/runtime/docker/image/Dockerfile)
 with the approved Codex/Claude Code clients, supervisor, checkpoint
 helper and profile executable. Select its immutable registry digest. It must be
-available on every execution node. The profile service uses this image because it also
+available on every execution node. The remote executor uses this image because it also
 needs Git to prepare workspace inputs; the smaller controller image does not
 contain `session-profile` or Git.
 
 The [complete Kubernetes example](../../examples/portable-workflows/kubernetes/kustomization.yaml)
-contains a managed Codex runtime, policy/template, dedicated profile service
-ServiceAccount, namespace-scoped roles, persistent profile service storage,
+contains a managed Codex runtime, policy/template, dedicated remote executor
+ServiceAccount, namespace-scoped roles, persistent remote executor storage,
 private TLS Service and the
 persistent Hermes Deployment. You need a default StorageClass or explicit PVC
-`storageClassName` values. Use quota-enforced profile service storage: Git
+`storageClassName` values. Use quota-enforced remote executor storage: Git
 revision restoration stages retained objects on that PVC under the profile
 service container's
 resource limits. It selects the same Hermes coordinator names as the
@@ -73,7 +73,7 @@ limits. The small default runtime is suitable for short investigation sessions.
 
 ## Profile configuration and credentials
 
-Issue a profile service TLS certificate for `sproozi-work.sproozi-system.svc` and any
+Issue a remote executor TLS certificate for `sproozi-work.sproozi-system.svc` and any
 external hostname/IP used by the developer. Use your internal PKI or the test-CA
 procedure in the Hermes guide with this service hostname. Save the chain and
 private key as `.local/retained-work/owner.crt` and `owner.key`, mode `0600`.
@@ -142,7 +142,7 @@ kubectl create secret generic hermes-coordinator -n sproozi-coordinators \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
 
-Combine Hermes's normal public roots with the profile service's public CA as
+Combine Hermes's normal public roots with the remote executor's public CA as
 `ca-bundle.pem`, following the Hermes guide's `docker run --entrypoint /bin/cat`
 procedure. Create `hermes-task-trust` in `sproozi-coordinators` from that bundle.
 Hermes receives only the work token; only the trusted home receives the home
@@ -160,9 +160,9 @@ kubectl -n sproozi-system rollout status deployment/sproozi-work --timeout=180s
 kubectl -n sproozi-coordinators rollout status deployment/hermes-coordinator --timeout=180s
 ```
 
-Keep one profile service replica and its PVC. The Deployment uses the Recreate
-strategy. A process lock also prevents two profile services from using the same
-directory. The profile service requires Pod exec/patch/delete in the isolated `sproozi-agents` namespace to
+Keep one remote executor replica and its PVC. The Deployment uses the Recreate
+strategy. A process lock also prevents two remote executors from using the same
+directory. The remote executor requires Pod exec/patch/delete in the isolated `sproozi-agents` namespace to
 drive fixed native lifecycle operations. It is trusted control-plane software;
 sandboxes and Hermes receive no such grants. Kubernetes RBAC does not limit this role to
 dynamically created Pod names.
@@ -183,14 +183,14 @@ saved JSON request containing a new UUID and the exact native-work fields:
 ```
 
 Ask Hermes to call `sproozi_run` with that exact object, then call
-`sproozi_status` for the returned `id` until the profile service reports `retained` or an
+`sproozi_status` for the returned `id` until the remote executor reports `retained` or an
 actionable failure. Reuse the complete saved submission after an uncertain reply.
 `sproozi_sessions` returns an object with a `sessions` array. Task text and results
 remain untrusted. Requests cannot select images, templates, credentials or policy.
 
-Expose the profile service's TLS origin through a reviewed private endpoint, or port-forward
+Expose the remote executor's TLS origin through a reviewed private endpoint, or port-forward
 its Service for a local evaluation. Configure the home `remote` map's `engineering` entry with that
-origin, the profile service's public CA and protected `home-principal-token` file. Use the same approved
+origin, the remote executor's public CA and protected `home-principal-token` file. Use the same approved
 native instructions and byte limits.
 [Run a task remotely, then resume it locally](portable-workflows.md) contains the complete
 global home configuration and command sequence:
@@ -212,9 +212,9 @@ conversation. Cross-harness handoff is a separate deferred feature.
 
 | Observation | Next step |
 | --- | --- |
-| Hermes cannot discover tools | Inspect its native logs and the profile service's TLS/CA/token configuration. All MCP output schemas must have object roots. |
-| Profile service is unready | Inspect its logs, PVC permissions, mounted config/credentials and namespace-scoped RBAC. |
-| Remote phase is `unknown` | Preserve the session/operation UUID and journals. Inspect the Pod and profile service logs, then use `recover`; do not manufacture a new submission. |
+| Hermes cannot discover tools | Inspect its native logs and the remote executor's TLS/CA/token configuration. All MCP output schemas must have object roots. |
+| Remote executor is unready | Inspect its logs, PVC permissions, mounted config/credentials and namespace-scoped RBAC. |
+| Remote phase is `unknown` | Preserve the session/operation UUID and journals. Inspect the Pod and remote executor logs, then use `recover`; do not manufacture a new submission. |
 | Native state is missing or incompatible | Retain the source evidence. Use the same harness and matching instructions. Check whether its saved state is supported. |
 | A deadline or cancellation stops work | Inspect status. Deadline/cancellation does not guarantee a resumable completed turn. Unknown stop or accounting prevents export. |
 | Home storage is full | Resolve capacity before pull/resume. A failed capacity check does not transfer ownership or start another writer. |
@@ -223,9 +223,9 @@ Use `sproozi cancel SESSION_UUID --executor engineering` for remote cancellation
 Inspect running Pods with the administrator kubeconfig and application logs with
 `kubectl logs -n sproozi-system deployment/sproozi-work`. Retained final output is
 available through status after Pod deletion; full live Pod logs have Kubernetes'
-ordinary log lifetime. Profile service and Hermes logs are separate from native checkpoints.
+ordinary log lifetime. Remote executor and Hermes logs are separate from native checkpoints.
 
-Stop or cancel active sessions before removing the deployment. Back up profile service
+Stop or cancel active sessions before removing the deployment. Back up remote executor
 and Hermes PVCs if their sessions must survive. Deleting the rendered stack also
 deletes those PVCs. AgentRuns, the controller installation and gateway credentials
 have separate lifecycles. For a local trial, delete only the dedicated Kind cluster you created.

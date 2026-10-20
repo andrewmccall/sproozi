@@ -69,34 +69,3 @@ func TestFreshKubernetesClientUsesInspectedAuthorityAndPlaceholderCredential(t *
 		t.Fatal("client installer accepted a workload symlink")
 	}
 }
-
-const preferences = "Prefer small commits."
-
-func TestUserInstructionsAreTheNativeUserFileAndExactOnRetry(t *testing.T) {
-	files := map[harness.NativeKind]string{harness.NativeCodex: "AGENTS.md", harness.NativeClaude: "CLAUDE.md"}
-	for kind, file := range files {
-		dir := t.TempDir()
-		c := config{Harness: kind, UserInstructions: preferences}
-		if err := installUserInstructions(dir, c); err != nil {
-			t.Fatal(err)
-		}
-		data, err := os.ReadFile(filepath.Join(dir, file))
-		if err != nil || string(data) != preferences {
-			t.Fatalf("%s: %q %v", kind, data, err)
-		}
-		if err = installUserInstructions(dir, c); err != nil {
-			t.Fatal(err)
-		}
-		c.UserInstructions = "Changed after the first launch."
-		if err = installUserInstructions(dir, c); err == nil {
-			t.Fatalf("%s: retry accepted changed instructions", kind)
-		}
-	}
-	dir := t.TempDir()
-	if err := installUserInstructions(dir, config{Harness: harness.NativeCodex}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "AGENTS.md")); !os.IsNotExist(err) {
-		t.Fatal("empty user instructions created a file")
-	}
-}

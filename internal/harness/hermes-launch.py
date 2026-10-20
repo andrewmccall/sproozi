@@ -115,7 +115,11 @@ def launch(args):
     with config_path.open("x", encoding="utf-8") as output:
         json.dump(config, output)
     env = dict(os.environ)
-    env["HERMES_EPHEMERAL_SYSTEM_PROMPT"] = (contract / "instructions.txt").read_text(encoding="utf-8")
+    # Sproozi guidance follows the approved instructions. Hermes ignores rules
+    # files here, so the access-recovery skill is delivered as instructions.
+    env["HERMES_EPHEMERAL_SYSTEM_PROMPT"] = "\n\n".join(
+        (contract / name).read_text(encoding="utf-8")
+        for name in ("instructions.txt", "sproozi-instructions.md", "sproozi-access.md"))
     env["OPENAI_API_KEY"] = "sproozi-local-placeholder"
     env["OPENAI_BASE_URL"] = "https://api.openai.com/v1"
     # Prevent ambient hosted/worker modes from changing native exit or provider selection.

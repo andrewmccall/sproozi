@@ -230,7 +230,11 @@ Read `$codex/proof/report.json` privately. Success covers genuine native termina
 turns, same native UUID and original deadline across placements, workspace and
 selected ignored-file continuity, real tool execution, forbidden network and
 mount probes, a held graceful move, forced held-turn cancellation and accounting
-replay. Controlled tools, histories and provider usage are the fixture's scope;
+replay. The driver also writes the user's [profile](../../../docs/reference/profile.md)
+beside the home configuration, changes its marker before each move, and reads
+the rendered `AGENTS.md` and profile skill in the exact Docker container and
+Kubernetes Pod: each visit must carry the profile as it was when it began, and
+the Kubernetes registration must name the stored archive. Controlled tools, histories and provider usage are the fixture's scope;
 arbitrary tools, background execution and compaction are not established by it.
 Retain failed reports and logs rather than reusing their provider state for a
 fresh run. The driver ends a successful run with the session cancelled.
@@ -280,6 +284,13 @@ python3 hack/verify/session-mobility/claude.py verify \
   --admin-probes --kubeconfig "$work/kubeconfig" \
   --namespace sproozi-system --agent-namespace sproozi-agents
 ```
+
+The Claude driver changes the profile marker before each move in the same way.
+With `--admin-probes` it reads the rendered profile skill in each visit's exact
+container or Pod and requires that visit's marker. Claude Code resumes a
+conversation with the system prompt and skill listing it started with, so every
+model request must carry the first visit's marker and the
+`profile:mobility-check` skill.
 
 Claude's preparation generates its principal token and a fresh certificate
 covering Anthropic as well as OpenAI and gateway/host names. The TLS Secret

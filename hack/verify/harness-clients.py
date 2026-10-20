@@ -47,13 +47,13 @@ def main():
             if selected == "codex":
                 Path(env["CODEX_HOME"]).mkdir()
                 Path(env["CODEX_HOME"], "config.toml").write_text(config)
-                for name in ("docs", "inventory"):
+                for name in ("docs", "inventory", "sproozi"):
                     value = json.loads(execute([binary, "mcp", "get", name, "--json"], env, directory))
                     assert value["transport"]["url"] == f"https://sproozi-gateway.sproozi-system.svc:8443/mcp/{name}", value
                     assert value["enabled"] is True, value
             elif selected == "claude-code":
                 Path(directory, ".mcp.json").write_text(config)
-                for name in ("docs", "inventory"):
+                for name in ("docs", "inventory", "sproozi"):
                     value = execute([binary, "mcp", "get", name], env, directory)
                     assert f"https://sproozi-gateway.sproozi-system.svc:8443/mcp/{name}" in value, value
                     assert "Type: http" in value, value
@@ -63,7 +63,7 @@ def main():
                 env["OPENCODE_CONFIG"] = str(path)
                 value = json.loads(execute([binary, "--pure", "debug", "config"], env, directory))
                 assert value["mcp"] == json.loads(config)["mcp"], value["mcp"]
-            print(f"PASS: {selected} {version} loaded both generated connections in disposable state; no model request")
+            print(f"PASS: {selected} {version} loaded the generated named and sproozi control connections in disposable state; no model request")
 
 
 if __name__ == "__main__":

@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/agentprofile"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/privatefs"
 
@@ -54,7 +55,6 @@ type authority struct {
 	options     []string
 	kind        harness.NativeKind
 	mcpEndpoint string
-	agents      string
 }
 
 const inspectionHost = "api.openai.com"
@@ -89,17 +89,11 @@ func (a *authority) InitializeAllocation(ctx context.Context, l session.Launch, 
 	if err != nil {
 		return runtimedocker.NativeAccess{}, err
 	}
-	// Shared preferences are read fresh for every visit; a malformed file
-	// stops the launch rather than being skipped silently.
-	user, err := UserInstructions(a.agents, a.kind)
-	if err != nil {
-		return runtimedocker.NativeAccess{}, err
-	}
 	trust, err := a.certs.trustFor(l)
 	if err != nil {
 		return runtimedocker.NativeAccess{}, err
 	}
-	return runtimedocker.NativeAccess{Env: env, TrustBundlePEM: trust, Model: a.model, Options: slices.Clone(a.options), ClientConfig: clients, UserInstructions: user}, nil
+	return runtimedocker.NativeAccess{Env: env, TrustBundlePEM: trust, Model: a.model, Options: slices.Clone(a.options), ClientConfig: clients}, nil
 }
 func (a *authority) Activate(ctx context.Context, l session.Launch, i session.Incarnation) error {
 	return a.owner.Activate(ctx, l, i)
@@ -197,10 +191,9 @@ func servingNames(c Config, stacks []*localStack) pki.Names {
 	for _, stack := range stacks {
 		names.DNS = append(names.DNS, inspectionHostFor(stack.config.Harness))
 	}
-	if c.Gateway.MCPRegistryFile != "" {
-		if host, _, err := net.SplitHostPort(c.Gateway.MCPAuthority); err == nil {
-			names.DNS = append(names.DNS, host)
-		}
+	// The MCP authority always serves the Sproozi control connection.
+	if host, _, err := net.SplitHostPort(c.Gateway.MCPAuthority); err == nil {
+		names.DNS = append(names.DNS, host)
 	}
 	if c.Gateway.GitHub != nil {
 		names.DNS = append(names.DNS, "github.com", "api.github.com")
@@ -237,6 +230,7 @@ func Open(c Config, log io.Writer) (_ *Service, err error) {
 	if err = privatefs.EnsureDir(c.Directory); err != nil {
 		return nil, err
 	}
+
 	duration, err := time.ParseDuration(c.MaxDuration)
 	if err != nil || duration <= 0 || duration > 24*time.Hour {
 		return nil, errors.New("home: invalid duration")
@@ -290,6 +284,7 @@ func Open(c Config, log io.Writer) (_ *Service, err error) {
 	if err != nil {
 		return nil, err
 	}
+	s.configureProfile(c.Local.ProfileDirectory)
 	s.config.Allowances = maps.Clone(c.Allowances)
 	s.config.ProjectApprovals = cloneProjectApprovals(c.ProjectApprovals)
 	return s, nil
@@ -384,7 +379,7 @@ func (s *Service) openStack(c Config, engine *runtimedocker.Engine, ledger *budg
 		return err
 	}
 	endpoint := "https://" + net.JoinHostPort(stack.config.GatewayIPv4, fmt.Sprint(stack.config.GatewayPort))
-	auth := &authority{owner: stack.owner, endpoint: endpoint, certs: s.certs, model: stack.model, options: stack.options, kind: stack.config.Harness, mcpEndpoint: "https://" + c.Gateway.MCPAuthority, agents: c.AgentsDirectory}
+	auth := &authority{owner: stack.owner, endpoint: endpoint, certs: s.certs, model: stack.model, options: stack.options, kind: stack.config.Harness, mcpEndpoint: "https://" + c.Gateway.MCPAuthority}
 	stack.placement, err = runtimedocker.OpenPlacement(filepath.Join(c.Directory, stackDirectory("docker", index, stack.config.Name)), engine, stack.config, auth)
 	if err != nil {
 		return err
@@ -397,6 +392,17 @@ func (s *Service) openStack(c Config, engine *runtimedocker.Engine, ledger *budg
 	modelConfig.Drain = s.drain
 	gatewayConfig := gatewaydocker.GatewayConfig{Harness: stack.config.Harness, Certificates: map[string]tls.Certificate{inspectionHostFor(stack.config.Harness): certificate}, Serving: s.certs.serving, Model: modelConfig, AuditLogger: audit.NewLogger(log),
 		MaxModelCall: maxModelCall(c.Gateway)}
+	// The MCP authority also serves the Sproozi control connection, so every
+	// home gateway needs it, with or without registered MCP servers.
+	host, _, err := net.SplitHostPort(c.Gateway.MCPAuthority)
+	if err != nil {
+		return errors.New("home: gateway mcpAuthority is required")
+	}
+	if leaf, _ := x509.ParseCertificate(certificate.Certificate[0]); leaf == nil || leaf.VerifyHostname(host) != nil {
+		return errors.New("home: inspection certificate must cover MCP authority")
+	}
+	gatewayConfig.Certificates[host] = certificate
+	gatewayConfig.MCPAuthority = c.Gateway.MCPAuthority
 	if c.Gateway.MCPRegistryFile != "" {
 		data, readErr := readSetting("gateway.mcpRegistryFile", c.Gateway.MCPRegistryFile, 128<<10)
 		if readErr != nil {
@@ -406,12 +412,6 @@ func (s *Service) openStack(c Config, engine *runtimedocker.Engine, ledger *budg
 		if err != nil {
 			return err
 		}
-		host, _, hostErr := net.SplitHostPort(c.Gateway.MCPAuthority)
-		if hostErr != nil {
-			return hostErr
-		}
-		gatewayConfig.Certificates[host] = certificate
-		gatewayConfig.MCPAuthority = c.Gateway.MCPAuthority
 	}
 	if err = nativeServices(c, certificate, &gatewayConfig); err != nil {
 		return err
@@ -535,14 +535,12 @@ func approvedPolicy(c Config) (api.AgentPolicySpec, error) {
 		policy.Budgets[capability] = api.EndpointBudget{MaxUnits: a.Units.Value, MaxCostMicros: a.CostMicros.Value}
 	}
 	slices.Sort(policy.AllowedCapabilities)
-	clients := &harness.NativeClientConfig{}
+	// MCPAuthority always serves the Sproozi control connection.
+	clients := &harness.NativeClientConfig{MCPGateway: "https://" + c.Gateway.MCPAuthority}
 	for _, capability := range policy.AllowedCapabilities {
 		if name, named := capability.MCPServerName(); named {
 			clients.MCPServers = append(clients.MCPServers, name)
 		}
-	}
-	if len(clients.MCPServers) > 0 {
-		clients.MCPGateway = "https://" + c.Gateway.MCPAuthority
 	}
 	if err := clients.Validate(c.Local.Harness); err != nil {
 		return api.AgentPolicySpec{}, err
@@ -551,6 +549,18 @@ func approvedPolicy(c Config) (api.AgentPolicySpec, error) {
 		return api.AgentPolicySpec{}, errors.New("home: native instruction digest mismatch")
 	}
 	return policy, nil
+}
+
+// configureProfile lets moves carry the user's profile. Docker sees the live
+// folder; a remote visit receives the archive taken when its move began.
+func (s *Service) configureProfile(folder string) {
+	if folder == "" {
+		return
+	}
+	s.coordinator.SetProfileSource(func() ([]byte, string, error) { return agentprofile.ArchiveDirectory(folder) })
+	for _, remote := range s.remotes {
+		remote.SetProfileSource(s.coordinator.ProfileArchive)
+	}
 }
 
 func (s *Service) configureRemotes() error {

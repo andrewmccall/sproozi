@@ -598,7 +598,7 @@ def template(name, rt, pol):
 
 
 def install_runtimes(images):
-    prefix = 'token="$(cat /var/run/sproozi/tokens/gateway/token)"\nproxy="https://sproozi:${token}@${SPROOZI_GATEWAY#https://}"\nexport HTTP_PROXY="$proxy" HTTPS_PROXY="$proxy" http_proxy="$proxy" https_proxy="$proxy"\nexport HOME=/home/agent OPENAI_API_KEY=sproozi-local-placeholder\nmkdir -p "$HOME/.codex"\ncp /etc/sproozi/contract/codex-mcp.toml "$HOME/.codex/config.toml"\ncd /workspace\n'
+    prefix = 'token="$(cat /var/run/sproozi/tokens/gateway/token)"\nproxy="https://sproozi:${token}@${SPROOZI_GATEWAY#https://}"\nexport HTTP_PROXY="$proxy" HTTPS_PROXY="$proxy" http_proxy="$proxy" https_proxy="$proxy"\nexport HOME=/home/agent OPENAI_API_KEY=sproozi-local-placeholder\nmkdir -p "$HOME/.codex/skills/sproozi-access"\ncp /etc/sproozi/contract/codex-mcp.toml "$HOME/.codex/config.toml"\ncp /etc/sproozi/contract/sproozi-instructions.md "$HOME/.codex/AGENTS.md"\ncp /etc/sproozi/contract/sproozi-access.md "$HOME/.codex/skills/sproozi-access/SKILL.md"\ncd /workspace\n'
     # Codex receives administrator instructions through its native developer setting.
     # Its only generic contract file is input.json; caller data remains a JSON user prompt.
     prefix += """developer=$(python3 -c 'import json; d=json.load(open("/etc/sproozi/contract/input.json")); print("developer_instructions="+json.dumps(d["trusted"]["instructions"]))')
@@ -1263,7 +1263,7 @@ def coordinator_setup(images):
 
 def coordinator_gateway_owner(stage):
     # Census the real native processes: a foreground command plus s6's restored
-    # profile service otherwise competes for the same gateway lock after restart.
+    # remote executor otherwise competes for the same gateway lock after restart.
     script = """import json, os
 from pathlib import Path
 actors=[]

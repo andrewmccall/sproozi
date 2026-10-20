@@ -136,6 +136,10 @@ func (c Config) gatewayProblems() []string {
 	u, err := url.Parse(g.ProviderURL)
 	add(err != nil || u.Host == "" || !approvedProviderURL(u), "gateway.providerURL", "HTTPS provider URL")
 	absolute("gateway.providerTokenFile", g.ProviderTokenFile)
+	// The MCP authority always serves the Sproozi control connection.
+	mcpHost, mcpPort, err := net.SplitHostPort(g.MCPAuthority)
+	add(err != nil || mcpHost == "" || net.ParseIP(mcpHost) != nil || mcpPort != "443", "gateway.mcpAuthority",
+		"DNS name on port 443 that the gateway certificate covers, such as mcp.sproozi.internal:443")
 	for i, h := range c.Harnesses {
 		key := fmt.Sprintf("harnesses[%d].", i)
 		add(h.Harness.Validate() != nil, key+"harness", `"codex" or "claude-code"`)

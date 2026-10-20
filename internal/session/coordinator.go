@@ -277,6 +277,11 @@ func (c *Coordinator) prepareDestination(ctx context.Context, r Record, index in
 				return r, errors.New("session: execution has no checkpoint to move")
 			}
 			launch := Launch{Harness: r.Harness, ExecutionID: r.ID, OperationID: op.ID, AllocationID: uuid.NewString(), Epoch: r.Epoch + 1, Placement: op.Destination, ThreadID: r.ThreadID, InstructionDigest: r.InstructionDigest, IncludeIgnored: append([]string(nil), r.IncludeIgnored...), Deadline: r.Deadline, Allowances: cloneAllowances(r.Remaining), CheckpointDigest: r.Checkpoint.Metadata.SHA256}
+			digest, err := c.retainProfile()
+			if err != nil {
+				return r, fmt.Errorf("session: profile: %w", err)
+			}
+			launch.ProfileDigest = digest
 			op.Launch = &launch
 			if err := c.save(r); err != nil {
 				return r, err

@@ -22,7 +22,7 @@ configuration for session commands.
 | `config.json` | Home daemon configuration. You may edit tunable values; setup keeps them. | No |
 | `config.json.backup-*` | The previous configuration, saved before setup changes it. | No |
 | `installation.json` | Provisioning journal: installation ID, Docker endpoint, image, network, gateway address and harnesses. | No |
-| `agents/` | Shared agent files; see [below](#shared-agent-files). | Only allowlisted files |
+| `profile/` | Your [profile](#profile): instructions and skills for every session. | A copy at each launch |
 | `credentials/` | Provider keys, one file per provider. | No |
 | `pki/` | Certificate authority keys, the serving leaf, trust generations and the trust-consumer record. | Only the public trust bundle |
 | `state/` | Journals, accounting, grants, placement records, retained checkpoints and the control socket. | No |
@@ -101,31 +101,14 @@ endpoint for the harness being added. Codex receives `OPENAI_API_KEY` and Claude
 Code `ANTHROPIC_API_KEY` as placeholders; the gateway replaces them with the
 stored key on approved requests.
 
-## Shared agent files
+## Profile
 
-The home daemon reads these files from `agents/` for every launch and gives
-the agent a read-only snapshot, after the approved developer instructions.
-Nothing in the running container can change the files in `agents/`.
-
-| Harness | Files read, in order | Delivered as |
-| --- | --- | --- |
-| `codex` | `shared/AGENTS.md`, then `codex/AGENTS.md` | `$CODEX_HOME/AGENTS.md`, Codex's user instructions |
-| `claude-code` | `shared/AGENTS.md`, then `claude/CLAUDE.md` | A `# User preferences` section appended to the system prompt |
-
-Claude Code runs with every settings source disabled so that hooks, plugins
-and personal settings cannot change its managed launch, and in that mode it
-does not read a user memory file. Its preferences are therefore appended to
-the system prompt, after the approved instructions, with a line saying they
-never override them.
-
-Each file must be UTF-8 text of at most 32 KiB, owned by you, and not writable
-by others. A symbolic link or special file stops the launch with an error;
-missing files are skipped. Other entries under `agents/`, such as `settings.json`,
-`skills/` or `config.toml`, are not delivered in this release; skills and other
-configuration are covered by the
-[managed harness configuration](../explanations/future-architecture/managed-harness-configuration-and-trust.md)
-proposal. `sproozi doctor` lists them as ignored. Shared files are not part of
-a checkpoint and are not sent to a remote placement.
+`profile/` is your [profile](profile.md): `AGENTS.md` for every harness,
+`codex/AGENTS.md` and `claude/CLAUDE.md` for one harness each, and
+`skills/<name>/`. Setup creates the empty folders. The home daemon archives the
+profile for every launch and sends it with the launch configuration; nothing in
+the running container can change your folder. `sproozi doctor` checks the
+profile, warns when it nears the size limit and lists entries no harness reads.
 
 ## Certificates
 

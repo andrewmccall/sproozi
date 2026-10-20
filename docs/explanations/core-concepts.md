@@ -117,7 +117,7 @@ its own sandbox. Hermes keeps its own conversation, memory and schedules.
 
 Hermes reaches Sproozi in one of two ways. The task service retains each
 delegated run's status and an optional final answer. Remote work, served by a
-profile service, also saves supported harness conversation and workspace state
+remote executor, also saves supported harness conversation and workspace state
 for later resume. Choose the
 [Run a persistent Hermes assistant on Kubernetes](../guides/hermes-orchestration.md) or the
 [Hermes with remote work](../guides/retained-work-kubernetes.md) guide for the

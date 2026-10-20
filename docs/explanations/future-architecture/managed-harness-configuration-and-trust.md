@@ -1,7 +1,7 @@
 # PRD: Managed Harness Configuration, Skills & Dynamic Trust
 
 **Project:** Sproozi  
-**Status:** Proposed  
+**Status:** In progress. M1 for managed Codex and Claude Code sessions and ordinary runs, and the `sproozi.diagnose` part of M3, are implemented; see [ADR 0025](../../adr/0025-managed-harness-integration-and-diagnose.md) and the [Sproozi integration reference](../../reference/sproozi-integration.md).  
 **Priority:** Near-term foundation, followed by incremental trust capabilities  
 **Target runtimes:** Docker and Kubernetes  
 **Target harnesses:** Claude Code, Codex, OpenCode and Hermes

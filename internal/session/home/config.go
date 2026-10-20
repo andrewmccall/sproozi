@@ -42,9 +42,6 @@ type Config struct {
 	Remote           map[string]profile.ClientConfig `json:"remote,omitempty"`
 	WorkSources      map[string]profile.ClientConfig `json:"workSources,omitempty"`
 	ProjectApprovals []ProjectApproval               `json:"projectApprovals,omitempty"`
-	// AgentsDirectory is the shared native settings root used by every local
-	// harness. Only its allowlisted instruction files reach workers.
-	AgentsDirectory string `json:"agentsDirectory,omitempty"`
 	// Harnesses adds further native harnesses to the home. Each is its own local
 	// placement with its own gateway port, grants and provider credential.
 	Harnesses []LocalHarness `json:"harnesses,omitempty"`
@@ -191,6 +188,11 @@ func ReadConfig(path string) (Config, error) {
 	if err != nil {
 		return c, &InvalidConfigError{Err: err}
 	}
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return c, err
+	}
+	c.Local.ProfileDirectory = filepath.Join(filepath.Dir(absolute), ProfileFolder)
 	return c, nil
 }
 
@@ -219,6 +221,10 @@ func parseConfig(b []byte) (Config, error) {
 	}
 	return c, nil
 }
+
+// ProfileFolder is the user's profile, beside the configuration file. Each
+// Docker launch sends it as it is then.
+const ProfileFolder = "profile"
 
 // requiredSettings names, by key, each setting every command needs. Settings
 // only serve needs, such as model, are in ServeProblems.

@@ -223,7 +223,7 @@ func (e *Engine) NativeOperation(ctx context.Context, i Instance, op harness.Nat
 			return nil, errors.New("unexpected native operation input")
 		}
 	case harness.NativeConfigure:
-		if len(input) > 256<<10 {
+		if len(input) > harness.NativeConfigureMaxBytes {
 			return nil, errors.New("native configuration exceeds limit")
 		}
 	default:

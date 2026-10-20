@@ -20,7 +20,7 @@ for remote task setup, pull and local resume, or
 [Move a live session between Docker and Kubernetes](../guides/session-mobility.md)
 for interactive moves within one bounded execution. The
 [home configuration reference](../../cmd/sproozi/README.md) describes private files,
-images, gateway credentials and profile services.
+images, gateway credentials and remote executors.
 
 ## Remote work and local resume
 
@@ -112,14 +112,14 @@ with `--root PATH`, defaulting to the recorded root or `~/sproozi`. The
 | --- | --- |
 | `init --local` | Provision or repair the installation for one harness and start the home daemon. Repeat it with another `--harness` to add that harness. |
 | `service status`, `service start`, `service stop` | Report, start or stop the detached home daemon. `stop` refuses while sessions are active unless `--leave-running` is given. |
-| `doctor` | Check permissions, configuration, Docker, image, network, credentials, certificates, the service and the restricted worker path. It changes no installation state. |
+| `doctor` | Check permissions, configuration, [profile](profile.md), Docker, image, network, credentials, certificates, the service and the restricted worker path. It changes no installation state. |
 | `credentials add openai`, `credentials add anthropic` | Store or replace a provider key, then restart the service if no session is active. |
 | `images status`, `images prepare` | Show the installed and release images, or pull or build an image. A prepared image replaces the installed one only while no local session state exists. |
 | `certificates status`, `renew`, `rotate-ca`, `replace-ca` | Show certificate state, renew the leaf now, begin routine rotation, or replace a lost or compromised authority. `replace-ca` refuses while sessions are active. |
 
 Results go to standard output, as JSON with `--json`; progress goes to standard
 error. A failure names its component (`docker`, `image`, `registry`, `network`,
-`tls`, `credential`, `provider`, `config`, `service` or `root`) and the next
+`tls`, `credential`, `provider`, `config`, `profile`, `service` or `root`) and the next
 step to try.
 
 ## Command flags
@@ -205,7 +205,7 @@ override. An explicit config is always read.
 | --- | --- |
 | `run` | Requires `--executor NAME` naming an executor under `remote` or `workSources` in the configuration. `docker` and `home` are rejected, for example `run does not accept --executor docker: docker is home's executor name, and run submits only to …`: to work at home, use `start`. |
 | `sessions` | Without `--executor`, queries home and configured remote catalogues. `--executor docker`, home's executor name, selects home; another configured name selects that remote. |
-| `status`, `recover`, `cancel` | `--executor NAME` addresses that profile service. `--executor docker` or an omitted executor addresses home. |
+| `status`, `recover`, `cancel` | `--executor NAME` addresses that remote executor. `--executor docker` or an omitted executor addresses home. |
 | `start`, `attach`, `move`, `resume`, `stop` | Require the home owner. Use `--executor docker` or omit it; a remote executor is rejected. `move --to NAME` selects a placement controlled by home. |
 | `pull` | Transfers into home from `--from NAME`, a remote executor. A remote `--executor NAME` can name the same source; conflicting names are rejected. |
 
@@ -225,7 +225,7 @@ accept either the first positional UUID or `--id UUID`, never both. A second
 positional UUID fails with, for example, `status: unexpected argument "UUID";
 usage: sproozi status SESSION_UUID`. UUIDs must
 use canonical lowercase spelling. `sessions` takes no session UUID. `start` can
-create one when omitted; `run` returns the profile service's stable session ID.
+create one when omitted; `run` returns the remote executor's stable session ID.
 
 Use `--project ID` to filter discovery to an approved Project, including with
 `--executor docker`. Catalogue rows retain the configured Project association and
@@ -318,12 +318,12 @@ both catalogues.
 
 | `executor` | `ownership` | Meaning |
 | --- | --- | --- |
-| `docker` | `home` | The home daemon owns the session: you started it locally, or a pull from a profile service completed. Commands go to the home daemon. |
-| `docker` | `source` | A pull is under way and the profile service hasn't yet acknowledged the handover. Run the same `pull` command again to finish it. |
-| a remote executor, such as `engineering` | `executor` | That profile service owns the session. Address it with `--executor engineering`, or pull it. |
-| a remote executor, such as `engineering` | `home` | A mirror row: the profile service handed the session to a home daemon and keeps only a read-only record, in phase `home-owned`. Use the `docker` row for that session instead. |
+| `docker` | `home` | The home daemon owns the session: you started it locally, or a pull from a remote executor completed. Commands go to the home daemon. |
+| `docker` | `source` | A pull is under way and the remote executor hasn't yet acknowledged the handover. Run the same `pull` command again to finish it. |
+| a remote executor, such as `engineering` | `executor` | That remote executor owns the session. Address it with `--executor engineering`, or pull it. |
+| a remote executor, such as `engineering` | `home` | A mirror row: the remote executor handed the session to a home daemon and keeps only a read-only record, in phase `home-owned`. Use the `docker` row for that session instead. |
 
-The value `executor` means "owned by the profile service this row came from";
+The value `executor` means "owned by the remote executor this row came from";
 the JSON value keeps that name so scripts that read it keep working.
 
 Home status also includes the nested `session` execution journal for detailed
