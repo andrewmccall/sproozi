@@ -382,14 +382,9 @@ func (q *options) checkDestination() error {
 // remoteKeys names the configuration maps that define remote executors.
 const remoteKeys = `"remote" or "workSources"`
 
-// unknownCommand points to help, and from doctor to the repository's setup check.
+// unknownCommand points to help.
 func unknownCommand(name string) error {
-	err := fmt.Errorf("unknown command %q; run \"sproozi -h\" for commands", name)
-	if name == "doctor" {
-		err = fmt.Errorf("%w. The setup check is \"python3 hack/verify/quickstart.py doctor\" "+
-			"in a repository checkout, see %s", err, docURL("docs/guides/getting-started.md"))
-	}
-	return err
+	return fmt.Errorf("unknown command %q; run \"sproozi -h\" for commands", name)
 }
 
 // selectedExecutors names the remote catalogues discovery queries by default.

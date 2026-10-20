@@ -77,9 +77,6 @@ func TestUnsupportedFlagOrCommandPointsToHelp(t *testing.T) {
 	}{
 		{[]string{"pull", uuid.NewString(), "--task", "x"}, `pull does not accept --task; run "sproozi pull -h"`},
 		{[]string{"bogus"}, `unknown command "bogus"; run "sproozi -h"`},
-		{[]string{"doctor"}, `unknown command "doctor"; run "sproozi -h" for commands. The setup check is ` +
-			`"python3 hack/verify/quickstart.py doctor" in a repository checkout, see ` +
-			docURL("docs/guides/getting-started.md")},
 	} {
 		var stdout, stderr bytes.Buffer
 		if code := cli(tc.args, &stdout, &stderr); code != 1 || !strings.Contains(stderr.String(), tc.want) {

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -46,6 +47,12 @@ func TestRenderedConfigIsAcceptedByTheHomeService(t *testing.T) {
 	}
 	if read.Gateway.PKIDirectory != l.PKI() || read.Gateway.Listen != "127.0.0.1:18443" || read.Gateway.CertificateFile != "" {
 		t.Fatalf("gateway %+v", read.Gateway)
+	}
+	// The test root's control socket path can exceed the platform limit; the
+	// default root does not, so only the other problems apply here.
+	problems := slices.DeleteFunc(read.ServeProblems(), func(p string) bool { return strings.HasPrefix(p, "directory (") })
+	if len(problems) != 0 {
+		t.Fatalf("serve would refuse the rendered configuration: %q", problems)
 	}
 	if len(read.Harnesses) != 1 || read.Harnesses[0].GatewayPort != 18444 || read.Harnesses[0].NativeOptions != nil {
 		t.Fatalf("second harness %+v", read.Harnesses)

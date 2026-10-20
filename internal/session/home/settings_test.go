@@ -195,3 +195,22 @@ func TestInstructionDigestProblemNamesItsForm(t *testing.T) {
 		t.Fatalf("problems = %v", c.ServeProblems())
 	}
 }
+
+// Each further harness entry is checked by its own key; a home-owned
+// certificate store replaces the administrator certificate files.
+func TestServeProblemsNameEachHarnessEntryAndAcceptManagedCertificates(t *testing.T) {
+	c := composedConfig(t)
+	c.Gateway.CertificateFile, c.Gateway.KeyFile, c.Gateway.TrustBundleFile = "", "", ""
+	c.Gateway.PKIDirectory = filepath.Join(c.Directory, "pki")
+	c.Harnesses = []LocalHarness{{Harness: "bogus", Name: "Bad Name", ProviderURL: "ftp://x", ProviderTokenFile: "relative"}}
+	problems := c.ServeProblems()
+	for _, key := range []string{"harnesses[0].harness", "harnesses[0].name", "harnesses[0].gatewayPort",
+		"harnesses[0].model", "harnesses[0].providerURL", "harnesses[0].providerTokenFile"} {
+		if !slices.ContainsFunc(problems, func(p string) bool { return strings.HasPrefix(p, key+" (") }) {
+			t.Errorf("no problem names %s: %q", key, problems)
+		}
+	}
+	if slices.ContainsFunc(problems, func(p string) bool { return strings.HasPrefix(p, "gateway.") }) {
+		t.Errorf("managed certificates reported as missing gateway files: %q", problems)
+	}
+}
