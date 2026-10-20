@@ -215,6 +215,16 @@ def verify(args):
             lp["updateOwnSecret"], not any(v for k, v in lp.items() if k != "updateOwnSecret")])
         report["logs"] = logs
     finally:
+        if created and not report["passed"]:
+            # Keep enough controller and run state to diagnose a failed proof.
+            diagnostics = OUT / "diagnostics"
+            diagnostics.mkdir(exist_ok=True)
+            for name, argv in {"controller.log": ("logs", "-n", SYSTEM, "deployment/sproozi-controller-manager", "--all-containers"),
+                               "agentruns.yaml": ("get", "agentruns", "-A", "-o", "yaml"),
+                               "pods.yaml": ("get", "pods", "-n", AGENTS, "-o", "yaml"),
+                               "events.txt": ("get", "events", "-A", "--sort-by=.lastTimestamp")}.items():
+                (diagnostics / name).write_text(cluster.kubectl(*argv, check=False).stdout)
+            report["diagnostics"] = str(diagnostics)
         report["finished"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         (OUT / "report.json").write_text(json.dumps(report, indent=2) + "\n")
         if created and not args.keep:
