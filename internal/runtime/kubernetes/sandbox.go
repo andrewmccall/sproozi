@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
@@ -165,18 +166,30 @@ func validateExistingSandbox(existing, wanted *corev1.Pod) error {
 			return fmt.Errorf("existing sandbox %s has different run identity", wanted.Name)
 		}
 	}
-	if existing.Spec.ServiceAccountName != wanted.Spec.ServiceAccountName ||
-		existing.Spec.AutomountServiceAccountToken == nil || !reflect.DeepEqual(existing.Spec.AutomountServiceAccountToken, wanted.Spec.AutomountServiceAccountToken) ||
-		existing.Spec.HostNetwork != wanted.Spec.HostNetwork || existing.Spec.HostPID != wanted.Spec.HostPID || existing.Spec.HostIPC != wanted.Spec.HostIPC ||
-		(existing.Spec.ShareProcessNamespace != nil && *existing.Spec.ShareProcessNamespace) ||
-		existing.Spec.RestartPolicy != wanted.Spec.RestartPolicy ||
-		!reflect.DeepEqual(existing.Spec.SecurityContext, wanted.Spec.SecurityContext) ||
-		!reflect.DeepEqual(existing.Spec.RuntimeClassName, wanted.Spec.RuntimeClassName) ||
-		!apiequality.Semantic.DeepEqual(existing.Spec.Containers, wanted.Spec.Containers) ||
-		!reflect.DeepEqual(existing.Spec.InitContainers, wanted.Spec.InitContainers) ||
-		!reflect.DeepEqual(existing.Spec.EphemeralContainers, wanted.Spec.EphemeralContainers) ||
-		!reflect.DeepEqual(existing.Spec.Volumes, wanted.Spec.Volumes) {
-		return fmt.Errorf("existing sandbox %s has unsafe Pod settings", wanted.Name)
+	// Semantic equality compares Quantities by value: their cached string form
+	// depends on how and when each copy was decoded or printed.
+	e, w := existing.Spec, wanted.Spec
+	var differs []string
+	for field, same := range map[string]bool{
+		"serviceAccountName":           e.ServiceAccountName == w.ServiceAccountName,
+		"automountServiceAccountToken": e.AutomountServiceAccountToken != nil && reflect.DeepEqual(e.AutomountServiceAccountToken, w.AutomountServiceAccountToken),
+		"hostNamespaces":               e.HostNetwork == w.HostNetwork && e.HostPID == w.HostPID && e.HostIPC == w.HostIPC,
+		"shareProcessNamespace":        e.ShareProcessNamespace == nil || !*e.ShareProcessNamespace,
+		"restartPolicy":                e.RestartPolicy == w.RestartPolicy,
+		"securityContext":              reflect.DeepEqual(e.SecurityContext, w.SecurityContext),
+		"runtimeClassName":             reflect.DeepEqual(e.RuntimeClassName, w.RuntimeClassName),
+		"containers":                   apiequality.Semantic.DeepEqual(e.Containers, w.Containers),
+		"initContainers":               apiequality.Semantic.DeepEqual(e.InitContainers, w.InitContainers),
+		"ephemeralContainers":          apiequality.Semantic.DeepEqual(e.EphemeralContainers, w.EphemeralContainers),
+		"volumes":                      apiequality.Semantic.DeepEqual(e.Volumes, w.Volumes),
+	} {
+		if !same {
+			differs = append(differs, field)
+		}
+	}
+	if len(differs) > 0 {
+		slices.Sort(differs)
+		return fmt.Errorf("existing sandbox %s has unsafe Pod settings: %s", wanted.Name, strings.Join(differs, ", "))
 	}
 	return nil
 }

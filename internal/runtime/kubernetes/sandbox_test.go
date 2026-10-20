@@ -383,6 +383,25 @@ func TestEnsureSandboxIdempotent(t *testing.T) {
 	}
 }
 
+// A Quantity caches its string form lazily, so equal workspace sizes can
+// differ under reflect.DeepEqual. Release runtimes use 256Mi, which the parser
+// does not cache, so a retry rejected the controller's own Pod.
+func TestEnsureSandboxAcceptsEqualSizesWithDifferentCachedForm(t *testing.T) {
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(testTrustConfigMap(t)).Build()
+	run := testRunForSandbox("cccccccc-0000-0000-0000-000000000010")
+	rt := testRuntime()
+	rt.Spec.EphemeralWorkspace.SizeLimit = resource.MustParse("256Mi")
+	sc := kubernetes.NewPodSandboxClient(c, c)
+
+	if _, err := sc.Ensure(context.Background(), run, rt); err != nil {
+		t.Fatalf("first Ensure error: %v", err)
+	}
+	_ = rt.Spec.EphemeralWorkspace.SizeLimit.String()
+	if _, err := sc.Ensure(context.Background(), run, rt); err != nil {
+		t.Fatalf("second Ensure error: %v", err)
+	}
+}
+
 func TestEnsureSandboxRejectsPreexistingIdentityCollision(t *testing.T) {
 	run := testRunForSandbox("cccccccc-0000-0000-0000-000000000098")
 	rt := testRuntime()

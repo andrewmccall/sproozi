@@ -19,6 +19,8 @@ import (
 	"context"
 	"fmt"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -56,8 +58,26 @@ func (r *AgentRunReconciler) ensureSandbox(
 		return "", err
 	}
 
-	run.Status.Identity.SandboxName = name
-	if err := r.Status().Update(ctx, run); err != nil {
+	// Record the name even if another writer changed the run meanwhile. A lost
+	// write sends every later reconcile back through Ensure, which compares the
+	// existing Pod with the current runtime and fails for good once they differ.
+	err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		run.Status.Identity.SandboxName = name
+		updateErr := r.Status().Update(ctx, run)
+		if !apierrors.IsConflict(updateErr) {
+			return updateErr
+		}
+		var latest sprooziv1alpha1.AgentRun
+		if err := r.APIReader.Get(ctx, client.ObjectKeyFromObject(run), &latest); err != nil {
+			return err
+		}
+		if latest.UID != run.UID || IsTerminal(latest.Status.Phase) || !latest.DeletionTimestamp.IsZero() {
+			return fmt.Errorf("AgentRun %s changed while its sandbox was recorded", run.Name)
+		}
+		*run = latest
+		return updateErr
+	})
+	if err != nil {
 		return "", err
 	}
 	return name, nil
