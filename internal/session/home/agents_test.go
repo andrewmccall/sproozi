@@ -26,7 +26,7 @@ func agentsRoot(t *testing.T) string {
 func TestUserInstructionsComposeSharedThenHarnessFiles(t *testing.T) {
 	root := agentsRoot(t)
 	for name, text := range map[string]string{"shared/AGENTS.md": "Shared rule.\n", "codex/AGENTS.md": "Codex rule.", "claude/CLAUDE.md": "Claude rule."} {
-		if err := os.WriteFile(filepath.Join(root, name), []byte(text), 0o644); err != nil {
+		if err := privatefs.Replace(filepath.Join(root, filepath.Dir(name)), filepath.Base(name), []byte(text)); err != nil {
 			t.Fatal(err)
 		}
 	}
