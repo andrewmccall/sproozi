@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -116,6 +117,12 @@ func Open(c Config, log io.Writer) (_ *Service, err error) {
 	}
 	if err = privatefs.EnsureDir(c.Directory); err != nil {
 		return nil, err
+	}
+	// Docker cannot mount a missing folder; an empty one is an empty profile.
+	if c.Local.ProfileDirectory != "" {
+		if err = os.MkdirAll(c.Local.ProfileDirectory, 0755); err != nil {
+			return nil, err
+		}
 	}
 	duration, err := time.ParseDuration(c.MaxDuration)
 	if err != nil || duration <= 0 || duration > 24*time.Hour {

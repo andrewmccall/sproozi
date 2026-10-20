@@ -125,5 +125,14 @@ func ReadConfig(path string) (Config, error) {
 	if err = validateProjectApprovals(c); err != nil {
 		return c, err
 	}
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return c, err
+	}
+	c.Local.ProfileDirectory = filepath.Join(filepath.Dir(absolute), ProfileFolder)
 	return c, nil
 }
+
+// ProfileFolder is the user's profile, beside the configuration file. Docker
+// sessions see it live and read-only.
+const ProfileFolder = "profile"

@@ -73,6 +73,9 @@ type PlacementConfig struct {
 	InstructionDigest                              string
 	AgentLimits, HelperLimits, AnchorLimits        ResourceLimits
 	VolumeBytes, MaxCheckpointBytes, RetainedBytes int64
+	// ProfileDirectory is the user's live profile folder, set by the home from
+	// the configuration file's location, never from its contents.
+	ProfileDirectory string `json:"-"`
 }
 
 func (c PlacementConfig) validate() error {
@@ -85,6 +88,9 @@ func (c PlacementConfig) validate() error {
 	ip, err := netip.ParseAddr(c.GatewayIPv4)
 	if !resourceName.MatchString(c.Name) || !resourceName.MatchString(c.NetworkName) || err != nil || !ip.Is4() || ip.IsUnspecified() || ip.IsMulticast() || c.GatewayPort == 0 || c.Instructions == "" || fmt.Sprintf("%x", sha256.Sum256([]byte(c.Instructions))) != c.InstructionDigest || c.VolumeBytes < 16<<20 || c.VolumeBytes > 4<<30 || c.MaxCheckpointBytes <= 0 || c.MaxCheckpointBytes > 64<<20 || c.RetainedBytes < c.MaxCheckpointBytes*2 {
 		return errors.New("invalid Docker placement configuration")
+	}
+	if c.ProfileDirectory != "" && !validProfileDirectory(c.ProfileDirectory) {
+		return errors.New("docker placement profile folder must be a clean absolute path")
 	}
 	for _, image := range []string{c.NativeImageID, c.HelperImageID, c.AnchorImageID} {
 		if !strings.HasPrefix(image, "sha256:") || !objectID.MatchString(strings.TrimPrefix(image, "sha256:")) {
@@ -199,6 +205,9 @@ func (p *Placement) spec(r placementRecord, role string) ManagedSpec {
 	spec.IntentDigest = fmt.Sprintf("%x", sha256.Sum256(append(encoded, []byte(r.ConfigDigest+r.InputDigest)...)))
 	if role != roleAnchor {
 		spec.Volume = r.Volume
+	}
+	if role == roleAgent {
+		spec.ProfileDirectory = p.config.ProfileDirectory
 	}
 	return spec
 }

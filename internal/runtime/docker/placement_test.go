@@ -52,11 +52,8 @@ type fakeContainer struct {
 		PidsLimit                           *int64
 		Tmpfs                               map[string]string
 	}
-	Mounts []struct {
-		Type, Name, Destination string
-		RW                      bool
-	}
-	State struct {
+	Mounts []managedMount
+	State  struct {
 		Running bool
 		Status  string
 		Pid     int
@@ -206,16 +203,24 @@ func (f *fakeDocker) createCommand(args []string) ([]byte, error) {
 			k, value, _ := strings.Cut(v, ":")
 			c.HostConfig.Tmpfs[k] = value
 		case "--mount":
-			var name string
+			m := managedMount{RW: true}
 			for field := range strings.SplitSeq(v, ",") {
-				if source, ok := strings.CutPrefix(field, "source="); ok {
-					name = source
+				key, value, _ := strings.Cut(field, "=")
+				switch key {
+				case "type":
+					m.Type = value
+				case "source":
+					m.Source = value
+				case "target":
+					m.Destination = value
+				case "readonly":
+					m.RW = false
 				}
 			}
-			c.Mounts = append(c.Mounts, struct {
-				Type, Name, Destination string
-				RW                      bool
-			}{volumeCommand, name, "/workspace", true})
+			if m.Type == volumeCommand {
+				m.Name, m.Source = m.Source, ""
+			}
+			c.Mounts = append(c.Mounts, m)
 		}
 	}
 	f.containers[c.ID] = c
@@ -456,10 +461,15 @@ func fixtureLaunch(t *testing.T, data []byte) session.Launch {
 }
 func openFixture(t *testing.T, dir string, f *fakeDocker, a *fakeAuthority) *Placement {
 	t.Helper()
+	return openFixtureWith(t, dir, f, a, fixtureConfig())
+}
+
+func openFixtureWith(t *testing.T, dir string, f *fakeDocker, a *fakeAuthority, config PlacementConfig) *Placement {
+	t.Helper()
 	if err := os.Chmod(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	p, err := OpenPlacement(dir, &Engine{execute: f.run}, fixtureConfig(), a)
+	p, err := OpenPlacement(dir, &Engine{execute: f.run}, config, a)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -778,5 +788,56 @@ func TestPreparedNativeLaunchCarriesTaskAndIndependentRolloutLimit(t *testing.T)
 	}
 	if configured.Task != launch.Task || configured.ThreadID != fixtureThread || configured.RolloutMaxBytes != 64<<20 || configured.RolloutMaxBytes == p.config.MaxCheckpointBytes {
 		t.Fatalf("native task/thread/observer bound lost: %+v", configured)
+	}
+}
+
+// Only the agent sees the profile, read-only and live, and a container whose
+// profile mount was made writable or redirected is not adopted.
+func TestAgentMountsTheLiveProfileReadOnly(t *testing.T) {
+	t.Parallel()
+	data := fixtureArtifact(t)
+	l := fixtureLaunch(t, data)
+	f := newFakeDocker()
+	a := &fakeAuthority{engine: f}
+	config := fixtureConfig()
+	config.ProfileDirectory = "/Users/fixture/.sproozi/profile"
+	p := openFixtureWith(t, testutil.PrivateDir(t), f, a, config)
+	inc, err := p.Prepare(context.Background(), l, data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profileMounts := 0
+	var agent *fakeContainer
+	for _, c := range f.containers {
+		for _, m := range c.Mounts {
+			if m.Type == bindMount {
+				profileMounts++
+				agent = c
+				if m.Source != config.ProfileDirectory || m.Destination != ProfileMountPath || m.RW {
+					t.Fatalf("profile mount = %+v", m)
+				}
+			}
+		}
+	}
+	if profileMounts != 1 || !strings.HasSuffix(agent.Name, "-"+roleAgent) {
+		t.Fatalf("profile mounts = %d on %v", profileMounts, agent)
+	}
+	for i, m := range agent.Mounts {
+		if m.Type == bindMount {
+			agent.Mounts[i].RW = true
+		}
+	}
+	if err = p.Activate(context.Background(), l, inc); err == nil {
+		t.Fatal("writable profile mount adopted")
+	}
+}
+
+func TestPlacementRejectsAnUnmountableProfileFolder(t *testing.T) {
+	for _, folder := range []string{"relative/profile", "/a,b/profile", "/a/../profile"} {
+		config := fixtureConfig()
+		config.ProfileDirectory = folder
+		if config.validate() == nil {
+			t.Fatalf("profile folder %q accepted", folder)
+		}
 	}
 }

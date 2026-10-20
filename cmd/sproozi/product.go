@@ -25,9 +25,11 @@ const (
 	actionRun      = "run"
 )
 
+// defaultConfigPath keeps every Sproozi file under ~/.sproozi, including the
+// profile beside the configuration.
 func defaultConfigPath() (string, error) {
-	p, e := os.UserConfigDir()
-	return filepath.Join(p, "sproozi", "config.json"), e
+	p, e := os.UserHomeDir()
+	return filepath.Join(p, ".sproozi", "config.json"), e
 }
 
 type options struct {

@@ -49,7 +49,17 @@ func TestInitCreatesPrivateDirectoryAndPreservesFiles(t *testing.T) {
 	if err := testutil.WriteFile(file, []byte("keep this"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	if info, err := os.Stat(filepath.Join(path, "profile", "skills")); err != nil || !info.IsDir() {
+		t.Fatalf("init did not create the profile: %v", err)
+	}
+	instructions := filepath.Join(path, "profile", "AGENTS.md")
+	if err := testutil.WriteFile(instructions, []byte("mine"), 0644); err != nil {
+		t.Fatal(err)
+	}
 	captureCLIOutput(t, []string{actionInit, "--directory", path})
+	if data, err := os.ReadFile(instructions); err != nil || string(data) != "mine" {
+		t.Fatalf("init changed the profile: %q, %v", data, err)
+	}
 	data, err := os.ReadFile(file)
 	if err != nil || string(data) != "keep this" {
 		t.Fatalf("init changed the existing configuration: %q, %v", data, err)
