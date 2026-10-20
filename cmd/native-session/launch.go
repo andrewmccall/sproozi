@@ -72,7 +72,7 @@ func adapterFor(kind harness.NativeKind) (nativeAdapter, error) {
 }
 
 func prepareCodexLaunch(c config, thread string, env []string) ([]string, []string, error) {
-	if err := installCodexProjectTrust(nativeHome); err != nil {
+	if err := errors.Join(installCodexProjectTrust(nativeHome), installUserInstructions(nativeHome, c)); err != nil {
 		return nil, nil, err
 	}
 	return codexArguments(c, thread), append(env, "CODEX_HOME="+nativeHome), nil

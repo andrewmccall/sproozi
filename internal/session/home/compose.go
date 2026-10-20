@@ -54,6 +54,7 @@ type authority struct {
 	options     []string
 	kind        harness.NativeKind
 	mcpEndpoint string
+	agents      string
 }
 
 const inspectionHost = "api.openai.com"
@@ -88,11 +89,17 @@ func (a *authority) InitializeAllocation(ctx context.Context, l session.Launch, 
 	if err != nil {
 		return runtimedocker.NativeAccess{}, err
 	}
+	// Shared preferences are read fresh for every visit; a malformed file
+	// stops the launch rather than being skipped silently.
+	user, err := UserInstructions(a.agents, a.kind)
+	if err != nil {
+		return runtimedocker.NativeAccess{}, err
+	}
 	trust, err := a.certs.trustFor(l)
 	if err != nil {
 		return runtimedocker.NativeAccess{}, err
 	}
-	return runtimedocker.NativeAccess{Env: env, TrustBundlePEM: trust, Model: a.model, Options: slices.Clone(a.options), ClientConfig: clients}, nil
+	return runtimedocker.NativeAccess{Env: env, TrustBundlePEM: trust, Model: a.model, Options: slices.Clone(a.options), ClientConfig: clients, UserInstructions: user}, nil
 }
 func (a *authority) Activate(ctx context.Context, l session.Launch, i session.Incarnation) error {
 	return a.owner.Activate(ctx, l, i)
@@ -374,7 +381,7 @@ func (s *Service) openStack(c Config, engine *runtimedocker.Engine, ledger *budg
 		return err
 	}
 	endpoint := "https://" + net.JoinHostPort(stack.config.GatewayIPv4, fmt.Sprint(stack.config.GatewayPort))
-	auth := &authority{owner: stack.owner, endpoint: endpoint, certs: s.certs, model: stack.model, options: stack.options, kind: stack.config.Harness, mcpEndpoint: "https://" + c.Gateway.MCPAuthority}
+	auth := &authority{owner: stack.owner, endpoint: endpoint, certs: s.certs, model: stack.model, options: stack.options, kind: stack.config.Harness, mcpEndpoint: "https://" + c.Gateway.MCPAuthority, agents: c.AgentsDirectory}
 	stack.placement, err = runtimedocker.OpenPlacement(filepath.Join(c.Directory, stackDirectory("docker", index, stack.config.Name)), engine, stack.config, auth)
 	if err != nil {
 		return err

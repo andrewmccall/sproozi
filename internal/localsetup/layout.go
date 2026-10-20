@@ -211,5 +211,13 @@ func (l Layout) ensureDirectories() error {
 			return fmt.Errorf("private directory %s: %w", dir, err)
 		}
 	}
-	return nil
+	// Shared native settings. Workers receive only allowlisted instruction
+	// files from these directories, freshly on every visit.
+	for _, kind := range []harness.NativeKind{harness.NativeCodex, harness.NativeClaude} {
+		directory, _ := harness.NativeDirectory(kind)
+		if err := privatefs.EnsureDir(filepath.Join(l.Agents(), directory)); err != nil {
+			return err
+		}
+	}
+	return privatefs.EnsureDir(filepath.Join(l.Agents(), "shared"))
 }

@@ -50,6 +50,8 @@ type NativeAccess struct {
 	Model          string
 	Options        []string
 	ClientConfig   *harness.NativeClientConfig
+	// UserInstructions are shared user preferences, never approved instructions.
+	UserInstructions string
 }
 
 // Authority is the trusted home gateway/accounting owner. It persists exact
@@ -252,7 +254,7 @@ func (p *Placement) drivePrepare(ctx context.Context, r *placementRecord, data [
 	if err != nil {
 		return err
 	}
-	contract := harness.NativeLaunch{Harness: p.config.Harness, Deadline: r.Launch.Deadline, ThreadID: r.Launch.ThreadID, Task: r.Launch.Task, Instructions: p.config.Instructions, InstructionDigest: p.config.InstructionDigest, Env: access.Env, Model: access.Model, Options: access.Options, ClientConfig: access.ClientConfig, TrustBundlePEM: access.TrustBundlePEM, RolloutMaxBytes: harness.NativeRolloutMaxBytes}
+	contract := harness.NativeLaunch{Harness: p.config.Harness, Deadline: r.Launch.Deadline, ThreadID: r.Launch.ThreadID, Task: r.Launch.Task, Instructions: p.config.Instructions, InstructionDigest: p.config.InstructionDigest, Env: access.Env, Model: access.Model, Options: access.Options, ClientConfig: access.ClientConfig, TrustBundlePEM: access.TrustBundlePEM, UserInstructions: access.UserInstructions, RolloutMaxBytes: harness.NativeRolloutMaxBytes}
 	if err := contract.Validate(time.Now()); err != nil {
 		return err
 	}

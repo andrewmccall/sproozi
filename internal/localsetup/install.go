@@ -367,6 +367,7 @@ func renderConfig(l Layout, inst Installation, instructions string) home.Config 
 	digest := fmt.Sprintf("%x", sha256.Sum256([]byte(instructions)))
 	c := home.Config{
 		Directory: l.State(), DockerBinary: inst.Docker.Binary, DockerSocket: inst.Docker.Socket, DockerConfig: l.DockerCLI(),
+		AgentsDirectory: l.Agents(),
 		Local: runtimedocker.PlacementConfig{Harness: primary.Harness, Name: primary.Name,
 			NativeImageID: inst.Image.ID, HelperImageID: inst.Image.ID, AnchorImageID: inst.Image.ID,
 			NetworkName: inst.Network.Name, GatewayIPv4: inst.Endpoint.GatewayIPv4, GatewayPort: primary.Port,
@@ -422,6 +423,9 @@ func mergeConfig(existing, rendered home.Config) (home.Config, bool, error) {
 			"run sproozi doctor; changing images, network or gateway address needs a drained migration")
 	}
 	changed := false
+	if existing.AgentsDirectory == "" {
+		existing.AgentsDirectory, changed = rendered.AgentsDirectory, true
+	}
 	for _, h := range rendered.Harnesses {
 		if !slices.ContainsFunc(existing.Harnesses, func(e home.LocalHarness) bool { return e.Harness == h.Harness }) {
 			existing.Harnesses = append(existing.Harnesses, h)

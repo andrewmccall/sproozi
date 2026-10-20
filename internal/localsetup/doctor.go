@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/pki"
@@ -67,6 +68,13 @@ func Doctor(ctx context.Context, l Layout, checkProvider bool) (r Report) {
 	r.add("config", err, "configuration "+l.Config()+" is valid")
 	if err != nil {
 		return r
+	}
+	for _, h := range inst.Harnesses {
+		_, err = home.UserInstructions(config.AgentsDirectory, h.Harness)
+		r.add("agents", err, fmt.Sprintf("%s reads %v from %s", h.Harness, home.AgentFiles(h.Harness), config.AgentsDirectory))
+	}
+	if ignored, err := home.UnsupportedAgentEntries(config.AgentsDirectory); err == nil && len(ignored) > 0 {
+		r.add("agents", nil, "ignored because no harness reads them: "+strings.Join(ignored, ", "))
 	}
 	docker, err := DiscoverDocker(ctx, l.DockerCLI())
 	r.add("docker", err, "engine at "+docker.Socket+" runs Linux containers")
