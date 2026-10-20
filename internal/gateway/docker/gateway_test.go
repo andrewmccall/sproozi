@@ -164,13 +164,13 @@ func assertDiagnosesUnknownDestination(t *testing.T, client *http.Client) {
 		_ = response.Body.Close()
 		t.Fatal("unknown destination was reachable")
 	}
-	session, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "v1"}, nil).Connect(t.Context(),
+	mcpSession, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "v1"}, nil).Connect(t.Context(),
 		&mcp.StreamableClientTransport{Endpoint: "https://" + controlHost + "/mcp/sproozi", HTTPClient: client}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = session.Close() }()
-	result, err := session.CallTool(t.Context(), &mcp.CallToolParams{Name: "diagnose", Arguments: map[string]any{"destination": "docs.example.com"}})
+	defer func() { _ = mcpSession.Close() }()
+	result, err := mcpSession.CallTool(t.Context(), &mcp.CallToolParams{Name: "diagnose", Arguments: map[string]any{"destination": "docs.example.com"}})
 	if err != nil || result.IsError {
 		t.Fatalf("diagnose = %+v, %v", result, err)
 	}

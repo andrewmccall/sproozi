@@ -3,9 +3,10 @@ package kubernetes_test
 import (
 	"context"
 	"encoding/json"
-	"github.com/andrewmccall/sproozi/internal/harness"
 	"strings"
 	"testing"
+
+	"github.com/andrewmccall/sproozi/internal/harness"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

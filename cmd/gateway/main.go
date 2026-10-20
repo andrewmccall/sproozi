@@ -428,8 +428,9 @@ func main() {
 	// Unknown authorities are absent and are denied before an upstream call.
 	budgets := budget.NewTrackerWithLedger(budgetkubernetes.NewLedger(runtimeClient,
 		envOrDefault("BUDGET_NAMESPACE", "sproozi-system")))
-	mcpHandler := diagnose.NewControl(auditLogger, mcpgateway.NewHandler(mcpgateway.HandlerConfig{Registry: cfg.mcpRegistry,
-		Budgets: budgets, AuditLogger: auditLogger}))
+	named := mcpgateway.NewHandler(mcpgateway.HandlerConfig{Registry: cfg.mcpRegistry,
+		Budgets: budgets, AuditLogger: auditLogger})
+	mcpHandler := diagnose.NewControl(auditLogger, named)
 	dispatcher := composeDispatcher(cfg, handlers, mcpHandler, anthropicHandler)
 	for authority, route := range dispatcher {
 		route.Budgets, route.AuditLogger = budgets, auditLogger

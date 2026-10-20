@@ -30,8 +30,10 @@ event content are not injected into the environment.
 The same immutable ConfigMap carries the generated kubeconfig and the selected
 CLI's native MCP configuration. `clientConfig.harness` supports `codex`,
 `claude-code`, `opencode` and `hermes`; omitted selection leaves preparation to the
-administrator. Native files select only requested `mcp.<server>` connections at
-the gateway, without provider URLs or credentials. Claude Code, OpenCode and Hermes also
+administrator. Native files select requested `mcp.<server>` connections and the
+`sproozi` control connection at the gateway, without provider URLs or
+credentials. `sproozi-instructions.md` and `sproozi-access.md` carry the
+[Sproozi integration](sproozi-integration.md) for every selected harness. Claude Code, OpenCode and Hermes also
 receive `instructions.txt` and `request.json`, retaining trusted instructions
 and untrusted request data separately. Retries require an exact match of all
 contract files. Native Kubernetes MCP remains an explicit trusted opt-in.

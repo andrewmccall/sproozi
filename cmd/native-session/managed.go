@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"syscall"
 
+	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/harness"
 )
 
@@ -19,19 +20,28 @@ const claudePlugin = "/tmp/sproozi-native/sproozi-plugin"
 func installManagedCodex(home string) error {
 	return errors.Join(
 		installManagedFile(filepath.Join(home, "AGENTS.md"), []byte(harness.ManagedInstructions)),
-		installManagedFile(filepath.Join(home, "skills", harness.ManagedSkillName, "SKILL.md"), harness.ManagedSkill(harness.ManagedSkillName)))
+		installManagedSkill(home))
 }
 
 // installManagedClaudePlugin writes the plugin Claude loads with --plugin-dir,
 // which works while every setting source stays disabled.
 func installManagedClaudePlugin(dir string) error {
-	manifest, err := json.Marshal(map[string]string{"name": "sproozi", "description": "Sproozi managed environment"})
+	manifest, err := json.Marshal(map[string]string{"name": api.ControlMCPServer, "description": "Sproozi integration"})
 	if err != nil {
 		return err
 	}
 	return errors.Join(
 		installManagedFile(filepath.Join(dir, ".claude-plugin", "plugin.json"), manifest),
-		installManagedFile(filepath.Join(dir, "skills", harness.ManagedSkillName, "SKILL.md"), harness.ManagedSkill(harness.ManagedSkillName)))
+		installManagedSkill(dir))
+}
+
+// installManagedSkill writes skills/sproozi-access/SKILL.md under root.
+func installManagedSkill(root string) error {
+	return installManagedFile(managedSkillPath(root), harness.ManagedSkill(harness.ManagedSkillName))
+}
+
+func managedSkillPath(root string) string {
+	return filepath.Join(root, "skills", harness.ManagedSkillName, "SKILL.md")
 }
 
 // installManagedFile replaces path with the supervisor's current content. The

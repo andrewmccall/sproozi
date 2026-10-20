@@ -361,6 +361,8 @@ registers the real public HTTPS provider without credentials. Use that same
 authored registry file for `gateway.mcpRegistryFile` locally and the remote
 gateway's mounted registry ConfigMap. Set the local inspection authority and
 certificate SANs according to the [MCP reference](../reference/configured-mcp.md).
+`gateway.mcpAuthority` is required even without a registry: it also serves the
+[Sproozi control connection](../reference/sproozi-integration.md).
 The policy example permits only `read_wiki_structure` for the public
 `modelcontextprotocol/go-sdk` repository, with a finite `mcp.docs` allowance.
 Keep the local copy outside the repository, owned and mode `0600`. Both copies

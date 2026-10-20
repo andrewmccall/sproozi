@@ -235,6 +235,7 @@ func prepareClaudeLaunch(c config, _ string, env []string) ([]string, []string, 
 		"CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false", "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1")
 	return args, env, nil
 }
+
 // claudeArguments keeps every setting source disabled. Sproozi instructions
 // follow the approved instructions; the skill and control connection come only
 // from the supervisor's plugin and MCP configuration.

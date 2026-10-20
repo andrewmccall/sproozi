@@ -3,6 +3,7 @@
 package diagnose
 
 import (
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -109,9 +110,9 @@ func (j *Journal) Denials(runUID string, since, now time.Time) []Entry {
 		return nil
 	}
 	var result []Entry
-	for i := len(entry.entries) - 1; i >= 0; i-- {
-		if !entry.entries[i].Event.Timestamp.Before(since) {
-			result = append(result, entry.entries[i])
+	for _, v := range slices.Backward(entry.entries) {
+		if !v.Event.Timestamp.Before(since) {
+			result = append(result, v)
 		}
 	}
 	return result

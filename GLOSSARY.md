@@ -29,6 +29,24 @@ through. It holds provider credentials, identifies the run and checks each
 request against current policy. See
 [capabilities and gateways](docs/explanations/capabilities-and-gateways.md).
 
+### Control connection
+
+The `sproozi` MCP server that every execution reaches on its own gateway. Its
+`diagnose` tool explains the execution's recent gateway refusals. It needs no
+capability and grants none. See
+[Sproozi integration and diagnose](docs/reference/sproozi-integration.md).
+
+### Denial journal
+
+The gateway's bounded, in-memory record of each execution's recent refused
+requests, kept from its audit records. `diagnose` reads it.
+
+### Sproozi integration
+
+What Sproozi adds to every harness it launches: environment instructions, the
+`sproozi-access` skill and the control connection. It is guidance, not
+authority. Also seen as: managed harness configuration.
+
 ### Capability
 
 A named kind of access a run can request, such as `kubernetes.read`,

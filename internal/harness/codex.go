@@ -13,7 +13,10 @@ import (
 )
 
 const (
-	connectionURL = "url"
+	connectionURL  = "url"
+	connectionType = "type"
+	// httpTransport is Claude Code's MCP transport name for Streamable HTTP.
+	httpTransport = "http"
 )
 
 const (
@@ -59,12 +62,12 @@ func MCPConfig(selected string, capabilities []string, gatewayEndpoint string) (
 		case codexName:
 			_, _ = fmt.Fprintf(&output, "[mcp_servers.%s]\nurl = %s\nrequired = true\n\n", strconv.Quote(name), strconv.Quote(address))
 		case claudeName:
-			connections[name] = map[string]any{"type": "http", connectionURL: address}
+			connections[name] = map[string]any{connectionType: httpTransport, connectionURL: address}
 		case hermesName:
 			// Native toolset aliases must not collide with built-ins such as all or terminal.
 			connections["sproozi-mcp-"+name] = map[string]any{connectionURL: address, "enabled": true, "strict_redirect_headers": true, "connect_timeout": 15, "timeout": 60}
 		case openCodeName:
-			connections[name] = map[string]any{"type": "remote", connectionURL: address, "enabled": true, "oauth": false}
+			connections[name] = map[string]any{connectionType: "remote", connectionURL: address, "enabled": true, "oauth": false}
 		}
 	}
 	if selected == codexName {

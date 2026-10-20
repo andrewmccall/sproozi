@@ -18,7 +18,8 @@ clients, described below.
 | `opencode` | `opencode-mcp.json` | OpenCode `mcp`, remote transport, OAuth disabled |
 | `hermes` | `hermes-mcp.json` | Hermes `mcp_servers`, Streamable HTTP |
 
-Only requested named `mcp.<server>` connections appear. Each points to the
+Requested named `mcp.<server>` connections appear, followed by the `sproozi`
+control connection, which every selected harness receives. Each points to the
 shared gateway's `/mcp/<server>` route. Provider URLs and credentials are absent.
 The gateway continues to check the run and live policy on each call; rendered
 configuration cannot grant tools. Native `kubernetes.read` MCP configuration
@@ -28,6 +29,9 @@ For Claude Code, OpenCode and Hermes, contract preparation also writes `instruct
 from the template's trusted instructions and `request.json` from the run's
 untrusted task and event context. The original `input.json` remains available.
 The examples pass these separately through each client's native input mechanism.
+Every selected harness also receives `sproozi-instructions.md` and
+`sproozi-access.md`; see [Sproozi integration and diagnose](sproozi-integration.md)
+for where each harness places them.
 The complete ConfigMap, including native files, must match on retry. Additional
 files, binary data, changed selectors and changed instructions fail closed.
 

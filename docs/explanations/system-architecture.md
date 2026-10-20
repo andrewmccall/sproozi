@@ -110,6 +110,7 @@ MCP clients use the same gateway and run identity as CLI and HTTP clients.
 | --- | --- | --- |
 | Native Kubernetes Pod-list tool at `https://kubernetes.default.svc/mcp` | `kubernetes.read` | The same namespace and resource rules as Kubernetes REST reads. |
 | Registered remote tools at `/mcp/<server>` | `mcp.<server>` | Registered endpoint, allowed tools, discovered input schemas and optional policy argument restrictions. |
+| Sproozi control connection at `/mcp/sproozi` | None | The authenticated execution; `diagnose` returns only that execution's recent gateway refusals. |
 
 A compatible remote HTTPS MCP server needs registration and policy
 configuration. It does not need a provider-specific Go adapter. The gateway

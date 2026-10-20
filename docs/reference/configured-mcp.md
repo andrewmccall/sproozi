@@ -35,7 +35,8 @@ For example:
 }
 ```
 
-Names are DNS labels of at most 63 characters. URLs must be exact HTTPS endpoints,
+Names are DNS labels of at most 63 characters. `sproozi` is reserved for the
+[control connection](sproozi-integration.md) and is rejected. URLs must be exact HTTPS endpoints,
 without user info, query parameters or fragments. DNS names, IDNA spelling and
 ports are canonicalized before reserving provider authorities. Authentication is
 optional; when needed, mount a Secret file under `/var/run/secrets/sproozi/mcp`
@@ -118,17 +119,25 @@ exec`:
 
 ```sh
 export HOME=/home/agent
-mkdir -p "$HOME/.codex"
+mkdir -p "$HOME/.codex/skills/sproozi-access"
 cp /etc/sproozi/contract/codex-mcp.toml "$HOME/.codex/config.toml"
+cp /etc/sproozi/contract/sproozi-instructions.md "$HOME/.codex/AGENTS.md"
+cp /etc/sproozi/contract/sproozi-access.md "$HOME/.codex/skills/sproozi-access/SKILL.md"
 ```
 
 The [demo runtime](../../examples/sre-demo/agentruntime.yaml) does this already,
-while retaining its command-line model-provider settings. Only requested named
-MCP capabilities become connections. A run requesting `mcp.docs` receives:
+while retaining its command-line model-provider settings. Requested named MCP
+capabilities become connections, followed by the `sproozi`
+[control connection](sproozi-integration.md). A run requesting `mcp.docs`
+receives:
 
 ```toml
 [mcp_servers."docs"]
 url = "https://sproozi-gateway.sproozi-system.svc:8443/mcp/docs"
+required = true
+
+[mcp_servers."sproozi"]
+url = "https://sproozi-gateway.sproozi-system.svc:8443/mcp/sproozi"
 required = true
 ```
 

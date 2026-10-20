@@ -60,6 +60,15 @@ Tests must check:
 - Upstream cancellation and session deletion use bounded timeouts. A committed
   provider side effect cannot be reversed by cancelling its request.
 
+- The `sproozi` control connection returns only the calling execution's
+  denials. A CONNECT to an unenabled destination by an authenticated execution
+  is recorded for that execution; an unauthenticated one is not. A failure the
+  gateway never saw is reported as `not_observed`, never as a denial.
+- Every harness launch carries the Sproozi instructions, the `sproozi-access`
+  skill and the control connection. Test with the pinned clients: the model
+  request must contain all three beside unchanged approved instructions, and
+  repository `AGENTS.md` or `CLAUDE.md` must not remove them.
+
 When changing the MCP SDK, include revocation during an in-flight call and
 session teardown. The tests must detect cancellation notifications lost during
 asynchronous shutdown.

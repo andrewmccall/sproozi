@@ -66,7 +66,7 @@ func NewGateway(owner *Owner, config GatewayConfig) (*proxytransport.Gateway, er
 	if _, covered := config.Certificates[host]; err != nil || host == "" || port != "443" || reserved || !covered {
 		return nil, errors.New("docker gateway: exact certified MCP authority on port 443 required")
 	}
-	var named http.Handler = http.NotFoundHandler()
+	var named = http.NotFoundHandler()
 	if config.MCPRegistry != nil {
 		named = mcpgateway.NewHandler(mcpgateway.HandlerConfig{Registry: config.MCPRegistry, HTTPClient: config.MCPClient, Budgets: tracker, AuditLogger: journal})
 	}

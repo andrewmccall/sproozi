@@ -60,31 +60,31 @@ func diagnoseAs(t *testing.T, url, execution string, args map[string]any) diagno
 func TestDiagnoseReturnsOnlyTheCallersMatchingDenials(t *testing.T) {
 	journal := diagnose.NewJournal(nil, diagnose.Limits{})
 	now := time.Now().UTC()
-	journal.Log(audit.Event{Timestamp: now, RunUID: "run-a", Operation: "CONNECT docs.example.com:443",
-		Capability: "network.egress", SemanticLevel: audit.TierDestination, DenyReason: "destination docs.example.com:443 is not enabled at this gateway"})
-	journal.Log(audit.Event{Timestamp: now, RunUID: "run-b", Operation: "CONNECT secret.example.com:443", DenyReason: "denied"})
-	journal.Log(audit.Event{Timestamp: now, RunUID: "run-a", Operation: "GET api.github.com:443", Resource: "org/repo", DenyReason: "repository denied"})
+	journal.Log(audit.Event{Timestamp: now, RunUID: runA, Operation: "CONNECT docs.example.com:443",
+		Capability: egress, SemanticLevel: audit.TierDestination, DenyReason: "destination docs.example.com:443 is not enabled at this gateway"})
+	journal.Log(audit.Event{Timestamp: now, RunUID: runB, Operation: "CONNECT secret.example.com:443", DenyReason: "denied"})
+	journal.Log(audit.Event{Timestamp: now, RunUID: runA, Operation: "GET api.github.com:443", Resource: "org/repo", DenyReason: "repository denied"})
 	server := httptest.NewServer(asExecution(diagnose.NewControl(journal, http.NotFoundHandler())))
 	defer server.Close()
 
-	got := diagnoseAs(t, server.URL, "run-a", map[string]any{"destination": "docs.example.com"})
+	got := diagnoseAs(t, server.URL, runA, map[string]any{"destination": "docs.example.com"})
 	if got.Status != diagnose.StatusDenied || len(got.Decisions) != 1 {
 		t.Fatalf("result = %+v", got)
 	}
 	d := got.Decisions[0]
-	if d.Source != "gateway" || d.Capability != "network.egress" || d.Operation != "CONNECT docs.example.com:443" || d.Reason == "" || d.DecisionID == "" {
+	if d.Source != "gateway" || d.Capability != egress || d.Operation != "CONNECT docs.example.com:443" || d.Reason == "" || d.DecisionID == "" {
 		t.Fatalf("decision = %+v", d)
 	}
-	byID := diagnoseAs(t, server.URL, "run-a", map[string]any{"decision_id": d.DecisionID})
+	byID := diagnoseAs(t, server.URL, runA, map[string]any{"decision_id": d.DecisionID})
 	if byID.Status != diagnose.StatusDenied || len(byID.Decisions) != 1 || byID.Decisions[0].DecisionID != d.DecisionID {
 		t.Fatalf("by id = %+v", byID)
 	}
 
-	other := diagnoseAs(t, server.URL, "run-b", map[string]any{"decision_id": d.DecisionID})
+	other := diagnoseAs(t, server.URL, runB, map[string]any{"decision_id": d.DecisionID})
 	if other.Status != diagnose.StatusNotObserved || len(other.Decisions) != 0 {
 		t.Fatalf("run-b read run-a's decision: %+v", other)
 	}
-	all := diagnoseAs(t, server.URL, "run-b", nil)
+	all := diagnoseAs(t, server.URL, runB, nil)
 	if len(all.Decisions) != 1 || all.Decisions[0].Operation != "CONNECT secret.example.com:443" {
 		t.Fatalf("run-b decisions = %+v", all)
 	}
@@ -96,7 +96,7 @@ func TestDiagnoseReportsNotObservedWithoutInventingADenial(t *testing.T) {
 	server := httptest.NewServer(asExecution(diagnose.NewControl(diagnose.NewJournal(nil, diagnose.Limits{}), http.NotFoundHandler())))
 	defer server.Close()
 
-	got := diagnoseAs(t, server.URL, "run-a", map[string]any{"destination": "10.0.0.1", "lookback_seconds": 30})
+	got := diagnoseAs(t, server.URL, runA, map[string]any{"destination": "10.0.0.1", "lookback_seconds": 30})
 	if got.Status != diagnose.StatusNotObserved || len(got.Decisions) != 0 || got.Note == "" {
 		t.Fatalf("result = %+v", got)
 	}
@@ -126,7 +126,7 @@ func TestControlRequiresIdentityAndDelegatesOtherPaths(t *testing.T) {
 	}
 	request, _ := http.NewRequest(http.MethodPost, server.URL+"/mcp/sproozi", nil)
 	request.Header.Set("Origin", "https://evil.example")
-	request.Header.Set("X-Test-Execution", "run-a")
+	request.Header.Set("X-Test-Execution", runA)
 	resp, err = http.DefaultClient.Do(request)
 	if err != nil {
 		t.Fatal(err)

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/harness"
 )
 
@@ -16,7 +17,7 @@ import (
 func TestManagedCodexFilesAreReinstalledFromTheSupervisor(t *testing.T) {
 	home := t.TempDir()
 	agents := filepath.Join(home, "AGENTS.md")
-	skill := filepath.Join(home, "skills", harness.ManagedSkillName, "SKILL.md")
+	skill := managedSkillPath(home)
 	if err := os.MkdirAll(filepath.Dir(skill), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -51,10 +52,11 @@ func TestManagedClaudePluginDeclaresTheReservedNamespace(t *testing.T) {
 	}
 	var manifest struct{ Name string }
 	data, err := os.ReadFile(filepath.Join(dir, ".claude-plugin", "plugin.json"))
-	if err != nil || json.Unmarshal(data, &manifest) != nil || manifest.Name != "sproozi" {
+	if err != nil || json.Unmarshal(data, &manifest) != nil || manifest.Name != api.ControlMCPServer {
 		t.Fatalf("plugin manifest=%s err=%v", data, err)
 	}
-	if data, err = os.ReadFile(filepath.Join(dir, "skills", harness.ManagedSkillName, "SKILL.md")); err != nil || !strings.Contains(string(data), "name: "+harness.ManagedSkillName+"\n") {
+	data, err = os.ReadFile(managedSkillPath(dir))
+	if err != nil || !strings.Contains(string(data), "name: "+harness.ManagedSkillName+"\n") {
 		t.Fatalf("skill=%q err=%v", data, err)
 	}
 }

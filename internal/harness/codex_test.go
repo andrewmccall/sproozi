@@ -8,6 +8,8 @@ import (
 )
 
 const (
+	testCodexName      = "codex"
+	testGatewayURL     = "https://gateway.svc"
 	testDocsCapability = "mcp.docs"
 	testClaudeName     = "claude-code"
 	testOpenCodeName   = "opencode"
@@ -16,7 +18,7 @@ const (
 
 func TestNativeMCPConfiguration(t *testing.T) {
 	for _, tt := range []struct{ harness, filename, expected string }{
-		{"codex", "codex-mcp.toml", "[mcp_servers.\"docs\"]\nurl = \"https://gateway.svc:8443/mcp/docs\"\nrequired = true\n\n[mcp_servers.\"inventory\"]\nurl = \"https://gateway.svc:8443/mcp/inventory\"\nrequired = true\n\n[mcp_servers.\"sproozi\"]\nurl = \"https://gateway.svc:8443/mcp/sproozi\"\nrequired = true\n\n"},
+		{testCodexName, "codex-mcp.toml", "[mcp_servers.\"docs\"]\nurl = \"https://gateway.svc:8443/mcp/docs\"\nrequired = true\n\n[mcp_servers.\"inventory\"]\nurl = \"https://gateway.svc:8443/mcp/inventory\"\nrequired = true\n\n[mcp_servers.\"sproozi\"]\nurl = \"https://gateway.svc:8443/mcp/sproozi\"\nrequired = true\n\n"},
 		{testClaudeName, "claude-mcp.json", "{\"mcpServers\":{\"docs\":{\"type\":\"http\",\"url\":\"https://gateway.svc:8443/mcp/docs\"},\"inventory\":{\"type\":\"http\",\"url\":\"https://gateway.svc:8443/mcp/inventory\"},\"sproozi\":{\"type\":\"http\",\"url\":\"https://gateway.svc:8443/mcp/sproozi\"}}}\n"},
 		{testOpenCodeName, "opencode-mcp.json", "{\"mcp\":{\"docs\":{\"enabled\":true,\"oauth\":false,\"type\":\"remote\",\"url\":\"https://gateway.svc:8443/mcp/docs\"},\"inventory\":{\"enabled\":true,\"oauth\":false,\"type\":\"remote\",\"url\":\"https://gateway.svc:8443/mcp/inventory\"},\"sproozi\":{\"enabled\":true,\"oauth\":false,\"type\":\"remote\",\"url\":\"https://gateway.svc:8443/mcp/sproozi\"}}}\n"},
 		{testHermesName, "hermes-mcp.json", "{\"mcp_servers\":{\"sproozi-mcp-docs\":{\"connect_timeout\":15,\"enabled\":true,\"strict_redirect_headers\":true,\"timeout\":60,\"url\":\"https://gateway.svc:8443/mcp/docs\"},\"sproozi-mcp-inventory\":{\"connect_timeout\":15,\"enabled\":true,\"strict_redirect_headers\":true,\"timeout\":60,\"url\":\"https://gateway.svc:8443/mcp/inventory\"},\"sproozi-mcp-sproozi\":{\"connect_timeout\":15,\"enabled\":true,\"strict_redirect_headers\":true,\"timeout\":60,\"url\":\"https://gateway.svc:8443/mcp/sproozi\"}}}\n"},
@@ -36,13 +38,13 @@ func TestNativeMCPConfiguration(t *testing.T) {
 
 func TestMCPConfigurationRejectsInvalidSelectionsAndConnections(t *testing.T) {
 	for _, tt := range []struct{ selected, endpoint, capability string }{
-		{"unsupported", "https://gateway.svc", testDocsCapability},
-		{"codex", "http://gateway.svc", testDocsCapability},
+		{"unsupported", testGatewayURL, testDocsCapability},
+		{testCodexName, "http://gateway.svc", testDocsCapability},
 		{testClaudeName, "https://user:password@gateway.svc", testDocsCapability},
 		{testOpenCodeName, "https://gateway.svc/path", testDocsCapability},
 		{testOpenCodeName, "https://gateway.svc?query", testDocsCapability},
-		{testClaudeName, "https://gateway.svc", "mcp.bad/name"},
-		{"codex", "https://gateway.svc", "mcp.sproozi"},
+		{testClaudeName, testGatewayURL, "mcp.bad/name"},
+		{testCodexName, testGatewayURL, "mcp.sproozi"},
 	} {
 		if _, err := harness.MCPConfig(tt.selected, []string{tt.capability}, tt.endpoint); err == nil {
 			t.Fatalf("accepted invalid configuration %+v", tt)

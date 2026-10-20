@@ -78,6 +78,7 @@ There's working code and recorded tests, but support varies by workflow:
 | Area | Current state |
 | --- | --- |
 | Kubernetes-based agent jobs | Tested with Codex, Claude Code, OpenCode and Hermes using deterministic providers |
+| Explaining refused access to the agent | Every harness receives Sproozi instructions, a `sproozi-access` skill and a `diagnose` tool for its own recent gateway refusals; tested with installed Codex and Claude Code clients, not yet in a recorded Kind run. See [Sproozi integration](docs/reference/sproozi-integration.md) |
 | Controlled access to Kubernetes and external tools | [Recorded tool-access acceptance](test/acceptance/reports/verified-mcp-demo.md) with a real model, including native Kubernetes reads, configured HTTPS test servers and denied operations |
 | Docker ↔ Kubernetes session movement | [Recorded round trips](test/acceptance/reports/verified-session-mobility.md) with Codex, Claude Code and deterministic providers, including unfinished Git changes |
 | Remote Codex work followed by local resume | [Recorded remote-work acceptance](test/acceptance/reports/verified-portable-workflows.md) with deterministic models, actual package checks and isolated Kubernetes reads/denials |

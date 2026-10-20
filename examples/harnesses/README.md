@@ -10,7 +10,8 @@ and hyphens in the OpenCode example because its trusted command builds JSON.
 The examples retain the Codex runtime's Pod security, gateway trust and bounded
 writable volumes. They create fresh client state under `/home/agent`, load the
 immutable contract's selected MCP configuration, pass trusted instructions
-separately from request JSON, and replace the shell with the CLI or its narrow completion adapter. Select the
+followed by the [Sproozi integration](../../docs/reference/sproozi-integration.md)
+files separately from request JSON, and replace the shell with the CLI or its narrow completion adapter. Select the
 runtime in `AgentTemplate.spec.runtimeRef`; policy and requested capabilities
 continue to grant authority. CLI permission flags permit local execution inside
 the Pod. They do not grant gateway access.

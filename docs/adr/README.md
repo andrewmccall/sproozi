@@ -79,3 +79,4 @@ client installs with pinned lockfiles and digests for CI and the verifiers.
 | [0022](0022-webhook-hmac-secrets-in-own-namespace.md) | Webhook HMAC Secrets live in their own namespace, away from provider credentials. |
 | [0023](0023-controller-writes-only-in-sproozi-agents.md) | The controller writes sandbox objects only in sproozi-agents; its cluster role keeps reads. |
 | [0024](0024-native-host-platforms-and-cli-releases.md) | Native host security and automated CLI releases with a Homebrew tap. |
+| [0025](0025-managed-harness-integration-and-diagnose.md) | Every harness receives the Sproozi integration, and the gateway explains an execution's own denials. |

@@ -69,18 +69,20 @@ func TestStockCodexParsesGeneratedNativeMCPConnections(t *testing.T) {
 
 const nativeFixtureMCPCapability api.CapabilityKind = "mcp.alpha"
 
+const testGateway = "https://gateway.test"
+
 func TestNativeClientsRendersDeclaredCapabilitiesInStableOrder(t *testing.T) {
-	c, err := NativeClients(NativeCodex, []api.CapabilityKind{"mcp.zeta", api.CapabilityKubernetesRead, nativeFixtureMCPCapability}, "https://gateway.test")
+	c, err := NativeClients(NativeCodex, []api.CapabilityKind{"mcp.zeta", api.CapabilityKubernetesRead, nativeFixtureMCPCapability}, testGateway)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c == nil || !c.Kubernetes || c.MCPGateway != "https://gateway.test" || strings.Join(c.MCPServers, ",") != "alpha,zeta" {
+	if c == nil || !c.Kubernetes || c.MCPGateway != testGateway || strings.Join(c.MCPServers, ",") != "alpha,zeta" {
 		t.Fatalf("clients=%+v", c)
 	}
-	if _, err = NativeClients(NativeClaude, []api.CapabilityKind{nativeFixtureMCPCapability}, "https://gateway.test"); err == nil {
+	if _, err = NativeClients(NativeClaude, []api.CapabilityKind{nativeFixtureMCPCapability}, testGateway); err == nil {
 		t.Fatal("unsupported Claude MCP admitted")
 	}
-	if _, err = NativeClients(NativeCodex, []api.CapabilityKind{nativeFixtureMCPCapability, nativeFixtureMCPCapability}, "https://gateway.test"); err == nil {
+	if _, err = NativeClients(NativeCodex, []api.CapabilityKind{nativeFixtureMCPCapability, nativeFixtureMCPCapability}, testGateway); err == nil {
 		t.Fatal("duplicate MCP admitted")
 	}
 	if _, err = NativeClients(NativeCodex, nil, ""); err == nil {
@@ -92,7 +94,7 @@ func TestNativeClientsRendersDeclaredCapabilitiesInStableOrder(t *testing.T) {
 // without granted capabilities, and the trusted entry follows administrator options.
 func TestNativeClientsAlwaysCarryTheControlConnection(t *testing.T) {
 	for _, kind := range []NativeKind{NativeCodex, NativeClaude} {
-		c, err := NativeClients(kind, nil, "https://gateway.test")
+		c, err := NativeClients(kind, nil, testGateway)
 		if err != nil || c == nil || c.ControlURL() != "https://gateway.test/mcp/sproozi" {
 			t.Fatalf("%s clients=%+v err=%v", kind, c, err)
 		}
@@ -100,7 +102,7 @@ func TestNativeClientsAlwaysCarryTheControlConnection(t *testing.T) {
 	if (*NativeClientConfig)(nil).Validate(NativeCodex) == nil {
 		t.Fatal("native launch without the control connection accepted")
 	}
-	c := &NativeClientConfig{MCPGateway: "https://gateway.test", MCPServers: []string{fixtureMCPName}}
+	c := &NativeClientConfig{MCPGateway: testGateway, MCPServers: []string{fixtureMCPName}}
 	if got := strings.Join(c.CodexOptions(), " "); got != `mcp_servers.docs.url="https://gateway.test/mcp/docs" mcp_servers.docs.required=true `+
 		`mcp_servers.sproozi.url="https://gateway.test/mcp/sproozi" mcp_servers.sproozi.required=true` {
 		t.Fatalf("codex options=%s", got)
@@ -108,8 +110,8 @@ func TestNativeClientsAlwaysCarryTheControlConnection(t *testing.T) {
 	var claude struct {
 		MCPServers map[string]struct{ Type, URL string } `json:"mcpServers"`
 	}
-	if err := json.Unmarshal([]byte((&NativeClientConfig{MCPGateway: "https://gateway.test"}).ClaudeMCPConfig()), &claude); err != nil ||
-		len(claude.MCPServers) != 1 || claude.MCPServers["sproozi"].Type != "http" || claude.MCPServers["sproozi"].URL != "https://gateway.test/mcp/sproozi" {
+	if err := json.Unmarshal([]byte((&NativeClientConfig{MCPGateway: testGateway}).ClaudeMCPConfig()), &claude); err != nil ||
+		len(claude.MCPServers) != 1 || claude.MCPServers["sproozi"].Type != httpTransport || claude.MCPServers["sproozi"].URL != "https://gateway.test/mcp/sproozi" {
 		t.Fatalf("claude MCP config=%+v err=%v", claude, err)
 	}
 }

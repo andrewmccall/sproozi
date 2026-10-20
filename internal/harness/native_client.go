@@ -79,7 +79,7 @@ func (c *NativeClientConfig) CodexOptions() []string {
 // control connection only, since named MCP servers remain Codex-only.
 func (c *NativeClientConfig) ClaudeMCPConfig() string {
 	data, _ := json.Marshal(map[string]any{"mcpServers": map[string]any{
-		api.ControlMCPServer: map[string]string{"type": "http", "url": c.ControlURL()}}})
+		api.ControlMCPServer: map[string]string{connectionType: httpTransport, connectionURL: c.ControlURL()}}})
 	return string(data)
 }
 
