@@ -154,7 +154,10 @@ jobs:
           (cd dist && sha256sum "sproozi_${version}_source.tar.gz" >> checksums.txt)
           if [ -f .local/release-images/images.json ]; then
             cp .local/release-images/images.json dist/images.json
-            (cd dist && sha256sum images.json >> checksums.txt)
+            control=$(python3 -c 'import json; print(json.load(open("dist/images.json"))["images"]["control"]["reference"])')
+            python3 hack/release/kubernetes.py --version "$version" --control-image "$control" \
+              --native-image "$SPROOZI_NATIVE_IMAGE" --output "dist/sproozi_${version}_kubernetes.tar.gz"
+            (cd dist && sha256sum images.json "sproozi_${version}_kubernetes.tar.gz" >> checksums.txt)
           fi
           python3 hack/release/verify.py --version "$version"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

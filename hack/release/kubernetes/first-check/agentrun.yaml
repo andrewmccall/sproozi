@@ -1,0 +1,12 @@
+apiVersion: sproozi.com/v1alpha1
+kind: AgentRun
+metadata:
+  name: first-check
+  namespace: sproozi-system
+spec:
+  templateRef:
+    name: first-check
+  task: Check permitted and denied access from the first agent Pod.
+  eventContext:
+    trigger: manual
+  capabilities: [kubernetes.read]

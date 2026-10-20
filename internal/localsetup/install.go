@@ -76,6 +76,10 @@ const DefaultInstructions = "You are working in a Sproozi-managed workspace at /
 // in installation.json; a repeated or interrupted run converges on the same
 // network, CA, credentials and configuration without duplicating them.
 func Init(ctx context.Context, o Options) (Result, error) {
+	if runtime.GOOS == "windows" {
+		return Result{}, fail("platform", errors.New("automatic local setup is not yet supported on Windows"),
+			"configure the home service manually; see docs/guides/windows.md")
+	}
 	if o.Timeout <= 0 {
 		o.Timeout = 30 * time.Minute
 	}

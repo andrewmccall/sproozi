@@ -19,7 +19,7 @@ def verify(directory, version, native):
         raise ValueError("invalid version")
     targets = json.loads(Path(__file__).with_name("targets.json").read_text())
     expected = {f"sproozi_{version}_{t['os']}_{t['arch']}." + ("zip" if t["os"] == "windows" else "tar.gz") for t in targets}
-    actual = {p.name for p in root.glob("sproozi_*") if p.name.endswith((".tar.gz", ".zip")) and not p.name.endswith("_source.tar.gz")}
+    actual = {p.name for p in root.glob("sproozi_*") if p.name.endswith((".tar.gz", ".zip")) and not p.name.endswith(("_source.tar.gz", "_kubernetes.tar.gz"))}
     if actual != expected:
         raise ValueError(f"release target mismatch: missing {expected - actual}, extra {actual - expected}")
     sums = {}
@@ -32,7 +32,8 @@ def verify(directory, version, native):
     required = expected | {f"sproozi_{version}_source.tar.gz"}
     native_image = ""
     if (root / "images.json").exists():
-        required.add("images.json")
+        # Published images come with their release-matched Kubernetes assets.
+        required |= {"images.json", f"sproozi_{version}_kubernetes.tar.gz"}
         native_image = json.loads((root / "images.json").read_text())["images"]["native"]["reference"]
     for name in required:
         if name not in sums or hashlib.sha256((root / name).read_bytes()).hexdigest() != sums[name]:

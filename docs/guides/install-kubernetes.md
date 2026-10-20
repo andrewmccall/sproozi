@@ -1,7 +1,9 @@
 # Install on Kubernetes and run your first Pod
 
-This guide installs Sproozi from this checkout on an existing cluster, then
-creates an `AgentRun`. Its Pod uses kubectl to list Pods through the gateway,
+This guide installs Sproozi on an existing cluster, then creates an `AgentRun`.
+Install from a release's Kubernetes assets when one is available: it needs no
+image build, no OpenSSL and no cert-manager. To install from a checkout instead,
+skip to [Install from a checkout](#install-from-a-checkout). Its Pod uses kubectl to list Pods through the gateway,
 waits 90 seconds so you can inspect it, and exits. This checks the controller,
 run identity, gateway and completion path without model or GitHub credentials.
 It does not run a model. [Run a model on this cluster](#7-run-a-model-on-this-cluster)
@@ -18,7 +20,84 @@ limits and the controls needed for a longer-lived deployment.
 Read [core concepts](../explanations/core-concepts.md) if you are new to runs,
 runtimes, templates and policies.
 
-## 1. Check the prerequisites and select the cluster
+## Install from release assets
+
+Releases that publish images include `sproozi_VERSION_kubernetes.tar.gz` and
+`images.json`. The archive's manifests reference the release's
+multi-architecture image digests, so cluster nodes pull them directly.
+
+You need an existing Linux cluster with a CNI that enforces NetworkPolicy,
+administrator access, and kubectl. Check the target first:
+
+```sh
+export KUBECONFIG=/absolute/path/to/your/cluster.kubeconfig
+kubectl config current-context
+kubectl get nodes -o wide
+```
+
+Download the archive for your version, check it against `checksums.txt`, and
+extract it. Review `install/install.yaml`, especially cluster-wide RBAC, before
+applying anything.
+
+```sh
+VERSION=0.0.0   # replace with the release version
+curl -fsSLO "https://github.com/andrewmccall/sproozi/releases/download/v$VERSION/sproozi_${VERSION}_kubernetes.tar.gz"
+curl -fsSLO "https://github.com/andrewmccall/sproozi/releases/download/v$VERSION/checksums.txt"
+grep "sproozi_${VERSION}_kubernetes.tar.gz" checksums.txt | shasum -a 256 -c -
+tar -xzf "sproozi_${VERSION}_kubernetes.tar.gz"
+```
+
+Install the CRDs and wait until they are established, then apply one quickstart
+overlay:
+
+```sh
+kubectl apply --server-side --field-manager=sproozi-installer -f sproozi-release/crds.yaml
+kubectl wait --for=condition=Established --timeout=60s \
+  crd/agentruntimes.sproozi.com crd/agentpolicies.sproozi.com \
+  crd/agenttemplates.sproozi.com crd/agentruns.sproozi.com
+kubectl apply --server-side --field-manager=sproozi-installer \
+  -k sproozi-release/quickstart-self-managed-ca
+kubectl rollout status -n sproozi-system deployment/sproozi-certificates
+kubectl rollout status -n sproozi-system deployment/sproozi-gateway --timeout=180s
+kubectl rollout status -n sproozi-system deployment/sproozi-controller-manager
+```
+
+The self-managed overlay deploys a small certificate controller. It creates the
+gateway's private CA and serving certificate in two precreated Secrets and the
+immutable worker trust ConfigMap `sproozi-agents/sproozi-sandbox-trust`. Applying
+the overlay authorises it to write those objects and nothing else. The gateway
+may restart once while it waits for its first certificate. Both quickstarts
+enable only `kubernetes.read` on the gateway.
+
+To use your own certificates, for example from cert-manager or an enterprise
+issuer, apply `sproozi-release/quickstart-external-ca` instead. Before applying,
+create Secret `sproozi-system/sproozi-gateway-tls` with `tls.crt` and `tls.key`,
+and the immutable ConfigMap `sproozi-agents/sproozi-sandbox-trust` with the
+public CA as `ca-bundle.pem`. The certificate must cover
+`sproozi-gateway.sproozi-system.svc`, its `.cluster.local` form and
+`kubernetes.default.svc`. No signer is deployed in this mode.
+
+Run the provider-free first check:
+
+```sh
+kubectl apply -f sproozi-release/first-check/resources.yaml
+kubectl create -f sproozi-release/first-check/agentrun.yaml
+kubectl wait -n sproozi-system agentrun/first-check \
+  --for=jsonpath='{.status.phase}'=Running --timeout=180s
+FIRST_POD="$(kubectl get agentrun first-check -n sproozi-system \
+  -o jsonpath='{.status.identity.sandboxName}')"
+kubectl wait -n sproozi-agents "pod/$FIRST_POD" --for=condition=Ready --timeout=180s
+kubectl logs -n sproozi-agents "$FIRST_POD" -c agent -f
+```
+
+The log lists Sproozi's Pods, then prints `PERMITTED: Pod read succeeded`,
+`DENIED: Secret read is outside the policy` and `DENIED: direct API server path
+is blocked`. The run becomes `Succeeded` and Sproozi removes its Pod, identity
+and NetworkPolicy. Continue with [Maintain gateway certificates](#maintain-gateway-certificates).
+
+## Install from a checkout
+
+### 1. Check the prerequisites and select the cluster
 
 You need:
 
@@ -54,7 +133,7 @@ The commands below install into `sproozi-system`, `sproozi-agents`,
 `sproozi-webhook-state` and `sproozi-webhooks`. Use a cluster without an existing Sproozi installation
 for this walkthrough. Keep the chosen `KUBECONFIG` exported throughout it.
 
-## 2. Build and publish the images
+### 2. Build and publish the images
 
 The controller, gateway and webhook share one image built from the repository's
 root Dockerfile. The first Pod uses the demo tools image, but runs kubectl rather
@@ -95,7 +174,7 @@ The runtime requires a digest-pinned image. The `localhost:5001` image that
 [Getting started](getting-started.md) builds is local to your computer and must
 not be used on remote cluster nodes.
 
-## 3. Create the namespaces and gateway certificate
+### 3. Create the namespaces and gateway certificate
 
 ```sh
 kubectl create namespace sproozi-system --dry-run=client -o yaml | kubectl apply -f -
@@ -274,7 +353,7 @@ AgentRuntimes.
 
 For a persistent installation, arrange certificate renewal before expiry.
 
-### If your images are private
+#### If your images are private
 
 Skip this step if your nodes can already pull both images. Otherwise, sign in
 with a registry credential that can pull them. Replace `ghcr.io` if you use
@@ -300,7 +379,7 @@ The two Secrets let Kubernetes pull images in each namespace. The Pod does not
 mount the registry credential. Add the deployment and runtime references in the
 following steps.
 
-## 4. Install Sproozi with Kubernetes reads enabled
+### 4. Install Sproozi with Kubernetes reads enabled
 
 The base gateway manifest enables model and GitHub modules as well. Those
 modules need provider credentials. Create a local Kustomize overlay that enables
@@ -452,7 +531,7 @@ Secret is needed for this overlay. The install includes the event webhook, but
 this guide submits runs manually and configures no event receiver. It requires
 neither cert-manager nor Prometheus.
 
-## 5. Create the runtime, policy and template
+### 5. Create the runtime, policy and template
 
 The [first-run resources](../../examples/getting-started/resources.yaml) grant
 only Pod reads in `sproozi-system`, with a five-minute execution deadline. Render
@@ -485,7 +564,7 @@ the per-run identity token, kubeconfig, public trust bundle and writable scratch
 volumes. The Pod uses one container named `agent` so the current controller can
 observe its exit code.
 
-## 6. Submit the run and read its output
+### 6. Submit the run and read its output
 
 ```sh
 kubectl create -f examples/getting-started/agentrun.yaml
@@ -915,3 +994,105 @@ kubectl delete -k config/agent-rbac
 
 Keep the certificate files and rendered manifests if you intend to reinstall
 with the same configuration.
+
+## Maintain gateway certificates
+
+### Self-managed CA
+
+The certificate controller renews the gateway's 30-day leaf after two thirds of
+its lifetime. It checks every five minutes. The gateway reloads the renewed
+Secret within about a minute of the kubelet updating it, without restarting.
+Status is on the authority Secret:
+
+```sh
+kubectl get secret -n sproozi-system sproozi-certificate-authority \
+  -o jsonpath='{.metadata.annotations}'
+```
+
+`sproozi.com/leaf-not-after`, `sproozi.com/renew-at`,
+`sproozi.com/trust-configmap` and `sproozi.com/rotation-stage` report the
+current state. `sproozi.com/last-error` explains a refused request. If renewal
+fails, the previous certificate stays in service and the controller log names
+the cause. Renew immediately with:
+
+```sh
+kubectl annotate secret -n sproozi-system sproozi-certificate-authority \
+  sproozi.com/rotation-request=renew --overwrite
+```
+
+The controller's certificate covers the gateway Service and
+`kubernetes.default.svc`. When you enable model, GitHub or MCP modules, add a
+`--dns NAME` argument to the `sproozi-certificates` Deployment for each extra
+authority the gateway inspects, such as `api.openai.com`.
+
+Rotate the CA in four steps. Trust ConfigMaps are immutable, so each step
+creates a new one; existing Pods keep the bundle they started with.
+
+1. Prepare. The controller creates a second authority and the combined bundle
+   `sproozi-sandbox-trust-1-2`. The gateway still serves a leaf from the first
+   authority.
+
+   ```sh
+   kubectl annotate secret -n sproozi-system sproozi-certificate-authority \
+     sproozi.com/rotation-request=prepare --overwrite
+   ```
+
+2. Point every AgentRuntime at the combined bundle, then wait until every Pod
+   started with the old bundle has finished:
+
+   ```sh
+   kubectl patch agentruntime -n sproozi-system RUNTIME --type=merge \
+     -p '{"spec":{"clientConfig":{"trustBundleConfigMap":{"name":"sproozi-sandbox-trust-1-2","key":"ca-bundle.pem"}}}}'
+   kubectl get pods -n sproozi-agents
+   ```
+
+   Profile and task services that verify the gateway with their own trust
+   bundle need the combined bundle too.
+
+3. Switch the gateway to a leaf from the new authority with
+   `sproozi.com/rotation-request=switch`. Both authorities remain trusted. To
+   undo the switch, use `rollback`.
+
+4. Retire the old authority with `sproozi.com/rotation-request=retire`. The
+   controller creates `sproozi-sandbox-trust-2` and destroys the old key. Point
+   the runtimes at the new bundle, and delete the old ConfigMaps once no runtime
+   or Pod uses them.
+
+Use `replace` only for a lost or compromised authority. It trusts only a new
+authority at once, so every running Pod loses trust in the gateway. Cancel
+running work first, and point runtimes at the new bundle afterwards.
+
+### Your own certificates
+
+Renew the certificate before it expires by replacing `tls.crt` and `tls.key` in
+`sproozi-gateway-tls`; the gateway reloads them without restarting. To change
+the issuing CA, create a new immutable trust ConfigMap and follow the same
+switch order: new bundle trusted by all runtimes first, new leaf second, old
+bundle removed last.
+
+## Audit records
+
+The gateway writes one JSON audit record per request to its log. Collect
+`kubectl logs -n sproozi-system deployment/sproozi-gateway` with your cluster's
+log pipeline and keep it for your retention period; Pod logs disappear when the
+Pod is replaced.
+
+## Uninstall a release installation
+
+Delete runs, templates, policies and runtimes first, so the controller removes
+their sandboxes. Then delete the installation with the same overlay you applied:
+
+```sh
+kubectl delete agentruns --all -n sproozi-system
+kubectl delete -k sproozi-release/quickstart-self-managed-ca
+```
+
+Deleting the overlay deletes Sproozi's namespaces, including the certificate
+Secrets and the CA key. It leaves the CRDs and their custom resources. Deleting
+`crds.yaml` deletes every Sproozi custom resource and its data in the cluster;
+do that only when you no longer need them:
+
+```sh
+kubectl delete -f sproozi-release/crds.yaml
+```
+

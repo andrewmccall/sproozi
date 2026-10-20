@@ -59,6 +59,9 @@ that can't be estimated and budget cuts, limits ADR 0015's per-account serializa
 unbounded calls, and settles ADR 0015's unknown reservations after a restart
 at their recovery charge, an estimate, once their leases expire.
 
+ADR 0025 extends those pinned clients to the published native image, replacing
+ADR 0024's statement that releases do not pin clients.
+
 | Decision | Topic |
 | --- | --- |
 | [0001](0001-mcp-capabilities-through-shared-gateway.md) | MCP access through the shared gateway. |
@@ -88,3 +91,5 @@ at their recovery charge, an estimate, once their leases expire.
 | [0026](0026-single-gateway-refresh-owner-with-recreate.md) | One gateway replica with a Recreate rollout owns the rotating ChatGPT credential refresh. |
 | [0027](0027-configurable-concurrent-admission.md) | Optional cluster and policy caps replace the single active-run slot; the gateway serves revalidation from a watch cache. |
 | [0028](0028-streamed-model-responses-and-estimated-interrupts.md) | The model gateway streams responses, charges interrupted calls an estimate, refuses detached work, runs bounded calls in parallel and gives model calls their own deadline. |
+| [0025](0025-local-provisioning-and-lifecycle.md) | Local provisioning, per-harness local placements and home-owned certificates. |
+| [0026](0026-kubernetes-release-assets-and-certificates.md) | Kubernetes release assets and a self-managed certificate controller. |

@@ -1,0 +1,15 @@
+# The first check needs no model or GitHub credential: enable only
+# kubernetes.read. Remove this patch after adding provider credentials.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sproozi-gateway
+  namespace: sproozi-system
+spec:
+  template:
+    spec:
+      containers:
+      - name: shared-gateway
+        env:
+        - name: SPROOZI_ENABLED_CAPABILITIES
+          value: kubernetes.read

@@ -84,6 +84,7 @@ type startupConfig struct {
 	host                 string
 	listenerCert         tls.Certificate
 	certificates         map[string]tls.Certificate
+	certFile, keyFile    string
 	profiles             *destination.ProfileStore
 	pricing              *modelgateway.PricingTable
 	openAIKey            string
@@ -306,7 +307,7 @@ func loadStartupConfig() (*startupConfig, error) {
 	}
 	return &startupConfig{
 		enabled: enabled,
-		host:    host, listenerCert: certificate, certificates: certificates,
+		host:    host, listenerCert: certificate, certificates: certificates, certFile: certFile, keyFile: keyFile,
 		profiles: profiles, pricing: pricing, openAIKey: openAIKey, anthropicKey: anthropicKey, modelAuthMode: modelAuthMode,
 		openAIUpstreamURL: openAIUpstreamURL, anthropicUpstreamURL: anthropicUpstreamURL,
 		appID: appID, installationID: installationID, privateKey: privateKey,
@@ -615,8 +616,19 @@ func main() {
 		route.Budgets, route.AuditLogger = budgets, auditLogger
 		dispatcher[authority] = route
 	}
+	serving := proxytransport.NewCertificate(cfg.listenerCert)
+	hosts := []string{host}
+	for name := range cfg.certificates {
+		hosts = append(hosts, name)
+	}
+	reloader := &certificateReloader{certFile: cfg.certFile, keyFile: cfg.keyFile, hosts: hosts, holder: serving}
+	if _, err := reloader.reload(); err != nil {
+		log.Fatal(err)
+	}
+	go reloader.run(context.Background())
 	transport, err := proxytransport.New(proxytransport.Config{
 		Certificates:     cfg.certificates,
+		Serving:          serving,
 		Authenticate:     authenticator.Authenticate,
 		Revalidate:       authenticator.Revalidate,
 		Handler:          dispatcher,
@@ -639,7 +651,7 @@ func main() {
 		log.Fatal(err)
 	}
 	go func() { log.Fatal(newHealthServer().Serve(healthListener)) }()
-	server := proxytransport.NewServer(":8443", proxytransport.NewCertificate(cfg.listenerCert), transport)
+	server := proxytransport.NewServer(":8443", serving, transport)
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGTERM, os.Interrupt)
 	go drainOnSignal(signals, server.Close, drain, func() { os.Exit(0) })

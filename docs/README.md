@@ -10,6 +10,7 @@ terms. The main [README](../README.md) gives the project overview.
 
 | I want to… | Guide | Uses |
 | --- | --- | --- |
+| Run Codex or Claude Code locally in Docker | [Local sessions](guides/local-sessions.md) | CLI and Docker |
 | Try Sproozi on a local Kind cluster | [Getting started](guides/getting-started.md) | Checkout and Make |
 | Install on an existing Kubernetes cluster and run a model | [Install on Kubernetes and run your first Pod](guides/install-kubernetes.md) | Checkout and Make |
 | Run the investigation-to-PR demo step by step | [Manual AgentRun to pull request](guides/manual-pr-demo.md) | Checkout and Make |
@@ -30,6 +31,7 @@ a deployment, check [cluster dependencies](reference/dependencies.md) and
 These guides give prerequisites, steps and checks for specific tasks.
 
 - [Model provider authentication](guides/model-provider-auth.md)
+- [Run Codex or Claude Code locally with Docker](guides/local-sessions.md)
 - [Use Sproozi on Windows](guides/windows.md)
 
 ## Understand the system
@@ -49,7 +51,7 @@ References describe exact fields, commands and supported behaviour.
 | Terminology | [Glossary](../GLOSSARY.md) |
 | Kubernetes task resources | [AgentRuntime](reference/agentruntime.md), [AgentPolicy](reference/agentpolicy.md), [AgentTemplate](reference/agenttemplate.md), [AgentRun](reference/agentrun.md) |
 | Access and credentials | [Permissions and capabilities](reference/permissions-and-capabilities.md), [security hardening](reference/security-hardening.md) |
-| Installation | [Cluster dependencies](reference/dependencies.md), [required secrets and config](reference/required-secrets-and-config.md) |
+| Installation | [Local installation](reference/local-installation.md), [cluster dependencies](reference/dependencies.md), [required secrets and config](reference/required-secrets-and-config.md) |
 | Harnesses | [Harnesses](reference/harnesses.md), [stock runtime examples](../examples/harnesses/README.md), [client compatibility](reference/client-compatibility.md), [input contract and completion](reference/agent-contract.md), [native launch and control](reference/native-control.md) |
 | MCP tools | [Native Kubernetes MCP](reference/kubernetes-mcp.md), [configured remote MCP](reference/configured-mcp.md) |
 | Sessions and remote work | [Session commands](reference/session-commands.md), [Projects and workspace revisions](reference/projects-and-revisions.md) |

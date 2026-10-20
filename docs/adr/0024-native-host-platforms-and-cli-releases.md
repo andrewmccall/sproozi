@@ -2,7 +2,7 @@
 
 Date: 2026-10-18
 
-Status: accepted
+Status: accepted; the client-version statement below is partly replaced by [ADR 0025](0025-local-provisioning-and-lifecycle.md)
 
 ## Context
 
@@ -56,7 +56,8 @@ publishes tested formula updates with its own workflow token. Sproozi does not
 hold a cross-repository tap credential.
 
 Agent packages continue to use upstream defaults. Product versions do not pin
-agent clients. A resolved runtime image identity remains part of execution
+agent clients. (ADR 0025 replaces this for the published native image, which
+installs the clients locked in `hack/clients` at the release commit.) A resolved runtime image identity remains part of execution
 identity, as required by the existing placement design.
 
 ## Alternatives and tradeoffs
