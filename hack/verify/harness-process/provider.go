@@ -49,13 +49,9 @@ func event(w io.Writer, name string, data any) {
 }
 
 func (f *fixture) anthropic(w http.ResponseWriter, request map[string]any) {
-	name := f.toolName(request)
+	name, input := f.toolCall(request)
 	messageID := fmt.Sprintf("msg_fixture_%d", time.Now().UnixNano())
 	toolID := fmt.Sprintf("toolu_fixture_%d", time.Now().UnixNano())
-	input := map[string]any{}
-	if name == "ToolSearch" {
-		input = map[string]any{"query": "select:mcp__fixture__verify", "max_results": 1}
-	}
 	encodedInput, _ := json.Marshal(input)
 	if request["stream"] != true {
 		content := []any{map[string]any{"type": "text", "text": answer}}
@@ -90,12 +86,15 @@ func (f *fixture) openAI(w http.ResponseWriter, request map[string]any) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	response := map[string]any{"id": "resp_fixture", "object": "response", "created_at": time.Now().Unix(), "status": "in_progress", "model": "fixture-model", "output": []any{}}
 	event(w, "", map[string]any{"type": "response.created", "response": response})
-	if name := f.toolName(request); name != "" {
-		item := map[string]any{"id": "fc_fixture", "type": "function_call", "call_id": "call_fixture", "name": name, "arguments": "", "status": "in_progress"}
+	if name, input := f.toolCall(request); name != "" {
+		encoded, _ := json.Marshal(input)
+		arguments := string(encoded)
+		callID := fmt.Sprintf("call_fixture_%d", time.Now().UnixNano())
+		item := map[string]any{"id": "fc_fixture", "type": "function_call", "call_id": callID, "name": name, "arguments": "", "status": "in_progress"}
 		event(w, "", map[string]any{"type": "response.output_item.added", "output_index": 0, "item": item})
-		event(w, "", map[string]any{"type": "response.function_call_arguments.delta", "item_id": "fc_fixture", "output_index": 0, "delta": "{}"})
-		event(w, "", map[string]any{"type": "response.function_call_arguments.done", "item_id": "fc_fixture", "output_index": 0, "arguments": "{}"})
-		item["arguments"] = "{}"
+		event(w, "", map[string]any{"type": "response.function_call_arguments.delta", "item_id": "fc_fixture", "output_index": 0, "delta": arguments})
+		event(w, "", map[string]any{"type": "response.function_call_arguments.done", "item_id": "fc_fixture", "output_index": 0, "arguments": arguments})
+		item["arguments"] = arguments
 		item["status"] = "completed"
 		event(w, "", map[string]any{"type": "response.output_item.done", "output_index": 0, "item": item})
 		response["status"] = "completed"
@@ -121,47 +120,105 @@ func (f *fixture) openAI(w http.ResponseWriter, request map[string]any) {
 	event(w, "", map[string]any{"type": "response.completed", "response": response})
 }
 
-func (f *fixture) toolName(request map[string]any) string {
+// toolCall scripts the next model turn: the success scenario calls the
+// fixture verify tool; the diagnose scenario fetches a destination the gateway
+// refuses, then asks the sproozi control connection why.
+func (f *fixture) toolCall(request map[string]any) (string, map[string]any) {
 	if !f.tool {
-		return ""
+		return "", nil
 	}
-	if toolResult(request) {
+	results := toolResults(request)
+	if f.scenario == diagnoseScenario {
+		return f.diagnoseCall(request, results)
+	}
+	if slices.ContainsFunc(results, func(r string) bool { return strings.Contains(r, answer) }) {
 		f.mu.Lock()
 		f.receivedToolResult = true
 		f.mu.Unlock()
-		return ""
+		return "", nil
 	}
+	if name := matchingTool(request, "fixture", "verify"); name != "" {
+		return name, map[string]any{}
+	}
+	if offeredTool(request, "ToolSearch") != "" {
+		return "ToolSearch", map[string]any{"query": "select:mcp__fixture__verify", "max_results": 1}
+	}
+	return "", nil
+}
+
+func (f *fixture) diagnoseCall(request map[string]any, results []string) (string, map[string]any) {
+	// Any diagnose result ends the turn, so not_observed fails acceptance
+	// instead of looping.
+	for _, r := range results {
+		if plain := strings.ReplaceAll(r, `\`, ""); strings.Contains(plain, `"status":"`) {
+			f.mu.Lock()
+			f.receivedToolResult = true
+			f.diagnosed = strings.Contains(plain, `"status":"denied"`) && strings.Contains(plain, deniedHost)
+			f.mu.Unlock()
+			return "", nil
+		}
+	}
+	if len(results) == 0 {
+		shell := offeredTool(request, "Bash", "bash")
+		if shell == "" {
+			return "", nil
+		}
+		return shell, map[string]any{"description": "Fetch the documentation",
+			"command": `curl -sS --max-time 10 --proxy-cacert "$SSL_CERT_FILE" https://` + deniedHost + `/`}
+	}
+	if name := matchingTool(request, "sproozi", "diagnose"); name != "" {
+		return name, map[string]any{"destination": deniedHost}
+	}
+	if offeredTool(request, "ToolSearch") != "" && len(results) == 1 {
+		return "ToolSearch", map[string]any{"query": "select:mcp__sproozi__diagnose", "max_results": 1}
+	}
+	return "", nil
+}
+
+// offeredTool returns the first offered tool named exactly one of names.
+func offeredTool(request map[string]any, names ...string) string {
 	tools, _ := request["tools"].([]any)
 	for _, value := range tools {
 		tool, _ := value.(map[string]any)
-		name, _ := tool["name"].(string)
-		if strings.Contains(name, "fixture") && strings.Contains(name, "verify") {
+		if name, _ := tool["name"].(string); slices.Contains(names, name) {
 			return name
-		}
-	}
-	for _, value := range tools {
-		tool, _ := value.(map[string]any)
-		if tool["name"] == "ToolSearch" {
-			return "ToolSearch"
 		}
 	}
 	return ""
 }
 
-func toolResult(value any) bool {
+// matchingTool returns the first offered tool whose name contains every part.
+func matchingTool(request map[string]any, parts ...string) string {
+	tools, _ := request["tools"].([]any)
+	for _, value := range tools {
+		tool, _ := value.(map[string]any)
+		name, _ := tool["name"].(string)
+		if !slices.ContainsFunc(parts, func(part string) bool { return !strings.Contains(name, part) }) {
+			return name
+		}
+	}
+	return ""
+}
+
+// toolResults returns each tool result block in the request, JSON encoded.
+func toolResults(value any) []string {
 	switch data := value.(type) {
 	case map[string]any:
 		if data["type"] == "function_call_output" || data["type"] == "tool_result" {
 			encoded, _ := json.Marshal(data)
-			return strings.Contains(string(encoded), answer)
+			return []string{string(encoded)}
 		}
+		var found []string
 		for _, child := range data {
-			if toolResult(child) {
-				return true
-			}
+			found = append(found, toolResults(child)...)
 		}
+		return found
 	case []any:
-		return slices.ContainsFunc(data, toolResult)
+		var found []string
+		for _, child := range data {
+			found = append(found, toolResults(child)...)
+		}
+		return found
 	}
-	return false
+	return nil
 }

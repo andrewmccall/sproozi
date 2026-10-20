@@ -146,7 +146,7 @@ verify-native-session: ## Resume installed stock Codex across checkpoint capture
 	python3 hack/verify/native-session.py --state rollout
 
 .PHONY: verify-harness-process
-verify-harness-process: ## Run installed Claude Code and OpenCode through the TLS gateway with local providers.
+verify-harness-process: ## Run installed Claude Code and OpenCode through the TLS gateway with local providers, including diagnose.
 	go run ./hack/verify/harness-process --output .local/verification/harness-process.json
 
 .PHONY: verify-mcp-kind

@@ -31,6 +31,7 @@ import (
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/audit"
 	"github.com/andrewmccall/sproozi/internal/budget"
+	"github.com/andrewmccall/sproozi/internal/diagnose"
 	mcpbroker "github.com/andrewmccall/sproozi/internal/endpoints/mcp"
 	"github.com/andrewmccall/sproozi/internal/endpoints/model"
 	"github.com/andrewmccall/sproozi/internal/gateway"
@@ -46,6 +47,10 @@ const fixtureName = "fixture"
 const claudeHarness = "claude-code"
 const successScenario = "success"
 const deniedScenario = "denied"
+const diagnoseScenario = "diagnose"
+
+// deniedHost is a destination the fixture gateway does not enable.
+const deniedHost = "docs.example.com"
 
 const answer = "SPROOZI_FIXTURE_COMPLETE"
 const providerKey = "fixture-gateway-provider-key"
@@ -65,6 +70,8 @@ type result struct {
 	UnitsUsed              *int64 `json:"unitsUsed"`
 	ReservedUnits          *int64 `json:"reservedUnits"`
 	ToolUnitsUsed          *int64 `json:"toolUnitsUsed"`
+	JournaledDenial        bool   `json:"journaledDenial"`
+	Diagnosed              bool   `json:"diagnosed"`
 	MissingIdentityDenied  bool   `json:"missingIdentityDenied"`
 	UnknownAuthorityDenied bool   `json:"unknownAuthorityDenied"`
 	Output                 string `json:"output"`
@@ -76,7 +83,9 @@ type fixture struct {
 	requests, tools, sessions int
 	violations                []string
 	tool                      bool
+	scenario                  string
 	receivedToolResult        bool
+	diagnosed                 bool
 }
 
 func main() {
@@ -96,7 +105,7 @@ func main() {
 			modes = append(modes, true)
 		}
 		for _, supervised := range modes {
-			for _, scenario := range []string{successScenario, deniedScenario} {
+			for _, scenario := range []string{successScenario, deniedScenario, diagnoseScenario} {
 				r, err := run(name, scenario, *withTool, supervised)
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
@@ -162,7 +171,7 @@ func run(selected, scenario string, withTool, supervised bool) (result, error) {
 	if err := os.WriteFile(caPath, ca, 0600); err != nil {
 		return out, err
 	}
-	f := &fixture{tool: withTool}
+	f := &fixture{tool: withTool, scenario: scenario}
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter,
 		r *http.Request) {
 		f.model(w,
@@ -177,6 +186,7 @@ func run(selected, scenario string, withTool, supervised bool) (result, error) {
 		}
 	}
 	tracker := budget.NewTrackerWithLedger(ledger)
+	journal := diagnose.NewJournal(audit.NewLogger(io.Discard), diagnose.Limits{})
 	capabilities := []api.CapabilityKind{api.CapabilityModelInference, api.CapabilityKind("mcp.fixture")}
 	runCaps := capabilities
 	if scenario == deniedScenario {
@@ -243,15 +253,15 @@ func run(selected, scenario string, withTool, supervised bool) (result, error) {
 	broker := mcpbroker.NewHandler(mcpbroker.HandlerConfig{Registry: registry,
 		HTTPClient:  mcpUpstream.Client(),
 		Budgets:     tracker,
-		AuditLogger: audit.NewLogger(io.Discard)})
+		AuditLogger: journal})
+	// As in the gateway binaries, the MCP authority route carries no capability:
+	// the broker checks each named server's, and the control connection needs none.
 	routes := gateway.Dispatcher{authority: {Capability: string(api.CapabilityModelInference),
 		Tier:    audit.TierSemantic,
 		Handler: modelHandler,
 		Budgets: tracker},
-		"gateway.fixture:443": {Capability: "mcp.fixture",
-			Tier:    audit.TierProtocol,
-			Budgets: tracker,
-			Handler: http.HandlerFunc(func(w http.ResponseWriter,
+		"gateway.fixture:443": {Tier: audit.TierProtocol,
+			Handler: diagnose.NewControl(journal, http.HandlerFunc(func(w http.ResponseWriter,
 				r *http.Request) {
 				if _,
 					ok := gateway.IdentityFromContext(r.Context()); !ok ||
@@ -265,7 +275,7 @@ func run(selected, scenario string, withTool, supervised bool) (result, error) {
 					return
 				}
 				broker.ServeHTTP(w, r)
-			})}}
+			}))}}
 	transport,
 		err := proxytransport.New(proxytransport.Config{Certificates: map[string]tls.Certificate{"api.openai.com": cert,
 		"api.anthropic.com": cert,
@@ -286,6 +296,7 @@ func run(selected, scenario string, withTool, supervised bool) (result, error) {
 			return nil
 		},
 		AllowedAuthority: routes.Allows,
+		AuditLogger:      journal,
 		Handler:          routes})
 	if err != nil {
 		return out, err
@@ -378,6 +389,7 @@ func run(selected, scenario string, withTool, supervised bool) (result, error) {
 	if process.ProcessState != nil {
 		out.ExitCode = process.ProcessState.ExitCode()
 	}
+	out.JournaledDenial = journaledDenial(journal, identity.Execution.UID)
 	return inspectResult(out, f, ledger, selected, scenario, withTool, processErr)
 }
 
@@ -578,6 +590,7 @@ func inspectResult(out result,
 	out.ModelRequests = f.requests
 	out.ToolCalls = f.tools
 	out.ReceivedToolResult = f.receivedToolResult
+	out.Diagnosed = f.diagnosed
 	out.AuthenticatedSessions = f.sessions
 	violations := append([]string{}, f.violations...)
 	f.mu.Unlock()
@@ -587,25 +600,12 @@ func inspectResult(out result,
 		return out, err
 	}
 	completed, response := completion(selected, out)
-	if scenario == successScenario {
-		out.Passed = processErr == nil && !out.TimedOut && completed && response == answer &&
-			out.AuthenticatedSessions > 0 && successfulUsage(out, withTool) && len(violations) == 0
-	} else {
-		out.Passed = !out.TimedOut &&
-			!completed &&
-			out.ModelRequests == 0 &&
-			(out.UnitsUsed == nil || *out.UnitsUsed == 0) &&
-			(out.ReservedUnits == nil || *out.ReservedUnits == 0) &&
-			out.ToolCalls == 0 && (out.ToolUnitsUsed == nil || *out.ToolUnitsUsed == 0) &&
-			out.AuthenticatedSessions > 0 &&
-			(strings.Contains(out.Output+out.SessionExport,
-				"capability_denied") ||
-				strings.Contains(out.Output+out.SessionExport,
-					"does not request capability model.inference"))
-	}
+	answered := processErr == nil && !out.TimedOut && completed && response == answer &&
+		out.AuthenticatedSessions > 0 && len(violations) == 0
+	out.Passed = accepted(out, scenario, withTool, answered, completed)
 	out.Passed = out.Passed && out.MissingIdentityDenied && out.UnknownAuthorityDenied
 	if out.Mode == "supervised" {
-		if scenario == successScenario {
+		if scenario != deniedScenario {
 			out.Passed = out.Passed && recoveredAnswer(out.Output) == answer
 		} else {
 			out.Passed = out.Passed && out.ExitCode > 0
@@ -620,6 +620,39 @@ func inspectResult(out result,
 				out.Output)
 	}
 	return out, nil
+}
+
+func accepted(out result, scenario string, withTool, answered, completed bool) bool {
+	switch scenario {
+	case diagnoseScenario:
+		// The agent's own request was refused and journaled, and the agent
+		// learned why through the sproozi control connection.
+		return answered && successfulUsage(out, false) && out.ToolCalls == 0 &&
+			out.JournaledDenial && out.Diagnosed
+	case successScenario:
+		return answered && successfulUsage(out, withTool)
+	default:
+		return !out.TimedOut &&
+			!completed &&
+			out.ModelRequests == 0 &&
+			(out.UnitsUsed == nil || *out.UnitsUsed == 0) &&
+			(out.ReservedUnits == nil || *out.ReservedUnits == 0) &&
+			out.ToolCalls == 0 && (out.ToolUnitsUsed == nil || *out.ToolUnitsUsed == 0) &&
+			out.AuthenticatedSessions > 0 &&
+			(strings.Contains(out.Output+out.SessionExport,
+				"capability_denied") ||
+				strings.Contains(out.Output+out.SessionExport,
+					"does not request capability model.inference"))
+	}
+}
+
+func journaledDenial(journal *diagnose.Journal, execution string) bool {
+	for _, entry := range journal.Denials(execution, time.Time{}, time.Now()) {
+		if strings.Contains(entry.Event.Operation, deniedHost) {
+			return true
+		}
+	}
+	return false
 }
 
 func observeAccounting(out result, ledger *budget.MemoryLedger) (result, error) {

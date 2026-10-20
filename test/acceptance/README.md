@@ -63,7 +63,9 @@ Tests must check:
 - The `sproozi` control connection returns only the calling execution's
   denials. A CONNECT to an unenabled destination by an authenticated execution
   is recorded for that execution; an unauthenticated one is not. A failure the
-  gateway never saw is reported as `not_observed`, never as a denial.
+  gateway never saw is reported as `not_observed`, never as a denial. An agent
+  whose own request the gateway refused learns that refusal by calling
+  `diagnose` through the gateway proxy.
 - Every harness launch carries the Sproozi instructions, the `sproozi-access`
   skill and the control connection. Test with the pinned clients: the model
   request must contain all three beside unchanged approved instructions, and
