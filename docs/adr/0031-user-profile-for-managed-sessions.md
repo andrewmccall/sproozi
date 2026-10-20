@@ -10,8 +10,12 @@ PRD](../explanations/future-architecture/managed-harness-configuration-and-trust
 lets users bring their own instructions and skills into managed sessions. The
 PRD proposes global and project layers, import commands and per-execution
 configuration digests. For the current demo the owner chose less: one default
-profile, edited like a home directory, with all Sproozi files under
-`~/.sproozi`.
+profile, edited like a home directory, beside the home configuration.
+
+[ADR 0029](0029-local-provisioning-and-lifecycle.md) had meanwhile added shared
+agent files: instruction text from a local installation's `agents/` directory,
+sent to local Docker launches only. The owner chose one concept, so this
+profile replaces them.
 
 Constraints found in the code:
 
@@ -34,19 +38,25 @@ Constraints found in the code:
 
 ## Decision
 
-**One profile.** `~/.sproozi/profile`, beside `~/.sproozi/config.json`, holds
-an optional `AGENTS.md` and `skills/<name>/SKILL.md` with supporting files.
-The home takes its location from the configuration file's location, never from
-its contents. `sproozi init` creates it. Sproozi never reads `~/.codex` or
-`~/.claude`.
+**One profile.** The `profile` folder beside the home configuration,
+`~/sproozi/profile` in a local installation, holds an optional `AGENTS.md` for
+every harness, optional `codex/AGENTS.md` and `claude/CLAUDE.md` for one
+harness each, and `skills/<name>/SKILL.md` with supporting files. The home
+takes its location from the configuration file's location, never from its
+contents, so there is no `agentsDirectory` setting. `sproozi init --local`
+creates it. Sproozi never reads `~/.codex` or `~/.claude`.
 
 **One set of rules.** `internal/agentprofile` reads the folder or a
 reproducible tar.gz archive with the same validation: regular files only, no
-`sproozi-access` skill, 512 files, 4 MiB, 64 KiB of instructions, and a
+`sproozi-access` skill, 512 files, 4 MiB, 64 KiB per instructions file, and a
 compressed archive of at most 640 KiB so it fits a ConfigMap. Its digest is
-`sha256:` over the archive.
+`sha256:` over the archive. Reading the folder also keeps ADR 0029's ownership
+rule: the folder and each file read must belong to the user and not be
+writable by others, so another local account cannot add instructions.
 
-**Rendering.** Profile instructions follow the Sproozi instructions: in
+**Rendering.** A harness's profile instructions are `AGENTS.md` then its own
+file, under ADR 0029's `# User preferences` heading, which says they never
+override the instructions before them. They follow the Sproozi instructions: in
 `$CODEX_HOME/AGENTS.md` for Codex, in `--append-system-prompt` for Claude Code.
 Profile skills sit beside `sproozi-access` for Codex and form a `profile`
 plugin for Claude Code. Each launch rebuilds them. Approved instructions and
@@ -74,15 +84,28 @@ same archive.
 Sproozi integration; the gateway enforces policy whatever it says. Executors
 need no allowlist.
 
-**`sproozi doctor`** validates the configuration and profile, warns past three
-quarters of the archive limit and fails above it. `run` and `move` refuse a
-profile over the limit.
+**`sproozi doctor`**, the local installation's check from ADR 0029, validates
+the profile, warns past three quarters of the archive limit, fails above it and
+lists entries no harness reads. `run` and `move` refuse a profile over the
+limit.
+
+**The MCP authority is always configured.** The control connection from
+[ADR 0025](0025-managed-harness-integration-and-diagnose.md) needs
+`gateway.mcpAuthority`. `sproozi init --local` writes
+`mcp.sproozi.internal:443`, adds it to an existing configuration that lacks it,
+and the home certificate authority's serving certificate covers it.
 
 **Naming.** "Profile" now means the user's profile. The `session-profile`
 program is a remote executor in documentation, matching `--executor`.
 
 ## Alternatives
 
+- **Keep ADR 0029's shared agent files beside the profile.** Quicker to merge,
+  but two overlapping concepts and two delivery paths for the same text, and
+  the agent files reached neither Kubernetes nor skills.
+- **The profile under `~/.sproozi`.** This change first moved the default
+  configuration there. The local installation's root, `~/sproozi`, was already
+  the default, so the profile follows it instead.
 - **Global and project layers with import commands (the PRD's M2).** Deferred
   by the owner as more than a demo needs.
 - **Several named profiles selected by `--profile`, project or workspace.**
@@ -116,8 +139,12 @@ program is a remote executor in documentation, matching `--executor`.
   retries of the same `run` operation is a conflict.
 - The agent can read its profile but not change the source. As in ADR 0025, it
   can edit its own copies inside the session until the next launch.
-- Default configuration moved from the platform configuration directory to
-  `~/.sproozi/config.json`. Existing users pass `--config` or move the file.
+- A local configuration written before this change with `agentsDirectory` is
+  rejected as an unknown key; remove the key and move files from `agents/`
+  into `profile/`. The shared file moves from `agents/shared/AGENTS.md` to
+  `profile/AGENTS.md`.
+- Shared instructions now change at every launch, including a retried one,
+  where ADR 0029 required a retry to see the same text.
 
 ## Revisit conditions
 
@@ -134,7 +161,7 @@ program is a remote executor in documentation, matching `--executor`.
 
 - Reference: [Profile](../reference/profile.md)
 - Implementation: `internal/agentprofile`, `cmd/native-session/managed.go`,
-  `internal/runtime/docker/managed_engine.go`,
+  `internal/runtime/docker/placement.go`, `internal/localsetup/doctor.go`,
   `internal/runtime/kubernetes/registry/profile.go`,
   `internal/runtime/kubernetes/managed.go`, `internal/session/store.go`,
-  `internal/work/owner.go`, `cmd/sproozi/doctor.go`
+  `internal/work/owner.go`

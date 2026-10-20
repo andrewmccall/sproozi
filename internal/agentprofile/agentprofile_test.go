@@ -3,14 +3,20 @@ package agentprofile_test
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"testing/fstest"
 
 	"github.com/andrewmccall/sproozi/internal/agentprofile"
+	"github.com/andrewmccall/sproozi/internal/harness"
+	"github.com/andrewmccall/sproozi/internal/testutil"
 )
 
-const reviewSkill = "skills/review/SKILL.md"
+const (
+	reviewSkill = "skills/review/SKILL.md"
+	codexAgents = "codex/AGENTS.md"
+)
 
 func skill(name, description string) []byte {
 	return []byte("---\nname: " + name + "\ndescription: " + description + "\n---\nBody\n")
@@ -147,14 +153,90 @@ func TestArchiveRejectsConfigurationOverTheConfigMapLimit(t *testing.T) {
 	}
 }
 
+// privateProfile writes files into a folder private to the test's user, as
+// LoadDirectory requires.
+func privateProfile(t *testing.T, files map[string][]byte) string {
+	t.Helper()
+	dir := filepath.Join(testutil.PrivateDir(t), "profile")
+	if err := testutil.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, data := range files {
+		path := filepath.Join(dir, filepath.FromSlash(name))
+		if err := testutil.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := testutil.WriteFile(path, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+// Each harness receives the shared instructions, then only its own.
+func TestHarnessInstructionsFollowTheSharedInstructions(t *testing.T) {
+	dir := privateProfile(t, map[string][]byte{
+		agentprofile.InstructionsFile: []byte("Shared rule.\n"),
+		codexAgents:                   []byte("Codex rule."),
+		"claude/CLAUDE.md":            []byte("Claude rule."),
+		"claude/settings.json":        []byte("{}"),
+		"codex/CLAUDE.md":             []byte("misplaced"),
+		"notes/todo.md":               []byte("x"),
+		reviewSkill:                   skill("review", "x"),
+	})
+	p, err := agentprofile.LoadDirectory(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := p.InstructionsFor(harness.NativeCodex); got != "Shared rule.\n\nCodex rule." {
+		t.Fatalf("codex = %q", got)
+	}
+	if got := p.InstructionsFor(harness.NativeClaude); got != "Shared rule.\n\nClaude rule." {
+		t.Fatalf("claude = %q", got)
+	}
+	archive, _, err := p.Archive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := agentprofile.FromArchive(archive)
+	if err != nil || restored.InstructionsFor(harness.NativeClaude) != "Shared rule.\n\nClaude rule." {
+		t.Fatalf("restored = %+v, %v", restored, err)
+	}
+	ignored, err := agentprofile.Ignored(dir)
+	if err != nil || strings.Join(ignored, ",") != "claude/settings.json,codex/CLAUDE.md,notes" {
+		t.Fatalf("ignored = %q, %v", ignored, err)
+	}
+	if only, err := agentprofile.Load(fstest.MapFS{codexAgents: {Data: []byte("Codex only.")}}); err != nil ||
+		only.InstructionsFor(harness.NativeCodex) != "Codex only." || only.InstructionsFor(harness.NativeClaude) != "" {
+		t.Fatalf("codex only = %+v, %v", only, err)
+	}
+	if _, err = agentprofile.Load(fstest.MapFS{"claude/CLAUDE.md": {Data: []byte("a\x00b")}}); err == nil {
+		t.Fatal("instructions with a NUL byte accepted")
+	}
+}
+
+// Another local account must not be able to add instructions.
+func TestLoadDirectoryRejectsFilesWritableByOthers(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows expresses ownership with ACLs; privatefs tests cover them")
+	}
+	dir := privateProfile(t, map[string][]byte{codexAgents: []byte("x"), "notes/open.md": []byte("x")})
+	if err := os.Chmod(filepath.Join(dir, "notes", "open.md"), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := agentprofile.LoadDirectory(dir); err != nil {
+		t.Fatalf("an ignored file blocked the profile: %v", err)
+	}
+	if err := os.Chmod(filepath.Join(dir, "codex", "AGENTS.md"), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := agentprofile.LoadDirectory(dir); err == nil || !strings.Contains(err.Error(), "not writable by others") {
+		t.Fatalf("writable file = %v", err)
+	}
+}
+
 func TestLoadDirectoryRejectsSymlinkedFiles(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "skills", "review"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "skills", "review", "SKILL.md"), skill("review", "x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	dir := privateProfile(t, map[string][]byte{reviewSkill: skill("review", "x")})
 	if _, err := agentprofile.LoadDirectory(dir); err != nil {
 		t.Fatal(err)
 	}

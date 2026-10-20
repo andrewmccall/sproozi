@@ -21,6 +21,9 @@ type UsageReservation struct {
 	// RequireExisting is set for initialized placement allocations. Losing the
 	// record must deny subsequent usage rather than recreate an empty balance.
 	RequireExisting bool
+	// Recovery, when set, keeps the reservation as a lease the ledger can
+	// settle if its gateway never does.
+	Recovery *Recovery
 }
 
 // TrustedUsage is usage returned by a trusted provider adapter.
@@ -64,6 +67,21 @@ func (e *ErrExhausted) Error() string {
 	return fmt.Sprintf("budget exhausted: %d units used, limit %d", e.UnitsUsed, e.MaxUnits)
 }
 
+// ErrCostExhausted reports that the cost allowance cannot cover a reservation.
+type ErrCostExhausted struct{ CostMicros, MaxCostMicros int64 }
+
+func (e *ErrCostExhausted) Error() string {
+	return fmt.Sprintf("budget: cost budget exhausted (%d of %d micros used)", e.CostMicros, e.MaxCostMicros)
+}
+
+// IsExhausted reports whether err refused a reservation because the units or
+// cost left in the allowance cannot cover it.
+func IsExhausted(err error) bool {
+	var units *ErrExhausted
+	var cost *ErrCostExhausted
+	return errors.As(err, &units) || errors.As(err, &cost)
+}
+
 // LedgerReservation is an opaque admission held by one request.
 type LedgerReservation struct {
 	mu                      sync.Mutex
@@ -71,6 +89,8 @@ type LedgerReservation struct {
 	units, costMicros       int64
 	maxUnits, maxCostMicros int64
 	settled                 bool
+	// lease names the reservation's durable lease, if it is recoverable.
+	lease string
 }
 
 func (r *LedgerReservation) unbounded() bool {
@@ -91,6 +111,21 @@ type Reservation struct {
 	settleCtx context.Context
 }
 
+// Held returns the units and cost the reservation holds against limited
+// dimensions. Zero means that dimension has no limit.
+func (r *Reservation) Held() (units, costMicros int64) {
+	if r == nil {
+		return 0, 0
+	}
+	if r.ledger.maxUnits > 0 {
+		units = r.ledger.units
+	}
+	if r.ledger.maxCostMicros > 0 {
+		costMicros = r.ledger.costMicros
+	}
+	return units, costMicros
+}
+
 func (r *Reservation) Settle(units, cost int64) error {
 	if r == nil {
 		return fmt.Errorf("budget: nil budget reservation")
@@ -108,13 +143,16 @@ func (r *Reservation) Release() error {
 	return r.tracker.ledger.Release(ctx, r.ledger)
 }
 
-// Forfeit charges all reserved units and cost when upstream consumption cannot
-// be verified. The ledger atomically consumes both bounds and rejects repeats.
+// Forfeit charges the reserved units and cost of each limited dimension when
+// upstream consumption cannot be verified. A dimension with no limit charges
+// nothing: its reservation is only the request's own bound, not consumption.
+// The ledger atomically consumes the bounds and rejects repeats.
 func (r *Reservation) Forfeit() error {
 	if r == nil {
 		return fmt.Errorf("budget: nil budget reservation")
 	}
-	return r.Settle(r.ledger.units, r.ledger.costMicros)
+	units, cost := r.Held()
+	return r.Settle(units, cost)
 }
 
 type Tracker struct {

@@ -1,16 +1,16 @@
 # Use Sproozi on Windows
 
-Install the x86-64 ZIP from [the release](install.md). Run commands in
+Install the x86-64 ZIP as described in [Install the CLI](install.md). Run commands in
 PowerShell or Windows Terminal on Windows 11 or Windows Server 2025. You can submit work to configured remote owners
 without running Docker locally. Local agent sessions require Docker Desktop
-using Linux containers, plus the home configuration in the
-[session mobility guide](session-mobility.md).
+using Linux containers, plus the home configuration described in
+[Move a live session between Docker and Kubernetes](session-mobility.md).
 
 Native Windows support includes private files, process locks, local control,
 Git workspace capture and terminal resize handling. CI tests these host
 behaviours on Windows. A full Docker Desktop session and interactive console
-check remain separate acceptance requirements. The Bash-based Kind demo and
-cluster setup scripts require Linux, macOS or WSL2.
+check remain separate acceptance requirements. The Bash-based investigation-to-PR demo
+and cluster setup scripts require Linux, macOS or WSL2.
 
 ## Create private configuration
 
@@ -20,12 +20,12 @@ Run:
 sproozi init
 ```
 
-This creates `%USERPROFILE%\.sproozi` with private Windows permissions, and the
-`profile` folder inside it, and prints its path. It grants access to your account and SYSTEM. It rejects an existing
+This creates `%APPDATA%\sproozi` with private Windows permissions, writes a
+starter `config.json` there if none exists, and prints the next step. It grants access to your account and SYSTEM. It rejects an existing
 directory that grants access to other ordinary users. It does not change
 permissions on existing files.
 
-Save `config.json`, credentials and TLS keys inside that directory. Files
+Keep `config.json`, credentials and TLS keys inside that directory. Files
 created there inherit its private permissions. Do not copy credentials into a
 shared directory. Follow the session guide for the configuration fields and
 required certificates.

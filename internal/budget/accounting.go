@@ -15,7 +15,7 @@ func validateState(s State) error {
 
 func reserveState(s *State, req UsageReservation) (*LedgerReservation, error) {
 	if req.MaxUnits < 0 || req.MaxCostMicros < 0 || req.Units < 0 || req.CostMicros < 0 {
-		return nil, fmt.Errorf("budget: budget reservation values must not be negative")
+		return nil, fmt.Errorf("budget: reservation values must not be negative")
 	}
 	units, cost := req.Units, req.CostMicros
 	if req.MaxUnits > 0 {
@@ -30,7 +30,7 @@ func reserveState(s *State, req UsageReservation) (*LedgerReservation, error) {
 	if req.MaxCostMicros > 0 {
 		available := req.MaxCostMicros - s.CostMicros - s.ReservedCostMicros
 		if available <= 0 || (cost > 0 && cost > available) {
-			return nil, fmt.Errorf("budget: cost budget exhausted (%d of %d micros used)", s.CostMicros+s.ReservedCostMicros, req.MaxCostMicros)
+			return nil, &ErrCostExhausted{CostMicros: s.CostMicros + s.ReservedCostMicros, MaxCostMicros: req.MaxCostMicros}
 		}
 		if cost == 0 {
 			cost = available
@@ -53,7 +53,7 @@ func reserveState(s *State, req UsageReservation) (*LedgerReservation, error) {
 // an oversized request indefinitely while each attempt charged a small bound.
 func settleState(s *State, r *LedgerReservation, usage TrustedUsage) (exceeded bool, err error) {
 	if r.settled {
-		return false, fmt.Errorf("budget: budget reservation already settled")
+		return false, ErrAlreadySettled
 	}
 	if usage.Units < 0 || usage.CostMicros < 0 {
 		return false, fmt.Errorf("budget: settled usage must not be negative")
@@ -65,8 +65,8 @@ func settleState(s *State, r *LedgerReservation, usage TrustedUsage) (exceeded b
 		usage.CostMicros > math.MaxInt64-s.CostMicros-(s.ReservedCostMicros-r.costMicros) {
 		return false, fmt.Errorf("budget: settled accounting overflows")
 	}
-	units, unitsExceeded := cappedCharge(usage.Units, r.units, r.maxUnits, s.UnitsUsed)
-	cost, costExceeded := cappedCharge(usage.CostMicros, r.costMicros, r.maxCostMicros, s.CostMicros)
+	units, unitsExceeded := cappedCharge(usage.Units, r.units, r.maxUnits, s.UnitsUsed, s.ReservedUnits-r.units)
+	cost, costExceeded := cappedCharge(usage.CostMicros, r.costMicros, r.maxCostMicros, s.CostMicros, s.ReservedCostMicros-r.costMicros)
 	s.ReservedUnits -= r.units
 	s.ReservedCostMicros -= r.costMicros
 	s.UnitsUsed += units
@@ -75,14 +75,20 @@ func settleState(s *State, r *LedgerReservation, usage TrustedUsage) (exceeded b
 }
 
 // cappedCharge returns the amount to record for used against one bounded
-// dimension. Usage within the reservation and the allowance is recorded as is.
-// Usage beyond either is recorded up to the allowance left after earlier
-// settlements, so the account reaches its limit and refuses later requests.
-// The charge is never less than the reservation, which was admitted within
-// the allowance, unless the usage itself is smaller.
-func cappedCharge(used, reserved, allowance, settled int64) (int64, bool) {
-	if allowance <= 0 || (used <= reserved && settled+used <= allowance) {
+// dimension, and whether used exceeded the reservation.
+//
+// Usage within the reservation is recorded as is and never exceeds: the
+// reservation was admitted within the allowance. Usage beyond it is recorded
+// up to the capacity no other call holds:
+//
+//	min(used, max(allowance − settled − otherReserved, reserved))
+//
+// so the account reaches its limit and refuses later requests, while calls
+// still in flight keep their reservations and settled usage never passes the
+// allowance. The charge is never less than the call's own reservation.
+func cappedCharge(used, reserved, allowance, settled, otherReserved int64) (int64, bool) {
+	if allowance <= 0 || used <= reserved {
 		return used, false
 	}
-	return min(used, max(allowance-settled, reserved)), true
+	return min(used, max(allowance-settled-otherReserved, reserved)), true
 }

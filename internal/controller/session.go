@@ -23,11 +23,16 @@ func (r *AgentRunReconciler) resolveSession(ctx context.Context, run *api.AgentR
 		return nil, &ctrl.Result{RequeueAfter: time.Second}, nil
 	}
 	phase, reason := api.AgentRunPhaseFailed, "SessionBindingRejected"
-	if errors.Is(err, registry.ErrExpired) {
+	message := "AgentRun does not match the session registration for managed AgentTemplate " + template.Name
+	switch {
+	case errors.Is(err, registry.ErrExpired):
 		phase, reason = api.AgentRunPhaseTimedOut, "SessionDeadlineExceeded"
-	} else if !errors.Is(err, registry.ErrConflict) && !errors.Is(err, registry.ErrGone) {
+		message = "Execution for this AgentRun passed its deadline"
+	case errors.Is(err, registry.ErrGone):
+		message = "Session registration for this AgentRun no longer exists"
+	case !errors.Is(err, registry.ErrConflict):
 		return nil, nil, err
 	}
-	result, transitionErr := r.transitionPhase(ctx, run, phase, reason, "")
+	result, transitionErr := r.transitionPhase(ctx, run, phase, reason, message)
 	return nil, &result, transitionErr
 }

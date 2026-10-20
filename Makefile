@@ -153,6 +153,14 @@ verify-harness-process: ## Run installed Claude Code and OpenCode through the TL
 verify-mcp-kind: ## Prove configured MCP with stock Codex in an owned Kind cluster; real model session.
 	KIND_NODE_IMAGE='$(KIND_NODE_IMAGE)' bash hack/verify/mcp-kind.sh
 
+.PHONY: verify-local-onboarding
+verify-local-onboarding: ## Prove init --local, both harnesses, profile instructions and renewal on this Docker engine with local providers.
+	python3 hack/verify/local-onboarding.py
+
+.PHONY: verify-kubernetes-release
+verify-kubernetes-release: ## Install the release Kubernetes assets in an owned Kind cluster; prove first check, renewal, rotation and RBAC.
+	KIND_NODE_IMAGE='$(KIND_NODE_IMAGE)' python3 hack/verify/kubernetes-release.py
+
 .PHONY: verify-workflow-fixtures
 verify-workflow-fixtures: ## Run offline Python and shell regressions for fixtures, quickstart, Kind and demo scripts. CI.
 	python3 -m unittest discover -s hack/verify/session-mobility -p '*_test.py'
@@ -160,6 +168,8 @@ verify-workflow-fixtures: ## Run offline Python and shell regressions for fixtur
 	python3 hack/verify/quickstart_test.py
 	bash hack/verify/kind-test.sh
 	bash hack/demo/setup-test.sh
+	python3 hack/demo/render_test.py
+	bash hack/demo/run-test.sh
 
 .PHONY: verify-protocol
 verify-protocol: protocol-tools ## Run the pinned gh/git protocol fixtures; zero matched or skipped tests fail. CI.
@@ -188,8 +198,10 @@ verify-public-tree: ## Check that private local material is absent from the trac
 ##@ Demo
 
 .PHONY: demo-check
-demo-check: demo-setup ## Check local prerequisites for the disposable manual AgentRun demo.
+demo-check: ## Check credentials first, then run demo-setup and check the full demo configuration.
 	@case "$(IMG)" in *:latest|latest) echo "Set IMG to a non-latest local tag, for example controller:sproozi-demo" >&2; exit 1;; esac
+	@CONTAINER_TOOL='$(CONTAINER_TOOL)' KIND='$(KIND)' KUBECTL='$(KUBECTL)' bash hack/demo/check.sh --credentials
+	@$(MAKE) --no-print-directory demo-setup
 	@CONTAINER_TOOL='$(CONTAINER_TOOL)' KIND='$(KIND)' KUBECTL='$(KUBECTL)' bash hack/demo/check.sh
 
 .PHONY: demo-setup
@@ -197,32 +209,16 @@ demo-setup: ## Configure Kind networking and a local pinned stock Codex image wi
 	@CONTAINER_TOOL='$(CONTAINER_TOOL)' bash hack/demo/setup.sh
 
 .PHONY: demo-chatgpt-login
-demo-chatgpt-login: ## Authorize ChatGPT plan usage locally; no credentials enter the sandbox.
-	@bash hack/demo/chatgpt-login.sh
+demo-chatgpt-login: ## Authorize ChatGPT plan usage locally; no credentials enter the sandbox. CHATGPT_REAUTHORIZE=1 forces a fresh sign-in.
+	@bash hack/demo/chatgpt-login.sh $(if $(filter 1,$(CHATGPT_REAUTHORIZE)),--reauthorize)
 
+# Not $(MAKE) in the recipe: that would make `make -n demo` run the script.
+# SPROOZI_DEMO_CHECKED=1: demo-check has just run hack/demo/check.sh.
+DEMO_MAKE := $(MAKE)
 .PHONY: demo
-demo: demo-check ## Build/load, deploy, and start the manual AgentRun demo on Kind.
-	@set -e; \
-	env_file="$${SPROOZI_DEMO_ENV_FILE:-$(CURDIR)/.local/demo.env}"; \
-	if [[ -f "$$env_file" ]]; then set -a; source "$$env_file"; set +a; fi; \
-	cluster='$(KIND_CLUSTER)'; \
-	mkdir -p '$(CURDIR)/.local/demo'; \
-	kubeconfig='$(CURDIR)/.local/demo/'"$$cluster"'.kubeconfig'; \
-	KIND='$(KIND)' KUBECTL='$(KUBECTL)' KIND_NODE_IMAGE='$(KIND_NODE_IMAGE)' bash hack/kind-up.sh "$$cluster" "$$kubeconfig"; \
-	export KUBECONFIG="$$kubeconfig"; \
-	$(MAKE) docker-build IMG='$(IMG)'; \
-	$(CONTAINER_TOOL) pull "$$CODEX_IMAGE"; \
-	$(KIND) load docker-image '$(IMG)' --name "$$cluster"; \
-	CONTAINER_TOOL='$(CONTAINER_TOOL)' KIND='$(KIND)' bash hack/demo/load-image.sh "$$cluster"; \
-	$(MAKE) install; \
-	$(KUBECTL) apply -f examples/sre-demo/namespaces.yaml; \
-	CONTAINER_TOOL='$(CONTAINER_TOOL)' KIND='$(KIND)' KUBECTL='$(KUBECTL)' bash hack/demo/prepare.sh; \
-	$(MAKE) deploy IMG='$(IMG)'; \
-	$(KUBECTL) rollout status deployment/sproozi-controller-manager -n sproozi-system --timeout=180s; \
-	$(KUBECTL) rollout status deployment/sproozi-gateway -n sproozi-system --timeout=180s; \
-	python3 hack/demo/render.py --codex-image "$$CODEX_IMAGE" --repository "$$SPROOZI_DEMO_REPOSITORY" --model-auth "$${MODEL_AUTH_MODE:-api_key}" | $(KUBECTL) apply -f -; \
-	SPROOZI_LIVE_ACCEPT=1 SPROOZI_DEMO_REPO="$$SPROOZI_DEMO_REPOSITORY" SPROOZI_KUBECONFIG="$$kubeconfig" bash hack/verify/live.sh; \
-	echo "Export the isolated context with: export KUBECONFIG=$$kubeconfig"
+demo: demo-check ## Build/load, deploy, and start the manual AgentRun demo on Kind (KIND_CLUSTER, default sproozi-demo).
+	@SPROOZI_DEMO_CHECKED=1 IMG='$(IMG)' MAKE='$(DEMO_MAKE)' CONTAINER_TOOL='$(CONTAINER_TOOL)' KIND='$(KIND)' KUBECTL='$(KUBECTL)' \
+	  KIND_NODE_IMAGE='$(KIND_NODE_IMAGE)' bash hack/demo/run.sh '$(or $(KIND_CLUSTER),sproozi-demo)'
 
 ##@ Build
 
@@ -237,8 +233,13 @@ run: manifests generate fmt vet ## Run a controller from your host.
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
+# `make demo` builds and deploys through these targets. An empty IMG (for
+# example IMG= on the command line) would tag nothing and make deploy write an
+# image reference with no name, so fail instead.
+require-img = [ -n '$(strip $(IMG))' ] || { echo 'IMG is empty; set IMG to an image reference, for example IMG=controller:sproozi-demo' >&2; exit 1; }
 .PHONY: docker-build
 docker-build: ## Build docker image with the manager.
+	@$(require-img)
 	@case '$(SPROOZI_BUILD_CACHE)' in ''|gha) ;; *) echo 'SPROOZI_BUILD_CACHE must be empty or gha' >&2; exit 1 ;; esac
 	$(CONTAINER_TOOL) $(DOCKER_BUILD_MANAGER) -t ${IMG} .
 
@@ -276,23 +277,22 @@ ifndef ignore-not-found
 endif
 
 .PHONY: install
-install: manifests kustomize ## Install CRDs into the K8s cluster specified in ~/.kube/config.
-	@out="$$( "$(KUSTOMIZE)" build config/crd 2>/dev/null || true )"; \
-	if [ -n "$$out" ]; then echo "$$out" | "$(KUBECTL)" apply --server-side --field-manager=sproozi-installer -f -; else echo "No CRDs to install; skipping."; fi
+install: manifests kustomize ## Install CRDs into the cluster selected by KUBECONFIG or the current kubectl context.
+	"$(KUSTOMIZE)" build config/crd | "$(KUBECTL)" apply --server-side --field-manager=sproozi-installer -f -
 
 .PHONY: uninstall
-uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
-	@out="$$( "$(KUSTOMIZE)" build config/crd 2>/dev/null || true )"; \
-	if [ -n "$$out" ]; then echo "$$out" | "$(KUBECTL)" delete --ignore-not-found=$(ignore-not-found) -f -; else echo "No CRDs to delete; skipping."; fi
+uninstall: manifests kustomize ## Uninstall CRDs from the cluster selected by KUBECONFIG or the current kubectl context. Call with ignore-not-found=true to ignore resource not found errors during deletion.
+	"$(KUSTOMIZE)" build config/crd | "$(KUBECTL)" delete --ignore-not-found=$(ignore-not-found) -f -
 
 .PHONY: deploy
-deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
+deploy: manifests kustomize ## Deploy controller to the cluster selected by KUBECONFIG or the current kubectl context.
+	@$(require-img)
 	cd config/manager && "$(KUSTOMIZE)" edit set image controller=${IMG}
 	"$(KUSTOMIZE)" build "$(DEPLOY_KUSTOMIZATION)" | "$(KUBECTL)" apply --server-side --field-manager=sproozi-installer -f -
 	"$(KUBECTL)" apply -k config/agent-rbac
 
 .PHONY: undeploy
-undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
+undeploy: kustomize ## Undeploy controller from the cluster selected by KUBECONFIG or the current kubectl context. Call with ignore-not-found=true to ignore resource not found errors during deletion.
 	"$(KUSTOMIZE)" build config/install | "$(KUBECTL)" delete --ignore-not-found=$(ignore-not-found) -f -
 	"$(KUBECTL)" delete --ignore-not-found=$(ignore-not-found) -k config/agent-rbac
 

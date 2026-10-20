@@ -1,7 +1,7 @@
 # Further execution runtimes
 
 **Status:** future extensions to implemented Kubernetes and controlled local Docker.
-See the [session guide](../../guides/session-mobility.md) for the current narrow
+See [Move a live session between Docker and Kubernetes](../../guides/session-mobility.md) for the current narrow
 Codex and Claude Code foreground workflows and limits.
 
 Docker and Kubernetes have concrete placement adapters under
@@ -22,7 +22,7 @@ boundaries and accepted costs.
 Remote Docker is a later placement option. It needs authenticated engine access,
 independent durable accounting, exact container ownership and the same admission,
 network and storage guarantees. A developer profile must not expose an engine
-socket or general infrastructure credentials to the worker.
+socket or general infrastructure credentials to the sandbox.
 
 Other concrete requirements may justify stronger container isolation, existing
 sandbox providers or virtual machines. Reuse their supported lifecycle APIs when

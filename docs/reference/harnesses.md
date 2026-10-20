@@ -28,7 +28,7 @@ remains an explicit trusted launch setting, as in the [Kubernetes MCP reference]
 For Claude Code, OpenCode and Hermes, contract preparation also writes `instructions.txt`
 from the template's trusted instructions and `request.json` from the run's
 untrusted task and event context. The original `input.json` remains available.
-The examples pass these separately through each client's native input mechanism.
+The examples pass these separately through each harness's native input mechanism.
 Every selected harness also receives `sproozi-instructions.md` and
 `sproozi-access.md`; see [Sproozi integration and diagnose](sproozi-integration.md)
 for where each harness places them.
@@ -51,8 +51,8 @@ Codex and Claude Code replace the launch shell with the stock process. OpenCode
 can exit zero on an API denial and lose terminal JSON stdout events.
 Sproozi therefore supplies `opencode-launch.py` in its immutable contract. This
 small Python 3 adapter starts the stock CLI, forwards termination signals, and
-then reads its native session list/export. It requires fresh session state, one
-root session, and a completed final assistant response for the last user request,
+then reads the harness conversation through OpenCode's session list and
+export. It requires fresh session state, one root session, and a completed final assistant response for the last user request,
 with no native error and a matching terminal `step-finish` reason. A missing,
 malformed or ambiguous result fails the container. It does not interpret the
 answer or decide whether the task was useful. Export inspection is bounded to
@@ -68,7 +68,7 @@ the UID-bound termination-file envelope. It truncates by encoded UTF-8 envelope
 size and marks incomplete text explicitly. Missing or malformed native completion
 fails the container; output text does not determine task quality. The helper
 runs as PID 1, forwards signals to the native process group and reaps children.
-The official image's root/s6 startup is bypassed for bounded non-root workers.
+The official image's root/s6 startup is bypassed in bounded non-root sandboxes.
 The separate persistent coordinator uses stock image startup and native state.
 
 The Hermes runtime example opts into the gateway's native Kubernetes Pod-list
@@ -93,16 +93,21 @@ The native formats follow the official [Claude Code CLI reference](https://code.
 ## Managed interactive sessions
 
 The [session service](../../cmd/sproozi/README.md) preserves a selected stock
-TUI while moving its native conversation and Git workspace from Docker to a
+TUI while moving its harness conversation and Git workspace from Docker to a
 fixed Kubernetes profile and back. Managed launches require an explicit
 immutable `codex` or `claude-code` selector. Both placements, the profile and
-the checkpoint must use the same selected harness. A move cannot switch clients.
+the checkpoint must use the same selected harness. A move cannot switch harnesses.
 OpenCode and Hermes runs can't be moved.
 
-The [remote work and local resume](../guides/portable-workflows.md) workflow supports remote tasks only for managed Codex. Its completion observer requires the
+The workflow in [Run a task remotely, then resume it locally](../guides/portable-workflows.md) supports remote tasks only for managed Codex. Its completion observer requires the
 submitted task text and a new completed turn. It then follows the usual stop,
 finalized usage and checkpoint steps. A later local resume gets fresh
 permissions.
+Managed launches also receive the user's [profile](profile.md): Codex in
+`$CODEX_HOME/AGENTS.md` and `$CODEX_HOME/skills`, and Claude Code as a section
+appended to its system prompt and a `profile` plugin, because its isolated
+settings sources exclude user memory. The profile stays outside the checkpoint
+and never replaces the approved developer instructions.
 Managed Codex MCP connections and placeholder Kubernetes configuration are
 regenerated for each launch; portable history cannot select upstream credentials
 or server registrations. Managed Claude tasks and MCP are not supported.
@@ -113,7 +118,10 @@ or server registrations. Managed Claude tasks and MCP are not supported.
 | `claude-code` | One same-UUID primary project transcript | Fresh prompt/tool/Stop hooks plus a settled transcript with paired foreground Bash tools |
 
 The supervisor owns the PTY across attachment disconnects. It uses the installed
-client without an exact-version check. The selected state and workspace are
+client without an exact-version check. The
+[recorded round trips](../../test/acceptance/reports/verified-session-mobility.md)
+used Codex 0.161.0 and Claude Code 2.1.27; movement hasn't been re-recorded with
+the currently pinned Codex 0.163.0 and Claude Code 2.1.302. The selected state and workspace are
 published together under `/workspace/session`; personal homes, caches, provider
 credentials and previous launch settings are excluded. Every visit supplies
 fresh trusted configuration, gateway access and the same approved instructions.
@@ -131,7 +139,7 @@ record finalized usage or prove that the container stopped. Forced
 cancellation revokes first. See [ADR
 0011](../adr/0011-native-session-compatibility-and-completion.md).
 
-The managed Codex launch uses `--sandbox danger-full-access` to run tools within the outer container boundary. The restricted worker
+The managed Codex launch uses `--sandbox danger-full-access` to run tools within the outer container boundary. The restricted sandbox
 kernel does not support the inner bubblewrap sandbox. Claude uses fixed `bypassPermissions` and foreground Bash. Both
 rely on the outer non-root, read-only, capability-restricted container and
 enforced gateway network boundary. Portable history cannot select these settings.
@@ -149,7 +157,12 @@ Codex, Hermes and the OpenCode example use the existing OpenAI Responses route.
 OpenCode uses a configured bundled OpenAI SDK provider rather than an external
 execution server. OpenAI API-key or ChatGPT authentication remains administrator
 configuration. ChatGPT compatibility is established for the recorded Codex
-path; it has not been established for OpenCode.
+path; it has not been established for OpenCode. With an API key the gateway
+accepts `GET /v1/models`, `POST /v1/responses` (JSON or SSE) and
+`POST /v1/chat/completions` (JSON only; a streaming request gets a 403 with
+code `streaming_not_supported`). ChatGPT mode accepts only `GET /v1/models` and
+`POST /v1/responses` with `store:false` and `stream:true`. See
+[protocol and budgets](../guides/model-provider-auth.md#protocol-and-budgets).
 
 Claude Code uses Anthropic's native Messages API through the reserved
 `api.anthropic.com:443` route and `model.inference` grant. Set `ANTHROPIC_API_KEY`
@@ -168,23 +181,37 @@ weaker access to the provider. Workload provider credentials and account headers
 do not select the account; the gateway replaces them and refuses redirects.
 
 Messages supports `POST /v1/messages`, optionally with `?beta=true`, JSON and
-buffered SSE. Successful SSE must include a valid start, cumulative usage and
-terminal message stop before any response reaches the client. Tool-use stop
+SSE. The gateway streams SSE to the client as it arrives and settles the call
+from the usage in `message_start` and `message_delta` once `message_stop`
+arrives. Tool-use stop
 reasons complete one model response; the stock CLI continues its own loop.
 Token counts include ordinary input, cache reads, cache writes and output. Both
 provider routes share the same run's `model.inference` account.
 
-Anthropic calls reserve all remaining configured token and monetary capacity.
-This serializes capped calls within a run, because `max_tokens` limits output
-rather than total input and output. Ambiguous provider consumption forfeits
-reserved tokens and dollars. Successful provider usage settles the actual
-consumption; known rejected provider responses release the reservation.
-OpenAI's output-bound admission can underestimate total usage. Cost-bounded
+A self-contained Anthropic call makes a
+[bounded reservation](../../GLOSSARY.md#bounded-reservation) from its request
+bytes and `max_tokens`, so Claude Code's calls within a run can proceed in
+parallel while their reservations fit. A call that enables a provider-run tool
+or references input its bytes don't contain reserves all remaining capacity and
+runs alone, as does every Codex and ChatGPT-mode call, which carry no output
+bound. A call interrupted after the provider received the whole request, such
+as by Esc, is charged an estimate, even before the response headers arrive;
+see [calls that aren't charged](../guides/model-provider-auth.md#calls-that-arent-charged)
+for the free cases. See
+[interrupted calls](../guides/model-provider-auth.md#interrupted-calls). The
+whole reservation is charged when no estimate is possible, or at a budget cut;
+see [unverifiable calls](../guides/model-provider-auth.md#unverifiable-calls).
+Successful provider usage settles the actual consumption; known rejected
+provider responses release the reservation. On both routes, a request with
+`background` other than omitted, `null` or `false`, or `n` or `best_of` other
+than omitted, `null` or 1, is refused with a 400 before inference, because the provider would do work the gateway can't
+see or bound; see
+[protocol and budgets](../guides/model-provider-auth.md#protocol-and-budgets). Cost-bounded
 API-key inference now requires an exact positive input/cached/output price row
 before provider work and selects `service_tier: default`, refusing explicit
 nondefault tiers. Workload account/project selector headers are removed in both
 OpenAI authentication modes. The API-key route still lacks a complete billable-field
-allowlist and pricing for all hosted/non-token work. Native client-executed tool
+allowlist and pricing for all hosted/non-token work. Harness-executed tool
 declarations are preserved. Neither route provides a hard provider-spending
 guarantee. See [model admission](../guides/model-provider-auth.md#protocol-and-budgets).
 
@@ -192,8 +219,9 @@ For a monetary cap, configure an exact model row in administrator pricing with
 positive input, cached input and output rates. Cache creation also requires
 `cacheWrite5mMicrosPerMillionTokens` or `cacheWrite1hMicrosPerMillionTokens` for
 any consumed category. Rates are microdollars per million tokens. Missing model
-pricing denies Anthropic requests before inference; missing consumed-category
-rates forfeit the reservation and withhold output. Explicit one-hour cache
+pricing denies Anthropic and OpenAI requests before inference, with a 403 and
+nothing charged; a consumed category without a rate charges the whole
+reservation, after the output has reached the client. Explicit one-hour cache
 requests, hosted billable tools, nonstandard service tiers, `context-1m`
 long-context betas in `anthropic-beta` and other unpriced extras are denied
 under a monetary cap. The pricing table has no long-context premium rate.

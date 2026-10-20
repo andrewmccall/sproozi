@@ -10,14 +10,18 @@ enforces policy whatever the profile says.
 
 ## Location and layout
 
-The profile is the `profile` folder beside the configuration file, so with the
-defaults it is `~/.sproozi/profile`. `sproozi init` creates it.
+The profile is the `profile` folder beside the configuration file. In a
+[local installation](local-installation.md) that is `~/sproozi/profile`, and
+`sproozi init --local` creates its folders. For another configuration, create
+the folder beside its `config.json`. A missing folder is an empty profile.
 
 ```text
-~/.sproozi/
+~/sproozi/
   config.json
   profile/
-    AGENTS.md                 optional instructions for every session
+    AGENTS.md                 optional instructions for every harness
+    codex/AGENTS.md           optional instructions for Codex only
+    claude/CLAUDE.md          optional instructions for Claude Code only
     skills/
       code-review/
         SKILL.md              required; the skill's name and description
@@ -35,7 +39,7 @@ description: Review a change for correctness and missing tests.
 Instructions the agent reads when it uses the skill.
 ```
 
-Other files in the folder are ignored.
+Other files in the folder are ignored; `sproozi doctor` lists them.
 
 ## Rules and limits
 
@@ -43,21 +47,31 @@ Other files in the folder are ignored.
 | --- | --- |
 | Skill folder name | 1–63 lowercase letters, digits or hyphens, starting with a letter or digit |
 | Reserved skill name | `sproozi-access` |
-| `AGENTS.md` | UTF-8, at most 64 KiB |
+| Each instructions file | UTF-8 without NUL bytes, at most 64 KiB |
+| Ownership | The folder and every file read must be yours and not writable by group or others; on Windows, private to your account |
 | Files | At most 512, regular files only; no symlinks |
 | Total size | At most 4 MiB |
-| Compressed archive for Kubernetes | At most 640 KiB |
+| Compressed archive | At most 640 KiB |
 
-An invalid or oversized profile stops the session from launching. Run
-`sproozi doctor` to check it first; it warns when the archive passes three
-quarters of the limit.
+An invalid or oversized profile stops the session from launching. In a local
+installation, run `sproozi doctor` to check it first; it warns when the archive
+passes three quarters of the limit.
 
 ## What each harness receives
+
+A harness's instructions are `AGENTS.md`, then its own file, under a
+`# User preferences` heading that says they never override the instructions
+before them.
 
 | Harness | Instructions | Skills |
 | --- | --- | --- |
 | Codex | `$CODEX_HOME/AGENTS.md`, after the Sproozi instructions | `$CODEX_HOME/skills/<name>`, beside `sproozi-access` |
 | Claude Code | `--append-system-prompt`, after the Sproozi instructions | Plugin `profile`, listed as `profile:<name>` |
+
+Claude Code runs with every settings source disabled, so that hooks, plugins
+and personal settings cannot change its managed launch, and in that mode it
+reads no user memory file. Its instructions therefore go into the system
+prompt.
 
 Repository `AGENTS.md` files follow the profile instructions. Each launch
 rebuilds the skills, so a skill you delete is gone at the next launch.
@@ -105,5 +119,5 @@ session still names.
   `move` refuse it.
 - Ordinary AgentRuns do not receive the profile.
 
-[ADR 0026](../adr/0026-user-profile-for-managed-sessions.md) records the
+[ADR 0031](../adr/0031-user-profile-for-managed-sessions.md) records the
 design and its tradeoffs.

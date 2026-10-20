@@ -2,10 +2,10 @@
 
 `session-profile` serves one administrator-approved Kubernetes placement over
 authenticated TLS. The developer receives its fixed HTTPS URL, CA certificate
-and principal token file. Kubernetes credentials remain with the remote executor.
-See the [session mobility guide](../../docs/guides/session-mobility.md) for the
-local/remote command sequence. Both selected clients have passed production
-Docker-to-Kubernetes-to-Docker round trips through this executor. Codex's extended
+and [home principal token](../../GLOSSARY.md#home-principal-token) file. Kubernetes credentials remain with the remote executor.
+See [Move a live session between Docker and Kubernetes](../../docs/guides/session-mobility.md) for the
+local/remote command sequence. Both supported harnesses have passed production
+Docker-to-Kubernetes-to-Docker round trips through this profile. Codex's extended
 proof also covers held-turn movement, forced cancellation and denial probes;
 Claude's full round trip establishes foreground Bash, workspace continuity and
 accounting. See the [repeatable fixture setup](../../hack/verify/session-mobility/README.md)
@@ -91,7 +91,7 @@ cluster after the Codex evaluation has stopped.
 
 The [retained-work Kubernetes example](../../examples/portable-workflows/kubernetes/owner.yaml)
 implements these namespace-scoped roles with a dedicated identity, PVC and TLS
-Service. The [deployment guide](../../docs/guides/retained-work-kubernetes.md)
+Service. [Hermes with remote work](../../docs/guides/retained-work-kubernetes.md)
 includes the managed runtime, distinct task/home credentials and Hermes setup.
 
 For a host-run profile, select an administrator-owned kubeconfig through
@@ -116,14 +116,14 @@ neither profile credentials nor Kubernetes API authority.
 
 Create an owned private configuration directory outside all worker workspaces.
 Use mode `0700` for directories and `0600` for files, including the token, TLS key
-and kubeconfig. Generate the principal token directly into a protected file:
+and kubeconfig. Generate the home principal token directly into a protected file:
 
 ```sh
 umask 077
 export SPROOZI_PROFILE_DIR=/absolute/private/profile
 mkdir -p "$SPROOZI_PROFILE_DIR"
 chmod 700 "$SPROOZI_PROFILE_DIR"
-openssl rand -hex 32 > "$SPROOZI_PROFILE_DIR/profile-token"
+openssl rand -hex 32 > "$SPROOZI_PROFILE_DIR/home-principal-token"
 ```
 
 Issue a TLS server certificate covering the host/IP in the developer's configured
@@ -145,9 +145,9 @@ unbounded here. A bounded positive cost requires corresponding gateway pricing.
   "listen": "127.0.0.1:18444",
   "certificateFile": "/absolute/private/profile/server.crt",
   "keyFile": "/absolute/private/profile/server.key",
-  "tokenFile": "/absolute/private/profile/profile-token",
+  "tokenFile": "/absolute/private/profile/home-principal-token",
   "principal": "developer",
-  "placementName": "remote",
+  "placementName": "engineering",
   "namespace": "sproozi-system",
   "templateName": "mobility-native",
   "directory": "/absolute/private/profile/state",
@@ -217,7 +217,7 @@ through the home journal. See the guide's
 ## Retained remote work
 
 To accept new Codex tasks independently of the home daemon, add `workTokenFile`
-and `repositories` to the configuration. The task token must be distinct from
+and `repositories` to the configuration. The work token must be distinct from
 `tokenFile`, at least 32 characters, and stored privately. Repository entries
 select either an administrator-owned absolute stopped `snapshot` path or an
 approved GitHub `url` with an optional `ref`. URL fetching uses the worker's
@@ -226,12 +226,12 @@ credential configuration.
 
 `/work/mcp` exposes `sproozi_run`, `sproozi_status`, `sproozi_cancel` and
 `sproozi_sessions` to Hermes. Fixed JSON routes also support recovery. The home principal additionally permits checkpoint export and the
-exclusive one-way claim; the task token cannot claim ownership. TLS and bearer
+exclusive one-way claim; the work token cannot claim ownership. TLS and bearer
 validation happen before request decoding.
 
 The protected `directory/work` retains original request/execution identities,
 source receipts, bounded native/Git checkpoints and untrusted final text. Run one
-owner with durable storage. Restart with the same principal and directory;
+remote executor per state directory, with durable storage. Restart with the same principal and directory;
 changing principals cannot reinterpret retained records. A lost preparation or
 stop reply requires recovery of that exact allocation. Missing stop/accounting
 evidence blocks export, and changing a request's intent on replay is rejected.

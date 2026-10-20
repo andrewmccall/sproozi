@@ -26,8 +26,8 @@ with stateless JSON responses. It keeps no shared MCP sessions and provides no
 server-initiated requests or resumable SSE stream. GET and DELETE return 405.
 Browser Origin headers are rejected. The trusted proxy binds CONNECT, SNI and
 Host to the Kubernetes authority and revalidates the run and policy on requests
-and during open sessions. Tool work retains the original HTTP context so
-revocation and session deadlines cancel in-flight upstream calls, including
+and during open inspected connections. Tool work retains the original HTTP
+context so revocation and connection deadlines cancel in-flight upstream calls, including
 older MCP protocol clients.
 
 MCP request bodies are limited to 64 KiB and Pod responses to 8 MiB. Namespace
@@ -52,7 +52,7 @@ codex exec \
   ...
 ```
 
-The [manual demo](../guides/manual-pr-demo.md) renderer has an opt-in variant:
+The demo renderer used by [Manual AgentRun to pull request](../guides/manual-pr-demo.md) has an opt-in variant:
 
 ```sh
 python3 hack/demo/render.py \

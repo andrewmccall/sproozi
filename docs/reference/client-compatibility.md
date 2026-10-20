@@ -50,12 +50,15 @@ Use the bounded REST `gh api` workflow above for the pinned gh client.
 
 ## Model responses
 
-The model path accepts JSON responses and Responses API SSE. SSE is buffered
-within the gateway's body and time limits until a single successful
-`response.completed` event supplies usage; the budget is settled before any
-events are returned. The client receives the expected protocol, but events
-arrive only after completion. Truncated, failed or ambiguous streams fail
-closed. Chat Completions streaming and WebSocket upgrades are unsupported.
+The model path accepts JSON responses and Responses API SSE. The gateway
+streams SSE events to the client as they arrive, and settles the budget from
+the usage in the terminal `response.completed`, `response.incomplete` or
+`response.failed` event. A stream that is cancelled, truncated or ends without
+usage is charged an estimate; see
+[interrupted calls](../guides/model-provider-auth.md#interrupted-calls). Each
+call may stream until the
+[model call deadline](../../GLOSSARY.md#model-call-deadline), 20 minutes by
+default. Chat Completions streaming and WebSocket upgrades are unsupported.
 Responses token accounting uses the provider's `input_tokens`, `output_tokens`
 and `input_tokens_details.cached_tokens` fields, as documented in the [Responses
 API](https://developers.openai.com/api/reference/cli/resources/responses/methods/retrieve)
@@ -73,7 +76,7 @@ OpenCode and Hermes. Claude Code uses the reserved Anthropic Messages model
 route; OpenCode
 uses the existing OpenAI route with completion normalization for its native
 session result. The [harness reference](harnesses.md) describes launch settings,
-provider configuration and managed-session compatibility. Anthropic Messages streaming is buffered and usage-checked
-before delivery, like the OpenAI Responses path. Bedrock, Vertex, Claude
+provider configuration and managed-session compatibility. Anthropic Messages streaming is relayed as it
+arrives and settled from its reported usage, like the OpenAI Responses path. Bedrock, Vertex, Claude
 subscription auth, and Claude Code/OpenCode persistent services and managed
 loops are outside the supported configuration.

@@ -9,14 +9,22 @@
 # Inputs: KIND_NODE_IMAGE (required), SPROOZI_CNI_MANIFEST and
 # SPROOZI_CNI_SELECTOR (required unless --no-cni), SPROOZI_CNI_TIMEOUT, and
 # optional KIND and KUBECTL binaries. Sourcing callers own cleanup: kind_up
-# refuses an existing cluster, then sets kind_cluster_created=1 just before
-# creating it, and exports KUBECONFIG.
+# refuses an existing cluster, sets kind_cluster_created=1 only after
+# `kind create cluster` succeeds, and exports KUBECONFIG. A create that fails,
+# for example because another run took the name first, leaves the flag at 0 so
+# the caller never deletes a cluster it did not create. The existence check is
+# not atomic; callers that may run concurrently with the same name also hold a
+# per-name lock (hack/demo/run.sh does).
 kind_cluster_created=0
 
 kind_up() {
   local cluster="$1" kubeconfig="$2" cni=1 timeout="${SPROOZI_CNI_TIMEOUT:-180s}"
   local kind="${KIND:-kind}" kubectl="${KUBECTL:-kubectl}" root
   [[ "${3:-}" != --no-cni ]] || cni=0
+  # Kind turns an empty name into its default cluster, "kind", whose context
+  # then never matches "kind-$cluster" and is left running.
+  [[ -n "$cluster" ]] || { echo 'Supply a non-empty Kind cluster name' >&2; return 1; }
+  [[ -n "$kubeconfig" ]] || { echo 'Supply a kubeconfig path' >&2; return 1; }
   : "${KIND_NODE_IMAGE:?KIND_NODE_IMAGE must be set}"
   if (( cni )); then
     if [[ -z "${SPROOZI_CNI_MANIFEST:-}" || ! -f "$SPROOZI_CNI_MANIFEST" ]]; then
@@ -30,9 +38,9 @@ kind_up() {
     return 1
   fi
   root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-  kind_cluster_created=1
   "$kind" create cluster --name "$cluster" --config "$root/hack/kind-cluster.yaml" \
-    --image "$KIND_NODE_IMAGE" --kubeconfig "$kubeconfig"
+    --image "$KIND_NODE_IMAGE" --kubeconfig "$kubeconfig" || return
+  kind_cluster_created=1
   chmod 600 "$kubeconfig"
   export KUBECONFIG="$kubeconfig"
   "$kubectl" config use-context "kind-$cluster" >/dev/null

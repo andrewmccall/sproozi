@@ -41,13 +41,24 @@ func (bt *Tracker) InitializedMeter(key string, limits sprooziv1alpha1.EndpointB
 // Reserve holds capacity for one request. ctx bounds the reservation itself;
 // the returned Reservation settles under ctx's values but not its cancellation.
 func (m *Meter) Reserve(ctx context.Context, units, costMicros int64) (*Reservation, error) {
+	return m.reserve(ctx, units, costMicros, nil)
+}
+
+// reserve holds capacity under a lease, so the ledger can recover it if this
+// gateway stops before settling. Without a model call's recovery, the lease
+// charges the reservation in full once the request's deadline has passed.
+// Every reservation therefore has a lease, and a pending reservation without
+// one can only come from a gateway from before leases.
+func (m *Meter) reserve(ctx context.Context, units, costMicros int64, recovery *Recovery) (*Reservation, error) {
 	if m == nil {
 		return nil, nil
 	}
-	r, err := m.tracker.ledger.Reserve(ctx, AccountKey(m.key), UsageReservation{
-		MaxUnits: m.limits.MaxUnits, MaxCostMicros: m.limits.MaxCostMicros,
-		Units: units, CostMicros: costMicros, RequireExisting: m.requireExisting,
-	})
+	request := UsageReservation{MaxUnits: m.limits.MaxUnits, MaxCostMicros: m.limits.MaxCostMicros,
+		Units: units, CostMicros: costMicros, RequireExisting: m.requireExisting, Recovery: recovery}
+	if request.Recovery == nil {
+		request.Recovery = requestRecovery(ctx, units, costMicros, request)
+	}
+	r, err := m.tracker.ledger.Reserve(ctx, AccountKey(m.key), request)
 	if err != nil {
 		return nil, err
 	}

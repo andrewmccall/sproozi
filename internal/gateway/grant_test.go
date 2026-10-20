@@ -130,3 +130,29 @@ func TestGrantCloneDoesNotShareAdministratorSnapshots(t *testing.T) {
 		t.Fatal("transport snapshot retained mutable input aliases")
 	}
 }
+
+func TestSameAuthorityIgnoresOnlyAdmissionFields(t *testing.T) {
+	admitted := dockerGrant()
+	limit := int32(4)
+	tuned := admitted.Clone()
+	tuned.Policy.Generation++
+	tuned.Policy.Spec.MaxActiveRuns = &limit
+	if !admitted.SameAuthority(tuned) {
+		t.Fatal("a maxActiveRuns edit revoked the grant")
+	}
+	for name, edit := range map[string]func(*gateway.ExecutionGrant){
+		"policy":       func(g *gateway.ExecutionGrant) { g.Policy.Spec.Budgets = nil },
+		"template":     func(g *gateway.ExecutionGrant) { g.Template.Spec.Instructions = "other" },
+		"capabilities": func(g *gateway.ExecutionGrant) { g.Capabilities = nil },
+		"policy UID":   func(g *gateway.ExecutionGrant) { g.Policy.UID = "recreated" },
+	} {
+		changed := tuned.Clone()
+		edit(changed)
+		if admitted.SameAuthority(changed) {
+			t.Fatalf("a %s change kept the grant", name)
+		}
+	}
+	if admitted.SameAuthority(nil) {
+		t.Fatal("a missing grant kept the session")
+	}
+}

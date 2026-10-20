@@ -53,12 +53,19 @@ type Rejection struct{ Code Code }
 func (r *Rejection) Error() string { return "session profile: " + string(r.Code) }
 
 // RemoteError preserves a server's explicit status and stable outcome.
+// Transport, when set, is the local client's own failure to reach the server.
+// It stays out of Error, which callers may relay, so only a trusted local
+// caller such as the CLI shows it.
 type RemoteError struct {
-	Code   Code
-	Status int
+	Code      Code
+	Status    int
+	Transport error
 }
 
 func (r *RemoteError) Error() string {
+	if r.Status == 0 {
+		return fmt.Sprintf("session profile: %s (no HTTP response)", r.Code)
+	}
 	return fmt.Sprintf("session profile: %s (HTTP %d)", r.Code, r.Status)
 }
 

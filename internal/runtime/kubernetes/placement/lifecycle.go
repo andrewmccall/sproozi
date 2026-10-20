@@ -729,5 +729,5 @@ func (p *Placement) Attach(ctx context.Context, l session.Launch, i session.Inca
 			}
 		}
 	}()
-	return p.exec.Execute(ctx, pod.Namespace, pod.Name, nativeContainer, []string{nativePath, string(harness.NativeAttach)}, input, output, &boundedOutput{max: 16 << 10})
+	return p.exec.Execute(ctx, pod.Namespace, pod.Name, nativeContainer, []string{nativePath, string(harness.NativeAttach)}, input, output, &boundedOutput{max: 16 << 10, truncate: true})
 }

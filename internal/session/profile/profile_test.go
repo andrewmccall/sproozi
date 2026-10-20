@@ -673,3 +673,20 @@ func TestPrepareCarriesTheNamedProfileArchive(t *testing.T) {
 		t.Fatalf("executor without profiles = %v", err)
 	}
 }
+
+func TestClientConfigUsesConfigurationKeysAndValidatesEach(t *testing.T) {
+	data, err := json.Marshal(ClientConfig{URL: "https://profile.example", TokenFile: "/private/token", MaxCheckpointBytes: 1})
+	if err != nil || string(data) != `{"url":"https://profile.example","tokenFile":"/private/token","maxCheckpointBytes":1}` {
+		t.Fatalf("configuration keys: %s %v", data, err)
+	}
+	err = ClientConfig{URL: "http://profile.example/path", TokenFile: "token", CAFile: "ca.pem", Timeout: -1}.Validate()
+	for _, key := range []string{"url: ", "tokenFile: ", "caFile: ", "maxCheckpointBytes: ", "timeout: "} {
+		if err == nil || !strings.Contains(err.Error(), "\n"+key) && !strings.HasPrefix(err.Error(), key) {
+			t.Errorf("validation omits %s: %v", key, err)
+		}
+	}
+	if err = (ClientConfig{URL: "https://profile.example:8443/", TokenFile: filepath.Join(t.TempDir(), "token"),
+		MaxCheckpointBytes: testMax}).Validate(); err != nil {
+		t.Fatalf("valid connection rejected: %v", err)
+	}
+}

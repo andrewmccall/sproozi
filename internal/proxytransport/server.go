@@ -8,7 +8,8 @@ import (
 
 // NewServer applies the common outer TLS, HTTP/1 and parsing limits. The caller
 // must wrap its raw listener with Gateway.LimitListener before serving TLS.
-func NewServer(address string, certificate tls.Certificate, handler http.Handler) *http.Server {
+// Certificate replacements apply to new connections.
+func NewServer(address string, certificate *Certificate, handler http.Handler) *http.Server {
 	return &http.Server{
 		Addr:              address,
 		Handler:           handler,
@@ -20,8 +21,8 @@ func NewServer(address string, certificate tls.Certificate, handler http.Handler
 		// same hijackable transport semantics across clients.
 		TLSNextProto: map[string]func(*http.Server, *tls.Conn, http.Handler){},
 		TLSConfig: &tls.Config{
-			MinVersion:   tls.VersionTLS13,
-			Certificates: []tls.Certificate{certificate},
+			MinVersion:     tls.VersionTLS13,
+			GetCertificate: certificate.get,
 		},
 	}
 }

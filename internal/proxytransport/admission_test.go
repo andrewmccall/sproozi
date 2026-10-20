@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -136,6 +137,9 @@ func TestExecutionSessionAdmissionIsIndependentAndReleased(t *testing.T) {
 	<-session.serveDone
 	if same.Code != http.StatusTooManyRequests || other.Code != http.StatusInternalServerError {
 		t.Fatalf("execution admission statuses = %d, %d", same.Code, other.Code)
+	}
+	if body := strings.TrimSpace(same.Body.String()); body != "execution inspected-connection limit reached" {
+		t.Fatalf("execution admission body = %q", body)
 	}
 	recovered := httptest.NewRecorder()
 	g.ServeHTTP(recovered, connectRequest("token"))
@@ -265,5 +269,51 @@ func TestGatewayRequiresAuthorityRouting(t *testing.T) {
 	config.AllowedAuthority = nil
 	if _, err := New(config); err == nil {
 		t.Fatal("gateway accepted no authority routing")
+	}
+}
+
+func TestAdmissionDefaultsAndBounds(t *testing.T) {
+	g, err := New(admissionConfig(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g.config.MaxConnections != DefaultMaxConnections || g.config.MaxSessionsPerExecution != DefaultMaxSessionsPerExecution ||
+		cap(g.connections) != DefaultMaxConnections || cap(g.requests) != DefaultMaxConnections ||
+		cap(g.authorityCalls) != DefaultMaxConnections {
+		t.Fatalf("default admission = %d connections, %d per execution", g.config.MaxConnections, g.config.MaxSessionsPerExecution)
+	}
+	small := admissionConfig(t)
+	small.MaxConnections = 4
+	if g, err = New(small); err != nil || g.config.MaxSessionsPerExecution != 4 {
+		t.Fatalf("per-execution default above a small connection limit = %v", err)
+	}
+	for name, limits := range map[string][2]int{
+		"connections above limit":         {MaxConnectionsLimit + 1, 0},
+		"negative connections":            {-1, 0},
+		"per-execution above limit":       {MaxConnectionsLimit, MaxSessionsPerExecutionLimit + 1},
+		"per-execution above connections": {8, 9},
+		"negative per-execution":          {8, -1},
+	} {
+		config := admissionConfig(t)
+		config.MaxConnections, config.MaxSessionsPerExecution = limits[0], limits[1]
+		if _, err := New(config); err == nil {
+			t.Fatalf("%s accepted", name)
+		}
+	}
+	config := admissionConfig(t)
+	config.MaxConnections, config.MaxSessionsPerExecution = MaxConnectionsLimit, MaxSessionsPerExecutionLimit
+	config.MaxModelCallDuration = MaxModelCallDurationLimit
+	if _, err := New(config); err != nil {
+		t.Fatalf("upper bounds rejected: %v", err)
+	}
+	if g.config.MaxModelCallDuration != DefaultMaxModelCallDuration {
+		t.Fatalf("default model call bound = %v", g.config.MaxModelCallDuration)
+	}
+	for _, bound := range []time.Duration{-time.Second, time.Millisecond, MaxModelCallDurationLimit + time.Second} {
+		config := admissionConfig(t)
+		config.MaxModelCallDuration = bound
+		if _, err := New(config); err == nil {
+			t.Fatalf("model call bound %v accepted", bound)
+		}
 	}
 }

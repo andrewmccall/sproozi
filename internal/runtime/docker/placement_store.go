@@ -10,6 +10,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"sync"
 
 	"github.com/andrewmccall/sproozi/internal/privatefs"
@@ -90,7 +92,7 @@ func OpenPlacement(dir string, engine *Engine, cfg PlacementConfig, authority Au
 	if os.IsNotExist(err) {
 		err = p.write("config.json", encoded)
 	} else if err == nil && !bytes.Equal(existing, encoded) {
-		err = errors.New("docker placement configuration changed")
+		err = p.reconfigure(existing, encoded)
 	}
 	if err != nil {
 		_ = p.Close()
@@ -98,7 +100,61 @@ func OpenPlacement(dir string, engine *Engine, cfg PlacementConfig, authority Au
 	}
 	return p, nil
 }
+
+// reconfigure accepts changed settings only while no execution record exists.
+// Every record carries the digest of the settings it was prepared under and is
+// never deleted, so changing them afterwards would strand those executions.
+func (p *Placement) reconfigure(existing, encoded []byte) error {
+	changed := changedSettings(existing, encoded)
+	entries, err := os.ReadDir(p.dir)
+	if err != nil {
+		return err
+	}
+	records := 0
+	for _, entry := range entries {
+		if filepath.Ext(entry.Name()) == ".json" && entry.Name() != "config.json" {
+			records++
+		}
+	}
+	if records == 0 {
+		return p.write("config.json", encoded)
+	}
+	noun := "execution records in %s were"
+	if records == 1 {
+		noun = "execution record in %s was"
+	}
+	return fmt.Errorf("local placement settings changed (%s), but %d "+noun+" prepared "+
+		"under the earlier values; set them back to keep those sessions, or use a new home directory for the "+
+		"new values", strings.Join(changed, ", "), records, p.dir)
+}
+
+// changedSettings names, as local.* settings, the fields that differ between
+// two encoded PlacementConfig values, with the earlier and new values where short.
+func changedSettings(existing, encoded []byte) []string {
+	var before, after map[string]json.RawMessage
+	if json.Unmarshal(existing, &before) != nil || json.Unmarshal(encoded, &after) != nil {
+		return []string{"unreadable config.json"}
+	}
+	var changed []string
+	t := reflect.TypeFor[PlacementConfig]()
+	for field := range t.Fields() {
+		name := field.Name
+		if bytes.Equal(before[name], after[name]) {
+			continue
+		}
+		setting := "local." + strings.ToLower(name[:1]) + name[1:]
+		if len(before[name]) <= 80 && len(after[name]) <= 80 {
+			setting += fmt.Sprintf(" %s -> %s", cmp.Or(string(before[name]), "unset"), after[name])
+		}
+		changed = append(changed, setting)
+	}
+	return changed
+}
+
 func (p *Placement) Close() error {
+	if p == nil {
+		return nil
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.closed {

@@ -65,12 +65,16 @@ spec:
                         MaxCostMicros is the ceiling in millionths of a US dollar; zero is uncapped.
                         Only endpoints with trusted pricing can consume a monetary budget.
                       format: int64
+                      maximum: 1000000000000000
                       minimum: 0
                       type: integer
                     maxUnits:
-                      description: MaxUnits is the consumption ceiling; zero leaves
-                        units uncapped.
+                      description: |-
+                        MaxUnits is the consumption ceiling; zero leaves units uncapped.
+                        Both limits have a Maximum of 10^15 so the API server cannot store a
+                        value that overflows int64, and so JSON clients read it exactly.
                       format: int64
+                      maximum: 1000000000000000
                       minimum: 0
                       type: integer
                   required:
@@ -148,6 +152,20 @@ spec:
                 - namespaces
                 - resources
                 type: object
+              maxActiveRuns:
+                description: |-
+                  MaxActiveRuns caps how many AgentRuns admitted under this policy can be
+                  Admitted or Running at once. Templates that share the policy share the
+                  cap. A run that would exceed it stays Queued; it is never denied.
+                  Unset means no per-policy limit.
+
+                  The Maximum keeps the value inside int32: the API server would otherwise
+                  accept a larger number that no AgentPolicy informer can decode. 10000 is
+                  far above any realistic per-policy concurrency.
+                format: int32
+                maximum: 10000
+                minimum: 1
+                type: integer
               maxExecutionDuration:
                 default: 1h
                 description: MaxExecutionDuration is the longest an AgentRun may execute.
@@ -155,6 +173,16 @@ spec:
                 x-kubernetes-validations:
                 - message: must not exceed one hour
                   rule: duration(self) <= duration('1h')
+              maxModelCallSeconds:
+                description: |-
+                  MaxModelCallSeconds lowers the longest one model call of a run may
+                  stream, in seconds. The gateway's own maximum applies when it is lower
+                  or when this is unset; this field can never raise it. 3600 is the
+                  highest gateway maximum.
+                format: int32
+                maximum: 3600
+                minimum: 1
+                type: integer
               mcpServers:
                 additionalProperties:
                   description: MCPServerScope grants only explicitly named tools of
@@ -265,9 +293,12 @@ spec:
                     maxItems: 8
                     type: array
                   maxDownloadBytes:
-                    description: MaxDownloadBytes caps each artifact response, including
-                      metadata responses.
+                    description: |-
+                      MaxDownloadBytes caps each artifact response, including metadata responses.
+                      The 1 TiB Maximum keeps the value inside int64, which the API server
+                      would otherwise not enforce.
                     format: int64
+                    maximum: 1099511627776
                     minimum: 1
                     type: integer
                 required:

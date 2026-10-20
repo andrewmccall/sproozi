@@ -38,11 +38,11 @@ func (h *Handler) prepareOpenAI(r *http.Request, body []byte, limits api.Endpoin
 		return nil, fmt.Errorf("OpenAI model is required for cost-capped inference")
 	}
 	if h.Config.Pricing == nil {
-		return nil, fmt.Errorf("administrator pricing is unavailable")
+		return nil, errPricingUnavailable
 	}
 	price, priced := h.Config.Pricing.Models[model]
 	if !priced || price.InputMicrosPerMillionTokens <= 0 || price.CachedInputMicrosPerMillionTokens <= 0 || price.OutputMicrosPerMillionTokens <= 0 {
-		return nil, fmt.Errorf("administrator pricing is unavailable")
+		return nil, errPricingUnavailable
 	}
 	if raw, present := request["service_tier"]; present {
 		var tier string

@@ -442,14 +442,14 @@ func TestSREDemoRendererRequiresAndAppliesImmutableInputs(t *testing.T) {
 		"--codex-image",
 		image,
 		"--repository",
-		"example/demo")
+		"octo-org/sproozi-demo")
 	cmd.Dir = root
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("render SRE demo: %v\n%s", err, out)
 	}
 	text := string(out)
-	if strings.Count(text, image) != 1 || strings.Count(text, "example/demo") != 3 {
+	if strings.Count(text, image) != 1 || strings.Count(text, "octo-org/sproozi-demo") != 3 {
 		t.Fatalf("renderer did not apply exact immutable inputs")
 	}
 	if strings.Contains(text, strings.Repeat("a", 64)) || strings.Contains(text, "example/sproozi-demo") {

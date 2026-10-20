@@ -426,6 +426,25 @@ func (p *Placement) Inspect(ctx context.Context, l session.Launch) (session.Obse
 	}
 	return o, nil
 }
+
+// Fenced reports, without changing any resource, whether this placement
+// independently recorded that the launch's containers stopped or never
+// existed. It is evidence that the allocation no longer consumes trust.
+func (p *Placement) Fenced(l session.Launch) (bool, error) {
+	unlock, err := p.lockOperation(l)
+	if err != nil {
+		return false, err
+	}
+	defer unlock()
+	r, err := p.load(l)
+	if os.IsNotExist(err) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return r.ActualStopped || r.Removed, nil
+}
 func (p *Placement) stopped(r placementRecord) (session.Stopped, error) {
 	inc, err := p.incarnation(r)
 	if err != nil {

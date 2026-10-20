@@ -10,21 +10,34 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
+	"runtime/debug"
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
-	"github.com/andrewmccall/sproozi/internal/budget"
-	budgetkubernetes "github.com/andrewmccall/sproozi/internal/budget/kubernetes"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	authentication "k8s.io/client-go/kubernetes"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
-
 	"github.com/andrewmccall/sproozi/internal/audit"
+	"github.com/andrewmccall/sproozi/internal/budget"
+	budgetkubernetes "github.com/andrewmccall/sproozi/internal/budget/kubernetes"
 	"github.com/andrewmccall/sproozi/internal/diagnose"
 	"github.com/andrewmccall/sproozi/internal/endpoints"
 	"github.com/andrewmccall/sproozi/internal/endpoints/destination"
@@ -38,16 +51,32 @@ import (
 	"github.com/andrewmccall/sproozi/internal/modelauth"
 	modelauthkube "github.com/andrewmccall/sproozi/internal/modelauth/kubernetes"
 	"github.com/andrewmccall/sproozi/internal/proxytransport"
-	"k8s.io/apimachinery/pkg/runtime"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	authentication "k8s.io/client-go/kubernetes"
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/client-go/rest"
-	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const defaultHost = "sproozi-gateway.sproozi-system.svc"
+
+// Startup errors name the installed object that supplies each value so an
+// administrator knows what to fix. ConfigMaps shipped by config/default carry
+// its sproozi- name prefix; Secrets and ConfigMaps the administrator creates
+// keep the names config/manager/gateway.yaml references. test/manifests checks
+// every name here against the rendered install.
+const (
+	modelCredentialsSource = "Secret sproozi-system/model-gateway-credentials"
+	modelAuthSource        = "ConfigMap sproozi-system/model-gateway-auth"
+	githubAppSource        = "Secret sproozi-system/capability-proxy-github-app"
+	gatewayTLSSource       = "Secret sproozi-system/sproozi-gateway-tls"
+	chatGPTSessionSource   = "Secret sproozi-system/model-gateway-chatgpt"
+	egressProfilesSource   = "ConfigMap sproozi-system/sproozi-egress-gateway-profiles"
+	modelPricingSource     = "ConfigMap sproozi-system/sproozi-model-gateway-pricing"
+	mcpServersSource       = "ConfigMap sproozi-system/sproozi-mcp-servers"
+	openAIKeyName          = "openai-api-key"
+	anthropicKeyName       = "anthropic-api-key"
+)
+
+// healthAddress serves only the readiness probe. It opens after startup
+// validation and the TLS listener succeed, answers a fixed body, and the
+// default-deny NetworkPolicy keeps it unreachable from other Pods.
+const healthAddress = ":8081"
 
 var scheme = runtime.NewScheme()
 
@@ -56,6 +85,7 @@ type startupConfig struct {
 	host                 string
 	listenerCert         tls.Certificate
 	certificates         map[string]tls.Certificate
+	certFile, keyFile    string
 	profiles             *destination.ProfileStore
 	pricing              *modelgateway.PricingTable
 	openAIKey            string
@@ -67,6 +97,106 @@ type startupConfig struct {
 	installationID       int64
 	privateKey           []byte
 	mcpRegistry          *mcpgateway.Registry
+	admission            connectionLimits
+	maxModelCall         time.Duration
+}
+
+// connectionLimits are the administrator-tunable gateway connection limits. They
+// must fit the gateway's memory limit; see proxytransport.DefaultMaxConnections.
+type connectionLimits struct {
+	maxConnections          int
+	maxSessionsPerExecution int
+}
+
+const (
+	maxConnectionsEnv          = "SPROOZI_GATEWAY_MAX_CONNECTIONS"
+	maxSessionsPerExecutionEnv = "SPROOZI_GATEWAY_MAX_SESSIONS_PER_EXECUTION"
+)
+
+func loadConnectionLimits() (connectionLimits, error) {
+	connections, err := boundedInteger(maxConnectionsEnv,
+		proxytransport.DefaultMaxConnections, proxytransport.MaxConnectionsLimit)
+	if err != nil {
+		return connectionLimits{}, err
+	}
+	sessions, err := boundedInteger(maxSessionsPerExecutionEnv,
+		min(proxytransport.DefaultMaxSessionsPerExecution, connections), proxytransport.MaxSessionsPerExecutionLimit)
+	if err != nil {
+		return connectionLimits{}, err
+	}
+	if sessions > connections {
+		return connectionLimits{}, fmt.Errorf("%s (%d) must not exceed %s (%d): "+
+			"check the gateway Deployment environment", maxSessionsPerExecutionEnv, sessions, maxConnectionsEnv, connections)
+	}
+	return connectionLimits{maxConnections: connections, maxSessionsPerExecution: sessions}, nil
+}
+
+// maxModelCallEnv sets the longest one model call may stream, in seconds. A
+// policy's maxModelCallSeconds can only lower it.
+const maxModelCallEnv = "SPROOZI_GATEWAY_MAX_MODEL_CALL_SECONDS"
+
+// loadGatewayLimits reads the connection limits and the model call maximum.
+func loadGatewayLimits() (connectionLimits, time.Duration, error) {
+	admission, err := loadConnectionLimits()
+	if err != nil {
+		return connectionLimits{}, 0, err
+	}
+	seconds, err := boundedInteger(maxModelCallEnv, int(proxytransport.DefaultMaxModelCallDuration/time.Second),
+		int(proxytransport.MaxModelCallDurationLimit/time.Second))
+	return admission, time.Duration(seconds) * time.Second, err
+}
+
+// memoryLimitEnv carries the container memory limit in bytes, from a
+// resourceFieldRef on limits.memory. The gateway sets its Go memory limit to
+// 90% of it, so the garbage collector works harder before the kernel would
+// kill the process. An explicit GOMEMLIMIT takes precedence, but the variable
+// is still validated so a broken Deployment does not go unnoticed.
+const memoryLimitEnv = "SPROOZI_GATEWAY_MEMORY_LIMIT"
+
+// minContainerMemoryLimit is the smallest container memory limit the gateway
+// accepts. Below it a 90% Go memory limit would leave the garbage collector
+// running continuously, and a mistyped value (bytes vs Mi) is the likely cause.
+const minContainerMemoryLimit = 64 << 20
+
+// memoryLimit is the Go memory limit the gateway runs with and where it came from.
+type memoryLimit struct {
+	// bytes is the limit to set; zero keeps the runtime's own setting.
+	bytes  int64
+	source string
+}
+
+// goMemoryLimit validates memoryLimitEnv and chooses the Go memory limit.
+func goMemoryLimit() (memoryLimit, error) {
+	raw := strings.TrimSpace(os.Getenv(memoryLimitEnv))
+	var container int64
+	if raw != "" {
+		var err error
+		container, err = strconv.ParseInt(raw, 10, 64)
+		if err != nil || container < minContainerMemoryLimit {
+			return memoryLimit{}, fmt.Errorf("%s=%q must be the container memory limit in bytes, at least %d (64Mi): "+
+				"check limits.memory on the gateway Deployment", memoryLimitEnv, raw, minContainerMemoryLimit)
+		}
+	}
+	if explicit := os.Getenv("GOMEMLIMIT"); explicit != "" {
+		return memoryLimit{source: "GOMEMLIMIT=" + explicit}, nil
+	}
+	if raw == "" {
+		return memoryLimit{source: "the Go runtime default, as neither GOMEMLIMIT nor " + memoryLimitEnv + " is set"}, nil
+	}
+	return memoryLimit{bytes: container / 10 * 9, source: fmt.Sprintf("90%% of %s=%d", memoryLimitEnv, container)}, nil
+}
+
+func boundedInteger(key string, fallback, upper int) (int, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < 1 || value > upper {
+		return 0, fmt.Errorf("%s=%q must be an integer from 1 to %d: check the gateway Deployment environment",
+			key, raw, upper)
+	}
+	return value, nil
 }
 
 func loadStartupConfig() (*startupConfig, error) {
@@ -74,20 +204,26 @@ func loadStartupConfig() (*startupConfig, error) {
 	if err != nil {
 		return nil, err
 	}
+	admission, maxModelCall, err := loadGatewayLimits()
+	if err != nil {
+		return nil, err
+	}
 	host := strings.ToLower(envOrDefault("SPROOZI_GATEWAY_HOST", defaultHost))
 	certFile, keyFile := os.Getenv("SPROOZI_GATEWAY_CERT_FILE"), os.Getenv("SPROOZI_GATEWAY_KEY_FILE")
 	if certFile == "" || keyFile == "" {
-		return nil, errors.New("gateway TLS certificate and key are required")
+		return nil, errors.New("gateway TLS certificate and key are required: " +
+			"set SPROOZI_GATEWAY_CERT_FILE and SPROOZI_GATEWAY_KEY_FILE to tls.crt and tls.key " +
+			"from " + gatewayTLSSource)
 	}
 	certificate, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
-		return nil, fmt.Errorf("load gateway TLS certificate: %w", err)
+		return nil, fmt.Errorf("load gateway TLS certificate (keys tls.crt and tls.key in %s): %w", gatewayTLSSource, err)
 	}
 	profileData := []byte("{}")
 	if enabled[sprooziv1alpha1.CapabilityNetworkEgress] {
 		profileData, err = os.ReadFile(envOrDefault("EGRESS_PROFILES_PATH", "/etc/sproozi/egress/profiles.json"))
 		if err != nil {
-			return nil, fmt.Errorf("read egress profiles: %w", err)
+			return nil, fmt.Errorf("read egress profiles (key profiles.json in %s): %w", egressProfilesSource, err)
 		}
 	}
 	profiles, err := destination.LoadProfileStore(profileData)
@@ -105,7 +241,7 @@ func loadStartupConfig() (*startupConfig, error) {
 	if enabled[sprooziv1alpha1.CapabilityModelInference] {
 		pricingFile, err := os.Open(envOrDefault("MODEL_PRICING_PATH", "/etc/sproozi/model/pricing.json"))
 		if err != nil {
-			return nil, fmt.Errorf("read model pricing: %w", err)
+			return nil, fmt.Errorf("read model pricing (key pricing.json in %s): %w", modelPricingSource, err)
 		}
 		var pricingErr error
 		pricing, pricingErr = modelgateway.LoadPricingTable(pricingFile)
@@ -130,20 +266,23 @@ func loadStartupConfig() (*startupConfig, error) {
 	var appID, installationID int64
 	var privateKey []byte
 	if enabled[sprooziv1alpha1.CapabilityGitHubPullRequest] {
-		appID, err = positiveEnvInteger("GITHUB_APP_ID")
+		appID, err = githubAppInteger("GITHUB_APP_ID", "app-id")
 		if err != nil {
 			return nil, err
 		}
-		installationID, err = positiveEnvInteger("GITHUB_APP_INSTALLATION_ID")
+		installationID, err = githubAppInteger("GITHUB_APP_INSTALLATION_ID", "installation-id")
 		if err != nil {
 			return nil, err
 		}
 		privateKey, err = os.ReadFile(os.Getenv("GITHUB_APP_PRIVATE_KEY_PATH"))
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("GitHub App private key is missing: create key private-key.pem in %s", githubAppSource)
+		}
 		if err != nil {
-			return nil, fmt.Errorf("read GitHub App private key: %w", err)
+			return nil, fmt.Errorf("read GitHub App private key (key private-key.pem in %s): %w", githubAppSource, err)
 		}
 		if _, err := githubgateway.NewAppTokenProvider(appID, installationID, privateKey, http.DefaultClient); err != nil {
-			return nil, fmt.Errorf("invalid GitHub App private key: %w", err)
+			return nil, fmt.Errorf("invalid GitHub App private key (key private-key.pem in %s): %w", githubAppSource, err)
 		}
 	}
 	certificates := map[string]tls.Certificate{}
@@ -162,35 +301,45 @@ func loadStartupConfig() (*startupConfig, error) {
 	}
 	for name := range hosts {
 		if err := leaf.VerifyHostname(name); err != nil {
-			return nil, fmt.Errorf("gateway certificate does not cover configured host %q", name)
+			return nil, fmt.Errorf("gateway certificate in %s does not cover configured host %q: "+
+				"reissue the certificate with %q in its subjectAltName", gatewayTLSSource, name, name)
 		}
 		certificates[name] = certificate
 	}
 	return &startupConfig{
 		enabled: enabled,
-		host:    host, listenerCert: certificate, certificates: certificates,
+		host:    host, listenerCert: certificate, certificates: certificates, certFile: certFile, keyFile: keyFile,
 		profiles: profiles, pricing: pricing, openAIKey: openAIKey, anthropicKey: anthropicKey, modelAuthMode: modelAuthMode,
 		openAIUpstreamURL: openAIUpstreamURL, anthropicUpstreamURL: anthropicUpstreamURL,
 		appID: appID, installationID: installationID, privateKey: privateKey,
-		mcpRegistry: mcpRegistry,
+		mcpRegistry: mcpRegistry, admission: admission, maxModelCall: maxModelCall,
 	}, nil
 }
 
 func loadModelCredentials(openAIUpstreamURL string) (string, string, string, error) {
 	openAIKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
 	anthropicKey := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY"))
-	if strings.ContainsAny(anthropicKey, "\r\n") {
-		return "", "", "", errors.New("ANTHROPIC_API_KEY is invalid")
+	for _, credential := range []struct{ env, key, value string }{
+		{"OPENAI_API_KEY", openAIKeyName, openAIKey},
+		{"ANTHROPIC_API_KEY", anthropicKeyName, anthropicKey},
+	} {
+		if strings.ContainsAny(credential.value, "\r\n") {
+			return "", "", "", errors.New(credential.env + " is invalid: key " + credential.key + " in " +
+				modelCredentialsSource + " must be a single line")
+		}
 	}
 	mode := envOrDefault("MODEL_AUTH_MODE", modelauth.APIKeyMode)
 	if mode != modelauth.APIKeyMode && mode != modelauth.ChatGPTMode {
-		return "", "", "", errors.New("MODEL_AUTH_MODE must be api_key or chatgpt")
+		return "", "", "", fmt.Errorf("MODEL_AUTH_MODE=%q must be api_key or chatgpt: check key mode in %s",
+			mode, modelAuthSource)
 	}
 	if mode == modelauth.ChatGPTMode && openAIUpstreamURL != "https://api.openai.com" {
 		return "", "", "", errors.New("ChatGPT plan usage requires the public OpenAI API upstream")
 	}
 	if mode == modelauth.APIKeyMode && openAIKey == "" && anthropicKey == "" {
-		return "", "", "", errors.New("OPENAI_API_KEY or ANTHROPIC_API_KEY is required")
+		return "", "", "", errors.New("OPENAI_API_KEY or ANTHROPIC_API_KEY is required in api_key mode: " +
+			"set key openai-api-key or anthropic-api-key in " + modelCredentialsSource +
+			", or set key mode to chatgpt in " + modelAuthSource)
 	}
 	return openAIKey, anthropicKey, mode, nil
 }
@@ -220,7 +369,7 @@ func loadMCPRegistry(gatewayHost string) (*mcpgateway.Registry, error) {
 		var err error
 		data, err = os.ReadFile(registryPath)
 		if err != nil {
-			return nil, errors.New("MCP registry is unavailable")
+			return nil, errors.New("MCP registry is unavailable: check key servers.json in " + mcpServersSource)
 		}
 	}
 	registry, err := mcpgateway.LoadRegistry(data, mcpgateway.CredentialDirectory)
@@ -248,17 +397,24 @@ func enabledCapabilities() (map[sprooziv1alpha1.CapabilityKind]bool, error) {
 	for item := range strings.SplitSeq(envOrDefault("SPROOZI_ENABLED_CAPABILITIES", "kubernetes.read"), ",") {
 		cap := sprooziv1alpha1.CapabilityKind(strings.TrimSpace(item))
 		if !slices.Contains(supported, cap) {
-			return nil, fmt.Errorf("unknown enabled capability %q", cap)
+			return nil, fmt.Errorf("SPROOZI_ENABLED_CAPABILITIES lists unknown capability %q", cap)
 		}
 		enabled[cap] = true
 	}
 	return enabled, nil
 }
 
-func positiveEnvInteger(key string) (int64, error) {
-	value, err := strconv.ParseInt(os.Getenv(key), 10, 64)
+func githubAppInteger(key, secretKey string) (int64, error) {
+	raw := os.Getenv(key)
+	if raw == "" {
+		// The Deployment references the Secret as optional, so a missing Secret
+		// or key arrives as an empty variable.
+		return 0, fmt.Errorf("%s is missing: create key %s in %s, or remove github.pull_request "+
+			"from SPROOZI_ENABLED_CAPABILITIES", key, secretKey, githubAppSource)
+	}
+	value, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil || value <= 0 {
-		return 0, fmt.Errorf("%s must be a positive integer", key)
+		return 0, fmt.Errorf("%s must be a positive integer: check key %s in %s", key, secretKey, githubAppSource)
 	}
 	return value, nil
 }
@@ -325,6 +481,21 @@ func main() {
 		log.Fatal(err)
 	}
 	host := cfg.host
+	memory, err := goMemoryLimit()
+	if err != nil {
+		log.Fatal(err)
+	}
+	if memory.bytes > 0 {
+		debug.SetMemoryLimit(memory.bytes)
+	}
+	if current := debug.SetMemoryLimit(-1); current == math.MaxInt64 {
+		log.Printf("Go memory limit is unlimited, from %s", memory.source)
+	} else {
+		log.Printf("Go memory limit is %d bytes, from %s", current, memory.source)
+	}
+	// The authority watch cache logs through controller-runtime.
+	ctrl.SetLogger(zap.New())
+	drain := modelgateway.NewDrain()
 
 	config, err := ctrl.GetConfig()
 	if err != nil {
@@ -339,8 +510,14 @@ func main() {
 		log.Fatal(err)
 	}
 	agentNamespace := envOrDefault("AGENT_NAMESPACE", "sproozi-agents")
-	authenticator := gatewaykubernetes.NewAuthenticator(clientset, "sproozi-gateway", runtimeClient, agentNamespace)
-	httpClient := &http.Client{Timeout: 120 * time.Second}
+	authorityClient, err := startAuthorityCache(context.Background(), config, agentNamespace)
+	if err != nil {
+		log.Fatal(err)
+	}
+	authenticator := gatewaykubernetes.NewAuthenticator(clientset, "sproozi-gateway", runtimeClient, agentNamespace).
+		WithWatchCache(authorityClient)
+	httpClient := &http.Client{Timeout: upstreamCallTimeout}
+	modelClient := newModelClient()
 	// The journal forwards every audit record unchanged and retains recent
 	// denials for each execution's own sproozi diagnose tool.
 	auditLogger := diagnose.NewJournal(audit.NewLogger(os.Stdout), diagnose.Limits{})
@@ -349,7 +526,9 @@ func main() {
 	// rest.Config so workload ServiceAccount tokens can never be forwarded to
 	// Kubernetes and no workload-specific RBAC is required.
 	kubeConfig := rest.CopyConfig(config)
-	kubeConfig.Timeout = 120 * time.Second
+	// The handler clears this Timeout for watches, which it bounds by their
+	// timeoutSeconds instead.
+	kubeConfig.Timeout = kubernetesReadTimeout
 	kubeClient, err := rest.HTTPClientFor(kubeConfig)
 	if err != nil {
 		log.Fatal(err)
@@ -368,7 +547,7 @@ func main() {
 		anthropicHandler = modelgateway.NewAnthropicHandler(modelgateway.HandlerConfig{
 			Pricing: cfg.pricing, AuditLogger: auditLogger,
 			UpstreamURL:  cfg.anthropicUpstreamURL,
-			ProviderAuth: modelauth.AnthropicAPIKey{Key: cfg.anthropicKey}, HTTPClient: httpClient,
+			ProviderAuth: modelauth.AnthropicAPIKey{Key: cfg.anthropicKey}, HTTPClient: modelClient, Drain: drain,
 		})
 	}
 	openAIEnabled := cfg.openAIKey != "" || cfg.modelAuthMode == modelauth.ChatGPTMode
@@ -377,11 +556,7 @@ func main() {
 		var providerAuth modelauth.Authenticator = modelauth.APIKey{Key: cfg.openAIKey}
 		if cfg.modelAuthMode == modelauth.ChatGPTMode {
 			store := modelauthkube.SessionStore{Client: runtimeClient, Namespace: budgetNamespace}
-			session, loadErr := store.Load(context.Background())
-			if loadErr != nil {
-				log.Fatal("ChatGPT credential Secret is unavailable")
-			}
-			if err = session.Validate(); err != nil {
+			if err := checkChatGPTSession(context.Background(), store); err != nil {
 				log.Fatal(err)
 			}
 			oauthClient := &http.Client{
@@ -393,7 +568,7 @@ func main() {
 		model := &modelgateway.Handler{Config: modelgateway.HandlerConfig{
 			Pricing: cfg.pricing, AuditLogger: auditLogger,
 			UpstreamURL:  cfg.openAIUpstreamURL,
-			ProviderAuth: providerAuth, HTTPClient: httpClient,
+			ProviderAuth: providerAuth, HTTPClient: modelClient, Drain: drain,
 		}}
 		if os.Getenv("MODEL_DIAGNOSTICS") == "true" {
 			// Administrator opt-in: bounded provider errors only, separate from audit.
@@ -426,8 +601,18 @@ func main() {
 	handlers[sprooziv1alpha1.CapabilityNetworkEgress] = raw
 
 	// Unknown authorities are absent and are denied before an upstream call.
-	budgets := budget.NewTrackerWithLedger(budgetkubernetes.NewLedger(runtimeClient,
-		envOrDefault("BUDGET_NAMESPACE", "sproozi-system")))
+	budgetNamespace := envOrDefault("BUDGET_NAMESPACE", "sproozi-system")
+	budgets := budget.NewTrackerWithLedger(budgetkubernetes.NewLedger(runtimeClient, budgetNamespace))
+	// Every current reservation carries a lease, so a pending reservation
+	// without one can only come from a gateway from before leases. Settle
+	// those before serving, then keep recovering expired leases.
+	legacySweep := func(ctx context.Context) error {
+		return budgetkubernetes.Sweep(ctx, runtimeClient, budgetNamespace, time.Now(), true)
+	}
+	if !sweepLegacyOnce(context.Background(), legacySweep) {
+		go retryLegacySweep(context.Background(), legacySweep, time.Second, budgetkubernetes.SweepInterval)
+	}
+	go sweepLedgers(context.Background(), runtimeClient, budgetNamespace, budgetkubernetes.SweepInterval)
 	named := mcpgateway.NewHandler(mcpgateway.HandlerConfig{Registry: cfg.mcpRegistry,
 		Budgets: budgets, AuditLogger: auditLogger})
 	mcpHandler := diagnose.NewControl(auditLogger, named)
@@ -436,13 +621,22 @@ func main() {
 		route.Budgets, route.AuditLogger = budgets, auditLogger
 		dispatcher[authority] = route
 	}
+	serving, err := startCertificateReloader(cfg, host)
+	if err != nil {
+		log.Fatal(err)
+	}
 	transport, err := proxytransport.New(proxytransport.Config{
 		Certificates:     cfg.certificates,
+		Serving:          serving,
 		Authenticate:     authenticator.Authenticate,
 		Revalidate:       authenticator.Revalidate,
 		Handler:          dispatcher,
 		AllowedAuthority: dispatcher.Allows,
 		AuditLogger:      auditLogger,
+
+		MaxConnections:          cfg.admission.maxConnections,
+		MaxSessionsPerExecution: cfg.admission.maxSessionsPerExecution,
+		MaxModelCallDuration:    cfg.maxModelCall,
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -452,8 +646,190 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	server := proxytransport.NewServer(":8443", cfg.listenerCert, transport)
-	log.Fatal(server.ServeTLS(transport.LimitListener(listener), "", ""))
+	healthListener, err := net.Listen("tcp", healthAddress)
+	if err != nil {
+		log.Fatal(err)
+	}
+	go func() { log.Fatal(newHealthServer().Serve(healthListener)) }()
+	server := proxytransport.NewServer(":8443", serving, transport)
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, syscall.SIGTERM, os.Interrupt)
+	go drainOnSignal(signals, server.Close, drain, func() { os.Exit(0) })
+	if err := server.ServeTLS(transport.LimitListener(listener), "", ""); !errors.Is(err, http.ErrServerClosed) {
+		log.Fatal(err)
+	}
+	select {} // drainOnSignal exits once model calls have settled
+}
+
+// sweepLegacyOnce runs one startup recovery of legacy reservations and
+// reports whether it succeeded.
+func sweepLegacyOnce(ctx context.Context, sweep func(context.Context) error) bool {
+	attemptCtx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	if err := sweep(attemptCtx); err != nil {
+		log.Printf("Failed to recover legacy budget reservations; retrying: %v", err)
+		return false
+	}
+	return true
+}
+
+// retryLegacySweep repeats the startup recovery of legacy reservations with
+// backoff until it succeeds once. Every reservation this gateway makes has a
+// lease, so the pass is safe while the gateway serves.
+func retryLegacySweep(ctx context.Context, sweep func(context.Context) error, initial, ceiling time.Duration) {
+	for delay := initial; ; delay = min(2*delay, ceiling) {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
+		}
+		if sweepLegacyOnce(ctx, sweep) {
+			return
+		}
+	}
+}
+
+// sweepLedgers recovers expired reservation leases across every budget
+// ledger at start and then every interval, so an idle account does not keep a
+// reservation that a stopped gateway left unsettled.
+func sweepLedgers(ctx context.Context, c client.Client, namespace string, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		sweepCtx, cancel := context.WithTimeout(ctx, interval)
+		if err := budgetkubernetes.Sweep(sweepCtx, c, namespace, time.Now(), false); err != nil {
+			log.Printf("Failed to recover expired budget reservations: %v", err)
+		}
+		cancel()
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// drainTimeout bounds the wait for model calls to settle on shutdown. It
+// fits inside terminationGracePeriodSeconds (45) in config/manager/gateway.yaml
+// with room for the settlement writes themselves.
+const drainTimeout = 30 * time.Second
+
+// drainOnSignal stops the gateway on SIGTERM: it stops accepting connections,
+// ends every model call as interrupted so each settles its reservation with
+// an estimate, then exits. A call still unsettled at drainTimeout is left to
+// the ledger's recovery of abandoned reservations.
+func drainOnSignal(signals <-chan os.Signal, stopAccepting func() error, drain *modelgateway.Drain, exit func()) {
+	<-signals
+	log.Printf("Stopping: draining model calls for up to %s", drainTimeout)
+	_ = stopAccepting()
+	ctx, cancel := context.WithTimeout(context.Background(), drainTimeout)
+	defer cancel()
+	if err := drain.Shutdown(ctx); err != nil {
+		log.Printf("Model calls did not settle before exit; the ledger will recover their reservations: %v", err)
+	}
+	exit()
+}
+
+// authorityCacheSyncTimeout bounds startup while the watch cache lists the
+// authority objects. The gateway is not ready until the cache has synced.
+const authorityCacheSyncTimeout = 2 * time.Minute
+
+// upstreamCallTimeout bounds one GitHub, package or egress call, from request
+// to the last byte of the response. A call cannot outlast the inspected
+// connection that carries it, so this is the longest request that connection
+// allows (4m50s).
+const upstreamCallTimeout = proxytransport.MaxRequestDuration
+
+// modelHeaderTimeout bounds the wait for a provider's response headers. A
+// model call has no whole-call timeout: its response streams until its
+// deadline, and the model handler ends a response idle for
+// modelgateway.DefaultIdleTimeout. A non-streaming call sends its headers
+// only once the model has finished, so this allows the longest request one
+// inspected connection allows, as before.
+const modelHeaderTimeout = proxytransport.MaxRequestDuration
+
+// newModelClient returns the provider client. A harness that disconnects
+// cancels the upstream call.
+func newModelClient() *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.ResponseHeaderTimeout = modelHeaderTimeout
+	return &http.Client{Transport: transport}
+}
+
+// kubernetesReadTimeout bounds a get, list or log read. Watches last up to
+// their timeoutSeconds (at most 300) plus a margin instead, cut short by the
+// inspected connection's remaining request time.
+const kubernetesReadTimeout = 120 * time.Second
+
+// startAuthorityCache starts the watch cache that serves revalidation of open
+// sessions, and returns a client that reads AgentRun, AgentTemplate,
+// AgentPolicy and agent-namespace ServiceAccount objects from it. The existing
+// shared-gateway ClusterRole already grants list and watch on these. Other
+// types read through to the API server: managed-session registration
+// ConfigMaps and sandbox Pods carry the source revocation of a session move,
+// so a watch delay there could let source and destination overlap. Any other
+// cached type fails instead of silently starting a cluster-wide informer.
+func startAuthorityCache(ctx context.Context, config *rest.Config, agentNamespace string) (client.Client, error) {
+	authorityCache, err := cache.New(config, cache.Options{
+		Scheme:                      scheme,
+		ReaderFailOnMissingInformer: true,
+		DefaultTransform:            cache.TransformStripManagedFields(),
+		ByObject: map[client.Object]cache.ByObject{
+			&corev1.ServiceAccount{}: {Namespaces: map[string]cache.Config{agentNamespace: {}}},
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create authority watch cache: %w", err)
+	}
+	for _, object := range []client.Object{&sprooziv1alpha1.AgentRun{}, &sprooziv1alpha1.AgentTemplate{},
+		&sprooziv1alpha1.AgentPolicy{}, &corev1.ServiceAccount{}} {
+		if _, err := authorityCache.GetInformer(ctx, object); err != nil {
+			return nil, fmt.Errorf("watch %T for gateway authority: %w", object, err)
+		}
+	}
+	go func() {
+		if err := authorityCache.Start(ctx); err != nil {
+			log.Fatalf("authority watch cache stopped: %v", err)
+		}
+	}()
+	syncCtx, cancel := context.WithTimeout(ctx, authorityCacheSyncTimeout)
+	defer cancel()
+	if !authorityCache.WaitForCacheSync(syncCtx) {
+		return nil, errors.New("authority watch cache did not sync: check the shared-gateway ClusterRole " +
+			"grants list and watch on agentruns, agenttemplates, agentpolicies and serviceaccounts")
+	}
+	return client.New(config, client.Options{Scheme: scheme, Cache: &client.CacheOptions{
+		Reader: authorityCache, DisableFor: []client.Object{&corev1.ConfigMap{}, &corev1.Pod{}},
+	}})
+}
+
+// checkChatGPTSession fails startup with the Secret, key and command that fix
+// a missing or unusable ChatGPT credential. Errors never include token material.
+func checkChatGPTSession(ctx context.Context, store modelauth.SessionStore) error {
+	session, err := store.Load(ctx)
+	if err != nil {
+		return fmt.Errorf("ChatGPT credential Secret is unavailable (%v): create key %s in %s "+
+			"from the credential file that `make demo-chatgpt-login` saves",
+			err, modelauthkube.SessionSecretKey, chatGPTSessionSource)
+	}
+	if err := session.Validate(); err != nil {
+		return fmt.Errorf("%w (key %s in %s): run `bash hack/demo/chatgpt-login.sh --reauthorize` "+
+			"(or `make demo-chatgpt-login CHATGPT_REAUTHORIZE=1`) and load the new credential into that Secret",
+			err, modelauthkube.SessionSecretKey, chatGPTSessionSource)
+	}
+	return nil
+}
+
+// newHealthServer answers the kubelet readiness probe. It runs only once
+// startup validation has passed and the TLS listener is bound, so readiness
+// means the gateway can accept workloads. It exposes nothing else.
+func newHealthServer() *http.Server {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = w.Write([]byte("ok\n"))
+	})
+	return &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second, MaxHeaderBytes: 4 << 10}
 }
 
 func envOrDefault(key, fallback string) string {

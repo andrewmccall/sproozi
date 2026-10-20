@@ -76,6 +76,28 @@ type AgentPolicySpec struct {
 	// +kubebuilder:default="720h"
 	// +kubebuilder:validation:XValidation:rule="duration(self) > duration('0s')",message="must be greater than zero"
 	RetentionTTL metav1.Duration `json:"retentionTTL,omitempty"`
+
+	// MaxActiveRuns caps how many AgentRuns admitted under this policy can be
+	// Admitted or Running at once. Templates that share the policy share the
+	// cap. A run that would exceed it stays Queued; it is never denied.
+	// Unset means no per-policy limit.
+	//
+	// The Maximum keeps the value inside int32: the API server would otherwise
+	// accept a larger number that no AgentPolicy informer can decode. 10000 is
+	// far above any realistic per-policy concurrency.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=10000
+	MaxActiveRuns *int32 `json:"maxActiveRuns,omitempty"`
+
+	// MaxModelCallSeconds lowers the longest one model call of a run may
+	// stream, in seconds. The gateway's own maximum applies when it is lower
+	// or when this is unset; this field can never raise it. 3600 is the
+	// highest gateway maximum.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=3600
+	MaxModelCallSeconds *int32 `json:"maxModelCallSeconds,omitempty"`
 }
 
 // CapabilityKind identifies an operation that may be granted to an AgentRun.
@@ -187,7 +209,10 @@ type PackagesInstallScope struct {
 	AllowSourceBuilds bool `json:"allowSourceBuilds,omitempty"`
 
 	// MaxDownloadBytes caps each artifact response, including metadata responses.
+	// The 1 TiB Maximum keeps the value inside int64, which the API server
+	// would otherwise not enforce.
 	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=1099511627776
 	MaxDownloadBytes int64 `json:"maxDownloadBytes"`
 }
 
@@ -225,11 +250,15 @@ type PackageDependency struct {
 // +kubebuilder:validation:XValidation:rule="self.maxUnits > 0 || self.maxCostMicros > 0",message="at least one budget limit must be positive"
 type EndpointBudget struct {
 	// MaxUnits is the consumption ceiling; zero leaves units uncapped.
+	// Both limits have a Maximum of 10^15 so the API server cannot store a
+	// value that overflows int64, and so JSON clients read it exactly.
 	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=1000000000000000
 	MaxUnits int64 `json:"maxUnits"`
 	// MaxCostMicros is the ceiling in millionths of a US dollar; zero is uncapped.
 	// Only endpoints with trusted pricing can consume a monetary budget.
 	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=1000000000000000
 	MaxCostMicros int64 `json:"maxCostMicros"`
 }
 

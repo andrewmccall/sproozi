@@ -14,7 +14,7 @@ const (
 	testResponseFailedEvent = "response.failed"
 )
 
-func TestFailedStreamDiagnosticsPreserveErrorWithoutBypassingUsage(t *testing.T) {
+func TestFailedStreamDiagnosticsPreserveErrorAndSettleTheEstimate(t *testing.T) {
 	stream := `data: {"type":"response.output_text.delta","delta":"private-model-output"}` + "\n\n" +
 		`data: {"type":"response.failed","response":{"status":"failed","error":{"code":"invalid_value","param":"tools","message":"Tools invalid; bearer sk-test; access_token=secret-record; eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhIn0.signature"}}}` + "\n\n"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -24,12 +24,14 @@ func TestFailedStreamDiagnosticsPreserveErrorWithoutBypassingUsage(t *testing.T)
 	}))
 	defer server.Close()
 	h := newHandler(t, testExecutionGrant(), server.URL)
+	h.Config.Now = fixedClock()
 	var diagnostics []modelgateway.ResponseDiagnostic
 	h.Config.Diagnostics = func(d modelgateway.ResponseDiagnostic) { diagnostics = append(diagnostics, d) }
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, testResponsesPath, strings.NewReader(`{"model":"test","stream":true}`)))
-	if w.Code != 502 || strings.Contains(w.Body.String(), "private-model-output") {
-		t.Fatal("diagnostics bypassed completed-usage verification")
+	request := `{"model":"test","stream":true}`
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, testResponsesPath, strings.NewReader(request)))
+	if w.Code != 200 || w.Body.String() != stream {
+		t.Fatalf("failed stream was not relayed: %d %q", w.Code, w.Body)
 	}
 	if len(diagnostics) != 1 {
 		t.Fatalf("got %d diagnostics, want one terminal summary", len(diagnostics))
@@ -43,9 +45,11 @@ func TestFailedStreamDiagnosticsPreserveErrorWithoutBypassingUsage(t *testing.T)
 		strings.Contains(d.ErrorMessage, "secret-record") || strings.Contains(d.ErrorMessage, "eyJhbGci") {
 		t.Fatal("diagnostics leaked credentials or model output")
 	}
+	// A failure without usage is charged the estimate: request bytes ÷ 4 and
+	// the visible output bytes.
 	state := observedState(t, h.Config.BudgetTracker, testRunUID)
-	if state.UnitsUsed != 10_000 || state.ReservedUnits != 0 {
-		t.Fatal("diagnostics weakened conservative settlement")
+	if want := int64((len(request)+3)/4 + len("private-model-output")); state.UnitsUsed != want || state.ReservedUnits != 0 {
+		t.Fatalf("state = %+v, want %d units estimated", state, want)
 	}
 }
 

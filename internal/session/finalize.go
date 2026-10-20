@@ -22,7 +22,7 @@ func (c *Coordinator) Finalize(ctx context.Context, id, operationID string) (Rec
 		return r, err
 	}
 	if r.CancelOperation != "" {
-		return r, errors.New("session: session cancelled")
+		return r, cancelled(r)
 	}
 	ctx, finish, err := c.graceful.Begin(ctx, id)
 	if err != nil {
@@ -41,7 +41,7 @@ func (c *Coordinator) Finalize(ctx context.Context, id, operationID string) (Rec
 		}
 	}
 	if r.PendingOperation != "" {
-		return r, errors.New("session: previous operation requires recovery")
+		return r, pendingRecovery(r)
 	}
 	for _, visit := range r.Visits {
 		if visit.Launch.OperationID == operationID {

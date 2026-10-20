@@ -29,6 +29,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	networkingv1 "k8s.io/api/networking/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 
@@ -52,6 +53,9 @@ import (
 
 // testNS is the namespace used across reconciler unit tests.
 const testNS = "default"
+
+// testPolicy is the fixture AgentPolicy name.
+const testPolicy = "sre"
 
 // newScheme builds a runtime scheme with the sproozi types plus the built-in
 // Kubernetes types (corev1/rbacv1/networkingv1) needed by the identity provisioning
@@ -86,7 +90,7 @@ func fixtures() []client.Object {
 		},
 	}
 	pol := &sprooziv1alpha1.AgentPolicy{
-		ObjectMeta: metav1.ObjectMeta{Name: "sre", Namespace: testNS, Generation: 1},
+		ObjectMeta: metav1.ObjectMeta{Name: testPolicy, Namespace: testNS, Generation: 1},
 		Spec: sprooziv1alpha1.AgentPolicySpec{
 			AllowedCapabilities: []sprooziv1alpha1.CapabilityKind{
 				sprooziv1alpha1.CapabilityKubernetesRead,
@@ -105,7 +109,7 @@ func fixtures() []client.Object {
 		ObjectMeta: metav1.ObjectMeta{Name: "sre-remediation", Namespace: testNS},
 		Spec: sprooziv1alpha1.AgentTemplateSpec{
 			RuntimeRef:     sprooziv1alpha1.AgentRuntimeReference{Name: "codex"},
-			PolicyRef:      sprooziv1alpha1.AgentPolicyReference{Name: "sre"},
+			PolicyRef:      sprooziv1alpha1.AgentPolicyReference{Name: testPolicy},
 			Instructions:   "Investigate and fix.",
 			EgressProfiles: []string{"go-modules"},
 		},
@@ -174,6 +178,22 @@ func getRun(t *testing.T, c client.Client, name string) sprooziv1alpha1.AgentRun
 	return run
 }
 
+// assertReadyMessage checks that the Ready condition carries the reason and a
+// user-facing message containing every fragment.
+func assertReadyMessage(t *testing.T, c client.Client, name, reason string, fragments ...string) {
+	t.Helper()
+	run := getRun(t, c, name)
+	ready := apimeta.FindStatusCondition(run.Status.Conditions, "Ready")
+	if ready == nil || ready.Reason != reason || ready.Message == "" {
+		t.Fatalf("Ready condition = %#v, want reason %q with a message", ready, reason)
+	}
+	for _, fragment := range fragments {
+		if !strings.Contains(ready.Message, fragment) {
+			t.Fatalf("Ready message %q does not contain %q", ready.Message, fragment)
+		}
+	}
+}
+
 func getPhase(t *testing.T, c client.Client, name string) sprooziv1alpha1.AgentRunPhase {
 	t.Helper()
 	return getRun(t, c, name).Status.Phase
@@ -229,8 +249,8 @@ func TestReconcilerQueuedRunAdmittedWhenNoActiveRun(t *testing.T) {
 
 // The informer cache can lag the reconciler's own admission write. A cached
 // list that still shows the admitted run as Queued must not let a run that
-// sorts ahead of it take the slot as well.
-func TestReconcilerQueuedRunIgnoresStaleCacheForSlot(t *testing.T) {
+// sorts ahead of it take the last place under a cap as well.
+func TestReconcilerQueuedRunIgnoresStaleCacheForCap(t *testing.T) {
 	t.Parallel()
 
 	// Equal creation timestamps: "a-queued" sorts first by name.
@@ -258,36 +278,264 @@ func TestReconcilerQueuedRunIgnoresStaleCacheForSlot(t *testing.T) {
 			return nil
 		},
 	})
-	r := &controller.AgentRunReconciler{Client: stale, APIReader: live, SandboxClient: &k8sresources.FakeSandboxClient{}}
+	r := &controller.AgentRunReconciler{Client: stale, APIReader: live, SandboxClient: &k8sresources.FakeSandboxClient{}, MaxActiveRuns: 1}
 
 	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: queued.Name, Namespace: testNS}}); err != nil {
 		t.Fatalf("Reconcile() error = %v", err)
 	}
 	if phase := getPhase(t, live, queued.Name); phase != sprooziv1alpha1.AgentRunPhaseQueued {
-		t.Fatalf("%s phase = %q, want Queued while %s holds the slot", queued.Name, phase, admitted.Name)
+		t.Fatalf("%s phase = %q, want Queued while %s fills the cap", queued.Name, phase, admitted.Name)
 	}
 }
 
-func TestReconcilerQueuedRunStaysQueuedWhenActiveRunExists(t *testing.T) {
+func TestReconcilerQueuedRunStaysQueuedAtGlobalCap(t *testing.T) {
 	t.Parallel()
 
 	run1 := newRun("run1")
 	run1.Status.Phase = sprooziv1alpha1.AgentRunPhaseAdmitted
 	run2 := newRun("run2")
 	run2.Status.Phase = sprooziv1alpha1.AgentRunPhaseQueued
-	objs := append(fixtures(), run1, run2)
+	r, c := newReconcilerWithSandbox(&k8sresources.FakeSandboxClient{}, append(fixtures(), run1, run2)...)
+	r.MaxActiveRuns = 1
+
+	result, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: run2.Name, Namespace: testNS}})
+	if err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+	if phase := getPhase(t, c, "run2"); phase != sprooziv1alpha1.AgentRunPhaseQueued {
+		t.Errorf("phase = %q, want %q", phase, sprooziv1alpha1.AgentRunPhaseQueued)
+	}
+	if result.RequeueAfter <= 0 {
+		t.Errorf("RequeueAfter = %v, want a fallback poll", result.RequeueAfter)
+	}
+	assertReadyMessage(t, c, "run2", "WaitingForConcurrencyCap", "cluster cap 1")
+}
+
+func TestReconcilerQueuedRunAdmittedAlongsideActiveRunWithoutCap(t *testing.T) {
+	t.Parallel()
+
+	run1 := newRun("run1")
+	run1.Status.Phase = sprooziv1alpha1.AgentRunPhaseRunning
+	run1.Status.PolicyName = testPolicy
+	run2 := newRun("run2")
+	run2.Status.Phase = sprooziv1alpha1.AgentRunPhaseQueued
 	c := fake.NewClientBuilder().
 		WithScheme(newScheme()).
-		WithObjects(objs...).
+		WithObjects(append(fixtures(), run1, run2)...).
 		WithStatusSubresource(&sprooziv1alpha1.AgentRun{}).
 		Build()
 
 	if _, err := reconcileRun(t, c, "run2"); err != nil {
 		t.Fatalf("Reconcile() error = %v", err)
 	}
+	got := getRun(t, c, "run2")
+	if got.Status.Phase != sprooziv1alpha1.AgentRunPhaseAdmitted {
+		t.Fatalf("phase = %q, want Admitted with no cap configured", got.Status.Phase)
+	}
+	if got.Status.PolicyName != testPolicy {
+		t.Fatalf("status.policyName = %q, want sre recorded at admission", got.Status.PolicyName)
+	}
+}
 
+// secondPolicy adds an AgentPolicy and AgentTemplate named name, copied from
+// the fixtures, with the given cap.
+func secondPolicy(name string, maxActiveRuns *int32) []client.Object {
+	objs := fixtures()
+	pol := objs[1].(*sprooziv1alpha1.AgentPolicy)
+	pol.Name = name
+	pol.Spec.MaxActiveRuns = maxActiveRuns
+	tmpl := objs[2].(*sprooziv1alpha1.AgentTemplate)
+	tmpl.Name = name
+	tmpl.Spec.PolicyRef.Name = name
+	return []client.Object{pol, tmpl}
+}
+
+// A policy whose cap is full must not block a later run under another policy.
+func TestReconcilerPolicyCapDoesNotBlockOtherPolicies(t *testing.T) {
+	t.Parallel()
+
+	objs := fixtures()
+	objs[1].(*sprooziv1alpha1.AgentPolicy).Spec.MaxActiveRuns = ptr.To(int32(1))
+	objs = append(objs, secondPolicy("other", ptr.To(int32(1)))...)
+	active := newRun("a-active")
+	active.Status.Phase = sprooziv1alpha1.AgentRunPhaseRunning
+	active.Status.PolicyName = testPolicy
+	head := newRun("a-head")
+	head.Status.Phase = sprooziv1alpha1.AgentRunPhaseQueued
+	head.CreationTimestamp = metav1.NewTime(time.Now().Add(-time.Minute))
+	later := newRun("b-later")
+	later.Spec.TemplateRef.Name = "other"
+	later.Status.Phase = sprooziv1alpha1.AgentRunPhaseQueued
+	later.CreationTimestamp = metav1.NewTime(time.Now())
+	r, c := newReconcilerWithSandbox(&k8sresources.FakeSandboxClient{}, append(objs, active, head, later)...)
+
+	for _, name := range []string{"a-head", "b-later"} {
+		if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: name, Namespace: testNS}}); err != nil {
+			t.Fatalf("reconcile %s: %v", name, err)
+		}
+	}
+	if phase := getPhase(t, c, "a-head"); phase != sprooziv1alpha1.AgentRunPhaseQueued {
+		t.Fatalf("a-head phase = %q, want Queued behind the sre policy cap", phase)
+	}
+	assertReadyMessage(t, c, "a-head", "WaitingForConcurrencyCap", "policy cap 1 (AgentPolicy sre) reached")
+	if got := getRun(t, c, "b-later"); got.Status.Phase != sprooziv1alpha1.AgentRunPhaseAdmitted || got.Status.PolicyName != "other" {
+		t.Fatalf("b-later = phase %q policy %q, want Admitted under other", got.Status.Phase, got.Status.PolicyName)
+	}
+}
+
+// Active runs count against the policy recorded at admission, not the policy
+// their template references now.
+func TestReconcilerCountsRecordedPolicyAfterTemplateRepointed(t *testing.T) {
+	t.Parallel()
+
+	objs := fixtures()
+	objs[1].(*sprooziv1alpha1.AgentPolicy).Spec.MaxActiveRuns = ptr.To(int32(1))
+	// The fixture template is re-pointed to an uncapped policy after run1 was
+	// admitted under sre; a second template still uses sre.
+	objs[2].(*sprooziv1alpha1.AgentTemplate).Spec.PolicyRef.Name = "uncapped"
+	uncapped := secondPolicy("uncapped", nil)[0]
+	sreTemplate := fixtures()[2].(*sprooziv1alpha1.AgentTemplate)
+	sreTemplate.Name = "sre-second"
+	active := newRun("run1")
+	active.Status.Phase = sprooziv1alpha1.AgentRunPhaseRunning
+	active.Status.PolicyName = testPolicy
+	queued := newRun("run2")
+	queued.Spec.TemplateRef.Name = "sre-second"
+	queued.Status.Phase = sprooziv1alpha1.AgentRunPhaseQueued
+	r, c := newReconcilerWithSandbox(&k8sresources.FakeSandboxClient{}, append(objs, uncapped, sreTemplate, active, queued)...)
+
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: "run2", Namespace: testNS}}); err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
 	if phase := getPhase(t, c, "run2"); phase != sprooziv1alpha1.AgentRunPhaseQueued {
-		t.Errorf("phase = %q, want %q", phase, sprooziv1alpha1.AgentRunPhaseQueued)
+		t.Fatalf("run2 phase = %q, want Queued: run1 still counts against sre", phase)
+	}
+	assertReadyMessage(t, c, "run2", "WaitingForConcurrencyCap", "policy cap 1 (AgentPolicy sre) reached")
+}
+
+// Re-pointing a running run's template to another policy fails the run closed:
+// it counts against the policy it was admitted under, so the new policy's cap
+// would not limit it. Its sandbox is released as for any terminal run.
+func TestReconcilerRunningRunFailsWhenTemplateRepointed(t *testing.T) {
+	t.Parallel()
+
+	const runName, repointedPolicy = "repointed-run", "repointed"
+	sc := &k8sresources.FakeSandboxClient{Status: k8sresources.SandboxStatusRunning}
+	run := newRun(runName)
+	r, c := newReconcilerWithSandbox(sc, append(fixtures(), secondPolicy(repointedPolicy, nil)[0], run)...)
+	driveToRunning(t, r, runName)
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: runName, Namespace: testNS}}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("reconcile error: %v", err)
+	}
+	if got := getRun(t, c, runName); got.Status.Phase != sprooziv1alpha1.AgentRunPhaseRunning || got.Status.Identity.SandboxName == "" {
+		t.Fatalf("run1 = phase %q sandbox %q, want Running with a sandbox", got.Status.Phase, got.Status.Identity.SandboxName)
+	}
+
+	var tmpl sprooziv1alpha1.AgentTemplate
+	if err := c.Get(context.Background(), types.NamespacedName{Name: run.Spec.TemplateRef.Name, Namespace: testNS}, &tmpl); err != nil {
+		t.Fatal(err)
+	}
+	tmpl.Spec.PolicyRef.Name = repointedPolicy
+	if err := c.Update(context.Background(), &tmpl); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 { // fail, then release
+		if _, err := r.Reconcile(context.Background(), req); err != nil {
+			t.Fatalf("reconcile error: %v", err)
+		}
+	}
+	if phase := getPhase(t, c, runName); phase != sprooziv1alpha1.AgentRunPhaseFailed {
+		t.Fatalf("phase = %q, want Failed", phase)
+	}
+	assertReadyMessage(t, c, runName, "PolicyChanged",
+		"AgentTemplate sre-remediation now references AgentPolicy repointed, but this run was admitted under AgentPolicy sre; submit a new run")
+	if want := []string{k8sresources.RunName(run.UID)}; !slices.Equal(sc.Deleted, want) {
+		t.Fatalf("deleted sandboxes = %v, want %v", sc.Deleted, want)
+	}
+}
+
+// A queued run is admitted under its template's current policy, whatever it
+// was when the run was created.
+func TestReconcilerQueuedRunUsesRepointedTemplatePolicy(t *testing.T) {
+	t.Parallel()
+
+	const runName, repointedPolicy = "queued-run", "repointed"
+	objs := fixtures()
+	objs[2].(*sprooziv1alpha1.AgentTemplate).Spec.PolicyRef.Name = repointedPolicy
+	run := newRun(runName)
+	run.Status.Phase = sprooziv1alpha1.AgentRunPhaseQueued
+	r, c := newReconcilerWithSandbox(&k8sresources.FakeSandboxClient{}, append(objs, secondPolicy(repointedPolicy, nil)[0], run)...)
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: runName, Namespace: testNS}}); err != nil {
+		t.Fatalf("reconcile error: %v", err)
+	}
+	if got := getRun(t, c, runName); got.Status.Phase != sprooziv1alpha1.AgentRunPhaseAdmitted || got.Status.PolicyName != repointedPolicy {
+		t.Fatalf("run1 = phase %q policy %q, want Admitted under repointed", got.Status.Phase, got.Status.PolicyName)
+	}
+}
+
+// A run admitted before status.policyName existed is counted through its
+// template's current policy.
+func TestReconcilerCountsLegacyActiveRunThroughTemplate(t *testing.T) {
+	t.Parallel()
+
+	objs := fixtures()
+	objs[1].(*sprooziv1alpha1.AgentPolicy).Spec.MaxActiveRuns = ptr.To(int32(1))
+	active := newRun("run1")
+	active.Status.Phase = sprooziv1alpha1.AgentRunPhaseRunning
+	queued := newRun("run2")
+	queued.Status.Phase = sprooziv1alpha1.AgentRunPhaseQueued
+	r, c := newReconcilerWithSandbox(&k8sresources.FakeSandboxClient{}, append(objs, active, queued)...)
+
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: "run2", Namespace: testNS}}); err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+	assertReadyMessage(t, c, "run2", "WaitingForConcurrencyCap", "policy cap 1 (AgentPolicy sre) reached")
+}
+
+// A ResourceQuota rejection keeps the run active with reason QuotaExceeded and
+// a bounded retry, writes the condition once, and clears it when the Pod is
+// created.
+func TestReconcilerQuotaRejectionWaitsAndRetries(t *testing.T) {
+	t.Parallel()
+
+	quotaErr := apierrors.NewForbidden(corev1.Resource("pods"), "sandbox",
+		errors.New("exceeded quota: agents, requested: pods=1, used: pods=2, limited: pods=2"))
+	sandbox := &k8sresources.FakeSandboxClient{EnsureErr: quotaErr, Status: k8sresources.SandboxStatusRunning}
+	r, c := newReconcilerWithSandbox(sandbox, append(fixtures(), newRun("run1"))...)
+	driveToRunning(t, r, "run1")
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "run1", Namespace: testNS}}
+
+	result, err := r.Reconcile(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+	if result.RequeueAfter < 5*time.Second || result.RequeueAfter > time.Minute {
+		t.Fatalf("RequeueAfter = %v, want a bounded backoff", result.RequeueAfter)
+	}
+	got := getRun(t, c, "run1")
+	if got.Status.Phase != sprooziv1alpha1.AgentRunPhaseRunning {
+		t.Fatalf("phase = %q, want the run kept active", got.Status.Phase)
+	}
+	assertReadyMessage(t, c, "run1", "QuotaExceeded", "exceeded quota: agents")
+
+	// A retry that is rejected again must not write status, or each write
+	// would trigger the next reconcile at once.
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("retry Reconcile() error = %v", err)
+	}
+	if again := getRun(t, c, "run1"); again.ResourceVersion != got.ResourceVersion {
+		t.Fatalf("resourceVersion changed from %s to %s on a repeated rejection", got.ResourceVersion, again.ResourceVersion)
+	}
+
+	sandbox.EnsureErr = nil
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("Reconcile() after quota freed error = %v", err)
+	}
+	created := getRun(t, c, "run1")
+	ready := apimeta.FindStatusCondition(created.Status.Conditions, "Ready")
+	if created.Status.Identity.SandboxName == "" || ready == nil || ready.Status != metav1.ConditionTrue || ready.Reason != "Running" {
+		t.Fatalf("after quota freed: sandbox %q, Ready %#v; want a sandbox and Ready=True/Running", created.Status.Identity.SandboxName, ready)
 	}
 }
 
@@ -312,6 +560,27 @@ func TestReconcilerQueuedRunFailsWhenTemplateMissing(t *testing.T) {
 	if phase := getPhase(t, c, "run1"); phase != sprooziv1alpha1.AgentRunPhaseFailed {
 		t.Errorf("phase = %q, want %q", phase, sprooziv1alpha1.AgentRunPhaseFailed)
 	}
+	assertReadyMessage(t, c, "run1", "TemplateNotFound", "AgentTemplate sre-remediation", "namespace "+testNS)
+}
+
+func TestReconcilerManagedRunWithoutRegistrationFailsWithMessage(t *testing.T) {
+	t.Parallel()
+
+	objs := fixtures()
+	tmpl := objs[2].(*sprooziv1alpha1.AgentTemplate)
+	tmpl.Annotations = map[string]string{"sessions.sproozi.com/managed": "true"}
+	run := newRun("run1")
+	run.Status.Phase = sprooziv1alpha1.AgentRunPhaseQueued
+	c := fake.NewClientBuilder().
+		WithScheme(newScheme()).
+		WithObjects(append(objs, run)...).
+		WithStatusSubresource(&sprooziv1alpha1.AgentRun{}).
+		Build()
+
+	if _, err := reconcileRun(t, c, "run1"); err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+	assertReadyMessage(t, c, "run1", "SessionBindingRejected", "Session registration", "no longer exists")
 }
 
 func TestReconcilerQueuedRunFailsWhenPolicyMissing(t *testing.T) {
@@ -335,6 +604,7 @@ func TestReconcilerQueuedRunFailsWhenPolicyMissing(t *testing.T) {
 	if phase := getPhase(t, c, "run1"); phase != sprooziv1alpha1.AgentRunPhaseFailed {
 		t.Errorf("phase = %q, want %q", phase, sprooziv1alpha1.AgentRunPhaseFailed)
 	}
+	assertReadyMessage(t, c, "run1", "PolicyNotFound", "AgentPolicy sre", "AgentTemplate sre-remediation", "namespace "+testNS)
 }
 
 func TestReconcilerQueuedRunFailsWhenRuntimeMissing(t *testing.T) {
@@ -358,12 +628,13 @@ func TestReconcilerQueuedRunFailsWhenRuntimeMissing(t *testing.T) {
 	if phase := getPhase(t, c, "run1"); phase != sprooziv1alpha1.AgentRunPhaseFailed {
 		t.Errorf("phase = %q, want %q", phase, sprooziv1alpha1.AgentRunPhaseFailed)
 	}
+	assertReadyMessage(t, c, "run1", "RuntimeNotFound", "AgentRuntime codex", "AgentTemplate sre-remediation", "namespace "+testNS)
 }
 
 // An unlaunchable runtime must fail the run at admission. If it were admitted,
-// every Pod create would fail and the run would hold the single active slot
+// every Pod create would fail and the run would hold a place under the cap
 // until its execution deadline.
-func TestReconcilerQueuedRunWithInvalidRuntimeFailsWithoutTakingSlot(t *testing.T) {
+func TestReconcilerQueuedRunWithInvalidRuntimeFailsWithoutTakingCapacity(t *testing.T) {
 	t.Parallel()
 
 	const brokenName = "broken"
@@ -384,6 +655,7 @@ func TestReconcilerQueuedRunWithInvalidRuntimeFailsWithoutTakingSlot(t *testing.
 	good.CreationTimestamp = metav1.NewTime(time.Now())
 
 	r, c := newReconcilerWithSandbox(&k8sresources.FakeSandboxClient{}, append(objs, broken, brokenTemplate, bad, good)...)
+	r.MaxActiveRuns = 1
 	for _, name := range []string{"bad", "good"} {
 		if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: name, Namespace: testNS}}); err != nil {
 			t.Fatalf("reconcile %s: %v", name, err)
@@ -447,6 +719,7 @@ func TestReconcilerQueuedRunCancelledWhenCancelSet(t *testing.T) {
 	if phase := getPhase(t, c, "run1"); phase != sprooziv1alpha1.AgentRunPhaseCancelled {
 		t.Errorf("phase = %q, want %q", phase, sprooziv1alpha1.AgentRunPhaseCancelled)
 	}
+	assertReadyMessage(t, c, "run1", "CancelRequested", "spec.cancel")
 }
 
 func TestReconcilerAdmittedRunCancelledWhenCancelSet(t *testing.T) {
@@ -495,6 +768,7 @@ func TestReconcilerAdmittedRunTimedOut(t *testing.T) {
 	if phase := getPhase(t, c, "run1"); phase != sprooziv1alpha1.AgentRunPhaseTimedOut {
 		t.Errorf("phase = %q, want %q", phase, sprooziv1alpha1.AgentRunPhaseTimedOut)
 	}
+	assertReadyMessage(t, c, "run1", "MaxExecutionDurationExceeded", "execution deadline")
 }
 
 func TestReconcilerRunningRunTimedOut(t *testing.T) {
@@ -699,6 +973,7 @@ func TestReconcilerSandboxFailedTransitionsToFailed(t *testing.T) {
 	if got.Status.Phase != sprooziv1alpha1.AgentRunPhaseFailed {
 		t.Fatalf("expected Failed, got %q", got.Status.Phase)
 	}
+	assertReadyMessage(t, c, "run-sandbox-3", "SandboxExitNonZero", "exited with code 1")
 }
 
 func TestReconcilerSandboxWithoutCompletionTransitionsToFailed(t *testing.T) {
@@ -716,6 +991,7 @@ func TestReconcilerSandboxWithoutCompletionTransitionsToFailed(t *testing.T) {
 	if got.Status.Phase != sprooziv1alpha1.AgentRunPhaseFailed {
 		t.Fatalf("phase = %q, want Failed", got.Status.Phase)
 	}
+	assertReadyMessage(t, c, run.Name, "SandboxExitUnavailable", "exit code")
 }
 
 func TestReconcilerSandboxAbsentTransitionsToFailed(t *testing.T) {
@@ -736,6 +1012,7 @@ func TestReconcilerSandboxAbsentTransitionsToFailed(t *testing.T) {
 	if got.Status.Phase != sprooziv1alpha1.AgentRunPhaseFailed {
 		t.Fatalf("expected Failed on Absent sandbox, got %q", got.Status.Phase)
 	}
+	assertReadyMessage(t, c, "run-sandbox-4", "SandboxGone", "disappeared")
 }
 
 func TestReconcilerSandboxDeletedOnTerminal(t *testing.T) {
@@ -768,5 +1045,88 @@ func TestReconcilerSandboxDeletedOnTerminal(t *testing.T) {
 	}
 	if want := []string{k8sresources.RunName(run.UID)}; !slices.Equal(sc.Deleted, want) {
 		t.Fatalf("deleted sandboxes = %v, want %v", sc.Deleted, want)
+	}
+}
+
+// A lost write of the sandbox name made every later reconcile re-check the
+// existing Pod against the current runtime. Once those differed, the run
+// could never record its sandbox and timed out although the Pod completed.
+func TestReconcilerRecordsSandboxNameAfterStatusConflict(t *testing.T) {
+	t.Parallel()
+
+	run := newRun("run1")
+	run.Status.Phase = sprooziv1alpha1.AgentRunPhaseRunning
+	run.Status.Identity.ServiceAccountName = "sproozi-run1"
+	startedAt := metav1.NewTime(time.Now().Add(-time.Minute))
+	run.Status.StartedAt = &startedAt
+	live := fake.NewClientBuilder().
+		WithScheme(newScheme()).
+		WithObjects(append(fixtures(), run)...).
+		WithStatusSubresource(&sprooziv1alpha1.AgentRun{}).
+		Build()
+	conflicts := 1
+	c := interceptor.NewClient(live, interceptor.Funcs{
+		SubResourceUpdate: func(ctx context.Context, c client.Client, sub string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+			if r, ok := obj.(*sprooziv1alpha1.AgentRun); ok && r.Status.Identity.SandboxName != "" && conflicts > 0 {
+				conflicts--
+				// A concurrent writer changed the run since it was read.
+				var latest sprooziv1alpha1.AgentRun
+				if err := c.Get(ctx, client.ObjectKeyFromObject(r), &latest); err != nil {
+					return err
+				}
+				latest.Annotations = map[string]string{"touched": "yes"}
+				if err := c.Update(ctx, &latest); err != nil {
+					return err
+				}
+				return apierrors.NewConflict(sprooziv1alpha1.GroupVersion.WithResource("agentruns").GroupResource(), r.Name, errors.New("modified"))
+			}
+			return c.SubResource(sub).Update(ctx, obj, opts...)
+		},
+	})
+	r := &controller.AgentRunReconciler{Client: c, APIReader: live, SandboxClient: &k8sresources.FakeSandboxClient{}}
+
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: run.Name, Namespace: testNS}}); err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+	var got sprooziv1alpha1.AgentRun
+	if err := live.Get(context.Background(), client.ObjectKeyFromObject(run), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status.Identity.SandboxName == "" || got.Annotations["touched"] != "yes" {
+		t.Fatalf("sandbox name not recorded after a conflict: %+v", got.Status.Identity)
+	}
+}
+
+// A reconcile whose cached run predates its own sandbox status write reads the
+// run live instead of ensuring the existing Pod again.
+func TestReconcilerStaleCacheDoesNotEnsureRecordedSandbox(t *testing.T) {
+	t.Parallel()
+	sc := &k8sresources.FakeSandboxClient{Status: k8sresources.SandboxStatusRunning}
+	run := newRun("run-stale-sandbox")
+	r, c := newReconcilerWithSandbox(sc, append(fixtures(), run)...)
+	driveToRunning(t, r, run.Name)
+	request := ctrl.Request{NamespacedName: types.NamespacedName{Name: run.Name, Namespace: testNS}}
+	if _, err := r.Reconcile(context.Background(), request); err != nil {
+		t.Fatalf("reconcile (running) error: %v", err)
+	}
+	if len(sc.Ensured) != 1 {
+		t.Fatalf("Ensured = %v, want one sandbox", sc.Ensured)
+	}
+	r.Client = interceptor.NewClient(c.(client.WithWatch), interceptor.Funcs{
+		Get: func(ctx context.Context, w client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+			if err := w.Get(ctx, key, obj, opts...); err != nil {
+				return err
+			}
+			if stale, ok := obj.(*sprooziv1alpha1.AgentRun); ok {
+				stale.Status.Identity.SandboxName = ""
+			}
+			return nil
+		},
+	})
+	if _, err := r.Reconcile(context.Background(), request); err != nil {
+		t.Fatalf("reconcile (stale cache) error: %v", err)
+	}
+	if len(sc.Ensured) != 1 {
+		t.Fatalf("Ensured = %v, want no second Ensure for a recorded sandbox", sc.Ensured)
 	}
 }

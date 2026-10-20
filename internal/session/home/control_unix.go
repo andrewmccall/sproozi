@@ -5,9 +5,11 @@ package home
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/privatefs"
@@ -15,13 +17,44 @@ import (
 
 func socketPath(directory string) string { return filepath.Join(directory, "control.sock") }
 
+// controlPathProblem explains a control socket path that exceeds the platform's
+// sun_path limit (104 bytes on macOS, 108 on Linux, each including the NUL), or
+// returns "". The bind would otherwise fail with a bare "invalid argument".
+func controlPathProblem(path string) string {
+	if problem := controlPathLength(path); problem != "" {
+		return problem + "; set a shorter \"directory\" in config.json"
+	}
+	return ""
+}
+
+// controlPathLength states an over-long control socket path without a remedy,
+// or returns "".
+func controlPathLength(path string) string {
+	limit := len(syscall.RawSockaddrUnix{}.Path) - 1
+	if len(path) <= limit {
+		return ""
+	}
+	return fmt.Sprintf("control socket path %q is %d bytes; this platform allows at most %d", path, len(path), limit)
+}
+
 func listenControl(path string) (net.Listener, error) {
 	if err := privatefs.Check(filepath.Dir(path), true); err != nil {
 		return nil, err
 	}
 	if info, err := os.Lstat(path); err == nil {
-		if info.Mode()&os.ModeSocket == 0 || info.Mode().Perm()&0077 != 0 {
-			return nil, errors.New("home: unsafe stale control path")
+		// Serve prefixes these with the control socket path.
+		if info.Mode()&os.ModeSocket == 0 {
+			return nil, fmt.Errorf("the path exists and is not a socket (%s); remove it if no home daemon is "+
+				"running, then serve again", info.Mode().Type())
+		}
+		if info.Mode().Perm()&0077 != 0 {
+			return nil, fmt.Errorf("the socket allows access by other accounts (mode %04o); remove it if no home "+
+				"daemon is running, or run chmod 600 on it, then serve again", info.Mode().Perm())
+		}
+		// Remove only a stale socket: one that answers belongs to a live process.
+		if conn, dialErr := net.DialTimeout("unix", path, time.Second); dialErr == nil {
+			_ = conn.Close()
+			return nil, errControlListening
 		}
 		if err = os.Remove(path); err != nil {
 			return nil, err
@@ -41,13 +74,30 @@ func listenControl(path string) (net.Listener, error) {
 }
 
 func dialControl(ctx context.Context, path string) (net.Conn, error) {
+	// No daemon can ever listen on an over-long path; say so rather than
+	// suggesting "sproozi serve", which refuses the same directory.
+	if problem := controlPathProblem(path); problem != "" {
+		return nil, errors.New("home: " + problem)
+	}
+	// A missing socket means no daemon, whatever its directory's permissions.
+	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("%w: %s does not exist", ErrControlUnavailable, path)
+	}
 	if err := privatefs.Check(filepath.Dir(path), true); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, ErrControlUnavailable
+		}
 		return nil, err
 	}
 	info, err := os.Lstat(path)
 	if err != nil || info.Mode()&os.ModeSocket == 0 || info.Mode().Perm()&0077 != 0 {
-		return nil, errors.New("home: private control socket unavailable")
+		return nil, ErrControlUnavailable
 	}
 	dialer := net.Dialer{Timeout: 5 * time.Second}
-	return dialer.DialContext(ctx, "unix", path)
+	conn, err := dialer.DialContext(ctx, "unix", path)
+	if errors.Is(err, syscall.ECONNREFUSED) {
+		// A socket left by a stopped daemon refuses connections.
+		return nil, ErrControlUnavailable
+	}
+	return conn, err
 }

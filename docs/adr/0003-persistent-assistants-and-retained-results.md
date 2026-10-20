@@ -5,6 +5,8 @@ Date: 2026-10-08
 
 Partly superseded: [ADR 0015](0015-default-clients-and-native-tool-schemas.md) replaces pinned native client versions. The verification record below describes the clients pinned at the time. Other decisions in this record remain in effect.
 
+Partly superseded: [ADR 0027](0027-configurable-concurrent-admission.md) replaces the one global active execution slot with optional cluster and policy concurrency caps. Delegated workers now run concurrently unless a cap applies, and the coordinator still does not count as an active run. The problem statement below describes the controller at the time.
+
 ## Problem and constraints
 
 A persistent assistant must accept tasks and routines, delegate bounded work,

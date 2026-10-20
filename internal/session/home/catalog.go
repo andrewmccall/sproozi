@@ -249,8 +249,12 @@ func (s *Service) validateExport(e work.Export, id, operation string) error {
 		return fmt.Errorf("home: exported stop, accounting or checkpoint is invalid: %w", err)
 	}
 	launch := e.Stopped.Launch
-	if e.ID != id || e.OperationID != operation || e.Harness != s.config.Local.Harness ||
-		!work.CanonicalID(launch.ThreadID) || launch.InstructionDigest != s.config.Local.InstructionDigest ||
+	local, err := s.localFor(e.Harness)
+	if err != nil {
+		return err
+	}
+	if e.ID != id || e.OperationID != operation || e.Harness != local.Harness ||
+		!work.CanonicalID(launch.ThreadID) || launch.InstructionDigest != local.InstructionDigest ||
 		e.Stopped.Incarnation.ResourceUID == "" || len(launch.Allowances) == 0 {
 		return errors.New("home: export does not match this pull or this home's native binding")
 	}
@@ -266,8 +270,12 @@ func (s *Service) Pull(ctx context.Context, id, operation, sourceName string) (S
 		return Status{}, err
 	}
 	defer unlock()
-	if !work.CanonicalID(operation) || s.workSources[sourceName] == nil {
-		return Status{}, errors.New("home: configured source and operation UUID required")
+	if !work.CanonicalID(operation) {
+		return Status{}, errors.New("home: pull operation UUID required")
+	}
+	if s.workSources[sourceName] == nil {
+		return Status{}, fmt.Errorf("home: pull --from %q names no remote executor configured under "+
+			"\"remote\" or \"workSources\" in this daemon's configuration", sourceName)
 	}
 	r, err := s.readCatalog(id)
 	if err == nil {
@@ -342,6 +350,11 @@ func (s *Service) Resume(ctx context.Context, id, operation string) (Status, err
 		return Status{}, errors.New("home: resume operation UUID required")
 	}
 	r, err := s.readCatalog(id)
+	if os.IsNotExist(err) {
+		if execution, inspectErr := s.coordinator.Inspect(id); inspectErr == nil {
+			return Status{}, notResumable(id, execution)
+		}
+	}
 	if err != nil {
 		return Status{}, err
 	}
@@ -371,7 +384,8 @@ func (s *Service) Resume(ctx context.Context, id, operation string) (Status, err
 		}
 	}
 	if r.Current != "" {
-		return Status{}, errors.New("home: previous execution must stop and commit before resume")
+		return Status{}, rejectedError(fmt.Sprintf("home: previous execution must stop and commit before resume; "+
+			"run \"sproozi stop %s\" first", id))
 	}
 	if len(r.Executions) >= 256 {
 		return Status{}, errors.New("home: execution retention limit reached")
@@ -380,12 +394,16 @@ func (s *Service) Resume(ctx context.Context, id, operation string) (Status, err
 	if err != nil {
 		return Status{}, err
 	}
-	if err = checkpoint.ValidateContinuity(data, s.config.Local.Harness, s.config.Local.InstructionDigest, s.config.Local.MaxCheckpointBytes); err != nil {
+	local, err := s.localFor(r.Committed.Launch.Harness)
+	if err != nil {
 		return Status{}, err
 	}
-	first := session.Launch{Harness: s.config.Local.Harness, ExecutionID: uuid.NewString(), OperationID: operation,
-		AllocationID: uuid.NewString(), Epoch: 1, Placement: s.config.Local.Name,
-		ThreadID: r.Committed.Launch.ThreadID, InstructionDigest: s.config.Local.InstructionDigest,
+	if err = checkpoint.ValidateContinuity(data, local.Harness, local.InstructionDigest, local.MaxCheckpointBytes); err != nil {
+		return Status{}, err
+	}
+	first := session.Launch{Harness: local.Harness, ExecutionID: uuid.NewString(), OperationID: operation,
+		AllocationID: uuid.NewString(), Epoch: 1, Placement: local.Name,
+		ThreadID: r.Committed.Launch.ThreadID, InstructionDigest: local.InstructionDigest,
 		IncludeIgnored: slices.Clone(r.Committed.Launch.IncludeIgnored), Deadline: time.Now().Add(s.duration).UTC(),
 		Allowances: allowances, CheckpointDigest: r.Committed.CheckpointDigest}
 	execution, err := s.createExecution(first, id, func() ([]byte, error) { return data, nil })
@@ -401,6 +419,17 @@ func (s *Service) Resume(ctx context.Context, id, operation string) (Status, err
 		return Status{}, err
 	}
 	return s.catalogStatus(r)
+}
+
+// notResumable explains a resume addressed to an execution rather than a
+// session imported with pull.
+func notResumable(id string, execution session.Record) error {
+	if execution.Session != "" {
+		return fmt.Errorf("home: %s is an execution of session %s; resume the session UUID %s",
+			id, execution.Session, execution.Session)
+	}
+	return fmt.Errorf("home: session %s was started at home with \"sproozi start\"; "+
+		"resume continues only sessions imported with \"sproozi pull\"", id)
 }
 
 func (s *Service) catalogStatus(r localSession) (Status, error) {
@@ -464,7 +493,7 @@ func (s *Service) resolveSession(id string) (string, string, error) {
 		return "", "", err
 	}
 	if r.Current == "" {
-		return "", id, errors.New("home: session has no active execution; use resume")
+		return "", id, rejectedError(fmt.Sprintf("home: session has no active execution; use \"sproozi resume %s\"", id))
 	}
 	return r.Current, id, nil
 }
@@ -510,6 +539,10 @@ func (s *Service) Status(id string) (Status, error) {
 }
 
 func (s *Service) Move(ctx context.Context, id, operation, destination string) (Status, error) {
+	// Refuse an unconfigured destination before binding the operation to it.
+	if err := s.moveDestinationProblem(destination); err != nil {
+		return Status{}, err
+	}
 	execution, sessionID, unlock, err := s.lockSessionExecution(id)
 	if err != nil {
 		return Status{}, err

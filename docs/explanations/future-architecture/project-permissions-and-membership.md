@@ -11,7 +11,7 @@ identify individual people and agents.
 
 Authenticated people and agents receive explicit Project roles and capability
 limits. Removing access prevents new reads and executions. Trusted services must
-still be able to stop existing workers and finish usage accounting.
+still be able to stop existing sandboxes and finish usage accounting.
 
 ## Proposed parts
 

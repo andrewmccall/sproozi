@@ -36,7 +36,8 @@ func (c *Client) CallOwner(ctx context.Context, action string, input, output any
 	r.Header.Set(headerContentType, jsonMedia)
 	response, err := c.http.Do(r)
 	if err != nil {
-		return ownerFailure(CodeUnavailable, 0)
+		return fmt.Errorf("%s: %w", OwnerOutcomeMessage(CodeUnavailable),
+			&RemoteError{Code: CodeUnavailable, Transport: err})
 	}
 	defer func() { _ = response.Body.Close() }()
 	data, err := io.ReadAll(io.LimitReader(response.Body, c.maxBody+1))

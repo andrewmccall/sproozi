@@ -14,7 +14,8 @@ import socket
 import ssl
 import subprocess
 import time
-from build import build_source_hashes
+from build import build_source_hashes, kind_nodes
+from clock import check_node_clocks
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -254,6 +255,8 @@ def setup(images, manager_image):
     expected = "kind-" + cluster
     check(cluster and os.environ.get("KUBECONFIG"), "Explicit Kind cluster and kubeconfig required")
     check(k("config", "current-context").strip() == expected, "Refusing nonselected cluster")
+    # Host-minted certificates below are valid from host time.
+    record("kind-node-clocks-match-host", skewSeconds=check_node_clocks(kind_nodes()))
     # Existing Manager Ordered spec owns the manager installation and cleanup.
     k("get", "deployment", "sproozi-controller-manager", "-n", SYSTEM)
     k("apply", "-k", "config/agent-rbac")
@@ -322,6 +325,8 @@ def setup(images, manager_image):
         str(ca_cert),
         "-CAkey",
         str(ca_key),
+        "-CAserial",
+        str(ca_cert.with_suffix(".srl")),
         "-CAcreateserial",
         "-out",
         str(cert),
@@ -868,17 +873,24 @@ def stock_clients():
             )
             budget_state = None
             if harness == "claude-code" and scenario == "budget":
-                reason = "failed to settle model budget reservation"
                 # The fixture reports more usage than the one-token reservation.
-                # Its response must be withheld and the trusted usage recorded,
-                # capped at the one-token allowance, so the account is exhausted.
+                # The streamed response reaches the client (ADR 0028), the call is
+                # audited as exceeded, and the trusted usage is recorded capped at
+                # the one-token allowance, so the next call is refused.
                 key = data["metadata"]["uid"] + "/model.inference"
                 ledger_name = "sproozi-budget-" + hashlib.sha256(key.encode()).hexdigest()[:20]
                 ledger = json.loads(k("get", "configmap", ledger_name, "-n", SYSTEM, "-o", "json"))
                 budget_state = json.loads(ledger["data"]["state"])
                 check(budget_state["UnitsUsed"] == 1 and budget_state["ReservedUnits"] == 0, budget_state)
                 check(budget_state["pendingReservations"] == 0, budget_state)
-                check(not any(event.get("allowed") for event in audit), audit)
+                exceeded = [
+                    event
+                    for event in audit
+                    if event.get("allowed")
+                    and event.get("usageSource") == "provider"
+                    and event.get("endReason") == "exceeded"
+                ]
+                check(len(exceeded) == 1, audit)
                 attempts = [event for event in audit if event.get("upstreamStatus") == 200]
                 check(len(attempts) == 1, attempts)
             denied = [
@@ -923,13 +935,11 @@ def task_service_checks():
     call("submit", submission("expired", minutes=-1), True)
     call("submit", submission("too-far", minutes=61), True)
     for token in ["", TOKEN + "bad"]:
+        # No body: the task service rejects the bearer before reading one, and
+        # closing with an unread body resets TCP, which ends the pod-bound
+        # kubectl port-forward mid-run (seen in CI as SSL UNEXPECTED_EOF).
         try:
-            request(
-                TASKPORT,
-                "/mcp",
-                {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-                token=token,
-            )
+            request(TASKPORT, "/mcp", token=token)
         except urllib.error.HTTPError as e:
             check(e.code == 401, e.code)
         else:
@@ -1023,16 +1033,63 @@ print(json.dumps({'gatewayAuthenticated':True,'missingIdentityDenied':True,'unkn
     record("worker-identity-capability-cni-boundary", probe=json.loads(result))
 
 
+def set_policy_cap(name, cap):
+    # cap None removes the field, so the policy has no per-policy limit.
+    k(
+        "patch",
+        "agentpolicy",
+        name,
+        "-n",
+        SYSTEM,
+        "--type=merge",
+        "-p",
+        json.dumps({"spec": {"maxActiveRuns": cap}}),
+    )
+
+
+def uncapped_concurrency():
+    # The default install has no cluster cap and kind-workers has no policy
+    # cap, so two held runs must be active at the same time.
+    names = ["kind-uncapped-1", "kind-uncapped-2"]
+    views = [
+        {"uid": agentrun(name, "hermes", task="SPROOZI_HOLD; call fixture verify.")["metadata"]["uid"]}
+        for name in names
+    ]
+    for view in views:
+        running_pod(view)
+    phases = [getrun(name).get("status", {}).get("phase") for name in names]
+    check(phases == ["Running", "Running"], phases)
+    for name in names:
+        k("patch", "agentrun", name, "-n", SYSTEM, "--type=merge", "-p", '{"spec":{"cancel":true}}')
+    for name in names:
+        cleaned(waitrun(name, "Cancelled", 60))
+    record("uncapped-policy-concurrent-runs", uids=[view["uid"] for view in views])
+
+
 def cancellation_and_deadline():
+    # Cap the workflow's policy at one active run so the second task must wait.
+    set_policy_cap("kind-workers", 1)
     held = call(
         "submit", submission("cancel-proof", task="SPROOZI_HOLD; call fixture verify.")
     )
     pod = running_pod(held)
     gateway_and_cni(pod)
-    second = call("submit", submission("global-slot", task="Call fixture verify."))
-    eventually(
-        lambda: getrun(second["id"]).get("status", {}).get("phase") == "Queued", 30
-    )
+    check(getrun(held["id"]).get("status", {}).get("policyName") == "kind-workers")
+    second = call("submit", submission("policy-cap", task="Call fixture verify."))
+    # Initialization sets Queued first; the cap reason follows on the next
+    # reconcile, so wait for both.
+    def held_by_cap():
+        status = getrun(second["id"]).get("status", {})
+        ready = next(
+            (c for c in status.get("conditions", []) if c.get("type") == "Ready"), {}
+        )
+        return (
+            status.get("phase") == "Queued"
+            and ready.get("reason") == "WaitingForConcurrencyCap"
+            and "policy cap 1 (AgentPolicy kind-workers) reached" in ready.get("message", "")
+        )
+
+    eventually(held_by_cap, 30)
     check(not json.loads(
         k(
             "get",
@@ -1051,11 +1108,13 @@ def cancellation_and_deadline():
     stopped = cleaned(waitrun(held["id"], "Cancelled", 60))
     check(not stopped["status"].get("result"))
     cleaned(waitrun(second["id"], "Succeeded", 240))
+    set_policy_cap("kind-workers", None)
     record(
-        "single-global-slot-monotonic-cancel-cleanup",
+        "policy-cap-monotonic-cancel-cleanup",
         cancelledUID=held["uid"],
         queuedUID=second["uid"],
     )
+    uncapped_concurrency()
     agentrun(
         "kind-hermes-deadline",
         "hermes",
@@ -1204,7 +1263,7 @@ def coordinator_setup(images):
 
 def coordinator_gateway_owner(stage):
     # Census the real native processes: a foreground command plus s6's restored
-    # profile service otherwise competes for the same gateway lock after restart.
+    # remote executor otherwise competes for the same gateway lock after restart.
     script = """import json, os
 from pathlib import Path
 actors=[]

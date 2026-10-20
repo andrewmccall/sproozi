@@ -258,7 +258,7 @@ func claudeArguments(c config, profile agentprofile.Profile, withSkills bool) []
 		args = append(args, "--plugin-dir", profilePlugin)
 	}
 	args = append(args, "--setting-sources", "", "--settings", claudeSettings, "--permission-mode", "bypassPermissions",
-		"--append-system-prompt", c.Instructions+"\n\n"+profileInstructions(profile))
+		"--append-system-prompt", c.Instructions+"\n\n"+profileInstructions(profile, harness.NativeClaude))
 	if c.Model != "" {
 		args = append(args, "--model", c.Model)
 	}

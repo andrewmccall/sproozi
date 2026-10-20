@@ -82,11 +82,13 @@ func LoadRegistry(data []byte, credentialsDir string) (*Registry, error) {
 		if config.BearerTokenFile != "" {
 			path, err := credentialPath(credentialsDir, config.BearerTokenFile)
 			if err != nil {
-				return nil, fmt.Errorf("MCP registration %s credential path is invalid", name)
+				return nil, fmt.Errorf("MCP registration %s credential path is invalid: "+
+					"bearerTokenFile must name a Secret file mounted under %s", name, credentialsDir)
 			}
 			file, err := os.Open(path)
 			if err != nil {
-				return nil, fmt.Errorf("MCP registration %s credential is unavailable", name)
+				return nil, fmt.Errorf("MCP registration %s credential is unavailable: "+
+					"mount the Secret file named by bearerTokenFile under %s", name, credentialsDir)
 			}
 			data, err := io.ReadAll(io.LimitReader(file, (16<<10)+1))
 			closeErr := file.Close()

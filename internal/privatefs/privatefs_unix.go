@@ -46,6 +46,11 @@ func openFile(path string, create bool) (*os.File, error) {
 func createFile(path string) (*os.File, error) { return open(path, os.O_RDWR|os.O_CREATE|os.O_EXCL) }
 func open(path string, flags int) (*os.File, error) {
 	f, err := os.OpenFile(path, flags|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0600)
+	if errors.Is(err, syscall.ELOOP) {
+		// O_NOFOLLOW refuses a final symbolic link with ELOOP: a link is not an
+		// ordinary private file.
+		return nil, unsafePath(path)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -71,6 +76,9 @@ func Lock(path string) (*os.File, error) {
 	}
 	if err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		_ = f.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil, lockedError{err}
+		}
 		return nil, err
 	}
 	return f, nil

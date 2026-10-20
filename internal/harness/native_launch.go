@@ -41,6 +41,15 @@ type NativeLaunch struct {
 	ProfileArchive []byte `json:"profileArchive,omitempty"`
 }
 
+// NativeUserInstructionsFile is the native user-level instruction file name
+// inside each harness's native home, and of its harness's profile instructions.
+func NativeUserInstructionsFile(kind NativeKind) string {
+	if kind == NativeClaude {
+		return "CLAUDE.md"
+	}
+	return "AGENTS.md"
+}
+
 // NativeGateway projects a fresh workload token only at activation. Its fixed
 // token/trust paths are runtime-owned mounts outside the portable state pair.
 type NativeGateway struct {

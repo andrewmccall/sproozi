@@ -2,14 +2,12 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-env_file="${SPROOZI_DEMO_ENV_FILE:-$repo_root/.local/demo.env}"
-if [[ -f "$env_file" ]]; then
-  set -a
-  # shellcheck disable=SC1090
-  source "$env_file"
-  set +a
-fi
-bash "$repo_root/hack/demo/check.sh" >/dev/null
+# The shared loader validates the file before sourcing it; the caller's
+# environment wins over the file, as in hack/demo/run.sh.
+source "$repo_root/hack/demo/env.sh"
+demo_env_load
+# hack/demo/run.sh sets SPROOZI_DEMO_CHECKED=1 after running the same check.
+[[ "${SPROOZI_DEMO_CHECKED:-0}" == 1 ]] || bash "$repo_root/hack/demo/check.sh" >/dev/null
 kubectl_bin="${KUBECTL:-kubectl}"
 
 work_dir="$repo_root/.local/demo/tls"
@@ -30,12 +28,17 @@ extendedKeyUsage=serverAuth
 keyUsage=digitalSignature,keyEncipherment
 EOF
   openssl x509 -req -days 2 -sha256 \
-    -in "$work_dir/tls.csr" -CA "$work_dir/ca.crt" -CAkey "$work_dir/ca.key" -CAcreateserial \
+    -in "$work_dir/tls.csr" -CA "$work_dir/ca.crt" -CAkey "$work_dir/ca.key" \
+    -CAserial "$work_dir/ca.srl" -CAcreateserial \
     -extfile "$work_dir/extensions.cnf" -out "$work_dir/tls.crt" >/dev/null 2>&1
 fi
 
 openai_key_file="$(mktemp "$work_dir/openai-api-key.XXXXXX")"
 trap 'rm -f "$openai_key_file"' EXIT
+# Fatal signals skip EXIT traps; exit explicitly so the key file is removed.
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 if [[ "${MODEL_AUTH_MODE:-api_key}" == chatgpt ]]; then
   "$kubectl_bin" create secret generic model-gateway-chatgpt -n sproozi-system \
     --from-file=session.json="$CHATGPT_SESSION_FILE" --dry-run=client -o yaml | "$kubectl_bin" apply -f -

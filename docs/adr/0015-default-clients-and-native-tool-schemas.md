@@ -3,6 +3,12 @@
 Status: accepted; package selection replaced by [ADR 0021](0021-pinned-ci-inputs-and-latest-client-canary.md)
 Date: 2026-10-16
 
+Partly superseded by [ADR 0028](0028-streamed-model-responses-and-estimated-interrupts.md): strict per-account serialization of model requests now applies only to calls that reserve all remaining capacity. Calls with bounded reservations run in parallel while their reservations fit.
+A restart still never refunds an unknown reservation, but it no longer holds
+one forever: the ledger keeps each reservation as a lease and, once the lease
+expires, settles it at its recovery charge, an estimate. See ADR 0028's decision on
+recovering abandoned reservations.
+
 ## Problem and constraints
 
 Sproozi previously selected exact client releases in installers, executable
@@ -56,7 +62,8 @@ gateway. A waiting request can be cancelled and remains subject to its transport
 and execution deadlines. Different accounts remain independent. Release the
 request slot after settlement or failure; retain the durable ledger as the
 source of budget authority. Restarting the gateway cannot release an unknown
-reservation. Discovery requests do not enter this queue.
+reservation (since ADR 0028, the ledger settles it at its recovery charge, an
+estimate, once its lease expires; it is still never refunded). Discovery requests do not enter this queue.
 
 This replaces the version-pinning portions of ADRs 0008, 0010 and 0011, and the
 combined discovery-schema presentation in ADR 0001. It also replaces the pinned

@@ -140,8 +140,12 @@ func TestStockCodexLoadsTheSprooziIntegration(t *testing.T) {
 		"- " + harness.ManagedSkillName + ":",
 		"- review: PROFILE_SKILL_MARKER",
 		profileMarker,
+		codexMarker,
 		"diagnose",
 	})
+	if strings.Contains(body, claudeMarker) {
+		t.Fatal("Codex received Claude's profile instructions")
+	}
 	managed, profile := strings.Index(body, managedHeading), strings.Index(body, profileMarker)
 	if managed > profile || profile > strings.Index(body, "HOSTILE_REPOSITORY_INSTRUCTION") {
 		t.Fatal("expected Sproozi, then profile, then repository instructions")
@@ -186,9 +190,10 @@ func TestStockClaudeLoadsTheSprooziIntegration(t *testing.T) {
 		"- sproozi:" + harness.ManagedSkillName + ":",
 		"- profile:review: PROFILE_SKILL_MARKER",
 		profileMarker,
+		claudeMarker,
 		`"name":"mcp__sproozi__diagnose"`,
 	})
-	if strings.Contains(body, "HOSTILE_REPOSITORY_INSTRUCTION") {
+	if strings.Contains(body, "HOSTILE_REPOSITORY_INSTRUCTION") || strings.Contains(body, codexMarker) {
 		t.Fatal("repository CLAUDE.md loaded with every setting source disabled")
 	}
 }

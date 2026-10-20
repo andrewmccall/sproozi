@@ -34,6 +34,7 @@ const testInstructions = "fixture approved developer instruction"
 const testLimit = int64(8 << 20)
 const testLocal = "local"
 const testRemote = "remote"
+const testClaudeLocal = "local-claude"
 const testIgnoredFile = "needed.bin"
 
 type placementFixture struct {
@@ -294,7 +295,7 @@ func testService(t *testing.T) (*Service, *placementFixture, *placementFixture, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &Service{config: config, duration: time.Hour, local: local, placements: placements, coordinator: coordinator}
+	s := &Service{config: config, duration: time.Hour, stacks: []*localStack{{config: config.Local}}, placements: placements, coordinator: coordinator}
 	t.Cleanup(func() { _ = s.Close() })
 	return s, local, remote, repo
 }
@@ -313,7 +314,7 @@ func TestStartIgnoredOptInRetainsBytesAndImmutableSelectionAcrossVisits(t *testi
 	data, digest := testArtifact(t, repo, testIgnoredFile)
 	local.artifact, local.digest, remote.artifact, remote.digest = data, digest, data, digest
 	id, operation := uuid.NewString(), uuid.NewString()
-	if _, err := s.Start(t.Context(), id, operation, repo, []string{testIgnoredFile}); err != nil {
+	if _, err := s.Start(t.Context(), id, operation, repo, "", []string{testIgnoredFile}); err != nil {
 		t.Fatal(err)
 	}
 	execution, err := s.coordinator.Inspect(id)
@@ -339,7 +340,7 @@ func TestStartIgnoredOptInRetainsBytesAndImmutableSelectionAcrossVisits(t *testi
 	if len(first.IncludeIgnored) != 1 || first.IncludeIgnored[0] != testIgnoredFile {
 		t.Fatal("initial launch omitted the approved ignored file")
 	}
-	if _, err = s.Start(t.Context(), id, operation, repo, nil); err == nil {
+	if _, err = s.Start(t.Context(), id, operation, repo, "", nil); err == nil {
 		t.Fatal("retry removed immutable ignored selection")
 	}
 	for _, destination := range []string{testRemote, testLocal, testRemote} {
@@ -360,7 +361,7 @@ func TestInitialSessionImportRoundTripAndLostReplies(t *testing.T) {
 	s, local, remote, repo := testService(t)
 	id, startOp, moveOp := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	local.lostActivate = true
-	if _, err := s.Start(t.Context(), id, startOp, repo, nil); err == nil {
+	if _, err := s.Start(t.Context(), id, startOp, repo, "", nil); err == nil {
 		t.Fatal("lost activation reply succeeded")
 	}
 	status, err := s.Recover(t.Context(), id)
@@ -405,7 +406,7 @@ func TestInitialSessionImportRoundTripAndLostReplies(t *testing.T) {
 func TestRecoverFirstMoveRetainedBeforeRestart(t *testing.T) {
 	s, local, remote, repo := testService(t)
 	id := uuid.NewString()
-	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, nil); err != nil {
+	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil); err != nil {
 		t.Fatal(err)
 	}
 	local.lostStop = true
@@ -434,7 +435,7 @@ func TestRejectedInitialActivationCancelsWithoutInspectingOrCompletingNativeTurn
 	s, local, _, repo := testService(t)
 	id := uuid.NewString()
 	local.rejectActivate = true
-	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, nil); err == nil {
+	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil); err == nil {
 		t.Fatal("native activation rejection hidden")
 	}
 	retained, err := s.coordinator.Inspect(id)
@@ -464,7 +465,7 @@ func TestPartiallyCreatedInitialSessionCancelsWithoutProvisioning(t *testing.T) 
 	s, local, remote, repo := testService(t)
 	id, operation := uuid.NewString(), uuid.NewString()
 	local.partialCreate = true
-	if _, err := s.Start(t.Context(), id, operation, repo, nil); err == nil {
+	if _, err := s.Start(t.Context(), id, operation, repo, "", nil); err == nil {
 		t.Fatal("expected failed initial prepare")
 	}
 	r, err := s.coordinator.Inspect(id)
@@ -487,11 +488,11 @@ func TestPreparingInitialSessionRetriesCreateOnlyThroughStart(t *testing.T) {
 	s, local, _, repo := testService(t)
 	id, operation := uuid.NewString(), uuid.NewString()
 	local.partialCreate = true
-	if _, err := s.Start(t.Context(), id, operation, repo, nil); err == nil {
+	if _, err := s.Start(t.Context(), id, operation, repo, "", nil); err == nil {
 		t.Fatal("expected failed initial prepare")
 	}
 	local.partialCreate = false
-	status, err := s.Start(t.Context(), id, operation, repo, nil)
+	status, err := s.Start(t.Context(), id, operation, repo, "", nil)
 	if err != nil || status.Phase != string(session.PhaseActive) || local.initials != 2 || local.activations != 1 {
 		t.Fatalf("explicit preparation retry: %+v %v", status, err)
 	}
@@ -501,7 +502,7 @@ func TestUnknownInitialUsageNeverStartsRemoteAndCanCancel(t *testing.T) {
 	t.Parallel()
 	s, local, remote, repo := testService(t)
 	id := uuid.NewString()
-	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, nil); err != nil {
+	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil); err != nil {
 		t.Fatal(err)
 	}
 	local.unknownUsage = true
@@ -593,5 +594,76 @@ func TestTerminalInputRetainsPartialBusySuffixAndDetaches(t *testing.T) {
 	}
 	if string(received) != "abcdef" || calls != 3 {
 		t.Fatalf("terminal lost/repeated suffix or sent detach: %q calls=%d", received, calls)
+	}
+}
+
+// A start that repeats an ID under a new operation is rejected with the
+// retained operation, never a hint to try yet another new one.
+func TestStartConflictNamesTheRetainedOperation(t *testing.T) {
+	t.Parallel()
+	s, _, _, repo := testService(t)
+	id, operation := uuid.NewString(), uuid.NewString()
+	if _, err := s.Start(t.Context(), id, operation, repo, "", nil); err != nil {
+		t.Fatal(err)
+	}
+	_, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil)
+	want := "home: start intent conflicts with retained launch; " + id + " was started with operation " + operation +
+		": to continue it, repeat the original start command with --operation " + operation +
+		", or run \"sproozi cancel " + id + "\" to revoke and force-stop its current execution"
+	if !errors.Is(err, ErrRejected) || err.Error() != want {
+		t.Fatalf("got %v, want %q", err, want)
+	}
+}
+
+func TestStartSelectsTheRequestedLocalHarnessPerSession(t *testing.T) {
+	t.Parallel()
+	repo, data, digest := testWorkspace(t)
+	codex := &placementFixture{rows: map[string]session.Observation{}, artifact: data, digest: digest, charge: 1}
+	claude := &placementFixture{rows: map[string]session.Observation{}, artifact: data, digest: digest, charge: 1}
+	dir := filepath.Join(testutil.PrivateDir(t), "home")
+	primary := runtimedocker.PlacementConfig{Harness: harness.NativeCodex, Name: testLocal, InstructionDigest: fmt.Sprintf("%x", sha256.Sum256([]byte(testInstructions))), MaxCheckpointBytes: testLimit, RetainedBytes: 64 << 20}
+	second := primary
+	second.Harness, second.Name = harness.NativeClaude, testClaudeLocal
+	placements := map[string]session.Placement{testLocal: codex, testClaudeLocal: claude}
+	coordinator, err := session.Open(filepath.Join(dir, "journal"), placements, testLimit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := Config{Directory: dir, Local: primary, Allowances: map[string]session.Allowance{testCapability: {Units: session.Limit{Bounded: true, Value: 10}}}}
+	s := &Service{config: config, duration: time.Hour, stacks: []*localStack{{config: primary}, {config: second}}, placements: placements, coordinator: coordinator}
+	t.Cleanup(func() { _ = s.Close() })
+
+	codexID, claudeID := uuid.NewString(), uuid.NewString()
+	if _, err = s.Start(t.Context(), codexID, uuid.NewString(), repo, "", nil); err != nil {
+		t.Fatal(err)
+	}
+	claudeOperation := uuid.NewString()
+	if _, err = s.Start(t.Context(), claudeID, claudeOperation, repo, harness.NativeClaude, nil); err != nil {
+		t.Fatal(err)
+	}
+	for id, want := range map[string]runtimedocker.PlacementConfig{codexID: primary, claudeID: second} {
+		r, err := s.coordinator.Inspect(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if launch := r.Operations[0].Launch; launch.Harness != want.Harness || launch.Placement != want.Name {
+			t.Fatalf("session %s launched %s on %s", id, launch.Harness, launch.Placement)
+		}
+		if got := s.localDestination(r, testLocal); got != want.Name {
+			t.Fatalf("move --to local for %s resolved to %s", want.Harness, got)
+		}
+		if got := s.localDestination(r, testRemote); got != testRemote {
+			t.Fatalf("remote destination rewritten to %s", got)
+		}
+	}
+	if codex.initials != 1 || claude.initials != 1 {
+		t.Fatalf("placements prepared codex=%d claude=%d", codex.initials, claude.initials)
+	}
+	if _, err = s.Start(t.Context(), claudeID, claudeOperation, repo, harness.NativeCodex, nil); err == nil {
+		t.Fatal("retry changed an existing session's harness")
+	}
+	single, _, _, _ := testService(t)
+	if _, err = single.Start(t.Context(), uuid.NewString(), uuid.NewString(), repo, harness.NativeClaude, nil); err == nil || !strings.Contains(err.Error(), "not configured") {
+		t.Fatalf("unconfigured harness: %v", err)
 	}
 }

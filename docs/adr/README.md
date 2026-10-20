@@ -52,6 +52,15 @@ These records preserve the reasons for each design. A later record can replace
 part of an earlier decision. ADR 0015 replaces exact client-version selection
 and the combined MCP discovery schema. ADR 0021 replaces ADR 0015's unversioned
 client installs with pinned lockfiles and digests for CI and the verifiers.
+ADR 0027 replaces the single active-run slot from ADRs 0003 and 0017, and ADR
+0016's rejection of a revalidation cache. ADR 0028 replaces ADR 0002's buffered
+model responses and response bound, narrows ADR 0009's full charge to calls
+that can't be estimated and budget cuts, limits ADR 0015's per-account serialization to
+unbounded calls, and settles ADR 0015's unknown reservations after a restart
+at their recovery charge, an estimate, once their leases expire.
+
+ADR 0029 extends those pinned clients to the published native image, replacing
+ADR 0024's statement that releases do not pin clients.
 
 | Decision | Topic |
 | --- | --- |
@@ -80,4 +89,9 @@ client installs with pinned lockfiles and digests for CI and the verifiers.
 | [0023](0023-controller-writes-only-in-sproozi-agents.md) | The controller writes sandbox objects only in sproozi-agents; its cluster role keeps reads. |
 | [0024](0024-native-host-platforms-and-cli-releases.md) | Native host security and automated CLI releases with a Homebrew tap. |
 | [0025](0025-managed-harness-integration-and-diagnose.md) | Every harness receives the Sproozi integration, and the gateway explains an execution's own denials. |
-| [0026](0026-user-profile-for-managed-sessions.md) | One user profile, mounted live in Docker and stored by digest for Kubernetes. |
+| [0026](0026-single-gateway-refresh-owner-with-recreate.md) | One gateway replica with a Recreate rollout owns the rotating ChatGPT credential refresh. |
+| [0027](0027-configurable-concurrent-admission.md) | Optional cluster and policy caps replace the single active-run slot; the gateway serves revalidation from a watch cache. |
+| [0028](0028-streamed-model-responses-and-estimated-interrupts.md) | The model gateway streams responses, charges interrupted calls an estimate, refuses detached work, runs bounded calls in parallel and gives model calls their own deadline. |
+| [0029](0029-local-provisioning-and-lifecycle.md) | Local provisioning, per-harness local placements and home-owned certificates. |
+| [0030](0030-kubernetes-release-assets-and-certificates.md) | Kubernetes release assets and a self-managed certificate controller. |
+| [0031](0031-user-profile-for-managed-sessions.md) | One user profile, sent with each Docker launch and stored by digest for Kubernetes, replacing the shared agent files. |

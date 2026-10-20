@@ -5,6 +5,8 @@ Date: 2026-10-07
 
 Partly superseded: [ADR 0015](0015-default-clients-and-native-tool-schemas.md) replaces exact client-version pinning. The OpenCode revisit condition below now applies to a stock default release rather than a pinned one. Other decisions in this record remain in effect.
 
+Partly superseded by [ADR 0028](0028-streamed-model-responses-and-estimated-interrupts.md): the gateway streams model responses instead of buffering and withholding them, the bounded response body limit is removed, and a harness that disconnects mid-response is charged an estimate rather than consuming the whole reservation.
+
 ## Problem and constraints
 
 The runtime already creates disposable Pods and observes process completion,

@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
@@ -99,6 +100,13 @@ type SandboxCompletion struct {
 	Result   *sprooziv1alpha1.AgentRunResult
 }
 
+// IsQuotaExceeded reports whether err is a namespace ResourceQuota rejecting
+// a create because the quota is used up. Such a rejection can clear when other
+// workloads finish, so callers retry rather than fail.
+func IsQuotaExceeded(err error) bool {
+	return err != nil && apierrors.IsForbidden(err) && strings.Contains(err.Error(), "exceeded quota")
+}
+
 // PodSandboxClient implements SandboxClient using a Kubernetes Pod.
 type PodSandboxClient struct {
 	c client.Client
@@ -165,20 +173,156 @@ func validateExistingSandbox(existing, wanted *corev1.Pod) error {
 			return fmt.Errorf("existing sandbox %s has different run identity", wanted.Name)
 		}
 	}
-	if existing.Spec.ServiceAccountName != wanted.Spec.ServiceAccountName ||
-		existing.Spec.AutomountServiceAccountToken == nil || !reflect.DeepEqual(existing.Spec.AutomountServiceAccountToken, wanted.Spec.AutomountServiceAccountToken) ||
-		existing.Spec.HostNetwork != wanted.Spec.HostNetwork || existing.Spec.HostPID != wanted.Spec.HostPID || existing.Spec.HostIPC != wanted.Spec.HostIPC ||
-		(existing.Spec.ShareProcessNamespace != nil && *existing.Spec.ShareProcessNamespace) ||
-		existing.Spec.RestartPolicy != wanted.Spec.RestartPolicy ||
-		!reflect.DeepEqual(existing.Spec.SecurityContext, wanted.Spec.SecurityContext) ||
-		!reflect.DeepEqual(existing.Spec.RuntimeClassName, wanted.Spec.RuntimeClassName) ||
-		!apiequality.Semantic.DeepEqual(existing.Spec.Containers, wanted.Spec.Containers) ||
-		!reflect.DeepEqual(existing.Spec.InitContainers, wanted.Spec.InitContainers) ||
-		!reflect.DeepEqual(existing.Spec.EphemeralContainers, wanted.Spec.EphemeralContainers) ||
-		!reflect.DeepEqual(existing.Spec.Volumes, wanted.Spec.Volumes) {
-		return fmt.Errorf("existing sandbox %s has unsafe Pod settings", wanted.Name)
+	// The API server fills unset fields with defaults, so compare both specs
+	// with the same defaults applied. Defaulting only fills unset fields: any
+	// value set on the existing Pod is still compared. Semantic equality
+	// compares Quantities by value: their cached string form depends on how and
+	// when each copy was decoded or printed.
+	e, w := *withAPIDefaults(&existing.Spec), *withAPIDefaults(&wanted.Spec)
+	var differs []string
+	for field, same := range map[string]bool{
+		"serviceAccountName":           e.ServiceAccountName == w.ServiceAccountName,
+		"automountServiceAccountToken": e.AutomountServiceAccountToken != nil && reflect.DeepEqual(e.AutomountServiceAccountToken, w.AutomountServiceAccountToken),
+		"hostNamespaces":               e.HostNetwork == w.HostNetwork && e.HostPID == w.HostPID && e.HostIPC == w.HostIPC,
+		"shareProcessNamespace":        e.ShareProcessNamespace == nil || !*e.ShareProcessNamespace,
+		"restartPolicy":                e.RestartPolicy == w.RestartPolicy,
+		"securityContext":              reflect.DeepEqual(e.SecurityContext, w.SecurityContext),
+		"runtimeClassName":             reflect.DeepEqual(e.RuntimeClassName, w.RuntimeClassName),
+		"containers":                   apiequality.Semantic.DeepEqual(e.Containers, w.Containers),
+		"initContainers":               apiequality.Semantic.DeepEqual(e.InitContainers, w.InitContainers),
+		"ephemeralContainers":          apiequality.Semantic.DeepEqual(e.EphemeralContainers, w.EphemeralContainers),
+		"volumes":                      apiequality.Semantic.DeepEqual(e.Volumes, w.Volumes),
+	} {
+		if !same {
+			differs = append(differs, field)
+		}
+	}
+	if len(differs) > 0 {
+		slices.Sort(differs)
+		return fmt.Errorf("existing sandbox %s has unsafe Pod settings: %s", wanted.Name, strings.Join(differs, ", "))
 	}
 	return nil
+}
+
+// withAPIDefaults returns a copy of spec with the defaults the API server
+// applies to the fields validateExistingSandbox compares. A runtime template may
+// leave these unset, for example a probe's thresholds or a ConfigMap volume's
+// mode, and the stored Pod then differs from the built one only by defaults.
+func withAPIDefaults(spec *corev1.PodSpec) *corev1.PodSpec {
+	out := spec.DeepCopy()
+	for i := range out.Containers {
+		defaultContainer(&out.Containers[i])
+	}
+	for i := range out.InitContainers {
+		defaultContainer(&out.InitContainers[i])
+	}
+	for i := range out.Volumes {
+		defaultVolume(&out.Volumes[i].VolumeSource)
+	}
+	return out
+}
+
+func defaultContainer(c *corev1.Container) {
+	if c.ImagePullPolicy == "" {
+		c.ImagePullPolicy = corev1.PullIfNotPresent
+		if !strings.Contains(c.Image, "@") {
+			if _, tag, found := strings.Cut(c.Image[strings.LastIndex(c.Image, "/")+1:], ":"); !found || tag == "latest" {
+				c.ImagePullPolicy = corev1.PullAlways
+			}
+		}
+	}
+	if c.TerminationMessagePath == "" {
+		c.TerminationMessagePath = corev1.TerminationMessagePathDefault
+	}
+	if c.TerminationMessagePolicy == "" {
+		c.TerminationMessagePolicy = corev1.TerminationMessageReadFile
+	}
+	for i := range c.Ports {
+		if c.Ports[i].Protocol == "" {
+			c.Ports[i].Protocol = corev1.ProtocolTCP
+		}
+	}
+	for i := range c.Env {
+		if from := c.Env[i].ValueFrom; from != nil {
+			defaultFieldRef(from.FieldRef)
+		}
+	}
+	for _, probe := range []*corev1.Probe{c.LivenessProbe, c.ReadinessProbe, c.StartupProbe} {
+		if probe == nil {
+			continue
+		}
+		defaultHTTPGet(probe.HTTPGet)
+		if probe.TimeoutSeconds == 0 {
+			probe.TimeoutSeconds = 1
+		}
+		if probe.PeriodSeconds == 0 {
+			probe.PeriodSeconds = 10
+		}
+		if probe.SuccessThreshold == 0 {
+			probe.SuccessThreshold = 1
+		}
+		if probe.FailureThreshold == 0 {
+			probe.FailureThreshold = 3
+		}
+	}
+	if c.Lifecycle != nil {
+		for _, handler := range []*corev1.LifecycleHandler{c.Lifecycle.PostStart, c.Lifecycle.PreStop} {
+			if handler != nil {
+				defaultHTTPGet(handler.HTTPGet)
+			}
+		}
+	}
+}
+
+func defaultHTTPGet(action *corev1.HTTPGetAction) {
+	if action == nil {
+		return
+	}
+	if action.Path == "" {
+		action.Path = "/"
+	}
+	if action.Scheme == "" {
+		action.Scheme = corev1.URISchemeHTTP
+	}
+}
+
+func defaultFieldRef(ref *corev1.ObjectFieldSelector) {
+	if ref != nil && ref.APIVersion == "" {
+		ref.APIVersion = "v1"
+	}
+}
+
+func defaultVolume(source *corev1.VolumeSource) {
+	mode := corev1.ConfigMapVolumeSourceDefaultMode
+	switch {
+	case source.ConfigMap != nil && source.ConfigMap.DefaultMode == nil:
+		source.ConfigMap.DefaultMode = &mode
+	case source.Secret != nil && source.Secret.DefaultMode == nil:
+		source.Secret.DefaultMode = &mode
+	case source.DownwardAPI != nil:
+		if source.DownwardAPI.DefaultMode == nil {
+			source.DownwardAPI.DefaultMode = &mode
+		}
+		for i := range source.DownwardAPI.Items {
+			defaultFieldRef(source.DownwardAPI.Items[i].FieldRef)
+		}
+	case source.Projected != nil:
+		if source.Projected.DefaultMode == nil {
+			source.Projected.DefaultMode = &mode
+		}
+		for i := range source.Projected.Sources {
+			projection := &source.Projected.Sources[i]
+			if token := projection.ServiceAccountToken; token != nil && token.ExpirationSeconds == nil {
+				expiration := int64(3600)
+				token.ExpirationSeconds = &expiration
+			}
+			if projection.DownwardAPI != nil {
+				for j := range projection.DownwardAPI.Items {
+					defaultFieldRef(projection.DownwardAPI.Items[j].FieldRef)
+				}
+			}
+		}
+	}
 }
 
 // GetStatus returns the current lifecycle status of the named Sandbox.

@@ -13,11 +13,16 @@ import (
 	"github.com/andrewmccall/sproozi/internal/harness"
 )
 
-const profileMarker = "PROFILE_INSTRUCTION_MARKER prefer small commits"
+const (
+	profileMarker = "PROFILE_INSTRUCTION_MARKER prefer small commits"
+	codexMarker   = "CODEX_PROFILE_MARKER"
+	claudeMarker  = "CLAUDE_PROFILE_MARKER"
+)
 
-// testProfile is a user profile with instructions and one skill that has an
-// executable helper.
-var testProfile = agentprofile.Profile{Instructions: profileMarker, Skills: []agentprofile.Skill{{Name: "review",
+// testProfile is a user profile with shared and per-harness instructions and
+// one skill that has an executable helper.
+var testProfile = agentprofile.Profile{Instructions: profileMarker, HarnessInstructions: map[harness.NativeKind]string{
+	harness.NativeCodex: codexMarker, harness.NativeClaude: claudeMarker}, Skills: []agentprofile.Skill{{Name: "review",
 	Files: []agentprofile.File{
 		{Path: "SKILL.md", Data: []byte("---\nname: review\ndescription: PROFILE_SKILL_MARKER review code\n---\nReview.\n")},
 		{Path: "scripts/check.sh", Data: []byte("#!/bin/sh\n"), Executable: true},
@@ -71,7 +76,7 @@ func TestCodexProfileFollowsTheSprooziIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(filepath.Join(home, "AGENTS.md"))
-	if err != nil || string(data) != harness.ManagedInstructions+"\n\n"+profileMarker {
+	if err != nil || string(data) != harness.ManagedInstructions+"\n\n"+profileHeading+profileMarker+"\n\n"+codexMarker {
 		t.Fatalf("AGENTS.md=%q err=%v", data, err)
 	}
 	if _, err = os.Stat(stale); !os.IsNotExist(err) {
@@ -109,7 +114,7 @@ func TestClaudeProfilePluginIsOnlyLoadedWithSkills(t *testing.T) {
 		t.Fatalf("args=%q", args)
 	}
 	prompt := args[slices.Index(args, "--append-system-prompt")+1]
-	if prompt != instructions+"\n\n"+harness.ManagedInstructions+"\n\n"+profileMarker {
+	if prompt != instructions+"\n\n"+harness.ManagedInstructions+"\n\n"+profileHeading+profileMarker+"\n\n"+claudeMarker {
 		t.Fatalf("system prompt=%q", prompt)
 	}
 }

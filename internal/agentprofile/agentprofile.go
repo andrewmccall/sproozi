@@ -1,9 +1,11 @@
 // Package agentprofile reads the user's profile: the instructions and skills
 // added to every managed session beside the Sproozi integration.
 //
-// A profile folder holds an optional AGENTS.md and skills/<name>/SKILL.md with
-// any supporting files. Other entries are ignored. The same rules apply to the
-// live folder mounted into Docker and to the archive stored for Kubernetes.
+// A profile folder holds an optional AGENTS.md for every harness, optional
+// codex/AGENTS.md and claude/CLAUDE.md for one harness each, and
+// skills/<name>/SKILL.md with any supporting files. Other entries are ignored.
+// The same rules apply to the folder the home archives for each launch and to
+// the archive stored for Kubernetes.
 package agentprofile
 
 import (
@@ -16,8 +18,10 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -73,8 +77,56 @@ type Skill struct {
 
 // Profile is a validated profile. Skills and their files are sorted by name.
 type Profile struct {
+	// Instructions apply to every harness.
 	Instructions string
-	Skills       []Skill
+	// HarnessInstructions follow Instructions for one harness only.
+	HarnessInstructions map[harness.NativeKind]string
+	Skills              []Skill
+}
+
+// InstructionsFor joins the shared instructions and the harness's own, in
+// that order, so the harness's text refines the shared text.
+func (p Profile) InstructionsFor(kind harness.NativeKind) string {
+	var parts []string
+	for _, text := range []string{p.Instructions, p.HarnessInstructions[kind]} {
+		if text = strings.TrimSpace(text); text != "" {
+			parts = append(parts, text)
+		}
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+func (p Profile) empty() bool {
+	return p.Instructions == "" && len(p.HarnessInstructions) == 0 && len(p.Skills) == 0
+}
+
+// harnessFiles maps each harness's own instructions file, such as
+// codex/AGENTS.md, to its harness.
+func harnessFiles() map[string]harness.NativeKind {
+	files := map[string]harness.NativeKind{}
+	for _, kind := range []harness.NativeKind{harness.NativeCodex, harness.NativeClaude} {
+		directory, _ := harness.NativeDirectory(kind)
+		files[directory+"/"+harness.NativeUserInstructionsFile(kind)] = kind
+	}
+	return files
+}
+
+// HarnessFiles lists each harness's own instructions file in a profile.
+func HarnessFiles() []string { return slices.Sorted(maps.Keys(harnessFiles())) }
+
+// read reports whether a profile path is part of the profile and, for a
+// directory, whether any of its contents can be.
+func read(name string, directory bool) bool {
+	root, _, _ := strings.Cut(name, "/")
+	if root == InstructionsFile || root == SkillsDirectory {
+		return true
+	}
+	for file := range harnessFiles() {
+		if file == name || directory && strings.HasPrefix(file, name+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 type entry struct {
@@ -84,11 +136,57 @@ type entry struct {
 }
 
 // LoadDirectory reads a profile folder. A missing folder is an empty profile.
+// The folder and every entry it reads must belong to the current user and not
+// be writable by others, so another local account cannot add instructions.
 func LoadDirectory(directory string) (Profile, error) {
-	if _, err := os.Stat(directory); errors.Is(err, fs.ErrNotExist) {
+	if _, err := os.Lstat(directory); errors.Is(err, fs.ErrNotExist) {
 		return Profile{}, nil
 	}
+	if err := ownedEntry(directory, true); err != nil {
+		return Profile{}, err
+	}
+	err := filepath.WalkDir(directory, func(name string, d fs.DirEntry, err error) error {
+		if err != nil || name == directory {
+			return err
+		}
+		relative, err := filepath.Rel(directory, name)
+		if err != nil {
+			return err
+		}
+		if !read(filepath.ToSlash(relative), d.IsDir()) {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		return ownedEntry(name, d.IsDir())
+	})
+	if err != nil {
+		return Profile{}, err
+	}
 	return Load(os.DirFS(directory))
+}
+
+// Ignored lists the entries in a profile folder that no harness reads, so
+// diagnostics can report them instead of implying they apply.
+func Ignored(directory string) ([]string, error) {
+	var ignored []string
+	err := fs.WalkDir(os.DirFS(directory), ".", func(name string, d fs.DirEntry, err error) error {
+		if err != nil || name == "." {
+			return err
+		}
+		if !read(name, d.IsDir()) {
+			ignored = append(ignored, name)
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+		}
+		return nil
+	})
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	return ignored, err
 }
 
 // Load reads a profile from fsys, refusing symlinks and special files.
@@ -101,15 +199,14 @@ func Load(fsys fs.FS) (Profile, error) {
 		if name == "." {
 			return nil
 		}
-		root, _, _ := strings.Cut(name, "/")
-		if root != InstructionsFile && root != SkillsDirectory {
+		if !read(name, d.IsDir()) {
 			if d.IsDir() {
 				return fs.SkipDir
 			}
 			return nil
 		}
 		if d.IsDir() {
-			if name == InstructionsFile {
+			if _, file := harnessFiles()[name]; file || name == InstructionsFile {
 				return fmt.Errorf("profile %s is a directory", name)
 			}
 			return nil
@@ -152,11 +249,19 @@ func assemble(entries []entry) (Profile, error) {
 		if total > MaxBytes {
 			return Profile{}, fmt.Errorf("profile is larger than %d bytes", MaxBytes)
 		}
-		if e.path == InstructionsFile {
-			if len(e.data) > MaxInstructionsBytes || !utf8.Valid(e.data) {
-				return Profile{}, fmt.Errorf("profile %s must be UTF-8 text of at most %d bytes", InstructionsFile, MaxInstructionsBytes)
+		kind, own := harnessFiles()[e.path]
+		if e.path == InstructionsFile || own {
+			if len(e.data) > MaxInstructionsBytes || !utf8.Valid(e.data) || bytes.IndexByte(e.data, 0) >= 0 {
+				return Profile{}, fmt.Errorf("profile %s must be UTF-8 text of at most %d bytes", e.path, MaxInstructionsBytes)
 			}
-			p.Instructions = string(e.data)
+			if !own {
+				p.Instructions = string(e.data)
+			} else if len(e.data) > 0 {
+				if p.HarnessInstructions == nil {
+					p.HarnessInstructions = map[harness.NativeKind]string{}
+				}
+				p.HarnessInstructions[kind] = string(e.data)
+			}
 			continue
 		}
 		rest, ok := strings.CutPrefix(e.path, SkillsDirectory+"/")
@@ -203,6 +308,13 @@ func (p Profile) Archive() ([]byte, string, error) {
 			return nil, "", err
 		}
 	}
+	for _, name := range HarnessFiles() {
+		if text := p.HarnessInstructions[harnessFiles()[name]]; text != "" {
+			if err := write(name, []byte(text), false); err != nil {
+				return nil, "", err
+			}
+		}
+	}
 	for _, s := range p.Skills {
 		for _, f := range s.Files {
 			if err := write(path.Join(SkillsDirectory, s.Name, f.Path), f.Data, f.Executable); err != nil {
@@ -227,7 +339,7 @@ func (p Profile) Archive() ([]byte, string, error) {
 // missing profile has no archive and an empty digest.
 func ArchiveDirectory(directory string) ([]byte, string, error) {
 	p, err := LoadDirectory(directory)
-	if err != nil || p.Instructions == "" && len(p.Skills) == 0 {
+	if err != nil || p.empty() {
 		return nil, "", err
 	}
 	return p.Archive()

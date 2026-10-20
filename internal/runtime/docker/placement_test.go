@@ -627,6 +627,46 @@ func TestIncarnationQuotaAndOwnerChecks(t *testing.T) {
 	}
 }
 
+// Changed placement settings are accepted until an execution record binds the
+// earlier ones; afterwards the refusal names each changed setting.
+func TestPlacementSettingsChangeOnlyWithoutExecutionRecords(t *testing.T) {
+	t.Parallel()
+	f := newFakeDocker()
+	a := &fakeAuthority{engine: f}
+	dir := testutil.PrivateDir(t)
+	first := fixtureConfig()
+	first.NativeImageID = "sha256:" + strings.Repeat("d", 64)
+	p, err := OpenPlacement(dir, &Engine{execute: f.run}, first, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = p.Close(); err != nil {
+		t.Fatal(err)
+	}
+	p = openFixture(t, dir, f, a)
+	data := fixtureArtifact(t)
+	if _, err = p.Prepare(context.Background(), fixtureLaunch(t, data), data); err != nil {
+		t.Fatal(err)
+	}
+	if err = p.Close(); err != nil {
+		t.Fatal(err)
+	}
+	changed := fixtureConfig()
+	changed.GatewayPort = 8845
+	_, err = OpenPlacement(dir, &Engine{execute: f.run}, changed, a)
+	resolved, _ := filepath.EvalSymlinks(dir)
+	want := "local placement settings changed (local.gatewayPort 8844 -> 8845), but 1 execution record in " +
+		resolved + " was prepared under the earlier values; set them back to keep those sessions, or use a new " +
+		"home directory for the new values"
+	if err == nil || err.Error() != want {
+		t.Fatalf("got %v, want %q", err, want)
+	}
+	var nilPlacement *Placement
+	if err = nilPlacement.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestInitialNativeGateRejectionCanAbortWithoutActivationOrCheckpoint(t *testing.T) {
 	t.Parallel()
 	data := fixtureArtifact(t)
@@ -790,13 +830,14 @@ func TestPreparedNativeLaunchCarriesTaskAndIndependentRolloutLimit(t *testing.T)
 func writeProfileFixture(t *testing.T, folder, skill, instructions string) {
 	t.Helper()
 	path := filepath.Join(folder, "skills", skill, "SKILL.md")
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	// Profile folders must be private to their owner, as they are on Windows.
+	if err := testutil.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte("---\nname: "+skill+"\ndescription: Fixture skill\n---\n"), 0644); err != nil {
+	if err := testutil.WriteFile(path, []byte("---\nname: "+skill+"\ndescription: Fixture skill\n---\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(folder, "AGENTS.md"), []byte(instructions), 0644); err != nil {
+	if err := testutil.WriteFile(filepath.Join(folder, "AGENTS.md"), []byte(instructions), 0600); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -810,7 +851,7 @@ func TestLaunchConfigurationCarriesTheProfileAsItIsNow(t *testing.T) {
 	f := newFakeDocker()
 	a := &fakeAuthority{engine: f}
 	config := fixtureConfig()
-	config.ProfileDirectory = filepath.Join(t.TempDir(), "profile")
+	config.ProfileDirectory = filepath.Join(testutil.PrivateDir(t), "profile")
 	writeProfileFixture(t, config.ProfileDirectory, "review", "Profile instructions")
 	p := openFixtureWith(t, testutil.PrivateDir(t), f, a, config)
 	if _, err := p.Prepare(context.Background(), l, data); err != nil {
@@ -845,7 +886,7 @@ func TestInvalidProfileStopsPreparation(t *testing.T) {
 	l := fixtureLaunch(t, data)
 	f := newFakeDocker()
 	config := fixtureConfig()
-	config.ProfileDirectory = filepath.Join(t.TempDir(), "profile")
+	config.ProfileDirectory = filepath.Join(testutil.PrivateDir(t), "profile")
 	writeProfileFixture(t, config.ProfileDirectory, "sproozi-access", "Profile instructions")
 	p := openFixtureWith(t, testutil.PrivateDir(t), f, &fakeAuthority{engine: f}, config)
 	if _, err := p.Prepare(context.Background(), l, data); err == nil || !strings.Contains(err.Error(), "profile") {

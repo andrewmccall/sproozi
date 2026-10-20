@@ -149,6 +149,12 @@ func discoveryOperation(u *url.URL) (Operation, bool) {
 	}
 }
 
+// requestError denies a request for a bound the workload can satisfy by
+// changing the request. Its reason is a fixed string, returned to the workload.
+type requestError struct{ reason string }
+
+func (e *requestError) Error() string { return "kubernetes: " + e.reason }
+
 func validateQuery(q url.Values, op *Operation) error {
 	allowed := map[string]bool{"watch": true, "resourceVersion": true, "resourceVersionMatch": true, "timeoutSeconds": true, "labelSelector": true, "fieldSelector": true, "limit": true, "continue": true, "tailLines": true, "previous": true, "timestamps": true, "container": true, "sinceSeconds": true, "sinceTime": true}
 	for key, values := range q {
@@ -165,13 +171,13 @@ func validateQuery(q url.Values, op *Operation) error {
 	if v := q.Get("timeoutSeconds"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 1 || n > 300 {
-			return fmt.Errorf("kubernetes: watch timeout is out of bounds")
+			return &requestError{reason: "timeoutSeconds must be an integer from 1 to 300"}
 		}
 	}
 	if v := q.Get("limit"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 1 || n > 5000 {
-			return fmt.Errorf("kubernetes: list limit is out of bounds")
+			return &requestError{reason: "limit must be an integer from 1 to 5000"}
 		}
 	}
 	if v := q.Get("continue"); len(v) > 2048 {

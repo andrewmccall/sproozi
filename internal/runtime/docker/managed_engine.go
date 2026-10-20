@@ -273,12 +273,15 @@ func (e *Engine) commandInput(ctx context.Context, input []byte, maxOutput int, 
 func (e *Engine) runCommand(ctx context.Context, input []byte, maxOutput int, args ...string) ([]byte, error) {
 	cmd := e.dockerCommand(ctx, args...)
 	cmd.Stdin = bytes.NewReader(input)
-	out, errout := &boundedOutput{limit: maxOutput}, &boundedOutput{limit: 4096}
+	out, errout := &boundedOutput{limit: maxOutput}, &boundedOutput{limit: 4096, truncate: true}
 	cmd.Stdout, cmd.Stderr = out, errout
 	if err := cmd.Run(); err != nil {
+		if detail := strings.TrimSpace(errout.String()); detail != "" {
+			return nil, fmt.Errorf("docker fixed operation failed: %w: %s", err, detail)
+		}
 		return nil, fmt.Errorf("docker fixed operation failed: %w", err)
 	}
-	return io.ReadAll(out)
+	return out.Bytes(), nil
 }
 
 func (e *Engine) dockerCommand(ctx context.Context, args ...string) *exec.Cmd {
@@ -367,7 +370,7 @@ func (e *Engine) AttachNative(ctx context.Context, i Instance, input io.Reader, 
 		return err
 	}
 	cmd := e.dockerCommand(ctx, execCommand, "--interactive", i.ID, nativeCommandPath, string(harness.NativeAttach))
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = input, output, &boundedOutput{limit: 4096}
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = input, output, &boundedOutput{limit: 4096, truncate: true}
 	if err = cmd.Run(); err != nil {
 		return errors.New("docker native attachment failed")
 	}

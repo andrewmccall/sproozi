@@ -30,5 +30,5 @@ do the clients support?
 
 ## Scope
 
-A handoff does not preserve the native conversation ID, hidden client state or
+A handoff does not preserve the harness conversation ID, hidden client state or
 source permissions.

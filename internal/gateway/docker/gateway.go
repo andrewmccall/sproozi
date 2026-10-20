@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"slices"
+	"time"
 
 	"github.com/andrewmccall/sproozi/internal/harness"
 
@@ -28,6 +29,8 @@ import (
 type GatewayConfig struct {
 	Harness      harness.NativeKind
 	Certificates map[string]tls.Certificate
+	// Serving, when set, supplies the current certificate for every inspected host.
+	Serving      *proxytransport.Certificate
 	Model        modelgateway.HandlerConfig
 	MCPRegistry  *mcpgateway.Registry
 	MCPAuthority string
@@ -35,6 +38,9 @@ type GatewayConfig struct {
 	AuditLogger  audit.Writer
 	GitHub       *githubgateway.HandlerConfig
 	Kubernetes   *kubernetesgateway.HandlerConfig
+	// MaxModelCall is the longest one model call may stream. Zero selects
+	// proxytransport.DefaultMaxModelCallDuration.
+	MaxModelCall time.Duration
 }
 
 func NewGateway(owner *Owner, config GatewayConfig) (*proxytransport.Gateway, error) {
@@ -71,7 +77,7 @@ func NewGateway(owner *Owner, config GatewayConfig) (*proxytransport.Gateway, er
 		named = mcpgateway.NewHandler(mcpgateway.HandlerConfig{Registry: config.MCPRegistry, HTTPClient: config.MCPClient, Budgets: tracker, AuditLogger: journal})
 	}
 	dispatch[config.MCPAuthority] = gateway.Route{Tier: audit.TierProtocol, Handler: diagnose.NewControl(journal, named)}
-	return proxytransport.New(proxytransport.Config{Certificates: config.Certificates, Authenticate: owner.Authenticate, Revalidate: owner.Revalidate, Handler: dispatch, AllowedAuthority: dispatch.Allows, AuditLogger: journal})
+	return proxytransport.New(proxytransport.Config{Certificates: config.Certificates, Serving: config.Serving, Authenticate: owner.Authenticate, Revalidate: owner.Revalidate, Handler: dispatch, AllowedAuthority: dispatch.Allows, AuditLogger: journal, MaxModelCallDuration: config.MaxModelCall})
 }
 
 func addNativeRoutes(owner *Owner, config GatewayConfig, dispatch gateway.Dispatcher, tracker *budget.Tracker) error {

@@ -32,7 +32,7 @@ It also verified:
 - MCP Pod reads outside `sproozi-demo` were denied;
 - an invented `kubernetes_delete_pods` tool was rejected;
 - direct Kubernetes service and control-plane node API connections timed out
-  from the worker-hosted sandbox with the proxy disabled;
+  from the sandbox, on a Kind worker node, with the proxy disabled;
 - the sandbox had no Secret environment references or Secret volumes;
 - cancellation reached `Cancelled`, and a still-running verifier witness using
   the old run identity received 401 or 403 through the gateway;
@@ -62,7 +62,8 @@ scripts together. The task-owned cluster was removed after verification.
 
 ## Scope of the evidence
 
-The reports are local, gitignored artifacts. They retain tool names, Pod names,
+The full reports are local, gitignored artifacts and haven't been published, so
+this page is the only public record of these runs. They retain tool names, Pod names,
 denial/check outcomes and selected audit fields; they omit raw workload logs,
 tool-result bodies and credential data. These are dirty-tree observations,
 not a clean release or general MCP-client compatibility promise.

@@ -35,7 +35,84 @@ jobs:
     uses: ./.github/workflows/platforms.yml
     with:
       ref: ${{ inputs.tag || github.ref }}
+  # Release images are built natively on each architecture, so no emulator is
+  # needed. Tags push by digest; pull requests only prove the recipe builds.
+  images:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - {platform: linux/amd64, arch: amd64, runner: ubuntu-24.04}
+          - {platform: linux/arm64, arch: arm64, runner: ubuntu-24.04-arm}
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    env:
+      PUBLISH: ${{ (startsWith(github.ref, 'refs/tags/v') || inputs.tag != '') && 'true' || 'false' }}
+      TAG: ${{ inputs.tag || github.ref_name }}
+      REPOSITORY: ghcr.io/${{ github.repository_owner }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          driver-opts: image=moby/buildkit:v0.33.1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
+      - name: Sign in to the registry
+        if: env.PUBLISH == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
+        run: echo "$GH_TOKEN" | docker login ghcr.io --username "$ACTOR" --password-stdin
+      - name: Build release images
+        run: |
+          version=snapshot
+          if [ "$PUBLISH" = true ]; then version=${TAG#v}; fi
+          push=()
+          if [ "$PUBLISH" = true ]; then push=(--push); fi
+          python3 hack/release/images.py build --platform "${{ matrix.platform }}" --repository "${REPOSITORY,,}" \
+            --version "$version" --output "digests-${{ matrix.arch }}.json" "${push[@]}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: image-digests-${{ matrix.arch }}
+          path: digests-${{ matrix.arch }}.json
+          retention-days: 7
+  image-index:
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.tag != ''
+    needs: images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      REPOSITORY: ghcr.io/${{ github.repository_owner }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: image-digests-*
+          merge-multiple: true
+      - name: Sign in to the registry
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
+        run: echo "$GH_TOKEN" | docker login ghcr.io --username "$ACTOR" --password-stdin
+      - name: Merge platforms and record the image manifest
+        run: python3 hack/release/images.py index --repository "${REPOSITORY,,}" --version "${TAG#v}" --output dist/images.json digests-*.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-images
+          path: dist/images.json
+          retention-days: 7
   package:
+    needs: [images, image-index]
+    if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -49,6 +126,19 @@ jobs:
         with:
           go-version-file: go.mod
           check-latest: true
+      - name: Read the published image manifest
+        if: needs.image-index.result == 'success'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release-images
+          path: .local/release-images
+      - name: Select the native image for the CLI
+        run: |
+          native=""
+          if [ -f .local/release-images/images.json ]; then
+            native=$(python3 -c 'import json; print(json.load(open(".local/release-images/images.json"))["images"]["native"]["reference"])')
+          fi
+          echo "SPROOZI_NATIVE_IMAGE=$native" >> "$GITHUB_ENV"
       - name: Build CLI archives
         uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de
         with:
@@ -59,8 +149,16 @@ jobs:
         run: |
           version=$(python3 -c 'import json; print(json.load(open("dist/metadata.json"))["version"])')
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          python3 hack/release/source.py --version "$version" --output "dist/sproozi_${version}_source.tar.gz"
+          python3 hack/release/source.py --version "$version" --output "dist/sproozi_${version}_source.tar.gz" \
+            --native-image "$SPROOZI_NATIVE_IMAGE"
           (cd dist && sha256sum "sproozi_${version}_source.tar.gz" >> checksums.txt)
+          if [ -f .local/release-images/images.json ]; then
+            cp .local/release-images/images.json dist/images.json
+            control=$(python3 -c 'import json; print(json.load(open("dist/images.json"))["images"]["control"]["reference"])')
+            python3 hack/release/kubernetes.py --version "$version" --control-image "$control" \
+              --native-image "$SPROOZI_NATIVE_IMAGE" --output "dist/sproozi_${version}_kubernetes.tar.gz"
+            (cd dist && sha256sum images.json "sproozi_${version}_kubernetes.tar.gz" >> checksums.txt)
+          fi
           python3 hack/release/verify.py --version "$version"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -70,6 +168,8 @@ jobs:
             dist/*.zip
             dist/checksums.txt
             dist/metadata.json
+            dist/images.json
+          if-no-files-found: warn
           retention-days: 7
   smoke:
     needs: [package, targets]

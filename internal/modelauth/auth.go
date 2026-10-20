@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -99,7 +100,7 @@ func (s Session) Validate() error {
 	if s.AccessToken == "" || s.RefreshToken == "" || s.IDToken == "" ||
 		strings.ContainsAny(s.AccessToken+s.RefreshToken, "\r\n") ||
 		!strings.EqualFold(s.TokenType, "Bearer") || s.ExpiresIn <= 0 || s.ExpiresIn > 86400 || s.SavedAt.IsZero() {
-		return errors.New("ChatGPT credentials are incomplete; sign in again")
+		return errors.New("ChatGPT credential is incomplete; sign in again")
 	}
 	if !slices.Contains(s.Scopes, PlanScope) {
 		return errors.New("ChatGPT plan permission was not granted; sign in again")
@@ -115,10 +116,26 @@ type SessionStore interface {
 	Replace(context.Context, Session, Session) error
 }
 
+// SessionReloadInterval bounds how long Authorize serves an in-memory access
+// token before reading the Secret again, measured from the start of the last
+// read. It is how quickly an administrator's replacement or removal of the
+// stored session reaches model requests.
+const SessionReloadInterval = 10 * time.Second
+
+// refreshWindow is how close to expiry the access token is refreshed.
+const refreshWindow = time.Minute
+
 type ChatGPT struct {
 	store  SessionStore
 	client *http.Client
-	mu     sync.Mutex
+	// current is the last session read from or written to the store, with the
+	// time it was read. Requests use it without the lock while it is younger
+	// than reloadInterval and its access token is outside the refresh window.
+	current        atomic.Pointer[loadedSession]
+	reloadInterval time.Duration
+	// mu serializes reloads and refreshes: this process is the session's one
+	// refresh owner (ADR 0026).
+	mu sync.Mutex
 	// Keep an unsaved replacement so persistence retries never rotate the same
 	// refresh token twice. Do not expose it to inference until durably saved.
 	pending       *Session
@@ -126,8 +143,13 @@ type ChatGPT struct {
 	tokenEndpoint string
 }
 
+type loadedSession struct {
+	session  Session
+	loadedAt time.Time
+}
+
 func NewChatGPT(store SessionStore, client *http.Client) *ChatGPT {
-	return &ChatGPT{store: store, client: client, tokenEndpoint: TokenEndpoint}
+	return &ChatGPT{store: store, client: client, tokenEndpoint: TokenEndpoint, reloadInterval: SessionReloadInterval}
 }
 
 func (*ChatGPT) Mode() string { return ChatGPTMode }
@@ -136,31 +158,64 @@ func (a *ChatGPT) Authorize(r *http.Request) error {
 	// The administrator's OAuth session selects the account, not a workload.
 	r.Header.Del("Authorization")
 	removeOpenAIAccountHeaders(r.Header)
+	s, ok := a.usable()
+	if !ok {
+		var err error
+		if s, err = a.reloadOrRefresh(r.Context()); err != nil {
+			return err
+		}
+	}
+	r.Header.Set("Authorization", "Bearer "+s.AccessToken)
+	return nil
+}
+
+// usable returns the in-memory session when no Secret read or refresh is due.
+func (a *ChatGPT) usable() (Session, bool) {
+	current := a.current.Load()
+	if current == nil || time.Since(current.loadedAt) >= a.reloadInterval ||
+		time.Until(current.session.SavedAt.Add(time.Duration(current.session.ExpiresIn)*time.Second)) <= refreshWindow {
+		return Session{}, false
+	}
+	return current.session, true
+}
+
+// reloadOrRefresh reads the stored session and refreshes it when due. It holds
+// the lock throughout, and always refreshes from the stored tokens, never the
+// in-memory copy, so the store's compare-before-write check sees what it read.
+func (a *ChatGPT) reloadOrRefresh(ctx context.Context) (Session, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	s, err := a.store.Load(r.Context())
+	// Another request may have reloaded or refreshed while this one waited.
+	if s, ok := a.usable(); ok {
+		return s, nil
+	}
+	a.current.Store(nil)
+	// The reload interval runs from the start of the read, so a slow Secret
+	// read does not extend how long an older stored session is served.
+	loadedAt := time.Now()
+	s, err := a.store.Load(ctx)
 	if err != nil {
-		return errors.New("ChatGPT credentials are unavailable")
+		return Session{}, errors.New("ChatGPT credentials are unavailable")
 	}
 	if err = s.Validate(); err != nil {
-		return err
+		return Session{}, err
 	}
 	if a.pending != nil {
 		if s.SameCredentials(a.pendingBefore) {
-			if err = a.store.Replace(r.Context(), s, *a.pending); err != nil {
-				return errors.New("could not persist renewed ChatGPT credentials")
+			if err = a.store.Replace(ctx, s, *a.pending); err != nil {
+				return Session{}, errors.New("could not persist renewed ChatGPT credentials")
 			}
 			s = *a.pending
 		}
 		a.pending = nil
 	}
-	if time.Until(s.SavedAt.Add(time.Duration(s.ExpiresIn)*time.Second)) <= time.Minute {
-		next, refreshErr := Exchange(r.Context(), a.client, a.tokenEndpoint, url.Values{
+	if time.Until(s.SavedAt.Add(time.Duration(s.ExpiresIn)*time.Second)) <= refreshWindow {
+		next, refreshErr := Exchange(ctx, a.client, a.tokenEndpoint, url.Values{
 			"grant_type": {refreshTokenField}, clientIDField: {s.ClientID},
 			refreshTokenField: {s.RefreshToken}, resourceField: {Resource},
 		})
 		if refreshErr != nil {
-			return refreshErr
+			return Session{}, refreshErr
 		}
 		renewed := s
 		renewed.AccessToken, renewed.RefreshToken = next.AccessToken, next.RefreshToken
@@ -172,17 +227,17 @@ func (a *ChatGPT) Authorize(r *http.Request) error {
 			renewed.Scopes = strings.Fields(next.Scope)
 		}
 		if err = renewed.Validate(); err != nil {
-			return err
+			return Session{}, err
 		}
 		a.pending, a.pendingBefore = &renewed, s
-		if err = a.store.Replace(r.Context(), s, renewed); err != nil {
-			return errors.New("could not persist renewed ChatGPT credentials")
+		if err = a.store.Replace(ctx, s, renewed); err != nil {
+			return Session{}, errors.New("could not persist renewed ChatGPT credentials")
 		}
 		a.pending = nil
 		s = renewed
 	}
-	r.Header.Set("Authorization", "Bearer "+s.AccessToken)
-	return nil
+	a.current.Store(&loadedSession{session: s, loadedAt: loadedAt})
+	return s, nil
 }
 
 // SameCredentials compares the rotating credential identity used by store CAS.

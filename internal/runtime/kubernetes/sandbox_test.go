@@ -23,6 +23,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"math/big"
 	"reflect"
 	"strings"
@@ -32,10 +33,12 @@ import (
 	"k8s.io/utils/ptr"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -383,6 +386,25 @@ func TestEnsureSandboxIdempotent(t *testing.T) {
 	}
 }
 
+// A Quantity caches its string form lazily, so equal workspace sizes can
+// differ under reflect.DeepEqual. Release runtimes use 256Mi, which the parser
+// does not cache, so a retry rejected the controller's own Pod.
+func TestEnsureSandboxAcceptsEqualSizesWithDifferentCachedForm(t *testing.T) {
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(testTrustConfigMap(t)).Build()
+	run := testRunForSandbox("cccccccc-0000-0000-0000-000000000010")
+	rt := testRuntime()
+	rt.Spec.EphemeralWorkspace.SizeLimit = resource.MustParse("256Mi")
+	sc := kubernetes.NewPodSandboxClient(c, c)
+
+	if _, err := sc.Ensure(context.Background(), run, rt); err != nil {
+		t.Fatalf("first Ensure error: %v", err)
+	}
+	_ = rt.Spec.EphemeralWorkspace.SizeLimit.String()
+	if _, err := sc.Ensure(context.Background(), run, rt); err != nil {
+		t.Fatalf("second Ensure error: %v", err)
+	}
+}
+
 func TestEnsureSandboxRejectsPreexistingIdentityCollision(t *testing.T) {
 	run := testRunForSandbox("cccccccc-0000-0000-0000-000000000098")
 	rt := testRuntime()
@@ -410,6 +432,87 @@ func TestEnsureSandboxComparesRuntimeClassByValue(t *testing.T) {
 	rt.Spec.RuntimeClassName = "runc"
 	if _, err := sc.Ensure(context.Background(), run, rt); err == nil {
 		t.Fatal("Ensure accepted a preexisting Pod with a different runtime class")
+	}
+}
+
+// defaultedRuntime leaves unset the fields the API server defaults on a Pod.
+func defaultedRuntime() *sprooziv1alpha1.AgentRuntime {
+	rt := testRuntime()
+	spec := &rt.Spec.PodTemplate.Spec
+	spec.Volumes = []corev1.Volume{
+		{Name: "cfg", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
+			LocalObjectReference: corev1.LocalObjectReference{Name: "cfg"}}}},
+		{Name: "info", VolumeSource: corev1.VolumeSource{DownwardAPI: &corev1.DownwardAPIVolumeSource{
+			Items: []corev1.DownwardAPIVolumeFile{{Path: "labels", FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.labels"}}}}}},
+	}
+	agent := &spec.Containers[0]
+	agent.Ports = []corev1.ContainerPort{{ContainerPort: 8080}}
+	agent.Env = []corev1.EnvVar{{Name: "POD", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.name"}}}}
+	agent.ReadinessProbe = &corev1.Probe{ProbeHandler: corev1.ProbeHandler{Exec: &corev1.ExecAction{Command: []string{"true"}}}}
+	agent.LivenessProbe = &corev1.Probe{ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Port: intstr.FromInt32(8080)}}}
+	agent.Lifecycle = &corev1.Lifecycle{PreStop: &corev1.LifecycleHandler{HTTPGet: &corev1.HTTPGetAction{Port: intstr.FromInt32(8080)}}}
+	return rt
+}
+
+// applyServerDefaults sets what the API server stored for defaultedRuntime,
+// as observed against a real kube-apiserver.
+func applyServerDefaults(pod *corev1.Pod) {
+	mode := int32(0o644)
+	for i := range pod.Spec.Volumes {
+		volume := &pod.Spec.Volumes[i].VolumeSource
+		if volume.ConfigMap != nil && volume.ConfigMap.DefaultMode == nil {
+			volume.ConfigMap.DefaultMode = &mode
+		}
+		if volume.DownwardAPI != nil {
+			volume.DownwardAPI.DefaultMode = &mode
+			volume.DownwardAPI.Items[0].FieldRef.APIVersion = "v1"
+		}
+	}
+	agent := &pod.Spec.Containers[0]
+	agent.Ports[0].Protocol = corev1.ProtocolTCP
+	agent.Env[0].ValueFrom.FieldRef.APIVersion = "v1"
+	for _, probe := range []*corev1.Probe{agent.ReadinessProbe, agent.LivenessProbe} {
+		probe.TimeoutSeconds, probe.PeriodSeconds, probe.SuccessThreshold, probe.FailureThreshold = 1, 10, 1, 3
+	}
+	agent.LivenessProbe.HTTPGet.Path, agent.LivenessProbe.HTTPGet.Scheme = "/", corev1.URISchemeHTTP
+	agent.Lifecycle.PreStop.HTTPGet.Path, agent.Lifecycle.PreStop.HTTPGet.Scheme = "/", corev1.URISchemeHTTP
+}
+
+// A Pod the API server stored with defaults filled in is the same sandbox; a
+// defaulted Pod that also differs in a set field is still rejected.
+func TestEnsureSandboxAcceptsServerDefaultedPod(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*corev1.Pod)
+		accept bool
+	}{
+		{name: "defaults only", mutate: func(*corev1.Pod) {}, accept: true},
+		{name: "privileged container", mutate: func(pod *corev1.Pod) {
+			pod.Spec.Containers[0].SecurityContext.Privileged = ptr.To(true)
+		}},
+		{name: "writable ConfigMap volume", mutate: func(pod *corev1.Pod) {
+			pod.Spec.Volumes[0].ConfigMap.DefaultMode = ptr.To(int32(0o777))
+		}},
+		{name: "longer probe period", mutate: func(pod *corev1.Pod) {
+			pod.Spec.Containers[0].ReadinessProbe.PeriodSeconds = 30
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			run := testRunForSandbox("cccccccc-0000-0000-0000-000000000104")
+			rt := defaultedRuntime()
+			existing := kubernetes.BuildPodSpec(run, rt, run.Status.Identity.ServiceAccountName)
+			applyServerDefaults(existing)
+			tc.mutate(existing)
+			c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(testTrustConfigMap(t), existing).Build()
+
+			_, err := kubernetes.NewPodSandboxClient(c, c).Ensure(context.Background(), run, rt)
+			if tc.accept && err != nil {
+				t.Fatalf("Ensure rejected a server-defaulted sandbox: %v", err)
+			}
+			if !tc.accept && err == nil {
+				t.Fatal("Ensure accepted a defaulted sandbox with a changed setting")
+			}
+		})
 	}
 }
 
@@ -658,5 +761,30 @@ func TestGetStatusConfirmsCachedAbsenceWithLiveRead(t *testing.T) {
 	status, err = kubernetes.NewPodSandboxClient(cache, cache).GetStatus(context.Background(), pod.Name)
 	if err != nil || status != kubernetes.SandboxStatusAbsent {
 		t.Fatalf("confirmed absence = (%s,%v); want Absent", status, err)
+	}
+}
+
+func TestIsQuotaExceeded(t *testing.T) {
+	t.Parallel()
+
+	pods := corev1.Resource("pods")
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "nil", err: nil},
+		{name: "quota exceeded", err: apierrors.NewForbidden(pods, "sandbox", errors.New("exceeded quota: agents, requested: pods=1, used: pods=2, limited: pods=2")), want: true},
+		{name: "wrapped quota exceeded", err: fmt.Errorf("create sandbox: %w", apierrors.NewForbidden(pods, "sandbox", errors.New("exceeded quota: agents"))), want: true},
+		{name: "other forbidden", err: apierrors.NewForbidden(pods, "sandbox", errors.New("violates PodSecurity"))},
+		{name: "not forbidden", err: apierrors.NewInternalError(errors.New("exceeded quota"))},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := kubernetes.IsQuotaExceeded(tt.err); got != tt.want {
+				t.Fatalf("IsQuotaExceeded(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
 	}
 }

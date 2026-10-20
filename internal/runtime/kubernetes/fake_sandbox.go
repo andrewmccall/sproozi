@@ -34,6 +34,8 @@ type FakeSandboxClient struct {
 	StatusErr error
 	// CompletionErr is returned by GetCompletion if non-nil.
 	CompletionErr error
+	// EnsureErr is returned by Ensure if non-nil, and nothing is recorded.
+	EnsureErr error
 	// Ensured records the sandbox names returned by Ensure.
 	Ensured []string
 	// Deleted records the sandbox names passed to DeleteForRun.
@@ -50,6 +52,9 @@ func (f *FakeSandboxClient) ValidateRuntime(_ context.Context, rt *sprooziv1alph
 
 // Ensure records and returns RunName(run.UID).
 func (f *FakeSandboxClient) Ensure(_ context.Context, run *sprooziv1alpha1.AgentRun, _ *sprooziv1alpha1.AgentRuntime) (string, error) {
+	if f.EnsureErr != nil {
+		return "", f.EnsureErr
+	}
 	name := RunName(run.UID)
 	f.Ensured = append(f.Ensured, name)
 	return name, nil

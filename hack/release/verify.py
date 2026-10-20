@@ -19,7 +19,7 @@ def verify(directory, version, native):
         raise ValueError("invalid version")
     targets = json.loads(Path(__file__).with_name("targets.json").read_text())
     expected = {f"sproozi_{version}_{t['os']}_{t['arch']}." + ("zip" if t["os"] == "windows" else "tar.gz") for t in targets}
-    actual = {p.name for p in root.glob("sproozi_*") if p.name.endswith((".tar.gz", ".zip")) and not p.name.endswith("_source.tar.gz")}
+    actual = {p.name for p in root.glob("sproozi_*") if p.name.endswith((".tar.gz", ".zip")) and not p.name.endswith(("_source.tar.gz", "_kubernetes.tar.gz"))}
     if actual != expected:
         raise ValueError(f"release target mismatch: missing {expected - actual}, extra {actual - expected}")
     sums = {}
@@ -29,7 +29,13 @@ def verify(directory, version, native):
         if name in sums or Path(name).name != name or not re.fullmatch("[0-9a-f]{64}", digest):
             raise ValueError("invalid checksum entry")
         sums[name] = digest
-    for name in expected | {f"sproozi_{version}_source.tar.gz"}:
+    required = expected | {f"sproozi_{version}_source.tar.gz"}
+    native_image = ""
+    if (root / "images.json").exists():
+        # Published images come with their release-matched Kubernetes assets.
+        required |= {"images.json", f"sproozi_{version}_kubernetes.tar.gz"}
+        native_image = json.loads((root / "images.json").read_text())["images"]["native"]["reference"]
+    for name in required:
         if name not in sums or hashlib.sha256((root / name).read_bytes()).hexdigest() != sums[name]:
             raise ValueError(f"checksum mismatch: {name}")
     if not native:
@@ -52,6 +58,8 @@ def verify(directory, version, native):
         output = subprocess.check_output([binary, "--version"], text=True)
         if not output.startswith("sproozi " + version + " (commit "):
             raise ValueError(f"wrong executable version: {output}")
+        if native_image and "native image " + native_image + "\n" not in output:
+            raise ValueError(f"executable does not embed the published native image: {output}")
         output = subprocess.check_output([binary, "--help"], text=True)
         if "Usage: sproozi COMMAND" not in output:
             raise ValueError("installed help failed")

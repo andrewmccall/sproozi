@@ -13,7 +13,9 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"time"
@@ -34,6 +36,7 @@ import (
 	gatewaydocker "github.com/andrewmccall/sproozi/internal/gateway/docker"
 	"github.com/andrewmccall/sproozi/internal/modelauth"
 	"github.com/andrewmccall/sproozi/internal/nativeconfig"
+	"github.com/andrewmccall/sproozi/internal/pki"
 	"github.com/andrewmccall/sproozi/internal/proxytransport"
 	runtimedocker "github.com/andrewmccall/sproozi/internal/runtime/docker"
 	runtimekubernetes "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
@@ -47,7 +50,7 @@ import (
 type authority struct {
 	owner       *gatewaydocker.Owner
 	endpoint    string
-	trust       []byte
+	certs       *certificates
 	model       string
 	options     []string
 	kind        harness.NativeKind
@@ -86,7 +89,11 @@ func (a *authority) InitializeAllocation(ctx context.Context, l session.Launch, 
 	if err != nil {
 		return runtimedocker.NativeAccess{}, err
 	}
-	return runtimedocker.NativeAccess{Env: env, TrustBundlePEM: bytes.Clone(a.trust), Model: a.model, Options: slices.Clone(a.options), ClientConfig: clients}, nil
+	trust, err := a.certs.trustFor(l)
+	if err != nil {
+		return runtimedocker.NativeAccess{}, err
+	}
+	return runtimedocker.NativeAccess{Env: env, TrustBundlePEM: trust, Model: a.model, Options: slices.Clone(a.options), ClientConfig: clients}, nil
 }
 func (a *authority) Activate(ctx context.Context, l session.Launch, i session.Incarnation) error {
 	return a.owner.Activate(ctx, l, i)
@@ -94,19 +101,117 @@ func (a *authority) Activate(ctx context.Context, l session.Launch, i session.In
 func (a *authority) Revoke(ctx context.Context, l session.Launch, i session.Incarnation) error {
 	return a.owner.Revoke(ctx, l, i)
 }
+
+// Seal follows the placement's independent stop, so the allocation no longer
+// holds the trust bundle it received.
 func (a *authority) Seal(ctx context.Context, l session.Launch, i session.Incarnation) (map[string]budget.TrustedUsage, error) {
-	return a.owner.Seal(ctx, l, i)
+	usage, err := a.owner.Seal(ctx, l, i)
+	if err == nil {
+		a.certs.releaseConsumer(l)
+	}
+	return usage, err
 }
 func (a *authority) BindNative(ctx context.Context, l session.Launch, i session.Incarnation, id string) error {
 	_, err := a.owner.BindNative(ctx, l, i, id)
 	return err
 }
 
+// localStack is one native harness's complete local path: its placement,
+// grants owner, gateway listener and provider credential. Stacks share the
+// journal, accounting ledger, images, network and certificate source.
+type localStack struct {
+	config    runtimedocker.PlacementConfig
+	model     string
+	options   []string
+	gateway   GatewayConfig
+	placement *runtimedocker.Placement
+	owner     *gatewaydocker.Owner
+	server    *http.Server
+}
+
+// localConfigs derives every local harness from the primary placement.
+func localConfigs(c Config) ([]*localStack, error) {
+	stacks := []*localStack{{config: c.Local, model: c.Model, options: c.NativeOptions, gateway: c.Gateway}}
+	host, _, err := net.SplitHostPort(c.Gateway.Listen)
+	if err != nil {
+		return nil, validListen(stacks[0])
+	}
+	for _, extra := range c.Harnesses {
+		placement := c.Local
+		placement.Harness, placement.Name, placement.GatewayPort = extra.Harness, extra.Name, extra.GatewayPort
+		listener := c.Gateway
+		listener.Listen = net.JoinHostPort(host, fmt.Sprint(extra.GatewayPort))
+		listener.ProviderURL, listener.ProviderTokenFile = extra.ProviderURL, extra.ProviderTokenFile
+		listener.ProviderCAFile, listener.PricingFile = extra.ProviderCAFile, extra.PricingFile
+		stacks = append(stacks, &localStack{config: placement, model: extra.Model, options: extra.NativeOptions, gateway: listener})
+	}
+	harnesses, names, ports := map[harness.NativeKind]bool{}, map[string]bool{}, map[uint16]bool{}
+	for _, stack := range stacks {
+		if err = errors.Join(nativeconfig.ValidateHarness(string(stack.config.Harness), stack.model, stack.options), validListen(stack)); err != nil {
+			return nil, err
+		}
+		_, remote := c.Remote[stack.config.Name]
+		if harnesses[stack.config.Harness] || names[stack.config.Name] || ports[stack.config.GatewayPort] || remote {
+			return nil, errors.New("home: each local harness needs a distinct harness, placement name and gateway port")
+		}
+		harnesses[stack.config.Harness], names[stack.config.Name], ports[stack.config.GatewayPort] = true, true, true
+	}
+	return stacks, nil
+}
+
+// validListen names the setting that keeps a gateway listener from serving
+// the Docker-reachable address local.gatewayIPv4 at the placement's port. It
+// accepts that address, a loopback address the engine forwards, or every
+// interface.
+func validListen(stack *localStack) error {
+	gatewayIPv4, listen, port := stack.config.GatewayIPv4, stack.gateway.Listen, fmt.Sprint(stack.config.GatewayPort)
+	if ip := net.ParseIP(gatewayIPv4); ip == nil || ip.To4() == nil || ip.IsUnspecified() {
+		return fmt.Errorf("home: local.gatewayIPv4 %q is not a specific IPv4 address; set the host address "+
+			"Docker containers reach", gatewayIPv4)
+	}
+	host, listenPort, err := net.SplitHostPort(listen)
+	ip := net.ParseIP(host)
+	switch {
+	case err != nil:
+		return fmt.Errorf("home: gateway.listen %q is not HOST:PORT; use %s or %s",
+			listen, net.JoinHostPort(gatewayIPv4, port), net.JoinHostPort("0.0.0.0", port))
+	case listenPort != port:
+		return fmt.Errorf("home: gateway.listen %q uses port %s, but local.gatewayPort is %s; make them equal",
+			listen, listenPort, port)
+	case ip == nil || ip.To4() == nil || host != gatewayIPv4 && !ip.IsLoopback() && !ip.IsUnspecified():
+		return fmt.Errorf("home: gateway.listen %q listens on %s, which containers cannot reach; "+
+			"use local.gatewayIPv4 %s, a loopback address the engine forwards, or 0.0.0.0", listen, host, gatewayIPv4)
+	}
+	return nil
+}
+
+// servingNames are every identity the shared gateway certificate must cover.
+func servingNames(c Config, stacks []*localStack) pki.Names {
+	names := pki.Names{IPs: []string{c.Local.GatewayIPv4}}
+	for _, stack := range stacks {
+		names.DNS = append(names.DNS, inspectionHostFor(stack.config.Harness))
+	}
+	// The MCP authority always serves the Sproozi control connection.
+	if host, _, err := net.SplitHostPort(c.Gateway.MCPAuthority); err == nil {
+		names.DNS = append(names.DNS, host)
+	}
+	if c.Gateway.GitHub != nil {
+		names.DNS = append(names.DNS, "github.com", "api.github.com")
+	}
+	if c.Gateway.Kubernetes != nil {
+		names.DNS = append(names.DNS, "kubernetes.default.svc")
+	}
+	return names
+}
+
 // Open constructs fixed production adapters. It performs no Docker launch or
 // inference; Serve starts the listener before any control request can activate.
 func Open(c Config, log io.Writer) (_ *Service, err error) {
-	if err := errors.Join(nativeconfig.ValidateHarness(string(c.Local.Harness), c.Model, c.NativeOptions),
-		validateProjectApprovals(c)); err != nil {
+	stacks, err := localConfigs(c)
+	if err != nil {
+		return nil, err
+	}
+	if err = validateProjectApprovals(c); err != nil {
 		return nil, err
 	}
 	if log == nil {
@@ -115,6 +220,13 @@ func Open(c Config, log io.Writer) (_ *Service, err error) {
 	if !filepath.IsAbs(c.Directory) {
 		return nil, errors.New("home: absolute directory required")
 	}
+	// Each store under the directory takes its own owner lock; a held one
+	// means another home daemon serves the same directory.
+	defer func() {
+		if errors.Is(err, privatefs.ErrLocked) {
+			err = anotherDaemon(c.Directory)
+		}
+	}()
 	if err = privatefs.EnsureDir(c.Directory); err != nil {
 		return nil, err
 	}
@@ -134,30 +246,34 @@ func Open(c Config, log io.Writer) (_ *Service, err error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Service{config: c, duration: duration, ledger: ledger, placements: map[string]session.Placement{}}
+	s := &Service{config: c, duration: duration, ledger: ledger, placements: map[string]session.Placement{}, log: log,
+		images: engine, sweepStop: make(chan struct{})}
 	defer func() {
 		if err != nil {
 			_ = s.Close()
 		}
 	}()
-	policy, err := approvedPolicy(c)
+	// Recover reservations a previous daemon left unsettled, then keep
+	// recovering any that expire on idle accounts.
+	// Home is the ledger's only owner and has not reserved yet, so a
+	// reservation without a lease belongs to a stopped daemon.
+	s.sweepLedger()
+	go s.sweepLedgerPeriodically()
+	s.drain = model.NewDrain()
+	s.certs, err = openCertificates(c, servingNames(c, stacks), log)
 	if err != nil {
 		return nil, err
 	}
-	s.owner, err = gatewaydocker.Open(gatewaydocker.Config{Directory: filepath.Join(c.Directory, "grants"), Ledger: ledger, Observer: engine, Policy: gateway.PolicySnapshot{Name: "home-policy", Spec: policy}, Template: gateway.TemplateSnapshot{Name: "home-template", Spec: api.AgentTemplateSpec{Instructions: c.Local.Instructions}}, NativeCapabilities: configuredNative(c)})
-	if err != nil {
-		return nil, err
+	s.certs.fenced = s.fenced
+	for _, stack := range stacks {
+		s.certs.listeners = append(s.certs.listeners, stack.gateway.Listen)
 	}
-	certificate, trust, endpoint, err := gatewayTLS(c)
-	if err != nil {
-		return nil, err
+	initial := s.certs.serving.Load()
+	for index, stack := range stacks {
+		if err = s.openStack(c, engine, ledger, stack, index, *initial, log); err != nil {
+			return nil, err
+		}
 	}
-	auth := &authority{owner: s.owner, endpoint: endpoint, trust: trust, model: c.Model, options: c.NativeOptions, kind: c.Local.Harness, mcpEndpoint: "https://" + c.Gateway.MCPAuthority}
-	s.local, err = runtimedocker.OpenPlacement(filepath.Join(c.Directory, "docker"), engine, c.Local, auth)
-	if err != nil {
-		return nil, err
-	}
-	s.placements[c.Local.Name] = s.local
 	if err = s.configureRemotes(); err != nil {
 		return nil, err
 	}
@@ -169,90 +285,177 @@ func Open(c Config, log io.Writer) (_ *Service, err error) {
 		return nil, err
 	}
 	s.configureProfile(c.Local.ProfileDirectory)
-	modelConfig, err := provider(c.Gateway, c.Local.Harness)
-	if err != nil {
-		return nil, err
-	}
-	gatewayConfig := gatewaydocker.GatewayConfig{Harness: c.Local.Harness, Certificates: map[string]tls.Certificate{inspectionHostFor(c.Local.Harness): certificate}, Model: modelConfig, AuditLogger: audit.NewLogger(log)}
-	// The MCP authority also serves the Sproozi control connection, so every
-	// home gateway needs it, with or without registered MCP servers.
-	host, _, err := net.SplitHostPort(c.Gateway.MCPAuthority)
-	if err != nil {
-		return nil, errors.New("home: gateway mcpAuthority is required")
-	}
-	leaf, _ := x509.ParseCertificate(certificate.Certificate[0])
-	if leaf.VerifyHostname(host) != nil {
-		return nil, errors.New("home: inspection certificate must cover MCP authority")
-	}
-	gatewayConfig.Certificates[host] = certificate
-	gatewayConfig.MCPAuthority = c.Gateway.MCPAuthority
-	if c.Gateway.MCPRegistryFile != "" {
-		data, readErr := readPrivate(c.Gateway.MCPRegistryFile, 128<<10)
-		if readErr != nil {
-			return nil, readErr
-		}
-		gatewayConfig.MCPRegistry, err = mcp.LoadRegistry(data, c.Gateway.MCPCredentialsDirectory)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if err = nativeServices(c, certificate, &gatewayConfig); err != nil {
-		return nil, err
-	}
-	handler, err := gatewaydocker.NewGateway(s.owner, gatewayConfig)
-	if err != nil {
-		return nil, err
-	}
-	s.gateway = proxytransport.NewServer(c.Gateway.Listen, certificate, handler)
 	s.config.Allowances = maps.Clone(c.Allowances)
 	s.config.ProjectApprovals = cloneProjectApprovals(c.ProjectApprovals)
 	return s, nil
 }
 
-func gatewayTLS(c Config) (tls.Certificate, []byte, string, error) {
-	var cert tls.Certificate
-	key, err := readPrivate(c.Gateway.KeyFile, 64<<10)
+// CheckDocker proves that dockerBinary reaches the engine at dockerSocket and
+// that the engine holds local.nativeImageID. serve calls it once before Open:
+// Open runs no Docker command but saves the placement settings, and a home
+// that cannot reach Docker cannot start or stop any local execution.
+func CheckDocker(ctx context.Context, c Config) error {
+	return checkDocker(ctx, c, configuredEngine(c))
+}
+
+// configuredEngine builds the engine only once checkDocker has found
+// dockerBinary and dockerSocket, so those checks name the setting first.
+type configuredEngine Config
+
+func (c configuredEngine) ImageID(ctx context.Context, reference string) (string, error) {
+	if err := privatefs.EnsureDir(c.DockerConfig); err != nil {
+		return "", err
+	}
+	engine, err := runtimedocker.NewEngine(c.DockerBinary, c.DockerSocket, c.DockerConfig)
 	if err != nil {
-		return cert, nil, "", err
+		return "", err
 	}
-	data, err := readPrivate(c.Gateway.CertificateFile, 64<<10)
+	return engine.ImageID(ctx, reference)
+}
+
+func (c configuredEngine) NetworkExists(ctx context.Context, name string) (bool, error) {
+	engine, err := runtimedocker.NewEngine(c.DockerBinary, c.DockerSocket, c.DockerConfig)
 	if err != nil {
-		return cert, nil, "", err
+		return false, err
 	}
-	cert, err = tls.X509KeyPair(data, key)
-	if err != nil {
-		return cert, nil, "", err
+	return engine.NetworkExists(ctx, name)
+}
+
+// CheckDocker runs CheckDocker with the service's settings and engine.
+func (s *Service) CheckDocker(ctx context.Context) error { return checkDocker(ctx, s.config, s.images) }
+
+func checkDocker(ctx context.Context, c Config, images imageResolver) error {
+	if info, err := os.Stat(c.DockerBinary); err != nil || !info.Mode().IsRegular() {
+		return fmt.Errorf("home: dockerBinary %s is not a file; set it to the Docker CLI's absolute path", c.DockerBinary)
 	}
-	leaf, err := x509.ParseCertificate(cert.Certificate[0])
-	if err != nil {
-		return cert, nil, "", err
-	}
-	ip := net.ParseIP(c.Local.GatewayIPv4)
-	host, port, err := net.SplitHostPort(c.Gateway.Listen)
-	want := fmt.Sprint(c.Local.GatewayPort)
-	if err != nil || ip == nil || ip.To4() == nil || ip.IsUnspecified() || port != want || (host != c.Local.GatewayIPv4 && host != "0.0.0.0") || leaf.VerifyHostname(c.Local.GatewayIPv4) != nil || leaf.VerifyHostname(inspectionHostFor(c.Local.Harness)) != nil {
-		return cert, nil, "", errors.New("home: TLS listener must cover fixed Docker-reachable IPv4 and inspection authority")
-	}
-	trust, err := readPrivate(c.Gateway.TrustBundleFile, 64<<10)
-	if err != nil {
-		return cert, nil, "", err
-	}
-	roots := x509.NewCertPool()
-	if !roots.AppendCertsFromPEM(trust) {
-		return cert, nil, "", errors.New("home: invalid gateway CA bundle")
-	}
-	intermediates := x509.NewCertPool()
-	for _, der := range cert.Certificate[1:] {
-		intermediate, parseErr := x509.ParseCertificate(der)
-		if parseErr != nil {
-			return cert, nil, "", parseErr
+	if runtime.GOOS != goosWindows {
+		if _, err := os.Stat(c.DockerSocket); err != nil {
+			return fmt.Errorf("home: dockerSocket %s does not exist; start Docker, or set dockerSocket to "+
+				"the engine's Unix socket", c.DockerSocket)
 		}
-		intermediates.AddCert(intermediate)
 	}
-	if _, err = leaf.Verify(x509.VerifyOptions{Roots: roots, Intermediates: intermediates, DNSName: c.Local.GatewayIPv4}); err != nil {
-		return cert, nil, "", err
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	id, err := images.ImageID(ctx, c.Local.NativeImageID)
+	if err != nil {
+		return fmt.Errorf("home: dockerBinary %s could not inspect local.nativeImageID %s through dockerSocket %s (%w); "+
+			"check that Docker is running, that dockerBinary is the Docker CLI and that the image is loaded",
+			c.DockerBinary, c.Local.NativeImageID, c.DockerSocket, err)
 	}
-	return cert, trust, "https://" + net.JoinHostPort(c.Local.GatewayIPv4, want), nil
+	if id != c.Local.NativeImageID {
+		return fmt.Errorf("home: Docker resolved local.nativeImageID %s to %s; set local.nativeImageID to the image ID",
+			c.Local.NativeImageID, id)
+	}
+	exists, err := images.NetworkExists(ctx, c.Local.NetworkName)
+	if err != nil {
+		return fmt.Errorf("home: could not list Docker networks to check local.networkName %q (%w)", c.Local.NetworkName, err)
+	}
+	if !exists {
+		return fmt.Errorf("home: local.networkName %q does not exist; create it with \"docker network create %s\"",
+			c.Local.NetworkName, c.Local.NetworkName)
+	}
+	return nil
+}
+
+// stackDirectory keeps the primary harness's original grants and placement
+// directories so existing installations retain their records.
+func stackDirectory(base string, index int, name string) string {
+	if index == 0 {
+		return base
+	}
+	return base + "-" + name
+}
+
+func (s *Service) openStack(c Config, engine *runtimedocker.Engine, ledger *budgetfile.Ledger, stack *localStack, index int, certificate tls.Certificate, log io.Writer) (err error) {
+	s.stacks = append(s.stacks, stack)
+	policyConfig := c
+	policyConfig.Local = stack.config
+	policy, err := approvedPolicy(policyConfig)
+	if err != nil {
+		return err
+	}
+	stack.owner, err = gatewaydocker.Open(gatewaydocker.Config{Directory: filepath.Join(c.Directory, stackDirectory("grants", index, stack.config.Name)), Ledger: ledger, Observer: engine, Policy: gateway.PolicySnapshot{Name: "home-policy", Spec: policy}, Template: gateway.TemplateSnapshot{Name: "home-template", Spec: api.AgentTemplateSpec{Instructions: c.Local.Instructions}}, NativeCapabilities: configuredNative(c)})
+	if err != nil {
+		return err
+	}
+	endpoint := "https://" + net.JoinHostPort(stack.config.GatewayIPv4, fmt.Sprint(stack.config.GatewayPort))
+	auth := &authority{owner: stack.owner, endpoint: endpoint, certs: s.certs, model: stack.model, options: stack.options, kind: stack.config.Harness, mcpEndpoint: "https://" + c.Gateway.MCPAuthority}
+	stack.placement, err = runtimedocker.OpenPlacement(filepath.Join(c.Directory, stackDirectory("docker", index, stack.config.Name)), engine, stack.config, auth)
+	if err != nil {
+		return err
+	}
+	s.placements[stack.config.Name] = stack.placement
+	modelConfig, err := provider(stack.gateway, stack.config.Harness)
+	if err != nil {
+		return err
+	}
+	modelConfig.Drain = s.drain
+	gatewayConfig := gatewaydocker.GatewayConfig{Harness: stack.config.Harness, Certificates: map[string]tls.Certificate{inspectionHostFor(stack.config.Harness): certificate}, Serving: s.certs.serving, Model: modelConfig, AuditLogger: audit.NewLogger(log),
+		MaxModelCall: maxModelCall(c.Gateway)}
+	// The MCP authority also serves the Sproozi control connection, so every
+	// home gateway needs it, with or without registered MCP servers.
+	host, _, err := net.SplitHostPort(c.Gateway.MCPAuthority)
+	if err != nil {
+		return errors.New("home: gateway mcpAuthority is required")
+	}
+	if leaf, _ := x509.ParseCertificate(certificate.Certificate[0]); leaf == nil || leaf.VerifyHostname(host) != nil {
+		return errors.New("home: inspection certificate must cover MCP authority")
+	}
+	gatewayConfig.Certificates[host] = certificate
+	gatewayConfig.MCPAuthority = c.Gateway.MCPAuthority
+	if c.Gateway.MCPRegistryFile != "" {
+		data, readErr := readSetting("gateway.mcpRegistryFile", c.Gateway.MCPRegistryFile, 128<<10)
+		if readErr != nil {
+			return readErr
+		}
+		gatewayConfig.MCPRegistry, err = mcp.LoadRegistry(data, c.Gateway.MCPCredentialsDirectory)
+		if err != nil {
+			return err
+		}
+	}
+	if err = nativeServices(c, certificate, &gatewayConfig); err != nil {
+		return err
+	}
+	handler, err := gatewaydocker.NewGateway(stack.owner, gatewayConfig)
+	if err != nil {
+		return err
+	}
+	stack.server = proxytransport.NewServer(stack.gateway.Listen, s.certs.serving, handler)
+	return nil
+}
+
+// fenced reports a local placement's independent stop evidence for a launch.
+func (s *Service) fenced(l session.Launch) (bool, error) {
+	for _, stack := range s.stacks {
+		if stack.config.Name == l.Placement && stack.placement != nil {
+			return stack.placement.Fenced(l)
+		}
+	}
+	return false, errors.New("home: launch belongs to no local placement")
+}
+
+// localFor returns the local placement for a native harness.
+func (s *Service) localFor(kind harness.NativeKind) (runtimedocker.PlacementConfig, error) {
+	for _, stack := range s.stacks {
+		if stack.config.Harness == kind {
+			return stack.config, nil
+		}
+	}
+	return runtimedocker.PlacementConfig{}, fmt.Errorf("home: harness %s is not configured; run sproozi init --local --harness %s", kind, kind)
+}
+
+// keyPairError names the gateway file that tls.X509KeyPair could not use.
+func keyPairError(g GatewayConfig, err error) error {
+	message := err.Error()
+	switch {
+	case strings.Contains(message, "certificate input"):
+		return fmt.Errorf("gateway.certificateFile %s: %w", g.CertificateFile, err)
+	case strings.Contains(message, "key input") || strings.Contains(message, "the private key") ||
+		strings.Contains(message, "parse private key"):
+		return fmt.Errorf("gateway.keyFile %s: %w", g.KeyFile, err)
+	default:
+		return fmt.Errorf("gateway.certificateFile %s and gateway.keyFile %s: %w", g.CertificateFile, g.KeyFile, err)
+	}
 }
 
 func provider(c GatewayConfig, kind harness.NativeKind) (model.HandlerConfig, error) {
@@ -261,13 +464,21 @@ func provider(c GatewayConfig, kind harness.NativeKind) (model.HandlerConfig, er
 	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || !approvedProviderURL(u) {
 		return result, errors.New("home: fixed HTTPS provider or controlled loopback fixture required")
 	}
-	data, err := readPrivate(c.ProviderTokenFile, 16<<10)
+	data, err := readSetting("gateway.providerTokenFile", c.ProviderTokenFile, 16<<10)
 	if err != nil {
 		return result, err
 	}
 	token := strings.TrimSpace(string(data))
-	if token == "" || strings.ContainsAny(token, " \r\n\t\x00") {
-		return result, errors.New("home: invalid provider credential")
+	if placeholderToken(token) {
+		return result, fmt.Errorf("home: gateway.providerTokenFile %s still holds the placeholder %s; "+
+			"write the provider API key there", c.ProviderTokenFile, token)
+	}
+	if token == "" {
+		return result, fmt.Errorf("home: gateway.providerTokenFile %s is empty; write the provider API key there", c.ProviderTokenFile)
+	}
+	if strings.ContainsAny(token, " \r\n\t\x00") {
+		return result, fmt.Errorf("home: gateway.providerTokenFile %s has whitespace or NUL inside the key; "+
+			"it must hold only the provider API key", c.ProviderTokenFile)
 	}
 	result.UpstreamURL = c.ProviderURL
 	if kind == harness.NativeClaude {
@@ -277,19 +488,21 @@ func provider(c GatewayConfig, kind harness.NativeKind) (model.HandlerConfig, er
 	}
 	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
 	if c.ProviderCAFile != "" {
-		data, err = readPrivate(c.ProviderCAFile, 64<<10)
+		data, err = readSetting("gateway.providerCAFile", c.ProviderCAFile, 64<<10)
 		if err != nil {
 			return result, err
 		}
 		roots := x509.NewCertPool()
 		if !roots.AppendCertsFromPEM(data) {
-			return result, errors.New("home: invalid provider CA bundle")
+			return result, fmt.Errorf("gateway.providerCAFile %s: no PEM CA certificate found", c.ProviderCAFile)
 		}
 		tlsConfig.RootCAs = roots
 	}
+	// A model call has no whole-call timeout: it streams until its own
+	// deadline, and the model handler ends a response that goes idle.
 	result.HTTPClient = &http.Client{Transport: &http.Transport{TLSClientConfig: tlsConfig, TLSHandshakeTimeout: 10 * time.Second, ResponseHeaderTimeout: 45 * time.Second, IdleConnTimeout: 30 * time.Second}, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
 	if c.PricingFile != "" {
-		data, err = readPrivate(c.PricingFile, 128<<10)
+		data, err = readSetting("gateway.pricingFile", c.PricingFile, 128<<10)
 		if err != nil {
 			return result, err
 		}
@@ -440,15 +653,8 @@ func nativeScopes(c Config, policy *api.AgentPolicySpec) error {
 }
 
 func nativeServices(c Config, certificate tls.Certificate, target *gatewaydocker.GatewayConfig) error {
-	leaf, err := x509.ParseCertificate(certificate.Certificate[0])
-	if err != nil {
-		return err
-	}
 	cover := func(hosts ...string) error {
 		for _, host := range hosts {
-			if leaf.VerifyHostname(host) != nil {
-				return errors.New("home: inspection certificate lacks configured native authority")
-			}
 			target.Certificates[host] = certificate
 		}
 		return nil
@@ -457,7 +663,7 @@ func nativeServices(c Config, certificate tls.Certificate, target *gatewaydocker
 		if err := cover("github.com", "api.github.com"); err != nil {
 			return err
 		}
-		key, err := readPrivate(github.PrivateKeyFile, 64<<10)
+		key, err := readSetting("gateway.github.privateKeyFile", github.PrivateKeyFile, 64<<10)
 		if err != nil {
 			return err
 		}
@@ -476,7 +682,7 @@ func nativeServices(c Config, certificate tls.Certificate, target *gatewaydocker
 		if err != nil || endpoint.Scheme != "https" || endpoint.Host == "" || endpoint.User != nil || endpoint.Path != "" || endpoint.RawQuery != "" || endpoint.ForceQuery || endpoint.Fragment != "" {
 			return errors.New("home: exact HTTPS Kubernetes API authority required")
 		}
-		token, err := readPrivate(kube.TokenFile, 16<<10)
+		token, err := readSetting("gateway.kubernetes.tokenFile", kube.TokenFile, 16<<10)
 		if err != nil {
 			return err
 		}
@@ -484,7 +690,7 @@ func nativeServices(c Config, certificate tls.Certificate, target *gatewaydocker
 		if credential == "" || strings.ContainsAny(credential, " \t\r\n\x00") {
 			return errors.New("home: invalid Kubernetes gateway credential")
 		}
-		ca, err := readPrivate(kube.CAFile, 64<<10)
+		ca, err := readSetting("gateway.kubernetes.caFile", kube.CAFile, 64<<10)
 		if err != nil {
 			return err
 		}
@@ -496,4 +702,13 @@ func nativeServices(c Config, certificate tls.Certificate, target *gatewaydocker
 		target.Kubernetes = &kubernetesgateway.HandlerConfig{Upstream: endpoint, Client: client, MaxResponseBytes: 8 << 20, MaxWatchSeconds: 300}
 	}
 	return nil
+}
+
+// maxModelCall is the configured model call maximum, or zero for the gateway
+// default. ServeProblems has already bounded the value.
+func maxModelCall(g GatewayConfig) time.Duration {
+	if g.MaxModelCallSeconds == nil {
+		return 0
+	}
+	return time.Duration(*g.MaxModelCallSeconds) * time.Second
 }

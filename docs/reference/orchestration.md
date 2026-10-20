@@ -1,14 +1,15 @@
 # Persistent assistant orchestration
 
-This task service lets a persistent assistant submit disposable jobs. It retains
-status and an optional final answer, not the worker's native conversation or
-workspace. For resumable work, use the retained-work service described in
-[remote work and local resume](../guides/portable-workflows.md).
+The task service, `sproozi-tasks`, lets a persistent assistant start delegated
+runs. Each delegated run is an AgentRun in its own sandbox. The service retains
+its status and an optional final answer, not the harness conversation
+or workspace. For resumable work, use a remote executor's remote work, described in
+[Run a task remotely, then resume it locally](../guides/portable-workflows.md).
 
 A persistent assistant owns its conversations, memory, channels and schedules.
 Sproozi owns the admission, identity, budget, deadline and cleanup of every
 delegated `AgentRun`. The assistant runs in its own Deployment and persistent
-volume, outside the disposable worker lifecycle.
+volume, outside the sandbox lifecycle of its delegated runs.
 
 The task service speaks native Streamable HTTP MCP at `https://<service>:8443/mcp`.
 Its administrator configuration maps workflow names to fixed templates and
@@ -75,7 +76,7 @@ Submission names are deterministic for the configured principal and key.
 An identical retained Run can be returned after submission expiry. A missing
 expired request cannot create work. Status and cancellation require the returned
 UID, so a replacement with the same name is unavailable rather than a new target.
-Waiting neither extends the worker deadline nor cancels it on client disconnect.
+Waiting neither extends the run's deadline nor cancels it on client disconnect.
 
 Before creating a Run, the service reads the workflow's live template and policy
 and requires retention longer than 65 minutes. This exceeds the maximum replay
@@ -95,7 +96,7 @@ invocation and preserve it while recovering that invocation.
 
 Responses contain `id`, `uid`, `phase`, `cancellationRequested`, optional
 timestamps, and optional `result: {"text": "...", "truncated": false}`.
-Phase comes from actual worker process completion, independently of answer text.
+Phase comes from actual agent process completion, independently of answer text.
 An absent result means unavailable; available empty text is distinct. Present
 truncated text as incomplete. Cancellation or deadline expiry can have no answer.
 
@@ -117,13 +118,16 @@ history has its own separate retention.
 
 ## Execution and inference ownership
 
-The controller runs one worker at a time. Additional delegated jobs queue. This
-integration has no concurrent worker teams or dependency-graph scheduler. The
-persistent assistant does not occupy that slot. Its model account, memory and
-channel credentials belong to the trusted assistant deployment. Worker inference
+The controller admits delegated runs concurrently unless a cap applies: the
+controller flag `--max-active-runs` for the cluster cap, or `maxActiveRuns` on
+the workflow's [AgentPolicy](agentpolicy.md#concurrent-runs). A delegated run
+held by a cap stays `Queued` with reason `WaitingForConcurrencyCap`. This integration has no
+dependency-graph scheduler. The persistent assistant is not an AgentRun and does
+not count against either cap. Its model account, memory and
+channel credentials belong to the trusted assistant deployment. Sandbox inference
 uses Sproozi's projected Run identity, gateway-owned provider credentials and
 per-Run budgets. Coordinator inference is accounted for separately by its
-configured provider; worker budgets do not cap the coordinator's spending.
+configured provider; run budgets do not cap the coordinator's spending.
 
 The [orchestration ADR](../adr/0003-persistent-assistants-and-retained-results.md)
 records the separation, alternatives, bounded replay and result tradeoffs.

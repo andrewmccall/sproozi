@@ -1,6 +1,7 @@
 package model_test
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,6 +15,9 @@ import (
 	"github.com/andrewmccall/sproozi/internal/modelauth"
 )
 
+// The bounded case reserves its request bytes plus max_tokens, 92 units of
+// 100, so a second bounded call does not fit and waits for the first to
+// settle. An unbounded call reserves everything and runs alone.
 func TestConcurrentInferenceWaitsForSharedAllowance(t *testing.T) {
 	for name, body := range map[string]string{"unbounded": `{"model":"test"}`, "bounded": `{"model":"test","max_tokens":60}`} {
 		t.Run(name, func(t *testing.T) {
@@ -62,5 +66,42 @@ func TestConcurrentInferenceWaitsForSharedAllowance(t *testing.T) {
 				t.Fatalf("concurrent usage lost: calls=%d state=%+v", calls.Load(), state)
 			}
 		})
+	}
+}
+
+// Bounded calls whose reservations fit together run concurrently.
+func TestBoundedInferenceRunsConcurrentlyWhileReservationsFit(t *testing.T) {
+	var started sync.WaitGroup
+	started.Add(2)
+	bothStarted := make(chan struct{})
+	go func() { started.Wait(); close(bothStarted) }()
+	h := newHandler(t, testExecutionGrant(), testModelUpstream)
+	h.Config.Identity.Policy.Spec.Budgets[api.CapabilityModelInference] = api.EndpointBudget{MaxUnits: 200}
+	h.Config.ProviderAuth = modelauth.APIKey{Key: testOpenAIKey}
+	h.Config.HTTPClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		started.Done()
+		select {
+		case <-bothStarted:
+		case <-time.After(time.Second):
+			return nil, errors.New("the other bounded call never started")
+		}
+		return modelResponse(r, `{"usage":{"total_tokens":12}}`), nil
+	})}
+	results := make(chan int, 2)
+	for range 2 {
+		go func() {
+			response := httptest.NewRecorder()
+			h.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
+				strings.NewReader(`{"model":"test","max_tokens":60}`)))
+			results <- response.Code
+		}()
+	}
+	for range 2 {
+		if code := <-results; code != http.StatusOK {
+			t.Fatalf("bounded calls did not run together: %d", code)
+		}
+	}
+	if state := observedState(t, h.Config.BudgetTracker, testRunUID); state.UnitsUsed != 24 || state.ReservedUnits != 0 {
+		t.Fatalf("state=%+v", state)
 	}
 }

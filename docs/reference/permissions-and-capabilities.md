@@ -31,6 +31,41 @@ an allowed subresource. Discovery is limited to the supported core/apps v1 paths
 The handler removes all `Impersonate-*` headers and refuses redirects so the
 forwarded operation stays bound to the authorized target.
 
+Query parameters are bounded:
+
+| Parameter | Allowed | Denial body (HTTP 403) |
+| --- | --- | --- |
+| `timeoutSeconds`, for example on a watch | 1 to 300 | `kubernetes request denied: timeoutSeconds must be an integer from 1 to 300` |
+| `limit` on a list | 1 to 5000 | `kubernetes request denied: limit must be an integer from 1 to 5000` |
+| `continue` | at most 2048 characters | `kubernetes request denied` |
+| `labelSelector`, `fieldSelector` | at most 2048 characters each | `kubernetes request denied` |
+
+Named watches are not permitted; watch a collection with a field selector
+instead.
+
+Each forwarded read has a time limit. Every read ends at the request
+deadline, 10 seconds before the
+[inspected connection](../../GLOSSARY.md#inspected-connection) that carries it
+closes, so no read lasts more than 4 minutes 50 seconds (290 seconds) from
+the CONNECT, and less on a connection the harness opened earlier. A watch
+therefore lasts its `timeoutSeconds` (1 to 300) or until the request deadline,
+whichever comes first, so in practice at most about 290 seconds. A watch
+without `timeoutSeconds` is treated as 300 seconds and so also ends at the
+request deadline. The API server normally ends a watch at its
+`timeoutSeconds`; if it hasn't, the gateway closes it 5 seconds later. A get,
+list or log read has 120 seconds to complete, so follow logs with repeated
+reads rather than one long stream. When the request deadline ends a watch, the
+client sees it end, as it would at `timeoutSeconds`.
+
+The gateway forwards at most 8 MiB of each response body. It has already sent
+the upstream status and headers by then, so it can't send a denial. A chunked
+response, which includes every watch, then ends at 8 MiB as if it were
+complete: the client sees a truncated list body, which fails to decode, or a
+watch that ended, not an HTTP error. A response with a `Content-Length`
+instead closes the connection early, which the client reports as an
+unexpected end of file. Use `limit` and `continue` to page large lists, and
+`timeoutSeconds` to end watches before they reach the cap.
+
 The investigation route does not authorize:
 
 - `secrets`
@@ -48,7 +83,7 @@ access is not a supported path.
 | ServiceAccount | Main permissions |
 | --- | --- |
 | `controller-manager` | cluster-wide: manage Run status; read runtime/policy/template objects; get, list and watch Pods, ServiceAccounts and NetworkPolicies; get ConfigMaps. In `sproozi-agents` only (`config/agent-rbac`): create and delete Pods, ServiceAccounts and contract ConfigMaps, and create, update and delete NetworkPolicies. The optional metrics overlay adds TokenReviews and SubjectAccessReviews |
-| `shared-gateway` | `tokenreviews`, read ServiceAccounts and run/policy/template objects, bounded Kubernetes reads, namespaced budget state, mounted provider credentials, and get/update of the rotating ChatGPT session Secret |
+| `shared-gateway` | `tokenreviews`, read ServiceAccounts and run/policy/template objects, bounded Kubernetes reads, get, list, create and update of budget ConfigMaps in `sproozi-system` (`list` for the minute-by-minute sweep of expired leases), mounted provider credentials, and get/update of the rotating ChatGPT credential Secret |
 | `webhook` | create `AgentRun` and read policy/template objects in `sproozi-system`, with no Secret access there; get Secrets only in `sproozi-webhooks`; and get/create/list/delete replay ConfigMaps in `sproozi-webhook-state` |
 
 ## Current enforcement caveats

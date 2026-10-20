@@ -2,7 +2,8 @@
 
 For a walkthrough from a fresh checkout, start with
 [Getting started](getting-started.md). To deploy on an existing cluster and
-submit a provider-free first run, use [Install on Kubernetes](install-kubernetes.md).
+submit a provider-free first run, use [Install on Kubernetes and run your first Pod](install-kubernetes.md).
+Its step 7 runs this demo on that cluster without Kind.
 
 The demonstrated path starts with a human-created `AgentRun` on a disposable
 Kind cluster. The controller creates the agent Pod in `sproozi-agents`.
@@ -49,13 +50,19 @@ The setup wizard selects ChatGPT-plan OAuth or API-key billing and asks only
 for missing GitHub App credentials. Follow
 [Save the credentials](getting-started.md#save-the-credentials) for the exact
 prompts, private-key location and saved files. If the GitHub App is already configured,
-`make demo-chatgpt-login` reuses or authorizes a session and verifies model access, preserving
-the existing API key and App settings. See
-[model provider authentication](model-provider-auth.md) for storage, refresh,
+`make demo-chatgpt-login` reuses or authorizes a ChatGPT credential and verifies model access, preserving
+the existing API key and App settings. Reuse prints a warning; for a new
+cluster, force a fresh sign-in with `make demo-chatgpt-login CHATGPT_REAUTHORIZE=1`. See
+[Model provider authentication](model-provider-auth.md) for storage, refresh,
 token-only subscription budgets and the single-gateway limitation.
 It saves settings immediately in gitignored `.local/demo.env` with mode
-`0600`; private key contents remain in the file you select. Setup also runs
-automatically before `make demo-check` and when opening the credential wizard.
+`0600`; private key contents remain in the file you select. A non-empty value
+set on the command line or in the environment takes precedence over the file.
+The demo refuses the file if a line is not a plain `KEY=value` assignment or
+sets a shell or tool variable such as `BASH_ENV` or `PATH`.
+Setup also runs
+automatically inside `make demo-check`, after its fast credential check, and when
+opening the credential wizard.
 Automatic repository selection does not create a GitHub repository or overwrite
 its contents. Create the disposable repository if it does not already exist.
 Seed the disposable repository's `main` branch with
@@ -86,6 +93,9 @@ probes verify a wrong token audience returns 401 and a direct connection to the
 Kubernetes API times out. A failed client, missing binary, broken trust bundle
 or provider error does not count as a policy denial.
 
+`make demo` refuses an empty `IMG`, and refuses a second run with the same
+`KIND_CLUSTER` while the first holds `.local/demo/<name>.lock`; if no run is
+active, the lock is stale and you can remove it with `rm -r`.
 `make demo` waits up to 20 minutes; use `SPROOZI_LIVE_TIMEOUT=30m` to change it.
 It writes a redacted report under `.local/verification/` with the PR URL and
 commit, run UID, policy decisions, model usage, tool versions, image digests and
@@ -148,4 +158,4 @@ monitoring namespace instead if it has a different name.
 The base install includes a webhook service, but the manual example configures
 no receiver or HMAC Secret. Event integration requires those inputs and a sender
 that signs the [webhook contract](../reference/webhook-contract.md). The
-[home-ops playbook](home-ops-playbook.md) retains that planned integration.
+[Home-ops playbook](home-ops-playbook.md) retains that planned integration.

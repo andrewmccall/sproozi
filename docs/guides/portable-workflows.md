@@ -1,8 +1,9 @@
-# Remote work and local resume
+# Run a task remotely, then resume it locally
 
 Start a Codex task in Kubernetes through Hermes or the CLI. Sproozi saves its
 conversation and Git workspace so you can resume it later in local Docker. The
-remote task service runs independently of your laptop.
+[remote executor](../../GLOSSARY.md#remote-executor) that runs the work in
+Kubernetes keeps going independently of your laptop.
 
 The workflow has four steps:
 
@@ -15,32 +16,35 @@ Pull does not start an agent. Resume starts a new execution with a new
 deadline and allowance. See [core concepts](../explanations/core-concepts.md)
 for the difference between a session and an execution.
 
-This workflow supports Codex. Existing Codex and Claude interactive live
-moves remain documented in the [session guide](session-mobility.md). Automated
+This workflow supports Codex. Here the remote executor owns the task until you
+pull it, and nobody attaches while it runs. To work interactively in a Codex or
+Claude Code session and move it between Docker and Kubernetes while your home
+daemon stays the owner, use
+[Move a live session between Docker and Kubernetes](session-mobility.md). Automated
 Claude tasks, IDE/GUI attachment, background tools, multiplayer and existing
 personal-session adoption are not part of this workflow.
 
 ## Prepare the installation
 
-1. Follow [getting started](getting-started.md) for the controller, authenticated
+1. Follow [Getting started](getting-started.md) for the controller, authenticated
    gateway and enforcing CNI. Use a dedicated Kind cluster for evaluation; use
-   [the Kubernetes installation guide](install-kubernetes.md) for an operator-owned
-   cluster. Do not use a personal current kubeconfig context implicitly.
+   [Install on Kubernetes and run your first Pod](install-kubernetes.md) for an
+   operator-owned cluster. Do not use a personal current kubeconfig context implicitly.
 2. Build the selected native image and provision its managed runtime/template/policy
    using [the complete mobility setup](../../hack/verify/session-mobility/README.md).
    The image contains Git, the native supervisor, checkpoint helper and
    `/usr/local/bin/session-profile`. The remote executor needs private durable
-   storage and administrator-owned Kubernetes credentials; workers and Hermes do
-   not receive those credentials.
+   storage and administrator-owned Kubernetes credentials; sandboxes and Hermes
+   do not receive those credentials.
 3. Configure the [home daemon](../../cmd/sproozi/README.md) with one private JSON
    file. It selects local Docker images/network, gateway TLS/provider credential
    files, finite allowances and named remote executors. Keep it outside any
-   transferred repository. Use `--config FILE` consistently or put it at
-   `~/.sproozi/config.json`. Your [profile](../reference/profile.md) lives
-   beside it in `~/.sproozi/profile`.
+   transferred repository. Use `--config FILE` consistently or put it at the
+   [default path](../reference/session-commands.md#command-flags). Your
+   [profile](../reference/profile.md) is the `profile` folder beside it.
 4. Configure scoped GitHub access through the existing GitHub App gateway for
    engineering work. Use approved repositories/base branches and finite budgets.
-   The worker gets a placeholder `GH_TOKEN`, never the App private key. Add the
+   The sandbox gets a placeholder `GH_TOKEN`, never the App private key. Add the
    corresponding `gateway.github` block and `github.pull_request` allowance to
    the home configuration when the resumed local agent should publish work.
 
@@ -81,9 +85,9 @@ To use GitHub after local resume, merge the following into the full home configu
 }
 ```
 
-Replace the numeric IDs and scope with your approved App installation. Use the
-[GitHub App setup](manual-pr-demo.md) for its required repository permissions
-and protected key file. The inspection certificate must additionally cover
+Replace the numeric IDs and scope with your approved App installation. Step 5 of
+[Getting started](getting-started.md#5-create-a-github-app) gives its required
+repository permissions and protected key file. The inspection certificate must additionally cover
 `github.com` and `api.github.com`, retaining its model and gateway-IP SANs.
 For remote work, configure the same approved repository/base scope and finite
 `github.pull_request` budget on the managed AgentPolicy, and provision the App
@@ -105,55 +109,54 @@ Add `workTokenFile` and approved repositories to the existing private
 ```
 
 These fields extend the full profile configuration, not a standalone replacement.
-Generate a distinct task token locally with `openssl rand -hex 32`, save it with
-mode `0600`, and reference that file. The existing profile principal token belongs
+Generate a distinct work token locally with `openssl rand -hex 32`, save it with
+mode `0600`, and reference that file. The existing home principal token belongs
 to the trusted home and additionally permits pull/claim. Hermes receives only the
-task token. Do not reuse the same bytes for both roles.
+work token. Do not reuse the same bytes for both roles.
 
 An approved repository can instead specify an absolute `snapshot` path to a
-stopped ordinary Git checkout owned by the administrator. The owner captures it
-before dispatch. A URL source starts from a controlled seed repository and asks
-the native worker to fetch that approved source through its GitHub capability.
+stopped ordinary Git checkout owned by the administrator. The remote executor
+captures it before dispatch. A URL source starts from a controlled seed repository and asks
+the harness to fetch that approved source through its GitHub capability.
 Repository files cannot supply trusted launch instructions or credential
 references.
 
 Run `session-profile --config FILE` with the explicit administrator kubeconfig,
 or deploy `/usr/local/bin/session-profile --config /etc/sproozi/profile.json` in
 a trusted Pod with the native image, a private persistent directory, its
-TLS/token files and narrowly scoped placement credentials. Use one replica and
-an owner lock; restarting it recovers the same stored execution intents. Its
+TLS/token files and narrowly scoped placement credentials. Use one replica; a
+lock on its state directory rejects a second remote executor using the same
+directory, and restarting it recovers the same stored execution intents. Its
 Kubernetes credentials need the documented managed-Run, registration and
-Pod-control permissions. Workers cannot use it to execute arbitrary commands.
+Pod-control permissions. Sandboxes cannot use it to execute arbitrary commands.
 
 Put the profile's HTTPS origin, public CA and home principal token file in the
 global home configuration's `remote` map. The map name must equal the configured
-profile `placementName`. A `workSources` entry gives an owner a separately
+profile `placementName`. A `workSources` entry gives a remote executor a separately
 provisioned connection. Every executor or source name resolves to its
 `workSources` entry when one exists, otherwise to the same-named `remote`
-profile. Both transports
+profile; the [configuration reference](../../cmd/sproozi/README.md#configuration-reference)
+says when to use each. Both transports
 verify TLS 1.3, use one fixed origin and reject redirects.
 
-For a persistent in-cluster owner and the exact Hermes `/work/mcp` configuration,
-use [Hermes with retained work](retained-work-kubernetes.md).
+For a persistent in-cluster remote executor and the exact Hermes `/work/mcp` configuration,
+use [Hermes with remote work](retained-work-kubernetes.md).
 
 ## Run and inspect work
 
-Build the public CLI:
-
-```sh
-go build -o bin/sproozi ./cmd/sproozi
-go build -o bin/session-profile ./cmd/session-profile
-```
+[Install the CLI](install.md). Build `session-profile` and the images from a
+checkout at the same release as the CLI, as described in
+[Move a live session between Docker and Kubernetes](session-mobility.md#prepare-the-administrator-owned-setup).
 
 Create a task file describing a reproducible problem and observable checks. Then
 submit against the explicit configured profile name:
 
 ```sh
-bin/sproozi run --config /private/sproozi/config.json \
+sproozi run --config /private/sproozi/config.json \
   --executor engineering --harness codex --repository sproozi \
   --task-file task.txt --operation ORIGINAL_REQUEST_UUID
-bin/sproozi sessions --config /private/sproozi/config.json --executor engineering
-bin/sproozi status SESSION_ID --config /private/sproozi/config.json --executor engineering
+sproozi sessions --config /private/sproozi/config.json --executor engineering
+sproozi status SESSION_UUID --config /private/sproozi/config.json --executor engineering
 ```
 
 Preserve the request UUID when retrying. Repeating identical intent returns the
@@ -161,8 +164,8 @@ same session and execution; changed intent is rejected. Public `id` addresses
 the stable session. `executionId`, `allocationId` and `incarnation` identify the
 execution, visit and exact writer separately. The session ID outlives the Pod.
 Status returns the task phase and a size-limited final answer marked as
-untrusted output. The owner reports `retained` only after compatible native
-completion, confirmed worker stop, finalized usage accounting and checkpoint
+untrusted output. The remote executor reports `retained` only after compatible native
+completion, confirmed sandbox stop, finalized usage accounting and checkpoint
 storage. An `unknown` status cannot be pulled or silently interpreted as stopped.
 
 `sessions` returns one labelled JSON catalogue. Check `executors` for unavailable
@@ -170,7 +173,7 @@ owners and `truncated` for omitted results; a missing home daemon does not erase
 successful remote rows. The [command reference](../reference/session-commands.md)
 explains owner selection, JSON fields and safe error categories.
 
-For a known recoverable interruption, use `sproozi recover SESSION_ID --executor
+For a known recoverable interruption, use `sproozi recover SESSION_UUID --executor
 engineering --config FILE`. Cancel uses a separate stable `--operation UUID` and
 revokes before forced stop. Keep the original owner journals and accounting
 records; deleting resources or replacing a failed Run does not establish stop or
@@ -178,8 +181,10 @@ refund evidence.
 
 ## Connect Hermes
 
-Use the existing persistent [Hermes deployment and native MCP setup](hermes-orchestration.md).
-Register the profile's `/work/mcp` URL with its task bearer token and public CA.
+Use the persistent Hermes deployment and native MCP setup from
+[Run a persistent Hermes assistant on Kubernetes](hermes-orchestration.md).
+Register the profile's `/work/mcp` URL with its work token as the bearer token
+and its public CA.
 The supported tools are `sproozi_run`, `sproozi_status`, `sproozi_cancel` and
 `sproozi_sessions`. Hermes supplies this intent, without images, PodSpecs,
 Kubernetes tokens or native-state paths:
@@ -196,8 +201,8 @@ Kubernetes tokens or native-state paths:
 
 Poll `sproozi_status` with the returned `id`. A scheduling prompt must preserve
 the same request UUID on transport retries. A new request UUID is a deliberately
-new task. The ordinary `submit/status/wait/cancel` facade remains available for
-the older disposable assistant-job workflows; it does not provide portable
+new task. The task service's `submit/status/wait/cancel` tools remain available for
+delegated runs that keep only a final answer; they don't provide portable
 native state.
 
 ## Pull and resume locally
@@ -205,20 +210,27 @@ native state.
 Start the home daemon, then transfer the completed session:
 
 ```sh
-bin/sproozi serve --config /private/sproozi/config.json
+sproozi serve --config /private/sproozi/config.json
 # In another terminal:
-bin/sproozi pull SESSION_ID --config /private/sproozi/config.json --from engineering
-bin/sproozi resume SESSION_ID --executor docker --config /private/sproozi/config.json
+sproozi pull SESSION_UUID --config /private/sproozi/config.json --from engineering
+sproozi resume SESSION_UUID --executor docker --config /private/sproozi/config.json
 ```
 
+`--from engineering` names the remote executor, configured under `remote` or
+`workSources`, whose remote executor hands the session over. `--executor docker`
+uses docker, home's executor name, to address the home daemon that now owns
+the session.
+[Why the commands use different flags](session-mobility.md#why-the-commands-use-different-flags)
+explains the three flags.
+
 Pull validates and saves the conversation and Git checkpoint without starting an
-agent. It then records the remote owner's one-way ownership transfer. The pull
+agent. It then records the remote executor's one-way ownership transfer. The pull
 operation UUID comes from the session ID and source, so if the reply is lost,
 run the same command again. An explicit `--operation UUID` overrides it; retry
 with that same UUID. Downloading a checkpoint alone
 does not permit local execution. The remote catalogue now reports `home-owned`
 and cannot reopen that task session. Keep the home configuration and private
-directory unique to this trusted installation; copying its principal credential
+directory unique to this trusted installation; copying its home principal token
 into independent homes is unsupported.
 
 The home catalogue enforces `local.retainedBytes` and a finite file count for
@@ -228,15 +240,15 @@ stopped and prevents a new execution. Restore capacity and retry the original
 operation. Keep protected owner/receipt journals intact; deleting them is not
 recovery.
 
-Resume opens the real native TUI with the same conversation UUID and supported
+Resume opens the real native TUI with the same harness conversation ID (`threadId`) and supported
 Git history, index, staged/unstaged changes and selected files. Its new deadline,
 allowances and gateway identity come from current home approval. Earlier receipts
-remain unchanged. `--detach` starts without attaching; `attach --socket PATH
---id SESSION_ID` reconnects, and Ctrl-] detaches without stopping work.
+remain unchanged. `--detach` starts without attaching; `sproozi attach SESSION_UUID
+--socket PATH` reconnects, and Ctrl-] detaches without stopping work.
 
 After reviewing and changing the work, use
-`sproozi stop SESSION_ID --executor docker --config FILE` to wait for the current
-turn and foreground tools, stop the worker, finalize usage accounting and save a
+`sproozi stop SESSION_UUID --executor docker --config FILE` to wait for the current
+turn and foreground tools, stop the sandbox, finalize usage accounting and save a
 new checkpoint. It does not launch a destination. A later resume starts another
 execution with current approval. Use `move` for live visits within one
 execution; its original deadline and aggregate allowance continue across those
@@ -308,7 +320,7 @@ it does not grant writes, arbitrary contexts or Flux custom-resource access.
 
 For the local gateway, add `gateway.kubernetes` with `upstreamURL`, private
 `tokenFile`, public `caFile` and `scope` containing approved namespaces/resources.
-Use a restricted read-only credential. The worker's regenerated kubeconfig points
+Use a restricted read-only credential. The sandbox's regenerated kubeconfig points
 to the inspected `kubernetes.default.svc` authority with a placeholder token;
 the gateway supplies its own credential for the configured API. The remote
 gateway's ordinary Kubernetes handler targets its configured execution cluster.

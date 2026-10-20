@@ -1,5 +1,5 @@
 // Package session retains trusted remote execution registration and fencing.
-// Only the profile service may write this store. Native workers, checkpoints
+// Only the remote executor may write this store. Native workers, checkpoints
 // and Run annotations do not supply authority. Callers confirm restoration,
 // native-container termination and ledger seals before recording those effects.
 package registry

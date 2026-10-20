@@ -11,6 +11,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"log/slog"
 	"math/big"
 	"net"
 	"net/http"
@@ -347,6 +348,111 @@ func TestGatewaySessionLifetimeClosesConnection(t *testing.T) {
 	case <-s.serveDone:
 	case <-time.After(time.Second):
 		t.Fatal("gateway ServeHTTP did not return after lifetime")
+	}
+}
+
+// A request still running near the connection's lifetime ends first, so its
+// handler's reply reaches the harness, and the gateway logs why.
+func TestGatewayRequestEndsBeforeConnectionLifetime(t *testing.T) {
+	logs := &lockedBuffer{}
+	identity := testIdentity()
+	g, err := New(Config{Certificates: map[string]tls.Certificate{testServiceHost: testCertificate(t)}, Authenticate: func(context.Context, string) (*gateway.ExecutionGrant, error) { return identity, nil }, Revalidate: func(context.Context, *gateway.ExecutionGrant) error { return nil }, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+		http.Error(w, "upstream request failed", http.StatusBadGateway)
+	}), AllowedAuthority: onlyTestService, SessionLifetime: time.Second, RevocationInterval: 20 * time.Millisecond,
+		Logger: slog.New(slog.NewTextHandler(logs, nil))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := startProxySession(t, g, testProxyAuthorization)
+	defer func() { _ = s.client.Close() }()
+	_ = s.client.SetDeadline(time.Now().Add(2 * time.Second))
+	if _, err = io.WriteString(s.client, "GET / HTTP/1.1\r\nHost: service.test\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	response, err := http.ReadResponse(bufio.NewReader(s.client), nil)
+	if err != nil {
+		t.Fatalf("request cut without a reply: %v", err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusBadGateway {
+		t.Fatalf("status = %d", response.StatusCode)
+	}
+	<-s.serveDone
+	if got := logs.String(); !strings.Contains(got, "Ended inspected request at connection lifetime") || !strings.Contains(got, "execution=test-execution") {
+		t.Fatalf("logs = %q", got)
+	}
+}
+
+// A request that arrives after the request deadline gets a retryable reply
+// that closes the connection, not a cancelled model call.
+func TestGatewayRequestAfterDeadlineAsksForANewConnection(t *testing.T) {
+	identity := testIdentity()
+	g, err := New(Config{Certificates: map[string]tls.Certificate{testServiceHost: testCertificate(t)}, Authenticate: func(context.Context, string) (*gateway.ExecutionGrant, error) { return identity, nil }, Revalidate: func(context.Context, *gateway.ExecutionGrant) error { return nil }, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("handler reached after the request deadline")
+	}), AllowedAuthority: onlyTestService, SessionLifetime: time.Second, RevocationInterval: 20 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := startProxySession(t, g, testProxyAuthorization)
+	defer func() { _ = s.client.Close() }()
+	time.Sleep(800 * time.Millisecond) // past the request deadline at 750ms
+	_ = s.client.SetDeadline(time.Now().Add(time.Second))
+	if _, err = io.WriteString(s.client, "GET / HTTP/1.1\r\nHost: service.test\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	response, err := http.ReadResponse(bufio.NewReader(s.client), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(response.Body)
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusServiceUnavailable || !response.Close ||
+		string(body) != "gateway connection reached its lifetime; open a new connection and retry\n" {
+		t.Fatalf("status = %d, close = %v, body = %q", response.StatusCode, response.Close, body)
+	}
+	<-s.serveDone
+}
+
+// An idle reused connection closes at the request deadline, before its
+// lifetime, so the client's next request opens a new one.
+func TestGatewayIdleConnectionClosesAtRequestDeadline(t *testing.T) {
+	identity := testIdentity()
+	g, err := New(Config{Certificates: map[string]tls.Certificate{testServiceHost: testCertificate(t)}, Authenticate: func(context.Context, string) (*gateway.ExecutionGrant, error) { return identity, nil }, Revalidate: func(context.Context, *gateway.ExecutionGrant) error { return nil }, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}), AllowedAuthority: onlyTestService, SessionLifetime: 2 * time.Second, RevocationInterval: 20 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	s := startProxySession(t, g, testProxyAuthorization)
+	defer func() { _ = s.client.Close() }()
+	_ = s.client.SetDeadline(time.Now().Add(3 * time.Second))
+	reader := bufio.NewReader(s.client)
+	if _, err = io.WriteString(s.client, "GET / HTTP/1.1\r\nHost: service.test\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	response, err := http.ReadResponse(reader, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusNoContent || response.Close {
+		t.Fatalf("status = %d, close = %v", response.StatusCode, response.Close)
+	}
+	if _, err = reader.ReadByte(); err == nil {
+		t.Fatal("idle connection stayed open")
+	}
+	<-s.serveDone
+	// The request deadline is 1.5s; the connection lifetime is 2s.
+	if elapsed := time.Since(started); elapsed >= 1900*time.Millisecond {
+		t.Fatalf("idle connection closed after %v, not at the request deadline", elapsed)
+	}
+}
+
+func TestRequestBoundFitsInsideConnectionLifetime(t *testing.T) {
+	if MaxRequestDuration+ResponseMargin != MaxSessionLifetime || MaxRequestDuration != 290*time.Second {
+		t.Fatalf("request bound %v, margin %v, lifetime %v", MaxRequestDuration, ResponseMargin, MaxSessionLifetime)
 	}
 }
 

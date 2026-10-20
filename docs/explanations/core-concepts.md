@@ -75,14 +75,14 @@ tracks the agent conversation and Git workspace across executions.
 
 The [glossary](../../GLOSSARY.md) defines these and the other terms.
 
-The harness also has a native conversation ID. It is separate from the Sproozi
+The harness conversation has its own ID. It is separate from the Sproozi
 session ID and execution ID.
 
 These operations serve different purposes:
 
 - `pull` imports stopped remote work. It does not start the agent.
 - `resume` starts a new execution with current approval. It restores the same
-  supported native conversation and unfinished workspace.
+  supported harness conversation and unfinished workspace.
 - `move` transfers an active execution to another placement, as a new visit.
   Its original deadline and total allowance still apply.
 - `stop` stops local work and saves supported state for a later resume.
@@ -111,20 +111,21 @@ when you need these options.
 
 ## Delegating through an assistant
 
-A persistent Hermes assistant can submit tasks through MCP, the Model Context
-Protocol. The task service selects an approved workflow and Sproozi runs the
-worker. Hermes keeps its own conversation, memory and schedules.
+A persistent Hermes assistant can start delegated runs through MCP, the Model
+Context Protocol. Each delegated run is an AgentRun of an approved workflow in
+its own sandbox. Hermes keeps its own conversation, memory and schedules.
 
-There are two task services. The disposable-job service retains status and an
-optional final answer. The retained-work service also saves supported native
-conversation and workspace state for later resume. Choose the
-[Hermes job guide](../guides/hermes-orchestration.md) or the
-[Hermes with retained work](../guides/retained-work-kubernetes.md) guide for the
+Hermes reaches Sproozi in one of two ways. The task service retains each
+delegated run's status and an optional final answer. Remote work, served by a
+remote executor, also saves supported harness conversation and workspace state
+for later resume. Choose the
+[Run a persistent Hermes assistant on Kubernetes](../guides/hermes-orchestration.md) or the
+[Hermes with remote work](../guides/retained-work-kubernetes.md) guide for the
 workflow you need.
 
 ## Choose a next step
 
-- [Getting started](../guides/getting-started.md) runs the Kind demo.
-- [Install on Kubernetes](../guides/install-kubernetes.md) runs a first Pod on an existing cluster.
-- [Remote work and local resume](../guides/portable-workflows.md) starts a remote task that you can continue locally.
+- [Getting started](../guides/getting-started.md) runs the investigation-to-PR demo on a local Kind cluster.
+- [Install on Kubernetes and run your first Pod](../guides/install-kubernetes.md) runs a first Pod on an existing cluster, then the same demo.
+- [Run a task remotely, then resume it locally](../guides/portable-workflows.md) starts a remote task that you can continue locally.
 - [System architecture](system-architecture.md) explains the components and trust boundaries.
