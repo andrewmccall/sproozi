@@ -3,7 +3,7 @@
 `sproozi init --local` provisions a local installation from a running Docker
 engine. This page lists what it creates, its defaults and limits, and the
 supported platforms. The [local sessions guide](../guides/local-sessions.md)
-walks through setup and daily use. [ADR 0025](../adr/0025-local-provisioning-and-lifecycle.md)
+walks through setup and daily use. [ADR 0029](../adr/0029-local-provisioning-and-lifecycle.md)
 records the design decisions.
 
 Local setup never reads kubeconfig, discovers cluster contexts, installs CRDs

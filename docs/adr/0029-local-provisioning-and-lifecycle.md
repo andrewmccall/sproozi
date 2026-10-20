@@ -1,4 +1,4 @@
-# 0025: Local provisioning, per-harness placements and home-owned certificates
+# 0029: Local provisioning, per-harness placements and home-owned certificates
 
 Status: accepted
 
@@ -210,5 +210,5 @@ not what it can reach.
   `cmd/sproozi-network/probe.go`
 - [ADR 0011](0011-native-session-compatibility-and-completion.md) for the
   native launch boundaries this keeps
-- [ADR 0026](0026-kubernetes-release-assets-and-certificates.md) for the
+- [ADR 0030](0030-kubernetes-release-assets-and-certificates.md) for the
   Kubernetes counterpart

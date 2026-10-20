@@ -1,4 +1,4 @@
-# 0026: Kubernetes release assets and a self-managed certificate controller
+# 0030: Kubernetes release assets and a self-managed certificate controller
 
 Status: accepted
 
@@ -124,5 +124,5 @@ four CRDs are the same in both modes.
 - `cmd/certificates`, `internal/certificates`, `config/certificates`,
   `cmd/gateway/certificate.go`, `hack/release/kubernetes.py`,
   `hack/verify/kubernetes-release.py`
-- [ADR 0025](0025-local-provisioning-and-lifecycle.md) for the shared certificate
+- [ADR 0029](0029-local-provisioning-and-lifecycle.md) for the shared certificate
   store and release images

@@ -2,7 +2,7 @@
 
 Date: 2026-10-18
 
-Status: accepted; the client-version statement below is partly replaced by [ADR 0025](0025-local-provisioning-and-lifecycle.md)
+Status: accepted; the client-version statement below is partly replaced by [ADR 0029](0029-local-provisioning-and-lifecycle.md)
 
 ## Context
 
