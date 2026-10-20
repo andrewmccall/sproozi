@@ -157,7 +157,7 @@ func TestUnixControlRefusesLiveListener(t *testing.T) {
 	}
 	_ = conn.Close()
 	s := &Service{config: Config{Directory: filepath.Dir(address)}, log: io.Discard,
-		gateway: &http.Server{Addr: anyLoopbackPort, TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13}}}
+		stacks: []*localStack{{server: &http.Server{Addr: anyLoopbackPort, TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13}}}}}
 	err = s.Serve(controlContext(t))
 	want := "home: control socket " + address + ": another process is listening there; stop it first " +
 		"(a home daemon for directory " + filepath.Dir(address) + ", or another program using that path)"
@@ -180,7 +180,7 @@ func TestServeExplainsAnUnsafeStaleSocket(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &Service{config: Config{Directory: filepath.Dir(address)}, log: io.Discard,
-		gateway: &http.Server{Addr: anyLoopbackPort, TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13}}}
+		stacks: []*localStack{{server: &http.Server{Addr: anyLoopbackPort, TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13}}}}}
 	err = s.Serve(controlContext(t))
 	want := "home: control socket " + address + ": the socket allows access by other accounts (mode 0755); " +
 		"remove it if no home daemon is running, or run chmod 600 on it, then serve again"

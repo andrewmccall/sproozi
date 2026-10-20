@@ -639,7 +639,7 @@ func main() {
 		log.Fatal(err)
 	}
 	go func() { log.Fatal(newHealthServer().Serve(healthListener)) }()
-	server := proxytransport.NewServer(":8443", cfg.listenerCert, transport)
+	server := proxytransport.NewServer(":8443", proxytransport.NewCertificate(cfg.listenerCert), transport)
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGTERM, os.Interrupt)
 	go drainOnSignal(signals, server.Close, drain, func() { os.Exit(0) })

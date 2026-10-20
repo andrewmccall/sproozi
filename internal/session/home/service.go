@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"maps"
-	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -19,10 +18,10 @@ import (
 	budgetfile "github.com/andrewmccall/sproozi/internal/budget/file"
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
 	"github.com/andrewmccall/sproozi/internal/endpoints/model"
-	gatewaydocker "github.com/andrewmccall/sproozi/internal/gateway/docker"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/privatefs"
 	"github.com/andrewmccall/sproozi/internal/project"
+	runtimedocker "github.com/andrewmccall/sproozi/internal/runtime/docker"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
 	"github.com/andrewmccall/sproozi/internal/work"
@@ -53,12 +52,12 @@ type Service struct {
 	closed      bool
 	config      Config
 	duration    time.Duration
-	local       localPlacement
+	stacks      []*localStack
+	certs       *certificates
 	placements  map[string]session.Placement
 	coordinator *session.Coordinator
 	// drain ends and settles model calls before the ledger closes.
 	drain  *model.Drain
-	owner  *gatewaydocker.Owner
 	ledger *budgetfile.Ledger
 	// sweepStop ends the periodic recovery of expired reservation leases.
 	sweepStop chan struct{}
@@ -66,7 +65,6 @@ type Service struct {
 	// leases has succeeded; until then each sweep repeats it.
 	legacySwept atomic.Bool
 	remotes     []*profile.Client
-	gateway     *http.Server
 	closeOnce   sync.Once
 	closeError  error
 	workSources map[string]WorkSource
@@ -175,8 +173,18 @@ func (s *Service) createExecution(first session.Launch, owner string, input func
 // whose first visit restores it in local Docker. The native UUID comes from the
 // real process at its first stop; Start never fabricates one. A retry with the
 // same operation and ignored-file selection continues the retained first visit.
-func (s *Service) Start(ctx context.Context, id, operationID, path string, includeIgnored []string) (Status, error) {
+//
+// kind selects a configured local harness; empty selects the primary one. A
+// session keeps its harness; another harness starts a separate session.
+func (s *Service) Start(ctx context.Context, id, operationID, path string, kind harness.NativeKind, includeIgnored []string) (Status, error) {
 	if err := workspace.ValidateIgnoredPaths(includeIgnored); err != nil {
+		return Status{}, err
+	}
+	if kind == "" {
+		kind = s.config.Local.Harness
+	}
+	local, err := s.localFor(kind)
+	if err != nil {
 		return Status{}, err
 	}
 	if !work.CanonicalID(id) || !work.CanonicalID(operationID) || !filepath.IsAbs(path) {
@@ -184,7 +192,7 @@ func (s *Service) Start(ctx context.Context, id, operationID, path string, inclu
 	}
 	r, err := s.coordinator.Inspect(id)
 	if os.IsNotExist(err) {
-		r, err = s.createWorkspaceExecution(ctx, id, operationID, path, includeIgnored)
+		r, err = s.createWorkspaceExecution(ctx, id, operationID, path, local, includeIgnored)
 	}
 	if err != nil {
 		return Status{}, err
@@ -193,6 +201,10 @@ func (s *Service) Start(ctx context.Context, id, operationID, path string, inclu
 	if r.Session != "" || first.CheckpointDigest != "" {
 		return Status{}, rejectedError(fmt.Sprintf("home: start intent conflicts with retained launch; %s was "+
 			"not created by start, see \"sproozi status %s\"", id, id))
+	}
+	if first.Harness != kind {
+		return Status{}, rejectedError(fmt.Sprintf("home: start intent conflicts with retained launch; %s was "+
+			"started with harness %s: start a new session for %s", id, first.Harness, kind))
 	}
 	if first.OperationID != operationID || !slices.Equal(first.IncludeIgnored, includeIgnored) {
 		// A new operation conflicts again; only the retained one continues it.
@@ -203,10 +215,10 @@ func (s *Service) Start(ctx context.Context, id, operationID, path string, inclu
 	return s.startFirstVisit(ctx, r)
 }
 
-func (s *Service) createWorkspaceExecution(ctx context.Context, id, operationID, path string, includeIgnored []string) (session.Record, error) {
-	first := session.Launch{Harness: s.config.Local.Harness, ExecutionID: id, OperationID: operationID,
-		AllocationID: uuid.NewString(), Epoch: 1, Placement: s.config.Local.Name,
-		InstructionDigest: s.config.Local.InstructionDigest, IncludeIgnored: slices.Clone(includeIgnored),
+func (s *Service) createWorkspaceExecution(ctx context.Context, id, operationID, path string, local runtimedocker.PlacementConfig, includeIgnored []string) (session.Record, error) {
+	first := session.Launch{Harness: local.Harness, ExecutionID: id, OperationID: operationID,
+		AllocationID: uuid.NewString(), Epoch: 1, Placement: local.Name,
+		InstructionDigest: local.InstructionDigest, IncludeIgnored: slices.Clone(includeIgnored),
 		Deadline: time.Now().Add(s.duration).UTC(), Allowances: maps.Clone(s.config.Allowances)}
 	return s.createExecution(first, "", func() ([]byte, error) {
 		return workspace.CaptureLocal(ctx, path, includeIgnored, s.config.Local.MaxCheckpointBytes)
@@ -250,11 +262,29 @@ func (s *Service) moveExecution(ctx context.Context, id, operationID, destinatio
 	if err != nil {
 		return Status{}, err
 	}
+	destination = s.localDestination(r, destination)
 	if err = s.executionProjectApproval(r); err != nil {
 		return Status{}, err
 	}
 	r, err = s.coordinator.Move(ctx, id, operationID, destination)
 	return executionStatus(r), err
+}
+
+// localDestination maps any local placement name to the local placement of
+// the execution's own harness, so "move --to local" returns every session to
+// home Docker. Remote names are unchanged.
+func (s *Service) localDestination(r session.Record, destination string) string {
+	if len(r.Operations) == 0 {
+		return destination
+	}
+	for _, stack := range s.stacks {
+		if stack.config.Name == destination {
+			if local, err := s.localFor(r.Operations[0].Launch.Harness); err == nil {
+				return local.Name
+			}
+		}
+	}
+	return destination
 }
 
 func (s *Service) recoverExecution(ctx context.Context, id string) (Status, error) {
@@ -302,14 +332,18 @@ func (s *Service) Close() error {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		s.closed = true
-		if s.gateway != nil {
-			s.closeError = errors.Join(s.closeError, s.gateway.Close())
+		for _, stack := range s.stacks {
+			if stack.server != nil {
+				s.closeError = errors.Join(s.closeError, stack.server.Close())
+			}
 		}
 		if s.coordinator != nil {
 			s.closeError = errors.Join(s.closeError, s.coordinator.Close())
 		}
-		if closer, ok := s.local.(io.Closer); ok {
-			s.closeError = errors.Join(s.closeError, closer.Close())
+		for _, stack := range s.stacks {
+			if stack.placement != nil {
+				s.closeError = errors.Join(s.closeError, stack.placement.Close())
+			}
 		}
 		for _, remote := range s.remotes {
 			remote.Close()
@@ -319,8 +353,10 @@ func (s *Service) Close() error {
 				s.closeError = errors.Join(s.closeError, closer.Close())
 			}
 		}
-		if s.owner != nil {
-			s.closeError = errors.Join(s.closeError, s.owner.Close())
+		for _, stack := range s.stacks {
+			if stack.owner != nil {
+				s.closeError = errors.Join(s.closeError, stack.owner.Close())
+			}
 		}
 		if s.sweepStop != nil {
 			close(s.sweepStop)

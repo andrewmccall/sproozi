@@ -84,10 +84,13 @@ certificate are unusable; see
 [If `serve` doesn't start](../guides/session-mobility.md#if-serve-doesnt-start).
 Once its control
 socket and gateway are listening, it prints `Started home daemon: control
-socket PATH, gateway HOST:PORT` to standard error, and on a clean shutdown,
+socket PATH, gateway HOST:PORT` to standard error, with one `HOST:PORT` per
+configured harness, and on a clean shutdown,
 after Ctrl-C or `SIGTERM`, `Stopped home daemon`. `start` seeds a managed Docker
-workspace from a stopped Git repository, `attach` connects its native terminal,
-and `move` transfers the supported state to a configured placement. These
+workspace from a stopped Git repository and attaches its native terminal unless
+`--detach` is selected. `attach` reconnects the terminal, and `move` transfers the
+supported state to a configured placement. `move --to NAME` with any local
+placement name returns a session to the local placement of its own harness. These
 client commands accept the configuration and socket selectors described below.
 
 Detaching the terminal does not stop the daemon or agent. Running a container on
@@ -116,7 +119,7 @@ other flag is rejected before configuration is read or a request is sent.
 | `cancel` | `--config`, `--socket`, `--executor`, `--id`, `--operation` |
 | `recover` | `--config`, `--socket`, `--executor`, `--id` |
 | `serve` | `--config` |
-| `start` | `--config`, `--socket`, `--executor`, `--id`, `--operation`, `--workspace`, `--include-ignored` |
+| `start` | `--config`, `--socket`, `--executor`, `--id`, `--operation`, `--workspace`, `--harness`, `--include-ignored`, `--detach` |
 | `attach` | `--config`, `--socket`, `--executor`, `--id` |
 | `move` | `--config`, `--socket`, `--executor`, `--id`, `--operation`, `--to` |
 
@@ -129,12 +132,12 @@ other flag is rejected before configuration is read or a request is sent.
 | `--id UUID` | Stable session UUID. Commands that take a session also accept it as a positional argument, before or after the flags. |
 | `--operation UUID` | Stable operation UUID. Reuse it when retrying a mutation. It must be a non-zero UUID in lowercase 8-4-4-4-12 hexadecimal form; any other value fails with, for example, `--operation "1" is not a canonical UUID: use a non-zero UUID in lowercase 8-4-4-4-12 hexadecimal form, such as 3f2b8c1e-7d4a-4e5b-9c6d-0a1b2c3d4e5f`. Session UUIDs follow the same rule. |
 | `--from NAME` | Remote executor to pull from, configured under `remote` or `workSources`. Without it, `pull` fails with `pull requires --from NAME naming the remote executor to pull from, configured under "remote" or "workSources" in <config>`; an unknown name fails with `pull --from "X" names no remote executor configured under …`. |
-| `--harness NAME` | Approved native harness for `run`; defaults to `local.harness`. |
+| `--harness NAME` | Native harness, `codex` or `claude-code`. For `run`, it defaults to `local.harness`. For `start`, it selects a configured local harness for the new session and defaults to the primary one. A session keeps its harness. |
 | `--repository NAME` | Approved repository for `run`. |
 | `--project ID` | Approved Project for `run`, or a filter for `sessions`. |
 | `--task TEXT`, `--task-file FILE` | Task for `run`, inline or from a UTF-8 file of at most 16 KiB. Choose one. |
 | `--workspace-from UUID`, `--checkpoint-digest SHA256`, `--revision COMMIT` | Start `run` from a retained session's exact recorded commit. All three are required together. |
-| `--detach` | Return after `resume` without attaching the terminal. |
+| `--detach` | Return after `start` or `resume` without attaching the terminal. |
 | `--workspace PATH` | Stopped ordinary Git directory that seeds `start`. |
 | `--include-ignored PATH` | Ignored file `start` carries on every visit. Repeat it for each file. |
 | `--to NAME` | Configured placement for `move`: `local.name` or a name under `remote`. `sproozi move --help` describes it as ``placement `NAME`: the value of local.name (for example local) or a name under "remote"``. Any other name fails before a request; see [move destinations](#move-destinations). |

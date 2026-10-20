@@ -275,7 +275,7 @@ func TestServeLogsItsListeners(t *testing.T) {
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	log := make(lines, 1)
 	s := &Service{config: Config{Directory: dir}, log: log,
-		gateway: &http.Server{Addr: anyLoopbackPort, TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13}}}
+		stacks: []*localStack{{server: &http.Server{Addr: anyLoopbackPort, TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13}}}}}
 	ctx, cancel := context.WithCancel(controlContext(t))
 	served := make(chan error, 1)
 	go func() { served <- s.Serve(ctx) }()
@@ -311,7 +311,7 @@ func TestServeNamesTheGatewayAddressInUse(t *testing.T) {
 	defer func() { _ = held.Close() }()
 	address := held.Addr().String()
 	s := &Service{config: Config{Directory: dir}, log: io.Discard,
-		gateway: &http.Server{Addr: address, TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13}}}
+		stacks: []*localStack{{server: &http.Server{Addr: address, TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13}}}}}
 	err = s.Serve(controlContext(t))
 	want := "home: gateway.listen \"" + address + "\": address already in use; stop the other process or choose " +
 		"another port (and local.gatewayPort)"

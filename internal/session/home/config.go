@@ -20,6 +20,7 @@ import (
 	"time"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
+	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/privatefs"
 	"github.com/andrewmccall/sproozi/internal/project"
 	runtimedocker "github.com/andrewmccall/sproozi/internal/runtime/docker"
@@ -41,6 +42,25 @@ type Config struct {
 	Remote           map[string]profile.ClientConfig `json:"remote,omitempty"`
 	WorkSources      map[string]profile.ClientConfig `json:"workSources,omitempty"`
 	ProjectApprovals []ProjectApproval               `json:"projectApprovals,omitempty"`
+	// Harnesses adds further native harnesses to the home. Each is its own local
+	// placement with its own gateway port, grants and provider credential.
+	Harnesses []LocalHarness `json:"harnesses,omitempty"`
+}
+
+// LocalHarness is another native harness beside the primary local placement.
+// It shares that placement's images, network, gateway address, instructions,
+// limits, allowances and certificate source. A session keeps the harness it
+// started with; its worker can reach only its own harness's gateway port.
+type LocalHarness struct {
+	Harness           harness.NativeKind `json:"harness"`
+	Name              string             `json:"name"`
+	GatewayPort       uint16             `json:"gatewayPort"`
+	Model             string             `json:"model"`
+	NativeOptions     []string           `json:"nativeOptions,omitempty"`
+	ProviderURL       string             `json:"providerURL"`
+	ProviderTokenFile string             `json:"providerTokenFile"`
+	ProviderCAFile    string             `json:"providerCAFile,omitempty"`
+	PricingFile       string             `json:"pricingFile,omitempty"`
 }
 
 // WorkConnections resolves remote work owners by name, for run, discovery,
@@ -62,10 +82,13 @@ type ProjectApproval struct {
 }
 
 type GatewayConfig struct {
-	Listen                  string                        `json:"listen"`
-	CertificateFile         string                        `json:"certificateFile"`
-	KeyFile                 string                        `json:"keyFile"`
-	TrustBundleFile         string                        `json:"trustBundleFile"`
+	Listen          string `json:"listen"`
+	CertificateFile string `json:"certificateFile,omitempty"`
+	KeyFile         string `json:"keyFile,omitempty"`
+	TrustBundleFile string `json:"trustBundleFile,omitempty"`
+	// PKIDirectory selects a home-owned private CA store instead of the three
+	// administrator files. The home renews its leaf and rotates the CA.
+	PKIDirectory            string                        `json:"pkiDirectory,omitempty"`
 	ProviderURL             string                        `json:"providerURL"`
 	ProviderTokenFile       string                        `json:"providerTokenFile"`
 	ProviderCAFile          string                        `json:"providerCAFile,omitempty"`

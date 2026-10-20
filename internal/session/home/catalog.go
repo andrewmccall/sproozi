@@ -249,8 +249,12 @@ func (s *Service) validateExport(e work.Export, id, operation string) error {
 		return fmt.Errorf("home: exported stop, accounting or checkpoint is invalid: %w", err)
 	}
 	launch := e.Stopped.Launch
-	if e.ID != id || e.OperationID != operation || e.Harness != s.config.Local.Harness ||
-		!work.CanonicalID(launch.ThreadID) || launch.InstructionDigest != s.config.Local.InstructionDigest ||
+	local, err := s.localFor(e.Harness)
+	if err != nil {
+		return err
+	}
+	if e.ID != id || e.OperationID != operation || e.Harness != local.Harness ||
+		!work.CanonicalID(launch.ThreadID) || launch.InstructionDigest != local.InstructionDigest ||
 		e.Stopped.Incarnation.ResourceUID == "" || len(launch.Allowances) == 0 {
 		return errors.New("home: export does not match this pull or this home's native binding")
 	}
@@ -390,12 +394,16 @@ func (s *Service) Resume(ctx context.Context, id, operation string) (Status, err
 	if err != nil {
 		return Status{}, err
 	}
-	if err = checkpoint.ValidateContinuity(data, s.config.Local.Harness, s.config.Local.InstructionDigest, s.config.Local.MaxCheckpointBytes); err != nil {
+	local, err := s.localFor(r.Committed.Launch.Harness)
+	if err != nil {
 		return Status{}, err
 	}
-	first := session.Launch{Harness: s.config.Local.Harness, ExecutionID: uuid.NewString(), OperationID: operation,
-		AllocationID: uuid.NewString(), Epoch: 1, Placement: s.config.Local.Name,
-		ThreadID: r.Committed.Launch.ThreadID, InstructionDigest: s.config.Local.InstructionDigest,
+	if err = checkpoint.ValidateContinuity(data, local.Harness, local.InstructionDigest, local.MaxCheckpointBytes); err != nil {
+		return Status{}, err
+	}
+	first := session.Launch{Harness: local.Harness, ExecutionID: uuid.NewString(), OperationID: operation,
+		AllocationID: uuid.NewString(), Epoch: 1, Placement: local.Name,
+		ThreadID: r.Committed.Launch.ThreadID, InstructionDigest: local.InstructionDigest,
 		IncludeIgnored: slices.Clone(r.Committed.Launch.IncludeIgnored), Deadline: time.Now().Add(s.duration).UTC(),
 		Allowances: allowances, CheckpointDigest: r.Committed.CheckpointDigest}
 	execution, err := s.createExecution(first, id, func() ([]byte, error) { return data, nil })

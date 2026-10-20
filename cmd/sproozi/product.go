@@ -242,6 +242,7 @@ func (q *options) local(ctx context.Context) error {
 	request := home.Request{
 		Action: q.action, ID: q.id, OperationID: q.operation, Source: q.source,
 		Workspace: q.workspace, Destination: q.destination, IncludeIgnored: q.includeIgnored,
+		Harness: harness.NativeKind(q.kind),
 	}
 	response, err := home.Call(ctx, q.socket, request)
 	// A refused or failed request prints only its error, not the session.
@@ -259,7 +260,7 @@ func (q *options) local(ctx context.Context) error {
 		return err
 	}
 	q.reportIDs()
-	if q.action == home.ActionResume && !q.detach {
+	if (q.action == home.ActionResume || q.action == home.ActionStart) && !q.detach {
 		return attach(ctx, q.socket, q.id)
 	}
 	return nil
