@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -293,5 +295,94 @@ func TestFreshResumeHonorsExistingExecutionRetentionBounds(t *testing.T) {
 	}
 	if local.prepares != 0 || local.activations != 0 {
 		t.Fatal("storage rejection admitted a writer")
+	}
+}
+
+// exchange sends one control request through handle and decodes its reply.
+func exchange(t *testing.T, s *Service, q Request) Response {
+	t.Helper()
+	client, server := net.Pipe()
+	defer func() { _ = client.Close() }()
+	go s.handle(t.Context(), server)
+	if err := json.NewEncoder(client).Encode(q); err != nil {
+		t.Fatal(err)
+	}
+	var r Response
+	if err := json.NewDecoder(client).Decode(&r); err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+// An unknown session UUID gets an actionable reply on every session command,
+// never the journal's file path.
+func TestUnknownSessionRepliesWithoutJournalPath(t *testing.T) {
+	t.Parallel()
+	s, _, _, _ := testService(t)
+	id := uuid.NewString()
+	want := "docker (home): no session " + id + `; run "sproozi sessions" to list sessions`
+	for _, q := range []Request{
+		{Action: ActionStatus, ID: id},
+		{Action: ActionStop, ID: id, OperationID: uuid.NewString()},
+		{Action: ActionCancel, ID: id, OperationID: uuid.NewString()},
+		{Action: ActionRecover, ID: id},
+		{Action: ActionMove, ID: id, OperationID: uuid.NewString(), Destination: testRemote},
+		{Action: ActionResume, ID: id, OperationID: uuid.NewString()},
+		{Action: ActionAttach, ID: id},
+	} {
+		r := exchange(t, s, q)
+		if r.Error != want || !r.UnknownSession {
+			t.Errorf("%s replied %+v, want %q", q.Action, r, want)
+		}
+		if err := replyError(r); !errors.Is(err, ErrUnknownSession) || err.Error() != want {
+			t.Errorf("%s reply error %v", q.Action, err)
+		}
+	}
+}
+
+// Resume names why a started execution, which pull never imported, cannot resume.
+func TestResumeExplainsStartedExecution(t *testing.T) {
+	t.Parallel()
+	s, _, _, repo := testService(t)
+	id := uuid.NewString()
+	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, nil); err != nil {
+		t.Fatal(err)
+	}
+	r := exchange(t, s, Request{Action: ActionResume, ID: id, OperationID: uuid.NewString()})
+	if r.UnknownSession || !strings.Contains(r.Error, `started at home with "sproozi start"`) ||
+		strings.Contains(r.Error, string(filepath.Separator)) {
+		t.Fatalf("resume of a started execution replied %+v", r)
+	}
+}
+
+// Pull names an unconfigured --from as a remote executor name.
+func TestPullNamesUnconfiguredRemoteExecutor(t *testing.T) {
+	t.Parallel()
+	s, _, source := importedFixture(t)
+	_, err := s.Pull(t.Context(), source.export.ID, source.export.OperationID, "elsewhere")
+	if err == nil || err.Error() != `home: pull --from "elsewhere" names no remote executor configured under `+
+		`"remote" or "workSources" in this daemon's configuration` {
+		t.Fatalf("pull from an unconfigured executor: %v", err)
+	}
+}
+
+// Move names an unconfigured destination and lists the configured placements.
+func TestMoveNamesUnconfiguredDestination(t *testing.T) {
+	t.Parallel()
+	s, _, _, repo := testService(t)
+	id := uuid.NewString()
+	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, nil); err != nil {
+		t.Fatal(err)
+	}
+	names := []string{testLocal, testRemote}
+	slices.Sort(names)
+	for _, tc := range []struct{ operation, destination, want string }{
+		{uuid.NewString(), "docker", `home: move destination "docker" is not a configured placement; use one of: ` +
+			strings.Join(names, ", ")},
+	} {
+		r := exchange(t, s, Request{Action: ActionMove, ID: id, OperationID: tc.operation, Destination: tc.destination})
+		if r.Error != tc.want || !r.Rejected || !errors.Is(replyError(r), ErrRejected) {
+			t.Errorf("move replied %+v, want rejected %q", r, tc.want)
+		}
 	}
 }

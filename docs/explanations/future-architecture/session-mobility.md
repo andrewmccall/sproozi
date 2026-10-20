@@ -2,7 +2,7 @@
 
 Status: future extensions to controlled Codex and Claude Code session movement.
 
-The [current session guide](../../guides/session-mobility.md) describes managed
+[Move a live session between Docker and Kubernetes](../../guides/session-mobility.md) describes managed
 Codex and Claude Code sessions. This page covers extensions to that workflow.
 
 [ADR 0004](../../adr/0004-portable-sessions-and-bounded-executions.md) records the
@@ -13,7 +13,7 @@ checkpoint, accounting and authority mechanisms. An AgentRun identifies one
 bounded remote visit; a completed or cancelled Run cannot reopen.
 
 Remote-first Codex work and later local resume are now implemented in the
-[remote work and local resume guide](../../guides/portable-workflows.md), under [ADR
+[Run a task remotely, then resume it locally](../../guides/portable-workflows.md), under [ADR
 0012](../../adr/0012-retained-work-and-fresh-session-continuations.md). The
 remote catalogue accepts tasks independently of the laptop, retains genuine
 stopped state, and transfers ownership once. A later local resume starts a new
@@ -34,7 +34,7 @@ the original process and all tool descendants stop, how uncertainty is reported,
 and what happens when the original environment cannot be stopped and denied
 access. Keep refusal explicit when those guarantees cannot be established.
 
-## Additional native sessions and clients
+## Additional harnesses and clients
 
 [ADR 0007](../../adr/0007-codex-round-trip-before-harness-expansion.md) selects
 Claude Code after Codex. The current workflow supports those two selected clients.

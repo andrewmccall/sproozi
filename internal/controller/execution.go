@@ -20,6 +20,8 @@ import (
 	"fmt"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -42,6 +44,20 @@ func (r *AgentRunReconciler) ensureSandbox(
 	if run.Status.Identity.SandboxName != "" {
 		return run.Status.Identity.SandboxName, nil
 	}
+	// The Pod event from this reconciler's own create can arrive before the
+	// cache holds the status write that recorded it. Ensure would then find
+	// the existing Pod and compare it again, which is only meant for a
+	// same-named Pod that predates the run, so read the run live first.
+	if r.APIReader != nil {
+		var live sprooziv1alpha1.AgentRun
+		if err := r.APIReader.Get(ctx, client.ObjectKeyFromObject(run), &live); err != nil {
+			return "", err
+		}
+		if live.UID == run.UID && live.Status.Identity.SandboxName != "" {
+			live.DeepCopyInto(run)
+			return run.Status.Identity.SandboxName, nil
+		}
+	}
 
 	var name string
 	var err error
@@ -63,6 +79,15 @@ func (r *AgentRunReconciler) ensureSandbox(
 	// existing Pod with the current runtime and fails for good once they differ.
 	err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		run.Status.Identity.SandboxName = name
+		if ready := apimeta.FindStatusCondition(run.Status.Conditions, readyCondition); ready != nil && ready.Reason == quotaExceededReason {
+			apimeta.SetStatusCondition(&run.Status.Conditions, metav1.Condition{
+				Type:               readyCondition,
+				Status:             metav1.ConditionTrue,
+				ObservedGeneration: run.Generation,
+				Reason:             string(sprooziv1alpha1.AgentRunPhaseRunning),
+				Message:            fmt.Sprintf("Sandbox Pod %s was created after a ResourceQuota rejection", name),
+			})
+		}
 		updateErr := r.Status().Update(ctx, run)
 		if !apierrors.IsConflict(updateErr) {
 			return updateErr
@@ -106,12 +131,13 @@ func (r *AgentRunReconciler) processSandboxExit(
 	run = &latest
 	if run.Spec.Cancel {
 		run.Status.Result = nil
-		return r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseCancelled, "CancelRequested", "")
+		return r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseCancelled, "CancelRequested", cancelMessage)
 	}
 	if completionErr != nil {
 		logger.Info("Could not determine Sandbox container exit code", "name", run.Name, "error", completionErr)
 		run.Status.Result = nil
-		_, transitionErr := r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseFailed, "SandboxExitUnavailable", "")
+		_, transitionErr := r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseFailed, "SandboxExitUnavailable",
+			fmt.Sprintf("Could not read the agent container exit code from sandbox Pod %s", sandboxName))
 		return ctrl.Result{}, transitionErr
 	}
 	// Persist result with terminal phase in one status update before cleanup.
@@ -119,10 +145,12 @@ func (r *AgentRunReconciler) processSandboxExit(
 	run.Status.Result = completion.Result
 	if completion.ExitCode != 0 {
 		logger.Info("Sandbox container exited unsuccessfully", "name", run.Name, "exitCode", completion.ExitCode)
-		_, err := r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseFailed, "SandboxExitNonZero", "")
+		_, err := r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseFailed, "SandboxExitNonZero",
+			fmt.Sprintf("Agent container in sandbox Pod %s exited with code %d", sandboxName, completion.ExitCode))
 		return ctrl.Result{}, err
 	}
 	logger.Info("Sandbox container exited successfully", "name", run.Name)
-	_, err := r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseSucceeded, "ExecutionSucceeded", "")
+	_, err := r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseSucceeded, "ExecutionSucceeded",
+		fmt.Sprintf("Agent container in sandbox Pod %s exited with code 0", sandboxName))
 	return ctrl.Result{}, err
 }

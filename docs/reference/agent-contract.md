@@ -58,7 +58,7 @@ controller lifecycle outcome. See [harness completion](harnesses.md).
 
 ## Retained final answers
 
-A worker can publish a size-limited final answer at its configured termination
+The agent can publish a size-limited final answer at its configured termination
 message path. Set `terminationMessagePolicy: File` and use this envelope:
 
 ```json

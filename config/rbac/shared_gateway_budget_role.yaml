@@ -5,4 +5,4 @@ metadata:
 rules:
 - apiGroups: [""]
   resources: [configmaps]
-  verbs: [get, create, update]
+  verbs: [get, list, create, update]

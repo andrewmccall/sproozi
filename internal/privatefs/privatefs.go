@@ -7,12 +7,21 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 )
+
+// ErrLocked reports that Lock found the lock held, normally by another process
+// that owns the same directory.
+var ErrLocked = errors.New("privatefs: lock held by another process")
+
+// lockedError keeps the platform error for diagnosis while matching ErrLocked.
+type lockedError struct{ err error }
+
+func (e lockedError) Error() string   { return ErrLocked.Error() + ": " + e.err.Error() }
+func (e lockedError) Unwrap() []error { return []error{ErrLocked, e.err} }
 
 // ReadFile opens and validates the same file handle before reading bounded data.
 func ReadFile(path string, max int64) ([]byte, error) {
@@ -117,6 +126,12 @@ func validLeaf(name string) bool {
 	return name != "" && name != "." && name != ".." && !strings.ContainsAny(name, "/\\:\x00") && !strings.HasSuffix(name, ".") && !strings.HasSuffix(name, " ")
 }
 
-func unsafePath(path string) error {
-	return fmt.Errorf("privatefs: path must be owned, private and ordinary: %s", path)
+// UnsafePathError reports a path that is not owned by the current user, is
+// accessible to others, or is not an ordinary file or directory.
+type UnsafePathError struct{ Path string }
+
+func (e *UnsafePathError) Error() string {
+	return "privatefs: path must be owned, private and ordinary: " + e.Path
 }
+
+func unsafePath(path string) error { return &UnsafePathError{Path: path} }

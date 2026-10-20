@@ -26,6 +26,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -52,16 +53,17 @@ type AppTokenProvider struct {
 	expires time.Time
 }
 
-// NewAppTokenProvider parses the PEM-encoded PKCS#1 RSA private key and
-// returns a provider that generates GitHub App installation tokens.
+// NewAppTokenProvider parses the PEM-encoded RSA private key and returns a
+// provider that generates GitHub App installation tokens. GitHub issues PKCS#1
+// keys; PKCS#8 RSA keys, which common conversions produce, are also accepted.
 func NewAppTokenProvider(appID, installationID int64, privateKeyPEM []byte, httpClient *http.Client) (*AppTokenProvider, error) {
 	block, _ := pem.Decode(privateKeyPEM)
 	if block == nil {
 		return nil, fmt.Errorf("capabilityproxy: no PEM block found in private key")
 	}
-	key, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+	key, err := parseRSAPrivateKey(block.Bytes)
 	if err != nil {
-		return nil, fmt.Errorf("capabilityproxy: failed to parse RSA private key: %w", err)
+		return nil, err
 	}
 	return &AppTokenProvider{
 		appID:          appID,
@@ -70,6 +72,21 @@ func NewAppTokenProvider(appID, installationID int64, privateKeyPEM []byte, http
 		httpClient:     httpClient,
 		apiBaseURL:     "https://api.github.com",
 	}, nil
+}
+
+func parseRSAPrivateKey(der []byte) (*rsa.PrivateKey, error) {
+	if key, err := x509.ParsePKCS1PrivateKey(der); err == nil {
+		return key, nil
+	}
+	parsed, err := x509.ParsePKCS8PrivateKey(der)
+	if err != nil {
+		return nil, errors.New("capabilityproxy: private key must be a PEM-encoded PKCS#1 or PKCS#8 RSA key")
+	}
+	key, ok := parsed.(*rsa.PrivateKey)
+	if !ok {
+		return nil, fmt.Errorf("capabilityproxy: private key must be RSA, got %T", parsed)
+	}
+	return key, nil
 }
 
 // Token returns a valid installation access token, refreshing 30 s before expiry.

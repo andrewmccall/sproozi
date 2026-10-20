@@ -78,6 +78,32 @@ func TestReservationForfeitConsumesUnitsAndCostAcrossLedgers(t *testing.T) {
 	}
 }
 
+// A forfeit charges only the dimensions with a limit: with no unit limit, the
+// request's output bound is not recorded as units used.
+func TestReservationForfeitChargesOnlyLimitedDimensions(t *testing.T) {
+	tracker := budget.NewTracker()
+	reservation, err := tracker.Meter("cost-only", api.EndpointBudget{MaxCostMicros: 200}).Reserve(t.Context(), 4096, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = reservation.Forfeit(); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := observedState(t, tracker, "cost-only"), (budget.State{CostMicros: 200}); got != want {
+		t.Fatalf("forfeited accounting = %+v, want %+v", got, want)
+	}
+	reservation, err = tracker.Meter("units-only", api.EndpointBudget{MaxUnits: 100}).Reserve(t.Context(), 10, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = reservation.Forfeit(); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := observedState(t, tracker, "units-only"), (budget.State{UnitsUsed: 10}); got != want {
+		t.Fatalf("forfeited accounting = %+v, want %+v", got, want)
+	}
+}
+
 func TestNilReservationForfeitRejectsMissingAdmission(t *testing.T) {
 	var reservation *budget.Reservation
 	if err := reservation.Forfeit(); err == nil {

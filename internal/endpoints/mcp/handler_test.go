@@ -574,6 +574,16 @@ func TestRegistryCredentialsStayWithinDedicatedSecretMount(t *testing.T) {
 	}
 }
 
+func TestRegistryCredentialErrorsNameTheSecretMount(t *testing.T) {
+	root := t.TempDir()
+	raw, _ := json.Marshal(map[string]any{registryServersField: map[string]any{docsName: map[string]string{
+		registryURLField: "https://safe.example/mcp", tokenFileField: filepath.Join(root, "missing")}}})
+	_, err := remote.LoadRegistry(raw, root)
+	if err == nil || !strings.Contains(err.Error(), "bearerTokenFile") || !strings.Contains(err.Error(), root) {
+		t.Fatalf("missing credential error does not say where it comes from: %v", err)
+	}
+}
+
 func TestRegistryCanonicalizesEquivalentProviderAuthorities(t *testing.T) {
 	for _, endpoint := range []string{"https://BÜCHER.example.:0443/mcp", "https://xn--bcher-kva.example/mcp"} {
 		raw, _ := json.Marshal(map[string]any{registryServersField: map[string]any{docsName: map[string]string{registryURLField: endpoint}}})

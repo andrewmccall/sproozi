@@ -20,10 +20,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
+	"net/http/httptrace"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,6 +37,7 @@ import (
 	"github.com/andrewmccall/sproozi/internal/audit"
 	"github.com/andrewmccall/sproozi/internal/gateway"
 	"github.com/andrewmccall/sproozi/internal/modelauth"
+	"github.com/andrewmccall/sproozi/internal/proxytransport"
 )
 
 const (
@@ -65,6 +70,26 @@ type HandlerConfig struct {
 	// receives bounded, redacted errors, never prompts or model output deltas.
 	// This does not bypass usage verification or change budget settlement.
 	Diagnostics func(ResponseDiagnostic)
+
+	// Logger receives a line for each call charged an estimate or its whole
+	// reservation instead of the provider's usage. Nil selects slog.Default().
+	Logger *slog.Logger
+
+	// OutputTokensPerSecond is R, the ceiling on output tokens per second
+	// that prices the time an interrupted call ran. Zero selects
+	// DefaultOutputTokensPerSecond.
+	OutputTokensPerSecond int64
+
+	// IdleTimeout ends a provider response that sends nothing for this long.
+	// The provider client bounds only the wait for response headers. Zero
+	// selects DefaultIdleTimeout.
+	IdleTimeout time.Duration
+
+	// Now is the clock that measures how long a call ran. Nil selects time.Now.
+	Now func() time.Time
+
+	// Drain, when set, lets a stopping gateway end and settle model calls.
+	Drain *Drain
 }
 
 // Handler is the HTTP handler for the model gateway.
@@ -169,7 +194,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Responses SSE is buffered until usage is verified. Other streaming
+	// Responses and Messages SSE are relayed as they arrive. Other streaming
 	// protocols are denied before reserving capacity.
 	bodyBytes, err := readBounded(r.Body, maxModelBodyBytes)
 	if err != nil {
@@ -177,23 +202,34 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"request body exceeds gateway limit", "invalid_request_error", "request_too_large")
 		return
 	}
-	if len(bodyBytes) != 0 && unambiguousJSON(bodyBytes) != nil {
-		h.deny(w, e, http.StatusBadRequest,
-			"request body must be one JSON value without duplicate keys", "invalid_request_error", "ambiguous_json")
-		return
+	if len(bodyBytes) != 0 {
+		if err := unambiguousJSON(bodyBytes); err != nil {
+			message, code := jsonRefusal(err)
+			h.deny(w, e, http.StatusBadRequest, message, "invalid_request_error", code)
+			return
+		}
 	}
 	var check requestStreamCheck
 	if h.protocol == anthropicProtocol {
 		bodyBytes, err = h.prepareAnthropic(r, bodyBytes, limits)
 		if err != nil {
-			h.deny(w, e, http.StatusForbidden, err.Error(), "permission_error", "unsupported_request")
+			h.deny(w, e, http.StatusForbidden, err.Error(), "permission_error", refusalCode(err))
 			return
 		}
 	}
-	if json.Unmarshal(bodyBytes, &check) == nil && check.Stream && r.URL.Path != responsesPath && h.protocol != anthropicProtocol {
+	if len(bodyBytes) != 0 && json.Unmarshal(bodyBytes, &check) != nil {
+		h.deny(w, e, http.StatusBadRequest, "request body field stream must be a boolean",
+			"invalid_request_error", "invalid_field")
+		return
+	}
+	if check.Stream && r.URL.Path != responsesPath && h.protocol != anthropicProtocol {
 		h.deny(w, e, http.StatusForbidden,
 			"streaming responses are not supported by the model gateway",
 			"permission_error", "streaming_not_supported")
+		return
+	}
+	if err := detachedWork(bodyBytes); err != nil {
+		h.deny(w, e, http.StatusBadRequest, err.Error(), "invalid_request_error", "unsupported_request")
 		return
 	}
 	providerAuth := h.Config.ProviderAuth
@@ -210,58 +246,111 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	} else if h.protocol == openAIProtocol {
 		bodyBytes, err = h.prepareOpenAI(r, bodyBytes, limits)
 		if err != nil {
-			h.deny(w, e, http.StatusForbidden, err.Error(), "permission_error", "unsupported_request")
+			h.deny(w, e, http.StatusForbidden, err.Error(), "permission_error", refusalCode(err))
 			return
 		}
 	}
 
-	// Reserve token capacity atomically before forwarding. Inference
-	// requests with an explicit output bound reserve that bound; requests
-	// without one reserve all remaining capacity. The models discovery endpoint
-	// does not consume model tokens and therefore has no reservation.
-	meter := budget.FromContext(ctx)
-	var reservation *budget.Reservation
-	if r.URL.Path != modelsPath {
-		release, waitErr := meter.AcquireRequest(ctx)
-		if waitErr != nil {
-			h.deny(w, e, http.StatusRequestTimeout, "model request cancelled while waiting for its allowance",
-				"server_error", "request_cancelled")
-			return
-		}
-		defer release()
-		// An explicit output bound is trusted as an admission bound. Without it,
-		// reserve all remaining capacity so unknown input plus output cannot
-		// oversubscribe the hard ceiling.
-		estimate := requestTokenEstimate(bodyBytes)
-		if h.protocol == anthropicProtocol {
-			// max_tokens bounds output, not input plus cache use. Reserve all
-			// remaining capped capacity until trusted total usage is available.
-			estimate = 0
-		}
-		reservation, err = meter.Reserve(r.Context(), estimate, 0)
-	}
-	if err != nil {
-		h.deny(w, e, http.StatusTooManyRequests, err.Error(), "budget_error", "budget_exhausted")
+	// The models discovery endpoint does not consume model tokens and
+	// therefore has no reservation or model call deadline.
+	if r.URL.Path == modelsPath {
+		h.forward(w, r, e, identity, limits, bodyBytes, providerAuth, nil)
 		return
 	}
+	// A model call may stream past the inspected connection's request
+	// deadline, up to the gateway maximum, which the policy can only lower.
+	var limit time.Duration
+	if seconds := identity.Policy.Spec.MaxModelCallSeconds; seconds != nil && *seconds > 0 {
+		limit = time.Duration(*seconds) * time.Second
+	}
+	// A stopping gateway refuses new calls and settles the ones in flight.
+	leave, open := h.Config.Drain.enter()
+	if !open {
+		h.deny(w, e, http.StatusServiceUnavailable, gatewayStoppingMessage, "server_error", gatewayStoppingCode)
+		return
+	}
+	defer leave()
+	callCtx, endCall := proxytransport.ExtendModelCall(ctx, limit)
+	defer endCall()
+	if h.Config.Drain != nil {
+		var stop context.CancelCauseFunc
+		callCtx, stop = context.WithCancelCause(callCtx)
+		defer stop(context.Canceled)
+		defer context.AfterFunc(h.Config.Drain.ctx, func() { stop(errGatewayStopping) })()
+	}
+	// Reserve capacity atomically before forwarding. A self-contained request
+	// with an output bound reserves a bounded amount and may run alongside
+	// other bounded calls; any other request reserves all remaining capacity
+	// and runs alone. The ledger can recover the reservation if this gateway
+	// stops without settling it.
+	plan := h.planReservation(bodyBytes, limits)
+	call := &modelCall{h: h, ctx: callCtx, w: w, r: r, e: e, limits: limits,
+		plan: plan, body: bodyBytes, stream: check.Stream}
+	reservation, endAdmission, err := budget.FromContext(ctx).ReserveRequest(callCtx, plan.units, plan.costMicros,
+		plan.bounded, call.recovery())
+	if err != nil {
+		h.refuseReservation(w, e, call, err)
+		return
+	}
+	defer endAdmission()
+	call.reservation = reservation
+	h.forward(w, r, e, identity, limits, bodyBytes, providerAuth, call)
+}
 
-	// Build the upstream request.
+// refuseReservation answers a call whose reservation failed: it ended while
+// it waited, too many calls are pending, or the budget is exhausted.
+func (h *Handler) refuseReservation(w http.ResponseWriter, e audit.Event, call *modelCall, err error) {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		// No policy refused the call: it ended while it waited. Audit how.
+		e.Allowed, e.EndReason = true, call.cancelReason()
+		h.Config.AuditLogger.Log(e)
+		if e.EndReason == endGatewayRestart {
+			h.writeError(w, http.StatusServiceUnavailable, gatewayStoppingMessage, "server_error", gatewayStoppingCode)
+			return
+		}
+		h.writeError(w, http.StatusRequestTimeout, "model request cancelled while waiting for its budget",
+			"server_error", "request_cancelled")
+		return
+	}
+	if errors.Is(err, budget.ErrTooManyPending) {
+		h.deny(w, e, http.StatusTooManyRequests, err.Error(), "rate_limit_error", "too_many_pending_calls")
+		return
+	}
+	h.deny(w, e, http.StatusTooManyRequests, err.Error(), "budget_error", "budget_exhausted")
+}
+
+// forward sends the request upstream. Without a model call, as for model
+// discovery, it relays the bounded response unchanged.
+func (h *Handler) forward(w http.ResponseWriter, r *http.Request, e audit.Event, identity *gateway.ExecutionGrant,
+	limits sprooziv1alpha1.EndpointBudget, bodyBytes []byte, providerAuth modelauth.Authenticator, call *modelCall,
+) {
+	ctx := r.Context()
+	var reservation *budget.Reservation
+	if call != nil {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(call.ctx)
+		defer cancel()
+		call.cancelUpstream, reservation = cancel, call.reservation
+	}
+	release := func() {
+		event := &e
+		if call != nil {
+			event = &call.e
+		}
+		h.release(event, reservation)
+	}
 	upstreamReq, err := http.NewRequestWithContext(
 		ctx, r.Method, h.Config.UpstreamURL+r.URL.RequestURI(), bytes.NewReader(bodyBytes),
 	)
 	if err != nil {
-		if reservation != nil {
-			_ = reservation.Release()
-		}
+		release()
 		h.deny(w, e, http.StatusInternalServerError,
 			"failed to build upstream request", "server_error", "upstream_error")
 		return
 	}
 	h.copyProviderHeaders(upstreamReq.Header, r.Header)
 	if err = providerAuth.Authorize(upstreamReq); err != nil {
-		if reservation != nil {
-			_ = reservation.Release()
-		}
+		release()
 		h.deny(w, e, http.StatusServiceUnavailable, "provider authentication is unavailable", "server_error", "provider_auth_unavailable")
 		return
 	}
@@ -270,13 +359,57 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// expose compressed bytes to the usage verifier instead of Responses SSE.
 	upstreamReq.Header.Del("Accept-Encoding")
 
-	// Forward request to upstream.
 	providerClient := *h.Config.HTTPClient
 	providerClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	// The provider starts work once it has the whole request. A call that
+	// does not stream sends headers only when generation finishes, so an
+	// interrupt before the headers is charged once the request was written.
+	if call != nil {
+		upstreamReq = upstreamReq.WithContext(httptrace.WithClientTrace(upstreamReq.Context(), &httptrace.ClientTrace{
+			WroteRequest: func(info httptrace.WroteRequestInfo) {
+				if info.Err == nil {
+					at := call.now()
+					call.written.CompareAndSwap(nil, &at)
+				}
+			},
+		}))
+	}
 	resp, err := providerClient.Do(upstreamReq)
 	if err != nil {
-		if reservation != nil {
-			_ = reservation.Forfeit()
+		if call != nil && call.written.Load() != nil {
+			call.startedAt = *call.written.Load()
+			call.observeFailure("provider call ended before its response headers")
+			reason := endUpstreamError
+			if call.ctx.Err() != nil {
+				reason = call.cancelReason()
+			}
+			call.settleInterrupted(reason)
+			if reason == endClientCancelled {
+				// The harness left; nothing failed and no one reads a reply.
+				call.finish()
+				return
+			}
+			if reason == endGatewayRestart {
+				h.deny(w, call.e, http.StatusServiceUnavailable, gatewayStoppingMessage, "server_error", gatewayStoppingCode)
+				return
+			}
+			h.deny(w, call.e, http.StatusBadGateway,
+				"upstream request failed", "server_error", "upstream_error")
+			return
+		}
+		// The provider never received the whole request, so it did no work:
+		// release the reservation so a retry can use it.
+		release()
+		if call != nil && call.cancelReason() == endClientCancelled && call.ctx.Err() != nil {
+			// The harness left while the request was written; nothing failed.
+			call.e.EndReason = endClientCancelled
+			call.finish()
+			return
+		}
+		if call != nil && call.cancelReason() == endGatewayRestart && call.ctx.Err() != nil {
+			call.e.EndReason = endGatewayRestart
+			h.deny(w, call.e, http.StatusServiceUnavailable, gatewayStoppingMessage, "server_error", gatewayStoppingCode)
+			return
 		}
 		h.deny(w, e, http.StatusBadGateway,
 			"upstream request failed", "server_error", "upstream_error")
@@ -284,113 +417,60 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	h.writeProviderResponse(w, r, e, identity, limits, upstreamReq, resp, bodyBytes, check.Stream, reservation)
-}
-
-func (h *Handler) writeProviderResponse(
-	w http.ResponseWriter, r *http.Request, e audit.Event,
-	identity *gateway.ExecutionGrant, limits sprooziv1alpha1.EndpointBudget,
-	upstreamReq *http.Request, resp *http.Response, bodyBytes []byte,
-	stream bool, reservation *budget.Reservation,
-) {
-	meter := budget.FromContext(r.Context())
-	// Buffer the response body and parse token usage from 2xx inference
-	// responses. Missing usage is fail-closed: the provider may have consumed
-	// the entire reserved bound, so charge that bound before denying the call.
-	body, err := readBounded(resp.Body, maxModelBodyBytes)
-	var diagnostic ResponseDiagnostic
+	var diagnostic *ResponseDiagnostic
+	credential := strings.TrimPrefix(upstreamReq.Header.Get("Authorization"), "Bearer ")
+	if h.protocol == anthropicProtocol {
+		credential = upstreamReq.Header.Get("X-Api-Key")
+	}
 	if h.Config.Diagnostics != nil {
-		credential := strings.TrimPrefix(upstreamReq.Header.Get("Authorization"), "Bearer ")
-		if h.protocol == anthropicProtocol {
-			credential = upstreamReq.Header.Get("X-Api-Key")
+		described := describeResponse(resp, nil, credential)
+		described.RunUID = identity.Execution.UID
+		diagnostic = &described
+		defer func() { h.Config.Diagnostics(*diagnostic) }()
+		if call != nil {
+			call.diagnostic, call.credential = diagnostic, credential
 		}
-		diagnostic = describeResponse(resp, body, credential)
+	}
+	if call != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		call.relay(resp)
+		return
+	}
+	// Provider errors and model discovery are small and carry no model
+	// output; relay them whole. Provider errors do not represent successful
+	// model consumption, so release the admission for a retry.
+	release()
+	body, err := readBounded(resp.Body, maxModelBodyBytes)
+	if diagnostic != nil {
+		*diagnostic = describeResponse(resp, body, credential)
 		diagnostic.RunUID = identity.Execution.UID
-		defer func() { h.Config.Diagnostics(diagnostic) }()
 	}
 	if err != nil {
-		diagnostic.ValidationError = "response read failed or exceeded body limit"
-		if reservation != nil {
-			_ = reservation.Forfeit()
+		if diagnostic != nil {
+			diagnostic.ValidationError = "response read failed or exceeded body limit"
 		}
 		h.deny(w, e, http.StatusBadGateway,
 			"failed to read upstream response", "server_error", "upstream_error")
 		return
 	}
-
-	var tokensUsed int64
-	var costMicros int64
-	successful := resp.StatusCode >= 200 && resp.StatusCode < 300
-	if h.protocol == anthropicProtocol && !successful {
-		if reservation != nil {
-			_ = reservation.Release()
-		}
+	if h.protocol == anthropicProtocol {
 		h.deny(w, e, resp.StatusCode, "provider rejected request", "api_error", "provider_rejected")
 		return
 	}
-	if successful && r.URL.Path != modelsPath {
-		usageResp, anthropic, usageErr := h.providerUsage(body, r.URL.Path, stream, resp.Header.Get("Content-Type"))
-		if invalidTokenUsage(usageResp, usageErr, limits) {
-			diagnostic.ValidationError = "completed response omitted required token usage"
-			if usageErr != nil {
-				diagnostic.ValidationError = usageErr.Error()
-			}
-			if reservation != nil {
-				_ = reservation.Forfeit()
-			}
-			e.UpstreamStatus = resp.StatusCode
-			h.deny(w, e, http.StatusBadGateway,
-				"upstream response did not include valid token usage",
-				"server_error", "usage_unavailable")
-			return
-		}
-		tokensUsed = *usageResp.Usage.TotalTokens
-		if limits.MaxCostMicros > 0 {
-			var costErr error
-			costMicros, costErr = h.providerCost(bodyBytes, usageResp, anthropic)
-			if costErr != nil {
-				if reservation != nil {
-					_ = reservation.Forfeit()
-				}
-				h.deny(w, e, http.StatusBadGateway, "administrator pricing is unavailable", "server_error", "pricing_unavailable")
-				return
-			}
-		}
-		if reservation != nil {
-			// Usage above the reservation or allowance is still recorded, up to
-			// the allowance, and reported as an error. Withhold the response.
-			if err := reservation.Settle(tokensUsed, costMicros); err != nil {
-				e.UpstreamStatus = resp.StatusCode
-				h.deny(w, e, http.StatusBadGateway,
-					"failed to settle model budget reservation",
-					"server_error", "budget_error")
-				return
-			}
-		}
-	} else if reservation != nil {
-		// Provider errors do not represent successful model consumption. Release
-		// the admission so a retry can use the remaining budget.
-		_ = reservation.Release()
-	}
+	h.copyResponseHeaders(w.Header(), resp.Header)
+	w.WriteHeader(resp.StatusCode)
+	_, _ = w.Write(body)
+	h.auditModelSuccess(r.Context(), e, resp.StatusCode, 0, budget.FromContext(r.Context()), limits)
+}
 
-	// Write upstream response headers and body to the client.
-	for k, vv := range resp.Header {
+func (h *Handler) copyResponseHeaders(target, source http.Header) {
+	for k, vv := range source {
 		if h.protocol == anthropicProtocol && !strings.EqualFold(k, "Content-Type") && !strings.EqualFold(k, "Request-ID") {
 			continue
 		}
 		for _, v := range vv {
-			w.Header().Add(k, v)
+			target.Add(k, v)
 		}
 	}
-	if stream && r.URL.Path == responsesPath && resp.StatusCode >= 200 && resp.StatusCode < 300 &&
-		strings.TrimSpace(resp.Header.Get("Content-Type")) == "" {
-		// Only reached after the buffered SSE stream and usage were verified.
-		w.Header().Set("Content-Type", "text/event-stream")
-	}
-	w.WriteHeader(resp.StatusCode)
-	_, _ = w.Write(body)
-
-	h.auditModelSuccess(r.Context(), e, resp.StatusCode, tokensUsed, meter, limits)
 }
 
 func invalidTokenUsage(
@@ -428,11 +508,24 @@ func requestTokenEstimate(body []byte) int64 {
 // Other content, such as tool schemas and message text, keeps its own keys.
 func unambiguousJSON(body []byte) error {
 	decoder := json.NewDecoder(bytes.NewReader(body))
+	// Read numbers as text, so one too large for a float64 is named as such
+	// rather than as invalid JSON.
+	decoder.UseNumber()
 	if err := inspectJSONValue(decoder, inspectedRequest, 0); err != nil {
 		return err
 	}
 	if _, err := decoder.Token(); err != io.EOF {
-		return fmt.Errorf("model request has trailing data")
+		return errTrailingData
+	}
+	// Refuse whatever encoding/json cannot decode, such as nesting deeper
+	// than it allows, so no check that parses the body can see it fail and
+	// treat a field as absent. Every request body is one JSON object.
+	if !json.Valid(body) {
+		return errInvalidJSON
+	}
+	var object map[string]json.RawMessage
+	if json.Unmarshal(body, &object) != nil || object == nil {
+		return errNotObject
 	}
 	return nil
 }
@@ -454,7 +547,7 @@ const (
 var inspectedChildren = map[inspectedObject]map[string]inspectedObject{
 	inspectedRequest: {"messages": inspectedMessage, "system": inspectedBlock, "tools": inspectedBlock,
 		"cache_control": inspectedCacheControl},
-	inspectedMessage: {"content": inspectedBlock},
+	inspectedMessage: {contentField: inspectedBlock},
 	inspectedBlock:   {"cache_control": inspectedCacheControl, "content": inspectedBlock},
 }
 
@@ -466,6 +559,12 @@ func inspectJSONValue(decoder *json.Decoder, kind inspectedObject, depth int) er
 	token, err := decoder.Token()
 	if err != nil {
 		return fmt.Errorf("invalid model request JSON")
+	}
+	if number, ok := token.(json.Number); ok {
+		if _, err := strconv.ParseFloat(string(number), 64); err != nil {
+			return errNumberTooLarge
+		}
+		return nil
 	}
 	delimiter, ok := token.(json.Delim)
 	if !ok {
@@ -482,7 +581,7 @@ func inspectJSONValue(decoder *json.Decoder, kind inspectedObject, depth int) er
 			key := token.(string)
 			fold := strings.ToLower(strings.ToUpper(key))
 			if keys[key] || kind != opaqueContent && folded[fold] {
-				return fmt.Errorf("model request has duplicate key")
+				return errDuplicateKey
 			}
 			keys[key], folded[fold] = true, true
 			// Struct decoding selects the field regardless of case.
@@ -513,11 +612,15 @@ func (h *Handler) deny(w http.ResponseWriter, e audit.Event, status int, message
 	e.Allowed = false
 	e.DenyReason = message
 	h.Config.AuditLogger.Log(e)
+	h.writeError(w, status, message, errType, code)
+}
 
+// writeError writes the protocol's error body.
+func (h *Handler) writeError(w http.ResponseWriter, status int, message, errType, code string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if h.protocol == anthropicProtocol {
-		_ = json.NewEncoder(w).Encode(map[string]any{"type": errorEventType, "error": map[string]string{"type": errType, "message": message}})
+		_ = json.NewEncoder(w).Encode(map[string]any{typeField: errorEventType, "error": map[string]string{typeField: errType, "message": message}})
 		return
 	}
 	_ = json.NewEncoder(w).Encode(openAIErrorBody{
@@ -537,10 +640,10 @@ func (h *Handler) prepareAnthropic(r *http.Request, body []byte, limits sprooziv
 	var model string
 	_ = json.Unmarshal(request["model"], &model)
 	if h.Config.Pricing == nil {
-		return nil, fmt.Errorf("administrator pricing is unavailable")
+		return nil, errPricingUnavailable
 	}
 	if _, priced := h.Config.Pricing.Models[model]; !priced {
-		return nil, fmt.Errorf("administrator pricing is unavailable")
+		return nil, errPricingUnavailable
 	}
 	// Omitted service_tier defaults to auto upstream. Capped admission uses
 	// only the administrator's standard pricing, never Priority Tier capacity.
@@ -565,20 +668,36 @@ func (h *Handler) copyProviderHeaders(target, source http.Header) {
 	}
 }
 
-func (h *Handler) providerUsage(body []byte, path string, stream bool, contentType string) (responseUsage, anthropicUsage, error) {
-	if h.protocol == openAIProtocol {
-		usage, err := decodeUsage(body, path, stream, contentType)
-		return usage, anthropicUsage{}, err
+// requestModel names the requested model for audit, bounded because the value
+// comes from the workload even though the provider has already accepted it.
+func requestModel(body []byte) string {
+	var request struct {
+		Model string `json:"model"`
 	}
-	usage, err := decodeAnthropicUsage(body, stream, contentType)
-	input := usage.Total - usage.Output
-	normalized := responseUsage{Usage: &tokenUsage{TotalTokens: &usage.Total, PromptTokens: &input, CompletionTokens: &usage.Output}}
-	return normalized, usage, err
+	_ = json.Unmarshal(body, &request)
+	if len(request.Model) > 128 {
+		return ""
+	}
+	return request.Model
+}
+
+// splitTokens returns input and output usage from whichever OpenAI-compatible
+// field pair the provider reported; Anthropic usage is normalized to prompt and completion.
+func splitTokens(usage *tokenUsage) (int64, int64) {
+	value := func(values ...*int64) int64 {
+		for _, v := range values {
+			if v != nil {
+				return *v
+			}
+		}
+		return 0
+	}
+	return value(usage.InputTokens, usage.PromptTokens), value(usage.OutputTokens, usage.CompletionTokens)
 }
 
 func (h *Handler) providerCost(body []byte, usage responseUsage, anthropic anthropicUsage) (int64, error) {
 	if h.Config.Pricing == nil {
-		return 0, fmt.Errorf("administrator pricing is unavailable")
+		return 0, errPricingUnavailable
 	}
 	var requestModel struct {
 		Model string `json:"model"`
@@ -592,6 +711,104 @@ func (h *Handler) providerCost(body []byte, usage responseUsage, anthropic anthr
 		cached = *usage.Usage.PromptTokensDetails.CachedTokens
 	}
 	return h.Config.Pricing.Cost(requestModel.Model, *usage.Usage.PromptTokens, cached, *usage.Usage.CompletionTokens)
+}
+
+// A stopping gateway refuses and ends calls with this retryable reply.
+const (
+	gatewayStoppingMessage = "the model gateway is shutting down; retry the call"
+	gatewayStoppingCode    = "gateway_stopping"
+)
+
+// Request bodies the JSON check refuses, each with its own reply.
+var (
+	errTrailingData   = errors.New("model request has trailing data")
+	errDuplicateKey   = errors.New("model request has duplicate key")
+	errNumberTooLarge = errors.New("model request has a number too large to read")
+	errInvalidJSON    = errors.New("model request is not valid JSON")
+	errNotObject      = errors.New("model request is not a JSON object")
+)
+
+// jsonRefusal is the message and code for a body unambiguousJSON refuses.
+func jsonRefusal(err error) (message, code string) {
+	switch {
+	case errors.Is(err, errTrailingData):
+		return "request body must be exactly one JSON value; remove the data after it", "trailing_data"
+	case errors.Is(err, errDuplicateKey):
+		return "request body must be one JSON value without duplicate keys; the keys of the request, its " +
+			"messages and their content blocks are compared without case", "ambiguous_json"
+	case errors.Is(err, errNumberTooLarge):
+		return "request body contains a number too large to read", "number_too_large"
+	case errors.Is(err, errNotObject):
+		return "request body must be a JSON object", "invalid_json"
+	default:
+		return "request body is not valid JSON", "invalid_json"
+	}
+}
+
+// errPricingUnavailable refuses a cost-capped call whose model has no
+// administrator price.
+var errPricingUnavailable = errors.New(reasonUnpriced)
+
+// refusalCode names why a request was refused before inference: missing
+// pricing, or an operation or option the gateway does not support.
+func refusalCode(err error) string {
+	if errors.Is(err, errPricingUnavailable) {
+		return "pricing_unavailable"
+	}
+	return "unsupported_operation"
+}
+
+func (h *Handler) logger() *slog.Logger {
+	if h.Config.Logger == nil {
+		return slog.Default()
+	}
+	return h.Config.Logger
+}
+
+// forfeit charges a whole reservation when the provider may have done work
+// that no estimate can bound, records the charged units in the audit event
+// and logs the charge with its reason. A reservation made without an output
+// bound holds all remaining capacity, so this can exhaust the allowance.
+func (h *Handler) forfeit(e *audit.Event, reservation *budget.Reservation, reason string) {
+	if reservation == nil {
+		return
+	}
+	// The charge is exactly what this reservation holds in its limited
+	// dimensions, so parallel settlements cannot distort it.
+	units, cost := reservation.Held()
+	if err := reservation.Forfeit(); err != nil {
+		h.settleFailed(e, err)
+		return
+	}
+	e.TokensUsed = units
+	h.logger().Info("Charged model reservation in full", "runID", e.RunID, "runUID", e.RunUID,
+		"endReason", e.EndReason, "detail", reason, "units", units, "costMicros", cost)
+}
+
+// settleFailed records a settlement, forfeit or release the ledger did not
+// apply. A reservation whose lease was already recovered was charged its
+// recovery estimate instead; anything else left the charge unrecorded.
+func (h *Handler) settleFailed(e *audit.Event, err error) {
+	e.TokensUsed = 0
+	if errors.Is(err, budget.ErrReservationRecovered) {
+		e.UsageSource = usageRecovered
+		h.logger().Info("Model reservation was already recovered", "runID", e.RunID, "runUID", e.RunUID,
+			"endReason", e.EndReason)
+		return
+	}
+	e.UsageSource = usageUnsettled
+	h.logger().Error("Failed to settle model reservation", "runID", e.RunID, "runUID", e.RunUID,
+		"endReason", e.EndReason, "error", err.Error())
+}
+
+// release frees a reservation the provider did no work for.
+func (h *Handler) release(e *audit.Event, reservation *budget.Reservation) {
+	if reservation == nil {
+		return
+	}
+	if err := reservation.Release(); err != nil {
+		h.settleFailed(e, err)
+	}
 }
 
 func (h *Handler) auditModelSuccess(ctx context.Context, e audit.Event, upstreamStatus int, tokensUsed int64, meter *budget.Meter, limits sprooziv1alpha1.EndpointBudget) {

@@ -85,13 +85,18 @@ fail in their environment. NetworkPolicy has exceptions for node traffic.
 
 Each run has a dedicated ServiceAccount and a token for the gateway audience.
 The token identifies the run. Its requested capabilities and current policy
-determine permission. Each new request checks that the run is still active,
-and open connections close soon after it stops. The agent Pod has no Sproozi
-proxy sidecar.
+determine permission. Each new connection is checked against live API reads.
+Each request on an open connection, and a check every second, confirm that the
+run is still active and allowed. On Kubernetes those checks read the gateway's
+watch cache and confirm any change with a live read, and each execution is
+also rechecked live at least every 10 seconds. Open connections close within
+the smaller of 1 second plus watch delay plus 5 seconds, and under 16 seconds,
+after the run stops or loses permission. The agent Pod has no Sproozi proxy
+sidecar.
 
-Both gateway backends cap connections, sessions per execution and pending
+Both gateway backends limit connections, inspected connections per execution and pending
 policy lookups, and give authentication and lookups short deadlines. A late
-lookup result can't restore permission. A slow policy lookup keeps its slot
+lookup result can't restore permission. A slow policy lookup keeps its place
 until it returns, even after timing out.
 [Transport limits](../reference/security-hardening.md#protect-transport-and-identities)
 give the defaults and explain why closing a connection doesn't prove that
@@ -100,7 +105,13 @@ upstream work stopped.
 The gateway routes each request to a handler. A handler can check service
 actions, MCP tools and arguments, or an exact network destination. These checks
 have different limits. See [capabilities and
-gateways](capabilities-and-gateways.md).
+gateways](capabilities-and-gateways.md). The model handler reserves budget
+before forwarding a call, streams the response to the harness as it arrives,
+and settles the reservation from the provider's reported usage, or with an
+[estimated charge](../../GLOSSARY.md#estimated-charge) when the call is
+interrupted. A model call may outlive its connection's 5-minute lifetime, up to
+the [model call deadline](../../GLOSSARY.md#model-call-deadline)
+([ADR 0028](../adr/0028-streamed-model-responses-and-estimated-interrupts.md)).
 
 ## MCP is a supported capability interface
 
@@ -136,18 +147,21 @@ design decision.
 
 ## Persistent assistant delegation
 
-Hermes runs separately from agent Pods. It keeps its native sessions, memory
-and schedules on a persistent volume. Its MCP client submits tasks to a private
-service that maps workflow names to fixed templates and capability subsets.
+Hermes runs separately from agent Pods. It keeps its own conversations, memory
+and schedules on a persistent volume. Its MCP client asks the private task
+service for delegated runs; the service maps workflow names to fixed templates
+and capability subsets.
 Hermes receives no Kubernetes token.
 
 The task service holds the Kubernetes credentials needed to create approved
-`AgentRun` requests. The controller runs them through the ordinary worker queue
+`AgentRun` requests. The controller runs them through the ordinary run queue
 and gateway. It saves terminal status and optional final text before deleting
-the Pod. The persistent assistant does not occupy the single worker slot.
+the Pod. Delegated runs can run concurrently. Without a cluster or policy concurrency
+cap, their number is bounded only by ResourceQuotas, node capacity and the
+gateway's connection limits. The persistent assistant is not an AgentRun and does
+not count against either cap.
 
-See [the task interface](../reference/orchestration.md), [the Hermes
-guide](../guides/hermes-orchestration.md) and [ADR
+See [the task service](../reference/orchestration.md), [Run a persistent Hermes assistant on Kubernetes](../guides/hermes-orchestration.md) and [ADR
 0003](../adr/0003-persistent-assistants-and-retained-results.md).
 
 ## Kubernetes execution
@@ -157,7 +171,7 @@ The Kubernetes adapter creates disposable Pods directly; see
 contract, a projected gateway token and a run-specific NetworkPolicy. Its
 ServiceAccount has no direct Kubernetes read grant.
 
-## Managed native session continuity
+## Managed session continuity
 
 The [home daemon](../../GLOSSARY.md#home-daemon) manages controlled Docker
 sessions. It connects to a [profile service](../../GLOSSARY.md#profile-service)
@@ -173,15 +187,15 @@ flowchart LR
     Profile --> Run[Fresh Kubernetes AgentRun]
     Docker --> LocalGateway[Local model gateway and accounts]
     Run --> Gateway[Shared gateway and managed accounts]
-    Docker --> Checkpoint[Selected native conversation and Git workspace]
+    Docker --> Checkpoint[Selected harness conversation and Git workspace]
     Run --> Checkpoint
     Checkpoint --> Home
 ```
 
 During a live move, the [execution](../../GLOSSARY.md#execution) keeps its
-native conversation ID, original deadline and total
+harness conversation ID, original deadline and total
 [allowance](../../GLOSSARY.md#allowance). Each [visit](../../GLOSSARY.md#visit)
-gets a fresh allocation and placement identity. A checkpoint carries the supported conversation and Git
+gets fresh admission and placement identity. A checkpoint carries the supported conversation and Git
 workspace. It carries no credentials or permission to spend.
 
 To move safely, Sproozi blocks new input, waits for the current turn and tools,
@@ -195,23 +209,23 @@ first and does not require a fresh checkpoint.
 The home coordinator records each execution from its first visit. `start` and
 `resume` save that visit before any container starts. The coordinator then
 prepares, activates, stops, moves, cancels and recovers every visit the same
-way. A visit started from a Git workspace has no native conversation ID until
+way. A visit started from a Git workspace has no harness conversation ID until
 the client creates one. Its first graceful stop records that ID separately,
 because a visit's launch settings never change. See [ADR
 0018](../adr/0018-coordinator-owns-every-visit.md).
 
-[Remote work and local resume](../guides/portable-workflows.md) uses a catalogue hosted by
+[Run a task remotely, then resume it locally](../guides/portable-workflows.md) uses a catalogue hosted by
 the profile service. It runs independently of the laptop. After a Codex task
-finishes, it stops the worker, finalizes usage and retains native and Git state.
+finishes, it stops the sandbox, finalizes usage and retains native and Git state.
 Hermes can submit and inspect tasks through authenticated MCP.
 
 Pull transfers ownership to the home daemon without starting an agent. A
 later resume starts a new execution with current local approval and the same
-native conversation ID. Old usage receipts remain unchanged. Retried operations
+harness conversation ID. Old usage receipts remain unchanged. Retried operations
 stay bound to their original execution, so they cannot affect a later resume.
 See [ADR 0012](../adr/0012-retained-work-and-fresh-session-continuations.md).
 
-Projects group retained work and restrict access under administrator
+Projects group remote work and restrict access under administrator
 configuration. A saved Project association records where work came from; local
 resume still requires local approval. An exact-revision launch starts a fresh
 conversation at the checkpoint's Git commit. It does not restore unfinished

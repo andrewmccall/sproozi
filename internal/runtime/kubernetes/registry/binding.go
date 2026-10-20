@@ -86,6 +86,23 @@ func EffectiveDeadline(run *api.AgentRun, policy *api.AgentPolicy, record *Recor
 	return deadline
 }
 
+// AdmittedPolicyChanged reports whether an Admitted or Running run's template
+// now names a policy other than the one recorded at its admission. The run
+// still counts against the old policy's cap, so the controller fails it and
+// the gateway denies it rather than apply the new policy's permissions.
+func AdmittedPolicyChanged(run *api.AgentRun, template *api.AgentTemplate) bool {
+	if run.Status.Phase != api.AgentRunPhaseAdmitted && run.Status.Phase != api.AgentRunPhaseRunning {
+		return false
+	}
+	return run.Status.PolicyName != "" && run.Status.PolicyName != template.Spec.PolicyRef.Name
+}
+
+// PolicyChangedMessage explains an AdmittedPolicyChanged run to its submitter.
+func PolicyChangedMessage(run *api.AgentRun, template *api.AgentTemplate) string {
+	return fmt.Sprintf("AgentTemplate %s now references AgentPolicy %s, but this run was admitted under AgentPolicy %s; submit a new run",
+		template.Name, template.Spec.PolicyRef.Name, run.Status.PolicyName)
+}
+
 // RequireActive verifies the exact live worker container in addition to the
 // retained activation record. A Running capture sidecar cannot authorize an
 // already terminated native container. Callers also verify live policy and Run.

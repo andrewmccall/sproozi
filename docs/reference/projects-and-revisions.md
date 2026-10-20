@@ -57,11 +57,11 @@ query or fragment and are never used as authorization.
 ## Run and discover work
 
 ```sh
-sproozi run --executor remote --project sproozi-dev --harness codex \
+sproozi run --executor engineering --project sproozi-dev --harness codex \
   --task 'Investigate the failing package check and propose a change'
-sproozi sessions --executor remote --project sproozi-dev
-sproozi sessions --executor remote --project home-ops
-sproozi status SESSION_UUID --executor remote
+sproozi sessions --executor engineering --project sproozi-dev
+sproozi sessions --executor engineering --project home-ops
+sproozi status SESSION_UUID --executor engineering
 ```
 
 Equivalent MCP inputs add `project` to `sproozi_run` and optionally to
@@ -74,7 +74,7 @@ also check current membership. Changing a submitted Project or revision source
 conflicts with the original operation's immutable intent.
 
 Project capability definitions select new submission grants. Editing a definition
-does not rewrite an already admitted remote allocation; its saved grant remains
+does not rewrite an already admitted remote visit; its saved grant remains
 subject to current placement policy. Configuration is loaded on service startup.
 After membership removal, public
 reads/admission are denied. The trusted owner still cancels unresolved writers
@@ -113,7 +113,7 @@ using the exact configured source name:
 
 These capability subsets use the home's current usage limits. They do not copy
 the remote grant or remaining allowance. Missing approval produces an actionable
-resume error before preparing a worker. An approval for a different source with
+resume error before preparing a sandbox. An approval for a different source with
 the same Project name does not match. Project/template/repository association
 remains visible after local resume and stop; local filtering uses `sproozi
 sessions --executor docker --project ID`.
@@ -122,7 +122,7 @@ sessions --executor docker --project ID`.
 
 Retained status exposes independent identities:
 
-- `threadId`: the harness's native conversation UUID.
+- `threadId`: the harness conversation ID.
 - `checkpointDigest`: SHA256 of the complete stopped conversation/workspace artifact.
 - `repositoryReference`: immutable descriptive repository identity from owner configuration.
 - `checkpointInfo.workspace.revision`: full Git HEAD captured with the selected workspace.
@@ -140,7 +140,7 @@ Native resume restores the same conversation and complete supported unfinished
 workspace. To start a **fresh conversation** at the clean committed revision:
 
 ```sh
-sproozi run --executor remote --project sproozi-dev --harness codex \
+sproozi run --executor engineering --project sproozi-dev --harness codex \
   --workspace-from SOURCE_SESSION_UUID \
   --checkpoint-digest EXACT_STOPPED_CHECKPOINT_SHA256 \
   --revision FULL_RECORDED_GIT_HEAD \
@@ -156,13 +156,13 @@ moving ref is rejected.
 
 The owner creates a clean detached checkout from saved Git objects in private
 staging. It saves the input record before preparing the destination. Dirty and
-untracked changes and native conversation history are excluded from this fresh
+untracked changes and harness conversation history are excluded from this fresh
 workspace-only execution. No network fetch or Git service is needed. The source
 checkpoint, receipt and ownership remain unchanged, even for unpublished
-commits. The destination has a fresh native UUID, allocation, deadline and
+commits. The destination has a fresh harness conversation ID (`threadId`), visit, deadline and
 independent grant. This workflow neither publishes commits nor gives permission
 to push them.
 
 See [ADR 0013](../adr/0013-configured-projects-and-workspace-revisions.md) for
 alternatives, accepted costs and revisit conditions, and the
-[Hermes with retained work](../guides/retained-work-kubernetes.md) guide for setup.
+[Hermes with remote work](../guides/retained-work-kubernetes.md) guide for setup.

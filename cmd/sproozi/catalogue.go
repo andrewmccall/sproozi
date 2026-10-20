@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -20,6 +23,9 @@ const availabilityAvailable = "available"
 const availabilityUnavailable = "unavailable"
 const ownershipHome = "home"
 const ownershipExecutor = "executor"
+
+// errorHomeNotRunning is the executor error when no home daemon is listening.
+const errorHomeNotRunning profile.Code = "home_not_running"
 
 // Catalogue rows are compact discovery facts, not full execution journals or
 // untrusted final answers. Executor labels the catalogue queried; placement
@@ -47,6 +53,8 @@ type catalogue struct {
 	Sessions  []catalogueRow         `json:"sessions"`
 	Executors []executorAvailability `json:"executors"`
 	Truncated bool                   `json:"truncated"`
+	// problems holds each unavailable owner's error, in executor order.
+	problems map[string]error
 }
 type discovered struct {
 	availability executorAvailability
@@ -63,7 +71,7 @@ func discoverSessions(ctx context.Context, q options) catalogue {
 		names = append(names, dockerExecutor)
 	}
 	slices.Sort(names)
-	out := catalogue{Sessions: []catalogueRow{}, Executors: []executorAvailability{}}
+	out := catalogue{Sessions: []catalogueRow{}, Executors: []executorAvailability{}, problems: map[string]error{}}
 	if len(names) > catalogueExecutors {
 		names = names[:catalogueExecutors]
 		out.Truncated = true
@@ -120,6 +128,10 @@ func discoverSessions(ctx context.Context, q options) catalogue {
 		if v.err != nil {
 			v.availability.Availability = availabilityUnavailable
 			v.availability.Error = work.OutcomeCode(v.err)
+			if errors.Is(v.err, home.ErrControlUnavailable) {
+				v.availability.Error = errorHomeNotRunning
+			}
+			out.problems[v.availability.Executor] = v.err
 		} else {
 			out.Sessions = append(out.Sessions, v.rows...)
 		}
@@ -137,4 +149,51 @@ func discoverSessions(ctx context.Context, q options) catalogue {
 		out.Truncated = true
 	}
 	return out
+}
+
+// failure explains a catalogue in which no requested owner answered. Partial
+// results succeed, with a note when home is not running.
+func (c catalogue) failure(configPath string) error {
+	homeErr := c.problems[dockerExecutor]
+	if len(c.problems) < len(c.Executors) {
+		if errors.Is(homeErr, home.ErrControlUnavailable) {
+			_, _ = fmt.Fprintln(os.Stderr,
+				"Home is not running, so its sessions are not listed; start it with \""+serveCommand(configPath)+"\"")
+		} else if homeErr != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "Home is unavailable, so its sessions are not listed: %v\n", homeErr)
+		}
+		for _, e := range c.Executors {
+			if err := c.problems[e.Executor]; err != nil && e.Executor != dockerExecutor {
+				_, _ = fmt.Fprintf(os.Stderr, "Executor %s is unavailable, so its sessions are not listed: %s\n",
+					e.Executor, executorCause(err))
+			}
+		}
+		return nil
+	}
+	var others []string
+	for _, e := range c.Executors {
+		if e.Executor != dockerExecutor {
+			others = append(others, e.Executor+": "+executorCause(c.problems[e.Executor]))
+		}
+	}
+	// The catalogue is already on stdout; this explains why it lists nothing.
+	const prefix = "no sessions listed: the results above show that no executor answered"
+	switch {
+	case homeErr != nil && len(others) == 0:
+		return fmt.Errorf("%s: %w", prefix, homeErr)
+	case homeErr != nil:
+		return fmt.Errorf("%s: executor %s; and %w", prefix, strings.Join(others, "; executor "), homeErr)
+	default:
+		return fmt.Errorf("%s: executor %s", prefix, strings.Join(others, "; executor "))
+	}
+}
+
+// executorCause explains why an executor did not answer, including this
+// client's own transport failure, which the error message leaves out.
+func executorCause(err error) string {
+	var remote *profile.RemoteError
+	if errors.As(err, &remote) && remote.Transport != nil {
+		return fmt.Sprintf("%v (%v)", err, remote.Transport)
+	}
+	return fmt.Sprint(err)
 }

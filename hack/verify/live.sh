@@ -2,13 +2,9 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
-env_file="${SPROOZI_DEMO_ENV_FILE:-$PWD/.local/demo.env}"
-if [[ -f "$env_file" ]]; then
-  set -a
-  # shellcheck disable=SC1090
-  source "$env_file"
-  set +a
-fi
+# Caller-set, non-empty values win over .local/demo.env.
+source hack/demo/env.sh
+demo_env_load
 
 export SPROOZI_DEMO_REPO="${SPROOZI_DEMO_REPO:-${SPROOZI_DEMO_REPOSITORY:-}}"
 export SPROOZI_KUBECONFIG="${SPROOZI_KUBECONFIG:-${KUBECONFIG:-}}"

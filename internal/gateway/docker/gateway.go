@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"slices"
+	"time"
 
 	"github.com/andrewmccall/sproozi/internal/harness"
 
@@ -34,6 +35,9 @@ type GatewayConfig struct {
 	AuditLogger  audit.Writer
 	GitHub       *githubgateway.HandlerConfig
 	Kubernetes   *kubernetesgateway.HandlerConfig
+	// MaxModelCall is the longest one model call may stream. Zero selects
+	// proxytransport.DefaultMaxModelCallDuration.
+	MaxModelCall time.Duration
 }
 
 func NewGateway(owner *Owner, config GatewayConfig) (*proxytransport.Gateway, error) {
@@ -64,7 +68,7 @@ func NewGateway(owner *Owner, config GatewayConfig) (*proxytransport.Gateway, er
 		}
 		dispatch[config.MCPAuthority] = gateway.Route{Tier: audit.TierProtocol, Handler: mcpgateway.NewHandler(mcpgateway.HandlerConfig{Registry: config.MCPRegistry, HTTPClient: config.MCPClient, Budgets: tracker, AuditLogger: config.AuditLogger})}
 	}
-	return proxytransport.New(proxytransport.Config{Certificates: config.Certificates, Authenticate: owner.Authenticate, Revalidate: owner.Revalidate, Handler: dispatch, AllowedAuthority: dispatch.Allows})
+	return proxytransport.New(proxytransport.Config{Certificates: config.Certificates, Authenticate: owner.Authenticate, Revalidate: owner.Revalidate, Handler: dispatch, AllowedAuthority: dispatch.Allows, MaxModelCallDuration: config.MaxModelCall})
 }
 
 func addNativeRoutes(owner *Owner, config GatewayConfig, dispatch gateway.Dispatcher, tracker *budget.Tracker) error {

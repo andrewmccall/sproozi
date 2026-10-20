@@ -26,8 +26,8 @@ metadata:
   namespace: system
 spec:
   replicas: 1
-  # A rotating ChatGPT session has one refresh owner. Do not scale this demo
-  # deployment or share its session with another cluster/process.
+  # A rotating ChatGPT credential has one refresh owner. Do not scale this demo
+  # deployment or share its credential with another cluster/process.
   strategy:
     type: Recreate
   selector:
@@ -41,6 +41,9 @@ spec:
         app.kubernetes.io/component: shared-gateway
     spec:
       serviceAccountName: shared-gateway
+      # SIGTERM drains model calls for up to 30 s so each settles its
+      # reservation (cmd/gateway drainTimeout); leave room for that.
+      terminationGracePeriodSeconds: 45
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
@@ -102,6 +105,28 @@ spec:
           value: /etc/sproozi/model/pricing.json
         - name: MCP_SERVERS_PATH
           value: /etc/sproozi/mcp/servers.json
+        # Connection limits, sized together with the memory limit below: one
+        # connection per MiB of limits.memory. The 256 KiB budget per inspected
+        # connection (about 150 to 160 KiB measured by TestInspectedSessionMemory)
+        # takes a quarter of the limit; the rest is headroom for model bodies,
+        # heap and GC. Lower them with it.
+        # SPROOZI_GATEWAY_MAX_SESSIONS_PER_EXECUTION is deliberately unset:
+        # it then defaults to min(16, SPROOZI_GATEWAY_MAX_CONNECTIONS), so
+        # lowering the connection limit alone below 16 still starts. Set it
+        # only to change the per-execution limit; it must not exceed the
+        # connection limit.
+        - name: SPROOZI_GATEWAY_MAX_CONNECTIONS
+          value: "2048"
+        # The gateway sets GOMEMLIMIT to 90% of the memory limit below, so
+        # garbage collection tightens before the container is OOM-killed. An
+        # explicit GOMEMLIMIT here takes precedence, but the limit is still
+        # checked: below 64Mi the gateway refuses to start. It logs the Go
+        # memory limit in effect and its source at startup.
+        - name: SPROOZI_GATEWAY_MEMORY_LIMIT
+          valueFrom:
+            resourceFieldRef:
+              containerName: shared-gateway
+              resource: limits.memory
         volumeMounts:
         - name: gateway-tls
           mountPath: /var/run/sproozi-gateway
@@ -122,6 +147,20 @@ spec:
         - name: proxy
           containerPort: 8443
           protocol: TCP
+        - name: health
+          containerPort: 8081
+          protocol: TCP
+        # The gateway opens the plain health port only after startup validation
+        # passes and the TLS listener on 8443 is bound, so a gateway that exits
+        # on bad configuration never becomes ready. The port answers only
+        # GET /readyz; the Service does not expose it and the default-deny
+        # NetworkPolicy keeps other Pods from reaching it.
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: health
+          periodSeconds: 5
+          failureThreshold: 3
         securityContext:
           runAsNonRoot: true
           runAsUser: 65532
@@ -131,13 +170,19 @@ spec:
           capabilities:
             drop:
             - ALL
+        # Requests stay small so an idle cluster reserves little. The limits are
+        # ceilings for many concurrent runs: every inspected connection holds
+        # TLS buffers, and handshakes cost CPU. Administrators may lower them,
+        # together with SPROOZI_GATEWAY_MAX_CONNECTIONS above (one connection
+        # per MiB). Raise the
+        # requests instead if the gateway needs guaranteed capacity.
         resources:
           requests:
             cpu: 25m
             memory: 128Mi
           limits:
-            cpu: 250m
-            memory: 256Mi
+            cpu: "2"
+            memory: 2Gi
       volumes:
       - name: gateway-tls
         secret:

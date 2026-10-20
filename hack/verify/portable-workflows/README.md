@@ -34,7 +34,7 @@ python3 hack/verify/portable-workflows/verify.py \
   --output-directory "$codex/workflow-proof"
 ```
 
-The configurator creates a separate private task token and a small stopped Git
+The configurator creates a separate private work token and a small stopped Git
 snapshot. The verifier submits and replays an authenticated MCP task while the
 home socket is absent, waits for genuine native completion and sealed retention,
 then starts the home, pulls/claims the checkpoint, resumes the same UUID under a

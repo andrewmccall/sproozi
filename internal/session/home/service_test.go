@@ -566,3 +566,21 @@ func TestTerminalInputRetainsPartialBusySuffixAndDetaches(t *testing.T) {
 		t.Fatalf("terminal lost/repeated suffix or sent detach: %q calls=%d", received, calls)
 	}
 }
+
+// A start that repeats an ID under a new operation is rejected with the
+// retained operation, never a hint to try yet another new one.
+func TestStartConflictNamesTheRetainedOperation(t *testing.T) {
+	t.Parallel()
+	s, _, _, repo := testService(t)
+	id, operation := uuid.NewString(), uuid.NewString()
+	if _, err := s.Start(t.Context(), id, operation, repo, nil); err != nil {
+		t.Fatal(err)
+	}
+	_, err := s.Start(t.Context(), id, uuid.NewString(), repo, nil)
+	want := "home: start intent conflicts with retained launch; " + id + " was started with operation " + operation +
+		": to continue it, repeat the original start command with --operation " + operation +
+		", or run \"sproozi cancel " + id + "\" to revoke and force-stop its current execution"
+	if !errors.Is(err, ErrRejected) || err.Error() != want {
+		t.Fatalf("got %v, want %q", err, want)
+	}
+}

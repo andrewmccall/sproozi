@@ -19,6 +19,7 @@ package main
 import (
 	"crypto/tls"
 	"flag"
+	"fmt"
 	"os"
 
 	corev1 "k8s.io/api/core/v1"
@@ -70,6 +71,7 @@ func main() {
 	var probeAddr string
 	var secureMetrics bool
 	var enableHTTP2 bool
+	var maxActiveRuns int
 	var tlsOpts []func(*tls.Config)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
@@ -85,6 +87,10 @@ func main() {
 	flag.StringVar(&metricsCertKey, "metrics-cert-key", "tls.key", "The name of the metrics server key file.")
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics server")
+	// Optional. The default install leaves it unset, so only AgentPolicy caps,
+	// quotas and node capacity bound how many runs are active at once.
+	flag.IntVar(&maxActiveRuns, "max-active-runs", 0,
+		"The most AgentRuns that can be Admitted or Running at once across the cluster. 0 means no limit.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -92,6 +98,10 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+	if maxActiveRuns < 0 {
+		setupLog.Error(fmt.Errorf("--max-active-runs is %d", maxActiveRuns), "Rejected negative active-run cap")
+		os.Exit(1)
+	}
 
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
 	// due to its vulnerabilities. More specifically, disabling http/2 will
@@ -173,6 +183,7 @@ func main() {
 		Client:        mgr.GetClient(),
 		APIReader:     mgr.GetAPIReader(),
 		SandboxClient: k8sresources.NewPodSandboxClient(mgr.GetClient(), mgr.GetAPIReader()),
+		MaxActiveRuns: maxActiveRuns,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to set up AgentRun controller")
 		os.Exit(1)

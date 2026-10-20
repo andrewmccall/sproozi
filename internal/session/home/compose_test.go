@@ -1,6 +1,7 @@
 package home
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -8,6 +9,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -17,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -26,6 +29,7 @@ import (
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	gatewaydocker "github.com/andrewmccall/sproozi/internal/gateway/docker"
 	"github.com/andrewmccall/sproozi/internal/harness"
+	"github.com/andrewmccall/sproozi/internal/privatefs"
 
 	runtimedocker "github.com/andrewmccall/sproozi/internal/runtime/docker"
 	"github.com/andrewmccall/sproozi/internal/session"
@@ -71,7 +75,7 @@ func composedConfig(t *testing.T) Config {
 	limits := runtimedocker.ResourceLimits{MemoryBytes: 64 << 20, CPUMilli: 500, PIDs: 64}
 	image := "sha256:" + strings.Repeat("a", 64)
 	socket := filepath.Join(root, "docker.sock")
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == goosWindows {
 		socket = "npipe:////./pipe/sproozi-fixture"
 	}
 	return Config{Directory: filepath.Join(root, "home"), DockerBinary: binary, DockerSocket: socket, DockerConfig: filepath.Join(root, "docker-cli"), MaxDuration: "1h", Model: "fixture", Allowances: map[string]session.Allowance{testCapability: {Units: session.Limit{Bounded: true, Value: 10}}}, Local: runtimedocker.PlacementConfig{Harness: harness.NativeCodex, Name: testLocal, NativeImageID: image, HelperImageID: image, AnchorImageID: image, NetworkName: "bridge-fixture", GatewayIPv4: "192.168.65.254", GatewayPort: 18443, Instructions: testInstructions, InstructionDigest: fmt.Sprintf("%x", sha256.Sum256([]byte(testInstructions))), AgentLimits: limits, HelperLimits: limits, AnchorLimits: limits, VolumeBytes: 64 << 20, MaxCheckpointBytes: testLimit, RetainedBytes: 32 << 20}, Gateway: GatewayConfig{Listen: "0.0.0.0:18443", CertificateFile: filepath.Join(root, "gateway.crt"), KeyFile: filepath.Join(root, "gateway.key"), TrustBundleFile: filepath.Join(root, "ca.pem"), ProviderURL: "http://127.0.0.1:18765", ProviderTokenFile: filepath.Join(root, "provider-token")}}
@@ -83,8 +87,10 @@ func TestProductionCompositionTakesExclusiveOwnershipWithoutLaunching(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = Open(c, io.Discard); err == nil {
-		t.Fatal("second home writer admitted")
+	want := "home: another home daemon is using directory " + c.Directory +
+		"; stop it first (\"sproozi serve\" holds it until it exits)"
+	if _, err = Open(c, io.Discard); err == nil || err.Error() != want {
+		t.Fatalf("second home writer: got %v, want %q", err, want)
 	}
 	if err = s.Close(); err != nil {
 		t.Fatal(err)
@@ -96,6 +102,28 @@ func TestProductionCompositionTakesExclusiveOwnershipWithoutLaunching(t *testing
 	defer func() { _ = reopened.Close() }()
 	if reopened.gateway.Handler == nil || reopened.local == nil || reopened.coordinator == nil {
 		t.Fatal("production adapters absent")
+	}
+}
+
+// A refused placement settings change reaches the caller as an error; it once
+// left a typed-nil placement that panicked in Close and hid the reason.
+func TestChangedPlacementSettingsReturnTheReasonInsteadOfPanicking(t *testing.T) {
+	c := composedConfig(t)
+	s, err := Open(c, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	record := filepath.Join(c.Directory, "docker", strings.Repeat("e", 64)+".json")
+	if err = testutil.WriteFile(record, []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	c.Local.NativeImageID = "sha256:" + strings.Repeat("f", 64)
+	_, err = Open(c, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "local placement settings changed (local.nativeImageID ") {
+		t.Fatalf("got %v", err)
 	}
 }
 
@@ -165,5 +193,122 @@ func TestGlobalNativeAllowanceRequiresConfiguredService(t *testing.T) {
 	c.Allowances["kubernetes.read"] = session.Allowance{Units: session.Limit{Bounded: true, Value: 1}}
 	if _, err := approvedPolicy(c); err == nil {
 		t.Fatal("capability enabled without trusted upstream configuration")
+	}
+}
+
+func TestGatewayTLSNamesTheUnreadableFile(t *testing.T) {
+	path := filepath.Join(testutil.PrivateDir(t), "not-pem")
+	if err := testutil.WriteFile(path, []byte("not PEM"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for key, set := range map[string]func(*GatewayConfig){
+		"gateway.certificateFile": func(g *GatewayConfig) { g.CertificateFile = path },
+		"gateway.keyFile":         func(g *GatewayConfig) { g.KeyFile = path },
+		"gateway.trustBundleFile": func(g *GatewayConfig) { g.TrustBundleFile = path },
+	} {
+		broken := composedConfig(t)
+		set(&broken.Gateway)
+		if _, _, _, err := gatewayTLS(broken); err == nil || !strings.Contains(err.Error(), key+" "+path+": ") {
+			t.Errorf("%s: %v", key, err)
+		}
+	}
+}
+
+// Each listener or certificate fault names its own setting.
+func TestGatewayTLSNamesTheFailedSetting(t *testing.T) {
+	for want, change := range map[string]func(*Config){
+		`home: local.gatewayIPv4 "0.0.0.0" is not a specific IPv4 address`: func(c *Config) { c.Local.GatewayIPv4 = "0.0.0.0" },
+		`home: gateway.listen "18443" is not HOST:PORT; use 192.168.65.254:18443 or 0.0.0.0:18443`: func(c *Config) {
+			c.Gateway.Listen = "18443"
+		},
+		`home: gateway.listen "0.0.0.0:9" uses port 9, but local.gatewayPort is 18443; make them equal`: func(c *Config) {
+			c.Gateway.Listen = "0.0.0.0:9"
+		},
+		`home: gateway.listen "127.0.0.1:18443" listens on 127.0.0.1, which containers cannot reach; ` +
+			`use local.gatewayIPv4 192.168.65.254 or 0.0.0.0`: func(c *Config) { c.Gateway.Listen = "127.0.0.1:18443" },
+		"does not name local.gatewayIPv4 192.168.65.253; issue it with that address as an IP subject alternative name": func(c *Config) {
+			c.Local.GatewayIPv4, c.Gateway.Listen = "192.168.65.253", "192.168.65.253:18443"
+		},
+		"does not name api.anthropic.com, the inspection host for local.harness claude-code; " +
+			"issue it with that name as a DNS subject alternative name": func(c *Config) { c.Local.Harness = harness.NativeClaude },
+	} {
+		c := composedConfig(t)
+		change(&c)
+		if _, _, _, err := gatewayTLS(c); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("got %v, want %q", err, want)
+		}
+	}
+}
+
+type imageFixture struct {
+	id        string
+	err       error
+	noNetwork bool
+}
+
+func (f imageFixture) ImageID(context.Context, string) (string, error) { return f.id, f.err }
+
+func (f imageFixture) NetworkExists(context.Context, string) (bool, error) { return !f.noNetwork, nil }
+
+// CheckDocker names the Docker setting that keeps home from reaching its engine.
+func TestCheckDockerNamesTheUnusableSetting(t *testing.T) {
+	c := composedConfig(t)
+	if runtime.GOOS != goosWindows {
+		if err := testutil.WriteFile(c.DockerSocket, nil, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	image := c.Local.NativeImageID
+	for _, tc := range []struct {
+		change func(*Config)
+		images imageFixture
+		want   string
+	}{
+		{nil, imageFixture{id: image}, ""},
+		{func(c *Config) { c.DockerBinary = filepath.Join(c.Directory, "absent") }, imageFixture{id: image},
+			"home: dockerBinary " + filepath.Join(c.Directory, "absent") + " is not a file; set it to the Docker CLI's absolute path"},
+		{nil, imageFixture{err: errors.New("exit status 1")}, "home: dockerBinary " + c.DockerBinary +
+			" could not inspect local.nativeImageID " + image + " through dockerSocket " + c.DockerSocket +
+			" (exit status 1); check that Docker is running, that dockerBinary is the Docker CLI and that the image is loaded"},
+		{nil, imageFixture{id: "sha256:" + strings.Repeat("b", 64)}, "home: Docker resolved local.nativeImageID " + image},
+		{nil, imageFixture{id: image, noNetwork: true}, "home: local.networkName " + strconv.Quote(c.Local.NetworkName) +
+			" does not exist; create it with \"docker network create " + c.Local.NetworkName + "\""},
+	} {
+		fixed := c
+		if tc.change != nil {
+			tc.change(&fixed)
+		}
+		err := (&Service{config: fixed, images: tc.images}).CheckDocker(t.Context())
+		if tc.want == "" && err != nil || tc.want != "" && (err == nil || !strings.HasPrefix(err.Error(), tc.want)) {
+			t.Errorf("got %v, want %q", err, tc.want)
+		}
+	}
+	if runtime.GOOS != goosWindows {
+		missing := c
+		missing.DockerSocket = filepath.Join(filepath.Dir(c.DockerSocket), "absent.sock")
+		err := (&Service{config: missing, images: imageFixture{id: image}}).CheckDocker(t.Context())
+		if err == nil || err.Error() != "home: dockerSocket "+missing.DockerSocket+" does not exist; start Docker, "+
+			"or set dockerSocket to the engine's Unix socket" {
+			t.Errorf("missing socket: %v", err)
+		}
+	}
+}
+
+// A shared gateway certificate names its key and why home still requires it
+// to be private, and keeps the privatefs error for the CLI's fix.
+func TestSharedCertificateNamesItsSetting(t *testing.T) {
+	if runtime.GOOS == goosWindows {
+		t.Skip("file modes do not grant access on Windows")
+	}
+	c := composedConfig(t)
+	if err := os.Chmod(c.Gateway.CertificateFile, 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Open(c, io.Discard)
+	want := "home: gateway.certificateFile " + c.Gateway.CertificateFile + " failed the private-file check; " +
+		"home applies one owner-only check (yours, not a link, no access for any other account) to every file it reads, including public certificates"
+	var unsafe *privatefs.UnsafePathError
+	if err == nil || err.Error() != want || !errors.As(err, &unsafe) || unsafe.Path != c.Gateway.CertificateFile {
+		t.Fatalf("got %v, want %q", err, want)
 	}
 }

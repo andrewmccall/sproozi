@@ -621,6 +621,46 @@ func TestIncarnationQuotaAndOwnerChecks(t *testing.T) {
 	}
 }
 
+// Changed placement settings are accepted until an execution record binds the
+// earlier ones; afterwards the refusal names each changed setting.
+func TestPlacementSettingsChangeOnlyWithoutExecutionRecords(t *testing.T) {
+	t.Parallel()
+	f := newFakeDocker()
+	a := &fakeAuthority{engine: f}
+	dir := testutil.PrivateDir(t)
+	first := fixtureConfig()
+	first.NativeImageID = "sha256:" + strings.Repeat("d", 64)
+	p, err := OpenPlacement(dir, &Engine{execute: f.run}, first, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = p.Close(); err != nil {
+		t.Fatal(err)
+	}
+	p = openFixture(t, dir, f, a)
+	data := fixtureArtifact(t)
+	if _, err = p.Prepare(context.Background(), fixtureLaunch(t, data), data); err != nil {
+		t.Fatal(err)
+	}
+	if err = p.Close(); err != nil {
+		t.Fatal(err)
+	}
+	changed := fixtureConfig()
+	changed.GatewayPort = 8845
+	_, err = OpenPlacement(dir, &Engine{execute: f.run}, changed, a)
+	resolved, _ := filepath.EvalSymlinks(dir)
+	want := "local placement settings changed (local.gatewayPort 8844 -> 8845), but 1 execution record in " +
+		resolved + " was prepared under the earlier values; set them back to keep those sessions, or use a new " +
+		"home directory for the new values"
+	if err == nil || err.Error() != want {
+		t.Fatalf("got %v, want %q", err, want)
+	}
+	var nilPlacement *Placement
+	if err = nilPlacement.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestInitialNativeGateRejectionCanAbortWithoutActivationOrCheckpoint(t *testing.T) {
 	t.Parallel()
 	data := fixtureArtifact(t)

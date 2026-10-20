@@ -13,7 +13,9 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"time"
@@ -114,6 +116,13 @@ func Open(c Config, log io.Writer) (_ *Service, err error) {
 	if !filepath.IsAbs(c.Directory) {
 		return nil, errors.New("home: absolute directory required")
 	}
+	// Each store under the directory takes its own owner lock; a held one
+	// means another home daemon serves the same directory.
+	defer func() {
+		if errors.Is(err, privatefs.ErrLocked) {
+			err = anotherDaemon(c.Directory)
+		}
+	}()
 	if err = privatefs.EnsureDir(c.Directory); err != nil {
 		return nil, err
 	}
@@ -132,12 +141,19 @@ func Open(c Config, log io.Writer) (_ *Service, err error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Service{config: c, duration: duration, ledger: ledger, placements: map[string]session.Placement{}}
+	s := &Service{config: c, duration: duration, ledger: ledger, placements: map[string]session.Placement{}, log: log,
+		images: engine, sweepStop: make(chan struct{})}
 	defer func() {
 		if err != nil {
 			_ = s.Close()
 		}
 	}()
+	// Recover reservations a previous daemon left unsettled, then keep
+	// recovering any that expire on idle accounts.
+	// Home is the ledger's only owner and has not reserved yet, so a
+	// reservation without a lease belongs to a stopped daemon.
+	s.sweepLedger()
+	go s.sweepLedgerPeriodically()
 	policy, err := approvedPolicy(c)
 	if err != nil {
 		return nil, err
@@ -151,10 +167,13 @@ func Open(c Config, log io.Writer) (_ *Service, err error) {
 		return nil, err
 	}
 	auth := &authority{owner: s.owner, endpoint: endpoint, trust: trust, model: c.Model, options: c.NativeOptions, kind: c.Local.Harness, mcpEndpoint: "https://" + c.Gateway.MCPAuthority}
-	s.local, err = runtimedocker.OpenPlacement(filepath.Join(c.Directory, "docker"), engine, c.Local, auth)
+	// Assign only a placement that opened: a typed-nil *Placement in s.local
+	// would pass Close's io.Closer check.
+	local, err := runtimedocker.OpenPlacement(filepath.Join(c.Directory, "docker"), engine, c.Local, auth)
 	if err != nil {
 		return nil, err
 	}
+	s.local = local
 	s.placements[c.Local.Name] = s.local
 	if err = s.configureRemotes(); err != nil {
 		return nil, err
@@ -170,9 +189,12 @@ func Open(c Config, log io.Writer) (_ *Service, err error) {
 	if err != nil {
 		return nil, err
 	}
-	gatewayConfig := gatewaydocker.GatewayConfig{Harness: c.Local.Harness, Certificates: map[string]tls.Certificate{inspectionHostFor(c.Local.Harness): certificate}, Model: modelConfig, AuditLogger: audit.NewLogger(log)}
+	s.drain = model.NewDrain()
+	modelConfig.Drain = s.drain
+	gatewayConfig := gatewaydocker.GatewayConfig{Harness: c.Local.Harness, Certificates: map[string]tls.Certificate{inspectionHostFor(c.Local.Harness): certificate}, Model: modelConfig, AuditLogger: audit.NewLogger(log),
+		MaxModelCall: maxModelCall(c.Gateway)}
 	if c.Gateway.MCPRegistryFile != "" {
-		data, readErr := readPrivate(c.Gateway.MCPRegistryFile, 128<<10)
+		data, readErr := readSetting("gateway.mcpRegistryFile", c.Gateway.MCPRegistryFile, 128<<10)
 		if readErr != nil {
 			return nil, readErr
 		}
@@ -204,50 +226,161 @@ func Open(c Config, log io.Writer) (_ *Service, err error) {
 	return s, nil
 }
 
+// CheckDocker proves that dockerBinary reaches the engine at dockerSocket and
+// that the engine holds local.nativeImageID. serve calls it once before Open:
+// Open runs no Docker command but saves the placement settings, and a home
+// that cannot reach Docker cannot start or stop any local execution.
+func CheckDocker(ctx context.Context, c Config) error {
+	return checkDocker(ctx, c, configuredEngine(c))
+}
+
+// configuredEngine builds the engine only once checkDocker has found
+// dockerBinary and dockerSocket, so those checks name the setting first.
+type configuredEngine Config
+
+func (c configuredEngine) ImageID(ctx context.Context, reference string) (string, error) {
+	if err := privatefs.EnsureDir(c.DockerConfig); err != nil {
+		return "", err
+	}
+	engine, err := runtimedocker.NewEngine(c.DockerBinary, c.DockerSocket, c.DockerConfig)
+	if err != nil {
+		return "", err
+	}
+	return engine.ImageID(ctx, reference)
+}
+
+func (c configuredEngine) NetworkExists(ctx context.Context, name string) (bool, error) {
+	engine, err := runtimedocker.NewEngine(c.DockerBinary, c.DockerSocket, c.DockerConfig)
+	if err != nil {
+		return false, err
+	}
+	return engine.NetworkExists(ctx, name)
+}
+
+// CheckDocker runs CheckDocker with the service's settings and engine.
+func (s *Service) CheckDocker(ctx context.Context) error { return checkDocker(ctx, s.config, s.images) }
+
+func checkDocker(ctx context.Context, c Config, images imageResolver) error {
+	if info, err := os.Stat(c.DockerBinary); err != nil || !info.Mode().IsRegular() {
+		return fmt.Errorf("home: dockerBinary %s is not a file; set it to the Docker CLI's absolute path", c.DockerBinary)
+	}
+	if runtime.GOOS != goosWindows {
+		if _, err := os.Stat(c.DockerSocket); err != nil {
+			return fmt.Errorf("home: dockerSocket %s does not exist; start Docker, or set dockerSocket to "+
+				"the engine's Unix socket", c.DockerSocket)
+		}
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	id, err := images.ImageID(ctx, c.Local.NativeImageID)
+	if err != nil {
+		return fmt.Errorf("home: dockerBinary %s could not inspect local.nativeImageID %s through dockerSocket %s (%w); "+
+			"check that Docker is running, that dockerBinary is the Docker CLI and that the image is loaded",
+			c.DockerBinary, c.Local.NativeImageID, c.DockerSocket, err)
+	}
+	if id != c.Local.NativeImageID {
+		return fmt.Errorf("home: Docker resolved local.nativeImageID %s to %s; set local.nativeImageID to the image ID",
+			c.Local.NativeImageID, id)
+	}
+	exists, err := images.NetworkExists(ctx, c.Local.NetworkName)
+	if err != nil {
+		return fmt.Errorf("home: could not list Docker networks to check local.networkName %q (%w)", c.Local.NetworkName, err)
+	}
+	if !exists {
+		return fmt.Errorf("home: local.networkName %q does not exist; create it with \"docker network create %s\"",
+			c.Local.NetworkName, c.Local.NetworkName)
+	}
+	return nil
+}
+
+// listenerProblem names the setting that keeps the gateway listener from
+// serving the Docker-reachable address local.gatewayIPv4:local.gatewayPort.
+func listenerProblem(c Config, port string) error {
+	if ip := net.ParseIP(c.Local.GatewayIPv4); ip == nil || ip.To4() == nil || ip.IsUnspecified() {
+		return fmt.Errorf("home: local.gatewayIPv4 %q is not a specific IPv4 address; set the host address "+
+			"Docker containers reach", c.Local.GatewayIPv4)
+	}
+	host, listenPort, err := net.SplitHostPort(c.Gateway.Listen)
+	switch {
+	case err != nil:
+		return fmt.Errorf("home: gateway.listen %q is not HOST:PORT; use %s or %s",
+			c.Gateway.Listen, net.JoinHostPort(c.Local.GatewayIPv4, port), net.JoinHostPort("0.0.0.0", port))
+	case listenPort != port:
+		return fmt.Errorf("home: gateway.listen %q uses port %s, but local.gatewayPort is %s; make them equal",
+			c.Gateway.Listen, listenPort, port)
+	case host != c.Local.GatewayIPv4 && host != "0.0.0.0":
+		return fmt.Errorf("home: gateway.listen %q listens on %s, which containers cannot reach; "+
+			"use local.gatewayIPv4 %s or 0.0.0.0", c.Gateway.Listen, host, c.Local.GatewayIPv4)
+	}
+	return nil
+}
+
 func gatewayTLS(c Config) (tls.Certificate, []byte, string, error) {
 	var cert tls.Certificate
-	key, err := readPrivate(c.Gateway.KeyFile, 64<<10)
+	key, err := readSetting("gateway.keyFile", c.Gateway.KeyFile, 64<<10)
 	if err != nil {
 		return cert, nil, "", err
 	}
-	data, err := readPrivate(c.Gateway.CertificateFile, 64<<10)
+	data, err := readSetting("gateway.certificateFile", c.Gateway.CertificateFile, 64<<10)
 	if err != nil {
 		return cert, nil, "", err
 	}
 	cert, err = tls.X509KeyPair(data, key)
 	if err != nil {
-		return cert, nil, "", err
+		return cert, nil, "", keyPairError(c.Gateway, err)
 	}
 	leaf, err := x509.ParseCertificate(cert.Certificate[0])
 	if err != nil {
+		return cert, nil, "", fmt.Errorf("gateway.certificateFile %s: %w", c.Gateway.CertificateFile, err)
+	}
+	want := fmt.Sprint(c.Local.GatewayPort)
+	if err = listenerProblem(c, want); err != nil {
 		return cert, nil, "", err
 	}
-	ip := net.ParseIP(c.Local.GatewayIPv4)
-	host, port, err := net.SplitHostPort(c.Gateway.Listen)
-	want := fmt.Sprint(c.Local.GatewayPort)
-	if err != nil || ip == nil || ip.To4() == nil || ip.IsUnspecified() || port != want || (host != c.Local.GatewayIPv4 && host != "0.0.0.0") || leaf.VerifyHostname(c.Local.GatewayIPv4) != nil || leaf.VerifyHostname(inspectionHostFor(c.Local.Harness)) != nil {
-		return cert, nil, "", errors.New("home: TLS listener must cover fixed Docker-reachable IPv4 and inspection authority")
+	if leaf.VerifyHostname(c.Local.GatewayIPv4) != nil {
+		return cert, nil, "", fmt.Errorf("home: gateway.certificateFile %s does not name local.gatewayIPv4 %s; "+
+			"issue it with that address as an IP subject alternative name", c.Gateway.CertificateFile, c.Local.GatewayIPv4)
 	}
-	trust, err := readPrivate(c.Gateway.TrustBundleFile, 64<<10)
+	if inspection := inspectionHostFor(c.Local.Harness); leaf.VerifyHostname(inspection) != nil {
+		return cert, nil, "", fmt.Errorf("home: gateway.certificateFile %s does not name %s, the inspection host "+
+			"for local.harness %s; issue it with that name as a DNS subject alternative name",
+			c.Gateway.CertificateFile, inspection, c.Local.Harness)
+	}
+	trust, err := readSetting("gateway.trustBundleFile", c.Gateway.TrustBundleFile, 64<<10)
 	if err != nil {
 		return cert, nil, "", err
 	}
 	roots := x509.NewCertPool()
 	if !roots.AppendCertsFromPEM(trust) {
-		return cert, nil, "", errors.New("home: invalid gateway CA bundle")
+		return cert, nil, "", fmt.Errorf("gateway.trustBundleFile %s: no PEM CA certificate found", c.Gateway.TrustBundleFile)
 	}
 	intermediates := x509.NewCertPool()
 	for _, der := range cert.Certificate[1:] {
 		intermediate, parseErr := x509.ParseCertificate(der)
 		if parseErr != nil {
-			return cert, nil, "", parseErr
+			return cert, nil, "", fmt.Errorf("gateway.certificateFile %s: %w", c.Gateway.CertificateFile, parseErr)
 		}
 		intermediates.AddCert(intermediate)
 	}
 	if _, err = leaf.Verify(x509.VerifyOptions{Roots: roots, Intermediates: intermediates, DNSName: c.Local.GatewayIPv4}); err != nil {
-		return cert, nil, "", err
+		return cert, nil, "", fmt.Errorf("gateway.certificateFile %s does not verify against gateway.trustBundleFile %s: %w",
+			c.Gateway.CertificateFile, c.Gateway.TrustBundleFile, err)
 	}
 	return cert, trust, "https://" + net.JoinHostPort(c.Local.GatewayIPv4, want), nil
+}
+
+// keyPairError names the gateway file that tls.X509KeyPair could not use.
+func keyPairError(g GatewayConfig, err error) error {
+	message := err.Error()
+	switch {
+	case strings.Contains(message, "certificate input"):
+		return fmt.Errorf("gateway.certificateFile %s: %w", g.CertificateFile, err)
+	case strings.Contains(message, "key input") || strings.Contains(message, "the private key") ||
+		strings.Contains(message, "parse private key"):
+		return fmt.Errorf("gateway.keyFile %s: %w", g.KeyFile, err)
+	default:
+		return fmt.Errorf("gateway.certificateFile %s and gateway.keyFile %s: %w", g.CertificateFile, g.KeyFile, err)
+	}
 }
 
 func provider(c GatewayConfig, kind harness.NativeKind) (model.HandlerConfig, error) {
@@ -256,13 +389,21 @@ func provider(c GatewayConfig, kind harness.NativeKind) (model.HandlerConfig, er
 	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || !approvedProviderURL(u) {
 		return result, errors.New("home: fixed HTTPS provider or controlled loopback fixture required")
 	}
-	data, err := readPrivate(c.ProviderTokenFile, 16<<10)
+	data, err := readSetting("gateway.providerTokenFile", c.ProviderTokenFile, 16<<10)
 	if err != nil {
 		return result, err
 	}
 	token := strings.TrimSpace(string(data))
-	if token == "" || strings.ContainsAny(token, " \r\n\t\x00") {
-		return result, errors.New("home: invalid provider credential")
+	if placeholderToken(token) {
+		return result, fmt.Errorf("home: gateway.providerTokenFile %s still holds the placeholder %s; "+
+			"write the provider API key there", c.ProviderTokenFile, token)
+	}
+	if token == "" {
+		return result, fmt.Errorf("home: gateway.providerTokenFile %s is empty; write the provider API key there", c.ProviderTokenFile)
+	}
+	if strings.ContainsAny(token, " \r\n\t\x00") {
+		return result, fmt.Errorf("home: gateway.providerTokenFile %s has whitespace or NUL inside the key; "+
+			"it must hold only the provider API key", c.ProviderTokenFile)
 	}
 	result.UpstreamURL = c.ProviderURL
 	if kind == harness.NativeClaude {
@@ -272,19 +413,21 @@ func provider(c GatewayConfig, kind harness.NativeKind) (model.HandlerConfig, er
 	}
 	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
 	if c.ProviderCAFile != "" {
-		data, err = readPrivate(c.ProviderCAFile, 64<<10)
+		data, err = readSetting("gateway.providerCAFile", c.ProviderCAFile, 64<<10)
 		if err != nil {
 			return result, err
 		}
 		roots := x509.NewCertPool()
 		if !roots.AppendCertsFromPEM(data) {
-			return result, errors.New("home: invalid provider CA bundle")
+			return result, fmt.Errorf("gateway.providerCAFile %s: no PEM CA certificate found", c.ProviderCAFile)
 		}
 		tlsConfig.RootCAs = roots
 	}
+	// A model call has no whole-call timeout: it streams until its own
+	// deadline, and the model handler ends a response that goes idle.
 	result.HTTPClient = &http.Client{Transport: &http.Transport{TLSClientConfig: tlsConfig, TLSHandshakeTimeout: 10 * time.Second, ResponseHeaderTimeout: 45 * time.Second, IdleConnTimeout: 30 * time.Second}, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
 	if c.PricingFile != "" {
-		data, err = readPrivate(c.PricingFile, 128<<10)
+		data, err = readSetting("gateway.pricingFile", c.PricingFile, 128<<10)
 		if err != nil {
 			return result, err
 		}
@@ -442,7 +585,7 @@ func nativeServices(c Config, certificate tls.Certificate, target *gatewaydocker
 		if err := cover("github.com", "api.github.com"); err != nil {
 			return err
 		}
-		key, err := readPrivate(github.PrivateKeyFile, 64<<10)
+		key, err := readSetting("gateway.github.privateKeyFile", github.PrivateKeyFile, 64<<10)
 		if err != nil {
 			return err
 		}
@@ -461,7 +604,7 @@ func nativeServices(c Config, certificate tls.Certificate, target *gatewaydocker
 		if err != nil || endpoint.Scheme != "https" || endpoint.Host == "" || endpoint.User != nil || endpoint.Path != "" || endpoint.RawQuery != "" || endpoint.ForceQuery || endpoint.Fragment != "" {
 			return errors.New("home: exact HTTPS Kubernetes API authority required")
 		}
-		token, err := readPrivate(kube.TokenFile, 16<<10)
+		token, err := readSetting("gateway.kubernetes.tokenFile", kube.TokenFile, 16<<10)
 		if err != nil {
 			return err
 		}
@@ -469,7 +612,7 @@ func nativeServices(c Config, certificate tls.Certificate, target *gatewaydocker
 		if credential == "" || strings.ContainsAny(credential, " \t\r\n\x00") {
 			return errors.New("home: invalid Kubernetes gateway credential")
 		}
-		ca, err := readPrivate(kube.CAFile, 64<<10)
+		ca, err := readSetting("gateway.kubernetes.caFile", kube.CAFile, 64<<10)
 		if err != nil {
 			return err
 		}
@@ -481,4 +624,13 @@ func nativeServices(c Config, certificate tls.Certificate, target *gatewaydocker
 		target.Kubernetes = &kubernetesgateway.HandlerConfig{Upstream: endpoint, Client: client, MaxResponseBytes: 8 << 20, MaxWatchSeconds: 300}
 	}
 	return nil
+}
+
+// maxModelCall is the configured model call maximum, or zero for the gateway
+// default. ServeProblems has already bounded the value.
+func maxModelCall(g GatewayConfig) time.Duration {
+	if g.MaxModelCallSeconds == nil {
+		return 0
+	}
+	return time.Duration(*g.MaxModelCallSeconds) * time.Second
 }

@@ -17,11 +17,14 @@ package kubernetes_test
 
 import (
 	"context"
+	"maps"
 	"slices"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -42,8 +45,35 @@ func TestEnsureNetworkPolicyCreates(t *testing.T) {
 	if err := c.Get(context.Background(), client.ObjectKey{Namespace: kubernetes.AgentsNamespace, Name: npName}, &np); err != nil {
 		t.Fatalf("NetworkPolicy not found: %v", err)
 	}
-	if np.Spec.PodSelector.MatchLabels[kubernetes.RunLabel] != run.Name {
-		t.Errorf("NetworkPolicy pod selector does not target run: %+v", np.Spec.PodSelector)
+	if want := map[string]string{kubernetes.RunUIDLabel: string(run.UID)}; !maps.Equal(np.Spec.PodSelector.MatchLabels, want) {
+		t.Errorf("NetworkPolicy pod selector does not target only this run's UID: %+v", np.Spec.PodSelector)
+	}
+}
+
+func TestNetworkPolicySelectorsDifferForRunsWithTheSameName(t *testing.T) {
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).Build()
+	first := testRun("bbbbbbbb-0000-0000-0000-000000000401")
+	second := testRun("bbbbbbbb-0000-0000-0000-000000000402")
+	second.Namespace = "other-team"
+	second.Name = first.Name
+	for _, run := range []*sprooziv1alpha1.AgentRun{first, second} {
+		if err := kubernetes.EnsureNetworkPolicy(t.Context(), c, run); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pod := kubernetes.BuildPodSpec(first, testRuntime(), "sa")
+	var policies networkingv1.NetworkPolicyList
+	if err := c.List(t.Context(), &policies); err != nil {
+		t.Fatal(err)
+	}
+	for _, np := range policies.Items {
+		selector, err := metav1.LabelSelectorAsSelector(&np.Spec.PodSelector)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if selects := selector.Matches(labels.Set(pod.Labels)); selects != (np.Name == kubernetes.RunName(first.UID)) {
+			t.Errorf("NetworkPolicy %s selects the first run's Pod: %v", np.Name, selects)
+		}
 	}
 }
 

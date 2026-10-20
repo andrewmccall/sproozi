@@ -7,11 +7,13 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -22,12 +24,43 @@ import (
 // ClientConfig selects one administrator-configured HTTPS profile. CAFile may
 // select a private CA; an empty CAFile uses system roots. Redirects, proxy
 // environment variables and cookies are never used. Timeout bounds each request.
+// The JSON names are the home configuration's keys; decoding ignores case, so
+// older capitalised keys such as "URL" still load.
 type ClientConfig struct {
-	URL                string
-	TokenFile          string
-	CAFile             string
-	MaxCheckpointBytes int64
-	Timeout            time.Duration
+	URL                string        `json:"url"`
+	TokenFile          string        `json:"tokenFile"`
+	CAFile             string        `json:"caFile,omitempty"`
+	MaxCheckpointBytes int64         `json:"maxCheckpointBytes"`
+	Timeout            time.Duration `json:"timeout,omitempty"`
+}
+
+// Validate checks the settings NewClient needs without reading any file. Each
+// error names the JSON key it concerns.
+func (c ClientConfig) Validate() error {
+	var problems []error
+	if !fixedOrigin(c.URL) {
+		problems = append(problems, errors.New("url: fixed HTTPS origin such as https://profile.example:8443 required"))
+	}
+	if !filepath.IsAbs(c.TokenFile) {
+		problems = append(problems, errors.New("tokenFile: absolute path to the bearer token file required"))
+	}
+	if c.CAFile != "" && !filepath.IsAbs(c.CAFile) {
+		problems = append(problems, errors.New("caFile: absolute path required, or omit it to use system roots"))
+	}
+	if _, err := bodyLimit(c.MaxCheckpointBytes); err != nil {
+		problems = append(problems, fmt.Errorf("maxCheckpointBytes: 1 byte to %d MiB required", maxArtifactLimit>>20))
+	}
+	if c.Timeout < 0 || c.Timeout > time.Hour {
+		problems = append(problems, errors.New("timeout: at most one hour required"))
+	}
+	return errors.Join(problems...)
+}
+
+// fixedOrigin accepts an HTTPS scheme, host and optional port, and nothing else.
+func fixedOrigin(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && u.Scheme == "https" && u.Hostname() != "" && u.User == nil && u.RawQuery == "" &&
+		!u.ForceQuery && u.Fragment == "" && u.Opaque == "" && (u.Path == "" || u.Path == "/") && u.RawPath == ""
 }
 
 // Client implements Placement without holding Kubernetes credentials.
@@ -46,10 +79,10 @@ func NewClient(config ClientConfig) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	u, err := url.Parse(config.URL)
-	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Opaque != "" || (u.Path != "" && u.Path != "/") || u.RawPath != "" {
+	if !fixedOrigin(config.URL) {
 		return nil, errors.New("profile: fixed HTTPS origin required")
 	}
+	u, _ := url.Parse(config.URL)
 	token, err := readToken(config.TokenFile)
 	if err != nil {
 		return nil, err

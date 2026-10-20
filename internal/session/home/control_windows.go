@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -23,6 +24,10 @@ func controlUser() (*windows.SID, error) {
 	}
 	return user.User.Sid.Copy()
 }
+
+// controlPathProblem returns "": a named pipe name is a fixed-length digest.
+func controlPathProblem(string) string { return "" }
+func controlPathLength(string) string  { return "" }
 
 func socketPath(directory string) string {
 	// The public address helper cannot report errors. Empty means unavailable and
@@ -62,7 +67,13 @@ func listenControl(path string) (net.Listener, error) {
 	// rejects remote clients. Keep an explicit protected descriptor: defaults
 	// admit users outside this home's ordinary-user trust boundary.
 	descriptor := fmt.Sprintf("O:%sD:P(A;;GA;;;%s)(A;;GA;;;SY)", user, user)
-	return winio.ListenPipe(path, &winio.PipeConfig{SecurityDescriptor: descriptor, InputBufferSize: controlLimit, OutputBufferSize: controlLimit})
+	listener, err := winio.ListenPipe(path, &winio.PipeConfig{SecurityDescriptor: descriptor, InputBufferSize: controlLimit, OutputBufferSize: controlLimit})
+	// The first-instance flag refuses a pipe name another process already
+	// serves; a pipe is never replaced.
+	if errors.Is(err, windows.ERROR_ACCESS_DENIED) || errors.Is(err, windows.ERROR_PIPE_BUSY) {
+		return nil, errControlListening
+	}
+	return listener, err
 }
 
 func dialControl(ctx context.Context, path string) (net.Conn, error) {
@@ -78,6 +89,9 @@ func dialControl(ctx context.Context, path string) (net.Conn, error) {
 	// DialPipeContext requests anonymous impersonation, so a squatting server
 	// cannot impersonate the client while its identity is being checked.
 	conn, err := winio.DialPipeContext(bounded, path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, ErrControlUnavailable
+	}
 	if err != nil {
 		return nil, err
 	}

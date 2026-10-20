@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 )
 
 var ErrAccountNotFound = errors.New("budget account not found")
@@ -17,9 +18,12 @@ type Store interface {
 	Update(context.Context, AccountKey, func(*Record, bool) error) error
 }
 
-type ledger struct{ store Store }
+type ledger struct {
+	store Store
+	now   func() time.Time
+}
 
-func NewLedger(store Store) Ledger { return &ledger{store: store} }
+func NewLedger(store Store) Ledger { return &ledger{store: store, now: time.Now} }
 
 // MemoryLedger uses the same admission/seal rules as durable storage, with one
 // mutex-backed record owner. It is injectable for tests, not persistent storage.
@@ -31,7 +35,7 @@ type memoryStore struct {
 }
 
 func NewMemoryLedger() *MemoryLedger {
-	return &MemoryLedger{ledger: &ledger{store: &memoryStore{records: make(map[AccountKey]*Record)}}}
+	return &MemoryLedger{ledger: &ledger{store: &memoryStore{records: make(map[AccountKey]*Record)}, now: time.Now}}
 }
 
 func (s *memoryStore) Read(_ context.Context, key AccountKey) (*Record, error) {
@@ -62,7 +66,40 @@ func (s *memoryStore) Update(_ context.Context, key AccountKey, mutate func(*Rec
 	return nil
 }
 
+// recover settles the account's expired leases in an update of its own, so
+// the recovery persists even when the reservation or seal that follows fails.
+func (l *ledger) recover(ctx context.Context, key AccountKey) error {
+	now := l.now()
+	record, err := l.store.Read(ctx, key)
+	if errors.Is(err, ErrAccountNotFound) || err == nil && !expiredLease(record.state, now) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var committed Recovered
+	err = l.store.Update(ctx, key, func(record *Record, exists bool) error {
+		if !exists {
+			// Deleted since the read: never recreate it as an empty record.
+			return ErrAccountNotFound
+		}
+		var recoverErr error
+		committed, recoverErr = recoverExpired(&record.state, key, now)
+		return recoverErr
+	})
+	if errors.Is(err, ErrAccountNotFound) {
+		return nil // the reservation or seal that follows decides
+	}
+	if err == nil {
+		committed.log()
+	}
+	return err
+}
+
 func (l *ledger) Reserve(ctx context.Context, runID AccountKey, req UsageReservation) (*LedgerReservation, error) {
+	if err := l.recover(ctx, runID); err != nil {
+		return nil, err
+	}
 	var result *LedgerReservation
 	err := l.store.Update(ctx, runID, func(record *Record, exists bool) error {
 		if req.RequireExisting && !exists {
@@ -75,6 +112,11 @@ func (l *ledger) Reserve(ctx context.Context, runID AccountKey, req UsageReserva
 		reservation, err := reserveState(&s.State, req)
 		if err != nil {
 			return err
+		}
+		if req.Recovery != nil {
+			if err := addLease(s, reservation, req.Recovery); err != nil {
+				return err
+			}
 		}
 		result = reservation
 		if s.Pending != nil {
@@ -100,9 +142,19 @@ func (l *ledger) Settle(ctx context.Context, r *LedgerReservation, usage Trusted
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.settled {
+		return ErrAlreadySettled
+	}
 	var exceeded bool
-	err := l.store.Update(ctx, r.runID, func(record *Record, _ bool) error {
+	err := l.store.Update(ctx, r.runID, func(record *Record, exists bool) error {
+		if !exists {
+			// A deleted account stays unavailable; never recreate it.
+			return ErrAccountNotFound
+		}
 		s := &record.state
+		if err := takeLease(s, r); err != nil {
+			return err
+		}
 		var err error
 		if exceeded, err = settleState(&s.State, r, usage); err != nil {
 			return err
@@ -115,6 +167,10 @@ func (l *ledger) Settle(ctx context.Context, r *LedgerReservation, usage Trusted
 		}
 		return nil
 	})
+	if errors.Is(err, ErrReservationRecovered) {
+		r.settled = true
+		return err
+	}
 	if err != nil {
 		return err
 	}
@@ -151,6 +207,9 @@ func (l *ledger) Initialize(ctx context.Context, key AccountKey) error {
 }
 
 func (l *ledger) Seal(ctx context.Context, runID AccountKey) (TrustedUsage, error) {
+	if err := l.recover(ctx, runID); err != nil {
+		return TrustedUsage{}, err
+	}
 	var receipt TrustedUsage
 	err := l.store.Update(ctx, runID, func(record *Record, exists bool) error {
 		s := &record.state

@@ -22,11 +22,11 @@ permissions. It records its source, which remains available.
 
 ## Open questions
 
-Which selected clients can import history into a new native conversation safely?
+Which selected clients can import history into a new harness conversation safely?
 How long must the parent remain available? How should callers distinguish a
 conversation fork from the current workspace-only revision launch?
 
 ## Scope
 
-This proposal excludes cloning active workers, inherited permissions, automatic
+This proposal excludes cloning active sandboxes, inherited permissions, automatic
 merges and cross-harness native resume.

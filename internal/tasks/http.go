@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -62,13 +63,13 @@ func NewHandler(service Service, token string) (http.Handler, error) {
 		}
 		actual := sha256.Sum256([]byte(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")))
 		if !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") || subtle.ConstantTimeCompare(wanted[:], actual[:]) != 1 {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			reject(w, r, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 		if origin := r.Header.Get("Origin"); origin != "" {
 			parsed, err := url.Parse(origin)
 			if err != nil || parsed.Scheme != "https" || parsed.Host != r.Host {
-				http.Error(w, "origin denied", http.StatusForbidden)
+				reject(w, r, "origin denied", http.StatusForbidden)
 				return
 			}
 		}
@@ -76,6 +77,14 @@ func NewHandler(service Service, token string) (http.Handler, error) {
 		w.Header().Set("Cache-Control", "no-store")
 		stream.ServeHTTP(w, r)
 	}), nil
+}
+
+// reject reads a bounded amount of an unread request body before answering.
+// Closing with body bytes still unread makes the kernel reset the connection,
+// so the client sees a reset instead of the status.
+func reject(w http.ResponseWriter, r *http.Request, message string, status int) {
+	_, _ = io.Copy(io.Discard, io.LimitReader(r.Body, 96<<10))
+	http.Error(w, message, status)
 }
 
 func toolResult(output View, err error) (*mcp.CallToolResult, View, error) {

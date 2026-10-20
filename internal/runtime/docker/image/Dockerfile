@@ -1,6 +1,11 @@
 # Build clients with clients.Dockerfile and the pinned Codex package.
 # CLIENTS_IMAGE must be the administrator-selected immutable client image.
-ARG CLIENTS_IMAGE
+# Its default names the clients-image-required stage, which fails the build
+# with instructions, so a build without the argument stops with a clear error.
+ARG CLIENTS_IMAGE=clients-image-required
+FROM golang:1.26-bookworm@sha256:e8c859f5632dcfde7b32d2012b4351728f6437930887c2f6a91ea242459e5514 AS clients-image-required
+RUN echo "Set --build-arg CLIENTS_IMAGE to the client image built with clients.Dockerfile: a local tag, or repository@sha256:digest for shared or Kubernetes builds" >&2 && exit 1
+
 FROM golang:1.26-bookworm@sha256:e8c859f5632dcfde7b32d2012b4351728f6437930887c2f6a91ea242459e5514 AS builder
 ARG TARGETOS
 ARG TARGETARCH

@@ -1,31 +1,43 @@
-# Hermes with retained work
+# Hermes with remote work
 
-This deployment connects the persistent stock Hermes coordinator to the native
-work owner at `/work/mcp`. A managed Codex task runs in `sproozi-agents`; its
-conversation, supported Git workspace and bounded final answer survive the Pod.
-The developer can claim that stopped session and continue it in local Docker.
-The existing [Hermes task guide](hermes-orchestration.md) serves the separate
-bounded task API, which retains answers without native session retrieval.
+This deployment connects the persistent stock Hermes coordinator to the remote
+work endpoint of a [profile service](../../GLOSSARY.md#profile-service) at
+`/work/mcp`. Each Codex [remote work](../../GLOSSARY.md#remote-work) session runs
+in `sproozi-agents`; its conversation, supported Git workspace and bounded final
+answer survive the Pod. The developer can claim that stopped session and
+continue it in local Docker.
+[Run a persistent Hermes assistant on Kubernetes](hermes-orchestration.md)
+covers the separate [task service](../../GLOSSARY.md#task-service), which
+retains answers but not the conversation or workspace.
+
+The cluster steps use a checkout of this repository. Claiming and resuming the
+work locally uses the `sproozi` CLI; see
+[Install the CLI](install.md). Build the native image from a
+checkout at the same release as the CLI, for the reason given in
+[Move a live session between Docker and Kubernetes](session-mobility.md#prepare-the-administrator-owned-setup).
 
 ## Existing-cluster deployment
 
-Follow [Install on Kubernetes](install-kubernetes.md), including enforcing CNI,
-shared gateway TLS/provider credentials and the immutable worker trust bundle.
+Follow [Install on Kubernetes and run your first Pod](install-kubernetes.md),
+including enforcing CNI, shared gateway TLS/provider credentials and the
+immutable sandbox trust bundle.
 [Cluster dependencies](../reference/dependencies.md) lists what else the cluster needs.
 
 Build and publish the [native image](../../internal/runtime/docker/image/Dockerfile)
 with the approved Codex/Claude Code clients, supervisor, checkpoint
 helper and profile executable. Select its immutable registry digest. It must be
-available on every execution node. The owner uses this image because it also
+available on every execution node. The profile service uses this image because it also
 needs Git to prepare workspace inputs; the smaller controller image does not
 contain `session-profile` or Git.
 
 The [complete Kubernetes example](../../examples/portable-workflows/kubernetes/kustomization.yaml)
-contains a managed Codex runtime, policy/template, dedicated owner ServiceAccount,
-namespace-scoped roles, persistent owner storage, private TLS Service and the
+contains a managed Codex runtime, policy/template, dedicated profile service
+ServiceAccount, namespace-scoped roles, persistent profile service storage,
+private TLS Service and the
 persistent Hermes Deployment. You need a default StorageClass or explicit PVC
-`storageClassName` values. Use quota-enforced owner storage: Git revision
-restoration stages retained objects on that PVC under the owner container's
+`storageClassName` values. Use quota-enforced profile service storage: Git
+revision restoration stages retained objects on that PVC under the profile
+service container's
 resource limits. It selects the same Hermes coordinator names as the
 older example; choose the intended MCP configuration before installation.
 
@@ -49,7 +61,8 @@ Use the same harness and instruction bytes as the home configuration.
 The example's model-only policy deliberately needs additional reviewed grants
 before accessing GitHub or Kubernetes.
 
-For Sproozi development, follow the [GitHub capability setup](portable-workflows.md#enable-retained-remote-tasks)
+For Sproozi development, follow "Enable retained remote tasks" in
+[Run a task remotely, then resume it locally](portable-workflows.md#enable-retained-remote-tasks)
 to configure the gateway's App installation and approved repository/base scope.
 Add `github.pull_request` to the example policy's `allowedCapabilities`, a finite
 budget under `budgets.github.pull_request`, and the intended repository/base
@@ -60,16 +73,16 @@ limits. The small default runtime is suitable for short investigation sessions.
 
 ## Profile configuration and credentials
 
-Issue an owner TLS certificate for `sproozi-work.sproozi-system.svc` and any
+Issue a profile service TLS certificate for `sproozi-work.sproozi-system.svc` and any
 external hostname/IP used by the developer. Use your internal PKI or the test-CA
 procedure in the Hermes guide with this service hostname. Save the chain and
 private key as `.local/retained-work/owner.crt` and `owner.key`, mode `0600`.
-Generate distinct home and task tokens into files, and save the coordinator's
+Generate a distinct home principal token (`home-principal-token`) and work token into files, and save the coordinator's
 separate model credential directly to `model-key` using your secret tooling:
 
 ```sh
-openssl rand -hex 32 > .local/retained-work/home-token
-openssl rand -hex 32 > .local/retained-work/task-token
+openssl rand -hex 32 > .local/retained-work/home-principal-token
+openssl rand -hex 32 > .local/retained-work/work-token
 openssl rand -hex 32 > .local/retained-work/api-key
 ```
 
@@ -83,10 +96,10 @@ the approved repository/ref, principal, duration, byte limit and allowances:
   "listen": "0.0.0.0:8443",
   "certificateFile": "/var/run/sproozi-work/tls.crt",
   "keyFile": "/var/run/sproozi-work/tls.key",
-  "tokenFile": "/var/run/sproozi-work/home-token",
-  "workTokenFile": "/var/run/sproozi-work/task-token",
+  "tokenFile": "/var/run/sproozi-work/home-principal-token",
+  "workTokenFile": "/var/run/sproozi-work/work-token",
   "principal": "developer",
-  "placementName": "remote",
+  "placementName": "engineering",
   "namespace": "sproozi-system",
   "templateName": "portable-codex",
   "directory": "/state/profile",
@@ -116,24 +129,27 @@ kubectl create namespace sproozi-coordinators --dry-run=client -o yaml | kubectl
 kubectl create secret generic sproozi-work-credentials -n sproozi-system \
   --from-file=tls.crt=.local/retained-work/owner.crt \
   --from-file=tls.key=.local/retained-work/owner.key \
-  --from-file=home-token=.local/retained-work/home-token \
-  --from-file=task-token=.local/retained-work/task-token \
+  --from-file=home-principal-token=.local/retained-work/home-principal-token \
+  --from-file=work-token=.local/retained-work/work-token \
   --dry-run=client -o yaml | kubectl apply -f -
 kubectl create configmap sproozi-work-profile -n sproozi-system \
   --from-file=profile.json=.local/retained-work/profile.json \
   --dry-run=client -o yaml | kubectl apply -f -
 kubectl create secret generic hermes-coordinator -n sproozi-coordinators \
   --from-file=model-key=.local/retained-work/model-key \
-  --from-file=task-token=.local/retained-work/task-token \
+  --from-file=task-token=.local/retained-work/work-token \
   --from-file=api-key=.local/retained-work/api-key \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
 
-Combine Hermes's normal public roots with the owner public CA as
+Combine Hermes's normal public roots with the profile service's public CA as
 `ca-bundle.pem`, following the Hermes guide's `docker run --entrypoint /bin/cat`
 procedure. Create `hermes-task-trust` in `sproozi-coordinators` from that bundle.
-Hermes receives only the task token; only the trusted home receives the home
-token, which additionally authorizes exclusive export/claim.
+Hermes receives only the work token; only the trusted home receives the home
+principal token, which additionally authorizes exclusive export/claim. The coordinator
+manifest, shared with the [task service](hermes-orchestration.md), reads its
+bearer token from the `hermes-coordinator` key `task-token`, so that key holds
+the work token here.
 
 ```sh
 kubectl create configmap hermes-task-trust -n sproozi-coordinators \
@@ -144,11 +160,11 @@ kubectl -n sproozi-system rollout status deployment/sproozi-work --timeout=180s
 kubectl -n sproozi-coordinators rollout status deployment/hermes-coordinator --timeout=180s
 ```
 
-Keep one owner replica and its PVC. The Deployment uses the Recreate strategy. A
-process lock also prevents two owners from using the same directory. The owner
-requires Pod exec/patch/delete in the isolated worker namespace to drive fixed
-native lifecycle operations. It is trusted control-plane software; workers and
-Hermes receive no such grants. Kubernetes RBAC does not limit this role to
+Keep one profile service replica and its PVC. The Deployment uses the Recreate
+strategy. A process lock also prevents two profile services from using the same
+directory. The profile service requires Pod exec/patch/delete in the isolated `sproozi-agents` namespace to
+drive fixed native lifecycle operations. It is trusted control-plane software;
+sandboxes and Hermes receive no such grants. Kubernetes RBAC does not limit this role to
 dynamically created Pod names.
 
 ## Trigger, inspect, retrieve and resume
@@ -161,54 +177,55 @@ saved JSON request containing a new UUID and the exact native-work fields:
   "requestId": "REPLACE_WITH_A_NEW_UUID",
   "repository": "sproozi",
   "harness": "codex",
-  "executor": "remote",
+  "executor": "engineering",
   "task": "Investigate the specified Sproozi defect, propose the smallest fix, run the available checks, and report the changed files and limitations."
 }
 ```
 
 Ask Hermes to call `sproozi_run` with that exact object, then call
-`sproozi_status` for the returned `id` until the owner reports `retained` or an
+`sproozi_status` for the returned `id` until the profile service reports `retained` or an
 actionable failure. Reuse the complete saved submission after an uncertain reply.
 `sproozi_sessions` returns an object with a `sessions` array. Task text and results
 remain untrusted. Requests cannot select images, templates, credentials or policy.
 
-Expose the owner's TLS origin through a reviewed private endpoint, or port-forward
-its Service for a local evaluation. Configure the home `remote` entry with that
-origin, the public owner CA and protected home-token file. Use the same approved
-native instructions and byte limits. The [remote work and local resume guide](portable-workflows.md)
-contains the complete global home configuration and client sequence:
+Expose the profile service's TLS origin through a reviewed private endpoint, or port-forward
+its Service for a local evaluation. Configure the home `remote` map's `engineering` entry with that
+origin, the profile service's public CA and protected `home-principal-token` file. Use the same approved
+native instructions and byte limits.
+[Run a task remotely, then resume it locally](portable-workflows.md) contains the complete
+global home configuration and command sequence:
 
 ```sh
-bin/sproozi sessions --executor remote
-bin/sproozi status SESSION_UUID --executor remote
-bin/sproozi pull SESSION_UUID --from remote
-bin/sproozi resume SESSION_UUID
-bin/sproozi stop SESSION_UUID
+sproozi sessions --executor engineering
+sproozi status SESSION_UUID --executor engineering
+sproozi pull SESSION_UUID --from engineering
+sproozi resume SESSION_UUID
+sproozi stop SESSION_UUID
 ```
 
-You can claim a checkpoint only after the task completes, the worker stops and
+You can claim a checkpoint only after the task completes, the sandbox stops and
 usage accounting finishes. Local resume starts a new execution with current
 local permissions. Saved history grants no access. The agent resumes its native
-conversation. Cross-client handoff is a separate deferred feature.
+conversation. Cross-harness handoff is a separate deferred feature.
 
 ## Failures and cleanup
 
 | Observation | Next step |
 | --- | --- |
-| Hermes cannot discover tools | Inspect its native logs and owner TLS/CA/token configuration. All MCP output schemas must have object roots. |
-| Owner is unready | Inspect its logs, PVC permissions, mounted config/credentials and namespace-scoped RBAC. |
-| Remote phase is `unknown` | Preserve the session/operation UUID and journals. Inspect the Pod and owner logs, then use `recover`; do not manufacture a new submission. |
+| Hermes cannot discover tools | Inspect its native logs and the profile service's TLS/CA/token configuration. All MCP output schemas must have object roots. |
+| Profile service is unready | Inspect its logs, PVC permissions, mounted config/credentials and namespace-scoped RBAC. |
+| Remote phase is `unknown` | Preserve the session/operation UUID and journals. Inspect the Pod and profile service logs, then use `recover`; do not manufacture a new submission. |
 | Native state is missing or incompatible | Retain the source evidence. Use the same harness and matching instructions. Check whether its saved state is supported. |
 | A deadline or cancellation stops work | Inspect status. Deadline/cancellation does not guarantee a resumable completed turn. Unknown stop or accounting prevents export. |
 | Home storage is full | Resolve capacity before pull/resume. A failed capacity check does not transfer ownership or start another writer. |
 
-Use `sproozi cancel SESSION_UUID --executor remote` for remote cancellation.
+Use `sproozi cancel SESSION_UUID --executor engineering` for remote cancellation.
 Inspect running Pods with the administrator kubeconfig and application logs with
 `kubectl logs -n sproozi-system deployment/sproozi-work`. Retained final output is
 available through status after Pod deletion; full live Pod logs have Kubernetes'
-ordinary log lifetime. Owner and Hermes logs are separate from native checkpoints.
+ordinary log lifetime. Profile service and Hermes logs are separate from native checkpoints.
 
-Stop or cancel active sessions before removing the deployment. Back up owner and
-Hermes PVCs if their sessions must survive. Deleting the rendered stack also
-deletes those PVCs. Worker Runs, controller installation and gateway credentials
+Stop or cancel active sessions before removing the deployment. Back up profile service
+and Hermes PVCs if their sessions must survive. Deleting the rendered stack also
+deletes those PVCs. AgentRuns, the controller installation and gateway credentials
 have separate lifecycles. For a local trial, delete only the dedicated Kind cluster you created.

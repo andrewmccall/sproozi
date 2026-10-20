@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"time"
 )
@@ -13,7 +15,10 @@ import (
 // TerminalSize comes from the user's terminal, never checkpoint metadata.
 type TerminalSize struct{ Rows, Columns uint16 }
 
-const terminalWrite = "write"
+const (
+	terminalWrite  = "write"
+	terminalResize = "resize"
+)
 
 type terminalFrame struct {
 	Op      string `json:"op"`
@@ -46,8 +51,8 @@ func AttachTerminal(ctx context.Context, path, id string, input io.Reader, outpu
 	if err = decode(line, &reply); err != nil {
 		return err
 	}
-	if reply.Error != "" {
-		return errors.New(reply.Error)
+	if err = replyError(reply); err != nil {
+		return err
 	}
 	var writer sync.Mutex
 	encoder := json.NewEncoder(conn)
@@ -65,7 +70,7 @@ func AttachTerminal(ctx context.Context, path, id string, input io.Reader, outpu
 					return
 				}
 				if size.Rows > 0 && size.Columns > 0 {
-					if emit(terminalFrame{Op: "resize", Rows: size.Rows, Columns: size.Columns}) != nil {
+					if emit(terminalFrame{Op: terminalResize, Rows: size.Rows, Columns: size.Columns}) != nil {
 						return
 					}
 				}
@@ -103,7 +108,7 @@ func AttachTerminal(ctx context.Context, path, id string, input io.Reader, outpu
 			continue
 		}
 		if f.Error != "" {
-			return errors.New("home: native terminal operation failed")
+			return terminalFailure(id, f)
 		}
 		if len(f.Data) > 0 {
 			if _, err = output.Write(f.Data); err != nil {
@@ -116,6 +121,38 @@ func AttachTerminal(ctx context.Context, path, id string, input io.Reader, outpu
 			}
 		}
 	}
+}
+
+// inactiveNative is the supervisor's reply when no native process runs.
+const inactiveNative = "native execution is not active"
+
+// terminalFailure names a failed native terminal frame and the next step. The
+// reason comes from inside the sandbox, so only printable ASCII is shown.
+func terminalFailure(id string, f terminalFrame) error {
+	if f.Error == inactiveNative {
+		return fmt.Errorf("home: session %s has no running native process to attach to; run \"sproozi status %s\" "+
+			"to see its phase: \"sproozi recover %s\" finishes an unfinished start or move, and "+
+			"\"sproozi resume %s\" continues a stopped session", id, id, id, id)
+	}
+	op := "operation"
+	if f.Op == "attach" || f.Op == terminalResize {
+		op = f.Op
+	}
+	reason := strings.Map(func(r rune) rune {
+		if r < 0x20 || r > 0x7e {
+			return -1
+		}
+		return r
+	}, f.Error)
+	if len(reason) > 200 {
+		reason = reason[:200] + "…"
+	}
+	if f.Op == "" {
+		// The home daemon's own frame already names itself.
+		return fmt.Errorf("%s; run \"sproozi status %s\" to see the session's phase", reason, id)
+	}
+	return fmt.Errorf("home: native terminal %s failed: %s; run \"sproozi status %s\" to see the session's phase",
+		op, reason, id)
 }
 
 func terminalInput(ctx context.Context, input io.Reader, emit func(terminalFrame) error, acks <-chan terminalFrame) error {

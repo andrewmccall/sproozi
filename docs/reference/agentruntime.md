@@ -101,8 +101,8 @@ run's namespace.
 
 These rules are checked when a run is admitted, not when the `AgentRuntime` is
 created, and again on every later reconcile of an active run. A runtime that breaks
-any of them fails the run with reason `RuntimeInvalid` before it takes the
-active slot. The `Ready` condition message names the runtime and the rule, for
+any of them fails the run with reason `RuntimeInvalid` before it is admitted,
+so it never counts against a concurrency cap. The `Ready` condition message names the runtime and the rule, for
 example `AgentRuntime codex: cannot launch a sandbox: container "agent" image
 must be digest pinned`. Fix the runtime, then create a new run.
 
@@ -127,6 +127,26 @@ launch command loads only that configuration into disposable client state.
 Only requested named MCP capabilities appear; credentials remain in the gateway.
 The [harness reference](harnesses.md) describes formats, trusted launch examples,
 model-provider setup and supported configurations.
+
+## Model selection
+
+Each AgentRuntime chooses its own model; there is no cluster-wide model
+setting, and AgentPolicy budgets limit usage rather than naming a model. An
+ordinary run's trusted launch command sets the model, for example
+`codex exec --model` in the [SRE demo runtime](../../examples/sre-demo/agentruntime.yaml)
+or the `SPROOZI_MODEL` environment variable in the
+[stock harness examples](../../examples/harnesses/README.md). A managed native
+session uses `clientConfig.nativeSession.model`, described below. A policy with
+a positive `maxCostMicros` also needs a row for that exact model in the gateway's
+[pricing table](required-secrets-and-config.md#model-pricing-format).
+
+The examples use different models on purpose. The SRE demo pins `gpt-6.1-sol`
+because its ChatGPT sign-in helper checks access to that exact model before
+switching the demo to ChatGPT mode, with no fallback; see
+[Model provider authentication](../guides/model-provider-auth.md). The other OpenAI examples use `gpt-5.3-codex` as a starting value,
+and the Claude Code example uses `claude-sonnet-4-5-20250929`. The installed
+pricing table has rows for all three. Replace any of them with a model your
+provider account can use, and add a pricing row for it if a policy caps cost.
 
 ## Managed native sessions
 

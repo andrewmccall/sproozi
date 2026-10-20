@@ -70,7 +70,7 @@ def prepare(args):
                "extendedKeyUsage=serverAuth\nsubjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid,issuer\n"
                "subjectAltName=" + ",".join(names) + "\n")
     HOST.run(["openssl", "x509", "-req", "-sha256", "-in", "gateway.csr", "-CA", "ca.pem", "-CAkey", "ca.key",
-              "-CAcreateserial", "-out", "gateway.crt", "-days", "2", "-extfile", "leaf.ext"], out)
+              "-CAserial", "ca.srl", "-CAcreateserial", "-out", "gateway.crt", "-days", "2", "-extfile", "leaf.ext"], out)
     for hostname in ("api.anthropic.com", GATEWAY, "127.0.0.1", args.gateway_ip):
         option = "-verify_ip" if hostname in ("127.0.0.1", args.gateway_ip) else "-verify_hostname"
         HOST.run(["openssl", "verify", "-x509_strict", "-CAfile", "ca.pem", "-purpose", "sslserver", option,
@@ -80,9 +80,9 @@ def prepare(args):
     config = json.loads((out / "home-config.json").read_text())
     config["model"], config["local"]["Harness"] = MODEL, "claude-code"
     config.pop("nativeOptions", None)
-    config["remote"] = {args.remote_name: {"URL": "https://127.0.0.1:18454",
-        "TokenFile": str(out / "profile-token"), "CAFile": str(out / "ca.pem"),
-        "MaxCheckpointBytes": args.max_checkpoint_bytes}}
+    config["remote"] = {args.remote_name: {"url": "https://127.0.0.1:18454",
+        "tokenFile": str(out / "profile-token"), "caFile": str(out / "ca.pem"),
+        "maxCheckpointBytes": args.max_checkpoint_bytes}}
     HOST.write(out / "home-config.json", config)
     hints = json.loads((out / "profile-hints.json").read_text())
     hints.update(harness="claude-code", model=MODEL, nativeOptions=[],

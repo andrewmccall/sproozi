@@ -15,10 +15,15 @@ func main() {
 	os.Exit(cli(os.Args[1:], os.Stdout, os.Stderr))
 }
 
-// cli runs one command line and returns its exit status. Help exits 0.
+// cli runs one command line and returns its exit status. Help exits 0; a
+// missing command prints usage to stderr and exits 2.
 func cli(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		usage(stderr)
+		return 2
+	}
 	if err := run(args, stdout); err != nil {
-		_, _ = fmt.Fprintln(stderr, "Sproozi failed:", err)
+		_, _ = fmt.Fprintln(stderr, "Sproozi failed:", privateHint(err, configArgument(args)))
 		return 1
 	}
 	return 0
@@ -36,8 +41,22 @@ func run(args []string, stdout io.Writer) error {
 }
 
 func serve(ctx context.Context, path string) error {
-	fixed, err := home.ReadConfig(path)
+	fixed, err := readConfig(path)
 	if err != nil {
+		return err
+	}
+	if err = serveReady(path, fixed); err != nil {
+		return err
+	}
+	// Open saves the local placement settings, so check Docker first: a failed
+	// check must not record settings the operator is about to correct.
+	if err = home.CheckDocker(ctx, fixed); err != nil {
+		return err
+	}
+	// A gateway port in use would otherwise fail only after Open had created
+	// a new home directory. A home daemon already serving this directory is
+	// named as such rather than as a port conflict.
+	if err = home.CheckListen(ctx, fixed); err != nil {
 		return err
 	}
 	service, err := home.Open(fixed, os.Stderr)
@@ -76,7 +95,7 @@ func attach(ctx context.Context, socket, id string) error {
 		defer cancel()
 		stopResize := watchResize(run, update)
 		defer stopResize()
-		_, _ = fmt.Fprintln(os.Stderr, "Attach native terminal; Ctrl-] detaches")
+		_, _ = fmt.Fprintln(os.Stderr, "Attached to the harness terminal; Ctrl-] detaches")
 		return home.AttachTerminal(run, socket, id, os.Stdin, os.Stdout, sizes)
 	}
 	ctx, cancel := context.WithCancel(ctx)

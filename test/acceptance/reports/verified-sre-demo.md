@@ -19,8 +19,10 @@ workload configured to exit with code 1. It proposed a one-line correction to
 The later run observed controller/gateway image
 `sha256:c3fd925f6ad3b415af89382128c440476837de86994d2765493e62ec0834182c`.
 Both builds used dirty working trees over base commit
-`2ae40a285e448e13f369974d4d6199d61e61adf3`; that commit alone does not reproduce
-the built images. The full reports record the agent image and tool identities.
+`2ae40a285e448e13f369974d4d6199d61e61adf3`. That commit isn't in this
+repository: the runs predate its public history, which starts on 5 October
+2026, so neither the commit nor the built images can be reproduced from it. The
+full reports record the agent image and tool identities.
 
 Both reports record observed sandbox security, authenticated allowed reads,
 denial probes and scoped cleanup. The probes verified:
@@ -32,14 +34,16 @@ denial probes and scoped cleanup. The probes verified:
 
 The separate acceptance suite read the real PR back and checked its branch,
 commit and file scope. AgentRun success itself came from container exit code 0.
-See the [manual guide](../../../docs/guides/manual-pr-demo.md) to run the current path.
+See [Manual AgentRun to pull request](../../../docs/guides/manual-pr-demo.md) to run the current path.
 
 ## Scope of this evidence
 
 These are historical observations from dirty working trees, not a clean release
-candidate or a fresh test of today's checkout. The redacted reports are local,
-gitignored artifacts and are not included in the public repository. The demo
-repository may require access. The acceptance runs did not merge or deploy the
+candidate or a fresh test of today's checkout. The demo repository
+`andrewmccall/sproozi-demo` is private, so the PR links above work only for
+people with access to it. The full redacted reports are local, gitignored
+artifacts and haven't been published, so this page is the only public record of
+these runs. The acceptance runs did not merge or deploy the
 PRs, so they do not prove workload recovery or home-ops integration.
 
 The runs exercised semantic Kubernetes, GitHub and model endpoints. They did

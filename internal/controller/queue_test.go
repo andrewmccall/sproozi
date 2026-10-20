@@ -17,10 +17,13 @@ limitations under the License.
 package controller_test
 
 import (
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/controller"
@@ -41,35 +44,25 @@ func runWithPhase(name string, phase sprooziv1alpha1.AgentRunPhase, createdAt ti
 	return runWithPhaseNs(name, "default", phase, createdAt)
 }
 
-func TestActiveRun(t *testing.T) {
+func TestActiveRuns(t *testing.T) {
 	t.Parallel()
 
 	now := time.Now()
 
 	tests := []struct {
-		name     string
-		runs     []sprooziv1alpha1.AgentRun
-		wantName string // "" means nil expected
+		name      string
+		runs      []sprooziv1alpha1.AgentRun
+		wantNames []string
 	}{
+		{name: "empty list"},
 		{
-			name:     "empty list",
-			runs:     nil,
-			wantName: "",
+			name: "only queued runs",
+			runs: []sprooziv1alpha1.AgentRun{runWithPhase("a", sprooziv1alpha1.AgentRunPhaseQueued, now)},
 		},
 		{
-			name:     "only queued runs",
-			runs:     []sprooziv1alpha1.AgentRun{runWithPhase("a", sprooziv1alpha1.AgentRunPhaseQueued, now)},
-			wantName: "",
-		},
-		{
-			name:     "admitted run is active",
-			runs:     []sprooziv1alpha1.AgentRun{runWithPhase("a", sprooziv1alpha1.AgentRunPhaseAdmitted, now)},
-			wantName: "a",
-		},
-		{
-			name:     "running run is active",
-			runs:     []sprooziv1alpha1.AgentRun{runWithPhase("a", sprooziv1alpha1.AgentRunPhaseRunning, now)},
-			wantName: "a",
+			name:      "admitted and running runs are active",
+			runs:      []sprooziv1alpha1.AgentRun{runWithPhase("a", sprooziv1alpha1.AgentRunPhaseAdmitted, now), runWithPhase("b", sprooziv1alpha1.AgentRunPhaseRunning, now)},
+			wantNames: []string{"a", "b"},
 		},
 		{
 			name: "terminal runs are not active",
@@ -79,40 +72,35 @@ func TestActiveRun(t *testing.T) {
 				runWithPhase("c", sprooziv1alpha1.AgentRunPhaseCancelled, now),
 				runWithPhase("d", sprooziv1alpha1.AgentRunPhaseTimedOut, now),
 			},
-			wantName: "",
 		},
 		{
-			name: "admitted run returned among mixed phases",
+			name: "every active run across namespaces among mixed phases",
 			runs: []sprooziv1alpha1.AgentRun{
 				runWithPhase("a", sprooziv1alpha1.AgentRunPhaseQueued, now),
 				runWithPhase("b", sprooziv1alpha1.AgentRunPhaseAdmitted, now),
 				runWithPhase("c", sprooziv1alpha1.AgentRunPhaseSucceeded, now),
+				runWithPhaseNs("d", "team-b", sprooziv1alpha1.AgentRunPhaseRunning, now),
 			},
-			wantName: "b",
+			wantNames: []string{"b", "d"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := controller.ActiveRun(tt.runs)
-			if tt.wantName == "" {
-				if got != nil {
-					t.Errorf("ActiveRun() = %q, want nil", got.Name)
-				}
-			} else {
-				if got == nil {
-					t.Fatalf("ActiveRun() = nil, want %q", tt.wantName)
-				}
-				if got.Name != tt.wantName {
-					t.Errorf("ActiveRun().Name = %q, want %q", got.Name, tt.wantName)
-				}
+			active := controller.ActiveRuns(tt.runs)
+			got := make([]string, 0, len(active))
+			for _, run := range active {
+				got = append(got, run.Name)
+			}
+			if !slices.Equal(got, tt.wantNames) {
+				t.Errorf("ActiveRuns() = %v, want %v", got, tt.wantNames)
 			}
 		})
 	}
 }
 
-func TestNextQueued(t *testing.T) {
+func TestQueuedRunsHead(t *testing.T) {
 	t.Parallel()
 
 	t1 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -187,17 +175,129 @@ func TestNextQueued(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := controller.NextQueued(tt.runs)
+			queued := controller.QueuedRuns(tt.runs)
 			if tt.wantName == "" {
-				if got != nil {
-					t.Errorf("NextQueued() = %q, want nil", got.Name)
+				if len(queued) != 0 {
+					t.Errorf("QueuedRuns()[0] = %q, want empty", queued[0].Name)
 				}
 			} else {
-				if got == nil {
-					t.Fatalf("NextQueued() = nil, want %q", tt.wantName)
+				if len(queued) == 0 {
+					t.Fatalf("QueuedRuns() is empty, want head %q", tt.wantName)
 				}
-				if got.Name != tt.wantName {
-					t.Errorf("NextQueued().Name = %q, want %q", got.Name, tt.wantName)
+				if queued[0].Name != tt.wantName {
+					t.Errorf("QueuedRuns()[0].Name = %q, want %q", queued[0].Name, tt.wantName)
+				}
+			}
+		})
+	}
+}
+
+func TestQueuedRunsOrdersWholeQueue(t *testing.T) {
+	t.Parallel()
+
+	t1 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	runs := []sprooziv1alpha1.AgentRun{
+		runWithPhaseNs("c", "team-a", sprooziv1alpha1.AgentRunPhaseQueued, t1.Add(time.Second)),
+		runWithPhaseNs("b", "team-b", sprooziv1alpha1.AgentRunPhaseQueued, t1),
+		runWithPhaseNs("a", "team-a", sprooziv1alpha1.AgentRunPhaseRunning, t1),
+		runWithPhaseNs("z", "team-a", sprooziv1alpha1.AgentRunPhaseQueued, t1),
+	}
+	queued := controller.QueuedRuns(runs)
+	got := make([]string, 0, len(queued))
+	for _, run := range queued {
+		got = append(got, run.Namespace+"/"+run.Name)
+	}
+	if want := []string{"team-a/z", "team-b/b", "team-a/c"}; !slices.Equal(got, want) {
+		t.Fatalf("QueuedRuns() = %v, want %v", got, want)
+	}
+}
+
+const targetRun = "run"
+
+func TestSimulateAdmission(t *testing.T) {
+	t.Parallel()
+
+	key := func(name string) types.NamespacedName { return types.NamespacedName{Namespace: "default", Name: name} }
+	polA, polB := key("policy-a"), key("policy-b")
+	candidate := func(run string, policy types.NamespacedName, policyCap int32) controller.AdmissionCandidate {
+		return controller.AdmissionCandidate{Run: key(run), Policy: policy, PolicyCap: policyCap, Resolved: true}
+	}
+
+	tests := []struct {
+		name        string
+		state       controller.AdmissionState
+		queue       []controller.AdmissionCandidate
+		target      string
+		wantAdmit   bool
+		wantMessage []string
+	}{
+		{
+			name:      "no caps admits alongside active runs",
+			state:     controller.AdmissionState{GlobalActive: 5, PolicyActive: map[types.NamespacedName]int{polA: 5}},
+			queue:     []controller.AdmissionCandidate{candidate("first", polA, 0), candidate("second", polA, 0)},
+			target:    "second",
+			wantAdmit: true,
+		},
+		{
+			name:        "cluster cap reached by active runs",
+			state:       controller.AdmissionState{GlobalCap: 2, GlobalActive: 2},
+			queue:       []controller.AdmissionCandidate{candidate(targetRun, polA, 0)},
+			target:      targetRun,
+			wantMessage: []string{"cluster cap 2"},
+		},
+		{
+			name:        "cluster cap taken by an earlier queued run",
+			state:       controller.AdmissionState{GlobalCap: 2, GlobalActive: 1},
+			queue:       []controller.AdmissionCandidate{candidate("earlier", polA, 0), candidate("later", polB, 0)},
+			target:      "later",
+			wantMessage: []string{"cluster cap 2", "waiting for earlier queued runs"},
+		},
+		{
+			name:        "policy cap reached",
+			state:       controller.AdmissionState{GlobalActive: 1, PolicyActive: map[types.NamespacedName]int{polA: 1}},
+			queue:       []controller.AdmissionCandidate{candidate(targetRun, polA, 1)},
+			target:      targetRun,
+			wantMessage: []string{"policy cap 1 (AgentPolicy policy-a) reached"},
+		},
+		{
+			name:      "full policy head does not block another policy",
+			state:     controller.AdmissionState{GlobalActive: 1, PolicyActive: map[types.NamespacedName]int{polA: 1}},
+			queue:     []controller.AdmissionCandidate{candidate("a-head", polA, 1), candidate("b-later", polB, 1)},
+			target:    "b-later",
+			wantAdmit: true,
+		},
+		{
+			name:        "earlier run under the same policy takes its last place",
+			state:       controller.AdmissionState{PolicyActive: map[types.NamespacedName]int{polA: 1}},
+			queue:       []controller.AdmissionCandidate{candidate("earlier", polA, 2), candidate("later", polA, 2)},
+			target:      "later",
+			wantMessage: []string{"policy cap 2 (AgentPolicy policy-a) reached", "waiting for earlier queued runs"},
+		},
+		{
+			name:      "unresolved earlier run is skipped",
+			state:     controller.AdmissionState{GlobalCap: 1},
+			queue:     []controller.AdmissionCandidate{{Run: key("broken")}, candidate(targetRun, polA, 0)},
+			target:    targetRun,
+			wantAdmit: true,
+		},
+		{
+			name:        "target missing from the queue waits",
+			state:       controller.AdmissionState{},
+			queue:       []controller.AdmissionCandidate{candidate("other", polA, 0)},
+			target:      targetRun,
+			wantMessage: []string{"not yet in the admission queue"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := controller.SimulateAdmission(tt.state, tt.queue, key(tt.target))
+			if got.Admit != tt.wantAdmit {
+				t.Fatalf("SimulateAdmission().Admit = %v (%q), want %v", got.Admit, got.Message, tt.wantAdmit)
+			}
+			for _, fragment := range tt.wantMessage {
+				if !strings.Contains(got.Message, fragment) {
+					t.Errorf("SimulateAdmission().Message = %q, want it to contain %q", got.Message, fragment)
 				}
 			}
 		})

@@ -2,6 +2,7 @@ package kubernetes
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,6 +20,9 @@ import (
 )
 
 const Authority = "kubernetes.default.svc:443"
+
+// watchMargin is how long past its timeoutSeconds the gateway keeps a watch open.
+const watchMargin = 5 * time.Second
 
 // HandlerConfig controls the trusted upstream and bounded response handling.
 type HandlerConfig struct {
@@ -56,7 +60,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 	response, err := h.authorizeAndForward(req.Context(), identity, req)
 	if err != nil {
-		http.Error(w, "kubernetes request denied", http.StatusForbidden)
+		message := "kubernetes request denied"
+		var bound *requestError
+		if errors.As(err, &bound) {
+			message += ": " + bound.reason
+		}
+		http.Error(w, message, http.StatusForbidden)
 		return
 	}
 	defer func() { _ = response.Body.Close() }()
@@ -136,9 +145,16 @@ func (h *Handler) authorizeAndForward(ctx context.Context, identity *gateway.Exe
 				max = n
 			}
 		}
-		callCtx, cancel = context.WithTimeout(callCtx, time.Duration(max)*time.Second)
+		// Kubernetes ends the watch itself at timeoutSeconds; the margin lets
+		// it close the stream cleanly before the gateway's deadline cuts it.
+		// The request context carries the inspected connection's deadline,
+		// so a watch opened late on a connection ends with that instead.
+		callCtx, cancel = context.WithTimeout(callCtx, time.Duration(max)*time.Second+watchMargin)
 		// The body owns cancellation after headers have been returned.
 		forward = forward.WithContext(callCtx)
+		// A client Timeout covers reading the body, so it would end a watch
+		// early; the deadline above bounds the watch instead.
+		upstreamClient.Timeout = 0
 	}
 	if err := budget.FromContext(ctx).SpendRequest(ctx); err != nil {
 		cancel()

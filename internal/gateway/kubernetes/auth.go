@@ -20,8 +20,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"reflect"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/gateway"
@@ -55,10 +55,18 @@ var (
 	// ErrRunNotRunning is returned when the matched AgentRun is not in Running phase.
 	ErrRunNotRunning = errors.New("gateway: AgentRun is not in Running phase")
 
+	// ErrPolicyChanged is returned when the run's template now references a
+	// different AgentPolicy from the one the run was admitted under.
+	ErrPolicyChanged = errors.New("gateway: AgentTemplate references a different AgentPolicy from the run's admission")
+
 	// ErrNotServiceAccount is returned when the token username is not a ServiceAccount.
 	ErrNotServiceAccount      = errors.New("gateway: token is not a ServiceAccount token")
 	ErrWrongAgentNamespace    = errors.New("gateway: ServiceAccount is outside the agent namespace")
 	ErrServiceAccountMismatch = errors.New("gateway: ServiceAccount does not match the AgentRun")
+
+	// errAuthorityChanged explains a revocation because what the run may do
+	// changed: its policy, template, capabilities or allocation.
+	errAuthorityChanged = errors.New("gateway: the AgentRun's policy, template, capabilities or allocation changed")
 )
 
 // ServiceAccountIdentity is the complete token subject. UID comes from the
@@ -69,32 +77,69 @@ type ServiceAccountIdentity struct {
 	UID       string
 }
 
+// LiveRecheckInterval bounds how long a session of one execution relies on the
+// watch cache alone. If a watch stalls, the first revalidation after this
+// interval claims a live read, and every session of the execution reads live
+// from that claim until a live read completes. A revocation therefore reaches
+// every open session within LiveRecheckInterval plus one revocation tick plus
+// one authority timeout: under 10s + 1s + 5s after the revocation with the
+// gateway defaults, and about 11s when the API server answers promptly.
+const LiveRecheckInterval = 10 * time.Second
+
 // Authenticator is the Kubernetes execution authority at the shared gateway
 // identity seam. It resolves a projected ServiceAccount token to the owning
 // active AgentRun, and resolves the same owner again on every revalidation.
-// Lookups read through to the API server so revocation takes effect promptly.
+//
+// Authentication reads through to the API server: a new session is always
+// admitted against live state. Revalidation of open sessions, every request
+// and every revocation tick, reads AgentRun, AgentTemplate, AgentPolicy and
+// ServiceAccount from the watch cache when one is configured, so API load does
+// not grow with sessions times ticks. A watch delay is acceptable there because
+// the session was admitted live, and any revocation is confirmed live before a
+// session is closed. Managed-session registrations and sandbox Pods stay live
+// reads (see cmd/gateway): a session move revokes the source through them, and
+// it must not overlap with the destination.
 type Authenticator struct {
 	clientset      kubernetes.Interface
 	audience       string
-	client         client.Client
+	live           client.Client
+	cached         client.Client
 	agentNamespace string
+
+	mu       sync.Mutex
+	lastLive map[gateway.Reference]liveCheck
+	now      func() time.Time
 }
 
 // NewAuthenticator validates tokens for audience through the TokenReview API
-// and resolves their owners in agentNamespace with the controller-runtime client.
+// and resolves their owners in agentNamespace with the uncached client c.
 func NewAuthenticator(clientset kubernetes.Interface, audience string, c client.Client, agentNamespace string) *Authenticator {
-	return &Authenticator{clientset: clientset, audience: audience, client: c, agentNamespace: agentNamespace}
+	return &Authenticator{clientset: clientset, audience: audience, live: c, agentNamespace: agentNamespace,
+		lastLive: map[gateway.Reference]liveCheck{}, now: time.Now}
+}
+
+// WithWatchCache serves revalidation from cached, a client whose AgentRun,
+// AgentTemplate, AgentPolicy and ServiceAccount reads come from a watch cache.
+func (a *Authenticator) WithWatchCache(cached client.Client) *Authenticator {
+	a.cached = cached
+	return a
 }
 
 func (a *Authenticator) Authenticate(ctx context.Context, token string) (*gateway.ExecutionGrant, error) {
 	if token == "" {
 		return nil, ErrTokenInvalid
 	}
+	// TokenReview is never cached: it is the only check of the token itself.
 	serviceAccount, err := a.reviewToken(ctx, token)
 	if err != nil {
 		return nil, err
 	}
-	return a.Find(ctx, serviceAccount)
+	started := a.now()
+	grant, err := a.Find(ctx, serviceAccount)
+	if err == nil {
+		a.recordLive(grant.Authority, started, true)
+	}
+	return grant, err
 }
 
 // Revalidate resolves the owning resources again, binding an inspected session
@@ -103,11 +148,89 @@ func (a *Authenticator) Revalidate(ctx context.Context, grant *gateway.Execution
 	if grant == nil || grant.Execution.Backend != gateway.BackendKubernetes || grant.Authority.Backend != gateway.BackendKubernetes {
 		return gateway.ErrGrantRevoked
 	}
-	fresh, err := a.Find(ctx, ServiceAccountIdentity{Namespace: grant.Authority.Namespace, Name: grant.Authority.Name, UID: grant.Authority.UID})
-	if err != nil || !reflect.DeepEqual(fresh, grant) {
-		return gateway.ErrGrantRevoked
+	identity := ServiceAccountIdentity{Namespace: grant.Authority.Namespace, Name: grant.Authority.Name, UID: grant.Authority.UID}
+	if a.cached == nil || a.claimLiveCheck(grant.Authority) {
+		return a.revalidateLive(ctx, grant, identity)
 	}
+	// A cached pass counts only if no live read became due or was claimed while
+	// it ran: a slow cached read (managed sessions read their registration and
+	// Pod live) must not carry stale state past the recheck. The live read then
+	// shares this revalidation's authority deadline.
+	if fresh, err := a.find(ctx, a.cached, identity); err == nil && grant.SameAuthority(fresh) &&
+		!a.claimLiveCheck(grant.Authority) {
+		return nil
+	}
+	// The cache can lag the live read that admitted this session, for example
+	// just after the run starts. Confirm against the API server before revoking.
+	return a.revalidateLive(ctx, grant, identity)
+}
+
+func (a *Authenticator) revalidateLive(ctx context.Context, grant *gateway.ExecutionGrant, identity ServiceAccountIdentity) error {
+	started := a.now()
+	fresh, err := a.Find(ctx, identity)
+	if err == nil && !grant.SameAuthority(fresh) {
+		err = errAuthorityChanged
+	}
+	if err != nil {
+		a.recordLive(grant.Authority, started, false)
+		return fmt.Errorf("%w: %w", gateway.ErrGrantRevoked, err)
+	}
+	a.recordLive(grant.Authority, started, true)
 	return nil
+}
+
+// liveCheck is the newest live read of one execution's authority.
+type liveCheck struct {
+	// at is when that read, or the pending claim, started.
+	at time.Time
+	// pending marks a claimed live read that has not completed. Until it does,
+	// every session of the execution reads live rather than trust a cache the
+	// claim found too old, so a stalled read cannot extend the stale window.
+	pending bool
+	// failed makes every session of the execution read live until a live read
+	// succeeds, so one failed check closes all of them on their next tick.
+	failed bool
+}
+
+// claimLiveCheck reports whether a session must read live: the execution's
+// last live read failed, is still pending, or is older than
+// LiveRecheckInterval. A due recheck is claimed, so that when live reads are
+// prompt, concurrent sessions of one execution do not all read live.
+func (a *Authenticator) claimLiveCheck(authority gateway.Reference) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	now := a.now()
+	last, ok := a.lastLive[authority]
+	if ok && !last.failed && !last.pending && now.Sub(last.at) < LiveRecheckInterval {
+		return false
+	}
+	if !ok || (!last.failed && !last.pending) {
+		a.lastLive[authority] = liveCheck{at: now, pending: true}
+	}
+	return true
+}
+
+// recordLive records a completed live read that started at started. A failure
+// always applies. A success applies only if it started no earlier than the
+// newest recorded read or claim, so a slow read that began before a claim
+// cannot clear it with older state.
+func (a *Authenticator) recordLive(authority gateway.Reference, started time.Time, ok bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	now := a.now()
+	for key, last := range a.lastLive {
+		if now.Sub(last.at) >= 2*LiveRecheckInterval {
+			delete(a.lastLive, key) // the execution has no recent session
+		}
+	}
+	if !ok {
+		a.lastLive[authority] = liveCheck{at: now, failed: true}
+		return
+	}
+	if last, found := a.lastLive[authority]; found && started.Before(last.at) {
+		return
+	}
+	a.lastLive[authority] = liveCheck{at: started}
 }
 
 // reviewToken submits a TokenReview and returns the complete ServiceAccount subject.
@@ -136,8 +259,13 @@ func (a *Authenticator) reviewToken(ctx context.Context, token string) (ServiceA
 }
 
 // Find returns the active AgentRun owned by the complete ServiceAccount
-// identity. ServiceAccount name reuse and stale owner labels fail closed.
+// identity, read through to the API server. ServiceAccount name reuse and
+// stale owner labels fail closed.
 func (a *Authenticator) Find(ctx context.Context, serviceAccount ServiceAccountIdentity) (*gateway.ExecutionGrant, error) {
+	return a.find(ctx, a.live, serviceAccount)
+}
+
+func (a *Authenticator) find(ctx context.Context, reader client.Client, serviceAccount ServiceAccountIdentity) (*gateway.ExecutionGrant, error) {
 	if serviceAccount.Namespace != a.agentNamespace {
 		return nil, ErrWrongAgentNamespace
 	}
@@ -145,7 +273,7 @@ func (a *Authenticator) Find(ctx context.Context, serviceAccount ServiceAccountI
 		return nil, ErrTokenInvalid
 	}
 	var serviceAccountObject corev1.ServiceAccount
-	if err := a.client.Get(ctx, client.ObjectKey{Namespace: serviceAccount.Namespace, Name: serviceAccount.Name}, &serviceAccountObject); err != nil {
+	if err := reader.Get(ctx, client.ObjectKey{Namespace: serviceAccount.Namespace, Name: serviceAccount.Name}, &serviceAccountObject); err != nil {
 		return nil, ErrRunNotFound
 	}
 	if string(serviceAccountObject.UID) != serviceAccount.UID || serviceAccountObject.Labels[managedByLabel] != managedByValue {
@@ -157,7 +285,7 @@ func (a *Authenticator) Find(ctx context.Context, serviceAccount ServiceAccountI
 		return nil, ErrServiceAccountMismatch
 	}
 	var run sprooziv1alpha1.AgentRun
-	if err := a.client.Get(ctx, client.ObjectKey{Namespace: runNamespace, Name: runName}, &run); err != nil {
+	if err := reader.Get(ctx, client.ObjectKey{Namespace: runNamespace, Name: runName}, &run); err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil, ErrRunNotFound
 		}
@@ -170,25 +298,30 @@ func (a *Authenticator) Find(ctx context.Context, serviceAccount ServiceAccountI
 		return nil, ErrRunNotRunning
 	}
 	var tmpl sprooziv1alpha1.AgentTemplate
-	if err := a.client.Get(ctx, client.ObjectKey{
+	if err := reader.Get(ctx, client.ObjectKey{
 		Namespace: run.Namespace,
 		Name:      run.Spec.TemplateRef.Name,
 	}, &tmpl); err != nil {
 		return nil, err
 	}
+	// The run counts against the policy it was admitted under; never grant it
+	// another policy's permissions. The controller fails it with PolicyChanged.
+	if registry.AdmittedPolicyChanged(&run, &tmpl) {
+		return nil, ErrPolicyChanged
+	}
 
 	var pol sprooziv1alpha1.AgentPolicy
-	if err := a.client.Get(ctx, client.ObjectKey{
+	if err := reader.Get(ctx, client.ObjectKey{
 		Namespace: run.Namespace,
 		Name:      tmpl.Spec.PolicyRef.Name,
 	}, &pol); err != nil {
 		return nil, err
 	}
-	record, err := registry.ResolveRun(ctx, a.client, &run, &tmpl)
+	record, err := registry.ResolveRun(ctx, reader, &run, &tmpl)
 	if err != nil {
 		return nil, err
 	}
-	if err := registry.RequireActive(ctx, a.client, &run, record, a.agentNamespace); err != nil {
+	if err := registry.RequireActive(ctx, reader, &run, record, a.agentNamespace); err != nil {
 		return nil, err
 	}
 	if deadline := registry.EffectiveDeadline(&run, &pol, record); !deadline.IsZero() && !deadline.After(time.Now()) {

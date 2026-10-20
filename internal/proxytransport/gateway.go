@@ -5,7 +5,9 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/base64"
+	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -19,6 +21,42 @@ const (
 	proxyAuthorizationHeader = "Proxy-Authorization"
 )
 
+// Inspected-connection lifetime. One CONNECT tunnel carries a harness's
+// requests for at most MaxSessionLifetime; the harness then opens a new one.
+// Each request on it must end ResponseMargin before the tunnel does, so its
+// handler can still reply instead of the tunnel closing mid-request.
+// MaxRequestDuration is therefore the longest any single inspected request,
+// such as a Kubernetes watch, can take. A model call alone may extend its
+// deadline with ExtendModelCall; the tunnel then stays open for that call.
+const (
+	MaxSessionLifetime = 5 * time.Minute
+	ResponseMargin     = 10 * time.Second
+	MaxRequestDuration = MaxSessionLifetime - ResponseMargin
+)
+
+// Admission defaults and bounds. Every admitted connection is an inspected TLS
+// session, so the connection limit is sized against gateway memory.
+// TestInspectedSessionMemory measures one streaming session (outer ServeTLS
+// connection, inspected tls.Server, upstream TLS client, 32 KiB copy buffer and
+// six goroutines) at about 150 to 160 KiB of in-use heap and stack.
+// InspectedSessionBytes budgets 256 KiB, at least 1.6 times that. 2048 sessions
+// then hold about 512 MiB; twice that for GC headroom still leaves room for the
+// watch cache and the rest of the process under the 2 GiB limit in
+// config/manager/gateway.yaml, where GOMEMLIMIT is 90% of the limit. Request
+// and response bodies that a handler buffers are extra, per request in flight.
+// Lower both together.
+const (
+	// InspectedSessionBytes is the per-session memory budget; the measured
+	// figure must stay below it.
+	InspectedSessionBytes = 256 << 10
+	DefaultMaxConnections = 2048
+	MaxConnectionsLimit   = 4096
+	// DefaultMaxSessionsPerExecution is the fairness guard: one execution can
+	// hold at most this many inspected sessions of the shared pool.
+	DefaultMaxSessionsPerExecution = 16
+	MaxSessionsPerExecutionLimit   = 128
+)
+
 type Config struct {
 	// Certificates maps exact DNS names (without port) to inspection certificates.
 	Certificates     map[string]tls.Certificate
@@ -28,11 +66,28 @@ type Config struct {
 	AllowedAuthority func(string) bool
 	// RevocationInterval bounds idle/in-flight sessions after revocation.
 	RevocationInterval time.Duration
-	SessionLifetime    time.Duration
+	// SessionLifetime bounds one inspected connection. Zero selects
+	// MaxSessionLifetime, which is also its upper bound.
+	SessionLifetime time.Duration
 	// AuthorityTimeout bounds authentication and each live authority lookup.
-	AuthorityTimeout        time.Duration
-	MaxConnections          int
+	AuthorityTimeout time.Duration
+	// MaxConnections bounds admitted TCP connections, CONNECT requests in
+	// progress and pending authority lookups. Zero selects
+	// DefaultMaxConnections.
+	MaxConnections int
+	// MaxModelCallDuration bounds one model call that its handler extends
+	// with ExtendModelCall past the connection's request deadline. Zero
+	// selects DefaultMaxModelCallDuration; MaxModelCallDurationLimit is its
+	// upper bound.
+	MaxModelCallDuration time.Duration
+	// MaxSessionsPerExecution bounds inspected sessions held by one execution.
+	// Zero selects DefaultMaxSessionsPerExecution, capped at MaxConnections.
 	MaxSessionsPerExecution int
+	// Logger receives a line when an open inspected connection is revoked,
+	// a connection is refused at the per-execution limit or a request is cut
+	// short by its connection's lifetime.
+	// Nil selects slog.Default().
+	Logger *slog.Logger
 }
 
 type Gateway struct {
@@ -42,6 +97,9 @@ type Gateway struct {
 	authorityCalls chan struct{}
 	sessionsMu     sync.Mutex
 	sessions       map[gateway.Reference]int
+	revocations    *executionLog
+	limitRejected  *executionLog
+	logger         *slog.Logger
 }
 
 func New(c Config) (*Gateway, error) {
@@ -60,28 +118,38 @@ func New(c Config) (*Gateway, error) {
 		c.RevocationInterval = time.Second
 	}
 	if c.SessionLifetime == 0 {
-		c.SessionLifetime = 5 * time.Minute
+		c.SessionLifetime = MaxSessionLifetime
 	}
-	if c.RevocationInterval < 10*time.Millisecond || c.RevocationInterval > 5*time.Second || c.SessionLifetime < time.Second || c.SessionLifetime > 5*time.Minute {
+	if c.RevocationInterval < 10*time.Millisecond || c.RevocationInterval > 5*time.Second || c.SessionLifetime < time.Second || c.SessionLifetime > MaxSessionLifetime {
 		return nil, fmt.Errorf("invalid session bounds")
 	}
 	if c.AuthorityTimeout == 0 {
 		c.AuthorityTimeout = 5 * time.Second
 	}
 	if c.MaxConnections == 0 {
-		c.MaxConnections = 128
+		c.MaxConnections = DefaultMaxConnections
 	}
 	if c.MaxSessionsPerExecution == 0 {
-		c.MaxSessionsPerExecution = min(8, c.MaxConnections)
+		c.MaxSessionsPerExecution = min(DefaultMaxSessionsPerExecution, c.MaxConnections)
+	}
+	if err := c.defaultModelCall(); err != nil {
+		return nil, err
 	}
 	if c.AuthorityTimeout < 10*time.Millisecond || c.AuthorityTimeout > 10*time.Second ||
-		c.MaxConnections < 1 || c.MaxConnections > 4096 || c.MaxSessionsPerExecution < 1 ||
-		c.MaxSessionsPerExecution > 128 || c.MaxSessionsPerExecution > c.MaxConnections {
+		c.MaxConnections < 1 || c.MaxConnections > MaxConnectionsLimit || c.MaxSessionsPerExecution < 1 ||
+		c.MaxSessionsPerExecution > MaxSessionsPerExecutionLimit || c.MaxSessionsPerExecution > c.MaxConnections {
 		return nil, fmt.Errorf("invalid authority or admission bounds")
 	}
+	logger := c.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+	// The request and authority-lookup pools take the connection limit too:
+	// each admitted CONNECT holds one request slot for its whole session.
 	return &Gateway{config: c, connections: make(chan struct{}, c.MaxConnections),
 		requests: make(chan struct{}, c.MaxConnections), authorityCalls: make(chan struct{}, c.MaxConnections),
-		sessions: make(map[gateway.Reference]int)}, nil
+		sessions: make(map[gateway.Reference]int), revocations: newRevocationLog(c.Logger),
+		limitRejected: newLimitLog(c.Logger), logger: logger}, nil
 }
 
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -119,7 +187,8 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !g.acquireSession(identity.Execution) {
-		http.Error(w, "execution session capacity unavailable", http.StatusTooManyRequests)
+		g.limitRejected.record(identity.Execution, g.config.MaxSessionsPerExecution)
+		http.Error(w, "execution inspected-connection limit reached", http.StatusTooManyRequests)
 		return
 	}
 	defer g.releaseSession(identity.Execution)
@@ -133,9 +202,15 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = connection.Close() }()
-	ctx, cancel := context.WithTimeout(gateway.WithIdentity(r.Context(), identity), g.config.SessionLifetime)
+	// The session ends at its lifetime, or later when a model call extended
+	// with ExtendModelCall still holds it; see sessionLife.
+	ctx, cancel := context.WithCancel(gateway.WithIdentity(r.Context(), identity))
 	defer cancel()
-	deadline, _ := ctx.Deadline()
+	deadline := time.Now().Add(g.config.SessionLifetime)
+	margin := min(ResponseMargin, g.config.SessionLifetime/4)
+	life := &sessionLife{connection: connection, end: cancel, grace: margin}
+	lifetime := time.AfterFunc(g.config.SessionLifetime, life.expire)
+	defer lifetime.Stop()
 	_ = connection.SetDeadline(minDeadline(deadline, time.Now().Add(10*time.Second)))
 	// No TLS bytes should precede CONNECT acknowledgement. Reject instead of losing
 	// buffered bytes or accidentally treating them as an uninspected protocol.
@@ -161,6 +236,11 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_ = connection.SetDeadline(deadline)
 	listener := newSessionListener(tlsConnection, connection)
 	defer func() { _ = listener.Close() }()
+	// Both the monitor and a request can see the revocation; log it once.
+	var revokedOnce sync.Once
+	revoked := func(err error) {
+		revokedOnce.Do(func() { g.revocations.revoked(identity.Execution, err) })
+	}
 	monitorDone := make(chan struct{})
 	go func() {
 		defer close(monitorDone)
@@ -172,7 +252,11 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				_ = listener.Close()
 				return
 			case <-ticker.C:
-				if g.revalidate(ctx, identity) != nil {
+				if err := g.revalidate(ctx, identity); err != nil {
+					// A session that reached its lifetime is not revoked.
+					if ctx.Err() == nil {
+						revoked(err)
+					}
 					cancel()
 					_ = listener.Close()
 					return
@@ -181,20 +265,51 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 	defer func() { cancel(); _ = listener.Close(); <-monitorDone }()
+	// Requests end before the connection so a handler can still reply, for
+	// example a 502 for a model call cut short. Short test lifetimes keep a
+	// proportional margin.
+	requestDeadline := deadline.Add(-margin)
 	server := &http.Server{
 		ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 32 << 10,
 		BaseContext: func(net.Listener) context.Context { return ctx },
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
-			g.serveInspected(w, request, identity, host, port)
+			// A request that arrives after the request deadline has no time
+			// left; ask the client to retry on a new connection.
+			if !time.Now().Before(requestDeadline) {
+				w.Header().Set("Connection", "close")
+				http.Error(w, "gateway connection reached its lifetime; open a new connection and retry",
+					http.StatusServiceUnavailable)
+				return
+			}
+			call := &modelCallGrant{base: request.Context(), start: time.Now(),
+				max: g.config.MaxModelCallDuration, session: life}
+			requestCtx, cancelRequest := context.WithDeadline(
+				context.WithValue(request.Context(), modelCallKey{}, call), requestDeadline)
+			defer cancelRequest()
+			g.serveInspected(w, request.WithContext(requestCtx), identity, host, port, revoked)
+			if errors.Is(requestCtx.Err(), context.DeadlineExceeded) && !call.wasExtended() {
+				// The harness sees an error reply or an ended stream, not why.
+				g.logger.Info("Ended inspected request at connection lifetime",
+					"execution", identity.Execution.UID, "host", host, "method", request.Method,
+					"lifetime", g.config.SessionLifetime.String())
+			}
 		}),
 	}
+	// This server holds one connection, so disabling keep-alive at the request
+	// deadline closes it when idle and marks later replies Connection: close.
+	stopKeepAlive := time.AfterFunc(time.Until(requestDeadline), func() { server.SetKeepAlivesEnabled(false) })
+	defer stopKeepAlive.Stop()
 	_ = server.Serve(listener)
 }
 
 func (g *Gateway) serveInspected(
 	w http.ResponseWriter, request *http.Request, identity *gateway.ExecutionGrant, host, port string,
+	revoked func(error),
 ) {
-	if g.revalidate(request.Context(), identity) != nil {
+	if err := g.revalidate(request.Context(), identity); err != nil {
+		if request.Context().Err() == nil {
+			revoked(err)
+		}
 		request.Close = true
 		http.Error(w, "revoked gateway identity", http.StatusForbidden)
 		return

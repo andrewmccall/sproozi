@@ -38,7 +38,7 @@ workload credentials. Administrators remain trusted for template contents and
 must not place secrets in literal environment values or public ConfigMaps.
 
 Use one outer gateway server constructor for TLS, HTTP/1 and parsing limits in
-both backends. Bound raw gateway sockets before TLS, authenticated sessions per execution, and
+both backends. Bound raw gateway sockets before TLS, inspected connections per execution, and
 authority lookup workers. A lookup times out independently and fails closed; its
 worker retains admission until it really exits. Existing sessions retain their
 absolute deadline and live revocation checks. MCP negotiates and executes within
@@ -116,7 +116,7 @@ The review inspected the AHP Go schemas at revision
   catalogue and explicit partial availability instead. Public JSON identity and
   list changes require consumers to migrate with this change.
 
-Fixed default admission limits may need tuning after measured production load.
+Fixed default gateway connection limits may need tuning after measured production load.
 Limits protect capacity rather than guarantee fairness between unauthenticated
 clients. Bounded cleanup can outlive a cancelled request. Do not claim hard
 provider spending ceilings: input/output accounting, unknown consumption and

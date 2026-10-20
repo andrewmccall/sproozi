@@ -14,16 +14,16 @@ needs it; a generic harness registry is not a prerequisite.
 
 ## Session adapters preserve native state
 
-For additional [session mobility](session-mobility.md), a harness adapter needs to report
+For further [moves between placements](session-mobility.md), a harness adapter needs to report
 whether the installed version and session are movable, reach a supported safe
 boundary, export selected native state, validate compatibility and invoke native
 resume in the restored workspace. Unsupported state must be reported explicitly.
 
 Check path assumptions, environment dependencies, active tools and subprocesses,
-conversation compaction, native session identifiers and state-format versions.
-Do not promise that copying transcript files reproduces the same native session.
+conversation compaction, harness conversation identifiers and state-format versions.
+Do not promise that copying transcript files reproduces the same harness conversation.
 The runtime adapter provisions and stops the environment; the harness adapter
-handles native conversation state. Neither can assume the other has stopped an
+handles harness conversation state. Neither can assume the other has stopped an
 in-flight tool or established exclusive workspace ownership.
 
 Preserve the selected native history's semantics. Codex can retain developer-role
@@ -31,7 +31,7 @@ records and remembered permissions; the adapter does not rewrite them as user
 text. History remains untrusted for Sproozi authority and accounting. Generate
 trusted launch settings and MCP connections again from destination policy.
 Imported global settings, hooks, plugins and credential helpers cannot acquire
-authority through checkpointing. Keep isolated worker homes and a strict state
+authority through checkpointing. Keep isolated sandbox homes and a strict state
 allowlist for each separately proved native resume path.
 
 The two implemented adapters deliberately use different completion evidence.
@@ -66,7 +66,7 @@ selects the complete Codex round trip first, followed by Claude Code.
 The first session starts through Sproozi in local Docker, under
 [ADR 0005](../../adr/0005-controlled-docker-launch-before-session-adoption.md).
 Later adoption of a directly
-started native session requires explicit user selection, safe state import and
+started harness conversation requires explicit user selection, safe state import and
 control of the original writer. A copied session cannot import cached approvals
 as a Sproozi grant. If native GUI access is unsupported, retain the proved CLI or
 terminal path and describe that limitation.

@@ -17,6 +17,8 @@ runs.
 - maximum runtime-selected resources
 - maximum execution duration
 - terminal retention TTL
+- optional cap on concurrent active runs
+- optional lower deadline for each model call
 
 ## Key fields
 
@@ -56,6 +58,8 @@ spec:
       ephemeral-storage: 4Gi
   maxExecutionDuration: 1h
   retentionTTL: 720h
+  maxActiveRuns: 4
+  maxModelCallSeconds: 900
 ```
 
 ## Relationships
@@ -66,7 +70,9 @@ spec:
 
 ## Policy changes and denials
 
-Policy changes affect later gateway decisions for active runs. A denied request
+Policy changes affect later gateway decisions for active runs. Deleting an
+AgentPolicy fails every non-terminal run whose template currently references
+it, running ones included, with `PolicyNotFound`, and stops their sandboxes. A denied request
 returns a structured denial to the sandbox. The gateway does not widen access to
 make the request succeed.
 
@@ -75,12 +81,78 @@ capabilities, current policy, run status, operation scope and upstream
 restrictions. Policy controls retention and lifetime. Task text cannot change
 them.
 
+## Concurrent runs
+
+`spec.maxActiveRuns` is optional and must be from 1 to 10000. It caps how many
+AgentRuns admitted under this policy can be `Admitted` or `Running` at once.
+Omit it for no per-policy limit; the default install sets no limit. Templates
+that reference the same policy share its cap. Zero is not accepted here,
+whereas a budget limit set to `0` leaves that dimension uncapped and `--max-active-runs=0` means no
+cluster cap.
+
+A run that would exceed the cap stays `Queued` with `Ready` reason
+`WaitingForConcurrencyCap`; it is never denied. Its message names the cap,
+for example `AgentRun is held by a concurrency cap: policy cap 1 (AgentPolicy
+sre) reached`. A run counts against the policy recorded in its
+`status.policyName` when it was admitted. If its template is re-pointed to
+another policy while the run is active, the run fails with reason
+`PolicyChanged` and the message `AgentTemplate T now references AgentPolicy B,
+but this run was admitted under AgentPolicy A; submit a new run`. The gateway
+denies the run's new connections at once and closes its open ones within the
+[revocation bound](security-hardening.md#protect-transport-and-identities),
+under 16 seconds. Permissions and the cap therefore always come from the same
+policy. A run admitted before `status.policyName` existed has no recorded
+policy: it isn't failed, counts against the policy its template references, and
+its new connections are checked against that policy. Queued runs under other policies are not held
+behind a full policy. Raising or removing the cap admits waiting runs without
+waiting for another run to finish.
+
+Editing `maxActiveRuns` doesn't close a run's open inspected connections at
+the gateway, because the cap bounds how many runs start, not what an admitted
+run may do. Every other edit to the policy's `spec` still closes them; label
+and annotation edits don't. Gateway audit records
+keep the `policyGeneration` the connection was admitted under, so after a
+cap-only edit they show the earlier generation.
+
+When a policy edit closes a run's open connections, the run itself carries
+on: the AgentRun stays `Running` with `Ready` `True`, and its new connections
+get the edited policy. The only trace is the gateway log line `Revoked
+inspected connection`, with `reason="gateway: execution grant revoked: gateway:
+the AgentRun's policy, template, capabilities or allocation changed"`. Read it
+with `kubectl logs -n sproozi-system deployment/sproozi-gateway`.
+
+The controller flag `--max-active-runs` sets a separate cluster cap; there is
+no cluster cap by default. See
+[Limit concurrent runs](../guides/install-kubernetes.md#limit-concurrent-runs)
+and the
+[concurrency warnings](security-hardening.md#concurrency-and-gateway-capacity).
+
+## Model call deadline
+
+`spec.maxModelCallSeconds` is optional and must be from 1 to 3600. It lowers
+the [model call deadline](../../GLOSSARY.md#model-call-deadline), the longest
+one model call of a run may stream, counted from when the gateway receives the
+call. The gateway's own maximum applies when it is lower or when this field is
+unset: 1200 seconds unless the administrator sets
+`SPROOZI_GATEWAY_MAX_MODEL_CALL_SECONDS` on the shared gateway or
+`gateway.maxModelCallSeconds` on the home gateway. The field can never raise
+that maximum.
+
+At the deadline the stream ends without an error event, and the call is
+charged an estimate; see
+[long model calls](../guides/model-provider-auth.md#long-model-calls). Editing
+`maxModelCallSeconds` is a spec edit, so like any other spec edit it closes the
+run's open inspected connections, including a model call in progress.
+
 ## Endpoint budgets
 
 `spec.budgets` is an optional map keyed by capability. Omit an entry to leave that
 capability's consumption uncapped. `maxUnits` measures tokens for model inference
-and upstream requests for the other endpoints. At least one limit must be positive.
-A zero limit leaves that dimension uncapped.
+and upstream requests for the other endpoints. An entry must set both
+`maxUnits` and `maxCostMicros`; the API server rejects an entry that omits one,
+for example `spec.budgets.kubernetes.read.maxCostMicros: Required value`. At
+least one of the two must be positive. Set the other to `0` to leave that
+dimension uncapped. Each limit can be at most 10^15 (1000000000000000).
 
 The deployed Kubernetes ledger shares accounting across gateway replicas, with
 separate accounts for each Run UID and capability. Policy changes do not reset
@@ -108,6 +180,12 @@ rules.
 Kubernetes namespaces, resources and verbs are checked on each request by the
 Kubernetes endpoint. Workload service accounts have no native read bindings.
 See [Security hardening](security-hardening.md) for deployment controls.
+
+## Package installs
+
+`spec.packagesInstall.maxDownloadBytes` caps each package artifact response,
+including metadata responses. It must be from 1 byte to 1 TiB
+(1099511627776 bytes).
 
 ## Named MCP capabilities
 

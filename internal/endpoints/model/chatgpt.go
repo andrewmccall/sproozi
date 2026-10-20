@@ -31,7 +31,7 @@ func validateChatGPTRequest(r *http.Request, body []byte, maxCostMicros int64) e
 		return errors.New("ChatGPT Responses requires an input array")
 	}
 	for _, key := range []string{"background", "conversation", "max_output_tokens", "max_tool_calls",
-		"metadata", "moderation", "multi_agent", "prompt", "prompt_cache_retention", "safety_identifier",
+		"metadata", "moderation", "multi_agent", promptField, "prompt_cache_retention", "safety_identifier",
 		"temperature", "top_logprobs", "top_p", "truncation", "user", "previous_response_id"} {
 		if _, ok := fields[key]; ok {
 			return errors.New("ChatGPT Responses request contains an unsupported field")

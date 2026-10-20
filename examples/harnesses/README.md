@@ -4,7 +4,9 @@ These administrator-owned runtime examples launch Claude Code, OpenCode or Herme
 `agent` process in a disposable Sproozi Pod. Replace each `example/...@sha256:...`
 image with a reviewed, digest-pinned image containing `/bin/sh`, `cat` and the
 selected stock CLI. The OpenCode image also needs Python 3. Set `SPROOZI_MODEL` to a provider model available to your
-account. Use only model identifiers made of letters, digits, dots, underscores
+account. The model is a per-runtime choice; the SRE demo pins a different one
+for its own reasons, explained in
+[model selection](../../docs/reference/agentruntime.md#model-selection). Use only model identifiers made of letters, digits, dots, underscores
 and hyphens in the OpenCode example because its trusted command builds JSON.
 
 The examples retain the Codex runtime's Pod security, gateway trust and bounded
@@ -42,11 +44,11 @@ request. See [harness reference](../../docs/reference/harnesses.md) for configur
 provider setup and the evidence limits of these examples.
 
 
-Hermes uses the default official image. The bounded worker launches its
+Hermes uses the default official image. The bounded sandbox launches its
 bundled interpreter directly, outside the root startup system, with fresh native
 state. Its immutable helper supervises the stock CLI and publishes a bounded
 UID-bound final answer. The example enables the native Kubernetes MCP tool;
 request `kubernetes.read` and configure its namespace/resource policy to use it.
 `make test-e2e` checks the deployed stock loops and persistent coordinator with
-deterministic providers. The [Hermes Kubernetes guide](../../docs/guides/hermes-orchestration.md)
+deterministic providers. [Run a persistent Hermes assistant on Kubernetes](../../docs/guides/hermes-orchestration.md)
 provides the persistent deployment and schedule setup.

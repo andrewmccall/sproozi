@@ -19,7 +19,7 @@ also treats tool annotations as untrusted unless the server is trusted.
 ## Register the provider
 
 The gateway reads JSON from `MCP_SERVERS_PATH` at startup. The installed
-`mcp-servers` ConfigMap starts with an empty registry.
+`sproozi-mcp-servers` ConfigMap starts with an empty registry.
 `SPROOZI_ENABLED_CAPABILITIES` selects native modules; remote registrations
 become available through this registry, subject to run and policy grants.
 For example:
@@ -173,8 +173,10 @@ by Run UID and capability. Failed upstream attempts remain charged. Reconnecting
 or changing policy does not reset consumption. Omitted budgets are uncapped;
 monetary ceilings are rejected because MCP supplies no trusted pricing. Discovery
 and initialization have fixed per-request bounds but do not consume tool-call
-units. The shared proxy also admits at most 128 connections and eight inspected
-sessions per execution by default; see [transport limits](security-hardening.md#protect-transport-and-identities).
+units. The shared proxy also allows at most 2048 connections, shared by all runs, and
+16 inspected connections per execution by default, set by
+`SPROOZI_GATEWAY_MAX_CONNECTIONS` and
+`SPROOZI_GATEWAY_MAX_SESSIONS_PER_EXECUTION`; see [transport limits](security-hardening.md#protect-transport-and-identities).
 Audit records the run, named capability, Protocol tier, approved tool and
 fixed outcome, without argument values, results or provider diagnostics. Provider
 failures return fixed messages; successful tool output remains provider content.

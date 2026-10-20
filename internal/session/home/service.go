@@ -4,17 +4,21 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	budgetfile "github.com/andrewmccall/sproozi/internal/budget/file"
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
+	"github.com/andrewmccall/sproozi/internal/endpoints/model"
 	gatewaydocker "github.com/andrewmccall/sproozi/internal/gateway/docker"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/privatefs"
@@ -52,13 +56,30 @@ type Service struct {
 	local       localPlacement
 	placements  map[string]session.Placement
 	coordinator *session.Coordinator
-	owner       *gatewaydocker.Owner
-	ledger      *budgetfile.Ledger
+	// drain ends and settles model calls before the ledger closes.
+	drain  *model.Drain
+	owner  *gatewaydocker.Owner
+	ledger *budgetfile.Ledger
+	// sweepStop ends the periodic recovery of expired reservation leases.
+	sweepStop chan struct{}
+	// legacySwept records that one recovery of reservations from before
+	// leases has succeeded; until then each sweep repeats it.
+	legacySwept atomic.Bool
 	remotes     []*profile.Client
 	gateway     *http.Server
 	closeOnce   sync.Once
 	closeError  error
 	workSources map[string]WorkSource
+	// log receives the daemon's operator messages; nil discards them.
+	log io.Writer
+	// images resolves Docker image IDs; CheckDocker uses it to reach the engine.
+	images imageResolver
+}
+
+// imageResolver is the part of the Docker engine CheckDocker needs.
+type imageResolver interface {
+	ImageID(ctx context.Context, reference string) (string, error)
+	NetworkExists(ctx context.Context, name string) (bool, error)
 }
 
 // Status names the durable session and separately reports its bounded execution.
@@ -169,8 +190,15 @@ func (s *Service) Start(ctx context.Context, id, operationID, path string, inclu
 		return Status{}, err
 	}
 	first := r.Operations[0].Launch
-	if r.Session != "" || first.CheckpointDigest != "" || first.OperationID != operationID || !slices.Equal(first.IncludeIgnored, includeIgnored) {
-		return Status{}, errors.New("home: start intent conflicts with retained launch")
+	if r.Session != "" || first.CheckpointDigest != "" {
+		return Status{}, rejectedError(fmt.Sprintf("home: start intent conflicts with retained launch; %s was "+
+			"not created by start, see \"sproozi status %s\"", id, id))
+	}
+	if first.OperationID != operationID || !slices.Equal(first.IncludeIgnored, includeIgnored) {
+		// A new operation conflicts again; only the retained one continues it.
+		return Status{}, rejectedError(fmt.Sprintf("home: start intent conflicts with retained launch; %s was "+
+			"started with operation %s: to continue it, repeat the original start command with --operation %s, "+
+			"or run \"sproozi cancel %s\" to revoke and force-stop its current execution", id, first.OperationID, first.OperationID, id))
 	}
 	return s.startFirstVisit(ctx, r)
 }
@@ -201,9 +229,22 @@ func (s *Service) startFirstVisit(ctx context.Context, r session.Record) (Status
 	return executionStatus(r), nil
 }
 
+// moveDestinationProblem rejects a destination that names no configured
+// placement, listing the ones that do.
+func (s *Service) moveDestinationProblem(destination string) error {
+	if s.placements[destination] != nil {
+		return nil
+	}
+	return rejectedError(fmt.Sprintf("home: move destination %q is not a configured placement; use one of: %s",
+		destination, strings.Join(slices.Sorted(maps.Keys(s.placements)), ", ")))
+}
+
 func (s *Service) moveExecution(ctx context.Context, id, operationID, destination string) (Status, error) {
-	if !work.CanonicalID(operationID) || s.placements[destination] == nil {
-		return Status{}, errors.New("home: canonical operation UUID and configured destination required")
+	if !work.CanonicalID(operationID) {
+		return Status{}, fmt.Errorf("home: move operation %q is not a canonical UUID", operationID)
+	}
+	if err := s.moveDestinationProblem(destination); err != nil {
+		return Status{}, err
 	}
 	r, err := s.coordinator.Inspect(id)
 	if err != nil {
@@ -248,8 +289,16 @@ func (s *Service) attachExecution(ctx context.Context, id string, input io.Reade
 	return terminal.Attach(ctx, r.Active.Launch, r.Active.Incarnation, input, output)
 }
 
+// modelDrainTimeout bounds how long Close waits for model calls to settle.
+const modelDrainTimeout = 10 * time.Second
+
 func (s *Service) Close() error {
 	s.closeOnce.Do(func() {
+		// Settle model calls while the ledger is still open; a call left
+		// unsettled is recovered from the ledger later.
+		drainCtx, cancelDrain := context.WithTimeout(context.Background(), modelDrainTimeout)
+		_ = s.drain.Shutdown(drainCtx)
+		cancelDrain()
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		s.closed = true
@@ -273,9 +322,41 @@ func (s *Service) Close() error {
 		if s.owner != nil {
 			s.closeError = errors.Join(s.closeError, s.owner.Close())
 		}
+		if s.sweepStop != nil {
+			close(s.sweepStop)
+		}
 		if s.ledger != nil {
 			s.closeError = errors.Join(s.closeError, s.ledger.Close())
 		}
 	})
 	return s.closeError
+}
+
+// ledgerSweepInterval is how often home recovers expired reservation leases.
+const ledgerSweepInterval = time.Minute
+
+// sweepLedger settles expired reservation leases, which a daemon that
+// stopped without settling its model calls leaves behind.
+func (s *Service) sweepLedger() {
+	legacy := !s.legacySwept.Load()
+	if err := s.ledger.Sweep(time.Now(), legacy); err != nil {
+		_, _ = fmt.Fprintln(s.log, "Failed to recover expired budget reservations:", err)
+		return
+	}
+	if legacy {
+		s.legacySwept.Store(true)
+	}
+}
+
+func (s *Service) sweepLedgerPeriodically() {
+	ticker := time.NewTicker(ledgerSweepInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.sweepStop:
+			return
+		case <-ticker.C:
+			s.sweepLedger()
+		}
+	}
 }

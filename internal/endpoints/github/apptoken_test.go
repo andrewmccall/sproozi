@@ -1,8 +1,12 @@
 package github
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"net/http"
@@ -38,5 +42,49 @@ func TestFetchInstallationTokenRejectsUnsafeProviderResponses(t *testing.T) {
 				t.Fatalf("unsafe token accepted: %q", got)
 			}
 		})
+	}
+}
+
+const pkcs8PEMType = "PRIVATE KEY"
+
+func TestNewAppTokenProviderAcceptsPKCS1AndPKCS8RSAKeys(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkcs8, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, block := range map[string]*pem.Block{
+		"PKCS#1": {Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)},
+		"PKCS#8": {Type: pkcs8PEMType, Bytes: pkcs8},
+	} {
+		provider, err := NewAppTokenProvider(1, 2, pem.EncodeToMemory(block), http.DefaultClient)
+		if err != nil {
+			t.Fatalf("%s key rejected: %v", name, err)
+		}
+		if !provider.privateKey.Equal(key) {
+			t.Fatalf("%s key parsed to a different key", name)
+		}
+	}
+}
+
+func TestNewAppTokenProviderRejectsNonRSAKeys(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = NewAppTokenProvider(1, 2, pem.EncodeToMemory(&pem.Block{Type: pkcs8PEMType, Bytes: der}), http.DefaultClient)
+	if err == nil || !strings.Contains(err.Error(), "must be RSA") {
+		t.Fatalf("non-RSA key error = %v", err)
+	}
+	_, err = NewAppTokenProvider(1, 2, pem.EncodeToMemory(&pem.Block{Type: pkcs8PEMType, Bytes: []byte("junk")}), http.DefaultClient)
+	if err == nil || strings.Contains(err.Error(), "ParsePKCS8PrivateKey") {
+		t.Fatalf("malformed key error = %v", err)
 	}
 }

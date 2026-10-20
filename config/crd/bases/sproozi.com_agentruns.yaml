@@ -14,7 +14,20 @@ spec:
     singular: agentrun
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - jsonPath: .spec.templateRef.name
+      name: Template
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Ready")].reason
+      name: Reason
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
     schema:
       openAPIV3Schema:
         description: AgentRun is the Schema for the agentruns API
@@ -196,6 +209,13 @@ spec:
                 - Failed
                 - TimedOut
                 - Cancelled
+                type: string
+              policyName:
+                description: |-
+                  PolicyName is the AgentPolicy the run was admitted under, recorded in
+                  the same status update that admits it. Active runs count against this
+                  policy's maxActiveRuns. If the run's template is re-pointed to another
+                  policy while the run is active, the run fails with reason PolicyChanged.
                 type: string
               result:
                 description: |-

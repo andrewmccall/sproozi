@@ -80,7 +80,8 @@ def prepare(args):
     run(["openssl", "req", "-new", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=api.openai.com",
          "-keyout", str(key), "-out", str(out / "gateway.csr")], out)
     run(["openssl", "x509", "-req", "-sha256", "-days", "2", "-in", str(out / "gateway.csr"),
-         "-CA", str(ca), "-CAkey", str(ca_key), "-CAcreateserial", "-extfile", str(out / "leaf.ext"),
+         "-CA", str(ca), "-CAkey", str(ca_key), "-CAserial", str(out / "ca.srl"), "-CAcreateserial",
+         "-extfile", str(out / "leaf.ext"),
          "-out", str(leaf)], out)
     for host in ["127.0.0.1", args.gateway_ip]:
         run(["openssl", "verify", "-x509_strict", "-CAfile", str(ca), "-verify_ip", host, str(leaf)], out)
@@ -103,8 +104,8 @@ def prepare(args):
     if args.remote_url:
         if not args.remote_token_file or not args.remote_ca_file:
             raise RuntimeError("Fixed remote URL requires its token and CA files")
-        remote[args.remote_name] = {"URL": args.remote_url, "TokenFile": str(args.remote_token_file.resolve()),
-                                    "CAFile": str(args.remote_ca_file.resolve()), "MaxCheckpointBytes": args.max_checkpoint_bytes}
+        remote[args.remote_name] = {"url": args.remote_url, "tokenFile": str(args.remote_token_file.resolve()),
+                                    "caFile": str(args.remote_ca_file.resolve()), "maxCheckpointBytes": args.max_checkpoint_bytes}
     cfg = {"directory": str(out / "home"), "dockerBinary": str(args.docker_binary.resolve()),
            "dockerSocket": str(args.docker_socket.absolute()), "dockerConfig": str(out / "docker-cli"),
            "local": {"Harness": "codex", "Name": "local", "NativeImageID": args.native_image_id, "HelperImageID": args.helper_image_id,

@@ -6,9 +6,12 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/andrewmccall/sproozi/internal/budget"
 	"github.com/andrewmccall/sproozi/internal/privatefs"
@@ -111,4 +114,67 @@ func (s *store) Update(ctx context.Context, key budget.AccountKey, mutate func(*
 		return errors.New("budget: ledger record exceeds bound")
 	}
 	return privatefs.Replace(s.dir, filepath.Base(s.path(key)), []byte(data))
+}
+
+// Sweep settles every expired reservation lease in the ledger, so an idle
+// account does not keep an abandoned reservation until its next reservation
+// or seal. The home daemon runs it at start and then periodically. legacy
+// also charges in full every pending reservation without a lease, which can
+// only come from a daemon from before leases. A corrupt record is logged and
+// skipped; only an I/O error fails the sweep.
+func (l *Ledger) Sweep(now time.Time, legacy bool) error {
+	s := l.store
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return errors.New("budget: ledger closed")
+	}
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
+		return err
+	}
+	var first error
+	for _, entry := range entries {
+		name := entry.Name()
+		if !strings.HasPrefix(name, "account-") || !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		if err := s.recoverFile(name, now, legacy); err != nil && first == nil {
+			first = fmt.Errorf("budget: ledger %s: %w", name, err)
+		}
+	}
+	return first
+}
+
+// recoverFile settles one record file's expired leases. The caller holds s.mu.
+func (s *store) recoverFile(name string, now time.Time, legacy bool) error {
+	data, err := privatefs.ReadFile(filepath.Join(s.dir, name), maxRecordBytes)
+	if err != nil {
+		return err
+	}
+	needed, err := budget.NeedsRecovery(string(data), now, legacy)
+	if err != nil {
+		slog.Default().Error("Skipped corrupt budget ledger", "file", name, "error", err.Error())
+		return nil
+	}
+	if !needed {
+		return nil
+	}
+	record, err := budget.DecodeRecord(string(data))
+	if err != nil {
+		return err
+	}
+	committed, err := budget.RecoverExpired(record, name, now, legacy)
+	if err != nil {
+		return err
+	}
+	encoded, err := record.Encode()
+	if err != nil {
+		return err
+	}
+	if err := privatefs.Replace(s.dir, name, []byte(encoded)); err != nil {
+		return err
+	}
+	committed()
+	return nil
 }

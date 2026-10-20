@@ -139,8 +139,8 @@ upstream TLS separately. Semantic service addresses stay reserved even if their
 handler is disabled. Generic egress cannot bypass a disabled service handler.
 
 Raw CONNECT tunnels, plaintext HTTP and protocol upgrades are unsupported. The
-shared dispatcher preserves streaming responses. Model handlers buffer responses
-to verify usage.
+shared dispatcher preserves streaming responses. Model handlers stream
+responses too, reading usage from the stream as it passes.
 
 ## Endpoint interface and spending
 
@@ -154,7 +154,9 @@ storage adapters. `Meter.Spend` charges known usage before forwarding.
 `Meter.Reserve` holds capacity for variable usage. The handler then settles
 actual usage or releases the reservation.
 
-Model handlers settle provider-reported usage at administrator prices.
+Model handlers settle provider-reported usage at administrator prices, and
+charge an interrupted call an estimate capped at its reservation
+([ADR 0028](../adr/0028-streamed-model-responses-and-estimated-interrupts.md)).
 [Security hardening](../reference/security-hardening.md#model-budgets-are-not-hard-spending-ceilings)
 explains why that is not a hard ceiling. Other native handlers charge one unit
 per authorized upstream request, including each GitHub read-back request.
