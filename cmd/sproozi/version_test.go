@@ -217,7 +217,8 @@ func TestConfigurationErrorsNameTheFileAndNextStep(t *testing.T) {
 		want string
 	}{
 		{[]string{"sessions", "--config", missing},
-			"no configuration at " + missing + `; run "sproozi init --directory ` + filepath.Dir(missing) + `" to create it`},
+			"no configuration at " + missing + `; run "sproozi init --directory ` +
+				shellQuote(filepath.Dir(missing)) + `" to create it`},
 		{[]string{"sessions", "--config", other}, "no configuration at " + other +
 			`; create it, for example with "sproozi init --directory ` + shellQuote(filepath.Dir(other)) +
 			`", which writes ` + shellQuote(filepath.Join(filepath.Dir(other), configFile)) + "; then pass --config " +
@@ -336,8 +337,7 @@ func TestPathFlagsExplainTheirFault(t *testing.T) {
 	}
 	long := filepath.Join(dir, strings.Repeat("s", 120), "control.sock")
 	cases := map[string][]string{
-		"--config needs a path":       {"status", uuid.NewString(), "--config", ""},
-		"use a shorter --socket path": {"sessions", "--socket", long},
+		"--config needs a path": {"status", uuid.NewString(), "--config", ""},
 		"init --directory " + shellQuote(file) + " is a file, not a directory": {"init", "--directory", file},
 	}
 	// init would keep an existing configuration, so the hint points at it.
@@ -347,7 +347,10 @@ func TestPathFlagsExplainTheirFault(t *testing.T) {
 	}
 	cases[shellQuote(held)+" already holds "+configFile] =
 		[]string{"sessions", "--config", filepath.Join(held, "other.json")}
+	// Windows names a named pipe with --socket, which has no path length limit
+	// and is never a file.
 	if runtime.GOOS != goosWindows {
+		cases["use a shorter --socket path"] = []string{"sessions", "--socket", long}
 		cases["--socket "+shellQuote(dir)+" is a directory, not a socket"] =
 			[]string{"status", uuid.NewString(), "--socket", dir}
 		cases["--socket "+shellQuote(file)+" is a regular file, not a socket"] = []string{"sessions", "--socket", file}

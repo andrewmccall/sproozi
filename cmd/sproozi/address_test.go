@@ -244,14 +244,18 @@ func TestUnknownHomeSessionHasNoRetryHint(t *testing.T) {
 	defer func() { _ = l.Close() }()
 	id := uuid.NewString()
 	want := "docker (home): no session " + id + `; run "sproozi sessions" to list sessions`
+	// Like home, answer every connection: a Windows named pipe has no backlog
+	// for a dial made while another connection is being served.
 	go func() {
-		c, e := l.Accept()
-		if e != nil {
-			return
-		}
-		defer func() { _ = c.Close() }()
-		if json.NewDecoder(c).Decode(new(home.Request)) == nil {
-			_ = json.NewEncoder(c).Encode(home.Response{Error: want, UnknownSession: true})
+		for {
+			c, e := l.Accept()
+			if e != nil {
+				return
+			}
+			if json.NewDecoder(c).Decode(new(home.Request)) == nil {
+				_ = json.NewEncoder(c).Encode(home.Response{Error: want, UnknownSession: true})
+			}
+			_ = c.Close()
 		}
 	}()
 	var stdout, stderr bytes.Buffer
@@ -272,15 +276,19 @@ func TestRejectedHomeMoveHasNoRetryHint(t *testing.T) {
 	}
 	defer func() { _ = l.Close() }()
 	want := `home: move destination "nowhere" is not a configured placement; use one of: local`
+	// Like home, answer every connection: a Windows named pipe has no backlog
+	// for a second dial while the first is being served.
 	go func() {
-		c, e := l.Accept()
-		if e != nil {
-			return
-		}
-		defer func() { _ = c.Close() }()
-		if json.NewDecoder(c).Decode(new(home.Request)) == nil {
-			_ = json.NewEncoder(c).Encode(home.Response{Error: want, Rejected: true,
-				Status: &home.Status{ID: uuid.NewString()}})
+		for {
+			c, e := l.Accept()
+			if e != nil {
+				return
+			}
+			if json.NewDecoder(c).Decode(new(home.Request)) == nil {
+				_ = json.NewEncoder(c).Encode(home.Response{Error: want, Rejected: true,
+					Status: &home.Status{ID: uuid.NewString()}})
+			}
+			_ = c.Close()
 		}
 	}()
 	var stdout, stderr bytes.Buffer

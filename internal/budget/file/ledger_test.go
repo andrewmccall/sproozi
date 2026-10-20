@@ -250,7 +250,7 @@ func TestCorruptRecordDoesNotFailTheSweep(t *testing.T) {
 	if _, err = ledger.Reserve(ctx, accountKey, budget.UsageReservation{MaxUnits: 100}); err != nil {
 		t.Fatal(err)
 	}
-	if err = os.WriteFile(filepath.Join(dir, "account-corrupt.json"), []byte("{"), 0o600); err != nil {
+	if err = testutil.WriteFile(filepath.Join(dir, "account-corrupt.json"), []byte("{"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err = ledger.Sweep(time.Now(), true); err != nil {

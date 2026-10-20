@@ -1074,7 +1074,7 @@ func TestReconcilerRecordsSandboxNameAfterStatusConflict(t *testing.T) {
 				if err := c.Get(ctx, client.ObjectKeyFromObject(r), &latest); err != nil {
 					return err
 				}
-				latest.Annotations = map[string]string{"touched": "true"}
+				latest.Annotations = map[string]string{"touched": "yes"}
 				if err := c.Update(ctx, &latest); err != nil {
 					return err
 				}
@@ -1092,7 +1092,7 @@ func TestReconcilerRecordsSandboxNameAfterStatusConflict(t *testing.T) {
 	if err := live.Get(context.Background(), client.ObjectKeyFromObject(run), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Status.Identity.SandboxName == "" || got.Annotations["touched"] != "true" {
+	if got.Status.Identity.SandboxName == "" || got.Annotations["touched"] != "yes" {
 		t.Fatalf("sandbox name not recorded after a conflict: %+v", got.Status.Identity)
 	}
 }

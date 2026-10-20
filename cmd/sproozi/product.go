@@ -73,8 +73,11 @@ func parseProduct(args []string) (options, error) {
 	if q.configPath, e = absolutePath(in.config); e != nil {
 		return options{}, e
 	}
-	if q.socket, e = absolutePath(q.socket); e != nil {
-		return options{}, e
+	// On Windows --socket names a named pipe, not a file, so it is used as given.
+	if runtime.GOOS != goosWindows {
+		if q.socket, e = absolutePath(q.socket); e != nil {
+			return options{}, e
+		}
 	}
 	if c.name == actionInit || c.name == actionVersion {
 		return q, nil

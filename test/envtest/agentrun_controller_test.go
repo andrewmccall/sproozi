@@ -290,14 +290,16 @@ func cancelRun(t *testing.T, c client.Client, ctx context.Context, run *sprooziv
 // setPolicyCap sets maxActiveRuns on the fixture policy.
 func setPolicyCap(t *testing.T, c client.Client, ctx context.Context, ns string, maxActiveRuns *int32) {
 	t.Helper()
-	var pol sprooziv1alpha1.AgentPolicy
-	if err := c.Get(ctx, client.ObjectKey{Name: testPolicyName, Namespace: ns}, &pol); err != nil {
-		t.Fatalf("Get policy error = %v", err)
-	}
-	pol.Spec.MaxActiveRuns = maxActiveRuns
-	if err := c.Update(ctx, &pol); err != nil {
-		t.Fatalf("Update policy error = %v", err)
-	}
+	// The manager's client reads from its cache, which may not yet hold the
+	// policy just created, and a concurrent write can conflict; retry both.
+	gomega.NewGomegaWithT(t).Eventually(func() error {
+		var pol sprooziv1alpha1.AgentPolicy
+		if err := c.Get(ctx, client.ObjectKey{Name: testPolicyName, Namespace: ns}, &pol); err != nil {
+			return err
+		}
+		pol.Spec.MaxActiveRuns = maxActiveRuns
+		return c.Update(ctx, &pol)
+	}, 10*time.Second, 50*time.Millisecond).Should(gomega.Succeed(), "set policy %s maxActiveRuns", testPolicyName)
 }
 
 // createPolicyAndTemplate adds a second policy and a template of the same
