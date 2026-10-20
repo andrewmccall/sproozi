@@ -17,20 +17,17 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"flag"
 	"fmt"
 	"os"
 
 	corev1 "k8s.io/api/core/v1"
-
-	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
-	// to ensure that exec-entrypoint and run can make use of them.
-	_ "k8s.io/client-go/plugin/pkg/client/auth"
-
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
@@ -41,7 +38,7 @@ import (
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 	sproozictrl "github.com/andrewmccall/sproozi/internal/controller"
 	k8sresources "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
-	// +kubebuilder:scaffold:imports
+	"github.com/andrewmccall/sproozi/internal/telemetry"
 )
 
 var (
@@ -198,8 +195,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	stopTelemetry := telemetry.Setup(context.Background(), "sproozi-controller")
 	setupLog.Info("Starting manager")
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+	err = mgr.Start(ctrl.SetupSignalHandler())
+	telemetry.Shutdown(stopTelemetry)
+	if err != nil {
 		setupLog.Error(err, "Failed to run manager")
 		os.Exit(1)
 	}

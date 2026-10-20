@@ -24,6 +24,7 @@ import (
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/placement"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
+	"github.com/andrewmccall/sproozi/internal/telemetry"
 	"github.com/andrewmccall/sproozi/internal/work"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -167,6 +168,7 @@ func run(args []string) error {
 			profileHandler.ServeHTTP(w, r)
 		})
 	}
+	defer telemetry.Shutdown(telemetry.Setup(context.Background(), "sproozi-session-profile"))
 	server := &http.Server{
 		Addr: fixed.Listen, Handler: handler, TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13},
 		ReadHeaderTimeout: 10 * time.Second, MaxHeaderBytes: 16 << 10,

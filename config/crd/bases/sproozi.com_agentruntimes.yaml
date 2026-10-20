@@ -73,6 +73,14 @@ spec:
                           type: string
                         maxItems: 32
                         type: array
+                      telemetry:
+                        description: |-
+                          Telemetry set to Relay exports the harness's own OpenTelemetry traces,
+                          metrics and logs through the gateway's OTLP relay. Prompt, response and
+                          tool content capture stays off. The gateway must also enable the relay.
+                        enum:
+                        - Relay
+                        type: string
                     type: object
                   trustBundleConfigMap:
                     description: |-

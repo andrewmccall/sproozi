@@ -83,6 +83,11 @@ The shared gateway writes newline-delimited, secret-free JSON audit events to
 container stdout. Operators should collect that stream from the shared gateway
 deployment; semantic gateway decisions are not silently discarded.
 
+Every component also exports OpenTelemetry traces, metrics and logs when
+`OTEL_EXPORTER_OTLP_ENDPOINT` is set, and audit records then carry `traceID` and
+`spanID`. `SPROOZI_HARNESS_TELEMETRY=relay` makes the gateway relay managed
+harness telemetry to the same endpoint. See [telemetry](telemetry.md).
+
 `MODEL_AUTH_MODE` selects `api_key` (default) or `chatgpt`. Only the selected
 mode's credential Secret is required. ChatGPT credentials are created through the
 local consent helper, not by copying a Codex login cache. See

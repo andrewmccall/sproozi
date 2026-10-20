@@ -3,6 +3,8 @@ package session
 import (
 	"context"
 	"errors"
+
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // Cancel durably prevents activation before asking a placement to revoke and
@@ -57,7 +59,9 @@ func (c *Coordinator) Cancel(ctx context.Context, id, operationID string, admit 
 // abort carries out retained cancellation. It forcibly stops the active writer,
 // or a pending destination that may have started, and ends in PhaseCancelled
 // only once no writer can run and its usage is sealed.
-func (c *Coordinator) abort(ctx context.Context, r Record) (Record, error) {
+func (c *Coordinator) abort(ctx context.Context, r Record) (_ Record, err error) {
+	ctx, end := observe(ctx, r, "cancel execution", attribute.String("sproozi.operation.id", r.CancelOperation))
+	defer func() { end(&err) }()
 	if r.Phase == PhaseCancelled {
 		return r, nil
 	}

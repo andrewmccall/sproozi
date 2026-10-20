@@ -50,6 +50,9 @@ type Allocation struct {
 // ExecutionGrant contains resolved authorization snapshots, without requiring
 // a Kubernetes AgentRun for other execution backends.
 type ExecutionGrant struct {
+	// ExecutionID is the session execution this visit serves (executionId), or
+	// the AgentRun UID when the run has no session. It only correlates telemetry.
+	ExecutionID  string
 	Execution    Reference
 	Authority    Reference
 	Policy       PolicySnapshot

@@ -74,6 +74,10 @@ type GatewayConfig struct {
 	MCPRegistryFile         string                        `json:"mcpRegistryFile,omitempty"`
 	MCPCredentialsDirectory string                        `json:"mcpCredentialsDirectory,omitempty"`
 	MCPPolicy               map[string]api.MCPServerScope `json:"mcpPolicy,omitempty"`
+	// HarnessTelemetry relays the harness's own OpenTelemetry export, with
+	// content capture off, to the daemon's OTEL_EXPORTER_OTLP_ENDPOINT. The
+	// relay is served on MCPAuthority.
+	HarnessTelemetry bool `json:"harnessTelemetry,omitempty"`
 	// MaxModelCallSeconds is the longest one model call may stream, 1 to
 	// 3600. Omitted selects the gateway default of 1200 seconds; a pointer
 	// tells omission apart from an explicit 0, which is refused.

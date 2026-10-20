@@ -3,6 +3,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/tasks"
 	taskskubernetes "github.com/andrewmccall/sproozi/internal/tasks/kubernetes"
+	"github.com/andrewmccall/sproozi/internal/telemetry"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -65,6 +67,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	telemetry.ShutdownOnSignal(telemetry.Setup(context.Background(), "sproozi-tasks"))
 	handler, err := tasks.NewHandler(service, strings.TrimSpace(string(token)))
 	if err != nil {
 		return err

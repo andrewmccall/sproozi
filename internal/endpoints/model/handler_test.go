@@ -29,10 +29,9 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/andrewmccall/sproozi/internal/budget"
-
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/audit"
+	"github.com/andrewmccall/sproozi/internal/budget"
 	modelgateway "github.com/andrewmccall/sproozi/internal/endpoints/model"
 	"github.com/andrewmccall/sproozi/internal/gateway"
 )
@@ -380,7 +379,7 @@ func TestHandlerAuditLogsAllowedRequest(t *testing.T) {
 			OpenAIKey:     testOpenAIKey,
 			HTTPClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 				return modelResponse(req,
-					`{"id":"x","usage":{"total_tokens":10,"prompt_tokens":5,"completion_tokens":5}}`), nil
+					`{"id":"x","usage":{"total_tokens":10,"prompt_tokens":4,"completion_tokens":6}}`), nil
 			})},
 		},
 	}
@@ -403,6 +402,9 @@ func TestHandlerAuditLogsAllowedRequest(t *testing.T) {
 	}
 	if e.TokensUsed != 10 {
 		t.Errorf("TokensUsed = %d, want 10", e.TokensUsed)
+	}
+	if e.Model != "gpt-4o" || e.InputTokens != 4 || e.OutputTokens != 6 {
+		t.Errorf("model=%q input=%d output=%d, want gpt-4o 4 6", e.Model, e.InputTokens, e.OutputTokens)
 	}
 	if e.RunID != testNamespace+"/"+testRunName {
 		t.Errorf("RunID = %q, want %q", e.RunID, testNamespace+"/"+testRunName)

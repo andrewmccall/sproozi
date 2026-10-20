@@ -13,9 +13,15 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/session"
+	"github.com/andrewmccall/sproozi/internal/telemetry"
 )
 
 // Config fixes one authenticated principal, placement and immutable profile.
@@ -203,7 +209,19 @@ func (h *handler) validateAdmission(action string, l session.Launch) error {
 	}
 	return nil
 }
-func (h *handler) perform(r *http.Request, action string, input request) (response, error) {
+func (h *handler) perform(r *http.Request, action string, input request) (_ response, err error) {
+	// Only an authenticated home reaches perform, so its trace context is trusted.
+	ctx := propagation.TraceContext{}.Extract(r.Context(), propagation.HeaderCarrier(r.Header))
+	ctx, span := telemetry.Tracer().Start(telemetry.WithinExecution(ctx, input.Launch.ExecutionID), "profile "+action,
+		trace.WithSpanKind(trace.SpanKindServer), trace.WithAttributes(attribute.String(telemetry.ExecutionID, input.Launch.ExecutionID),
+			attribute.String(telemetry.VisitID, input.Launch.AllocationID), attribute.String(telemetry.Placement, input.Launch.Placement)))
+	defer func() {
+		if err != nil {
+			span.SetStatus(codes.Error, err.Error())
+		}
+		span.End()
+	}()
+	r = r.WithContext(ctx)
 	output := response{Version: protocolVersion}
 	p := h.config.Backend
 	switch action {

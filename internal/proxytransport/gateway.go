@@ -324,6 +324,11 @@ func (g *Gateway) serveInspected(
 	request.Header.Del("Authorization")
 	request.Header.Del(proxyAuthorizationHeader)
 	request.Header.Del("Cookie")
+	// Workload trace context is untrusted and would correlate requests across
+	// the provider boundary; Sproozi's own spans never propagate upstream.
+	request.Header.Del("Traceparent")
+	request.Header.Del("Tracestate")
+	request.Header.Del("Baggage")
 	request.URL.Scheme, request.URL.Host = "https", net.JoinHostPort(host, port)
 	g.config.Handler.ServeHTTP(w, request)
 }

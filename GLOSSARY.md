@@ -423,3 +423,18 @@ that keeps a checkpoint for later resume, the coordinator uses
 [orchestration](docs/reference/orchestration.md). Also seen as: task API,
 bounded task API, disposable-job service, orchestration service.
 
+## Observability
+
+### Execution trace
+
+The one OpenTelemetry trace that holds an execution's operations, visits and
+gateway calls. Its IDs derive from the execution ID, so every Sproozi process
+joins it. A session has one execution trace per execution. See
+[telemetry](docs/reference/telemetry.md#execution-traces).
+
+### Harness relay
+
+The gateway route that forwards a managed harness's own OpenTelemetry export to
+the administrator's collector. It replaces the harness's identity claims and
+removes content. See [telemetry](docs/reference/telemetry.md#harness-relay).
+Also seen as: telemetry relay, OTLP relay.

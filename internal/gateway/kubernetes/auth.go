@@ -335,7 +335,9 @@ func (a *Authenticator) find(ctx context.Context, reader client.Client, serviceA
 		Policy:       gateway.PolicySnapshot{Name: pol.Name, UID: string(pol.UID), Generation: pol.Generation, Spec: *pol.Spec.DeepCopy()},
 		Template:     gateway.TemplateSnapshot{Name: tmpl.Name, UID: string(tmpl.UID), Generation: tmpl.Generation, Spec: *tmpl.Spec.DeepCopy()},
 	}
+	grant.ExecutionID = string(run.UID)
 	if record != nil {
+		grant.ExecutionID = record.SessionID
 		grant.Managed = true
 		grant.Allocations = make(map[sprooziv1alpha1.CapabilityKind]gateway.Allocation, len(record.Ceilings))
 		for capability, ceiling := range record.Ceilings {

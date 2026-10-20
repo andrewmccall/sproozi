@@ -8,6 +8,9 @@ import (
 	"os"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/attribute"
+
+	"github.com/andrewmccall/sproozi/internal/telemetry"
 )
 
 // Create retains a new execution and its first visit without starting it;
@@ -17,7 +20,7 @@ import (
 // the launch has no checkpoint or thread. session names the owning durable
 // session when it differs from the execution. A retry must repeat the same
 // launch and input; it returns the retained execution unchanged.
-func (c *Coordinator) Create(first Launch, input []byte, session string) (Record, error) {
+func (c *Coordinator) Create(first Launch, input []byte, session string) (_ Record, err error) {
 	unlock, err := c.lockSession(first.ExecutionID)
 	if err != nil {
 		return Record{}, err
@@ -55,6 +58,13 @@ func (c *Coordinator) Create(first Launch, input []byte, session string) (Record
 		Ceiling: cloneAllowances(first.Allowances), Remaining: cloneAllowances(first.Allowances),
 		Phase: PhasePreparing, PendingOperation: first.OperationID,
 		Operations: []Operation{{ID: first.OperationID, Destination: first.Placement, Launch: &first, Stage: stagePrepare}}}
+	defer func() {
+		if err == nil {
+			telemetry.StartExecution(context.Background(), r.ID, attribute.String(telemetry.SessionID, cmpSession(r)),
+				attribute.String(telemetry.GenAIConversationID, cmpSession(r)), attribute.String(telemetry.GenAIAgentName, string(r.Harness)),
+				attribute.String(telemetry.Placement, first.Placement))
+		}
+	}()
 	if first.CheckpointDigest == "" {
 		r.Workspace, err = c.retainWorkspace(input)
 	} else {
@@ -172,11 +182,13 @@ func (c *Coordinator) Recover(ctx context.Context, id string) (Record, error) {
 	}
 	return r, errors.New("session: pending operation missing")
 }
-func (c *Coordinator) drive(ctx context.Context, r Record, index int) (Record, error) {
+func (c *Coordinator) drive(ctx context.Context, r Record, index int) (_ Record, err error) {
 	if err := ctx.Err(); err != nil {
 		return r, err
 	}
-	var err error
+	ctx, end := observe(ctx, r, operationName(r, index), attribute.String("sproozi.operation.id", r.Operations[index].ID),
+		attribute.String(telemetry.Placement, r.Operations[index].Destination))
+	defer func() { end(&err) }()
 	r, err = c.stopSource(ctx, r, index)
 	if err != nil {
 		return r, err
@@ -196,13 +208,16 @@ func (c *Coordinator) drive(ctx context.Context, r Record, index int) (Record, e
 	}
 	return c.activateDestination(ctx, r, index)
 }
-func (c *Coordinator) stopSource(ctx context.Context, r Record, index int) (Record, error) {
+func (c *Coordinator) stopSource(ctx context.Context, r Record, index int) (_ Record, err error) {
 	op := &r.Operations[index]
 	if op.Stage == stageStop {
 		if r.Active == nil {
 			return r, errors.New("session: stop intent lacks active allocation")
 		}
 		source := r.Active
+		var end func(*error)
+		ctx, end = observeVisit(ctx, r, "stop visit", source.Launch)
+		defer func() { end(&err) }()
 		p, ok := c.placements[source.Launch.Placement]
 		if !ok {
 			return r, errors.New("session: source placement unavailable")
@@ -266,9 +281,16 @@ func (c *Coordinator) commitStopped(r Record, s Stopped) (string, Checkpoint, er
 	cp, err := c.commitCheckpoint(s.Checkpoint, r.Harness, thread, s.CheckpointDigest)
 	return thread, cp, err
 }
-func (c *Coordinator) prepareDestination(ctx context.Context, r Record, index int) (Record, error) {
+func (c *Coordinator) prepareDestination(ctx context.Context, r Record, index int) (_ Record, err error) {
 	op := &r.Operations[index]
 	if op.Stage == stagePrepare {
+		visit := Launch{Placement: op.Destination}
+		if op.Launch != nil {
+			visit = *op.Launch
+		}
+		var end func(*error)
+		ctx, end = observeVisit(ctx, r, "prepare visit", visit)
+		defer func() { end(&err) }()
 		if op.Launch == nil {
 			if r.Epoch == ^uint64(0) {
 				return r, errors.New("session: epoch exhausted")
@@ -333,9 +355,12 @@ func (c *Coordinator) prepareDestination(ctx context.Context, r Record, index in
 	}
 	return r, nil
 }
-func (c *Coordinator) activateDestination(ctx context.Context, r Record, index int) (Record, error) {
+func (c *Coordinator) activateDestination(ctx context.Context, r Record, index int) (_ Record, err error) {
 	op := &r.Operations[index]
 	if op.Stage == stageActivate {
+		var end func(*error)
+		ctx, end = observeVisit(ctx, r, "activate visit", *op.Launch)
+		defer func() { end(&err) }()
 		p, ok := c.placements[op.Destination]
 		if !ok {
 			return r, errors.New("session: destination placement unavailable")

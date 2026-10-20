@@ -16,7 +16,7 @@ func AuditEvent(ctx context.Context, operation string) audit.Event {
 	if route, ok := ctx.Value(routeContextKey{}).(Route); ok {
 		event.Capability, event.SemanticLevel = route.Capability, route.Tier
 	}
-	return event
+	return event.WithContext(ctx)
 }
 
 func (i *ExecutionGrant) auditEvent(operation string) audit.Event {

@@ -113,6 +113,15 @@ interrupted. A model call may outlive its connection's 5-minute lifetime, up to
 the [model call deadline](../../GLOSSARY.md#model-call-deadline)
 ([ADR 0028](../adr/0028-streamed-model-responses-and-estimated-interrupts.md)).
 
+Each gateway decision writes an audit record, and the same record drives the
+gateway's OpenTelemetry spans, metrics and logs. Telemetry therefore never
+carries more than audit does. Every Sproozi process joins one trace per
+execution. The sandbox's own trace headers are removed, and no trace context
+leaves for an upstream. A managed harness's own telemetry can reach the
+collector only through the gateway's [harness relay](../reference/telemetry.md#harness-relay),
+which replaces its identity claims. See
+[ADR 0025](../adr/0025-opentelemetry-from-audit-and-execution-traces.md).
+
 ## MCP is a supported capability interface
 
 MCP clients use the same gateway and run identity as CLI and HTTP clients.

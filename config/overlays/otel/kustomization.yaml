@@ -1,0 +1,10 @@
+# Full install plus an OpenTelemetry Collector that receives every Sproozi
+# component's traces, metrics and logs, and harness telemetry relayed by the
+# gateway. Edit collector.yaml's exporters to send the data to your backend.
+resources:
+  - ../../install
+  - collector.yaml
+  - allow-otlp-traffic.yaml
+
+patches:
+  - path: telemetry-env.yaml

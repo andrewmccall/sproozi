@@ -17,6 +17,8 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel/propagation"
+
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
 	"github.com/andrewmccall/sproozi/internal/session"
 )
@@ -191,6 +193,9 @@ func (c *Client) call(ctx context.Context, action string, input request) (respon
 	}
 	req.Header.Set(headerAuthorization, bearerPrefix+c.token)
 	req.Header.Set(headerContentType, jsonMedia)
+	// The profile service is a trusted Sproozi owner, so its spans may nest
+	// under the coordinator's; no other destination receives trace context.
+	propagation.TraceContext{}.Inject(ctx, propagation.HeaderCarrier(req.Header))
 	r, err := c.http.Do(req)
 	if err != nil {
 		return response{}, err

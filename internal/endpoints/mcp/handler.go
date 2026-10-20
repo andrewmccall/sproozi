@@ -14,13 +14,22 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/audit"
 	"github.com/andrewmccall/sproozi/internal/budget"
 	"github.com/andrewmccall/sproozi/internal/gateway"
 	"github.com/andrewmccall/sproozi/internal/mcppolicy"
+	"github.com/andrewmccall/sproozi/internal/telemetry"
 )
+
+var operationDuration, _ = telemetry.Meter().Float64Histogram("mcp.client.operation.duration",
+	metric.WithUnit("s"), metric.WithDescription("Duration of MCP tool calls the gateway made upstream"),
+	metric.WithExplicitBucketBoundaries(0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 30, 60, 120, 300))
 
 const maxResponseBytes = 8 << 20
 const discoverMethod = "server/discover"
@@ -105,6 +114,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.deny(w, event, http.StatusBadRequest, "unsupported MCP request envelope")
 		return
 	}
+	// The method is one of the supported names, never arbitrary workload text.
+	trace.SpanFromContext(r.Context()).SetAttributes(attribute.String(telemetry.MCPMethodName, request.Method))
 	var params struct {
 		Name string `json:"name"`
 	}
@@ -207,12 +218,24 @@ func (h *Handler) prepare(ctx context.Context, upstream *sdk.ClientSession,
 					stop := context.AfterFunc(callCtx, cancel)
 					defer stop()
 					defer cancel()
-					callEvent := event
+					// The tool name comes from the approved upstream catalogue.
+					start := time.Now()
+					attrs := []attribute.KeyValue{attribute.String(telemetry.MCPMethodName, "tools/call"),
+						attribute.String(telemetry.GenAIToolName, name), attribute.String(telemetry.Capability, event.Capability)}
+					spanCtx, span := telemetry.Tracer().Start(ctx, "tools/call "+name, trace.WithSpanKind(trace.SpanKindClient),
+						trace.WithAttributes(append(attrs, attribute.String(telemetry.GenAIOperationName, "execute_tool"))...))
+					callEvent := event.WithContext(spanCtx)
 					callEvent.Operation, callEvent.Resource = "mcp.tools.call", name
 					defer func() {
 						if h.config.AuditLogger != nil {
 							h.config.AuditLogger.Log(callEvent)
 						}
+						if !callEvent.Allowed {
+							attrs = append(attrs, attribute.String(telemetry.ErrorType, callEvent.DenyReason))
+							span.SetStatus(codes.Error, callEvent.DenyReason)
+						}
+						span.End()
+						operationDuration.Record(spanCtx, time.Since(start).Seconds(), metric.WithAttributes(attrs...))
 					}()
 					arguments := req.Params.Arguments
 					if len(arguments) == 0 {

@@ -11,6 +11,7 @@ import (
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
+	"github.com/andrewmccall/sproozi/internal/telemetry"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -59,6 +60,13 @@ func addManagedNativeContract(ctx context.Context, kube client.Client, run *api.
 			TokenPath: harness.NativeGatewayTokenPath, TrustBundle: harness.NativeGatewayTrustBundle}}
 	if native := runtime.Spec.ClientConfig.NativeSession; native != nil {
 		launch.Model, launch.Options = native.Model, slices.Clone(native.Options)
+		if native.Telemetry == api.NativeTelemetryRelay {
+			launch.ClientConfig, err = harness.WithTelemetry(launch.ClientConfig, binding.Harness,
+				runtime.Spec.GatewayEndpoint, telemetry.TraceParent(binding.SessionID))
+			if err != nil {
+				return err
+			}
+		}
 	}
 	if err = launch.Validate(time.Now()); err != nil {
 		return err

@@ -9,10 +9,11 @@ import (
 	"slices"
 	"time"
 
-	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 )
 
 // ManagedTemplateAnnotation is set only on an administrator-owned template.
@@ -128,4 +129,19 @@ func RequireActive(ctx context.Context, kube client.Client, run *api.AgentRun, r
 		}
 	}
 	return fmt.Errorf("session native container is not running")
+}
+
+// ExecutionForRun names the session execution a run serves, for telemetry
+// correlation only; it grants nothing. A run without a valid registry record,
+// or bound to another run, is its own execution and yields its UID.
+func ExecutionForRun(ctx context.Context, kube client.Reader, run *api.AgentRun) string {
+	var cm corev1.ConfigMap
+	if kube.Get(ctx, client.ObjectKey{Namespace: run.Namespace, Name: NameForRun(run.Name)}, &cm) != nil {
+		return string(run.UID)
+	}
+	record, err := read(&cm)
+	if err != nil || record.IntendedRunName != run.Name || record.RunUID != "" && record.RunUID != string(run.UID) {
+		return string(run.UID)
+	}
+	return record.SessionID
 }

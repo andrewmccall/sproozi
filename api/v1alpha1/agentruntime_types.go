@@ -244,7 +244,20 @@ type NativeSessionConfig struct {
 	// +kubebuilder:validation:MaxItems=32
 	// +kubebuilder:validation:items:MaxLength=4096
 	Options []string `json:"options,omitempty"`
+
+	// Telemetry set to Relay exports the harness's own OpenTelemetry traces,
+	// metrics and logs through the gateway's OTLP relay. Prompt, response and
+	// tool content capture stays off. The gateway must also enable the relay.
+	// +optional
+	// +kubebuilder:validation:Enum=Relay
+	Telemetry NativeTelemetryMode `json:"telemetry,omitempty"`
 }
+
+// NativeTelemetryMode selects how a managed native harness exports its own telemetry.
+type NativeTelemetryMode string
+
+// NativeTelemetryRelay exports harness telemetry through the gateway relay.
+const NativeTelemetryRelay NativeTelemetryMode = "Relay"
 
 func (c RuntimeClientConfig) validateNativeSession() error {
 	if c.NativeSession == nil {

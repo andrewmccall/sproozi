@@ -75,6 +75,7 @@ func prepareCodexLaunch(c config, thread string, env []string) ([]string, []stri
 	if err := installCodexProjectTrust(nativeHome); err != nil {
 		return nil, nil, err
 	}
+	env = append(env, c.ClientConfig.TelemetryEnvironment()...)
 	return codexArguments(c, thread), append(env, "CODEX_HOME="+nativeHome), nil
 }
 

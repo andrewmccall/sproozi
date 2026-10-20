@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/url"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -22,14 +23,48 @@ const (
 // It contains broker connections and a credential-free Kubernetes client binding,
 // never upstream endpoints, credentials, or configuration from a checkpoint.
 type NativeClientConfig struct {
-	Kubernetes bool     `json:"kubernetes,omitempty"`
-	MCPGateway string   `json:"mcpGateway,omitempty"`
-	MCPServers []string `json:"mcpServers,omitempty"`
+	Kubernetes bool             `json:"kubernetes,omitempty"`
+	MCPGateway string           `json:"mcpGateway,omitempty"`
+	MCPServers []string         `json:"mcpServers,omitempty"`
+	Telemetry  *NativeTelemetry `json:"telemetry,omitempty"`
+}
+
+// NativeTelemetry points the harness's own OpenTelemetry export at the gateway
+// relay. TraceParent is the execution's root span, so harness spans join the
+// execution trace. Content capture is never configurable.
+type NativeTelemetry struct {
+	Endpoint    string `json:"endpoint"`
+	TraceParent string `json:"traceParent"`
+}
+
+// TelemetryPath is where the gateway serves its OTLP/HTTP relay.
+const TelemetryPath = "/otlp"
+
+var traceParentPattern = regexp.MustCompile(`^00-[0-9a-f]{32}-[0-9a-f]{16}-0[01]$`)
+
+// WithTelemetry adds relay export to c, which may be nil, for the harnesses
+// whose native telemetry Sproozi configures.
+func WithTelemetry(c *NativeClientConfig, kind NativeKind, gateway, traceParent string) (*NativeClientConfig, error) {
+	if c == nil {
+		c = &NativeClientConfig{}
+	}
+	c.Telemetry = &NativeTelemetry{Endpoint: gateway + TelemetryPath, TraceParent: traceParent}
+	return c, c.Validate(kind)
 }
 
 func (c *NativeClientConfig) Validate(kind NativeKind) error {
 	if c == nil {
 		return nil
+	}
+	if t := c.Telemetry; t != nil {
+		if kind != NativeCodex && kind != NativeClaude {
+			return errors.New("native telemetry requires Codex or Claude Code")
+		}
+		u, err := url.Parse(t.Endpoint)
+		if err != nil || u.Scheme != nativeHTTPScheme || u.Host == "" || u.User != nil || u.Path != TelemetryPath ||
+			u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || !traceParentPattern.MatchString(t.TraceParent) {
+			return errors.New("native telemetry requires the exact gateway relay and an execution trace parent")
+		}
 	}
 	if len(c.MCPServers) > 32 {
 		return errors.New("native MCP connection count exceeded")
@@ -66,12 +101,49 @@ func (c *NativeClientConfig) CodexOptions() []string {
 	}
 	names := slices.Clone(c.MCPServers)
 	slices.Sort(names)
-	options := make([]string, 0, 2*len(names))
+	options := make([]string, 0, 2*len(names)+4)
 	for _, name := range names {
 		key := "mcp_servers." + name
 		options = append(options, key+".url="+strconv.Quote(c.MCPGateway+"/mcp/"+name), key+".required=true")
 	}
-	return options
+	return append(options, c.codexTelemetry()...)
+}
+
+// codexTelemetry exports Codex's logs, traces and metrics over OTLP/HTTP
+// protobuf to the relay, with prompt logging off. The exporters trust the
+// gateway through the sandbox's standard trust environment, like model calls.
+func (c *NativeClientConfig) codexTelemetry() []string {
+	if c.Telemetry == nil {
+		return nil
+	}
+	exporter := func(signal string) string {
+		return `{otlp-http={endpoint=` + strconv.Quote(c.Telemetry.Endpoint+"/v1/"+signal) + `,protocol="binary"}}`
+	}
+	return []string{"otel.environment=\"sproozi\"", "otel.log_user_prompt=false",
+		"otel.exporter=" + exporter("logs"), "otel.trace_exporter=" + exporter("traces"),
+		"otel.metrics_exporter=" + exporter("metrics")}
+}
+
+// ClaudeTelemetryEnvironment enables Claude Code's metrics, events and beta
+// traces over OTLP/HTTP protobuf to the relay. Its prompt, response and tool
+// detail switches stay unset, so Claude Code redacts that content.
+func (c *NativeClientConfig) ClaudeTelemetryEnvironment() []string {
+	if c == nil || c.Telemetry == nil {
+		return nil
+	}
+	return []string{"CLAUDE_CODE_ENABLE_TELEMETRY=1", "CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1",
+		"OTEL_METRICS_EXPORTER=otlp", "OTEL_LOGS_EXPORTER=otlp", "OTEL_TRACES_EXPORTER=otlp",
+		"OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf", "OTEL_EXPORTER_OTLP_ENDPOINT=" + c.Telemetry.Endpoint,
+		"TRACEPARENT=" + c.Telemetry.TraceParent}
+}
+
+// TelemetryEnvironment passes the execution trace parent to any harness that
+// reads TRACEPARENT, such as Codex.
+func (c *NativeClientConfig) TelemetryEnvironment() []string {
+	if c == nil || c.Telemetry == nil {
+		return nil
+	}
+	return []string{"TRACEPARENT=" + c.Telemetry.TraceParent}
 }
 
 // NativeKubeconfig targets the inspected authority through the authenticated
