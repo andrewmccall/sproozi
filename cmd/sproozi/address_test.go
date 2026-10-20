@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/andrewmccall/sproozi/internal/testutil"
 
@@ -110,6 +111,13 @@ func TestSessionsWritesOneLabelledCatalogue(t *testing.T) {
 	}()
 	var stdout bytes.Buffer
 	if err = run([]string{"sessions", testSocketFlag, socket, "--project", "sproozi-dev"}, &stdout); err != nil {
+		select {
+		case e := <-done:
+			t.Logf("DIAG fake home finished with: %v", e)
+		case <-time.After(2 * time.Second):
+			t.Logf("DIAG fake home never finished (no connection accepted)")
+		}
+		t.Logf("DIAG socket=%q", socket)
 		t.Fatal(err)
 	}
 	if err = <-done; err != nil {
