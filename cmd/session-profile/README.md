@@ -1,11 +1,11 @@
-# Fixed Kubernetes session profile
+# Remote executor (`session-profile`)
 
 `session-profile` serves one administrator-approved Kubernetes placement over
 authenticated TLS. The developer receives its fixed HTTPS URL, CA certificate
-and principal token file. Kubernetes credentials remain with the profile service.
+and principal token file. Kubernetes credentials remain with the remote executor.
 See the [session mobility guide](../../docs/guides/session-mobility.md) for the
 local/remote command sequence. Both selected clients have passed production
-Docker-to-Kubernetes-to-Docker round trips through this profile. Codex's extended
+Docker-to-Kubernetes-to-Docker round trips through this executor. Codex's extended
 proof also covers held-turn movement, forced cancellation and denial probes;
 Claude's full round trip establishes foreground Bash, workspace continuity and
 accounting. See the [repeatable fixture setup](../../hack/verify/session-mobility/README.md)

@@ -47,6 +47,12 @@ What Sproozi adds to every harness it launches: environment instructions, the
 `sproozi-access` skill and the control connection. It is guidance, not
 authority. Also seen as: managed harness configuration.
 
+### Profile
+
+Your own instructions and skills, in `~/.sproozi/profile`, that every managed
+Codex and Claude Code session receives after the Sproozi integration. Like the
+integration, it is guidance, not authority. See [Profile](docs/reference/profile.md).
+
 ### Capability
 
 A named kind of access a run can request, such as `kubernetes.read`,
@@ -113,7 +119,7 @@ Its ID is `executionId`. Also seen as: Sproozi execution.
 ### Placement
 
 Where an execution runs: local Docker, managed by the home daemon, or a
-Kubernetes cluster reached through a profile service.
+Kubernetes cluster reached through a remote executor.
 
 ### Visit
 
@@ -162,16 +168,16 @@ The `sproozi serve` process on your own machine. It owns local Docker
 placements, their gateway and accounting, and the sessions you have pulled.
 Also seen as: home (in CLI output and flags), home service.
 
-### Profile service
+### Remote executor
 
 The `session-profile` program. It serves one administrator-approved Kubernetes
 placement, holds that cluster's credentials and hosts a catalogue of remote
-work. Also seen as: remote profile, fixed remote profile.
+work. Also seen as: profile service, remote profile, fixed remote profile.
 
 ### Executor
 
 The owner a CLI command addresses, selected with `--executor NAME`. `docker`
-means the home daemon; any other name is a profile service from the home
+means the home daemon; any other name is a remote executor from the home
 configuration.
 
 ### Catalogue

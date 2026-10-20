@@ -18,7 +18,7 @@ session is not supported.
 
 The trusted home daemon owns a local Unix Docker socket, fixed image IDs, its TLS
 gateway, provider credentials and protected journals. Local start requires no
-cluster or kubeconfig. A developer can use the profile service after an
+cluster or kubeconfig. A developer can use the remote executor after an
 administrator provisions it. The remote service holds its own Kubernetes
 credentials; the developer receives only the profile URL, public CA and protected
 principal token file.
@@ -103,10 +103,10 @@ its fixed HTTPS origin, principal token file, CA file and checkpoint byte limit.
 The remote placement alias must match the profile's `placementName`. All
 placements must use the same checkpoint byte limit and approve the same initial
 instructions and native version. The original home duration must also fit the
-profile service and live policy; Kubernetes policy currently permits at most one
+remote executor and live policy; Kubernetes policy currently permits at most one
 hour. Moving does not restart the lifetime clock.
 
-## Provision the profile service
+## Provision the remote executor
 
 Follow [the profile setup](../../cmd/session-profile/README.md) to install the
 current controller/shared gateway and generated CRDs in an evaluation cluster
@@ -114,7 +114,7 @@ with a NetworkPolicy-enforcing CNI. The administrator supplies the managed nativ
 runtime, approved template/policy, immutable certificate-only worker trust bundle,
 shared gateway TLS and gateway-owned provider credentials.
 
-The profile service uses either its protected host kubeconfig or an in-cluster
+The remote executor uses either its protected host kubeconfig or an in-cluster
 ServiceAccount with the documented scoped Run/registration/account/Pod permissions.
 It fixes the principal, Run namespace, template, ceilings and maximum duration in
 private JSON. Incoming move requests cannot select images, environment variables,
@@ -189,7 +189,7 @@ attached reaches the harness. A reconnect replays a bounded terminal output tail
 native `/quit` when you intend to move; the placement owns graceful quit and the
 independent container stop/checkpoint boundary.
 
-Move to the configured profile service, attach there, then return locally:
+Move to the configured remote executor, attach there, then return locally:
 
 ```sh
 bin/sproozi move --socket /absolute/private/home/control.sock \
@@ -257,9 +257,9 @@ daemon/profile with the same protected state and configuration; stopping those
 processes alone doesn't prove that the agent stopped. The native original
 deadline still applies.
 
-Managed remote Pods keep a Sproozi finalizer until the profile service records
-that their harness container stopped. A stopped helper or lost profile service
-can leave a Pod stuck terminating. Restart the same profile service and run
+Managed remote Pods keep a Sproozi finalizer until the remote executor records
+that their harness container stopped. A stopped helper or lost remote executor
+can leave a Pod stuck terminating. Restart the same remote executor and run
 `recover` for the original operation, and keep its journal and checkpoint files.
 Don't remove the finalizer or force-delete the Pod: Sproozi then can't tell
 whether the agent stopped, so the allowance stays held and the session can't

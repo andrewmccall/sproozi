@@ -18,7 +18,7 @@ cmd/main.go                   Controller manager entry point
 cmd/gateway/                  Shared authenticated gateway (the only workload-facing proxy)
 cmd/webhook/                  Signed inbound event receiver that creates AgentRuns
 cmd/sproozi/                  Public CLI and home daemon (`sproozi serve`)
-cmd/session-profile/          Profile service: one Kubernetes placement and remote work catalogue
+cmd/session-profile/          Remote executor: one Kubernetes placement and remote work catalogue
 cmd/tasks/                    Task service for persistent assistants over MCP
 cmd/native-session/           Supervisor for the harness inside a managed sandbox
 cmd/checkpoint/               Checkpoint helper container

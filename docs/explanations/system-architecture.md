@@ -161,8 +161,8 @@ ServiceAccount has no direct Kubernetes read grant.
 ## Managed native session continuity
 
 The [home daemon](../../GLOSSARY.md#home-daemon) manages controlled Docker
-sessions. It connects to a [profile service](../../GLOSSARY.md#profile-service)
-to place work on Kubernetes. The profile holds Kubernetes
+sessions. It connects to a [remote executor](../../GLOSSARY.md#remote-executor)
+to place work on Kubernetes. The executor holds Kubernetes
 credentials; the home daemon does not need them. Each remote visit creates a
 fresh `AgentRun` and must pass current policy checks.
 
@@ -170,8 +170,8 @@ fresh `AgentRun` and must pass current policy checks.
 flowchart LR
     CLI[Native terminal client] --> Home[Home daemon and session journal]
     Home --> Docker[Controlled Docker placement]
-    Home --> Profile[Authenticated profile service]
-    Profile --> Run[Fresh Kubernetes AgentRun]
+    Home --> Executor[Authenticated remote executor]
+    Executor --> Run[Fresh Kubernetes AgentRun]
     Docker --> LocalGateway[Local model gateway and accounts]
     Run --> Gateway[Shared gateway and managed accounts]
     Docker --> Checkpoint[Selected native conversation and Git workspace]
@@ -202,7 +202,7 @@ because a visit's launch settings never change. See [ADR
 0018](../adr/0018-coordinator-owns-every-visit.md).
 
 [Remote work and local resume](../guides/portable-workflows.md) uses a catalogue hosted by
-the profile service. It runs independently of the laptop. After a Codex task
+the remote executor. It runs independently of the laptop. After a Codex task
 finishes, it stops the worker, finalizes usage and retains native and Git state.
 Hermes can submit and inspect tasks through authenticated MCP.
 
@@ -249,5 +249,5 @@ boundaries.
 
 The [future architecture overview](future-architecture/README.md) covers managed
 MCP servers, more harnesses, GUI and IDE clients, adoption of existing sessions,
-and broader profile services. Each extension needs its own implementation and
+and broader remote executors. Each extension needs its own implementation and
 tests.

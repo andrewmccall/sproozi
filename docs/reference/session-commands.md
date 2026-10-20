@@ -20,7 +20,7 @@ Use [remote work and local resume](../guides/portable-workflows.md) for remote t
 pull and local resume, or [native session mobility](../guides/session-mobility.md)
 for interactive moves within one bounded execution. The
 [home configuration reference](../../cmd/sproozi/README.md) describes private files,
-images, gateway credentials and profile services.
+images, gateway credentials and remote executors.
 
 ## Remote work and local resume
 

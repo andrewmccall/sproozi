@@ -29,12 +29,12 @@ personal-session adoption are not part of this workflow.
 2. Build the selected native image and provision its managed runtime/template/policy
    using [the complete mobility setup](../../hack/verify/session-mobility/README.md).
    The image contains Git, the native supervisor, checkpoint helper and
-   `/usr/local/bin/session-profile`. The profile service needs private durable
+   `/usr/local/bin/session-profile`. The remote executor needs private durable
    storage and administrator-owned Kubernetes credentials; workers and Hermes do
    not receive those credentials.
 3. Configure the [home daemon](../../cmd/sproozi/README.md) with one private JSON
    file. It selects local Docker images/network, gateway TLS/provider credential
-   files, finite allowances and named profile services. Keep it outside any
+   files, finite allowances and named remote executors. Keep it outside any
    transferred repository. Use `--config FILE` consistently or put it at the
    platform's user configuration directory under `sproozi/config.json`.
 4. Configure scoped GitHub access through the existing GitHub App gateway for

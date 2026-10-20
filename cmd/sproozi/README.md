@@ -130,7 +130,7 @@ with the same certificate's IP SAN. The fixture CA must also be selected by the
 remote gateway's administrator-owned upstream TLS configuration.
 
 Set `local.harness` explicitly to `codex` or `claude-code`; it must match every
-remote profile and runtime used by this session. There is no default or client
+remote executor and runtime used by this session. There is no default or client
 switch during a move. Sproozi checks no client version; the repository's client images install the
 releases pinned in `hack/clients`. For Claude, use an approved Anthropic model/provider URL, omit
 `nativeOptions`, and cover `api.anthropic.com` in the inspection certificate.
@@ -153,9 +153,9 @@ authority. Bounded monetary MCP allowances are rejected because trusted MCP cost
 pricing is not implemented. Administrator `nativeOptions` supplies the matching
 stock Codex MCP client configuration; checkpoint contents supply none of it.
 
-Every remote profile must use the same checkpoint byte limit. Its separate profile
-service pins its own approved template, capabilities, ceilings and maximum
-duration. The home service holds only that profile's CA and bearer token, never
+Every remote executor must use the same checkpoint byte limit. Each one pins
+its own approved template, capabilities, ceilings and maximum duration. The
+home service holds only that executor's CA and bearer token, never
 Kubernetes credentials. Keep approved instructions identical
 through every visit: native resume retains the original developer instruction
 block. Claude receives the approved instructions through its fresh managed launch;
@@ -217,7 +217,7 @@ Codex uses native quit; Claude uses controlled process shutdown after its observ
 Stop and settled transcript. Accepted input after a Claude turn prevents reuse of
 its earlier Stop, so finish a new turn before requesting that graceful move.
 
-After a completed turn, move to the fixed remote profile and return:
+After a completed turn, move to the remote executor and return:
 
 ```sh
 bin/sproozi move --socket /absolute/private/home/control.sock \
