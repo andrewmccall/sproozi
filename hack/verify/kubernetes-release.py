@@ -145,7 +145,7 @@ def verify(args):
         logs = {}
         cluster.kubectl("create", "-f", str(release / "first-check/agentrun.yaml"))
         capture_logs(cluster, "first-check", logs)
-        phase = wait("first-check phase", lambda: cluster.json("get", "agentrun", "-n", SYSTEM, "first-check").get("status", {}).get("phase") in ("Succeeded", "Failed")
+        phase = wait("first-check phase", lambda: cluster.json("get", "agentrun", "-n", SYSTEM, "first-check").get("status", {}).get("phase") in ("Succeeded", "Failed", "TimedOut")
                      and cluster.json("get", "agentrun", "-n", SYSTEM, "first-check")["status"]["phase"], timeout=240)
         report["steps"]["firstCheck"] = {"phase": phase, "permitted": "PERMITTED: Pod read succeeded" in logs["first-check"],
                                          "deniedRead": "DENIED: Secret read" in logs["first-check"],
@@ -182,7 +182,7 @@ def verify(args):
         retired = cluster.json("get", "configmap", "-n", AGENTS, "sproozi-sandbox-trust-2")
         cluster.kubectl("patch", "agentruntime", "-n", SYSTEM, "first-check", "--type=merge", "-p",
                         json.dumps({"spec": {"clientConfig": {"trustBundleConfigMap": {"name": "sproozi-sandbox-trust-2", "key": "ca-bundle.pem"}}}}))
-        wait("previous run to finish", lambda: cluster.json("get", "agentrun", "-n", SYSTEM, "first-check").get("status", {}).get("phase") in ("Succeeded", "Failed"), timeout=240)
+        wait("previous run to finish", lambda: cluster.json("get", "agentrun", "-n", SYSTEM, "first-check").get("status", {}).get("phase") in ("Succeeded", "Failed", "TimedOut"), timeout=240)
         cluster.kubectl("delete", "agentrun", "-n", SYSTEM, "first-check")
         cluster.kubectl("create", "-f", str(release / "first-check/agentrun.yaml"))
         capture_logs(cluster, "first-check", logs)
