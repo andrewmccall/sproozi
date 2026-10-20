@@ -18,3 +18,6 @@
 # Include the native launch adapter embedded in the manager binary
 !internal/harness/opencode-launch.py
 !internal/harness/hermes-launch.py
+
+# Include the Sproozi instructions and skill embedded in every harness launch
+!internal/harness/managed/*.md
