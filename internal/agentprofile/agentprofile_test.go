@@ -158,8 +158,8 @@ func TestLoadDirectoryRejectsSymlinkedFiles(t *testing.T) {
 	if _, err := agentprofile.LoadDirectory(dir); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink("/etc/hosts", filepath.Join(dir, agentprofile.InstructionsFile)); err != nil {
-		t.Fatal(err)
+	if err := os.Symlink(filepath.Join(dir, "elsewhere"), filepath.Join(dir, agentprofile.InstructionsFile)); err != nil {
+		t.Skipf("symlinks unavailable on this host: %v", err)
 	}
 	if _, err := agentprofile.LoadDirectory(dir); err == nil {
 		t.Fatal("LoadDirectory followed a symlink")

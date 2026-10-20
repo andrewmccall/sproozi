@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -523,7 +524,11 @@ func TestProfileFolderIsBesideTheConfigurationFile(t *testing.T) {
 	t.Parallel()
 	dir := testutil.PrivateDir(t)
 	path := filepath.Join(dir, "config.json")
-	data := `{"directory":"/tmp/home","model":"fixture","local":{"Name":"local"PROFILE},` +
+	home, err := json.Marshal(filepath.Join(dir, "home"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := `{"directory":` + string(home) + `,"model":"fixture","local":{"Name":"local"PROFILE},` +
 		`"maxDuration":"1h","allowances":{"model.inference":{"units":{"bounded":true,"value":10}}}}`
 	if err := testutil.WriteFile(path, []byte(strings.Replace(data, "PROFILE", `,"ProfileDirectory":"/x"`, 1)), 0600); err != nil {
 		t.Fatal(err)
