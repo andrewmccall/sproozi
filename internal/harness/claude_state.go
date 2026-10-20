@@ -338,7 +338,10 @@ func validateClaudeAttachment(row claudeRecord) error {
 		return errors.New("unsupported Claude context attachment")
 	}
 	switch row.Attachment.Type {
-	case "environment", "model", "total_tokens_reminder", "session_context", "date", "remote_session_change", "prompt_snapshot":
+	// skill_listing appears once any plugin skill is loaded, as the Sproozi
+	// integration always loads one.
+	case "environment", "model", "total_tokens_reminder", "session_context", "date", "remote_session_change", "prompt_snapshot",
+		"skill_listing":
 		return nil
 	default:
 		return errors.New("unsupported Claude context attachment")
