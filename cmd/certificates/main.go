@@ -58,9 +58,9 @@ func main() {
 	for {
 		status, err := c.Reconcile(ctx)
 		if err != nil {
-			log.Printf("Failed to reconcile gateway certificates: %v", err)
+			log.Printf("Failed to reconcile gateway certificates err=%q", err)
 		} else if status.Changed {
-			log.Printf("Updated gateway certificates; trust %s, leaf valid until %s", status.TrustConfigMap,
+			log.Printf("Updated gateway certificates trustConfigMap=%s leafNotAfter=%s", status.TrustConfigMap,
 				status.LeafNotAfter.Format(time.RFC3339))
 		}
 		select {

@@ -110,7 +110,8 @@ func deny(ip, port string, stdout io.Writer) error {
 	other = other%65535 + 1
 	attempts := []struct{ network, address, path string }{
 		{tcp4, "1.1.1.1:443", "public IPv4 HTTPS"},
-		{tcp4, "api.openai.com:443", "direct provider"},
+		{tcp4, "api.openai.com:443", "direct OpenAI provider"},
+		{tcp4, "api.anthropic.com:443", "direct Anthropic provider"},
 		{tcp4, net.JoinHostPort(ip, strconv.Itoa(other)), "gateway alternate port"},
 		{tcp4, "169.254.169.254:80", "metadata endpoint"},
 		{"tcp6", "[2606:4700:4700::1111]:443", "public IPv6 HTTPS"},

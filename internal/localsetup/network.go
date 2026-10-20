@@ -58,7 +58,7 @@ func inspectNetwork(ctx context.Context, d Docker, name, installation string) (N
 	}
 	f := found[0]
 	if f.Driver != "bridge" || f.Labels[installationLabel] != installation {
-		return Network{}, fail("network", fmt.Errorf("network %s exists but is not owned by this installation", name), "remove it or choose another installation root")
+		return Network{}, fail("network", fmt.Errorf("network %s exists but is not owned by this installation", name), "remove it or choose another local installation with --root")
 	}
 	n := Network{Name: name}
 	for _, c := range f.IPAM.Config {

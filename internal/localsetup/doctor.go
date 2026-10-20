@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"path/filepath"
 	"strings"
 	"time"
@@ -120,10 +121,14 @@ func Doctor(ctx context.Context, l Layout, checkProvider bool) (r Report) {
 	}
 	service := ServiceState(ctx, l, config)
 	if !service.Running {
-		r.add("service", fail("service", errors.New("the home service is not running"), "sproozi service start"), "")
+		r.add("service", fail("service", errors.New("the home daemon is not running"), "sproozi service start"), "")
 		return r
 	}
 	r.add("service", nil, fmt.Sprintf("running with %d active session(s); log %s", len(service.Active), service.Log))
+	if ip := net.ParseIP(inst.Endpoint.ListenHost); ip != nil && ip.IsUnspecified() {
+		r.add("network", nil, fmt.Sprintf("warning: the gateway listens on every interface because no narrower address "+
+			"reached workers; allow its ports only from the Docker network in the host firewall (ports %v)", ports(inst)))
+	}
 	for _, h := range inst.Harnesses {
 		report, err := ProbePath(ctx, docker, inst.ID, *inst.Image, network, inst.Endpoint.GatewayIPv4, h.Port, trust)
 		denied := 0
@@ -225,4 +230,12 @@ func PKIStore(l Layout) (*pki.Store, error) {
 		return nil, fmt.Errorf("no local certificate authority in %s: %w", l.PKI(), err)
 	}
 	return pki.Open(l.PKI(), pki.DefaultPolicy, nil)
+}
+
+func ports(inst Installation) []uint16 {
+	out := make([]uint16, 0, len(inst.Harnesses))
+	for _, h := range inst.Harnesses {
+		out = append(out, h.Port)
+	}
+	return out
 }

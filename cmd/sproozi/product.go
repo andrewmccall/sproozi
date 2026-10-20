@@ -31,7 +31,7 @@ const (
 )
 
 // defaultConfigPath keeps an existing platform configuration authoritative and
-// otherwise uses the local installation root's configuration.
+// otherwise uses the local installation's configuration.
 func defaultConfigPath() (string, error) { return localsetup.DefaultConfigPath() }
 
 // setupOptions holds local provisioning and maintenance flags.

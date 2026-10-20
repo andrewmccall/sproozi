@@ -5,9 +5,11 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"slices"
 	"time"
 
@@ -48,10 +50,8 @@ func (r *certificateReloader) reload() (bool, error) {
 	if certificate.Leaf, err = x509.ParseCertificate(certificate.Certificate[0]); err != nil {
 		return false, err
 	}
-	for _, host := range r.hosts {
-		if err = certificate.Leaf.VerifyHostname(host); err != nil {
-			return false, fmt.Errorf("replacement certificate does not cover %q", host)
-		}
+	if err = r.verifyChain(certificate.Leaf); err != nil {
+		return false, err
 	}
 	if time.Now().After(certificate.Leaf.NotAfter) {
 		return false, fmt.Errorf("replacement certificate expired at %s", certificate.Leaf.NotAfter)
@@ -59,6 +59,34 @@ func (r *certificateReloader) reload() (bool, error) {
 	r.holder.Store(certificate)
 	r.last = current
 	return true, nil
+}
+
+// verifyChain checks every inspected host. When the Secret also carries the
+// published trust as ca.crt, as the certificate controller writes it, the leaf
+// must chain to that trust; otherwise only the names are checked.
+func (r *certificateReloader) verifyChain(leaf *x509.Certificate) error {
+	trust, err := os.ReadFile(filepath.Join(filepath.Dir(r.certFile), "ca.crt"))
+	if os.IsNotExist(err) {
+		for _, host := range r.hosts {
+			if err = leaf.VerifyHostname(host); err != nil {
+				return fmt.Errorf("replacement certificate does not cover %q", host)
+			}
+		}
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(trust) {
+		return errors.New("replacement trust bundle has no certificates")
+	}
+	for _, host := range r.hosts {
+		if _, err = leaf.Verify(x509.VerifyOptions{Roots: roots, DNSName: host}); err != nil {
+			return fmt.Errorf("replacement certificate does not verify for %q: %w", host, err)
+		}
+	}
+	return nil
 }
 
 func (r *certificateReloader) run(ctx context.Context) {
@@ -71,9 +99,9 @@ func (r *certificateReloader) run(ctx context.Context) {
 		case <-ticker.C:
 			changed, err := r.reload()
 			if err != nil {
-				log.Printf("Failed to reload gateway certificate: %v", err)
+				log.Printf("Failed to reload gateway certificate err=%q", err)
 			} else if changed {
-				log.Printf("Reloaded gateway certificate valid until %s", r.holder.Load().Leaf.NotAfter.Format(time.RFC3339))
+				log.Printf("Reloaded gateway certificate notAfter=%s", r.holder.Load().Leaf.NotAfter.Format(time.RFC3339))
 			}
 		}
 	}

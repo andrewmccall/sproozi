@@ -52,12 +52,13 @@ certificate authority, credentials and configuration.
 | Credentials | Stores the provider key from a hidden prompt, `--credential-file` or `--credential-stdin`. It then lists the provider's models to check the key, unless `--skip-credential-check` is given. |
 | Certificates | Creates the certificate authority and a serving leaf covering the gateway address and the enabled provider authorities. |
 | Configuration | Writes `config.json`. On a later run it adds a new harness and keeps every other value. It refuses when the existing configuration's image, network, gateway address or approved instructions differ from the installation. |
-| Service | Starts `sproozi serve` detached from the terminal, or restarts it when the configuration changed. |
-| Readiness | For each harness, starts a network anchor and a restricted worker on the network and verifies the gateway's TLS identity. It then confirms the worker cannot reach a public address, the provider directly, another gateway port, cloud metadata, direct DNS or IPv6. |
+| Service | Starts `sproozi serve` detached from the terminal. After a configuration or credential change it restarts the home daemon only when no session is active; otherwise it stops with a `service` error saying the restart is still needed. |
+| Readiness | For each harness, starts a network anchor and a restricted worker on the network and verifies the gateway's TLS identity. It then confirms the worker cannot reach a public address, either provider directly, another gateway port, cloud metadata, direct DNS or IPv6. |
 
 On Docker Desktop, workers reach the gateway at the engine's host address and
 the gateway listens only on `127.0.0.1`. On Linux Docker Engine it listens on
-the bridge gateway address. A wildcard listener is used only when neither works.
+the bridge gateway address. A wildcard listener is used only when neither works;
+`sproozi doctor` then warns and names the ports to restrict in the host firewall.
 
 ## Defaults
 
@@ -141,8 +142,10 @@ rotation is waiting for. The trust bundle contains certificates only. Sproozi
 never adds its authority to the host's trust store, and the authority never
 verifies upstream providers.
 
-A missing or unreadable authority key stops renewal and new launches; it never
-creates a replacement automatically. `certificates replace-ca` creates a new
+A missing or unreadable authority key, or a lost `pki/state.json`, stops
+renewal and new launches; it never creates a replacement automatically. After a
+switch, the home daemon checks its own listeners against the new trust before
+it retires the previous authority. `certificates replace-ca` creates a new
 authority, trusts only it and destroys every older key.
 
 ## Supported platforms

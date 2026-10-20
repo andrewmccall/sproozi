@@ -1010,8 +1010,11 @@ kubectl get secret -n sproozi-system sproozi-certificate-authority \
 ```
 
 `sproozi.com/leaf-not-after`, `sproozi.com/renew-at`,
-`sproozi.com/trust-configmap` and `sproozi.com/rotation-stage` report the
-current state. `sproozi.com/last-error` explains a refused request. If renewal
+`sproozi.com/issuer-fingerprint`, `sproozi.com/authority-not-after`,
+`sproozi.com/rotate-at`, `sproozi.com/trust-configmap` and
+`sproozi.com/rotation-stage` report the current state. Start a rotation before
+`rotate-at`. If the authority Secret loses its data, the controller stops with
+an error instead of creating a new authority; restore the Secret from a backup. `sproozi.com/last-error` explains a refused request. If renewal
 fails, the previous certificate stays in service and the controller log names
 the cause. Renew immediately with:
 

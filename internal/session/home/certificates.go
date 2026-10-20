@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"slices"
 	"time"
 
@@ -29,6 +30,8 @@ type certificates struct {
 	log     io.Writer
 	// fenced reports a placement's independent stop evidence for a launch.
 	fenced func(session.Launch) (bool, error)
+	// listeners are the gateway addresses checked after a switch.
+	listeners []string
 }
 
 // maintenanceInterval also bounds how late renewal notices a sleep/wake jump.
@@ -132,8 +135,9 @@ func (c *certificates) trustFor(l session.Launch) ([]byte, error) {
 	return c.store.TrustFor(l.AllocationID, reference)
 }
 
-// released forgets an allocation whose usage was sealed after its independent stop.
-func (c *certificates) released(l session.Launch) {
+// releaseConsumer forgets an allocation's trust record once its usage is
+// finalized, which follows the placement's independent stop.
+func (c *certificates) releaseConsumer(l session.Launch) {
 	if c.store != nil {
 		_ = c.store.Release(l.AllocationID)
 	}
@@ -175,6 +179,10 @@ func (c *certificates) maintain() error {
 			changed = true
 			c.logf("Switched gateway certificate to the new authority")
 		case distributed && st.Rotation.Stage == pki.StageSwitched:
+			// Retire only after the gateway serves a leaf the new trust accepts.
+			if err = c.selfCheck(); err != nil {
+				return fmt.Errorf("switched gateway certificate failed its check; the previous authority stays trusted: %w", err)
+			}
 			if err = c.store.RetireRotation(true); err != nil {
 				return err
 			}
@@ -221,6 +229,36 @@ func (c *certificates) distributed(generation int) (bool, error) {
 	return remaining == 0, nil
 }
 
+// selfCheck connects to each gateway listener and verifies the served leaf
+// against the current worker trust for the gateway address.
+func (c *certificates) selfCheck() error {
+	_, trust, _, err := c.store.Serving()
+	if err != nil {
+		return err
+	}
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(trust) || len(c.names.IPs) == 0 {
+		return errors.New("no trust or gateway address to check")
+	}
+	for _, listen := range c.listeners {
+		host, port, err := net.SplitHostPort(listen)
+		if err != nil {
+			return err
+		}
+		if ip := net.ParseIP(host); ip == nil || ip.IsUnspecified() {
+			host = "127.0.0.1"
+		}
+		dialer := &net.Dialer{Timeout: 5 * time.Second}
+		conn, err := tls.DialWithDialer(dialer, "tcp4", net.JoinHostPort(host, port),
+			&tls.Config{RootCAs: roots, ServerName: c.names.IPs[0], MinVersion: tls.VersionTLS13})
+		if err != nil {
+			return err
+		}
+		_ = conn.Close()
+	}
+	return nil
+}
+
 func (c *certificates) reload() error {
 	cert, trust, _, err := c.store.Serving()
 	if err != nil {
@@ -247,7 +285,7 @@ func (c *certificates) run(ctx context.Context) {
 			return
 		case <-ticker.C:
 			if err := c.maintain(); err != nil {
-				c.logf("Failed to maintain gateway certificate: %v", err)
+				c.logf("Failed to maintain gateway certificate err=%q", err)
 			}
 		}
 	}

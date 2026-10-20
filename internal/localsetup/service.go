@@ -15,7 +15,7 @@ import (
 	"github.com/andrewmccall/sproozi/internal/session/home"
 )
 
-// ServiceStatus describes the home service for one installation root.
+// ServiceStatus describes the home daemon for one local installation.
 type ServiceStatus struct {
 	Running bool     `json:"running"`
 	PID     int      `json:"pid,omitempty"`
@@ -96,18 +96,18 @@ func StartService(ctx context.Context, l Layout, c home.Config, executable strin
 		}
 		select {
 		case err := <-exited:
-			return ServiceStatus{}, fail("service", fmt.Errorf("home service exited during startup (%v): %s", err, logTail(l)), "read "+l.ServiceLog())
+			return ServiceStatus{}, fail("service", fmt.Errorf("home daemon exited during startup (%v): %s", err, logTail(l)), "read "+l.ServiceLog())
 		case <-ctx.Done():
 			return ServiceStatus{}, ctx.Err()
 		case <-time.After(200 * time.Millisecond):
 		}
 		if time.Now().After(deadline) {
-			return ServiceStatus{}, fail("service", errors.New("home service did not become ready"), "read "+l.ServiceLog())
+			return ServiceStatus{}, fail("service", errors.New("home daemon did not become ready"), "read "+l.ServiceLog())
 		}
 	}
 }
 
-// StopService stops the home service. Active executions keep running within
+// StopService stops the home daemon. Active executions keep running within
 // their own deadlines unless the caller cancels them first; stopping the
 // daemon is never evidence that a container stopped.
 func StopService(ctx context.Context, l Layout, c home.Config, leaveRunning bool, timeout time.Duration) (ServiceStatus, error) {
@@ -134,7 +134,7 @@ func StopService(ctx context.Context, l Layout, c home.Config, leaveRunning bool
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	return status, fail("service", errors.New("home service did not stop"), "")
+	return status, fail("service", errors.New("home daemon did not stop"), "")
 }
 
 func readPID(l Layout) int {
@@ -158,4 +158,45 @@ func logTail(l Layout) string {
 		data = data[len(data)-1024:]
 	}
 	return strings.TrimSpace(string(data))
+}
+
+// RestartIdle restarts the home daemon so it reads changed configuration or
+// credentials, which it loads only at startup. It never restarts over active
+// sessions; it reports that the restart is still needed instead.
+func RestartIdle(ctx context.Context, l Layout, c home.Config, executable string) (bool, error) {
+	status := ServiceState(ctx, l, c)
+	if !status.Running {
+		return false, nil
+	}
+	if len(status.Active) > 0 {
+		return false, fail("service", fmt.Errorf("%d session(s) are active, so the home daemon keeps its previous "+
+			"configuration and credentials", len(status.Active)),
+			"stop or cancel them, then run sproozi service stop and sproozi service start")
+	}
+	if _, err := StopService(ctx, l, c, false, time.Minute); err != nil {
+		return false, err
+	}
+	if _, err := StartService(ctx, l, c, executable, 2*time.Minute); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// RunningContainers counts running containers attached to the installation's
+// network, which includes every worker's network anchor whether or not the
+// home daemon is running.
+func RunningContainers(ctx context.Context, l Layout) (int, error) {
+	inst, err := LoadInstallation(l)
+	if err != nil || inst.Network == nil {
+		return 0, err
+	}
+	docker, err := DiscoverDocker(ctx, l.DockerCLI())
+	if err != nil {
+		return 0, err
+	}
+	out, err := docker.Output(ctx, nil, "ps", "--quiet", "--filter", "network="+inst.Network.Name)
+	if err != nil {
+		return 0, fail("docker", err, "")
+	}
+	return len(strings.Fields(out)), nil
 }

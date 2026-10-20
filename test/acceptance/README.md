@@ -159,7 +159,7 @@ Tests must check that:
   reach those paths, so the check is shown to discriminate.
 - Each harness's worker reaches only its own gateway port and provider key.
 - Provider keys, CA keys and journals never reach worker mounts, environment,
-  checkpoints or the agents directory. Shared agent files reach only harnesses
+  checkpoints or the shared agent files. Shared agent files reach only harnesses
   that load them, are rejected when they are links or unsafe files, and never
   enter a checkpoint.
 - A renewed leaf reaches new connections without restarting the gateway, an

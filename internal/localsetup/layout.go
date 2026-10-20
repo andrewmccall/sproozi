@@ -1,6 +1,6 @@
 // Package localsetup provisions a local Sproozi installation from a working
 // Docker engine: images, an owned network, a probed gateway endpoint, a private
-// CA, provider credentials, home configuration and a supervised home service.
+// CA, provider credentials, home configuration and a supervised home daemon.
 // It never reads cluster credentials or contacts a Kubernetes API.
 package localsetup
 
@@ -21,7 +21,7 @@ import (
 	"github.com/andrewmccall/sproozi/internal/session/home"
 )
 
-// Layout is the private per-user installation root.
+// Layout is the private per-user local installation.
 //
 //	config.json        trusted home configuration
 //	installation.json  provisioning journal and owned resource identities

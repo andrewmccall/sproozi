@@ -28,7 +28,7 @@ session is not supported.
 
 For local sessions only, `sproozi init --local` prepares everything in this
 section; see [local sessions](local-sessions.md). Use the steps below when you
-also need a remote profile or want to manage the configuration by hand.
+also need a profile service or want to manage the configuration by hand.
 
 ## Prepare the administrator-owned setup
 

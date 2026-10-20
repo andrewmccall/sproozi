@@ -132,6 +132,9 @@ type installer struct {
 	store    *pki.Store
 	config   home.Config
 	changed  bool
+	// credential records that this run stored a provider credential, which a
+	// running home daemon reads only at startup.
+	credential bool
 }
 
 // openInstaller validates the root, takes the setup lock and loads the journal.
@@ -157,7 +160,7 @@ func openInstaller(o Options) (*installer, func(), error) {
 		i.inst, err = LoadInstallation(l)
 	}
 	if err == nil {
-		i.step("Using private installation root %s; shared agent settings live in %s", root, l.Agents())
+		i.step("Using local installation %s; shared agent files live in %s", root, l.Agents())
 		err = i.save("root")
 	}
 	if err != nil {
@@ -248,6 +251,7 @@ func (i *installer) prepareHarness(ctx context.Context) error {
 		if _, err := StoreCredential(i.l, provider.Name, o.Credential); err != nil {
 			return err
 		}
+		i.credential = true
 		i.step("Stored the %s credential in %s", provider.Name, i.l.Credentials())
 	}
 	if o.CheckCredential {
@@ -295,6 +299,17 @@ func (i *installer) prepareCertificates(context.Context) error {
 	for _, h := range i.inst.Harnesses {
 		names.DNS = append(names.DNS, inspectionHost(h.Harness))
 	}
+	if _, err = store.State(); errors.Is(err, pki.ErrNotInitialized) {
+		// Create the authority only on the first run. A journal that already
+		// completed this stage means the state was lost, not never made.
+		if _, done := i.inst.Stages["pki"]; done {
+			return fail("tls", errors.New("the certificate authority's state is missing"),
+				"restore "+i.l.PKI()+" from a backup, or run sproozi certificates replace-ca")
+		}
+		if err = store.Initialize(names); err != nil {
+			return fail("tls", err, "run sproozi certificates status")
+		}
+	}
 	if _, err = store.Ensure(names); err != nil {
 		return fail("tls", err, "run sproozi certificates status")
 	}
@@ -339,10 +354,14 @@ func (i *installer) serve(ctx context.Context) (Result, error) {
 		result.Service = ServiceState(ctx, l, i.config)
 		return result, nil
 	}
-	if status := ServiceState(ctx, l, i.config); i.changed && status.Running {
-		i.step("Restarting the home daemon to load the new configuration")
-		if _, err := StopService(ctx, l, i.config, true, time.Minute); err != nil {
+	if i.changed || i.credential {
+		restarted, err := RestartIdle(ctx, l, i.config, i.o.Executable)
+		if err != nil {
+			result.Service = ServiceState(ctx, l, i.config)
 			return result, err
+		}
+		if restarted {
+			i.step("Restarted the home daemon to load the new configuration and credentials")
 		}
 	}
 	var err error

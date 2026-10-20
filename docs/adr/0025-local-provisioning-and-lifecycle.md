@@ -74,11 +74,15 @@ that names them. With `gateway.pkiDirectory`, the home daemon:
 - serves it through an atomically replaced certificate, so new connections get
   the new leaf without a restart and existing connections keep theirs;
 - records each allocation's trust generations before the bundle leaves the
-  service, releases the record after a sealed stop or independent fence, and
+  service, releases the record once usage is finalized or the placement independently recorded the stop, and
   switches or retires a rotation only when no recorded consumer lacks the new
   generation;
-- never creates an authority at startup. A missing key stops issuance rather
-  than producing an unrelated authority.
+- never creates an authority at startup. Creation is a separate operation that
+  refuses whenever any authority or leaf file exists, and setup runs it only
+  before its journal records the certificate stage. A lost state file or key
+  therefore stops issuance rather than producing an unrelated authority;
+- checks its own listeners against the new trust after a switch, and retires
+  the previous authority only when that check passes.
 
 Emergency replacement is an explicit command that destroys every older key.
 
@@ -109,7 +113,7 @@ an absent service for a provisioned installation.
 
 ### Shared agent files are a launch-time snapshot
 
-The agents directory holds allowlisted instruction files. The trusted home
+The `agents/` directory holds the allowlisted shared agent files. The trusted home
 reads them on every launch, rejecting links, special files, foreign or
 writable-by-others files, oversized and non-UTF-8 text. The launch contract
 delivers the text, and the supervisor writes it as the native user instruction
@@ -138,7 +142,7 @@ therefore receives no shared files in this release.
 - **Time-based rotation overlap.** Simpler, but time alone does not prove a
   consumer has the new trust. Recorded consumers plus independent stop
   evidence do, and a stuck consumer blocks rotation visibly.
-- **A writable bind mount of the agents directory.** It matches the proposal's
+- **A writable bind mount of the shared agent files.** It matches the proposal's
   wording that agents may alter shared state. It needs a new mount contract in
   an exact-mount verifier, writes untrusted output onto the host, risks new
   transcript records that break capture, and widens configuration loading.
@@ -160,6 +164,13 @@ therefore receives no shared files in this release.
 - Docker Engine on Linux uses the bridge-address path, which has unit coverage
   but no recorded acceptance run.
 - Automatic setup does not run on Windows hosts.
+- Setup and `credentials add` restart the home daemon only when no session is
+  active; otherwise they report that the restart is still needed.
+- Not yet implemented: an `uninstall` or purge command (the guide gives manual
+  removal), removing a stored credential (a harness's gateway requires its
+  key), verifying a `--build` source against a release manifest, and probing
+  host LAN addresses beyond the gateway's other ports. Each is a revisit
+  condition below.
 
 ## Revisit conditions
 
@@ -171,6 +182,8 @@ therefore receives no shared files in this release.
 - Image upgrades must apply to installations with retained sessions: add a
   drained migration.
 - A Linux or Windows acceptance run fails the endpoint or containment probes.
+- Users need scripted uninstall, credential removal, verified source builds or
+  LAN containment evidence.
 
 ## Links
 

@@ -56,3 +56,31 @@ func TestGatewayReloadsARenewedSecretAndRejectsNarrowerCertificates(t *testing.T
 		t.Fatal("rejected replacement displaced the serving certificate")
 	}
 }
+
+func TestGatewayRejectsALeafOutsideThePublishedTrust(t *testing.T) {
+	dir := t.TempDir()
+	trusted, err := pki.NewCA("trusted", time.Now(), 48*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign, err := pki.NewCA("foreign", time.Now(), 48*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hosts := []string{"sproozi-gateway.sproozi-system.svc"}
+	if err = os.WriteFile(filepath.Join(dir, "ca.crt"), trusted.Certificate, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeLeaf(t, dir, trusted, pki.Names{DNS: hosts})
+	holder := proxytransport.NewCertificate(tls.Certificate{})
+	r := &certificateReloader{certFile: filepath.Join(dir, "tls.crt"), keyFile: filepath.Join(dir, "tls.key"),
+		hosts: hosts, holder: holder}
+	if _, err = r.reload(); err != nil {
+		t.Fatal(err)
+	}
+	good := holder.Load().Leaf
+	writeLeaf(t, dir, foreign, pki.Names{DNS: hosts})
+	if _, err = r.reload(); err == nil || !holder.Load().Leaf.Equal(good) {
+		t.Fatalf("leaf from an unpublished authority accepted: %v", err)
+	}
+}

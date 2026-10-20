@@ -3,6 +3,7 @@ package pki
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,11 +39,17 @@ func serving(t *testing.T, s *Store) (*x509.Certificate, []byte, State) {
 	return cert.Leaf, trust, st
 }
 
-func TestEnsureCreatesOnceAndReusesValidMaterial(t *testing.T) {
+func TestInitializeCreatesOnceAndEnsureReusesValidMaterial(t *testing.T) {
 	s, c := openTest(t)
-	changed, err := s.Ensure(testNames)
-	if err != nil || !changed {
-		t.Fatalf("first ensure changed=%v err=%v", changed, err)
+	if _, err := s.Ensure(testNames); !errors.Is(err, ErrNotInitialized) {
+		t.Fatalf("ensure created an authority: %v", err)
+	}
+	err := s.Initialize(testNames)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Initialize(testNames); err == nil {
+		t.Fatal("second initialization accepted")
 	}
 	leaf, trust, st := serving(t, s)
 	if err = VerifyServing(leaf, trust, testNames, c.t); err != nil {
@@ -52,7 +59,7 @@ func TestEnsureCreatesOnceAndReusesValidMaterial(t *testing.T) {
 		t.Fatalf("leaf outlives policy: %s", leaf.NotAfter)
 	}
 	c.t = c.t.Add(time.Hour)
-	changed, err = s.Ensure(testNames)
+	changed, err := s.Ensure(testNames)
 	if err != nil || changed {
 		t.Fatalf("repeat ensure changed=%v err=%v", changed, err)
 	}
@@ -64,7 +71,7 @@ func TestEnsureCreatesOnceAndReusesValidMaterial(t *testing.T) {
 
 func TestEnsureRenewsAfterTwoThirdsAndOnNameChange(t *testing.T) {
 	s, c := openTest(t)
-	if _, err := s.Ensure(testNames); err != nil {
+	if err := s.Initialize(testNames); err != nil {
 		t.Fatal(err)
 	}
 	first, _, _ := serving(t, s)
@@ -92,7 +99,7 @@ func TestEnsureRenewsAfterTwoThirdsAndOnNameChange(t *testing.T) {
 
 func TestLeafNeverOutlivesIssuerAndExpiredIssuerFailsClosed(t *testing.T) {
 	s, c := openTest(t)
-	if _, err := s.Ensure(testNames); err != nil {
+	if err := s.Initialize(testNames); err != nil {
 		t.Fatal(err)
 	}
 	_, _, st := serving(t, s)
@@ -116,7 +123,7 @@ func TestLeafNeverOutlivesIssuerAndExpiredIssuerFailsClosed(t *testing.T) {
 
 func TestRoutineRotationStagesAndRestart(t *testing.T) {
 	s, c := openTest(t)
-	if _, err := s.Ensure(testNames); err != nil {
+	if err := s.Initialize(testNames); err != nil {
 		t.Fatal(err)
 	}
 	_, trustA, _ := serving(t, s)
@@ -184,7 +191,7 @@ func TestRoutineRotationStagesAndRestart(t *testing.T) {
 
 func TestMissingSigningKeyStopsIssuanceWithoutNewCA(t *testing.T) {
 	s, _ := openTest(t)
-	if _, err := s.Ensure(testNames); err != nil {
+	if err := s.Initialize(testNames); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Remove(filepath.Join(s.Dir(), "ca-1.key")); err != nil {
@@ -221,17 +228,54 @@ func TestStateCorruptionAndUncommittedGenerationAreSafe(t *testing.T) {
 	if err = s.writePair("ca-1", orphan); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.Ensure(testNames); err != nil {
+	// Uncommitted authority files are indistinguishable from a lost state
+	// file, so neither initialization nor renewal may proceed.
+	if err = s.Initialize(testNames); !errors.Is(err, ErrAuthorityMaterial) {
+		t.Fatalf("initialized over existing authority files: %v", err)
+	}
+	if _, err = s.Ensure(testNames); !errors.Is(err, ErrAuthorityMaterial) {
+		t.Fatalf("ensure over existing authority files: %v", err)
+	}
+	if ca := mustCA(t, s, 1); !strings.Contains(ca.Subject.CommonName, "orphan") {
+		t.Fatal("existing authority files were replaced")
+	}
+	if err = os.Remove(filepath.Join(s.Dir(), "ca-1.pem")); err != nil {
 		t.Fatal(err)
 	}
-	if ca := mustCA(t, s, 1); strings.Contains(ca.Subject.CommonName, "orphan") {
-		t.Fatal("uncommitted generation adopted")
+	if err = os.Remove(filepath.Join(s.Dir(), "ca-1.key")); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Initialize(testNames); err != nil {
+		t.Fatal(err)
 	}
 	if err = os.WriteFile(filepath.Join(s.Dir(), "state.json"), []byte("{"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = s.Ensure(testNames); err == nil || !strings.Contains(err.Error(), "corrupt") {
 		t.Fatalf("corrupt state accepted: %v", err)
+	}
+}
+
+func TestLostStateNeverMintsAnUnrelatedAuthority(t *testing.T) {
+	s, _ := openTest(t)
+	if err := s.Initialize(testNames); err != nil {
+		t.Fatal(err)
+	}
+	original := mustCA(t, s, 1)
+	if err := os.Remove(filepath.Join(s.Dir(), "state.json")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Ensure(testNames); !errors.Is(err, ErrAuthorityMaterial) {
+		t.Fatalf("ensure after lost state: %v", err)
+	}
+	if err := s.Initialize(testNames); !errors.Is(err, ErrAuthorityMaterial) {
+		t.Fatalf("initialize after lost state: %v", err)
+	}
+	if after := mustCA(t, s, 1); !after.Equal(original) {
+		t.Fatal("lost state replaced the authority certificate")
+	}
+	if _, err := os.Stat(filepath.Join(s.Dir(), "ca-1.key")); err != nil {
+		t.Fatalf("authority key removed: %v", err)
 	}
 }
 
@@ -246,7 +290,7 @@ func TestNamesRejectWildcardsAndEmpty(t *testing.T) {
 func TestServingCertificateHandshakes(t *testing.T) {
 	s, c := openTest(t)
 	c.t = time.Now()
-	if _, err := s.Ensure(Names{DNS: []string{openAIHost}, IPs: []string{"127.0.0.1"}}); err != nil {
+	if err := s.Initialize(Names{DNS: []string{openAIHost}, IPs: []string{"127.0.0.1"}}); err != nil {
 		t.Fatal(err)
 	}
 	cert, trust, _, err := s.Serving()
@@ -285,7 +329,7 @@ func mustCA(t *testing.T, s *Store, id int) *x509.Certificate {
 
 func TestTrustConsumersGateRotationEvidence(t *testing.T) {
 	s, _ := openTest(t)
-	if _, err := s.Ensure(testNames); err != nil {
+	if err := s.Initialize(testNames); err != nil {
 		t.Fatal(err)
 	}
 	trustA, err := s.TrustFor("alloc-a", []byte(`{"allocation":"a"}`))

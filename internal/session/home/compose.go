@@ -113,7 +113,7 @@ func (a *authority) Revoke(ctx context.Context, l session.Launch, i session.Inca
 func (a *authority) Seal(ctx context.Context, l session.Launch, i session.Incarnation) (map[string]budget.TrustedUsage, error) {
 	usage, err := a.owner.Seal(ctx, l, i)
 	if err == nil {
-		a.certs.released(l)
+		a.certs.releaseConsumer(l)
 	}
 	return usage, err
 }
@@ -271,6 +271,9 @@ func Open(c Config, log io.Writer) (_ *Service, err error) {
 		return nil, err
 	}
 	s.certs.fenced = s.fenced
+	for _, stack := range stacks {
+		s.certs.listeners = append(s.certs.listeners, stack.gateway.Listen)
+	}
 	initial := s.certs.serving.Load()
 	for index, stack := range stacks {
 		if err = s.openStack(c, engine, ledger, stack, index, *initial, log); err != nil {

@@ -56,8 +56,7 @@ publishes tested formula updates with its own workflow token. Sproozi does not
 hold a cross-repository tap credential.
 
 Agent packages continue to use upstream defaults. Product versions do not pin
-agent clients. (ADR 0025 replaces this for the published native image, which
-installs the clients locked in `hack/clients` at the release commit.) A resolved runtime image identity remains part of execution
+agent clients. A resolved runtime image identity remains part of execution
 identity, as required by the existing placement design.
 
 ## Alternatives and tradeoffs

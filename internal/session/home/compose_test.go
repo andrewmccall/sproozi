@@ -355,7 +355,7 @@ func TestManagedCertificatesNeverCreateACAAtServiceStart(t *testing.T) {
 func TestSecondHarnessGetsItsOwnPlacementPortAndCoveredCertificate(t *testing.T) {
 	c, store := managedConfig(t)
 	// Setup created the CA for a narrower name set; Open widens the leaf.
-	if _, err := store.Ensure(pki.Names{DNS: []string{inspectionHost}, IPs: []string{c.Local.GatewayIPv4}}); err != nil {
+	if err := store.Initialize(pki.Names{DNS: []string{inspectionHost}, IPs: []string{c.Local.GatewayIPv4}}); err != nil {
 		t.Fatal(err)
 	}
 	s, err := Open(c, io.Discard)
@@ -399,7 +399,7 @@ func TestLocalHarnessesRejectDuplicatesAndUnsafeListeners(t *testing.T) {
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
 			c, store := managedConfig(t)
-			if _, err := store.Ensure(pki.Names{DNS: []string{inspectionHost}, IPs: []string{c.Local.GatewayIPv4}}); err != nil {
+			if err := store.Initialize(pki.Names{DNS: []string{inspectionHost}, IPs: []string{c.Local.GatewayIPv4}}); err != nil {
 				t.Fatal(err)
 			}
 			mutate(&c)
@@ -413,7 +413,7 @@ func TestLocalHarnessesRejectDuplicatesAndUnsafeListeners(t *testing.T) {
 
 func TestManagedTrustRecordsConsumersUntilSeal(t *testing.T) {
 	c, store := managedConfig(t)
-	if _, err := store.Ensure(pki.Names{DNS: []string{inspectionHost}, IPs: []string{c.Local.GatewayIPv4}}); err != nil {
+	if err := store.Initialize(pki.Names{DNS: []string{inspectionHost}, IPs: []string{c.Local.GatewayIPv4}}); err != nil {
 		t.Fatal(err)
 	}
 	certs, err := openCertificates(c, servingNames(c, []*localStack{{config: c.Local}}), nil)
@@ -446,6 +446,16 @@ func TestManagedTrustRecordsConsumersUntilSeal(t *testing.T) {
 	if !certs.serving.Load().Leaf.Equal(mustServing(t, store)) {
 		t.Fatal("switched leaf not reloaded")
 	}
+	// An unreachable gateway fails the post-switch check, so the old
+	// authority stays trusted.
+	certs.listeners = []string{"127.0.0.1:1"}
+	if err = certs.maintain(); err == nil {
+		t.Fatal("retired the previous authority without checking the switched gateway")
+	}
+	if st, _ := store.State(); st.Rotation == nil || st.Rotation.Stage != pki.StageSwitched {
+		t.Fatal("rotation advanced after a failed check")
+	}
+	certs.listeners = nil
 	if err = certs.maintain(); err != nil {
 		t.Fatal(err)
 	}

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/privatefs"
@@ -165,9 +166,59 @@ func (s *Store) loadLeaf(st State) (tls.Certificate, error) {
 	return certificate, err
 }
 
-// Ensure creates the first CA when absent and issues a new leaf when the
-// current one is missing, invalid, due for renewal, issued by a CA other than
-// the serving one, or does not cover names. It never replaces an existing CA.
+// ErrAuthorityMaterial means the store holds authority files but no
+// committed state. It is never treated as a fresh store.
+var ErrAuthorityMaterial = errors.New("pki: certificate authority files exist without committed state; " +
+	"restore state.json from a backup, or replace the authority explicitly")
+
+// Initialize creates the first CA and serving leaf in an empty store. It
+// refuses when any authority or leaf file already exists, so a lost state file
+// never silently becomes an unrelated authority.
+func (s *Store) Initialize(names Names) error {
+	names, err := names.normalized()
+	if err != nil {
+		return err
+	}
+	return s.locked(func() error {
+		if _, err := s.State(); !errors.Is(err, ErrNotInitialized) {
+			if err == nil {
+				return errors.New("pki: certificate authority already initialized")
+			}
+			return err
+		}
+		if err := s.requireEmpty(); err != nil {
+			return err
+		}
+		now := s.now()
+		if err := s.createGeneration(1, now); err != nil {
+			return err
+		}
+		st := State{Version: 1, Serving: 1, Trusted: []int{1}, Names: names}
+		if st.Generations, err = s.generations(st, 1); err != nil {
+			return err
+		}
+		return s.issue(&st, now)
+	})
+}
+
+// requireEmpty refuses a store that holds any CA or leaf file.
+func (s *Store) requireEmpty() error {
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if strings.HasPrefix(name, "ca-") || strings.HasPrefix(name, "leaf-") || name == trustFile {
+			return ErrAuthorityMaterial
+		}
+	}
+	return nil
+}
+
+// Ensure issues a new leaf when the current one is missing, invalid, due for
+// renewal, issued by a CA other than the serving one, or does not cover
+// names. It never creates or replaces a CA; an uninitialized store fails.
 // It reports whether the serving leaf changed.
 func (s *Store) Ensure(names Names) (bool, error) {
 	names, err := names.normalized()
@@ -178,15 +229,10 @@ func (s *Store) Ensure(names Names) (bool, error) {
 	err = s.locked(func() error {
 		now := s.now()
 		st, err := s.State()
-		if errors.Is(err, ErrNotInitialized) {
-			if err = s.createGeneration(1, now); err != nil {
-				return err
-			}
-			st = State{Version: 1, Serving: 1, Trusted: []int{1}}
-			if st.Generations, err = s.generations(st, 1); err != nil {
-				return err
-			}
-		} else if err != nil {
+		if errors.Is(err, ErrNotInitialized) && s.requireEmpty() != nil {
+			return ErrAuthorityMaterial
+		}
+		if err != nil {
 			return err
 		}
 		same := slices.Equal(st.Names.DNS, names.DNS) && slices.Equal(st.Names.IPs, names.IPs)
@@ -433,10 +479,11 @@ func (s *Store) caCertificate(id int) (*x509.Certificate, error) {
 	return ParseCertificate(data)
 }
 
+// createGeneration writes a new CA's files. Callers hold committed state that
+// does not name id, so existing files for id are an uncommitted earlier
+// attempt and may be replaced.
 func (s *Store) createGeneration(id int, now time.Time) error {
 	if _, err := os.Lstat(filepath.Join(s.dir, caName(id)+".pem")); err == nil {
-		// A crash after writing an uncommitted generation leaves its files;
-		// the next attempt replaces them because no state names them.
 		_ = os.Remove(filepath.Join(s.dir, caName(id)+".pem"))
 		_ = os.Remove(filepath.Join(s.dir, caName(id)+".key"))
 	}

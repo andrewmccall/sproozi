@@ -46,8 +46,11 @@ read and a blocked direct API path.
 
 Each reconcile loads the authority Secret into private memory, applies any
 operator request, ensures a current leaf, and commits the Secret with
-optimistic concurrency. Only then does it publish the serving Secret and trust
-object derived from the committed state. One replica with a `Recreate`
+optimistic concurrency. Only then does it publish the trust object and, after
+that succeeds, the serving Secret, both derived from the committed state. It
+creates an authority only in a Secret that has never held one; a used Secret
+that lost its data is an error, never a new CA. The serving Secret also carries
+the published trust as `ca.crt`. One replica with a `Recreate`
 strategy is the single writer; a conflicting write fails and retries from the
 winner's state.
 
@@ -59,7 +62,8 @@ patched.
 
 The Kubernetes gateway polls its mounted certificate files and atomically
 replaces the serving certificate when they change. It rejects a replacement
-that does not cover every inspected host or has expired.
+that has expired, does not cover every inspected host, or, when `ca.crt` is
+present, does not chain to it.
 
 ### Narrow RBAC
 

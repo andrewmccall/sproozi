@@ -176,3 +176,26 @@ func TestRenewRequestReplacesTheLeafUnderTheSameAuthority(t *testing.T) {
 		t.Fatal("renewal must serve a new leaf trusted by the unchanged bundle")
 	}
 }
+
+func TestLostAuthorityStateIsNotReplacedByANewCA(t *testing.T) {
+	c, client := setup(t)
+	if _, err := c.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	leaf := serving(t, client).Leaf
+	secrets := client.CoreV1().Secrets(systemNamespace)
+	s, err := secrets.Get(context.Background(), "sproozi-certificate-authority", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Data = nil
+	if _, err = secrets.Update(context.Background(), s, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = c.Reconcile(context.Background()); err == nil || !strings.Contains(err.Error(), "lost its certificate state") {
+		t.Fatalf("emptied authority Secret bootstrapped again: %v", err)
+	}
+	if !serving(t, client).Leaf.Equal(leaf) {
+		t.Fatal("serving Secret changed after the authority state was lost")
+	}
+}

@@ -30,15 +30,20 @@ import (
 // Annotations on the authority Secret. RotationRequest is the operator's
 // explicit instruction; the others report status.
 const (
-	RotationRequest  = "sproozi.com/rotation-request"
-	TrustAnnotation  = "sproozi.com/trust-configmap"
-	LeafNotAfter     = "sproozi.com/leaf-not-after"
-	RenewAt          = "sproozi.com/renew-at"
-	RotationStage    = "sproozi.com/rotation-stage"
-	LastError        = "sproozi.com/last-error"
-	ManagedByLabel   = "app.kubernetes.io/managed-by"
-	managedByValue   = "sproozi-certificates"
-	trustBundleKey   = "ca-bundle.pem"
+	RotationRequest   = "sproozi.com/rotation-request"
+	TrustAnnotation   = "sproozi.com/trust-configmap"
+	LeafNotAfter      = "sproozi.com/leaf-not-after"
+	RenewAt           = "sproozi.com/renew-at"
+	RotationStage     = "sproozi.com/rotation-stage"
+	IssuerFingerprint = "sproozi.com/issuer-fingerprint"
+	AuthorityNotAfter = "sproozi.com/authority-not-after"
+	RotateAt          = "sproozi.com/rotate-at"
+	LastError         = "sproozi.com/last-error"
+	ManagedByLabel    = "app.kubernetes.io/managed-by"
+	managedByValue    = "sproozi-certificates"
+	trustBundleKey    = "ca-bundle.pem"
+	// CABundleKey holds the published trust in the serving Secret.
+	CABundleKey      = "ca.crt"
 	maxAuthorityKeys = 64
 )
 
@@ -102,6 +107,17 @@ func (c *Controller) Reconcile(ctx context.Context) (Status, error) {
 	if err != nil {
 		return Status{}, err
 	}
+	if _, err = store.State(); errors.Is(err, pki.ErrNotInitialized) {
+		// Bootstrap only a Secret that never held an authority. Lost data in a
+		// used Secret must not become an unrelated CA.
+		if len(authority.Data) != 0 || authority.Annotations[TrustAnnotation] != "" {
+			return Status{}, errors.New("authority Secret lost its certificate state; restore it from a backup, " +
+				"or create a new authority with the replace procedure")
+		}
+		if err = store.Initialize(cfg.Names); err != nil {
+			return Status{}, err
+		}
+	}
 	request := authority.Annotations[RotationRequest]
 	requestErr := c.apply(store, request)
 	if _, err = store.Ensure(cfg.Names); err != nil {
@@ -126,6 +142,13 @@ func (c *Controller) Reconcile(ctx context.Context) (Status, error) {
 		annotations[LastError] = fmt.Sprintf("rotation request %q refused: %v", request, requestErr)
 	}
 	annotations[TrustAnnotation] = status.TrustConfigMap
+	for _, g := range st.Generations {
+		if g.ID == st.Serving {
+			annotations[IssuerFingerprint] = g.Fingerprint
+			annotations[AuthorityNotAfter] = g.NotAfter.UTC().Format(time.RFC3339)
+			annotations[RotateAt] = g.NotAfter.Add(-cfg.Policy.RotateBefore).UTC().Format(time.RFC3339)
+		}
+	}
 	annotations[LeafNotAfter] = certificate.Leaf.NotAfter.UTC().Format(time.RFC3339)
 	annotations[RenewAt] = cfg.Policy.RenewAt(certificate.Leaf).UTC().Format(time.RFC3339)
 	annotations[RotationStage] = "none"
@@ -141,10 +164,11 @@ func (c *Controller) Reconcile(ctx context.Context) (Status, error) {
 		}
 		status.Changed = true
 	}
-	if err = c.publishServing(ctx, store, st); err != nil {
+	// Trust first: a conflicting trust object stops the leaf from being served.
+	if err = c.publishTrust(ctx, status.TrustConfigMap, trust); err != nil {
 		return status, err
 	}
-	if err = c.publishTrust(ctx, status.TrustConfigMap, trust); err != nil {
+	if err = c.publishServing(ctx, store, st, trust); err != nil {
 		return status, err
 	}
 	return status, requestErr
@@ -180,7 +204,7 @@ func (c *Controller) apply(store *pki.Store, request string) error {
 
 // publishServing writes the leaf and key the gateway mounts. The gateway
 // reloads the projected files without restarting.
-func (c *Controller) publishServing(ctx context.Context, store *pki.Store, st pki.State) error {
+func (c *Controller) publishServing(ctx context.Context, store *pki.Store, st pki.State, trust []byte) error {
 	pair, err := readLeaf(store.Dir(), st.Leaf)
 	if err != nil {
 		return err
@@ -190,7 +214,9 @@ func (c *Controller) publishServing(ctx context.Context, store *pki.Store, st pk
 	if err != nil {
 		return fmt.Errorf("read serving Secret %s/%s (install creates it): %w", c.Config.Namespace, c.Config.ServingSecret, err)
 	}
-	want := map[string][]byte{corev1.TLSCertKey: pair.Certificate, corev1.TLSPrivateKeyKey: pair.Key}
+	// ca.crt lets the gateway check a replacement chains to the published trust.
+	want := map[string][]byte{corev1.TLSCertKey: pair.Certificate, corev1.TLSPrivateKeyKey: pair.Key,
+		CABundleKey: trust}
 	if maps.EqualFunc(serving.Data, want, bytes.Equal) {
 		return nil
 	}

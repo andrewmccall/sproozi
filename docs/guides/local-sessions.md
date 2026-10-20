@@ -104,8 +104,9 @@ sproozi start --workspace "$PWD" --harness claude-code
 
 The second harness gets its own gateway port and provider key. Its workers can
 reach only that port, so a Codex worker cannot use the Anthropic key and the
-reverse. Setup restarts the home daemon to load the new harness. Running
-sessions keep their containers.
+reverse. Setup restarts the home daemon to load the new harness when no session
+is active. If a session is running, setup writes the configuration and asks you
+to restart the home daemon once the session stops.
 
 ## Share your instructions
 
@@ -164,8 +165,9 @@ then removes the old authority. `sproozi certificates status` lists the
 sessions a rotation is waiting for. `rotate-ca` starts a rotation early.
 
 `sproozi certificates replace-ca` is for a lost or compromised authority. It
-refuses while sessions are active, because they would lose trust in the
-gateway. It never runs automatically.
+refuses while sessions are active or any container runs on the installation's
+network, because they would lose trust in the gateway. It never runs
+automatically.
 
 ## Troubleshooting
 

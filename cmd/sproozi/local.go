@@ -288,32 +288,18 @@ func restartForCredential(ctx context.Context, l localsetup.Layout) (string, err
 	if err != nil {
 		return "", err
 	}
-	status := localsetup.ServiceState(ctx, l, c)
-	switch {
-	case !status.Running:
-		return "not running; the credential is used when it starts", nil
-	case len(status.Active) > 0:
-		return "still using the previous credential, which it read at startup; restart it with " +
-			"sproozi service stop and sproozi service start once no session is active", nil
-	}
 	executable, err := os.Executable()
 	if err != nil {
 		return "", err
 	}
-	if _, err = localsetup.StopService(ctx, l, c, false, time.Minute); err != nil {
-		return "", err
+	restarted, err := localsetup.RestartIdle(ctx, l, c, executable)
+	switch {
+	case err != nil:
+		return "still using the previous credential", err
+	case restarted:
+		return "restarted with the new credential", nil
 	}
-	if _, err = localsetup.StartService(ctx, l, c, executable, 2*time.Minute); err != nil {
-		return "", err
-	}
-	return "restarted with the new credential", nil
-}
-
-func printHuman(w io.Writer, v any) {
-	data, err := json.MarshalIndent(v, "", "  ")
-	if err == nil {
-		_, _ = fmt.Fprintln(w, string(data))
-	}
+	return "not running; the credential is used when it starts", nil
 }
 
 // imageStatus reports the installed and release images.
@@ -364,6 +350,12 @@ func certificatesCommand(ctx context.Context, l localsetup.Layout, c home.Config
 			return nil, fmt.Errorf("replacing the CA would remove trust from %d active session(s); cancel them first",
 				len(status.Active))
 		}
+		// The daemon may be stopped while workers keep running.
+		running, countErr := localsetup.RunningContainers(ctx, l)
+		if countErr != nil || running > 0 {
+			return nil, errors.Join(countErr, fmt.Errorf("%d container(s) still run on the installation network; "+
+				"cancel or stop their sessions first", running))
+		}
 		err = store.ReplaceCA()
 	}
 	if err != nil {
@@ -372,7 +364,7 @@ func certificatesCommand(ctx context.Context, l localsetup.Layout, c home.Config
 	return localsetup.Certificates(store)
 }
 
-// ensureService starts a locally provisioned home service when a local
+// ensureService starts a locally provisioned home daemon when a local
 // session command finds it absent. Installations configured by hand are left
 // to their administrator.
 func (q *options) ensureService(ctx context.Context) error {
@@ -390,7 +382,14 @@ func (q *options) ensureService(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintln(os.Stderr, "Starting the local home service")
+	_, _ = fmt.Fprintln(os.Stderr, "Starting the local home daemon")
 	_, err = localsetup.StartService(ctx, l, q.fixed, executable, 2*time.Minute)
 	return err
+}
+
+func printHuman(w io.Writer, v any) {
+	data, err := json.MarshalIndent(v, "", "  ")
+	if err == nil {
+		_, _ = fmt.Fprintln(w, string(data))
+	}
 }

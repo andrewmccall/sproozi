@@ -130,7 +130,7 @@ func pullImage(ctx context.Context, d Docker, reference, source string, progress
 
 // buildImage runs the repository's pinned three-stage recipe through Docker.
 // The build context is the source tree; workspaces, agent state, credentials
-// and keys live under the installation root, never in it.
+// and keys live under the local installation, never in it.
 func buildImage(ctx context.Context, d Docker, installation, source string, progress io.Writer) (Image, error) {
 	source, err := filepath.Abs(source)
 	if err != nil {
