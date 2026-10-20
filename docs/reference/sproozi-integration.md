@@ -26,7 +26,9 @@ The supervisor installs the managed-session files at every launch and replaces
 anything already at those paths. The approved template instructions and their
 digest do not change. Codex sessions started before this release resume with
 the skill and control connection but without the instruction text in their
-history.
+history. Claude Code resumes a conversation with the system prompt and skill
+listing it started with, so a conversation started before this release keeps
+its earlier prompt; the control connection is available on every launch.
 
 In ordinary runs the administrator's AgentRuntime command places the contract
 files. The [demo runtime](../../examples/sre-demo/agentruntime.yaml) shows Codex

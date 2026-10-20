@@ -97,6 +97,10 @@ program is a remote executor in documentation, matching `--executor`.
 
 ## Tradeoffs and consequences
 
+- Profile changes reach new conversations. A continued conversation keeps
+  what its first launch showed the model: Codex in its history, Claude Code in
+  its saved system prompt and skill listing. Each launch still installs the
+  current files; session mobility checks the rendered profile per visit.
 - A compressed profile over 640 KiB cannot go to Kubernetes.
 - Stored profiles, like registrations, are never deleted. Each distinct profile
   sent to an executor adds one ConfigMap.

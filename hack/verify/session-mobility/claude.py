@@ -501,10 +501,20 @@ class Proof(BASE.Proof):
         self.save()
         for index, destination in enumerate((self.args.remote_name, self.config["local"]["Name"], self.args.remote_name)):
             self.terminal(index)
+            # Claude Code resumes a conversation with the system prompt and skill
+            # listing it started with, so model requests keep the first visit's
+            # profile; each visit's own launch must still render its profile.
             turns = [r for r in self.provider(quiet=True) if r["kind"] == "conversation" and r["turn"] == index]
-            BASE.check(turns and all(r["profileMarkers"] == [markers[index]] and r["profileSkill"] for r in turns),
-                       "Visit %d did not carry the profile as it was at launch" % index)
-            self.report["steps"].append({"turn": index, "profileMarker": markers[index], "profileSkill": True})
+            BASE.check(turns and all(r["profileMarkers"] == [markers[0]] and r["profileSkill"] for r in turns),
+                       "Turn %d model requests lost the conversation's profile" % index)
+            step = {"turn": index, "requestProfileMarker": markers[0], "profileSkill": True}
+            if self.probes:
+                active = self.cli("status")["session"]["active"]
+                rendered = self.probes.read(active, "/tmp/sproozi-native/profile-plugin/skills/" + BASE.PROFILE_SKILL + "/SKILL.md")
+                BASE.check(BASE.profile_markers(rendered) == [markers[index]],
+                           "Visit %d did not render the profile as it was at launch" % index)
+                step.update(renderedProfileMarker=markers[index], placement=active["launch"]["placement"])
+            self.report["steps"].append(step)
             BASE.write_profile(self.fixture, markers[index + 1])
             if self.probes and index < 2:
                 active = None if index == 0 else self.cli("status")["session"]["active"]

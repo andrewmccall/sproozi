@@ -104,7 +104,11 @@ still receive no record and no routing information.
   `CLAUDE.md` is never loaded, and repository `AGENTS.md` follows the Sproozi
   text. Compliance with instructions is never a security control.
 - Codex sessions created before this change resume with the skill and control
-  connection but without the Sproozi text in their history.
+  connection but without the Sproozi text in their history. Claude Code resumes
+  with the system prompt and skill listing its conversation started with, so
+  earlier Claude conversations also keep their earlier prompt.
+- Loading any plugin skill makes Claude Code record a `skill_listing` context
+  attachment, which the checkpoint transcript validator accepts.
 - The journal is lost on gateway restart. It records every refusal, including
   upstream failures the gateway reports as errors; the `reason` says which. It
   does not yet say whether access could be requested.

@@ -65,9 +65,19 @@ Executable bits on skill files are kept.
 
 ## When sessions see changes
 
+Each launch installs the profile as it is then. What the model sees from a
+continued conversation differs by harness:
+
+- **A new conversation** receives the current profile instructions and skills.
+- **A continued Codex conversation** keeps the instructions from its first
+  launch in its history.
+- **A continued Claude Code conversation** keeps the system prompt and skill
+  listing it started with. The reinstalled profile files are present, but the
+  model is not shown the changed instructions or skill descriptions.
+
 **Docker.** The agent container mounts the profile folder read-only at
-`/etc/sproozi/profile`. The agent cannot change it. Changes reach a session at
-its next launch: `start`, `resume` or a move back to Docker.
+`/etc/sproozi/profile`. The agent cannot change it. Changes are installed at the
+session's next launch: `start`, `resume` or a move back to Docker.
 
 **Kubernetes.** A Kubernetes visit gets the profile as it was when the visit
 was launched:

@@ -285,9 +285,12 @@ python3 hack/verify/session-mobility/claude.py verify \
   --namespace sproozi-system --agent-namespace sproozi-agents
 ```
 
-The Claude driver changes the profile marker before each move in the same way
-and requires every model request of each turn to carry only that visit's
-marker and the `profile:mobility-check` skill.
+The Claude driver changes the profile marker before each move in the same way.
+With `--admin-probes` it reads the rendered profile skill in each visit's exact
+container or Pod and requires that visit's marker. Claude Code resumes a
+conversation with the system prompt and skill listing it started with, so every
+model request must carry the first visit's marker and the
+`profile:mobility-check` skill.
 
 Claude's preparation generates its principal token and a fresh certificate
 covering Anthropic as well as OpenAI and gateway/host names. The TLS Secret
