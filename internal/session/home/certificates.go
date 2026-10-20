@@ -181,6 +181,15 @@ func (c *certificates) maintain() error {
 			c.logf("Retired previous certificate authority")
 		}
 	}
+	if !changed {
+		// Another certificate owner, such as sproozi certificates renew, may
+		// have committed a new leaf.
+		current, _, _, err := c.store.Serving()
+		if err != nil {
+			return err
+		}
+		changed = !current.Leaf.Equal(c.serving.Load().Leaf)
+	}
 	if changed {
 		return c.reload()
 	}

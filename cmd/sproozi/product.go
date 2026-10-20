@@ -15,8 +15,10 @@ import (
 	"slices"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/andrewmccall/sproozi/internal/harness"
+	"github.com/andrewmccall/sproozi/internal/localsetup"
 	"github.com/andrewmccall/sproozi/internal/project"
 	"github.com/andrewmccall/sproozi/internal/session/home"
 	"github.com/andrewmccall/sproozi/internal/work"
@@ -28,12 +30,21 @@ const (
 	actionRun      = "run"
 )
 
-func defaultConfigPath() (string, error) {
-	p, e := os.UserConfigDir()
-	return filepath.Join(p, "sproozi", "config.json"), e
+// defaultConfigPath keeps an existing platform configuration authoritative and
+// otherwise uses the local installation root's configuration.
+func defaultConfigPath() (string, error) { return localsetup.DefaultConfigPath() }
+
+// setupOptions holds local provisioning and maintenance flags.
+type setupOptions struct {
+	enabled, credentialStdin, skipCheck, noService, json, leaveRunning, checkProvider bool
+	root, model, image, build, providerURL, providerCA, credentialFile                string
+	port                                                                              uint16
+	timeout                                                                           time.Duration
+	verb, operand                                                                     string
 }
 
 type options struct {
+	setup                                                                   setupOptions
 	action, socket, id, operation, executor, source, kind, repository, task string
 	detach                                                                  bool
 	// socketGiven reports --socket on the command line, not derived from config.
@@ -59,7 +70,14 @@ func parseProduct(args []string) (options, error) {
 	q := options{action: c.name}
 	var in inputs
 	fs := c.flagSet(&q, &in)
-	if err := parseSessionArguments(c, fs, args[1:], &q.id); err != nil {
+	rest := args[1:]
+	if c.verbs != nil {
+		var err error
+		if rest, err = parseVerb(c, rest, &q.setup); err != nil {
+			return options{}, err
+		}
+	}
+	if err := parseSessionArguments(c, fs, rest, &q.id); err != nil {
 		return options{}, err
 	}
 	configGiven := false
@@ -79,7 +97,10 @@ func parseProduct(args []string) (options, error) {
 			return options{}, e
 		}
 	}
-	if c.name == actionInit || c.name == actionVersion {
+	if err := parseSetupInputs(in, &q.setup); err != nil {
+		return options{}, err
+	}
+	if isSetupCommand(c.name) || c.name == actionVersion {
 		return q, nil
 	}
 	if c.name == actionServe {
@@ -176,8 +197,12 @@ func runProduct(args []string, stdout io.Writer) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	switch {
+	case q.action == actionInit && q.setup.enabled:
+		return q.initLocal(ctx)
 	case q.action == actionInit:
 		return initialize(q.directory, stdout)
+	case isSetupCommand(q.action):
+		return q.maintain(ctx)
 	case q.action == actionVersion:
 		_, err := fmt.Fprintln(stdout, build)
 		return err
@@ -234,6 +259,9 @@ func (q *options) local(ctx context.Context) error {
 		}
 	}
 	if err := q.checkSocket(); err != nil {
+		return err
+	}
+	if err := q.ensureService(ctx); err != nil {
 		return err
 	}
 	if q.action == home.ActionAttach {

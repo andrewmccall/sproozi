@@ -30,6 +30,9 @@ func main() {
 }
 
 func run(args []string) error {
+	if len(args) > 0 && args[0] == "probe" {
+		return probe(args[1:], os.Stdin, os.Stdout)
+	}
 	check := len(args) == 3 && args[0] == "check"
 	if check {
 		args = args[1:]
