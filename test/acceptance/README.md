@@ -144,6 +144,38 @@ results do not establish Claude behaviour. Longer histories, compaction,
 background tools, subagents and another native version each need their own cases.
 Adoption tests must stop the original writer and reject imported authority.
 
+## Local onboarding and certificates
+
+Tests must check that:
+
+- `init --local` reaches a working native terminal without a checkout, OpenSSL,
+  image IDs or network edits, and never calls kubectl or a Kubernetes API, even
+  with a kubeconfig configured.
+- Repeating or interrupting setup reuses the same network, certificate
+  authority, credentials and configuration, and keeps user edits.
+- Readiness requires the restricted worker path: verified gateway TLS, and
+  failed attempts to reach a public address, the provider directly, another
+  gateway port, metadata, direct DNS and IPv6. A probe without the anchor must
+  reach those paths, so the check is shown to discriminate.
+- Each harness's worker reaches only its own gateway port and provider key.
+- Provider keys, CA keys and journals never reach worker mounts, environment,
+  checkpoints or the shared agent files. Shared agent files reach only harnesses
+  that load them, are rejected when they are links or unsafe files, and never
+  enter a checkpoint.
+- A renewed leaf reaches new connections without restarting the gateway, an
+  invalid replacement keeps the previous leaf, and a leaf never outlives its
+  issuer. Rotation keeps old and new trust until every recorded consumer has
+  the new generation or has independently stopped; a restart at any stage
+  resumes it; a missing key never creates an unrelated authority.
+- In Kubernetes, release CRDs are applied and established before custom
+  resources; the self-managed CA works without cert-manager; trust bundles are
+  new immutable objects; and the certificate controller cannot read other
+  Secrets, change policy or act cluster-wide.
+
+`make verify-local-onboarding` and `make verify-kubernetes-release` cover these
+on one engine and a Kind cluster. Linux Docker Engine and Windows need their own
+recorded runs before they are advertised.
+
 ## Runtime extensions
 
 A new backend must pass equivalent admission, filesystem, network, resource,

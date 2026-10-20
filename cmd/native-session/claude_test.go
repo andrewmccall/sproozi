@@ -108,6 +108,18 @@ func TestExplicitHarnessContractAndClaudeOptionBoundary(t *testing.T) {
 		t.Fatal("portable home override accepted")
 	}
 }
+func TestClaudeSystemPromptAppendsUserPreferencesAfterApprovedInstructions(t *testing.T) {
+	c := config{Instructions: instructions}
+	if claudeSystemPrompt(c) != instructions {
+		t.Fatal("empty preferences changed the approved prompt")
+	}
+	c.UserInstructions = preferences
+	prompt := claudeSystemPrompt(c)
+	if !strings.HasPrefix(prompt, instructions+"\n\n# User preferences") || !strings.HasSuffix(prompt, preferences) {
+		t.Fatalf("prompt %q", prompt)
+	}
+}
+
 func TestClaudePrivateSettingsRetryIsExact(t *testing.T) {
 	path := t.TempDir() + "/settings.json"
 	value := map[string]any{claudeHooksKey: map[string]any{}}

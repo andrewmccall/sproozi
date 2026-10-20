@@ -345,7 +345,7 @@ func TestResumeExplainsStartedExecution(t *testing.T) {
 	t.Parallel()
 	s, _, _, repo := testService(t)
 	id := uuid.NewString()
-	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, nil); err != nil {
+	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil); err != nil {
 		t.Fatal(err)
 	}
 	r := exchange(t, s, Request{Action: ActionResume, ID: id, OperationID: uuid.NewString()})
@@ -371,7 +371,7 @@ func TestMoveNamesUnconfiguredDestination(t *testing.T) {
 	t.Parallel()
 	s, _, _, repo := testService(t)
 	id := uuid.NewString()
-	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, nil); err != nil {
+	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil); err != nil {
 		t.Fatal(err)
 	}
 	names := []string{testLocal, testRemote}

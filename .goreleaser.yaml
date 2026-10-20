@@ -11,7 +11,7 @@ builds:
         goarch: arm64
     flags: [-trimpath]
     ldflags:
-      - -s -w -X main.version={{ .Version }} -X main.commit={{ .FullCommit }} -X main.date={{ .CommitDate }}
+      - -s -w -X main.version={{ .Version }} -X main.commit={{ .FullCommit }} -X main.date={{ .CommitDate }} -X github.com/andrewmccall/sproozi/internal/localsetup.releaseNative={{ index .Env "SPROOZI_NATIVE_IMAGE" }}
 archives:
   - name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
     formats: [tar.gz]

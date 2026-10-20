@@ -1,0 +1,10 @@
+# Release-matched install for operator-supplied certificates. Before applying,
+# create Secret sproozi-system/sproozi-gateway-tls (tls.crt, tls.key) and the
+# immutable ConfigMap sproozi-agents/sproozi-sandbox-trust (ca-bundle.pem).
+# cert-manager or an enterprise issuer can supply them; no signer is deployed.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- ../install
+patches:
+- path: gateway-kubernetes-read.yaml

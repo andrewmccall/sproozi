@@ -66,3 +66,31 @@ func installCodexProjectTrust(home string) error {
 	_, err = f.Write(data)
 	return errors.Join(err, f.Close())
 }
+
+// installUserInstructions writes the shared user instructions as the native
+// user-level instruction file. Like the other launch files it is fresh on every
+// visit, exact on retry and outside the selected portable state.
+func installUserInstructions(home string, c config) error {
+	if c.UserInstructions == "" {
+		return nil
+	}
+	path := filepath.Join(home, harness.NativeUserInstructionsFile(c.Harness))
+	data := []byte(c.UserInstructions)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if os.IsExist(err) {
+		info, statErr := os.Lstat(path)
+		if statErr != nil || !info.Mode().IsRegular() {
+			return errors.New("native user instructions are not a regular file")
+		}
+		existing, readErr := os.ReadFile(path)
+		if readErr != nil || !bytes.Equal(existing, data) {
+			return errors.New("native user instructions changed")
+		}
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(data)
+	return errors.Join(err, f.Close())
+}

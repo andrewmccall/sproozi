@@ -28,6 +28,8 @@ import (
 type GatewayConfig struct {
 	Harness      harness.NativeKind
 	Certificates map[string]tls.Certificate
+	// Serving, when set, supplies the current certificate for every inspected host.
+	Serving      *proxytransport.Certificate
 	Model        modelgateway.HandlerConfig
 	MCPRegistry  *mcpgateway.Registry
 	MCPAuthority string
@@ -68,7 +70,7 @@ func NewGateway(owner *Owner, config GatewayConfig) (*proxytransport.Gateway, er
 		}
 		dispatch[config.MCPAuthority] = gateway.Route{Tier: audit.TierProtocol, Handler: mcpgateway.NewHandler(mcpgateway.HandlerConfig{Registry: config.MCPRegistry, HTTPClient: config.MCPClient, Budgets: tracker, AuditLogger: config.AuditLogger})}
 	}
-	return proxytransport.New(proxytransport.Config{Certificates: config.Certificates, Authenticate: owner.Authenticate, Revalidate: owner.Revalidate, Handler: dispatch, AllowedAuthority: dispatch.Allows, MaxModelCallDuration: config.MaxModelCall})
+	return proxytransport.New(proxytransport.Config{Certificates: config.Certificates, Serving: config.Serving, Authenticate: owner.Authenticate, Revalidate: owner.Revalidate, Handler: dispatch, AllowedAuthority: dispatch.Allows, MaxModelCallDuration: config.MaxModelCall})
 }
 
 func addNativeRoutes(owner *Owner, config GatewayConfig, dispatch gateway.Dispatcher, tracker *budget.Tracker) error {

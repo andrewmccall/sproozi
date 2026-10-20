@@ -11,10 +11,12 @@ import (
 	"io/fs"
 	"net"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/project"
 	"github.com/andrewmccall/sproozi/internal/proxytransport"
 	"github.com/andrewmccall/sproozi/internal/session"
@@ -46,6 +48,9 @@ type Request struct {
 	IncludeIgnored []string   `json:"includeIgnored,omitempty"`
 	Source         string     `json:"source,omitempty"`
 	Project        project.ID `json:"project,omitempty"`
+	// Harness selects a configured local harness for start; empty selects
+	// the primary local placement's harness.
+	Harness harness.NativeKind `json:"harness,omitempty"`
 }
 type Response struct {
 	Status   *Status  `json:"status,omitempty"`
@@ -121,17 +126,23 @@ func SocketPathProblem(path string) string { return controlPathLength(path) }
 func (s *Service) Serve(ctx context.Context) error {
 	run, cancel := context.WithCancel(ctx)
 	defer cancel()
-	s.gateway.BaseContext = func(net.Listener) context.Context { return run }
-	gatewayListener, err := listenGateway(s.gateway.Addr)
-	if err != nil {
-		return err
+	done := make(chan error, len(s.stacks))
+	addresses := make([]string, 0, len(s.stacks))
+	for _, stack := range s.stacks {
+		server := stack.server
+		server.BaseContext = func(net.Listener) context.Context { return run }
+		gatewayListener, err := listenGateway(server.Addr)
+		if err != nil {
+			return err
+		}
+		if gateway, ok := server.Handler.(*proxytransport.Gateway); ok {
+			gatewayListener = gateway.LimitListener(gatewayListener)
+		}
+		addresses = append(addresses, gatewayListener.Addr().String())
+		go func() { done <- server.Serve(tls.NewListener(gatewayListener, server.TLSConfig)) }()
+		defer func() { _ = server.Close() }()
 	}
-	if gateway, ok := s.gateway.Handler.(*proxytransport.Gateway); ok {
-		gatewayListener = gateway.LimitListener(gatewayListener)
-	}
-	done := make(chan error, 1)
-	go func() { done <- s.gateway.Serve(tls.NewListener(gatewayListener, s.gateway.TLSConfig)) }()
-	defer func() { _ = s.gateway.Close() }()
+	go s.certs.run(run)
 	path := SocketPath(s.config.Directory)
 	listener, err := listenControl(path)
 	if errors.Is(err, errControlListening) {
@@ -145,7 +156,7 @@ func (s *Service) Serve(ctx context.Context) error {
 	}
 	defer func() { _ = listener.Close() }()
 	if s.log != nil {
-		_, _ = fmt.Fprintf(s.log, "Started home daemon: control socket %s, gateway %s\n", path, gatewayListener.Addr())
+		_, _ = fmt.Fprintf(s.log, "Started home daemon: control socket %s, gateway %s\n", path, strings.Join(addresses, ", "))
 	}
 	var workers sync.WaitGroup
 	var connections sync.Map
@@ -210,14 +221,26 @@ func listenGateway(address string) (net.Listener, error) {
 // home daemon that answers on this directory's control socket is reported as
 // that daemon, so a second serve is not told to change ports.
 func CheckListen(ctx context.Context, c Config) error {
-	listener, err := listenGateway(c.Gateway.Listen)
-	if err != nil {
-		if daemonRunning(ctx, c.Directory) {
-			return anotherDaemon(c.Directory)
+	addresses := []string{c.Gateway.Listen}
+	if stacks, err := localConfigs(c); err == nil {
+		addresses = addresses[:0]
+		for _, stack := range stacks {
+			addresses = append(addresses, stack.gateway.Listen)
 		}
-		return err
 	}
-	return listener.Close()
+	for _, address := range addresses {
+		listener, err := listenGateway(address)
+		if err != nil {
+			if daemonRunning(ctx, c.Directory) {
+				return anotherDaemon(c.Directory)
+			}
+			return err
+		}
+		if err = listener.Close(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // daemonRunning dials the directory's control socket without creating
@@ -292,7 +315,7 @@ func (s *Service) handle(ctx context.Context, conn net.Conn) {
 	var sessions []Status
 	switch q.Action {
 	case ActionStart:
-		status, err = s.Start(ctx, q.ID, q.OperationID, q.Workspace, q.IncludeIgnored)
+		status, err = s.Start(ctx, q.ID, q.OperationID, q.Workspace, q.Harness, q.IncludeIgnored)
 	case ActionMove:
 		status, err = s.Move(ctx, q.ID, q.OperationID, q.Destination)
 	case ActionStatus:
@@ -437,6 +460,9 @@ func validateCommonRequest(q Request) error {
 	}
 	if q.Action != ActionStart && len(q.IncludeIgnored) != 0 {
 		return errors.New("home: ignored file selection is start intent")
+	}
+	if q.Harness != "" && (q.Action != ActionStart || q.Harness.Validate() != nil) {
+		return errors.New("home: harness selection applies only to start")
 	}
 	if q.Action != ActionPull && q.Source != "" {
 		return errors.New("home: source is pull intent")

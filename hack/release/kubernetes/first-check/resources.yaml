@@ -1,0 +1,96 @@
+# Provider-free first check. The Pod reads Pods through the gateway, shows a
+# policy-denied Secret read and a blocked direct API path, then exits.
+apiVersion: sproozi.com/v1alpha1
+kind: AgentRuntime
+metadata:
+  name: first-check
+  namespace: sproozi-system
+spec:
+  podTemplate:
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: agent
+        image: SPROOZI_NATIVE_IMAGE
+        command: ["/bin/sh", "-ec"]
+        args:
+        - |
+          token="$(cat /var/run/sproozi/tokens/gateway/token)"
+          proxy="https://sproozi:${token}@${SPROOZI_GATEWAY#https://}"
+          export HTTP_PROXY="$proxy" HTTPS_PROXY="$proxy" http_proxy="$proxy" https_proxy="$proxy"
+          export NO_PROXY='' no_proxy=''
+          echo 'Listing Pods through the Sproozi gateway'
+          kubectl get pods --namespace sproozi-system
+          echo 'PERMITTED: Pod read succeeded'
+          if kubectl get secrets --namespace sproozi-system >/dev/null 2>&1; then
+            echo 'UNEXPECTED: Secret read was allowed'; exit 1
+          fi
+          echo 'DENIED: Secret read is outside the policy'
+          if env -u HTTPS_PROXY -u https_proxy curl -sk --max-time 5 https://kubernetes.default.svc/version >/dev/null 2>&1; then
+            echo 'UNEXPECTED: direct API server path was reachable'; exit 1
+          fi
+          echo 'DENIED: direct API server path is blocked'
+          echo 'First check passed. Keeping this Pod for inspection for 60 seconds'
+          sleep 60
+        resources:
+          limits:
+            cpu: "1"
+            memory: 512Mi
+            ephemeral-storage: 1Gi
+        securityContext:
+          runAsNonRoot: true
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+          seccompProfile:
+            type: RuntimeDefault
+  workloadContainers: [agent]
+  clientConfig:
+    trustBundleConfigMap:
+      name: sproozi-sandbox-trust
+      key: ca-bundle.pem
+  ephemeralWorkspace:
+    sizeLimit: 256Mi
+  gatewayEndpoint: https://sproozi-gateway.sproozi-system.svc:8443
+---
+apiVersion: sproozi.com/v1alpha1
+kind: AgentPolicy
+metadata:
+  name: first-check
+  namespace: sproozi-system
+spec:
+  allowedCapabilities: [kubernetes.read]
+  kubernetesRead:
+    namespaces: [sproozi-system]
+    resources: [pods]
+  githubPullRequest:
+    repositories: []
+    allowedBaseBranches: []
+  egressProfiles: []
+  resourceBounds:
+    max:
+      cpu: "1"
+      memory: 512Mi
+      ephemeral-storage: 1Gi
+  maxExecutionDuration: 5m
+  retentionTTL: 24h
+---
+apiVersion: sproozi.com/v1alpha1
+kind: AgentTemplate
+metadata:
+  name: first-check
+  namespace: sproozi-system
+spec:
+  runtimeRef:
+    name: first-check
+  policyRef:
+    name: first-check
+  instructions: List Pods in sproozi-system through the gateway, show the denied paths, then exit.
+  egressProfiles: []

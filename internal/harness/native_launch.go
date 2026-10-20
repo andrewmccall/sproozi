@@ -12,6 +12,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/andrewmccall/sproozi/internal/nativeconfig"
 )
@@ -36,6 +37,23 @@ type NativeLaunch struct {
 	Options           []string            `json:"options,omitempty"`
 	Gateway           *NativeGateway      `json:"gateway,omitempty"`
 	TrustBundlePEM    []byte              `json:"trustBundlePEM,omitempty"`
+	// UserInstructions are the user's shared native preferences: Codex's
+	// user-level instruction file, or a section after Claude's approved system
+	// prompt. They never replace Instructions, the approved developer
+	// instructions.
+	UserInstructions string `json:"userInstructions,omitempty"`
+}
+
+// MaxUserInstructions bounds the shared user instruction text.
+const MaxUserInstructions = 64 << 10
+
+// NativeUserInstructionsFile is the native user-level instruction file name
+// inside each harness's native home.
+func NativeUserInstructionsFile(kind NativeKind) string {
+	if kind == NativeClaude {
+		return "CLAUDE.md"
+	}
+	return "AGENTS.md"
 }
 
 // NativeGateway projects a fresh workload token only at activation. Its fixed
@@ -165,6 +183,9 @@ func (c NativeLaunch) Validate(now time.Time) error {
 	}
 	if c.Instructions == "" || fmt.Sprintf("%x", sha256.Sum256([]byte(c.Instructions))) != c.InstructionDigest {
 		return errors.New("trusted instructions do not match digest")
+	}
+	if len(c.UserInstructions) > MaxUserInstructions || !utf8.ValidString(c.UserInstructions) || strings.ContainsRune(c.UserInstructions, 0) {
+		return errors.New("user instructions must be bounded UTF-8 text")
 	}
 	if c.Gateway != nil {
 		if err := c.Gateway.Validate(c.Env); err != nil {

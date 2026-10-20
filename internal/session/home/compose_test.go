@@ -29,6 +29,7 @@ import (
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	gatewaydocker "github.com/andrewmccall/sproozi/internal/gateway/docker"
 	"github.com/andrewmccall/sproozi/internal/harness"
+	"github.com/andrewmccall/sproozi/internal/pki"
 	"github.com/andrewmccall/sproozi/internal/privatefs"
 
 	runtimedocker "github.com/andrewmccall/sproozi/internal/runtime/docker"
@@ -100,7 +101,7 @@ func TestProductionCompositionTakesExclusiveOwnershipWithoutLaunching(t *testing
 		t.Fatal(err)
 	}
 	defer func() { _ = reopened.Close() }()
-	if reopened.gateway.Handler == nil || reopened.local == nil || reopened.coordinator == nil {
+	if len(reopened.stacks) != 1 || reopened.stacks[0].server.Handler == nil || reopened.stacks[0].placement == nil || reopened.coordinator == nil {
 		t.Fatal("production adapters absent")
 	}
 }
@@ -130,8 +131,8 @@ func TestChangedPlacementSettingsReturnTheReasonInsteadOfPanicking(t *testing.T)
 func TestGatewayTLSRejectsDifferentDockerEndpoint(t *testing.T) {
 	c := composedConfig(t)
 	c.Local.GatewayIPv4 = "192.168.65.253"
-	if _, _, _, err := gatewayTLS(c); err == nil {
-		t.Fatal("gateway endpoint lacked matching IP SAN")
+	if _, err := Open(c, io.Discard); err == nil || !strings.Contains(err.Error(), "does not name local.gatewayIPv4 192.168.65.253") {
+		t.Fatalf("gateway endpoint lacked matching IP SAN: %v", err)
 	}
 }
 
@@ -158,10 +159,11 @@ func TestKubernetesConfigKeepsCredentialInGatewayAndRejectsUnsafeScopes(t *testi
 	if err != nil || len(policy.KubernetesRead.Resources) != 2 || len(policy.AllowedCapabilities) != 2 {
 		t.Fatalf("approved native scope=%+v err=%v", policy, err)
 	}
-	certificate, _, _, err := gatewayTLS(c)
+	certs, err := openCertificates(c, servingNames(c, []*localStack{{config: c.Local}}), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	certificate := *certs.serving.Load()
 	target := &gatewaydocker.GatewayConfig{Certificates: map[string]tls.Certificate{}}
 	if err := nativeServices(c, certificate, target); err != nil {
 		t.Fatal(err)
@@ -208,10 +210,21 @@ func TestGatewayTLSNamesTheUnreadableFile(t *testing.T) {
 	} {
 		broken := composedConfig(t)
 		set(&broken.Gateway)
-		if _, _, _, err := gatewayTLS(broken); err == nil || !strings.Contains(err.Error(), key+" "+path+": ") {
+		if err := checkGatewayTLS(broken); err == nil || !strings.Contains(err.Error(), key+" "+path+": ") {
 			t.Errorf("%s: %v", key, err)
 		}
 	}
+}
+
+// checkGatewayTLS runs the listener and administrator certificate checks
+// that Open applies before it creates any store.
+func checkGatewayTLS(c Config) error {
+	stacks, err := localConfigs(c)
+	if err != nil {
+		return err
+	}
+	_, err = openCertificates(c, servingNames(c, stacks), nil)
+	return err
 }
 
 // Each listener or certificate fault names its own setting.
@@ -224,17 +237,19 @@ func TestGatewayTLSNamesTheFailedSetting(t *testing.T) {
 		`home: gateway.listen "0.0.0.0:9" uses port 9, but local.gatewayPort is 18443; make them equal`: func(c *Config) {
 			c.Gateway.Listen = "0.0.0.0:9"
 		},
-		`home: gateway.listen "127.0.0.1:18443" listens on 127.0.0.1, which containers cannot reach; ` +
-			`use local.gatewayIPv4 192.168.65.254 or 0.0.0.0`: func(c *Config) { c.Gateway.Listen = "127.0.0.1:18443" },
+		`home: gateway.listen "10.1.2.3:18443" listens on 10.1.2.3, which containers cannot reach; ` +
+			`use local.gatewayIPv4 192.168.65.254, a loopback address the engine forwards, or 0.0.0.0`: func(c *Config) {
+			c.Gateway.Listen = "10.1.2.3:18443"
+		},
 		"does not name local.gatewayIPv4 192.168.65.253; issue it with that address as an IP subject alternative name": func(c *Config) {
 			c.Local.GatewayIPv4, c.Gateway.Listen = "192.168.65.253", "192.168.65.253:18443"
 		},
-		"does not name api.anthropic.com, the inspection host for local.harness claude-code; " +
+		"does not name api.anthropic.com, a host the gateway inspects; " +
 			"issue it with that name as a DNS subject alternative name": func(c *Config) { c.Local.Harness = harness.NativeClaude },
 	} {
 		c := composedConfig(t)
 		change(&c)
-		if _, _, _, err := gatewayTLS(c); err == nil || !strings.Contains(err.Error(), want) {
+		if err := checkGatewayTLS(c); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("got %v, want %q", err, want)
 		}
 	}
@@ -311,4 +326,149 @@ func TestSharedCertificateNamesItsSetting(t *testing.T) {
 	if err == nil || err.Error() != want || !errors.As(err, &unsafe) || unsafe.Path != c.Gateway.CertificateFile {
 		t.Fatalf("got %v, want %q", err, want)
 	}
+}
+
+// managedConfig uses a home-owned PKI store and a second, Claude harness.
+func managedConfig(t *testing.T) (Config, *pki.Store) {
+	t.Helper()
+	c := composedConfig(t)
+	root := filepath.Dir(c.Gateway.ProviderTokenFile)
+	c.Gateway.CertificateFile, c.Gateway.KeyFile, c.Gateway.TrustBundleFile = "", "", ""
+	c.Gateway.PKIDirectory = filepath.Join(root, "pki")
+	c.Gateway.Listen = "127.0.0.1:18443"
+	c.Harnesses = []LocalHarness{{Harness: harness.NativeClaude, Name: testClaudeLocal, GatewayPort: 18444, Model: "claude-fixture",
+		ProviderURL: "http://127.0.0.1:18766", ProviderTokenFile: c.Gateway.ProviderTokenFile}}
+	store, err := pki.Open(c.Gateway.PKIDirectory, pki.DefaultPolicy, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c, store
+}
+
+func TestManagedCertificatesNeverCreateACAAtServiceStart(t *testing.T) {
+	c, _ := managedConfig(t)
+	if _, err := Open(c, io.Discard); err == nil || !errors.Is(err, pki.ErrNotInitialized) {
+		t.Fatalf("service start created or skipped the CA: %v", err)
+	}
+}
+
+func TestSecondHarnessGetsItsOwnPlacementPortAndCoveredCertificate(t *testing.T) {
+	c, store := managedConfig(t)
+	// Setup created the CA for a narrower name set; Open widens the leaf.
+	if err := store.Initialize(pki.Names{DNS: []string{inspectionHost}, IPs: []string{c.Local.GatewayIPv4}}); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(c, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	if len(s.stacks) != 2 || s.placements[testClaudeLocal] == nil || s.placements[testLocal] == nil {
+		t.Fatalf("stacks=%d placements=%v", len(s.stacks), s.placements)
+	}
+	if s.stacks[0].server.Addr != "127.0.0.1:18443" || s.stacks[1].server.Addr != "127.0.0.1:18444" {
+		t.Fatalf("listeners %s %s", s.stacks[0].server.Addr, s.stacks[1].server.Addr)
+	}
+	if s.stacks[1].config.GatewayPort != 18444 || s.stacks[1].config.NativeImageID != c.Local.NativeImageID {
+		t.Fatal("second harness must derive from the primary placement with its own port")
+	}
+	leaf := s.certs.serving.Load().Leaf
+	for _, host := range []string{"api.openai.com", "api.anthropic.com", c.Local.GatewayIPv4} {
+		if leaf.VerifyHostname(host) != nil {
+			t.Fatalf("serving leaf lacks %s", host)
+		}
+	}
+	local, err := s.localFor(harness.NativeClaude)
+	if err != nil || local.Name != testClaudeLocal {
+		t.Fatalf("localFor claude = %+v %v", local, err)
+	}
+	if _, err = os.Stat(filepath.Join(c.Directory, "docker-local-claude")); err != nil {
+		t.Fatalf("second placement directory: %v", err)
+	}
+}
+
+func TestLocalHarnessesRejectDuplicatesAndUnsafeListeners(t *testing.T) {
+	cases := map[string]func(*Config){
+		"duplicate harness": func(c *Config) { c.Harnesses[0].Harness = harness.NativeCodex },
+		"duplicate port":    func(c *Config) { c.Harnesses[0].GatewayPort = c.Local.GatewayPort },
+		"duplicate name":    func(c *Config) { c.Harnesses[0].Name = testLocal },
+		"public listener":   func(c *Config) { c.Gateway.Listen = "10.1.2.3:18443" },
+		"wrong port":        func(c *Config) { c.Gateway.Listen = "127.0.0.1:1" },
+		"mixed sources":     func(c *Config) { c.Gateway.CertificateFile = "/etc/passwd" },
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			c, store := managedConfig(t)
+			if err := store.Initialize(pki.Names{DNS: []string{inspectionHost}, IPs: []string{c.Local.GatewayIPv4}}); err != nil {
+				t.Fatal(err)
+			}
+			mutate(&c)
+			if s, err := Open(c, io.Discard); err == nil {
+				_ = s.Close()
+				t.Fatal("unsafe local harness configuration accepted")
+			}
+		})
+	}
+}
+
+func TestManagedTrustRecordsConsumersUntilSeal(t *testing.T) {
+	c, store := managedConfig(t)
+	if err := store.Initialize(pki.Names{DNS: []string{inspectionHost}, IPs: []string{c.Local.GatewayIPv4}}); err != nil {
+		t.Fatal(err)
+	}
+	certs, err := openCertificates(c, servingNames(c, []*localStack{{config: c.Local}}), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	launch := session.Launch{AllocationID: "6f1f9c55-1d36-4b10-9a5e-0d5b1a9c7c11", Placement: testLocal}
+	trust, err := certs.trustFor(launch)
+	if err != nil || len(trust) == 0 {
+		t.Fatalf("trust=%d err=%v", len(trust), err)
+	}
+	if err = store.PrepareRotation(); err != nil {
+		t.Fatal(err)
+	}
+	fenced := false
+	certs.fenced = func(session.Launch) (bool, error) { return fenced, nil }
+	if err = certs.maintain(); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := store.State(); st.Rotation.Stage != pki.StagePrepared {
+		t.Fatal("rotation switched while a running allocation held only the old trust")
+	}
+	fenced = true
+	if err = certs.maintain(); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := store.State(); st.Rotation == nil || st.Rotation.Stage != pki.StageSwitched || st.Serving != 2 {
+		t.Fatalf("rotation did not switch after independent stop: %+v", st.Rotation)
+	}
+	if !certs.serving.Load().Leaf.Equal(mustServing(t, store)) {
+		t.Fatal("switched leaf not reloaded")
+	}
+	// An unreachable gateway fails the post-switch check, so the old
+	// authority stays trusted.
+	certs.listeners = []string{"127.0.0.1:1"}
+	if err = certs.maintain(); err == nil {
+		t.Fatal("retired the previous authority without checking the switched gateway")
+	}
+	if st, _ := store.State(); st.Rotation == nil || st.Rotation.Stage != pki.StageSwitched {
+		t.Fatal("rotation advanced after a failed check")
+	}
+	certs.listeners = nil
+	if err = certs.maintain(); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := store.State(); st.Rotation != nil || len(st.Trusted) != 1 {
+		t.Fatalf("rotation did not retire: %+v", st)
+	}
+}
+
+func mustServing(t *testing.T, store *pki.Store) *x509.Certificate {
+	t.Helper()
+	cert, _, _, err := store.Serving()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cert.Leaf
 }

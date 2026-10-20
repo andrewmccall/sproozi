@@ -1,6 +1,6 @@
 # Simplified Sproozi local client onboarding
 
-Status: proposed product requirements, ready for engineering breakdown
+Status: largely implemented. [ADR 0029](../../adr/0029-local-provisioning-and-lifecycle.md) and [ADR 0030](../../adr/0030-kubernetes-release-assets-and-certificates.md) record what was built and how it differs from this proposal; the [local sessions guide](../../guides/local-sessions.md) and [Kubernetes guide](../../guides/install-kubernetes.md) describe current use. The text below is the original proposal.
 
 Date: 20 October 2026
 

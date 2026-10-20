@@ -1,7 +1,12 @@
 # Sproozi CLI and home daemon
 
-`sproozi serve` runs the [home daemon](../../GLOSSARY.md#home-daemon). It owns one
-local Docker placement, its private gateway and accounting, the session journal,
+For a local Docker installation, run `sproozi init --local` and follow the
+[local sessions guide](../../docs/guides/local-sessions.md). It writes the
+configuration described below for you. This page documents that configuration
+for administrators who write or adjust it by hand.
+
+`sproozi serve` runs the [home daemon](../../GLOSSARY.md#home-daemon). It owns a
+local Docker placement for each configured harness, with its private gateway, and the accounting, the session journal,
 and HTTPS connections to administrator-selected
 [profile services](../../GLOSSARY.md#profile-service). Client
 commands use a private Unix socket or Windows named pipe. A terminal attachment can disconnect while
@@ -114,6 +119,8 @@ hold exactly one JSON object: anything after its closing `}` fails with
 `configuration PATH: unexpected content after the closing "}" that ends at byte
 N; the file must hold exactly one JSON object; ...`.
 The configuration must be a regular file, not a directory or symbolic link.
+`sproozi init --local` provisions a complete local installation; see the
+[local installation reference](../../docs/reference/local-installation.md).
 Printed commands quote paths that contain spaces, so you can paste them. Windows users should read
 [Windows setup](../../docs/guides/windows.md) for path and permission rules.
 
@@ -123,8 +130,8 @@ Prepare the selected native/helper/anchor images and the administrator-created b
 network used by `internal/runtime/docker`. The gateway IPv4 must be reachable from
 that network, including across Docker Desktop's VM boundary. The anchor permits
 worker traffic only to that fixed IPv4 and port. Image IDs are immutable Docker
-`sha256:` content IDs, not tags. This command neither pulls images nor creates a
-network automatically.
+`sha256:` content IDs, not tags. With a hand-written configuration, `serve`
+neither pulls images nor creates a network; `init --local` does both.
 
 Keep configuration, provider keys, home principal tokens and TLS keys outside the worker
 workspace. Directories must be owned and mode `0700`; files must be owned, regular,
@@ -233,12 +240,36 @@ both maps hold the same name, those commands use the `workSources` entry and
 `move --to` uses the `remote` one. Use `remote` alone when one profile service
 is both your placement and your executor.
 
+### Fields for home-managed certificates, harnesses and shared instructions
+
+These optional fields are what `init --local` writes:
+
+- `gateway.pkiDirectory` replaces `certificateFile`, `keyFile` and
+  `trustBundleFile` with a home-owned certificate authority store. The service
+  renews the serving leaf, rotates the authority when every running allocation
+  has the new trust or has stopped, and reloads the certificate without
+  restarting. Setup creates the store; the service never creates an authority.
+  Do not combine it with the three file fields.
+- `harnesses` lists further native harnesses. Each entry has `harness`, a
+  distinct placement `name` and `gatewayPort`, `model`, optional
+  `nativeOptions`, `providerURL`, `providerTokenFile` and optional
+  `providerCAFile` and `pricingFile`. It shares the `local` placement's images,
+  network, gateway address, instructions, limits, allowances and certificate
+  source. Each harness has its own grants and placement directories.
+  `start --harness` selects one; `move --to` with any local placement name
+  returns a session to its own harness's placement.
+- `agentsDirectory` names the shared agent files read for every launch; see
+  [shared agent files](../../docs/reference/local-installation.md#shared-agent-files).
+- `gateway.listen` may name a loopback address when the engine forwards its host
+  address to host loopback, as Docker Desktop does.
+
 ## Gateway certificates and provider
 
 The configured TLS certificate must cover both the exact gateway IPv4 as an IP SAN
 and the selected model authority as a DNS SAN: `api.openai.com` for Codex or
 `api.anthropic.com` for Claude Code. The trusted CA bundle must verify that chain.
-The listener can bind the exact IPv4 or `0.0.0.0`, on the configured gateway port.
+The listener can bind the exact IPv4, a loopback address the engine forwards or
+`0.0.0.0`, on the configured gateway port.
 Workers receive only the CA certificates, a fresh per-visit proxy token and
 a placeholder provider key. The provider key is read by the trusted gateway
 from `providerTokenFile`. `serve` refuses to start while that file still holds

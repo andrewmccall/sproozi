@@ -1,0 +1,74 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sproozi-certificates
+  namespace: sproozi-system
+  labels:
+    app.kubernetes.io/name: sproozi
+    app.kubernetes.io/component: certificates
+automountServiceAccountToken: true
+---
+# Only the two precreated Secrets, by name. No list, watch or create.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: sproozi-certificates
+  namespace: sproozi-system
+  labels:
+    app.kubernetes.io/name: sproozi
+    app.kubernetes.io/component: certificates
+rules:
+- apiGroups: [""]
+  resources: [secrets]
+  resourceNames: [sproozi-certificate-authority, sproozi-gateway-tls]
+  verbs: [get, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sproozi-certificates
+  namespace: sproozi-system
+  labels:
+    app.kubernetes.io/name: sproozi
+    app.kubernetes.io/component: certificates
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: sproozi-certificates
+subjects:
+- kind: ServiceAccount
+  name: sproozi-certificates
+  namespace: sproozi-system
+---
+# Certificate-only trust bundles for workers. Generated names cannot be listed
+# in resourceNames, so creation is namespace-wide; the objects are immutable
+# and hold public certificates only.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: sproozi-certificates-trust
+  namespace: sproozi-agents
+  labels:
+    app.kubernetes.io/name: sproozi
+    app.kubernetes.io/component: certificates
+rules:
+- apiGroups: [""]
+  resources: [configmaps]
+  verbs: [get, create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sproozi-certificates-trust
+  namespace: sproozi-agents
+  labels:
+    app.kubernetes.io/name: sproozi
+    app.kubernetes.io/component: certificates
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: sproozi-certificates-trust
+subjects:
+- kind: ServiceAccount
+  name: sproozi-certificates
+  namespace: sproozi-system

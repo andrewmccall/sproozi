@@ -1,0 +1,10 @@
+# Release-matched install with Sproozi's self-managed gateway CA. Apply the
+# CRDs first. No cert-manager is needed. Applying this overlay authorises the
+# certificate controller to write its two Secrets and trust ConfigMaps.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- ../install
+- ../self-managed-ca
+patches:
+- path: gateway-kubernetes-read.yaml

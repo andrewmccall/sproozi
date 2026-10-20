@@ -53,6 +53,8 @@ recommended macOS installation path.
 The CLI controls sessions through the home daemon (`sproozi serve`) and remote
 executors. These guides use it:
 
+- [Local sessions](local-sessions.md) runs Codex or Claude Code in local Docker
+  after `sproozi init --local`. It needs no cluster and no checkout.
 - [Move a live session between Docker and Kubernetes](session-mobility.md)
   configures the home daemon and starts a session in local Docker.
 - [Run a task remotely, then resume it locally](portable-workflows.md) runs Codex in
@@ -62,15 +64,18 @@ executors. These guides use it:
 - On Windows, read [Use Sproozi on Windows](windows.md) before configuring the
   home daemon.
 
-These guides also build images and the profile service from a checkout of this
-repository. Use the checkout of the same release as your CLI:
-`sproozi --version` prints the version, and its tag is that version with a `v`
-prefix, for example `git checkout v0.1.0`. The CLI archive does not contain
-sandbox images.
+`sproozi init --local` pulls the release's worker image and prepares the
+network, certificates and credentials. The other guides build images and the
+profile service from a checkout of this repository. Use the checkout of the
+same release as your CLI: `sproozi --version` prints the version, and its tag
+is that version with a `v` prefix, for example `git checkout v0.1.0`. The CLI
+archive does not contain sandbox images.
 
 The Kubernetes guides don't use the CLI. [Getting started](getting-started.md)
-and [Install on Kubernetes and run your first Pod](install-kubernetes.md) run
-from a checkout with Make.
+runs from a checkout with Make.
+[Install on Kubernetes and run your first Pod](install-kubernetes.md) uses the
+release's Kubernetes assets, which reference the same published images, or a
+checkout.
 
 ## Build from source
 

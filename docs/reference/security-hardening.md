@@ -102,6 +102,24 @@ rules](agentruntime.md#container-validation-rules) list what admission rejects.
 Runtime authors are trusted: keep provider credentials out of public ConfigMaps
 and literal environment values.
 
+### Gateway certificates
+
+Rotate gateway certificates before they expire. The Kubernetes gateway and the
+home daemon both serve a renewed certificate to new connections without
+restarting; a replacement that misses an inspected host or has expired is
+refused. The optional Kubernetes certificate controller holds its CA key in one
+Secret. Protect `sproozi-system` Secrets and etcd encryption accordingly. Its
+trust bundles are certificate-only and immutable. Treat `replace` as an
+emergency that removes every running Pod's trust in the gateway. See
+[maintain gateway certificates](../guides/install-kubernetes.md#maintain-gateway-certificates).
+
+A [local installation](local-installation.md) keeps its CA key, provider keys
+and journals in owner-only files. Its gateway listens on loopback when the
+engine forwards there, as Docker Desktop does. The shared `agents/` directory
+reaches every Codex session of that user and is not isolation between
+untrusted users or agents. Anyone controlling the user account or the Docker
+engine controls the local installation.
+
 ## Concurrency and gateway capacity
 
 > **Warning:** There is no cluster cap by default, and the default install sets

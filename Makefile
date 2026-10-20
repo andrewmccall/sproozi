@@ -153,6 +153,14 @@ verify-harness-process: ## Run installed Claude Code and OpenCode through the TL
 verify-mcp-kind: ## Prove configured MCP with stock Codex in an owned Kind cluster; real model session.
 	KIND_NODE_IMAGE='$(KIND_NODE_IMAGE)' bash hack/verify/mcp-kind.sh
 
+.PHONY: verify-local-onboarding
+verify-local-onboarding: ## Prove init --local, both harnesses, shared instructions and renewal on this Docker engine with local providers.
+	python3 hack/verify/local-onboarding.py
+
+.PHONY: verify-kubernetes-release
+verify-kubernetes-release: ## Install the release Kubernetes assets in an owned Kind cluster; prove first check, renewal, rotation and RBAC.
+	KIND_NODE_IMAGE='$(KIND_NODE_IMAGE)' python3 hack/verify/kubernetes-release.py
+
 .PHONY: verify-workflow-fixtures
 verify-workflow-fixtures: ## Run offline Python and shell regressions for fixtures, quickstart, Kind and demo scripts. CI.
 	python3 -m unittest discover -s hack/verify/session-mobility -p '*_test.py'

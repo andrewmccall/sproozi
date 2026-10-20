@@ -349,6 +349,34 @@ and `home` are reserved, and neither `home` nor `local.name` is an executor.
 Also seen as: home (in CLI output and messages; `--executor home` is
 rejected), home service.
 
+### Local installation
+
+The private directory, `~/sproozi` by default, that `sproozi init --local`
+provisions for the home daemon: its configuration, provider credentials,
+certificate authority, journals and shared agent files. See
+[local installation](docs/reference/local-installation.md). Also seen as:
+installation root.
+
+### Shared agent files
+
+User instructions in a local installation's `agents/` directory that the home
+daemon gives every launch of a harness that supports them. They never replace
+approved instructions or reach a checkpoint. See
+[shared agent files](docs/reference/local-installation.md#shared-agent-files).
+Also seen as: agents root, agents directory.
+
+### Trust generation
+
+One certificate authority in the gateway's certificate store. A worker trusts
+the generations in the bundle it received at launch; rotation adds a new
+generation and retires the old one only after every consumer has the new one.
+
+### Certificate controller
+
+The optional `/certificates` program in a Kubernetes installation. It keeps the
+gateway's private CA, serving certificate and immutable trust ConfigMaps
+without cert-manager. See [Kubernetes installation](docs/guides/install-kubernetes.md#maintain-gateway-certificates).
+
 ### Profile service
 
 The `session-profile` program. It serves one administrator-approved Kubernetes

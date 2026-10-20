@@ -15,8 +15,10 @@ import (
 	"slices"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/andrewmccall/sproozi/internal/harness"
+	"github.com/andrewmccall/sproozi/internal/localsetup"
 	"github.com/andrewmccall/sproozi/internal/project"
 	"github.com/andrewmccall/sproozi/internal/session/home"
 	"github.com/andrewmccall/sproozi/internal/work"
@@ -28,12 +30,21 @@ const (
 	actionRun      = "run"
 )
 
-func defaultConfigPath() (string, error) {
-	p, e := os.UserConfigDir()
-	return filepath.Join(p, "sproozi", "config.json"), e
+// defaultConfigPath keeps an existing platform configuration authoritative and
+// otherwise uses the local installation's configuration.
+func defaultConfigPath() (string, error) { return localsetup.DefaultConfigPath() }
+
+// setupOptions holds local provisioning and maintenance flags.
+type setupOptions struct {
+	enabled, credentialStdin, skipCheck, noService, json, leaveRunning, checkProvider    bool
+	root, model, image, build, providerURL, providerCA, credentialFile, instructionsFile string
+	port                                                                                 uint16
+	timeout                                                                              time.Duration
+	verb, operand                                                                        string
 }
 
 type options struct {
+	setup                                                                   setupOptions
 	action, socket, id, operation, executor, source, kind, repository, task string
 	detach                                                                  bool
 	// socketGiven reports --socket on the command line, not derived from config.
@@ -59,7 +70,14 @@ func parseProduct(args []string) (options, error) {
 	q := options{action: c.name}
 	var in inputs
 	fs := c.flagSet(&q, &in)
-	if err := parseSessionArguments(c, fs, args[1:], &q.id); err != nil {
+	rest := args[1:]
+	if c.verbs != nil {
+		var err error
+		if rest, err = parseVerb(c, rest, &q.setup); err != nil {
+			return options{}, err
+		}
+	}
+	if err := parseSessionArguments(c, fs, rest, &q.id); err != nil {
 		return options{}, err
 	}
 	configGiven := false
@@ -79,7 +97,10 @@ func parseProduct(args []string) (options, error) {
 			return options{}, e
 		}
 	}
-	if c.name == actionInit || c.name == actionVersion {
+	if err := parseSetupInputs(in, &q.setup); err != nil {
+		return options{}, err
+	}
+	if isSetupCommand(c.name) || c.name == actionVersion {
 		return q, nil
 	}
 	if c.name == actionServe {
@@ -176,10 +197,17 @@ func runProduct(args []string, stdout io.Writer) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	switch {
+	case q.action == actionInit && q.setup.enabled:
+		return q.initLocal(ctx)
 	case q.action == actionInit:
 		return initialize(q.directory, stdout)
+	case isSetupCommand(q.action):
+		return q.maintain(ctx)
 	case q.action == actionVersion:
 		_, err := fmt.Fprintln(stdout, build)
+		if image := localsetup.ReleaseImage(); err == nil && image != "" {
+			_, err = fmt.Fprintf(stdout, "native image %s\n", image)
+		}
 		return err
 	case q.action == actionServe:
 		return serve(ctx, q.configPath)
@@ -236,12 +264,16 @@ func (q *options) local(ctx context.Context) error {
 	if err := q.checkSocket(); err != nil {
 		return err
 	}
+	if err := q.ensureService(ctx); err != nil {
+		return err
+	}
 	if q.action == home.ActionAttach {
 		return attach(ctx, q.socket, q.id)
 	}
 	request := home.Request{
 		Action: q.action, ID: q.id, OperationID: q.operation, Source: q.source,
 		Workspace: q.workspace, Destination: q.destination, IncludeIgnored: q.includeIgnored,
+		Harness: harness.NativeKind(q.kind),
 	}
 	response, err := home.Call(ctx, q.socket, request)
 	// A refused or failed request prints only its error, not the session.
@@ -259,7 +291,7 @@ func (q *options) local(ctx context.Context) error {
 		return err
 	}
 	q.reportIDs()
-	if q.action == home.ActionResume && !q.detach {
+	if (q.action == home.ActionResume || q.action == home.ActionStart) && !q.detach {
 		return attach(ctx, q.socket, q.id)
 	}
 	return nil
@@ -350,14 +382,9 @@ func (q *options) checkDestination() error {
 // remoteKeys names the configuration maps that define remote executors.
 const remoteKeys = `"remote" or "workSources"`
 
-// unknownCommand points to help, and from doctor to the repository's setup check.
+// unknownCommand points to help.
 func unknownCommand(name string) error {
-	err := fmt.Errorf("unknown command %q; run \"sproozi -h\" for commands", name)
-	if name == "doctor" {
-		err = fmt.Errorf("%w. The setup check is \"python3 hack/verify/quickstart.py doctor\" "+
-			"in a repository checkout, see %s", err, docURL("docs/guides/getting-started.md"))
-	}
-	return err
+	return fmt.Errorf("unknown command %q; run \"sproozi -h\" for commands", name)
 }
 
 // selectedExecutors names the remote catalogues discovery queries by default.
@@ -428,7 +455,12 @@ func (q *options) checkSocket() error {
 	if problem := home.SocketPathProblem(q.socket); problem != "" {
 		return errors.New(problem + "; use a shorter --socket path")
 	}
-	if info, err := os.Stat(q.socket); err == nil && info.Mode()&os.ModeSocket == 0 && runtime.GOOS != goosWindows {
+	// On Windows the socket is a named pipe, and stat opens it as a client,
+	// taking the instance the request needs.
+	if runtime.GOOS == goosWindows {
+		return nil
+	}
+	if info, err := os.Stat(q.socket); err == nil && info.Mode()&os.ModeSocket == 0 {
 		kind := "a regular file"
 		if info.IsDir() {
 			kind = "a directory"

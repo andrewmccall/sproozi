@@ -59,7 +59,10 @@ const (
 
 type Config struct {
 	// Certificates maps exact DNS names (without port) to inspection certificates.
-	Certificates     map[string]tls.Certificate
+	Certificates map[string]tls.Certificate
+	// Serving, when set, replaces every inspected host's certificate with its
+	// current value. Certificates then lists only the inspected hosts.
+	Serving          *Certificate
 	Authenticate     func(context.Context, string) (*gateway.ExecutionGrant, error)
 	Revalidate       func(context.Context, *gateway.ExecutionGrant) error
 	Handler          http.Handler
@@ -226,6 +229,9 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
 			if hello.ServerName != host {
 				return nil, fmt.Errorf("SNI does not match CONNECT target")
+			}
+			if g.config.Serving != nil {
+				return g.config.Serving.get(hello)
 			}
 			return &certificate, nil
 		},

@@ -25,9 +25,10 @@ COPY internal/ internal/
 # the docker BUILDPLATFORM arg will be linux/arm64 when for Apple x86 it will be linux/amd64. Therefore,
 # by leaving it empty we can ensure that the container and binary shipped on it will have the same platform.
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -o manager cmd/main.go && \
-    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -o gateway cmd/gateway/main.go && \
+    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -o gateway ./cmd/gateway && \
     CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -o webhook cmd/webhook/main.go && \
-    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -o tasks cmd/tasks/main.go
+    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -o tasks cmd/tasks/main.go && \
+    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -o certificates ./cmd/certificates
 
 # The binaries are statically linked.  scratch removes a second mutable image
 # reference; copy only the CA bundle needed for outbound TLS.
@@ -37,6 +38,7 @@ COPY --from=builder /workspace/manager .
 COPY --from=builder /workspace/gateway .
 COPY --from=builder /workspace/webhook .
 COPY --from=builder /workspace/tasks .
+COPY --from=builder /workspace/certificates .
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 USER 65532:65532
 

@@ -99,7 +99,7 @@ func TestInspectedSessionMemory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := NewServer(listener.Addr().String(), testCertificate(t), g)
+	server := NewServer(listener.Addr().String(), NewCertificate(testCertificate(t)), g)
 	go func() { _ = server.ServeTLS(g.LimitListener(listener), "", "") }()
 	defer func() { _ = server.Close() }()
 

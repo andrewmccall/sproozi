@@ -40,6 +40,8 @@ checks one and exits non-zero if it is malformed, unsafe, a directory or a
 symbolic link, or has an invalid `remote`, `workSources` or `allowances` entry. It does not
 start a service. The default
 is the platform user configuration directory's `sproozi` directory.
+`sproozi init --local` instead provisions a complete local installation; see
+[local installation commands](#local-installation-commands).
 
 Home is the [home daemon](../../GLOSSARY.md#home-daemon): the `sproozi serve`
 process on your own machine. A command that finds no configuration reports the
@@ -84,10 +86,13 @@ certificate are unusable; see
 [If `serve` doesn't start](../guides/session-mobility.md#if-serve-doesnt-start).
 Once its control
 socket and gateway are listening, it prints `Started home daemon: control
-socket PATH, gateway HOST:PORT` to standard error, and on a clean shutdown,
+socket PATH, gateway HOST:PORT` to standard error, with one `HOST:PORT` per
+configured harness, and on a clean shutdown,
 after Ctrl-C or `SIGTERM`, `Stopped home daemon`. `start` seeds a managed Docker
-workspace from a stopped Git repository, `attach` connects its native terminal,
-and `move` transfers the supported state to a configured placement. These
+workspace from a stopped Git repository and attaches its native terminal unless
+`--detach` is selected. `attach` reconnects the terminal, and `move` transfers the
+supported state to a configured placement. `move --to NAME` with any local
+placement name returns a session to the local placement of its own harness. These
 client commands accept the configuration and socket selectors described below.
 
 Detaching the terminal does not stop the daemon or agent. Running a container on
@@ -95,6 +100,27 @@ your laptop still requires the laptop and Docker engine to remain available.
 Follow
 [Move a live session between Docker and Kubernetes](../guides/session-mobility.md)
 for the complete setup, commands, supported clients and movement limits.
+
+## Local installation commands
+
+These commands manage an installation created by `init --local`. They select it
+with `--root PATH`, defaulting to the recorded root or `~/sproozi`. The
+[local sessions guide](../guides/local-sessions.md) shows them in use and the
+[local installation reference](local-installation.md) lists what they create.
+
+| Command | Purpose |
+| --- | --- |
+| `init --local` | Provision or repair the installation for one harness and start the home daemon. Repeat it with another `--harness` to add that harness. |
+| `service status`, `service start`, `service stop` | Report, start or stop the detached home daemon. `stop` refuses while sessions are active unless `--leave-running` is given. |
+| `doctor` | Check permissions, configuration, Docker, image, network, credentials, certificates, the service and the restricted worker path. It changes no installation state. |
+| `credentials add openai`, `credentials add anthropic` | Store or replace a provider key, then restart the service if no session is active. |
+| `images status`, `images prepare` | Show the installed and release images, or pull or build an image. A prepared image replaces the installed one only while no local session state exists. |
+| `certificates status`, `renew`, `rotate-ca`, `replace-ca` | Show certificate state, renew the leaf now, begin routine rotation, or replace a lost or compromised authority. `replace-ca` refuses while sessions are active. |
+
+Results go to standard output, as JSON with `--json`; progress goes to standard
+error. A failure names its component (`docker`, `image`, `registry`, `network`,
+`tls`, `credential`, `provider`, `config`, `service` or `root`) and the next
+step to try.
 
 ## Command flags
 
@@ -105,7 +131,12 @@ other flag is rejected before configuration is read or a request is sent.
 
 | Command | Flags |
 | --- | --- |
-| `init` | `--directory` |
+| `init` | `--directory`, `--local`, `--root`, `--harness`, `--model`, `--instructions-file`, `--image`, `--build`, `--provider-url`, `--provider-ca-file`, `--credential-file`, `--credential-stdin`, `--skip-credential-check`, `--port`, `--no-service`, `--json`, `--timeout` |
+| `service` | `--root`, `--json`, `--leave-running` |
+| `doctor` | `--root`, `--json`, `--check-provider` |
+| `credentials` | `--root`, `--credential-file`, `--credential-stdin`, `--skip-credential-check` |
+| `images` | `--root`, `--image`, `--build`, `--json` |
+| `certificates` | `--root`, `--json` |
 | `version` |  |
 | `run` | `--config`, `--executor`, `--operation`, `--harness`, `--repository`, `--project`, `--task`, `--task-file`, `--workspace-from`, `--checkpoint-digest`, `--revision` |
 | `sessions` | `--config`, `--socket`, `--executor`, `--project` |
@@ -116,7 +147,7 @@ other flag is rejected before configuration is read or a request is sent.
 | `cancel` | `--config`, `--socket`, `--executor`, `--id`, `--operation` |
 | `recover` | `--config`, `--socket`, `--executor`, `--id` |
 | `serve` | `--config` |
-| `start` | `--config`, `--socket`, `--executor`, `--id`, `--operation`, `--workspace`, `--include-ignored` |
+| `start` | `--config`, `--socket`, `--executor`, `--id`, `--operation`, `--workspace`, `--harness`, `--include-ignored`, `--detach` |
 | `attach` | `--config`, `--socket`, `--executor`, `--id` |
 | `move` | `--config`, `--socket`, `--executor`, `--id`, `--operation`, `--to` |
 
@@ -129,15 +160,33 @@ other flag is rejected before configuration is read or a request is sent.
 | `--id UUID` | Stable session UUID. Commands that take a session also accept it as a positional argument, before or after the flags. |
 | `--operation UUID` | Stable operation UUID. Reuse it when retrying a mutation. It must be a non-zero UUID in lowercase 8-4-4-4-12 hexadecimal form; any other value fails with, for example, `--operation "1" is not a canonical UUID: use a non-zero UUID in lowercase 8-4-4-4-12 hexadecimal form, such as 3f2b8c1e-7d4a-4e5b-9c6d-0a1b2c3d4e5f`. Session UUIDs follow the same rule. |
 | `--from NAME` | Remote executor to pull from, configured under `remote` or `workSources`. Without it, `pull` fails with `pull requires --from NAME naming the remote executor to pull from, configured under "remote" or "workSources" in <config>`; an unknown name fails with `pull --from "X" names no remote executor configured under …`. |
-| `--harness NAME` | Approved native harness for `run`; defaults to `local.harness`. |
+| `--harness NAME` | Native harness, `codex` or `claude-code`. For `run`, it defaults to `local.harness`. For `start`, it selects a configured local harness for the new session and defaults to the primary one; a session keeps its harness. For `init --local`, it selects the harness to add and defaults to `codex`. |
 | `--repository NAME` | Approved repository for `run`. |
 | `--project ID` | Approved Project for `run`, or a filter for `sessions`. |
 | `--task TEXT`, `--task-file FILE` | Task for `run`, inline or from a UTF-8 file of at most 16 KiB. Choose one. |
 | `--workspace-from UUID`, `--checkpoint-digest SHA256`, `--revision COMMIT` | Start `run` from a retained session's exact recorded commit. All three are required together. |
-| `--detach` | Return after `resume` without attaching the terminal. |
+| `--detach` | Return after `start` or `resume` without attaching the terminal. |
 | `--workspace PATH` | Stopped ordinary Git directory that seeds `start`. |
 | `--include-ignored PATH` | Ignored file `start` carries on every visit. Repeat it for each file. |
 | `--to NAME` | Configured placement for `move`: `local.name` or a name under `remote`. `sproozi move --help` describes it as ``placement `NAME`: the value of local.name (for example local) or a name under "remote"``. Any other name fails before a request; see [move destinations](#move-destinations). |
+| `--local` | Make `init` provision a local installation instead of only creating a directory. |
+| `--root PATH` | Local installation root; defaults to the recorded root or `~/sproozi`. |
+| `--model NAME` | Provider model for the harness `init --local` adds. Setup asks for it when omitted. |
+| `--instructions-file FILE` | Approved developer instructions for a new installation, at most 16 KiB. |
+| `--image REFERENCE` | Native image as `REPOSITORY@sha256:DIGEST` or a local `sha256:` content ID. |
+| `--build DIRECTORY` | Build the native image with Docker from a Sproozi checkout or release source bundle. |
+| `--provider-url URL` | Provider base URL for the harness being added; defaults to its public provider. |
+| `--provider-ca-file FILE` | CA bundle for a private provider endpoint. |
+| `--credential-file FILE` | Owner-only file holding the provider key. |
+| `--credential-stdin` | Read the provider key from standard input. |
+| `--skip-credential-check` | Do not ask the provider to validate the key. |
+| `--port PORT` | First gateway port to try; defaults to 18443. |
+| `--no-service` | Write the configuration without starting the service. |
+| `--json` | Print a machine-readable result. |
+| `--timeout DURATION` | Overall limit for `init --local`; defaults to 30 minutes. |
+| `--leave-running` | Stop the service while active sessions keep running within their deadlines. |
+| `--check-provider` | Make `doctor` validate each stored key by listing the provider's models. |
+
 
 ## Select the owner
 
@@ -146,7 +195,8 @@ explains `--executor`, `--from` and `--to`.
 
 `run`, `serve` and every session command accept `--config FILE`. The session
 commands also accept a home `--socket PATH` override; `run` and `serve` don't. Configuration defaults to the platform user configuration directory at
-`sproozi/config.json`. A socket-only local invocation skips that default file;
+`sproozi/config.json` when that file exists, and otherwise to the local
+installation's `config.json` (the recorded root or `~/sproozi`). A socket-only local invocation skips that default file;
 for example, `sessions --socket PATH` queries only home. Supply
 `--config FILE --socket PATH` to combine configured remote sources with a socket
 override. An explicit config is always read.

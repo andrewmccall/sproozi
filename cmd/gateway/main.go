@@ -84,6 +84,7 @@ type startupConfig struct {
 	host                 string
 	listenerCert         tls.Certificate
 	certificates         map[string]tls.Certificate
+	certFile, keyFile    string
 	profiles             *destination.ProfileStore
 	pricing              *modelgateway.PricingTable
 	openAIKey            string
@@ -306,7 +307,7 @@ func loadStartupConfig() (*startupConfig, error) {
 	}
 	return &startupConfig{
 		enabled: enabled,
-		host:    host, listenerCert: certificate, certificates: certificates,
+		host:    host, listenerCert: certificate, certificates: certificates, certFile: certFile, keyFile: keyFile,
 		profiles: profiles, pricing: pricing, openAIKey: openAIKey, anthropicKey: anthropicKey, modelAuthMode: modelAuthMode,
 		openAIUpstreamURL: openAIUpstreamURL, anthropicUpstreamURL: anthropicUpstreamURL,
 		appID: appID, installationID: installationID, privateKey: privateKey,
@@ -615,8 +616,13 @@ func main() {
 		route.Budgets, route.AuditLogger = budgets, auditLogger
 		dispatcher[authority] = route
 	}
+	serving, err := startCertificateReloader(cfg, host)
+	if err != nil {
+		log.Fatal(err)
+	}
 	transport, err := proxytransport.New(proxytransport.Config{
 		Certificates:     cfg.certificates,
+		Serving:          serving,
 		Authenticate:     authenticator.Authenticate,
 		Revalidate:       authenticator.Revalidate,
 		Handler:          dispatcher,
@@ -639,7 +645,7 @@ func main() {
 		log.Fatal(err)
 	}
 	go func() { log.Fatal(newHealthServer().Serve(healthListener)) }()
-	server := proxytransport.NewServer(":8443", cfg.listenerCert, transport)
+	server := proxytransport.NewServer(":8443", serving, transport)
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGTERM, os.Interrupt)
 	go drainOnSignal(signals, server.Close, drain, func() { os.Exit(0) })

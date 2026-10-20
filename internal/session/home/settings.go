@@ -97,20 +97,7 @@ func (c Config) ServeProblems() []string {
 	add(l.MaxCheckpointBytes <= 0 || l.MaxCheckpointBytes > maxCapture, "local.maxCheckpointBytes", "1 byte to 64 MiB")
 	add(l.RetainedBytes < 2*l.MaxCheckpointBytes || l.RetainedBytes <= 0,
 		"local.retainedBytes", "at least twice local.maxCheckpointBytes")
-	g := c.Gateway
-	_, port, err := net.SplitHostPort(g.Listen)
-	add(err != nil || port != strconv.Itoa(int(l.GatewayPort)), "gateway.listen", "HOST:PORT on local.gatewayPort")
-	absolute("gateway.certificateFile", g.CertificateFile)
-	absolute("gateway.keyFile", g.KeyFile)
-	absolute("gateway.trustBundleFile", g.TrustBundleFile)
-	u, err := url.Parse(g.ProviderURL)
-	add(err != nil || u.Host == "" || !approvedProviderURL(u), "gateway.providerURL", "HTTPS provider URL")
-	absolute("gateway.providerTokenFile", g.ProviderTokenFile)
-	// Compare the integer before any conversion, which would overflow.
-	add(g.MaxModelCallSeconds != nil && (*g.MaxModelCallSeconds < 1 ||
-		int(*g.MaxModelCallSeconds) > int(proxytransport.MaxModelCallDurationLimit/time.Second)),
-		"gateway.maxModelCallSeconds", fmt.Sprintf("1 to %d seconds; omit it for %d",
-			int(proxytransport.MaxModelCallDurationLimit/time.Second), int(proxytransport.DefaultMaxModelCallDuration/time.Second)))
+	p = append(p, c.gatewayProblems()...)
 	for _, group := range c.connectionGroups() {
 		for _, name := range slices.Sorted(maps.Keys(group.entries)) {
 			add(group.entries[name].MaxCheckpointBytes != l.MaxCheckpointBytes,
@@ -123,6 +110,49 @@ func (c Config) ServeProblems() []string {
 // placeholderToken reports a setup guide's placeholder, such as
 // REPLACE_WITH_PROVIDER_API_KEY, left in place of a provider credential.
 func placeholderToken(token string) bool { return strings.HasPrefix(token, "REPLACE_WITH_") }
+
+// gatewayProblems names the gateway and further harness settings that
+// ServeProblems reports.
+func (c Config) gatewayProblems() []string {
+	var p []string
+	add := func(bad bool, key, want string) {
+		if bad {
+			p = append(p, key+" ("+want+")")
+		}
+	}
+	absolute := func(key, path string) { add(!filepath.IsAbs(path), key, "absolute path") }
+	blank := func(v string) bool { return strings.TrimSpace(v) == "" }
+	g := c.Gateway
+	_, port, err := net.SplitHostPort(g.Listen)
+	add(err != nil || port != strconv.Itoa(int(c.Local.GatewayPort)), "gateway.listen", "HOST:PORT on local.gatewayPort")
+	// A home-owned certificate store replaces the three administrator files.
+	if g.PKIDirectory != "" {
+		absolute("gateway.pkiDirectory", g.PKIDirectory)
+	} else {
+		absolute("gateway.certificateFile", g.CertificateFile)
+		absolute("gateway.keyFile", g.KeyFile)
+		absolute("gateway.trustBundleFile", g.TrustBundleFile)
+	}
+	u, err := url.Parse(g.ProviderURL)
+	add(err != nil || u.Host == "" || !approvedProviderURL(u), "gateway.providerURL", "HTTPS provider URL")
+	absolute("gateway.providerTokenFile", g.ProviderTokenFile)
+	for i, h := range c.Harnesses {
+		key := fmt.Sprintf("harnesses[%d].", i)
+		add(h.Harness.Validate() != nil, key+"harness", `"codex" or "claude-code"`)
+		add(!dockerName.MatchString(h.Name), key+"name", "Docker resource name")
+		add(h.GatewayPort == 0, key+"gatewayPort", "port")
+		add(blank(h.Model), key+"model", "model name the harness requests")
+		u, err := url.Parse(h.ProviderURL)
+		add(err != nil || u.Host == "" || !approvedProviderURL(u), key+"providerURL", "HTTPS provider URL")
+		absolute(key+"providerTokenFile", h.ProviderTokenFile)
+	}
+	// Compare the integer before any conversion, which would overflow.
+	add(g.MaxModelCallSeconds != nil && (*g.MaxModelCallSeconds < 1 ||
+		int(*g.MaxModelCallSeconds) > int(proxytransport.MaxModelCallDurationLimit/time.Second)),
+		"gateway.maxModelCallSeconds", fmt.Sprintf("1 to %d seconds; omit it for %d",
+			int(proxytransport.MaxModelCallDurationLimit/time.Second), int(proxytransport.DefaultMaxModelCallDuration/time.Second)))
+	return p
+}
 
 // ProviderTokenProblem names gateway.providerTokenFile when it still holds a
 // placeholder, or returns "". It ignores a file it cannot read: Open reports that.

@@ -55,6 +55,7 @@ Or choose a path closer to what you want to do:
 
 | I want to… | Guide | Uses |
 | --- | --- | --- |
+| Run Codex or Claude Code locally in Docker | [Local sessions](docs/guides/local-sessions.md) | CLI and Docker |
 | Try Sproozi on a local Kind cluster | [Getting started](docs/guides/getting-started.md) | Checkout and Make |
 | Install on an existing Kubernetes cluster and run a model | [Install on Kubernetes and run your first Pod](docs/guides/install-kubernetes.md) | Checkout and Make |
 | Run the investigation-to-PR demo step by step | [Manual AgentRun to pull request](docs/guides/manual-pr-demo.md) | Checkout and Make |
@@ -75,27 +76,21 @@ brew install andrewmccall/tap/sproozi
 sproozi --version
 ```
 
-Installing the CLI doesn't start a service or create credentials, and the CLI
-alone isn't enough for any guide yet. Every CLI guide in the table above also
-needs a repository checkout of the same release as the CLI, to build images and
-the profile service; [Move a live session between Docker and Kubernetes](docs/guides/session-mobility.md)
-shows how.
-With both, run `sproozi init` to create the configuration file, then edit it for
-one of two uses:
-
-- Remote work: add an executor under `"remote"`, then run `sproozi sessions`.
-  [Run a task remotely, then resume it locally](docs/guides/portable-workflows.md) walks
-  through it.
-- Local sessions: complete the settings `sproozi serve` needs (model, Docker,
-  images, instructions, limits, storage sizes and gateway), then run
-  `sproozi serve`.
-  [Prepare the administrator-owned setup](docs/guides/session-mobility.md#prepare-the-administrator-owned-setup)
-  walks through that setup, and the rest of that guide starts a session in
-  local Docker.
+Installing the CLI doesn't start a service or create credentials. For local
+Docker sessions, `sproozi init --local` prepares the image, network,
+certificates, provider credential and home daemon; the
+[local sessions guide](docs/guides/local-sessions.md) walks through it.
+The other CLI guides in the table above also need a repository checkout of the
+same release as the CLI, to build images and the profile service;
+[Move a live session between Docker and Kubernetes](docs/guides/session-mobility.md)
+shows how. For remote work, run `sproozi init` to create the configuration file,
+add an executor under `"remote"`, then run `sproozi sessions`.
+[Run a task remotely, then resume it locally](docs/guides/portable-workflows.md)
+walks through it.
 
 [Install the CLI](docs/guides/install.md) covers Windows, other downloads and
 source builds, and the [session command reference](docs/reference/session-commands.md)
-lists every command and flag. This is not yet a one-command install.
+lists every command and flag.
 
 ## What works today
 
@@ -105,6 +100,7 @@ There's working code and recorded tests, but support varies by workflow:
 | --- | --- |
 | Agent runs in Kubernetes Pods | Tested with Codex, Claude Code, OpenCode and Hermes using deterministic providers, by [`make test-e2e`](test/acceptance/running.md#harnesses-and-hermes-in-kind). The [E2E workflow](https://github.com/andrewmccall/sproozi/actions/workflows/test-e2e.yml) runs it on pull requests and pushes to `main`; check there for the latest result, which isn't always green |
 | Controlled access to Kubernetes and external tools | [Recorded tool-access acceptance](test/acceptance/reports/verified-mcp-demo.md) with a real model, including native Kubernetes reads, configured HTTPS test servers and denied operations. The full redacted reports aren't published yet |
+| Local Docker sessions from `sproozi init --local` | Provisioning, per-session Codex or Claude Code selection, gateway containment probes and certificate renewal verified live on macOS Docker Desktop with deterministic providers; see the [local sessions guide](docs/guides/local-sessions.md) |
 | Docker ↔ Kubernetes session movement | [Recorded round trips](test/acceptance/reports/verified-session-mobility.md) with Codex 0.161.0, Claude Code 2.1.27 and deterministic providers, including unfinished Git changes. The pinned clients are now Codex 0.163.0 and Claude Code 2.1.302; movement hasn't been re-recorded with them |
 | Concurrent AgentRuns | New. There's no cluster cap by default. An optional cluster cap (`--max-active-runs`) or per-policy cap (`maxActiveRuns`) keeps extra runs `Queued`. Checked with unit tests and envtest. The Kind verifier's `uncapped-policy-concurrent-runs` and `policy-cap-monotonic-cancel-cleanup` checks ([`verify.py`](hack/verify/orchestration-kind/verify.py)) run concurrent fixture runs, and last passed on this branch on 2026-10-20. Concurrent runs with a real model are not verified. Read the [concurrency warnings](docs/reference/security-hardening.md#concurrency-and-gateway-capacity) before sharing a cluster |
 | Remote Codex work followed by local resume | [Recorded remote-work acceptance](test/acceptance/reports/verified-portable-workflows.md) with deterministic models, actual package checks and isolated Kubernetes reads/denials |

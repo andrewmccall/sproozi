@@ -22,7 +22,9 @@ def publish(tag, directory):
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
     if metadata["version"] != tag[1:] or metadata["commit"] != commit:
         raise ValueError("assets do not match this tag and commit")
-    assets = sorted(p for p in root.iterdir() if p.name.endswith((".tar.gz", ".zip")) or p.name in {"checksums.txt", "metadata.json"})
+    if not (root / "images.json").exists():
+        raise ValueError("a release must include the published image manifest images.json")
+    assets = sorted(p for p in root.iterdir() if p.name.endswith((".tar.gz", ".zip")) or p.name in {"checksums.txt", "metadata.json", "images.json"})
     existing = gh("release", "view", tag, "--json", "isDraft", check=False)
     if existing.returncode == 0:
         if not json.loads(existing.stdout)["isDraft"]:

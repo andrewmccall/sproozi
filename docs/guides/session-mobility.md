@@ -26,6 +26,10 @@ lifetime. Start a new managed
 conversation; importing a personal agent home or adopting an existing running
 session is not supported.
 
+For local sessions only, `sproozi init --local` prepares everything in this
+section; see [local sessions](local-sessions.md). Use the steps below when you
+also need a profile service or want to manage the configuration by hand.
+
 ## Prepare the administrator-owned setup
 
 The trusted home daemon owns a local Unix Docker socket, fixed image IDs, its TLS
