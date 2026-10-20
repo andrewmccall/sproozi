@@ -97,9 +97,34 @@ func (c Config) ServeProblems() []string {
 	add(l.MaxCheckpointBytes <= 0 || l.MaxCheckpointBytes > maxCapture, "local.maxCheckpointBytes", "1 byte to 64 MiB")
 	add(l.RetainedBytes < 2*l.MaxCheckpointBytes || l.RetainedBytes <= 0,
 		"local.retainedBytes", "at least twice local.maxCheckpointBytes")
+	p = append(p, c.gatewayProblems()...)
+	for _, group := range c.connectionGroups() {
+		for _, name := range slices.Sorted(maps.Keys(group.entries)) {
+			add(group.entries[name].MaxCheckpointBytes != l.MaxCheckpointBytes,
+				group.key+"."+name+".maxCheckpointBytes", "equal to local.maxCheckpointBytes")
+		}
+	}
+	return append(p, c.AllowanceProblems()...)
+}
+
+// placeholderToken reports a setup guide's placeholder, such as
+// REPLACE_WITH_PROVIDER_API_KEY, left in place of a provider credential.
+func placeholderToken(token string) bool { return strings.HasPrefix(token, "REPLACE_WITH_") }
+
+// gatewayProblems names the gateway and further harness settings that
+// ServeProblems reports.
+func (c Config) gatewayProblems() []string {
+	var p []string
+	add := func(bad bool, key, want string) {
+		if bad {
+			p = append(p, key+" ("+want+")")
+		}
+	}
+	absolute := func(key, path string) { add(!filepath.IsAbs(path), key, "absolute path") }
+	blank := func(v string) bool { return strings.TrimSpace(v) == "" }
 	g := c.Gateway
 	_, port, err := net.SplitHostPort(g.Listen)
-	add(err != nil || port != strconv.Itoa(int(l.GatewayPort)), "gateway.listen", "HOST:PORT on local.gatewayPort")
+	add(err != nil || port != strconv.Itoa(int(c.Local.GatewayPort)), "gateway.listen", "HOST:PORT on local.gatewayPort")
 	// A home-owned certificate store replaces the three administrator files.
 	if g.PKIDirectory != "" {
 		absolute("gateway.pkiDirectory", g.PKIDirectory)
@@ -126,18 +151,8 @@ func (c Config) ServeProblems() []string {
 		int(*g.MaxModelCallSeconds) > int(proxytransport.MaxModelCallDurationLimit/time.Second)),
 		"gateway.maxModelCallSeconds", fmt.Sprintf("1 to %d seconds; omit it for %d",
 			int(proxytransport.MaxModelCallDurationLimit/time.Second), int(proxytransport.DefaultMaxModelCallDuration/time.Second)))
-	for _, group := range c.connectionGroups() {
-		for _, name := range slices.Sorted(maps.Keys(group.entries)) {
-			add(group.entries[name].MaxCheckpointBytes != l.MaxCheckpointBytes,
-				group.key+"."+name+".maxCheckpointBytes", "equal to local.maxCheckpointBytes")
-		}
-	}
-	return append(p, c.AllowanceProblems()...)
+	return p
 }
-
-// placeholderToken reports a setup guide's placeholder, such as
-// REPLACE_WITH_PROVIDER_API_KEY, left in place of a provider credential.
-func placeholderToken(token string) bool { return strings.HasPrefix(token, "REPLACE_WITH_") }
 
 // ProviderTokenProblem names gateway.providerTokenFile when it still holds a
 // placeholder, or returns "". It ignores a file it cannot read: Open reports that.

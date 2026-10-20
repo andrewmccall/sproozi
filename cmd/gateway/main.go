@@ -616,17 +616,10 @@ func main() {
 		route.Budgets, route.AuditLogger = budgets, auditLogger
 		dispatcher[authority] = route
 	}
-	serving := proxytransport.NewCertificate(cfg.listenerCert)
-	hosts := make([]string, 0, 1+len(cfg.certificates))
-	hosts = append(hosts, host)
-	for name := range cfg.certificates {
-		hosts = append(hosts, name)
-	}
-	reloader := &certificateReloader{certFile: cfg.certFile, keyFile: cfg.keyFile, hosts: hosts, holder: serving}
-	if _, err := reloader.reload(); err != nil {
+	serving, err := startCertificateReloader(cfg, host)
+	if err != nil {
 		log.Fatal(err)
 	}
-	go reloader.run(context.Background())
 	transport, err := proxytransport.New(proxytransport.Config{
 		Certificates:     cfg.certificates,
 		Serving:          serving,

@@ -106,3 +106,20 @@ func (r *certificateReloader) run(ctx context.Context) {
 		}
 	}
 }
+
+// startCertificateReloader serves the startup certificate and keeps replacing
+// it with renewed files that still cover the listener and inspected hosts.
+func startCertificateReloader(cfg *startupConfig, host string) (*proxytransport.Certificate, error) {
+	serving := proxytransport.NewCertificate(cfg.listenerCert)
+	hosts := make([]string, 0, 1+len(cfg.certificates))
+	hosts = append(hosts, host)
+	for name := range cfg.certificates {
+		hosts = append(hosts, name)
+	}
+	reloader := &certificateReloader{certFile: cfg.certFile, keyFile: cfg.keyFile, hosts: hosts, holder: serving}
+	if _, err := reloader.reload(); err != nil {
+		return nil, err
+	}
+	go reloader.run(context.Background())
+	return serving, nil
+}
