@@ -23,9 +23,10 @@ const (
 	hermesName   = "hermes"
 )
 
-// MCPConfig describes only requested broker connections in the selected CLI's
-// native format. Empty selection leaves configuration to the administrator.
-// It contains no upstream addresses or credentials.
+// MCPConfig describes the requested broker connections and the Sproozi control
+// connection in the selected CLI's native format. Empty selection leaves
+// configuration to the administrator. It contains no upstream addresses or
+// credentials.
 func MCPConfig(selected string, capabilities []string, gatewayEndpoint string) (map[string]string, error) {
 	if selected == "" {
 		return nil, nil
@@ -47,9 +48,12 @@ func MCPConfig(selected string, capabilities []string, gatewayEndpoint string) (
 		}
 	}
 	slices.Sort(names)
+	// Every selected harness receives the control connection; MCPServerName
+	// never admits its reserved name as a grant, so it cannot duplicate.
+	names = append(slices.Compact(names), api.ControlMCPServer)
 	var output strings.Builder
 	connections := make(map[string]any)
-	for _, name := range slices.Compact(names) {
+	for _, name := range names {
 		address := gatewayEndpoint + "/mcp/" + name
 		switch selected {
 		case codexName:

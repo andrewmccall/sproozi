@@ -31,7 +31,7 @@ func installManagedClaudePlugin(dir string) error {
 	}
 	return errors.Join(
 		installManagedFile(filepath.Join(dir, ".claude-plugin", "plugin.json"), manifest),
-		installManagedFile(filepath.Join(dir, "skills", "access", "SKILL.md"), harness.ManagedSkill("access")))
+		installManagedFile(filepath.Join(dir, "skills", harness.ManagedSkillName, "SKILL.md"), harness.ManagedSkill(harness.ManagedSkillName)))
 }
 
 // installManagedFile replaces path with the supervisor's current content. The

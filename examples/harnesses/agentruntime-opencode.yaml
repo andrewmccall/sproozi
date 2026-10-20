@@ -41,7 +41,8 @@ spec:
                 "models": {"${SPROOZI_MODEL}": {"name": "${SPROOZI_MODEL}", "limit": {"context": 200000, "output": 8192}}}
               }
             },
-            "instructions": ["/etc/sproozi/contract/instructions.txt"],
+            "instructions": ["/etc/sproozi/contract/instructions.txt",
+              "/etc/sproozi/contract/sproozi-instructions.md", "/etc/sproozi/contract/sproozi-access.md"],
             "share": "disabled",
             "autoupdate": false,
             "plugin": [],

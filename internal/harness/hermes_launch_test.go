@@ -22,7 +22,7 @@ const fakeHermes = `
 import json, os, signal, subprocess, sys, time
 from pathlib import Path
 assert sys.argv[1:] == ["chat","--oneshot","--query-file",os.environ["FIXTURE_CONTRACT"]+"/request.json","--format","stream-json","--provider","openai-api","--model","fixture-model","--max-turns","16","--ignore-rules","--toolsets",os.environ.get("FIXTURE_TOOLSETS","sproozi-mcp-docs")]
-assert os.environ["HERMES_EPHEMERAL_SYSTEM_PROMPT"] == "Trusted template"
+assert os.environ["HERMES_EPHEMERAL_SYSTEM_PROMPT"] == "Trusted template\n\nSproozi environment\n\nSproozi access skill"
 assert json.loads(Path(os.environ["FIXTURE_CONTRACT"]+"/request.json").read_text())["task"] == "Untrusted task"
 assert os.environ["OPENAI_API_KEY"] == "sproozi-local-placeholder"
 config=json.loads(Path(os.environ["HERMES_HOME"]+"/config.yaml").read_text())
@@ -59,7 +59,7 @@ func hermesFixture(t *testing.T, scenario string) (*exec.Cmd, string, string) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	files := map[string]string{"hermes": "#!" + python + "\n" + fakeHermes, "launch.py": harness.HermesLaunch, "input.json": `{"run":{"uid":"fixture-run-uid"}}`, "request.json": `{"task":"Untrusted task"}`, "instructions.txt": "Trusted template", "hermes-mcp.json": `{"mcp_servers":{"sproozi-mcp-docs":{"url":"https://gateway.svc/mcp/docs"}}}`}
+	files := map[string]string{"hermes": "#!" + python + "\n" + fakeHermes, "launch.py": harness.HermesLaunch, "input.json": `{"run":{"uid":"fixture-run-uid"}}`, "request.json": `{"task":"Untrusted task"}`, "instructions.txt": "Trusted template", "sproozi-instructions.md": "Sproozi environment", "sproozi-access.md": "Sproozi access skill", "hermes-mcp.json": `{"mcp_servers":{"sproozi-mcp-docs":{"url":"https://gateway.svc/mcp/docs"}}}`}
 	for name, data := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(data), 0700); err != nil {
 			t.Fatal(err)

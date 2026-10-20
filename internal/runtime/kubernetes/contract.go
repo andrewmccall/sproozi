@@ -89,6 +89,9 @@ func EnsureAgentContract(ctx context.Context, c client.Client, run *sprooziv1alp
 		return err
 	}
 	maps.Copy(wanted.Data, config)
+	if rt.Spec.ClientConfig.Harness != "" {
+		maps.Copy(wanted.Data, harness.ManagedContract())
+	}
 	if rt.Spec.ClientConfig.Harness == "opencode" {
 		wanted.Data["opencode-launch.py"] = harness.OpenCodeLaunch
 	}

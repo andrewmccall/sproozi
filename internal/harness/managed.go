@@ -7,7 +7,7 @@ import (
 )
 
 // ManagedSkillName is the reserved name of the Sproozi access-recovery skill.
-// Claude receives it inside the reserved sproozi plugin as sproozi:access.
+// Claude lists it inside the reserved sproozi plugin as sproozi:sproozi-access.
 const ManagedSkillName = api.ControlMCPServer + "-access"
 
 const managedSkillDescription = "Use when an external request (HTTP, git, package install, Kubernetes, MCP) " +
@@ -23,8 +23,19 @@ var ManagedInstructions string
 //go:embed managed/skill.md
 var managedSkillBody string
 
-// ManagedSkill renders the access-recovery SKILL.md under name, the harness's
-// native skill identifier.
+// ManagedSkill renders the access-recovery SKILL.md under name.
 func ManagedSkill(name string) []byte {
 	return []byte("---\nname: " + name + "\ndescription: " + managedSkillDescription + "\n---\n\n" + managedSkillBody)
+}
+
+// Contract keys for ordinary runs, whose administrator command places them.
+const (
+	ManagedInstructionsKey = "sproozi-instructions.md"
+	ManagedSkillKey        = ManagedSkillName + ".md"
+)
+
+// ManagedContract returns the Sproozi files every selected harness receives in
+// its read-only run contract.
+func ManagedContract() map[string]string {
+	return map[string]string{ManagedInstructionsKey: ManagedInstructions, ManagedSkillKey: string(ManagedSkill(ManagedSkillName))}
 }

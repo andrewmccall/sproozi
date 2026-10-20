@@ -169,7 +169,7 @@ func TestStockClaudeLoadsTheSprooziIntegration(t *testing.T) {
 	assertIntegration(t, "claude", body, []string{
 		strings.Split(instructions, "\n")[0],
 		"Sproozi managed environment",
-		"- sproozi:access:",
+		"- sproozi:" + harness.ManagedSkillName + ":",
 		`"name":"mcp__sproozi__diagnose"`,
 	})
 	if strings.Contains(body, "HOSTILE_REPOSITORY_INSTRUCTION") {

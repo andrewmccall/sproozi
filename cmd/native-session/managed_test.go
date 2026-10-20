@@ -54,7 +54,7 @@ func TestManagedClaudePluginDeclaresTheReservedNamespace(t *testing.T) {
 	if err != nil || json.Unmarshal(data, &manifest) != nil || manifest.Name != "sproozi" {
 		t.Fatalf("plugin manifest=%s err=%v", data, err)
 	}
-	if data, err = os.ReadFile(filepath.Join(dir, "skills", "access", "SKILL.md")); err != nil || !strings.Contains(string(data), "name: access\n") {
+	if data, err = os.ReadFile(filepath.Join(dir, "skills", harness.ManagedSkillName, "SKILL.md")); err != nil || !strings.Contains(string(data), "name: "+harness.ManagedSkillName+"\n") {
 		t.Fatalf("skill=%q err=%v", data, err)
 	}
 }
