@@ -171,6 +171,18 @@ func Open(c Config, log io.Writer) (_ *Service, err error) {
 		return nil, err
 	}
 	gatewayConfig := gatewaydocker.GatewayConfig{Harness: c.Local.Harness, Certificates: map[string]tls.Certificate{inspectionHostFor(c.Local.Harness): certificate}, Model: modelConfig, AuditLogger: audit.NewLogger(log)}
+	// The MCP authority also serves the Sproozi control connection, so every
+	// home gateway needs it, with or without registered MCP servers.
+	host, _, err := net.SplitHostPort(c.Gateway.MCPAuthority)
+	if err != nil {
+		return nil, errors.New("home: gateway mcpAuthority is required")
+	}
+	leaf, _ := x509.ParseCertificate(certificate.Certificate[0])
+	if leaf.VerifyHostname(host) != nil {
+		return nil, errors.New("home: inspection certificate must cover MCP authority")
+	}
+	gatewayConfig.Certificates[host] = certificate
+	gatewayConfig.MCPAuthority = c.Gateway.MCPAuthority
 	if c.Gateway.MCPRegistryFile != "" {
 		data, readErr := readPrivate(c.Gateway.MCPRegistryFile, 128<<10)
 		if readErr != nil {
@@ -180,16 +192,6 @@ func Open(c Config, log io.Writer) (_ *Service, err error) {
 		if err != nil {
 			return nil, err
 		}
-		host, _, hostErr := net.SplitHostPort(c.Gateway.MCPAuthority)
-		if hostErr != nil {
-			return nil, hostErr
-		}
-		leaf, _ := x509.ParseCertificate(certificate.Certificate[0])
-		if leaf.VerifyHostname(host) != nil {
-			return nil, errors.New("home: inspection certificate must cover MCP authority")
-		}
-		gatewayConfig.Certificates[host] = certificate
-		gatewayConfig.MCPAuthority = c.Gateway.MCPAuthority
 	}
 	if err = nativeServices(c, certificate, &gatewayConfig); err != nil {
 		return nil, err

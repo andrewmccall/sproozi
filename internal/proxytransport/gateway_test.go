@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/audit"
 	"github.com/andrewmccall/sproozi/internal/gateway"
 )
 
@@ -223,6 +224,79 @@ func TestGatewayDeniesUnknownHostAndSNIMismatchWithoutHandler(t *testing.T) {
 	}
 	if called != 0 {
 		t.Fatalf("handler calls = %d", called)
+	}
+}
+
+type auditRecorder struct {
+	mu     sync.Mutex
+	events []audit.Event
+}
+
+func (r *auditRecorder) Log(e audit.Event) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.events = append(r.events, e)
+}
+
+func (r *auditRecorder) snapshot() []audit.Event {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]audit.Event(nil), r.events...)
+}
+
+// A destination denial is attributable only after authentication; without a
+// valid identity the gateway records nothing and reveals no routing.
+func TestGatewayAuditsAuthenticatedUnknownDestination(t *testing.T) {
+	identity := testIdentity()
+	for _, tc := range []struct {
+		name, auth, response string
+		authenticate         error
+		audited              bool
+	}{
+		{name: "authenticated", auth: testProxyAuthorization, response: "unsupported destination", audited: true},
+		{name: "missing identity", response: "gateway identity required"},
+		{name: "invalid identity", auth: testProxyAuthorization, authenticate: gateway.ErrTokenInvalid, response: "invalid gateway identity"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := &auditRecorder{}
+			g, err := New(Config{Certificates: map[string]tls.Certificate{testServiceHost: testCertificate(t)},
+				Authenticate: func(context.Context, string) (*gateway.ExecutionGrant, error) {
+					if tc.authenticate != nil {
+						return nil, tc.authenticate
+					}
+					return identity, nil
+				},
+				Revalidate: func(context.Context, *gateway.ExecutionGrant) error { return nil },
+				Handler:    http.NotFoundHandler(), AllowedAuthority: onlyTestService, AuditLogger: recorder})
+			if err != nil {
+				t.Fatal(err)
+			}
+			server, client := net.Pipe()
+			w := &pipeResponseWriter{header: make(http.Header), conn: server}
+			header := http.Header{}
+			if tc.auth != "" {
+				header.Set(proxyAuthorizationHeader, tc.auth)
+			}
+			r := &http.Request{Method: http.MethodConnect, Host: "docs.example.com:443", URL: &url.URL{Host: "docs.example.com:443"}, Header: header}
+			done := make(chan struct{})
+			go func() { g.ServeHTTP(w, r); close(done) }()
+			_ = client.SetReadDeadline(time.Now().Add(time.Second))
+			if body, _ := io.ReadAll(client); !strings.Contains(string(body), tc.response) {
+				t.Fatalf("response = %q, want %q", body, tc.response)
+			}
+			<-done
+			events := recorder.snapshot()
+			if !tc.audited {
+				if len(events) != 0 {
+					t.Fatalf("unauthenticated request audited: %+v", events)
+				}
+				return
+			}
+			if len(events) != 1 || events[0].Allowed || events[0].RunUID != "test-execution" ||
+				events[0].Operation != "CONNECT docs.example.com:443" || events[0].DenyReason == "" {
+				t.Fatalf("audit = %+v", events)
+			}
+		})
 	}
 }
 

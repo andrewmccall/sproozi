@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	api "github.com/andrewmccall/sproozi/api/v1alpha1"
+	"github.com/andrewmccall/sproozi/internal/audit"
 	"github.com/andrewmccall/sproozi/internal/gateway"
 )
 
@@ -26,6 +28,8 @@ type Config struct {
 	Revalidate       func(context.Context, *gateway.ExecutionGrant) error
 	Handler          http.Handler
 	AllowedAuthority func(string) bool
+	// AuditLogger, when set, records authenticated destination denials.
+	AuditLogger audit.Writer
 	// RevocationInterval bounds idle/in-flight sessions after revocation.
 	RevocationInterval time.Duration
 	SessionLifetime    time.Duration
@@ -95,8 +99,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	host, port, err := net.SplitHostPort(r.Host)
-	certificate, allowed := g.config.Certificates[host]
-	if err != nil || !allowed || !g.config.AllowedAuthority(r.Host) || (r.URL.Host != "" && r.URL.Host != r.Host) || (r.URL.Opaque != "" && r.URL.Opaque != r.Host) {
+	if err != nil || (r.URL.Host != "" && r.URL.Host != r.Host) || (r.URL.Opaque != "" && r.URL.Opaque != r.Host) {
 		http.Error(w, "unsupported destination", http.StatusForbidden)
 		return
 	}
@@ -116,6 +119,19 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	identity = identity.Clone()
 	if g.revalidate(r.Context(), identity) != nil {
 		http.Error(w, "revoked gateway identity", http.StatusForbidden)
+		return
+	}
+	// Authenticate before routing so a destination denial is attributed to
+	// its execution and can be diagnosed by that execution alone.
+	certificate, allowed := g.config.Certificates[host]
+	if !allowed || !g.config.AllowedAuthority(r.Host) {
+		if g.config.AuditLogger != nil {
+			event := gateway.AuditEvent(gateway.WithIdentity(r.Context(), identity), http.MethodConnect+" "+r.Host)
+			event.Capability, event.Service = string(api.CapabilityNetworkEgress), "network"
+			event.DenyReason = "destination " + r.Host + " is not enabled at this gateway"
+			g.config.AuditLogger.Log(event)
+		}
+		http.Error(w, "unsupported destination", http.StatusForbidden)
 		return
 	}
 	if !g.acquireSession(identity.Execution) {

@@ -79,7 +79,7 @@ func TestNativeSemanticGatewaysRetainScopeCredentialsAndUnitAccounting(t *testin
 	defer git.Close()
 	inspection := inspectionCertificate(t)
 	proxy, err := gatewaydocker.NewGateway(f.owner, gatewaydocker.GatewayConfig{
-		Harness: harness.NativeCodex, Certificates: map[string]tls.Certificate{modelHostname: inspection, "github.com": inspection, "api.github.com": inspection, "kubernetes.default.svc": inspection},
+		Harness: harness.NativeCodex, MCPAuthority: controlAuthority, Certificates: map[string]tls.Certificate{controlHost: inspection, modelHostname: inspection, "github.com": inspection, "api.github.com": inspection, "kubernetes.default.svc": inspection},
 		Model:      modelgateway.HandlerConfig{UpstreamURL: "https://api.openai.com", ProviderAuth: modelauth.APIKey{Key: trustedProviderKey}},
 		GitHub:     &githubgateway.HandlerConfig{TokenProvider: &githubgateway.FakeTokenProvider{GitHubToken: "restricted-github-provider"}, HTTPClient: git.Client(), GitBaseURL: git.URL, APIBaseURL: git.URL},
 		Kubernetes: &kubernetesgateway.HandlerConfig{Upstream: kubeURL, Client: kubeClient, MaxResponseBytes: 8 << 20}, AuditLogger: audit.NewLogger(io.Discard),

@@ -89,3 +89,14 @@ func TestRuntimeVolumeAndProcessBoundary(t *testing.T) {
 		t.Fatal("shared process namespace admitted")
 	}
 }
+
+// The control connection is delivered to every managed execution; no policy,
+// registry or native launch may grant or register a server with its name.
+func TestControlMCPServerNameIsNotGrantable(t *testing.T) {
+	if _, valid := CapabilityKind("mcp." + ControlMCPServer).MCPServerName(); valid {
+		t.Fatal("mcp.sproozi accepted as a grantable MCP server")
+	}
+	if name, valid := CapabilityKind("mcp.sproozi-docs").MCPServerName(); !valid || name != "sproozi-docs" {
+		t.Fatalf("ordinary server name rejected: %q %v", name, valid)
+	}
+}

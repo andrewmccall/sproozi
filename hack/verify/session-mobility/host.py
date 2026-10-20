@@ -121,7 +121,8 @@ def prepare(args):
            "gateway": {"listen": "0.0.0.0:" + str(args.gateway_port), "certificateFile": str(leaf),
                        "keyFile": str(key), "trustBundleFile": str(ca),
                        "providerURL": ("https" if args.provider_tls else "http") + "://127.0.0.1:" + str(args.provider_port),
-                       "providerTokenFile": str(out / "provider-token")}, "remote": remote}
+                       "providerTokenFile": str(out / "provider-token"),
+                       "mcpAuthority": "sproozi-gateway.sproozi-system.svc:443"}, "remote": remote}
     if args.provider_tls:
         cfg["gateway"]["providerCAFile"] = str(ca)
     write(out / "home-config.json", cfg)

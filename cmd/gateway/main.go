@@ -25,6 +25,7 @@ import (
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 
 	"github.com/andrewmccall/sproozi/internal/audit"
+	"github.com/andrewmccall/sproozi/internal/diagnose"
 	"github.com/andrewmccall/sproozi/internal/endpoints"
 	"github.com/andrewmccall/sproozi/internal/endpoints/destination"
 	githubgateway "github.com/andrewmccall/sproozi/internal/endpoints/github"
@@ -271,8 +272,9 @@ func composeDispatcher(
 	if host == "" {
 		host = defaultHost
 	}
-	// Named MCP capabilities share the gateway's own authority. The module
-	// chooses the exact account only after authenticating the requested path.
+	// Named MCP capabilities and the Sproozi control connection share the
+	// gateway's own authority. The module chooses the exact account only after
+	// authenticating the requested path.
 	for _, port := range []string{"443", "8443"} {
 		routes[net.JoinHostPort(host, port)] = gateway.Route{Tier: audit.TierProtocol, Handler: mcpHandler}
 	}
@@ -339,7 +341,9 @@ func main() {
 	agentNamespace := envOrDefault("AGENT_NAMESPACE", "sproozi-agents")
 	authenticator := gatewaykubernetes.NewAuthenticator(clientset, "sproozi-gateway", runtimeClient, agentNamespace)
 	httpClient := &http.Client{Timeout: 120 * time.Second}
-	auditLogger := audit.NewLogger(os.Stdout)
+	// The journal forwards every audit record unchanged and retains recent
+	// denials for each execution's own sproozi diagnose tool.
+	auditLogger := diagnose.NewJournal(audit.NewLogger(os.Stdout), diagnose.Limits{})
 	// The shared gateway is the only component that receives Kubernetes API
 	// credentials. Build the upstream transport from its own in-cluster
 	// rest.Config so workload ServiceAccount tokens can never be forwarded to
@@ -424,8 +428,8 @@ func main() {
 	// Unknown authorities are absent and are denied before an upstream call.
 	budgets := budget.NewTrackerWithLedger(budgetkubernetes.NewLedger(runtimeClient,
 		envOrDefault("BUDGET_NAMESPACE", "sproozi-system")))
-	mcpHandler := mcpgateway.NewHandler(mcpgateway.HandlerConfig{Registry: cfg.mcpRegistry,
-		Budgets: budgets, AuditLogger: auditLogger})
+	mcpHandler := diagnose.NewControl(auditLogger, mcpgateway.NewHandler(mcpgateway.HandlerConfig{Registry: cfg.mcpRegistry,
+		Budgets: budgets, AuditLogger: auditLogger}))
 	dispatcher := composeDispatcher(cfg, handlers, mcpHandler, anthropicHandler)
 	for authority, route := range dispatcher {
 		route.Budgets, route.AuditLogger = budgets, auditLogger
@@ -437,6 +441,7 @@ func main() {
 		Revalidate:       authenticator.Revalidate,
 		Handler:          dispatcher,
 		AllowedAuthority: dispatcher.Allows,
+		AuditLogger:      auditLogger,
 	})
 	if err != nil {
 		log.Fatal(err)

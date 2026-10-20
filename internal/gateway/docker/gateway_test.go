@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"io"
 	"math/big"
 	"net/http"
@@ -16,10 +17,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"github.com/andrewmccall/sproozi/internal/harness"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/audit"
+	"github.com/andrewmccall/sproozi/internal/diagnose"
 	modelgateway "github.com/andrewmccall/sproozi/internal/endpoints/model"
 	gatewaydocker "github.com/andrewmccall/sproozi/internal/gateway/docker"
 	"github.com/andrewmccall/sproozi/internal/modelauth"
@@ -28,13 +32,18 @@ import (
 
 const trustedProviderKey = "trusted-provider-key"
 
+const (
+	controlHost      = "sproozi-gateway.test"
+	controlAuthority = controlHost + ":443"
+)
+
 func inspectionCertificate(t *testing.T) tls.Certificate {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	template := &x509.Certificate{SerialNumber: big.NewInt(1), DNSNames: []string{modelHostname, "api.anthropic.com", "github.com", "api.github.com", "kubernetes.default.svc"}, NotBefore: time.Now().Add(-time.Minute), NotAfter: time.Now().Add(time.Hour)}
+	template := &x509.Certificate{SerialNumber: big.NewInt(1), DNSNames: []string{modelHostname, controlHost, "api.anthropic.com", "github.com", "api.github.com", "kubernetes.default.svc"}, NotBefore: time.Now().Add(-time.Minute), NotAfter: time.Now().Add(time.Hour)}
 	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
 	if err != nil {
 		t.Fatal(err)
@@ -89,7 +98,7 @@ func testLocalGatewayAllocation(t *testing.T, kind harness.NativeKind) {
 	}))
 	defer upstream.Close()
 	inspection := inspectionCertificate(t)
-	proxy, err := gatewaydocker.NewGateway(f.owner, gatewaydocker.GatewayConfig{Harness: kind, Certificates: map[string]tls.Certificate{authority: inspection}, Model: modelgateway.HandlerConfig{UpstreamURL: upstream.URL, ProviderAuth: auth, HTTPClient: upstream.Client()}, AuditLogger: audit.NewLogger(io.Discard)})
+	proxy, err := gatewaydocker.NewGateway(f.owner, gatewaydocker.GatewayConfig{Harness: kind, Certificates: map[string]tls.Certificate{authority: inspection, controlHost: inspection}, MCPAuthority: controlAuthority, Model: modelgateway.HandlerConfig{UpstreamURL: upstream.URL, ProviderAuth: auth, HTTPClient: upstream.Client()}, AuditLogger: audit.NewLogger(io.Discard)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,11 +146,39 @@ func testLocalGatewayAllocation(t *testing.T, kind harness.NativeKind) {
 	if calls.Load() != 1 {
 		t.Fatalf("forwarded %d requests", calls.Load())
 	}
+	assertDiagnosesUnknownDestination(t, client)
 	if err = f.owner.Revoke(t.Context(), f.launch, f.instance); err != nil {
 		t.Fatal(err)
 	}
 	usage, err := f.owner.Seal(t.Context(), f.launch, f.instance)
 	if err != nil || usage[modelCapability].Units != 1 {
 		t.Fatalf("sealed actual provider usage=%+v err=%v", usage, err)
+	}
+}
+
+// The execution's own denial is explained over its stock MCP transport, and
+// the request never reached a handler or upstream.
+func assertDiagnosesUnknownDestination(t *testing.T, client *http.Client) {
+	t.Helper()
+	if response, err := client.Get("https://docs.example.com/guide"); err == nil {
+		_ = response.Body.Close()
+		t.Fatal("unknown destination was reachable")
+	}
+	session, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "v1"}, nil).Connect(t.Context(),
+		&mcp.StreamableClientTransport{Endpoint: "https://" + controlHost + "/mcp/sproozi", HTTPClient: client}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = session.Close() }()
+	result, err := session.CallTool(t.Context(), &mcp.CallToolParams{Name: "diagnose", Arguments: map[string]any{"destination": "docs.example.com"}})
+	if err != nil || result.IsError {
+		t.Fatalf("diagnose = %+v, %v", result, err)
+	}
+	var got diagnose.Result
+	if err = json.Unmarshal([]byte(result.Content[0].(*mcp.TextContent).Text), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != diagnose.StatusDenied || len(got.Decisions) != 1 || got.Decisions[0].Operation != "CONNECT docs.example.com:443" {
+		t.Fatalf("diagnose result = %+v", got)
 	}
 }
