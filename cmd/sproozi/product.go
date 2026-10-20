@@ -60,7 +60,7 @@ func parseProduct(args []string) (options, error) {
 		return options{}, err
 	}
 	q.configPath = in.config
-	if c.name == actionInit || c.name == actionVersion {
+	if c.name == actionInit || c.name == actionVersion || c.name == actionDoctor {
 		return q, nil
 	}
 	if c.name == actionServe {
@@ -161,6 +161,8 @@ func runProduct(args []string, stdout io.Writer) error {
 		return err
 	case q.action == actionServe:
 		return serve(ctx, q.configPath)
+	case q.action == actionDoctor:
+		return doctor(q.configPath, stdout)
 	case q.action == actionRun:
 		return q.submitRemote(ctx)
 	case q.action == home.ActionSessions:

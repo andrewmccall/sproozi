@@ -27,8 +27,10 @@ images, gateway credentials and profile services.
 `sproozi --help` lists commands. `sproozi --version` prints the product version,
 commit and build date. Neither command reads home configuration.
 `sproozi init [--directory PATH]` creates or validates a private directory for
-configuration and credentials. It does not overwrite files or start a service.
-The default is the platform user configuration directory's `sproozi` directory.
+configuration and credentials, and the [profile](profile.md) folder inside it.
+It does not overwrite files or start a service. The default is `~/.sproozi`.
+`sproozi doctor [--config FILE]` checks the configuration file and the profile
+beside it, and exits non-zero when either is invalid.
 
 Local commands use a private Unix socket on macOS and Linux, or a private named
 pipe on Windows. See [Windows setup](../guides/windows.md) for native platform
@@ -72,6 +74,7 @@ other flag is rejected before configuration is read or a request is sent.
 | --- | --- |
 | `init` | `--directory` |
 | `version` |  |
+| `doctor` | `--config` |
 | `run` | `--config`, `--executor`, `--operation`, `--harness`, `--repository`, `--project`, `--task`, `--task-file`, `--workspace-from`, `--checkpoint-digest`, `--revision` |
 | `sessions` | `--config`, `--socket`, `--executor`, `--project` |
 | `status` | `--config`, `--socket`, `--executor`, `--id` |
@@ -87,8 +90,8 @@ other flag is rejected before configuration is read or a request is sent.
 
 | Flag | Meaning |
 | --- | --- |
-| `--directory PATH` | Private configuration directory; defaults to the platform user configuration directory plus `sproozi`. |
-| `--config FILE` | Private global configuration. `serve` requires it; other commands default to the platform path described below. |
+| `--directory PATH` | Private configuration directory; defaults to `~/.sproozi`. |
+| `--config FILE` | Private global configuration. `serve` requires it; other commands default to `~/.sproozi/config.json`. |
 | `--socket PATH` | Private home socket, overriding the configured home. |
 | `--executor NAME` | Owner to address; `docker` selects home. See [Select the owner](#select-the-owner). |
 | `--id UUID` | Stable session UUID. Commands that take a session also accept it as the first argument. |
@@ -107,8 +110,7 @@ other flag is rejected before configuration is read or a request is sent.
 ## Select the owner
 
 Every client command except `run` accepts `--config FILE` and a home
-`--socket PATH` override. Configuration defaults to the platform user configuration directory at
-`sproozi/config.json`. A socket-only local invocation skips that default file;
+`--socket PATH` override. Configuration defaults to `~/.sproozi/config.json`. A socket-only local invocation skips that default file;
 for example, `sessions --socket PATH` queries only home. Supply
 `--config FILE --socket PATH` to combine configured remote sources with a socket
 override. An explicit config is always read. `serve` requires `--config FILE`.

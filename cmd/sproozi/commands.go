@@ -40,6 +40,7 @@ type command struct {
 var commands = []command{
 	{name: actionInit, summary: "Create a private configuration directory", flags: []string{"directory"}},
 	{name: actionVersion, summary: "Show the installed product version"},
+	{name: actionDoctor, summary: "Check the configuration and profile", flags: []string{"config"}},
 	{name: actionRun, operands: "--executor NAME (--task TEXT | --task-file FILE)",
 		summary: "Submit a Codex task to a configured remote executor", owner: remoteOwner,
 		flags: []string{"config", "executor", "operation", "harness", "repository", "project", "task", "task-file",
