@@ -24,8 +24,12 @@ import (
 
 // Options configure one local provisioning run.
 type Options struct {
-	Root           string
-	Harness        harness.NativeKind
+	Root    string
+	Harness harness.NativeKind
+	// Instructions replace DefaultInstructions when the installation's
+	// configuration is first written. They are fixed afterwards because
+	// retained sessions are bound to their digest.
+	Instructions   string
 	Model          string
 	Image          ImageRequest
 	ProviderURL    string
@@ -240,7 +244,10 @@ func Init(ctx context.Context, o Options) (Result, error) {
 		return Result{}, err
 	}
 
-	rendered := renderConfig(l, inst)
+	if o.Instructions == "" {
+		o.Instructions = DefaultInstructions
+	}
+	rendered := renderConfig(l, inst, o.Instructions)
 	changed := false
 	if existing {
 		if config, changed, err = mergeConfig(config, rendered); err != nil {
@@ -355,15 +362,15 @@ var codexOptions = []string{
 	`projects."/workspace/session/workspace".trust_level="trusted"`,
 }
 
-func renderConfig(l Layout, inst Installation) home.Config {
+func renderConfig(l Layout, inst Installation, instructions string) home.Config {
 	primary := inst.Harnesses[0]
-	digest := fmt.Sprintf("%x", sha256.Sum256([]byte(DefaultInstructions)))
+	digest := fmt.Sprintf("%x", sha256.Sum256([]byte(instructions)))
 	c := home.Config{
 		Directory: l.State(), DockerBinary: inst.Docker.Binary, DockerSocket: inst.Docker.Socket, DockerConfig: l.DockerCLI(),
 		Local: runtimedocker.PlacementConfig{Harness: primary.Harness, Name: primary.Name,
 			NativeImageID: inst.Image.ID, HelperImageID: inst.Image.ID, AnchorImageID: inst.Image.ID,
 			NetworkName: inst.Network.Name, GatewayIPv4: inst.Endpoint.GatewayIPv4, GatewayPort: primary.Port,
-			Instructions: DefaultInstructions, InstructionDigest: digest,
+			Instructions: instructions, InstructionDigest: digest,
 			AgentLimits: agentLimits, HelperLimits: helperLimits, AnchorLimits: anchorLimits,
 			VolumeBytes: 512 << 20, MaxCheckpointBytes: 8 << 20, RetainedBytes: 128 << 20},
 		Allowances:  map[string]session.Allowance{"model.inference": {Units: session.Limit{Bounded: true, Value: 200000}}},
@@ -403,6 +410,12 @@ func mergeConfig(existing, rendered home.Config) (home.Config, bool, error) {
 	pinned := func(c home.Config) []any {
 		return []any{c.Directory, c.Local.Harness, c.Local.Name, c.Local.NativeImageID, c.Local.HelperImageID,
 			c.Local.AnchorImageID, c.Local.NetworkName, c.Local.GatewayIPv4, c.Local.GatewayPort, c.Gateway.PKIDirectory}
+	}
+	// The existing approved instructions are kept; only an explicit
+	// different request conflicts with them.
+	if rendered.Local.Instructions != DefaultInstructions && rendered.Local.Instructions != existing.Local.Instructions {
+		return existing, false, fail("config", errors.New("the installation already has different approved instructions"),
+			"edit them in the configuration before the first session, or omit --instructions-file")
 	}
 	if !reflect.DeepEqual(pinned(existing), pinned(rendered)) {
 		return existing, false, fail("config", errors.New("the existing configuration's placement differs from this installation"),

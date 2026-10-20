@@ -36,11 +36,11 @@ func defaultConfigPath() (string, error) { return localsetup.DefaultConfigPath()
 
 // setupOptions holds local provisioning and maintenance flags.
 type setupOptions struct {
-	enabled, credentialStdin, skipCheck, noService, json, leaveRunning, checkProvider bool
-	root, model, image, build, providerURL, providerCA, credentialFile                string
-	port                                                                              uint16
-	timeout                                                                           time.Duration
-	verb, operand                                                                     string
+	enabled, credentialStdin, skipCheck, noService, json, leaveRunning, checkProvider    bool
+	root, model, image, build, providerURL, providerCA, credentialFile, instructionsFile string
+	port                                                                                 uint16
+	timeout                                                                              time.Duration
+	verb, operand                                                                        string
 }
 
 type options struct {

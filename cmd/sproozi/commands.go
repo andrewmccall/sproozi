@@ -47,7 +47,7 @@ type command struct {
 // requires a session UUID, except start, which creates one when omitted.
 var commands = []command{
 	{name: actionInit, operands: "[--local]", summary: "Create a private configuration directory, or provision local Docker sessions with --local",
-		flags: []string{"directory", "local", "root", "harness", "model", "image", "build", "provider-url", "provider-ca-file",
+		flags: []string{"directory", "local", "root", "harness", "model", "instructions-file", "image", "build", "provider-url", "provider-ca-file",
 			"credential-file", "credential-stdin", "skip-credential-check", "port", "no-service", "json", "timeout"}},
 	{name: actionService, operands: "status|start|stop", summary: "Show, start or stop the local home service",
 		flags: []string{"root", "json", "leave-running"}, verbs: []string{"status", "start", "stop"}},
@@ -180,7 +180,7 @@ func (c command) flagSet(q *options, in *inputs) *flag.FlagSet {
 		"to":        &q.destination,
 		"directory": &q.directory,
 		"root":      &q.setup.root, "model": &q.setup.model, "image": &q.setup.image, "build": &q.setup.build,
-		"provider-url": &q.setup.providerURL, "provider-ca-file": &q.setup.providerCA, "credential-file": &q.setup.credentialFile,
+		"provider-url": &q.setup.providerURL, "instructions-file": &q.setup.instructionsFile, "provider-ca-file": &q.setup.providerCA, "credential-file": &q.setup.credentialFile,
 		"port": &in.port, "timeout": &in.timeout,
 	}
 	switches := map[string]*bool{

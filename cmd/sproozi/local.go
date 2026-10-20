@@ -90,6 +90,13 @@ func (q *options) initLocal(ctx context.Context) error {
 		ProviderURL: s.providerURL, ProviderCAFile: s.providerCA, CheckCredential: !s.skipCheck,
 		Port: s.port, StartService: !s.noService, Executable: executable, Timeout: s.timeout, Progress: os.Stderr}
 	options.Credential = credentialInput(s)
+	if s.instructionsFile != "" {
+		data, err := os.ReadFile(s.instructionsFile)
+		if err != nil || len(data) == 0 || len(data) > 16<<10 {
+			return errors.New("--instructions-file requires a readable UTF-8 file of at most 16 KiB")
+		}
+		options.Instructions = strings.TrimSpace(string(data))
+	}
 	if options.Model == "" {
 		root, _ := localsetup.ResolveRoot(s.root)
 		inst, _ := localsetup.LoadInstallation(localsetup.Layout{Root: root})

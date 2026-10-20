@@ -129,6 +129,7 @@ func StopService(ctx context.Context, l Layout, c home.Config, leaveRunning bool
 	for time.Now().Before(deadline) {
 		if after := ServiceState(ctx, l, c); !after.Running {
 			_ = os.Remove(l.ServicePID())
+			after.PID, after.Error = 0, ""
 			return after, nil
 		}
 		time.Sleep(200 * time.Millisecond)
