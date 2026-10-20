@@ -70,16 +70,18 @@ func TestFreshKubernetesClientUsesInspectedAuthorityAndPlaceholderCredential(t *
 	}
 }
 
+const preferences = "Prefer small commits."
+
 func TestUserInstructionsAreTheNativeUserFileAndExactOnRetry(t *testing.T) {
 	files := map[harness.NativeKind]string{harness.NativeCodex: "AGENTS.md", harness.NativeClaude: "CLAUDE.md"}
 	for kind, file := range files {
 		dir := t.TempDir()
-		c := config{Harness: kind, UserInstructions: "Prefer small commits."}
+		c := config{Harness: kind, UserInstructions: preferences}
 		if err := installUserInstructions(dir, c); err != nil {
 			t.Fatal(err)
 		}
 		data, err := os.ReadFile(filepath.Join(dir, file))
-		if err != nil || string(data) != "Prefer small commits." {
+		if err != nil || string(data) != preferences {
 			t.Fatalf("%s: %q %v", kind, data, err)
 		}
 		if err = installUserInstructions(dir, c); err != nil {

@@ -110,16 +110,16 @@ to restart the home daemon once the session stops.
 
 ## Share your instructions
 
-Put instructions that every Codex session should follow in
-`~/sproozi/agents/shared/AGENTS.md` and `~/sproozi/agents/codex/AGENTS.md`.
-Sproozi reads them freshly for each launch and gives them to Codex as its user
-instructions. Approved developer instructions still come from the configuration
-and take precedence.
+Put instructions that every session should follow in
+`~/sproozi/agents/shared/AGENTS.md`. Add harness-specific ones in
+`~/sproozi/agents/codex/AGENTS.md` or `~/sproozi/agents/claude/CLAUDE.md`.
+Sproozi reads them freshly for each launch and gives the agent a read-only
+copy. Edit them on your computer; changes apply to the next launch. Approved
+developer instructions still come from the configuration and take precedence.
 
-Claude Code does not read shared instructions in this release. The
-[harness table](../reference/local-installation.md#shared-agent-files) explains
-why and lists which files each harness reads. `sproozi doctor` reports any file
-in `agents/` that no harness reads.
+The [harness table](../reference/local-installation.md#shared-agent-files)
+shows how each harness receives them. `sproozi doctor` reports any file in
+`agents/` that no harness reads.
 
 ## Check and maintain the installation
 

@@ -99,11 +99,12 @@ The workflow in [Run a task remotely, then resume it locally](../guides/portable
 submitted task text and a new completed turn. It then follows the usual stop,
 finalized usage and checkpoint steps. A later local resume gets fresh
 permissions.
-In a [local installation](local-installation.md#shared-agent-files), managed Codex
-launches also receive the user's shared instructions as `$CODEX_HOME/AGENTS.md`.
-The home daemon reads them freshly for each launch, outside the checkpoint, and
-they never replace the approved developer instructions. Claude Code launches
-receive none, because its isolated settings sources exclude user memory.
+In a [local installation](local-installation.md#shared-agent-files), managed
+launches also receive the user's shared instructions: Codex as
+`$CODEX_HOME/AGENTS.md`, and Claude Code as a section appended to its system
+prompt, because its isolated settings sources exclude user memory. The home
+daemon reads them freshly for each launch, outside the checkpoint, and they
+never replace the approved developer instructions.
 Managed Codex MCP connections and placeholder Kubernetes configuration are
 regenerated for each launch; portable history cannot select upstream credentials
 or server registrations. Managed Claude tasks and MCP are not supported.

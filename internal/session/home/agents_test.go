@@ -33,9 +33,8 @@ func TestUserInstructionsComposeSharedThenHarnessFiles(t *testing.T) {
 	if err != nil || codex != "Shared rule.\n\nCodex rule." {
 		t.Fatalf("codex %q %v", codex, err)
 	}
-	// Claude ignores user memory under its isolated settings sources.
 	claude, err := UserInstructions(root, harness.NativeClaude)
-	if err != nil || claude != "" {
+	if err != nil || claude != "Shared rule.\n\nClaude rule." {
 		t.Fatalf("claude %q %v", claude, err)
 	}
 	if empty, err := UserInstructions("", harness.NativeCodex); err != nil || empty != "" {
@@ -94,7 +93,7 @@ func TestUnsupportedAgentEntriesAreReported(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]bool{"codex/config.toml": true, "claude": true, "codex/skills": true}
+	want := map[string]bool{"codex/config.toml": true, "claude/settings.json": true, "codex/skills": true}
 	if len(ignored) != len(want) {
 		t.Fatalf("ignored %v", ignored)
 	}

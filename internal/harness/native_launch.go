@@ -37,9 +37,10 @@ type NativeLaunch struct {
 	Options           []string            `json:"options,omitempty"`
 	Gateway           *NativeGateway      `json:"gateway,omitempty"`
 	TrustBundlePEM    []byte              `json:"trustBundlePEM,omitempty"`
-	// UserInstructions are the user's shared native preferences, written as the
-	// harness's user-level instruction file. They never replace Instructions,
-	// which remain the approved developer instructions.
+	// UserInstructions are the user's shared native preferences: Codex's
+	// user-level instruction file, or a section after Claude's approved system
+	// prompt. They never replace Instructions, the approved developer
+	// instructions.
 	UserInstructions string `json:"userInstructions,omitempty"`
 }
 

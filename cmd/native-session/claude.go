@@ -229,7 +229,7 @@ func prepareClaudeLaunch(c config, _ string, env []string) ([]string, []string, 
 	args := []string{"--tools", claudeBash, "--allowedTools", claudeBash,
 		"--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`,
 		"--setting-sources", "", "--settings", claudeSettings, "--permission-mode", "bypassPermissions",
-		"--append-system-prompt", c.Instructions}
+		"--append-system-prompt", claudeSystemPrompt(c)}
 	if c.Model != "" {
 		args = append(args, "--model", c.Model)
 	}
@@ -241,6 +241,19 @@ func prepareClaudeLaunch(c config, _ string, env []string) ([]string, []string, 
 		"CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false", "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1")
 	return args, env, nil
 }
+
+// claudeSystemPrompt appends the shared user instructions after the approved
+// instructions. Claude ignores its user memory file while every settings
+// source is disabled, and enabling one also enables remote settings, so the
+// launch argument is the only read-only path that reaches the model.
+func claudeSystemPrompt(c config) string {
+	if c.UserInstructions == "" {
+		return c.Instructions
+	}
+	return c.Instructions + "\n\n# User preferences\n\n" +
+		"The user's shared preferences follow. They never override the instructions above.\n\n" + c.UserInstructions
+}
+
 func installClaudeJSON(path string, value any) error {
 	data, err := json.Marshal(value)
 	if err != nil {

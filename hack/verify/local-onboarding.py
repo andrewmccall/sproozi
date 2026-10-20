@@ -5,7 +5,7 @@ Uses deterministic local providers, an isolated HOME and a short private root,
 so it neither spends provider credit nor touches your real installation. It
 provisions Codex, adds Claude Code, checks doctor, drives one stock terminal
 turn per harness through `sproozi attach`, stops both sessions, proves shared
-Codex instructions reach the provider, renews the gateway certificate while
+instructions reach both providers, renews the gateway certificate while
 the home daemon runs, and records that a configured kubeconfig and kubectl on
 PATH received no calls. The report is written to
 .local/verification/local-onboarding/report.json.
@@ -27,7 +27,7 @@ import time
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / ".local/verification/local-onboarding"
 FIXTURES = ROOT / "hack/verify/session-mobility"
-SHARED_MARKER, CODEX_MARKER = "SHARED_PREF_MARKER_42", "CODEX_PREF_MARKER_7"
+SHARED_MARKER, CODEX_MARKER, CLAUDE_MARKER = "SHARED_PREF_MARKER_42", "CODEX_PREF_MARKER_7", "CLAUDE_PREF_MARKER_9"
 
 
 def load(name):
@@ -115,6 +115,7 @@ def main():
                                         "paths": both["paths"]}
         write_private(root / "agents/shared/AGENTS.md", f"Shared preference {SHARED_MARKER}.\n")
         write_private(root / "agents/codex/AGENTS.md", f"Codex preference {CODEX_MARKER}.\n")
+        write_private(root / "agents/claude/CLAUDE.md", f"Claude preference {CLAUDE_MARKER}.\n")
         doctor = json.loads(sproozi("doctor", "--root", str(root), "--json").stdout)
         report["steps"]["doctor"] = {"ok": doctor["ok"], "failed": [c for c in doctor["checks"] if not c["ok"]]}
 
@@ -141,8 +142,10 @@ def main():
         codex_requests = (work / "codex-provider/requests.json").read_text()
         claude_requests = (provider_dir / "requests.private.json").read_text()
         report["steps"]["sessions"] = {"turns": turns, "stops": stops,
-                                       "codexSharedInstructions": SHARED_MARKER in codex_requests and CODEX_MARKER in codex_requests,
-                                       "claudeReceivedNoSharedFiles": SHARED_MARKER not in claude_requests,
+                                       "codexSharedInstructions": all(m in codex_requests for m in (SHARED_MARKER, CODEX_MARKER))
+                                       and CLAUDE_MARKER not in codex_requests,
+                                       "claudeSharedInstructions": all(m in claude_requests for m in (SHARED_MARKER, CLAUDE_MARKER))
+                                       and CODEX_MARKER not in claude_requests,
                                        "consumersReleased": not any((root / "pki/consumers").glob("*.json"))}
 
         log = root / "logs/service.log"
@@ -162,7 +165,7 @@ def main():
         report["passed"] = all([
             s["initCodex"]["ready"], s["addClaude"]["ready"], len(s["addClaude"]["paths"]) == 2, s["doctor"]["ok"],
             all(s["sessions"]["turns"].values()), all(v["phase"] == "idle" and v["nativeUUID"] for v in s["sessions"]["stops"].values()),
-            s["sessions"]["codexSharedInstructions"], s["sessions"]["claudeReceivedNoSharedFiles"], s["sessions"]["consumersReleased"],
+            s["sessions"]["codexSharedInstructions"], s["sessions"]["claudeSharedInstructions"], s["sessions"]["consumersReleased"],
             all(s["renewal"].values()), not s["serviceStop"]["running"], s["clusterIsolation"]["kubectlCalls"] == ""])
     finally:
         if installation is not None:

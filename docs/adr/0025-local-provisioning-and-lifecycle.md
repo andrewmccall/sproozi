@@ -116,16 +116,24 @@ an absent service for a provisioned installation.
 The `agents/` directory holds the allowlisted shared agent files. The trusted home
 reads them on every launch, rejecting links, special files, foreign or
 writable-by-others files, oversized and non-UTF-8 text. The launch contract
-delivers the text, and the supervisor writes it as the native user instruction
-file, separate from the approved developer instructions. Nothing is mounted;
-the agent's edits are not written back; checkpoints still select only the
-conversation and workspace.
+delivers the text, separate from the approved developer instructions. Nothing
+is mounted; the agent's edits are not written back; checkpoints still select
+only the conversation and workspace. The user changes the files outside the
+run, and each launch sees the current copy.
 
-Codex loads `$CODEX_HOME/AGENTS.md`, and its checkpoints still pass continuity
-validation. Claude Code, launched with every settings source disabled, ignores
-its user memory file. Enabling the user source loaded the file, but Claude then
-requested remote managed settings and its graceful stop never completed. Claude
-therefore receives no shared files in this release.
+Codex receives the text as its user instruction file, `$CODEX_HOME/AGENTS.md`,
+and its checkpoints still pass continuity validation. Claude Code, launched with
+every settings source disabled, ignores its user memory file. Enabling the user
+source loaded the file, but Claude then requested remote managed settings and
+its graceful stop never completed. The supervisor therefore appends Claude's
+text to the `--append-system-prompt` argument after the approved instructions,
+under a `# User preferences` heading that says they never override them.
+
+That gives Claude's preferences system-prompt position. It is accepted because,
+in a local installation, the same user writes the approved instructions and the
+shared files. Policy is enforced by the gateway and the restricted worker, not
+by the prompt, so the ordering affects how well the model follows instructions,
+not what it can reach.
 
 ## Alternatives
 
@@ -146,8 +154,12 @@ therefore receives no shared files in this release.
   wording that agents may alter shared state. It needs a new mount contract in
   an exact-mount verifier, writes untrusted output onto the host, risks new
   transcript records that break capture, and widens configuration loading.
-- **Appending shared text to Claude's system prompt.** It would deliver the
-  text, but at the same precedence as approved instructions.
+- **Enabling Claude's user settings source** so it reads `CLAUDE.md` natively.
+  It loaded the file, but also enabled remote managed settings and broke
+  graceful stops.
+- **No shared instructions for Claude.** It keeps user text out of the system
+  prompt, but leaves Claude users without a feature Codex users have, for no
+  trust benefit.
 - **Platform service managers (launchd, systemd user units).** They add boot
   persistence. They are deferred; the detached service meets the current
   requirement, and session commands restart it on demand.
@@ -160,7 +172,9 @@ therefore receives no shared files in this release.
   the error names the port.
 - Rotation can wait indefinitely for a consumer that never stops; `certificates
   status` names it. Cancelling the session releases it.
-- Agents cannot change shared instructions, and Claude Code users get none.
+- Agents cannot change shared instructions.
+- Claude's preferences share the system prompt with approved instructions, so
+  the model may weigh them more than Codex weighs its user file.
 - Docker Engine on Linux uses the bridge-address path, which has unit coverage
   but no recorded acceptance run.
 - Automatic setup does not run on Windows hosts.
@@ -176,8 +190,10 @@ therefore receives no shared files in this release.
 
 - Users need agents to persist shared preferences or history: design a mount
   contract, concurrency rules and transcript validation for it.
-- Claude Code offers user memory without enabling other settings sources, or
-  a supported way to add user instructions below the system prompt.
+- Claude Code offers user memory without enabling other settings sources:
+  move Claude's preferences out of the system prompt.
+- Shared agent files reach a placement whose approved instructions are written
+  by someone other than the user.
 - A supported platform needs boot persistence or a native service manager.
 - Image upgrades must apply to installations with retained sessions: add a
   drained migration.

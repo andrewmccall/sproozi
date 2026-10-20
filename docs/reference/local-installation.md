@@ -103,20 +103,20 @@ stored key on approved requests.
 
 ## Shared agent files
 
-The home daemon reads these files from `agents/` for every launch. It passes
-them to the agent as its native user instructions, separate from the approved
-developer instructions. The agent's changes to its copy are not written back.
+The home daemon reads these files from `agents/` for every launch and gives
+the agent a read-only snapshot, after the approved developer instructions.
+Nothing in the running container can change the files in `agents/`.
 
-| Harness | Files read, in order | Native file written | Status |
-| --- | --- | --- | --- |
-| `codex` | `shared/AGENTS.md`, then `codex/AGENTS.md` | `$CODEX_HOME/AGENTS.md` | Supported |
-| `claude-code` | None | None | Not supported in this release |
+| Harness | Files read, in order | Delivered as |
+| --- | --- | --- |
+| `codex` | `shared/AGENTS.md`, then `codex/AGENTS.md` | `$CODEX_HOME/AGENTS.md`, Codex's user instructions |
+| `claude-code` | `shared/AGENTS.md`, then `claude/CLAUDE.md` | A `# User preferences` section appended to the system prompt |
 
 Claude Code runs with every settings source disabled so that hooks, plugins
-and personal settings cannot change its managed launch. In that mode it does
-not read its user memory file. Enabling the user settings source made it load
-the file, but it also fetched remote managed settings and stopped completing
-graceful stops.
+and personal settings cannot change its managed launch, and in that mode it
+does not read a user memory file. Its preferences are therefore appended to
+the system prompt, after the approved instructions, with a line saying they
+never override them.
 
 Each file must be UTF-8 text of at most 32 KiB, owned by you, and not writable
 by others. A symbolic link or special file stops the launch with an error;
