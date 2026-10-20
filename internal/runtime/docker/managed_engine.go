@@ -236,7 +236,7 @@ func matchesManagedMounts(mounts []managedMount, s ManagedSpec) bool {
 	for _, m := range mounts {
 		switch {
 		case s.Volume != nil && m.Type == volumeCommand && m.Name == s.Volume.Name && m.Destination == "/workspace" && m.RW:
-		case s.ProfileDirectory != "" && m.Type == bindMount && m.Source == s.ProfileDirectory &&
+		case s.ProfileDirectory != "" && m.Type == bindMount && sameHostPath(m.Source, s.ProfileDirectory) &&
 			m.Destination == ProfileMountPath && !m.RW:
 		default:
 			return false
@@ -251,6 +251,13 @@ func matchesManagedMounts(mounts []managedMount, s ManagedSpec) bool {
 		expected++
 	}
 	return want == expected
+}
+
+// sameHostPath accepts the engine's report of a bind source. Docker Desktop's
+// raw engine socket reports host paths under a mount prefix such as
+// /host_mnt; the absolute host path must still match in full.
+func sameHostPath(reported, host string) bool {
+	return reported == host || strings.HasSuffix(reported, host)
 }
 
 // validProfileDirectory keeps the path expressible in a --mount argument.

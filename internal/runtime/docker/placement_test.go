@@ -822,13 +822,30 @@ func TestAgentMountsTheLiveProfileReadOnly(t *testing.T) {
 	if profileMounts != 1 || !strings.HasSuffix(agent.Name, "-"+roleAgent) {
 		t.Fatalf("profile mounts = %d on %v", profileMounts, agent)
 	}
+	// Docker Desktop's raw engine socket reports the host path under a prefix.
 	for i, m := range agent.Mounts {
 		if m.Type == bindMount {
-			agent.Mounts[i].RW = true
+			agent.Mounts[i].Source = "/host_mnt" + m.Source
 		}
 	}
-	if err = p.Activate(context.Background(), l, inc); err == nil {
-		t.Fatal("writable profile mount adopted")
+	if err = p.Activate(context.Background(), l, inc); err != nil {
+		t.Fatalf("prefixed host path refused: %v", err)
+	}
+	for _, tamper := range []func(*managedMount){
+		func(m *managedMount) { m.RW = true },
+		func(m *managedMount) { m.Source = "/host_mnt/Users/fixture/.sproozi/other" },
+		func(m *managedMount) { m.Source = config.ProfileDirectory + "-other" },
+	} {
+		for i, m := range agent.Mounts {
+			if m.Type == bindMount {
+				original := m
+				tamper(&agent.Mounts[i])
+				if err = p.Activate(context.Background(), l, inc); err == nil {
+					t.Fatalf("tampered profile mount %+v adopted", agent.Mounts[i])
+				}
+				agent.Mounts[i] = original
+			}
+		}
 	}
 }
 

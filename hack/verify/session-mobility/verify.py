@@ -14,6 +14,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import signal
 import ssl
 import subprocess
@@ -42,6 +43,29 @@ def visit_thread(index, visit):
 
 def digest(data):
     return hashlib.sha256(data).hexdigest()
+
+
+PROFILE_SKILL = "mobility-check"
+PROFILE_MARKER = re.compile(r"PROFILE_MARKER_[A-Z0-9_]+")
+
+
+def write_profile(fixture, marker):
+    """Writes the user's profile beside the home configuration. Docker reads it
+    live at each launch; a move to Kubernetes archives it as it is then."""
+    profile = fixture / "profile"
+    skill = profile / "skills" / PROFILE_SKILL
+    skill.mkdir(parents=True, exist_ok=True)
+    for directory in (profile, profile / "skills", skill):
+        directory.chmod(0o755)
+    for path, text in ((profile / "AGENTS.md", "Profile instruction " + marker + "\n"),
+                       (skill / "SKILL.md", "---\nname: " + PROFILE_SKILL + "\ndescription: Profile skill " + marker +
+                        "\n---\nConfirm the session carries the profile.\n")):
+        path.write_text(text)
+        path.chmod(0o644)
+
+
+def profile_markers(text):
+    return sorted(set(PROFILE_MARKER.findall(text)))
 
 
 class Proof:

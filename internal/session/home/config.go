@@ -129,7 +129,13 @@ func ReadConfig(path string) (Config, error) {
 	if err != nil {
 		return c, err
 	}
-	c.Local.ProfileDirectory = filepath.Join(filepath.Dir(absolute), ProfileFolder)
+	// Resolve the existing configuration directory so Docker reports the same
+	// host path it was given, for example /private/tmp rather than /tmp.
+	directory := filepath.Dir(absolute)
+	if resolved, err := filepath.EvalSymlinks(directory); err == nil {
+		directory = resolved
+	}
+	c.Local.ProfileDirectory = filepath.Join(directory, ProfileFolder)
 	return c, nil
 }
 

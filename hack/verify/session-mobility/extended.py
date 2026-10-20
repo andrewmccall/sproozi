@@ -201,6 +201,31 @@ class ExtendedProof(BASE.Proof):
               "Native source status lost actual UUID")
         return status
 
+    def rendered_profile(self, active, marker):
+        """Checks the profile Codex received in the exact source container: its
+        instructions follow the Sproozi text and its skill sits in Codex's home.
+        A Kubernetes visit must also name the stored archive in its registration."""
+        home = "/workspace/session/codex/"
+        command = ["cat", home + "AGENTS.md", home + "skills/" + BASE.PROFILE_SKILL + "/SKILL.md"]
+        if active["launch"]["placement"] == self.config["local"]["Name"]:
+            records = [record for record in self.docker_records() if record["launch"] == active["launch"]]
+            check(len(records) == 1, "Local profile probe requires one exact source")
+            rendered = self.docker("exec", records[0]["Agent"]["ID"], *command)
+        else:
+            records = [record for record in self.registries() if record["runUid"] == active["incarnation"]["executionId"]]
+            check(len(records) == 1 and records[0]["registration"].get("profileDigest", "").startswith("sha256:"),
+                  "Remote registration does not name the stored profile")
+            pods = [pod for pod in json.loads(self.kube(self.args.agent_namespace, "get", "pods", "-o", "json"))["items"]
+                    if pod["metadata"]["uid"] == records[0]["podUid"]]
+            check(len(pods) == 1, "Exact remote source Pod is unavailable for the profile probe")
+            rendered = self.kube(self.args.agent_namespace, "exec", pods[0]["metadata"]["name"], "-c", "agent", "--", *command)
+        rendered = rendered.decode()
+        check("Sproozi managed environment" in rendered and BASE.profile_markers(rendered) == [marker] and
+              rendered.index("Sproozi managed environment") < rendered.index(marker),
+              "Codex did not receive the profile as it was when this visit began")
+        self.report["steps"].append({"profile": active["launch"]["placement"], "profileMarker": marker})
+        self.save()
+
     def denials(self, active=None):
         source = Path(__file__).with_name("native-denials.js").read_text()
         if active is None or active["launch"]["placement"] == self.config["local"]["Name"]:
@@ -405,6 +430,7 @@ class ExtendedProof(BASE.Proof):
             check([r["turn"] for r in self.provider() if r["kind"] == "conversation"] == [0], "Retained first turn census changed")
         else:
             check(not self.provider(), "Use a fresh deterministic provider process")
+            BASE.write_profile(self.fixture, "PROFILE_MARKER_DOCKER_FIRST")
             repo, expected = self.seed()
             start = self.cli("start", operation=uuid.uuid4(), workspace=repo, **{"include-ignored": ["needed.bin"]})
             check(start["initialStage"] == "active" and not start.get("threadId"), "Initial native UUID fabricated")
@@ -412,6 +438,8 @@ class ExtendedProof(BASE.Proof):
             self.report["originalDeadline"] = deadline
             self.save()
             self.terminal(0)
+            self.rendered_profile(self.cli("status")["session"]["active"], "PROFILE_MARKER_DOCKER_FIRST")
+            BASE.write_profile(self.fixture, "PROFILE_MARKER_KUBERNETES")
         if remote is None:
             self.denials()
             remote = self.validate_record(self.cli("move", operation=uuid.uuid4(), to=self.args.remote_name), deadline,
@@ -421,6 +449,9 @@ class ExtendedProof(BASE.Proof):
         self.report["firstCheckpoint"] = self.inspect_checkpoint(remote, expected, [HOST.ANSWERS[0]])
         self.save()
         self.terminal(1)
+        if not (self.args.resume_first_move_report or self.args.resume_initial_report):
+            self.rendered_profile(remote["active"], "PROFILE_MARKER_KUBERNETES")
+            BASE.write_profile(self.fixture, "PROFILE_MARKER_DOCKER_EDITED")
         self.denials(remote["active"])
         self.terminal(3)
         expected["untracked"] = sorted([*expected["untracked"], HOST.TOOL_FILE])
@@ -431,6 +462,8 @@ class ExtendedProof(BASE.Proof):
         self.report["toolCheckpoint"] = self.inspect_checkpoint(local, expected, answers)
         self.save()
         self.terminal(2)
+        if not (self.args.resume_first_move_report or self.args.resume_initial_report):
+            self.rendered_profile(local["active"], "PROFILE_MARKER_DOCKER_EDITED")
         # Capture the completed local turn, then return idle to a fresh local
         # allocation for the cancellation test. Neither idle move infers again.
         remote = self.validate_record(self.cli("move", operation=uuid.uuid4(), to=self.args.remote_name), deadline, thread, self.args.remote_name)
