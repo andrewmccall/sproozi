@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/agentprofile"
 	"github.com/andrewmccall/sproozi/internal/budget"
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
 	"github.com/andrewmccall/sproozi/internal/harness"
@@ -602,5 +603,73 @@ func TestProfileExplicitClaudeKindAndCheckpointCompatibility(t *testing.T) {
 	foreign.Harness = ""
 	if _, err = c.Prepare(t.Context(), foreign, codex); err == nil {
 		t.Fatal("empty harness silently selected Codex")
+	}
+}
+
+type profileStore struct {
+	stored map[string][]byte
+}
+
+func (s *profileStore) StoreProfile(_ context.Context, digest string, archive []byte) error {
+	s.stored[digest] = archive
+	return nil
+}
+
+// A move carries the archive its launch names; the executor stores it only
+// after checking it, and refuses when it keeps no profiles.
+func TestPrepareCarriesTheNamedProfileArchive(t *testing.T) {
+	t.Parallel()
+	data, digest := artifact(t)
+	archive, profileDigest, err := agentprofile.Profile{Instructions: "Profile instructions"}.Archive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, _, err := agentprofile.Profile{Instructions: "Other instructions"}.Archive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	l := launch(digest)
+	l.ProfileDigest = profileDigest
+	connect := func(store ProfileStore) *Client {
+		h, err := NewHandler(Config{Harness: l.Harness, Principal: testPrincipal, TokenFile: tokenFile(t), Placement: l.Placement,
+			InstructionDigest: l.InstructionDigest, Allowances: l.Allowances, MaxDuration: time.Hour, MaxCheckpointBytes: testMax,
+			Backend: &retainedBackend{data: data, digest: digest}, Profiles: store})
+		if err != nil {
+			t.Fatal(err)
+		}
+		s, ca := serve(t, h)
+		c, err := NewClient(ClientConfig{URL: s.URL, TokenFile: tokenFile(t), CAFile: ca, MaxCheckpointBytes: testMax})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(c.Close)
+		return c
+	}
+	store := &profileStore{stored: map[string][]byte{}}
+	c := connect(store)
+	if _, err = c.Prepare(t.Context(), l, data); err == nil {
+		t.Fatal("launch named a profile the client cannot supply")
+	}
+	c.SetProfileSource(func(string) ([]byte, error) { return other, nil })
+	if _, err = c.Prepare(t.Context(), l, data); err == nil || len(store.stored) != 0 {
+		t.Fatalf("mismatched archive sent: %v", err)
+	}
+	c.SetProfileSource(func(d string) ([]byte, error) {
+		if d != profileDigest {
+			t.Fatalf("source asked for %s", d)
+		}
+		return archive, nil
+	})
+	if _, err = c.Prepare(t.Context(), l, data); err != nil {
+		t.Fatal(err)
+	}
+	if string(store.stored[profileDigest]) != string(archive) {
+		t.Fatal("executor did not retain the profile")
+	}
+	unsupported := connect(nil)
+	unsupported.SetProfileSource(func(string) ([]byte, error) { return archive, nil })
+	var remote *RemoteError
+	if _, err = unsupported.Prepare(t.Context(), l, data); !errors.As(err, &remote) || remote.Code != CodeUnsupported {
+		t.Fatalf("executor without profiles = %v", err)
 	}
 }

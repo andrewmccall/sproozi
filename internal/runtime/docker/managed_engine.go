@@ -81,7 +81,7 @@ func (e *Engine) volume(ctx context.Context, v Volume) (Volume, error) {
 
 // ProfileMountPath is where the agent container sees the user's profile
 // folder, mounted read-only and live from the home.
-const ProfileMountPath = "/etc/sproozi/profile"
+const ProfileMountPath = harness.NativeProfileDirectory
 
 const bindMount = "bind"
 

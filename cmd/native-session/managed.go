@@ -24,8 +24,8 @@ const (
 // Docker mounts the user's live profile folder read-only; Kubernetes mounts
 // the profile archive recorded for the session.
 var (
-	profileDirectory = "/etc/sproozi/profile"
-	profileArchive   = "/etc/sproozi/profile-archive/profile.tar.gz"
+	profileDirectory = harness.NativeProfileDirectory
+	profileArchive   = harness.NativeProfileArchive
 )
 
 // loadProfile reads the profile this launch received. Without either mount

@@ -1,6 +1,7 @@
 package profile
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"crypto/tls"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/agentprofile"
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/session"
@@ -33,6 +35,14 @@ type Config struct {
 	MaxDuration        time.Duration
 	MaxCheckpointBytes int64
 	Backend            session.Placement
+	// Profiles retains profile archives that launches name. Without it, a
+	// launch with a profile is unsupported.
+	Profiles ProfileStore
+}
+
+// ProfileStore retains a verified profile archive under its digest.
+type ProfileStore interface {
+	StoreProfile(ctx context.Context, digest string, archive []byte) error
 }
 type handler struct {
 	config  Config
@@ -167,11 +177,15 @@ func (h *handler) validatePayload(action string, input request) error {
 		if input.Incarnation != nil || len(input.Checkpoint) == 0 {
 			return &Rejection{Code: CodeInvalid}
 		}
+		named := input.Launch.ProfileDigest != ""
+		if named != (len(input.Profile) > 0) || named && agentprofile.Verify(input.Launch.ProfileDigest, input.Profile) != nil {
+			return &Rejection{Code: CodeInvalid}
+		}
 		meta, err := checkpoint.Inspect(input.Checkpoint, h.config.MaxCheckpointBytes)
 		if err != nil || meta.Harness != input.Launch.Harness || meta.ThreadID != input.Launch.ThreadID || meta.SHA256 != input.Launch.CheckpointDigest {
 			return &Rejection{Code: CodeInvalid}
 		}
-	} else if len(input.Checkpoint) > 0 {
+	} else if len(input.Checkpoint) > 0 || len(input.Profile) > 0 {
 		return &Rejection{Code: CodeInvalid}
 	}
 	if action == actionInspect {
@@ -208,6 +222,14 @@ func (h *handler) perform(r *http.Request, action string, input request) (respon
 	p := h.config.Backend
 	switch action {
 	case actionPrepare:
+		if digest := input.Launch.ProfileDigest; digest != "" {
+			if h.config.Profiles == nil {
+				return output, &Rejection{Code: CodeUnsupported}
+			}
+			if err := h.config.Profiles.StoreProfile(r.Context(), digest, input.Profile); err != nil {
+				return output, err
+			}
+		}
 		i, err := p.Prepare(r.Context(), input.Launch, input.Checkpoint)
 		if err != nil {
 			return output, err

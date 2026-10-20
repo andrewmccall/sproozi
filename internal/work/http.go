@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/andrewmccall/sproozi/internal/agentprofile"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -118,7 +119,12 @@ func (h *ownerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.serveJSON(w, r, action)
 }
 func (h *ownerHandler) serveJSON(w http.ResponseWriter, r *http.Request, action string) {
-	r.Body = http.MaxBytesReader(w, r.Body, 32<<10)
+	limit := int64(32 << 10)
+	if action == "run" {
+		// A submission may carry the caller's profile archive.
+		limit += agentprofile.EncodedArchiveBytes
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	b, e := io.ReadAll(r.Body)
 	if e != nil {
 		http.Error(w, "Input exceeds bound", http.StatusBadRequest)

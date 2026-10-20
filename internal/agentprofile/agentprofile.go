@@ -37,9 +37,27 @@ const (
 	// MaxArchiveBytes keeps the compressed archive, base64 encoded, inside one
 	// Kubernetes ConfigMap.
 	MaxArchiveBytes = 640 << 10
+	// EncodedArchiveBytes bounds an archive carried as base64 in JSON.
+	EncodedArchiveBytes = ((MaxArchiveBytes + 2) / 3) * 4
 )
 
-var skillName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
+var (
+	skillName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
+	digest    = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+)
+
+// ValidDigest reports whether d has the form Archive returns.
+func ValidDigest(d string) bool { return digest.MatchString(d) }
+
+// Verify checks that archive is a valid profile whose digest is d.
+func Verify(d string, archive []byte) error {
+	sum := sha256.Sum256(archive)
+	if !ValidDigest(d) || "sha256:"+hex.EncodeToString(sum[:]) != d {
+		return errors.New("profile archive does not match its digest")
+	}
+	_, err := FromArchive(archive)
+	return err
+}
 
 // File is one skill file, relative to its skill directory.
 type File struct {
@@ -203,6 +221,16 @@ func (p Profile) Archive() ([]byte, string, error) {
 	}
 	sum := sha256.Sum256(buffer.Bytes())
 	return buffer.Bytes(), "sha256:" + hex.EncodeToString(sum[:]), nil
+}
+
+// ArchiveDirectory archives the profile folder as it is now. An empty or
+// missing profile has no archive and an empty digest.
+func ArchiveDirectory(directory string) ([]byte, string, error) {
+	p, err := LoadDirectory(directory)
+	if err != nil || p.Instructions == "" && len(p.Skills) == 0 {
+		return nil, "", err
+	}
+	return p.Archive()
 }
 
 // FromArchive reads an archive written by Archive, applying the same rules.

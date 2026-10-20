@@ -55,6 +55,10 @@ const (
 	NativeLocalTrustBundle   = "/tmp/sproozi-native/ca.pem"
 	NativeGatewayTokenPath   = "/var/run/sproozi/tokens/gateway/token"
 	NativeGatewayTrustBundle = "/etc/sproozi/trust/ca-bundle.pem"
+	// NativeProfileArchive is the session's stored profile on Kubernetes;
+	// NativeProfileDirectory is the live folder Docker mounts.
+	NativeProfileArchive   = "/etc/sproozi/profile-archive/profile.tar.gz"
+	NativeProfileDirectory = "/etc/sproozi/profile"
 )
 
 func (g NativeGateway) Validate(env []string) error {

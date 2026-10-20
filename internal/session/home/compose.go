@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/agentprofile"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/privatefs"
 
@@ -173,6 +174,7 @@ func Open(c Config, log io.Writer) (_ *Service, err error) {
 	if err != nil {
 		return nil, err
 	}
+	s.configureProfile(c.Local.ProfileDirectory)
 	modelConfig, err := provider(c.Gateway, c.Local.Harness)
 	if err != nil {
 		return nil, err
@@ -340,6 +342,18 @@ func approvedPolicy(c Config) (api.AgentPolicySpec, error) {
 		return api.AgentPolicySpec{}, errors.New("home: native instruction digest mismatch")
 	}
 	return policy, nil
+}
+
+// configureProfile lets moves carry the user's profile. Docker sees the live
+// folder; a remote visit receives the archive taken when its move began.
+func (s *Service) configureProfile(folder string) {
+	if folder == "" {
+		return
+	}
+	s.coordinator.SetProfileSource(func() ([]byte, string, error) { return agentprofile.ArchiveDirectory(folder) })
+	for _, remote := range s.remotes {
+		remote.SetProfileSource(s.coordinator.ProfileArchive)
+	}
 }
 
 func (s *Service) configureRemotes() error {

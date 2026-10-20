@@ -119,7 +119,7 @@ func TestLoadProfilePrefersTheSessionArchive(t *testing.T) {
 	root := t.TempDir()
 	profileDirectory, profileArchive = filepath.Join(root, "profile"), filepath.Join(root, "archive", "profile.tar.gz")
 	t.Cleanup(func() {
-		profileDirectory, profileArchive = "/etc/sproozi/profile", "/etc/sproozi/profile-archive/profile.tar.gz"
+		profileDirectory, profileArchive = harness.NativeProfileDirectory, harness.NativeProfileArchive
 	})
 	if p, err := loadProfile(); err != nil || p.Instructions != "" || len(p.Skills) != 0 {
 		t.Fatalf("missing profile=%+v err=%v", p, err)

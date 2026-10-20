@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/agentprofile"
 	"github.com/andrewmccall/sproozi/internal/testutil"
 
 	"github.com/andrewmccall/sproozi/internal/budget"
@@ -803,5 +804,42 @@ func TestExpiredOriginalDeadlinePreventsPreparation(t *testing.T) {
 	}
 	if remote.prepared != 0 || remote.activated != 0 {
 		t.Fatal("expired session prepared a destination")
+	}
+}
+
+// A move records the profile as it is when the launch is created; a retry of
+// that move sends the same archive even after the profile changed.
+func TestMoveRetainsTheProfileOfItsLaunch(t *testing.T) {
+	t.Parallel()
+	c, _, _, remote, start := setup(t)
+	instructions := "First profile"
+	c.SetProfileSource(func() ([]byte, string, error) {
+		return agentprofile.Profile{Instructions: instructions}.Archive()
+	})
+	first, firstDigest, err := agentprofile.Profile{Instructions: instructions}.Archive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	op := uuid.NewString()
+	remote.lostPrepare = true
+	if _, err = c.Move(t.Context(), start.Source.ExecutionID, op, testRemote); err == nil {
+		t.Fatal("lost preparation hidden")
+	}
+	instructions = "Edited profile"
+	r, err := c.Move(t.Context(), start.Source.ExecutionID, op, testRemote)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Active.Launch.ProfileDigest != firstDigest {
+		t.Fatalf("retried move profile = %s, want %s", r.Active.Launch.ProfileDigest, firstDigest)
+	}
+	retained, err := c.ProfileArchive(firstDigest)
+	if err != nil || string(retained) != string(first) {
+		t.Fatalf("retained profile: %v", err)
+	}
+	_, editedDigest, _ := agentprofile.Profile{Instructions: instructions}.Archive()
+	r, err = c.Move(t.Context(), r.ID, uuid.NewString(), testLocal)
+	if err != nil || r.Active.Launch.ProfileDigest != editedDigest {
+		t.Fatalf("next move profile = %s, %v", r.Active.Launch.ProfileDigest, err)
 	}
 }

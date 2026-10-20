@@ -29,7 +29,7 @@ const managedTemplateEnabledValue = "true"
 const openAIAPIKey = "OPENAI_API_KEY"
 
 func addManagedNativeContract(ctx context.Context, kube client.Client, run *api.AgentRun, template *api.AgentTemplate,
-	runtime *api.AgentRuntime, data map[string]string,
+	runtime *api.AgentRuntime, contract *corev1.ConfigMap,
 ) error {
 	binding, err := registry.ResolveRun(ctx, kube, run, template)
 	if err != nil || binding == nil {
@@ -67,7 +67,16 @@ func addManagedNativeContract(ctx context.Context, kube client.Client, run *api.
 	if err != nil {
 		return err
 	}
-	data[nativeConfigKey] = string(document)
+	contract.Data[nativeConfigKey] = string(document)
+	// The executor stored the profile beside the registration; the controller
+	// re-checks its digest before the agent can read it.
+	if binding.ProfileDigest != "" {
+		archive, err := registry.ReadProfile(ctx, kube, run.Namespace, binding.ProfileDigest)
+		if err != nil {
+			return fmt.Errorf("managed native profile: %w", err)
+		}
+		contract.BinaryData = map[string][]byte{registry.ProfileArchiveKey: archive}
+	}
 	return nil
 }
 
@@ -143,6 +152,10 @@ func BuildManagedPodSpec(run *api.AgentRun, rt *api.AgentRuntime, binding *regis
 			container.WorkingDir = workspaceDirectory
 			container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{Name: contractVolumeName,
 				MountPath: "/etc/sproozi/native/config.json", SubPath: nativeConfigKey, ReadOnly: true})
+			if binding.ProfileDigest != "" {
+				container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{Name: contractVolumeName,
+					MountPath: harness.NativeProfileArchive, SubPath: registry.ProfileArchiveKey, ReadOnly: true})
+			}
 		case CaptureContainer:
 			container.Command = []string{"/usr/local/bin/checkpoint"}
 			container.Args = []string{"hold", "--deadline", binding.OriginalDeadline.Format(time.RFC3339Nano)}

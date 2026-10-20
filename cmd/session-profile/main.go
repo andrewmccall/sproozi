@@ -127,7 +127,7 @@ func run(args []string) error {
 	handler, err := profile.NewHandler(profile.Config{
 		Harness: fixed.Harness, Principal: fixed.Principal, TokenFile: fixed.TokenFile, Placement: fixed.PlacementName,
 		InstructionDigest: fixed.InstructionDigest, Allowances: fixed.Allowances,
-		MaxDuration: duration, MaxCheckpointBytes: fixed.MaxCheckpointBytes, Backend: backend,
+		MaxDuration: duration, MaxCheckpointBytes: fixed.MaxCheckpointBytes, Backend: backend, Profiles: backend,
 	})
 	if err != nil {
 		return err

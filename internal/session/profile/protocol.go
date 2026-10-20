@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/agentprofile"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/workspace"
 	"github.com/google/uuid"
@@ -66,6 +67,8 @@ type request struct {
 	Launch      session.Launch       `json:"launch"`
 	Incarnation *session.Incarnation `json:"incarnation,omitempty"`
 	Checkpoint  []byte               `json:"checkpoint,omitempty"`
+	// Profile is the archive a prepared launch names by ProfileDigest.
+	Profile []byte `json:"profile,omitempty"`
 }
 type observation struct {
 	Launch      session.Launch         `json:"launch"`
@@ -86,7 +89,7 @@ func bodyLimit(max int64) (int64, error) {
 	if max < 1 || max > maxArtifactLimit {
 		return 0, errors.New("profile: invalid checkpoint byte limit")
 	}
-	return ((max+2)/3)*4 + metadataLimit, nil
+	return ((max+2)/3)*4 + agentprofile.EncodedArchiveBytes + metadataLimit, nil
 }
 func strictDecode(data []byte, target any) error {
 	d := json.NewDecoder(bytes.NewReader(data))
@@ -165,7 +168,8 @@ func validateLaunch(l session.Launch) error {
 	if err := workspace.ValidateIgnoredPaths(l.IncludeIgnored); err != nil {
 		return err
 	}
-	if l.Harness.Validate() != nil || !validID(l.ExecutionID) || !validID(l.OperationID) || !validID(l.AllocationID) || !validID(l.ThreadID) || l.Epoch == 0 || !validName(l.Placement) || !validDigest(l.InstructionDigest) || !validDigest(l.CheckpointDigest) || l.Deadline.IsZero() || len(l.Allowances) == 0 || len(l.Allowances) > 32 {
+	if l.Harness.Validate() != nil || !validID(l.ExecutionID) || !validID(l.OperationID) || !validID(l.AllocationID) || !validID(l.ThreadID) || l.Epoch == 0 || !validName(l.Placement) || !validDigest(l.InstructionDigest) || !validDigest(l.CheckpointDigest) || l.Deadline.IsZero() || len(l.Allowances) == 0 || len(l.Allowances) > 32 ||
+		l.ProfileDigest != "" && !agentprofile.ValidDigest(l.ProfileDigest) {
 		return errors.New("profile: invalid launch")
 	}
 	for capability, a := range l.Allowances {

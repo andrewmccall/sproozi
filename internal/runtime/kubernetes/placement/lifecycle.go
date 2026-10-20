@@ -55,7 +55,7 @@ func (p *Placement) retained(ctx context.Context, l session.Launch) (retained, r
 	l = local.Launch
 	// Only a first visit's registration gains a native UUID after its launch.
 	thread := r.NativeUUID == l.ThreadID || local.fresh() && l.ThreadID == ""
-	if r.Harness != p.config.Harness || l.Harness != r.Harness || r.Principal != p.config.Principal || r.TemplateName != p.config.TemplateName || r.Epoch != l.Epoch || r.IntendedRunName != runName(l) || r.OperationID != l.OperationID || r.SessionID != l.ExecutionID || r.WorkspaceDigest != local.WorkspaceDigest || r.Task != l.Task || !thread || r.CheckpointDigest != l.CheckpointDigest || r.InstructionDigest != l.InstructionDigest || !r.OriginalDeadline.Equal(l.Deadline) || !slices.Equal(r.IncludeIgnored, l.IncludeIgnored) || !ceilingsMatch(l, r.Ceilings) {
+	if r.Harness != p.config.Harness || l.Harness != r.Harness || r.Principal != p.config.Principal || r.TemplateName != p.config.TemplateName || r.Epoch != l.Epoch || r.IntendedRunName != runName(l) || r.OperationID != l.OperationID || r.SessionID != l.ExecutionID || r.WorkspaceDigest != local.WorkspaceDigest || r.Task != l.Task || !thread || r.CheckpointDigest != l.CheckpointDigest || r.InstructionDigest != l.InstructionDigest || !r.OriginalDeadline.Equal(l.Deadline) || !slices.Equal(r.IncludeIgnored, l.IncludeIgnored) || r.ProfileDigest != l.ProfileDigest || !ceilingsMatch(l, r.Ceilings) {
 		return local, r, &profile.Rejection{Code: profile.CodeConflict}
 	}
 	return local, r, nil

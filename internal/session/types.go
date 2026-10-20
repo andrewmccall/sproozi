@@ -53,6 +53,9 @@ type Launch struct {
 	Allowances        map[string]Allowance `json:"allowances"`
 	CheckpointDigest  string               `json:"checkpointDigest"`
 	IncludeIgnored    []string             `json:"includeIgnored,omitempty"`
+	// ProfileDigest names the user's profile archive for this visit. Docker
+	// mounts the live folder instead; remote placements store the archive.
+	ProfileDigest string `json:"profileDigest,omitempty"`
 }
 
 // Incarnation identifies exact resources, rather than a reusable execution name.
