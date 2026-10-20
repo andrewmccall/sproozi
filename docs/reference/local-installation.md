@@ -121,9 +121,11 @@ never override them.
 Each file must be UTF-8 text of at most 32 KiB, owned by you, and not writable
 by others. A symbolic link or special file stops the launch with an error;
 missing files are skipped. Other entries under `agents/`, such as `settings.json`,
-`skills/` or `config.toml`, are never read. `sproozi doctor` lists them as
-ignored. Shared files are not part of a checkpoint and are not sent to a remote
-placement.
+`skills/` or `config.toml`, are not delivered in this release; skills and other
+configuration are covered by the
+[managed harness configuration](../explanations/future-architecture/managed-harness-configuration-and-trust.md)
+proposal. `sproozi doctor` lists them as ignored. Shared files are not part of
+a checkpoint and are not sent to a remote placement.
 
 ## Certificates
 
