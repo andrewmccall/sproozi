@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Render the SRE demo with caller-owned immutable values."""
 
+from __future__ import annotations
+
 import argparse
 import re
 import subprocess
@@ -8,7 +10,11 @@ from pathlib import Path
 
 
 IMAGE_PATTERN = re.compile(r"^[A-Za-z0-9./_:-]+@sha256:[a-f0-9]{64}$")
-REPOSITORY_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+# GitHub owners are letters, digits and inner hyphens; names add "_" and ".".
+REPOSITORY_PATTERN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?/[A-Za-z0-9_.-]{1,100}$")
+# Values copied unchanged from the docs or this script's own template.
+PLACEHOLDER_OWNERS = {"owner", "example", "org", "user", "username", "account"}
+PLACEHOLDER_NAMES = {"name", "repo", "repository"}
 IMAGE_PLACEHOLDER = "ghcr.io/openai/codex-universal@sha256:" + ("a" * 64)
 REPOSITORY_PLACEHOLDER = "example/sproozi-demo"
 
@@ -20,6 +26,16 @@ def replace_exact(document: str, old: str, new: str, expected: int) -> str:
     return document.replace(old, new)
 
 
+def repository_error(repository: str) -> str | None:
+    """Return why --repository is unusable, or None when it looks real."""
+    owner, _, name = repository.lower().partition("/")
+    if owner.startswith("your") or owner in PLACEHOLDER_OWNERS or name in PLACEHOLDER_NAMES:
+        return f"--repository {repository} is a placeholder; set SPROOZI_DEMO_REPOSITORY to your own owner/name"
+    if not REPOSITORY_PATTERN.fullmatch(repository) or name in (".", ".."):
+        return "--repository must be owner/name for an existing GitHub repository, for example octo-org/sproozi-demo"
+    return None
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--codex-image", required=True)
@@ -29,8 +45,9 @@ def main() -> None:
     args = parser.parse_args()
     if not IMAGE_PATTERN.fullmatch(args.codex_image):
         raise SystemExit("--codex-image must be repository@sha256:<64 lowercase hex characters>")
-    if not REPOSITORY_PATTERN.fullmatch(args.repository):
-        raise SystemExit("--repository must be owner/name")
+    error = repository_error(args.repository)
+    if error:
+        raise SystemExit(error)
 
     root = Path(__file__).resolve().parents[2]
     rendered = subprocess.run(

@@ -113,14 +113,16 @@ func TestOpenCodeLaunchForwardsTermination(t *testing.T) {
 	waitForFile(t, state+".stopped")
 }
 
+// waitForFile allows the fixtures' full 10s command bound: under a loaded
+// parallel test run, starting the Python launcher and its child can exceed 3s.
 func waitForFile(t *testing.T, path string) {
 	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		if _, err := os.Stat(path); err == nil {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatal("native command did not start")
+	t.Fatalf("native command did not create %s", path)
 }

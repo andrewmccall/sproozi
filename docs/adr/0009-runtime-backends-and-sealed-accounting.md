@@ -5,6 +5,8 @@ Date: 2026-10-10
 Reconciled: 2026-10-12
 Implementation: sealed accounting used by verified Codex and Claude round trips
 
+Partly superseded by [ADR 0028](0028-streamed-model-responses-and-estimated-interrupts.md): charging the whole reservation after provider uncertainty now applies only when no estimate is possible, or at a budget cut. An interrupted model call is charged an estimate capped at its reservation.
+
 ## Problem and constraints
 
 Docker and Kubernetes execution require different provisioning and stop evidence.

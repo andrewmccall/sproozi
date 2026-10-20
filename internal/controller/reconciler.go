@@ -44,8 +44,24 @@ import (
 )
 
 const (
-	defaultRetentionTTL       = 30 * 24 * time.Hour
-	admittedRequeueTime       = 10 * time.Second
+	defaultRetentionTTL = 30 * 24 * time.Hour
+	// queuedPollInterval is the fallback re-check for a run left Queued. Runs
+	// going terminal or deleted and policy changes wake queued runs sooner.
+	queuedPollInterval = 10 * time.Second
+	// quotaRetryMin and quotaRetryMax bound the retry after a ResourceQuota
+	// rejects a sandbox Pod.
+	quotaRetryMin = 5 * time.Second
+	quotaRetryMax = time.Minute
+	// waitingForCapReason marks a Queued run held back by a cap.
+	waitingForCapReason = "WaitingForConcurrencyCap"
+	// policyChangedReason fails an active run whose template now names a
+	// different policy from the one it was admitted under.
+	policyChangedReason = "PolicyChanged"
+	// quotaExceededReason marks an active run whose sandbox Pod a
+	// ResourceQuota rejected.
+	quotaExceededReason = "QuotaExceeded"
+	// readyCondition is the AgentRun condition type that carries phase reasons.
+	readyCondition            = "Ready"
 	agentRunFinalizer         = "sproozi.com/agentrun-cleanup"
 	agentRunPhaseIndex        = "sproozi.com/agentrun-phase"
 	agentRunTemplateIndex     = "sproozi.com/agentrun-template"
@@ -72,10 +88,13 @@ const (
 // AgentRunReconciler reconciles AgentRun objects.
 type AgentRunReconciler struct {
 	client.Client
-	// APIReader reads the API server directly. The single-slot admission
-	// decision uses it because the cache can lag this reconciler's own writes.
+	// APIReader reads the API server directly. Admission counts active runs
+	// with it because the cache can lag this reconciler's own writes.
 	APIReader     client.Reader
 	SandboxClient k8sresources.SandboxClient
+	// MaxActiveRuns caps Admitted and Running runs across the cluster. Zero
+	// means no cluster-wide limit.
+	MaxActiveRuns int
 }
 
 // admission holds the live objects a non-terminal run was last admitted against.
@@ -104,7 +123,8 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	// Initialize runs that have no phase yet; transitionPhase sets the Ready condition.
 	if run.Status.Phase == "" {
-		return r.transitionPhase(ctx, &run, sprooziv1alpha1.AgentRunPhaseQueued, "Initialized", "")
+		return r.transitionPhase(ctx, &run, sprooziv1alpha1.AgentRunPhaseQueued, "Initialized",
+			"AgentRun is queued for admission")
 	}
 
 	// Terminal runs are only subject to retention TTL deletion.
@@ -114,7 +134,7 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	// Cancellation is honoured at any non-terminal phase.
 	if run.Spec.Cancel {
-		return r.transitionPhase(ctx, &run, sprooziv1alpha1.AgentRunPhaseCancelled, "CancelRequested", "")
+		return r.transitionPhase(ctx, &run, sprooziv1alpha1.AgentRunPhaseCancelled, "CancelRequested", cancelMessage)
 	}
 
 	admitted, result, err := r.resolveAdmission(ctx, &run)
@@ -124,7 +144,7 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	switch run.Status.Phase {
 	case sprooziv1alpha1.AgentRunPhaseQueued:
-		return r.handleQueued(ctx, &run)
+		return r.handleQueued(ctx, &run, admitted.policy)
 	case sprooziv1alpha1.AgentRunPhaseAdmitted:
 		return r.handleAdmitted(ctx, &run, admitted)
 	case sprooziv1alpha1.AgentRunPhaseRunning:
@@ -168,7 +188,7 @@ func (r *AgentRunReconciler) resolveAdmission(ctx context.Context, run *sprooziv
 		return nil, *sessionResult, nil
 	}
 
-	// Reject a runtime that cannot launch before the run takes the active slot.
+	// Reject a runtime that cannot launch before the run is admitted.
 	if err := r.SandboxClient.ValidateRuntime(ctx, rt); err != nil {
 		if !errors.Is(err, k8sresources.ErrInvalidRuntime) {
 			return nil, ctrl.Result{}, err
@@ -203,20 +223,21 @@ func (r *AgentRunReconciler) resolveAdmission(ctx context.Context, run *sprooziv
 	deadline := registry.EffectiveDeadline(run, pol, binding)
 	if time.Now().After(deadline) {
 		logger.Info("AgentRun deadline exceeded", "name", run.Name, "phase", run.Status.Phase)
-		_, err := r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseTimedOut, "MaxExecutionDurationExceeded", "")
+		_, err := r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseTimedOut, "MaxExecutionDurationExceeded",
+			fmt.Sprintf("AgentRun passed its execution deadline %s", deadline.UTC().Format(time.RFC3339)))
 		return nil, ctrl.Result{}, err
 	}
 	return &admission{template: tmpl, policy: pol, runtime: rt, binding: binding, deadline: deadline}, ctrl.Result{}, nil
 }
 
-// handleQueued enforces the single-active-run invariant and either admits the
-// run or leaves it queued. The active-run list is cluster-wide to enforce the
-// single global active-run slot.
-func (r *AgentRunReconciler) handleQueued(ctx context.Context, run *sprooziv1alpha1.AgentRun) (ctrl.Result, error) {
+// handleQueued admits the run if a first-in, first-out simulation of the
+// cluster-wide queue admits it under the cluster cap and each policy's cap, or
+// leaves it Queued with a message naming what is full.
+func (r *AgentRunReconciler) handleQueued(ctx context.Context, run *sprooziv1alpha1.AgentRun, pol *sprooziv1alpha1.AgentPolicy) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
 	// A cached list can miss an admission this reconciler has just written,
-	// or a run it has not yet seen initialized, and so admit a second run or
+	// or a run it has not yet seen initialized, and so admit past a cap or
 	// let a later run overtake an earlier one. Reconciles are serialized, so a
 	// live list reflects every earlier admission decision.
 	var allRuns sprooziv1alpha1.AgentRunList
@@ -224,19 +245,134 @@ func (r *AgentRunReconciler) handleQueued(ctx context.Context, run *sprooziv1alp
 		return ctrl.Result{}, err
 	}
 
-	if active := ActiveRun(allRuns.Items); active != nil {
-		logger.Info("Active run exists, staying queued", "name", run.Name, "activeRun", active.Name)
-		return ctrl.Result{RequeueAfter: admittedRequeueTime}, nil
+	state, err := r.admissionState(ctx, allRuns.Items)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	target := client.ObjectKeyFromObject(run)
+	queue, err := r.admissionQueue(ctx, allRuns.Items, target, pol)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	decision := SimulateAdmission(state, queue, target)
+	if !decision.Admit {
+		logger.Info("AgentRun stayed queued", "name", run.Name, "message", decision.Message)
+		ready := apimeta.FindStatusCondition(run.Status.Conditions, readyCondition)
+		if ready == nil || ready.Reason != waitingForCapReason || ready.Message != decision.Message {
+			apimeta.SetStatusCondition(&run.Status.Conditions, metav1.Condition{
+				Type:               readyCondition,
+				Status:             metav1.ConditionFalse,
+				ObservedGeneration: run.Generation,
+				Reason:             waitingForCapReason,
+				Message:            decision.Message,
+			})
+			if err := r.Status().Update(ctx, run); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+		return ctrl.Result{RequeueAfter: queuedPollInterval}, nil
 	}
 
-	next := NextQueued(allRuns.Items)
-	if next == nil || next.Name != run.Name || next.Namespace != run.Namespace {
-		// Another queued run has an earlier timestamp; wait.
-		return ctrl.Result{RequeueAfter: admittedRequeueTime}, nil
-	}
+	logger.Info("Admitting AgentRun", "name", run.Name, "policy", pol.Name)
+	// Record the policy in the same status update that admits the run, so the
+	// run counts against it even if its template is re-pointed later.
+	run.Status.PolicyName = pol.Name
+	return r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseAdmitted, "",
+		fmt.Sprintf("AgentRun was admitted under AgentPolicy %s", pol.Name))
+}
 
-	logger.Info("Admitting AgentRun", "name", run.Name)
-	return r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseAdmitted, "", "")
+// admissionState counts active runs cluster-wide and per policy. A run counts
+// against the policy recorded at its admission; a run admitted before that
+// field existed is resolved through its template's current policyRef.
+func (r *AgentRunReconciler) admissionState(ctx context.Context, runs []sprooziv1alpha1.AgentRun) (AdmissionState, error) {
+	state := AdmissionState{GlobalCap: r.MaxActiveRuns, PolicyActive: map[types.NamespacedName]int{}}
+	for _, active := range ActiveRuns(runs) {
+		state.GlobalActive++
+		policyName := active.Status.PolicyName
+		if policyName == "" {
+			var tmpl sprooziv1alpha1.AgentTemplate
+			err := r.Get(ctx, types.NamespacedName{Name: active.Spec.TemplateRef.Name, Namespace: active.Namespace}, &tmpl)
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			if err != nil {
+				return AdmissionState{}, err
+			}
+			policyName = tmpl.Spec.PolicyRef.Name
+		}
+		state.PolicyActive[types.NamespacedName{Namespace: active.Namespace, Name: policyName}]++
+	}
+	return state, nil
+}
+
+// admissionQueue resolves the policy of each queued run up to and including
+// the target. The target uses the policy it was just checked against; earlier
+// runs whose template or policy is missing, or that are cancelled or being
+// deleted, are left unresolved so the simulation skips them.
+func (r *AgentRunReconciler) admissionQueue(
+	ctx context.Context,
+	runs []sprooziv1alpha1.AgentRun,
+	target types.NamespacedName,
+	targetPolicy *sprooziv1alpha1.AgentPolicy,
+) ([]AdmissionCandidate, error) {
+	policies := map[types.NamespacedName]*sprooziv1alpha1.AgentPolicy{
+		{Namespace: target.Namespace, Name: targetPolicy.Name}: targetPolicy,
+	}
+	var queue []AdmissionCandidate
+	for _, queued := range QueuedRuns(runs) {
+		key := client.ObjectKeyFromObject(queued)
+		var pol *sprooziv1alpha1.AgentPolicy
+		if key == target {
+			pol = targetPolicy
+		} else if queued.Spec.Cancel || !queued.DeletionTimestamp.IsZero() {
+			queue = append(queue, AdmissionCandidate{Run: key})
+			continue
+		} else {
+			var err error
+			if pol, err = r.queuedPolicy(ctx, queued, policies); err != nil {
+				return nil, err
+			}
+		}
+		candidate := AdmissionCandidate{Run: key, Resolved: pol != nil}
+		if pol != nil {
+			candidate.Policy = types.NamespacedName{Namespace: queued.Namespace, Name: pol.Name}
+			if pol.Spec.MaxActiveRuns != nil {
+				candidate.PolicyCap = *pol.Spec.MaxActiveRuns
+			}
+		}
+		queue = append(queue, candidate)
+		if key == target {
+			break
+		}
+	}
+	return queue, nil
+}
+
+// queuedPolicy resolves a queued run's policy through its template, or nil if
+// either is missing.
+func (r *AgentRunReconciler) queuedPolicy(
+	ctx context.Context,
+	run *sprooziv1alpha1.AgentRun,
+	policies map[types.NamespacedName]*sprooziv1alpha1.AgentPolicy,
+) (*sprooziv1alpha1.AgentPolicy, error) {
+	var tmpl sprooziv1alpha1.AgentTemplate
+	if err := r.Get(ctx, types.NamespacedName{Name: run.Spec.TemplateRef.Name, Namespace: run.Namespace}, &tmpl); err != nil {
+		return nil, client.IgnoreNotFound(err)
+	}
+	key := types.NamespacedName{Namespace: run.Namespace, Name: tmpl.Spec.PolicyRef.Name}
+	if pol, ok := policies[key]; ok {
+		return pol, nil
+	}
+	var pol sprooziv1alpha1.AgentPolicy
+	if err := r.Get(ctx, key, &pol); err != nil {
+		if apierrors.IsNotFound(err) {
+			policies[key] = nil
+			return nil, nil
+		}
+		return nil, err
+	}
+	policies[key] = &pol
+	return &pol, nil
 }
 
 // handleAdmitted provisions the per-run identity resources (ServiceAccount and
@@ -265,7 +401,8 @@ func (r *AgentRunReconciler) handleAdmitted(ctx context.Context, run *sprooziv1a
 		logger.Info("Provisioned run identity", "name", run.Name, "serviceAccount", saName)
 	}
 
-	return r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseRunning, "", "")
+	return r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseRunning, "",
+		fmt.Sprintf("Run identity ServiceAccount %s is provisioned", run.Status.Identity.ServiceAccountName))
 }
 
 // handleRunning creates the Sandbox Pod, monitors its lifecycle, and transitions
@@ -283,6 +420,9 @@ func (r *AgentRunReconciler) handleRunning(ctx context.Context, run *sprooziv1al
 	}
 
 	sandboxName, err := r.ensureSandbox(ctx, run, admitted.runtime, admitted.binding)
+	if k8sresources.IsQuotaExceeded(err) {
+		return r.waitForQuota(ctx, run, err, admitted.deadline)
+	}
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -297,11 +437,38 @@ func (r *AgentRunReconciler) handleRunning(ctx context.Context, run *sprooziv1al
 
 	case k8sresources.SandboxStatusAbsent:
 		logger.Info("Sandbox terminated abnormally", "name", run.Name, "sandboxStatus", sandboxStatus)
-		return r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseFailed, "SandboxGone", "")
+		return r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseFailed, "SandboxGone",
+			fmt.Sprintf("Sandbox Pod %s disappeared before the agent container exited", sandboxName))
 	}
 
 	// Pending, Running or Unknown: wake at the deadline; Pod events wake sooner.
 	return ctrl.Result{RequeueAfter: time.Until(admitted.deadline)}, nil
+}
+
+// waitForQuota keeps a run whose sandbox Pod a ResourceQuota rejected active,
+// with Ready reason QuotaExceeded, and retries with a backoff that grows with
+// the time since the first rejection. The condition is written only when it
+// first appears, so the write does not trigger a reconcile per retry. The
+// run's deadline still applies on each reconcile.
+func (r *AgentRunReconciler) waitForQuota(ctx context.Context, run *sprooziv1alpha1.AgentRun, quotaErr error, deadline time.Time) (ctrl.Result, error) {
+	ready := apimeta.FindStatusCondition(run.Status.Conditions, readyCondition)
+	if ready == nil || ready.Reason != quotaExceededReason {
+		log.FromContext(ctx).Info("ResourceQuota rejected sandbox Pod", "name", run.Name, "error", quotaErr.Error())
+		apimeta.SetStatusCondition(&run.Status.Conditions, metav1.Condition{
+			Type:               readyCondition,
+			Status:             metav1.ConditionFalse,
+			ObservedGeneration: run.Generation,
+			Reason:             quotaExceededReason,
+			Message:            fmt.Sprintf("A ResourceQuota rejected the sandbox Pod; retrying until the run deadline: %v", quotaErr),
+		})
+		if err := r.Status().Update(ctx, run); err != nil {
+			return ctrl.Result{}, err
+		}
+		ready = apimeta.FindStatusCondition(run.Status.Conditions, readyCondition)
+	}
+	wait := min(max(time.Since(ready.LastTransitionTime.Time), quotaRetryMin), quotaRetryMax)
+	wait = min(wait, max(time.Until(deadline), time.Second))
+	return ctrl.Result{RequeueAfter: wait}, nil
 }
 
 // handleTerminal revokes any provisioned identity resources and then deletes
@@ -430,16 +597,28 @@ func (r *AgentRunReconciler) resolveRefs(
 	var tmpl sprooziv1alpha1.AgentTemplate
 	if err := r.Get(ctx, types.NamespacedName{Name: run.Spec.TemplateRef.Name, Namespace: run.Namespace}, &tmpl); err != nil {
 		if apierrors.IsNotFound(err) {
-			_, ferr := r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseFailed, "TemplateNotFound", "")
+			_, ferr := r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseFailed, "TemplateNotFound",
+				fmt.Sprintf("AgentTemplate %s not found in namespace %s", run.Spec.TemplateRef.Name, run.Namespace))
 			return nil, nil, nil, ferr
 		}
 		return nil, nil, nil, err
 	}
 
+	// An active run counts against the policy it was admitted under. If its
+	// template now names another policy, that policy's cap would not limit it,
+	// so fail closed as for a deleted policy. The gateway denies the same runs.
+	if registry.AdmittedPolicyChanged(run, &tmpl) {
+		_, ferr := r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseFailed, policyChangedReason,
+			registry.PolicyChangedMessage(run, &tmpl))
+		return nil, nil, nil, ferr
+	}
+
 	var pol sprooziv1alpha1.AgentPolicy
 	if err := r.Get(ctx, types.NamespacedName{Name: tmpl.Spec.PolicyRef.Name, Namespace: run.Namespace}, &pol); err != nil {
 		if apierrors.IsNotFound(err) {
-			_, ferr := r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseFailed, "PolicyNotFound", "")
+			_, ferr := r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseFailed, "PolicyNotFound",
+				fmt.Sprintf("AgentPolicy %s referenced by AgentTemplate %s not found in namespace %s",
+					tmpl.Spec.PolicyRef.Name, tmpl.Name, run.Namespace))
 			return nil, nil, nil, ferr
 		}
 		return nil, nil, nil, err
@@ -448,7 +627,9 @@ func (r *AgentRunReconciler) resolveRefs(
 	var rt sprooziv1alpha1.AgentRuntime
 	if err := r.Get(ctx, types.NamespacedName{Name: tmpl.Spec.RuntimeRef.Name, Namespace: run.Namespace}, &rt); err != nil {
 		if apierrors.IsNotFound(err) {
-			_, ferr := r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseFailed, "RuntimeNotFound", "")
+			_, ferr := r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseFailed, "RuntimeNotFound",
+				fmt.Sprintf("AgentRuntime %s referenced by AgentTemplate %s not found in namespace %s",
+					tmpl.Spec.RuntimeRef.Name, tmpl.Name, run.Namespace))
 			return nil, nil, nil, ferr
 		}
 		return nil, nil, nil, err
@@ -456,6 +637,9 @@ func (r *AgentRunReconciler) resolveRefs(
 
 	return &tmpl, &pol, &rt, nil
 }
+
+// cancelMessage is shared by every path that honours spec.cancel.
+const cancelMessage = "AgentRun was cancelled because spec.cancel is true"
 
 // transitionPhase validates, applies, and persists a phase change.
 // reason must be a CamelCase token suitable for a Condition reason field.
@@ -504,7 +688,7 @@ func (r *AgentRunReconciler) transitionPhase(
 	}
 
 	apimeta.SetStatusCondition(&run.Status.Conditions, metav1.Condition{
-		Type:               "Ready",
+		Type:               readyCondition,
 		Status:             condStatus,
 		ObservedGeneration: run.Generation,
 		Reason:             reason,
@@ -520,13 +704,15 @@ func (r *AgentRunReconciler) transitionPhase(
 }
 
 // SetupWithManager registers the controller with the manager. MaxConcurrentReconciles
-// is pinned to 1 to preserve the single-active-run ordering invariant: concurrent
-// reconciliations of two Queued runs could each see no active run and both self-admit.
+// is pinned to 1 so admission counts stay correct: concurrent reconciliations of
+// two Queued runs could each see the same free capacity and both self-admit past
+// a cap.
 //
 // Three additional watch sources re-enqueue non-terminal AgentRuns when their
 // referenced AgentPolicy, AgentTemplate, or AgentRuntime changes, so that a policy
 // tightening immediately causes queued runs to be re-evaluated and denied if needed
-// (PRD §5: "Policy is evaluated for every active run").
+// (PRD §5: "Policy is evaluated for every active run"). A policy change also wakes
+// every queued run, because a changed cap can admit them.
 //
 // A sandbox Pod watch re-enqueues the owning AgentRun immediately when the Pod
 // phase changes, so completed runs are processed without waiting for the deadline
@@ -536,14 +722,15 @@ func (r *AgentRunReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return err
 	}
 
-	// An AgentRun event is already enqueued by For. Only wake the next queued
-	// run when this event can release the global active slot. This keeps the
-	// single-admission invariant while bounding cross-run fanout to one request.
-	nextQueued := handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
+	// An AgentRun event is already enqueued by For. When this event can free
+	// capacity (the run is terminal or being deleted), wake every queued run:
+	// with per-policy caps the run that can now be admitted need not be the
+	// queue head.
+	queuedOnRelease := handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
 		if !IsTerminal(obj.(*sprooziv1alpha1.AgentRun).Status.Phase) && obj.GetDeletionTimestamp().IsZero() {
 			return nil
 		}
-		return r.nextQueuedRequests(ctx)
+		return r.queuedRequests(ctx)
 	})
 
 	// Enqueue only runs that reference the changed template. Policy and runtime
@@ -580,7 +767,7 @@ func (r *AgentRunReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return reqs
 	}
 	policyRuns := handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
-		return templatesFor(ctx, obj, agentTemplatePolicyIndex)
+		return mergeRequests(templatesFor(ctx, obj, agentTemplatePolicyIndex), r.queuedRequests(ctx))
 	})
 	runtimeRuns := handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
 		return templatesFor(ctx, obj, agentTemplateRuntimeIndex)
@@ -607,11 +794,12 @@ func (r *AgentRunReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	return ctrl.NewControllerManagedBy(mgr).
 		WithOptions(ctrlcontroller.Options{
-			// Single concurrent reconciler preserves global active-run ordering.
+			// One reconciler at a time keeps admission counts and FIFO order
+			// correct against the live run list.
 			MaxConcurrentReconciles: 1,
 		}).
 		For(&sprooziv1alpha1.AgentRun{}).
-		Watches(&sprooziv1alpha1.AgentRun{}, nextQueued).
+		Watches(&sprooziv1alpha1.AgentRun{}, queuedOnRelease).
 		Watches(&sprooziv1alpha1.AgentPolicy{}, policyRuns).
 		Watches(&sprooziv1alpha1.AgentTemplate{}, templateRuns).
 		Watches(&sprooziv1alpha1.AgentRuntime{}, runtimeRuns).
@@ -651,15 +839,28 @@ func nonTerminalRequests(runs []sprooziv1alpha1.AgentRun) []reconcile.Request {
 	return requests
 }
 
-func (r *AgentRunReconciler) nextQueuedRequests(ctx context.Context) []reconcile.Request {
+// queuedRequests returns every Queued run, read from the cache. Each one
+// re-checks its own admission against the live list.
+func (r *AgentRunReconciler) queuedRequests(ctx context.Context) []reconcile.Request {
 	var list sprooziv1alpha1.AgentRunList
 	if err := r.List(ctx, &list, client.MatchingFields{agentRunPhaseIndex: string(sprooziv1alpha1.AgentRunPhaseQueued)}); err != nil {
-		log.FromContext(ctx).Error(err, "Failed to find next queued AgentRun")
+		log.FromContext(ctx).Error(err, "Failed to list queued AgentRuns")
 		return nil
 	}
-	next := NextQueued(list.Items)
-	if next == nil {
-		return nil
+	return nonTerminalRequests(list.Items)
+}
+
+// mergeRequests joins request lists without duplicates.
+func mergeRequests(lists ...[]reconcile.Request) []reconcile.Request {
+	seen := make(map[types.NamespacedName]struct{})
+	var merged []reconcile.Request
+	for _, list := range lists {
+		for _, req := range list {
+			if _, ok := seen[req.NamespacedName]; !ok {
+				seen[req.NamespacedName] = struct{}{}
+				merged = append(merged, req)
+			}
+		}
 	}
-	return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: next.Name, Namespace: next.Namespace}}}
+	return merged
 }

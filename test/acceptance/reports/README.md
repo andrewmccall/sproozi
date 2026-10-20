@@ -12,10 +12,10 @@ tests the integration and access controls, not model reasoning or real billing.
 
 | Report | What was exercised | Model and scope |
 | --- | --- | --- |
-| [Infrastructure investigation](verified-sre-demo.md) | Codex investigated a failing workload and proposed a GitHub PR. | Real model and GitHub in isolated Kind; no merge or deployment. |
-| [Kubernetes and configured MCP](verified-mcp-demo.md) | Native Kubernetes reads, two HTTPS MCP fixture providers, scope and budget denials, cancellation and cleanup. | Real model in isolated Kind; the configured providers were fixtures. |
-| [Interactive session movement](verified-session-mobility.md) | Codex 0.161.0 and Claude Code 2.1.27 moved between Docker and Kubernetes with the same conversation and unfinished Git work. | Deterministic providers; the report distinguishes each client's failure-path coverage. |
-| [Remote work and local resume](verified-portable-workflows.md) | Remote Codex work, stock Hermes dispatch, pull and local resume with fresh permissions, Project filtering and exact Git revision replay. | Deterministic models, actual package checks and isolated Pod reads/Secrets denials; personal infrastructure was not accessed. |
+| [Infrastructure investigation](verified-sre-demo.md) | Codex investigated a failing workload and proposed a GitHub PR. | Real model and GitHub in isolated Kind; no merge or deployment. Recorded on 4 October 2026, before this repository's public history; the cited base commit isn't in it. The demo repository is private and the full reports aren't published. |
+| [Kubernetes and configured MCP](verified-mcp-demo.md) | Native Kubernetes reads, two HTTPS MCP fixture providers, scope and budget denials, cancellation and cleanup. | Real model in isolated Kind; the configured providers were fixtures. The full reports aren't published. |
+| [Interactive session movement](verified-session-mobility.md) | Codex 0.161.0 and Claude Code 2.1.27 moved between Docker and Kubernetes with the same conversation and unfinished Git work. | Deterministic providers; the report distinguishes each harness's failure-path coverage. Not repeated with the current pins, Codex 0.163.0 and Claude Code 2.1.302. |
+| [Run a task remotely, then resume it locally](verified-portable-workflows.md) | Remote Codex work, stock Hermes dispatch, pull and local resume with fresh permissions, Project filtering and exact Git revision replay. | Deterministic models, actual package checks and isolated Pod reads/Secrets denials; personal infrastructure was not accessed. |
 
 The [Project and revision evidence](execution-roadmap-evidence.json) records the
 native development and isolated home-ops scenarios described in the retained-work

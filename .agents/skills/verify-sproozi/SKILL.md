@@ -46,10 +46,19 @@ The skill never performs browser consent or retrieves credentials from other clu
 
 ## Doctor
 
-`doctor` reads host tool availability, Docker health and versions. With
-`--env-file`, it also checks credential presence and host gh authentication.
+`doctor` reads host tool availability, Docker health and versions, including
+the Go minimum from `go.mod`. With `--env-file`, it runs
+`hack/demo/check.sh --credentials` against that file, so it gives the same
+verdict as `make demo-check`: every line must be a plain `KEY=value`
+assignment (no commands, unquoted spaces or CRLF line endings), the credentials
+must be present, the GitHub App IDs positive integers, the private-key file
+readable and gh signed in.
 It does not run setup, inference or credential rotation. kubectl must support the
-guide's pinned Kubernetes 1.33.1 node image.
+guide's pinned Kubernetes 1.33.1 node image. It prints one `ok` line as each
+check passes (the Go line names the `go.mod` minimum), then a verdict or the
+first failure. `--json` prints one object instead: the checked versions with
+`"ok": true`, or `"ok": false` with `error` and the checks that `passed`, and
+exits 1 on failure.
 
 For a retained cluster, set `SPROOZI_QUICKSTART_EVIDENCE` to the exact directory
 printed by launch and check its identity and API:
@@ -100,7 +109,18 @@ python3 hack/verify/quickstart.py cleanup "$SPROOZI_QUICKSTART_EVIDENCE"
 ```
 
 Cleanup checks the recorded owner, removes only that cluster and scratch
-checkout, then records `clusterRemoved` and `scratchRemoved`. Confirm the evidence
+checkout, then records `clusterRemoved` and `scratchRemoved`. It refuses while
+the run that wrote `owner.json` is still running (matched by PID and process
+start time) and names that process; `--force` overrides this, and is also
+needed for runs whose `owner.json` predates the recorded PID, or when that PID
+is live but its start time is not recorded. When the owner died without
+stopping (for example `kill -9`), cleanup first stops the gate's process group
+recorded in `owner.json` (SIGTERM, then SIGKILL) and names it, so `make
+test-e2e` cannot recreate the cluster afterwards. It signals the group only
+while its leader's start time matches the record. A symlinked `checkout` is left
+alone and reported. A run blocked by
+`driver.lock` says whether the holder is still running and prints the cleanup
+command only when the holder has exited. Confirm the evidence
 files still exist afterwards. It leaves the GitHub PR, branch, host registry and
 operator-owned credential files for review. Close or delete GitHub artefacts only
 when that action is requested. An uncleanable cluster makes the verification fail.

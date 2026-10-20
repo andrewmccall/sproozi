@@ -1,34 +1,59 @@
 # Session commands and identities
 
-The public executable is `sproozi`. Build it from the repository root:
-
-```sh
-go build -o bin/sproozi ./cmd/sproozi
-```
+The public executable is `sproozi`. [Install the CLI](../guides/install.md)
+covers Homebrew, downloads and source builds. The examples run `sproozi` from
+your `PATH` with the default configuration and home address; see
+[Select the owner](#select-the-owner) for `--config` and `--socket`.
 
 These commands require administrator configuration, approved images and prepared
 execution environments. Building the CLI does not install a cluster or start an
 agent.
 
-A [session](../../GLOSSARY.md#session) tracks the native conversation across executions. Each
+A [session](../../GLOSSARY.md#session) tracks the harness conversation across executions. Each
 execution needs separate approval and has its own deadline and usage allowance.
-Each [visit](../../GLOSSARY.md#visit) to a placement gets a new allocation
-and backend resource identity. Knowing a session or conversation ID doesn't give
+Each [visit](../../GLOSSARY.md#visit) to a placement gets a new visit ID
+(`allocationId`) and backend resource identity. Knowing a session ID or harness conversation ID (`threadId`) doesn't give
 you permission to run it.
 
-Use [remote work and local resume](../guides/portable-workflows.md) for remote task setup,
-pull and local resume, or [native session mobility](../guides/session-mobility.md)
+Use [Run a task remotely, then resume it locally](../guides/portable-workflows.md)
+for remote task setup, pull and local resume, or
+[Move a live session between Docker and Kubernetes](../guides/session-mobility.md)
 for interactive moves within one bounded execution. The
 [home configuration reference](../../cmd/sproozi/README.md) describes private files,
 images, gateway credentials and profile services.
 
 ## Remote work and local resume
 
-`sproozi --help` lists commands. `sproozi --version` prints the product version,
-commit and build date. Neither command reads home configuration.
+`sproozi --help` lists commands and exits 0; `sproozi` with no command prints
+the same list to standard error and exits 2. `sproozi --version` prints the
+product version, commit and build date; a source build prints `dev` and the
+commit it was built from, or says to use the checkout you built from. Neither reads home configuration.
 `sproozi init [--directory PATH]` creates or validates a private directory for
-configuration and credentials. It does not overwrite files or start a service.
-The default is the platform user configuration directory's `sproozi` directory.
+configuration and credentials. When `config.json` is missing, it also writes a
+starter configuration that client commands accept and prints the next step
+for each use: add a remote executor under `remote` for remote work, or replace
+the placeholder model and add the Docker, local placement and gateway settings
+and run `sproozi serve` for local sessions, as the
+[home configuration reference](../../cmd/sproozi/README.md) shows. Each next
+step links its setup guide. It never overwrites an existing `config.json`; it
+checks one and exits non-zero if it is malformed, unsafe, a directory or a
+symbolic link, or has an invalid `remote`, `workSources` or `allowances` entry. It does not
+start a service. The default
+is the platform user configuration directory's `sproozi` directory.
+
+Home is the [home daemon](../../GLOSSARY.md#home-daemon): the `sproozi serve`
+process on your own machine. A command that finds no configuration reports the
+path it read and suggests `sproozi init`. For a missing `--config` file not
+named `config.json`, in a directory D, it suggests `create it, for example
+with "sproozi init --directory D", which writes D/config.json; then pass
+--config D/config.json`, or, when D already holds a `config.json`, `D already
+holds config.json; pass --config D/config.json, or run "sproozi init
+--directory DIR" with another directory and pass --config DIR/config.json`. A
+malformed file is reported with its
+path and the key to correct, and a file or directory with unsafe permissions with the `chmod` that
+fixes it. Printed commands quote paths that contain spaces. A command that needs
+home when it isn't running says so and suggests `sproozi serve`; a command that
+changes state names its session and operation UUIDs for the retry.
 
 Local commands use a private Unix socket on macOS and Linux, or a private named
 pipe on Windows. See [Windows setup](../guides/windows.md) for native platform
@@ -36,36 +61,46 @@ requirements and workspace limits.
 
 | Command | Purpose |
 | --- | --- |
-| `run` | Submit a Codex task to a configured remote executor. |
+| `run` | Submit a task to a configured remote executor. |
 | `sessions` | List accessible sessions, optionally filtered by executor or Project. |
 | `status` | Inspect one session by its stable session UUID. |
 | `pull` | Claim a stopped remote session and import its conversation and Git workspace. This does not start an agent. |
-| `resume` | Start a new local execution of retained work with fresh permissions. It attaches the terminal unless `--detach` is selected. |
+| `resume` | Start a new local execution of a stopped session with fresh permissions. It attaches the terminal unless `--detach` is selected. |
 | `stop` | Stop local work and retain its supported state for later resume. |
-| `cancel` | Cancel an execution, including unfinished work that cannot stop gracefully. |
+| `cancel` | Revoke and force-stop a session's current execution, including unfinished work that cannot stop gracefully. |
 | `recover` | Continue a journaled operation after an uncertain response or interruption. |
 
-The harness also has a native conversation UUID. It is separate from Sproozi's
+The harness conversation has its own UUID. It is separate from Sproozi's
 session and execution IDs. See [core concepts](../explanations/core-concepts.md)
 and [Projects and workspace revisions](projects-and-revisions.md) for the basic
 model and exact-commit launches.
 
 ## Interactive sessions and movement
 
-`serve --config FILE` starts the home daemon. `start` seeds a managed Docker
+`serve` starts the home daemon. It first names, by JSON key, every setting
+that is missing or invalid, and exits if there are any. It then checks Docker
+once and exits if Docker, the native image or the gateway listener and
+certificate are unusable; see
+[If `serve` doesn't start](../guides/session-mobility.md#if-serve-doesnt-start).
+Once its control
+socket and gateway are listening, it prints `Started home daemon: control
+socket PATH, gateway HOST:PORT` to standard error, and on a clean shutdown,
+after Ctrl-C or `SIGTERM`, `Stopped home daemon`. `start` seeds a managed Docker
 workspace from a stopped Git repository, `attach` connects its native terminal,
-and `move` transfers the supported state to a configured destination. These
+and `move` transfers the supported state to a configured placement. These
 client commands accept the configuration and socket selectors described below.
 
 Detaching the terminal does not stop the daemon or agent. Running a container on
 your laptop still requires the laptop and Docker engine to remain available.
-Follow [session mobility](../guides/session-mobility.md) for the complete setup,
-commands, supported clients and movement limits.
+Follow
+[Move a live session between Docker and Kubernetes](../guides/session-mobility.md)
+for the complete setup, commands, supported clients and movement limits.
 
 ## Command flags
 
 Each command accepts only the flags listed here. `sproozi -h` lists the
-commands, and `sproozi COMMAND -h` prints one command's usage and flags. Any
+commands, and `sproozi COMMAND -h` prints one command's usage and flags,
+spelled with two dashes as `--name`. Any
 other flag is rejected before configuration is read or a request is sent.
 
 | Command | Flags |
@@ -87,13 +122,13 @@ other flag is rejected before configuration is read or a request is sent.
 
 | Flag | Meaning |
 | --- | --- |
-| `--directory PATH` | Private configuration directory; defaults to the platform user configuration directory plus `sproozi`. |
-| `--config FILE` | Private global configuration. `serve` requires it; other commands default to the platform path described below. |
-| `--socket PATH` | Private home socket, overriding the configured home. |
-| `--executor NAME` | Owner to address; `docker` selects home. See [Select the owner](#select-the-owner). |
-| `--id UUID` | Stable session UUID. Commands that take a session also accept it as the first argument. |
-| `--operation UUID` | Stable operation UUID. Reuse it when retrying a mutation. |
-| `--from NAME` | Configured remote source for `pull`. |
+| `--directory PATH` | Private configuration directory; defaults to the platform user configuration directory plus `sproozi`. A path that names a file fails with `init --directory FILE is a file, not a directory; name the directory to hold config.json`. |
+| `--config FILE` | Private global configuration; defaults to the platform path described below. An empty value fails with `--config needs a path`. |
+| `--socket PATH` | Private home socket, overriding the configured home. On macOS and Linux a path too long to bind fails with `…; use a shorter --socket path` (see [read status and discovery](#read-status-and-discovery)), and a path that names a directory or regular file fails with `--socket PATH is a directory, not a socket; name home's control.sock` (or `is a regular file`). |
+| `--executor NAME` | [Owner](../../GLOSSARY.md#owner) to address: `docker` (home's executor name), or a name under `remote` or `workSources`. `run` accepts only a remote executor. See [Select the owner](#select-the-owner). |
+| `--id UUID` | Stable session UUID. Commands that take a session also accept it as a positional argument, before or after the flags. |
+| `--operation UUID` | Stable operation UUID. Reuse it when retrying a mutation. It must be a non-zero UUID in lowercase 8-4-4-4-12 hexadecimal form; any other value fails with, for example, `--operation "1" is not a canonical UUID: use a non-zero UUID in lowercase 8-4-4-4-12 hexadecimal form, such as 3f2b8c1e-7d4a-4e5b-9c6d-0a1b2c3d4e5f`. Session UUIDs follow the same rule. |
+| `--from NAME` | Remote executor to pull from, configured under `remote` or `workSources`. Without it, `pull` fails with `pull requires --from NAME naming the remote executor to pull from, configured under "remote" or "workSources" in <config>`; an unknown name fails with `pull --from "X" names no remote executor configured under …`. |
 | `--harness NAME` | Approved native harness for `run`; defaults to `local.harness`. |
 | `--repository NAME` | Approved repository for `run`. |
 | `--project ID` | Approved Project for `run`, or a filter for `sessions`. |
@@ -102,30 +137,45 @@ other flag is rejected before configuration is read or a request is sent.
 | `--detach` | Return after `resume` without attaching the terminal. |
 | `--workspace PATH` | Stopped ordinary Git directory that seeds `start`. |
 | `--include-ignored PATH` | Ignored file `start` carries on every visit. Repeat it for each file. |
-| `--to NAME` | Configured destination for `move`. |
+| `--to NAME` | Configured placement for `move`: `local.name` or a name under `remote`. `sproozi move --help` describes it as ``placement `NAME`: the value of local.name (for example local) or a name under "remote"``. Any other name fails before a request; see [move destinations](#move-destinations). |
 
 ## Select the owner
 
-Every client command except `run` accepts `--config FILE` and a home
-`--socket PATH` override. Configuration defaults to the platform user configuration directory at
+[Why the commands use different flags](../guides/session-mobility.md#why-the-commands-use-different-flags)
+explains `--executor`, `--from` and `--to`.
+
+`run`, `serve` and every session command accept `--config FILE`. The session
+commands also accept a home `--socket PATH` override; `run` and `serve` don't. Configuration defaults to the platform user configuration directory at
 `sproozi/config.json`. A socket-only local invocation skips that default file;
 for example, `sessions --socket PATH` queries only home. Supply
 `--config FILE --socket PATH` to combine configured remote sources with a socket
-override. An explicit config is always read. `serve` requires `--config FILE`.
+override. An explicit config is always read.
 
 | Command | Owner selection |
 | --- | --- |
-| `run` | Requires an explicitly configured remote `--executor NAME`. |
-| `sessions` | Without `--executor`, queries home and configured remote catalogues. `--executor docker` selects home; another configured name selects that remote. |
-| `status`, `recover`, `cancel` | `--executor NAME` addresses that remote owner. `--executor docker` or an omitted executor addresses home. |
+| `run` | Requires `--executor NAME` naming an executor under `remote` or `workSources` in the configuration. `docker` and `home` are rejected, for example `run does not accept --executor docker: docker is home's executor name, and run submits only to …`: to work at home, use `start`. |
+| `sessions` | Without `--executor`, queries home and configured remote catalogues. `--executor docker`, home's executor name, selects home; another configured name selects that remote. |
+| `status`, `recover`, `cancel` | `--executor NAME` addresses that profile service. `--executor docker` or an omitted executor addresses home. |
 | `start`, `attach`, `move`, `resume`, `stop` | Require the home owner. Use `--executor docker` or omit it; a remote executor is rejected. `move --to NAME` selects a placement controlled by home. |
-| `pull` | Transfers into home from `--from NAME`. A remote `--executor NAME` can name the same source; conflicting names are rejected. |
+| `pull` | Transfers into home from `--from NAME`, a remote executor. A remote `--executor NAME` can name the same source; conflicting names are rejected. |
 
-An explicit remote selection never falls back home. Unsupported flags and
+An explicit remote selection never falls back home. An executor that isn't
+configured fails before a request. Three names refer to your machine: `docker`
+is home's executor name, `home` is the home daemon, and `local.name` is home's
+local placement for `move --to`. Only `docker` addresses home as an executor.
+`--executor home` fails with `executor "home" names the home daemon, not an
+executor; use --executor docker (home's executor name) or omit --executor`,
+and `--executor local` with `executor "local" is local.name, home's local
+placement for "move --to", not an executor; …`. A configuration entry named
+`docker` or `home` fails with `"docker" is reserved: docker is home's executor
+name, home names the home daemon, and local.name names home's local placement
+for "move --to"`. Unsupported flags and
 operation/owner combinations fail before a request. Commands requiring a session
-accept either the first positional UUID or `--id UUID`, never both. UUIDs must
+accept either the first positional UUID or `--id UUID`, never both. A second
+positional UUID fails with, for example, `status: unexpected argument "UUID";
+usage: sproozi status SESSION_UUID`. UUIDs must
 use canonical lowercase spelling. `sessions` takes no session UUID. `start` can
-create one when omitted; `run` returns the remote owner's stable session ID.
+create one when omitted; `run` returns the profile service's stable session ID.
 
 Use `--project ID` to filter discovery to an approved Project, including with
 `--executor docker`. Catalogue rows retain the configured Project association and
@@ -136,13 +186,12 @@ authority. [Projects and workspace revisions](projects-and-revisions.md) describ
 Use explicit selectors when switching between owners:
 
 ```sh
-sproozi sessions --config /private/sproozi/config.json
-sproozi status SESSION_UUID --executor engineering --config /private/sproozi/config.json
-sproozi recover SESSION_UUID --executor engineering --config /private/sproozi/config.json
-sproozi status SESSION_UUID --executor docker --config /private/sproozi/config.json
-sproozi resume SESSION_UUID --executor docker --config /private/sproozi/config.json
-sproozi stop SESSION_UUID --executor docker --config /private/sproozi/config.json \
-  --operation ORIGINAL_STOP_UUID
+sproozi sessions
+sproozi status SESSION_UUID --executor engineering
+sproozi recover SESSION_UUID --executor engineering
+sproozi status SESSION_UUID --executor docker
+sproozi resume SESSION_UUID --executor docker
+sproozi stop SESSION_UUID --executor docker --operation ORIGINAL_STOP_UUID
 ```
 
 When you retry a command that changes state, reuse its operation UUID and
@@ -154,19 +203,78 @@ accept a new operation UUID. `stop` waits for supported foreground work and save
 `cancel` revokes before forced stop. An old operation remains bound to its original
 execution and cannot affect a later resume.
 
+### Recovery messages
+
+When an earlier operation or the session's state blocks a command, home
+refuses it and names the command that unblocks it. Nothing was recorded, so
+the reply has no retry hint. `ID` is the session UUID and `OP` an operation
+UUID.
+
+| Reply | Cause | Run |
+| --- | --- | --- |
+| `session: previous KIND requires recovery; run "sproozi recover ID" to finish it, or "sproozi cancel ID" to revoke and force-stop its current execution`, where `KIND` is `start`, `resume`, `move` or `stop` | A `move` or `stop` while that earlier operation on this execution is unfinished. | `sproozi recover ID` to finish it, or `sproozi cancel ID` to give it up and force-stop the session's current execution. |
+| `session: cancellation unfinished; run "sproozi recover ID" to finish the cancellation` | A `move` or `stop` while a cancellation hasn't yet proved the agent stopped and its usage finalized. | `sproozi recover ID`. |
+| `session ID is cancelled; start a new session` | A `move` or `stop` of a session whose cancellation finished. Nothing can continue it. | `sproozi start` for new work. |
+| `home: previous execution must stop and commit before resume; run "sproozi stop ID" first` | `resume` while the current execution is still running. | `sproozi stop ID`, then `resume` again. |
+| `home: start intent conflicts with retained launch; ID was started with operation OP: to continue it, repeat the original start command with --operation OP, or run "sproozi cancel ID" to revoke and force-stop its current execution` | A `start --id ID` with a different operation or different `--include-ignored` flags from the original start. | The original `start` command with `--operation OP`, or `sproozi cancel ID`. |
+| `home: start intent conflicts with retained launch; ID was not created by start, see "sproozi status ID"` | A `start --id ID` for a session home didn't create with `start`, such as one it pulled. | `sproozi status ID`, then the command its phase calls for. |
+| `home: session ID has no running native process to attach to; run "sproozi status ID" to see its phase: "sproozi recover ID" finishes an unfinished start or move, and "sproozi resume ID" continues a stopped session` | `attach` when no harness process is running. | `sproozi status ID`, then `recover` or `resume` as it says. |
+
+Any other `attach` failure gives its reason followed by `; run "sproozi status
+ID" to see the session's phase`.
+
+When a Docker command that home runs fails, the error includes Docker's
+standard error, cut to its first 4096 bytes and then marked
+` [output truncated]`.
+
+### Move destinations
+
+`move --to` takes a placement, not an executor, so the two names that address
+home as an executor or daemon are rejected with the name to use instead:
+
+- `move --to docker: "docker" is home's executor name; use --to local (local.name) to move to this machine`
+- `move --to home: "home" names the home daemon; use --to local (local.name) to move to this machine`
+
+Any other name that is neither `local.name` nor a key of `remote` fails with
+the configured choices and the file to add it to, for example `move --to "X"
+is not a configured placement; use one of: local (local.name), r (remote.r),
+or add it under "remote" in FILE`. A `workSources` entry is not a placement.
+The messages use your `local.name`, shown here as `local`.
+When the command runs without a configuration, for example with only
+`--socket`, the home daemon checks the name instead and replies `home: move
+destination "X" is not a configured placement; use one of: local, r`. None of
+these rejections ends with the retry hint, because nothing was recorded:
+correct the name and run `move` again; there is no operation to reuse.
+
 ## Read status and discovery
 
 | Public field | Meaning |
 | --- | --- |
 | `id` | Durable session UUID and operand for subsequent session commands. |
 | `executionId` | Current or last retained bounded execution UUID. Initially it can equal `id`; a later resume gets another execution. |
-| `allocationId` | Current or last retained visit allocation, distinct from the execution envelope. |
+| `allocationId` | Current or last retained visit, distinct from the execution. |
 | `incarnation` | Backend `executionId` and immutable `resourceUid` for the exact physical writer. The nested backend ID is distinct from the top-level bounded execution ID. These opaque fields do not establish stopped state by themselves. |
-| `threadId` | Retained native conversation UUID for the selected harness. It is not a session command operand or gateway credential. |
+| `threadId` | Harness conversation ID for the selected harness. It is not a session command operand or gateway credential. |
 | `harness`, `phase`, `deadline` | Selected native client, observed lifecycle and current execution's absolute deadline. |
-| `ownership` | `home` for claimed/local ownership, `source` while an imported claim is unacknowledged, or `executor` for remote ownership in discovery. |
-| `executor` | In catalogue rows, the owner catalogue queried. |
-| `placement` | Current or last retained execution destination. It can differ from the queried owner. |
+| `ownership` | Which owner holds the session, judged from the row's catalogue; see [ownership values](#ownership-values). |
+| `executor` | In catalogue rows, the owner catalogue queried: `docker` for the home daemon, or a remote executor name. |
+| `placement` | Current or last retained execution destination. It can differ from the queried owner. A row for a local visit shows the `local.name` value, such as `local`, next to `"executor": "docker"`; a remote visit shows its `remote` name. |
+
+### Ownership values
+
+`ownership` says who owns the session, while `executor` says which catalogue
+the row came from. The two can differ: after a pull, the session appears in
+both catalogues.
+
+| `executor` | `ownership` | Meaning |
+| --- | --- | --- |
+| `docker` | `home` | The home daemon owns the session: you started it locally, or a pull from a profile service completed. Commands go to the home daemon. |
+| `docker` | `source` | A pull is under way and the profile service hasn't yet acknowledged the handover. Run the same `pull` command again to finish it. |
+| a remote executor, such as `engineering` | `executor` | That profile service owns the session. Address it with `--executor engineering`, or pull it. |
+| a remote executor, such as `engineering` | `home` | A mirror row: the profile service handed the session to a home daemon and keeps only a read-only record, in phase `home-owned`. Use the `docker` row for that session instead. |
+
+The value `executor` means "owned by the profile service this row came from";
+the JSON value keeps that name so scripts that read it keep working.
 
 Home status also includes the nested `session` execution journal for detailed
 inspection, and `initialStage`, which repeats `phase` for older clients. That
@@ -183,17 +291,45 @@ session ID. Check each executor's availability independently:
 {
   "sessions": [],
   "executors": [
-    {"executor": "docker", "availability": "unavailable", "error": "unavailable"},
+    {"executor": "docker", "availability": "unavailable", "error": "home_not_running"},
     {"executor": "engineering", "availability": "available"}
   ],
   "truncated": false
 }
 ```
 
-Here engineering returned an empty catalogue, and home could not be queried.
+Here engineering returned an empty catalogue, and home could not be queried
+because no home daemon is running. An unavailable executor's `error` is
+`home_not_running` when nothing listens on home's socket, otherwise one of the
+work outcome codes below, such as `unavailable` or `denied`.
 An unavailable source doesn't mean its catalogue is empty or that nothing is
-running there. Rows from sources that answered are still returned. Discovery can exit successfully
-with unavailable sources, so inspect the JSON as well as the command exit status.
+running there. Rows from sources that answered are still returned, and the
+command exits successfully; when home is not running it also says so on
+standard error. When no source answers, `sessions` still writes the JSON, then
+exits non-zero; standard error says the results show that no executor
+answered and gives each source's problem, for example that home is not
+running. When some sources answer, standard error names each remote executor
+that did not and its cause. When home is running but can't answer, it says
+`Home is unavailable, so its sessions are not listed: CAUSE`. A `directory`
+whose `control.sock` path is longer than the platform allows gives the cause
+`home: control socket path "..." is N bytes; this platform allows at most M;
+set a shorter "directory" in config.json`, and every command addressed to home
+fails with the same message. A `--socket PATH` that is too long fails before
+any request with `control socket path "..." is N bytes; this platform allows
+at most M; use a shorter --socket path`. Inspect the JSON as well as the exit status.
+A command addressed to home while it isn't running fails with
+`docker (home): no home daemon is listening on the private control socket`,
+followed by `: PATH does not exist` when the socket file is missing, then
+`; start home with "sproozi serve", see ...`. When the command named a
+configuration other than the default with `--config`, the hint echoes it, as
+in `start home with "sproozi serve --config '/Users/me/home config.json'"`. The
+path is quoted only when it holds characters the shell would treat specially.
+A session UUID that home doesn't
+hold fails with `docker (home): no session UUID; run "sproozi sessions" to list
+sessions`. `resume` continues only sessions imported with `pull`; for a session
+created with `start`, it fails with `home: session UUID was started at home
+with "sproozi start"; resume continues only sessions imported with "sproozi
+pull"`.
 `truncated: true` means a source or row limit omitted results. A remote
 `home-owned` mirror and its local
 import remain separate rows labelled by catalogue; matching session IDs do not
@@ -203,7 +339,7 @@ merge their provenance.
 
 The remote work HTTP interface returns one of the fixed JSON error codes below.
 MCP tool failures carry the same code with fixed guidance, and so does the
-`problem` field of a retained work status. The CLI shows the recognized code and
+`problem` field of a remote work status. The CLI shows the recognized code and
 HTTP status. It never shows upstream error bodies or private transport details.
 
 If status says `unavailable`, Sproozi can't yet confirm that the agent stopped

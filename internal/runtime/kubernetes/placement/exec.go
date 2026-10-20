@@ -37,19 +37,32 @@ func (e *executor) Execute(ctx context.Context, namespace, pod, container string
 	return x.StreamWithContext(ctx, remotecommand.StreamOptions{Stdin: input, Stdout: output, Stderr: errout})
 }
 
+// boundedOutput keeps at most max bytes of a command's output. It does not
+// embed bytes.Buffer: io.Copy would then use Buffer.ReadFrom and bypass Write.
+// Output past the bound fails, unless truncate keeps the first max bytes and
+// discards the rest.
 type boundedOutput struct {
-	bytes.Buffer
-	max int64
+	buffer   bytes.Buffer
+	max      int64
+	truncate bool
 }
 
 func (b *boundedOutput) Write(data []byte) (int, error) {
-	if int64(b.Len())+int64(len(data)) > b.max {
+	room := b.max - int64(b.buffer.Len())
+	if int64(len(data)) <= room {
+		return b.buffer.Write(data)
+	}
+	if !b.truncate {
 		return 0, errors.New("placement: command output exceeds bound")
 	}
-	return b.Buffer.Write(data)
+	_, _ = b.buffer.Write(data[:max(room, 0)])
+	return len(data), nil
 }
+
+func (b *boundedOutput) Bytes() []byte { return b.buffer.Bytes() }
+
 func (p *Placement) control(ctx context.Context, pod *corev1.Pod, container string, args []string, input []byte, max int64) ([]byte, error) {
-	output, errout := &boundedOutput{max: max}, &boundedOutput{max: 16 << 10}
+	output, errout := &boundedOutput{max: max}, &boundedOutput{max: 16 << 10, truncate: true}
 	var reader io.Reader
 	if input != nil {
 		reader = bytes.NewReader(input)

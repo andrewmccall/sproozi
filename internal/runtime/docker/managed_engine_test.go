@@ -1,6 +1,10 @@
 package docker
 
-import "testing"
+import (
+	"io"
+	"strings"
+	"testing"
+)
 
 const fixtureBridge = "bridge"
 
@@ -35,5 +39,25 @@ func TestManagedAnchorCapabilitySpellings(t *testing.T) {
 				t.Fatalf("managed launch accepted=%v, want %v", got, test.want)
 			}
 		})
+	}
+}
+
+// io.Copy from a reader without WriteTo, as exec does for a pipe, must not
+// bypass the limit through a ReadFrom method.
+func TestBoundedOutputEnforcesItsLimitThroughCopy(t *testing.T) {
+	large := strings.Repeat("x", 200000)
+	out := &boundedOutput{limit: 1024}
+	if _, err := io.Copy(out, struct{ io.Reader }{strings.NewReader(large)}); err == nil {
+		t.Fatal("output over the limit was accepted")
+	}
+	if len(out.Bytes()) > 1024 {
+		t.Fatalf("kept %d bytes over a 1024-byte limit", len(out.Bytes()))
+	}
+	errout := &boundedOutput{limit: 1024, truncate: true}
+	if _, err := io.Copy(errout, struct{ io.Reader }{strings.NewReader(large)}); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := errout.String(), large[:1024]+" [output truncated]"; got != want {
+		t.Fatalf("truncated output has %d bytes, want %d", len(got), len(want))
 	}
 }

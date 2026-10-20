@@ -3,7 +3,7 @@
 This guide describes a planned Sproozi installation in
 [`andrewmccall/home-ops`](https://github.com/andrewmccall/home-ops). It uses
 that repository's Flux layout. For a working first installation, start with
-[Install on Kubernetes](install-kubernetes.md).
+[Install on Kubernetes and run your first Pod](install-kubernetes.md).
 
 This is a planned integration. The recorded manual Kind runs did not exercise
 Alertmanager delivery, a home-ops PR or Flux recovery.
@@ -69,16 +69,16 @@ A practical starter set is:
 
 - `Secret/model-gateway-credentials` in `sproozi-system`
 - `Secret/capability-proxy-github-app` in `sproozi-system`
-- `ConfigMap/egress-gateway-profiles` in `sproozi-system`
+- `ConfigMap/sproozi-egress-gateway-profiles` in `sproozi-system`
 - `Secret/sproozi-gateway-tls` with managed inspection TLS in `sproozi-system`
 - immutable `ConfigMap/sproozi-sandbox-trust` in `sproozi-agents`, referenced by the runtime's client trust configuration
 - the model pricing and authentication configuration described in [required secrets and config](../reference/required-secrets-and-config.md)
 - one random per-template HMAC Secret with key `hmac-key`, at least 32 bytes, in `sproozi-webhooks`
 
 Keep static credentials in SOPS-managed manifests in `cluster/apps/sproozi/`.
-For ChatGPT authentication, the gateway owns the rotating live session Secret;
+For ChatGPT authentication, the gateway owns the Secret holding the rotating ChatGPT credential;
 do not reconcile it from a stale bootstrap file. See
-[model provider authentication](model-provider-auth.md).
+[Model provider authentication](model-provider-auth.md).
 
 ## 4. Add the SRE demo stack
 

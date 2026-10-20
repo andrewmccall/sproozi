@@ -7,8 +7,10 @@ import (
 	"math"
 	"sync"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -309,5 +311,209 @@ func TestInitializedAllocationCannotRecreateDeletedUsage(t *testing.T) {
 	}
 	if _, err = ledger.Seal(ctx, "expected"); err == nil {
 		t.Fatal("deleted allocation returned a zero receipt")
+	}
+}
+
+// slowClient adds API latency so concurrent read-modify-write cycles overlap.
+type slowClient struct{ client.Client }
+
+func (c slowClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	time.Sleep(2 * time.Millisecond)
+	return c.Client.Get(ctx, key, obj, opts...)
+}
+
+func (c slowClient) Update(ctx context.Context, obj client.Object, opts ...client.UpdateOption) error {
+	time.Sleep(2 * time.Millisecond)
+	return c.Client.Update(ctx, obj, opts...)
+}
+
+// Many calls settling one account at once conflict on the ConfigMap; every
+// settlement still lands, with exact totals.
+func TestConcurrentSettlementsAllSucceed(t *testing.T) {
+	ctx := context.Background()
+	ledger := budgetkubernetes.NewLedger(slowClient{ledgerClient(t)}, "ledger")
+	const calls = 16
+	reservations := make([]*budget.LedgerReservation, calls)
+	for i := range reservations {
+		r, err := ledger.Reserve(ctx, "account", budget.UsageReservation{MaxUnits: 10_000, Units: 100})
+		if err != nil {
+			t.Fatal(err)
+		}
+		reservations[i] = r
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, calls)
+	for _, r := range reservations {
+		wg.Go(func() {
+			settleCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			defer cancel()
+			errs <- ledger.Settle(settleCtx, r, budget.TrustedUsage{Units: 57})
+		})
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent settlement failed: %v", err)
+		}
+	}
+	if state := observedLedgerState(t, ledger, ctx, "account"); state.UnitsUsed != calls*57 || state.ReservedUnits != 0 {
+		t.Fatalf("state=%+v", state)
+	}
+}
+
+// The periodic sweep recovers an idle account's expired lease without any
+// further reservation or seal of that account.
+func TestSweepRecoversIdleAccounts(t *testing.T) {
+	ctx := context.Background()
+	c := ledgerClient(t)
+	ledger := budgetkubernetes.NewLedger(c, "ledger")
+	if _, err := ledger.Reserve(ctx, "idle", budget.UsageReservation{MaxUnits: 1000,
+		Recovery: &budget.Recovery{ExpiresAt: time.Now().Add(-time.Second), Units: 250}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ledger.Reserve(ctx, "live", budget.UsageReservation{MaxUnits: 1000, Units: 10,
+		Recovery: &budget.Recovery{ExpiresAt: time.Now().Add(time.Hour), Units: 10}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := budgetkubernetes.Sweep(ctx, c, "ledger", time.Now(), false); err != nil {
+		t.Fatal(err)
+	}
+	if state := observedLedgerState(t, ledger, ctx, "idle"); state.UnitsUsed != 250 || state.ReservedUnits != 0 {
+		t.Fatalf("idle account state=%+v", state)
+	}
+	if state := observedLedgerState(t, ledger, ctx, "live"); state.UnitsUsed != 0 || state.ReservedUnits != 10 {
+		t.Fatalf("live account state=%+v", state)
+	}
+}
+
+// A reservation left by a gateway from before leases has none. The periodic
+// sweep leaves it, but the startup sweep, run by the only reserving process
+// before it serves, charges it in full, keeps leased reservations and lets
+// the account seal again.
+func TestStartupSweepSettlesLegacyReservationsInFull(t *testing.T) {
+	ctx := context.Background()
+	c := ledgerClient(t)
+	ledger := budgetkubernetes.NewLedger(c, "ledger")
+	if err := ledger.Initialize(ctx, "legacy"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ledger.Reserve(ctx, "legacy", budget.UsageReservation{MaxUnits: 100}); err != nil {
+		t.Fatal(err)
+	}
+	if err := budgetkubernetes.Sweep(ctx, c, "ledger", time.Now(), false); err != nil {
+		t.Fatal(err)
+	}
+	if state := observedLedgerState(t, ledger, ctx, "legacy"); state.ReservedUnits != 100 {
+		t.Fatalf("periodic sweep settled a legacy reservation: %+v", state)
+	}
+	if err := budgetkubernetes.Sweep(ctx, c, "ledger", time.Now(), true); err != nil {
+		t.Fatal(err)
+	}
+	if state := observedLedgerState(t, ledger, ctx, "legacy"); state.UnitsUsed != 100 || state.ReservedUnits != 0 {
+		t.Fatalf("startup sweep state=%+v", state)
+	}
+	if receipt, err := ledger.Seal(ctx, "legacy"); err != nil || receipt.Units != 100 {
+		t.Fatalf("seal=%+v err=%v", receipt, err)
+	}
+}
+
+// deletingClient deletes the budget ConfigMap right after the read named by
+// afterGet (1 for the first Get), or after the first List.
+type deletingClient struct {
+	client.Client
+	afterGet  int
+	afterList bool
+	gets      int
+}
+
+func (c *deletingClient) deleteLedgers(ctx context.Context) {
+	var list corev1.ConfigMapList
+	_ = c.Client.List(ctx, &list)
+	for i := range list.Items {
+		_ = c.Delete(ctx, &list.Items[i])
+	}
+}
+
+func (c *deletingClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	err := c.Client.Get(ctx, key, obj, opts...)
+	c.gets++
+	if c.gets == c.afterGet {
+		c.deleteLedgers(ctx)
+	}
+	return err
+}
+
+func (c *deletingClient) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	err := c.Client.List(ctx, list, opts...)
+	if c.afterList {
+		c.afterList = false
+		c.deleteLedgers(ctx)
+	}
+	return err
+}
+
+// expiredAccount initializes account with one expired lease.
+func expiredAccount(t *testing.T, c client.Client) {
+	t.Helper()
+	ledger := budgetkubernetes.NewLedger(c, "ledger")
+	if err := ledger.Initialize(context.Background(), "account"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ledger.Reserve(context.Background(), "account", budget.UsageReservation{MaxUnits: 100, RequireExisting: true,
+		Recovery: &budget.Recovery{ExpiresAt: time.Now().Add(-time.Second), Units: 10}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A ledger deleted while a sweep or a recovery is under way stays deleted:
+// neither recreates it as an empty record that later calls could spend.
+func TestRecoveryNeverRecreatesADeletedAccount(t *testing.T) {
+	ctx := context.Background()
+	t.Run("sweep", func(t *testing.T) {
+		base := ledgerClient(t)
+		expiredAccount(t, base)
+		c := &deletingClient{Client: base, afterList: true}
+		if err := budgetkubernetes.Sweep(ctx, c, "ledger", time.Now(), true); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := budgetkubernetes.NewLedger(base, "ledger").State(ctx, "account"); !errors.Is(err, budget.ErrAccountNotFound) {
+			t.Fatalf("deleted ledger was recreated: %v", err)
+		}
+	})
+	t.Run("recover before reserve", func(t *testing.T) {
+		base := ledgerClient(t)
+		expiredAccount(t, base)
+		c := &deletingClient{Client: base, afterGet: 1}
+		_, err := budgetkubernetes.NewLedger(c, "ledger").Reserve(ctx, "account",
+			budget.UsageReservation{MaxUnits: 100, Units: 1, RequireExisting: true})
+		if err == nil {
+			t.Fatal("a reservation succeeded against a deleted, recreated account")
+		}
+		if _, err := budgetkubernetes.NewLedger(base, "ledger").State(ctx, "account"); !errors.Is(err, budget.ErrAccountNotFound) {
+			t.Fatalf("deleted ledger was recreated: %v", err)
+		}
+	})
+}
+
+// A corrupt ledger is skipped, not a failure: the legacy pass still settles
+// the good ledger and succeeds, so it is not retried for ever.
+func TestCorruptLedgerDoesNotFailTheSweep(t *testing.T) {
+	ctx := context.Background()
+	c := ledgerClient(t)
+	ledger := budgetkubernetes.NewLedger(c, "ledger")
+	if _, err := ledger.Reserve(ctx, "legacy", budget.UsageReservation{MaxUnits: 100}); err != nil {
+		t.Fatal(err)
+	}
+	corrupt := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "sproozi-budget-corrupt", Namespace: "ledger",
+		Labels: map[string]string{"app.kubernetes.io/component": "budget-ledger"}}, Data: map[string]string{"state": "{"}}
+	if err := c.Create(ctx, corrupt); err != nil {
+		t.Fatal(err)
+	}
+	if err := budgetkubernetes.Sweep(ctx, c, "ledger", time.Now(), true); err != nil {
+		t.Fatalf("a corrupt ledger failed the sweep: %v", err)
+	}
+	if state := observedLedgerState(t, ledger, ctx, "legacy"); state.UnitsUsed != 100 || state.ReservedUnits != 0 {
+		t.Fatalf("legacy ledger state=%+v", state)
 	}
 }

@@ -81,6 +81,13 @@ type AgentRunStatus struct {
 	// +optional
 	Identity AgentRunIdentity `json:"identity,omitempty"`
 
+	// PolicyName is the AgentPolicy the run was admitted under, recorded in
+	// the same status update that admits it. Active runs count against this
+	// policy's maxActiveRuns. If the run's template is re-pointed to another
+	// policy while the run is active, the run fails with reason PolicyChanged.
+	// +optional
+	PolicyName string `json:"policyName,omitempty"`
+
 	// StartedAt records when the run was admitted to execution.
 	// +optional
 	StartedAt *metav1.Time `json:"startedAt,omitempty"`
@@ -138,6 +145,10 @@ type AgentRunIdentity struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Template",type=string,JSONPath=`.spec.templateRef.name`
+// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
+// +kubebuilder:printcolumn:name="Reason",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].reason`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // AgentRun is the Schema for the agentruns API
 type AgentRun struct {

@@ -128,39 +128,47 @@ func TestAnthropicHandlerReplacesCredentialsAndSettlesTotalBeyondOutputBound(t *
 	}
 }
 
-func TestAnthropicFailureConsumesBothCapsAndMixedProviderBudget(t *testing.T) {
+// A Messages response without usage has reached the workload, so it is
+// charged the estimate in both capped dimensions. Both providers then share
+// the one model.inference account.
+func TestAnthropicResponseWithoutUsageChargesEstimateToSharedBudget(t *testing.T) {
 	identity := testExecutionGrant()
 	identity.Policy.Spec.Budgets[api.CapabilityModelInference] = api.EndpointBudget{MaxUnits: 100, MaxCostMicros: 200}
 	var calls atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
+		if r.URL.Path == testResponsesPath {
+			_, _ = io.WriteString(w, `{"status":"completed","usage":{"total_tokens":3,"input_tokens":2,"output_tokens":1}}`)
+			return
+		}
 		_, _ = io.WriteString(w, `{"type":"message","content":[{"type":"text","text":"partial output"}]}`)
 	}))
 	defer upstream.Close()
 	tracker := budget.NewTracker()
-	config := model.HandlerConfig{Pricing: &model.PricingTable{Models: map[string]model.ModelPrice{"claude-fixture": {InputMicrosPerMillionTokens: 1, CachedInputMicrosPerMillionTokens: 1, OutputMicrosPerMillionTokens: 1}}}, ProviderAuth: modelauth.AnthropicAPIKey{Key: testAnthropicSecret}, UpstreamURL: upstream.URL, HTTPClient: upstream.Client(), AuditLogger: audit.NewLogger(io.Discard)}
+	config := model.HandlerConfig{Pricing: &model.PricingTable{Models: map[string]model.ModelPrice{"claude-fixture": {InputMicrosPerMillionTokens: 1, CachedInputMicrosPerMillionTokens: 1, OutputMicrosPerMillionTokens: 1}}}, ProviderAuth: modelauth.AnthropicAPIKey{Key: testAnthropicSecret}, UpstreamURL: upstream.URL, HTTPClient: upstream.Client(), AuditLogger: audit.NewLogger(io.Discard), Now: fixedClock()}
 	h := model.NewAnthropicHandler(config)
 	openAI := &model.Handler{Config: config}
 	routes := gateway.Dispatcher{
 		model.AnthropicAuthority: {Capability: "model.inference", Handler: h, Budgets: tracker},
 		"api.openai.com:443":     {Capability: "model.inference", Handler: openAI, Budgets: tracker},
 	}
-	for i, address := range []string{"https://api.anthropic.com/v1/messages", "https://api.openai.com/v1/responses"} {
-		req := httptest.NewRequest(http.MethodPost, address, strings.NewReader(`{"model":"claude-fixture","max_tokens":2,"messages":[]}`))
+	body := `{"model":"claude-fixture","max_tokens":2,"messages":[]}`
+	for _, address := range []string{"https://api.anthropic.com/v1/messages", "https://api.openai.com/v1/responses"} {
+		req := httptest.NewRequest(http.MethodPost, address, strings.NewReader(body))
 		req = req.WithContext(gateway.WithIdentity(req.Context(), identity))
 		response := httptest.NewRecorder()
 		routes.ServeHTTP(response, req)
-		expected := 502
-		if i == 1 {
-			expected = 429
-		}
-		if response.Code != expected || strings.Contains(response.Body.String(), "partial output") {
+		if response.Code != 200 {
 			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 		}
 	}
+	// Anthropic: ceil(bytes ÷ 4) of the request as sent, with its pinned
+	// service tier, plus the output bound of 2; OpenAI: 3.
+	sent := `{"max_tokens":2,"messages":[],"model":"claude-fixture","service_tier":"standard_only"}`
 	state := observedState(t, tracker, testRunUID+"/model.inference")
-	if calls.Load() != 1 || state.UnitsUsed != 100 || state.CostMicros != 200 || state.ReservedUnits != 0 || state.ReservedCostMicros != 0 {
-		t.Fatalf("calls=%d state=%+v", calls.Load(), state)
+	if want := int64((len(sent)+3)/4 + 2 + 3); calls.Load() != 2 || state.UnitsUsed != want || state.CostMicros != 2 ||
+		state.ReservedUnits != 0 || state.ReservedCostMicros != 0 {
+		t.Fatalf("calls=%d state=%+v, want %d units", calls.Load(), state, want)
 	}
 }
 

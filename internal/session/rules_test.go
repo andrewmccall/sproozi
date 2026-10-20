@@ -1,6 +1,7 @@
 package session
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
@@ -43,5 +44,37 @@ func TestRecordRejectsPhaseThatContradictsItsStructure(t *testing.T) {
 				t.Fatalf("record accepted: phase=%s active=%v pending=%q cancel=%q", r.Phase, r.Active != nil, r.PendingOperation, r.CancelOperation)
 			}
 		})
+	}
+}
+
+// A refused move or stop names the operation that is actually pending.
+func TestPendingRecoveryNamesThePendingOperation(t *testing.T) {
+	ops := []Operation{{ID: uuid.NewString()}, {ID: uuid.NewString()}, {ID: uuid.NewString(), Finalize: true}}
+	for _, tc := range []struct {
+		pending int
+		thread  string
+		want    string
+	}{
+		{0, "", "session: previous start requires recovery"},
+		{0, uuid.NewString(), "session: previous resume requires recovery"},
+		{1, uuid.NewString(), "session: previous move requires recovery"},
+		{2, uuid.NewString(), "session: previous stop requires recovery"},
+	} {
+		err := pendingRecovery(Record{Operations: ops, PendingOperation: ops[tc.pending].ID, ThreadID: tc.thread})
+		if !errors.Is(err, ErrRecoveryRequired) || err.Error() != tc.want {
+			t.Fatalf("pending %d: got %v, want %q", tc.pending, err, tc.want)
+		}
+	}
+}
+
+// Only an unfinished cancellation points at recovery; a finished one is final.
+func TestCancelledRefusalDependsOnFinishedCancellation(t *testing.T) {
+	if err := cancelled(Record{Phase: PhaseCancelled}); !errors.Is(err, ErrSessionCancelled) {
+		t.Fatalf("finished cancellation: got %v", err)
+	}
+	for _, phase := range []Phase{PhaseCancelling, PhaseUnknownStop, PhaseUnknownUsage} {
+		if err := cancelled(Record{Phase: phase}); !errors.Is(err, ErrCancellationUnfinished) {
+			t.Fatalf("%s: got %v", phase, err)
+		}
 	}
 }

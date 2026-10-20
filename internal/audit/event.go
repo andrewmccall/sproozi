@@ -72,11 +72,28 @@ type Event struct {
 	// DenyReason is the human-readable explanation when Allowed is false.
 	DenyReason string `json:"denyReason,omitempty"`
 
+	// Model is the model a provider accepted. It is recorded only after the
+	// provider succeeds, so it is never unvalidated workload input.
+	Model string `json:"model,omitempty"`
+
 	// UpstreamStatus is the HTTP status code returned by the upstream model provider.
 	UpstreamStatus int `json:"upstreamStatus,omitempty"`
 
 	// TokensUsed is the number of tokens consumed by the upstream response.
 	TokensUsed int64 `json:"tokensUsed,omitempty"`
+
+	// InputTokens and OutputTokens split TokensUsed when the provider reports both.
+	InputTokens  int64 `json:"inputTokens,omitempty"`
+	OutputTokens int64 `json:"outputTokens,omitempty"`
+
+	// UsageSource says how a model call was charged: provider (the provider's
+	// reported usage), estimated (an estimate of an interrupted call) or
+	// reservation (the call's whole reservation).
+	UsageSource string `json:"usageSource,omitempty"`
+
+	// EndReason says how a model call ended: completed, client_cancelled,
+	// deadline, upstream_error, budget_cut, parse_limit or exceeded.
+	EndReason string `json:"endReason,omitempty"`
 
 	// TokenBudget is the total token budget configured in the policy.
 	TokenBudget int64 `json:"tokenBudget"`

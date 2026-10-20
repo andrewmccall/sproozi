@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -124,6 +125,8 @@ func TestLockProcessExclusionAndRelease(t *testing.T) {
 	if other, err := Lock(path); err == nil {
 		_ = UnlockClose(other)
 		t.Fatal("acquired child-owned lock")
+	} else if !errors.Is(err, ErrLocked) {
+		t.Fatalf("held lock error does not match ErrLocked: %v", err)
 	}
 	if err = child.Process.Kill(); err != nil {
 		t.Fatal(err)

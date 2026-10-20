@@ -52,6 +52,12 @@ These records preserve the reasons for each design. A later record can replace
 part of an earlier decision. ADR 0015 replaces exact client-version selection
 and the combined MCP discovery schema. ADR 0021 replaces ADR 0015's unversioned
 client installs with pinned lockfiles and digests for CI and the verifiers.
+ADR 0027 replaces the single active-run slot from ADRs 0003 and 0017, and ADR
+0016's rejection of a revalidation cache. ADR 0028 replaces ADR 0002's buffered
+model responses and response bound, narrows ADR 0009's full charge to calls
+that can't be estimated and budget cuts, limits ADR 0015's per-account serialization to
+unbounded calls, and settles ADR 0015's unknown reservations after a restart
+at their recovery charge, an estimate, once their leases expire.
 
 | Decision | Topic |
 | --- | --- |
@@ -79,3 +85,6 @@ client installs with pinned lockfiles and digests for CI and the verifiers.
 | [0022](0022-webhook-hmac-secrets-in-own-namespace.md) | Webhook HMAC Secrets live in their own namespace, away from provider credentials. |
 | [0023](0023-controller-writes-only-in-sproozi-agents.md) | The controller writes sandbox objects only in sproozi-agents; its cluster role keeps reads. |
 | [0024](0024-native-host-platforms-and-cli-releases.md) | Native host security and automated CLI releases with a Homebrew tap. |
+| [0026](0026-single-gateway-refresh-owner-with-recreate.md) | One gateway replica with a Recreate rollout owns the rotating ChatGPT credential refresh. |
+| [0027](0027-configurable-concurrent-admission.md) | Optional cluster and policy caps replace the single active-run slot; the gateway serves revalidation from a watch cache. |
+| [0028](0028-streamed-model-responses-and-estimated-interrupts.md) | The model gateway streams responses, charges interrupted calls an estimate, refuses detached work, runs bounded calls in parallel and gives model calls their own deadline. |

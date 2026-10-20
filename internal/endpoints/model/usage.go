@@ -8,20 +8,14 @@ import (
 	"strings"
 )
 
-// decodeUsage reads provider usage without forwarding partial model output.
-// Responses SSE is supported as a bounded batch of events, not a live relay.
+// decodeUsage reads provider usage from a whole response body.
 func decodeUsage(body []byte, path string, streaming bool, contentType string) (responseUsage, error) {
 	var result responseUsage
 	if streaming {
-		mediaType, _, err := mime.ParseMediaType(contentType)
-		// The public ChatGPT route can omit Content-Type on a valid SSE body.
-		// An absent header is not authority to skip verification: the same strict
-		// framing, terminal-completion and usage checks below still apply. Reject
-		// explicit conflicting media types and malformed nonempty headers.
-		if path != responsesPath || (strings.TrimSpace(contentType) != "" &&
-			(err != nil || mediaType != eventStreamMediaType)) {
-			return result, fmt.Errorf("unsupported streaming response")
+		if err := checkStreamType(path, contentType); err != nil {
+			return result, err
 		}
+		var err error
 		result, err = decodeStreamUsage(body)
 		if err != nil {
 			return result, err
@@ -29,6 +23,25 @@ func decodeUsage(body []byte, path string, streaming bool, contentType string) (
 	} else if err := json.Unmarshal(body, &result); err != nil {
 		return result, err
 	}
+	return normalizeUsage(result, path)
+}
+
+// checkStreamType accepts Responses SSE. The public ChatGPT route can omit
+// Content-Type on a valid SSE body. An absent header is not authority to skip
+// verification: the same strict framing, terminal-event and usage checks still
+// apply. Reject explicit conflicting media types and malformed nonempty headers.
+func checkStreamType(path, contentType string) error {
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if path != responsesPath || (strings.TrimSpace(contentType) != "" &&
+		(err != nil || mediaType != eventStreamMediaType)) {
+		return fmt.Errorf("unsupported streaming response")
+	}
+	return nil
+}
+
+// normalizeUsage maps Responses usage onto the chat-completions field names
+// and rejects negative or inconsistent counts.
+func normalizeUsage(result responseUsage, path string) (responseUsage, error) {
 	if path == responsesPath && result.Usage != nil {
 		result.Usage.PromptTokens, result.Usage.CompletionTokens = result.Usage.InputTokens, result.Usage.OutputTokens
 		if result.Usage.InputTokensDetails != nil {
@@ -52,45 +65,82 @@ func decodeUsage(body []byte, path string, streaming bool, contentType string) (
 }
 
 func decodeStreamUsage(body []byte) (responseUsage, error) {
-	var result responseUsage
 	normalized := bytes.ReplaceAll(body, []byte("\r\n"), []byte("\n"))
 	if !bytes.HasSuffix(normalized, []byte("\n\n")) {
-		return result, fmt.Errorf("truncated event stream")
+		return responseUsage{}, fmt.Errorf("truncated event stream")
 	}
-	completed := false
+	var stream responsesStream
 	for frame := range bytes.SplitSeq(normalized, []byte("\n\n")) {
-		var data []string
-		for line := range bytes.SplitSeq(frame, []byte("\n")) {
-			if bytes.HasPrefix(line, []byte("data:")) {
-				data = append(data, strings.TrimPrefix(string(line[5:]), " "))
-			}
-		}
-		if len(data) == 0 {
-			continue
-		}
-		var event struct {
-			Type     string          `json:"type"`
-			Response json.RawMessage `json:"response"`
-		}
-		if completed || json.Unmarshal([]byte(strings.Join(data, "\n")), &event) != nil || event.Type == "" {
-			return result, fmt.Errorf("invalid event stream")
-		}
-		if event.Type == errorEventType || event.Type == responseFailedEvent || event.Type == responseIncompleteEvent {
-			return result, fmt.Errorf("unsuccessful event stream")
-		}
-		if event.Type == "response.completed" {
-			var status struct {
-				Status string `json:"status"`
-			}
-			if json.Unmarshal(event.Response, &status) != nil || status.Status != "completed" ||
-				json.Unmarshal(event.Response, &result) != nil {
-				return result, fmt.Errorf("invalid completion event")
-			}
-			completed = true
+		if err := stream.next(frame); err != nil {
+			return responseUsage{}, err
 		}
 	}
-	if !completed {
-		return result, fmt.Errorf("completion event missing")
+	if stream.terminal == responseFailedEvent {
+		return responseUsage{}, fmt.Errorf("unsuccessful event stream")
 	}
-	return result, nil
+	return stream.finish()
+}
+
+// terminalStatus is the response status each terminal Responses event carries.
+var terminalStatus = map[string]string{
+	"response.completed": "completed", responseIncompleteEvent: "incomplete", responseFailedEvent: "failed",
+}
+
+// responsesStream validates a Responses event stream one frame at a time, so
+// the gateway can relay each frame as it arrives. Usage arrives only in the
+// terminal event. It counts the bytes of visible output deltas.
+type responsesStream struct {
+	result   responseUsage
+	terminal string
+	visible  int64
+}
+
+// next validates one frame, normalized to LF line endings.
+func (s *responsesStream) next(frame []byte) error {
+	var data []string
+	for line := range bytes.SplitSeq(frame, []byte("\n")) {
+		if bytes.HasPrefix(line, []byte("data:")) {
+			data = append(data, strings.TrimPrefix(string(line[5:]), " "))
+		}
+	}
+	if len(data) == 0 {
+		return nil
+	}
+	var event struct {
+		Type     string          `json:"type"`
+		Response json.RawMessage `json:"response"`
+		Delta    json.RawMessage `json:"delta"`
+	}
+	if s.terminal != "" || json.Unmarshal([]byte(strings.Join(data, "\n")), &event) != nil || event.Type == "" {
+		return fmt.Errorf("invalid event stream")
+	}
+	if event.Type == errorEventType {
+		return fmt.Errorf("unsuccessful event stream")
+	}
+	if want, terminal := terminalStatus[event.Type]; terminal {
+		var status struct {
+			Status string `json:"status"`
+		}
+		if json.Unmarshal(event.Response, &status) != nil || status.Status != want ||
+			json.Unmarshal(event.Response, &s.result) != nil {
+			return fmt.Errorf("invalid completion event")
+		}
+		s.terminal = event.Type
+		return nil
+	}
+	if strings.HasSuffix(event.Type, ".delta") {
+		var delta string
+		if json.Unmarshal(event.Delta, &delta) == nil {
+			s.visible += int64(len(delta))
+		}
+	}
+	return nil
+}
+
+// finish returns the terminal event's usage, normalized.
+func (s *responsesStream) finish() (responseUsage, error) {
+	if s.terminal == "" {
+		return responseUsage{}, fmt.Errorf("completion event missing")
+	}
+	return normalizeUsage(s.result, responsesPath)
 }

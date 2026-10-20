@@ -13,9 +13,14 @@ This guide has two parts:
    broken workload and opens a pull request in your own disposable GitHub
    repository. This needs a model account and a GitHub App.
 
-Already have a cluster? [Install on Kubernetes](install-kubernetes.md) instead.
-Its first agent Pod lists other Pods through the gateway. It needs an image
-registry, but no model account or GitHub App.
+Everything here runs from a clone of this repository with Make. You don't need
+the `sproozi` CLI.
+
+Already have a cluster? Follow
+[Install on Kubernetes and run your first Pod](install-kubernetes.md) instead.
+Its first agent Pod lists other Pods through the gateway and needs an image
+registry, but no model account or GitHub App. Its last part adds model and
+GitHub credentials and runs this guide's investigation-to-PR demo on your cluster.
 
 Sproozi is a preview. Start in an evaluation environment and read the
 [deployment limitations](../reference/security-hardening.md) before using it for
@@ -35,14 +40,8 @@ make sure they are on your `PATH`:
   1.33.1, so use kubectl 1.32, 1.33 or 1.34, within Kubernetes' supported
   [version skew](https://kubernetes.io/releases/version-skew-policy/#kubectl).
 - Git and the [GitHub CLI](https://cli.github.com/).
-- [Go](https://go.dev/dl/) 1.25 or later (CI uses 1.26.6), Make, OpenSSL,
+- [Go](https://go.dev/dl/) 1.26 or later, Make, OpenSSL,
   Python 3, curl and `shasum`.
-
-Check Docker:
-
-```sh
-docker info
-```
 
 Clone the repository and run the rest of this guide from its root:
 
@@ -52,7 +51,15 @@ cd sproozi
 mkdir -p .local
 ```
 
-If your host has a newer kubectl, install the demo-compatible client separately
+Check Docker and your kubectl version:
+
+```sh
+docker info
+kubectl version --client
+```
+
+If `kubectl version --client` reports a version other than 1.32, 1.33 or 1.34,
+or kubectl isn't installed, install the demo-compatible client separately
 and put it first on `PATH`. On macOS or Linux with an AMD64 or ARM64 CPU:
 
 ```sh
@@ -62,12 +69,16 @@ SPROOZI_KUBECTL_ARCH=amd64
 case "$(uname -m)" in arm64|aarch64) SPROOZI_KUBECTL_ARCH=arm64 ;; esac
 SPROOZI_KUBECTL_URL="https://dl.k8s.io/release/v1.34.1/bin/$SPROOZI_KUBECTL_OS/$SPROOZI_KUBECTL_ARCH/kubectl"
 curl --fail --location "$SPROOZI_KUBECTL_URL" -o .local/bin/kubectl
-curl --fail --location "$SPROOZI_KUBECTL_URL.sha256" -o .local/bin/kubectl.sha256
-printf '%s  %s\n' "$(cat .local/bin/kubectl.sha256)" .local/bin/kubectl | shasum -a 256 -c -
-chmod +x .local/bin/kubectl
+SPROOZI_KUBECTL_SHA256="$(curl --fail --location --silent --show-error "$SPROOZI_KUBECTL_URL.sha256")"
+printf '%s  %s\n' "$SPROOZI_KUBECTL_SHA256" .local/bin/kubectl | shasum -a 256 -c - &&
+  chmod +x .local/bin/kubectl
 export PATH="$PWD/.local/bin:$PATH"
 kubectl version --client
 ```
+
+The export lasts only for this terminal. In each new terminal, including the
+one you open to watch the demo in step 7, run
+`export PATH="$PWD/.local/bin:$PATH"` again from the repository root.
 
 ## 2. Check your setup without any accounts
 
@@ -78,24 +89,64 @@ python3 hack/verify/quickstart.py doctor
 python3 hack/verify/quickstart.py dependencies
 ```
 
-`doctor` checks your host tools and Docker. `dependencies` builds the real
-controller image and deploys it to a temporary Kind cluster with Calico. It then
-proves that the network rules work: a test connection succeeds, a deny-egress
-policy blocks it, and removing the policy restores it. It skips the optional
-metrics check, which the demo doesn't use.
+`doctor` checks that Docker, Kind, kubectl, Git, Go, Make, OpenSSL, curl and
+`shasum` are on your `PATH`. It enforces two versions: kubectl must be 1.32,
+1.33 or 1.34, and Go must be at least the version `go.mod` declares. It also
+asks the Docker engine for its version, which fails if the engine isn't
+running, and prints the Docker server and Kind versions without checking them.
+It doesn't check the versions of Git, Make, OpenSSL, curl or `shasum`. It runs
+under Python 3, so it doesn't check for it separately. It checks for `gh` only
+in step 6, when you pass `--env-file`. It runs every check, even after one
+fails, and prints an `ok` line as each one passes; the Go line names the
+minimum version `go.mod` requires. A tool that is missing from `PATH` is
+reported once in `Missing tools: …`, and its version check is skipped. It ends
+with `Doctor checks passed: host tools and versions`, or with every failure in check order, so you can
+fix them all before rerunning. One failure stays on the same line as
+`Doctor check failed: `. With several, `Doctor check failed:` stands alone and
+each failure follows on its own line, indented by two spaces. An unsupported
+kubectl version fails with this message, which names the version found and
+points to step 1 above:
 
-When it passes, the temporary cluster is deleted. Logs and `result.json` stay
-under `.local/verification/quickstart/`. This check doesn't run Codex or open a
-PR. [Cluster dependencies](../reference/dependencies.md) lists what the demo
+```text
+Use kubectl 1.32, 1.33 or 1.34 for the pinned Kubernetes 1.33.1 demo (found 1.37.1); see "Prepare your computer" in docs/guides/getting-started.md to install a matching client into .local/bin
+```
+
+`dependencies` builds the real controller image and deploys it to a temporary
+Kind cluster with Calico. It then proves that the network rules work: a test
+connection succeeds, a deny-egress policy blocks it, and removing the policy
+restores it. It skips the optional metrics check, which the demo doesn't use.
+
+The first run builds images and can take 10 minutes or more; once images are
+cached, a run takes about 2 minutes. `dependencies` prints each step as it
+starts and finishes, plus a `still running` line every two minutes, and tells
+you where its `commands.log` is so you can follow it with `tail -f`. It ends
+with `Dependencies check passed` or `Dependencies check failed` and the
+reason.
+
+If you close the terminal or press Ctrl-C, the check stops and cleans up. If a
+second run reports that another quickstart owns `driver.lock`, it says whether
+that run is still going. If it is, wait for it or stop it; it cleans up as it
+stops. If it has exited, the message prints the `cleanup` command that releases
+it. `cleanup` refuses while the owning run is still going unless you add
+`--force`. After a crash, `cleanup` first stops the processes that run left
+behind, then deletes its cluster. If a process with the run's PID is still
+running but the run's start time wasn't recorded, `cleanup` can't tell whether
+it is that run and needs `--force`.
+
+The temporary cluster is deleted when the check finishes, whether it passes or
+fails; a passing run reports `Kind cluster <name> removed` before its final
+line. Logs and `result.json` stay under `.local/verification/quickstart/`.
+This check doesn't run Codex or open a PR.
+[Cluster dependencies](../reference/dependencies.md) lists what the demo
 installs and what it doesn't need.
 
 ## 3. Choose a model account
 
-The PR demo needs either an OpenAI API key with access to the demo's
+The investigation-to-PR demo needs either an OpenAI API key with access to the demo's
 `gpt-6.1-sol` model or a ChatGPT plan that supports the repository's sign-in
 flow. The credential wizard in step 6 lets you choose. API-key mode incurs API
 usage charges; ChatGPT mode uses your plan's allowance. See
-[model provider authentication](model-provider-auth.md) for the details.
+[Model provider authentication](model-provider-auth.md) for the details.
 
 Sign in to GitHub on your computer too:
 
@@ -183,7 +234,7 @@ so you can interrupt it and resume. Enter these values at its prompts:
 | --- | --- | --- |
 | Authentication mode | `api_key` or `chatgpt` | `MODEL_AUTH_MODE` in `.local/demo.env`. |
 | OpenAI API key, for `api_key` mode | Your provider API key at the hidden-input prompt | `OPENAI_API_KEY` in `.local/demo.env`. |
-| Browser sign-in, for `chatgpt` mode | Complete the browser consent flow | Private `.local/chatgpt-session.json` and `.local/chatgpt-host.json`; the session path is saved as `CHATGPT_SESSION_FILE` in `.local/demo.env`. |
+| Browser sign-in, for `chatgpt` mode | Complete the browser consent flow | Private `.local/chatgpt-session.json` and `.local/chatgpt-host.json`; the ChatGPT credential path is saved as `CHATGPT_SESSION_FILE` in `.local/demo.env`. |
 | GitHub App ID | The App ID from the App settings page | `GITHUB_APP_ID` in `.local/demo.env`. |
 | GitHub App installation ID | The ID from the installation URL | `GITHUB_APP_INSTALLATION_ID` in `.local/demo.env`. |
 | Local private-key file path | The full path to `.local/credentials/github-app.pem` | `GITHUB_APP_PRIVATE_KEY_FILE` in `.local/demo.env`; the key stays in its own file. |
@@ -204,20 +255,28 @@ python3 hack/verify/quickstart.py doctor --env-file "$PWD/.local/demo.env"
 ```
 
 The private files should have permissions `-rw-------`. The doctor reports
-missing variable names without printing credential values. `make demo-check`
-also checks prerequisites and the configured files. Neither launches the agent.
+every missing variable name at once without printing credential values, and
+checks that the private-key file is readable. `make demo-check` checks
+credentials first, in under a second, before the slower setup of the local
+registry and the Codex image. Neither launches the agent.
 
-The demo loads these saved settings automatically on later runs. To replace
+The demo loads these saved settings automatically on later runs. A non-empty
+value set on the command line or in the environment, such as
+`make demo IMG=...` or an exported `SPROOZI_DEMO_REPOSITORY`, takes precedence
+over the file. To replace
 credentials, edit `.local/demo.env` in a local editor, remove the settings you
 want the wizard to ask for again, and rerun it. The wizard keeps existing values.
 For an independent configuration, set `SPROOZI_DEMO_ENV_FILE` to an absolute
 gitignored path before running setup and the wizard; pass that same file to the
 verification helper's `--env-file` option.
 
-For ChatGPT mode, each session belongs to one active gateway. Before launching
-another cluster, renew consent with `bash hack/demo/chatgpt-login.sh --reauthorize`.
+For ChatGPT mode, each ChatGPT sign-in belongs to one active gateway. Before
+launching another cluster, renew consent with
+`make demo-chatgpt-login CHATGPT_REAUTHORIZE=1`
+(or `bash hack/demo/chatgpt-login.sh --reauthorize`). Without it, the helper
+reuses the saved ChatGPT credential and prints a warning.
 The local bootstrap file does not receive the live gateway's token refreshes.
-See [model provider authentication](model-provider-auth.md) for the lifecycle.
+See [Model provider authentication](model-provider-auth.md) for the lifecycle.
 
 `make demo-check` should end with:
 
@@ -239,9 +298,12 @@ Codex investigates the workload and creates a real GitHub PR using the shared
 gateway. The command then waits for the acceptance checks,
 up to 20 minutes by default. Keep the local registry running during the demo.
 
-The command uses a dedicated kubeconfig. It refuses to reuse a cluster named
-`sproozi-demo`; choose a new name or delete your previous demo cluster before
-trying again.
+The command uses a dedicated kubeconfig. `KIND_CLUSTER` defaults to
+`sproozi-demo`. It refuses to reuse an existing cluster; choose a new name or
+delete your previous demo cluster before trying again. If setup fails before the
+run is submitted, the command deletes the cluster it created; set
+`SPROOZI_PRESERVE_ON_FAILURE=1` to keep it. Once the run is submitted, the
+cluster is kept, so you can inspect a failed acceptance check.
 
 To watch while it runs, open another terminal in the repository root:
 
@@ -302,7 +364,7 @@ kubectl patch agentrun manual-sre-remediation -n sproozi-system \
 Run success means the `agent` container exited with code zero. PR creation is a
 separate acceptance check. To repeat a manual run, delete its terminal
 `AgentRun` first or give the new run a different name. See the
-[manual demo guide](manual-pr-demo.md) for probes, optional monitoring and MCP links.
+[Manual AgentRun to pull request](manual-pr-demo.md) for probes, optional monitoring and MCP links.
 
 ## If something goes wrong
 
@@ -311,13 +373,19 @@ separate acceptance check. To repeat a manual run, delete its terminal
 | Docker is unavailable | Start the engine and rerun `docker info`. |
 | Repository already exists | Use another disposable name, or seed the existing repository's `main` branch. |
 | Missing configuration | Run `bash hack/demo/configure.sh`, then `make demo-check`. |
+| The environment file `line N is not a plain KEY=value assignment`, or `sets NAME, which the demo refuses` | The demo checks the file before loading it. Quote values that contain spaces, remove lines that would run a command, and remove settings for shell or tool variables such as `BASH_ENV` or `PATH`. |
+| `IMG is empty or unset` | Set `IMG` to a non-`latest` local tag, for example `make demo IMG=controller:sproozi-demo`. |
+| `Another demo run is using cluster NAME` | A second `make demo` with the same `KIND_CLUSTER` is refused while the first holds `.local/demo/NAME.lock`. Wait for it or choose another name. If no run is active, the lock is stale; remove it with `rm -r .local/demo/NAME.lock`. |
 | Cluster already exists | Inspect the old cluster, then choose a new `KIND_CLUSTER` or remove that demo cluster. |
 | Image pull fails | Check `docker ps -a --filter name=sproozi-demo-registry`. Restart it with `docker start sproozi-demo-registry`. |
 | Gateway does not start | Read `kubectl logs -n sproozi-system deployment/sproozi-gateway` in the demo context. Check credentials and certificate errors. |
+| TLS fails with `tls: expired certificate` or a certificate that is not yet valid | The Docker Desktop VM clock has drifted from the host, usually after the host slept. Restart Docker Desktop, then rerun the command. Compare clocks with `date -u; docker run --rm busybox date -u`. |
 | Model access or PR creation fails | Check the report, model authentication, and App installation permissions on the selected repository. |
 
-If setup fails before the final message, the isolated kubeconfig is still at
-`.local/demo/<cluster-name>.kubeconfig`. Export it before debugging. A failing
+If the run fails after it was submitted, the isolated kubeconfig is still at
+`.local/demo/<cluster-name>.kubeconfig`; the command prints the `export`
+line. Export it before debugging. To debug an earlier setup failure, rerun with
+`SPROOZI_PRESERVE_ON_FAILURE=1`. A failing
 provider call is not proof of a policy denial; use the report's acceptance result.
 
 ## Clean up

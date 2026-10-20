@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"reflect"
 	"slices"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
@@ -91,6 +92,26 @@ func (g *ExecutionGrant) Clone() *ExecutionGrant {
 	out.Capabilities = slices.Clone(g.Capabilities)
 	out.Allocations = maps.Clone(g.Allocations)
 	return &out
+}
+
+// SameAuthority reports whether fresh grants exactly what g grants, so an open
+// session may continue. It ignores the policy's maxActiveRuns, which bounds how
+// many runs start but not what an admitted run may do, and the policy
+// generation, which changes with any spec edit. Any other policy, template,
+// capability, identity or allocation change revokes.
+func (g *ExecutionGrant) SameAuthority(fresh *ExecutionGrant) bool {
+	if g == nil || fresh == nil {
+		return false
+	}
+	return reflect.DeepEqual(g.authority(), fresh.authority())
+}
+
+// authority is the grant without the fields that SameAuthority ignores.
+func (g *ExecutionGrant) authority() *ExecutionGrant {
+	out := g.Clone()
+	out.Policy.Generation = 0
+	out.Policy.Spec.MaxActiveRuns = nil
+	return out
 }
 
 // BudgetLimits intersects current policy with the placement's issued ceiling.

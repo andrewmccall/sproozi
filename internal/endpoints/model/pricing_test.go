@@ -1,8 +1,13 @@
 package model_test
 
 import (
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
+
+	"sigs.k8s.io/yaml"
 
 	modelgateway "github.com/andrewmccall/sproozi/internal/endpoints/model"
 )
@@ -89,5 +94,46 @@ func TestPricingTableFailsClosedForUnknownModel(t *testing.T) {
 	_, err := (modelgateway.PricingTable{}).Cost("unpriced", 1, 0, 1)
 	if err == nil {
 		t.Fatal("expected missing administrator pricing error")
+	}
+}
+
+// A stock harness example whose model has no installed price row would be
+// refused under any cost-capped policy, so every example model must be priced.
+func TestInstalledPricingCoversStockHarnessExampleModels(t *testing.T) {
+	root := filepath.Join("..", "..", "..")
+	raw, err := os.ReadFile(filepath.Join(root, "config", "manager", "model-pricing.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var configMap struct {
+		Data map[string]string `json:"data"`
+	}
+	if err := yaml.Unmarshal(raw, &configMap); err != nil {
+		t.Fatal(err)
+	}
+	table, err := modelgateway.LoadPricingTable(strings.NewReader(configMap.Data["pricing.json"]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	examples, err := filepath.Glob(filepath.Join(root, "examples", "harnesses", "agentruntime-*.yaml"))
+	if err != nil || len(examples) == 0 {
+		t.Fatalf("no stock harness examples found: %v", err)
+	}
+	modelValue := regexp.MustCompile(`(?m)- name: SPROOZI_MODEL\s+value: (\S+)`)
+	for _, example := range examples {
+		data, err := os.ReadFile(example)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, match := range modelValue.FindAllStringSubmatch(string(data), -1) {
+			if _, err := table.Cost(match[1], 1, 0, 1); err != nil {
+				t.Errorf("%s: model %s has no installed price row: %v", filepath.Base(example), match[1], err)
+			}
+		}
+	}
+	sonnet := table.Models["claude-sonnet-4-5-20250929"]
+	if sonnet.InputMicrosPerMillionTokens != 3_000_000 || sonnet.OutputMicrosPerMillionTokens != 15_000_000 ||
+		sonnet.CachedInputMicrosPerMillionTokens != 300_000 || sonnet.CacheWrite5mMicrosPerMillionTokens != 3_750_000 {
+		t.Fatalf("Claude Sonnet 4.5 list price row = %+v", sonnet)
 	}
 }

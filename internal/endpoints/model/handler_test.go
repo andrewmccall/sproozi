@@ -17,12 +17,15 @@ limitations under the License.
 package model_test
 
 import (
+	"bytes"
 	"compress/gzip"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -151,28 +154,33 @@ func TestHandlerMissingGatewayIdentityReturns401(t *testing.T) {
 	}
 }
 
-func TestHandlerBuffersResponsesStreamAndSettlesUsageBeforeReturning(t *testing.T) {
+// A stream is relayed as it arrives. One that ends without its terminal event
+// has already reached the workload, so it is charged the estimate E: request
+// bytes ÷ 4 for input and the visible output bytes, as no time elapsed.
+func TestHandlerRelaysResponsesStreamAndSettlesUsage(t *testing.T) {
 	stream := "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"total_tokens\":12,\"input_tokens\":9,\"output_tokens\":3}}}\n\n"
+	request := `{"model":"test","stream":true}`
 	for _, valid := range []bool{true, false} {
 		body := stream
 		if !valid {
 			body = strings.Split(stream, "event: response.completed")[0]
 		}
 		h := newHandler(t, testExecutionGrant(), "https://model.test")
+		h.Config.Now = fixedClock()
 		h.Config.HTTPClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 			response := modelResponse(r, body)
 			response.Header.Set("Content-Type", "text/event-stream")
 			return response, nil
 		})}
 		recorder := httptest.NewRecorder()
-		h.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, testResponsesPath, strings.NewReader(`{"model":"test","stream":true}`)))
+		h.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, testResponsesPath, strings.NewReader(request)))
 		state := observedState(t, h.Config.BudgetTracker, testRunUID)
-		if valid {
-			if recorder.Code != 200 || recorder.Body.String() != stream || state.UnitsUsed != 12 || state.ReservedUnits != 0 {
-				t.Fatalf("valid stream: status=%d state=%+v", recorder.Code, state)
-			}
-		} else if recorder.Code != 502 || strings.Contains(recorder.Body.String(), "delta") || state.UnitsUsed != 10000 {
-			t.Fatalf("incomplete stream escaped or failed to charge reservation: status=%d state=%+v", recorder.Code, state)
+		want := int64(12)
+		if !valid {
+			want = int64((len(request)+3)/4 + len("hello"))
+		}
+		if recorder.Code != 200 || recorder.Body.String() != body || state.UnitsUsed != want || state.ReservedUnits != 0 {
+			t.Fatalf("valid=%v: status=%d body=%q state=%+v, want %d units", valid, recorder.Code, recorder.Body, state, want)
 		}
 	}
 }
@@ -251,11 +259,15 @@ func TestHandlerForwardsToUpstreamAndStripsAuth(t *testing.T) {
 }
 
 // captureWriter is a test double for audit.Writer that records all events.
+// Like audit.Logger, it accepts concurrent calls.
 type captureWriter struct {
+	mu     sync.Mutex
 	events []audit.Event
 }
 
 func (c *captureWriter) Log(e audit.Event) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.events = append(c.events, e)
 }
 
@@ -413,7 +425,8 @@ func TestHandlerRejectsStreamingRequest(t *testing.T) {
 
 // TestHandlerUsageAboveReservationExhaustsAllowance verifies that trusted usage
 // above a small output reservation is recorded up to the allowance. Keeping
-// only the reservation would let a large input repeat without limit.
+// only the reservation would let a large input repeat without limit. The
+// output has already reached the workload, so the call is audited as exceeded.
 func TestHandlerUsageAboveReservationExhaustsAllowance(t *testing.T) {
 	identity := testExecutionGrant()
 	limits := identity.Policy.Spec.Budgets[sprooziv1alpha1.CapabilityModelInference]
@@ -421,6 +434,8 @@ func TestHandlerUsageAboveReservationExhaustsAllowance(t *testing.T) {
 	identity.Policy.Spec.Budgets[sprooziv1alpha1.CapabilityModelInference] = limits
 	var calls atomic.Int32
 	h := newHandler(t, identity, testModelUpstream)
+	capture := &captureWriter{}
+	h.Config.AuditLogger = capture
 	h.Config.HTTPClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		calls.Add(1)
 		return modelResponse(req,
@@ -434,47 +449,79 @@ func TestHandlerUsageAboveReservationExhaustsAllowance(t *testing.T) {
 		h.ServeHTTP(w, req)
 		return w
 	}
-	if w := send(); w.Code != http.StatusBadGateway || strings.Contains(w.Body.String(), `"id":"x"`) {
-		t.Fatalf("status = %d, body = %s; want the response withheld with 502", w.Code, w.Body.String())
+	if w := send(); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"id":"x"`) {
+		t.Fatalf("status = %d, body = %s; want the relayed response", w.Code, w.Body.String())
 	}
 	state := observedState(t, h.Config.BudgetTracker, testRunUID)
 	if state.UnitsUsed != 100 || state.ReservedUnits != 0 {
 		t.Fatalf("budget state = %+v, want the allowance of 100 used and no reservation", state)
+	}
+	if e := capture.events[0]; !e.Allowed || e.EndReason != "exceeded" || e.UsageSource != "provider" || e.TokensUsed != 5016 {
+		t.Fatalf("audit = %+v, want an exceeded call settled from provider usage", e)
 	}
 	if w := send(); w.Code != http.StatusTooManyRequests || calls.Load() != 1 {
 		t.Fatalf("second request status = %d after %d provider calls, want 429 after 1", w.Code, calls.Load())
 	}
 }
 
-func TestHandlerMissingUsageConsumesReservationAndDenies(t *testing.T) {
+// A JSON response without usage has reached the workload; it is charged the
+// estimate, here request bytes ÷ 4 plus the visible body bytes.
+func TestHandlerMissingUsageChargesTheEstimate(t *testing.T) {
 	identity := testExecutionGrant()
 	limits := identity.Policy.Spec.Budgets[sprooziv1alpha1.CapabilityModelInference]
 	limits.MaxUnits = 100
 	identity.Policy.Spec.Budgets[sprooziv1alpha1.CapabilityModelInference] = limits
 	var calls atomic.Int32
 	h := newHandler(t, identity, testModelUpstream)
+	h.Config.Now = fixedClock()
 	h.Config.HTTPClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		calls.Add(1)
 		return modelResponse(req, `{"id":"x"}`), nil
 	})}
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
-		strings.NewReader(`{"model":"gpt-4o","messages":[],"max_tokens":25}`))
+	body := `{"model":"gpt-4o","messages":[],"max_tokens":25}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer some-token")
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 
-	if w.Code != http.StatusBadGateway {
-		t.Fatalf("status = %d, want 502; body = %s", w.Code, w.Body.String())
-	}
-	if !strings.Contains(w.Body.String(), "usage_unavailable") {
-		t.Errorf("body = %s, want usage_unavailable", w.Body.String())
-	}
-	if calls.Load() != 1 {
-		t.Fatalf("upstream calls = %d, want 1", calls.Load())
+	if w.Code != http.StatusOK || w.Body.String() != `{"id":"x"}` || calls.Load() != 1 {
+		t.Fatalf("status = %d, body = %s, calls = %d", w.Code, w.Body.String(), calls.Load())
 	}
 	state := observedState(t, h.Config.BudgetTracker, testRunUID)
-	if state.UnitsUsed != 25 || state.ReservedUnits != 0 {
-		t.Fatalf("budget state = %+v, want 25 consumed and no reservation", state)
+	if want := int64((len(body)+3)/4 + len(`{"id":"x"}`)); state.UnitsUsed != want || state.ReservedUnits != 0 {
+		t.Fatalf("budget state = %+v, want %d estimated and no reservation", state, want)
+	}
+}
+
+// A response event larger than the parser's bound is still relayed, but no
+// usage can be read from it, so the reservation is charged in full: with no
+// output bound that is all remaining capacity. The operator log names the
+// run, the reason and the charge.
+func TestOversizedResponseChargesTheReservationAndLogsIt(t *testing.T) {
+	identity := testExecutionGrant()
+	limits := identity.Policy.Spec.Budgets[sprooziv1alpha1.CapabilityModelInference]
+	limits.MaxUnits = 100
+	identity.Policy.Spec.Budgets[sprooziv1alpha1.CapabilityModelInference] = limits
+	var logs bytes.Buffer
+	h := newHandler(t, identity, testModelUpstream)
+	h.Config.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+	large := `{"id":"` + strings.Repeat("x", 8<<20) + `"}`
+	h.Config.HTTPClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return modelResponse(req, large), nil
+	})}
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
+		strings.NewReader(`{"model":"gpt-4o","messages":[]}`)))
+	if w.Code != http.StatusOK || w.Body.Len() != len(large) {
+		t.Fatalf("status = %d, relayed %d of %d bytes", w.Code, w.Body.Len(), len(large))
+	}
+	if state := observedState(t, h.Config.BudgetTracker, testRunUID); state.UnitsUsed != 100 || state.ReservedUnits != 0 {
+		t.Fatalf("budget state = %+v, want all 100 units charged", state)
+	}
+	for _, want := range []string{`msg="Charged model reservation in full"`, "runUID=" + testRunUID,
+		`detail="provider event exceeded the parse limit"`, "endReason=parse_limit", "units=100", "costMicros=0"} {
+		if !strings.Contains(logs.String(), want) {
+			t.Fatalf("log %q lacks %q", logs.String(), want)
+		}
 	}
 }

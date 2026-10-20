@@ -272,73 +272,108 @@ func decodeAnthropicStream(body []byte) (anthropicUsage, error) {
 	if !bytes.HasSuffix(normalized, []byte("\n\n")) || bytes.Contains(normalized, []byte("\r")) {
 		return anthropicUsage{}, fmt.Errorf("truncated Anthropic event stream")
 	}
-	var usage anthropicUsage
-	var usageFields map[string]json.RawMessage
-	type streamPhase uint8
-	const (
-		beforeMessage streamPhase = iota
-		readingMessage
-		completedMessage
-		stoppedMessage
-	)
-	phase := beforeMessage
+	var stream anthropicStream
 	for frame := range bytes.SplitSeq(normalized, []byte("\n\n")) {
-		event, err := parseAnthropicFrame(frame)
-		if err != nil {
+		if err := stream.next(frame); err != nil {
 			return anthropicUsage{}, err
 		}
-		if event == nil {
-			continue
+	}
+	return stream.finish()
+}
+
+type anthropicPhase uint8
+
+const (
+	anthropicBeforeMessage anthropicPhase = iota
+	anthropicReadingMessage
+	anthropicCompletedMessage
+	anthropicStoppedMessage
+)
+
+// anthropicStream validates a Messages event stream one frame at a time, so
+// the gateway can relay each frame as it arrives. It keeps the cumulative
+// usage, which holds exact input usage from message_start onwards, and counts
+// the bytes of visible output deltas.
+type anthropicStream struct {
+	usage   anthropicUsage
+	fields  map[string]json.RawMessage
+	phase   anthropicPhase
+	visible int64
+	// delta is set once message_delta has reported exact output usage.
+	delta bool
+}
+
+// next validates one frame, normalized to LF line endings.
+func (s *anthropicStream) next(frame []byte) error {
+	if bytes.Contains(frame, []byte("\r")) {
+		return fmt.Errorf("invalid Anthropic event framing")
+	}
+	event, err := parseAnthropicFrame(frame)
+	if err != nil {
+		return err
+	}
+	if event == nil {
+		return nil
+	}
+	if s.phase == anthropicStoppedMessage {
+		return fmt.Errorf("invalid Anthropic event stream")
+	}
+	switch event.Type {
+	case errorEventType:
+		return fmt.Errorf("unsuccessful Anthropic event stream")
+	case "message_start":
+		if s.phase != anthropicBeforeMessage || !event.Message.valid() || event.Message.StopReason != "" {
+			return fmt.Errorf("invalid Anthropic message start")
 		}
-		if phase == stoppedMessage {
-			return anthropicUsage{}, fmt.Errorf("invalid Anthropic event stream")
+		usage, err := parseAnthropicUsage(event.Message.Usage)
+		if err != nil {
+			return err
 		}
-		switch event.Type {
-		case errorEventType:
-			return anthropicUsage{}, fmt.Errorf("unsuccessful Anthropic event stream")
-		case "message_start":
-			if phase != beforeMessage || !event.Message.valid() || event.Message.StopReason != "" {
-				return anthropicUsage{}, fmt.Errorf("invalid Anthropic message start")
+		if err := json.Unmarshal(event.Message.Usage, &s.fields); err != nil {
+			return fmt.Errorf("invalid Anthropic start usage")
+		}
+		s.usage, s.phase = usage, anthropicReadingMessage
+	case "message_delta":
+		if s.phase != anthropicReadingMessage {
+			return fmt.Errorf("unexpected Anthropic message delta")
+		}
+		updated, err := mergeAnthropicUsage(s.usage, s.fields, event.Usage)
+		if err != nil {
+			return err
+		}
+		s.usage, s.delta = updated, true
+		if event.Delta.StopReason != "" {
+			if !validAnthropicStopReason(event.Delta.StopReason) {
+				return fmt.Errorf("invalid Anthropic stop reason")
 			}
-			var err error
-			usage, err = parseAnthropicUsage(event.Message.Usage)
-			if err != nil {
-				return anthropicUsage{}, err
-			}
-			if err := json.Unmarshal(event.Message.Usage, &usageFields); err != nil {
-				return anthropicUsage{}, fmt.Errorf("invalid Anthropic start usage")
-			}
-			phase = readingMessage
-		case "message_delta":
-			if phase != readingMessage {
-				return anthropicUsage{}, fmt.Errorf("unexpected Anthropic message delta")
-			}
-			updated, err := mergeAnthropicUsage(usage, usageFields, event.Usage)
-			if err != nil {
-				return anthropicUsage{}, err
-			}
-			usage = updated
-			if event.Delta.StopReason != "" {
-				if !validAnthropicStopReason(event.Delta.StopReason) {
-					return anthropicUsage{}, fmt.Errorf("invalid Anthropic stop reason")
-				}
-				phase = completedMessage
-			}
-		case "message_stop":
-			if phase != completedMessage {
-				return anthropicUsage{}, fmt.Errorf("incomplete Anthropic message")
-			}
-			phase = stoppedMessage
-		default:
-			if event.Type != "ping" && phase != readingMessage {
-				return anthropicUsage{}, fmt.Errorf("unexpected Anthropic content event")
-			}
+			s.phase = anthropicCompletedMessage
+		}
+	case "message_stop":
+		if s.phase != anthropicCompletedMessage {
+			return fmt.Errorf("incomplete Anthropic message")
+		}
+		s.phase = anthropicStoppedMessage
+	default:
+		if event.Type != "ping" && s.phase != anthropicReadingMessage {
+			return fmt.Errorf("unexpected Anthropic content event")
+		}
+		if event.Type == "content_block_delta" {
+			s.visible += int64(len(event.Delta.Text) + len(event.Delta.PartialJSON) + len(event.Delta.Thinking))
 		}
 	}
-	if phase != stoppedMessage {
+	return nil
+}
+
+// started reports whether message_start has supplied exact input usage.
+func (s *anthropicStream) started() bool { return s.phase != anthropicBeforeMessage }
+
+func (s *anthropicStream) stopped() bool { return s.phase == anthropicStoppedMessage }
+
+func (s *anthropicStream) finish() (anthropicUsage, error) {
+	if s.phase != anthropicStoppedMessage {
 		return anthropicUsage{}, fmt.Errorf("anthropic: message stop is required")
 	}
-	return totalAnthropicUsage(usage)
+	return totalAnthropicUsage(s.usage)
 }
 
 // parseAnthropicFrame validates SSE framing and the agreement between the named
@@ -348,7 +383,10 @@ type anthropicStreamEvent struct {
 	Message anthropicMessage `json:"message"`
 	Usage   json.RawMessage  `json:"usage"`
 	Delta   struct {
-		StopReason string `json:"stop_reason"`
+		StopReason  string `json:"stop_reason"`
+		Text        string `json:"text"`
+		PartialJSON string `json:"partial_json"`
+		Thinking    string `json:"thinking"`
 	} `json:"delta"`
 }
 

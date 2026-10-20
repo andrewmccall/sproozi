@@ -1,5 +1,10 @@
 # Build from the repository root, with an administrator-resolved native image.
-ARG NATIVE_IMAGE
+# NATIVE_IMAGE's default names the native-image-required stage, which fails the
+# build with instructions, so a build without the argument stops with a clear error.
+ARG NATIVE_IMAGE=native-image-required
+FROM golang:1.26-bookworm@sha256:e8c859f5632dcfde7b32d2012b4351728f6437930887c2f6a91ea242459e5514 AS native-image-required
+RUN echo "Set --build-arg NATIVE_IMAGE to the administrator-resolved native image: a local tag, or repository@sha256:digest for shared or Kubernetes builds" >&2 && exit 1
+
 FROM golang:1.26-bookworm@sha256:e8c859f5632dcfde7b32d2012b4351728f6437930887c2f6a91ea242459e5514 AS toolchain
 ENV GOTOOLCHAIN=local GOMODCACHE=/opt/sproozi-go-modules CGO_ENABLED=0
 WORKDIR /cache-source

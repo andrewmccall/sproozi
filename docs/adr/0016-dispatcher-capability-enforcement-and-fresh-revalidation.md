@@ -3,6 +3,8 @@
 Status: accepted
 Date: 2026-10-17
 
+Partly superseded: [ADR 0027](0027-configurable-concurrent-admission.md) replaces the uncached revalidation reads and this record's rejection of an informer cache. On Kubernetes, the per-request and one-second checks now read AgentRun, AgentTemplate, AgentPolicy and ServiceAccount from a watch cache, confirm any change live before closing a session, and recheck each execution live at least every 10 seconds. New connections, registration ConfigMaps and Pods stay live. The connection and session defaults are now 2048 and 16. Dispatcher enforcement below remains in effect.
+
 ## Problem and constraints
 
 Every gateway route declared a capability and an enforcement tier, but the
@@ -47,7 +49,7 @@ The Kubernetes backend is one concrete `Authenticator` with `Authenticate` and
 `Revalidate`, mirroring the Docker `Owner`. Revalidation keeps reading the
 current objects directly from the API server, without a cache. Fresh reads make
 revocation prompt: cancelling a run, changing its policy or template, stopping a
-managed worker or deleting its ServiceAccount closes inspected sessions within
+managed worker or deleting its ServiceAccount closes inspected connections within
 the revalidation interval.
 
 ## Alternatives and tradeoffs
@@ -65,17 +67,19 @@ must grant it. Other services' clients receive the same body.
 Each revalidation makes four uncached GET requests for an ordinary run: the
 ServiceAccount, AgentRun, AgentTemplate and AgentPolicy. A managed execution
 adds its registry ConfigMap and worker Pod, for six. The transport revalidates
-every open session once per second and before each inspected request. With the
-default bounds of 128 connections and eight sessions per execution, the ticker
+every open inspected connection once per second and before each inspected
+request. With the default bounds of 128 connections and eight inspected
+connections per execution, the ticker
 alone can therefore produce up to about 770 GET requests per second. Request
 traffic adds to that.
 
 - An informer cache would remove most of those reads, but revocation would wait
   for watch delivery. The gateway would also hold every watched ServiceAccount,
   run, template, policy, registry ConfigMap and Pod in memory, and a stale
-  cache could keep a revoked session open.
-- Revalidating only on each request would leave idle and streaming sessions open
-  after revocation until their next request or the five-minute session lifetime.
+  cache could keep a revoked connection open.
+- Revalidating only on each request would leave idle and streaming inspected
+  connections open after revocation until their next request or the
+  five-minute connection lifetime.
 - A longer interval would reduce load in proportion to the interval, but would
   delay revocation by the same amount.
 

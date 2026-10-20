@@ -1,8 +1,10 @@
 package model_test
 
 import (
+	"log/slog"
 	"net/http"
 	"testing"
+	"time"
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/budget"
@@ -52,6 +54,12 @@ type identityConfig struct {
 	// receives bounded, redacted errors, never prompts or model output deltas.
 	// This does not bypass usage verification or change budget settlement.
 	Diagnostics func(modelgateway.ResponseDiagnostic)
+
+	// Logger receives forfeited-reservation lines.
+	Logger *slog.Logger
+
+	// Now is the clock that measures how long a call ran.
+	Now func() time.Time
 }
 type identityHandler struct{ Config identityConfig }
 
@@ -65,6 +73,6 @@ func (h *identityHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.Config.ProviderAuth == nil {
 		h.Config.ProviderAuth = modelauth.APIKey{Key: h.Config.OpenAIKey}
 	}
-	real := &modelgateway.Handler{Config: modelgateway.HandlerConfig{Pricing: h.Config.Pricing, AuditLogger: h.Config.AuditLogger, UpstreamURL: h.Config.UpstreamURL, ProviderAuth: h.Config.ProviderAuth, HTTPClient: h.Config.HTTPClient, Diagnostics: h.Config.Diagnostics}}
+	real := &modelgateway.Handler{Config: modelgateway.HandlerConfig{Pricing: h.Config.Pricing, AuditLogger: h.Config.AuditLogger, UpstreamURL: h.Config.UpstreamURL, ProviderAuth: h.Config.ProviderAuth, HTTPClient: h.Config.HTTPClient, Diagnostics: h.Config.Diagnostics, Logger: h.Config.Logger, Now: h.Config.Now}}
 	real.ServeHTTP(w, r)
 }

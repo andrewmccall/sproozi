@@ -38,7 +38,12 @@ Queued -> Admitted -> Running -> Succeeded | Failed | TimedOut | Cancelled
 ```
 
 Before admission, the controller resolves the template, policy and runtime
-references. It checks the requested capabilities and resource limits.
+references. It checks the requested capabilities and resource limits. If an
+optional concurrency cap is full, for the cluster or for the run's policy, the
+run stays `Queued` with reason `WaitingForConcurrencyCap` until an active run
+finishes. There is no cluster cap by default, and no policy cap unless the
+policy sets one, so runs are admitted concurrently. See
+[AgentRun admission](../reference/agentrun.md#admission-and-concurrency-caps).
 
 After admission, the controller creates a dedicated ServiceAccount,
 NetworkPolicy and immutable input ConfigMap. It creates the Pod from the runtime
@@ -78,9 +83,15 @@ for ownership checks and retained state.
 
 The projected gateway token lasts two hours; policy limits execution to one
 hour. The demo reads the token once. The gateway does not wait for token expiry
-to revoke access. It checks run identity and policy on every new request and
-rechecks open connections every second by default. Each policy lookup has a
-five-second deadline. Closing a connection doesn't prove that the upstream work
-stopped. See the [transport
+to revoke access. It checks run identity and policy on every new connection and
+request, and rechecks open connections every second by default. On Kubernetes,
+the checks after the first read a watch cache, confirm any change live and run
+a live recheck at least every 10 seconds per execution. Each policy lookup has a
+five-second deadline, so a revocation closes open connections within 1 second
+plus watch delay plus 5 seconds, or under 16 seconds if the watch stalls. Closing a connection doesn't prove that the upstream work
+stopped. A model call cut off this way after the provider received its whole
+request is charged an [estimated charge](../../GLOSSARY.md#estimated-charge),
+capped at its reservation, even if its response hadn't started; one cut off
+before the provider received the whole request is not charged. See the [transport
 limits](../reference/security-hardening.md#protect-transport-and-identities).
 The workload has no Sproozi proxy sidecar or local proxy process.

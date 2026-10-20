@@ -81,6 +81,23 @@ func (e *Engine) ImageID(ctx context.Context, reference string) (string, error) 
 	return id, nil
 }
 
+// NetworkExists reports whether the engine has a network with exactly this name.
+func (e *Engine) NetworkExists(ctx context.Context, name string) (bool, error) {
+	if !resourceName.MatchString(name) {
+		return false, errors.New("docker network name is invalid")
+	}
+	data, err := e.command(ctx, "network", "ls", "--filter", "name=^"+name+"$", "--format", "{{.Name}}")
+	if err != nil {
+		return false, err
+	}
+	for line := range strings.SplitSeq(string(data), "\n") {
+		if strings.TrimSpace(line) == name {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // CreateIsolated creates an inert, network-disabled execution. This primitive
 // does not supply workspace storage, gateway routing or portable-session launch.
 // The managed placement must establish those before any native activation.
@@ -221,16 +238,37 @@ func (e *Engine) RemoveVolume(ctx context.Context, v Volume) error {
 	return err
 }
 
+// boundedOutput keeps at most limit bytes of a command's output. It does not
+// embed bytes.Buffer: io.Copy would then use Buffer.ReadFrom and bypass Write.
+// Output past the limit fails, unless truncate keeps the first limit bytes
+// for an error message and discards the rest.
 type boundedOutput struct {
-	bytes.Buffer
-	limit int
+	buffer              bytes.Buffer
+	limit               int
+	truncate, truncated bool
 }
 
 func (b *boundedOutput) Write(data []byte) (int, error) {
-	if len(data) > b.limit-b.Len() {
+	room := b.limit - b.buffer.Len()
+	if len(data) <= room {
+		return b.buffer.Write(data)
+	}
+	if !b.truncate {
 		return 0, errors.New("docker control response exceeds limit")
 	}
-	return b.Buffer.Write(data)
+	b.truncated = true
+	_, _ = b.buffer.Write(data[:max(room, 0)])
+	return len(data), nil
+}
+
+func (b *boundedOutput) Bytes() []byte { return b.buffer.Bytes() }
+
+// String returns the kept output, marked when the rest was discarded.
+func (b *boundedOutput) String() string {
+	if b.truncated {
+		return b.buffer.String() + " [output truncated]"
+	}
+	return b.buffer.String()
 }
 
 func (e *Engine) command(ctx context.Context, args ...string) ([]byte, error) {

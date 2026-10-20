@@ -50,8 +50,8 @@ def main():
     check(Path(home["gateway"]["providerTokenFile"]).read_text().strip() == HOST.TOKEN,
           "This verifier accepts only the deterministic public provider fixture")
     source = profile["placementName"]
-    origin = home["remote"][source]["URL"]
-    tls = ssl.create_default_context(cafile=home["remote"][source]["CAFile"])
+    origin = home["remote"][source]["url"]
+    tls = ssl.create_default_context(cafile=home["remote"][source]["caFile"])
     task_token = Path(profile["workTokenFile"]).read_text().strip()
     socket = Path(home["directory"]) / "control.sock"
     check(not socket.exists(), "First remote task must run without the home daemon")

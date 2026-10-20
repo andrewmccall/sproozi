@@ -13,5 +13,6 @@ func listenTestControl(address string) (net.Listener, error) {
 		return nil, err
 	}
 	sid := user.User.Sid.String()
-	return winio.ListenPipe(address, &winio.PipeConfig{SecurityDescriptor: "O:" + sid + "D:P(A;;GA;;;" + sid + ")(A;;GA;;;SY)"})
+	descriptor := "O:" + sid + "D:P(A;;GA;;;" + sid + ")(A;;GA;;;SY)"
+	return winio.ListenPipe(address, &winio.PipeConfig{SecurityDescriptor: descriptor})
 }

@@ -20,7 +20,7 @@ if [[ "${SPROOZI_PRESERVE_ON_FAILURE:-0}" != 0 && "${SPROOZI_PRESERVE_ON_FAILURE
 fi
 
 run_id="${SPROOZI_VERIFY_ID:-$(date -u +%Y%m%d%H%M%S)-$$}"
-cluster="kind-sproozi-verify-${run_id}"
+cluster="sproozi-verify-${run_id}"
 kubeconfig="${SPROOZI_KUBECONFIG:-$(mktemp -p "${TMPDIR:-/tmp}" sproozi-kind.XXXXXX)}"
 manager_image="${SPROOZI_E2E_MANAGER_IMAGE:-example.com/sproozi:v0.0.1}"
 logs="$(mktemp -d -p "${TMPDIR:-/tmp}" sproozi-kind-jobs.XXXXXX)"

@@ -63,7 +63,8 @@ spec:
       - name: hermes
         # Hermes 0.22.2, pinned by digest like the acceptance tests.
         image: docker.io/nousresearch/hermes-agent@sha256:36099926da316742423544e055d4734777105ffe6341873af5459b957d0c2919
-        # Native s6 owns the gateway; a second foreground gateway conflicts on PVC restart.
+        # Hermes's own s6 supervisor runs the Hermes gateway (not the Sproozi gateway);
+        # a second foreground Hermes gateway conflicts with it on PVC restart.
         args: [sleep, infinity]
         env:
         - name: HERMES_HOME

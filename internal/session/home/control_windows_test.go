@@ -303,3 +303,19 @@ func TestWindowsControlOtherUserHelper(t *testing.T) {
 	}
 	fmt.Printf("bytes=%d\n", len(data))
 }
+
+// A control pipe another process still serves is refused, not replaced.
+func TestWindowsControlRefusesLivePipe(t *testing.T) {
+	address := controlAddress(t)
+	listener, err := listenControl(address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = listener.Close() }()
+	if other, err := listenControl(address); !errors.Is(err, errControlListening) {
+		if other != nil {
+			_ = other.Close()
+		}
+		t.Fatalf("second listener on a live pipe: %v", err)
+	}
+}

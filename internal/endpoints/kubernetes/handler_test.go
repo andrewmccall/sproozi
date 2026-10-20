@@ -122,6 +122,26 @@ func TestDeniedOperationsNeverCallUpstream(t *testing.T) {
 	}
 }
 
+// A request outside a bound the workload controls says which bound; a policy
+// denial says only that the request was denied.
+func TestDenialBodyNamesWorkloadFixableBounds(t *testing.T) {
+	u, _ := url.Parse("https://kubernetes.test")
+	h := &Handler{Config: HandlerConfig{Upstream: u, Client: &http.Client{Transport: roundTripFunc(
+		func(*http.Request) (*http.Response, error) { return response(), nil })}}}
+	for path, want := range map[string]string{
+		"/api/v1/namespaces/demo/pods?watch=1&timeoutSeconds=301": "kubernetes request denied: timeoutSeconds must be an integer from 1 to 300",
+		"/api/v1/namespaces/demo/pods?limit=5001":                 "kubernetes request denied: limit must be an integer from 1 to 5000",
+		demoSecretsPath: "kubernetes request denied",
+	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		recorder := httptest.NewRecorder()
+		h.ServeHTTP(recorder, req.WithContext(gateway.WithIdentity(req.Context(), identity())))
+		if recorder.Code != http.StatusForbidden || strings.TrimSpace(recorder.Body.String()) != want {
+			t.Errorf("%s = %d %q, want 403 %q", path, recorder.Code, recorder.Body.String(), want)
+		}
+	}
+}
+
 func TestKubernetesAuditRecordsAllowedReadAndPolicyDenial(t *testing.T) {
 	var output bytes.Buffer
 	u, _ := url.Parse("https://kubernetes.test")

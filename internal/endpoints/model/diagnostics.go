@@ -6,6 +6,7 @@ import (
 	"mime"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -70,77 +71,76 @@ func describeResponse(resp *http.Response, body []byte, credential string) Respo
 	prefix := bytes.TrimSpace(body)
 	switch {
 	case bytes.HasPrefix(prefix, []byte("data:")), bytes.HasPrefix(prefix, []byte("event:")):
-		d.BodyFormat = "sse"
+		d.BodyFormat = sseFormat
 	case bytes.HasPrefix(prefix, []byte("{")), bytes.HasPrefix(prefix, []byte("[")):
 		d.BodyFormat = "json"
 	case len(prefix) == 0:
 		d.BodyFormat = "empty"
 	}
-	decode := func(raw []byte) {
-		var event struct {
-			Type    string `json:"type"`
-			Code    string `json:"code"`
-			Param   string `json:"param"`
-			Message string `json:"message"`
-			Detail  string `json:"detail"`
-			Error   *struct {
-				Code    string
-				Param   string
-				Message string
-			} `json:"error"`
-			Response *struct {
-				Error *struct {
-					Code    string
-					Param   string
-					Message string
-				}
-			} `json:"response"`
-		}
-		if json.Unmarshal(raw, &event) != nil {
-			return
-		}
-		kind := diagnosticID(event.Type, credential)
-		if kind != "" && len(d.Events) < 16 {
-			found := false
-			for _, previous := range d.Events {
-				if previous == kind {
-					found = true
-				}
-			}
-			if !found {
-				d.Events = append(d.Events, kind)
-			}
-		}
-		switch kind {
-		case "response.completed", responseFailedEvent, responseIncompleteEvent, errorEventType:
-			d.TerminalEvent = kind
-		}
-		if event.Response != nil && event.Response.Error != nil {
-			event.Code, event.Param, event.Message = event.Response.Error.Code, event.Response.Error.Param, event.Response.Error.Message
-		} else if event.Error != nil {
-			event.Code, event.Param, event.Message = event.Error.Code, event.Error.Param, event.Error.Message
-		} else if event.Detail != "" {
-			event.Message = event.Detail
-		}
-		if kind == errorEventType || kind == responseFailedEvent || kind == responseIncompleteEvent || resp.StatusCode >= 400 {
-			d.ErrorCode, d.ErrorParam = diagnosticID(event.Code, credential), diagnosticID(event.Param, credential)
-			d.ErrorMessage = diagnosticText(event.Message, credential)
-		}
-	}
 	if mediaType != eventStreamMediaType && d.BodyFormat != "sse" {
-		decode(body)
+		d.observe(body, credential)
 		return d
 	}
 	for frame := range bytes.SplitSeq(bytes.ReplaceAll(body, []byte("\r\n"), []byte("\n")), []byte("\n\n")) {
-		var data []string
-		for line := range bytes.SplitSeq(frame, []byte("\n")) {
-			if bytes.HasPrefix(line, []byte("data:")) {
-				data = append(data, strings.TrimPrefix(string(line[5:]), " "))
-			}
-		}
-		if len(data) > 0 {
-			decode([]byte(strings.Join(data, "\n")))
-		}
+		d.observeFrame(frame, credential)
 	}
 	return d
+}
+
+// observeFrame observes the data of one SSE frame, normalized to LF.
+func (d *ResponseDiagnostic) observeFrame(frame []byte, credential string) {
+	var data []string
+	for line := range bytes.SplitSeq(frame, []byte("\n")) {
+		if bytes.HasPrefix(line, []byte("data:")) {
+			data = append(data, strings.TrimPrefix(string(line[5:]), " "))
+		}
+	}
+	if len(data) > 0 {
+		d.observe([]byte(strings.Join(data, "\n")), credential)
+	}
+}
+
+// observe records one JSON payload's event type and any provider error.
+func (d *ResponseDiagnostic) observe(raw []byte, credential string) {
+	var event struct {
+		Type    string `json:"type"`
+		Code    string `json:"code"`
+		Param   string `json:"param"`
+		Message string `json:"message"`
+		Detail  string `json:"detail"`
+		Error   *struct {
+			Code    string
+			Param   string
+			Message string
+		} `json:"error"`
+		Response *struct {
+			Error *struct {
+				Code    string
+				Param   string
+				Message string
+			}
+		} `json:"response"`
+	}
+	if json.Unmarshal(raw, &event) != nil {
+		return
+	}
+	kind := diagnosticID(event.Type, credential)
+	if kind != "" && len(d.Events) < 16 && !slices.Contains(d.Events, kind) {
+		d.Events = append(d.Events, kind)
+	}
+	switch kind {
+	case "response.completed", responseFailedEvent, responseIncompleteEvent, errorEventType:
+		d.TerminalEvent = kind
+	}
+	if event.Response != nil && event.Response.Error != nil {
+		event.Code, event.Param, event.Message = event.Response.Error.Code, event.Response.Error.Param, event.Response.Error.Message
+	} else if event.Error != nil {
+		event.Code, event.Param, event.Message = event.Error.Code, event.Error.Param, event.Error.Message
+	} else if event.Detail != "" {
+		event.Message = event.Detail
+	}
+	if kind == errorEventType || kind == responseFailedEvent || kind == responseIncompleteEvent || d.HTTPStatus >= 400 {
+		d.ErrorCode, d.ErrorParam = diagnosticID(event.Code, credential), diagnosticID(event.Param, credential)
+		d.ErrorMessage = diagnosticText(event.Message, credential)
+	}
 }

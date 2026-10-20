@@ -3,6 +3,7 @@
 package privatefs
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -43,5 +44,23 @@ func TestRejectsBroadPermissionsWithoutRepair(t *testing.T) {
 	if f, err := Lock(filepath.Join(dir, "owner.lock")); err == nil {
 		_ = UnlockClose(f)
 		t.Fatal("created lock in public directory")
+	}
+}
+
+// A symbolic link fails the private-file check rather than surfacing ELOOP.
+func TestReadFileReportsALinkAsUnsafe(t *testing.T) {
+	dir := testDirectory(t)
+	target := filepath.Join(dir, "certificate")
+	if err := os.WriteFile(target, []byte("public"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	_, err := ReadFile(link, 1024)
+	var unsafe *UnsafePathError
+	if !errors.As(err, &unsafe) || unsafe.Path != link {
+		t.Fatalf("got %v, want an unsafe path error for %s", err, link)
 	}
 }

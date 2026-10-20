@@ -71,3 +71,6 @@ venv/
 
 # GoReleaser output
 /dist/
+
+# Local build output of cmd/webhook
+/webhook

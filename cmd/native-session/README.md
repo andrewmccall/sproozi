@@ -14,7 +14,7 @@ It supplies these JSON fields:
 | --- | --- |
 | `harness` | Required `codex` or `claude-code`; immutable throughout the session |
 | `deadline` | Original effective absolute deadline, RFC3339 |
-| `threadId` | Selected native UUID for resume; empty only for a new session |
+| `threadId` | Selected harness conversation ID for resume; empty only for a new session |
 | `instructions` | Actual trusted instruction string supplied independently of portable history |
 | `instructionDigest` | SHA256 of the UTF-8 instruction string |
 | `env` | Explicit fresh `KEY=value` entries; fixed homes, cwd and Claude behavior switches cannot be replaced |

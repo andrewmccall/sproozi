@@ -17,7 +17,7 @@ def main():
     root = Path(__file__).resolve().parents[2]
     rendered = subprocess.run(
         ["python3", str(root / "hack/demo/render.py"), "--codex-image", args.codex_image,
-         "--repository", "example/sproozi-demo", "--model-auth", args.model_auth]
+         "--repository", "octo-org/sproozi-demo", "--model-auth", args.model_auth]
         + (["--mcp"] if args.mode == "native" else []),
         check=True, capture_output=True, text=True,
     ).stdout

@@ -16,7 +16,7 @@ func helpFlags(t *testing.T, text string) []string {
 	t.Helper()
 	var names []string
 	for line := range strings.SplitSeq(text, "\n") {
-		if rest, ok := strings.CutPrefix(line, "  -"); ok {
+		if rest, ok := strings.CutPrefix(line, "  --"); ok {
 			names = append(names, strings.Fields(rest)[0])
 		}
 	}
@@ -36,8 +36,28 @@ func TestCommandHelpListsOnlyItsFlagsAndSucceeds(t *testing.T) {
 	}
 }
 
+func TestBareCommandPrintsUsageAndFails(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := cli(nil, &stdout, &stderr); code != 2 || stdout.Len() != 0 ||
+		!strings.HasPrefix(stderr.String(), "Usage: sproozi COMMAND [flags]") {
+		t.Fatalf("bare sproozi exited %d: %q %q", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestHelpNamesValuesAndPlacements(t *testing.T) {
+	for args, want := range map[string]string{
+		"run":  "  --harness NAME\n",
+		"move": "placement NAME: the value of local.name (for example local) or a name under \"remote\"",
+	} {
+		var stdout, stderr bytes.Buffer
+		if code := cli([]string{args, "-h"}, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), want) {
+			t.Fatalf("%s -h exited %d without %q:\n%s", args, code, want, stdout.String())
+		}
+	}
+}
+
 func TestTopLevelHelpListsEveryCommand(t *testing.T) {
-	for _, args := range [][]string{nil, {"-h"}, {"--help"}, {"help"}} {
+	for _, args := range [][]string{{"-h"}, {"--help"}, {"help"}} {
 		var stdout, stderr bytes.Buffer
 		if code := cli(args, &stdout, &stderr); code != 0 {
 			t.Fatalf("%v exited %d: %s", args, code, stderr.String())
@@ -57,6 +77,9 @@ func TestUnsupportedFlagOrCommandPointsToHelp(t *testing.T) {
 	}{
 		{[]string{"pull", uuid.NewString(), "--task", "x"}, `pull does not accept --task; run "sproozi pull -h"`},
 		{[]string{"bogus"}, `unknown command "bogus"; run "sproozi -h"`},
+		{[]string{"doctor"}, `unknown command "doctor"; run "sproozi -h" for commands. The setup check is ` +
+			`"python3 hack/verify/quickstart.py doctor" in a repository checkout, see ` +
+			docURL("docs/guides/getting-started.md")},
 	} {
 		var stdout, stderr bytes.Buffer
 		if code := cli(tc.args, &stdout, &stderr); code != 1 || !strings.Contains(stderr.String(), tc.want) {

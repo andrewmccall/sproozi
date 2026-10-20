@@ -98,7 +98,7 @@ func (c *Coordinator) Move(ctx context.Context, id, operationID, destination str
 		return r, err
 	}
 	if r.CancelOperation != "" {
-		return r, errors.New("session: session cancelled")
+		return r, cancelled(r)
 	}
 	ctx, finish, err := c.graceful.Begin(ctx, id)
 	if err != nil {
@@ -118,7 +118,7 @@ func (c *Coordinator) Move(ctx context.Context, id, operationID, destination str
 		}
 	}
 	if r.PendingOperation != "" {
-		return r, errors.New("session: previous move requires recovery")
+		return r, pendingRecovery(r)
 	}
 	for _, v := range r.Visits {
 		if v.Launch.OperationID == operationID {

@@ -63,6 +63,9 @@ spec:
         args:
           - --leader-elect
           - --health-probe-bind-address=:8081
+          # Optional: --max-active-runs=N caps how many AgentRuns can be
+          # Admitted or Running at once across the cluster. Unset means no
+          # cluster-wide limit; AgentPolicy.spec.maxActiveRuns caps per policy.
         image: controller:latest
         name: manager
         ports:

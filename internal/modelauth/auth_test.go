@@ -20,6 +20,7 @@ const (
 	fixtureOther    = "other"
 	fixtureRefresh  = "fixture-refresh"
 	fixtureAccess   = "fixture-access"
+	renewedBearer   = "Bearer new-access"
 )
 
 func fixtureSession() Session {
@@ -31,9 +32,14 @@ func fixtureSession() Session {
 type memoryStore struct {
 	session Session
 	fail    bool
+	loadErr error
+	loads   atomic.Int32
 }
 
-func (s *memoryStore) Load(context.Context) (Session, error) { return s.session, nil }
+func (s *memoryStore) Load(context.Context) (Session, error) {
+	s.loads.Add(1)
+	return s.session, s.loadErr
+}
 func (s *memoryStore) Replace(_ context.Context, before, after Session) error {
 	if s.fail {
 		s.fail = false
@@ -97,7 +103,7 @@ func TestChatGPTSerializesRefreshAndPersistsRotatedSession(t *testing.T) {
 				t.Error(err)
 				return
 			}
-			if req.Header.Get("Authorization") != "Bearer new-access" {
+			if req.Header.Get("Authorization") != renewedBearer {
 				t.Error("stale credentials were injected")
 			}
 		})
@@ -126,8 +132,97 @@ func TestChatGPTDoesNotUseUnsavedCredentialsOrRefreshTwice(t *testing.T) {
 	if err := auth.Authorize(r); err != nil {
 		t.Fatal(err)
 	}
-	if calls.Load() != 1 || r.Header.Get("Authorization") != "Bearer new-access" {
+	if calls.Load() != 1 || r.Header.Get("Authorization") != renewedBearer {
 		t.Fatal("persistence retry rotated twice")
+	}
+}
+
+func TestChatGPTParallelRequestsDoNotSerializeWhenNoRefreshIsDue(t *testing.T) {
+	store := &memoryStore{session: fixtureSession()}
+	auth := NewChatGPT(store, http.DefaultClient)
+	auth.tokenEndpoint = "http://127.0.0.1:0" // a refresh would fail
+	if err := auth.Authorize(httptest.NewRequest(http.MethodPost, Resource+"/responses", nil)); err != nil {
+		t.Fatal(err)
+	}
+	// Hold the refresh lock: requests that needed it, or a Secret read, would block.
+	auth.mu.Lock()
+	defer auth.mu.Unlock()
+	var wg sync.WaitGroup
+	done := make(chan struct{})
+	for range 50 {
+		wg.Go(func() {
+			req := httptest.NewRequest(http.MethodPost, Resource+"/responses", nil)
+			if err := auth.Authorize(req); err != nil || req.Header.Get("Authorization") != "Bearer "+fixtureAccess {
+				t.Errorf("parallel authorize = %v, %q", err, req.Header.Get("Authorization"))
+			}
+		})
+	}
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("parallel requests waited for the refresh lock")
+	}
+	if store.loads.Load() != 1 {
+		t.Fatalf("Secret reads = %d, want 1", store.loads.Load())
+	}
+}
+
+func TestChatGPTRereadsTheStoredSessionAfterTheReloadInterval(t *testing.T) {
+	store := &memoryStore{session: fixtureSession()}
+	auth := NewChatGPT(store, http.DefaultClient)
+	authorize := func() (string, error) {
+		req := httptest.NewRequest(http.MethodPost, Resource+"/responses", nil)
+		err := auth.Authorize(req)
+		return req.Header.Get("Authorization"), err
+	}
+	if header, err := authorize(); err != nil || header != "Bearer "+fixtureAccess {
+		t.Fatalf("first authorize = %q, %v", header, err)
+	}
+	// An administrator loads a new sign-in into the Secret.
+	store.session.AccessToken = "replaced-access"
+	if header, _ := authorize(); header != "Bearer "+fixtureAccess {
+		t.Fatalf("authorize within the reload interval = %q", header)
+	}
+	auth.current.Load().loadedAt = time.Now().Add(-SessionReloadInterval)
+	if header, err := authorize(); err != nil || header != "Bearer replaced-access" {
+		t.Fatalf("authorize after the reload interval = %q, %v", header, err)
+	}
+	// A Secret that can no longer be read stops model requests at the next reload.
+	store.loadErr = errors.New("forbidden")
+	auth.current.Load().loadedAt = time.Now().Add(-SessionReloadInterval)
+	if header, err := authorize(); err == nil || header != "" {
+		t.Fatalf("authorize with an unreadable Secret = %q, %v", header, err)
+	}
+	if header, err := authorize(); err == nil || header != "" {
+		t.Fatalf("authorize after a failed reload served a cached token: %q, %v", header, err)
+	}
+}
+
+func TestChatGPTRefreshesFromTheStoredSessionNotTheInMemoryCopy(t *testing.T) {
+	var refreshTokens []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		refreshTokens = append(refreshTokens, r.Form.Get(refreshTokenField))
+		_, _ = w.Write([]byte(`{"access_token":"new-access","refresh_token":"new-refresh","token_type":"Bearer","expires_in":3600}`))
+	}))
+	defer server.Close()
+	store := &memoryStore{session: fixtureSession()}
+	auth := NewChatGPT(store, server.Client())
+	auth.tokenEndpoint = server.URL
+	if err := auth.Authorize(httptest.NewRequest(http.MethodPost, Resource+"/responses", nil)); err != nil {
+		t.Fatal(err)
+	}
+	// The administrator replaces the session; then the in-memory copy expires.
+	store.session.RefreshToken = "administrator-refresh"
+	store.session.SavedAt = time.Now().Add(-2 * time.Hour)
+	auth.current.Load().session.SavedAt = time.Now().Add(-2 * time.Hour)
+	req := httptest.NewRequest(http.MethodPost, Resource+"/responses", nil)
+	if err := auth.Authorize(req); err != nil || req.Header.Get("Authorization") != renewedBearer {
+		t.Fatalf("refresh = %v", err)
+	}
+	if len(refreshTokens) != 1 || refreshTokens[0] != "administrator-refresh" || store.session.RefreshToken != "new-refresh" {
+		t.Fatalf("refresh used %v, stored %q", refreshTokens, store.session.RefreshToken)
 	}
 }
 
@@ -180,5 +275,29 @@ func TestPrivateCredentialFilesAndRequiredPlanScope(t *testing.T) {
 	session.ClientID = dynamicClientID
 	if session.Validate() == nil {
 		t.Fatal("bootstrap client accepted as issued client")
+	}
+}
+
+type slowStore struct {
+	*memoryStore
+	delay time.Duration
+}
+
+func (s slowStore) Load(ctx context.Context) (Session, error) {
+	time.Sleep(s.delay)
+	return s.memoryStore.Load(ctx)
+}
+
+func TestChatGPTReloadIntervalStartsBeforeTheSecretRead(t *testing.T) {
+	store := &memoryStore{session: fixtureSession()}
+	auth := NewChatGPT(slowStore{memoryStore: store, delay: 30 * time.Millisecond}, http.DefaultClient)
+	auth.reloadInterval = 20 * time.Millisecond // shorter than one read
+	for range 2 {
+		if err := auth.Authorize(httptest.NewRequest(http.MethodPost, Resource+"/responses", nil)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if loads := store.loads.Load(); loads != 2 {
+		t.Fatalf("Secret reads = %d, want 2: a read slower than the reload interval extended the cached session", loads)
 	}
 }

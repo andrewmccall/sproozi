@@ -3,6 +3,8 @@
 Status: accepted
 Date: 2026-10-17
 
+Partly superseded: [ADR 0027](0027-configurable-concurrent-admission.md) replaces the single active slot with optional cluster and policy concurrency caps. The live run list described below now counts active runs against those caps, and a runtime that cannot launch still fails the run before it is admitted. References to "the slot" below describe the controller at the time. Other decisions in this record remain in effect.
+
 ## Problem and constraints
 
 `AgentRuntime` rules (digest-pinned images, container security, approved

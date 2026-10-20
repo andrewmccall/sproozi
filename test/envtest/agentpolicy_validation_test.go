@@ -6,10 +6,12 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
@@ -202,4 +204,84 @@ func TestAgentPolicyAllowsTokenOnlyBudgetButRejectsInvalidLimits(t *testing.T) {
 		}
 	})
 
+}
+
+func TestAgentPolicyMaxActiveRunsIsAtLeastOne(t *testing.T) {
+	t.Parallel()
+
+	ns := newNamespace(t)
+	policy := validAgentPolicy(ns)
+	policy.Spec.MaxActiveRuns = ptr.To(int32(0))
+	if err := testClient.Create(t.Context(), policy); err == nil {
+		t.Fatal("Create() with maxActiveRuns 0 error = nil, want API server validation error")
+	}
+	policy = validAgentPolicy(ns)
+	policy.Spec.MaxActiveRuns = ptr.To(int32(1))
+	if err := testClient.Create(t.Context(), policy); err != nil {
+		t.Fatalf("Create() with maxActiveRuns 1 error = %v", err)
+	}
+}
+
+func TestAgentPolicyMaxModelCallSecondsIsAtLeastOne(t *testing.T) {
+	t.Parallel()
+
+	ns := newNamespace(t)
+	policy := validAgentPolicy(ns)
+	policy.Spec.MaxModelCallSeconds = ptr.To(int32(0))
+	if err := testClient.Create(t.Context(), policy); err == nil {
+		t.Fatal("Create() with maxModelCallSeconds 0 error = nil, want API server validation error")
+	}
+	policy = validAgentPolicy(ns)
+	policy.Spec.MaxModelCallSeconds = ptr.To(int32(1))
+	if err := testClient.Create(t.Context(), policy); err != nil {
+		t.Fatalf("Create() with maxModelCallSeconds 1 error = %v", err)
+	}
+}
+
+// An integer the API server accepts but the Go type cannot hold stops every
+// AgentPolicy informer from decoding, so each integer field has a Maximum.
+func TestAgentPolicyRejectsIntegersAboveTheirMaximum(t *testing.T) {
+	t.Parallel()
+
+	ns := newNamespace(t)
+	const spec = "spec"
+	budget := []string{spec, "budgets", string(sprooziv1alpha1.CapabilityModelInference)}
+	for _, tc := range []struct {
+		name  string
+		path  []string
+		max   int64
+		above any
+	}{
+		{"max-active-runs", []string{spec, "maxActiveRuns"}, 10_000, int64(99_999_999_999)},
+		{"max-model-call-seconds", []string{spec, "maxModelCallSeconds"}, 3600, int64(99_999_999_999)},
+		{"max-download-bytes", []string{spec, "packagesInstall", "maxDownloadBytes"}, 1 << 40, float64(1e20)},
+		{"max-units", append(budget, "maxUnits"), 1_000_000_000_000_000, float64(1e20)},
+		{"max-cost-micros", append(budget, "maxCostMicros"), 1_000_000_000_000_000, float64(1e20)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			create := func(name string, value any) error {
+				object, err := runtime.DefaultUnstructuredConverter.ToUnstructured(validAgentPolicy(ns))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := unstructured.SetNestedField(object, value, tc.path...); err != nil {
+					t.Fatal(err)
+				}
+				policy := &unstructured.Unstructured{Object: object}
+				policy.SetAPIVersion(sprooziv1alpha1.GroupVersion.String())
+				policy.SetKind("AgentPolicy")
+				policy.SetName(name)
+				return testClient.Create(t.Context(), policy)
+			}
+			if err := create(tc.name+"-max", tc.max); err != nil {
+				t.Fatalf("Create() at maximum %d error = %v", tc.max, err)
+			}
+			if err := create(tc.name+"-above", tc.max+1); !apierrors.IsInvalid(err) {
+				t.Fatalf("Create() at maximum+1 error = %v, want Invalid", err)
+			}
+			if err := create(tc.name+"-overflow", tc.above); !apierrors.IsInvalid(err) {
+				t.Fatalf("Create() with %v error = %v, want Invalid", tc.above, err)
+			}
+		})
+	}
 }

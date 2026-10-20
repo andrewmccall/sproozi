@@ -1,7 +1,13 @@
+# Optional example, not listed in kustomization.yaml. The install creates an
+# empty sproozi-egress-gateway-profiles ConfigMap; applying this file replaces
+# it with two named profiles. Restart the gateway afterwards
+# (kubectl rollout restart deployment/sproozi-gateway -n sproozi-system), and
+# list a profile in both the AgentPolicy and the AgentTemplate egressProfiles
+# before a run can use it.
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: egress-gateway-profiles
+  name: sproozi-egress-gateway-profiles
   namespace: sproozi-system
 data:
   profiles.json: |

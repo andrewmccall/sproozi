@@ -1,6 +1,6 @@
 # Selected native checkpoint helper
 
-`checkpoint` transfers one stopped native conversation and its Git workspace as
+`checkpoint` transfers one stopped harness conversation and its Git workspace as
 a bounded artifact. Build it into the trusted helper image at
 `/usr/local/bin/checkpoint`. The placement owns admission, transport authentication,
 quota-backed storage, actual writer fencing and activation. This command does
@@ -51,7 +51,7 @@ the captured workspace artifact:
 ```
 
 This publishes the workspace with a fresh empty selected native home. Its receipt
-has an empty native UUID; the stock client generates the UUID later. It accepts
+has an empty harness conversation ID (`threadId`); the stock client generates the UUID later. It accepts
 no instruction digest or caller-supplied thread ID.
 
 After the placement independently confirms the exact worker container stopped,

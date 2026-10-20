@@ -1,7 +1,7 @@
 # Install the CLI
 
-Install `sproozi` on the machine where you control agent work. Agent workers run
-in Linux containers. Installing the CLI does not start a service or create
+Install `sproozi` on the machine where you control agent work. Agent sandboxes
+run in Linux containers. Installing the CLI does not start a service or create
 credentials.
 
 ## Homebrew
@@ -50,13 +50,27 @@ recommended macOS installation path.
 
 ## Choose the next step
 
-- To try Kubernetes locally, follow [getting started](getting-started.md).
-- To use an existing cluster, follow [Kubernetes installation](install-kubernetes.md).
-- To move sessions between Docker and Kubernetes, follow [session mobility](session-mobility.md).
-- On Windows, read [Windows setup](windows.md) before configuring a home service.
+The CLI controls sessions through the home daemon (`sproozi serve`) and remote
+executors. These guides use it:
 
-The Kubernetes and session guides include the required Linux images, network
-setup and credentials. The CLI archive does not contain worker images.
+- [Move a live session between Docker and Kubernetes](session-mobility.md)
+  configures the home daemon and starts a session in local Docker.
+- [Run a task remotely, then resume it locally](portable-workflows.md) runs Codex in
+  Kubernetes and continues its work locally.
+- [Hermes with remote work](retained-work-kubernetes.md) connects a persistent
+  Hermes assistant to that remote work.
+- On Windows, read [Use Sproozi on Windows](windows.md) before configuring the
+  home daemon.
+
+These guides also build images and the profile service from a checkout of this
+repository. Use the checkout of the same release as your CLI:
+`sproozi --version` prints the version, and its tag is that version with a `v`
+prefix, for example `git checkout v0.1.0`. The CLI archive does not contain
+sandbox images.
+
+The Kubernetes guides don't use the CLI. [Getting started](getting-started.md)
+and [Install on Kubernetes and run your first Pod](install-kubernetes.md) run
+from a checkout with Make.
 
 ## Build from source
 

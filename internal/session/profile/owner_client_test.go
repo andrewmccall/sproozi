@@ -38,3 +38,17 @@ func TestOwnerClientPreservesSafeOutcomes(t *testing.T) {
 		}
 	}
 }
+
+func TestOwnerClientKeepsTransportFailureOutOfTheMessage(t *testing.T) {
+	refused := errors.New("dial tcp 127.0.0.1:1: connect: connection refused")
+	c := Client{base: "https://owner.invalid", maxBody: 1024, http: &http.Client{Transport: ownerRoundTripper(
+		func(*http.Request) (*http.Response, error) { return nil, refused })}}
+	var result any
+	err := c.CallOwner(context.Background(), "info", struct{}{}, &result)
+	var remote *RemoteError
+	if !errors.As(err, &remote) || remote.Code != CodeUnavailable || !errors.Is(remote.Transport, refused) ||
+		strings.Contains(err.Error(), "connection refused") ||
+		!strings.HasSuffix(err.Error(), "session profile: unavailable (no HTTP response)") {
+		t.Fatalf("transport failure: %v", err)
+	}
+}

@@ -67,8 +67,10 @@ func EnsureNetworkPolicy(ctx context.Context, c client.Client, run *sprooziv1alp
 			},
 		},
 		Spec: networkingv1.NetworkPolicySpec{
+			// Select by UID: run names repeat across namespaces, and policies
+			// are additive, so a name selector would share egress between runs.
 			PodSelector: metav1.LabelSelector{
-				MatchLabels: map[string]string{RunLabel: run.Name},
+				MatchLabels: map[string]string{RunUIDLabel: string(run.UID)},
 			},
 			PolicyTypes: []networkingv1.PolicyType{
 				networkingv1.PolicyTypeIngress,

@@ -25,7 +25,8 @@ so CI does not run `make test`. `Lint` and `E2E` are separate workflows.
 | `make verify-race` | The race-and-coverage half of `verify-fast`. `RACE_SHARD=1` runs `test/` and `internal/session`, `RACE_SHARD=2` every other package; the two shards together cover every non-e2e package. | Tests (`race-1`, `race-2`) | Go; downloads envtest binaries |
 | `make verify-protocol` | Pinned `gh` and `git` clients produce the GitHub protocol the gateway inspects. Zero matched or skipped tests fail. | Tests (`checks`) | Downloads the checksum-pinned `gh` |
 | `make verify-mcp` | MCP and gateway packages pass under race, and the live MCP verifier's safety and failure reports pass offline. | Tests: `checks` runs the offline verifier, `python3 hack/verify/mcp-live-test.py`; the race shards cover the packages | Go, Python 3 |
-| `make verify-workflow-fixtures` | Session-mobility protocol fixtures, quickstart ownership and CRD checks, Kind bootstrap readiness ordering, Kind image import and build cache selection, and demo setup credential preservation and registry wiring. Stubs replace Docker and Kind. | Tests (`checks`) | Python 3, Bash; fetches the pinned Calico manifest into `.local/cni` on first run |
+| `make verify-workflow-fixtures` | Session-mobility protocol fixtures, quickstart ownership and CRD checks, Kind bootstrap readiness ordering, Kind image import and build cache selection, demo setup credential preservation and registry wiring, and `make demo` input
+checks before cluster creation and cleanup after a setup failure. Stubs replace Docker and Kind. | Tests (`checks`) | Python 3, Bash; fetches the pinned Calico manifest into `.local/cni` on first run |
 | `make verify-docs` | Local Markdown links resolve and no private-plan paths are referenced. It does not establish that documentation is current. | Tests (`checks`) | Python 3 |
 | `make lint` | golangci-lint reports no issues; `make lint-config` checks its configuration. | Lint | Go; downloads the checksum-pinned golangci-lint release |
 | `make test-e2e` | The full stack works in an owned two-node Kind cluster with enforcing CNI, using the pinned clients and Hermes digest. See [Harnesses and Hermes in Kind](#harnesses-and-hermes-in-kind). | E2E | Docker, Kind, kubectl, Calico from `hack/verify/fetch-calico.sh` |
@@ -94,8 +95,9 @@ unset KUBECONFIG
 ```
 
 Only one helper invocation can drive the shared local Docker images and registry
-at a time. A retained demo holds its lock until cleanup. For ChatGPT mode, use a
-newly authorised session that no other gateway is refreshing. Keep the generated
+at a time. A retained demo holds its lock until cleanup. A run that finds the
+lock held names the owning run and prints the exact `cleanup` command. For ChatGPT mode, use a
+newly authorised ChatGPT credential that no other gateway is refreshing. Keep the generated
 proof under `.local`; keep the skill and its feature map current with
 `/maintain-verification-skill`.
 
@@ -196,8 +198,8 @@ writes a redacted report. The fixture resources and cluster remain caller-owned.
 `make verify-mcp-kind` creates and removes its own two-node Kind cluster. Supply
 Docker, Kind, kubectl, OpenSSL, PyYAML, the Calico v3.30.4 manifest verified by
 `hack/verify/fetch-calico.sh`, a digest-pinned stock Codex tools image and a
-dedicated single-owner ChatGPT session file. The check uses real model requests. Do not share that rotating
-session with another running gateway; the script returns its newest replacement
+dedicated single-owner ChatGPT credential file. The check uses real model requests. Do not share that rotating
+credential with another running gateway; the script returns its newest replacement
 to the supplied file before deleting the cluster.
 
 ```sh
@@ -206,7 +208,7 @@ docker build -f hack/verify/mcp-provider/Dockerfile -t mcp-provider:proof .
 export MCP_PROOF_IMAGE=controller:mcp-proof
 export MCP_PROVIDER_IMAGE=mcp-provider:proof
 export CODEX_IMAGE="<stock-codex-image>@sha256:<digest>"
-export CHATGPT_SESSION_FILE="<private-single-owner-session.json>"
+export CHATGPT_SESSION_FILE="<private-single-owner-chatgpt-credential.json>"
 bash hack/verify/fetch-calico.sh .local/verification/calico-v3.30.4.yaml
 export SPROOZI_CNI_MANIFEST="$PWD/.local/verification/calico-v3.30.4.yaml"
 export MCP_PROOF_REPORT=.local/verification/configured-mcp-live.json

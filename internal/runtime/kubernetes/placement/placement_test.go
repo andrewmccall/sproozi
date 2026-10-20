@@ -1298,3 +1298,23 @@ func TestPlacementRejectsEmptyMismatchedHarnessAndForeignCheckpoint(t *testing.T
 		t.Fatal("changed runtime kind admitted")
 	}
 }
+
+// io.Copy from a reader without WriteTo, as the exec stream does, must not
+// bypass the bound through a ReadFrom method.
+func TestBoundedOutputEnforcesItsBoundThroughCopy(t *testing.T) {
+	large := strings.Repeat("x", 200000)
+	out := &boundedOutput{max: 1024}
+	if _, err := io.Copy(out, struct{ io.Reader }{strings.NewReader(large)}); err == nil {
+		t.Fatal("output over the bound was accepted")
+	}
+	if len(out.Bytes()) > 1024 {
+		t.Fatalf("kept %d bytes over a 1024-byte bound", len(out.Bytes()))
+	}
+	errout := &boundedOutput{max: 1024, truncate: true}
+	if _, err := io.Copy(errout, struct{ io.Reader }{strings.NewReader(large)}); err != nil {
+		t.Fatal(err)
+	}
+	if len(errout.Bytes()) != 1024 {
+		t.Fatalf("truncated output kept %d bytes", len(errout.Bytes()))
+	}
+}

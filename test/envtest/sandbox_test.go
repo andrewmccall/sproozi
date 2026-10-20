@@ -16,11 +16,15 @@ limitations under the License.
 package envtest
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
@@ -69,5 +73,43 @@ func TestAgentRunSandboxPodCreatedOnRunning(t *testing.T) {
 	}
 	if _, err := k8sresources.NewPodSandboxClient(c, c).Ensure(ctx, &r, &rt); err != nil {
 		t.Fatalf("reconcile API-defaulted sandbox: %v", err)
+	}
+}
+
+// TestSandboxEnsureAcceptsAPIDefaultedProbesAndVolumes creates a sandbox from
+// a runtime that leaves server-defaulted fields unset (probe thresholds, port
+// protocol, field reference versions and volume modes), then ensures it again
+// against the Pod the API server stored.
+func TestSandboxEnsureAcceptsAPIDefaultedProbesAndVolumes(t *testing.T) {
+	c, ctx, ns := startAgentRunController(t)
+	createControllerFixtures(t, c, ctx, ns)
+
+	rt := validAgentRuntime(ns)
+	spec := &rt.Spec.PodTemplate.Spec
+	labels := &corev1.ObjectFieldSelector{FieldPath: "metadata.labels"}
+	spec.Volumes = []corev1.Volume{{Name: "info", VolumeSource: corev1.VolumeSource{
+		DownwardAPI: &corev1.DownwardAPIVolumeSource{
+			Items: []corev1.DownwardAPIVolumeFile{{Path: "labels", FieldRef: labels}}}}}}
+	agent := &spec.Containers[0]
+	agent.Ports = []corev1.ContainerPort{{ContainerPort: 8080}}
+	podName := &corev1.ObjectFieldSelector{FieldPath: "metadata.name"}
+	agent.Env = []corev1.EnvVar{{Name: "POD", ValueFrom: &corev1.EnvVarSource{FieldRef: podName}}}
+	agent.LivenessProbe = &corev1.Probe{ProbeHandler: corev1.ProbeHandler{
+		HTTPGet: &corev1.HTTPGetAction{Port: intstr.FromInt32(8080)}}}
+	run := &sprooziv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "defaulted", Namespace: ns, UID: types.UID("defaulted-sandbox-uid")},
+		Status: sprooziv1alpha1.AgentRunStatus{
+			Identity: sprooziv1alpha1.AgentRunIdentity{ServiceAccountName: "defaulted"}},
+	}
+
+	sandboxes := k8sresources.NewPodSandboxClient(testClient, testClient)
+	if _, err := sandboxes.Ensure(ctx, run, rt); err != nil {
+		t.Fatalf("create sandbox: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = sandboxes.DeleteForRun(context.Background(), k8sresources.RunName(run.UID), string(run.UID))
+	})
+	if _, err := sandboxes.Ensure(ctx, run, rt); err != nil {
+		t.Fatalf("ensure API-defaulted sandbox: %v", err)
 	}
 }

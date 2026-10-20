@@ -112,6 +112,53 @@ type Observation struct {
 // repeats only the seal and capture, never the native handoff.
 var ErrUsageUnsealed = errors.New("session: writer stopped but usage is not sealed")
 
+// ErrRecoveryRequired matches a refusal of a new move or stop because an
+// earlier one on the same execution must be recovered or cancelled first.
+var ErrRecoveryRequired = errors.New("session: recovery required")
+
+type recoveryRequired string
+
+func (e recoveryRequired) Error() string        { return string(e) }
+func (e recoveryRequired) Is(target error) bool { return target == ErrRecoveryRequired }
+
+// ErrSessionCancelled refuses a move or stop of an execution whose
+// cancellation has finished. Nothing can start it again.
+var ErrSessionCancelled = errors.New("session: session cancelled")
+
+// ErrCancellationUnfinished refuses a move or stop of an execution whose
+// cancellation has not yet proved the writer stopped and its usage sealed.
+// Recover finishes it.
+var ErrCancellationUnfinished = errors.New("session: cancellation unfinished")
+
+// pendingRecovery is the refusal for a new move or stop while the record's
+// pending operation is unfinished. It names that operation: the first visit's
+// start (or resume), a move, or a stop.
+func pendingRecovery(r Record) error {
+	kind := "move"
+	for i, op := range r.Operations {
+		if op.ID != r.PendingOperation {
+			continue
+		}
+		switch {
+		case i == 0 && r.ThreadID == "":
+			kind = "start"
+		case i == 0:
+			kind = "resume"
+		case op.Finalize:
+			kind = "stop"
+		}
+	}
+	return recoveryRequired("session: previous " + kind + " requires recovery")
+}
+
+// cancelled is the refusal for a move or stop of a cancelled record.
+func cancelled(r Record) error {
+	if r.Phase == PhaseCancelled {
+		return ErrSessionCancelled
+	}
+	return ErrCancellationUnfinished
+}
+
 // Placement must retain exact intent on retries. Prepare is inert, Activate is
 // idempotent for its incarnation, and Stop retains an immutable sealed receipt.
 // Inspect errors/unknown observations cannot be converted into absence or zero.
