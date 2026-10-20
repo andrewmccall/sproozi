@@ -205,6 +205,9 @@ func runProduct(args []string, stdout io.Writer) error {
 		return q.maintain(ctx)
 	case q.action == actionVersion:
 		_, err := fmt.Fprintln(stdout, build)
+		if image := localsetup.ReleaseImage(); err == nil && image != "" {
+			_, err = fmt.Fprintf(stdout, "native image %s\n", image)
+		}
 		return err
 	case q.action == actionServe:
 		return serve(ctx, q.configPath)

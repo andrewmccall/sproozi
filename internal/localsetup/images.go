@@ -36,13 +36,20 @@ const helperContract = "1"
 //go:embed release-images.json
 var releaseManifest []byte
 
+// releaseNative is set by release archive builds with -ldflags -X. Source
+// builds, including Homebrew's, read the bundle's release-images.json.
+var releaseNative string
+
 // ReleaseImage is the digest-pinned native image published with this CLI
 // release, or empty for a development build.
 func ReleaseImage() string {
+	if releaseNative != "" {
+		return releaseNative
+	}
 	var m struct {
 		Native string `json:"native"`
 	}
-	if json.Unmarshal(releaseManifest, &m) != nil {
+	if json.Unmarshal(releaseManifest, &m) != nil || !pinnedReference.MatchString(m.Native) {
 		return ""
 	}
 	return m.Native
