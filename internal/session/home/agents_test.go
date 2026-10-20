@@ -33,8 +33,9 @@ func TestUserInstructionsComposeSharedThenHarnessFiles(t *testing.T) {
 	if err != nil || codex != "Shared rule.\n\nCodex rule." {
 		t.Fatalf("codex %q %v", codex, err)
 	}
+	// Claude ignores user memory under its isolated settings sources.
 	claude, err := UserInstructions(root, harness.NativeClaude)
-	if err != nil || claude != "Shared rule.\n\nClaude rule." {
+	if err != nil || claude != "" {
 		t.Fatalf("claude %q %v", claude, err)
 	}
 	if empty, err := UserInstructions("", harness.NativeCodex); err != nil || empty != "" {
@@ -81,7 +82,7 @@ func TestUserInstructionsRejectLinksOversizeAndBinary(t *testing.T) {
 
 func TestUnsupportedAgentEntriesAreReported(t *testing.T) {
 	root := agentsRoot(t)
-	for _, name := range []string{"shared/AGENTS.md", "codex/config.toml", "claude/settings.json"} {
+	for _, name := range []string{"shared/AGENTS.md", "codex/config.toml", "claude/settings.json", "claude/CLAUDE.md"} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte("x"), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -93,7 +94,7 @@ func TestUnsupportedAgentEntriesAreReported(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]bool{"codex/config.toml": true, "claude/settings.json": true, "codex/skills": true}
+	want := map[string]bool{"codex/config.toml": true, "claude": true, "codex/skills": true}
 	if len(ignored) != len(want) {
 		t.Fatalf("ignored %v", ignored)
 	}

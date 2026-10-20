@@ -71,7 +71,11 @@ func Doctor(ctx context.Context, l Layout, checkProvider bool) (r Report) {
 	}
 	for _, h := range inst.Harnesses {
 		_, err = home.UserInstructions(config.AgentsDirectory, h.Harness)
-		r.add("agents", err, fmt.Sprintf("%s reads %v from %s", h.Harness, home.AgentFiles(h.Harness), config.AgentsDirectory))
+		detail := fmt.Sprintf("%s reads %v from %s", h.Harness, home.AgentFiles(h.Harness), config.AgentsDirectory)
+		if len(home.AgentFiles(h.Harness)) == 0 {
+			detail = fmt.Sprintf("%s does not read shared instructions in this release", h.Harness)
+		}
+		r.add("agents", err, detail)
 	}
 	if ignored, err := home.UnsupportedAgentEntries(config.AgentsDirectory); err == nil && len(ignored) > 0 {
 		r.add("agents", nil, "ignored because no harness reads them: "+strings.Join(ignored, ", "))

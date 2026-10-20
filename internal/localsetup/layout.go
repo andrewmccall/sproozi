@@ -18,6 +18,7 @@ import (
 
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/privatefs"
+	"github.com/andrewmccall/sproozi/internal/session/home"
 )
 
 // Layout is the private per-user installation root.
@@ -213,11 +214,10 @@ func (l Layout) ensureDirectories() error {
 	}
 	// Shared native settings. Workers receive only allowlisted instruction
 	// files from these directories, freshly on every visit.
-	for _, kind := range []harness.NativeKind{harness.NativeCodex, harness.NativeClaude} {
-		directory, _ := harness.NativeDirectory(kind)
-		if err := privatefs.EnsureDir(filepath.Join(l.Agents(), directory)); err != nil {
+	for _, name := range append(home.AgentFiles(harness.NativeCodex), home.AgentFiles(harness.NativeClaude)...) {
+		if err := privatefs.EnsureDir(filepath.Join(l.Agents(), filepath.Dir(name))); err != nil {
 			return err
 		}
 	}
-	return privatefs.EnsureDir(filepath.Join(l.Agents(), "shared"))
+	return nil
 }

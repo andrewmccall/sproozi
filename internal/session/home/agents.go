@@ -22,7 +22,15 @@ const maxAgentFile = 32 << 10
 // receives: shared instructions first, then the harness's own. Later text
 // refines earlier text. These are user preferences; approved developer
 // instructions and every enforcement setting stay outside this directory.
+//
+// Claude Code is launched with every settings source disabled, and a live
+// check showed it then ignores its user memory file. Enabling the user source
+// also enabled remote managed-settings requests and stopped graceful
+// completion, so Claude receives no shared files until a supported path exists.
 func AgentFiles(kind harness.NativeKind) []string {
+	if kind != harness.NativeCodex {
+		return nil
+	}
 	directory, _ := harness.NativeDirectory(kind)
 	file := harness.NativeUserInstructionsFile(kind)
 	return []string{filepath.Join(SharedAgentsDirectory, "AGENTS.md"), filepath.Join(directory, file)}
