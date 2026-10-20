@@ -31,6 +31,7 @@ These guides give prerequisites, steps and checks for specific tasks.
 
 - [Model provider authentication](guides/model-provider-auth.md)
 - [Use Sproozi on Windows](guides/windows.md)
+- [Collect traces, metrics and logs](guides/telemetry.md)
 
 ## Understand the system
 
@@ -54,6 +55,7 @@ References describe exact fields, commands and supported behaviour.
 | MCP tools | [Native Kubernetes MCP](reference/kubernetes-mcp.md), [configured remote MCP](reference/configured-mcp.md) |
 | Sessions and remote work | [Session commands](reference/session-commands.md), [Projects and workspace revisions](reference/projects-and-revisions.md) |
 | Task submission services | [Task service MCP interface](reference/orchestration.md), [webhook contract](reference/webhook-contract.md) |
+| Observability | [Telemetry](reference/telemetry.md) |
 
 ## Decisions and future work
 

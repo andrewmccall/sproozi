@@ -162,8 +162,12 @@ is bounded to 128 bytes without NUL or line breaks. Empty uses the stock default
 Codex also accepts `nativeSession.options`: at most 32 single-line
 `key=TOMLvalue` entries, each at most 4096 bytes. Keys use validated dotted bare
 or quoted segments; approved instructions and the update gate remain reserved.
-Claude rejects Codex options. These settings come from the approved current
-runtime, never a portable checkpoint. For example:
+Claude rejects Codex options. Codex options cannot set `otel` keys.
+`nativeSession.telemetry: Relay` exports the harness's own OpenTelemetry
+through the gateway relay with content capture off; the gateway must also set
+`SPROOZI_HARNESS_TELEMETRY=relay`. See [harness relay](telemetry.md#harness-relay).
+These settings come from the approved current runtime, never a portable
+checkpoint. For example:
 
 ```yaml
 spec:

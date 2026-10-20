@@ -394,7 +394,7 @@ func (o *Owner) BindNative(_ context.Context, launch session.Launch, instance se
 }
 
 func (o *Owner) grant(r record) *gateway.ExecutionGrant {
-	g := (&gateway.ExecutionGrant{Execution: gateway.Reference{Backend: gateway.BackendDocker, Name: r.Incarnation.ExecutionID, UID: r.Incarnation.ResourceUID}, Policy: o.policy, Template: o.template, Managed: true, Allocations: map[api.CapabilityKind]gateway.Allocation{}}).Clone()
+	g := (&gateway.ExecutionGrant{ExecutionID: r.Launch.ExecutionID, Execution: gateway.Reference{Backend: gateway.BackendDocker, Name: r.Incarnation.ExecutionID, UID: r.Incarnation.ResourceUID}, Policy: o.policy, Template: o.template, Managed: true, Allocations: map[api.CapabilityKind]gateway.Allocation{}}).Clone()
 	g.Capabilities = make([]api.CapabilityKind, 0, len(r.Launch.Allowances))
 	for name, a := range r.Launch.Allowances {
 		cap := api.CapabilityKind(name)

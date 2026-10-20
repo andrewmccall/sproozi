@@ -16,10 +16,13 @@ limitations under the License.
 package audit
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"sync"
 	"time"
+
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Event is a structured gateway audit record complying with PRD §11.
@@ -100,6 +103,31 @@ type Event struct {
 
 	// TokensRemaining is the observed remaining budget; nil means unavailable.
 	TokensRemaining *int64 `json:"tokensRemaining"`
+
+	// TraceID and SpanID join the record to the decision's span when tracing is on.
+	TraceID string `json:"traceID,omitempty"`
+	SpanID  string `json:"spanID,omitempty"`
+
+	// ctx is the request context of the decision, for telemetry writers.
+	ctx context.Context
+}
+
+// WithContext binds the record to the request context of its decision.
+func (e Event) WithContext(ctx context.Context) Event {
+	e.ctx = ctx
+	e.TraceID, e.SpanID = "", ""
+	if span := trace.SpanContextFromContext(ctx); span.IsValid() {
+		e.TraceID, e.SpanID = span.TraceID().String(), span.SpanID().String()
+	}
+	return e
+}
+
+// Context returns the bound request context, or the background context.
+func (e Event) Context() context.Context {
+	if e.ctx == nil {
+		return context.Background()
+	}
+	return e.ctx
 }
 
 // WebhookEvent is a structured audit record for webhook ingress decisions.

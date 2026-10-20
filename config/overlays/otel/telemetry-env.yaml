@@ -1,0 +1,48 @@
+# Points each component's own telemetry at the in-namespace collector. Sproozi
+# accepts only OTLP over HTTP with protobuf and exports nothing until an
+# endpoint is set. The gateway also relays harness telemetry from managed
+# native sessions whose AgentRuntime sets clientConfig.nativeSession.telemetry:
+# Relay; remove SPROOZI_HARNESS_TELEMETRY to keep that telemetry in the sandbox.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: controller-manager
+  namespace: system
+spec:
+  template:
+    spec:
+      containers:
+      - name: manager
+        env:
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: http://sproozi-otel-collector.sproozi-system.svc:4318
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webhook
+  namespace: system
+spec:
+  template:
+    spec:
+      containers:
+      - name: webhook
+        env:
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: http://sproozi-otel-collector.sproozi-system.svc:4318
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  namespace: system
+spec:
+  template:
+    spec:
+      containers:
+      - name: shared-gateway
+        env:
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: http://sproozi-otel-collector.sproozi-system.svc:4318
+        - name: SPROOZI_HARNESS_TELEMETRY
+          value: relay

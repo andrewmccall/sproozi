@@ -30,6 +30,7 @@ func NewHandler(service Service, token string) (http.Handler, error) {
 		return nil, fmt.Errorf("task token must contain at least 32 non-whitespace characters")
 	}
 	server := mcp.NewServer(&mcp.Implementation{Name: "sproozi-tasks", Version: "1"}, nil)
+	server.AddReceivingMiddleware(observe)
 	mcp.AddTool(server, &mcp.Tool{Name: submitTool, Description: "Submit one bounded task to an approved workflow. Workflow fixes all authority. Preserve requestId and expiresAt on retries. Replay is bounded; administrative Run deletion or retention shortening resets guarantees."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input Submit) (*mcp.CallToolResult, View, error) {
 			output, err := service.Submit(ctx, input)

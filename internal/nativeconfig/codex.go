@@ -12,7 +12,8 @@ import (
 // Validate accepts bounded administrator-selected Codex launch settings. Values
 // remain native TOML, interpreted by the native client; this is not a TOML parser.
 // Keys use a restricted dotted grammar so alternative spellings cannot replace
-// the separately owned developer instructions or startup update gate.
+// the separately owned developer instructions, startup update gate or
+// telemetry export, whose content capture Sproozi keeps off.
 func Validate(model string, options []string) error {
 	if len(model) > 128 || strings.ContainsAny(model, "\x00\r\n") || len(options) > 32 {
 		return errors.New("invalid managed native model or option count")
@@ -26,7 +27,7 @@ func Validate(model string, options []string) error {
 			return err
 		}
 		switch root {
-		case "developer_instructions", "check_for_update_on_startup":
+		case "developer_instructions", "check_for_update_on_startup", "otel":
 			return errors.New("native option cannot replace a reserved setting")
 		}
 	}

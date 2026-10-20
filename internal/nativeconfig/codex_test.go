@@ -41,6 +41,9 @@ func TestNativeSettingsCannotReplaceReservedKeys(t *testing.T) {
 		`check_for_update_on_startup=true`,
 		`"check_for_update_on_startup"=true`,
 		`check_for_update_on_startup.nested=true`,
+		`otel.log_user_prompt=true`,
+		`"otel".exporter="none"`,
+		`otel={log_user_prompt=true}`,
 	} {
 		t.Run(option, func(t *testing.T) {
 			if err := Validate("", []string{option}); err == nil {

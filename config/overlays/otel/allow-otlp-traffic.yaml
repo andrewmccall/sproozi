@@ -1,0 +1,25 @@
+# The namespace denies ingress by default. Only Sproozi's own pods in
+# sproozi-system may send telemetry; sandboxes reach the collector solely
+# through the gateway relay.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    app.kubernetes.io/name: sproozi
+    app.kubernetes.io/managed-by: kustomize
+  name: sproozi-allow-otlp-traffic
+  namespace: sproozi-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: otel-collector
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: sproozi
+    ports:
+    - port: 4318
+      protocol: TCP

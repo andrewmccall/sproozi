@@ -20,8 +20,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/andrewmccall/sproozi/internal/harness"
-	"github.com/andrewmccall/sproozi/internal/privatefs"
+	"k8s.io/apimachinery/pkg/util/validation"
+	"k8s.io/client-go/rest"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/audit"
@@ -31,18 +31,20 @@ import (
 	kubernetesgateway "github.com/andrewmccall/sproozi/internal/endpoints/kubernetes"
 	"github.com/andrewmccall/sproozi/internal/endpoints/mcp"
 	"github.com/andrewmccall/sproozi/internal/endpoints/model"
+	"github.com/andrewmccall/sproozi/internal/endpoints/otlp"
 	"github.com/andrewmccall/sproozi/internal/gateway"
 	gatewaydocker "github.com/andrewmccall/sproozi/internal/gateway/docker"
+	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/modelauth"
 	"github.com/andrewmccall/sproozi/internal/nativeconfig"
+	"github.com/andrewmccall/sproozi/internal/privatefs"
 	"github.com/andrewmccall/sproozi/internal/proxytransport"
 	runtimedocker "github.com/andrewmccall/sproozi/internal/runtime/docker"
 	runtimekubernetes "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
+	"github.com/andrewmccall/sproozi/internal/telemetry"
 	"github.com/andrewmccall/sproozi/internal/work"
-	"k8s.io/apimachinery/pkg/util/validation"
-	"k8s.io/client-go/rest"
 )
 
 type authority struct {
@@ -53,6 +55,46 @@ type authority struct {
 	options     []string
 	kind        harness.NativeKind
 	mcpEndpoint string
+	telemetry   bool
+}
+
+// harnessTelemetry serves the relay on the MCP authority when configured. It
+// forwards to the daemon's own OTEL_EXPORTER_OTLP_ENDPOINT.
+func harnessTelemetry(c Config, certificate tls.Certificate, gatewayConfig *gatewaydocker.GatewayConfig, log io.Writer) error {
+	if !c.Gateway.HarnessTelemetry {
+		return nil
+	}
+	if c.Gateway.MCPAuthority == "" || c.Local.Harness != harness.NativeCodex && c.Local.Harness != harness.NativeClaude {
+		return errors.New("home: gateway.harnessTelemetry requires gateway.mcpAuthority and a Codex or Claude Code harness")
+	}
+	collector, err := otlp.CollectorFromEnvironment()
+	if err != nil {
+		// The relay is optional: without a collector, harnesses export nothing.
+		_, _ = fmt.Fprintln(log, "Harness telemetry relay disabled:", err)
+		return nil
+	}
+	host, err := coveredHost(certificate, c.Gateway.MCPAuthority)
+	if err != nil {
+		return err
+	}
+	gatewayConfig.Certificates[host] = certificate
+	gatewayConfig.MCPAuthority = c.Gateway.MCPAuthority
+	gatewayConfig.Telemetry = otlp.NewHandler(collector)
+	return nil
+}
+
+// coveredHost returns the MCP authority's host once the inspection certificate
+// covers it; the MCP servers and the telemetry relay share that authority.
+func coveredHost(certificate tls.Certificate, authority string) (string, error) {
+	host, _, err := net.SplitHostPort(authority)
+	if err != nil {
+		return "", err
+	}
+	leaf, _ := x509.ParseCertificate(certificate.Certificate[0])
+	if leaf.VerifyHostname(host) != nil {
+		return "", errors.New("home: inspection certificate must cover MCP authority")
+	}
+	return host, nil
 }
 
 const inspectionHost = "api.openai.com"
@@ -86,6 +128,11 @@ func (a *authority) InitializeAllocation(ctx context.Context, l session.Launch, 
 	clients, err := harness.NativeClients(a.kind, capabilities, a.mcpEndpoint)
 	if err != nil {
 		return runtimedocker.NativeAccess{}, err
+	}
+	if a.telemetry {
+		if clients, err = harness.WithTelemetry(clients, a.kind, a.mcpEndpoint, telemetry.TraceParent(l.ExecutionID)); err != nil {
+			return runtimedocker.NativeAccess{}, err
+		}
 	}
 	return runtimedocker.NativeAccess{Env: env, TrustBundlePEM: bytes.Clone(a.trust), Model: a.model, Options: slices.Clone(a.options), ClientConfig: clients}, nil
 }
@@ -191,7 +238,7 @@ func Open(c Config, log io.Writer) (_ *Service, err error) {
 	}
 	s.drain = model.NewDrain()
 	modelConfig.Drain = s.drain
-	gatewayConfig := gatewaydocker.GatewayConfig{Harness: c.Local.Harness, Certificates: map[string]tls.Certificate{inspectionHostFor(c.Local.Harness): certificate}, Model: modelConfig, AuditLogger: audit.NewLogger(log),
+	gatewayConfig := gatewaydocker.GatewayConfig{Harness: c.Local.Harness, Certificates: map[string]tls.Certificate{inspectionHostFor(c.Local.Harness): certificate}, Model: modelConfig, AuditLogger: telemetry.AuditWriter{Next: audit.NewLogger(log)},
 		MaxModelCall: maxModelCall(c.Gateway)}
 	if c.Gateway.MCPRegistryFile != "" {
 		data, readErr := readSetting("gateway.mcpRegistryFile", c.Gateway.MCPRegistryFile, 128<<10)
@@ -202,17 +249,18 @@ func Open(c Config, log io.Writer) (_ *Service, err error) {
 		if err != nil {
 			return nil, err
 		}
-		host, _, hostErr := net.SplitHostPort(c.Gateway.MCPAuthority)
+		host, hostErr := coveredHost(certificate, c.Gateway.MCPAuthority)
 		if hostErr != nil {
 			return nil, hostErr
-		}
-		leaf, _ := x509.ParseCertificate(certificate.Certificate[0])
-		if leaf.VerifyHostname(host) != nil {
-			return nil, errors.New("home: inspection certificate must cover MCP authority")
 		}
 		gatewayConfig.Certificates[host] = certificate
 		gatewayConfig.MCPAuthority = c.Gateway.MCPAuthority
 	}
+	if err = harnessTelemetry(c, certificate, &gatewayConfig, log); err != nil {
+		return nil, err
+	}
+	// Harnesses export only when the relay actually runs.
+	auth.telemetry = gatewayConfig.Telemetry != nil
 	if err = nativeServices(c, certificate, &gatewayConfig); err != nil {
 		return nil, err
 	}

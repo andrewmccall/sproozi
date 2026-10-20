@@ -41,6 +41,7 @@ import (
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/audit"
+	"github.com/andrewmccall/sproozi/internal/telemetry"
 	"github.com/andrewmccall/sproozi/internal/webhook"
 )
 
@@ -62,6 +63,7 @@ func main() {
 	log := ctrl.Log.WithName("setup")
 
 	listenAddr := envOrDefault("LISTEN_ADDR", defaultListenAddr)
+	telemetry.ShutdownOnSignal(telemetry.Setup(context.Background(), "sproozi-webhook"))
 
 	cfg, err := ctrl.GetConfig()
 	if err != nil {
@@ -92,7 +94,7 @@ func main() {
 		Config: webhook.HandlerConfig{
 			Client:          runtimeClient,
 			Replay:          replay,
-			AuditLogger:     audit.NewLogger(os.Stdout),
+			AuditLogger:     telemetry.AuditWriter{Next: audit.NewLogger(os.Stdout)},
 			SecretNamespace: envOrDefault("HMAC_SECRET_NAMESPACE", webhook.DefaultSecretNamespace),
 		},
 	}

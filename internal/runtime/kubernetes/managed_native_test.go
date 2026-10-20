@@ -10,6 +10,7 @@ import (
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
+	"github.com/andrewmccall/sproozi/internal/telemetry"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -69,6 +70,23 @@ func TestManagedLaunchProjectsFreshKindSpecificPlaceholderAndHarness(t *testing.
 					t.Fatal("launch inherited another provider's credential")
 				}
 			}
+			if launch.ClientConfig != nil && launch.ClientConfig.Telemetry != nil {
+				t.Fatal("harness telemetry configured without the runtime opting in")
+			}
+			rt.Spec.ClientConfig.NativeSession.Telemetry = api.NativeTelemetryRelay
+			relayed := map[string]string{}
+			if err = addManagedNativeContract(t.Context(), kube, run, template, rt, relayed); err != nil {
+				t.Fatal(err)
+			}
+			var withRelay harness.NativeLaunch
+			if err = json.Unmarshal([]byte(relayed[nativeConfigKey]), &withRelay); err != nil {
+				t.Fatal(err)
+			}
+			if got := withRelay.ClientConfig.Telemetry; got == nil || got.Endpoint != "https://gateway.invalid:443/otlp" ||
+				got.TraceParent != telemetry.TraceParent(intent.SessionID) {
+				t.Fatalf("relay telemetry %+v does not target the gateway within the execution trace", got)
+			}
+			rt.Spec.ClientConfig.NativeSession.Telemetry = ""
 			rt.Spec.ClientConfig.Harness = "mismatched"
 			if err = addManagedNativeContract(t.Context(), kube, run, template, rt, map[string]string{}); err == nil {
 				t.Fatal("launch accepted client/registration mismatch")

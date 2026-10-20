@@ -7,8 +7,10 @@ import (
 	"io"
 	"os"
 
-	"github.com/andrewmccall/sproozi/internal/session/home"
 	"golang.org/x/term"
+
+	"github.com/andrewmccall/sproozi/internal/session/home"
+	"github.com/andrewmccall/sproozi/internal/telemetry"
 )
 
 func main() {
@@ -59,6 +61,7 @@ func serve(ctx context.Context, path string) error {
 	if err = home.CheckListen(ctx, fixed); err != nil {
 		return err
 	}
+	defer telemetry.Shutdown(telemetry.Setup(ctx, "sproozi-home"))
 	service, err := home.Open(fixed, os.Stderr)
 	if err != nil {
 		return err

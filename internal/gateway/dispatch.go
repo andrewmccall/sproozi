@@ -45,6 +45,8 @@ func (d Dispatcher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	route, ok := d[normalizeAuthority(r.Host)]
+	w, r, end := startRequest(w, r, identity, route)
+	defer end()
 	if !ok || route.Handler == nil {
 		writeDenial(w, http.StatusForbidden, "permission_error", "destination_denied",
 			"destination "+r.Host+" is not enabled at this gateway")

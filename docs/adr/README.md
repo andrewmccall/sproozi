@@ -85,6 +85,7 @@ at their recovery charge, an estimate, once their leases expire.
 | [0022](0022-webhook-hmac-secrets-in-own-namespace.md) | Webhook HMAC Secrets live in their own namespace, away from provider credentials. |
 | [0023](0023-controller-writes-only-in-sproozi-agents.md) | The controller writes sandbox objects only in sproozi-agents; its cluster role keeps reads. |
 | [0024](0024-native-host-platforms-and-cli-releases.md) | Native host security and automated CLI releases with a Homebrew tap. |
+| [0025](0025-opentelemetry-from-audit-and-execution-traces.md) | OpenTelemetry derived from audit records, one trace per execution and a gateway relay for harness telemetry. |
 | [0026](0026-single-gateway-refresh-owner-with-recreate.md) | One gateway replica with a Recreate rollout owns the rotating ChatGPT credential refresh. |
 | [0027](0027-configurable-concurrent-admission.md) | Optional cluster and policy caps replace the single active-run slot; the gateway serves revalidation from a watch cache. |
 | [0028](0028-streamed-model-responses-and-estimated-interrupts.md) | The model gateway streams responses, charges interrupted calls an estimate, refuses detached work, runs bounded calls in parallel and gives model calls their own deadline. |

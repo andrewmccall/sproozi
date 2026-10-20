@@ -18,6 +18,7 @@ import (
 	kubernetesgateway "github.com/andrewmccall/sproozi/internal/endpoints/kubernetes"
 	mcpgateway "github.com/andrewmccall/sproozi/internal/endpoints/mcp"
 	modelgateway "github.com/andrewmccall/sproozi/internal/endpoints/model"
+	"github.com/andrewmccall/sproozi/internal/endpoints/otlp"
 	"github.com/andrewmccall/sproozi/internal/gateway"
 	"github.com/andrewmccall/sproozi/internal/proxytransport"
 )
@@ -32,9 +33,11 @@ type GatewayConfig struct {
 	MCPRegistry  *mcpgateway.Registry
 	MCPAuthority string
 	MCPClient    *http.Client
-	AuditLogger  audit.Writer
-	GitHub       *githubgateway.HandlerConfig
-	Kubernetes   *kubernetesgateway.HandlerConfig
+	// Telemetry relays harness OTLP export on the MCP authority when non-nil.
+	Telemetry   *otlp.Handler
+	AuditLogger audit.Writer
+	GitHub      *githubgateway.HandlerConfig
+	Kubernetes  *kubernetesgateway.HandlerConfig
 	// MaxModelCall is the longest one model call may stream. Zero selects
 	// proxytransport.DefaultMaxModelCallDuration.
 	MaxModelCall time.Duration
@@ -60,13 +63,17 @@ func NewGateway(owner *Owner, config GatewayConfig) (*proxytransport.Gateway, er
 	if err := addNativeRoutes(owner, config, dispatch, tracker); err != nil {
 		return nil, err
 	}
-	if config.MCPRegistry != nil {
+	if config.MCPRegistry != nil || config.Telemetry != nil {
 		host, port, err := net.SplitHostPort(config.MCPAuthority)
 		_, reserved := endpoints.SemanticAuthorities[config.MCPAuthority]
 		if err != nil || host == "" || port != "443" || reserved {
 			return nil, errors.New("docker gateway: exact MCP authority on port 443 required")
 		}
-		dispatch[config.MCPAuthority] = gateway.Route{Tier: audit.TierProtocol, Handler: mcpgateway.NewHandler(mcpgateway.HandlerConfig{Registry: config.MCPRegistry, HTTPClient: config.MCPClient, Budgets: tracker, AuditLogger: config.AuditLogger})}
+		var mcp http.Handler
+		if config.MCPRegistry != nil {
+			mcp = mcpgateway.NewHandler(mcpgateway.HandlerConfig{Registry: config.MCPRegistry, HTTPClient: config.MCPClient, Budgets: tracker, AuditLogger: config.AuditLogger})
+		}
+		dispatch[config.MCPAuthority] = gateway.Route{Tier: audit.TierProtocol, Handler: otlp.Mount(config.Telemetry, mcp)}
 	}
 	return proxytransport.New(proxytransport.Config{Certificates: config.Certificates, Authenticate: owner.Authenticate, Revalidate: owner.Revalidate, Handler: dispatch, AllowedAuthority: dispatch.Allows, MaxModelCallDuration: config.MaxModelCall})
 }

@@ -663,6 +663,7 @@ func (r *AgentRunReconciler) transitionPhase(
 	}
 
 	now := metav1.Now()
+	from := run.Status.Phase
 	run.Status.Phase = phase
 
 	// Set StartedAt when the run is first admitted to execution.
@@ -699,6 +700,7 @@ func (r *AgentRunReconciler) transitionPhase(
 		return ctrl.Result{}, err
 	}
 
+	r.traceTransition(ctx, run, from, reason)
 	logger.Info("Transitioned AgentRun", "name", run.Name, "phase", phase)
 	return ctrl.Result{}, nil
 }

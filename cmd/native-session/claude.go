@@ -239,7 +239,7 @@ func prepareClaudeLaunch(c config, _ string, env []string) ([]string, []string, 
 	env = append(env,
 		"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1", "DISABLE_AUTOUPDATER=1",
 		"CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false", "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1")
-	return args, env, nil
+	return args, append(env, c.ClientConfig.ClaudeTelemetryEnvironment()...), nil
 }
 func installClaudeJSON(path string, value any) error {
 	data, err := json.Marshal(value)

@@ -44,12 +44,14 @@ import (
 	kubernetesgateway "github.com/andrewmccall/sproozi/internal/endpoints/kubernetes"
 	mcpgateway "github.com/andrewmccall/sproozi/internal/endpoints/mcp"
 	modelgateway "github.com/andrewmccall/sproozi/internal/endpoints/model"
+	"github.com/andrewmccall/sproozi/internal/endpoints/otlp"
 	packagesgateway "github.com/andrewmccall/sproozi/internal/endpoints/packages"
 	"github.com/andrewmccall/sproozi/internal/gateway"
 	gatewaykubernetes "github.com/andrewmccall/sproozi/internal/gateway/kubernetes"
 	"github.com/andrewmccall/sproozi/internal/modelauth"
 	modelauthkube "github.com/andrewmccall/sproozi/internal/modelauth/kubernetes"
 	"github.com/andrewmccall/sproozi/internal/proxytransport"
+	"github.com/andrewmccall/sproozi/internal/telemetry"
 )
 
 const defaultHost = "sproozi-gateway.sproozi-system.svc"
@@ -492,6 +494,7 @@ func main() {
 	}
 	// The authority watch cache logs through controller-runtime.
 	ctrl.SetLogger(zap.New())
+	stopTelemetry := telemetry.Setup(context.Background(), "sproozi-gateway")
 	drain := modelgateway.NewDrain()
 
 	config, err := ctrl.GetConfig()
@@ -515,7 +518,7 @@ func main() {
 		WithWatchCache(authorityClient)
 	httpClient := &http.Client{Timeout: upstreamCallTimeout}
 	modelClient := newModelClient()
-	auditLogger := audit.NewLogger(os.Stdout)
+	auditLogger := telemetry.AuditWriter{Next: audit.NewLogger(os.Stdout)}
 	// The shared gateway is the only component that receives Kubernetes API
 	// credentials. Build the upstream transport from its own in-cluster
 	// rest.Config so workload ServiceAccount tokens can never be forwarded to
@@ -608,9 +611,15 @@ func main() {
 		go retryLegacySweep(context.Background(), legacySweep, time.Second, budgetkubernetes.SweepInterval)
 	}
 	go sweepLedgers(context.Background(), runtimeClient, budgetNamespace, budgetkubernetes.SweepInterval)
+	relayConfig, err := otlp.ConfigFromEnvironment()
+	if err != nil {
+		// The relay is optional; the gateway serves everything else without it.
+		log.Printf("Harness telemetry relay disabled: %v", err)
+	}
 	mcpHandler := mcpgateway.NewHandler(mcpgateway.HandlerConfig{Registry: cfg.mcpRegistry,
 		Budgets: budgets, AuditLogger: auditLogger})
-	dispatcher := composeDispatcher(cfg, handlers, mcpHandler, anthropicHandler)
+	// The relay shares the gateway's own authority with named MCP servers.
+	dispatcher := composeDispatcher(cfg, handlers, otlp.Mount(otlp.NewHandler(relayConfig), mcpHandler), anthropicHandler)
 	for authority, route := range dispatcher {
 		route.Budgets, route.AuditLogger = budgets, auditLogger
 		dispatcher[authority] = route
@@ -642,7 +651,7 @@ func main() {
 	server := proxytransport.NewServer(":8443", cfg.listenerCert, transport)
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGTERM, os.Interrupt)
-	go drainOnSignal(signals, server.Close, drain, func() { os.Exit(0) })
+	go drainOnSignal(signals, server.Close, drain, func() { telemetry.Shutdown(stopTelemetry); os.Exit(0) })
 	if err := server.ServeTLS(transport.LimitListener(listener), "", ""); !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}
@@ -699,7 +708,7 @@ func sweepLedgers(ctx context.Context, c client.Client, namespace string, interv
 
 // drainTimeout bounds the wait for model calls to settle on shutdown. It
 // fits inside terminationGracePeriodSeconds (45) in config/manager/gateway.yaml
-// with room for the settlement writes themselves.
+// with room for telemetry and the settlement writes themselves.
 const drainTimeout = 30 * time.Second
 
 // drainOnSignal stops the gateway on SIGTERM: it stops accepting connections,

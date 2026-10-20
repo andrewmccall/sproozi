@@ -24,6 +24,10 @@ import (
 	"time"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/trace"
 	"k8s.io/apimachinery/pkg/runtime"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
@@ -32,6 +36,8 @@ import (
 	remote "github.com/andrewmccall/sproozi/internal/endpoints/mcp"
 	"github.com/andrewmccall/sproozi/internal/gateway"
 	"github.com/andrewmccall/sproozi/internal/proxytransport"
+	"github.com/andrewmccall/sproozi/internal/telemetry"
+	"github.com/andrewmccall/sproozi/internal/telemetry/telemetrytest"
 )
 
 const (
@@ -672,5 +678,48 @@ func TestUnsupportedMCPMethodsAreRejectedBeforeSetup(t *testing.T) {
 	}
 	if len(tools.Tools) != 1 || tools.Tools[0].Name != "search" {
 		t.Fatalf("supported discovery = %+v", tools.Tools)
+	}
+}
+
+func TestToolCallSpanAndDurationNameToolWithoutArguments(t *testing.T) {
+	recorder := telemetrytest.Install(t)
+	f := newFixture(t, nil)
+	session := f.connect(t, docsName)
+	if _, err := session.CallTool(t.Context(), &sdk.CallToolParams{Name: searchTool,
+		Arguments: map[string]any{collectionField: approvedCollection, queryField: testQuery}}); err != nil {
+		t.Fatal(err)
+	}
+	var span sdktrace.ReadOnlySpan
+	for _, s := range recorder.Spans() {
+		if s.Name() == "tools/call "+searchTool {
+			span = s
+		}
+		for _, attr := range s.Attributes() {
+			if strings.Contains(attr.Value.String(), testQuery) {
+				t.Fatalf("span %q attribute %s carries tool arguments", s.Name(), attr.Key)
+			}
+		}
+	}
+	if span == nil || span.SpanKind() != trace.SpanKindClient {
+		t.Fatal("tool call span missing")
+	}
+	attrs := attribute.NewSet(span.Attributes()...)
+	if tool, _ := attrs.Value(telemetry.GenAIToolName); tool.AsString() != searchTool {
+		t.Fatalf("tool attribute %q", tool.AsString())
+	}
+	if !strings.Contains(f.audit.data(), `"spanID":"`+span.SpanContext().SpanID().String()+`"`) {
+		t.Fatal("tool call audit record is not bound to the tool span")
+	}
+	data, ok := recorder.Metric(t, "mcp.client.operation.duration")
+	if !ok {
+		t.Fatal("MCP duration metric missing")
+	}
+	found := false
+	for _, point := range data.(metricdata.Histogram[float64]).DataPoints {
+		tool, _ := point.Attributes.Value(telemetry.GenAIToolName)
+		found = found || tool.AsString() == searchTool && point.Count > 0
+	}
+	if !found {
+		t.Fatal("MCP duration has no point for the tool")
 	}
 }
