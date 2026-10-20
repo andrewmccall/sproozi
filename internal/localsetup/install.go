@@ -1,6 +1,7 @@
 package localsetup
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -59,6 +60,9 @@ type Result struct {
 	Ready        bool          `json:"ready"`
 }
 
+// goosWindows names the host where automatic setup is unsupported.
+const goosWindows = "windows"
+
 // maxSocketPath is the portable Unix socket path limit (macOS allows 104
 // bytes including the terminator).
 const maxSocketPath = 103
@@ -76,238 +80,293 @@ const DefaultInstructions = "You are working in a Sproozi-managed workspace at /
 // in installation.json; a repeated or interrupted run converges on the same
 // network, CA, credentials and configuration without duplicating them.
 func Init(ctx context.Context, o Options) (Result, error) {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == goosWindows {
 		return Result{}, fail("platform", errors.New("automatic local setup is not yet supported on Windows"),
-			"configure the home service manually; see docs/guides/windows.md")
+			"configure the home daemon manually; see docs/guides/windows.md")
 	}
-	if o.Timeout <= 0 {
-		o.Timeout = 30 * time.Minute
+	o = o.withDefaults()
+	if err := o.Harness.Validate(); err != nil {
+		return Result{}, fail("harness", err, "use --harness codex or --harness claude-code")
 	}
 	ctx, cancel := context.WithTimeout(ctx, o.Timeout)
 	defer cancel()
+	i, unlock, err := openInstaller(o)
+	if err != nil {
+		return Result{}, err
+	}
+	defer unlock()
+	for _, stage := range []func(context.Context) error{i.findDocker, i.prepareImage, i.prepareNetwork, i.findEndpoint, i.prepareHarness, i.prepareCertificates, i.writeConfiguration} {
+		if err = stage(ctx); err != nil {
+			return Result{}, err
+		}
+	}
+	return i.serve(ctx)
+}
+
+func (o Options) withDefaults() Options {
+	if o.Timeout <= 0 {
+		o.Timeout = 30 * time.Minute
+	}
 	if o.Progress == nil {
 		o.Progress = io.Discard
 	}
 	if o.Harness == "" {
 		o.Harness = harness.NativeCodex
 	}
-	if err := o.Harness.Validate(); err != nil {
-		return Result{}, fail("harness", err, "use --harness codex or --harness claude-code")
-	}
 	if o.Port == 0 {
 		o.Port = DefaultPort
 	}
-	root, err := ResolveRoot(o.Root)
-	if err != nil {
-		return Result{}, err
-	}
-	l := Layout{Root: root}
-	if socket := home.SocketPath(l.State()); runtime.GOOS != "windows" && len(socket) > maxSocketPath {
-		return Result{}, fail("root", fmt.Errorf("the control socket path %s exceeds the %d-byte Unix socket limit", socket, maxSocketPath), "choose a shorter --root")
-	}
-	if err = l.ensureDirectories(); err != nil {
-		return Result{}, fail("root", err, "fix ownership or permissions, or choose --root")
-	}
-	unlock, err := l.lock()
-	if err != nil {
-		return Result{}, err
-	}
-	defer unlock()
-	if err = RememberRoot(root); err != nil {
-		return Result{}, err
-	}
-	step(o, "Using private installation root %s; shared agent settings live in %s", root, l.Agents())
-	inst, err := LoadInstallation(l)
-	if err != nil {
-		return Result{}, err
-	}
-	save := func(stage string) error {
-		inst.done(stage)
-		return l.save(inst)
-	}
-	if err = save("root"); err != nil {
-		return Result{}, err
-	}
-
-	docker, err := DiscoverDocker(ctx, l.DockerCLI())
-	if err != nil {
-		return Result{}, err
-	}
-	inst.Docker = &docker
-	step(o, "Docker engine at %s runs Linux containers", docker.Socket)
-	if err = save("docker"); err != nil {
-		return Result{}, err
-	}
-
-	requested := o.Image.Reference != "" || o.Image.BuildSource != ""
-	if inst.Image == nil || requested || VerifyImage(ctx, docker, *inst.Image) != nil {
-		if inst.Image != nil && requested && placementExists(l) {
-			return Result{}, fail("image", errors.New("changing the native image of an installation with retained sessions is not supported yet"), "finish or cancel sessions, then move the state directory aside")
-		}
-		o.Image.Progress = o.Progress
-		image, err := ResolveImage(ctx, docker, inst.ID, o.Image)
-		if err != nil {
-			return Result{}, err
-		}
-		inst.Image = &image
-	}
-	step(o, "Native image %s (%s)", inst.Image.ID, inst.Image.Source)
-	if err = save("image"); err != nil {
-		return Result{}, err
-	}
-
-	network, err := EnsureNetwork(ctx, docker, inst.ID)
-	if err != nil {
-		return Result{}, err
-	}
-	inst.Network = &network
-	step(o, "Network %s (%s)", network.Name, network.Subnet)
-	if err = save("network"); err != nil {
-		return Result{}, err
-	}
-
-	config, existing, err := readExistingConfig(l)
-	if err != nil {
-		return Result{}, err
-	}
-	if inst.Endpoint == nil {
-		port, err := freePort(o.Port, inst)
-		if err != nil {
-			return Result{}, err
-		}
-		endpoint, err := SelectEndpoint(ctx, docker, *inst.Image, network, port)
-		if err != nil {
-			return Result{}, err
-		}
-		inst.Endpoint = &endpoint
-	}
-	step(o, "Workers reach the gateway at %s (%s; listening on %s)", inst.Endpoint.GatewayIPv4, inst.Endpoint.Method, inst.Endpoint.ListenHost)
-	if err = save("endpoint"); err != nil {
-		return Result{}, err
-	}
-
-	selected := inst.harness(o.Harness)
-	if selected == nil {
-		start := o.Port
-		if len(inst.Harnesses) > 0 {
-			start = maxPort(inst) + 1
-		}
-		port, err := freePort(start, inst)
-		if err != nil {
-			return Result{}, err
-		}
-		if o.Model == "" {
-			return Result{}, fail("harness", fmt.Errorf("no model selected for %s", o.Harness), "pass --model NAME")
-		}
-		provider := ProviderFor(o.Harness)
-		name := "local"
-		if len(inst.Harnesses) > 0 {
-			directory, _ := harness.NativeDirectory(o.Harness)
-			name = "local-" + directory
-		}
-		h := Harness{Harness: o.Harness, Name: name, Port: port, Model: o.Model, ProviderURL: provider.URL,
-			ProviderCAFile: o.ProviderCAFile, Credential: filepath.Join(l.Credentials(), provider.Name)}
-		if o.ProviderURL != "" {
-			h.ProviderURL = o.ProviderURL
-		}
-		inst.Harnesses = append(inst.Harnesses, h)
-		selected = &inst.Harnesses[len(inst.Harnesses)-1]
-	} else if o.Model != "" && o.Model != selected.Model {
-		return Result{}, fail("harness", fmt.Errorf("%s already uses model %s", o.Harness, selected.Model), "edit the model in "+l.Config())
-	}
-	provider := ProviderFor(selected.Harness)
-	if !HasCredential(l, provider.Name) || o.Credential.File != "" || o.Credential.Stdin != nil {
-		if _, err = StoreCredential(l, provider.Name, o.Credential); err != nil {
-			return Result{}, err
-		}
-		step(o, "Stored the %s credential in %s", provider.Name, l.Credentials())
-	}
-	if o.CheckCredential {
-		if err = CheckCredential(ctx, selected.Harness, selected.ProviderURL, selected.ProviderCAFile, selected.Credential); err != nil {
-			return Result{}, err
-		}
-		step(o, "The %s credential is accepted", provider.Name)
-	}
-	if err = save("harness:" + string(selected.Harness)); err != nil {
-		return Result{}, err
-	}
-
-	store, err := pki.Open(l.PKI(), pki.DefaultPolicy, nil)
-	if err != nil {
-		return Result{}, err
-	}
-	names := pki.Names{IPs: []string{inst.Endpoint.GatewayIPv4}}
-	for _, h := range inst.Harnesses {
-		names.DNS = append(names.DNS, inspectionHost(h.Harness))
-	}
-	if _, err = store.Ensure(names); err != nil {
-		return Result{}, fail("tls", err, "run sproozi certificates status")
-	}
-	step(o, "Private gateway CA and serving certificate are in %s", l.PKI())
-	if err = save("pki"); err != nil {
-		return Result{}, err
-	}
-
 	if o.Instructions == "" {
 		o.Instructions = DefaultInstructions
 	}
-	rendered := renderConfig(l, inst, o.Instructions)
-	changed := false
-	if existing {
-		if config, changed, err = mergeConfig(config, rendered); err != nil {
-			return Result{}, err
-		}
-	} else {
-		config, changed = rendered, true
-	}
-	if changed {
-		if err = writeConfig(l, config, existing); err != nil {
-			return Result{}, err
-		}
-		step(o, "Wrote %s", l.Config())
-	}
-	if _, err = home.ReadConfig(l.Config()); err != nil {
-		return Result{}, fail("config", err, "fix "+l.Config())
-	}
-	if err = save("config"); err != nil {
-		return Result{}, err
-	}
+	return o
+}
 
-	result := Result{Root: root, Config: l.Config(), Agents: l.Agents(), Installation: inst.ID, Image: *inst.Image,
-		Network: network, Endpoint: *inst.Endpoint, Harnesses: inst.Harnesses}
-	if !o.StartService {
-		result.Service = ServiceState(ctx, l, config)
+// installer carries one provisioning run's journal and resolved resources.
+type installer struct {
+	o        Options
+	l        Layout
+	inst     Installation
+	docker   Docker
+	selected *Harness
+	store    *pki.Store
+	config   home.Config
+	changed  bool
+}
+
+// openInstaller validates the root, takes the setup lock and loads the journal.
+func openInstaller(o Options) (*installer, func(), error) {
+	root, err := ResolveRoot(o.Root)
+	if err != nil {
+		return nil, nil, err
+	}
+	l := Layout{Root: root}
+	if socket := home.SocketPath(l.State()); len(socket) > maxSocketPath {
+		return nil, nil, fail("root", fmt.Errorf("the control socket path %s exceeds the %d-byte Unix socket limit",
+			socket, maxSocketPath), "choose a shorter --root")
+	}
+	if err = l.ensureDirectories(); err != nil {
+		return nil, nil, fail("root", err, "fix ownership or permissions, or choose --root")
+	}
+	unlock, err := l.lock()
+	if err != nil {
+		return nil, nil, err
+	}
+	i := &installer{o: o, l: l}
+	if err = RememberRoot(root); err == nil {
+		i.inst, err = LoadInstallation(l)
+	}
+	if err == nil {
+		i.step("Using private installation root %s; shared agent settings live in %s", root, l.Agents())
+		err = i.save("root")
+	}
+	if err != nil {
+		unlock()
+		return nil, nil, err
+	}
+	return i, unlock, nil
+}
+
+func (i *installer) save(stage string) error {
+	i.inst.done(stage)
+	return i.l.save(i.inst)
+}
+
+func (i *installer) step(format string, args ...any) { step(i.o, format, args...) }
+
+func (i *installer) findDocker(ctx context.Context) error {
+	docker, err := DiscoverDocker(ctx, i.l.DockerCLI())
+	if err != nil {
+		return err
+	}
+	i.docker, i.inst.Docker = docker, &docker
+	i.step("Docker engine at %s runs Linux containers", docker.Socket)
+	return i.save("docker")
+}
+
+func (i *installer) prepareImage(ctx context.Context) error {
+	requested := i.o.Image.Reference != "" || i.o.Image.BuildSource != ""
+	if i.inst.Image == nil || requested || VerifyImage(ctx, i.docker, *i.inst.Image) != nil {
+		if i.inst.Image != nil && requested && placementExists(i.l) {
+			return fail("image", errors.New("changing the native image of an installation with retained sessions is not supported yet"),
+				"finish or cancel sessions, then move the state directory aside")
+		}
+		request := i.o.Image
+		request.Progress = i.o.Progress
+		image, err := ResolveImage(ctx, i.docker, i.inst.ID, request)
+		if err != nil {
+			return err
+		}
+		i.inst.Image = &image
+	}
+	i.step("Native image %s (%s)", i.inst.Image.ID, i.inst.Image.Source)
+	return i.save("image")
+}
+
+func (i *installer) prepareNetwork(ctx context.Context) error {
+	network, err := EnsureNetwork(ctx, i.docker, i.inst.ID)
+	if err != nil {
+		return err
+	}
+	i.inst.Network = &network
+	i.step("Network %s (%s)", network.Name, network.Subnet)
+	return i.save("network")
+}
+
+func (i *installer) findEndpoint(ctx context.Context) error {
+	if i.inst.Endpoint == nil {
+		port, err := freePort(i.o.Port, i.inst)
+		if err != nil {
+			return err
+		}
+		endpoint, err := SelectEndpoint(ctx, i.docker, *i.inst.Image, *i.inst.Network, port)
+		if err != nil {
+			return err
+		}
+		i.inst.Endpoint = &endpoint
+	}
+	e := i.inst.Endpoint
+	i.step("Workers reach the gateway at %s (%s; listening on %s)", e.GatewayIPv4, e.Method, e.ListenHost)
+	return i.save("endpoint")
+}
+
+// prepareHarness adds the requested harness with its own port, or reuses it, then
+// stores and optionally validates its provider credential.
+func (i *installer) prepareHarness(ctx context.Context) error {
+	o := i.o
+	i.selected = i.inst.harness(o.Harness)
+	switch {
+	case i.selected == nil:
+		if err := i.addHarness(); err != nil {
+			return err
+		}
+	case o.Model != "" && o.Model != i.selected.Model:
+		return fail("harness", fmt.Errorf("%s already uses model %s", o.Harness, i.selected.Model), "edit the model in "+i.l.Config())
+	}
+	provider := ProviderFor(i.selected.Harness)
+	if !HasCredential(i.l, provider.Name) || o.Credential.File != "" || o.Credential.Stdin != nil {
+		if _, err := StoreCredential(i.l, provider.Name, o.Credential); err != nil {
+			return err
+		}
+		i.step("Stored the %s credential in %s", provider.Name, i.l.Credentials())
+	}
+	if o.CheckCredential {
+		h := i.selected
+		if err := CheckCredential(ctx, h.Harness, h.ProviderURL, h.ProviderCAFile, h.Credential); err != nil {
+			return err
+		}
+		i.step("The %s credential is accepted", provider.Name)
+	}
+	return i.save("harness:" + string(i.selected.Harness))
+}
+
+func (i *installer) addHarness() error {
+	o := i.o
+	start := o.Port
+	if len(i.inst.Harnesses) > 0 {
+		start = maxPort(i.inst) + 1
+	}
+	port, err := freePort(start, i.inst)
+	if err != nil {
+		return err
+	}
+	if o.Model == "" {
+		return fail("harness", fmt.Errorf("no model selected for %s", o.Harness), "pass --model NAME")
+	}
+	provider := ProviderFor(o.Harness)
+	name := "local"
+	if len(i.inst.Harnesses) > 0 {
+		directory, _ := harness.NativeDirectory(o.Harness)
+		name = "local-" + directory
+	}
+	h := Harness{Harness: o.Harness, Name: name, Port: port, Model: o.Model, ProviderURL: cmp.Or(o.ProviderURL, provider.URL),
+		ProviderCAFile: o.ProviderCAFile, Credential: filepath.Join(i.l.Credentials(), provider.Name)}
+	i.inst.Harnesses = append(i.inst.Harnesses, h)
+	i.selected = &i.inst.Harnesses[len(i.inst.Harnesses)-1]
+	return nil
+}
+
+func (i *installer) prepareCertificates(context.Context) error {
+	store, err := pki.Open(i.l.PKI(), pki.DefaultPolicy, nil)
+	if err != nil {
+		return err
+	}
+	names := pki.Names{IPs: []string{i.inst.Endpoint.GatewayIPv4}}
+	for _, h := range i.inst.Harnesses {
+		names.DNS = append(names.DNS, inspectionHost(h.Harness))
+	}
+	if _, err = store.Ensure(names); err != nil {
+		return fail("tls", err, "run sproozi certificates status")
+	}
+	i.store = store
+	i.step("Private gateway CA and serving certificate are in %s", i.l.PKI())
+	return i.save("pki")
+}
+
+// writeConfiguration writes a new configuration, or merges a new harness into an existing
+// one while keeping the user's edits.
+func (i *installer) writeConfiguration(context.Context) error {
+	existing, found, err := readExistingConfig(i.l)
+	if err != nil {
+		return err
+	}
+	rendered := renderConfig(i.l, i.inst, i.o.Instructions)
+	i.config, i.changed = rendered, true
+	if found {
+		if i.config, i.changed, err = mergeConfig(existing, rendered); err != nil {
+			return err
+		}
+	}
+	if i.changed {
+		if err = writeConfig(i.l, i.config, found); err != nil {
+			return err
+		}
+		i.step("Wrote %s", i.l.Config())
+	}
+	if _, err = home.ReadConfig(i.l.Config()); err != nil {
+		return fail("config", err, "fix "+i.l.Config())
+	}
+	return i.save("config")
+}
+
+// serve starts or restarts the home daemon, then proves each harness's
+// restricted worker path before reporting ready.
+func (i *installer) serve(ctx context.Context) (Result, error) {
+	l, inst := i.l, i.inst
+	result := Result{Root: l.Root, Config: l.Config(), Agents: l.Agents(), Installation: inst.ID, Image: *inst.Image,
+		Network: *inst.Network, Endpoint: *inst.Endpoint, Harnesses: inst.Harnesses}
+	if !i.o.StartService {
+		result.Service = ServiceState(ctx, l, i.config)
 		return result, nil
 	}
-	if changed {
-		if status := ServiceState(ctx, l, config); status.Running {
-			step(o, "Restarting the home service to load the new configuration")
-			if _, err = StopService(ctx, l, config, true, time.Minute); err != nil {
-				return result, err
-			}
+	if status := ServiceState(ctx, l, i.config); i.changed && status.Running {
+		i.step("Restarting the home daemon to load the new configuration")
+		if _, err := StopService(ctx, l, i.config, true, time.Minute); err != nil {
+			return result, err
 		}
 	}
-	if result.Service, err = StartService(ctx, l, config, o.Executable, 2*time.Minute); err != nil {
+	var err error
+	if result.Service, err = StartService(ctx, l, i.config, i.o.Executable, 2*time.Minute); err != nil {
 		return result, err
 	}
-	step(o, "Home service is running; log %s", l.ServiceLog())
-	if err = save("service"); err != nil {
+	i.step("Home daemon is running; log %s", l.ServiceLog())
+	if err = i.save("service"); err != nil {
 		return result, err
 	}
-	trust, err := privatefs.ReadFile(store.TrustPath(), 64<<10)
+	trust, err := privatefs.ReadFile(i.store.TrustPath(), 64<<10)
 	if err != nil {
 		return result, err
 	}
 	for _, h := range inst.Harnesses {
-		report, err := ProbePath(ctx, docker, inst.ID, *inst.Image, network, inst.Endpoint.GatewayIPv4, h.Port, trust)
+		report, err := ProbePath(ctx, i.docker, inst.ID, *inst.Image, *inst.Network, inst.Endpoint.GatewayIPv4, h.Port, trust)
 		result.Paths = append(result.Paths, report)
 		if err != nil {
 			return result, err
 		}
-		step(o, "Verified %s gateway TLS and denied direct paths from a restricted worker", h.Harness)
+		i.step("Verified %s gateway TLS and denied direct paths from a restricted worker", h.Harness)
 	}
 	result.Ready = true
-	return result, save("ready")
+	return result, i.save("ready")
 }
 
 func step(o Options, format string, args ...any) {

@@ -617,7 +617,8 @@ func main() {
 		dispatcher[authority] = route
 	}
 	serving := proxytransport.NewCertificate(cfg.listenerCert)
-	hosts := []string{host}
+	hosts := make([]string, 0, 1+len(cfg.certificates))
+	hosts = append(hosts, host)
 	for name := range cfg.certificates {
 		hosts = append(hosts, name)
 	}

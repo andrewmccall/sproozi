@@ -18,6 +18,12 @@ import (
 // Setup rejects an image whose helper reports a different version.
 const contractVersion = "1"
 
+const (
+	probeReach = "reach"
+	probeTLS   = "tls"
+	tcp4       = "tcp4"
+)
+
 // probe runs one diagnostic inside a worker network namespace. None of these
 // change firewall state; the anchor alone does.
 //
@@ -30,9 +36,9 @@ func probe(args []string, stdin io.Reader, stdout io.Writer) error {
 	case len(args) == 1 && args[0] == "contract":
 		_, err := fmt.Fprintln(stdout, contractVersion)
 		return err
-	case len(args) == 4 && args[0] == "reach":
+	case len(args) == 4 && args[0] == probeReach:
 		return reach(args[1], args[2], args[3], stdout)
-	case len(args) == 3 && args[0] == "tls":
+	case len(args) == 3 && args[0] == probeTLS:
 		return verifyTLS(args[1], args[2], stdin)
 	case len(args) == 3 && args[0] == "deny":
 		return deny(args[1], args[2], stdout)
@@ -49,7 +55,7 @@ func reach(host, port, nonce string, stdout io.Writer) error {
 	}
 	for _, address := range addresses {
 		target := net.JoinHostPort(address.String(), port)
-		conn, err := (&net.Dialer{}).DialContext(ctx, "tcp4", target)
+		conn, err := (&net.Dialer{}).DialContext(ctx, tcp4, target)
 		if err != nil {
 			continue
 		}
@@ -78,7 +84,8 @@ func verifyTLS(ip, port string, stdin io.Reader) error {
 		return errors.New("gateway IP required")
 	}
 	dialer := &net.Dialer{Timeout: 5 * time.Second}
-	conn, err := tls.DialWithDialer(dialer, "tcp4", net.JoinHostPort(ip, port), &tls.Config{RootCAs: roots, ServerName: ip, MinVersion: tls.VersionTLS13})
+	config := &tls.Config{RootCAs: roots, ServerName: ip, MinVersion: tls.VersionTLS13}
+	conn, err := tls.DialWithDialer(dialer, tcp4, net.JoinHostPort(ip, port), config)
 	if err != nil {
 		return fmt.Errorf("gateway TLS verification failed: %w", err)
 	}
@@ -102,10 +109,10 @@ func deny(ip, port string, stdout io.Writer) error {
 	}
 	other = other%65535 + 1
 	attempts := []struct{ network, address, path string }{
-		{"tcp4", "1.1.1.1:443", "public IPv4 HTTPS"},
-		{"tcp4", "api.openai.com:443", "direct provider"},
-		{"tcp4", net.JoinHostPort(ip, strconv.Itoa(other)), "gateway alternate port"},
-		{"tcp4", "169.254.169.254:80", "metadata endpoint"},
+		{tcp4, "1.1.1.1:443", "public IPv4 HTTPS"},
+		{tcp4, "api.openai.com:443", "direct provider"},
+		{tcp4, net.JoinHostPort(ip, strconv.Itoa(other)), "gateway alternate port"},
+		{tcp4, "169.254.169.254:80", "metadata endpoint"},
 		{"tcp6", "[2606:4700:4700::1111]:443", "public IPv6 HTTPS"},
 		{"udp4", "1.1.1.1:53", "direct DNS"},
 	}
@@ -142,7 +149,8 @@ func attempt(network, address string) (bool, error) {
 	}
 	// UDP "connects" locally; a reply proves the path. Send a DNS query.
 	_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
-	query := []byte{0x12, 0x34, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 7, 'e', 'x', 'a', 'm', 'p', 'l', 'e', 3, 'c', 'o', 'm', 0, 0, 1, 0, 1}
+	query := []byte{0x12, 0x34, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0,
+		7, 'e', 'x', 'a', 'm', 'p', 'l', 'e', 3, 'c', 'o', 'm', 0, 0, 1, 0, 1}
 	if _, err = conn.Write(query); err != nil {
 		return false, err
 	}

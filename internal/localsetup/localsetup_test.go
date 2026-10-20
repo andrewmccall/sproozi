@@ -28,14 +28,14 @@ func testInstallation(t *testing.T) (Layout, Installation) {
 		Network:  &Network{Name: "sproozi-0a1b2c3d", Subnet: "172.30.0.0/16", Gateway: "172.30.0.1"},
 		Endpoint: &Endpoint{GatewayIPv4: "192.168.65.254", ListenHost: "127.0.0.1"},
 		Harnesses: []Harness{{Harness: harness.NativeCodex, Name: "local", Port: 18443, Model: "gpt-fixture",
-			ProviderURL: "https://api.openai.com", Credential: filepath.Join(l.Credentials(), "openai")}}}
+			ProviderURL: openAIURL, Credential: filepath.Join(l.Credentials(), "openai")}}}
 	return l, inst
 }
 
 func TestRenderedConfigIsAcceptedByTheHomeService(t *testing.T) {
 	l, inst := testInstallation(t)
 	inst.Harnesses = append(inst.Harnesses, Harness{Harness: harness.NativeClaude, Name: "local-claude", Port: 18444,
-		Model: "claude-fixture", ProviderURL: "https://api.anthropic.com", Credential: filepath.Join(l.Credentials(), "anthropic")})
+		Model: "claude-fixture", ProviderURL: anthropicURL, Credential: filepath.Join(l.Credentials(), "anthropic")})
 	c := renderConfig(l, inst, DefaultInstructions)
 	if err := writeConfig(l, c, false); err != nil {
 		t.Fatal(err)
@@ -69,7 +69,7 @@ func TestMergeKeepsUserEditsAddsHarnessesAndRefusesPlacementChanges(t *testing.T
 	existing.MaxDuration = "2h"
 	existing.Model = "edited-model"
 	inst.Harnesses = append(inst.Harnesses, Harness{Harness: harness.NativeClaude, Name: "local-claude", Port: 18444,
-		Model: "claude-fixture", ProviderURL: "https://api.anthropic.com", Credential: "/x/anthropic"})
+		Model: "claude-fixture", ProviderURL: anthropicURL, Credential: "/x/anthropic"})
 	merged, changed, err := mergeConfig(existing, renderConfig(l, inst, DefaultInstructions))
 	if err != nil || !changed {
 		t.Fatalf("merge changed=%v err=%v", changed, err)
@@ -131,7 +131,7 @@ func TestCredentialInputsStorePrivatelyAndRejectBadValues(t *testing.T) {
 	if err = os.WriteFile(public, []byte("sk"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS != goosWindows {
 		if _, err = StoreCredential(l, "openai", CredentialInput{File: public}); err == nil {
 			t.Fatal("world-readable credential file accepted")
 		}
@@ -181,7 +181,7 @@ func TestSetupLockAdmitsOneOwner(t *testing.T) {
 }
 
 func TestRootDiscoveryPrefersPlatformConfigThenRecordedRoot(t *testing.T) {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == goosWindows {
 		t.Skip("UserConfigDir ignores HOME on Windows")
 	}
 	homeDir := testutil.PrivateDir(t)

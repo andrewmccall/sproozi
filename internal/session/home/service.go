@@ -32,12 +32,6 @@ import (
 // maxRetainedExecutions bounds the executions the home coordinator retains.
 const maxRetainedExecutions = 256
 
-type localPlacement interface {
-	session.Placement
-	session.TerminalPlacement
-	session.PreparationAborter
-}
-
 // Service is the home daemon. Every execution, including its first visit, is
 // a coordinator record: the coordinator alone prepares, activates, stops,
 // cancels and recovers writers. The service adds workspace capture, retention

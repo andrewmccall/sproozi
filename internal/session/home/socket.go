@@ -378,9 +378,6 @@ func validateRequest(q Request) error {
 	if !work.CanonicalID(q.ID) {
 		return errors.New("home: invalid session UUID")
 	}
-	if q.Harness != "" && (q.Action != ActionStart || q.Harness.Validate() != nil) {
-		return errors.New("home: harness selection applies only to start")
-	}
 	switch q.Action {
 	case ActionStart:
 		if !work.CanonicalID(q.OperationID) || !filepath.IsAbs(q.Workspace) || q.Destination != "" {
@@ -463,6 +460,9 @@ func validateCommonRequest(q Request) error {
 	}
 	if q.Action != ActionStart && len(q.IncludeIgnored) != 0 {
 		return errors.New("home: ignored file selection is start intent")
+	}
+	if q.Harness != "" && (q.Action != ActionStart || q.Harness.Validate() != nil) {
+		return errors.New("home: harness selection applies only to start")
 	}
 	if q.Action != ActionPull && q.Source != "" {
 		return errors.New("home: source is pull intent")

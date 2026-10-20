@@ -10,7 +10,9 @@ import (
 	"time"
 )
 
-var testNames = Names{DNS: []string{"api.openai.com", "api.anthropic.com"}, IPs: []string{"192.168.65.254"}}
+const openAIHost = "api.openai.com"
+
+var testNames = Names{DNS: []string{openAIHost, "api.anthropic.com"}, IPs: []string{"192.168.65.254"}}
 
 type clock struct{ t time.Time }
 
@@ -71,7 +73,7 @@ func TestEnsureRenewsAfterTwoThirdsAndOnNameChange(t *testing.T) {
 	if err != nil || !changed {
 		t.Fatalf("renewal changed=%v err=%v", changed, err)
 	}
-	second, trust, st := serving(t, s)
+	second, _, st := serving(t, s)
 	if second.Equal(first) || len(st.Generations) != 1 {
 		t.Fatal("renewal must issue a new leaf under the same CA")
 	}
@@ -244,7 +246,7 @@ func TestNamesRejectWildcardsAndEmpty(t *testing.T) {
 func TestServingCertificateHandshakes(t *testing.T) {
 	s, c := openTest(t)
 	c.t = time.Now()
-	if _, err := s.Ensure(Names{DNS: []string{"api.openai.com"}, IPs: []string{"127.0.0.1"}}); err != nil {
+	if _, err := s.Ensure(Names{DNS: []string{openAIHost}, IPs: []string{"127.0.0.1"}}); err != nil {
 		t.Fatal(err)
 	}
 	cert, trust, _, err := s.Serving()
@@ -265,7 +267,7 @@ func TestServingCertificateHandshakes(t *testing.T) {
 	}()
 	roots := x509.NewCertPool()
 	roots.AppendCertsFromPEM(trust)
-	conn, err := tls.Dial("tcp", listener.Addr().String(), &tls.Config{RootCAs: roots, ServerName: "api.openai.com", MinVersion: tls.VersionTLS13})
+	conn, err := tls.Dial("tcp", listener.Addr().String(), &tls.Config{RootCAs: roots, ServerName: openAIHost, MinVersion: tls.VersionTLS13})
 	if err != nil {
 		t.Fatal(err)
 	}

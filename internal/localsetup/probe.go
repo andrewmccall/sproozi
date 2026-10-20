@@ -93,10 +93,9 @@ func PortFree(host string, port uint16) bool {
 // workerFlags are the restricted worker settings: non-root, no capabilities,
 // read-only root and no privilege escalation.
 func workerFlags(network ...string) []string {
-	flags := []string{"run", "--rm", "-i", "--user", "1000:1000", "--cap-drop", "ALL", "--read-only",
+	return append([]string{"run", "--rm", "-i", "--user", "1000:1000", "--cap-drop", "ALL", "--read-only",
 		"--security-opt", "no-new-privileges", "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=16777216",
-		"--entrypoint", "/usr/local/bin/sproozi-network"}
-	return append(flags, network...)
+		"--entrypoint", "/usr/local/bin/sproozi-network"}, network...)
 }
 
 // PathReport is the result of probing the actual restricted worker path.

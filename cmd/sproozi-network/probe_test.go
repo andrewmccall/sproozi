@@ -11,8 +11,10 @@ import (
 	"github.com/andrewmccall/sproozi/internal/pki"
 )
 
+const loopback = "127.0.0.1"
+
 func TestReachReturnsTheAddressThatServedTheNonce(t *testing.T) {
-	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	listener, err := net.Listen(tcp4, loopback+":0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,13 +31,13 @@ func TestReachReturnsTheAddressThatServedTheNonce(t *testing.T) {
 	}()
 	_, port, _ := net.SplitHostPort(listener.Addr().String())
 	var out bytes.Buffer
-	if err = probe([]string{"reach", "localhost", port, "nonce-123"}, nil, &out); err != nil {
+	if err = probe([]string{probeReach, "localhost", port, "nonce-123"}, nil, &out); err != nil {
 		t.Fatal(err)
 	}
-	if strings.TrimSpace(out.String()) != "127.0.0.1" {
+	if strings.TrimSpace(out.String()) != loopback {
 		t.Fatalf("reach printed %q", out.String())
 	}
-	if probe([]string{"reach", "127.0.0.1", port, "other-nonce"}, nil, &out) == nil {
+	if probe([]string{probeReach, loopback, port, "other-nonce"}, nil, &out) == nil {
 		t.Fatal("wrong nonce accepted")
 	}
 }
@@ -46,7 +48,7 @@ func TestTLSProbeVerifiesTheGatewayIP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	leaf, err := pki.IssueLeaf(ca, pki.Names{IPs: []string{"127.0.0.1"}}, now, 24*time.Hour)
+	leaf, err := pki.IssueLeaf(ca, pki.Names{IPs: []string{loopback}}, now, 24*time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +56,8 @@ func TestTLSProbeVerifiesTheGatewayIP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	listener, err := tls.Listen("tcp4", "127.0.0.1:0", &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS13})
+	config := &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS13}
+	listener, err := tls.Listen(tcp4, loopback+":0", config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,14 +73,14 @@ func TestTLSProbeVerifiesTheGatewayIP(t *testing.T) {
 		}
 	}()
 	_, port, _ := net.SplitHostPort(listener.Addr().String())
-	if err = probe([]string{"tls", "127.0.0.1", port}, bytes.NewReader(ca.Certificate), nil); err != nil {
+	if err = probe([]string{probeTLS, loopback, port}, bytes.NewReader(ca.Certificate), nil); err != nil {
 		t.Fatal(err)
 	}
 	other, err := pki.NewCA("other", now, 48*time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if probe([]string{"tls", "127.0.0.1", port}, bytes.NewReader(other.Certificate), nil) == nil {
+	if probe([]string{probeTLS, loopback, port}, bytes.NewReader(other.Certificate), nil) == nil {
 		t.Fatal("untrusted gateway accepted")
 	}
 }

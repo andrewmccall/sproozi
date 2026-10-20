@@ -336,7 +336,7 @@ func managedConfig(t *testing.T) (Config, *pki.Store) {
 	c.Gateway.CertificateFile, c.Gateway.KeyFile, c.Gateway.TrustBundleFile = "", "", ""
 	c.Gateway.PKIDirectory = filepath.Join(root, "pki")
 	c.Gateway.Listen = "127.0.0.1:18443"
-	c.Harnesses = []LocalHarness{{Harness: harness.NativeClaude, Name: "local-claude", GatewayPort: 18444, Model: "claude-fixture",
+	c.Harnesses = []LocalHarness{{Harness: harness.NativeClaude, Name: testClaudeLocal, GatewayPort: 18444, Model: "claude-fixture",
 		ProviderURL: "http://127.0.0.1:18766", ProviderTokenFile: c.Gateway.ProviderTokenFile}}
 	store, err := pki.Open(c.Gateway.PKIDirectory, pki.DefaultPolicy, nil)
 	if err != nil {
@@ -363,7 +363,7 @@ func TestSecondHarnessGetsItsOwnPlacementPortAndCoveredCertificate(t *testing.T)
 		t.Fatal(err)
 	}
 	defer func() { _ = s.Close() }()
-	if len(s.stacks) != 2 || s.placements["local-claude"] == nil || s.placements[testLocal] == nil {
+	if len(s.stacks) != 2 || s.placements[testClaudeLocal] == nil || s.placements[testLocal] == nil {
 		t.Fatalf("stacks=%d placements=%v", len(s.stacks), s.placements)
 	}
 	if s.stacks[0].server.Addr != "127.0.0.1:18443" || s.stacks[1].server.Addr != "127.0.0.1:18444" {
@@ -379,7 +379,7 @@ func TestSecondHarnessGetsItsOwnPlacementPortAndCoveredCertificate(t *testing.T)
 		}
 	}
 	local, err := s.localFor(harness.NativeClaude)
-	if err != nil || local.Name != "local-claude" {
+	if err != nil || local.Name != testClaudeLocal {
 		t.Fatalf("localFor claude = %+v %v", local, err)
 	}
 	if _, err = os.Stat(filepath.Join(c.Directory, "docker-local-claude")); err != nil {

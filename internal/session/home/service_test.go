@@ -33,6 +33,7 @@ const testInstructions = "fixture approved developer instruction"
 const testLimit = int64(8 << 20)
 const testLocal = "local"
 const testRemote = "remote"
+const testClaudeLocal = "local-claude"
 const testIgnoredFile = "needed.bin"
 
 type placementFixture struct {
@@ -593,8 +594,8 @@ func TestStartSelectsTheRequestedLocalHarnessPerSession(t *testing.T) {
 	dir := filepath.Join(testutil.PrivateDir(t), "home")
 	primary := runtimedocker.PlacementConfig{Harness: harness.NativeCodex, Name: testLocal, InstructionDigest: fmt.Sprintf("%x", sha256.Sum256([]byte(testInstructions))), MaxCheckpointBytes: testLimit, RetainedBytes: 64 << 20}
 	second := primary
-	second.Harness, second.Name = harness.NativeClaude, "local-claude"
-	placements := map[string]session.Placement{testLocal: codex, "local-claude": claude}
+	second.Harness, second.Name = harness.NativeClaude, testClaudeLocal
+	placements := map[string]session.Placement{testLocal: codex, testClaudeLocal: claude}
 	coordinator, err := session.Open(filepath.Join(dir, "journal"), placements, testLimit)
 	if err != nil {
 		t.Fatal(err)

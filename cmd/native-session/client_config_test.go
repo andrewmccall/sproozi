@@ -71,7 +71,8 @@ func TestFreshKubernetesClientUsesInspectedAuthorityAndPlaceholderCredential(t *
 }
 
 func TestUserInstructionsAreTheNativeUserFileAndExactOnRetry(t *testing.T) {
-	for kind, file := range map[harness.NativeKind]string{harness.NativeCodex: "AGENTS.md", harness.NativeClaude: "CLAUDE.md"} {
+	files := map[harness.NativeKind]string{harness.NativeCodex: "AGENTS.md", harness.NativeClaude: "CLAUDE.md"}
+	for kind, file := range files {
 		dir := t.TempDir()
 		c := config{Harness: kind, UserInstructions: "Prefer small commits."}
 		if err := installUserInstructions(dir, c); err != nil {

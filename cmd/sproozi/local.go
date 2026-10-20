@@ -20,15 +20,28 @@ import (
 	"golang.org/x/term"
 )
 
+// Verbs of the local installation commands.
+const (
+	verbStatus    = "status"
+	verbStart     = "start"
+	verbStop      = "stop"
+	verbAdd       = "add"
+	verbPrepare   = "prepare"
+	verbRenew     = "renew"
+	verbRotateCA  = "rotate-ca"
+	verbReplaceCA = "replace-ca"
+)
+
 func isSetupCommand(name string) bool {
-	return slices.Contains([]string{actionInit, actionService, actionDoctor, actionCredentials, actionImages, actionCertificates}, name)
+	return slices.Contains([]string{actionInit, actionService, actionDoctor, actionCredentials, actionImages,
+		actionCertificates}, name)
 }
 
 // parseVerb takes the command's verb, and for operand verbs one operand, from
 // the leading positional arguments.
 func parseVerb(c command, args []string, s *setupOptions) ([]string, error) {
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
-		if len(args) > 0 && (args[0] == "-h" || args[0] == "--help" || args[0] == "-help") {
+		if len(args) > 0 && helpRequested(args[0]) {
 			return args, nil
 		}
 		return nil, fmt.Errorf("%s requires one of %s; usage: %s", c.name, strings.Join(c.verbs, ", "), c.line())
@@ -173,7 +186,8 @@ func installation(root string) (localsetup.Layout, localsetup.Installation, home
 	}
 	l := localsetup.Layout{Root: resolved}
 	if _, err = os.Stat(l.Installation()); err != nil {
-		return l, localsetup.Installation{}, home.Config{}, fmt.Errorf("no local installation at %s; run sproozi init --local", resolved)
+		err = fmt.Errorf("no local installation at %s; run sproozi init --local", resolved)
+		return l, localsetup.Installation{}, home.Config{}, err
 	}
 	inst, err := localsetup.LoadInstallation(l)
 	if err != nil {
@@ -221,65 +235,78 @@ func (q *options) maintain(ctx context.Context) error {
 
 func serviceCommand(ctx context.Context, l localsetup.Layout, c home.Config, s setupOptions) (any, error) {
 	switch s.verb {
-	case "start":
+	case verbStart:
 		executable, err := os.Executable()
 		if err != nil {
 			return nil, err
 		}
 		return localsetup.StartService(ctx, l, c, executable, 2*time.Minute)
-	case "stop":
+	case verbStop:
 		return localsetup.StopService(ctx, l, c, s.leaveRunning, time.Minute)
 	}
 	return localsetup.ServiceState(ctx, l, c), nil
 }
 
-func credentialsCommand(ctx context.Context, l localsetup.Layout, inst localsetup.Installation, s setupOptions) (any, error) {
+// credentialResult reports a stored provider credential and its effect.
+type credentialResult struct {
+	Stored    string `json:"stored"`
+	Validated bool   `json:"validated,omitempty"`
+	Service   string `json:"service"`
+}
+
+func credentialsCommand(ctx context.Context, l localsetup.Layout, inst localsetup.Installation,
+	s setupOptions) (any, error) {
+	if s.operand != "openai" && s.operand != "anthropic" {
+		return nil, errors.New("credentials add requires openai or anthropic")
+	}
 	var selected *localsetup.Harness
 	for i := range inst.Harnesses {
 		if localsetup.ProviderFor(inst.Harnesses[i].Harness).Name == s.operand {
 			selected = &inst.Harnesses[i]
 		}
 	}
-	if s.operand != "openai" && s.operand != "anthropic" {
-		return nil, errors.New("credentials add requires openai or anthropic")
-	}
 	path, err := localsetup.StoreCredential(l, s.operand, credentialInput(s))
 	if err != nil {
 		return nil, err
 	}
-	result := map[string]any{"stored": path}
+	result := credentialResult{Stored: path}
 	if selected != nil && !s.skipCheck {
-		if err = localsetup.CheckCredential(ctx, selected.Harness, selected.ProviderURL, selected.ProviderCAFile, path); err != nil {
+		err = localsetup.CheckCredential(ctx, selected.Harness, selected.ProviderURL, selected.ProviderCAFile, path)
+		if err != nil {
 			return result, err
 		}
-		result["validated"] = true
+		result.Validated = true
 	}
-	// The gateway reads provider credentials only at startup, so a running
-	// service is restarted when no session is active.
+	result.Service, err = restartForCredential(ctx, l)
+	return result, err
+}
+
+// restartForCredential restarts the home daemon when no session is active.
+// The gateway reads provider credentials only at startup.
+func restartForCredential(ctx context.Context, l localsetup.Layout) (string, error) {
 	c, err := home.ReadConfig(l.Config())
 	if err != nil {
-		return result, err
+		return "", err
 	}
 	status := localsetup.ServiceState(ctx, l, c)
 	switch {
 	case !status.Running:
-		result["service"] = "not running; the credential is used when it starts"
+		return "not running; the credential is used when it starts", nil
 	case len(status.Active) > 0:
-		result["service"] = "still using the previous credential; it reads credentials at startup, so restart it with sproozi service stop and sproozi service start once no session is active"
-	default:
-		executable, err := os.Executable()
-		if err != nil {
-			return result, err
-		}
-		if _, err = localsetup.StopService(ctx, l, c, false, time.Minute); err != nil {
-			return result, err
-		}
-		if _, err = localsetup.StartService(ctx, l, c, executable, 2*time.Minute); err != nil {
-			return result, err
-		}
-		result["service"] = "restarted with the new credential"
+		return "still using the previous credential, which it read at startup; restart it with " +
+			"sproozi service stop and sproozi service start once no session is active", nil
 	}
-	return result, nil
+	executable, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	if _, err = localsetup.StopService(ctx, l, c, false, time.Minute); err != nil {
+		return "", err
+	}
+	if _, err = localsetup.StartService(ctx, l, c, executable, 2*time.Minute); err != nil {
+		return "", err
+	}
+	return "restarted with the new credential", nil
 }
 
 func printHuman(w io.Writer, v any) {
@@ -289,17 +316,33 @@ func printHuman(w io.Writer, v any) {
 	}
 }
 
-func imagesCommand(ctx context.Context, l localsetup.Layout, inst localsetup.Installation, s setupOptions) (any, error) {
-	if s.verb == "status" {
-		return map[string]any{"installed": inst.Image, "release": localsetup.ReleaseImage()}, nil
+// imageStatus reports the installed and release images.
+type imageStatus struct {
+	Installed *localsetup.Image `json:"installed"`
+	Release   string            `json:"release"`
+}
+
+// preparedImage reports an image prepared by images prepare.
+type preparedImage struct {
+	Image  localsetup.Image `json:"image"`
+	Active bool             `json:"active"`
+	Note   string           `json:"note,omitempty"`
+}
+
+func imagesCommand(ctx context.Context, l localsetup.Layout, inst localsetup.Installation,
+	s setupOptions) (any, error) {
+	if s.verb == verbStatus {
+		return imageStatus{Installed: inst.Image, Release: localsetup.ReleaseImage()}, nil
 	}
-	image, active, err := localsetup.PrepareImage(ctx, l, localsetup.ImageRequest{Reference: s.image, BuildSource: s.build, Progress: os.Stderr})
+	request := localsetup.ImageRequest{Reference: s.image, BuildSource: s.build, Progress: os.Stderr}
+	image, active, err := localsetup.PrepareImage(ctx, l, request)
 	if err != nil {
 		return nil, err
 	}
-	result := map[string]any{"image": image, "active": active}
+	result := preparedImage{Image: image, Active: active}
 	if !active {
-		result["note"] = "prepared but not active: retained local sessions use the current image; changing it needs a drained migration"
+		result.Note = "prepared but not active: retained local sessions use the current image; " +
+			"changing it needs a drained migration"
 	}
 	return result, nil
 }
@@ -310,15 +353,16 @@ func certificatesCommand(ctx context.Context, l localsetup.Layout, c home.Config
 		return nil, err
 	}
 	switch s.verb {
-	case "renew":
+	case verbRenew:
 		err = store.Renew()
-	case "rotate-ca":
+	case verbRotateCA:
 		// The running service switches and retires once every running
 		// allocation has the new trust or has independently stopped.
 		err = store.PrepareRotation()
-	case "replace-ca":
+	case verbReplaceCA:
 		if status := localsetup.ServiceState(ctx, l, c); len(status.Active) > 0 {
-			return nil, fmt.Errorf("replacing the CA would remove trust from %d active session(s); cancel them first", len(status.Active))
+			return nil, fmt.Errorf("replacing the CA would remove trust from %d active session(s); cancel them first",
+				len(status.Active))
 		}
 		err = store.ReplaceCA()
 	}

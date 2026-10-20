@@ -14,26 +14,31 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 )
 
+const (
+	systemNamespace = "sproozi-system"
+	trustPrefix     = "sproozi-sandbox-trust"
+)
+
 var names = pki.Names{DNS: []string{"sproozi-gateway.sproozi-system.svc", "kubernetes.default.svc"}}
 
 func setup(t *testing.T) (*Controller, *fake.Clientset) {
 	t.Helper()
 	client := fake.NewClientset(
-		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "sproozi-certificate-authority", Namespace: "sproozi-system"}},
-		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "sproozi-gateway-tls", Namespace: "sproozi-system"}},
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "sproozi-certificate-authority", Namespace: systemNamespace}},
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "sproozi-gateway-tls", Namespace: systemNamespace}},
 	)
 	return controller(t, client), client
 }
 
 func controller(t *testing.T, client *fake.Clientset) *Controller {
-	return &Controller{Client: client, Config: Config{Namespace: "sproozi-system", AuthoritySecret: "sproozi-certificate-authority",
-		ServingSecret: "sproozi-gateway-tls", TrustNamespace: "sproozi-agents", TrustPrefix: "sproozi-sandbox-trust",
+	return &Controller{Client: client, Config: Config{Namespace: systemNamespace, AuthoritySecret: "sproozi-certificate-authority",
+		ServingSecret: "sproozi-gateway-tls", TrustNamespace: "sproozi-agents", TrustPrefix: trustPrefix,
 		Names: names, Policy: pki.DefaultPolicy, Scratch: testutil.PrivateDir(t)}}
 }
 
 func serving(t *testing.T, client *fake.Clientset) tls.Certificate {
 	t.Helper()
-	s, err := client.CoreV1().Secrets("sproozi-system").Get(context.Background(), "sproozi-gateway-tls", metav1.GetOptions{})
+	s, err := client.CoreV1().Secrets(systemNamespace).Get(context.Background(), "sproozi-gateway-tls", metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +67,7 @@ func trust(t *testing.T, client *fake.Clientset, name string) []byte {
 
 func request(t *testing.T, client *fake.Clientset, value string) {
 	t.Helper()
-	secrets := client.CoreV1().Secrets("sproozi-system")
+	secrets := client.CoreV1().Secrets(systemNamespace)
 	s, err := secrets.Get(context.Background(), "sproozi-certificate-authority", metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -79,11 +84,11 @@ func request(t *testing.T, client *fake.Clientset, value string) {
 func TestBootstrapPublishesServingSecretAndImmutableTrust(t *testing.T) {
 	c, client := setup(t)
 	status, err := c.Reconcile(context.Background())
-	if err != nil || !status.Changed || status.TrustConfigMap != "sproozi-sandbox-trust" {
+	if err != nil || !status.Changed || status.TrustConfigMap != trustPrefix {
 		t.Fatalf("bootstrap %+v %v", status, err)
 	}
 	leaf := serving(t, client).Leaf
-	if err = pki.VerifyServing(leaf, trust(t, client, "sproozi-sandbox-trust"), names, time.Now()); err != nil {
+	if err = pki.VerifyServing(leaf, trust(t, client, trustPrefix), names, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	// A restarted controller with fresh scratch space reuses committed state.
@@ -98,7 +103,7 @@ func TestOperatorDrivenRotationCreatesNewTrustObjects(t *testing.T) {
 	if _, err := c.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	trustA := trust(t, client, "sproozi-sandbox-trust")
+	trustA := trust(t, client, trustPrefix)
 	leafA := serving(t, client).Leaf
 	request(t, client, "prepare")
 	status, err := c.Reconcile(context.Background())
@@ -106,7 +111,7 @@ func TestOperatorDrivenRotationCreatesNewTrustObjects(t *testing.T) {
 		t.Fatalf("prepare %+v %v", status, err)
 	}
 	trustAB := trust(t, client, "sproozi-sandbox-trust-1-2")
-	if string(trust(t, client, "sproozi-sandbox-trust")) != string(trustA) {
+	if string(trust(t, client, trustPrefix)) != string(trustA) {
 		t.Fatal("existing trust object changed")
 	}
 	request(t, client, "switch")
@@ -124,7 +129,7 @@ func TestOperatorDrivenRotationCreatesNewTrustObjects(t *testing.T) {
 	if pki.VerifyServing(leafB, trust(t, client, "sproozi-sandbox-trust-2"), names, time.Now()) != nil {
 		t.Fatal("retired bundle must still verify the B leaf")
 	}
-	s, _ := client.CoreV1().Secrets("sproozi-system").Get(context.Background(), "sproozi-certificate-authority", metav1.GetOptions{})
+	s, _ := client.CoreV1().Secrets(systemNamespace).Get(context.Background(), "sproozi-certificate-authority", metav1.GetOptions{})
 	if _, ok := s.Data["ca-1.key"]; ok || s.Annotations[RotationRequest] != "" || s.Annotations[RotationStage] != "none" {
 		t.Fatalf("retired key or request retained: %v", s.Annotations)
 	}
@@ -139,8 +144,8 @@ func TestRefusedRequestIsReportedWithoutChangingTrust(t *testing.T) {
 	if _, err := c.Reconcile(context.Background()); err == nil {
 		t.Fatal("switch without prepare accepted")
 	}
-	s, _ := client.CoreV1().Secrets("sproozi-system").Get(context.Background(), "sproozi-certificate-authority", metav1.GetOptions{})
-	if !strings.Contains(s.Annotations[LastError], "refused") || s.Annotations[RotationRequest] != "" || s.Annotations[TrustAnnotation] != "sproozi-sandbox-trust" {
+	s, _ := client.CoreV1().Secrets(systemNamespace).Get(context.Background(), "sproozi-certificate-authority", metav1.GetOptions{})
+	if !strings.Contains(s.Annotations[LastError], "refused") || s.Annotations[RotationRequest] != "" || s.Annotations[TrustAnnotation] != trustPrefix {
 		t.Fatalf("annotations %v", s.Annotations)
 	}
 }
@@ -150,7 +155,7 @@ func TestMissingPrecreatedObjectsFailWithoutCreatingThem(t *testing.T) {
 	if _, err := controller(t, client).Reconcile(context.Background()); err == nil || !strings.Contains(err.Error(), "install creates it") {
 		t.Fatalf("missing authority Secret: %v", err)
 	}
-	if list, _ := client.CoreV1().Secrets("sproozi-system").List(context.Background(), metav1.ListOptions{}); len(list.Items) != 0 {
+	if list, _ := client.CoreV1().Secrets(systemNamespace).List(context.Background(), metav1.ListOptions{}); len(list.Items) != 0 {
 		t.Fatal("controller created a Secret")
 	}
 }
@@ -163,11 +168,11 @@ func TestRenewRequestReplacesTheLeafUnderTheSameAuthority(t *testing.T) {
 	before := serving(t, client).Leaf
 	request(t, client, "renew")
 	status, err := c.Reconcile(context.Background())
-	if err != nil || status.TrustConfigMap != "sproozi-sandbox-trust" {
+	if err != nil || status.TrustConfigMap != trustPrefix {
 		t.Fatalf("renew %+v %v", status, err)
 	}
 	after := serving(t, client).Leaf
-	if after.Equal(before) || pki.VerifyServing(after, trust(t, client, "sproozi-sandbox-trust"), names, time.Now()) != nil {
+	if after.Equal(before) || pki.VerifyServing(after, trust(t, client, trustPrefix), names, time.Now()) != nil {
 		t.Fatal("renewal must serve a new leaf trusted by the unchanged bundle")
 	}
 }

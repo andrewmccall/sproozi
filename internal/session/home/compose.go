@@ -145,11 +145,11 @@ func localConfigs(c Config) ([]*localStack, error) {
 	for _, extra := range c.Harnesses {
 		placement := c.Local
 		placement.Harness, placement.Name, placement.GatewayPort = extra.Harness, extra.Name, extra.GatewayPort
-		gateway := c.Gateway
-		gateway.Listen = net.JoinHostPort(host, fmt.Sprint(extra.GatewayPort))
-		gateway.ProviderURL, gateway.ProviderTokenFile = extra.ProviderURL, extra.ProviderTokenFile
-		gateway.ProviderCAFile, gateway.PricingFile = extra.ProviderCAFile, extra.PricingFile
-		stacks = append(stacks, &localStack{config: placement, model: extra.Model, options: extra.NativeOptions, gateway: gateway})
+		listener := c.Gateway
+		listener.Listen = net.JoinHostPort(host, fmt.Sprint(extra.GatewayPort))
+		listener.ProviderURL, listener.ProviderTokenFile = extra.ProviderURL, extra.ProviderTokenFile
+		listener.ProviderCAFile, listener.PricingFile = extra.ProviderCAFile, extra.PricingFile
+		stacks = append(stacks, &localStack{config: placement, model: extra.Model, options: extra.NativeOptions, gateway: listener})
 	}
 	harnesses, names, ports := map[harness.NativeKind]bool{}, map[string]bool{}, map[uint16]bool{}
 	for _, stack := range stacks {

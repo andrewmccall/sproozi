@@ -46,19 +46,25 @@ type command struct {
 // commands lists every subcommand in help order. A command with an "id" flag
 // requires a session UUID, except start, which creates one when omitted.
 var commands = []command{
-	{name: actionInit, operands: "[--local]", summary: "Create a private configuration directory, or provision local Docker sessions with --local",
-		flags: []string{"directory", "local", "root", "harness", "model", "instructions-file", "image", "build", "provider-url", "provider-ca-file",
+	{name: actionInit, operands: "[--local]",
+		summary: "Create a private configuration directory, or provision local Docker sessions with --local",
+		flags: []string{"directory", "local", "root", "harness", "model", "instructions-file", "image", "build",
+			"provider-url", "provider-ca-file",
 			"credential-file", "credential-stdin", "skip-credential-check", "port", "no-service", "json", "timeout"}},
 	{name: actionService, operands: "status|start|stop", summary: "Show, start or stop the local home service",
-		flags: []string{"root", "json", "leave-running"}, verbs: []string{"status", "start", "stop"}},
+		flags: []string{"root", "json", "leave-running"}, verbs: []string{verbStatus, verbStart, verbStop}},
 	{name: actionDoctor, summary: "Check the local installation without changing it",
 		flags: []string{"root", "json", "check-provider"}},
-	{name: actionCredentials, operands: "add openai|anthropic", summary: "Store or replace a gateway-owned provider credential",
-		flags: []string{"root", "credential-file", "credential-stdin", "skip-credential-check"}, verbs: []string{"add"}, operandVerbs: []string{"add"}},
+	{name: actionCredentials, operands: "add openai|anthropic",
+		summary: "Store or replace a gateway-owned provider credential",
+		flags:   []string{"root", "credential-file", "credential-stdin", "skip-credential-check"},
+		verbs:   []string{verbAdd}, operandVerbs: []string{verbAdd}},
 	{name: actionImages, operands: "status|prepare", summary: "Show or prepare the native worker image",
-		flags: []string{"root", "image", "build", "json"}, verbs: []string{"status", "prepare"}},
-	{name: actionCertificates, operands: "status|renew|rotate-ca|replace-ca", summary: "Show or maintain the local gateway certificate authority",
-		flags: []string{"root", "json"}, verbs: []string{"status", "renew", "rotate-ca", "replace-ca"}},
+		flags: []string{"root", "image", "build", "json"}, verbs: []string{verbStatus, verbPrepare}},
+	{name: actionCertificates, operands: "status|renew|rotate-ca|replace-ca",
+		summary: "Show or maintain the local gateway certificate authority",
+		flags:   []string{"root", "json"},
+		verbs:   []string{verbStatus, verbRenew, verbRotateCA, verbReplaceCA}},
 	{name: actionVersion, summary: "Show the installed product version"},
 	{name: actionRun, operands: "--executor NAME (--task TEXT | --task-file FILE)",
 		summary: "Submit a task to a configured remote executor", owner: remoteOwner,
@@ -85,7 +91,8 @@ var commands = []command{
 		flags: []string{"config"}},
 	{name: home.ActionStart, operands: "--workspace PATH", owner: homeOwner,
 		summary: "Start a managed Docker session from a stopped Git directory and attach to it",
-		flags:   []string{"config", "socket", "executor", "id", "operation", "workspace", "harness", "include-ignored", "detach"}},
+		flags: []string{"config", "socket", "executor", "id", "operation", "workspace", "harness", "include-ignored",
+			"detach"}},
 	{name: home.ActionAttach, operands: "SESSION_UUID", owner: homeOwner,
 		summary: "Attach this terminal to a home session; Ctrl-] detaches",
 		flags:   []string{"config", "socket", "executor", "id"}},
@@ -115,7 +122,7 @@ var flagHelp = map[string]string{
 	"workspace":             "stopped ordinary Git directory `PATH`",
 	"include-ignored":       "ignored file `PATH` to carry on every visit; repeatable",
 	"to":                    "placement `NAME`: the value of local.name (for example local) or a name under \"remote\"",
-	"local":                 "provision local Docker sessions: images, network, TLS, credential, configuration and service",
+	"local":                 "provision local Docker sessions: image, network, TLS, credential, configuration, daemon",
 	"root":                  "private installation root `PATH`; defaults to the recorded root or ~/sproozi",
 	"model":                 "provider `MODEL` for the selected harness",
 	"image":                 "approved native image `REFERENCE`, digest-pinned, or a local sha256 content ID",
@@ -166,7 +173,8 @@ type inputs struct {
 }
 
 // boolFlags are switches; every other flag takes a value.
-var boolFlags = []string{"detach", "local", "credential-stdin", "skip-credential-check", "no-service", "json", "leave-running", "check-provider"}
+var boolFlags = []string{"detach", "local", "credential-stdin", "skip-credential-check", "no-service", "json",
+	"leave-running", "check-provider"}
 
 // flagSet registers only this command's flags, bound to q and in.
 func (c command) flagSet(q *options, in *inputs) *flag.FlagSet {
@@ -180,7 +188,8 @@ func (c command) flagSet(q *options, in *inputs) *flag.FlagSet {
 		"to":        &q.destination,
 		"directory": &q.directory,
 		"root":      &q.setup.root, "model": &q.setup.model, "image": &q.setup.image, "build": &q.setup.build,
-		"provider-url": &q.setup.providerURL, "instructions-file": &q.setup.instructionsFile, "provider-ca-file": &q.setup.providerCA, "credential-file": &q.setup.credentialFile,
+		"provider-url": &q.setup.providerURL, "instructions-file": &q.setup.instructionsFile,
+		"provider-ca-file": &q.setup.providerCA, "credential-file": &q.setup.credentialFile,
 		"port": &in.port, "timeout": &in.timeout,
 	}
 	switches := map[string]*bool{

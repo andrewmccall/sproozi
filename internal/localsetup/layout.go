@@ -46,11 +46,11 @@ func (l Layout) ServicePID() string   { return filepath.Join(l.Root, "service.pi
 
 // DefaultRoot is ~/sproozi.
 func DefaultRoot() (string, error) {
-	home, err := os.UserHomeDir()
+	dir, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, "sproozi"), nil
+	return filepath.Join(dir, "sproozi"), nil
 }
 
 // pointerPath records an explicit non-default root for later commands.

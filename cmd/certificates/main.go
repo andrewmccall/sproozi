@@ -28,7 +28,8 @@ func main() {
 	var dns names
 	cfg := certificates.Config{Policy: pki.DefaultPolicy}
 	flag.StringVar(&cfg.Namespace, "namespace", "sproozi-system", "namespace of the authority and serving Secrets")
-	flag.StringVar(&cfg.AuthoritySecret, "authority-secret", "sproozi-certificate-authority", "precreated Secret holding the CA store")
+	flag.StringVar(&cfg.AuthoritySecret, "authority-secret", "sproozi-certificate-authority",
+		"precreated Secret holding the CA store")
 	flag.StringVar(&cfg.ServingSecret, "serving-secret", "sproozi-gateway-tls", "precreated Secret the gateway mounts")
 	flag.StringVar(&cfg.TrustNamespace, "trust-namespace", "sproozi-agents", "namespace for worker trust ConfigMaps")
 	flag.StringVar(&cfg.TrustPrefix, "trust-prefix", "sproozi-sandbox-trust", "trust ConfigMap name prefix")
@@ -37,7 +38,8 @@ func main() {
 	interval := flag.Duration("interval", 5*time.Minute, "reconcile interval")
 	flag.Parse()
 	if len(dns) == 0 {
-		dns = names{"sproozi-gateway.sproozi-system.svc", "sproozi-gateway.sproozi-system.svc.cluster.local", "kubernetes.default.svc"}
+		dns = names{"sproozi-gateway.sproozi-system.svc", "sproozi-gateway.sproozi-system.svc.cluster.local",
+			"kubernetes.default.svc"}
 	}
 	cfg.Names = pki.Names{DNS: dns}
 	restConfig, err := rest.InClusterConfig()
@@ -58,7 +60,8 @@ func main() {
 		if err != nil {
 			log.Printf("Failed to reconcile gateway certificates: %v", err)
 		} else if status.Changed {
-			log.Printf("Updated gateway certificates; trust %s, leaf valid until %s", status.TrustConfigMap, status.LeafNotAfter.Format(time.RFC3339))
+			log.Printf("Updated gateway certificates; trust %s, leaf valid until %s", status.TrustConfigMap,
+				status.LeafNotAfter.Format(time.RFC3339))
 		}
 		select {
 		case <-ctx.Done():

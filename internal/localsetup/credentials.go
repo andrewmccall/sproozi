@@ -17,6 +17,12 @@ import (
 	"github.com/andrewmccall/sproozi/internal/privatefs"
 )
 
+// Public provider origins the gateway uses by default.
+const (
+	anthropicURL = "https://api.anthropic.com"
+	openAIURL    = "https://api.openai.com"
+)
+
 // Provider describes the upstream model service for a native harness.
 type Provider struct {
 	Name string
@@ -26,9 +32,9 @@ type Provider struct {
 // ProviderFor is the gateway-owned provider each harness uses by default.
 func ProviderFor(kind harness.NativeKind) Provider {
 	if kind == harness.NativeClaude {
-		return Provider{Name: "anthropic", URL: "https://api.anthropic.com"}
+		return Provider{Name: "anthropic", URL: anthropicURL}
 	}
-	return Provider{Name: "openai", URL: "https://api.openai.com"}
+	return Provider{Name: "openai", URL: openAIURL}
 }
 
 // CredentialInput supplies a secret without a command-line value: a protected

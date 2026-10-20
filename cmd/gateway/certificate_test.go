@@ -34,7 +34,8 @@ func TestGatewayReloadsARenewedSecretAndRejectsNarrowerCertificates(t *testing.T
 	hosts := []string{"sproozi-gateway.sproozi-system.svc", "kubernetes.default.svc"}
 	writeLeaf(t, dir, ca, pki.Names{DNS: hosts})
 	holder := proxytransport.NewCertificate(tls.Certificate{})
-	r := &certificateReloader{certFile: filepath.Join(dir, "tls.crt"), keyFile: filepath.Join(dir, "tls.key"), hosts: hosts, holder: holder}
+	r := &certificateReloader{certFile: filepath.Join(dir, "tls.crt"), keyFile: filepath.Join(dir, "tls.key"),
+		hosts: hosts, holder: holder}
 	if changed, err := r.reload(); err != nil || !changed {
 		t.Fatalf("initial load changed=%v err=%v", changed, err)
 	}

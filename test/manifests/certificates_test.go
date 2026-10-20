@@ -2,7 +2,10 @@ package manifests_test
 
 import (
 	"slices"
+	"strings"
 	"testing"
+
+	corev1 "k8s.io/api/core/v1"
 )
 
 // The optional certificate controller holds only what its lifecycle needs:
@@ -13,6 +16,8 @@ func TestCertificateControllerRBACStaysNarrow(t *testing.T) {
 	if len(objectsOfKind(docs, "ClusterRole"))+len(objectsOfKind(docs, "ClusterRoleBinding")) != 0 {
 		t.Fatal("certificate controller must not have cluster-wide RBAC")
 	}
+	secrets, configMaps := string(corev1.ResourceSecrets), string(corev1.ResourceConfigMaps)
+	writes := strings.Fields("update patch delete deletecollection list watch")
 	roles := objectsOfKind(docs, "Role")
 	if len(roles) != 2 {
 		t.Fatalf("expected two Roles, got %d", len(roles))
@@ -22,13 +27,13 @@ func TestCertificateControllerRBACStaysNarrow(t *testing.T) {
 		for _, rule := range decodeRules(t, role) {
 			switch namespace {
 			case "sproozi-system":
-				if !slices.Equal(rule.Resources, []string{"secrets"}) || !slices.Equal(rule.Verbs, []string{"get", "update"}) ||
+				if !slices.Equal(rule.Resources, []string{secrets}) || !slices.Equal(rule.Verbs, []string{verbGet, writes[0]}) ||
 					!slices.Equal(rule.ResourceNames, []string{"sproozi-certificate-authority", "sproozi-gateway-tls"}) {
 					t.Fatalf("Secret access must be get/update by name only: %+v", rule)
 				}
 			case "sproozi-agents":
-				if !slices.Equal(rule.Resources, []string{"configmaps"}) || slices.Contains(rule.Verbs, "update") ||
-					slices.Contains(rule.Verbs, "delete") || slices.Contains(rule.Verbs, "list") {
+				if !slices.Equal(rule.Resources, []string{configMaps}) ||
+					slices.ContainsFunc(rule.Verbs, func(v string) bool { return slices.Contains(writes, v) }) {
 					t.Fatalf("trust access must create immutable ConfigMaps only: %+v", rule)
 				}
 			default:
