@@ -345,7 +345,7 @@ type fakeAuthority struct {
 
 func (a *fakeAuthority) InitializeAllocation(context.Context, session.Launch, session.Incarnation) (NativeAccess, error) {
 	a.init++
-	return NativeAccess{Env: []string{"PATH=/usr/bin:/bin"}}, nil
+	return NativeAccess{Env: []string{"PATH=/usr/bin:/bin"}, ClientConfig: &harness.NativeClientConfig{MCPGateway: "https://sproozi-gateway.test"}}, nil
 }
 func (a *fakeAuthority) Activate(context.Context, session.Launch, session.Incarnation) error {
 	if a.activateErr != nil {

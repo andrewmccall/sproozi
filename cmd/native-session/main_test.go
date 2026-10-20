@@ -22,6 +22,8 @@ const testPathEnvironment = "PATH=/usr/bin:/bin"
 const selected = "01234567-89ab-cdef-0123-456789abcdef"
 const instructions = "Only the isolated fixture is approved."
 
+var testClients = &harness.NativeClientConfig{MCPGateway: "https://sproozi-gateway.test"}
+
 func digest() string { return fmt.Sprintf("%x", sha256.Sum256([]byte(instructions))) }
 func journal(extra string) string {
 	return `{"type":"session_meta","payload":{"id":"` + selected + `","cli_version":"0.161.0",` +
@@ -86,8 +88,8 @@ func TestCompletedTurnObserver(t *testing.T) {
 }
 func TestTrustedContract(t *testing.T) {
 	c := config{Harness: harness.NativeCodex, Deadline: time.Now().Add(time.Minute), Instructions: instructions,
-		InstructionDigest: digest(),
-		Env:               []string{testPathEnvironment}, RolloutMaxBytes: 8192}
+		InstructionDigest: digest(), ClientConfig: testClients,
+		Env: []string{testPathEnvironment}, RolloutMaxBytes: 8192}
 	path := filepath.Join(t.TempDir(), "config.json")
 	data, err := json.Marshal(c)
 	if err != nil {
@@ -113,8 +115,8 @@ func TestTrustedContract(t *testing.T) {
 
 func TestNativeLaunchRejectsReservedAndUnboundedOptions(t *testing.T) {
 	c := config{Harness: harness.NativeCodex, Deadline: time.Now().Add(time.Minute), Instructions: instructions,
-		InstructionDigest: digest(),
-		Env:               []string{testPathEnvironment}, RolloutMaxBytes: 8192}
+		InstructionDigest: digest(), ClientConfig: testClients,
+		Env: []string{testPathEnvironment}, RolloutMaxBytes: 8192}
 	c.Options = []string{`projects."/workspace/session/workspace".trust_level="trusted"`}
 	if err := c.Validate(time.Now()); err != nil {
 		t.Fatal(err)
@@ -222,8 +224,8 @@ func TestBootstrapConfigurationIsImmutable(t *testing.T) {
 	s := &server{config: config{Harness: harness.NativeCodex, Deadline: deadline}, deadline: deadline,
 		state: harness.NativeUnconfigured, done: make(chan struct{})}
 	approved := config{Harness: harness.NativeCodex, Deadline: deadline, ThreadID: selected, Instructions: instructions,
-		InstructionDigest: digest(),
-		Env:               []string{}, RolloutMaxBytes: 8192}
+		InstructionDigest: digest(), ClientConfig: testClients,
+		Env: []string{}, RolloutMaxBytes: 8192}
 	if r := s.configure(&approved); r.Error != "" || r.State != harness.NativePrepared || r.ThreadID != approved.ThreadID {
 		t.Fatalf("configure: %+v", r)
 	}

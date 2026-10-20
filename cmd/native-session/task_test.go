@@ -54,7 +54,7 @@ func TestSubmittedTaskNeedsItsOwnCompletedNativeTurn(t *testing.T) {
 
 func TestTaskContractRejectsUnsupportedAndUnboundedInput(t *testing.T) {
 	c := config{Harness: harness.NativeCodex, Deadline: time.Now().Add(time.Minute),
-		Instructions: instructions, InstructionDigest: digest(),
+		Instructions: instructions, InstructionDigest: digest(), ClientConfig: testClients,
 		Env: []string{testPathEnvironment}, RolloutMaxBytes: 8192}
 	for _, task := range []string{" ", "task\x00other", strings.Repeat("x", (32<<10)+1)} {
 		c.Task = task

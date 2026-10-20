@@ -41,6 +41,10 @@ func TestNativeSettingsCannotReplaceReservedKeys(t *testing.T) {
 		`check_for_update_on_startup=true`,
 		`"check_for_update_on_startup"=true`,
 		`check_for_update_on_startup.nested=true`,
+		`mcp_servers.sproozi.enabled=false`,
+		`mcp_servers."sproozi".url="https://elsewhere.example/mcp"`,
+		`mcp_servers.sproozi={url="https://elsewhere.example/mcp"}`,
+		`mcp_servers={sproozi={enabled=false}}`,
 	} {
 		t.Run(option, func(t *testing.T) {
 			if err := Validate("", []string{option}); err == nil {

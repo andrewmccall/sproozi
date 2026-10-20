@@ -87,7 +87,7 @@ func TestClaudeHookBoundedPinnedPayload(t *testing.T) {
 }
 func TestExplicitHarnessContractAndClaudeOptionBoundary(t *testing.T) {
 	c := config{Harness: harness.NativeClaude, Deadline: time.Now().Add(time.Minute), Instructions: instructions,
-		InstructionDigest: digest(), Env: []string{testPathEnvironment}, RolloutMaxBytes: 8192, Model: "claude-sonnet-4-5"}
+		InstructionDigest: digest(), ClientConfig: testClients, Env: []string{testPathEnvironment}, RolloutMaxBytes: 8192, Model: "claude-sonnet-4-5"}
 	if err := c.Validate(time.Now()); err != nil {
 		t.Fatal(err)
 	}

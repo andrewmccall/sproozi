@@ -21,41 +21,46 @@ func Validate(model string, options []string) error {
 		if len(option) > 4096 || strings.ContainsAny(option, "\x00\r\n") {
 			return errors.New("native option must be bounded and single-line")
 		}
-		root, err := assignmentRoot(option)
+		key, err := assignmentKey(option)
 		if err != nil {
 			return err
 		}
-		switch root {
-		case "developer_instructions", "check_for_update_on_startup":
+		switch {
+		case key[0] == "developer_instructions", key[0] == "check_for_update_on_startup",
+			// The Sproozi control connection follows these options; a whole-table
+			// or sibling assignment could still disable or redirect it.
+			key[0] == "mcp_servers" && (len(key) == 1 || key[1] == ControlMCPServer):
 			return errors.New("native option cannot replace a reserved setting")
 		}
 	}
 	return nil
 }
 
-func assignmentRoot(option string) (string, error) {
-	var root string
+// ControlMCPServer names the Sproozi control connection. The API re-exports it;
+// it is defined here because this package cannot import the API.
+const ControlMCPServer = "sproozi"
+
+func assignmentKey(option string) ([]string, error) {
+	var key []string
 	for offset := 0; ; {
-		key, end, err := segment(option, offset)
+		name, end, err := segment(option, offset)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
-		if root == "" {
-			root = key
-		}
+		key = append(key, name)
 		if end == len(option) {
-			return "", errors.New("native option requires an assignment")
+			return nil, errors.New("native option requires an assignment")
 		}
 		switch option[end] {
 		case '.':
 			offset = end + 1
 		case '=':
 			if strings.TrimSpace(option[end+1:]) == "" {
-				return "", errors.New("native option requires a value")
+				return nil, errors.New("native option requires a value")
 			}
-			return root, nil
+			return key, nil
 		default:
-			return "", errors.New("native option key has unsupported syntax")
+			return nil, errors.New("native option key has unsupported syntax")
 		}
 	}
 }

@@ -53,8 +53,17 @@ func TestStockCodexParsesGeneratedNativeMCPConnections(t *testing.T) {
 			URL  string `json:"url"`
 		} `json:"transport"`
 	}
-	if err = json.Unmarshal(data, &connections); err != nil || len(connections) != 1 || connections[0].Name != fixtureMCPName || !connections[0].Enabled || connections[0].Transport.URL != "https://sproozi-mcp.example/mcp/docs" || strings.Contains(string(data), "token_file") {
+	if err = json.Unmarshal(data, &connections); err != nil || len(connections) != 2 || strings.Contains(string(data), "token_file") {
 		t.Fatalf("stock connections=%s err=%v", data, err)
+	}
+	urls := map[string]string{}
+	for _, connection := range connections {
+		if connection.Enabled {
+			urls[connection.Name] = connection.Transport.URL
+		}
+	}
+	if urls[fixtureMCPName] != "https://sproozi-mcp.example/mcp/docs" || urls[api.ControlMCPServer] != "https://sproozi-mcp.example/mcp/sproozi" {
+		t.Fatalf("stock connections=%s", data)
 	}
 }
 
@@ -74,8 +83,33 @@ func TestNativeClientsRendersDeclaredCapabilitiesInStableOrder(t *testing.T) {
 	if _, err = NativeClients(NativeCodex, []api.CapabilityKind{nativeFixtureMCPCapability, nativeFixtureMCPCapability}, "https://gateway.test"); err == nil {
 		t.Fatal("duplicate MCP admitted")
 	}
-	c, err = NativeClients(NativeCodex, nil, "")
-	if err != nil || c != nil {
-		t.Fatalf("empty declared clients=%+v error=%v", c, err)
+	if _, err = NativeClients(NativeCodex, nil, ""); err == nil {
+		t.Fatal("native clients rendered without the gateway control connection")
+	}
+}
+
+// Every managed native launch carries the Sproozi control connection, with or
+// without granted capabilities, and the trusted entry follows administrator options.
+func TestNativeClientsAlwaysCarryTheControlConnection(t *testing.T) {
+	for _, kind := range []NativeKind{NativeCodex, NativeClaude} {
+		c, err := NativeClients(kind, nil, "https://gateway.test")
+		if err != nil || c == nil || c.ControlURL() != "https://gateway.test/mcp/sproozi" {
+			t.Fatalf("%s clients=%+v err=%v", kind, c, err)
+		}
+	}
+	if (*NativeClientConfig)(nil).Validate(NativeCodex) == nil {
+		t.Fatal("native launch without the control connection accepted")
+	}
+	c := &NativeClientConfig{MCPGateway: "https://gateway.test", MCPServers: []string{fixtureMCPName}}
+	if got := strings.Join(c.CodexOptions(), " "); got != `mcp_servers.docs.url="https://gateway.test/mcp/docs" mcp_servers.docs.required=true `+
+		`mcp_servers.sproozi.url="https://gateway.test/mcp/sproozi" mcp_servers.sproozi.required=true` {
+		t.Fatalf("codex options=%s", got)
+	}
+	var claude struct {
+		MCPServers map[string]struct{ Type, URL string } `json:"mcpServers"`
+	}
+	if err := json.Unmarshal([]byte((&NativeClientConfig{MCPGateway: "https://gateway.test"}).ClaudeMCPConfig()), &claude); err != nil ||
+		len(claude.MCPServers) != 1 || claude.MCPServers["sproozi"].Type != "http" || claude.MCPServers["sproozi"].URL != "https://gateway.test/mcp/sproozi" {
+		t.Fatalf("claude MCP config=%+v err=%v", claude, err)
 	}
 }

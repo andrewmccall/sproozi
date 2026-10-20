@@ -17,6 +17,7 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"github.com/andrewmccall/sproozi/internal/nativeconfig"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -84,7 +85,7 @@ type CapabilityKind string
 
 // ControlMCPServer names the Sproozi control connection every managed execution
 // receives. It is not a grantable capability and no registration may use it.
-const ControlMCPServer = "sproozi"
+const ControlMCPServer = nativeconfig.ControlMCPServer
 
 // MCPServerName identifies a configured MCP grant without admitting arbitrary
 // capability strings or treating tool installation as authority.

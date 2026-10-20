@@ -75,6 +75,9 @@ func prepareCodexLaunch(c config, thread string, env []string) ([]string, []stri
 	if err := installCodexProjectTrust(nativeHome); err != nil {
 		return nil, nil, err
 	}
+	if err := installManagedCodex(nativeHome); err != nil {
+		return nil, nil, err
+	}
 	return codexArguments(c, thread), append(env, "CODEX_HOME="+nativeHome), nil
 }
 

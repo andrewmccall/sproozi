@@ -319,14 +319,12 @@ func approvedPolicy(c Config) (api.AgentPolicySpec, error) {
 		policy.Budgets[capability] = api.EndpointBudget{MaxUnits: a.Units.Value, MaxCostMicros: a.CostMicros.Value}
 	}
 	slices.Sort(policy.AllowedCapabilities)
-	clients := &harness.NativeClientConfig{}
+	// MCPAuthority always serves the Sproozi control connection.
+	clients := &harness.NativeClientConfig{MCPGateway: "https://" + c.Gateway.MCPAuthority}
 	for _, capability := range policy.AllowedCapabilities {
 		if name, named := capability.MCPServerName(); named {
 			clients.MCPServers = append(clients.MCPServers, name)
 		}
-	}
-	if len(clients.MCPServers) > 0 {
-		clients.MCPGateway = "https://" + c.Gateway.MCPAuthority
 	}
 	if err := clients.Validate(c.Local.Harness); err != nil {
 		return api.AgentPolicySpec{}, err
