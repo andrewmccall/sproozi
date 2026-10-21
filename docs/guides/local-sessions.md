@@ -1,18 +1,14 @@
 # Run Codex or Claude Code locally with Docker
 
-This guide sets up Sproozi on one computer and starts a native Codex or Claude
-Code terminal in a restricted Docker container. You need a running Docker
-engine; you do not need a Sproozi checkout, Go, OpenSSL, Python, kubectl or a
-Kubernetes cluster.
+This guide sets up Sproozi on one computer and runs Codex or Claude Code in a
+restricted Docker container. You need a running Docker engine; you do not need
+a Sproozi checkout, Go, OpenSSL, Python, kubectl or a Kubernetes cluster.
 
-`sproozi init --local` provisions everything the home daemon needs. It finds
-the Docker engine, prepares the native image, creates a Docker network,
-works out the address workers use to reach the gateway, creates a private
-certificate authority, stores your provider key, writes the configuration and
-starts the home daemon. It reports ready only after a test container on the
-restricted worker path verifies the gateway's TLS identity and fails to reach
-the internet, the provider directly, other gateway ports, cloud metadata,
-direct DNS and IPv6.
+`sproozi init` sets up everything: the agent image, a private Docker network,
+a certificate authority, your provider key, the configuration and a background
+service. It reports ready only after a test container verifies the gateway's
+identity and fails to reach the internet, the provider directly, other gateway
+ports, cloud metadata, direct DNS and IPv6.
 
 The [local installation reference](../reference/local-installation.md) lists
 the files, defaults, limits and supported platforms.
@@ -20,12 +16,11 @@ the files, defaults, limits and supported platforms.
 ## Before you start
 
 - macOS with Docker Desktop, or Linux with Docker Engine, using Linux
-  containers. Automatic setup has been verified on macOS with Docker Desktop.
-  It also supports Docker Engine on Linux, but no recorded acceptance run
-  covers that yet. Windows needs the [manual home configuration](../../cmd/sproozi/README.md).
+  containers. Setup has been verified on macOS with Docker Desktop; Docker
+  Engine on Linux is supported but has no recorded acceptance run yet. Windows
+  needs a [hand-written configuration](windows.md).
 - An OpenAI API key for Codex or an Anthropic API key for Claude Code. Setup
   stores the key for the gateway; agents never receive it.
-- The model name to use, for example the one you use with the stock CLI.
 - The Sproozi CLI from [Homebrew or a release download](install.md).
 
 Sproozi is a preview. Read [what a container does not protect](#what-this-does-not-protect)
@@ -33,182 +28,183 @@ before using it with sensitive repositories.
 
 ## Set up
 
-Run setup once. It asks for the model and the API key, without echoing the key:
+Run setup once. It asks for your API key without echoing it:
 
 ```sh
-sproozi init --local --harness codex
+sproozi init
 ```
 
-For Claude Code, use `--harness claude-code`. The output ends with:
+That sets up Codex. For Claude Code, run `sproozi init --harness claude-code`.
+The output ends with:
 
 ```text
-Ready. Start a session with:
-  sproozi start --workspace "$PWD" --harness codex
+Ready. In a Git repository, start an agent with:
+  sproozi run
 ```
 
-Setup is safe to repeat. A repeated or interrupted run reuses the same network,
-certificate authority, credential and configuration. It keeps any values you
-edited in the configuration.
-
-For scripts, supply every answer and read a JSON result:
+Setup is safe to repeat: it reuses the same network, certificate authority,
+key and configuration, and keeps values you edited. For scripts, read the key
+from a file only you can read, or from standard input, and print JSON:
 
 ```sh
-sproozi init --local --harness codex --model MODEL \
-  --credential-file /absolute/path/to/openai-key --json
+sproozi init --credential-file /absolute/path/to/openai-key --json
 ```
 
-The key file must be owned by you with mode `0600`. You can pipe the key with
-`--credential-stdin` instead. A secret is never accepted as a command-line value.
-Setup checks the key by listing the provider's models; this makes no inference
-request. Use `--skip-credential-check` to skip it.
+A key is never accepted as a command-line value. Setup checks it by listing
+the provider's models, which makes no inference request; `--skip-credential-check`
+skips that.
 
-## Start a session
+## Run an agent
 
-Stop other programs writing to the repository, then start a session from it:
+In any Git repository with at least one commit:
 
 ```sh
 cd /path/to/repository
-sproozi start --workspace "$PWD" --harness codex
+sproozi run
 ```
 
-Sproozi copies the repository's Git history, branches, staged and unstaged
-changes and ordinary untracked files into a managed workspace. Ignored files
-stay behind unless you name them with `--include-ignored`. Your directory is not
-changed; the agent works in its own copy.
+Sproozi copies the repository's history, branches, staged and unstaged changes
+and untracked files into the session. Ignored files stay behind unless you name
+them with `--include-ignored`. Your directory is not changed; the agent works on
+its own copy.
 
-`start` prints the session ID and opens the stock terminal. Press Ctrl-] to
-detach; Ctrl-C reaches the agent. Detaching leaves the agent running within its
-deadline. Use `--detach` to start without attaching.
+`run` prints the session ID and opens the agent's terminal. Press Ctrl-] to
+detach; Ctrl-C reaches the agent. Detaching prints the session ID and the next
+commands, and leaves the agent running until its deadline: 30 minutes by
+default, set by `maxDuration` in `~/.sproozi/config.json`. `run -d` starts
+without opening the terminal.
 
 ```sh
-sproozi sessions
-sproozi attach SESSION_UUID
-sproozi stop SESSION_UUID
-sproozi resume SESSION_UUID
+sproozi ls            # list sessions
+sproozi attach 3f2b   # open its terminal again: the start of the ID is enough
+sproozi stop 3f2b     # stop after the current turn; ls then shows it as retained
+sproozi resume 3f2b   # carry on later and reconnect (-d skips that), with a new deadline
+sproozi rm 3f2b       # delete a stopped session and its saved work
 ```
 
-`stop` waits for the current turn, stops the container and keeps the
-conversation and workspace. If the home daemon is not running, these commands
-start it. The [session commands reference](../reference/session-commands.md)
-covers every command and flag.
+`cancel` stops a session at once, discarding the agent's current turn. The
+background service only needs to run while you use sessions. These commands
+start it if it is stopped; `ls` does not, and says how to start it.
 
-## Add the other harness
-
-Each session keeps the harness it started with. To use both, run setup again
-for the other harness:
+Each agent uses its own default model and settings. To pass the agent's own
+flags, put them after `--`:
 
 ```sh
-sproozi init --local --harness claude-code
-sproozi start --workspace "$PWD" --harness claude-code
+sproozi run -- --model gpt-5.5
 ```
 
-The second harness gets its own gateway port and provider key. Its workers can
-reach only that port, so a Codex worker cannot use the Anthropic key and the
-reverse. Setup restarts the home daemon to load the new harness when no session
-is active. If a session is running, setup writes the configuration and asks you
-to restart the home daemon once the session stops.
+Flags that Sproozi controls, such as Codex's `--sandbox`, are refused with the
+reason; the [command reference](../reference/session-commands.md#agent-arguments)
+lists them.
+
+The gateway refuses the agent's own services that Sproozi doesn't allow, and
+the agents say so; both are expected and the agent still works. Claude Code
+shows `Remote managed settings failed to load (access denied (403))`. Codex
+may show `⚠ 1 warning` because its telemetry (`ab.chatgpt.com`) is refused;
+in a real terminal, F2 shows the warning.
+[Sproozi integration](../reference/sproozi-integration.md) explains how the
+agent can ask why a request was refused.
+
+## Add the other agent
+
+Each session keeps the agent it started with. To use both, run setup again for
+the other one, then choose it per session:
+
+```sh
+sproozi init --harness claude-code
+sproozi run --harness claude-code
+```
+
+Each agent gets its own gateway port. `--port` sets only the first one, on the
+first `init`; a later agent takes the next free port after the existing ones,
+so `--port` on a later `init` has no effect.
+
+The second agent gets its own gateway port and provider key, so a Codex
+container cannot use the Anthropic key, or the reverse. If a session is
+running, setup saves the change and says to restart the service once the
+session stops.
 
 ## Add your instructions and skills
 
-Your [profile](../reference/profile.md) is `~/sproozi/profile`. Put
-instructions that every session should follow in `AGENTS.md` there, and
-harness-specific ones in `codex/AGENTS.md` or `claude/CLAUDE.md`. Add skills as
-`skills/<name>/SKILL.md`. Sproozi sends the profile with each launch, and the
-agent gets its own copy. Edit it on your computer; changes apply to the next
-launch. Approved developer instructions still come from the configuration and
-take precedence.
-
-The [profile reference](../reference/profile.md#what-each-harness-receives)
-shows how each harness receives them. `sproozi doctor` checks the profile and
-reports any file in it that no harness reads.
+Your [profile](../reference/profile.md) is `~/.sproozi/profile`. Put
+instructions for every session in `AGENTS.md` there, and agent-specific ones in
+`codex/AGENTS.md` or `claude/CLAUDE.md`. Add skills as `skills/<name>/SKILL.md`.
+Each launch gets a copy, so changes apply to the next session. Approved
+instructions from the configuration take precedence. `sproozi doctor` checks
+the profile and reports files no agent reads.
 
 ## Check and maintain the installation
 
-`sproozi doctor` checks the installation without changing it. It names the
-failing component and the next step. Its final check starts a temporary network
-anchor and worker on the restricted path, repeats the TLS and denial probes, and
-removes both containers.
-
-```sh
-sproozi doctor
-sproozi doctor --check-provider   # also validates each stored key
-sproozi service status
-```
+`sproozi doctor` checks the installation without changing it and names the next
+step for anything that fails.
 
 | Task | Command |
 | --- | --- |
-| Replace a provider key | `sproozi credentials add openai` or `sproozi credentials add anthropic` |
-| Stop the home daemon | `sproozi service stop` |
-| Start it again | `sproozi service start` |
+| Check everything, including each stored key | `sproozi doctor --check-provider` |
+| See whether the service runs | `sproozi service status` |
+| Replace a provider key | `sproozi credentials set codex` (or `claude-code`) |
+| See which keys are stored | `sproozi credentials list` |
+| Stop or start the service | `sproozi service stop`, `sproozi service start` |
 | See certificate expiry and renewal | `sproozi certificates status` |
-| Renew the gateway certificate now | `sproozi certificates renew` |
-| Begin certificate authority rotation | `sproozi certificates rotate-ca` |
 
-The gateway reads provider keys only when it starts. `credentials add` restarts
-the home daemon when no session is active; otherwise it says so and keeps the
-daemon running with the previous key.
+The gateway reads keys only when it starts. `credentials set` restarts the
+service when no session is running; otherwise it says it keeps the previous key
+until the sessions stop. `service stop` refuses while sessions run; stop or
+cancel them first, or use `--leave-running` to let them run on until their
+deadlines.
 
-`service stop` refuses while sessions are active. Stop or cancel them first, or
-use `--leave-running`: containers then keep running until their deadlines, and
-stopping the home daemon is not evidence that they stopped.
-
-### Certificates
-
-The home daemon renews its gateway certificate automatically. It checks every
-minute, which also covers a computer waking from sleep. A renewed certificate
-applies to new connections without a restart.
-
-Routine certificate authority rotation is also automatic. It begins 60 days
-before the authority expires. The home daemon first gives new sessions a bundle
-that trusts both the old and the new authority. It switches the gateway to the
-new authority only once every running session has that bundle or has stopped,
-then removes the old authority. `sproozi certificates status` lists the
-sessions a rotation is waiting for. `rotate-ca` starts a rotation early.
-
-`sproozi certificates replace-ca` is for a lost or compromised authority. It
-refuses while sessions are active or any container runs on the installation's
-network, because they would lose trust in the gateway. It never runs
-automatically.
+The service renews its certificate and rotates its certificate authority by
+itself. `sproozi certificates replace-ca` is only for a lost or compromised
+authority, and refuses while any session runs. The
+[local installation reference](../reference/local-installation.md#certificates)
+has the details.
 
 ## Troubleshooting
 
 | Message | Next step |
 | --- | --- |
 | `docker: engine unavailable` | Start Docker Desktop or the Docker service, then repeat the command. |
+| `root: … is a Git checkout, not a Sproozi installation` | The installation directory holds something else. Move it, or choose another with `--root`. |
 | `root: … exceeds the 103-byte Unix socket limit` | Choose a shorter `--root`. |
 | `network: no host address is reachable from the worker network` | A firewall may block the gateway port; choose another with `--port`. |
-| `registry: pull failed` | Check registry access, or build the image locally with `--build SOURCE_DIRECTORY` from a release source bundle or checkout. |
+| `registry: pull failed` | Check registry access, or build the image with `--build SOURCE_DIRECTORY` from a release source bundle or checkout. |
 | `image: … does not provide helper contract` | The image belongs to another Sproozi release. Use the release image or rebuild. |
-| `provider: the provider rejected the credential` | Replace the key with `sproozi credentials add`. |
-| `config: the existing configuration's placement differs` | The configuration no longer matches the installation's image, network or gateway. Restore the backup next to `config.json` or run `sproozi doctor`. |
-| `service: home daemon exited during startup` | Read the log named in the message, usually `~/sproozi/logs/service.log`. |
+| `provider: the provider rejected the credential` | Replace the key with `sproozi credentials set`. |
+| `workspace: the repository has no commits` | Make a first commit, then `sproozi run` again. |
+| `workspace: byte limit exceeded` | The repository's history is larger than one checkpoint. The message gives the size and how to raise `local.maxCheckpointBytes`, up to 64 MiB. |
+| `the Sproozi service is not running, so this machine's sessions can't be listed` | Run `sproozi service start`, or any session command. |
+| `doctor` shows `restart pending` | You added an agent or key while sessions ran. Stop them, then `sproozi service stop` and `sproozi service start`. |
+| `setup at … is incomplete` | `init` stopped part-way, for example with no terminal to ask for the key. Run `sproozi init` again. |
+| `provider: the provider's certificate is not trusted` | For a private endpoint, pass its CA bundle with `--provider-ca-file`. |
+| `gateway.listen "127.0.0.1:PORT": address already in use` | Another program holds the gateway port. Stop it, then `sproozi service start`. |
+| `service: the service exited during startup` | Read the log the message names, usually `~/.sproozi/logs/service.log`. |
 
 ## What this does not protect
 
 - The agent can run any command inside its container, including tools that
-  change the managed workspace. Review its changes before using them.
-- Every local session uses the same profile. Anything you place there reaches
-  every Codex and Claude Code session. It is a convenience for one user, not
-  isolation between untrusted users or agents.
-- The trusted home daemon controls Docker. Anyone who controls your account or
+  change its copy of the workspace. Review its changes before using them.
+- Sproozi has no command yet to bring the agent's changes back into your
+  repository; see [returning a session's work](../explanations/future-architecture/returning-work-to-the-user.md).
+- Every local session uses the same profile. It is a convenience for one user,
+  not isolation between untrusted users or agents.
+- The background service controls Docker. Anyone who controls your account or
   Docker engine controls Sproozi too.
 - Token allowances are accounting limits, not a guarantee against provider
-  spend. Setup leaves the monetary allowance unbounded unless you configure
-  pricing and a bound.
+  spend. The monetary allowance is unbounded unless you configure pricing and a
+  bound.
 
 ## Remove the installation
 
-Stop every session, then stop the home daemon and delete the files:
+Delete your sessions with `sproozi rm`, stop the service, then remove the
+installation's Docker network and directory (`~/.sproozi` unless you chose
+another with `--root`). `sproozi doctor` names the network, `sproozi-ID`:
 
 ```sh
 sproozi service stop
-docker network ls --filter label=sproozi.com/installation
-docker network rm sproozi-INSTALLATION_ID
-rm -rf ~/sproozi
+docker network rm sproozi-ID
+rm -rf ~/.sproozi
 ```
 
-The network name is in `~/sproozi/installation.json` and in `sproozi doctor`
-output. Removing it never touches Docker resources that Sproozi did not create.
-
-Deleting `~/sproozi` removes retained conversations, checkpoints, provider keys
-and the certificate authority. Back up anything you want to keep first.
+Removing the network never touches Docker resources Sproozi did not create.
+Deleting the directory removes saved sessions, provider keys and the
+certificate authority.

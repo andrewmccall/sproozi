@@ -7,7 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
+	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // NativeOp names one fixed operation of the private native supervisor. The
@@ -50,7 +53,26 @@ type NativeReply struct {
 	Written    int               `json:"written,omitempty"`
 	Exit       *NativeExit       `json:"exit,omitempty"`
 	Completion *NativeCompletion `json:"completion,omitempty"`
+	// Turnless reports, once input is gated and has settled, that a first
+	// visit has no native conversation to keep: no turn ever started, or
+	// its only turn ended without completing. Quiesce then stops the
+	// harness without one.
+	Turnless bool `json:"turnless,omitempty"`
+	// Waiting says, while a graceful stop waits for the native turn, what it
+	// waits for. A quiesce reply with it stopped waiting without stopping the
+	// harness, which keeps running with input gated.
+	Waiting string `json:"waiting,omitempty"`
 }
+
+// NativeQuiesceWait bounds each graceful wait for a completed native turn:
+// observing the first visit's thread, and the supervisor's quiesce. When it
+// passes the stop reports what it waits for instead of waiting silently.
+const NativeQuiesceWait = 2 * time.Minute
+
+// ErrNativeTurnPending reports a graceful stop that gave up waiting for the
+// native turn. Nothing changed: the writer still runs with input gated, and
+// repeating the stop waits again.
+var ErrNativeTurnPending = errors.New("the stop is still waiting")
 
 // NativeExit is the supervisor's process exit observation, not a container fence.
 type NativeExit struct {
@@ -127,6 +149,10 @@ var ErrQuiesceUnacknowledged = errors.New("native quiesce reply unavailable")
 // turn. bind records the observed thread with the trusted owner before quiesce
 // reports it. The returned thread is the bound native UUID.
 //
+// A first visit whose supervisor reports it turnless has no conversation to
+// bind or keep: quiesce stops its harness and QuiesceNative returns an empty
+// thread with no error. Only that outcome returns an empty thread.
+//
 // Gateway access stays open throughout so the admitted turn and its tools can
 // finish. Revocation, physical fencing and accounting remain backend steps.
 func QuiesceNative(ctx context.Context, control NativeControl, thread string, deadline time.Time,
@@ -139,22 +165,41 @@ func QuiesceNative(ctx context.Context, control NativeControl, thread string, de
 		return "", err
 	}
 	if thread == "" {
-		if thread, err = observeNativeThread(ctx, control, deadline); err != nil {
+		wait := deadline
+		if bound := time.Now().Add(NativeQuiesceWait); bound.Before(wait) {
+			wait = bound
+		}
+		observed, err := observeNativeThread(ctx, control, wait, deadline)
+		if err != nil {
 			return "", err
 		}
-		if err = bind(ctx, thread); err != nil {
-			return "", err
+		if observed != "" {
+			if err = bind(ctx, observed); err != nil {
+				return "", err
+			}
 		}
+		thread = observed
 	}
 	output, err = control(ctx, NativeQuiesce)
 	if err != nil {
 		return thread, fmt.Errorf("%w: %w", ErrQuiesceUnacknowledged, err)
 	}
-	_, err = DecodeNativeReply(output, NativeQuiesce, NativeStopped, thread)
+	if waiting, err := decodeNativeReply(output, NativeQuiesce, NativeStopping); err == nil && waiting.Waiting != "" {
+		return thread, fmt.Errorf("%w for %s", ErrNativeTurnPending, waiting.Waiting)
+	}
+	reply, err := DecodeNativeReply(output, NativeQuiesce, NativeStopped, thread)
+	if err == nil && thread == "" && !reply.Turnless {
+		return "", errors.New("native quiesce stopped without a bound thread")
+	}
 	return thread, err
 }
 
-func observeNativeThread(ctx context.Context, control NativeControl, deadline time.Time) (string, error) {
+// observeNativeThread waits for the genuine native UUID of a first visit. It
+// returns an empty UUID when the supervisor reports the visit turnless, and
+// ErrNativeTurnPending with what it waits for once wait passes before the
+// execution deadline.
+func observeNativeThread(ctx context.Context, control NativeControl, wait, deadline time.Time) (string, error) {
+	waiting := "the native turn to complete"
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	for {
@@ -169,6 +214,12 @@ func observeNativeThread(ctx context.Context, control NativeControl, deadline ti
 		if status.ThreadID != "" {
 			return status.ThreadID, nil
 		}
+		if status.Turnless {
+			return "", nil
+		}
+		if status.Waiting != "" {
+			waiting = status.Waiting
+		}
 		select {
 		case <-ctx.Done():
 			return "", ctx.Err()
@@ -176,6 +227,81 @@ func observeNativeThread(ctx context.Context, control NativeControl, deadline ti
 			if !time.Now().Before(deadline) {
 				return "", errors.New("native UUID unavailable before deadline")
 			}
+			if !time.Now().Before(wait) {
+				return "", fmt.Errorf("%w for %s", ErrNativeTurnPending, waiting)
+			}
 		}
 	}
+}
+
+// NativeExitReport is what the supervisor writes to its standard output when
+// the harness exits on its own, before any stop asked it to. It is a workload
+// observation: a diagnostic for the user, and the thread of a completed turn
+// the placement may checkpoint, never a writer fence or accounting fact.
+type NativeExitReport struct {
+	Code   int    `json:"code"`
+	Thread string `json:"thread,omitempty"`
+	Output string `json:"output,omitempty"`
+}
+
+// NativeExitReportPrefix starts the supervisor's exit report line.
+const NativeExitReportPrefix = "sproozi-native-exit "
+
+// NativeExitOutputMax bounds the output tail an exit report carries.
+const NativeExitOutputMax = 2048
+
+var terminalControl = regexp.MustCompile(`\x1b(\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(\x07|\x1b\\)|[@-Z\\-_])`)
+
+// NativeExitOutput turns raw terminal output into at most lines plain lines
+// for a person: control sequences and other control characters are removed.
+func NativeExitOutput(raw []byte, lines int) string {
+	text := terminalControl.ReplaceAllString(string(raw), "")
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	var kept []string
+	for line := range strings.SplitSeq(text, "\n") {
+		if i := strings.LastIndexByte(line, '\r'); i >= 0 {
+			line = line[i+1:]
+		}
+		line = strings.TrimSpace(strings.Map(func(r rune) rune {
+			if r < ' ' || r == 0x7f || r == utf8.RuneError {
+				return -1
+			}
+			return r
+		}, line))
+		if line != "" {
+			kept = append(kept, line)
+		}
+	}
+	if len(kept) > lines {
+		kept = kept[len(kept)-lines:]
+	}
+	out := strings.Join(kept, "\n")
+	if len(out) > NativeExitOutputMax {
+		out = out[len(out)-NativeExitOutputMax:]
+		if i := strings.IndexByte(out, '\n'); i >= 0 {
+			out = out[i+1:]
+		}
+	}
+	return out
+}
+
+// ParseNativeExitReport finds the last exit report in container output and
+// bounds what it may claim.
+func ParseNativeExitReport(logs []byte) (NativeExitReport, bool) {
+	var found NativeExitReport
+	ok := false
+	for line := range bytes.SplitSeq(logs, []byte{'\n'}) {
+		rest, isReport := bytes.CutPrefix(bytes.TrimSpace(line), []byte(NativeExitReportPrefix))
+		if !isReport {
+			continue
+		}
+		var r NativeExitReport
+		if json.Unmarshal(rest, &r) != nil || len(r.Output) > NativeExitOutputMax ||
+			r.Thread != "" && !codexThreadID.MatchString(r.Thread) {
+			continue
+		}
+		r.Output = NativeExitOutput([]byte(r.Output), 20)
+		found, ok = r, true
+	}
+	return found, ok
 }

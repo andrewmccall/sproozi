@@ -40,8 +40,10 @@ func profilePath(digest string) string {
 // Close releases the cross-process lock. Placement implementations enforce the
 // actual runtime/authority fences; a private Go value alone supplies no fence.
 type Coordinator struct {
-	dir           string
-	placements    map[string]Placement
+	dir        string
+	placements map[string]Placement
+	// placementsMu guards placements, which AddPlacement extends at runtime.
+	placementsMu  sync.RWMutex
 	maxCheckpoint int64
 	lock          *os.File
 	mu            sync.RWMutex
@@ -53,6 +55,29 @@ type Coordinator struct {
 	// profile archives the user's current profile for a new visit; an empty
 	// digest means there is none.
 	profile func() (archive []byte, digest string, err error)
+}
+
+// AddPlacement names another destination after Open, such as a remote executor
+// reached for the first time. An existing name keeps its placement: a name
+// recorded in a journal must not silently change implementation.
+func (c *Coordinator) AddPlacement(name string, p Placement) error {
+	if !validName(name) || p == nil {
+		return errors.New("session: invalid placement")
+	}
+	c.placementsMu.Lock()
+	defer c.placementsMu.Unlock()
+	if _, ok := c.placements[name]; !ok {
+		c.placements[name] = p
+	}
+	return nil
+}
+
+// placement looks up a destination by name.
+func (c *Coordinator) placement(name string) (Placement, bool) {
+	c.placementsMu.RLock()
+	defer c.placementsMu.RUnlock()
+	p, ok := c.placements[name]
+	return p, ok
 }
 
 // Open takes a nonblocking owner lock. Existing directories/files must be private
@@ -276,6 +301,27 @@ func (c *Coordinator) Checkpoint(id string) ([]byte, error) {
 		return nil, errors.New("session: execution has no committed checkpoint")
 	}
 	return c.checkpointBytes(r)
+}
+
+// Workspace returns the retained Git workspace an execution started from.
+func (c *Coordinator) Workspace(id string) ([]byte, error) {
+	unlock, err := c.lockSession(id)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	r, err := c.load(id)
+	if err != nil {
+		return nil, err
+	}
+	if r.Workspace == "" {
+		return nil, errors.New("session: execution retains no starting workspace")
+	}
+	data, err := readFile(filepath.Join(c.dir, workspacePath(r.Workspace)), c.maxCheckpoint)
+	if err == nil && fmt.Sprintf("%x", sha256.Sum256(data)) != r.Workspace {
+		err = errors.New("session: retained input changed")
+	}
+	return data, err
 }
 
 // List returns the IDs of every retained execution journal.

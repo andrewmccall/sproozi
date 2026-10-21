@@ -17,7 +17,7 @@ api/v1alpha1/                 CRD types: AgentRuntime, AgentPolicy, AgentTemplat
 cmd/main.go                   Controller manager entry point
 cmd/gateway/                  Shared authenticated gateway (the only workload-facing proxy)
 cmd/webhook/                  Signed inbound event receiver that creates AgentRuns
-cmd/sproozi/                  Public CLI and home daemon (`sproozi serve`)
+cmd/sproozi/                  Public CLI and the local service (`sproozi service run`)
 cmd/session-profile/          Remote executor: one Kubernetes placement and remote work catalogue
 cmd/tasks/                    Task service for persistent assistants over MCP
 cmd/native-session/           Supervisor for the harness inside a managed sandbox
@@ -30,7 +30,7 @@ internal/endpoints/<service>/ Per-service handlers: kubernetes, github, model, p
 internal/runtime/{kubernetes,docker}/         Execution backends
 internal/budget/              Usage accounting (Kubernetes store in internal/budget/kubernetes)
 internal/session/, internal/work/, internal/checkpoint/, internal/workspace/   Sessions, remote work, checkpoints
-internal/harness/, internal/nativeconfig/, internal/nativepty/                 Harness configuration and terminal
+internal/harness/, internal/nativeconfig/, internal/nativepty/                 Harness registry (registry.go), configuration and terminal
 internal/webhook/             Event receiver: signature checks, replay protection, AgentRun creation
 config/                       Kustomize: crd, rbac, manager, install (full install), overlays
 examples/                     Runnable example resources (not config/samples)
@@ -53,6 +53,8 @@ Run the gates that match the change before declaring it done:
 | Any Go code | `make lint-fix`, `make test`, `make verify-fast` |
 | Controller, gateway, network policy or install manifests | also `make test-e2e` (creates and removes its own Kind cluster) |
 | Documentation | `make verify-docs` |
+| A new harness | follow `docs/contributing/add-a-harness.md`; `go test ./internal/harness/ ./cmd/native-session/ ./internal/checkpoint/` guards the registry, CRD enum, rendered `sproozi` connection, MCP loader and bridge hook, examples, reference row and managed wiring; client loading and launch behaviour need review and `make verify-harness-clients`, `make verify-harness-process` (see the guide's "What the guards check") |
+| MCP registry, policy or examples | `make verify-mcp` |
 | Release candidate | `make verify-release` |
 
 `make help` lists every target, and

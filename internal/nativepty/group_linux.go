@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"golang.org/x/sys/unix"
 )
 
 // A zombie has stopped executing, even when the namespace's PID 1 has not
@@ -46,3 +48,5 @@ func groupStopped(group int) (bool, error) {
 	}
 	return true, nil
 }
+
+func groupGone(err error) bool { return errors.Is(err, unix.ESRCH) }

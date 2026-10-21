@@ -100,12 +100,6 @@ def prepare(args):
                "model_providers.mobility-fixture.wire_api=\"responses\"",
                "model_providers.mobility-fixture.supports_websockets=false",
                "projects.\"/workspace/session/workspace\".trust_level=\"trusted\""]
-    remote = {}
-    if args.remote_url:
-        if not args.remote_token_file or not args.remote_ca_file:
-            raise RuntimeError("Fixed remote URL requires its token and CA files")
-        remote[args.remote_name] = {"url": args.remote_url, "tokenFile": str(args.remote_token_file.resolve()),
-                                    "caFile": str(args.remote_ca_file.resolve()), "maxCheckpointBytes": args.max_checkpoint_bytes}
     cfg = {"directory": str(out / "home"), "dockerBinary": str(args.docker_binary.resolve()),
            "dockerSocket": str(args.docker_socket.absolute()), "dockerConfig": str(out / "docker-cli"),
            "local": {"Harness": "codex", "Name": "local", "NativeImageID": args.native_image_id, "HelperImageID": args.helper_image_id,
@@ -123,7 +117,7 @@ def prepare(args):
                        "keyFile": str(key), "trustBundleFile": str(ca),
                        "providerURL": ("https" if args.provider_tls else "http") + "://127.0.0.1:" + str(args.provider_port),
                        "providerTokenFile": str(out / "provider-token"),
-                       "mcpAuthority": "sproozi-gateway.sproozi-system.svc:443"}, "remote": remote}
+                       "mcpAuthority": "sproozi-gateway.sproozi-system.svc:443"}}
     if args.provider_tls:
         cfg["gateway"]["providerCAFile"] = str(ca)
     write(out / "home-config.json", cfg)
@@ -466,10 +460,6 @@ def main():
     prep.add_argument("--gateway-port", type=int, default=18443)
     prep.add_argument("--provider-port", type=int, default=18765)
     prep.add_argument("--provider-tls", action="store_true")
-    prep.add_argument("--remote-name", default="remote")
-    prep.add_argument("--remote-url")
-    prep.add_argument("--remote-token-file", type=Path)
-    prep.add_argument("--remote-ca-file", type=Path)
     prep.add_argument("--instructions", default=INSTRUCTIONS)
     prep.add_argument("--units", type=int, default=200000)
     prep.add_argument("--duration", default="15m")

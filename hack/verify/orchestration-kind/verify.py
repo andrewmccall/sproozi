@@ -1514,7 +1514,7 @@ def main():
         + list((ROOT / "hack/verify/orchestration-kind").rglob("*Dockerfile"))
         + list((ROOT / "test/e2e").glob("*.go"))
         + [
-            ROOT / "internal/harness/hermes-launch.py",
+            ROOT / "internal/harness/launchfiles/hermes-launch.py",
             ROOT / "examples/harnesses/agentruntime-hermes.yaml",
         ]
     )

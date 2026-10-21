@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/andrewmccall/sproozi/internal/budget"
+	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/workspace"
 	"github.com/google/uuid"
 )
@@ -57,6 +58,9 @@ func validateLaunch(l Launch) error {
 		return errors.New("session: invalid launch identity")
 	}
 	if err := workspace.ValidateIgnoredPaths(l.IncludeIgnored); err != nil {
+		return err
+	}
+	if err := harness.ValidateNativeArgs(l.Harness, l.HarnessArgs); err != nil {
 		return err
 	}
 	return validateAllowance(l.Allowances)
@@ -154,10 +158,11 @@ func fencedBy(launch Launch, inc Incarnation, s Stopped) bool {
 func stoppedThread(s Stopped) string { return cmp.Or(s.ThreadID, s.Launch.ThreadID) }
 
 // launchBelongs checks a launch against the execution's fixed identity. Only
-// the first visit of an execution started from a workspace lacks the thread.
+// a visit from the retained workspace of an execution started from one lacks
+// the thread; restoredBeforeThread checks it came before any kept checkpoint.
 func launchBelongs(r Record, l Launch) bool {
-	thread := l.ThreadID == r.ThreadID || l.ThreadID == "" && l.Epoch == 1 && r.Workspace != ""
-	return thread && l.Harness == r.Harness && l.ExecutionID == r.ID && l.InstructionDigest == r.InstructionDigest && l.Deadline.Equal(r.Deadline) && slices.Equal(l.IncludeIgnored, r.IncludeIgnored)
+	thread := l.ThreadID == r.ThreadID || l.ThreadID == "" && l.CheckpointDigest == "" && r.Workspace != ""
+	return thread && l.Harness == r.Harness && l.ExecutionID == r.ID && l.InstructionDigest == r.InstructionDigest && l.Deadline.Equal(r.Deadline) && slices.Equal(l.IncludeIgnored, r.IncludeIgnored) && slices.Equal(l.HarnessArgs, r.HarnessArgs)
 }
 
 func (r Record) hasCheckpoint() bool { return r.Checkpoint.Path != "" }
@@ -210,12 +215,19 @@ func validateHistory(r Record) (uint64, map[string]bool, error) {
 	remaining := cloneAllowances(r.Ceiling)
 	var lastEpoch uint64
 	seenAlloc := map[string]bool{}
+	kept := false
 	for _, visit := range r.Visits {
 		if err := validateLaunch(visit.Launch); err != nil {
 			return 0, nil, err
 		}
-		// A visit cancelled before any checkpoint existed retains none.
-		checkpointed := validDigest(visit.CheckpointDigest) || visit.CheckpointDigest == "" && !r.hasCheckpoint()
+		// Visits from the retained workspace precede the first kept checkpoint.
+		if kept && visit.Launch.CheckpointDigest == "" {
+			return 0, nil, errors.New("session: invalid retained visit")
+		}
+		// A visit cancelled, or stopped turnless, before any checkpoint
+		// existed retains none.
+		checkpointed := validDigest(visit.CheckpointDigest) || visit.CheckpointDigest == "" && !kept
+		kept = kept || visit.CheckpointDigest != ""
 		if !launchBelongs(r, visit.Launch) || !validIncarnation(visit.Incarnation) || seenAlloc[visit.Launch.AllocationID] || !visit.ActualStopped || !checkpointed || visit.Launch.Epoch <= lastEpoch {
 			return 0, nil, errors.New("session: invalid retained visit")
 		}
@@ -242,6 +254,9 @@ func validateActive(r Record, lastEpoch uint64, seenAlloc map[string]bool) error
 	if r.Active != nil {
 		if err := validateLaunch(r.Active.Launch); err != nil {
 			return err
+		}
+		if r.Active.Launch.CheckpointDigest == "" && r.hasCheckpoint() {
+			return errors.New("session: invalid active allocation")
 		}
 		if !launchBelongs(r, r.Active.Launch) || !validIncarnation(r.Active.Incarnation) || seenAlloc[r.Active.Launch.AllocationID] || !sameAllowances(r.Remaining, r.Active.Launch.Allowances) || r.Active.Launch.Epoch != r.Epoch || r.Active.Launch.Epoch <= lastEpoch {
 			return errors.New("session: invalid active allocation")

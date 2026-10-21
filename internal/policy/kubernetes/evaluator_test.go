@@ -17,6 +17,7 @@ limitations under the License.
 package kubernetes_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -383,8 +384,14 @@ func TestNamedMCPCapabilityRequiresExplicitScopeAndRejectsUnsupportedPricing(t *
 	p.AllowedCapabilities = []sprooziv1alpha1.CapabilityKind{"mcp.docs"}
 	run := baseRun("mcp.docs")
 	denial := policy.Evaluate(p, baseTemplate(), run, baseRuntime())
-	if denial == nil || denial.Reason != policy.DenialMCPScopeInvalid {
-		t.Fatalf("missing scope admitted: %v", denial)
+	if denial == nil || denial.Reason != policy.DenialMCPScopeInvalid ||
+		!strings.Contains(denial.Message, `capability "mcp.docs" has no tool scope; add mcpServers.docs.tools`) {
+		t.Fatalf("missing scope admitted or unexplained: %v", denial)
+	}
+	p.MCPServers = map[string]sprooziv1alpha1.MCPServerScope{"docs": {Tools: map[string]sprooziv1alpha1.MCPToolScope{"bad name": {}}}}
+	denial = policy.Evaluate(p, baseTemplate(), run, baseRuntime())
+	if denial == nil || !strings.Contains(denial.Message, `mcpServers.docs is invalid: invalid MCP tool name "bad name"`) {
+		t.Fatalf("invalid scope hid its cause: %v", denial)
 	}
 	p.MCPServers = map[string]sprooziv1alpha1.MCPServerScope{"docs": {Tools: map[string]sprooziv1alpha1.MCPToolScope{"search": {}}}}
 	if denial := policy.Evaluate(p, baseTemplate(), run, baseRuntime()); denial != nil {

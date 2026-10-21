@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -43,10 +44,13 @@ type placementFixture struct {
 	digest                                         string
 	initials, prepares, activations, stops, aborts int
 	lostStop, lostActivate, unknownUsage           bool
-	rejectActivate, failInspect                    bool
-	partialCreate                                  bool
-	inspections                                    int
-	charge                                         int64
+	// turnless stops a visit from a workspace with no conversation.
+	turnless                    bool
+	exited                      *session.Exit
+	rejectActivate, failInspect bool
+	partialCreate               bool
+	inspections                 int
+	charge                      int64
 	// Non-nil hold channels are closed when the call is reached; the call then
 	// waits for its context, as a native turn that has not completed would.
 	holdPrepare, holdStop chan struct{}
@@ -140,6 +144,15 @@ func (p *placementFixture) Stop(ctx context.Context, l session.Launch, i session
 	if p.unknownUsage {
 		stopped.Receipt = nil
 	}
+	if p.turnless && l.ThreadID == "" {
+		stopped.ThreadID, stopped.Checkpoint, stopped.CheckpointDigest = "", nil, ""
+	}
+	if p.exited != nil {
+		stopped.Exit, stopped.Checkpoint, stopped.CheckpointDigest = p.exited, nil, ""
+		if l.ThreadID == "" {
+			stopped.ThreadID = ""
+		}
+	}
 	r.State = session.PlacementStopped
 	r.Stopped = &stopped
 	p.rows[l.AllocationID] = r
@@ -155,6 +168,10 @@ func (p *placementFixture) receipt(l session.Launch, i session.Incarnation) *ses
 
 // Abort fences the writer and seals its usage, as the Docker placement does
 // even when an earlier graceful stop could not seal it.
+func (p *placementFixture) Exited(_ context.Context, l session.Launch, i session.Incarnation) (bool, error) {
+	r := p.rows[l.AllocationID]
+	return p.exited != nil && r.Incarnation == i && r.State == session.PlacementActive, nil
+}
 func (p *placementFixture) Abort(_ context.Context, l session.Launch, i session.Incarnation) (session.Observation, error) {
 	p.aborts++
 	if p.abortEntered != nil {
@@ -314,7 +331,7 @@ func TestStartIgnoredOptInRetainsBytesAndImmutableSelectionAcrossVisits(t *testi
 	data, digest := testArtifact(t, repo, testIgnoredFile)
 	local.artifact, local.digest, remote.artifact, remote.digest = data, digest, data, digest
 	id, operation := uuid.NewString(), uuid.NewString()
-	if _, err := s.Start(t.Context(), id, operation, repo, "", []string{testIgnoredFile}); err != nil {
+	if _, err := s.Start(t.Context(), id, operation, repo, "", []string{testIgnoredFile}, nil); err != nil {
 		t.Fatal(err)
 	}
 	execution, err := s.coordinator.Inspect(id)
@@ -340,7 +357,7 @@ func TestStartIgnoredOptInRetainsBytesAndImmutableSelectionAcrossVisits(t *testi
 	if len(first.IncludeIgnored) != 1 || first.IncludeIgnored[0] != testIgnoredFile {
 		t.Fatal("initial launch omitted the approved ignored file")
 	}
-	if _, err = s.Start(t.Context(), id, operation, repo, "", nil); err == nil {
+	if _, err = s.Start(t.Context(), id, operation, repo, "", nil, nil); err == nil {
 		t.Fatal("retry removed immutable ignored selection")
 	}
 	for _, destination := range []string{testRemote, testLocal, testRemote} {
@@ -361,7 +378,7 @@ func TestInitialSessionImportRoundTripAndLostReplies(t *testing.T) {
 	s, local, remote, repo := testService(t)
 	id, startOp, moveOp := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	local.lostActivate = true
-	if _, err := s.Start(t.Context(), id, startOp, repo, "", nil); err == nil {
+	if _, err := s.Start(t.Context(), id, startOp, repo, "", nil, nil); err == nil {
 		t.Fatal("lost activation reply succeeded")
 	}
 	status, err := s.Recover(t.Context(), id)
@@ -406,7 +423,7 @@ func TestInitialSessionImportRoundTripAndLostReplies(t *testing.T) {
 func TestRecoverFirstMoveRetainedBeforeRestart(t *testing.T) {
 	s, local, remote, repo := testService(t)
 	id := uuid.NewString()
-	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil); err != nil {
+	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	local.lostStop = true
@@ -435,7 +452,7 @@ func TestRejectedInitialActivationCancelsWithoutInspectingOrCompletingNativeTurn
 	s, local, _, repo := testService(t)
 	id := uuid.NewString()
 	local.rejectActivate = true
-	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil); err == nil {
+	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err == nil {
 		t.Fatal("native activation rejection hidden")
 	}
 	retained, err := s.coordinator.Inspect(id)
@@ -465,7 +482,7 @@ func TestPartiallyCreatedInitialSessionCancelsWithoutProvisioning(t *testing.T) 
 	s, local, remote, repo := testService(t)
 	id, operation := uuid.NewString(), uuid.NewString()
 	local.partialCreate = true
-	if _, err := s.Start(t.Context(), id, operation, repo, "", nil); err == nil {
+	if _, err := s.Start(t.Context(), id, operation, repo, "", nil, nil); err == nil {
 		t.Fatal("expected failed initial prepare")
 	}
 	r, err := s.coordinator.Inspect(id)
@@ -488,11 +505,11 @@ func TestPreparingInitialSessionRetriesCreateOnlyThroughStart(t *testing.T) {
 	s, local, _, repo := testService(t)
 	id, operation := uuid.NewString(), uuid.NewString()
 	local.partialCreate = true
-	if _, err := s.Start(t.Context(), id, operation, repo, "", nil); err == nil {
+	if _, err := s.Start(t.Context(), id, operation, repo, "", nil, nil); err == nil {
 		t.Fatal("expected failed initial prepare")
 	}
 	local.partialCreate = false
-	status, err := s.Start(t.Context(), id, operation, repo, "", nil)
+	status, err := s.Start(t.Context(), id, operation, repo, "", nil, nil)
 	if err != nil || status.Phase != string(session.PhaseActive) || local.initials != 2 || local.activations != 1 {
 		t.Fatalf("explicit preparation retry: %+v %v", status, err)
 	}
@@ -502,7 +519,7 @@ func TestUnknownInitialUsageNeverStartsRemoteAndCanCancel(t *testing.T) {
 	t.Parallel()
 	s, local, remote, repo := testService(t)
 	id := uuid.NewString()
-	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil); err != nil {
+	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	local.unknownUsage = true
@@ -603,13 +620,13 @@ func TestStartConflictNamesTheRetainedOperation(t *testing.T) {
 	t.Parallel()
 	s, _, _, repo := testService(t)
 	id, operation := uuid.NewString(), uuid.NewString()
-	if _, err := s.Start(t.Context(), id, operation, repo, "", nil); err != nil {
+	if _, err := s.Start(t.Context(), id, operation, repo, "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	_, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil)
+	_, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil)
 	want := "home: start intent conflicts with retained launch; " + id + " was started with operation " + operation +
-		": to continue it, repeat the original start command with --operation " + operation +
-		", or run \"sproozi cancel " + id + "\" to revoke and force-stop its current execution"
+		": to continue it, repeat the original run command with --operation " + operation +
+		", or run \"sproozi cancel " + id + "\" to stop it now"
 	if !errors.Is(err, ErrRejected) || err.Error() != want {
 		t.Fatalf("got %v, want %q", err, want)
 	}
@@ -634,11 +651,11 @@ func TestStartSelectsTheRequestedLocalHarnessPerSession(t *testing.T) {
 	t.Cleanup(func() { _ = s.Close() })
 
 	codexID, claudeID := uuid.NewString(), uuid.NewString()
-	if _, err = s.Start(t.Context(), codexID, uuid.NewString(), repo, "", nil); err != nil {
+	if _, err = s.Start(t.Context(), codexID, uuid.NewString(), repo, "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	claudeOperation := uuid.NewString()
-	if _, err = s.Start(t.Context(), claudeID, claudeOperation, repo, harness.NativeClaude, nil); err != nil {
+	if _, err = s.Start(t.Context(), claudeID, claudeOperation, repo, harness.NativeClaude, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	for id, want := range map[string]runtimedocker.PlacementConfig{codexID: primary, claudeID: second} {
@@ -659,11 +676,130 @@ func TestStartSelectsTheRequestedLocalHarnessPerSession(t *testing.T) {
 	if codex.initials != 1 || claude.initials != 1 {
 		t.Fatalf("placements prepared codex=%d claude=%d", codex.initials, claude.initials)
 	}
-	if _, err = s.Start(t.Context(), claudeID, claudeOperation, repo, harness.NativeCodex, nil); err == nil {
+	if _, err = s.Start(t.Context(), claudeID, claudeOperation, repo, harness.NativeCodex, nil, nil); err == nil {
 		t.Fatal("retry changed an existing session's harness")
 	}
 	single, _, _, _ := testService(t)
-	if _, err = single.Start(t.Context(), uuid.NewString(), uuid.NewString(), repo, harness.NativeClaude, nil); err == nil || !strings.Contains(err.Error(), "not configured") {
+	if _, err = single.Start(t.Context(), uuid.NewString(), uuid.NewString(), repo, harness.NativeClaude, nil, nil); err == nil || !strings.Contains(err.Error(), "not set up in the running service") {
 		t.Fatalf("unconfigured harness: %v", err)
+	}
+}
+
+// Harness arguments belong to the execution: a refused flag never creates one,
+// a retry must repeat them, and they keep the execution at home.
+func TestStartHarnessArgsAreCheckedAndKeptWithTheExecution(t *testing.T) {
+	t.Parallel()
+	s, _, _, repo := testService(t)
+	id, operation := uuid.NewString(), uuid.NewString()
+	_, err := s.Start(t.Context(), id, operation, repo, "", nil, []string{"--sandbox", "read-only"})
+	if !errors.Is(err, ErrRejected) || !strings.Contains(err.Error(), "--sandbox") {
+		t.Fatalf("refused harness flag: %v", err)
+	}
+	if _, inspectErr := s.coordinator.Inspect(id); inspectErr == nil {
+		t.Fatal("refused harness arguments created an execution")
+	}
+	args := []string{"--model", "gpt-5.5"}
+	status, err := s.Start(t.Context(), id, operation, repo, "", nil, args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(status.Session.HarnessArgs, args) || !slices.Equal(status.Session.Active.Launch.HarnessArgs, args) {
+		t.Fatalf("harness arguments not kept: %+v", status.Session)
+	}
+	if _, err = s.Start(t.Context(), id, operation, repo, "", nil, nil); !errors.Is(err, ErrRejected) {
+		t.Fatalf("retry with other harness arguments: %v", err)
+	}
+	_, err = s.Move(t.Context(), id, uuid.NewString(), testRemote)
+	if !errors.Is(err, ErrRejected) || !strings.Contains(err.Error(), "harness arguments") {
+		t.Fatalf("remote move with harness arguments: %v", err)
+	}
+}
+
+// A workspace start cannot capture is refused before anything is recorded,
+// with the reason and the repair, so the client offers no retry.
+func TestStartRejectsWorkspaceProblemsWithRepair(t *testing.T) {
+	t.Parallel()
+	s, _, _, repo := testService(t)
+	plain := testutil.PrivateDir(t)
+	for name, tc := range map[string]struct {
+		path  string
+		limit int64
+		want  string
+	}{
+		"missing": {filepath.Join(plain, "missing"), testLimit, "does not exist; run it on the top-level"},
+		"subdirectory": {filepath.Join(repo, "sub"), testLimit, "is inside the repository at " + repo +
+			"; try: sproozi run " + repo},
+		"not git":   {plain, testLimit, "must be the top-level directory of a Git repository"},
+		"too large": {repo, 1024, "local.maxCheckpointBytes is 0.0 MiB: raise it"},
+	} {
+		if name == "subdirectory" {
+			if err := os.MkdirAll(tc.path, 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}
+		s.config.Local.MaxCheckpointBytes = tc.limit
+		id := uuid.NewString()
+		_, err := s.Start(t.Context(), id, uuid.NewString(), tc.path, "", nil, nil)
+		if !errors.Is(err, ErrRejected) || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: %v", name, err)
+		}
+		if _, inspectErr := s.coordinator.Inspect(id); !os.IsNotExist(inspectErr) {
+			t.Errorf("%s: execution recorded: %v", name, inspectErr)
+		}
+	}
+}
+
+// A harness that exits on its own is noticed: the session stops as failed with
+// its exit code and output, and every command names what to do next.
+func TestExitedHarnessFailsTheSessionWithItsOutput(t *testing.T) {
+	t.Parallel()
+	s, local, _, repo := testService(t)
+	id := uuid.NewString()
+	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if settled, err := s.settleExit(t.Context(), id); err != nil || settled {
+		t.Fatalf("running harness settled as exited: %v %v", settled, err)
+	}
+	local.exited = &session.Exit{Code: 2, Output: "error: unexpected argument '--bad' found"}
+	attach := s.attachProblem(t.Context(), id)
+	if attach == nil || !strings.Contains(attach.Error(), "exited with code 2") || !strings.Contains(attach.Error(), "sproozi rm "+id) {
+		t.Fatalf("attach to an exited harness: %v", attach)
+	}
+	status, err := s.Status(id)
+	if err != nil || status.Phase != stageFailed || status.Exit == nil || status.Exit.Code != 2 ||
+		!strings.Contains(status.Exit.Output, "--bad") {
+		t.Fatalf("failed status: %+v %v", status, err)
+	}
+	if stopped, err := s.Stop(t.Context(), id, uuid.NewString()); err != nil || stopped.Phase != stageFailed {
+		t.Fatalf("stop of a failed session: %+v %v", stopped, err)
+	}
+	local.exited = nil
+	resumed, err := s.Resume(t.Context(), id, uuid.NewString(), nil)
+	if err != nil || resumed.Session.Active == nil || resumed.Session.Active.Launch.CheckpointDigest != "" {
+		t.Fatalf("resume of a failed session: %+v %v", resumed, err)
+	}
+}
+
+// A cancelled session cannot continue; every refusal points to rm.
+func TestCancelledSessionPointsToRemove(t *testing.T) {
+	t.Parallel()
+	s, _, _, repo := testService(t)
+	id := uuid.NewString()
+	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Cancel(t.Context(), id, uuid.NewString()); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []Request{
+		{Action: ActionResume, ID: id, OperationID: uuid.NewString()},
+		{Action: ActionStop, ID: id, OperationID: uuid.NewString()},
+		{Action: ActionAttach, ID: id},
+	} {
+		r := exchange(t, s, q)
+		if !strings.Contains(r.Error, "cancelled") || !strings.Contains(r.Error, "sproozi rm "+id) {
+			t.Errorf("%s of a cancelled session replied %+v", q.Action, r)
+		}
 	}
 }

@@ -8,7 +8,7 @@ for (const item of fs.readFileSync('/proc/' + status.pid + '/environ', 'utf8').s
   const k = item.indexOf('=');
   if (k > 0) env[item.slice(0, k)] = item.slice(k + 1);
 }
-function call(repo, name = 'read_wiki_structure', target = 'https://sproozi-gateway.sproozi-system.svc/mcp/docs') {
+function call(repo, name = 'read_wiki_structure', target = 'https://sproozi-gateway.sproozi-system.svc/mcp/deepwiki') {
   const body = JSON.stringify({jsonrpc: '2.0', id: 1, method: 'tools/call', params: {name, arguments: {repoName: repo}}});
   const r = cp.spawnSync('/usr/bin/curl', ['--silent', '--show-error', '--max-time', '45',
     '--proxy-cacert', env.SSL_CERT_FILE, '-H', 'Content-Type: application/json',

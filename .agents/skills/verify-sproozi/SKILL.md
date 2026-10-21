@@ -1,11 +1,11 @@
 ---
 name: verify-sproozi
-description: Verify Sproozi's Kind getting-started guide, cluster dependencies, AgentRun-to-PR demo, exploration and cleanup through the documented CLI paths.
+description: Verify Sproozi's Kind investigation-to-PR demo guide, cluster dependencies, AgentRun-to-PR demo, exploration and cleanup through the documented CLI paths.
 ---
 
 # Verify the Sproozi Kind quickstart
 
-Scope is [Getting started](../../../docs/guides/getting-started.md). Read the
+Scope is [the investigation-to-PR demo](../../../docs/guides/pr-demo.md). Read the
 [feature map](features/README.md), then choose the requested path. Existing-cluster
 installation is outside this skill. Use the repository helper from its root.
 Use the dependency path by default. Choose the provider-backed demo when that

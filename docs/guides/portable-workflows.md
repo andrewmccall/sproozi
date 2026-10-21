@@ -26,17 +26,17 @@ personal-session adoption are not part of this workflow.
 
 ## Prepare the installation
 
-1. Follow [Getting started](getting-started.md) for the controller, authenticated
-   gateway and enforcing CNI. Use a dedicated Kind cluster for evaluation; use
-   [Install on Kubernetes and run your first Pod](install-kubernetes.md) for an
-   operator-owned cluster. Do not use a personal current kubeconfig context implicitly.
+1. Follow the [investigation-to-PR demo on Kind](pr-demo.md) for the
+   controller, authenticated gateway and enforcing CNI. Use a dedicated Kind
+   cluster for evaluation; use [Install from a checkout](install-from-checkout.md)
+   for an operator-owned cluster. Do not use a personal current kubeconfig context implicitly.
 2. Build the selected native image and provision its managed runtime/template/policy
    using [the complete mobility setup](../../hack/verify/session-mobility/README.md).
    The image contains Git, the native supervisor, checkpoint helper and
    `/usr/local/bin/session-profile`. The remote executor needs private durable
    storage and administrator-owned Kubernetes credentials; sandboxes and Hermes
    do not receive those credentials.
-3. Configure the [home daemon](../../cmd/sproozi/README.md) with one private JSON
+3. Configure this machine's [service](../../cmd/sproozi/README.md) with one private JSON
    file. It selects local Docker images/network, gateway TLS/provider credential
    files, finite allowances and named remote executors. Keep it outside any
    transferred repository. Use `--config FILE` consistently or put it at the
@@ -86,19 +86,19 @@ To use GitHub after local resume, merge the following into the full home configu
 ```
 
 Replace the numeric IDs and scope with your approved App installation. Step 5 of
-[Getting started](getting-started.md#5-create-a-github-app) gives its required
+[Getting started](pr-demo.md#5-create-a-github-app) gives its required
 repository permissions and protected key file. The inspection certificate must additionally cover
 `github.com` and `api.github.com`, retaining its model and gateway-IP SANs.
 For remote work, configure the same approved repository/base scope and finite
 `github.pull_request` budget on the managed AgentPolicy, and provision the App
 credentials only in the shared gateway as described in that setup.
 
-Add `workTokenFile` and approved repositories to the existing private
-`session-profile` configuration:
+Add `workTokenFile` and approved repositories to the remote executor's
+configuration:
 
 ```json
 {
-  "workTokenFile": "/private/sproozi/work-token",
+  "workTokenFile": "/var/run/sproozi-work/work-token",
   "repositories": {
     "sproozi": {
       "url": "https://github.com/andrewmccall/sproozi",
@@ -108,11 +108,11 @@ Add `workTokenFile` and approved repositories to the existing private
 }
 ```
 
-These fields extend the full profile configuration, not a standalone replacement.
-Generate a distinct work token locally with `openssl rand -hex 32`, save it with
-mode `0600`, and reference that file. The existing home principal token belongs
-to the trusted home and additionally permits pull/claim. Hermes receives only the
-work token. Do not reuse the same bytes for both roles.
+These fields extend the full executor configuration, not a standalone
+replacement. Generate the work token with `openssl rand -hex 32` and put it in
+the executor's credentials Secret. Hermes receives only the work token. Your
+own CLI and service sign in as the `sproozi-cli` ServiceAccount instead, which
+also permits pull.
 
 An approved repository can instead specify an absolute `snapshot` path to a
 stopped ordinary Git checkout owned by the administrator. The remote executor
@@ -121,23 +121,16 @@ the harness to fetch that approved source through its GitHub capability.
 Repository files cannot supply trusted launch instructions or credential
 references.
 
-Run `session-profile --config FILE` with the explicit administrator kubeconfig,
-or deploy `/usr/local/bin/session-profile --config /etc/sproozi/profile.json` in
-a trusted Pod with the native image, a private persistent directory, its
-TLS/token files and narrowly scoped placement credentials. Use one replica; a
-lock on its state directory rejects a second remote executor using the same
-directory, and restarting it recovers the same stored execution intents. Its
-Kubernetes credentials need the documented managed-Run, registration and
-Pod-control permissions. Sandboxes cannot use it to execute arbitrary commands.
+Deploy the remote executor in the cluster with the
+[retained-work example](../../examples/portable-workflows/kubernetes/owner.yaml):
+one replica, a private persistent volume, its TLS and work-token Secret and its
+placement permissions. A lock on its state directory rejects a second executor
+using the same directory, and restarting it recovers the stored execution
+intents. Sandboxes cannot use it to execute arbitrary commands.
 
-Put the profile's HTTPS origin, public CA and home principal token file in the
-global home configuration's `remote` map. The map name must equal the configured
-profile `placementName`. A `workSources` entry gives a remote executor a separately
-provisioned connection. Every executor or source name resolves to its
-`workSources` entry when one exists, otherwise to the same-named `remote`
-profile; the [configuration reference](../../cmd/sproozi/README.md#configuration-reference)
-says when to use each. Both transports
-verify TLS 1.3, use one fixed origin and reject redirects.
+You reach it through a kubeconfig context. Apply `cli-access` and create the
+`sproozi` context as [remote executor access](../reference/remote-executors.md)
+shows; that page also lists what the executor must publish.
 
 For a persistent in-cluster remote executor and the exact Hermes `/work/mcp` configuration,
 use [Hermes with remote work](retained-work-kubernetes.md).
@@ -149,15 +142,16 @@ checkout at the same release as the CLI, as described in
 [Move a live session between Docker and Kubernetes](session-mobility.md#prepare-the-administrator-owned-setup).
 
 Create a task file describing a reproducible problem and observable checks. Then
-submit against the explicit configured profile name:
+submit it; without `--context`, the `sproozi` context is used:
 
 ```sh
-sproozi run --config /private/sproozi/config.json \
-  --executor engineering --harness codex --repository sproozi \
-  --task-file task.txt --operation ORIGINAL_REQUEST_UUID
-sproozi sessions --config /private/sproozi/config.json --executor engineering
-sproozi status SESSION_UUID --config /private/sproozi/config.json --executor engineering
+sproozi run --remote --harness codex --repository sproozi --task-file task.txt
+sproozi sessions
+sproozi status ID --remote
 ```
+
+Add `--context NAME` or `--context FILE` to reach another cluster, and
+`--operation UUID` to retry a submission whose outcome is unknown.
 
 Preserve the request UUID when retrying. Repeating identical intent returns the
 same session and execution; changed intent is rejected. Public `id` addresses
@@ -168,13 +162,12 @@ untrusted output. The remote executor reports `retained` only after compatible n
 completion, confirmed sandbox stop, finalized usage accounting and checkpoint
 storage. An `unknown` status cannot be pulled or silently interpreted as stopped.
 
-`sessions` returns one labelled JSON catalogue. Check `executors` for unavailable
-owners and `truncated` for omitted results; a missing home daemon does not erase
-successful remote rows. The [command reference](../reference/session-commands.md)
+`sessions --json` returns one labelled catalogue. Check `executors` for
+unavailable owners and `truncated` for omitted results; a stopped local service
+does not hide the cluster's rows. The [command reference](../reference/session-commands.md)
 explains owner selection, JSON fields and safe error categories.
 
-For a known recoverable interruption, use `sproozi recover SESSION_UUID --executor
-engineering --config FILE`. Cancel uses a separate stable `--operation UUID` and
+For a known recoverable interruption, use `sproozi recover ID --remote`. Cancel uses a separate stable `--operation UUID` and
 revokes before forced stop. Keep the original owner journals and accounting
 records; deleting resources or replacing a failed Run does not establish stop or
 refund evidence.
@@ -183,7 +176,7 @@ refund evidence.
 
 Use the persistent Hermes deployment and native MCP setup from
 [Run a persistent Hermes assistant on Kubernetes](hermes-orchestration.md).
-Register the profile's `/work/mcp` URL with its work token as the bearer token
+Register the executor's `/work/mcp` URL with its work token as the bearer token
 and its public CA.
 The supported tools are `sproozi_run`, `sproozi_status`, `sproozi_cancel` and
 `sproozi_sessions`. Hermes supplies this intent, without images, PodSpecs,
@@ -207,31 +200,26 @@ native state.
 
 ## Pull and resume locally
 
-Start the home daemon, then transfer the completed session:
+With this machine's service running, transfer the completed session:
 
 ```sh
-sproozi serve --config /private/sproozi/config.json
-# In another terminal:
-sproozi pull SESSION_UUID --config /private/sproozi/config.json --from engineering
-sproozi resume SESSION_UUID --executor docker --config /private/sproozi/config.json
+sproozi pull ID
+sproozi resume ID
 ```
 
-`--from engineering` names the remote executor, configured under `remote` or
-`workSources`, whose remote executor hands the session over. `--executor docker`
-uses docker, home's executor name, to address the home daemon that now owns
-the session.
-[Why the commands use different flags](session-mobility.md#why-the-commands-use-different-flags)
-explains the three flags.
+`pull` uses the `sproozi` context unless `--context` names another. The
+service reaches the cluster itself and remembers it. After the pull this machine
+owns the session, so `resume` needs no `--context`.
 
 Pull validates and saves the conversation and Git checkpoint without starting an
-agent. It then records the remote executor's one-way ownership transfer. The pull
-operation UUID comes from the session ID and source, so if the reply is lost,
-run the same command again. An explicit `--operation UUID` overrides it; retry
-with that same UUID. Downloading a checkpoint alone
-does not permit local execution. The remote catalogue now reports `home-owned`
-and cannot reopen that task session. Keep the home configuration and private
-directory unique to this trusted installation; copying its home principal token
-into independent homes is unsupported.
+agent. It then records the remote executor's one-way ownership transfer. If the
+reply is lost, run the same command again: a pull the service already began
+continues from the same executor with its original operation. Downloading a
+checkpoint alone
+does not permit local execution. The remote catalogue now reports `pulled`
+and cannot reopen that task session. One executor serves one developer's
+service: two services signed in to the same executor share its single
+principal, which is unsupported.
 
 The home catalogue enforces `local.retainedBytes` and a finite file count for
 imported artifacts and journals; new executions also use the existing
@@ -243,11 +231,11 @@ recovery.
 Resume opens the real native TUI with the same harness conversation ID (`threadId`) and supported
 Git history, index, staged/unstaged changes and selected files. Its new deadline,
 allowances and gateway identity come from current home approval. Earlier receipts
-remain unchanged. `--detach` starts without attaching; `sproozi attach SESSION_UUID
---socket PATH` reconnects, and Ctrl-] detaches without stopping work.
+remain unchanged. `--detach` starts without attaching; `sproozi attach ID`
+reconnects, and Ctrl-] detaches without stopping work.
 
 After reviewing and changing the work, use
-`sproozi stop SESSION_UUID --executor docker --config FILE` to wait for the current
+`sproozi stop ID --config FILE` to wait for the current
 turn and foreground tools, stop the sandbox, finalize usage accounting and save a
 new checkpoint. It does not launch a destination. A later resume starts another
 execution with current approval. Use `move` for live visits within one
@@ -369,15 +357,17 @@ Use only the approved endpoint and namespaces in your home configuration.
 
 ## One external MCP definition across executors
 
-The [DeepWiki example](../../examples/portable-workflows/deepwiki-servers.json)
+The [DeepWiki example](../../examples/mcp/servers.json)
 registers the real public HTTPS provider without credentials. Use that same
 authored registry file for `gateway.mcpRegistryFile` locally and the remote
 gateway's mounted registry ConfigMap. Set the local inspection authority and
 certificate SANs according to the [MCP reference](../reference/configured-mcp.md).
 `gateway.mcpAuthority` is required even without a registry: it also serves the
 [Sproozi control connection](../reference/sproozi-integration.md).
-The policy example permits only `read_wiki_structure` for the public
-`modelcontextprotocol/go-sdk` repository, with a finite `mcp.docs` allowance.
+The [policy example](../../examples/mcp/agentpolicy.yaml) permits only
+`read_wiki_structure` and `ask_wiki_question` for the public
+`modelcontextprotocol/go-sdk` repository, with a finite `mcp.deepwiki`
+allowance.
 Keep the local copy outside the repository, owned and mode `0600`. Both copies
 must contain the same registration bytes; restart gateways after registry edits.
 Use the same registration and policy on both gateways.
@@ -386,8 +376,8 @@ Regenerate connection settings at each native launch. Registry configuration
 alone does not grant access. Each execution needs the named capability, matching
 tool and argument policy, an available budget and active run status. Restart the
 owning gateways to apply registry or credential changes; removing a grant must
-deny later calls. Codex managed-native MCP is supported; managed Claude MCP
-is not supported. No provider-specific
+deny later calls. Codex sessions get the named servers; Claude Code sessions
+get none. No provider-specific
 server code, catalogue, OAuth enrollment or stdio lifecycle is required for this
 HTTPS example.
 

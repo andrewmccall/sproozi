@@ -31,12 +31,11 @@ ADR preserves the reasons for the choice.
 
 ## Review before completion
 
-Review the task's retained source evidence, candidate designs, design synthesis,
-implementation checks, reviews and TODO records. For each material choice, link
-its public decision record or explain in the task evidence why it needs no ADR.
-One coherent ADR can cover related choices. Distinguish selected decisions,
-rejected proposals, later fixes and deferred work. Preserve the original
-evidence.
+Look back over the work: the options you considered, the checks you ran and
+any review comments. Every important choice should either have an ADR or a
+sentence in the change description saying why it needs none. One ADR can cover
+several related choices. Say which options were chosen, which were rejected,
+and what was fixed or left for later. Do not rewrite earlier records to match.
 
 Update affected explanations, references and examples. Update the main README
 when supported capabilities change. Compare claims with code and test evidence,
@@ -95,3 +94,11 @@ ADR 0024's statement that releases do not pin clients.
 | [0029](0029-local-provisioning-and-lifecycle.md) | Local provisioning, per-harness local placements and home-owned certificates. |
 | [0030](0030-kubernetes-release-assets-and-certificates.md) | Kubernetes release assets and a self-managed certificate controller. |
 | [0031](0031-user-profile-for-managed-sessions.md) | One user profile, sent with each Docker launch and stored by digest for Kubernetes, replacing the shared agent files. |
+| [0032](0032-stopping-a-visit-with-no-native-conversation.md) | A first visit with no harness conversation stops at once without a checkpoint, and its usage seals without a bound conversation ID. |
+| [0033](0033-harness-arguments-from-the-command-line.md) | Arguments after `--` on start and resume go to the harness, refusing flags Sproozi controls; Codex upgrade prompts are acknowledged from its own catalogue. |
+| [0034](0034-resume-continues-every-home-session.md) | Every home session is catalogued, and `resume` continues a stopped one in a new execution, including sessions created with `start` and after the old deadline. |
+| [0035](0035-bounded-graceful-stops-and-settled-input.md) | Graceful stops report what they wait for after a bounded time, settled terminal input no longer blocks them, and Claude system request caches are accepted. |
+| [0036](0036-remote-executors-through-kubeconfig-contexts.md) | The CLI reaches a remote executor through a kubeconfig context (default `sproozi`) and a port-forward; the executor authorizes the caller's ServiceAccount with TokenReview and RBAC, and describes its own name and checkpoint limit. |
+| [0037](0037-one-command-surface.md) | One grouped command surface: `run` for local and remote work, `init` for local Docker, `local` as this machine's only name, ID prefixes, `rm`, text output with `--json`, and `~/.sproozi` found by `--root` or `SPROOZI_ROOT`. |
+| [0038](0038-exited-agents-and-one-recovery-path.md) | The service stops sessions whose agent exited by itself, showing them failed with the exit; a resumed visit with no prompt stops at once; stuck stops and cancelled sessions each name one next command. |
+| [0039](0039-one-harness-registry-and-the-mcp-requirement.md) | One harness registry with guard tests; every harness needs an MCP client for the `sproozi` control connection. |

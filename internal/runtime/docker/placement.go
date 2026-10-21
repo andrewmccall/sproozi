@@ -268,7 +268,7 @@ func (p *Placement) drivePrepare(ctx context.Context, r *placementRecord, data [
 	if err != nil {
 		return fmt.Errorf("profile: %w", err)
 	}
-	contract := harness.NativeLaunch{Harness: p.config.Harness, Deadline: r.Launch.Deadline, ThreadID: r.Launch.ThreadID, Task: r.Launch.Task, Instructions: p.config.Instructions, InstructionDigest: p.config.InstructionDigest, Env: access.Env, Model: access.Model, Options: access.Options, ClientConfig: access.ClientConfig, TrustBundlePEM: access.TrustBundlePEM, RolloutMaxBytes: harness.NativeRolloutMaxBytes, ProfileArchive: profile}
+	contract := harness.NativeLaunch{Harness: p.config.Harness, Deadline: r.Launch.Deadline, ThreadID: r.Launch.ThreadID, Task: r.Launch.Task, Instructions: p.config.Instructions, InstructionDigest: p.config.InstructionDigest, Env: access.Env, Model: access.Model, Options: access.Options, Args: r.Launch.HarnessArgs, ClientConfig: access.ClientConfig, TrustBundlePEM: access.TrustBundlePEM, RolloutMaxBytes: harness.NativeRolloutMaxBytes, ProfileArchive: profile}
 	if err := contract.Validate(time.Now()); err != nil {
 		return err
 	}
@@ -450,7 +450,7 @@ func (p *Placement) stopped(r placementRecord) (session.Stopped, error) {
 	if err != nil {
 		return session.Stopped{}, err
 	}
-	stopped := session.Stopped{Launch: r.Launch, Incarnation: inc, ActualStopped: r.ActualStopped, ThreadID: r.thread(), Receipt: r.Receipt, CheckpointDigest: r.CheckpointDigest}
+	stopped := session.Stopped{Launch: r.Launch, Incarnation: inc, ActualStopped: r.ActualStopped, ThreadID: r.thread(), Receipt: r.Receipt, CheckpointDigest: r.CheckpointDigest, Exit: r.Exited}
 	if r.CheckpointDigest != "" {
 		data, err := p.read("out-"+r.CheckpointDigest+".checkpoint", p.config.MaxCheckpointBytes)
 		if err != nil {
@@ -513,33 +513,20 @@ func (p *Placement) Stop(ctx context.Context, l session.Launch, i session.Incarn
 		}
 	}
 
-	if !validUUID(r.thread()) {
+	if !validUUID(r.thread()) && !r.Turnless && r.Exited == nil {
 		return session.Stopped{}, errors.New("initial native UUID remains unknown")
 	}
 	if err = p.seal(ctx, &r, i); err != nil {
 		stopped, stoppedErr := p.stopped(r)
 		return stopped, errors.Join(fmt.Errorf("%w: %w", session.ErrUsageUnsealed, err), stoppedErr)
 	}
-	if r.CheckpointDigest == "" {
-		if err = p.engine.VerifyManaged(ctx, *r.Helper, p.spec(r, roleHelper)); err != nil {
-			return session.Stopped{}, err
-		}
-		data, err := p.engine.CaptureCheckpoint(ctx, *r.Helper, p.config.Harness, r.thread(), r.Launch.IncludeIgnored, p.config.MaxCheckpointBytes)
-		if err != nil {
-			return session.Stopped{}, err
-		}
-		if err = checkpoint.ValidateContinuity(data, p.config.Harness, p.config.InstructionDigest, p.config.MaxCheckpointBytes); err != nil {
-			return session.Stopped{}, err
-		}
-		meta, err := checkpoint.Inspect(data, p.config.MaxCheckpointBytes)
-		if err != nil || meta.Harness != r.Launch.Harness || meta.ThreadID != r.thread() {
-			return session.Stopped{}, errors.New("docker capture identity mismatch")
-		}
-		if err = p.retain("out-"+meta.SHA256+".checkpoint", data); err != nil {
-			return session.Stopped{}, err
-		}
-		r.CheckpointDigest = meta.SHA256
-		if err = p.save(r); err != nil {
+	// A turnless visit had no conversation; its workspace is the one it
+	// started from, which the execution retains, so nothing is captured. An
+	// exited harness keeps a checkpoint only when Codex reported a completed
+	// conversation that validates; otherwise the session keeps its previous one.
+	exitedWithout := r.Exited != nil && (r.Launch.Harness == harness.NativeClaude || r.thread() == "")
+	if r.CheckpointDigest == "" && !r.Turnless && !exitedWithout {
+		if err = p.capture(ctx, &r); err != nil && r.Exited == nil {
 			return session.Stopped{}, err
 		}
 	}
@@ -838,20 +825,107 @@ func (p *Placement) quiesceNative(ctx context.Context, r *placementRecord, i ses
 			r.Thread = thread
 			return p.save(*r)
 		}
-		_, err = harness.QuiesceNative(ctx, control, r.thread(), r.Launch.Deadline, bind)
-		if errors.Is(err, harness.ErrQuiesceUnacknowledged) && r.Launch.Harness != harness.NativeClaude {
+		var thread string
+		thread, err = harness.QuiesceNative(ctx, control, r.thread(), r.Launch.Deadline, bind)
+		if errors.Is(err, harness.ErrQuiesceUnacknowledged) && r.Launch.Harness != harness.NativeClaude &&
+			p.agentStops(ctx, *r.Agent) {
 			// A lost Codex reply is resolved by the actual stopped container.
-			observed, observeErr := p.engine.Observe(ctx, *r.Agent)
-			if observeErr == nil && !observed.Running && observed.PID == 0 {
-				err = nil
-			}
+			// The reply is usually lost because the container exited first.
+			err = nil
 		}
 		if err != nil {
 			return err
 		}
-	} else if r.Launch.Harness == harness.NativeClaude {
-		return errors.New("claude graceful completion acknowledgement unavailable")
+		// Only a turnless first visit quiesces without a bound thread.
+		r.Turnless = thread == ""
+	} else if err = p.recordExit(ctx, r, i, state); err != nil {
+		return err
 	}
 	r.NativeQuiet = true
 	return p.save(*r)
+}
+
+// recordExit keeps what the supervisor reported when its harness exited on its
+// own. A Codex first visit binds the thread of a completed turn it reported,
+// so the stop can still checkpoint that conversation; Claude needs its
+// graceful acknowledgement, so its exited visit keeps no new checkpoint.
+func (p *Placement) recordExit(ctx context.Context, r *placementRecord, i session.Incarnation, state Observation) error {
+	report, ok := p.engine.ExitReport(ctx, *r.Agent)
+	if !ok {
+		report = harness.NativeExitReport{Code: state.ExitCode}
+	}
+	r.Exited = &session.Exit{Code: report.Code, Output: report.Output}
+	if r.Launch.Harness == harness.NativeCodex && r.thread() == "" && report.Thread != "" {
+		if err := p.authority.BindNative(ctx, r.Launch, i, report.Thread); err != nil {
+			return err
+		}
+		r.Thread = report.Thread
+	}
+	return p.save(*r)
+}
+
+// agentStops reports whether the agent container is observed stopped within
+// a few seconds, as it is when quiesce ended the supervisor before its reply
+// reached the caller.
+func (p *Placement) agentStops(ctx context.Context, agent Instance) bool {
+	for range 40 {
+		observed, err := p.engine.Observe(ctx, agent)
+		if err != nil {
+			return false
+		}
+		if !observed.Running && observed.PID == 0 {
+			return true
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+	return false
+}
+
+// capture retains the stopped visit's checkpoint.
+func (p *Placement) capture(ctx context.Context, r *placementRecord) error {
+	if err := p.engine.VerifyManaged(ctx, *r.Helper, p.spec(*r, roleHelper)); err != nil {
+		return err
+	}
+	data, err := p.engine.CaptureCheckpoint(ctx, *r.Helper, p.config.Harness, r.thread(), r.Launch.IncludeIgnored, p.config.MaxCheckpointBytes)
+	if err != nil {
+		return err
+	}
+	if err = checkpoint.ValidateContinuity(data, p.config.Harness, p.config.InstructionDigest, p.config.MaxCheckpointBytes); err != nil {
+		return err
+	}
+	meta, err := checkpoint.Inspect(data, p.config.MaxCheckpointBytes)
+	if err != nil || meta.Harness != r.Launch.Harness || meta.ThreadID != r.thread() {
+		return errors.New("docker capture identity mismatch")
+	}
+	if err = p.retain("out-"+meta.SHA256+".checkpoint", data); err != nil {
+		return err
+	}
+	r.CheckpointDigest = meta.SHA256
+	return p.save(*r)
+}
+
+// Exited reports whether an active visit's agent container has stopped
+// without a stop being requested: its harness exited on its own.
+func (p *Placement) Exited(ctx context.Context, l session.Launch, i session.Incarnation) (bool, error) {
+	unlock, err := p.lockOperation(l)
+	if err != nil {
+		return false, err
+	}
+	defer unlock()
+	r, err := p.bound(l, i)
+	if err != nil {
+		return false, err
+	}
+	if r.Phase != phaseActive || r.ActualStopped || r.Agent == nil {
+		return false, nil
+	}
+	state, err := p.engine.Observe(ctx, *r.Agent)
+	if err != nil {
+		return false, err
+	}
+	return !state.Running && state.PID == 0, nil
 }

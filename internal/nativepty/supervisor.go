@@ -147,6 +147,17 @@ func Start(launch Launch) (*Supervisor, error) {
 	return s, nil
 }
 
+// Tail copies at most max of the most recent output bytes still buffered.
+func (s *Supervisor) Tail(max int) []byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	data := s.buffer
+	if len(data) > max {
+		data = data[len(data)-max:]
+	}
+	return append([]byte(nil), data...)
+}
+
 func (s *Supervisor) PID() int              { return s.cmd.Process.Pid }
 func (s *Supervisor) Done() <-chan struct{} { return s.done }
 
@@ -429,7 +440,7 @@ func resize(file *os.File, size Size) error {
 }
 
 func stopGroup(pid int) error {
-	if err := unix.Kill(-pid, unix.SIGKILL); err != nil && !errors.Is(err, unix.ESRCH) {
+	if err := unix.Kill(-pid, unix.SIGKILL); err != nil && !groupGone(err) {
 		return err
 	}
 	end := time.Now().Add(2 * time.Second)

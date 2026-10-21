@@ -18,7 +18,7 @@ import (
 func TestCancelInterruptsDisconnectedInitialMove(t *testing.T) {
 	s, local, remote, repo := testService(t)
 	id := uuid.NewString()
-	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil); err != nil {
+	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	entered, aborted := holdStop(local)
@@ -70,7 +70,7 @@ func TestCancelInterruptsDisconnectedInitialMove(t *testing.T) {
 func TestCancelInterruptsInitialRecovery(t *testing.T) {
 	s, local, remote, repo := testService(t)
 	id := uuid.NewString()
-	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil); err != nil {
+	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	// The failed Stop retains the first move operation; Recover must wait for the
@@ -104,7 +104,7 @@ func TestCancelIndependentInitialSessionWhileAnotherMoveIsHeld(t *testing.T) {
 	s, local, remote, repo := testService(t)
 	heldID, cancelledID := uuid.NewString(), uuid.NewString()
 	for _, id := range []string{heldID, cancelledID} {
-		if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil); err != nil {
+		if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -146,12 +146,12 @@ func TestCancelPreventsInitialActivationAfterPreparedReply(t *testing.T) {
 	// Capture runs real Git subprocesses and is setup for this test's prepared
 	// reply boundary. Keep it outside the cancellation responsiveness guard;
 	// Start must recover the same durable preparing intent without recapturing.
-	if _, err := s.createWorkspaceExecution(ctx, id, operationID, repo, s.config.Local, nil); err != nil {
+	if _, err := s.createWorkspaceExecution(ctx, id, operationID, repo, s.config.Local, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	startDone := make(chan error, 1)
 	go func() {
-		_, err := s.Start(ctx, id, operationID, repo, "", nil)
+		_, err := s.Start(ctx, id, operationID, repo, "", nil, nil)
 		startDone <- err
 	}()
 	select {

@@ -281,7 +281,7 @@ func TestServeLogsItsListeners(t *testing.T) {
 	go func() { served <- s.Serve(ctx) }()
 	select {
 	case line := <-log:
-		prefix := "Started home daemon: control socket " + SocketPath(dir) + ", gateway 127.0.0.1:"
+		prefix := "Started the Sproozi service: control socket " + SocketPath(dir) + ", gateway 127.0.0.1:"
 		if !strings.HasPrefix(line, prefix) || !strings.HasSuffix(line, "\n") || strings.Count(line, "\n") != 1 {
 			t.Errorf("start line %q, want prefix %q", line, prefix)
 		}
@@ -289,7 +289,7 @@ func TestServeLogsItsListeners(t *testing.T) {
 		t.Fatalf("serve stopped before logging: %v", err)
 	}
 	cancel()
-	if line := <-log; line != "Stopped home daemon\n" {
+	if line := <-log; line != "Stopped the Sproozi service\n" {
 		t.Errorf("stop line %q", line)
 	}
 	if err = <-served; err != nil {
@@ -324,13 +324,13 @@ func TestServeNamesTheGatewayAddressInUse(t *testing.T) {
 // that unblock it and is a rejection, so the CLI offers no looping retry.
 func TestRecoveryRequiredNamesRecoverAndCancel(t *testing.T) {
 	id := "6f0f4f3e-0f6b-4bd8-9a39-3f1c1f2b8b8e"
-	err := needsRecovery(fmt.Errorf("session: previous move requires recovery: %w", session.ErrRecoveryRequired), id)
+	err := needsRecovery(fmt.Errorf("session: previous move requires recovery: %w", session.ErrRecoveryRequired), id, "recover")
 	want := "session: previous move requires recovery: session: recovery required; run \"sproozi recover " + id +
-		"\" to finish it, or \"sproozi cancel " + id + "\" to revoke and force-stop its current execution"
+		"\" to finish it, or \"sproozi cancel " + id + "\" to stop it now"
 	if !errors.Is(err, ErrRejected) || err.Error() != want {
 		t.Fatalf("got %v, want %q", err, want)
 	}
-	if err = needsRecovery(errors.New("other"), id); errors.Is(err, ErrRejected) {
+	if err = needsRecovery(errors.New("other"), id, "recover"); errors.Is(err, ErrRejected) {
 		t.Fatal("unrelated error became a rejection")
 	}
 }
@@ -387,8 +387,8 @@ func TestCheckListenNamesTheRunningHomeDaemon(t *testing.T) {
 		}
 	}()
 	err = CheckListen(controlContext(t), Config{Directory: dir, Gateway: GatewayConfig{Listen: held.Addr().String()}})
-	want := "home: another home daemon is using directory " + dir +
-		"; stop it first (\"sproozi serve\" holds it until it exits)"
+	want := "home: another Sproozi service is using directory " + dir +
+		"; stop it first"
 	if err == nil || err.Error() != want {
 		t.Fatalf("got %v, want %q", err, want)
 	}

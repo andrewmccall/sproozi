@@ -41,6 +41,10 @@ func (c *Coordinator) Finalize(ctx context.Context, id, operationID string) (Rec
 		}
 	}
 	if r.PendingOperation != "" {
+		// A stop already in progress is the same intent: continue it.
+		if last := len(r.Operations) - 1; r.Operations[last].Finalize {
+			return c.drive(ctx, r, last)
+		}
 		return r, pendingRecovery(r)
 	}
 	for _, visit := range r.Visits {

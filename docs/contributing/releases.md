@@ -77,7 +77,7 @@ image.
 | `sproozi_VERSION_kubernetes.tar.gz` | CRDs, the digest-pinned install bundle, the optional certificate controller, quickstart overlays and the first check. |
 | `checksums.txt` | SHA-256 of every other asset. |
 
-The archives install nothing by themselves. `sproozi init --local` pulls the
+The archives install nothing by themselves. `sproozi init` pulls the
 native image; the [Kubernetes guide](../guides/install-kubernetes.md) applies
 the Kubernetes assets.
 

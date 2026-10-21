@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -45,13 +46,17 @@ func (l Layout) Logs() string         { return filepath.Join(l.Root, "logs") }
 func (l Layout) ServiceLog() string   { return filepath.Join(l.Logs(), "service.log") }
 func (l Layout) ServicePID() string   { return filepath.Join(l.Root, "service.pid") }
 
-// DefaultRoot is ~/sproozi.
+// RootEnvironment names the environment variable that selects the root when
+// no --root is given.
+const RootEnvironment = "SPROOZI_ROOT"
+
+// DefaultRoot is ~/.sproozi.
 func DefaultRoot() (string, error) {
 	dir, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "sproozi"), nil
+	return filepath.Join(dir, ".sproozi"), nil
 }
 
 // pointerPath records an explicit non-default root for later commands.
@@ -60,10 +65,14 @@ func pointerPath() (string, error) {
 	return filepath.Join(dir, "sproozi", "root"), err
 }
 
-// ResolveRoot returns the explicit root, else the recorded root, else ~/sproozi.
+// ResolveRoot returns the explicit root, else $SPROOZI_ROOT, else the root
+// that init recorded, else ~/.sproozi.
 func ResolveRoot(explicit string) (string, error) {
 	if explicit != "" {
 		return filepath.Abs(explicit)
+	}
+	if env := strings.TrimSpace(os.Getenv(RootEnvironment)); env != "" {
+		return filepath.Abs(env)
 	}
 	if pointer, err := pointerPath(); err == nil {
 		if data, err := privatefs.ReadFile(pointer, 4096); err == nil {
@@ -76,10 +85,11 @@ func ResolveRoot(explicit string) (string, error) {
 	return DefaultRoot()
 }
 
-// RememberRoot records a non-default root so later commands find it.
+// RememberRoot records a non-default root so later commands find it. A root
+// chosen by $SPROOZI_ROOT is not recorded; the variable keeps choosing it.
 func RememberRoot(root string) error {
 	def, err := DefaultRoot()
-	if err != nil || root == def {
+	if err != nil || root == def || os.Getenv(RootEnvironment) != "" {
 		return err
 	}
 	pointer, err := pointerPath()
@@ -92,26 +102,13 @@ func RememberRoot(root string) error {
 	return privatefs.Replace(filepath.Dir(pointer), filepath.Base(pointer), []byte(root+"\n"))
 }
 
-// DefaultConfigPath keeps an existing platform configuration authoritative.
-// New installations use the local root's config.json.
+// DefaultConfigPath is the configuration of the root ResolveRoot selects.
 func DefaultConfigPath() (string, error) {
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		return "", err
-	}
-	platform := filepath.Join(dir, "sproozi", "config.json")
-	if _, err = os.Lstat(platform); err == nil {
-		return platform, nil
-	}
 	root, err := ResolveRoot("")
 	if err != nil {
 		return "", err
 	}
-	local := Layout{Root: root}.Config()
-	if _, err = os.Lstat(local); err == nil {
-		return local, nil
-	}
-	return platform, nil
+	return Layout{Root: root}.Config(), nil
 }
 
 // Installation is the provisioning journal. Each stage records what it
@@ -203,6 +200,46 @@ func (l Layout) lock() (func(), error) {
 		return nil, errors.New("another sproozi init is running for this installation")
 	}
 	return func() { _ = privatefs.UnlockClose(f) }, nil
+}
+
+// rootEntries are the names a local installation root holds. ".DS_Store" is
+// what macOS Finder leaves in any folder it shows.
+var rootEntries = []string{"config.json", "installation.json", home.ProfileFolder, "credentials", "pki", "state",
+	"docker-cli", "logs", "service.pid", "setup.lock", restartPendingFile, ".DS_Store"}
+
+// checkRoot refuses a root that holds anything other than a Sproozi
+// installation, such as a Git checkout. Setup writes credentials and keys
+// there, and removing the installation removes the whole directory, so the
+// installation must own it. A missing or empty root is accepted.
+func (l Layout) checkRoot() error {
+	entries, err := os.ReadDir(l.Root)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fail("root", err, "choose a new directory with --root PATH")
+	}
+	var foreign []string
+	for _, entry := range entries {
+		name := entry.Name()
+		if name == ".git" {
+			return fail("root", fmt.Errorf("%s is a Git checkout, not a Sproozi installation", l.Root),
+				"choose a directory of its own for the installation with --root PATH; "+
+					"setup never writes credentials or keys into a checkout")
+		}
+		if !slices.Contains(rootEntries, name) && !strings.HasPrefix(name, "config.json.backup-") {
+			foreign = append(foreign, name)
+		}
+	}
+	if len(foreign) == 0 {
+		return nil
+	}
+	shown := strings.Join(foreign[:min(len(foreign), 3)], ", ")
+	if len(foreign) > 3 {
+		shown += fmt.Sprintf(" and %d more", len(foreign)-3)
+	}
+	return fail("root", fmt.Errorf("%s holds %s, which are not part of a Sproozi installation", l.Root, shown),
+		"choose a new or empty directory for the installation with --root PATH")
 }
 
 // ensureDirectories creates the private layout. Existing directories must

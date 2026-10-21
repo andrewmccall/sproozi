@@ -34,6 +34,13 @@ type terminalFrame struct {
 // detaches locally. Partial/busy writes retain their suffix; closing the socket
 // ends only this attachment, while the home daemon and native process continue.
 func AttachTerminal(ctx context.Context, path, id string, input io.Reader, output io.Writer, sizes <-chan TerminalSize) error {
+	return AttachTerminalNotify(ctx, path, id, input, output, sizes, nil)
+}
+
+// AttachTerminalNotify is AttachTerminal that calls attached, when not nil,
+// once the service has accepted the attachment and before any output.
+func AttachTerminalNotify(ctx context.Context, path, id string, input io.Reader, output io.Writer,
+	sizes <-chan TerminalSize, attached func()) error {
 	conn, reader, err := connect(ctx, path, Request{Action: ActionAttach, ID: id})
 	if err != nil {
 		return err
@@ -53,6 +60,9 @@ func AttachTerminal(ctx context.Context, path, id string, input io.Reader, outpu
 	}
 	if err = replyError(reply); err != nil {
 		return err
+	}
+	if attached != nil {
+		attached()
 	}
 	var writer sync.Mutex
 	encoder := json.NewEncoder(conn)

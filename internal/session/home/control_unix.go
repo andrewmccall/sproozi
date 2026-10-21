@@ -44,12 +44,12 @@ func listenControl(path string) (net.Listener, error) {
 	if info, err := os.Lstat(path); err == nil {
 		// Serve prefixes these with the control socket path.
 		if info.Mode()&os.ModeSocket == 0 {
-			return nil, fmt.Errorf("the path exists and is not a socket (%s); remove it if no home daemon is "+
-				"running, then serve again", info.Mode().Type())
+			return nil, fmt.Errorf("the path exists and is not a socket (%s); remove it if no Sproozi service is "+
+				"running, then start the service again", info.Mode().Type())
 		}
 		if info.Mode().Perm()&0077 != 0 {
-			return nil, fmt.Errorf("the socket allows access by other accounts (mode %04o); remove it if no home "+
-				"daemon is running, or run chmod 600 on it, then serve again", info.Mode().Perm())
+			return nil, fmt.Errorf("the socket allows access by other accounts (mode %04o); remove it if no Sproozi "+
+				"service is running, or run chmod 600 on it, then start the service again", info.Mode().Perm())
 		}
 		// Remove only a stale socket: one that answers belongs to a live process.
 		if conn, dialErr := net.DialTimeout("unix", path, time.Second); dialErr == nil {
@@ -75,7 +75,7 @@ func listenControl(path string) (net.Listener, error) {
 
 func dialControl(ctx context.Context, path string) (net.Conn, error) {
 	// No daemon can ever listen on an over-long path; say so rather than
-	// suggesting "sproozi serve", which refuses the same directory.
+	// suggesting "sproozi service run", which refuses the same directory.
 	if problem := controlPathProblem(path); problem != "" {
 		return nil, errors.New("home: " + problem)
 	}

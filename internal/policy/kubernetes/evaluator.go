@@ -84,8 +84,13 @@ func Evaluate(
 			}
 		}
 		if name, mcp := c.MCPServerName(); mcp {
+			if _, scoped := pol.MCPServers[name]; !scoped {
+				return &Denial{Reason: DenialMCPScopeInvalid, Message: fmt.Sprintf(
+					"capability %q has no tool scope; add mcpServers.%s.tools to the policy", c, name)}
+			}
 			if _, err := mcppolicy.CompileScope(pol.MCPServers[name]); err != nil {
-				return &Denial{Reason: DenialMCPScopeInvalid, Message: "MCP tool scope is missing or invalid"}
+				return &Denial{Reason: DenialMCPScopeInvalid, Message: fmt.Sprintf(
+					"MCP tool scope mcpServers.%s is invalid: %v", name, err)}
 			}
 			if limits := pol.Budgets[c]; limits.MaxCostMicros > 0 {
 				return &Denial{Reason: DenialMCPScopeInvalid, Message: "MCP capabilities have no trusted monetary pricing"}

@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path"
@@ -60,6 +61,17 @@ type gitRunner struct {
 	limit    int64
 	excludes string
 }
+
+// ErrByteLimit matches a capture or restore that exceeds its byte limit.
+var ErrByteLimit = errors.New("workspace: byte limit exceeded")
+
+// ErrUnbornRepository matches a repository with no commit yet.
+var ErrUnbornRepository = errors.New("workspace: the repository has no commits")
+
+// ErrNotRepository matches a capture root that is not the top-level directory
+// of an ordinary Git repository.
+var ErrNotRepository = errors.New("workspace: ordinary Git directory required")
+
 type boundedBuffer struct {
 	bytes.Buffer
 	limit int64
@@ -67,7 +79,7 @@ type boundedBuffer struct {
 
 func (b *boundedBuffer) Write(p []byte) (int, error) {
 	if int64(len(p)) > b.limit-int64(b.Len()) {
-		return 0, errors.New("workspace: byte limit exceeded")
+		return 0, ErrByteLimit
 	}
 	return b.Buffer.Write(p)
 }
@@ -174,7 +186,7 @@ func readBounded(name string, max int64) ([]byte, error) {
 		return nil, err
 	}
 	if int64(len(b)) > max {
-		return nil, errors.New("workspace: byte limit exceeded")
+		return nil, ErrByteLimit
 	}
 	return b, nil
 }
@@ -299,7 +311,7 @@ func capture(ctx context.Context, root string, selectedIgnored []string, exclude
 	}
 	gi, err := sourceEntry(root, ".git")
 	if err != nil || gi == nil || !gi.IsDir() {
-		return nil, errors.New("workspace: ordinary Git directory required")
+		return nil, ErrNotRepository
 	}
 	scratch, err := privatefs.TempDir("", "sproozi-workspace-capture-")
 	if err != nil {
@@ -333,7 +345,7 @@ func capture(ctx context.Context, root string, selectedIgnored []string, exclude
 	run := func(a ...string) ([]byte, error) { return g.run(ctx, scratch, append(args, a...)...) }
 	head, err := run("rev-parse", "--verify", "HEAD")
 	if err != nil {
-		return nil, errors.New("workspace: unborn repository unsupported")
+		return nil, ErrUnbornRepository
 	}
 	branch, _ := run("symbolic-ref", "--quiet", "HEAD")
 	if err = checkIndexLayout(run); err != nil {
@@ -378,6 +390,10 @@ func capture(ctx context.Context, root string, selectedIgnored []string, exclude
 	}
 	return encode(m, bundle, files, maxBytes)
 }
+
+// mebibytes formats a byte count for an error message.
+func mebibytes(n int64) string { return fmt.Sprintf("%.1f MiB", float64(n)/(1<<20)) }
+
 func splitZero(b []byte) []string {
 	s := strings.TrimSuffix(string(b), "\x00")
 	if s == "" {
@@ -474,13 +490,18 @@ func checkObjects(ctx context.Context, g gitRunner, repo string, max int64) erro
 	if err != nil {
 		return err
 	}
+	// Sum every object, so the error can say how far over the limit it is.
 	total := int64(0)
 	for line := range strings.FieldsSeq(string(out)) {
 		n, err := strconv.ParseInt(line, 10, 64)
-		if err != nil || n < 0 || n > max-total {
-			return errors.New("workspace: expanded Git objects exceed byte limit")
+		if err != nil || n < 0 || n > math.MaxInt64-total {
+			return errors.New("workspace: invalid Git object size")
 		}
 		total += n
+	}
+	if total > max {
+		return fmt.Errorf("%w: expanded Git objects total %s, and %s remains after working files",
+			ErrByteLimit, mebibytes(total), mebibytes(max))
 	}
 	_, err = g.run(ctx, repo, "fsck", "--full", "--strict", "--no-reflogs")
 	return err
@@ -568,6 +589,14 @@ func captureWorkingFiles(run func(...string) ([]byte, error), root string, selec
 			}
 		}
 		if !match {
+			info, statErr := os.Lstat(filepath.Join(root, filepath.FromSlash(name)))
+			switch {
+			case os.IsNotExist(statErr):
+				return nil, nil, 0, fmt.Errorf("workspace: ignored file %s does not exist in the repository", name)
+			case statErr == nil && info.Mode().IsRegular():
+				return nil, nil, 0, fmt.Errorf("workspace: %s is not ignored by Git, so it is copied already; "+
+					"leave it out of --include-ignored", name)
+			}
 			return nil, nil, 0, fmt.Errorf("workspace: selection is not an ignored regular file: %s", name)
 		}
 		selected[name] = true

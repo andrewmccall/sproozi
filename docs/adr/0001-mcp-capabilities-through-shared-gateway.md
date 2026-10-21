@@ -150,3 +150,13 @@ an explicit owner for any new lifecycle or authority.
   native Kubernetes and two configured HTTPS fixture providers, denials, budgets,
   cancellation and normal cleanup. This is bounded dirty-tree evidence, not
   universal MCP compatibility or a release claim.
+
+## Later clarification (2026-10-20)
+
+Missing approved tools still fail preparation for the whole server, which keeps
+a misspelt or renamed tool from silently disappearing from an agent's list.
+The failure now names the missing tools and the tools the server offers, and
+reaches the agent and the audit log, so the administrator can correct the
+policy; `hack/mcp-tools.py` lists a server's tools before writing one. Local
+sessions give named MCP servers only to Codex placements; Claude Code
+placements on the same home start without them instead of failing.

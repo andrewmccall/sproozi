@@ -4,19 +4,33 @@ A harness runs the agent loop, conversation and tools. Sproozi supplies its
 container environment and controls external service access. This page describes
 supported clients, launch settings and completion checks.
 
-For ordinary `AgentRun` launches, `AgentRuntime.spec.clientConfig.harness`
-selects generated MCP configuration. Supported values are `codex`,
-`claude-code`, `opencode` and `hermes`. If omitted, the administrator's launch
-command prepares client configuration. Unknown values fail validation and
-contract preparation. Managed interactive sessions support a narrower set of
-clients, described below.
+Harnesses come in two tiers:
 
-| Selector | Immutable contract file | Native connection format |
-| --- | --- | --- |
-| `codex` | `codex-mcp.toml` | Codex `mcp_servers` TOML |
-| `claude-code` | `claude-mcp.json` | Claude Code `mcpServers`, HTTP transport |
-| `opencode` | `opencode-mcp.json` | OpenCode `mcp`, remote transport, OAuth disabled |
-| `hermes` | `hermes-mcp.json` | Hermes `mcp_servers`, Streamable HTTP |
+- An [AgentRun harness](../../GLOSSARY.md#agentrun-harness) is any value of
+  `AgentRuntime.spec.clientConfig.harness`. Sproozi renders its MCP
+  configuration into each run's immutable contract.
+- A [managed harness](../../GLOSSARY.md#managed-harness) is also a native kind
+  for `sproozi run`, `stop`, `resume` and `move`, described under
+  [managed interactive sessions](#managed-interactive-sessions).
+
+To add one, follow [Add a harness](../contributing/add-a-harness.md).
+
+## Harness selectors
+
+This table is the reference list; other pages link here. It matches the
+registry in [`internal/harness/registry.go`](../../internal/harness/registry.go).
+If `harness` is omitted, the administrator's launch command prepares client
+configuration. Unknown values fail validation and contract preparation.
+
+| Selector | Managed | Immutable contract file | Native connection format |
+| --- | --- | --- | --- |
+| `codex` | yes | `codex-mcp.toml` | Codex `mcp_servers` TOML |
+| `claude-code` | yes | `claude-mcp.json` | Claude Code `mcpServers`, HTTP transport |
+| `opencode` | no | `opencode-mcp.json` | OpenCode `mcp`, remote transport, OAuth disabled |
+| `hermes` | no | `hermes-mcp.json` | Hermes `mcp_servers`, Streamable HTTP |
+
+Every harness needs an MCP client: there is no harness without the `sproozi`
+control connection ([ADR 0039](../adr/0039-one-harness-registry-and-the-mcp-requirement.md)).
 
 Requested named `mcp.<server>` connections appear, followed by the `sproozi`
 control connection, which every selected harness receives. Each points to the

@@ -6,11 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -23,7 +21,7 @@ import (
 	"github.com/andrewmccall/sproozi/internal/project"
 	runtimedocker "github.com/andrewmccall/sproozi/internal/runtime/docker"
 	"github.com/andrewmccall/sproozi/internal/session"
-	"github.com/andrewmccall/sproozi/internal/session/profile"
+	"github.com/andrewmccall/sproozi/internal/session/remote"
 	"github.com/andrewmccall/sproozi/internal/work"
 	"github.com/andrewmccall/sproozi/internal/workspace"
 	"github.com/google/uuid"
@@ -58,7 +56,11 @@ type Service struct {
 	// legacySwept records that one recovery of reservations from before
 	// leases has succeeded; until then each sweep repeats it.
 	legacySwept atomic.Bool
-	remotes     []*profile.Client
+	// remoteMu guards remotes, workSources and the remote entries of
+	// placements, which a first move or pull through a context adds.
+	remoteMu    sync.RWMutex
+	remotes     map[string]*remote.Client
+	discover    func(context.Context, remote.Selection) (remote.Executor, error)
 	closeOnce   sync.Once
 	closeError  error
 	workSources map[string]WorkSource
@@ -88,10 +90,12 @@ type Status struct {
 	Phase          string               `json:"phase"`
 	Placement      string               `json:"placement,omitempty"`
 	// InitialStage repeats Phase for existing clients.
-	InitialStage string          `json:"initialStage"`
-	ThreadID     string          `json:"threadId,omitempty"`
-	Deadline     time.Time       `json:"deadline"`
-	Session      *session.Record `json:"session,omitempty"`
+	InitialStage string    `json:"initialStage"`
+	ThreadID     string    `json:"threadId,omitempty"`
+	Deadline     time.Time `json:"deadline"`
+	// Exit describes a harness that exited on its own and stopped the session.
+	Exit    *session.Exit   `json:"exit,omitempty"`
+	Session *session.Record `json:"session,omitempty"`
 }
 
 // executionStatus reports an execution and its current visit: the active one,
@@ -170,12 +174,18 @@ func (s *Service) createExecution(first session.Launch, owner string, input func
 //
 // kind selects a configured local harness; empty selects the primary one. A
 // session keeps its harness; another harness starts a separate session.
-func (s *Service) Start(ctx context.Context, id, operationID, path string, kind harness.NativeKind, includeIgnored []string) (Status, error) {
+//
+// harnessArgs are the user's own arguments for the stock harness, kept with
+// this execution and passed to each of its visits.
+func (s *Service) Start(ctx context.Context, id, operationID, path string, kind harness.NativeKind, includeIgnored, harnessArgs []string) (Status, error) {
 	if err := workspace.ValidateIgnoredPaths(includeIgnored); err != nil {
 		return Status{}, err
 	}
 	if kind == "" {
 		kind = s.config.Local.Harness
+	}
+	if err := harness.ValidateNativeArgs(kind, harnessArgs); err != nil {
+		return Status{}, rejectedError("home: " + err.Error())
 	}
 	local, err := s.localFor(kind)
 	if err != nil {
@@ -184,9 +194,13 @@ func (s *Service) Start(ctx context.Context, id, operationID, path string, kind 
 	if !work.CanonicalID(id) || !work.CanonicalID(operationID) || !filepath.IsAbs(path) {
 		return Status{}, errors.New("home: UUIDs and absolute stopped workspace required")
 	}
+	if c, catalogErr := s.readCatalog(id); catalogErr == nil && c.Source != ReservedHome {
+		return Status{}, rejectedError(fmt.Sprintf("home: start intent conflicts with retained launch; %s was "+
+			"not created by start, see \"sproozi status %s\"", id, id))
+	}
 	r, err := s.coordinator.Inspect(id)
 	if os.IsNotExist(err) {
-		r, err = s.createWorkspaceExecution(ctx, id, operationID, path, local, includeIgnored)
+		r, err = s.createWorkspaceExecution(ctx, id, operationID, path, local, includeIgnored, harnessArgs)
 	}
 	if err != nil {
 		return Status{}, err
@@ -200,23 +214,112 @@ func (s *Service) Start(ctx context.Context, id, operationID, path string, kind 
 		return Status{}, rejectedError(fmt.Sprintf("home: start intent conflicts with retained launch; %s was "+
 			"started with harness %s: start a new session for %s", id, first.Harness, kind))
 	}
-	if first.OperationID != operationID || !slices.Equal(first.IncludeIgnored, includeIgnored) {
+	if first.OperationID != operationID || !slices.Equal(first.IncludeIgnored, includeIgnored) ||
+		!slices.Equal(first.HarnessArgs, harnessArgs) {
 		// A new operation conflicts again; only the retained one continues it.
 		return Status{}, rejectedError(fmt.Sprintf("home: start intent conflicts with retained launch; %s was "+
-			"started with operation %s: to continue it, repeat the original start command with --operation %s, "+
-			"or run \"sproozi cancel %s\" to revoke and force-stop its current execution", id, first.OperationID, first.OperationID, id))
+			"started with operation %s: to continue it, repeat the original run command with --operation %s, "+
+			"or run \"sproozi cancel %s\" to stop it now", id, first.OperationID, first.OperationID, id))
+	}
+	// Catalogue the session before its first visit starts, so stop, cancel
+	// and resume address it like any other home session.
+	if err = s.catalogStarted(r); err != nil {
+		return Status{}, err
 	}
 	return s.startFirstVisit(ctx, r)
 }
 
-func (s *Service) createWorkspaceExecution(ctx context.Context, id, operationID, path string, local runtimedocker.PlacementConfig, includeIgnored []string) (session.Record, error) {
+// catalogStarted records a session created by start in the home catalogue,
+// once. Its first execution shares the session UUID. A started execution that
+// is already idle (catalogued late, after an interruption) is recorded as
+// stopped, ready to resume.
+func (s *Service) catalogStarted(r session.Record) error {
+	unlock, err := s.lockSession(r.ID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return s.catalogStartedLocked(r)
+}
+
+// catalogStartedLocked is catalogStarted for a caller holding the session lock.
+func (s *Service) catalogStartedLocked(r session.Record) error {
+	existing, err := s.readCatalog(r.ID)
+	if err == nil {
+		if existing.Source != ReservedHome {
+			return errors.New("home: session UUID belongs to an imported session")
+		}
+		return nil
+	}
+	if !os.IsNotExist(err) {
+		return err
+	}
+	first := r.Operations[0].Launch
+	c := localSession{Version: 1, ID: r.ID, Source: ReservedHome, Operation: first.OperationID, Claimed: true,
+		Original: work.Export{ID: r.ID, Harness: r.Harness, OperationID: first.OperationID, Claimed: true},
+		Current:  r.ID, Executions: []string{r.ID}}
+	if r.Phase == session.PhaseIdle && r.CancelOperation == "" {
+		if c.Committed, err = s.lastStop(r); err != nil {
+			return err
+		}
+		if c.Committed.CheckpointDigest != "" {
+			if err = s.retainCatalogArtifact(c.Committed.Checkpoint, c.Committed.CheckpointDigest); err != nil {
+				return err
+			}
+		}
+		c.Current = ""
+	}
+	return s.saveCatalog(c)
+}
+
+func (s *Service) createWorkspaceExecution(ctx context.Context, id, operationID, path string, local runtimedocker.PlacementConfig, includeIgnored, harnessArgs []string) (session.Record, error) {
 	first := session.Launch{Harness: local.Harness, ExecutionID: id, OperationID: operationID,
 		AllocationID: uuid.NewString(), Epoch: 1, Placement: local.Name,
 		InstructionDigest: local.InstructionDigest, IncludeIgnored: slices.Clone(includeIgnored),
-		Deadline: time.Now().Add(s.duration).UTC(), Allowances: maps.Clone(s.config.Allowances)}
+		HarnessArgs: slices.Clone(harnessArgs),
+		Deadline:    time.Now().Add(s.duration).UTC(), Allowances: harnessAllowances(local.Harness, s.config.Allowances)}
 	return s.createExecution(first, "", func() ([]byte, error) {
-		return workspace.CaptureLocal(ctx, path, includeIgnored, s.config.Local.MaxCheckpointBytes)
+		limit := s.config.Local.MaxCheckpointBytes
+		data, err := workspace.CaptureLocal(ctx, path, includeIgnored, limit)
+		if err != nil && ctx.Err() == nil {
+			// Nothing is recorded yet, so repeating the request cannot help.
+			return nil, rejectedError(workspaceProblem(path, err, limit))
+		}
+		return data, err
 	})
+}
+
+// repositoryAbove is the nearest directory above path that holds .git, or "".
+func repositoryAbove(path string) string {
+	for dir := filepath.Dir(path); dir != filepath.Dir(dir); dir = filepath.Dir(dir) {
+		if _, err := os.Lstat(filepath.Join(dir, ".git")); err == nil {
+			return dir
+		}
+	}
+	return ""
+}
+
+// workspaceProblem explains why start cannot capture a workspace and what
+// would let it.
+func workspaceProblem(path string, err error, limit int64) string {
+	if _, statErr := os.Lstat(path); os.IsNotExist(statErr) {
+		return fmt.Sprintf("workspace: %s does not exist; run it on the top-level directory of a Git repository", path)
+	}
+	switch {
+	case errors.Is(err, workspace.ErrNotRepository):
+		if top := repositoryAbove(path); top != "" {
+			return fmt.Sprintf("%v; %s is inside the repository at %s; try: sproozi run %s", err, path, top, top)
+		}
+		return fmt.Sprintf("%v; %s must be the top-level directory of a Git repository, holding its .git directory "+
+			"(linked worktrees and submodules are unsupported)", err, path)
+	case errors.Is(err, workspace.ErrUnbornRepository):
+		return fmt.Sprintf("%v; make a first commit in %s, then run again", err, path)
+	case errors.Is(err, workspace.ErrByteLimit):
+		return fmt.Sprintf("%v; local.maxCheckpointBytes is %.1f MiB: raise it in home's config.json, up to %d MiB, "+
+			"keeping local.retainedBytes at least twice it, then restart the service", err, float64(limit)/(1<<20),
+			MaxCheckpointBytes>>20)
+	}
+	return err.Error()
 }
 
 // startFirstVisit prepares and activates a retained first visit that has not
@@ -235,14 +338,15 @@ func (s *Service) startFirstVisit(ctx context.Context, r session.Record) (Status
 	return executionStatus(r), nil
 }
 
-// moveDestinationProblem rejects a destination that names no configured
-// placement, listing the ones that do.
+// moveDestinationProblem rejects a destination that names no known
+// placement, with the commands that choose one; placement names are internal.
 func (s *Service) moveDestinationProblem(destination string) error {
-	if s.placements[destination] != nil {
+	if s.placement(destination) != nil {
 		return nil
 	}
-	return rejectedError(fmt.Sprintf("home: move destination %q is not a configured placement; use one of: %s",
-		destination, strings.Join(slices.Sorted(maps.Keys(s.placements)), ", ")))
+	return rejectedError(fmt.Sprintf("home: this service cannot move a session to %q; run "+
+		"\"sproozi move ID --local\" to bring it to this machine, or \"sproozi move ID --remote\" "+
+		"(add --context for another cluster)", destination))
 }
 
 func (s *Service) moveExecution(ctx context.Context, id, operationID, destination string) (Status, error) {
@@ -257,11 +361,35 @@ func (s *Service) moveExecution(ctx context.Context, id, operationID, destinatio
 		return Status{}, err
 	}
 	destination = s.localDestination(r, destination)
+	if err = s.remoteMoveProblem(r, destination); err != nil {
+		return Status{}, err
+	}
 	if err = s.executionProjectApproval(r); err != nil {
 		return Status{}, err
 	}
 	r, err = s.coordinator.Move(ctx, id, operationID, destination)
 	return executionStatus(r), err
+}
+
+// remoteMoveProblem refuses moving to a remote placement an execution that
+// carries harness arguments, which only local Docker visits apply, or a
+// stopped one that kept no conversation, which can only start again from its
+// workspace here.
+func (s *Service) remoteMoveProblem(r session.Record, destination string) error {
+	for _, stack := range s.stacks {
+		if stack.config.Name == destination {
+			return nil
+		}
+	}
+	switch {
+	case len(r.HarnessArgs) != 0:
+		return rejectedError(fmt.Sprintf("home: %s was started with harness arguments, which apply only at home; "+
+			"it cannot move to %s", r.ID, destination))
+	case r.Active == nil && r.Checkpoint.Path == "":
+		return rejectedError(fmt.Sprintf("home: %s has no saved conversation yet; finish a turn before moving it to %s, "+
+			"or continue it at home", r.ID, destination))
+	}
+	return nil
 }
 
 // localDestination maps any local placement name to the local placement of
@@ -306,7 +434,7 @@ func (s *Service) attachExecution(ctx context.Context, id string, input io.Reade
 	if r.Active == nil || r.Phase != session.PhaseActive {
 		return errors.New("home: native attachment is unavailable")
 	}
-	terminal, ok := s.placements[r.Active.Launch.Placement].(session.TerminalPlacement)
+	terminal, ok := s.placement(r.Active.Launch.Placement).(session.TerminalPlacement)
 	if !ok {
 		return errors.New("home: native attachment is unavailable")
 	}

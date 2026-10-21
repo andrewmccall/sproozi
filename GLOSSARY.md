@@ -13,6 +13,85 @@ or Hermes. The harness runs the conversation and its tool calls; Sproozi
 supplies the environment and access. Selected by `clientConfig.harness`.
 Also seen as: client, native client.
 
+### AgentRun harness
+
+A harness that `AgentRuntime.spec.clientConfig.harness` can select. Sproozi
+renders its MCP configuration, including the `sproozi` control connection,
+into each run's contract. Every registered harness is one; see the
+[harness selectors](docs/reference/harnesses.md#harness-selectors).
+
+### Managed harness
+
+An AgentRun harness that is also a native kind for managed sessions
+(`sproozi run`, `stop`, `resume`, `move`): Sproozi supervises its terminal,
+observes completed turns and checkpoints its conversation. Codex and Claude
+Code. Also seen as: native kind, native harness.
+
+### Run contract
+
+The immutable ConfigMap Sproozi writes for each AgentRun and mounts read-only
+at `/etc/sproozi/contract`: the run's task, its harness's MCP configuration,
+the Sproozi integration files and its launch files. Also seen as: contract,
+agent contract.
+
+### Launch file
+
+A file the [harness registry](docs/contributing/add-a-harness.md) adds to the
+run contract for the harness's launch command, such as `opencode-launch.py` or
+an MCP bridge.
+
+### MCP bridge
+
+A launch file that gives a harness without its own MCP client the run's MCP
+connections, including `sproozi`. See
+[ADR 0039](docs/adr/0039-one-harness-registry-and-the-mcp-requirement.md).
+
+### Completion adapter
+
+A launch file that runs a harness's client and sets the `agent` container's
+exit status from the client's native result, for a client that can exit zero
+after a failure, such as `opencode-launch.py` and `hermes-launch.py`. It may
+also write the termination-file envelope. See
+[completion and result](docs/contributing/add-a-harness.md#completion-and-result).
+
+### Termination-file envelope
+
+The small JSON document, `{"version":"sproozi.run-result/v1","runUID":...,"result":{...}}`,
+an `agent` container writes to its termination message file to return a final
+answer for its AgentRun. See
+[retained final answers](docs/reference/agent-contract.md#retained-final-answers).
+
+### Inspection CA
+
+The private certificate authority the gateway uses to issue certificates for
+the outside services it inspects. Sandboxes trust it through their trust
+bundle, so their TLS connections terminate at the gateway. Also seen as:
+gateway CA.
+
+### Guard test
+
+A Go test that compares two places that must agree, such as the harness
+registry and the CRD enum, and fails naming the file to change. The
+[bridge hook](#bridge-hook) is one.
+
+### Bridge hook
+
+The guard test that runs each registered [MCP bridge](#mcp-bridge) against a
+fake MCP server and requires it to load every connection, call `diagnose` and
+refuse to start without `sproozi`. See
+[Add a harness](docs/contributing/add-a-harness.md#writing-an-mcp-bridge).
+
+### Managed wiring
+
+The per-kind code a [managed harness](#managed-harness) needs outside the
+registry: its supervisor adapter, checkpoint format and native configuration
+check. Guard tests require each one.
+
+### Envtest
+
+The controller-runtime test environment that runs a real Kubernetes API server
+and etcd without a cluster; the `test/` integration tests use it.
+
 ### Sandbox
 
 The isolated environment a harness runs in. On Kubernetes it is a disposable
@@ -50,7 +129,7 @@ authority. Also seen as: managed harness configuration.
 ### Profile
 
 Your own instructions and skills, in the `profile` folder beside the home
-configuration (`~/sproozi/profile` for a local installation), that every
+configuration (`~/.sproozi/profile` for a local installation), that every
 managed Codex and Claude Code session receives after the Sproozi integration.
 Like the integration, it is guidance, not authority. See
 [Profile](docs/reference/profile.md). Also seen as: shared agent files, agents
@@ -78,6 +157,49 @@ A named kind of access a run can request, such as `kubernetes.read`,
 Policy decides whether it is allowed and sets its limits. See
 [permissions and capabilities](docs/reference/permissions-and-capabilities.md).
 
+### Semantic tier
+
+The most precise of the gateway's three kinds of check. The gateway
+understands the service and checks each resource and action, such as reading
+Pods in one namespace or opening a pull request from the run's own branch.
+Kubernetes reads, GitHub pull requests and the native Kubernetes MCP tool use
+it. The tiers describe what the gateway understands, not levels of permission. See [capabilities and gateways](docs/explanations/capabilities-and-gateways.md#mental-model).
+
+### Protocol tier
+
+The middle kind of gateway check. The gateway understands the protocol but not
+the service: for configured MCP servers it allows only the tools the policy
+names, with their argument restrictions, but cannot know what a tool does. See
+[configured MCP](docs/reference/configured-mcp.md).
+
+### Destination tier
+
+The least precise kind of gateway check: the gateway allows HTTPS to an exact
+host and port from an egress profile and does not check what is sent.
+*Destination-tier fallback* is reaching a host through such a profile when no
+stronger check applies; the gateway refuses it for hosts a stronger tier owns,
+such as a registered MCP provider, so a denied MCP call cannot be made directly.
+
+### Provider authority
+
+The host and port of a registered MCP server, such as `mcp.deepwiki.com:443`,
+written one canonical way: lower-case, internationalized names in their ASCII
+(IDNA) form and an explicit port. The gateway reserves it so only the MCP
+bridge reaches that server.
+
+### GitOps
+
+Deploying from files kept in a Git repository: a tool such as Argo CD or Flux
+applies whatever the repository holds, so changes go through Git rather than
+`kubectl` commands. Where these docs change an installed object with
+`kubectl`, a GitOps user makes the same change in their files instead.
+
+### Overlay
+
+A kustomize directory that starts from other manifests and changes them, for
+example to set a namespace, an image or a ConfigMap's contents, without
+editing the originals. The release's `quickstart-*` directories are overlays.
+
 ### Budget
 
 A usage limit for one capability in one run, set in `AgentPolicy.spec.budgets`:
@@ -91,7 +213,7 @@ ceilings; see
 ### Allowance
 
 The total usage limit, per capability, granted to one execution and shared by
-all of its visits. For local executions it comes from the home daemon's
+all of its visits. For local executions it comes from the service's
 `allowances` configuration. A move doesn't refill it; a new execution gets a
 fresh one.
 
@@ -205,11 +327,11 @@ that carries it, up to this deadline. See
 ### Drain
 
 What a gateway does when it stops on purpose: on SIGTERM the shared gateway,
-and the home daemon when it closes, refuses new model calls with a 503
+and the service when it closes, refuses new model calls with a 503
 (`gateway_stopping` in the OpenAI body; the Anthropic body has the type
 `server_error` and no code), ends every call in flight with `endReason`
 `gateway_restart` so each settles its reservation, and waits up to 30 seconds
-(10 for the home daemon) before it exits. A call the provider had received is
+(10 for the service) before it exits. A call the provider had received is
 charged as interrupted, usually an [estimated charge](#estimated-charge). A
 call still waiting for its budget, not yet fully written or still waiting for
 its response headers gets the same 503; the first two are free. Anything still unsettled is left as
@@ -295,7 +417,7 @@ Its ID is `executionId`. Also seen as: Sproozi execution.
 
 ### Placement
 
-Where an execution runs: local Docker, managed by the home daemon, or a
+Where an execution runs: local Docker, managed by this machine's service, or a
 Kubernetes cluster reached through a remote executor.
 
 ### Visit
@@ -304,6 +426,21 @@ One stay of an execution at one placement. Each `move` ends one visit and
 starts another, with fresh admission, gateway access and a new sandbox. The
 execution's deadline and allowance carry across visits. Its ID is
 `allocationId`. Also seen as: allocation.
+
+### Turnless visit
+
+A first visit whose harness never started a conversation: no prompt was
+submitted, or, for Claude Code, every prompt ended on a provider error before
+any turn completed. `stop` ends it without waiting for a turn and keeps no
+checkpoint; the session keeps the workspace it started from. See
+[ADR 0032](docs/adr/0032-stopping-a-visit-with-no-native-conversation.md).
+
+### Harness arguments
+
+The user's own arguments for the stock harness, given after `--` on `start` or
+`resume`. They belong to that execution, not the session. Sproozi refuses the
+ones that would replace a flag it controls. See
+[pass arguments to the harness](docs/reference/session-commands.md#agent-arguments).
 
 ### Writer
 
@@ -334,10 +471,10 @@ commit with a clean checkout and a fresh conversation. See
 ### Remote work
 
 A session that a remote executor runs in a Kubernetes sandbox and keeps in its
-catalogue after the sandbox stops. It starts from `sproozi run --executor` or a
+catalogue after the sandbox stops. It starts from `sproozi run --remote` or a
 coordinator's request. Once the writer has stopped, usage is finalized and the
 checkpoint is stored, its phase is `retained`: it can seed fresh work at its
-workspace revision, or be pulled to the home daemon and resumed there. See
+workspace revision, or be pulled to this machine and resumed there. See
 [Run a task remotely, then resume it locally](docs/guides/portable-workflows.md).
 Also seen as: retained work, work session.
 
@@ -351,37 +488,35 @@ template, capability limits and explicit membership. See
 
 ### Owner
 
-The home daemon or remote executor whose catalogue holds a session. Only the
-owner starts, stops or hands over that session's executions. The owner is not
-the placement: the home daemon stays the owner when `move` runs an execution in
-Kubernetes. A successful `pull` transfers ownership from a remote executor to
-the home daemon, one way. Catalogue rows report it as `ownership`: `home`
-when the home daemon owns the session, `executor` when the remote executor the
-row came from owns it, or `source` while a pull is unacknowledged. After a
-pull, the remote executor still lists a read-only mirror row with
-`"executor": "engineering"` (its name) and `"ownership": "home"`. See
-[ownership values](docs/reference/session-commands.md#ownership-values).
+This machine's service or a remote executor: whichever's catalogue holds a
+session. Only the owner starts, stops or hands over that session's executions.
+The owner is not the placement: this machine stays the owner when `move
+--remote` runs an execution in Kubernetes. A successful `pull` transfers
+ownership from a remote executor to this machine, one way. Catalogue rows
+report it as `ownership`: `local` when this machine owns the session,
+`cluster` when the remote executor the row came from owns it, or `pulling`
+while a pull is unacknowledged. After a pull, the remote executor still lists a
+read-only row in phase `pulled` with `"ownership": "local"`. See
+[status and listing output](docs/reference/session-commands.md#status-and-listing-output).
 An owner lock is the lock on an owner's state directory that stops a second
 process using it.
 
-### Home daemon
+### Service
 
-The `sproozi serve` process on your own machine. It owns local Docker
-placements, their gateway and accounting, and the sessions you have pulled.
-One machine appears under three names: `docker` is home's executor name
-(`--executor docker`, and `"executor": "docker"` in `sessions` output); `home`
-is the daemon itself (`"ownership": "home"`); and `local.name`, `local` in the
-starter configuration, is home's local placement for `move --to`. `docker`
-and `home` are reserved, and neither `home` nor `local.name` is an executor.
-Also seen as: home (in CLI output and messages; `--executor home` is
-rejected), home service.
+The background `sproozi service run` process on your own machine, which
+`sproozi service start` and the session commands start for you. It owns local
+Docker placements, their gateway and accounting, and the sessions you have
+pulled. Commands and output call this machine `local`: `move --local`,
+`"executor": "local"`, `"ownership": "local"` and `"placement": "local"`.
+Also seen as: home daemon, home, home service (in code, configuration keys and
+older records).
 
 ### Local installation
 
-The private directory, `~/sproozi` by default, that `sproozi init --local`
-provisions for the home daemon: its configuration, provider credentials,
-certificate authority, journals and profile. See
-[local installation](docs/reference/local-installation.md). Also seen as:
+The private directory, `~/.sproozi` by default, that `sproozi init`
+sets up for the service: its configuration, provider credentials, certificate
+authority, journals and profile. `--root` or `SPROOZI_ROOT` chooses another.
+See [local installation](docs/reference/local-installation.md). Also seen as:
 installation root.
 
 ### Trust generation
@@ -394,57 +529,55 @@ generation and retires the old one only after every consumer has the new one.
 
 The optional `/certificates` program in a Kubernetes installation. It keeps the
 gateway's private CA, serving certificate and immutable trust ConfigMaps
-without cert-manager. See [Kubernetes installation](docs/guides/install-kubernetes.md#maintain-gateway-certificates).
+without cert-manager. See [Kubernetes installation](docs/reference/gateway-certificates.md).
 
 ### Remote executor
 
-The `session-profile` program. It serves one administrator-approved Kubernetes
-placement, holds that cluster's credentials and hosts a catalogue of remote
-work. Its work token (`workTokenFile`) is the bearer token a coordinator uses
-for `/work/mcp`; it differs from the home principal token (`tokenFile`), which
-also permits pull, and from the task service's token. Also seen as: profile
-service, remote profile, fixed remote profile, work owner, native work owner, remote work
+The `session-profile` program, running in a cluster. It serves one
+administrator-approved Kubernetes placement, holds that cluster's credentials
+and hosts a catalogue of remote work. A namespace holds one, found by the label
+`sproozi.com/remote-executor` on its Service. Its placement name is its name in
+commands and session rows. The CLI and this machine's service reach it through
+a [context](#context); it accepts a caller as the home principal when Kubernetes
+RBAC allows that identity to `use` it. Hermes uses the separate static work
+token (`workTokenFile`) for `/work/mcp`. Also seen as: profile service, remote
+profile, fixed remote profile, work owner, native work owner, remote work
 service.
 
 ### Home principal token
 
-The bearer token a home daemon presents to a remote executor. The profile
-service reads it from its `tokenFile`, and the home configuration names the
-same secret in `remote.NAME.tokenFile` or `workSources.NAME.tokenFile`. It
-permits remote work, moves and pull, unlike the work token. It needs at least
-32 non-whitespace characters. Also seen as: home token, principal token,
-profile principal token, profile token, remote token.
+The bearer token this machine's service and CLI present to a remote executor:
+the token of the [context](#context)'s ServiceAccount, usually `sproozi-cli`.
+The executor checks it with a TokenReview and a SubjectAccessReview. It permits
+remote work, moves and pull, unlike the work token. Also seen as: home token,
+principal token, profile principal token, profile token, remote token.
+
+### Context
+
+A kubeconfig context through which the CLI and this machine's service reach a
+remote executor: the cluster, the identity signing in to it and the namespace
+holding the executor. Without `--context`, the context named `sproozi`, which
+signs in as the ServiceAccount `sproozi-cli`; `--context` takes a context name
+or a path to a kubeconfig file, whose current context is used, and
+`--namespace` overrides the context's namespace. The service records each
+executor it reaches, with the files, context and namespace, so it keeps
+reaching it after the CLI exits. See
+[remote executor access](docs/reference/remote-executors.md). Also seen as:
+kube context, kubeconfig context, Kubernetes context.
 
 ### Executor
 
-The owner a CLI command addresses, selected with `--executor NAME`. `docker`
-means the home daemon; any other name is a remote executor from the home
-configuration. The `ownership` value `executor` in catalogue rows means the
-remote kind: a remote executor owns the session, never the home daemon
-addressed by `--executor docker`. `pull --from NAME` also names an owner, the
-one giving the session up, while `move --to NAME` names a placement, not an owner. The
-configuration's `local.name` names home's local placement, which `move --to`
-uses; it is not an executor, and home is addressed as `--executor docker` or by
-omitting `--executor`. Executor names are lowercase DNS labels of 1 to 63
-characters; `docker`, `home` and the configured `local.name` are reserved. See
-[why the commands use different flags](docs/guides/session-mobility.md#why-the-commands-use-different-flags).
-
-### Work source
-
-An entry in the home configuration's `workSources` map: a connection to a
-remote executor that `run`, `sessions`, `status`, `cancel`, `recover` and
-`pull` use but `move --to` does not, because it is not a placement. Entries
-take the same fields and name rules as `remote` entries. When both maps hold
-the same name, those commands use the `workSources` entry and `move --to` uses
-the `remote` one. `sproozi init` leaves the map out; add it only for an
-executor reached through a separate connection. See the
-[configuration reference](cmd/sproozi/README.md#configuration-reference).
+The owner whose catalogue a command reads. `local` is this machine's service;
+any other name is a remote executor. Remote commands select one with
+`--context` (a kubeconfig context or file) and `--namespace`. Executor names
+are lowercase DNS labels of 1 to 63 characters. See
+[remote commands](docs/reference/session-commands.md#remote-commands).
 
 ### Catalogue
 
-The list of sessions that one owner holds. `sproozi sessions` combines the
-catalogues of the home daemon and configured executors. See
-[session commands](docs/reference/session-commands.md#read-status-and-discovery).
+The list of sessions that one owner holds. `sproozi sessions` combines this
+machine's catalogue with each cluster's. See
+[status and listing output](docs/reference/session-commands.md#status-and-listing-output).
 
 ### Coordinator
 

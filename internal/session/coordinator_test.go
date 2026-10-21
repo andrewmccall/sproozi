@@ -6,9 +6,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -143,6 +145,111 @@ func TestFirstVisitFromWorkspaceBindsGenuineThreadAtFirstStop(t *testing.T) {
 	}
 }
 
+// A visit with no native conversation stops without a checkpoint; the
+// execution keeps its retained workspace, and the next visit starts again from
+// it with the same harness arguments until a later stop binds the thread.
+func TestTurnlessStopKeepsWorkspaceAndRestartsFromIt(t *testing.T) {
+	t.Parallel()
+	c, dir, local, remote, start := setup(t)
+	first := start.Source
+	first.ExecutionID, first.OperationID, first.AllocationID = uuid.NewString(), uuid.NewString(), uuid.NewString()
+	first.ThreadID, first.CheckpointDigest = "", ""
+	first.HarnessArgs = []string{"--search"}
+	if _, err := c.Create(first, []byte("captured git workspace"), ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Recover(t.Context(), first.ExecutionID); err != nil {
+		t.Fatal(err)
+	}
+	local.turnless = true
+	r, err := c.Finalize(t.Context(), first.ExecutionID, uuid.NewString())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Phase != PhaseIdle || r.Active != nil || r.ThreadID != "" || r.hasCheckpoint() || len(r.Visits) != 1 ||
+		r.Visits[0].CheckpointDigest != "" || r.Workspace == "" {
+		t.Fatalf("turnless stop = %+v", r)
+	}
+	if r.Remaining[testCapability].Units.Value != r.Ceiling[testCapability].Units.Value-visitUnits {
+		t.Fatalf("turnless visit usage not charged: %+v", r.Remaining)
+	}
+	r, err = c.Move(t.Context(), first.ExecutionID, uuid.NewString(), testLocal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Phase != PhaseActive || r.Active.Launch.ThreadID != "" || r.Active.Launch.CheckpointDigest != "" ||
+		r.Active.Launch.Epoch != 2 || !slices.Equal(r.Active.Launch.HarnessArgs, first.HarnessArgs) {
+		t.Fatalf("restart from workspace = %+v", r.Active)
+	}
+	local.turnless = false
+	if r, err = c.Move(t.Context(), first.ExecutionID, uuid.NewString(), testRemote); err != nil {
+		t.Fatal(err)
+	}
+	if r.ThreadID != testThread || !r.hasCheckpoint() || remote.activated != 1 {
+		t.Fatalf("later stop did not bind the conversation: %+v", r)
+	}
+	if err = c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(dir, map[string]Placement{testLocal: local, testRemote: remote}, testMaxCheckpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = reopened.Close() }()
+	if _, err = reopened.Inspect(first.ExecutionID); err != nil {
+		t.Fatalf("journal with a turnless visit did not reload: %v", err)
+	}
+	// A visit from the retained workspace cannot follow a kept checkpoint.
+	r, err = reopened.Inspect(first.ExecutionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := r
+	stale.Active = &Visit{Launch: r.Visits[0].Launch, Incarnation: r.Active.Incarnation}
+	stale.Active.Launch.AllocationID, stale.Active.Launch.Epoch = uuid.NewString(), r.Epoch
+	stale.Active.Launch.Allowances = cloneAllowances(r.Remaining)
+	if validateRecord(stale) == nil {
+		t.Fatal("workspace visit accepted after a kept checkpoint")
+	}
+}
+
+// A stop that gave up waiting for the native turn stays pending with the
+// writer running; repeating it finishes once the turn completes.
+func TestStopWaitingForTurnStaysStopping(t *testing.T) {
+	t.Parallel()
+	c, _, local, _, start := setup(t)
+	first := start.Source
+	first.ExecutionID, first.OperationID, first.AllocationID = uuid.NewString(), uuid.NewString(), uuid.NewString()
+	first.ThreadID, first.CheckpointDigest = "", ""
+	if _, err := c.Create(first, []byte("captured git workspace"), ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Recover(t.Context(), first.ExecutionID); err != nil {
+		t.Fatal(err)
+	}
+	start.Source = first
+	local.pendingTurn = true
+	op := uuid.NewString()
+	r, err := c.Finalize(t.Context(), start.Source.ExecutionID, op)
+	if !errors.Is(err, harness.ErrNativeTurnPending) || r.Phase != PhaseStopping || r.Active == nil {
+		t.Fatalf("pending stop: %+v %v", r.Phase, err)
+	}
+	if r, err = c.Inspect(start.Source.ExecutionID); err != nil || r.Phase != PhaseStopping {
+		t.Fatalf("retained pending stop: %+v %v", r.Phase, err)
+	}
+	// Another stop request, with its own operation, continues the same stop.
+	if _, err = c.Finalize(t.Context(), start.Source.ExecutionID, uuid.NewString()); !errors.Is(err, harness.ErrNativeTurnPending) {
+		t.Fatalf("second stop did not continue the pending one: %v", err)
+	}
+	local.pendingTurn = false
+	if r, err = c.Finalize(t.Context(), start.Source.ExecutionID, uuid.NewString()); err != nil || r.Phase != PhaseIdle {
+		t.Fatalf("repeated stop: %+v %v", r.Phase, err)
+	}
+	if r.Operations[len(r.Operations)-1].ID != op {
+		t.Fatal("repeated stop added an operation instead of finishing the pending one")
+	}
+}
+
 type fakePlacement struct {
 	data                                  []byte
 	digest                                string
@@ -154,8 +261,12 @@ type fakePlacement struct {
 	unknownStop                           bool
 	missingUsage                          bool
 	unsealed                              bool
-	corruptReceipt                        func(*Receipt)
-	charge                                budget.TrustedUsage
+	// turnless stops a visit from the retained workspace with no native
+	// conversation: no thread and no checkpoint.
+	turnless       bool
+	pendingTurn    bool
+	corruptReceipt func(*Receipt)
+	charge         budget.TrustedUsage
 }
 
 func newPlacement(data []byte, digest string) *fakePlacement {
@@ -221,6 +332,9 @@ func (p *fakePlacement) Stop(_ context.Context, l Launch, i Incarnation) (Stoppe
 	if p.unknownStop {
 		return Stopped{}, errors.New("unreachable placement")
 	}
+	if p.pendingTurn {
+		return Stopped{}, fmt.Errorf("%w for the current turn", harness.ErrNativeTurnPending)
+	}
 	o, ok := p.records[l.AllocationID]
 	if !ok || o.Incarnation != i || !SameLaunch(o.Launch, l) {
 		return Stopped{}, errors.New("stale execution")
@@ -240,6 +354,9 @@ func (p *fakePlacement) Stop(_ context.Context, l Launch, i Incarnation) (Stoppe
 		r = nil
 	}
 	stopped := Stopped{Launch: l, Incarnation: i, ActualStopped: true, ThreadID: cmp.Or(l.ThreadID, testThread), Receipt: r, Checkpoint: p.data, CheckpointDigest: p.digest}
+	if p.turnless && l.ThreadID == "" {
+		stopped.ThreadID, stopped.Checkpoint, stopped.CheckpointDigest = "", nil, ""
+	}
 	o.State = PlacementStopped
 	o.Stopped = &stopped
 	p.records[l.AllocationID] = o
@@ -732,9 +849,10 @@ func TestUnknownUsageCancellationSurvivesReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = reopened.Close() }()
+	// Recovery that cannot finalize usage says what it is waiting for.
 	got, err := reopened.Recover(context.Background(), r.ID)
-	if err != nil {
-		t.Fatal(err)
+	if err == nil || !strings.Contains(err.Error(), "usage is not finalized") {
+		t.Fatalf("recover reported no wait: %v", err)
 	}
 	if got.Phase != PhaseUnknownUsage || got.CancelOperation == "" || got.Active == nil || !got.Active.ActualStopped || got.Remaining[testCapability].Units.Value != afterSeedUnits {
 		t.Fatalf("cancel recovery refunded unknown usage: %+v", got)

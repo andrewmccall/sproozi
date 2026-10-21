@@ -75,7 +75,7 @@ const (
 )
 
 // ErrNotInitialized means the store has no committed CA.
-var ErrNotInitialized = errors.New("pki: no local certificate authority; run sproozi init --local")
+var ErrNotInitialized = errors.New("pki: no local certificate authority; run sproozi init")
 
 // Open validates or creates the private directory.
 func Open(dir string, policy Policy, now func() time.Time) (*Store, error) {

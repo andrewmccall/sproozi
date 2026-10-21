@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
-"""Render the owned fixture's trusted profile and stock Hermes Kubernetes stack."""
+"""Render the owned fixture's remote executor and stock Hermes Kubernetes stack."""
 import argparse
 import base64
 import json
 import os
 from pathlib import Path
+import importlib.util
 import secrets
 
 import yaml
 
 ROOT = Path(__file__).resolve().parents[3]
+_spec = importlib.util.spec_from_file_location("mobility_kubernetes", ROOT / "hack/verify/session-mobility/kubernetes.py")
+KUBE = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(KUBE)
 
 
 def obj(kind, name, namespace, **fields):
@@ -25,28 +29,12 @@ def render(fixture, native_image, hermes_image, build_sproozi=False):
     if Path(home["gateway"]["providerTokenFile"]).read_text().strip() != "tui-placeholder":
         raise ValueError("Only credential-free fixture deployment is supported")
     credentials = {"tls.crt": (fixture / "gateway.crt").read_bytes(), "tls.key": (fixture / "gateway.key").read_bytes(),
-                   "home-token": Path(profile["tokenFile"]).read_bytes(), "task-token": Path(profile["workTokenFile"]).read_bytes()}
-    profile.update(listen="0.0.0.0:8443", directory="/state/profile",
-                   certificateFile="/var/run/sproozi-work/tls.crt", keyFile="/var/run/sproozi-work/tls.key",
-                   tokenFile="/var/run/sproozi-work/home-token", workTokenFile="/var/run/sproozi-work/task-token",
-                   repositories={"sproozi": {**profile["repositories"]["sproozi"], "snapshot": "/state/source"}})
+                   "task-token": (fixture / "work-token").read_bytes()}
     if build_sproozi:
         profile["repositories"]["sproozi"]["snapshot"] = "/state/source-sproozi"
-    documents = list(yaml.safe_load_all((ROOT / "examples/portable-workflows/kubernetes/owner.yaml").read_text()))
-    for d in documents:
-        if d["kind"] == "Deployment":
-            pod = d["spec"]["template"]["spec"]
-            pod["containers"][0]["image"] = native_image
-            # Only this credential-free fixture seeds an administrator-owned Git
-            # snapshot. The public deployment uses approved URL sources instead.
-            pod["initContainers"] = [{"name": "seed", "image": native_image,
-                "command": ["/bin/sh", "-ec", "mkdir -p /state/source; if ! test -d /state/source/.git; then git init --quiet --template= /state/source; printf 'Portable workflow fixture\\n' > /state/source/note.txt; git -C /state/source add note.txt; git -C /state/source -c user.name=Fixture -c user.email=fixture@example.invalid commit --quiet -m 'Initial fixture'; fi"],
-                "securityContext": dict(allowPrivilegeEscalation=False, readOnlyRootFilesystem=True, capabilities=dict(drop=["ALL"])),
-                "resources": dict(requests=dict(cpu="100m", memory="64Mi"), limits=dict(cpu="500m", memory="256Mi")),
-                "volumeMounts": [dict(name="state", mountPath="/state"), dict(name="tmp", mountPath="/tmp")]}]
-    documents += [obj("Secret", "sproozi-work-credentials", "sproozi-system",
-                       data={k: base64.b64encode(v).decode() for k, v in credentials.items()}),
-                  obj("ConfigMap", "sproozi-work-profile", "sproozi-system", data={"profile.json": json.dumps(profile)})]
+    documents = KUBE.executor_resources(profile, native_image, (fixture / "ca.pem").read_text())
+    documents.append(obj("Secret", "sproozi-work-credentials", "sproozi-system",
+                         data={k: base64.b64encode(v).decode() for k, v in credentials.items()}))
     coordinator = list(yaml.safe_load_all((ROOT / "examples/orchestration/hermes-coordinator.yaml").read_text()))
     work_config = yaml.safe_load((ROOT / "examples/portable-workflows/kubernetes/hermes-work.yaml").read_text())
     for d in coordinator:

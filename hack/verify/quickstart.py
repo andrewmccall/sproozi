@@ -173,8 +173,8 @@ def doctor(demo=False, env_file=None, passed=lambda line: None):
         found = (client.get("gitVersion") or f"{client['major']}.{client['minor']}").lstrip("v")
         if client["major"] != "1" or not 32 <= minor <= 34:
             raise RuntimeError("Use kubectl 1.32, 1.33 or 1.34 for the pinned Kubernetes 1.33.1 demo"
-                               f" (found {found}); see \"Prepare your computer\" in"
-                               " docs/guides/getting-started.md to install a matching client into .local/bin")
+                               f" (found {found}); run \"make demo-kubectl\", then"
+                               " export PATH=\"$PWD/bin:$PATH\"")
         return "kubectl " + found
 
     def go():
@@ -579,7 +579,7 @@ def verify(args):
         directory = EVIDENCE_ROOT / run_id
         cluster = (DEPENDENCY_CLUSTER_PREFIX if args.path == "dependencies" else DEMO_CLUSTER_PREFIX) + run_id
         source_commit = capture(["git", "rev-parse", "HEAD"])
-        guide = hashlib.sha256((ROOT / "docs/guides/getting-started.md").read_bytes()).hexdigest()
+        guide = hashlib.sha256((ROOT / "docs/guides/pr-demo.md").read_bytes()).hexdigest()
         if cluster in capture(["kind", "get", "clusters"]).splitlines():
             raise RuntimeError("Refusing to reuse an existing cluster")
         acquire_lock(run_id)

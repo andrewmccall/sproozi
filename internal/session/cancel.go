@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"errors"
+	"fmt"
 )
 
 // Cancel durably prevents activation before asking a placement to revoke and
@@ -42,7 +43,8 @@ func (c *Coordinator) Cancel(ctx context.Context, id, operationID string, admit 
 		return r, err
 	}
 	if r.CancelOperation != "" && r.CancelOperation != operationID {
-		return r, errors.New("session: cancellation intent conflict")
+		// Another cancellation already owns this execution; recover finishes it.
+		return r, fmt.Errorf("session: cancellation %s was already requested: %w", r.CancelOperation, cancelled(r))
 	}
 	if r.CancelOperation == "" {
 		r.CancelOperation = operationID
@@ -93,7 +95,7 @@ func (c *Coordinator) claimPendingWriter(ctx context.Context, r Record) (Record,
 	if op.Launch == nil {
 		return r, false, nil
 	}
-	p, ok := c.placements[op.Destination]
+	p, ok := c.placement(op.Destination)
 	if !ok {
 		return r, false, errors.New("session: pending placement unavailable")
 	}
@@ -141,7 +143,7 @@ func (c *Coordinator) claimPendingWriter(ctx context.Context, r Record) (Record,
 // with its sealed receipt. Unproven stop or usage leaves it active.
 func (c *Coordinator) abortActive(ctx context.Context, r Record) (Record, error) {
 	active := r.Active
-	p, ok := c.placements[active.Launch.Placement]
+	p, ok := c.placement(active.Launch.Placement)
 	if !ok {
 		return r, errors.New("session: active placement unavailable")
 	}

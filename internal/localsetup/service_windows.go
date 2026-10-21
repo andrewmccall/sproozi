@@ -16,7 +16,7 @@ func detach(cmd *exec.Cmd) {
 }
 
 func terminate(int) error {
-	return errors.New("automatic service stop is not supported on Windows; stop sproozi serve where it runs")
+	return errors.New("automatic service stop is not supported on Windows; stop \"sproozi service run\" where it runs")
 }
 
 func alive(pid int) bool { return pid > 0 }

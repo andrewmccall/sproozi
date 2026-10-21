@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/andrewmccall/sproozi/internal/harness"
+
 	"github.com/andrewmccall/sproozi/internal/privatefs"
 )
 
@@ -59,9 +61,10 @@ type Instance struct {
 
 type Observation struct {
 	Instance
-	Running bool
-	Status  string
-	PID     int
+	Running  bool
+	Status   string
+	PID      int
+	ExitCode int
 }
 
 // ImageID resolves an administrator-selected image reference once. Container
@@ -139,9 +142,10 @@ func (e *Engine) Observe(ctx context.Context, instance Instance) (Observation, e
 		ID     string                             `json:"Id"`
 		Config struct{ Labels map[string]string } `json:"Config"`
 		State  struct {
-			Running bool
-			Status  string
-			PID     int `json:"Pid"`
+			Running  bool
+			Status   string
+			PID      int `json:"Pid"`
+			ExitCode int
 		}
 	}
 	if err = json.Unmarshal(data, &records); err != nil || len(records) != 1 ||
@@ -149,7 +153,7 @@ func (e *Engine) Observe(ctx context.Context, instance Instance) (Observation, e
 		return Observation{}, errors.New("docker incarnation or execution binding is unavailable")
 	}
 	s := records[0].State
-	return Observation{Instance: instance, Running: s.Running, Status: s.Status, PID: s.PID}, nil
+	return Observation{Instance: instance, Running: s.Running, Status: s.Status, PID: s.PID, ExitCode: s.ExitCode}, nil
 }
 
 func (e *Engine) Start(ctx context.Context, instance Instance) error {
@@ -273,4 +277,17 @@ func (b *boundedOutput) String() string {
 
 func (e *Engine) command(ctx context.Context, args ...string) ([]byte, error) {
 	return e.commandInput(ctx, nil, 128<<10, args...)
+}
+
+// ExitReport reads the supervisor's exit report from a stopped agent's
+// output. It is a bounded workload diagnostic; ok is false when there is none.
+func (e *Engine) ExitReport(ctx context.Context, instance Instance) (harness.NativeExitReport, bool) {
+	if !objectID.MatchString(instance.ID) {
+		return harness.NativeExitReport{}, false
+	}
+	data, err := e.command(ctx, containerCommand, "logs", "--tail", "50", instance.ID)
+	if err != nil {
+		return harness.NativeExitReport{}, false
+	}
+	return harness.ParseNativeExitReport(data)
 }

@@ -3,7 +3,9 @@
 This page lists credentials and configuration for the Kubernetes deployment.
 Provider credentials stay in trusted cluster objects. Agent Pods receive client
 configuration, public trust material and a gateway identity token for the run.
-Follow [Install on Kubernetes and run your first Pod](../guides/install-kubernetes.md) for setup steps.
+[Install on Kubernetes](../guides/install-kubernetes.md) installs a release; step 7 of
+[Install from a checkout](../guides/install-from-checkout.md#7-run-a-model-on-this-cluster)
+adds the provider and GitHub credentials.
 
 ## Objects
 
@@ -101,7 +103,7 @@ restart.
 
 The default install leaves `--max-active-runs` unset. Per-policy caps use
 [`AgentPolicy.spec.maxActiveRuns`](agentpolicy.md#concurrent-runs).
-[Limit concurrent runs](../guides/install-kubernetes.md#limit-concurrent-runs)
+[Limit concurrent runs](../guides/install-from-checkout.md#limit-concurrent-runs)
 shows how to set the flag.
 
 ## Egress profile format

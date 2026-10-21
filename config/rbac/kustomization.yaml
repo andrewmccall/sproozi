@@ -11,7 +11,9 @@ resources:
 # runtime. Be sure to update RoleBinding and ClusterRoleBinding
 # subjects if changing service account names.
 - service_account.yaml
-- role.yaml
+# role.yaml, generated from +kubebuilder:rbac markers by `make manifests`, is
+# not installed: nothing binds it. controller_manager_role.yaml is the
+# ClusterRole the controller uses.
 - controller_manager_role.yaml
 - role_binding.yaml
 - webhook_service_account.yaml

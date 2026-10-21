@@ -20,10 +20,10 @@ directly; see [cluster dependencies](../reference/dependencies.md).
 
 ## Deploy with your own model account
 
-First follow [Install on Kubernetes and run your first Pod](install-kubernetes.md).
+First follow [Install from a checkout](install-from-checkout.md).
 You need an installed Sproozi controller and shared gateway, enforcing CNI,
 gateway-held model credentials for the sandboxes and the public sandbox trust
-ConfigMap. Its [step 7](install-kubernetes.md#7-run-a-model-on-this-cluster)
+ConfigMap. Its [step 7](install-from-checkout.md#7-run-a-model-on-this-cluster)
 shows how to add model credentials and extend the gateway certificate. Enable
 `model.inference,kubernetes.read` on the gateway, and ensure its inspection
 certificate covers `api.openai.com` and `kubernetes.default.svc`. The coordinator

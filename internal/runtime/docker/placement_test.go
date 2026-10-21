@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -75,9 +76,12 @@ type fakeDocker struct {
 	rejectNativeActivation                   bool
 	quiesceAcknowledgesOnly                  bool
 	lostQuiesceAck                           bool
-	quiesceStarted                           chan struct{}
-	completeTurn                             <-chan struct{}
-	calls                                    []string
+	// turnless makes the supervisor report a first visit with no native
+	// conversation and stop it without one.
+	turnless       bool
+	quiesceStarted chan struct{}
+	completeTurn   <-chan struct{}
+	calls          []string
 }
 
 func newFakeDocker() *fakeDocker {
@@ -308,8 +312,15 @@ func (f *fakeDocker) execCommand(ctx context.Context, args []string, input []byt
 	case "gate":
 		c.nativeState = harness.NativeStopping
 	case "status":
+		if f.turnless {
+			return json.Marshal(map[string]any{"op": op, stateField: c.nativeState, "turnless": true})
+		}
 		return json.Marshal(map[string]any{"op": op, stateField: c.nativeState, threadField: fixtureThread})
 	case string(harness.NativeQuiesce):
+		if f.turnless {
+			c.State.Running, c.State.Status, c.State.Pid = false, exitedStatus, 0
+			return json.Marshal(map[string]any{"op": op, stateField: harness.NativeStopped, "turnless": true})
+		}
 		if f.quiesceStarted != nil {
 			close(f.quiesceStarted)
 			select {
@@ -742,6 +753,54 @@ func TestFirstLocalSessionBindsGeneratedNativeUUID(t *testing.T) {
 		t.Fatal("a launch rewritten with the bound thread replayed the stop")
 	}
 }
+
+// A first visit whose supervisor reports it turnless stops promptly: usage is
+// sealed without a bound thread and nothing is captured, because the
+// execution keeps the workspace the visit started from.
+func TestTurnlessFirstVisitStopsWithoutThreadOrCheckpoint(t *testing.T) {
+	t.Parallel()
+	data := fixtureArtifact(t)
+	l := fixtureLaunch(t, data)
+	l.ThreadID, l.CheckpointDigest = "", ""
+	l.HarnessArgs = []string{"--search"}
+	f := newFakeDocker()
+	f.turnless, f.failCapture = true, true
+	a := &fakeAuthority{engine: f}
+	p := openFixture(t, testutil.PrivateDir(t), f, a)
+	inc, err := p.Prepare(t.Context(), l, []byte("workspace-continuity"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = p.Activate(t.Context(), l, inc); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range f.containers {
+		if c.configured == nil {
+			continue
+		}
+		var launch harness.NativeLaunch
+		if err = json.Unmarshal(c.configured, &launch); err != nil || !slices.Equal(launch.Args, l.HarnessArgs) {
+			t.Fatalf("native launch args = %q %v", launch.Args, err)
+		}
+	}
+	stopped, err := p.Stop(t.Context(), l, inc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.bound || stopped.ThreadID != "" || stopped.Receipt == nil || len(stopped.Checkpoint) != 0 ||
+		stopped.CheckpointDigest != "" || !stopped.ActualStopped {
+		t.Fatalf("turnless stop: %+v", stopped)
+	}
+	for _, call := range f.calls {
+		if strings.Contains(call, "capture-stopped") {
+			t.Fatal("turnless stop captured a checkpoint")
+		}
+	}
+	if replay, err := p.Stop(t.Context(), l, inc); err != nil || replay.Receipt == nil || replay.ThreadID != "" {
+		t.Fatalf("turnless stop replay: %+v %v", replay, err)
+	}
+}
+
 func TestCaptureFailureKeepsActualStopAndBlocksActivation(t *testing.T) {
 	t.Parallel()
 	data := fixtureArtifact(t)

@@ -7,7 +7,7 @@ import subprocess
 import tarfile
 
 
-def verify(home, profile, kubeconfig, session_id, output):
+def verify(home, fixture, kubeconfig, session_id, output):
     catalogue = Path(home['directory']) / 'sessions'
     record = json.loads((catalogue / (session_id + '.json')).read_text())
     remote = record['original']['stopped']['incarnation']['executionId']
@@ -31,7 +31,7 @@ def verify(home, profile, kubeconfig, session_id, output):
         if not any(e.get('allowed') is False and e.get('denyReason') for e in selected):
             raise RuntimeError(name + ' lacks an execution-bound Kubernetes denial audit event')
         events[name] = selected
-    secrets = [Path(profile['tokenFile']).read_bytes().strip(), Path(profile['workTokenFile']).read_bytes().strip(),
+    secrets = [(fixture / 'work-token').read_bytes().strip(),
                Path(home['gateway']['kubernetes']['tokenFile']).read_bytes().strip()]
     for secret in secrets:
         if secret in (remote_log + (output / 'home.log').read_text()).encode():

@@ -121,7 +121,7 @@ The adapter creates ordinary disposable Pods. See
 
 ## MCP client preparation
 
-Optional `spec.clientConfig.harness` selects `codex`, `claude-code`, `opencode` or `hermes`
+Optional `spec.clientConfig.harness` selects one of the [harness selectors](harnesses.md#harness-selectors)
 native MCP configuration in the immutable contract. The administrator-owned
 launch command loads only that configuration into disposable client state.
 Only requested named MCP capabilities appear; credentials remain in the gateway.

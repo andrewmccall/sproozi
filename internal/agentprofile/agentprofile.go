@@ -104,7 +104,7 @@ func (p Profile) empty() bool {
 // codex/AGENTS.md, to its harness.
 func harnessFiles() map[string]harness.NativeKind {
 	files := map[string]harness.NativeKind{}
-	for _, kind := range []harness.NativeKind{harness.NativeCodex, harness.NativeClaude} {
+	for _, kind := range harness.ManagedKinds() {
 		directory, _ := harness.NativeDirectory(kind)
 		files[directory+"/"+harness.NativeUserInstructionsFile(kind)] = kind
 	}

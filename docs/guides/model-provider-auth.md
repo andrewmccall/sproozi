@@ -16,7 +16,7 @@ harmless API-key placeholder in either mode.
 ## Existing cluster
 
 To use a ChatGPT plan on a cluster you installed yourself, follow
-[Run a model on this cluster](install-kubernetes.md#7-run-a-model-on-this-cluster).
+[Run a model on this cluster](install-from-checkout.md#7-run-a-model-on-this-cluster).
 It uses the same sign-in helper, Secret, ConfigMap and `--model-auth chatgpt`
 policy budget as the Kind demo below.
 
@@ -185,7 +185,7 @@ These sections describe how the gateway streams and charges model calls.
 [ADR 0028](../adr/0028-streamed-model-responses-and-estimated-interrupts.md)
 records why. Here a run's [budget](../../GLOSSARY.md#budget) is its
 `model.inference` budget on Kubernetes or, on the home gateway, the
-execution's [allowance](../../GLOSSARY.md#allowance), which the home daemon's
+execution's [allowance](../../GLOSSARY.md#allowance), which the local service's
 `allowances` configuration sets; the gateway charges both the same way.
 
 ### Long model calls
@@ -608,7 +608,7 @@ calls:
 
 A call that arrives on an open connection during the drain gets a 503 with
 `the model gateway is shutting down; retry the call` (for OpenAI, code
-`gateway_stopping`). Nothing is charged. The home daemon drains its model
+`gateway_stopping`). Nothing is charged. The local service drains its model
 calls the same way for up to 10 seconds when it closes.
 
 Calls that settle at once can collide on the shared gateway's ledger, a
@@ -641,11 +641,11 @@ settled at its recovery charge by whichever comes first:
 - the next call or seal on that account;
 - a sweep. The shared gateway sweeps every budget ConfigMap (label
   `app.kubernetes.io/component=budget-ledger`) when it starts and every
-  minute after; the home daemon sweeps its own ledger files when it opens
+  minute after; the local service sweeps its own ledger files when it opens
   them and every minute after. A sweep that fails logs `Failed to recover
   expired budget reservations` with the error.
 
-The process that settles it, the gateway, the home daemon or the service that
+The process that settles it, the gateway, the local service or the service that
 seals the account when an execution ends, saves the recovery in an update of
 its own before the call or seal that found it, so the recovery persists even
 if that reservation or seal then fails. Only after that save does it log

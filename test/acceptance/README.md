@@ -165,7 +165,7 @@ Adoption tests must stop the original writer and reject imported authority.
 
 Tests must check that:
 
-- `init --local` reaches a working native terminal without a checkout, OpenSSL,
+- `init` reaches a working native terminal without a checkout, OpenSSL,
   image IDs or network edits, and never calls kubectl or a Kubernetes API, even
   with a kubeconfig configured.
 - Repeating or interrupting setup reuses the same network, certificate

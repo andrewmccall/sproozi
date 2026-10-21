@@ -25,7 +25,7 @@ required_docs = {
     "docs/reference/client-compatibility.md", "docs/guides/manual-pr-demo.md",
     "docs/adr/README.md", "docs/adr/0001-mcp-capabilities-through-shared-gateway.md",
     "docs/reference/kubernetes-mcp.md", "docs/reference/configured-mcp.md",
-    "docs/guides/getting-started.md",
+    "docs/guides/pr-demo.md", "docs/guides/install-kubernetes.md",
     ".agents/skills/verify-sproozi/SKILL.md",
     ".agents/skills/verify-sproozi/features/README.md",
     ".agents/skills/verify-sproozi/features/dependencies.md",

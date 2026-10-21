@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/google/uuid"
 )
 
@@ -30,7 +31,7 @@ func (c *Coordinator) Create(first Launch, input []byte, session string) (Record
 	if first.Epoch != 1 || session != "" && (!validUUID(session) || session == first.ExecutionID) {
 		return Record{}, errors.New("session: invalid first visit")
 	}
-	if _, ok := c.placements[first.Placement]; !ok {
+	if _, ok := c.placement(first.Placement); !ok {
 		return Record{}, errors.New("session: first placement unavailable")
 	}
 	existing, err := c.load(first.ExecutionID)
@@ -51,8 +52,9 @@ func (c *Coordinator) Create(first Launch, input []byte, session string) (Record
 	}
 	r := Record{Version: journalVersion, ID: first.ExecutionID, Session: session, Harness: first.Harness,
 		ThreadID: first.ThreadID, InstructionDigest: first.InstructionDigest,
-		IncludeIgnored: append([]string(nil), first.IncludeIgnored...), Deadline: first.Deadline,
-		Ceiling: cloneAllowances(first.Allowances), Remaining: cloneAllowances(first.Allowances),
+		IncludeIgnored: append([]string(nil), first.IncludeIgnored...), HarnessArgs: append([]string(nil), first.HarnessArgs...),
+		Deadline: first.Deadline,
+		Ceiling:  cloneAllowances(first.Allowances), Remaining: cloneAllowances(first.Allowances),
 		Phase: PhasePreparing, PendingOperation: first.OperationID,
 		Operations: []Operation{{ID: first.OperationID, Destination: first.Placement, Launch: &first, Stage: stagePrepare}}}
 	if first.CheckpointDigest == "" {
@@ -90,7 +92,7 @@ func (c *Coordinator) Move(ctx context.Context, id, operationID, destination str
 	if !validUUID(operationID) {
 		return Record{}, errors.New("session: invalid operation ID")
 	}
-	if _, ok := c.placements[destination]; !ok {
+	if _, ok := c.placement(destination); !ok {
 		return Record{}, errors.New("session: destination unavailable")
 	}
 	r, err := c.load(id)
@@ -155,7 +157,10 @@ func (c *Coordinator) Recover(ctx context.Context, id string) (Record, error) {
 		return r, err
 	}
 	if r.CancelOperation != "" {
-		return c.abort(ctx, r)
+		if r, err = c.abort(ctx, r); err == nil {
+			err = stillWaiting(r)
+		}
+		return r, err
 	}
 	if r.PendingOperation == "" {
 		return r, nil
@@ -172,6 +177,21 @@ func (c *Coordinator) Recover(ctx context.Context, id string) (Record, error) {
 	}
 	return r, errors.New("session: pending operation missing")
 }
+
+// stillWaiting names what a recovery that could not finish is waiting for,
+// so it never reports success while the execution stays unresolved.
+func stillWaiting(r Record) error {
+	switch r.Phase {
+	case PhaseUnknownUsage:
+		return errors.New("session: the writer stopped, but its usage is not finalized yet; " +
+			"recover again once the placement can finalize it")
+	case PhaseUnknownStop:
+		return errors.New("session: the placement has not yet proved the writer stopped; " +
+			"recover again once it is reachable")
+	}
+	return nil
+}
+
 func (c *Coordinator) drive(ctx context.Context, r Record, index int) (Record, error) {
 	if err := ctx.Err(); err != nil {
 		return r, err
@@ -203,11 +223,16 @@ func (c *Coordinator) stopSource(ctx context.Context, r Record, index int) (Reco
 			return r, errors.New("session: stop intent lacks active allocation")
 		}
 		source := r.Active
-		p, ok := c.placements[source.Launch.Placement]
+		p, ok := c.placement(source.Launch.Placement)
 		if !ok {
 			return r, errors.New("session: source placement unavailable")
 		}
 		stopped, err := p.Stop(ctx, source.Launch, source.Incarnation)
+		if errors.Is(err, harness.ErrNativeTurnPending) {
+			// The writer still runs with input gated; the stop stays pending
+			// and repeating it waits again.
+			return r, err
+		}
 		fenced := fencedBy(source.Launch, source.Incarnation, stopped)
 		if err != nil && (!errors.Is(err, ErrUsageUnsealed) || !fenced) {
 			r.Phase = PhaseUnknownStop
@@ -226,8 +251,13 @@ func (c *Coordinator) stopSource(ctx context.Context, r Record, index int) (Reco
 			r.Phase = PhaseUnknownUsage
 			return r, errors.Join(err, c.save(r))
 		}
-		if len(stopped.Checkpoint) == 0 {
+		// A harness that exited on its own may leave no new checkpoint; the
+		// previous one, or the retained workspace, stays the session's state.
+		if len(stopped.Checkpoint) == 0 && stopped.Exit == nil && (r.hasCheckpoint() || stoppedThread(stopped) != "") {
 			return r, errors.New("session: graceful stop returned no checkpoint")
+		}
+		if stopped.Exit != nil && len(stopped.Exit.Output) > ExitOutputMax {
+			return r, errors.New("session: harness exit report exceeds its bound")
 		}
 		thread, cp, err := c.commitStopped(r, stopped)
 		if err != nil {
@@ -238,7 +268,7 @@ func (c *Coordinator) stopSource(ctx context.Context, r Record, index int) (Reco
 			r.Phase = PhaseUnknownUsage
 			return r, errors.Join(err, c.save(r))
 		}
-		r.Visits = append(r.Visits, Visit{Launch: source.Launch, Incarnation: source.Incarnation, Receipt: stopped.Receipt, ActualStopped: true, CheckpointDigest: cp.Metadata.SHA256})
+		r.Visits = append(r.Visits, Visit{Launch: source.Launch, Incarnation: source.Incarnation, Receipt: stopped.Receipt, ActualStopped: true, CheckpointDigest: cp.Metadata.SHA256, Exit: stopped.Exit})
 		r.Remaining = remaining
 		r.ThreadID, r.Checkpoint = thread, cp
 		r.Active = nil
@@ -273,10 +303,12 @@ func (c *Coordinator) prepareDestination(ctx context.Context, r Record, index in
 			if r.Epoch == ^uint64(0) {
 				return r, errors.New("session: epoch exhausted")
 			}
-			if !r.hasCheckpoint() {
+			if !r.hasCheckpoint() && r.Workspace == "" {
 				return r, errors.New("session: execution has no checkpoint to move")
 			}
-			launch := Launch{Harness: r.Harness, ExecutionID: r.ID, OperationID: op.ID, AllocationID: uuid.NewString(), Epoch: r.Epoch + 1, Placement: op.Destination, ThreadID: r.ThreadID, InstructionDigest: r.InstructionDigest, IncludeIgnored: append([]string(nil), r.IncludeIgnored...), Deadline: r.Deadline, Allowances: cloneAllowances(r.Remaining), CheckpointDigest: r.Checkpoint.Metadata.SHA256}
+			// Without a kept conversation the visit starts again from the
+			// retained workspace, with no thread or checkpoint.
+			launch := Launch{Harness: r.Harness, ExecutionID: r.ID, OperationID: op.ID, AllocationID: uuid.NewString(), Epoch: r.Epoch + 1, Placement: op.Destination, ThreadID: r.ThreadID, InstructionDigest: r.InstructionDigest, IncludeIgnored: append([]string(nil), r.IncludeIgnored...), HarnessArgs: append([]string(nil), r.HarnessArgs...), Deadline: r.Deadline, Allowances: cloneAllowances(r.Remaining), CheckpointDigest: r.Checkpoint.Metadata.SHA256}
 			digest, err := c.retainProfile()
 			if err != nil {
 				return r, fmt.Errorf("session: profile: %w", err)
@@ -293,7 +325,7 @@ func (c *Coordinator) prepareDestination(ctx context.Context, r Record, index in
 		if err := spendable(op.Launch.Allowances); err != nil {
 			return r, err
 		}
-		p, ok := c.placements[op.Destination]
+		p, ok := c.placement(op.Destination)
 		if !ok {
 			return r, errors.New("session: destination placement unavailable")
 		}
@@ -341,7 +373,7 @@ func (c *Coordinator) prepareDestination(ctx context.Context, r Record, index in
 func (c *Coordinator) activateDestination(ctx context.Context, r Record, index int) (Record, error) {
 	op := &r.Operations[index]
 	if op.Stage == stageActivate {
-		p, ok := c.placements[op.Destination]
+		p, ok := c.placement(op.Destination)
 		if !ok {
 			return r, errors.New("session: destination placement unavailable")
 		}

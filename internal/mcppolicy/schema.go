@@ -9,6 +9,7 @@ import (
 	"io"
 	"math/big"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/google/jsonschema-go/jsonschema"
@@ -54,20 +55,23 @@ func (c *Constraint) Schema() json.RawMessage  { return bytes.Clone(c.raw) }
 
 // CompileScope is shared by admission and the live gateway boundary.
 func CompileScope(scope api.MCPServerScope) (map[string]*Constraint, error) {
-	if len(scope.Tools) == 0 || len(scope.Tools) > 128 {
-		return nil, fmt.Errorf("MCP scope requires bounded explicit tools")
+	if len(scope.Tools) == 0 {
+		return nil, fmt.Errorf("no tools are listed; name each approved tool under tools")
+	}
+	if len(scope.Tools) > 128 {
+		return nil, fmt.Errorf("%d tools are listed; at most 128 are supported", len(scope.Tools))
 	}
 	result := make(map[string]*Constraint, len(scope.Tools))
 	for name, rule := range scope.Tools {
 		if !toolName.MatchString(name) {
-			return nil, fmt.Errorf("invalid MCP tool name")
+			return nil, fmt.Errorf("invalid MCP tool name %q; use 1 to 128 letters, digits, '_', '.' and '-'", name)
 		}
 		var constraint *Constraint
 		if rule.Arguments != nil {
 			var err error
 			constraint, err = Compile(rule.Arguments.Raw)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("tool %q arguments: %w", name, err)
 			}
 		}
 		result[name] = constraint
@@ -162,8 +166,12 @@ func checkKeywords(s *jsonschema.Schema, depth int) error {
 	if s == nil {
 		return nil
 	}
-	if depth > 32 || len(s.Extra) != 0 || s.Format != "" || s.ContentSchema != nil || len(s.Vocabulary) != 0 {
-		return fmt.Errorf("unsupported MCP schema restriction")
+	if depth > 32 {
+		return fmt.Errorf("MCP argument schema nesting exceeds bounds")
+	}
+	if keyword := unsupportedKeyword(s); keyword != "" {
+		return fmt.Errorf("unsupported MCP schema restriction %q; argument schemas cannot use format assertions, "+
+			"content schemas, vocabularies or unknown keywords", keyword)
 	}
 	for _, child := range schemaChildren(s) {
 		if err := checkKeywords(child, depth+1); err != nil {
@@ -171,4 +179,24 @@ func checkKeywords(s *jsonschema.Schema, depth int) error {
 		}
 	}
 	return nil
+}
+
+// unsupportedKeyword names the first keyword in s that policies cannot use.
+func unsupportedKeyword(s *jsonschema.Schema) string {
+	switch {
+	case s.Format != "":
+		return "format"
+	case s.ContentSchema != nil:
+		return "contentSchema"
+	case len(s.Vocabulary) != 0:
+		return "$vocabulary"
+	case len(s.Extra) != 0:
+		keys := make([]string, 0, len(s.Extra))
+		for key := range s.Extra {
+			keys = append(keys, key)
+		}
+		slices.Sort(keys)
+		return keys[0]
+	}
+	return ""
 }

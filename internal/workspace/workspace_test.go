@@ -3,6 +3,7 @@ package workspace
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -405,8 +406,30 @@ func TestUnsupportedSourceFailsExplicitly(t *testing.T) {
 		}
 	})
 	t.Run("byte limit", func(t *testing.T) {
-		if _, err := Capture(context.Background(), newFixture(t), nil, 512); err == nil {
-			t.Fatal("accepted undersized byte limit")
+		if _, err := Capture(context.Background(), newFixture(t), nil, 512); !errors.Is(err, ErrByteLimit) {
+			t.Fatalf("undersized byte limit: %v", err)
+		}
+	})
+	t.Run("expanded objects report their size", func(t *testing.T) {
+		root := newFixture(t)
+		// Zeros compress well, so the packed files fit and only the expanded
+		// objects exceed the limit.
+		if err := os.WriteFile(filepath.Join(root, "zeros"), make([]byte, 1<<20), 0600); err != nil {
+			t.Fatal(err)
+		}
+		fixtureGit(t, root, "add", "zeros")
+		fixtureGit(t, root, "commit", "-q", "-m", "zeros")
+		fixtureGit(t, root, "rm", "-q", "zeros")
+		fixtureGit(t, root, "commit", "-q", "-m", "remove")
+		fixtureGit(t, root, "gc", "-q")
+		_, err := Capture(context.Background(), root, nil, 512<<10)
+		if !errors.Is(err, ErrByteLimit) || !strings.Contains(err.Error(), "expanded Git objects total 1.0 MiB") {
+			t.Fatalf("expanded objects: %v", err)
+		}
+	})
+	t.Run("not a repository", func(t *testing.T) {
+		if _, err := Capture(context.Background(), t.TempDir(), nil, testLimit); !errors.Is(err, ErrNotRepository) {
+			t.Fatalf("plain directory: %v", err)
 		}
 	})
 }
@@ -421,5 +444,18 @@ func TestCaptureRejectsWindowsPathAliasesInGitTrees(t *testing.T) {
 				t.Fatalf("accepted Windows path alias %q", name)
 			}
 		})
+	}
+}
+
+// A selected ignored file that is missing, or not ignored, says which.
+func TestIncludeIgnoredNamesAMissingOrTrackedFile(t *testing.T) {
+	root := newFixture(t)
+	if _, err := Capture(t.Context(), root, []string{"nothere"}, testLimit); err == nil ||
+		!strings.Contains(err.Error(), "ignored file nothere does not exist in the repository") {
+		t.Fatalf("missing file: %v", err)
+	}
+	if _, err := Capture(t.Context(), root, []string{"note.txt"}, testLimit); err == nil ||
+		!strings.Contains(err.Error(), "note.txt is not ignored by Git") {
+		t.Fatalf("tracked file: %v", err)
 	}
 }

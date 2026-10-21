@@ -30,8 +30,8 @@ spec:
 ```
 
 The same immutable capability list can request configured MCP servers, for
-example `capabilities: [model.inference, mcp.docs]`. The selected policy must allow
-`mcp.docs` and define its permitted tools; the gateway must register `docs`.
+example `capabilities: [model.inference, mcp.deepwiki]`. The selected policy must allow
+`mcp.deepwiki` and define its permitted tools; the gateway must register `deepwiki`.
 The run cannot choose a provider URL, credential file or tool-policy override.
 See [configured MCP capabilities](configured-mcp.md).
 
@@ -73,7 +73,7 @@ doesn't hold back later runs under other policies. A run held by a cap stays
 `Queued` with reason `WaitingForConcurrencyCap`; it is never denied. When a run
 finishes or is deleted, or a policy changes, the controller re-checks every
 queued run. See
-[Limit concurrent runs](../guides/install-kubernetes.md#limit-concurrent-runs).
+[Limit concurrent runs](../guides/install-from-checkout.md#limit-concurrent-runs).
 
 Editing an admitted run's AgentPolicy doesn't fail or restart the run. Any `spec` edit
 other than `maxActiveRuns` closes the run's open gateway connections within the

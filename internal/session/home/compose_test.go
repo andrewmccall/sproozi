@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -88,8 +89,8 @@ func TestProductionCompositionTakesExclusiveOwnershipWithoutLaunching(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "home: another home daemon is using directory " + c.Directory +
-		"; stop it first (\"sproozi serve\" holds it until it exits)"
+	want := "home: another Sproozi service is using directory " + c.Directory +
+		"; stop it first"
 	if _, err = Open(c, io.Discard); err == nil || err.Error() != want {
 		t.Fatalf("second home writer: got %v, want %q", err, want)
 	}
@@ -373,7 +374,7 @@ func TestSecondHarnessGetsItsOwnPlacementPortAndCoveredCertificate(t *testing.T)
 		t.Fatal("second harness must derive from the primary placement with its own port")
 	}
 	leaf := s.certs.serving.Load().Leaf
-	for _, host := range []string{"api.openai.com", "api.anthropic.com", c.Local.GatewayIPv4} {
+	for _, host := range []string{inspectionHost, "api.anthropic.com", c.Local.GatewayIPv4} {
 		if leaf.VerifyHostname(host) != nil {
 			t.Fatalf("serving leaf lacks %s", host)
 		}
@@ -471,4 +472,44 @@ func mustServing(t *testing.T, store *pki.Store) *x509.Certificate {
 		t.Fatal(err)
 	}
 	return cert.Leaf
+}
+
+// inspectionHost is the OpenAI provider host the codex fixtures inspect.
+var inspectionHost = harness.ProtocolOpenAI.InspectionHost()
+
+// A home with MCP allowances still starts a Claude Code placement: its
+// sessions get no named MCP servers, and the service says so.
+func TestMCPAllowancesReachOnlyHarnessesThatUseThem(t *testing.T) {
+	c, store := managedConfig(t)
+	if err := store.Initialize(pki.Names{DNS: []string{inspectionHost}, IPs: []string{c.Local.GatewayIPv4}}); err != nil {
+		t.Fatal(err)
+	}
+	registry := filepath.Join(filepath.Dir(c.Gateway.ProviderTokenFile), "servers.json")
+	if err := testutil.WriteFile(registry, []byte(`{"servers":{"deepwiki":{"url":"https://mcp.deepwiki.com/mcp"}}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	c.Gateway.MCPRegistryFile = registry
+	c.Gateway.MCPPolicy = map[string]api.MCPServerScope{"deepwiki": {Tools: map[string]api.MCPToolScope{"ask_wiki_question": {}}}}
+	c.Allowances["mcp.deepwiki"] = session.Allowance{Units: session.Limit{Bounded: true, Value: 5}}
+	var log strings.Builder
+	s, err := Open(c, &log)
+	if err != nil {
+		t.Fatalf("a Claude Code placement beside MCP allowances did not start: %v", err)
+	}
+	defer func() { _ = s.Close() }()
+	if !strings.Contains(log.String(), "claude-code sessions get no configured MCP servers (mcp.deepwiki)") {
+		t.Fatalf("no notice for Claude Code sessions: %q", log.String())
+	}
+	if _, ok := harnessAllowances(harness.NativeClaude, c.Allowances)["mcp.deepwiki"]; ok {
+		t.Fatal("Claude Code session received an MCP allowance")
+	}
+	if _, ok := harnessAllowances(harness.NativeCodex, c.Allowances)["mcp.deepwiki"]; !ok {
+		t.Fatal("Codex session lost its MCP allowance")
+	}
+	claude := c
+	claude.Local.Harness = harness.NativeClaude
+	policy, err := approvedPolicy(claude)
+	if err != nil || slices.Contains(policy.AllowedCapabilities, "mcp.deepwiki") || policy.MCPServers != nil {
+		t.Fatalf("Claude Code policy %+v %v", policy, err)
+	}
 }

@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Render the isolated native session proof's real controller and shared gateway.
+"""Render the isolated native session proof's controller, shared gateway and remote executor.
 
 YAML on stdout contains only public fixture configuration. Create the gateway
-TLS Secret separately; profile credentials and administrator KUBECONFIG stay on
-the host. This renders infrastructure, not a completed mobility proof.
+and executor TLS Secrets separately; administrator KUBECONFIG stays on the host.
+The executor is the public retained-work example, reached through a kubeconfig
+context as the sproozi-cli ServiceAccount. This renders infrastructure, not a
+completed mobility proof.
 """
 import argparse
 import hashlib
@@ -24,6 +26,8 @@ AGENTS = "sproozi-agents"
 GATEWAY = "sproozi-gateway.sproozi-system.svc"
 TRUST = "mobility-fixture-trust"
 TEMPLATE = "mobility-native"
+EXECUTOR = "sproozi-work"
+CREDENTIALS = "/var/run/sproozi-work"
 UPSTREAM = "https://192.168.65.254:18765"
 IMAGE = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._:/-]*@sha256:[a-f0-9]{64}\Z")
 KEEP = {
@@ -169,22 +173,68 @@ def fixture_resources(hints, image, ca, trust):
         runtime, policy, template]
 
 
-def write_profile(path, hints, certificate, key):
+def executor_profile(hints, principal="mobility-proof", harness="codex", template=TEMPLATE, directory="/state/profile"):
+    """The remote executor's configuration as its Pod reads it."""
+    return {"listen": "0.0.0.0:8443", "certificateFile": CREDENTIALS + "/tls.crt", "keyFile": CREDENTIALS + "/tls.key",
+            "principal": principal, "harness": harness, "placementName": "remote",
+            "namespace": SYSTEM, "templateName": template, "directory": directory,
+            "instructionDigest": hints["instructionDigest"], "allowances": hints["allowances"],
+            "maxDuration": hints["maxDuration"], "maxCheckpointBytes": hints["maxCheckpointBytes"]}
+
+
+SEED = ("mkdir -p /state/source; if ! test -d /state/source/.git; then git init --quiet --template= /state/source; "
+        "printf 'Portable workflow fixture\\n' > /state/source/note.txt; git -C /state/source add note.txt; "
+        "git -C /state/source -c user.name=Fixture -c user.email=fixture@example.invalid commit --quiet -m 'Initial fixture'; fi")
+
+
+def executor_resources(profile, image, ca):
+    """The public executor example with this fixture's image and configuration,
+    its published CA and the CLI's ServiceAccount. The executor mounts the
+    sproozi-work-credentials Secret (tls.crt, tls.key and, for retained work,
+    task-token), which the administrator creates from private files."""
+    documents = list(yaml.safe_load_all((ROOT / "examples/portable-workflows/kubernetes/owner.yaml").read_text()))
+    for doc in documents:
+        if doc["kind"] == "Deployment":
+            pod = doc["spec"]["template"]["spec"]
+            pod["containers"][0]["image"] = image
+            pod["containers"][0]["imagePullPolicy"] = "IfNotPresent"
+            if any(r.get("snapshot") == "/state/source" for r in profile.get("repositories", {}).values()):
+                # Only this credential-free fixture seeds an administrator-owned
+                # Git snapshot; the public example uses approved URL sources.
+                pod["initContainers"] = [{"name": "seed", "image": image, "imagePullPolicy": "IfNotPresent",
+                    "command": ["/bin/sh", "-ec", SEED],
+                    "securityContext": {"allowPrivilegeEscalation": False, "readOnlyRootFilesystem": True,
+                                        "capabilities": {"drop": ["ALL"]}},
+                    "resources": {"requests": {"cpu": "100m", "memory": "64Mi"}, "limits": {"cpu": "500m", "memory": "256Mi"}},
+                    "volumeMounts": [{"name": "state", "mountPath": "/state"}, {"name": "tmp", "mountPath": "/tmp"}]}]
+            # A changed configuration must restart the single executor.
+            pod_meta = doc["spec"]["template"].setdefault("metadata", {})
+            pod_meta.setdefault("annotations", {})["sproozi.test/profile"] = hashlib.sha256(
+                json.dumps(profile, sort_keys=True).encode()).hexdigest()[:16]
+    documents += [object_("ConfigMap", "sproozi-work-profile", data={"profile.json": json.dumps(profile, indent=2)}),
+                  object_("ConfigMap", "sproozi-remote-executor", data={"ca.crt": ca})]
+    documents.extend(doc for doc in build("config/cli-access") if doc)
+    return documents
+
+
+def replace_executor(documents, profile, image, ca):
+    """Swap a manifest's executor resources for ones rendered from profile."""
+    names = {(d["kind"], d["metadata"]["name"]) for d in executor_resources(profile, image, ca)}
+    kept = [d for d in documents if d and (d["kind"], d["metadata"]["name"]) not in names]
+    return kept + executor_resources(profile, image, ca)
+
+
+def write_profile(path, profile):
     parent = path.parent
     stat = parent.lstat()
     if not parent.is_dir() or parent.is_symlink() or stat.st_uid != os.geteuid() or stat.st_mode & 0o077:
         raise ValueError("Profile output parent must be an existing private owned directory")
     if path.is_symlink():
         raise ValueError("Profile output cannot be a symlink")
-    config = {"listen": "127.0.0.1:18444", "certificateFile": str(certificate), "keyFile": str(key),
-              "tokenFile": str(parent / "profile-token"), "principal": "mobility-proof", "harness": "codex", "placementName": "remote",
-              "namespace": SYSTEM, "templateName": TEMPLATE, "directory": str(parent / "remote-profile-state"),
-              "instructionDigest": hints["instructionDigest"], "allowances": hints["allowances"],
-              "maxDuration": hints["maxDuration"], "maxCheckpointBytes": hints["maxCheckpointBytes"]}
     with tempfile.NamedTemporaryFile(mode="w", dir=parent, delete=False) as stream:
         temporary = Path(stream.name)
         try:
-            json.dump(config, stream, indent=2)
+            json.dump(profile, stream, indent=2)
             stream.write("\n")
             stream.flush()
             os.fsync(stream.fileno())
@@ -210,16 +260,18 @@ def main():
         raise ValueError("CA file must contain only bounded PEM certificates")
     ssl.create_default_context(cadata=ca)
     trust = trust_name(ca)
-    certificate, key = args.gateway_cert.resolve(strict=True), args.gateway_key.resolve(strict=True)
+    args.gateway_cert.resolve(strict=True), args.gateway_key.resolve(strict=True)
     documents = [doc for doc in build("config/default") if doc and doc["metadata"]["name"] in KEEP.get(doc["kind"], set())]
     documents.extend(doc for doc in build("config/agent-rbac") if doc)
     for doc in documents:
         if doc["kind"] == "Deployment":
             configure_deployment(doc, args.control_image, trust)
     documents.extend(fixture_resources(hints, args.native_image, ca, trust))
+    profile = executor_profile(hints)
+    documents.extend(executor_resources(profile, args.native_image, ca))
     # Validate and render everything before publishing either output.
     output = yaml.safe_dump_all(documents, sort_keys=False)
-    write_profile(args.profile_config_output.absolute(), hints, certificate, key)
+    write_profile(args.profile_config_output.absolute(), profile)
     sys.stdout.write(output)
 
 

@@ -108,3 +108,64 @@ func TestQuiesceNativeSeparatesLostReplyFromRejectedTurn(t *testing.T) {
 		t.Fatalf("a rejected quiesce must not look like a lost reply: %v", err)
 	}
 }
+
+// A first visit reported turnless stops without binding any thread, and only
+// a turnless reply may end quiesce with no thread.
+func TestQuiesceNativeStopsTurnlessFirstVisitWithoutBinding(t *testing.T) {
+	quiesce := `{"op":"quiesce","state":"stopped","turnless":true}`
+	control := func(_ context.Context, op NativeOp) ([]byte, error) {
+		switch op {
+		case NativeGate:
+			return []byte(`{"op":"gate","state":"stopping"}`), nil
+		case NativeStatus:
+			return []byte(`{"op":"status","state":"stopping","turnless":true}`), nil
+		case NativeQuiesce:
+			return []byte(quiesce), nil
+		}
+		return nil, errors.New("unexpected operation")
+	}
+	bind := func(context.Context, string) error { return errors.New("turnless visit bound a thread") }
+	got, err := QuiesceNative(t.Context(), control, "", time.Now().Add(time.Minute), bind)
+	if err != nil || got != "" {
+		t.Fatalf("thread=%q error=%v", got, err)
+	}
+	quiesce = `{"op":"quiesce","state":"stopped"}`
+	if _, err = QuiesceNative(t.Context(), control, "", time.Now().Add(time.Minute), bind); err == nil {
+		t.Fatal("quiesce without a thread or turnless report accepted")
+	}
+}
+
+// A quiesce reply that is still waiting becomes ErrNativeTurnPending naming
+// what it waits for, not an unknown stop.
+func TestQuiesceNativeReportsPendingTurn(t *testing.T) {
+	const thread = "12345678-1234-1234-1234-123456789abc"
+	control := func(_ context.Context, op NativeOp) ([]byte, error) {
+		switch op {
+		case NativeGate:
+			return []byte(`{"op":"gate","state":"stopping","threadId":"` + thread + `"}`), nil
+		case NativeQuiesce:
+			return []byte(`{"op":"quiesce","state":"stopping","waiting":"the current Codex turn to complete"}`), nil
+		}
+		return nil, errors.New("unexpected operation")
+	}
+	_, err := QuiesceNative(t.Context(), control, thread, time.Now().Add(time.Minute), nil)
+	if !errors.Is(err, ErrNativeTurnPending) || !strings.Contains(err.Error(), "current Codex turn") {
+		t.Fatalf("pending quiesce: %v", err)
+	}
+}
+
+func TestNativeExitReportIsBoundedPlainText(t *testing.T) {
+	raw := "\x1b[2J\x1b[1;1Hstarting\r\n\x1b]0;title\x07error: unexpected argument '--bad' found\r\n\r\nUsage: codex [OPTIONS]\r\n"
+	if got := NativeExitOutput([]byte(raw), 2); got != "error: unexpected argument '--bad' found\nUsage: codex [OPTIONS]" {
+		t.Fatalf("output %q", got)
+	}
+	logs := "native container stopped\n" + NativeExitReportPrefix + `{"code":2,"output":"bad flag","thread":"not-a-thread"}` + "\n" +
+		NativeExitReportPrefix + `{"code":2,"output":"bad flag"}` + "\n"
+	report, ok := ParseNativeExitReport([]byte(logs))
+	if !ok || report.Code != 2 || report.Output != "bad flag" || report.Thread != "" {
+		t.Fatalf("report %+v %v", report, ok)
+	}
+	if _, ok = ParseNativeExitReport([]byte("nothing here\n")); ok {
+		t.Fatal("report found in unrelated output")
+	}
+}

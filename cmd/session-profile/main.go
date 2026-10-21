@@ -24,9 +24,12 @@ import (
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/placement"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
+	"github.com/andrewmccall/sproozi/internal/session/remote"
 	"github.com/andrewmccall/sproozi/internal/work"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 )
@@ -36,7 +39,6 @@ type serverConfig struct {
 	Listen             string                            `json:"listen"`
 	CertificateFile    string                            `json:"certificateFile"`
 	KeyFile            string                            `json:"keyFile"`
-	TokenFile          string                            `json:"tokenFile"`
 	Principal          string                            `json:"principal"`
 	PlacementName      string                            `json:"placementName"`
 	Namespace          string                            `json:"namespace"`
@@ -124,8 +126,12 @@ func run(args []string) error {
 		return err
 	}
 	defer func() { _ = backend.Close() }()
+	home, err := homeAuthorizer(fixed, restConfig)
+	if err != nil {
+		return err
+	}
 	handler, err := profile.NewHandler(profile.Config{
-		Harness: fixed.Harness, Principal: fixed.Principal, TokenFile: fixed.TokenFile, Placement: fixed.PlacementName,
+		Harness: fixed.Harness, Principal: fixed.Principal, Authorizer: home, Placement: fixed.PlacementName,
 		InstructionDigest: fixed.InstructionDigest, Allowances: fixed.Allowances,
 		MaxDuration: duration, MaxCheckpointBytes: fixed.MaxCheckpointBytes, Backend: backend, Profiles: backend,
 	})
@@ -149,12 +155,7 @@ func run(args []string) error {
 		if readErr != nil {
 			return readErr
 		}
-		homeToken, readErr := os.ReadFile(fixed.TokenFile)
-		if readErr != nil {
-			return readErr
-		}
-		workHandler, handlerErr := work.NewHandler(owner,
-			strings.TrimSpace(string(taskToken)), strings.TrimSpace(string(homeToken)))
+		workHandler, handlerErr := work.NewHandler(owner, strings.TrimSpace(string(taskToken)), home)
 		if handlerErr != nil {
 			return handlerErr
 		}
@@ -189,4 +190,14 @@ func run(args []string) error {
 		}
 		return err
 	}
+}
+
+// homeAuthorizer decides the home principal: a caller whose Kubernetes
+// identity a TokenReview authenticates and RBAC allows to use this executor.
+func homeAuthorizer(fixed serverConfig, restConfig *rest.Config) (profile.Authorizer, error) {
+	kube, err := kubernetes.NewForConfig(restConfig)
+	if err != nil {
+		return nil, err
+	}
+	return remote.NewReviewer(kube, fixed.Namespace, fixed.PlacementName)
 }

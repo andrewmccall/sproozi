@@ -20,6 +20,7 @@ import (
 	"github.com/andrewmccall/sproozi/internal/project"
 	"github.com/andrewmccall/sproozi/internal/proxytransport"
 	"github.com/andrewmccall/sproozi/internal/session"
+	"github.com/andrewmccall/sproozi/internal/session/remote"
 	"github.com/andrewmccall/sproozi/internal/work"
 	"github.com/andrewmccall/sproozi/internal/workspace"
 )
@@ -35,6 +36,7 @@ const (
 	ActionResume   = "resume"
 	ActionStop     = "stop"
 	ActionSessions = "sessions"
+	ActionRemove   = "remove"
 	controlLimit   = 32 << 10
 	responseLimit  = 2 << 20
 )
@@ -51,6 +53,12 @@ type Request struct {
 	// Harness selects a configured local harness for start; empty selects
 	// the primary local placement's harness.
 	Harness harness.NativeKind `json:"harness,omitempty"`
+	// HarnessArgs are the user's own arguments for the stock harness of a
+	// start or resume, appended to the harness command line.
+	HarnessArgs []string `json:"harnessArgs,omitempty"`
+	// Remote selects a remote executor through a kubeconfig context for move
+	// or pull. The service reaches it from its own environment and records it.
+	Remote *remote.Selection `json:"remote,omitempty"`
 }
 type Response struct {
 	Status   *Status  `json:"status,omitempty"`
@@ -73,7 +81,7 @@ func (e rejectedError) Is(target error) bool { return target == ErrRejected }
 
 // ErrUnknownSession matches a reply that home retains no session with the
 // requested UUID, so the client knows a retry cannot help.
-var ErrUnknownSession = errors.New("docker (home): no such session")
+var ErrUnknownSession = errors.New("no such session on this machine")
 
 type unknownSessionError string
 
@@ -108,7 +116,7 @@ func (s *Service) unknownSession(q Request, err error) (Response, bool) {
 		return Response{}, false
 	}
 	return Response{UnknownSession: true, Error: fmt.Sprintf(
-		"docker (home): no session %s; run \"sproozi sessions\" to list sessions", q.ID)}, true
+		"no session %s on this machine; \"sproozi ls\" lists sessions", q.ID)}, true
 }
 
 // SocketPath returns the private local control address for a home directory.
@@ -143,20 +151,21 @@ func (s *Service) Serve(ctx context.Context) error {
 		defer func() { _ = server.Close() }()
 	}
 	go s.certs.run(run)
+	go s.watchExits(run)
 	path := SocketPath(s.config.Directory)
 	listener, err := listenControl(path)
 	if errors.Is(err, errControlListening) {
 		return fmt.Errorf("home: control socket %s: another process is listening there; stop it first "+
-			"(a home daemon for directory %s, or another program using that path)", path, s.config.Directory)
+			"(a Sproozi service for directory %s, or another program using that path)", path, s.config.Directory)
 	} else if addressInUse(err) {
-		return fmt.Errorf("home: control socket %s: address already in use; stop the other home daemon for "+
+		return fmt.Errorf("home: control socket %s: address already in use; stop the other Sproozi service for "+
 			"directory %s", path, s.config.Directory)
 	} else if err != nil {
 		return fmt.Errorf("home: control socket %s: %w", path, err)
 	}
 	defer func() { _ = listener.Close() }()
 	if s.log != nil {
-		_, _ = fmt.Fprintf(s.log, "Started home daemon: control socket %s, gateway %s\n", path, strings.Join(addresses, ", "))
+		_, _ = fmt.Fprintf(s.log, "Started the Sproozi service: control socket %s, gateway %s\n", path, strings.Join(addresses, ", "))
 	}
 	var workers sync.WaitGroup
 	var connections sync.Map
@@ -185,7 +194,7 @@ func (s *Service) Serve(ctx context.Context) error {
 			workers.Wait()
 			if ctx.Err() != nil {
 				if s.log != nil {
-					_, _ = fmt.Fprintln(s.log, "Stopped home daemon")
+					_, _ = fmt.Fprintln(s.log, "Stopped the Sproozi service")
 				}
 				return nil
 			}
@@ -255,7 +264,7 @@ func daemonRunning(ctx context.Context, directory string) bool {
 }
 
 func anotherDaemon(directory string) error {
-	return fmt.Errorf("home: another home daemon is using directory %s; stop it first (\"sproozi serve\" holds it until it exits)", directory)
+	return fmt.Errorf("home: another Sproozi service is using directory %s; stop it first", directory)
 }
 
 func addressInUse(err error) bool {
@@ -301,6 +310,10 @@ func (s *Service) handle(ctx context.Context, conn net.Conn) {
 			_ = encoder.Encode(unknown)
 			return
 		}
+		if problem := s.attachProblem(ctx, q.ID); problem != nil {
+			_ = encoder.Encode(Response{Error: problem.Error(), Rejected: errors.Is(problem, ErrRejected)})
+			return
+		}
 		if err = encoder.Encode(Response{}); err != nil {
 			return
 		}
@@ -315,9 +328,15 @@ func (s *Service) handle(ctx context.Context, conn net.Conn) {
 	var sessions []Status
 	switch q.Action {
 	case ActionStart:
-		status, err = s.Start(ctx, q.ID, q.OperationID, q.Workspace, q.Harness, q.IncludeIgnored)
+		status, err = s.Start(ctx, q.ID, q.OperationID, q.Workspace, q.Harness, q.IncludeIgnored, q.HarnessArgs)
 	case ActionMove:
-		status, err = s.Move(ctx, q.ID, q.OperationID, q.Destination)
+		destination := q.Destination
+		if q.Remote != nil {
+			destination, err = s.reachExecutor(ctx, *q.Remote)
+		}
+		if err == nil {
+			status, err = s.Move(ctx, q.ID, q.OperationID, destination)
+		}
 	case ActionStatus:
 		status, err = s.Status(q.ID)
 	case ActionCancel:
@@ -325,20 +344,28 @@ func (s *Service) handle(ctx context.Context, conn net.Conn) {
 	case ActionRecover:
 		status, err = s.Recover(ctx, q.ID)
 	case ActionPull:
-		status, err = s.Pull(ctx, q.ID, q.OperationID, q.Source)
+		source := q.Source
+		if q.Remote != nil && !s.pullRetained(q.ID) {
+			source, err = s.reachExecutor(ctx, *q.Remote)
+		}
+		if err == nil {
+			status, err = s.Pull(ctx, q.ID, q.OperationID, source)
+		}
 	case ActionResume:
-		status, err = s.Resume(ctx, q.ID, q.OperationID)
+		status, err = s.Resume(ctx, q.ID, q.OperationID, q.HarnessArgs)
 	case ActionStop:
 		status, err = s.Stop(ctx, q.ID, q.OperationID)
 	case ActionSessions:
 		sessions, err = s.Sessions(work.SessionQuery{Project: q.Project})
+	case ActionRemove:
+		status, err = s.Remove(q.ID)
 	}
 	response := Response{Sessions: sessions}
 	if status.ID != "" {
 		response.Status = &status
 	}
 	if err != nil {
-		err = needsRecovery(err, q.ID)
+		err = needsRecovery(err, q.ID, s.continueCommand(q))
 		response.Error = err.Error()
 		response.Rejected = errors.Is(err, ErrRejected)
 		if unknown, ok := s.unknownSession(q, err); ok {
@@ -352,17 +379,49 @@ func (s *Service) handle(ctx context.Context, conn net.Conn) {
 // needsRecovery names the commands that unblock a session whose earlier
 // operation is unfinished or cancelled. Repeating the refused request cannot
 // help, so the reply is a rejection without a retry hint.
-func needsRecovery(err error, id string) error {
+func needsRecovery(err error, id, continueWith string) error {
 	switch {
+	case errors.Is(err, harness.ErrNativeTurnPending):
+		return rejectedError(fmt.Sprintf("%v; the session keeps running with its terminal input paused: run "+
+			"\"sproozi %s %s\" to keep waiting, or \"sproozi cancel %s\" to force-stop it", err, continueWith, id, id))
+	case errors.Is(err, session.ErrStopPending):
+		return rejectedError(fmt.Sprintf("session %s is still stopping; run \"sproozi stop %s\" to keep waiting, "+
+			"or \"sproozi cancel %s\" to force-stop it", id, id, id))
 	case errors.Is(err, session.ErrRecoveryRequired):
 		return rejectedError(fmt.Sprintf("%v; run \"sproozi recover %s\" to finish it, or \"sproozi cancel %s\" "+
-			"to revoke and force-stop its current execution", err, id, id))
+			"to stop it now", err, id, id))
 	case errors.Is(err, session.ErrCancellationUnfinished):
 		return rejectedError(fmt.Sprintf("%v; run \"sproozi recover %s\" to finish the cancellation", err, id))
 	case errors.Is(err, session.ErrSessionCancelled):
-		return rejectedError(fmt.Sprintf("session %s is cancelled; start a new session", id))
+		return cancelledProblem(id)
 	}
 	return err
+}
+
+// cancelledProblem says a cancelled session cannot continue and how to remove it.
+func cancelledProblem(id string) error {
+	return rejectedError(fmt.Sprintf("session %s was cancelled, so it cannot be stopped or resumed; remove it with "+
+		"\"sproozi rm %s\", and start new work with \"sproozi run\"", id, id))
+}
+
+// continueCommand names the command that keeps waiting for a request's
+// pending operation: stop for a stop, recover for anything else.
+func (s *Service) continueCommand(q Request) string {
+	switch q.Action {
+	case ActionStop:
+		return ActionStop
+	case ActionMove:
+		return ActionRecover
+	}
+	execution, _, err := s.resolveSession(q.ID)
+	if err != nil {
+		return ActionRecover
+	}
+	r, err := s.coordinator.Inspect(execution)
+	if err == nil && r.PendingOperation != "" && r.Operations[len(r.Operations)-1].Finalize {
+		return ActionStop
+	}
+	return ActionRecover
 }
 
 func validateRequest(q Request) error {
@@ -384,18 +443,18 @@ func validateRequest(q Request) error {
 			return errors.New("home: invalid start")
 		}
 	case ActionMove:
-		if !work.CanonicalID(q.OperationID) || q.Destination == "" || q.Workspace != "" {
+		if !work.CanonicalID(q.OperationID) || (q.Destination == "") == (q.Remote == nil) || q.Workspace != "" {
 			return errors.New("home: invalid move")
 		}
 	case ActionPull:
-		if !work.CanonicalID(q.OperationID) || q.Source == "" || q.Workspace != "" || q.Destination != "" {
+		if !work.CanonicalID(q.OperationID) || q.Source != "" && q.Remote != nil || q.Workspace != "" || q.Destination != "" {
 			return errors.New("home: invalid pull")
 		}
 	case ActionResume, ActionStop, ActionCancel:
 		if !work.CanonicalID(q.OperationID) || q.Workspace != "" || q.Destination != "" {
 			return errors.New("home: invalid execution intent")
 		}
-	case ActionAttach, ActionStatus, ActionRecover:
+	case ActionAttach, ActionStatus, ActionRecover, ActionRemove:
 		if q.OperationID != "" || q.Workspace != "" || q.Destination != "" {
 			return errors.New("home: unexpected control fields")
 		}
@@ -412,7 +471,7 @@ var errControlListening = errors.New("home: control socket has a live listener")
 // ErrControlUnavailable reports that no home daemon is listening on the
 // control address. It names the executor (docker) and its owner (home) as
 // command output and --executor do.
-var ErrControlUnavailable = errors.New("docker (home): no home daemon is listening on the private control socket")
+var ErrControlUnavailable = errors.New("no Sproozi service is listening on the control socket")
 
 func connect(ctx context.Context, path string, q Request) (net.Conn, *bufio.Reader, error) {
 	if err := validateRequest(q); err != nil {
@@ -466,6 +525,17 @@ func validateCommonRequest(q Request) error {
 	}
 	if q.Action != ActionPull && q.Source != "" {
 		return errors.New("home: source is pull intent")
+	}
+	if q.Remote != nil {
+		if q.Action != ActionPull && q.Action != ActionMove {
+			return errors.New("home: a kubeconfig context selects a move destination or pull source only")
+		}
+		if err := q.Remote.Validate(); err != nil {
+			return err
+		}
+	}
+	if len(q.HarnessArgs) != 0 && q.Action != ActionStart && q.Action != ActionResume {
+		return errors.New("home: only start and resume take harness arguments")
 	}
 	return nil
 }

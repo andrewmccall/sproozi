@@ -1,144 +1,63 @@
-# Getting started
+# Run the investigation-to-PR demo on Kind
 
-Sproozi runs an agent in a disposable Kubernetes Pod. The agent reaches approved
-services through a shared gateway, which checks the run's identity and policy.
-Provider credentials stay in the gateway.
+In this demo, Codex investigates a deliberately broken workload in a
+disposable Kind cluster and opens a pull request in your own GitHub
+repository. It needs a model account and a GitHub App, and runs from a clone
+of this repository with Make. It doesn't use the `sproozi` CLI.
 
-This guide has two parts:
+New to Sproozi? [Install on Kubernetes](install-kubernetes.md) runs a first
+check on Kind from a release, with no accounts or builds. To run
+this demo on a cluster you already have, use
+[step 7 of Install from a checkout](install-from-checkout.md#7-run-a-model-on-this-cluster).
 
-1. **Check your setup, no accounts needed** (steps 1 and 2). Build Sproozi,
-   deploy it to a throwaway Kind cluster and prove that its network enforcement
-   works.
-2. **Run the investigation-to-PR demo** (steps 3 to 8). Codex investigates a
-   broken workload and opens a pull request in your own disposable GitHub
-   repository. This needs a model account and a GitHub App.
-
-Everything here runs from a clone of this repository with Make. You don't need
-the `sproozi` CLI.
-
-Already have a cluster? Follow
-[Install on Kubernetes and run your first Pod](install-kubernetes.md) instead.
-Its first agent Pod lists other Pods through the gateway and needs an image
-registry, but no model account or GitHub App. Its last part adds model and
-GitHub credentials and runs this guide's investigation-to-PR demo on your cluster.
-
-Sproozi is a preview. Start in an evaluation environment and read the
-[deployment limitations](../reference/security-hardening.md) before using it for
-other workloads. The demo proposes a fix; it does not merge the PR or repair
-the running workload. If the resource names are new to you, read
-[core concepts](../explanations/core-concepts.md) first.
+The demo proposes a fix; it does not merge the PR or repair the workload. Read
+the [deployment limitations](../reference/security-hardening.md) before using
+Sproozi for other work.
 
 ## 1. Prepare your computer
 
-Use macOS or Linux, or a Linux shell under WSL2. Install the following tools and
-make sure they are on your `PATH`:
+Use macOS or Linux, or a Linux shell under WSL2, with these tools on your
+`PATH`:
 
-- [Docker](https://docs.docker.com/get-started/get-docker/) with a running engine.
-  On macOS, start Docker Desktop.
+- [Docker](https://docs.docker.com/get-started/get-docker/), running.
 - [Kind](https://kind.sigs.k8s.io/docs/user/quick-start/) and
-  [kubectl](https://kubernetes.io/docs/tasks/tools/). The demo pins Kubernetes
-  1.33.1, so use kubectl 1.32, 1.33 or 1.34, within Kubernetes' supported
-  [version skew](https://kubernetes.io/releases/version-skew-policy/#kubectl).
+  [kubectl](https://kubernetes.io/docs/tasks/tools/) 1.32, 1.33 or 1.34. The
+  demo pins Kubernetes 1.33.1.
 - Git and the [GitHub CLI](https://cli.github.com/).
-- [Go](https://go.dev/dl/) 1.26 or later, Make, OpenSSL,
-  Python 3, curl and `shasum`.
+- [Go](https://go.dev/dl/) 1.26 or later, Make, OpenSSL, Python 3, curl and
+  `shasum`.
 
 Clone the repository and run the rest of this guide from its root:
 
 ```sh
-git clone https://github.com/andrewmccall/sproozi.git
-cd sproozi
-mkdir -p .local
+git clone https://github.com/andrewmccall/sproozi.git ~/src/sproozi
+cd ~/src/sproozi
 ```
 
-Check Docker and your kubectl version:
+If your kubectl is another version, install a matching one into `bin/` and
+put it first on your `PATH` (repeat the export in each new terminal):
 
 ```sh
-docker info
-kubectl version --client
+make demo-kubectl
+export PATH="$PWD/bin:$PATH"
 ```
-
-If `kubectl version --client` reports a version other than 1.32, 1.33 or 1.34,
-or kubectl isn't installed, install the demo-compatible client separately
-and put it first on `PATH`. On macOS or Linux with an AMD64 or ARM64 CPU:
-
-```sh
-mkdir -p .local/bin
-SPROOZI_KUBECTL_OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
-SPROOZI_KUBECTL_ARCH=amd64
-case "$(uname -m)" in arm64|aarch64) SPROOZI_KUBECTL_ARCH=arm64 ;; esac
-SPROOZI_KUBECTL_URL="https://dl.k8s.io/release/v1.34.1/bin/$SPROOZI_KUBECTL_OS/$SPROOZI_KUBECTL_ARCH/kubectl"
-curl --fail --location "$SPROOZI_KUBECTL_URL" -o .local/bin/kubectl
-SPROOZI_KUBECTL_SHA256="$(curl --fail --location --silent --show-error "$SPROOZI_KUBECTL_URL.sha256")"
-printf '%s  %s\n' "$SPROOZI_KUBECTL_SHA256" .local/bin/kubectl | shasum -a 256 -c - &&
-  chmod +x .local/bin/kubectl
-export PATH="$PWD/.local/bin:$PATH"
-kubectl version --client
-```
-
-The export lasts only for this terminal. In each new terminal, including the
-one you open to watch the demo in step 7, run
-`export PATH="$PWD/.local/bin:$PATH"` again from the repository root.
 
 ## 2. Check your setup without any accounts
-
-Run:
 
 ```sh
 python3 hack/verify/quickstart.py doctor
 python3 hack/verify/quickstart.py dependencies
 ```
 
-`doctor` checks that Docker, Kind, kubectl, Git, Go, Make, OpenSSL, curl and
-`shasum` are on your `PATH`. It enforces two versions: kubectl must be 1.32,
-1.33 or 1.34, and Go must be at least the version `go.mod` declares. It also
-asks the Docker engine for its version, which fails if the engine isn't
-running, and prints the Docker server and Kind versions without checking them.
-It doesn't check the versions of Git, Make, OpenSSL, curl or `shasum`. It runs
-under Python 3, so it doesn't check for it separately. It checks for `gh` only
-in step 6, when you pass `--env-file`. It runs every check, even after one
-fails, and prints an `ok` line as each one passes; the Go line names the
-minimum version `go.mod` requires. A tool that is missing from `PATH` is
-reported once in `Missing tools: …`, and its version check is skipped. It ends
-with `Doctor checks passed: host tools and versions`, or with every failure in check order, so you can
-fix them all before rerunning. One failure stays on the same line as
-`Doctor check failed: `. With several, `Doctor check failed:` stands alone and
-each failure follows on its own line, indented by two spaces. An unsupported
-kubectl version fails with this message, which names the version found and
-points to step 1 above:
-
-```text
-Use kubectl 1.32, 1.33 or 1.34 for the pinned Kubernetes 1.33.1 demo (found 1.37.1); see "Prepare your computer" in docs/guides/getting-started.md to install a matching client into .local/bin
-```
-
-`dependencies` builds the real controller image and deploys it to a temporary
-Kind cluster with Calico. It then proves that the network rules work: a test
-connection succeeds, a deny-egress policy blocks it, and removing the policy
-restores it. It skips the optional metrics check, which the demo doesn't use.
-
-The first run builds images and can take 10 minutes or more; once images are
-cached, a run takes about 2 minutes. `dependencies` prints each step as it
-starts and finishes, plus a `still running` line every two minutes, and tells
-you where its `commands.log` is so you can follow it with `tail -f`. It ends
-with `Dependencies check passed` or `Dependencies check failed` and the
-reason.
-
-If you close the terminal or press Ctrl-C, the check stops and cleans up. If a
-second run reports that another quickstart owns `driver.lock`, it says whether
-that run is still going. If it is, wait for it or stop it; it cleans up as it
-stops. If it has exited, the message prints the `cleanup` command that releases
-it. `cleanup` refuses while the owning run is still going unless you add
-`--force`. After a crash, `cleanup` first stops the processes that run left
-behind, then deletes its cluster. If a process with the run's PID is still
-running but the run's start time wasn't recorded, `cleanup` can't tell whether
-it is that run and needs `--force`.
-
-The temporary cluster is deleted when the check finishes, whether it passes or
-fails; a passing run reports `Kind cluster <name> removed` before its final
-line. Logs and `result.json` stay under `.local/verification/quickstart/`.
-This check doesn't run Codex or open a PR.
+`doctor` checks the tools and versions above and lists every problem at once.
+`dependencies` builds the controller image, deploys it to a temporary Kind
+cluster with Calico, and proves that a deny-egress policy blocks traffic. The
+first run takes 10 minutes or more; later runs take about 2. It ends with
+`Dependencies check passed` and deletes its cluster. Logs stay under
+`.local/verification/quickstart/`. If a run is interrupted, the next one tells
+you how to clean up.
 [Cluster dependencies](../reference/dependencies.md) lists what the demo
-installs and what it doesn't need.
+installs.
 
 ## 3. Choose a model account
 

@@ -65,7 +65,7 @@ def main():
                 "kubernetes.read": {"maxUnits": 20, "maxCostMicros": 0},
             }
             if args.mode == "configured":
-                policy = yaml.safe_load((root / "examples/mcp/agentpolicy.yaml").read_text())["spec"]
+                policy = yaml.safe_load((root / "hack/verify/mcp-provider/agentpolicy.yaml").read_text())["spec"]
                 obj["spec"]["allowedCapabilities"] = policy["allowedCapabilities"]
                 obj["spec"]["mcpServers"] = policy["mcpServers"]
                 obj["spec"]["budgets"].pop("kubernetes.read")

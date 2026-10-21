@@ -426,8 +426,14 @@ func (p *Placement) quietSource(ctx context.Context, local retained, r registry.
 			r = bound
 			return nil
 		}
-		if _, err := harness.QuiesceNative(ctx, p.native(pod), local.thread(r), local.Launch.Deadline, bind); err != nil {
+		thread, err := harness.QuiesceNative(ctx, p.native(pod), local.thread(r), local.Launch.Deadline, bind)
+		if err != nil {
 			return local, r, err
+		}
+		if thread == "" {
+			// Kubernetes visits carry a task or a checkpoint, so a turnless
+			// stop is unexpected here and has nothing to capture.
+			return local, r, errors.New("kubernetes native visit stopped with no native conversation")
 		}
 	}
 	local.NativeQuiet = true

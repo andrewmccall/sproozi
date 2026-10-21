@@ -1,10 +1,12 @@
 apiVersion: sproozi.com/v1alpha1
 kind: AgentRun
 metadata:
-  generateName: mcp-investigation-
+  generateName: mcp-deepwiki-
   namespace: sproozi-system
 spec:
   templateRef:
-    name: mcp-investigation
-  capabilities: [model.inference, mcp.docs, mcp.inventory]
-  task: Find the DNS outage guide and the servers in rack a.
+    name: mcp-deepwiki
+  capabilities: [model.inference, mcp.deepwiki]
+  task: How does the Go MCP SDK's streamable HTTP client handle a server that answers with server-sent events?
+  eventContext:
+    trigger: manual

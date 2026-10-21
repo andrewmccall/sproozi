@@ -9,6 +9,7 @@ The archive extracts to sproozi-release/:
   quickstart-self-managed-ca/   install + self-managed CA + kubernetes.read gateway
   quickstart-external-ca/       install + kubernetes.read gateway; you supply TLS
   first-check/                  provider-free AgentRun with permitted and denied paths
+  cli-access/                   the CLI's ServiceAccount and Role for a remote executor's namespace
 
 Nothing in the tree is modified; overlays are rendered in a scratch directory.
 """
@@ -64,6 +65,7 @@ def render(version, control, native, output):
         scratch = Path(temporary)
         crds, install = split(build(binary, scratch, "install", ["config/install", "config/agent-rbac"], control))
         _, certificates = split(build(binary, scratch, "certificates", ["config/certificates"], control))
+        _, cli_access = split(build(binary, scratch, "cli-access", ["config/cli-access"], control))
         if crds.count("kind: CustomResourceDefinition") != 4:
             raise ValueError("expected exactly four CRDs")
         for text, name in [(install, "install"), (certificates, "certificates")]:
@@ -73,7 +75,8 @@ def render(version, control, native, output):
         out = scratch / "sproozi-release"
         out.mkdir()
         (out / "crds.yaml").write_text(crds)
-        for directory, file, content in [("install", "install.yaml", install), ("self-managed-ca", "certificates.yaml", certificates)]:
+        for directory, file, content in [("install", "install.yaml", install), ("self-managed-ca", "certificates.yaml", certificates),
+                                         ("cli-access", "cli-access.yaml", cli_access)]:
             (out / directory).mkdir()
             (out / directory / file).write_text(content)
             (out / directory / "kustomization.yaml").write_text(f"apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n- {file}\n")

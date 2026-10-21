@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/andrewmccall/sproozi/internal/agentprofile"
 	"github.com/andrewmccall/sproozi/internal/harness"
@@ -16,10 +17,13 @@ import (
 
 const (
 	journalUnavailable = "journal_unavailable_or_invalid"
+	pendingTools       = "pending_tools"
+	inputChanged       = "input_changed"
 	claudePromptSubmit = "UserPromptSubmit"
 	claudePreTool      = "PreToolUse"
 	claudePostTool     = "PostToolUse"
 	claudeStop         = "Stop"
+	claudeStopFailure  = "StopFailure"
 	claudeBash         = "Bash"
 	claudeHooksKey     = "hooks"
 
@@ -45,6 +49,12 @@ type claudeLifecycle struct {
 	id        string
 	started   bool
 	completed bool
+	// failed records a turn that ended on an API error (StopFailure);
+	// everCompleted records that some turn of this conversation completed.
+	failed        bool
+	everCompleted bool
+	// lastHook is when the last lifecycle hook arrived.
+	lastHook  time.Time
 	input     uint64
 	pending   map[string]bool
 	lastEvent string
@@ -62,15 +72,17 @@ func (s *server) claudeCompletion() *claudeCompletion {
 		PromptGeneration: c.input, InputGeneration: s.inputGeneration,
 		LastEvent: c.lastEvent, Rejected: c.rejected, Observation: "lifecycle_incomplete"}
 	selected := s.config.ThreadID
+	settled := s.inputSettled()
+	restored := s.claudeRestoredUnchanged()
 	s.mu.Unlock()
 	switch {
 	case d.PendingTools != 0:
-		d.Observation = "pending_tools"
-	case d.PromptGeneration != d.InputGeneration:
-		d.Observation = "input_changed"
-	case c.id == "" || (selected != "" && c.id != selected):
+		d.Observation = pendingTools
+	case d.PromptGeneration != d.InputGeneration && !settled:
+		d.Observation = inputChanged
+	case !restored && (c.id == "" || (selected != "" && c.id != selected)):
 		d.Observation = "identity_unavailable"
-	case d.Completed:
+	case d.Completed || restored:
 		if _, _, err := s.observeClaudeTurn(); err != nil {
 			d.Observation = claudeJournalDiagnostic(err)
 		} else {
@@ -117,6 +129,7 @@ func (s *server) claudeHook(h *claudeHook) response {
 		return r
 	}
 	s.claude.id = h.SessionID
+	s.claude.lastHook = time.Now()
 	if err = s.claude.accept(*h, s.inputGeneration); err != nil {
 		r.Error = err.Error()
 		s.claude.rejected = "invalid_lifecycle_transition"
@@ -131,7 +144,7 @@ func (c *claudeLifecycle) accept(h claudeHook, input uint64) error {
 		if len(c.pending) != 0 {
 			return errors.New("claude prompt arrived with pending tools")
 		}
-		c.started, c.completed, c.input = true, false, input
+		c.started, c.completed, c.failed, c.input = true, false, false, input
 		c.pending = map[string]bool{}
 	case claudePreTool:
 		if !c.started || c.completed || !validClaudeTool(h) || c.pending[h.ToolID] {
@@ -147,7 +160,13 @@ func (c *claudeLifecycle) accept(h claudeHook, input uint64) error {
 		if !c.started || len(c.pending) != 0 || h.StopActive == nil || *h.StopActive {
 			return errors.New("claude turn has no safe Stop observation")
 		}
-		c.completed = true
+		c.completed, c.everCompleted = true, true
+	case claudeStopFailure:
+		if !c.started || c.completed {
+			return errors.New("claude turn failure has no started turn")
+		}
+		// An API error ends the turn; no tool can still be running.
+		c.failed, c.pending = true, map[string]bool{}
 	default:
 		return errors.New("unsupported Claude lifecycle event")
 	}
@@ -158,11 +177,48 @@ func validClaudeTool(h claudeHook) bool {
 		!strings.ContainsAny(h.ToolID, "\x00\r\n")
 }
 
+// claudeTurnless reports that a gated first visit has no Claude conversation
+// to keep: no prompt was ever submitted, or every submitted turn ended on an
+// API error before any turn completed. A failed transcript is not a
+// resumable checkpoint, so it is left behind.
+func (s *server) claudeTurnless() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c := s.claude
+	if !c.started {
+		return c.id == ""
+	}
+	return c.failed && !c.everCompleted && len(c.pending) == 0
+}
+
+// claudeTurnReady reports a completed turn with no running tool and no
+// unsettled input after it. Input after the completed turn blocks the stop
+// until it settles: a submitted or queued prompt reports UserPromptSubmit and
+// clears the completion, while terminal replies, focus reports and drafts do
+// not. The caller holds s.mu.
+func (s *server) claudeTurnReady() bool {
+	c := s.claude
+	return c.completed && len(c.pending) == 0 && (c.input == s.inputGeneration || s.inputSettled())
+}
+
+// claudeRestoredUnchanged reports a resumed visit in which no prompt was
+// submitted: its selected conversation is the restored one, so a stop needs no
+// new turn. Unsubmitted input must have settled. The caller holds s.mu.
+func (s *server) claudeRestoredUnchanged() bool {
+	c := s.claude
+	return !c.started && s.config.ThreadID != "" && len(c.pending) == 0 &&
+		(s.inputGeneration == 0 || s.inputSettled())
+}
+
 func (s *server) observeClaudeTurn() (string, string, error) {
 	s.mu.Lock()
 	c := s.claude
 	selected, maxBytes := s.config.ThreadID, s.config.RolloutMaxBytes
-	ready := c.completed && len(c.pending) == 0 && c.input == s.inputGeneration
+	ready := s.claudeTurnReady()
+	if s.claudeRestoredUnchanged() {
+		// No prompt in this visit: the restored conversation is unchanged.
+		ready, c.id = true, selected
+	}
 	s.mu.Unlock()
 	if !ready || c.id == "" || (selected != "" && selected != c.id) {
 		return "", "", errors.New("claude completed turn is unavailable")
@@ -221,7 +277,7 @@ func prepareClaudeLaunch(c config, _ string, env []string) ([]string, []string, 
 		return nil, nil, err
 	}
 	hooks := map[string]any{}
-	for _, event := range []string{claudePromptSubmit, claudePreTool, claudePostTool, claudeStop} {
+	for _, event := range []string{claudePromptSubmit, claudePreTool, claudePostTool, claudeStop, claudeStopFailure} {
 		hooks[event] = []any{map[string]any{"matcher": "", claudeHooksKey: []any{map[string]any{
 			"type": "command", "command": "/usr/local/bin/native-session observe-claude", "timeout": 5}}}}
 	}
@@ -259,9 +315,10 @@ func claudeArguments(c config, profile agentprofile.Profile, withSkills bool) []
 	}
 	args = append(args, "--setting-sources", "", "--settings", claudeSettings, "--permission-mode", "bypassPermissions",
 		"--append-system-prompt", c.Instructions+"\n\n"+profileInstructions(profile, harness.NativeClaude))
-	if c.Model != "" {
+	if c.Model != "" && !harness.NativeArgsSelectModel(harness.NativeClaude, c.Args) {
 		args = append(args, "--model", c.Model)
 	}
+	args = append(args, c.Args...)
 	if c.ThreadID != "" {
 		args = append(args, "--resume", c.ThreadID)
 	}

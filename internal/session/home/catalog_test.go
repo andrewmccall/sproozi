@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
+	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -77,14 +78,11 @@ func TestPullClaimReplayAndFreshResumePreserveSourceAccounts(t *testing.T) {
 	if _, err := s.Pull(t.Context(), id, operation, testRemote); err == nil {
 		t.Fatal("lost claim response became acknowledged ownership")
 	}
-	if _, err := s.Resume(t.Context(), id, uuid.NewString()); err == nil || local.prepares != 0 {
+	if _, err := s.Resume(t.Context(), id, uuid.NewString(), nil); err == nil || local.prepares != 0 {
 		t.Fatal("downloaded bytes acquired activation authority")
 	}
-	if _, err := s.Pull(t.Context(), id, uuid.NewString(), testRemote); err == nil ||
-		!strings.Contains(err.Error(), "--from "+testRemote+" --operation "+operation) {
-		t.Fatalf("conflicting pull did not name the retained operation: %v", err)
-	}
-	status, err := s.Pull(t.Context(), id, operation, testRemote)
+	// A retry with a fresh operation and no source continues the retained pull.
+	status, err := s.Pull(t.Context(), id, uuid.NewString(), "")
 	if err != nil || source.begins != 1 || source.claims != 2 || status.InitialStage != stageRetained || status.ThreadID != testNativeUUID {
 		t.Fatalf("claim replay: %+v %v, begin=%d claim=%d", status, err, source.begins, source.claims)
 	}
@@ -95,7 +93,7 @@ func assertFreshResume(t *testing.T, s *Service, local *placementFixture, source
 	t.Helper()
 	before, _ := json.Marshal(source.export.Stopped.Receipt)
 	resume := uuid.NewString()
-	status, err := s.Resume(t.Context(), id, resume)
+	status, err := s.Resume(t.Context(), id, resume, nil)
 	if err != nil || status.ID != id || status.ExecutionID == id || status.Phase != string(session.PhaseActive) || status.ThreadID != testNativeUUID {
 		t.Fatalf("fresh native resume: %+v %v", status, err)
 	}
@@ -110,11 +108,11 @@ func assertFreshResume(t *testing.T, s *Service, local *placementFixture, source
 	if len(r.Visits) != 0 || !reflect.DeepEqual(r.Remaining, r.Ceiling) {
 		t.Fatalf("resume invented a previous source receipt in its coordinator: %+v", r)
 	}
-	replayed, err := s.Resume(t.Context(), id, resume)
+	replayed, err := s.Resume(t.Context(), id, resume, nil)
 	if err != nil || replayed.ID != id || replayed.ExecutionID != status.ExecutionID || local.activations != 1 || local.initials != 0 || local.prepares != 1 {
 		t.Fatalf("resume replay: %+v %v, activations=%d", replayed, err, local.activations)
 	}
-	if _, err = s.Resume(t.Context(), id, uuid.NewString()); err == nil {
+	if _, err = s.Resume(t.Context(), id, uuid.NewString(), nil); err == nil {
 		t.Fatal("active prior writer admitted a new envelope")
 	}
 	listed, err := s.Sessions(work.SessionQuery{})
@@ -132,7 +130,7 @@ func assertCompletedResumeCycle(t *testing.T, s *Service, local *placementFixtur
 	if err != nil || stopped.ID != id || stopped.ExecutionID != status.ExecutionID || stopped.AllocationID != status.AllocationID || stopped.Incarnation == nil || stopped.InitialStage != stageRetained || stopped.ThreadID != testNativeUUID {
 		t.Fatalf("stopped session checkpoint: %+v %v", stopped, err)
 	}
-	next, err := s.Resume(t.Context(), id, uuid.NewString())
+	next, err := s.Resume(t.Context(), id, uuid.NewString(), nil)
 	if err != nil || next.ID != id || next.ExecutionID == status.ExecutionID || local.activations != 2 {
 		t.Fatalf("separate later envelope: %+v %v", next, err)
 	}
@@ -179,7 +177,7 @@ func TestPullRejectsUnknownSourceAndChangedClaim(t *testing.T) {
 			if _, err := s.Pull(t.Context(), source.export.ID, source.export.OperationID, testRemote); err == nil {
 				t.Fatal("invalid source acquired ownership")
 			}
-			if _, err := s.Resume(t.Context(), source.export.ID, uuid.NewString()); err == nil || local.activations != 0 {
+			if _, err := s.Resume(t.Context(), source.export.ID, uuid.NewString(), nil); err == nil || local.activations != 0 {
 				t.Fatal("invalid source activated local writer")
 			}
 		})
@@ -195,10 +193,10 @@ func TestImportedResumeLostActivationAndUnknownStopKeepOneWriter(t *testing.T) {
 	}
 	op := uuid.NewString()
 	local.lostActivate = true
-	if _, err := s.Resume(t.Context(), id, op); err == nil {
+	if _, err := s.Resume(t.Context(), id, op, nil); err == nil {
 		t.Fatal("lost activation response was successful")
 	}
-	status, err := s.Resume(t.Context(), id, op)
+	status, err := s.Resume(t.Context(), id, op, nil)
 	if err != nil || local.activations != 1 {
 		t.Fatalf("lost activation repeated native launch: %+v %v", status, err)
 	}
@@ -206,7 +204,7 @@ func TestImportedResumeLostActivationAndUnknownStopKeepOneWriter(t *testing.T) {
 	if _, err := s.Stop(t.Context(), id, uuid.NewString()); err == nil {
 		t.Fatal("missing local accounting became a committed checkpoint")
 	}
-	if _, err := s.Resume(t.Context(), id, uuid.NewString()); err == nil || local.activations != 1 {
+	if _, err := s.Resume(t.Context(), id, uuid.NewString(), nil); err == nil || local.activations != 1 {
 		t.Fatal("unknown stopped source admitted another writer")
 	}
 	r, err := s.readCatalog(id)
@@ -223,7 +221,7 @@ func TestStopMovedProductFinalizesWithoutDestinationAndRemainsReplayable(t *test
 	if _, err := s.Pull(t.Context(), id, source.export.OperationID, testRemote); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Resume(t.Context(), id, uuid.NewString()); err != nil {
+	if _, err := s.Resume(t.Context(), id, uuid.NewString(), nil); err != nil {
 		t.Fatal(err)
 	}
 	moveOperation := uuid.NewString()
@@ -235,7 +233,7 @@ func TestStopMovedProductFinalizesWithoutDestinationAndRemainsReplayable(t *test
 	if err != nil || status.InitialStage != stageRetained || prepares != local.prepares+remote.prepares {
 		t.Fatalf("stop activated destination: %+v %v", status, err)
 	}
-	if _, err = s.Resume(t.Context(), id, uuid.NewString()); err != nil {
+	if _, err = s.Resume(t.Context(), id, uuid.NewString(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = s.Move(t.Context(), id, moveOperation, testRemote); err == nil {
@@ -254,7 +252,7 @@ func TestIdleStopReplayCannotStopTheFirstContinuation(t *testing.T) {
 	if _, err := s.Stop(t.Context(), id, operation); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Resume(t.Context(), id, uuid.NewString()); err != nil {
+	if _, err := s.Resume(t.Context(), id, uuid.NewString(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Stop(t.Context(), id, operation); err == nil {
@@ -290,7 +288,7 @@ func TestFreshResumeHonorsExistingExecutionRetentionBounds(t *testing.T) {
 	if err := testutil.WriteFile(filepath.Join(s.config.Directory, "journal", "retained-padding"), []byte("xx"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Resume(t.Context(), id, uuid.NewString()); err == nil {
+	if _, err := s.Resume(t.Context(), id, uuid.NewString(), nil); err == nil {
 		t.Fatal("fresh execution bypassed retention bound")
 	}
 	if local.prepares != 0 || local.activations != 0 {
@@ -320,7 +318,7 @@ func TestUnknownSessionRepliesWithoutJournalPath(t *testing.T) {
 	t.Parallel()
 	s, _, _, _ := testService(t)
 	id := uuid.NewString()
-	want := "docker (home): no session " + id + `; run "sproozi sessions" to list sessions`
+	want := "no session " + id + ` on this machine; "sproozi ls" lists sessions`
 	for _, q := range []Request{
 		{Action: ActionStatus, ID: id},
 		{Action: ActionStop, ID: id, OperationID: uuid.NewString()},
@@ -340,49 +338,170 @@ func TestUnknownSessionRepliesWithoutJournalPath(t *testing.T) {
 	}
 }
 
-// Resume names why a started execution, which pull never imported, cannot resume.
-func TestResumeExplainsStartedExecution(t *testing.T) {
+// A session created by start resumes where it stopped: a new execution from
+// its last checkpoint, with the same conversation, fresh limits and a new
+// deadline, even after the first execution's deadline.
+func TestResumeContinuesAStartedSessionAfterItsDeadline(t *testing.T) {
 	t.Parallel()
-	s, _, _, repo := testService(t)
+	s, local, _, repo := testService(t)
 	id := uuid.NewString()
-	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil); err != nil {
+	// Long enough for start, a refused resume and the stop to finish before the
+	// deadline on a loaded machine; the test then waits for it to pass.
+	s.duration = 15 * time.Second
+	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	r := exchange(t, s, Request{Action: ActionResume, ID: id, OperationID: uuid.NewString()})
-	if r.UnknownSession || !strings.Contains(r.Error, `started at home with "sproozi start"`) ||
-		strings.Contains(r.Error, string(filepath.Separator)) {
-		t.Fatalf("resume of a started execution replied %+v", r)
+	if !r.Rejected || !strings.Contains(r.Error, `is running; attach to it with "sproozi attach `+id+`"`) {
+		t.Fatalf("resume of a running session replied %+v", r)
+	}
+	stopped, err := s.Stop(t.Context(), id, uuid.NewString())
+	if err != nil || stopped.Phase != stageRetained || stopped.ThreadID != testNativeUUID {
+		t.Fatalf("stop of a started session: %+v %v", stopped, err)
+	}
+	time.Sleep(time.Until(stopped.Deadline) + 100*time.Millisecond)
+	s.duration = time.Hour
+	resumed, err := s.Resume(t.Context(), id, uuid.NewString(), []string{"--search"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	active := resumed.Session.Active
+	if resumed.ID != id || resumed.ExecutionID == id || active == nil || active.Launch.ThreadID != testNativeUUID ||
+		active.Launch.CheckpointDigest != local.digest || !active.Launch.Deadline.After(time.Now().Add(time.Minute)) ||
+		!slices.Equal(active.Launch.HarnessArgs, []string{"--search"}) {
+		t.Fatalf("resumed session: %+v", resumed)
+	}
+	if again, err := s.Stop(t.Context(), id, uuid.NewString()); err != nil || again.ThreadID != testNativeUUID {
+		t.Fatalf("stop of the resumed execution: %+v %v", again, err)
 	}
 }
 
-// Pull names an unconfigured --from as a remote executor name.
-func TestPullNamesUnconfiguredRemoteExecutor(t *testing.T) {
+// A session stopped with no conversation resumes from the workspace it
+// started from, as a new conversation.
+func TestResumeOfTurnlessSessionStartsFromItsWorkspace(t *testing.T) {
+	t.Parallel()
+	s, local, _, repo := testService(t)
+	local.turnless = true
+	id := uuid.NewString()
+	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	stopped, err := s.Stop(t.Context(), id, uuid.NewString())
+	if err != nil || stopped.Phase != stageRetained || stopped.ThreadID != "" {
+		t.Fatalf("turnless stop: %+v %v", stopped, err)
+	}
+	resumed, err := s.Resume(t.Context(), id, uuid.NewString(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	active := resumed.Session.Active
+	if active == nil || active.Launch.ThreadID != "" || active.Launch.CheckpointDigest != "" || resumed.Session.Workspace == "" {
+		t.Fatalf("turnless resume: %+v", resumed.Session)
+	}
+}
+
+// Pull names an executor this service has not reached, and says how to reach it.
+func TestPullNamesUnknownRemoteExecutor(t *testing.T) {
 	t.Parallel()
 	s, _, source := importedFixture(t)
 	_, err := s.Pull(t.Context(), source.export.ID, source.export.OperationID, "elsewhere")
-	if err == nil || err.Error() != `home: pull --from "elsewhere" names no remote executor configured under `+
-		`"remote" or "workSources" in this daemon's configuration` {
-		t.Fatalf("pull from an unconfigured executor: %v", err)
+	if err == nil || err.Error() != `home: no remote executor named "elsewhere" is known to this service; `+
+		`reach it with --context` || !errors.Is(err, ErrRejected) {
+		t.Fatalf("pull from an unknown executor: %v", err)
+	}
+	_, err = s.Pull(t.Context(), source.export.ID, source.export.OperationID, "")
+	if err == nil || !strings.Contains(err.Error(), "pass --context") {
+		t.Fatalf("pull without a source: %v", err)
 	}
 }
 
-// Move names an unconfigured destination and lists the configured placements.
+// Move refuses an unknown destination with the commands that choose one.
 func TestMoveNamesUnconfiguredDestination(t *testing.T) {
 	t.Parallel()
 	s, _, _, repo := testService(t)
 	id := uuid.NewString()
-	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil); err != nil {
+	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	names := []string{testLocal, testRemote}
-	slices.Sort(names)
 	for _, tc := range []struct{ operation, destination, want string }{
-		{uuid.NewString(), "docker", `home: move destination "docker" is not a configured placement; use one of: ` +
-			strings.Join(names, ", ")},
+		{uuid.NewString(), "docker", `home: this service cannot move a session to "docker"; run ` +
+			`"sproozi move ID --local" to bring it to this machine, or "sproozi move ID --remote" ` +
+			`(add --context for another cluster)`},
 	} {
 		r := exchange(t, s, Request{Action: ActionMove, ID: id, OperationID: tc.operation, Destination: tc.destination})
 		if r.Error != tc.want || !r.Rejected || !errors.Is(replyError(r), ErrRejected) {
 			t.Errorf("move replied %+v, want rejected %q", r, tc.want)
 		}
+	}
+}
+
+// rm refuses a running session, then deletes a stopped one with every
+// journal and retained file only it used; the listing no longer shows it.
+func TestRemoveDeletesAStoppedSessionAndItsFiles(t *testing.T) {
+	t.Parallel()
+	s, _, _, repo := testService(t)
+	id := uuid.NewString()
+	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	r := exchange(t, s, Request{Action: ActionRemove, ID: id})
+	if !r.Rejected || !strings.Contains(r.Error, `stop it with "sproozi stop `+id+`"`) {
+		t.Fatalf("remove of a running session replied %+v", r)
+	}
+	if _, err := s.Stop(t.Context(), id, uuid.NewString()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Resume(t.Context(), id, uuid.NewString(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Stop(t.Context(), id, uuid.NewString()); err != nil {
+		t.Fatal(err)
+	}
+	journal := filepath.Join(s.config.Directory, "journal")
+	before := countFiles(t, journal)
+	r = exchange(t, s, Request{Action: ActionRemove, ID: id})
+	if r.Error != "" || r.Status == nil || r.Status.ID != id {
+		t.Fatalf("remove replied %+v", r)
+	}
+	if after := countFiles(t, journal); after >= before || after != 0 {
+		t.Fatalf("journal files before %d, after %d", before, after)
+	}
+	if listed, err := s.Sessions(work.SessionQuery{}); err != nil || len(listed) != 0 {
+		t.Fatalf("removed session still listed: %+v %v", listed, err)
+	}
+	if r = exchange(t, s, Request{Action: ActionRemove, ID: id}); !r.UnknownSession {
+		t.Fatalf("second remove replied %+v", r)
+	}
+}
+
+func countFiles(t *testing.T, dir string) int {
+	t.Helper()
+	count := 0
+	err := filepath.WalkDir(dir, func(_ string, entry os.DirEntry, err error) error {
+		if err == nil && !entry.IsDir() && entry.Name() != "owner.lock" {
+			count++
+		}
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return count
+}
+
+// "local" names this machine's placement in a move, whatever it is called.
+func TestMoveToLocalAliasReturnsToThisMachine(t *testing.T) {
+	t.Parallel()
+	s, _, _, repo := testService(t)
+	id := uuid.NewString()
+	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Move(t.Context(), id, uuid.NewString(), testRemote); err != nil {
+		t.Fatal(err)
+	}
+	status, err := s.Move(t.Context(), id, uuid.NewString(), LocalAlias)
+	if err != nil || status.Placement != s.config.Local.Name {
+		t.Fatalf("move to local: %+v %v", status, err)
 	}
 }

@@ -102,24 +102,31 @@ test-e2e-existing: ## Run the e2e suite against an existing caller-owned Kind cl
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint. CI (Lint).
-	"$(GOLANGCI_LINT)" run
+	GOTOOLCHAIN=$(LINT_TOOLCHAIN) "$(GOLANGCI_LINT)" run
 
 .PHONY: lint-fix
 lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
-	"$(GOLANGCI_LINT)" run --fix
+	GOTOOLCHAIN=$(LINT_TOOLCHAIN) "$(GOLANGCI_LINT)" run --fix
 
 .PHONY: lint-config
 lint-config: golangci-lint ## Verify golangci-lint configuration. CI (Lint).
-	"$(GOLANGCI_LINT)" config verify
+	GOTOOLCHAIN=$(LINT_TOOLCHAIN) "$(GOLANGCI_LINT)" config verify
 
 ##@ Verification (see test/acceptance/running.md)
 
 # The committed header year is kept, so a new calendar year is not a diff.
 .PHONY: verify-generated
-verify-generated: ## Regenerate code and manifests and run go fmt; fail if the tree changes. CI.
-	@year="$$(sed -n 's/^Copyright \([0-9]*\)\.$$/\1/p' api/v1alpha1/zz_generated.deepcopy.go)"; \
-	$(MAKE) --no-print-directory manifests generate fmt YEAR="$$year"
-	@git diff --exit-code || { echo 'Generated code, manifests or formatting are stale: run make manifests generate fmt and commit the result' >&2; exit 1; }
+verify-generated: ## Regenerate code and manifests and run go fmt; fail if that changes the working tree. CI.
+	@before="$$(mktemp)"; after="$$(mktemp)"; trap 'rm -f "$$before" "$$after"' EXIT; \
+	git diff > "$$before"; \
+	year="$$(sed -n 's/^Copyright \([0-9]*\)\.$$/\1/p' api/v1alpha1/zz_generated.deepcopy.go)"; \
+	$(MAKE) --no-print-directory manifests generate fmt YEAR="$$year" || exit 1; \
+	git diff > "$$after"; \
+	if ! cmp -s "$$before" "$$after"; then \
+		diff "$$before" "$$after" | head -200; \
+		echo 'Generated code, manifests or formatting were stale; make manifests generate fmt has now updated them: review and keep the result' >&2; \
+		exit 1; \
+	fi
 
 .PHONY: verify-fast
 verify-fast: vet verify-race ## Vet and race-test every non-e2e package with coverage, without regenerating sources. CI.
@@ -129,9 +136,11 @@ verify-race: setup-envtest ## Race-test the non-e2e packages (RACE_SHARD=1 or 2 
 	$(ENVTEST_ASSETS) go test -race -coverprofile cover.out $(RACE_PACKAGES)
 
 .PHONY: verify-mcp
-verify-mcp: ## Race-test the MCP and gateway packages and the live MCP verifier offline. CI.
-	go test -race ./internal/endpoints/kubernetes ./internal/endpoints/mcp ./internal/mcppolicy ./internal/harness ./cmd/gateway -count=1
+verify-mcp: ## Race-test the MCP and gateway packages, check examples/*/servers.json examples and the live MCP verifier offline. CI.
+	go test -race ./internal/endpoints/kubernetes ./internal/endpoints/mcp ./internal/mcppolicy ./internal/harness ./internal/policy/kubernetes ./cmd/gateway -count=1
+	go test -race ./test/manifests -run 'TestMCPExamples' -count=1
 	python3 hack/verify/mcp-live-test.py
+	python3 hack/mcp_tools_test.py
 
 .PHONY: verify-mcp-client
 verify-mcp-client: ## Load generated MCP config in the installed stock Codex CLI; no model request.
@@ -154,7 +163,7 @@ verify-mcp-kind: ## Prove configured MCP with stock Codex in an owned Kind clust
 	KIND_NODE_IMAGE='$(KIND_NODE_IMAGE)' bash hack/verify/mcp-kind.sh
 
 .PHONY: verify-local-onboarding
-verify-local-onboarding: ## Prove init --local, both harnesses, profile instructions and renewal on this Docker engine with local providers.
+verify-local-onboarding: ## Prove sproozi init, both harnesses, profile instructions and renewal on this Docker engine with local providers.
 	python3 hack/verify/local-onboarding.py
 
 .PHONY: verify-kubernetes-release
@@ -207,6 +216,11 @@ demo-check: ## Check credentials first, then run demo-setup and check the full d
 .PHONY: demo-setup
 demo-setup: ## Configure Kind networking and a local pinned stock Codex image without prompts.
 	@CONTAINER_TOOL='$(CONTAINER_TOOL)' bash hack/demo/setup.sh
+
+DEMO_KUBECTL_VERSION ?= v1.34.1
+.PHONY: demo-kubectl
+demo-kubectl: | $(LOCALBIN) ## Download the kubectl client the Kind demo supports into bin/.
+	bash hack/demo/install-kubectl.sh "$(DEMO_KUBECTL_VERSION)" "$(LOCALBIN)/kubectl"
 
 .PHONY: demo-chatgpt-login
 demo-chatgpt-login: ## Authorize ChatGPT plan usage locally; no credentials enter the sandbox. CHATGPT_REAUTHORIZE=1 forces a fresh sign-in.
@@ -331,6 +345,10 @@ ENVTEST_K8S_VERSION ?= $(shell v='$(call gomodver,k8s.io/api)'; \
   printf '%s\n' "$$v" | sed -E 's/^v?[0-9]+\.([0-9]+).*/1.\1/')
 
 GOLANGCI_LINT_VERSION ?= v2.12.2
+# golangci-lint v2.12.2 reads compiler export data only from Go 1.26, so lint
+# loads packages with CI's toolchain whatever Go is installed; the go command
+# downloads it once if it is missing.
+LINT_TOOLCHAIN ?= go1.26.6
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
 $(KUSTOMIZE): | $(LOCALBIN)
@@ -362,7 +380,7 @@ $(GOLANGCI_LINT): | $(LOCALBIN)
 	@ln -sf "$$(realpath "$(GOLANGCI_LINT)-$(GOLANGCI_LINT_VERSION)")" "$(GOLANGCI_LINT)"
 	@test -f .custom-gcl.yml && { \
 		echo "Building custom golangci-lint with plugins..." && \
-		$(GOLANGCI_LINT) custom --destination $(LOCALBIN) --name golangci-lint-custom && \
+		GOTOOLCHAIN=$(LINT_TOOLCHAIN) $(GOLANGCI_LINT) custom --destination $(LOCALBIN) --name golangci-lint-custom && \
 		mv -f $(LOCALBIN)/golangci-lint-custom $(GOLANGCI_LINT); \
 	} || true
 

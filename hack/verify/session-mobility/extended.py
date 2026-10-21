@@ -91,7 +91,14 @@ class ExtendedProof(BASE.Proof):
         self.save()
 
     def command(self, action, **flags):
-        command = [str(self.args.session_binary.resolve()), action, "--socket", str(self.socket), "--id", self.id]
+        command = [str(self.args.session_binary.resolve()), action, "--socket", str(self.socket), "--id", self.id, "--json"]
+        destination = flags.pop("to", None)
+        if destination is not None:
+            local = destination in ("local", self.config["local"]["Name"])
+            # A remote destination is reached through the kubeconfig context,
+            # by default the "sproozi" context; destination is the executor's name.
+            context = ["--context", str(self.args.context)] if getattr(self.args, "context", None) else []
+            command += ["--local"] if local else ["--remote", *context]
         for key, value in flags.items():
             command += ["--" + key, str(value)]
         return command
@@ -432,7 +439,7 @@ class ExtendedProof(BASE.Proof):
             check(not self.provider(), "Use a fresh deterministic provider process")
             BASE.write_profile(self.fixture, "PROFILE_MARKER_DOCKER_FIRST")
             repo, expected = self.seed()
-            start = self.cli("start", operation=uuid.uuid4(), workspace=repo, **{"include-ignored": ["needed.bin"]})
+            start = self.cli("run", operation=uuid.uuid4(), workspace=repo, **{"include-ignored": ["needed.bin"]})
             check(start["initialStage"] == "active" and not start.get("threadId"), "Initial native UUID fabricated")
             deadline = start["deadline"]
             self.report["originalDeadline"] = deadline
@@ -506,7 +513,8 @@ def main():
     parser.add_argument("--kubectl", type=Path, default=Path("kubectl"))
     parser.add_argument("--namespace", required=True, help="Registry/AgentRun namespace in dedicated Kind")
     parser.add_argument("--agent-namespace", required=True)
-    parser.add_argument("--remote-name", default="remote")
+    parser.add_argument("--remote-name", default="remote", help="the remote executor's placement name")
+    parser.add_argument("--context", help="kubeconfig context name or file for the remote executor; default: the sproozi context")
     parser.add_argument("--operation-timeout", type=int, default=240)
     parser.add_argument("--turn-timeout", type=int, default=120)
     parser.add_argument("--observe-timeout", type=int, default=30)

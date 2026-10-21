@@ -13,18 +13,18 @@ Every verification target, what a pass establishes, and whether CI runs it.
 The `Tests` workflow runs three parallel jobs. `race-1` runs
 `make verify-generated`, `make vet` and `make verify-race RACE_SHARD=1`;
 `race-2` runs `make verify-race RACE_SHARD=2`; and `checks` runs the remaining
-`Tests` rows in table order, taking only the offline verifier from `verify-mcp`. The race run proves everything a plain run does,
+`Tests` rows in table order, taking only the Python checks from `verify-mcp`. The race run proves everything a plain run does,
 so CI does not run `make test`. `Lint` and `E2E` are separate workflows.
 `make help` prints the same summaries.
 
 | Target | A pass proves | CI | Needs |
 | --- | --- | --- | --- |
 | `make test` | After regenerating code and manifests, every non-e2e Go test passes: unit, rendered manifests, envtest API validation, integration and offline acceptance helpers. | No; CI runs the same packages under race | Go; downloads envtest binaries |
-| `make verify-generated` | Regenerating code and manifests and running `go fmt` leaves the tree unchanged, so committed generated files are current. Fails on any uncommitted change. | Tests (`race-1`) | Go, Git |
+| `make verify-generated` | Regenerating code and manifests and running `go fmt` leaves the working tree unchanged, so generated files match their sources. Works before you commit; on failure the regenerated files are already in place to review. | Tests (`race-1`) | Go, Git |
 | `make verify-fast` | `go vet` is clean and every non-e2e package passes under the race detector with coverage, without regenerating sources. | Tests (`race-1` and `race-2`, as `vet` and `verify-race`) | Go; downloads envtest binaries |
 | `make verify-race` | The race-and-coverage half of `verify-fast`. `RACE_SHARD=1` runs `test/` and `internal/session`, `RACE_SHARD=2` every other package; the two shards together cover every non-e2e package. | Tests (`race-1`, `race-2`) | Go; downloads envtest binaries |
 | `make verify-protocol` | Pinned `gh` and `git` clients produce the GitHub protocol the gateway inspects. Zero matched or skipped tests fail. | Tests (`checks`) | Downloads the checksum-pinned `gh` |
-| `make verify-mcp` | MCP and gateway packages pass under race, and the live MCP verifier's safety and failure reports pass offline. | Tests: `checks` runs the offline verifier, `python3 hack/verify/mcp-live-test.py`; the race shards cover the packages | Go, Python 3 |
+| `make verify-mcp` | MCP and gateway packages pass under race, every `examples/*/servers.json` example is consistent, the live MCP verifier's safety and failure reports pass offline, and `hack/mcp-tools.py` handles JSON, SSE and legacy-SSE servers. | Tests: `checks` runs the two Python checks, `hack/verify/mcp-live-test.py` and `hack/mcp_tools_test.py`; the race shards cover the Go tests | Go, Python 3 |
 | `make verify-workflow-fixtures` | Session-mobility protocol fixtures, quickstart ownership and CRD checks, Kind bootstrap readiness ordering, Kind image import and build cache selection, demo setup credential preservation and registry wiring, and `make demo` input
 checks before cluster creation and cleanup after a setup failure. Stubs replace Docker and Kind. | Tests (`checks`) | Python 3, Bash; fetches the pinned Calico manifest into `.local/cni` on first run |
 | `make verify-docs` | Local Markdown links resolve and no private-plan paths are referenced. It does not establish that documentation is current. | Tests (`checks`) | Python 3 |
@@ -36,7 +36,7 @@ checks before cluster creation and cleanup after a setup failure. Stubs replace 
 | `make verify-native-session` | Installed stock Codex resumes through production checkpoint capture and restore against a local provider. | No | Codex CLI |
 | `make verify-harness-process` | Installed Claude Code and OpenCode complete model and tool loops through the inspected-TLS gateway with local providers, and call `sproozi` `diagnose` to explain a request the gateway refused. | No | Claude Code, OpenCode |
 | `make verify-mcp-kind` | Configured MCP providers work with stock Codex in an owned Kind cluster, including denials, budgets and revocation. Real model requests. | No | See [Configured MCP in Kind](#configured-mcp-in-kind) |
-| `make verify-local-onboarding` | On this computer's Docker engine, `init --local` provisions Codex and adds Claude Code, `doctor` passes, one stock terminal turn per harness completes through `attach`, both stops bind native UUIDs, each harness's profile instructions reach its provider, a renewed certificate reaches the running gateway, and a configured kubeconfig receives no calls. Deterministic local providers. See [Local onboarding](#local-onboarding). | No | Docker with Buildx, Go, Python 3, OpenSSL |
+| `make verify-local-onboarding` | On this computer's Docker engine, `init` provisions Codex and adds Claude Code, `doctor` passes, one stock terminal turn per harness completes through `attach`, both stops bind native UUIDs, each harness's profile instructions reach its provider, a renewed certificate reaches the running gateway, and a configured kubeconfig receives no calls. Deterministic local providers. See [Local onboarding](#local-onboarding). | No | Docker with Buildx, Go, Python 3, OpenSSL |
 | `make verify-kubernetes-release` | In an owned Kind cluster with enforcing CNI, the rendered release assets install as documented; the provider-free first check passes with permitted, denied and blocked paths; renewal reaches the running gateway; a CA rotation passes through new immutable trust objects; and the certificate controller lacks other rights. See [Kubernetes release assets](#kubernetes-release-assets). | No | Docker with Buildx, Kind, kubectl, Python 3 |
 | `make verify-live` | One real AgentRun on a provisioned cluster opens a scoped PR in `SPROOZI_DEMO_REPO` and its denial probes fail closed. | No | Provisioned cluster and credentials; creates a PR |
 | `make verify-public-tree` | No private local material is tracked. | No | Git |
@@ -59,7 +59,7 @@ only inside GitHub Actions; leave it unset locally. See the
 [CI caching amendment](../../docs/adr/0021-pinned-ci-inputs-and-latest-client-canary.md#amendment-ci-caching)
 to ADR 0021.
 
-## Getting-started guide
+## Investigation-to-PR demo guide
 
 The repository includes the
 [`verify-sproozi` skill](../../.agents/skills/verify-sproozi/SKILL.md) for checking
@@ -89,7 +89,7 @@ export KUBECONFIG="$SPROOZI_QUICKSTART_EVIDENCE/cluster.kubeconfig"
 python3 hack/verify/quickstart.py doctor --evidence "$SPROOZI_QUICKSTART_EVIDENCE"
 ```
 
-Use the [exploration commands](../../docs/guides/getting-started.md#8-inspect-the-result-and-explore). Finish with:
+Use the [exploration commands](../../docs/guides/pr-demo.md#8-inspect-the-result-and-explore). Finish with:
 
 ```sh
 python3 hack/verify/quickstart.py cleanup "$SPROOZI_QUICKSTART_EVIDENCE"
@@ -240,7 +240,7 @@ deterministic providers from the
 [session movement fixtures](../../hack/verify/session-mobility/README.md) on
 ports 18765 and 18775. It removes its network, root and providers when it
 finishes. The report records the tested revision, whether the tree was dirty,
-each step's result and the timing of the first `init --local`.
+each step's result and the timing of the first `init`.
 
 A pass establishes the local flow on the engine you ran it on. It does not
 establish real provider authentication, paid-model behaviour or other
@@ -251,7 +251,7 @@ platforms; record those separately.
 `make verify-kubernetes-release` creates a dedicated `sproozi-release-*` Kind
 cluster with Calico, imports locally built release images, renders the release
 archive with those digests and applies it exactly as the
-[Kubernetes guide](../../docs/guides/install-kubernetes.md#install-from-release-assets)
+[Kubernetes guide](../../docs/guides/install-kubernetes.md)
 describes. It deletes the cluster when it finishes; pass `--keep` to the script
 to inspect it. Read `.local/verification/kubernetes-release/report.json`.
 

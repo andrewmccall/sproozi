@@ -15,6 +15,7 @@ import (
 	"time"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
+	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/nativeconfig"
 	"github.com/andrewmccall/sproozi/internal/privatefs"
 	"github.com/andrewmccall/sproozi/internal/proxytransport"
@@ -48,7 +49,8 @@ func (c Config) ServeProblems() []string {
 	absolute := func(key, path string) { add(!filepath.IsAbs(path), key, "absolute path") }
 	// A blank value is as missing as an empty one.
 	blank := func(v string) bool { return strings.TrimSpace(v) == "" }
-	add(blank(c.Model), "model", "model name the harness requests")
+	// An omitted model lets the harness choose its own default.
+	add(c.Model != "" && blank(c.Model), "model", modelWant)
 	absolute("dockerBinary", c.DockerBinary)
 	if runtime.GOOS == goosWindows {
 		add(blank(c.DockerSocket), "dockerSocket", `local named pipe such as "npipe:////./pipe/docker_engine"`)
@@ -63,7 +65,7 @@ func (c Config) ServeProblems() []string {
 	}
 	l := c.Local
 	harnessErr := l.Harness.Validate()
-	add(harnessErr != nil, "local.harness", `"codex" or "claude-code"`)
+	add(harnessErr != nil, "local.harness", managedChoices())
 	if harnessErr == nil {
 		if err := nativeconfig.ValidateHarness(string(l.Harness), c.Model, c.NativeOptions); err != nil {
 			p = append(p, "model or nativeOptions ("+err.Error()+")")
@@ -98,14 +100,11 @@ func (c Config) ServeProblems() []string {
 	add(l.RetainedBytes < 2*l.MaxCheckpointBytes || l.RetainedBytes <= 0,
 		"local.retainedBytes", "at least twice local.maxCheckpointBytes")
 	p = append(p, c.gatewayProblems()...)
-	for _, group := range c.connectionGroups() {
-		for _, name := range slices.Sorted(maps.Keys(group.entries)) {
-			add(group.entries[name].MaxCheckpointBytes != l.MaxCheckpointBytes,
-				group.key+"."+name+".maxCheckpointBytes", "equal to local.maxCheckpointBytes")
-		}
-	}
 	return append(p, c.AllowanceProblems()...)
 }
+
+// modelWant describes a valid model setting.
+const modelWant = "model name the harness requests, or omit it for the harness's default"
 
 // placeholderToken reports a setup guide's placeholder, such as
 // REPLACE_WITH_PROVIDER_API_KEY, left in place of a provider credential.
@@ -142,10 +141,10 @@ func (c Config) gatewayProblems() []string {
 		"DNS name on port 443 that the gateway certificate covers, such as mcp.sproozi.internal:443")
 	for i, h := range c.Harnesses {
 		key := fmt.Sprintf("harnesses[%d].", i)
-		add(h.Harness.Validate() != nil, key+"harness", `"codex" or "claude-code"`)
+		add(h.Harness.Validate() != nil, key+"harness", managedChoices())
 		add(!dockerName.MatchString(h.Name), key+"name", "Docker resource name")
 		add(h.GatewayPort == 0, key+"gatewayPort", "port")
-		add(blank(h.Model), key+"model", "model name the harness requests")
+		add(h.Model != "" && blank(h.Model), key+"model", modelWant)
 		u, err := url.Parse(h.ProviderURL)
 		add(err != nil || u.Host == "" || !approvedProviderURL(u), key+"providerURL", "HTTPS provider URL")
 		absolute(key+"providerTokenFile", h.ProviderTokenFile)
@@ -206,4 +205,15 @@ func (c Config) AllowanceProblems() []string {
 		}
 	}
 	return p
+}
+
+// managedChoices names the registered managed harnesses for a setting message,
+// such as "codex" or "claude-code".
+func managedChoices() string {
+	kinds := harness.ManagedKinds()
+	quoted := make([]string, 0, len(kinds))
+	for _, kind := range kinds {
+		quoted = append(quoted, strconv.Quote(string(kind)))
+	}
+	return strings.Join(quoted, " or ")
 }

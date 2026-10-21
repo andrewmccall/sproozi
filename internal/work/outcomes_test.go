@@ -25,7 +25,7 @@ func TestWorkHTTPAndMCPShareActionableRejections(t *testing.T) {
 	}
 	defer func() { _ = o.Close() }()
 	token := strings.Repeat("t", 32)
-	h, err := NewHandler(o, token, strings.Repeat("h", 32))
+	h, err := NewHandler(o, token, homeToken(strings.Repeat("h", 32)))
 	if err != nil {
 		t.Fatal(err)
 	}

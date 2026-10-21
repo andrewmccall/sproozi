@@ -18,7 +18,7 @@ checkout at the same release as the CLI, for the reason given in
 
 ## Existing-cluster deployment
 
-Follow [Install on Kubernetes and run your first Pod](install-kubernetes.md),
+Follow [Install from a checkout](install-from-checkout.md),
 including enforcing CNI, shared gateway TLS/provider credentials and the
 immutable sandbox trust bundle.
 [Cluster dependencies](../reference/dependencies.md) lists what else the cluster needs.
@@ -73,15 +73,15 @@ limits. The small default runtime is suitable for short investigation sessions.
 
 ## Profile configuration and credentials
 
-Issue a remote executor TLS certificate for `sproozi-work.sproozi-system.svc` and any
-external hostname/IP used by the developer. Use your internal PKI or the test-CA
-procedure in the Hermes guide with this service hostname. Save the chain and
-private key as `.local/retained-work/owner.crt` and `owner.key`, mode `0600`.
-Generate a distinct home principal token (`home-principal-token`) and work token into files, and save the coordinator's
-separate model credential directly to `model-key` using your secret tooling:
+Issue a remote executor TLS certificate for `sproozi-work.sproozi-system.svc`.
+Use your internal PKI or the test-CA procedure in the Hermes guide with this
+service hostname. Save the chain and private key as
+`.local/retained-work/owner.crt` and `owner.key`, and the issuing CA as
+`owner-ca.crt`, mode `0600`. Generate the Hermes work token, and save the
+coordinator's separate model credential directly to `model-key` using your
+secret tooling:
 
 ```sh
-openssl rand -hex 32 > .local/retained-work/home-principal-token
 openssl rand -hex 32 > .local/retained-work/work-token
 openssl rand -hex 32 > .local/retained-work/api-key
 ```
@@ -96,7 +96,6 @@ the approved repository/ref, principal, duration, byte limit and allowances:
   "listen": "0.0.0.0:8443",
   "certificateFile": "/var/run/sproozi-work/tls.crt",
   "keyFile": "/var/run/sproozi-work/tls.key",
-  "tokenFile": "/var/run/sproozi-work/home-principal-token",
   "workTokenFile": "/var/run/sproozi-work/work-token",
   "principal": "developer",
   "placementName": "engineering",
@@ -115,12 +114,16 @@ the approved repository/ref, principal, duration, byte limit and allowances:
     }
   },
   "maxDuration": "30m",
-  "maxCheckpointBytes": 8388608,
+  "maxCheckpointBytes": 33554432,
   "repositories": {
     "sproozi": {"url": "https://github.com/andrewmccall/sproozi", "ref": "main"}
   }
 }
 ```
+
+`maxCheckpointBytes` must equal `local.maxCheckpointBytes` in your local
+installation's `config.json`: 32 MiB for a new `sproozi init`
+installation, 8 MiB for one created before that default changed.
 
 Apply namespaces from the installation before creating these objects:
 
@@ -129,11 +132,13 @@ kubectl create namespace sproozi-coordinators --dry-run=client -o yaml | kubectl
 kubectl create secret generic sproozi-work-credentials -n sproozi-system \
   --from-file=tls.crt=.local/retained-work/owner.crt \
   --from-file=tls.key=.local/retained-work/owner.key \
-  --from-file=home-principal-token=.local/retained-work/home-principal-token \
   --from-file=work-token=.local/retained-work/work-token \
   --dry-run=client -o yaml | kubectl apply -f -
 kubectl create configmap sproozi-work-profile -n sproozi-system \
   --from-file=profile.json=.local/retained-work/profile.json \
+  --dry-run=client -o yaml | kubectl apply -f -
+kubectl create configmap sproozi-remote-executor -n sproozi-system \
+  --from-file=ca.crt=.local/retained-work/owner-ca.crt \
   --dry-run=client -o yaml | kubectl apply -f -
 kubectl create secret generic hermes-coordinator -n sproozi-coordinators \
   --from-file=model-key=.local/retained-work/model-key \
@@ -145,8 +150,9 @@ kubectl create secret generic hermes-coordinator -n sproozi-coordinators \
 Combine Hermes's normal public roots with the remote executor's public CA as
 `ca-bundle.pem`, following the Hermes guide's `docker run --entrypoint /bin/cat`
 procedure. Create `hermes-task-trust` in `sproozi-coordinators` from that bundle.
-Hermes receives only the work token; only the trusted home receives the home
-principal token, which additionally authorizes exclusive export/claim. The coordinator
+Hermes receives only the work token. Your CLI and service sign in as the
+`sproozi-cli` ServiceAccount, which additionally authorizes exclusive
+export/claim. The coordinator
 manifest, shared with the [task service](hermes-orchestration.md), reads its
 bearer token from the `hermes-coordinator` key `task-token`, so that key holds
 the work token here.
@@ -188,19 +194,20 @@ actionable failure. Reuse the complete saved submission after an uncertain reply
 `sproozi_sessions` returns an object with a `sessions` array. Task text and results
 remain untrusted. Requests cannot select images, templates, credentials or policy.
 
-Expose the remote executor's TLS origin through a reviewed private endpoint, or port-forward
-its Service for a local evaluation. Configure the home `remote` map's `engineering` entry with that
-origin, the remote executor's public CA and protected `home-principal-token` file. Use the same approved
-native instructions and byte limits.
-[Run a task remotely, then resume it locally](portable-workflows.md) contains the complete
-global home configuration and command sequence:
+To follow the work from your own machine, apply `cli-access` in
+`sproozi-system` and create the `sproozi` context, as
+[remote executor access](../reference/remote-executors.md) shows. The example
+Service already carries the `sproozi.com/remote-executor` label. Use the same
+approved native instructions and byte limits locally.
+[Run a task remotely, then resume it locally](portable-workflows.md) has the
+complete command sequence:
 
 ```sh
-sproozi sessions --executor engineering
-sproozi status SESSION_UUID --executor engineering
-sproozi pull SESSION_UUID --from engineering
-sproozi resume SESSION_UUID
-sproozi stop SESSION_UUID
+sproozi sessions
+sproozi status ID --remote
+sproozi pull ID
+sproozi resume ID
+sproozi stop ID
 ```
 
 You can claim a checkpoint only after the task completes, the sandbox stops and
@@ -212,14 +219,14 @@ conversation. Cross-harness handoff is a separate deferred feature.
 
 | Observation | Next step |
 | --- | --- |
-| Hermes cannot discover tools | Inspect its native logs and the remote executor's TLS/CA/token configuration. All MCP output schemas must have object roots. |
+| Hermes cannot discover tools | Inspect its native logs and the remote executor's TLS, CA and work token. All MCP output schemas must have object roots. |
 | Remote executor is unready | Inspect its logs, PVC permissions, mounted config/credentials and namespace-scoped RBAC. |
 | Remote phase is `unknown` | Preserve the session/operation UUID and journals. Inspect the Pod and remote executor logs, then use `recover`; do not manufacture a new submission. |
 | Native state is missing or incompatible | Retain the source evidence. Use the same harness and matching instructions. Check whether its saved state is supported. |
 | A deadline or cancellation stops work | Inspect status. Deadline/cancellation does not guarantee a resumable completed turn. Unknown stop or accounting prevents export. |
 | Home storage is full | Resolve capacity before pull/resume. A failed capacity check does not transfer ownership or start another writer. |
 
-Use `sproozi cancel SESSION_UUID --executor engineering` for remote cancellation.
+Use `sproozi cancel ID --remote` for remote cancellation.
 Inspect running Pods with the administrator kubeconfig and application logs with
 `kubectl logs -n sproozi-system deployment/sproozi-work`. Retained final output is
 available through status after Pod deletion; full live Pod logs have Kubernetes'

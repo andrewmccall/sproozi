@@ -46,9 +46,9 @@ const (
 	phaseFinalizing Phase = "finalizing"
 	phaseRetained   Phase = "retained"
 	phaseExporting  Phase = "exporting"
-	// PhaseHomeOwned means a home claimed the stopped session; this owner
+	// PhasePulled means a machine pulled the stopped session; this owner
 	// keeps only its read-only record.
-	PhaseHomeOwned  Phase = "home-owned"
+	PhasePulled     Phase = "pulled"
 	phaseCancelling Phase = "cancelling"
 	phaseCancelled  Phase = "cancelled"
 	phaseUnknown    Phase = "unknown"
@@ -57,7 +57,7 @@ const (
 // stopped reports a confirmed writer stop with a stored checkpoint, which can
 // seed fresh work or transfer to a home.
 func (p Phase) stopped() bool {
-	return p == phaseRetained || p == phaseExporting || p == PhaseHomeOwned
+	return p == phaseRetained || p == phaseExporting || p == PhasePulled
 }
 
 // live reports a phase the owner drives in the background until it settles.
@@ -726,7 +726,7 @@ func (o *Owner) export(ctx context.Context, id, operation, digest string, claim 
 		return Export{}, err
 	}
 	e := Export{Association: view(r).Association, CheckpointInfo: &info, ID: id, Harness: r.Launch.Harness,
-		Stopped: *r.Stopped, Checkpoint: b, OperationID: operation, Claimed: r.Phase == PhaseHomeOwned}
+		Stopped: *r.Stopped, Checkpoint: b, OperationID: operation, Claimed: r.Phase == PhasePulled}
 	if err = ValidateExport(e, o.config.MaxCheckpointBytes); err != nil {
 		if o.config.Log != nil {
 			_, _ = fmt.Fprintf(o.config.Log, "Could not export work session %s: %v\n", id, err)
@@ -735,9 +735,9 @@ func (o *Owner) export(ctx context.Context, id, operation, digest string, claim 
 	}
 	r.Transfer = operation
 	if claim {
-		r.Phase = PhaseHomeOwned
+		r.Phase = PhasePulled
 		e.Claimed = true
-	} else if r.Phase != PhaseHomeOwned {
+	} else if r.Phase != PhasePulled {
 		r.Phase = phaseExporting
 	}
 	if err = o.save(r); err != nil {

@@ -41,8 +41,7 @@ import (
 	runtimedocker "github.com/andrewmccall/sproozi/internal/runtime/docker"
 	runtimekubernetes "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
 	"github.com/andrewmccall/sproozi/internal/session"
-	"github.com/andrewmccall/sproozi/internal/session/profile"
-	"github.com/andrewmccall/sproozi/internal/work"
+	"github.com/andrewmccall/sproozi/internal/session/remote"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/rest"
 )
@@ -57,13 +56,9 @@ type authority struct {
 	mcpEndpoint string
 }
 
-const inspectionHost = "api.openai.com"
-
 func inspectionHostFor(kind harness.NativeKind) string {
-	if kind == harness.NativeClaude {
-		return "api.anthropic.com"
-	}
-	return inspectionHost
+	h, _ := harness.Managed(kind)
+	return h.Protocol.InspectionHost()
 }
 
 func (a *authority) InitializeAllocation(ctx context.Context, l session.Launch, i session.Incarnation) (runtimedocker.NativeAccess, error) {
@@ -150,8 +145,7 @@ func localConfigs(c Config) ([]*localStack, error) {
 		if err = errors.Join(nativeconfig.ValidateHarness(string(stack.config.Harness), stack.model, stack.options), validListen(stack)); err != nil {
 			return nil, err
 		}
-		_, remote := c.Remote[stack.config.Name]
-		if harnesses[stack.config.Harness] || names[stack.config.Name] || ports[stack.config.GatewayPort] || remote {
+		if harnesses[stack.config.Harness] || names[stack.config.Name] || ports[stack.config.GatewayPort] {
 			return nil, errors.New("home: each local harness needs a distinct harness, placement name and gateway port")
 		}
 		harnesses[stack.config.Harness], names[stack.config.Name], ports[stack.config.GatewayPort] = true, true, true
@@ -274,10 +268,8 @@ func Open(c Config, log io.Writer) (_ *Service, err error) {
 			return nil, err
 		}
 	}
-	if err = s.configureRemotes(); err != nil {
-		return nil, err
-	}
-	if err = s.configureWorkSources(); err != nil {
+	s.discover = remote.Discover
+	if err = s.openExecutors(); err != nil {
 		return nil, err
 	}
 	s.coordinator, err = session.Open(filepath.Join(c.Directory, "journal"), s.placements, c.Local.MaxCheckpointBytes)
@@ -368,6 +360,9 @@ func stackDirectory(base string, index int, name string) string {
 
 func (s *Service) openStack(c Config, engine *runtimedocker.Engine, ledger *budgetfile.Ledger, stack *localStack, index int, certificate tls.Certificate, log io.Writer) (err error) {
 	s.stacks = append(s.stacks, stack)
+	if notice := mcpNotice(stack.config.Harness, c.Allowances); notice != "" && log != nil {
+		_, _ = fmt.Fprintln(log, "Notice:", notice)
+	}
 	policyConfig := c
 	policyConfig.Local = stack.config
 	policy, err := approvedPolicy(policyConfig)
@@ -441,7 +436,9 @@ func (s *Service) localFor(kind harness.NativeKind) (runtimedocker.PlacementConf
 			return stack.config, nil
 		}
 	}
-	return runtimedocker.PlacementConfig{}, fmt.Errorf("home: harness %s is not configured; run sproozi init --local --harness %s", kind, kind)
+	return runtimedocker.PlacementConfig{}, rejectedError(fmt.Sprintf("home: harness %s is not set up in the running "+
+		"service; run \"sproozi init --harness %s\", or, if you already did, restart the service with "+
+		"\"sproozi service stop\" and \"sproozi service start\"", kind, kind))
 }
 
 // keyPairError names the gateway file that tls.X509KeyPair could not use.
@@ -481,7 +478,7 @@ func provider(c GatewayConfig, kind harness.NativeKind) (model.HandlerConfig, er
 			"it must hold only the provider API key", c.ProviderTokenFile)
 	}
 	result.UpstreamURL = c.ProviderURL
-	if kind == harness.NativeClaude {
+	if h, _ := harness.Managed(kind); h.Protocol == harness.ProtocolAnthropic {
 		result.ProviderAuth = modelauth.AnthropicAPIKey{Key: token}
 	} else {
 		result.ProviderAuth = modelauth.APIKey{Key: token}
@@ -511,12 +508,58 @@ func provider(c GatewayConfig, kind harness.NativeKind) (model.HandlerConfig, er
 	return result, err
 }
 
+// harnessAllowances are the allowances a session of this harness receives.
+// The configured MCP servers reach only harnesses whose native clients can
+// use them, so a home with MCP allowances can still run Claude Code: its
+// sessions simply have no named MCP servers.
+func harnessAllowances(kind harness.NativeKind, all map[string]session.Allowance) map[string]session.Allowance {
+	out := maps.Clone(all)
+	if supportsNamedMCP(kind) {
+		return out
+	}
+	for name := range out {
+		if _, named := api.CapabilityKind(name).MCPServerName(); named {
+			delete(out, name)
+		}
+	}
+	return out
+}
+
+// supportsNamedMCP asks the harness package whether kind can use configured
+// MCP servers, so home follows its rule instead of restating it.
+func supportsNamedMCP(kind harness.NativeKind) bool {
+	probe := harness.NativeClientConfig{MCPGateway: "https://sproozi-mcp.invalid", MCPServers: []string{"probe"}}
+	return probe.Validate(kind) == nil
+}
+
+// mcpNotice names the MCP allowances a harness's sessions do not receive, or "".
+func mcpNotice(kind harness.NativeKind, all map[string]session.Allowance) string {
+	if supportsNamedMCP(kind) {
+		return ""
+	}
+	var names []string
+	for name := range all {
+		if _, named := api.CapabilityKind(name).MCPServerName(); named {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	slices.Sort(names)
+	return fmt.Sprintf("%s sessions get no configured MCP servers (%s): named MCP servers currently need Codex; "+
+		"start a session with --harness codex to use them", kind, strings.Join(names, ", "))
+}
+
 func approvedPolicy(c Config) (api.AgentPolicySpec, error) {
-	policy := api.AgentPolicySpec{Budgets: map[api.CapabilityKind]api.EndpointBudget{}, MCPServers: c.Gateway.MCPPolicy}
+	policy := api.AgentPolicySpec{Budgets: map[api.CapabilityKind]api.EndpointBudget{}}
+	if supportsNamedMCP(c.Local.Harness) {
+		policy.MCPServers = c.Gateway.MCPPolicy
+	}
 	if err := nativeScopes(c, &policy); err != nil {
 		return api.AgentPolicySpec{}, err
 	}
-	for name, a := range c.Allowances {
+	for name, a := range harnessAllowances(c.Local.Harness, c.Allowances) {
 		if !a.Units.Bounded || a.Units.Value <= 0 || a.CostMicros.Value < 0 || a.CostMicros.Bounded && a.CostMicros.Value == 0 || !a.CostMicros.Bounded && a.CostMicros.Value != 0 {
 			return api.AgentPolicySpec{}, errors.New("home: finite positive unit ceilings required")
 		}
@@ -558,49 +601,9 @@ func (s *Service) configureProfile(folder string) {
 		return
 	}
 	s.coordinator.SetProfileSource(func() ([]byte, string, error) { return agentprofile.ArchiveDirectory(folder) })
-	for _, remote := range s.remotes {
-		remote.SetProfileSource(s.coordinator.ProfileArchive)
+	for _, client := range s.remotes {
+		client.SetProfileSource(s.coordinator.ProfileArchive)
 	}
-}
-
-func (s *Service) configureRemotes() error {
-	for name, fixed := range s.config.Remote {
-		if name == s.config.Local.Name || len(name) == 0 || len(name) > 128 {
-			return errors.New("home: distinct named remote profile required")
-		}
-		if fixed.MaxCheckpointBytes != s.config.Local.MaxCheckpointBytes {
-			return errors.New("home: profiles must share the checkpoint byte limit")
-		}
-		remote, clientErr := profile.NewClient(fixed)
-		if clientErr != nil {
-			return clientErr
-		}
-		s.remotes = append(s.remotes, remote)
-		s.placements[name] = remote
-	}
-	return nil
-}
-
-func (s *Service) configureWorkSources() error {
-	fixed := s.config.WorkConnections()
-	sources := make(map[string]WorkSource, len(fixed))
-	for name, config := range fixed {
-		if name == "" || len(name) > 128 || config.MaxCheckpointBytes != s.config.Local.MaxCheckpointBytes {
-			return errors.New("home: bounded named work source required")
-		}
-		source, err := work.NewClient(config)
-		if err != nil {
-			for _, opened := range sources {
-				if closer, ok := opened.(io.Closer); ok {
-					_ = closer.Close()
-				}
-			}
-			return err
-		}
-		sources[name] = source
-	}
-	s.SetWorkSources(sources)
-	return nil
 }
 
 func approvedProviderURL(u *url.URL) bool {

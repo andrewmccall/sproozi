@@ -1,6 +1,7 @@
 package home
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -17,8 +18,10 @@ import (
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
+	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/privatefs"
 	"github.com/andrewmccall/sproozi/internal/project"
+	runtimedocker "github.com/andrewmccall/sproozi/internal/runtime/docker"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/work"
 	"github.com/google/uuid"
@@ -35,6 +38,8 @@ type WorkSource interface {
 }
 
 func (s *Service) SetWorkSources(sources map[string]WorkSource) {
+	s.remoteMu.Lock()
+	defer s.remoteMu.Unlock()
 	s.workSources = maps.Clone(sources)
 }
 
@@ -273,23 +278,28 @@ func (s *Service) Pull(ctx context.Context, id, operation, sourceName string) (S
 	if !work.CanonicalID(operation) {
 		return Status{}, errors.New("home: pull operation UUID required")
 	}
-	if s.workSources[sourceName] == nil {
-		return Status{}, fmt.Errorf("home: pull --from %q names no remote executor configured under "+
-			"\"remote\" or \"workSources\" in this daemon's configuration", sourceName)
-	}
 	r, err := s.readCatalog(id)
-	if err == nil {
-		if r.Source != sourceName || r.Operation != operation {
-			return Status{}, fmt.Errorf("home: this session's pull from %q is retained as operation %s; "+
-				"retry it with --from %s --operation %s", r.Source, r.Operation, r.Source, r.Operation)
-		}
-		if r.Claimed {
-			return s.catalogStatus(r)
-		}
-	} else if !os.IsNotExist(err) {
+	switch {
+	case err == nil && r.Claimed:
+		return s.catalogStatus(r)
+	case err == nil:
+		// A retained pull continues with its own source and operation, so
+		// repeating the command finishes it.
+		sourceName, operation = r.Source, r.Operation
+	case !os.IsNotExist(err):
 		return Status{}, err
-	} else {
-		e, exportErr := s.workSources[sourceName].BeginExport(ctx, id, operation)
+	}
+	source := s.workSource(sourceName)
+	if source == nil {
+		if sourceName == "" {
+			return Status{}, rejectedError(fmt.Sprintf("home: the Sproozi service does not know which cluster holds "+
+				"session %s; pass --context", id))
+		}
+		return Status{}, rejectedError(fmt.Sprintf("home: no remote executor named %q is known to this service; "+
+			"reach it with --context", sourceName))
+	}
+	if r.ID == "" {
+		e, exportErr := source.BeginExport(ctx, id, operation)
 		if exportErr != nil {
 			return Status{}, exportErr
 		}
@@ -304,7 +314,7 @@ func (s *Service) Pull(ctx context.Context, id, operation, sourceName string) (S
 			return Status{}, err
 		}
 	}
-	e, err := s.workSources[sourceName].Claim(ctx, id, operation, r.Original.Stopped.CheckpointDigest)
+	e, err := source.Claim(ctx, id, operation, r.Original.Stopped.CheckpointDigest)
 	if err != nil {
 		return Status{}, err
 	}
@@ -340,7 +350,9 @@ func sameExportSource(a, b work.Export) bool {
 
 // Resume admits a new execution from claimed continuity. Its new UUID,
 // allocation, deadline and allowances never modify or credit the source receipt.
-func (s *Service) Resume(ctx context.Context, id, operation string) (Status, error) {
+// harnessArgs are the user's own arguments for the stock harness, kept with
+// the new execution only.
+func (s *Service) Resume(ctx context.Context, id, operation string, harnessArgs []string) (Status, error) {
 	unlock, err := s.lockSession(id)
 	if err != nil {
 		return Status{}, err
@@ -352,7 +364,13 @@ func (s *Service) Resume(ctx context.Context, id, operation string) (Status, err
 	r, err := s.readCatalog(id)
 	if os.IsNotExist(err) {
 		if execution, inspectErr := s.coordinator.Inspect(id); inspectErr == nil {
-			return Status{}, notResumable(id, execution)
+			// A start interrupted before its catalogue entry is adopted now.
+			if execution.Session != "" || execution.Operations[0].Launch.CheckpointDigest != "" {
+				return Status{}, notResumable(id, execution)
+			}
+			if err = s.catalogStartedLocked(execution); err == nil {
+				r, err = s.readCatalog(id)
+			}
 		}
 	}
 	if err != nil {
@@ -384,28 +402,31 @@ func (s *Service) Resume(ctx context.Context, id, operation string) (Status, err
 		}
 	}
 	if r.Current != "" {
-		return Status{}, rejectedError(fmt.Sprintf("home: previous execution must stop and commit before resume; "+
-			"run \"sproozi stop %s\" first", id))
+		return Status{}, s.notStoppedProblem(id, r.Current)
 	}
 	if len(r.Executions) >= 256 {
 		return Status{}, errors.New("home: execution retention limit reached")
-	}
-	data, err := s.catalogArtifact(r.Committed.CheckpointDigest)
-	if err != nil {
-		return Status{}, err
 	}
 	local, err := s.localFor(r.Committed.Launch.Harness)
 	if err != nil {
 		return Status{}, err
 	}
-	if err = checkpoint.ValidateContinuity(data, local.Harness, local.InstructionDigest, local.MaxCheckpointBytes); err != nil {
+	if err = harness.ValidateNativeArgs(local.Harness, harnessArgs); err != nil {
+		return Status{}, rejectedError("home: " + err.Error())
+	}
+	data, err := s.resumeInput(r, local)
+	if err != nil {
 		return Status{}, err
 	}
 	first := session.Launch{Harness: local.Harness, ExecutionID: uuid.NewString(), OperationID: operation,
 		AllocationID: uuid.NewString(), Epoch: 1, Placement: local.Name,
-		ThreadID: r.Committed.Launch.ThreadID, InstructionDigest: local.InstructionDigest,
-		IncludeIgnored: slices.Clone(r.Committed.Launch.IncludeIgnored), Deadline: time.Now().Add(s.duration).UTC(),
-		Allowances: allowances, CheckpointDigest: r.Committed.CheckpointDigest}
+		ThreadID: cmp.Or(r.Committed.ThreadID, r.Committed.Launch.ThreadID), InstructionDigest: local.InstructionDigest,
+		IncludeIgnored: slices.Clone(r.Committed.Launch.IncludeIgnored), HarnessArgs: slices.Clone(harnessArgs),
+		Deadline: time.Now().Add(s.duration).UTC(), Allowances: allowances, CheckpointDigest: r.Committed.CheckpointDigest}
+	if first.CheckpointDigest == "" {
+		// Stopped with no conversation: start one again from its workspace.
+		first.ThreadID = ""
+	}
 	execution, err := s.createExecution(first, id, func() ([]byte, error) { return data, nil })
 	if err != nil {
 		return Status{}, err
@@ -422,14 +443,31 @@ func (s *Service) Resume(ctx context.Context, id, operation string) (Status, err
 }
 
 // notResumable explains a resume addressed to an execution rather than a
-// session imported with pull.
+// session.
 func notResumable(id string, execution session.Record) error {
 	if execution.Session != "" {
-		return fmt.Errorf("home: %s is an execution of session %s; resume the session UUID %s",
-			id, execution.Session, execution.Session)
+		return rejectedError(fmt.Sprintf("home: %s is an execution of session %s; resume the session UUID %s",
+			id, execution.Session, execution.Session))
 	}
-	return fmt.Errorf("home: session %s was started at home with \"sproozi start\"; "+
-		"resume continues only sessions imported with \"sproozi pull\"", id)
+	return rejectedError(fmt.Sprintf("home: %s is an execution, not a session; run \"sproozi ls\" to find "+
+		"its session", id))
+}
+
+// resumeInput is what a resumed execution restores: the session's last
+// checkpoint, or, for a session stopped with no conversation, the workspace
+// its last execution started from.
+func (s *Service) resumeInput(r localSession, local runtimedocker.PlacementConfig) ([]byte, error) {
+	if r.Committed.CheckpointDigest == "" {
+		if r.Committed.Launch.ExecutionID == "" {
+			return nil, errors.New("home: session has no stopped execution to resume")
+		}
+		return s.coordinator.Workspace(r.Committed.Launch.ExecutionID)
+	}
+	data, err := s.catalogArtifact(r.Committed.CheckpointDigest)
+	if err != nil {
+		return nil, err
+	}
+	return data, checkpoint.ValidateContinuity(data, local.Harness, local.InstructionDigest, local.MaxCheckpointBytes)
 }
 
 func (s *Service) catalogStatus(r localSession) (Status, error) {
@@ -457,14 +495,15 @@ func (s *Service) catalogStatus(r localSession) (Status, error) {
 	stage := "importing"
 	ownership := "source"
 	if r.Claimed {
-		stage = stageRetained
+		stage = committedStage(r)
 		ownership = "home"
 	}
 	return Status{Association: r.Original.Association, CheckpointInfo: info,
 		ID: r.ID, Ownership: ownership, ExecutionID: r.Committed.Launch.ExecutionID,
 		AllocationID: r.Committed.Launch.AllocationID, Incarnation: &r.Committed.Incarnation,
 		Placement: r.Committed.Launch.Placement, Phase: stage, Harness: r.Committed.Launch.Harness,
-		InitialStage: stage, ThreadID: r.Committed.Launch.ThreadID, Deadline: r.Committed.Launch.Deadline}, nil
+		InitialStage: stage, ThreadID: cmp.Or(r.Committed.ThreadID, r.Committed.Launch.ThreadID),
+		Deadline: r.Committed.Launch.Deadline, Exit: r.Committed.Exit}, nil
 }
 
 // resolveSession maps a session or execution ID to the execution to act on
@@ -493,7 +532,7 @@ func (s *Service) resolveSession(id string) (string, string, error) {
 		return "", "", err
 	}
 	if r.Current == "" {
-		return "", id, rejectedError(fmt.Sprintf("home: session has no active execution; use \"sproozi resume %s\"", id))
+		return "", id, stoppedProblem(r)
 	}
 	return r.Current, id, nil
 }
@@ -539,6 +578,11 @@ func (s *Service) Status(id string) (Status, error) {
 }
 
 func (s *Service) Move(ctx context.Context, id, operation, destination string) (Status, error) {
+	// "local" names this machine whatever its placement is called; a move to
+	// any local placement continues on the session's own harness.
+	if destination == LocalAlias {
+		destination = s.config.Local.Name
+	}
 	// Refuse an unconfigured destination before binding the operation to it.
 	if err := s.moveDestinationProblem(destination); err != nil {
 		return Status{}, err

@@ -1,8 +1,11 @@
 # Remote executor (`session-profile`)
 
 `session-profile` serves one administrator-approved Kubernetes placement over
-authenticated TLS. The developer receives its fixed HTTPS URL, CA certificate
-and [home principal token](../../GLOSSARY.md#home-principal-token) file. Kubernetes credentials remain with the remote executor.
+authenticated TLS. It runs in the cluster, and the developer reaches it through
+a kubeconfig [context](../../GLOSSARY.md#context), signed in as the
+`sproozi-cli` ServiceAccount; see
+[remote executor access](../../docs/reference/remote-executors.md). Kubernetes
+credentials for the placement remain with the remote executor.
 See [Move a live session between Docker and Kubernetes](../../docs/guides/session-mobility.md) for the
 local/remote command sequence. Both supported harnesses have passed production
 Docker-to-Kubernetes-to-Docker round trips through this profile. Codex's extended
@@ -22,7 +25,7 @@ go build -o bin/session-profile ./cmd/session-profile
 Install the current generated CRDs, controller and shared gateway using
 [Install on Kubernetes](../../docs/guides/install-kubernetes.md). For an isolated
 Kind evaluation, use the enforcing CNI setup in
-[Getting started](../../docs/guides/getting-started.md). Managed sessions require
+[the investigation-to-PR demo](../../docs/guides/pr-demo.md). Managed sessions require
 the controller and gateway from this change; an older ordinary-run deployment
 does not provide managed registration or active-allocation checks.
 
@@ -92,11 +95,10 @@ cluster after the Codex evaluation has stopped.
 The [retained-work Kubernetes example](../../examples/portable-workflows/kubernetes/owner.yaml)
 implements these namespace-scoped roles with a dedicated identity, PVC and TLS
 Service. [Hermes with remote work](../../docs/guides/retained-work-kubernetes.md)
-includes the managed runtime, distinct task/home credentials and Hermes setup.
+includes the managed runtime, the work token and Hermes setup.
 
-For a host-run profile, select an administrator-owned kubeconfig through
-`KUBECONFIG`. For an in-cluster profile, use its dedicated ServiceAccount and
-the normal in-cluster client configuration. Required backend permissions are:
+The executor uses its dedicated ServiceAccount and the normal in-cluster client
+configuration. Required backend permissions are:
 
 | Namespace | API resources | Verbs |
 | --- | --- | --- |
@@ -106,6 +108,9 @@ the normal in-cluster client configuration. Required backend permissions are:
 | `sproozi-agents` | Core `pods` | `get`, `patch`, `delete` |
 | `sproozi-agents` | Core `pods/exec` | `create` |
 
+Also bind the profile's identity to the `system:auth-delegator` ClusterRole, so
+it can create TokenReviews and SubjectAccessReviews.
+
 Bind these as namespace-scoped roles to the profile's identity. The existing
 controller and gateway retain their own deployment RBAC. In particular, the
 gateway needs registration/account ConfigMap access in the Run namespace,
@@ -114,27 +119,17 @@ neither profile credentials nor Kubernetes API authority.
 
 ## Create private configuration
 
-Create an owned private configuration directory outside all worker workspaces.
-Use mode `0700` for directories and `0600` for files, including the token, TLS key
-and kubeconfig. Generate the home principal token directly into a protected file:
-
-```sh
-umask 077
-export SPROOZI_PROFILE_DIR=/absolute/private/profile
-mkdir -p "$SPROOZI_PROFILE_DIR"
-chmod 700 "$SPROOZI_PROFILE_DIR"
-openssl rand -hex 32 > "$SPROOZI_PROFILE_DIR/home-principal-token"
-```
-
-Issue a TLS server certificate covering the host/IP in the developer's configured
-URL, with its chain and key available to this service. Give the developer the
-trusted CA and token through your credential distribution process. Do not paste
-provider credentials or private keys into chat or place them in the repository.
+Issue a TLS server certificate for `SERVICE.NAMESPACE.svc`, the executor
+Service's name, and keep its key in a Secret the executor mounts. Publish the
+issuing CA in the ConfigMap `sproozi-remote-executor` under `ca.crt`. Do not
+paste provider credentials or private keys into chat or place them in the
+repository.
 The endpoint uses CA-verified TLS 1.3, without redirects, environment proxies or
 cookies. It exposes fixed lifecycle and terminal operations, with no arbitrary
 execution or resource-configuration endpoint.
 
-Save the following strict JSON as `profile.json`. Replace the example paths,
+Save the following strict JSON as `profile.json` in a ConfigMap the executor
+mounts. Replace the example paths,
 template, instruction digest and approved ceilings. The 30-minute duration and
 unit ceiling match the [home example](../sproozi/README.md); cost is explicitly
 unbounded here. A bounded positive cost requires corresponding gateway pricing.
@@ -142,15 +137,14 @@ unbounded here. A bounded positive cost requires corresponding gateway pricing.
 ```json
 {
   "harness": "codex",
-  "listen": "127.0.0.1:18444",
-  "certificateFile": "/absolute/private/profile/server.crt",
-  "keyFile": "/absolute/private/profile/server.key",
-  "tokenFile": "/absolute/private/profile/home-principal-token",
+  "listen": "0.0.0.0:8443",
+  "certificateFile": "/var/run/sproozi-work/tls.crt",
+  "keyFile": "/var/run/sproozi-work/tls.key",
   "principal": "developer",
   "placementName": "engineering",
   "namespace": "sproozi-system",
   "templateName": "mobility-native",
-  "directory": "/absolute/private/profile/state",
+  "directory": "/state/profile",
   "instructionDigest": "REPLACE_WITH_64_LOWERCASE_HEX",
   "allowances": {
     "model.inference": {
@@ -163,24 +157,26 @@ unbounded here. A bounded positive cost requires corresponding gateway pricing.
 }
 ```
 
-Use `127.0.0.1:18444` for a same-host evaluation. A hosted remote service needs a
-reachable fixed listener, a matching certificate and host firewall rules. Its
-`placementName` must match the alias in the home configuration, and both sides
-must use the same checkpoint byte limit. Run one process for this principal and
-state directory; the owner lock rejects competing profile instances.
+The executor accepts a caller as its home principal when a TokenReview
+authenticates the caller's bearer token and Kubernetes RBAC allows that
+identity to `use` `remoteexecutors.sproozi.com` named `placementName` in
+`namespace`, the rule `config/cli-access` grants the `sproozi-cli`
+ServiceAccount. Removing that RoleBinding revokes access on the next request.
+Every allowed identity acts as the one configured `principal`; give each
+developer's service its own executor and namespace.
 
-```sh
-export KUBECONFIG=/absolute/private/profile/cluster.kubeconfig
-bin/session-profile --config "$SPROOZI_PROFILE_DIR/profile.json"
-```
-
-Keep this process under a service manager. Restart with the same private directory
-and fixed configuration to recover retained registrations; do not delete them to
-make an uncertain move proceed.
+Label the executor's Service `sproozi.com/remote-executor: "true"` with a port
+named `https`. One executor per namespace. The Sproozi service learns the
+executor's `placementName`, harness and `maxCheckpointBytes` from its
+authenticated `describe` request; the checkpoint limit must equal the service's
+`local.maxCheckpointBytes`. Run one executor for this principal and state
+directory; the owner lock rejects competing instances. The
+[retained-work example](../../examples/portable-workflows/kubernetes/owner.yaml)
+deploys it with this configuration mounted at `/etc/sproozi-work/profile.json`.
 
 ## Stop, recover and cancel
 
-The home daemon drives this profile; use the `sproozi` CLI instead of hand-crafted
+The local service drives this profile; use the `sproozi` CLI instead of hand-crafted
 HTTP calls. Each visit gets a fresh Run and Pod. Restore is inert until exact
 admission succeeds and initialized budget accounts exist. Actual checkpoint
 UUID, artifact kind and digest must match trusted intent. The
@@ -216,9 +212,11 @@ through the home journal. See the guide's
 
 ## Retained remote work
 
-To accept new Codex tasks independently of the home daemon, add `workTokenFile`
-and `repositories` to the configuration. The work token must be distinct from
-`tokenFile`, at least 32 characters, and stored privately. Repository entries
+To accept new Codex tasks independently of the local service, add `workTokenFile`
+and `repositories` to the configuration. The work token is the one static token:
+at least 32 characters, stored privately and checked first, because Hermes has
+no Kubernetes identity of its own. Any other bearer token is reviewed as above.
+Repository entries
 select either an administrator-owned absolute stopped `snapshot` path or an
 approved GitHub `url` with an optional `ref`. URL fetching uses the worker's
 separately scoped GitHub capability; the trusted profile never imports a worker's

@@ -15,14 +15,18 @@ import (
 	"github.com/andrewmccall/sproozi/internal/session/home"
 )
 
-// ServiceStatus describes the home daemon for one local installation.
+// ServiceStatus describes the service for one local installation.
 type ServiceStatus struct {
 	Running bool     `json:"running"`
 	PID     int      `json:"pid,omitempty"`
 	Socket  string   `json:"socket"`
 	Log     string   `json:"log"`
 	Active  []string `json:"activeSessions,omitempty"`
-	Error   string   `json:"error,omitempty"`
+	// RestartPending says why the running service still uses earlier
+	// settings, until it restarts.
+	RestartPending string `json:"restartPending,omitempty"`
+	// Error is a problem reaching the service other than its not running.
+	Error string `json:"error,omitempty"`
 }
 
 // ServiceState asks the control socket for its session list; an answer means
@@ -33,10 +37,14 @@ func ServiceState(ctx context.Context, l Layout, c home.Config) ServiceStatus {
 	defer cancel()
 	response, err := home.Call(ctx, status.Socket, home.Request{Action: home.ActionSessions})
 	if err != nil {
-		status.Error = err.Error()
+		// A service that is not running is an ordinary state, not a problem.
+		if !errors.Is(err, home.ErrControlUnavailable) {
+			status.Error = err.Error()
+		}
 		return status
 	}
 	status.Running = true
+	status.RestartPending = PendingRestart(l)
 	for _, s := range response.Sessions {
 		if s.Ownership == "home" && running(s.Phase) {
 			status.Active = append(status.Active, s.ID)
@@ -48,13 +56,13 @@ func ServiceState(ctx context.Context, l Layout, c home.Config) ServiceStatus {
 // running phases still have, or may have, a worker container.
 func running(phase string) bool {
 	switch phase {
-	case "idle", "cancelled", "":
+	case "idle", "cancelled", "retained", "failed", "importing", "":
 		return false
 	}
 	return true
 }
 
-// StartService runs `sproozi serve` detached from the terminal, appending to
+// StartService runs `sproozi service run` detached from the terminal, appending to
 // the private log, then waits until the control socket answers.
 func StartService(ctx context.Context, l Layout, c home.Config, executable string, timeout time.Duration) (ServiceStatus, error) {
 	if status := ServiceState(ctx, l, c); status.Running {
@@ -76,7 +84,11 @@ func StartService(ctx context.Context, l Layout, c home.Config, executable strin
 		return ServiceStatus{}, err
 	}
 	defer func() { _ = devnull.Close() }()
-	cmd := exec.Command(executable, "serve", "--config", l.Config())
+	// The service starting now reads the current settings.
+	if err = os.Remove(l.restartPending()); err != nil && !os.IsNotExist(err) {
+		return ServiceStatus{}, err
+	}
+	cmd := exec.Command(executable, "service", "run", "--config", l.Config())
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = devnull, log, log
 	cmd.Dir = l.Root
 	detach(cmd)
@@ -96,13 +108,13 @@ func StartService(ctx context.Context, l Layout, c home.Config, executable strin
 		}
 		select {
 		case err := <-exited:
-			return ServiceStatus{}, fail("service", fmt.Errorf("home daemon exited during startup (%v): %s", err, logTail(l)), "read "+l.ServiceLog())
+			return ServiceStatus{}, fail("service", fmt.Errorf("the service exited during startup (%v): %s", err, logTail(l)), "read "+l.ServiceLog())
 		case <-ctx.Done():
 			return ServiceStatus{}, ctx.Err()
 		case <-time.After(200 * time.Millisecond):
 		}
 		if time.Now().After(deadline) {
-			return ServiceStatus{}, fail("service", errors.New("home daemon did not become ready"), "read "+l.ServiceLog())
+			return ServiceStatus{}, fail("service", errors.New("the service did not become ready"), "read "+l.ServiceLog())
 		}
 	}
 }
@@ -134,7 +146,7 @@ func StopService(ctx context.Context, l Layout, c home.Config, leaveRunning bool
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	return status, fail("service", errors.New("home daemon did not stop"), "")
+	return status, fail("service", errors.New("the service did not stop"), "")
 }
 
 func readPID(l Layout) int {
@@ -160,6 +172,15 @@ func logTail(l Layout) string {
 	return strings.TrimSpace(string(data))
 }
 
+// SessionsActiveError reports that the service kept running with its previous
+// configuration and credentials because sessions are active.
+type SessionsActiveError struct{ Count int }
+
+func (e *SessionsActiveError) Error() string {
+	return fmt.Sprintf("%d session(s) are running, so the service keeps its previous settings until they stop; "+
+		"then run \"sproozi service stop\" and \"sproozi service start\"", e.Count)
+}
+
 // RestartIdle restarts the home daemon so it reads changed configuration or
 // credentials, which it loads only at startup. It never restarts over active
 // sessions; it reports that the restart is still needed instead.
@@ -169,9 +190,11 @@ func RestartIdle(ctx context.Context, l Layout, c home.Config, executable string
 		return false, nil
 	}
 	if len(status.Active) > 0 {
-		return false, fail("service", fmt.Errorf("%d session(s) are active, so the home daemon keeps its previous "+
-			"configuration and credentials", len(status.Active)),
-			"stop or cancel them, then run sproozi service stop and sproozi service start")
+		active := &SessionsActiveError{Count: len(status.Active)}
+		if err := markRestartPending(l, active.Error()); err != nil {
+			return false, err
+		}
+		return false, active
 	}
 	if _, err := StopService(ctx, l, c, false, time.Minute); err != nil {
 		return false, err
@@ -180,6 +203,25 @@ func RestartIdle(ctx context.Context, l Layout, c home.Config, executable string
 		return false, err
 	}
 	return true, nil
+}
+
+// restartPending is the file that records why the running service needs a
+// restart; starting the service removes it.
+func (l Layout) restartPending() string { return filepath.Join(l.Root, restartPendingFile) }
+
+const restartPendingFile = "restart-pending"
+
+func markRestartPending(l Layout, reason string) error {
+	return privatefs.Replace(l.Root, restartPendingFile, []byte(reason+"\n"))
+}
+
+// PendingRestart is why the running service needs a restart, or "".
+func PendingRestart(l Layout) string {
+	data, err := privatefs.ReadFile(l.restartPending(), 4096)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
 }
 
 // RunningContainers counts running containers attached to the installation's

@@ -8,6 +8,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -72,7 +74,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	registration, registered := h.config.Registry.servers[name]
 	if !registered {
 		event.Capability = ""
-		h.deny(w, event, http.StatusForbidden, "MCP server is not registered")
+		h.deny(w, event, http.StatusForbidden, fmt.Sprintf("MCP server %q is not registered in the gateway's MCP "+
+			"registry; add it to servers.json and restart the gateway", name))
 		return
 	}
 	if !identity.Permits(capability) {
@@ -144,7 +147,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = session.Close() }()
 	server, err := h.prepare(ctx, session, rules, event, meter)
 	if err != nil {
-		h.deny(w, event, http.StatusBadGateway, "MCP upstream tools unavailable or unsupported")
+		// prepare's errors are fixed text or upstream tool names, quoted and
+		// bounded, so they can name the fix without echoing upstream content.
+		h.deny(w, event, http.StatusBadGateway, fmt.Sprintf("MCP server %q tools unavailable or unsupported: %v", name, err))
 		return
 	}
 	sdk.NewStreamableHTTPHandler(func(*http.Request) *sdk.Server { return server }, &sdk.StreamableHTTPOptions{
@@ -174,7 +179,7 @@ func (h *Handler) prepare(ctx context.Context, upstream *sdk.ClientSession,
 		Logger: logger, Capabilities: &sdk.ServerCapabilities{Tools: &sdk.ToolCapabilities{}},
 	})
 	seen := map[string]bool{}
-	selected := 0
+	var offered []string
 	cursor := ""
 	for range 8 {
 		tools, err := upstream.ListTools(ctx, &sdk.ListToolsParams{Cursor: cursor})
@@ -186,13 +191,14 @@ func (h *Handler) prepare(ctx context.Context, upstream *sdk.ClientSession,
 				return nil, fmt.Errorf("MCP catalogue exceeded bounds or contains duplicate names")
 			}
 			seen[tool.Name] = true
+			offered = append(offered, tool.Name)
 			constraint, permitted := rules[tool.Name]
 			if !permitted {
 				continue
 			}
 			schema, resolved, err := compileInput(tool.InputSchema)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("tool %q: %w", tool.Name, err)
 			}
 			name := tool.Name
 			// Copy only supported, non-authoritative discovery metadata. Do not
@@ -241,17 +247,60 @@ func (h *Handler) prepare(ctx context.Context, upstream *sdk.ClientSession,
 					callEvent.Allowed = true
 					return &sdk.CallToolResult{Content: result.Content, StructuredContent: result.StructuredContent, IsError: result.IsError}, nil
 				})
-			selected++
 		}
 		if tools.NextCursor == "" {
-			if selected != len(rules) {
-				return nil, fmt.Errorf("approved MCP tool missing")
+			if missing := missingTools(rules, seen); len(missing) > 0 {
+				return nil, missingToolsError{missing: missing, offered: offered}
 			}
 			return server, nil
 		}
 		cursor = tools.NextCursor
 	}
 	return nil, fmt.Errorf("MCP pagination exceeded bounds")
+}
+
+// missingToolsError reports approved tools the server does not offer. The
+// whole server fails closed, as ADR 0001 decided, so a misspelt or renamed
+// tool is found on the first call rather than missing silently from the
+// agent's list; the message names the fix.
+type missingToolsError struct{ missing, offered []string }
+
+func (e missingToolsError) Error() string {
+	return fmt.Sprintf("the policy approves %s, which the server does not offer; it offers %s. "+
+		"Correct the tool names in the AgentPolicy's mcpServers scope", quoteNames(e.missing), quoteNames(e.offered))
+}
+
+func missingTools(rules map[string]*mcppolicy.Constraint, seen map[string]bool) []string {
+	var missing []string
+	for name := range rules {
+		if !seen[name] {
+			missing = append(missing, name)
+		}
+	}
+	slices.Sort(missing)
+	return missing
+}
+
+// quoteNames lists at most 32 names, quoted so control characters in an
+// upstream tool name cannot forge log or message structure.
+func quoteNames(names []string) string {
+	if len(names) == 0 {
+		return "no tools"
+	}
+	sorted := slices.Sorted(slices.Values(names))
+	extra := ""
+	if len(sorted) > 32 {
+		extra = fmt.Sprintf(" and %d more", len(sorted)-32)
+		sorted = sorted[:32]
+	}
+	quoted := make([]string, len(sorted))
+	for i, name := range sorted {
+		if len(name) > 128 {
+			name = name[:128] + "…"
+		}
+		quoted[i] = strconv.Quote(name)
+	}
+	return strings.Join(quoted, ", ") + extra
 }
 
 func compileInput(input any) (*jsonschema.Schema, *jsonschema.Resolved, error) {
