@@ -54,7 +54,7 @@ func running(phase string) bool {
 	return true
 }
 
-// StartService runs `sproozi serve` detached from the terminal, appending to
+// StartService runs `sproozi service run` detached from the terminal, appending to
 // the private log, then waits until the control socket answers.
 func StartService(ctx context.Context, l Layout, c home.Config, executable string, timeout time.Duration) (ServiceStatus, error) {
 	if status := ServiceState(ctx, l, c); status.Running {
@@ -76,7 +76,7 @@ func StartService(ctx context.Context, l Layout, c home.Config, executable strin
 		return ServiceStatus{}, err
 	}
 	defer func() { _ = devnull.Close() }()
-	cmd := exec.Command(executable, "serve", "--config", l.Config())
+	cmd := exec.Command(executable, "service", "run", "--config", l.Config())
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = devnull, log, log
 	cmd.Dir = l.Root
 	detach(cmd)
@@ -96,13 +96,13 @@ func StartService(ctx context.Context, l Layout, c home.Config, executable strin
 		}
 		select {
 		case err := <-exited:
-			return ServiceStatus{}, fail("service", fmt.Errorf("home daemon exited during startup (%v): %s", err, logTail(l)), "read "+l.ServiceLog())
+			return ServiceStatus{}, fail("service", fmt.Errorf("the service exited during startup (%v): %s", err, logTail(l)), "read "+l.ServiceLog())
 		case <-ctx.Done():
 			return ServiceStatus{}, ctx.Err()
 		case <-time.After(200 * time.Millisecond):
 		}
 		if time.Now().After(deadline) {
-			return ServiceStatus{}, fail("service", errors.New("home daemon did not become ready"), "read "+l.ServiceLog())
+			return ServiceStatus{}, fail("service", errors.New("the service did not become ready"), "read "+l.ServiceLog())
 		}
 	}
 }
@@ -134,7 +134,7 @@ func StopService(ctx context.Context, l Layout, c home.Config, leaveRunning bool
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	return status, fail("service", errors.New("home daemon did not stop"), "")
+	return status, fail("service", errors.New("the service did not stop"), "")
 }
 
 func readPID(l Layout) int {
@@ -160,6 +160,15 @@ func logTail(l Layout) string {
 	return strings.TrimSpace(string(data))
 }
 
+// SessionsActiveError reports that the service kept running with its previous
+// configuration and credentials because sessions are active.
+type SessionsActiveError struct{ Count int }
+
+func (e *SessionsActiveError) Error() string {
+	return fmt.Sprintf("%d session(s) are running, so the service keeps its previous settings until they stop; "+
+		"then run \"sproozi service stop\" and \"sproozi service start\"", e.Count)
+}
+
 // RestartIdle restarts the home daemon so it reads changed configuration or
 // credentials, which it loads only at startup. It never restarts over active
 // sessions; it reports that the restart is still needed instead.
@@ -169,9 +178,7 @@ func RestartIdle(ctx context.Context, l Layout, c home.Config, executable string
 		return false, nil
 	}
 	if len(status.Active) > 0 {
-		return false, fail("service", fmt.Errorf("%d session(s) are active, so the home daemon keeps its previous "+
-			"configuration and credentials", len(status.Active)),
-			"stop or cancel them, then run sproozi service stop and sproozi service start")
+		return false, &SessionsActiveError{Count: len(status.Active)}
 	}
 	if _, err := StopService(ctx, l, c, false, time.Minute); err != nil {
 		return false, err

@@ -63,7 +63,7 @@ func Doctor(ctx context.Context, l Layout, checkProvider bool) (r Report) {
 	r.add("permissions", nil, "private directories are owner-only")
 	inst, err := LoadInstallation(l)
 	if err != nil || inst.Image == nil || inst.Network == nil || inst.Endpoint == nil || len(inst.Harnesses) == 0 {
-		r.add("installation", fail("installation", fmt.Errorf("incomplete installation journal: %v", err), "run sproozi init --local"), "")
+		r.add("installation", fail("installation", fmt.Errorf("incomplete installation journal: %v", err), "run sproozi init"), "")
 		return r
 	}
 	config, err := home.ReadConfig(l.Config())
@@ -112,7 +112,7 @@ func Doctor(ctx context.Context, l Layout, checkProvider bool) (r Report) {
 	}
 	service := ServiceState(ctx, l, config)
 	if !service.Running {
-		r.add("service", fail("service", errors.New("the home daemon is not running"), "sproozi service start"), "")
+		r.add("service", fail("service", errors.New("the service is not running"), "sproozi service start"), "")
 		return r
 	}
 	r.add("service", nil, fmt.Sprintf("running with %d active session(s); log %s", len(service.Active), service.Log))

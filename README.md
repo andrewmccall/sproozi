@@ -51,18 +51,18 @@ any Git repository:
 
 ```bash
 brew install andrewmccall/tap/sproozi
-sproozi init --local --harness codex
+sproozi init
 cd /path/to/your/repository
-sproozi start --workspace "$PWD" --harness codex
+sproozi run
 ```
 
-`init --local` asks for your API key and checks that the sandbox can't reach
-the internet directly. `start` copies the repository into a container and
-opens Codex there; your own directory isn't changed. Press Ctrl-] to detach,
+`init` asks for your API key and checks that the agent's container can't reach
+the internet directly. `run` copies the repository into a container and opens
+Codex there; your own directory isn't changed. Press Ctrl-] to detach,
 `sproozi attach ID` to return, `sproozi stop ID` to stop and `sproozi resume
-ID` to carry on later; `sproozi sessions` lists them. For Claude Code, run
-`sproozi init --local --harness claude-code` too, then start with
-`--harness claude-code`.
+ID` to carry on later; `sproozi ls` lists them, and an ID's first few
+characters are enough. For Claude Code, run `sproozi init --harness
+claude-code`, then `sproozi run --harness claude-code`.
 
 [Local sessions](docs/guides/local-sessions.md) explains each step.
 [Install the CLI](docs/guides/install.md) covers downloads for Linux and
@@ -89,8 +89,8 @@ no accounts, no builds.
 
 These guides need a clone of this repository, at the tag that matches your
 CLI (`sproozi --version` prints it). The
-[session command reference](docs/reference/session-commands.md) lists every
-command and flag.
+[command reference](docs/reference/session-commands.md) lists every command
+and flag.
 
 ## What works today
 
@@ -100,7 +100,7 @@ There's working code and recorded tests, but support varies by workflow:
 | --- | --- |
 | Agent runs in Kubernetes Pods | Tested with Codex, Claude Code, OpenCode and Hermes using deterministic providers, by [`make test-e2e`](test/acceptance/running.md#harnesses-and-hermes-in-kind). The [E2E workflow](https://github.com/andrewmccall/sproozi/actions/workflows/test-e2e.yml) runs it on pull requests and pushes to `main`; check there for the latest result, which isn't always green |
 | Controlled access to Kubernetes and external tools | [Recorded tool-access acceptance](test/acceptance/reports/verified-mcp-demo.md) with a real model, including native Kubernetes reads, configured HTTPS test servers and denied operations. The full redacted reports aren't published yet |
-| Local Docker sessions from `sproozi init --local` | Provisioning, per-session Codex or Claude Code selection, gateway containment probes and certificate renewal checked on macOS Docker Desktop with deterministic providers by [`make verify-local-onboarding`](test/acceptance/running.md#local-onboarding); no recorded report is published yet. See the [local sessions guide](docs/guides/local-sessions.md) |
+| Local Docker sessions from `sproozi init` | Provisioning, per-session Codex or Claude Code selection, gateway containment probes and certificate renewal checked on macOS Docker Desktop with deterministic providers by [`make verify-local-onboarding`](test/acceptance/running.md#local-onboarding); no recorded report is published yet. See the [local sessions guide](docs/guides/local-sessions.md) |
 | Explaining refused access to the agent | Every harness receives Sproozi instructions, a `sproozi-access` skill and a `diagnose` tool for its own recent gateway refusals; tested with installed Codex, Claude Code and OpenCode clients, which call `diagnose` through the gateway after a refused request; not yet in a recorded Kind run. See [Sproozi integration](docs/reference/sproozi-integration.md) |
 | Your own instructions and skills | One profile, `~/.sproozi/profile` in a local installation, reaches every managed Codex and Claude Code session with shared and per-harness instructions and skills. It is sent with each Docker launch and stored by digest for Kubernetes. Tested with installed clients and a Docker ↔ Kind session-mobility round trip. See [Profile](docs/reference/profile.md) |
 | Docker ↔ Kubernetes session movement | [Recorded round trips](test/acceptance/reports/verified-session-mobility.md) with Codex 0.161.0, Claude Code 2.1.27 and deterministic providers, including unfinished Git changes. The pinned clients are now Codex 0.163.0 and Claude Code 2.1.302; movement hasn't been re-recorded with them |
@@ -118,7 +118,7 @@ Isolation only works if the environment is configured and enforced correctly. In
 - Rules can restrict external operations, but their precision depends on the integration. A service-aware permission can constrain particular actions. Configured Model Context Protocol (MCP) access checks tools and arguments, while generic HTTPS egress only constrains the destination.
 - Agent containers must run locked down: non-root, read-only, no extra Linux capabilities and no mounted secrets.
 - The gateway limits connections: by default 2048 connections shared by all runs (one per MiB of the gateway's 2Gi memory limit, leaving headroom for a few hundred concurrent model calls rather than one per connection), each one inspected, and at most 16 inspected connections per execution, or the connection limit if lower. Cleanup keeps a run's network controls in place until Sproozi sees its Pod gone, but interrupted cleanup and lost provisioning status aren't fully covered: after an interrupted run, check the Pod yourself.
-- **Interrupted model calls are charged an estimate.** The gateway streams model responses, so output reaches the agent before its usage is settled. A model call can stream for up to 20 minutes by default (configurable up to an hour). A call interrupted after the provider received the request, for example by pressing Esc, is charged an estimate from its input and elapsed time, which can be more or less than the provider bills. That includes a cancel before the response headers, which a call that doesn't stream receives only when the model has finished. A call is free only when the gateway refuses it before inference or while it waits for its budget, when the request never fully reached the provider, or when the provider answers with an error. A call whose usage can't be estimated, or that a budget cut ends, is charged its whole reservation. Codex and ChatGPT-mode calls carry no output bound, so each one reserves everything left in the budget: a run's `model.inference` budget on Kubernetes, or the execution's allowance from `allowances` on the home daemon. See [long model calls](docs/guides/model-provider-auth.md#long-model-calls), [interrupted calls](docs/guides/model-provider-auth.md#interrupted-calls) and [calls that aren't charged](docs/guides/model-provider-auth.md#calls-that-arent-charged).
+- **Interrupted model calls are charged an estimate.** The gateway streams model responses, so output reaches the agent before its usage is settled. A model call can stream for up to 20 minutes by default (configurable up to an hour). A call interrupted after the provider received the request, for example by pressing Esc, is charged an estimate from its input and elapsed time, which can be more or less than the provider bills. That includes a cancel before the response headers, which a call that doesn't stream receives only when the model has finished. A call is free only when the gateway refuses it before inference or while it waits for its budget, when the request never fully reached the provider, or when the provider answers with an error. A call whose usage can't be estimated, or that a budget cut ends, is charged its whole reservation. Codex and ChatGPT-mode calls carry no output bound, so each one reserves everything left in the budget: a run's `model.inference` budget on Kubernetes, or the execution's allowance from `allowances` on the local service. See [long model calls](docs/guides/model-provider-auth.md#long-model-calls), [interrupted calls](docs/guides/model-provider-auth.md#interrupted-calls) and [calls that aren't charged](docs/guides/model-provider-auth.md#calls-that-arent-charged).
 - Resource and usage limits exist, but model-token and cost estimates are **not** hard guarantees against provider spend.
 - There's no cluster cap by default. Without a cluster cap, policy caps or a ResourceQuota, many runs can load the single gateway and the API server, share one ChatGPT plan's rate limit and each spend a full budget at once. See [concurrency and gateway capacity](docs/reference/security-hardening.md#concurrency-and-gateway-capacity).
 - A sandbox does not guarantee that an agent's answer, code or proposed fix is correct. Review changes before deploying or merging them.

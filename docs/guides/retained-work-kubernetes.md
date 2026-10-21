@@ -123,7 +123,7 @@ the approved repository/ref, principal, duration, byte limit and allowances:
 ```
 
 `maxCheckpointBytes` must equal `local.maxCheckpointBytes` in your local
-installation's `config.json`: 32 MiB for a new `sproozi init --local`
+installation's `config.json`: 32 MiB for a new `sproozi init`
 installation, 8 MiB for one created before that default changed.
 
 Apply namespaces from the installation before creating these objects:
@@ -200,11 +200,11 @@ native instructions and byte limits.
 global home configuration and command sequence:
 
 ```sh
-sproozi sessions --executor engineering
-sproozi status SESSION_UUID --executor engineering
-sproozi pull SESSION_UUID --from engineering
-sproozi resume SESSION_UUID
-sproozi stop SESSION_UUID
+sproozi sessions --context engineering
+sproozi status ID --context engineering
+sproozi pull ID --context engineering
+sproozi resume ID
+sproozi stop ID
 ```
 
 You can claim a checkpoint only after the task completes, the sandbox stops and
@@ -223,7 +223,7 @@ conversation. Cross-harness handoff is a separate deferred feature.
 | A deadline or cancellation stops work | Inspect status. Deadline/cancellation does not guarantee a resumable completed turn. Unknown stop or accounting prevents export. |
 | Home storage is full | Resolve capacity before pull/resume. A failed capacity check does not transfer ownership or start another writer. |
 
-Use `sproozi cancel SESSION_UUID --executor engineering` for remote cancellation.
+Use `sproozi cancel ID --context engineering` for remote cancellation.
 Inspect running Pods with the administrator kubeconfig and application logs with
 `kubectl logs -n sproozi-system deployment/sproozi-work`. Retained final output is
 available through status after Pod deletion; full live Pod logs have Kubernetes'

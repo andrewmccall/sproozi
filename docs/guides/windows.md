@@ -3,8 +3,9 @@
 Install the x86-64 ZIP as described in [Install the CLI](install.md). Run commands in
 PowerShell or Windows Terminal on Windows 11 or Windows Server 2025. You can submit work to configured remote owners
 without running Docker locally. Local agent sessions require Docker Desktop
-using Linux containers, plus the home configuration described in
-[Move a live session between Docker and Kubernetes](session-mobility.md).
+using Linux containers, plus a hand-written configuration as described in
+[Move a live session between Docker and Kubernetes](session-mobility.md):
+automatic setup does not run on Windows yet.
 
 Native Windows support includes private files, process locks, local control,
 Git workspace capture and terminal resize handling. CI tests these host
@@ -20,10 +21,11 @@ Run:
 sproozi init
 ```
 
-This creates `%APPDATA%\sproozi` with private Windows permissions, writes a
-starter `config.json` there if none exists, and prints the next step. It grants access to your account and SYSTEM. It rejects an existing
-directory that grants access to other ordinary users. It does not change
-permissions on existing files.
+On Windows this only creates `%USERPROFILE%\.sproozi` (or `--root PATH`) with
+private Windows permissions, then stops with an error saying automatic setup is
+not supported and naming the directory. The directory grants access to your
+account and SYSTEM. `init` rejects an existing directory that grants access to
+other ordinary users, and does not change permissions on existing files.
 
 Keep `config.json`, credentials and TLS keys inside that directory. Files
 created there inherit its private permissions. Do not copy credentials into a
@@ -41,7 +43,8 @@ Use absolute Windows paths in configuration. Escape backslashes in JSON:
 }
 ```
 
-This shows the Windows-specific fields, not a complete home configuration.
+Save it as `config.json` in that directory. This shows the Windows-specific
+fields, not a complete configuration.
 Select Docker Desktop's Linux engine before starting the service. Sproozi uses
 the configured local pipe and private Docker configuration. It does not use
 your active Docker context or accept a remote Docker endpoint.
@@ -69,6 +72,6 @@ reserved names, alternate data streams, trailing dots or spaces, and names
 that collide when case is ignored. DOS short-name aliases are also rejected. Use ordinary directories, not linked
 worktrees, junctions or symlinks.
 
-Start the configured home with `sproozi serve --config PATH`. Use
-`sproozi COMMAND --help` for command options. `Ctrl-]` detaches from an agent
+Run the service with `sproozi service run`, which reads that `config.json`. Use
+`sproozi help COMMAND` for command options. `Ctrl-]` detaches from an agent
 terminal. Detaching leaves the managed session running.

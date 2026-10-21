@@ -174,10 +174,10 @@ ServiceAccount has no direct Kubernetes read grant.
 
 ## Managed session continuity
 
-The [home daemon](../../GLOSSARY.md#home-daemon) manages controlled Docker
+The [service](../../GLOSSARY.md#service) manages controlled Docker
 sessions. It connects to a [remote executor](../../GLOSSARY.md#remote-executor)
 to place work on Kubernetes. The executor holds Kubernetes
-credentials; the home daemon does not need them. Each remote visit creates a
+credentials; the local service does not need them. Each remote visit creates a
 fresh `AgentRun` and must pass current policy checks.
 
 ```mermaid
@@ -207,7 +207,7 @@ can't confirm the stop or the usage, the reserved allowance stays held and the
 destination doesn't start. Forced cancellation revokes access
 first and does not require a fresh checkpoint.
 
-The home coordinator records each execution from its first visit. `start` and
+The home coordinator records each execution from its first visit. `run` and
 `resume` save that visit before any container starts. The coordinator then
 prepares, activates, stops, moves, cancels and recovers every visit the same
 way. A visit started from a Git workspace has no harness conversation ID until
@@ -220,7 +220,7 @@ the remote executor. It runs independently of the laptop. After a Codex task
 finishes, it stops the sandbox, finalizes usage and retains native and Git state.
 Hermes can submit and inspect tasks through authenticated MCP.
 
-Pull transfers ownership to the home daemon without starting an agent. A
+Pull transfers ownership to the local service without starting an agent. A
 later resume starts a new execution with current local approval and the same
 harness conversation ID. Old usage receipts remain unchanged. Retried operations
 stay bound to their original execution, so they cannot affect a later resume.

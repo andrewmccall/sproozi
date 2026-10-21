@@ -494,7 +494,7 @@ class Proof(BASE.Proof):
                    "PROFILE_MARKER_KUBERNETES_FINAL"]
         BASE.write_profile(self.fixture, markers[0])
         repo, expected = self.seed()
-        start = self.cli("start", operation=uuid.uuid4(), workspace=repo, **{"include-ignored": ["needed.bin"]})
+        start = self.cli("run", operation=uuid.uuid4(), workspace=repo, **{"include-ignored": ["needed.bin"]})
         BASE.check(start["initialStage"] == "active" and not start.get("threadId"), "Initial native identity fabricated or launch inactive")
         deadline, thread = start["deadline"], None
         self.report["originalDeadline"] = deadline

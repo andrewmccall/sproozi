@@ -58,6 +58,9 @@ type Result struct {
 	Service      ServiceStatus `json:"service"`
 	Paths        []PathReport  `json:"paths,omitempty"`
 	Ready        bool          `json:"ready"`
+	// Warning says what still needs doing when setup saved its changes but
+	// could not apply them yet.
+	Warning string `json:"warning,omitempty"`
 }
 
 // goosWindows names the host where automatic setup is unsupported.
@@ -81,8 +84,18 @@ const DefaultInstructions = "You are working in a Sproozi-managed workspace at /
 // network, CA, credentials and configuration without duplicating them.
 func Init(ctx context.Context, o Options) (Result, error) {
 	if runtime.GOOS == goosWindows {
+		// Create the private root, so a hand-written configuration has a
+		// safe home, then explain that the rest is manual.
+		root, err := ResolveRoot(o.Root)
+		if err == nil {
+			err = privatefs.EnsureDir(root)
+		}
+		if err != nil {
+			return Result{}, fail("root", err, "choose another --root")
+		}
 		return Result{}, fail("platform", errors.New("automatic local setup is not yet supported on Windows"),
-			"configure the home daemon manually; see docs/guides/windows.md")
+			"write config.json in the private directory "+root+" by hand, then run \"sproozi service run\"; "+
+				"see docs/guides/windows.md")
 	}
 	o = o.withDefaults()
 	if err := o.Harness.Validate(); err != nil {
@@ -379,19 +392,26 @@ func (i *installer) serve(ctx context.Context) (Result, error) {
 	}
 	if i.changed || i.credential {
 		restarted, err := RestartIdle(ctx, l, i.config, i.o.Executable)
+		var active *SessionsActiveError
+		if errors.As(err, &active) {
+			// Setup is saved; the running service adopts it after a restart,
+			// so the readiness probes would test the previous settings.
+			result.Service, result.Warning = ServiceState(ctx, l, i.config), err.Error()
+			return result, nil
+		}
 		if err != nil {
 			result.Service = ServiceState(ctx, l, i.config)
 			return result, err
 		}
 		if restarted {
-			i.step("Restarted the home daemon to load the new configuration and credentials")
+			i.step("Restarted the service to load the new configuration and credentials")
 		}
 	}
 	var err error
 	if result.Service, err = StartService(ctx, l, i.config, i.o.Executable, 2*time.Minute); err != nil {
 		return result, err
 	}
-	i.step("Home daemon is running; log %s", l.ServiceLog())
+	i.step("The service is running; log %s", l.ServiceLog())
 	if err = i.save("service"); err != nil {
 		return result, err
 	}

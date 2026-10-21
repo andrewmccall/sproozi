@@ -441,7 +441,9 @@ func (s *Service) localFor(kind harness.NativeKind) (runtimedocker.PlacementConf
 			return stack.config, nil
 		}
 	}
-	return runtimedocker.PlacementConfig{}, fmt.Errorf("home: harness %s is not configured; run sproozi init --local --harness %s", kind, kind)
+	return runtimedocker.PlacementConfig{}, rejectedError(fmt.Sprintf("home: harness %s is not set up in the running "+
+		"service; run \"sproozi init --harness %s\", or, if you already did, restart the service with "+
+		"\"sproozi service stop\" and \"sproozi service start\"", kind, kind))
 }
 
 // keyPairError names the gateway file that tls.X509KeyPair could not use.

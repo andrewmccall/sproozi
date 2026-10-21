@@ -36,7 +36,7 @@ checks before cluster creation and cleanup after a setup failure. Stubs replace 
 | `make verify-native-session` | Installed stock Codex resumes through production checkpoint capture and restore against a local provider. | No | Codex CLI |
 | `make verify-harness-process` | Installed Claude Code and OpenCode complete model and tool loops through the inspected-TLS gateway with local providers, and call `sproozi` `diagnose` to explain a request the gateway refused. | No | Claude Code, OpenCode |
 | `make verify-mcp-kind` | Configured MCP providers work with stock Codex in an owned Kind cluster, including denials, budgets and revocation. Real model requests. | No | See [Configured MCP in Kind](#configured-mcp-in-kind) |
-| `make verify-local-onboarding` | On this computer's Docker engine, `init --local` provisions Codex and adds Claude Code, `doctor` passes, one stock terminal turn per harness completes through `attach`, both stops bind native UUIDs, each harness's profile instructions reach its provider, a renewed certificate reaches the running gateway, and a configured kubeconfig receives no calls. Deterministic local providers. See [Local onboarding](#local-onboarding). | No | Docker with Buildx, Go, Python 3, OpenSSL |
+| `make verify-local-onboarding` | On this computer's Docker engine, `init` provisions Codex and adds Claude Code, `doctor` passes, one stock terminal turn per harness completes through `attach`, both stops bind native UUIDs, each harness's profile instructions reach its provider, a renewed certificate reaches the running gateway, and a configured kubeconfig receives no calls. Deterministic local providers. See [Local onboarding](#local-onboarding). | No | Docker with Buildx, Go, Python 3, OpenSSL |
 | `make verify-kubernetes-release` | In an owned Kind cluster with enforcing CNI, the rendered release assets install as documented; the provider-free first check passes with permitted, denied and blocked paths; renewal reaches the running gateway; a CA rotation passes through new immutable trust objects; and the certificate controller lacks other rights. See [Kubernetes release assets](#kubernetes-release-assets). | No | Docker with Buildx, Kind, kubectl, Python 3 |
 | `make verify-live` | One real AgentRun on a provisioned cluster opens a scoped PR in `SPROOZI_DEMO_REPO` and its denial probes fail closed. | No | Provisioned cluster and credentials; creates a PR |
 | `make verify-public-tree` | No private local material is tracked. | No | Git |
@@ -240,7 +240,7 @@ deterministic providers from the
 [session movement fixtures](../../hack/verify/session-mobility/README.md) on
 ports 18765 and 18775. It removes its network, root and providers when it
 finishes. The report records the tested revision, whether the tree was dirty,
-each step's result and the timing of the first `init --local`.
+each step's result and the timing of the first `init`.
 
 A pass establishes the local flow on the engine you ran it on. It does not
 establish real provider authentication, paid-model behaviour or other

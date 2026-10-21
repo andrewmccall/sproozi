@@ -65,6 +65,9 @@ type gitRunner struct {
 // ErrByteLimit matches a capture or restore that exceeds its byte limit.
 var ErrByteLimit = errors.New("workspace: byte limit exceeded")
 
+// ErrUnbornRepository matches a repository with no commit yet.
+var ErrUnbornRepository = errors.New("workspace: the repository has no commits")
+
 // ErrNotRepository matches a capture root that is not the top-level directory
 // of an ordinary Git repository.
 var ErrNotRepository = errors.New("workspace: ordinary Git directory required")
@@ -342,7 +345,7 @@ func capture(ctx context.Context, root string, selectedIgnored []string, exclude
 	run := func(a ...string) ([]byte, error) { return g.run(ctx, scratch, append(args, a...)...) }
 	head, err := run("rev-parse", "--verify", "HEAD")
 	if err != nil {
-		return nil, errors.New("workspace: unborn repository unsupported")
+		return nil, ErrUnbornRepository
 	}
 	branch, _ := run("symbolic-ref", "--quiet", "HEAD")
 	if err = checkIndexLayout(run); err != nil {

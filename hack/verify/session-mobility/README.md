@@ -175,7 +175,7 @@ codex_provider_pid=$!
 KUBECONFIG="$work/kubeconfig" "$work/bin/session-profile" \
   --config "$codex/profile-config.json" >"$codex/profile.log" 2>&1 &
 codex_profile_pid=$!
-"$work/bin/sproozi" serve --config "$codex/home-config.json" >"$codex/home.log" 2>&1 &
+"$work/bin/sproozi" service run --config "$codex/home-config.json" >"$codex/home.log" 2>&1 &
 codex_home_pid=$!
 ```
 
@@ -274,7 +274,7 @@ claude_provider_pid=$!
 KUBECONFIG="$work/kubeconfig" "$work/bin/session-profile" \
   --config "$claude/profile-config.json" >"$claude/profile.log" 2>&1 &
 claude_profile_pid=$!
-"$work/bin/sproozi" serve --config "$claude/home-config.json" >"$claude/home.log" 2>&1 &
+"$work/bin/sproozi" service run --config "$claude/home-config.json" >"$claude/home.log" 2>&1 &
 claude_home_pid=$!
 wait_ready "$claude" 18775 18454 30
 python3 hack/verify/session-mobility/claude.py verify \

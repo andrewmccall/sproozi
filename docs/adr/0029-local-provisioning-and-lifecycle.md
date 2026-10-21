@@ -35,8 +35,8 @@ The default root is `~/sproozi`. An existing platform configuration stays the
 session commands' default, so manual installations keep working.
 
 > Amended by [first-run fixes](#amendment-first-run-fixes): setup refuses a
-> root it does not own, and a platform configuration that can do nothing yet
-> yields to a local installation.
+> root it does not own. [ADR 0037](0037-one-command-surface.md) then made the
+> default root `~/.sproozi` and removed the platform configuration default.
 
 ### The gateway address is measured, not assumed
 
@@ -212,6 +212,13 @@ not what it can reach.
 ## Amendment: first-run fixes
 
 Added 2026-10-20, after five launch testers hit the same first-run problems.
+
+> Partly superseded by [ADR 0037](0037-one-command-surface.md): `init --local`
+> became `init`, the plain-`init` starter configuration and the platform
+> configuration's precedence are gone, and the owner moved the default root to
+> `~/.sproozi`, chosen by `--root` or `SPROOZI_ROOT`. Sproozi is unreleased, so
+> no installation at `~/sproozi` is migrated. The root ownership check, the
+> checkpoint defaults and the provider CA copy below still hold.
 
 **Setup owns its root.** The guides once cloned the repository from the home
 directory, which makes `~/sproozi` a Git checkout. Setup then failed the

@@ -21,15 +21,22 @@ const catalogueSessions = 512
 const catalogueExecutors = 32
 const availabilityAvailable = "available"
 const availabilityUnavailable = "unavailable"
-const ownershipHome = "home"
-const ownershipExecutor = "executor"
 
-// errorHomeNotRunning is the executor error when no home daemon is listening.
-const errorHomeNotRunning profile.Code = "home_not_running"
+// Ownership values: this machine owns the session, a pull to this machine is
+// under way, or the cluster that listed it owns it.
+const (
+	ownershipLocal   = localName
+	ownershipPulling = "pulling"
+	ownershipCluster = "cluster"
+)
 
-// Catalogue rows are compact discovery facts, not full execution journals or
-// untrusted final answers. Executor labels the catalogue queried; placement
-// separately names the current execution destination.
+// errorServiceNotRunning is the executor error when this machine's service is
+// not running.
+const errorServiceNotRunning profile.Code = "service_not_running"
+
+// Catalogue rows are compact discovery facts, not full journals or untrusted
+// final answers. Executor names the catalogue that listed the row: local for
+// this machine, or a cluster's name; placement names where it runs now.
 type catalogueRow struct {
 	project.Association
 	ID           string               `json:"id"`
@@ -53,7 +60,7 @@ type catalogue struct {
 	Sessions  []catalogueRow         `json:"sessions"`
 	Executors []executorAvailability `json:"executors"`
 	Truncated bool                   `json:"truncated"`
-	// problems holds each unavailable owner's error, in executor order.
+	// problems holds each unavailable catalogue's error.
 	problems map[string]error
 }
 type discovered struct {
@@ -62,74 +69,57 @@ type discovered struct {
 	err          error
 }
 
-func discoverSessions(ctx context.Context, q options) catalogue {
-	names := selectedExecutors(q.fixed, q.executor)
-	if q.executor != "" && q.executor != dockerExecutor {
-		names = []string{q.executor}
+// sessions lists this machine's sessions and each cluster's. It never starts
+// the service: a listing has no side effects.
+func (q *options) sessions(ctx context.Context) error {
+	var targets []remoteTarget
+	if q.remote {
+		if err := q.loadOptional(); err != nil {
+			return err
+		}
+		target, err := resolveRemote(ctx, q.fixed, q.context, q.namespace)
+		if err != nil {
+			return err
+		}
+		targets = []remoteTarget{target}
+	} else {
+		if err := q.load(); err != nil {
+			return err
+		}
+		targets = remoteTargets(ctx, q.fixed)
 	}
-	if q.executor == "" || q.executor == dockerExecutor {
-		names = append(names, dockerExecutor)
+	found := discoverSessions(ctx, q, !q.remote, targets)
+	if q.json {
+		if err := writeJSON(q.out, found); err != nil {
+			return err
+		}
+	} else if len(found.problems) < len(found.Executors) {
+		if err := writeCatalogueTable(q.out, found); err != nil {
+			return err
+		}
 	}
-	slices.Sort(names)
+	return found.failure(q)
+}
+
+func discoverSessions(ctx context.Context, q *options, local bool, targets []remoteTarget) catalogue {
 	out := catalogue{Sessions: []catalogueRow{}, Executors: []executorAvailability{}, problems: map[string]error{}}
-	if len(names) > catalogueExecutors {
-		names = names[:catalogueExecutors]
-		out.Truncated = true
+	if len(targets) > catalogueExecutors {
+		targets, out.Truncated = targets[:catalogueExecutors], true
 	}
-	results := make(chan discovered, len(names))
-	for _, name := range names {
-		go func() {
-			requestCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-			defer cancel()
-			v := discovered{availability: executorAvailability{Executor: name, Availability: availabilityAvailable}}
-			if name == dockerExecutor {
-				response, err := home.Call(requestCtx, q.socket, home.Request{Action: home.ActionSessions, Project: q.project})
-				v.err = err
-				for _, status := range response.Sessions {
-					row := catalogueRow{
-						Association: status.Association, ID: status.ID, Executor: name, Ownership: status.Ownership, Phase: status.Phase,
-						Harness: status.Harness, ExecutionID: status.ExecutionID, AllocationID: status.AllocationID,
-						Incarnation: status.Incarnation, Placement: status.Placement, ThreadID: status.ThreadID,
-						Deadline: status.Deadline,
-					}
-					v.rows = append(v.rows, row)
-				}
-			} else {
-				fixed, ok := q.fixed.WorkConnections()[name]
-				if !ok {
-					v.err = &profile.Rejection{Code: profile.CodeInvalid}
-				} else {
-					client, err := work.NewClient(fixed)
-					v.err = err
-					if err == nil {
-						rows, err := client.List(requestCtx, work.SessionQuery{Project: q.project})
-						_ = client.Close()
-						v.err = err
-						for _, row := range rows {
-							ownership := ownershipExecutor
-							if row.Phase == work.PhaseHomeOwned {
-								ownership = ownershipHome
-							}
-							v.rows = append(v.rows, catalogueRow{
-								Association: row.Association, ID: row.ID, Executor: name,
-								Ownership: ownership, Phase: string(row.Phase), Harness: row.Harness,
-								ExecutionID: row.ExecutionID, AllocationID: row.AllocationID, Incarnation: row.Incarnation,
-								Placement: row.Placement, ThreadID: row.ThreadID, Deadline: row.Deadline,
-							})
-						}
-					}
-				}
-			}
-			results <- v
-		}()
+	results := make(chan discovered, len(targets)+1)
+	if local {
+		go func() { results <- q.discoverLocal(ctx) }()
 	}
-	for range names {
+	for _, target := range targets {
+		go func() { results <- q.discoverRemote(ctx, target) }()
+	}
+	for range len(targets) + btoi(local) {
 		v := <-results
 		if v.err != nil {
 			v.availability.Availability = availabilityUnavailable
 			v.availability.Error = work.OutcomeCode(v.err)
 			if errors.Is(v.err, home.ErrControlUnavailable) {
-				v.availability.Error = errorHomeNotRunning
+				v.availability.Error = errorServiceNotRunning
 			}
 			out.problems[v.availability.Executor] = v.err
 		} else {
@@ -145,51 +135,99 @@ func discoverSessions(ctx context.Context, q options) catalogue {
 		return strings.Compare(a.ID, b.ID)
 	})
 	if len(out.Sessions) > catalogueSessions {
-		out.Sessions = out.Sessions[:catalogueSessions]
-		out.Truncated = true
+		out.Sessions, out.Truncated = out.Sessions[:catalogueSessions], true
 	}
 	return out
 }
 
-// failure explains a catalogue in which no requested owner answered. Partial
-// results succeed, with a note when home is not running.
-func (c catalogue) failure(configPath string) error {
-	homeErr := c.problems[dockerExecutor]
-	if len(c.problems) < len(c.Executors) {
-		if errors.Is(homeErr, home.ErrControlUnavailable) {
-			_, _ = fmt.Fprintln(os.Stderr,
-				"Home is not running, so its sessions are not listed; start it with \""+startHomeCommand(configPath)+"\"")
-		} else if homeErr != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "Home is unavailable, so its sessions are not listed: %v\n", homeErr)
+func btoi(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+func (q *options) discoverLocal(ctx context.Context) discovered {
+	requestCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	v := discovered{availability: executorAvailability{Executor: localName, Availability: availabilityAvailable}}
+	response, err := home.Call(requestCtx, q.socket, home.Request{Action: home.ActionSessions, Project: q.project})
+	v.err = err
+	for _, status := range response.Sessions {
+		status = q.publicStatus(status)
+		ownership := status.Ownership
+		if ownership == "source" {
+			ownership = ownershipPulling
 		}
+		v.rows = append(v.rows, catalogueRow{
+			Association: status.Association, ID: status.ID, Executor: localName, Ownership: ownership,
+			Phase: status.Phase, Harness: status.Harness, ExecutionID: status.ExecutionID,
+			AllocationID: status.AllocationID, Incarnation: status.Incarnation, Placement: status.Placement,
+			ThreadID: status.ThreadID, Deadline: status.Deadline,
+		})
+	}
+	return v
+}
+
+func (q *options) discoverRemote(ctx context.Context, target remoteTarget) discovered {
+	requestCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	v := discovered{availability: executorAvailability{Executor: target.Name, Availability: availabilityAvailable}}
+	client, err := work.NewClient(target.Client)
+	if err != nil {
+		v.err = err
+		return v
+	}
+	defer func() { _ = client.Close() }()
+	views, err := client.List(requestCtx, work.SessionQuery{Project: q.project})
+	v.err = err
+	for _, view := range views {
+		ownership, phase := ownershipCluster, string(view.Phase)
+		if view.Phase == work.PhaseHomeOwned {
+			// The cluster keeps a record of a session pulled to a machine.
+			ownership, phase = ownershipLocal, "pulled"
+		}
+		v.rows = append(v.rows, catalogueRow{
+			Association: view.Association, ID: view.ID, Executor: target.Name, Ownership: ownership, Phase: phase,
+			Harness: view.Harness, ExecutionID: view.ExecutionID, AllocationID: view.AllocationID,
+			Incarnation: view.Incarnation, Placement: view.Placement, ThreadID: view.ThreadID, Deadline: view.Deadline,
+		})
+	}
+	return v
+}
+
+// failure explains catalogues that did not answer. It fails only when none
+// did; otherwise it notes each one on standard error.
+func (c catalogue) failure(q *options) error {
+	explainOne := func(name string, err error) string {
+		switch {
+		case errors.Is(err, home.ErrControlUnavailable):
+			return q.homeError(err).Error()
+		case name == localName:
+			return "this machine's sessions: " + explain(err)
+		}
+		return fmt.Sprintf("cluster %s did not answer: %s", name, executorCause(err))
+	}
+	if len(c.problems) < len(c.Executors) {
 		for _, e := range c.Executors {
-			if err := c.problems[e.Executor]; err != nil && e.Executor != dockerExecutor {
-				_, _ = fmt.Fprintf(os.Stderr, "Executor %s is unavailable, so its sessions are not listed: %s\n",
-					e.Executor, executorCause(err))
+			if err := c.problems[e.Executor]; err != nil {
+				_, _ = fmt.Fprintf(os.Stderr, "Not listed: %s\n", explainOne(e.Executor, err))
 			}
 		}
 		return nil
 	}
-	var others []string
+	var reasons []string
 	for _, e := range c.Executors {
-		if e.Executor != dockerExecutor {
-			others = append(others, e.Executor+": "+executorCause(c.problems[e.Executor]))
-		}
+		reasons = append(reasons, explainOne(e.Executor, c.problems[e.Executor]))
 	}
-	// The catalogue is already on stdout; this explains why it lists nothing.
-	const prefix = "no sessions listed: the results above show that no executor answered"
-	switch {
-	case homeErr != nil && len(others) == 0:
-		return fmt.Errorf("%s: %w", prefix, homeErr)
-	case homeErr != nil:
-		return fmt.Errorf("%s: executor %s; and %w", prefix, strings.Join(others, "; executor "), homeErr)
-	default:
-		return fmt.Errorf("%s: executor %s", prefix, strings.Join(others, "; executor "))
+	if len(reasons) == 1 {
+		return errors.New(reasons[0])
 	}
+	return fmt.Errorf("no sessions listed: %s", strings.Join(reasons, "; "))
 }
 
-// executorCause explains why an executor did not answer, including this
-// client's own transport failure, which the error message leaves out.
+// executorCause explains why a cluster did not answer, including this client's
+// own transport failure, which the error message leaves out.
 func executorCause(err error) string {
 	var remote *profile.RemoteError
 	if errors.As(err, &remote) && remote.Transport != nil {

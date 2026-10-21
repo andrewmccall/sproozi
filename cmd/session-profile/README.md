@@ -180,7 +180,7 @@ make an uncertain move proceed.
 
 ## Stop, recover and cancel
 
-The home daemon drives this profile; use the `sproozi` CLI instead of hand-crafted
+The local service drives this profile; use the `sproozi` CLI instead of hand-crafted
 HTTP calls. Each visit gets a fresh Run and Pod. Restore is inert until exact
 admission succeeds and initialized budget accounts exist. Actual checkpoint
 UUID, artifact kind and digest must match trusted intent. The
@@ -216,7 +216,7 @@ through the home journal. See the guide's
 
 ## Retained remote work
 
-To accept new Codex tasks independently of the home daemon, add `workTokenFile`
+To accept new Codex tasks independently of the local service, add `workTokenFile`
 and `repositories` to the configuration. The work token must be distinct from
 `tokenFile`, at least 32 characters, and stored privately. Repository entries
 select either an administrator-owned absolute stopped `snapshot` path or an

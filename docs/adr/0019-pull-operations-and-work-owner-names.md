@@ -66,5 +66,5 @@ limit.
 
 - [Retained remote work](../guides/portable-workflows.md)
 - [Session commands](../reference/session-commands.md)
-- `cmd/sproozi/address.go`, `internal/session/home/config.go`,
+- `cmd/sproozi/parse.go`, `internal/session/home/config.go`,
   `internal/session/home/catalog.go`

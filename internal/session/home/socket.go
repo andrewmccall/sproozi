@@ -35,6 +35,7 @@ const (
 	ActionResume   = "resume"
 	ActionStop     = "stop"
 	ActionSessions = "sessions"
+	ActionRemove   = "remove"
 	controlLimit   = 32 << 10
 	responseLimit  = 2 << 20
 )
@@ -111,7 +112,7 @@ func (s *Service) unknownSession(q Request, err error) (Response, bool) {
 		return Response{}, false
 	}
 	return Response{UnknownSession: true, Error: fmt.Sprintf(
-		"docker (home): no session %s; run \"sproozi sessions\" to list sessions", q.ID)}, true
+		"docker (home): no session %s; \"sproozi ls\" lists sessions", q.ID)}, true
 }
 
 // SocketPath returns the private local control address for a home directory.
@@ -150,16 +151,16 @@ func (s *Service) Serve(ctx context.Context) error {
 	listener, err := listenControl(path)
 	if errors.Is(err, errControlListening) {
 		return fmt.Errorf("home: control socket %s: another process is listening there; stop it first "+
-			"(a home daemon for directory %s, or another program using that path)", path, s.config.Directory)
+			"(a Sproozi service for directory %s, or another program using that path)", path, s.config.Directory)
 	} else if addressInUse(err) {
-		return fmt.Errorf("home: control socket %s: address already in use; stop the other home daemon for "+
+		return fmt.Errorf("home: control socket %s: address already in use; stop the other Sproozi service for "+
 			"directory %s", path, s.config.Directory)
 	} else if err != nil {
 		return fmt.Errorf("home: control socket %s: %w", path, err)
 	}
 	defer func() { _ = listener.Close() }()
 	if s.log != nil {
-		_, _ = fmt.Fprintf(s.log, "Started home daemon: control socket %s, gateway %s\n", path, strings.Join(addresses, ", "))
+		_, _ = fmt.Fprintf(s.log, "Started the Sproozi service: control socket %s, gateway %s\n", path, strings.Join(addresses, ", "))
 	}
 	var workers sync.WaitGroup
 	var connections sync.Map
@@ -188,7 +189,7 @@ func (s *Service) Serve(ctx context.Context) error {
 			workers.Wait()
 			if ctx.Err() != nil {
 				if s.log != nil {
-					_, _ = fmt.Fprintln(s.log, "Stopped home daemon")
+					_, _ = fmt.Fprintln(s.log, "Stopped the Sproozi service")
 				}
 				return nil
 			}
@@ -258,7 +259,7 @@ func daemonRunning(ctx context.Context, directory string) bool {
 }
 
 func anotherDaemon(directory string) error {
-	return fmt.Errorf("home: another home daemon is using directory %s; stop it first (\"sproozi serve\" holds it until it exits)", directory)
+	return fmt.Errorf("home: another Sproozi service is using directory %s; stop it first", directory)
 }
 
 func addressInUse(err error) bool {
@@ -335,6 +336,8 @@ func (s *Service) handle(ctx context.Context, conn net.Conn) {
 		status, err = s.Stop(ctx, q.ID, q.OperationID)
 	case ActionSessions:
 		sessions, err = s.Sessions(work.SessionQuery{Project: q.Project})
+	case ActionRemove:
+		status, err = s.Remove(q.ID)
 	}
 	response := Response{Sessions: sessions}
 	if status.ID != "" {
@@ -362,11 +365,11 @@ func needsRecovery(err error, id string) error {
 			"waiting, or run \"sproozi cancel %s\" to force-stop it", err, id)
 	case errors.Is(err, session.ErrRecoveryRequired):
 		return rejectedError(fmt.Sprintf("%v; run \"sproozi recover %s\" to finish it, or \"sproozi cancel %s\" "+
-			"to revoke and force-stop its current execution", err, id, id))
+			"to stop it now", err, id, id))
 	case errors.Is(err, session.ErrCancellationUnfinished):
 		return rejectedError(fmt.Sprintf("%v; run \"sproozi recover %s\" to finish the cancellation", err, id))
 	case errors.Is(err, session.ErrSessionCancelled):
-		return rejectedError(fmt.Sprintf("session %s is cancelled; start a new session", id))
+		return rejectedError(fmt.Sprintf("session %s is cancelled; start a new one with \"sproozi run\", or delete it with \"sproozi rm %s\"", id, id))
 	}
 	return err
 }
@@ -401,7 +404,7 @@ func validateRequest(q Request) error {
 		if !work.CanonicalID(q.OperationID) || q.Workspace != "" || q.Destination != "" {
 			return errors.New("home: invalid execution intent")
 		}
-	case ActionAttach, ActionStatus, ActionRecover:
+	case ActionAttach, ActionStatus, ActionRecover, ActionRemove:
 		if q.OperationID != "" || q.Workspace != "" || q.Destination != "" {
 			return errors.New("home: unexpected control fields")
 		}
@@ -418,7 +421,7 @@ var errControlListening = errors.New("home: control socket has a live listener")
 // ErrControlUnavailable reports that no home daemon is listening on the
 // control address. It names the executor (docker) and its owner (home) as
 // command output and --executor do.
-var ErrControlUnavailable = errors.New("docker (home): no home daemon is listening on the private control socket")
+var ErrControlUnavailable = errors.New("docker (home): no Sproozi service is listening on the private control socket")
 
 func connect(ctx context.Context, path string, q Request) (net.Conn, *bufio.Reader, error) {
 	if err := validateRequest(q); err != nil {

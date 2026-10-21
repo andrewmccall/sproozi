@@ -8,7 +8,6 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"errors"
-	"fmt"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -210,15 +209,18 @@ func TestSetupLockAdmitsOneOwner(t *testing.T) {
 	unlock()
 }
 
-func TestRootDiscoveryPrefersPlatformConfigThenRecordedRoot(t *testing.T) {
+// The root is --root, else $SPROOZI_ROOT, else the root init recorded, else
+// ~/.sproozi; the configuration is always the root's.
+func TestRootDiscoveryPrefersFlagThenEnvironmentThenRecordedRoot(t *testing.T) {
 	if runtime.GOOS == goosWindows {
 		t.Skip("UserConfigDir ignores HOME on Windows")
 	}
 	homeDir := testutil.PrivateDir(t)
 	t.Setenv("HOME", homeDir)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(homeDir, ".config"))
+	t.Setenv(RootEnvironment, "")
 	root, err := ResolveRoot("")
-	if err != nil || root != filepath.Join(homeDir, "sproozi") {
+	if err != nil || root != filepath.Join(homeDir, ".sproozi") {
 		t.Fatalf("default root %s %v", root, err)
 	}
 	custom := filepath.Join(homeDir, "elsewhere")
@@ -228,46 +230,24 @@ func TestRootDiscoveryPrefersPlatformConfigThenRecordedRoot(t *testing.T) {
 	if root, err = ResolveRoot(""); err != nil || root != custom {
 		t.Fatalf("recorded root %s %v", root, err)
 	}
-	l := Layout{Root: custom}
-	if err = privatefs.EnsureDir(custom); err != nil {
+	if path, err := DefaultConfigPath(); err != nil || path != (Layout{Root: custom}).Config() {
+		t.Fatalf("config path %s %v", path, err)
+	}
+	environment := filepath.Join(homeDir, "from-env")
+	t.Setenv(RootEnvironment, environment)
+	if root, err = ResolveRoot(""); err != nil || root != environment {
+		t.Fatalf("environment root %s %v", root, err)
+	}
+	// A root the variable chooses is not recorded.
+	if err = RememberRoot(environment); err != nil {
 		t.Fatal(err)
 	}
-	if err = privatefs.Replace(custom, "config.json", []byte("{}")); err != nil {
-		t.Fatal(err)
+	t.Setenv(RootEnvironment, "")
+	if root, err = ResolveRoot(""); err != nil || root != custom {
+		t.Fatalf("environment root was recorded: %s %v", root, err)
 	}
-	if path, err := DefaultConfigPath(); err != nil || path != l.Config() {
-		t.Fatalf("local config path %s %v", path, err)
-	}
-	dir, _ := os.UserConfigDir()
-	if err = privatefs.Replace(filepath.Join(dir, "sproozi"), "config.json", []byte("{}")); err != nil {
-		t.Fatal(err)
-	}
-	if path, err := DefaultConfigPath(); err != nil || path != filepath.Join(dir, "sproozi", "config.json") {
-		t.Fatalf("existing platform configuration must stay authoritative: %s %v", path, err)
-	}
-	// The starter "sproozi init" writes can do nothing yet, so a local
-	// installation wins over it until it names a remote executor.
-	starter := `{"directory": "` + filepath.Join(dir, "sproozi", "home") + `",
-		"local": {"harness": "codex", "name": "local"}, "maxDuration": "30m", "remote": {%s},
-		"allowances": {"model.inference": {"units": {"bounded": true, "value": 1}, "costMicros": {"bounded": false, "value": 0}}}}`
-	if err = privatefs.Replace(filepath.Join(dir, "sproozi"), "config.json", fmt.Appendf(nil, starter, "")); err != nil {
-		t.Fatal(err)
-	}
-	if path, err := DefaultConfigPath(); err != nil || path != filepath.Join(dir, "sproozi", "config.json") {
-		t.Fatalf("starter without an installation: %s %v", path, err)
-	}
-	if err = privatefs.Replace(custom, "installation.json", []byte("{}")); err != nil {
-		t.Fatal(err)
-	}
-	if path, err := DefaultConfigPath(); err != nil || path != l.Config() {
-		t.Fatalf("installation must win over an unconfigured starter: %s %v", path, err)
-	}
-	remote := `"engineering": {"url": "https://work.example"}`
-	if err = privatefs.Replace(filepath.Join(dir, "sproozi"), "config.json", fmt.Appendf(nil, starter, remote)); err != nil {
-		t.Fatal(err)
-	}
-	if path, err := DefaultConfigPath(); err != nil || path != filepath.Join(dir, "sproozi", "config.json") {
-		t.Fatalf("a platform configuration with a remote executor must stay authoritative: %s %v", path, err)
+	if root, err = ResolveRoot("flag"); err != nil || !filepath.IsAbs(root) || filepath.Base(root) != "flag" {
+		t.Fatalf("flag root %s %v", root, err)
 	}
 }
 

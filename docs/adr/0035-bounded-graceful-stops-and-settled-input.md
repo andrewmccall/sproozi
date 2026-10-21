@@ -76,4 +76,4 @@ Implementation: [native supervisor](../../cmd/native-session/main.go),
 [Claude transcript rules](../../internal/harness/claude_state.go),
 [shared handoff](../../internal/harness/native_control.go),
 [coordinator](../../internal/session/coordinator.go) and
-[CLI](../../cmd/sproozi/product.go).
+[CLI](../../cmd/sproozi/session.go).

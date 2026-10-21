@@ -91,7 +91,7 @@ ceilings; see
 ### Allowance
 
 The total usage limit, per capability, granted to one execution and shared by
-all of its visits. For local executions it comes from the home daemon's
+all of its visits. For local executions it comes from the service's
 `allowances` configuration. A move doesn't refill it; a new execution gets a
 fresh one.
 
@@ -205,11 +205,11 @@ that carries it, up to this deadline. See
 ### Drain
 
 What a gateway does when it stops on purpose: on SIGTERM the shared gateway,
-and the home daemon when it closes, refuses new model calls with a 503
+and the service when it closes, refuses new model calls with a 503
 (`gateway_stopping` in the OpenAI body; the Anthropic body has the type
 `server_error` and no code), ends every call in flight with `endReason`
 `gateway_restart` so each settles its reservation, and waits up to 30 seconds
-(10 for the home daemon) before it exits. A call the provider had received is
+(10 for the service) before it exits. A call the provider had received is
 charged as interrupted, usually an [estimated charge](#estimated-charge). A
 call still waiting for its budget, not yet fully written or still waiting for
 its response headers gets the same 503; the first two are free. Anything still unsettled is left as
@@ -295,7 +295,7 @@ Its ID is `executionId`. Also seen as: Sproozi execution.
 
 ### Placement
 
-Where an execution runs: local Docker, managed by the home daemon, or a
+Where an execution runs: local Docker, managed by this machine's service, or a
 Kubernetes cluster reached through a remote executor.
 
 ### Visit
@@ -318,7 +318,7 @@ checkpoint; the session keeps the workspace it started from. See
 The user's own arguments for the stock harness, given after `--` on `start` or
 `resume`. They belong to that execution, not the session. Sproozi refuses the
 ones that would replace a flag it controls. See
-[pass arguments to the harness](docs/reference/session-commands.md#pass-arguments-to-the-harness).
+[pass arguments to the harness](docs/reference/session-commands.md#agent-arguments).
 
 ### Writer
 
@@ -349,10 +349,10 @@ commit with a clean checkout and a fresh conversation. See
 ### Remote work
 
 A session that a remote executor runs in a Kubernetes sandbox and keeps in its
-catalogue after the sandbox stops. It starts from `sproozi run --executor` or a
+catalogue after the sandbox stops. It starts from `sproozi run --remote` or a
 coordinator's request. Once the writer has stopped, usage is finalized and the
 checkpoint is stored, its phase is `retained`: it can seed fresh work at its
-workspace revision, or be pulled to the home daemon and resumed there. See
+workspace revision, or be pulled to this machine and resumed there. See
 [Run a task remotely, then resume it locally](docs/guides/portable-workflows.md).
 Also seen as: retained work, work session.
 
@@ -366,37 +366,35 @@ template, capability limits and explicit membership. See
 
 ### Owner
 
-The home daemon or remote executor whose catalogue holds a session. Only the
-owner starts, stops or hands over that session's executions. The owner is not
-the placement: the home daemon stays the owner when `move` runs an execution in
-Kubernetes. A successful `pull` transfers ownership from a remote executor to
-the home daemon, one way. Catalogue rows report it as `ownership`: `home`
-when the home daemon owns the session, `executor` when the remote executor the
-row came from owns it, or `source` while a pull is unacknowledged. After a
-pull, the remote executor still lists a read-only mirror row with
-`"executor": "engineering"` (its name) and `"ownership": "home"`. See
-[ownership values](docs/reference/session-commands.md#ownership-values).
+This machine's service or a remote executor: whichever's catalogue holds a
+session. Only the owner starts, stops or hands over that session's executions.
+The owner is not the placement: this machine stays the owner when `move
+--remote` runs an execution in Kubernetes. A successful `pull` transfers
+ownership from a remote executor to this machine, one way. Catalogue rows
+report it as `ownership`: `local` when this machine owns the session,
+`cluster` when the remote executor the row came from owns it, or `pulling`
+while a pull is unacknowledged. After a pull, the remote executor still lists a
+read-only row in phase `pulled` with `"ownership": "local"`. See
+[status and listing output](docs/reference/session-commands.md#status-and-listing-output).
 An owner lock is the lock on an owner's state directory that stops a second
 process using it.
 
-### Home daemon
+### Service
 
-The `sproozi serve` process on your own machine. It owns local Docker
-placements, their gateway and accounting, and the sessions you have pulled.
-One machine appears under three names: `docker` is home's executor name
-(`--executor docker`, and `"executor": "docker"` in `sessions` output); `home`
-is the daemon itself (`"ownership": "home"`); and `local.name`, `local` in the
-starter configuration, is home's local placement for `move --to`. `docker`
-and `home` are reserved, and neither `home` nor `local.name` is an executor.
-Also seen as: home (in CLI output and messages; `--executor home` is
-rejected), home service.
+The background `sproozi service run` process on your own machine, which
+`sproozi service start` and the session commands start for you. It owns local
+Docker placements, their gateway and accounting, and the sessions you have
+pulled. Commands and output call this machine `local`: `move --local`,
+`"executor": "local"`, `"ownership": "local"` and `"placement": "local"`.
+Also seen as: home daemon, home, home service (in code, configuration keys and
+older records).
 
 ### Local installation
 
-The private directory, `~/.sproozi` by default, that `sproozi init --local`
-provisions for the home daemon: its configuration, provider credentials,
-certificate authority, journals and profile. See
-[local installation](docs/reference/local-installation.md). Also seen as:
+The private directory, `~/.sproozi` by default, that `sproozi init`
+sets up for the service: its configuration, provider credentials, certificate
+authority, journals and profile. `--root` or `SPROOZI_ROOT` chooses another.
+See [local installation](docs/reference/local-installation.md). Also seen as:
 installation root.
 
 ### Trust generation
@@ -423,7 +421,7 @@ service.
 
 ### Home principal token
 
-The bearer token a home daemon presents to a remote executor. The profile
+The bearer token this machine's service presents to a remote executor. The profile
 service reads it from its `tokenFile`, and the home configuration names the
 same secret in `remote.NAME.tokenFile` or `workSources.NAME.tokenFile`. It
 permits remote work, moves and pull, unlike the work token. It needs at least
@@ -432,34 +430,27 @@ profile principal token, profile token, remote token.
 
 ### Executor
 
-The owner a CLI command addresses, selected with `--executor NAME`. `docker`
-means the home daemon; any other name is a remote executor from the home
-configuration. The `ownership` value `executor` in catalogue rows means the
-remote kind: a remote executor owns the session, never the home daemon
-addressed by `--executor docker`. `pull --from NAME` also names an owner, the
-one giving the session up, while `move --to NAME` names a placement, not an owner. The
-configuration's `local.name` names home's local placement, which `move --to`
-uses; it is not an executor, and home is addressed as `--executor docker` or by
-omitting `--executor`. Executor names are lowercase DNS labels of 1 to 63
-characters; `docker`, `home` and the configured `local.name` are reserved. See
-[why the commands use different flags](docs/guides/session-mobility.md#why-the-commands-use-different-flags).
+The owner whose catalogue a command reads. `local` is this machine's service;
+any other name is a remote executor. Remote commands select one with
+`--context` (a kubeconfig context or file) and `--namespace`. Executor names
+are lowercase DNS labels of 1 to 63 characters. See
+[remote commands](docs/reference/session-commands.md#remote-commands).
 
 ### Work source
 
-An entry in the home configuration's `workSources` map: a connection to a
-remote executor that `run`, `sessions`, `status`, `cancel`, `recover` and
-`pull` use but `move --to` does not, because it is not a placement. Entries
-take the same fields and name rules as `remote` entries. When both maps hold
-the same name, those commands use the `workSources` entry and `move --to` uses
-the `remote` one. `sproozi init` leaves the map out; add it only for an
-executor reached through a separate connection. See the
+An entry in a hand-written configuration's `workSources` map: a connection to
+a remote executor that `run --remote`, `sessions`, `status`, `cancel`,
+`recover` and `pull` use but `move --remote` does not, because it is not a
+placement. Entries take the same fields and name rules as `remote` entries.
+When both maps hold the same name, those commands use the `workSources` entry
+and `move` uses the `remote` one. See the
 [configuration reference](cmd/sproozi/README.md#configuration-reference).
 
 ### Catalogue
 
-The list of sessions that one owner holds. `sproozi sessions` combines the
-catalogues of the home daemon and configured executors. See
-[session commands](docs/reference/session-commands.md#read-status-and-discovery).
+The list of sessions that one owner holds. `sproozi sessions` combines this
+machine's catalogue with each cluster's. See
+[status and listing output](docs/reference/session-commands.md#status-and-listing-output).
 
 ### Coordinator
 

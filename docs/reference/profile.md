@@ -12,7 +12,7 @@ enforces policy whatever the profile says.
 
 The profile is the `profile` folder beside the configuration file. In a
 [local installation](local-installation.md) that is `~/.sproozi/profile`, and
-`sproozi init --local` creates its folders. For another configuration, create
+`sproozi init` creates its folders. For another configuration, create
 the folder beside its `config.json`. A missing folder is an empty profile.
 
 ```text
@@ -89,10 +89,10 @@ continued conversation differs by harness:
   listing it started with. The reinstalled profile files are present, but the
   model is not shown the changed instructions or skill descriptions.
 
-**Docker.** The home daemon archives the profile folder when it prepares each
+**Docker.** The service archives the profile folder when it prepares each
 visit and sends it with the launch configuration; nothing from your machine is
 mounted into the container. Changes are installed at the session's next
-launch: `start`, `resume` or a move back to Docker. The agent cannot change
+launch: `run`, `resume` or a move back to Docker. The agent cannot change
 your folder.
 
 **Kubernetes.** A Kubernetes visit gets the profile as it was when the visit

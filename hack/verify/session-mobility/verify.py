@@ -165,7 +165,13 @@ class Proof:
                 "files": {p: digest((repo / p).read_bytes()) for p in paths}}
 
     def cli(self, action, **flags):
-        command = [str(self.args.session_binary.resolve()), action, "--socket", str(self.socket), "--id", self.id]
+        command = [str(self.args.session_binary.resolve()), action, "--socket", str(self.socket), "--id", self.id, "--json"]
+        if action == "run":
+            command.append(str(flags.pop("workspace")))
+        destination = flags.pop("to", None)
+        if destination is not None:
+            local = destination in ("local", self.config["local"]["Name"])
+            command += ["--local"] if local else ["--remote", "--context", str(destination)]
         for key, value in flags.items():
             for item in value if isinstance(value, list) else [value]:
                 command += ["--" + key, str(item)]
@@ -319,7 +325,7 @@ class Proof:
         else:
             check(not self.provider(), "Fixture provider already contains requests; use a fresh provider process")
             repo, expected = self.seed()
-            start = self.cli("start", operation=uuid.uuid4(), workspace=repo, **{"include-ignored": ["needed.bin"]})
+            start = self.cli("run", operation=uuid.uuid4(), workspace=repo, **{"include-ignored": ["needed.bin"]})
             check(start["initialStage"] == "active" and not start.get("threadId"),
                   "Initial launch fabricated a native UUID or failed activation")
             deadline = start["deadline"]

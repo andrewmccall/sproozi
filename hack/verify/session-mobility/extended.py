@@ -91,7 +91,11 @@ class ExtendedProof(BASE.Proof):
         self.save()
 
     def command(self, action, **flags):
-        command = [str(self.args.session_binary.resolve()), action, "--socket", str(self.socket), "--id", self.id]
+        command = [str(self.args.session_binary.resolve()), action, "--socket", str(self.socket), "--id", self.id, "--json"]
+        destination = flags.pop("to", None)
+        if destination is not None:
+            local = destination in ("local", self.config["local"]["Name"])
+            command += ["--local"] if local else ["--remote", "--context", str(destination)]
         for key, value in flags.items():
             command += ["--" + key, str(value)]
         return command
@@ -432,7 +436,7 @@ class ExtendedProof(BASE.Proof):
             check(not self.provider(), "Use a fresh deterministic provider process")
             BASE.write_profile(self.fixture, "PROFILE_MARKER_DOCKER_FIRST")
             repo, expected = self.seed()
-            start = self.cli("start", operation=uuid.uuid4(), workspace=repo, **{"include-ignored": ["needed.bin"]})
+            start = self.cli("run", operation=uuid.uuid4(), workspace=repo, **{"include-ignored": ["needed.bin"]})
             check(start["initialStage"] == "active" and not start.get("threadId"), "Initial native UUID fabricated")
             deadline = start["deadline"]
             self.report["originalDeadline"] = deadline

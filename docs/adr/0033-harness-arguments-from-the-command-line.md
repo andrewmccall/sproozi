@@ -3,6 +3,9 @@
 Status: accepted
 Date: 2026-10-20
 
+> [ADR 0037](0037-one-command-surface.md) renamed `start` to `run`; the
+> arguments after `--` work the same way.
+
 ## Problem and constraints
 
 Managed sessions launch the stock harness with flags Sproozi generates
@@ -108,5 +111,5 @@ Implementation: [argument rules](../../internal/harness/native_args.go),
 [launch arguments](../../cmd/native-session/launch.go),
 [Claude arguments](../../cmd/native-session/claude.go),
 [home service](../../internal/session/home/service.go) and
-[CLI parsing](../../cmd/sproozi/product.go). Usage is in the
-[session commands reference](../reference/session-commands.md#pass-arguments-to-the-harness).
+[CLI parsing](../../cmd/sproozi/parse.go). Usage is in the
+[session commands reference](../reference/session-commands.md#agent-arguments).

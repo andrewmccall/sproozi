@@ -99,3 +99,4 @@ ADR 0024's statement that releases do not pin clients.
 | [0033](0033-harness-arguments-from-the-command-line.md) | Arguments after `--` on start and resume go to the harness, refusing flags Sproozi controls; Codex upgrade prompts are acknowledged from its own catalogue. |
 | [0034](0034-resume-continues-every-home-session.md) | Every home session is catalogued, and `resume` continues a stopped one in a new execution, including sessions created with `start` and after the old deadline. |
 | [0035](0035-bounded-graceful-stops-and-settled-input.md) | Graceful stops report what they wait for after a bounded time, settled terminal input no longer blocks them, and Claude system request caches are accepted. |
+| [0037](0037-one-command-surface.md) | One grouped command surface: `run` for local and remote work, `init` for local Docker, `local` as this machine's only name, ID prefixes, `rm`, text output with `--json`, and `~/.sproozi` found by `--root` or `SPROOZI_ROOT`. |

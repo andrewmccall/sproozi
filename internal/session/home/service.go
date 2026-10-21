@@ -214,8 +214,8 @@ func (s *Service) Start(ctx context.Context, id, operationID, path string, kind 
 		!slices.Equal(first.HarnessArgs, harnessArgs) {
 		// A new operation conflicts again; only the retained one continues it.
 		return Status{}, rejectedError(fmt.Sprintf("home: start intent conflicts with retained launch; %s was "+
-			"started with operation %s: to continue it, repeat the original start command with --operation %s, "+
-			"or run \"sproozi cancel %s\" to revoke and force-stop its current execution", id, first.OperationID, first.OperationID, id))
+			"started with operation %s: to continue it, repeat the original run command with --operation %s, "+
+			"or run \"sproozi cancel %s\" to stop it now", id, first.OperationID, first.OperationID, id))
 	}
 	// Catalogue the session before its first visit starts, so stop, cancel
 	// and resume address it like any other home session.
@@ -289,15 +289,17 @@ func (s *Service) createWorkspaceExecution(ctx context.Context, id, operationID,
 // would let it.
 func workspaceProblem(path string, err error, limit int64) string {
 	if _, statErr := os.Lstat(path); os.IsNotExist(statErr) {
-		return fmt.Sprintf("workspace: %s does not exist; pass --workspace the top-level directory of a Git repository", path)
+		return fmt.Sprintf("workspace: %s does not exist; run it on the top-level directory of a Git repository", path)
 	}
 	switch {
 	case errors.Is(err, workspace.ErrNotRepository):
 		return fmt.Sprintf("%v; %s must be the top-level directory of a Git repository, holding its .git directory "+
 			"(linked worktrees and submodules are unsupported)", err, path)
+	case errors.Is(err, workspace.ErrUnbornRepository):
+		return fmt.Sprintf("%v; make a first commit in %s, then run again", err, path)
 	case errors.Is(err, workspace.ErrByteLimit):
 		return fmt.Sprintf("%v; local.maxCheckpointBytes is %.1f MiB: raise it in home's config.json, up to %d MiB, "+
-			"keeping local.retainedBytes at least twice it, then restart home", err, float64(limit)/(1<<20),
+			"keeping local.retainedBytes at least twice it, then restart the service", err, float64(limit)/(1<<20),
 			MaxCheckpointBytes>>20)
 	}
 	return err.Error()

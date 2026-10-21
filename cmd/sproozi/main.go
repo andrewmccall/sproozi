@@ -1,4 +1,5 @@
-// Command sproozi owns the trusted home daemon and its local terminal client.
+// Command sproozi runs coding agents in isolated containers, and runs the
+// background service that owns them on this machine.
 package main
 
 import (
@@ -7,41 +8,110 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
+	"runtime"
+	"syscall"
 
 	"github.com/andrewmccall/sproozi/internal/session/home"
 	"golang.org/x/term"
 )
 
+// goos names the platform; tests may not change it.
+var goos = runtime.GOOS
+
 func main() {
 	os.Exit(cli(os.Args[1:], os.Stdout, os.Stderr))
 }
 
-// cli runs one command line and returns its exit status. Help exits 0; a
-// missing command prints usage to stderr and exits 2.
+// cli runs one command line and returns its exit status: 0 on success, 2 for
+// a command line that cannot run as written, 1 for any other failure.
 func cli(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		usage(stderr)
+		printTopUsage(stderr)
 		return 2
 	}
-	if err := run(args, stdout); err != nil {
-		_, _ = fmt.Fprintln(stderr, "Sproozi failed:", privateHint(err, configArgument(args)))
-		return 1
+	err := run(args, stdout)
+	if err == nil {
+		return 0
 	}
-	return 0
+	_, _ = fmt.Fprintln(stderr, "error:", explain(err))
+	var usage *usageError
+	if errors.As(err, &usage) {
+		return 2
+	}
+	return 1
 }
 
 func run(args []string, stdout io.Writer) error {
-	if len(args) == 1 && args[0] == "--version" {
-		args = []string{actionVersion}
+	switch {
+	case args[0] == "-v" || args[0] == "--version":
+		args = append([]string{cmdVersion}, args[1:]...)
+	case helpRequested(args[0]):
+		printTopUsage(stdout)
+		return nil
+	case args[0] == cmdHelp:
+		return help(args[1:], stdout)
 	}
-	if len(args) == 0 || helpRequested(args[0]) {
-		usage(stdout)
+	q, err := parse(args)
+	if errors.Is(err, errHelp) {
+		q.cmd.printUsage(stdout)
 		return nil
 	}
-	return runProduct(args, stdout)
+	if err != nil {
+		return err
+	}
+	q.out = stdout
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return q.dispatch(ctx)
 }
 
-func serve(ctx context.Context, path string) error {
+// help prints the top-level help or one command's.
+func help(topics []string, out io.Writer) error {
+	switch len(topics) {
+	case 0:
+		printTopUsage(out)
+		return nil
+	case 1:
+		c, ok := findCommand(topics[0])
+		if !ok {
+			return unknownCommand(topics[0])
+		}
+		c.printUsage(out)
+		return nil
+	}
+	return usagef("help takes one command name")
+}
+
+func (q *options) dispatch(ctx context.Context) error {
+	switch q.action() {
+	case cmdVersion:
+		return q.version()
+	case cmdInit:
+		return q.initLocal(ctx)
+	case cmdDoctor, cmdCredentials, cmdImages, cmdCertificates:
+		return q.maintain(ctx)
+	case cmdService:
+		if q.verb == verbRun {
+			return q.serve(ctx)
+		}
+		return q.maintain(ctx)
+	case cmdSessions:
+		return q.sessions(ctx)
+	case cmdRun:
+		if q.remote {
+			return q.submitRemote(ctx)
+		}
+	}
+	return q.session(ctx)
+}
+
+// serve runs the service in the foreground for "service run".
+func (q *options) serve(ctx context.Context) error {
+	path, err := q.config()
+	if err != nil {
+		return err
+	}
 	fixed, err := readConfig(path)
 	if err != nil {
 		return err
@@ -54,9 +124,8 @@ func serve(ctx context.Context, path string) error {
 	if err = home.CheckDocker(ctx, fixed); err != nil {
 		return err
 	}
-	// A gateway port in use would otherwise fail only after Open had created
-	// a new home directory. A home daemon already serving this directory is
-	// named as such rather than as a port conflict.
+	// A port in use would otherwise fail only after Open had created a new
+	// state directory. A service already serving it is named as such.
 	if err = home.CheckListen(ctx, fixed); err != nil {
 		return err
 	}
@@ -68,7 +137,7 @@ func serve(ctx context.Context, path string) error {
 	return service.Serve(ctx)
 }
 
-// errNoTerminal explains why attach cannot run: the harness terminal needs an
+// errNoTerminal explains why attach cannot run: the agent's terminal needs an
 // interactive terminal on standard input.
 var errNoTerminal = errors.New("attach needs an interactive terminal, and standard input is not one; " +
 	"run it from a terminal, where Ctrl-] detaches")
@@ -103,6 +172,6 @@ func attach(ctx context.Context, socket, id string) error {
 	defer cancel()
 	stopResize := watchResize(run, update)
 	defer stopResize()
-	_, _ = fmt.Fprintln(os.Stderr, "Attached to the harness terminal; Ctrl-] detaches")
+	_, _ = fmt.Fprintln(os.Stderr, "Attached to the agent's terminal; Ctrl-] detaches")
 	return home.AttachTerminal(run, socket, id, os.Stdin, os.Stdout, sizes)
 }

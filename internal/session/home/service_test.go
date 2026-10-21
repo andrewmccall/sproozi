@@ -614,8 +614,8 @@ func TestStartConflictNamesTheRetainedOperation(t *testing.T) {
 	}
 	_, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil)
 	want := "home: start intent conflicts with retained launch; " + id + " was started with operation " + operation +
-		": to continue it, repeat the original start command with --operation " + operation +
-		", or run \"sproozi cancel " + id + "\" to revoke and force-stop its current execution"
+		": to continue it, repeat the original run command with --operation " + operation +
+		", or run \"sproozi cancel " + id + "\" to stop it now"
 	if !errors.Is(err, ErrRejected) || err.Error() != want {
 		t.Fatalf("got %v, want %q", err, want)
 	}
@@ -669,7 +669,7 @@ func TestStartSelectsTheRequestedLocalHarnessPerSession(t *testing.T) {
 		t.Fatal("retry changed an existing session's harness")
 	}
 	single, _, _, _ := testService(t)
-	if _, err = single.Start(t.Context(), uuid.NewString(), uuid.NewString(), repo, harness.NativeClaude, nil, nil); err == nil || !strings.Contains(err.Error(), "not configured") {
+	if _, err = single.Start(t.Context(), uuid.NewString(), uuid.NewString(), repo, harness.NativeClaude, nil, nil); err == nil || !strings.Contains(err.Error(), "not set up in the running service") {
 		t.Fatalf("unconfigured harness: %v", err)
 	}
 }
@@ -715,7 +715,7 @@ func TestStartRejectsWorkspaceProblemsWithRepair(t *testing.T) {
 		limit int64
 		want  string
 	}{
-		"missing":   {filepath.Join(plain, "missing"), testLimit, "does not exist; pass --workspace"},
+		"missing":   {filepath.Join(plain, "missing"), testLimit, "does not exist; run it on the top-level"},
 		"not git":   {plain, testLimit, "must be the top-level directory of a Git repository"},
 		"too large": {repo, 1024, "local.maxCheckpointBytes is 0.0 MiB: raise it"},
 	} {

@@ -46,13 +46,17 @@ func (l Layout) Logs() string         { return filepath.Join(l.Root, "logs") }
 func (l Layout) ServiceLog() string   { return filepath.Join(l.Logs(), "service.log") }
 func (l Layout) ServicePID() string   { return filepath.Join(l.Root, "service.pid") }
 
-// DefaultRoot is ~/sproozi.
+// RootEnvironment names the environment variable that selects the root when
+// no --root is given.
+const RootEnvironment = "SPROOZI_ROOT"
+
+// DefaultRoot is ~/.sproozi.
 func DefaultRoot() (string, error) {
 	dir, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "sproozi"), nil
+	return filepath.Join(dir, ".sproozi"), nil
 }
 
 // pointerPath records an explicit non-default root for later commands.
@@ -61,10 +65,14 @@ func pointerPath() (string, error) {
 	return filepath.Join(dir, "sproozi", "root"), err
 }
 
-// ResolveRoot returns the explicit root, else the recorded root, else ~/sproozi.
+// ResolveRoot returns the explicit root, else $SPROOZI_ROOT, else the root
+// that init recorded, else ~/.sproozi.
 func ResolveRoot(explicit string) (string, error) {
 	if explicit != "" {
 		return filepath.Abs(explicit)
+	}
+	if env := strings.TrimSpace(os.Getenv(RootEnvironment)); env != "" {
+		return filepath.Abs(env)
 	}
 	if pointer, err := pointerPath(); err == nil {
 		if data, err := privatefs.ReadFile(pointer, 4096); err == nil {
@@ -77,10 +85,11 @@ func ResolveRoot(explicit string) (string, error) {
 	return DefaultRoot()
 }
 
-// RememberRoot records a non-default root so later commands find it.
+// RememberRoot records a non-default root so later commands find it. A root
+// chosen by $SPROOZI_ROOT is not recorded; the variable keeps choosing it.
 func RememberRoot(root string) error {
 	def, err := DefaultRoot()
-	if err != nil || root == def {
+	if err != nil || root == def || os.Getenv(RootEnvironment) != "" {
 		return err
 	}
 	pointer, err := pointerPath()
@@ -93,40 +102,13 @@ func RememberRoot(root string) error {
 	return privatefs.Replace(filepath.Dir(pointer), filepath.Base(pointer), []byte(root+"\n"))
 }
 
-// DefaultConfigPath keeps an existing platform configuration authoritative
-// unless it can do nothing yet and a local installation exists: then the
-// local installation's config.json wins. New installations use it too.
+// DefaultConfigPath is the configuration of the root ResolveRoot selects.
 func DefaultConfigPath() (string, error) {
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		return "", err
-	}
-	platform := filepath.Join(dir, "sproozi", "config.json")
-	_, platformErr := os.Lstat(platform)
 	root, err := ResolveRoot("")
 	if err != nil {
 		return "", err
 	}
-	l := Layout{Root: root}
-	_, localErr := os.Lstat(l.Config())
-	_, installErr := os.Lstat(l.Installation())
-	installed := localErr == nil && installErr == nil
-	switch {
-	case platformErr == nil && (!installed || !unconfigured(platform)):
-		return platform, nil
-	case localErr == nil:
-		return l.Config(), nil
-	}
-	return platform, nil
-}
-
-// unconfigured reports a configuration that can do nothing yet: home would
-// refuse to serve it and it names no remote executor, as "sproozi init" first
-// writes it. A configuration home cannot read is not unconfigured, so its
-// error still reaches the user.
-func unconfigured(path string) bool {
-	c, err := home.ReadConfig(path)
-	return err == nil && len(c.ServeProblems()) > 0 && len(c.WorkConnections()) == 0
+	return Layout{Root: root}.Config(), nil
 }
 
 // Installation is the provisioning journal. Each stage records what it
@@ -242,7 +224,7 @@ func (l Layout) checkRoot() error {
 		name := entry.Name()
 		if name == ".git" {
 			return fail("root", fmt.Errorf("%s is a Git checkout, not a Sproozi installation", l.Root),
-				"choose a directory of its own for the installation with --root PATH, such as --root ~/.sproozi; "+
+				"choose a directory of its own for the installation with --root PATH; "+
 					"setup never writes credentials or keys into a checkout")
 		}
 		if !slices.Contains(rootEntries, name) && !strings.HasPrefix(name, "config.json.backup-") {
@@ -257,7 +239,7 @@ func (l Layout) checkRoot() error {
 		shown += fmt.Sprintf(" and %d more", len(foreign)-3)
 	}
 	return fail("root", fmt.Errorf("%s holds %s, which are not part of a Sproozi installation", l.Root, shown),
-		"choose a new or empty directory for the installation with --root PATH, such as --root ~/.sproozi")
+		"choose a new or empty directory for the installation with --root PATH")
 }
 
 // ensureDirectories creates the private layout. Existing directories must

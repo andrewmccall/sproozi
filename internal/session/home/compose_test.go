@@ -88,8 +88,8 @@ func TestProductionCompositionTakesExclusiveOwnershipWithoutLaunching(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "home: another home daemon is using directory " + c.Directory +
-		"; stop it first (\"sproozi serve\" holds it until it exits)"
+	want := "home: another Sproozi service is using directory " + c.Directory +
+		"; stop it first"
 	if _, err = Open(c, io.Discard); err == nil || err.Error() != want {
 		t.Fatalf("second home writer: got %v, want %q", err, want)
 	}

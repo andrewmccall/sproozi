@@ -1,270 +1,369 @@
-//nolint:goconst // Flag names read best as literals in the command table.
+//nolint:goconst // Flag names and value names read best as literals in the command table.
 package main
 
 import (
-	"flag"
 	"fmt"
 	"io"
 	"slices"
 	"strings"
-
-	"github.com/andrewmccall/sproozi/internal/session/home"
-	"github.com/andrewmccall/sproozi/internal/workspace"
 )
+
+// Command names.
+const (
+	cmdRun          = "run"
+	cmdSessions     = "sessions"
+	cmdStatus       = "status"
+	cmdAttach       = "attach"
+	cmdStop         = "stop"
+	cmdResume       = "resume"
+	cmdCancel       = "cancel"
+	cmdRemove       = "rm"
+	cmdMove         = "move"
+	cmdPull         = "pull"
+	cmdRecover      = "recover"
+	cmdInit         = "init"
+	cmdDoctor       = "doctor"
+	cmdService      = "service"
+	cmdCredentials  = "credentials"
+	cmdImages       = "images"
+	cmdCertificates = "certificates"
+	cmdVersion      = "version"
+	cmdHelp         = "help"
+)
+
+// Verbs of the setup commands.
+const (
+	verbStatus    = "status"
+	verbStart     = "start"
+	verbStop      = "stop"
+	verbRun       = "run"
+	verbSet       = "set"
+	verbList      = "list"
+	verbPrepare   = "prepare"
+	verbRenew     = "renew"
+	verbRotateCA  = "rotate-ca"
+	verbReplaceCA = "replace-ca"
+)
+
+// group places a command in the top-level help; hidden commands are not listed.
+type group int
 
 const (
-	actionServe        = "serve"
-	actionVersion      = "version"
-	actionService      = "service"
-	actionDoctor       = "doctor"
-	actionCredentials  = "credentials"
-	actionImages       = "images"
-	actionCertificates = "certificates"
-	configFlag         = "config"
+	hidden group = iota
+	groupSessions
+	groupRemote
+	groupSetup
 )
 
-// owner says which session owner a command may address through --executor.
-type owner int
-
-const (
-	anyOwner    owner = iota
-	homeOwner         // docker or omitted; a remote executor is rejected
-	remoteOwner       // an explicitly configured remote executor is required
-)
-
-// command declares one subcommand. Its flags are the only ones it registers,
-// so help, parsing and the command reference all come from this table.
+// command declares one subcommand. Its flags are the only ones it accepts, so
+// help, parsing and the command reference all come from this table.
 type command struct {
-	name, operands, summary string
-	flags                   []string
-	owner                   owner
-	// verbs, when set, are the accepted first positional arguments. A verb in
-	// operandVerbs also takes one further positional operand.
-	verbs, operandVerbs []string
+	name    string
+	aliases []string
+	// operands follow the name in the usage line.
+	operands string
+	summary  string
+	// about is the longer description command help prints.
+	about string
+	group group
+	// flags lists visible flags in help order; hiddenFlags are accepted but
+	// not shown, for scripts and the administrator's hand-written setup.
+	flags, hiddenFlags []string
+	// verbs are the accepted first operands; hiddenVerbs are accepted but not
+	// shown. A verb in operandVerbs takes one further operand.
+	verbs, hiddenVerbs, operandVerbs []string
+	// session commands take one session ID; path commands take an optional PATH.
+	session, path bool
+	// harnessArgs commands pass the arguments after "--" to the agent.
+	harnessArgs bool
 }
 
-// commands lists every subcommand in help order. A command with an "id" flag
-// requires a session UUID, except start, which creates one when omitted.
+// locationFlags select a hand-written configuration or a control socket
+// instead of an installation. They are hidden: --root is the location flag.
+var locationFlags = []string{"config", "socket"}
+
 var commands = []command{
-	{name: actionInit, operands: "[--local]",
-		summary: "Create a private configuration directory, or provision local Docker sessions with --local",
-		flags: []string{"directory", "local", "root", "harness", "model", "instructions-file", "image", "build",
-			"provider-url", "provider-ca-file",
-			"credential-file", "credential-stdin", "skip-credential-check", "port", "no-service", "json", "timeout"}},
-	{name: actionService, operands: "status|start|stop", summary: "Show, start or stop the local home daemon",
-		flags: []string{"root", "json", "leave-running"}, verbs: []string{verbStatus, verbStart, verbStop}},
-	{name: actionDoctor, summary: "Check the local installation without changing it",
-		flags: []string{"root", "json", "check-provider"}},
-	{name: actionCredentials, operands: "add openai|anthropic",
-		summary: "Store or replace a gateway-owned provider credential",
-		flags:   []string{"root", "credential-file", "credential-stdin", "skip-credential-check"},
-		verbs:   []string{verbAdd}, operandVerbs: []string{verbAdd}},
-	{name: actionImages, operands: "status|prepare", summary: "Show or prepare the native worker image",
-		flags: []string{"root", "image", "build", "json"}, verbs: []string{verbStatus, verbPrepare}},
-	{name: actionCertificates, operands: "status|renew|rotate-ca|replace-ca",
-		summary: "Show or maintain the local gateway certificate authority",
-		flags:   []string{"root", "json"},
-		verbs:   []string{verbStatus, verbRenew, verbRotateCA, verbReplaceCA}},
-	{name: actionVersion, summary: "Show the installed product version"},
-	{name: actionRun, operands: "--executor NAME (--task TEXT | --task-file FILE)",
-		summary: "Submit a task to a configured remote executor", owner: remoteOwner,
-		flags: []string{"config", "executor", "operation", "harness", "repository", "project", "task", "task-file",
-			"workspace-from", "checkpoint-digest", "revision"}},
-	{name: home.ActionSessions, summary: "List sessions from home and configured remote executors",
-		flags: []string{"config", "socket", "executor", "project", "json"}},
-	{name: home.ActionStatus, operands: "SESSION_UUID", summary: "Show one session's status",
-		flags: []string{"config", "socket", "executor", "id"}},
-	{name: home.ActionPull, operands: "SESSION_UUID --from NAME",
-		summary: "Claim a stopped remote session and import it into home without starting an agent",
-		flags:   []string{"config", "socket", "executor", "id", "operation", "from"}},
-	{name: home.ActionResume, operands: "SESSION_UUID", owner: homeOwner,
-		summary: "Continue a stopped session's conversation and workspace in a new local execution and attach to it",
-		flags:   []string{"config", "socket", "executor", "id", "operation", "detach", "json"}},
-	{name: home.ActionStop, operands: "SESSION_UUID", owner: homeOwner,
-		summary: "Stop local work after its current turn and keep a checkpoint",
-		flags:   []string{"config", "socket", "executor", "id", "operation", "json"}},
-	{name: home.ActionCancel, operands: "SESSION_UUID", summary: "Revoke and force-stop a session's current execution",
-		flags: []string{"config", "socket", "executor", "id", "operation"}},
-	{name: home.ActionRecover, operands: "SESSION_UUID", summary: "Continue a journaled operation after an interruption",
-		flags: []string{"config", "socket", "executor", "id"}},
-	{name: actionServe, summary: "Run the home daemon",
-		flags: []string{"config"}},
-	{name: home.ActionStart, operands: "--workspace PATH", owner: homeOwner,
-		summary: "Start a managed Docker session from a stopped Git directory and attach to it",
-		flags: []string{"config", "socket", "executor", "id", "operation", "workspace", "harness", "include-ignored",
-			"detach", "json"}},
-	{name: home.ActionAttach, operands: "SESSION_UUID", owner: homeOwner,
-		summary: "Attach this terminal to a home session; Ctrl-] detaches",
-		flags:   []string{"config", "socket", "executor", "id"}},
-	{name: home.ActionMove, operands: "SESSION_UUID --to NAME", owner: homeOwner,
-		summary: "Move a home session to a configured placement after its current turn",
-		flags:   []string{"config", "socket", "executor", "id", "operation", "to"}},
+	{name: cmdRun, operands: "[PATH] [-- AGENT ARGS]", group: groupSessions, path: true, harnessArgs: true,
+		summary: "Start an agent on a Git repository (default: the current directory)",
+		about: "Start an agent on a copy of the Git repository at PATH, in an isolated container, and connect\n" +
+			"your terminal to it. PATH defaults to the current directory. Arguments after -- go to the\n" +
+			"agent program unchanged, for example: sproozi run -- --model gpt-5.\n\n" +
+			"With --remote, submit a task to run in a Kubernetes cluster instead.",
+		flags: []string{"harness", "detach", "include-ignored", "remote", "context", "namespace", "task", "task-file",
+			"repository", "project", "json", "root"},
+		hiddenFlags: append([]string{"id", "operation", "workspace-from", "checkpoint-digest", "revision"},
+			locationFlags...)},
+	{name: cmdSessions, aliases: []string{"ls"}, group: groupSessions, summary: "List sessions",
+		about: "List the sessions on this machine and in the cluster. Sessions on this machine are listed\n" +
+			"only while the Sproozi service runs; this command never starts it.",
+		flags: []string{"context", "namespace", "project", "json", "root"}, hiddenFlags: locationFlags},
+	{name: cmdStatus, operands: "ID", group: groupSessions, session: true, summary: "Show a session",
+		flags: []string{"context", "namespace", "json", "root"}, hiddenFlags: sessionPlumbing(false)},
+	{name: cmdAttach, operands: "ID", group: groupSessions, session: true,
+		summary: "Connect your terminal to a running session; Ctrl-] detaches",
+		flags:   []string{"root"}, hiddenFlags: sessionPlumbing(false)},
+	{name: cmdStop, operands: "ID", group: groupSessions, session: true,
+		summary: "Stop a session after the agent's current turn and keep its work",
+		flags:   []string{"json", "root"}, hiddenFlags: sessionPlumbing(true)},
+	{name: cmdResume, operands: "ID [-- AGENT ARGS]", group: groupSessions, session: true, harnessArgs: true,
+		summary: "Continue a stopped session where it left off",
+		flags:   []string{"detach", "json", "root"}, hiddenFlags: sessionPlumbing(true)},
+	{name: cmdCancel, operands: "ID", group: groupSessions, session: true,
+		summary: "Stop a session now, discarding the agent's current turn",
+		flags:   []string{"context", "namespace", "json", "root"}, hiddenFlags: sessionPlumbing(true)},
+	{name: cmdRemove, operands: "ID", group: groupSessions, session: true,
+		summary: "Delete a stopped or cancelled session and its saved work",
+		flags:   []string{"json", "root"}, hiddenFlags: sessionPlumbing(false)},
+	{name: cmdMove, operands: "ID --local|--remote", group: groupRemote, session: true,
+		summary: "Move a running session between this machine and a cluster",
+		about: "Move a running session after the agent's current turn: --local brings it to this machine,\n" +
+			"--remote sends it to a cluster.",
+		flags: []string{"local", "remote", "context", "namespace", "json", "root"}, hiddenFlags: sessionPlumbing(true)},
+	{name: cmdPull, operands: "ID", group: groupRemote, session: true,
+		summary: "Bring a stopped session from a cluster to this machine",
+		flags:   []string{"context", "namespace", "json", "root"}, hiddenFlags: sessionPlumbing(true)},
+	{name: cmdRecover, operands: "ID", session: true,
+		summary: "Finish an operation that was interrupted",
+		flags:   []string{"context", "namespace", "json", "root"}, hiddenFlags: sessionPlumbing(false)},
+	{name: cmdInit, group: groupSetup, summary: "Set up this machine to run agents in Docker",
+		about: "Set up Sproozi on this machine: the agent image, a private Docker network, certificates,\n" +
+			"your provider key and the background service. Run it again to add another agent with\n" +
+			"--harness, or to repair the installation.",
+		flags: []string{"harness", "model", "credential-file", "credential-stdin", "skip-credential-check",
+			"provider-url", "provider-ca-file", "instructions-file", "image", "build", "port", "no-service",
+			"timeout", "json", "root"}},
+	{name: cmdDoctor, group: groupSetup, summary: "Check the installation without changing it",
+		flags: []string{"check-provider", "json", "root"}},
+	{name: cmdService, operands: "status|start|stop", group: groupSetup,
+		summary: "Show, start or stop the background service",
+		verbs:   []string{verbStatus, verbStart, verbStop}, hiddenVerbs: []string{verbRun},
+		flags: []string{"leave-running", "json", "root"}, hiddenFlags: []string{"config"}},
+	{name: cmdCredentials, operands: "set AGENT|PROVIDER | list", group: groupSetup,
+		summary: "Set or list provider keys",
+		about: "Store or replace the provider key an agent uses (codex or openai, claude-code or anthropic),\n" +
+			"or list the stored keys. Keys stay outside the agent's container and are never printed.",
+		verbs: []string{verbSet, verbList}, operandVerbs: []string{verbSet},
+		flags: []string{"credential-file", "credential-stdin", "skip-credential-check", "json", "root"}},
+	{name: cmdImages, operands: "status|prepare", group: groupSetup, summary: "Show or prepare the agent image",
+		verbs: []string{verbStatus, verbPrepare}, flags: []string{"image", "build", "json", "root"}},
+	{name: cmdCertificates, operands: "status|renew|rotate-ca|replace-ca", group: groupSetup,
+		summary: "Show or maintain this machine's certificate authority",
+		verbs:   []string{verbStatus, verbRenew, verbRotateCA, verbReplaceCA}, flags: []string{"json", "root"}},
+	{name: cmdVersion, group: groupSetup, summary: "Show the version", flags: []string{"json"}},
 }
 
-// flagHelp describes each flag once. A backquoted word names its value in help.
-var flagHelp = map[string]string{
-	"directory":             "private configuration directory `PATH`",
-	"config":                "private global Sproozi configuration `FILE`",
-	"socket":                "private home socket `PATH`; defaults to the configured home",
-	"executor":              "executor `NAME`: docker (home), or a name under \"remote\" or \"workSources\"",
-	"id":                    "stable session `UUID`; may instead be a positional argument",
-	"operation":             "stable operation `UUID`; reuse it when retrying",
-	"from":                  "remote executor `NAME` to pull from, configured under \"remote\" or \"workSources\"",
-	"harness":               "native harness `NAME`, codex or claude-code; defaults to the primary configured harness",
-	"repository":            "approved repository `NAME`",
-	"project":               "configured project `ID`",
-	"task":                  "task `TEXT`",
-	"task-file":             "UTF-8 task `FILE`, at most 16 KiB",
-	"workspace-from":        "retained source `SESSION_UUID` for fresh work at its recorded commit",
-	"checkpoint-digest":     "exact source checkpoint `SHA256` for --workspace-from",
-	"revision":              "exact full recorded Git `COMMIT` for --workspace-from",
-	"detach":                "return without attaching to the native terminal",
-	"workspace":             "stopped ordinary Git directory `PATH`",
-	"include-ignored":       "ignored file `PATH` to carry on every visit; repeatable",
-	"to":                    "placement `NAME`: the value of local.name (for example local) or a name under \"remote\"",
-	"local":                 "provision local Docker sessions: image, network, TLS, credential, configuration, daemon",
-	"root":                  "local installation `PATH`; defaults to the recorded one or ~/sproozi",
-	"model":                 "provider `MODEL` for the harness being added; omit it to use the harness's default",
-	"instructions-file":     "approved developer instructions `FILE`, UTF-8 and at most 16 KiB, for a new installation",
-	"image":                 "approved native image `REFERENCE`, digest-pinned, or a local sha256 content ID",
-	"build":                 "build the native image from a Sproozi source `DIRECTORY` with Docker",
-	"provider-url":          "provider base `URL`; defaults to the harness's provider",
-	"provider-ca-file":      "private CA bundle `FILE` for a private provider endpoint",
-	"credential-file":       "owner-only `FILE` holding the provider credential",
-	"credential-stdin":      "read the provider credential from standard input",
-	"skip-credential-check": "do not ask the provider to validate the credential",
-	"port":                  "first gateway `PORT` to try",
-	"no-service":            "write configuration without starting the home daemon",
-	"json":                  "print a machine-readable result, as session commands do whenever output is not a terminal",
-	"timeout":               "overall `DURATION` limit",
-	"leave-running":         "stop the service while active sessions keep running within their deadlines",
-	"check-provider":        "also ask each provider to validate its credential; lists models only",
+// sessionPlumbing are the hidden flags of a session command: the full ID,
+// the retry operation and the location flags.
+func sessionPlumbing(operation bool) []string {
+	flags := []string{"id"}
+	if operation {
+		flags = append(flags, "operation")
+	}
+	return append(flags, locationFlags...)
 }
 
-// runFlagHelp replaces flagHelp where run takes a narrower value.
-var runFlagHelp = map[string]string{
-	"executor": "remote executor `NAME` configured under \"remote\" or \"workSources\"; run does not accept docker",
+// flagSpec describes a flag once: its value name, if it takes one, and help.
+type flagSpec struct {
+	value, help, short string
 }
 
-// help describes one of this command's flags.
-func (c command) help(name string) string {
-	if text, ok := runFlagHelp[name]; ok && c.name == actionRun {
+func (f flagSpec) boolean() bool { return f.value == "" }
+
+var flagSpecs = map[string]flagSpec{
+	"harness":               {value: "NAME", help: "agent to run: codex or claude-code (default: the first one set up)"},
+	"detach":                {short: "d", help: "start without connecting your terminal"},
+	"include-ignored":       {value: "PATH", help: "also copy this Git-ignored file into the session; repeatable"},
+	"remote":                {help: "run the task in a Kubernetes cluster instead of on this machine"},
+	"context":               {value: "NAME", help: "kubeconfig context or file for the cluster (default: sproozi)"},
+	"namespace":             {value: "NS", help: "namespace of Sproozi in that cluster"},
+	"task":                  {value: "TEXT", help: "task for a --remote run"},
+	"task-file":             {value: "FILE", help: "task for a --remote run, from a UTF-8 file of at most 16 KiB"},
+	"repository":            {value: "NAME", help: "approved repository for a --remote run"},
+	"project":               {value: "ID", help: "approved project for a --remote run"},
+	"json":                  {help: "print JSON instead of text"},
+	"root":                  {value: "PATH", help: "installation directory (default: $SPROOZI_ROOT or ~/.sproozi)"},
+	"local":                 {help: "move it to this machine"},
+	"model":                 {value: "MODEL", help: "model the agent requests (default: the agent's own default)"},
+	"credential-file":       {value: "FILE", help: "read the provider key from a file only you can read"},
+	"credential-stdin":      {help: "read the provider key from standard input"},
+	"skip-credential-check": {help: "do not ask the provider to check the key"},
+	"provider-url":          {value: "URL", help: "address of a private provider endpoint (default: the public one)"},
+	"provider-ca-file":      {value: "FILE", help: "PEM CA bundle for a private provider endpoint"},
+	"instructions-file":     {value: "FILE", help: "approved instructions for every session, at most 16 KiB (first run)"},
+	"image":                 {value: "REF", help: "agent image as REPOSITORY@sha256:DIGEST or a local sha256: ID"},
+	"build":                 {value: "DIR", help: "build the agent image from a Sproozi source directory"},
+	"port":                  {value: "PORT", help: "first port to try for the service (default: 18443)"},
+	"no-service":            {help: "write the configuration without starting the service"},
+	"timeout":               {value: "DURATION", help: "give up after this long (default: 30m)"},
+	"check-provider":        {help: "also ask each provider to check its key"},
+	"leave-running":         {help: "stop the service even while sessions run; they run on until their deadline"},
+	// Hidden plumbing for scripts and hand-written administrator setups.
+	"id":                {value: "UUID", help: "session ID"},
+	"operation":         {value: "UUID", help: "operation ID to repeat a request whose outcome is unknown"},
+	"workspace-from":    {value: "UUID", help: "retained session to start a --remote run from"},
+	"checkpoint-digest": {value: "SHA256", help: "checkpoint of that session"},
+	"revision":          {value: "COMMIT", help: "commit of that session"},
+	"config":            {value: "FILE", help: "hand-written configuration file instead of an installation"},
+	"socket":            {value: "PATH", help: "service control socket"},
+}
+
+// commandFlagHelp replaces a flag's help where one command uses it differently.
+var commandFlagHelp = map[string]map[string]string{
+	cmdSessions: {"project": "list only this project's sessions",
+		"context": "list only this cluster's sessions: a kubeconfig context or file"},
+	cmdStatus:  {"context": "show a session in this cluster: a kubeconfig context or file"},
+	cmdCancel:  {"context": "cancel a session in this cluster: a kubeconfig context or file"},
+	cmdRecover: {"context": "recover a session in this cluster: a kubeconfig context or file"},
+	cmdPull:    {"context": "cluster to pull from, the first time: a kubeconfig context or file"},
+	cmdMove:    {"remote": "move it to a cluster"},
+}
+
+// flagHelp is a flag's help for this command.
+func (c command) flagHelp(name string) string {
+	if text, ok := commandFlagHelp[c.name][name]; ok {
 		return text
 	}
-	return flagHelp[name]
+	return flagSpecs[name].help
 }
 
 func findCommand(name string) (command, bool) {
 	for _, c := range commands {
-		if c.name == name {
+		if c.name == name || slices.Contains(c.aliases, name) {
 			return c, true
 		}
 	}
 	return command{}, false
 }
 
-func (c command) accepts(name string) bool {
-	return slices.Contains(c.flags, name)
+func (c command) usageLine() string {
+	line := "sproozi " + c.name
+	if c.operands != "" {
+		line += " " + c.operands
+	}
+	if len(c.flags) > 0 {
+		line += " [flags]"
+	}
+	return line
 }
 
-// inputs holds flag values that are checked or combined before they become options.
-type inputs struct {
-	config, project, workspaceFrom, checkpointDigest, revision, taskFile string
-	port, timeout                                                        string
+// flagLabel is how help spells a flag, with its short form and value name.
+func flagLabel(name string) string {
+	spec := flagSpecs[name]
+	label := "    --" + name
+	if spec.short != "" {
+		label = "-" + spec.short + ", --" + name
+	}
+	if !spec.boolean() {
+		label += " " + spec.value
+	}
+	return label
 }
 
-// boolFlags are switches; every other flag takes a value.
-var boolFlags = []string{"detach", "local", "credential-stdin", "skip-credential-check", "no-service", "json",
-	"leave-running", "check-provider"}
-
-// flagSet registers only this command's flags, bound to q and in.
-func (c command) flagSet(q *options, in *inputs) *flag.FlagSet {
-	fs := flag.NewFlagSet("sproozi "+c.name, flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	values := map[string]*string{
-		"socket": &q.socket, "executor": &q.executor, "id": &q.id,
-		"operation": &q.operation, "from": &q.source, "harness": &q.kind, "repository": &q.repository,
-		"project": &in.project, "task": &q.task, "task-file": &in.taskFile, "workspace-from": &in.workspaceFrom,
-		"checkpoint-digest": &in.checkpointDigest, "revision": &in.revision, "workspace": &q.workspace,
-		"to":        &q.destination,
-		"directory": &q.directory,
-		"root":      &q.setup.root, "model": &q.setup.model, "image": &q.setup.image, "build": &q.setup.build,
-		"provider-url": &q.setup.providerURL, "instructions-file": &q.setup.instructionsFile,
-		"provider-ca-file": &q.setup.providerCA, "credential-file": &q.setup.credentialFile,
-		"port": &in.port, "timeout": &in.timeout,
+// printUsage writes a command's help: usage, description and one line per flag.
+func (c command) printUsage(w io.Writer) {
+	_, _ = fmt.Fprintf(w, "Usage: %s\n\n", c.usageLine())
+	about := c.about
+	if about == "" {
+		about = c.summary + "."
 	}
-	switches := map[string]*bool{
-		"detach": &q.detach, "local": &q.setup.enabled, "credential-stdin": &q.setup.credentialStdin,
-		"skip-credential-check": &q.setup.skipCheck, "no-service": &q.setup.noService, "json": &q.setup.json,
-		"leave-running": &q.setup.leaveRunning, "check-provider": &q.setup.checkProvider,
+	_, _ = fmt.Fprintln(w, about)
+	if len(c.aliases) > 0 {
+		_, _ = fmt.Fprintf(w, "\nAlso: sproozi %s\n", strings.Join(c.aliases, ", sproozi "))
 	}
+	if len(c.flags) == 0 {
+		return
+	}
+	width := 0
 	for _, name := range c.flags {
-		switch {
-		case slices.Contains(boolFlags, name):
-			fs.BoolVar(switches[name], name, false, c.help(name))
-		case name == "include-ignored":
-			fs.Func(name, c.help(name), func(v string) error {
-				q.includeIgnored = append(q.includeIgnored, v)
-				return workspace.ValidateIgnoredPaths(q.includeIgnored)
-			})
-		case name == configFlag:
-			fs.StringVar(&in.config, name, c.defaultConfig(), c.help(name))
-		default:
-			fs.StringVar(values[name], name, "", c.help(name))
-		}
+		width = max(width, len(flagLabel(name)))
 	}
-	return fs
+	_, _ = fmt.Fprintln(w, "\nFlags:")
+	for _, name := range c.flags {
+		_, _ = fmt.Fprintf(w, "  %-*s  %s\n", width, flagLabel(name), c.flagHelp(name))
+	}
 }
 
-// line is the command's synopsis without its optional flags.
-func (c command) line() string {
-	return strings.TrimSpace("sproozi " + c.name + " " + c.operands)
-}
-
-func (c command) usage(w io.Writer) {
-	fs := c.flagSet(&options{}, &inputs{})
-	_, _ = fmt.Fprintf(w, "Usage: %s [flags]\n\n%s.\n\nFlags:\n", c.line(), c.summary)
-	printFlags(w, fs)
-}
-
-// printFlags lists flags as the usage line spells them, with two dashes.
-// flag.PrintDefaults would print one.
-func printFlags(w io.Writer, fs *flag.FlagSet) {
-	fs.VisitAll(func(f *flag.Flag) {
-		name, usage := flag.UnquoteUsage(f)
-		line := "  --" + f.Name
-		if name != "" {
-			line += " " + name
-		}
-		line += "\n    \t" + strings.ReplaceAll(usage, "\n", "\n    \t")
-		if f.DefValue != "" && f.DefValue != "false" && f.DefValue != "0" {
-			line += fmt.Sprintf(" (default %q)", f.DefValue)
-		}
-		_, _ = fmt.Fprintln(w, line)
-	})
-}
-
-// defaultConfig is the platform configuration path that init creates.
-func (c command) defaultConfig() string {
-	path, _ := defaultConfigPath()
-	return path
-}
-
-func usage(w io.Writer) {
-	_, _ = fmt.Fprintln(w, "Usage: sproozi COMMAND [flags]\n\nCommands:")
+// printTopUsage writes the grouped command list.
+func printTopUsage(w io.Writer) {
+	_, _ = fmt.Fprintln(w, "Sproozi runs coding agents (Codex, Claude Code) in isolated containers. Your provider\n"+
+		"keys stay outside the container, and every request the agent makes is checked.\n\n"+
+		"Usage: sproozi COMMAND [ARGS] [flags]")
 	width := 0
 	for _, c := range commands {
-		width = max(width, len(c.name))
+		if c.group != hidden {
+			width = max(width, len(commandLabel(c)))
+		}
 	}
-	for _, c := range commands {
-		_, _ = fmt.Fprintf(w, "  %-*s  %s\n", width, c.name, c.summary)
+	for _, g := range []struct {
+		group group
+		title string
+	}{{groupSessions, "Sessions"}, {groupRemote, "Remote"}, {groupSetup, "Setup"}} {
+		_, _ = fmt.Fprintf(w, "\n%s:\n", g.title)
+		for _, c := range commands {
+			if c.group == g.group {
+				_, _ = fmt.Fprintf(w, "  %-*s  %s\n", width, commandLabel(c), c.summary)
+			}
+		}
 	}
-	_, _ = fmt.Fprintln(w, "\nHome is the home daemon: the \"sproozi serve\" process on your own machine. It owns\n"+
-		"local Docker placements, their gateway and accounting, and the sessions you have pulled.\n"+
-		"Run \"sproozi init\" to create a starting configuration.\n"+
-		"Run \"sproozi COMMAND -h\" for a command's flags.")
+	_, _ = fmt.Fprintln(w, "\nStart with \"sproozi init\", then \"sproozi run\" in a Git repository.\n"+
+		"Run \"sproozi help COMMAND\" for a command's flags.")
+}
+
+func commandLabel(c command) string {
+	return strings.Join(append([]string{c.name}, c.aliases...), ", ")
 }
 
 func helpRequested(arg string) bool {
-	return slices.Contains([]string{"help", "-h", "-help", "--help"}, arg)
+	return slices.Contains([]string{"-h", "-help", "--help"}, arg)
+}
+
+// suggest returns the candidate closest to name when it is close enough to
+// be a likely misspelling, otherwise "".
+func suggest(name string, candidates []string) string {
+	for _, candidate := range candidates {
+		if len(name) >= 3 && strings.HasPrefix(candidate, name) {
+			return candidate
+		}
+	}
+	best, bestDistance := "", -1
+	for _, candidate := range candidates {
+		if d := distance(name, candidate); bestDistance < 0 || d < bestDistance {
+			best, bestDistance = candidate, d
+		}
+	}
+	if bestDistance < 0 || bestDistance > max(1, len(name)/3) {
+		return ""
+	}
+	return best
+}
+
+// distance is the Levenshtein edit distance.
+func distance(a, b string) int {
+	previous := make([]int, len(b)+1)
+	for j := range previous {
+		previous[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		current := make([]int, len(b)+1)
+		current[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			current[j] = min(previous[j]+1, current[j-1]+1, previous[j-1]+cost)
+		}
+		previous = current
+	}
+	return previous[len(b)]
+}
+
+// commandNames lists every name and alias a user may type.
+func commandNames() []string {
+	names := []string{cmdHelp}
+	for _, c := range commands {
+		names = append(names, c.name)
+		names = append(names, c.aliases...)
+	}
+	return names
 }

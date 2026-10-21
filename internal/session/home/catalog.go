@@ -443,7 +443,7 @@ func notResumable(id string, execution session.Record) error {
 		return rejectedError(fmt.Sprintf("home: %s is an execution of session %s; resume the session UUID %s",
 			id, execution.Session, execution.Session))
 	}
-	return rejectedError(fmt.Sprintf("home: %s is an execution, not a session; run \"sproozi sessions\" to find "+
+	return rejectedError(fmt.Sprintf("home: %s is an execution, not a session; run \"sproozi ls\" to find "+
 		"its session", id))
 }
 
@@ -572,6 +572,11 @@ func (s *Service) Status(id string) (Status, error) {
 }
 
 func (s *Service) Move(ctx context.Context, id, operation, destination string) (Status, error) {
+	// "local" names this machine whatever its placement is called; a move to
+	// any local placement continues on the session's own harness.
+	if destination == LocalAlias {
+		destination = s.config.Local.Name
+	}
 	// Refuse an unconfigured destination before binding the operation to it.
 	if err := s.moveDestinationProblem(destination); err != nil {
 		return Status{}, err

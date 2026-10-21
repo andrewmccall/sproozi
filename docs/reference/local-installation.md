@@ -1,6 +1,6 @@
 # Local installation
 
-`sproozi init --local` provisions a local installation from a running Docker
+`sproozi init` sets up a local installation from a running Docker
 engine. This page lists what it creates, its defaults and limits, and the
 supported platforms. The [local sessions guide](../guides/local-sessions.md)
 walks through setup and daily use. [ADR 0029](../adr/0029-local-provisioning-and-lifecycle.md)
@@ -11,20 +11,15 @@ or contacts a Kubernetes API.
 
 ## Installation root
 
-The root is `~/sproozi` unless `init --local --root PATH` chooses another. A
-non-default root is recorded in the platform user configuration directory as
-`sproozi/root`, so later commands find it. The root must be new, empty or an
-existing installation: setup refuses a Git checkout, such as a clone of the
-Sproozi repository at `~/sproozi`, and a directory holding other files, with a
-`root` error that suggests `--root`. It never asks you to change such a
-directory's permissions.
+Every command finds the installation the same way: `--root PATH`, else the
+`SPROOZI_ROOT` environment variable, else the root `init --root PATH` recorded
+in the platform user configuration directory as `sproozi/root`, else
+`~/.sproozi`. A root chosen by `SPROOZI_ROOT` is not recorded. The
+configuration is always the root's `config.json`.
 
-An existing platform `sproozi/config.json` (from a manual installation) stays
-the default configuration for session commands while it names a remote
-executor or is ready for `serve`. A platform configuration that is neither,
-such as the starter `sproozi init` writes, yields to the local installation.
-When a configured platform configuration stays the default, `init --local` says
-so and names the `--config` that selects the installation.
+The root must be new, empty or an existing installation: setup refuses a Git
+checkout and a directory holding other files, with a `root` error that suggests
+`--root`. It never asks you to change such a directory's permissions.
 
 | Path | Contents | Reaches workers |
 | --- | --- | --- |
@@ -61,7 +56,7 @@ certificate authority, credentials and configuration.
 | Credentials | Stores the provider key from a hidden prompt, `--credential-file` or `--credential-stdin`. With `--provider-ca-file`, copies that PEM bundle to `credentials/PROVIDER-ca.pem` and points the harness's gateway at the copy; a later run with the flag replaces it. It then lists the provider's models to check the key, unless `--skip-credential-check` is given. |
 | Certificates | Creates the certificate authority and a serving leaf covering the gateway address and the enabled provider authorities. |
 | Configuration | Writes `config.json`. On a later run it adds a new harness and keeps every other value. It refuses when the existing configuration's image, network, gateway address or approved instructions differ from the installation. |
-| Service | Starts `sproozi serve` detached from the terminal. After a configuration or credential change it restarts the home daemon only when no session is active; otherwise it stops with a `service` error saying the restart is still needed. |
+| Service | Starts `sproozi service run` detached from the terminal. After a configuration or credential change it restarts the service only when no session is running; otherwise it saves the change, skips the readiness check and prints `Saved. N session(s) are running, so the service keeps its previous settings until they stop; ...`, exiting 0. |
 | Readiness | For each harness, starts a network anchor and a restricted worker on the network and verifies the gateway's TLS identity. It then confirms the worker cannot reach a public address, either provider directly, another gateway port, cloud metadata, direct DNS or IPv6. |
 
 On Docker Desktop, workers reach the gateway at the engine's host address and
@@ -81,7 +76,7 @@ service with `sproozi service stop` and `sproozi service start`.
 | Checkpoint helper | 0.5 CPU, 512 MiB, 128 processes |
 | Network anchor | 0.1 CPU, 64 MiB, 32 processes |
 | Managed workspace volume | 512 MiB |
-| Maximum checkpoint (`local.maxCheckpointBytes`) | 32 MiB; it also bounds the workspace's expanded Git objects at `start`. The highest value home accepts is 64 MiB. |
+| Maximum checkpoint (`local.maxCheckpointBytes`) | 32 MiB; it also bounds the workspace's expanded Git objects at `run`. The highest value home accepts is 64 MiB. |
 | Retained checkpoint storage (`local.retainedBytes`) | 256 MiB; at least twice the maximum checkpoint |
 | Model | None: each harness uses its own default model unless `--model` names one |
 | Model allowance | 200,000 accounted tokens |
@@ -93,7 +88,7 @@ service with `sproozi service stop` and `sproozi service start`.
 Setup never rewrites these values in an existing `config.json`, so an
 installation created with an earlier release keeps its 8 MiB checkpoint and
 128 MiB retained limits until you raise them. When a workspace exceeds the
-limit, `start` names the size and `local.maxCheckpointBytes`.
+limit, `run` names the size and `local.maxCheckpointBytes`.
 
 The image, network, gateway address and approved instructions bind retained
 sessions. Changing them in place is not supported; setup and
@@ -122,7 +117,7 @@ stored key on approved requests.
 
 `profile/` is your [profile](profile.md): `AGENTS.md` for every harness,
 `codex/AGENTS.md` and `claude/CLAUDE.md` for one harness each, and
-`skills/<name>/`. Setup creates the empty folders. The home daemon archives the
+`skills/<name>/`. Setup creates the empty folders. The service archives the
 profile for every launch and sends it with the launch configuration; nothing in
 the running container can change your folder. `sproozi doctor` checks the
 profile, warns when it nears the size limit and lists entries no harness reads.
@@ -136,7 +131,7 @@ profile, warns when it nears the size limit and lists entries no harness reads.
 | Serving leaf lifetime | 30 days, never past its authority's expiry |
 | Leaf renewal | After two thirds of its lifetime |
 | Routine rotation | Begins 60 days before the authority expires |
-| Check interval | Every minute while the home daemon runs, and at startup |
+| Check interval | Every minute while the service runs, and at startup |
 
 `sproozi certificates status` reports the serving and trusted generations, the
 issuer fingerprint, expiry and renewal times, and any running sessions a
@@ -146,7 +141,7 @@ verifies upstream providers.
 
 A missing or unreadable authority key, or a lost `pki/state.json`, stops
 renewal and new launches; it never creates a replacement automatically. After a
-switch, the home daemon checks its own listeners against the new trust before
+switch, the service checks its own listeners against the new trust before
 it retires the previous authority. `certificates replace-ca` creates a new
 authority, trusts only it and destroys every older key.
 

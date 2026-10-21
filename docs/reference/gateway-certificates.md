@@ -1,8 +1,8 @@
 # Gateway certificates
 
 Workers trust the gateway through a private CA. This page covers renewing and
-rotating that CA on Kubernetes. The local home daemon renews its own; see
-[Local sessions](../guides/local-sessions.md#certificates).
+rotating that CA on Kubernetes. The local service renews its own; see
+[Local sessions](local-installation.md#certificates).
 
 ## Self-managed CA
 

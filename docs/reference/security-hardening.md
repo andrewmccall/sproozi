@@ -114,7 +114,7 @@ and literal environment values.
 ### Gateway certificates
 
 Rotate gateway certificates before they expire. The Kubernetes gateway and the
-home daemon both serve a renewed certificate to new connections without
+local service both serve a renewed certificate to new connections without
 restarting; a replacement that misses an inspected host or has expired is
 refused. The optional Kubernetes certificate controller holds its CA key in one
 Secret. Protect `sproozi-system` Secrets and etcd encryption accordingly. Its
@@ -418,7 +418,7 @@ one still waiting for its response headers get a 503 with `the model gateway
 is shutting down; retry the call`; only the last is charged. The gateway
 Deployment sets `terminationGracePeriodSeconds: 45`. A model call that arrives
 during the drain gets the same 503. Its code `gateway_stopping` is in the
-OpenAI body only; the Anthropic body has the type `server_error` and no code. The home daemon drains for up to 10 seconds
+OpenAI body only; the Anthropic body has the type `server_error` and no code. The local service drains for up to 10 seconds
 when it closes. Settles that collide on one account's ConfigMap retry for up
 to 30 seconds, so a drain normally settles every call; one that still fails is
 left to lease recovery, with the error `budget: ledger update conflicted
@@ -443,7 +443,7 @@ a model call's, with `account`, `endReason` `gateway_restart`, `usageSource`
 `estimated`, `units` and `costMicros`. The shared gateway sweeps every budget
 ConfigMap (label `app.kubernetes.io/component=budget-ledger`), listing 500 at
 a time, at start and every minute, which needs `list` on ConfigMaps in
-`sproozi-system`; the home daemon sweeps its ledger files when it opens them
+`sproozi-system`; the local service sweeps its ledger files when it opens them
 and every minute. A sweep that fails logs `Failed to recover expired budget
 reservations: <error>`. A ledger ConfigMap the sweep can't decode is skipped
 with `Skipped corrupt budget ledger`, with `configMap` and `error`; the sweep
@@ -470,19 +470,19 @@ reservation` with `account`, `endReason` `gateway_restart`, `usageSource`
 `reservation`, `reservations`, `units` and `costMicros`. If the gateway's pass
 fails, it logs `Failed to recover legacy budget reservations; retrying:
 <error>`, serves anyway and retries with backoff from 1 second up to 1 minute
-until the pass succeeds once; the home daemon repeats the pass on each sweep
+until the pass succeeds once; the local service repeats the pass on each sweep
 until one succeeds. An unbounded reservation left that way therefore charges
 everything its account had left, so upgrade while no model calls are in
 flight.
 
 Rolling back is a risk. Older versions of every binary that reads budget
 records, the shared gateway and the remote executor (budget ConfigMaps) and
-the home daemon (its ledger files), refuse a record that holds leases, so that
+the local service (its ledger files), refuse a record that holds leases, so that
 account's model calls, and the remote executor's seals, fail until a current
 binary settles them. Every pending reservation a current binary makes, model
 call or not, holds a lease, so a record has leases whenever such a call is in
 flight or a lease was abandoned. Before rolling
-back, let model calls stop, then keep the current gateway or home daemon
+back, let model calls stop, then keep the current gateway or local service
 running for the model call deadline plus 5 minutes, plus a minute for its
 next sweep (26 minutes at the default deadline), so the sweep settles every
 abandoned lease, including those of idle accounts.

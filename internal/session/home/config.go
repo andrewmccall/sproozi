@@ -263,6 +263,9 @@ const ReservedExecutor = "docker"
 // ReservedHome names the home daemon in commands and output, so no executor may take it.
 const ReservedHome = "home"
 
+// LocalAlias is the name commands use for this machine's placement.
+const LocalAlias = "local"
+
 // MaxCheckpointBytes is the largest checkpoint home's Docker placement
 // captures. Remote entries must match local.maxCheckpointBytes, so it bounds them too.
 const MaxCheckpointBytes = maxCapture
@@ -273,8 +276,8 @@ var executorName = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)
 const executorNameRule = "use 1 to 63 lowercase letters, digits and hyphens, starting and ending with a letter or digit"
 
 // ReservedNames explains the names that address home, in every message about them.
-const ReservedNames = `docker is home's executor name, home names the home daemon, ` +
-	`and local.name names home's local placement for "move --to"`
+const ReservedNames = `docker and home are reserved names for this machine's service, ` +
+	`and local.name names its placement`
 
 // ExecutorNameProblem explains why name cannot name a remote executor or
 // home's local placement, or returns "" when it can.

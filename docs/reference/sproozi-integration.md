@@ -134,7 +134,7 @@ ports 443 and 8443, beside configured MCP servers. Native sessions reach it at
 
 **Docker home.** `gateway.mcpAuthority` is required, as `host:443`. It serves
 the control connection whether or not `gateway.mcpRegistryFile` is set.
-`sproozi init --local` writes `mcp.sproozi.internal:443`, also into an existing
+`sproozi init` writes `mcp.sproozi.internal:443`, also into an existing
 configuration that lacks it, and the home's certificate authority covers it.
 With `gateway.certificateFile` instead, that certificate must include the host
 as a DNS name. Startup fails with `home: gateway mcpAuthority is required` or

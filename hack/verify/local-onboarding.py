@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prove `sproozi init --local` end to end on this computer's Docker engine.
+"""Prove `sproozi init` end to end on this computer's Docker engine.
 
 Uses deterministic local providers, an isolated HOME and a short private root,
 so it neither spends provider credit nor touches your real installation. It
@@ -100,14 +100,14 @@ def main():
         report["image"] = reference
         image = ["--image", reference]
         started = time.monotonic()
-        result = sproozi("init", "--local", "--root", str(root), "--harness", "codex", "--model", "gpt-fixture",
+        result = sproozi("init", "--root", str(root), "--harness", "codex", "--model", "gpt-fixture",
                          "--instructions-file", str(work / "instructions.txt"), *image, "--provider-url", "http://127.0.0.1:18765",
                          "--credential-file", str(work / "codex-token"), "--skip-credential-check", "--json")
         codex = json.loads(result.stdout)
         report["steps"]["initCodex"] = {"ready": codex["ready"], "seconds": round(time.monotonic() - started, 1),
                                         "endpoint": codex["endpoint"], "paths": codex["paths"]}
         installation = codex["installation"]
-        result = sproozi("init", "--local", "--root", str(root), "--harness", "claude-code", "--model", claude.MODEL,
+        result = sproozi("init", "--root", str(root), "--harness", "claude-code", "--model", claude.MODEL,
                          "--provider-url", "https://127.0.0.1:18775", "--provider-ca-file", str(work / "claude-ca.pem"),
                          "--credential-file", str(work / "claude-token"), "--skip-credential-check", "--json")
         both = json.loads(result.stdout)
@@ -125,7 +125,7 @@ def main():
             subprocess.run(command, cwd=repo, check=True)
         sessions = {}
         for kind in ("codex", "claude-code"):
-            status = json.loads(sproozi("start", "--workspace", str(repo), "--harness", kind, "--detach").stdout.splitlines()[-1])
+            status = json.loads(sproozi("run", str(repo), "--root", str(root), "--harness", kind, "--detach", "--json").stdout)
             sessions[kind] = status["id"]
         socket = root / "state/control.sock"
         turns = {}
@@ -137,7 +137,7 @@ def main():
             turns[kind] = json.loads(drive.stdout.strip().splitlines()[-1]).get("passed") is True
         stops = {}
         for kind, session in sessions.items():
-            stopped = json.loads(sproozi("stop", session).stdout.splitlines()[-1])
+            stopped = json.loads(sproozi("stop", session, "--root", str(root), "--json").stdout)
             stops[kind] = {"phase": stopped["phase"], "nativeUUID": bool(stopped.get("threadId"))}
         codex_requests = (work / "codex-provider/requests.json").read_text()
         claude_requests = (provider_dir / "requests.private.json").read_text()

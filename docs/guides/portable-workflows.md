@@ -36,7 +36,7 @@ personal-session adoption are not part of this workflow.
    `/usr/local/bin/session-profile`. The remote executor needs private durable
    storage and administrator-owned Kubernetes credentials; sandboxes and Hermes
    do not receive those credentials.
-3. Configure the [home daemon](../../cmd/sproozi/README.md) with one private JSON
+3. Configure this machine's [service](../../cmd/sproozi/README.md) with one private JSON
    file. It selects local Docker images/network, gateway TLS/provider credential
    files, finite allowances and named remote executors. Keep it outside any
    transferred repository. Use `--config FILE` consistently or put it at the
@@ -152,11 +152,10 @@ Create a task file describing a reproducible problem and observable checks. Then
 submit against the explicit configured profile name:
 
 ```sh
-sproozi run --config /private/sproozi/config.json \
-  --executor engineering --harness codex --repository sproozi \
-  --task-file task.txt --operation ORIGINAL_REQUEST_UUID
-sproozi sessions --config /private/sproozi/config.json --executor engineering
-sproozi status SESSION_UUID --config /private/sproozi/config.json --executor engineering
+sproozi run --remote --context engineering --config /private/sproozi/config.json \
+  --harness codex --repository sproozi --task-file task.txt --operation ORIGINAL_REQUEST_UUID
+sproozi sessions --context engineering --config /private/sproozi/config.json
+sproozi status ID --context engineering --config /private/sproozi/config.json
 ```
 
 Preserve the request UUID when retrying. Repeating identical intent returns the
@@ -168,12 +167,12 @@ untrusted output. The remote executor reports `retained` only after compatible n
 completion, confirmed sandbox stop, finalized usage accounting and checkpoint
 storage. An `unknown` status cannot be pulled or silently interpreted as stopped.
 
-`sessions` returns one labelled JSON catalogue. Check `executors` for unavailable
-owners and `truncated` for omitted results; a missing home daemon does not erase
-successful remote rows. The [command reference](../reference/session-commands.md)
+`sessions --json` returns one labelled catalogue. Check `executors` for
+unavailable owners and `truncated` for omitted results; a stopped local service
+does not hide the cluster's rows. The [command reference](../reference/session-commands.md)
 explains owner selection, JSON fields and safe error categories.
 
-For a known recoverable interruption, use `sproozi recover SESSION_UUID --executor
+For a known recoverable interruption, use `sproozi recover ID --context
 engineering --config FILE`. Cancel uses a separate stable `--operation UUID` and
 revokes before forced stop. Keep the original owner journals and accounting
 records; deleting resources or replacing a failed Run does not establish stop or
@@ -207,21 +206,18 @@ native state.
 
 ## Pull and resume locally
 
-Start the home daemon, then transfer the completed session:
+Run this machine's service, then transfer the completed session:
 
 ```sh
-sproozi serve --config /private/sproozi/config.json
+sproozi service run --config /private/sproozi/config.json
 # In another terminal:
-sproozi pull SESSION_UUID --config /private/sproozi/config.json --from engineering
-sproozi resume SESSION_UUID --executor docker --config /private/sproozi/config.json
+sproozi pull ID --context engineering --config /private/sproozi/config.json
+sproozi resume ID --config /private/sproozi/config.json
 ```
 
-`--from engineering` names the remote executor, configured under `remote` or
-`workSources`, whose remote executor hands the session over. `--executor docker`
-uses docker, home's executor name, to address the home daemon that now owns
-the session.
-[Why the commands use different flags](session-mobility.md#why-the-commands-use-different-flags)
-explains the three flags.
+`--context engineering` names the cluster that hands the session over,
+configured under `remote` or `workSources`. After the pull this machine owns the
+session, so `resume` needs no `--context`.
 
 Pull validates and saves the conversation and Git checkpoint without starting an
 agent. It then records the remote executor's one-way ownership transfer. The pull
@@ -243,11 +239,11 @@ recovery.
 Resume opens the real native TUI with the same harness conversation ID (`threadId`) and supported
 Git history, index, staged/unstaged changes and selected files. Its new deadline,
 allowances and gateway identity come from current home approval. Earlier receipts
-remain unchanged. `--detach` starts without attaching; `sproozi attach SESSION_UUID
---socket PATH` reconnects, and Ctrl-] detaches without stopping work.
+remain unchanged. `--detach` starts without attaching; `sproozi attach ID`
+reconnects, and Ctrl-] detaches without stopping work.
 
 After reviewing and changing the work, use
-`sproozi stop SESSION_UUID --executor docker --config FILE` to wait for the current
+`sproozi stop ID --config FILE` to wait for the current
 turn and foreground tools, stop the sandbox, finalize usage accounting and save a
 new checkpoint. It does not launch a destination. A later resume starts another
 execution with current approval. Use `move` for live visits within one

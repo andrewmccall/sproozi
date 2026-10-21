@@ -4,7 +4,6 @@
 package main
 
 import (
-	"bytes"
 	"net"
 	"os"
 	"path/filepath"
@@ -37,56 +36,28 @@ func TestUnsafeConfigurationNamesThePermissionRepair(t *testing.T) {
 	if err := os.Chmod(config, 0644); err != nil {
 		t.Fatal(err)
 	}
-	var stdout, stderr bytes.Buffer
-	if code := cli([]string{"sessions", "--config", config}, &stdout, &stderr); code != 1 ||
-		!strings.Contains(stderr.String(), "chmod 600 "+config) {
-		t.Fatalf("exited %d: %q", code, stderr.String())
-	}
-	if err := os.Chmod(dir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	stderr.Reset()
-	if code := cli([]string{"init", "--directory", dir}, &stdout, &stderr); code != 1 ||
-		!strings.Contains(stderr.String(), "chmod 700 "+dir) {
-		t.Fatalf("exited %d: %q", code, stderr.String())
-	}
-}
-
-func TestInitRejectsAnUnusableExistingConfiguration(t *testing.T) {
-	dir := testutil.PrivateDir(t)
-	file := filepath.Join(dir, "config.json")
-	target := filepath.Join(dir, "elsewhere.json")
-	if err := testutil.WriteFile(target, []byte("{}"), 0600); err != nil {
-		t.Fatal(err)
+	if code, _, stderr := runCLI("sessions", "--config", config); code != 1 ||
+		!strings.Contains(stderr, "chmod 600 "+config) {
+		t.Fatalf("exited %d: %q", code, stderr)
 	}
 	for _, tc := range []struct {
 		name    string
 		prepare func() error
 		want    string
 	}{
-		{"shared", func() error {
-			if err := testutil.WriteFile(file, []byte("{}"), 0600); err != nil {
-				return err
-			}
-			return os.Chmod(file, 0644)
-		}, "chmod 600 " + file},
-		{"directory", func() error { return os.Mkdir(file, 0700) },
-			"configuration " + file + " is a directory; it must be a regular file: move the directory aside"},
-		{"symlink", func() error { return os.Symlink(target, file) },
-			"configuration " + file + " is a symbolic link; it must be a regular file"},
-		{"dangling", func() error { return os.Symlink(filepath.Join(dir, "absent"), file) },
-			"configuration " + file + " is a symbolic link; it must be a regular file"},
+		{"directory", func() error { return os.Mkdir(config, 0700) }, "configuration " + config + " is a directory"},
+		{"symlink", func() error { return os.Symlink(filepath.Join(dir, "absent"), config) },
+			"configuration " + config + " is a symbolic link"},
 	} {
-		if err := os.RemoveAll(file); err != nil {
+		if err := os.RemoveAll(config); err != nil {
 			t.Fatal(err)
 		}
 		if err := tc.prepare(); err != nil {
 			t.Fatal(err)
 		}
-		var stdout, stderr bytes.Buffer
-		if code := cli([]string{"init", "--directory", dir}, &stdout, &stderr); code != 1 ||
-			!strings.Contains(stderr.String(), tc.want) || strings.Contains(stderr.String(), "chmod 700") {
-			t.Fatalf("%s: exited %d: %q", tc.name, code, stderr.String())
+		if code, _, stderr := runCLI("status", "abcd", "--config", config); code != 1 ||
+			!strings.Contains(stderr, tc.want) || strings.Contains(stderr, "chmod") {
+			t.Fatalf("%s: exited %d: %q", tc.name, code, stderr)
 		}
 	}
 }
@@ -103,31 +74,36 @@ func TestPrintedPathsAreShellQuoted(t *testing.T) {
 	}
 }
 
-// A missing socket is named as such, never repaired with chmod on its directory.
+// A missing socket says the service is not running, never suggesting chmod.
 func TestMissingSocketIsNamedWithoutChmod(t *testing.T) {
 	socket := "/sproozi-missing-" + uuid.NewString() + ".sock"
-	var stdout, stderr bytes.Buffer
-	code := cli([]string{"status", uuid.NewString(), "--socket", socket}, &stdout, &stderr)
-	want := "Sproozi failed: docker (home): no home daemon is listening on the private control socket: " +
-		socket + " does not exist; start home with \"sproozi serve\""
-	if code != 1 || !strings.HasPrefix(stderr.String(), want) || strings.Contains(stderr.String(), "chmod") {
-		t.Fatalf("exited %d: %q", code, stderr.String())
+	code, _, stderr := runCLI("status", uuid.NewString(), "--socket", socket)
+	if code != 1 || stderr != "error: the Sproozi service is not running; start it with \"sproozi service start\"\n" {
+		t.Fatalf("exited %d: %q", code, stderr)
 	}
 	for _, path := range []string{"/", filepath.Join(testutil.PrivateDir(t), "absent")} {
-		got := privateHint(&privatefs.UnsafePathError{Path: path}, "").Error()
+		got := explain(&privatefs.UnsafePathError{Path: path})
 		if strings.Contains(got, "chmod") || !strings.HasSuffix(got, "; use a private directory you own instead") {
 			t.Errorf("%s: %q", path, got)
 		}
 	}
 }
 
-// An explicit --socket that is too long names the flag, not config.json.
-func TestLongExplicitSocketNamesTheFlag(t *testing.T) {
-	socket := "/" + strings.Repeat("s", 200) + ".sock"
-	var stdout, stderr bytes.Buffer
-	code := cli([]string{"status", uuid.NewString(), "--socket", socket}, &stdout, &stderr)
-	if code != 1 || !strings.Contains(stderr.String(), "; use a shorter --socket path") ||
-		strings.Contains(stderr.String(), `"directory"`) {
-		t.Fatalf("exited %d: %q", code, stderr.String())
+// A --socket that cannot work names the flag.
+func TestUnusableSocketNamesTheFlag(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "plain")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for want, socket := range map[string]string{
+		"; use a shorter --socket path":                                 "/" + strings.Repeat("s", 200) + ".sock",
+		"--socket " + shellQuote(dir) + " is a directory, not a socket": dir,
+		"--socket " + file + " is a regular file, not a socket":         file,
+	} {
+		if code, _, stderr := runCLI("status", uuid.NewString(), "--socket", socket); code != 2 ||
+			!strings.Contains(stderr, want) {
+			t.Errorf("%s: exited %d: %q", socket, code, stderr)
+		}
 	}
 }

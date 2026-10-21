@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
+	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -320,7 +321,7 @@ func TestUnknownSessionRepliesWithoutJournalPath(t *testing.T) {
 	t.Parallel()
 	s, _, _, _ := testService(t)
 	id := uuid.NewString()
-	want := "docker (home): no session " + id + `; run "sproozi sessions" to list sessions`
+	want := "docker (home): no session " + id + `; "sproozi ls" lists sessions`
 	for _, q := range []Request{
 		{Action: ActionStatus, ID: id},
 		{Action: ActionStop, ID: id, OperationID: uuid.NewString()},
@@ -429,5 +430,76 @@ func TestMoveNamesUnconfiguredDestination(t *testing.T) {
 		if r.Error != tc.want || !r.Rejected || !errors.Is(replyError(r), ErrRejected) {
 			t.Errorf("move replied %+v, want rejected %q", r, tc.want)
 		}
+	}
+}
+
+// rm refuses a running session, then deletes a stopped one with every
+// journal and retained file only it used; the listing no longer shows it.
+func TestRemoveDeletesAStoppedSessionAndItsFiles(t *testing.T) {
+	t.Parallel()
+	s, _, _, repo := testService(t)
+	id := uuid.NewString()
+	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	r := exchange(t, s, Request{Action: ActionRemove, ID: id})
+	if !r.Rejected || !strings.Contains(r.Error, `stop it with "sproozi stop `+id+`"`) {
+		t.Fatalf("remove of a running session replied %+v", r)
+	}
+	if _, err := s.Stop(t.Context(), id, uuid.NewString()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Resume(t.Context(), id, uuid.NewString(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Stop(t.Context(), id, uuid.NewString()); err != nil {
+		t.Fatal(err)
+	}
+	journal := filepath.Join(s.config.Directory, "journal")
+	before := countFiles(t, journal)
+	r = exchange(t, s, Request{Action: ActionRemove, ID: id})
+	if r.Error != "" || r.Status == nil || r.Status.ID != id {
+		t.Fatalf("remove replied %+v", r)
+	}
+	if after := countFiles(t, journal); after >= before || after != 0 {
+		t.Fatalf("journal files before %d, after %d", before, after)
+	}
+	if listed, err := s.Sessions(work.SessionQuery{}); err != nil || len(listed) != 0 {
+		t.Fatalf("removed session still listed: %+v %v", listed, err)
+	}
+	if r = exchange(t, s, Request{Action: ActionRemove, ID: id}); !r.UnknownSession {
+		t.Fatalf("second remove replied %+v", r)
+	}
+}
+
+func countFiles(t *testing.T, dir string) int {
+	t.Helper()
+	count := 0
+	err := filepath.WalkDir(dir, func(_ string, entry os.DirEntry, err error) error {
+		if err == nil && !entry.IsDir() && entry.Name() != "owner.lock" {
+			count++
+		}
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return count
+}
+
+// "local" names this machine's placement in a move, whatever it is called.
+func TestMoveToLocalAliasReturnsToThisMachine(t *testing.T) {
+	t.Parallel()
+	s, _, _, repo := testService(t)
+	id := uuid.NewString()
+	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Move(t.Context(), id, uuid.NewString(), testRemote); err != nil {
+		t.Fatal(err)
+	}
+	status, err := s.Move(t.Context(), id, uuid.NewString(), LocalAlias)
+	if err != nil || status.Placement != s.config.Local.Name {
+		t.Fatalf("move to local: %+v %v", status, err)
 	}
 }

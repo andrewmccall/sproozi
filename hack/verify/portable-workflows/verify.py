@@ -126,7 +126,7 @@ def main():
     save()
     if args.request_id and view["phase"] == "unknown":
         recovered = subprocess.run([str(args.session_binary.resolve()), "recover", view["id"],
-                                    "--executor", source, "--config", str(args.home_config.resolve())],
+                                    "--context", source, "--config", str(args.home_config.resolve()), "--json"],
                                    cwd=ROOT, capture_output=True, text=True, timeout=120)
         check(recovered.returncode == 0, "Exact retained request recovery failed: " + recovered.stderr[-1024:])
         report['recovery'] = json.loads(recovered.stdout)
@@ -163,7 +163,7 @@ def main():
     report["steps"].append("Remote initial native task completed and retained while home was absent")
     save()
     with (out / "home.log").open("wb") as log:
-        daemon = subprocess.Popen([str(args.session_binary.resolve()), "serve", "--config", str(args.home_config.resolve())],
+        daemon = subprocess.Popen([str(args.session_binary.resolve()), "service", "run", "--config", str(args.home_config.resolve())],
                                   cwd=ROOT, stdout=log, stderr=log)
         report["homePID"] = daemon.pid
         save()
@@ -173,11 +173,11 @@ def main():
                 check(daemon.poll() is None and time.monotonic() < ready, "Home daemon did not start")
                 time.sleep(0.1)
             def command(*words):
-                completed = subprocess.run([str(args.session_binary.resolve()), *words, "--socket", str(socket)],
+                completed = subprocess.run([str(args.session_binary.resolve()), *words, "--socket", str(socket), "--json"],
                                            cwd=ROOT, capture_output=True, text=True, timeout=120)
                 check(completed.returncode == 0, completed.stderr[-1024:])
                 return json.loads(completed.stdout)
-            pulled = command("pull", view["id"], "--from", source)
+            pulled = command("pull", view["id"], "--context", source)
             check(pulled["threadId"] == current["threadId"], "Pull changed native identity")
             after = tool("sproozi_status", {"id": view["id"]}, number)
             number += 1
@@ -203,7 +203,7 @@ def main():
             check(stopped["initialStage"] == "retained" and stopped["threadId"] == current["threadId"], "Local follow-up did not retain native state")
             report["stopped"] = stopped
             if args.project:
-                local_sessions = command("sessions", "--executor", "docker", "--project", args.project)["sessions"]
+                local_sessions = command("sessions", "--project", args.project)["sessions"]
                 check(any(item['id'] == view['id'] for item in local_sessions), "Project-filtered CLI catalogue omitted local work")
                 check(all(item.get('project') == args.project for item in local_sessions), "CLI Project filter leaked another scope")
                 check(stopped.get('project') == args.project and stopped.get('repositoryReference') == current.get('repositoryReference'),
