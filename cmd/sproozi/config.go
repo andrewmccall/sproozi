@@ -144,6 +144,9 @@ func startCommand(configPath string) string {
 	return "sproozi service start --root " + shellQuote(root)
 }
 
+// docPath matches a repository-relative documentation path in a message.
+var docPath = regexp.MustCompile(`(^|[\s(])docs/[A-Za-z0-9/_.-]+\.md`)
+
 // startServiceCommand starts the default installation's service.
 const startServiceCommand = "sproozi service start"
 
@@ -163,11 +166,18 @@ func (e *serviceDown) Unwrap() error { return e.err }
 type retryError struct {
 	err           error
 	id, operation string
+	// newSession says the command created the session ID, so a repeat must
+	// name it too or it would start another session.
+	newSession bool
 }
 
 func (e *retryError) Error() string {
+	flags := "--operation " + e.operation
+	if e.newSession {
+		flags = "--id " + e.id + " " + flags
+	}
 	return fmt.Sprintf("%v; the outcome is unknown: check with \"sproozi status %s\", and to try again repeat "+
-		"the command with --operation %s", e.err, e.id, e.operation)
+		"the command with %s", e.err, e.id, flags)
 }
 
 func (e *retryError) Unwrap() error { return e.err }
@@ -179,7 +189,8 @@ func explain(err error) string {
 	var down *serviceDown
 	switch {
 	case errors.As(err, &retry):
-		return (&retryError{err: errors.New(explain(retry.err)), id: retry.id, operation: retry.operation}).Error()
+		return (&retryError{err: errors.New(explain(retry.err)), id: retry.id, operation: retry.operation,
+			newSession: retry.newSession}).Error()
 	case errors.As(err, &down):
 		return down.Error()
 	case errors.Is(err, home.ErrControlUnavailable):
@@ -189,6 +200,11 @@ func explain(err error) string {
 	for _, prefix := range []string{"docker (home): ", "home: "} {
 		message = strings.TrimPrefix(message, prefix)
 	}
+	// Name documentation by URL: an installed CLI has no checkout beside it.
+	message = docPath.ReplaceAllStringFunc(message, func(m string) string {
+		prefix, path, _ := strings.Cut(m, "docs/")
+		return prefix + docURL("docs/"+path)
+	})
 	var unsafe *privatefs.UnsafePathError
 	if !errors.As(err, &unsafe) {
 		return message

@@ -72,7 +72,15 @@ func StoreCredential(l Layout, name string, in CredentialInput) (string, error) 
 	}
 	value = strings.TrimSpace(value)
 	if value == "" || strings.ContainsAny(value, " \r\n\t\x00") || len(value) > 8<<10 {
-		return "", fail("credential", errors.New("the credential is empty or contains whitespace"), "")
+		next := "give the key alone, with no spaces; nothing was saved"
+		switch {
+		case in.Stdin != nil:
+			next = "pipe the key itself, for example: printf '%s' \"$API_KEY\" | sproozi init --credential-stdin; " +
+				"nothing was saved"
+		case in.File != "":
+			next = "put only the key in " + in.File + "; nothing was saved"
+		}
+		return "", fail("credential", errors.New("the key is empty or contains whitespace"), next)
 	}
 	if err := privatefs.EnsureDir(l.Credentials()); err != nil {
 		return "", err

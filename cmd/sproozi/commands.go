@@ -88,6 +88,7 @@ var commands = []command{
 		about: "Start an agent on a copy of the Git repository at PATH, in an isolated container, and connect\n" +
 			"your terminal to it. PATH defaults to the current directory. Arguments after -- go to the\n" +
 			"agent program unchanged, for example: sproozi run -- --model gpt-5.\n\n" +
+			deadlineHelp + "\n\n" +
 			"With --remote, submit a task to run in a Kubernetes cluster instead.",
 		flags: []string{"harness", "detach", "include-ignored", "remote", "context", "namespace", "task", "task-file",
 			"repository", "project", "json", "root"},
@@ -107,7 +108,9 @@ var commands = []command{
 		flags:   []string{"json", "root"}, hiddenFlags: sessionPlumbing(true)},
 	{name: cmdResume, operands: "ID [-- AGENT ARGS]", group: groupSessions, session: true, harnessArgs: true,
 		summary: "Continue a stopped session where it left off",
-		flags:   []string{"detach", "json", "root"}, hiddenFlags: sessionPlumbing(true)},
+		about: "Continue a stopped session where it left off and connect your terminal to it (-d skips that).\n" +
+			"Arguments after -- go to the agent program unchanged.\n\n" + deadlineHelp,
+		flags: []string{"detach", "json", "root"}, hiddenFlags: sessionPlumbing(true)},
 	{name: cmdCancel, operands: "ID", group: groupSessions, session: true,
 		summary: "Stop a session now, discarding the agent's current turn",
 		flags:   []string{"remote", "context", "namespace", "json", "root"}, hiddenFlags: sessionPlumbing(true)},
@@ -151,6 +154,11 @@ var commands = []command{
 		verbs:   []string{verbStatus, verbRenew, verbRotateCA, verbReplaceCA}, flags: []string{"json", "root"}},
 	{name: cmdVersion, group: groupSetup, summary: "Show the version", flags: []string{"json"}},
 }
+
+// deadlineHelp says how long a session runs and where that is set.
+const deadlineHelp = "Each run or resume lasts until its deadline: 30 minutes by default. Change it with\n" +
+	"\"maxDuration\" in config.json in the installation directory, then restart the service.\n" +
+	"\"sproozi stop\" before then keeps the work; \"sproozi resume\" starts a new deadline."
 
 // sessionPlumbing are the hidden flags of a session command: the full ID,
 // the retry operation and the location flags.
@@ -335,31 +343,40 @@ func suggest(name string, candidates []string) string {
 			best, bestDistance = candidate, d
 		}
 	}
-	if bestDistance < 0 || bestDistance > max(1, len(name)/3) {
+	allowed := 1
+	if len(name) > 4 {
+		allowed = 2
+	}
+	if bestDistance < 0 || bestDistance > allowed {
 		return ""
 	}
 	return best
 }
 
-// distance is the Levenshtein edit distance.
+// distance is the optimal string alignment distance: insertions, deletions,
+// substitutions and swaps of adjacent letters each count once.
 func distance(a, b string) int {
-	previous := make([]int, len(b)+1)
-	for j := range previous {
-		previous[j] = j
+	d := make([][]int, len(a)+1)
+	for i := range d {
+		d[i] = make([]int, len(b)+1)
+		d[i][0] = i
+	}
+	for j := range d[0] {
+		d[0][j] = j
 	}
 	for i := 1; i <= len(a); i++ {
-		current := make([]int, len(b)+1)
-		current[0] = i
 		for j := 1; j <= len(b); j++ {
 			cost := 1
 			if a[i-1] == b[j-1] {
 				cost = 0
 			}
-			current[j] = min(previous[j]+1, current[j-1]+1, previous[j-1]+cost)
+			d[i][j] = min(d[i-1][j]+1, d[i][j-1]+1, d[i-1][j-1]+cost)
+			if i > 1 && j > 1 && a[i-1] == b[j-2] && a[i-2] == b[j-1] {
+				d[i][j] = min(d[i][j], d[i-2][j-2]+1)
+			}
 		}
-		previous = current
 	}
-	return previous[len(b)]
+	return d[len(a)][len(b)]
 }
 
 // commandNames lists every name and alias a user may type.

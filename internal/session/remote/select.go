@@ -63,6 +63,11 @@ func Select(context, namespace string) (Selection, error) {
 			return Selection{}, fmt.Errorf("cannot read the kubeconfig %s: %w; fix the file, set KUBECONFIG, or pass --context FILE",
 				describeFiles(files), loadErr)
 		}
+		if !slices.ContainsFunc(files, exists) {
+			return Selection{}, fmt.Errorf("there is no kubeconfig file at %s, so the default context %q does not "+
+				"exist; create it for the ServiceAccount %s as docs/reference/remote-executors.md shows, set KUBECONFIG, "+
+				"or pass --context FILE", describeFiles(files), DefaultContext, CLIServiceAccount)
+		}
 		if loaded.Contexts[DefaultContext] == nil {
 			return Selection{}, fmt.Errorf("the kubeconfig %s has no context named %q, which remote commands use by default; "+
 				"create it for the ServiceAccount %s as docs/reference/remote-executors.md shows, or pass --context NAME or --context FILE",
@@ -189,6 +194,11 @@ func defaultFiles() []string {
 // load merges kubeconfig files as kubectl does; missing files are skipped.
 func load(files []string) (*clientcmdapi.Config, error) {
 	return (&clientcmd.ClientConfigLoadingRules{Precedence: files}).Load()
+}
+
+func exists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func describeFiles(files []string) string {

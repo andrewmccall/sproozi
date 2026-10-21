@@ -69,14 +69,16 @@ them with `--include-ignored`. Your directory is not changed; the agent works on
 its own copy.
 
 `run` prints the session ID and opens the agent's terminal. Press Ctrl-] to
-detach; Ctrl-C reaches the agent. Detaching leaves the agent running until its
-deadline. `run -d` starts without opening the terminal.
+detach; Ctrl-C reaches the agent. Detaching prints the session ID and the next
+commands, and leaves the agent running until its deadline: 30 minutes by
+default, set by `maxDuration` in `~/.sproozi/config.json`. `run -d` starts
+without opening the terminal.
 
 ```sh
 sproozi ls            # list sessions
 sproozi attach 3f2b   # open its terminal again: the start of the ID is enough
-sproozi stop 3f2b     # stop after the current turn and keep the work
-sproozi resume 3f2b   # carry on later, with a new deadline
+sproozi stop 3f2b     # stop after the current turn; ls then shows it as retained
+sproozi resume 3f2b   # carry on later and reconnect (-d skips that), with a new deadline
 sproozi rm 3f2b       # delete a stopped session and its saved work
 ```
 
@@ -112,6 +114,10 @@ the other one, then choose it per session:
 sproozi init --harness claude-code
 sproozi run --harness claude-code
 ```
+
+Each agent gets its own gateway port. `--port` sets only the first one, on the
+first `init`; a later agent takes the next free port after the existing ones,
+so `--port` on a later `init` has no effect.
 
 The second agent gets its own gateway port and provider key, so a Codex
 container cannot use the Anthropic key, or the reverse. If a session is

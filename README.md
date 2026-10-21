@@ -57,11 +57,18 @@ sproozi run
 ```
 
 `init` asks for your API key and checks that the agent's container can't reach
-the internet directly. `run` copies the repository into a container and opens
-Codex there; your own directory isn't changed. Press Ctrl-] to detach.
+the internet directly; for scripts, pass `--credential-file FILE` or
+`--credential-stdin` instead. `run` copies the repository into a container and
+opens Codex there; your own directory isn't changed. Press Ctrl-] to detach.
 `sproozi ls` shows each session's ID; the first few characters are enough for
-`sproozi attach ID` to return, `sproozi stop ID` to stop and `sproozi resume
-ID` to carry on later.
+`sproozi attach ID` to return and `sproozi stop ID` to stop. A stopped session
+shows as `retained` in `sproozi ls`; `sproozi resume ID` carries on and
+reconnects your terminal (`-d` skips that).
+
+The agents show expected warnings because the gateway refuses their own
+services: Codex shows `⚠ 1 warning` (refused telemetry), Claude Code a 403 on
+its remote settings. [Local sessions](docs/guides/local-sessions.md#run-an-agent)
+explains them.
 
 For Claude Code, run `sproozi init --harness claude-code`, then `sproozi run
 --harness claude-code`. Adding it restarts the background service if no
@@ -104,7 +111,7 @@ There's working code and recorded tests, but support varies by workflow:
 | Area | Current state |
 | --- | --- |
 | Agent runs in Kubernetes Pods | Tested with Codex, Claude Code, OpenCode and Hermes using deterministic providers, by [`make test-e2e`](test/acceptance/running.md#harnesses-and-hermes-in-kind). The [E2E workflow](https://github.com/andrewmccall/sproozi/actions/workflows/test-e2e.yml) runs it on pull requests and pushes to `main`; check there for the latest result, which isn't always green |
-| Controlled access to Kubernetes and external tools | [Recorded tool-access acceptance](test/acceptance/reports/verified-mcp-demo.md) with a real model, including native Kubernetes reads, configured HTTPS test servers and denied operations. The full redacted reports aren't published yet |
+| Controlled access to Kubernetes and external tools | [Recorded tool-access acceptance](test/acceptance/reports/verified-mcp-demo.md) with a real model, including native Kubernetes reads, configured HTTPS test servers and denied operations. Recorded with Codex 0.154.0; not re-recorded with the current pins. The full redacted reports aren't published yet |
 | Local Docker sessions from `sproozi init` | Provisioning, per-session Codex or Claude Code selection, gateway containment probes and certificate renewal checked on macOS Docker Desktop with deterministic providers by [`make verify-local-onboarding`](test/acceptance/running.md#local-onboarding); no recorded report is published yet. See the [local sessions guide](docs/guides/local-sessions.md) |
 | Explaining refused access to the agent | Every harness receives Sproozi instructions, a `sproozi-access` skill and a `diagnose` tool for its own recent gateway refusals; tested with installed Codex, Claude Code and OpenCode clients, which call `diagnose` through the gateway after a refused request; not yet in a recorded Kind run. See [Sproozi integration](docs/reference/sproozi-integration.md) |
 | Your own instructions and skills | One profile, `~/.sproozi/profile` in a local installation, reaches every managed Codex and Claude Code session with shared and per-harness instructions and skills. It is sent with each Docker launch and stored by digest for Kubernetes. Tested with installed clients and a Docker ↔ Kind session-mobility round trip. See [Profile](docs/reference/profile.md) |

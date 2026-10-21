@@ -102,6 +102,8 @@ func TestSelectExplainsEachFailure(t *testing.T) {
 		says                                 []string
 	}{
 		{"no sproozi context", noSproozi, "", "", []string{`no context named "sproozi"`, "docs/reference/remote-executors.md", "--context"}},
+		{"no kubeconfig file", filepath.Join(dir, "absent"), "", "", []string{"there is no kubeconfig file at " +
+			filepath.Join(dir, "absent"), "--context FILE"}},
 		{"neither context nor file", defaults, "prod", "", []string{`--context "prod" is neither a context`, "admin, sproozi", "kubeconfig file"}},
 		{"file without current context", defaults, noCurrent, "", []string{"read as the kubeconfig file", "sets no current context", "use-context"}},
 		{"file that is not a kubeconfig", defaults, broken, "", []string{"read as a kubeconfig file", "not a valid kubeconfig"}},

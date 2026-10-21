@@ -199,7 +199,14 @@ func attach(ctx context.Context, socket, id string) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = term.Restore(fd, state) }()
+	restored := false
+	restore := func() {
+		if !restored {
+			restored = true
+			_ = term.Restore(fd, state)
+		}
+	}
+	defer restore()
 	var last home.TerminalSize
 	update := func() {
 		columns, rows, err := terminalSize(fd)
@@ -219,7 +226,20 @@ func attach(ctx context.Context, socket, id string) error {
 	defer cancel()
 	stopResize := watchResize(run, update)
 	defer stopResize()
-	return home.AttachTerminalNotify(run, socket, id, os.Stdin, os.Stdout, sizes, func() {
+	err = home.AttachTerminalNotify(run, socket, id, os.Stdin, os.Stdout, sizes, func() {
 		_, _ = fmt.Fprint(os.Stderr, "Attached to the agent's terminal; Ctrl-] detaches\r\n")
 	})
+	restore()
+	if err == nil {
+		// The agent's screen hid the session ID; name it and the next commands.
+		_, _ = fmt.Fprintln(os.Stderr, detachedLine(id))
+	}
+	return err
+}
+
+// detachedLine names the session and the next commands after its terminal closes.
+func detachedLine(id string) string {
+	short := shortID(id)
+	return fmt.Sprintf("\nLeft session %s. Back to it: sproozi attach %s   Stop it: sproozi stop %s   List: sproozi ls",
+		id, short, short)
 }

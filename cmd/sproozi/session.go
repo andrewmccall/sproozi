@@ -47,7 +47,7 @@ func (q *options) session(ctx context.Context) error {
 			return err
 		}
 	}
-	if slices.Contains(mutations, q.action()) && q.operation == "" {
+	if slices.Contains(mutations, q.action()) && q.action() != cmdPull && q.operation == "" {
 		q.operation = uuid.NewString()
 	}
 	if err := q.ensureService(ctx); err != nil {
@@ -64,12 +64,7 @@ func (q *options) session(ctx context.Context) error {
 	response, err := home.Call(ctx, q.socket, request)
 	stopNotice()
 	if err != nil {
-		// Only a request whose outcome is unknown is worth repeating.
-		if q.operation != "" && !errors.Is(err, home.ErrUnknownSession) && !errors.Is(err, home.ErrRejected) &&
-			!errors.Is(err, home.ErrControlUnavailable) {
-			return &retryError{err: q.homeError(err), id: q.id, operation: q.operation}
-		}
-		return q.homeError(err)
+		return q.callError(ctx, err)
 	}
 	if response.Status == nil {
 		return errors.New("the service sent no session status")
@@ -91,6 +86,20 @@ func (q *options) session(ctx context.Context) error {
 		return q.homeError(attach(ctx, q.socket, q.id))
 	}
 	return nil
+}
+
+// callError explains a failed request. Only one whose outcome is unknown,
+// including one interrupted before the reply, is worth repeating, with the
+// same session and operation.
+func (q *options) callError(ctx context.Context, err error) error {
+	if ctx.Err() != nil {
+		err = errors.New("interrupted before the service replied")
+	}
+	if q.operation != "" && !errors.Is(err, home.ErrUnknownSession) && !errors.Is(err, home.ErrRejected) &&
+		!errors.Is(err, home.ErrControlUnavailable) {
+		return &retryError{err: q.homeError(err), id: q.id, operation: q.operation, newSession: q.action() == cmdRun}
+	}
+	return q.homeError(err)
 }
 
 // request builds the service request. done reports a command that finished
@@ -201,7 +210,14 @@ func (q *options) resolveID(ctx context.Context) error {
 	case cmdRun:
 		return nil
 	case cmdPull:
-		return q.resolvePullID(ctx)
+		if err := q.resolvePullID(ctx); err != nil {
+			return err
+		}
+		// One session has one pull, so a plain repeat continues it.
+		if q.operation == "" {
+			q.operation = uuid.NewSHA1(uuid.NameSpaceOID, []byte("sproozi/pull/"+q.id)).String()
+		}
+		return nil
 	}
 	return q.resolveLocalID(ctx)
 }

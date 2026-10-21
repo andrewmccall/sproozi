@@ -15,7 +15,8 @@ runtimes, templates and policies.
 
 ## Before you start
 
-You need kubectl 1.31 or later and a Linux cluster whose network plugin
+You need kubectl 1.31 or later and a Linux cluster (Kind on macOS counts: its
+nodes are Linux containers) whose network plugin
 enforces NetworkPolicy from the moment a Pod starts, such as Calico or
 Cilium. Kind's default network isn't enough: it lets a new Pod's first
 traffic through before applying its policy.
@@ -40,7 +41,8 @@ extracts to `sproozi-release/`.
 ## Create a Kind cluster
 
 To try Sproozi on your computer, create a Kind cluster with Calico. Skip this
-on a cluster you already have.
+on a cluster you already have. Any cluster name works if `sproozi` is taken;
+use the same name when you delete it.
 
 ```sh
 kind create cluster --name sproozi --config sproozi-release/kind/cluster.yaml
@@ -48,8 +50,7 @@ kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.30.4/
 kubectl rollout status -n kube-system daemonset/calico-node --timeout=300s
 ```
 
-Any cluster name works if `sproozi` is taken; use the same name when you
-delete it. Kind selects the new cluster for kubectl. On any cluster, check that
+Kind selects the new cluster for kubectl. On any cluster, check that
 kubectl points at the one you mean before installing:
 
 ```sh
@@ -59,14 +60,16 @@ kubectl get nodes
 
 ## Install
 
-Before applying, read `sproozi-release/install/install.yaml`. It creates
-namespaces whose names start with `sproozi-` and these cluster-wide
-permissions:
+Before applying, read `sproozi-release/install/install.yaml`. It creates the
+namespaces `sproozi-system`, `sproozi-agents`, `sproozi-webhooks` and
+`sproozi-webhook-state`; the controller, gateway and webhook Deployments in
+`sproozi-system`; and these cluster-wide permissions:
 
 - The controller reads Pods, ServiceAccounts, NetworkPolicies, ConfigMaps,
   AgentPolicies, AgentRuntimes and AgentTemplates in every namespace, and
-  creates, updates and deletes AgentRuns in every namespace. It creates and
-  deletes sandbox objects only in `sproozi-agents`.
+  updates and deletes AgentRuns in every namespace. It creates and deletes
+  sandbox objects only in `sproozi-agents`. Only the webhook creates AgentRuns,
+  and only in `sproozi-system`.
 - The gateway reads Pods and their logs, events, ServiceAccounts, Services,
   Deployments, ReplicaSets and StatefulSets, and Sproozi's AgentRuns,
   AgentPolicies and AgentTemplates, in every namespace, and creates
@@ -74,13 +77,17 @@ permissions:
 - Admin, editor and viewer ClusterRoles for Sproozi's resources, bound to
   no one until you bind them.
 
+**This grants cluster-wide read of Pods, their logs and ServiceAccounts: use an
+evaluation cluster.**
+
 ```sh
 kubectl apply --server-side --field-manager=sproozi-installer -f sproozi-release/crds.yaml
-kubectl wait --for=condition=Established --timeout=60s crd --all
+kubectl wait --for=condition=Established --timeout=60s -f sproozi-release/crds.yaml
 kubectl apply --server-side --field-manager=sproozi-installer -k sproozi-release/quickstart-self-managed-ca
-kubectl rollout status -n sproozi-system deployment/sproozi-certificates
+kubectl rollout status -n sproozi-system deployment/sproozi-certificates --timeout=180s
 kubectl rollout status -n sproozi-system deployment/sproozi-gateway --timeout=180s
-kubectl rollout status -n sproozi-system deployment/sproozi-controller-manager
+kubectl rollout status -n sproozi-system deployment/sproozi-controller-manager --timeout=180s
+kubectl rollout status -n sproozi-system deployment/sproozi-webhook --timeout=180s
 ```
 
 The `quickstart-self-managed-ca` overlay applies `install/install.yaml` plus a
@@ -118,13 +125,17 @@ DENIED: direct API server path is blocked
 First check passed. Keeping this Pod for inspection for 60 seconds
 ```
 
-The run then becomes `Succeeded` and Sproozi removes its Pod, identity and
-NetworkPolicy:
+The run then becomes `Succeeded`, and shortly after Sproozi removes its Pod,
+identity and NetworkPolicy:
 
 ```sh
 kubectl wait agentrun/first-check -n sproozi-system --for=jsonpath='{.status.phase}'=Succeeded --timeout=120s
 kubectl get agentrun first-check -n sproozi-system
+kubectl get sa,pods,networkpolicy -n sproozi-agents
 ```
+
+The last command may list the run's ServiceAccount for up to half a minute;
+run it again to see it gone.
 
 To run it again, delete the finished run first:
 `kubectl delete agentrun first-check -n sproozi-system`.
@@ -149,6 +160,7 @@ To run it again, delete the finished run first:
 
 | Symptom | Next step |
 | --- | --- |
+| Nodes are `NotReady` and Pods stay `Pending` | The Kind config disables the default network; install Calico as in [Create a Kind cluster](#create-a-kind-cluster). |
 | A Deployment has `ImagePullBackOff` | The nodes can't pull the release images. Check that they can reach `ghcr.io`, and that the node architecture is amd64 or arm64. |
 | The gateway has `CrashLoopBackOff`, or its rollout times out | Read `kubectl logs -n sproozi-system deployment/sproozi-gateway --previous`; the message names the Secret, key and fix. |
 | `kubectl wait ... --for=create` says the flag is unknown | Use kubectl 1.31 or later. |

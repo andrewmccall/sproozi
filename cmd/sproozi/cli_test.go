@@ -4,6 +4,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -531,5 +532,63 @@ func TestIncompleteSetupNamesInit(t *testing.T) {
 			` is incomplete: it stopped before writing config.json; run "sproozi init" to finish it`) {
 			t.Errorf("%v exited %d: %q", args, code, stderr)
 		}
+	}
+}
+
+// Following a retry hint repeats the same request: the same session and the
+// same operation. A run names the session it created, and a plain repeat of
+// pull continues the same pull.
+func TestRetryHintsRepeatTheSameRequest(t *testing.T) {
+	id := uuid.NewString()
+	socket, requests := fakeService(t, func(r home.Request) home.Response {
+		if r.Action == home.ActionSessions {
+			return home.Response{Sessions: []home.Status{{ID: id}}}
+		}
+		return home.Response{Error: "connection lost"}
+	})
+	hinted := regexp.MustCompile(`repeat the command with ((?:--id \S+ )?--operation \S+)`)
+	last := func() home.Request { return (*requests)[len(*requests)-1] }
+	repo := t.TempDir()
+	for _, args := range [][]string{{"run", repo, "-d"}, {"stop", id}, {"resume", id, "-d"}, {"cancel", id},
+		{"move", id, "--local"}} {
+		_, _, stderr := runCLI(append(args, testSocketFlag, socket)...)
+		match := hinted.FindStringSubmatch(stderr)
+		if match == nil {
+			t.Fatalf("%v gave no retry hint: %q", args, stderr)
+		}
+		first := last()
+		runCLI(append(append(args, strings.Fields(match[1])...), testSocketFlag, socket)...)
+		if again := last(); again.ID != first.ID || again.OperationID != first.OperationID || again.Action != first.Action {
+			t.Errorf("%v: following %q sent %+v after %+v", args, match[1], again, first)
+		}
+	}
+	runCLI("pull", id, testSocketFlag, socket)
+	first := last()
+	runCLI("pull", id, testSocketFlag, socket)
+	if again := last(); again.Action != home.ActionPull || again.OperationID != first.OperationID {
+		t.Errorf("a repeated pull used operation %s after %s", again.OperationID, first.OperationID)
+	}
+}
+
+func TestMisspeltCommandsAndVerbsAreSuggested(t *testing.T) {
+	// The typos are built from parts so a spelling fixer leaves them alone.
+	for args, want := range map[string]string{"st" + "po": `did you mean "stop"?`,
+		"service st" + "rat": `did you mean "start"?`,
+		"credentials lst":    `did you mean "list"?`, "resuem x": `did you mean "resume"?`} {
+		if code, _, stderr := runCLI(strings.Fields(args)...); code != 2 || !strings.Contains(stderr, want) {
+			t.Errorf("%s exited %d: %q", args, code, stderr)
+		}
+	}
+}
+
+// Documentation paths in messages become links, since a CLI has no checkout.
+func TestDocumentationPathsBecomeLinks(t *testing.T) {
+	got := explain(errors.New("create it as docs/reference/remote-executors.md shows (docs/guides/install.md)"))
+	if !strings.Contains(got, "as "+docURL("docs/reference/remote-executors.md")+" shows") ||
+		!strings.Contains(got, "("+docURL("docs/guides/install.md")+")") {
+		t.Fatalf("links: %s", got)
+	}
+	if line := detachedLine(uuid.Nil.String()); !strings.Contains(line, "sproozi attach 00000000") {
+		t.Fatalf("detached line: %s", line)
 	}
 }

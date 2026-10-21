@@ -219,11 +219,16 @@ func (q *options) serviceCommand(ctx context.Context, l localsetup.Layout, c hom
 		if e != nil {
 			return nil, e
 		}
-		report.ServiceStatus, err = localsetup.StartService(ctx, l, c, executable, 2*time.Minute)
-		report.Changed = err == nil && !before.Running
+		if report.ServiceStatus, err = localsetup.StartService(ctx, l, c, executable, 2*time.Minute); err != nil {
+			return nil, err
+		}
+		report.Changed = !before.Running
 	case verbStop:
-		report.ServiceStatus, err = localsetup.StopService(ctx, l, c, q.leaveRunning, time.Minute)
-		report.Changed = err == nil && before.Running
+		// A refused stop prints only its reason: the service still runs.
+		if report.ServiceStatus, err = localsetup.StopService(ctx, l, c, q.leaveRunning, time.Minute); err != nil {
+			return nil, err
+		}
+		report.Changed = before.Running
 	default:
 		report.ServiceStatus = before
 	}
