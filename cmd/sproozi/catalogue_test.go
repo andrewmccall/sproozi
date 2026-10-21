@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -60,7 +59,8 @@ func TestCatalogueKeepsPartialAvailabilityAndBoundsResults(t *testing.T) {
 		}
 		return work.ClientFor(client)
 	}
-	q := &options{socket: filepath.Join(dir, "missing.sock"), project: "sproozi-dev"}
+	// The platform's control address in an empty directory: no service listens.
+	q := &options{socket: home.SocketPath(dir), project: "sproozi-dev"}
 	out := discoverSessions(t.Context(), q, true,
 		[]remoteTarget{{Name: testExecutor, Client: connect(server.URL)},
 			{Name: "unreachable", Client: connect("https://127.0.0.1:1")}})

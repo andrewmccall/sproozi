@@ -16,8 +16,12 @@ import (
 
 const testExecutorName = "engineering"
 
+// testKubeconfig is an absolute path on every platform; selections only record
+// it, so the file need not exist.
+var testKubeconfig = filepath.Join(os.TempDir(), "fixture", "kubeconfig")
+
 func testSelection(name string) remote.Selection {
-	return remote.Selection{Kubeconfig: []string{"/fixture/kubeconfig"}, Context: name, Namespace: "team-a"}
+	return remote.Selection{Kubeconfig: []string{testKubeconfig}, Context: name, Namespace: "team-a"}
 }
 
 // describing returns a discover function that finds one executor per context.

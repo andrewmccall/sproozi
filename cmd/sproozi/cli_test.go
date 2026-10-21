@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"runtime/debug"
 	"slices"
 	"strconv"
@@ -56,7 +57,13 @@ func writeTestConfig(t *testing.T, root string, installed bool) string {
 // platform's limit.
 func shortTempDir(t *testing.T) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("/tmp", "sz")
+	// Unix socket paths are short; Windows uses a named pipe, so any
+	// temporary directory works there.
+	base := "/tmp"
+	if runtime.GOOS == "windows" {
+		base = ""
+	}
+	dir, err := os.MkdirTemp(base, "sz")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +195,8 @@ func TestUsageErrorsExitTwoBeforeReadingAnything(t *testing.T) {
 func TestParseOperandsAndAgentArguments(t *testing.T) {
 	id := uuid.NewString()
 	q, err := parse([]string{cmdResume, "--root", "/r", id, "-d", "--", "--model", "gpt-5", "--", "-c"})
-	if err != nil || q.id != id || !q.detach || q.root != "/r" ||
+	root, _ := filepath.Abs("/r") // a drive-qualified path on Windows
+	if err != nil || q.id != id || !q.detach || q.root != root ||
 		!slices.Equal(q.harnessArgs, []string{"--model", "gpt-5", "--", "-c"}) {
 		t.Fatalf("resume: %+v %v", q, err)
 	}
