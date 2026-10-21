@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/andrewmccall/sproozi/internal/harness"
+	"github.com/andrewmccall/sproozi/internal/privatefs"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/remote"
 	"github.com/google/uuid"
@@ -51,8 +52,10 @@ func TestReachExecutorRecordsAndReopensIt(t *testing.T) {
 		t.Fatal("executor is not a placement and a work source")
 	}
 	path := filepath.Join(s.config.Directory, executorsFile)
-	if info, statErr := os.Stat(path); statErr != nil || info.Mode().Perm() != 0o600 {
-		t.Fatalf("record %v: %v", info, statErr)
+	// The platform's own privacy rule: owner-only mode bits, or an owner-only ACL
+	// on Windows.
+	if err := privatefs.Check(path, false); err != nil {
+		t.Fatalf("executors record is not private: %v", err)
 	}
 	// Another context that reaches the same executor re-points the record.
 	if name, err = s.reachExecutor(t.Context(), testSelection("file")); err != nil || name != testExecutorName {

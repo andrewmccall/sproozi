@@ -63,7 +63,9 @@ func shortTempDir(t *testing.T) string {
 	if runtime.GOOS == "windows" {
 		base = ""
 	}
-	dir, err := os.MkdirTemp(base, "sz")
+	// privatefs makes the directory private by the platform's rules (mode bits
+	// or an owner-only ACL), as an installation root must be.
+	dir, err := privatefs.TempDir(base, "sz")
 	if err != nil {
 		t.Fatal(err)
 	}
