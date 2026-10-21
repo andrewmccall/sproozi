@@ -319,7 +319,7 @@ func TestRemoteCatalogueRetainsCompletionAndExclusiveClaimAcrossRestart(t *testi
 		t.Fatal("claim lost after restart")
 	}
 	list, e := resumed.List(t.Context(), SessionQuery{})
-	if e != nil || len(list) != 1 || list[0].Phase != PhaseHomeOwned {
+	if e != nil || len(list) != 1 || list[0].Phase != PhasePulled {
 		t.Fatalf("catalogue: %+v %v", list, e)
 	}
 	p.mu.Lock()

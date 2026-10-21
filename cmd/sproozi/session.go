@@ -53,10 +53,8 @@ func (q *options) session(ctx context.Context) error {
 	if err := q.ensureService(ctx); err != nil {
 		return err
 	}
-	if q.action() != cmdRun {
-		if err := q.resolveLocalID(ctx); err != nil {
-			return err
-		}
+	if err := q.resolveID(ctx); err != nil {
+		return err
 	}
 	request, done, err := q.request(ctx)
 	if done || err != nil {
@@ -191,6 +189,48 @@ func (q *options) resolveLocalID(ctx context.Context) error {
 	ids := make([]string, 0, len(response.Sessions))
 	for _, s := range response.Sessions {
 		ids = append(ids, s.ID)
+	}
+	q.id, err = matchID(q.id, ids)
+	return err
+}
+
+// resolveID completes a session ID prefix: from the cluster as well for pull,
+// from this machine otherwise. run creates its ID.
+func (q *options) resolveID(ctx context.Context) error {
+	switch q.action() {
+	case cmdRun:
+		return nil
+	case cmdPull:
+		return q.resolvePullID(ctx)
+	}
+	return q.resolveLocalID(ctx)
+}
+
+// resolvePullID completes a session ID prefix for pull from the cluster's
+// sessions as well as this machine's, since the session usually lives only in
+// the cluster until the pull.
+func (q *options) resolvePullID(ctx context.Context) error {
+	if work.CanonicalID(q.id) {
+		return nil
+	}
+	var ids []string
+	if response, err := home.Call(ctx, q.socket, home.Request{Action: home.ActionSessions}); err == nil {
+		for _, s := range response.Sessions {
+			ids = append(ids, s.ID)
+		}
+	}
+	target, err := resolveRemote(ctx, q.context, q.namespace)
+	if err != nil {
+		return fmt.Errorf("%w; or give the full session ID", err)
+	}
+	defer func() { _ = target.Client.Close() }()
+	views, err := target.Client.List(ctx, work.SessionQuery{})
+	if err != nil {
+		return fmt.Errorf("cluster %s did not list its sessions to complete %s: %s; give the full session ID",
+			target.Name, q.id, executorCause(err))
+	}
+	for _, v := range views {
+		ids = append(ids, v.ID)
 	}
 	q.id, err = matchID(q.id, ids)
 	return err

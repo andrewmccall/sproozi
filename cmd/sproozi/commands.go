@@ -96,9 +96,9 @@ var commands = []command{
 	{name: cmdSessions, aliases: []string{"ls"}, group: groupSessions, summary: "List sessions",
 		about: "List the sessions on this machine and in the cluster. Sessions on this machine are listed\n" +
 			"only while the Sproozi service runs; this command never starts it.",
-		flags: []string{"context", "namespace", "project", "json", "root"}, hiddenFlags: locationFlags},
+		flags: []string{"remote", "context", "namespace", "project", "json", "root"}, hiddenFlags: locationFlags},
 	{name: cmdStatus, operands: "ID", group: groupSessions, session: true, summary: "Show a session",
-		flags: []string{"context", "namespace", "json", "root"}, hiddenFlags: sessionPlumbing(false)},
+		flags: []string{"remote", "context", "namespace", "json", "root"}, hiddenFlags: sessionPlumbing(false)},
 	{name: cmdAttach, operands: "ID", group: groupSessions, session: true,
 		summary: "Connect your terminal to a running session; Ctrl-] detaches",
 		flags:   []string{"root"}, hiddenFlags: sessionPlumbing(false)},
@@ -110,7 +110,7 @@ var commands = []command{
 		flags:   []string{"detach", "json", "root"}, hiddenFlags: sessionPlumbing(true)},
 	{name: cmdCancel, operands: "ID", group: groupSessions, session: true,
 		summary: "Stop a session now, discarding the agent's current turn",
-		flags:   []string{"context", "namespace", "json", "root"}, hiddenFlags: sessionPlumbing(true)},
+		flags:   []string{"remote", "context", "namespace", "json", "root"}, hiddenFlags: sessionPlumbing(true)},
 	{name: cmdRemove, operands: "ID", group: groupSessions, session: true,
 		summary: "Delete a stopped or cancelled session and its saved work",
 		flags:   []string{"json", "root"}, hiddenFlags: sessionPlumbing(false)},
@@ -124,7 +124,7 @@ var commands = []command{
 		flags:   []string{"context", "namespace", "json", "root"}, hiddenFlags: sessionPlumbing(true)},
 	{name: cmdRecover, operands: "ID", session: true,
 		summary: "Finish an operation that was interrupted",
-		flags:   []string{"context", "namespace", "json", "root"}, hiddenFlags: sessionPlumbing(false)},
+		flags:   []string{"remote", "context", "namespace", "json", "root"}, hiddenFlags: sessionPlumbing(false)},
 	{name: cmdInit, group: groupSetup, summary: "Set up this machine to run agents in Docker",
 		about: "Set up Sproozi on this machine: the agent image, a private Docker network, certificates,\n" +
 			"your provider key and the background service. Run it again to add another agent with\n" +
@@ -210,12 +210,16 @@ var flagSpecs = map[string]flagSpec{
 // commandFlagHelp replaces a flag's help where one command uses it differently.
 var commandFlagHelp = map[string]map[string]string{
 	cmdSessions: {"project": "list only this project's sessions",
+		"remote":  "list only the cluster's sessions (the sproozi context unless --context)",
 		"context": "list only this cluster's sessions: a kubeconfig context or file"},
-	cmdStatus:  {"context": "show a session in this cluster: a kubeconfig context or file"},
-	cmdCancel:  {"context": "cancel a session in this cluster: a kubeconfig context or file"},
-	cmdRecover: {"context": "recover a session in this cluster: a kubeconfig context or file"},
-	cmdPull:    {"context": "cluster to pull from, the first time: a kubeconfig context or file"},
-	cmdMove:    {"remote": "move it to a cluster"},
+	cmdStatus: {"remote": "show a session in the cluster (the sproozi context unless --context)",
+		"context": "show a session in this cluster: a kubeconfig context or file"},
+	cmdCancel: {"remote": "cancel a session in the cluster (the sproozi context unless --context)",
+		"context": "cancel a session in this cluster: a kubeconfig context or file"},
+	cmdRecover: {"remote": "recover a session in the cluster (the sproozi context unless --context)",
+		"context": "recover a session in this cluster: a kubeconfig context or file"},
+	cmdPull: {"context": "cluster to pull from, the first time: a kubeconfig context or file"},
+	cmdMove: {"remote": "move it to a cluster"},
 }
 
 // flagHelp is a flag's help for this command.

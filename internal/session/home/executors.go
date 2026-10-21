@@ -159,13 +159,6 @@ func (s *Service) placement(name string) session.Placement {
 	return s.placements[name]
 }
 
-// placementNames lists every destination, for messages.
-func (s *Service) placementNames() []string {
-	s.remoteMu.RLock()
-	defer s.remoteMu.RUnlock()
-	return slices.Sorted(maps.Keys(s.placements))
-}
-
 // pullRetained reports a pull this service already began, which continues
 // with its recorded source whatever context the retry names.
 func (s *Service) pullRetained(id string) bool {

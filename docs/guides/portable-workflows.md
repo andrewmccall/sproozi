@@ -147,7 +147,7 @@ submit it; without `--context`, the `sproozi` context is used:
 ```sh
 sproozi run --remote --harness codex --repository sproozi --task-file task.txt
 sproozi sessions
-sproozi status ID --context sproozi
+sproozi status ID --remote
 ```
 
 Add `--context NAME` or `--context FILE` to reach another cluster, and
@@ -167,7 +167,7 @@ unavailable owners and `truncated` for omitted results; a stopped local service
 does not hide the cluster's rows. The [command reference](../reference/session-commands.md)
 explains owner selection, JSON fields and safe error categories.
 
-For a known recoverable interruption, use `sproozi recover ID --context sproozi`. Cancel uses a separate stable `--operation UUID` and
+For a known recoverable interruption, use `sproozi recover ID --remote`. Cancel uses a separate stable `--operation UUID` and
 revokes before forced stop. Keep the original owner journals and accounting
 records; deleting resources or replacing a failed Run does not establish stop or
 refund evidence.
@@ -216,7 +216,7 @@ agent. It then records the remote executor's one-way ownership transfer. If the
 reply is lost, run the same command again: a pull the service already began
 continues from the same executor with its original operation. Downloading a
 checkpoint alone
-does not permit local execution. The remote catalogue now reports `home-owned`
+does not permit local execution. The remote catalogue now reports `pulled`
 and cannot reopen that task session. One executor serves one developer's
 service: two services signed in to the same executor share its single
 principal, which is unsupported.

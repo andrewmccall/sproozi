@@ -204,7 +204,7 @@ complete command sequence:
 
 ```sh
 sproozi sessions
-sproozi status ID --context sproozi
+sproozi status ID --remote
 sproozi pull ID
 sproozi resume ID
 sproozi stop ID
@@ -226,7 +226,7 @@ conversation. Cross-harness handoff is a separate deferred feature.
 | A deadline or cancellation stops work | Inspect status. Deadline/cancellation does not guarantee a resumable completed turn. Unknown stop or accounting prevents export. |
 | Home storage is full | Resolve capacity before pull/resume. A failed capacity check does not transfer ownership or start another writer. |
 
-Use `sproozi cancel ID --context sproozi` for remote cancellation.
+Use `sproozi cancel ID --remote` for remote cancellation.
 Inspect running Pods with the administrator kubeconfig and application logs with
 `kubectl logs -n sproozi-system deployment/sproozi-work`. Retained final output is
 available through status after Pod deletion; full live Pod logs have Kubernetes'

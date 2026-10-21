@@ -76,16 +76,16 @@ anything is read or sent. `-d` is short for `--detach`.
 | Command | Flags |
 | --- | --- |
 | `run` | `--harness`, `--detach`, `--include-ignored`, `--remote`, `--context`, `--namespace`, `--task`, `--task-file`, `--repository`, `--project`, `--json`, `--root` |
-| `sessions` | `--context`, `--namespace`, `--project`, `--json`, `--root` |
-| `status` | `--context`, `--namespace`, `--json`, `--root` |
+| `sessions` | `--remote`, `--context`, `--namespace`, `--project`, `--json`, `--root` |
+| `status` | `--remote`, `--context`, `--namespace`, `--json`, `--root` |
 | `attach` | `--root` |
 | `stop` | `--json`, `--root` |
 | `resume` | `--detach`, `--json`, `--root` |
-| `cancel` | `--context`, `--namespace`, `--json`, `--root` |
+| `cancel` | `--remote`, `--context`, `--namespace`, `--json`, `--root` |
 | `rm` | `--json`, `--root` |
 | `move` | `--local`, `--remote`, `--context`, `--namespace`, `--json`, `--root` |
 | `pull` | `--context`, `--namespace`, `--json`, `--root` |
-| `recover` | `--context`, `--namespace`, `--json`, `--root` |
+| `recover` | `--remote`, `--context`, `--namespace`, `--json`, `--root` |
 | `init` | `--harness`, `--model`, `--credential-file`, `--credential-stdin`, `--skip-credential-check`, `--provider-url`, `--provider-ca-file`, `--instructions-file`, `--image`, `--build`, `--port`, `--no-service`, `--timeout`, `--json`, `--root` |
 | `doctor` | `--check-provider`, `--json`, `--root` |
 | `service` | `--leave-running`, `--json`, `--root` |
@@ -100,7 +100,7 @@ anything is read or sent. `-d` is short for `--detach`.
 | `--harness NAME` | `codex` or `claude-code`. For `run`, defaults to the first agent set up; for `init`, the agent to add, default `codex`. |
 | `-d`, `--detach` | Start or resume without connecting the terminal. Without a terminal on standard input, `run` and `resume` start the session and say they did not attach. |
 | `--include-ignored PATH` | Also copy this Git-ignored file into the session, on every visit. Repeatable. |
-| `--remote` | Work in a cluster: `run --remote` submits a task there (it needs `--task` or `--task-file` and takes no `PATH`, `--detach`, `--include-ignored` or agent arguments); `move --remote` sends the session there. Implied by `--context` or `--namespace`. |
+| `--remote` | Work in a cluster: `run --remote` submits a task there (it needs `--task` or `--task-file` and takes no `PATH`, `--detach`, `--include-ignored` or agent arguments); `move --remote` sends the session there; `sessions`, `status`, `cancel` and `recover` with `--remote` read or act on the cluster's sessions only. Implied by `--context` or `--namespace`. |
 | `--context NAME` | The cluster, as a kubeconfig context name or a kubeconfig file. Default: the context named `sproozi`. See [Remote commands](#remote-commands). |
 | `--namespace NS` | Namespace of the remote executor. Default: the context's namespace, else `default`. |
 | `--task TEXT`, `--task-file FILE` | Task for a remote run, inline or from a UTF-8 file of at most 16 KiB. Choose one. |
@@ -218,9 +218,8 @@ retry hint:
 
 ## Remote commands
 
-`run --remote`, `move --remote`, `pull`, and `sessions`, `status`, `cancel`
-and `recover` with `--remote` or `--context` reach a
-[remote executor](../../GLOSSARY.md#remote-executor) in a Kubernetes cluster.
+`pull`, and `run`, `move`, `sessions`, `status`, `cancel` and `recover` with
+`--remote`, reach a [remote executor](../../GLOSSARY.md#remote-executor) in a Kubernetes cluster.
 `--context` names a kubeconfig context, or a kubeconfig file whose current
 context is used; without it, the context named `sproozi`. A context name wins
 over a file of the same name. `--namespace` overrides the context's namespace.
@@ -233,8 +232,9 @@ cluster itself and remembers the executor, so it keeps working after the
 command exits. `move ID --local` needs no context. A `pull` the service already
 began continues from the same executor when you repeat it.
 
-`sessions` without `--remote` or `--context` lists this machine only. A remote
-`status` prints the session's phase, problem and its untrusted final text;
+`sessions` without `--remote` lists this machine and, when the `sproozi`
+context exists, its cluster; an unreachable cluster is reported by its context
+on standard error. A remote `status` prints the session's phase, problem and its untrusted final text;
 `--json` prints the remote status document.
 
 ## Status and listing output
@@ -279,7 +279,10 @@ An unavailable catalogue's `error` is `service_not_running` when this
 machine's service is not running, otherwise one of the
 [work outcome codes](#handle-work-outcomes). Rows from catalogues that
 answered are still listed and the command succeeds, naming each one that did
-not on standard error. When none answers, `sessions` fails with the reason.
+not on standard error. A cluster that could not be reached at all has
+`context` in place of `executor`, and standard error says `Not listed: cluster
+(context sproozi) is unreachable: …` with the cause and its fix. When none
+answers, `sessions` fails with the reason.
 
 | `executor` | `ownership` | Meaning |
 | --- | --- | --- |

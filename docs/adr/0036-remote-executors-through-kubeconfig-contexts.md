@@ -127,7 +127,8 @@ recorded source and operation, whatever the retry names; this replaces
 [ADR 0019](0019-pull-operations-and-work-owner-names.md)'s refusal of a retry
 with a different operation, which the CLI no longer derives. `sessions` without
 `--context` lists this machine and, when the `sproozi` context exists, its
-cluster.
+cluster. A session a machine pulled is in phase `pulled` in the executor's catalogue
+and in every command's output; the work API's former `home-owned` is gone.
 
 `maxCheckpointBytes` per entry is gone: home compares the described limit with
 `local.maxCheckpointBytes` (`Executor.CheckpointProblem`) when it records the

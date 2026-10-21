@@ -148,7 +148,7 @@ sproozi run --remote --context engineering --project sproozi-dev --harness codex
 ```
 
 All three source flags are required together. The source must be in `retained`,
-`exporting` or `home-owned` state, with confirmed stop and finalized usage
+`exporting` or `pulled` state, with confirmed stop and finalized usage
 records. The current principal must have access. Its approved repository alias
 and reference must match the target. The full requested revision must equal that
 source checkpoint's recorded HEAD; a branch, short commit, arbitrary ancestor or

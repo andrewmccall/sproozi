@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -325,14 +324,15 @@ func (s *Service) startFirstVisit(ctx context.Context, r session.Record) (Status
 	return executionStatus(r), nil
 }
 
-// moveDestinationProblem rejects a destination that names no configured
-// placement, listing the ones that do.
+// moveDestinationProblem rejects a destination that names no known
+// placement, with the commands that choose one; placement names are internal.
 func (s *Service) moveDestinationProblem(destination string) error {
 	if s.placement(destination) != nil {
 		return nil
 	}
-	return rejectedError(fmt.Sprintf("home: move destination %q is not a known placement; use one of: %s, "+
-		"or move --remote with --context to reach a cluster", destination, strings.Join(s.placementNames(), ", ")))
+	return rejectedError(fmt.Sprintf("home: this service cannot move a session to %q; run "+
+		"\"sproozi move ID --local\" to bring it to this machine, or \"sproozi move ID --remote\" "+
+		"(add --context for another cluster)", destination))
 }
 
 func (s *Service) moveExecution(ctx context.Context, id, operationID, destination string) (Status, error) {

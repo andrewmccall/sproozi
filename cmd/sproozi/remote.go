@@ -18,8 +18,10 @@ import (
 type remoteTarget struct {
 	Name   string
 	Client *work.Client
-	// Err says why the cluster could not be reached; Name is then the context.
-	Err error
+	// Err says why the cluster could not be reached; Context then names it,
+	// since its executor's name is unknown.
+	Err     error
+	Context string
 }
 
 // selectRemote resolves --context and --namespace on this machine, without
@@ -30,8 +32,10 @@ func selectRemote(kubeContext, namespace string) (remote.Selection, error) {
 }
 
 // resolveRemote reaches the remote executor a context and namespace select,
-// for the commands the CLI runs against a cluster directly.
-func resolveRemote(ctx context.Context, kubeContext, namespace string) (remoteTarget, error) {
+// for the commands the CLI runs against a cluster directly. Tests replace it.
+var resolveRemote = reachRemote
+
+func reachRemote(ctx context.Context, kubeContext, namespace string) (remoteTarget, error) {
 	selection, err := selectRemote(kubeContext, namespace)
 	if err != nil {
 		return remoteTarget{}, err
@@ -57,7 +61,7 @@ func defaultTargets(ctx context.Context) []remoteTarget {
 	defer cancel()
 	target, err := resolveRemote(resolveCtx, "", "")
 	if err != nil {
-		return []remoteTarget{{Name: remote.DefaultContext, Err: err}}
+		return []remoteTarget{{Context: remote.DefaultContext, Err: err}}
 	}
 	return []remoteTarget{target}
 }

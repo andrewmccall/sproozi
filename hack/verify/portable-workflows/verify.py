@@ -130,7 +130,7 @@ def main():
     save()
     if args.request_id and view["phase"] == "unknown":
         recovered = subprocess.run([str(args.session_binary.resolve()), "recover", view["id"],
-                                    *(context or ["--context", "sproozi"]), "--config", str(args.home_config.resolve()), "--json"],
+                                    *(context or ["--remote"]), "--config", str(args.home_config.resolve()), "--json"],
                                    cwd=ROOT, capture_output=True, text=True, timeout=120)
         check(recovered.returncode == 0, "Exact retained request recovery failed: " + recovered.stderr[-1024:])
         report['recovery'] = json.loads(recovered.stdout)
@@ -185,7 +185,7 @@ def main():
             check(pulled["threadId"] == current["threadId"], "Pull changed native identity")
             after = tool("sproozi_status", {"id": view["id"]}, number)
             number += 1
-            check(after["phase"] == "home-owned", "Remote owner did not commit exclusive handoff")
+            check(after["phase"] == "pulled", "Remote owner did not commit exclusive handoff")
             resumed = command("resume", view["id"], "--detach")
             check(resumed["id"] == view["id"] and resumed["threadId"] == current["threadId"], "Resume lost product/native identity")
             check(resumed["executionId"] != view["executionId"] and resumed["allocationId"] != view["allocationId"],
@@ -243,7 +243,7 @@ def main():
                 check(fresh['result'] == current['result'], "Recorded revision task lacked genuine native completion")
                 source_after = tool("sproozi_status", {'id': view['id']}, number)
                 number += 1
-                check(source_after['checkpointDigest'] == current['checkpointDigest'] and source_after['phase'] == 'home-owned',
+                check(source_after['checkpointDigest'] == current['checkpointDigest'] and source_after['phase'] == 'pulled',
                       "Revision execution mutated source checkpoint or ownership")
                 report['revisionExecution'] = fresh
                 report['steps'].append('Stock Hermes launched fresh native conversation/authority from exact retained Git revision; source unchanged')

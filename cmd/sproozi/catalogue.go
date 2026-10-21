@@ -52,10 +52,23 @@ type catalogueRow struct {
 	Deadline     time.Time            `json:"deadline"`
 }
 type executorAvailability struct {
-	Executor     string       `json:"executor"`
+	Executor string `json:"executor,omitempty"`
+	// Context names a cluster that could not be reached, so its executor's
+	// name is unknown.
+	Context      string       `json:"context,omitempty"`
 	Availability string       `json:"availability"`
 	Error        profile.Code `json:"error,omitempty"`
 }
+
+// key names an availability row: its executor, or the context of a cluster
+// that could not be reached.
+func (e executorAvailability) key() string {
+	if e.Context != "" {
+		return "context " + e.Context
+	}
+	return e.Executor
+}
+
 type catalogue struct {
 	Sessions  []catalogueRow         `json:"sessions"`
 	Executors []executorAvailability `json:"executors"`
@@ -121,7 +134,7 @@ func discoverSessions(ctx context.Context, q *options, local bool, targets []rem
 			if errors.Is(v.err, home.ErrControlUnavailable) {
 				v.availability.Error = errorServiceNotRunning
 			}
-			out.problems[v.availability.Executor] = v.err
+			out.problems[v.availability.key()] = v.err
 		} else {
 			out.Sessions = append(out.Sessions, v.rows...)
 		}
@@ -173,6 +186,9 @@ func (q *options) discoverRemote(ctx context.Context, target remoteTarget) disco
 	requestCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	v := discovered{availability: executorAvailability{Executor: target.Name, Availability: availabilityAvailable}}
+	if target.Context != "" {
+		v.availability = executorAvailability{Context: target.Context}
+	}
 	if target.Err != nil {
 		v.err = target.Err
 		return v
@@ -183,9 +199,9 @@ func (q *options) discoverRemote(ctx context.Context, target remoteTarget) disco
 	v.err = err
 	for _, view := range views {
 		ownership, phase := ownershipCluster, string(view.Phase)
-		if view.Phase == work.PhaseHomeOwned {
+		if view.Phase == work.PhasePulled {
 			// The cluster keeps a record of a session pulled to a machine.
-			ownership, phase = ownershipLocal, "pulled"
+			ownership = ownershipLocal
 		}
 		v.rows = append(v.rows, catalogueRow{
 			Association: view.Association, ID: view.ID, Executor: target.Name, Ownership: ownership, Phase: phase,
@@ -199,26 +215,28 @@ func (q *options) discoverRemote(ctx context.Context, target remoteTarget) disco
 // failure explains catalogues that did not answer. It fails only when none
 // did; otherwise it notes each one on standard error.
 func (c catalogue) failure(q *options) error {
-	explainOne := func(name string, err error) string {
+	explainOne := func(e executorAvailability, err error) string {
 		switch {
 		case errors.Is(err, home.ErrControlUnavailable):
 			return q.homeError(err).Error()
-		case name == localName:
+		case e.Context != "":
+			return fmt.Sprintf("cluster (context %s) is unreachable: %s", e.Context, executorCause(err))
+		case e.Executor == localName:
 			return "this machine's sessions: " + explain(err)
 		}
-		return fmt.Sprintf("cluster %s did not answer: %s", name, executorCause(err))
+		return fmt.Sprintf("cluster %s did not answer: %s", e.Executor, executorCause(err))
 	}
 	if len(c.problems) < len(c.Executors) {
 		for _, e := range c.Executors {
-			if err := c.problems[e.Executor]; err != nil {
-				_, _ = fmt.Fprintf(os.Stderr, "Not listed: %s\n", explainOne(e.Executor, err))
+			if err := c.problems[e.key()]; err != nil {
+				_, _ = fmt.Fprintf(os.Stderr, "Not listed: %s\n", explainOne(e, err))
 			}
 		}
 		return nil
 	}
 	var reasons []string
 	for _, e := range c.Executors {
-		reasons = append(reasons, explainOne(e.Executor, c.problems[e.Executor]))
+		reasons = append(reasons, explainOne(e, c.problems[e.key()]))
 	}
 	if len(reasons) == 1 {
 		return errors.New(reasons[0])

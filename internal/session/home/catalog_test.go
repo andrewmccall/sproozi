@@ -413,7 +413,7 @@ func TestPullNamesUnknownRemoteExecutor(t *testing.T) {
 	}
 }
 
-// Move names an unconfigured destination and lists the configured placements.
+// Move refuses an unknown destination with the commands that choose one.
 func TestMoveNamesUnconfiguredDestination(t *testing.T) {
 	t.Parallel()
 	s, _, _, repo := testService(t)
@@ -421,11 +421,10 @@ func TestMoveNamesUnconfiguredDestination(t *testing.T) {
 	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	names := []string{testLocal, testRemote}
-	slices.Sort(names)
 	for _, tc := range []struct{ operation, destination, want string }{
-		{uuid.NewString(), "docker", `home: move destination "docker" is not a known placement; use one of: ` +
-			strings.Join(names, ", ") + ", or move --remote with --context to reach a cluster"},
+		{uuid.NewString(), "docker", `home: this service cannot move a session to "docker"; run ` +
+			`"sproozi move ID --local" to bring it to this machine, or "sproozi move ID --remote" ` +
+			`(add --context for another cluster)`},
 	} {
 		r := exchange(t, s, Request{Action: ActionMove, ID: id, OperationID: tc.operation, Destination: tc.destination})
 		if r.Error != tc.want || !r.Rejected || !errors.Is(replyError(r), ErrRejected) {
