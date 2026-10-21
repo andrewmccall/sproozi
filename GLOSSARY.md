@@ -111,6 +111,36 @@ A named kind of access a run can request, such as `kubernetes.read`,
 Policy decides whether it is allowed and sets its limits. See
 [permissions and capabilities](docs/reference/permissions-and-capabilities.md).
 
+### Semantic tier
+
+The most precise of the gateway's three kinds of check. The gateway
+understands the service and checks each resource and action, such as reading
+Pods in one namespace or opening a pull request from the run's own branch.
+Kubernetes reads, GitHub pull requests and the native Kubernetes MCP tool use
+it. The tiers describe what the gateway understands, not levels of permission. See [capabilities and gateways](docs/explanations/capabilities-and-gateways.md#mental-model).
+
+### Protocol tier
+
+The middle kind of gateway check. The gateway understands the protocol but not
+the service: for configured MCP servers it allows only the tools the policy
+names, with their argument restrictions, but cannot know what a tool does. See
+[configured MCP](docs/reference/configured-mcp.md).
+
+### Destination tier
+
+The least precise kind of gateway check: the gateway allows HTTPS to an exact
+host and port from an egress profile and does not check what is sent.
+*Destination-tier fallback* is reaching a host through such a profile when no
+stronger check applies; the gateway refuses it for hosts a stronger tier owns,
+such as a registered MCP provider, so a denied MCP call cannot be made directly.
+
+### Provider authority
+
+The host and port of a registered MCP server, such as `mcp.deepwiki.com:443`,
+written one canonical way: lower-case, internationalized names in their ASCII
+(IDNA) form and an explicit port. The gateway reserves it so only the MCP
+bridge reaches that server.
+
 ### Budget
 
 A usage limit for one capability in one run, set in `AgentPolicy.spec.budgets`:

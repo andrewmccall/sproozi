@@ -140,6 +140,7 @@ verify-mcp: ## Race-test the MCP and gateway packages, check examples/*/servers.
 	go test -race ./internal/endpoints/kubernetes ./internal/endpoints/mcp ./internal/mcppolicy ./internal/harness ./internal/policy/kubernetes ./cmd/gateway -count=1
 	go test -race ./test/manifests -run 'TestMCPExamples' -count=1
 	python3 hack/verify/mcp-live-test.py
+	python3 hack/mcp_tools_test.py
 
 .PHONY: verify-mcp-client
 verify-mcp-client: ## Load generated MCP config in the installed stock Codex CLI; no model request.

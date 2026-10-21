@@ -7,7 +7,9 @@
 It speaks the MCP Streamable HTTP transport directly (initialize, then
 tools/list, following pagination) with the Python standard library, and prints
 each tool's name and argument names. --json prints the tools as the server sent
-them. Run it from a machine that may reach the server; the agent never does.
+them. A URL that serves only the legacy HTTP+SSE transport (often ending in
+/sse) is reported as such; the gateway needs the Streamable HTTP endpoint. Run
+it from a machine that may reach the server; the agent never does.
 The listing grants nothing: copy only the tools you approve into
 AgentPolicy.spec.mcpServers.<name>.tools.
 """
@@ -15,6 +17,7 @@ import argparse
 import json
 from pathlib import Path
 import sys
+import urllib.error
 import urllib.request
 
 PROTOCOL = "2025-03-26"
@@ -30,22 +33,55 @@ def post(url, token, session, message):
     if session:
         headers["Mcp-Session-Id"] = session
     request = urllib.request.Request(url, data=json.dumps(message).encode(), headers=headers, method="POST")
-    with urllib.request.urlopen(request, timeout=30) as response:
+    try:
+        response = urllib.request.urlopen(request, timeout=30)
+    except urllib.error.HTTPError as error:
+        if message.get("method") == "initialize" and error.code in (400, 404, 405) and legacy_sse(url, headers):
+            raise RuntimeError(LEGACY) from None
+        raise
+    with response:
         session = response.headers.get("Mcp-Session-Id") or session
-        body = response.read(4 << 20).decode()
-        kind = response.headers.get("Content-Type", "")
-    if "id" not in message:
-        return None, session
-    if kind.startswith("text/event-stream"):
-        # Each event's data lines carry one JSON-RPC message; take the reply.
-        for event in body.split("\n\n"):
-            data = "\n".join(line[5:].strip() for line in event.splitlines() if line.startswith("data:"))
-            if data:
-                reply = json.loads(data)
-                if reply.get("id") == message["id"]:
-                    return reply, session
+        if "id" not in message:
+            return None, session
+        if not response.headers.get("Content-Type", "").startswith("text/event-stream"):
+            return json.loads(response.read(4 << 20).decode()), session
+        # Read events as they arrive: a Streamable HTTP reply ends the
+        # stream, but a legacy SSE endpoint keeps it open after "endpoint".
+        event, data = "", []
+        for raw in response:
+            line = raw.decode().rstrip("\r\n")
+            if line.startswith("event:"):
+                event = line[6:].strip()
+            elif line.startswith("data:"):
+                data.append(line[5:].strip())
+            elif not line:
+                if event == "endpoint":
+                    raise RuntimeError(LEGACY)
+                if data:
+                    reply = json.loads("\n".join(data))
+                    if reply.get("id") == message["id"]:
+                        return reply, session
+                event, data = "", []
         raise RuntimeError("the server sent no reply to " + message["method"])
-    return json.loads(body), session
+
+
+LEGACY = ("this URL serves only the legacy HTTP+SSE transport; Sproozi needs the server's Streamable HTTP "
+          "endpoint, which often ends in /mcp instead of /sse")
+
+
+def legacy_sse(url, headers):
+    """Report whether a GET opens a legacy SSE stream that announces an endpoint."""
+    request = urllib.request.Request(url, headers={"Accept": "text/event-stream", "User-Agent": headers["User-Agent"]})
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            if not response.headers.get("Content-Type", "").startswith("text/event-stream"):
+                return False
+            for _, raw in zip(range(20), response):
+                if raw.decode().strip() == "event: endpoint":
+                    return True
+    except OSError:
+        return False
+    return False
 
 
 def result(reply, method):

@@ -31,12 +31,11 @@ ADR preserves the reasons for the choice.
 
 ## Review before completion
 
-Review the task's retained source evidence, candidate designs, design synthesis,
-implementation checks, reviews and TODO records. For each material choice, link
-its public decision record or explain in the task evidence why it needs no ADR.
-One coherent ADR can cover related choices. Distinguish selected decisions,
-rejected proposals, later fixes and deferred work. Preserve the original
-evidence.
+Look back over the work: the options you considered, the checks you ran and
+any review comments. Every important choice should either have an ADR or a
+sentence in the change description saying why it needs none. One ADR can cover
+several related choices. Say which options were chosen, which were rejected,
+and what was fixed or left for later. Do not rewrite earlier records to match.
 
 Update affected explanations, references and examples. Update the main README
 when supported capabilities change. Compare claims with code and test evidence,

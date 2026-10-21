@@ -62,10 +62,25 @@ func TestMCPExamplesAreConsistent(t *testing.T) {
 	if err != nil || len(dirs) == 0 {
 		t.Fatalf("no MCP examples found: %v", err)
 	}
+	// Examples are applied side by side, so a copied example must rename its
+	// resources rather than replace another example's.
+	owners := map[string]string{}
 	for _, registryFile := range dirs {
 		dir := filepath.Dir(registryFile)
 		t.Run(filepath.Base(dir), func(t *testing.T) {
 			e := loadMCPExample(t, dir)
+			for _, object := range []struct{ kind, namespace, name string }{
+				{"AgentPolicy", e.policy.Namespace, e.policy.Name}, {"AgentTemplate", e.template.Namespace, e.template.Name},
+				{"AgentRuntime", e.runtime.Namespace, e.runtime.Name},
+				{"AgentRun", e.run.Namespace, e.run.Name + e.run.GenerateName},
+			} {
+				key := object.kind + " " + object.namespace + "/" + object.name
+				if other, taken := owners[key]; taken {
+					t.Errorf("%s is defined by both %s and %s; give each example its own names", key,
+						filepath.Base(other), filepath.Base(dir))
+				}
+				owners[key] = dir
+			}
 			registered := e.registry.Names()
 			var granted []string
 			for _, capability := range e.policy.Spec.AllowedCapabilities {
