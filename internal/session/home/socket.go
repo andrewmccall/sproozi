@@ -151,6 +151,7 @@ func (s *Service) Serve(ctx context.Context) error {
 		defer func() { _ = server.Close() }()
 	}
 	go s.certs.run(run)
+	go s.watchExits(run)
 	path := SocketPath(s.config.Directory)
 	listener, err := listenControl(path)
 	if errors.Is(err, errControlListening) {
@@ -309,6 +310,10 @@ func (s *Service) handle(ctx context.Context, conn net.Conn) {
 			_ = encoder.Encode(unknown)
 			return
 		}
+		if problem := s.attachProblem(ctx, q.ID); problem != nil {
+			_ = encoder.Encode(Response{Error: problem.Error(), Rejected: errors.Is(problem, ErrRejected)})
+			return
+		}
 		if err = encoder.Encode(Response{}); err != nil {
 			return
 		}
@@ -360,7 +365,7 @@ func (s *Service) handle(ctx context.Context, conn net.Conn) {
 		response.Status = &status
 	}
 	if err != nil {
-		err = needsRecovery(err, q.ID)
+		err = needsRecovery(err, q.ID, s.continueCommand(q))
 		response.Error = err.Error()
 		response.Rejected = errors.Is(err, ErrRejected)
 		if unknown, ok := s.unknownSession(q, err); ok {
@@ -374,20 +379,49 @@ func (s *Service) handle(ctx context.Context, conn net.Conn) {
 // needsRecovery names the commands that unblock a session whose earlier
 // operation is unfinished or cancelled. Repeating the refused request cannot
 // help, so the reply is a rejection without a retry hint.
-func needsRecovery(err error, id string) error {
+func needsRecovery(err error, id, continueWith string) error {
 	switch {
 	case errors.Is(err, harness.ErrNativeTurnPending):
-		return fmt.Errorf("%w; the session keeps running with its terminal input paused: repeat this command to keep "+
-			"waiting, or run \"sproozi cancel %s\" to force-stop it", err, id)
+		return rejectedError(fmt.Sprintf("%v; the session keeps running with its terminal input paused: run "+
+			"\"sproozi %s %s\" to keep waiting, or \"sproozi cancel %s\" to force-stop it", err, continueWith, id, id))
+	case errors.Is(err, session.ErrStopPending):
+		return rejectedError(fmt.Sprintf("session %s is still stopping; run \"sproozi stop %s\" to keep waiting, "+
+			"or \"sproozi cancel %s\" to force-stop it", id, id, id))
 	case errors.Is(err, session.ErrRecoveryRequired):
 		return rejectedError(fmt.Sprintf("%v; run \"sproozi recover %s\" to finish it, or \"sproozi cancel %s\" "+
 			"to stop it now", err, id, id))
 	case errors.Is(err, session.ErrCancellationUnfinished):
 		return rejectedError(fmt.Sprintf("%v; run \"sproozi recover %s\" to finish the cancellation", err, id))
 	case errors.Is(err, session.ErrSessionCancelled):
-		return rejectedError(fmt.Sprintf("session %s is cancelled; start a new one with \"sproozi run\", or delete it with \"sproozi rm %s\"", id, id))
+		return cancelledProblem(id)
 	}
 	return err
+}
+
+// cancelledProblem says a cancelled session cannot continue and how to remove it.
+func cancelledProblem(id string) error {
+	return rejectedError(fmt.Sprintf("session %s was cancelled, so it cannot be stopped or resumed; remove it with "+
+		"\"sproozi rm %s\", and start new work with \"sproozi run\"", id, id))
+}
+
+// continueCommand names the command that keeps waiting for a request's
+// pending operation: stop for a stop, recover for anything else.
+func (s *Service) continueCommand(q Request) string {
+	switch q.Action {
+	case ActionStop:
+		return ActionStop
+	case ActionMove:
+		return ActionRecover
+	}
+	execution, _, err := s.resolveSession(q.ID)
+	if err != nil {
+		return ActionRecover
+	}
+	r, err := s.coordinator.Inspect(execution)
+	if err == nil && r.PendingOperation != "" && r.Operations[len(r.Operations)-1].Finalize {
+		return ActionStop
+	}
+	return ActionRecover
 }
 
 func validateRequest(q Request) error {

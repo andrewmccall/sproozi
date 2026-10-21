@@ -324,13 +324,13 @@ func TestServeNamesTheGatewayAddressInUse(t *testing.T) {
 // that unblock it and is a rejection, so the CLI offers no looping retry.
 func TestRecoveryRequiredNamesRecoverAndCancel(t *testing.T) {
 	id := "6f0f4f3e-0f6b-4bd8-9a39-3f1c1f2b8b8e"
-	err := needsRecovery(fmt.Errorf("session: previous move requires recovery: %w", session.ErrRecoveryRequired), id)
+	err := needsRecovery(fmt.Errorf("session: previous move requires recovery: %w", session.ErrRecoveryRequired), id, "recover")
 	want := "session: previous move requires recovery: session: recovery required; run \"sproozi recover " + id +
 		"\" to finish it, or \"sproozi cancel " + id + "\" to stop it now"
 	if !errors.Is(err, ErrRejected) || err.Error() != want {
 		t.Fatalf("got %v, want %q", err, want)
 	}
-	if err = needsRecovery(errors.New("other"), id); errors.Is(err, ErrRejected) {
+	if err = needsRecovery(errors.New("other"), id, "recover"); errors.Is(err, ErrRejected) {
 		t.Fatal("unrelated error became a rejection")
 	}
 }

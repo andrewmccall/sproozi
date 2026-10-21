@@ -9,6 +9,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/home"
 	"github.com/andrewmccall/sproozi/internal/work"
 )
@@ -76,6 +77,11 @@ func statusText(action string, s home.Status, detached bool) string {
 	id, short := s.ID, shortID(s.ID)
 	switch action {
 	case cmdStop:
+		if s.Exit != nil && s.Exit.Code != 0 {
+			return fmt.Sprintf("Session %s had already stopped: its agent exited with code %d.%s\n"+
+				"Continue it with: sproozi resume %s    Delete it with: sproozi rm %s",
+				id, s.Exit.Code, exitOutput(s.Exit), short, short)
+		}
 		return fmt.Sprintf("Stopped session %s; its work is kept.\nContinue it with: sproozi resume %s", id, short)
 	case cmdCancel:
 		return fmt.Sprintf("Cancelled session %s.\nDelete it with: sproozi rm %s", id, short)
@@ -96,7 +102,23 @@ func statusText(action string, s home.Status, detached bool) string {
 		}
 		return line
 	}
-	return describe(id, string(s.Harness), s.Phase, s.Placement, s.Deadline)
+	text := describe(id, string(s.Harness), s.Phase, s.Placement, s.Deadline)
+	switch {
+	case s.Exit != nil && s.Exit.Code != 0:
+		text += fmt.Sprintf("\nExited     code %d%s", s.Exit.Code, exitOutput(s.Exit))
+		text += fmt.Sprintf("\nContinue it with: sproozi resume %s    Delete it with: sproozi rm %s", short, short)
+	case s.Exit != nil:
+		text += "\nExited     code 0: the agent quit by itself"
+	}
+	return text
+}
+
+// exitOutput indents the last lines an exited agent printed.
+func exitOutput(e *session.Exit) string {
+	if e.Output == "" {
+		return ""
+	}
+	return "\n           " + strings.ReplaceAll(e.Output, "\n", "\n           ")
 }
 
 // describe is the status summary of a session.

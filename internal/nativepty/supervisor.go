@@ -147,6 +147,17 @@ func Start(launch Launch) (*Supervisor, error) {
 	return s, nil
 }
 
+// Tail copies at most max of the most recent output bytes still buffered.
+func (s *Supervisor) Tail(max int) []byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	data := s.buffer
+	if len(data) > max {
+		data = data[len(data)-max:]
+	}
+	return append([]byte(nil), data...)
+}
+
 func (s *Supervisor) PID() int              { return s.cmd.Process.Pid }
 func (s *Supervisor) Done() <-chan struct{} { return s.done }
 

@@ -175,17 +175,37 @@ print `Waiting for the agent's current turn in session ID to finish; run
 "sproozi cancel ID" in another terminal to stop it now instead.` After about
 two minutes without a finished turn they fail with, for example, `the stop is
 still waiting for the current Claude Code turn to finish; the session keeps
-running with its terminal input paused: repeat this command to keep waiting,
-or run "sproozi cancel ID" to force-stop it`. A session with no conversation
-yet stops within a few seconds; `resume` then starts a new conversation from
-the workspace it started from.
+running with its terminal input paused: run "sproozi stop ID" to keep waiting,
+or "sproozi cancel ID" to force-stop it` (a stuck `move` names `sproozi
+recover ID` instead). The session stays `stopping`. Running `stop` again, with
+any operation, continues the same stop, and `recover`, `attach` and `resume`
+name `sproozi stop ID` too, so there is one way on. A session with no
+conversation yet stops within a few seconds; `resume` then starts a new
+conversation from the workspace it started from. A resumed session stopped
+without a new prompt stops at once and keeps its conversation.
 
-A stopped session's phase is `retained`. `resume` continues it; `attach`,
-`move`, `cancel` and `recover` refuse it with `session has no active
-execution; use "sproozi resume ID"`. Each `resume` is a new execution, so the
+If the agent exits by itself, for example on an argument it rejects or after
+Codex's `/quit`, the service notices within about five seconds and stops the
+session through the same path. A nonzero exit code leaves it `failed`;
+`status` prints `Exited     code N` and the last lines the agent printed, and
+`attach` refuses with `session ID stopped because its agent exited with code
+N; see "sproozi status ID", then "sproozi resume ID" to continue it or
+"sproozi rm ID" to remove it`. Code 0 leaves it `retained`. Codex keeps the
+conversation of a completed turn it reported before exiting; otherwise the
+session keeps its previous checkpoint, or the workspace it started from.
+
+A stopped session's phase is `retained`, or `failed` after its agent exited
+with an error. `resume` continues either; `attach`, `move`, `cancel` and
+`recover` refuse it with `session ID is stopped; "sproozi resume ID" continues
+it`, or the `failed` message above. `resume` of a running session fails with
+`session ID is running; attach to it with "sproozi attach ID", or stop it with
+"sproozi stop ID" before resuming`; of a stopping one, with `session ID is
+still stopping; run "sproozi stop ID" to finish, or "sproozi cancel ID" to
+force-stop it`. `attach` refuses a session that isn't running before it
+prints `Attached`. Each `resume` is a new execution, so the
 `executionId` changes while `id` and `threadId` stay the same.
 
-`rm ID` deletes a `retained` or `cancelled` session: its record, its executions'
+`rm ID` deletes a `retained`, `failed` or `cancelled` session: its record, its executions'
 journals, and the saved workspaces, checkpoints and profiles no other session
 uses. It keeps the accounting and grant records, and the service's record of
 each finished container. It refuses:
@@ -203,13 +223,13 @@ hint. `ID` is the session and `OP` an operation.
 
 | Reply | Cause | Run |
 | --- | --- | --- |
-| `session: previous KIND requires recovery; run "sproozi recover ID" to finish it, or "sproozi cancel ID" to stop it now` | A `move` or `stop` while an earlier `start`, `resume`, `move` or `stop` is unfinished. | `sproozi recover ID`, or `sproozi cancel ID`. |
+| `session: previous KIND requires recovery; run "sproozi recover ID" to finish it, or "sproozi cancel ID" to stop it now` | A `move` or `stop` while an earlier `start`, `resume` or `move` is unfinished. | `sproozi recover ID`, or `sproozi cancel ID`. |
+| `session ID is still stopping; run "sproozi stop ID" to keep waiting, or "sproozi cancel ID" to force-stop it` | A `move` while a stop is unfinished. | `sproozi stop ID`, or `sproozi cancel ID`. |
 | `session: cancellation unfinished; run "sproozi recover ID" to finish the cancellation` | A `move` or `stop` while a cancellation hasn't yet proved the agent stopped and its usage settled. | `sproozi recover ID`. |
 | `session: the writer stopped, but its usage is not finalized yet; recover again once the placement can finalize it` | `recover` of a cancellation whose usage could not be settled yet. | `sproozi recover ID` again; the service log has the cause. |
 | `session: the placement has not yet proved the writer stopped; recover again once it is reachable` | `recover` of a cancellation that could not confirm the agent stopped. | Restore Docker or the cluster, then `sproozi recover ID`. |
-| `session ID is cancelled; start a new one with "sproozi run", or delete it with "sproozi rm ID"` | A `move` or `stop` of a cancelled session. | `sproozi run` for new work. |
-| `previous execution must stop and commit before resume; run "sproozi stop ID" first` | `resume` while the session is running. | `sproozi stop ID`, then `resume`. |
-| `session ID has no running native process to attach to; run "sproozi status ID" to see its phase: ...` | `attach` when no agent is running. | `sproozi status ID`, then `recover` or `resume` as it says. |
+| `session ID was cancelled, so it cannot be stopped or resumed; remove it with "sproozi rm ID", and start new work with "sproozi run"` | `stop`, `resume`, `move` or `attach` of a cancelled session. Nothing can continue it. | `sproozi rm ID`. |
+| `session ID is being cancelled; run "sproozi recover ID" to finish the cancellation, then "sproozi rm ID" to remove it` | `resume` while a cancellation is unfinished. | `sproozi recover ID`. |
 
 When a Docker command the service runs fails, the error includes Docker's
 standard error, cut to its first 4096 bytes and marked ` [output truncated]`.

@@ -7,7 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
+	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // NativeOp names one fixed operation of the private native supervisor. The
@@ -229,4 +232,76 @@ func observeNativeThread(ctx context.Context, control NativeControl, wait, deadl
 			}
 		}
 	}
+}
+
+// NativeExitReport is what the supervisor writes to its standard output when
+// the harness exits on its own, before any stop asked it to. It is a workload
+// observation: a diagnostic for the user, and the thread of a completed turn
+// the placement may checkpoint, never a writer fence or accounting fact.
+type NativeExitReport struct {
+	Code   int    `json:"code"`
+	Thread string `json:"thread,omitempty"`
+	Output string `json:"output,omitempty"`
+}
+
+// NativeExitReportPrefix starts the supervisor's exit report line.
+const NativeExitReportPrefix = "sproozi-native-exit "
+
+// NativeExitOutputMax bounds the output tail an exit report carries.
+const NativeExitOutputMax = 2048
+
+var terminalControl = regexp.MustCompile(`\x1b(\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(\x07|\x1b\\)|[@-Z\\-_])`)
+
+// NativeExitOutput turns raw terminal output into at most lines plain lines
+// for a person: control sequences and other control characters are removed.
+func NativeExitOutput(raw []byte, lines int) string {
+	text := terminalControl.ReplaceAllString(string(raw), "")
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	var kept []string
+	for line := range strings.SplitSeq(text, "\n") {
+		if i := strings.LastIndexByte(line, '\r'); i >= 0 {
+			line = line[i+1:]
+		}
+		line = strings.TrimSpace(strings.Map(func(r rune) rune {
+			if r < ' ' || r == 0x7f || r == utf8.RuneError {
+				return -1
+			}
+			return r
+		}, line))
+		if line != "" {
+			kept = append(kept, line)
+		}
+	}
+	if len(kept) > lines {
+		kept = kept[len(kept)-lines:]
+	}
+	out := strings.Join(kept, "\n")
+	if len(out) > NativeExitOutputMax {
+		out = out[len(out)-NativeExitOutputMax:]
+		if i := strings.IndexByte(out, '\n'); i >= 0 {
+			out = out[i+1:]
+		}
+	}
+	return out
+}
+
+// ParseNativeExitReport finds the last exit report in container output and
+// bounds what it may claim.
+func ParseNativeExitReport(logs []byte) (NativeExitReport, bool) {
+	var found NativeExitReport
+	ok := false
+	for line := range bytes.SplitSeq(logs, []byte{'\n'}) {
+		rest, isReport := bytes.CutPrefix(bytes.TrimSpace(line), []byte(NativeExitReportPrefix))
+		if !isReport {
+			continue
+		}
+		var r NativeExitReport
+		if json.Unmarshal(rest, &r) != nil || len(r.Output) > NativeExitOutputMax ||
+			r.Thread != "" && !codexThreadID.MatchString(r.Thread) {
+			continue
+		}
+		r.Output = NativeExitOutput([]byte(r.Output), 20)
+		found, ok = r, true
+	}
+	return found, ok
 }

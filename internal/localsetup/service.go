@@ -56,7 +56,7 @@ func ServiceState(ctx context.Context, l Layout, c home.Config) ServiceStatus {
 // running phases still have, or may have, a worker container.
 func running(phase string) bool {
 	switch phase {
-	case "idle", "cancelled", "retained", "importing", "":
+	case "idle", "cancelled", "retained", "failed", "importing", "":
 		return false
 	}
 	return true

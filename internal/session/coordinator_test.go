@@ -237,9 +237,16 @@ func TestStopWaitingForTurnStaysStopping(t *testing.T) {
 	if r, err = c.Inspect(start.Source.ExecutionID); err != nil || r.Phase != PhaseStopping {
 		t.Fatalf("retained pending stop: %+v %v", r.Phase, err)
 	}
+	// Another stop request, with its own operation, continues the same stop.
+	if _, err = c.Finalize(t.Context(), start.Source.ExecutionID, uuid.NewString()); !errors.Is(err, harness.ErrNativeTurnPending) {
+		t.Fatalf("second stop did not continue the pending one: %v", err)
+	}
 	local.pendingTurn = false
-	if r, err = c.Finalize(t.Context(), start.Source.ExecutionID, op); err != nil || r.Phase != PhaseIdle {
+	if r, err = c.Finalize(t.Context(), start.Source.ExecutionID, uuid.NewString()); err != nil || r.Phase != PhaseIdle {
 		t.Fatalf("repeated stop: %+v %v", r.Phase, err)
+	}
+	if r.Operations[len(r.Operations)-1].ID != op {
+		t.Fatal("repeated stop added an operation instead of finishing the pending one")
 	}
 }
 

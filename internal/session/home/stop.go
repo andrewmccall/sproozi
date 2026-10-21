@@ -96,6 +96,6 @@ func (s *Service) lastStop(r session.Record) (session.Stopped, error) {
 		}
 	}
 	visit := r.Visits[len(r.Visits)-1]
-	return session.Stopped{Launch: visit.Launch, Incarnation: visit.Incarnation, ActualStopped: visit.ActualStopped,
+	return session.Stopped{Exit: visit.Exit, Launch: visit.Launch, Incarnation: visit.Incarnation, ActualStopped: visit.ActualStopped,
 		ThreadID: r.ThreadID, Receipt: visit.Receipt, Checkpoint: data, CheckpointDigest: r.Checkpoint.Metadata.SHA256}, nil
 }

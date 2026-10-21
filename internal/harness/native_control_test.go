@@ -153,3 +153,19 @@ func TestQuiesceNativeReportsPendingTurn(t *testing.T) {
 		t.Fatalf("pending quiesce: %v", err)
 	}
 }
+
+func TestNativeExitReportIsBoundedPlainText(t *testing.T) {
+	raw := "\x1b[2J\x1b[1;1Hstarting\r\n\x1b]0;title\x07error: unexpected argument '--bad' found\r\n\r\nUsage: codex [OPTIONS]\r\n"
+	if got := NativeExitOutput([]byte(raw), 2); got != "error: unexpected argument '--bad' found\nUsage: codex [OPTIONS]" {
+		t.Fatalf("output %q", got)
+	}
+	logs := "native container stopped\n" + NativeExitReportPrefix + `{"code":2,"output":"bad flag","thread":"not-a-thread"}` + "\n" +
+		NativeExitReportPrefix + `{"code":2,"output":"bad flag"}` + "\n"
+	report, ok := ParseNativeExitReport([]byte(logs))
+	if !ok || report.Code != 2 || report.Output != "bad flag" || report.Thread != "" {
+		t.Fatalf("report %+v %v", report, ok)
+	}
+	if _, ok = ParseNativeExitReport([]byte("nothing here\n")); ok {
+		t.Fatal("report found in unrelated output")
+	}
+}

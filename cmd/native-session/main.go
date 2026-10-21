@@ -311,10 +311,31 @@ func (s *server) activate() response {
 		}
 		s.mu.Unlock()
 		if !quiescing {
+			s.reportExit(n, exit.Code)
 			s.stopOnce.Do(func() { close(s.done) })
 		}
 	}()
 	return r
+}
+
+// reportExit writes, for a harness that exited before any stop, its exit
+// code, the last lines of its terminal and the thread of a completed turn,
+// so the placement can explain the failure and keep a finished conversation.
+func (s *server) reportExit(n *nativepty.Supervisor, code int) {
+	report := harness.NativeExitReport{Code: code,
+		Output: harness.NativeExitOutput(n.Tail(16<<10), 20)}
+	s.mu.Lock()
+	report.Thread = s.threadID
+	s.mu.Unlock()
+	if report.Thread == "" {
+		if id, _, err := s.observeNativeTurn(); err == nil {
+			report.Thread = id
+		}
+	}
+	data, err := json.Marshal(report)
+	if err == nil {
+		fmt.Println(harness.NativeExitReportPrefix + string(data))
+	}
 }
 func (s *server) status() response {
 	s.mu.Lock()

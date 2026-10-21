@@ -87,6 +87,10 @@ type Receipt struct {
 // observed, or stopped turnless: with no native conversation to keep, so with
 // no Checkpoint either.
 type Stopped struct {
+	// Exit is set when the harness exited on its own before a stop asked it
+	// to. Such a stop keeps the previous checkpoint unless it captured a
+	// completed conversation.
+	Exit             *Exit       `json:"exit,omitempty"`
 	Launch           Launch      `json:"launch"`
 	Incarnation      Incarnation `json:"incarnation"`
 	ActualStopped    bool        `json:"actualStopped"`
@@ -95,6 +99,16 @@ type Stopped struct {
 	Checkpoint       []byte      `json:"-"`
 	CheckpointDigest string      `json:"checkpointDigest"`
 }
+
+// Exit describes a harness that exited on its own: its exit code and the last
+// lines of its terminal, a bounded diagnostic from the workload.
+type Exit struct {
+	Code   int    `json:"code"`
+	Output string `json:"output,omitempty"`
+}
+
+// ExitOutputMax bounds Exit.Output.
+const ExitOutputMax = 4096
 
 // PlacementState distinguishes an absent keyed operation from an unreachable one.
 type PlacementState string
@@ -132,6 +146,10 @@ type recoveryRequired string
 func (e recoveryRequired) Error() string        { return string(e) }
 func (e recoveryRequired) Is(target error) bool { return target == ErrRecoveryRequired }
 
+// ErrStopPending refuses a move while a stop of the same execution is still
+// in progress. Repeating the stop continues it.
+var ErrStopPending = errors.New("session: a stop is still in progress")
+
 // ErrSessionCancelled refuses a move or stop of an execution whose
 // cancellation has finished. Nothing can start it again.
 var ErrSessionCancelled = errors.New("session: session cancelled")
@@ -145,6 +163,9 @@ var ErrCancellationUnfinished = errors.New("session: cancellation unfinished")
 // pending operation is unfinished. It names that operation: the first visit's
 // start (or resume), a move, or a stop.
 func pendingRecovery(r Record) error {
+	if last := len(r.Operations) - 1; last >= 0 && r.Operations[last].ID == r.PendingOperation && r.Operations[last].Finalize {
+		return ErrStopPending
+	}
 	kind := "move"
 	for i, op := range r.Operations {
 		if op.ID != r.PendingOperation {
@@ -210,6 +231,8 @@ type Checkpoint struct {
 
 // Visit keeps immutable intent and receipts after the allocation is released.
 type Visit struct {
+	// Exit is set when the visit ended because its harness exited on its own.
+	Exit             *Exit       `json:"exit,omitempty"`
 	CheckpointDigest string      `json:"checkpointDigest"`
 	ActualStopped    bool        `json:"actualStopped"`
 	Launch           Launch      `json:"launch"`

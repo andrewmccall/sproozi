@@ -3,6 +3,10 @@
 Status: accepted
 Date: 2026-10-20
 
+Extended: [ADR 0038](0038-exited-agents-and-one-recovery-path.md) makes a
+repeated stop continue the pending one and names `sproozi stop ID` in every
+message for a stuck stop.
+
 ## Problem and constraints
 
 `stop` and `move` wait for a completed native turn

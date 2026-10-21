@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -245,4 +246,60 @@ func TestQuiesceReportsWhatItWaitsForWithoutStopping(t *testing.T) {
 	if st := s.status(); st.State != harness.NativeStopping {
 		t.Fatalf("state after bounded quiesce: %+v", st)
 	}
+}
+
+// A resumed Claude visit with no new prompt keeps its restored conversation:
+// a stop needs no new turn once any terminal input has settled.
+func TestClaudeResumedVisitWithoutPromptStopsAsRestored(t *testing.T) {
+	s := &server{config: config{Harness: harness.NativeClaude, ThreadID: selected}, state: harness.NativeStopping,
+		gatedAt: time.Now()}
+	if !s.claudeRestoredUnchanged() {
+		t.Fatal("resumed visit without input is not its restored conversation")
+	}
+	s.inputGeneration, s.lastInputAt = 2, time.Now()
+	if s.claudeRestoredUnchanged() {
+		t.Fatal("unsettled input accepted as unchanged")
+	}
+	s.lastInputAt = time.Now().Add(-time.Minute)
+	if !s.claudeRestoredUnchanged() {
+		t.Fatal("settled terminal input blocks the restored conversation")
+	}
+	if err := s.claude.accept(claudeHook{Event: claudePromptSubmit}, 2); err != nil {
+		t.Fatal(err)
+	}
+	if s.claudeRestoredUnchanged() {
+		t.Fatal("a submitted prompt still counts as the restored conversation")
+	}
+	first := &server{config: config{Harness: harness.NativeClaude}, state: harness.NativeStopping}
+	if first.claudeRestoredUnchanged() {
+		t.Fatal("a first visit has no restored conversation")
+	}
+}
+
+func TestReportExitCarriesCodeOutputAndThread(t *testing.T) {
+	native := startIdleNative(t)
+	s := &server{native: native, threadID: selected, config: config{Harness: harness.NativeCodex}}
+	out := captureStdout(t, func() { s.reportExit(native, 2) })
+	report, ok := harness.ParseNativeExitReport([]byte(out))
+	if !ok || report.Code != 2 || report.Thread != selected {
+		t.Fatalf("exit report %q: %+v %v", out, report, ok)
+	}
+}
+
+func captureStdout(t *testing.T, f func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := os.Stdout
+	os.Stdout = w
+	f()
+	os.Stdout = previous
+	_ = w.Close()
+	data, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
 }

@@ -39,7 +39,9 @@ type placementRecord struct {
 	NativeQuiet           bool `json:"nativeQuiet,omitempty"`
 	// Turnless records that the supervisor stopped a first visit with no
 	// native conversation to keep; its stop captures no checkpoint.
-	Turnless         bool             `json:"turnless,omitempty"`
+	Turnless bool `json:"turnless,omitempty"`
+	// Exited records a harness that exited on its own before the stop.
+	Exited           *session.Exit    `json:"exited,omitempty"`
 	Receipt          *session.Receipt `json:"receipt,omitempty"`
 	CheckpointDigest string           `json:"checkpointDigest,omitempty"`
 	// Removing is saved after the placement confirmed every recorded container

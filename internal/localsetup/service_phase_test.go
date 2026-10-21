@@ -6,7 +6,7 @@ import "testing"
 // the home daemon from stopping.
 func TestRunningPhasesExcludeStoppedSessions(t *testing.T) {
 	for phase, want := range map[string]bool{
-		"idle": false, "cancelled": false, "retained": false, "importing": false, "": false,
+		"idle": false, "cancelled": false, "retained": false, "failed": false, "importing": false, "": false,
 		"active": true, "stopping": true, "unknown-stop": true, "unknown-usage": true, "preparing": true,
 	} {
 		if got := running(phase); got != want {

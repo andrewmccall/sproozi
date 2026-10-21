@@ -91,10 +91,12 @@ type Status struct {
 	Phase          string               `json:"phase"`
 	Placement      string               `json:"placement,omitempty"`
 	// InitialStage repeats Phase for existing clients.
-	InitialStage string          `json:"initialStage"`
-	ThreadID     string          `json:"threadId,omitempty"`
-	Deadline     time.Time       `json:"deadline"`
-	Session      *session.Record `json:"session,omitempty"`
+	InitialStage string    `json:"initialStage"`
+	ThreadID     string    `json:"threadId,omitempty"`
+	Deadline     time.Time `json:"deadline"`
+	// Exit describes a harness that exited on its own and stopped the session.
+	Exit    *session.Exit   `json:"exit,omitempty"`
+	Session *session.Record `json:"session,omitempty"`
 }
 
 // executionStatus reports an execution and its current visit: the active one,

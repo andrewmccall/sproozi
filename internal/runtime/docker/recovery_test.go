@@ -140,7 +140,7 @@ func TestAbortedDockerRetriesExistingAccountingWithoutInitializing(t *testing.T)
 	}
 }
 
-func TestClaudeGracefulStopRequiresPersistedAcknowledgement(t *testing.T) {
+func TestClaudeStopWithoutAcknowledgementKeepsNoCheckpoint(t *testing.T) {
 	t.Parallel()
 	for _, lostReply := range []bool{false, true} {
 		name := "already-stopped"
@@ -176,18 +176,24 @@ func TestClaudeGracefulStopRequiresPersistedAcknowledgement(t *testing.T) {
 				c := f.containers[i.ResourceUID]
 				c.State.Running, c.State.Pid, c.State.Status = false, 0, exitedStatus
 			}
-			if _, err = p.Stop(t.Context(), l, i); err == nil {
-				t.Fatal("physical stop substituted for Claude completion")
+			// Without the acknowledgement the visit stops as an exited harness:
+			// fenced and sealed, with no checkpoint claimed from the stopped
+			// process. A lost reply first reports itself.
+			stopped, err := p.Stop(t.Context(), l, i)
+			if lostReply {
+				if err == nil {
+					t.Fatal("lost Claude acknowledgement hidden")
+				}
+				stopped, err = p.Stop(t.Context(), l, i)
 			}
-			if _, err = p.Stop(t.Context(), l, i); err == nil {
-				t.Fatal("retry invented Claude completion")
+			if err != nil || stopped.Exit == nil || len(stopped.Checkpoint) != 0 || stopped.CheckpointDigest != "" ||
+				stopped.Receipt == nil {
+				t.Fatalf("exited Claude visit: %+v %v", stopped, err)
 			}
-			r, err := p.load(l)
-			if err != nil || r.NativeQuiet || r.CheckpointDigest != "" || a.seals != 0 {
-				t.Fatalf("unconfirmed turn captured or sealed: %+v %v", r, err)
-			}
-			if _, err = p.Abort(t.Context(), l, i); err != nil {
-				t.Fatalf("forced cancel unavailable: %v", err)
+			for _, call := range f.calls {
+				if strings.Contains(call, "capture-stopped") {
+					t.Fatal("physical stop substituted for Claude completion")
+				}
 			}
 		})
 	}

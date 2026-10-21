@@ -73,15 +73,16 @@ func (s *server) claudeCompletion() *claudeCompletion {
 		LastEvent: c.lastEvent, Rejected: c.rejected, Observation: "lifecycle_incomplete"}
 	selected := s.config.ThreadID
 	settled := s.inputSettled()
+	restored := s.claudeRestoredUnchanged()
 	s.mu.Unlock()
 	switch {
 	case d.PendingTools != 0:
 		d.Observation = pendingTools
 	case d.PromptGeneration != d.InputGeneration && !settled:
 		d.Observation = inputChanged
-	case c.id == "" || (selected != "" && c.id != selected):
+	case !restored && (c.id == "" || (selected != "" && c.id != selected)):
 		d.Observation = "identity_unavailable"
-	case d.Completed:
+	case d.Completed || restored:
 		if _, _, err := s.observeClaudeTurn(); err != nil {
 			d.Observation = claudeJournalDiagnostic(err)
 		} else {
@@ -200,11 +201,24 @@ func (s *server) claudeTurnReady() bool {
 	return c.completed && len(c.pending) == 0 && (c.input == s.inputGeneration || s.inputSettled())
 }
 
+// claudeRestoredUnchanged reports a resumed visit in which no prompt was
+// submitted: its selected conversation is the restored one, so a stop needs no
+// new turn. Unsubmitted input must have settled. The caller holds s.mu.
+func (s *server) claudeRestoredUnchanged() bool {
+	c := s.claude
+	return !c.started && s.config.ThreadID != "" && len(c.pending) == 0 &&
+		(s.inputGeneration == 0 || s.inputSettled())
+}
+
 func (s *server) observeClaudeTurn() (string, string, error) {
 	s.mu.Lock()
 	c := s.claude
 	selected, maxBytes := s.config.ThreadID, s.config.RolloutMaxBytes
 	ready := s.claudeTurnReady()
+	if s.claudeRestoredUnchanged() {
+		// No prompt in this visit: the restored conversation is unchanged.
+		ready, c.id = true, selected
+	}
 	s.mu.Unlock()
 	if !ready || c.id == "" || (selected != "" && selected != c.id) {
 		return "", "", errors.New("claude completed turn is unavailable")

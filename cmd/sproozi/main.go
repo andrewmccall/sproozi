@@ -219,6 +219,7 @@ func attach(ctx context.Context, socket, id string) error {
 	defer cancel()
 	stopResize := watchResize(run, update)
 	defer stopResize()
-	_, _ = fmt.Fprintln(os.Stderr, "Attached to the agent's terminal; Ctrl-] detaches")
-	return home.AttachTerminal(run, socket, id, os.Stdin, os.Stdout, sizes)
+	return home.AttachTerminalNotify(run, socket, id, os.Stdin, os.Stdout, sizes, func() {
+		_, _ = fmt.Fprint(os.Stderr, "Attached to the agent's terminal; Ctrl-] detaches\r\n")
+	})
 }

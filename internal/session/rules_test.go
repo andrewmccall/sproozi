@@ -58,12 +58,15 @@ func TestPendingRecoveryNamesThePendingOperation(t *testing.T) {
 		{0, "", "session: previous start requires recovery"},
 		{0, uuid.NewString(), "session: previous resume requires recovery"},
 		{1, uuid.NewString(), "session: previous move requires recovery"},
-		{2, uuid.NewString(), "session: previous stop requires recovery"},
 	} {
 		err := pendingRecovery(Record{Operations: ops, PendingOperation: ops[tc.pending].ID, ThreadID: tc.thread})
 		if !errors.Is(err, ErrRecoveryRequired) || err.Error() != tc.want {
 			t.Fatalf("pending %d: got %v, want %q", tc.pending, err, tc.want)
 		}
+	}
+	// A pending stop is continued by repeating the stop, not by recovery.
+	if err := pendingRecovery(Record{Operations: ops, PendingOperation: ops[2].ID}); !errors.Is(err, ErrStopPending) {
+		t.Fatalf("pending stop: got %v", err)
 	}
 }
 

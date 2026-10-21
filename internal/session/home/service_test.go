@@ -46,6 +46,7 @@ type placementFixture struct {
 	lostStop, lostActivate, unknownUsage           bool
 	// turnless stops a visit from a workspace with no conversation.
 	turnless                    bool
+	exited                      *session.Exit
 	rejectActivate, failInspect bool
 	partialCreate               bool
 	inspections                 int
@@ -146,6 +147,12 @@ func (p *placementFixture) Stop(ctx context.Context, l session.Launch, i session
 	if p.turnless && l.ThreadID == "" {
 		stopped.ThreadID, stopped.Checkpoint, stopped.CheckpointDigest = "", nil, ""
 	}
+	if p.exited != nil {
+		stopped.Exit, stopped.Checkpoint, stopped.CheckpointDigest = p.exited, nil, ""
+		if l.ThreadID == "" {
+			stopped.ThreadID = ""
+		}
+	}
 	r.State = session.PlacementStopped
 	r.Stopped = &stopped
 	p.rows[l.AllocationID] = r
@@ -161,6 +168,10 @@ func (p *placementFixture) receipt(l session.Launch, i session.Incarnation) *ses
 
 // Abort fences the writer and seals its usage, as the Docker placement does
 // even when an earlier graceful stop could not seal it.
+func (p *placementFixture) Exited(_ context.Context, l session.Launch, i session.Incarnation) (bool, error) {
+	r := p.rows[l.AllocationID]
+	return p.exited != nil && r.Incarnation == i && r.State == session.PlacementActive, nil
+}
 func (p *placementFixture) Abort(_ context.Context, l session.Launch, i session.Incarnation) (session.Observation, error) {
 	p.aborts++
 	if p.abortEntered != nil {
@@ -734,6 +745,61 @@ func TestStartRejectsWorkspaceProblemsWithRepair(t *testing.T) {
 		}
 		if _, inspectErr := s.coordinator.Inspect(id); !os.IsNotExist(inspectErr) {
 			t.Errorf("%s: execution recorded: %v", name, inspectErr)
+		}
+	}
+}
+
+// A harness that exits on its own is noticed: the session stops as failed with
+// its exit code and output, and every command names what to do next.
+func TestExitedHarnessFailsTheSessionWithItsOutput(t *testing.T) {
+	t.Parallel()
+	s, local, _, repo := testService(t)
+	id := uuid.NewString()
+	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if settled, err := s.settleExit(t.Context(), id); err != nil || settled {
+		t.Fatalf("running harness settled as exited: %v %v", settled, err)
+	}
+	local.exited = &session.Exit{Code: 2, Output: "error: unexpected argument '--bad' found"}
+	attach := s.attachProblem(t.Context(), id)
+	if attach == nil || !strings.Contains(attach.Error(), "exited with code 2") || !strings.Contains(attach.Error(), "sproozi rm "+id) {
+		t.Fatalf("attach to an exited harness: %v", attach)
+	}
+	status, err := s.Status(id)
+	if err != nil || status.Phase != stageFailed || status.Exit == nil || status.Exit.Code != 2 ||
+		!strings.Contains(status.Exit.Output, "--bad") {
+		t.Fatalf("failed status: %+v %v", status, err)
+	}
+	if stopped, err := s.Stop(t.Context(), id, uuid.NewString()); err != nil || stopped.Phase != stageFailed {
+		t.Fatalf("stop of a failed session: %+v %v", stopped, err)
+	}
+	local.exited = nil
+	resumed, err := s.Resume(t.Context(), id, uuid.NewString(), nil)
+	if err != nil || resumed.Session.Active == nil || resumed.Session.Active.Launch.CheckpointDigest != "" {
+		t.Fatalf("resume of a failed session: %+v %v", resumed, err)
+	}
+}
+
+// A cancelled session cannot continue; every refusal points to rm.
+func TestCancelledSessionPointsToRemove(t *testing.T) {
+	t.Parallel()
+	s, _, _, repo := testService(t)
+	id := uuid.NewString()
+	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Cancel(t.Context(), id, uuid.NewString()); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []Request{
+		{Action: ActionResume, ID: id, OperationID: uuid.NewString()},
+		{Action: ActionStop, ID: id, OperationID: uuid.NewString()},
+		{Action: ActionAttach, ID: id},
+	} {
+		r := exchange(t, s, q)
+		if !strings.Contains(r.Error, "cancelled") || !strings.Contains(r.Error, "sproozi rm "+id) {
+			t.Errorf("%s of a cancelled session replied %+v", q.Action, r)
 		}
 	}
 }

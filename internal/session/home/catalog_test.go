@@ -350,7 +350,7 @@ func TestResumeContinuesAStartedSessionAfterItsDeadline(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := exchange(t, s, Request{Action: ActionResume, ID: id, OperationID: uuid.NewString()})
-	if !r.Rejected || !strings.Contains(r.Error, `run "sproozi stop `+id+`" first`) {
+	if !r.Rejected || !strings.Contains(r.Error, `is running; attach to it with "sproozi attach `+id+`"`) {
 		t.Fatalf("resume of a running session replied %+v", r)
 	}
 	stopped, err := s.Stop(t.Context(), id, uuid.NewString())

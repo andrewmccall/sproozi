@@ -251,8 +251,13 @@ func (c *Coordinator) stopSource(ctx context.Context, r Record, index int) (Reco
 			r.Phase = PhaseUnknownUsage
 			return r, errors.Join(err, c.save(r))
 		}
-		if len(stopped.Checkpoint) == 0 && (r.hasCheckpoint() || stoppedThread(stopped) != "") {
+		// A harness that exited on its own may leave no new checkpoint; the
+		// previous one, or the retained workspace, stays the session's state.
+		if len(stopped.Checkpoint) == 0 && stopped.Exit == nil && (r.hasCheckpoint() || stoppedThread(stopped) != "") {
 			return r, errors.New("session: graceful stop returned no checkpoint")
+		}
+		if stopped.Exit != nil && len(stopped.Exit.Output) > ExitOutputMax {
+			return r, errors.New("session: harness exit report exceeds its bound")
 		}
 		thread, cp, err := c.commitStopped(r, stopped)
 		if err != nil {
@@ -263,7 +268,7 @@ func (c *Coordinator) stopSource(ctx context.Context, r Record, index int) (Reco
 			r.Phase = PhaseUnknownUsage
 			return r, errors.Join(err, c.save(r))
 		}
-		r.Visits = append(r.Visits, Visit{Launch: source.Launch, Incarnation: source.Incarnation, Receipt: stopped.Receipt, ActualStopped: true, CheckpointDigest: cp.Metadata.SHA256})
+		r.Visits = append(r.Visits, Visit{Launch: source.Launch, Incarnation: source.Incarnation, Receipt: stopped.Receipt, ActualStopped: true, CheckpointDigest: cp.Metadata.SHA256, Exit: stopped.Exit})
 		r.Remaining = remaining
 		r.ThreadID, r.Checkpoint = thread, cp
 		r.Active = nil

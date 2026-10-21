@@ -402,8 +402,7 @@ func (s *Service) Resume(ctx context.Context, id, operation string, harnessArgs 
 		}
 	}
 	if r.Current != "" {
-		return Status{}, rejectedError(fmt.Sprintf("home: previous execution must stop and commit before resume; "+
-			"run \"sproozi stop %s\" first", id))
+		return Status{}, s.notStoppedProblem(id, r.Current)
 	}
 	if len(r.Executions) >= 256 {
 		return Status{}, errors.New("home: execution retention limit reached")
@@ -496,7 +495,7 @@ func (s *Service) catalogStatus(r localSession) (Status, error) {
 	stage := "importing"
 	ownership := "source"
 	if r.Claimed {
-		stage = stageRetained
+		stage = committedStage(r)
 		ownership = "home"
 	}
 	return Status{Association: r.Original.Association, CheckpointInfo: info,
@@ -504,7 +503,7 @@ func (s *Service) catalogStatus(r localSession) (Status, error) {
 		AllocationID: r.Committed.Launch.AllocationID, Incarnation: &r.Committed.Incarnation,
 		Placement: r.Committed.Launch.Placement, Phase: stage, Harness: r.Committed.Launch.Harness,
 		InitialStage: stage, ThreadID: cmp.Or(r.Committed.ThreadID, r.Committed.Launch.ThreadID),
-		Deadline: r.Committed.Launch.Deadline}, nil
+		Deadline: r.Committed.Launch.Deadline, Exit: r.Committed.Exit}, nil
 }
 
 // resolveSession maps a session or execution ID to the execution to act on
@@ -533,7 +532,7 @@ func (s *Service) resolveSession(id string) (string, string, error) {
 		return "", "", err
 	}
 	if r.Current == "" {
-		return "", id, rejectedError(fmt.Sprintf("home: session has no active execution; use \"sproozi resume %s\"", id))
+		return "", id, stoppedProblem(r)
 	}
 	return r.Current, id, nil
 }
