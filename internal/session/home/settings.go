@@ -15,6 +15,7 @@ import (
 	"time"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
+	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/nativeconfig"
 	"github.com/andrewmccall/sproozi/internal/privatefs"
 	"github.com/andrewmccall/sproozi/internal/proxytransport"
@@ -64,7 +65,7 @@ func (c Config) ServeProblems() []string {
 	}
 	l := c.Local
 	harnessErr := l.Harness.Validate()
-	add(harnessErr != nil, "local.harness", `"codex" or "claude-code"`)
+	add(harnessErr != nil, "local.harness", managedChoices())
 	if harnessErr == nil {
 		if err := nativeconfig.ValidateHarness(string(l.Harness), c.Model, c.NativeOptions); err != nil {
 			p = append(p, "model or nativeOptions ("+err.Error()+")")
@@ -140,7 +141,7 @@ func (c Config) gatewayProblems() []string {
 		"DNS name on port 443 that the gateway certificate covers, such as mcp.sproozi.internal:443")
 	for i, h := range c.Harnesses {
 		key := fmt.Sprintf("harnesses[%d].", i)
-		add(h.Harness.Validate() != nil, key+"harness", `"codex" or "claude-code"`)
+		add(h.Harness.Validate() != nil, key+"harness", managedChoices())
 		add(!dockerName.MatchString(h.Name), key+"name", "Docker resource name")
 		add(h.GatewayPort == 0, key+"gatewayPort", "port")
 		add(h.Model != "" && blank(h.Model), key+"model", modelWant)
@@ -204,4 +205,15 @@ func (c Config) AllowanceProblems() []string {
 		}
 	}
 	return p
+}
+
+// managedChoices names the registered managed harnesses for a setting message,
+// such as "codex" or "claude-code".
+func managedChoices() string {
+	kinds := harness.ManagedKinds()
+	quoted := make([]string, 0, len(kinds))
+	for _, kind := range kinds {
+		quoted = append(quoted, strconv.Quote(string(kind)))
+	}
+	return strings.Join(quoted, " or ")
 }

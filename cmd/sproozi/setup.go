@@ -255,13 +255,20 @@ func (r doctorReport) text(w io.Writer) {
 	}
 }
 
-// providers maps each agent and provider name to the provider key it uses.
-var providers = map[string]string{string(harness.NativeCodex): providerOpenAI, providerOpenAI: providerOpenAI,
-	string(harness.NativeClaude): providerAnthropic, providerAnthropic: providerAnthropic}
+// providers maps each agent and provider name to the provider key it uses,
+// from the harness registry's model protocols.
+var providers = func() map[string]string {
+	out := map[string]string{providerOpenAI: providerOpenAI, providerAnthropic: providerAnthropic}
+	for _, kind := range harness.ManagedKinds() {
+		h, _ := harness.Managed(kind)
+		out[string(kind)] = string(h.Protocol)
+	}
+	return out
+}()
 
 const (
-	providerOpenAI    = "openai"
-	providerAnthropic = "anthropic"
+	providerOpenAI    = string(harness.ProtocolOpenAI)
+	providerAnthropic = string(harness.ProtocolAnthropic)
 )
 
 // credentialEntry reports one provider's stored key, never its value.

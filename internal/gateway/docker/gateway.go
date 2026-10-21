@@ -59,7 +59,7 @@ func NewGateway(owner *Owner, config GatewayConfig) (*proxytransport.Gateway, er
 	modelConfig.AuditLogger = config.AuditLogger
 	authority := modelgateway.OpenAIAuthority
 	handler := &modelgateway.Handler{Config: modelConfig}
-	if config.Harness == harness.NativeClaude {
+	if h, _ := harness.Managed(config.Harness); h.Protocol == harness.ProtocolAnthropic {
 		authority = modelgateway.AnthropicAuthority
 		handler = modelgateway.NewAnthropicHandler(modelConfig)
 	}

@@ -250,6 +250,8 @@ func Restore(ctx context.Context, data []byte, target string, maxBytes int64) (M
 		err = harness.RestoreCodexState(home, *artifact.Codex, maxBytes)
 	case harness.NativeClaude:
 		err = harness.RestoreClaudeState(home, filepath.Join(target, "workspace"), *artifact.Claude, maxBytes)
+	default:
+		err = errors.New("checkpoint: unsupported native harness")
 	}
 	if err != nil {
 		return Metadata{}, err

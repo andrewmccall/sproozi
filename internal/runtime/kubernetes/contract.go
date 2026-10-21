@@ -84,28 +84,16 @@ func EnsureAgentContract(ctx context.Context, c client.Client, run *sprooziv1alp
 	if err = addManagedNativeContract(ctx, c, run, tmpl, rt, wanted); err != nil {
 		return err
 	}
-	config, err := harness.MCPConfig(rt.Spec.ClientConfig.Harness, input.Capabilities, rt.Spec.GatewayEndpoint)
+	request, err := json.Marshal(input.Untrusted)
+	if err != nil {
+		return fmt.Errorf("encode untrusted request: %w", err)
+	}
+	files, err := harness.ContractFiles(rt.Spec.ClientConfig.Harness, input.Capabilities, rt.Spec.GatewayEndpoint,
+		input.Trusted.Instructions, string(request))
 	if err != nil {
 		return err
 	}
-	maps.Copy(wanted.Data, config)
-	if rt.Spec.ClientConfig.Harness != "" {
-		maps.Copy(wanted.Data, harness.ManagedContract())
-	}
-	if rt.Spec.ClientConfig.Harness == "opencode" {
-		wanted.Data["opencode-launch.py"] = harness.OpenCodeLaunch
-	}
-	if rt.Spec.ClientConfig.Harness == "hermes" {
-		wanted.Data["hermes-launch.py"] = harness.HermesLaunch
-	}
-	if rt.Spec.ClientConfig.Harness == "claude-code" || rt.Spec.ClientConfig.Harness == "opencode" || rt.Spec.ClientConfig.Harness == "hermes" {
-		request, err := json.Marshal(input.Untrusted)
-		if err != nil {
-			return fmt.Errorf("encode untrusted request: %w", err)
-		}
-		wanted.Data["instructions.txt"] = input.Trusted.Instructions
-		wanted.Data["request.json"] = string(request)
-	}
+	maps.Copy(wanted.Data, files)
 	if err := c.Create(ctx, wanted); err == nil {
 		return nil
 	} else if !apierrors.IsAlreadyExists(err) {

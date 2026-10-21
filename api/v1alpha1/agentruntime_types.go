@@ -33,7 +33,6 @@ import (
 
 var digestImagePattern = regexp.MustCompile(`^[A-Za-z0-9./_:-]+@sha256:[a-f0-9]{64}$`)
 
-const codexHarnessSelector = "codex"
 const runtimeDropAll corev1.Capability = "ALL"
 
 // ValidateRuntimeTemplate checks the administrator-owned template at the
@@ -251,10 +250,12 @@ func (c RuntimeClientConfig) validateNativeSession() error {
 		return nil
 	}
 	native := c.NativeSession
-	if c.Harness != codexHarnessSelector && c.Harness != "claude-code" {
-		return fmt.Errorf("native session options require the codex or claude-code harness")
+	// nativeconfig accepts exactly the managed harnesses; a guard test in
+	// internal/harness compares it with the registry.
+	if err := nativeconfig.ValidateHarness(c.Harness, native.Model, native.Options); err != nil {
+		return fmt.Errorf("native session options: %w", err)
 	}
-	return nativeconfig.ValidateHarness(c.Harness, native.Model, native.Options)
+	return nil
 }
 
 // RuntimeConfigMapKeyReference selects exactly one ConfigMap data key.

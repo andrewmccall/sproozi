@@ -108,7 +108,7 @@ schemas fail closed, without destination fallback.
 
 ## Deliver ordinary Codex configuration
 
-Set `AgentRuntime.spec.clientConfig.harness` to `codex`, `claude-code`, `opencode` or `hermes`
+Set `AgentRuntime.spec.clientConfig.harness` to one of the [harness selectors](harnesses.md#harness-selectors)
 for native run-local configuration. See [harness preparation](harnesses.md) for
 the additional launch formats, provider setup and supported configurations.
 

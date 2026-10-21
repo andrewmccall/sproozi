@@ -373,7 +373,7 @@ func TestSecondHarnessGetsItsOwnPlacementPortAndCoveredCertificate(t *testing.T)
 		t.Fatal("second harness must derive from the primary placement with its own port")
 	}
 	leaf := s.certs.serving.Load().Leaf
-	for _, host := range []string{"api.openai.com", "api.anthropic.com", c.Local.GatewayIPv4} {
+	for _, host := range []string{inspectionHost, "api.anthropic.com", c.Local.GatewayIPv4} {
 		if leaf.VerifyHostname(host) != nil {
 			t.Fatalf("serving leaf lacks %s", host)
 		}
@@ -472,3 +472,6 @@ func mustServing(t *testing.T, store *pki.Store) *x509.Certificate {
 	}
 	return cert.Leaf
 }
+
+// inspectionHost is the OpenAI provider host the codex fixtures inspect.
+var inspectionHost = harness.ProtocolOpenAI.InspectionHost()

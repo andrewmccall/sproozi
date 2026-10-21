@@ -73,4 +73,5 @@ For contributor test requirements and commands, see
 [recorded test reports](../test/acceptance/reports/README.md) hold the evidence
 from specific acceptance runs.
 
-Maintainers can follow [the release steps](contributing/releases.md).
+Maintainers can follow [the release steps](contributing/releases.md). Contributors adding an agent program follow
+[Add a harness](contributing/add-a-harness.md).

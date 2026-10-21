@@ -6,7 +6,7 @@ import (
 )
 
 func TestRuntimeNativeSessionBoundary(t *testing.T) {
-	c := RuntimeClientConfig{Harness: codexHarnessSelector, NativeSession: &NativeSessionConfig{
+	c := RuntimeClientConfig{Harness: "codex", NativeSession: &NativeSessionConfig{
 		Model: "fixture-model", Options: []string{`mcp_servers."fixture-name".enabled=true`},
 	}}
 	if err := c.validateNativeSession(); err != nil {

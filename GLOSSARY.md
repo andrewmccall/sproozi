@@ -13,6 +13,20 @@ or Hermes. The harness runs the conversation and its tool calls; Sproozi
 supplies the environment and access. Selected by `clientConfig.harness`.
 Also seen as: client, native client.
 
+### AgentRun harness
+
+A harness that `AgentRuntime.spec.clientConfig.harness` can select. Sproozi
+renders its MCP configuration, including the `sproozi` control connection,
+into each run's contract. Every registered harness is one; see the
+[harness selectors](docs/reference/harnesses.md#harness-selectors).
+
+### Managed harness
+
+An AgentRun harness that is also a native kind for managed sessions
+(`sproozi run`, `stop`, `resume`, `move`): Sproozi supervises its terminal,
+observes completed turns and checkpoints its conversation. Codex and Claude
+Code. Also seen as: native kind, native harness.
+
 ### Sandbox
 
 The isolated environment a harness runs in. On Kubernetes it is a disposable

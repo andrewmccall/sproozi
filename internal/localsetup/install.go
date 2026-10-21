@@ -436,10 +436,8 @@ func step(o Options, format string, args ...any) {
 }
 
 func inspectionHost(kind harness.NativeKind) string {
-	if kind == harness.NativeClaude {
-		return "api.anthropic.com"
-	}
-	return "api.openai.com"
+	h, _ := harness.Managed(kind)
+	return h.Protocol.InspectionHost()
 }
 
 func maxPort(inst Installation) uint16 {

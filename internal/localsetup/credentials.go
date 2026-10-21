@@ -31,10 +31,11 @@ type Provider struct {
 
 // ProviderFor is the gateway-owned provider each harness uses by default.
 func ProviderFor(kind harness.NativeKind) Provider {
-	if kind == harness.NativeClaude {
-		return Provider{Name: "anthropic", URL: anthropicURL}
+	h, _ := harness.Managed(kind)
+	if h.Protocol == harness.ProtocolAnthropic {
+		return Provider{Name: string(harness.ProtocolAnthropic), URL: anthropicURL}
 	}
-	return Provider{Name: "openai", URL: openAIURL}
+	return Provider{Name: string(harness.ProtocolOpenAI), URL: openAIURL}
 }
 
 // CredentialInput supplies a secret without a command-line value: a protected

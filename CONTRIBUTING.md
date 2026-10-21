@@ -11,6 +11,10 @@ Kubebuilder commands described in `AGENTS.md`; do not edit generated output by
 hand. Security-sensitive changes should include both an allow and a denial
 test, including the expected reason and absence of an upstream side effect.
 
+To add an agent program as a harness, follow
+[Add a harness](docs/contributing/add-a-harness.md): one registry entry, guard
+tests that name each missing piece, and the MCP requirement.
+
 Please do not include credentials, provider responses, patches, or local
 agent configuration in commits.
 

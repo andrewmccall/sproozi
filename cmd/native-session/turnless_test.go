@@ -303,3 +303,13 @@ func captureStdout(t *testing.T, f func()) string {
 	}
 	return string(data)
 }
+
+// Every managed harness in the registry needs a supervisor adapter.
+func TestEveryManagedKindHasAnAdapter(t *testing.T) {
+	for _, kind := range harness.ManagedKinds() {
+		if _, err := adapterFor(kind); err != nil {
+			t.Errorf("managed harness %q has no supervisor adapter; add one to nativeAdapters in "+
+				"cmd/native-session/launch.go", kind)
+		}
+	}
+}

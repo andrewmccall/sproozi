@@ -4,9 +4,9 @@ package harness
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/url"
 	"slices"
-	"strconv"
 	"strings"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
@@ -19,23 +19,17 @@ const (
 	httpTransport = "http"
 )
 
-const (
-	codexName    = "codex"
-	claudeName   = "claude-code"
-	openCodeName = "opencode"
-	hermesName   = "hermes"
-)
-
 // MCPConfig describes the requested broker connections and the Sproozi control
 // connection in the selected CLI's native format. Empty selection leaves
-// configuration to the administrator. It contains no upstream addresses or
-// credentials.
+// configuration to the administrator; an unregistered one is an error. It
+// contains no upstream addresses or credentials.
 func MCPConfig(selected string, capabilities []string, gatewayEndpoint string) (map[string]string, error) {
 	if selected == "" {
 		return nil, nil
 	}
-	if selected != codexName && selected != claudeName && selected != openCodeName && selected != hermesName {
-		return nil, fmt.Errorf("unsupported harness %q", selected)
+	h, err := Lookup(selected)
+	if err != nil {
+		return nil, err
 	}
 	endpoint, err := url.Parse(gatewayEndpoint)
 	if err != nil || endpoint.Scheme != nativeHTTPScheme || endpoint.Host == "" || endpoint.User != nil ||
@@ -54,35 +48,34 @@ func MCPConfig(selected string, capabilities []string, gatewayEndpoint string) (
 	// Every selected harness receives the control connection; MCPServerName
 	// never admits its reserved name as a grant, so it cannot duplicate.
 	names = append(slices.Compact(names), api.ControlMCPServer)
-	var output strings.Builder
-	connections := make(map[string]any)
-	for _, name := range names {
-		address := gatewayEndpoint + "/mcp/" + name
-		switch selected {
-		case codexName:
-			_, _ = fmt.Fprintf(&output, "[mcp_servers.%s]\nurl = %s\nrequired = true\n\n", strconv.Quote(name), strconv.Quote(address))
-		case claudeName:
-			connections[name] = map[string]any{connectionType: httpTransport, connectionURL: address}
-		case hermesName:
-			// Native toolset aliases must not collide with built-ins such as all or terminal.
-			connections["sproozi-mcp-"+name] = map[string]any{connectionURL: address, "enabled": true, "strict_redirect_headers": true, "connect_timeout": 15, "timeout": 60}
-		case openCodeName:
-			connections[name] = map[string]any{connectionType: "remote", connectionURL: address, "enabled": true, "oauth": false}
-		}
+	return h.MCP.render(names, func(name string) string { return gatewayEndpoint + "/mcp/" + name })
+}
+
+// ContractFiles are the selected harness's files in an AgentRun contract: its
+// MCP configuration, the Sproozi integration, its launch files and, when its
+// launch reads them, the instructions and request. Empty selection adds none.
+func ContractFiles(selected string, capabilities []string, gatewayEndpoint, instructions, request string) (map[string]string, error) {
+	files, err := MCPConfig(selected, capabilities, gatewayEndpoint)
+	if err != nil || selected == "" {
+		return files, err
 	}
-	if selected == codexName {
-		return map[string]string{"codex-mcp.toml": output.String()}, nil
-	}
-	key, field := "claude-mcp.json", "mcpServers"
-	if selected == openCodeName {
-		key, field = "opencode-mcp.json", "mcp"
-	}
-	if selected == hermesName {
-		key, field = "hermes-mcp.json", "mcp_servers"
-	}
-	document, err := json.Marshal(map[string]any{field: connections})
+	h, err := Lookup(selected)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]string{key: string(document) + "\n"}, nil
+	maps.Copy(files, ManagedContract())
+	maps.Copy(files, h.LaunchFiles)
+	if h.RequestFiles {
+		files["instructions.txt"] = instructions
+		files["request.json"] = request
+	}
+	return files, nil
+}
+
+func jsonDocument(value any) (string, error) {
+	document, err := json.Marshal(value)
+	if err != nil {
+		return "", err
+	}
+	return string(document) + "\n", nil
 }

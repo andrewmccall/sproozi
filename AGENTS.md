@@ -30,7 +30,7 @@ internal/endpoints/<service>/ Per-service handlers: kubernetes, github, model, p
 internal/runtime/{kubernetes,docker}/         Execution backends
 internal/budget/              Usage accounting (Kubernetes store in internal/budget/kubernetes)
 internal/session/, internal/work/, internal/checkpoint/, internal/workspace/   Sessions, remote work, checkpoints
-internal/harness/, internal/nativeconfig/, internal/nativepty/                 Harness configuration and terminal
+internal/harness/, internal/nativeconfig/, internal/nativepty/                 Harness registry (registry.go), configuration and terminal
 internal/webhook/             Event receiver: signature checks, replay protection, AgentRun creation
 config/                       Kustomize: crd, rbac, manager, install (full install), overlays
 examples/                     Runnable example resources (not config/samples)
@@ -53,6 +53,7 @@ Run the gates that match the change before declaring it done:
 | Any Go code | `make lint-fix`, `make test`, `make verify-fast` |
 | Controller, gateway, network policy or install manifests | also `make test-e2e` (creates and removes its own Kind cluster) |
 | Documentation | `make verify-docs` |
+| A new harness | follow `docs/contributing/add-a-harness.md`; `go test ./internal/harness/` guards the registry |
 | Release candidate | `make verify-release` |
 
 `make help` lists every target, and

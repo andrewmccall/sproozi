@@ -56,13 +56,9 @@ type authority struct {
 	mcpEndpoint string
 }
 
-const inspectionHost = "api.openai.com"
-
 func inspectionHostFor(kind harness.NativeKind) string {
-	if kind == harness.NativeClaude {
-		return "api.anthropic.com"
-	}
-	return inspectionHost
+	h, _ := harness.Managed(kind)
+	return h.Protocol.InspectionHost()
 }
 
 func (a *authority) InitializeAllocation(ctx context.Context, l session.Launch, i session.Incarnation) (runtimedocker.NativeAccess, error) {
@@ -479,7 +475,7 @@ func provider(c GatewayConfig, kind harness.NativeKind) (model.HandlerConfig, er
 			"it must hold only the provider API key", c.ProviderTokenFile)
 	}
 	result.UpstreamURL = c.ProviderURL
-	if kind == harness.NativeClaude {
+	if h, _ := harness.Managed(kind); h.Protocol == harness.ProtocolAnthropic {
 		result.ProviderAuth = modelauth.AnthropicAPIKey{Key: token}
 	} else {
 		result.ProviderAuth = modelauth.APIKey{Key: token}
