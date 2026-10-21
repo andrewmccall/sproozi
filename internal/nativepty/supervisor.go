@@ -440,7 +440,7 @@ func resize(file *os.File, size Size) error {
 }
 
 func stopGroup(pid int) error {
-	if err := unix.Kill(-pid, unix.SIGKILL); err != nil && !errors.Is(err, unix.ESRCH) {
+	if err := unix.Kill(-pid, unix.SIGKILL); err != nil && !groupGone(err) {
 		return err
 	}
 	end := time.Now().Add(2 * time.Second)

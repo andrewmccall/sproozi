@@ -345,7 +345,9 @@ func TestResumeContinuesAStartedSessionAfterItsDeadline(t *testing.T) {
 	t.Parallel()
 	s, local, _, repo := testService(t)
 	id := uuid.NewString()
-	s.duration = 5 * time.Second
+	// Long enough for start, a refused resume and the stop to finish before the
+	// deadline on a loaded machine; the test then waits for it to pass.
+	s.duration = 15 * time.Second
 	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
