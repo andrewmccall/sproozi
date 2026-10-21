@@ -6,18 +6,18 @@ On an existing cluster, follow [Install on Kubernetes](../guides/install-kuberne
 
 | Dependency | Required? | How it is supplied |
 | --- | --- | --- |
-| Sproozi CRDs: `AgentRuntime`, `AgentPolicy`, `AgentTemplate`, `AgentRun` | Yes | `make install` installs the four definitions from this checkout. |
+| Sproozi CRDs: `AgentRuntime`, `AgentPolicy`, `AgentTemplate`, `AgentRun`, `BudgetLedger` | Yes | A release ships the five definitions as `sproozi-release/crds.yaml`; from a checkout, `make install` installs them. |
 | A CNI that enforces NetworkPolicy | Yes | Any enforcing CNI works. The Kind demo downloads pinned Calico 3.30.4, which installs its controller, `crd.projectcalico.org` CRDs and bundled `AdminNetworkPolicy` and `BaselineAdminNetworkPolicy` definitions under `policy.networking.k8s.io`. |
 | Model account and GitHub App | Only for agents that call a model or open PRs | External services, configured in the [investigation-to-PR demo](../guides/pr-demo.md) or as [gateway Secrets](required-secrets-and-config.md). |
-| cert-manager | No | The demo and install guide create the gateway certificate with OpenSSL. |
+| cert-manager | No | The demo creates the gateway certificate with OpenSSL; the install guide's self-managed CA controller creates it in the cluster. |
 | Prometheus Operator and monitoring CRDs | No | Only the optional monitoring overlays use them. |
 | gVisor, Kata Containers or another `RuntimeClass` | No | Optional. Select one with [`spec.runtimeClassName`](agentruntime.md#runtime-class). The demo uses Kind's default runtime. |
 | Kubernetes Agent Sandbox controller and CRDs | No | See below. |
 
 ## Kubernetes Agent Sandbox is not required
 
-In Sproozi, a [sandbox](../../GLOSSARY.md#sandbox) is the disposable agent Pod
-in `sproozi-agents`, with its own run identity, NetworkPolicy and input
+On Kubernetes, a Sproozi [sandbox](../../GLOSSARY.md#sandbox) is a disposable
+Pod in `sproozi-agents`, with its own run identity, NetworkPolicy and input
 contract. Sproozi creates these Pods directly.
 
 It does not use the `Sandbox` resource from the separate

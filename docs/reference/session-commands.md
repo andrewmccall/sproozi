@@ -285,7 +285,7 @@ With `--json`, `status` and the session commands print the session:
 | `executionId` | Current or last execution. A `resume` gets a new one. |
 | `allocationId` | Current or last visit to a placement. |
 | `incarnation` | The backend's identity for the exact container or Pod. |
-| `threadId` | The agent's conversation ID. It is not a command operand or a credential. |
+| `threadId` | The harness conversation ID. It is not a command operand or a credential. |
 | `harness`, `phase`, `deadline` | Agent, lifecycle phase and the current execution's deadline. |
 | `placement` | Where it runs or last ran: `local` for this machine, or a cluster's placement name. |
 | `ownership` | Who owns it; see below. |

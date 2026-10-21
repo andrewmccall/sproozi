@@ -19,7 +19,6 @@ graph LR
             G[semantic service modules]
             MCP[configured MCP bridge, Protocol]
             E[destination module]
-            W[webhook]
             CR[(Trusted Secrets and configuration)]
         end
 
@@ -38,9 +37,7 @@ graph LR
         RT[AgentRuntime]
     end
 
-    A[Operator or future event producer] --> R
-    A -. optional signed webhook .-> W
-    W -. optional .-> R
+    A[Operator or tool] --> R
     R --> C
     T --> C
     P --> C
@@ -59,17 +56,15 @@ graph LR
     CR --> G
     CR --> MCP
     CR --> E
-    CR --> W
 ```
 
 ## Trust and namespace boundaries
 
 The system uses separate namespaces:
 
-- `sproozi-system` holds the trusted controller, webhook, gateway and provider credentials.
-- `sproozi-webhooks` holds only webhook HMAC Secrets, the one place the webhook can read Secrets ([ADR 0022](../adr/0022-webhook-hmac-secrets-in-own-namespace.md)).
-- `sproozi-webhook-state` holds the webhook's replay records.
-- `sproozi-agents` holds untrusted agent Pods and their run identities, network policies and input contracts.
+- `sproozi-system` holds the trusted controller, gateway and provider credentials, and the gateway's budget ledgers. Ledgers are [BudgetLedger](../reference/budgetledger.md) resources, so the gateway's write access to them never reaches the ConfigMaps that hold its configuration ([ADR 0045](../adr/0045-budget-ledgers-are-a-custom-resource.md)).
+- `sproozi-sessions` holds the remote executor, its managed runs and their registrations, so the executor's ConfigMap write access never reaches the gateway's configuration in `sproozi-system` ([ADR 0041](../adr/0041-gateway-state-namespace-and-retained-state-owners.md)).
+- `sproozi-agents` holds untrusted sandbox Pods and their run identities, network policies and input contracts.
 - Approved target namespaces, such as `sproozi-demo`, hold resources that an agent can inspect.
 
 Task text, event payloads and provider output are untrusted. They cannot grant
@@ -80,8 +75,12 @@ gateway configuration.
 
 With an enforcing CNI and the generated NetworkPolicy, external calls go through
 the gateway. This includes Kubernetes API and MCP calls. The policy allows only
-DNS and gateway egress. Operators must check that direct API and provider calls
-fail in their environment. NetworkPolicy has exceptions for node traffic.
+gateway egress, and only while the run holds an allowed capability. Sandboxes
+have no DNS: the controller resolves the gateway host and writes its address
+into the Pod's hosts file, and the Pod's only nameserver is a loopback address
+with nothing listening ([ADR 0040](../adr/0040-sandboxes-reach-the-gateway-without-dns.md)).
+Operators must check that direct API and provider calls fail in their
+environment. NetworkPolicy has exceptions for node traffic.
 
 Each run has a dedicated ServiceAccount and a token for the gateway audience.
 The token identifies the run. Its requested capabilities and current policy
@@ -91,7 +90,7 @@ run is still active and allowed. On Kubernetes those checks read the gateway's
 watch cache and confirm any change with a live read, and each execution is
 also rechecked live at least every 10 seconds. Open connections close within
 the smaller of 1 second plus watch delay plus 5 seconds, and under 16 seconds,
-after the run stops or loses permission. The agent Pod has no Sproozi proxy
+after the run stops or loses permission. The sandbox Pod has no Sproozi proxy
 sidecar.
 
 Both gateway backends limit connections, inspected connections per execution and pending
@@ -148,7 +147,7 @@ design decision.
 
 ## Persistent assistant delegation
 
-Hermes runs separately from agent Pods. It keeps its own conversations, memory
+Hermes runs separately from sandbox Pods. It keeps its own conversations, memory
 and schedules on a persistent volume. Its MCP client asks the private task
 service for delegated runs; the service maps workflow names to fixed templates
 and capability subsets.
@@ -176,13 +175,13 @@ ServiceAccount has no direct Kubernetes read grant.
 
 The [service](../../GLOSSARY.md#service) manages controlled Docker
 sessions. It connects to a [remote executor](../../GLOSSARY.md#remote-executor)
-to place work on Kubernetes. The executor holds Kubernetes
-credentials; the local service does not need them. Each remote visit creates a
+to place work on Kubernetes. The executor runs in `sproozi-sessions` and holds
+Kubernetes credentials; the local service does not need them. Each remote visit creates a
 fresh `AgentRun` and must pass current policy checks.
 
 ```mermaid
 flowchart LR
-    CLI[Native terminal client] --> Home[Home daemon and session journal]
+    CLI[Native terminal client] --> Home[Local service and session journal]
     Home --> Docker[Controlled Docker placement]
     Home --> Executor[Authenticated remote executor]
     Executor --> Run[Fresh Kubernetes AgentRun]

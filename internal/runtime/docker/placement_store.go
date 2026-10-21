@@ -185,6 +185,24 @@ func (p *Placement) lockOperation(l session.Launch) (func(), error) {
 	}
 	return func() { unlock(); p.mu.RUnlock() }, nil
 }
+
+// tryLockOperation is lockOperation without waiting: ok is false when another
+// operation holds the visit.
+func (p *Placement) tryLockOperation(l session.Launch) (func(), bool, error) {
+	p.mu.RLock()
+	unlock, ok := p.journals.TryLock(operationKey(l))
+	if !ok {
+		p.mu.RUnlock()
+		return nil, false, nil
+	}
+	if err := p.ready(); err != nil {
+		unlock()
+		p.mu.RUnlock()
+		return nil, false, err
+	}
+	return func() { unlock(); p.mu.RUnlock() }, true, nil
+}
+
 func operationKey(l session.Launch) string {
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(l.ExecutionID+"\x00"+l.OperationID)))
 }

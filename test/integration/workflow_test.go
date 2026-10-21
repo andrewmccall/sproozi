@@ -2,10 +2,6 @@ package integration_test
 
 import (
 	"context"
-	"fmt"
-	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -29,22 +25,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
-	"github.com/andrewmccall/sproozi/internal/audit"
 	"github.com/andrewmccall/sproozi/internal/controller"
 
 	k8sresources "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
-	"github.com/andrewmccall/sproozi/internal/webhook"
 )
 
 const (
-	e2eNamespace = "default"
-	e2eReceiver  = "alertmanager"
-	e2eHMACKey   = "webhook-secret-of-at-least-32-bytes"
+	e2eNamespace  = "default"
+	demoNamespace = "sproozi-demo"
 )
-
-type discardWebhookLogger struct{}
-
-func (discardWebhookLogger) LogWebhook(audit.WebhookEvent) {}
 
 func e2eScheme(t *testing.T) *runtime.Scheme {
 	t.Helper()
@@ -77,7 +66,7 @@ func e2ePolicy() *sprooziv1alpha1.AgentPolicy {
 				sprooziv1alpha1.CapabilityGitHubPullRequest,
 			},
 			KubernetesRead: sprooziv1alpha1.KubernetesReadScope{
-				Namespaces: []string{"sproozi-demo"},
+				Namespaces: []string{demoNamespace},
 				Resources:  []sprooziv1alpha1.KubernetesReadResource{"deployments", "pods", "events", "pods/log"},
 			},
 			GitHubPullRequest: sprooziv1alpha1.GitHubPullRequestScope{
@@ -149,30 +138,12 @@ func e2eTemplate() *sprooziv1alpha1.AgentTemplate {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "sre-remediation",
 			Namespace: e2eNamespace,
-			Labels: map[string]string{
-				webhook.ReceiverLabel: e2eReceiver,
-			},
-			Annotations: map[string]string{
-				webhook.SecretNameAnnotation: "alertmanager-secret",
-			},
 		},
 		Spec: sprooziv1alpha1.AgentTemplateSpec{
 			RuntimeRef:     sprooziv1alpha1.AgentRuntimeReference{Name: "codex"},
 			PolicyRef:      sprooziv1alpha1.AgentPolicyReference{Name: "sre"},
 			Instructions:   "Investigate the failing workload and open a pull request.",
 			EgressProfiles: []string{"go-modules"},
-		},
-	}
-}
-
-func e2eSecret() *corev1.Secret {
-	return &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "alertmanager-secret",
-			Namespace: webhook.DefaultSecretNamespace,
-		},
-		Data: map[string][]byte{
-			"hmac-key": []byte(e2eHMACKey),
 		},
 	}
 }
@@ -191,7 +162,6 @@ func e2eObjects() []client.Object {
 		e2eRuntime(),
 		e2ePolicy(),
 		e2eTemplate(),
-		e2eSecret(),
 	}
 }
 
@@ -215,25 +185,21 @@ func reconcileRunNTimes(t *testing.T, r *controller.AgentRunReconciler, name str
 	}
 }
 
-func createRunViaWebhook(t *testing.T, c client.Client, body string) sprooziv1alpha1.AgentRun {
+// createRun submits an AgentRun the way a user does: the event context comes
+// from the request, and the capabilities from the policy.
+func createRun(t *testing.T, c client.Client, name string, eventContext map[string]string) sprooziv1alpha1.AgentRun {
 	t.Helper()
-	handler := &webhook.Handler{
-		Config: webhook.HandlerConfig{
-			Client:      c,
-			Replay:      webhook.NewInMemoryReplayStore(),
-			AuditLogger: discardWebhookLogger{},
+	submitted := &sprooziv1alpha1.AgentRun{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: e2eNamespace},
+		Spec: sprooziv1alpha1.AgentRunSpec{
+			TemplateRef:  sprooziv1alpha1.AgentTemplateReference{Name: e2eTemplate().Name},
+			Task:         "Investigate the incident.",
+			Capabilities: append([]sprooziv1alpha1.CapabilityKind(nil), e2ePolicy().Spec.AllowedCapabilities...),
+			EventContext: eventContext,
 		},
 	}
-
-	ts := fmt.Sprintf("%d", time.Now().Unix())
-	req := httptest.NewRequest(http.MethodPost, "/webhook/"+e2eNamespace+"/"+e2eReceiver, strings.NewReader(body))
-	req.Header.Set(webhook.TimestampHeader, ts)
-	req.Header.Set(webhook.SignatureHeader, webhook.ComputeSignature(ts, []byte(body), []byte(e2eHMACKey)))
-
-	resp := httptest.NewRecorder()
-	handler.ServeHTTP(resp, req)
-	if resp.Code != http.StatusCreated {
-		t.Fatalf("expected webhook create 201, got %d body=%s", resp.Code, resp.Body.String())
+	if err := c.Create(context.Background(), submitted); err != nil {
+		t.Fatalf("create AgentRun: %v", err)
 	}
 
 	runs := listE2ERuns(t, c)
@@ -250,15 +216,12 @@ func createRunViaWebhook(t *testing.T, c client.Client, body string) sprooziv1al
 	return run
 }
 
-func TestWebhookTriggeredRunReachesSucceeded(t *testing.T) {
+func TestSubmittedRunReachesSucceeded(t *testing.T) {
 	c := e2eClient(t, e2eObjects()...)
-	run := createRunViaWebhook(t, c, `{
-  "id": "evt-100",
-  "eventContext": {
-    "alertname": "CrashLoopBackOff",
-    "namespace": "sproozi-demo"
-  }
-}`)
+	run := createRun(t, c, "incident-100", map[string]string{
+		"alertname": "CrashLoopBackOff",
+		"namespace": demoNamespace,
+	})
 
 	sandbox := &k8sresources.FakeSandboxClient{
 		Status:   k8sresources.SandboxStatusSucceeded,

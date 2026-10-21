@@ -1,4 +1,4 @@
-# Every harness receives the Sproozi integration, and the gateway explains its own denials
+# 0025: Every harness receives the Sproozi integration, and the gateway explains its own denials
 
 Status: accepted
 Date: 2026-10-20

@@ -19,6 +19,7 @@ jobs:
       contents: read
     name: Generated code, vet and race tests (1 of 2)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Clone the code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -28,7 +29,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
-          go-version: '1.26.6'
+          go-version: '1.26.10'
 
       - name: Check generated code, manifests and formatting
         run: make verify-generated
@@ -42,6 +43,7 @@ jobs:
       contents: read
     name: Race tests (2 of 2)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Clone the code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -51,7 +53,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
-          go-version: '1.26.6'
+          go-version: '1.26.10'
 
       - name: Run race tests with coverage (all other packages)
         run: make verify-race RACE_SHARD=2
@@ -61,6 +63,7 @@ jobs:
       contents: read
     name: Protocol, MCP, fixture and docs checks
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Clone the code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -70,7 +73,13 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
-          go-version: '1.26.6'
+          go-version: '1.26.10'
+
+      - name: Install pinned Python dependencies
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --require-hashes --no-deps -r hack/requirements.txt
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
 
       - name: Verify pinned client protocol fixtures
         run: make verify-protocol

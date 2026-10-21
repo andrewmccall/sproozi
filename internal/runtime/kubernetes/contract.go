@@ -71,6 +71,10 @@ func EnsureAgentContract(ctx context.Context, c client.Client, run *sprooziv1alp
 	if err != nil {
 		return fmt.Errorf("encode agent contract: %w", err)
 	}
+	kubeconfig, err := generatedKubeconfig()
+	if err != nil {
+		return err
+	}
 	wanted := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{Name: RunName(run.UID), Namespace: AgentsNamespace, Labels: map[string]string{
 			RunLabel: run.Name, RunNamespaceLabel: run.Namespace, RunUIDLabel: string(run.UID), ManagedByLabel: ManagedByValue,
@@ -78,7 +82,7 @@ func EnsureAgentContract(ctx context.Context, c client.Client, run *sprooziv1alp
 		Immutable: ptrTo(true),
 		Data: map[string]string{
 			contractConfigMapKey:   string(document),
-			kubeconfigConfigMapKey: generatedKubeconfig(),
+			kubeconfigConfigMapKey: kubeconfig,
 		},
 	}
 	if err = addManagedNativeContract(ctx, c, run, tmpl, rt, wanted); err != nil {
@@ -110,7 +114,7 @@ func EnsureAgentContract(ctx context.Context, c client.Client, run *sprooziv1alp
 	return nil
 }
 
-func generatedKubeconfig() string {
+func generatedKubeconfig() (string, error) {
 	config := clientcmdapi.Config{
 		Clusters: map[string]*clientcmdapi.Cluster{kubeconfigContextName: {
 			Server: "https://kubernetes.default.svc",
@@ -131,9 +135,9 @@ func generatedKubeconfig() string {
 	}
 	document, err := clientcmd.Write(config)
 	if err != nil {
-		panic(fmt.Sprintf("encode static kubeconfig: %v", err))
+		return "", fmt.Errorf("encode static kubeconfig: %w", err)
 	}
-	return string(document)
+	return string(document), nil
 }
 
 // RevokeAgentContract removes the run-owned contract after its Pod has stopped.

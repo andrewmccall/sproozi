@@ -3,6 +3,7 @@ package remote
 import (
 	"context"
 	"errors"
+	"slices"
 
 	authenticationv1 "k8s.io/api/authentication/v1"
 	authorizationv1 "k8s.io/api/authorization/v1"
@@ -14,7 +15,8 @@ import (
 
 // Reviewer is the remote executor's side: it authorizes the home principal by
 // the caller's Kubernetes identity. A TokenReview authenticates the bearer
-// token and a SubjectAccessReview asks whether that identity may "use"
+// token for TokenAudience only, so a token the API server accepts, such as a
+// developer's own credential, is refused; a SubjectAccessReview asks whether that identity may "use"
 // remoteexecutors.sproozi.com with the executor's placement name in its
 // namespace. Removing the RoleBinding revokes access on the next request.
 type Reviewer struct {
@@ -39,11 +41,16 @@ func (r *Reviewer) Authorize(ctx context.Context, token string) error {
 		return profile.ErrUnauthenticated
 	}
 	review, err := r.kube.AuthenticationV1().TokenReviews().Create(ctx,
-		&authenticationv1.TokenReview{Spec: authenticationv1.TokenReviewSpec{Token: token}}, metav1.CreateOptions{})
+		&authenticationv1.TokenReview{Spec: authenticationv1.TokenReviewSpec{
+			Token: token, Audiences: []string{TokenAudience},
+		}}, metav1.CreateOptions{})
 	if err != nil {
 		return err
 	}
-	if !review.Status.Authenticated {
+	// An audience-aware API server returns the audiences the token was
+	// accepted for; an empty or different list means the audience was not
+	// checked, so the token may be one the API server itself accepts.
+	if !review.Status.Authenticated || !slices.Contains(review.Status.Audiences, TokenAudience) {
 		return profile.ErrUnauthenticated
 	}
 	user := review.Status.User

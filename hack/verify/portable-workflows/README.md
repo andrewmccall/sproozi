@@ -1,16 +1,16 @@
 # Verify retained remote work
 
-This fixture drives the production task owner, managed Kubernetes placement,
-stock Codex, home daemon and Docker continuation. It uses the existing
+This fixture drives the production remote executor, managed Kubernetes placement,
+stock Codex, this machine's service and Docker continuation. It uses the existing
 public deterministic TLS provider. The default authenticated MCP caller follows
-Hermes's native client protocol. The Kubernetes caller below runs the stock
+the stock Hermes harness's protocol. The Kubernetes caller below runs the stock
 Hermes itself. Neither mode establishes a paid-model software contribution.
 Personal infrastructure is never selected.
 
 First follow the [mobility setup](../session-mobility/README.md) through image
 resolution, Codex configuration, TLS Secrets, `sproozi` context and enforcing
 two-node Kind installation. Use its explicit private `work`, `codex` and
-`cluster` variables. Use `export GOTOOLCHAIN=go1.26.6` for the repository
+`cluster` variables. Use `export GOTOOLCHAIN=go1.26.10` for the repository
 checks and host builds. Start the provider, but leave this machine's service
 stopped. If you already started it, stop its saved PID gracefully and wait for
 exit. Check the saved PID command still belongs to this fixture before
@@ -26,13 +26,13 @@ python3 hack/verify/portable-workflows/configure.py \
   --fixture "$codex" --manifest "$codex/kubernetes.yaml" \
   --output "$codex/workflows.yaml"
 export KUBECONFIG="$work/kubeconfig"
-kubectl -n sproozi-system create secret generic sproozi-work-credentials \
+kubectl -n sproozi-sessions create secret generic sproozi-work-credentials \
   --from-file=tls.crt="$codex/gateway.crt" --from-file=tls.key="$codex/gateway.key" \
   --from-file=task-token="$codex/work-token" --dry-run=client -o yaml | kubectl apply -f -
 kubectl apply --server-side -f "$codex/workflows.yaml"
-kubectl -n sproozi-system rollout restart deployment/sproozi-work
-kubectl -n sproozi-system rollout status deployment/sproozi-work --timeout=180s
-kubectl -n sproozi-system port-forward service/sproozi-work 18444:8443 >"$codex/profile-forward.log" 2>&1 &
+kubectl -n sproozi-sessions rollout restart deployment/sproozi-work
+kubectl -n sproozi-sessions rollout status deployment/sproozi-work --timeout=180s
+kubectl -n sproozi-sessions port-forward service/sproozi-work 18444:8443 >"$codex/profile-forward.log" 2>&1 &
 profile_forward_pid=$!
 unset KUBECONFIG
 python3 hack/verify/portable-workflows/verify.py \
@@ -43,8 +43,9 @@ python3 hack/verify/portable-workflows/verify.py \
 
 The configurator creates a separate private work token and points the
 executor at a small stopped Git snapshot that its init container seeds. The verifier submits and replays an authenticated MCP task while the
-home socket is absent, waits for genuine native completion and sealed retention,
-then starts the home, pulls/claims the checkpoint, resumes the same UUID under a
+service's socket is absent, waits for genuine native completion and retention with
+finalized usage, then starts the service, pulls the checkpoint, resumes the same
+harness conversation ID under a
 fresh execution and completes a genuine local follow-up. It stops to retained
 state without another destination. `report.json` records identities, stages and
 limits; private terminal/provider logs retain native evidence. `--request-id`
@@ -68,7 +69,7 @@ hermes_ref=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["he
 ```
 
 Resolve the local native image ID after the import, as in the mobility setup.
-The generated certificate now covers `sproozi-work.sproozi-system.svc` as well
+The generated certificate now covers `sproozi-work.sproozi-sessions.svc` as well
 as the gateway, model and host IP. Older fixture certificates need a new fixture,
 not an in-place replacement of retained trust.
 
@@ -81,7 +82,7 @@ python3 hack/verify/portable-workflows/deploy.py \
   --fixture "$codex" --images "$work/images/images.json" \
   --hermes-image "$hermes_ref" --output "$codex/stack.yaml"
 kubectl --kubeconfig "$work/kubeconfig" apply --server-side -f "$codex/stack.yaml"
-kubectl --kubeconfig "$work/kubeconfig" -n sproozi-system \
+kubectl --kubeconfig "$work/kubeconfig" -n sproozi-sessions \
   rollout status deployment/sproozi-work --timeout=180s
 kubectl --kubeconfig "$work/kubeconfig" -n sproozi-coordinators \
   rollout status deployment/hermes-coordinator --timeout=180s
@@ -90,7 +91,7 @@ TLS_CERT_FILE="$codex/gateway.crt" TLS_KEY_FILE="$codex/gateway.key" \
 SPROOZI_FIXTURE_LISTEN=0.0.0.0:19865 "$work/bin/coordinator-provider" \
   >"$codex/coordinator-provider.log" 2>&1 &
 coordinator_provider_pid=$!
-kubectl --kubeconfig "$work/kubeconfig" -n sproozi-system \
+kubectl --kubeconfig "$work/kubeconfig" -n sproozi-sessions \
   port-forward service/sproozi-work 18444:8443 >"$codex/profile-forward.log" 2>&1 &
 profile_forward_pid=$!
 python3 hack/verify/portable-workflows/verify.py \
@@ -112,7 +113,7 @@ token, and the verifier's pull signs in as `sproozi-cli`.
 Worker/provider credentials are not copied into checkpoints. Keep journals and
 both PVCs when investigating a failed run. Stop the two saved provider PIDs and
 `profile_forward_pid`, then delete only the dedicated Kind cluster after retaining
-the private proof. The verifier owns its temporary home daemon and stops it.
+the private proof. The verifier owns its temporary service and stops it.
 
 ## Development and governed home-ops Projects
 
@@ -129,7 +130,7 @@ docker tag docker.io/sproozi-session/native:sproozi-build docker.io/sproozi-sess
 
 Repeat the image import and `host.py prepare` steps using this image's resolved
 local ID for agent/helper/anchor. Generate the worker manifest as in the mobility
-walkthrough. Then configure the two distinct Projects, independent home approval
+walkthrough. Then configure the two distinct Projects, independent approval by this machine's service
 and explicit compiler limits before deploying the owner:
 
 ```sh
@@ -142,7 +143,7 @@ python3 hack/verify/portable-workflows/deploy.py \
   --fixture "$codex" --images "$work/images/images.json" \
   --hermes-image "$hermes_ref" --build-sproozi --output "$codex/stack.yaml"
 kubectl --kubeconfig "$work/kubeconfig" apply --server-side -f "$codex/stack.yaml"
-kubectl --kubeconfig "$work/kubeconfig" -n sproozi-system \
+kubectl --kubeconfig "$work/kubeconfig" -n sproozi-sessions \
   rollout status deployment/sproozi-work --timeout=180s
 kubectl --kubeconfig "$work/kubeconfig" -n sproozi-coordinators \
   rollout status deployment/hermes-coordinator --timeout=180s
@@ -158,7 +159,7 @@ provenance. The separately owned PVC source is `/state/source-sproozi`.
 The remote owner then captures it immutably for each submission.
 
 Start both model providers and the owner port-forward from the preceding section,
-using this fixture's TLS files, before running either proof. Leave the home absent:
+using this fixture's TLS files, before running either proof. Leave the service stopped:
 
 ```sh
 python3 hack/verify/portable-workflows/verify.py \
@@ -182,7 +183,7 @@ execution identity and unchanged source checkpoint/ownership. MCP and local CLI
 Project filters and persistent repository association are checked.
 
 Home-ops uses a one-hour read-only ServiceAccount credential created only in the
-explicit dedicated Kind cluster. The native client observes the approved Running
+explicit dedicated Kind cluster. The harness observes the approved Running
 Pod, attempts a prohibited Secrets read and reports the actual denial in both
 placements. The verifier checks execution-bound gateway audit events and scans
 decoded selected native/workspace artifacts and audit logs for the generated
@@ -200,13 +201,13 @@ A resource-policy denial before writer preparation retains `unknown` status.
 Inspect the exact cause, correct the reviewed policy, then pass the original
 `report.json` request UUID via `--request-id` into a **fresh** output directory.
 The verifier uses the public CLI recovery path when necessary and preserves the
-original session, allocation, deadline and grant. An exhausted allocation is not
+original session, visit, deadline and grant. An exhausted allowance is not
 refunded by recovery; use exact cancellation and a deliberately new task.
 Preserve failed reports rather than editing their `passed` value.
 
 ## Real external MCP
 
-For the keyless public DeepWiki integration, gracefully stop the profile and home,
+For the keyless public DeepWiki integration, gracefully stop the remote executor and the service,
 then repeat configuration with `--deepwiki`. The configurator uses the same
 [public example registry](../../../examples/mcp/servers.json)
 for a private local copy and the remote ConfigMap, and adds the example's
@@ -222,7 +223,7 @@ kubectl --kubeconfig "$work/kubeconfig" -n sproozi-system rollout restart deploy
 kubectl --kubeconfig "$work/kubeconfig" -n sproozi-system rollout status deployment/sproozi-gateway --timeout=180s
 ```
 
-Restart profile and home with the same protected directories, then resume a
+Restart the remote executor and the service with the same protected directories, then resume a
 retained session with `sproozi resume SESSION_ID --config FILE --detach`.
 The fresh grant has ten `mcp.deepwiki` calls. Run `mcp-probe.js` through the exact
 fixture's active agent, first with `docker exec -i CONTAINER_ID node`, then with
@@ -235,7 +236,7 @@ without printing it. It calls the real `read_wiki_structure` tool for
 `modelcontextprotocol/go-sdk`, then verifies wrong-repository, wrong-tool and
 direct-provider denials. The calls are transport probes under real worker
 identity; they do not establish autonomous model selection of that tool. Move
-back locally and stop. Inspect the retained sealed receipts for actual admitted
+back locally and stop. Inspect the retained finalized-usage receipts for actual admitted
 call units and immutable remaining allowance. Duplicate allowed probes consume
 additional units; denied calls do not.
 

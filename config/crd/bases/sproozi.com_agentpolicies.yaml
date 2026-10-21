@@ -173,6 +173,8 @@ spec:
                 x-kubernetes-validations:
                 - message: must not exceed one hour
                   rule: duration(self) <= duration('1h')
+                - message: must be greater than zero
+                  rule: duration(self) > duration('0s')
               maxModelCallSeconds:
                 description: |-
                   MaxModelCallSeconds lowers the longest one model call of a run may

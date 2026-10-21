@@ -137,7 +137,7 @@ class AdministratorProbeTests(unittest.TestCase):
                   "threadId": "fixture-native", "epoch": 2 if remote else 1, "placement": "remote" if remote else "local", "harness": "claude-code"}
         agent = {"ID": "container-fixture", "Execution": "fixture-allocation"}
         (root / "docker" / "fixture.json").write_text(json.dumps({"launch": launch, "Agent": agent}))
-        args = types.SimpleNamespace(kubeconfig=kubeconfig, kubectl=Path("kubectl"), namespace="sproozi-system", agent_namespace="sproozi-agents")
+        args = types.SimpleNamespace(kubeconfig=kubeconfig, kubectl=Path("kubectl"), namespace="sproozi-sessions", agent_namespace="sproozi-agents")
         calls = []
         observed = {"passed": True, "nativeUID": 1000, "capabilityDenials": {"kubernetesRead": {"httpStatus": "403"}},
                     "directDenials": {"ipv4": {"exitCode": 7, "httpStatus": "000"}}, "firewallMutationDenied": True}

@@ -83,6 +83,8 @@ The client sends the context's bearer token, obtained through client-go's own
 authentication wrappers so static tokens, token files and exec plugins all
 work. A context that signs in only with a client certificate, or impersonates
 another user, is refused with guidance, because the executor cannot review it.
+(Replaced by the amendment below: the client now sends only an
+audience-bound token it mints for `sproozi-cli`.)
 The executor runs a TokenReview and a SubjectAccessReview for `use` on `remoteexecutors` in its namespace, named by
 its placement name, on every request. An unknown token is 401, a known identity
 without the permission is 403, and a review that cannot complete is 503
@@ -141,6 +143,31 @@ transport failure or a 401 it connects again on the next call, reloading the
 kubeconfig, so a refreshed or rotated token is picked up, and it checks that the
 executor still describes itself as recorded. Exec plugins run in home's
 environment, so their binaries must be on home's `PATH`.
+
+### Amendment: an audience-bound token (2026-10-21)
+
+A review found that the client sent whatever bearer token its context held,
+including an exec plugin's, and that the executor's TokenReview named no
+audience. A compromised or impersonated executor could therefore collect a
+developer's full cluster credential, for example from an administrator's
+context. Now:
+
+- The client uses its context only to call the API server. It mints a token
+  for the `sproozi-cli` ServiceAccount with the TokenRequest API, with the
+  audience `sproozi-remote-executor` and a one-hour lifetime, and sends only
+  that token to the executor. It mints a new one five minutes before expiry.
+  The context's own credential (static token, exec plugin, client certificate
+  or impersonation) never reaches the executor, so all of them now work.
+- The `sproozi-cli` Role gains `create` on `serviceaccounts/token`, limited by
+  `resourceNames` to `sproozi-cli` itself, so it grants no new identity.
+- The executor's TokenReview requests that audience and refuses a token whose
+  review does not confirm it.
+
+Alternatives: keep sending the context's token, which leaks it; or have the
+client check with a SelfSubjectReview that the context already is the
+`sproozi-cli` ServiceAccount, which still sends an unscoped API token. The cost
+is a lockstep upgrade: an older client and a newer executor, or the reverse,
+get a 401 with an upgrade hint. Revisit if per-executor audiences are wanted.
 
 ## Alternatives
 

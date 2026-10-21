@@ -17,6 +17,10 @@ import (
 	"testing"
 	"time"
 
+	authorizationv1 "k8s.io/api/authorization/v1"
+	k8sfake "k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
+
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/budget"
 	budgetkubernetes "github.com/andrewmccall/sproozi/internal/budget/kubernetes"
@@ -29,7 +33,9 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 )
 
 func TestGatewaySchemeSupportsRunIdentityAndBudgetObjects(t *testing.T) {
@@ -578,10 +584,13 @@ func TestHealthServerAnswersOnlyReadiness(t *testing.T) {
 // past the inspected connection's lifetime. Only the wait for its response
 // headers is bounded, by what the connection allows a non-streaming call.
 func TestModelClientBoundsOnlyResponseHeaders(t *testing.T) {
-	client := newModelClient()
-	transport, ok := client.Transport.(*http.Transport)
-	if client.Timeout != 0 || !ok || transport.ResponseHeaderTimeout != proxytransport.MaxRequestDuration {
-		t.Fatalf("model client timeout %v, header timeout %v", client.Timeout, transport.ResponseHeaderTimeout)
+	model := newModelClient()
+	transport, ok := model.Transport.(*http.Transport)
+	if ok && transport.Proxy != nil {
+		t.Fatal("model client must not use an ambient proxy")
+	}
+	if model.Timeout != 0 || !ok || transport.ResponseHeaderTimeout != proxytransport.MaxRequestDuration {
+		t.Fatalf("model client timeout %v, header timeout %v", model.Timeout, transport.ResponseHeaderTimeout)
 	}
 	if upstreamCallTimeout+proxytransport.ResponseMargin > proxytransport.MaxSessionLifetime {
 		t.Fatalf("upstream call timeout %v does not fit the inspected connection", upstreamCallTimeout)
@@ -604,6 +613,27 @@ func TestMaxModelCallIsConfigurableWithinBounds(t *testing.T) {
 		_, err := loadStartupConfig()
 		if err == nil || !strings.Contains(err.Error(), maxModelCallEnv+`="`+invalid+`" must be an integer from 1 to 3600`) {
 			t.Fatalf("invalid model call maximum %q accepted or unexplained: %v", invalid, err)
+		}
+	}
+}
+
+// BUDGET_LEDGER_RETENTION is checked with the rest of the startup
+// configuration, before any handler or server is built.
+func TestLedgerRetentionIsValidatedAtStartup(t *testing.T) {
+	validGatewayEnvironment(t)
+	t.Setenv("BUDGET_LEDGER_RETENTION", "")
+	cfg, err := loadStartupConfig()
+	if err != nil || cfg.ledgerRetention != budgetkubernetes.DefaultRetention {
+		t.Fatalf("default ledger retention = %v, %v", cfg.ledgerRetention, err)
+	}
+	t.Setenv("BUDGET_LEDGER_RETENTION", "2h")
+	if cfg, err = loadStartupConfig(); err != nil || cfg.ledgerRetention != 2*time.Hour {
+		t.Fatalf("configured ledger retention = %v, %v", cfg.ledgerRetention, err)
+	}
+	for _, invalid := range []string{"30m", "soon", "-1h"} {
+		t.Setenv("BUDGET_LEDGER_RETENTION", invalid)
+		if _, err := loadStartupConfig(); err == nil || !strings.Contains(err.Error(), "BUDGET_LEDGER_RETENTION") {
+			t.Fatalf("invalid ledger retention %q accepted or unexplained: %v", invalid, err)
 		}
 	}
 }
@@ -634,7 +664,7 @@ func TestSignalDrainsModelCallsBeforeExit(t *testing.T) {
 // lease is recovered without another call on that account.
 func TestGatewaySweepsBudgetLedgers(t *testing.T) {
 	scheme := runtime.NewScheme()
-	if err := corev1.AddToScheme(scheme); err != nil {
+	if err := api.AddToScheme(scheme); err != nil {
 		t.Fatal(err)
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).Build()
@@ -682,5 +712,96 @@ func TestLegacySweepRetriesUntilItSucceeds(t *testing.T) {
 	}
 	if attempts != 3 {
 		t.Fatalf("attempts = %d", attempts)
+	}
+}
+
+// A ledger is pruned only when its AgentRun is missing from the full list, and
+// a failed list prunes nothing.
+func TestGatewayPrunesLedgersOfDeletedRuns(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := api.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	live := &api.AgentRun{}
+	live.Name, live.Namespace, live.UID = "live", "default", "live-uid"
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(live).Build()
+	ledger := budgetkubernetes.NewLedger(c, "budgets")
+	for _, key := range []budget.AccountKey{"live-uid/model.inference", "gone-uid/model.inference"} {
+		r, err := ledger.Reserve(t.Context(), key, budget.UsageReservation{MaxUnits: 10, Units: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := ledger.Settle(t.Context(), r, budget.TrustedUsage{Units: 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	later := time.Now().Add(budgetkubernetes.DefaultRetention + time.Hour)
+	deleted, err := pruneLedgers(t.Context(), c, "budgets", later, budgetkubernetes.DefaultRetention)
+	if err != nil || deleted != 1 {
+		t.Fatalf("pruneLedgers = %d, %v; want 1 deletion", deleted, err)
+	}
+	if _, err := ledger.State(t.Context(), "live-uid/model.inference"); err != nil {
+		t.Fatalf("live run's ledger was pruned: %v", err)
+	}
+
+	// A failed AgentRun list must delete nothing, even a prunable ledger.
+	listFails := interceptor.NewClient(c, interceptor.Funcs{
+		List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+			if _, runs := list.(*api.AgentRunList); runs {
+				return errors.New("apiserver unavailable")
+			}
+			return c.List(ctx, list, opts...)
+		},
+	})
+	r, err := ledger.Reserve(t.Context(), "gone-again/model.inference", budget.UsageReservation{MaxUnits: 10, Units: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ledger.Settle(t.Context(), r, budget.TrustedUsage{Units: 1}); err != nil {
+		t.Fatal(err)
+	}
+	deleted, err = pruneLedgers(t.Context(), listFails, "budgets", later, budgetkubernetes.DefaultRetention)
+	if err == nil || deleted != 0 {
+		t.Fatalf("pruneLedgers with a failed list = %d, %v; want an error and no deletion", deleted, err)
+	}
+	if _, err := ledger.State(t.Context(), "gone-again/model.inference"); err != nil {
+		t.Fatalf("ledger deleted although the AgentRun list failed: %v", err)
+	}
+}
+
+// Upstream clients carry injected credentials, so they ignore ambient proxy
+// settings and never follow redirects.
+func TestUpstreamClientIgnoresProxyAndRedirects(t *testing.T) {
+	t.Setenv("HTTPS_PROXY", "http://proxy.invalid:3128")
+	c := newUpstreamClient(time.Second)
+	transport, ok := c.Transport.(*http.Transport)
+	if !ok || transport.Proxy != nil {
+		t.Fatalf("transport = %#v, want no proxy", c.Transport)
+	}
+	if c.CheckRedirect == nil || c.CheckRedirect(nil, nil) != http.ErrUseLastResponse {
+		t.Fatal("upstream client follows redirects")
+	}
+}
+
+// The gateway warns, at startup, when any Role still lets it
+// write its own configuration.
+func TestGatewayWarnsAboutUpgradeResidue(t *testing.T) {
+	for _, allowed := range []bool{true, false} {
+		clients := k8sfake.NewClientset()
+		clients.PrependReactor("create", "selfsubjectaccessreviews", func(
+			action k8stesting.Action,
+		) (bool, runtime.Object, error) {
+			review := action.(k8stesting.CreateAction).GetObject().(*authorizationv1.SelfSubjectAccessReview)
+			review.Status.Allowed = allowed
+			return true, review, nil
+		})
+		var out strings.Builder
+		warnSystemConfigWrites(t.Context(), clients, &out)
+		if strings.Contains(out.String(), "WARNING") != allowed {
+			t.Fatalf("allowed=%v: output %q", allowed, out.String())
+		}
 	}
 }

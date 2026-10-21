@@ -1,0 +1,119 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.21.0
+  name: budgetledgers.sproozi.com
+spec:
+  group: sproozi.com
+  names:
+    kind: BudgetLedger
+    listKind: BudgetLedgerList
+    plural: budgetledgers
+    singular: budgetledger
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.runUID
+      name: Run
+      type: string
+    - jsonPath: .spec.capability
+      name: Capability
+      type: string
+    - jsonPath: .spec.unitsUsed
+      name: Units
+      type: integer
+    - jsonPath: .spec.finalized
+      name: Finalized
+      type: boolean
+    - jsonPath: .spec.writtenAt
+      name: Written
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          BudgetLedger is one run account's durable usage, written by the gateway and,
+          for managed sessions, the remote executor. It is a separate resource so that
+          write access to ledgers grants no write access to ConfigMaps, which hold the
+          gateway's own configuration.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec holds the account's usage
+            properties:
+              account:
+                description: |-
+                  Account is the account key: on Kubernetes, the run UID and capability
+                  joined by "/". The object name is derived from it.
+                maxLength: 512
+                minLength: 1
+                type: string
+              capability:
+                description: Capability is the account's capability, such as model.inference.
+                maxLength: 256
+                type: string
+              costMicros:
+                description: CostMicros copies the settled cost from State, for display.
+                format: int64
+                minimum: 0
+                type: integer
+              finalized:
+                description: |-
+                  Finalized is true once the account is sealed: its usage can no longer
+                  change.
+                type: boolean
+              runUID:
+                description: |-
+                  RunUID is the run whose usage this account holds, empty for an account
+                  key without one. It is also the sproozi.com/run-uid label.
+                maxLength: 63
+                type: string
+              state:
+                description: |-
+                  State is the ledger's encoded counters, reservations, leases and seal.
+                  Only the gateway and the remote executor interpret it.
+                maxLength: 1048576
+                minLength: 1
+                type: string
+              unitsUsed:
+                description: UnitsUsed copies the settled units from State, for display.
+                format: int64
+                minimum: 0
+                type: integer
+              writtenAt:
+                description: WrittenAt is when the ledger was last written. Retention
+                  counts from it.
+                format: date-time
+                type: string
+            required:
+            - account
+            - state
+            - writtenAt
+            type: object
+            x-kubernetes-validations:
+            - message: spec.account is immutable
+              rule: self.account == oldSelf.account
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources: {}

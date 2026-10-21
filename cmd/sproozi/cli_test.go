@@ -602,3 +602,11 @@ func TestDocumentationPathsBecomeLinks(t *testing.T) {
 		t.Fatalf("detached line: %s", line)
 	}
 }
+
+// "help help" describes help instead of suggesting the name just typed.
+func TestHelpHelpDescribesHelp(t *testing.T) {
+	code, out, errOut := runCLI("help", "help")
+	if code != 0 || !strings.Contains(out, "sproozi help [command]") || strings.Contains(errOut, "Did you mean") {
+		t.Fatalf("help help = %d %q %q", code, out, errOut)
+	}
+}

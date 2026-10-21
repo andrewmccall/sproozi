@@ -94,7 +94,7 @@ func (p *PodSandboxClient) EnsureManaged(ctx context.Context, run *api.AgentRun,
 	if err != nil {
 		return "", err
 	}
-	return p.ensurePod(ctx, pod)
+	return p.ensurePod(ctx, pod, rt.Spec.GatewayEndpoint)
 }
 
 func BuildManagedPodSpec(run *api.AgentRun, rt *api.AgentRuntime, binding *registry.Record) (*corev1.Pod, error) {

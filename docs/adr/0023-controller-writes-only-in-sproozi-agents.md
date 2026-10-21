@@ -1,4 +1,4 @@
-# The controller writes sandbox objects only in sproozi-agents
+# 0023: The controller writes sandbox objects only in sproozi-agents
 
 Status: accepted
 Date: 2026-10-18

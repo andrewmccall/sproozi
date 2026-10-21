@@ -4,4 +4,5 @@ resources:
 - sproozi_v1alpha1_agentpolicy.yaml
 - sproozi_v1alpha1_agenttemplate.yaml
 - sproozi_v1alpha1_agentrun.yaml
+- sproozi_v1alpha1_budgetledger.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

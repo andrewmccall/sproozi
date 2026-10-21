@@ -90,7 +90,7 @@ func TestNamedMCPGrantUsesOnlyExistingGatewayNetworkRoute(t *testing.T) {
 	if err := c.Get(t.Context(), key, &np); err != nil {
 		t.Fatal(err)
 	}
-	if len(np.Spec.Egress) != 2 || np.Spec.Egress[1].Ports[0].Port.IntVal != 8443 || np.Spec.Egress[1].To[0].PodSelector == nil {
+	if len(np.Spec.Egress) != 1 || np.Spec.Egress[0].Ports[0].Port.IntVal != 8443 || np.Spec.Egress[0].To[0].PodSelector == nil {
 		t.Fatalf("MCP network route=%+v", np.Spec.Egress)
 	}
 	p.Spec.AllowedCapabilities = nil
@@ -100,7 +100,7 @@ func TestNamedMCPGrantUsesOnlyExistingGatewayNetworkRoute(t *testing.T) {
 	if err := c.Get(t.Context(), key, &np); err != nil {
 		t.Fatal(err)
 	}
-	if len(np.Spec.Egress) != 1 {
+	if len(np.Spec.Egress) != 0 {
 		t.Fatal("revoked MCP grant retained gateway route")
 	}
 }
@@ -127,31 +127,28 @@ func TestNetworkPolicyDeniesAllIngress(t *testing.T) {
 	}
 }
 
-func TestNetworkPolicyAllowsDNS(t *testing.T) {
+// Sandboxes resolve nothing: the gateway address is pinned in the Pod, so the
+// NetworkPolicy has no route to any resolver.
+func TestNetworkPolicyDeniesDNS(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).Build()
 	run := testRun("bbbbbbbb-0000-0000-0000-000000000003")
-	_ = kubernetes.EnsureNetworkPolicy(context.Background(), c, run)
-	npName := kubernetes.RunName(run.UID)
+	run.Spec.Capabilities = []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityModelInference}
+	if err := kubernetes.EnsureNetworkPolicy(context.Background(), c, run); err != nil {
+		t.Fatal(err)
+	}
 	var np networkingv1.NetworkPolicy
-	_ = c.Get(context.Background(), client.ObjectKey{Namespace: kubernetes.AgentsNamespace, Name: npName}, &np)
-
-	found53UDP := false
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: kubernetes.AgentsNamespace, Name: kubernetes.RunName(run.UID)}, &np); err != nil {
+		t.Fatal(err)
+	}
 	for _, rule := range np.Spec.Egress {
 		for _, port := range rule.Ports {
-			if port.Port != nil && port.Port.IntVal == 53 && port.Protocol != nil && *port.Protocol == corev1.ProtocolUDP {
-				found53UDP = true
+			if port.Port != nil && port.Port.IntVal == 53 {
+				t.Fatalf("NetworkPolicy allows port 53: %+v", rule)
 			}
 		}
-	}
-	if !found53UDP {
-		t.Error("NetworkPolicy missing DNS (UDP 53) egress rule")
-	}
-	for _, rule := range np.Spec.Egress {
 		for _, peer := range rule.To {
 			if peer.NamespaceSelector != nil && peer.NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"] == "kube-system" {
-				if peer.PodSelector == nil || peer.PodSelector.MatchLabels["k8s-app"] != "kube-dns" {
-					t.Error("DNS egress must select the kube-dns Pods, not the whole namespace")
-				}
+				t.Fatalf("NetworkPolicy allows kube-system: %+v", rule)
 			}
 		}
 	}
@@ -194,7 +191,7 @@ func TestNetworkPolicyRemovesRoutesWhenLivePolicyTightens(t *testing.T) {
 		{allowed: slices.Clone(run.Spec.Capabilities), gateway: true},
 		// One requested capability is still allowed, so the gateway route stays.
 		{allowed: []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityModelInference}, gateway: true},
-		// No requested capability is allowed any more, so only DNS remains.
+		// No requested capability is allowed any more, so no egress remains.
 		{allowed: []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityKubernetesRead}, gateway: false},
 	} {
 		policy.Spec.AllowedCapabilities = step.allowed
@@ -232,32 +229,25 @@ func TestEnsureNetworkPolicyTightensExistingRoutes(t *testing.T) {
 	assertEgressRoutes(t, c, run, false)
 }
 
-// assertEgressRoutes checks the run's stored egress rules exactly: the kube-dns
-// rule always, followed by the shared gateway route only when gateway is true.
+// assertEgressRoutes checks the run's stored egress rules exactly: the shared
+// gateway route when gateway is true, and nothing otherwise.
 func assertEgressRoutes(t *testing.T, c client.Client, run *sprooziv1alpha1.AgentRun, gateway bool) {
 	t.Helper()
 	var np networkingv1.NetworkPolicy
 	if err := c.Get(context.Background(), client.ObjectKey{Namespace: kubernetes.AgentsNamespace, Name: kubernetes.RunName(run.UID)}, &np); err != nil {
 		t.Fatal(err)
 	}
-	want := 1
+	want := 0
 	if gateway {
-		want = 2
+		want = 1
 	}
 	if len(np.Spec.Egress) != want {
 		t.Fatalf("egress rules = %+v, want %d", np.Spec.Egress, want)
 	}
-	dns := np.Spec.Egress[0]
-	if len(dns.Ports) != 2 || len(dns.To) != 1 ||
-		*dns.Ports[0].Protocol != corev1.ProtocolUDP || dns.Ports[0].Port.IntVal != 53 ||
-		*dns.Ports[1].Protocol != corev1.ProtocolTCP || dns.Ports[1].Port.IntVal != 53 ||
-		dns.To[0].PodSelector == nil || dns.To[0].PodSelector.MatchLabels["k8s-app"] != "kube-dns" {
-		t.Fatalf("first egress rule = %+v, want kube-dns on UDP and TCP 53", dns)
-	}
 	if !gateway {
 		return
 	}
-	route := np.Spec.Egress[1]
+	route := np.Spec.Egress[0]
 	if len(route.Ports) != 1 || len(route.To) != 1 ||
 		*route.Ports[0].Protocol != corev1.ProtocolTCP || route.Ports[0].Port.IntVal != 8443 ||
 		route.To[0].NamespaceSelector == nil || route.To[0].NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"] != "sproozi-system" ||

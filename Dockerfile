@@ -2,7 +2,7 @@
 # The digest is the multi-platform manifest digest for the pinned Go release.
 # Keeping the platform selector implicit lets BuildKit select the matching
 # child manifest for TARGETARCH while retaining one auditable reference.
-FROM golang:1.26-bookworm@sha256:e8c859f5632dcfde7b32d2012b4351728f6437930887c2f6a91ea242459e5514 AS builder
+FROM golang:1.26.10-bookworm@sha256:632dff7351799a5a9954a48dc06670ade72ee44e8c351cdc0e5a57af2fea21af AS builder
 ARG TARGETOS
 ARG TARGETARCH
 
@@ -26,7 +26,6 @@ COPY internal/ internal/
 # by leaving it empty we can ensure that the container and binary shipped on it will have the same platform.
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -o manager cmd/main.go && \
     CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -o gateway ./cmd/gateway && \
-    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -o webhook cmd/webhook/main.go && \
     CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -o tasks cmd/tasks/main.go && \
     CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -o certificates ./cmd/certificates
 
@@ -36,7 +35,6 @@ FROM scratch
 WORKDIR /
 COPY --from=builder /workspace/manager .
 COPY --from=builder /workspace/gateway .
-COPY --from=builder /workspace/webhook .
 COPY --from=builder /workspace/tasks .
 COPY --from=builder /workspace/certificates .
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt

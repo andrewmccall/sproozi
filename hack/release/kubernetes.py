@@ -3,13 +3,16 @@
 
 The archive extracts to sproozi-release/:
 
-  crds.yaml                     the four CRDs, applied before anything else
-  install/                      controller, gateway, webhook, RBAC, namespaces
+  crds.yaml                     every Sproozi CRD, applied before anything else
+  install/                      controller, gateway, RBAC, namespaces
   self-managed-ca/              optional certificate controller (no cert-manager)
   quickstart-self-managed-ca/   install + self-managed CA + kubernetes.read gateway
   quickstart-external-ca/       install + kubernetes.read gateway; you supply TLS
   first-check/                  provider-free AgentRun with permitted and denied paths
   cli-access/                   the CLI's ServiceAccount and Role for a remote executor's namespace
+                                (sproozi-sessions by default; never sproozi-system)
+  kind/                         a two-node Kind cluster configuration for trying the release
+  README.md                     where to start
 
 Nothing in the tree is modified; overlays are rendered in a scratch directory.
 """
@@ -66,8 +69,9 @@ def render(version, control, native, output):
         crds, install = split(build(binary, scratch, "install", ["config/install", "config/agent-rbac"], control))
         _, certificates = split(build(binary, scratch, "certificates", ["config/certificates"], control))
         _, cli_access = split(build(binary, scratch, "cli-access", ["config/cli-access"], control))
-        if crds.count("kind: CustomResourceDefinition") != 4:
-            raise ValueError("expected exactly four CRDs")
+        expected = len(list((ROOT / "config/crd/bases").glob("*.yaml")))
+        if crds.count("kind: CustomResourceDefinition") != expected:
+            raise ValueError(f"expected exactly {expected} CRDs, one per file in config/crd/bases")
         for text, name in [(install, "install"), (certificates, "certificates")]:
             for image in re.findall(r"(?m)^\s+image: (\S+)$", text):
                 if image != control:

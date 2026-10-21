@@ -100,6 +100,16 @@ class TrustRotationTests(unittest.TestCase):
         self.assertEqual(named[("ConfigMap", "sproozi-remote-executor")]["data"]["ca.crt"], certificate.read_text())
         profile = json.loads(named[("ConfigMap", "sproozi-work-profile")]["data"]["profile.json"])
         self.assertEqual(profile["harness"], harness)
+        # The executor and its managed runs live apart from the gateway's
+        # configuration in sproozi-system, as in the public example.
+        self.assertEqual(profile["namespace"], "sproozi-sessions")
+        for kind, name in [("Service", "sproozi-work"), ("Deployment", "sproozi-work"),
+                           ("ConfigMap", "sproozi-work-profile"), ("ConfigMap", "sproozi-remote-executor"),
+                           ("ServiceAccount", "sproozi-work")]:
+            self.assertEqual(named[(kind, name)]["metadata"]["namespace"], "sproozi-sessions", (kind, name))
+        for kind in ("AgentRuntime", "AgentPolicy", "AgentTemplate"):
+            managed = [doc for doc in documents if doc["kind"] == kind]
+            self.assertEqual([doc["metadata"]["namespace"] for doc in managed], ["sproozi-sessions"], kind)
         self.assertNotIn("tokenFile", profile)
         self.assertTrue(profile["certificateFile"].startswith("/var/run/sproozi-work/"))
         self.assertIn(("ClusterRoleBinding", "sproozi-work-auth-delegator"), named)

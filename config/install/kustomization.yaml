@@ -1,4 +1,4 @@
+# The install the release ships (install.yaml). Resources that must not take
+# config/default's sproozi-system namespace go here, beside it.
 resources:
 - ../default
-- ../webhook-state-rbac
-- ../webhook-secrets

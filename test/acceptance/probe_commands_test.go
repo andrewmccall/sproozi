@@ -19,7 +19,8 @@ func TestLiveErrorsRedactCredentialsBeforeTruncation(t *testing.T) {
 }
 
 // This checks shell argument construction, not network enforcement. The live
-// suite still must run these same commands in real, run-bound probe Pods.
+// suite runs these same commands in the run's sandbox, or in a separate Pod
+// for the probes that must be refused.
 func TestDenialProbeShellArguments(t *testing.T) {
 	const clients = `
 cat() { printf test-token; }
@@ -43,7 +44,7 @@ curl() {
 `
 	for _, probe := range demoDenialProbes() {
 		t.Run(probe.name, func(t *testing.T) {
-			out, err := exec.Command("/bin/sh", "-ec", clients+probe.command).CombinedOutput()
+			out, err := exec.Command("/bin/sh", "-eu", "-c", clients+probe.script()).CombinedOutput()
 			if err != nil {
 				t.Fatalf("probe shell did not pass correctly quoted arguments: %v: %s", err, out)
 			}

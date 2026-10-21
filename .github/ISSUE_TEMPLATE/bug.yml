@@ -1,0 +1,46 @@
+name: Bug report
+description: Something Sproozi does differs from its documentation.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not report security vulnerabilities here. See SECURITY.md.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `sproozi --version`, or the release or commit you installed.
+    validations:
+      required: true
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Where it ran
+      options: [Local Docker, Kubernetes, Both, Not applicable]
+    validations:
+      required: true
+  - type: dropdown
+    id: harness
+    attributes:
+      label: Harness
+      options: [Codex, Claude Code, OpenCode, Hermes, Not applicable]
+    validations:
+      required: true
+  - type: input
+    id: client
+    attributes:
+      label: Harness client version
+      description: For example the output of `codex --version` in the session, if you know it.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected
+      description: Include the exact error text and the command or object that produced it. Remove credentials and private repository content.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true

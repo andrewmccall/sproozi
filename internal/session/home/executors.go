@@ -152,6 +152,14 @@ func (s *Service) workSource(name string) WorkSource {
 	return s.workSources[name]
 }
 
+// placementsSnapshot copies the placements under remoteMu, so a caller can
+// call into each without holding the lock while executor discovery adds one.
+func (s *Service) placementsSnapshot() map[string]session.Placement {
+	s.remoteMu.RLock()
+	defer s.remoteMu.RUnlock()
+	return maps.Clone(s.placements)
+}
+
 // placement finds a destination by name: a local placement or a recorded executor.
 func (s *Service) placement(name string) session.Placement {
 	s.remoteMu.RLock()

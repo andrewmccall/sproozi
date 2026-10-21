@@ -1,0 +1,11 @@
+# Every sandbox Pod in sproozi-agents is denied all ingress and egress unless a
+# per-run NetworkPolicy allows the shared gateway. Policies are additive, so a
+# Pod whose run labels were changed or whose per-run policy was deleted falls
+# back to no network at all, rather than to the cluster's default allow.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sproozi-sandbox-default-deny
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]

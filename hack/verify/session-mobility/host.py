@@ -70,7 +70,7 @@ def prepare(args):
     leaf, key = out / "gateway.crt", out / "gateway.key"
     if any(path.exists() for path in [ca, ca_key, leaf, key]):
         raise RuntimeError("Use a fresh output directory; retained trust keys cannot be replaced")
-    write(out / "leaf.ext", "subjectAltName=DNS:api.openai.com,DNS:kubernetes.default.svc,DNS:sproozi-work.sproozi-system.svc,DNS:sproozi-gateway.sproozi-system.svc,DNS:sproozi-gateway.sproozi-system.svc.cluster.local,IP:127.0.0.1,IP:" + args.gateway_ip +
+    write(out / "leaf.ext", "subjectAltName=DNS:api.openai.com,DNS:kubernetes.default.svc,DNS:sproozi-work.sproozi-sessions.svc,DNS:sproozi-gateway.sproozi-system.svc,DNS:sproozi-gateway.sproozi-system.svc.cluster.local,IP:127.0.0.1,IP:" + args.gateway_ip +
           "\nbasicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\n"
           "extendedKeyUsage=serverAuth\nsubjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid,issuer\n")
     run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-sha256", "-days", "2",

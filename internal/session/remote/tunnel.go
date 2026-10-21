@@ -16,7 +16,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/portforward"
-	"k8s.io/client-go/transport"
 	"k8s.io/client-go/transport/spdy"
 )
 
@@ -151,48 +150,3 @@ type tunnelAddr struct{}
 
 func (tunnelAddr) Network() string { return "kubernetes-port-forward" }
 func (tunnelAddr) String() string  { return "kubernetes-port-forward" }
-
-// bearerToken returns the bearer token the context authenticates with, the
-// token the executor reviews. It applies client-go's own authentication
-// wrappers, so a static token, a token file and an exec plugin all work, and
-// refreshed credentials are used. A context that authenticates only with a
-// client certificate, or impersonates another user, has no token the executor
-// could review.
-func bearerToken(sel Selection, config *rest.Config) (string, error) {
-	if config.Impersonate.UserName != "" || len(config.Impersonate.Groups) > 0 || config.Impersonate.UID != "" {
-		return "", fmt.Errorf("%s impersonates another user, which the remote executor cannot verify; use a context "+
-			"that signs in as the ServiceAccount %s itself, such as the %q context (docs/reference/remote-executors.md)",
-			sel, CLIServiceAccount, DefaultContext)
-	}
-	settings, err := config.TransportConfig()
-	if err != nil {
-		return "", fmt.Errorf("%s cannot be used: %w", sel, err)
-	}
-	capture := &captureAuthorization{}
-	roundTripper, err := transport.HTTPWrappersForConfig(settings, capture)
-	if err != nil {
-		return "", fmt.Errorf("%s cannot be used: %w", sel, err)
-	}
-	request, err := http.NewRequest(http.MethodGet, "https://capture.invalid/", nil)
-	if err != nil {
-		return "", err
-	}
-	if response, err := roundTripper.RoundTrip(request); err == nil {
-		_ = response.Body.Close()
-	}
-	const prefix = "Bearer "
-	if len(capture.value) <= len(prefix) || capture.value[:len(prefix)] != prefix {
-		return "", fmt.Errorf("%s signs in without a bearer token (for example with a client certificate), which the "+
-			"remote executor cannot verify; use a context that signs in with the ServiceAccount %s's token, such as "+
-			"the %q context (docs/reference/remote-executors.md)", sel, CLIServiceAccount, DefaultContext)
-	}
-	return capture.value[len(prefix):], nil
-}
-
-// captureAuthorization records the Authorization header and sends nothing.
-type captureAuthorization struct{ value string }
-
-func (c *captureAuthorization) RoundTrip(r *http.Request) (*http.Response, error) {
-	c.value = r.Header.Get("Authorization")
-	return &http.Response{StatusCode: http.StatusNoContent, Body: http.NoBody, Request: r}, nil
-}

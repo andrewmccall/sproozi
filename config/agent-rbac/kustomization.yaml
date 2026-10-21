@@ -1,5 +1,6 @@
 namespace: sproozi-agents
 resources:
 - namespace.yaml
+- default_deny.yaml
 - controller_sandbox_role.yaml
 - controller_sandbox_role_binding.yaml

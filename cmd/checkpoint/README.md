@@ -10,7 +10,7 @@ New artifacts use version 2 with explicit `harness: codex` or `claude-code`,
 exactly one matching native component, and the workspace component. Client versions do not determine compatibility. Version 1 Codex artifacts have a separate
 explicit decoder; they do not create a default client for new launches. A move
 cannot switch kind. Metadata contains `harness`, `threadId`, `turnId`, `sha256`
-and `bytes`; it describes continuity, not authority or sealed usage.
+and `bytes`; it describes continuity, not authority or finalized usage.
 
 ## Managed helper lifecycle
 
@@ -71,7 +71,7 @@ workspace state travel. `--include-ignored` repeats for explicitly selected
 individual ignored files. The placement retains that immutable selection through
 all visits and seals. Missing selected files or unsafe paths fail capture.
 
-Once the placement has retained the artifact and sealed accounting receipt:
+Once the placement has retained the artifact and finalized usage receipt:
 
 ```sh
 /usr/local/bin/checkpoint finish

@@ -91,8 +91,10 @@ func main() {
 	// quotas and node capacity bound how many runs are active at once.
 	flag.IntVar(&maxActiveRuns, "max-active-runs", 0,
 		"The most AgentRuns that can be Admitted or Running at once across the cluster. 0 means no limit.")
+	// Production logging by default: JSON, no stack traces on warnings and no
+	// panics on DPanic. --zap-devel turns development mode on.
 	opts := zap.Options{
-		Development: true,
+		Development: false,
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()

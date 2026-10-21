@@ -102,9 +102,10 @@ func runAgentRunController(maxActiveRuns int) (client.Client, error) {
 		return nil, err
 	}
 	if err := (&controller.AgentRunReconciler{
-		Client:        mgr.GetClient(),
-		APIReader:     mgr.GetAPIReader(),
-		SandboxClient: k8sresources.NewPodSandboxClient(mgr.GetClient(), mgr.GetAPIReader()),
+		Client:    mgr.GetClient(),
+		APIReader: mgr.GetAPIReader(),
+		SandboxClient: k8sresources.NewPodSandboxClient(mgr.GetClient(), mgr.GetAPIReader()).
+			WithGatewayResolver(testGatewayResolver),
 		MaxActiveRuns: maxActiveRuns,
 	}).SetupWithManager(mgr); err != nil {
 		return nil, err

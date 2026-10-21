@@ -60,7 +60,7 @@ func (s *Service) settleExit(ctx context.Context, id string) (bool, error) {
 	if err != nil || execution.Phase != session.PhaseActive || execution.Active == nil {
 		return false, err
 	}
-	observer, ok := s.placements[execution.Active.Launch.Placement].(exitObserver)
+	observer, ok := s.placement(execution.Active.Launch.Placement).(exitObserver)
 	if !ok {
 		return false, nil
 	}

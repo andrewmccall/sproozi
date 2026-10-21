@@ -7,6 +7,12 @@ Provider-backed tests consume model usage and can create branches and PRs.
 The [test requirements](README.md) describe the behaviours to check. These
 instructions describe how to run the existing drivers.
 
+Where a check needs PyYAML, install the hash-pinned version in
+[`hack/requirements.txt`](../../hack/requirements.txt), as CI does, into a
+virtual environment:
+`python3 -m venv .local/venv && .local/venv/bin/pip install --require-hashes --no-deps -r hack/requirements.txt`,
+then put `.local/venv/bin` first on your `PATH`.
+
 ## Which command proves what
 
 Every verification target, what a pass establishes, and whether CI runs it.
@@ -23,6 +29,7 @@ so CI does not run `make test`. `Lint` and `E2E` are separate workflows.
 | `make verify-generated` | Regenerating code and manifests and running `go fmt` leaves the working tree unchanged, so generated files match their sources. Works before you commit; on failure the regenerated files are already in place to review. | Tests (`race-1`) | Go, Git |
 | `make verify-fast` | `go vet` is clean and every non-e2e package passes under the race detector with coverage, without regenerating sources. | Tests (`race-1` and `race-2`, as `vet` and `verify-race`) | Go; downloads envtest binaries |
 | `make verify-race` | The race-and-coverage half of `verify-fast`. `RACE_SHARD=1` runs `test/` and `internal/session`, `RACE_SHARD=2` every other package; the two shards together cover every non-e2e package. | Tests (`race-1`, `race-2`) | Go; downloads envtest binaries |
+| `make verify-deps` | `go.mod` and `go.sum` are tidy, and the pinned `govulncheck` finds no known vulnerability reachable from Sproozi code. | Lint (`verify-deps` step) | Go; network for the vulnerability database |
 | `make verify-protocol` | Pinned `gh` and `git` clients produce the GitHub protocol the gateway inspects. Zero matched or skipped tests fail. | Tests (`checks`) | Downloads the checksum-pinned `gh` |
 | `make verify-mcp` | MCP and gateway packages pass under race, every `examples/*/servers.json` example is consistent, the live MCP verifier's safety and failure reports pass offline, and `hack/mcp-tools.py` handles JSON, SSE and legacy-SSE servers. | Tests: `checks` runs the two Python checks, `hack/verify/mcp-live-test.py` and `hack/mcp_tools_test.py`; the race shards cover the Go tests | Go, Python 3 |
 | `make verify-workflow-fixtures` | Session-mobility protocol fixtures, quickstart ownership and CRD checks, Kind bootstrap readiness ordering, Kind image import and build cache selection, demo setup credential preservation and registry wiring, and `make demo` input
@@ -38,7 +45,7 @@ checks before cluster creation and cleanup after a setup failure. Stubs replace 
 | `make verify-mcp-kind` | Configured MCP providers work with stock Codex in an owned Kind cluster, including denials, budgets and revocation. Real model requests. | No | See [Configured MCP in Kind](#configured-mcp-in-kind) |
 | `make verify-local-onboarding` | On this computer's Docker engine, `init` provisions Codex and adds Claude Code, `doctor` passes, one stock terminal turn per harness completes through `attach`, both stops bind native UUIDs, each harness's profile instructions reach its provider, a renewed certificate reaches the running gateway, and a configured kubeconfig receives no calls. Deterministic local providers. See [Local onboarding](#local-onboarding). | No | Docker with Buildx, Go, Python 3, OpenSSL |
 | `make verify-kubernetes-release` | In an owned Kind cluster with enforcing CNI, the rendered release assets install as documented; the provider-free first check passes with permitted, denied and blocked paths; renewal reaches the running gateway; a CA rotation passes through new immutable trust objects; and the certificate controller lacks other rights. See [Kubernetes release assets](#kubernetes-release-assets). | No | Docker with Buildx, Kind, kubectl, Python 3 |
-| `make verify-live` | One real AgentRun on a provisioned cluster opens a scoped PR in `SPROOZI_DEMO_REPO` and its denial probes fail closed. | No | Provisioned cluster and credentials; creates a PR |
+| `make verify-live` | One real AgentRun on a provisioned cluster opens a scoped PR in `SPROOZI_DEMO_REPO`. Denial probes run inside its sandbox and fail closed, and a second Pod using the run's identity is refused by the gateway. | No | Provisioned cluster and credentials; creates a PR |
 | `make verify-public-tree` | No private local material is tracked. | No | Git |
 | `make verify-release` | Release inputs are pinned, then `test`, `lint`, every `Tests` row, `test-e2e`, `verify-live` and `verify-public-tree` pass and the release image builds. A missing prerequisite fails. No push. | No | Everything above; `RELEASE_BUILD=1`, `SPROOZI_DEMO_REPO` |
 
@@ -105,13 +112,13 @@ proof under `.local`; keep the skill and its feature map current with
 
 ## Harnesses and Hermes in Kind
 
-Install Docker, Python 3, Go 1.26.6, kubectl and Kind. Docker must be running;
+Install Docker, Python 3, Go 1.26.10, kubectl and Kind. Docker must be running;
 the cluster and four stock clients need several GiB of memory and disk. From
 the repository root:
 
 ```sh
 bash hack/verify/fetch-calico.sh .local/verification/calico-v3.30.4.yaml
-GOTOOLCHAIN=go1.26.6 \
+GOTOOLCHAIN=go1.26.10 \
 SPROOZI_CNI_MANIFEST="$PWD/.local/verification/calico-v3.30.4.yaml" \
 SPROOZI_CNI_SELECTOR=k8s-app=calico-node \
 make test-e2e
@@ -122,7 +129,19 @@ image, fixture providers and stock clients, and launches the complete
 controller, TLS gateway, task service and persistent Hermes coordinator. Native
 API chat and a native scheduled job delegate real AgentRuns. The suite checks
 all four stock worker loops, denials, budgets, cancellation, deadlines, UID-bound
-replay, result retention, PVC restart and direct-network isolation. It removes
+replay, result retention, PVC restart and direct-network isolation. On the same
+stack it applies the shipped remote executor example
+(`examples/portable-workflows/kubernetes/`) with test-only substitutions: the
+image, trust bundle, the policy's capabilities, fixture tool, budgets and
+maximum duration, instructions and a seeded Git snapshot. The executor gets its own certificate for its Service name. A Pod in
+`sproozi-coordinators`, the namespace the executor admits, submits one task by
+that name with certificate checks on. The case requires a charged model
+request and fixture tool call through the gateway, finalized usage that equals
+the fixture's exact token counts, a deleted sandbox, a run that ends
+`Succeeded` with reason `SessionStopped`, and a retained checkpoint. This runs
+under the installed controller, gateway and executor identities, so it catches
+a permission, address or certificate name that is right in one component and
+wrong in the next. It removes
 its cluster on completion. Set `SPROOZI_PRESERVE_ON_FAILURE=1` to retain an owned
 failed cluster for investigation.
 
@@ -168,7 +187,7 @@ redacted reports and Secret references in every Pod container and volume source.
 These checks make no model requests.
 
 For a caller-provisioned, dedicated multi-node Kind cluster, render the bounded
-fixture and run the live gate. The fixture renderer requires PyYAML. Supply a
+fixture and run the live gate. The fixture renderer requires PyYAML from `hack/requirements.txt`. Supply a
 digest-pinned stock Codex image with curl and the selected model-auth mode.
 The cluster needs the current controller/gateway, `config/agent-rbac`, Calico,
 gateway TLS and controller/sandbox trust ConfigMaps, and valid model credentials
@@ -198,7 +217,7 @@ writes a redacted report. The fixture resources and cluster remain caller-owned.
 ## Configured MCP in Kind
 
 `make verify-mcp-kind` creates and removes its own two-node Kind cluster. Supply
-Docker, Kind, kubectl, OpenSSL, PyYAML, the Calico v3.30.4 manifest verified by
+Docker, Kind, kubectl, OpenSSL, PyYAML (`hack/requirements.txt`), the Calico v3.30.4 manifest verified by
 `hack/verify/fetch-calico.sh`, a digest-pinned stock Codex tools image and a
 dedicated single-owner ChatGPT credential file. The check uses real model requests. Do not share that rotating
 credential with another running gateway; the script returns its newest replacement
@@ -255,7 +274,7 @@ archive with those digests and applies it exactly as the
 describes. It deletes the cluster when it finishes; pass `--keep` to the script
 to inspect it. Read `.local/verification/kubernetes-release/report.json`.
 
-## Native clients and session movement
+## Harnesses and session movement
 
 `make verify-native-session`, `make verify-harness-clients` and
 `make verify-harness-process` cover installed clients on the host; see the
@@ -272,14 +291,14 @@ to create a dedicated two-node Kind cluster with enforcing Calico, build the
 approved native/helper images, prepare TLS and install the controller/gateway.
 The [stock Hermes walkthrough](../../hack/verify/portable-workflows/README.md#stock-hermes-and-a-persistent-kubernetes-owner)
 then installs this owner and coordinator and runs the complete native round trip.
-It needs Docker, Kind, kubectl, Git, Go 1.26.6, OpenSSL, Python 3 and PyYAML.
+It needs Docker, Kind, kubectl, Git, Go 1.26.10, OpenSSL, Python 3 and PyYAML from `hack/requirements.txt`.
 It selects no personal credentials or home-network resources. The development
 fixture seeds only public Sproozi compiler sources. Follow the
 [Project dogfooding walkthrough](../../hack/verify/portable-workflows/README.md#development-and-governed-home-ops-projects)
 for actual package checks, exact revision replay and scoped Pod-read/Secrets-denial
 checks in both placements.
 
-Its report separates native client/lifecycle proof from model quality. The model
+Its report separates harness and lifecycle proof from model quality. The model
 fixtures direct real stock Hermes MCP calls and stock Codex execution; they do
 not establish a paid-model Sproozi contribution or a personal home-ops diagnosis.
 Keep the report and private logs before deleting the dedicated cluster.

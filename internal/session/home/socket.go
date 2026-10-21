@@ -152,6 +152,7 @@ func (s *Service) Serve(ctx context.Context) error {
 	}
 	go s.certs.run(run)
 	go s.watchExits(run)
+	go s.releaseStopped(run)
 	path := SocketPath(s.config.Directory)
 	listener, err := listenControl(path)
 	if errors.Is(err, errControlListening) {
@@ -186,7 +187,7 @@ func (s *Service) Serve(ctx context.Context) error {
 		case <-shutdown:
 		}
 	}()
-	slots := make(chan struct{}, 16)
+	slots := make(chan struct{}, maxControlConnections)
 	for {
 		conn, acceptErr := listener.Accept()
 		if acceptErr != nil {
@@ -203,7 +204,7 @@ func (s *Service) Serve(ctx context.Context) error {
 		select {
 		case slots <- struct{}{}:
 		default:
-			_ = conn.Close()
+			refuseBusy(conn)
 			continue
 		}
 		connections.Store(conn, struct{}{})
@@ -538,4 +539,19 @@ func validateCommonRequest(q Request) error {
 		return errors.New("home: only start and resume take harness arguments")
 	}
 	return nil
+}
+
+// maxControlConnections bounds concurrent control requests.
+const maxControlConnections = 16
+
+// errServiceBusy is the reply to a control connection over the limit, so the
+// CLI reports why instead of a bare connection reset.
+var errServiceBusy = fmt.Sprintf("home: the Sproozi service is already handling %d requests; retry shortly", maxControlConnections)
+
+// refuseBusy answers one line and closes, without reading the request or
+// waiting on a slow client.
+func refuseBusy(conn net.Conn) {
+	_ = conn.SetWriteDeadline(time.Now().Add(time.Second))
+	_ = json.NewEncoder(conn).Encode(Response{Error: errServiceBusy})
+	_ = conn.Close()
 }

@@ -612,7 +612,7 @@ A call that arrives on an open connection during the drain gets a 503 with
 calls the same way for up to 10 seconds when it closes.
 
 Calls that settle at once can collide on the shared gateway's ledger, a
-ConfigMap per account. A settle that collides retries with a randomised,
+[BudgetLedger](../reference/budgetledger.md) resource per account. A settle that collides retries with a randomised,
 growing backoff for up to 30 seconds, so a drain normally settles every call.
 A settle that still fails logs `Failed to settle model reservation` with the
 error `budget: ledger update conflicted until its deadline: …`, its audit
@@ -639,9 +639,8 @@ drain ran out of time, or the settle failed. After the expiry the lease is
 settled at its recovery charge by whichever comes first:
 
 - the next call or seal on that account;
-- a sweep. The shared gateway sweeps every budget ConfigMap (label
-  `app.kubernetes.io/component=budget-ledger`) when it starts and every
-  minute after; the local service sweeps its own ledger files when it opens
+- a sweep. The shared gateway sweeps every BudgetLedger in its
+  `BUDGET_NAMESPACE` when it starts and every minute after; the local service sweeps its own ledger files when it opens
   them and every minute after. A sweep that fails logs `Failed to recover
   expired budget reservations` with the error.
 
@@ -653,15 +652,15 @@ if that reservation or seal then fails. Only after that save does it log
 abandoned budget reservation` for any other lease, with `account`,
 `endReason` `gateway_restart`, `usageSource` `estimated`, `units` and
 `costMicros`. `account` is the account key, or, when a sweep settled the
-lease, the ConfigMap or ledger file name. There is no audit record for it. If
+lease, the BudgetLedger or ledger file name. There is no audit record for it. If
 the original gateway tries to settle the call later, the ledger refuses it:
 that gateway logs `Model reservation was already recovered` and its audit
 record has `usageSource` `recovered` and `tokensUsed` 0.
 
 A recovery, settle or sweep that finds the account deleted stops there: it
-never recreates the account. The shared gateway's sweep lists budget
-ConfigMaps 500 at a time. A ledger it can't decode is skipped with `Skipped
-corrupt budget ledger`, with `configMap` and `error`, and the sweep carries on
+never recreates the account. The shared gateway's sweep lists BudgetLedger
+resources 500 at a time. A ledger it can't decode is skipped with `Skipped
+corrupt BudgetLedger`, with `name` and `error`, and the sweep carries on
 with the others but reports that error as its failure.
 
 Every reservation a current gateway makes has a lease, so a pending
@@ -670,8 +669,8 @@ an upgrade, the shared gateway runs a legacy pass before it serves: its sweep
 also charges the whole reservation of every pending reservation without a
 lease. If that pass fails, the gateway logs `Failed to recover legacy budget
 reservations; retrying: <error>`, starts serving anyway and retries the pass
-with backoff, from 1 second up to 1 minute, until it succeeds once. The home
-daemon makes its first sweep after opening its ledger the legacy pass, and
+with backoff, from 1 second up to 1 minute, until it succeeds once. The
+service makes its first sweep after opening its ledger the legacy pass, and
 repeats it on each sweep until one succeeds. Once a legacy charge is saved,
 the process logs `Settled legacy budget reservation` with `account`,
 `endReason` `gateway_restart`, `usageSource` `reservation`, `reservations`,

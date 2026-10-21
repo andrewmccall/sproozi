@@ -13,6 +13,7 @@ import os
 import socket
 import ssl
 import subprocess
+import sys
 import time
 from build import build_source_hashes, kind_nodes
 from clock import check_node_clocks
@@ -21,10 +22,12 @@ import urllib.request
 from pathlib import Path
 
 from worker_logs import WorkerLogCapture
+import managed
 
 ROOT = Path(__file__).resolve().parents[3]
 OUT = ROOT / ".local/verification/orchestration-kind"
 SYSTEM = "sproozi-system"
+BUDGET = SYSTEM  # BudgetLedger resources live beside the gateway (ADR 0045)
 AGENTS = "sproozi-agents"
 COORD = "sproozi-coordinator-test"
 TOKEN = "96f694b908a2375d1deec2c843717f6f9eeb5c6520bd527a0f6116209024871d"
@@ -879,8 +882,8 @@ def stock_clients():
                 # the one-token allowance, so the next call is refused.
                 key = data["metadata"]["uid"] + "/model.inference"
                 ledger_name = "sproozi-budget-" + hashlib.sha256(key.encode()).hexdigest()[:20]
-                ledger = json.loads(k("get", "configmap", ledger_name, "-n", SYSTEM, "-o", "json"))
-                budget_state = json.loads(ledger["data"]["state"])
+                ledger = json.loads(k("get", "budgetledger", ledger_name, "-n", BUDGET, "-o", "json"))
+                budget_state = json.loads(ledger["spec"]["state"])
                 check(budget_state["UnitsUsed"] == 1 and budget_state["ReservedUnits"] == 0, budget_state)
                 check(budget_state["pendingReservations"] == 0, budget_state)
                 exceeded = [
@@ -1019,14 +1022,25 @@ check(connect('api.openai.com:443','')==401)
 check(connect('api.openai.com:443','invalid')==401)
 check(connect('unregistered.fixture:443',token)==403)
 check(connect('api.openai.com:443',token)==200)
+# ADR 0040: the sandbox resolves no names. Only the pinned gateway host is
+# known; any other lookup fails inside the Pod.
+unresolved=0
+for host in ['orchestration-provider.sproozi-system.svc','kubernetes.default.svc','example.com']:
+ try:socket.getaddrinfo(host,443)
+ except socket.gaierror:unresolved+=1
+check(unresolved==3,unresolved)
+# The CNI still blocks direct connections by address.
 blocked=0
-for host,port in [('orchestration-provider.sproozi-system.svc',8443),('kubernetes.default.svc',443)]:
+for host,port in [(PROVIDER_IP,8443),(os.environ['KUBERNETES_SERVICE_HOST'],443)]:
  try:s=socket.create_connection((host,port),timeout=3);s.close()
  except TimeoutError:blocked+=1
 check(blocked==2,blocked)
 check(not Path('/var/run/secrets/kubernetes.io/serviceaccount/token').exists())
-print(json.dumps({'gatewayAuthenticated':True,'missingIdentityDenied':True,'unknownAuthorityDenied':True,'directProviderAndKubernetesBlocked':True,'noKubernetesCredential':True}))
+print(json.dumps({'gatewayAuthenticated':True,'missingIdentityDenied':True,'unknownAuthorityDenied':True,'namesUnresolved':True,'directProviderAndKubernetesBlocked':True,'noKubernetesCredential':True}))
 """
+    provider_ip = k("get", "service", "orchestration-provider", "-n", SYSTEM, "-o", "jsonpath={.spec.clusterIP}").strip()
+    check(provider_ip, "orchestration-provider has no cluster IP")
+    script = script.replace("PROVIDER_IP", repr(provider_ip))
     result = k(
         "exec", "-n", AGENTS, name, "--", "/opt/hermes/.venv/bin/python", "-c", script
     )
@@ -1516,6 +1530,8 @@ def main():
         + [
             ROOT / "internal/harness/launchfiles/hermes-launch.py",
             ROOT / "examples/harnesses/agentruntime-hermes.yaml",
+            ROOT / "examples/portable-workflows/kubernetes/owner.yaml",
+            ROOT / "examples/portable-workflows/kubernetes/runtime.yaml",
         ]
     )
     EVIDENCE["sourceSHA256"] = {
@@ -1554,6 +1570,9 @@ def main():
         check(call("status", ref(view))["result"]["text"] == ANSWER)
         record("task-facade-restart-retained-replay", uid=view["uid"])
         cancellation_and_deadline()
+        # One managed session through the shipped remote executor example,
+        # on this same stack, rather than a separate smaller cluster run.
+        managed.proof(sys.modules[__name__], images)
         coordinator_proof(images)
         provider_proc, provider_port = portforward("orchestration-provider")
         processes.append(provider_proc)
@@ -1564,17 +1583,15 @@ def main():
         ledger = json.loads(
             k(
                 "get",
-                "configmaps",
+                "budgetledgers",
                 "-n",
-                SYSTEM,
-                "-l",
-                "app.kubernetes.io/component=budget-ledger",
+                BUDGET,
                 "-o",
                 "json",
             )
         )
         EVIDENCE["budgetLedgers"] = [
-            {"name": v["metadata"]["name"], "state": json.loads(v["data"]["state"])}
+            {"name": v["metadata"]["name"], "state": json.loads(v["spec"]["state"])}
             for v in ledger["items"]
         ]
         check(EVIDENCE["budgetLedgers"])
@@ -1596,7 +1613,7 @@ def main():
         except Exception as diagnostic_error:
             EVIDENCE["providerDiagnosticFailure"] = str(diagnostic_error)
         save()
-        for ns in [SYSTEM, AGENTS, COORD]:
+        for ns in [SYSTEM, AGENTS, COORD, managed.SESSIONS]:
             for kind in ["pods", "events", "agentruns"]:
                 p = run("kubectl", "get", kind, "-n", ns, "-o", "json", check=False)
                 (OUT / (ns + "-" + kind + ".json")).write_text(p.stdout)

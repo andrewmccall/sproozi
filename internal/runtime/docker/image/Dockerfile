@@ -3,10 +3,10 @@
 # Its default names the clients-image-required stage, which fails the build
 # with instructions, so a build without the argument stops with a clear error.
 ARG CLIENTS_IMAGE=clients-image-required
-FROM golang:1.26-bookworm@sha256:e8c859f5632dcfde7b32d2012b4351728f6437930887c2f6a91ea242459e5514 AS clients-image-required
+FROM golang:1.26.10-bookworm@sha256:632dff7351799a5a9954a48dc06670ade72ee44e8c351cdc0e5a57af2fea21af AS clients-image-required
 RUN echo "Set --build-arg CLIENTS_IMAGE to the client image built with clients.Dockerfile: a local tag, or repository@sha256:digest for shared or Kubernetes builds" >&2 && exit 1
 
-FROM golang:1.26-bookworm@sha256:e8c859f5632dcfde7b32d2012b4351728f6437930887c2f6a91ea242459e5514 AS builder
+FROM golang:1.26.10-bookworm@sha256:632dff7351799a5a9954a48dc06670ade72ee44e8c351cdc0e5a57af2fea21af AS builder
 ARG TARGETOS
 ARG TARGETARCH
 WORKDIR /workspace

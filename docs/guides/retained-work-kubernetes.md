@@ -73,7 +73,7 @@ limits. The small default runtime is suitable for short investigation sessions.
 
 ## Profile configuration and credentials
 
-Issue a remote executor TLS certificate for `sproozi-work.sproozi-system.svc`.
+Issue a remote executor TLS certificate for `sproozi-work.sproozi-sessions.svc`.
 Use your internal PKI or the test-CA procedure in the Hermes guide with this
 service hostname. Save the chain and private key as
 `.local/retained-work/owner.crt` and `owner.key`, and the issuing CA as
@@ -99,7 +99,7 @@ the approved repository/ref, principal, duration, byte limit and allowances:
   "workTokenFile": "/var/run/sproozi-work/work-token",
   "principal": "developer",
   "placementName": "engineering",
-  "namespace": "sproozi-system",
+  "namespace": "sproozi-sessions",
   "templateName": "portable-codex",
   "directory": "/state/profile",
   "instructionDigest": "REPLACE_WITH_64_LOWERCASE_HEX",
@@ -125,27 +125,34 @@ the approved repository/ref, principal, duration, byte limit and allowances:
 installation's `config.json`: 32 MiB for a new `sproozi init`
 installation, 8 MiB for one created before that default changed.
 
-Apply namespaces from the installation before creating these objects:
+Apply namespaces from the installation before creating these objects. The
+remote executor, its profile and credentials, and its managed runs live in
+`sproozi-sessions`, apart from the gateway's configuration in `sproozi-system`:
 
 ```sh
+kubectl create namespace sproozi-sessions --dry-run=client -o yaml | kubectl apply -f -
 kubectl create namespace sproozi-coordinators --dry-run=client -o yaml | kubectl apply -f -
-kubectl create secret generic sproozi-work-credentials -n sproozi-system \
+kubectl create secret generic sproozi-work-credentials -n sproozi-sessions \
   --from-file=tls.crt=.local/retained-work/owner.crt \
   --from-file=tls.key=.local/retained-work/owner.key \
   --from-file=work-token=.local/retained-work/work-token \
   --dry-run=client -o yaml | kubectl apply -f -
-kubectl create configmap sproozi-work-profile -n sproozi-system \
-  --from-file=profile.json=.local/retained-work/profile.json \
-  --dry-run=client -o yaml | kubectl apply -f -
-kubectl create configmap sproozi-remote-executor -n sproozi-system \
-  --from-file=ca.crt=.local/retained-work/owner-ca.crt \
-  --dry-run=client -o yaml | kubectl apply -f -
+{ kubectl create configmap sproozi-work-profile -n sproozi-sessions \
+    --from-file=profile.json=.local/retained-work/profile.json --dry-run=client -o yaml
+  echo 'immutable: true'; } | kubectl create -f -
+{ kubectl create configmap sproozi-remote-executor -n sproozi-sessions \
+    --from-file=ca.crt=.local/retained-work/owner-ca.crt --dry-run=client -o yaml
+  echo 'immutable: true'; } | kubectl create -f -
 kubectl create secret generic hermes-coordinator -n sproozi-coordinators \
   --from-file=model-key=.local/retained-work/model-key \
   --from-file=task-token=.local/retained-work/work-token \
   --from-file=api-key=.local/retained-work/api-key \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
+
+The executor's profile and CA ConfigMaps are immutable, so the executor cannot
+rewrite them. To change one, delete it, create it again the same way and
+restart the executor.
 
 Combine Hermes's normal public roots with the remote executor's public CA as
 `ca-bundle.pem`, following the Hermes guide's `docker run --entrypoint /bin/cat`
@@ -162,7 +169,7 @@ kubectl create configmap hermes-task-trust -n sproozi-coordinators \
   --from-file=ca-bundle.pem=.local/retained-work/ca-bundle.pem \
   --dry-run=client -o yaml | kubectl apply -f -
 kubectl apply -f .local/retained-work/stack.yaml
-kubectl -n sproozi-system rollout status deployment/sproozi-work --timeout=180s
+kubectl -n sproozi-sessions rollout status deployment/sproozi-work --timeout=180s
 kubectl -n sproozi-coordinators rollout status deployment/hermes-coordinator --timeout=180s
 ```
 
@@ -195,7 +202,7 @@ actionable failure. Reuse the complete saved submission after an uncertain reply
 remain untrusted. Requests cannot select images, templates, credentials or policy.
 
 To follow the work from your own machine, apply `cli-access` in
-`sproozi-system` and create the `sproozi` context, as
+`sproozi-sessions` and create the `sproozi` context, as
 [remote executor access](../reference/remote-executors.md) shows. The example
 Service already carries the `sproozi.com/remote-executor` label. Use the same
 approved native instructions and byte limits locally.
@@ -228,7 +235,7 @@ conversation. Cross-harness handoff is a separate deferred feature.
 
 Use `sproozi cancel ID --remote` for remote cancellation.
 Inspect running Pods with the administrator kubeconfig and application logs with
-`kubectl logs -n sproozi-system deployment/sproozi-work`. Retained final output is
+`kubectl logs -n sproozi-sessions deployment/sproozi-work`. Retained final output is
 available through status after Pod deletion; full live Pod logs have Kubernetes'
 ordinary log lifetime. Remote executor and Hermes logs are separate from native checkpoints.
 

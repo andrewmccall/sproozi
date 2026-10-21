@@ -2,9 +2,8 @@ resources:
 - shared_gateway_service_account.yaml
 - shared_gateway_role.yaml
 - shared_gateway_role_binding.yaml
-- shared_gateway_budget_role.yaml
-- shared_gateway_budget_role_binding.yaml
 - shared_gateway_credentials_role.yaml
+- shared_gateway_budget_role.yaml
 # All RBAC will be applied under this service account in
 # the deployment namespace. You may comment out this resource
 # if your manager will use a service account that exists at
@@ -16,15 +15,15 @@ resources:
 # ClusterRole the controller uses.
 - controller_manager_role.yaml
 - role_binding.yaml
-- webhook_service_account.yaml
-- webhook_role.yaml
-- webhook_role_binding.yaml
 - leader_election_role.yaml
 - leader_election_role_binding.yaml
 # For each CRD, "Admin", "Editor" and "Viewer" roles are scaffolded by
 # default, aiding admins in cluster management. Those roles are
 # not used by the sproozi itself. You can comment the following lines
 # if you do not want those helpers be installed with your Project.
+- budgetledger_admin_role.yaml
+- budgetledger_editor_role.yaml
+- budgetledger_viewer_role.yaml
 - agentrun_admin_role.yaml
 - agentrun_editor_role.yaml
 - agentrun_viewer_role.yaml
@@ -37,3 +36,5 @@ resources:
 - agentruntime_admin_role.yaml
 - agentruntime_editor_role.yaml
 - agentruntime_viewer_role.yaml
+
+

@@ -74,6 +74,16 @@ running work first, and point runtimes at the new bundle afterwards.
 
 ## Your own certificates
 
+The `quickstart-external-ca` overlay deploys no signer. Before applying it,
+create:
+
+- the Secret `sproozi-gateway-tls` in `sproozi-system`, with `tls.crt` and
+  `tls.key`: a serving certificate covering `sproozi-gateway.sproozi-system.svc`,
+  `sproozi-gateway.sproozi-system.svc.cluster.local` and
+  `kubernetes.default.svc`, plus each extra authority the gateway inspects;
+- the ConfigMap `sproozi-sandbox-trust` in `sproozi-agents`, created with
+  `immutable: true`, whose `ca-bundle.pem` holds the issuing CA.
+
 Renew the certificate before it expires by replacing `tls.crt` and `tls.key` in
 `sproozi-gateway-tls`; the gateway reloads them without restarting. To change
 the issuing CA, create a new immutable trust ConfigMap and follow the same

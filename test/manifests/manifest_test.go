@@ -14,7 +14,7 @@ import (
 	"testing"
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
-	rbacv1 "k8s.io/api/rbac/v1"
+	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/placement"
 	"k8s.io/apimachinery/pkg/util/yaml"
 	sigyaml "sigs.k8s.io/yaml"
 )
@@ -22,7 +22,7 @@ import (
 const (
 	controllerManagerName      = "sproozi-controller-manager"
 	sharedGatewayName          = "sproozi-gateway"
-	webhookName                = "sproozi-webhook"
+	budgetNamespace            = "sproozi-system"
 	retiredModelGatewayName    = "sproozi-model-gateway"
 	retiredCapabilityProxyName = "sproozi-capability-proxy"
 	retiredEgressGatewayName   = "sproozi-egress-gateway"
@@ -126,7 +126,7 @@ func renderKustomization(t *testing.T, path string) []map[string]any {
 func objectsOfKind(docs []map[string]any, kind string) []map[string]any {
 	var out []map[string]any
 	for _, doc := range docs {
-		if doc["kind"] == kind {
+		if doc[keyKind] == kind {
 			out = append(out, doc)
 		}
 	}
@@ -155,7 +155,6 @@ func TestRenderedDefaultIncludesOnlySharedGateway(t *testing.T) {
 	for _, want := range []string{
 		controllerManagerName,
 		sharedGatewayName,
-		webhookName,
 	} {
 		if !slices.Contains(names, want) {
 			t.Fatalf("expected rendered deployment %q, got %v", want, names)
@@ -251,7 +250,7 @@ func TestRenderedDefaultManagerHasNoRemovedLifecycleConfiguration(t *testing.T) 
 		for _, raw := range env {
 			entry, _ := raw.(map[string]any)
 			if entry["name"] == "REPLAY_NAMESPACE" {
-				t.Fatal("controller manager must not configure webhook state")
+				t.Fatal("controller manager must not configure the removed webhook's state")
 			}
 		}
 		return
@@ -268,8 +267,7 @@ func TestRenderedDefaultIncludesCurrentServiceAccounts(t *testing.T) {
 
 	for _, want := range []string{
 		controllerManagerName,
-		"sproozi-shared-gateway",
-		webhookName,
+		gatewayAccount,
 	} {
 		if !slices.Contains(names, want) {
 			t.Fatalf("expected rendered service account %q, got %v", want, names)
@@ -279,7 +277,7 @@ func TestRenderedDefaultIncludesCurrentServiceAccounts(t *testing.T) {
 	// Each component runs as its own identity rather than a shared one.
 	for _, doc := range objectsOfKind(docs, "Deployment") {
 		name := metadataName(doc)
-		if name != controllerManagerName && name != webhookName {
+		if name != controllerManagerName {
 			continue
 		}
 		spec, _ := doc["spec"].(map[string]any)
@@ -331,92 +329,15 @@ func TestSREDemoRuntimePassesRuntimeValidation(t *testing.T) {
 	}
 }
 
-func TestInstallBundleIncludesWebhookReplayIsolation(t *testing.T) {
-	docs := renderInstall(t)
-	foundNamespace := false
-	foundReplayBinding := false
-	for _, doc := range objectsOfKind(docs, "Namespace") {
-		foundNamespace = foundNamespace || metadataName(doc) == "sproozi-webhook-state"
-	}
-	for _, doc := range objectsOfKind(docs, "RoleBinding") {
-		if metadataName(doc) != "sproozi-webhook-replay" || metadataNamespace(doc) != "sproozi-webhook-state" {
-			continue
+// The event webhook was removed (ADR 0043). Nothing in the install may bring
+// back its Deployment, identity, network exception or state namespaces.
+func TestInstallBundleHasNoEventWebhook(t *testing.T) {
+	for _, doc := range renderInstall(t) {
+		kind, _ := doc[keyKind].(string)
+		name := metadataName(doc)
+		if strings.Contains(name, "webhook") && kind != "CustomResourceDefinition" {
+			t.Fatalf("install bundle still renders %s %s", kind, name)
 		}
-		subjects, _ := doc["subjects"].([]any)
-		if len(subjects) == 1 {
-			subject, _ := subjects[0].(map[string]any)
-			foundReplayBinding = subject["name"] == webhookName && subject["namespace"] == systemNamespace
-		}
-	}
-	if !foundNamespace || !foundReplayBinding {
-		t.Fatalf("install bundle must create webhook replay state and bind the webhook (namespace=%v binding=%v)",
-			foundNamespace,
-			foundReplayBinding)
-	}
-}
-
-// TestInstallBundleScopesWebhookSecretReads verifies that the webhook can read
-// Secrets only in the HMAC Secret namespace. sproozi-system holds the provider
-// and GitHub credentials, so no role bound to the webhook may grant Secret
-// access there or cluster-wide.
-func TestInstallBundleScopesWebhookSecretReads(t *testing.T) {
-	const (
-		secretNamespace = "sproozi-webhooks"
-		roleBindingKind = "RoleBinding"
-		getVerb         = "get"
-	)
-	docs := renderInstall(t)
-	roles := map[string][]rbacv1.PolicyRule{}
-	for _, kind := range []string{"Role", "ClusterRole"} {
-		for _, doc := range objectsOfKind(docs, kind) {
-			var role rbacv1.ClusterRole
-			decodeObject(t, doc, &role)
-			roles[kind+"/"+metadataNamespace(doc)+"/"+role.Name] = role.Rules
-		}
-	}
-	foundNamespace := false
-	for _, doc := range objectsOfKind(docs, "Namespace") {
-		foundNamespace = foundNamespace || metadataName(doc) == secretNamespace
-	}
-	foundSecretRead, foundTemplateRead := false, false
-	for _, kind := range []string{roleBindingKind, "ClusterRoleBinding"} {
-		for _, doc := range objectsOfKind(docs, kind) {
-			var binding rbacv1.RoleBinding
-			decodeObject(t, doc, &binding)
-			if !slices.ContainsFunc(binding.Subjects, func(s rbacv1.Subject) bool {
-				return s.Kind == rbacv1.ServiceAccountKind && s.Name == webhookName && s.Namespace == systemNamespace
-			}) {
-				continue
-			}
-			roleNamespace := binding.Namespace
-			if binding.RoleRef.Kind == "ClusterRole" {
-				roleNamespace = ""
-			}
-			rules, ok := roles[binding.RoleRef.Kind+"/"+roleNamespace+"/"+binding.RoleRef.Name]
-			if !ok {
-				t.Fatalf("%s %s binds the webhook to missing %s %s", kind, binding.Name, binding.RoleRef.Kind, binding.RoleRef.Name)
-			}
-			for _, rule := range rules {
-				if binding.Namespace == systemNamespace && slices.Contains(rule.Resources, "agenttemplates") {
-					foundTemplateRead = true
-				}
-				if !slices.Contains(rule.Resources, "secrets") && !slices.Contains(rule.Resources, "*") {
-					continue
-				}
-				if kind != roleBindingKind || binding.Namespace != secretNamespace ||
-					!slices.Equal(rule.Verbs, []string{getVerb}) || len(rule.Resources) != 1 {
-					t.Fatalf("%s %s grants the webhook Secret access outside %s: %+v", kind, binding.Name, secretNamespace, rule)
-				}
-				foundSecretRead = true
-			}
-		}
-	}
-	// The rendered webhook ServiceAccount must also be bound to its template
-	// role, or this check would pass for a webhook with no bindings at all.
-	if !foundNamespace || !foundSecretRead || !foundTemplateRead {
-		t.Fatalf("install bundle must create %s, let the webhook get Secrets there and read templates in %s "+
-			"(namespace=%v secrets=%v templates=%v)",
-			secretNamespace, systemNamespace, foundNamespace, foundSecretRead, foundTemplateRead)
 	}
 }
 
@@ -471,8 +392,8 @@ func TestKindDemoDisablesDefaultCNI(t *testing.T) {
 func TestSharedGatewayRBACOwnsOnlyBoundedKubernetesReads(t *testing.T) {
 	docs := renderDefault(t)
 	var role map[string]any
-	for _, doc := range objectsOfKind(docs, "ClusterRole") {
-		if metadataName(doc) == "sproozi-shared-gateway" {
+	for _, doc := range objectsOfKind(docs, kindClusterRole) {
+		if metadataName(doc) == gatewayAccount {
 			role = doc
 			break
 		}
@@ -481,7 +402,7 @@ func TestSharedGatewayRBACOwnsOnlyBoundedKubernetesReads(t *testing.T) {
 		t.Fatal("shared-gateway ClusterRole was not rendered")
 	}
 	rules, _ := role["rules"].([]any)
-	allowed := map[string]bool{"pods": true,
+	allowed := map[string]bool{resourcePods: true,
 		"pods/log":        true,
 		"events":          true,
 		"services":        true,
@@ -495,8 +416,8 @@ func TestSharedGatewayRBACOwnsOnlyBoundedKubernetesReads(t *testing.T) {
 		verbs, _ := rule["verbs"].([]any)
 		for _, rawResource := range resources {
 			resource, _ := rawResource.(string)
-			if resource == "tokenreviews" ||
-				resource == "agentruns" ||
+			if resource == resourceTokenReviews ||
+				resource == resourceAgentRuns ||
 				resource == "agentpolicies" ||
 				resource == "agenttemplates" {
 				continue
@@ -506,7 +427,7 @@ func TestSharedGatewayRBACOwnsOnlyBoundedKubernetesReads(t *testing.T) {
 			}
 			for _, rawVerb := range verbs {
 				verb, _ := rawVerb.(string)
-				if verb != "get" && verb != "list" && verb != "watch" {
+				if verb != verbGet && verb != verbList && verb != "watch" {
 					t.Fatalf("shared-gateway ClusterRole grants unexpected Kubernetes verb %q", verb)
 				}
 			}
@@ -514,12 +435,36 @@ func TestSharedGatewayRBACOwnsOnlyBoundedKubernetesReads(t *testing.T) {
 	}
 }
 
+// Ledgers are BudgetLedger resources beside the gateway (ADR 0045). A gateway
+// that could update ConfigMaps in sproozi-system could rewrite its own egress,
+// MCP, pricing and auth configuration, which take effect on its next restart,
+// so its ledger Role names budgetledgers and nothing else.
 func TestSharedGatewayHasNamespacedDurableBudgetRBAC(t *testing.T) {
-	docs := renderDefault(t)
+	docs := renderInstall(t)
 	foundRole := false
 	foundNamespaceEnv := false
+	for _, doc := range objectsOfKind(docs, "Namespace") {
+		if metadataName(doc) == "sproozi-budget" {
+			t.Fatal("install still creates the sproozi-budget namespace")
+		}
+	}
+	gatewayRoles := map[string]bool{}
+	for _, doc := range objectsOfKind(docs, kindRoleBinding) {
+		subjects := fmt.Sprint(doc["subjects"])
+		if metadataNamespace(doc) == systemNamespace && strings.Contains(subjects, gatewayAccount) {
+			roleRef, _ := doc["roleRef"].(map[string]any)
+			name, _ := roleRef["name"].(string)
+			gatewayRoles[name] = true
+		}
+	}
 	for _, doc := range objectsOfKind(docs, "Role") {
-		if metadataName(doc) != "sproozi-shared-gateway-budget" || metadataNamespace(doc) != systemNamespace {
+		ruleText := fmt.Sprint(doc["rules"])
+		if metadataNamespace(doc) == systemNamespace && gatewayRoles[metadataName(doc)] &&
+			strings.Contains(ruleText, resourceConfigMaps) &&
+			(strings.Contains(ruleText, verbUpdate) || strings.Contains(ruleText, verbCreate)) {
+			t.Fatalf("gateway Role %s can write ConfigMaps in %s", metadataName(doc), systemNamespace)
+		}
+		if metadataName(doc) != "sproozi-shared-gateway-budget" || metadataNamespace(doc) != budgetNamespace {
 			continue
 		}
 		foundRole = true
@@ -528,10 +473,13 @@ func TestSharedGatewayHasNamespacedDurableBudgetRBAC(t *testing.T) {
 		for _, rule := range rules {
 			fmt.Fprint(&serialized, rule)
 		}
-		for _, want := range []string{"configmaps", "get", "create", "update"} {
+		for _, want := range []string{"budgetledgers", groupSproozi, verbGet, verbCreate, verbUpdate} {
 			if !strings.Contains(serialized.String(), want) {
 				t.Fatalf("budget Role is missing %q: %v", want, rules)
 			}
+		}
+		if strings.Contains(serialized.String(), resourceConfigMaps) {
+			t.Fatalf("budget Role grants ConfigMaps: %v", rules)
 		}
 	}
 	for _, doc := range objectsOfKind(docs, "Deployment") {
@@ -546,7 +494,7 @@ func TestSharedGatewayHasNamespacedDurableBudgetRBAC(t *testing.T) {
 		env, _ := container["env"].([]any)
 		for _, raw := range env {
 			entry, _ := raw.(map[string]any)
-			foundNamespaceEnv = foundNamespaceEnv || (entry["name"] == "BUDGET_NAMESPACE" && entry["value"] == systemNamespace)
+			foundNamespaceEnv = foundNamespaceEnv || (entry["name"] == "BUDGET_NAMESPACE" && entry["value"] == budgetNamespace)
 		}
 	}
 	if !foundRole || !foundNamespaceEnv {
@@ -564,10 +512,44 @@ func TestRenderedDefaultIncludesSystemNetworkPolicies(t *testing.T) {
 	for _, want := range []string{
 		"sproozi-default-deny-ingress",
 		"sproozi-allow-agent-traffic",
-		"sproozi-allow-webhook-traffic",
 	} {
 		if !slices.Contains(names, want) {
 			t.Fatalf("expected rendered network policy %q, got %v", want, names)
 		}
 	}
+}
+
+// Managed sessions span the gateway and the remote executor, and both default
+// to the same budget namespace: moving one without the other broke managed
+// sessions. The install binds no registry read: nothing runs managed sessions
+// in sproozi-system. TestManagedSessionPathIsAuthorized checks, from resolved
+// rules, that the gateway reads registrations in sproozi-sessions and cannot
+// write them.
+func TestGatewayAndExecutorShareManagedSessionState(t *testing.T) {
+	for _, doc := range objectsOfKind(renderInstall(t), "Role") {
+		if metadataNamespace(doc) == systemNamespace && strings.Contains(metadataName(doc), "registry") {
+			t.Fatalf("install binds a registry Role in %s: %s", systemNamespace, metadataName(doc))
+		}
+	}
+	if budgetNamespace != placement.DefaultBudgetNamespace {
+		t.Fatalf("gateway ledger namespace %q differs from the executor default %q",
+			budgetNamespace, placement.DefaultBudgetNamespace)
+	}
+}
+
+// Sandbox isolation must not fail open: a Pod in sproozi-agents whose per-run
+// policy is missing or no longer selects it still has no network.
+func TestAgentNamespaceDefaultDenies(t *testing.T) {
+	agentRBAC := renderKustomization(t, filepath.Join(repoRoot(t), "config", "agent-rbac"))
+	for _, doc := range objectsOfKind(agentRBAC, "NetworkPolicy") {
+		spec, _ := doc["spec"].(map[string]any)
+		selector, _ := spec["podSelector"].(map[string]any)
+		types := fmt.Sprint(spec["policyTypes"])
+		if metadataNamespace(doc) == agentsNamespace && len(selector) == 0 &&
+			strings.Contains(types, "Ingress") && strings.Contains(types, "Egress") &&
+			spec["ingress"] == nil && spec["egress"] == nil {
+			return
+		}
+	}
+	t.Fatal("config/agent-rbac must install a default-deny NetworkPolicy for every Pod in sproozi-agents")
 }

@@ -106,6 +106,7 @@ type Gateway struct {
 	sessions       map[gateway.Reference]int
 	revocations    *executionLog
 	limitRejected  *executionLog
+	authRejected   *authFailureLog
 	logger         *slog.Logger
 }
 
@@ -156,7 +157,7 @@ func New(c Config) (*Gateway, error) {
 	return &Gateway{config: c, connections: make(chan struct{}, c.MaxConnections),
 		requests: make(chan struct{}, c.MaxConnections), authorityCalls: make(chan struct{}, c.MaxConnections),
 		sessions: make(map[gateway.Reference]int), revocations: newRevocationLog(c.Logger),
-		limitRejected: newLimitLog(c.Logger), logger: logger}, nil
+		limitRejected: newLimitLog(c.Logger), authRejected: newAuthFailureLog(logger), logger: logger}, nil
 }
 
 // authenticate returns the CONNECT's current execution identity, or writes
@@ -170,12 +171,20 @@ func (g *Gateway) authenticate(w http.ResponseWriter, r *http.Request) (*gateway
 	identity, err := authorityCall(r.Context(), g, func(ctx context.Context) (*gateway.ExecutionGrant, error) {
 		return g.config.Authenticate(ctx, token)
 	})
-	if err != nil || identity.Validate() != nil {
+	if err == nil {
+		err = identity.Validate()
+	}
+	if err != nil {
+		// The client learns only that the identity was refused; the cause
+		// (TokenReview failure, unbound token, Pod mismatch, run not running,
+		// a Forbidden read) stays in the gateway log.
+		g.authRejected.record(err, r.RemoteAddr)
 		http.Error(w, "invalid gateway identity", http.StatusUnauthorized)
 		return nil, false
 	}
 	identity = identity.Clone()
-	if g.revalidate(r.Context(), identity) != nil {
+	if err := g.revalidate(r.Context(), identity); err != nil {
+		g.revocations.revoked(identity.Execution, err)
 		http.Error(w, "revoked gateway identity", http.StatusForbidden)
 		return nil, false
 	}
@@ -419,3 +428,63 @@ type sessionConnection struct {
 }
 
 func (c *sessionConnection) Close() error { return c.close() }
+
+// authFailureMaxCauses bounds the distinct causes an authFailureLog tracks in
+// one window. Later causes are counted, not logged, until a window closes.
+const authFailureMaxCauses = 32
+
+// authFailureLog reports refused gateway identities. A refused token has no
+// execution to group by, so it groups by cause instead: the first refusal
+// with a cause in a window is logged with the client address, and one summary
+// line counts the rest when the window closes. Lines carry the cause and the
+// client address, never the token.
+type authFailureLog struct {
+	logger *slog.Logger
+	window time.Duration
+
+	mu       sync.Mutex
+	bursts   map[string]int
+	overflow int
+}
+
+func newAuthFailureLog(logger *slog.Logger) *authFailureLog {
+	return &authFailureLog{logger: logger, window: executionLogWindow, bursts: map[string]int{}}
+}
+
+// record reports one refused identity with its cause.
+func (l *authFailureLog) record(cause error, remote string) {
+	reason := cause.Error()
+	l.mu.Lock()
+	if more, open := l.bursts[reason]; open {
+		l.bursts[reason] = more + 1
+		l.mu.Unlock()
+		return
+	}
+	if len(l.bursts) >= authFailureMaxCauses {
+		l.overflow++
+		l.mu.Unlock()
+		return
+	}
+	l.bursts[reason] = 0
+	l.mu.Unlock()
+	l.logger.Info("Rejected inspected connection with invalid gateway identity", "reason", reason, "remote", remote)
+	time.AfterFunc(l.window, func() { l.flush(reason) })
+}
+
+func (l *authFailureLog) flush(reason string) {
+	l.mu.Lock()
+	more := l.bursts[reason]
+	delete(l.bursts, reason)
+	overflow := 0
+	if len(l.bursts) == 0 {
+		overflow, l.overflow = l.overflow, 0
+	}
+	l.mu.Unlock()
+	if more > 0 {
+		l.logger.Info("Rejected further inspected connections with invalid gateway identity", "count", more, "reason", reason)
+	}
+	if overflow > 0 {
+		l.logger.Info("Rejected further inspected connections with invalid gateway identity", "count", overflow,
+			"reason", "other causes")
+	}
+}

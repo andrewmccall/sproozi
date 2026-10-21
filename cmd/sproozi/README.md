@@ -236,12 +236,14 @@ none. The `gateway.mcp*` keys and `mcp.<name>` allowances are described in
 ## Remote executors
 
 Every remote executor must use the same checkpoint byte limit. Each one pins its
-own approved template, capabilities, ceilings and maximum duration. The home
-daemon holds only that remote executor's CA and bearer token, never
-Kubernetes credentials. Keep approved instructions identical
+own approved template, capabilities, ceilings and maximum duration. The
+service reaches an executor through a kubeconfig context: the context's
+credential goes only to the Kubernetes API server, and the executor receives
+only a short-lived `sproozi-cli` token bound to the audience
+`sproozi-remote-executor` ([remote executor access](../../docs/reference/remote-executors.md)). Keep approved instructions identical
 through every visit: native resume retains the original developer instruction
 block. Claude receives the approved instructions through its fresh managed launch;
-its transcript cannot authorize instructions, settings or permissions. Restart the service with the same remote executor configuration while
+its transcript cannot authorize instructions, settings or permissions. Restart the service with the same configuration while
 visits remain active; changed placement or authority configuration fails closed against
 retained records.
 
@@ -336,21 +338,20 @@ capture. Codex uses native quit; Claude uses controlled process shutdown after
 its observed Stop and settled transcript. Input accepted after a Claude turn
 prevents reuse of its earlier Stop, so finish a new turn before moving.
 
-After a completed turn, move to the remote executor's placement, named
-`engineering` in the example configuration, and back:
+After a completed turn, move to the remote executor and back:
 
 ```sh
-sproozi move ID --remote --context engineering
+sproozi move ID --remote
 sproozi attach ID
 sproozi move ID --local
 sproozi attach ID
 ```
 
-`--context` names a key of `remote`. A name that is not configured fails
-before a request with the configured choices. When the command runs without a
-configuration, for example with only `--socket`, the service checks the name
-and replies `move destination "X" is not a configured placement; use one of:
-local, r`. Neither rejection has a retry hint: nothing was recorded.
+`move --remote` reaches the executor through the kubeconfig context named
+`sproozi`; `--context` names another context or a kubeconfig file, and
+`--namespace` the executor's namespace. The service, not the CLI, connects,
+and records the executor it reached. See
+[remote executor access](../../docs/reference/remote-executors.md).
 
 Move gates new input and waits for the active native turn and supported tools to
 complete within the original deadline. Source gateway access remains available
@@ -381,7 +382,7 @@ operation. Retry `move ID --operation OP` or `cancel ID --operation OP` with
 the same intent, or use `recover`. Cancellation revokes authority and forcibly
 stops the active incarnation; it does not require a new completed turn. Native
 processes enforce their original absolute deadline even while the service is
-unavailable. Stopping the daemon releases its private ownership locks and socket;
+unavailable. Stopping the service releases its private ownership locks and socket;
 it is not a claim that an execution stopped. Restart with the same configuration
 and recover the retained operation.
 

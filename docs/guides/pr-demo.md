@@ -99,7 +99,7 @@ setup does not create or seed a repository.
 
 Sproozi uses a GitHub App installation to access the disposable repository.
 Your host's `gh` login lets the demo inspect the PR; it is a separate credential
-and never goes into the agent Pod.
+and never goes into the sandbox Pod.
 
 Follow GitHub's [App registration instructions](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/registering-a-github-app):
 
@@ -211,7 +211,7 @@ make demo IMG="$IMG" KIND_CLUSTER=sproozi-demo
 
 This command creates the isolated cluster, installs Calico, builds and loads
 the Sproozi image, creates gateway credentials and trust material, deploys the
-example resources, and submits the run. The controller creates an agent Pod in
+example resources, and submits the run. The controller creates a sandbox Pod in
 `sproozi-agents` and starts a noninteractive `codex exec` session inside it.
 Codex investigates the workload and creates a real GitHub PR using the shared
 gateway. The command then waits for the acceptance checks,
@@ -234,7 +234,7 @@ kubectl get agentruns -n sproozi-system -w
 ```
 
 The target workload is deliberately broken. Its failing Pod is expected.
-The agent Pod appears in `sproozi-agents` and is removed when its run ends.
+The sandbox Pod appears in `sproozi-agents` and is removed when its run ends.
 
 ## 8. Inspect the result and explore
 

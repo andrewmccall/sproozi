@@ -86,17 +86,12 @@ func TestAgentPolicyDefaultsDurations(t *testing.T) {
 	apiClient := testClient
 	ns := newNamespace(t)
 
+	// A typed client that leaves the durations unset must get the CRD
+	// defaults. With omitempty it sent "0s", and every run timed out at once.
 	policy := validAgentPolicy(ns)
-	policyObject, err := runtime.DefaultUnstructuredConverter.ToUnstructured(policy)
-	if err != nil {
-		t.Fatalf("ToUnstructured() error = %v", err)
-	}
-	unstructured.RemoveNestedField(policyObject, "spec", "maxExecutionDuration")
-	unstructured.RemoveNestedField(policyObject, "spec", "retentionTTL")
-	unstructuredPolicy := &unstructured.Unstructured{Object: policyObject}
-	unstructuredPolicy.SetAPIVersion(sprooziv1alpha1.GroupVersion.String())
-	unstructuredPolicy.SetKind("AgentPolicy")
-	if err := apiClient.Create(t.Context(), unstructuredPolicy); err != nil {
+	policy.Spec.MaxExecutionDuration = metav1.Duration{}
+	policy.Spec.RetentionTTL = metav1.Duration{}
+	if err := apiClient.Create(t.Context(), policy); err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
 
@@ -110,6 +105,28 @@ func TestAgentPolicyDefaultsDurations(t *testing.T) {
 	}
 	if got.Spec.RetentionTTL.Duration != 30*24*time.Hour {
 		t.Errorf("retentionTTL = %s, want 720h", got.Spec.RetentionTTL.Duration)
+	}
+}
+
+func TestAgentPolicyRejectsZeroExecutionDuration(t *testing.T) {
+	t.Parallel()
+
+	apiClient := testClient
+	ns := newNamespace(t)
+
+	policy := validAgentPolicy(ns)
+	policyObject, err := runtime.DefaultUnstructuredConverter.ToUnstructured(policy)
+	if err != nil {
+		t.Fatalf("ToUnstructured() error = %v", err)
+	}
+	if err := unstructured.SetNestedField(policyObject, "0s", "spec", "maxExecutionDuration"); err != nil {
+		t.Fatal(err)
+	}
+	unstructuredPolicy := &unstructured.Unstructured{Object: policyObject}
+	unstructuredPolicy.SetAPIVersion(sprooziv1alpha1.GroupVersion.String())
+	unstructuredPolicy.SetKind("AgentPolicy")
+	if err := apiClient.Create(t.Context(), unstructuredPolicy); err == nil {
+		t.Fatal("Create() error = nil, want API server validation error for 0s")
 	}
 }
 

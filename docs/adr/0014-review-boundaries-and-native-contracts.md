@@ -3,6 +3,8 @@
 Status: accepted
 Date: 2026-10-15
 
+Partly superseded: [ADR 0040](0040-sandboxes-reach-the-gateway-without-dns.md) removes the kube-dns exception described below; Kubernetes sandboxes now resolve no names.
+
 ## Context and constraints
 
 The October source review found authorization-document drift in GitHub reads,

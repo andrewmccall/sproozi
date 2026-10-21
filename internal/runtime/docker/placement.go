@@ -738,6 +738,20 @@ func (p *Placement) AbortPreparation(ctx context.Context, l session.Launch) erro
 			return err
 		}
 	}
+	// A volume created just before its record was saved is still this
+	// execution's: find it by its fixed name so release removes it too.
+	if r.Volume == nil && !r.Removing {
+		v, found, err := p.engine.lookupVolume(ctx, r.Execution+"-workspace", r.Launch.AllocationID, p.config.VolumeBytes)
+		if err != nil {
+			return err
+		}
+		if found {
+			r.Volume = &v
+			if err = p.save(r); err != nil {
+				return err
+			}
+		}
+	}
 	if r.Phase != phasePreparationAborting && r.Agent != nil {
 		i, err := p.incarnation(r)
 		if err != nil {

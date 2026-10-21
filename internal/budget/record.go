@@ -39,6 +39,12 @@ func (r *Record) Encode() (string, error) {
 	return string(data), err
 }
 
+// Usage is the settled usage and whether the account is sealed, for display
+// beside the encoded record. It reads the record and changes nothing.
+func (r *Record) Usage() (units, costMicros int64, finalized bool) {
+	return r.state.UnitsUsed, r.state.CostMicros, r.state.Sealed != nil
+}
+
 func DecodeRecord(data string) (*Record, error) {
 	state, err := decodeLedgerState(data)
 	if err != nil {

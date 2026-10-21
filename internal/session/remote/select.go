@@ -1,8 +1,10 @@
 // Package remote reaches a remote executor through a kubeconfig context. The
 // developer's own Kubernetes identity finds the executor's Service in a
-// namespace, reads its access Secret and opens a port-forward tunnel to its
-// Pod; the profile protocol then runs over that tunnel with the same TLS and
-// home principal token as before. See ADR 0034.
+// namespace, reads its published CA, mints a short-lived token for the
+// sproozi-cli ServiceAccount bound to TokenAudience and opens a port-forward
+// tunnel to its Pod; the profile protocol then runs over that tunnel with TLS
+// and that token. The context's own credential never reaches the executor. See
+// ADR 0036.
 package remote
 
 import (

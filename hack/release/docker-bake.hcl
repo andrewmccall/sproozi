@@ -37,7 +37,7 @@ target "native" {
   labels     = { "org.opencontainers.image.source" = "https://github.com/andrewmccall/sproozi", "org.opencontainers.image.version" = "${VERSION}" }
 }
 
-// The controller, gateway, webhook and task service image.
+// The controller, gateway, task service and certificate controller image.
 target "control" {
   context    = "."
   dockerfile = "Dockerfile"

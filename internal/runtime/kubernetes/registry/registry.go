@@ -17,6 +17,9 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
+
+	"github.com/andrewmccall/sproozi/internal/agentcontract"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/agentprofile"
@@ -40,12 +43,22 @@ const (
 )
 
 var (
-	ErrConflict   = errors.New("mobility registration conflict")
-	ErrGone       = errors.New("mobility registration incarnation unavailable")
-	ErrExpired    = errors.New("mobility execution deadline expired")
-	identifier    = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$`)
-	digestPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
-	uuidPattern   = regexp.MustCompile(`^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$`)
+	ErrConflict = errors.New("mobility registration conflict")
+	ErrGone     = errors.New("mobility registration incarnation unavailable")
+	ErrExpired  = errors.New("mobility execution deadline expired")
+	// ErrSessionStopped reports a run whose session stop completed: its
+	// checkpoint and finalized usage are recorded. ResolveRun returns the
+	// record with it. The gateway denies the run; the controller waits for
+	// the sandbox to finish and ends the run as stopped, not failed.
+	ErrSessionStopped = errors.New("mobility session stopped this execution")
+	// ErrSessionCancelled reports a run whose own registration was cancelled:
+	// an abort cancels the registration before it patches spec.cancel on the
+	// run. It wraps ErrConflict, so every caller that refuses a conflict still
+	// refuses it; the controller ends the run Cancelled rather than Failed.
+	ErrSessionCancelled = fmt.Errorf("%w: session cancelled this execution", ErrConflict)
+	identifier          = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$`)
+	digestPattern       = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	uuidPattern         = regexp.MustCompile(`^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$`)
 )
 
 type Phase string
@@ -562,7 +575,7 @@ func validateSeals(seals map[api.CapabilityKind]budget.TrustedUsage, ceilings ma
 }
 
 func validateNativeInput(r Registration) error {
-	if len(r.Task) > 32<<10 || strings.ContainsRune(r.Task, 0) || r.Task != "" && (strings.TrimSpace(r.Task) == "" || r.Harness != harness.NativeCodex) {
+	if utf8.RuneCountInString(r.Task) > agentcontract.MaxTaskRunes || strings.ContainsRune(r.Task, 0) || r.Task != "" && (strings.TrimSpace(r.Task) == "" || r.Harness != harness.NativeCodex) {
 		return fmt.Errorf("invalid native task")
 	}
 	if r.WorkspaceDigest != "" {

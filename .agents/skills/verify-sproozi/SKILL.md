@@ -89,7 +89,7 @@ Each invocation prints its evidence directory under
 - `crds-observed.json`, with CRDs seen in the owned cluster during the gate.
 - `live.json` for the full provider-backed demo, including PR and denial evidence.
 
-The dependency proof must observe Sproozi's four CRDs and Calico's CRDs, with no
+The dependency proof must observe Sproozi's five CRDs and Calico's CRDs, with no
 external Agent Sandbox, cert-manager or monitoring CRDs. Sproozi creates ordinary
 Pods. No external Sandbox controller, gVisor or Kata runtime is installed.
 

@@ -16,7 +16,15 @@ limitations under the License.
 
 package controller
 
-import sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
+import (
+	"errors"
+
+	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
+)
+
+// ErrInvalidTransition reports a phase change the lifecycle does not permit.
+// It indicates a controller bug, so it is returned rather than ignored.
+var ErrInvalidTransition = errors.New("invalid AgentRun phase transition")
 
 // IsTerminal reports whether phase is a terminal lifecycle state from which no
 // further transitions are permitted.
@@ -41,7 +49,10 @@ func ValidTransition(from, to sprooziv1alpha1.AgentRunPhase) bool {
 		switch to {
 		case sprooziv1alpha1.AgentRunPhaseAdmitted,
 			sprooziv1alpha1.AgentRunPhaseFailed,
+			sprooziv1alpha1.AgentRunPhaseTimedOut,
 			sprooziv1alpha1.AgentRunPhaseCancelled:
+			// TimedOut: a managed run's session registration can expire
+			// while the run waits under a concurrency cap.
 			return true
 		}
 	case sprooziv1alpha1.AgentRunPhaseAdmitted:

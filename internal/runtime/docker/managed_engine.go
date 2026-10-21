@@ -11,6 +11,7 @@ import (
 	"net/netip"
 	"os/exec"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -57,6 +58,24 @@ func (e *Engine) EnsureVolume(ctx context.Context, name, execution string, size 
 	}
 	return e.volume(ctx, Volume{Name: name, Execution: execution, Bytes: size})
 }
+
+// lookupVolume finds a workspace volume by its exact name and verifies it is
+// the one this execution created. found is false when no such volume exists.
+func (e *Engine) lookupVolume(ctx context.Context, name, execution string, size int64) (Volume, bool, error) {
+	if !resourceName.MatchString(name) {
+		return Volume{}, false, errors.New("invalid Docker tmpfs volume")
+	}
+	data, err := e.command(ctx, volumeCommand, "ls", "--quiet", "--filter", "name="+name)
+	if err != nil {
+		return Volume{}, false, err
+	}
+	if !slices.Contains(strings.Fields(string(data)), name) {
+		return Volume{}, false, nil
+	}
+	v, err := e.volume(ctx, Volume{Name: name, Execution: execution, Bytes: size})
+	return v, err == nil, err
+}
+
 func (e *Engine) volume(ctx context.Context, v Volume) (Volume, error) {
 	data, err := e.command(ctx, volumeCommand, "inspect", v.Name)
 	if err != nil {

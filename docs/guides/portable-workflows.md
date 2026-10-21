@@ -18,8 +18,8 @@ for the difference between a session and an execution.
 
 This workflow supports Codex. Here the remote executor owns the task until you
 pull it, and nobody attaches while it runs. To work interactively in a Codex or
-Claude Code session and move it between Docker and Kubernetes while your home
-daemon stays the owner, use
+Claude Code session and move it between Docker and Kubernetes while the service on
+your machine stays the owner, use
 [Move a live session between Docker and Kubernetes](session-mobility.md). Automated
 Claude tasks, IDE/GUI attachment, background tools, multiplayer and existing
 personal-session adoption are not part of this workflow.
@@ -124,7 +124,9 @@ references.
 Deploy the remote executor in the cluster with the
 [retained-work example](../../examples/portable-workflows/kubernetes/owner.yaml):
 one replica, a private persistent volume, its TLS and work-token Secret and its
-placement permissions. A lock on its state directory rejects a second executor
+placement permissions, all in the `sproozi-sessions` namespace with its managed
+runs. Keep the executor out of `sproozi-system`, which holds the gateway's
+configuration. A lock on its state directory rejects a second executor
 using the same directory, and restarting it recovers the stored execution
 intents. Sandboxes cannot use it to execute arbitrary commands.
 

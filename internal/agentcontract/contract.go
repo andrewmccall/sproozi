@@ -28,9 +28,14 @@ const (
 
 var (
 	errInvalidContract = errors.New("agentcontract: invalid contract")
-	dnsLabel           = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
-	identifier         = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,127}$`)
-	uid                = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
+	// MaxTaskRunes bounds a run's task, in characters. The AgentRun CRD, the
+	// session registry and native launches use the same limit.
+	MaxTaskRunes = maxTaskRunes
+	// MaxEventContextBytes bounds the JSON encoding of a run's event context.
+	MaxEventContextBytes = maxEventContextBytes
+	dnsLabel             = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
+	identifier           = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,127}$`)
+	uid                  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
 )
 
 // Input is the complete runner input. Trusted and untrusted content are
@@ -55,7 +60,7 @@ type TrustedInput struct {
 	Instructions string `json:"instructions"`
 }
 
-// UntrustedInput holds caller- or webhook-provided data. EventContext is an
+// UntrustedInput holds caller-provided data. EventContext is an
 // opaque JSON object so templates cannot mistake it for operating instructions.
 type UntrustedInput struct {
 	Task         string          `json:"task"`
@@ -111,7 +116,10 @@ func (i Input) Validate() error {
 }
 
 func (r RunIdentity) validate() error {
-	if !dnsLabel.MatchString(r.Namespace) || !dnsLabel.MatchString(r.Name) || !uid.MatchString(r.UID) {
+	// Run names and namespaces are copied into label values, which hold at
+	// most 63 characters.
+	if !dnsLabel.MatchString(r.Namespace) || !dnsLabel.MatchString(r.Name) || len(r.Name) > 63 || len(r.Namespace) > 63 ||
+		!uid.MatchString(r.UID) {
 		return invalid("invalid run identity")
 	}
 	return nil
@@ -214,4 +222,10 @@ func safeGatewayURL(value string) bool {
 func boundedText(value string, max int) bool {
 	return value != "" && utf8.ValidString(value) && utf8.RuneCountInString(value) <= max && !strings.ContainsRune(value, '\x00')
 }
+
+// IsInvalid reports whether err is a deterministic contract validation
+// failure, as opposed to an encoding or infrastructure error. Retrying the
+// same input cannot succeed.
+func IsInvalid(err error) bool { return errors.Is(err, errInvalidContract) }
+
 func invalid(reason string) error { return fmt.Errorf("%w: %s", errInvalidContract, reason) }

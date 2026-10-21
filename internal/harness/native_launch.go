@@ -12,6 +12,9 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
+
+	"github.com/andrewmccall/sproozi/internal/agentcontract"
 
 	"github.com/andrewmccall/sproozi/internal/nativeconfig"
 )
@@ -183,7 +186,7 @@ func (c NativeLaunch) Validate(now time.Time) error {
 		len(c.ProfileArchive) > NativeProfileArchiveMaxBytes {
 		return errors.New("invalid native launch contract")
 	}
-	if len(c.Task) > 32<<10 || strings.ContainsRune(c.Task, 0) ||
+	if utf8.RuneCountInString(c.Task) > agentcontract.MaxTaskRunes || strings.ContainsRune(c.Task, 0) ||
 		c.Task != "" && (strings.TrimSpace(c.Task) == "" || c.Harness != NativeCodex) {
 		return errors.New("native task requires bounded nonempty Codex input")
 	}

@@ -55,11 +55,11 @@ help: ## Display this help.
 
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
-	"$(CONTROLLER_GEN)" rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+	"$(CONTROLLER_GEN)" rbac:roleName=manager-role crd webhook paths="./api/...;./cmd/...;./internal/..." output:crd:artifacts:config=config/crd/bases
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
-	"$(CONTROLLER_GEN)" object:headerFile="hack/boilerplate.go.txt",year=$(YEAR) paths="./..."
+	"$(CONTROLLER_GEN)" object:headerFile="hack/boilerplate.go.txt",year=$(YEAR) paths="./api/...;./cmd/...;./internal/..."
 
 .PHONY: fmt
 fmt: ## Run go fmt against code.
@@ -118,15 +118,20 @@ lint-config: golangci-lint ## Verify golangci-lint configuration. CI (Lint).
 .PHONY: verify-generated
 verify-generated: ## Regenerate code and manifests and run go fmt; fail if that changes the working tree. CI.
 	@before="$$(mktemp)"; after="$$(mktemp)"; trap 'rm -f "$$before" "$$after"' EXIT; \
-	git diff > "$$before"; \
+	git diff > "$$before"; git ls-files --others --exclude-standard >> "$$before"; \
 	year="$$(sed -n 's/^Copyright \([0-9]*\)\.$$/\1/p' api/v1alpha1/zz_generated.deepcopy.go)"; \
 	$(MAKE) --no-print-directory manifests generate fmt YEAR="$$year" || exit 1; \
-	git diff > "$$after"; \
+	git diff > "$$after"; git ls-files --others --exclude-standard >> "$$after"; \
 	if ! cmp -s "$$before" "$$after"; then \
 		diff "$$before" "$$after" | head -200; \
 		echo 'Generated code, manifests or formatting were stale; make manifests generate fmt has now updated them: review and keep the result' >&2; \
 		exit 1; \
 	fi
+
+.PHONY: verify-deps
+verify-deps: ## Fail if go.mod is untidy or reachable code has a known vulnerability (pinned govulncheck). CI.
+	GOTOOLCHAIN=$(LINT_TOOLCHAIN) go mod tidy -diff
+	GOTOOLCHAIN=$(LINT_TOOLCHAIN) go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) ./...
 
 .PHONY: verify-fast
 verify-fast: vet verify-race ## Vet and race-test every non-e2e package with coverage, without regenerating sources. CI.
@@ -175,6 +180,7 @@ verify-workflow-fixtures: ## Run offline Python and shell regressions for fixtur
 	python3 -m unittest discover -s hack/verify/session-mobility -p '*_test.py'
 	python3 -m unittest discover -s hack/verify/orchestration-kind -p '*_test.py'
 	python3 hack/verify/quickstart_test.py
+	python3 hack/release/publish_test.py
 	bash hack/verify/kind-test.sh
 	bash hack/demo/setup-test.sh
 	python3 hack/demo/render_test.py
@@ -274,7 +280,7 @@ docker-buildx: ## Build and push docker image for the manager for cross-platform
 	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile > Dockerfile.cross
 	- $(CONTAINER_TOOL) buildx create --name sproozi-builder
 	$(CONTAINER_TOOL) buildx use sproozi-builder
-	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${IMG} -f Dockerfile.cross .
+	$(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${IMG} -f Dockerfile.cross .
 	- $(CONTAINER_TOOL) buildx rm sproozi-builder
 	rm Dockerfile.cross
 
@@ -348,7 +354,8 @@ GOLANGCI_LINT_VERSION ?= v2.12.2
 # golangci-lint v2.12.2 reads compiler export data only from Go 1.26, so lint
 # loads packages with CI's toolchain whatever Go is installed; the go command
 # downloads it once if it is missing.
-LINT_TOOLCHAIN ?= go1.26.6
+LINT_TOOLCHAIN ?= go1.26.10
+GOVULNCHECK_VERSION ?= v1.8.0
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
 $(KUSTOMIZE): | $(LOCALBIN)

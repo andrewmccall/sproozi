@@ -1,8 +1,8 @@
 # Native session mobility fixture
 
 Run these commands from the repository root in one administrator shell. They
-exercise the production home daemon, Docker placement, authenticated remote
-profile, Kubernetes placement and stock native terminal. The provider is a
+exercise the production service, Docker placement, authenticated remote
+executor, Kubernetes placement and stock native terminal. The provider is a
 deterministic local HTTPS fixture; it needs no personal credentials or paid model
 account. Codex's extended production roundtrip and Claude's complete TUI/Bash/Git
 roundtrip with both-placement denial probes passed on 12 October 2026. See
@@ -154,14 +154,16 @@ python3 hack/verify/session-mobility/kubernetes.py \
 export KUBECONFIG="$work/kubeconfig"
 kubectl apply --server-side -f config/crd/bases
 kubectl create namespace sproozi-system
+kubectl create namespace sproozi-sessions
 kubectl -n sproozi-system create secret tls sproozi-gateway-tls \
   --cert="$codex/gateway.crt" --key="$codex/gateway.key"
-kubectl -n sproozi-system create secret generic sproozi-work-credentials \
+kubectl -n sproozi-sessions create secret generic sproozi-work-credentials \
   --from-file=tls.crt="$codex/gateway.crt" --from-file=tls.key="$codex/gateway.key"
 kubectl apply --server-side -f "$codex/kubernetes.yaml"
-for name in sproozi-controller-manager sproozi-gateway sproozi-work; do
+for name in sproozi-controller-manager sproozi-gateway; do
   kubectl -n sproozi-system rollout status "deployment/$name" --timeout=180s
 done
+kubectl -n sproozi-sessions rollout status deployment/sproozi-work --timeout=180s
 ```
 
 Write a `sproozi` context for the `sproozi-cli` ServiceAccount into its own
@@ -216,7 +218,7 @@ python3 hack/verify/session-mobility/extended.py \
   --checkpoint-binary "$work/bin/checkpoint" --provider-directory "$codex" \
   --context "$work/sproozi.kubeconfig" \
   --kubeconfig "$work/kubeconfig" --kubectl "$(command -v kubectl)" \
-  --namespace sproozi-system --agent-namespace sproozi-agents \
+  --namespace sproozi-sessions --agent-namespace sproozi-agents \
   --home-log "$codex/home.log"
 ```
 
@@ -225,11 +227,11 @@ same arguments, without `--provider-directory`, `--kubeconfig`, `--kubectl` and
 the namespaces.
 
 Read `$codex/proof/report.json` privately. Success covers genuine native terminal
-turns, same native UUID and original deadline across placements, workspace and
+turns, same harness conversation ID and original deadline across placements, workspace and
 selected ignored-file continuity, real tool execution, forbidden network and
 mount probes, a held graceful move, forced held-turn cancellation and accounting
 replay. The driver also writes the user's [profile](../../../docs/reference/profile.md)
-beside the home configuration, changes its marker before each move, and reads
+beside the service configuration, changes its marker before each move, and reads
 the rendered `AGENTS.md` and profile skill in the exact Docker container and
 Kubernetes Pod: each visit must carry the profile as it was when it began, and
 the Kubernetes registration must name the stored archive. Controlled tools, histories and provider usage are the fixture's scope;
@@ -243,7 +245,7 @@ Finish or cancel every Codex visit before switching the gateway certificate,
 provider and executor. Stop the two owned processes using the PIDs captured
 above. Keep the same dedicated cluster, controller, namespaces, `sproozi`
 context and resolved images. Claude uses a fresh private directory, trust
-material and executor principal, with ports 18775 (provider) and 18453 (home
+material and executor principal, with ports 18775 (provider) and 18453 (local
 gateway). Its renderer updates the shared gateway, adds Claude-specific
 runtime, template and trust resources, and reconfigures the one executor in the
 namespace for Claude, which restarts its Pod. It does not deploy a second
@@ -266,13 +268,13 @@ python3 hack/verify/session-mobility/claude.py render \
 export KUBECONFIG="$work/kubeconfig"
 kubectl -n sproozi-system create secret tls sproozi-gateway-tls \
   --cert="$claude/gateway.crt" --key="$claude/gateway.key" --dry-run=client -o yaml | kubectl apply -f -
-kubectl -n sproozi-system create secret generic sproozi-work-credentials \
+kubectl -n sproozi-sessions create secret generic sproozi-work-credentials \
   --from-file=tls.crt="$claude/gateway.crt" --from-file=tls.key="$claude/gateway.key" \
   --dry-run=client -o yaml | kubectl apply -f -
 kubectl apply --server-side -f "$claude/kubernetes.yaml"
 kubectl -n sproozi-system rollout status deployment/sproozi-gateway --timeout=180s
-kubectl -n sproozi-system rollout restart deployment/sproozi-work
-kubectl -n sproozi-system rollout status deployment/sproozi-work --timeout=180s
+kubectl -n sproozi-sessions rollout restart deployment/sproozi-work
+kubectl -n sproozi-sessions rollout status deployment/sproozi-work --timeout=180s
 unset KUBECONFIG
 python3 hack/verify/session-mobility/claude.py serve \
   --output-directory "$claude" >"$claude/provider.log" 2>&1 &
@@ -284,7 +286,7 @@ python3 hack/verify/session-mobility/claude.py verify \
   --session-binary "$work/bin/sproozi" --pty-helper "$work/bin/native-pty" \
   --checkpoint-binary "$work/bin/checkpoint" --context "$work/sproozi.kubeconfig" \
   --admin-probes --kubeconfig "$work/kubeconfig" \
-  --namespace sproozi-system --agent-namespace sproozi-agents
+  --namespace sproozi-sessions --agent-namespace sproozi-agents
 ```
 
 Wait for Claude's socket and provider as above, with port 18775, before the
@@ -311,8 +313,8 @@ reusing a deleted immutable ConfigMap's cached mount.
 
 After a passing driver, stop the owned service and provider processes and
 delete the named dedicated cluster. For an interrupted run, first cancel the
-session ID recorded in its private report through its own home socket, preserving
-the daemon's actual placement stop and accounting behavior. If cancellation
+session ID recorded in its private report through its own service socket, preserving
+the service's actual placement stop and accounting behavior. If cancellation
 fails, retain the failure and exact resource records; do not assume killing a
 client or home process stopped all workers. Their original deadlines still
 apply. Inspect only the exact fixture allocation IDs when resolving a failed

@@ -1,7 +1,7 @@
 # Required secrets and config
 
 This page lists credentials and configuration for the Kubernetes deployment.
-Provider credentials stay in trusted cluster objects. Agent Pods receive client
+Provider credentials stay in trusted cluster objects. Sandbox Pods receive client
 configuration, public trust material and a gateway identity token for the run.
 [Install on Kubernetes](../guides/install-kubernetes.md) installs a release; step 7 of
 [Install from a checkout](../guides/install-from-checkout.md#7-run-a-model-on-this-cluster)
@@ -19,7 +19,6 @@ adds the provider and GitHub credentials.
 | `sproozi-egress-gateway-profiles` | `sproozi-system` | `ConfigMap` | shared gateway egress module | `profiles.json` |
 | `sproozi-gateway-tls` | `sproozi-system` | `Secret` | shared gateway inspection certificate | `tls.crt`, `tls.key` |
 | `sproozi-sandbox-trust` | `sproozi-agents` | immutable `ConfigMap` | sandbox clients | `ca-bundle.pem`, public CA only |
-| `<template secret>` | `sproozi-webhooks` | `Secret` | webhook | `hmac-key`, at least 32 random bytes |
 
 The install adds the `sproozi-` prefix to every object it creates, so the
 ConfigMaps it ships are `sproozi-model-gateway-pricing`,
@@ -174,23 +173,19 @@ dollar prices. Model admission can underestimate total consumption; see
 
 ## State and deployment controls
 
-The deployed budget ledger writes ConfigMaps in `sproozi-system`, selected by
-`BUDGET_NAMESPACE` and labelled `app.kubernetes.io/component=budget-ledger`.
-The gateway's `shared-gateway-budget` Role grants `get`, `list`, `create` and
-`update` on ConfigMaps there; it lists them to settle expired
-[leases](../../GLOSSARY.md#lease) every minute. If you change the variable,
-create that Role and its RoleBinding in the new namespace. The webhook writes replay ConfigMaps in
-`sproozi-webhook-state`, selected by `REPLAY_NAMESPACE`. The install includes
-the webhook state namespace and namespaced state RBAC; `retentionTTL` does not
-clean this durable state.
+The deployed gateway keeps its budget ledgers as
+[BudgetLedger](budgetledger.md) resources in `sproozi-system`, selected by
+`BUDGET_NAMESPACE` (default `sproozi-system`). The gateway's
+`sproozi-shared-gateway-budget` Role grants `get`, `list`, `create`, `update`
+and `delete` on `budgetledgers` there and on nothing else, so the gateway
+cannot rewrite the configuration ConfigMaps beside them. It lists them to settle expired [leases](../../GLOSSARY.md#lease) every minute,
+and every hour deletes a settled ledger whose AgentRun is gone and which has
+not been written for `BUDGET_LEDGER_RETENTION` (a Go duration, default `168h`; the gateway refuses to start with less than `1h`).
+If you change `BUDGET_NAMESPACE`, create that Role and its RoleBinding in the new
+namespace. The rotating ChatGPT credential stays in `sproozi-system`, selected
+by `CREDENTIAL_NAMESPACE`.
 
-The webhook reads HMAC Secrets only in `sproozi-webhooks`, selected by
-`HMAC_SECRET_NAMESPACE`, never in the template's namespace. The install
-creates that namespace and a Role there that grants only Secret `get`. If you
-change the variable, create the Role and RoleBinding in the new namespace.
-See [ADR 0022](../adr/0022-webhook-hmac-secrets-in-own-namespace.md).
-
-Transport, GitHub protection, replay retention and trusted-service restrictions
+Transport, GitHub protection, state retention and trusted-service restrictions
 are documented in [security hardening](security-hardening.md).
 
 ## Remote MCP registration
@@ -207,7 +202,7 @@ policy predicates and client preparation.
 ## Optional persistent orchestration
 
 [Run a persistent Hermes assistant on Kubernetes](../guides/hermes-orchestration.md) prepares the private task
-service and trusted coordinator. These credentials stay outside agent Pods:
+service and trusted coordinator. These credentials stay outside sandbox Pods:
 
 | Object | Namespace | Purpose |
 | --- | --- | --- |

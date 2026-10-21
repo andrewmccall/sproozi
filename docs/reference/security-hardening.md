@@ -14,6 +14,39 @@ traffic involving the Pod's own node. Do not infer API isolation from policy
 alone when the API server is on that node. See
 [Kubernetes NetworkPolicy semantics](https://kubernetes.io/docs/concepts/services-networking/network-policies/).
 
+Sandboxes resolve no names, on Kubernetes as on Docker. The NetworkPolicy has
+no DNS rule, the Pod's `dnsPolicy` is `None` with `127.0.0.1` as its only
+nameserver, and its hosts file maps the gateway host to the address the
+controller resolved when it created the Pod. A query for an attacker's domain
+therefore never leaves the Pod, so DNS cannot carry data past the gateway's
+policy, audit and accounting. Clients reach every other host through the
+gateway as an HTTPS proxy, which resolves names itself. If the gateway Service
+is recreated with a new cluster IP, running sandboxes lose the gateway until
+their runs end; new runs get the new address. Keep `gatewayEndpoint` a host
+name: managed harnesses also use that host for their control connection, and
+the gateway does not serve an IP address as an inspection host. See
+[ADR 0040](../adr/0040-sandboxes-reach-the-gateway-without-dns.md).
+
+Every Pod in `sproozi-agents` is denied all ingress and egress by
+`sproozi-sandbox-default-deny`, and each run's own NetworkPolicy then allows the
+gateway. Policies add up, so a sandbox whose run labels are changed, or whose
+per-run policy is deleted, has no network rather than the cluster's default.
+Release refuses to report a run-named Pod whose labels no longer match the run,
+so someone looks at it.
+
+The gateway also checks which Pod a projected token was issued to. The
+TokenReview must carry exactly one `authentication.kubernetes.io/pod-name` and
+one `authentication.kubernetes.io/pod-uid` extra, so a token with no Pod
+binding is refused. That covers one minted with
+`kubectl create token sproozi-<uid> --audience sproozi-gateway` and one bound
+to a Secret. The Pod name must be the run's sandbox name, and the Pod UID must
+equal the UID of the sandbox Pod the gateway reads live from `sproozi-agents`
+when the connection opens. A token from any other Pod is refused, even if that
+Pod uses the run's ServiceAccount, and so is a token from an earlier Pod with
+the sandbox's name. Every refusal returns the same `401 invalid gateway
+identity`; the gateway logs the cause, never the token, once per cause every
+10 seconds, with a count of the repeats.
+
 The CNI must also enforce a Pod's policy from the moment the Pod starts.
 Sproozi creates each run's NetworkPolicy before its Pod, but some
 implementations apply it only after the Pod is running. Kind's default
@@ -25,7 +58,8 @@ once on a warm node: a policy applied late shows as
 
 The gateway validates the ServiceAccount namespace, name, UID, audience and
 active Run state. Each new connection (CONNECT) is checked with a live
-TokenReview and live reads of the run, template, policy and ServiceAccount.
+TokenReview and live reads of the run, template, policy, ServiceAccount and
+sandbox Pod.
 The gateway then checks each request on that connection, and rechecks the open
 connection every second, and closes it once the run is no longer active or
 allowed.
@@ -47,7 +81,7 @@ therefore do grow with connections and checks:
 | Each managed session, every second | 2 GETs |
 | Each inspected request | 2 more GETs |
 | 10-second live recheck | about 0.4 per second more per execution |
-| Each new CONNECT | 1 TokenReview and 8 GETs |
+| Each new CONNECT | 1 TokenReview and 9 GETs |
 
 Authentication and each authority lookup have a five-second deadline. A
 revocation therefore closes open connections:
@@ -124,7 +158,10 @@ emergency that removes every running Pod's trust in the gateway. See
 
 A [local installation](local-installation.md) keeps its CA key, provider keys
 and journals in owner-only files. Its gateway listens on loopback when the
-engine forwards there, as Docker Desktop does. The user's
+engine forwards there, as Docker Desktop does. Where Docker reaches neither
+loopback nor the bridge address, it listens on every interface; it still
+requires TLS 1.3 and a per-execution token, but a host firewall that blocks
+the gateway port from the network keeps unauthenticated connections off it. The user's
 [profile](profile.md) reaches every session of that user and is not isolation between
 untrusted users or agents. Anyone controlling the user account or the Docker
 engine controls the local installation.
@@ -134,7 +171,7 @@ engine controls the local installation.
 > **Warning:** There is no cluster cap by default, and the default install sets
 > no policy caps. With no cluster cap (`--max-active-runs`) and no policy cap
 > (`maxActiveRuns`), the number of active runs is bounded only by
-> ResourceQuotas, node capacity and the gateway's connection limits. Set caps before you share a cluster or connect a webhook.
+> ResourceQuotas, node capacity and the gateway's connection limits. Set caps before you share a cluster.
 
 Every active run adds load that Sproozi doesn't cap for you:
 
@@ -197,15 +234,15 @@ Every active run adds load that Sproozi doesn't cap for you:
 - **Spend.** Budgets apply per run, so N concurrent runs can spend N budgets at
   once. Model budgets are not hard ceilings either; see
   [Model budgets are not hard spending ceilings](#model-budgets-are-not-hard-spending-ceilings).
-- **Webhook bursts.** Each accepted event creates an AgentRun, and those runs
-  now start in parallel. A burst of alerts starts a burst of runs.
+- **Burst submissions.** Runs start in parallel, so a script or tool that
+  creates many AgentRuns at once starts as many runs.
 
 For shared clusters:
 
 1. Set the controller flag `--max-active-runs`; see
    [Limit concurrent runs](../guides/install-from-checkout.md#limit-concurrent-runs).
 2. Set `maxActiveRuns` on each AgentPolicy, especially the policies that
-   webhook templates use; see [AgentPolicy](agentpolicy.md#concurrent-runs).
+   scripts and tools submit runs under; see [AgentPolicy](agentpolicy.md#concurrent-runs).
 3. Put a ResourceQuota on `sproozi-agents` as a Kubernetes-level backstop:
 
 ```yaml
@@ -249,6 +286,11 @@ Sproozi. Grant the scaffolded `sproozi-agentruntime-editor-role`,
 `sproozi-agentpolicy-admin-role` ClusterRoles only to administrators, including
 through namespaced RoleBindings. Users who only start work need `AgentRun`
 access and read access to templates.
+
+The install also ships `sproozi-budgetledger-editor-role` and
+`sproozi-budgetledger-admin-role`. Anyone who can write a
+[BudgetLedger](budgetledger.md) can reset or inflate a run's usage, so bind
+them to no one, or only to administrators; the viewer role is safe to grant.
 
 ## Restrict remote MCP access
 
@@ -409,6 +451,10 @@ they are not provider-hosted.) See
 
 ### Gateway restarts, upgrades and rollback
 
+For the steps of an in-place Kubernetes upgrade, see
+[Upgrade](../guides/install-kubernetes.md#upgrade). The release notes name any
+object a release no longer ships.
+
 On SIGTERM the shared gateway drains: it stops accepting connections, cancels
 every model call with `endReason` `gateway_restart` and waits up to 30 seconds
 for them to settle, then exits. A call the provider had received is settled as
@@ -440,13 +486,13 @@ its own first, so it persists even when the reservation or seal then fails.
 Only once the recovery is saved does it log `Settled abandoned model
 reservation`, or `Settled abandoned budget reservation` for a lease that isn't
 a model call's, with `account`, `endReason` `gateway_restart`, `usageSource`
-`estimated`, `units` and `costMicros`. The shared gateway sweeps every budget
-ConfigMap (label `app.kubernetes.io/component=budget-ledger`), listing 500 at
-a time, at start and every minute, which needs `list` on ConfigMaps in
+`estimated`, `units` and `costMicros`. The shared gateway sweeps every
+[BudgetLedger](budgetledger.md) in its `BUDGET_NAMESPACE`, listing 500 at a
+time, at start and every minute, which needs `list` on `budgetledgers` in
 `sproozi-system`; the local service sweeps its ledger files when it opens them
 and every minute. A sweep that fails logs `Failed to recover expired budget
-reservations: <error>`. A ledger ConfigMap the sweep can't decode is skipped
-with `Skipped corrupt budget ledger`, with `configMap` and `error`; the sweep
+reservations: <error>`. A BudgetLedger the sweep can't decode is skipped
+with `Skipped corrupt BudgetLedger`, with `name` and `error`; the sweep
 carries on and reports that error. A recovery, settle or sweep that finds the
 account deleted stops without recreating it, so a deleted account stays
 deleted. A late settle from the original gateway is refused; for a model call, its
@@ -462,8 +508,8 @@ gateway did when it stops. On SIGTERM it exits at once without settling its
 calls in flight, and their reservations have no lease. Every
 reservation a current gateway makes has a lease, so a pending reservation
 without one can only come from a gateway from before leases. The upgraded
-shared gateway runs a legacy pass before it serves, and the upgraded home
-daemon makes its first sweep after opening its ledger one: the pass charges
+shared gateway runs a legacy pass before it serves, and the upgraded
+service makes its first sweep after opening its ledger one: the pass charges
 the whole reservation of every pending reservation that has no lease, as the
 older gateway would have, and, once that is saved, logs `Settled legacy budget
 reservation` with `account`, `endReason` `gateway_restart`, `usageSource`
@@ -476,7 +522,7 @@ everything its account had left, so upgrade while no model calls are in
 flight.
 
 Rolling back is a risk. Older versions of every binary that reads budget
-records, the shared gateway and the remote executor (budget ConfigMaps) and
+records, the shared gateway and the remote executor (BudgetLedger resources) and
 the local service (its ledger files), refuse a record that holds leases, so that
 account's model calls, and the remote executor's seals, fail until a current
 binary settles them. Every pending reservation a current binary makes, model
@@ -497,14 +543,18 @@ Sproozi finalizers by hand. A deleted Pod doesn't mean its usage was recorded.
 [ADR 0014](../adr/0014-review-boundaries-and-native-contracts.md#implementation-notes)
 records how release recovers ownership.
 
-`retentionTTL` governs the AgentRun record. Budget ConfigMaps have no automatic
-retention/deletion path. Webhook replay keys are stored atomically in ConfigMaps
-in `sproozi-webhook-state`; they survive restarts and are shared by replicas.
-Each record is kept for two replay windows after its event's timestamp, so
-replicas whose clocks differ by less than one window cannot accept an event
-again after another replica removes its record.
-The webhook deletes expired replay entries once per replay window, so this state
-stays bounded by recent event volume.
+`retentionTTL` governs the AgentRun record. Budget ledgers are
+[BudgetLedger](budgetledger.md) resources in `sproozi-system`. The gateway deletes a ledger once its AgentRun no longer
+exists, nothing is reserved on it, and it has not been written for
+`BUDGET_LEDGER_RETENTION` (default 7 days, at least 1 hour); a run that no longer exists cannot
+authenticate, so its usage is final. A ledger whose account has no run UID
+carries no `sproozi.com/run-uid` label and is kept. Session
+registrations in run namespaces are not yet removed automatically: list them
+with `kubectl get configmaps -A -l sessions.sproozi.com/registry=true` and delete those
+whose AgentRun is gone and whose sessions you no longer need to stop or
+resume. See
+[ADR 0041](../adr/0041-gateway-state-namespace-and-retained-state-owners.md) and
+[ADR 0045](../adr/0045-budget-ledgers-are-a-custom-resource.md).
 
 ## Restrict trusted services
 
@@ -517,30 +567,31 @@ namespace. The optional metrics overlay adds TokenReviews and
 SubjectAccessReviews. Restrict exec/debug access
 and reuse of trusted service accounts. The gateway holds provider credentials
 and may update its rotating ChatGPT credential Secret. ChatGPT refresh requires one active gateway process,
-even though budget and replay state are shared. See
+even though budget state is shared. See
 [Model provider authentication](../guides/model-provider-auth.md).
+
+The remote executor example's Roles are not limited to its own runs. In
+`sproozi-agents` it can get, patch and delete any Pod and exec into it, and in
+`sproozi-system` it can update any BudgetLedger, though no ConfigMap. A compromised executor therefore
+holds the authority of every Kubernetes run in the cluster. Run it only where
+all runs share one trust domain, and treat its ServiceAccount like the
+controller's ([ADR 0041](../adr/0041-gateway-state-namespace-and-retained-state-owners.md)).
 
 The gateway's only plain HTTP listener is its health port, 8081, for the
 kubelet readiness probe. It serves `GET /readyz` with a fixed `ok` body and
 nothing else. The `sproozi-gateway` Service exposes only 8443, and no installed
 NetworkPolicy admits ingress to 8081, so `default-deny-ingress` keeps other
 Pods from reaching it. The kubelet probes it from the Pod's node.
-
-The webhook receiver refuses a request with missing, malformed or stale
-signature headers before it reads the body or calls the API server, and bounds
-header, body, read, write and idle time. See the
-[webhook contract](webhook-contract.md#request-checks-and-limits).
-It can read Secrets only in `sproozi-webhooks`, which holds HMAC keys alone, so
-a compromised receiver or a template annotation cannot reach the provider,
-GitHub or TLS credentials in `sproozi-system`
-([ADR 0022](../adr/0022-webhook-hmac-secrets-in-own-namespace.md)). Restrict
-who can create Secrets in `sproozi-webhooks` and edit `AgentTemplate`
-annotations, since either can choose which key authenticates a receiver.
+`kubectl port-forward` reaches a Pod directly through the API server and the
+kubelet, so NetworkPolicy doesn't apply to it: anyone allowed to create
+`pods/portforward` in `sproozi-system` can reach 8081, and every other port of
+the gateway and controller. Grant `pods/portforward` there only to
+administrators.
 
 The local demo's short-lived CA and gitignored environment file are disposable
 evaluation inputs. For deployment, supply managed certificates, least-privilege
 credentials, namespace isolation and durable audit collection. The [Home-ops playbook](../guides/home-ops-playbook.md) describes a planned
-integration; its Alertmanager converter and signer are not supplied.
+integration; Sproozi has no event receiver, so its runs are created by hand.
 
 
 ## Persistent assistant permissions and answers

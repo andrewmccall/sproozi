@@ -128,9 +128,10 @@ def verify(args):
         release = OUT / "sproozi-release"
         cluster.kubectl("apply", "--server-side", "--field-manager=sproozi-installer", "-f", str(release / "crds.yaml"))
         cluster.kubectl("wait", "--for=condition=Established", "--timeout=60s", "crd/agentruntimes.sproozi.com",
-                        "crd/agentpolicies.sproozi.com", "crd/agenttemplates.sproozi.com", "crd/agentruns.sproozi.com")
+                        "crd/agentpolicies.sproozi.com", "crd/agenttemplates.sproozi.com", "crd/agentruns.sproozi.com",
+                        "crd/budgetledgers.sproozi.com")
         cluster.kubectl("apply", "--server-side", "--field-manager=sproozi-installer", "-k", str(release / "quickstart-self-managed-ca"))
-        for deployment in ["sproozi-certificates", "sproozi-controller-manager", "sproozi-gateway", "sproozi-webhook"]:
+        for deployment in ["sproozi-certificates", "sproozi-controller-manager", "sproozi-gateway"]:
             cluster.kubectl("rollout", "status", "-n", SYSTEM, "deployment/" + deployment, "--timeout=300s", timeout=330)
         trust = cluster.json("get", "configmap", "-n", AGENTS, "sproozi-sandbox-trust")
         report["steps"]["bootstrap"] = {"servingSecretPopulated": bool(cluster.serving_leaf()), "trustImmutable": trust.get("immutable") is True,

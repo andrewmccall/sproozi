@@ -30,21 +30,29 @@ type AgentTemplateSpec struct {
 	PolicyRef AgentPolicyReference `json:"policyRef"`
 
 	// Instructions are trusted operating instructions selected by an administrator.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=16384
 	Instructions string `json:"instructions"`
 
 	// EgressProfiles lists named egress profiles selected for this template.
+	// +kubebuilder:validation:MaxItems=32
+	// +listType=set
 	EgressProfiles []string `json:"egressProfiles"`
 }
 
 // AgentRuntimeReference identifies an AgentRuntime in the template namespace.
 type AgentRuntimeReference struct {
 	// Name is the referenced AgentRuntime name.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
 	Name string `json:"name"`
 }
 
 // AgentPolicyReference identifies an AgentPolicy in the template namespace.
 type AgentPolicyReference struct {
 	// Name is the referenced AgentPolicy name.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
 	Name string `json:"name"`
 }
 

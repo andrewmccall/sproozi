@@ -61,15 +61,14 @@ kubectl get nodes
 ## Install
 
 Before applying, read `sproozi-release/install/install.yaml`. It creates the
-namespaces `sproozi-system`, `sproozi-agents`, `sproozi-webhooks` and
-`sproozi-webhook-state`; the controller, gateway and webhook Deployments in
-`sproozi-system`; and these cluster-wide permissions:
+namespaces `sproozi-system` and `sproozi-agents`; the
+controller and gateway Deployments in `sproozi-system`; and these cluster-wide permissions:
 
 - The controller reads Pods, ServiceAccounts, NetworkPolicies, ConfigMaps,
   AgentPolicies, AgentRuntimes and AgentTemplates in every namespace, and
   updates and deletes AgentRuns in every namespace. It creates and deletes
-  sandbox objects only in `sproozi-agents`. Only the webhook creates AgentRuns,
-  and only in `sproozi-system`.
+  sandbox objects only in `sproozi-agents`. Nothing Sproozi installs creates
+  AgentRuns; users and tools create them.
 - The gateway reads Pods and their logs, events, ServiceAccounts, Services,
   Deployments, ReplicaSets and StatefulSets, and Sproozi's AgentRuns,
   AgentPolicies and AgentTemplates, in every namespace, and creates
@@ -87,7 +86,6 @@ kubectl apply --server-side --field-manager=sproozi-installer -k sproozi-release
 kubectl rollout status -n sproozi-system deployment/sproozi-certificates --timeout=180s
 kubectl rollout status -n sproozi-system deployment/sproozi-gateway --timeout=180s
 kubectl rollout status -n sproozi-system deployment/sproozi-controller-manager --timeout=180s
-kubectl rollout status -n sproozi-system deployment/sproozi-webhook --timeout=180s
 ```
 
 The `quickstart-self-managed-ca` overlay applies `install/install.yaml` plus a
@@ -104,7 +102,7 @@ for what to create first.
 
 ## Run the first check
 
-The first check starts an agent Pod that lists Sproozi's Pods through the
+The first check starts a sandbox Pod that lists Sproozi's Pods through the
 gateway, tries two things its policy forbids, then waits 60 seconds so you can
 inspect it.
 
@@ -151,9 +149,11 @@ To run it again, delete the finished run first:
 - **Keep certificates current.** The certificate controller renews the
   gateway's certificate itself. CA rotation is a manual, four-step process; see
   [Gateway certificates](../reference/gateway-certificates.md).
-- **Reach a remote executor from your machine.** `sproozi-release/cli-access/`
-  holds the CLI's ServiceAccount and Role. Apply it in the executor's namespace
-  and create the `sproozi` context; see
+- **Reach a remote executor from your machine.** The release doesn't install
+  a remote executor; [Run a task remotely](portable-workflows.md) sets one up
+  from a checkout. `sproozi-release/cli-access/` then holds the CLI's
+  ServiceAccount and Role, for the executor's namespace `sproozi-sessions`.
+  Apply it and create the `sproozi` context; see
   [remote executor access](../reference/remote-executors.md).
 
 ## Troubleshooting
@@ -163,25 +163,59 @@ To run it again, delete the finished run first:
 | Nodes are `NotReady` and Pods stay `Pending` | The Kind config disables the default network; install Calico as in [Create a Kind cluster](#create-a-kind-cluster). |
 | A Deployment has `ImagePullBackOff` | The nodes can't pull the release images. Check that they can reach `ghcr.io`, and that the node architecture is amd64 or arm64. |
 | The gateway has `CrashLoopBackOff`, or its rollout times out | Read `kubectl logs -n sproozi-system deployment/sproozi-gateway --previous`; the message names the Secret, key and fix. |
+| The gateway log starts with `WARNING: the gateway can <verb> ConfigMaps in sproozi-system, which hold its own configuration; remove the Role or binding that grants it (ADR 0041)` | A Role or ClusterRole bound to `sproozi-shared-gateway` lets it change its own configuration. Find the binding with `kubectl get rolebindings,clusterrolebindings -A -o wide \| grep sproozi-shared-gateway` and remove the rule or binding that grants that verb on ConfigMaps; the install grants none. The gateway checks once, at startup, so restart it afterwards to confirm the warning is gone. See [ADR 0041](../adr/0041-gateway-state-namespace-and-retained-state-owners.md). |
 | `kubectl wait ... --for=create` says the flag is unknown | Use kubectl 1.31 or later. |
 | The run stays `Queued` | Read its `Ready` condition. `WaitingForConcurrencyCap` means a concurrency cap is full. |
 | The run is `Failed` before a Pod appears | Run `kubectl describe agentrun first-check -n sproozi-system` and read the controller log: `kubectl logs -n sproozi-system deployment/sproozi-controller-manager`. |
 | `AlreadyExists` when you create the run | Delete the earlier run first. |
 | `UNEXPECTED: direct API server path was reachable` | The network plugin doesn't enforce NetworkPolicy from Pod start. Use Calico or Cilium; see [security hardening](../reference/security-hardening.md). |
 
+## Upgrade
+
+Read the release notes' "Breaking changes" first. Before crossing a minor
+version, delete finished AgentRuns and stop running ones while the old
+controller still runs, and save your runtimes, policies and templates (see
+[the alpha API](../contributing/releases.md#the-alpha-api)). Then apply the
+new release's CRDs and overlay as in [Install](#install), and reapply
+`cli-access/` if you use it.
+
+`kubectl apply` does not delete objects a new release no longer ships. The
+release notes' "Breaking changes" name any you must delete and how.
+
 ## Uninstall
 
-Delete the runs first, so the controller removes their sandboxes. Then delete
-the overlay you applied:
+Delete the runs in every namespace first, while the controller is still
+running: it removes each run's sandbox and then its `sproozi.com/agentrun-cleanup`
+finalizer. A run left behind after the controller is gone keeps that
+finalizer, and its namespace cannot be deleted until you remove it by hand.
 
-```sh
-kubectl delete agentruns --all -n sproozi-system
+```bash
+kubectl delete agentruns --all --all-namespaces --wait=true --timeout=5m
+```
+
+Deleting the overlay deletes Sproozi's namespaces and everything in them: the
+certificate Secrets and CA key, the gateway's
+[BudgetLedger](../reference/budgetledger.md) resources, and any AgentTemplates,
+AgentPolicies and AgentRuntimes you created in `sproozi-system`, as the quickstart and examples
+do. Export anything you want to keep before you delete it:
+
+```bash
+kubectl get agenttemplates,agentpolicies,agentruntimes -n sproozi-system -o yaml > sproozi-resources.yaml
+```
+
+```bash
 kubectl delete -k sproozi-release/quickstart-self-managed-ca
 ```
 
-This deletes Sproozi's namespaces, including the certificate Secrets and the
-CA key. It keeps the CRDs and any templates, policies and runtimes you created.
-To delete those too:
+If you installed the remote executor example, delete its namespace too, after
+its runs are gone:
+
+```bash
+kubectl delete namespace sproozi-sessions --ignore-not-found
+```
+
+The CRDs remain, with resources in namespaces you did not delete. To delete
+those too:
 
 ```sh
 kubectl delete -f sproozi-release/crds.yaml

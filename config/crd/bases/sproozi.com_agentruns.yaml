@@ -70,14 +70,19 @@ spec:
                 maxItems: 32
                 minItems: 1
                 type: array
+                x-kubernetes-list-type: set
               eventContext:
                 additionalProperties:
                   type: string
-                description: EventContext is immutable untrusted evidence supplied
-                  by the caller or webhook.
+                description: |-
+                  EventContext is immutable untrusted evidence supplied by the caller.
+                  Its JSON encoding must not exceed 16 KiB; admission fails a run that does.
+                maxProperties: 64
                 type: object
               task:
                 description: Task is untrusted free-form work requested from the agent.
+                maxLength: 16384
+                minLength: 1
                 type: string
               templateRef:
                 description: TemplateRef identifies the administrator-managed template
@@ -85,6 +90,8 @@ spec:
                 properties:
                   name:
                     description: Name is the referenced AgentTemplate name.
+                    maxLength: 253
+                    minLength: 1
                     type: string
                 required:
                 - name
@@ -248,6 +255,10 @@ spec:
         required:
         - spec
         type: object
+        x-kubernetes-validations:
+        - message: AgentRun names must be at most 63 characters, because they are
+            copied into label values
+          rule: self.metadata.name.size() <= 63
     served: true
     storage: true
     subresources:

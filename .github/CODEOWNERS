@@ -3,6 +3,7 @@
 /.github/          @andrewmccall
 /hack/             @andrewmccall
 /config/           @andrewmccall
+/examples/         @andrewmccall
 /Makefile          @andrewmccall
 Dockerfile         @andrewmccall
 *.Dockerfile       @andrewmccall

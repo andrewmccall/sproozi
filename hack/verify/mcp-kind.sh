@@ -68,7 +68,7 @@ EOF
 openssl x509 -req -days 1 -sha256 -in "$work_dir/tls.csr" -CA "$work_dir/ca.crt" -CAkey "$work_dir/ca.key" \
   -CAserial "$work_dir/ca.srl" -CAcreateserial -extfile "$work_dir/extensions.cnf" -out "$work_dir/tls.crt" >/dev/null 2>&1
 # The scratch gateway still needs public trust for the model provider.
-docker run --rm --entrypoint /bin/cat golang:1.26-bookworm@sha256:e8c859f5632dcfde7b32d2012b4351728f6437930887c2f6a91ea242459e5514 \
+docker run --rm --entrypoint /bin/cat golang:1.26.10-bookworm@sha256:632dff7351799a5a9954a48dc06670ade72ee44e8c351cdc0e5a57af2fea21af \
   /etc/ssl/certs/ca-certificates.crt > "$work_dir/ca-bundle.pem"
 cat "$work_dir/ca.crt" >> "$work_dir/ca-bundle.pem"
 openssl rand -hex 32 > "$work_dir/docs-token"

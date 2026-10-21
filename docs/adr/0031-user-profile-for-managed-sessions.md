@@ -1,4 +1,4 @@
-# One user profile, sent with each Docker launch and stored by digest for Kubernetes
+# 0031: One user profile, sent with each Docker launch and stored by digest for Kubernetes
 
 Status: accepted
 Date: 2026-10-20

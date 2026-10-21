@@ -1,4 +1,4 @@
-# Streamed model responses, estimated interrupts and bounded reservations
+# 0028: Streamed model responses, estimated interrupts and bounded reservations
 
 Status: accepted
 Date: 2026-10-20
@@ -418,7 +418,7 @@ never refunded, but it is no longer held forever.
 
 - Implementation: `internal/endpoints/model/`, `internal/budget/`,
   `internal/proxytransport/modelcall.go`, `cmd/gateway/main.go`,
-  `config/manager/gateway.yaml`, `config/rbac/shared_gateway_budget_role.yaml`,
+  `config/manager/gateway.yaml`, `config/rbac/shared_gateway_budget_role.yaml` (in config/budget-state from ADR 0041 to ADR 0045),
   `api/v1alpha1/agentpolicy_types.go`,
   `internal/session/home/compose.go` and `internal/session/home/service.go`.
 - References: [Model provider authentication](../guides/model-provider-auth.md),

@@ -3,7 +3,7 @@
 Hermes keeps conversation history, memory and schedules on a persistent volume.
 Its native MCP client asks the Sproozi task service for delegated runs. Each
 delegated run is an AgentRun in its own Sproozi sandbox that ends when the run
-does. Hermes can read the run's saved final answer after the agent Pod is
+does. Hermes can read the run's saved final answer after the sandbox Pod is
 deleted. The initial
 workflow lists Pods in `sproozi-demo`; it grants no Kubernetes mutations or
 GitHub writes.
@@ -15,7 +15,7 @@ later resume, use [Hermes with remote work](retained-work-kubernetes.md).
 The deployment follows the persistent-agent pattern in the upstream [Agent
 Sandbox Hermes
 example](https://agent-sandbox.sigs.k8s.io/docs/use-cases/examples/hermes-agent/).
-Sproozi runs it as a separate coordinator Deployment and creates agent Pods
+Sproozi runs it as a separate coordinator Deployment and creates sandbox Pods
 directly; see [cluster dependencies](../reference/dependencies.md).
 
 ## Deploy with your own model account

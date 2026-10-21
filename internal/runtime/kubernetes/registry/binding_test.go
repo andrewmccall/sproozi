@@ -128,3 +128,31 @@ func TestEffectiveDeadlineDoesNotResetOnAdmission(t *testing.T) {
 		t.Fatalf("live policy tightening ignored: %v", got)
 	}
 }
+
+// A run whose own registration an abort cancelled reads as cancelled, still a
+// conflict to every caller; another run's cancelled registration stays a plain
+// conflict.
+func TestCancelledRegistrationResolvesAsSessionCancelled(t *testing.T) {
+	store, kube := registry(t, nil)
+	ctx := context.Background()
+	run, template, intent := managedFixture()
+	r, err := store.Create(ctx, intent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.BindRun(ctx, r.Reference, fixtureRunUID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.Cancel(ctx, r.Reference); err != nil {
+		t.Fatal(err)
+	}
+	_, err = ResolveRun(ctx, kube, run, template)
+	if !errors.Is(err, ErrSessionCancelled) || !errors.Is(err, ErrConflict) {
+		t.Fatalf("cancelled registration resolved as %v", err)
+	}
+	other := run.DeepCopy()
+	other.UID = "replacement"
+	if _, err = ResolveRun(ctx, kube, other, template); !errors.Is(err, ErrConflict) || errors.Is(err, ErrSessionCancelled) {
+		t.Fatalf("another run's cancelled registration resolved as %v", err)
+	}
+}

@@ -279,6 +279,9 @@ def hermes_stamp(reference, path):
 IMAGES = {
     "provider": "hack/verify/orchestration-kind/provider/Dockerfile",
     "clients": "hack/verify/orchestration-kind/clients.Dockerfile",
+    # Native supervisor, checkpoint helper and remote executor for the
+    # managed-session case (managed.py).
+    "native": "hack/verify/orchestration-kind/native.Dockerfile",
 }
 
 

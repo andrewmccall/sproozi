@@ -57,6 +57,15 @@ workload containers. Every capability uses that identity and HTTPS proxy
 endpoint. Client-specific destination URLs belong in ordinary client settings.
 No additional egress token or local proxy process is injected.
 
+`spec.gatewayEndpoint` names the gateway as an `https` URL whose host the
+gateway's TLS certificate covers. Sandboxes resolve no names, so the controller
+resolves that host itself when it creates each Pod and writes the address into
+the Pod's hosts file. The host must therefore resolve from the controller, not
+only from Pods. Keep it a host name: managed harnesses also use it as the
+authority of their control connection, which the gateway serves only by name.
+The address is fixed for the Pod's life; a gateway Service recreated with a new
+cluster IP reaches only new runs. See [ADR 0040](../adr/0040-sandboxes-reach-the-gateway-without-dns.md).
+
 `AgentRun` cannot change the template, image, environment or security settings.
 Containers share the Pod's network boundary; a helper that needs different permissions needs its own
 workload. The managed checkpoint helper below receives no workload token and

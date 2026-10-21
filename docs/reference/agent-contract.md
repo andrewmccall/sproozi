@@ -12,7 +12,7 @@ it.
 | `run` | Run namespace, name and immutable UID |
 | `trusted.instructions` | Administrator-owned `AgentTemplate.spec.instructions` |
 | `untrusted.task` | Caller-provided `AgentRun.spec.task` |
-| `untrusted.eventContext` | Caller or webhook evidence, never operating instructions |
+| `untrusted.eventContext` | Caller-supplied evidence, never operating instructions |
 | `capabilities` | The run's requested capability list |
 | `workspace` | Fixed `/workspace` path |
 | `gateway` | Shared endpoint and projected identity token path |

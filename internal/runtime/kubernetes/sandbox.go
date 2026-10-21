@@ -22,6 +22,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"net"
 	"reflect"
 	"slices"
 	"strings"
@@ -113,12 +114,22 @@ type PodSandboxClient struct {
 	// live reads the API server directly. Absent ends a run, so GetStatus
 	// confirms a cached NotFound with it: the cache can lag a Pod just created.
 	live client.Reader
+	// resolveGateway maps the runtime's gateway host to the address written
+	// into each sandbox's hosts file.
+	resolveGateway GatewayResolver
 }
 
 // NewPodSandboxClient returns the Pod-backed execution adapter. live must read
 // the API server directly, not through the cache that backs c.
 func NewPodSandboxClient(c client.Client, live client.Reader) *PodSandboxClient {
-	return &PodSandboxClient{c: c, live: live}
+	return &PodSandboxClient{c: c, live: live, resolveGateway: LookupGateway}
+}
+
+// WithGatewayResolver replaces how the gateway host is resolved. Tests use it
+// where the cluster's service names do not resolve.
+func (p *PodSandboxClient) WithGatewayResolver(resolve GatewayResolver) *PodSandboxClient {
+	p.resolveGateway = resolve
+	return p
 }
 
 // ValidateRuntime checks the Pod template and the trust bundle ConfigMap it mounts.
@@ -133,27 +144,55 @@ func (p *PodSandboxClient) ValidateRuntime(ctx context.Context, rt *sprooziv1alp
 func (p *PodSandboxClient) Ensure(ctx context.Context, run *sprooziv1alpha1.AgentRun, rt *sprooziv1alpha1.AgentRuntime) (string, error) {
 	saName := run.Status.Identity.ServiceAccountName
 	pod := BuildPodSpec(run, rt, saName)
-	return p.ensurePod(ctx, pod)
+	return p.ensurePod(ctx, pod, rt.Spec.GatewayEndpoint)
 }
 
-func (p *PodSandboxClient) ensurePod(ctx context.Context, pod *corev1.Pod) (string, error) {
+func (p *PodSandboxClient) ensurePod(ctx context.Context, pod *corev1.Pod, gatewayEndpoint string) (string, error) {
+	// A sandbox that already exists keeps the gateway address it was created
+	// with, so re-checking it must not depend on the resolver: an outage would
+	// otherwise stop the controller from observing a running or finished Pod.
+	var existing corev1.Pod
+	err := p.c.Get(ctx, client.ObjectKeyFromObject(pod), &existing)
+	if err == nil {
+		return pod.Name, p.adoptExisting(ctx, pod, &existing, gatewayEndpoint)
+	}
+	if !apierrors.IsNotFound(err) {
+		return "", err
+	}
+	if err := PinGateway(ctx, pod, gatewayEndpoint, p.resolveGateway); err != nil {
+		return "", err
+	}
 	if err := p.c.Create(ctx, pod); err != nil {
 		if !apierrors.IsAlreadyExists(err) {
 			return "", err
 		}
-		// Never treat a same-named object as ours. Names are derived from a run
-		// UID, but an attacker or stale controller may have created an object
-		// before this reconciliation. Accepting it would let an arbitrary Pod
-		// replace the hardened sandbox.
-		var existing corev1.Pod
+		// A cached read can miss a Pod created moments ago.
 		if getErr := p.c.Get(ctx, client.ObjectKeyFromObject(pod), &existing); getErr != nil {
 			return "", getErr
 		}
-		if err := validateExistingSandbox(&existing, pod); err != nil {
-			return "", err
-		}
+		return pod.Name, validateExistingSandbox(&existing, pod)
 	}
 	return pod.Name, nil
+}
+
+// adoptExisting accepts a same-named Pod only if it is the hardened sandbox
+// this controller would build. Names are derived from a run UID, but an
+// attacker or stale controller may have created an object before this
+// reconciliation; accepting it would let an arbitrary Pod replace the sandbox.
+// The gateway address is taken from the Pod itself, never re-resolved: only a
+// Pod that pins exactly the gateway host is accepted.
+func (p *PodSandboxClient) adoptExisting(ctx context.Context, wanted, existing *corev1.Pod, gatewayEndpoint string) error {
+	pinned := func(_ context.Context, host string) (string, error) {
+		aliases := existing.Spec.HostAliases
+		if len(aliases) == 1 && slices.Equal(aliases[0].Hostnames, []string{host}) && net.ParseIP(aliases[0].IP) != nil {
+			return aliases[0].IP, nil
+		}
+		return "", fmt.Errorf("existing sandbox %s has unsafe Pod settings: hostAliases", wanted.Name)
+	}
+	if err := PinGateway(ctx, wanted, gatewayEndpoint, pinned); err != nil {
+		return err
+	}
+	return validateExistingSandbox(existing, wanted)
 }
 
 func validateExistingSandbox(existing, wanted *corev1.Pod) error {
@@ -179,6 +218,7 @@ func validateExistingSandbox(existing, wanted *corev1.Pod) error {
 	// compares Quantities by value: their cached string form depends on how and
 	// when each copy was decoded or printed.
 	e, w := *withAPIDefaults(&existing.Spec), *withAPIDefaults(&wanted.Spec)
+	w.HostAliases = keepPinnedAddress(e.HostAliases, w.HostAliases)
 	var differs []string
 	for field, same := range map[string]bool{
 		"serviceAccountName":           e.ServiceAccountName == w.ServiceAccountName,
@@ -192,6 +232,9 @@ func validateExistingSandbox(existing, wanted *corev1.Pod) error {
 		"initContainers":               apiequality.Semantic.DeepEqual(e.InitContainers, w.InitContainers),
 		"ephemeralContainers":          apiequality.Semantic.DeepEqual(e.EphemeralContainers, w.EphemeralContainers),
 		"volumes":                      apiequality.Semantic.DeepEqual(e.Volumes, w.Volumes),
+		"dns":                          e.DNSPolicy == w.DNSPolicy && reflect.DeepEqual(e.DNSConfig, w.DNSConfig),
+		"hostAliases":                  reflect.DeepEqual(e.HostAliases, w.HostAliases),
+		"hostUsers":                    reflect.DeepEqual(e.HostUsers, w.HostUsers),
 	} {
 		if !same {
 			differs = append(differs, field)
@@ -202,6 +245,19 @@ func validateExistingSandbox(existing, wanted *corev1.Pod) error {
 		return fmt.Errorf("existing sandbox %s has unsafe Pod settings: %s", wanted.Name, strings.Join(differs, ", "))
 	}
 	return nil
+}
+
+// keepPinnedAddress returns wanted with the existing Pod's gateway address
+// when both pin the same single host. The address was resolved when the Pod
+// was created and cannot change for its life; a later lookup may answer
+// differently (a recreated Service, several A records) and must not turn the
+// controller's own Pod into a mismatch.
+func keepPinnedAddress(existing, wanted []corev1.HostAlias) []corev1.HostAlias {
+	if len(existing) != 1 || len(wanted) != 1 || net.ParseIP(existing[0].IP) == nil ||
+		!slices.Equal(existing[0].Hostnames, wanted[0].Hostnames) {
+		return wanted
+	}
+	return []corev1.HostAlias{{IP: existing[0].IP, Hostnames: wanted[0].Hostnames}}
 }
 
 // withAPIDefaults returns a copy of spec with the defaults the API server
@@ -387,6 +443,9 @@ func (p *PodSandboxClient) GetCompletion(ctx context.Context, name, runUID strin
 	return SandboxCompletion{}, fmt.Errorf("agent container has not terminated")
 }
 
+// ErrSandboxTampered reports a run-named Pod whose identity labels changed.
+var ErrSandboxTampered = errors.New("sandbox identity changed")
+
 // DeleteForRun removes a sandbox only when its immutable run identity still
 // matches. UID and resource-version preconditions make delete/recreate races
 // fail safely rather than deleting a replacement Pod.
@@ -399,7 +458,12 @@ func (p *PodSandboxClient) DeleteForRun(ctx context.Context, name, runUID string
 		return err
 	}
 	if !ownedByRun(&pod, runUID) {
-		return nil
+		// The Pod has the run's name but no longer carries its identity:
+		// someone changed its labels. It is not provably this run's sandbox,
+		// so it is not deleted, but release must not report success while it
+		// runs. The namespace's default-deny policy keeps it without egress.
+		return fmt.Errorf("%w: sandbox Pod %s/%s no longer carries run %s's identity labels; inspect and delete it by hand",
+			ErrSandboxTampered, AgentsNamespace, name, runUID)
 	}
 	if err := p.c.Delete(ctx, &pod, client.Preconditions{UID: &pod.UID, ResourceVersion: &pod.ResourceVersion}); err != nil && !apierrors.IsNotFound(err) {
 		return err
@@ -493,6 +557,8 @@ func BuildPodSpec(run *sprooziv1alpha1.AgentRun, rt *sprooziv1alpha1.AgentRuntim
 			corev1.EnvVar{Name: "SSL_CERT_FILE", Value: trustBundlePath},
 			corev1.EnvVar{Name: "GIT_SSL_CAINFO", Value: trustBundlePath},
 			corev1.EnvVar{Name: "NODE_EXTRA_CA_CERTS", Value: trustBundlePath},
+			corev1.EnvVar{Name: "REQUESTS_CA_BUNDLE", Value: trustBundlePath},
+			corev1.EnvVar{Name: "CURL_CA_BUNDLE", Value: trustBundlePath},
 			corev1.EnvVar{Name: "KUBECONFIG", Value: kubeconfigPath},
 			corev1.EnvVar{Name: "GH_HOST", Value: "github.com"},
 			corev1.EnvVar{Name: "GH_TOKEN", Value: clientAuthPlaceholder},

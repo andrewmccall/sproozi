@@ -28,6 +28,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -38,6 +39,9 @@ import (
 type TokenProvider interface {
 	Token(ctx context.Context) (string, error)
 }
+
+// maxTokenResponseBytes bounds the installation token response.
+const maxTokenResponseBytes = 64 << 10
 
 // AppTokenProvider authenticates as a GitHub App and vends cached
 // installation tokens, refreshing them before expiry.
@@ -163,7 +167,8 @@ func (a *AppTokenProvider) fetchInstallationToken(ctx context.Context, jwt strin
 		Token     string    `json:"token"`
 		ExpiresAt time.Time `json:"expires_at"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	// Bound the read like every other upstream response the gateway parses.
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxTokenResponseBytes)).Decode(&result); err != nil {
 		return "", time.Time{}, fmt.Errorf("capabilityproxy: failed to decode token response: %w", err)
 	}
 	// Treat the provider response as untrusted input at this boundary. An empty,

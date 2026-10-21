@@ -1,7 +1,9 @@
-# The Docker placement removes a stopped visit's resources
+# 0020: The Docker placement removes a stopped visit's resources
 
 Status: accepted
 Date: 2026-10-18
+
+Partly superseded: [ADR 0041](0041-gateway-state-namespace-and-retained-state-owners.md) gives failed removals an owner: the local service retries them at start and every five minutes, so they no longer wait for a person.
 
 ## Problem and constraints
 

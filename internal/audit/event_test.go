@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/andrewmccall/sproozi/internal/audit"
 )
@@ -77,30 +78,6 @@ func TestAuditRemainingDistinguishesUnavailableFromExhausted(t *testing.T) {
 // sensitive data (prompt, credential, authorization, apiKey, response) exists.
 func TestAuditEventStructHasNoForbiddenFields(t *testing.T) {
 	assertNoForbiddenFields[audit.Event](t)
-	assertNoForbiddenFields[audit.WebhookEvent](t)
-}
-
-func TestAuditLoggerWritesWebhookJSONLine(t *testing.T) {
-	var buf bytes.Buffer
-	l := audit.NewLogger(&buf)
-	l.LogWebhook(audit.WebhookEvent{
-		TemplateNamespace: "default",
-		TemplateName:      "sre-remediation",
-		Operation:         "webhook.ingest",
-		Allowed:           false,
-		DenyReason:        "signature verification failed",
-		Source:            "alertmanager",
-	})
-	if !bytes.Contains(buf.Bytes(), []byte("sre-remediation")) {
-		t.Error("expected TemplateName in output")
-	}
-	if !bytes.Contains(buf.Bytes(), []byte("signature verification failed")) {
-		t.Error("expected DenyReason in output")
-	}
-	var decoded audit.WebhookEvent
-	if err := json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &decoded); err != nil {
-		t.Errorf("logger output is not valid JSON: %v", err)
-	}
 }
 
 func TestAuditLoggerSerializesConcurrentGatewayEvents(t *testing.T) {
@@ -126,5 +103,18 @@ func TestAuditLoggerSerializesConcurrentGatewayEvents(t *testing.T) {
 	}
 	if decoder.More() {
 		t.Fatal("unexpected extra audit events")
+	}
+}
+
+// A denied request's path is workload input; the audit record keeps it bounded.
+func TestAuditLoggerBoundsWorkloadText(t *testing.T) {
+	var buf bytes.Buffer
+	audit.NewLogger(&buf).Log(audit.Event{Operation: "GET /" + strings.Repeat("a", 32<<10), Resource: strings.Repeat("é", 1000)})
+	var decoded audit.Event
+	if err := json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded.Operation) > 520 || len(decoded.Resource) > 520 || !utf8.ValidString(decoded.Resource) {
+		t.Fatalf("operation %d bytes, resource %d bytes valid=%v", len(decoded.Operation), len(decoded.Resource), utf8.ValidString(decoded.Resource))
 	}
 }

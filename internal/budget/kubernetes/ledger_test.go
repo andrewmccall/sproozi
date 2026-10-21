@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	corev1 "k8s.io/api/core/v1"
+	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -30,7 +30,7 @@ func observedLedgerState(t *testing.T, ledger budget.Ledger, ctx context.Context
 
 func TestKubernetesLedgerSurvivesNewInstance(t *testing.T) {
 	scheme := runtime.NewScheme()
-	if err := corev1.AddToScheme(scheme); err != nil {
+	if err := api.AddToScheme(scheme); err != nil {
 		t.Fatal(err)
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).Build()
@@ -60,7 +60,7 @@ func (c failedLedgerClient) Get(context.Context, client.ObjectKey, client.Object
 func ledgerClient(t *testing.T) client.Client {
 	t.Helper()
 	scheme := runtime.NewScheme()
-	if err := corev1.AddToScheme(scheme); err != nil {
+	if err := api.AddToScheme(scheme); err != nil {
 		t.Fatal(err)
 	}
 	return fake.NewClientBuilder().WithScheme(scheme).Build()
@@ -111,11 +111,11 @@ func TestKubernetesCorruptAccountingFailsObservationAndMutation(t *testing.T) {
 			if err := ledger.Initialize(ctx, "account"); err != nil {
 				t.Fatal(err)
 			}
-			var records corev1.ConfigMapList
+			var records api.BudgetLedgerList
 			if err := c.List(ctx, &records); err != nil {
 				t.Fatal(err)
 			}
-			records.Items[0].Data = map[string]string{"state": data}
+			records.Items[0].Spec.State = data
 			if err := c.Update(ctx, &records.Items[0]); err != nil {
 				t.Fatal(err)
 			}
@@ -139,11 +139,11 @@ func TestLegacyAccountingRemainsObservableButCannotSealUnknownReservations(t *te
 	if err := ledger.Initialize(ctx, "account"); err != nil {
 		t.Fatal(err)
 	}
-	var records corev1.ConfigMapList
+	var records api.BudgetLedgerList
 	if err := c.List(ctx, &records); err != nil {
 		t.Fatal(err)
 	}
-	records.Items[0].Data["state"] = `{"UnitsUsed":20,"CostMicros":30,"ReservedUnits":0,"ReservedCostMicros":0}`
+	records.Items[0].Spec.State = `{"UnitsUsed":20,"CostMicros":30,"ReservedUnits":0,"ReservedCostMicros":0}`
 	if err := c.Update(ctx, &records.Items[0]); err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +175,7 @@ func TestMissingExpectedKubernetesAccountCannotBecomeZeroSeal(t *testing.T) {
 	if err := ledger.Initialize(ctx, "account"); err != nil {
 		t.Fatal(err)
 	}
-	var records corev1.ConfigMapList
+	var records api.BudgetLedgerList
 	if err := c.List(ctx, &records); err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +267,7 @@ func TestLedgerRejectsOverflowRatherThanResettingObservation(t *testing.T) {
 
 func TestKubernetesLedgerCompetingReplicasCannotOversubscribe(t *testing.T) {
 	scheme := runtime.NewScheme()
-	if err := corev1.AddToScheme(scheme); err != nil {
+	if err := api.AddToScheme(scheme); err != nil {
 		t.Fatal(err)
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).Build()
@@ -299,7 +299,7 @@ func TestInitializedAllocationCannotRecreateDeletedUsage(t *testing.T) {
 	if err = ledger.Settle(ctx, reservation, budget.TrustedUsage{Units: 40, CostMicros: 10}); err != nil {
 		t.Fatal(err)
 	}
-	var records corev1.ConfigMapList
+	var records api.BudgetLedgerList
 	if err = c.List(ctx, &records, client.InNamespace("ledger")); err != nil || len(records.Items) != 1 {
 		t.Fatalf("expected one allocation record: %v", err)
 	}
@@ -327,7 +327,7 @@ func (c slowClient) Update(ctx context.Context, obj client.Object, opts ...clien
 	return c.Client.Update(ctx, obj, opts...)
 }
 
-// Many calls settling one account at once conflict on the ConfigMap; every
+// Many calls settling one account at once conflict on the ledger; every
 // settlement still lands, with exact totals.
 func TestConcurrentSettlementsAllSucceed(t *testing.T) {
 	ctx := context.Background()
@@ -418,7 +418,7 @@ func TestStartupSweepSettlesLegacyReservationsInFull(t *testing.T) {
 	}
 }
 
-// deletingClient deletes the budget ConfigMap right after the read named by
+// deletingClient deletes the BudgetLedger right after the read named by
 // afterGet (1 for the first Get), or after the first List.
 type deletingClient struct {
 	client.Client
@@ -428,7 +428,7 @@ type deletingClient struct {
 }
 
 func (c *deletingClient) deleteLedgers(ctx context.Context) {
-	var list corev1.ConfigMapList
+	var list api.BudgetLedgerList
 	_ = c.Client.List(ctx, &list)
 	for i := range list.Items {
 		_ = c.Delete(ctx, &list.Items[i])
@@ -505,8 +505,8 @@ func TestCorruptLedgerDoesNotFailTheSweep(t *testing.T) {
 	if _, err := ledger.Reserve(ctx, "legacy", budget.UsageReservation{MaxUnits: 100}); err != nil {
 		t.Fatal(err)
 	}
-	corrupt := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "sproozi-budget-corrupt", Namespace: "ledger",
-		Labels: map[string]string{"app.kubernetes.io/component": "budget-ledger"}}, Data: map[string]string{"state": "{"}}
+	corrupt := &api.BudgetLedger{ObjectMeta: metav1.ObjectMeta{Name: "sproozi-budget-corrupt", Namespace: "ledger"},
+		Spec: api.BudgetLedgerSpec{Account: "corrupt", State: "{", WrittenAt: metav1.Now()}}
 	if err := c.Create(ctx, corrupt); err != nil {
 		t.Fatal(err)
 	}
@@ -515,5 +515,62 @@ func TestCorruptLedgerDoesNotFailTheSweep(t *testing.T) {
 	}
 	if state := observedLedgerState(t, ledger, ctx, "legacy"); state.UnitsUsed != 100 || state.ReservedUnits != 0 {
 		t.Fatalf("legacy ledger state=%+v", state)
+	}
+}
+
+// A ledger is removed only when its run is gone, nothing is reserved and it
+// has not been written for the retention period.
+func TestPruneRemovesOnlySettledLedgersOfGoneRuns(t *testing.T) {
+	ctx := context.Background()
+	c := ledgerClient(t)
+	ledger := budgetkubernetes.NewLedger(c, "ledger")
+	settle := func(key budget.AccountKey) {
+		r, err := ledger.Reserve(ctx, key, budget.UsageReservation{MaxUnits: 100, Units: 10})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := ledger.Settle(ctx, r, budget.TrustedUsage{Units: 5}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	settle("gone-run/model.inference")
+	settle("live-run/model.inference")
+	settle("recent-run/model.inference")
+	settle("unlabelled")
+	if _, err := ledger.Reserve(ctx, "pending-run/model.inference", budget.UsageReservation{MaxUnits: 100, Units: 10}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	old := metav1.NewTime(now.Add(-budgetkubernetes.DefaultRetention - time.Hour).UTC())
+	var all api.BudgetLedgerList
+	if err := c.List(ctx, &all); err != nil {
+		t.Fatal(err)
+	}
+	for i := range all.Items {
+		stored := &all.Items[i]
+		if stored.Labels["sproozi.com/run-uid"] != "recent-run" {
+			stored.Spec.WrittenAt = old
+			if err := c.Update(ctx, stored); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	deleted, err := budgetkubernetes.Prune(ctx, c, "ledger", now, budgetkubernetes.DefaultRetention,
+		func(uid string) bool { return uid == "live-run" })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deleted != 1 {
+		t.Fatalf("deleted = %d, want 1", deleted)
+	}
+	if _, err := ledger.State(ctx, "gone-run/model.inference"); !errors.Is(err, budget.ErrAccountNotFound) {
+		t.Fatalf("gone run's ledger: err = %v, want deleted", err)
+	}
+	for _, kept := range []budget.AccountKey{"live-run/model.inference", "recent-run/model.inference",
+		"pending-run/model.inference", "unlabelled"} {
+		if _, err := ledger.State(ctx, kept); err != nil {
+			t.Fatalf("%s: %v, want kept", kept, err)
+		}
 	}
 }

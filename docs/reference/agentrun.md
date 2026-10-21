@@ -35,6 +35,19 @@ example `capabilities: [model.inference, mcp.deepwiki]`. The selected policy mus
 The run cannot choose a provider URL, credential file or tool-policy override.
 See [configured MCP capabilities](configured-mcp.md).
 
+| Field | Limits |
+| --- | --- |
+| `metadata.name` | At most 63 characters; it is copied into label values. |
+| `spec.templateRef.name` | 1 to 253 characters. |
+| `spec.task` | 1 to 16384 characters. |
+| `spec.eventContext` | At most 64 keys. Its JSON must not exceed 16 KiB; a larger one fails the run with `InvalidRunInput` before admission. |
+| `spec.capabilities` | 1 to 32 entries, no repeats. |
+
+The API server rejects a run that breaks the name, task, key-count or
+capability limits when it is created. It cannot check the 16 KiB size of the
+event context: the controller does, before admission, so such a run is
+created and then fails with `InvalidRunInput`.
+
 ## Lifecycle
 
 `AgentRun.status.phase` moves through:
@@ -75,14 +88,31 @@ finishes or is deleted, or a policy changes, the controller re-checks every
 queued run. See
 [Limit concurrent runs](../guides/install-from-checkout.md#limit-concurrent-runs).
 
-Editing an admitted run's AgentPolicy doesn't fail or restart the run. Any `spec` edit
-other than `maxActiveRuns` closes the run's open gateway connections within the
-[revocation bound](security-hardening.md#protect-transport-and-identities), but
-the run carries on: the AgentRun stays `Running` with `Ready` `True`, and its new connections
-get the edited policy. The only trace is the gateway log line `Revoked
-inspected connection`, with `reason="gateway: execution grant revoked: gateway:
-the AgentRun's policy, template, capabilities or allocation changed"`. Read it
-with `kubectl logs -n sproozi-system deployment/sproozi-gateway`.
+### Policy edits
+
+The controller checks every non-terminal run against its live AgentPolicy on
+each reconcile, so an edit can end an admitted run:
+
+- If the edit makes the run inadmissible, the run becomes `Failed` with the
+  denial reason from the table below, and its sandbox stops. That happens when
+  the edit removes a capability the run requested, drops an egress profile its
+  template selects, lowers a resource bound below its runtime's limits, or
+  leaves a requested package or MCP capability without a valid scope.
+- Narrowing a valid scope does not end the run. Removing one MCP tool, one
+  package artifact or one Kubernetes namespace leaves the run admissible; the
+  gateway refuses the run's later requests that the narrower scope no longer
+  allows.
+- If the edit shortens `maxExecutionDuration` so the run is already past its
+  new deadline, the run becomes `TimedOut` with `MaxExecutionDurationExceeded`.
+
+Any other `spec` edit except `maxActiveRuns` leaves the run `Running` with
+`Ready` `True`. Its open gateway connections close within the
+[revocation bound](security-hardening.md#protect-transport-and-identities), and
+its new connections get the edited policy. The only trace is the gateway log
+line `Revoked inspected connection`, with `reason="gateway: execution grant
+revoked: gateway: the AgentRun's policy, template, capabilities or allocation
+changed"`. Read it with
+`kubectl logs -n sproozi-system deployment/sproozi-gateway`.
 
 Success uses the process exit of the container named `agent`, after the Pod
 becomes terminal. Review a proposed PR separately. See
@@ -104,14 +134,17 @@ created.
 | `Admitted` | `Admitted` | Admitted under the AgentPolicy recorded in `status.policyName`. | Nothing. |
 | `Running` | `Running` | Run identity exists; the sandbox Pod is starting or running. | Nothing. |
 | `QuotaExceeded` | `Running` | A namespace ResourceQuota rejected the sandbox Pod. The run stays active and counts against the caps. The controller retries with a backoff from 5 seconds up to one minute until the Pod is created or the run passes its execution deadline. | Free quota in `sproozi-agents`, raise the quota, or cancel the run. The wait counts toward the run's execution duration. |
+| `SessionCancelled` | `Cancelled` | The remote executor aborted this managed run and cancelled its session registration. The run ends `Cancelled` even if the controller sees the cancelled registration before `spec.cancel`. | Start a new run or session. |
+| `SessionStopped` | `Succeeded` | A managed session's stop completed: its checkpoint and finalized usage are in the session registration. The controller waits for the sandbox to finish before ending the run. The agent's exit code is not the outcome. | Resume the session to continue. |
 | `ExecutionSucceeded` | `Succeeded` | The `agent` container exited with code 0. | Review any proposed PR. |
 | `TemplateNotFound`, `PolicyNotFound`, `RuntimeNotFound` | `Failed` | A referenced `AgentTemplate`, `AgentPolicy` or `AgentRuntime` is missing from the namespace. Deleting an AgentPolicy fails every non-terminal run whose template currently references it, running ones included, with `PolicyNotFound`, and stops their sandboxes. | Create the named object, or fix the reference, then create a new run. |
 | `PolicyChanged` | `Failed` | The run's template was re-pointed to another policy after admission. The message is `AgentTemplate T now references AgentPolicy B, but this run was admitted under AgentPolicy A; submit a new run`. The gateway denies the run's new connections at once and closes its open ones within the [revocation bound](security-hardening.md#protect-transport-and-identities), under 16 seconds. A run admitted before `status.policyName` existed has no recorded policy, so it isn't failed: its new connections are checked against the policy the template now references. | Submit a new run, which is admitted under the policy the template now references. |
 | `RuntimeInvalid` | `Failed` | The `AgentRuntime` cannot launch a sandbox; the message names the problem. | Fix the runtime, then create a new run. |
 | `CapabilityNotAllowed`, `EgressProfileNotAllowed`, `ResourceLimitExceeded`, `PackageScopeInvalid`, `MCPScopeInvalid` | `Failed` | The policy denied the run, template or runtime; the message names the capability, profile or limit. | Request fewer capabilities, or have an administrator change the policy or runtime. |
+| `InvalidRunInput` | `Failed` | The run, its template and its runtime cannot form a valid [agent contract](agent-contract.md): for example a task or instructions containing a NUL character, or an event context whose JSON encoding is over 16 KiB. The API server already rejects an empty or oversized task or instructions and a repeated capability when the object is created. The controller checks this before admission, so the run never takes a place under a cap. | Fix the template or submit a corrected run. |
 | `SessionBindingRejected` | `Failed` | The run does not match the visit the remote executor registered for it, or that registration no longer exists. | Start the work again from the session command that created it. |
-| `SessionDeadlineExceeded` | `TimedOut` | The run's execution passed its deadline. A move doesn't extend it. | Resume the session, which starts a new execution with a new deadline. |
-| `MaxExecutionDurationExceeded` | `TimedOut` | The run passed its execution deadline. | Raise the policy `maxExecutionDuration`, or narrow the task. |
+| `SessionDeadlineExceeded` | `TimedOut` | The run's execution passed its deadline, including while it waited in the queue. A move doesn't extend it. | Resume the session, which starts a new execution with a new deadline. |
+| `MaxExecutionDurationExceeded` | `TimedOut` | The run passed its execution deadline. | Narrow the task. `maxExecutionDuration` is at most one hour and defaults to one hour; if the policy sets less, raise it. |
 | `SandboxGone` | `Failed` | The sandbox Pod disappeared before the `agent` container exited, for example after eviction or deletion. | Check node and Pod events, then retry. |
 | `SandboxExitNonZero` | `Failed` | The `agent` container exited with a non-zero code. | Read `status.result` and any collected sandbox logs. |
 | `SandboxExitUnavailable` | `Failed` | The controller could not read the `agent` container exit code. | Check the Pod events, then retry. |

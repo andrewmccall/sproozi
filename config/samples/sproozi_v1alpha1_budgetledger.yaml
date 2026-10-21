@@ -1,0 +1,19 @@
+# The gateway and the remote executor create and update BudgetLedger resources;
+# users do not. This sample shows the shape of one finalized account, as
+# `kubectl get budgetledger -o yaml` would print it (ADR 0045).
+apiVersion: sproozi.com/v1alpha1
+kind: BudgetLedger
+metadata:
+  labels:
+    app.kubernetes.io/name: sproozi
+    app.kubernetes.io/managed-by: kustomize
+    sproozi.com/run-uid: 0b4c1d2e-3f40-4a5b-8c6d-7e8f9a0b1c2d
+  name: sproozi-budget-0123456789abcdef0123
+spec:
+  account: 0b4c1d2e-3f40-4a5b-8c6d-7e8f9a0b1c2d/model.inference
+  runUID: 0b4c1d2e-3f40-4a5b-8c6d-7e8f9a0b1c2d
+  capability: model.inference
+  state: '{"UnitsUsed":30,"CostMicros":0,"ReservedUnits":0,"ReservedCostMicros":0,"sealed":{"Units":30,"CostMicros":0},"pendingReservations":0,"pendingUnboundedReservations":0}'
+  unitsUsed: 30
+  finalized: true
+  writtenAt: "2026-10-21T19:00:00Z"

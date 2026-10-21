@@ -1,29 +1,23 @@
 # DNS egress containment
 
-Status: deferred.
+Status: implemented for the gateway; workload name resolution remains open.
 
-Kubernetes sandbox policies allow UDP and TCP port 53 to kube-dns, including
-runs without endpoint capabilities. A recursive resolver can resolve external
-names. These queries bypass gateway permission checks and accounting. An
-enforcing CNI does not remove this DNS exception.
+Sandboxes on both backends now resolve no names. Docker sessions reach the
+gateway by a fixed address. Kubernetes sandboxes have `dnsPolicy: None`, a
+loopback nameserver with nothing behind it and a hosts-file entry for the
+gateway host that the controller resolves. Their NetworkPolicy has no DNS rule.
+[ADR 0040](../../adr/0040-sandboxes-reach-the-gateway-without-dns.md) records
+the decision.
 
-Controlled Docker sessions deny DNS and allow only the fixed gateway TCP
-destination. Their DNS restrictions differ from those of Kubernetes runs.
+The open question is a workload that needs to resolve other names itself, for
+example a tool that connects without honouring `HTTPS_PROXY`. Options include:
 
-A future design must establish which workloads need DNS, which names they need
-and who approves resolution. Options include:
-
-- Use fixed gateway addresses and deny workload DNS.
 - Allow only approved internal names through a resolver with recursion disabled.
 - Add an explicit DNS capability and a resolver gateway with usage limits.
 
-Each option affects availability, address changes and service discovery.
-Routing queries to the cluster resolver alone keeps the external-name channel.
-
-Before adding DNS controls, test allowed internal queries and refused external
-queries over UDP and TCP in an isolated environment. Include resolver failure,
-policy changes and restart. Preserve gateway trust and workload identity checks.
-Permission to call an HTTP destination does not grant DNS permission.
+Either must keep queries for external names inside the gateway's policy, audit
+and accounting. Permission to call an HTTP destination does not grant DNS
+permission.
 
 See [security hardening](../../reference/security-hardening.md) and
 [ADR 0014](../../adr/0014-review-boundaries-and-native-contracts.md).

@@ -23,7 +23,12 @@ import (
 	gateway "github.com/andrewmccall/sproozi/internal/gateway/kubernetes"
 )
 
-const cacheTestServiceAccountUID = "service-account-uid-cache"
+const (
+	cacheTestServiceAccountUID = "service-account-uid-cache"
+	// cacheTestSandboxName is the sandbox name derived from the run's UID.
+	cacheTestSandboxName = "sproozi-runuidcache"
+	cacheTestSandboxUID  = "sandbox-pod-uid-cache"
+)
 
 func cacheFixtureObjects() []client.Object {
 	run := &sprooziv1alpha1.AgentRun{
@@ -55,6 +60,8 @@ func cacheFixtureObjects() []client.Object {
 			Labels: map[string]string{testManagedByLabel: testManagedByValue, testRunLabel: run.Name,
 				testRunNamespaceLabel: run.Namespace, testRunUIDLabel: string(run.UID)},
 		}},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: cacheTestSandboxName, Namespace: testAgentsNamespace,
+			UID: types.UID(cacheTestSandboxUID)}},
 	}
 }
 
@@ -74,7 +81,11 @@ func tokenReviewer() *k8sfake.Clientset {
 	clientset.PrependReactor("create", "tokenreviews", func(k8stesting.Action) (bool, runtime.Object, error) {
 		return true, &authv1.TokenReview{Status: authv1.TokenReviewStatus{Authenticated: true, User: authv1.UserInfo{
 			Username: "system:serviceaccount:" + testAgentsNamespace + ":" + testFirstServiceAccount,
-			UID:      cacheTestServiceAccountUID}}}, nil
+			UID:      cacheTestServiceAccountUID,
+			Extra: map[string]authv1.ExtraValue{
+				podNameExtra: {cacheTestSandboxName},
+				podUIDExtra:  {cacheTestSandboxUID},
+			}}}}, nil
 	})
 	return clientset
 }

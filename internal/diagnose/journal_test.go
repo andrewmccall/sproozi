@@ -2,6 +2,7 @@ package diagnose_test
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -101,5 +102,51 @@ func TestJournalBoundsEntriesExecutionsAndAge(t *testing.T) {
 	}
 	if got := journal.Denials(runB, now.Add(time.Second), now); len(got) != 0 {
 		t.Fatalf("lookback window ignored: %+v", got)
+	}
+}
+
+// Denials carrying huge workload-chosen text across many executions keep the
+// journal within its byte budget, and each retained field is bounded.
+func TestJournalBoundsRetainedBytes(t *testing.T) {
+	journal := diagnose.NewJournal(nil, diagnose.Limits{MaxBytes: 1 << 20})
+	now := time.Now()
+	huge := strings.Repeat("a", 64<<10)
+	for run := range 400 {
+		for range 64 {
+			e := denial(fmt.Sprintf("run-%d", run), "CONNECT "+huge, now)
+			e.DenyReason = "destination " + huge + " is not enabled at this gateway"
+			journal.Log(e)
+		}
+	}
+	retained := 0
+	for run := range 400 {
+		for _, d := range journal.Denials(fmt.Sprintf("run-%d", run), now.Add(-time.Minute), now) {
+			if len(d.Event.Operation) > 520 || len(d.Event.DenyReason) > 520 {
+				t.Fatalf("retained field not bounded: %d, %d bytes", len(d.Event.Operation), len(d.Event.DenyReason))
+			}
+			retained += len(d.Event.Operation) + len(d.Event.DenyReason) + 256
+		}
+	}
+	if retained > 1<<20+64*2048 {
+		t.Fatalf("journal retains about %d bytes, budget 1 MiB", retained)
+	}
+	if journal.Denials("run-399", now.Add(-time.Minute), now) == nil {
+		t.Fatal("the most recent execution's denials were evicted")
+	}
+}
+
+// Expired denials are removed when an execution records a new one, not only
+// hidden from queries.
+func TestJournalDropsExpiredDenials(t *testing.T) {
+	journal := diagnose.NewJournal(nil, diagnose.Limits{MaxAge: time.Minute})
+	start := time.Now()
+	journal.Log(denial(runA, "CONNECT old.example:443", start))
+	journal.Log(denial(runA, "CONNECT new.example:443", start.Add(2*time.Minute)))
+	got := journal.Denials(runA, start.Add(-time.Hour), start.Add(2*time.Minute))
+	if len(got) != 1 {
+		t.Fatalf("retained %d denials, want only the unexpired one", len(got))
+	}
+	if _, ok := journal.Lookup(runA, got[0].ID); !ok {
+		t.Fatal("lookup lost the retained denial")
 	}
 }

@@ -31,7 +31,7 @@ does not provide managed registration or active-allocation checks.
 
 The administrator creates an `AgentRuntime`, `AgentPolicy` and `AgentTemplate`
 in the profile's fixed namespace. The worker namespace is `sproozi-agents`.
-The runtime selects an explicit native client: stock Codex (`codex`) or
+The runtime selects an explicit harness: stock Codex (`codex`) or
 Claude Code (`claude-code`), with Git, `native-session` and `checkpoint`
 from the approved [native image](../../internal/runtime/docker/image/Dockerfile).
 Use an immutable `repository@sha256:...` image reference available on cluster
@@ -104,7 +104,8 @@ configuration. Required backend permissions are:
 | --- | --- | --- |
 | Configured Run namespace | `sproozi.com/agentruns` | `get`, `create`, `patch` |
 | Configured Run namespace | `sproozi.com/agenttemplates`, `agentpolicies`, `agentruntimes` | `get` |
-| Configured Run namespace | Core `configmaps` for registrations, accounts and stored profiles | `get`, `create`, `update` |
+| Configured Run namespace | Core `configmaps` for registrations and stored profiles | `get`, `create`, `update` |
+| `budgetNamespace` (default `sproozi-system`) | `sproozi.com/budgetledgers` for run accounts | `get`, `create`, `update` |
 | `sproozi-agents` | Core `pods` | `get`, `patch`, `delete` |
 | `sproozi-agents` | Core `pods/exec` | `create` |
 
@@ -113,9 +114,48 @@ it can create TokenReviews and SubjectAccessReviews.
 
 Bind these as namespace-scoped roles to the profile's identity. The existing
 controller and gateway retain their own deployment RBAC. In particular, the
-gateway needs registration/account ConfigMap access in the Run namespace,
-as provided by the shared-gateway budget Role. Worker ServiceAccounts receive
+gateway reads registrations in the Run namespace through its read-only
+`sproozi-shared-gateway-registry` Role. The install binds none; the example
+binds it in its Run namespace, `sproozi-sessions`, and you bind it in any other
+Run namespace you configure.
+Keep the Run namespace out of `sproozi-system`: the executor writes ConfigMaps
+there, and the gateway's configuration lives in `sproozi-system`. The executor
+refuses to start when `namespace` is the gateway's namespace, the one in
+`gatewayUser`. `budgetNamespace` may be the gateway's namespace, and by default
+is: run accounts are [BudgetLedger](../../docs/reference/budgetledger.md)
+resources, and the executor's `sproozi-work-budget` Role grants only
+`budgetledgers` there, not ConfigMaps. Set `budgetNamespace` to the gateway's
+`BUDGET_NAMESPACE`: the executor initializes and seals the accounts the gateway
+charges, so both must use the same namespace. Worker ServiceAccounts receive
 neither profile credentials nor Kubernetes API authority.
+
+The executor's Role can update every ConfigMap in its namespace, because it
+writes registrations and stored profiles there. Create its own configuration
+ConfigMap, `sproozi-work-profile`, and the CLI's trust anchor,
+`sproozi-remote-executor`, with `immutable: true`, so a compromised executor
+cannot rewrite its principal, allowances, namespaces or `gatewayUser`, or
+replace the CA the CLI trusts for it. See [Create private
+configuration](#create-private-configuration).
+
+### Startup checks
+
+Before serving, the executor asks the API server whether the installed RBAC
+can carry a managed session, and refuses to start, naming the missing
+permission, when it cannot. The checks together have 30 seconds; an API server
+that does not answer in time fails startup. It refuses first, without asking, a
+`namespace` equal to the gateway's namespace. Then it runs
+these access reviews, a SelfSubjectAccessReview for its own identity and a
+SubjectAccessReview for `gatewayUser`:
+
+| Identity | Namespace | Resource | Verb | Why |
+| --- | --- | --- | --- | --- |
+| Executor | `namespace` | `configmaps` | `create`, `update` | Write registrations and stored profiles. |
+| Executor | `namespace` | `agentruns.sproozi.com` | `create` | Create each visit's Run. |
+| Executor | `budgetNamespace` | `budgetledgers.sproozi.com` | `create`, `update` | Initialize and seal run accounts. |
+| `gatewayUser` | `namespace` | `configmaps` | `get` | The gateway reads registrations; bind `sproozi-shared-gateway-registry` here. |
+| `gatewayUser` | `budgetNamespace` | `budgetledgers.sproozi.com` | `update` | The gateway charges the same accounts. A denial means `budgetNamespace` differs from the gateway's `BUDGET_NAMESPACE`. |
+
+The `system:auth-delegator` binding above allows these reviews.
 
 ## Create private configuration
 
@@ -128,8 +168,25 @@ The endpoint uses CA-verified TLS 1.3, without redirects, environment proxies or
 cookies. It exposes fixed lifecycle and terminal operations, with no arbitrary
 execution or resource-configuration endpoint.
 
-Save the following strict JSON as `profile.json` in a ConfigMap the executor
-mounts. Replace the example paths,
+Publish the CA as an immutable ConfigMap:
+
+```sh
+{ kubectl -n sproozi-sessions create configmap sproozi-remote-executor \
+    --from-file=ca.crt=/path/to/executor-ca.crt --dry-run=client -o yaml
+  echo 'immutable: true'; } | kubectl create -f -
+```
+
+Save the following strict JSON as `profile.json` in the immutable ConfigMap
+`sproozi-work-profile`, which the executor mounts:
+
+```sh
+{ kubectl -n sproozi-sessions create configmap sproozi-work-profile \
+    --from-file=profile.json=profile.json --dry-run=client -o yaml
+  echo 'immutable: true'; } | kubectl create -f -
+```
+
+To change either, delete it, create it again the same way, and run
+`kubectl -n sproozi-sessions rollout restart deployment/sproozi-work`. Replace the example paths,
 template, instruction digest and approved ceilings. The 30-minute duration and
 unit ceiling match the [home example](../sproozi/README.md); cost is explicitly
 unbounded here. A bounded positive cost requires corresponding gateway pricing.
@@ -142,7 +199,8 @@ unbounded here. A bounded positive cost requires corresponding gateway pricing.
   "keyFile": "/var/run/sproozi-work/tls.key",
   "principal": "developer",
   "placementName": "engineering",
-  "namespace": "sproozi-system",
+  "namespace": "sproozi-sessions",
+  "budgetNamespace": "sproozi-system",
   "templateName": "mobility-native",
   "directory": "/state/profile",
   "instructionDigest": "REPLACE_WITH_64_LOWERCASE_HEX",
@@ -157,11 +215,26 @@ unbounded here. A bounded positive cost requires corresponding gateway pricing.
 }
 ```
 
+The executor checks each field at startup and names the one that is wrong.
+`budgetNamespace` defaults to `sproozi-system`, where the installed gateway
+keeps its BudgetLedger resources. `gatewayUser`, optional,
+is the shared gateway's ServiceAccount user name,
+`system:serviceaccount:NAMESPACE:NAME`; it defaults to
+`system:serviceaccount:sproozi-system:sproozi-shared-gateway`, the installed
+gateway. Set it when the gateway runs under another name or namespace, for
+example after a kustomize `namePrefix` or `namespace` change. The executor
+checks the gateway's access as that user, and takes the gateway's namespace
+from it, at [startup](#startup-checks).
+
 The executor accepts a caller as its home principal when a TokenReview
-authenticates the caller's bearer token and Kubernetes RBAC allows that
+authenticates the caller's bearer token for the audience
+`sproozi-remote-executor` and Kubernetes RBAC allows that
 identity to `use` `remoteexecutors.sproozi.com` named `placementName` in
 `namespace`, the rule `config/cli-access` grants the `sproozi-cli`
-ServiceAccount. Removing that RoleBinding revokes access on the next request.
+ServiceAccount. The CLI mints that token for `sproozi-cli` with a TokenRequest,
+valid for at most an hour, and never sends the executor the credential its
+kubeconfig context signs in with. Removing that RoleBinding revokes access on
+the next request.
 Every allowed identity acts as the one configured `principal`; give each
 developer's service its own executor and namespace.
 
