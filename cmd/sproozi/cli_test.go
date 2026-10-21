@@ -307,7 +307,7 @@ func TestSessionsNeverStartsTheService(t *testing.T) {
 	writeTestConfig(t, root, true)
 	code, out, stderr := runCLI("ls", "--root", root)
 	if code != 1 || out != "" || stderr != "error: the Sproozi service is not running, so this machine's sessions "+
-		`can't be listed; start it with "sproozi service start --root `+root+`" (run, attach, stop and resume `+
+		`can't be listed; start it with "sproozi service start --root `+shellQuote(root)+`" (run, attach, stop and resume `+
 		"start it too)\n" {
 		t.Fatalf("exited %d: %q %q", code, out, stderr)
 	}
