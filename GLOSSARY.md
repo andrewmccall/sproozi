@@ -46,6 +46,52 @@ A launch file that gives a harness without its own MCP client the run's MCP
 connections, including `sproozi`. See
 [ADR 0039](docs/adr/0039-one-harness-registry-and-the-mcp-requirement.md).
 
+### Completion adapter
+
+A launch file that runs a harness's client and sets the `agent` container's
+exit status from the client's native result, for a client that can exit zero
+after a failure, such as `opencode-launch.py` and `hermes-launch.py`. It may
+also write the termination-file envelope. See
+[completion and result](docs/contributing/add-a-harness.md#completion-and-result).
+
+### Termination-file envelope
+
+The small JSON document, `{"version":"sproozi.run-result/v1","runUID":...,"result":{...}}`,
+an `agent` container writes to its termination message file to return a final
+answer for its AgentRun. See
+[retained final answers](docs/reference/agent-contract.md#retained-final-answers).
+
+### Inspection CA
+
+The private certificate authority the gateway uses to issue certificates for
+the outside services it inspects. Sandboxes trust it through their trust
+bundle, so their TLS connections terminate at the gateway. Also seen as:
+gateway CA.
+
+### Guard test
+
+A Go test that compares two places that must agree, such as the harness
+registry and the CRD enum, and fails naming the file to change. The
+[bridge hook](#bridge-hook) is one.
+
+### Bridge hook
+
+The guard test that runs each registered [MCP bridge](#mcp-bridge) against a
+fake MCP server and requires it to load every connection, call `diagnose` and
+refuse to start without `sproozi`. See
+[Add a harness](docs/contributing/add-a-harness.md#writing-an-mcp-bridge).
+
+### Managed wiring
+
+The per-kind code a [managed harness](#managed-harness) needs outside the
+registry: its supervisor adapter, checkpoint format and native configuration
+check. Guard tests require each one.
+
+### Envtest
+
+The controller-runtime test environment that runs a real Kubernetes API server
+and etcd without a cluster; the `test/` integration tests use it.
+
 ### Sandbox
 
 The isolated environment a harness runs in. On Kubernetes it is a disposable

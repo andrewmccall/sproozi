@@ -1,7 +1,9 @@
 // Example MCP bridge for a harness whose agent has no MCP client of its own.
 // A real bridge is a launch file the harness loads (for example as a plugin or
 // extension); this one shows the parts Sproozi relies on and supports the
-// `--sproozi-check CONFIG` mode the registry test hook runs.
+// `--sproozi-check CONFIG` mode the registry test hook runs: it loads every
+// connection, calls sproozi__diagnose and prints
+// {"tools":["<connection>__<tool>", ...],"diagnose":"<its text>"}.
 //
 // - Read the rendered MCP file from the run contract.
 // - Refuse to start without the `sproozi` control connection.
@@ -46,19 +48,35 @@ async function call(url, method, params) {
   return (await rpc(url, init.session, 2, method, params)).result;
 }
 
+// tools lists every connection's tools as <connection>__<tool>, each with the
+// function the client calls; this is what a real bridge registers.
 export async function tools(path) {
-  const names = [];
+  const registered = new Map();
   for (const [connection, server] of Object.entries(connections(path))) {
     const listed = await call(server.url, "tools/list", {});
-    for (const tool of listed.tools ?? []) names.push(`${connection}__${tool.name}`);
+    for (const tool of listed.tools ?? []) {
+      registered.set(`${connection}__${tool.name}`,
+        async (args) => call(server.url, "tools/call", { name: tool.name, arguments: args ?? {} }));
+    }
   }
-  return names.sort();
+  return registered;
 }
 
+function text(result) {
+  return (result.content ?? []).filter((c) => c.type === "text").map((c) => c.text).join("\n");
+}
+
+// Dual mode: the same file is the client's plugin and a command. The client
+// imports it and calls the exported functions; only
+// `node BRIDGE --sproozi-check CONFIG` reaches this branch, because that flag
+// is on the command line. Don't compare import.meta.url with process.argv[1]:
+// symbolic links such as macOS /tmp make that check fail silently.
 const check = process.argv.indexOf("--sproozi-check");
 if (check >= 0) {
   try {
-    console.log(JSON.stringify({ tools: await tools(process.argv[check + 1]) }));
+    const registered = await tools(process.argv[check + 1]);
+    const diagnose = text(await registered.get("sproozi__diagnose")({}));
+    console.log(JSON.stringify({ tools: [...registered.keys()].sort(), diagnose }));
   } catch (error) {
     console.error(error.message);
     process.exit(2);

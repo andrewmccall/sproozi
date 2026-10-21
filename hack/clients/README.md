@@ -18,7 +18,10 @@ verifiers run AgentRuns in, when a verifier exercises it. Only a managed
 harness also goes into the released native image,
 `internal/runtime/docker/image/clients.Dockerfile`, which adds Claude Code to
 the Codex base built from `hack/demo/codex.Dockerfile`. See
-[Add a harness](../../docs/contributing/add-a-harness.md).
+[Add a harness](../../docs/contributing/add-a-harness.md). Add the client to
+[`install.sh`](install.sh)'s `case`, which links its command into
+`/usr/local/bin`, and to [`update.sh`](update.sh)'s client list, which
+refreshes the lockfiles.
 
 Each lockfile records an integrity hash for the wrapper package and for every
 platform package, including `linux-x64` and `linux-arm64`. Build client images

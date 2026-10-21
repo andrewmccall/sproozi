@@ -54,7 +54,11 @@ rendered file served by a fake MCP server, named `<connection>__<tool>`, and
 refuse to start without `sproozi`. The hook skips when the runtime is not
 installed. Further guards require a stock runtime example and a reference
 table row for each selector. A stock client's own loading is still checked
-only by `make verify-harness-clients`.
+only by `make verify-harness-clients`. Later contributor rounds added: launch files live in
+one embedded directory that `.dockerignore` ships, a `tools/call` round trip in
+the hook, strict decoding of each example, and `hack/verify/fake-mcp`, which
+serves the same fake MCP server locally so a real client can be checked on a
+laptop.
 
 ## Alternatives
 

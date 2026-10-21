@@ -1,13 +1,18 @@
 package harness
 
 import (
+	"encoding/json"
+	"fmt"
+	"io/fs"
 	"os"
 	"regexp"
 	"slices"
 	"strings"
 	"testing"
 
+	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/nativeconfig"
+	"sigs.k8s.io/yaml"
 )
 
 // These guards fail on a half-added harness and name the next file to change.
@@ -147,16 +152,20 @@ func TestEveryHarnessDeclaresItsMCPLoader(t *testing.T) {
 			t.Errorf("harness %q must set exactly one of Loader.Native (its client reads %s) or Loader.Bridge "+
 				"(a launch file that does) in %s", h.Selector, h.MCP.File, registryFile)
 		case l.Bridge != "" && h.LaunchFiles[l.Bridge] == "":
-			t.Errorf("harness %q declares MCP bridge %s, which is not one of its LaunchFiles; embed it with go:embed "+
-				"in internal/harness/launch.go and list it in LaunchFiles in %s", h.Selector, l.Bridge, registryFile)
+			t.Errorf("harness %q declares MCP bridge %s, which is not one of its LaunchFiles; put it in "+
+				"internal/harness/launchfiles and add it with launchFilesNamed in %s", h.Selector, l.Bridge, registryFile)
 		case l.Bridge != "" && len(l.Runtime) == 0:
 			t.Errorf("harness %q's MCP bridge %s needs a Loader.Runtime, such as node, in %s", h.Selector, l.Bridge,
 				registryFile)
 		}
 		for name, content := range h.LaunchFiles {
 			if strings.TrimSpace(content) == "" {
-				t.Errorf("harness %q launch file %s is empty; embed its contents in internal/harness/launch.go",
-					h.Selector, name)
+				t.Errorf("harness %q launch file %s is empty", h.Selector, name)
+			}
+			if shipped, err := fs.ReadFile(launchFiles, "launchfiles/"+name); err != nil || string(shipped) != content {
+				t.Errorf("harness %q launch file %s is not internal/harness/launchfiles/%s; put it there and add it "+
+					"with launchFilesNamed in %s, so .dockerignore ships it in the image build context",
+					h.Selector, name, name, registryFile)
 			}
 		}
 	}
@@ -189,10 +198,8 @@ func TestEveryHarnessHasAnExampleAndAReferenceRow(t *testing.T) {
 		if other, ok := exampleElsewhere[h.Selector]; ok {
 			example = other
 		}
-		data, err := os.ReadFile("../../" + example)
-		if err != nil || !regexp.MustCompile(`(?m)^\s+harness: "?`+regexp.QuoteMeta(h.Selector)+`"?\s*$`).Match(data) {
-			t.Errorf("harness %q has no stock runtime example: add %s selecting it (see examples/harnesses/README.md)",
-				h.Selector, example)
+		if problem := exampleProblem(h, example); problem != "" {
+			t.Errorf("harness %q: %s", h.Selector, problem)
 		}
 		managed := "no"
 		if h.Native != "" {
@@ -206,5 +213,54 @@ func TestEveryHarnessHasAnExampleAndAReferenceRow(t *testing.T) {
 	}
 	for selector := range rows {
 		t.Errorf("docs/reference/harnesses.md lists %q, which is not registered in %s", selector, registryFile)
+	}
+}
+
+// exampleProblem checks that a stock runtime example is a valid AgentRuntime
+// selecting the harness whose containers read its MCP file, bridge or a launch
+// file from the run contract.
+func exampleProblem(h Harness, example string) string {
+	data, err := os.ReadFile("../../" + example)
+	if err != nil {
+		return fmt.Sprintf("has no stock runtime example: add %s, starting from "+
+			"examples/harnesses/agentruntime-opencode.yaml", example)
+	}
+	var rt api.AgentRuntime
+	if err = yaml.UnmarshalStrict(data, &rt); err != nil || rt.Kind != "AgentRuntime" {
+		return fmt.Sprintf("%s is not a valid AgentRuntime (%v); start from "+
+			"examples/harnesses/agentruntime-opencode.yaml", example, err)
+	}
+	if rt.Spec.ClientConfig.Harness != h.Selector {
+		return fmt.Sprintf("%s must set spec.clientConfig.harness: %s", example, h.Selector)
+	}
+	spec, err := json.Marshal(rt.Spec)
+	if err != nil {
+		return err.Error()
+	}
+	read := []string{h.MCP.File}
+	if h.Loader.Bridge != "" {
+		read = append(read, h.Loader.Bridge)
+	}
+	for name := range h.LaunchFiles {
+		read = append(read, name)
+	}
+	for _, name := range read {
+		if strings.Contains(string(spec), "/etc/sproozi/contract/"+name) {
+			return ""
+		}
+	}
+	return fmt.Sprintf("%s's containers never read /etc/sproozi/contract/ for any of %v; its command must load "+
+		"the MCP file or the launch file that does", example, read)
+}
+
+// The image build context must ship every launch file.
+func TestDockerignoreShipsLaunchFiles(t *testing.T) {
+	data, err := os.ReadFile("../../.dockerignore")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !regexp.MustCompile(`(?m)^!internal/harness/launchfiles/?$`).Match(data) {
+		t.Fatal(".dockerignore must re-include internal/harness/launchfiles/, or the manager image build " +
+			"fails for every embedded launch file")
 	}
 }

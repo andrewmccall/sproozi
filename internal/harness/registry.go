@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 )
 
 // Harness is one registered agent program and every fact Sproozi's Go code
@@ -24,8 +26,9 @@ type Harness struct {
 	// bridge shipped as one of LaunchFiles.
 	Loader MCPLoader
 	// LaunchFiles are extra contract files, by ConfigMap key, that the
-	// harness's launch command reads. Their contents are embedded in the
-	// binary, so every run contract carries them.
+	// harness's launch command reads. Each is a file in
+	// internal/harness/launchfiles, embedded in the binary and shipped in the
+	// image build context; use launchFilesNamed.
 	LaunchFiles map[string]string
 	// RequestFiles adds instructions.txt and request.json to the contract for
 	// launch commands that read the request from files.
@@ -92,11 +95,11 @@ var registry = []Harness{
 		MCP: MCPFormat{File: "claude-mcp.json", Field: mcpServersField, Entry: func(name, address string) (string, any) {
 			return name, map[string]any{connectionType: httpTransport, connectionURL: address}
 		}}},
-	{Selector: "opencode", RequestFiles: true, Loader: NativeMCP, LaunchFiles: map[string]string{"opencode-launch.py": OpenCodeLaunch},
+	{Selector: "opencode", RequestFiles: true, Loader: NativeMCP, LaunchFiles: launchFilesNamed("opencode-launch.py"),
 		MCP: MCPFormat{File: "opencode-mcp.json", Field: "mcp", Entry: func(name, address string) (string, any) {
 			return name, map[string]any{connectionType: "remote", connectionURL: address, "enabled": true, "oauth": false}
 		}}},
-	{Selector: "hermes", RequestFiles: true, Loader: NativeMCP, LaunchFiles: map[string]string{"hermes-launch.py": HermesLaunch},
+	{Selector: "hermes", RequestFiles: true, Loader: NativeMCP, LaunchFiles: launchFilesNamed("hermes-launch.py"),
 		MCP: MCPFormat{File: "hermes-mcp.json", Field: "mcp_servers", Entry: func(name, address string) (string, any) {
 			// Native toolset aliases must not collide with built-ins such as all or terminal.
 			return "sproozi-mcp-" + name, map[string]any{connectionURL: address, "enabled": true,
@@ -141,6 +144,18 @@ func Managed(kind NativeKind) (Harness, error) {
 		return Harness{}, fmt.Errorf("unsupported native harness %q", kind)
 	}
 	return registry[i], nil
+}
+
+// MCPConfigAt renders a harness's MCP file for the named connections and the
+// sproozi control connection at base+"/mcp/<name>", such as a local fake MCP
+// server, so a person can check that a real client loads it.
+func MCPConfigAt(selected, base string, names ...string) (map[string]string, error) {
+	h, err := Lookup(selected)
+	if err != nil {
+		return nil, err
+	}
+	names = append(slices.Clone(names), api.ControlMCPServer)
+	return h.MCP.render(names, func(name string) string { return base + "/mcp/" + name })
 }
 
 // render writes connections, by name and address, in the harness's format.
