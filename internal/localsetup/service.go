@@ -15,14 +15,18 @@ import (
 	"github.com/andrewmccall/sproozi/internal/session/home"
 )
 
-// ServiceStatus describes the home daemon for one local installation.
+// ServiceStatus describes the service for one local installation.
 type ServiceStatus struct {
 	Running bool     `json:"running"`
 	PID     int      `json:"pid,omitempty"`
 	Socket  string   `json:"socket"`
 	Log     string   `json:"log"`
 	Active  []string `json:"activeSessions,omitempty"`
-	Error   string   `json:"error,omitempty"`
+	// RestartPending says why the running service still uses earlier
+	// settings, until it restarts.
+	RestartPending string `json:"restartPending,omitempty"`
+	// Error is a problem reaching the service other than its not running.
+	Error string `json:"error,omitempty"`
 }
 
 // ServiceState asks the control socket for its session list; an answer means
@@ -33,10 +37,14 @@ func ServiceState(ctx context.Context, l Layout, c home.Config) ServiceStatus {
 	defer cancel()
 	response, err := home.Call(ctx, status.Socket, home.Request{Action: home.ActionSessions})
 	if err != nil {
-		status.Error = err.Error()
+		// A service that is not running is an ordinary state, not a problem.
+		if !errors.Is(err, home.ErrControlUnavailable) {
+			status.Error = err.Error()
+		}
 		return status
 	}
 	status.Running = true
+	status.RestartPending = PendingRestart(l)
 	for _, s := range response.Sessions {
 		if s.Ownership == "home" && running(s.Phase) {
 			status.Active = append(status.Active, s.ID)
@@ -76,6 +84,10 @@ func StartService(ctx context.Context, l Layout, c home.Config, executable strin
 		return ServiceStatus{}, err
 	}
 	defer func() { _ = devnull.Close() }()
+	// The service starting now reads the current settings.
+	if err = os.Remove(l.restartPending()); err != nil && !os.IsNotExist(err) {
+		return ServiceStatus{}, err
+	}
 	cmd := exec.Command(executable, "service", "run", "--config", l.Config())
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = devnull, log, log
 	cmd.Dir = l.Root
@@ -178,7 +190,11 @@ func RestartIdle(ctx context.Context, l Layout, c home.Config, executable string
 		return false, nil
 	}
 	if len(status.Active) > 0 {
-		return false, &SessionsActiveError{Count: len(status.Active)}
+		active := &SessionsActiveError{Count: len(status.Active)}
+		if err := markRestartPending(l, active.Error()); err != nil {
+			return false, err
+		}
+		return false, active
 	}
 	if _, err := StopService(ctx, l, c, false, time.Minute); err != nil {
 		return false, err
@@ -187,6 +203,25 @@ func RestartIdle(ctx context.Context, l Layout, c home.Config, executable string
 		return false, err
 	}
 	return true, nil
+}
+
+// restartPending is the file that records why the running service needs a
+// restart; starting the service removes it.
+func (l Layout) restartPending() string { return filepath.Join(l.Root, restartPendingFile) }
+
+const restartPendingFile = "restart-pending"
+
+func markRestartPending(l Layout, reason string) error {
+	return privatefs.Replace(l.Root, restartPendingFile, []byte(reason+"\n"))
+}
+
+// PendingRestart is why the running service needs a restart, or "".
+func PendingRestart(l Layout) string {
+	data, err := privatefs.ReadFile(l.restartPending(), 4096)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
 }
 
 // RunningContainers counts running containers attached to the installation's

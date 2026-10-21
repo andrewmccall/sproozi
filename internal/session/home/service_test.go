@@ -715,10 +715,17 @@ func TestStartRejectsWorkspaceProblemsWithRepair(t *testing.T) {
 		limit int64
 		want  string
 	}{
-		"missing":   {filepath.Join(plain, "missing"), testLimit, "does not exist; run it on the top-level"},
+		"missing": {filepath.Join(plain, "missing"), testLimit, "does not exist; run it on the top-level"},
+		"subdirectory": {filepath.Join(repo, "sub"), testLimit, "is inside the repository at " + repo +
+			"; try: sproozi run " + repo},
 		"not git":   {plain, testLimit, "must be the top-level directory of a Git repository"},
 		"too large": {repo, 1024, "local.maxCheckpointBytes is 0.0 MiB: raise it"},
 	} {
+		if name == "subdirectory" {
+			if err := os.MkdirAll(tc.path, 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}
 		s.config.Local.MaxCheckpointBytes = tc.limit
 		id := uuid.NewString()
 		_, err := s.Start(t.Context(), id, uuid.NewString(), tc.path, "", nil, nil)

@@ -81,7 +81,7 @@ func (e rejectedError) Is(target error) bool { return target == ErrRejected }
 
 // ErrUnknownSession matches a reply that home retains no session with the
 // requested UUID, so the client knows a retry cannot help.
-var ErrUnknownSession = errors.New("docker (home): no such session")
+var ErrUnknownSession = errors.New("no such session on this machine")
 
 type unknownSessionError string
 
@@ -116,7 +116,7 @@ func (s *Service) unknownSession(q Request, err error) (Response, bool) {
 		return Response{}, false
 	}
 	return Response{UnknownSession: true, Error: fmt.Sprintf(
-		"docker (home): no session %s; \"sproozi ls\" lists sessions", q.ID)}, true
+		"no session %s on this machine; \"sproozi ls\" lists sessions", q.ID)}, true
 }
 
 // SocketPath returns the private local control address for a home directory.
@@ -437,7 +437,7 @@ var errControlListening = errors.New("home: control socket has a live listener")
 // ErrControlUnavailable reports that no home daemon is listening on the
 // control address. It names the executor (docker) and its owner (home) as
 // command output and --executor do.
-var ErrControlUnavailable = errors.New("docker (home): no Sproozi service is listening on the private control socket")
+var ErrControlUnavailable = errors.New("no Sproozi service is listening on the control socket")
 
 func connect(ctx context.Context, path string, q Request) (net.Conn, *bufio.Reader, error) {
 	if err := validateRequest(q); err != nil {

@@ -166,7 +166,7 @@ func (q *options) homeError(err error) error {
 	case err == nil:
 		return nil
 	case errors.Is(err, home.ErrControlUnavailable):
-		command := "sproozi service start"
+		command := startServiceCommand
 		if q.configPath != "" {
 			command = startCommand(q.configPath)
 		}

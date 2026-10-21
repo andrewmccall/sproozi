@@ -48,8 +48,9 @@ kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.30.4/
 kubectl rollout status -n kube-system daemonset/calico-node --timeout=300s
 ```
 
-Kind selects the new cluster for kubectl. On any cluster, check that kubectl
-points at the one you mean before installing:
+Any cluster name works if `sproozi` is taken; use the same name when you
+delete it. Kind selects the new cluster for kubectl. On any cluster, check that
+kubectl points at the one you mean before installing:
 
 ```sh
 kubectl config current-context
@@ -62,12 +63,14 @@ Before applying, read `sproozi-release/install/install.yaml`. It creates
 namespaces whose names start with `sproozi-` and these cluster-wide
 permissions:
 
-- The controller reads Pods, ServiceAccounts, NetworkPolicies, ConfigMaps and
-  Sproozi's resources in every namespace, and updates AgentRuns. It creates
-  and deletes sandbox objects only in `sproozi-agents`.
-- The gateway reads Pods and their logs, events, Services, Deployments,
-  ReplicaSets and StatefulSets in every namespace, and creates TokenReviews.
-  An agent sees only what its policy allows through the gateway.
+- The controller reads Pods, ServiceAccounts, NetworkPolicies, ConfigMaps,
+  AgentPolicies, AgentRuntimes and AgentTemplates in every namespace, and
+  creates, updates and deletes AgentRuns in every namespace. It creates and
+  deletes sandbox objects only in `sproozi-agents`.
+- The gateway reads Pods and their logs, events, ServiceAccounts, Services,
+  Deployments, ReplicaSets and StatefulSets, and Sproozi's AgentRuns,
+  AgentPolicies and AgentTemplates, in every namespace, and creates
+  TokenReviews. An agent sees only what its policy allows through the gateway.
 - Admin, editor and viewer ClusterRoles for Sproozi's resources, bound to
   no one until you bind them.
 
@@ -80,9 +83,11 @@ kubectl rollout status -n sproozi-system deployment/sproozi-gateway --timeout=18
 kubectl rollout status -n sproozi-system deployment/sproozi-controller-manager
 ```
 
-This overlay includes a small certificate controller that creates the gateway's
-private CA. The gateway may restart a few times while it waits for its
-first certificate. The gateway allows only Kubernetes reads (`kubernetes.read`) until
+The `quickstart-self-managed-ca` overlay applies `install/install.yaml` plus a
+small certificate controller that creates the gateway's private CA. The gateway
+may restart a few times while it waits for its first certificate. Apply the
+CRDs first, as above: if you apply the overlay before them, the controller and
+gateway restart until the CRDs exist. The gateway allows only Kubernetes reads (`kubernetes.read`) until
 you enable more.
 
 To use certificates from your own issuer, such as cert-manager, apply
@@ -117,6 +122,7 @@ The run then becomes `Succeeded` and Sproozi removes its Pod, identity and
 NetworkPolicy:
 
 ```sh
+kubectl wait agentrun/first-check -n sproozi-system --for=jsonpath='{.status.phase}'=Succeeded --timeout=120s
 kubectl get agentrun first-check -n sproozi-system
 ```
 
@@ -170,4 +176,4 @@ kubectl delete -f sproozi-release/crds.yaml
 ```
 
 If you created a Kind cluster for this guide, delete it instead:
-`kind delete cluster --name sproozi`.
+`kind delete cluster --name sproozi`, with the name you created it with.

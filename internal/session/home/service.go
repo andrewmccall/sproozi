@@ -288,6 +288,16 @@ func (s *Service) createWorkspaceExecution(ctx context.Context, id, operationID,
 	})
 }
 
+// repositoryAbove is the nearest directory above path that holds .git, or "".
+func repositoryAbove(path string) string {
+	for dir := filepath.Dir(path); dir != filepath.Dir(dir); dir = filepath.Dir(dir) {
+		if _, err := os.Lstat(filepath.Join(dir, ".git")); err == nil {
+			return dir
+		}
+	}
+	return ""
+}
+
 // workspaceProblem explains why start cannot capture a workspace and what
 // would let it.
 func workspaceProblem(path string, err error, limit int64) string {
@@ -296,6 +306,9 @@ func workspaceProblem(path string, err error, limit int64) string {
 	}
 	switch {
 	case errors.Is(err, workspace.ErrNotRepository):
+		if top := repositoryAbove(path); top != "" {
+			return fmt.Sprintf("%v; %s is inside the repository at %s; try: sproozi run %s", err, path, top, top)
+		}
 		return fmt.Sprintf("%v; %s must be the top-level directory of a Git repository, holding its .git directory "+
 			"(linked worktrees and submodules are unsupported)", err, path)
 	case errors.Is(err, workspace.ErrUnbornRepository):

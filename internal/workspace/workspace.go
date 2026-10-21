@@ -589,6 +589,14 @@ func captureWorkingFiles(run func(...string) ([]byte, error), root string, selec
 			}
 		}
 		if !match {
+			info, statErr := os.Lstat(filepath.Join(root, filepath.FromSlash(name)))
+			switch {
+			case os.IsNotExist(statErr):
+				return nil, nil, 0, fmt.Errorf("workspace: ignored file %s does not exist in the repository", name)
+			case statErr == nil && info.Mode().IsRegular():
+				return nil, nil, 0, fmt.Errorf("workspace: %s is not ignored by Git, so it is copied already; "+
+					"leave it out of --include-ignored", name)
+			}
 			return nil, nil, 0, fmt.Errorf("workspace: selection is not an ignored regular file: %s", name)
 		}
 		selected[name] = true

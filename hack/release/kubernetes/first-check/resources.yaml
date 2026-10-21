@@ -28,14 +28,22 @@ spec:
           echo 'Listing Pods through the Sproozi gateway'
           kubectl get pods --namespace sproozi-system
           echo 'PERMITTED: Pod read succeeded'
-          if kubectl get secrets --namespace sproozi-system >/dev/null 2>&1; then
+          # Each refusal must come from the expected place: the gateway's
+          # policy for the Secret, the network for the direct path.
+          if refusal="$(kubectl get secrets --namespace sproozi-system 2>&1)"; then
             echo 'UNEXPECTED: Secret read was allowed'; exit 1
           fi
-          echo 'DENIED: Secret read is outside the policy'
-          if env -u HTTPS_PROXY -u https_proxy curl -sk --max-time 5 https://kubernetes.default.svc/version >/dev/null 2>&1; then
-            echo 'UNEXPECTED: direct API server path was reachable'; exit 1
-          fi
-          echo 'DENIED: direct API server path is blocked'
+          case "$refusal" in
+          *"kubernetes request denied"*) echo 'DENIED: Secret read is outside the policy' ;;
+          *) echo "UNEXPECTED: Secret read failed, but not with the gateway's refusal: $refusal"; exit 1 ;;
+          esac
+          status=0
+          env -u HTTPS_PROXY -u https_proxy curl -sk --max-time 5 https://kubernetes.default.svc/version >/dev/null 2>&1 || status=$?
+          case "$status" in
+          0) echo 'UNEXPECTED: direct API server path was reachable'; exit 1 ;;
+          7|28) echo 'DENIED: direct API server path is blocked' ;;
+          *) echo "UNEXPECTED: direct API server path failed with curl exit $status, not a refused or timed-out connection"; exit 1 ;;
+          esac
           echo 'First check passed. Keeping this Pod for inspection for 60 seconds'
           sleep 60
         resources:

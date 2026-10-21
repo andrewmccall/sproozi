@@ -12,8 +12,12 @@ func ValidateIgnoredPaths(paths []string) error {
 	}
 	seen := make(map[string]bool, len(paths))
 	for _, name := range paths {
-		if len(name) > 512 || !validPath(name) || seen[name] {
-			return fmt.Errorf("workspace: invalid ignored file selection %q", name)
+		switch {
+		case seen[name]:
+			return fmt.Errorf("workspace: ignored file %q is selected twice", name)
+		case len(name) > 512 || !validPath(name):
+			return fmt.Errorf("workspace: ignored file %q must be a path inside the repository, relative to its "+
+				"top level, with no \"..\" or .git", name)
 		}
 		seen[name] = true
 	}

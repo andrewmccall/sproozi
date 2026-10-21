@@ -218,7 +218,13 @@ func (c catalogue) failure(q *options) error {
 	explainOne := func(e executorAvailability, err error) string {
 		switch {
 		case errors.Is(err, home.ErrControlUnavailable):
-			return q.homeError(err).Error()
+			// Listing never starts the service, which only runs while needed.
+			command := startServiceCommand
+			if q.configPath != "" {
+				command = startCommand(q.configPath)
+			}
+			return "the Sproozi service is not running, so this machine's sessions can't be listed; " +
+				"start it with \"" + command + "\" (run, attach, stop and resume start it too)"
 		case e.Context != "":
 			return fmt.Sprintf("cluster (context %s) is unreachable: %s", e.Context, executorCause(err))
 		case e.Executor == localName:

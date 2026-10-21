@@ -155,7 +155,14 @@ func CheckCredential(ctx context.Context, kind harness.NativeKind, providerURL, 
 	client := &http.Client{Timeout: 20 * time.Second, Transport: &http.Transport{TLSClientConfig: tlsConfig, Proxy: nil},
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	response, err := client.Do(request)
-	if err != nil {
+	var unknownAuthority x509.UnknownAuthorityError
+	var verification *tls.CertificateVerificationError
+	var hostname x509.HostnameError
+	switch {
+	case errors.As(err, &unknownAuthority) || errors.As(err, &verification) || errors.As(err, &hostname):
+		return fail("provider", fmt.Errorf("the provider's certificate is not trusted: %w", err),
+			"for a private endpoint, pass its CA bundle with --provider-ca-file FILE")
+	case err != nil:
 		return fail("provider", fmt.Errorf("provider unreachable: %w", err), "check network access, or pass --skip-credential-check")
 	}
 	_ = response.Body.Close()

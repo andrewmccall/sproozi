@@ -48,7 +48,11 @@ runs the service in the foreground, which `service start` does for you.
   unique start of it, as `sproozi ls` shows it (8 characters). A prefix that
   matches several sessions fails and lists them.
 - **Output.** Commands print text. `--json` prints one indented JSON document
-  instead, on every command except `attach` and `help`.
+  instead, on every command except `attach` and `help`. With `--json`, an
+  error is one JSON line on standard error instead, such as
+  `{"error":"no Sproozi installation at DIR","next":"run \"sproozi init\" to
+  set one up, or choose another with --root","exitCode":1}`. Flags may also
+  come before the command: `sproozi --json ls` is `sproozi ls --json`.
 - **Exit status.** 0 on success; 2 for a command line that cannot run as
   written (an unknown command or flag, a missing operand, a bad value); 1 for
   anything else. Every error is one line on standard error starting `error:`.
@@ -61,10 +65,16 @@ runs the service in the foreground, which `service start` does for you.
   ID", and to try again repeat the command with --operation OP`. A refused
   request, an unknown session or a service that is not running has no retry
   hint: nothing was recorded, so run the command again as it is.
-- **The service.** `status`, `attach`, `stop`, `resume`, `cancel`, `rm`,
-  `move`, `pull` and `run` start the service if it is stopped, and say so.
-  `sessions` never does; it says `the Sproozi service is not running; start
-  it with "sproozi service start"`.
+- **The service.** The service only needs to run while you use sessions, and
+  it may not be running: that is normal, not a problem. `status`, `attach`,
+  `stop`, `resume`, `cancel`, `rm`, `move`, `pull` and `run` start it if it is
+  stopped, and say so. `sessions` never does: a listing has no side effects,
+  and this machine's sessions live in records only the service reads safely.
+  It fails with `the Sproozi service is not running, so this machine's
+  sessions can't be listed; start it with "sproozi service start" (run,
+  attach, stop and resume start it too)`. `service status` says whether it
+  runs; `service stop` prints `Stopped the Sproozi service.`, or `The Sproozi
+  service was not running.`
 - **Plain names.** This machine is `local` everywhere: in `move --local`, in
   the `placement`, `ownership` and `executor` values, and in text output.
 
@@ -212,7 +222,8 @@ retry hint:
 | Reply | Run |
 | --- | --- |
 | `workspace: PATH does not exist; run it on the top-level directory of a Git repository` | `sproozi run` in, or on, a Git repository. |
-| `workspace: ordinary Git directory required; PATH must be the top-level directory of a Git repository, holding its .git directory (linked worktrees and submodules are unsupported)` | Run it at the repository's top level. |
+| `workspace: ordinary Git directory required; PATH is inside the repository at TOP; try: sproozi run TOP` | Run it on the repository's top level, as it says. Elsewhere it says `PATH must be the top-level directory of a Git repository, holding its .git directory (linked worktrees and submodules are unsupported)`. |
+| `workspace: ignored file NAME does not exist in the repository`, or `NAME is not ignored by Git, so it is copied already; leave it out of --include-ignored` | Correct or drop that `--include-ignored`. |
 | `workspace: the repository has no commits; make a first commit in PATH, then run again` | `git commit`, then `sproozi run`. |
 | `workspace: byte limit exceeded: expanded Git objects total N MiB, and M MiB remains after working files; local.maxCheckpointBytes is L MiB: raise it ...` | Raise `local.maxCheckpointBytes` in `config.json` (at most 64 MiB, with `local.retainedBytes` at least twice it), then `sproozi service stop` and `sproozi service start`. |
 

@@ -6,7 +6,7 @@ I want to give an AI agent a job and let it get on with it. No approving every s
 
 But I don't want to give it my personal credentials, let it delete my home directory, or discover that an innocent-looking task turned into something much less innocent. I'd rather it didn't hack Hugging Face or turn the world into paperclips, either.
 
-Sproozi runs **existing AI agents in isolated environments**, controls what they can access outside those environments, and lets you bring their conversations and unfinished work back to your own machine.
+Sproozi runs **existing AI agents in isolated environments**, controls what they can access outside those environments, and lets you continue their conversations and unfinished work in a session on your own machine. There's no command yet to copy that work into your own checkout.
 
 It's not another agent or coding assistant. It's a way to run the agents you already use with more freedom **inside boundaries you choose**.
 
@@ -58,11 +58,15 @@ sproozi run
 
 `init` asks for your API key and checks that the agent's container can't reach
 the internet directly. `run` copies the repository into a container and opens
-Codex there; your own directory isn't changed. Press Ctrl-] to detach,
+Codex there; your own directory isn't changed. Press Ctrl-] to detach.
+`sproozi ls` shows each session's ID; the first few characters are enough for
 `sproozi attach ID` to return, `sproozi stop ID` to stop and `sproozi resume
-ID` to carry on later; `sproozi ls` lists them, and an ID's first few
-characters are enough. For Claude Code, run `sproozi init --harness
-claude-code`, then `sproozi run --harness claude-code`.
+ID` to carry on later.
+
+For Claude Code, run `sproozi init --harness claude-code`, then `sproozi run
+--harness claude-code`. Adding it restarts the background service if no
+session is running; otherwise `init` says so, and you restart it later with
+`sproozi service stop` and `sproozi service start`.
 
 [Local sessions](docs/guides/local-sessions.md) explains each step.
 [Install the CLI](docs/guides/install.md) covers downloads for Linux and
@@ -70,9 +74,10 @@ Windows.
 
 ### 2. Try it on Kubernetes
 
-Install a release on a local Kind cluster and run a first check that shows the
-gateway allowing one request and refusing two. It needs only Kind and kubectl:
-no accounts, no builds.
+Install a release on a local Kind cluster and run a first check that shows one
+request allowed through the gateway and two refused: one at the gateway, one at
+the network. It needs Kind, kubectl and internet access (the guide installs
+Calico for network policy), but no accounts and no builds.
 
 **[Install on Kubernetes →](docs/guides/install-kubernetes.md)**
 
@@ -80,7 +85,7 @@ no accounts, no builds.
 
 | I want to… | Guide |
 | --- | --- |
-| Have Codex investigate a broken workload and open a PR | [Investigation-to-PR demo on Kind](docs/guides/pr-demo.md) |
+| Have Codex investigate a broken workload and open a PR (needs a model account and a GitHub App) | [Investigation-to-PR demo on Kind](docs/guides/pr-demo.md) |
 | Move a live session between Docker and Kubernetes | [Session mobility](docs/guides/session-mobility.md) |
 | Run Codex remotely, then continue its work on my machine | [Run a task remotely, then resume it locally](docs/guides/portable-workflows.md) |
 | Have a persistent Hermes assistant delegate bounded tasks | [Persistent Hermes assistant on Kubernetes](docs/guides/hermes-orchestration.md) |

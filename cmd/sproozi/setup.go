@@ -126,7 +126,17 @@ func installation(root string) (localsetup.Layout, localsetup.Installation, home
 		return l, inst, home.Config{}, err
 	}
 	c, err := home.ReadConfig(l.Config())
+	if os.IsNotExist(err) {
+		err = incompleteSetup(resolved)
+	}
 	return l, inst, c, err
+}
+
+// incompleteSetup reports an installation whose setup stopped before it
+// wrote the configuration.
+func incompleteSetup(root string) error {
+	return fmt.Errorf("setup at %s is incomplete: it stopped before writing config.json; run \"sproozi init\" "+
+		"to finish it", root)
 }
 
 // printer writes a setup command's result as text.
@@ -167,14 +177,31 @@ func (q *options) maintain(ctx context.Context) error {
 	return err
 }
 
-type serviceReport localsetup.ServiceStatus
+// serviceReport is the service's state and what this command did to it.
+type serviceReport struct {
+	localsetup.ServiceStatus
+	// Changed says this command started or stopped the service.
+	Changed bool `json:"changed"`
+	verb    string
+}
 
 func (s serviceReport) text(w io.Writer) {
-	if !s.Running {
-		_, _ = fmt.Fprintln(w, "The Sproozi service is not running.")
-	} else {
+	switch {
+	case s.verb == verbStop && s.Changed:
+		_, _ = fmt.Fprintln(w, "Stopped the Sproozi service.")
+	case s.verb == verbStop:
+		_, _ = fmt.Fprintln(w, "The Sproozi service was not running.")
+	case s.verb == verbStart && s.Changed:
+		_, _ = fmt.Fprintf(w, "Started the Sproozi service (process %d).\n", s.PID)
+	case s.Running:
 		_, _ = fmt.Fprintf(w, "The Sproozi service is running (process %d) with %d active session(s).\n",
 			s.PID, len(s.Active))
+	default:
+		_, _ = fmt.Fprintln(w, "The Sproozi service is not running. Session commands start it when they need it;\n"+
+			"to start it now: sproozi service start")
+	}
+	if s.RestartPending != "" {
+		_, _ = fmt.Fprintln(w, "Restart pending: "+s.RestartPending+".")
 	}
 	if s.Error != "" {
 		_, _ = fmt.Fprintln(w, "Problem: "+s.Error)
@@ -183,19 +210,24 @@ func (s serviceReport) text(w io.Writer) {
 }
 
 func (q *options) serviceCommand(ctx context.Context, l localsetup.Layout, c home.Config) (printer, error) {
+	before := localsetup.ServiceState(ctx, l, c)
+	report := serviceReport{verb: q.verb}
+	var err error
 	switch q.verb {
 	case verbStart:
-		executable, err := os.Executable()
-		if err != nil {
-			return nil, err
+		executable, e := os.Executable()
+		if e != nil {
+			return nil, e
 		}
-		status, err := localsetup.StartService(ctx, l, c, executable, 2*time.Minute)
-		return serviceReport(status), err
+		report.ServiceStatus, err = localsetup.StartService(ctx, l, c, executable, 2*time.Minute)
+		report.Changed = err == nil && !before.Running
 	case verbStop:
-		status, err := localsetup.StopService(ctx, l, c, q.leaveRunning, time.Minute)
-		return serviceReport(status), err
+		report.ServiceStatus, err = localsetup.StopService(ctx, l, c, q.leaveRunning, time.Minute)
+		report.Changed = err == nil && before.Running
+	default:
+		report.ServiceStatus = before
 	}
-	return serviceReport(localsetup.ServiceState(ctx, l, c)), nil
+	return report, err
 }
 
 type doctorReport localsetup.Report

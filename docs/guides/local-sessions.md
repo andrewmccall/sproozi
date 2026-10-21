@@ -80,9 +80,9 @@ sproozi resume 3f2b   # carry on later, with a new deadline
 sproozi rm 3f2b       # delete a stopped session and its saved work
 ```
 
-`cancel` stops a session at once, discarding the agent's current turn. These
-commands start the background service if it is stopped; `ls` does not, and
-says how to start it.
+`cancel` stops a session at once, discarding the agent's current turn. The
+background service only needs to run while you use sessions. These commands
+start it if it is stopped; `ls` does not, and says how to start it.
 
 Each agent uses its own default model and settings. To pass the agent's own
 flags, put them after `--`:
@@ -95,9 +95,11 @@ Flags that Sproozi controls, such as Codex's `--sandbox`, are refused with the
 reason; the [command reference](../reference/session-commands.md#agent-arguments)
 lists them.
 
-The gateway refuses the agent's own services that Sproozi doesn't allow, such
-as Claude Code's remote settings. Claude Code then shows `Remote managed
-settings failed to load (access denied (403))`; the agent still works.
+The gateway refuses the agent's own services that Sproozi doesn't allow, and
+the agents say so; both are expected and the agent still works. Claude Code
+shows `Remote managed settings failed to load (access denied (403))`. Codex
+may show `⚠ 1 warning` because its telemetry (`ab.chatgpt.com`) is refused;
+in a real terminal, F2 shows the warning.
 [Sproozi integration](../reference/sproozi-integration.md) explains how the
 agent can ask why a request was refused.
 
@@ -164,7 +166,10 @@ has the details.
 | `provider: the provider rejected the credential` | Replace the key with `sproozi credentials set`. |
 | `workspace: the repository has no commits` | Make a first commit, then `sproozi run` again. |
 | `workspace: byte limit exceeded` | The repository's history is larger than one checkpoint. The message gives the size and how to raise `local.maxCheckpointBytes`, up to 64 MiB. |
-| `the Sproozi service is not running` | Run `sproozi service start`. |
+| `the Sproozi service is not running, so this machine's sessions can't be listed` | Run `sproozi service start`, or any session command. |
+| `doctor` shows `restart pending` | You added an agent or key while sessions ran. Stop them, then `sproozi service stop` and `sproozi service start`. |
+| `setup at … is incomplete` | `init` stopped part-way, for example with no terminal to ask for the key. Run `sproozi init` again. |
+| `provider: the provider's certificate is not trusted` | For a private endpoint, pass its CA bundle with `--provider-ca-file`. |
 | `gateway.listen "127.0.0.1:PORT": address already in use` | Another program holds the gateway port. Stop it, then `sproozi service start`. |
 | `service: the service exited during startup` | Read the log the message names, usually `~/.sproozi/logs/service.log`. |
 

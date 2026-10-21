@@ -9,6 +9,8 @@ import (
 	"encoding/pem"
 	"errors"
 	"math/big"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -377,5 +379,35 @@ func TestSetProviderCAReplacesTheStoredValue(t *testing.T) {
 	}
 	if !setProviderCA(&c, harness.NativeClaude, "/new/anthropic-ca.pem") || c.Harnesses[0].ProviderCAFile != "/new/anthropic-ca.pem" {
 		t.Fatalf("further harness: %+v", c.Harnesses)
+	}
+}
+
+// A provider certificate the client does not trust names --provider-ca-file.
+func TestUntrustedProviderCertificateNamesTheCAFlag(t *testing.T) {
+	server := httptest.NewTLSServer(http.NotFoundHandler())
+	defer server.Close()
+	l, _ := testInstallation(t)
+	key, err := StoreCredential(l, "openai", CredentialInput{Stdin: strings.NewReader("sk-test")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = CheckCredential(t.Context(), harness.NativeCodex, server.URL, "", key)
+	if err == nil || !strings.Contains(err.Error(), "certificate is not trusted") ||
+		!strings.Contains(err.Error(), "--provider-ca-file") {
+		t.Fatalf("untrusted certificate: %v", err)
+	}
+}
+
+// A pending restart is recorded in the root, which setup still owns.
+func TestRestartPendingIsRecordedInTheRoot(t *testing.T) {
+	l, _ := testInstallation(t)
+	if PendingRestart(l) != "" {
+		t.Fatal("pending restart without a record")
+	}
+	if err := markRestartPending(l, "1 session(s) are running"); err != nil {
+		t.Fatal(err)
+	}
+	if PendingRestart(l) != "1 session(s) are running" || l.checkRoot() != nil {
+		t.Fatalf("pending restart %q, root %v", PendingRestart(l), l.checkRoot())
 	}
 }

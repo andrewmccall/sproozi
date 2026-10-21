@@ -446,3 +446,16 @@ func TestCaptureRejectsWindowsPathAliasesInGitTrees(t *testing.T) {
 		})
 	}
 }
+
+// A selected ignored file that is missing, or not ignored, says which.
+func TestIncludeIgnoredNamesAMissingOrTrackedFile(t *testing.T) {
+	root := newFixture(t)
+	if _, err := Capture(t.Context(), root, []string{"nothere"}, testLimit); err == nil ||
+		!strings.Contains(err.Error(), "ignored file nothere does not exist in the repository") {
+		t.Fatalf("missing file: %v", err)
+	}
+	if _, err := Capture(t.Context(), root, []string{"note.txt"}, testLimit); err == nil ||
+		!strings.Contains(err.Error(), "note.txt is not ignored by Git") {
+		t.Fatalf("tracked file: %v", err)
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -165,8 +166,15 @@ func flagError(c command, err error) error {
 		}
 		return usagef("%s does not accept --%s; run \"sproozi help %s\" for its flags", c.name, name, c.name)
 	}
-	return usagef("%s: %v; run \"sproozi help %s\" for its flags", c.name, err, c.name)
+	if m := invalidFlagValue.FindStringSubmatch(err.Error()); m != nil {
+		return usagef("--%s %s: %s", m[2], m[1], strings.TrimPrefix(m[3], "workspace: "))
+	}
+	return usagef("%s: %v; run \"sproozi help %s\" for its flags", c.name,
+		strings.ReplaceAll(err.Error(), " -", " --"), c.name)
 }
+
+// invalidFlagValue matches the flag package's message for a rejected value.
+var invalidFlagValue = regexp.MustCompile(`^invalid (?:value|boolean value) ("[^"]*") for flag -([a-z-]+): (.*)$`)
 
 func unknownCommand(name string) error {
 	if hint := suggest(name, commandNames()); hint != "" {

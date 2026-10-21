@@ -173,7 +173,7 @@ func TestUsageErrorsExitTwoBeforeReadingAnything(t *testing.T) {
 		"--port must be a port number":                              {"init", "--port", "80"},
 		"choose --credential-file or --credential-stdin":            {"init", "--credential-file", "k", "--credential-stdin"},
 		"help takes one command name":                               {"help", "run", "stop"},
-		"attach does not accept --json":                             {"attach", "abc", "--json"},
+		"attach does not accept --detach":                           {"attach", "abc", "--detach"},
 		"resume does not accept --model; put arguments for the age": {"resume", "abc", "--model", "x"},
 	} {
 		code, _, stderr := runCLI(args...)
@@ -295,8 +295,9 @@ func TestSessionsNeverStartsTheService(t *testing.T) {
 	root := shortTempDir(t)
 	writeTestConfig(t, root, true)
 	code, out, stderr := runCLI("ls", "--root", root)
-	if code != 1 || out != "" || stderr != "error: the Sproozi service is not running; start it with "+
-		`"sproozi service start --root `+root+`"`+"\n" {
+	if code != 1 || out != "" || stderr != "error: the Sproozi service is not running, so this machine's sessions "+
+		`can't be listed; start it with "sproozi service start --root `+root+`" (run, attach, stop and resume `+
+		"start it too)\n" {
 		t.Fatalf("exited %d: %q %q", code, out, stderr)
 	}
 	if _, err := os.Stat(filepath.Join(root, "service.pid")); !os.IsNotExist(err) {
@@ -332,7 +333,7 @@ func TestSessionPrefixesAndRetryHints(t *testing.T) {
 		want     string
 		retry    bool
 	}{
-		{home.Response{Error: "docker (home): no session " + id, UnknownSession: true},
+		{home.Response{Error: "no session " + id + " on this machine", UnknownSession: true},
 			"no session " + id + ` on this machine; "sproozi ls" lists sessions`, false},
 		{home.Response{Error: "home: session is not stopped", Rejected: true}, "session is not stopped", false},
 		{home.Response{Error: "home: docker fixed operation failed"}, "docker fixed operation failed", true},
@@ -491,6 +492,44 @@ func TestSourceBuildsReportTheirCommit(t *testing.T) {
 		b := describeBuild(tc.v, tc.c, tc.d, tc.info)
 		if b.String() != tc.want || docsRef(b.version) != tc.wantRef {
 			t.Errorf("%s: %q links %s, want %q and %s", tc.name, b, docsRef(b.version), tc.want, tc.wantRef)
+		}
+	}
+}
+
+// With --json, an error is one JSON object on standard error with the next
+// step; flags given before the command work.
+func TestJSONErrorsAndFlagsBeforeTheCommand(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "absent")
+	code, out, stderr := runCLI("--json", "ls", "--root", root)
+	var reply struct {
+		Error, Next string
+		ExitCode    int
+	}
+	if code != 1 || out != "" || json.Unmarshal([]byte(stderr), &reply) != nil ||
+		reply.Error != "no Sproozi installation at "+root || !strings.Contains(reply.Next, `"sproozi init"`) ||
+		reply.ExitCode != 1 {
+		t.Fatalf("exited %d: %q %q", code, out, stderr)
+	}
+	if code, _, stderr = runCLI("stop", "--json"); code != 2 || !strings.Contains(stderr, `"exitCode":2`) {
+		t.Fatalf("usage error exited %d: %q", code, stderr)
+	}
+	if code, _, stderr = runCLI("run", "--include-ignored", "/etc/hosts"); code != 2 ||
+		!strings.Contains(stderr, `--include-ignored "/etc/hosts": ignored file`) || strings.Contains(stderr, " -include") {
+		t.Fatalf("flag value error exited %d: %q", code, stderr)
+	}
+}
+
+// A setup that stopped before writing its configuration says so.
+func TestIncompleteSetupNamesInit(t *testing.T) {
+	root := shortTempDir(t)
+	if err := testutil.WriteFile(filepath.Join(root, "installation.json"), []byte(`{"version":1,"id":"0a1b2c3d"}`),
+		0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"doctor", "--root", root}, {"status", "abcd", "--root", root}} {
+		if code, _, stderr := runCLI(args...); code != 1 || !strings.Contains(stderr, "setup at "+root+
+			` is incomplete: it stopped before writing config.json; run "sproozi init" to finish it`) {
+			t.Errorf("%v exited %d: %q", args, code, stderr)
 		}
 	}
 }

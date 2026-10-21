@@ -318,7 +318,7 @@ func TestUnknownSessionRepliesWithoutJournalPath(t *testing.T) {
 	t.Parallel()
 	s, _, _, _ := testService(t)
 	id := uuid.NewString()
-	want := "docker (home): no session " + id + `; "sproozi ls" lists sessions`
+	want := "no session " + id + ` on this machine; "sproozi ls" lists sessions`
 	for _, q := range []Request{
 		{Action: ActionStatus, ID: id},
 		{Action: ActionStop, ID: id, OperationID: uuid.NewString()},

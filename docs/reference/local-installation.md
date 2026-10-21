@@ -33,6 +33,7 @@ checkout and a directory holding other files, with a `root` error that suggests
 | `docker-cli/` | A private Docker CLI configuration with no registry credentials. | No |
 | `logs/service.log` | Home daemon log. | No |
 | `service.pid` | Process ID of a service started by `sproozi service start`. | No |
+| `restart-pending` | Why the running service still uses earlier settings, written when `init` or `credentials set` could not restart it over running sessions; starting the service removes it. `doctor` and `service status` report it. | No |
 
 Directories are created with mode `0700` and files with `0600`. Setup and the
 service refuse existing paths with broader permissions, a different owner or a

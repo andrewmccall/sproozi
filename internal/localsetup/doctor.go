@@ -88,7 +88,7 @@ func Doctor(ctx context.Context, l Layout, checkProvider bool) (r Report) {
 		provider := ProviderFor(h.Harness)
 		_, err = privatefs.ReadFile(h.Credential, 16<<10)
 		if err != nil {
-			err = fail("credential", err, "sproozi credentials add "+provider.Name)
+			err = fail("credential", err, "sproozi credentials set "+string(h.Harness))
 		}
 		r.add("credential", err, fmt.Sprintf("%s credential for %s is stored privately", provider.Name, h.Harness))
 		if err == nil && checkProvider {
@@ -112,7 +112,14 @@ func Doctor(ctx context.Context, l Layout, checkProvider bool) (r Report) {
 	}
 	service := ServiceState(ctx, l, config)
 	if !service.Running {
-		r.add("service", fail("service", errors.New("the service is not running"), "sproozi service start"), "")
+		r.add("service", fail("service", errors.New("the service is not running, so the path check cannot run"),
+			"sproozi service start, then sproozi doctor"), "")
+		return r
+	}
+	if service.RestartPending != "" {
+		// The running service still serves the earlier settings, so a probe
+		// of the new ones would fail for a reason doctor already knows.
+		r.add("service", fail("service", errors.New("restart pending: "+service.RestartPending), ""), "")
 		return r
 	}
 	r.add("service", nil, fmt.Sprintf("running with %d active session(s); log %s", len(service.Active), service.Log))

@@ -105,6 +105,9 @@ func readConfig(path string) (home.Config, error) {
 	case errors.As(err, &invalid):
 		err = fmt.Errorf("configuration %s: %w; edit the file to correct it, see %s", path, err, configDoc)
 	case errors.Is(err, os.ErrNotExist) && installation:
+		if _, statErr := os.Stat(localsetup.Layout{Root: filepath.Dir(path)}.Installation()); statErr == nil {
+			return fixed, incompleteSetup(filepath.Dir(path))
+		}
 		err = fmt.Errorf("no Sproozi installation at %s; run \"sproozi init\" to set one up, or choose another "+
 			"with --root", filepath.Dir(path))
 	case errors.Is(err, os.ErrNotExist):
@@ -136,10 +139,13 @@ func startCommand(configPath string) string {
 		return "sproozi service run --config " + shellQuote(configPath)
 	}
 	if resolved, err := localsetup.ResolveRoot(""); err == nil && resolved == root {
-		return "sproozi service start"
+		return startServiceCommand
 	}
 	return "sproozi service start --root " + shellQuote(root)
 }
+
+// startServiceCommand starts the default installation's service.
+const startServiceCommand = "sproozi service start"
 
 // serviceDown reports that the service is not running and how to start it.
 type serviceDown struct {

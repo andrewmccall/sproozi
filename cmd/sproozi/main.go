@@ -4,12 +4,15 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/signal"
 	"runtime"
+	"slices"
+	"strings"
 	"syscall"
 
 	"github.com/andrewmccall/sproozi/internal/session/home"
@@ -30,21 +33,65 @@ func cli(args []string, stdout, stderr io.Writer) int {
 		printTopUsage(stderr)
 		return 2
 	}
+	args = commandFirst(args)
 	err := run(args, stdout)
 	if err == nil {
 		return 0
 	}
-	_, _ = fmt.Fprintln(stderr, "error:", explain(err))
+	code := 1
 	var usage *usageError
 	if errors.As(err, &usage) {
-		return 2
+		code = 2
 	}
-	return 1
+	if wantsJSON(args) {
+		message, next, _ := strings.Cut(explain(err), "; ")
+		_ = json.NewEncoder(stderr).Encode(struct {
+			Error    string `json:"error"`
+			Next     string `json:"next,omitempty"`
+			ExitCode int    `json:"exitCode"`
+		}{message, strings.TrimPrefix(next, "next: "), code})
+		return code
+	}
+	_, _ = fmt.Fprintln(stderr, "error:", explain(err))
+	return code
+}
+
+// commandFirst moves flags given before the command, as in "sproozi --json
+// ls", after it, where the command parses them.
+func commandFirst(args []string) []string {
+	if !strings.HasPrefix(args[0], "-") || helpRequested(args[0]) || versionRequested(args[0]) {
+		return args
+	}
+	names := commandNames()
+	for i, arg := range args {
+		if arg == "--" {
+			break
+		}
+		if slices.Contains(names, arg) {
+			return append(append([]string{arg}, args[:i]...), args[i+1:]...)
+		}
+	}
+	return args
+}
+
+func versionRequested(arg string) bool { return arg == "-v" || arg == "--version" }
+
+// wantsJSON reports --json among Sproozi's own arguments.
+func wantsJSON(args []string) bool {
+	for _, arg := range args {
+		if arg == "--" {
+			return false
+		}
+		if arg == "--json" || arg == "-json" {
+			return true
+		}
+	}
+	return false
 }
 
 func run(args []string, stdout io.Writer) error {
 	switch {
-	case args[0] == "-v" || args[0] == "--version":
+	case versionRequested(args[0]):
 		args = append([]string{cmdVersion}, args[1:]...)
 	case helpRequested(args[0]):
 		printTopUsage(stdout)

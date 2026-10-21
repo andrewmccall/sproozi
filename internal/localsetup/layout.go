@@ -205,7 +205,7 @@ func (l Layout) lock() (func(), error) {
 // rootEntries are the names a local installation root holds. ".DS_Store" is
 // what macOS Finder leaves in any folder it shows.
 var rootEntries = []string{"config.json", "installation.json", home.ProfileFolder, "credentials", "pki", "state",
-	"docker-cli", "logs", "service.pid", "setup.lock", ".DS_Store"}
+	"docker-cli", "logs", "service.pid", "setup.lock", restartPendingFile, ".DS_Store"}
 
 // checkRoot refuses a root that holds anything other than a Sproozi
 // installation, such as a Git checkout. Setup writes credentials and keys
