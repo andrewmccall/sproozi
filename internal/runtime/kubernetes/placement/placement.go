@@ -15,6 +15,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
+
+	"github.com/andrewmccall/sproozi/internal/agentcontract"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/budget"
@@ -45,6 +48,11 @@ const helperFinish = "finish"
 const helperPrepare = "prepare"
 const helperPrepareWorkspace = "prepare-workspace"
 
+// DefaultBudgetNamespace is where the installed gateway keeps its BudgetLedger
+// resources (ADR 0045). The executor initializes and seals the accounts the
+// gateway charges, so both must name the same namespace.
+const DefaultBudgetNamespace = "sproozi-system"
+
 // Config is administrator-owned; requests cannot override templates, namespace,
 // credentials, commands or limits. Directory must be private durable storage.
 type Config struct {
@@ -52,10 +60,13 @@ type Config struct {
 	Kube                                                                client.Client
 	RESTConfig                                                          *rest.Config
 	Namespace, AgentNamespace, TemplateName, Principal, Directory, Name string
-	InstructionDigest                                                   string
-	Allowances                                                          map[string]session.Allowance
-	MaxDuration                                                         time.Duration
-	MaxCheckpointBytes                                                  int64
+	// BudgetNamespace holds the run accounts the gateway charges. It must be
+	// the gateway's BUDGET_NAMESPACE; empty means DefaultBudgetNamespace.
+	BudgetNamespace    string
+	InstructionDigest  string
+	Allowances         map[string]session.Allowance
+	MaxDuration        time.Duration
+	MaxCheckpointBytes int64
 }
 
 type Placement struct {
@@ -71,6 +82,9 @@ type Placement struct {
 // Open holds one filesystem owner lock for the configured profile. Kubernetes
 // CAS records independently retain exact remote identity and immutable receipts.
 func Open(config Config) (*Placement, error) {
+	if config.BudgetNamespace == "" {
+		config.BudgetNamespace = DefaultBudgetNamespace
+	}
 	if config.AgentNamespace == "" {
 		config.AgentNamespace = runtimekube.AgentsNamespace
 	}
@@ -106,10 +120,10 @@ func Open(config Config) (*Placement, error) {
 		_ = lock.Close()
 		return nil, err
 	}
-	return &Placement{config: config, registry: store, ledger: budgetkube.NewLedger(config.Kube, config.Namespace), exec: executor, lock: lock}, nil
+	return &Placement{config: config, registry: store, ledger: budgetkube.NewLedger(config.Kube, config.BudgetNamespace), exec: executor, lock: lock}, nil
 }
 func validateConfig(config Config) error {
-	if config.Harness.Validate() != nil || config.Kube == nil || config.RESTConfig == nil || len(validation.IsDNS1123Label(config.Namespace)) != 0 || config.AgentNamespace != runtimekube.AgentsNamespace || len(validation.IsDNS1123Subdomain(config.TemplateName)) != 0 || config.Principal == "" || config.Name == "" || !digestValid(config.InstructionDigest) || config.MaxDuration <= 0 || config.MaxCheckpointBytes <= 0 || config.MaxCheckpointBytes > 256<<20 || !filepath.IsAbs(config.Directory) || len(config.Allowances) == 0 || len(config.Allowances) > 32 {
+	if config.Harness.Validate() != nil || config.Kube == nil || config.RESTConfig == nil || len(validation.IsDNS1123Label(config.Namespace)) != 0 || len(validation.IsDNS1123Label(config.BudgetNamespace)) != 0 || config.AgentNamespace != runtimekube.AgentsNamespace || len(validation.IsDNS1123Subdomain(config.TemplateName)) != 0 || config.Principal == "" || config.Name == "" || !digestValid(config.InstructionDigest) || config.MaxDuration <= 0 || config.MaxCheckpointBytes <= 0 || config.MaxCheckpointBytes > 256<<20 || !filepath.IsAbs(config.Directory) || len(config.Allowances) == 0 || len(config.Allowances) > 32 {
 		return errors.New("placement: invalid fixed configuration")
 	}
 	for _, allowance := range config.Allowances {
@@ -428,6 +442,9 @@ func (p *Placement) ensureRun(ctx context.Context, r registry.Record) (*api.Agen
 	if err == nil {
 		return wanted, nil
 	}
+	if apierrors.IsInvalid(err) {
+		return nil, invalidRun(wanted.Name, err)
+	}
 	if !apierrors.IsAlreadyExists(err) {
 		return nil, err
 	}
@@ -440,6 +457,26 @@ func (p *Placement) ensureRun(ctx context.Context, r registry.Record) (*api.Agen
 	}
 	return &existing, nil
 }
+
+// invalidRun names the AgentRun fields the API server rejected, so an operator
+// sees which bound or value failed. The wrapped error still satisfies
+// apierrors.IsInvalid.
+func invalidRun(name string, err error) error {
+	var fields []string
+	var status apierrors.APIStatus
+	if errors.As(err, &status) && status.Status().Details != nil {
+		for _, cause := range status.Status().Details.Causes {
+			if cause.Field != "" {
+				fields = append(fields, cause.Field+": "+cause.Message)
+			}
+		}
+	}
+	if len(fields) == 0 {
+		return fmt.Errorf("placement: AgentRun %s was rejected as invalid: %w", name, err)
+	}
+	return fmt.Errorf("placement: AgentRun %s was rejected as invalid (%s): %w", name, strings.Join(fields, "; "), err)
+}
+
 func semantic(err error) error {
 	if errors.Is(err, registry.ErrConflict) || errors.Is(err, registry.ErrGone) {
 		return &profile.Rejection{Code: profile.CodeConflict}
@@ -460,7 +497,7 @@ func (p *Placement) validateInput(l session.Launch, initial bool) error {
 	if l.Harness != p.config.Harness || !idValid(l.ExecutionID) || !idValid(l.OperationID) || !idValid(l.AllocationID) || (!initial && !idValid(l.ThreadID) || initial && l.ThreadID != "") || l.Epoch == 0 || l.Placement != p.config.Name || (!initial && !digestValid(l.CheckpointDigest) || initial && l.CheckpointDigest != "") || l.InstructionDigest != p.config.InstructionDigest || len(l.Allowances) == 0 || len(l.Allowances) > 32 {
 		return &profile.Rejection{Code: profile.CodeDenied}
 	}
-	if len(l.Task) > 32<<10 || strings.ContainsRune(l.Task, 0) || l.Task != "" && (strings.TrimSpace(l.Task) == "" || l.Harness != harness.NativeCodex) {
+	if utf8.RuneCountInString(l.Task) > agentcontract.MaxTaskRunes || strings.ContainsRune(l.Task, 0) || l.Task != "" && (strings.TrimSpace(l.Task) == "" || l.Harness != harness.NativeCodex) {
 		return &profile.Rejection{Code: profile.CodeDenied}
 	}
 	return nil

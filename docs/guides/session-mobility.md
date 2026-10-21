@@ -51,10 +51,12 @@ workspace data, so move it outside the source before capture.
 [Install the CLI](install.md) on the developer's machine. It provides
 `sproozi service run`, the service, and the session commands below.
 
-The remote executor and the native image have no release download, so
-build them from a checkout of this repository that matches your CLI. Run
-`sproozi --version`. Release binaries print a version, so check out its tag,
-for example `git checkout v0.1.0`. A source build prints `dev` and a commit, so
+A release publishes the native image, which also contains the remote
+executor, as `ghcr.io/andrewmccall/sproozi-native`; `sproozi version` prints
+its digest as `agent image`. This guide builds both from a checkout of this
+repository that matches your CLI instead. Run `sproozi --version`. Release
+binaries print a version, so check out its tag, for example
+`git checkout v0.1.0`. A source build prints `dev` and a commit, so
 build the other components from that commit (`git checkout <commit>`). If it
 prints `source build`, use the checkout you built from. The service,
 remote executor and native supervisor reject messages they don't recognise, so
@@ -320,7 +322,7 @@ message starts with `error: `.
 3. **Gateway port.** It binds `gateway.listen` and releases it at once, still
    before anything is written. If the port is taken, it dials this
    directory's control socket: when a service answers, it reports that
-   daemon; otherwise it reports the port in use.
+   service; otherwise it reports the port in use.
 4. **Certificate, listener and saved placement settings.** It opens the home
    directory, checks the gateway certificate and listener, and compares the
    `local` placement settings with the ones saved there.
@@ -341,13 +343,13 @@ message starts with `error: `.
 | 2 | `error: dockerBinary B could not inspect local.nativeImageID I through dockerSocket S (...)` | Check that Docker is running, that `dockerBinary` is the Docker CLI and that the native image is loaded. |
 | 2 | `error: Docker resolved local.nativeImageID I to J` | Set `local.nativeImageID` to the full image ID `J`, not a tag. |
 | 2 | `error: local.networkName "X" does not exist; create it with "docker network create X"` | Create the bridge network as in [the administrator-owned setup](#prepare-the-administrator-owned-setup), or set `local.networkName` to an existing one. |
-| 3 | `error: another Sproozi service is using directory PATH; stop it first` | A second the service with the same configuration: a service already serves this directory on this port. Use the running daemon, or stop it first. |
+| 3 | `error: another Sproozi service is using directory PATH; stop it first` | A second service with the same configuration: a service already serves this directory on this port. Use the running service, or stop it first. |
 | 3 or 5 | `error: gateway.listen "ADDR": address already in use; stop the other process or choose another port (and local.gatewayPort)` | Another process, not a service for this directory, holds the port. Stop it, or choose another port and set `local.gatewayPort` to match. Pass 5 reports it only if the port was taken after pass 3. |
 | 4 | `error: gateway.listen "X" listens on H, which containers cannot reach` | Listen on `local.gatewayIPv4` or `0.0.0.0`. |
 | 4 | `error: gateway.certificateFile F does not name local.gatewayIPv4 IP` | Reissue the certificate with that address as an IP subject alternative name. |
 | 4 | `error: gateway.certificateFile F does not name HOST, the inspection host for local.harness K` | Reissue it with that name, `api.openai.com` for Codex or `api.anthropic.com` for Claude Code, as a DNS subject alternative name. |
 | 4 | `error: local placement settings changed (local.nativeImageID "…" -> "…"), but N execution records in DIR were prepared under the earlier values; set them back to keep those sessions, or use a new home directory for the new values` | See [changing placement settings](#changing-placement-settings). |
-| 4 | `error: another Sproozi service is using directory PATH; stop it first` | A second the service for the same `directory` with a different gateway port. Use the running daemon, or stop it first. |
+| 4 | `error: another Sproozi service is using directory PATH; stop it first` | A second service for the same `directory` with a different gateway port. Use the running service, or stop it first. |
 | 4 | `error: gateway.certificateFile P failed the private-file check; home applies one owner-only check (yours, not a link, no access for any other account) to every file it reads, including public certificates; it must be yours, not a link, with no group or other access: chmod 600 P` | Home reads every configured file, public certificates included, only when no other account can change or replace it. The path in the `chmod` hint is quoted only when it holds characters the shell would treat specially. Run the `chmod` it prints. For a symbolic link, the same message ends instead with `; it must be a real file or directory, not a symbolic link`: replace the link with a copy of the file. The same message names any other configured file, such as `gateway.trustBundleFile`. |
 | 4 | `error: gateway.providerTokenFile PATH still holds the placeholder REPLACE_WITH_PROVIDER_API_KEY` | The file was reset after the settings pass. Write the provider API key there. |
 | 1 or 4 | `gateway.providerTokenFile (PATH is empty; write the provider API key there)`, or in pass 4 `error: gateway.providerTokenFile PATH is empty; write the provider API key there` | Write the provider API key into that file. |
@@ -402,8 +404,8 @@ Kubernetes credentials or arbitrary commands. One process owns its private durab
 state directory. Run it under a service manager and retain the directory across
 restarts.
 
-Apply `cli-access` in the executor's namespace and create the `sproozi`
-context, as [remote executor access](../reference/remote-executors.md) shows.
+Apply `cli-access` in the executor's namespace (`sproozi-sessions` in the
+example) and create the `sproozi` context, as [remote executor access](../reference/remote-executors.md) shows.
 The service reaches the executor through a port-forward, verifies its
 certificate against the CA it publishes, and sends the ServiceAccount token only
 to it. Never give the executor's own credentials to the developer, a sandbox or
@@ -558,8 +560,8 @@ its retained state. Attachment disconnects do not cancel the native turn.
 If stop is unknown, the execution is unreachable or usage is missing, the visit
 stays open and its allowance stays held. The destination cannot start. A lost reply is not proof
 of absence or zero consumption. Keep the home and profile journals intact,
-restore backend connectivity, and recover the existing operation. Restart a
-daemon/profile with the same protected state and configuration; stopping those
+restore backend connectivity, and recover the existing operation. Restart the
+service or remote executor with the same protected state and configuration; stopping those
 processes alone doesn't prove that the agent stopped. The native original
 deadline still applies.
 

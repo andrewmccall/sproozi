@@ -49,7 +49,7 @@ type AgentPolicySpec struct {
 
 	// PackagesInstall constrains package artifacts that may be downloaded for a run.
 	// +optional
-	PackagesInstall PackagesInstallScope `json:"packagesInstall,omitempty"`
+	PackagesInstall PackagesInstallScope `json:"packagesInstall,omitzero"`
 
 	// EgressProfiles lists the named egress profiles available to templates.
 	// +kubebuilder:validation:MaxItems=32
@@ -69,13 +69,14 @@ type AgentPolicySpec struct {
 	// +optional
 	// +kubebuilder:default="1h"
 	// +kubebuilder:validation:XValidation:rule="duration(self) <= duration('1h')",message="must not exceed one hour"
-	MaxExecutionDuration metav1.Duration `json:"maxExecutionDuration,omitempty"`
+	// +kubebuilder:validation:XValidation:rule="duration(self) > duration('0s')",message="must be greater than zero"
+	MaxExecutionDuration metav1.Duration `json:"maxExecutionDuration,omitzero"` // omitzero, not omitempty: a typed client must omit it so the default applies
 
 	// RetentionTTL is how long terminal AgentRuns are retained.
 	// +optional
 	// +kubebuilder:default="720h"
 	// +kubebuilder:validation:XValidation:rule="duration(self) > duration('0s')",message="must be greater than zero"
-	RetentionTTL metav1.Duration `json:"retentionTTL,omitempty"`
+	RetentionTTL metav1.Duration `json:"retentionTTL,omitzero"`
 
 	// MaxActiveRuns caps how many AgentRuns admitted under this policy can be
 	// Admitted or Running at once. Templates that share the policy share the

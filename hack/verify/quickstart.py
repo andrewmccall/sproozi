@@ -21,6 +21,7 @@ EVIDENCE_ROOT = ROOT / ".local/verification/quickstart"
 REQUIRED_CRDS = {
     "agentruns.sproozi.com", "agentruntimes.sproozi.com",
     "agentpolicies.sproozi.com", "agenttemplates.sproozi.com",
+    "budgetledgers.sproozi.com",
 }
 CNI_POLICY_CRDS = {"adminnetworkpolicies.policy.networking.k8s.io",
                    "baselineadminnetworkpolicies.policy.networking.k8s.io"}
@@ -280,7 +281,7 @@ def observe_crds(kubeconfig, stop, observed):
 
 def check_crds(observed):
     if not REQUIRED_CRDS.issubset(observed):
-        raise RuntimeError("Did not observe all four Sproozi CRDs in the owned cluster")
+        raise RuntimeError("Did not observe every Sproozi CRD in the owned cluster")
     if not any(crd["group"] == "crd.projectcalico.org" for crd in observed.values()):
         raise RuntimeError("Did not observe the default Calico CRDs")
     unexpected = {name for name, crd in observed.items()

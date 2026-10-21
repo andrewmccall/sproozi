@@ -64,6 +64,15 @@ var (
 	ErrWrongAgentNamespace    = errors.New("gateway: ServiceAccount is outside the agent namespace")
 	ErrServiceAccountMismatch = errors.New("gateway: ServiceAccount does not match the AgentRun")
 
+	// ErrTokenNotPodBound is returned when the TokenReview does not name
+	// exactly one Pod and its UID: the token was minted without a Pod
+	// binding, for example by "kubectl create token".
+	ErrTokenNotPodBound = fmt.Errorf("%w: token is not bound to a Pod", ErrTokenInvalid)
+
+	// ErrSandboxPodMismatch is returned when a Pod-bound token was issued to
+	// a Pod other than the run's current sandbox Pod, by name or by UID.
+	ErrSandboxPodMismatch = errors.New("gateway: token is bound to a Pod other than the AgentRun's sandbox")
+
 	// errAuthorityChanged explains a revocation because what the run may do
 	// changed: its policy, template, capabilities or allocation.
 	errAuthorityChanged = errors.New("gateway: the AgentRun's policy, template, capabilities or allocation changed")
@@ -75,7 +84,20 @@ type ServiceAccountIdentity struct {
 	Namespace string
 	Name      string
 	UID       string
+	// PodName and PodUID are the Pod a projected token was issued to.
+	// Authenticate requires both, and only the run's own sandbox Pod, matched
+	// by name and UID, may use the run's authority. Revalidation of an
+	// admitted session leaves them empty.
+	PodName string
+	PodUID  string
 }
+
+// podNameExtra and podUIDExtra are the TokenReview extras that name the Pod a
+// bound token belongs to.
+const (
+	podNameExtra = "authentication.kubernetes.io/pod-name"
+	podUIDExtra  = "authentication.kubernetes.io/pod-uid"
+)
 
 // LiveRecheckInterval bounds how long a session of one execution relies on the
 // watch cache alone. If a watch stalls, the first revalidation after this
@@ -255,7 +277,15 @@ func (a *Authenticator) reviewToken(ctx context.Context, token string) (ServiceA
 	if result.Status.User.UID == "" {
 		return ServiceAccountIdentity{}, ErrTokenInvalid
 	}
-	return ServiceAccountIdentity{Namespace: namespace, Name: name, UID: result.Status.User.UID}, nil
+	// A run token must be a projected token bound to a Pod. A token minted
+	// without one (kubectl create token, a Secret-bound token) would carry
+	// the run's authority from anywhere that reaches the gateway.
+	pods, podUIDs := result.Status.User.Extra[podNameExtra], result.Status.User.Extra[podUIDExtra]
+	if len(pods) != 1 || len(podUIDs) != 1 || pods[0] == "" || podUIDs[0] == "" {
+		return ServiceAccountIdentity{}, ErrTokenNotPodBound
+	}
+	return ServiceAccountIdentity{Namespace: namespace, Name: name, UID: result.Status.User.UID,
+		PodName: pods[0], PodUID: podUIDs[0]}, nil
 }
 
 // Find returns the active AgentRun owned by the complete ServiceAccount
@@ -293,6 +323,15 @@ func (a *Authenticator) find(ctx context.Context, reader client.Client, serviceA
 	}
 	if string(run.UID) != runUID || run.Status.Identity.ServiceAccountName != serviceAccount.Name || run.Namespace != runNamespace {
 		return nil, ErrServiceAccountMismatch
+	}
+	// A token bound to a Pod must come from the run's current sandbox Pod,
+	// matched by name and UID. Another Pod given the run's ServiceAccount, or
+	// a replacement Pod reusing the sandbox name, does not inherit the run's
+	// authority.
+	if serviceAccount.PodName != "" || serviceAccount.PodUID != "" {
+		if err := a.requireSandboxPod(ctx, run, serviceAccount); err != nil {
+			return nil, err
+		}
 	}
 	if run.Status.Phase != sprooziv1alpha1.AgentRunPhaseRunning || run.Spec.Cancel || !run.DeletionTimestamp.IsZero() {
 		return nil, ErrRunNotRunning
@@ -345,6 +384,27 @@ func (a *Authenticator) find(ctx context.Context, reader client.Client, serviceA
 	return grant, nil
 }
 
+// requireSandboxPod checks that the token's Pod is the run's sandbox Pod. The
+// Pod is read live: its UID changes when it is replaced, and the watch cache
+// may not have seen the replacement.
+func (a *Authenticator) requireSandboxPod(ctx context.Context, run sprooziv1alpha1.AgentRun, serviceAccount ServiceAccountIdentity) error {
+	name := sandboxName(run)
+	if serviceAccount.PodName == "" || serviceAccount.PodUID == "" || serviceAccount.PodName != name {
+		return ErrSandboxPodMismatch
+	}
+	var pod corev1.Pod
+	if err := a.live.Get(ctx, client.ObjectKey{Namespace: a.agentNamespace, Name: name}, &pod); err != nil {
+		if apierrors.IsNotFound(err) {
+			return ErrSandboxPodMismatch
+		}
+		return fmt.Errorf("gateway: read sandbox Pod %s/%s: %w", a.agentNamespace, name, err)
+	}
+	if string(pod.UID) != serviceAccount.PodUID {
+		return ErrSandboxPodMismatch
+	}
+	return nil
+}
+
 // ParseServiceAccountUsername parses a Kubernetes ServiceAccount username of
 // the form "system:serviceaccount:<namespace>:<name>" and returns the namespace
 // and name. Returns ErrNotServiceAccount if the string does not match the
@@ -360,4 +420,13 @@ func ParseServiceAccountUsername(username string) (namespace, name string, err e
 		return "", "", ErrNotServiceAccount
 	}
 	return parts[0], parts[1], nil
+}
+
+// sandboxName is the run's sandbox Pod name: the recorded one, or the name the
+// controller derives from the run's UID before it records it.
+func sandboxName(run sprooziv1alpha1.AgentRun) string {
+	if run.Status.Identity.SandboxName != "" {
+		return run.Status.Identity.SandboxName
+	}
+	return "sproozi-" + strings.ToLower(strings.ReplaceAll(string(run.UID), "-", ""))
 }

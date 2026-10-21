@@ -1,0 +1,16 @@
+name: Feature request
+description: Propose a change to what Sproozi does.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do, and what stops you today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you propose
+      description: Say whether it changes a trust boundary, an API field or a harness; those need an ADR.

@@ -6,6 +6,7 @@ resources:
 - bases/sproozi.com_agentpolicies.yaml
 - bases/sproozi.com_agenttemplates.yaml
 - bases/sproozi.com_agentruns.yaml
+- bases/sproozi.com_budgetledgers.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

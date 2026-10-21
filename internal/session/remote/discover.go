@@ -9,7 +9,9 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"time"
 
+	authenticationv1 "k8s.io/api/authentication/v1"
 	authorizationv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
@@ -44,6 +46,19 @@ const (
 	PermissionGroup    = "sproozi.com"
 	PermissionResource = "remoteexecutors"
 	PermissionVerb     = "use"
+	// TokenAudience is the only audience the executor accepts. The CLI never
+	// sends the credential its kubeconfig context signs in with: it asks the
+	// API server for a short-lived token for CLIServiceAccount bound to this
+	// audience, which the API server itself does not accept, so an executor
+	// that is compromised or impersonated cannot replay it against the cluster.
+	TokenAudience = "sproozi-remote-executor"
+)
+
+// tokenLifetime is how long a minted executor token lives; the client renews
+// its connection renewBefore its token expires. The API server may shorten it.
+const (
+	tokenLifetime = time.Hour
+	renewBefore   = 5 * time.Minute
 )
 
 // Executor is a remote executor home has reached: how to reach it, and what it
@@ -85,8 +100,9 @@ func (e Executor) CheckpointProblem(local int64) error {
 type cluster struct {
 	sel    Selection
 	kube   kubernetes.Interface
-	token  string
 	tunnel func(ctx context.Context, pod string, port int32) (net.Conn, error)
+	// expires is when the token of the last connection expires.
+	expires time.Time
 }
 
 func openCluster(sel Selection) (*cluster, error) {
@@ -94,15 +110,11 @@ func openCluster(sel Selection) (*cluster, error) {
 	if err != nil {
 		return nil, err
 	}
-	token, err := bearerToken(sel, config)
-	if err != nil {
-		return nil, err
-	}
 	kube, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		return nil, fmt.Errorf("%s cannot be used: %w", sel, err)
 	}
-	return &cluster{sel: sel, kube: kube, token: token, tunnel: portForwarder(config, kube, sel.Namespace)}, nil
+	return &cluster{sel: sel, kube: kube, tunnel: portForwarder(config, kube, sel.Namespace)}, nil
 }
 
 func (c *cluster) discover(ctx context.Context) (Executor, error) {
@@ -136,13 +148,46 @@ func (c *cluster) connection(ctx context.Context, maxCheckpoint int64) (profile.
 	if err != nil {
 		return profile.Connection{}, err
 	}
+	token, err := c.mint(ctx)
+	if err != nil {
+		return profile.Connection{}, err
+	}
 	port := servicePort(service)
 	host := service.Name + "." + c.sel.Namespace + ".svc"
 	return profile.Connection{
-		Origin: "https://" + net.JoinHostPort(host, strconv.Itoa(int(port))), Token: c.token, Roots: roots,
+		Origin: "https://" + net.JoinHostPort(host, strconv.Itoa(int(port))), Token: token, Roots: roots,
 		MaxCheckpointBytes: maxCheckpoint,
 		Dial:               func(ctx context.Context) (net.Conn, error) { return c.dial(ctx, service.Name) },
 	}, nil
+}
+
+// mint asks the API server for a short-lived token for CLIServiceAccount,
+// bound to TokenAudience, and records when it expires. Whatever the context
+// signs in with (a ServiceAccount token, an exec plugin, a client certificate)
+// goes only to the API server; the executor receives this token alone.
+func (c *cluster) mint(ctx context.Context) (string, error) {
+	seconds := int64(tokenLifetime / time.Second)
+	request, err := c.kube.CoreV1().ServiceAccounts(c.sel.Namespace).CreateToken(ctx, CLIServiceAccount,
+		&authenticationv1.TokenRequest{Spec: authenticationv1.TokenRequestSpec{
+			Audiences: []string{TokenAudience}, ExpirationSeconds: &seconds,
+		}}, metav1.CreateOptions{})
+	if apierrors.IsNotFound(err) {
+		return "", fmt.Errorf("namespace %q has no ServiceAccount %s (%s), whose short-lived token the remote "+
+			"executor accepts; ask the administrator to apply config/cli-access there "+
+			"(docs/reference/remote-executors.md)", c.sel.Namespace, CLIServiceAccount, c.sel)
+	}
+	if err != nil {
+		return "", c.apiProblem("create a token for the ServiceAccount "+CLIServiceAccount, err)
+	}
+	if request.Status.Token == "" {
+		return "", fmt.Errorf("the cluster returned no token for the ServiceAccount %s in namespace %q (%s)",
+			CLIServiceAccount, c.sel.Namespace, c.sel)
+	}
+	c.expires = request.Status.ExpirationTimestamp.Time
+	if c.expires.IsZero() {
+		c.expires = time.Now().Add(tokenLifetime)
+	}
+	return request.Status.Token, nil
 }
 
 // service finds the single Service labelled as the namespace's remote executor.
@@ -308,9 +353,10 @@ func (c *cluster) describeProblem(err error) error {
 	if errors.As(err, &remote) {
 		switch {
 		case remote.Status == http.StatusUnauthorized:
-			return fmt.Errorf("the remote executor in namespace %q could not authenticate the token of %s; the token "+
-				"may have expired or been revoked. Mint a new ServiceAccount token into the context "+
-				"(docs/reference/remote-executors.md)", c.sel.Namespace, c.sel)
+			return fmt.Errorf("the remote executor in namespace %q could not authenticate the %s token minted "+
+				"through %s for audience %q; the ServiceAccount may have been re-created, or the executor may be "+
+				"older than this client and not accept that audience, so ask the administrator to upgrade it "+
+				"(docs/reference/remote-executors.md)", c.sel.Namespace, CLIServiceAccount, c.sel, TokenAudience)
 		case remote.Status == http.StatusForbidden:
 			return fmt.Errorf("the remote executor in namespace %q refused your Kubernetes user (%s): it needs %q on %s.%s "+
 				"in that namespace, which the Role %s grants to the ServiceAccount %s", c.sel.Namespace, c.sel,

@@ -16,7 +16,7 @@ data:
       max_turns: 24
     mcp_servers:
       sproozi-work:
-        url: https://sproozi-work.sproozi-system.svc:8443/work/mcp
+        url: https://sproozi-work.sproozi-sessions.svc:8443/work/mcp
         enabled: true
         strict_redirect_headers: true
         headers:

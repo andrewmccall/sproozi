@@ -20,6 +20,7 @@ import (
 	"io"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // Event is a structured gateway audit record complying with PRD §11.
@@ -102,23 +103,6 @@ type Event struct {
 	TokensRemaining *int64 `json:"tokensRemaining"`
 }
 
-// WebhookEvent is a structured audit record for webhook ingress decisions.
-type WebhookEvent struct {
-	Timestamp         time.Time `json:"timestamp"`
-	TemplateNamespace string    `json:"templateNamespace"`
-	TemplateName      string    `json:"templateName"`
-	Operation         string    `json:"operation"`
-	Allowed           bool      `json:"allowed"`
-	DenyReason        string    `json:"denyReason,omitempty"`
-	RunName           string    `json:"runName,omitempty"`
-	Source            string    `json:"source,omitempty"`
-}
-
-// WebhookWriter is the interface satisfied by Logger for webhook audit events.
-type WebhookWriter interface {
-	LogWebhook(e WebhookEvent)
-}
-
 // Writer is the interface satisfied by Logger; use it in handler configs so
 // the gateway handler can be unit-tested with a stub.
 type Writer interface {
@@ -139,13 +123,7 @@ func NewLogger(w io.Writer) *Logger {
 // Log writes e as a JSON line. Errors are silently discarded intentionally:
 // audit logging must never block or disrupt the request path.
 func (l *Logger) Log(e Event) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	_ = l.enc.Encode(e)
-}
-
-// LogWebhook writes e as a JSON line.
-func (l *Logger) LogWebhook(e WebhookEvent) {
+	e = Bound(e)
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	_ = l.enc.Encode(e)
@@ -159,3 +137,29 @@ const (
 	TierProtocol    EnforcementTier = "protocol"
 	TierDestination EnforcementTier = "destination"
 )
+
+// Bound cuts the free-text fields that can carry workload-chosen text, such as
+// a requested authority or path on a denial, so a sandbox cannot bloat the
+// audit stream or anything that retains events.
+func Bound(e Event) Event {
+	e.Operation = bounded(e.Operation)
+	e.Resource = bounded(e.Resource)
+	e.DenyReason = bounded(e.DenyReason)
+	e.ArtifactURL = bounded(e.ArtifactURL)
+	return e
+}
+
+// maxFieldBytes bounds free-text audit fields that may hold workload input.
+const maxFieldBytes = 512
+
+// bounded cuts s to at most maxFieldBytes on a rune boundary and marks the cut.
+func bounded(s string) string {
+	if len(s) <= maxFieldBytes {
+		return s
+	}
+	cut := maxFieldBytes
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "…"
+}

@@ -30,7 +30,6 @@ and [security hardening](reference/security-hardening.md).
 These guides give prerequisites, steps and checks for specific tasks.
 
 - [Model provider authentication](guides/model-provider-auth.md)
-- [Run Codex or Claude Code locally with Docker](guides/local-sessions.md)
 - [Use Sproozi on Windows](guides/windows.md)
 
 ## Understand the system
@@ -48,13 +47,14 @@ References describe exact fields, commands and supported behaviour.
 | Topic | References |
 | --- | --- |
 | Terminology | [Glossary](../GLOSSARY.md) |
-| Kubernetes task resources | [AgentRuntime](reference/agentruntime.md), [AgentPolicy](reference/agentpolicy.md), [AgentTemplate](reference/agenttemplate.md), [AgentRun](reference/agentrun.md) |
+| Kubernetes task resources | [AgentRuntime](reference/agentruntime.md), [AgentPolicy](reference/agentpolicy.md), [AgentTemplate](reference/agenttemplate.md), [AgentRun](reference/agentrun.md), [BudgetLedger](reference/budgetledger.md) |
 | Access and credentials | [Permissions and capabilities](reference/permissions-and-capabilities.md), [security hardening](reference/security-hardening.md) |
 | Installation | [Local installation](reference/local-installation.md), [gateway certificates](reference/gateway-certificates.md), [cluster dependencies](reference/dependencies.md), [required secrets and config](reference/required-secrets-and-config.md) |
 | Harnesses | [Harnesses](reference/harnesses.md), [stock runtime examples](../examples/harnesses/README.md), [client compatibility](reference/client-compatibility.md), [input contract and completion](reference/agent-contract.md), [native launch and control](reference/native-control.md) |
 | MCP tools | [Native Kubernetes MCP](reference/kubernetes-mcp.md), [configured remote MCP](reference/configured-mcp.md), [Sproozi integration and diagnose](reference/sproozi-integration.md) |
 | Sessions and remote work | [Session commands](reference/session-commands.md), [remote executor access](reference/remote-executors.md), [profile](reference/profile.md), [Projects and workspace revisions](reference/projects-and-revisions.md) |
-| Task submission services | [Task service MCP interface](reference/orchestration.md), [webhook contract](reference/webhook-contract.md) |
+| Task submission services | [Task service MCP interface](reference/orchestration.md) |
+| Component references | [CLI service configuration](../cmd/sproozi/README.md), [remote executor](../cmd/session-profile/README.md), [native session supervisor](../cmd/native-session/README.md), [checkpoint helper](../cmd/checkpoint/README.md), [Docker execution backend](../internal/runtime/docker/README.md) |
 
 ## Decisions and future work
 
@@ -65,8 +65,8 @@ system, their alternatives and their tradeoffs.
 proposed extensions and distinguishes them from implemented behaviour.
 
 The [Home-ops playbook](guides/home-ops-playbook.md) describes a planned
-installation. It requires an Alertmanager converter and signer that this
-repository does not supply.
+installation. Sproozi has no event receiver, so its alerts cannot start runs by
+themselves; see [event webhooks](explanations/future-architecture/event-webhooks.md).
 
 For contributor test requirements and commands, see
 [Testing](../test/acceptance/README.md). The

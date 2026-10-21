@@ -1,8 +1,7 @@
-# Native host platforms and CLI releases
-
-Date: 2026-10-18
+# 0024: Native host platforms and CLI releases
 
 Status: accepted; the client-version statement below is partly replaced by [ADR 0029](0029-local-provisioning-and-lifecycle.md)
+Date: 2026-10-18
 
 ## Context
 

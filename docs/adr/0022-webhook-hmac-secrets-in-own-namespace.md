@@ -1,6 +1,6 @@
-# Webhook HMAC Secrets live in their own namespace
+# 0022: Webhook HMAC Secrets live in their own namespace
 
-Status: accepted
+Status: superseded by [ADR 0043](0043-remove-the-event-webhook.md)
 Date: 2026-10-18
 
 ## Problem and constraints
@@ -71,9 +71,9 @@ store.
 
 ## Links
 
-- [Webhook contract](../reference/webhook-contract.md)
+- [Webhook contract](https://github.com/andrewmccall/sproozi/blob/01bac1b47cf22ab66ebd8f8c9d7a16236f8f46f8/docs/reference/webhook-contract.md)
 - [Permissions and capabilities](../reference/permissions-and-capabilities.md#trusted-service-identities)
 - [Security hardening](../reference/security-hardening.md)
-- `config/webhook-secrets/`
-- `internal/webhook/handler.go` (`HandlerConfig.SecretNamespace`)
-- `test/manifests/manifest_test.go` (`TestInstallBundleScopesWebhookSecretReads`)
+- [config/webhook-secrets/](https://github.com/andrewmccall/sproozi/tree/01bac1b47cf22ab66ebd8f8c9d7a16236f8f46f8/config/webhook-secrets)
+- [internal/webhook/handler.go](https://github.com/andrewmccall/sproozi/blob/01bac1b47cf22ab66ebd8f8c9d7a16236f8f46f8/internal/webhook/handler.go) (`HandlerConfig.SecretNamespace`)
+- `test/manifests/manifest_test.go` at `01bac1b` (`TestInstallBundleScopesWebhookSecretReads`), removed with the webhook by ADR 0043

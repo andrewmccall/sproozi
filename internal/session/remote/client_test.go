@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/andrewmccall/sproozi/internal/session/profile"
 	"github.com/andrewmccall/sproozi/internal/work"
@@ -28,17 +29,13 @@ func TestClientConnectsLazilyAndAgainAfterTransportFailures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c.open = func(_ context.Context, e Executor) (*profile.Client, error) {
+	c.open = func(_ context.Context, e Executor) (*profile.Client, time.Time, error) {
 		opens++
 		if !reachable {
-			return nil, errors.New("cluster unreachable")
+			return nil, time.Time{}, errors.New("cluster unreachable")
 		}
-		return profile.Connect(profile.Connection{Origin: "https://" + testService + "." + testNamespace + ".svc:8443",
-			Token: testToken, Roots: roots, MaxCheckpointBytes: e.MaxCheckpointBytes,
-			Dial: func(ctx context.Context) (net.Conn, error) {
-				var d net.Dialer
-				return d.DialContext(ctx, "tcp", s.address)
-			}})
+		client, err := testConnect(s, roots, e)
+		return client, time.Now().Add(time.Hour), err
 	}
 	owner := work.ClientFor(c)
 	if opens != 0 {
@@ -65,6 +62,48 @@ func TestClientConnectsLazilyAndAgainAfterTransportFailures(t *testing.T) {
 	_, _ = owner.Info(t.Context(), "00000000-0000-4000-8000-000000000001")
 	if opens != 3 {
 		t.Fatalf("a rejected token did not reconnect: %d opens", opens)
+	}
+}
+
+func testConnect(s *executorServer, roots *x509.CertPool, e Executor) (*profile.Client, error) {
+	return profile.Connect(profile.Connection{Origin: "https://" + testService + "." + testNamespace + ".svc:8443",
+		Token: testToken, Roots: roots, MaxCheckpointBytes: e.MaxCheckpointBytes,
+		Dial: func(ctx context.Context) (net.Conn, error) {
+			var d net.Dialer
+			return d.DialContext(ctx, "tcp", s.address)
+		}})
+}
+
+// The executor token is short-lived, so a long-running service connects again,
+// minting a new one, shortly before it expires.
+func TestClientConnectsAgainBeforeItsTokenExpires(t *testing.T) {
+	s := startExecutor(t)
+	roots := x509.NewCertPool()
+	roots.AppendCertsFromPEM(s.caPEM)
+	c, err := NewClient(recorded())
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	c.now = func() time.Time { return now }
+	opens := 0
+	c.open = func(_ context.Context, e Executor) (*profile.Client, time.Time, error) {
+		opens++
+		client, err := testConnect(s, roots, e)
+		return client, now.Add(time.Hour), err
+	}
+	owner := work.ClientFor(c)
+	info := func() { _, _ = owner.Info(t.Context(), "00000000-0000-4000-8000-000000000001") }
+	info()
+	now = now.Add(50 * time.Minute)
+	info()
+	if opens != 1 {
+		t.Fatalf("connected %d times while the token was fresh", opens)
+	}
+	now = now.Add(6 * time.Minute) // Within renewBefore of expiry.
+	info()
+	if opens != 2 {
+		t.Fatalf("connected %d times; want a new connection before the token expires", opens)
 	}
 }
 

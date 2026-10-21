@@ -33,7 +33,7 @@ def render(fixture, native_image, hermes_image, build_sproozi=False):
     if build_sproozi:
         profile["repositories"]["sproozi"]["snapshot"] = "/state/source-sproozi"
     documents = KUBE.executor_resources(profile, native_image, (fixture / "ca.pem").read_text())
-    documents.append(obj("Secret", "sproozi-work-credentials", "sproozi-system",
+    documents.append(obj("Secret", "sproozi-work-credentials", KUBE.SESSIONS,
                          data={k: base64.b64encode(v).decode() for k, v in credentials.items()}))
     coordinator = list(yaml.safe_load_all((ROOT / "examples/orchestration/hermes-coordinator.yaml").read_text()))
     work_config = yaml.safe_load((ROOT / "examples/portable-workflows/kubernetes/hermes-work.yaml").read_text())
@@ -45,9 +45,11 @@ def render(fixture, native_image, hermes_image, build_sproozi=False):
                                               key_env="OPENAI_API_KEY", api_mode="chat_completions", model="fixture-model")],
                        platform_toolsets={p: ["sproozi-work"] for p in ("api_server", "cron", "cli")},
                        compression=dict(enabled=False), memory=dict(enabled=False), checkpoints=dict(enabled=False))
-            cfg["mcp_servers"] = {"sproozi-work": dict(url="https://sproozi-work.sproozi-system.svc:8443/work/mcp",
-                enabled=True, strict_redirect_headers=True, headers=dict(Authorization="Bearer ${SPROOZI_TASK_TOKEN}"),
-                connect_timeout=15, timeout=40)}
+            # Deploy the shipped MCP address unchanged, so a stale executor
+            # namespace in the example fails here rather than for users.
+            want = "https://sproozi-work." + KUBE.SESSIONS + ".svc:8443/work/mcp"
+            if cfg["mcp_servers"]["sproozi-work"]["url"] != want:
+                raise ValueError("hermes-work.yaml must address the remote executor at " + want)
             d["data"]["config.yaml"] = yaml.safe_dump(cfg, sort_keys=False)
         if d["kind"] == "Deployment":
             d["spec"]["template"]["spec"]["containers"][0]["image"] = hermes_image

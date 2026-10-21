@@ -13,11 +13,13 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	authenticationv1 "k8s.io/api/authentication/v1"
 	authorizationv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
@@ -115,9 +117,19 @@ func testCluster(t *testing.T, s *executorServer, forward bool, objects ...runti
 			attributes.Verb == "create" && attributes.Namespace == testNamespace
 		return true, review, nil
 	})
+	kube.PrependReactor("create", "serviceaccounts", func(a k8stesting.Action) (bool, runtime.Object, error) {
+		create := a.(k8stesting.CreateAction)
+		if create.GetSubresource() != "token" {
+			return false, nil, nil
+		}
+		request := create.GetObject().(*authenticationv1.TokenRequest).DeepCopy()
+		request.Status = authenticationv1.TokenRequestStatus{Token: testToken,
+			ExpirationTimestamp: metav1.NewTime(time.Now().Add(time.Hour))}
+		return true, request, nil
+	})
 	var dialed []string
 	sel := Selection{Kubeconfig: []string{"/fixture/kubeconfig"}, Context: DefaultContext, Namespace: testNamespace}
-	return &cluster{sel: sel, kube: kube, token: testToken, tunnel: func(ctx context.Context, pod string, port int32) (net.Conn, error) {
+	return &cluster{sel: sel, kube: kube, tunnel: func(ctx context.Context, pod string, port int32) (net.Conn, error) {
 		dialed = append(dialed, pod)
 		if port != 8443 {
 			t.Errorf("tunnel to port %d", port)
@@ -127,9 +139,11 @@ func testCluster(t *testing.T, s *executorServer, forward bool, objects ...runti
 	}}, kube, &dialed
 }
 
-func TestDiscoverReachesTheExecutorWithTheContextToken(t *testing.T) {
+// The executor receives only a short-lived token minted for sproozi-cli and
+// bound to the executor's audience, never the context's own credential.
+func TestDiscoverReachesTheExecutorWithAMintedAudienceToken(t *testing.T) {
 	s := startExecutor(t)
-	c, _, dialed := testCluster(t, s, true, publishedObjects(s.caPEM)...)
+	c, kube, dialed := testCluster(t, s, true, publishedObjects(s.caPEM)...)
 	e, err := c.discover(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -139,6 +153,25 @@ func TestDiscoverReachesTheExecutorWithTheContextToken(t *testing.T) {
 	}
 	if got := s.token.Load(); got != testToken {
 		t.Fatalf("executor saw token %v", got)
+	}
+	var minted []*authenticationv1.TokenRequest
+	for _, a := range kube.Actions() {
+		if create, ok := a.(k8stesting.CreateAction); ok && create.GetSubresource() == "token" {
+			if a.GetNamespace() != testNamespace || create.GetResource().Resource != "serviceaccounts" {
+				t.Fatalf("token minted in %s/%s", a.GetNamespace(), create.GetResource().Resource)
+			}
+			if name := a.(k8stesting.CreateActionImpl).Name; name != CLIServiceAccount {
+				t.Fatalf("token minted for %q", name)
+			}
+			minted = append(minted, create.GetObject().(*authenticationv1.TokenRequest))
+		}
+	}
+	if len(minted) != 1 || !slices.Equal(minted[0].Spec.Audiences, []string{TokenAudience}) ||
+		minted[0].Spec.ExpirationSeconds == nil || *minted[0].Spec.ExpirationSeconds > 3600 {
+		t.Fatalf("minted %+v, want one token for audience %q lasting at most an hour", minted, TokenAudience)
+	}
+	if time.Until(c.expires) < 50*time.Minute {
+		t.Fatalf("token expiry not recorded: %v", c.expires)
 	}
 	if len(*dialed) != 1 || (*dialed)[0] != "sproozi-work-0" {
 		t.Fatalf("dialed %v", *dialed)
@@ -194,7 +227,17 @@ func TestDiscoverNamesTheFixForEachFailure(t *testing.T) {
 		{name: "no ready pod", objects: []runtime.Object{objects[0], objects[1], notReady}, forward: true,
 			says: []string{"has no ready Pod", "get pods"}},
 		{name: "token not authenticated", objects: objects, forward: true, status: http.StatusUnauthorized,
-			says: []string{"could not authenticate the token", "Mint a new ServiceAccount token"}},
+			says: []string{"could not authenticate the sproozi-cli token", TokenAudience, "upgrade"}},
+		{name: "token mint denied", objects: objects, forward: true,
+			react: func(k *fake.Clientset) { k.PrependReactor("create", "serviceaccounts", forbidden("serviceaccounts")) },
+			says:  []string{"may not create a token for the ServiceAccount sproozi-cli", roleHint}},
+		{name: "no CLI ServiceAccount", objects: objects, forward: true,
+			react: func(k *fake.Clientset) {
+				k.PrependReactor("create", "serviceaccounts", func(k8stesting.Action) (bool, runtime.Object, error) {
+					return true, nil, apierrors.NewNotFound(schema.GroupResource{Resource: "serviceaccounts"}, CLIServiceAccount)
+				})
+			},
+			says: []string{`namespace "team-a" has no ServiceAccount sproozi-cli`, "config/cli-access"}},
 		{name: "identity not allowed", objects: objects, forward: true, status: http.StatusForbidden,
 			says: []string{"refused your Kubernetes user", `"use" on remoteexecutors.sproozi.com`, roleHint}},
 	} {

@@ -7,14 +7,13 @@ import (
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/budget"
 	budgetkubernetes "github.com/andrewmccall/sproozi/internal/budget/kubernetes"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 func TestLedgerAdaptersAgreeOnFailedSettlement(t *testing.T) {
 	s := runtime.NewScheme()
-	if err := corev1.AddToScheme(s); err != nil {
+	if err := api.AddToScheme(s); err != nil {
 		t.Fatal(err)
 	}
 	mem := budget.NewMemoryLedger()
@@ -37,7 +36,7 @@ func TestLedgerAdaptersAgreeOnFailedSettlement(t *testing.T) {
 
 func TestReservationForfeitConsumesUnitsAndCostAcrossLedgers(t *testing.T) {
 	scheme := runtime.NewScheme()
-	if err := corev1.AddToScheme(scheme); err != nil {
+	if err := api.AddToScheme(scheme); err != nil {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {

@@ -13,16 +13,16 @@ the glossary lists "also seen as", write the chosen word.
 ## Layout
 
 ```
-api/v1alpha1/                 CRD types: AgentRuntime, AgentPolicy, AgentTemplate, AgentRun
+api/v1alpha1/                 CRD types: AgentRuntime, AgentPolicy, AgentTemplate, AgentRun, BudgetLedger
 cmd/main.go                   Controller manager entry point
 cmd/gateway/                  Shared authenticated gateway (the only workload-facing proxy)
-cmd/webhook/                  Signed inbound event receiver that creates AgentRuns
 cmd/sproozi/                  Public CLI and the local service (`sproozi service run`)
 cmd/session-profile/          Remote executor: one Kubernetes placement and remote work catalogue
 cmd/tasks/                    Task service for persistent assistants over MCP
 cmd/native-session/           Supervisor for the harness inside a managed sandbox
 cmd/checkpoint/               Checkpoint helper container
 cmd/sproozi-network/          Docker network namespace owner
+cmd/certificates/             Optional controller for the gateway's self-managed certificate authority and TLS
 cmd/chatgpt-login/            Local administrator sign-in helper
 internal/controller/          AgentRun reconciliation, queue and lifecycle
 internal/gateway/, internal/proxytransport/   Gateway dispatch, TLS inspection, authentication
@@ -31,8 +31,9 @@ internal/runtime/{kubernetes,docker}/         Execution backends
 internal/budget/              Usage accounting (Kubernetes store in internal/budget/kubernetes)
 internal/session/, internal/work/, internal/checkpoint/, internal/workspace/   Sessions, remote work, checkpoints
 internal/harness/, internal/nativeconfig/, internal/nativepty/                 Harness registry (registry.go), configuration and terminal
-internal/webhook/             Event receiver: signature checks, replay protection, AgentRun creation
-config/                       Kustomize: crd, rbac, manager, install (full install), overlays
+internal/policy/, internal/mcppolicy/, internal/modelauth/, internal/pki/, internal/privatefs/   Policy evaluation, provider auth, CA and host-private files (`ls internal` for the rest)
+config/                       Kustomize: crd, rbac, manager, network-policy, default; install (the release install);
+                              agent-rbac (sandbox namespace), certificates, cli-access (remote executor CLI) and overlays
 examples/                     Runnable example resources (not config/samples)
 docs/                         Guides, explanations, references and ADRs
 test/                         envtest, e2e, manifests, integration and acceptance tests
@@ -51,6 +52,7 @@ Run the gates that match the change before declaring it done:
 | --- | --- |
 | `*_types.go` or kubebuilder markers | `make manifests generate`, then `make test` |
 | Any Go code | `make lint-fix`, `make test`, `make verify-fast` |
+| `go.mod`, `go.sum` or the Go toolchain pin | also `make verify-deps` (tidiness and `govulncheck`) |
 | Controller, gateway, network policy or install manifests | also `make test-e2e` (creates and removes its own Kind cluster) |
 | Documentation | `make verify-docs` |
 | A new harness | follow `docs/contributing/add-a-harness.md`; `go test ./internal/harness/ ./cmd/native-session/ ./internal/checkpoint/` guards the registry, CRD enum, rendered `sproozi` connection, MCP loader and bridge hook, examples, reference row and managed wiring; client loading and launch behaviour need review and `make verify-harness-clients`, `make verify-harness-process` (see the guide's "What the guards check") |
@@ -97,8 +99,7 @@ kubebuilder create webhook --group <group> --version <version> --kind <Kind> \
 ```
 
 The project uses the single-group layout (`api/v1alpha1`, group `sproozi`,
-domain `sproozi.com`). The existing `internal/webhook` is not a Kubebuilder
-admission webhook.
+domain `sproozi.com`).
 
 ### API design
 
@@ -110,7 +111,11 @@ admission webhook.
 ### Controller design
 
 - Declare RBAC with `+kubebuilder:rbac` markers on the controller, then run
-  `make manifests`.
+  `make manifests`. The generated `config/rbac/role.yaml` is not installed:
+  also change the hand-maintained role the binary actually uses
+  (`config/rbac/controller_manager_role.yaml`, the gateway's
+  `config/rbac/shared_gateway_*.yaml` or `config/agent-rbac/`) and the manifest test in `test/manifests/`
+  that guards it.
 - Make reconciliation idempotent. Re-fetch an object before updating it.
 - Set owner references for garbage collection, and watch secondary resources
   with `.Owns()` or `.Watches()` rather than only `RequeueAfter`.

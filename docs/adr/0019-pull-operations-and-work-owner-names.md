@@ -1,4 +1,4 @@
-# Derived pull operations and work owner names
+# 0019: Derived pull operations and work owner names
 
 Status: accepted
 Date: 2026-10-17

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
@@ -15,15 +16,18 @@ import (
 // Client is home's handle on a recorded executor: a session placement, a
 // terminal and the remote work transport. It contacts the cluster only when
 // used, so home starts while the cluster is unreachable. After a failure that
-// is not the executor's own answer, or a rejected token, it connects again on
-// the next call, reloading the kubeconfig (and so a refreshed token) and the
-// published CA, and checking the executor still describes itself as recorded.
+// is not the executor's own answer, or a rejected token, and shortly before
+// its short-lived executor token expires, it connects again on the next call,
+// reloading the kubeconfig, minting a new token and reading the published CA,
+// and checking the executor still describes itself as recorded.
 type Client struct {
 	executor Executor
-	open     func(context.Context, Executor) (*profile.Client, error)
+	open     func(context.Context, Executor) (*profile.Client, time.Time, error)
+	now      func() time.Time
 
 	mu       sync.Mutex
 	current  *profile.Client
+	expires  time.Time
 	profiles func(digest string) ([]byte, error)
 }
 
@@ -35,7 +39,7 @@ func NewClient(e Executor) (*Client, error) {
 	if e.Name == "" || e.Harness.Validate() != nil || e.MaxCheckpointBytes < 1 {
 		return nil, errors.New("remote: a recorded executor needs its name, harness and checkpoint limit")
 	}
-	return &Client{executor: e, open: connect}, nil
+	return &Client{executor: e, open: connect, now: time.Now}, nil
 }
 
 // Executor is the recorded executor this client reaches.
@@ -64,47 +68,52 @@ func (c *Client) Update(e Executor) error {
 	return nil
 }
 
-// connect opens a profile client and checks it reaches the recorded executor.
-func connect(ctx context.Context, e Executor) (*profile.Client, error) {
+// connect opens a profile client, checks it reaches the recorded executor and
+// returns when its token expires.
+func connect(ctx context.Context, e Executor) (*profile.Client, time.Time, error) {
 	cluster, err := openCluster(e.Selection)
 	if err != nil {
-		return nil, err
+		return nil, time.Time{}, err
 	}
 	connection, err := cluster.connection(ctx, e.MaxCheckpointBytes)
 	if err != nil {
-		return nil, err
+		return nil, time.Time{}, err
 	}
 	client, err := profile.Connect(connection)
 	if err != nil {
-		return nil, err
+		return nil, time.Time{}, err
 	}
 	d, err := client.Describe(ctx)
 	if err != nil {
 		client.Close()
-		return nil, cluster.describeProblem(err)
+		return nil, time.Time{}, cluster.describeProblem(err)
 	}
 	if d.Placement != e.Name || d.Harness != e.Harness || d.MaxCheckpointBytes != e.MaxCheckpointBytes {
 		client.Close()
-		return nil, fmt.Errorf("the remote executor reached by %s now describes itself as %q (%s, checkpoints up to %d bytes), "+
+		return nil, time.Time{}, fmt.Errorf("the remote executor reached by %s now describes itself as %q (%s, checkpoints up to %d bytes), "+
 			"but home recorded %q (%s, %d bytes); it is not the executor this session used. Restore it, or select "+
 			"the right context and namespace", e.Selection, d.Placement, d.Harness, d.MaxCheckpointBytes,
 			e.Name, e.Harness, e.MaxCheckpointBytes)
 	}
-	return client, nil
+	return client, cluster.expires, nil
 }
 
 func (c *Client) client(ctx context.Context) (*profile.Client, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.current != nil {
+	if c.current != nil && (c.expires.IsZero() || c.now().Before(c.expires.Add(-renewBefore))) {
 		return c.current, nil
 	}
-	client, err := c.open(ctx, c.executor)
+	if c.current != nil {
+		c.current.Close() // Its token is about to expire.
+		c.current = nil
+	}
+	client, expires, err := c.open(ctx, c.executor)
 	if err != nil {
 		return nil, fmt.Errorf("remote executor %q: %w", c.executor.Name, err)
 	}
 	client.SetProfileSource(c.profiles)
-	c.current = client
+	c.current, c.expires = client, expires
 	return client, nil
 }
 

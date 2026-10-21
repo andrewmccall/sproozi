@@ -17,13 +17,10 @@ import (
 
 func TestCancelledRunCleansUpRunScopedResources(t *testing.T) {
 	c := e2eClient(t, e2eObjects()...)
-	run := createRunViaWebhook(t, c, `{
-  "id": "evt-200",
-  "eventContext": {
-    "alertname": "CrashLoopBackOff",
-    "namespace": "sproozi-demo"
-  }
-}`)
+	run := createRun(t, c, "incident-200", map[string]string{
+		"alertname": "CrashLoopBackOff",
+		"namespace": demoNamespace,
+	})
 
 	sandbox := &k8sresources.FakeSandboxClient{Status: k8sresources.SandboxStatusRunning}
 	reconciler := &controller.AgentRunReconciler{

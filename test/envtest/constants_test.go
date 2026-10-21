@@ -16,6 +16,8 @@ limitations under the License.
 
 package envtest
 
+import "context"
+
 // Shared constants used across envtest test files to satisfy goconst lint rules.
 const (
 	testRuntimeName         = "codex"
@@ -26,3 +28,7 @@ const (
 )
 
 const testMCPCapability = "mcp.docs"
+
+// testGatewayResolver stands in for the controller's DNS lookup of the gateway
+// Service, which does not exist in envtest.
+func testGatewayResolver(context.Context, string) (string, error) { return "10.96.0.42", nil }

@@ -1,7 +1,0 @@
-# Holds only webhook receiver HMAC Secrets. The webhook can read Secrets here
-# and nowhere else, so it cannot read the provider and GitHub credentials in
-# sproozi-system.
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: sproozi-webhooks

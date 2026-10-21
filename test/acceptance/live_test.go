@@ -489,9 +489,28 @@ func (k kubectlClient) runNetworkDenialProbes(t *testing.T, cfg liveConfig, run 
 		return errors.New("sandbox image is unavailable for denial probes")
 	}
 	for _, probe := range demoDenialProbes() {
-		if err := k.runDenialProbe(t, cfg, run, image, probe.name, probe.audience, probe.command); err != nil {
+		var err error
+		if probe.inSandbox {
+			err = k.runSandboxProbe(run, probe.name, probe.script())
+		} else {
+			err = k.runDenialProbe(t, cfg, run, image, probe.name, probe.audience, probe.script())
+		}
+		if err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// runSandboxProbe runs a probe in the run's own sandbox Pod, the only Pod the
+// gateway accepts the run's token from.
+func (k kubectlClient) runSandboxProbe(run *runDocument, suffix, command string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	out, err := k.command(ctx, nil, "exec", run.Status.Identity.SandboxName, "-n", agentsNamespace, "--",
+		"/bin/sh", "-ceu", command)
+	if err != nil {
+		return fmt.Errorf("%s denial probe in the sandbox did not prove denial: %s: %w", suffix, redact(string(out)), err)
 	}
 	return nil
 }

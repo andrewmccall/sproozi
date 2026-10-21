@@ -6,7 +6,7 @@ existing cluster without Kind, use step 7 of
 [Install from a checkout](install-from-checkout.md#7-run-a-model-on-this-cluster).
 
 The demonstrated path starts with a human-created `AgentRun` on a disposable
-Kind cluster. The controller creates the agent Pod in `sproozi-agents`.
+Kind cluster. The controller creates the sandbox Pod in `sproozi-agents`.
 [Cluster dependencies](../reference/dependencies.md) lists what the cluster
 needs and what it doesn't.
 
@@ -155,7 +155,5 @@ These overlays expose metrics and label the conventional `monitoring` namespace
 with `metrics: enabled`. They do not install Prometheus. Label your actual
 monitoring namespace instead if it has a different name.
 
-The base install includes a webhook service, but the manual example configures
-no receiver or HMAC Secret. Event integration requires those inputs and a sender
-that signs the [webhook contract](../reference/webhook-contract.md). The
-[Home-ops playbook](home-ops-playbook.md) retains that planned integration.
+Sproozi has no event receiver, so this demo submits its run by hand; see
+[event webhooks](../explanations/future-architecture/event-webhooks.md).

@@ -2,7 +2,7 @@
 
 An `AgentRun` requests one task through an administrator-owned template. It
 records the requested capabilities, task text and event context. The controller
-checks the request, starts the agent Pod, records its outcome and cleans up.
+checks the request, starts the sandbox Pod, records its outcome and cleans up.
 
 Read [core concepts](core-concepts.md) for the resource names. This page
 describes the ordinary Kubernetes run lifecycle. Managed session stop and move
@@ -10,7 +10,7 @@ operations have [additional checks](../guides/session-mobility.md).
 
 ```mermaid
 sequenceDiagram
-    participant Caller as Operator or signed webhook
+    participant Caller as Operator or tool
     participant API as Kubernetes API
     participant Ctrl as Controller
     participant Policy as Template, policy and runtime
@@ -75,8 +75,8 @@ the Pod is confirmed absent or terminal. Lookup errors, unknown Pod state and
 ownership mismatches block cleanup. Managed sessions also need confirmation
 that the writer stopped and its usage was finalized.
 
-Budget ConfigMaps and unique webhook replay records have no automatic retention
-cleanup. See [security hardening](../reference/security-hardening.md#cleanup-and-state-retention)
+The gateway deletes a [BudgetLedger](../reference/budgetledger.md) once its AgentRun is gone, nothing is
+reserved on it and it has not been written for `BUDGET_LEDGER_RETENTION`. See [security hardening](../reference/security-hardening.md#cleanup-and-state-retention)
 for ownership checks and retained state.
 
 ## Gateway revocation

@@ -18,8 +18,16 @@ Tests must check that:
 - A permitted operation succeeds through the gateway. A forbidden namespace,
   resource, repository or capability returns the expected denial without an
   upstream side effect.
-- Direct API and provider calls fail from the agent Pod, including when it shares
+- Direct API and provider calls fail from the sandbox Pod, including when it shares
   a node with the API server. A broken client or trust bundle is not a denial.
+- The sandbox Pod resolves no names other than the pinned gateway host, so DNS is
+  not a path past the gateway; a direct connection by IP is still blocked by the
+  CNI. A Pod whose run labels changed has no network.
+- A managed session's API calls are authorized by the installed and example
+  roles: the executor registers runs and keeps their accounts in the gateway's
+  budget namespace, and the gateway reads registrations read-only. A session
+  submitted to the shipped executor example completes, ends `SessionStopped`,
+  finalizes its usage and retains its checkpoint.
 - The `agent` container's exit status determines ordinary run success. Cancellation
   and deadline expiry stop the run independently of agent output.
 - Cleanup removes the owned Pod, identity, network policy and contract. Interrupted
@@ -32,8 +40,9 @@ The PR demo must also check the target repository, base branch, run-owned branch
 commit and allowed file changes. It must not merge or deploy a proposed fix.
 [cases.json](cases.json) catalogues planned acceptance scenarios. It is a design
 checklist, not evidence: no gate or test checks its entries. The planned
-[home-ops acceptance procedure](home-ops.md) covers alert delivery, a GitOps PR
-and recovery after review and merge.
+[home-ops acceptance procedure](home-ops.md) covers a run the operator creates
+by hand when an alert fires (Sproozi has no event receiver), a GitOps PR and
+recovery after review and merge.
 
 ## Gateway and MCP
 

@@ -31,6 +31,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/client-go/rest"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -43,6 +44,9 @@ const fixtureThread = "01a126e8-288d-7350-9b52-627e16048343"
 const fixtureMax = int64(8 << 20)
 const fixtureRuntimeName = "native"
 const fixtureTypeKey = "type"
+
+// fixtureTemplate is the managed template the fixtures register against.
+const fixtureTemplate = "approved"
 
 func fixtureTermination(containerID string, exitCode int32) corev1.ContainerState {
 	return corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
@@ -609,13 +613,13 @@ func setupKind(t *testing.T, kind harness.NativeKind) (*Placement, *admissionCli
 	if err := corev1.AddToScheme(scheme); err != nil {
 		t.Fatal(err)
 	}
-	template := &api.AgentTemplate{ObjectMeta: metav1.ObjectMeta{Namespace: fixtureNamespace, Name: "approved", Annotations: map[string]string{registry.ManagedTemplateAnnotation: "true"}}, Spec: api.AgentTemplateSpec{Instructions: fixtureInstruction, PolicyRef: api.AgentPolicyReference{Name: "policy"}, RuntimeRef: api.AgentRuntimeReference{Name: fixtureRuntimeName}}}
+	template := &api.AgentTemplate{ObjectMeta: metav1.ObjectMeta{Namespace: fixtureNamespace, Name: fixtureTemplate, Annotations: map[string]string{registry.ManagedTemplateAnnotation: "true"}}, Spec: api.AgentTemplateSpec{Instructions: fixtureInstruction, PolicyRef: api.AgentPolicyReference{Name: "policy"}, RuntimeRef: api.AgentRuntimeReference{Name: fixtureRuntimeName}}}
 	policy := &api.AgentPolicy{ObjectMeta: metav1.ObjectMeta{Namespace: fixtureNamespace, Name: "policy"}, Spec: api.AgentPolicySpec{AllowedCapabilities: []api.CapabilityKind{api.CapabilityModelInference}, MaxExecutionDuration: metav1.Duration{Duration: time.Hour}}}
 	nativeRuntime := approvedRuntime()
 	nativeRuntime.Spec.ClientConfig.Harness = string(kind)
 	kube := &admissionClient{Client: fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&api.AgentRun{}, &corev1.Pod{}).WithObjects(template, policy, nativeRuntime).Build()}
 	a := map[string]session.Allowance{string(api.CapabilityModelInference): {Units: session.Limit{Bounded: true, Value: 100}, CostMicros: session.Limit{Bounded: true, Value: 1000}}}
-	p, err := Open(Config{Harness: kind, Kube: kube, RESTConfig: &rest.Config{Host: "https://fixture.invalid"}, Namespace: fixtureNamespace, TemplateName: "approved", Principal: "developer", Directory: filepath.Join(t.TempDir(), "profile"), Name: "remote", InstructionDigest: registry.InstructionsDigest(fixtureInstruction), Allowances: a, MaxDuration: time.Hour, MaxCheckpointBytes: fixtureMax})
+	p, err := Open(Config{Harness: kind, Kube: kube, RESTConfig: &rest.Config{Host: "https://fixture.invalid"}, Namespace: fixtureNamespace, TemplateName: fixtureTemplate, Principal: "developer", Directory: filepath.Join(t.TempDir(), "profile"), Name: "remote", InstructionDigest: registry.InstructionsDigest(fixtureInstruction), Allowances: a, MaxDuration: time.Hour, MaxCheckpointBytes: fixtureMax})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -849,16 +853,16 @@ func TestCancellationMissingOrCorruptAccountRemainsUnknownAfterActualFence(t *te
 			if err != nil {
 				t.Fatal(err)
 			}
-			var accounts corev1.ConfigMapList
-			if err = kube.List(t.Context(), &accounts, client.InNamespace(p.config.Namespace),
-				client.MatchingLabels{"app.kubernetes.io/component": "budget-ledger"}); err != nil || len(accounts.Items) != 1 {
+			var accounts api.BudgetLedgerList
+			if err = kube.List(t.Context(), &accounts, client.InNamespace(p.config.BudgetNamespace)); err != nil ||
+				len(accounts.Items) != 1 {
 				t.Fatalf("expected initialized account: %v", err)
 			}
 			account := &accounts.Items[0]
 			if corruption == "missing" {
 				err = kube.Delete(t.Context(), account)
 			} else {
-				account.Data["state"] = "corrupt trusted accounting"
+				account.Spec.State = "corrupt trusted accounting"
 				err = kube.Update(t.Context(), account)
 			}
 			if err != nil {
@@ -1316,5 +1320,27 @@ func TestBoundedOutputEnforcesItsBoundThroughCopy(t *testing.T) {
 	}
 	if len(errout.Bytes()) != 1024 {
 		t.Fatalf("truncated output kept %d bytes", len(errout.Bytes()))
+	}
+}
+
+type invalidCreateClient struct{ client.Client }
+
+func (invalidCreateClient) Create(_ context.Context, obj client.Object, _ ...client.CreateOption) error {
+	return apierrors.NewInvalid(api.GroupVersion.WithKind("AgentRun").GroupKind(), obj.GetName(), field.ErrorList{
+		field.TooLong(field.NewPath("spec", "task"), "", 16384),
+	})
+}
+
+// An AgentRun the API server rejects names the field, and callers can still
+// recognize the rejection.
+func TestEnsureRunNamesTheInvalidField(t *testing.T) {
+	t.Parallel()
+	p := &Placement{config: Config{Kube: invalidCreateClient{}, Namespace: fixtureNamespace, TemplateName: fixtureTemplate}}
+	_, err := p.ensureRun(t.Context(), registry.Record{Registration: registry.Registration{IntendedRunName: "run-1", Task: "work"}})
+	if !apierrors.IsInvalid(err) {
+		t.Fatalf("ensureRun error no longer satisfies IsInvalid: %v", err)
+	}
+	if !strings.Contains(err.Error(), "spec.task") || !strings.Contains(err.Error(), "AgentRun run-1") {
+		t.Fatalf("ensureRun error does not name the run and field: %v", err)
 	}
 }

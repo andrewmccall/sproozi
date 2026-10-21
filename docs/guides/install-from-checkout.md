@@ -45,14 +45,13 @@ kubectl cluster-info
 kubectl get nodes -o wide
 ```
 
-The commands below install into `sproozi-system`, `sproozi-agents`,
-`sproozi-webhook-state` and `sproozi-webhooks`. Use a cluster without an existing Sproozi installation
+The commands below install into `sproozi-system` and `sproozi-agents`. Use a cluster without an existing Sproozi installation
 for this walkthrough. Keep the chosen `KUBECONFIG` exported throughout it.
 
 ## 2. Build and publish the images
 
-The controller, gateway and webhook share one image built from the repository's
-root Dockerfile. The first Pod uses the demo tools image, but runs kubectl rather
+One image built from the repository's root Dockerfile holds the controller,
+gateway, task service and certificate controller. The first Pod uses the demo tools image, but runs kubectl rather
 than Codex.
 
 Replace the example registry path with your own. Authenticate to that registry
@@ -170,16 +169,18 @@ with `field is immutable`, and the `&&` stops the gateway Secret from changing
 too, so sandboxes keep trusting the certificate the gateway serves. To switch
 to the new CA, follow [use a new CA](#use-a-new-ca).
 
-The gateway reads its certificate only when it starts, so it keeps serving the
-old one after the Secret changes, and new runs fail with `curl: (60) SSL
-certificate problem: unable to get local issuer certificate`. Once the
-gateway is installed (step 4), restart it after applying the Secret. Its
-Deployment uses the `Recreate` strategy, so gateway calls fail while the new
-Pod starts:
+Once the gateway is installed (step 4), it doesn't need a restart after the
+Secret changes. The kubelet updates the mounted files, usually within a
+minute, and the gateway checks them every 30 seconds. It serves a changed
+certificate to new connections and logs `Reloaded gateway certificate`. It
+keeps the current certificate and logs `Failed to reload gateway certificate`
+instead when the new one has expired, doesn't cover every host it inspects or,
+when the Secret also holds `ca.crt`, doesn't chain to that CA. Until it
+reloads, new runs can fail with `curl: (60) SSL certificate problem: unable to
+get local issuer certificate`. Check with:
 
 ```sh
-kubectl rollout restart -n sproozi-system deployment/sproozi-gateway &&
-  kubectl rollout status -n sproozi-system deployment/sproozi-gateway --timeout=180s
+kubectl logs -n sproozi-system deployment/sproozi-gateway | grep 'gateway certificate'
 ```
 
 ### Use a new CA
@@ -252,8 +253,12 @@ fi
 
 The block prints one `Pointing AgentRuntime NAMESPACE/NAME at NAME` line for
 each AgentRuntime it changes. If a restart failed after the Secret was
-applied, a rerun prints `Nothing to switch`; restart the gateway with the
-command at the end of step 3 instead.
+applied, a rerun prints `Nothing to switch`; restart the gateway instead:
+
+```sh
+kubectl rollout restart -n sproozi-system deployment/sproozi-gateway &&
+  kubectl rollout status -n sproozi-system deployment/sproozi-gateway --timeout=180s
+```
 
 After a switch, don't rerun the step 3 block as written: it applies the new
 CA to `sproozi-sandbox-trust`, which fails with `field is immutable`. To sign
@@ -267,7 +272,9 @@ and step 7's certificate check reads that ConfigMap. After a switch, replace
 before you apply them, or rerun this block afterwards to patch the new
 AgentRuntimes.
 
-For a persistent installation, arrange certificate renewal before expiry.
+For a persistent installation, arrange certificate renewal before expiry. The
+gateway reloads a renewed certificate from its Secret without a restart, as
+described above.
 
 #### If your images are private
 
@@ -343,7 +350,7 @@ kept='No install.yaml was written.'
 ../../bin/kustomize build . > install.yaml.new
 deployments=$(awk '/^---$/ { kind = "" } /^kind: / { kind = $2 }
   kind == "Deployment" && /^  name: / { print $2 }' install.yaml.new)
-for name in sproozi-controller-manager sproozi-gateway sproozi-webhook; do
+for name in sproozi-controller-manager sproozi-gateway; do
   if ! printf '%s\n' "$deployments" | grep -qx "$name"; then
     echo "The build has no $name Deployment; check that kustomization.yaml lists ../../config/install under resources. $kept" >&2
     exit 1
@@ -370,8 +377,7 @@ The block is safe to rerun. It writes `kustomization.yaml` only if the file is
 missing, so a rerun keeps patches that later sections add; to start the overlay
 again, delete the file first. `build.sh` builds into `install.yaml.new` and
 replaces `install.yaml` only when the build succeeds, contains the
-`sproozi-controller-manager`, `sproozi-gateway` and `sproozi-webhook`
-Deployments, and no longer uses the placeholder image. Otherwise it removes
+`sproozi-controller-manager` and `sproozi-gateway` Deployments, and no longer uses the placeholder image. Otherwise it removes
 `install.yaml.new`, prints the reason and keeps the last good `install.yaml`,
 which [Cleanup](#cleanup) needs. The reason ends `Kept the previous
 install.yaml.`, or `No install.yaml was written.` when no build has succeeded
@@ -389,8 +395,8 @@ contains a space, tab or newline, so nothing was built.`
 
 `config/manager` already renames the source image `controller` to the
 placeholder `example.com/sproozi`, so the overlay replaces that placeholder.
-The `grep` should show your `$IMG` digest three times, for the controller,
-gateway and webhook Deployments, and no `example.com/sproozi`.
+The `grep` should show your `$IMG` digest twice, for the controller and
+gateway Deployments, and no `example.com/sproozi`.
 
 If you created `sproozi-registry`, add it to the trusted Deployments before
 installing. Public-image users can skip this block:
@@ -424,7 +430,6 @@ kubectl wait --for=condition=Established --timeout=60s \
 kubectl apply --server-side --field-manager=sproozi-installer -f .local/install/install.yaml
 kubectl rollout status -n sproozi-system deployment/sproozi-controller-manager --timeout=180s
 kubectl rollout status -n sproozi-system deployment/sproozi-gateway --timeout=180s
-kubectl rollout status -n sproozi-system deployment/sproozi-webhook --timeout=180s
 ```
 
 The gateway becomes ready only after it has validated its configuration and
@@ -442,10 +447,11 @@ kubectl describe pod -n sproozi-system \
 `secret "sproozi-gateway-tls" not found` in the events means step 3 hasn't
 run. Run step 3 first; the Pod starts once the Secret exists.
 
-All three Deployments should become available. No model or GitHub credential
-Secret is needed for this overlay. The install includes the event webhook, but
-this guide submits runs manually and configures no event receiver. It requires
-neither cert-manager nor Prometheus.
+Both Deployments should become available. No model or GitHub credential
+Secret is needed for this overlay. This guide submits runs by hand; Sproozi has
+no event receiver (see
+[event webhooks](../explanations/future-architecture/event-webhooks.md)). It
+requires neither cert-manager nor Prometheus.
 
 ## 5. Create the runtime, policy and template
 
@@ -549,8 +555,9 @@ for example because the CA files were lost and step 3 made a new CA, the
 block prints a message and changes nothing; follow
 [use a new CA](#use-a-new-ca) in step 3 and use your new ConfigMap name in the
 check. The certificate is applied only when the check
-and `openssl verify` both pass. The running gateway reads its certificate only
-at startup and keeps serving the old one until the restart in
+and `openssl verify` both pass. The running gateway reloads its certificate from the Secret
+within a minute or two, without a restart; it inspects the new hosts after the
+restart in
 [Enable the model and GitHub modules](#enable-the-model-and-github-modules).
 If you rerun step 3 afterwards, it keeps this certificate, because the files
 exist:
@@ -656,7 +663,7 @@ checks, the rotating ChatGPT credential and the ChatGPT request limits.
 In `.local/install/kustomization.yaml`, change the gateway's
 `SPROOZI_ENABLED_CAPABILITIES` value from `kubernetes.read` to
 `kubernetes.read,model.inference,github.pull_request`. Then rebuild, apply and
-restart the gateway so it reads the new certificate and credentials. The
+restart the gateway so it starts the new modules and reads their credentials. The
 gateway Deployment uses the `Recreate` strategy, so the old gateway stops
 before the new Pod is ready. Gateway calls fail for that interval, and a run in
 progress may fail; make these changes while no run is active:
@@ -731,7 +738,7 @@ and [AgentTemplate](../reference/agenttemplate.md).
 This step is optional. There is no cluster cap by default, and the controller
 admits every run that its policy allows, so any number of runs can be active at
 once. Before you share
-the cluster or connect a webhook, read the
+the cluster, read the
 [concurrency warnings](../reference/security-hardening.md#concurrency-and-gateway-capacity)
 and set the caps you need.
 
@@ -868,6 +875,12 @@ kubectl logs -n sproozi-system deployment/sproozi-controller-manager --tail=100
 kubectl logs -n sproozi-system deployment/sproozi-gateway --tail=100
 kubectl get events -n sproozi-agents --sort-by=.metadata.creationTimestamp
 ```
+
+## Upgrade
+
+To move an existing installation to a newer checkout, follow the
+[upgrade steps](install-kubernetes.md#upgrade). The release notes name any
+object a new release no longer ships, which `kubectl apply` leaves behind.
 
 ## Cleanup
 

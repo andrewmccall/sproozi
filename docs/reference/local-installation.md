@@ -23,7 +23,7 @@ checkout and a directory holding other files, with a `root` error that suggests
 
 | Path | Contents | Reaches workers |
 | --- | --- | --- |
-| `config.json` | Home daemon configuration. You may edit tunable values; setup keeps them. | No |
+| `config.json` | Service configuration. You may edit tunable values; setup keeps them. | No |
 | `config.json.backup-*` | The previous configuration, saved before setup changes it. | No |
 | `installation.json` | Provisioning journal: installation ID, Docker endpoint, image, network, gateway address and harnesses. | No |
 | `profile/` | Your [profile](#profile): instructions and skills for every session. | A copy at each launch |
@@ -31,7 +31,7 @@ checkout and a directory holding other files, with a `root` error that suggests
 | `pki/` | Certificate authority keys, the serving leaf, trust generations and the trust-consumer record. | Only the public trust bundle |
 | `state/` | Journals, accounting, grants, placement records, retained checkpoints and the control socket. | No |
 | `docker-cli/` | A private Docker CLI configuration with no registry credentials. | No |
-| `logs/service.log` | Home daemon log. | No |
+| `logs/service.log` | Service log. | No |
 | `service.pid` | Process ID of a service started by `sproozi service start`. | No |
 | `restart-pending` | Why the running service still uses earlier settings, written when `init` or `credentials set` could not restart it over running sessions; starting the service removes it. `doctor` and `service status` report it. | No |
 
@@ -87,8 +87,8 @@ service with `sproozi service stop` and `sproozi service start`.
 | Approved instructions | A short product default, or `--instructions-file` on the first run |
 
 Setup never rewrites these values in an existing `config.json`, so an
-installation created with an earlier release keeps its 8 MiB checkpoint and
-128 MiB retained limits until you raise them. When a workspace exceeds the
+existing installation keeps its checkpoint and retained limits until you
+raise them. When a workspace exceeds the
 limit, `run` names the size and `local.maxCheckpointBytes`.
 
 The image, network, gateway address and approved instructions bind retained

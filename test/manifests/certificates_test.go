@@ -31,7 +31,7 @@ func TestCertificateControllerRBACStaysNarrow(t *testing.T) {
 					!slices.Equal(rule.ResourceNames, []string{"sproozi-certificate-authority", "sproozi-gateway-tls"}) {
 					t.Fatalf("Secret access must be get/update by name only: %+v", rule)
 				}
-			case "sproozi-agents":
+			case agentsNamespace:
 				if !slices.Equal(rule.Resources, []string{configMaps}) ||
 					slices.ContainsFunc(rule.Verbs, func(v string) bool { return slices.Contains(writes, v) }) {
 					t.Fatalf("trust access must create immutable ConfigMaps only: %+v", rule)

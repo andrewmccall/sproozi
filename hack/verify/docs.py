@@ -36,8 +36,8 @@ for required in required_docs:
     if not (root / required).is_file():
         errors.append(f"missing required public guide/reference: {required}")
 
-# The primary demo is deliberately usable without the optional monitoring and
-# webhook integrations. Keep this assertion against the source kustomization,
+# The primary demo is deliberately usable without the optional monitoring
+# integration. Keep this assertion against the source kustomization,
 # rather than relying on a rendered manifest that may have been produced from
 # a different checkout.
 demo_kustomization = root / "examples/sre-demo/kustomization.yaml"

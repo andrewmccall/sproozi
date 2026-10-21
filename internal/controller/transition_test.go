@@ -65,6 +65,7 @@ func TestValidTransition(t *testing.T) {
 		{sprooziv1alpha1.AgentRunPhaseQueued, sprooziv1alpha1.AgentRunPhaseAdmitted, true},
 		{sprooziv1alpha1.AgentRunPhaseQueued, sprooziv1alpha1.AgentRunPhaseFailed, true},
 		{sprooziv1alpha1.AgentRunPhaseQueued, sprooziv1alpha1.AgentRunPhaseCancelled, true},
+		{sprooziv1alpha1.AgentRunPhaseQueued, sprooziv1alpha1.AgentRunPhaseTimedOut, true},
 		// Valid: execution path
 		{sprooziv1alpha1.AgentRunPhaseAdmitted, sprooziv1alpha1.AgentRunPhaseRunning, true},
 		{sprooziv1alpha1.AgentRunPhaseAdmitted, sprooziv1alpha1.AgentRunPhaseFailed, true},
@@ -78,7 +79,6 @@ func TestValidTransition(t *testing.T) {
 		// Invalid: skip steps
 		{sprooziv1alpha1.AgentRunPhaseQueued, sprooziv1alpha1.AgentRunPhaseRunning, false},
 		{sprooziv1alpha1.AgentRunPhaseQueued, sprooziv1alpha1.AgentRunPhaseSucceeded, false},
-		{sprooziv1alpha1.AgentRunPhaseQueued, sprooziv1alpha1.AgentRunPhaseTimedOut, false},
 		{"", sprooziv1alpha1.AgentRunPhaseAdmitted, false},
 		{"", sprooziv1alpha1.AgentRunPhaseRunning, false},
 		// Invalid: from terminal states

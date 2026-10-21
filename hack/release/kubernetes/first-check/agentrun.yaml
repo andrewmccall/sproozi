@@ -6,7 +6,7 @@ metadata:
 spec:
   templateRef:
     name: first-check
-  task: Check permitted and denied access from the first agent Pod.
+  task: Check permitted and denied access from the first sandbox.
   eventContext:
     trigger: manual
   capabilities: [kubernetes.read]

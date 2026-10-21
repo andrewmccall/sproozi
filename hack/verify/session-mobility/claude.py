@@ -52,6 +52,7 @@ PROMPTS = ["Remember the fixture fact silver-tern-681.",
            "Complete the controlled held Claude reply using the first fixture fact."]
 ANSWERS = ["CLAUDE_FIRST_COMPLETE", "CLAUDE_TOOL_COMPLETE", "CLAUDE_RESUMED_COMPLETE", "CLAUDE_HELD_COMPLETE"]
 SYSTEM, AGENTS = "sproozi-system", "sproozi-agents"
+SESSIONS = "sproozi-sessions"
 GATEWAY = "sproozi-gateway." + SYSTEM + ".svc"
 TEMPLATE = "mobility-claude"
 UPSTREAM = "https://192.168.65.254:18775"
@@ -64,7 +65,7 @@ def prepare(args):
     # the Claude adapter. No Codex options enter the published Claude config.
     with contextlib.redirect_stdout(io.StringIO()):
         HOST.prepare(args)
-    names = ["DNS:api.anthropic.com", "DNS:api.openai.com", "DNS:" + GATEWAY, "DNS:sproozi-work.sproozi-system.svc",
+    names = ["DNS:api.anthropic.com", "DNS:api.openai.com", "DNS:" + GATEWAY, "DNS:sproozi-work." + SESSIONS + ".svc",
              "DNS:" + GATEWAY + ".cluster.local", "IP:127.0.0.1", "IP:" + args.gateway_ip]
     HOST.write(out / "leaf.ext", "basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\n"
                "extendedKeyUsage=serverAuth\nsubjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid,issuer\n"
@@ -591,7 +592,7 @@ def main():
     verifying.add_argument("--admin-probes", action="store_true", help="Run fixed denials in exact admitted containers using administrator access")
     verifying.add_argument("--kubeconfig", type=Path, help="Administrator-only dedicated mobility Kind configuration")
     verifying.add_argument("--kubectl", type=Path, default=Path("kubectl"))
-    verifying.add_argument("--namespace", default=SYSTEM)
+    verifying.add_argument("--namespace", default=SESSIONS, help="the remote executor's Run and registration namespace")
     verifying.add_argument("--agent-namespace", default=AGENTS)
     args = parser.parse_args()
     if args.command == "verify":

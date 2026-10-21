@@ -1,9 +1,11 @@
-# Runtime checks at run admission and bounded replay records
+# 0017: Runtime checks at run admission and bounded replay records
 
 Status: accepted
 Date: 2026-10-17
 
 Partly superseded: [ADR 0027](0027-configurable-concurrent-admission.md) replaces the single active slot with optional cluster and policy concurrency caps. The live run list described below now counts active runs against those caps, and a runtime that cannot launch still fails the run before it is admitted. References to "the slot" below describe the controller at the time. Other decisions in this record remain in effect.
+
+Partly superseded: [ADR 0043](0043-remove-the-event-webhook.md) removes the event webhook, so the replay records below no longer exist.
 
 ## Problem and constraints
 
@@ -97,7 +99,7 @@ replay state moves out of ConfigMaps.
 
 - [AgentRuntime reference](../reference/agentruntime.md)
 - [AgentRun lifecycle](../reference/agentrun.md#lifecycle)
-- [Webhook contract](../reference/webhook-contract.md)
+- [Webhook contract](https://github.com/andrewmccall/sproozi/blob/01bac1b47cf22ab66ebd8f8c9d7a16236f8f46f8/docs/reference/webhook-contract.md)
 - `internal/controller/reconciler.go` (`resolveAdmission`)
 - `internal/runtime/kubernetes/sandbox.go` (`ValidateRuntime`)
-- `internal/webhook/replay.go` (`SweepExpired`)
+- [internal/webhook/replay.go](https://github.com/andrewmccall/sproozi/blob/01bac1b47cf22ab66ebd8f8c9d7a16236f8f46f8/internal/webhook/replay.go) (`SweepExpired`)

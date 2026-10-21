@@ -4,19 +4,59 @@
 # TLS and the Hermes work token. The CLI reaches it through a kubeconfig context
 # (docs/reference/remote-executors.md): the Service carries the
 # sproozi.com/remote-executor label, the ConfigMap sproozi-remote-executor
-# publishes its CA, and it reviews the CLI's ServiceAccount token, which the
-# auth-delegator binding below allows.
+# publishes its CA, and it reviews the short-lived sproozi-cli token the CLI
+# mints for the audience sproozi-remote-executor, which the auth-delegator
+# binding below allows.
+# The administrator creates the executor's configuration ConfigMap
+# sproozi-work-profile and the CLI's trust anchor sproozi-remote-executor in
+# sproozi-sessions with "immutable: true" (cmd/session-profile/README.md). The
+# executor's Role below may update ConfigMaps there, for registrations, so
+# immutability is what stops it rewriting its own profile or the CA.
+# The executor, its managed runs and their registrations live in their own
+# namespace. The executor writes ConfigMaps here, so it must not share a
+# namespace with the gateway's configuration in sproozi-system (ADR 0041), and
+# the CLI's port-forward access here reaches only the executor.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sproozi-sessions
+---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: sproozi-work
+  namespace: sproozi-sessions
+---
+# The gateway reads each managed run's registration in the run's namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: sproozi-shared-gateway-registry
+  namespace: sproozi-sessions
+rules:
+- apiGroups: ['']
+  resources: [configmaps]
+  verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sproozi-shared-gateway-registry
+  namespace: sproozi-sessions
+subjects:
+- kind: ServiceAccount
+  name: sproozi-shared-gateway
   namespace: sproozi-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: sproozi-shared-gateway-registry
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: sproozi-work
-  namespace: sproozi-system
+  namespace: sproozi-sessions
 rules:
 - apiGroups: [sproozi.com]
   resources: [agenttemplates, agentpolicies, agentruntimes]
@@ -24,19 +64,48 @@ rules:
 - apiGroups: [sproozi.com]
   resources: [agentruns]
   verbs: [get, create, patch]
+# Registrations and stored profiles. This reaches sproozi-work-profile and
+# sproozi-remote-executor too; create both immutable.
 - apiGroups: ['']
   resources: [configmaps]
+  verbs: [get, create, update]
+---
+# The executor initializes and seals run accounts, BudgetLedger resources in the
+# gateway's namespace (ADR 0045); it never lists or deletes them. The grant is
+# for ledgers only, so it cannot write the gateway's configuration ConfigMaps.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: sproozi-work-budget
+  namespace: sproozi-system
+rules:
+- apiGroups: [sproozi.com]
+  resources: [budgetledgers]
   verbs: [get, create, update]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: sproozi-work
+  name: sproozi-work-budget
   namespace: sproozi-system
 subjects:
 - kind: ServiceAccount
   name: sproozi-work
-  namespace: sproozi-system
+  namespace: sproozi-sessions
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: sproozi-work-budget
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sproozi-work
+  namespace: sproozi-sessions
+subjects:
+- kind: ServiceAccount
+  name: sproozi-work
+  namespace: sproozi-sessions
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -63,7 +132,7 @@ metadata:
 subjects:
 - kind: ServiceAccount
   name: sproozi-work
-  namespace: sproozi-system
+  namespace: sproozi-sessions
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -81,13 +150,13 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: sproozi-work
-  namespace: sproozi-system
+  namespace: sproozi-sessions
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: sproozi-work-state
-  namespace: sproozi-system
+  namespace: sproozi-sessions
 spec:
   accessModes: [ReadWriteOnce]
   resources:
@@ -98,7 +167,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: sproozi-work
-  namespace: sproozi-system
+  namespace: sproozi-sessions
   labels:
     sproozi.com/remote-executor: "true"
 spec:
@@ -113,7 +182,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: sproozi-work
-  namespace: sproozi-system
+  namespace: sproozi-sessions
 spec:
   replicas: 1
   strategy:
@@ -187,7 +256,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: sproozi-work-private
-  namespace: sproozi-system
+  namespace: sproozi-sessions
 spec:
   podSelector:
     matchLabels:

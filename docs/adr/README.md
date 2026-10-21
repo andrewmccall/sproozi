@@ -58,6 +58,14 @@ that can't be estimated and budget cuts, limits ADR 0015's per-account serializa
 unbounded calls, and settles ADR 0015's unknown reservations after a restart
 at their recovery charge, an estimate, once their leases expire.
 
+ADR 0040 removes ADR 0014's kube-dns exception: Kubernetes sandboxes resolve
+no names. ADR 0041 gives ADR 0020's failed Docker removals an owner, the local
+service's periodic retry. ADR 0045 replaces ADR 0041's `sproozi-budget`
+namespace with `BudgetLedger` resources in `sproozi-system`.
+
+ADR 0043 removes the event webhook, superseding ADRs 0022 and 0042 and the
+replay records of ADR 0017.
+
 ADR 0029 extends those pinned clients to the published native image, replacing
 ADR 0024's statement that releases do not pin clients.
 
@@ -84,7 +92,7 @@ ADR 0024's statement that releases do not pin clients.
 | [0019](0019-pull-operations-and-work-owner-names.md) | Derived pull operations and one rule for resolving work owner names. |
 | [0020](0020-docker-placement-removes-stopped-visits.md) | The Docker placement removes a stopped visit's containers and volume after recording it. |
 | [0021](0021-pinned-ci-inputs-and-latest-client-canary.md) | Pull request CI runs only pinned clients, images and manifests; a weekly canary reports upstream drift. |
-| [0022](0022-webhook-hmac-secrets-in-own-namespace.md) | Webhook HMAC Secrets live in their own namespace, away from provider credentials. |
+| [0022](0022-webhook-hmac-secrets-in-own-namespace.md) | Superseded by 0043. Webhook HMAC Secrets live in their own namespace, away from provider credentials. |
 | [0023](0023-controller-writes-only-in-sproozi-agents.md) | The controller writes sandbox objects only in sproozi-agents; its cluster role keeps reads. |
 | [0024](0024-native-host-platforms-and-cli-releases.md) | Native host security and automated CLI releases with a Homebrew tap. |
 | [0025](0025-managed-harness-integration-and-diagnose.md) | Every harness receives the Sproozi integration, and the gateway explains an execution's own denials. |
@@ -102,3 +110,9 @@ ADR 0024's statement that releases do not pin clients.
 | [0037](0037-one-command-surface.md) | One grouped command surface: `run` for local and remote work, `init` for local Docker, `local` as this machine's only name, ID prefixes, `rm`, text output with `--json`, and `~/.sproozi` found by `--root` or `SPROOZI_ROOT`. |
 | [0038](0038-exited-agents-and-one-recovery-path.md) | The service stops sessions whose agent exited by itself, showing them failed with the exit; a resumed visit with no prompt stops at once; stuck stops and cancelled sessions each name one next command. |
 | [0039](0039-one-harness-registry-and-the-mcp-requirement.md) | One harness registry with guard tests; every harness needs an MCP client for the `sproozi` control connection. |
+| [0040](0040-sandboxes-reach-the-gateway-without-dns.md) | Sandboxes resolve no names: the controller pins the gateway address in each Pod, and the NetworkPolicy has no DNS rule. |
+| [0041](0041-gateway-state-namespace-and-retained-state-owners.md) | Budget ledgers move to `sproozi-budget` and the remote executor to `sproozi-sessions`, so neither the gateway nor the executor can write ConfigMaps in `sproozi-system`; the gateway prunes settled ledgers of deleted runs; the local service finishes Docker removals; registry records keep no expiry yet. |
+| [0042](0042-idempotent-webhook-delivery.md) | Superseded by 0043. Webhook runs are named from the event, replay records track delivery, and every failure before verification returns 401. |
+| [0043](0043-remove-the-event-webhook.md) | The event webhook is removed until a supported sender exists; its design and gotchas move to a future-architecture note. |
+| [0044](0044-the-api-stays-alpha-with-a-written-policy.md) | The CRDs stay `v1alpha1` under a written compatibility policy, with criteria for moving to `v1beta1`; the 1.0 promise is dropped. |
+| [0045](0045-budget-ledgers-are-a-custom-resource.md) | Budget ledgers become `BudgetLedger` resources in `sproozi-system`; write access to them grants no ConfigMap writes, so the `sproozi-budget` namespace is removed. |

@@ -1,4 +1,0 @@
-resources:
-- namespace.yaml
-- webhook_role.yaml
-- webhook_role_binding.yaml

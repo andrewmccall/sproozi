@@ -3,14 +3,24 @@ apiVersion: sproozi.com/v1alpha1
 kind: AgentRuntime
 metadata:
   name: portable-codex
-  namespace: sproozi-system
+  namespace: sproozi-sessions
 spec:
   workloadContainers: [agent]
   clientConfig:
     harness: codex
     nativeSession:
       model: gpt-5.3-codex
+      # Point stock Codex at the OpenAI Responses API through the gateway with
+      # the sandbox's placeholder key, as `sproozi init` does locally. Without
+      # a provider that reads its key from the environment, the Codex terminal
+      # waits at its sign-in screen and never starts the task.
       options:
+      - 'model_provider="sproozi"'
+      - 'model_providers.sproozi.name="OpenAI through Sproozi"'
+      - 'model_providers.sproozi.base_url="https://api.openai.com/v1"'
+      - 'model_providers.sproozi.env_key="OPENAI_API_KEY"'
+      - 'model_providers.sproozi.wire_api="responses"'
+      - 'model_providers.sproozi.supports_websockets=false'
       - 'projects."/workspace/session/workspace".trust_level="trusted"'
     trustBundleConfigMap:
       name: portable-codex-trust
@@ -74,7 +84,7 @@ apiVersion: sproozi.com/v1alpha1
 kind: AgentPolicy
 metadata:
   name: portable-codex
-  namespace: sproozi-system
+  namespace: sproozi-sessions
 spec:
   allowedCapabilities: [model.inference]
   kubernetesRead:
@@ -100,7 +110,7 @@ apiVersion: sproozi.com/v1alpha1
 kind: AgentTemplate
 metadata:
   name: portable-codex
-  namespace: sproozi-system
+  namespace: sproozi-sessions
   annotations:
     sessions.sproozi.com/managed: 'true'
 spec:

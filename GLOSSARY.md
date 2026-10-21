@@ -95,7 +95,7 @@ and etcd without a cluster; the `test/` integration tests use it.
 ### Sandbox
 
 The isolated environment a harness runs in. On Kubernetes it is a disposable
-agent Pod in `sproozi-agents` with its own run identity, NetworkPolicy and input
+Pod in `sproozi-agents` with its own run identity, NetworkPolicy and input
 contract; on Docker it is a controlled container. It is not the `Sandbox`
 resource from the Kubernetes Agent Sandbox project; see
 [cluster dependencies](docs/reference/dependencies.md).
@@ -203,12 +203,22 @@ editing the originals. The release's `quickstart-*` directories are overlays.
 ### Budget
 
 A usage limit for one capability in one run, set in `AgentPolicy.spec.budgets`:
-tokens or requests (`maxUnits`) and cost (`maxCostMicros`). On the home
-daemon, the budget is the execution's [allowance](#allowance), set by the
-daemon's `allowances` configuration; the gateway charges both the same way,
+tokens or requests (`maxUnits`) and cost (`maxCostMicros`). On the
+[service](#service), the budget is the execution's [allowance](#allowance), set by
+the service's `allowances` configuration; the gateway charges both the same way,
 and its messages say "budget" for both. Budgets are not hard spending
 ceilings; see
 [security hardening](docs/reference/security-hardening.md#model-budgets-are-not-hard-spending-ceilings).
+
+### Budget ledger
+
+The durable record of one run's usage for one capability: units and cost used,
+amounts reserved and the [leases](#lease) that cover them. On Kubernetes each
+ledger is a [BudgetLedger](#budgetledger) resource in `sproozi-system`; the
+gateway deletes it once the run is gone, it is settled and it has not been
+written for `BUDGET_LEDGER_RETENTION` (seven days by default). The local
+service keeps ledgers in files. Also seen as: ledger, budget ConfigMap (the
+earlier storage).
 
 ### Allowance
 
@@ -361,6 +371,12 @@ instructions. See [AgentTemplate](docs/reference/agenttemplate.md).
 One request to run a task through an AgentTemplate, with an explicit list of
 requested capabilities. Also called a run. See [AgentRun](docs/reference/agentrun.md).
 
+### BudgetLedger
+
+The custom resource that holds one [budget ledger](#budget-ledger) on
+Kubernetes. The gateway and, for managed sessions, the remote executor write
+it; users never create one. See [BudgetLedger](docs/reference/budgetledger.md).
+
 ### Admission
 
 The check Sproozi makes before a run, or a visit, starts: the requested
@@ -388,10 +404,33 @@ runs, global cap.
 
 A Sproozi record that tracks one harness conversation and its Git workspace
 across executions. Its `id` is stable. The harness's own conversation ID
-(`threadId`) is separate. Also seen as: Sproozi session; native session or
-managed native session, for a session whose harness runs its own native client
-(`clientConfig.nativeSession` in an AgentRuntime). When "native session" means
-the harness's own conversation, write "harness conversation".
+(`threadId`) is separate. Also seen as: Sproozi session. When "native
+session" means the harness's own conversation, write "harness conversation".
+
+### Managed session
+
+A session whose harness is a [managed harness](#managed-harness), started and
+continued with `sproozi run`, `stop`, `resume` and `move`. Sproozi runs the
+harness's own terminal in the sandbox with the administrator's launch settings
+(`clientConfig.nativeSession` in an AgentRuntime), observes completed turns and
+checkpoints the conversation. On Kubernetes its AgentRun uses an
+administrator-owned AgentTemplate annotated `sessions.sproozi.com/managed`, and
+the run is admitted only when it matches its
+[session registration](#session-registration). Also seen as: native session,
+managed native session.
+
+### Session registration
+
+The trusted record of one managed session's visit on Kubernetes: a ConfigMap
+named `sproozi-session-` plus a hash of the run name, in the run's namespace.
+Only the remote executor writes it. It fixes the session, execution epoch,
+harness, principal, template and instructions digest, intended run name,
+original deadline, allowance ceilings and starting checkpoint, and records the
+bound run and Pod, the visit's phase and, after a stop, the checkpoint and
+finalized usage. The controller and the gateway read it live and refuse a run
+that doesn't match it (`SessionBindingRejected`). It carries the label
+`sessions.sproozi.com/registry=true` and is not yet removed automatically.
+Also seen as: registry record, session registry record.
 
 ### Harness conversation ID
 
@@ -437,7 +476,7 @@ checkpoint; the session keeps the workspace it started from. See
 
 ### Harness arguments
 
-The user's own arguments for the stock harness, given after `--` on `start` or
+The user's own arguments for the stock harness, given after `--` on `run` or
 `resume`. They belong to that execution, not the session. Sproozi refuses the
 ones that would replace a flag it controls. See
 [pass arguments to the harness](docs/reference/session-commands.md#agent-arguments).
@@ -602,4 +641,3 @@ that keeps a checkpoint for later resume, the coordinator uses
 [remote work](#remote-work) instead. See
 [orchestration](docs/reference/orchestration.md). Also seen as: task API,
 bounded task API, disposable-job service, orchestration service.
-

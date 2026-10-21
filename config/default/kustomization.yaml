@@ -1,3 +1,8 @@
+# The controller and gateway in sproozi-system. Deploy config/install, the
+# install the release ships; it includes this directory. The gateway's budget
+# ledgers are BudgetLedger resources here (ADR 0045), so there is no separate
+# state namespace.
+#
 # Adds namespace to all resources.
 namespace: sproozi-system
 

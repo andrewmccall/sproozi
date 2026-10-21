@@ -114,12 +114,19 @@ and annotation edits don't. Gateway audit records
 keep the `policyGeneration` the connection was admitted under, so after a
 cap-only edit they show the earlier generation.
 
-When a policy edit closes a run's open connections, the run itself carries
-on: the AgentRun stays `Running` with `Ready` `True`, and its new connections
-get the edited policy. The only trace is the gateway log line `Revoked
-inspected connection`, with `reason="gateway: execution grant revoked: gateway:
-the AgentRun's policy, template, capabilities or allocation changed"`. Read it
-with `kubectl logs -n sproozi-system deployment/sproozi-gateway`.
+A policy edit can end an admitted run. The controller re-evaluates every
+non-terminal run against the live policy, so an edit that makes a run
+inadmissible fails it with the denial reason: removing a capability it
+requested, dropping an egress profile its template selects, lowering a resource
+bound below its runtime, or leaving a requested package or MCP capability
+without a valid scope. Narrowing a valid scope, such as removing one MCP tool,
+leaves the run running and only changes which of its later requests the gateway
+allows. Shortening `maxExecutionDuration` below a run's elapsed time times it
+out. See [policy edits](agentrun.md#policy-edits) in the AgentRun reference. Other
+edits leave the run `Running` with `Ready` `True`: its open connections close and
+its new connections get the edited policy. The only trace is the gateway log
+line `Revoked inspected connection`. Read it with
+`kubectl logs -n sproozi-system deployment/sproozi-gateway`.
 
 The controller flag `--max-active-runs` sets a separate cluster cap; there is
 no cluster cap by default. See
@@ -181,11 +188,57 @@ Kubernetes namespaces, resources and verbs are checked on each request by the
 Kubernetes endpoint. Workload service accounts have no native read bindings.
 See [Security hardening](security-hardening.md) for deployment controls.
 
+## Limits
+
+| Field | Limits |
+| --- | --- |
+| `spec.allowedCapabilities` | 1 to 32 entries. |
+| `spec.mcpServers` | At most 32 servers; each name is a DNS label. |
+| `spec.budgets` | At most 32 entries, keyed by a native or `mcp.<server>` capability. |
+
+## Durations
+
+| Field | Default | Limits |
+| --- | --- | --- |
+| `spec.maxExecutionDuration` | `1h` | Greater than zero and at most `1h`. The API server rejects `2h` or `0s`. |
+| `spec.retentionTTL` | `720h` (30 days) | Greater than zero. A terminal AgentRun is deleted this long after it finished. |
+
+Omit a field to take its default. A Go client using the API types also omits
+them when they are unset.
+
 ## Package installs
 
-`spec.packagesInstall.maxDownloadBytes` caps each package artifact response,
-including metadata responses. It must be from 1 byte to 1 TiB
-(1099511627776 bytes).
+`spec.packagesInstall` lists the exact Python wheels a run may download through
+the `packages.install` capability. Nothing outside the list is served.
+
+| Field | Meaning | Limits |
+| --- | --- | --- |
+| `ecosystems` | Registries this scope covers. Only `pypi` is supported. | Up to 8 entries. |
+| `artifacts[]` | The complete set of wheels and their locked dependencies. | Up to 128 entries. |
+| `artifacts[].name` | Normalized package name. | 1 to 128 characters, lowercase with `.`, `_` or `-` separators. |
+| `artifacts[].version` | Exact PEP 440 version. | 1 to 64 characters. |
+| `artifacts[].sha256` | Lowercase hexadecimal SHA-256 of the wheel bytes. | 64 characters. |
+| `artifacts[].filename` | Exact wheel filename from registry metadata. | 1 to 255 characters. |
+| `artifacts[].dependencies[]` | `name` and `version` of each locked dependency. Each must also appear in `artifacts`. | Up to 64 entries. |
+| `allowSourceBuilds` | Must stay `false`: only wheels are supported. | |
+| `maxDownloadBytes` | Cap on each artifact or metadata response. | 1 byte to 1 TiB (1099511627776 bytes). |
+
+```yaml
+packagesInstall:
+  ecosystems: [pypi]
+  maxDownloadBytes: 52428800
+  artifacts:
+    - name: requests
+      version: "2.32.3"
+      filename: requests-2.32.3-py3-none-any.whl
+      sha256: <64 hex characters from the registry>
+      dependencies:
+        - {name: idna, version: "3.10"}
+    - name: idna
+      version: "3.10"
+      filename: idna-3.10-py3-none-any.whl
+      sha256: <64 hex characters from the registry>
+```
 
 ## Named MCP capabilities
 

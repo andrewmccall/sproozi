@@ -1,13 +1,14 @@
 # Home-ops demo runbook
 
 This runbook describes a planned end-to-end test on a real `home-ops` cluster.
-It has not passed acceptance. The Alertmanager converter and signer still need
-implementation. The intended sequence is:
+It has not passed acceptance. Sproozi has no event receiver, so an alert cannot
+start a run; the operator creates the AgentRun by hand (see
+[event webhooks](../../docs/explanations/future-architecture/event-webhooks.md)). The intended sequence is:
 
 1. build and publish Sproozi
 2. install it into `home-ops`
 3. introduce a broken workload through GitOps
-4. let monitoring trigger the SRE agent
+4. start the SRE agent by hand when monitoring alerts
 5. show the proposed remediation PR
 6. prove the sandbox stays bounded
 
@@ -17,7 +18,7 @@ If the live acceptance succeeds, it will show:
 
 - Sproozi installed as a bounded control-plane service
 - a broken deployment landing through GitOps
-- Alertmanager sending a notification through a converter and signer to the webhook, which creates an `AgentRun`
+- Alertmanager reporting the failure and the operator creating an `AgentRun`
 - the trusted services provisioning a sandbox in `sproozi-agents`
 - the agent proposing a fix against `andrewmccall/home-ops`
 - the sandbox staying inside its RBAC, filesystem, and network bounds
@@ -62,8 +63,6 @@ For the demo, keep the policy aligned with the current SRE example:
 
 The template should:
 
-- use `sproozi.com/webhook-receiver=alertmanager`
-- use `sproozi.com/webhook-secret=<secret-name>`
 - point at the `sre` policy
 - point at the `codex` runtime
 - instruct the agent to edit `cluster/apps/sproozi/demo-workload.yaml` and create the PR through bounded `gh api` REST
@@ -78,26 +77,32 @@ unchanged.
 In `home-ops`, add:
 
 1. a `PrometheusRule` that fires on the demo workload
-2. an `AlertmanagerConfig` route to a notification converter/HMAC signer
-3. that adapter's signed POST to the Sproozi webhook
+2. an `AlertmanagerConfig` route to your usual notification receiver
 
-The converter/signer is still required work. It must produce `{id,eventContext}`
-and the timestamp/signature headers in the
-[webhook contract](../../docs/reference/webhook-contract.md). A receiver URL alone is
-insufficient to connect native Alertmanager notifications.
-
-Receiver target:
-
-```text
-http://sproozi-webhook.sproozi-system.svc.cluster.local:8083/webhook/sproozi-system/alertmanager
-```
-
-If you enforce the webhook ingress label contract, ensure the sender namespace has:
+Sproozi has no event receiver, so the alert cannot create the run. Keep an
+AgentRun manifest outside the Flux path, for example `agentrun.yaml`, and
+create it when the alert fires:
 
 ```yaml
+apiVersion: sproozi.com/v1alpha1
+kind: AgentRun
 metadata:
-  labels:
-    sproozi.com/webhook-client: enabled
+  # generateName gives each alert its own run; a fixed name would make a
+  # second `kubectl create` fail while the first run is retained.
+  generateName: home-ops-sre-remediation-
+  namespace: sproozi-system
+spec:
+  templateRef:
+    name: sre-remediation
+  task: Investigate the failing demo workload and propose a safe correction.
+  eventContext:
+    trigger: manual
+    namespace: sproozi-demo
+    alertname: <alert name>
+  capabilities:
+    - kubernetes.read
+    - github.pull_request
+    - model.inference
 ```
 
 ## 5. Reconcile the baseline install
@@ -116,7 +121,7 @@ kubectl get ns sproozi-agents sproozi-demo
 Expected result:
 
 - controller-manager is running
-- shared gateway and webhook are running
+- shared gateway is running
 - Sproozi CRs exist in `sproozi-system`
 - `sproozi-agents` exists but does not yet contain a sandbox for this demo
 
@@ -146,7 +151,7 @@ Commit that broken change to the branch Flux reconciles.
 
 ## 7. Watch the failure land
 
-Open four panes or terminals:
+Open three panes or terminals:
 
 ### Pane 1: workload and alert path
 
@@ -162,13 +167,7 @@ kubectl get agentruns.sproozi.com -n sproozi-system -w
 kubectl get pods -n sproozi-agents -w
 ```
 
-### Pane 3: webhook logs
-
-```sh
-kubectl logs -n sproozi-system deploy/sproozi-webhook -f
-```
-
-### Pane 4: controller logs
+### Pane 3: controller logs
 
 ```sh
 kubectl logs -n sproozi-system deploy/sproozi-controller-manager -f
@@ -178,13 +177,13 @@ What you want to see:
 
 1. the demo workload goes unhealthy
 2. Prometheus fires the rule
-3. Alertmanager sends a notification through the converter and signer
-4. the webhook creates an `AgentRun`
+3. Alertmanager sends a notification
+4. you create the AgentRun with `kubectl create -f agentrun.yaml`
 5. the controller provisions a sandbox pod in `sproozi-agents`
 
 ## 8. Show the proposed fix / PR
 
-Use the GitHub UI or `gh` in a separate browser window or fifth pane:
+Use the GitHub UI or `gh` in a separate browser window or fourth pane:
 
 ```sh
 gh pr list --repo andrewmccall/home-ops --limit 5
@@ -204,7 +203,7 @@ Record the known-good state before introducing the fault. For example:
 
 ## 9. Show the sandbox is bounded
 
-Check filesystem, identity and network restrictions while the agent Pod is active.
+Check filesystem, identity and network restrictions while the sandbox Pod is active.
 
 ### 9.1 Show the sandbox pod security context
 
@@ -311,19 +310,18 @@ gh pr view --repo andrewmccall/home-ops <pr-number>
 
 ## Suggested 90-second recording flow
 
-If you want a short video or GIF, use four panes plus a browser window:
+If you want a short video or GIF, use three panes plus a browser window:
 
 1. `kubectl get pods -n sproozi-demo -w`
 2. `kubectl get agentruns -n sproozi-system -w` and `kubectl get pods -n sproozi-agents -w`
-3. `kubectl logs -n sproozi-system deploy/sproozi-webhook -f`
-4. `kubectl logs -n sproozi-system deploy/sproozi-controller-manager -f`
-5. GitHub PR page in a browser
+3. `kubectl logs -n sproozi-system deploy/sproozi-controller-manager -f`
+4. GitHub PR page in a browser
 
 Suggested narration:
 
 1. Show the failing workload in `sproozi-demo`.
-2. Show the Alertmanager notification and the converter's signed event.
-3. Show the resulting `AgentRun` and agent Pod.
+2. Show the Alertmanager notification and the AgentRun you created.
+3. Show the resulting `AgentRun` and sandbox Pod.
 4. Show the proposed PR and its file scope.
 5. Show the allowed and denied operations, Pod security settings and network checks.
 
@@ -358,5 +356,5 @@ kubectl get pods -n sproozi-agents
 - keep GitHub branch protection enabled; the capability proxy is not the only line of defense
 - keep `sproozi-agents` reserved for Sproozi-managed identities
 - use the shared inspected-TLS gateway and record actual home-ops evidence before calling this integration accepted
-- budget and replay state use Kubernetes ConfigMaps; ChatGPT refresh still requires one active gateway process
+- budget state uses Kubernetes ConfigMaps; ChatGPT refresh still requires one active gateway process
 - model reservations can undercount total usage, and interrupted provisioning can evade cleanup; see [security hardening](../../docs/reference/security-hardening.md)

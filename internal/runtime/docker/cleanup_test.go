@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/andrewmccall/sproozi/internal/testutil"
 
@@ -235,4 +236,110 @@ func assertReleasedPreparation(t *testing.T, p *Placement, f *fakeDocker, l sess
 	if err != nil || !r.ActualStopped || !r.Removed || r.Receipt != nil {
 		t.Fatalf("cancelled preparation record: %+v %v", r, err)
 	}
+}
+
+// A removal that failed after a durable stop is finished by the sweep, with no
+// further Stop or Abort from a coordinator.
+func TestReleaseStoppedFinishesRemovalWithoutAnotherStop(t *testing.T) {
+	dir := testutil.PrivateDir(t)
+	p, f, a, l, i := activeFixture(t, dir)
+	f.failRemove = true
+	if _, err := p.Stop(t.Context(), l, i); err != nil {
+		t.Fatal(err)
+	}
+	if released, err := p.ReleaseStopped(t.Context()); err == nil || released != 0 {
+		t.Fatalf("sweep with a failing engine = %d, %v; want an error", released, err)
+	}
+	f.failRemove = false
+	// A restarted service sweeps its retained records.
+	if err := p.Close(); err != nil {
+		t.Fatal(err)
+	}
+	p = openFixture(t, dir, f, a)
+	released, err := p.ReleaseStopped(t.Context())
+	if err != nil || released != 1 {
+		t.Fatalf("ReleaseStopped = %d, %v; want 1", released, err)
+	}
+	assertReleased(t, p, f, l)
+	if released, err = p.ReleaseStopped(t.Context()); err != nil || released != 0 {
+		t.Fatalf("second sweep = %d, %v; want nothing to do", released, err)
+	}
+}
+
+// An active visit is never released by the sweep.
+func TestReleaseStoppedLeavesActiveVisits(t *testing.T) {
+	t.Parallel()
+	p, f, _, _, i := activeFixture(t, testutil.PrivateDir(t))
+	if released, err := p.ReleaseStopped(t.Context()); err != nil || released != 0 {
+		t.Fatalf("ReleaseStopped = %d, %v", released, err)
+	}
+	if f.containers[i.ResourceUID] == nil || len(f.volumes) != 1 {
+		t.Fatal("sweep removed an active visit's resources")
+	}
+}
+
+// A visit whose operation is in progress is skipped, not waited for, so it
+// cannot delay cleanup of other visits.
+func TestReleaseStoppedSkipsBusyVisit(t *testing.T) {
+	dir := testutil.PrivateDir(t)
+	p, f, _, l, i := activeFixture(t, dir)
+	f.failRemove = true
+	if _, err := p.Stop(t.Context(), l, i); err != nil {
+		t.Fatal(err)
+	}
+	f.failRemove = false
+	unlock, err := p.lockOperation(l)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if released, err := p.ReleaseStopped(t.Context()); err != nil || released != 0 {
+			t.Errorf("sweep of a busy visit = %d, %v; want skipped", released, err)
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("sweep waited for a busy visit's lock")
+	}
+	unlock()
+	if released, err := p.ReleaseStopped(t.Context()); err != nil || released != 1 {
+		t.Fatalf("sweep after the operation = %d, %v; want 1", released, err)
+	}
+	assertReleased(t, p, f, l)
+}
+
+// A workspace volume whose record was lost after Docker created it is still
+// found and removed when the preparation is cancelled.
+func TestCancelledPreparationRemovesVolumeMissingFromRecord(t *testing.T) {
+	t.Parallel()
+	f := newFakeDocker()
+	a := &fakeAuthority{engine: f}
+	p := openFixture(t, testutil.PrivateDir(t), f, a)
+	original := p.engine.execute
+	p.engine.execute = func(ctx context.Context, input []byte, max int, args []string) ([]byte, error) {
+		if args[0] == createCommand && strings.HasSuffix(args[2], "-"+roleAnchor) {
+			return nil, errors.New("anchor unavailable")
+		}
+		return original(ctx, input, max, args)
+	}
+	l := fixtureLaunch(t, fixtureArtifact(t))
+	l.ThreadID, l.CheckpointDigest = "", ""
+	if _, err := p.Prepare(t.Context(), l, []byte("workspace-continuity")); err == nil {
+		t.Fatal("expected failed preparation")
+	}
+	r, err := p.load(l)
+	if err != nil || r.Volume == nil || len(f.volumes) != 1 {
+		t.Fatalf("fixture did not create the volume: %+v %v", r, err)
+	}
+	r.Volume = nil // the save after volume creation was lost
+	if err := p.save(r); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.AbortPreparation(t.Context(), l); err != nil {
+		t.Fatal(err)
+	}
+	assertReleasedPreparation(t, p, f, l)
 }

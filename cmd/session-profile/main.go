@@ -3,8 +3,10 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/tls"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -28,6 +30,7 @@ import (
 	"github.com/andrewmccall/sproozi/internal/work"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -42,6 +45,8 @@ type serverConfig struct {
 	Principal          string                            `json:"principal"`
 	PlacementName      string                            `json:"placementName"`
 	Namespace          string                            `json:"namespace"`
+	BudgetNamespace    string                            `json:"budgetNamespace,omitempty"`
+	GatewayUser        string                            `json:"gatewayUser,omitempty"`
 	TemplateName       string                            `json:"templateName"`
 	Directory          string                            `json:"directory"`
 	InstructionDigest  string                            `json:"instructionDigest"`
@@ -52,6 +57,15 @@ type serverConfig struct {
 	Repositories       map[string]work.Repository        `json:"repositories,omitempty"`
 	Projects           map[project.ID]project.Definition `json:"projects,omitempty"`
 }
+
+// Configuration field names, as errors name them.
+const (
+	fieldListen          = "listen"
+	fieldCertificateFile = "certificateFile"
+	fieldKeyFile         = "keyFile"
+	fieldNamespace       = "namespace"
+	fieldBudgetNamespace = "budgetNamespace"
+)
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -78,10 +92,75 @@ func readConfig(path string) (serverConfig, error) {
 	if err = decoder.Decode(new(any)); err != io.EOF {
 		return value, errors.New("trailing configuration JSON")
 	}
-	if value.Harness.Validate() != nil || value.Listen == "" || value.CertificateFile == "" || value.KeyFile == "" {
-		return value, errors.New("fixed TLS listener configuration required")
+	if err = value.Harness.Validate(); err != nil {
+		return value, fmt.Errorf("configuration \"harness\": %w", err)
+	}
+	for _, field := range []struct{ name, value string }{
+		{fieldListen, value.Listen}, {fieldCertificateFile, value.CertificateFile}, {fieldKeyFile, value.KeyFile},
+	} {
+		if field.value == "" {
+			return value, fmt.Errorf("configuration %q is required: the executor serves a fixed TLS listener", field.name)
+		}
 	}
 	return value, nil
+}
+
+// validateConfig checks the placement settings one field at a time, so a
+// mistake names the field to fix instead of failing as one invalid
+// configuration. placement.Open checks the same rules again.
+func validateConfig(c serverConfig) error {
+	invalid := func(field, rule string) error {
+		return fmt.Errorf("configuration %q %s", field, rule)
+	}
+	if c.Principal == "" {
+		return invalid("principal", "is required")
+	}
+	if c.PlacementName == "" {
+		return invalid("placementName", "is required")
+	}
+	if len(validation.IsDNS1123Label(c.Namespace)) != 0 {
+		return invalid(fieldNamespace, "must be a Kubernetes namespace name")
+	}
+	if c.BudgetNamespace != "" && len(validation.IsDNS1123Label(c.BudgetNamespace)) != 0 {
+		return invalid(fieldBudgetNamespace, "must be a Kubernetes namespace name")
+	}
+	if c.GatewayUser != "" {
+		if _, err := gatewayNamespace(c.GatewayUser); err != nil {
+			return err
+		}
+	}
+	if len(validation.IsDNS1123Subdomain(c.TemplateName)) != 0 {
+		return invalid("templateName", "must be an AgentTemplate name")
+	}
+	if !filepath.IsAbs(c.Directory) {
+		return invalid("directory", "must be an absolute path")
+	}
+	if digest, err := hex.DecodeString(c.InstructionDigest); err != nil || len(digest) != 32 ||
+		hex.EncodeToString(digest) != c.InstructionDigest {
+		return invalid("instructionDigest", "must be 64 lowercase hexadecimal characters (a SHA-256 digest)")
+	}
+	if len(c.Allowances) == 0 || len(c.Allowances) > 32 {
+		return invalid("allowances", "must hold between 1 and 32 capabilities")
+	}
+	for name, a := range c.Allowances {
+		if !a.Units.Bounded || a.Units.Value <= 0 {
+			return invalid("allowances", fmt.Sprintf("entry %q needs bounded positive units", name))
+		}
+		if a.CostMicros.Bounded && a.CostMicros.Value <= 0 || !a.CostMicros.Bounded && a.CostMicros.Value != 0 {
+			return invalid("allowances", fmt.Sprintf("entry %q needs costMicros bounded and positive, "+
+				"or unbounded with value 0", name))
+		}
+	}
+	if duration, err := time.ParseDuration(c.MaxDuration); err != nil || duration <= 0 {
+		return invalid("maxDuration", "must be a positive Go duration such as \"30m\"")
+	}
+	if c.MaxCheckpointBytes <= 0 || c.MaxCheckpointBytes > 256<<20 {
+		return invalid("maxCheckpointBytes", "must be between 1 and 268435456")
+	}
+	if len(c.Repositories)+len(c.Projects) > 0 && c.WorkTokenFile == "" {
+		return invalid("workTokenFile", "is required with repositories or projects")
+	}
+	return nil
 }
 func run(args []string) error {
 	flags := flag.NewFlagSet("session-profile", flag.ContinueOnError)
@@ -94,6 +173,9 @@ func run(args []string) error {
 	}
 	fixed, err := readConfig(*path)
 	if err != nil {
+		return err
+	}
+	if err = validateConfig(fixed); err != nil {
 		return err
 	}
 	duration, err := time.ParseDuration(fixed.MaxDuration)
@@ -115,9 +197,18 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
+	clients, err := kubernetes.NewForConfig(restConfig)
+	if err != nil {
+		return err
+	}
+	budgetNamespace := cmp.Or(fixed.BudgetNamespace, placement.DefaultBudgetNamespace)
+	if err = preflight(context.Background(), clients, fixed.Namespace, budgetNamespace,
+		cmp.Or(fixed.GatewayUser, defaultGatewayUser)); err != nil {
+		return err
+	}
 	backend, err := placement.Open(placement.Config{
 		Harness: fixed.Harness, Kube: kube, RESTConfig: restConfig, Namespace: fixed.Namespace,
-		TemplateName: fixed.TemplateName, Principal: fixed.Principal,
+		BudgetNamespace: fixed.BudgetNamespace, TemplateName: fixed.TemplateName, Principal: fixed.Principal,
 		Directory: fixed.Directory, Name: fixed.PlacementName,
 		InstructionDigest: fixed.InstructionDigest, Allowances: fixed.Allowances,
 		MaxDuration: duration, MaxCheckpointBytes: fixed.MaxCheckpointBytes,

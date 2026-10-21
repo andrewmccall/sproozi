@@ -1,4 +1,4 @@
-# Everything the sproozi CLI (and the home daemon it starts) needs to reach the
+# Everything the sproozi CLI (and the local service it starts) needs to reach the
 # remote executor in this namespace, and nothing else.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -19,6 +19,13 @@ rules:
 # Open the TLS tunnel to the executor Pod.
 - apiGroups: [""]
   resources: [pods/portforward]
+  verbs: [create]
+# Mint the short-lived token, bound to the audience sproozi-remote-executor,
+# that the remote executor accepts. Only for this ServiceAccount itself, so it
+# grants nothing new; the kubeconfig credential never reaches the executor.
+- apiGroups: [""]
+  resources: [serviceaccounts/token]
+  resourceNames: [sproozi-cli]
   verbs: [create]
 # Trust the executor's serving certificate.
 - apiGroups: [""]

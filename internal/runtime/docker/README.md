@@ -24,7 +24,7 @@ Inspection of a creating record is observation-only and returns `preparing`;
 `Prepare` explicitly retries that intent. `AbortPreparation` handles a partial
 preparation whose incarnation was never reported by discovering and fencing only
 exact already-created fixed roles, including lost create replies. It creates no
-container or authority and invents no native UUID or usage receipt.
+container or authority and invents no harness conversation ID or usage receipt.
 
 The home gateway implements these hooks:
 
@@ -33,7 +33,7 @@ The home gateway implements these hooks:
 | `InitializeAllocation` | Retain exact launch/allocation/container binding and return fresh native access while inactive |
 | `Activate` | Admit only the retained current execution and original deadline |
 | `Revoke` | Deny new capability work immediately; retries converge |
-| `BindNative` | Bind an initial empty thread exactly once to the observed genuine native UUID |
+| `BindNative` | Bind an initial empty thread exactly once to the observed genuine harness conversation ID |
 | `Seal` | Independently confirm actual stopped execution and return trusted usage for every allocated capability |
 
 The agent runs as UID/GID 1000 with a read-only root filesystem, dropped
@@ -65,7 +65,7 @@ rejected after the move gate closes.
 `Stop` gates input and preserves admitted gateway work while the supported final
 native turn completes. After native quiet, it revokes gateway authority and
 independently stops the actual container before capture. For the first local
-session, it binds and persists the observed native UUID before quitting. The
+session, it binds and persists the observed harness conversation ID before quitting. The
 launch never changes: `Stopped.ThreadID` reports that UUID, and
 `Stopped.Launch` and the receipt keep the launch as prepared. The
 supervisor socket and journal are workload-accessible diagnostics. Neither a
@@ -93,8 +93,10 @@ placement confirms each container stopped and records `removing` before the
 first removal, then `removed` after the last. Only that record lets a missing
 container count as removed; without it, a missing container is still an error.
 After `removed`, retried `Stop`, `Abort` and `Inspect` calls answer from the
-record without Docker. A removal failure leaves the recorded stop intact, and
-the next `Stop` or `Abort` for the visit retries it. A visit whose usage is
+record without Docker. A removal failure leaves the recorded stop intact. The
+local service retries it with `ReleaseStopped` when it starts and every five
+minutes, so removal does not wait for another `Stop` or `Abort` that may never
+come ([ADR 0041](../../../docs/adr/0041-gateway-state-namespace-and-retained-state-owners.md)). A visit whose usage is
 still unknown keeps its containers until an `Abort` retry seals it. See
 [ADR 0020](../../../docs/adr/0020-docker-placement-removes-stopped-visits.md).
 

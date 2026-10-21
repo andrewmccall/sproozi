@@ -267,3 +267,17 @@ func settleUnleased(s *ledgerState, account string) Recovered {
 			"units", units, "costMicros", cost)
 	}
 }
+
+// Settled reports whether a stored ledger has no reservation outstanding: no
+// reserved units or cost, no pending count and no lease. Only a settled ledger
+// may be removed once its run is gone; its usage is final.
+func Settled(data string) (bool, error) {
+	r, err := DecodeRecord(data)
+	if err != nil {
+		return false, err
+	}
+	s := r.state
+	// A missing pending count means legacy history is unknown, not zero.
+	noPending := s.Pending != nil && *s.Pending == 0 && (s.Unbounded == nil || *s.Unbounded == 0)
+	return noPending && s.ReservedUnits == 0 && s.ReservedCostMicros == 0 && len(s.Leases) == 0, nil
+}

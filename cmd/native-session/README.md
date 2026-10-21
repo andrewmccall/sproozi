@@ -154,7 +154,7 @@ Never restart or relaunch a container to infer successful quiescence. Pending
 input admitted just before gating can race native journal emission. Final
 post-stop native checkpoint validation must reject an incomplete/aborted last
 turn; the earlier turn observation is insufficient by itself. Whole-container
-fencing and sealed usage remain the placement's responsibility.
+fencing and finalized usage remain the placement's responsibility.
 
 The stock TUI fixture is separate from container containment:
 

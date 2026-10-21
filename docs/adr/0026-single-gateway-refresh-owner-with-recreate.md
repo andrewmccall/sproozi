@@ -1,4 +1,4 @@
-# One gateway process owns the ChatGPT refresh, with a Recreate rollout
+# 0026: One gateway process owns the ChatGPT refresh, with a Recreate rollout
 
 Status: accepted
 Date: 2026-10-19

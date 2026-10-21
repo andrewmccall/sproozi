@@ -68,6 +68,12 @@ const (
 	testPolicyName   = "pol"
 )
 
+// The TokenReview extras that bind a token to its Pod.
+const (
+	podNameExtra = "authentication.kubernetes.io/pod-name"
+	podUIDExtra  = "authentication.kubernetes.io/pod-uid"
+)
+
 func testScheme(t *testing.T) *runtime.Scheme {
 	t.Helper()
 	s := runtime.NewScheme()
@@ -308,6 +314,10 @@ func TestAuthenticateResolvesTokenReviewSubjectToItsRun(t *testing.T) {
 			clientset.PrependReactor("create", "tokenreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
 				return true, &authv1.TokenReview{Status: authv1.TokenReviewStatus{Authenticated: true, User: authv1.UserInfo{
 					Username: "system:serviceaccount:" + f.subject.Namespace + ":" + f.subject.Name, UID: tc.uid,
+					Extra: map[string]authv1.ExtraValue{
+						podNameExtra: {f.pod.Name},
+						podUIDExtra:  {string(f.pod.UID)},
+					},
 				}}}, nil
 			})
 			grant, err := gateway.NewAuthenticator(clientset, "sproozi-gateway", f.kube, testAgentsNamespace).Authenticate(context.Background(), "valid-token")
@@ -357,5 +367,70 @@ func TestAuthenticateReturnsErrNotServiceAccountForNonSAUser(t *testing.T) {
 	_, err := v.Authenticate(context.Background(), "node-token")
 	if err != gateway.ErrNotServiceAccount {
 		t.Errorf("err = %v, want ErrNotServiceAccount", err)
+	}
+}
+
+// A run token authorizes the run only when it is bound to the run's own
+// sandbox Pod, matched by name and UID. A token with no Pod binding, such as
+// one from "kubectl create token", is refused.
+func TestAuthenticateRequiresTheRunsSandboxPod(t *testing.T) {
+	f := managedExecution(t, true)
+	sandbox, sandboxUID := f.run.Status.Identity.SandboxName, string(f.pod.UID)
+	for _, tc := range []struct {
+		name       string
+		pods, uids []string
+		want       error
+	}{
+		{"sandbox Pod", []string{sandbox}, []string{sandboxUID}, nil},
+		{"unbound token", nil, nil, gateway.ErrTokenNotPodBound},
+		{"Pod name without UID", []string{sandbox}, nil, gateway.ErrTokenNotPodBound},
+		{"Pod UID without name", nil, []string{sandboxUID}, gateway.ErrTokenNotPodBound},
+		{"another Pod", []string{"debug-pod"}, []string{"debug-uid"}, gateway.ErrSandboxPodMismatch},
+		{"replaced sandbox Pod", []string{sandbox}, []string{"old-pod-uid"}, gateway.ErrSandboxPodMismatch},
+		{"two Pods", []string{sandbox, "debug-pod"}, []string{sandboxUID, "debug-uid"}, gateway.ErrTokenInvalid},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			clientset := k8sfake.NewSimpleClientset()
+			clientset.PrependReactor("create", "tokenreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
+				user := authv1.UserInfo{Username: "system:serviceaccount:" + f.subject.Namespace + ":" + f.subject.Name, UID: f.subject.UID,
+					Extra: map[string]authv1.ExtraValue{}}
+				if tc.pods != nil {
+					user.Extra[podNameExtra] = tc.pods
+				}
+				if tc.uids != nil {
+					user.Extra[podUIDExtra] = tc.uids
+				}
+				return true, &authv1.TokenReview{Status: authv1.TokenReviewStatus{Authenticated: true, User: user}}, nil
+			})
+			_, err := gateway.NewAuthenticator(clientset, "sproozi-gateway", f.kube, testAgentsNamespace).Authenticate(context.Background(), "token")
+			if !errors.Is(err, tc.want) || (tc.want == nil) != (err == nil) {
+				t.Fatalf("Authenticate() error = %v, want %v", err, tc.want)
+			}
+		})
+	}
+}
+
+// A sandbox Pod that cannot be read fails closed and keeps the cause.
+func TestAuthenticateFailsClosedWhenTheSandboxPodCannotBeRead(t *testing.T) {
+	f := managedExecution(t, true)
+	forbidden := errors.New("pods is forbidden")
+	kube := interceptor.NewClient(f.kube.(client.WithWatch), interceptor.Funcs{Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+		if _, ok := obj.(*corev1.Pod); ok {
+			return forbidden
+		}
+		return c.Get(ctx, key, obj, opts...)
+	}})
+	clientset := k8sfake.NewSimpleClientset()
+	clientset.PrependReactor("create", "tokenreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, &authv1.TokenReview{Status: authv1.TokenReviewStatus{Authenticated: true, User: authv1.UserInfo{
+			Username: "system:serviceaccount:" + f.subject.Namespace + ":" + f.subject.Name, UID: f.subject.UID,
+			Extra: map[string]authv1.ExtraValue{
+				podNameExtra: {f.pod.Name},
+				podUIDExtra:  {string(f.pod.UID)},
+			}}}}, nil
+	})
+	_, err := gateway.NewAuthenticator(clientset, "sproozi-gateway", kube, testAgentsNamespace).Authenticate(context.Background(), "token")
+	if !errors.Is(err, forbidden) {
+		t.Fatalf("Authenticate() error = %v, want the Pod read failure", err)
 	}
 }

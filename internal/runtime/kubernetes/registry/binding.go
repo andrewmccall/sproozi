@@ -53,14 +53,24 @@ func ResolveRun(ctx context.Context, kube client.Client, run *api.AgentRun, temp
 		record.InstructionDigest != InstructionsDigest(template.Spec.Instructions) {
 		return nil, ErrConflict
 	}
-	if !record.OriginalDeadline.After(time.Now()) {
+	// A stop this run completed is final, whenever the controller observes it:
+	// its checkpoint and finalized usage are recorded, so it ends as stopped
+	// rather than timed out. Every caller still refuses ErrSessionStopped.
+	stopped := record.Phase == Stopped && record.RunUID == string(run.UID)
+	if !stopped && !record.OriginalDeadline.After(time.Now()) {
 		return nil, ErrExpired
 	}
 	if record.Phase == Creating && record.RunUID == "" {
 		return nil, ErrBindingPending
 	}
-	if record.RunUID != string(run.UID) || record.Phase == Cancelled || record.Phase == Stopped {
+	if record.RunUID == string(run.UID) && record.Phase == Cancelled {
+		return nil, ErrSessionCancelled
+	}
+	if record.RunUID != string(run.UID) || record.Phase == Cancelled {
 		return nil, ErrConflict
+	}
+	if record.Phase == Stopped {
+		return &record, ErrSessionStopped
 	}
 	if len(record.Ceilings) != len(run.Spec.Capabilities) {
 		return nil, ErrConflict

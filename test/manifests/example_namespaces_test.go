@@ -10,7 +10,7 @@ import (
 // Pod Security restricted enforcement.
 func TestExamplesKeepSandboxNamespaceLabels(t *testing.T) {
 	root := repoRoot(t)
-	want := namespaceLabels(renderKustomization(t, filepath.Join(root, "config", "agent-rbac")), "sproozi-agents")
+	want := namespaceLabels(renderKustomization(t, filepath.Join(root, "config", "agent-rbac")), agentsNamespace)
 	if want["pod-security.kubernetes.io/enforce"] != "restricted" {
 		t.Fatalf("installed sandbox namespace does not enforce restricted Pod Security: %v", want)
 	}
@@ -24,7 +24,7 @@ func TestExamplesKeepSandboxNamespaceLabels(t *testing.T) {
 	}
 	for _, kustomization := range append(examples, overlays...) {
 		dir := filepath.Dir(kustomization)
-		got := namespaceLabels(renderKustomization(t, dir), "sproozi-agents")
+		got := namespaceLabels(renderKustomization(t, dir), agentsNamespace)
 		if got == nil {
 			continue
 		}

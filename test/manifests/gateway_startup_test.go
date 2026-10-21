@@ -165,7 +165,7 @@ func gatewayConsumedNames(t *testing.T, docs []map[string]any, gateway appsv1.De
 		}
 	}
 	for _, doc := range objectsOfKind(docs, "Role") {
-		if !strings.HasPrefix(metadataName(doc), "sproozi-shared-gateway") {
+		if !strings.HasPrefix(metadataName(doc), gatewayAccount) {
 			continue
 		}
 		var role rbacv1.Role

@@ -1,5 +1,11 @@
 # Sproozi
 
+[![Tests](https://github.com/andrewmccall/sproozi/actions/workflows/test.yml/badge.svg)](https://github.com/andrewmccall/sproozi/actions/workflows/test.yml)
+[![E2E](https://github.com/andrewmccall/sproozi/actions/workflows/test-e2e.yml/badge.svg)](https://github.com/andrewmccall/sproozi/actions/workflows/test-e2e.yml)
+[![Lint](https://github.com/andrewmccall/sproozi/actions/workflows/lint.yml/badge.svg)](https://github.com/andrewmccall/sproozi/actions/workflows/lint.yml)
+[![Release](https://img.shields.io/github/v/release/andrewmccall/sproozi?include_prereleases)](https://github.com/andrewmccall/sproozi/releases)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+
 **YOLO your agents. Not your infrastructure.**
 
 I want to give an AI agent a job and let it get on with it. No approving every shell command. No sitting around waiting for it to finish.
@@ -120,13 +126,13 @@ There's working code and recorded tests, but support varies by workflow:
 | Remote Codex work followed by local resume | [Recorded remote-work acceptance](test/acceptance/reports/verified-portable-workflows.md) with deterministic models, actual package checks and isolated Kubernetes reads/denials |
 | Infrastructure investigation and proposed GitHub fix | [Recorded SRE runs](test/acceptance/reports/verified-sre-demo.md) with a real model and GitHub; no merge or deployment. Recorded on 4 October 2026 from working trees that predate this repository's public history, so the base commit they cite isn't in it. The demo repository holding the PRs is private and the full reports aren't published yet |
 
-These are **specific verified scenarios**, not a claim that every configuration works or that the project is ready for production. The [recorded test reports](test/acceptance/reports/README.md) give the evidence for each run, and the [agent reference](docs/reference/harnesses.md) documents the supported paths.
+These are **specific verified scenarios**, not a claim that every configuration works or that the project is ready for production. The Kubernetes API is alpha (`sproozi.com/v1alpha1`): a minor release may change it incompatibly, so pin a release and read its notes before upgrading ([versioning and compatibility](docs/contributing/releases.md#the-alpha-api)). The [recorded test reports](test/acceptance/reports/README.md) give the evidence for each run, and the [agent reference](docs/reference/harnesses.md) documents the supported paths.
 
 ## Security limitations
 
 Isolation only works if the environment is configured and enforced correctly. In particular:
 
-- Kubernetes network restrictions require an enforcing network plugin and verification that agents cannot bypass the gateway. Kubernetes NetworkPolicy permits traffic involving a Pod's own node, so policy alone is not a complete isolation guarantee.
+- Kubernetes network restrictions require an enforcing network plugin and verification that agents cannot bypass the gateway. Kubernetes NetworkPolicy permits traffic involving a Pod's own node, so policy alone is not a complete isolation guarantee. Sandboxes on both backends resolve no names, so DNS is not a path around the gateway; on Kubernetes the controller pins the gateway's address in each Pod ([ADR 0040](docs/adr/0040-sandboxes-reach-the-gateway-without-dns.md)).
 - Rules can restrict external operations, but their precision depends on the integration. A service-aware permission can constrain particular actions. Configured Model Context Protocol (MCP) access checks tools and arguments, while generic HTTPS egress only constrains the destination.
 - Agent containers must run locked down: non-root, read-only, no extra Linux capabilities and no mounted secrets.
 - The gateway limits connections: by default 2048 connections shared by all runs (one per MiB of the gateway's 2Gi memory limit, leaving headroom for a few hundred concurrent model calls rather than one per connection), each one inspected, and at most 16 inspected connections per execution, or the connection limit if lower. Cleanup keeps a run's network controls in place until Sproozi sees its Pod gone, but interrupted cleanup and lost provisioning status aren't fully covered: after an interrupted run, check the Pod yourself.
@@ -153,4 +159,5 @@ Some of that is still future architecture, not shipped functionality. The [futur
 - [Architecture decisions](docs/adr/README.md)
 - [Full documentation index](docs/README.md)
 
-Sproozi is open source and evolving. If you're trying to let agents do useful work without handing them the keys to everything, I'd love to hear what you're building.
+Sproozi is open source under the [Apache License 2.0](LICENSE) and evolving.
+See [contributing](CONTRIBUTING.md) and the [security policy](SECURITY.md). If you're trying to let agents do useful work without handing them the keys to everything, I'd love to hear what you're building.

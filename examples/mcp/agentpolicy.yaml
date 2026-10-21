@@ -43,8 +43,10 @@ spec:
   budgets:
     model.inference:
       maxUnits: 100000
+      maxCostMicros: 0
     mcp.deepwiki:
       maxUnits: 10
+      maxCostMicros: 0
   resourceBounds:
     max:
       cpu: "1"

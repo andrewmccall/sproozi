@@ -38,6 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
+	"github.com/andrewmccall/sproozi/internal/agentcontract"
 	policy "github.com/andrewmccall/sproozi/internal/policy/kubernetes"
 	k8sresources "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
@@ -57,6 +58,8 @@ const (
 	// policyChangedReason fails an active run whose template now names a
 	// different policy from the one it was admitted under.
 	policyChangedReason = "PolicyChanged"
+	// sessionStoppedReason ends a managed run whose session stop completed.
+	sessionStoppedReason = "SessionStopped"
 	// quotaExceededReason marks an active run whose sandbox Pod a
 	// ResourceQuota rejected.
 	quotaExceededReason = "QuotaExceeded"
@@ -199,6 +202,20 @@ func (r *AgentRunReconciler) resolveAdmission(ctx context.Context, run *sprooziv
 		return nil, ctrl.Result{}, err
 	}
 
+	// Reject input the agent contract will refuse before the run is admitted.
+	// Otherwise an admitted run would hold a slot under its cap while contract
+	// creation failed on every reconcile until its deadline.
+	if _, err := k8sresources.BuildAgentContract(run, tmpl, rt); err != nil {
+		if !agentcontract.IsInvalid(err) {
+			return nil, ctrl.Result{}, err
+		}
+		logger.Info("AgentRun input is invalid", "name", run.Name, "template", tmpl.Name, "reason", err.Error())
+		_, err := r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseFailed, "InvalidRunInput",
+			fmt.Sprintf("AgentRun, AgentTemplate %s and AgentRuntime %s cannot form a valid agent contract: %v",
+				tmpl.Name, rt.Name, err))
+		return nil, ctrl.Result{}, err
+	}
+
 	if denial := policy.Evaluate(pol.Spec, tmpl.Spec, run.Spec, rt.Spec); denial != nil {
 		logger.Info("Policy denied AgentRun", "name", run.Name, "phase", run.Status.Phase, "reason", denial.Reason)
 		_, err := r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseFailed, string(denial.Reason), denial.Message)
@@ -221,7 +238,10 @@ func (r *AgentRunReconciler) resolveAdmission(ctx context.Context, run *sprooziv
 		logger.Info("Recovered missing StartedAt on AgentRun", "name", run.Name, "phase", run.Status.Phase)
 	}
 	deadline := registry.EffectiveDeadline(run, pol, binding)
-	if time.Now().After(deadline) {
+	// A completed session stop ends the run as stopped even past the deadline
+	// (ADR 0041); handleRunning waits for its sandbox to finish.
+	stopped := binding != nil && binding.Phase == registry.Stopped
+	if !stopped && time.Now().After(deadline) {
 		logger.Info("AgentRun deadline exceeded", "name", run.Name, "phase", run.Status.Phase)
 		_, err := r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseTimedOut, "MaxExecutionDurationExceeded",
 			fmt.Sprintf("AgentRun passed its execution deadline %s", deadline.UTC().Format(time.RFC3339)))
@@ -410,6 +430,10 @@ func (r *AgentRunReconciler) handleAdmitted(ctx context.Context, run *sprooziv1a
 func (r *AgentRunReconciler) handleRunning(ctx context.Context, run *sprooziv1alpha1.AgentRun, admitted *admission) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
+	if admitted.binding != nil && admitted.binding.Phase == registry.Stopped {
+		return r.finishStoppedSession(ctx, run)
+	}
+
 	if run.Status.Identity.ServiceAccountName != "" {
 		if err := k8sresources.EnsureNetworkPolicy(ctx, r.Client, run, admitted.policy); err != nil {
 			return ctrl.Result{}, err
@@ -570,13 +594,19 @@ func (r *AgentRunReconciler) ReconcileRelease(ctx context.Context, run *sprooziv
 // A zero or negative TTL (should not occur with CRD validation) is replaced
 // with defaultRetentionTTL to prevent immediate deletion.
 func (r *AgentRunReconciler) retentionTTL(ctx context.Context, run *sprooziv1alpha1.AgentRun) time.Duration {
-	var tmpl sprooziv1alpha1.AgentTemplate
-	if err := r.Get(ctx, types.NamespacedName{Name: run.Spec.TemplateRef.Name, Namespace: run.Namespace}, &tmpl); err != nil {
-		return defaultRetentionTTL
+	// Prefer the policy the run was admitted under, so re-pointing a template
+	// later does not change how long its finished runs are kept.
+	policyName := run.Status.PolicyName
+	if policyName == "" {
+		var tmpl sprooziv1alpha1.AgentTemplate
+		if err := r.Get(ctx, types.NamespacedName{Name: run.Spec.TemplateRef.Name, Namespace: run.Namespace}, &tmpl); err != nil {
+			return defaultRetentionTTL
+		}
+		policyName = tmpl.Spec.PolicyRef.Name
 	}
 
 	var pol sprooziv1alpha1.AgentPolicy
-	if err := r.Get(ctx, types.NamespacedName{Name: tmpl.Spec.PolicyRef.Name, Namespace: run.Namespace}, &pol); err != nil {
+	if err := r.Get(ctx, types.NamespacedName{Name: policyName, Namespace: run.Namespace}, &pol); err != nil {
 		return defaultRetentionTTL
 	}
 
@@ -654,12 +684,9 @@ func (r *AgentRunReconciler) transitionPhase(
 	logger := log.FromContext(ctx)
 
 	if !ValidTransition(run.Status.Phase, phase) {
-		logger.Info("Ignoring invalid phase transition",
-			"name", run.Name,
-			"from", run.Status.Phase,
-			"to", phase,
-		)
-		return ctrl.Result{}, nil
+		err := fmt.Errorf("%w: %s to %s", ErrInvalidTransition, run.Status.Phase, phase)
+		logger.Error(err, "Refused AgentRun phase transition", "name", run.Name, "reason", reason)
+		return ctrl.Result{}, err
 	}
 
 	now := metav1.Now()
@@ -863,4 +890,25 @@ func mergeRequests(lists ...[]reconcile.Request) []reconcile.Request {
 		}
 	}
 	return merged
+}
+
+// finishStoppedSession ends a managed run whose session stop completed. The
+// executor recorded the checkpoint and finalized usage and is finishing its
+// capture helper, so the controller neither reprovisions nor releases the
+// sandbox until the Pod has finished. The agent's exit code is not the
+// outcome: the session stopped it on purpose.
+func (r *AgentRunReconciler) finishStoppedSession(ctx context.Context, run *sprooziv1alpha1.AgentRun) (ctrl.Result, error) {
+	sandboxName := run.Status.Identity.SandboxName
+	if sandboxName != "" {
+		status, err := r.SandboxClient.GetStatus(ctx, sandboxName)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if status != k8sresources.SandboxStatusSucceeded && status != k8sresources.SandboxStatusFailed &&
+			status != k8sresources.SandboxStatusAbsent {
+			return ctrl.Result{RequeueAfter: queuedPollInterval}, nil
+		}
+	}
+	return r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseSucceeded, sessionStoppedReason,
+		"The session stopped this execution; its checkpoint and finalized usage are in the session registration")
 }

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"math"
 	"net"
@@ -22,6 +23,9 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	authorizationv1 "k8s.io/api/authorization/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -99,6 +103,7 @@ type startupConfig struct {
 	mcpRegistry          *mcpgateway.Registry
 	admission            connectionLimits
 	maxModelCall         time.Duration
+	ledgerRetention      time.Duration
 }
 
 // connectionLimits are the administrator-tunable gateway connection limits. They
@@ -199,12 +204,43 @@ func boundedInteger(key string, fallback, upper int) (int, error) {
 	return value, nil
 }
 
+// loadGitHubApp reads and checks the GitHub App identity the pull request
+// module signs in with.
+func loadGitHubApp() (appID, installationID int64, privateKey []byte, err error) {
+	appID, err = githubAppInteger("GITHUB_APP_ID", "app-id")
+	if err != nil {
+		return 0, 0, nil, err
+	}
+	installationID, err = githubAppInteger("GITHUB_APP_INSTALLATION_ID", "installation-id")
+	if err != nil {
+		return 0, 0, nil, err
+	}
+	privateKey, err = os.ReadFile(os.Getenv("GITHUB_APP_PRIVATE_KEY_PATH"))
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, 0, nil, fmt.Errorf("GitHub App private key is missing: create key private-key.pem in %s",
+			githubAppSource)
+	}
+	if err != nil {
+		return 0, 0, nil, fmt.Errorf("read GitHub App private key (key private-key.pem in %s): %w", githubAppSource, err)
+	}
+	validation := newUpstreamClient(time.Minute)
+	if _, err := githubgateway.NewAppTokenProvider(appID, installationID, privateKey, validation); err != nil {
+		return 0, 0, nil, fmt.Errorf("invalid GitHub App private key (key private-key.pem in %s): %w",
+			githubAppSource, err)
+	}
+	return appID, installationID, privateKey, nil
+}
+
 func loadStartupConfig() (*startupConfig, error) {
 	enabled, err := enabledCapabilities()
 	if err != nil {
 		return nil, err
 	}
 	admission, maxModelCall, err := loadGatewayLimits()
+	if err != nil {
+		return nil, err
+	}
+	ledgerRetention, err := loadLedgerRetention()
 	if err != nil {
 		return nil, err
 	}
@@ -266,23 +302,9 @@ func loadStartupConfig() (*startupConfig, error) {
 	var appID, installationID int64
 	var privateKey []byte
 	if enabled[sprooziv1alpha1.CapabilityGitHubPullRequest] {
-		appID, err = githubAppInteger("GITHUB_APP_ID", "app-id")
+		appID, installationID, privateKey, err = loadGitHubApp()
 		if err != nil {
 			return nil, err
-		}
-		installationID, err = githubAppInteger("GITHUB_APP_INSTALLATION_ID", "installation-id")
-		if err != nil {
-			return nil, err
-		}
-		privateKey, err = os.ReadFile(os.Getenv("GITHUB_APP_PRIVATE_KEY_PATH"))
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, fmt.Errorf("GitHub App private key is missing: create key private-key.pem in %s", githubAppSource)
-		}
-		if err != nil {
-			return nil, fmt.Errorf("read GitHub App private key (key private-key.pem in %s): %w", githubAppSource, err)
-		}
-		if _, err := githubgateway.NewAppTokenProvider(appID, installationID, privateKey, http.DefaultClient); err != nil {
-			return nil, fmt.Errorf("invalid GitHub App private key (key private-key.pem in %s): %w", githubAppSource, err)
 		}
 	}
 	certificates := map[string]tls.Certificate{}
@@ -313,6 +335,7 @@ func loadStartupConfig() (*startupConfig, error) {
 		openAIUpstreamURL: openAIUpstreamURL, anthropicUpstreamURL: anthropicUpstreamURL,
 		appID: appID, installationID: installationID, privateKey: privateKey,
 		mcpRegistry: mcpRegistry, admission: admission, maxModelCall: maxModelCall,
+		ledgerRetention: ledgerRetention,
 	}, nil
 }
 
@@ -516,7 +539,7 @@ func main() {
 	}
 	authenticator := gatewaykubernetes.NewAuthenticator(clientset, "sproozi-gateway", runtimeClient, agentNamespace).
 		WithWatchCache(authorityClient)
-	httpClient := &http.Client{Timeout: upstreamCallTimeout}
+	httpClient := newUpstreamClient(upstreamCallTimeout)
 	modelClient := newModelClient()
 	// The journal forwards every audit record unchanged and retains recent
 	// denials for each execution's own sproozi diagnose tool.
@@ -552,17 +575,16 @@ func main() {
 	}
 	openAIEnabled := cfg.openAIKey != "" || cfg.modelAuthMode == modelauth.ChatGPTMode
 	if cfg.enabled[sprooziv1alpha1.CapabilityModelInference] && openAIEnabled {
-		budgetNamespace := envOrDefault("BUDGET_NAMESPACE", "sproozi-system")
+		// The ChatGPT credential stays in sproozi-system, where the gateway's
+		// access to it is limited to the one named Secret.
+		credentialNamespace := envOrDefault("CREDENTIAL_NAMESPACE", "sproozi-system")
 		var providerAuth modelauth.Authenticator = modelauth.APIKey{Key: cfg.openAIKey}
 		if cfg.modelAuthMode == modelauth.ChatGPTMode {
-			store := modelauthkube.SessionStore{Client: runtimeClient, Namespace: budgetNamespace}
+			store := modelauthkube.SessionStore{Client: runtimeClient, Namespace: credentialNamespace}
 			if err := checkChatGPTSession(context.Background(), store); err != nil {
 				log.Fatal(err)
 			}
-			oauthClient := &http.Client{
-				Timeout:       30 * time.Second,
-				CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-			}
+			oauthClient := newUpstreamClient(30 * time.Second)
 			providerAuth = modelauth.NewChatGPT(store, oauthClient)
 		}
 		model := &modelgateway.Handler{Config: modelgateway.HandlerConfig{
@@ -612,7 +634,8 @@ func main() {
 	if !sweepLegacyOnce(context.Background(), legacySweep) {
 		go retryLegacySweep(context.Background(), legacySweep, time.Second, budgetkubernetes.SweepInterval)
 	}
-	go sweepLedgers(context.Background(), runtimeClient, budgetNamespace, budgetkubernetes.SweepInterval)
+	startLedgerMaintenance(runtimeClient, budgetNamespace, cfg.ledgerRetention)
+	warnSystemConfigWrites(context.Background(), clientset, os.Stderr)
 	named := mcpgateway.NewHandler(mcpgateway.HandlerConfig{Registry: cfg.mcpRegistry,
 		Budgets: budgets, AuditLogger: auditLogger})
 	mcpHandler := diagnose.NewControl(auditLogger, named)
@@ -709,6 +732,82 @@ func sweepLedgers(ctx context.Context, c client.Client, namespace string, interv
 	}
 }
 
+// startLedgerMaintenance recovers expired leases every minute and prunes
+// settled ledgers of deleted runs every hour.
+func startLedgerMaintenance(c client.Client, namespace string, retention time.Duration) {
+	go sweepLedgers(context.Background(), c, namespace, budgetkubernetes.SweepInterval)
+	go pruneLedgerLoop(context.Background(), c, namespace, retention, ledgerPruneInterval)
+}
+
+// ledgerPruneInterval is how often settled ledgers of deleted runs are removed.
+const ledgerPruneInterval = time.Hour
+
+// pruneLedgerLoop deletes the ledgers of runs that no longer exist once they
+// are settled and older than retention, so ledger storage is bounded by the
+// runs the cluster retains.
+func pruneLedgerLoop(ctx context.Context, c client.Client, namespace string, retention, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		pruneCtx, cancel := context.WithTimeout(ctx, interval)
+		if deleted, err := pruneLedgers(pruneCtx, c, namespace, time.Now(), retention); err != nil {
+			log.Printf("Failed to prune budget ledgers: %v", err)
+		} else if deleted > 0 {
+			log.Printf("Pruned %d budget ledgers of deleted AgentRuns", deleted)
+		}
+		cancel()
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// pruneLedgers reads every AgentRun first: a ledger is pruned only if its run
+// is absent from that complete list. A failed list prunes nothing.
+func pruneLedgers(ctx context.Context, c client.Client, namespace string, now time.Time,
+	retention time.Duration,
+) (int, error) {
+	var runs sprooziv1alpha1.AgentRunList
+	if err := c.List(ctx, &runs); err != nil {
+		return 0, fmt.Errorf("list AgentRuns: %w", err)
+	}
+	live := make(map[string]bool, len(runs.Items))
+	for i := range runs.Items {
+		live[string(runs.Items[i].UID)] = true
+	}
+	return budgetkubernetes.Prune(ctx, c, namespace, now, retention, func(uid string) bool { return live[uid] })
+}
+
+// loadLedgerRetention reads BUDGET_LEDGER_RETENTION with the rest of the
+// startup configuration, so a bad value stops the gateway before it serves.
+// A period under an hour could delete a ledger before a run that was just
+// deleted is gone from every component's view.
+func loadLedgerRetention() (time.Duration, error) {
+	retention, err := durationEnv("BUDGET_LEDGER_RETENTION", budgetkubernetes.DefaultRetention)
+	if err != nil {
+		return 0, err
+	}
+	if retention < time.Hour {
+		return 0, fmt.Errorf("BUDGET_LEDGER_RETENTION must be at least 1h, got %s", retention)
+	}
+	return retention, nil
+}
+
+// durationEnv reads a positive Go duration from name, or returns fallback.
+func durationEnv(name string, fallback time.Duration) (time.Duration, error) {
+	raw := os.Getenv(name)
+	if raw == "" {
+		return fallback, nil
+	}
+	value, err := time.ParseDuration(raw)
+	if err != nil || value <= 0 {
+		return 0, fmt.Errorf("%s must be a positive duration, got %q", name, raw)
+	}
+	return value, nil
+}
+
 // drainTimeout bounds the wait for model calls to settle on shutdown. It
 // fits inside terminationGracePeriodSeconds (45) in config/manager/gateway.yaml
 // with room for the settlement writes themselves.
@@ -748,10 +847,31 @@ const upstreamCallTimeout = proxytransport.MaxRequestDuration
 // inspected connection allows, as before.
 const modelHeaderTimeout = proxytransport.MaxRequestDuration
 
+// directTransport is the default transport without ambient proxy settings.
+// Upstream calls carry injected provider credentials; an HTTPS_PROXY added to
+// the gateway Pod by a mutating webhook or a debugging edit must not route them
+// elsewhere. The MCP bridge does the same (ADR 0001).
+func directTransport() *http.Transport {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	return transport
+}
+
+// newUpstreamClient returns a client for provider and service calls: no
+// ambient proxy, and no redirects, which could carry an injected credential
+// to a host the policy did not name.
+func newUpstreamClient(timeout time.Duration) *http.Client {
+	return &http.Client{
+		Timeout:       timeout,
+		Transport:     directTransport(),
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+}
+
 // newModelClient returns the provider client. A harness that disconnects
 // cancels the upstream call.
 func newModelClient() *http.Client {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport := directTransport()
 	transport.ResponseHeaderTimeout = modelHeaderTimeout
 	return &http.Client{Transport: transport}
 }
@@ -849,4 +969,25 @@ func validateModelUpstream(name, value string) error {
 		return fmt.Errorf("%s must be an https origin", name)
 	}
 	return nil
+}
+
+// warnSystemConfigWrites reports any grant that lets the gateway write the
+// ConfigMaps in sproozi-system that hold its own configuration (ADR 0041). It
+// changes nothing; an administrator removes the binding.
+func warnSystemConfigWrites(ctx context.Context, clients authentication.Interface, out io.Writer) {
+	for _, verb := range []string{"create", "update", "patch", "delete"} {
+		attributes := &authorizationv1.ResourceAttributes{Namespace: "sproozi-system", Resource: "configmaps", Verb: verb}
+		review, err := clients.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx,
+			&authorizationv1.SelfSubjectAccessReview{
+				Spec: authorizationv1.SelfSubjectAccessReviewSpec{ResourceAttributes: attributes},
+			}, metav1.CreateOptions{})
+		if err != nil {
+			return
+		}
+		if review.Status.Allowed {
+			_, _ = fmt.Fprintf(out, "WARNING: the gateway can %s ConfigMaps in sproozi-system, "+
+				"which hold its own configuration; remove the Role or binding that grants it (ADR 0041)\n", verb)
+			return
+		}
+	}
 }

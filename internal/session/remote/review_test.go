@@ -2,6 +2,7 @@ package remote
 
 import (
 	"errors"
+	"slices"
 	"testing"
 
 	authenticationv1 "k8s.io/api/authentication/v1"
@@ -12,6 +13,8 @@ import (
 
 	"github.com/andrewmccall/sproozi/internal/session/profile"
 )
+
+const apiAudience = "https://kubernetes.default.svc"
 
 func TestReviewerAuthorizesByTokenReviewAndRBAC(t *testing.T) {
 	const cli = "system:serviceaccount:team-a:sproozi-cli"
@@ -26,17 +29,48 @@ func TestReviewerAuthorizesByTokenReviewAndRBAC(t *testing.T) {
 			return errors.As(err, &r) && r.Code == profile.CodeDenied
 		}},
 		{"empty token", "", func(err error) bool { return errors.Is(err, profile.ErrUnauthenticated) }},
+		// A developer's own credential, valid for the API server, is never
+		// accepted, even for an identity RBAC allows.
+		{"API server token of an allowed identity", "api-token", func(err error) bool {
+			return errors.Is(err, profile.ErrUnauthenticated)
+		}},
+		// A review answered without audiences did not check the audience.
+		{"audience not checked", "unaware-token", func(err error) bool {
+			return errors.Is(err, profile.ErrUnauthenticated)
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			kube := fake.NewClientset()
 			kube.PrependReactor("create", "tokenreviews", func(a k8stesting.Action) (bool, runtime.Object, error) {
 				review := a.(k8stesting.CreateAction).GetObject().(*authenticationv1.TokenReview)
+				// Model an audience-aware API server: a review with no
+				// audiences checks the API server's own.
+				requested := review.Spec.Audiences
+				if len(requested) == 0 {
+					requested = []string{apiAudience}
+				}
+				user := authenticationv1.UserInfo{Username: cli, Groups: []string{"system:serviceaccounts"},
+					Extra: map[string]authenticationv1.ExtraValue{"k": {"v"}}}
+				var audiences []string
 				switch review.Spec.Token {
 				case "cli-token":
-					review.Status = authenticationv1.TokenReviewStatus{Authenticated: true, User: authenticationv1.UserInfo{Username: cli,
-						Groups: []string{"system:serviceaccounts"}, Extra: map[string]authenticationv1.ExtraValue{"k": {"v"}}}}
+					audiences = []string{TokenAudience}
+				case "api-token":
+					audiences = []string{apiAudience}
 				case "other-token":
-					review.Status = authenticationv1.TokenReviewStatus{Authenticated: true, User: authenticationv1.UserInfo{Username: "someone"}}
+					audiences, user = []string{TokenAudience}, authenticationv1.UserInfo{Username: "someone"}
+				case "unaware-token":
+					review.Status = authenticationv1.TokenReviewStatus{Authenticated: true, User: user}
+					return true, review, nil
+				}
+				var granted []string
+				for _, audience := range audiences {
+					if slices.Contains(requested, audience) {
+						granted = append(granted, audience)
+					}
+				}
+				if len(granted) > 0 {
+					review.Status = authenticationv1.TokenReviewStatus{Authenticated: true, User: user, Audiences: granted}
 				}
 				return true, review, nil
 			})

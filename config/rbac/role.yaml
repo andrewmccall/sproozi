@@ -42,7 +42,6 @@ rules:
   resources:
   - agentruns
   verbs:
-  - create
   - delete
   - get
   - list

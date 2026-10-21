@@ -71,7 +71,8 @@ func TestAgentRunSandboxPodCreatedOnRunning(t *testing.T) {
 	if err := c.Get(ctx, client.ObjectKey{Namespace: ns, Name: testRuntimeName}, &rt); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := k8sresources.NewPodSandboxClient(c, c).Ensure(ctx, &r, &rt); err != nil {
+	sandboxes := k8sresources.NewPodSandboxClient(c, c).WithGatewayResolver(testGatewayResolver)
+	if _, err := sandboxes.Ensure(ctx, &r, &rt); err != nil {
 		t.Fatalf("reconcile API-defaulted sandbox: %v", err)
 	}
 }
@@ -102,7 +103,7 @@ func TestSandboxEnsureAcceptsAPIDefaultedProbesAndVolumes(t *testing.T) {
 			Identity: sprooziv1alpha1.AgentRunIdentity{ServiceAccountName: "defaulted"}},
 	}
 
-	sandboxes := k8sresources.NewPodSandboxClient(testClient, testClient)
+	sandboxes := k8sresources.NewPodSandboxClient(testClient, testClient).WithGatewayResolver(testGatewayResolver)
 	if _, err := sandboxes.Ensure(ctx, run, rt); err != nil {
 		t.Fatalf("create sandbox: %v", err)
 	}

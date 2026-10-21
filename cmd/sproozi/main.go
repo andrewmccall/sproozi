@@ -120,6 +120,12 @@ func help(topics []string, out io.Writer) error {
 		printTopUsage(out)
 		return nil
 	case 1:
+		if topics[0] == "help" {
+			// help is handled before the command table; describe it here
+			// rather than suggest the name the user just typed.
+			_, _ = fmt.Fprintln(out, "Usage: sproozi help [command]\n\nShow all commands, or one command's usage and flags.")
+			return nil
+		}
 		c, ok := findCommand(topics[0])
 		if !ok {
 			return unknownCommand(topics[0])

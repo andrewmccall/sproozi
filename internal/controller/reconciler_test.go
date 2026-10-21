@@ -18,6 +18,7 @@ package controller_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
 	"strings"
@@ -47,6 +48,8 @@ import (
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/controller"
+	"github.com/andrewmccall/sproozi/internal/harness"
+	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
 
 	k8sresources "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
 )
@@ -54,12 +57,27 @@ import (
 // testNS is the namespace used across reconciler unit tests.
 const testNS = "default"
 
+// runOne is the fixture AgentRun name; managedValue enables a managed template.
+const (
+	runOne       = "run1"
+	managedValue = "true"
+)
+
 // testPolicy is the fixture AgentPolicy name.
 const testPolicy = "sre"
 
 // newScheme builds a runtime scheme with the sproozi types plus the built-in
 // Kubernetes types (corev1/rbacv1/networkingv1) needed by the identity provisioning
 // helpers in internal/runtime/kubernetes.
+
+// Registration fixtures shared by the managed-session tests.
+const (
+	testPrincipal   = "alice"
+	testNativeUUID  = "12345678-1234-1234-1234-123456789abc"
+	testOperationID = "run-1"
+	testSessionID   = "spr-1"
+)
+
 func newScheme() *runtime.Scheme {
 	s := runtime.NewScheme()
 	_ = sprooziv1alpha1.AddToScheme(s)
@@ -202,21 +220,21 @@ func getPhase(t *testing.T, c client.Client, name string) sprooziv1alpha1.AgentR
 func TestReconcilerNewRunBecomesQueued(t *testing.T) {
 	t.Parallel()
 
-	objs := append(fixtures(), newRun("run1"))
+	objs := append(fixtures(), newRun(runOne))
 	c := fake.NewClientBuilder().
 		WithScheme(newScheme()).
 		WithObjects(objs...).
 		WithStatusSubresource(&sprooziv1alpha1.AgentRun{}).
 		Build()
 
-	if _, err := reconcileRun(t, c, "run1"); err != nil {
+	if _, err := reconcileRun(t, c, runOne); err != nil {
 		t.Fatalf("Reconcile() error = %v", err)
 	}
 
-	if phase := getPhase(t, c, "run1"); phase != sprooziv1alpha1.AgentRunPhaseQueued {
+	if phase := getPhase(t, c, runOne); phase != sprooziv1alpha1.AgentRunPhaseQueued {
 		t.Errorf("phase = %q, want %q", phase, sprooziv1alpha1.AgentRunPhaseQueued)
 	}
-	queued := getRun(t, c, "run1")
+	queued := getRun(t, c, runOne)
 	if !controllerutil.ContainsFinalizer(&queued, "sproozi.com/agentrun-cleanup") {
 		t.Fatal("active AgentRun must retain cleanup finalizer")
 	}
@@ -225,7 +243,7 @@ func TestReconcilerNewRunBecomesQueued(t *testing.T) {
 func TestReconcilerQueuedRunAdmittedWhenNoActiveRun(t *testing.T) {
 	t.Parallel()
 
-	run := newRun("run1")
+	run := newRun(runOne)
 	run.Status.Phase = sprooziv1alpha1.AgentRunPhaseQueued
 	objs := append(fixtures(), run)
 	c := fake.NewClientBuilder().
@@ -234,11 +252,11 @@ func TestReconcilerQueuedRunAdmittedWhenNoActiveRun(t *testing.T) {
 		WithStatusSubresource(&sprooziv1alpha1.AgentRun{}).
 		Build()
 
-	if _, err := reconcileRun(t, c, "run1"); err != nil {
+	if _, err := reconcileRun(t, c, runOne); err != nil {
 		t.Fatalf("Reconcile() error = %v", err)
 	}
 
-	got := getRun(t, c, "run1")
+	got := getRun(t, c, runOne)
 	if got.Status.Phase != sprooziv1alpha1.AgentRunPhaseAdmitted {
 		t.Errorf("phase = %q, want %q", got.Status.Phase, sprooziv1alpha1.AgentRunPhaseAdmitted)
 	}
@@ -291,7 +309,7 @@ func TestReconcilerQueuedRunIgnoresStaleCacheForCap(t *testing.T) {
 func TestReconcilerQueuedRunStaysQueuedAtGlobalCap(t *testing.T) {
 	t.Parallel()
 
-	run1 := newRun("run1")
+	run1 := newRun(runOne)
 	run1.Status.Phase = sprooziv1alpha1.AgentRunPhaseAdmitted
 	run2 := newRun("run2")
 	run2.Status.Phase = sprooziv1alpha1.AgentRunPhaseQueued
@@ -314,7 +332,7 @@ func TestReconcilerQueuedRunStaysQueuedAtGlobalCap(t *testing.T) {
 func TestReconcilerQueuedRunAdmittedAlongsideActiveRunWithoutCap(t *testing.T) {
 	t.Parallel()
 
-	run1 := newRun("run1")
+	run1 := newRun(runOne)
 	run1.Status.Phase = sprooziv1alpha1.AgentRunPhaseRunning
 	run1.Status.PolicyName = testPolicy
 	run2 := newRun("run2")
@@ -396,7 +414,7 @@ func TestReconcilerCountsRecordedPolicyAfterTemplateRepointed(t *testing.T) {
 	uncapped := secondPolicy("uncapped", nil)[0]
 	sreTemplate := fixtures()[2].(*sprooziv1alpha1.AgentTemplate)
 	sreTemplate.Name = "sre-second"
-	active := newRun("run1")
+	active := newRun(runOne)
 	active.Status.Phase = sprooziv1alpha1.AgentRunPhaseRunning
 	active.Status.PolicyName = testPolicy
 	queued := newRun("run2")
@@ -481,7 +499,7 @@ func TestReconcilerCountsLegacyActiveRunThroughTemplate(t *testing.T) {
 
 	objs := fixtures()
 	objs[1].(*sprooziv1alpha1.AgentPolicy).Spec.MaxActiveRuns = ptr.To(int32(1))
-	active := newRun("run1")
+	active := newRun(runOne)
 	active.Status.Phase = sprooziv1alpha1.AgentRunPhaseRunning
 	queued := newRun("run2")
 	queued.Status.Phase = sprooziv1alpha1.AgentRunPhaseQueued
@@ -502,9 +520,9 @@ func TestReconcilerQuotaRejectionWaitsAndRetries(t *testing.T) {
 	quotaErr := apierrors.NewForbidden(corev1.Resource("pods"), "sandbox",
 		errors.New("exceeded quota: agents, requested: pods=1, used: pods=2, limited: pods=2"))
 	sandbox := &k8sresources.FakeSandboxClient{EnsureErr: quotaErr, Status: k8sresources.SandboxStatusRunning}
-	r, c := newReconcilerWithSandbox(sandbox, append(fixtures(), newRun("run1"))...)
-	driveToRunning(t, r, "run1")
-	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "run1", Namespace: testNS}}
+	r, c := newReconcilerWithSandbox(sandbox, append(fixtures(), newRun(runOne))...)
+	driveToRunning(t, r, runOne)
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: runOne, Namespace: testNS}}
 
 	result, err := r.Reconcile(context.Background(), req)
 	if err != nil {
@@ -513,18 +531,18 @@ func TestReconcilerQuotaRejectionWaitsAndRetries(t *testing.T) {
 	if result.RequeueAfter < 5*time.Second || result.RequeueAfter > time.Minute {
 		t.Fatalf("RequeueAfter = %v, want a bounded backoff", result.RequeueAfter)
 	}
-	got := getRun(t, c, "run1")
+	got := getRun(t, c, runOne)
 	if got.Status.Phase != sprooziv1alpha1.AgentRunPhaseRunning {
 		t.Fatalf("phase = %q, want the run kept active", got.Status.Phase)
 	}
-	assertReadyMessage(t, c, "run1", "QuotaExceeded", "exceeded quota: agents")
+	assertReadyMessage(t, c, runOne, "QuotaExceeded", "exceeded quota: agents")
 
 	// A retry that is rejected again must not write status, or each write
 	// would trigger the next reconcile at once.
 	if _, err := r.Reconcile(context.Background(), req); err != nil {
 		t.Fatalf("retry Reconcile() error = %v", err)
 	}
-	if again := getRun(t, c, "run1"); again.ResourceVersion != got.ResourceVersion {
+	if again := getRun(t, c, runOne); again.ResourceVersion != got.ResourceVersion {
 		t.Fatalf("resourceVersion changed from %s to %s on a repeated rejection", got.ResourceVersion, again.ResourceVersion)
 	}
 
@@ -532,7 +550,7 @@ func TestReconcilerQuotaRejectionWaitsAndRetries(t *testing.T) {
 	if _, err := r.Reconcile(context.Background(), req); err != nil {
 		t.Fatalf("Reconcile() after quota freed error = %v", err)
 	}
-	created := getRun(t, c, "run1")
+	created := getRun(t, c, runOne)
 	ready := apimeta.FindStatusCondition(created.Status.Conditions, "Ready")
 	if created.Status.Identity.SandboxName == "" || ready == nil || ready.Status != metav1.ConditionTrue || ready.Reason != "Running" {
 		t.Fatalf("after quota freed: sandbox %q, Ready %#v; want a sandbox and Ready=True/Running", created.Status.Identity.SandboxName, ready)
@@ -545,7 +563,7 @@ func TestReconcilerQueuedRunFailsWhenTemplateMissing(t *testing.T) {
 	// Only runtime and policy; no template
 	rt := fixtures()[0]
 	pol := fixtures()[1]
-	run := newRun("run1")
+	run := newRun(runOne)
 	run.Status.Phase = sprooziv1alpha1.AgentRunPhaseQueued
 	c := fake.NewClientBuilder().
 		WithScheme(newScheme()).
@@ -553,14 +571,14 @@ func TestReconcilerQueuedRunFailsWhenTemplateMissing(t *testing.T) {
 		WithStatusSubresource(&sprooziv1alpha1.AgentRun{}).
 		Build()
 
-	if _, err := reconcileRun(t, c, "run1"); err != nil {
+	if _, err := reconcileRun(t, c, runOne); err != nil {
 		t.Fatalf("Reconcile() error = %v", err)
 	}
 
-	if phase := getPhase(t, c, "run1"); phase != sprooziv1alpha1.AgentRunPhaseFailed {
+	if phase := getPhase(t, c, runOne); phase != sprooziv1alpha1.AgentRunPhaseFailed {
 		t.Errorf("phase = %q, want %q", phase, sprooziv1alpha1.AgentRunPhaseFailed)
 	}
-	assertReadyMessage(t, c, "run1", "TemplateNotFound", "AgentTemplate sre-remediation", "namespace "+testNS)
+	assertReadyMessage(t, c, runOne, "TemplateNotFound", "AgentTemplate sre-remediation", "namespace "+testNS)
 }
 
 func TestReconcilerManagedRunWithoutRegistrationFailsWithMessage(t *testing.T) {
@@ -568,8 +586,8 @@ func TestReconcilerManagedRunWithoutRegistrationFailsWithMessage(t *testing.T) {
 
 	objs := fixtures()
 	tmpl := objs[2].(*sprooziv1alpha1.AgentTemplate)
-	tmpl.Annotations = map[string]string{"sessions.sproozi.com/managed": "true"}
-	run := newRun("run1")
+	tmpl.Annotations = map[string]string{"sessions.sproozi.com/managed": managedValue}
+	run := newRun(runOne)
 	run.Status.Phase = sprooziv1alpha1.AgentRunPhaseQueued
 	c := fake.NewClientBuilder().
 		WithScheme(newScheme()).
@@ -577,10 +595,10 @@ func TestReconcilerManagedRunWithoutRegistrationFailsWithMessage(t *testing.T) {
 		WithStatusSubresource(&sprooziv1alpha1.AgentRun{}).
 		Build()
 
-	if _, err := reconcileRun(t, c, "run1"); err != nil {
+	if _, err := reconcileRun(t, c, runOne); err != nil {
 		t.Fatalf("Reconcile() error = %v", err)
 	}
-	assertReadyMessage(t, c, "run1", "SessionBindingRejected", "Session registration", "no longer exists")
+	assertReadyMessage(t, c, runOne, "SessionBindingRejected", "Session registration", "no longer exists")
 }
 
 func TestReconcilerQueuedRunFailsWhenPolicyMissing(t *testing.T) {
@@ -589,7 +607,7 @@ func TestReconcilerQueuedRunFailsWhenPolicyMissing(t *testing.T) {
 	rt := fixtures()[0]
 	// Template references "sre" policy, which is not present.
 	tmpl := fixtures()[2]
-	run := newRun("run1")
+	run := newRun(runOne)
 	run.Status.Phase = sprooziv1alpha1.AgentRunPhaseQueued
 	c := fake.NewClientBuilder().
 		WithScheme(newScheme()).
@@ -597,14 +615,14 @@ func TestReconcilerQueuedRunFailsWhenPolicyMissing(t *testing.T) {
 		WithStatusSubresource(&sprooziv1alpha1.AgentRun{}).
 		Build()
 
-	if _, err := reconcileRun(t, c, "run1"); err != nil {
+	if _, err := reconcileRun(t, c, runOne); err != nil {
 		t.Fatalf("Reconcile() error = %v", err)
 	}
 
-	if phase := getPhase(t, c, "run1"); phase != sprooziv1alpha1.AgentRunPhaseFailed {
+	if phase := getPhase(t, c, runOne); phase != sprooziv1alpha1.AgentRunPhaseFailed {
 		t.Errorf("phase = %q, want %q", phase, sprooziv1alpha1.AgentRunPhaseFailed)
 	}
-	assertReadyMessage(t, c, "run1", "PolicyNotFound", "AgentPolicy sre", "AgentTemplate sre-remediation", "namespace "+testNS)
+	assertReadyMessage(t, c, runOne, "PolicyNotFound", "AgentPolicy sre", "AgentTemplate sre-remediation", "namespace "+testNS)
 }
 
 func TestReconcilerQueuedRunFailsWhenRuntimeMissing(t *testing.T) {
@@ -613,7 +631,7 @@ func TestReconcilerQueuedRunFailsWhenRuntimeMissing(t *testing.T) {
 	pol := fixtures()[1]
 	tmpl := fixtures()[2]
 	// No runtime.
-	run := newRun("run1")
+	run := newRun(runOne)
 	run.Status.Phase = sprooziv1alpha1.AgentRunPhaseQueued
 	c := fake.NewClientBuilder().
 		WithScheme(newScheme()).
@@ -621,14 +639,14 @@ func TestReconcilerQueuedRunFailsWhenRuntimeMissing(t *testing.T) {
 		WithStatusSubresource(&sprooziv1alpha1.AgentRun{}).
 		Build()
 
-	if _, err := reconcileRun(t, c, "run1"); err != nil {
+	if _, err := reconcileRun(t, c, runOne); err != nil {
 		t.Fatalf("Reconcile() error = %v", err)
 	}
 
-	if phase := getPhase(t, c, "run1"); phase != sprooziv1alpha1.AgentRunPhaseFailed {
+	if phase := getPhase(t, c, runOne); phase != sprooziv1alpha1.AgentRunPhaseFailed {
 		t.Errorf("phase = %q, want %q", phase, sprooziv1alpha1.AgentRunPhaseFailed)
 	}
-	assertReadyMessage(t, c, "run1", "RuntimeNotFound", "AgentRuntime codex", "AgentTemplate sre-remediation", "namespace "+testNS)
+	assertReadyMessage(t, c, runOne, "RuntimeNotFound", "AgentRuntime codex", "AgentTemplate sre-remediation", "namespace "+testNS)
 }
 
 // An unlaunchable runtime must fail the run at admission. If it were admitted,
@@ -679,7 +697,7 @@ func TestReconcilerQueuedRunWithInvalidRuntimeFailsWithoutTakingCapacity(t *test
 func TestReconcilerQueuedRunFailsWhenCapabilityDenied(t *testing.T) {
 	t.Parallel()
 
-	run := newRun("run1")
+	run := newRun(runOne)
 	run.Status.Phase = sprooziv1alpha1.AgentRunPhaseQueued
 	// Request a capability not in the policy
 	run.Spec.Capabilities = []sprooziv1alpha1.CapabilityKind{sprooziv1alpha1.CapabilityNetworkEgress}
@@ -690,11 +708,11 @@ func TestReconcilerQueuedRunFailsWhenCapabilityDenied(t *testing.T) {
 		WithStatusSubresource(&sprooziv1alpha1.AgentRun{}).
 		Build()
 
-	if _, err := reconcileRun(t, c, "run1"); err != nil {
+	if _, err := reconcileRun(t, c, runOne); err != nil {
 		t.Fatalf("Reconcile() error = %v", err)
 	}
 
-	if phase := getPhase(t, c, "run1"); phase != sprooziv1alpha1.AgentRunPhaseFailed {
+	if phase := getPhase(t, c, runOne); phase != sprooziv1alpha1.AgentRunPhaseFailed {
 		t.Errorf("phase = %q, want %q", phase, sprooziv1alpha1.AgentRunPhaseFailed)
 	}
 }
@@ -702,7 +720,7 @@ func TestReconcilerQueuedRunFailsWhenCapabilityDenied(t *testing.T) {
 func TestReconcilerQueuedRunCancelledWhenCancelSet(t *testing.T) {
 	t.Parallel()
 
-	run := newRun("run1")
+	run := newRun(runOne)
 	run.Status.Phase = sprooziv1alpha1.AgentRunPhaseQueued
 	run.Spec.Cancel = true
 	objs := append(fixtures(), run)
@@ -712,20 +730,20 @@ func TestReconcilerQueuedRunCancelledWhenCancelSet(t *testing.T) {
 		WithStatusSubresource(&sprooziv1alpha1.AgentRun{}).
 		Build()
 
-	if _, err := reconcileRun(t, c, "run1"); err != nil {
+	if _, err := reconcileRun(t, c, runOne); err != nil {
 		t.Fatalf("Reconcile() error = %v", err)
 	}
 
-	if phase := getPhase(t, c, "run1"); phase != sprooziv1alpha1.AgentRunPhaseCancelled {
+	if phase := getPhase(t, c, runOne); phase != sprooziv1alpha1.AgentRunPhaseCancelled {
 		t.Errorf("phase = %q, want %q", phase, sprooziv1alpha1.AgentRunPhaseCancelled)
 	}
-	assertReadyMessage(t, c, "run1", "CancelRequested", "spec.cancel")
+	assertReadyMessage(t, c, runOne, "CancelRequested", "spec.cancel")
 }
 
 func TestReconcilerAdmittedRunCancelledWhenCancelSet(t *testing.T) {
 	t.Parallel()
 
-	run := newRun("run1")
+	run := newRun(runOne)
 	startedAt := metav1.NewTime(time.Now().Add(-5 * time.Minute))
 	run.Status.Phase = sprooziv1alpha1.AgentRunPhaseAdmitted
 	run.Status.StartedAt = &startedAt
@@ -737,11 +755,11 @@ func TestReconcilerAdmittedRunCancelledWhenCancelSet(t *testing.T) {
 		WithStatusSubresource(&sprooziv1alpha1.AgentRun{}).
 		Build()
 
-	if _, err := reconcileRun(t, c, "run1"); err != nil {
+	if _, err := reconcileRun(t, c, runOne); err != nil {
 		t.Fatalf("Reconcile() error = %v", err)
 	}
 
-	if phase := getPhase(t, c, "run1"); phase != sprooziv1alpha1.AgentRunPhaseCancelled {
+	if phase := getPhase(t, c, runOne); phase != sprooziv1alpha1.AgentRunPhaseCancelled {
 		t.Errorf("phase = %q, want %q", phase, sprooziv1alpha1.AgentRunPhaseCancelled)
 	}
 }
@@ -749,7 +767,7 @@ func TestReconcilerAdmittedRunCancelledWhenCancelSet(t *testing.T) {
 func TestReconcilerAdmittedRunTimedOut(t *testing.T) {
 	t.Parallel()
 
-	run := newRun("run1")
+	run := newRun(runOne)
 	// StartedAt was 2 hours ago; policy MaxExecutionDuration is 1 hour.
 	twoHoursAgo := metav1.NewTime(time.Now().Add(-2 * time.Hour))
 	run.Status.Phase = sprooziv1alpha1.AgentRunPhaseAdmitted
@@ -761,20 +779,20 @@ func TestReconcilerAdmittedRunTimedOut(t *testing.T) {
 		WithStatusSubresource(&sprooziv1alpha1.AgentRun{}).
 		Build()
 
-	if _, err := reconcileRun(t, c, "run1"); err != nil {
+	if _, err := reconcileRun(t, c, runOne); err != nil {
 		t.Fatalf("Reconcile() error = %v", err)
 	}
 
-	if phase := getPhase(t, c, "run1"); phase != sprooziv1alpha1.AgentRunPhaseTimedOut {
+	if phase := getPhase(t, c, runOne); phase != sprooziv1alpha1.AgentRunPhaseTimedOut {
 		t.Errorf("phase = %q, want %q", phase, sprooziv1alpha1.AgentRunPhaseTimedOut)
 	}
-	assertReadyMessage(t, c, "run1", "MaxExecutionDurationExceeded", "execution deadline")
+	assertReadyMessage(t, c, runOne, "MaxExecutionDurationExceeded", "execution deadline")
 }
 
 func TestReconcilerRunningRunTimedOut(t *testing.T) {
 	t.Parallel()
 
-	run := newRun("run1")
+	run := newRun(runOne)
 	run.Status.Phase = sprooziv1alpha1.AgentRunPhaseRunning
 	// StartedAt was 2 hours ago; policy MaxExecutionDuration is 1 hour.
 	twoHoursAgo := metav1.NewTime(time.Now().Add(-2 * time.Hour))
@@ -786,11 +804,11 @@ func TestReconcilerRunningRunTimedOut(t *testing.T) {
 		WithStatusSubresource(&sprooziv1alpha1.AgentRun{}).
 		Build()
 
-	if _, err := reconcileRun(t, c, "run1"); err != nil {
+	if _, err := reconcileRun(t, c, runOne); err != nil {
 		t.Fatalf("Reconcile() error = %v", err)
 	}
 
-	if phase := getPhase(t, c, "run1"); phase != sprooziv1alpha1.AgentRunPhaseTimedOut {
+	if phase := getPhase(t, c, runOne); phase != sprooziv1alpha1.AgentRunPhaseTimedOut {
 		t.Errorf("phase = %q, want %q", phase, sprooziv1alpha1.AgentRunPhaseTimedOut)
 	}
 }
@@ -798,7 +816,7 @@ func TestReconcilerRunningRunTimedOut(t *testing.T) {
 func TestReconcilerRunningRunCancelledWhenCancelSet(t *testing.T) {
 	t.Parallel()
 
-	run := newRun("run1")
+	run := newRun(runOne)
 	run.Status.Phase = sprooziv1alpha1.AgentRunPhaseRunning
 	run.Spec.Cancel = true
 	startedAt := metav1.NewTime(time.Now().Add(-5 * time.Minute))
@@ -810,11 +828,11 @@ func TestReconcilerRunningRunCancelledWhenCancelSet(t *testing.T) {
 		WithStatusSubresource(&sprooziv1alpha1.AgentRun{}).
 		Build()
 
-	if _, err := reconcileRun(t, c, "run1"); err != nil {
+	if _, err := reconcileRun(t, c, runOne); err != nil {
 		t.Fatalf("Reconcile() error = %v", err)
 	}
 
-	if phase := getPhase(t, c, "run1"); phase != sprooziv1alpha1.AgentRunPhaseCancelled {
+	if phase := getPhase(t, c, runOne); phase != sprooziv1alpha1.AgentRunPhaseCancelled {
 		t.Errorf("phase = %q, want %q", phase, sprooziv1alpha1.AgentRunPhaseCancelled)
 	}
 }
@@ -822,7 +840,7 @@ func TestReconcilerRunningRunCancelledWhenCancelSet(t *testing.T) {
 func TestReconcilerTerminalRunDeletedAfterTTL(t *testing.T) {
 	t.Parallel()
 
-	run := newRun("run1")
+	run := newRun(runOne)
 	run.Status.Phase = sprooziv1alpha1.AgentRunPhaseSucceeded
 	// Completed 31 days ago; TTL is 30 days.
 	past := metav1.NewTime(time.Now().Add(-31 * 24 * time.Hour))
@@ -834,12 +852,12 @@ func TestReconcilerTerminalRunDeletedAfterTTL(t *testing.T) {
 		WithStatusSubresource(&sprooziv1alpha1.AgentRun{}).
 		Build()
 
-	if _, err := reconcileRun(t, c, "run1"); err != nil {
+	if _, err := reconcileRun(t, c, runOne); err != nil {
 		t.Fatalf("Reconcile() error = %v", err)
 	}
 
 	var got sprooziv1alpha1.AgentRun
-	err := c.Get(context.Background(), types.NamespacedName{Name: "run1", Namespace: testNS}, &got)
+	err := c.Get(context.Background(), types.NamespacedName{Name: runOne, Namespace: testNS}, &got)
 	if err == nil {
 		t.Errorf("Get() after TTL = nil error (run still exists), want not-found")
 	}
@@ -848,7 +866,7 @@ func TestReconcilerTerminalRunDeletedAfterTTL(t *testing.T) {
 func TestReconcilerTerminalRunNotDeletedBeforeTTL(t *testing.T) {
 	t.Parallel()
 
-	run := newRun("run1")
+	run := newRun(runOne)
 	run.Status.Phase = sprooziv1alpha1.AgentRunPhaseSucceeded
 	// Completed only 1 hour ago; TTL is 30 days.
 	recent := metav1.NewTime(time.Now().Add(-1 * time.Hour))
@@ -860,11 +878,11 @@ func TestReconcilerTerminalRunNotDeletedBeforeTTL(t *testing.T) {
 		WithStatusSubresource(&sprooziv1alpha1.AgentRun{}).
 		Build()
 
-	if _, err := reconcileRun(t, c, "run1"); err != nil {
+	if _, err := reconcileRun(t, c, runOne); err != nil {
 		t.Fatalf("Reconcile() error = %v", err)
 	}
 
-	if phase := getPhase(t, c, "run1"); phase != sprooziv1alpha1.AgentRunPhaseSucceeded {
+	if phase := getPhase(t, c, runOne); phase != sprooziv1alpha1.AgentRunPhaseSucceeded {
 		t.Errorf("phase = %q, want Succeeded (run should still exist)", phase)
 	}
 }
@@ -874,7 +892,7 @@ func TestReconcilerTerminalRunNotDeletedBeforeTTL(t *testing.T) {
 func TestReconcilerTerminalRunNotRewrittenWhenTemplateMissing(t *testing.T) {
 	t.Parallel()
 
-	run := newRun("run1")
+	run := newRun(runOne)
 	run.Status.Phase = sprooziv1alpha1.AgentRunPhaseSucceeded
 	// CompletedAt is recent enough that TTL has not elapsed.
 	recent := metav1.NewTime(time.Now().Add(-1 * time.Hour))
@@ -886,11 +904,11 @@ func TestReconcilerTerminalRunNotRewrittenWhenTemplateMissing(t *testing.T) {
 		WithStatusSubresource(&sprooziv1alpha1.AgentRun{}).
 		Build()
 
-	if _, err := reconcileRun(t, c, "run1"); err != nil {
+	if _, err := reconcileRun(t, c, runOne); err != nil {
 		t.Fatalf("Reconcile() error = %v", err)
 	}
 
-	if phase := getPhase(t, c, "run1"); phase != sprooziv1alpha1.AgentRunPhaseSucceeded {
+	if phase := getPhase(t, c, runOne); phase != sprooziv1alpha1.AgentRunPhaseSucceeded {
 		t.Errorf("phase = %q after template deletion; want Succeeded (terminal runs must not be rewritten)", phase)
 	}
 }
@@ -1054,7 +1072,7 @@ func TestReconcilerSandboxDeletedOnTerminal(t *testing.T) {
 func TestReconcilerRecordsSandboxNameAfterStatusConflict(t *testing.T) {
 	t.Parallel()
 
-	run := newRun("run1")
+	run := newRun(runOne)
 	run.Status.Phase = sprooziv1alpha1.AgentRunPhaseRunning
 	run.Status.Identity.ServiceAccountName = "sproozi-run1"
 	startedAt := metav1.NewTime(time.Now().Add(-time.Minute))
@@ -1128,5 +1146,322 @@ func TestReconcilerStaleCacheDoesNotEnsureRecordedSandbox(t *testing.T) {
 	}
 	if len(sc.Ensured) != 1 {
 		t.Fatalf("Ensured = %v, want no second Ensure for a recorded sandbox", sc.Ensured)
+	}
+}
+
+// A managed run held in the queue past its session deadline must leave the
+// queue as TimedOut. Before the fix it stayed Queued forever and kept a
+// simulated admission slot ahead of later runs.
+func TestReconcilerQueuedManagedRunPastDeadlineTimesOut(t *testing.T) {
+	t.Parallel()
+
+	objs := fixtures()
+	tmpl := objs[2].(*sprooziv1alpha1.AgentTemplate)
+	tmpl.Annotations = map[string]string{registry.ManagedTemplateAnnotation: managedValue}
+	run := newRun(runOne)
+	run.Status.Phase = sprooziv1alpha1.AgentRunPhaseQueued
+	c := fake.NewClientBuilder().
+		WithScheme(newScheme()).
+		WithObjects(append(objs, run)...).
+		WithStatusSubresource(&sprooziv1alpha1.AgentRun{}).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+				if obj.GetUID() == "" {
+					obj.SetUID("registration-uid")
+				}
+				return c.Create(ctx, obj, opts...)
+			},
+		}).
+		Build()
+
+	store, err := registry.NewStore(c, testNS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Create(context.Background(), registry.Registration{
+		Harness: harness.NativeCodex, Principal: testPrincipal, SessionID: testSessionID, Epoch: 1, OperationID: testOperationID,
+		InstructionDigest: registry.InstructionsDigest(tmpl.Spec.Instructions),
+		OriginalDeadline:  time.Now().Add(time.Hour), TemplateName: tmpl.Name,
+		Ceilings: map[sprooziv1alpha1.CapabilityKind]sprooziv1alpha1.EndpointBudget{
+			sprooziv1alpha1.CapabilityKubernetesRead: {MaxUnits: 10}},
+		NativeUUID: testNativeUUID, CheckpointDigest: strings.Repeat("b", 64), IntendedRunName: run.Name,
+	}); err != nil {
+		t.Fatalf("Create registration: %v", err)
+	}
+	expireRegistration(t, c, registry.NameForRun(run.Name))
+
+	if _, err := reconcileRun(t, c, runOne); err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+	if phase := getPhase(t, c, runOne); phase != sprooziv1alpha1.AgentRunPhaseTimedOut {
+		t.Fatalf("phase = %q, want %q", phase, sprooziv1alpha1.AgentRunPhaseTimedOut)
+	}
+	assertReadyMessage(t, c, runOne, "SessionDeadlineExceeded", "deadline")
+}
+
+// expireRegistration moves a stored registration's deadline into the past,
+// which the registry API itself refuses to create.
+func expireRegistration(t *testing.T, c client.Client, name string) {
+	t.Helper()
+	var cm corev1.ConfigMap
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: testNS, Name: name}, &cm); err != nil {
+		t.Fatal(err)
+	}
+	for key, document := range cm.Data {
+		var doc map[string]any
+		if err := json.Unmarshal([]byte(document), &doc); err != nil {
+			t.Fatal(err)
+		}
+		reg := doc["registration"].(map[string]any)
+		reg["originalDeadline"] = time.Now().Add(-time.Minute).UTC().Format(time.RFC3339Nano)
+		encoded, err := json.Marshal(doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cm.Data[key] = string(encoded)
+	}
+	if err := c.Update(context.Background(), &cm); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Input the agent contract refuses must fail the run before admission, so it
+// never holds a slot under a cap while contract creation fails.
+func TestReconcilerQueuedRunWithInvalidInputFailsBeforeAdmission(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]func(*sprooziv1alpha1.AgentRun){
+		"empty task": func(run *sprooziv1alpha1.AgentRun) { run.Spec.Task = "" },
+		"duplicate capability": func(run *sprooziv1alpha1.AgentRun) {
+			run.Spec.Capabilities = []sprooziv1alpha1.CapabilityKind{
+				sprooziv1alpha1.CapabilityKubernetesRead, sprooziv1alpha1.CapabilityKubernetesRead}
+		},
+		"oversized event context": func(run *sprooziv1alpha1.AgentRun) {
+			run.Spec.EventContext = map[string]string{"body": strings.Repeat("x", 17<<10)}
+		},
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			run := newRun(runOne)
+			run.Status.Phase = sprooziv1alpha1.AgentRunPhaseQueued
+			mutate(run)
+			c := fake.NewClientBuilder().
+				WithScheme(newScheme()).
+				WithObjects(append(fixtures(), run)...).
+				WithStatusSubresource(&sprooziv1alpha1.AgentRun{}).
+				Build()
+
+			if _, err := reconcileRun(t, c, runOne); err != nil {
+				t.Fatalf("Reconcile() error = %v", err)
+			}
+			got := getRun(t, c, runOne)
+			if got.Status.Phase != sprooziv1alpha1.AgentRunPhaseFailed || got.Status.StartedAt != nil {
+				t.Fatalf("phase = %q, startedAt = %v; want Failed without admission", got.Status.Phase, got.Status.StartedAt)
+			}
+			assertReadyMessage(t, c, runOne, "InvalidRunInput", "AgentTemplate sre-remediation", "AgentRuntime codex")
+		})
+	}
+}
+
+// Retention follows the policy a run was admitted under, not the policy its
+// template names now.
+func TestReconcilerRetentionUsesAdmittingPolicy(t *testing.T) {
+	t.Parallel()
+
+	objs := fixtures()
+	short := objs[1].(*sprooziv1alpha1.AgentPolicy).DeepCopy()
+	short.Name = "short-retention"
+	short.Spec.RetentionTTL = metav1.Duration{Duration: time.Hour}
+	objs[2].(*sprooziv1alpha1.AgentTemplate).Spec.PolicyRef.Name = short.Name
+	run := newRun(runOne)
+	run.Status.Phase = sprooziv1alpha1.AgentRunPhaseSucceeded
+	run.Status.PolicyName = testPolicy // admitted under the 30-day policy
+	finished := metav1.NewTime(time.Now().Add(-2 * time.Hour))
+	run.Status.CompletedAt = &finished
+	c := fake.NewClientBuilder().
+		WithScheme(newScheme()).
+		WithObjects(append(objs, short, run)...).
+		WithStatusSubresource(&sprooziv1alpha1.AgentRun{}).
+		Build()
+
+	if _, err := reconcileRun(t, c, runOne); err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+	if phase := getPhase(t, c, runOne); phase != sprooziv1alpha1.AgentRunPhaseSucceeded {
+		t.Fatalf("phase = %q; the run was deleted under the template's new policy", phase)
+	}
+}
+
+// A managed run whose session stop completed waits for its sandbox to finish,
+// then ends Succeeded with SessionStopped, whatever the agent's exit code.
+// Before, the stopped registration read as a binding conflict and the run was
+// failed, and its sandbox released, while the executor was still capturing.
+func TestReconcilerStoppedManagedSessionEndsAsStopped(t *testing.T) {
+	t.Parallel()
+	checkStoppedManagedSessionEnds(t, false)
+}
+
+// A stop that completed before the deadline must not read as a timeout when
+// the controller first observes it afterwards, for example after downtime.
+func TestReconcilerStoppedManagedSessionPastDeadlineEndsAsStopped(t *testing.T) {
+	t.Parallel()
+	checkStoppedManagedSessionEnds(t, true)
+}
+
+func checkStoppedManagedSessionEnds(t *testing.T, pastDeadline bool) {
+	t.Helper()
+	objs := fixtures()
+	tmpl := objs[2].(*sprooziv1alpha1.AgentTemplate)
+	tmpl.Annotations = map[string]string{registry.ManagedTemplateAnnotation: managedValue}
+	run := newRun(runOne)
+	run.Status.Phase = sprooziv1alpha1.AgentRunPhaseRunning
+	started := metav1.Now()
+	run.Status.StartedAt = &started
+	run.Status.PolicyName = testPolicy
+	run.Status.Identity = sprooziv1alpha1.AgentRunIdentity{ServiceAccountName: "sa", SandboxName: "sandbox-run1"}
+	controllerutil.AddFinalizer(run, "sproozi.com/agentrun-cleanup")
+	c := fake.NewClientBuilder().
+		WithScheme(newScheme()).
+		WithObjects(append(objs, run)...).
+		WithStatusSubresource(&sprooziv1alpha1.AgentRun{}).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+				if obj.GetUID() == "" {
+					obj.SetUID("registration-uid")
+				}
+				return c.Create(ctx, obj, opts...)
+			},
+		}).
+		Build()
+	store, err := registry.NewStore(c, testNS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Create(context.Background(), registry.Registration{
+		Harness: harness.NativeCodex, Principal: testPrincipal, SessionID: testSessionID, Epoch: 1, OperationID: testOperationID,
+		InstructionDigest: registry.InstructionsDigest(tmpl.Spec.Instructions),
+		OriginalDeadline:  time.Now().Add(time.Hour), TemplateName: tmpl.Name,
+		Ceilings: map[sprooziv1alpha1.CapabilityKind]sprooziv1alpha1.EndpointBudget{
+			sprooziv1alpha1.CapabilityKubernetesRead: {MaxUnits: 10}},
+		NativeUUID: testNativeUUID, CheckpointDigest: strings.Repeat("b", 64), IntendedRunName: run.Name,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	editRegistration(t, c, registry.NameForRun(run.Name), func(doc map[string]any) {
+		doc["phase"] = "stopped"
+		doc["runUid"] = string(run.UID)
+		doc["podUid"] = "pod-uid-1"
+		doc["receipt"] = map[string]any{"checkpointDigest": strings.Repeat("c", 64),
+			"seals": map[string]any{"kubernetes.read": map[string]any{"Units": 1, "CostMicros": 0}}}
+		if pastDeadline {
+			registration, _ := doc["registration"].(map[string]any)
+			registration["originalDeadline"] = time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano)
+		}
+	})
+
+	sandbox := &k8sresources.FakeSandboxClient{Status: k8sresources.SandboxStatusRunning, ExitCode: 137}
+	r := &controller.AgentRunReconciler{Client: c, APIReader: c, SandboxClient: sandbox}
+	reconcile := func() {
+		t.Helper()
+		if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: runOne, Namespace: testNS}}); err != nil {
+			t.Fatalf("Reconcile() error = %v", err)
+		}
+	}
+	reconcile()
+	if phase := getPhase(t, c, runOne); phase != sprooziv1alpha1.AgentRunPhaseRunning {
+		ready := apimeta.FindStatusCondition(getRun(t, c, runOne).Status.Conditions, "Ready")
+		t.Fatalf("phase while capture runs = %q (%+v), want Running", phase, ready)
+	}
+	if len(sandbox.Deleted) != 0 {
+		t.Fatal("sandbox released while the executor was still capturing")
+	}
+	sandbox.Status = k8sresources.SandboxStatusFailed
+	reconcile()
+	if phase := getPhase(t, c, runOne); phase != sprooziv1alpha1.AgentRunPhaseSucceeded {
+		t.Fatalf("phase = %q, want Succeeded", phase)
+	}
+	assertReadyMessage(t, c, runOne, "SessionStopped", "session stopped")
+}
+
+// An abort cancels the registration before it sets spec.cancel on the run. A
+// reconcile in between must end the run Cancelled, not Failed with
+// SessionBindingRejected.
+func TestReconcilerCancelledManagedSessionEndsAsCancelled(t *testing.T) {
+	t.Parallel()
+	objs := fixtures()
+	tmpl := objs[2].(*sprooziv1alpha1.AgentTemplate)
+	tmpl.Annotations = map[string]string{registry.ManagedTemplateAnnotation: managedValue}
+	run := newRun(runOne)
+	run.Status.Phase = sprooziv1alpha1.AgentRunPhaseRunning
+	started := metav1.Now()
+	run.Status.StartedAt = &started
+	run.Status.PolicyName = testPolicy
+	run.Status.Identity = sprooziv1alpha1.AgentRunIdentity{ServiceAccountName: "sa", SandboxName: "sandbox-run1"}
+	controllerutil.AddFinalizer(run, "sproozi.com/agentrun-cleanup")
+	c := fake.NewClientBuilder().
+		WithScheme(newScheme()).
+		WithObjects(append(objs, run)...).
+		WithStatusSubresource(&sprooziv1alpha1.AgentRun{}).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+				if obj.GetUID() == "" {
+					obj.SetUID("registration-uid")
+				}
+				return c.Create(ctx, obj, opts...)
+			},
+		}).
+		Build()
+	store, err := registry.NewStore(c, testNS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Create(context.Background(), registry.Registration{
+		Harness: harness.NativeCodex, Principal: testPrincipal, SessionID: testSessionID, Epoch: 1, OperationID: testOperationID,
+		InstructionDigest: registry.InstructionsDigest(tmpl.Spec.Instructions),
+		OriginalDeadline:  time.Now().Add(time.Hour), TemplateName: tmpl.Name,
+		Ceilings: map[sprooziv1alpha1.CapabilityKind]sprooziv1alpha1.EndpointBudget{
+			sprooziv1alpha1.CapabilityKubernetesRead: {MaxUnits: 10}},
+		NativeUUID: testNativeUUID, CheckpointDigest: strings.Repeat("b", 64), IntendedRunName: run.Name,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	editRegistration(t, c, registry.NameForRun(run.Name), func(doc map[string]any) {
+		doc["phase"] = "cancelled"
+		doc["runUid"] = string(run.UID)
+	})
+
+	sandbox := &k8sresources.FakeSandboxClient{Status: k8sresources.SandboxStatusRunning}
+	r := &controller.AgentRunReconciler{Client: c, APIReader: c, SandboxClient: sandbox}
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: runOne, Namespace: testNS}}); err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+	if phase := getPhase(t, c, runOne); phase != sprooziv1alpha1.AgentRunPhaseCancelled {
+		t.Fatalf("phase = %q, want Cancelled", phase)
+	}
+	assertReadyMessage(t, c, runOne, "SessionCancelled", "cancelled")
+}
+
+// editRegistration rewrites a stored registration document.
+func editRegistration(t *testing.T, c client.Client, name string, edit func(map[string]any)) {
+	t.Helper()
+	var cm corev1.ConfigMap
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: testNS, Name: name}, &cm); err != nil {
+		t.Fatal(err)
+	}
+	for key, document := range cm.Data {
+		var doc map[string]any
+		if err := json.Unmarshal([]byte(document), &doc); err != nil {
+			t.Fatal(err)
+		}
+		edit(doc)
+		encoded, err := json.Marshal(doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cm.Data[key] = string(encoded)
+	}
+	if err := c.Update(context.Background(), &cm); err != nil {
+		t.Fatal(err)
 	}
 }

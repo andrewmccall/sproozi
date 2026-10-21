@@ -1,4 +1,4 @@
-# Optional caps replace the single active-run slot
+# 0027: Optional caps replace the single active-run slot
 
 Status: accepted
 Date: 2026-10-19

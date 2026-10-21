@@ -36,14 +36,19 @@ type AgentRunSpec struct {
 	TemplateRef AgentTemplateReference `json:"templateRef"`
 
 	// Task is untrusted free-form work requested from the agent.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=16384
 	Task string `json:"task"`
 
-	// EventContext is immutable untrusted evidence supplied by the caller or webhook.
+	// EventContext is immutable untrusted evidence supplied by the caller.
+	// Its JSON encoding must not exceed 16 KiB; admission fails a run that does.
+	// +kubebuilder:validation:MaxProperties=64
 	EventContext map[string]string `json:"eventContext,omitempty"`
 
 	// Capabilities is the requested subset of capabilities permitted by the policy.
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=32
+	// +listType=set
 	Capabilities []CapabilityKind `json:"capabilities"`
 
 	// Cancel requests cancellation of an active run.
@@ -54,6 +59,8 @@ type AgentRunSpec struct {
 // AgentTemplateReference identifies an AgentTemplate in the AgentRun namespace.
 type AgentTemplateReference struct {
 	// Name is the referenced AgentTemplate name.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
 	Name string `json:"name"`
 }
 
@@ -149,6 +156,7 @@ type AgentRunIdentity struct {
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Reason",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].reason`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
+// +kubebuilder:validation:XValidation:rule="self.metadata.name.size() <= 63",message="AgentRun names must be at most 63 characters, because they are copied into label values"
 
 // AgentRun is the Schema for the agentruns API
 type AgentRun struct {

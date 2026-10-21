@@ -22,6 +22,7 @@ def installed_crds():
         "agentruntimes.sproozi.com": {"group": "sproozi.com", "kind": "AgentRuntime"},
         "agentpolicies.sproozi.com": {"group": "sproozi.com", "kind": "AgentPolicy"},
         "agenttemplates.sproozi.com": {"group": "sproozi.com", "kind": "AgentTemplate"},
+        "budgetledgers.sproozi.com": {"group": "sproozi.com", "kind": "BudgetLedger"},
         "networkpolicies.crd.projectcalico.org": {"group": "crd.projectcalico.org", "kind": "NetworkPolicy"},
         "adminnetworkpolicies.policy.networking.k8s.io": {"group": "policy.networking.k8s.io", "kind": "AdminNetworkPolicy"},
         "baselineadminnetworkpolicies.policy.networking.k8s.io": {"group": "policy.networking.k8s.io", "kind": "BaselineAdminNetworkPolicy"},
@@ -35,7 +36,7 @@ class Dependencies(unittest.TestCase):
     def test_missing_sproozi_crd_fails(self):
         observed = installed_crds()
         del observed["agentruns.sproozi.com"]
-        with self.assertRaisesRegex(RuntimeError, "all four"):
+        with self.assertRaisesRegex(RuntimeError, "every Sproozi CRD"):
             quickstart.check_crds(observed)
 
     def test_external_sandbox_cannot_be_a_hidden_dependency(self):

@@ -57,12 +57,13 @@ client reads its MCP file, or `Bridge` naming the launch file that does.
    `RuntimeClientConfig.Harness` in
    [`api/v1alpha1/agentruntime_types.go`](../../api/v1alpha1/agentruntime_types.go)
    and run `make manifests`.
-3. Run `go test ./internal/harness/ ./internal/runtime/kubernetes/` while
+3. Run `go test ./internal/harness/ ./cmd/native-session/ ./internal/checkpoint/ ./internal/runtime/kubernetes/` while
    you iterate; `make test` runs everything. The guard tests fail, naming the
    file to change, until the CRD enum, the registry, the rendered `sproozi`
    control connection, the declared loader, the example and the reference row
-   agree. A bridge also runs through the bridge hook below; a native client is
-   checked only by the verifiers in step 6.
+   agree. A harness whose client needs a bridge also runs through the bridge
+   hook below; one whose client loads MCP itself is checked only by the
+   verifiers in step 6.
 4. Add the client's pinned install under [`hack/clients`](../../hack/clients/README.md).
    Two Dockerfiles install clients: `internal/runtime/docker/image/clients.Dockerfile`
    builds the released native image for managed sessions, so only a managed
@@ -143,7 +144,7 @@ until Ctrl-C. Start the real client with that file in place of the contract's,
 check that it lists `github__list_issues` and `sproozi__diagnose`, ask it to
 call `sproozi__diagnose`, and check that it refuses to start once you delete
 the `sproozi` entry. Record that evidence in the ADR. The same command checks
-a native client by hand; `hack/verify/mcp-config` renders the in-cluster
+a harness whose client loads MCP itself by hand; `hack/verify/mcp-config` renders the in-cluster
 gateway addresses instead, which only a sandbox can reach. Client lockfiles, Dockerfiles, verifier
 lists and documentation prose are reviewed by hand.
 

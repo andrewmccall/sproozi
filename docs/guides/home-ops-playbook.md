@@ -6,7 +6,9 @@ that repository's Flux layout. For a working first installation, start with
 [Install on Kubernetes](install-kubernetes.md).
 
 This is a planned integration. The recorded manual Kind runs did not exercise
-Alertmanager delivery, a home-ops PR or Flux recovery.
+a home-ops PR or Flux recovery. Sproozi has no event receiver, so an
+Alertmanager alert cannot start a run; you create the AgentRun by hand. See
+[event webhooks](../explanations/future-architecture/event-webhooks.md).
 
 ## Outcome
 
@@ -25,7 +27,7 @@ Use these paths in the home-ops repository:
 | --- | --- |
 | `cluster/apps/sproozi/` | Sproozi app bundle, namespaces, CRs, ConfigMaps, and SOPS-managed Secrets |
 | `cluster/apps/monitoring/alerts/prometheus-rules.yaml` | demo alert rule |
-| `cluster/apps/monitoring/alerts/alertmanager-config.yaml` | Route to a converter and signer that calls the Sproozi webhook. |
+| `cluster/apps/monitoring/alerts/alertmanager-config.yaml` | Route the demo alert to your usual notification receiver. |
 
 ## 1. Publish a pinned Sproozi release artifact
 
@@ -61,7 +63,6 @@ A practical starter set is:
 - `cluster/apps/sproozi/egress-gateway-profiles.yaml`
 - `cluster/apps/sproozi/model-gateway-credentials.sops.yaml`
 - `cluster/apps/sproozi/capability-proxy-github-app.sops.yaml`
-- `cluster/apps/sproozi/alertmanager-secret.sops.yaml`
 
 ## 3. Add SOPS-managed secrets and config
 
@@ -73,7 +74,6 @@ A practical starter set is:
 - `Secret/sproozi-gateway-tls` with managed inspection TLS in `sproozi-system`
 - immutable `ConfigMap/sproozi-sandbox-trust` in `sproozi-agents`, referenced by the runtime's client trust configuration
 - the model pricing and authentication configuration described in [required secrets and config](../reference/required-secrets-and-config.md)
-- one random per-template HMAC Secret with key `hmac-key`, at least 32 bytes, in `sproozi-webhooks`
 
 Keep static credentials in SOPS-managed manifests in `cluster/apps/sproozi/`.
 For ChatGPT authentication, the gateway owns the Secret holding the rotating ChatGPT credential;
@@ -85,8 +85,6 @@ do not reconcile it from a stale bootstrap file. See
 The first `home-ops` template should:
 
 - reference exactly one runtime and one policy
-- label the template with `sproozi.com/webhook-receiver=alertmanager`
-- annotate the template with `sproozi.com/webhook-secret=<secret-name>`
 - target `andrewmccall/home-ops` for `github.pull_request`
 - target `sproozi-demo` for `kubernetes.read`
 
@@ -106,21 +104,20 @@ do not run that suite against home-ops unchanged.
 Keep monitoring-owned changes in `cluster/apps/monitoring/alerts/`:
 
 - add a `PrometheusRule` that selects the demo workload
-- route an `AlertmanagerConfig` notification to a converter/signing adapter
-- have that adapter POST the signed event to `http://sproozi-webhook.sproozi-system.svc.cluster.local:8083/webhook/<namespace>/<receiver>`
+- route an `AlertmanagerConfig` notification to your usual receiver
 
-The adapter must translate Alertmanager notifications into `{id,eventContext}`
-and sign the timestamp plus exact request bytes with the per-template HMAC key.
-This repository implements the [signed receiver contract](../reference/webhook-contract.md),
-but supplies no Alertmanager converter/signer. Implement that adapter before connecting Alertmanager to this workflow.
+Sproozi has no event receiver, so the alert cannot start a run. When the alert
+fires, write an [AgentRun](../reference/agentrun.md) that names the template
+and copies the alert details into `spec.eventContext`. Give it
+`metadata.generateName` rather than a fixed name, so each alert gets its own
+run. Then create it:
 
-Make sure the namespace hosting the sender is allowed by the webhook NetworkPolicy label contract:
-
-```yaml
-metadata:
-  labels:
-    sproozi.com/webhook-client: enabled
+```sh
+kubectl create -f agentrun.yaml
 ```
+
+See [event webhooks](../explanations/future-architecture/event-webhooks.md) for
+what an automatic trigger would need.
 
 ## 7. Reconcile and observe the workflow
 
@@ -129,8 +126,7 @@ sequenceDiagram
     participant Workload as sproozi-demo workload
     participant Prom as PrometheusRule
     participant Alert as Alertmanager
-    participant Adapter as Planned converter/signer
-    participant Webhook as Sproozi webhook
+    participant Operator as Operator
     participant Run as AgentRun
     participant Ctrl as controller-manager
     participant Sandbox as sandbox in sproozi-agents
@@ -139,9 +135,8 @@ sequenceDiagram
 
     Workload->>Prom: emits failing signals
     Prom->>Alert: fires alert
-    Alert->>Adapter: Alertmanager notification
-    Adapter->>Webhook: Signed Sproozi event
-    Webhook->>Run: creates AgentRun
+    Alert->>Operator: Alertmanager notification
+    Operator->>Run: kubectl create AgentRun
     Ctrl->>Sandbox: Provisions identity, network and sandbox
     Sandbox->>Gateway: Requests Kubernetes read, inference or PR operation
     Gateway->>GH: shared gateway GitHub module publishes PR

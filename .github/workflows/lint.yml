@@ -17,6 +17,7 @@ jobs:
       contents: read
     name: Run on Ubuntu
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Clone the code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -26,7 +27,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
-          go-version: '1.26.6'
+          go-version: '1.26.10'
 
       # Caches written by pushes to main are readable by every pull request.
       # GitHub scopes a cache written by a pull request run to that pull
@@ -43,7 +44,7 @@ jobs:
           path: |
             bin/golangci-lint
             bin/golangci-lint-${{ steps.golangci-lint.outputs.version }}
-          key: golangci-lint-bin-${{ runner.os }}-${{ runner.arch }}-go1.26.6-${{ hashFiles('Makefile', '.custom-gcl.yml', 'hack/verify/install-golangci-lint.sh') }}
+          key: golangci-lint-bin-${{ runner.os }}-${{ runner.arch }}-go1.26.10-${{ hashFiles('Makefile', '.custom-gcl.yml', 'hack/verify/install-golangci-lint.sh') }}
 
       - name: Restore golangci-lint analysis cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -57,3 +58,7 @@ jobs:
         run: make lint-config
       - name: Run linter
         run: make lint
+      - name: Check module tidiness and known vulnerabilities
+        run: make verify-deps
+      - name: Check pinned release inputs (actions, tools, Go builders)
+        run: python3 hack/verify/release.py

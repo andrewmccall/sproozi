@@ -22,6 +22,9 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[3]
 SYSTEM = "sproozi-system"
+# The remote executor, its profile, CA, credentials and managed runs live apart
+# from the gateway's configuration in SYSTEM, matching the public example.
+SESSIONS = "sproozi-sessions"
 AGENTS = "sproozi-agents"
 GATEWAY = "sproozi-gateway.sproozi-system.svc"
 TRUST = "mobility-fixture-trust"
@@ -144,7 +147,7 @@ def fixture_resources(hints, image, ca, trust):
                                          "limits": {"cpu": cpu, "memory": memory,
                                                     "ephemeral-storage": "256Mi"}}})
     model = hints.get("model", "gpt-6.1-sol")
-    runtime = object_("AgentRuntime", TEMPLATE, spec={
+    runtime = object_("AgentRuntime", TEMPLATE, SESSIONS, spec={
         "podTemplate": {"spec": {"automountServiceAccountToken": False,
                                   "securityContext": {"runAsNonRoot": True, "runAsUser": 1000,
                                                       "runAsGroup": 1000, "fsGroup": 1000,
@@ -157,14 +160,14 @@ def fixture_resources(hints, image, ca, trust):
         "gatewayEndpoint": "https://" + GATEWAY + ":8443"})
     allowance = hints["allowances"]["model.inference"]
     budget = {"maxUnits": allowance["units"]["value"], "maxCostMicros": allowance["costMicros"]["value"]}
-    policy = object_("AgentPolicy", TEMPLATE, spec={
+    policy = object_("AgentPolicy", TEMPLATE, SESSIONS, spec={
         # Required schema fields carry no authority without the corresponding capability.
         "allowedCapabilities": ["model.inference"], "kubernetesRead": {"namespaces": [SYSTEM], "resources": ["pods"]},
         "githubPullRequest": {"repositories": [], "allowedBaseBranches": []}, "egressProfiles": [],
         "budgets": {"model.inference": budget},
         "resourceBounds": {"max": {"cpu": "1500m", "memory": "1536Mi", "ephemeral-storage": "512Mi"}},
         "maxExecutionDuration": hints["maxDuration"], "retentionTTL": "1h"})
-    template = object_("AgentTemplate", TEMPLATE, spec={
+    template = object_("AgentTemplate", TEMPLATE, SESSIONS, spec={
         "runtimeRef": {"name": TEMPLATE}, "policyRef": {"name": TEMPLATE},
         "instructions": hints["instructions"], "egressProfiles": []})
     template["metadata"]["annotations"] = {"sessions.sproozi.com/managed": "true"}
@@ -177,7 +180,7 @@ def executor_profile(hints, principal="mobility-proof", harness="codex", templat
     """The remote executor's configuration as its Pod reads it."""
     return {"listen": "0.0.0.0:8443", "certificateFile": CREDENTIALS + "/tls.crt", "keyFile": CREDENTIALS + "/tls.key",
             "principal": principal, "harness": harness, "placementName": "remote",
-            "namespace": SYSTEM, "templateName": template, "directory": directory,
+            "namespace": SESSIONS, "templateName": template, "directory": directory,
             "instructionDigest": hints["instructionDigest"], "allowances": hints["allowances"],
             "maxDuration": hints["maxDuration"], "maxCheckpointBytes": hints["maxCheckpointBytes"]}
 
@@ -211,16 +214,22 @@ def executor_resources(profile, image, ca):
             pod_meta = doc["spec"]["template"].setdefault("metadata", {})
             pod_meta.setdefault("annotations", {})["sproozi.test/profile"] = hashlib.sha256(
                 json.dumps(profile, sort_keys=True).encode()).hexdigest()[:16]
-    documents += [object_("ConfigMap", "sproozi-work-profile", data={"profile.json": json.dumps(profile, indent=2)}),
-                  object_("ConfigMap", "sproozi-remote-executor", data={"ca.crt": ca})]
+    # Left mutable on purpose: these manual runbooks reconfigure the executor in
+    # place with kubectl apply. A real install creates both immutable (see the
+    # executor README); the Kind managed-session case does.
+    documents += [object_("ConfigMap", "sproozi-work-profile", SESSIONS, data={"profile.json": json.dumps(profile, indent=2)}),
+                  object_("ConfigMap", "sproozi-remote-executor", SESSIONS, data={"ca.crt": ca})]
     documents.extend(doc for doc in build("config/cli-access") if doc)
     return documents
 
 
 def replace_executor(documents, profile, image, ca):
     """Swap a manifest's executor resources for ones rendered from profile."""
-    names = {(d["kind"], d["metadata"]["name"]) for d in executor_resources(profile, image, ca)}
-    kept = [d for d in documents if d and (d["kind"], d["metadata"]["name"]) not in names]
+    # Match the namespace too, so same-named objects elsewhere are kept.
+    def key(d):
+        return d["kind"], d["metadata"].get("namespace"), d["metadata"]["name"]
+    names = {key(d) for d in executor_resources(profile, image, ca)}
+    kept = [d for d in documents if d and key(d) not in names]
     return kept + executor_resources(profile, image, ca)
 
 
