@@ -215,8 +215,32 @@ func (s *Service) createWorkspaceExecution(ctx context.Context, id, operationID,
 		InstructionDigest: local.InstructionDigest, IncludeIgnored: slices.Clone(includeIgnored),
 		Deadline: time.Now().Add(s.duration).UTC(), Allowances: maps.Clone(s.config.Allowances)}
 	return s.createExecution(first, "", func() ([]byte, error) {
-		return workspace.CaptureLocal(ctx, path, includeIgnored, s.config.Local.MaxCheckpointBytes)
+		limit := s.config.Local.MaxCheckpointBytes
+		data, err := workspace.CaptureLocal(ctx, path, includeIgnored, limit)
+		if err != nil && ctx.Err() == nil {
+			// Nothing is recorded yet, so repeating the request cannot help.
+			return nil, rejectedError(workspaceProblem(path, err, limit))
+		}
+		return data, err
 	})
+}
+
+// workspaceProblem explains why start cannot capture a workspace and what
+// would let it.
+func workspaceProblem(path string, err error, limit int64) string {
+	if _, statErr := os.Lstat(path); os.IsNotExist(statErr) {
+		return fmt.Sprintf("workspace: %s does not exist; pass --workspace the top-level directory of a Git repository", path)
+	}
+	switch {
+	case errors.Is(err, workspace.ErrNotRepository):
+		return fmt.Sprintf("%v; %s must be the top-level directory of a Git repository, holding its .git directory "+
+			"(linked worktrees and submodules are unsupported)", err, path)
+	case errors.Is(err, workspace.ErrByteLimit):
+		return fmt.Sprintf("%v; local.maxCheckpointBytes is %.1f MiB: raise it in home's config.json, up to %d MiB, "+
+			"keeping local.retainedBytes at least twice it, then restart home", err, float64(limit)/(1<<20),
+			MaxCheckpointBytes>>20)
+	}
+	return err.Error()
 }
 
 // startFirstVisit prepares and activates a retained first visit that has not

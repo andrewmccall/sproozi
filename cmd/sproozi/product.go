@@ -24,6 +24,7 @@ import (
 	"github.com/andrewmccall/sproozi/internal/session/home"
 	"github.com/andrewmccall/sproozi/internal/work"
 	"github.com/google/uuid"
+	"golang.org/x/term"
 )
 
 const (
@@ -218,8 +219,15 @@ func runProduct(args []string, stdout io.Writer) error {
 		if err := q.checkSocket(); err != nil {
 			return err
 		}
+		// Like the other session commands, sessions starts an absent local
+		// home daemon; remote executors are still listed if that fails.
+		if q.executor == "" || q.executor == dockerExecutor {
+			if err := q.ensureService(ctx); err != nil {
+				_, _ = fmt.Fprintf(os.Stderr, "Could not start the local home daemon: %v\n", err)
+			}
+		}
 		found := discoverSessions(ctx, q)
-		if err := json.NewEncoder(q.out).Encode(found); err != nil {
+		if err := q.printCatalogue(found); err != nil {
 			return err
 		}
 		return found.failure(q.configPath)
@@ -271,6 +279,10 @@ func (q *options) local(ctx context.Context) error {
 	if err := q.checkSocket(); err != nil {
 		return err
 	}
+	// Refuse before starting or contacting home.
+	if q.action == home.ActionAttach && !term.IsTerminal(int(os.Stdin.Fd())) {
+		return errNoTerminal
+	}
 	if err := q.ensureService(ctx); err != nil {
 		return err
 	}
@@ -283,22 +295,33 @@ func (q *options) local(ctx context.Context) error {
 		Harness: harness.NativeKind(q.kind),
 	}
 	response, err := home.Call(ctx, q.socket, request)
+	// The session runs either way; only attaching needs a terminal.
+	attachNow := (q.action == home.ActionResume || q.action == home.ActionStart) && !q.detach
+	noTerminal := attachNow && !term.IsTerminal(int(os.Stdin.Fd()))
+	if noTerminal {
+		attachNow, q.detach = false, true
+	}
 	// A refused or failed request prints only its error, not the session.
 	if response.Status != nil && err == nil {
-		if e := json.NewEncoder(q.out).Encode(response.Status); e != nil {
+		if e := q.printStatus(*response.Status); e != nil {
 			return e
 		}
 	}
 	if err != nil {
-		// Repeating a request for a session home does not retain, or one it
-		// rejected before recording, cannot help.
-		if q.operation != "" && !errors.Is(err, home.ErrUnknownSession) && !errors.Is(err, home.ErrRejected) {
+		// Repeating a request for a session home does not retain, one it
+		// rejected before recording, or one no home daemon received, cannot help.
+		if q.operation != "" && !errors.Is(err, home.ErrUnknownSession) && !errors.Is(err, home.ErrRejected) &&
+			!errors.Is(err, home.ErrControlUnavailable) {
 			return &retryError{err: err, id: q.id, operation: q.operation}
 		}
 		return err
 	}
 	q.reportIDs()
-	if (q.action == home.ActionResume || q.action == home.ActionStart) && !q.detach {
+	if noTerminal {
+		_, _ = fmt.Fprintf(os.Stderr, "Standard input is not a terminal, so this command did not attach; "+
+			"run \"sproozi attach %s\" from a terminal\n", q.id)
+	}
+	if attachNow {
 		return attach(ctx, q.socket, q.id)
 	}
 	return nil

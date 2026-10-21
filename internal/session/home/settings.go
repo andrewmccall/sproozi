@@ -48,7 +48,8 @@ func (c Config) ServeProblems() []string {
 	absolute := func(key, path string) { add(!filepath.IsAbs(path), key, "absolute path") }
 	// A blank value is as missing as an empty one.
 	blank := func(v string) bool { return strings.TrimSpace(v) == "" }
-	add(blank(c.Model), "model", "model name the harness requests")
+	// An omitted model lets the harness choose its own default.
+	add(c.Model != "" && blank(c.Model), "model", modelWant)
 	absolute("dockerBinary", c.DockerBinary)
 	if runtime.GOOS == goosWindows {
 		add(blank(c.DockerSocket), "dockerSocket", `local named pipe such as "npipe:////./pipe/docker_engine"`)
@@ -107,6 +108,9 @@ func (c Config) ServeProblems() []string {
 	return append(p, c.AllowanceProblems()...)
 }
 
+// modelWant describes a valid model setting.
+const modelWant = "model name the harness requests, or omit it for the harness's default"
+
 // placeholderToken reports a setup guide's placeholder, such as
 // REPLACE_WITH_PROVIDER_API_KEY, left in place of a provider credential.
 func placeholderToken(token string) bool { return strings.HasPrefix(token, "REPLACE_WITH_") }
@@ -145,7 +149,7 @@ func (c Config) gatewayProblems() []string {
 		add(h.Harness.Validate() != nil, key+"harness", `"codex" or "claude-code"`)
 		add(!dockerName.MatchString(h.Name), key+"name", "Docker resource name")
 		add(h.GatewayPort == 0, key+"gatewayPort", "port")
-		add(blank(h.Model), key+"model", "model name the harness requests")
+		add(h.Model != "" && blank(h.Model), key+"model", modelWant)
 		u, err := url.Parse(h.ProviderURL)
 		add(err != nil || u.Host == "" || !approvedProviderURL(u), key+"providerURL", "HTTPS provider URL")
 		absolute(key+"providerTokenFile", h.ProviderTokenFile)

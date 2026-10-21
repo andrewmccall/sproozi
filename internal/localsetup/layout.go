@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -92,26 +93,40 @@ func RememberRoot(root string) error {
 	return privatefs.Replace(filepath.Dir(pointer), filepath.Base(pointer), []byte(root+"\n"))
 }
 
-// DefaultConfigPath keeps an existing platform configuration authoritative.
-// New installations use the local root's config.json.
+// DefaultConfigPath keeps an existing platform configuration authoritative
+// unless it can do nothing yet and a local installation exists: then the
+// local installation's config.json wins. New installations use it too.
 func DefaultConfigPath() (string, error) {
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
 	}
 	platform := filepath.Join(dir, "sproozi", "config.json")
-	if _, err = os.Lstat(platform); err == nil {
-		return platform, nil
-	}
+	_, platformErr := os.Lstat(platform)
 	root, err := ResolveRoot("")
 	if err != nil {
 		return "", err
 	}
-	local := Layout{Root: root}.Config()
-	if _, err = os.Lstat(local); err == nil {
-		return local, nil
+	l := Layout{Root: root}
+	_, localErr := os.Lstat(l.Config())
+	_, installErr := os.Lstat(l.Installation())
+	installed := localErr == nil && installErr == nil
+	switch {
+	case platformErr == nil && (!installed || !unconfigured(platform)):
+		return platform, nil
+	case localErr == nil:
+		return l.Config(), nil
 	}
 	return platform, nil
+}
+
+// unconfigured reports a configuration that can do nothing yet: home would
+// refuse to serve it and it names no remote executor, as "sproozi init" first
+// writes it. A configuration home cannot read is not unconfigured, so its
+// error still reaches the user.
+func unconfigured(path string) bool {
+	c, err := home.ReadConfig(path)
+	return err == nil && len(c.ServeProblems()) > 0 && len(c.WorkConnections()) == 0
 }
 
 // Installation is the provisioning journal. Each stage records what it
@@ -203,6 +218,46 @@ func (l Layout) lock() (func(), error) {
 		return nil, errors.New("another sproozi init is running for this installation")
 	}
 	return func() { _ = privatefs.UnlockClose(f) }, nil
+}
+
+// rootEntries are the names a local installation root holds. ".DS_Store" is
+// what macOS Finder leaves in any folder it shows.
+var rootEntries = []string{"config.json", "installation.json", home.ProfileFolder, "credentials", "pki", "state",
+	"docker-cli", "logs", "service.pid", "setup.lock", ".DS_Store"}
+
+// checkRoot refuses a root that holds anything other than a Sproozi
+// installation, such as a Git checkout. Setup writes credentials and keys
+// there, and removing the installation removes the whole directory, so the
+// installation must own it. A missing or empty root is accepted.
+func (l Layout) checkRoot() error {
+	entries, err := os.ReadDir(l.Root)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fail("root", err, "choose a new directory with --root PATH")
+	}
+	var foreign []string
+	for _, entry := range entries {
+		name := entry.Name()
+		if name == ".git" {
+			return fail("root", fmt.Errorf("%s is a Git checkout, not a Sproozi installation", l.Root),
+				"choose a directory of its own for the installation with --root PATH, such as --root ~/.sproozi; "+
+					"setup never writes credentials or keys into a checkout")
+		}
+		if !slices.Contains(rootEntries, name) && !strings.HasPrefix(name, "config.json.backup-") {
+			foreign = append(foreign, name)
+		}
+	}
+	if len(foreign) == 0 {
+		return nil
+	}
+	shown := strings.Join(foreign[:min(len(foreign), 3)], ", ")
+	if len(foreign) > 3 {
+		shown += fmt.Sprintf(" and %d more", len(foreign)-3)
+	}
+	return fail("root", fmt.Errorf("%s holds %s, which are not part of a Sproozi installation", l.Root, shown),
+		"choose a new or empty directory for the installation with --root PATH, such as --root ~/.sproozi")
 }
 
 // ensureDirectories creates the private layout. Existing directories must

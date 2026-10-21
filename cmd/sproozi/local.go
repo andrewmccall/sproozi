@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -110,15 +109,6 @@ func (q *options) initLocal(ctx context.Context) error {
 		}
 		options.Instructions = strings.TrimSpace(string(data))
 	}
-	if options.Model == "" {
-		root, _ := localsetup.ResolveRoot(s.root)
-		inst, _ := localsetup.LoadInstallation(localsetup.Layout{Root: root})
-		if !slices.ContainsFunc(inst.Harnesses, func(h localsetup.Harness) bool { return h.Harness == kind }) {
-			if options.Model, err = ask(fmt.Sprintf("Model for %s", kind)); err != nil {
-				return fmt.Errorf("%w; pass --model NAME", err)
-			}
-		}
-	}
 	result, err := localsetup.Init(ctx, options)
 	if s.json {
 		if e := json.NewEncoder(q.out).Encode(struct {
@@ -133,6 +123,11 @@ func (q *options) initLocal(ctx context.Context) error {
 	}
 	if !s.json {
 		_, _ = fmt.Fprintf(q.out, "Ready. Start a session with:\n  sproozi start --workspace \"$PWD\" --harness %s\n", kind)
+	}
+	// A configured platform configuration stays the session commands' default.
+	if def, e := defaultConfigPath(); e == nil && def != result.Config {
+		_, _ = fmt.Fprintf(os.Stderr, "Note: session commands use %s by default, which is configured for other work; "+
+			"pass --config %s to use this installation\n", shellQuote(def), shellQuote(result.Config))
 	}
 	return nil
 }
@@ -157,18 +152,6 @@ func secret(label string) (string, error) {
 	value, err := term.ReadPassword(fd)
 	_, _ = fmt.Fprintln(os.Stderr)
 	return string(value), err
-}
-
-func ask(label string) (string, error) {
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		return "", errors.New("no terminal to ask for input")
-	}
-	_, _ = fmt.Fprintf(os.Stderr, "%s: ", label)
-	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
-	if err != nil && line == "" {
-		return "", err
-	}
-	return strings.TrimSpace(line), nil
 }
 
 func errorText(err error) string {

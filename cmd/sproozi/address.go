@@ -74,7 +74,11 @@ func (q *options) prepareAddress(c command) error {
 		return fmt.Errorf("%s requires the local home owner; %s", c.name, useDocker)
 	}
 	if q.id != "" && !work.CanonicalID(q.id) {
-		return fmt.Errorf("session UUID %q is not a canonical UUID: %s", q.id, canonicalUUIDRule)
+		hint := ""
+		if c.name == home.ActionStart {
+			hint = `; start takes the directory as "--workspace PATH"`
+		}
+		return fmt.Errorf("session UUID %q is not a canonical UUID: %s%s", q.id, canonicalUUIDRule, hint)
 	}
 	if q.id == "" && c.accepts("id") && c.name != home.ActionStart {
 		return fmt.Errorf("%s requires a session UUID; usage: %s", c.name, c.line())

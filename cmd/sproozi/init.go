@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/andrewmccall/sproozi/internal/localsetup"
 	"github.com/andrewmccall/sproozi/internal/privatefs"
 	"github.com/andrewmccall/sproozi/internal/session/home"
 )
@@ -24,7 +25,9 @@ const configFile = "config.json"
 // repository is the public source of the documentation the CLI links to.
 const repository = "https://github.com/andrewmccall/sproozi"
 
-// placeholderModel is the starter model, which an administrator must replace.
+// placeholderModel is the model earlier starter configurations wrote, which an
+// administrator had to replace. Starter configurations now omit the model, so
+// the harness uses its own default.
 const placeholderModel = "ADMINISTRATOR_SELECTED_MODEL"
 
 // releaseVersion matches the tag-derived versions that release builds set.
@@ -46,6 +49,9 @@ var configDoc = docURL("cmd/sproozi/README.md")
 
 // localSetupDoc builds the images, network and certificates that serve needs.
 var localSetupDoc = docURL("docs/guides/session-mobility.md") + "#prepare-the-administrator-owned-setup"
+
+// localSessionsDoc provisions local Docker sessions with init --local.
+var localSessionsDoc = docURL("docs/guides/local-sessions.md")
 
 // remoteSetupDoc configures a remote executor for run and sessions.
 var remoteSetupDoc = docURL("docs/guides/portable-workflows.md")
@@ -79,7 +85,6 @@ func starterConfig(homeDirectory string) map[string]any {
 			"costMicros": map[string]any{"bounded": false, "value": 0},
 		}},
 		"maxDuration": "30m",
-		"model":       placeholderModel,
 		"remote":      map[string]any{},
 	}
 }
@@ -137,6 +142,22 @@ func serveCommand(configPath string) string {
 	return "sproozi serve --config " + shellQuote(configPath)
 }
 
+// startHomeCommand starts home for the configuration: the detached service
+// for a local installation's configuration, otherwise serve in the foreground.
+func startHomeCommand(configPath string) string {
+	if configPath == "" {
+		configPath, _ = defaultConfigPath()
+	}
+	root := filepath.Dir(configPath)
+	if _, err := os.Stat(localsetup.Layout{Root: root}.Installation()); err != nil || configPath == "" {
+		return serveCommand(configPath)
+	}
+	if recorded, err := localsetup.ResolveRoot(""); err == nil && recorded == root {
+		return "sproozi service start"
+	}
+	return "sproozi service start --root " + shellQuote(root)
+}
+
 // configArgument returns the --config value on a command line, if any.
 func configArgument(args []string) string {
 	for i, arg := range args {
@@ -160,19 +181,21 @@ func printNextStep(out io.Writer, path string, created bool) error {
 		flag = " --config " + shellQuote(path)
 	}
 	_, err := fmt.Fprintf(out, `%s configuration %s
-Next, edit that file for one of these uses:
-  Remote work: add an executor under "remote", then run
+For local Docker sessions, run this instead; it provisions everything they need:
+    sproozi init --local
+    Guide: %s
+  Session commands use that installation while this file names no remote
+  executor and is not ready for serve.
+For remote work, add an executor under "remote" in this file, then run
     sproozi sessions%s
     Guide: %s
-  Local sessions: replace "model", then add the Docker paths, the "local"
-  images, network, instructions, limits and sizes, and the "gateway"
-  certificates and provider; serve names any setting still missing. Then run
+To configure local sessions by hand, add the Docker paths, the "local" images,
+network, instructions, limits and sizes, and the "gateway" certificates and
+provider to this file; serve names any setting still missing. Then run
     sproozi serve%s
     Guide: %s
-  "remote" can stay empty for local sessions; add an executor to it later to
-  move sessions to that executor's Kubernetes placement.
 Configuration reference: %s
-`, verb, shellQuote(path), flag, remoteSetupDoc, flag, localSetupDoc, configDoc)
+`, verb, shellQuote(path), localSessionsDoc, flag, remoteSetupDoc, flag, localSetupDoc, configDoc)
 	return err
 }
 
@@ -234,7 +257,8 @@ func serveReady(path string, c home.Config) error {
 		problems = append(problems, problem)
 	}
 	if c.Model == placeholderModel {
-		problems = append([]string{"model (replace " + placeholderModel + ")"}, problems...)
+		problems = append([]string{"model (replace " + placeholderModel +
+			" with a model name, or remove it to use the harness's default)"}, problems...)
 	}
 	if len(problems) == 0 {
 		return nil
@@ -264,7 +288,11 @@ func privateHint(err error, configPath string) error {
 		return &retryError{err: privateHint(retry.err, configPath), id: retry.id, operation: retry.operation}
 	}
 	if errors.Is(err, home.ErrControlUnavailable) {
-		return fmt.Errorf("%w; start home with \"%s\", see %s", err, serveCommand(configPath), configDoc)
+		command := startHomeCommand(configPath)
+		if command != serveCommand(configPath) {
+			return fmt.Errorf("%w; start home with \"%s\"", err, command)
+		}
+		return fmt.Errorf("%w; start home with \"%s\", see %s", err, command, configDoc)
 	}
 	var unsafe *privatefs.UnsafePathError
 	if !errors.As(err, &unsafe) {

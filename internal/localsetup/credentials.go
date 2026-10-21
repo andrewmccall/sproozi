@@ -83,6 +83,42 @@ func StoreCredential(l Layout, name string, in CredentialInput) (string, error) 
 	return filepath.Join(l.Credentials(), name), nil
 }
 
+// StoreProviderCA copies a private provider endpoint's CA bundle into
+// credentials/ as an owner-only file, which the gateway reads at startup. The
+// source can be readable by anyone, since a CA certificate is public; it must
+// not be writable by other accounts, since whoever can change it could make the
+// gateway trust another endpoint with the provider key. Later changes to the
+// source take effect only when setup copies it again.
+func StoreProviderCA(l Layout, provider, source string) (string, error) {
+	next := "pass --provider-ca-file a PEM file holding the endpoint's CA certificates"
+	info, err := os.Stat(source)
+	if err != nil {
+		return "", fail("provider", fmt.Errorf("read --provider-ca-file: %w", err), next)
+	}
+	if !info.Mode().IsRegular() || info.Size() > 64<<10 {
+		return "", fail("provider", fmt.Errorf("--provider-ca-file %s is not a regular file of at most 64 KiB", source), next)
+	}
+	if info.Mode().Perm()&0o002 != 0 {
+		return "", fail("provider", fmt.Errorf("--provider-ca-file %s is writable by every account", source),
+			"remove that access (chmod o-w), or copy the file somewhere only you can change")
+	}
+	data, err := os.ReadFile(source)
+	if err != nil {
+		return "", fail("provider", fmt.Errorf("read --provider-ca-file: %w", err), next)
+	}
+	if pool := x509.NewCertPool(); !pool.AppendCertsFromPEM(data) {
+		return "", fail("provider", fmt.Errorf("--provider-ca-file %s holds no PEM certificate", source), next)
+	}
+	if err = privatefs.EnsureDir(l.Credentials()); err != nil {
+		return "", err
+	}
+	name := provider + "-ca.pem"
+	if err = privatefs.Replace(l.Credentials(), name, data); err != nil {
+		return "", err
+	}
+	return filepath.Join(l.Credentials(), name), nil
+}
+
 // HasCredential reports whether a stored credential exists.
 func HasCredential(l Layout, name string) bool {
 	_, err := privatefs.ReadFile(filepath.Join(l.Credentials(), name), 16<<10)

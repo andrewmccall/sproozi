@@ -13,9 +13,18 @@ or contacts a Kubernetes API.
 
 The root is `~/sproozi` unless `init --local --root PATH` chooses another. A
 non-default root is recorded in the platform user configuration directory as
-`sproozi/root`, so later commands find it. An existing platform
-`sproozi/config.json` (from a manual installation) stays the default
-configuration for session commands.
+`sproozi/root`, so later commands find it. The root must be new, empty or an
+existing installation: setup refuses a Git checkout, such as a clone of the
+Sproozi repository at `~/sproozi`, and a directory holding other files, with a
+`root` error that suggests `--root`. It never asks you to change such a
+directory's permissions.
+
+An existing platform `sproozi/config.json` (from a manual installation) stays
+the default configuration for session commands while it names a remote
+executor or is ready for `serve`. A platform configuration that is neither,
+such as the starter `sproozi init` writes, yields to the local installation.
+When a configured platform configuration stays the default, `init --local` says
+so and names the `--config` that selects the installation.
 
 | Path | Contents | Reaches workers |
 | --- | --- | --- |
@@ -23,7 +32,7 @@ configuration for session commands.
 | `config.json.backup-*` | The previous configuration, saved before setup changes it. | No |
 | `installation.json` | Provisioning journal: installation ID, Docker endpoint, image, network, gateway address and harnesses. | No |
 | `profile/` | Your [profile](#profile): instructions and skills for every session. | A copy at each launch |
-| `credentials/` | Provider keys, one file per provider. | No |
+| `credentials/` | Provider keys, one file per provider, and `PROVIDER-ca.pem` copies of `--provider-ca-file` bundles. | No |
 | `pki/` | Certificate authority keys, the serving leaf, trust generations and the trust-consumer record. | Only the public trust bundle |
 | `state/` | Journals, accounting, grants, placement records, retained checkpoints and the control socket. | No |
 | `docker-cli/` | A private Docker CLI configuration with no registry credentials. | No |
@@ -46,10 +55,10 @@ certificate authority, credentials and configuration.
 | Step | Behaviour |
 | --- | --- |
 | Docker | Uses `docker` from `PATH` and the current context's local Unix socket. Remote TCP engines are rejected. The engine must run Linux containers. |
-| Image | Pulls the native image digest built into the CLI release, or uses `--image REPOSITORY@sha256:DIGEST` or a local `sha256:` content ID, or builds with `--build SOURCE_DIRECTORY`. The image must report helper contract `1`. |
+| Image | Reuses the recorded image when `--image` names it again. Otherwise pulls the native image digest built into the CLI release, or uses `--image REPOSITORY@sha256:DIGEST` or a local `sha256:` content ID, or builds with `--build SOURCE_DIRECTORY`. The image must report helper contract `1`. |
 | Network | Creates or reuses the bridge network `sproozi-ID`, labelled `sproozi.com/installation=ID`. Docker chooses a subnet that does not overlap its other networks. A same-named network that this installation does not own is rejected. |
 | Gateway address | Serves a one-time value from the host and fetches it from a container on the network. It tries, in order: host loopback reached through the engine's host name, the bridge gateway address, then each of those on all interfaces. The first address that works is recorded. |
-| Credentials | Stores the provider key from a hidden prompt, `--credential-file` or `--credential-stdin`. It then lists the provider's models to check the key, unless `--skip-credential-check` is given. |
+| Credentials | Stores the provider key from a hidden prompt, `--credential-file` or `--credential-stdin`. With `--provider-ca-file`, copies that PEM bundle to `credentials/PROVIDER-ca.pem` and points the harness's gateway at the copy; a later run with the flag replaces it. It then lists the provider's models to check the key, unless `--skip-credential-check` is given. |
 | Certificates | Creates the certificate authority and a serving leaf covering the gateway address and the enabled provider authorities. |
 | Configuration | Writes `config.json`. On a later run it adds a new harness and keeps every other value. It refuses when the existing configuration's image, network, gateway address or approved instructions differ from the installation. |
 | Service | Starts `sproozi serve` detached from the terminal. After a configuration or credential change it restarts the home daemon only when no session is active; otherwise it stops with a `service` error saying the restart is still needed. |
@@ -72,13 +81,19 @@ service with `sproozi service stop` and `sproozi service start`.
 | Checkpoint helper | 0.5 CPU, 512 MiB, 128 processes |
 | Network anchor | 0.1 CPU, 64 MiB, 32 processes |
 | Managed workspace volume | 512 MiB |
-| Maximum checkpoint | 8 MiB |
-| Retained checkpoint storage | 128 MiB |
+| Maximum checkpoint (`local.maxCheckpointBytes`) | 32 MiB; it also bounds the workspace's expanded Git objects at `start`. The highest value home accepts is 64 MiB. |
+| Retained checkpoint storage (`local.retainedBytes`) | 256 MiB; at least twice the maximum checkpoint |
+| Model | None: each harness uses its own default model unless `--model` names one |
 | Model allowance | 200,000 accounted tokens |
 | Monetary allowance | Unbounded; a bound needs administrator pricing |
 | External services | Model inference only |
 | First gateway port | 18443; each further harness uses the next free port |
 | Approved instructions | A short product default, or `--instructions-file` on the first run |
+
+Setup never rewrites these values in an existing `config.json`, so an
+installation created with an earlier release keeps its 8 MiB checkpoint and
+128 MiB retained limits until you raise them. When a workspace exceeds the
+limit, `start` names the size and `local.maxCheckpointBytes`.
 
 The image, network, gateway address and approved instructions bind retained
 sessions. Changing them in place is not supported; setup and
@@ -97,7 +112,9 @@ network, gateway address, limits, allowances and certificate authority.
 | `claude-code` | `local` when first, otherwise `local-claude` | `https://api.anthropic.com` | `credentials/anthropic` |
 
 `--provider-url` and `--provider-ca-file` select a private HTTPS provider
-endpoint for the harness being added. Codex receives `OPENAI_API_KEY` and Claude
+endpoint for the harness being added. The CA bundle is public, so its source
+may be readable by anyone, but setup refuses one every account can write. The
+gateway reads only the private copy. Codex receives `OPENAI_API_KEY` and Claude
 Code `ANTHROPIC_API_KEY` as placeholders; the gateway replaces them with the
 stored key on approved requests.
 

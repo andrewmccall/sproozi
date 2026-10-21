@@ -34,6 +34,10 @@ adds missing harnesses and refuses when placement-binding values differ.
 The default root is `~/sproozi`. An existing platform configuration stays the
 session commands' default, so manual installations keep working.
 
+> Amended by [first-run fixes](#amendment-first-run-fixes): setup refuses a
+> root it does not own, and a platform configuration that can do nothing yet
+> yields to a local installation.
+
 ### The gateway address is measured, not assumed
 
 Setup serves a nonce on a candidate host bind and fetches it from a container
@@ -204,6 +208,61 @@ not what it can reach.
 - A Linux or Windows acceptance run fails the endpoint or containment probes.
 - Users need scripted uninstall, credential removal, verified source builds or
   LAN containment evidence.
+
+## Amendment: first-run fixes
+
+Added 2026-10-20, after five launch testers hit the same first-run problems.
+
+**Setup owns its root.** The guides once cloned the repository from the home
+directory, which makes `~/sproozi` a Git checkout. Setup then failed the
+private-directory check and suggested `chmod 700`; following it put
+credentials, the CA keys and state into the checkout, one `git add -A` from a
+commit, and the guide's `rm -rf ~/sproozi` removal would delete the checkout.
+`init --local` now refuses a root that holds `.git` or any entry outside the
+installation layout, names the cause and suggests `--root`. The default stays
+`~/sproozi`: changing it would orphan existing installations and recorded
+roots, and the check removes the collision without a migration. Revisit if
+users still choose a checkout path after the guides change.
+
+**One configuration wins predictably.** Plain `sproozi init` writes a starter
+platform configuration, and the platform file used to win whenever it existed,
+so a later `init --local` reported ready while session commands read the
+starter and failed. A platform configuration now stays the default only while
+it names a remote executor or is ready for `serve`; otherwise an existing local
+installation wins. Discovery reads the file rather than moving it, so nothing
+the user wrote is changed. Alternative rejected: having `init --local` rename
+the starter, which mutates a file in another directory and still leaves the
+rule implicit. Revisit if a partly written manual configuration is commonly
+kept beside a local installation.
+
+**The checkpoint default is 32 MiB, with 256 MiB retained.** The checkpoint
+limit also bounds a workspace's expanded Git objects at `start`. At the
+proposal's 8 MiB, ordinary repositories failed. 32 MiB covers repositories with
+a few tens of MiB of history while leaving room to raise it to home's 64 MiB
+ceiling, and 256 MiB of retained storage keeps eight maximum-size checkpoints
+above the two-checkpoint minimum. Using the ceiling as the default was rejected:
+it leaves no headroom and doubles the per-checkpoint memory home and the helper
+hold. A remote executor must still use the same limit; the starter Kubernetes
+examples use 8 MiB, so adding one needs matching values, which the
+configuration check names. Existing installations keep their values. Revisit
+when capture no longer holds checkpoints in memory or the 64 MiB ceiling moves.
+
+**Provider CA bundles are copied into the installation.** Home applies one
+owner-only check to every file it reads, so a world-readable
+`--provider-ca-file` passed setup but stopped the daemon. Setup now validates
+the bundle as PEM certificates and copies it to `credentials/PROVIDER-ca.pem`;
+a later run with the flag replaces the copy and the configured path. The source
+may be readable by anyone, since the bundle is public, but not writable by
+every account, because whoever can change it can make the gateway trust another
+endpoint with the provider key. Alternative rejected: relaxing home's check for
+CA files, which adds a second file-trust rule to the daemon. The cost is that a
+changed source takes effect only when setup copies it again.
+
+**The model is optional.** Setup no longer asks for or requires a model, and
+`serve` no longer lists it. Without one the harness uses its own default, as
+the supervisor already omitted `--model` for an empty value; `--model` remains
+an optional override. Pricing keys on the model each request names, not on
+this setting, so cost accounting is unchanged.
 
 ## Links
 

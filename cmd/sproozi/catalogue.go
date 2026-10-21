@@ -158,7 +158,7 @@ func (c catalogue) failure(configPath string) error {
 	if len(c.problems) < len(c.Executors) {
 		if errors.Is(homeErr, home.ErrControlUnavailable) {
 			_, _ = fmt.Fprintln(os.Stderr,
-				"Home is not running, so its sessions are not listed; start it with \""+serveCommand(configPath)+"\"")
+				"Home is not running, so its sessions are not listed; start it with \""+startHomeCommand(configPath)+"\"")
 		} else if homeErr != nil {
 			_, _ = fmt.Fprintf(os.Stderr, "Home is unavailable, so its sessions are not listed: %v\n", homeErr)
 		}

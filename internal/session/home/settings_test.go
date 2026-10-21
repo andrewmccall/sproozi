@@ -41,9 +41,12 @@ func TestServeProblemsAcceptComposedConfigAndNameEveryGap(t *testing.T) {
 	if slices.Contains(keys, "local.harness") || slices.Contains(keys, "local.name") || slices.Contains(keys, "model") {
 		t.Errorf("valid starter settings reported: %v", keys)
 	}
+	// An omitted model lets the harness use its own default.
 	starter.Model = ""
-	if !slices.Contains(starter.ServeProblems(), "model (model name the harness requests)") {
-		t.Errorf("empty model not reported with the other serve settings: %v", starter.ServeProblems())
+	for _, problem := range starter.ServeProblems() {
+		if strings.HasPrefix(problem, "model ") {
+			t.Errorf("omitted model reported: %v", problem)
+		}
 	}
 }
 
@@ -52,7 +55,7 @@ func TestServeProblemsTreatBlankTextAsMissing(t *testing.T) {
 	c := composedConfig(t)
 	c.Model, c.Local.Instructions = "   ", "\t\n"
 	problems := c.ServeProblems()
-	for _, want := range []string{"model (model name the harness requests)", "local.instructions (approved instructions)"} {
+	for _, want := range []string{"model (" + modelWant + ")", "local.instructions (approved instructions)"} {
 		if !slices.Contains(problems, want) {
 			t.Errorf("blank setting not reported as %q: %v", want, problems)
 		}
@@ -202,7 +205,8 @@ func TestServeProblemsNameEachHarnessEntryAndAcceptManagedCertificates(t *testin
 	c := composedConfig(t)
 	c.Gateway.CertificateFile, c.Gateway.KeyFile, c.Gateway.TrustBundleFile = "", "", ""
 	c.Gateway.PKIDirectory = filepath.Join(c.Directory, "pki")
-	c.Harnesses = []LocalHarness{{Harness: "bogus", Name: "Bad Name", ProviderURL: "ftp://x", ProviderTokenFile: "relative"}}
+	c.Harnesses = []LocalHarness{{Harness: "bogus", Name: "Bad Name", Model: " ", ProviderURL: "ftp://x",
+		ProviderTokenFile: "relative"}}
 	problems := c.ServeProblems()
 	for _, key := range []string{"harnesses[0].harness", "harnesses[0].name", "harnesses[0].gatewayPort",
 		"harnesses[0].model", "harnesses[0].providerURL", "harnesses[0].providerTokenFile"} {

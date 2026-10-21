@@ -667,3 +667,30 @@ func TestStartSelectsTheRequestedLocalHarnessPerSession(t *testing.T) {
 		t.Fatalf("unconfigured harness: %v", err)
 	}
 }
+
+// A workspace start cannot capture is refused before anything is recorded,
+// with the reason and the repair, so the client offers no retry.
+func TestStartRejectsWorkspaceProblemsWithRepair(t *testing.T) {
+	t.Parallel()
+	s, _, _, repo := testService(t)
+	plain := testutil.PrivateDir(t)
+	for name, tc := range map[string]struct {
+		path  string
+		limit int64
+		want  string
+	}{
+		"missing":   {filepath.Join(plain, "missing"), testLimit, "does not exist; pass --workspace"},
+		"not git":   {plain, testLimit, "must be the top-level directory of a Git repository"},
+		"too large": {repo, 1024, "local.maxCheckpointBytes is 0.0 MiB: raise it"},
+	} {
+		s.config.Local.MaxCheckpointBytes = tc.limit
+		id := uuid.NewString()
+		_, err := s.Start(t.Context(), id, uuid.NewString(), tc.path, "", nil)
+		if !errors.Is(err, ErrRejected) || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: %v", name, err)
+		}
+		if _, inspectErr := s.coordinator.Inspect(id); !os.IsNotExist(inspectErr) {
+			t.Errorf("%s: execution recorded: %v", name, inspectErr)
+		}
+	}
+}

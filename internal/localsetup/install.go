@@ -132,9 +132,11 @@ type installer struct {
 	store    *pki.Store
 	config   home.Config
 	changed  bool
-	// credential records that this run stored a provider credential, which a
-	// running home daemon reads only at startup.
+	// credential records that this run stored a provider credential or CA
+	// bundle, which a running home daemon reads only at startup.
 	credential bool
+	// providerCA is the CA bundle this run stored for the selected harness.
+	providerCA string
 }
 
 // openInstaller validates the root, takes the setup lock and loads the journal.
@@ -147,6 +149,9 @@ func openInstaller(o Options) (*installer, func(), error) {
 	if socket := home.SocketPath(l.State()); len(socket) > maxSocketPath {
 		return nil, nil, fail("root", fmt.Errorf("the control socket path %s exceeds the %d-byte Unix socket limit",
 			socket, maxSocketPath), "choose a shorter --root")
+	}
+	if err = l.checkRoot(); err != nil {
+		return nil, nil, err
 	}
 	if err = l.ensureDirectories(); err != nil {
 		return nil, nil, fail("root", err, "fix ownership or permissions, or choose --root")
@@ -189,6 +194,11 @@ func (i *installer) findDocker(ctx context.Context) error {
 
 func (i *installer) prepareImage(ctx context.Context) error {
 	requested := i.o.Image.Reference != "" || i.o.Image.BuildSource != ""
+	// Repeating setup with the recorded image is not a change.
+	if recorded := i.inst.Image; recorded != nil && i.o.Image.BuildSource == "" &&
+		(i.o.Image.Reference == recorded.Reference || i.o.Image.Reference == recorded.ID) {
+		requested = false
+	}
 	if i.inst.Image == nil || requested || VerifyImage(ctx, i.docker, *i.inst.Image) != nil {
 		if i.inst.Image != nil && requested && placementExists(i.l) {
 			return fail("image", errors.New("changing the native image of an installation with retained sessions is not supported yet"),
@@ -244,9 +254,22 @@ func (i *installer) prepareHarness(ctx context.Context) error {
 			return err
 		}
 	case o.Model != "" && o.Model != i.selected.Model:
-		return fail("harness", fmt.Errorf("%s already uses model %s", o.Harness, i.selected.Model), "edit the model in "+i.l.Config())
+		current := "the harness's default model"
+		if i.selected.Model != "" {
+			current = "model " + i.selected.Model
+		}
+		return fail("harness", fmt.Errorf("%s already uses %s", o.Harness, current), "edit the model in "+i.l.Config())
 	}
 	provider := ProviderFor(i.selected.Harness)
+	// An explicit CA bundle replaces the stored one on every run.
+	if o.ProviderCAFile != "" {
+		path, err := StoreProviderCA(i.l, provider.Name, o.ProviderCAFile)
+		if err != nil {
+			return err
+		}
+		i.selected.ProviderCAFile, i.providerCA, i.credential = path, path, true
+		i.step("Stored the %s endpoint's CA bundle in %s", provider.Name, path)
+	}
 	if !HasCredential(i.l, provider.Name) || o.Credential.File != "" || o.Credential.Stdin != nil {
 		if _, err := StoreCredential(i.l, provider.Name, o.Credential); err != nil {
 			return err
@@ -274,9 +297,6 @@ func (i *installer) addHarness() error {
 	if err != nil {
 		return err
 	}
-	if o.Model == "" {
-		return fail("harness", fmt.Errorf("no model selected for %s", o.Harness), "pass --model NAME")
-	}
 	provider := ProviderFor(o.Harness)
 	name := "local"
 	if len(i.inst.Harnesses) > 0 {
@@ -284,7 +304,7 @@ func (i *installer) addHarness() error {
 		name = "local-" + directory
 	}
 	h := Harness{Harness: o.Harness, Name: name, Port: port, Model: o.Model, ProviderURL: cmp.Or(o.ProviderURL, provider.URL),
-		ProviderCAFile: o.ProviderCAFile, Credential: filepath.Join(i.l.Credentials(), provider.Name)}
+		Credential: filepath.Join(i.l.Credentials(), provider.Name)}
 	i.inst.Harnesses = append(i.inst.Harnesses, h)
 	i.selected = &i.inst.Harnesses[len(i.inst.Harnesses)-1]
 	return nil
@@ -330,6 +350,9 @@ func (i *installer) writeConfiguration(context.Context) error {
 	if found {
 		if i.config, i.changed, err = mergeConfig(existing, rendered); err != nil {
 			return err
+		}
+		if i.providerCA != "" && setProviderCA(&i.config, i.selected.Harness, i.providerCA) {
+			i.changed = true
 		}
 	}
 	if i.changed {
@@ -425,7 +448,9 @@ func placementExists(l Layout) bool {
 	return err == nil
 }
 
-// Default local limits, from the onboarding proposal's starter values.
+// Default local limits, from the onboarding proposal's starter values. The
+// checkpoint limit also bounds a workspace's expanded Git objects, so it is
+// 32 MiB rather than the proposal's 8 MiB; see ADR 0029.
 var (
 	agentLimits  = runtimedocker.ResourceLimits{MemoryBytes: 1 << 30, CPUMilli: 1000, PIDs: 256}
 	helperLimits = runtimedocker.ResourceLimits{MemoryBytes: 512 << 20, CPUMilli: 500, PIDs: 128}
@@ -459,7 +484,7 @@ func renderConfig(l Layout, inst Installation, instructions string) home.Config 
 			NetworkName: inst.Network.Name, GatewayIPv4: inst.Endpoint.GatewayIPv4, GatewayPort: primary.Port,
 			Instructions: instructions, InstructionDigest: digest,
 			AgentLimits: agentLimits, HelperLimits: helperLimits, AnchorLimits: anchorLimits,
-			VolumeBytes: 512 << 20, MaxCheckpointBytes: 8 << 20, RetainedBytes: 128 << 20},
+			VolumeBytes: 512 << 20, MaxCheckpointBytes: 32 << 20, RetainedBytes: 256 << 20},
 		Allowances:  map[string]session.Allowance{"model.inference": {Units: session.Limit{Bounded: true, Value: 200000}}},
 		MaxDuration: "30m", Model: primary.Model, NativeOptions: nativeOptions(primary.Harness),
 		Gateway: home.GatewayConfig{Listen: fmt.Sprintf("%s:%d", inst.Endpoint.ListenHost, primary.Port), PKIDirectory: l.PKI(),
@@ -520,6 +545,22 @@ func mergeConfig(existing, rendered home.Config) (home.Config, bool, error) {
 		}
 	}
 	return existing, changed, nil
+}
+
+// setProviderCA points the harness's gateway at a stored CA bundle and
+// reports whether that changed the configuration.
+func setProviderCA(c *home.Config, kind harness.NativeKind, path string) bool {
+	target := &c.Gateway.ProviderCAFile
+	if c.Local.Harness != kind {
+		index := slices.IndexFunc(c.Harnesses, func(h home.LocalHarness) bool { return h.Harness == kind })
+		if index < 0 {
+			return false
+		}
+		target = &c.Harnesses[index].ProviderCAFile
+	}
+	changed := *target != path
+	*target = path
+	return changed
 }
 
 // writeConfig backs up an existing configuration, then replaces it atomically.

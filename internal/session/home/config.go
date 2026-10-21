@@ -36,7 +36,7 @@ type Config struct {
 	Local            runtimedocker.PlacementConfig   `json:"local"`
 	Allowances       map[string]session.Allowance    `json:"allowances"`
 	MaxDuration      string                          `json:"maxDuration"`
-	Model            string                          `json:"model"`
+	Model            string                          `json:"model,omitempty"`
 	NativeOptions    []string                        `json:"nativeOptions,omitempty"`
 	Gateway          GatewayConfig                   `json:"gateway"`
 	Remote           map[string]profile.ClientConfig `json:"remote,omitempty"`
@@ -55,7 +55,7 @@ type LocalHarness struct {
 	Harness           harness.NativeKind `json:"harness"`
 	Name              string             `json:"name"`
 	GatewayPort       uint16             `json:"gatewayPort"`
-	Model             string             `json:"model"`
+	Model             string             `json:"model,omitempty"`
 	NativeOptions     []string           `json:"nativeOptions,omitempty"`
 	ProviderURL       string             `json:"providerURL"`
 	ProviderTokenFile string             `json:"providerTokenFile"`

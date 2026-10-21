@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -67,40 +68,41 @@ func serve(ctx context.Context, path string) error {
 	return service.Serve(ctx)
 }
 
+// errNoTerminal explains why attach cannot run: the harness terminal needs an
+// interactive terminal on standard input.
+var errNoTerminal = errors.New("attach needs an interactive terminal, and standard input is not one; " +
+	"run it from a terminal, where Ctrl-] detaches")
+
 func attach(ctx context.Context, socket, id string) error {
 	sizes := make(chan home.TerminalSize, 1)
 	fd := int(os.Stdin.Fd())
-	if term.IsTerminal(fd) {
-		state, err := term.MakeRaw(fd)
-		if err != nil {
-			return err
-		}
-		defer func() { _ = term.Restore(fd, state) }()
-		var last home.TerminalSize
-		update := func() {
-			columns, rows, err := terminalSize(fd)
-			if err == nil && columns > 0 && rows > 0 && columns <= 65535 && rows <= 65535 {
-				size := home.TerminalSize{Rows: uint16(rows), Columns: uint16(columns)}
-				if size == last {
-					return
-				}
-				select {
-				case sizes <- size:
-					last = size
-				default:
-				}
+	if !term.IsTerminal(fd) {
+		return errNoTerminal
+	}
+	state, err := term.MakeRaw(fd)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = term.Restore(fd, state) }()
+	var last home.TerminalSize
+	update := func() {
+		columns, rows, err := terminalSize(fd)
+		if err == nil && columns > 0 && rows > 0 && columns <= 65535 && rows <= 65535 {
+			size := home.TerminalSize{Rows: uint16(rows), Columns: uint16(columns)}
+			if size == last {
+				return
+			}
+			select {
+			case sizes <- size:
+				last = size
+			default:
 			}
 		}
-		run, cancel := context.WithCancel(ctx)
-		defer cancel()
-		stopResize := watchResize(run, update)
-		defer stopResize()
-		_, _ = fmt.Fprintln(os.Stderr, "Attached to the harness terminal; Ctrl-] detaches")
-		return home.AttachTerminal(run, socket, id, os.Stdin, os.Stdout, sizes)
 	}
-	ctx, cancel := context.WithCancel(ctx)
+	run, cancel := context.WithCancel(ctx)
 	defer cancel()
-	// Noninteractive input also acknowledges every byte before EOF detaches.
-	sizes <- home.TerminalSize{Rows: 24, Columns: 80}
-	return home.AttachTerminal(ctx, socket, id, os.Stdin, os.Stdout, sizes)
+	stopResize := watchResize(run, update)
+	defer stopResize()
+	_, _ = fmt.Fprintln(os.Stderr, "Attached to the harness terminal; Ctrl-] detaches")
+	return home.AttachTerminal(run, socket, id, os.Stdin, os.Stdout, sizes)
 }

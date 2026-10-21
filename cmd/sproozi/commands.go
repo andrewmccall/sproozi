@@ -71,7 +71,7 @@ var commands = []command{
 		flags: []string{"config", "executor", "operation", "harness", "repository", "project", "task", "task-file",
 			"workspace-from", "checkpoint-digest", "revision"}},
 	{name: home.ActionSessions, summary: "List sessions from home and configured remote executors",
-		flags: []string{"config", "socket", "executor", "project"}},
+		flags: []string{"config", "socket", "executor", "project", "json"}},
 	{name: home.ActionStatus, operands: "SESSION_UUID", summary: "Show one session's status",
 		flags: []string{"config", "socket", "executor", "id"}},
 	{name: home.ActionPull, operands: "SESSION_UUID --from NAME",
@@ -79,10 +79,10 @@ var commands = []command{
 		flags:   []string{"config", "socket", "executor", "id", "operation", "from"}},
 	{name: home.ActionResume, operands: "SESSION_UUID", owner: homeOwner,
 		summary: "Start a new local execution of a stopped session and attach to it",
-		flags:   []string{"config", "socket", "executor", "id", "operation", "detach"}},
+		flags:   []string{"config", "socket", "executor", "id", "operation", "detach", "json"}},
 	{name: home.ActionStop, operands: "SESSION_UUID", owner: homeOwner,
 		summary: "Stop local work after its current turn and keep a checkpoint",
-		flags:   []string{"config", "socket", "executor", "id", "operation"}},
+		flags:   []string{"config", "socket", "executor", "id", "operation", "json"}},
 	{name: home.ActionCancel, operands: "SESSION_UUID", summary: "Revoke and force-stop a session's current execution",
 		flags: []string{"config", "socket", "executor", "id", "operation"}},
 	{name: home.ActionRecover, operands: "SESSION_UUID", summary: "Continue a journaled operation after an interruption",
@@ -92,7 +92,7 @@ var commands = []command{
 	{name: home.ActionStart, operands: "--workspace PATH", owner: homeOwner,
 		summary: "Start a managed Docker session from a stopped Git directory and attach to it",
 		flags: []string{"config", "socket", "executor", "id", "operation", "workspace", "harness", "include-ignored",
-			"detach"}},
+			"detach", "json"}},
 	{name: home.ActionAttach, operands: "SESSION_UUID", owner: homeOwner,
 		summary: "Attach this terminal to a home session; Ctrl-] detaches",
 		flags:   []string{"config", "socket", "executor", "id"}},
@@ -124,7 +124,8 @@ var flagHelp = map[string]string{
 	"to":                    "placement `NAME`: the value of local.name (for example local) or a name under \"remote\"",
 	"local":                 "provision local Docker sessions: image, network, TLS, credential, configuration, daemon",
 	"root":                  "local installation `PATH`; defaults to the recorded one or ~/sproozi",
-	"model":                 "provider `MODEL` for the selected harness",
+	"model":                 "provider `MODEL` for the harness being added; omit it to use the harness's default",
+	"instructions-file":     "approved developer instructions `FILE`, UTF-8 and at most 16 KiB, for a new installation",
 	"image":                 "approved native image `REFERENCE`, digest-pinned, or a local sha256 content ID",
 	"build":                 "build the native image from a Sproozi source `DIRECTORY` with Docker",
 	"provider-url":          "provider base `URL`; defaults to the harness's provider",
@@ -134,7 +135,7 @@ var flagHelp = map[string]string{
 	"skip-credential-check": "do not ask the provider to validate the credential",
 	"port":                  "first gateway `PORT` to try",
 	"no-service":            "write configuration without starting the home daemon",
-	"json":                  "print a machine-readable result",
+	"json":                  "print a machine-readable result, as session commands do whenever output is not a terminal",
 	"timeout":               "overall `DURATION` limit",
 	"leave-running":         "stop the service while active sessions keep running within their deadlines",
 	"check-provider":        "also ask each provider to validate its credential; lists models only",
@@ -251,8 +252,12 @@ func (c command) defaultConfig() string {
 
 func usage(w io.Writer) {
 	_, _ = fmt.Fprintln(w, "Usage: sproozi COMMAND [flags]\n\nCommands:")
+	width := 0
 	for _, c := range commands {
-		_, _ = fmt.Fprintf(w, "  %-9s %s\n", c.name, c.summary)
+		width = max(width, len(c.name))
+	}
+	for _, c := range commands {
+		_, _ = fmt.Fprintf(w, "  %-*s  %s\n", width, c.name, c.summary)
 	}
 	_, _ = fmt.Fprintln(w, "\nHome is the home daemon: the \"sproozi serve\" process on your own machine. It owns\n"+
 		"local Docker placements, their gateway and accounting, and the sessions you have pulled.\n"+

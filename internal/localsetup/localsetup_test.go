@@ -1,16 +1,26 @@
 package localsetup
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"errors"
+	"fmt"
+	"math/big"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/privatefs"
+	runtimedocker "github.com/andrewmccall/sproozi/internal/runtime/docker"
 	"github.com/andrewmccall/sproozi/internal/session/home"
 	"github.com/andrewmccall/sproozi/internal/testutil"
 )
@@ -60,7 +70,7 @@ func TestRenderedConfigIsAcceptedByTheHomeService(t *testing.T) {
 	if read.MaxDuration != "30m" || read.Allowances["model.inference"].Units.Value != 200000 || read.Allowances["model.inference"].CostMicros.Bounded {
 		t.Fatal("starter limits differ from the proposal")
 	}
-	if read.Local.AgentLimits != agentLimits || read.Local.VolumeBytes != 512<<20 || read.Local.MaxCheckpointBytes != 8<<20 {
+	if read.Local.AgentLimits != agentLimits || read.Local.VolumeBytes != 512<<20 || read.Local.MaxCheckpointBytes != 32<<20 || read.Local.RetainedBytes != 256<<20 {
 		t.Fatal("starter worker limits differ from the proposal")
 	}
 	for _, path := range []string{read.Directory, read.DockerConfig, read.Gateway.ProviderTokenFile} {
@@ -235,6 +245,30 @@ func TestRootDiscoveryPrefersPlatformConfigThenRecordedRoot(t *testing.T) {
 	if path, err := DefaultConfigPath(); err != nil || path != filepath.Join(dir, "sproozi", "config.json") {
 		t.Fatalf("existing platform configuration must stay authoritative: %s %v", path, err)
 	}
+	// The starter "sproozi init" writes can do nothing yet, so a local
+	// installation wins over it until it names a remote executor.
+	starter := `{"directory": "` + filepath.Join(dir, "sproozi", "home") + `",
+		"local": {"harness": "codex", "name": "local"}, "maxDuration": "30m", "remote": {%s},
+		"allowances": {"model.inference": {"units": {"bounded": true, "value": 1}, "costMicros": {"bounded": false, "value": 0}}}}`
+	if err = privatefs.Replace(filepath.Join(dir, "sproozi"), "config.json", fmt.Appendf(nil, starter, "")); err != nil {
+		t.Fatal(err)
+	}
+	if path, err := DefaultConfigPath(); err != nil || path != filepath.Join(dir, "sproozi", "config.json") {
+		t.Fatalf("starter without an installation: %s %v", path, err)
+	}
+	if err = privatefs.Replace(custom, "installation.json", []byte("{}")); err != nil {
+		t.Fatal(err)
+	}
+	if path, err := DefaultConfigPath(); err != nil || path != l.Config() {
+		t.Fatalf("installation must win over an unconfigured starter: %s %v", path, err)
+	}
+	remote := `"engineering": {"url": "https://work.example"}`
+	if err = privatefs.Replace(filepath.Join(dir, "sproozi"), "config.json", fmt.Appendf(nil, starter, remote)); err != nil {
+		t.Fatal(err)
+	}
+	if path, err := DefaultConfigPath(); err != nil || path != filepath.Join(dir, "sproozi", "config.json") {
+		t.Fatalf("a platform configuration with a remote executor must stay authoritative: %s %v", path, err)
+	}
 }
 
 func TestFreePortSkipsRecordedAndBoundPorts(t *testing.T) {
@@ -242,5 +276,126 @@ func TestFreePortSkipsRecordedAndBoundPorts(t *testing.T) {
 	port, err := freePort(18443, inst)
 	if err != nil || port == 18443 {
 		t.Fatalf("recorded port reused: %d %v", port, err)
+	}
+}
+
+// Setup refuses a root it does not own, such as a Git checkout, and never asks
+// for its permissions to be changed; a new, empty or installed root is fine.
+func TestCheckRootRefusesForeignDirectories(t *testing.T) {
+	l, _ := testInstallation(t)
+	if err := l.checkRoot(); err != nil {
+		t.Fatalf("installation root refused: %v", err)
+	}
+	if err := (Layout{Root: filepath.Join(l.Root, "missing")}).checkRoot(); err != nil {
+		t.Fatalf("missing root refused: %v", err)
+	}
+	checkout := Layout{Root: filepath.Join(testutil.PrivateDir(t), "sproozi")}
+	if err := os.MkdirAll(filepath.Join(checkout.Root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	err := checkout.checkRoot()
+	if err == nil || !strings.Contains(err.Error(), "is a Git checkout") || !strings.Contains(err.Error(), "--root") ||
+		strings.Contains(err.Error(), "chmod") {
+		t.Fatalf("checkout root: %v", err)
+	}
+	other := Layout{Root: filepath.Join(testutil.PrivateDir(t), "other")}
+	if err = os.Mkdir(other.Root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err = testutil.WriteFile(filepath.Join(other.Root, "notes.txt"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err = other.checkRoot(); err == nil || !strings.Contains(err.Error(), "notes.txt") {
+		t.Fatalf("foreign root: %v", err)
+	}
+}
+
+// A harness added without a model leaves the choice to the harness, and serve
+// accepts that configuration.
+func TestRenderedConfigWithoutModel(t *testing.T) {
+	l, inst := testInstallation(t)
+	inst.Harnesses[0].Model = ""
+	if err := writeConfig(l, renderConfig(l, inst, DefaultInstructions), false); err != nil {
+		t.Fatal(err)
+	}
+	read, err := home.ReadConfig(l.Config())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, problem := range read.ServeProblems() {
+		if strings.HasPrefix(problem, "model") {
+			t.Fatalf("serve requires a model: %s", problem)
+		}
+	}
+}
+
+func testCAPEM(t *testing.T) []byte {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "provider CA"},
+		NotBefore: time.Now(), NotAfter: time.Now().Add(time.Hour), IsCA: true, BasicConstraintsValid: true,
+		KeyUsage: x509.KeyUsageCertSign}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+}
+
+// A public provider CA bundle is copied into the installation as a private
+// file the gateway accepts; a bundle anyone can change, or no PEM, is refused.
+func TestStoreProviderCACopiesAPrivateFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission bits")
+	}
+	l, _ := testInstallation(t)
+	source := filepath.Join(t.TempDir(), "ca.pem")
+	if err := os.WriteFile(source, testCAPEM(t), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(source, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := StoreProviderCA(l, "openai", source)
+	if err != nil || stored != filepath.Join(l.Credentials(), "openai-ca.pem") {
+		t.Fatalf("stored %s %v", stored, err)
+	}
+	if _, err = privatefs.ReadFile(stored, 64<<10); err != nil {
+		t.Fatalf("stored copy fails the private-file check: %v", err)
+	}
+	if err = os.Chmod(source, 0o666); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = StoreProviderCA(l, "openai", source); err == nil || !strings.Contains(err.Error(), "writable by every account") {
+		t.Fatalf("world-writable source: %v", err)
+	}
+	if err = os.WriteFile(source, []byte("not a certificate"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Chmod(source, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = StoreProviderCA(l, "openai", source); err == nil || !strings.Contains(err.Error(), "no PEM certificate") {
+		t.Fatalf("non-PEM source: %v", err)
+	}
+}
+
+// An explicit CA bundle on a later run replaces the stored path for the
+// harness it names, whether it is the primary harness or a further one.
+func TestSetProviderCAReplacesTheStoredValue(t *testing.T) {
+	c := home.Config{Local: runtimedocker.PlacementConfig{Harness: harness.NativeCodex},
+		Gateway:   home.GatewayConfig{ProviderCAFile: "/old/ca.pem"},
+		Harnesses: []home.LocalHarness{{Harness: harness.NativeClaude}}}
+	if !setProviderCA(&c, harness.NativeCodex, "/new/openai-ca.pem") || c.Gateway.ProviderCAFile != "/new/openai-ca.pem" {
+		t.Fatalf("primary: %+v", c.Gateway)
+	}
+	if setProviderCA(&c, harness.NativeCodex, "/new/openai-ca.pem") {
+		t.Fatal("unchanged value reported as a change")
+	}
+	if !setProviderCA(&c, harness.NativeClaude, "/new/anthropic-ca.pem") || c.Harnesses[0].ProviderCAFile != "/new/anthropic-ca.pem" {
+		t.Fatalf("further harness: %+v", c.Harnesses)
 	}
 }

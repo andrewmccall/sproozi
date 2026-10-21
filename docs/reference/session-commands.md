@@ -31,11 +31,12 @@ commit it was built from, or says to use the checkout you built from. Neither re
 `sproozi init [--directory PATH]` creates or validates a private directory for
 configuration and credentials. When `config.json` is missing, it also writes a
 starter configuration that client commands accept and prints the next step
-for each use: add a remote executor under `remote` for remote work, or replace
-the placeholder model and add the Docker, local placement and gateway settings
-and run `sproozi serve` for local sessions, as the
-[home configuration reference](../../cmd/sproozi/README.md) shows. Each next
-step links its setup guide. It never overwrites an existing `config.json`; it
+for each use: `sproozi init --local` for local Docker sessions, a remote
+executor under `remote` for remote work, or the Docker, local placement and
+gateway settings and `sproozi serve` for a hand-built local configuration, as
+the [home configuration reference](../../cmd/sproozi/README.md) shows. Each
+next step links its setup guide. The starter names no model, so the harness
+uses its own default. It never overwrites an existing `config.json`; it
 checks one and exits non-zero if it is malformed, unsafe, a directory or a
 symbolic link, or has an invalid `remote`, `workSources` or `allowances` entry. It does not
 start a service. The default
@@ -54,8 +55,11 @@ holds config.json; pass --config D/config.json, or run "sproozi init
 malformed file is reported with its
 path and the key to correct, and a file or directory with unsafe permissions with the `chmod` that
 fixes it. Printed commands quote paths that contain spaces. A command that needs
-home when it isn't running says so and suggests `sproozi serve`; a command that
-changes state names its session and operation UUIDs for the retry.
+home when it isn't running says so and suggests `sproozi service start` for a
+local installation, otherwise `sproozi serve`. A command that changes state
+names its session and operation UUIDs for the retry when its outcome is
+unknown; a request home refused before recording anything, or that no home
+daemon received, has no retry hint.
 
 Local commands use a private Unix socket on macOS and Linux, or a private named
 pipe on Windows. See [Windows setup](../guides/windows.md) for native platform
@@ -139,15 +143,15 @@ other flag is rejected before configuration is read or a request is sent.
 | `certificates` | `--root`, `--json` |
 | `version` |  |
 | `run` | `--config`, `--executor`, `--operation`, `--harness`, `--repository`, `--project`, `--task`, `--task-file`, `--workspace-from`, `--checkpoint-digest`, `--revision` |
-| `sessions` | `--config`, `--socket`, `--executor`, `--project` |
+| `sessions` | `--config`, `--socket`, `--executor`, `--project`, `--json` |
 | `status` | `--config`, `--socket`, `--executor`, `--id` |
 | `pull` | `--config`, `--socket`, `--executor`, `--id`, `--operation`, `--from` |
-| `resume` | `--config`, `--socket`, `--executor`, `--id`, `--operation`, `--detach` |
-| `stop` | `--config`, `--socket`, `--executor`, `--id`, `--operation` |
+| `resume` | `--config`, `--socket`, `--executor`, `--id`, `--operation`, `--detach`, `--json` |
+| `stop` | `--config`, `--socket`, `--executor`, `--id`, `--operation`, `--json` |
 | `cancel` | `--config`, `--socket`, `--executor`, `--id`, `--operation` |
 | `recover` | `--config`, `--socket`, `--executor`, `--id` |
 | `serve` | `--config` |
-| `start` | `--config`, `--socket`, `--executor`, `--id`, `--operation`, `--workspace`, `--harness`, `--include-ignored`, `--detach` |
+| `start` | `--config`, `--socket`, `--executor`, `--id`, `--operation`, `--workspace`, `--harness`, `--include-ignored`, `--detach`, `--json` |
 | `attach` | `--config`, `--socket`, `--executor`, `--id` |
 | `move` | `--config`, `--socket`, `--executor`, `--id`, `--operation`, `--to` |
 
@@ -171,18 +175,18 @@ other flag is rejected before configuration is read or a request is sent.
 | `--to NAME` | Configured placement for `move`: `local.name` or a name under `remote`. `sproozi move --help` describes it as ``placement `NAME`: the value of local.name (for example local) or a name under "remote"``. Any other name fails before a request; see [move destinations](#move-destinations). |
 | `--local` | Make `init` provision a local installation instead of only creating a directory. |
 | `--root PATH` | Local installation root; defaults to the recorded root or `~/sproozi`. |
-| `--model NAME` | Provider model for the harness `init --local` adds. Setup asks for it when omitted. |
+| `--model NAME` | Optional provider model for the harness `init --local` adds. Without it the harness uses its own default model. |
 | `--instructions-file FILE` | Approved developer instructions for a new installation, at most 16 KiB. |
 | `--image REFERENCE` | Native image as `REPOSITORY@sha256:DIGEST` or a local `sha256:` content ID. |
 | `--build DIRECTORY` | Build the native image with Docker from a Sproozi checkout or release source bundle. |
 | `--provider-url URL` | Provider base URL for the harness being added; defaults to its public provider. |
-| `--provider-ca-file FILE` | CA bundle for a private provider endpoint. |
+| `--provider-ca-file FILE` | PEM CA bundle for a private provider endpoint. Setup copies it into `credentials/` as an owner-only file; the source may be readable by anyone but not writable by every account. Passing it again replaces the stored copy. |
 | `--credential-file FILE` | Owner-only file holding the provider key. |
 | `--credential-stdin` | Read the provider key from standard input. |
 | `--skip-credential-check` | Do not ask the provider to validate the key. |
 | `--port PORT` | First gateway port to try; defaults to 18443. |
 | `--no-service` | Write the configuration without starting the service. |
-| `--json` | Print a machine-readable result. |
+| `--json` | Print a machine-readable result. `start`, `resume`, `stop` and `sessions` also print JSON whenever standard output is not a terminal. |
 | `--timeout DURATION` | Overall limit for `init --local`; defaults to 30 minutes. |
 | `--leave-running` | Stop the service while active sessions keep running within their deadlines. |
 | `--check-provider` | Make `doctor` validate each stored key by listing the provider's models. |
@@ -196,7 +200,10 @@ explains `--executor`, `--from` and `--to`.
 `run`, `serve` and every session command accept `--config FILE`. The session
 commands also accept a home `--socket PATH` override; `run` and `serve` don't. Configuration defaults to the platform user configuration directory at
 `sproozi/config.json` when that file exists, and otherwise to the local
-installation's `config.json` (the recorded root or `~/sproozi`). A socket-only local invocation skips that default file;
+installation's `config.json` (the recorded root or `~/sproozi`). A local
+installation also wins over a platform configuration that names no remote
+executor and is not ready for `serve`, such as the starter `sproozi init`
+writes. A socket-only local invocation skips that default file;
 for example, `sessions --socket PATH` queries only home. Supply
 `--config FILE --socket PATH` to combine configured remote sources with a socket
 override. An explicit config is always read.
@@ -298,6 +305,21 @@ correct the name and run `move` again; there is no operation to reuse.
 
 ## Read status and discovery
 
+`start`, `resume`, `stop` and `sessions` print a short summary when standard
+output is a terminal: for `start`, `resume` and `stop` one line with the session
+UUID, harness, phase, placement and deadline, then the next command to run;
+for `sessions` a table with the columns `ID`, `HARNESS`, `PHASE`, `PLACEMENT`
+and `DEADLINE`, plus `EXECUTOR` when rows come from more than one catalogue.
+When standard output is not a terminal, or `--json` is given, they print the
+JSON described below, one document per command. `status` and the other
+session commands always print JSON.
+
+`attach` needs an interactive terminal on standard input; without one it fails
+with `attach needs an interactive terminal, and standard input is not one`
+before contacting home. `start` and `resume` without `--detach` still start the
+session when standard input is not a terminal, and say on standard error that
+they did not attach.
+
 | Public field | Meaning |
 | --- | --- |
 | `id` | Durable session UUID and operand for subsequent session commands. |
@@ -332,7 +354,7 @@ nested journal keeps its original execution-bound identifiers and receipts.
 Remote work status can include bounded untrusted final text and checkpoint
 facts. Discovery omits full journals and final answers.
 
-`sessions` writes one JSON document containing `sessions`, `executors` and
+With JSON output, `sessions` writes one JSON document containing `sessions`, `executors` and
 `truncated`. It queries at most 32 catalogues concurrently, with a five-second
 request timeout per source, and returns at most 512 rows sorted by executor and
 session ID. Check each executor's availability independently:
@@ -367,10 +389,15 @@ set a shorter "directory" in config.json`, and every command addressed to home
 fails with the same message. A `--socket PATH` that is too long fails before
 any request with `control socket path "..." is N bytes; this platform allows
 at most M; use a shorter --socket path`. Inspect the JSON as well as the exit status.
+For a local installation created by `init --local`, `sessions`, `start`,
+`attach`, `move`, `resume` and `stop` first start an absent home daemon, as
+`sproozi service start` does, and say so on standard error.
 A command addressed to home while it isn't running fails with
 `docker (home): no home daemon is listening on the private control socket`,
 followed by `: PATH does not exist` when the socket file is missing, then
-`; start home with "sproozi serve", see ...`. When the command named a
+`; start home with "sproozi service start"` for a local installation's
+configuration (with `--root PATH` when it is not the recorded root), or
+`; start home with "sproozi serve", see ...` otherwise. When the command named a
 configuration other than the default with `--config`, the hint echoes it, as
 in `start home with "sproozi serve --config '/Users/me/home config.json'"`. The
 path is quoted only when it holds characters the shell would treat specially.

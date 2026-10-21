@@ -61,7 +61,8 @@ func TestInitCreatesStarterConfigurationAndPreservesFiles(t *testing.T) {
 	output := captureCLIOutput(t, []string{actionInit, "--directory", path})
 	if !strings.Contains(output, "Created configuration "+shellQuote(file)+"\n") ||
 		!strings.Contains(output, `add an executor under "remote"`) ||
-		!strings.Contains(output, `add an executor to it later`) || strings.Contains(output, "profile service") ||
+		!strings.Contains(output, "\n    sproozi init --local\n    Guide: "+localSessionsDoc+"\n") ||
+		strings.Contains(output, "profile service") || strings.Contains(output, `replace "model"`) ||
 		!strings.Contains(output, "Guide: "+localSetupDoc+"\n") || !strings.Contains(output, "Guide: "+remoteSetupDoc+"\n") ||
 		!strings.Contains(output, "sproozi serve --config "+shellQuote(file)+"\n") ||
 		!strings.Contains(output, "sproozi sessions --config "+shellQuote(file)+"\n") ||
@@ -125,8 +126,8 @@ func TestStarterConfigurationNamesWhatEachCommandNeeds(t *testing.T) {
 		{[]string{"status", uuid.NewString(), "--config", file, "--executor", "elsewhere"}, []string{
 			`executor "elsewhere" is not configured; use --executor docker (home's executor name), ` +
 				`or add it under "remote" or "workSources" in ` + file}},
-		{[]string{"serve", "--config", file}, []string{"is not ready for serve; set:\n  model (replace",
-			"\n  dockerBinary (absolute path)\n", "\n  dockerConfig (absolute path)\n", "\n  local.nativeImageID",
+		{[]string{"serve", "--config", file}, []string{"is not ready for serve; set:\n  dockerBinary (absolute path)\n",
+			"\n  dockerConfig (absolute path)\n", "\n  local.nativeImageID",
 			"\n  gateway.providerTokenFile", "see " + localSetupDoc + "\n", "For each key, see " + configDoc + "\n"}},
 		{[]string{"run", "--config", file, "--executor", "local", "--task", "x"}, []string{
 			`run submits only to a remote executor configured under "remote" or "workSources" in ` + file,
@@ -148,8 +149,9 @@ func TestStarterConfigurationNamesWhatEachCommandNeeds(t *testing.T) {
 			`move --to "elsewhere" is not a configured placement; use one of: local (local.name), ` +
 				`or add it under "remote" in ` + file}},
 		{[]string{"start", "--config", file, "--workspace", dir}, []string{
-			`start home with "sproozi serve --config ` + shellQuote(file) + `"`,
-			"to retry, repeat the command with --id ", " --operation "}},
+			`start home with "sproozi serve --config ` + shellQuote(file) + `"`}},
+		{[]string{"start", "notgit", "--config", file}, []string{
+			`session UUID "notgit" is not a canonical UUID`, `start takes the directory as "--workspace PATH"`}},
 	} {
 		var stdout, stderr bytes.Buffer
 		code := cli(tc.args, &stdout, &stderr)
@@ -158,7 +160,7 @@ func TestStarterConfigurationNamesWhatEachCommandNeeds(t *testing.T) {
 				t.Fatalf("%v exited %d without %q: %q", tc.args, code, want, stderr.String())
 			}
 		}
-		if tc.args[0] == "move" && strings.Contains(stderr.String(), "to retry") {
+		if (tc.args[0] == "move" || tc.args[0] == "start") && strings.Contains(stderr.String(), "to retry") {
 			t.Errorf("%v offered a retry for a validation error: %q", tc.args, stderr.String())
 		}
 	}
