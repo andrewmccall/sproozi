@@ -49,7 +49,11 @@ func loadMCPExample(t *testing.T, dir string) mcpExample {
 	readStrict(t, filepath.Join(dir, "agentpolicy.yaml"), &e.policy)
 	readStrict(t, filepath.Join(dir, "agenttemplate.yaml"), &e.template)
 	readStrict(t, filepath.Join(dir, "agentrun.yaml"), &e.run)
-	readStrict(t, filepath.Join(dir, "agentruntime.yaml"), &e.runtime)
+	// A runtime is optional: an example may use another example's runtime by
+	// name instead of copying it.
+	if _, err = os.Stat(filepath.Join(dir, "agentruntime.yaml")); err == nil {
+		readStrict(t, filepath.Join(dir, "agentruntime.yaml"), &e.runtime)
+	}
 	return e
 }
 
@@ -63,15 +67,35 @@ func TestMCPExamplesAreConsistent(t *testing.T) {
 		t.Fatalf("no MCP examples found: %v", err)
 	}
 	// Examples are applied side by side, so a copied example must rename its
-	// resources rather than replace another example's.
+	// resources rather than replace another example's. Runtimes are shared by
+	// name: an example without agentruntime.yaml uses another example's.
+	examples := map[string]mcpExample{}
+	runtimes := map[string]api.AgentRuntime{}
+	for _, registryFile := range dirs {
+		dir := filepath.Dir(registryFile)
+		e := loadMCPExample(t, dir)
+		examples[dir] = e
+		if e.runtime.Name != "" {
+			if _, taken := runtimes[e.runtime.Namespace+"/"+e.runtime.Name]; taken {
+				t.Errorf("AgentRuntime %s/%s is defined twice; share it by omitting agentruntime.yaml from %s",
+					e.runtime.Namespace, e.runtime.Name, filepath.Base(dir))
+			}
+			runtimes[e.runtime.Namespace+"/"+e.runtime.Name] = e.runtime
+		}
+	}
 	owners := map[string]string{}
 	for _, registryFile := range dirs {
 		dir := filepath.Dir(registryFile)
 		t.Run(filepath.Base(dir), func(t *testing.T) {
-			e := loadMCPExample(t, dir)
+			e := examples[dir]
+			runtime, found := runtimes[e.template.Namespace+"/"+e.template.Spec.RuntimeRef.Name]
+			if !found {
+				t.Fatalf("template runtimeRef %q names no example runtime; add agentruntime.yaml or use mcp-research",
+					e.template.Spec.RuntimeRef.Name)
+			}
+			e.runtime = runtime
 			for _, object := range []struct{ kind, namespace, name string }{
 				{"AgentPolicy", e.policy.Namespace, e.policy.Name}, {"AgentTemplate", e.template.Namespace, e.template.Name},
-				{"AgentRuntime", e.runtime.Namespace, e.runtime.Name},
 				{"AgentRun", e.run.Namespace, e.run.Name + e.run.GenerateName},
 			} {
 				key := object.kind + " " + object.namespace + "/" + object.name

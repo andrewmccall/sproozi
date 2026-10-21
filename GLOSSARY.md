@@ -187,6 +187,19 @@ written one canonical way: lower-case, internationalized names in their ASCII
 (IDNA) form and an explicit port. The gateway reserves it so only the MCP
 bridge reaches that server.
 
+### GitOps
+
+Deploying from files kept in a Git repository: a tool such as Argo CD or Flux
+applies whatever the repository holds, so changes go through Git rather than
+`kubectl` commands. Where these docs change an installed object with
+`kubectl`, a GitOps user makes the same change in their files instead.
+
+### Overlay
+
+A kustomize directory that starts from other manifests and changes them, for
+example to set a namespace, an image or a ConfigMap's contents, without
+editing the originals. The release's `quickstart-*` directories are overlays.
+
 ### Budget
 
 A usage limit for one capability in one run, set in `AgentPolicy.spec.budgets`:

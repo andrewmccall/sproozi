@@ -4,6 +4,7 @@ package mcp
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -112,38 +113,44 @@ func LoadRegistry(data []byte, credentialsDir string) (*Registry, error) {
 // registryKeys are the keys a registry and each of its servers accept.
 var registryKeys = map[string][]string{"": {"servers"}, "server": {"url", "bearerTokenFile"}}
 
-// registryKeysProblem names an unknown key and where it is, with the keys
+// registryKeysProblem names every unknown key and where it is, with the keys
 // that are accepted there, or returns nil.
 func registryKeysProblem(data []byte) error {
 	var top map[string]json.RawMessage
 	if err := json.Unmarshal(data, &top); err != nil {
 		return fmt.Errorf("invalid MCP registry JSON: %w", err)
 	}
-	for key := range top {
+	var problems []string
+	for _, key := range slices.Sorted(maps.Keys(top)) {
 		if !slices.Contains(registryKeys[""], key) {
-			return fmt.Errorf("MCP registry has unknown key %q; it holds only \"servers\"", key)
+			problems = append(problems, fmt.Sprintf("MCP registry has unknown key %q; it holds only \"servers\"", key))
 		}
 	}
-	if top["servers"] == nil {
-		return fmt.Errorf("MCP registry needs a \"servers\" object naming each server")
-	}
 	var servers map[string]json.RawMessage
-	if err := json.Unmarshal(top["servers"], &servers); err != nil {
-		return fmt.Errorf("MCP registry \"servers\" must be an object of named servers")
+	switch {
+	case top["servers"] == nil:
+		problems = append(problems, "MCP registry needs a \"servers\" object naming each server")
+	case json.Unmarshal(top["servers"], &servers) != nil:
+		problems = append(problems, "MCP registry \"servers\" must be an object of named servers")
 	}
 	for _, name := range slices.Sorted(maps.Keys(servers)) {
 		var fields map[string]json.RawMessage
 		if err := json.Unmarshal(servers[name], &fields); err != nil {
-			return fmt.Errorf("MCP registration %q must be an object with \"url\" and optional \"bearerTokenFile\"", name)
+			problems = append(problems, fmt.Sprintf("MCP registration %q must be an object with \"url\" and "+
+				"optional \"bearerTokenFile\"", name))
+			continue
 		}
 		for _, key := range slices.Sorted(maps.Keys(fields)) {
 			if !slices.Contains(registryKeys["server"], key) {
-				return fmt.Errorf("MCP registration %q has unknown key %q; a server takes \"url\" and optional "+
-					"\"bearerTokenFile\"", name, key)
+				problems = append(problems, fmt.Sprintf("MCP registration %q has unknown key %q; a server takes "+
+					"\"url\" and optional \"bearerTokenFile\"", name, key))
 			}
 		}
 	}
-	return nil
+	if len(problems) == 0 {
+		return nil
+	}
+	return errors.New(strings.Join(problems, "\n"))
 }
 
 // RegistrationNameProblem explains why name cannot name a registered MCP

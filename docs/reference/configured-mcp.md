@@ -48,14 +48,19 @@ It prints each tool and its arguments (`?` marks optional ones);
 The listing grants nothing. DeepWiki offers `read_wiki_structure(repoName)`,
 `read_wiki_contents(repoName)` and `ask_wiki_question(repoName, question)`.
 
-The URL must be the server's Streamable HTTP endpoint, often ending in `/mcp`.
-A URL that serves only the legacy HTTP+SSE transport, often ending in `/sse`,
-passes every offline check but fails at the gateway; `mcp-tools.py` says so.
+Use the URL the provider publishes for MCP. The gateway needs one that speaks
+the Streamable HTTP transport; a URL that serves only the older HTTP+SSE
+transport passes every offline check but fails at the gateway.
+`mcp-tools.py` tells you which one a URL speaks.
 
-For a stronger check, list the tools with the gateway's own MCP client and
-check that the gateway accepts each tool's input schema:
+Two live checks catch what the offline checks cannot. `--policy` compares your
+policy's tools and argument names with the server's, reports unknown tools,
+unknown arguments and required arguments the policy forbids, and exits 1 on
+any mismatch. The Go test lists the tools with the gateway's own MCP client and
+checks that the gateway accepts each tool's input schema:
 
 ```sh
+python3 hack/mcp-tools.py https://mcp.deepwiki.com/mcp --policy examples/mcp/agentpolicy.yaml
 SPROOZI_MCP_LIVE_URL=https://mcp.deepwiki.com/mcp \
   go test ./internal/endpoints/mcp -run TestLiveServerToolsCompile -v
 ```
@@ -68,8 +73,8 @@ Sproozi's [Destination tier](../../GLOSSARY.md#destination-tier) policy.
 ## Register the provider
 
 The gateway reads `servers.json` from its `sproozi-mcp-servers` ConfigMap in
-`sproozi-system` at startup (in the source tree it is `mcp-servers`, before the
-installation's `sproozi-` prefix). The installed registry is empty. A
+`sproozi-system` at startup. The source tree calls it `mcp-servers`: the
+installation adds `sproozi-` to the start of every object name it creates. The installed registry is empty. A
 registry naming two servers, one with a credential, looks like this:
 
 ```json
@@ -123,8 +128,10 @@ kubectl -n sproozi-system rollout restart deployment/sproozi-gateway
 kubectl -n sproozi-system rollout status deployment/sproozi-gateway
 ```
 
-With GitOps, change the ConfigMap in your overlay instead and restart the
-gateway the same way. For a credential, also add the Secret volume and mount to
+If you deploy from files kept in Git ([GitOps](../../GLOSSARY.md#gitops)),
+change the ConfigMap in your own copy of the install files instead, for example
+in an [overlay](../../GLOSSARY.md#overlay), and restart the gateway the same
+way. For a credential, also add the Secret volume and mount to
 the `sproozi-gateway` Deployment. Policy changes need no restart. The provider
 uses ordinary system TLS trust; a private CA needs a gateway image or trust
 store that includes it. The workload receives only the gateway URL and its run
@@ -202,19 +209,26 @@ sees it, and the gateway's audit log records it as the deny reason.
 
 ## Check your configuration offline
 
-`make verify-mcp` loads every
-`examples/*/servers.json` with the gateway's own loader and checks the
-directory's `agentpolicy.yaml`, `agenttemplate.yaml`, `agentrun.yaml` and
-`agentruntime.yaml`: every granted `mcp.<name>` is registered and scoped, the
-scopes compile, the run asks only for what the policy allows, admission accepts
-the run, and the runtime's harness gets a connection for each server. To check
-your own configuration, put the same five files in a directory under
-`examples/` and run `make verify-mcp`; it fails when two examples reuse a
-resource name in the same namespace, so rename what you copy. Tool names can
-only be checked against the live server, with `hack/mcp-tools.py`. CI runs the
-same checks: the Go tests in its race jobs and the Python checks in its
-`checks` job. `make test` runs the Go tests, without the race detector, but not
-the Python checks.
+`make verify-mcp` loads every `examples/*/servers.json` with the gateway's own
+loader and checks the directory's `agentpolicy.yaml`, `agenttemplate.yaml` and
+`agentrun.yaml`:
+
+- every granted `mcp.<name>` is registered, scoped and has a finite budget;
+- the scopes compile, and the run asks only for what the policy allows;
+- admission accepts the run, and the runtime's harness gets a connection for
+  each server;
+- no two examples define a policy, template or run with the same name in one
+  namespace.
+
+To check your own configuration, put those four files in a directory under
+`examples/` and rename the copied resources. Leave out `agentruntime.yaml` to
+use the `mcp-research` runtime from `examples/mcp`, which only tells the agent
+to use the tools Sproozi configured; add one only if your example needs a
+different runtime, with its own name. Tool and argument names can only be
+checked against the live server, with `hack/mcp-tools.py --policy`.
+
+GitHub Actions runs the same checks on every pull request. `make test` runs
+the Go tests, without the race detector, but not the Python ones.
 
 ## Deliver ordinary Codex configuration
 
@@ -289,7 +303,9 @@ before closing a call and keeps the session reader active during revocation.
 
 A configured budget spends one unit before each approved tool invocation, keyed
 by Run UID and capability. Failed upstream attempts remain charged. Reconnecting
-or changing policy does not reset consumption. Omitted budgets are uncapped;
+or changing policy does not reset consumption. The gateway treats an omitted
+budget as uncapped, but the example check requires one, so reviewed examples
+always cap their calls;
 monetary ceilings are rejected because MCP supplies no trusted pricing. Discovery
 and initialization have fixed per-request bounds but do not consume tool-call
 units. The shared proxy also allows at most 2048 connections, shared by all runs, and

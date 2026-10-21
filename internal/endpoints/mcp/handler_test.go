@@ -698,6 +698,16 @@ func TestMissingApprovedToolNamesItAndTheOfferedTools(t *testing.T) {
 	}
 }
 
+func TestRegistryReportsEveryUnknownKey(t *testing.T) {
+	_, err := remote.LoadRegistry([]byte(`{"version":1,"servers":{"a":{"url":"https://a.example/mcp","headers":{}},`+
+		`"b":{"url":"https://b.example/mcp","auth":"x"}}}`), remote.CredentialDirectory)
+	for _, want := range []string{`unknown key "version"`, `"a" has unknown key "headers"`, `"b" has unknown key "auth"`} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("error %v lacks %s", err, want)
+		}
+	}
+}
+
 func TestRegistryErrorsNameTheKeyAndTheName(t *testing.T) {
 	for raw, want := range map[string]string{
 		`{"servers":{"docs":{"url":"https://safe.example/mcp","headers":{}}}}`: `MCP registration "docs" has unknown key "headers"; a server takes "url" and optional "bearerTokenFile"`,

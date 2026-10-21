@@ -7,6 +7,7 @@ import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import sys
+import tempfile
 import threading
 import unittest
 from unittest import mock
@@ -63,19 +64,21 @@ class Handler(BaseHTTPRequestHandler):
 
 
 class McpToolsTest(unittest.TestCase):
-    def run_against(self, mode):
+    def run_against(self, mode, *extra):
         Handler.mode = mode
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         threading.Thread(target=server.serve_forever, daemon=True).start()
         self.addCleanup(server.shutdown)
         out, err = io.StringIO(), io.StringIO()
         url = "http://127.0.0.1:%d/mcp" % server.server_address[1]
-        with mock.patch.object(sys, "argv", ["mcp-tools.py", url]), contextlib.redirect_stdout(out), \
+        with mock.patch.object(sys, "argv", ["mcp-tools.py", url, *extra]), contextlib.redirect_stdout(out), \
                 contextlib.redirect_stderr(err):
             try:
                 TOOLS.main()
             except RuntimeError as error:
                 return "", str(error)
+            except SystemExit as exit:
+                return out.getvalue(), err.getvalue() + "exit %s" % exit.code
         return out.getvalue(), err.getvalue()
 
     def test_lists_tools_from_json_and_sse_replies(self):
@@ -87,6 +90,33 @@ class McpToolsTest(unittest.TestCase):
     def test_names_a_legacy_sse_only_url(self):
         _, err = self.run_against("legacy")
         self.assertIn("legacy HTTP+SSE transport", err)
+
+
+class PolicyCheckTest(unittest.TestCase):
+    def test_reports_unknown_tools_arguments_and_forbidden_required_arguments(self):
+        scope = {"ask": {"arguments": {"type": "object", "required": ["question"], "additionalProperties": False,
+                                       "properties": {"question": {}}}},
+                 "ask_question": {}}
+        problems = TOOLS.check_policy(LISTED["tools"], scope)
+        self.assertEqual(problems, [
+            "tool 'ask' has no argument 'question'; its arguments are page, q",
+            "tool 'ask' requires argument 'q', which the policy's additionalProperties: false forbids, "
+            "so every call would fail",
+            "tool 'ask_question' is not offered; the server offers ask"])
+        self.assertEqual(TOOLS.check_policy(LISTED["tools"], {"ask": {"arguments": {"properties": {"q": {}}}}}), [])
+
+    def test_policy_option_exits_non_zero_on_a_mismatch(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        policy = Path(directory.name) / "policy.json"
+        for tools, ok in [({"ask": {}}, True), ({"ask_question": {}}, False)]:
+            policy.write_text(json.dumps({"spec": {"mcpServers": {"fake": {"tools": tools}}}}))
+            out, err = McpToolsTest.run_against(self, "json", "--policy", str(policy))
+            if ok:
+                self.assertIn("The policy's 1 fake tools match", out)
+            else:
+                self.assertIn("tool 'ask_question' is not offered", err)
+                self.assertIn("exit 1", err)
 
 
 if __name__ == "__main__":
