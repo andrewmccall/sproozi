@@ -54,6 +54,7 @@ Run the gates that match the change before declaring it done:
 | Controller, gateway, network policy or install manifests | also `make test-e2e` (creates and removes its own Kind cluster) |
 | Documentation | `make verify-docs` |
 | A new harness | follow `docs/contributing/add-a-harness.md`; `go test ./internal/harness/` guards the registry |
+| MCP registry, policy or examples | `make verify-mcp` |
 | Release candidate | `make verify-release` |
 
 `make help` lists every target, and

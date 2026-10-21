@@ -1,26 +1,37 @@
 # Contributing
 
-Sproozi is a Kubernetes operator. Start with the repository-specific rules in
-`AGENTS.md`, then run the narrowest relevant verification target before
-opening a change. The [testing requirements](test/acceptance/README.md) describe
-expected behaviour; [test commands](test/acceptance/running.md) describe setup
-and execution.
+Start with `AGENTS.md`: it maps the code and lists the checks each kind of
+change needs. You need Go 1.26 or later, Make and Python 3; some checks also
+need Docker. Lint runs with Go 1.26.6 whatever Go you have installed
+(`LINT_TOOLCHAIN` in the Makefile); the go command downloads it once.
 
-Generated CRDs, RBAC, and deepcopy files must be regenerated with the
-Kubebuilder commands described in `AGENTS.md`; do not edit generated output by
-hand. Security-sensitive changes should include both an allow and a denial
-test, including the expected reason and absence of an upstream side effect.
+Run the narrowest check that covers your change before opening it. The
+[testing requirements](test/acceptance/README.md) describe the behaviour tests
+must keep, and [test commands](test/acceptance/running.md) say what each
+command proves and what it needs.
 
-To add an agent program as a harness, follow
-[Add a harness](docs/contributing/add-a-harness.md): one registry entry, guard
-tests that name each missing piece, and the MCP requirement.
+Regenerate CRDs, RBAC and deepcopy files with the commands in `AGENTS.md`;
+never edit generated output by hand. A security-sensitive change needs both an
+allow and a denial test, including the expected reason and proof that nothing
+reached the upstream service.
 
-Please do not include credentials, provider responses, patches, or local
-agent configuration in commits.
+## Common changes
 
-The repository-owned `verify-sproozi` skill under `.agents/skills/verify-sproozi`
-is distributed with the Kind getting-started guide. Its feature map and
-`hack/verify/quickstart.py` drive the documented paths and retain local proof.
-Start with `python3 hack/verify/quickstart.py doctor`, then run `dependencies`
-or the configured provider-backed `demo` path. Other local agent skills and all
-credential, kubeconfig and verification artefacts remain private.
+- **Add an MCP server.** Put `servers.json`, `agentpolicy.yaml`,
+  `agenttemplate.yaml`, `agentrun.yaml` and `agentruntime.yaml` in a directory
+  under `examples/`, list the server's real tools with
+  `python3 hack/mcp-tools.py URL`, and run `make verify-mcp`.
+  [Configured MCP](docs/reference/configured-mcp.md) explains each file.
+- **Add a harness.** Follow [Add a harness](docs/contributing/add-a-harness.md):
+  one registry entry, guard tests that name each missing piece, and the MCP
+  requirement.
+
+Don't commit credentials, provider responses, patches or local agent
+configuration.
+
+## Maintainer skill
+
+`.agents/skills/verify-sproozi` drives the
+[investigation-to-PR demo on Kind](docs/guides/pr-demo.md) through
+`hack/verify/quickstart.py` and keeps local proof. You don't need it for code
+changes.
