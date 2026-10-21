@@ -345,9 +345,9 @@ func (o *Owner) Seal(ctx context.Context, launch session.Launch, instance sessio
 	if r.Phase != revoked {
 		return nil, errors.New("docker gateway: revoke before sealing")
 	}
-	if r.initial() && r.Thread == "" {
-		return nil, errors.New("docker gateway: genuine initial native UUID is not bound")
-	}
+	// A first visit can stop with no bound UUID: cancelled before its
+	// conversation started, or stopped turnless. Its usage still seals; the
+	// receipt then refuses any later binding.
 	if r.Receipt != nil {
 		return maps.Clone(r.Receipt), nil
 	}

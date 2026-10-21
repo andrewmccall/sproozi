@@ -108,3 +108,29 @@ func TestQuiesceNativeSeparatesLostReplyFromRejectedTurn(t *testing.T) {
 		t.Fatalf("a rejected quiesce must not look like a lost reply: %v", err)
 	}
 }
+
+// A first visit reported turnless stops without binding any thread, and only
+// a turnless reply may end quiesce with no thread.
+func TestQuiesceNativeStopsTurnlessFirstVisitWithoutBinding(t *testing.T) {
+	quiesce := `{"op":"quiesce","state":"stopped","turnless":true}`
+	control := func(_ context.Context, op NativeOp) ([]byte, error) {
+		switch op {
+		case NativeGate:
+			return []byte(`{"op":"gate","state":"stopping"}`), nil
+		case NativeStatus:
+			return []byte(`{"op":"status","state":"stopping","turnless":true}`), nil
+		case NativeQuiesce:
+			return []byte(quiesce), nil
+		}
+		return nil, errors.New("unexpected operation")
+	}
+	bind := func(context.Context, string) error { return errors.New("turnless visit bound a thread") }
+	got, err := QuiesceNative(t.Context(), control, "", time.Now().Add(time.Minute), bind)
+	if err != nil || got != "" {
+		t.Fatalf("thread=%q error=%v", got, err)
+	}
+	quiesce = `{"op":"quiesce","state":"stopped"}`
+	if _, err = QuiesceNative(t.Context(), control, "", time.Now().Add(time.Minute), bind); err == nil {
+		t.Fatal("quiesce without a thread or turnless report accepted")
+	}
+}

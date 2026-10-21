@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -314,7 +315,7 @@ func TestStartIgnoredOptInRetainsBytesAndImmutableSelectionAcrossVisits(t *testi
 	data, digest := testArtifact(t, repo, testIgnoredFile)
 	local.artifact, local.digest, remote.artifact, remote.digest = data, digest, data, digest
 	id, operation := uuid.NewString(), uuid.NewString()
-	if _, err := s.Start(t.Context(), id, operation, repo, "", []string{testIgnoredFile}); err != nil {
+	if _, err := s.Start(t.Context(), id, operation, repo, "", []string{testIgnoredFile}, nil); err != nil {
 		t.Fatal(err)
 	}
 	execution, err := s.coordinator.Inspect(id)
@@ -340,7 +341,7 @@ func TestStartIgnoredOptInRetainsBytesAndImmutableSelectionAcrossVisits(t *testi
 	if len(first.IncludeIgnored) != 1 || first.IncludeIgnored[0] != testIgnoredFile {
 		t.Fatal("initial launch omitted the approved ignored file")
 	}
-	if _, err = s.Start(t.Context(), id, operation, repo, "", nil); err == nil {
+	if _, err = s.Start(t.Context(), id, operation, repo, "", nil, nil); err == nil {
 		t.Fatal("retry removed immutable ignored selection")
 	}
 	for _, destination := range []string{testRemote, testLocal, testRemote} {
@@ -361,7 +362,7 @@ func TestInitialSessionImportRoundTripAndLostReplies(t *testing.T) {
 	s, local, remote, repo := testService(t)
 	id, startOp, moveOp := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	local.lostActivate = true
-	if _, err := s.Start(t.Context(), id, startOp, repo, "", nil); err == nil {
+	if _, err := s.Start(t.Context(), id, startOp, repo, "", nil, nil); err == nil {
 		t.Fatal("lost activation reply succeeded")
 	}
 	status, err := s.Recover(t.Context(), id)
@@ -406,7 +407,7 @@ func TestInitialSessionImportRoundTripAndLostReplies(t *testing.T) {
 func TestRecoverFirstMoveRetainedBeforeRestart(t *testing.T) {
 	s, local, remote, repo := testService(t)
 	id := uuid.NewString()
-	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil); err != nil {
+	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	local.lostStop = true
@@ -435,7 +436,7 @@ func TestRejectedInitialActivationCancelsWithoutInspectingOrCompletingNativeTurn
 	s, local, _, repo := testService(t)
 	id := uuid.NewString()
 	local.rejectActivate = true
-	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil); err == nil {
+	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err == nil {
 		t.Fatal("native activation rejection hidden")
 	}
 	retained, err := s.coordinator.Inspect(id)
@@ -465,7 +466,7 @@ func TestPartiallyCreatedInitialSessionCancelsWithoutProvisioning(t *testing.T) 
 	s, local, remote, repo := testService(t)
 	id, operation := uuid.NewString(), uuid.NewString()
 	local.partialCreate = true
-	if _, err := s.Start(t.Context(), id, operation, repo, "", nil); err == nil {
+	if _, err := s.Start(t.Context(), id, operation, repo, "", nil, nil); err == nil {
 		t.Fatal("expected failed initial prepare")
 	}
 	r, err := s.coordinator.Inspect(id)
@@ -488,11 +489,11 @@ func TestPreparingInitialSessionRetriesCreateOnlyThroughStart(t *testing.T) {
 	s, local, _, repo := testService(t)
 	id, operation := uuid.NewString(), uuid.NewString()
 	local.partialCreate = true
-	if _, err := s.Start(t.Context(), id, operation, repo, "", nil); err == nil {
+	if _, err := s.Start(t.Context(), id, operation, repo, "", nil, nil); err == nil {
 		t.Fatal("expected failed initial prepare")
 	}
 	local.partialCreate = false
-	status, err := s.Start(t.Context(), id, operation, repo, "", nil)
+	status, err := s.Start(t.Context(), id, operation, repo, "", nil, nil)
 	if err != nil || status.Phase != string(session.PhaseActive) || local.initials != 2 || local.activations != 1 {
 		t.Fatalf("explicit preparation retry: %+v %v", status, err)
 	}
@@ -502,7 +503,7 @@ func TestUnknownInitialUsageNeverStartsRemoteAndCanCancel(t *testing.T) {
 	t.Parallel()
 	s, local, remote, repo := testService(t)
 	id := uuid.NewString()
-	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil); err != nil {
+	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	local.unknownUsage = true
@@ -603,10 +604,10 @@ func TestStartConflictNamesTheRetainedOperation(t *testing.T) {
 	t.Parallel()
 	s, _, _, repo := testService(t)
 	id, operation := uuid.NewString(), uuid.NewString()
-	if _, err := s.Start(t.Context(), id, operation, repo, "", nil); err != nil {
+	if _, err := s.Start(t.Context(), id, operation, repo, "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	_, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil)
+	_, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil)
 	want := "home: start intent conflicts with retained launch; " + id + " was started with operation " + operation +
 		": to continue it, repeat the original start command with --operation " + operation +
 		", or run \"sproozi cancel " + id + "\" to revoke and force-stop its current execution"
@@ -634,11 +635,11 @@ func TestStartSelectsTheRequestedLocalHarnessPerSession(t *testing.T) {
 	t.Cleanup(func() { _ = s.Close() })
 
 	codexID, claudeID := uuid.NewString(), uuid.NewString()
-	if _, err = s.Start(t.Context(), codexID, uuid.NewString(), repo, "", nil); err != nil {
+	if _, err = s.Start(t.Context(), codexID, uuid.NewString(), repo, "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	claudeOperation := uuid.NewString()
-	if _, err = s.Start(t.Context(), claudeID, claudeOperation, repo, harness.NativeClaude, nil); err != nil {
+	if _, err = s.Start(t.Context(), claudeID, claudeOperation, repo, harness.NativeClaude, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	for id, want := range map[string]runtimedocker.PlacementConfig{codexID: primary, claudeID: second} {
@@ -659,12 +660,42 @@ func TestStartSelectsTheRequestedLocalHarnessPerSession(t *testing.T) {
 	if codex.initials != 1 || claude.initials != 1 {
 		t.Fatalf("placements prepared codex=%d claude=%d", codex.initials, claude.initials)
 	}
-	if _, err = s.Start(t.Context(), claudeID, claudeOperation, repo, harness.NativeCodex, nil); err == nil {
+	if _, err = s.Start(t.Context(), claudeID, claudeOperation, repo, harness.NativeCodex, nil, nil); err == nil {
 		t.Fatal("retry changed an existing session's harness")
 	}
 	single, _, _, _ := testService(t)
-	if _, err = single.Start(t.Context(), uuid.NewString(), uuid.NewString(), repo, harness.NativeClaude, nil); err == nil || !strings.Contains(err.Error(), "not configured") {
+	if _, err = single.Start(t.Context(), uuid.NewString(), uuid.NewString(), repo, harness.NativeClaude, nil, nil); err == nil || !strings.Contains(err.Error(), "not configured") {
 		t.Fatalf("unconfigured harness: %v", err)
+	}
+}
+
+// Harness arguments belong to the execution: a refused flag never creates one,
+// a retry must repeat them, and they keep the execution at home.
+func TestStartHarnessArgsAreCheckedAndKeptWithTheExecution(t *testing.T) {
+	t.Parallel()
+	s, _, _, repo := testService(t)
+	id, operation := uuid.NewString(), uuid.NewString()
+	_, err := s.Start(t.Context(), id, operation, repo, "", nil, []string{"--sandbox", "read-only"})
+	if !errors.Is(err, ErrRejected) || !strings.Contains(err.Error(), "--sandbox") {
+		t.Fatalf("refused harness flag: %v", err)
+	}
+	if _, inspectErr := s.coordinator.Inspect(id); inspectErr == nil {
+		t.Fatal("refused harness arguments created an execution")
+	}
+	args := []string{"--model", "gpt-5.5"}
+	status, err := s.Start(t.Context(), id, operation, repo, "", nil, args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(status.Session.HarnessArgs, args) || !slices.Equal(status.Session.Active.Launch.HarnessArgs, args) {
+		t.Fatalf("harness arguments not kept: %+v", status.Session)
+	}
+	if _, err = s.Start(t.Context(), id, operation, repo, "", nil, nil); !errors.Is(err, ErrRejected) {
+		t.Fatalf("retry with other harness arguments: %v", err)
+	}
+	_, err = s.Move(t.Context(), id, uuid.NewString(), testRemote)
+	if !errors.Is(err, ErrRejected) || !strings.Contains(err.Error(), "harness arguments") {
+		t.Fatalf("remote move with harness arguments: %v", err)
 	}
 }
 
@@ -685,7 +716,7 @@ func TestStartRejectsWorkspaceProblemsWithRepair(t *testing.T) {
 	} {
 		s.config.Local.MaxCheckpointBytes = tc.limit
 		id := uuid.NewString()
-		_, err := s.Start(t.Context(), id, uuid.NewString(), tc.path, "", nil)
+		_, err := s.Start(t.Context(), id, uuid.NewString(), tc.path, "", nil, nil)
 		if !errors.Is(err, ErrRejected) || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: %v", name, err)
 		}

@@ -9,6 +9,9 @@ Unassessed: Claude's full held placement move/cancel matrix and broader native s
 Current compatibility policy: [ADR 0015](0015-default-clients-and-native-tool-schemas.md)
 replaces exact client-version selection and extends supported native context
 records. Identity, completion, writer-fencing and accounting rules remain in effect.
+[ADR 0032](0032-stopping-a-visit-with-no-native-conversation.md) adds a stop for a
+first visit with no conversation at all, and Claude's `StopFailure` hook to
+recognize a failed-only first turn; every conversation still needs a completed turn.
 
 ## Problem and constraints
 

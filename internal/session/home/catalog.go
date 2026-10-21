@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
+	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/privatefs"
 	"github.com/andrewmccall/sproozi/internal/project"
 	"github.com/andrewmccall/sproozi/internal/session"
@@ -340,7 +341,9 @@ func sameExportSource(a, b work.Export) bool {
 
 // Resume admits a new execution from claimed continuity. Its new UUID,
 // allocation, deadline and allowances never modify or credit the source receipt.
-func (s *Service) Resume(ctx context.Context, id, operation string) (Status, error) {
+// harnessArgs are the user's own arguments for the stock harness, kept with
+// the new execution only.
+func (s *Service) Resume(ctx context.Context, id, operation string, harnessArgs []string) (Status, error) {
 	unlock, err := s.lockSession(id)
 	if err != nil {
 		return Status{}, err
@@ -352,7 +355,7 @@ func (s *Service) Resume(ctx context.Context, id, operation string) (Status, err
 	r, err := s.readCatalog(id)
 	if os.IsNotExist(err) {
 		if execution, inspectErr := s.coordinator.Inspect(id); inspectErr == nil {
-			return Status{}, notResumable(id, execution)
+			return Status{}, notResumable(id, execution, s.config.Local.Name)
 		}
 	}
 	if err != nil {
@@ -398,14 +401,17 @@ func (s *Service) Resume(ctx context.Context, id, operation string) (Status, err
 	if err != nil {
 		return Status{}, err
 	}
+	if err = harness.ValidateNativeArgs(local.Harness, harnessArgs); err != nil {
+		return Status{}, rejectedError("home: " + err.Error())
+	}
 	if err = checkpoint.ValidateContinuity(data, local.Harness, local.InstructionDigest, local.MaxCheckpointBytes); err != nil {
 		return Status{}, err
 	}
 	first := session.Launch{Harness: local.Harness, ExecutionID: uuid.NewString(), OperationID: operation,
 		AllocationID: uuid.NewString(), Epoch: 1, Placement: local.Name,
 		ThreadID: r.Committed.Launch.ThreadID, InstructionDigest: local.InstructionDigest,
-		IncludeIgnored: slices.Clone(r.Committed.Launch.IncludeIgnored), Deadline: time.Now().Add(s.duration).UTC(),
-		Allowances: allowances, CheckpointDigest: r.Committed.CheckpointDigest}
+		IncludeIgnored: slices.Clone(r.Committed.Launch.IncludeIgnored), HarnessArgs: slices.Clone(harnessArgs),
+		Deadline: time.Now().Add(s.duration).UTC(), Allowances: allowances, CheckpointDigest: r.Committed.CheckpointDigest}
 	execution, err := s.createExecution(first, id, func() ([]byte, error) { return data, nil })
 	if err != nil {
 		return Status{}, err
@@ -422,14 +428,15 @@ func (s *Service) Resume(ctx context.Context, id, operation string) (Status, err
 }
 
 // notResumable explains a resume addressed to an execution rather than a
-// session imported with pull.
-func notResumable(id string, execution session.Record) error {
+// session imported with pull, and how to continue it instead.
+func notResumable(id string, execution session.Record, local string) error {
 	if execution.Session != "" {
-		return fmt.Errorf("home: %s is an execution of session %s; resume the session UUID %s",
-			id, execution.Session, execution.Session)
+		return rejectedError(fmt.Sprintf("home: %s is an execution of session %s; resume the session UUID %s",
+			id, execution.Session, execution.Session))
 	}
-	return fmt.Errorf("home: session %s was started at home with \"sproozi start\"; "+
-		"resume continues only sessions imported with \"sproozi pull\"", id)
+	return rejectedError(fmt.Sprintf("home: session %s was started at home with \"sproozi start\"; "+
+		"resume continues only sessions imported with \"sproozi pull\"; to continue it before its deadline, "+
+		"run \"sproozi move %s --to %s\"", id, id, local))
 }
 
 func (s *Service) catalogStatus(r localSession) (Status, error) {

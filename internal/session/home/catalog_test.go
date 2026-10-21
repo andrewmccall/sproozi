@@ -77,7 +77,7 @@ func TestPullClaimReplayAndFreshResumePreserveSourceAccounts(t *testing.T) {
 	if _, err := s.Pull(t.Context(), id, operation, testRemote); err == nil {
 		t.Fatal("lost claim response became acknowledged ownership")
 	}
-	if _, err := s.Resume(t.Context(), id, uuid.NewString()); err == nil || local.prepares != 0 {
+	if _, err := s.Resume(t.Context(), id, uuid.NewString(), nil); err == nil || local.prepares != 0 {
 		t.Fatal("downloaded bytes acquired activation authority")
 	}
 	if _, err := s.Pull(t.Context(), id, uuid.NewString(), testRemote); err == nil ||
@@ -95,7 +95,7 @@ func assertFreshResume(t *testing.T, s *Service, local *placementFixture, source
 	t.Helper()
 	before, _ := json.Marshal(source.export.Stopped.Receipt)
 	resume := uuid.NewString()
-	status, err := s.Resume(t.Context(), id, resume)
+	status, err := s.Resume(t.Context(), id, resume, nil)
 	if err != nil || status.ID != id || status.ExecutionID == id || status.Phase != string(session.PhaseActive) || status.ThreadID != testNativeUUID {
 		t.Fatalf("fresh native resume: %+v %v", status, err)
 	}
@@ -110,11 +110,11 @@ func assertFreshResume(t *testing.T, s *Service, local *placementFixture, source
 	if len(r.Visits) != 0 || !reflect.DeepEqual(r.Remaining, r.Ceiling) {
 		t.Fatalf("resume invented a previous source receipt in its coordinator: %+v", r)
 	}
-	replayed, err := s.Resume(t.Context(), id, resume)
+	replayed, err := s.Resume(t.Context(), id, resume, nil)
 	if err != nil || replayed.ID != id || replayed.ExecutionID != status.ExecutionID || local.activations != 1 || local.initials != 0 || local.prepares != 1 {
 		t.Fatalf("resume replay: %+v %v, activations=%d", replayed, err, local.activations)
 	}
-	if _, err = s.Resume(t.Context(), id, uuid.NewString()); err == nil {
+	if _, err = s.Resume(t.Context(), id, uuid.NewString(), nil); err == nil {
 		t.Fatal("active prior writer admitted a new envelope")
 	}
 	listed, err := s.Sessions(work.SessionQuery{})
@@ -132,7 +132,7 @@ func assertCompletedResumeCycle(t *testing.T, s *Service, local *placementFixtur
 	if err != nil || stopped.ID != id || stopped.ExecutionID != status.ExecutionID || stopped.AllocationID != status.AllocationID || stopped.Incarnation == nil || stopped.InitialStage != stageRetained || stopped.ThreadID != testNativeUUID {
 		t.Fatalf("stopped session checkpoint: %+v %v", stopped, err)
 	}
-	next, err := s.Resume(t.Context(), id, uuid.NewString())
+	next, err := s.Resume(t.Context(), id, uuid.NewString(), nil)
 	if err != nil || next.ID != id || next.ExecutionID == status.ExecutionID || local.activations != 2 {
 		t.Fatalf("separate later envelope: %+v %v", next, err)
 	}
@@ -179,7 +179,7 @@ func TestPullRejectsUnknownSourceAndChangedClaim(t *testing.T) {
 			if _, err := s.Pull(t.Context(), source.export.ID, source.export.OperationID, testRemote); err == nil {
 				t.Fatal("invalid source acquired ownership")
 			}
-			if _, err := s.Resume(t.Context(), source.export.ID, uuid.NewString()); err == nil || local.activations != 0 {
+			if _, err := s.Resume(t.Context(), source.export.ID, uuid.NewString(), nil); err == nil || local.activations != 0 {
 				t.Fatal("invalid source activated local writer")
 			}
 		})
@@ -195,10 +195,10 @@ func TestImportedResumeLostActivationAndUnknownStopKeepOneWriter(t *testing.T) {
 	}
 	op := uuid.NewString()
 	local.lostActivate = true
-	if _, err := s.Resume(t.Context(), id, op); err == nil {
+	if _, err := s.Resume(t.Context(), id, op, nil); err == nil {
 		t.Fatal("lost activation response was successful")
 	}
-	status, err := s.Resume(t.Context(), id, op)
+	status, err := s.Resume(t.Context(), id, op, nil)
 	if err != nil || local.activations != 1 {
 		t.Fatalf("lost activation repeated native launch: %+v %v", status, err)
 	}
@@ -206,7 +206,7 @@ func TestImportedResumeLostActivationAndUnknownStopKeepOneWriter(t *testing.T) {
 	if _, err := s.Stop(t.Context(), id, uuid.NewString()); err == nil {
 		t.Fatal("missing local accounting became a committed checkpoint")
 	}
-	if _, err := s.Resume(t.Context(), id, uuid.NewString()); err == nil || local.activations != 1 {
+	if _, err := s.Resume(t.Context(), id, uuid.NewString(), nil); err == nil || local.activations != 1 {
 		t.Fatal("unknown stopped source admitted another writer")
 	}
 	r, err := s.readCatalog(id)
@@ -223,7 +223,7 @@ func TestStopMovedProductFinalizesWithoutDestinationAndRemainsReplayable(t *test
 	if _, err := s.Pull(t.Context(), id, source.export.OperationID, testRemote); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Resume(t.Context(), id, uuid.NewString()); err != nil {
+	if _, err := s.Resume(t.Context(), id, uuid.NewString(), nil); err != nil {
 		t.Fatal(err)
 	}
 	moveOperation := uuid.NewString()
@@ -235,7 +235,7 @@ func TestStopMovedProductFinalizesWithoutDestinationAndRemainsReplayable(t *test
 	if err != nil || status.InitialStage != stageRetained || prepares != local.prepares+remote.prepares {
 		t.Fatalf("stop activated destination: %+v %v", status, err)
 	}
-	if _, err = s.Resume(t.Context(), id, uuid.NewString()); err != nil {
+	if _, err = s.Resume(t.Context(), id, uuid.NewString(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = s.Move(t.Context(), id, moveOperation, testRemote); err == nil {
@@ -254,7 +254,7 @@ func TestIdleStopReplayCannotStopTheFirstContinuation(t *testing.T) {
 	if _, err := s.Stop(t.Context(), id, operation); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Resume(t.Context(), id, uuid.NewString()); err != nil {
+	if _, err := s.Resume(t.Context(), id, uuid.NewString(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Stop(t.Context(), id, operation); err == nil {
@@ -290,7 +290,7 @@ func TestFreshResumeHonorsExistingExecutionRetentionBounds(t *testing.T) {
 	if err := testutil.WriteFile(filepath.Join(s.config.Directory, "journal", "retained-padding"), []byte("xx"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Resume(t.Context(), id, uuid.NewString()); err == nil {
+	if _, err := s.Resume(t.Context(), id, uuid.NewString(), nil); err == nil {
 		t.Fatal("fresh execution bypassed retention bound")
 	}
 	if local.prepares != 0 || local.activations != 0 {
@@ -345,7 +345,7 @@ func TestResumeExplainsStartedExecution(t *testing.T) {
 	t.Parallel()
 	s, _, _, repo := testService(t)
 	id := uuid.NewString()
-	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil); err != nil {
+	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	r := exchange(t, s, Request{Action: ActionResume, ID: id, OperationID: uuid.NewString()})
@@ -371,7 +371,7 @@ func TestMoveNamesUnconfiguredDestination(t *testing.T) {
 	t.Parallel()
 	s, _, _, repo := testService(t)
 	id := uuid.NewString()
-	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil); err != nil {
+	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	names := []string{testLocal, testRemote}

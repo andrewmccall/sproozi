@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -317,5 +318,25 @@ func TestPullFromNamesARemoteExecutor(t *testing.T) {
 		if _, err := parseProduct(strings.Fields(args)); err == nil || err.Error() != want {
 			t.Errorf("%s: %v, want %q", args, err, want)
 		}
+	}
+}
+
+// Arguments after "--" on start and resume go to the harness unparsed; other
+// commands keep refusing them.
+func TestHarnessArgumentsFollowDoubleDash(t *testing.T) {
+	id := uuid.NewString()
+	q, err := parseProduct([]string{home.ActionResume, id, testSocketFlag, "/unused/private/socket",
+		"--", "--model", "gpt-5.5", "--", "-c"})
+	if err != nil || q.id != id || !slices.Equal(q.harnessArgs, []string{"--model", "gpt-5.5", "--", "-c"}) {
+		t.Fatalf("resume harness arguments: %+v %v", q, err)
+	}
+	q, err = parseProduct([]string{home.ActionStart, "--workspace", "/tmp/ws", testSocketFlag,
+		"/unused/private/socket", "--", "--search"})
+	if err != nil || !slices.Equal(q.harnessArgs, []string{"--search"}) {
+		t.Fatalf("start harness arguments: %+v %v", q, err)
+	}
+	if _, err = parseProduct([]string{home.ActionStop, id, testSocketFlag, "/unused/private/socket",
+		"--", "--search"}); err == nil {
+		t.Fatal("stop accepted harness arguments")
 	}
 }

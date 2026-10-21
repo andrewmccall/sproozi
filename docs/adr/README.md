@@ -95,3 +95,5 @@ ADR 0024's statement that releases do not pin clients.
 | [0029](0029-local-provisioning-and-lifecycle.md) | Local provisioning, per-harness local placements and home-owned certificates. |
 | [0030](0030-kubernetes-release-assets-and-certificates.md) | Kubernetes release assets and a self-managed certificate controller. |
 | [0031](0031-user-profile-for-managed-sessions.md) | One user profile, sent with each Docker launch and stored by digest for Kubernetes, replacing the shared agent files. |
+| [0032](0032-stopping-a-visit-with-no-native-conversation.md) | A first visit with no harness conversation stops at once without a checkpoint, and its usage seals without a bound conversation ID. |
+| [0033](0033-harness-arguments-from-the-command-line.md) | Arguments after `--` on start and resume go to the harness, refusing flags Sproozi controls; Codex upgrade prompts are acknowledged from its own catalogue. |

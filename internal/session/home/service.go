@@ -170,12 +170,18 @@ func (s *Service) createExecution(first session.Launch, owner string, input func
 //
 // kind selects a configured local harness; empty selects the primary one. A
 // session keeps its harness; another harness starts a separate session.
-func (s *Service) Start(ctx context.Context, id, operationID, path string, kind harness.NativeKind, includeIgnored []string) (Status, error) {
+//
+// harnessArgs are the user's own arguments for the stock harness, kept with
+// this execution and passed to each of its visits.
+func (s *Service) Start(ctx context.Context, id, operationID, path string, kind harness.NativeKind, includeIgnored, harnessArgs []string) (Status, error) {
 	if err := workspace.ValidateIgnoredPaths(includeIgnored); err != nil {
 		return Status{}, err
 	}
 	if kind == "" {
 		kind = s.config.Local.Harness
+	}
+	if err := harness.ValidateNativeArgs(kind, harnessArgs); err != nil {
+		return Status{}, rejectedError("home: " + err.Error())
 	}
 	local, err := s.localFor(kind)
 	if err != nil {
@@ -186,7 +192,7 @@ func (s *Service) Start(ctx context.Context, id, operationID, path string, kind 
 	}
 	r, err := s.coordinator.Inspect(id)
 	if os.IsNotExist(err) {
-		r, err = s.createWorkspaceExecution(ctx, id, operationID, path, local, includeIgnored)
+		r, err = s.createWorkspaceExecution(ctx, id, operationID, path, local, includeIgnored, harnessArgs)
 	}
 	if err != nil {
 		return Status{}, err
@@ -200,7 +206,8 @@ func (s *Service) Start(ctx context.Context, id, operationID, path string, kind 
 		return Status{}, rejectedError(fmt.Sprintf("home: start intent conflicts with retained launch; %s was "+
 			"started with harness %s: start a new session for %s", id, first.Harness, kind))
 	}
-	if first.OperationID != operationID || !slices.Equal(first.IncludeIgnored, includeIgnored) {
+	if first.OperationID != operationID || !slices.Equal(first.IncludeIgnored, includeIgnored) ||
+		!slices.Equal(first.HarnessArgs, harnessArgs) {
 		// A new operation conflicts again; only the retained one continues it.
 		return Status{}, rejectedError(fmt.Sprintf("home: start intent conflicts with retained launch; %s was "+
 			"started with operation %s: to continue it, repeat the original start command with --operation %s, "+
@@ -209,11 +216,12 @@ func (s *Service) Start(ctx context.Context, id, operationID, path string, kind 
 	return s.startFirstVisit(ctx, r)
 }
 
-func (s *Service) createWorkspaceExecution(ctx context.Context, id, operationID, path string, local runtimedocker.PlacementConfig, includeIgnored []string) (session.Record, error) {
+func (s *Service) createWorkspaceExecution(ctx context.Context, id, operationID, path string, local runtimedocker.PlacementConfig, includeIgnored, harnessArgs []string) (session.Record, error) {
 	first := session.Launch{Harness: local.Harness, ExecutionID: id, OperationID: operationID,
 		AllocationID: uuid.NewString(), Epoch: 1, Placement: local.Name,
 		InstructionDigest: local.InstructionDigest, IncludeIgnored: slices.Clone(includeIgnored),
-		Deadline: time.Now().Add(s.duration).UTC(), Allowances: maps.Clone(s.config.Allowances)}
+		HarnessArgs: slices.Clone(harnessArgs),
+		Deadline:    time.Now().Add(s.duration).UTC(), Allowances: maps.Clone(s.config.Allowances)}
 	return s.createExecution(first, "", func() ([]byte, error) {
 		limit := s.config.Local.MaxCheckpointBytes
 		data, err := workspace.CaptureLocal(ctx, path, includeIgnored, limit)
@@ -281,11 +289,35 @@ func (s *Service) moveExecution(ctx context.Context, id, operationID, destinatio
 		return Status{}, err
 	}
 	destination = s.localDestination(r, destination)
+	if err = s.remoteMoveProblem(r, destination); err != nil {
+		return Status{}, err
+	}
 	if err = s.executionProjectApproval(r); err != nil {
 		return Status{}, err
 	}
 	r, err = s.coordinator.Move(ctx, id, operationID, destination)
 	return executionStatus(r), err
+}
+
+// remoteMoveProblem refuses moving to a remote placement an execution that
+// carries harness arguments, which only local Docker visits apply, or a
+// stopped one that kept no conversation, which can only start again from its
+// workspace here.
+func (s *Service) remoteMoveProblem(r session.Record, destination string) error {
+	for _, stack := range s.stacks {
+		if stack.config.Name == destination {
+			return nil
+		}
+	}
+	switch {
+	case len(r.HarnessArgs) != 0:
+		return rejectedError(fmt.Sprintf("home: %s was started with harness arguments, which apply only at home; "+
+			"it cannot move to %s", r.ID, destination))
+	case r.Active == nil && r.Checkpoint.Path == "":
+		return rejectedError(fmt.Sprintf("home: %s has no saved conversation yet; finish a turn before moving it to %s, "+
+			"or continue it at home", r.ID, destination))
+	}
+	return nil
 }
 
 // localDestination maps any local placement name to the local placement of

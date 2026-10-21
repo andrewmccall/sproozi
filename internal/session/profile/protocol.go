@@ -179,6 +179,10 @@ func validateLaunch(l session.Launch) error {
 		l.ProfileDigest != "" && !agentprofile.ValidDigest(l.ProfileDigest) {
 		return errors.New("profile: invalid launch")
 	}
+	if len(l.HarnessArgs) != 0 {
+		// Harness arguments apply to local Docker visits only.
+		return errors.New("profile: harness arguments are not supported on remote placements")
+	}
 	for capability, a := range l.Allowances {
 		if !validName(capability) || !validLimit(a.Units) || !validLimit(a.CostMicros) {
 			return errors.New("profile: invalid allowance")

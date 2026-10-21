@@ -53,10 +53,12 @@ type options struct {
 	socketGiven                                   bool
 	workspace, destination, configPath, directory string
 	includeIgnored                                []string
-	fixed                                         home.Config
-	project                                       project.ID
-	workspaceFrom                                 *work.RevisionSource
-	out                                           io.Writer
+	// harnessArgs follow "--" on start and resume and go to the harness as given.
+	harnessArgs   []string
+	fixed         home.Config
+	project       project.ID
+	workspaceFrom *work.RevisionSource
+	out           io.Writer
 }
 
 // parseProduct parses one command line, args[0] naming the command. It returns
@@ -78,6 +80,9 @@ func parseProduct(args []string) (options, error) {
 		if rest, err = parseVerb(c, rest, &q.setup); err != nil {
 			return options{}, err
 		}
+	}
+	if c.name == home.ActionStart || c.name == home.ActionResume {
+		rest, q.harnessArgs = splitHarnessArgs(rest)
 	}
 	if err := parseSessionArguments(c, fs, rest, &q.id); err != nil {
 		return options{}, err
@@ -292,7 +297,7 @@ func (q *options) local(ctx context.Context) error {
 	request := home.Request{
 		Action: q.action, ID: q.id, OperationID: q.operation, Source: q.source,
 		Workspace: q.workspace, Destination: q.destination, IncludeIgnored: q.includeIgnored,
-		Harness: harness.NativeKind(q.kind),
+		Harness: harness.NativeKind(q.kind), HarnessArgs: q.harnessArgs,
 	}
 	response, err := home.Call(ctx, q.socket, request)
 	// The session runs either way; only attaching needs a terminal.
@@ -498,4 +503,13 @@ func (q *options) checkSocket() error {
 		return fmt.Errorf("--socket %s is %s, not a socket; name home's control.sock", shellQuote(q.socket), kind)
 	}
 	return nil
+}
+
+// splitHarnessArgs separates the harness arguments after the first "--" from
+// Sproozi's own arguments before it.
+func splitHarnessArgs(args []string) ([]string, []string) {
+	if i := slices.Index(args, "--"); i >= 0 {
+		return args[:i], slices.Clone(args[i+1:])
+	}
+	return args, nil
 }

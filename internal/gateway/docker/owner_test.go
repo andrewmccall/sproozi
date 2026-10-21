@@ -305,6 +305,27 @@ func TestInitialOwnerBindsNativeWithEquivalentEmptyIgnoredSelection(t *testing.T
 	}
 }
 
+// A first visit cancelled or stopped before it had a native conversation
+// never binds a UUID; its usage must still seal, or it stays unfinalized
+// forever. The receipt then refuses any late binding.
+func TestInitialOwnerSealsWithoutNativeBinding(t *testing.T) {
+	f := newOwner(t)
+	f.launch.ThreadID, f.launch.CheckpointDigest = "", ""
+	f.initialized(t)
+	if err := f.owner.Activate(t.Context(), f.launch, f.instance); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.owner.Revoke(t.Context(), f.launch, f.instance); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.owner.Seal(t.Context(), f.launch, f.instance); err != nil {
+		t.Fatalf("unbound first visit did not seal: %v", err)
+	}
+	if _, err := f.owner.BindNative(t.Context(), f.launch, f.instance, observedNativeUUID); err == nil {
+		t.Fatal("native UUID bound after the receipt")
+	}
+}
+
 func TestLocalOwnerIgnoredSelectionCannotChangeOnRetryOrNativeBinding(t *testing.T) {
 	f := newOwner(t)
 	f.launch.ThreadID, f.launch.CheckpointDigest = "", ""

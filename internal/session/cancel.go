@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"errors"
+	"fmt"
 )
 
 // Cancel durably prevents activation before asking a placement to revoke and
@@ -42,7 +43,8 @@ func (c *Coordinator) Cancel(ctx context.Context, id, operationID string, admit 
 		return r, err
 	}
 	if r.CancelOperation != "" && r.CancelOperation != operationID {
-		return r, errors.New("session: cancellation intent conflict")
+		// Another cancellation already owns this execution; recover finishes it.
+		return r, fmt.Errorf("session: cancellation %s was already requested: %w", r.CancelOperation, cancelled(r))
 	}
 	if r.CancelOperation == "" {
 		r.CancelOperation = operationID

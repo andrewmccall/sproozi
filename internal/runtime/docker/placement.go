@@ -268,7 +268,7 @@ func (p *Placement) drivePrepare(ctx context.Context, r *placementRecord, data [
 	if err != nil {
 		return fmt.Errorf("profile: %w", err)
 	}
-	contract := harness.NativeLaunch{Harness: p.config.Harness, Deadline: r.Launch.Deadline, ThreadID: r.Launch.ThreadID, Task: r.Launch.Task, Instructions: p.config.Instructions, InstructionDigest: p.config.InstructionDigest, Env: access.Env, Model: access.Model, Options: access.Options, ClientConfig: access.ClientConfig, TrustBundlePEM: access.TrustBundlePEM, RolloutMaxBytes: harness.NativeRolloutMaxBytes, ProfileArchive: profile}
+	contract := harness.NativeLaunch{Harness: p.config.Harness, Deadline: r.Launch.Deadline, ThreadID: r.Launch.ThreadID, Task: r.Launch.Task, Instructions: p.config.Instructions, InstructionDigest: p.config.InstructionDigest, Env: access.Env, Model: access.Model, Options: access.Options, Args: r.Launch.HarnessArgs, ClientConfig: access.ClientConfig, TrustBundlePEM: access.TrustBundlePEM, RolloutMaxBytes: harness.NativeRolloutMaxBytes, ProfileArchive: profile}
 	if err := contract.Validate(time.Now()); err != nil {
 		return err
 	}
@@ -513,14 +513,16 @@ func (p *Placement) Stop(ctx context.Context, l session.Launch, i session.Incarn
 		}
 	}
 
-	if !validUUID(r.thread()) {
+	if !validUUID(r.thread()) && !r.Turnless {
 		return session.Stopped{}, errors.New("initial native UUID remains unknown")
 	}
 	if err = p.seal(ctx, &r, i); err != nil {
 		stopped, stoppedErr := p.stopped(r)
 		return stopped, errors.Join(fmt.Errorf("%w: %w", session.ErrUsageUnsealed, err), stoppedErr)
 	}
-	if r.CheckpointDigest == "" {
+	// A turnless visit had no conversation; its workspace is the one it
+	// started from, which the execution retains, so nothing is captured.
+	if r.CheckpointDigest == "" && !r.Turnless {
 		if err = p.engine.VerifyManaged(ctx, *r.Helper, p.spec(r, roleHelper)); err != nil {
 			return session.Stopped{}, err
 		}
@@ -838,7 +840,8 @@ func (p *Placement) quiesceNative(ctx context.Context, r *placementRecord, i ses
 			r.Thread = thread
 			return p.save(*r)
 		}
-		_, err = harness.QuiesceNative(ctx, control, r.thread(), r.Launch.Deadline, bind)
+		var thread string
+		thread, err = harness.QuiesceNative(ctx, control, r.thread(), r.Launch.Deadline, bind)
 		if errors.Is(err, harness.ErrQuiesceUnacknowledged) && r.Launch.Harness != harness.NativeClaude {
 			// A lost Codex reply is resolved by the actual stopped container.
 			observed, observeErr := p.engine.Observe(ctx, *r.Agent)
@@ -849,6 +852,8 @@ func (p *Placement) quiesceNative(ctx context.Context, r *placementRecord, i ses
 		if err != nil {
 			return err
 		}
+		// Only a turnless first visit quiesces without a bound thread.
+		r.Turnless = thread == ""
 	} else if r.Launch.Harness == harness.NativeClaude {
 		return errors.New("claude graceful completion acknowledgement unavailable")
 	}

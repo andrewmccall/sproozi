@@ -50,6 +50,11 @@ type NativeReply struct {
 	Written    int               `json:"written,omitempty"`
 	Exit       *NativeExit       `json:"exit,omitempty"`
 	Completion *NativeCompletion `json:"completion,omitempty"`
+	// Turnless reports, once input is gated and has settled, that a first
+	// visit has no native conversation to keep: no turn ever started, or
+	// its only turn ended without completing. Quiesce then stops the
+	// harness without one.
+	Turnless bool `json:"turnless,omitempty"`
 }
 
 // NativeExit is the supervisor's process exit observation, not a container fence.
@@ -127,6 +132,10 @@ var ErrQuiesceUnacknowledged = errors.New("native quiesce reply unavailable")
 // turn. bind records the observed thread with the trusted owner before quiesce
 // reports it. The returned thread is the bound native UUID.
 //
+// A first visit whose supervisor reports it turnless has no conversation to
+// bind or keep: quiesce stops its harness and QuiesceNative returns an empty
+// thread with no error. Only that outcome returns an empty thread.
+//
 // Gateway access stays open throughout so the admitted turn and its tools can
 // finish. Revocation, physical fencing and accounting remain backend steps.
 func QuiesceNative(ctx context.Context, control NativeControl, thread string, deadline time.Time,
@@ -139,21 +148,30 @@ func QuiesceNative(ctx context.Context, control NativeControl, thread string, de
 		return "", err
 	}
 	if thread == "" {
-		if thread, err = observeNativeThread(ctx, control, deadline); err != nil {
+		observed, err := observeNativeThread(ctx, control, deadline)
+		if err != nil {
 			return "", err
 		}
-		if err = bind(ctx, thread); err != nil {
-			return "", err
+		if observed != "" {
+			if err = bind(ctx, observed); err != nil {
+				return "", err
+			}
 		}
+		thread = observed
 	}
 	output, err = control(ctx, NativeQuiesce)
 	if err != nil {
 		return thread, fmt.Errorf("%w: %w", ErrQuiesceUnacknowledged, err)
 	}
-	_, err = DecodeNativeReply(output, NativeQuiesce, NativeStopped, thread)
+	reply, err := DecodeNativeReply(output, NativeQuiesce, NativeStopped, thread)
+	if err == nil && thread == "" && !reply.Turnless {
+		return "", errors.New("native quiesce stopped without a bound thread")
+	}
 	return thread, err
 }
 
+// observeNativeThread waits for the genuine native UUID of a first visit. It
+// returns an empty UUID when the supervisor reports the visit turnless.
 func observeNativeThread(ctx context.Context, control NativeControl, deadline time.Time) (string, error) {
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
@@ -168,6 +186,9 @@ func observeNativeThread(ctx context.Context, control NativeControl, deadline ti
 		}
 		if status.ThreadID != "" {
 			return status.ThreadID, nil
+		}
+		if status.Turnless {
+			return "", nil
 		}
 		select {
 		case <-ctx.Done():

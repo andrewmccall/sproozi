@@ -34,8 +34,12 @@ type NativeLaunch struct {
 	RolloutMaxBytes   int64               `json:"rolloutMaxBytes"`
 	Model             string              `json:"model,omitempty"`
 	Options           []string            `json:"options,omitempty"`
-	Gateway           *NativeGateway      `json:"gateway,omitempty"`
-	TrustBundlePEM    []byte              `json:"trustBundlePEM,omitempty"`
+	// Args are the user's own harness arguments for this execution, appended
+	// after the flags the supervisor sets. ValidateNativeArgs refuses the
+	// flags Sproozi controls.
+	Args           []string       `json:"args,omitempty"`
+	Gateway        *NativeGateway `json:"gateway,omitempty"`
+	TrustBundlePEM []byte         `json:"trustBundlePEM,omitempty"`
 	// ProfileArchive is the user's profile for a Docker launch. Kubernetes
 	// mounts the stored archive at NativeProfileArchive instead.
 	ProfileArchive []byte `json:"profileArchive,omitempty"`
@@ -182,6 +186,9 @@ func (c NativeLaunch) Validate(now time.Time) error {
 	if len(c.Task) > 32<<10 || strings.ContainsRune(c.Task, 0) ||
 		c.Task != "" && (strings.TrimSpace(c.Task) == "" || c.Harness != NativeCodex) {
 		return errors.New("native task requires bounded nonempty Codex input")
+	}
+	if err := ValidateNativeArgs(c.Harness, c.Args); err != nil {
+		return err
 	}
 	if c.Instructions == "" || fmt.Sprintf("%x", sha256.Sum256([]byte(c.Instructions))) != c.InstructionDigest {
 		return errors.New("trusted instructions do not match digest")

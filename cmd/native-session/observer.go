@@ -128,3 +128,22 @@ func taskInTurn(rollout []byte, turn, task string) bool {
 	}
 	return active == turn && matched
 }
+
+// codexJournalExists reports whether Codex has started any native journal.
+// Codex writes its rollout only once a turn starts, so a home without one
+// has no conversation. Anything it cannot read counts as a journal, so an
+// unreadable home never makes a visit turnless.
+func codexJournalExists(home string) bool {
+	found := false
+	err := filepath.WalkDir(filepath.Join(home, "sessions"), func(name string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if !entry.IsDir() {
+			found = true
+			return fs.SkipAll
+		}
+		return nil
+	})
+	return found || err != nil && !errors.Is(err, fs.ErrNotExist)
+}

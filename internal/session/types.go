@@ -34,9 +34,11 @@ type Allowance struct {
 }
 
 // Launch is immutable trusted placement intent. Checkpoint contents grant none of it.
-// A first visit started from a Git workspace has neither ThreadID nor
-// CheckpointDigest: the placement observes the genuine native thread during the
-// visit and reports it in Stopped.ThreadID. No layer rewrites a Launch.
+// A visit started from the execution's retained Git workspace has neither
+// ThreadID nor CheckpointDigest: the placement observes the genuine native
+// thread during the visit and reports it in Stopped.ThreadID. That is the
+// first visit, or a later one while no visit has kept a conversation. No layer
+// rewrites a Launch.
 type Launch struct {
 	Harness harness.NativeKind `json:"harness"`
 	// ExecutionID is the public executionId. Its wire name predates the split
@@ -53,6 +55,10 @@ type Launch struct {
 	Allowances        map[string]Allowance `json:"allowances"`
 	CheckpointDigest  string               `json:"checkpointDigest"`
 	IncludeIgnored    []string             `json:"includeIgnored,omitempty"`
+	// HarnessArgs are the user's own harness arguments for the execution,
+	// the same on every visit. They are not session identity: a later
+	// execution of the session chooses its own.
+	HarnessArgs []string `json:"harnessArgs,omitempty"`
 	// ProfileDigest names the user's profile archive for this visit. Docker
 	// mounts the live folder instead; remote placements store the archive.
 	ProfileDigest string `json:"profileDigest,omitempty"`
@@ -76,8 +82,10 @@ type Receipt struct {
 // Nil Receipt means usage is unknown and all allowance stays encumbered.
 // Launch and Receipt.Launch are the exact launch the visit started from.
 // ThreadID is the genuine native thread a first visit bound; a placement may
-// omit it when it equals Launch.ThreadID. It is empty for a first visit only
-// when the visit was cancelled before its thread was observed.
+// omit it when it equals Launch.ThreadID. It is empty for a visit from the
+// retained workspace only when the visit was cancelled before its thread was
+// observed, or stopped turnless: with no native conversation to keep, so with
+// no Checkpoint either.
 type Stopped struct {
 	Launch           Launch      `json:"launch"`
 	Incarnation      Incarnation `json:"incarnation"`
@@ -167,7 +175,9 @@ func cancelled(r Record) error {
 // Inspect errors/unknown observations cannot be converted into absence or zero.
 //
 // Stop has exactly three outcomes:
-//   - nil error: the writer is fenced, Receipt is sealed and Checkpoint is captured.
+//   - nil error: the writer is fenced, Receipt is sealed and Checkpoint is
+//     captured. A turnless visit from the retained workspace returns no
+//     ThreadID and no Checkpoint: it had no native conversation to keep.
 //   - an error wrapping ErrUsageUnsealed: Stopped reports ActualStopped with a
 //     nil Receipt. The writer is fenced; only accounting is unknown.
 //   - any other error: whether the writer stopped is unknown.
@@ -263,8 +273,9 @@ func (o Operation) done() bool { return o.Stage == stageComplete || o.Stage == s
 //
 // The first operation starts the first visit. Its input is the committed
 // Checkpoint when the execution resumes a conversation, or the retained Git
-// Workspace for a new one; ThreadID and Checkpoint are then empty until the
-// first stop binds the genuine thread. Session names the durable session that
+// Workspace for a new one; ThreadID and Checkpoint are then empty until a
+// stop binds the genuine thread. A turnless stop keeps neither, so the next
+// visit starts again from the retained workspace. Session names the durable session that
 // owns the execution; it is empty when the execution is the session itself.
 // PendingOperation names the one unfinished operation, always the last one.
 type Record struct {
@@ -277,6 +288,7 @@ type Record struct {
 	Workspace         string               `json:"workspace,omitempty"`
 	InstructionDigest string               `json:"instructionDigest"`
 	IncludeIgnored    []string             `json:"includeIgnored,omitempty"`
+	HarnessArgs       []string             `json:"harnessArgs,omitempty"`
 	Deadline          time.Time            `json:"deadline"`
 	Ceiling           map[string]Allowance `json:"ceiling"`
 	Remaining         map[string]Allowance `json:"remaining"`

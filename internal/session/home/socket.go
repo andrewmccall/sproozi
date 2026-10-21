@@ -51,6 +51,9 @@ type Request struct {
 	// Harness selects a configured local harness for start; empty selects
 	// the primary local placement's harness.
 	Harness harness.NativeKind `json:"harness,omitempty"`
+	// HarnessArgs are the user's own arguments for the stock harness of a
+	// start or resume, appended to the harness command line.
+	HarnessArgs []string `json:"harnessArgs,omitempty"`
 }
 type Response struct {
 	Status   *Status  `json:"status,omitempty"`
@@ -315,7 +318,7 @@ func (s *Service) handle(ctx context.Context, conn net.Conn) {
 	var sessions []Status
 	switch q.Action {
 	case ActionStart:
-		status, err = s.Start(ctx, q.ID, q.OperationID, q.Workspace, q.Harness, q.IncludeIgnored)
+		status, err = s.Start(ctx, q.ID, q.OperationID, q.Workspace, q.Harness, q.IncludeIgnored, q.HarnessArgs)
 	case ActionMove:
 		status, err = s.Move(ctx, q.ID, q.OperationID, q.Destination)
 	case ActionStatus:
@@ -327,7 +330,7 @@ func (s *Service) handle(ctx context.Context, conn net.Conn) {
 	case ActionPull:
 		status, err = s.Pull(ctx, q.ID, q.OperationID, q.Source)
 	case ActionResume:
-		status, err = s.Resume(ctx, q.ID, q.OperationID)
+		status, err = s.Resume(ctx, q.ID, q.OperationID, q.HarnessArgs)
 	case ActionStop:
 		status, err = s.Stop(ctx, q.ID, q.OperationID)
 	case ActionSessions:
@@ -466,6 +469,9 @@ func validateCommonRequest(q Request) error {
 	}
 	if q.Action != ActionPull && q.Source != "" {
 		return errors.New("home: source is pull intent")
+	}
+	if len(q.HarnessArgs) != 0 && q.Action != ActionStart && q.Action != ActionResume {
+		return errors.New("home: only start and resume take harness arguments")
 	}
 	return nil
 }

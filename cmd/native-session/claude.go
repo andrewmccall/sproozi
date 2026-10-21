@@ -20,6 +20,7 @@ const (
 	claudePreTool      = "PreToolUse"
 	claudePostTool     = "PostToolUse"
 	claudeStop         = "Stop"
+	claudeStopFailure  = "StopFailure"
 	claudeBash         = "Bash"
 	claudeHooksKey     = "hooks"
 
@@ -45,10 +46,14 @@ type claudeLifecycle struct {
 	id        string
 	started   bool
 	completed bool
-	input     uint64
-	pending   map[string]bool
-	lastEvent string
-	rejected  string
+	// failed records a turn that ended on an API error (StopFailure);
+	// everCompleted records that some turn of this conversation completed.
+	failed        bool
+	everCompleted bool
+	input         uint64
+	pending       map[string]bool
+	lastEvent     string
+	rejected      string
 }
 
 // Completion diagnostics describe the observer's state without disclosing
@@ -131,7 +136,7 @@ func (c *claudeLifecycle) accept(h claudeHook, input uint64) error {
 		if len(c.pending) != 0 {
 			return errors.New("claude prompt arrived with pending tools")
 		}
-		c.started, c.completed, c.input = true, false, input
+		c.started, c.completed, c.failed, c.input = true, false, false, input
 		c.pending = map[string]bool{}
 	case claudePreTool:
 		if !c.started || c.completed || !validClaudeTool(h) || c.pending[h.ToolID] {
@@ -147,7 +152,13 @@ func (c *claudeLifecycle) accept(h claudeHook, input uint64) error {
 		if !c.started || len(c.pending) != 0 || h.StopActive == nil || *h.StopActive {
 			return errors.New("claude turn has no safe Stop observation")
 		}
-		c.completed = true
+		c.completed, c.everCompleted = true, true
+	case claudeStopFailure:
+		if !c.started || c.completed {
+			return errors.New("claude turn failure has no started turn")
+		}
+		// An API error ends the turn; no tool can still be running.
+		c.failed, c.pending = true, map[string]bool{}
 	default:
 		return errors.New("unsupported Claude lifecycle event")
 	}
@@ -156,6 +167,20 @@ func (c *claudeLifecycle) accept(h claudeHook, input uint64) error {
 func validClaudeTool(h claudeHook) bool {
 	return h.ToolName == claudeBash && h.ToolID != "" && len(h.ToolID) <= 256 &&
 		!strings.ContainsAny(h.ToolID, "\x00\r\n")
+}
+
+// claudeTurnless reports that a gated first visit has no Claude conversation
+// to keep: no prompt was ever submitted, or every submitted turn ended on an
+// API error before any turn completed. A failed transcript is not a
+// resumable checkpoint, so it is left behind.
+func (s *server) claudeTurnless() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c := s.claude
+	if !c.started {
+		return c.id == ""
+	}
+	return c.failed && !c.everCompleted && len(c.pending) == 0
 }
 
 func (s *server) observeClaudeTurn() (string, string, error) {
@@ -221,7 +246,7 @@ func prepareClaudeLaunch(c config, _ string, env []string) ([]string, []string, 
 		return nil, nil, err
 	}
 	hooks := map[string]any{}
-	for _, event := range []string{claudePromptSubmit, claudePreTool, claudePostTool, claudeStop} {
+	for _, event := range []string{claudePromptSubmit, claudePreTool, claudePostTool, claudeStop, claudeStopFailure} {
 		hooks[event] = []any{map[string]any{"matcher": "", claudeHooksKey: []any{map[string]any{
 			"type": "command", "command": "/usr/local/bin/native-session observe-claude", "timeout": 5}}}}
 	}
@@ -259,9 +284,10 @@ func claudeArguments(c config, profile agentprofile.Profile, withSkills bool) []
 	}
 	args = append(args, "--setting-sources", "", "--settings", claudeSettings, "--permission-mode", "bypassPermissions",
 		"--append-system-prompt", c.Instructions+"\n\n"+profileInstructions(profile, harness.NativeClaude))
-	if c.Model != "" {
+	if c.Model != "" && !harness.NativeArgsSelectModel(harness.NativeClaude, c.Args) {
 		args = append(args, "--model", c.Model)
 	}
+	args = append(args, c.Args...)
 	if c.ThreadID != "" {
 		args = append(args, "--resume", c.ThreadID)
 	}

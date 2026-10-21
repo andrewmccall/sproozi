@@ -72,7 +72,7 @@ requirements and workspace limits.
 | `status` | Inspect one session by its stable session UUID. |
 | `pull` | Claim a stopped remote session and import its conversation and Git workspace. This does not start an agent. |
 | `resume` | Start a new local execution of a stopped session with fresh permissions. It attaches the terminal unless `--detach` is selected. |
-| `stop` | Stop local work and retain its supported state for later resume. |
+| `stop` | Stop local work and retain its supported state for later resume. A session whose harness never started a conversation stops at once and keeps its starting workspace. |
 | `cancel` | Revoke and force-stop a session's current execution, including unfinished work that cannot stop gracefully. |
 | `recover` | Continue a journaled operation after an uncertain response or interruption. |
 
@@ -146,12 +146,12 @@ other flag is rejected before configuration is read or a request is sent.
 | `sessions` | `--config`, `--socket`, `--executor`, `--project`, `--json` |
 | `status` | `--config`, `--socket`, `--executor`, `--id` |
 | `pull` | `--config`, `--socket`, `--executor`, `--id`, `--operation`, `--from` |
-| `resume` | `--config`, `--socket`, `--executor`, `--id`, `--operation`, `--detach`, `--json` |
+| `resume` | `--config`, `--socket`, `--executor`, `--id`, `--operation`, `--detach`, `--json`, `-- ARGS` |
 | `stop` | `--config`, `--socket`, `--executor`, `--id`, `--operation`, `--json` |
 | `cancel` | `--config`, `--socket`, `--executor`, `--id`, `--operation` |
 | `recover` | `--config`, `--socket`, `--executor`, `--id` |
 | `serve` | `--config` |
-| `start` | `--config`, `--socket`, `--executor`, `--id`, `--operation`, `--workspace`, `--harness`, `--include-ignored`, `--detach`, `--json` |
+| `start` | `--config`, `--socket`, `--executor`, `--id`, `--operation`, `--workspace`, `--harness`, `--include-ignored`, `--detach`, `--json`, `-- ARGS` |
 | `attach` | `--config`, `--socket`, `--executor`, `--id` |
 | `move` | `--config`, `--socket`, `--executor`, `--id`, `--operation`, `--to` |
 
@@ -172,6 +172,7 @@ other flag is rejected before configuration is read or a request is sent.
 | `--detach` | Return after `start` or `resume` without attaching the terminal. |
 | `--workspace PATH` | Stopped ordinary Git directory that seeds `start`. |
 | `--include-ignored PATH` | Ignored file `start` carries on every visit. Repeat it for each file. |
+| `-- ARGS` | Arguments after `--` on `start` or `resume` go to the harness unchanged. See [pass arguments to the harness](#pass-arguments-to-the-harness). |
 | `--to NAME` | Configured placement for `move`: `local.name` or a name under `remote`. `sproozi move --help` describes it as ``placement `NAME`: the value of local.name (for example local) or a name under "remote"``. Any other name fails before a request; see [move destinations](#move-destinations). |
 | `--local` | Make `init` provision a local installation instead of only creating a directory. |
 | `--root PATH` | Local installation root; defaults to the recorded root or `~/sproozi`. |
@@ -257,7 +258,12 @@ arguments. `pull` derives its operation from the session ID and source unless
 timeout means the outcome is unknown: check `status` on the same owner before
 deciding what to do. `recover` finishes the original operation and doesn't
 accept a new operation UUID. `stop` waits for supported foreground work and saves a checkpoint;
-`cancel` revokes before forced stop. An old operation remains bound to its original
+`cancel` revokes before forced stop. A first visit with no harness
+conversation, because no prompt was submitted or, for Claude Code, every
+prompt failed with a provider error, has nothing to wait for: `stop` ends it
+within a few seconds, finalizes its usage and keeps no checkpoint. The session
+goes `idle` with the workspace it started from, and
+`sproozi move ID --to local` starts it again before its deadline. An old operation remains bound to its original
 execution and cannot affect a later resume.
 
 ### Recovery messages
@@ -271,6 +277,9 @@ UUID.
 | --- | --- | --- |
 | `session: previous KIND requires recovery; run "sproozi recover ID" to finish it, or "sproozi cancel ID" to revoke and force-stop its current execution`, where `KIND` is `start`, `resume`, `move` or `stop` | A `move` or `stop` while that earlier operation on this execution is unfinished. | `sproozi recover ID` to finish it, or `sproozi cancel ID` to give it up and force-stop the session's current execution. |
 | `session: cancellation unfinished; run "sproozi recover ID" to finish the cancellation` | A `move` or `stop` while a cancellation hasn't yet proved the agent stopped and its usage finalized. | `sproozi recover ID`. |
+| `session: cancellation OP was already requested: session: cancellation unfinished; run "sproozi recover ID" to finish the cancellation` | A `cancel` with a new operation while an earlier cancellation is unfinished. | `sproozi recover ID`. |
+| `session: the writer stopped, but its usage is not finalized yet; recover again once the placement can finalize it` | `recover` of a cancellation whose agent stopped but whose usage home could not finalize. | `sproozi recover ID` again; the home daemon log has the cause. |
+| `session: the placement has not yet proved the writer stopped; recover again once it is reachable` | `recover` of a cancellation that could not confirm the agent stopped. | Restore Docker or the remote executor, then `sproozi recover ID`. |
 | `session ID is cancelled; start a new session` | A `move` or `stop` of a session whose cancellation finished. Nothing can continue it. | `sproozi start` for new work. |
 | `home: previous execution must stop and commit before resume; run "sproozi stop ID" first` | `resume` while the current execution is still running. | `sproozi stop ID`, then `resume` again. |
 | `home: start intent conflicts with retained launch; ID was started with operation OP: to continue it, repeat the original start command with --operation OP, or run "sproozi cancel ID" to revoke and force-stop its current execution` | A `start --id ID` with a different operation or different `--include-ignored` flags from the original start. | The original `start` command with `--operation OP`, or `sproozi cancel ID`. |
@@ -283,6 +292,42 @@ ID" to see the session's phase`.
 When a Docker command that home runs fails, the error includes Docker's
 standard error, cut to its first 4096 bytes and then marked
 ` [output truncated]`.
+
+### Pass arguments to the harness
+
+Arguments after `--` on `start` and `resume` go to the stock harness for that
+execution, after the flags Sproozi sets and before the conversation it resumes:
+
+```sh
+sproozi start --workspace "$PWD" --harness codex -- --model gpt-5.5 -c model_reasoning_effort=high
+sproozi resume SESSION_UUID -- --model gpt-5.5
+```
+
+They stay with the execution: a `move --to local` keeps them, and a later
+`resume` takes its own. A start retried with the same `--operation` must repeat
+them. When they choose a model (`--model`, or Codex `-m` and `-c model=...`),
+the harness gets that model instead of the configured one. The gateway still
+decides which requests and models are allowed and charges them to the
+execution's allowance.
+
+Home refuses, before creating the execution, an argument that would replace a
+flag Sproozi controls, for example `home: harness argument "--sandbox" is
+refused: Sproozi runs the harness unattended with its own sandbox and approval
+mode for codex sessions; remove --sandbox` or `home: harness argument "-c
+model_provider=openai" is refused: Sproozi sets "model_provider" for codex
+sessions; remove it`. The refused flags are:
+
+| Harness | Refused |
+| --- | --- |
+| `codex` | `--sandbox`, `-s`, `--ask-for-approval`, `-a`, `--dangerously-bypass-approvals-and-sandbox`, `--yolo`, `--approve-for-me`, `--full-auto`, `--cd`, `-C`, `--worktree`, `--oss`, `--local-provider`, `--profile`, `-p`, `--remote`, `--remote-auth-token-env`, `--no-daemon`, `--no-alt-screen`; `-c`/`--config` for `developer_instructions`, `instructions`, `model_instructions_file`, `experimental_instructions_file`, `model_provider`, `model_providers`, `mcp_servers.sproozi`, `projects`, `sandbox_mode`, `sandbox_workspace_write`, `approval_policy`, `approvals_reviewer`, `check_for_update_on_startup`, `profile`, `profiles`, `notice` and keys below them |
+| `claude-code` | `--permission-mode`, `--permission-prompts`, `--dangerously-skip-permissions`, `--allow-dangerously-skip-permissions`, `--tools`, `--allowedTools`, `--allowed-tools`, `--mcp-config`, `--strict-mcp-config`, `--plugin-dir`, `--plugin-url`, `--settings`, `--setting-sources`, `--bare`, `--safe-mode`, `--restricted`, `--system-prompt`, `--system-prompt-file`, `--append-system-prompt`, `--append-system-prompt-file`, `--resume`, `-r`, `--continue`, `-c`, `--session-id`, `--fork-session`, `--from-pr`, `--teleport`, `--no-session-persistence`, `--print`, `-p`, `--output-format`, `--input-format`, `--remote-control`, `--cloud`, `--environment`, `--bg`, `--background`, `--desktop`, `--tmux`, `--worktree`, `-w` |
+
+A second `--` is refused too, because Sproozi adds the conversation to resume
+after the harness arguments. Other words pass through as given, so a Codex
+positional becomes its initial prompt. At most 64 arguments of 4096 bytes each are
+accepted. Arguments apply to local Docker visits: `move --to` a remote
+placement fails with `home: ID was started with harness arguments, which apply
+only at home; it cannot move to NAME`. Other commands don't accept `--`.
 
 ### Move destinations
 
@@ -406,7 +451,8 @@ hold fails with `docker (home): no session UUID; run "sproozi sessions" to list
 sessions`. `resume` continues only sessions imported with `pull`; for a session
 created with `start`, it fails with `home: session UUID was started at home
 with "sproozi start"; resume continues only sessions imported with "sproozi
-pull"`.
+pull"; to continue it before its deadline, run "sproozi move UUID --to
+local"`, naming the configured `local.name`.
 `truncated: true` means a source or row limit omitted results. A remote
 `home-owned` mirror and its local
 import remain separate rows labelled by catalogue; matching session IDs do not

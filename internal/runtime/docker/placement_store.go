@@ -35,10 +35,13 @@ type placementRecord struct {
 	Phase                 string  `json:"phase"`
 	Volume                *Volume `json:"volume,omitempty"`
 	Agent, Helper, Anchor *Instance
-	ActualStopped         bool             `json:"actualStopped"`
-	NativeQuiet           bool             `json:"nativeQuiet,omitempty"`
-	Receipt               *session.Receipt `json:"receipt,omitempty"`
-	CheckpointDigest      string           `json:"checkpointDigest,omitempty"`
+	ActualStopped         bool `json:"actualStopped"`
+	NativeQuiet           bool `json:"nativeQuiet,omitempty"`
+	// Turnless records that the supervisor stopped a first visit with no
+	// native conversation to keep; its stop captures no checkpoint.
+	Turnless         bool             `json:"turnless,omitempty"`
+	Receipt          *session.Receipt `json:"receipt,omitempty"`
+	CheckpointDigest string           `json:"checkpointDigest,omitempty"`
 	// Removing is saved after the placement confirmed every recorded container
 	// stopped and before it removes any of them. From then on an absent
 	// container is one this placement removed, not missing writer evidence.

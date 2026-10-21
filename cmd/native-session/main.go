@@ -66,7 +66,16 @@ type server struct {
 	claude          claudeLifecycle
 	inputGeneration uint64
 	taskBaseline    string
+	// gatedAt is when input was first gated; turnless latches the decision
+	// that this first visit has no native conversation to keep.
+	gatedAt  time.Time
+	turnless bool
 }
+
+// turnlessSettle is how long gated input must stay quiet before a first visit
+// with no native conversation counts as turnless. It covers a prompt
+// submitted just before the gate whose native record has not appeared yet.
+var turnlessSettle = 2 * time.Second
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -321,6 +330,9 @@ func (s *server) status() response {
 		}
 	}
 	r := response{Op: harness.NativeStatus, State: state, ThreadID: id}
+	if id == "" && state == harness.NativeStopping {
+		r.Turnless = s.isTurnless()
+	}
 	if adapter, err := adapterFor(kind); err == nil && adapter.completion != nil {
 		r.Completion = adapter.completion(s)
 	}
@@ -341,6 +353,7 @@ func (s *server) gate() response {
 		return r
 	}
 	s.state = harness.NativeStopping
+	s.markGated()
 	thread := s.threadID
 	s.mu.Unlock()
 	n.GateInput()
@@ -358,6 +371,7 @@ func (s *server) quiesce() response {
 		return r
 	}
 	s.state = harness.NativeStopping
+	s.markGated()
 	s.mu.Unlock()
 	n.GateInput()
 	ctx, cancel := context.WithDeadline(context.Background(), s.deadline)
@@ -366,6 +380,9 @@ func (s *server) quiesce() response {
 	defer timer.Stop()
 	var id, turn string
 	for {
+		if s.isTurnless() {
+			return s.stopTurnless(ctx, n)
+		}
 		var err error
 		id, turn, err = s.observeNativeTurn()
 		if err == nil {
@@ -400,6 +417,56 @@ func (s *server) quiesce() response {
 	return response{Op: harness.NativeQuiesce, State: harness.NativeStopped, ThreadID: id, TurnID: turn,
 		Exit: &harness.NativeExit{Code: exit.Code, Reason: string(exit.Reason)}, Error: problem}
 }
+
+// markGated records when input was first gated. The caller holds s.mu.
+func (s *server) markGated() {
+	if s.gatedAt.IsZero() {
+		s.gatedAt = time.Now()
+	}
+}
+
+// isTurnless reports, and latches, that a gated first interactive visit has
+// no native conversation to keep. A launch with a selected thread or a task
+// always has one, so it never qualifies.
+func (s *server) isTurnless() bool {
+	s.mu.Lock()
+	latched := s.turnless
+	eligible := s.state == harness.NativeStopping && s.config.ThreadID == "" && s.threadID == "" &&
+		s.config.Task == "" && !s.gatedAt.IsZero() && time.Since(s.gatedAt) >= turnlessSettle
+	kind := s.config.Harness
+	s.mu.Unlock()
+	if latched || !eligible {
+		return latched
+	}
+	adapter, err := adapterFor(kind)
+	if err != nil || adapter.turnless == nil || !adapter.turnless(s) {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.threadID != "" {
+		return false
+	}
+	s.turnless = true
+	return true
+}
+
+// stopTurnless ends a turnless first visit. There is no native conversation
+// to preserve, so the supervisor stops the process group itself rather than
+// typing a quit command into whatever the harness shows.
+func (s *server) stopTurnless(ctx context.Context, n *nativepty.Supervisor) response {
+	exit, err := n.Stop(ctx)
+	if err != nil {
+		s.stop()
+		return response{Op: harness.NativeQuiesce, State: harness.NativeStopping, Error: err.Error()}
+	}
+	s.mu.Lock()
+	s.state, s.exitCode = harness.NativeStopped, 0
+	s.mu.Unlock()
+	return response{Op: harness.NativeQuiesce, State: harness.NativeStopped, Turnless: true,
+		Exit: &harness.NativeExit{Code: exit.Code, Reason: string(exit.Reason)}}
+}
+
 func (s *server) handle(conn net.Conn) {
 	defer func() { _ = conn.Close() }()
 	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))

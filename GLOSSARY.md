@@ -305,6 +305,21 @@ starts another, with fresh admission, gateway access and a new sandbox. The
 execution's deadline and allowance carry across visits. Its ID is
 `allocationId`. Also seen as: allocation.
 
+### Turnless visit
+
+A first visit whose harness never started a conversation: no prompt was
+submitted, or, for Claude Code, every prompt ended on a provider error before
+any turn completed. `stop` ends it without waiting for a turn and keeps no
+checkpoint; the session keeps the workspace it started from. See
+[ADR 0032](docs/adr/0032-stopping-a-visit-with-no-native-conversation.md).
+
+### Harness arguments
+
+The user's own arguments for the stock harness, given after `--` on `start` or
+`resume`. They belong to that execution, not the session. Sproozi refuses the
+ones that would replace a flag it controls. See
+[pass arguments to the harness](docs/reference/session-commands.md#pass-arguments-to-the-harness).
+
 ### Writer
 
 The running sandbox process that can change a session's conversation or

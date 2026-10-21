@@ -25,18 +25,18 @@ func TestImportedProjectNeedsIndependentLocalApprovalAndKeepsAssociation(t *test
 	if err != nil || pulled.Project != "sproozi-dev" || pulled.Repository != "sproozi" || pulled.CheckpointInfo == nil {
 		t.Fatalf("Authenticated association was lost: %#v %v", pulled, err)
 	}
-	if _, err = s.Resume(t.Context(), id, uuid.NewString()); err == nil || local.prepares != 0 {
+	if _, err = s.Resume(t.Context(), id, uuid.NewString(), nil); err == nil || local.prepares != 0 {
 		t.Fatal("Imported association granted unconfigured local authority")
 	}
 	s.config.Allowances["kubernetes.read"] = session.Allowance{Units: session.Limit{Bounded: true, Value: 50}}
 	s.config.ProjectApprovals = []ProjectApproval{{Source: "another-source", Project: "sproozi-dev",
 		Capabilities: []string{"model.inference", "kubernetes.read"}}}
-	if _, err = s.Resume(t.Context(), id, uuid.NewString()); err == nil || local.prepares != 0 {
+	if _, err = s.Resume(t.Context(), id, uuid.NewString(), nil); err == nil || local.prepares != 0 {
 		t.Fatal("A different source's approval granted execution authority")
 	}
 	s.config.ProjectApprovals = []ProjectApproval{{Source: testRemote, Project: "sproozi-dev",
 		Capabilities: []string{"model.inference"}}}
-	resumed, err := s.Resume(t.Context(), id, uuid.NewString())
+	resumed, err := s.Resume(t.Context(), id, uuid.NewString(), nil)
 	if err != nil || resumed.Project != "sproozi-dev" || resumed.ThreadID != testNativeUUID {
 		t.Fatalf("Approved same-conversation continuation failed: %#v %v", resumed, err)
 	}
@@ -73,7 +73,7 @@ func TestInterruptedProjectAdmissionRechecksApprovalOnEveryActivationPath(t *tes
 					t.Fatal(err)
 				}
 				local.failInspect = true
-				if _, err := s.Resume(t.Context(), id, operation); err == nil {
+				if _, err := s.Resume(t.Context(), id, operation, nil); err == nil {
 					t.Fatal("Expected interrupted preparation")
 				}
 				local.failInspect = false
@@ -85,7 +85,7 @@ func TestInterruptedProjectAdmissionRechecksApprovalOnEveryActivationPath(t *tes
 				var err error
 				switch action {
 				case "resume":
-					_, err = s.Resume(t.Context(), id, operation)
+					_, err = s.Resume(t.Context(), id, operation, nil)
 				case "recover":
 					_, err = s.Recover(t.Context(), id)
 				case "move":
@@ -144,7 +144,7 @@ func TestRemovedProjectApprovalDoesNotBlockInterruptedFinalStopRecovery(t *testi
 	if _, err := s.Pull(t.Context(), id, source.export.OperationID, testRemote); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Resume(t.Context(), id, uuid.NewString()); err != nil {
+	if _, err := s.Resume(t.Context(), id, uuid.NewString(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Move(t.Context(), id, uuid.NewString(), testRemote); err != nil {
