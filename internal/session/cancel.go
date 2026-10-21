@@ -95,7 +95,7 @@ func (c *Coordinator) claimPendingWriter(ctx context.Context, r Record) (Record,
 	if op.Launch == nil {
 		return r, false, nil
 	}
-	p, ok := c.placements[op.Destination]
+	p, ok := c.placement(op.Destination)
 	if !ok {
 		return r, false, errors.New("session: pending placement unavailable")
 	}
@@ -143,7 +143,7 @@ func (c *Coordinator) claimPendingWriter(ctx context.Context, r Record) (Record,
 // with its sealed receipt. Unproven stop or usage leaves it active.
 func (c *Coordinator) abortActive(ctx context.Context, r Record) (Record, error) {
 	active := r.Active
-	p, ok := c.placements[active.Launch.Placement]
+	p, ok := c.placement(active.Launch.Placement)
 	if !ok {
 		return r, errors.New("session: active placement unavailable")
 	}

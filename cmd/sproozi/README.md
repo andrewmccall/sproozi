@@ -60,7 +60,7 @@ worker traffic only to that fixed IPv4 and port. Image IDs are immutable Docker
 `sha256:` content IDs, not tags. With a hand-written configuration, the service
 neither pulls images nor creates a network; `init` does both.
 
-Keep configuration, provider keys, home principal tokens and TLS keys outside the worker
+Keep configuration, provider keys, kubeconfig files and TLS keys outside the worker
 workspace. Directories must be owned and mode `0700`; files must be owned, regular,
 mode `0600` (or stricter), and selected by absolute path. `dockerConfig` is a fresh
 private Docker CLI directory, not a personal Docker configuration. The engine uses
@@ -127,44 +127,26 @@ by its key, for example `local.gatewayPort: number -1 is not a whole number from
     "providerURL": "https://api.openai.com",
     "providerTokenFile": "/absolute/private/provider-token",
     "maxModelCallSeconds": 1200
-  },
-  "remote": {
-    "engineering": {
-      "url": "https://approved-profile.example:8443",
-      "tokenFile": "/absolute/private/home-principal-token",
-      "caFile": "/absolute/private/remote-ca.pem",
-      "maxCheckpointBytes": 8388608
-    }
   }
 }
 ```
 
-Each `remote` entry is a [remote executor](../../GLOSSARY.md#remote-executor):
-a placement that `move --remote --context NAME` can use and an executor for
-`run --remote`, `sessions`, `status`, `cancel`, `recover` and `pull` with
-`--context NAME`. `url` is its fixed HTTPS
-origin, `tokenFile` the absolute path of its
-[home principal token](../../GLOSSARY.md#home-principal-token), `caFile` an optional
-private CA (omit it to use system roots) and `maxCheckpointBytes` is 1 byte to
-64 MiB and must equal `local.maxCheckpointBytes` once that is set. Every
-command checks each entry when it reads the configuration and names the bad
-key, such as `remote.engineering.url` or `remote.engineering.maxCheckpointBytes`. Earlier
-capitalised keys (`URL`, `TokenFile`, `CAFile`, `MaxCheckpointBytes`) still load.
-An entry name is 1 to 63 lowercase letters, digits and hyphens, starting and
-ending with a letter or digit, like a DNS label. It cannot be `docker` or
-`home`, or the same as `local.name`, this machine's placement. `local.name`
-follows the same rule and cannot be `docker` or `home`; either fails with, for
-example, `"docker" is reserved: docker and home are reserved names for this
-machine's service, and local.name names its placement`. An unknown key is reported
-with the entry that holds it, such as `remote.engineering: unknown key "bogus"`.
+Remote executors are not configured here. Remote commands reach a cluster
+through a kubeconfig context: `--context NAME` or `--context FILE`, by default
+the context named `sproozi`, and `--namespace`. The service records each
+[remote executor](../../GLOSSARY.md#remote-executor) it reaches, under the
+executor's own name, in `executors.json` in its directory, so `move` and `pull`
+keep working after the command exits. See
+[remote executor access](../../docs/reference/remote-executors.md). A
+configuration that still has a `remote` or `workSources` key fails with
+`unknown key "remote": remote executors are no longer configured here`.
 
-`workSources` takes entries of the same shape. Use it for an executor that is
-not a placement, such as a remote executor reached only for remote work through
-`run --remote`, `sessions`, `status`, `cancel`, `recover` and `pull`, or to
-give a `remote` executor a separately provisioned connection for those
-commands. When both maps hold the same name, those commands use the
-`workSources` entry and `move` uses the `remote` one. Use `remote` alone when one remote executor
-is both your placement and your executor.
+`local.name` is 1 to 63 lowercase letters, digits and hyphens, starting and
+ending with a letter or digit, like a DNS label, and cannot be `docker` or
+`home`; either fails with, for example, `"docker" is reserved: docker and home
+are reserved names for this machine's service, and local.name names its
+placement`. An unknown key is reported with the key that holds it, such as
+`local.agentLimits: unknown key "bogus"`.
 
 ### Fields for home-managed certificates, harnesses and shared instructions
 

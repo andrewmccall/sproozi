@@ -31,7 +31,7 @@ func (c *Coordinator) Create(first Launch, input []byte, session string) (Record
 	if first.Epoch != 1 || session != "" && (!validUUID(session) || session == first.ExecutionID) {
 		return Record{}, errors.New("session: invalid first visit")
 	}
-	if _, ok := c.placements[first.Placement]; !ok {
+	if _, ok := c.placement(first.Placement); !ok {
 		return Record{}, errors.New("session: first placement unavailable")
 	}
 	existing, err := c.load(first.ExecutionID)
@@ -92,7 +92,7 @@ func (c *Coordinator) Move(ctx context.Context, id, operationID, destination str
 	if !validUUID(operationID) {
 		return Record{}, errors.New("session: invalid operation ID")
 	}
-	if _, ok := c.placements[destination]; !ok {
+	if _, ok := c.placement(destination); !ok {
 		return Record{}, errors.New("session: destination unavailable")
 	}
 	r, err := c.load(id)
@@ -223,7 +223,7 @@ func (c *Coordinator) stopSource(ctx context.Context, r Record, index int) (Reco
 			return r, errors.New("session: stop intent lacks active allocation")
 		}
 		source := r.Active
-		p, ok := c.placements[source.Launch.Placement]
+		p, ok := c.placement(source.Launch.Placement)
 		if !ok {
 			return r, errors.New("session: source placement unavailable")
 		}
@@ -320,7 +320,7 @@ func (c *Coordinator) prepareDestination(ctx context.Context, r Record, index in
 		if err := spendable(op.Launch.Allowances); err != nil {
 			return r, err
 		}
-		p, ok := c.placements[op.Destination]
+		p, ok := c.placement(op.Destination)
 		if !ok {
 			return r, errors.New("session: destination placement unavailable")
 		}
@@ -368,7 +368,7 @@ func (c *Coordinator) prepareDestination(ctx context.Context, r Record, index in
 func (c *Coordinator) activateDestination(ctx context.Context, r Record, index int) (Record, error) {
 	op := &r.Operations[index]
 	if op.Stage == stageActivate {
-		p, ok := c.placements[op.Destination]
+		p, ok := c.placement(op.Destination)
 		if !ok {
 			return r, errors.New("session: destination placement unavailable")
 		}

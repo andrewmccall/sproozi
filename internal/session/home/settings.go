@@ -99,12 +99,6 @@ func (c Config) ServeProblems() []string {
 	add(l.RetainedBytes < 2*l.MaxCheckpointBytes || l.RetainedBytes <= 0,
 		"local.retainedBytes", "at least twice local.maxCheckpointBytes")
 	p = append(p, c.gatewayProblems()...)
-	for _, group := range c.connectionGroups() {
-		for _, name := range slices.Sorted(maps.Keys(group.entries)) {
-			add(group.entries[name].MaxCheckpointBytes != l.MaxCheckpointBytes,
-				group.key+"."+name+".maxCheckpointBytes", "equal to local.maxCheckpointBytes")
-		}
-	}
 	return append(p, c.AllowanceProblems()...)
 }
 

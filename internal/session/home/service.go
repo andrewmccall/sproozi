@@ -23,7 +23,7 @@ import (
 	"github.com/andrewmccall/sproozi/internal/project"
 	runtimedocker "github.com/andrewmccall/sproozi/internal/runtime/docker"
 	"github.com/andrewmccall/sproozi/internal/session"
-	"github.com/andrewmccall/sproozi/internal/session/profile"
+	"github.com/andrewmccall/sproozi/internal/session/remote"
 	"github.com/andrewmccall/sproozi/internal/work"
 	"github.com/andrewmccall/sproozi/internal/workspace"
 	"github.com/google/uuid"
@@ -58,7 +58,11 @@ type Service struct {
 	// legacySwept records that one recovery of reservations from before
 	// leases has succeeded; until then each sweep repeats it.
 	legacySwept atomic.Bool
-	remotes     []*profile.Client
+	// remoteMu guards remotes, workSources and the remote entries of
+	// placements, which a first move or pull through a context adds.
+	remoteMu    sync.RWMutex
+	remotes     map[string]*remote.Client
+	discover    func(context.Context, remote.Selection) (remote.Executor, error)
 	closeOnce   sync.Once
 	closeError  error
 	workSources map[string]WorkSource
@@ -324,11 +328,11 @@ func (s *Service) startFirstVisit(ctx context.Context, r session.Record) (Status
 // moveDestinationProblem rejects a destination that names no configured
 // placement, listing the ones that do.
 func (s *Service) moveDestinationProblem(destination string) error {
-	if s.placements[destination] != nil {
+	if s.placement(destination) != nil {
 		return nil
 	}
-	return rejectedError(fmt.Sprintf("home: move destination %q is not a configured placement; use one of: %s",
-		destination, strings.Join(slices.Sorted(maps.Keys(s.placements)), ", ")))
+	return rejectedError(fmt.Sprintf("home: move destination %q is not a known placement; use one of: %s, "+
+		"or move --remote with --context to reach a cluster", destination, strings.Join(s.placementNames(), ", ")))
 }
 
 func (s *Service) moveExecution(ctx context.Context, id, operationID, destination string) (Status, error) {
@@ -416,7 +420,7 @@ func (s *Service) attachExecution(ctx context.Context, id string, input io.Reade
 	if r.Active == nil || r.Phase != session.PhaseActive {
 		return errors.New("home: native attachment is unavailable")
 	}
-	terminal, ok := s.placements[r.Active.Launch.Placement].(session.TerminalPlacement)
+	terminal, ok := s.placement(r.Active.Launch.Placement).(session.TerminalPlacement)
 	if !ok {
 		return errors.New("home: native attachment is unavailable")
 	}

@@ -2,15 +2,12 @@ package profile
 
 import (
 	"context"
-	"crypto/sha256"
-	"crypto/subtle"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"io"
 	"mime"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -28,14 +25,12 @@ import (
 type Config struct {
 	Harness            harness.NativeKind
 	Principal          string
-	TokenFile          string
 	Placement          string
 	InstructionDigest  string
 	Allowances         map[string]session.Allowance
 	MaxDuration        time.Duration
 	MaxCheckpointBytes int64
-	// Authorizer decides who the home principal is. Without it, TokenFile
-	// holds the one static home principal token.
+	// Authorizer decides who the home principal is.
 	Authorizer Authorizer
 	Backend    session.Placement
 	// Profiles retains profile archives that launches name. Without it, a
@@ -62,25 +57,6 @@ var ErrUnauthenticated = errors.New("profile: unauthenticated")
 // any other error when it cannot decide, which the caller sees as unavailable.
 type Authorizer interface {
 	Authorize(ctx context.Context, token string) error
-}
-
-// StaticToken authorizes exactly one token, compared in constant time.
-func StaticToken(token string) (Authorizer, error) {
-	token, err := validToken(token)
-	if err != nil {
-		return nil, err
-	}
-	return staticToken(sha256.Sum256([]byte(token))), nil
-}
-
-type staticToken [32]byte
-
-func (s staticToken) Authorize(_ context.Context, token string) error {
-	actual := sha256.Sum256([]byte(token))
-	if subtle.ConstantTimeCompare(s[:], actual[:]) != 1 {
-		return ErrUnauthenticated
-	}
-	return nil
 }
 
 // AuthorizationStatus maps an Authorizer result to the HTTP status and code a
@@ -118,30 +94,10 @@ func NewHandler(config Config) (http.Handler, error) {
 	config.Allowances = allowed
 	home := config.Authorizer
 	if home == nil {
-		token, err := readToken(config.TokenFile)
-		if err != nil {
-			return nil, err
-		}
-		if home, err = StaticToken(token); err != nil {
-			return nil, err
-		}
-	} else if config.TokenFile != "" {
-		return nil, errors.New("profile: set either a token file or an authorizer, not both")
+		return nil, errors.New("profile: home principal authorizer required")
 	}
-	config.TokenFile, config.Authorizer = "", nil
+	config.Authorizer = nil
 	return &handler{config: config, home: home, maxBody: maxBody}, nil
-}
-func readToken(name string) (string, error) {
-	f, err := os.Open(name)
-	if err != nil {
-		return "", errors.New("profile: token file unavailable")
-	}
-	defer func() { _ = f.Close() }()
-	data, err := io.ReadAll(io.LimitReader(f, 4097))
-	if err != nil || len(data) > 4096 {
-		return "", errors.New("profile: invalid token file")
-	}
-	return validToken(string(data))
 }
 
 // validToken trims a bearer token and checks the length and characters every

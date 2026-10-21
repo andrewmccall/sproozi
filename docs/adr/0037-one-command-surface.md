@@ -81,11 +81,13 @@ each finished visit, which are small and are evidence for budgets and fencing.
 
 ### Remote seam
 
-Remote commands reach a cluster through one file, `cmd/sproozi/remote.go`:
-`resolveRemote(ctx, config, context, namespace)` and `remoteTargets(ctx,
-config)`. Until ADR 0036's discovery is wired in, a context name selects a
-configured `remote` or `workSources` entry and kubeconfig files and
-`--namespace` are refused.
+Remote commands reach a cluster through one file, `cmd/sproozi/remote.go`,
+which calls ADR 0036's `internal/session/remote`: `selectRemote` resolves
+`--context` and `--namespace` locally, `resolveRemote` reaches the executor for
+the commands the CLI runs against a cluster, and `move --remote` and `pull`
+send the selection to the service. (An interim build mapped a context name to
+the configured `remote` or `workSources` entries; ADR 0036's wiring removed
+them.)
 
 ## Alternatives
 

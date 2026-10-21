@@ -2,62 +2,62 @@ package main
 
 import (
 	"context"
-	"fmt"
-	"maps"
-	"slices"
-	"strings"
+	"time"
 
-	"github.com/andrewmccall/sproozi/internal/session/home"
-	"github.com/andrewmccall/sproozi/internal/session/profile"
+	"github.com/andrewmccall/sproozi/internal/session/remote"
+	"github.com/andrewmccall/sproozi/internal/work"
 )
 
 // This file is the one seam between the CLI and how a cluster is found.
 // Remote commands name a cluster with --context (a kubeconfig context name or
-// kubeconfig file) and --namespace. Until kubeconfig contexts are supported,
-// a context name selects an executor configured under "remote" or
-// "workSources" in a hand-written configuration.
+// kubeconfig file) and --namespace; without --context they use the context
+// named "sproozi". See docs/reference/remote-executors.md.
 
-// defaultContext is the kubeconfig context remote commands use by default.
-const defaultContext = "sproozi"
-
-// remoteTarget is one cluster's remote executor: the name the service knows
-// it by, for pull and move, and how the CLI reaches it.
+// remoteTarget is one cluster's remote executor: its own name, which session
+// rows show, and its remote work catalogue.
 type remoteTarget struct {
 	Name   string
-	Client profile.ClientConfig
+	Client *work.Client
+	// Err says why the cluster could not be reached; Name is then the context.
+	Err error
 }
 
-// resolveRemote finds the remote executor for a context and namespace.
-func resolveRemote(_ context.Context, fixed home.Config, kubeContext, namespace string) (remoteTarget, error) {
-	if kubeContext == "" {
-		kubeContext = defaultContext
-	}
-	if namespace != "" {
-		return remoteTarget{}, fmt.Errorf("--namespace needs kubeconfig context support, which this build does not " +
-			"have yet; name a configured cluster with --context")
-	}
-	if strings.ContainsAny(kubeContext, `/\`) {
-		return remoteTarget{}, fmt.Errorf("--context %s: kubeconfig files are not supported by this build yet; "+
-			"name a configured cluster", kubeContext)
-	}
-	client, ok := fixed.WorkConnections()[kubeContext]
-	if !ok {
-		configured := slices.Sorted(maps.Keys(fixed.WorkConnections()))
-		if len(configured) == 0 {
-			return remoteTarget{}, fmt.Errorf("no cluster named %q is set up; see %s", kubeContext,
-				docURL("docs/guides/portable-workflows.md"))
-		}
-		return remoteTarget{}, fmt.Errorf("no cluster named %q is set up; use --context with one of: %s",
-			kubeContext, strings.Join(configured, ", "))
-	}
-	return remoteTarget{Name: kubeContext, Client: client}, nil
+// selectRemote resolves --context and --namespace on this machine, without
+// contacting the cluster. The service reaches the selection itself for move
+// and pull, so exec credential plugins run in its environment.
+func selectRemote(kubeContext, namespace string) (remote.Selection, error) {
+	return remote.Select(kubeContext, namespace)
 }
 
-// remoteTargets are the clusters "sessions" lists when no --context is given.
-func remoteTargets(_ context.Context, fixed home.Config) []remoteTarget {
-	targets := make([]remoteTarget, 0, len(fixed.WorkConnections()))
-	for _, name := range slices.Sorted(maps.Keys(fixed.WorkConnections())) {
-		targets = append(targets, remoteTarget{Name: name, Client: fixed.WorkConnections()[name]})
+// resolveRemote reaches the remote executor a context and namespace select,
+// for the commands the CLI runs against a cluster directly.
+func resolveRemote(ctx context.Context, kubeContext, namespace string) (remoteTarget, error) {
+	selection, err := selectRemote(kubeContext, namespace)
+	if err != nil {
+		return remoteTarget{}, err
 	}
-	return targets
+	executor, err := remote.Discover(ctx, selection)
+	if err != nil {
+		return remoteTarget{}, err
+	}
+	client, err := remote.NewClient(executor)
+	if err != nil {
+		return remoteTarget{}, err
+	}
+	return remoteTarget{Name: executor.Name, Client: work.ClientFor(client)}, nil
+}
+
+// defaultTargets are the clusters "sessions" lists besides this machine: the
+// one the sproozi context reaches, when that context exists.
+func defaultTargets(ctx context.Context) []remoteTarget {
+	if _, err := selectRemote("", ""); err != nil {
+		return nil
+	}
+	resolveCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	target, err := resolveRemote(resolveCtx, "", "")
+	if err != nil {
+		return []remoteTarget{{Name: remote.DefaultContext, Err: err}}
+	}
+	return []remoteTarget{target}
 }

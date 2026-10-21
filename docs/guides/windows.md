@@ -1,8 +1,8 @@
 # Use Sproozi on Windows
 
 Install the x86-64 ZIP as described in [Install the CLI](install.md). Run commands in
-PowerShell or Windows Terminal on Windows 11 or Windows Server 2025. You can submit work to configured remote owners
-without running Docker locally. Local agent sessions require Docker Desktop
+PowerShell or Windows Terminal on Windows 11 or Windows Server 2025. You can submit work to a remote executor through a
+kubeconfig context without running Docker locally. Local agent sessions require Docker Desktop
 using Linux containers, plus a hand-written configuration as described in
 [Move a live session between Docker and Kubernetes](session-mobility.md):
 automatic setup does not run on Windows yet.

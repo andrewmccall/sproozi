@@ -43,12 +43,12 @@ func terminalFixture(t *testing.T) (*Client, *terminalBackend, session.Launch, s
 	l := launch(strings.Repeat("c", 64))
 	i := session.Incarnation{ExecutionID: uuid.NewString(), ResourceUID: uuid.NewString()}
 	b := &terminalBackend{retainedBackend: &retainedBackend{state: session.Observation{Launch: l, Incarnation: i, State: session.PlacementActive}}, finished: make(chan struct{})}
-	h, err := NewHandler(Config{Harness: harness.NativeCodex, Principal: testPrincipal, TokenFile: tokenFile(t), Placement: l.Placement, InstructionDigest: l.InstructionDigest, Allowances: l.Allowances, MaxDuration: time.Hour, MaxCheckpointBytes: testMax, Backend: b})
+	h, err := NewHandler(Config{Harness: harness.NativeCodex, Principal: testPrincipal, Authorizer: tokenAuthorizer(testToken), Placement: l.Placement, InstructionDigest: l.InstructionDigest, Allowances: l.Allowances, MaxDuration: time.Hour, MaxCheckpointBytes: testMax, Backend: b})
 	if err != nil {
 		t.Fatal(err)
 	}
 	s, ca := serve(t, h)
-	c, err := NewClient(ClientConfig{URL: s.URL, TokenFile: tokenFile(t), CAFile: ca, MaxCheckpointBytes: testMax})
+	c, err := testClient(s.URL, ca)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -85,6 +85,10 @@ class Proof:
         self.env = {"PATH": os.environ["PATH"], "HOME": str(self.out), "LANG": "C.UTF-8",
                     "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
                     "GIT_TERMINAL_PROMPT": "0"}
+        # Without --context the CLI uses the "sproozi" context, so keep the
+        # administrator's KUBECONFIG choice in the otherwise scrubbed environment.
+        if os.environ.get("KUBECONFIG"):
+            self.env["KUBECONFIG"] = os.environ["KUBECONFIG"]
         self.report = {"passed": False, "sessionId": self.id, "fixtureCredentialIsPublicPlaceholder": True,
                        "scope": "real stock native TUI through production session CLI and placement moves",
                        "steps": [], "limitations": ["Text-only history; tool effects and compaction unassessed",
@@ -171,7 +175,10 @@ class Proof:
         destination = flags.pop("to", None)
         if destination is not None:
             local = destination in ("local", self.config["local"]["Name"])
-            command += ["--local"] if local else ["--remote", "--context", str(destination)]
+            # A remote destination is reached through the kubeconfig context,
+            # by default the "sproozi" context; destination is the executor's name.
+            context = ["--context", str(self.args.context)] if getattr(self.args, "context", None) else []
+            command += ["--local"] if local else ["--remote", *context]
         for key, value in flags.items():
             for item in value if isinstance(value, list) else [value]:
                 command += ["--" + key, str(item)]
@@ -374,7 +381,11 @@ class Proof:
         remaining = cancelled["remaining"]["model.inference"]["units"]
         check(ceiling["bounded"] and remaining["bounded"] and remaining["value"] == ceiling["value"] - used,
               "Remaining allowance did not subtract immutable sealed usage")
-        check(all(v["launch"]["threadId"] == thread for v in cancelled["visits"]), "Native UUID changed")
+        # The first visit starts before the harness has a conversation, so its
+        # launch carries no native UUID; every later visit carries the bound one.
+        visits = cancelled["visits"]
+        check(visits[0]["launch"]["threadId"] in ("", thread) and all(v["launch"]["threadId"] == thread for v in visits[1:]),
+              "Native UUID changed")
         self.report.update(passed=True, finalPhase="cancelled", sameNativeUUID=True, sameOriginalDeadline=True,
                            visits=receipts, providerRequests={"conversation": 3,
                            "title": len(requests) - 3, "completed": len(requests), "tokensPerRequest": 15},
@@ -391,7 +402,8 @@ def main():
     parser.add_argument("--session-binary", type=Path, required=True)
     parser.add_argument("--pty-helper", type=Path, required=True)
     parser.add_argument("--checkpoint-binary", type=Path)
-    parser.add_argument("--remote-name", default="remote")
+    parser.add_argument("--remote-name", default="remote", help="the remote executor's placement name")
+    parser.add_argument("--context", help="kubeconfig context name or file for the remote executor; default: the sproozi context")
     parser.add_argument("--operation-timeout", type=int, default=240)
     parser.add_argument("--turn-timeout", type=int, default=60)
     parser.add_argument("--profile-server-log", type=Path)

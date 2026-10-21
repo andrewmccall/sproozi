@@ -35,9 +35,9 @@ a remote executor or want to manage the configuration by hand.
 The trusted service owns a local Unix Docker socket, fixed image IDs, its TLS
 gateway, provider credentials and protected journals. Local start requires no
 cluster or kubeconfig. A developer can use the remote executor after an
-administrator provisions it. The remote service holds its own Kubernetes
-credentials; the developer receives only the profile URL, public CA and protected
-[home principal token](../../GLOSSARY.md#home-principal-token) file.
+administrator provisions it. The remote executor holds its own Kubernetes
+credentials; the developer receives only a kubeconfig context for the
+`sproozi-cli` ServiceAccount, which can reach the executor and nothing else.
 
 You need a running Linux Docker engine or Docker Desktop, Git, Go 1.26 or later,
 and administrator-created images/network/TLS material. Keep all
@@ -228,7 +228,7 @@ e = os.environ
 admin, path, image = e["SPROOZI_ADMIN"], e["SPROOZI_CONFIG"], e["SPROOZI_NATIVE_IMAGE_ID"]
 port = int(e["SPROOZI_GATEWAY_PORT"])
 instructions = "Work only on the repository in this session. Ask before deleting files."
-c = {"directory": admin + "/state", "local": {}, "maxDuration": "30m", "remote": {},
+c = {"directory": admin + "/state", "local": {}, "maxDuration": "30m",
      "allowances": {"model.inference": {"units": {"bounded": True, "value": 200000},
                                         "costMicros": {"bounded": False, "value": 0}}}}
 if os.path.exists(path):
@@ -378,13 +378,11 @@ Allowances need a finite positive unit ceiling and an explicit cost ceiling.
 exhausted allowance and cannot activate another visit. Bounded model cost needs
 administrator pricing in `gateway.pricingFile`.
 
-For a local-only session, leave `remote` empty, as `init` writes it. If a
-setting is missing or invalid, `sproozi service run` names it by JSON key. For remote
-moves, add a `remote` entry with the remote executor's fixed HTTPS origin,
-home principal token file, CA file and checkpoint byte limit.
-The remote placement alias must match the profile's `placementName`. All
-placements must use the same checkpoint byte limit and approve the same initial
-instructions and native version. The original home duration must also fit the
+If a setting is missing or invalid, `sproozi service run` names it by JSON key.
+Remote executors are not configured here: `move --remote` reaches one through
+the `sproozi` kubeconfig context, or `--context`. All placements must use the
+same checkpoint byte limit and approve the same initial instructions and native
+version; the service checks the executor's limit when it first reaches it. The original home duration must also fit the
 remote executor and live policy; Kubernetes policy currently permits at most one
 hour. Moving does not restart the lifetime clock.
 
@@ -396,19 +394,20 @@ with a NetworkPolicy-enforcing CNI. The administrator supplies the managed nativ
 runtime, approved template/policy, immutable certificate-only sandbox trust bundle,
 shared gateway TLS and gateway-owned provider credentials.
 
-The remote executor uses either its protected host kubeconfig or an in-cluster
-ServiceAccount with the documented scoped Run/registration/account/Pod permissions.
-It fixes the principal, Run namespace, template, ceilings and maximum duration in
-private JSON. Incoming move requests cannot select images, environment variables,
+The remote executor runs in the cluster with its own ServiceAccount and the
+documented scoped Run/registration/account/Pod permissions. It fixes the
+principal, Run namespace, template, ceilings and maximum duration in its
+configuration. Incoming move requests cannot select images, environment variables,
 Kubernetes credentials or arbitrary commands. One process owns its private durable
 state directory. Run it under a service manager and retain the directory across
 restarts.
 
-The private home principal token needs at least 32 non-whitespace characters. TLS 1.3
-verifies the profile certificate against the configured CA. The profile client
-sends the token only to that exact origin, with no redirect or environment-proxy
-fallback. Keep the token and CA file paths in the home configuration; do not copy
-the profile's kubeconfig to the developer, sandbox or portable pair.
+Apply `cli-access` in the executor's namespace and create the `sproozi`
+context, as [remote executor access](../reference/remote-executors.md) shows.
+The service reaches the executor through a port-forward, verifies its
+certificate against the CA it publishes, and sends the ServiceAccount token only
+to it. Never give the executor's own credentials to the developer, a sandbox or
+the portable pair.
 
 ## Start the service and conversation
 
@@ -487,12 +486,13 @@ attached reaches the harness. A reconnect replays a bounded terminal output tail
 native `/quit` when you intend to move; the placement owns graceful quit and the
 independent container stop/checkpoint boundary.
 
-Move to the configured remote executor, attach there, then return to local
-Docker. `--context engineering` names a key of the configuration's `remote`
-map, as in the [configuration example](../../cmd/sproozi/README.md):
+Move to the remote executor, attach there, then return to local Docker.
+Without `--context`, `move --remote` uses the `sproozi` context; add
+`--context NAME` or `--context FILE` for another cluster. The service reaches
+the executor and remembers it, so `move --local` needs no context:
 
 ```sh
-sproozi move ID --remote --context engineering
+sproozi move ID --remote
 sproozi attach ID
 sproozi move ID --local
 sproozi attach ID
@@ -517,8 +517,8 @@ effect.
 
 This machine's service stays the [owner](../../GLOSSARY.md#owner) whichever
 placement runs the execution: `move` only changes the placement, which
-`sessions` and `status` show as `local` or the cluster's placement name. `pull
-ID --context NAME` is different: it hands a session that a cluster owns over to
+`sessions` and `status` show as `local` or the remote executor's name. `pull
+ID` is different: it hands a session that a cluster owns over to
 this machine. Afterwards `sessions` lists it twice: a `local` row, and a
 read-only row from the cluster in phase `pulled`. See
 [status and listing output](../reference/session-commands.md#status-and-listing-output).
@@ -546,7 +546,7 @@ retry explicitly, reuse the same session, operation and exact intent:
 ```sh
 sproozi run --id SESSION_UUID --operation START_OPERATION_UUID \
   /absolute/path/to/stopped-repository --include-ignored needed.bin
-sproozi move ID --operation MOVE_OPERATION_UUID --remote --context engineering
+sproozi move ID --operation MOVE_OPERATION_UUID --remote
 ```
 
 The start retry must repeat every original ignored-file flag. A changed operation

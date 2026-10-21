@@ -25,23 +25,20 @@ import (
 	"github.com/andrewmccall/sproozi/internal/project"
 	runtimedocker "github.com/andrewmccall/sproozi/internal/runtime/docker"
 	"github.com/andrewmccall/sproozi/internal/session"
-	"github.com/andrewmccall/sproozi/internal/session/profile"
 )
 
 type Config struct {
-	Directory        string                          `json:"directory"`
-	DockerBinary     string                          `json:"dockerBinary"`
-	DockerSocket     string                          `json:"dockerSocket"`
-	DockerConfig     string                          `json:"dockerConfig"`
-	Local            runtimedocker.PlacementConfig   `json:"local"`
-	Allowances       map[string]session.Allowance    `json:"allowances"`
-	MaxDuration      string                          `json:"maxDuration"`
-	Model            string                          `json:"model,omitempty"`
-	NativeOptions    []string                        `json:"nativeOptions,omitempty"`
-	Gateway          GatewayConfig                   `json:"gateway"`
-	Remote           map[string]profile.ClientConfig `json:"remote,omitempty"`
-	WorkSources      map[string]profile.ClientConfig `json:"workSources,omitempty"`
-	ProjectApprovals []ProjectApproval               `json:"projectApprovals,omitempty"`
+	Directory        string                        `json:"directory"`
+	DockerBinary     string                        `json:"dockerBinary"`
+	DockerSocket     string                        `json:"dockerSocket"`
+	DockerConfig     string                        `json:"dockerConfig"`
+	Local            runtimedocker.PlacementConfig `json:"local"`
+	Allowances       map[string]session.Allowance  `json:"allowances"`
+	MaxDuration      string                        `json:"maxDuration"`
+	Model            string                        `json:"model,omitempty"`
+	NativeOptions    []string                      `json:"nativeOptions,omitempty"`
+	Gateway          GatewayConfig                 `json:"gateway"`
+	ProjectApprovals []ProjectApproval             `json:"projectApprovals,omitempty"`
 	// Harnesses adds further native harnesses to the home. Each is its own local
 	// placement with its own gateway port, grants and provider credential.
 	Harnesses []LocalHarness `json:"harnesses,omitempty"`
@@ -61,16 +58,6 @@ type LocalHarness struct {
 	ProviderTokenFile string             `json:"providerTokenFile"`
 	ProviderCAFile    string             `json:"providerCAFile,omitempty"`
 	PricingFile       string             `json:"pricingFile,omitempty"`
-}
-
-// WorkConnections resolves remote work owners by name, for run, discovery,
-// remote control and pull alike. A workSources entry wins; any other name uses
-// its remote profile.
-func (c Config) WorkConnections() map[string]profile.ClientConfig {
-	connections := make(map[string]profile.ClientConfig, len(c.Remote)+len(c.WorkSources))
-	maps.Copy(connections, c.Remote)
-	maps.Copy(connections, c.WorkSources)
-	return connections
 }
 
 // ProjectApproval is current local authority, qualified by authenticated source.
@@ -213,9 +200,6 @@ func parseConfig(b []byte) (Config, error) {
 	if err != nil || duration <= 0 || duration > 24*time.Hour {
 		return c, errors.New("maxDuration: positive duration of at most 24h, such as \"30m\", required")
 	}
-	if err = validateConnections(c); err != nil {
-		return c, err
-	}
 	if err = validateProjectApprovals(c); err != nil {
 		return c, err
 	}
@@ -245,16 +229,6 @@ func requiredSettings(c Config) error {
 		return nil
 	}
 	return errors.New(strings.Join(problems, "; "))
-}
-
-// connectionGroup is one configuration map of remote work connections.
-type connectionGroup struct {
-	key     string
-	entries map[string]profile.ClientConfig
-}
-
-func (c Config) connectionGroups() []connectionGroup {
-	return []connectionGroup{{"remote", c.Remote}, {"workSources", c.WorkSources}}
 }
 
 // ReservedExecutor is the executor name that addresses home itself.
@@ -300,56 +274,6 @@ func nameProblem(name string) string {
 	return problem
 }
 
-// validateConnections checks each remote and workSources entry by key, and
-// rejects names that would shadow home or its local placement.
-func validateConnections(c Config) error {
-	var problems []string
-	for _, group := range c.connectionGroups() {
-		for _, name := range slices.Sorted(maps.Keys(group.entries)) {
-			key := group.key + "." + name
-			if problem := nameProblem(name); problem != "" {
-				problems = append(problems, key+": "+problem)
-				continue
-			}
-			if name == c.Local.Name {
-				problems = append(problems, fmt.Sprintf("%s: %q is local.name, home's local placement; "+
-					"choose another name or change local.name", key, name))
-				continue
-			}
-			entry := group.entries[name]
-			// Home checks the checkpoint limit itself: the profile protocol allows
-			// more than home's placement can capture.
-			checked := entry
-			checked.MaxCheckpointBytes = 1
-			if err := checked.Validate(); err != nil {
-				for problem := range strings.SplitSeq(err.Error(), "\n") {
-					problems = append(problems, key+"."+problem)
-				}
-			}
-			if problem := checkpointLimitProblem(entry.MaxCheckpointBytes, c.Local.MaxCheckpointBytes); problem != "" {
-				problems = append(problems, key+".maxCheckpointBytes: "+problem)
-			}
-		}
-	}
-	if len(problems) == 0 {
-		return nil
-	}
-	return errors.New(strings.Join(problems, "; "))
-}
-
-// checkpointLimitProblem checks a remote entry's checkpoint limit against the
-// one range home supports and, once it is set, local.maxCheckpointBytes.
-func checkpointLimitProblem(remote, local int64) string {
-	const rule = "1 byte to 64 MiB, equal to local.maxCheckpointBytes"
-	switch {
-	case remote < 1 || remote > MaxCheckpointBytes:
-		return fmt.Sprintf("%d is out of range; %s, required", remote, rule)
-	case local != 0 && remote != local:
-		return fmt.Sprintf("%d differs from local.maxCheckpointBytes (%d); %s, required", remote, local, rule)
-	}
-	return ""
-}
-
 // typeErrorKey restates a JSON type error by configuration key, such as
 // local.gatewayPort or remote.NAME.maxCheckpointBytes, instead of Go names.
 func typeErrorKey(data []byte, err error) error {
@@ -365,16 +289,12 @@ func typeErrorKey(data []byte, err error) error {
 		}
 	}
 	// Go omits map keys from the path, so find the entry that fails alone.
-	if named := map[string]bool{"remote": true, "workSources": true, "allowances": true}; named[segments[0]] {
+	if segments[0] == "allowances" {
 		var top map[string]json.RawMessage
 		var group map[string]json.RawMessage
 		if json.Unmarshal(data, &top) == nil && json.Unmarshal(top[segments[0]], &group) == nil {
 			for _, name := range slices.Sorted(maps.Keys(group)) {
-				var entry any = new(profile.ClientConfig)
-				if segments[0] == "allowances" {
-					entry = new(session.Allowance)
-				}
-				if json.Unmarshal(group[name], entry) != nil {
+				if json.Unmarshal(group[name], new(session.Allowance)) != nil {
 					segments = slices.Insert(segments, 1, name)
 					break
 				}
@@ -397,6 +317,10 @@ func unknownFieldKey(data []byte, err error) error {
 	path, field, ok := findUnknownField(v, reflect.TypeFor[Config](), nil)
 	if !ok {
 		return err
+	}
+	if len(path) == 0 && (field == "remote" || field == "workSources") {
+		return fmt.Errorf("unknown key %q: remote executors are no longer configured here; remove it and reach "+
+			"the cluster with --context (docs/reference/remote-executors.md)", field)
 	}
 	if len(path) == 0 {
 		return fmt.Errorf("unknown key %q", field)

@@ -95,7 +95,10 @@ class ExtendedProof(BASE.Proof):
         destination = flags.pop("to", None)
         if destination is not None:
             local = destination in ("local", self.config["local"]["Name"])
-            command += ["--local"] if local else ["--remote", "--context", str(destination)]
+            # A remote destination is reached through the kubeconfig context,
+            # by default the "sproozi" context; destination is the executor's name.
+            context = ["--context", str(self.args.context)] if getattr(self.args, "context", None) else []
+            command += ["--local"] if local else ["--remote", *context]
         for key, value in flags.items():
             command += ["--" + key, str(value)]
         return command
@@ -510,7 +513,8 @@ def main():
     parser.add_argument("--kubectl", type=Path, default=Path("kubectl"))
     parser.add_argument("--namespace", required=True, help="Registry/AgentRun namespace in dedicated Kind")
     parser.add_argument("--agent-namespace", required=True)
-    parser.add_argument("--remote-name", default="remote")
+    parser.add_argument("--remote-name", default="remote", help="the remote executor's placement name")
+    parser.add_argument("--context", help="kubeconfig context name or file for the remote executor; default: the sproozi context")
     parser.add_argument("--operation-timeout", type=int, default=240)
     parser.add_argument("--turn-timeout", type=int, default=120)
     parser.add_argument("--observe-timeout", type=int, default=30)

@@ -6,11 +6,15 @@ import json
 import os
 from pathlib import Path
 import secrets
+import importlib.util
 import subprocess
 
 import yaml
 
 ROOT = Path(__file__).resolve().parents[3]
+_spec = importlib.util.spec_from_file_location('mobility_kubernetes', ROOT / 'hack/verify/session-mobility/kubernetes.py')
+KUBE = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(KUBE)
 
 
 def write(path, value):
@@ -90,20 +94,15 @@ def main():
         raise RuntimeError('Only the deterministic credential-free fixture is supported')
     if (Path(home['directory']) / 'control.sock').exists():
         raise RuntimeError('Stop the fixture home before changing approval')
+    # The Hermes work token stays a static token; the executor reads it from
+    # its credentials Secret, which the administrator creates from this file.
     token = fixture / 'work-token'
     if not token.exists():
         token.write_text(secrets.token_hex(32) + '\n')
         token.chmod(0o600)
-    repo = fixture / 'source'
-    if not repo.exists():
-        repo.mkdir(mode=0o700)
-        subprocess.run(['git', 'init', '--quiet', str(repo)], check=True)
-        (repo / 'note.txt').write_text('Portable workflow fixture\n')
-        subprocess.run(['git', '-C', str(repo), 'add', 'note.txt'], check=True)
-        subprocess.run(['git', '-C', str(repo), '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
-                        'commit', '--quiet', '-m', 'Initial fixture'], check=True)
-    profile['workTokenFile'] = str(token)
-    profile['repositories'] = {'sproozi': {'snapshot': str(repo)}}
+    profile['workTokenFile'] = KUBE.CREDENTIALS + '/task-token'
+    # The executor's init container seeds this administrator-owned snapshot.
+    profile['repositories'] = {'sproozi': {'snapshot': '/state/source'}}
     documents = list(yaml.safe_load_all(args.manifest.read_text()))
     if args.deepwiki:
         registry = ROOT / 'examples/portable-workflows/deepwiki-servers.json'
@@ -160,6 +159,10 @@ def main():
             if d['kind'] == 'AgentPolicy' and d['metadata']['name'] == profile['templateName']:
                 d['spec']['resourceBounds']['max']['memory'] = '2560Mi'
                 d['spec']['resourceBounds']['max']['ephemeral-storage'] = '2Gi'
+    executor = next(d for d in documents if d and d['kind'] == 'Deployment' and d['metadata']['name'] == KUBE.EXECUTOR)
+    published = next(d for d in documents if d and d['kind'] == 'ConfigMap' and d['metadata']['name'] == 'sproozi-remote-executor')
+    documents = KUBE.replace_executor(documents, profile, executor['spec']['template']['spec']['containers'][0]['image'],
+                                      published['data']['ca.crt'])
     write(home_path, home)
     write(profile_path, profile)
     args.output.write_text(yaml.safe_dump_all(documents, sort_keys=False))

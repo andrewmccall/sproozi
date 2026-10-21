@@ -93,12 +93,12 @@ For remote work, configure the same approved repository/base scope and finite
 `github.pull_request` budget on the managed AgentPolicy, and provision the App
 credentials only in the shared gateway as described in that setup.
 
-Add `workTokenFile` and approved repositories to the existing private
-`session-profile` configuration:
+Add `workTokenFile` and approved repositories to the remote executor's
+configuration:
 
 ```json
 {
-  "workTokenFile": "/private/sproozi/work-token",
+  "workTokenFile": "/var/run/sproozi-work/work-token",
   "repositories": {
     "sproozi": {
       "url": "https://github.com/andrewmccall/sproozi",
@@ -108,11 +108,11 @@ Add `workTokenFile` and approved repositories to the existing private
 }
 ```
 
-These fields extend the full profile configuration, not a standalone replacement.
-Generate a distinct work token locally with `openssl rand -hex 32`, save it with
-mode `0600`, and reference that file. The existing home principal token belongs
-to the trusted home and additionally permits pull/claim. Hermes receives only the
-work token. Do not reuse the same bytes for both roles.
+These fields extend the full executor configuration, not a standalone
+replacement. Generate the work token with `openssl rand -hex 32` and put it in
+the executor's credentials Secret. Hermes receives only the work token. Your
+own CLI and service sign in as the `sproozi-cli` ServiceAccount instead, which
+also permits pull.
 
 An approved repository can instead specify an absolute `snapshot` path to a
 stopped ordinary Git checkout owned by the administrator. The remote executor
@@ -121,23 +121,16 @@ the harness to fetch that approved source through its GitHub capability.
 Repository files cannot supply trusted launch instructions or credential
 references.
 
-Run `session-profile --config FILE` with the explicit administrator kubeconfig,
-or deploy `/usr/local/bin/session-profile --config /etc/sproozi/profile.json` in
-a trusted Pod with the native image, a private persistent directory, its
-TLS/token files and narrowly scoped placement credentials. Use one replica; a
-lock on its state directory rejects a second remote executor using the same
-directory, and restarting it recovers the same stored execution intents. Its
-Kubernetes credentials need the documented managed-Run, registration and
-Pod-control permissions. Sandboxes cannot use it to execute arbitrary commands.
+Deploy the remote executor in the cluster with the
+[retained-work example](../../examples/portable-workflows/kubernetes/owner.yaml):
+one replica, a private persistent volume, its TLS and work-token Secret and its
+placement permissions. A lock on its state directory rejects a second executor
+using the same directory, and restarting it recovers the stored execution
+intents. Sandboxes cannot use it to execute arbitrary commands.
 
-Put the profile's HTTPS origin, public CA and home principal token file in the
-global home configuration's `remote` map. The map name must equal the configured
-profile `placementName`. A `workSources` entry gives a remote executor a separately
-provisioned connection. Every executor or source name resolves to its
-`workSources` entry when one exists, otherwise to the same-named `remote`
-profile; the [configuration reference](../../cmd/sproozi/README.md#configuration-reference)
-says when to use each. Both transports
-verify TLS 1.3, use one fixed origin and reject redirects.
+You reach it through a kubeconfig context. Apply `cli-access` and create the
+`sproozi` context as [remote executor access](../reference/remote-executors.md)
+shows; that page also lists what the executor must publish.
 
 For a persistent in-cluster remote executor and the exact Hermes `/work/mcp` configuration,
 use [Hermes with remote work](retained-work-kubernetes.md).
@@ -149,14 +142,16 @@ checkout at the same release as the CLI, as described in
 [Move a live session between Docker and Kubernetes](session-mobility.md#prepare-the-administrator-owned-setup).
 
 Create a task file describing a reproducible problem and observable checks. Then
-submit against the explicit configured profile name:
+submit it; without `--context`, the `sproozi` context is used:
 
 ```sh
-sproozi run --remote --context engineering --config /private/sproozi/config.json \
-  --harness codex --repository sproozi --task-file task.txt --operation ORIGINAL_REQUEST_UUID
-sproozi sessions --context engineering --config /private/sproozi/config.json
-sproozi status ID --context engineering --config /private/sproozi/config.json
+sproozi run --remote --harness codex --repository sproozi --task-file task.txt
+sproozi sessions
+sproozi status ID --context sproozi
 ```
+
+Add `--context NAME` or `--context FILE` to reach another cluster, and
+`--operation UUID` to retry a submission whose outcome is unknown.
 
 Preserve the request UUID when retrying. Repeating identical intent returns the
 same session and execution; changed intent is rejected. Public `id` addresses
@@ -172,8 +167,7 @@ unavailable owners and `truncated` for omitted results; a stopped local service
 does not hide the cluster's rows. The [command reference](../reference/session-commands.md)
 explains owner selection, JSON fields and safe error categories.
 
-For a known recoverable interruption, use `sproozi recover ID --context
-engineering --config FILE`. Cancel uses a separate stable `--operation UUID` and
+For a known recoverable interruption, use `sproozi recover ID --context sproozi`. Cancel uses a separate stable `--operation UUID` and
 revokes before forced stop. Keep the original owner journals and accounting
 records; deleting resources or replacing a failed Run does not establish stop or
 refund evidence.
@@ -182,7 +176,7 @@ refund evidence.
 
 Use the persistent Hermes deployment and native MCP setup from
 [Run a persistent Hermes assistant on Kubernetes](hermes-orchestration.md).
-Register the profile's `/work/mcp` URL with its work token as the bearer token
+Register the executor's `/work/mcp` URL with its work token as the bearer token
 and its public CA.
 The supported tools are `sproozi_run`, `sproozi_status`, `sproozi_cancel` and
 `sproozi_sessions`. Hermes supplies this intent, without images, PodSpecs,
@@ -206,28 +200,26 @@ native state.
 
 ## Pull and resume locally
 
-Run this machine's service, then transfer the completed session:
+With this machine's service running, transfer the completed session:
 
 ```sh
-sproozi service run --config /private/sproozi/config.json
-# In another terminal:
-sproozi pull ID --context engineering --config /private/sproozi/config.json
-sproozi resume ID --config /private/sproozi/config.json
+sproozi pull ID
+sproozi resume ID
 ```
 
-`--context engineering` names the cluster that hands the session over,
-configured under `remote` or `workSources`. After the pull this machine owns the
-session, so `resume` needs no `--context`.
+`pull` uses the `sproozi` context unless `--context` names another. The
+service reaches the cluster itself and remembers it. After the pull this machine
+owns the session, so `resume` needs no `--context`.
 
 Pull validates and saves the conversation and Git checkpoint without starting an
-agent. It then records the remote executor's one-way ownership transfer. The pull
-operation UUID comes from the session ID and source, so if the reply is lost,
-run the same command again. An explicit `--operation UUID` overrides it; retry
-with that same UUID. Downloading a checkpoint alone
+agent. It then records the remote executor's one-way ownership transfer. If the
+reply is lost, run the same command again: a pull the service already began
+continues from the same executor with its original operation. Downloading a
+checkpoint alone
 does not permit local execution. The remote catalogue now reports `home-owned`
-and cannot reopen that task session. Keep the home configuration and private
-directory unique to this trusted installation; copying its home principal token
-into independent homes is unsupported.
+and cannot reopen that task session. One executor serves one developer's
+service: two services signed in to the same executor share its single
+principal, which is unsupported.
 
 The home catalogue enforces `local.retainedBytes` and a finite file count for
 imported artifacts and journals; new executions also use the existing

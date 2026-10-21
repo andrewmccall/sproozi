@@ -31,20 +31,14 @@ func runCLI(args ...string) (int, string, string) {
 
 // writeTestConfig writes the smallest configuration commands accept, as an
 // installation when installed is set, with the named clusters.
-func writeTestConfig(t *testing.T, root string, installed bool, clusters ...string) string {
+func writeTestConfig(t *testing.T, root string, installed bool) string {
 	t.Helper()
 	if err := privatefs.EnsureDir(root); err != nil {
 		t.Fatal(err)
 	}
-	remotes := make([]string, 0, len(clusters))
-	for _, name := range clusters {
-		remotes = append(remotes, strconv.Quote(name)+`:{"url":"https://work.example:8443","tokenFile":`+
-			strconv.Quote(filepath.Join(root, "token"))+`,"maxCheckpointBytes":8388608}`)
-	}
 	data := `{"directory":` + strconv.Quote(filepath.Join(root, "state")) + `,
  "local":{"harness":"codex","name":"local"}, "maxDuration":"30m",
- "allowances":{"model.inference":{"units":{"bounded":true,"value":10}}},
- "remote":{` + strings.Join(remotes, ",") + `}}`
+ "allowances":{"model.inference":{"units":{"bounded":true,"value":10}}}}`
 	path := filepath.Join(root, "config.json")
 	if err := testutil.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
@@ -365,29 +359,66 @@ func TestCancelIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestRemoteSeamResolvesConfiguredClusters(t *testing.T) {
-	c := home.Config{Remote: nil}
-	_, err := resolveRemote(t.Context(), c, "", "")
-	if err == nil || !strings.Contains(err.Error(), `no cluster named "sproozi"`) {
-		t.Fatalf("default context: %v", err)
+// writeKubeconfig writes a kubeconfig with the given contexts, each in
+// namespace team-a, and points KUBECONFIG at it.
+func writeKubeconfig(t *testing.T, contexts ...string) string {
+	t.Helper()
+	entries := make([]string, 0, len(contexts))
+	for _, name := range contexts {
+		entries = append(entries, "- name: "+name+"\n  context: {cluster: c, user: u, namespace: team-a}")
 	}
-	root := filepath.Join(testutil.PrivateDir(t), "r")
-	fixed, err := home.ReadConfig(writeTestConfig(t, root, false, "sproozi", "engineering"))
-	if err != nil {
+	path := filepath.Join(testutil.PrivateDir(t), "kubeconfig")
+	data := "apiVersion: v1\nkind: Config\nclusters:\n- name: c\n  cluster: {server: \"https://127.0.0.1:1\"}\n" +
+		"users:\n- name: u\n  user: {token: \"" + strings.Repeat("t", 40) + "\"}\ncontexts:\n" +
+		strings.Join(entries, "\n") + "\n"
+	if err := testutil.WriteFile(path, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if target, err := resolveRemote(t.Context(), fixed, "", ""); err != nil || target.Name != "sproozi" {
-		t.Fatalf("default context: %+v %v", target, err)
+	t.Setenv("KUBECONFIG", path)
+	return path
+}
+
+// Move and pull send the service the context selection, which it reaches
+// itself; a move home and a pull without a sproozi context send none.
+func TestMoveAndPullSendTheSelectionToTheService(t *testing.T) {
+	kubeconfig := writeKubeconfig(t, "sproozi", "other")
+	id := uuid.NewString()
+	socket, requests := fakeService(t, func(q home.Request) home.Response {
+		return home.Response{Status: &home.Status{ID: id, Phase: "retained", Placement: "engineering"}}
+	})
+	for _, args := range [][]string{
+		{"move", id, "--remote"},
+		{"move", id, "--context", "other", "--namespace", "team-b"},
+		{"move", id, "--local"},
+		{"pull", id},
+	} {
+		if code, _, errOut := runCLI(append(args, testSocketFlag, socket)...); code != 0 {
+			t.Fatalf("%v exited %d: %s", args, code, errOut)
+		}
 	}
-	if _, err = resolveRemote(t.Context(), fixed, "other", ""); err == nil ||
-		!strings.Contains(err.Error(), "use --context with one of: engineering, sproozi") {
-		t.Fatalf("unknown context: %v", err)
+	got := *requests
+	toDefault, toOther, back, pulled := got[0].Remote, got[1].Remote, got[2], got[3]
+	if len(got) != 4 || toDefault == nil || toDefault.Context != "sproozi" || toDefault.Namespace != "team-a" ||
+		toDefault.Kubeconfig[0] != kubeconfig || toOther.Context != "other" || toOther.Namespace != "team-b" ||
+		back.Remote != nil || back.Destination != home.LocalAlias ||
+		pulled.Remote == nil || pulled.Action != home.ActionPull {
+		t.Fatalf("requests: %+v", got)
 	}
-	if _, err = resolveRemote(t.Context(), fixed, "engineering", "team"); err == nil {
-		t.Fatal("namespace accepted")
+	writeKubeconfig(t, "other")
+	if code, _, _ := runCLI("pull", id, testSocketFlag, socket); code != 0 || (*requests)[4].Remote != nil {
+		t.Fatalf("pull without a sproozi context: %+v", (*requests)[4])
 	}
-	if names := remoteTargets(t.Context(), fixed); len(names) != 2 || names[0].Name != "engineering" {
-		t.Fatalf("targets: %+v", names)
+	if code, _, errOut := runCLI("pull", id, "--context", "missing", testSocketFlag, socket); code == 0 ||
+		!strings.Contains(errOut, `--context "missing" is neither a context`) {
+		t.Fatalf("unknown context: %d %s", code, errOut)
+	}
+}
+
+func TestRemoteSeamExplainsAMissingSproozi(t *testing.T) {
+	writeKubeconfig(t, "other")
+	_, err := resolveRemote(t.Context(), "", "")
+	if err == nil || !strings.Contains(err.Error(), `no context named "sproozi"`) {
+		t.Fatalf("default context: %v", err)
 	}
 }
 

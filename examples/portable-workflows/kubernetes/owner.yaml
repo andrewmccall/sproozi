@@ -1,11 +1,11 @@
 # The remote executor (sproozi-work), the owner of its remote work: see "Owner"
 # in GLOSSARY.md. Install alongside the managed native runtime and shared
 # gateway. Set the native image to the reviewed digest; prepare profile config,
-# TLS and the distinct home and work tokens. The CLI reaches it through a
-# kubeconfig context (docs/reference/remote-executors.md): the Service carries
-# the sproozi.com/remote-executor label, the ConfigMap sproozi-remote-executor
-# publishes its CA, and with "homeAuthorization": "kubernetes" it reviews the
-# CLI's ServiceAccount token, which the auth-delegator binding below allows.
+# TLS and the Hermes work token. The CLI reaches it through a kubeconfig context
+# (docs/reference/remote-executors.md): the Service carries the
+# sproozi.com/remote-executor label, the ConfigMap sproozi-remote-executor
+# publishes its CA, and it reviews the CLI's ServiceAccount token, which the
+# auth-delegator binding below allows.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -69,7 +69,7 @@ roleRef:
   kind: Role
   name: sproozi-work
 ---
-# TokenReview and SubjectAccessReview, for "homeAuthorization": "kubernetes".
+# TokenReview and SubjectAccessReview, to authorize the CLI's ServiceAccount.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:

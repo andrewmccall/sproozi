@@ -64,7 +64,7 @@ def prepare(args):
     # the Claude adapter. No Codex options enter the published Claude config.
     with contextlib.redirect_stdout(io.StringIO()):
         HOST.prepare(args)
-    names = ["DNS:api.anthropic.com", "DNS:api.openai.com", "DNS:" + GATEWAY,
+    names = ["DNS:api.anthropic.com", "DNS:api.openai.com", "DNS:" + GATEWAY, "DNS:sproozi-work.sproozi-system.svc",
              "DNS:" + GATEWAY + ".cluster.local", "IP:127.0.0.1", "IP:" + args.gateway_ip]
     HOST.write(out / "leaf.ext", "basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\n"
                "extendedKeyUsage=serverAuth\nsubjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid,issuer\n"
@@ -76,13 +76,9 @@ def prepare(args):
         HOST.run(["openssl", "verify", "-x509_strict", "-CAfile", "ca.pem", "-purpose", "sslserver", option,
                   hostname, "gateway.crt"], out)
     HOST.write(out / "provider-token", TOKEN + "\n")
-    HOST.write(out / "profile-token", os.urandom(32).hex() + "\n")
     config = json.loads((out / "home-config.json").read_text())
     config["model"], config["local"]["Harness"] = MODEL, "claude-code"
     config.pop("nativeOptions", None)
-    config["remote"] = {args.remote_name: {"url": "https://127.0.0.1:18454",
-        "tokenFile": str(out / "profile-token"), "caFile": str(out / "ca.pem"),
-        "maxCheckpointBytes": args.max_checkpoint_bytes}}
     HOST.write(out / "home-config.json", config)
     hints = json.loads((out / "profile-hints.json").read_text())
     hints.update(harness="claude-code", model=MODEL, nativeOptions=[],
@@ -335,12 +331,12 @@ def render(args):
                 value = value.replace(before, after)
         return value
     documents = substitute(documents)
-    profile = {"listen": "127.0.0.1:18454", "certificateFile": str(args.gateway_cert.resolve(strict=True)),
-               "keyFile": str(args.gateway_key.resolve(strict=True)), "tokenFile": str(args.profile_config_output.parent / "profile-token"),
-               "principal": "claude-mobility-proof", "harness": "claude-code", "placementName": "remote",
-               "namespace": SYSTEM, "templateName": TEMPLATE, "directory": str(args.profile_config_output.parent / "remote-profile-state"),
-               "instructionDigest": hints["instructionDigest"], "allowances": hints["allowances"],
-               "maxDuration": hints["maxDuration"], "maxCheckpointBytes": hints["maxCheckpointBytes"]}
+    args.gateway_cert.resolve(strict=True), args.gateway_key.resolve(strict=True)
+    # One executor per namespace: the Claude follow-up reconfigures it with its
+    # own principal and state directory, which restarts its Pod.
+    profile = KUBE.executor_profile(hints, principal="claude-mobility-proof", harness="claude-code",
+                                    template=TEMPLATE, directory="/state/claude-profile")
+    documents.extend(KUBE.executor_resources(profile, args.native_image, ca))
     HOST.private_directory(args.profile_config_output.parent)
     BASE.check(not args.profile_config_output.is_symlink(), "Profile output cannot be a symlink")
     output = yaml.safe_dump_all(documents, sort_keys=False)
@@ -395,6 +391,10 @@ class Proof(BASE.Proof):
         self.id = str(uuid.uuid4())
         self.env = {"PATH": os.environ["PATH"], "HOME": str(self.out), "LANG": "C.UTF-8",
                     "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull, "GIT_TERMINAL_PROMPT": "0"}
+        # Without --context the CLI uses the "sproozi" context, so keep the
+        # administrator's KUBECONFIG choice in the otherwise scrubbed environment.
+        if os.environ.get("KUBECONFIG"):
+            self.env["KUBECONFIG"] = os.environ["KUBECONFIG"]
         self.report = {"passed": False, "harness": "claude-code", "sessionId": self.id,
                        "fixtureCredentialIsPublicPlaceholder": True, "steps": [],
                        "scope": "stock Claude TUI and actual Bash through production session placements",
@@ -558,8 +558,7 @@ def main():
     prep.add_argument("--units", type=int, default=200000)
     prep.add_argument("--duration", default="20m")
     prep.add_argument("--max-checkpoint-bytes", type=int, default=8 << 20)
-    prep.set_defaults(gateway_port=18453, provider_port=18775, provider_tls=True, remote_name="remote",
-                      remote_url=None, instructions=INSTRUCTIONS, remote_token_file=None, remote_ca_file=None)
+    prep.set_defaults(gateway_port=18453, provider_port=18775, provider_tls=True, instructions=INSTRUCTIONS)
     serving = commands.add_parser("serve")
     serving.add_argument("--output-directory", type=Path, required=True)
     serving.add_argument("--listen", default="0.0.0.0")
@@ -585,7 +584,8 @@ def main():
     verifying = commands.add_parser("verify")
     for name in ("output-directory", "home-config", "session-binary", "pty-helper", "checkpoint-binary"):
         verifying.add_argument("--" + name, type=Path, required=True)
-    verifying.add_argument("--remote-name", default="remote")
+    verifying.add_argument("--remote-name", default="remote", help="the remote executor's placement name")
+    verifying.add_argument("--context", help="kubeconfig context name or file for the remote executor; default: the sproozi context")
     verifying.add_argument("--operation-timeout", type=int, default=240)
     verifying.add_argument("--turn-timeout", type=int, default=90)
     verifying.add_argument("--admin-probes", action="store_true", help="Run fixed denials in exact admitted containers using administrator access")

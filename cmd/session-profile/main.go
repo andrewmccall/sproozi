@@ -39,8 +39,6 @@ type serverConfig struct {
 	Listen             string                            `json:"listen"`
 	CertificateFile    string                            `json:"certificateFile"`
 	KeyFile            string                            `json:"keyFile"`
-	TokenFile          string                            `json:"tokenFile,omitempty"`
-	HomeAuthorization  string                            `json:"homeAuthorization,omitempty"`
 	Principal          string                            `json:"principal"`
 	PlacementName      string                            `json:"placementName"`
 	Namespace          string                            `json:"namespace"`
@@ -54,13 +52,6 @@ type serverConfig struct {
 	Repositories       map[string]work.Repository        `json:"repositories,omitempty"`
 	Projects           map[project.ID]project.Definition `json:"projects,omitempty"`
 }
-
-// The two ways the executor decides the home principal: one static token
-// file, or a caller whose Kubernetes identity RBAC allows to use it.
-const (
-	homeByToken      = "token"
-	homeByKubernetes = "kubernetes"
-)
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -89,19 +80,6 @@ func readConfig(path string) (serverConfig, error) {
 	}
 	if value.Harness.Validate() != nil || value.Listen == "" || value.CertificateFile == "" || value.KeyFile == "" {
 		return value, errors.New("fixed TLS listener configuration required")
-	}
-	switch value.HomeAuthorization {
-	case homeByToken, "":
-		if value.TokenFile == "" {
-			return value, errors.New(`tokenFile: required unless homeAuthorization is "kubernetes"`)
-		}
-	case homeByKubernetes:
-		if value.TokenFile != "" {
-			return value, errors.New(`tokenFile: omit it when homeAuthorization is "kubernetes"; ` +
-				"Kubernetes RBAC decides the home principal")
-		}
-	default:
-		return value, fmt.Errorf(`homeAuthorization: %q is not "token" or "kubernetes"`, value.HomeAuthorization)
 	}
 	return value, nil
 }
@@ -177,7 +155,7 @@ func run(args []string) error {
 		if readErr != nil {
 			return readErr
 		}
-		workHandler, handlerErr := work.NewAuthorizedHandler(owner, strings.TrimSpace(string(taskToken)), home)
+		workHandler, handlerErr := work.NewHandler(owner, strings.TrimSpace(string(taskToken)), home)
 		if handlerErr != nil {
 			return handlerErr
 		}
@@ -214,20 +192,12 @@ func run(args []string) error {
 	}
 }
 
-// homeAuthorizer decides the home principal from the configuration: the
-// static token file, or Kubernetes TokenReview and SubjectAccessReview against
-// the executor's namespace and placement name.
+// homeAuthorizer decides the home principal: a caller whose Kubernetes
+// identity a TokenReview authenticates and RBAC allows to use this executor.
 func homeAuthorizer(fixed serverConfig, restConfig *rest.Config) (profile.Authorizer, error) {
-	if fixed.HomeAuthorization == homeByKubernetes {
-		kube, err := kubernetes.NewForConfig(restConfig)
-		if err != nil {
-			return nil, err
-		}
-		return remote.NewReviewer(kube, fixed.Namespace, fixed.PlacementName)
-	}
-	token, err := os.ReadFile(fixed.TokenFile)
+	kube, err := kubernetes.NewForConfig(restConfig)
 	if err != nil {
 		return nil, err
 	}
-	return profile.StaticToken(string(token))
+	return remote.NewReviewer(kube, fixed.Namespace, fixed.PlacementName)
 }

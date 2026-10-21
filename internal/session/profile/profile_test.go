@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -183,13 +184,30 @@ func buildArtifactKind(t *testing.T, kind harness.NativeKind) ([]byte, string) {
 func launch(digest string) session.Launch {
 	return session.Launch{Harness: harness.NativeCodex, ExecutionID: uuid.NewString(), OperationID: uuid.NewString(), AllocationID: uuid.NewString(), ThreadID: testThread, Epoch: 2, Placement: "remote", InstructionDigest: strings.Repeat("a", 64), CheckpointDigest: digest, Deadline: time.Now().Add(30 * time.Minute).UTC(), Allowances: map[string]session.Allowance{testCapability: {Units: session.Limit{Bounded: true, Value: 20}, CostMicros: session.Limit{Bounded: true, Value: 100}}}}
 }
-func tokenFile(t *testing.T) string {
-	t.Helper()
-	name := filepath.Join(t.TempDir(), "token")
-	if err := os.WriteFile(name, []byte(testToken+"\n"), 0600); err != nil {
-		t.Fatal(err)
+
+// tokenAuthorizer accepts exactly one bearer token as the home principal.
+type tokenAuthorizer string
+
+func (a tokenAuthorizer) Authorize(_ context.Context, token string) error {
+	if token != string(a) {
+		return ErrUnauthenticated
 	}
-	return name
+	return nil
+}
+
+// testClient connects to origin with the test token, trusting the CA file
+// when one is named and the system roots otherwise.
+func testClient(origin, caFile string) (*Client, error) {
+	var roots *x509.CertPool
+	if caFile != "" {
+		data, err := os.ReadFile(caFile)
+		if err != nil {
+			return nil, err
+		}
+		roots = x509.NewCertPool()
+		roots.AppendCertsFromPEM(data)
+	}
+	return Connect(Connection{Origin: origin, Token: testToken, Roots: roots, MaxCheckpointBytes: testMax})
 }
 func serve(t *testing.T, h http.Handler) (*httptest.Server, string) {
 	t.Helper()
@@ -208,12 +226,12 @@ func fixture(t *testing.T) (*Client, *retainedBackend, *httptest.Server, session
 	data, digest := artifact(t)
 	backend := &retainedBackend{data: data, digest: digest}
 	l := launch(digest)
-	h, err := NewHandler(Config{Harness: l.Harness, Principal: testPrincipal, TokenFile: tokenFile(t), Placement: l.Placement, InstructionDigest: l.InstructionDigest, Allowances: l.Allowances, MaxDuration: time.Hour, MaxCheckpointBytes: testMax, Backend: backend})
+	h, err := NewHandler(Config{Harness: l.Harness, Principal: testPrincipal, Authorizer: tokenAuthorizer(testToken), Placement: l.Placement, InstructionDigest: l.InstructionDigest, Allowances: l.Allowances, MaxDuration: time.Hour, MaxCheckpointBytes: testMax, Backend: backend})
 	if err != nil {
 		t.Fatal(err)
 	}
 	s, ca := serve(t, h)
-	c, err := NewClient(ClientConfig{URL: s.URL, TokenFile: tokenFile(t), CAFile: ca, MaxCheckpointBytes: testMax})
+	c, err := testClient(s.URL, ca)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -478,14 +496,13 @@ func TestHTTPBoundaryRejectsMalformedAndBrowserRequests(t *testing.T) {
 
 func TestClientRequiresVerifiedTLSAndFixedOrigin(t *testing.T) {
 	t.Parallel()
-	token := tokenFile(t)
 	for _, origin := range []string{"http://example.com", "https://user:pass@example.com", "https://example.com/path", "https://example.com?q=1", "https://example.com/#fragment"} {
-		if _, err := NewClient(ClientConfig{URL: origin, TokenFile: token, MaxCheckpointBytes: testMax}); err == nil {
+		if _, err := testClient(origin, ""); err == nil {
 			t.Fatalf("accepted %s", origin)
 		}
 	}
 	c, _, s, l, _ := fixture(t)
-	untrusted, err := NewClient(ClientConfig{URL: s.URL, TokenFile: token, MaxCheckpointBytes: testMax})
+	untrusted, err := testClient(s.URL, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -508,13 +525,12 @@ func TestClientRequiresVerifiedTLSAndFixedOrigin(t *testing.T) {
 func TestClientRejectsRedirectAndInvalidBackendResults(t *testing.T) {
 	t.Parallel()
 	l := launch(strings.Repeat("c", 64))
-	token := tokenFile(t)
 	targetCalls := 0
 	target, _ := serve(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { targetCalls++; w.WriteHeader(200) }))
 	redirect, ca := serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, target.URL+"/v1/inspect", http.StatusTemporaryRedirect)
 	}))
-	c, err := NewClient(ClientConfig{URL: redirect.URL, TokenFile: token, CAFile: ca, MaxCheckpointBytes: testMax})
+	c, err := testClient(redirect.URL, ca)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -542,7 +558,7 @@ func TestClientRejectsRedirectAndInvalidBackendResults(t *testing.T) {
 				w.Header().Set(headerContentType, jsonMedia)
 				_, _ = w.Write(encode())
 			}))
-			bad, err := NewClient(ClientConfig{URL: s.URL, TokenFile: token, CAFile: ca, MaxCheckpointBytes: testMax})
+			bad, err := testClient(s.URL, ca)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -561,14 +577,14 @@ func TestProfileExplicitClaudeKindAndCheckpointCompatibility(t *testing.T) {
 	l.Harness = harness.NativeClaude
 	backend := &retainedBackend{data: data, digest: digest}
 	// Keep the existing public HTTPS client path: no backend-specific wire API.
-	h, err := NewHandler(Config{Harness: l.Harness, Principal: testPrincipal, TokenFile: tokenFile(t),
+	h, err := NewHandler(Config{Harness: l.Harness, Principal: testPrincipal, Authorizer: tokenAuthorizer(testToken),
 		Placement: l.Placement, InstructionDigest: l.InstructionDigest, Allowances: l.Allowances,
 		MaxDuration: time.Hour, MaxCheckpointBytes: testMax, Backend: backend})
 	if err != nil {
 		t.Fatal(err)
 	}
 	s, ca := serve(t, h)
-	c, err := NewClient(ClientConfig{URL: s.URL, TokenFile: tokenFile(t), CAFile: ca, MaxCheckpointBytes: testMax})
+	c, err := testClient(s.URL, ca)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -631,14 +647,14 @@ func TestPrepareCarriesTheNamedProfileArchive(t *testing.T) {
 	l := launch(digest)
 	l.ProfileDigest = profileDigest
 	connect := func(store ProfileStore) *Client {
-		h, err := NewHandler(Config{Harness: l.Harness, Principal: testPrincipal, TokenFile: tokenFile(t), Placement: l.Placement,
+		h, err := NewHandler(Config{Harness: l.Harness, Principal: testPrincipal, Authorizer: tokenAuthorizer(testToken), Placement: l.Placement,
 			InstructionDigest: l.InstructionDigest, Allowances: l.Allowances, MaxDuration: time.Hour, MaxCheckpointBytes: testMax,
 			Backend: &retainedBackend{data: data, digest: digest}, Profiles: store})
 		if err != nil {
 			t.Fatal(err)
 		}
 		s, ca := serve(t, h)
-		c, err := NewClient(ClientConfig{URL: s.URL, TokenFile: tokenFile(t), CAFile: ca, MaxCheckpointBytes: testMax})
+		c, err := testClient(s.URL, ca)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -671,22 +687,5 @@ func TestPrepareCarriesTheNamedProfileArchive(t *testing.T) {
 	var remote *RemoteError
 	if _, err = unsupported.Prepare(t.Context(), l, data); !errors.As(err, &remote) || remote.Code != CodeUnsupported {
 		t.Fatalf("executor without profiles = %v", err)
-	}
-}
-
-func TestClientConfigUsesConfigurationKeysAndValidatesEach(t *testing.T) {
-	data, err := json.Marshal(ClientConfig{URL: "https://profile.example", TokenFile: "/private/token", MaxCheckpointBytes: 1})
-	if err != nil || string(data) != `{"url":"https://profile.example","tokenFile":"/private/token","maxCheckpointBytes":1}` {
-		t.Fatalf("configuration keys: %s %v", data, err)
-	}
-	err = ClientConfig{URL: "http://profile.example/path", TokenFile: "token", CAFile: "ca.pem", Timeout: -1}.Validate()
-	for _, key := range []string{"url: ", "tokenFile: ", "caFile: ", "maxCheckpointBytes: ", "timeout: "} {
-		if err == nil || !strings.Contains(err.Error(), "\n"+key) && !strings.HasPrefix(err.Error(), key) {
-			t.Errorf("validation omits %s: %v", key, err)
-		}
-	}
-	if err = (ClientConfig{URL: "https://profile.example:8443/", TokenFile: filepath.Join(t.TempDir(), "token"),
-		MaxCheckpointBytes: testMax}).Validate(); err != nil {
-		t.Fatalf("valid connection rejected: %v", err)
 	}
 }

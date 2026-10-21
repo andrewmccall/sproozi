@@ -15,12 +15,12 @@ func validateProjectApprovals(c Config) error {
 		return errors.New("home: at most 64 source-qualified project approvals are supported")
 	}
 	seen := map[string]bool{}
-	sources := c.WorkConnections()
 	for _, approval := range c.ProjectApprovals {
 		key := approval.Source + "/" + string(approval.Project)
-		_, source := sources[approval.Source]
-		if !project.ValidID(approval.Project) || !source || seen[key] {
-			return fmt.Errorf("home: invalid, unconfigured or duplicate project approval %q", key)
+		// The source is a remote executor's own name, which the service
+		// learns when it first reaches the executor through a context.
+		if !project.ValidID(approval.Project) || ExecutorNameProblem(approval.Source) != "" || seen[key] {
+			return fmt.Errorf("home: invalid or duplicate project approval %q", key)
 		}
 		seen[key] = true
 		if _, err := project.Narrow(approval.Capabilities, c.Allowances); err != nil {

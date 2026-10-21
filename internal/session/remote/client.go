@@ -39,7 +39,30 @@ func NewClient(e Executor) (*Client, error) {
 }
 
 // Executor is the recorded executor this client reaches.
-func (c *Client) Executor() Executor { return c.executor }
+func (c *Client) Executor() Executor {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.executor
+}
+
+// Update points the client at a new way of reaching the same named executor,
+// such as another context or kubeconfig file. The next call connects again.
+func (c *Client) Update(e Executor) error {
+	if err := e.Validate(); err != nil {
+		return err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if e.Name != c.executor.Name {
+		return fmt.Errorf("remote: executor %q cannot become %q", c.executor.Name, e.Name)
+	}
+	c.executor = e
+	if c.current != nil {
+		c.current.Close()
+		c.current = nil
+	}
+	return nil
+}
 
 // connect opens a profile client and checks it reaches the recorded executor.
 func connect(ctx context.Context, e Executor) (*profile.Client, error) {

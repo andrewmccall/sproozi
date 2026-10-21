@@ -411,38 +411,35 @@ without cert-manager. See [Kubernetes installation](docs/reference/gateway-certi
 
 ### Remote executor
 
-The `session-profile` program. It serves one administrator-approved Kubernetes
-placement, holds that cluster's credentials and hosts a catalogue of remote
-work. Its work token (`workTokenFile`) is the bearer token a coordinator uses
-for `/work/mcp`; it differs from the home principal token (`tokenFile`), which
-also permits pull, and from the task service's token. With
-`"homeAuthorization": "kubernetes"` it has no home principal token: any caller
-whose Kubernetes identity RBAC allows to `use` it is the home principal. Its
-placement name is its name in commands and session rows; a namespace holds one,
-found by the label `sproozi.com/remote-executor` on its Service. Also seen as: profile
-service, remote profile, fixed remote profile, work owner, native work owner, remote work
+The `session-profile` program, running in a cluster. It serves one
+administrator-approved Kubernetes placement, holds that cluster's credentials
+and hosts a catalogue of remote work. A namespace holds one, found by the label
+`sproozi.com/remote-executor` on its Service. Its placement name is its name in
+commands and session rows. The CLI and this machine's service reach it through
+a [context](#context); it accepts a caller as the home principal when Kubernetes
+RBAC allows that identity to `use` it. Hermes uses the separate static work
+token (`workTokenFile`) for `/work/mcp`. Also seen as: profile service, remote
+profile, fixed remote profile, work owner, native work owner, remote work
 service.
 
 ### Home principal token
 
-The bearer token this machine's service presents to a remote executor. The profile
-service reads it from its `tokenFile`, and the home configuration names the
-same secret in `remote.NAME.tokenFile` or `workSources.NAME.tokenFile`. It
-permits remote work, moves and pull, unlike the work token. It needs at least
-32 non-whitespace characters. An executor reached through a
-[context](#context) uses the caller's ServiceAccount token instead. Also seen
-as: home token, principal token, profile principal token, profile token,
-remote token.
+The bearer token this machine's service and CLI present to a remote executor:
+the token of the [context](#context)'s ServiceAccount, usually `sproozi-cli`.
+The executor checks it with a TokenReview and a SubjectAccessReview. It permits
+remote work, moves and pull, unlike the work token. Also seen as: home token,
+principal token, profile principal token, profile token, remote token.
 
 ### Context
 
-A kubeconfig context through which the CLI and home daemon reach a remote
-executor: the cluster, the identity signing in to it and the namespace holding
-the executor. Without `--context`, the context named `sproozi`, which signs in
-as the ServiceAccount `sproozi-cli`; `--context` takes a context name or a path
-to a kubeconfig file, whose current context is used, and `--namespace`
-overrides the context's namespace. Home records the files, context and
-namespace so it keeps reaching the executor after the CLI exits. See
+A kubeconfig context through which the CLI and this machine's service reach a
+remote executor: the cluster, the identity signing in to it and the namespace
+holding the executor. Without `--context`, the context named `sproozi`, which
+signs in as the ServiceAccount `sproozi-cli`; `--context` takes a context name
+or a path to a kubeconfig file, whose current context is used, and
+`--namespace` overrides the context's namespace. The service records each
+executor it reaches, with the files, context and namespace, so it keeps
+reaching it after the CLI exits. See
 [remote executor access](docs/reference/remote-executors.md). Also seen as:
 kube context, kubeconfig context, Kubernetes context.
 
@@ -453,16 +450,6 @@ any other name is a remote executor. Remote commands select one with
 `--context` (a kubeconfig context or file) and `--namespace`. Executor names
 are lowercase DNS labels of 1 to 63 characters. See
 [remote commands](docs/reference/session-commands.md#remote-commands).
-
-### Work source
-
-An entry in a hand-written configuration's `workSources` map: a connection to
-a remote executor that `run --remote`, `sessions`, `status`, `cancel`,
-`recover` and `pull` use but `move --remote` does not, because it is not a
-placement. Entries take the same fields and name rules as `remote` entries.
-When both maps hold the same name, those commands use the `workSources` entry
-and `move` uses the `remote` one. See the
-[configuration reference](cmd/sproozi/README.md#configuration-reference).
 
 ### Catalogue
 

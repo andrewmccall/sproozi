@@ -26,37 +26,6 @@ func readTestConfig(t *testing.T, extra string) (Config, error) {
 	return ReadConfig(path)
 }
 
-func TestReadConfigNamesEachInvalidConnectionKey(t *testing.T) {
-	t.Parallel()
-	token := strconv.Quote(filepath.Join(testutil.PrivateDir(t), "token"))
-	for _, tc := range []struct {
-		extra string
-		want  []string
-	}{
-		{`,"remote":{"engineering":{}}`, []string{"remote.engineering.url: ", "remote.engineering.tokenFile: ",
-			"remote.engineering.maxCheckpointBytes: "}},
-		{`,"workSources":{"tasks":{"url":"http://tasks.example","tokenFile":` + token + `,"maxCheckpointBytes":1}}`,
-			[]string{"workSources.tasks.url: fixed HTTPS origin"}},
-		{`,"remote":{"docker":{}}`, []string{`remote.docker: "docker" is reserved: ` + ReservedNames + "; choose another name"}},
-		{`,"workSources":{"local":{}}`, []string{`workSources.local: "local" is local.name`}},
-		{`,"remote":{"home":{}}`, []string{`remote.home: "home" is reserved: ` + ReservedNames + "; choose another name"}},
-		{`,"remote":{"Bad Name":{}}`, []string{`remote.Bad Name: "Bad Name" is not a valid name; use 1 to 63`}},
-		{`,"workSources":{"../x":{}}`, []string{`workSources.../x: "../x" is not a valid name`}},
-		{`,"remote":{"big":{"maxCheckpointBytes":104857600}}`, []string{
-			"remote.big.maxCheckpointBytes: 104857600 is out of range; 1 byte to 64 MiB, equal to local.maxCheckpointBytes"}},
-		{`,"local":{"name":"local","maxCheckpointBytes":8388608},"remote":{"engineering":{"maxCheckpointBytes":4194304}}`,
-			[]string{"remote.engineering.maxCheckpointBytes: 4194304 differs from local.maxCheckpointBytes (8388608)"}},
-		{`,"remote":{"-a":{},"a-":{}}`, []string{`remote.-a: "-a" is not a valid`, `remote.a-: "a-" is not a valid`}},
-	} {
-		_, err := readTestConfig(t, tc.extra)
-		for _, want := range tc.want {
-			if err == nil || !strings.Contains(err.Error(), want) {
-				t.Errorf("%s: %v lacks %q", tc.extra, err, want)
-			}
-		}
-	}
-}
-
 func TestReadConfigChecksLocalNameAndRequiredKeysByPath(t *testing.T) {
 	t.Parallel()
 	for extra, want := range map[string]string{
@@ -78,31 +47,14 @@ func TestReadConfigNamesUnknownKeysByPath(t *testing.T) {
 	t.Parallel()
 	for extra, want := range map[string]string{
 		`,"bogus":1`: `unknown key "bogus"`,
-		`,"remote":{"a":{"url":"https://a.example"},"engineering":{"bogus":1}}`: `remote.engineering: unknown key "bogus"`,
-		`,"local":{"name":"local","agentLimits":{"bogus":1}}`:                   `local.agentLimits: unknown key "bogus"`,
-		`,"projectApprovals":[{"source":"a"},{"bogus":1}]`:                      `projectApprovals[1]: unknown key "bogus"`,
-		`,"gateway":{"Bogus":1}`:                                                `gateway: unknown key "Bogus"`,
+		`,"remote":{"engineering":{"url":"https://a.example"}}`: `unknown key "remote": remote executors are no longer ` +
+			`configured here; remove it and reach the cluster with --context (docs/reference/remote-executors.md)`,
+		`,"local":{"name":"local","agentLimits":{"bogus":1}}`: `local.agentLimits: unknown key "bogus"`,
+		`,"projectApprovals":[{"source":"a"},{"bogus":1}]`:    `projectApprovals[1]: unknown key "bogus"`,
+		`,"gateway":{"Bogus":1}`:                              `gateway: unknown key "Bogus"`,
 	} {
 		if _, err := readTestConfig(t, extra); err == nil || err.Error() != want {
 			t.Errorf("%s: %v, want %q", extra, err, want)
-		}
-	}
-}
-
-func TestReadConfigAcceptsCamelCaseAndLegacyConnectionKeys(t *testing.T) {
-	t.Parallel()
-	token := filepath.Join(testutil.PrivateDir(t), "token")
-	for _, entry := range []string{
-		`{"url":"https://profile.example:8443","tokenFile":` + strconv.Quote(token) + `,"maxCheckpointBytes":8388608}`,
-		`{"URL":"https://profile.example:8443","TokenFile":` + strconv.Quote(token) + `,"MaxCheckpointBytes":8388608}`,
-	} {
-		c, err := readTestConfig(t, `,"remote":{"engineering":`+entry+`}`)
-		if err != nil {
-			t.Fatalf("%s: %v", entry, err)
-		}
-		if got := c.Remote["engineering"]; got.URL != "https://profile.example:8443" || got.TokenFile != token ||
-			got.MaxCheckpointBytes != 8<<20 {
-			t.Fatalf("%s decoded as %+v", entry, got)
 		}
 	}
 }
@@ -111,7 +63,6 @@ func TestReadConfigNamesTypeErrorsByKey(t *testing.T) {
 	t.Parallel()
 	for extra, want := range map[string]string{
 		`,"dockerBinary":1`: "dockerBinary: number is not a string",
-		`,"remote":{"a":{"url":"https://a.example"},"engineering":{"MaxCheckpointBytes":"x"}}`: "remote.engineering.maxCheckpointBytes: string is not a whole number",
 	} {
 		if _, err := readTestConfig(t, extra); err == nil || err.Error() != want {
 			t.Errorf("%s: %v, want %q", extra, err, want)

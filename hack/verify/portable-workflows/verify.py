@@ -31,6 +31,9 @@ def main():
     for name in ("home-config", "profile-config", "session-binary", "pty-helper", "output-directory"):
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--request-id", help="Retained original submission UUID for recovery proof")
+    parser.add_argument("--work-url", default="https://127.0.0.1:18444",
+                        help="The executor's /work API for the Hermes-style caller, such as a port-forward to its Service")
+    parser.add_argument("--context", help="kubeconfig context name or file for the remote executor; default: the sproozi context")
     parser.add_argument("--hermes-deployment", help="Deployed stock Hermes in sproozi-coordinators; enables native caller proof")
     parser.add_argument("--hermes-kubeconfig", type=Path, help="Explicit isolated Kind kubeconfig for the native Hermes caller")
     parser.add_argument("--home-ops", action="store_true", help="Exercise approved Pod read and prohibited Secrets read in each placement")
@@ -50,9 +53,10 @@ def main():
     check(Path(home["gateway"]["providerTokenFile"]).read_text().strip() == HOST.TOKEN,
           "This verifier accepts only the deterministic public provider fixture")
     source = profile["placementName"]
-    origin = home["remote"][source]["url"]
-    tls = ssl.create_default_context(cafile=home["remote"][source]["caFile"])
-    task_token = Path(profile["workTokenFile"]).read_text().strip()
+    origin = args.work_url.rstrip("/")
+    tls = ssl.create_default_context(cafile=str(args.profile_config.parent / "ca.pem"))
+    task_token = (args.profile_config.parent / "work-token").read_text().strip()
+    context = ["--context", str(args.context)] if args.context else []
     socket = Path(home["directory"]) / "control.sock"
     check(not socket.exists(), "First remote task must run without the home daemon")
     report = {"passed": False, "scope": "genuine stock native task via authenticated MCP; remote retention and fresh local resume",
@@ -126,7 +130,7 @@ def main():
     save()
     if args.request_id and view["phase"] == "unknown":
         recovered = subprocess.run([str(args.session_binary.resolve()), "recover", view["id"],
-                                    "--context", source, "--config", str(args.home_config.resolve()), "--json"],
+                                    *(context or ["--context", "sproozi"]), "--config", str(args.home_config.resolve()), "--json"],
                                    cwd=ROOT, capture_output=True, text=True, timeout=120)
         check(recovered.returncode == 0, "Exact retained request recovery failed: " + recovered.stderr[-1024:])
         report['recovery'] = json.loads(recovered.stdout)
@@ -177,7 +181,7 @@ def main():
                                            cwd=ROOT, capture_output=True, text=True, timeout=120)
                 check(completed.returncode == 0, completed.stderr[-1024:])
                 return json.loads(completed.stdout)
-            pulled = command("pull", view["id"], "--context", source)
+            pulled = command("pull", view["id"], *context)
             check(pulled["threadId"] == current["threadId"], "Pull changed native identity")
             after = tool("sproozi_status", {"id": view["id"]}, number)
             number += 1
@@ -214,7 +218,7 @@ def main():
                                    else "Stock native exec_command wrote and read the controlled workspace file")
             save()
             if args.home_ops:
-                report['governance'] = governance.verify(home, profile, args.hermes_kubeconfig, view['id'], out)
+                report['governance'] = governance.verify(home, args.profile_config.parent, args.hermes_kubeconfig, view['id'], out)
             if args.replay_revision:
                 fresh_intent = dict(intent, requestId=str(uuid.uuid4()), workspaceFrom=dict(
                     sessionId=view['id'], digest=current['checkpointDigest'], revision=current['checkpointInfo']['workspace']['revision']))

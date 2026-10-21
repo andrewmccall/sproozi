@@ -38,6 +38,8 @@ type WorkSource interface {
 }
 
 func (s *Service) SetWorkSources(sources map[string]WorkSource) {
+	s.remoteMu.Lock()
+	defer s.remoteMu.Unlock()
 	s.workSources = maps.Clone(sources)
 }
 
@@ -276,23 +278,28 @@ func (s *Service) Pull(ctx context.Context, id, operation, sourceName string) (S
 	if !work.CanonicalID(operation) {
 		return Status{}, errors.New("home: pull operation UUID required")
 	}
-	if s.workSources[sourceName] == nil {
-		return Status{}, fmt.Errorf("home: pull --from %q names no remote executor configured under "+
-			"\"remote\" or \"workSources\" in this daemon's configuration", sourceName)
-	}
 	r, err := s.readCatalog(id)
-	if err == nil {
-		if r.Source != sourceName || r.Operation != operation {
-			return Status{}, fmt.Errorf("home: this session's pull from %q is retained as operation %s; "+
-				"retry it with --from %s --operation %s", r.Source, r.Operation, r.Source, r.Operation)
-		}
-		if r.Claimed {
-			return s.catalogStatus(r)
-		}
-	} else if !os.IsNotExist(err) {
+	switch {
+	case err == nil && r.Claimed:
+		return s.catalogStatus(r)
+	case err == nil:
+		// A retained pull continues with its own source and operation, so
+		// repeating the command finishes it.
+		sourceName, operation = r.Source, r.Operation
+	case !os.IsNotExist(err):
 		return Status{}, err
-	} else {
-		e, exportErr := s.workSources[sourceName].BeginExport(ctx, id, operation)
+	}
+	source := s.workSource(sourceName)
+	if source == nil {
+		if sourceName == "" {
+			return Status{}, rejectedError(fmt.Sprintf("home: the Sproozi service does not know which cluster holds "+
+				"session %s; pass --context", id))
+		}
+		return Status{}, rejectedError(fmt.Sprintf("home: no remote executor named %q is known to this service; "+
+			"reach it with --context", sourceName))
+	}
+	if r.ID == "" {
+		e, exportErr := source.BeginExport(ctx, id, operation)
 		if exportErr != nil {
 			return Status{}, exportErr
 		}
@@ -307,7 +314,7 @@ func (s *Service) Pull(ctx context.Context, id, operation, sourceName string) (S
 			return Status{}, err
 		}
 	}
-	e, err := s.workSources[sourceName].Claim(ctx, id, operation, r.Original.Stopped.CheckpointDigest)
+	e, err := source.Claim(ctx, id, operation, r.Original.Stopped.CheckpointDigest)
 	if err != nil {
 		return Status{}, err
 	}

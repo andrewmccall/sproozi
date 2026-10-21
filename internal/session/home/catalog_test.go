@@ -81,11 +81,8 @@ func TestPullClaimReplayAndFreshResumePreserveSourceAccounts(t *testing.T) {
 	if _, err := s.Resume(t.Context(), id, uuid.NewString(), nil); err == nil || local.prepares != 0 {
 		t.Fatal("downloaded bytes acquired activation authority")
 	}
-	if _, err := s.Pull(t.Context(), id, uuid.NewString(), testRemote); err == nil ||
-		!strings.Contains(err.Error(), "--from "+testRemote+" --operation "+operation) {
-		t.Fatalf("conflicting pull did not name the retained operation: %v", err)
-	}
-	status, err := s.Pull(t.Context(), id, operation, testRemote)
+	// A retry with a fresh operation and no source continues the retained pull.
+	status, err := s.Pull(t.Context(), id, uuid.NewString(), "")
 	if err != nil || source.begins != 1 || source.claims != 2 || status.InitialStage != stageRetained || status.ThreadID != testNativeUUID {
 		t.Fatalf("claim replay: %+v %v, begin=%d claim=%d", status, err, source.begins, source.claims)
 	}
@@ -401,14 +398,18 @@ func TestResumeOfTurnlessSessionStartsFromItsWorkspace(t *testing.T) {
 	}
 }
 
-// Pull names an unconfigured --from as a remote executor name.
-func TestPullNamesUnconfiguredRemoteExecutor(t *testing.T) {
+// Pull names an executor this service has not reached, and says how to reach it.
+func TestPullNamesUnknownRemoteExecutor(t *testing.T) {
 	t.Parallel()
 	s, _, source := importedFixture(t)
 	_, err := s.Pull(t.Context(), source.export.ID, source.export.OperationID, "elsewhere")
-	if err == nil || err.Error() != `home: pull --from "elsewhere" names no remote executor configured under `+
-		`"remote" or "workSources" in this daemon's configuration` {
-		t.Fatalf("pull from an unconfigured executor: %v", err)
+	if err == nil || err.Error() != `home: no remote executor named "elsewhere" is known to this service; `+
+		`reach it with --context` || !errors.Is(err, ErrRejected) {
+		t.Fatalf("pull from an unknown executor: %v", err)
+	}
+	_, err = s.Pull(t.Context(), source.export.ID, source.export.OperationID, "")
+	if err == nil || !strings.Contains(err.Error(), "pass --context") {
+		t.Fatalf("pull without a source: %v", err)
 	}
 }
 
@@ -423,8 +424,8 @@ func TestMoveNamesUnconfiguredDestination(t *testing.T) {
 	names := []string{testLocal, testRemote}
 	slices.Sort(names)
 	for _, tc := range []struct{ operation, destination, want string }{
-		{uuid.NewString(), "docker", `home: move destination "docker" is not a configured placement; use one of: ` +
-			strings.Join(names, ", ")},
+		{uuid.NewString(), "docker", `home: move destination "docker" is not a known placement; use one of: ` +
+			strings.Join(names, ", ") + ", or move --remote with --context to reach a cluster"},
 	} {
 		r := exchange(t, s, Request{Action: ActionMove, ID: id, OperationID: tc.operation, Destination: tc.destination})
 		if r.Error != tc.want || !r.Rejected || !errors.Is(replyError(r), ErrRejected) {

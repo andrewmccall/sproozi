@@ -44,11 +44,7 @@ const fixtureDigest = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 
 func TestDescribeOverACallerSuppliedRoute(t *testing.T) {
 	t.Parallel()
-	home, err := StaticToken(testToken)
-	if err != nil {
-		t.Fatal(err)
-	}
-	connection := describeServer(t, home)
+	connection := describeServer(t, tokenAuthorizer(testToken))
 	c, err := Connect(connection)
 	if err != nil {
 		t.Fatal(err)
@@ -99,20 +95,13 @@ func TestAuthorizerOutcomesReachTheCaller(t *testing.T) {
 	}
 }
 
-func TestHandlerTakesOneHomeAuthorization(t *testing.T) {
+func TestHandlerRequiresAHomeAuthorizer(t *testing.T) {
 	t.Parallel()
-	home, err := StaticToken(testToken)
-	if err != nil {
-		t.Fatal(err)
-	}
 	l := launch(fixtureDigest)
-	_, err = NewHandler(Config{Harness: l.Harness, Principal: testPrincipal, Authorizer: home, TokenFile: tokenFile(t),
-		Placement: l.Placement, InstructionDigest: l.InstructionDigest, Allowances: l.Allowances, MaxDuration: time.Hour,
+	_, err := NewHandler(Config{Harness: l.Harness, Principal: testPrincipal, Placement: l.Placement,
+		InstructionDigest: l.InstructionDigest, Allowances: l.Allowances, MaxDuration: time.Hour,
 		MaxCheckpointBytes: testMax, Backend: &retainedBackend{}})
 	if err == nil {
-		t.Fatal("handler accepted both a token file and an authorizer")
-	}
-	if _, err = StaticToken("short"); err == nil {
-		t.Fatal("static token accepted a short token")
+		t.Fatal("handler started without deciding who the home principal is")
 	}
 }

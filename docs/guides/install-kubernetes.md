@@ -134,6 +134,10 @@ To run it again, delete the finished run first:
 - **Keep certificates current.** The certificate controller renews the
   gateway's certificate itself. CA rotation is a manual, four-step process; see
   [Gateway certificates](../reference/gateway-certificates.md).
+- **Reach a remote executor from your machine.** `sproozi-release/cli-access/`
+  holds the CLI's ServiceAccount and Role. Apply it in the executor's namespace
+  and create the `sproozi` context; see
+  [remote executor access](../reference/remote-executors.md).
 
 ## Troubleshooting
 

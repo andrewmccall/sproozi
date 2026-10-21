@@ -77,7 +77,7 @@ func (q *options) sessions(ctx context.Context) error {
 		if err := q.loadOptional(); err != nil {
 			return err
 		}
-		target, err := resolveRemote(ctx, q.fixed, q.context, q.namespace)
+		target, err := resolveRemote(ctx, q.context, q.namespace)
 		if err != nil {
 			return err
 		}
@@ -86,7 +86,7 @@ func (q *options) sessions(ctx context.Context) error {
 		if err := q.load(); err != nil {
 			return err
 		}
-		targets = remoteTargets(ctx, q.fixed)
+		targets = defaultTargets(ctx)
 	}
 	found := discoverSessions(ctx, q, !q.remote, targets)
 	if q.json {
@@ -173,11 +173,11 @@ func (q *options) discoverRemote(ctx context.Context, target remoteTarget) disco
 	requestCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	v := discovered{availability: executorAvailability{Executor: target.Name, Availability: availabilityAvailable}}
-	client, err := work.NewClient(target.Client)
-	if err != nil {
-		v.err = err
+	if target.Err != nil {
+		v.err = target.Err
 		return v
 	}
+	client := target.Client
 	defer func() { _ = client.Close() }()
 	views, err := client.List(requestCtx, work.SessionQuery{Project: q.project})
 	v.err = err

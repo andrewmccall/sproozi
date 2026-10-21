@@ -377,15 +377,15 @@ func TestTaskCredentialCannotClaimHomeOwnership(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer func() { _ = o.Close() }()
-	taskToken, homeToken := strings.Repeat("t", 32), strings.Repeat("h", 32)
-	h, e := NewHandler(o, taskToken, homeToken)
+	taskToken, home := strings.Repeat("t", 32), strings.Repeat("h", 32)
+	h, e := NewHandler(o, taskToken, homeToken(home))
 	if e != nil {
 		t.Fatal(e)
 	}
 	for _, tc := range []struct {
 		token, path string
 		want        int
-	}{{"", "/work/run", 401}, {taskToken, "/work/claim", 403}, {homeToken, "/work/list", 200}} {
+	}{{"", "/work/run", 401}, {taskToken, "/work/claim", 403}, {home, "/work/list", 200}} {
 		r := httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader("{}"))
 		r.TLS = &tls.ConnectionState{Version: tls.VersionTLS13}
 		r.Header.Set("Authorization", "Bearer "+tc.token)

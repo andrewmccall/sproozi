@@ -3,8 +3,8 @@ package main
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
-	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -45,18 +45,20 @@ func TestCatalogueKeepsPartialAvailabilityAndBoundsResults(t *testing.T) {
 	server.StartTLS()
 	defer server.Close()
 	dir := testutil.PrivateDir(t)
-	ca, token := filepath.Join(dir, "ca.pem"), filepath.Join(dir, "token")
-	certificate := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})
-	if err := testutil.WriteFile(ca, certificate, 0600); err != nil {
-		t.Fatal(err)
+	roots := x509.NewCertPool()
+	roots.AddCert(server.Certificate())
+	connect := func(origin string) *work.Client {
+		client, err := profile.Connect(profile.Connection{Origin: origin, Token: strings.Repeat("t", 32), Roots: roots,
+			MaxCheckpointBytes: 1 << 20})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return work.ClientFor(client)
 	}
-	if err := testutil.WriteFile(token, []byte(strings.Repeat("t", 32)), 0600); err != nil {
-		t.Fatal(err)
-	}
-	connection := profile.ClientConfig{URL: server.URL, TokenFile: token, CAFile: ca, MaxCheckpointBytes: 1 << 20}
 	q := &options{socket: filepath.Join(dir, "missing.sock"), project: "sproozi-dev"}
 	out := discoverSessions(t.Context(), q, true,
-		[]remoteTarget{{Name: testExecutor, Client: connection}, {Name: "unconfigured"}})
+		[]remoteTarget{{Name: testExecutor, Client: connect(server.URL)},
+			{Name: "unreachable", Client: connect("https://127.0.0.1:1")}})
 	if !out.Truncated || len(out.Sessions) != catalogueSessions || len(out.Executors) != 3 {
 		t.Fatalf("unbounded catalogue: %+v", out.Executors)
 	}

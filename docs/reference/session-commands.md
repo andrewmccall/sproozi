@@ -101,8 +101,8 @@ anything is read or sent. `-d` is short for `--detach`.
 | `-d`, `--detach` | Start or resume without connecting the terminal. Without a terminal on standard input, `run` and `resume` start the session and say they did not attach. |
 | `--include-ignored PATH` | Also copy this Git-ignored file into the session, on every visit. Repeatable. |
 | `--remote` | Work in a cluster: `run --remote` submits a task there (it needs `--task` or `--task-file` and takes no `PATH`, `--detach`, `--include-ignored` or agent arguments); `move --remote` sends the session there. Implied by `--context` or `--namespace`. |
-| `--context NAME` | The cluster, as a kubeconfig context or file. Default `sproozi`. See [Remote commands](#remote-commands). |
-| `--namespace NS` | Namespace of Sproozi in that cluster. |
+| `--context NAME` | The cluster, as a kubeconfig context name or a kubeconfig file. Default: the context named `sproozi`. See [Remote commands](#remote-commands). |
+| `--namespace NS` | Namespace of the remote executor. Default: the context's namespace, else `default`. |
 | `--task TEXT`, `--task-file FILE` | Task for a remote run, inline or from a UTF-8 file of at most 16 KiB. Choose one. |
 | `--repository NAME`, `--project ID` | Approved repository and [project](projects-and-revisions.md) for a remote run. `sessions --project` lists only that project's sessions. |
 | `--local` | Move the session to this machine. `move` needs `--local` or `--remote`. |
@@ -219,20 +219,23 @@ retry hint:
 ## Remote commands
 
 `run --remote`, `move --remote`, `pull`, and `sessions`, `status`, `cancel`
-and `recover` with `--context` reach a Sproozi installation in a Kubernetes
-cluster. `--context`
-names it as a kubeconfig context or file and defaults to `sproozi`;
-`--namespace` names the namespace Sproozi runs in. `--context` or
-`--namespace` alone implies `--remote`.
+and `recover` with `--remote` or `--context` reach a
+[remote executor](../../GLOSSARY.md#remote-executor) in a Kubernetes cluster.
+`--context` names a kubeconfig context, or a kubeconfig file whose current
+context is used; without it, the context named `sproozi`. A context name wins
+over a file of the same name. `--namespace` overrides the context's namespace.
+`--context` or `--namespace` alone implies `--remote`.
+[Remote executor access](remote-executors.md) shows how to create the
+`sproozi` context and lists every error with its fix.
 
-> This build resolves `--context NAME` to a remote executor configured under
-> `remote` or `workSources` in a hand-written configuration (see the
-> [home configuration reference](../../cmd/sproozi/README.md)). Kubeconfig
-> files and `--namespace` are refused until kubeconfig context support lands.
+`move --remote` and `pull` hand the selection to the service, which reaches the
+cluster itself and remembers the executor, so it keeps working after the
+command exits. `move ID --local` needs no context. A `pull` the service already
+began continues from the same executor when you repeat it.
 
-Without `--context`, `sessions` lists this machine and every configured
-cluster. A remote `status` prints the session's phase, problem and its
-untrusted final text; `--json` prints the remote status document.
+`sessions` without `--remote` or `--context` lists this machine only. A remote
+`status` prints the session's phase, problem and its untrusted final text;
+`--json` prints the remote status document.
 
 ## Status and listing output
 
@@ -282,7 +285,7 @@ not on standard error. When none answers, `sessions` fails with the reason.
 | --- | --- | --- |
 | `local` | `local` | This machine owns the session: you ran it here, or a pull finished. |
 | `local` | `pulling` | A pull is under way; run the same `pull` again to finish it. |
-| a cluster, such as `engineering` | `cluster` | That cluster owns it. Use `--context engineering`, or pull it. |
+| a cluster, such as `engineering` | `cluster` | That cluster owns it. Use the command with `--context` for that cluster, or pull it. |
 | a cluster | `local` | The cluster's record of a session pulled to a machine, in phase `pulled`. Use the `local` row. |
 
 ## Handle work outcomes

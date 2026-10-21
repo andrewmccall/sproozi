@@ -92,6 +92,20 @@ class TrustRotationTests(unittest.TestCase):
         self.assertEqual(runtime["spec"]["clientConfig"]["harness"], harness)
         return expected
 
+    def assert_executor(self, documents, certificate, harness):
+        """The executor is the public example, reached through a context."""
+        named = {(doc["kind"], doc["metadata"]["name"]): doc for doc in documents}
+        service = named[("Service", "sproozi-work")]
+        self.assertEqual(service["metadata"]["labels"]["sproozi.com/remote-executor"], "true")
+        self.assertEqual(named[("ConfigMap", "sproozi-remote-executor")]["data"]["ca.crt"], certificate.read_text())
+        profile = json.loads(named[("ConfigMap", "sproozi-work-profile")]["data"]["profile.json"])
+        self.assertEqual(profile["harness"], harness)
+        self.assertNotIn("tokenFile", profile)
+        self.assertTrue(profile["certificateFile"].startswith("/var/run/sproozi-work/"))
+        self.assertIn(("ClusterRoleBinding", "sproozi-work-auth-delegator"), named)
+        image = named[("Deployment", "sproozi-work")]["spec"]["template"]["spec"]["containers"][0]["image"]
+        self.assertTrue(image.startswith("registry.example/fixture@sha256:"))
+
     def test_rotation_selects_new_immutable_objects_and_consistent_references(self):
         for harness in ("codex", "claude-code"):
             with self.subTest(harness=harness):
@@ -99,6 +113,7 @@ class TrustRotationTests(unittest.TestCase):
                 for certificate, key in self.certificates:
                     documents = self.render(harness, certificate, key)
                     names.append(self.assert_bindings(documents, certificate, harness))
+                    self.assert_executor(documents, certificate, harness)
                 self.assertNotEqual(names[0], names[1])
                 certificate, key = self.certificates[0]
                 repeated = self.assert_bindings(self.render(harness, certificate, key), certificate, harness)

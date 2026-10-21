@@ -1,6 +1,6 @@
 # Remote executor access through a kubeconfig context
 
-The CLI and the [home daemon](../../GLOSSARY.md#home-daemon) reach a
+The CLI and this machine's Sproozi service reach a
 [remote executor](../../GLOSSARY.md#remote-executor) through a kubeconfig
 [context](../../GLOSSARY.md#context): the developer's Kubernetes identity finds
 the executor in a namespace, opens a port-forward to its Pod and runs the
@@ -8,10 +8,10 @@ executor's TLS protocol over it. No load balancer, hand-copied CA or token file
 is needed. [ADR 0036](../adr/0036-remote-executors-through-kubeconfig-contexts.md)
 records why.
 
-The selection rules and messages below are implemented in
-`internal/session/remote`. The `--context` and `--namespace` command flags
-arrive with the CLI redesign; until then, home still reads `remote` entries
-([session commands](session-commands.md)).
+[Remote commands](session-commands.md#remote-commands) take `--context` and
+`--namespace`. `run --remote`, `sessions --remote`, `status`, `cancel` and
+`recover` reach the cluster from the CLI. `move --remote` and `pull` send the
+selection to the service, which reaches the cluster from its own environment.
 
 ## Selecting the context and namespace
 
@@ -22,12 +22,21 @@ arrive with the CLI redesign; until then, home still reads `remote` entries
 | `--context PATH` | Otherwise, an existing kubeconfig file; its current context is used. A context of the same name wins over a file. |
 | `--namespace NS` | The executor's namespace. Without it, the context's namespace, else `default`. |
 
-Home records the absolute kubeconfig files, the context name and the namespace
-when it first reaches an executor, and keeps using them after the CLI exits. A
-later `kubectl config use-context`, or a different `KUBECONFIG` in home's
-environment, does not change them. Home reloads the files on each new
-connection, so a refreshed token is used. Exec credential plugins run in home's
-environment, so their binaries must be on home's `PATH`.
+The service records each executor it reaches in `executors.json` in its
+directory (mode `0600`): the executor's name, harness and checkpoint limit, and
+the absolute kubeconfig files, context and namespace that reached it. It keeps
+using them after the command exits and after a restart, and connects only when
+a session needs the executor. A later `kubectl config use-context`, or a
+different `KUBECONFIG` in the service's environment, does not change them. The
+service reloads the files on each new connection, so a refreshed token is used.
+Exec credential plugins run in the service's environment, so their binaries
+must be on its `PATH`. Reaching the same executor name through another context
+or file points the record at that one.
+
+`move ID --local` needs no context: the service already knows where the
+session is. `pull ID` uses the default context unless `--context` names
+another; a pull the service already began continues from its recorded executor
+whatever the retry names.
 
 The context must sign in with a bearer token: a ServiceAccount token, a token
 file or an exec plugin that returns a token. A context that signs in only with a
@@ -47,6 +56,8 @@ user, is refused, because the executor cannot verify it.
 | `… has no ready Pod` | The executor is not running; check its Pods. |
 | `the remote executor's certificate is not trusted` | The executor's certificate must be issued by the published CA and cover `SERVICE.NAMESPACE.svc`. |
 | `the remote executor … accepts checkpoints up to N bytes, but local.maxCheckpointBytes is M` | Make the two limits equal. |
+| `the remote executor is named "local", which is this machine's own name` | Ask the administrator to give the executor another `placementName`. |
+| `the Sproozi service does not know which cluster holds session …` | Pass `--context` to `pull`. |
 
 ## What the executor publishes
 
@@ -59,9 +70,8 @@ One remote executor per namespace. The administrator provides:
 | Serving certificate | in the executor's own Secret | Covers `SERVICE.NAMESPACE.svc`. |
 | ClusterRoleBinding | any | Binds the executor's ServiceAccount to `system:auth-delegator`, for TokenReview and SubjectAccessReview. |
 
-Set `"homeAuthorization": "kubernetes"` in the executor's configuration and omit
-`tokenFile`; see [the executor setup](../../cmd/session-profile/README.md#create-private-configuration).
-The executor then accepts a caller as its home principal when a TokenReview
+See [the executor setup](../../cmd/session-profile/README.md#create-private-configuration).
+The executor accepts a caller as its home principal when a TokenReview
 authenticates the bearer token and a SubjectAccessReview allows `use` on
 `remoteexecutors.sproozi.com`, named by the executor's `placementName`, in its
 `namespace`. Removing the RoleBinding revokes access on the next request. The
@@ -75,7 +85,7 @@ kubectl -n sproozi-system create configmap sproozi-remote-executor --from-file=c
 The executor describes itself on request: its placement name, harness and
 `maxCheckpointBytes`. The placement name is the executor's name in session rows
 and commands, whatever the context is called; its checkpoint limit must equal
-home's `local.maxCheckpointBytes`.
+the service's `local.maxCheckpointBytes`.
 
 ## The CLI's ServiceAccount
 
@@ -86,7 +96,7 @@ change.
 
 | Object | Name | Purpose |
 | --- | --- | --- |
-| ServiceAccount | `sproozi-cli` | The CLI and home's identity. |
+| ServiceAccount | `sproozi-cli` | The CLI and the service's identity. |
 | Role, RoleBinding | `sproozi-cli` | Exactly the permissions below. |
 | Secret | `sproozi-cli-token` | A long-lived token Kubernetes fills for `sproozi-cli`. |
 
@@ -131,5 +141,5 @@ then run `kubectl --kubeconfig FILE config use-context sproozi` and
 `chmod 600 FILE`.
 
 To rotate the token, delete the Secret, re-apply `cli-access`, and run the
-`set-credentials` command again with the new token. Home picks it up on its
+`set-credentials` command again with the new token. The service picks it up on its
 next connection.

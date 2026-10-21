@@ -66,8 +66,9 @@ limit.
 
 [ADR 0036](0036-remote-executors-through-kubeconfig-contexts.md) names a remote
 executor by the placement name it describes, reached through a kubeconfig
-context, in place of `remote` and `workSources` entries. Once the CLI uses it,
-the per-name lookup above has a single source.
+context, in place of `remote` and `workSources` entries. A pull the service
+already began now continues with its recorded source and operation on any
+retry, so the error above no longer occurs.
 
 ## Links
 

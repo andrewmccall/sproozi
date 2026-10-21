@@ -1,7 +1,6 @@
 package main
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -107,18 +106,25 @@ func (q *options) request(ctx context.Context) (home.Request, bool, error) {
 	case cmdAttach:
 		return request, true, q.homeError(attach(ctx, q.socket, q.id))
 	case cmdMove:
-		destination, err := q.moveDestination(ctx)
+		if q.local {
+			request.Destination = home.LocalAlias
+			break
+		}
+		selection, err := selectRemote(q.context, q.namespace)
 		if err != nil {
 			return request, true, err
 		}
-		request.Destination = destination
+		request.Remote = &selection
 	case cmdPull:
-		// Without a configuration (only --socket), the service checks the name.
-		source, err := q.remoteName(ctx)
-		if err != nil {
+		// A pull the service already began continues from its own source, so
+		// a retry needs no context. Otherwise the selection names the cluster.
+		selection, err := selectRemote(q.context, q.namespace)
+		if err != nil && q.remote {
 			return request, true, err
 		}
-		request.Source = source
+		if err == nil {
+			request.Remote = &selection
+		}
 	case cmdCancel:
 		// Cancelling a cancelled session succeeds without another request.
 		if status, err := home.Call(ctx, q.socket, home.Request{Action: home.ActionStatus, ID: q.id}); err == nil &&
@@ -154,25 +160,6 @@ func (q *options) prepareRun() error {
 		return fmt.Errorf("%s is not set up on this machine; add it with \"sproozi init --harness %s\"", q.harness, q.harness)
 	}
 	return nil
-}
-
-// moveDestination is the placement a move goes to: this machine's, or the
-// cluster's.
-func (q *options) moveDestination(ctx context.Context) (string, error) {
-	if !q.local {
-		return q.remoteName(ctx)
-	}
-	return home.LocalAlias, nil
-}
-
-// remoteName is the name the service knows the selected cluster by. Without
-// a configuration (only --socket), the service checks the name itself.
-func (q *options) remoteName(ctx context.Context) (string, error) {
-	if q.fixed.Directory == "" {
-		return cmp.Or(q.context, defaultContext), nil
-	}
-	target, err := resolveRemote(ctx, q.fixed, q.context, q.namespace)
-	return target.Name, err
 }
 
 // homeError names the service's state in plain words.
@@ -274,14 +261,11 @@ func (q *options) remoteSession(ctx context.Context) error {
 	if err := q.loadOptional(); err != nil {
 		return err
 	}
-	target, err := resolveRemote(ctx, q.fixed, q.context, q.namespace)
+	target, err := resolveRemote(ctx, q.context, q.namespace)
 	if err != nil {
 		return err
 	}
-	client, err := work.NewClient(target.Client)
-	if err != nil {
-		return err
-	}
+	client := target.Client
 	defer func() { _ = client.Close() }()
 	if !work.CanonicalID(q.id) {
 		views, err := client.List(ctx, work.SessionQuery{})
@@ -335,14 +319,11 @@ func (q *options) submitRemote(ctx context.Context) error {
 	if err := q.loadOptional(); err != nil {
 		return err
 	}
-	target, err := resolveRemote(ctx, q.fixed, q.context, q.namespace)
+	target, err := resolveRemote(ctx, q.context, q.namespace)
 	if err != nil {
 		return err
 	}
-	client, err := work.NewClient(target.Client)
-	if err != nil {
-		return err
-	}
+	client := target.Client
 	defer func() { _ = client.Close() }()
 	if q.operation == "" {
 		q.operation = uuid.NewString()

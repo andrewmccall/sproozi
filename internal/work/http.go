@@ -42,23 +42,12 @@ func decode(b []byte, v any) error {
 }
 
 // NewHandler authenticates the owner API before reading task or artifact input.
-// The Hermes token grants only high-level work tools. The home profile token
-// additionally permits the fixed owner's one-way export/claim protocol.
-func NewHandler(o *Owner, taskToken, homeToken string) (http.Handler, error) {
-	if len(homeToken) < 32 || taskToken == homeToken {
-		return nil, errors.New("work: private task and home credentials required")
-	}
-	home, err := profile.StaticToken(homeToken)
-	if err != nil {
-		return nil, errors.New("work: private task and home credentials required")
-	}
-	return NewAuthorizedHandler(o, taskToken, home)
-}
-
-// NewAuthorizedHandler is NewHandler with the home principal decided by an
-// Authorizer, such as a Kubernetes TokenReview and SubjectAccessReview. The
-// task token is still one static token, compared first.
-func NewAuthorizedHandler(o *Owner, taskToken string, home profile.Authorizer) (http.Handler, error) {
+// The Hermes work token grants only high-level work tools. The home principal
+// additionally holds the fixed owner's one-way export/claim protocol; an
+// Authorizer decides it (Kubernetes TokenReview and SubjectAccessReview in the
+// remote executor). The work token stays one static token, compared first,
+// because Hermes holds no Kubernetes identity of its own.
+func NewHandler(o *Owner, taskToken string, home profile.Authorizer) (http.Handler, error) {
 	if o == nil || home == nil || len(taskToken) < 32 || strings.ContainsAny(taskToken, " \r\n\t") {
 		return nil, errors.New("work: private task and home credentials required")
 	}
@@ -212,14 +201,6 @@ type OwnerTransport interface {
 }
 
 type Client struct{ transport OwnerTransport }
-
-func NewClient(c profile.ClientConfig) (*Client, error) {
-	p, e := profile.NewClient(c)
-	if e != nil {
-		return nil, e
-	}
-	return &Client{transport: p}, nil
-}
 
 // ClientFor addresses the remote work catalogue over an existing transport.
 func ClientFor(t OwnerTransport) *Client { return &Client{transport: t} }

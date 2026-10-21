@@ -41,8 +41,7 @@ import (
 	runtimedocker "github.com/andrewmccall/sproozi/internal/runtime/docker"
 	runtimekubernetes "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
 	"github.com/andrewmccall/sproozi/internal/session"
-	"github.com/andrewmccall/sproozi/internal/session/profile"
-	"github.com/andrewmccall/sproozi/internal/work"
+	"github.com/andrewmccall/sproozi/internal/session/remote"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/rest"
 )
@@ -150,8 +149,7 @@ func localConfigs(c Config) ([]*localStack, error) {
 		if err = errors.Join(nativeconfig.ValidateHarness(string(stack.config.Harness), stack.model, stack.options), validListen(stack)); err != nil {
 			return nil, err
 		}
-		_, remote := c.Remote[stack.config.Name]
-		if harnesses[stack.config.Harness] || names[stack.config.Name] || ports[stack.config.GatewayPort] || remote {
+		if harnesses[stack.config.Harness] || names[stack.config.Name] || ports[stack.config.GatewayPort] {
 			return nil, errors.New("home: each local harness needs a distinct harness, placement name and gateway port")
 		}
 		harnesses[stack.config.Harness], names[stack.config.Name], ports[stack.config.GatewayPort] = true, true, true
@@ -274,10 +272,8 @@ func Open(c Config, log io.Writer) (_ *Service, err error) {
 			return nil, err
 		}
 	}
-	if err = s.configureRemotes(); err != nil {
-		return nil, err
-	}
-	if err = s.configureWorkSources(); err != nil {
+	s.discover = remote.Discover
+	if err = s.openExecutors(); err != nil {
 		return nil, err
 	}
 	s.coordinator, err = session.Open(filepath.Join(c.Directory, "journal"), s.placements, c.Local.MaxCheckpointBytes)
@@ -560,49 +556,9 @@ func (s *Service) configureProfile(folder string) {
 		return
 	}
 	s.coordinator.SetProfileSource(func() ([]byte, string, error) { return agentprofile.ArchiveDirectory(folder) })
-	for _, remote := range s.remotes {
-		remote.SetProfileSource(s.coordinator.ProfileArchive)
+	for _, client := range s.remotes {
+		client.SetProfileSource(s.coordinator.ProfileArchive)
 	}
-}
-
-func (s *Service) configureRemotes() error {
-	for name, fixed := range s.config.Remote {
-		if name == s.config.Local.Name || len(name) == 0 || len(name) > 128 {
-			return errors.New("home: distinct named remote profile required")
-		}
-		if fixed.MaxCheckpointBytes != s.config.Local.MaxCheckpointBytes {
-			return errors.New("home: profiles must share the checkpoint byte limit")
-		}
-		remote, clientErr := profile.NewClient(fixed)
-		if clientErr != nil {
-			return clientErr
-		}
-		s.remotes = append(s.remotes, remote)
-		s.placements[name] = remote
-	}
-	return nil
-}
-
-func (s *Service) configureWorkSources() error {
-	fixed := s.config.WorkConnections()
-	sources := make(map[string]WorkSource, len(fixed))
-	for name, config := range fixed {
-		if name == "" || len(name) > 128 || config.MaxCheckpointBytes != s.config.Local.MaxCheckpointBytes {
-			return errors.New("home: bounded named work source required")
-		}
-		source, err := work.NewClient(config)
-		if err != nil {
-			for _, opened := range sources {
-				if closer, ok := opened.(io.Closer); ok {
-					_ = closer.Close()
-				}
-			}
-			return err
-		}
-		sources[name] = source
-	}
-	s.SetWorkSources(sources)
-	return nil
 }
 
 func approvedProviderURL(u *url.URL) bool {

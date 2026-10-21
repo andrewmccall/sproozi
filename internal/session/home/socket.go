@@ -20,6 +20,7 @@ import (
 	"github.com/andrewmccall/sproozi/internal/project"
 	"github.com/andrewmccall/sproozi/internal/proxytransport"
 	"github.com/andrewmccall/sproozi/internal/session"
+	"github.com/andrewmccall/sproozi/internal/session/remote"
 	"github.com/andrewmccall/sproozi/internal/work"
 	"github.com/andrewmccall/sproozi/internal/workspace"
 )
@@ -55,6 +56,9 @@ type Request struct {
 	// HarnessArgs are the user's own arguments for the stock harness of a
 	// start or resume, appended to the harness command line.
 	HarnessArgs []string `json:"harnessArgs,omitempty"`
+	// Remote selects a remote executor through a kubeconfig context for move
+	// or pull. The service reaches it from its own environment and records it.
+	Remote *remote.Selection `json:"remote,omitempty"`
 }
 type Response struct {
 	Status   *Status  `json:"status,omitempty"`
@@ -321,7 +325,13 @@ func (s *Service) handle(ctx context.Context, conn net.Conn) {
 	case ActionStart:
 		status, err = s.Start(ctx, q.ID, q.OperationID, q.Workspace, q.Harness, q.IncludeIgnored, q.HarnessArgs)
 	case ActionMove:
-		status, err = s.Move(ctx, q.ID, q.OperationID, q.Destination)
+		destination := q.Destination
+		if q.Remote != nil {
+			destination, err = s.reachExecutor(ctx, *q.Remote)
+		}
+		if err == nil {
+			status, err = s.Move(ctx, q.ID, q.OperationID, destination)
+		}
 	case ActionStatus:
 		status, err = s.Status(q.ID)
 	case ActionCancel:
@@ -329,7 +339,13 @@ func (s *Service) handle(ctx context.Context, conn net.Conn) {
 	case ActionRecover:
 		status, err = s.Recover(ctx, q.ID)
 	case ActionPull:
-		status, err = s.Pull(ctx, q.ID, q.OperationID, q.Source)
+		source := q.Source
+		if q.Remote != nil && !s.pullRetained(q.ID) {
+			source, err = s.reachExecutor(ctx, *q.Remote)
+		}
+		if err == nil {
+			status, err = s.Pull(ctx, q.ID, q.OperationID, source)
+		}
 	case ActionResume:
 		status, err = s.Resume(ctx, q.ID, q.OperationID, q.HarnessArgs)
 	case ActionStop:
@@ -393,11 +409,11 @@ func validateRequest(q Request) error {
 			return errors.New("home: invalid start")
 		}
 	case ActionMove:
-		if !work.CanonicalID(q.OperationID) || q.Destination == "" || q.Workspace != "" {
+		if !work.CanonicalID(q.OperationID) || (q.Destination == "") == (q.Remote == nil) || q.Workspace != "" {
 			return errors.New("home: invalid move")
 		}
 	case ActionPull:
-		if !work.CanonicalID(q.OperationID) || q.Source == "" || q.Workspace != "" || q.Destination != "" {
+		if !work.CanonicalID(q.OperationID) || q.Source != "" && q.Remote != nil || q.Workspace != "" || q.Destination != "" {
 			return errors.New("home: invalid pull")
 		}
 	case ActionResume, ActionStop, ActionCancel:
@@ -475,6 +491,14 @@ func validateCommonRequest(q Request) error {
 	}
 	if q.Action != ActionPull && q.Source != "" {
 		return errors.New("home: source is pull intent")
+	}
+	if q.Remote != nil {
+		if q.Action != ActionPull && q.Action != ActionMove {
+			return errors.New("home: a kubeconfig context selects a move destination or pull source only")
+		}
+		if err := q.Remote.Validate(); err != nil {
+			return err
+		}
 	}
 	if len(q.HarnessArgs) != 0 && q.Action != ActionStart && q.Action != ActionResume {
 		return errors.New("home: only start and resume take harness arguments")

@@ -56,8 +56,9 @@ session discovery, detach/reconnect and revocation separately. See
 
 ## Enterprise profiles and retained state
 
-The current fixed TLS profile keeps kubeconfig on the administrator's service and
-supplies the developer a narrow principal token. Multiple owners, identity
+The current remote executor keeps its own Kubernetes credentials and accepts
+the developer through a narrow `sproozi-cli` ServiceAccount, authorized by
+Kubernetes RBAC ([ADR 0036](../../adr/0036-remote-executors-through-kubeconfig-contexts.md)). Multiple owners, identity
 providers, profile discovery and organizational quotas may justify a broader
 access model. Resolve principal isolation, transfer policy and audit attribution
 before adding enrollment or federation mechanisms.

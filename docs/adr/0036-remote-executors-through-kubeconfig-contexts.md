@@ -2,9 +2,10 @@
 
 Status: accepted
 Date: 2026-10-20
-Implementation: selection, discovery, tunnel, executor authorization and the
-lazy client are implemented and proved on Kind; recording executors in home and
-the CLI flags are wired by the CLI redesign (ADR 0037, separate change).
+Implementation: implemented and proved on Kind, including the service's
+executor records, the CLI wiring and both mobility fixtures. The `remote` and
+`workSources` configuration, `profile.ClientConfig` and the static home token
+are removed.
 
 ## Problem and constraints
 
@@ -82,8 +83,7 @@ The client sends the context's bearer token, obtained through client-go's own
 authentication wrappers so static tokens, token files and exec plugins all
 work. A context that signs in only with a client certificate, or impersonates
 another user, is refused with guidance, because the executor cannot review it.
-With `"homeAuthorization": "kubernetes"` the executor runs a TokenReview and a
-SubjectAccessReview for `use` on `remoteexecutors` in its namespace, named by
+The executor runs a TokenReview and a SubjectAccessReview for `use` on `remoteexecutors` in its namespace, named by
 its placement name, on every request. An unknown token is 401, a known identity
 without the permission is 403, and a review that cannot complete is 503
 (unavailable, never absence). The executor's ServiceAccount is bound to
@@ -94,10 +94,11 @@ one configured principal, exactly as every holder of the token did before; the
 one-home-per-principal rule still applies, so one developer's home uses one
 executor namespace.
 
-The Hermes work token stays a static token; it is checked first and grants only
-the work tools. The static home token remains as `"homeAuthorization": "token"`
-(the default) for host-run executors and the existing fixtures, until the CLI
-wiring replaces the `remote` entries they use.
+The Hermes work token stays a static token, because Hermes has no Kubernetes
+identity of its own; it is checked first and grants only the work tools. The
+static home token is gone: Kubernetes review is the executor's only way to
+decide the home principal, so an executor always runs in a cluster behind a
+labelled Service.
 
 ### Naming, the checkpoint limit and home
 
@@ -105,9 +106,28 @@ A new authenticated `describe` action returns the executor's placement name,
 harness and `maxCheckpointBytes`. The placement name is the executor's identity:
 launches already carry it and the executor rejects any other, session rows show
 it, and two developers whose contexts have different names still see the same
-executor. A context is only how this developer reaches it. Home records an
-`Executor` (the `Selection` plus the described name, harness and limit) keyed by
-that name, and refuses a different selection that describes the same name.
+executor. A context is only how this developer reaches it.
+
+`run --remote`, `sessions`, `status`, `cancel` and `recover` reach the cluster
+from the CLI, which needs no running service for them. `move --remote` and
+`pull` send the `Selection` over the control socket; the service discovers the
+executor from its own environment, so exec plugins and their `PATH` are the
+ones that will refresh credentials later. It records an `Executor` (the
+`Selection` plus the described name, harness and limit) keyed by that name in
+`executors.json` (mode `0600`) in its directory, registers it as a placement
+and a work source, and reopens the records at start without contacting any
+cluster. Reaching the same name through another context or file re-points the
+record: the executor's name, not the context, identifies it, and a launch to
+the wrong cluster is refused by that executor, which knows nothing of it. A
+name equal to `local` or a local placement name is refused.
+
+`move ID --local` needs no context. `pull ID` uses the default context unless
+`--context` names another. A pull the service already began continues with its
+recorded source and operation, whatever the retry names; this replaces
+[ADR 0019](0019-pull-operations-and-work-owner-names.md)'s refusal of a retry
+with a different operation, which the CLI no longer derives. `sessions` without
+`--context` lists this machine and, when the `sproozi` context exists, its
+cluster.
 
 `maxCheckpointBytes` per entry is gone: home compares the described limit with
 `local.maxCheckpointBytes` (`Executor.CheckpointProblem`) when it records the
@@ -158,6 +178,17 @@ environment, so their binaries must be on home's `PATH`.
   that launches must carry.
 - **`sproozi init --kubernetes` installing the cluster side.** Designed and
   dropped by the user: installation stays a GitOps-applied manifest set.
+- **Discovery in the CLI, records sent to the service.** It would fail fast in
+  the user's own environment, but the service then refreshes credentials with
+  plugins it never ran. Discovering in the service proves at the first move or
+  pull that it can reach the cluster on its own.
+- **Refusing a second selection for a recorded name.** It guards against two
+  clusters with executors of the same name, but also refuses the same executor
+  reached through a file and through a context, which the user wanted to use
+  interchangeably.
+- **Keeping the static home token for host-run executors.** Host-run
+  executors could not be reached through a context at all, since there is no
+  Pod to forward to, and the fixtures moved into the cluster.
 
 ## Tradeoffs and consequences
 
@@ -175,6 +206,10 @@ environment, so their binaries must be on home's `PATH`.
   a `--namespace` or context.
 - The executor reads TLS material once at startup; changing its CA needs a new
   ConfigMap value and a restart, as before.
+- Executors must run in a cluster; a host-run evaluation now deploys the
+  public example instead.
+- Executor names must be unique across the clusters one developer uses;
+  reusing a name re-points the record.
 
 ## Revisit when
 
@@ -184,8 +219,7 @@ environment, so their binaries must be on home's `PATH`.
   executor are required.
 - The certificate controller ([ADR 0030](0030-kubernetes-release-assets-and-certificates.md))
   can issue the executor's serving certificate and publish its CA.
-- The fixtures no longer use the static home token, at which point
-  `"homeAuthorization": "token"` and `profile.ClientConfig` can be removed.
+- Developers need executors with the same name in several clusters.
 
 ## Links
 
@@ -193,8 +227,9 @@ environment, so their binaries must be on home's `PATH`.
 - [Remote executor setup](../../cmd/session-profile/README.md)
 - `internal/session/remote/` (selection, discovery, tunnel, reviewer, client),
   `internal/session/profile/` (`describe`, `Authorizer`, `Connect`),
+  `internal/session/home/executors.go`, `cmd/sproozi/remote.go`,
   `cmd/session-profile/main.go`, `config/cli-access/`,
   `examples/portable-workflows/kubernetes/owner.yaml`
 - Refines [ADR 0010](0010-managed-session-authority-and-admission.md)'s fixed
-  remote profile and [ADR 0019](0019-pull-operations-and-work-owner-names.md)'s
-  owner names.
+  remote profile, and replaces [ADR 0019](0019-pull-operations-and-work-owner-names.md)'s
+  owner-name rule and its refusal of a retried pull with another operation.

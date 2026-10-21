@@ -2,12 +2,15 @@
 package work
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/andrewmccall/sproozi/internal/session/profile"
 )
 
 func TestMCPDiscoveryAndSessionListingUseObjectSchemas(t *testing.T) {
@@ -26,7 +29,7 @@ func TestMCPDiscoveryAndSessionListingUseObjectSchemas(t *testing.T) {
 	standalone := submit(t, o)
 	waitPhase(t, o, standalone.ID, phaseRetained)
 	token := strings.Repeat("t", 32)
-	h, err := NewHandler(o, token, strings.Repeat("h", 32))
+	h, err := NewHandler(o, token, homeToken(strings.Repeat("h", 32)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,4 +93,15 @@ func TestMCPDiscoveryAndSessionListingUseObjectSchemas(t *testing.T) {
 	if invalid["isError"] != true || !strings.Contains(invalid["content"].([]any)[0].(map[string]any)["text"].(string), "invalid_request:") {
 		t.Fatalf("Invalid project filter lost its safe outcome: %#v", invalid)
 	}
+}
+
+// homeToken accepts exactly one bearer token as the home principal, as a
+// Kubernetes review accepts one ServiceAccount.
+type homeToken string
+
+func (h homeToken) Authorize(_ context.Context, token string) error {
+	if token != string(h) {
+		return profile.ErrUnauthenticated
+	}
+	return nil
 }
