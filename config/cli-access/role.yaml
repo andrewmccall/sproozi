@@ -1,0 +1,33 @@
+# Everything the sproozi CLI (and the home daemon it starts) needs to reach the
+# remote executor in this namespace, and nothing else.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: sproozi-cli
+  labels:
+    app.kubernetes.io/name: sproozi
+    app.kubernetes.io/component: cli-access
+rules:
+# Find the executor: the one Service labelled sproozi.com/remote-executor=true.
+- apiGroups: [""]
+  resources: [services]
+  verbs: [list]
+# Find a ready executor Pod behind that Service.
+- apiGroups: [discovery.k8s.io]
+  resources: [endpointslices]
+  verbs: [list]
+# Open the TLS tunnel to the executor Pod.
+- apiGroups: [""]
+  resources: [pods/portforward]
+  verbs: [create]
+# Trust the executor's serving certificate.
+- apiGroups: [""]
+  resources: [configmaps]
+  resourceNames: [sproozi-remote-executor]
+  verbs: [get]
+# Act as the executor's home principal. The executor checks this with a
+# SubjectAccessReview; there is no such API resource to read or write. Add
+# resourceNames with an executor's placement name to allow only that executor.
+- apiGroups: [sproozi.com]
+  resources: [remoteexecutors]
+  verbs: [use]

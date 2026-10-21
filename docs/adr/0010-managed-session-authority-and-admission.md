@@ -213,3 +213,10 @@ live moves. A new execution has current admission, new accounts and a new
 deadline; it cannot reopen an old allocation or modify sealed usage. Exact
 writer fencing and conservative unknown-state handling remain required in both
 paths.
+
+[ADR 0036](0036-remote-executors-through-kubeconfig-contexts.md) changes how the
+developer reaches the fixed remote profile: through a kubeconfig context and a
+port-forward, signed in as a narrow ServiceAccount that Kubernetes RBAC
+authorizes as the home principal. The developer now holds that Kubernetes
+credential; the executor still owns its own credentials, namespace, template
+and ceilings, and the ServiceAccount cannot create Pods or select images.

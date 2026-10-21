@@ -45,7 +45,21 @@ func decode(b []byte, v any) error {
 // The Hermes token grants only high-level work tools. The home profile token
 // additionally permits the fixed owner's one-way export/claim protocol.
 func NewHandler(o *Owner, taskToken, homeToken string) (http.Handler, error) {
-	if o == nil || len(taskToken) < 32 || len(homeToken) < 32 || taskToken == homeToken || strings.ContainsAny(taskToken+homeToken, " \r\n\t") {
+	if len(homeToken) < 32 || taskToken == homeToken {
+		return nil, errors.New("work: private task and home credentials required")
+	}
+	home, err := profile.StaticToken(homeToken)
+	if err != nil {
+		return nil, errors.New("work: private task and home credentials required")
+	}
+	return NewAuthorizedHandler(o, taskToken, home)
+}
+
+// NewAuthorizedHandler is NewHandler with the home principal decided by an
+// Authorizer, such as a Kubernetes TokenReview and SubjectAccessReview. The
+// task token is still one static token, compared first.
+func NewAuthorizedHandler(o *Owner, taskToken string, home profile.Authorizer) (http.Handler, error) {
+	if o == nil || home == nil || len(taskToken) < 32 || strings.ContainsAny(taskToken, " \r\n\t") {
 		return nil, errors.New("work: private task and home credentials required")
 	}
 	server := mcp.NewServer(&mcp.Implementation{Name: "sproozi-work", Version: "1"}, nil)
@@ -69,14 +83,14 @@ func NewHandler(o *Owner, taskToken, homeToken string) (http.Handler, error) {
 		return nil, sessionList{Sessions: v}, nil
 	})
 	stream := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true, DisableLocalhostProtection: true})
-	taskHash, homeHash := sha256.Sum256([]byte(taskToken)), sha256.Sum256([]byte(homeToken))
-	return &ownerHandler{owner: o, taskHash: taskHash, homeHash: homeHash, stream: stream}, nil
+	return &ownerHandler{owner: o, taskHash: sha256.Sum256([]byte(taskToken)), home: home, stream: stream}, nil
 }
 
 type ownerHandler struct {
-	owner              *Owner
-	taskHash, homeHash [32]byte
-	stream             http.Handler
+	owner    *Owner
+	taskHash [32]byte
+	home     profile.Authorizer
+	stream   http.Handler
 }
 
 func (h *ownerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -86,12 +100,16 @@ func (h *ownerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Denied", http.StatusUnauthorized)
 		return
 	}
-	actual := sha256.Sum256([]byte(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")))
-	isHome := subtle.ConstantTimeCompare(actual[:], h.homeHash[:]) == 1
+	token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	actual := sha256.Sum256([]byte(token))
 	isTask := subtle.ConstantTimeCompare(actual[:], h.taskHash[:]) == 1
-	if !isHome && !isTask {
-		http.Error(w, "Denied", http.StatusUnauthorized)
-		return
+	isHome := false
+	if !isTask {
+		if status, _ := profile.AuthorizationStatus(h.home.Authorize(r.Context(), token)); status != 0 {
+			http.Error(w, http.StatusText(status), status)
+			return
+		}
+		isHome = true
 	}
 	if r.URL.RawQuery != "" || r.URL.RawPath != "" {
 		http.Error(w, "Invalid route", http.StatusBadRequest)
@@ -185,7 +203,15 @@ func tool(v View, e error) (*mcp.CallToolResult, View, error) {
 	return nil, v, nil
 }
 
-type Client struct{ transport *profile.Client }
+// OwnerTransport carries the fixed remote work operations to one remote
+// executor: a profile.Client, or a client that reaches the executor through a
+// Kubernetes context.
+type OwnerTransport interface {
+	CallOwner(ctx context.Context, action string, input, output any) error
+	Close()
+}
+
+type Client struct{ transport OwnerTransport }
 
 func NewClient(c profile.ClientConfig) (*Client, error) {
 	p, e := profile.NewClient(c)
@@ -194,7 +220,10 @@ func NewClient(c profile.ClientConfig) (*Client, error) {
 	}
 	return &Client{transport: p}, nil
 }
-func (c *Client) Close() error { c.transport.Close(); return nil }
+
+// ClientFor addresses the remote work catalogue over an existing transport.
+func ClientFor(t OwnerTransport) *Client { return &Client{transport: t} }
+func (c *Client) Close() error           { c.transport.Close(); return nil }
 func (c *Client) Submit(ctx context.Context, q Submit) (v View, e error) {
 	e = c.transport.CallOwner(ctx, "run", q, &v)
 	return

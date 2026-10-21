@@ -1,0 +1,13 @@
+# The sproozi CLI's identity in a remote executor's namespace: a ServiceAccount,
+# the Role holding exactly what the CLI needs to reach that executor, its
+# RoleBinding and a token Secret for the "sproozi" kubeconfig context. Apply it
+# in the executor's namespace (set "namespace" below, or with an overlay). See
+# docs/reference/remote-executors.md and ADR 0036.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: sproozi-system
+resources:
+- service_account.yaml
+- role.yaml
+- role_binding.yaml
+- token_secret.yaml

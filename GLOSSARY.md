@@ -415,7 +415,11 @@ The `session-profile` program. It serves one administrator-approved Kubernetes
 placement, holds that cluster's credentials and hosts a catalogue of remote
 work. Its work token (`workTokenFile`) is the bearer token a coordinator uses
 for `/work/mcp`; it differs from the home principal token (`tokenFile`), which
-also permits pull, and from the task service's token. Also seen as: profile
+also permits pull, and from the task service's token. With
+`"homeAuthorization": "kubernetes"` it has no home principal token: any caller
+whose Kubernetes identity RBAC allows to `use` it is the home principal. Its
+placement name is its name in commands and session rows; a namespace holds one,
+found by the label `sproozi.com/remote-executor` on its Service. Also seen as: profile
 service, remote profile, fixed remote profile, work owner, native work owner, remote work
 service.
 
@@ -425,8 +429,22 @@ The bearer token this machine's service presents to a remote executor. The profi
 service reads it from its `tokenFile`, and the home configuration names the
 same secret in `remote.NAME.tokenFile` or `workSources.NAME.tokenFile`. It
 permits remote work, moves and pull, unlike the work token. It needs at least
-32 non-whitespace characters. Also seen as: home token, principal token,
-profile principal token, profile token, remote token.
+32 non-whitespace characters. An executor reached through a
+[context](#context) uses the caller's ServiceAccount token instead. Also seen
+as: home token, principal token, profile principal token, profile token,
+remote token.
+
+### Context
+
+A kubeconfig context through which the CLI and home daemon reach a remote
+executor: the cluster, the identity signing in to it and the namespace holding
+the executor. Without `--context`, the context named `sproozi`, which signs in
+as the ServiceAccount `sproozi-cli`; `--context` takes a context name or a path
+to a kubeconfig file, whose current context is used, and `--namespace`
+overrides the context's namespace. Home records the files, context and
+namespace so it keeps reaching the executor after the CLI exits. See
+[remote executor access](docs/reference/remote-executors.md). Also seen as:
+kube context, kubeconfig context, Kubernetes context.
 
 ### Executor
 

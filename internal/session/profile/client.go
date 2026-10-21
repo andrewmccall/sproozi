@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"mime"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -81,26 +82,50 @@ func (c *Client) SetProfileSource(source func(digest string) ([]byte, error)) { 
 // NewClient validates the fixed origin and constructs a CA-verified TLS 1.3
 // transport. Credentials are read once and sent only to that origin.
 func NewClient(config ClientConfig) (*Client, error) {
-	maxBody, err := bodyLimit(config.MaxCheckpointBytes)
-	if err != nil {
-		return nil, err
-	}
 	if !fixedOrigin(config.URL) {
 		return nil, errors.New("profile: fixed HTTPS origin required")
 	}
-	u, _ := url.Parse(config.URL)
 	token, err := readToken(config.TokenFile)
 	if err != nil {
 		return nil, err
 	}
-	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS13}
+	connection := Connection{Origin: config.URL, Token: token, MaxCheckpointBytes: config.MaxCheckpointBytes, Timeout: config.Timeout}
 	if config.CAFile != "" {
-		roots, err := readRoots(config.CAFile)
-		if err != nil {
+		if connection.Roots, err = readRoots(config.CAFile); err != nil {
 			return nil, err
 		}
-		tlsConfig.RootCAs = roots
 	}
+	return Connect(connection)
+}
+
+// Connection is a resolved route to one remote executor. Origin is the HTTPS
+// origin its certificate covers; Roots, when set, replace the system roots.
+// Dial, when set, replaces the network path to Origin with a byte stream the
+// caller opens, such as a Kubernetes port-forward; TLS still runs over it.
+type Connection struct {
+	Origin             string
+	Token              string
+	Roots              *x509.CertPool
+	Dial               func(ctx context.Context) (net.Conn, error)
+	MaxCheckpointBytes int64
+	Timeout            time.Duration
+}
+
+// Connect builds a client for a resolved connection without contacting it.
+func Connect(config Connection) (*Client, error) {
+	maxBody, err := bodyLimit(config.MaxCheckpointBytes)
+	if err != nil {
+		return nil, err
+	}
+	if !fixedOrigin(config.Origin) {
+		return nil, errors.New("profile: fixed HTTPS origin required")
+	}
+	token, err := validToken(config.Token)
+	if err != nil {
+		return nil, err
+	}
+	u, _ := url.Parse(config.Origin)
+	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS13, RootCAs: config.Roots}
 	if config.Timeout == 0 {
 		config.Timeout = 45 * time.Second
 	}
@@ -108,6 +133,9 @@ func NewClient(config ClientConfig) (*Client, error) {
 		return nil, errors.New("profile: invalid timeout")
 	}
 	transport := &http.Transport{TLSClientConfig: tlsConfig, TLSHandshakeTimeout: 10 * time.Second, ResponseHeaderTimeout: config.Timeout, IdleConnTimeout: 30 * time.Second, MaxIdleConnsPerHost: 2}
+	if dial := config.Dial; dial != nil {
+		transport.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) { return dial(ctx) }
+	}
 	client := &http.Client{Transport: transport, Timeout: config.Timeout, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
 	return &Client{base: strings.TrimSuffix(u.String(), "/"), token: token, http: client, maxCheckpoint: config.MaxCheckpointBytes, maxBody: maxBody}, nil
 }
@@ -240,8 +268,46 @@ func (c *Client) call(ctx context.Context, action string, input request) (respon
 	return output, nil
 }
 
+// Describe asks the executor for its placement name, harness and checkpoint
+// limit. It needs only the origin and token, so a client built with any valid
+// checkpoint limit can ask before the real limit is known.
+func (c *Client) Describe(ctx context.Context) (Description, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/v1/"+actionDescribe,
+		strings.NewReader(fmt.Sprintf(`{"version":%d}`, protocolVersion)))
+	if err != nil {
+		return Description{}, err
+	}
+	req.Header.Set(headerAuthorization, bearerPrefix+c.token)
+	req.Header.Set(headerContentType, jsonMedia)
+	r, err := c.http.Do(req)
+	if err != nil {
+		return Description{}, &RemoteError{Code: CodeUnavailable, Transport: err}
+	}
+	defer func() { _ = r.Body.Close() }()
+	data, err := io.ReadAll(io.LimitReader(r.Body, metadataLimit+1))
+	var output response
+	if err != nil || int64(len(data)) > metadataLimit || strictDecode(data, &output) != nil || output.Version != protocolVersion {
+		return Description{}, &RemoteError{Code: CodeUnavailable, Status: r.StatusCode}
+	}
+	if r.StatusCode != http.StatusOK {
+		if !errorResponse(output, r.StatusCode) {
+			return Description{}, errors.New("profile: invalid error response")
+		}
+		return Description{}, &RemoteError{Code: output.Error, Status: r.StatusCode}
+	}
+	d := output.Executor
+	if output.Error != "" || d == nil || output.Incarnation != nil || output.Observation != nil || output.Stopped != nil || len(output.Checkpoint) > 0 ||
+		!validName(d.Placement) || d.Harness.Validate() != nil {
+		return Description{}, errors.New("profile: invalid description")
+	}
+	if _, err = bodyLimit(d.MaxCheckpointBytes); err != nil {
+		return Description{}, errors.New("profile: invalid description")
+	}
+	return *d, nil
+}
+
 func errorResponse(r response, status int) bool {
-	if r.Incarnation != nil || r.Observation != nil || r.Stopped != nil || len(r.Checkpoint) > 0 {
+	if r.Executor != nil || r.Incarnation != nil || r.Observation != nil || r.Stopped != nil || len(r.Checkpoint) > 0 {
 		return false
 	}
 	switch r.Error {

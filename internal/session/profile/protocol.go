@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/agentprofile"
+	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/workspace"
 	"github.com/google/uuid"
@@ -32,6 +33,7 @@ const (
 	actionInspect  = "inspect"
 	actionAbort    = "abort"
 	actionAttach   = "attach"
+	actionDescribe = "describe"
 )
 
 // Code describes a stable transport outcome. Unavailable never means absence.
@@ -83,8 +85,18 @@ type observation struct {
 	State       session.PlacementState `json:"state"`
 	Stopped     *session.Stopped       `json:"stopped,omitempty"`
 }
+
+// Description is what a remote executor states about itself: the placement
+// name launches must carry, its harness and its checkpoint byte limit.
+type Description struct {
+	Placement          string             `json:"placement"`
+	Harness            harness.NativeKind `json:"harness"`
+	MaxCheckpointBytes int64              `json:"maxCheckpointBytes"`
+}
+
 type response struct {
 	Version     int                  `json:"version"`
+	Executor    *Description         `json:"executor,omitempty"`
 	Incarnation *session.Incarnation `json:"incarnation,omitempty"`
 	Observation *observation         `json:"observation,omitempty"`
 	Stopped     *session.Stopped     `json:"stopped,omitempty"`

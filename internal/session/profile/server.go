@@ -34,7 +34,10 @@ type Config struct {
 	Allowances         map[string]session.Allowance
 	MaxDuration        time.Duration
 	MaxCheckpointBytes int64
-	Backend            session.Placement
+	// Authorizer decides who the home principal is. Without it, TokenFile
+	// holds the one static home principal token.
+	Authorizer Authorizer
+	Backend    session.Placement
 	// Profiles retains profile archives that launches name. Without it, a
 	// launch with a profile is unsupported.
 	Profiles ProfileStore
@@ -46,8 +49,53 @@ type ProfileStore interface {
 }
 type handler struct {
 	config  Config
-	wanted  [32]byte
+	home    Authorizer
 	maxBody int64
+}
+
+// ErrUnauthenticated means a bearer token identifies no caller at all.
+var ErrUnauthenticated = errors.New("profile: unauthenticated")
+
+// Authorizer decides whether a bearer token belongs to the home principal. It
+// returns nil for the principal, ErrUnauthenticated for an unknown token, a
+// *Rejection with CodeDenied for a known caller that is not the principal, and
+// any other error when it cannot decide, which the caller sees as unavailable.
+type Authorizer interface {
+	Authorize(ctx context.Context, token string) error
+}
+
+// StaticToken authorizes exactly one token, compared in constant time.
+func StaticToken(token string) (Authorizer, error) {
+	token, err := validToken(token)
+	if err != nil {
+		return nil, err
+	}
+	return staticToken(sha256.Sum256([]byte(token))), nil
+}
+
+type staticToken [32]byte
+
+func (s staticToken) Authorize(_ context.Context, token string) error {
+	actual := sha256.Sum256([]byte(token))
+	if subtle.ConstantTimeCompare(s[:], actual[:]) != 1 {
+		return ErrUnauthenticated
+	}
+	return nil
+}
+
+// AuthorizationStatus maps an Authorizer result to the HTTP status and code a
+// handler answers with; status 0 means the caller is the home principal.
+func AuthorizationStatus(err error) (int, Code) {
+	var refusal *Rejection
+	switch {
+	case err == nil:
+		return 0, ""
+	case errors.Is(err, ErrUnauthenticated):
+		return http.StatusUnauthorized, CodeDenied
+	case errors.As(err, &refusal) && refusal.Code == CodeDenied:
+		return http.StatusForbidden, CodeDenied
+	}
+	return http.StatusServiceUnavailable, CodeUnavailable
 }
 
 // NewHandler requires direct TLS 1.3 requests and authenticates before decoding.
@@ -68,12 +116,20 @@ func NewHandler(config Config) (http.Handler, error) {
 		allowed[name] = a
 	}
 	config.Allowances = allowed
-	token, err := readToken(config.TokenFile)
-	if err != nil {
-		return nil, err
+	home := config.Authorizer
+	if home == nil {
+		token, err := readToken(config.TokenFile)
+		if err != nil {
+			return nil, err
+		}
+		if home, err = StaticToken(token); err != nil {
+			return nil, err
+		}
+	} else if config.TokenFile != "" {
+		return nil, errors.New("profile: set either a token file or an authorizer, not both")
 	}
-	config.TokenFile = ""
-	return &handler{config: config, wanted: sha256.Sum256([]byte(token)), maxBody: maxBody}, nil
+	config.TokenFile, config.Authorizer = "", nil
+	return &handler{config: config, home: home, maxBody: maxBody}, nil
 }
 func readToken(name string) (string, error) {
 	f, err := os.Open(name)
@@ -85,8 +141,14 @@ func readToken(name string) (string, error) {
 	if err != nil || len(data) > 4096 {
 		return "", errors.New("profile: invalid token file")
 	}
-	token := strings.TrimSpace(string(data))
-	if len(token) < 32 || strings.ContainsAny(token, " \r\n\t") {
+	return validToken(string(data))
+}
+
+// validToken trims a bearer token and checks the length and characters every
+// home principal and work token needs.
+func validToken(raw string) (string, error) {
+	token := strings.TrimSpace(raw)
+	if len(token) < 32 || len(token) > 4096 || strings.ContainsAny(token, " \r\n\t") {
 		return "", errors.New("profile: token needs at least 32 non-whitespace characters")
 	}
 	return token, nil
@@ -102,6 +164,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if action == actionAttach {
 		h.attach(w, r)
+		return
+	}
+	if action == actionDescribe {
+		h.describe(w, r)
 		return
 	}
 	media, _, err := mime.ParseMediaType(r.Header.Get(headerContentType))
@@ -146,10 +212,11 @@ func (h *handler) requestAction(r *http.Request) (string, int, Code) {
 		return "", http.StatusUpgradeRequired, CodeDenied
 	}
 	authorization := r.Header.Values(headerAuthorization)
-	actual := sha256.Sum256([]byte(strings.TrimPrefix(r.Header.Get(headerAuthorization), bearerPrefix)))
-	matched := subtle.ConstantTimeCompare(h.wanted[:], actual[:]) == 1
-	if len(authorization) != 1 || !strings.HasPrefix(r.Header.Get(headerAuthorization), bearerPrefix) || !matched {
+	if len(authorization) != 1 || !strings.HasPrefix(authorization[0], bearerPrefix) {
 		return "", http.StatusUnauthorized, CodeDenied
+	}
+	if status, code := AuthorizationStatus(h.home.Authorize(r.Context(), strings.TrimPrefix(authorization[0], bearerPrefix))); status != 0 {
+		return "", status, code
 	}
 	if len(r.Header.Values("Origin")) > 0 || len(r.Header.Values("Cookie")) > 0 {
 		return "", http.StatusForbidden, CodeDenied
@@ -159,11 +226,40 @@ func (h *handler) requestAction(r *http.Request) (string, int, Code) {
 		return "", http.StatusNotFound, CodeInvalid
 	}
 	switch action {
-	case actionPrepare, actionActivate, actionStop, actionInspect, actionAbort, actionAttach:
+	case actionPrepare, actionActivate, actionStop, actionInspect, actionAbort, actionAttach, actionDescribe:
 	default:
 		return "", http.StatusNotFound, CodeInvalid
 	}
 	return action, 0, ""
+}
+
+// describe states the executor's fixed placement name, harness and checkpoint
+// limit, so a home that reached it through a Kubernetes context can name it and
+// check the limit without hand-copied configuration. The request carries only
+// the protocol version.
+func (h *handler) describe(w http.ResponseWriter, r *http.Request) {
+	media, _, err := mime.ParseMediaType(r.Header.Get(headerContentType))
+	if err != nil || media != jsonMedia {
+		writeError(w, http.StatusUnsupportedMediaType, CodeInvalid)
+		return
+	}
+	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, metadataLimit))
+	var input struct {
+		Version int `json:"version"`
+	}
+	if err != nil || strictDecode(data, &input) != nil || input.Version != protocolVersion {
+		writeError(w, http.StatusBadRequest, CodeInvalid)
+		return
+	}
+	encoded, err := json.Marshal(response{Version: protocolVersion, Executor: &Description{
+		Placement: h.config.Placement, Harness: h.config.Harness, MaxCheckpointBytes: h.config.MaxCheckpointBytes,
+	}})
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, CodeUnavailable)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(encoded)
 }
 
 func (h *handler) validateAction(action string, input request) error {

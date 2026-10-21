@@ -62,6 +62,13 @@ limit.
 - Pull needs more intent than session and source, such as a selected checkpoint.
 - `remote` and `workSources` gain different trust or transport requirements.
 
+## Subsequent decision
+
+[ADR 0036](0036-remote-executors-through-kubeconfig-contexts.md) names a remote
+executor by the placement name it describes, reached through a kubeconfig
+context, in place of `remote` and `workSources` entries. Once the CLI uses it,
+the per-name lookup above has a single source.
+
 ## Links
 
 - [Retained remote work](../guides/portable-workflows.md)

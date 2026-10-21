@@ -53,7 +53,7 @@ References describe exact fields, commands and supported behaviour.
 | Installation | [Local installation](reference/local-installation.md), [gateway certificates](reference/gateway-certificates.md), [cluster dependencies](reference/dependencies.md), [required secrets and config](reference/required-secrets-and-config.md) |
 | Harnesses | [Harnesses](reference/harnesses.md), [stock runtime examples](../examples/harnesses/README.md), [client compatibility](reference/client-compatibility.md), [input contract and completion](reference/agent-contract.md), [native launch and control](reference/native-control.md) |
 | MCP tools | [Native Kubernetes MCP](reference/kubernetes-mcp.md), [configured remote MCP](reference/configured-mcp.md), [Sproozi integration and diagnose](reference/sproozi-integration.md) |
-| Sessions and remote work | [Session commands](reference/session-commands.md), [profile](reference/profile.md), [Projects and workspace revisions](reference/projects-and-revisions.md) |
+| Sessions and remote work | [Session commands](reference/session-commands.md), [remote executor access](reference/remote-executors.md), [profile](reference/profile.md), [Projects and workspace revisions](reference/projects-and-revisions.md) |
 | Task submission services | [Task service MCP interface](reference/orchestration.md), [webhook contract](reference/webhook-contract.md) |
 
 ## Decisions and future work

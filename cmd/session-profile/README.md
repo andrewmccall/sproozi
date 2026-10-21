@@ -1,8 +1,12 @@
 # Remote executor (`session-profile`)
 
 `session-profile` serves one administrator-approved Kubernetes placement over
-authenticated TLS. The developer receives its fixed HTTPS URL, CA certificate
-and [home principal token](../../GLOSSARY.md#home-principal-token) file. Kubernetes credentials remain with the remote executor.
+authenticated TLS. In a cluster, the developer reaches it through a kubeconfig
+[context](../../GLOSSARY.md#context), signed in as the `sproozi-cli`
+ServiceAccount; see [remote executor access](../../docs/reference/remote-executors.md).
+A host-run executor instead gives the developer its fixed HTTPS URL, CA
+certificate and [home principal token](../../GLOSSARY.md#home-principal-token)
+file. Kubernetes credentials for the placement remain with the remote executor.
 See [Move a live session between Docker and Kubernetes](../../docs/guides/session-mobility.md) for the
 local/remote command sequence. Both supported harnesses have passed production
 Docker-to-Kubernetes-to-Docker round trips through this profile. Codex's extended
@@ -106,6 +110,10 @@ the normal in-cluster client configuration. Required backend permissions are:
 | `sproozi-agents` | Core `pods` | `get`, `patch`, `delete` |
 | `sproozi-agents` | Core `pods/exec` | `create` |
 
+With `"homeAuthorization": "kubernetes"`, also bind the profile's identity to
+the `system:auth-delegator` ClusterRole, so it can create TokenReviews and
+SubjectAccessReviews.
+
 Bind these as namespace-scoped roles to the profile's identity. The existing
 controller and gateway retain their own deployment RBAC. In particular, the
 gateway needs registration/account ConfigMap access in the Run namespace,
@@ -163,6 +171,22 @@ unbounded here. A bounded positive cost requires corresponding gateway pricing.
 }
 ```
 
+`homeAuthorization` selects who the home principal is. `"token"`, the default,
+accepts the one token in `tokenFile`. `"kubernetes"` requires `tokenFile` to be
+omitted and accepts any bearer token that a TokenReview authenticates and that
+Kubernetes RBAC allows to `use` `remoteexecutors.sproozi.com` named
+`placementName` in `namespace`, the rule `config/cli-access` grants the
+`sproozi-cli` ServiceAccount. Removing that RoleBinding revokes access on the
+next request.
+
+For an in-cluster executor reached through a context, also label its Service
+`sproozi.com/remote-executor: "true"` with a port named `https`, issue its
+serving certificate for `SERVICE.NAMESPACE.svc`, and publish the issuing CA in
+the ConfigMap `sproozi-remote-executor` under `ca.crt`. One executor per
+namespace. Home learns the executor's `placementName`, harness and
+`maxCheckpointBytes` from its authenticated `describe` request; the checkpoint
+limit must equal home's `local.maxCheckpointBytes`.
+
 Use `127.0.0.1:18444` for a same-host evaluation. A hosted remote service needs a
 reachable fixed listener, a matching certificate and host firewall rules. Its
 `placementName` must match the alias in the home configuration, and both sides
@@ -218,7 +242,8 @@ through the home journal. See the guide's
 
 To accept new Codex tasks independently of the local service, add `workTokenFile`
 and `repositories` to the configuration. The work token must be distinct from
-`tokenFile`, at least 32 characters, and stored privately. Repository entries
+`tokenFile`, at least 32 characters, and stored privately. It is checked first;
+any other bearer token is decided by `homeAuthorization`. Repository entries
 select either an administrator-owned absolute stopped `snapshot` path or an
 approved GitHub `url` with an optional `ref`. URL fetching uses the worker's
 separately scoped GitHub capability; the trusted profile never imports a worker's
