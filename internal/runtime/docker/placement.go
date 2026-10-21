@@ -842,12 +842,11 @@ func (p *Placement) quiesceNative(ctx context.Context, r *placementRecord, i ses
 		}
 		var thread string
 		thread, err = harness.QuiesceNative(ctx, control, r.thread(), r.Launch.Deadline, bind)
-		if errors.Is(err, harness.ErrQuiesceUnacknowledged) && r.Launch.Harness != harness.NativeClaude {
+		if errors.Is(err, harness.ErrQuiesceUnacknowledged) && r.Launch.Harness != harness.NativeClaude &&
+			p.agentStops(ctx, *r.Agent) {
 			// A lost Codex reply is resolved by the actual stopped container.
-			observed, observeErr := p.engine.Observe(ctx, *r.Agent)
-			if observeErr == nil && !observed.Running && observed.PID == 0 {
-				err = nil
-			}
+			// The reply is usually lost because the container exited first.
+			err = nil
 		}
 		if err != nil {
 			return err
@@ -859,4 +858,25 @@ func (p *Placement) quiesceNative(ctx context.Context, r *placementRecord, i ses
 	}
 	r.NativeQuiet = true
 	return p.save(*r)
+}
+
+// agentStops reports whether the agent container is observed stopped within
+// a few seconds, as it is when quiesce ended the supervisor before its reply
+// reached the caller.
+func (p *Placement) agentStops(ctx context.Context, agent Instance) bool {
+	for range 40 {
+		observed, err := p.engine.Observe(ctx, agent)
+		if err != nil {
+			return false
+		}
+		if !observed.Running && observed.PID == 0 {
+			return true
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+	return false
 }

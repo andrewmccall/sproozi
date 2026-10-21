@@ -190,6 +190,10 @@ func (s *Service) Start(ctx context.Context, id, operationID, path string, kind 
 	if !work.CanonicalID(id) || !work.CanonicalID(operationID) || !filepath.IsAbs(path) {
 		return Status{}, errors.New("home: UUIDs and absolute stopped workspace required")
 	}
+	if c, catalogErr := s.readCatalog(id); catalogErr == nil && c.Source != ReservedHome {
+		return Status{}, rejectedError(fmt.Sprintf("home: start intent conflicts with retained launch; %s was "+
+			"not created by start, see \"sproozi status %s\"", id, id))
+	}
 	r, err := s.coordinator.Inspect(id)
 	if os.IsNotExist(err) {
 		r, err = s.createWorkspaceExecution(ctx, id, operationID, path, local, includeIgnored, harnessArgs)
@@ -213,7 +217,55 @@ func (s *Service) Start(ctx context.Context, id, operationID, path string, kind 
 			"started with operation %s: to continue it, repeat the original start command with --operation %s, "+
 			"or run \"sproozi cancel %s\" to revoke and force-stop its current execution", id, first.OperationID, first.OperationID, id))
 	}
+	// Catalogue the session before its first visit starts, so stop, cancel
+	// and resume address it like any other home session.
+	if err = s.catalogStarted(r); err != nil {
+		return Status{}, err
+	}
 	return s.startFirstVisit(ctx, r)
+}
+
+// catalogStarted records a session created by start in the home catalogue,
+// once. Its first execution shares the session UUID. A started execution that
+// is already idle (catalogued late, after an interruption) is recorded as
+// stopped, ready to resume.
+func (s *Service) catalogStarted(r session.Record) error {
+	unlock, err := s.lockSession(r.ID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return s.catalogStartedLocked(r)
+}
+
+// catalogStartedLocked is catalogStarted for a caller holding the session lock.
+func (s *Service) catalogStartedLocked(r session.Record) error {
+	existing, err := s.readCatalog(r.ID)
+	if err == nil {
+		if existing.Source != ReservedHome {
+			return errors.New("home: session UUID belongs to an imported session")
+		}
+		return nil
+	}
+	if !os.IsNotExist(err) {
+		return err
+	}
+	first := r.Operations[0].Launch
+	c := localSession{Version: 1, ID: r.ID, Source: ReservedHome, Operation: first.OperationID, Claimed: true,
+		Original: work.Export{ID: r.ID, Harness: r.Harness, OperationID: first.OperationID, Claimed: true},
+		Current:  r.ID, Executions: []string{r.ID}}
+	if r.Phase == session.PhaseIdle && r.CancelOperation == "" {
+		if c.Committed, err = s.lastStop(r); err != nil {
+			return err
+		}
+		if c.Committed.CheckpointDigest != "" {
+			if err = s.retainCatalogArtifact(c.Committed.Checkpoint, c.Committed.CheckpointDigest); err != nil {
+				return err
+			}
+		}
+		c.Current = ""
+	}
+	return s.saveCatalog(c)
 }
 
 func (s *Service) createWorkspaceExecution(ctx context.Context, id, operationID, path string, local runtimedocker.PlacementConfig, includeIgnored, harnessArgs []string) (session.Record, error) {

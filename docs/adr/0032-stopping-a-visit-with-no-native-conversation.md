@@ -46,11 +46,13 @@ The Docker placement records the visit as turnless, revokes and fences it,
 seals its usage and captures nothing. The coordinator accepts a stop with no
 checkpoint only when the execution has never kept one and the stop names no
 thread. The visit is retained with its receipt and no checkpoint, and the
-execution goes idle with its retained Git workspace input. A later
-`move --to local` starts a new visit from that workspace with no thread, the
-same as the first visit; the first stop that finds a conversation binds it.
-Journal validation allows such workspace visits only before the first kept
-checkpoint.
+execution goes idle with its retained Git workspace input. A later visit of
+the same execution from that workspace has no thread, like the first one; the
+first stop that finds a conversation binds it. Journal validation allows such
+workspace visits only before the first kept checkpoint.
+[ADR 0034](0034-resume-continues-every-home-session.md) makes `resume` the way
+to continue a stopped session: for a turnless one it starts a new execution
+from the same workspace.
 
 The Docker gateway owner now seals a first visit whose conversation ID was
 never bound. The receipt then refuses any later binding. This also lets a
@@ -86,12 +88,14 @@ one tells the user to run `recover`.
   turnless: its transcript cannot be checkpointed, so `stop` still waits and
   `cancel` is the way out. A Codex turn that failed with a provider error is
   likewise not detected; Codex records no failure hook to observe.
-- A stopped turnless execution keeps its original deadline and allowance;
-  `move --to local` continues it. It cannot move to Kubernetes, which needs a
-  checkpoint; home refuses that move. A move to Kubernetes requested while a
+- A stopped turnless session resumes from its starting workspace. A move to
+  Kubernetes, which needs a checkpoint, is refused for an execution with no
+  kept conversation. A move to Kubernetes requested while a
   turnless first visit is still running stops it, then cannot prepare the
   destination; `cancel` ends that execution, and a new `start` begins again
   from the same directory, since the visit kept no work.
+- [ADR 0035](0035-bounded-graceful-stops-and-settled-input.md) bounds each wait
+  for a turn and keeps terminal input that submits nothing from blocking it.
 - Kubernetes visits always carry a task or a checkpoint, so they are never
   turnless; their placement rejects a turnless reply.
 

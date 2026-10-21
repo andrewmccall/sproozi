@@ -55,7 +55,21 @@ type NativeReply struct {
 	// its only turn ended without completing. Quiesce then stops the
 	// harness without one.
 	Turnless bool `json:"turnless,omitempty"`
+	// Waiting says, while a graceful stop waits for the native turn, what it
+	// waits for. A quiesce reply with it stopped waiting without stopping the
+	// harness, which keeps running with input gated.
+	Waiting string `json:"waiting,omitempty"`
 }
+
+// NativeQuiesceWait bounds each graceful wait for a completed native turn:
+// observing the first visit's thread, and the supervisor's quiesce. When it
+// passes the stop reports what it waits for instead of waiting silently.
+const NativeQuiesceWait = 2 * time.Minute
+
+// ErrNativeTurnPending reports a graceful stop that gave up waiting for the
+// native turn. Nothing changed: the writer still runs with input gated, and
+// repeating the stop waits again.
+var ErrNativeTurnPending = errors.New("the stop is still waiting")
 
 // NativeExit is the supervisor's process exit observation, not a container fence.
 type NativeExit struct {
@@ -148,7 +162,11 @@ func QuiesceNative(ctx context.Context, control NativeControl, thread string, de
 		return "", err
 	}
 	if thread == "" {
-		observed, err := observeNativeThread(ctx, control, deadline)
+		wait := deadline
+		if bound := time.Now().Add(NativeQuiesceWait); bound.Before(wait) {
+			wait = bound
+		}
+		observed, err := observeNativeThread(ctx, control, wait, deadline)
 		if err != nil {
 			return "", err
 		}
@@ -163,6 +181,9 @@ func QuiesceNative(ctx context.Context, control NativeControl, thread string, de
 	if err != nil {
 		return thread, fmt.Errorf("%w: %w", ErrQuiesceUnacknowledged, err)
 	}
+	if waiting, err := decodeNativeReply(output, NativeQuiesce, NativeStopping); err == nil && waiting.Waiting != "" {
+		return thread, fmt.Errorf("%w for %s", ErrNativeTurnPending, waiting.Waiting)
+	}
 	reply, err := DecodeNativeReply(output, NativeQuiesce, NativeStopped, thread)
 	if err == nil && thread == "" && !reply.Turnless {
 		return "", errors.New("native quiesce stopped without a bound thread")
@@ -171,8 +192,11 @@ func QuiesceNative(ctx context.Context, control NativeControl, thread string, de
 }
 
 // observeNativeThread waits for the genuine native UUID of a first visit. It
-// returns an empty UUID when the supervisor reports the visit turnless.
-func observeNativeThread(ctx context.Context, control NativeControl, deadline time.Time) (string, error) {
+// returns an empty UUID when the supervisor reports the visit turnless, and
+// ErrNativeTurnPending with what it waits for once wait passes before the
+// execution deadline.
+func observeNativeThread(ctx context.Context, control NativeControl, wait, deadline time.Time) (string, error) {
+	waiting := "the native turn to complete"
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	for {
@@ -190,12 +214,18 @@ func observeNativeThread(ctx context.Context, control NativeControl, deadline ti
 		if status.Turnless {
 			return "", nil
 		}
+		if status.Waiting != "" {
+			waiting = status.Waiting
+		}
 		select {
 		case <-ctx.Done():
 			return "", ctx.Err()
 		case <-ticker.C:
 			if !time.Now().Before(deadline) {
 				return "", errors.New("native UUID unavailable before deadline")
+			}
+			if !time.Now().Before(wait) {
+				return "", fmt.Errorf("%w for %s", ErrNativeTurnPending, waiting)
 			}
 		}
 	}

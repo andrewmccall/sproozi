@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -212,6 +213,36 @@ func TestTurnlessStopKeepsWorkspaceAndRestartsFromIt(t *testing.T) {
 	}
 }
 
+// A stop that gave up waiting for the native turn stays pending with the
+// writer running; repeating it finishes once the turn completes.
+func TestStopWaitingForTurnStaysStopping(t *testing.T) {
+	t.Parallel()
+	c, _, local, _, start := setup(t)
+	first := start.Source
+	first.ExecutionID, first.OperationID, first.AllocationID = uuid.NewString(), uuid.NewString(), uuid.NewString()
+	first.ThreadID, first.CheckpointDigest = "", ""
+	if _, err := c.Create(first, []byte("captured git workspace"), ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Recover(t.Context(), first.ExecutionID); err != nil {
+		t.Fatal(err)
+	}
+	start.Source = first
+	local.pendingTurn = true
+	op := uuid.NewString()
+	r, err := c.Finalize(t.Context(), start.Source.ExecutionID, op)
+	if !errors.Is(err, harness.ErrNativeTurnPending) || r.Phase != PhaseStopping || r.Active == nil {
+		t.Fatalf("pending stop: %+v %v", r.Phase, err)
+	}
+	if r, err = c.Inspect(start.Source.ExecutionID); err != nil || r.Phase != PhaseStopping {
+		t.Fatalf("retained pending stop: %+v %v", r.Phase, err)
+	}
+	local.pendingTurn = false
+	if r, err = c.Finalize(t.Context(), start.Source.ExecutionID, op); err != nil || r.Phase != PhaseIdle {
+		t.Fatalf("repeated stop: %+v %v", r.Phase, err)
+	}
+}
+
 type fakePlacement struct {
 	data                                  []byte
 	digest                                string
@@ -226,6 +257,7 @@ type fakePlacement struct {
 	// turnless stops a visit from the retained workspace with no native
 	// conversation: no thread and no checkpoint.
 	turnless       bool
+	pendingTurn    bool
 	corruptReceipt func(*Receipt)
 	charge         budget.TrustedUsage
 }
@@ -292,6 +324,9 @@ func (p *fakePlacement) Inspect(_ context.Context, l Launch) (Observation, error
 func (p *fakePlacement) Stop(_ context.Context, l Launch, i Incarnation) (Stopped, error) {
 	if p.unknownStop {
 		return Stopped{}, errors.New("unreachable placement")
+	}
+	if p.pendingTurn {
+		return Stopped{}, fmt.Errorf("%w for the current turn", harness.ErrNativeTurnPending)
 	}
 	o, ok := p.records[l.AllocationID]
 	if !ok || o.Incarnation != i || !SameLaunch(o.Launch, l) {

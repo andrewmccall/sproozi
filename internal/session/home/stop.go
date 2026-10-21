@@ -58,8 +58,10 @@ func (s *Service) Stop(ctx context.Context, id, operation string) (Status, error
 	if err != nil {
 		return Status{}, err
 	}
-	if err = s.retainCatalogArtifact(stopped.Checkpoint, stopped.CheckpointDigest); err != nil {
-		return Status{}, err
+	if stopped.CheckpointDigest != "" {
+		if err = s.retainCatalogArtifact(stopped.Checkpoint, stopped.CheckpointDigest); err != nil {
+			return Status{}, err
+		}
 	}
 	r.Committed = stopped
 	r.Current = ""
@@ -76,12 +78,22 @@ func (s *Service) stopExecution(ctx context.Context, id, operation string) (sess
 	if err != nil {
 		return session.Stopped{}, err
 	}
+	return s.lastStop(r)
+}
+
+// lastStop is an idle execution's last stopped visit with the execution's
+// committed checkpoint. A session stopped with no conversation has none: it
+// resumes from the workspace its execution started from.
+func (s *Service) lastStop(r session.Record) (session.Stopped, error) {
 	if len(r.Visits) == 0 {
 		return session.Stopped{}, errors.New("home: execution has no stopped visit")
 	}
-	data, err := s.coordinator.Checkpoint(id)
-	if err != nil {
-		return session.Stopped{}, err
+	var data []byte
+	if r.Checkpoint.Path != "" {
+		var err error
+		if data, err = s.coordinator.Checkpoint(r.ID); err != nil {
+			return session.Stopped{}, err
+		}
 	}
 	visit := r.Visits[len(r.Visits)-1]
 	return session.Stopped{Launch: visit.Launch, Incarnation: visit.Incarnation, ActualStopped: visit.ActualStopped,

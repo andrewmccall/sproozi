@@ -164,7 +164,7 @@ def main():
         s = report["steps"]
         report["passed"] = all([
             s["initCodex"]["ready"], s["addClaude"]["ready"], len(s["addClaude"]["paths"]) == 2, s["doctor"]["ok"],
-            all(s["sessions"]["turns"].values()), all(v["phase"] == "idle" and v["nativeUUID"] for v in s["sessions"]["stops"].values()),
+            all(s["sessions"]["turns"].values()), all(v["phase"] == "retained" and v["nativeUUID"] for v in s["sessions"]["stops"].values()),
             s["sessions"]["codexSharedInstructions"], s["sessions"]["claudeSharedInstructions"], s["sessions"]["consumersReleased"],
             all(s["renewal"].values()), not s["serviceStop"]["running"], s["clusterIsolation"]["kubectlCalls"] == ""])
     finally:

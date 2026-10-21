@@ -340,18 +340,63 @@ func TestUnknownSessionRepliesWithoutJournalPath(t *testing.T) {
 	}
 }
 
-// Resume names why a started execution, which pull never imported, cannot resume.
-func TestResumeExplainsStartedExecution(t *testing.T) {
+// A session created by start resumes where it stopped: a new execution from
+// its last checkpoint, with the same conversation, fresh limits and a new
+// deadline, even after the first execution's deadline.
+func TestResumeContinuesAStartedSessionAfterItsDeadline(t *testing.T) {
 	t.Parallel()
-	s, _, _, repo := testService(t)
+	s, local, _, repo := testService(t)
 	id := uuid.NewString()
+	s.duration = 5 * time.Second
 	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	r := exchange(t, s, Request{Action: ActionResume, ID: id, OperationID: uuid.NewString()})
-	if r.UnknownSession || !strings.Contains(r.Error, `started at home with "sproozi start"`) ||
-		strings.Contains(r.Error, string(filepath.Separator)) {
-		t.Fatalf("resume of a started execution replied %+v", r)
+	if !r.Rejected || !strings.Contains(r.Error, `run "sproozi stop `+id+`" first`) {
+		t.Fatalf("resume of a running session replied %+v", r)
+	}
+	stopped, err := s.Stop(t.Context(), id, uuid.NewString())
+	if err != nil || stopped.Phase != stageRetained || stopped.ThreadID != testNativeUUID {
+		t.Fatalf("stop of a started session: %+v %v", stopped, err)
+	}
+	time.Sleep(time.Until(stopped.Deadline) + 100*time.Millisecond)
+	s.duration = time.Hour
+	resumed, err := s.Resume(t.Context(), id, uuid.NewString(), []string{"--search"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	active := resumed.Session.Active
+	if resumed.ID != id || resumed.ExecutionID == id || active == nil || active.Launch.ThreadID != testNativeUUID ||
+		active.Launch.CheckpointDigest != local.digest || !active.Launch.Deadline.After(time.Now().Add(time.Minute)) ||
+		!slices.Equal(active.Launch.HarnessArgs, []string{"--search"}) {
+		t.Fatalf("resumed session: %+v", resumed)
+	}
+	if again, err := s.Stop(t.Context(), id, uuid.NewString()); err != nil || again.ThreadID != testNativeUUID {
+		t.Fatalf("stop of the resumed execution: %+v %v", again, err)
+	}
+}
+
+// A session stopped with no conversation resumes from the workspace it
+// started from, as a new conversation.
+func TestResumeOfTurnlessSessionStartsFromItsWorkspace(t *testing.T) {
+	t.Parallel()
+	s, local, _, repo := testService(t)
+	local.turnless = true
+	id := uuid.NewString()
+	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	stopped, err := s.Stop(t.Context(), id, uuid.NewString())
+	if err != nil || stopped.Phase != stageRetained || stopped.ThreadID != "" {
+		t.Fatalf("turnless stop: %+v %v", stopped, err)
+	}
+	resumed, err := s.Resume(t.Context(), id, uuid.NewString(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	active := resumed.Session.Active
+	if active == nil || active.Launch.ThreadID != "" || active.Launch.CheckpointDigest != "" || resumed.Session.Workspace == "" {
+		t.Fatalf("turnless resume: %+v", resumed.Session)
 	}
 }
 

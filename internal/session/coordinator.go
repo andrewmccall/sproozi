@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/google/uuid"
 )
 
@@ -227,6 +228,11 @@ func (c *Coordinator) stopSource(ctx context.Context, r Record, index int) (Reco
 			return r, errors.New("session: source placement unavailable")
 		}
 		stopped, err := p.Stop(ctx, source.Launch, source.Incarnation)
+		if errors.Is(err, harness.ErrNativeTurnPending) {
+			// The writer still runs with input gated; the stop stays pending
+			// and repeating it waits again.
+			return r, err
+		}
 		fenced := fencedBy(source.Launch, source.Incarnation, stopped)
 		if err != nil && (!errors.Is(err, ErrUsageUnsealed) || !fenced) {
 			r.Phase = PhaseUnknownStop

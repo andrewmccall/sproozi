@@ -151,3 +151,24 @@ func TestClaudeSkillListingIsContext(t *testing.T) {
 		t.Fatalf("skill listing changed the assistant leaf: %q %v", leaf, err)
 	}
 }
+
+// Claude Code 2.1.302 caches system-prompt request blocks with role "system"
+// from a conversation's second request. Rejecting them made every stop after
+// a second request wait forever; they stay outside the primary chain.
+func TestClaudeSystemRequestCacheKeepsLeaf(t *testing.T) {
+	state := resumedContextClaudeState(t)
+	blob := `{"type":"api-request-blob","sessionId":"` + state.ThreadID + `","hash":` +
+		`"f2b07e4bba62feaf145e728a60dd8353b68e79ef96129409521e2e798c150036",` +
+		`"message":{"role":"system","content":"# Environment\nYou have been invoked in the following environment."}}` + "\n"
+	state.Transcript = append(bytes.Clone(state.Transcript), blob...)
+	leaf, err := ClaudeTranscriptLeaf(state, 1<<20)
+	if err != nil || leaf != "be2e538e-cdc0-4111-81bb-eee6623e4f44" {
+		t.Fatalf("system request cache changed leaf: %q %v", leaf, err)
+	}
+	other := bytes.Replace(state.Transcript, []byte(`"role":"system","content":"# Environment`),
+		[]byte(`"role":"developer","content":"# Environment`), 1)
+	state.Transcript = other
+	if _, err = ClaudeTranscriptLeaf(state, 1<<20); err == nil {
+		t.Fatal("request cache with an unknown role accepted")
+	}
+}

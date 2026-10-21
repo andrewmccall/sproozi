@@ -278,6 +278,27 @@ func (c *Coordinator) Checkpoint(id string) ([]byte, error) {
 	return c.checkpointBytes(r)
 }
 
+// Workspace returns the retained Git workspace an execution started from.
+func (c *Coordinator) Workspace(id string) ([]byte, error) {
+	unlock, err := c.lockSession(id)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	r, err := c.load(id)
+	if err != nil {
+		return nil, err
+	}
+	if r.Workspace == "" {
+		return nil, errors.New("session: execution retains no starting workspace")
+	}
+	data, err := readFile(filepath.Join(c.dir, workspacePath(r.Workspace)), c.maxCheckpoint)
+	if err == nil && fmt.Sprintf("%x", sha256.Sum256(data)) != r.Workspace {
+		err = errors.New("session: retained input changed")
+	}
+	return data, err
+}
+
 // List returns the IDs of every retained execution journal.
 func (c *Coordinator) List() ([]string, error) {
 	c.mu.RLock()

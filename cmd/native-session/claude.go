@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/andrewmccall/sproozi/internal/agentprofile"
 	"github.com/andrewmccall/sproozi/internal/harness"
@@ -16,6 +17,8 @@ import (
 
 const (
 	journalUnavailable = "journal_unavailable_or_invalid"
+	pendingTools       = "pending_tools"
+	inputChanged       = "input_changed"
 	claudePromptSubmit = "UserPromptSubmit"
 	claudePreTool      = "PreToolUse"
 	claudePostTool     = "PostToolUse"
@@ -50,10 +53,12 @@ type claudeLifecycle struct {
 	// everCompleted records that some turn of this conversation completed.
 	failed        bool
 	everCompleted bool
-	input         uint64
-	pending       map[string]bool
-	lastEvent     string
-	rejected      string
+	// lastHook is when the last lifecycle hook arrived.
+	lastHook  time.Time
+	input     uint64
+	pending   map[string]bool
+	lastEvent string
+	rejected  string
 }
 
 // Completion diagnostics describe the observer's state without disclosing
@@ -67,12 +72,13 @@ func (s *server) claudeCompletion() *claudeCompletion {
 		PromptGeneration: c.input, InputGeneration: s.inputGeneration,
 		LastEvent: c.lastEvent, Rejected: c.rejected, Observation: "lifecycle_incomplete"}
 	selected := s.config.ThreadID
+	settled := s.inputSettled()
 	s.mu.Unlock()
 	switch {
 	case d.PendingTools != 0:
-		d.Observation = "pending_tools"
-	case d.PromptGeneration != d.InputGeneration:
-		d.Observation = "input_changed"
+		d.Observation = pendingTools
+	case d.PromptGeneration != d.InputGeneration && !settled:
+		d.Observation = inputChanged
 	case c.id == "" || (selected != "" && c.id != selected):
 		d.Observation = "identity_unavailable"
 	case d.Completed:
@@ -122,6 +128,7 @@ func (s *server) claudeHook(h *claudeHook) response {
 		return r
 	}
 	s.claude.id = h.SessionID
+	s.claude.lastHook = time.Now()
 	if err = s.claude.accept(*h, s.inputGeneration); err != nil {
 		r.Error = err.Error()
 		s.claude.rejected = "invalid_lifecycle_transition"
@@ -183,11 +190,21 @@ func (s *server) claudeTurnless() bool {
 	return c.failed && !c.everCompleted && len(c.pending) == 0
 }
 
+// claudeTurnReady reports a completed turn with no running tool and no
+// unsettled input after it. Input after the completed turn blocks the stop
+// until it settles: a submitted or queued prompt reports UserPromptSubmit and
+// clears the completion, while terminal replies, focus reports and drafts do
+// not. The caller holds s.mu.
+func (s *server) claudeTurnReady() bool {
+	c := s.claude
+	return c.completed && len(c.pending) == 0 && (c.input == s.inputGeneration || s.inputSettled())
+}
+
 func (s *server) observeClaudeTurn() (string, string, error) {
 	s.mu.Lock()
 	c := s.claude
 	selected, maxBytes := s.config.ThreadID, s.config.RolloutMaxBytes
-	ready := c.completed && len(c.pending) == 0 && c.input == s.inputGeneration
+	ready := s.claudeTurnReady()
 	s.mu.Unlock()
 	if !ready || c.id == "" || (selected != "" && selected != c.id) {
 		return "", "", errors.New("claude completed turn is unavailable")

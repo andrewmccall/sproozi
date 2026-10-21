@@ -140,7 +140,7 @@ func TestClaudeStatusExplainsCompletionBarrierWithoutPayloads(t *testing.T) {
 	if got := s.claudeHook(h); got.Error != "" {
 		t.Fatal(got.Error)
 	}
-	if got := s.status().Completion; got.Observation != "pending_tools" || got.PendingTools != 1 {
+	if got := s.status().Completion; got.Observation != pendingTools || got.PendingTools != 1 {
 		t.Fatalf("pending tool diagnostic: %+v", got)
 	}
 	h.Event = claudePostTool
@@ -154,7 +154,7 @@ func TestClaudeStatusExplainsCompletionBarrierWithoutPayloads(t *testing.T) {
 	}
 	s.inputGeneration = 3
 	d := s.status().Completion
-	if d.Observation != "input_changed" || !d.Completed || d.PromptGeneration != 2 || d.InputGeneration != 3 {
+	if d.Observation != inputChanged || !d.Completed || d.PromptGeneration != 2 || d.InputGeneration != 3 {
 		t.Fatalf("input diagnostic: %+v", d)
 	}
 	encoded, err := json.Marshal(s.status())

@@ -44,10 +44,12 @@ type placementFixture struct {
 	digest                                         string
 	initials, prepares, activations, stops, aborts int
 	lostStop, lostActivate, unknownUsage           bool
-	rejectActivate, failInspect                    bool
-	partialCreate                                  bool
-	inspections                                    int
-	charge                                         int64
+	// turnless stops a visit from a workspace with no conversation.
+	turnless                    bool
+	rejectActivate, failInspect bool
+	partialCreate               bool
+	inspections                 int
+	charge                      int64
 	// Non-nil hold channels are closed when the call is reached; the call then
 	// waits for its context, as a native turn that has not completed would.
 	holdPrepare, holdStop chan struct{}
@@ -140,6 +142,9 @@ func (p *placementFixture) Stop(ctx context.Context, l session.Launch, i session
 	stopped := session.Stopped{Launch: l, Incarnation: i, ActualStopped: true, ThreadID: testNativeUUID, Checkpoint: p.artifact, CheckpointDigest: p.digest, Receipt: p.receipt(l, i)}
 	if p.unknownUsage {
 		stopped.Receipt = nil
+	}
+	if p.turnless && l.ThreadID == "" {
+		stopped.ThreadID, stopped.Checkpoint, stopped.CheckpointDigest = "", nil, ""
 	}
 	r.State = session.PlacementStopped
 	r.Stopped = &stopped

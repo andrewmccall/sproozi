@@ -16,6 +16,7 @@ import (
 const (
 	claudeUser      = "user"
 	claudeAssistant = "assistant"
+	claudeSystem    = "system"
 	claudeText      = "text"
 )
 
@@ -271,7 +272,7 @@ func (c *claudeChain) accept(line []byte, id string) error {
 		err = validateClaudeProgress(row, c.pending, c.tools, c.stops, c.leaf)
 	case "attachment":
 		err = validateClaudeAttachment(row)
-	case "system":
+	case claudeSystem:
 		switch row.Subtype {
 		case "stop_hook_summary":
 			if c.leaf == "" || len(c.pending) != 0 {
@@ -318,8 +319,10 @@ func validateClaudeMetadata(row claudeRecord) (bool, error) {
 		valid = row.Version != "" && claudeCacheHash.MatchString(row.ShapeHash)
 	case "api-request-blob":
 		messageCache = true
+		// Claude Code 2.1.302 also caches the system prompt's request blocks
+		// with role "system" once a conversation has a second request.
 		valid = claudeCacheHash.MatchString(row.CacheHash) && len(row.Message.Content) != 0 &&
-			(row.Message.Role == claudeUser || row.Message.Role == claudeAssistant)
+			(row.Message.Role == claudeUser || row.Message.Role == claudeAssistant || row.Message.Role == claudeSystem)
 	case "api-request":
 		valid = row.Version != "" && claudeSessionID.MatchString(row.RequestID) && claudeCacheHash.MatchString(row.ShapeHash)
 	default:

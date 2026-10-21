@@ -71,8 +71,8 @@ requirements and workspace limits.
 | `sessions` | List accessible sessions, optionally filtered by executor or Project. |
 | `status` | Inspect one session by its stable session UUID. |
 | `pull` | Claim a stopped remote session and import its conversation and Git workspace. This does not start an agent. |
-| `resume` | Start a new local execution of a stopped session with fresh permissions. It attaches the terminal unless `--detach` is selected. |
-| `stop` | Stop local work and retain its supported state for later resume. A session whose harness never started a conversation stops at once and keeps its starting workspace. |
+| `resume` | Continue a stopped session's conversation and workspace from its last checkpoint in a new local execution, with fresh permissions, allowance and deadline. It works for sessions created with `start` and sessions imported with `pull`, after the previous execution's deadline too. It attaches the terminal unless `--detach` is selected. |
+| `stop` | Stop local work after its current turn and retain its supported state for `resume`. A session whose harness never started a conversation stops at once and keeps its starting workspace. A stop still waiting after about two minutes returns and says what it waits for. |
 | `cancel` | Revoke and force-stop a session's current execution, including unfinished work that cannot stop gracefully. |
 | `recover` | Continue a journaled operation after an uncertain response or interruption. |
 
@@ -262,9 +262,27 @@ accept a new operation UUID. `stop` waits for supported foreground work and save
 conversation, because no prompt was submitted or, for Claude Code, every
 prompt failed with a provider error, has nothing to wait for: `stop` ends it
 within a few seconds, finalizes its usage and keeps no checkpoint. The session
-goes `idle` with the workspace it started from, and
-`sproozi move ID --to local` starts it again before its deadline. An old operation remains bound to its original
+is `retained` with the workspace it started from, and `resume` starts a new
+conversation from it. An old operation remains bound to its original
 execution and cannot affect a later resume.
+
+A stopped session is `retained`: `resume` continues it, and `attach`, `move`,
+`cancel` and `recover` refuse it with `home: session has no active execution;
+use "sproozi resume ID"`. `move --to NAME` changes the placement of a running
+session. Each `resume` creates a new execution, so a session's `executionId`
+changes while its `id` and `threadId` stay the same.
+
+`stop` and `move` wait for the harness's current turn. After 30 seconds the
+command prints `Waiting for the current turn of session ID to finish; run
+"sproozi cancel ID" in another terminal to force-stop it instead.` to
+standard error. Each wait is bounded: after about two minutes without a
+completed turn the command fails with, for example, `the stop is still waiting
+for the current Claude Code turn to finish; the session keeps running with its
+terminal input paused: repeat this command to keep waiting, or run "sproozi
+cancel ID" to force-stop it`. The session stays in phase `stopping`, with
+terminal input paused, until the stop is repeated or cancelled. Terminal input
+that submits nothing, such as a focus report or a terminal's reply to a query,
+delays a stop by about three seconds and no longer blocks it.
 
 ### Recovery messages
 
@@ -448,11 +466,9 @@ in `start home with "sproozi serve --config '/Users/me/home config.json'"`. The
 path is quoted only when it holds characters the shell would treat specially.
 A session UUID that home doesn't
 hold fails with `docker (home): no session UUID; run "sproozi sessions" to list
-sessions`. `resume` continues only sessions imported with `pull`; for a session
-created with `start`, it fails with `home: session UUID was started at home
-with "sproozi start"; resume continues only sessions imported with "sproozi
-pull"; to continue it before its deadline, run "sproozi move UUID --to
-local"`, naming the configured `local.name`.
+sessions`. `resume` of an execution UUID rather than its session fails with
+`home: UUID is an execution of session SESSION; resume the session UUID
+SESSION`.
 `truncated: true` means a source or row limit omitted results. A remote
 `home-owned` mirror and its local
 import remain separate rows labelled by catalogue; matching session IDs do not

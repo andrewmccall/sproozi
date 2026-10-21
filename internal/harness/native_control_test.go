@@ -134,3 +134,22 @@ func TestQuiesceNativeStopsTurnlessFirstVisitWithoutBinding(t *testing.T) {
 		t.Fatal("quiesce without a thread or turnless report accepted")
 	}
 }
+
+// A quiesce reply that is still waiting becomes ErrNativeTurnPending naming
+// what it waits for, not an unknown stop.
+func TestQuiesceNativeReportsPendingTurn(t *testing.T) {
+	const thread = "12345678-1234-1234-1234-123456789abc"
+	control := func(_ context.Context, op NativeOp) ([]byte, error) {
+		switch op {
+		case NativeGate:
+			return []byte(`{"op":"gate","state":"stopping","threadId":"` + thread + `"}`), nil
+		case NativeQuiesce:
+			return []byte(`{"op":"quiesce","state":"stopping","waiting":"the current Codex turn to complete"}`), nil
+		}
+		return nil, errors.New("unexpected operation")
+	}
+	_, err := QuiesceNative(t.Context(), control, thread, time.Now().Add(time.Minute), nil)
+	if !errors.Is(err, ErrNativeTurnPending) || !strings.Contains(err.Error(), "current Codex turn") {
+		t.Fatalf("pending quiesce: %v", err)
+	}
+}

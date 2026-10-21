@@ -97,3 +97,5 @@ ADR 0024's statement that releases do not pin clients.
 | [0031](0031-user-profile-for-managed-sessions.md) | One user profile, sent with each Docker launch and stored by digest for Kubernetes, replacing the shared agent files. |
 | [0032](0032-stopping-a-visit-with-no-native-conversation.md) | A first visit with no harness conversation stops at once without a checkpoint, and its usage seals without a bound conversation ID. |
 | [0033](0033-harness-arguments-from-the-command-line.md) | Arguments after `--` on start and resume go to the harness, refusing flags Sproozi controls; Codex upgrade prompts are acknowledged from its own catalogue. |
+| [0034](0034-resume-continues-every-home-session.md) | Every home session is catalogued, and `resume` continues a stopped one in a new execution, including sessions created with `start` and after the old deadline. |
+| [0035](0035-bounded-graceful-stops-and-settled-input.md) | Graceful stops report what they wait for after a bounded time, settled terminal input no longer blocks them, and Claude system request caches are accepted. |

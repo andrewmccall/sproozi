@@ -78,7 +78,7 @@ var commands = []command{
 		summary: "Claim a stopped remote session and import it into home without starting an agent",
 		flags:   []string{"config", "socket", "executor", "id", "operation", "from"}},
 	{name: home.ActionResume, operands: "SESSION_UUID", owner: homeOwner,
-		summary: "Start a new local execution of a stopped session and attach to it",
+		summary: "Continue a stopped session's conversation and workspace in a new local execution and attach to it",
 		flags:   []string{"config", "socket", "executor", "id", "operation", "detach", "json"}},
 	{name: home.ActionStop, operands: "SESSION_UUID", owner: homeOwner,
 		summary: "Stop local work after its current turn and keep a checkpoint",

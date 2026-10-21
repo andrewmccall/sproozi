@@ -187,3 +187,62 @@ func TestMigrationNoticeAcknowledgesEveryCatalogUpgrade(t *testing.T) {
 		t.Fatal("unreadable catalog accepted")
 	}
 }
+
+// Terminal input after a completed Claude turn, such as a focus report or a
+// terminal's reply to a query, no longer blocks a stop forever: once gated
+// input and hooks are quiet, the completed turn stands. A prompt that input
+// submitted reports itself and clears the completion.
+func TestClaudeCompletedTurnSurvivesSettledTerminalInput(t *testing.T) {
+	inactive := false
+	c := claudeLifecycle{}
+	if err := c.accept(claudeHook{Event: claudePromptSubmit}, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.accept(claudeHook{Event: claudeStop, StopActive: &inactive}, 1); err != nil {
+		t.Fatal(err)
+	}
+	quiet := time.Now().Add(-time.Minute)
+	c.lastHook = quiet
+	s := &server{claude: c, inputGeneration: 3, state: harness.NativeActive, lastInputAt: time.Now()}
+	if s.claudeTurnReady() {
+		t.Fatal("ungated fresh input accepted the earlier Stop")
+	}
+	s.state, s.gatedAt = harness.NativeStopping, time.Now()
+	if s.claudeTurnReady() {
+		t.Fatal("unsettled input accepted the earlier Stop")
+	}
+	s.lastInputAt = quiet
+	if !s.claudeTurnReady() {
+		t.Fatal("settled terminal input still blocks the completed turn")
+	}
+	if err := s.claude.accept(claudeHook{Event: claudePromptSubmit}, 3); err != nil {
+		t.Fatal(err)
+	}
+	if s.claudeTurnReady() {
+		t.Fatal("a submitted prompt kept the earlier completion")
+	}
+}
+
+// A quiesce that cannot see a completed turn within its bound says what it
+// waits for and leaves the harness running with input gated.
+func TestQuiesceReportsWhatItWaitsForWithoutStopping(t *testing.T) {
+	previous := quiesceWait
+	quiesceWait = 200 * time.Millisecond
+	t.Cleanup(func() { quiesceWait = previous })
+	native := startIdleNative(t)
+	deadline := time.Now().Add(time.Minute)
+	s := &server{native: native, state: harness.NativeActive, threadID: selected, done: make(chan struct{}),
+		config: config{Harness: harness.NativeCodex, ThreadID: selected, Deadline: deadline}, deadline: deadline}
+	r := s.quiesce()
+	if r.Error != "" || r.State != harness.NativeStopping || r.Waiting == "" {
+		t.Fatalf("bounded quiesce: %+v", r)
+	}
+	select {
+	case <-native.Done():
+		t.Fatal("bounded quiesce stopped the harness")
+	default:
+	}
+	if st := s.status(); st.State != harness.NativeStopping {
+		t.Fatalf("state after bounded quiesce: %+v", st)
+	}
+}

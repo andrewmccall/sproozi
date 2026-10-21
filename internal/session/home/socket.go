@@ -357,6 +357,9 @@ func (s *Service) handle(ctx context.Context, conn net.Conn) {
 // help, so the reply is a rejection without a retry hint.
 func needsRecovery(err error, id string) error {
 	switch {
+	case errors.Is(err, harness.ErrNativeTurnPending):
+		return fmt.Errorf("%w; the session keeps running with its terminal input paused: repeat this command to keep "+
+			"waiting, or run \"sproozi cancel %s\" to force-stop it", err, id)
 	case errors.Is(err, session.ErrRecoveryRequired):
 		return rejectedError(fmt.Sprintf("%v; run \"sproozi recover %s\" to finish it, or \"sproozi cancel %s\" "+
 			"to revoke and force-stop its current execution", err, id, id))

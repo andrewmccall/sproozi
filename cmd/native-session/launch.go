@@ -224,6 +224,7 @@ func (s *server) writeInput(a *nativepty.Attachment, data []byte) (int, error) {
 	n, err := a.Write(data)
 	if n > 0 {
 		s.inputGeneration++
+		s.lastInputAt = time.Now()
 	}
 	return n, err
 }

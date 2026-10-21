@@ -299,7 +299,9 @@ func (q *options) local(ctx context.Context) error {
 		Workspace: q.workspace, Destination: q.destination, IncludeIgnored: q.includeIgnored,
 		Harness: harness.NativeKind(q.kind), HarnessArgs: q.harnessArgs,
 	}
+	stopNotice := waitNotice(q)
 	response, err := home.Call(ctx, q.socket, request)
+	stopNotice()
 	// The session runs either way; only attaching needs a terminal.
 	attachNow := (q.action == home.ActionResume || q.action == home.ActionStart) && !q.detach
 	noTerminal := attachNow && !term.IsTerminal(int(os.Stdin.Fd()))
@@ -512,4 +514,21 @@ func splitHarnessArgs(args []string) ([]string, []string) {
 		return args[:i], slices.Clone(args[i+1:])
 	}
 	return args, nil
+}
+
+// stopNoticeAfter is how long stop or move waits before saying why it waits.
+var stopNoticeAfter = 30 * time.Second
+
+// waitNotice tells the user, once stop or move has waited a while for the
+// harness's current turn, what it waits for and how to force-stop instead.
+// The returned function cancels the notice.
+func waitNotice(q *options) func() {
+	if q.action != home.ActionStop && q.action != home.ActionMove {
+		return func() {}
+	}
+	timer := time.AfterFunc(stopNoticeAfter, func() {
+		fmt.Fprintf(os.Stderr, "Waiting for the current turn of session %s to finish; "+
+			"run \"sproozi cancel %s\" in another terminal to force-stop it instead.\n", q.id, q.id)
+	})
+	return func() { timer.Stop() }
 }

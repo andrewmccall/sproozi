@@ -70,7 +70,12 @@ type server struct {
 	// that this first visit has no native conversation to keep.
 	gatedAt  time.Time
 	turnless bool
+	// lastInputAt is when the last terminal write was accepted.
+	lastInputAt time.Time
 }
+
+// quiesceWait bounds one quiesce request's wait for a completed turn.
+var quiesceWait = harness.NativeQuiesceWait
 
 // turnlessSettle is how long gated input must stay quiet before a first visit
 // with no native conversation counts as turnless. It covers a prompt
@@ -332,6 +337,9 @@ func (s *server) status() response {
 	r := response{Op: harness.NativeStatus, State: state, ThreadID: id}
 	if id == "" && state == harness.NativeStopping {
 		r.Turnless = s.isTurnless()
+		if !r.Turnless {
+			r.Waiting = s.waitingFor()
+		}
 	}
 	if adapter, err := adapterFor(kind); err == nil && adapter.completion != nil {
 		r.Completion = adapter.completion(s)
@@ -378,6 +386,8 @@ func (s *server) quiesce() response {
 	defer cancel()
 	timer := time.NewTicker(100 * time.Millisecond)
 	defer timer.Stop()
+	bound := time.NewTimer(quiesceWait)
+	defer bound.Stop()
 	var id, turn string
 	for {
 		if s.isTurnless() {
@@ -397,6 +407,10 @@ func (s *server) quiesce() response {
 			s.stop()
 			return response{Op: harness.NativeQuiesce, State: harness.NativeStopping,
 				Error: "native process stopped before completed turn observation"}
+		case <-bound.C:
+			// Report what the stop waits for and leave the harness running
+			// with input gated; a repeated quiesce waits again.
+			return response{Op: harness.NativeQuiesce, State: harness.NativeStopping, Waiting: s.waitingFor()}
 		case <-timer.C:
 		}
 	}
@@ -417,6 +431,48 @@ func (s *server) quiesce() response {
 	return response{Op: harness.NativeQuiesce, State: harness.NativeStopped, ThreadID: id, TurnID: turn,
 		Exit: &harness.NativeExit{Code: exit.Code, Reason: string(exit.Reason)}, Error: problem}
 }
+
+// waitingFor describes, in fixed words, what a graceful stop waits for.
+func (s *server) waitingFor() string {
+	s.mu.Lock()
+	kind := s.config.Harness
+	s.mu.Unlock()
+	if kind != harness.NativeClaude {
+		if !codexJournalExists(nativeHome) {
+			return "Codex to start its first turn"
+		}
+		return "the current Codex turn to complete"
+	}
+	switch s.claudeCompletion().Observation {
+	case pendingTools:
+		return "a running Claude Code tool to finish"
+	case inputChanged:
+		return "terminal input sent after the last Claude Code turn to settle"
+	case "identity_unavailable":
+		return "Claude Code to report its conversation"
+	case "lifecycle_incomplete":
+		return "the current Claude Code turn to finish"
+	case "settled":
+		return "Claude Code to stop"
+	}
+	return "Claude Code's transcript to settle"
+}
+
+// inputSettled reports that gated input has been quiet long enough for any
+// prompt it submitted to have reported itself. The caller holds s.mu.
+func (s *server) inputSettled() bool {
+	last := s.lastInputAt
+	if s.claude.lastHook.After(last) {
+		last = s.claude.lastHook
+	}
+	return s.state == harness.NativeStopping && !s.gatedAt.IsZero() && time.Since(last) >= inputSettle
+}
+
+// inputSettle is how long gated input and lifecycle hooks must stay quiet
+// before input accepted after the last completed turn no longer blocks a stop.
+// A prompt submitted by that input, or queued during the turn, reports
+// UserPromptSubmit well within it.
+var inputSettle = 3 * time.Second
 
 // markGated records when input was first gated. The caller holds s.mu.
 func (s *server) markGated() {

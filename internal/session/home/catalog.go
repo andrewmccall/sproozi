@@ -1,6 +1,7 @@
 package home
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -20,6 +21,7 @@ import (
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/privatefs"
 	"github.com/andrewmccall/sproozi/internal/project"
+	runtimedocker "github.com/andrewmccall/sproozi/internal/runtime/docker"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/work"
 	"github.com/google/uuid"
@@ -355,7 +357,13 @@ func (s *Service) Resume(ctx context.Context, id, operation string, harnessArgs 
 	r, err := s.readCatalog(id)
 	if os.IsNotExist(err) {
 		if execution, inspectErr := s.coordinator.Inspect(id); inspectErr == nil {
-			return Status{}, notResumable(id, execution, s.config.Local.Name)
+			// A start interrupted before its catalogue entry is adopted now.
+			if execution.Session != "" || execution.Operations[0].Launch.CheckpointDigest != "" {
+				return Status{}, notResumable(id, execution)
+			}
+			if err = s.catalogStartedLocked(execution); err == nil {
+				r, err = s.readCatalog(id)
+			}
 		}
 	}
 	if err != nil {
@@ -393,10 +401,6 @@ func (s *Service) Resume(ctx context.Context, id, operation string, harnessArgs 
 	if len(r.Executions) >= 256 {
 		return Status{}, errors.New("home: execution retention limit reached")
 	}
-	data, err := s.catalogArtifact(r.Committed.CheckpointDigest)
-	if err != nil {
-		return Status{}, err
-	}
 	local, err := s.localFor(r.Committed.Launch.Harness)
 	if err != nil {
 		return Status{}, err
@@ -404,14 +408,19 @@ func (s *Service) Resume(ctx context.Context, id, operation string, harnessArgs 
 	if err = harness.ValidateNativeArgs(local.Harness, harnessArgs); err != nil {
 		return Status{}, rejectedError("home: " + err.Error())
 	}
-	if err = checkpoint.ValidateContinuity(data, local.Harness, local.InstructionDigest, local.MaxCheckpointBytes); err != nil {
+	data, err := s.resumeInput(r, local)
+	if err != nil {
 		return Status{}, err
 	}
 	first := session.Launch{Harness: local.Harness, ExecutionID: uuid.NewString(), OperationID: operation,
 		AllocationID: uuid.NewString(), Epoch: 1, Placement: local.Name,
-		ThreadID: r.Committed.Launch.ThreadID, InstructionDigest: local.InstructionDigest,
+		ThreadID: cmp.Or(r.Committed.ThreadID, r.Committed.Launch.ThreadID), InstructionDigest: local.InstructionDigest,
 		IncludeIgnored: slices.Clone(r.Committed.Launch.IncludeIgnored), HarnessArgs: slices.Clone(harnessArgs),
 		Deadline: time.Now().Add(s.duration).UTC(), Allowances: allowances, CheckpointDigest: r.Committed.CheckpointDigest}
+	if first.CheckpointDigest == "" {
+		// Stopped with no conversation: start one again from its workspace.
+		first.ThreadID = ""
+	}
 	execution, err := s.createExecution(first, id, func() ([]byte, error) { return data, nil })
 	if err != nil {
 		return Status{}, err
@@ -428,15 +437,31 @@ func (s *Service) Resume(ctx context.Context, id, operation string, harnessArgs 
 }
 
 // notResumable explains a resume addressed to an execution rather than a
-// session imported with pull, and how to continue it instead.
-func notResumable(id string, execution session.Record, local string) error {
+// session.
+func notResumable(id string, execution session.Record) error {
 	if execution.Session != "" {
 		return rejectedError(fmt.Sprintf("home: %s is an execution of session %s; resume the session UUID %s",
 			id, execution.Session, execution.Session))
 	}
-	return rejectedError(fmt.Sprintf("home: session %s was started at home with \"sproozi start\"; "+
-		"resume continues only sessions imported with \"sproozi pull\"; to continue it before its deadline, "+
-		"run \"sproozi move %s --to %s\"", id, id, local))
+	return rejectedError(fmt.Sprintf("home: %s is an execution, not a session; run \"sproozi sessions\" to find "+
+		"its session", id))
+}
+
+// resumeInput is what a resumed execution restores: the session's last
+// checkpoint, or, for a session stopped with no conversation, the workspace
+// its last execution started from.
+func (s *Service) resumeInput(r localSession, local runtimedocker.PlacementConfig) ([]byte, error) {
+	if r.Committed.CheckpointDigest == "" {
+		if r.Committed.Launch.ExecutionID == "" {
+			return nil, errors.New("home: session has no stopped execution to resume")
+		}
+		return s.coordinator.Workspace(r.Committed.Launch.ExecutionID)
+	}
+	data, err := s.catalogArtifact(r.Committed.CheckpointDigest)
+	if err != nil {
+		return nil, err
+	}
+	return data, checkpoint.ValidateContinuity(data, local.Harness, local.InstructionDigest, local.MaxCheckpointBytes)
 }
 
 func (s *Service) catalogStatus(r localSession) (Status, error) {
@@ -471,7 +496,8 @@ func (s *Service) catalogStatus(r localSession) (Status, error) {
 		ID: r.ID, Ownership: ownership, ExecutionID: r.Committed.Launch.ExecutionID,
 		AllocationID: r.Committed.Launch.AllocationID, Incarnation: &r.Committed.Incarnation,
 		Placement: r.Committed.Launch.Placement, Phase: stage, Harness: r.Committed.Launch.Harness,
-		InitialStage: stage, ThreadID: r.Committed.Launch.ThreadID, Deadline: r.Committed.Launch.Deadline}, nil
+		InitialStage: stage, ThreadID: cmp.Or(r.Committed.ThreadID, r.Committed.Launch.ThreadID),
+		Deadline: r.Committed.Launch.Deadline}, nil
 }
 
 // resolveSession maps a session or execution ID to the execution to act on

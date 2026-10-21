@@ -12,6 +12,9 @@ records. Identity, completion, writer-fencing and accounting rules remain in eff
 [ADR 0032](0032-stopping-a-visit-with-no-native-conversation.md) adds a stop for a
 first visit with no conversation at all, and Claude's `StopFailure` hook to
 recognize a failed-only first turn; every conversation still needs a completed turn.
+[ADR 0035](0035-bounded-graceful-stops-and-settled-input.md) lets gated input
+that stays quiet for three seconds stop blocking an earlier completion, bounds
+each graceful wait, and accepts Claude's `system` request caches.
 
 ## Problem and constraints
 
