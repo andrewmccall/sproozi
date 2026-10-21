@@ -7,10 +7,18 @@ explains why.
 
 | Client | Package | Pinned in | Used by |
 | --- | --- | --- | --- |
-| Codex | `@openai/codex` | `codex/package-lock.json` | `hack/demo/codex.Dockerfile`, `hack/verify/orchestration-kind/clients.Dockerfile` |
-| Claude Code | `@anthropic-ai/claude-code` | `claude-code/package-lock.json` | `internal/runtime/docker/image/clients.Dockerfile`, `hack/verify/orchestration-kind/clients.Dockerfile` |
+| Codex | `@openai/codex` | `codex/package-lock.json` | `hack/demo/codex.Dockerfile` (the base of the released native image), `hack/verify/orchestration-kind/clients.Dockerfile` |
+| Claude Code | `@anthropic-ai/claude-code` | `claude-code/package-lock.json` | `internal/runtime/docker/image/clients.Dockerfile` (the released native image), `hack/verify/orchestration-kind/clients.Dockerfile` |
 | OpenCode | `opencode-ai` | `opencode/package-lock.json` | `hack/verify/orchestration-kind/clients.Dockerfile` |
 | Hermes | `docker.io/nousresearch/hermes-agent` | `HERMES_IMAGE` in `hack/verify/orchestration-kind/build.py` | `make test-e2e`, Hermes guides and `examples/orchestration/hermes-coordinator.yaml` |
+
+A new harness's client gets its own lockfile directory here. Add it to
+`hack/verify/orchestration-kind/clients.Dockerfile`, the image the Kind
+verifiers run AgentRuns in, when a verifier exercises it. Only a managed
+harness also goes into the released native image,
+`internal/runtime/docker/image/clients.Dockerfile`, which adds Claude Code to
+the Codex base built from `hack/demo/codex.Dockerfile`. See
+[Add a harness](../../docs/contributing/add-a-harness.md).
 
 Each lockfile records an integrity hash for the wrapper package and for every
 platform package, including `linux-x64` and `linux-arm64`. Build client images

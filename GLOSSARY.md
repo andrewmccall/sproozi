@@ -27,6 +27,25 @@ An AgentRun harness that is also a native kind for managed sessions
 observes completed turns and checkpoints its conversation. Codex and Claude
 Code. Also seen as: native kind, native harness.
 
+### Run contract
+
+The immutable ConfigMap Sproozi writes for each AgentRun and mounts read-only
+at `/etc/sproozi/contract`: the run's task, its harness's MCP configuration,
+the Sproozi integration files and its launch files. Also seen as: contract,
+agent contract.
+
+### Launch file
+
+A file the [harness registry](docs/contributing/add-a-harness.md) adds to the
+run contract for the harness's launch command, such as `opencode-launch.py` or
+an MCP bridge.
+
+### MCP bridge
+
+A launch file that gives a harness without its own MCP client the run's MCP
+connections, including `sproozi`. See
+[ADR 0039](docs/adr/0039-one-harness-registry-and-the-mcp-requirement.md).
+
 ### Sandbox
 
 The isolated environment a harness runs in. On Kubernetes it is a disposable

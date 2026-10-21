@@ -20,7 +20,7 @@ so CI does not run `make test`. `Lint` and `E2E` are separate workflows.
 | Target | A pass proves | CI | Needs |
 | --- | --- | --- | --- |
 | `make test` | After regenerating code and manifests, every non-e2e Go test passes: unit, rendered manifests, envtest API validation, integration and offline acceptance helpers. | No; CI runs the same packages under race | Go; downloads envtest binaries |
-| `make verify-generated` | Regenerating code and manifests and running `go fmt` leaves the tree unchanged, so committed generated files are current. Fails on any uncommitted change. | Tests (`race-1`) | Go, Git |
+| `make verify-generated` | Regenerating code and manifests and running `go fmt` leaves the working tree unchanged, so generated files match their sources. Works before you commit; on failure the regenerated files are already in place to review. | Tests (`race-1`) | Go, Git |
 | `make verify-fast` | `go vet` is clean and every non-e2e package passes under the race detector with coverage, without regenerating sources. | Tests (`race-1` and `race-2`, as `vet` and `verify-race`) | Go; downloads envtest binaries |
 | `make verify-race` | The race-and-coverage half of `verify-fast`. `RACE_SHARD=1` runs `test/` and `internal/session`, `RACE_SHARD=2` every other package; the two shards together cover every non-e2e package. | Tests (`race-1`, `race-2`) | Go; downloads envtest binaries |
 | `make verify-protocol` | Pinned `gh` and `git` clients produce the GitHub protocol the gateway inspects. Zero matched or skipped tests fail. | Tests (`checks`) | Downloads the checksum-pinned `gh` |

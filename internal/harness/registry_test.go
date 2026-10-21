@@ -136,3 +136,75 @@ func TestManagedKindsAreWired(t *testing.T) {
 		t.Fatal("an unregistered managed kind validated")
 	}
 }
+
+// Each harness declares what loads its MCP file. A bridge must be one of its
+// shipped launch files, with a runtime the test hook can run.
+func TestEveryHarnessDeclaresItsMCPLoader(t *testing.T) {
+	for _, h := range registry {
+		l := h.Loader
+		switch {
+		case l.Native == (l.Bridge != ""):
+			t.Errorf("harness %q must set exactly one of Loader.Native (its client reads %s) or Loader.Bridge "+
+				"(a launch file that does) in %s", h.Selector, h.MCP.File, registryFile)
+		case l.Bridge != "" && h.LaunchFiles[l.Bridge] == "":
+			t.Errorf("harness %q declares MCP bridge %s, which is not one of its LaunchFiles; embed it with go:embed "+
+				"in internal/harness/launch.go and list it in LaunchFiles in %s", h.Selector, l.Bridge, registryFile)
+		case l.Bridge != "" && len(l.Runtime) == 0:
+			t.Errorf("harness %q's MCP bridge %s needs a Loader.Runtime, such as node, in %s", h.Selector, l.Bridge,
+				registryFile)
+		}
+		for name, content := range h.LaunchFiles {
+			if strings.TrimSpace(content) == "" {
+				t.Errorf("harness %q launch file %s is empty; embed its contents in internal/harness/launch.go",
+					h.Selector, name)
+			}
+		}
+	}
+}
+
+// exampleElsewhere exempts a harness whose stock runtime example lives outside
+// examples/harnesses, naming the file that shows it.
+var exampleElsewhere = map[string]string{"codex": "examples/mcp/agentruntime.yaml"}
+
+// Every harness has a stock runtime example and a row in the reference's
+// selector table, which claims to match this registry.
+func TestEveryHarnessHasAnExampleAndAReferenceRow(t *testing.T) {
+	reference, err := os.ReadFile("../../docs/reference/harnesses.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	section := string(reference)
+	if start := strings.Index(section, "## Harness selectors"); start >= 0 {
+		section = section[start:]
+		if end := strings.Index(section[3:], "\n## "); end >= 0 {
+			section = section[:end+3]
+		}
+	}
+	rows := map[string]string{}
+	for _, m := range regexp.MustCompile("(?m)^\\| `([a-z0-9-]+)` \\| (yes|no) \\|").FindAllStringSubmatch(section, -1) {
+		rows[m[1]] = m[2]
+	}
+	for _, h := range registry {
+		example := "examples/harnesses/agentruntime-" + h.Selector + ".yaml"
+		if other, ok := exampleElsewhere[h.Selector]; ok {
+			example = other
+		}
+		data, err := os.ReadFile("../../" + example)
+		if err != nil || !regexp.MustCompile(`(?m)^\s+harness: "?`+regexp.QuoteMeta(h.Selector)+`"?\s*$`).Match(data) {
+			t.Errorf("harness %q has no stock runtime example: add %s selecting it (see examples/harnesses/README.md)",
+				h.Selector, example)
+		}
+		managed := "no"
+		if h.Native != "" {
+			managed = "yes"
+		}
+		if got, ok := rows[h.Selector]; !ok || got != managed {
+			t.Errorf("harness %q needs a row \"| `%s` | %s |\" in the Harness selectors table of "+
+				"docs/reference/harnesses.md", h.Selector, h.Selector, managed)
+		}
+		delete(rows, h.Selector)
+	}
+	for selector := range rows {
+		t.Errorf("docs/reference/harnesses.md lists %q, which is not registered in %s", selector, registryFile)
+	}
+}

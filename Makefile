@@ -116,10 +116,17 @@ lint-config: golangci-lint ## Verify golangci-lint configuration. CI (Lint).
 
 # The committed header year is kept, so a new calendar year is not a diff.
 .PHONY: verify-generated
-verify-generated: ## Regenerate code and manifests and run go fmt; fail if the tree changes. CI.
-	@year="$$(sed -n 's/^Copyright \([0-9]*\)\.$$/\1/p' api/v1alpha1/zz_generated.deepcopy.go)"; \
-	$(MAKE) --no-print-directory manifests generate fmt YEAR="$$year"
-	@git diff --exit-code || { echo 'Generated code, manifests or formatting are stale: run make manifests generate fmt and commit the result' >&2; exit 1; }
+verify-generated: ## Regenerate code and manifests and run go fmt; fail if that changes the working tree. CI.
+	@before="$$(mktemp)"; after="$$(mktemp)"; trap 'rm -f "$$before" "$$after"' EXIT; \
+	git diff > "$$before"; \
+	year="$$(sed -n 's/^Copyright \([0-9]*\)\.$$/\1/p' api/v1alpha1/zz_generated.deepcopy.go)"; \
+	$(MAKE) --no-print-directory manifests generate fmt YEAR="$$year" || exit 1; \
+	git diff > "$$after"; \
+	if ! cmp -s "$$before" "$$after"; then \
+		diff "$$before" "$$after" | head -200; \
+		echo 'Generated code, manifests or formatting were stale; make manifests generate fmt has now updated them: review and keep the result' >&2; \
+		exit 1; \
+	fi
 
 .PHONY: verify-fast
 verify-fast: vet verify-race ## Vet and race-test every non-e2e package with coverage, without regenerating sources. CI.

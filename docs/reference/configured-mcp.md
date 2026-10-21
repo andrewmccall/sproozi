@@ -9,7 +9,7 @@ registration uses the shared gateway and named run grants.
 
 | Where | Harnesses that get the servers | Configured in |
 | --- | --- | --- |
-| Kubernetes AgentRuns | `codex`, `claude-code`, `opencode`, `hermes` | The gateway's registry ConfigMap, the AgentPolicy and the AgentRun. |
+| Kubernetes AgentRuns | Every [harness selector](harnesses.md#harness-selectors) | The gateway's registry ConfigMap, the AgentPolicy and the AgentRun. |
 | Local sessions (`sproozi run`) | Codex. Claude Code sessions get no named MCP servers. | `config.json`; see [local sessions](#local-sessions). |
 | Sessions on a remote executor | Codex executors | The executor's allowances and the cluster's policy. |
 
@@ -209,7 +209,7 @@ required = true
 Codex uses the existing authenticated HTTPS proxy and trust bundle. MCP
 connection configuration contains no provider credentials or upstream URLs.
 Other clients can use these gateway URLs through the same proxy. Sproozi
-generates configuration for the four harness selectors listed above. MCP
+generates configuration for every [harness selector](harnesses.md#harness-selectors). MCP
 resources and prompts are not exposed.
 
 ## Protocol limits

@@ -20,8 +20,12 @@ type Harness struct {
 	// connection, in the harness's own configuration format. Every harness
 	// has one: ADR 0039 requires an MCP client.
 	MCP MCPFormat
+	// Loader says what reads MCP.File: the stock client itself, or an MCP
+	// bridge shipped as one of LaunchFiles.
+	Loader MCPLoader
 	// LaunchFiles are extra contract files, by ConfigMap key, that the
-	// harness's launch command reads.
+	// harness's launch command reads. Their contents are embedded in the
+	// binary, so every run contract carries them.
 	LaunchFiles map[string]string
 	// RequestFiles adds instructions.txt and request.json to the contract for
 	// launch commands that read the request from files.
@@ -45,6 +49,22 @@ type MCPFormat struct {
 	Entry func(name, address string) (string, any)
 }
 
+// MCPLoader declares how a harness loads its rendered MCP configuration.
+// Exactly one of Native and Bridge is set.
+type MCPLoader struct {
+	// Native means the stock client reads MCP.File itself.
+	Native bool
+	// Bridge names the launch file, a key of LaunchFiles, that reads MCP.File
+	// and exposes its connections to a client without its own MCP support.
+	Bridge string
+	// Runtime is the command that runs Bridge, such as ["node"]. The bridge
+	// test hook runs it as Runtime... Bridge --sproozi-check CONFIG.
+	Runtime []string
+}
+
+// NativeMCP is the loader of a client that reads its MCP file itself.
+var NativeMCP = MCPLoader{Native: true}
+
 // ModelProtocol names the provider API a managed harness calls.
 type ModelProtocol string
 
@@ -61,19 +81,22 @@ func (p ModelProtocol) InspectionHost() string {
 	return "api.openai.com"
 }
 
+// mcpServersField is Claude Code's MCP configuration key.
+const mcpServersField = "mcpServers"
+
 var registry = []Harness{
-	{Selector: string(NativeCodex), Native: NativeCodex, NativeDirectory: "codex", Protocol: ProtocolOpenAI,
-		MCP: MCPFormat{File: "codex-mcp.toml"}},
+	{Selector: string(NativeCodex), Native: NativeCodex, NativeDirectory: string(NativeCodex), Protocol: ProtocolOpenAI,
+		MCP: MCPFormat{File: "codex-mcp.toml"}, Loader: NativeMCP},
 	{Selector: string(NativeClaude), Native: NativeClaude, NativeDirectory: "claude", Protocol: ProtocolAnthropic,
-		RequestFiles: true,
-		MCP: MCPFormat{File: "claude-mcp.json", Field: "mcpServers", Entry: func(name, address string) (string, any) {
+		RequestFiles: true, Loader: NativeMCP,
+		MCP: MCPFormat{File: "claude-mcp.json", Field: mcpServersField, Entry: func(name, address string) (string, any) {
 			return name, map[string]any{connectionType: httpTransport, connectionURL: address}
 		}}},
-	{Selector: "opencode", RequestFiles: true, LaunchFiles: map[string]string{"opencode-launch.py": OpenCodeLaunch},
+	{Selector: "opencode", RequestFiles: true, Loader: NativeMCP, LaunchFiles: map[string]string{"opencode-launch.py": OpenCodeLaunch},
 		MCP: MCPFormat{File: "opencode-mcp.json", Field: "mcp", Entry: func(name, address string) (string, any) {
 			return name, map[string]any{connectionType: "remote", connectionURL: address, "enabled": true, "oauth": false}
 		}}},
-	{Selector: "hermes", RequestFiles: true, LaunchFiles: map[string]string{"hermes-launch.py": HermesLaunch},
+	{Selector: "hermes", RequestFiles: true, Loader: NativeMCP, LaunchFiles: map[string]string{"hermes-launch.py": HermesLaunch},
 		MCP: MCPFormat{File: "hermes-mcp.json", Field: "mcp_servers", Entry: func(name, address string) (string, any) {
 			// Native toolset aliases must not collide with built-ins such as all or terminal.
 			return "sproozi-mcp-" + name, map[string]any{connectionURL: address, "enabled": true,

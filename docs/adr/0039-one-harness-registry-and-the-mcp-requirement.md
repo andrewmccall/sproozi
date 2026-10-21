@@ -41,6 +41,21 @@ what a harness without MCP meant.
   can't be added until it gains one, upstream or through an MCP bridge
   shipped as a launch file.
 
+### Amendment: declared loaders and the bridge hook
+
+Contributors following the bridge route found that the guards checked only
+that a configuration file was rendered: a file nothing read, or a bridge that
+did nothing, passed. Each registry entry now declares its `Loader`: the stock
+client reads its MCP file, or a named bridge launch file, with the runtime that
+runs it, does. Guards require exactly one, require a bridge to be a shipped
+launch file, and run every bridge through a test hook: its
+`--sproozi-check CONFIG` mode must load each connection's tools from the
+rendered file served by a fake MCP server, named `<connection>__<tool>`, and
+refuse to start without `sproozi`. The hook skips when the runtime is not
+installed. Further guards require a stock runtime example and a reference
+table row for each selector. A stock client's own loading is still checked
+only by `make verify-harness-clients`.
+
 ## Alternatives
 
 - **Allow a harness without MCP, marked "no diagnose".** It would add a
