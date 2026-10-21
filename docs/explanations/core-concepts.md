@@ -125,7 +125,8 @@ workflow you need.
 
 ## Choose a next step
 
-- [Getting started](../guides/getting-started.md) runs the investigation-to-PR demo on a local Kind cluster.
-- [Install on Kubernetes and run your first Pod](../guides/install-kubernetes.md) runs a first Pod on an existing cluster, then the same demo.
+- [Local sessions](../guides/local-sessions.md) runs Codex or Claude Code in local Docker.
+- [Install on Kubernetes](../guides/install-kubernetes.md) installs a release and runs a provider-free first check.
+- [The investigation-to-PR demo](../guides/pr-demo.md) has Codex propose a fix as a pull request.
 - [Run a task remotely, then resume it locally](../guides/portable-workflows.md) starts a remote task that you can continue locally.
 - [System architecture](system-architecture.md) explains the components and trust boundaries.

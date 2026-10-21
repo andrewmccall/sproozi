@@ -16,7 +16,7 @@ harmless API-key placeholder in either mode.
 ## Existing cluster
 
 To use a ChatGPT plan on a cluster you installed yourself, follow
-[Run a model on this cluster](install-kubernetes.md#7-run-a-model-on-this-cluster).
+[Run a model on this cluster](install-from-checkout.md#7-run-a-model-on-this-cluster).
 It uses the same sign-in helper, Secret, ConfigMap and `--model-auth chatgpt`
 policy budget as the Kind demo below.
 

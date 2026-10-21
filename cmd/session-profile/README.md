@@ -22,7 +22,7 @@ go build -o bin/session-profile ./cmd/session-profile
 Install the current generated CRDs, controller and shared gateway using
 [Install on Kubernetes](../../docs/guides/install-kubernetes.md). For an isolated
 Kind evaluation, use the enforcing CNI setup in
-[Getting started](../../docs/guides/getting-started.md). Managed sessions require
+[the investigation-to-PR demo](../../docs/guides/pr-demo.md). Managed sessions require
 the controller and gateway from this change; an older ordinary-run deployment
 does not provide managed registration or active-allocation checks.
 

@@ -123,7 +123,7 @@ with `kubectl logs -n sproozi-system deployment/sproozi-gateway`.
 
 The controller flag `--max-active-runs` sets a separate cluster cap; there is
 no cluster cap by default. See
-[Limit concurrent runs](../guides/install-kubernetes.md#limit-concurrent-runs)
+[Limit concurrent runs](../guides/install-from-checkout.md#limit-concurrent-runs)
 and the
 [concurrency warnings](security-hardening.md#concurrency-and-gateway-capacity).
 

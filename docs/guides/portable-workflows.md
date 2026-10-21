@@ -26,10 +26,10 @@ personal-session adoption are not part of this workflow.
 
 ## Prepare the installation
 
-1. Follow [Getting started](getting-started.md) for the controller, authenticated
-   gateway and enforcing CNI. Use a dedicated Kind cluster for evaluation; use
-   [Install on Kubernetes and run your first Pod](install-kubernetes.md) for an
-   operator-owned cluster. Do not use a personal current kubeconfig context implicitly.
+1. Follow the [investigation-to-PR demo on Kind](pr-demo.md) for the
+   controller, authenticated gateway and enforcing CNI. Use a dedicated Kind
+   cluster for evaluation; use [Install from a checkout](install-from-checkout.md)
+   for an operator-owned cluster. Do not use a personal current kubeconfig context implicitly.
 2. Build the selected native image and provision its managed runtime/template/policy
    using [the complete mobility setup](../../hack/verify/session-mobility/README.md).
    The image contains Git, the native supervisor, checkpoint helper and
@@ -86,7 +86,7 @@ To use GitHub after local resume, merge the following into the full home configu
 ```
 
 Replace the numeric IDs and scope with your approved App installation. Step 5 of
-[Getting started](getting-started.md#5-create-a-github-app) gives its required
+[Getting started](pr-demo.md#5-create-a-github-app) gives its required
 repository permissions and protected key file. The inspection certificate must additionally cover
 `github.com` and `api.github.com`, retaining its model and gateway-IP SANs.
 For remote work, configure the same approved repository/base scope and finite

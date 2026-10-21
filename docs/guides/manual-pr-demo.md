@@ -1,9 +1,9 @@
 # Manual AgentRun to pull request
 
-For a walkthrough from a fresh checkout, start with
-[Getting started](getting-started.md). To deploy on an existing cluster and
-submit a provider-free first run, use [Install on Kubernetes and run your first Pod](install-kubernetes.md).
-Its step 7 runs this demo on that cluster without Kind.
+For a walkthrough from a fresh checkout, start with the
+[investigation-to-PR demo on Kind](pr-demo.md). To run this demo on an
+existing cluster without Kind, use step 7 of
+[Install from a checkout](install-from-checkout.md#7-run-a-model-on-this-cluster).
 
 The demonstrated path starts with a human-created `AgentRun` on a disposable
 Kind cluster. The controller creates the agent Pod in `sproozi-agents`.
@@ -48,7 +48,7 @@ another enforcing CNI, configure both `SPROOZI_CNI_MANIFEST` and
 
 The setup wizard selects ChatGPT-plan OAuth or API-key billing and asks only
 for missing GitHub App credentials. Follow
-[Save the credentials](getting-started.md#save-the-credentials) for the exact
+[Save the credentials](pr-demo.md#save-the-credentials) for the exact
 prompts, private-key location and saved files. If the GitHub App is already configured,
 `make demo-chatgpt-login` reuses or authorizes a ChatGPT credential and verifies model access, preserving
 the existing API key and App settings. Reuse prints a warning; for a new

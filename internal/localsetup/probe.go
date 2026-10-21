@@ -143,7 +143,8 @@ func ProbePath(ctx context.Context, d Docker, installation string, image Image, 
 	}
 	worker := workerFlags("--network", "container:"+anchor)
 	if _, err = d.Output(ctx, bytes.NewReader(trust), append(worker, image.ID, "probe", "tls", ip, fmt.Sprint(port))...); err != nil {
-		return report, fail("tls", fmt.Errorf("gateway TLS from the restricted worker path failed: %w", err), "run sproozi doctor")
+		return report, fail("tls", fmt.Errorf("gateway TLS from the restricted worker path failed: %w", err),
+			fmt.Sprintf("check that this installation's home daemon is running (sproozi service status) and that no other program listens on port %d", port))
 	}
 	report.TLS = true
 	out, err := d.Output(ctx, nil, append(worker, image.ID, "probe", "deny", ip, fmt.Sprint(port))...)

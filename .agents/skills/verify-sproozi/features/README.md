@@ -1,7 +1,7 @@
 # Kind quickstart verification map
 
 This map covers the user paths in
-[Getting started](../../../../docs/guides/getting-started.md). It deliberately
+[the investigation-to-PR demo](../../../../docs/guides/pr-demo.md). It deliberately
 excludes installation on an existing cluster.
 
 ## Baseline preconditions

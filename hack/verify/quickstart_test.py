@@ -61,7 +61,7 @@ class Dependencies(unittest.TestCase):
             return "available"
         with patch.object(quickstart.shutil, "which", return_value="/tools/bin"), \
                 patch.object(quickstart, "capture", side_effect=output):
-            with self.assertRaisesRegex(RuntimeError, r"\(found 1\.37\.1\); see \"Prepare your computer\""):
+            with self.assertRaisesRegex(RuntimeError, r"\(found 1\.37\.1\); run \"make demo-kubectl\""):
                 quickstart.doctor()
 
 

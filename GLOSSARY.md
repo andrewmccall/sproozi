@@ -409,7 +409,7 @@ generation and retires the old one only after every consumer has the new one.
 
 The optional `/certificates` program in a Kubernetes installation. It keeps the
 gateway's private CA, serving certificate and immutable trust ConfigMaps
-without cert-manager. See [Kubernetes installation](docs/guides/install-kubernetes.md#maintain-gateway-certificates).
+without cert-manager. See [Kubernetes installation](docs/reference/gateway-certificates.md).
 
 ### Remote executor
 

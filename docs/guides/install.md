@@ -71,11 +71,9 @@ same release as your CLI: `sproozi --version` prints the version, and its tag
 is that version with a `v` prefix, for example `git checkout v0.1.0`. The CLI
 archive does not contain sandbox images.
 
-The Kubernetes guides don't use the CLI. [Getting started](getting-started.md)
-runs from a checkout with Make.
-[Install on Kubernetes and run your first Pod](install-kubernetes.md) uses the
-release's Kubernetes assets, which reference the same published images, or a
-checkout.
+The Kubernetes guides don't use the CLI. [Install on Kubernetes](install-kubernetes.md)
+uses the release's Kubernetes assets, which reference the same published
+images.
 
 ## Build from source
 

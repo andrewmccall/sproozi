@@ -76,15 +76,15 @@ with no command prints the command list to standard error and exits 2.
 when `config.json` is missing, a starter configuration with a private `home`
 state directory. It never overwrites an existing `config.json`. The starter file
 holds the fields every command requires (`directory`, `local.name`,
-`local.harness`, `allowances`, `maxDuration`), a placeholder `model` and an
-empty `remote` map. Only `sproozi serve` requires `model`; it reports the
-starter placeholder as `model (replace ADMINISTRATOR_SELECTED_MODEL)` and an
-empty one as `model (model name the harness requests)`. Then edit it for one of two uses:
+`local.harness`, `allowances`, `maxDuration`) and an empty `remote` map.
+`model` is optional: without it, the harness uses its own default. For local
+Docker sessions, `sproozi init --local` writes a complete configuration
+instead; otherwise edit the starter for one of two uses:
 
 - Remote work: add an executor under `remote` (see the example below), then run
   `sproozi sessions` and `sproozi run --executor NAME`.
   [Run a task remotely, then resume it locally](../../docs/guides/portable-workflows.md) sets up the remote executor.
-- Local sessions: replace the placeholder `model`, then add the Docker paths,
+- Local sessions: add the Docker paths,
   the `local` images, network, instructions and digest, resource limits and
   storage sizes, and the `gateway` certificates and provider, then run
   `sproozi serve`.
@@ -191,7 +191,6 @@ by its key, for example `local.gatewayPort: number -1 is not a whole number from
     }
   },
   "maxDuration": "30m",
-  "model": "ADMINISTRATOR_SELECTED_MODEL",
   "nativeOptions": [],
   "gateway": {
     "listen": "0.0.0.0:18443",

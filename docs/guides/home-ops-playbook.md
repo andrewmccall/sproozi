@@ -3,7 +3,7 @@
 This guide describes a planned Sproozi installation in
 [`andrewmccall/home-ops`](https://github.com/andrewmccall/home-ops). It uses
 that repository's Flux layout. For a working first installation, start with
-[Install on Kubernetes and run your first Pod](install-kubernetes.md).
+[Install on Kubernetes](install-kubernetes.md).
 
 This is a planned integration. The recorded manual Kind runs did not exercise
 Alertmanager delivery, a home-ops PR or Flux recovery.

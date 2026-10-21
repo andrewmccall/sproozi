@@ -89,7 +89,7 @@ export KUBECONFIG="$SPROOZI_QUICKSTART_EVIDENCE/cluster.kubeconfig"
 python3 hack/verify/quickstart.py doctor --evidence "$SPROOZI_QUICKSTART_EVIDENCE"
 ```
 
-Use the [exploration commands](../../docs/guides/getting-started.md#8-inspect-the-result-and-explore). Finish with:
+Use the [exploration commands](../../docs/guides/pr-demo.md#8-inspect-the-result-and-explore). Finish with:
 
 ```sh
 python3 hack/verify/quickstart.py cleanup "$SPROOZI_QUICKSTART_EVIDENCE"
@@ -251,7 +251,7 @@ platforms; record those separately.
 `make verify-kubernetes-release` creates a dedicated `sproozi-release-*` Kind
 cluster with Calico, imports locally built release images, renders the release
 archive with those digests and applies it exactly as the
-[Kubernetes guide](../../docs/guides/install-kubernetes.md#install-from-release-assets)
+[Kubernetes guide](../../docs/guides/install-kubernetes.md)
 describes. It deletes the cluster when it finishes; pass `--keep` to the script
 to inspect it. Read `.local/verification/kubernetes-release/report.json`.
 

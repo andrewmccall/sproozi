@@ -208,6 +208,11 @@ demo-check: ## Check credentials first, then run demo-setup and check the full d
 demo-setup: ## Configure Kind networking and a local pinned stock Codex image without prompts.
 	@CONTAINER_TOOL='$(CONTAINER_TOOL)' bash hack/demo/setup.sh
 
+DEMO_KUBECTL_VERSION ?= v1.34.1
+.PHONY: demo-kubectl
+demo-kubectl: | $(LOCALBIN) ## Download the kubectl client the Kind demo supports into bin/.
+	bash hack/demo/install-kubectl.sh "$(DEMO_KUBECTL_VERSION)" "$(LOCALBIN)/kubectl"
+
 .PHONY: demo-chatgpt-login
 demo-chatgpt-login: ## Authorize ChatGPT plan usage locally; no credentials enter the sandbox. CHATGPT_REAUTHORIZE=1 forces a fresh sign-in.
 	@bash hack/demo/chatgpt-login.sh $(if $(filter 1,$(CHATGPT_REAUTHORIZE)),--reauthorize)

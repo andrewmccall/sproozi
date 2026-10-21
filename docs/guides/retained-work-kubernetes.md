@@ -18,7 +18,7 @@ checkout at the same release as the CLI, for the reason given in
 
 ## Existing-cluster deployment
 
-Follow [Install on Kubernetes and run your first Pod](install-kubernetes.md),
+Follow [Install from a checkout](install-from-checkout.md),
 including enforcing CNI, shared gateway TLS/provider credentials and the
 immutable sandbox trust bundle.
 [Cluster dependencies](../reference/dependencies.md) lists what else the cluster needs.
@@ -115,12 +115,16 @@ the approved repository/ref, principal, duration, byte limit and allowances:
     }
   },
   "maxDuration": "30m",
-  "maxCheckpointBytes": 8388608,
+  "maxCheckpointBytes": 33554432,
   "repositories": {
     "sproozi": {"url": "https://github.com/andrewmccall/sproozi", "ref": "main"}
   }
 }
 ```
+
+`maxCheckpointBytes` must equal `local.maxCheckpointBytes` in your local
+installation's `config.json`: 32 MiB for a new `sproozi init --local`
+installation, 8 MiB for one created before that default changed.
 
 Apply namespaces from the installation before creating these objects:
 

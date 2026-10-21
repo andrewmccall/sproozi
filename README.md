@@ -36,61 +36,58 @@ This is about giving an agent autonomy *within a defined boundary*. It does not 
 
 Sproozi does not replace an agent's own reasoning or tools. It launches an existing agent, provides an environment for it to work in, and enforces the access that you configure.
 
-- **Codex and Claude Code:** supported for runs in Kubernetes Pods. Both support controlled session movement between Docker and Kubernetes, recorded with older client versions than the ones now pinned (see [what works today](#what-works-today)).
+- **Codex and Claude Code:** run locally in Docker or in Kubernetes Pods. Both support controlled session movement between Docker and Kubernetes, recorded with older client versions than the ones now pinned (see [what works today](#what-works-today)).
 - **OpenCode and Hermes:** supported for runs in Kubernetes Pods; portable sessions aren't yet supported for these agents.
 
 [Agent support and details](docs/reference/harnesses.md)
 
 ## Get started
 
-Start with a local Kind cluster. The first check needs no accounts at all; then
-the investigation-to-PR demo has Codex open a real PR in a throwaway
-repository. The demo needs an OpenAI API key or a ChatGPT plan, plus a GitHub
-App that you create during setup. It needs the repository checkout and Make,
-not the `sproozi` CLI.
+### 1. Run an agent on your computer
 
-**[Getting started →](docs/guides/getting-started.md)**
-
-Or choose a path closer to what you want to do:
-
-| I want to… | Guide | Uses |
-| --- | --- | --- |
-| Run Codex or Claude Code locally in Docker | [Local sessions](docs/guides/local-sessions.md) | CLI and Docker |
-| Try Sproozi on a local Kind cluster | [Getting started](docs/guides/getting-started.md) | Checkout and Make |
-| Install on an existing Kubernetes cluster and run a model | [Install on Kubernetes and run your first Pod](docs/guides/install-kubernetes.md) | Checkout and Make |
-| Run the investigation-to-PR demo step by step | [Manual AgentRun to pull request](docs/guides/manual-pr-demo.md) | Checkout and Make |
-| Have a persistent Hermes assistant delegate bounded tasks | [Run a persistent Hermes assistant on Kubernetes](docs/guides/hermes-orchestration.md) | Checkout and Make |
-| Install the command-line tool | [Install the CLI](docs/guides/install.md) | Homebrew or a download |
-| Move an interactive session between Docker and Kubernetes | [Move a live session between Docker and Kubernetes](docs/guides/session-mobility.md) | CLI and a matching checkout |
-| Run Codex remotely, then continue its work on my machine | [Run a task remotely, then resume it locally](docs/guides/portable-workflows.md) | CLI and a matching checkout |
-| Connect persistent Hermes to remote Codex work | [Hermes with remote work](docs/guides/retained-work-kubernetes.md) | CLI and a matching checkout |
-
-"Checkout and Make" guides run from a clone of this repository and never call
-`sproozi`. The CLI guides use the installed `sproozi` command, and build images
-and the remote executor from a checkout of the same release as the CLI.
-
-Install the CLI on macOS or Linux with Homebrew:
+You need Docker running and an OpenAI API key (for Codex) or an Anthropic API
+key (for Claude Code). Install the CLI, set up once, then start a session in
+any Git repository:
 
 ```bash
 brew install andrewmccall/tap/sproozi
-sproozi --version
+sproozi init --local --harness codex
+cd ~/code/my-project
+sproozi start --workspace "$PWD" --harness codex
 ```
 
-Installing the CLI doesn't start a service or create credentials. For local
-Docker sessions, `sproozi init --local` prepares the image, network,
-certificates, provider credential and home daemon; the
-[local sessions guide](docs/guides/local-sessions.md) walks through it.
-The other CLI guides in the table above also need a repository checkout of the
-same release as the CLI, to build images and the remote executor;
-[Move a live session between Docker and Kubernetes](docs/guides/session-mobility.md)
-shows how. For remote work, run `sproozi init` to create the configuration file,
-add an executor under `"remote"`, then run `sproozi sessions`.
-[Run a task remotely, then resume it locally](docs/guides/portable-workflows.md)
-walks through it.
+`init --local` asks for your API key and checks that the sandbox can't reach
+the internet directly. `start` copies the repository into a container and
+opens Codex there; your own directory isn't changed. Press Ctrl-] to detach.
+For Claude Code, use `--harness claude-code`.
 
-[Install the CLI](docs/guides/install.md) covers Windows, other downloads and
-source builds, and the [session command reference](docs/reference/session-commands.md)
-lists every command and flag.
+[Local sessions](docs/guides/local-sessions.md) explains each step.
+[Install the CLI](docs/guides/install.md) covers downloads for Linux and
+Windows.
+
+### 2. Try it on Kubernetes
+
+Install a release on a local Kind cluster and run a first check that shows the
+gateway allowing one request and refusing two. It needs only Kind and kubectl:
+no accounts, no builds.
+
+**[Install on Kubernetes →](docs/guides/install-kubernetes.md)**
+
+### 3. Go further
+
+| I want to… | Guide |
+| --- | --- |
+| Have Codex investigate a broken workload and open a PR | [Investigation-to-PR demo on Kind](docs/guides/pr-demo.md) |
+| Move a live session between Docker and Kubernetes | [Session mobility](docs/guides/session-mobility.md) |
+| Run Codex remotely, then continue its work on my machine | [Run a task remotely, then resume it locally](docs/guides/portable-workflows.md) |
+| Have a persistent Hermes assistant delegate bounded tasks | [Persistent Hermes assistant on Kubernetes](docs/guides/hermes-orchestration.md) |
+| Connect persistent Hermes to remote Codex work | [Hermes with remote work](docs/guides/retained-work-kubernetes.md) |
+| Build and install my own images | [Install from a checkout](docs/guides/install-from-checkout.md) |
+
+These guides need a clone of this repository, at the tag that matches your
+CLI (`sproozi --version` prints it). The
+[session command reference](docs/reference/session-commands.md) lists every
+command and flag.
 
 ## What works today
 
@@ -100,11 +97,11 @@ There's working code and recorded tests, but support varies by workflow:
 | --- | --- |
 | Agent runs in Kubernetes Pods | Tested with Codex, Claude Code, OpenCode and Hermes using deterministic providers, by [`make test-e2e`](test/acceptance/running.md#harnesses-and-hermes-in-kind). The [E2E workflow](https://github.com/andrewmccall/sproozi/actions/workflows/test-e2e.yml) runs it on pull requests and pushes to `main`; check there for the latest result, which isn't always green |
 | Controlled access to Kubernetes and external tools | [Recorded tool-access acceptance](test/acceptance/reports/verified-mcp-demo.md) with a real model, including native Kubernetes reads, configured HTTPS test servers and denied operations. The full redacted reports aren't published yet |
-| Local Docker sessions from `sproozi init --local` | Provisioning, per-session Codex or Claude Code selection, gateway containment probes and certificate renewal verified live on macOS Docker Desktop with deterministic providers; see the [local sessions guide](docs/guides/local-sessions.md) |
+| Local Docker sessions from `sproozi init --local` | Provisioning, per-session Codex or Claude Code selection, gateway containment probes and certificate renewal checked on macOS Docker Desktop with deterministic providers by [`make verify-local-onboarding`](test/acceptance/running.md#local-onboarding); no recorded report is published yet. See the [local sessions guide](docs/guides/local-sessions.md) |
 | Explaining refused access to the agent | Every harness receives Sproozi instructions, a `sproozi-access` skill and a `diagnose` tool for its own recent gateway refusals; tested with installed Codex, Claude Code and OpenCode clients, which call `diagnose` through the gateway after a refused request; not yet in a recorded Kind run. See [Sproozi integration](docs/reference/sproozi-integration.md) |
 | Your own instructions and skills | One profile, `~/sproozi/profile` in a local installation, reaches every managed Codex and Claude Code session with shared and per-harness instructions and skills. It is sent with each Docker launch and stored by digest for Kubernetes. Tested with installed clients and a Docker ↔ Kind session-mobility round trip. See [Profile](docs/reference/profile.md) |
 | Docker ↔ Kubernetes session movement | [Recorded round trips](test/acceptance/reports/verified-session-mobility.md) with Codex 0.161.0, Claude Code 2.1.27 and deterministic providers, including unfinished Git changes. The pinned clients are now Codex 0.163.0 and Claude Code 2.1.302; movement hasn't been re-recorded with them |
-| Concurrent AgentRuns | New. There's no cluster cap by default. An optional cluster cap (`--max-active-runs`) or per-policy cap (`maxActiveRuns`) keeps extra runs `Queued`. Checked with unit tests and envtest. The Kind verifier's `uncapped-policy-concurrent-runs` and `policy-cap-monotonic-cancel-cleanup` checks ([`verify.py`](hack/verify/orchestration-kind/verify.py)) run concurrent fixture runs, and last passed on this branch on 2026-10-20. Concurrent runs with a real model are not verified. Read the [concurrency warnings](docs/reference/security-hardening.md#concurrency-and-gateway-capacity) before sharing a cluster |
+| Concurrent AgentRuns | New. There's no cluster cap by default. An optional cluster cap (`--max-active-runs`) or per-policy cap (`maxActiveRuns`) keeps extra runs `Queued`. Checked with unit tests and envtest. The Kind verifier's `uncapped-policy-concurrent-runs` and `policy-cap-monotonic-cancel-cleanup` checks ([`verify.py`](hack/verify/orchestration-kind/verify.py)) run concurrent fixture runs in the [E2E workflow](https://github.com/andrewmccall/sproozi/actions/workflows/test-e2e.yml). Concurrent runs with a real model are not verified. Read the [concurrency warnings](docs/reference/security-hardening.md#concurrency-and-gateway-capacity) before sharing a cluster |
 | Remote Codex work followed by local resume | [Recorded remote-work acceptance](test/acceptance/reports/verified-portable-workflows.md) with deterministic models, actual package checks and isolated Kubernetes reads/denials |
 | Infrastructure investigation and proposed GitHub fix | [Recorded SRE runs](test/acceptance/reports/verified-sre-demo.md) with a real model and GitHub; no merge or deployment. Recorded on 4 October 2026 from working trees that predate this repository's public history, so the base commit they cite isn't in it. The demo repository holding the PRs is private and the full reports aren't published yet |
 

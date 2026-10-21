@@ -103,7 +103,7 @@ For a shared or Kubernetes deployment, build through your registry's approved
 architecture-specific or multi-architecture process instead, and build the
 native image with an immutable `CLIENTS_IMAGE=repository@sha256:...` reference.
 Step 2 of
-[Install on Kubernetes and run your first Pod](install-kubernetes.md#2-build-and-publish-the-images)
+[Install from a checkout](install-from-checkout.md#2-build-and-publish-the-images)
 shows registry publication and digest selection. Then pull the approved native
 image onto the local engine and resolve its content ID. Replace the whole
 reference in angle brackets with your own:

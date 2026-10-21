@@ -25,7 +25,6 @@ the files, defaults, limits and supported platforms.
   covers that yet. Windows needs the [manual home configuration](../../cmd/sproozi/README.md).
 - An OpenAI API key for Codex or an Anthropic API key for Claude Code. Setup
   stores the key for the gateway; agents never receive it.
-- The model name to use, for example the one you use with the stock CLI.
 - The Sproozi CLI from [Homebrew or a release download](install.md).
 
 Sproozi is a preview. Read [what a container does not protect](#what-this-does-not-protect)
@@ -33,7 +32,7 @@ before using it with sensitive repositories.
 
 ## Set up
 
-Run setup once. It asks for the model and the API key, without echoing the key:
+Run setup once. It asks for your API key without echoing it:
 
 ```sh
 sproozi init --local --harness codex
@@ -53,7 +52,7 @@ edited in the configuration.
 For scripts, supply every answer and read a JSON result:
 
 ```sh
-sproozi init --local --harness codex --model MODEL \
+sproozi init --local --harness codex \
   --credential-file /absolute/path/to/openai-key --json
 ```
 
@@ -64,7 +63,8 @@ request. Use `--skip-credential-check` to skip it.
 
 ## Start a session
 
-Stop other programs writing to the repository, then start a session from it:
+Use any Git repository you want the agent to work on. Stop other programs
+writing to it, then start a session from it:
 
 ```sh
 cd /path/to/repository
@@ -84,13 +84,25 @@ deadline. Use `--detach` to start without attaching.
 sproozi sessions
 sproozi attach SESSION_UUID
 sproozi stop SESSION_UUID
-sproozi resume SESSION_UUID
+sproozi move SESSION_UUID --to local
 ```
 
-`stop` waits for the current turn, stops the container and keeps the
-conversation and workspace. If the home daemon is not running, these commands
-start it. The [session commands reference](../reference/session-commands.md)
-covers every command and flag.
+`sessions` lists your sessions and their deadlines. `stop` waits for the
+current turn, stops the container and keeps the conversation and workspace; a
+session that never started a conversation stops at once. `move SESSION_UUID
+--to local` starts a stopped session again, before its deadline.
+
+Each harness uses its own default model and settings. To pass the stock CLI's
+own flags, put them after `--`:
+
+```sh
+sproozi start --workspace "$PWD" --harness codex -- --model gpt-5.5
+```
+
+Flags that Sproozi controls, such as Codex's `--sandbox`, are refused with the
+reason; the [session commands reference](../reference/session-commands.md#pass-arguments-to-the-harness)
+lists them, with every other command and flag. If the home daemon isn't
+running, these commands start it.
 
 ## Add the other harness
 
@@ -175,12 +187,15 @@ automatically.
 | Message | Next step |
 | --- | --- |
 | `docker: engine unavailable` | Start Docker Desktop or the Docker service, then repeat the command. |
+| `root: … is a Git checkout, not a Sproozi installation` | The installation root, `~/sproozi` by default, holds something else. Move it, or choose another directory with `--root`. |
 | `root: … exceeds the 103-byte Unix socket limit` | Choose a shorter `--root`. |
 | `network: no host address is reachable from the worker network` | A firewall may block the gateway port; choose another with `--port`. |
 | `registry: pull failed` | Check registry access, or build the image locally with `--build SOURCE_DIRECTORY` from a release source bundle or checkout. |
 | `image: … does not provide helper contract` | The image belongs to another Sproozi release. Use the release image or rebuild. |
 | `provider: the provider rejected the credential` | Replace the key with `sproozi credentials add`. |
 | `config: the existing configuration's placement differs` | The configuration no longer matches the installation's image, network or gateway. Restore the backup next to `config.json` or run `sproozi doctor`. |
+| `workspace: byte limit exceeded` | The repository's Git history is larger than one checkpoint. The message gives the size and how to raise `local.maxCheckpointBytes`, up to 64 MiB. |
+| `gateway.listen "127.0.0.1:PORT": address already in use` | Another program holds the gateway port. Stop it, then run `sproozi service start`. If you haven't started a session yet, you can instead [remove the installation](#remove-the-installation) and run setup again with `--port` set to a free port. |
 | `service: home daemon exited during startup` | Read the log named in the message, usually `~/sproozi/logs/service.log`. |
 
 ## What this does not protect
@@ -198,7 +213,8 @@ automatically.
 
 ## Remove the installation
 
-Stop every session, then stop the home daemon and delete the files:
+Stop every session, then stop the home daemon and delete the installation
+root, `~/sproozi` unless you chose another with `--root`:
 
 ```sh
 sproozi service stop

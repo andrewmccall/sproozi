@@ -73,7 +73,7 @@ doesn't hold back later runs under other policies. A run held by a cap stays
 `Queued` with reason `WaitingForConcurrencyCap`; it is never denied. When a run
 finishes or is deleted, or a policy changes, the controller re-checks every
 queued run. See
-[Limit concurrent runs](../guides/install-kubernetes.md#limit-concurrent-runs).
+[Limit concurrent runs](../guides/install-from-checkout.md#limit-concurrent-runs).
 
 Editing an admitted run's AgentPolicy doesn't fail or restart the run. Any `spec` edit
 other than `maxActiveRuns` closes the run's open gateway connections within the

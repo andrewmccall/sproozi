@@ -111,7 +111,7 @@ refused. The optional Kubernetes certificate controller holds its CA key in one
 Secret. Protect `sproozi-system` Secrets and etcd encryption accordingly. Its
 trust bundles are certificate-only and immutable. Treat `replace` as an
 emergency that removes every running Pod's trust in the gateway. See
-[maintain gateway certificates](../guides/install-kubernetes.md#maintain-gateway-certificates).
+[maintain gateway certificates](gateway-certificates.md).
 
 A [local installation](local-installation.md) keeps its CA key, provider keys
 and journals in owner-only files. Its gateway listens on loopback when the
@@ -194,7 +194,7 @@ Every active run adds load that Sproozi doesn't cap for you:
 For shared clusters:
 
 1. Set the controller flag `--max-active-runs`; see
-   [Limit concurrent runs](../guides/install-kubernetes.md#limit-concurrent-runs).
+   [Limit concurrent runs](../guides/install-from-checkout.md#limit-concurrent-runs).
 2. Set `maxActiveRuns` on each AgentPolicy, especially the policies that
    webhook templates use; see [AgentPolicy](agentpolicy.md#concurrent-runs).
 3. Put a ResourceQuota on `sproozi-agents` as a Kubernetes-level backstop:

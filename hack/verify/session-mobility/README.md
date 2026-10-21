@@ -19,7 +19,7 @@ development or production cluster.
 ## Prepare the host and enforcing cluster
 
 Install Docker, Kind, kubectl, Go, Git, OpenSSL, Python 3 and Python's PyYAML
-package. See the [getting-started guide](../../../docs/guides/getting-started.md)
+package. See the [investigation-to-PR demo guide](../../../docs/guides/pr-demo.md)
 for host prerequisites and the disposable Kind/CNI setup. The commands below
 select the node image pinned in this checkout's Makefile. Keep the generated
 keys, tokens, native histories, command logs and evidence private. Do not enable
