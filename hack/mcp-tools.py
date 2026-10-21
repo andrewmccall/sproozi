@@ -21,8 +21,10 @@ PROTOCOL = "2025-03-26"
 
 
 def post(url, token, session, message):
+    # Some hosted servers sit behind bot filters that refuse Python's default
+    # User-Agent with 403, so name the tool instead.
     headers = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream",
-               "MCP-Protocol-Version": PROTOCOL}
+               "MCP-Protocol-Version": PROTOCOL, "User-Agent": "sproozi-mcp-tools/1"}
     if token:
         headers["Authorization"] = "Bearer " + token
     if session:
