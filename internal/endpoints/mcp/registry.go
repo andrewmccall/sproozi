@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/url"
 	"os"
@@ -35,7 +36,10 @@ type registration struct {
 // credential changes require gateway restart; policy remains live.
 func LoadRegistry(data []byte, credentialsDir string) (*Registry, error) {
 	if _, err := mcppolicy.DecodeObject(data); err != nil {
-		return nil, fmt.Errorf("invalid MCP registry JSON")
+		return nil, fmt.Errorf("invalid MCP registry JSON: %w", err)
+	}
+	if err := registryKeysProblem(data); err != nil {
+		return nil, err
 	}
 	var document struct {
 		Servers map[string]struct {
@@ -45,13 +49,16 @@ func LoadRegistry(data []byte, credentialsDir string) (*Registry, error) {
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&document); err != nil || document.Servers == nil || len(document.Servers) > 32 {
-		return nil, fmt.Errorf("invalid or unbounded MCP registry")
+	if err := decoder.Decode(&document); err != nil {
+		return nil, fmt.Errorf("invalid MCP registry: %w", err)
+	}
+	if len(document.Servers) > 32 {
+		return nil, fmt.Errorf("MCP registry lists %d servers; at most 32 are supported", len(document.Servers))
 	}
 	registry := &Registry{servers: map[string]registration{}}
 	for name, config := range document.Servers {
-		if _, valid := api.CapabilityKind("mcp." + name).MCPServerName(); !valid {
-			return nil, fmt.Errorf("invalid MCP registration name")
+		if problem := RegistrationNameProblem(name); problem != "" {
+			return nil, fmt.Errorf("MCP registration name %q %s", name, problem)
 		}
 		endpoint, err := url.Parse(config.URL)
 		if err != nil || endpoint.Scheme != "https" || endpoint.Host == "" || endpoint.User != nil ||
@@ -102,6 +109,56 @@ func LoadRegistry(data []byte, credentialsDir string) (*Registry, error) {
 	return registry, nil
 }
 
+// registryKeys are the keys a registry and each of its servers accept.
+var registryKeys = map[string][]string{"": {"servers"}, "server": {"url", "bearerTokenFile"}}
+
+// registryKeysProblem names an unknown key and where it is, with the keys
+// that are accepted there, or returns nil.
+func registryKeysProblem(data []byte) error {
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(data, &top); err != nil {
+		return fmt.Errorf("invalid MCP registry JSON: %w", err)
+	}
+	for key := range top {
+		if !slices.Contains(registryKeys[""], key) {
+			return fmt.Errorf("MCP registry has unknown key %q; it holds only \"servers\"", key)
+		}
+	}
+	if top["servers"] == nil {
+		return fmt.Errorf("MCP registry needs a \"servers\" object naming each server")
+	}
+	var servers map[string]json.RawMessage
+	if err := json.Unmarshal(top["servers"], &servers); err != nil {
+		return fmt.Errorf("MCP registry \"servers\" must be an object of named servers")
+	}
+	for _, name := range slices.Sorted(maps.Keys(servers)) {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(servers[name], &fields); err != nil {
+			return fmt.Errorf("MCP registration %q must be an object with \"url\" and optional \"bearerTokenFile\"", name)
+		}
+		for _, key := range slices.Sorted(maps.Keys(fields)) {
+			if !slices.Contains(registryKeys["server"], key) {
+				return fmt.Errorf("MCP registration %q has unknown key %q; a server takes \"url\" and optional "+
+					"\"bearerTokenFile\"", name, key)
+			}
+		}
+	}
+	return nil
+}
+
+// RegistrationNameProblem explains why name cannot name a registered MCP
+// server, or returns "". The name is the part after "mcp." in a capability.
+func RegistrationNameProblem(name string) string {
+	if name == api.ControlMCPServer {
+		return "is reserved for the Sproozi control connection; choose another name"
+	}
+	if _, valid := api.CapabilityKind("mcp." + name).MCPServerName(); !valid {
+		return "is not a valid name; use 1 to 63 lowercase letters, digits and hyphens, starting and ending " +
+			"with a letter or digit"
+	}
+	return ""
+}
+
 // Kubernetes Secret mounts use symlinks, so accept links within the dedicated
 // credential directory while rejecting lexical and resolved escapes.
 func credentialPath(root, path string) (string, error) {
@@ -123,6 +180,9 @@ func within(root, path string) bool {
 	relative, err := filepath.Rel(filepath.Clean(root), filepath.Clean(path))
 	return err == nil && relative != "." && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }
+
+// Names lists the registered server names, the X of each mcp.X capability.
+func (r *Registry) Names() []string { return slices.Sorted(maps.Keys(r.servers)) }
 
 // Authorities reserves remote providers against weaker destination fallback.
 // These are not workload routes and do not need inspection certificates.

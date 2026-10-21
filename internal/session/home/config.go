@@ -288,14 +288,17 @@ func typeErrorKey(data []byte, err error) error {
 			segments[i] = strings.ToLower(segment[:1]) + segment[1:]
 		}
 	}
-	// Go omits map keys from the path, so find the entry that fails alone.
+	// Go before 1.27 omits map keys from the path, so find the entry that
+	// fails alone and insert it unless the path already holds it.
 	if segments[0] == "allowances" {
 		var top map[string]json.RawMessage
 		var group map[string]json.RawMessage
 		if json.Unmarshal(data, &top) == nil && json.Unmarshal(top[segments[0]], &group) == nil {
 			for _, name := range slices.Sorted(maps.Keys(group)) {
 				if json.Unmarshal(group[name], new(session.Allowance)) != nil {
-					segments = slices.Insert(segments, 1, name)
+					if rest := strings.Join(segments[1:], "."); rest != name && !strings.HasPrefix(rest, name+".") {
+						segments = slices.Insert(segments, 1, name)
+					}
 					break
 				}
 			}

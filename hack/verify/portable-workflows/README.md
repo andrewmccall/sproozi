@@ -208,9 +208,9 @@ Preserve failed reports rather than editing their `passed` value.
 
 For the keyless public DeepWiki integration, gracefully stop the profile and home,
 then repeat configuration with `--deepwiki`. The configurator uses the same
-[authored registry](../../../examples/portable-workflows/deepwiki-servers.json)
-for a private local copy and the remote ConfigMap, and adds the
-[bounded tool policy](../../../examples/portable-workflows/deepwiki-policy.yaml).
+[public example registry](../../../examples/mcp/servers.json)
+for a private local copy and the remote ConfigMap, and adds the example's
+[bounded tool policy](../../../examples/mcp/agentpolicy.yaml).
 Apply the output and restart the gateway to snapshot the changed registry:
 
 ```sh
@@ -224,7 +224,7 @@ kubectl --kubeconfig "$work/kubeconfig" -n sproozi-system rollout status deploym
 
 Restart profile and home with the same protected directories, then resume a
 retained session with `sproozi resume SESSION_ID --config FILE --detach`.
-The fresh grant has ten `mcp.docs` calls. Run `mcp-probe.js` through the exact
+The fresh grant has ten `mcp.deepwiki` calls. Run `mcp-probe.js` through the exact
 fixture's active agent, first with `docker exec -i CONTAINER_ID node`, then with
 `kubectl --kubeconfig FILE -n sproozi-agents exec -i POD -c agent -- node` after a
 live move to `remote`. Feed the script on stdin. Select the container/Pod from the

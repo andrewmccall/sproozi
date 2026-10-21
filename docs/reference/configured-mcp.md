@@ -1,59 +1,95 @@
 # Configured MCP capabilities
 
-Approved remote MCP servers can supply tools through configuration. Register a
-server in the trusted gateway, allow selected tools in policy, then request
-`mcp.<server>` in an AgentRun. Sproozi discovers the provider's input schemas.
-Operators add any required argument restrictions. A compatible server needs no
-provider-specific Go adapter or copied tool catalogue. [ADR
+Approved remote MCP servers can supply tools through configuration, with no
+Go code: register the server in the gateway, allow selected tools in policy,
+and grant `mcp.<server>` to a run. Sproozi discovers the server's input
+schemas; you add any argument restrictions. [ADR
 0001](../adr/0001-mcp-capabilities-through-shared-gateway.md) records why
 registration uses the shared gateway and named run grants.
 
-This path enforces the **Protocol** tier. Tool names, descriptions and schemas
-cannot establish read-only behaviour or service semantics. A reviewed server,
-restricted provider credential and upstream-native controls must support claims
-about the actual operation. The native [Kubernetes MCP tool](kubernetes-mcp.md)
-continues to enforce the **Semantic** tier through its existing handler.
-The [MCP tools specification](https://modelcontextprotocol.io/specification/2025-11-25/server/tools)
+| Where | Harnesses that get the servers | Configured in |
+| --- | --- | --- |
+| Kubernetes AgentRuns | `codex`, `claude-code`, `opencode`, `hermes` | The gateway's registry ConfigMap, the AgentPolicy and the AgentRun. |
+| Local sessions (`sproozi run`) | Codex. Claude Code sessions get no named MCP servers. | `config.json`; see [local sessions](#local-sessions). |
+| Sessions on a remote executor | Codex executors | The executor's allowances and the cluster's policy. |
+
+This path enforces the
+[**Protocol** tier](../explanations/capabilities-and-gateways.md#mental-model).
+Tool names, descriptions and schemas cannot establish read-only behaviour or
+service semantics. A reviewed server, restricted provider credential and
+upstream-native controls must support claims about the actual operation. The
+native [Kubernetes MCP tool](kubernetes-mcp.md) enforces the **Semantic** tier
+through its own handler. The
+[MCP tools specification](https://modelcontextprotocol.io/specification/2025-11-25/server/tools)
 also treats tool annotations as untrusted unless the server is trusted.
+
+[`examples/mcp`](../../examples/mcp/agentpolicy.yaml) is a complete working
+example for the public DeepWiki server (no credential): its registry, policy,
+template, a Codex runtime with a neutral prompt, and a run.
+
+## Find a server's tools
+
+Policy names tools exactly, so start from what the server offers. From a
+machine that may reach the server:
+
+```sh
+python3 hack/mcp-tools.py https://mcp.deepwiki.com/mcp
+```
+
+It prints each tool and its arguments (`?` marks optional ones);
+`--bearer-token-file FILE` adds a credential and `--json` prints the schemas.
+The listing grants nothing. DeepWiki offers `read_wiki_structure(repoName)`,
+`read_wiki_contents(repoName)` and `ask_wiki_question(repoName, question)`.
 
 ## Register the provider
 
-The gateway reads JSON from `MCP_SERVERS_PATH` at startup. The installed
-`sproozi-mcp-servers` ConfigMap starts with an empty registry.
-`SPROOZI_ENABLED_CAPABILITIES` selects native modules; remote registrations
-become available through this registry, subject to run and policy grants.
-For example:
+The gateway reads `servers.json` from its `sproozi-mcp-servers` ConfigMap in
+`sproozi-system` at startup (in the source tree it is `mcp-servers`, before the
+installation's `sproozi-` prefix). The installed registry is empty:
 
 ```json
 {
   "servers": {
-    "docs": {
-      "url": "https://docs.example.com/mcp",
-      "bearerTokenFile": "/var/run/secrets/sproozi/mcp/docs/token"
+    "deepwiki": {
+      "url": "https://mcp.deepwiki.com/mcp"
+    },
+    "inventory": {
+      "url": "https://inventory.example.com/mcp",
+      "bearerTokenFile": "/var/run/secrets/sproozi/mcp/inventory/token"
     }
   }
 }
 ```
 
-Names are DNS labels of at most 63 characters. `sproozi` is reserved for the
-[control connection](sproozi-integration.md) and is rejected. URLs must be exact HTTPS endpoints,
-without user info, query parameters or fragments. DNS names, IDNA spelling and
-ports are canonicalized before reserving provider authorities. Authentication is
-optional; when needed, mount a Secret file under `/var/run/secrets/sproozi/mcp`
-**only in the gateway** and reference it with `bearerTokenFile`. Files and symlinks
-must remain within that dedicated mount; registry entries cannot read other
-gateway credentials. The registration does not support arbitrary
-headers.
+Each server takes `url` and optional `bearerTokenFile`, and nothing else.
+Names are DNS labels: 1 to 63 lowercase letters, digits and hyphens.
+`sproozi` is reserved for the [control connection](sproozi-integration.md).
+URLs must be exact HTTPS endpoints, without user info, query parameters or
+fragments. DNS names, IDNA spelling and ports are canonicalized before
+reserving provider authorities. When a server needs a credential, mount a
+Secret file under `/var/run/secrets/sproozi/mcp` **only in the gateway** and
+name it with `bearerTokenFile`. Files and symlinks must stay within that
+mount; the registry cannot read other gateway credentials or set headers.
 
-For deployment, replace the example hosts with your approved providers, update
-the gateway ConfigMap's `servers.json`, and add the corresponding Secret volumes
-and mounts to the gateway Deployment. Restart the gateway after registration or
-credential changes: it snapshots both together. Policy remains live. The remote
-provider uses ordinary system TLS trust; private CAs need trusted gateway image
-or trust-store configuration. The workload receives only the gateway URL and run
-identity. Registered provider authorities are reserved against destination-tier
-fallback; a separate egress profile cannot bypass a denied MCP call with direct
-provider access.
+On a release installation, replace the registry and restart the gateway, which
+reads the registry and credentials only at startup:
+
+```sh
+kubectl -n sproozi-system create configmap sproozi-mcp-servers \
+  --from-file=servers.json=examples/mcp/servers.json --dry-run=client -o yaml |
+  kubectl apply --server-side --force-conflicts --field-manager=sproozi-admin -f -
+kubectl -n sproozi-system rollout restart deployment/sproozi-gateway
+kubectl -n sproozi-system rollout status deployment/sproozi-gateway
+```
+
+With GitOps, change the ConfigMap in your overlay instead and restart the
+gateway the same way. For a credential, also add the Secret volume and mount to
+the `sproozi-gateway` Deployment. Policy changes need no restart. The provider
+uses ordinary system TLS trust; a private CA needs a gateway image or trust
+store that includes it. The workload receives only the gateway URL and its run
+identity. Registered provider authorities are reserved against Destination-tier
+fallback, so an egress profile cannot bypass a denied MCP call with direct
+access.
 
 ## Select tools and add scope
 
@@ -61,25 +97,25 @@ The same capability name appears in policy and the immutable run request:
 
 ```yaml
 # AgentPolicy.spec fragment
-allowedCapabilities: [mcp.docs]
+allowedCapabilities: [mcp.deepwiki]
 mcpServers:
-  docs:
+  deepwiki:
     tools:
-      search:
+      ask_wiki_question:
         arguments:
           type: object
-          required: [collection]
+          required: [repoName, question]
           properties:
-            collection:
-              const: operations
+            repoName:
+              const: modelcontextprotocol/go-sdk
 budgets:
-  mcp.docs:
+  mcp.deepwiki:
     maxUnits: 10
 ```
 
 ```yaml
 # AgentRun.spec fragment
-capabilities: [mcp.docs]
+capabilities: [mcp.deepwiki]
 ```
 
 `tools` is an explicit default-deny map. `search: {}` allows the discovered
@@ -103,8 +139,37 @@ rejected.
 Every request reloads authorization through the shared proxy. Removing a capability
 or its tool, changing scope, stopping the run or cancelling it denies subsequent
 requests. When the run stops or loses permission, the gateway cancels its active requests.
-A discovered or cached tool is not a grant. Missing approved tools or unsupported
-schemas fail closed, without destination fallback.
+A discovered or cached tool is not a grant. Unsupported schemas fail closed,
+without destination fallback.
+
+Every tool the policy names must exist on the server. If one does not, every
+call to that server fails, so a misspelt or renamed tool shows up on the first
+call instead of silently missing from the agent's list. The error names the
+missing tool and the tools the server offers, for example: `MCP server
+"deepwiki" tools unavailable or unsupported: the policy approves
+"ask_question", which the server does not offer; it offers
+"ask_wiki_question", "read_wiki_contents", "read_wiki_structure"`. The agent
+sees it, and the gateway's audit log records it as the deny reason.
+
+| Message | Fix |
+| --- | --- |
+| `MCP registration "docs" has unknown key "headers"; a server takes "url" and optional "bearerTokenFile"` | Remove the key; credentials go in `bearerTokenFile`. |
+| `MCP registration name "DeepWiki" is not a valid name …` / `… "sproozi" is reserved …` | Use a lowercase DNS label other than `sproozi`. |
+| `capability "mcp.x" has no tool scope; add mcpServers.x.tools to the policy` | Add the tool scope (admission). |
+| `MCP tool scope mcpServers.x is invalid: tool "t" arguments: unsupported MCP schema restriction "format"` | Remove the named keyword from the argument schema. |
+| `MCP server "x" is not registered in the gateway's MCP registry` | Add it to `servers.json` and restart the gateway. |
+
+## Check your configuration offline
+
+`make verify-mcp` (run by CI, and part of `make test`) loads every
+`examples/*/servers.json` with the gateway's own loader and checks the
+directory's `agentpolicy.yaml`, `agenttemplate.yaml`, `agentrun.yaml` and
+`agentruntime.yaml`: every granted `mcp.<name>` is registered and scoped, the
+scopes compile, the run asks only for what the policy allows, admission accepts
+the run, and the runtime's harness gets a connection for each server. To check
+your own configuration, put the same five files in a directory under
+`examples/` and run `make verify-mcp`. Tool names can only be checked against
+the live server, with `hack/mcp-tools.py`.
 
 ## Deliver ordinary Codex configuration
 
@@ -125,15 +190,15 @@ cp /etc/sproozi/contract/sproozi-instructions.md "$HOME/.codex/AGENTS.md"
 cp /etc/sproozi/contract/sproozi-access.md "$HOME/.codex/skills/sproozi-access/SKILL.md"
 ```
 
-The [demo runtime](../../examples/sre-demo/agentruntime.yaml) does this already,
+The [example runtime](../../examples/mcp/agentruntime.yaml) does this already,
 while retaining its command-line model-provider settings. Requested named MCP
 capabilities become connections, followed by the `sproozi`
-[control connection](sproozi-integration.md). A run requesting `mcp.docs`
+[control connection](sproozi-integration.md). A run requesting `mcp.deepwiki`
 receives:
 
 ```toml
-[mcp_servers."docs"]
-url = "https://sproozi-gateway.sproozi-system.svc:8443/mcp/docs"
+[mcp_servers."deepwiki"]
+url = "https://sproozi-gateway.sproozi-system.svc:8443/mcp/deepwiki"
 required = true
 
 [mcp_servers."sproozi"]
@@ -190,6 +255,26 @@ Audit records the run, named capability, Protocol tier, approved tool and
 fixed outcome, without argument values, results or provider diagnostics. Provider
 failures return fixed messages; successful tool output remains provider content.
 
-The [configuration examples](../../examples/mcp/agentpolicy.yaml) show two tool
-and scope configurations. Their hosts are placeholders. Replace them with your
-approved providers.
+## Local sessions
+
+A local Codex session can use the same registered servers through this
+machine's gateway. Add to the `gateway` object in `config.json`:
+
+| Key | Value |
+| --- | --- |
+| `mcpAuthority` | The exact DNS name and port 443 workers use for the gateway's MCP endpoint. `sproozi init` sets `mcp.sproozi.internal:443` and covers it in the gateway certificate; a hand-written configuration's certificate must cover it. |
+| `mcpRegistryFile` | Absolute path of a private `servers.json` in the format above. |
+| `mcpCredentialsDirectory` | Absolute private directory holding the files `bearerTokenFile` names, when a server needs a credential. |
+| `mcpPolicy` | The `mcpServers` map of an AgentPolicy: server name to approved `tools`. |
+
+Add a unit allowance for each server, such as
+`"mcp.deepwiki": {"units": {"bounded": true, "value": 10}}`, then restart the
+service with `sproozi service stop` and `sproozi service start`. Monetary MCP
+allowances are rejected because MCP has no trusted pricing. Sproozi generates
+the Codex client configuration for each session from these allowances.
+
+Claude Code sessions on the same machine get no named MCP servers: Sproozi
+generates named-server configuration only for Codex sessions, and says so when
+the service starts (`claude-code sessions get no configured MCP servers
+(mcp.deepwiki): …`). Start the session with `sproozi run --harness codex` to
+use them.

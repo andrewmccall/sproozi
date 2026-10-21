@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -278,7 +277,7 @@ func (s *Service) createWorkspaceExecution(ctx context.Context, id, operationID,
 		AllocationID: uuid.NewString(), Epoch: 1, Placement: local.Name,
 		InstructionDigest: local.InstructionDigest, IncludeIgnored: slices.Clone(includeIgnored),
 		HarnessArgs: slices.Clone(harnessArgs),
-		Deadline:    time.Now().Add(s.duration).UTC(), Allowances: maps.Clone(s.config.Allowances)}
+		Deadline:    time.Now().Add(s.duration).UTC(), Allowances: harnessAllowances(local.Harness, s.config.Allowances)}
 	return s.createExecution(first, "", func() ([]byte, error) {
 		limit := s.config.Local.MaxCheckpointBytes
 		data, err := workspace.CaptureLocal(ctx, path, includeIgnored, limit)

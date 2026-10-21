@@ -1,7 +1,12 @@
 package mcppolicy_test
 
 import (
+	"strings"
 	"testing"
+
+	"k8s.io/apimachinery/pkg/runtime"
+
+	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 
 	"github.com/andrewmccall/sproozi/internal/mcppolicy"
 )
@@ -77,5 +82,24 @@ func TestSchemaEvaluationRejectsCyclesAndUnsupportedReferences(t *testing.T) {
 	}
 	if constraint.Validate(map[string]any{"tenant": "other"}) == nil {
 		t.Fatal("acyclic reference lost its restriction")
+	}
+}
+
+func TestScopeErrorsNameTheToolAndKeyword(t *testing.T) {
+	for _, tc := range []struct {
+		scope api.MCPServerScope
+		want  string
+	}{
+		{api.MCPServerScope{}, "no tools are listed"},
+		{api.MCPServerScope{Tools: map[string]api.MCPToolScope{"bad name": {}}}, `invalid MCP tool name "bad name"`},
+		{api.MCPServerScope{Tools: map[string]api.MCPToolScope{"ask_wiki_question": {Arguments: &runtime.RawExtension{
+			Raw: []byte(`{"type":"object","properties":{"repoName":{"type":"string","format":"uri"}}}`)}}}},
+			`tool "ask_wiki_question" arguments: unsupported MCP schema restriction "format"`},
+		{api.MCPServerScope{Tools: map[string]api.MCPToolScope{"t": {Arguments: &runtime.RawExtension{
+			Raw: []byte(`{"type":"object","x-custom":true}`)}}}}, `unsupported MCP schema restriction "x-custom"`},
+	} {
+		if _, err := mcppolicy.CompileScope(tc.scope); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("got %v, want %q", err, tc.want)
+		}
 	}
 }

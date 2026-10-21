@@ -357,15 +357,17 @@ Use only the approved endpoint and namespaces in your home configuration.
 
 ## One external MCP definition across executors
 
-The [DeepWiki example](../../examples/portable-workflows/deepwiki-servers.json)
+The [DeepWiki example](../../examples/mcp/servers.json)
 registers the real public HTTPS provider without credentials. Use that same
 authored registry file for `gateway.mcpRegistryFile` locally and the remote
 gateway's mounted registry ConfigMap. Set the local inspection authority and
 certificate SANs according to the [MCP reference](../reference/configured-mcp.md).
 `gateway.mcpAuthority` is required even without a registry: it also serves the
 [Sproozi control connection](../reference/sproozi-integration.md).
-The policy example permits only `read_wiki_structure` for the public
-`modelcontextprotocol/go-sdk` repository, with a finite `mcp.docs` allowance.
+The [policy example](../../examples/mcp/agentpolicy.yaml) permits only
+`read_wiki_structure` and `ask_wiki_question` for the public
+`modelcontextprotocol/go-sdk` repository, with a finite `mcp.deepwiki`
+allowance.
 Keep the local copy outside the repository, owned and mode `0600`. Both copies
 must contain the same registration bytes; restart gateways after registry edits.
 Use the same registration and policy on both gateways.
@@ -374,8 +376,8 @@ Regenerate connection settings at each native launch. Registry configuration
 alone does not grant access. Each execution needs the named capability, matching
 tool and argument policy, an available budget and active run status. Restart the
 owning gateways to apply registry or credential changes; removing a grant must
-deny later calls. Codex managed-native MCP is supported; managed Claude MCP
-is not supported. No provider-specific
+deny later calls. Codex sessions get the named servers; Claude Code sessions
+get none. No provider-specific
 server code, catalogue, OAuth enrollment or stdio lifecycle is required for this
 HTTPS example.
 

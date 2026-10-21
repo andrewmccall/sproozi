@@ -3,7 +3,6 @@ package home
 import (
 	"errors"
 	"fmt"
-	"maps"
 	"slices"
 
 	"github.com/andrewmccall/sproozi/internal/project"
@@ -31,12 +30,13 @@ func validateProjectApprovals(c Config) error {
 }
 
 func (s *Service) projectAllowances(r localSession) (map[string]session.Allowance, error) {
+	base := harnessAllowances(r.Original.Harness, s.config.Allowances)
 	if r.Original.Project == "" {
-		return maps.Clone(s.config.Allowances), nil
+		return base, nil
 	}
 	for _, approval := range s.config.ProjectApprovals {
 		if approval.Source == r.Source && approval.Project == r.Original.Project {
-			return project.Narrow(approval.Capabilities, s.config.Allowances)
+			return project.Narrow(approval.Capabilities, base)
 		}
 	}
 	return nil, fmt.Errorf("home: configure projectApprovals for source %q and project %q before native resume",

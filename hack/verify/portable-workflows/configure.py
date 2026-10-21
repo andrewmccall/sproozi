@@ -105,14 +105,15 @@ def main():
     profile['repositories'] = {'sproozi': {'snapshot': '/state/source'}}
     documents = list(yaml.safe_load_all(args.manifest.read_text()))
     if args.deepwiki:
-        registry = ROOT / 'examples/portable-workflows/deepwiki-servers.json'
+        # The public DeepWiki example: its registry and the policy's tool scope.
+        registry = ROOT / 'examples/mcp/servers.json'
         local_registry = fixture / 'mcp-servers.json'
         local_registry.write_bytes(registry.read_bytes())
         local_registry.chmod(0o600)
-        policy = yaml.safe_load((ROOT / 'examples/portable-workflows/deepwiki-policy.yaml').read_text())['spec']
+        policy = yaml.safe_load((ROOT / 'examples/mcp/agentpolicy.yaml').read_text())['spec']
         allowance = {'units': {'bounded': True, 'value': 10}, 'costMicros': {'bounded': False, 'value': 0}}
-        home['allowances']['mcp.docs'] = allowance
-        profile['allowances']['mcp.docs'] = allowance
+        home['allowances']['mcp.deepwiki'] = allowance
+        profile['allowances']['mcp.deepwiki'] = allowance
         home['gateway'].update(mcpRegistryFile=str(local_registry), mcpAuthority='sproozi-gateway.sproozi-system.svc:443',
                                mcpPolicy=policy['mcpServers'])
         found_registry = found_policy = False
@@ -123,8 +124,8 @@ def main():
                 document['data']['servers.json'] = registry.read_text()
                 found_registry = True
             if document['kind'] == 'AgentPolicy' and document['metadata']['name'] == profile['templateName']:
-                document['spec']['allowedCapabilities'] = ['model.inference', 'mcp.docs']
-                document['spec']['budgets']['mcp.docs'] = {'maxUnits': 10, 'maxCostMicros': 0}
+                document['spec']['allowedCapabilities'] = ['model.inference', 'mcp.deepwiki']
+                document['spec']['budgets']['mcp.deepwiki'] = {'maxUnits': 10, 'maxCostMicros': 0}
                 document['spec']['mcpServers'] = policy['mcpServers']
                 found_policy = True
         if not found_registry or not found_policy:

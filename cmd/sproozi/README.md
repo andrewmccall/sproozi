@@ -227,15 +227,11 @@ snapshots are also history; [ADR 0015](../../docs/adr/0015-default-clients-and-n
 describes the supported records. Unsupported native error
 records, subagents, compaction and broad long-history portability are unproved.
 
-### Named MCP for Codex
+### Named MCP
 
-For Codex, named MCP is optional: configure `gateway.mcpAuthority` as an exact DNS authority
-on port 443, `mcpRegistryFile`, `mcpCredentialsDirectory`, and `mcpPolicy` using the
-existing named MCP registry and `MCPServerScope` schema. Include corresponding
-`mcp.<name>` unit allowances. The inspection certificate must also cover the MCP
-authority. Bounded monetary MCP allowances are rejected because trusted MCP cost
-pricing is not implemented. Administrator `nativeOptions` supplies the matching
-stock Codex MCP client configuration; checkpoint contents supply none of it.
+Local Codex sessions can use configured MCP servers; Claude Code sessions get
+none. The `gateway.mcp*` keys and `mcp.<name>` allowances are described in
+[configured MCP: local sessions](../../docs/reference/configured-mcp.md#local-sessions).
 
 ## Remote executors
 

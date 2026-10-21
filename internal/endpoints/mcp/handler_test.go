@@ -674,3 +674,40 @@ func TestUnsupportedMCPMethodsAreRejectedBeforeSetup(t *testing.T) {
 		t.Fatalf("supported discovery = %+v", tools.Tools)
 	}
 }
+
+// A policy naming a tool the server does not offer fails the server's
+// connection with the missing tool and the tools the server does offer.
+func TestMissingApprovedToolNamesItAndTheOfferedTools(t *testing.T) {
+	f := newFixture(t, func(g *gateway.ExecutionGrant) {
+		scope := g.Policy.Spec.MCPServers[docsName]
+		scope.Tools["ask_question"] = api.MCPToolScope{}
+		g.Policy.Spec.MCPServers[docsName] = scope
+	})
+	_, err := sdk.NewClient(&sdk.Implementation{Name: clientName, Version: fixtureVersion}, nil).Connect(t.Context(),
+		&sdk.StreamableClientTransport{Endpoint: "https://" + fixtureHost + ":8443" + docsPath, HTTPClient: f.client,
+			DisableStandaloneSSE: true}, nil)
+	if err == nil {
+		t.Fatal("a policy approving a missing tool connected")
+	}
+	recorded := f.audit.data()
+	for _, want := range []string{`the policy approves \"ask_question\", which the server does not offer`,
+		`it offers \"delete_everything\", \"search\"`} {
+		if !strings.Contains(recorded, want) {
+			t.Fatalf("deny reason lacks %s: %s", want, recorded)
+		}
+	}
+}
+
+func TestRegistryErrorsNameTheKeyAndTheName(t *testing.T) {
+	for raw, want := range map[string]string{
+		`{"servers":{"docs":{"url":"https://safe.example/mcp","headers":{}}}}`: `MCP registration "docs" has unknown key "headers"; a server takes "url" and optional "bearerTokenFile"`,
+		`{"server":{}}`: `MCP registry has unknown key "server"; it holds only "servers"`,
+		`{}`:            `MCP registry needs a "servers" object`,
+		`{"servers":{"DeepWiki":{"url":"https://safe.example/mcp"}}}`: `MCP registration name "DeepWiki" is not a valid name; use 1 to 63 lowercase letters`,
+		`{"servers":{"sproozi":{"url":"https://safe.example/mcp"}}}`:  `MCP registration name "sproozi" is reserved for the Sproozi control connection`,
+	} {
+		if _, err := remote.LoadRegistry([]byte(raw), remote.CredentialDirectory); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: %v, want %q", raw, err, want)
+		}
+	}
+}

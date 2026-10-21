@@ -1,33 +1,40 @@
+# Grants mcp.deepwiki: two of DeepWiki's read-only tools, each limited to one
+# repository. List a server's real tool names and argument schemas with
+#   python3 hack/mcp-tools.py https://mcp.deepwiki.com/mcp
+# A tool name the server does not offer fails every call to the server.
 apiVersion: sproozi.com/v1alpha1
 kind: AgentPolicy
 metadata:
-  name: mcp-investigation
+  name: mcp-deepwiki
   namespace: sproozi-system
 spec:
-  allowedCapabilities: [model.inference, mcp.docs, mcp.inventory]
+  allowedCapabilities: [model.inference, mcp.deepwiki]
   mcpServers:
-    docs:
+    deepwiki:
       tools:
-        search:
+        read_wiki_structure:
           arguments:
             type: object
-            required: [collection]
+            required: [repoName]
+            additionalProperties: false
             properties:
-              collection:
-                const: operations
-    inventory:
-      tools:
-        list_assets:
+              repoName:
+                const: modelcontextprotocol/go-sdk
+        ask_wiki_question:
           arguments:
             type: object
-            required: [tenant]
+            required: [repoName, question]
+            additionalProperties: false
             properties:
-              tenant:
-                const: home-ops
+              repoName:
+                const: modelcontextprotocol/go-sdk
+              question:
+                type: string
+                maxLength: 1000
   # These native scope fields remain required by the current API. They grant
   # no authority because their capabilities are absent above.
   kubernetesRead:
-    namespaces: [sproozi-demo]
+    namespaces: [sproozi-system]
     resources: [pods]
   githubPullRequest:
     repositories: []
@@ -36,10 +43,8 @@ spec:
   budgets:
     model.inference:
       maxUnits: 100000
-    mcp.docs:
+    mcp.deepwiki:
       maxUnits: 10
-    mcp.inventory:
-      maxUnits: 5
   resourceBounds:
     max:
       cpu: "1"

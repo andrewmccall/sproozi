@@ -102,15 +102,15 @@ test-e2e-existing: ## Run the e2e suite against an existing caller-owned Kind cl
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint. CI (Lint).
-	"$(GOLANGCI_LINT)" run
+	GOTOOLCHAIN=$(LINT_TOOLCHAIN) "$(GOLANGCI_LINT)" run
 
 .PHONY: lint-fix
 lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
-	"$(GOLANGCI_LINT)" run --fix
+	GOTOOLCHAIN=$(LINT_TOOLCHAIN) "$(GOLANGCI_LINT)" run --fix
 
 .PHONY: lint-config
 lint-config: golangci-lint ## Verify golangci-lint configuration. CI (Lint).
-	"$(GOLANGCI_LINT)" config verify
+	GOTOOLCHAIN=$(LINT_TOOLCHAIN) "$(GOLANGCI_LINT)" config verify
 
 ##@ Verification (see test/acceptance/running.md)
 
@@ -129,8 +129,9 @@ verify-race: setup-envtest ## Race-test the non-e2e packages (RACE_SHARD=1 or 2 
 	$(ENVTEST_ASSETS) go test -race -coverprofile cover.out $(RACE_PACKAGES)
 
 .PHONY: verify-mcp
-verify-mcp: ## Race-test the MCP and gateway packages and the live MCP verifier offline. CI.
-	go test -race ./internal/endpoints/kubernetes ./internal/endpoints/mcp ./internal/mcppolicy ./internal/harness ./cmd/gateway -count=1
+verify-mcp: ## Race-test the MCP and gateway packages, check examples/*/servers.json examples and the live MCP verifier offline. CI.
+	go test -race ./internal/endpoints/kubernetes ./internal/endpoints/mcp ./internal/mcppolicy ./internal/harness ./internal/policy/kubernetes ./cmd/gateway -count=1
+	go test -race ./test/manifests -run 'TestMCPExamples' -count=1
 	python3 hack/verify/mcp-live-test.py
 
 .PHONY: verify-mcp-client
@@ -336,6 +337,10 @@ ENVTEST_K8S_VERSION ?= $(shell v='$(call gomodver,k8s.io/api)'; \
   printf '%s\n' "$$v" | sed -E 's/^v?[0-9]+\.([0-9]+).*/1.\1/')
 
 GOLANGCI_LINT_VERSION ?= v2.12.2
+# golangci-lint v2.12.2 reads compiler export data only from Go 1.26, so lint
+# loads packages with CI's toolchain whatever Go is installed; the go command
+# downloads it once if it is missing.
+LINT_TOOLCHAIN ?= go1.26.6
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
 $(KUSTOMIZE): | $(LOCALBIN)
@@ -367,7 +372,7 @@ $(GOLANGCI_LINT): | $(LOCALBIN)
 	@ln -sf "$$(realpath "$(GOLANGCI_LINT)-$(GOLANGCI_LINT_VERSION)")" "$(GOLANGCI_LINT)"
 	@test -f .custom-gcl.yml && { \
 		echo "Building custom golangci-lint with plugins..." && \
-		$(GOLANGCI_LINT) custom --destination $(LOCALBIN) --name golangci-lint-custom && \
+		GOTOOLCHAIN=$(LINT_TOOLCHAIN) $(GOLANGCI_LINT) custom --destination $(LOCALBIN) --name golangci-lint-custom && \
 		mv -f $(LOCALBIN)/golangci-lint-custom $(GOLANGCI_LINT); \
 	} || true
 
