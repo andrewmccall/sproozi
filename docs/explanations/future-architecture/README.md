@@ -30,6 +30,7 @@ to the current remote work, Project or workspace-revision workflow.
 - [Multiplayer sessions](multiplayer-sessions.md)
 - [Agent communication](agent-to-agent-communication.md)
 - [Shared workspace reconciliation](shared-workspace-reconciliation.md)
+- [Returning a session's work to your repository](returning-work-to-the-user.md)
 - [Workspace memory and indexing](workspace-memory-and-indexing.md)
 - [Cross-harness context handoff](cross-harness-handoff.md)
 - [Project permissions and membership](project-permissions-and-membership.md)

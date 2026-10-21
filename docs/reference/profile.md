@@ -11,12 +11,12 @@ enforces policy whatever the profile says.
 ## Location and layout
 
 The profile is the `profile` folder beside the configuration file. In a
-[local installation](local-installation.md) that is `~/sproozi/profile`, and
+[local installation](local-installation.md) that is `~/.sproozi/profile`, and
 `sproozi init --local` creates its folders. For another configuration, create
 the folder beside its `config.json`. A missing folder is an empty profile.
 
 ```text
-~/sproozi/
+~/.sproozi/
   config.json
   profile/
     AGENTS.md                 optional instructions for every harness

@@ -59,7 +59,7 @@ only inside GitHub Actions; leave it unset locally. See the
 [CI caching amendment](../../docs/adr/0021-pinned-ci-inputs-and-latest-client-canary.md#amendment-ci-caching)
 to ADR 0021.
 
-## Getting-started guide
+## Investigation-to-PR demo guide
 
 The repository includes the
 [`verify-sproozi` skill](../../.agents/skills/verify-sproozi/SKILL.md) for checking

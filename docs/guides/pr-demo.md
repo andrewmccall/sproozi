@@ -27,8 +27,7 @@ Use macOS or Linux, or a Linux shell under WSL2, with these tools on your
 - [Go](https://go.dev/dl/) 1.26 or later, Make, OpenSSL, Python 3, curl and
   `shasum`.
 
-Clone the repository and run the rest of this guide from its root. Don't clone
-it to `~/sproozi`: the CLI keeps its own files there.
+Clone the repository and run the rest of this guide from its root:
 
 ```sh
 git clone https://github.com/andrewmccall/sproozi.git ~/src/sproozi

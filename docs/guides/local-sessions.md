@@ -104,6 +104,12 @@ reason; the [session commands reference](../reference/session-commands.md#pass-a
 lists them, with every other command and flag. If the home daemon isn't
 running, these commands start it.
 
+The gateway refuses the harness's own services that Sproozi doesn't allow,
+such as Claude Code's remote settings. Claude Code then shows `Remote managed
+settings failed to load (access denied (403))`; the agent still works.
+[Sproozi integration](../reference/sproozi-integration.md) explains how the
+agent can ask why a request was refused.
+
 ## Add the other harness
 
 Each session keeps the harness it started with. To use both, run setup again
@@ -122,7 +128,7 @@ to restart the home daemon once the session stops.
 
 ## Add your instructions and skills
 
-Your [profile](../reference/profile.md) is `~/sproozi/profile`. Put
+Your [profile](../reference/profile.md) is `~/.sproozi/profile`. Put
 instructions that every session should follow in `AGENTS.md` there, and
 harness-specific ones in `codex/AGENTS.md` or `claude/CLAUDE.md`. Add skills as
 `skills/<name>/SKILL.md`. Sproozi sends the profile with each launch, and the
@@ -187,7 +193,7 @@ automatically.
 | Message | Next step |
 | --- | --- |
 | `docker: engine unavailable` | Start Docker Desktop or the Docker service, then repeat the command. |
-| `root: … is a Git checkout, not a Sproozi installation` | The installation root, `~/sproozi` by default, holds something else. Move it, or choose another directory with `--root`. |
+| `root: … is a Git checkout, not a Sproozi installation` | The installation root, `~/.sproozi` by default, holds something else. Move it, or choose another directory with `--root`. |
 | `root: … exceeds the 103-byte Unix socket limit` | Choose a shorter `--root`. |
 | `network: no host address is reachable from the worker network` | A firewall may block the gateway port; choose another with `--port`. |
 | `registry: pull failed` | Check registry access, or build the image locally with `--build SOURCE_DIRECTORY` from a release source bundle or checkout. |
@@ -196,12 +202,14 @@ automatically.
 | `config: the existing configuration's placement differs` | The configuration no longer matches the installation's image, network or gateway. Restore the backup next to `config.json` or run `sproozi doctor`. |
 | `workspace: byte limit exceeded` | The repository's Git history is larger than one checkpoint. The message gives the size and how to raise `local.maxCheckpointBytes`, up to 64 MiB. |
 | `gateway.listen "127.0.0.1:PORT": address already in use` | Another program holds the gateway port. Stop it, then run `sproozi service start`. If you haven't started a session yet, you can instead [remove the installation](#remove-the-installation) and run setup again with `--port` set to a free port. |
-| `service: home daemon exited during startup` | Read the log named in the message, usually `~/sproozi/logs/service.log`. |
+| `service: home daemon exited during startup` | Read the log named in the message, usually `~/.sproozi/logs/service.log`. |
 
 ## What this does not protect
 
 - The agent can run any command inside its container, including tools that
   change the managed workspace. Review its changes before using them.
+- Sproozi has no command yet to bring the agent's changes back into your
+  repository; see [returning a session's work](../explanations/future-architecture/returning-work-to-the-user.md).
 - Every local session uses the same profile. Anything you place there reaches
   every Codex and Claude Code session. It is a convenience for one user, not
   isolation between untrusted users or agents.
@@ -214,17 +222,17 @@ automatically.
 ## Remove the installation
 
 Stop every session, then stop the home daemon and delete the installation
-root, `~/sproozi` unless you chose another with `--root`:
+root, `~/.sproozi` unless you chose another with `--root`:
 
 ```sh
 sproozi service stop
 docker network ls --filter label=sproozi.com/installation
 docker network rm sproozi-INSTALLATION_ID
-rm -rf ~/sproozi
+rm -rf ~/.sproozi
 ```
 
-The network name is in `~/sproozi/installation.json` and in `sproozi doctor`
+The network name is in `~/.sproozi/installation.json` and in `sproozi doctor`
 output. Removing it never touches Docker resources that Sproozi did not create.
 
-Deleting `~/sproozi` removes retained conversations, checkpoints, provider keys
+Deleting `~/.sproozi` removes retained conversations, checkpoints, provider keys
 and the certificate authority. Back up anything you want to keep first.

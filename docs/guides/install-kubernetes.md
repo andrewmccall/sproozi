@@ -15,23 +15,10 @@ runtimes, templates and policies.
 
 ## Before you start
 
-You need a Linux cluster whose network plugin enforces NetworkPolicy, and
-administrator access to it.
-
-To try Sproozi on your computer, create a Kind cluster. Kind's default network
-enforces NetworkPolicy (tested with Kind 0.33):
-
-```sh
-kind create cluster --name sproozi
-```
-
-Kind selects the new cluster for kubectl. For any cluster, check that kubectl
-points at the one you mean before installing:
-
-```sh
-kubectl config current-context
-kubectl get nodes
-```
+You need kubectl 1.31 or later and a Linux cluster whose network plugin
+enforces NetworkPolicy from the moment a Pod starts, such as Calico or
+Cilium. Kind's default network isn't enough: it lets a new Pod's first
+traffic through before applying its policy.
 
 ## Download the release
 
@@ -50,12 +37,39 @@ tar -xzf "sproozi_${VERSION}_kubernetes.tar.gz"
 The check prints `OK`. On Linux, `sha256sum -c -` works too. The archive
 extracts to `sproozi-release/`.
 
+## Create a Kind cluster
+
+To try Sproozi on your computer, create a Kind cluster with Calico. Skip this
+on a cluster you already have.
+
+```sh
+kind create cluster --name sproozi --config sproozi-release/kind/cluster.yaml
+kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.30.4/manifests/calico.yaml
+kubectl rollout status -n kube-system daemonset/calico-node --timeout=300s
+```
+
+Kind selects the new cluster for kubectl. On any cluster, check that kubectl
+points at the one you mean before installing:
+
+```sh
+kubectl config current-context
+kubectl get nodes
+```
+
 ## Install
 
 Before applying, read `sproozi-release/install/install.yaml`. It creates
-namespaces whose names start with `sproozi-`, and ClusterRoles that let the
-controller read Pods, ServiceAccounts, NetworkPolicies and ConfigMaps across
-the cluster. The controller writes only in `sproozi-agents`.
+namespaces whose names start with `sproozi-` and these cluster-wide
+permissions:
+
+- The controller reads Pods, ServiceAccounts, NetworkPolicies, ConfigMaps and
+  Sproozi's resources in every namespace, and updates AgentRuns. It creates
+  and deletes sandbox objects only in `sproozi-agents`.
+- The gateway reads Pods and their logs, events, Services, Deployments,
+  ReplicaSets and StatefulSets in every namespace, and creates TokenReviews.
+  An agent sees only what its policy allows through the gateway.
+- Admin, editor and viewer ClusterRoles for Sproozi's resources, bound to
+  no one until you bind them.
 
 ```sh
 kubectl apply --server-side --field-manager=sproozi-installer -f sproozi-release/crds.yaml
@@ -131,6 +145,7 @@ To run it again, delete the finished run first:
 | The run stays `Queued` | Read its `Ready` condition. `WaitingForConcurrencyCap` means a concurrency cap is full. |
 | The run is `Failed` before a Pod appears | Run `kubectl describe agentrun first-check -n sproozi-system` and read the controller log: `kubectl logs -n sproozi-system deployment/sproozi-controller-manager`. |
 | `AlreadyExists` when you create the run | Delete the earlier run first. |
+| `UNEXPECTED: direct API server path was reachable` | The network plugin doesn't enforce NetworkPolicy from Pod start. Use Calico or Cilium; see [security hardening](../reference/security-hardening.md). |
 
 ## Uninstall
 

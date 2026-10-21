@@ -52,14 +52,17 @@ any Git repository:
 ```bash
 brew install andrewmccall/tap/sproozi
 sproozi init --local --harness codex
-cd ~/code/my-project
+cd /path/to/your/repository
 sproozi start --workspace "$PWD" --harness codex
 ```
 
 `init --local` asks for your API key and checks that the sandbox can't reach
 the internet directly. `start` copies the repository into a container and
-opens Codex there; your own directory isn't changed. Press Ctrl-] to detach.
-For Claude Code, use `--harness claude-code`.
+opens Codex there; your own directory isn't changed. Press Ctrl-] to detach,
+`sproozi attach ID` to return, `sproozi stop ID` to stop and `sproozi resume
+ID` to carry on later; `sproozi sessions` lists them. For Claude Code, run
+`sproozi init --local --harness claude-code` too, then start with
+`--harness claude-code`.
 
 [Local sessions](docs/guides/local-sessions.md) explains each step.
 [Install the CLI](docs/guides/install.md) covers downloads for Linux and
@@ -99,7 +102,7 @@ There's working code and recorded tests, but support varies by workflow:
 | Controlled access to Kubernetes and external tools | [Recorded tool-access acceptance](test/acceptance/reports/verified-mcp-demo.md) with a real model, including native Kubernetes reads, configured HTTPS test servers and denied operations. The full redacted reports aren't published yet |
 | Local Docker sessions from `sproozi init --local` | Provisioning, per-session Codex or Claude Code selection, gateway containment probes and certificate renewal checked on macOS Docker Desktop with deterministic providers by [`make verify-local-onboarding`](test/acceptance/running.md#local-onboarding); no recorded report is published yet. See the [local sessions guide](docs/guides/local-sessions.md) |
 | Explaining refused access to the agent | Every harness receives Sproozi instructions, a `sproozi-access` skill and a `diagnose` tool for its own recent gateway refusals; tested with installed Codex, Claude Code and OpenCode clients, which call `diagnose` through the gateway after a refused request; not yet in a recorded Kind run. See [Sproozi integration](docs/reference/sproozi-integration.md) |
-| Your own instructions and skills | One profile, `~/sproozi/profile` in a local installation, reaches every managed Codex and Claude Code session with shared and per-harness instructions and skills. It is sent with each Docker launch and stored by digest for Kubernetes. Tested with installed clients and a Docker ↔ Kind session-mobility round trip. See [Profile](docs/reference/profile.md) |
+| Your own instructions and skills | One profile, `~/.sproozi/profile` in a local installation, reaches every managed Codex and Claude Code session with shared and per-harness instructions and skills. It is sent with each Docker launch and stored by digest for Kubernetes. Tested with installed clients and a Docker ↔ Kind session-mobility round trip. See [Profile](docs/reference/profile.md) |
 | Docker ↔ Kubernetes session movement | [Recorded round trips](test/acceptance/reports/verified-session-mobility.md) with Codex 0.161.0, Claude Code 2.1.27 and deterministic providers, including unfinished Git changes. The pinned clients are now Codex 0.163.0 and Claude Code 2.1.302; movement hasn't been re-recorded with them |
 | Concurrent AgentRuns | New. There's no cluster cap by default. An optional cluster cap (`--max-active-runs`) or per-policy cap (`maxActiveRuns`) keeps extra runs `Queued`. Checked with unit tests and envtest. The Kind verifier's `uncapped-policy-concurrent-runs` and `policy-cap-monotonic-cancel-cleanup` checks ([`verify.py`](hack/verify/orchestration-kind/verify.py)) run concurrent fixture runs in the [E2E workflow](https://github.com/andrewmccall/sproozi/actions/workflows/test-e2e.yml). Concurrent runs with a real model are not verified. Read the [concurrency warnings](docs/reference/security-hardening.md#concurrency-and-gateway-capacity) before sharing a cluster |
 | Remote Codex work followed by local resume | [Recorded remote-work acceptance](test/acceptance/reports/verified-portable-workflows.md) with deterministic models, actual package checks and isolated Kubernetes reads/denials |

@@ -50,7 +50,7 @@ authority. Also seen as: managed harness configuration.
 ### Profile
 
 Your own instructions and skills, in the `profile` folder beside the home
-configuration (`~/sproozi/profile` for a local installation), that every
+configuration (`~/.sproozi/profile` for a local installation), that every
 managed Codex and Claude Code session receives after the Sproozi integration.
 Like the integration, it is guidance, not authority. See
 [Profile](docs/reference/profile.md). Also seen as: shared agent files, agents
@@ -393,7 +393,7 @@ rejected), home service.
 
 ### Local installation
 
-The private directory, `~/sproozi` by default, that `sproozi init --local`
+The private directory, `~/.sproozi` by default, that `sproozi init --local`
 provisions for the home daemon: its configuration, provider credentials,
 certificate authority, journals and profile. See
 [local installation](docs/reference/local-installation.md). Also seen as:

@@ -14,6 +14,15 @@ traffic involving the Pod's own node. Do not infer API isolation from policy
 alone when the API server is on that node. See
 [Kubernetes NetworkPolicy semantics](https://kubernetes.io/docs/concepts/services-networking/network-policies/).
 
+The CNI must also enforce a Pod's policy from the moment the Pod starts.
+Sproozi creates each run's NetworkPolicy before its Pod, but some
+implementations apply it only after the Pod is running. Kind's default
+network (kindnet) let a new sandbox reach the API server directly for about a
+second; Calico v3.30.4 on Kind blocked it on every attempt. Run the first
+check from [Install on Kubernetes](../guides/install-kubernetes.md) more than
+once on a warm node: a policy applied late shows as
+`UNEXPECTED: direct API server path was reachable`.
+
 The gateway validates the ServiceAccount namespace, name, UID, audience and
 active Run state. Each new connection (CONNECT) is checked with a live
 TokenReview and live reads of the run, template, policy and ServiceAccount.
