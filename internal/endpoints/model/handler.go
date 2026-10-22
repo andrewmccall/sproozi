@@ -200,12 +200,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Responses and Messages SSE are relayed as they arrive. Other streaming
 	// protocols are denied before reserving capacity.
-	bodyBytes, err := readBounded(r.Body, maxModelBodyBytes)
-	if err != nil {
-		h.deny(w, e, http.StatusRequestEntityTooLarge,
-			"request body exceeds gateway limit", "invalid_request_error", "request_too_large")
+	bodyBytes, ok := h.readBody(w, r, e)
+	if !ok {
 		return
 	}
+	var err error
 	if len(bodyBytes) != 0 {
 		if err := unambiguousJSON(bodyBytes); err != nil {
 			message, code := jsonRefusal(err)
@@ -661,6 +660,25 @@ func (h *Handler) prepareAnthropic(r *http.Request, body []byte, limits sprooziv
 	return json.Marshal(request)
 }
 
+// readBody reads and decodes the request body, refusing an unsupported or
+// corrupt encoding and a body past the gateway limit.
+func (h *Handler) readBody(w http.ResponseWriter, r *http.Request, e audit.Event) ([]byte, bool) {
+	body, err := decodedBody(r, maxModelBodyBytes)
+	switch {
+	case errors.Is(err, errUnsupportedEncoding):
+		h.deny(w, e, http.StatusUnsupportedMediaType,
+			"request body uses an unsupported content encoding", "invalid_request_error", "unsupported_encoding")
+	case errors.Is(err, errUndecodableBody):
+		h.deny(w, e, http.StatusBadRequest, err.Error(), "invalid_request_error", "invalid_encoding")
+	case err != nil:
+		h.deny(w, e, http.StatusRequestEntityTooLarge,
+			"request body exceeds gateway limit", "invalid_request_error", "request_too_large")
+	default:
+		return body, true
+	}
+	return nil, false
+}
+
 // upstreamTarget is the provider's path and query for an accepted request.
 func (h *Handler) upstreamTarget(r *http.Request) string {
 	if h.Config.UpstreamPath == nil {
@@ -679,7 +697,9 @@ func (h *Handler) copyProviderHeaders(target, source http.Header, workloadCreden
 	for k, vv := range source {
 		name := strings.ToLower(k)
 		credential := name == "authorization" || name == "x-api-key"
-		if name == "proxy-authorization" || name == "cookie" || credential && !workloadCredential {
+		// The gateway forwards the body it decoded and inspected.
+		if name == "proxy-authorization" || name == "cookie" || name == "content-encoding" ||
+			credential && !workloadCredential {
 			continue
 		}
 		if h.protocol == anthropicProtocol && !credential &&

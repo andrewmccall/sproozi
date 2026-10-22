@@ -1,6 +1,8 @@
 package model_test
 
 import (
+	"bytes"
+	"compress/gzip"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +14,7 @@ import (
 	model "github.com/andrewmccall/sproozi/internal/endpoints/model"
 	"github.com/andrewmccall/sproozi/internal/gateway"
 	"github.com/andrewmccall/sproozi/internal/modelauth"
+	"github.com/klauspost/compress/zstd"
 )
 
 const chatGPTSignIn = "eyJ-codex-own-chatgpt-access-token"
@@ -82,5 +85,44 @@ func TestProviderHostsCoverSignedInRoutesOnlyWhenTheHarnessSignsIn(t *testing.T)
 	anthropic, _ := model.ProviderFor("anthropic")
 	if got := strings.Join(anthropic.Hosts(true), ","); got != "api.anthropic.com,platform.claude.com" {
 		t.Fatalf("anthropic signed-in hosts: %s", got)
+	}
+}
+
+// Codex compresses its ChatGPT requests; the gateway decodes them so it can
+// inspect them, and forwards plain JSON.
+func TestModelRequestBodiesAreDecodedBeforeInspection(t *testing.T) {
+	plain := `{"model":"gpt-fixture","stream":true,"store":false}`
+	var gz bytes.Buffer
+	w := gzip.NewWriter(&gz)
+	_, _ = io.WriteString(w, plain)
+	_ = w.Close()
+	encoder, _ := zstd.NewWriter(nil)
+	for encoding, body := range map[string][]byte{"zstd": encoder.EncodeAll([]byte(plain), nil), "gzip": gz.Bytes(), "br": []byte("x")} {
+		var forwarded, forwardedEncoding string
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			data, _ := io.ReadAll(r.Body)
+			forwarded, forwardedEncoding = string(data), r.Header.Get("Content-Encoding")
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = io.WriteString(w, completedStream)
+		}))
+		tracker := budget.NewTracker()
+		h := model.NewChatGPTBackendHandler(model.HandlerConfig{ProviderAuth: modelauth.Workload{}, UpstreamURL: upstream.URL,
+			HTTPClient: upstream.Client(), AuditLogger: audit.NewLogger(io.Discard)})
+		r := httptest.NewRequest(http.MethodPost, "https://chatgpt.com/backend-api/codex/responses", bytes.NewReader(body))
+		r = r.WithContext(gateway.WithIdentity(r.Context(), testExecutionGrant()))
+		r.Header.Set("Authorization", "Bearer "+chatGPTSignIn)
+		r.Header.Set("Content-Encoding", encoding)
+		response := httptest.NewRecorder()
+		workloadRoutes(model.ChatGPTBackendAuthority, h, tracker).ServeHTTP(response, r)
+		upstream.Close()
+		if encoding == "br" {
+			if response.Code != http.StatusUnsupportedMediaType || forwarded != "" {
+				t.Fatalf("an unknown encoding was forwarded: %d", response.Code)
+			}
+			continue
+		}
+		if response.Code != http.StatusOK || !strings.Contains(forwarded, `"stream":true`) || forwardedEncoding != "" {
+			t.Fatalf("%s: status=%d forwarded=%q encoding=%q", encoding, response.Code, forwarded, forwardedEncoding)
+		}
 	}
 }

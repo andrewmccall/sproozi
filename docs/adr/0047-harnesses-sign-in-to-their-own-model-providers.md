@@ -33,6 +33,9 @@ would have to be repeated for each new harness.
   gateway-held token needs. Each harness registry entry adds only where its
   stock client keeps its login file (`SignInFile`). The gateways build routes
   from these; nothing branches on the harness.
+- **Compressed requests are decoded.** A model request with a gzip or zstd
+  `Content-Encoding` is decoded before inspection and forwarded uncompressed,
+  so every mechanism inspects the same JSON.
 - **Forwarding keeps inspection.** For a harness that signs in itself, every
   model authority of its provider forwards the harness's credential headers
   (`modelauth.Workload`). Model routes keep TLS inspection, capability checks,
@@ -97,8 +100,13 @@ All with deterministic providers unless stated:
   falls back to HTTPS; it refreshes at `auth.openai.com/oauth/token` and
   writes a mounted `auth.json` in place; its terminal offers device-code
   sign-in. Account routing fields must be `NO_CONSTRAINT` in the fixture.
-- `make verify-local-onboarding` with gateway-held keys, and Claude Code with
-  a seeded fixture sign-in, both passed with the stock clients.
+- `make verify-local-onboarding` passed both ways with the stock clients:
+  gateway-held keys for Codex and Claude Code, and with `SIGN_IN=1` each
+  harness's own seeded sign-in, every model request carrying it. That run
+  found that a ChatGPT-signed-in Codex compresses its request bodies (zstd,
+  its `enable_request_compression` feature), so the model handler decodes
+  gzip or zstd before inspection, bounded like any body, and forwards plain
+  JSON; another encoding is refused.
 
 ## Alternatives
 
