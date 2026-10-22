@@ -54,7 +54,7 @@ certificate authority, credentials and configuration.
 | Image | Reuses the recorded image when `--image` names it again. Otherwise pulls the native image digest built into the CLI release, or uses `--image REPOSITORY@sha256:DIGEST` or a local `sha256:` content ID, or builds with `--build SOURCE_DIRECTORY`. The image must report helper contract `1`. |
 | Network | Creates or reuses the bridge network `sproozi-ID`, labelled `sproozi.com/installation=ID`. Docker chooses a subnet that does not overlap its other networks. A same-named network that this installation does not own is rejected. |
 | Gateway address | Serves a one-time value from the host and fetches it from a container on the network. It tries, in order: host loopback reached through the engine's host name, the bridge gateway address, then each of those on all interfaces. The first address that works is recorded. |
-| Credentials | Stores the provider key from a hidden prompt, `--credential-file` or `--credential-stdin`. With `--provider-ca-file`, copies that PEM bundle to `credentials/PROVIDER-ca.pem` and points the harness's gateway at the copy; a later run with the flag replaces it. It then lists the provider's models to check the key, unless `--skip-credential-check` is given. |
+| Credentials | With `--sign-in`, stores no key: the harness signs in to its own provider account in its first session. Otherwise stores the provider key from a hidden prompt, `--credential-file` or `--credential-stdin`. With `--provider-ca-file`, copies that PEM bundle to `credentials/PROVIDER-ca.pem` and points the harness's gateway at the copy; a later run with the flag replaces it. It then lists the provider's models to check the key, unless `--skip-credential-check` is given. |
 | Certificates | Creates the certificate authority and a serving leaf covering the gateway address and the enabled provider authorities. |
 | Configuration | Writes `config.json`. On a later run it adds a new harness and keeps every other value. It refuses when the existing configuration's image, network, gateway address or approved instructions differ from the installation. |
 | Service | Starts `sproozi service run` detached from the terminal. After a configuration or credential change it restarts the service only when no session is running; otherwise it saves the change, skips the readiness check and prints `Saved. N session(s) are running, so the service keeps its previous settings until they stop; ...`, exiting 0. |
@@ -105,7 +105,7 @@ network, gateway address, limits, allowances and certificate authority.
 | Harness | Placement | Provider | Provider credential |
 | --- | --- | --- | --- |
 | `codex` | `local` when first, otherwise `local-codex` | `https://api.openai.com` | Key file `credentials/openai`, which the gateway holds |
-| `claude-code` | `local` when first, otherwise `local-claude` | `https://api.anthropic.com` | Claude Code's own sign-in, in Docker volume `sproozi-<installation>-<placement>-login` |
+| `claude-code` | `local` when first, otherwise `local-claude` | `https://api.anthropic.com` | Key file `credentials/anthropic`, or with `--sign-in` Claude Code's own sign-in in Docker volume `sproozi-<installation>-<placement>-login` |
 
 `--provider-url` and `--provider-ca-file` select a private HTTPS provider
 endpoint for the harness being added. The CA bundle is public, so its source
@@ -113,7 +113,7 @@ may be readable by anyone, but setup refuses one every account can write. The
 gateway reads only the private copy. Codex receives `OPENAI_API_KEY` as a
 placeholder; the gateway replaces it with the stored key on approved requests.
 
-Claude Code signs in itself with `/login`
+With `--sign-in`, Claude Code signs in itself with `/login`
 ([ADR 0047](../adr/0047-harnesses-sign-in-to-their-own-model-providers.md)).
 Its configuration has no `providerTokenFile`, and it receives no placeholder
 key. Its sign-in lives in a persistent Docker volume, created on the first
@@ -124,10 +124,9 @@ every Claude Code agent of the installation mounts that one file at
 Removing the installation leaves the volume; `docker volume rm` deletes the
 sign-in. The gateway forwards the sign-in to `api.anthropic.com`, relays
 Claude Code's token refresh on `platform.claude.com` (`POST /v1/oauth/token`
-only), and covers that host in its certificate. Setup with
-`--credential-file` for Claude Code fails, and running setup again on an
-installation that stored an Anthropic key drops the key file from the
-configuration.
+only), and covers that host in its certificate. Setup again with a key
+(`--credential-file`, `--credential-stdin` or the prompt) switches the harness
+back to a gateway-held key; setup without either keeps its current choice.
 
 ## Profile
 

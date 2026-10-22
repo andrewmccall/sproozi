@@ -85,13 +85,12 @@ container stdout. Operators should collect that stream from the shared gateway
 deployment; semantic gateway decisions are not silently discarded.
 
 `MODEL_AUTH_MODE` selects `api_key` (default), `chatgpt` or `workload`. Only the selected
-mode's credential Secret is required. In `workload` mode the gateway holds no
-model provider key: it enables both the OpenAI and Anthropic routes and forwards
-the credential each harness signed in with, refusing a request that has none.
-The gateway refuses to start in `workload` mode if `openai-api-key` or
-`anthropic-api-key` is set. It holds each run's credential in memory until the
-run's maximum duration has passed, and refuses that credential on any other
-inspected route ([ADR 0047](../adr/0047-harnesses-sign-in-to-their-own-model-providers.md)). ChatGPT credentials are created through the
+mode's credential Secret is required. In `workload` mode the gateway enables
+both the OpenAI and Anthropic routes. A provider whose key (`openai-api-key` or
+`anthropic-api-key`) is set keeps using it; a provider without one forwards the
+credential each harness signed in with and refuses a request that has none. It
+holds each run's forwarded credential in memory until the run's maximum
+duration has passed, and refuses that credential on any other inspected route ([ADR 0047](../adr/0047-harnesses-sign-in-to-their-own-model-providers.md)). ChatGPT credentials are created through the
 local consent helper, not by copying a Codex login cache. See
 [Model provider authentication](../guides/model-provider-auth.md) for the Kind
 setup, token-only subscription budget and single-refresh-owner limitation. In

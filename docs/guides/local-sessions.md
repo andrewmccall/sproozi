@@ -5,9 +5,9 @@ restricted Docker container. You need a running Docker engine; you do not need
 a Sproozi checkout, Go, OpenSSL, Python, kubectl or a Kubernetes cluster.
 
 `sproozi init` sets up everything: the agent image, a private Docker network,
-a certificate authority, the Codex provider key, the configuration and a
-background service. Claude Code needs no key from setup: you sign it in to
-your Claude account in its first session. It reports ready only after a test container verifies the gateway's
+a certificate authority, your provider key, the configuration and a background
+service. Claude Code can instead sign in to your own Claude account; see
+[Sign in to Claude Code](#sign-in-to-claude-code). It reports ready only after a test container verifies the gateway's
 identity and fails to reach the internet, the provider directly, other gateway
 ports, cloud metadata, direct DNS and IPv6.
 
@@ -20,9 +20,9 @@ the files, defaults, limits and supported platforms.
   containers. Setup has been verified on macOS with Docker Desktop; Docker
   Engine on Linux is supported but has no recorded acceptance run yet. Windows
   needs a [hand-written configuration](windows.md).
-- An OpenAI API key for Codex, which setup stores for the gateway, or a Claude
-  subscription or Claude Console account for Claude Code, which you sign in to
-  inside the agent.
+- An OpenAI API key for Codex, or for Claude Code an Anthropic API key or a
+  Claude account to sign in with. Setup stores a key for the gateway; agents
+  never receive it.
 - The Sproozi CLI from [Homebrew or a release download](install.md).
 
 Sproozi is a preview. Read [what a container does not protect](#what-this-does-not-protect)
@@ -36,8 +36,9 @@ Run setup once. It asks for your API key without echoing it:
 sproozi init
 ```
 
-That sets up Codex. For Claude Code, run `sproozi init --harness claude-code`;
-it asks for no key. The output ends with:
+That sets up Codex. For Claude Code, run `sproozi init --harness claude-code`,
+or add `--sign-in` to use your Claude account instead of a key. The output
+ends with:
 
 ```text
 Ready. In a Git repository, start an agent with:
@@ -121,14 +122,21 @@ Each agent gets its own gateway port. `--port` sets only the first one, on the
 first `init`; a later agent takes the next free port after the existing ones,
 so `--port` on a later `init` has no effect.
 
-The second agent gets its own gateway port, so a Claude Code container cannot
-use the Codex key. If a session is running, setup saves the change and says to
-restart the service once the session stops.
+The second agent gets its own gateway port and provider key, so a Codex
+container cannot use the Anthropic key, or the reverse. If a session is
+running, setup saves the change and says to restart the service once the
+session stops.
 
 ## Sign in to Claude Code
 
-Claude Code signs in to your own Claude account, as it does outside Sproozi
-([ADR 0047](../adr/0047-harnesses-sign-in-to-their-own-model-providers.md)).
+Instead of an API key, Claude Code can sign in to your own Claude account, as
+it does outside Sproozi
+([ADR 0047](../adr/0047-harnesses-sign-in-to-their-own-model-providers.md)):
+
+```sh
+sproozi init --harness claude-code --sign-in
+```
+
 In the first session, type `/login`, open the link it shows in your browser,
 and paste the code back into the terminal. Claude Code keeps the sign-in in a
 Docker volume of its own, `sproozi-<installation>-local-claude-login`, which
@@ -147,9 +155,10 @@ gateway-held key:
   Code sessions running at once share one sign-in, and one may need `/login`
   again if both refresh at the same moment.
 
-Updating an installation that stored an Anthropic key: run
-`sproozi init --harness claude-code` again. It drops the key file from the
-configuration, and the next Claude Code session asks you to `/login`.
+To switch an installation that stored an Anthropic key, run
+`sproozi init --harness claude-code --sign-in`; the next Claude Code session
+asks you to `/login`. To switch back, run `sproozi init --harness claude-code`
+with `--credential-file` or at the key prompt.
 
 ## Add your instructions and skills
 
@@ -169,7 +178,7 @@ step for anything that fails.
 | --- | --- |
 | Check everything, including each stored key | `sproozi doctor --check-provider` |
 | See whether the service runs | `sproozi service status` |
-| Replace the Codex provider key | `sproozi credentials set codex` |
+| Replace a provider key | `sproozi credentials set codex` (or `claude-code` when it uses a key) |
 | See which keys are stored | `sproozi credentials list` |
 | Stop or start the service | `sproozi service stop`, `sproozi service start` |
 | See certificate expiry and renewal | `sproozi certificates status` |

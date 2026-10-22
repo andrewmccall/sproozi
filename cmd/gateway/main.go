@@ -356,10 +356,6 @@ func loadModelCredentials(openAIUpstreamURL string) (string, string, string, err
 		return "", "", "", fmt.Errorf("MODEL_AUTH_MODE=%q must be api_key, chatgpt or workload: check key mode in %s",
 			mode, modelAuthSource)
 	}
-	if mode == modelauth.WorkloadMode && (openAIKey != "" || anthropicKey != "") {
-		return "", "", "", errors.New("MODEL_AUTH_MODE=workload forwards each harness's own sign-in: " +
-			"remove keys openai-api-key and anthropic-api-key from " + modelCredentialsSource)
-	}
 	if mode == modelauth.ChatGPTMode && openAIUpstreamURL != "https://api.openai.com" {
 		return "", "", "", errors.New("ChatGPT plan usage requires the public OpenAI API upstream")
 	}
@@ -454,7 +450,7 @@ func modelHandlers(cfg *startupConfig, auditLogger audit.Writer, modelClient *ht
 	workload := cfg.modelAuthMode == modelauth.WorkloadMode
 	if cfg.enabled[sprooziv1alpha1.CapabilityModelInference] && (cfg.anthropicKey != "" || workload) {
 		var anthropicAuth modelauth.Authenticator = modelauth.AnthropicAPIKey{Key: cfg.anthropicKey}
-		if workload {
+		if workload && cfg.anthropicKey == "" {
 			anthropicAuth = modelauth.Workload{}
 		}
 		anthropicHandler = modelgateway.NewAnthropicHandler(modelgateway.HandlerConfig{
@@ -469,7 +465,7 @@ func modelHandlers(cfg *startupConfig, auditLogger audit.Writer, modelClient *ht
 		// access to it is limited to the one named Secret.
 		credentialNamespace := envOrDefault("CREDENTIAL_NAMESPACE", "sproozi-system")
 		var providerAuth modelauth.Authenticator = modelauth.APIKey{Key: cfg.openAIKey}
-		if workload {
+		if workload && cfg.openAIKey == "" {
 			providerAuth = modelauth.Workload{}
 		}
 		if cfg.modelAuthMode == modelauth.ChatGPTMode {
@@ -531,10 +527,13 @@ func composeDispatcher(
 	anthropic := routes[modelgateway.AnthropicAuthority]
 	anthropic.Handler = anthropicHandler
 	routes[modelgateway.AnthropicAuthority] = anthropic
+	// In workload mode a provider with no gateway key forwards each harness's
+	// own sign-in; one with a key keeps it (ADR 0047).
 	if cfg.modelAuthMode == modelauth.WorkloadMode {
-		for _, authority := range []string{modelgateway.OpenAIAuthority, modelgateway.AnthropicAuthority} {
+		for authority, key := range map[string]string{modelgateway.OpenAIAuthority: cfg.openAIKey,
+			modelgateway.AnthropicAuthority: cfg.anthropicKey} {
 			route := routes[authority]
-			route.ProviderCredential = true
+			route.ProviderCredential = key == ""
 			routes[authority] = route
 		}
 	}

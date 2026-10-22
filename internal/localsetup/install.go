@@ -38,11 +38,15 @@ type Options struct {
 	Credential     CredentialInput
 	// CheckCredential validates the key with the provider's model listing.
 	CheckCredential bool
-	Port            uint16
-	StartService    bool
-	Executable      string
-	Timeout         time.Duration
-	Progress        io.Writer
+	// SignIn lets the harness sign in to its own provider account instead of
+	// the gateway holding a key (ADR 0047). Without it or a key, a harness
+	// keeps the choice it already has.
+	SignIn       bool
+	Port         uint16
+	StartService bool
+	Executable   string
+	Timeout      time.Duration
+	Progress     io.Writer
 }
 
 // Result summarises a completed installation.
@@ -283,16 +287,21 @@ func (i *installer) prepareHarness(ctx context.Context) error {
 		i.selected.ProviderCAFile, i.providerCA, i.credential = path, path, true
 		i.step("Stored the %s endpoint's CA bundle in %s", provider.Name, path)
 	}
-	if SignsIn(i.selected.Harness) {
-		// The harness signs in to its own provider in its first session; the
-		// gateway forwards that sign-in and stores no key (ADR 0047).
-		if o.Credential.File != "" || o.Credential.Stdin != nil {
-			return fail("credential", fmt.Errorf("%s signs in to its provider itself, so Sproozi stores no key for it", o.Harness),
-				"leave out the credential options, then run /login in its first session")
+	keyGiven := o.Credential.File != "" || o.Credential.Stdin != nil
+	if o.SignIn && !SignsIn(i.selected.Harness) {
+		return fail("harness", fmt.Errorf("%s can't sign in to its provider itself yet", o.Harness),
+			"leave out --sign-in and give it a provider key")
+	}
+	if o.SignIn || (i.selected.Credential == "" && !keyGiven && SignsIn(i.selected.Harness)) {
+		// The harness signs in in its first session; the gateway forwards
+		// that sign-in and stores no key (ADR 0047).
+		if i.selected.Credential != "" {
+			i.step("%s now signs in to %s itself; the stored key is no longer used", o.Harness, provider.Name)
 		}
 		i.selected.Credential = ""
 		return i.save("harness:" + string(i.selected.Harness))
 	}
+	i.selected.Credential = filepath.Join(i.l.Credentials(), provider.Name)
 	if !HasCredential(i.l, provider.Name) || o.Credential.File != "" || o.Credential.Stdin != nil {
 		if _, err := StoreCredential(i.l, provider.Name, o.Credential); err != nil {
 			return err
@@ -326,10 +335,8 @@ func (i *installer) addHarness() error {
 		directory, _ := harness.NativeDirectory(o.Harness)
 		name = "local-" + directory
 	}
-	h := Harness{Harness: o.Harness, Name: name, Port: port, Model: o.Model, ProviderURL: cmp.Or(o.ProviderURL, provider.URL)}
-	if !SignsIn(o.Harness) {
-		h.Credential = filepath.Join(i.l.Credentials(), provider.Name)
-	}
+	h := Harness{Harness: o.Harness, Name: name, Port: port, Model: o.Model, ProviderURL: cmp.Or(o.ProviderURL, provider.URL),
+		Credential: filepath.Join(i.l.Credentials(), provider.Name)}
 	i.inst.Harnesses = append(i.inst.Harnesses, h)
 	i.selected = &i.inst.Harnesses[len(i.inst.Harnesses)-1]
 	return nil
@@ -574,19 +581,23 @@ func mergeConfig(existing, rendered home.Config) (home.Config, bool, error) {
 			changed = true
 		}
 	}
-	return existing, clearSignInKeys(&existing) || changed, nil
+	return existing, syncCredentialMode(&existing, rendered) || changed, nil
 }
 
-// clearSignInKeys drops the provider key file of every harness that now
-// signs in itself, so an existing installation moves to its own sign-in.
-func clearSignInKeys(c *home.Config) bool {
+// syncCredentialMode follows a harness's switch between a gateway-held key and
+// its own sign-in (ADR 0047), keeping an edited key file path otherwise.
+func syncCredentialMode(c *home.Config, rendered home.Config) bool {
+	c.Harnesses = slices.Clone(c.Harnesses)
 	changed := false
-	if SignsIn(c.Local.Harness) && c.Gateway.ProviderTokenFile != "" {
-		c.Gateway.ProviderTokenFile, changed = "", true
+	follow := func(current *string, want string) {
+		if (*current == "") != (want == "") {
+			*current, changed = want, true
+		}
 	}
-	for i := range c.Harnesses {
-		if SignsIn(c.Harnesses[i].Harness) && c.Harnesses[i].ProviderTokenFile != "" {
-			c.Harnesses[i].ProviderTokenFile, changed = "", true
+	follow(&c.Gateway.ProviderTokenFile, rendered.Gateway.ProviderTokenFile)
+	for _, r := range rendered.Harnesses {
+		if i := slices.IndexFunc(c.Harnesses, func(e home.LocalHarness) bool { return e.Harness == r.Harness }); i >= 0 {
+			follow(&c.Harnesses[i].ProviderTokenFile, r.ProviderTokenFile)
 		}
 	}
 	return changed

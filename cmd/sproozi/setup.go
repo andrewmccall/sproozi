@@ -31,7 +31,7 @@ func (q *options) initLocal(ctx context.Context) error {
 		Image:       localsetup.ImageRequest{Reference: q.image, BuildSource: q.build},
 		ProviderURL: q.providerURL, ProviderCAFile: q.providerCA, CheckCredential: !q.skipCheck,
 		Port: q.port, StartService: !q.noService, Executable: executable, Timeout: q.timeout, Progress: os.Stderr,
-		Credential: q.credentialInput()}
+		Credential: q.credentialInput(), SignIn: q.signIn}
 	if q.instructionsFile != "" {
 		data, err := os.ReadFile(q.instructionsFile)
 		if err != nil || len(data) == 0 || len(data) > 16<<10 {

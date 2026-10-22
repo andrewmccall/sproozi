@@ -520,9 +520,21 @@ func TestWorkloadModeForwardsEachHarnessSignIn(t *testing.T) {
 	if routes["api.github.com:443"].ProviderCredential {
 		t.Fatal("a non-model route was marked as carrying a provider credential")
 	}
-	t.Setenv("ANTHROPIC_API_KEY", "anthropic-fixture-key")
-	if _, err := loadStartupConfig(); err == nil || !strings.Contains(err.Error(), "workload") {
-		t.Fatalf("a gateway key in workload mode was accepted: %v", err)
+	// A provider with a gateway key keeps it; the other forwards each
+	// harness's own sign-in.
+	t.Setenv("OPENAI_API_KEY", "openai-fixture-key")
+	cfg, err = loadStartupConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	openAI, anthropic = modelHandlers(cfg, audit.NewLogger(io.Discard), http.DefaultClient, nil, nil)
+	handlers = map[api.CapabilityKind]http.Handler{api.CapabilityModelInference: openAI}
+	routes = composeDispatcher(cfg, handlers, nil, anthropic)
+	if routes["api.openai.com:443"].ProviderCredential || !routes["api.anthropic.com:443"].ProviderCredential {
+		t.Fatal("a mixed gateway forwarded the wrong provider's credential")
+	}
+	if mode := openAI.(*modelgateway.Handler).Config.ProviderAuth.Mode(); mode != modelauth.APIKeyMode {
+		t.Fatalf("the OpenAI route with a gateway key uses %s", mode)
 	}
 }
 

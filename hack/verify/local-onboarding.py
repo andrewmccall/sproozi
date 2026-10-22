@@ -3,7 +3,7 @@
 
 Uses deterministic local providers, an isolated HOME and a short private root,
 so it neither spends provider credit nor touches your real installation. It
-provisions Codex, adds Claude Code without a provider key, seeds Claude's
+provisions Codex, adds Claude Code with `--sign-in` and no provider key, seeds Claude's
 login volume with a fixture sign-in, checks doctor, drives one stock terminal
 turn per harness through `sproozi attach` (Claude's with its own sign-in),
 stops both sessions, proves shared
@@ -109,7 +109,7 @@ def main():
                                         "endpoint": codex["endpoint"], "paths": codex["paths"]}
         installation = codex["installation"]
         result = sproozi("init", "--root", str(root), "--harness", "claude-code", "--model", claude.MODEL,
-                         "--provider-url", "https://127.0.0.1:18775", "--provider-ca-file", str(work / "claude-ca.pem"), "--json")
+                         "--provider-url", "https://127.0.0.1:18775", "--provider-ca-file", str(work / "claude-ca.pem"), "--sign-in", "--json")
         both = json.loads(result.stdout)
         report["steps"]["addClaude"] = {"ready": both["ready"], "harnesses": [(h["harness"], h["port"]) for h in both["harnesses"]],
                                         "paths": both["paths"]}

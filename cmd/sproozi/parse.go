@@ -50,6 +50,7 @@ type options struct {
 	instructionsFile   string
 	credentialStdin    bool
 	skipCheck          bool
+	signIn             bool
 	noService          bool
 	json               bool
 	leaveRunning       bool
@@ -124,6 +125,7 @@ func parse(args []string) (options, error) {
 	q.operation, q.id = str("operation"), str("id")
 	q.local = boolean("local")
 	q.credentialStdin, q.skipCheck = boolean("credential-stdin"), boolean("skip-credential-check")
+	q.signIn = boolean("sign-in")
 	q.noService, q.json, q.leaveRunning = boolean("no-service"), boolean("json"), boolean("leave-running")
 	q.checkProvider, q.detach = boolean("check-provider"), boolean("detach")
 	q.remote = boolean("remote") || q.context != "" || q.namespace != ""
@@ -255,6 +257,9 @@ func (q *options) validate(str func(string) string) error {
 	}
 	if q.credentialStdin && q.credentialFile != "" {
 		return usagef("choose --credential-file or --credential-stdin")
+	}
+	if q.signIn && (q.credentialStdin || q.credentialFile != "") {
+		return usagef("--sign-in stores no key; leave out --credential-file and --credential-stdin")
 	}
 	if c.name == cmdMove && q.local == q.remote {
 		return usagef("move needs --local (to this machine) or --remote (to a cluster)")

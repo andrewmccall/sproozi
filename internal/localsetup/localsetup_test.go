@@ -415,30 +415,33 @@ func TestRestartPendingIsRecordedInTheRoot(t *testing.T) {
 	}
 }
 
-// Claude Code signs in itself, so its harness stores no key and an existing
-// configuration's key file is dropped on the next init (ADR 0047).
-func TestClaudeStoresNoProviderKey(t *testing.T) {
+// Each harness keeps either a gateway-held key or its own sign-in, and setup
+// can switch it either way (ADR 0047).
+func TestSignInIsChosenPerHarness(t *testing.T) {
 	l, inst := testInstallation(t)
 	keyed := inst
 	keyed.Harnesses = append(slices.Clone(inst.Harnesses), Harness{Harness: harness.NativeClaude, Name: claudePlacement, Port: 18444,
 		ProviderURL: anthropicURL, Credential: filepath.Join(l.Credentials(), "anthropic")})
-	existing := renderConfig(l, keyed, DefaultInstructions)
-	if existing.Harnesses[0].ProviderTokenFile == "" {
-		t.Fatal("fixture should start with a stored Claude key")
+	withKey := renderConfig(l, keyed, DefaultInstructions)
+	signedIn := keyed
+	signedIn.Harnesses = slices.Clone(keyed.Harnesses)
+	signedIn.Harnesses[1].Credential = ""
+	toSignIn, changed, err := mergeConfig(withKey, renderConfig(l, signedIn, DefaultInstructions))
+	if err != nil || !changed || toSignIn.Harnesses[0].ProviderTokenFile != "" || toSignIn.Gateway.ProviderTokenFile == "" {
+		t.Fatalf("switch to sign-in: changed=%v claude=%q codex=%q err=%v", changed, toSignIn.Harnesses[0].ProviderTokenFile,
+			toSignIn.Gateway.ProviderTokenFile, err)
 	}
-	i := &installer{l: l, inst: inst, o: Options{Harness: harness.NativeClaude}}
-	if err := i.addHarness(); err != nil {
-		t.Fatal(err)
-	}
-	if i.selected.Credential != "" {
-		t.Fatalf("Claude got a key path: %s", i.selected.Credential)
-	}
-	merged, changed, err := mergeConfig(existing, renderConfig(l, i.inst, DefaultInstructions))
-	if err != nil || !changed || merged.Harnesses[0].ProviderTokenFile != "" || merged.Gateway.ProviderTokenFile == "" {
-		t.Fatalf("merge: changed=%v claude=%q codex=%q err=%v", changed, merged.Harnesses[0].ProviderTokenFile,
-			merged.Gateway.ProviderTokenFile, err)
-	}
-	if problems := slices.DeleteFunc(merged.ServeProblems(), func(p string) bool { return strings.HasPrefix(p, "directory (") }); len(problems) != 0 {
+	if problems := slices.DeleteFunc(toSignIn.ServeProblems(), func(p string) bool { return strings.HasPrefix(p, "directory (") }); len(problems) != 0 {
 		t.Fatalf("serve would refuse the signed-in configuration: %q", problems)
+	}
+	back, changed, err := mergeConfig(toSignIn, withKey)
+	if err != nil || !changed || back.Harnesses[0].ProviderTokenFile == "" {
+		t.Fatalf("switch back to a key: changed=%v claude=%q err=%v", changed, back.Harnesses[0].ProviderTokenFile, err)
+	}
+	edited := withKey
+	edited.Harnesses = slices.Clone(withKey.Harnesses)
+	edited.Harnesses[0].ProviderTokenFile = "/elsewhere/anthropic-key"
+	if kept, _, _ := mergeConfig(edited, withKey); kept.Harnesses[0].ProviderTokenFile != "/elsewhere/anthropic-key" {
+		t.Fatal("an edited key path was replaced")
 	}
 }
