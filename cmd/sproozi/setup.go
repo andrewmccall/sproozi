@@ -315,7 +315,7 @@ func (q *options) credentialsCommand(ctx context.Context, l localsetup.Layout,
 		for _, provider := range []string{providerOpenAI, providerAnthropic} {
 			e := credentialEntry{Provider: provider, Stored: localsetup.HasCredential(l, provider)}
 			for _, h := range inst.Harnesses {
-				if localsetup.ProviderFor(h.Harness).Name == provider {
+				if localsetup.ProviderFor(h.Harness).Name == provider && h.Credential != "" {
 					e.Harnesses = append(e.Harnesses, string(h.Harness))
 				}
 			}
@@ -329,9 +329,14 @@ func (q *options) credentialsCommand(ctx context.Context, l localsetup.Layout,
 	}
 	var selected *localsetup.Harness
 	for i := range inst.Harnesses {
-		if localsetup.ProviderFor(inst.Harnesses[i].Harness).Name == provider {
-			selected = &inst.Harnesses[i]
+		if localsetup.ProviderFor(inst.Harnesses[i].Harness).Name != provider {
+			continue
 		}
+		if inst.Harnesses[i].Credential == "" {
+			return nil, usagef("%s signs in to %s itself, so Sproozi stores no key for it; run /login in its session",
+				inst.Harnesses[i].Harness, provider)
+		}
+		selected = &inst.Harnesses[i]
 	}
 	path, err := localsetup.StoreCredential(l, provider, q.credentialInput())
 	if err != nil {

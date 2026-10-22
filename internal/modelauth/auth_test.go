@@ -52,6 +52,27 @@ func (s *memoryStore) Replace(_ context.Context, before, after Session) error {
 	return nil
 }
 
+func TestWorkloadKeepsTheHarnessCredentialAndAccount(t *testing.T) {
+	r := httptest.NewRequest(http.MethodPost, Resource+"/responses", nil)
+	r.Header.Set("Authorization", "Bearer harness-own-key")
+	r.Header.Set(openAIProjectHeader, "harness-project")
+	if err := (Workload{}).Authorize(r); err != nil {
+		t.Fatal(err)
+	}
+	if r.Header.Get("Authorization") != "Bearer harness-own-key" || r.Header.Get(openAIProjectHeader) != "harness-project" {
+		t.Fatal("the harness's credential or account was changed")
+	}
+	for _, header := range []struct{ name, value string }{
+		{"Authorization", ""}, {"Authorization", "Bearer "}, {"X-Api-Key", "bad\r\nvalue"},
+	} {
+		r := httptest.NewRequest(http.MethodPost, Resource+"/responses", nil)
+		r.Header[header.name] = []string{header.value}
+		if err := (Workload{}).Authorize(r); err == nil {
+			t.Fatalf("missing or invalid %s accepted", header.name)
+		}
+	}
+}
+
 func TestAPIKeyReplacesWorkloadAuthorization(t *testing.T) {
 	r := httptest.NewRequest(http.MethodPost, Resource+"/responses", nil)
 	r.Header.Set("Authorization", "Bearer workload-placeholder")

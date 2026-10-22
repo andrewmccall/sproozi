@@ -222,16 +222,23 @@ func (c NativeLaunch) Validate(now time.Time) error {
 }
 
 // NativeBaseEnvironment is the public, credential-free environment shared by
-// both backends. Each authority adds its own fresh proxy/token binding.
-func NativeBaseEnvironment(kind NativeKind, executionUID string) ([]string, error) {
+// both backends. Each authority adds its own fresh proxy/token binding. A
+// harness that signs in itself gets no provider key placeholder, which would
+// otherwise take precedence over its own sign-in (ADR 0047).
+func NativeBaseEnvironment(kind NativeKind, executionUID string, signIn bool) ([]string, error) {
 	if err := kind.Validate(); err != nil {
 		return nil, err
+	}
+	env := make([]string, 0, 8)
+	env = append(env, "PATH=/opt/git/bin:/usr/local/bin:/usr/bin:/bin", "TERM=xterm-256color", "LANG=C.UTF-8",
+		"GIT_TERMINAL_PROMPT=0", "GH_PROMPT_DISABLED=1", "GH_TOKEN=sproozi-worker-placeholder",
+		"SPROOZI_EXECUTION_UID="+executionUID)
+	if signIn {
+		return env, nil
 	}
 	apiKey := nativeOpenAIKey
 	if kind == NativeClaude {
 		apiKey = nativeAnthropicKey
 	}
-	return []string{"PATH=/opt/git/bin:/usr/local/bin:/usr/bin:/bin", "TERM=xterm-256color", "LANG=C.UTF-8",
-		"GIT_TERMINAL_PROMPT=0", "GH_PROMPT_DISABLED=1", "GH_TOKEN=sproozi-worker-placeholder",
-		"SPROOZI_EXECUTION_UID=" + executionUID, apiKey + "=sproozi-worker-placeholder"}, nil
+	return append(env, apiKey+"=sproozi-worker-placeholder"), nil
 }

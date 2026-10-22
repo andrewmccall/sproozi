@@ -41,6 +41,11 @@ type Harness struct {
 	NativeDirectory string
 	// Protocol is the model API the managed kind speaks through the gateway.
 	Protocol ModelProtocol
+	// SignInHost serves the managed kind's own OAuth sign-in and refresh, and
+	// SignInFile is where the harness keeps that sign-in, relative to its
+	// NativeDirectory (ADR 0047). Both are empty for a harness that can't
+	// sign in itself yet.
+	SignInHost, SignInFile string
 }
 
 // MCPFormat is a harness's MCP configuration file. A JSON file holds a map,
@@ -91,6 +96,7 @@ var registry = []Harness{
 	{Selector: string(NativeCodex), Native: NativeCodex, NativeDirectory: string(NativeCodex), Protocol: ProtocolOpenAI,
 		MCP: MCPFormat{File: "codex-mcp.toml"}, Loader: NativeMCP},
 	{Selector: string(NativeClaude), Native: NativeClaude, NativeDirectory: "claude", Protocol: ProtocolAnthropic,
+		SignInHost: "platform.claude.com", SignInFile: ".credentials.json",
 		RequestFiles: true, Loader: NativeMCP,
 		MCP: MCPFormat{File: "claude-mcp.json", Field: mcpServersField, Entry: func(name, address string) (string, any) {
 			return name, map[string]any{connectionType: httpTransport, connectionURL: address}

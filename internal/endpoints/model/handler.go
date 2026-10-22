@@ -238,6 +238,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	e.ProviderAuthMode = providerAuth.Mode()
+	if providerAuth.Mode() == modelauth.WorkloadMode && !modelauth.HasWorkloadCredential(r.Header) {
+		h.deny(w, e, http.StatusUnauthorized,
+			"the harness sent no provider credential; sign the harness in to its model provider",
+			"authentication_error", "provider_credential_missing")
+		return
+	}
 	if providerAuth.Mode() == modelauth.ChatGPTMode {
 		if err := validateChatGPTRequest(r, bodyBytes, limits.MaxCostMicros); err != nil {
 			h.deny(w, e, http.StatusForbidden, err.Error(), "permission_error", "chatgpt_request_not_supported")
@@ -348,7 +354,7 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, e audit.Event,
 			"failed to build upstream request", "server_error", "upstream_error")
 		return
 	}
-	h.copyProviderHeaders(upstreamReq.Header, r.Header)
+	h.copyProviderHeaders(upstreamReq.Header, r.Header, providerAuth.Mode() == modelauth.WorkloadMode)
 	if err = providerAuth.Authorize(upstreamReq); err != nil {
 		release()
 		h.deny(w, e, http.StatusServiceUnavailable, "provider authentication is unavailable", "server_error", "provider_auth_unavailable")
@@ -418,9 +424,9 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, e audit.Event,
 	defer func() { _ = resp.Body.Close() }()
 
 	var diagnostic *ResponseDiagnostic
-	credential := strings.TrimPrefix(upstreamReq.Header.Get("Authorization"), "Bearer ")
-	if h.protocol == anthropicProtocol {
-		credential = upstreamReq.Header.Get("X-Api-Key")
+	credential := upstreamReq.Header.Get("X-Api-Key")
+	if credential == "" {
+		credential = strings.TrimPrefix(upstreamReq.Header.Get("Authorization"), "Bearer ")
 	}
 	if h.Config.Diagnostics != nil {
 		described := describeResponse(resp, nil, credential)
@@ -651,12 +657,17 @@ func (h *Handler) prepareAnthropic(r *http.Request, body []byte, limits sprooziv
 	return json.Marshal(request)
 }
 
-func (h *Handler) copyProviderHeaders(target, source http.Header) {
+// copyProviderHeaders never forwards cookies or the gateway credential. It
+// forwards the workload's own provider credential only in workload mode.
+func (h *Handler) copyProviderHeaders(target, source http.Header, workloadCredential bool) {
 	for k, vv := range source {
-		if slices.Contains([]string{"authorization", "x-api-key", "proxy-authorization", "cookie"}, strings.ToLower(k)) {
+		name := strings.ToLower(k)
+		credential := name == "authorization" || name == "x-api-key"
+		if name == "proxy-authorization" || name == "cookie" || credential && !workloadCredential {
 			continue
 		}
-		if h.protocol == anthropicProtocol && !slices.Contains([]string{"content-type", "accept", "anthropic-version", "anthropic-beta"}, strings.ToLower(k)) {
+		if h.protocol == anthropicProtocol && !credential &&
+			!slices.Contains([]string{"content-type", "accept", "anthropic-version", "anthropic-beta"}, name) {
 			continue
 		}
 		for _, v := range vv {

@@ -3,8 +3,10 @@
 
 Uses deterministic local providers, an isolated HOME and a short private root,
 so it neither spends provider credit nor touches your real installation. It
-provisions Codex, adds Claude Code, checks doctor, drives one stock terminal
-turn per harness through `sproozi attach`, stops both sessions, proves shared
+provisions Codex, adds Claude Code without a provider key, seeds Claude's
+login volume with a fixture sign-in, checks doctor, drives one stock terminal
+turn per harness through `sproozi attach` (Claude's with its own sign-in),
+stops both sessions, proves shared
 instructions reach both providers, renews the gateway certificate while
 the home daemon runs, and records that a configured kubeconfig and kubectl on
 PATH received no calls. The report is written to
@@ -77,7 +79,6 @@ def main():
         instructions = claude.INSTRUCTIONS
         write_private(work / "instructions.txt", instructions)
         write_private(work / "codex-token", "tui-placeholder\n")
-        write_private(work / "claude-token", claude.TOKEN + "\n")
         provider_dir = work / "claude-provider"
         provider_dir.mkdir(mode=0o700)
         subprocess.run(["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256", "-nodes",
@@ -108,8 +109,7 @@ def main():
                                         "endpoint": codex["endpoint"], "paths": codex["paths"]}
         installation = codex["installation"]
         result = sproozi("init", "--root", str(root), "--harness", "claude-code", "--model", claude.MODEL,
-                         "--provider-url", "https://127.0.0.1:18775", "--provider-ca-file", str(work / "claude-ca.pem"),
-                         "--credential-file", str(work / "claude-token"), "--skip-credential-check", "--json")
+                         "--provider-url", "https://127.0.0.1:18775", "--provider-ca-file", str(work / "claude-ca.pem"), "--json")
         both = json.loads(result.stdout)
         report["steps"]["addClaude"] = {"ready": both["ready"], "harnesses": [(h["harness"], h["port"]) for h in both["harnesses"]],
                                         "paths": both["paths"]}
@@ -119,6 +119,18 @@ def main():
         doctor = json.loads(sproozi("doctor", "--root", str(root), "--json").stdout)
         report["steps"]["doctor"] = {"ok": doctor["ok"], "failed": [c for c in doctor["checks"] if not c["ok"]]}
 
+        # Claude Code signs in itself (ADR 0047). Seed its login volume as /login
+        # would leave it: an unexpired fixture OAuth sign-in owned by the agent.
+        login_volume = f"sproozi-{installation}-local-claude-login"
+        sign_in = json.dumps({"claudeAiOauth": {"accessToken": claude.OAUTH_TOKEN, "refreshToken": "sk-ant-ort01-fixture",
+                                                "expiresAt": int((time.time() + 86400) * 1000), "scopes": ["user:inference"],
+                                                "subscriptionType": "max"}})
+        subprocess.run(["docker", "volume", "create", "--label", "sproozi.com/login=claude-code", login_volume],
+                       check=True, capture_output=True)
+        subprocess.run(["docker", "run", "--rm", "-i", "--network", "none", "--user", "0:0", "-v", f"{login_volume}:/login",
+                        "--entrypoint", "/bin/sh", reference, "-c",
+                        "cat > /login/.credentials.json && chmod 600 /login/.credentials.json && chmod 700 /login && "
+                        "chown 1000:1000 /login/.credentials.json"], input=sign_in, text=True, check=True, capture_output=True)
         repo = work / "repo"
         repo.mkdir()
         for command in (["git", "init", "-q"], ["git", "-c", "user.email=v@e", "-c", "user.name=v", "commit", "-q", "--allow-empty", "-m", "init"]):
@@ -141,11 +153,13 @@ def main():
             stops[kind] = {"phase": stopped["phase"], "nativeUUID": bool(stopped.get("threadId"))}
         codex_requests = (work / "codex-provider/requests.json").read_text()
         claude_requests = (provider_dir / "requests.private.json").read_text()
+        claude_records = json.loads(claude_requests)
         report["steps"]["sessions"] = {"turns": turns, "stops": stops,
                                        "codexSharedInstructions": all(m in codex_requests for m in (SHARED_MARKER, CODEX_MARKER))
                                        and CLAUDE_MARKER not in codex_requests,
                                        "claudeSharedInstructions": all(m in claude_requests for m in (SHARED_MARKER, CLAUDE_MARKER))
                                        and CODEX_MARKER not in claude_requests,
+                                       "claudeOwnSignIn": bool(claude_records) and all(r.get("signedIn") for r in claude_records),
                                        "consumersReleased": not any((root / "pki/consumers").glob("*.json"))}
 
         log = root / "logs/service.log"
@@ -165,12 +179,14 @@ def main():
         report["passed"] = all([
             s["initCodex"]["ready"], s["addClaude"]["ready"], len(s["addClaude"]["paths"]) == 2, s["doctor"]["ok"],
             all(s["sessions"]["turns"].values()), all(v["phase"] == "retained" and v["nativeUUID"] for v in s["sessions"]["stops"].values()),
-            s["sessions"]["codexSharedInstructions"], s["sessions"]["claudeSharedInstructions"], s["sessions"]["consumersReleased"],
+            s["sessions"]["codexSharedInstructions"], s["sessions"]["claudeSharedInstructions"], s["sessions"]["claudeOwnSignIn"],
+            s["sessions"]["consumersReleased"],
             all(s["renewal"].values()), not s["serviceStop"]["running"], s["clusterIsolation"]["kubectlCalls"] == ""])
     finally:
         if installation is not None:
             subprocess.run([str(bin_dir / "sproozi"), "service", "stop", "--root", str(root), "--leave-running"], env=env, capture_output=True)
             subprocess.run(["docker", "network", "rm", "sproozi-" + installation], capture_output=True)
+            subprocess.run(["docker", "volume", "rm", f"sproozi-{installation}-local-claude-login"], capture_output=True)
         for p in providers:
             p.terminate()
         (OUT / "report.json").write_text(json.dumps(report, indent=2) + "\n")

@@ -120,6 +120,16 @@ func (c Config) gatewayProblems() []string {
 		}
 	}
 	absolute := func(key, path string) { add(!filepath.IsAbs(path), key, "absolute path") }
+	// Leaving out a provider key file means the harness signs in itself
+	// (ADR 0047), which only a harness with a sign-in host can do.
+	tokenFile := func(key string, kind harness.NativeKind, path string) {
+		if path != "" {
+			absolute(key, path)
+			return
+		}
+		h, _ := harness.Managed(kind)
+		add(h.SignInHost == "", key, "absolute path; "+string(kind)+" can't sign in itself yet")
+	}
 	blank := func(v string) bool { return strings.TrimSpace(v) == "" }
 	g := c.Gateway
 	_, port, err := net.SplitHostPort(g.Listen)
@@ -134,7 +144,7 @@ func (c Config) gatewayProblems() []string {
 	}
 	u, err := url.Parse(g.ProviderURL)
 	add(err != nil || u.Host == "" || !approvedProviderURL(u), "gateway.providerURL", "HTTPS provider URL")
-	absolute("gateway.providerTokenFile", g.ProviderTokenFile)
+	tokenFile("gateway.providerTokenFile", c.Local.Harness, g.ProviderTokenFile)
 	// The MCP authority always serves the Sproozi control connection.
 	mcpHost, mcpPort, err := net.SplitHostPort(g.MCPAuthority)
 	add(err != nil || mcpHost == "" || net.ParseIP(mcpHost) != nil || mcpPort != "443", "gateway.mcpAuthority",
@@ -147,7 +157,7 @@ func (c Config) gatewayProblems() []string {
 		add(h.Model != "" && blank(h.Model), key+"model", modelWant)
 		u, err := url.Parse(h.ProviderURL)
 		add(err != nil || u.Host == "" || !approvedProviderURL(u), key+"providerURL", "HTTPS provider URL")
-		absolute(key+"providerTokenFile", h.ProviderTokenFile)
+		tokenFile(key+"providerTokenFile", h.Harness, h.ProviderTokenFile)
 	}
 	// Compare the integer before any conversion, which would overflow.
 	add(g.MaxModelCallSeconds != nil && (*g.MaxModelCallSeconds < 1 ||
@@ -161,7 +171,7 @@ func (c Config) gatewayProblems() []string {
 // placeholder, or returns "". It ignores a file it cannot read: Open reports that.
 func (c Config) ProviderTokenProblem() string {
 	path := c.Gateway.ProviderTokenFile
-	if !filepath.IsAbs(path) {
+	if path == "" || !filepath.IsAbs(path) {
 		return ""
 	}
 	data, err := privatefs.ReadFile(path, 16<<10)

@@ -98,21 +98,36 @@ sessions. Changing them in place is not supported; setup and
 ## Harnesses
 
 Each harness is a separate local placement with its own gateway port, grants
-and provider key. The first harness is the configuration's `local` placement;
+and provider credential. The first harness is the configuration's `local` placement;
 later ones are listed under `harnesses`. Every placement shares the image,
 network, gateway address, limits, allowances and certificate authority.
 
-| Harness | Placement | Provider | Key file |
+| Harness | Placement | Provider | Provider credential |
 | --- | --- | --- | --- |
-| `codex` | `local` when first, otherwise `local-codex` | `https://api.openai.com` | `credentials/openai` |
-| `claude-code` | `local` when first, otherwise `local-claude` | `https://api.anthropic.com` | `credentials/anthropic` |
+| `codex` | `local` when first, otherwise `local-codex` | `https://api.openai.com` | Key file `credentials/openai`, which the gateway holds |
+| `claude-code` | `local` when first, otherwise `local-claude` | `https://api.anthropic.com` | Claude Code's own sign-in, in Docker volume `sproozi-<installation>-<placement>-login` |
 
 `--provider-url` and `--provider-ca-file` select a private HTTPS provider
 endpoint for the harness being added. The CA bundle is public, so its source
 may be readable by anyone, but setup refuses one every account can write. The
-gateway reads only the private copy. Codex receives `OPENAI_API_KEY` and Claude
-Code `ANTHROPIC_API_KEY` as placeholders; the gateway replaces them with the
-stored key on approved requests.
+gateway reads only the private copy. Codex receives `OPENAI_API_KEY` as a
+placeholder; the gateway replaces it with the stored key on approved requests.
+
+Claude Code signs in itself with `/login`
+([ADR 0047](../adr/0047-harnesses-sign-in-to-their-own-model-providers.md)).
+Its configuration has no `providerTokenFile`, and it receives no placeholder
+key. Its sign-in lives in a persistent Docker volume, created on the first
+Claude Code session and labelled `sproozi.com/login=claude-code`. The helper
+image prepares it as an empty mode-0600 file owned by the agent user, and
+every Claude Code agent of the installation mounts that one file at
+`/workspace/session/claude/.credentials.json`; no other container mounts it.
+Removing the installation leaves the volume; `docker volume rm` deletes the
+sign-in. The gateway forwards the sign-in to `api.anthropic.com`, relays
+Claude Code's token refresh on `platform.claude.com` (`POST /v1/oauth/token`
+only), and covers that host in its certificate. Setup with
+`--credential-file` for Claude Code fails, and running setup again on an
+installation that stored an Anthropic key drops the key file from the
+configuration.
 
 ## Profile
 

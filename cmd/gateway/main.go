@@ -314,7 +314,7 @@ func loadStartupConfig() (*startupConfig, error) {
 	}
 	hosts := inspectionHosts(host, enabled, profiles, mcpRegistry)
 	if enabled[sprooziv1alpha1.CapabilityModelInference] {
-		if anthropicKey == "" {
+		if anthropicKey == "" && modelAuthMode != modelauth.WorkloadMode {
 			delete(hosts, "api.anthropic.com")
 		}
 		if openAIKey == "" && modelAuthMode == modelauth.APIKeyMode {
@@ -352,9 +352,13 @@ func loadModelCredentials(openAIUpstreamURL string) (string, string, string, err
 		}
 	}
 	mode := envOrDefault("MODEL_AUTH_MODE", modelauth.APIKeyMode)
-	if mode != modelauth.APIKeyMode && mode != modelauth.ChatGPTMode {
-		return "", "", "", fmt.Errorf("MODEL_AUTH_MODE=%q must be api_key or chatgpt: check key mode in %s",
+	if mode != modelauth.APIKeyMode && mode != modelauth.ChatGPTMode && mode != modelauth.WorkloadMode {
+		return "", "", "", fmt.Errorf("MODEL_AUTH_MODE=%q must be api_key, chatgpt or workload: check key mode in %s",
 			mode, modelAuthSource)
+	}
+	if mode == modelauth.WorkloadMode && (openAIKey != "" || anthropicKey != "") {
+		return "", "", "", errors.New("MODEL_AUTH_MODE=workload forwards each harness's own sign-in: " +
+			"remove keys openai-api-key and anthropic-api-key from " + modelCredentialsSource)
 	}
 	if mode == modelauth.ChatGPTMode && openAIUpstreamURL != "https://api.openai.com" {
 		return "", "", "", errors.New("ChatGPT plan usage requires the public OpenAI API upstream")
@@ -442,6 +446,57 @@ func githubAppInteger(key, secretKey string) (int64, error) {
 	return value, nil
 }
 
+// modelHandlers builds the OpenAI and Anthropic routes' handlers for the
+// administrator's MODEL_AUTH_MODE; either is nil when its route is disabled.
+func modelHandlers(cfg *startupConfig, auditLogger audit.Writer, modelClient *http.Client,
+	drain *modelgateway.Drain, runtimeClient client.Client,
+) (openAIHandler, anthropicHandler http.Handler) {
+	workload := cfg.modelAuthMode == modelauth.WorkloadMode
+	if cfg.enabled[sprooziv1alpha1.CapabilityModelInference] && (cfg.anthropicKey != "" || workload) {
+		var anthropicAuth modelauth.Authenticator = modelauth.AnthropicAPIKey{Key: cfg.anthropicKey}
+		if workload {
+			anthropicAuth = modelauth.Workload{}
+		}
+		anthropicHandler = modelgateway.NewAnthropicHandler(modelgateway.HandlerConfig{
+			Pricing: cfg.pricing, AuditLogger: auditLogger,
+			UpstreamURL:  cfg.anthropicUpstreamURL,
+			ProviderAuth: anthropicAuth, HTTPClient: modelClient, Drain: drain,
+		})
+	}
+	openAIEnabled := cfg.openAIKey != "" || cfg.modelAuthMode == modelauth.ChatGPTMode || workload
+	if cfg.enabled[sprooziv1alpha1.CapabilityModelInference] && openAIEnabled {
+		// The ChatGPT credential stays in sproozi-system, where the gateway's
+		// access to it is limited to the one named Secret.
+		credentialNamespace := envOrDefault("CREDENTIAL_NAMESPACE", "sproozi-system")
+		var providerAuth modelauth.Authenticator = modelauth.APIKey{Key: cfg.openAIKey}
+		if workload {
+			providerAuth = modelauth.Workload{}
+		}
+		if cfg.modelAuthMode == modelauth.ChatGPTMode {
+			store := modelauthkube.SessionStore{Client: runtimeClient, Namespace: credentialNamespace}
+			if err := checkChatGPTSession(context.Background(), store); err != nil {
+				log.Fatal(err)
+			}
+			oauthClient := newUpstreamClient(30 * time.Second)
+			providerAuth = modelauth.NewChatGPT(store, oauthClient)
+		}
+		model := &modelgateway.Handler{Config: modelgateway.HandlerConfig{
+			Pricing: cfg.pricing, AuditLogger: auditLogger,
+			UpstreamURL:  cfg.openAIUpstreamURL,
+			ProviderAuth: providerAuth, HTTPClient: modelClient, Drain: drain,
+		}}
+		if os.Getenv("MODEL_DIAGNOSTICS") == "true" {
+			// Administrator opt-in: bounded provider errors only, separate from audit.
+			// Never log prompts, model text, reasoning, raw bodies or auth headers.
+			model.Config.Diagnostics = func(d modelgateway.ResponseDiagnostic) {
+				_ = json.NewEncoder(os.Stderr).Encode(d)
+			}
+		}
+		openAIHandler = model
+	}
+	return openAIHandler, anthropicHandler
+}
+
 func composeDispatcher(
 	cfg *startupConfig, handlers map[sprooziv1alpha1.CapabilityKind]http.Handler,
 	mcpHandler http.Handler, anthropicHandler http.Handler,
@@ -474,11 +529,15 @@ func composeDispatcher(
 	// The two fixed provider protocols share model.inference accounting, while
 	// credentials and upstream transport remain administrator-owned.
 	anthropic := routes[modelgateway.AnthropicAuthority]
-	anthropic.Handler = nil
-	if cfg.enabled[sprooziv1alpha1.CapabilityModelInference] && cfg.anthropicKey != "" {
-		anthropic.Handler = anthropicHandler
-	}
+	anthropic.Handler = anthropicHandler
 	routes[modelgateway.AnthropicAuthority] = anthropic
+	if cfg.modelAuthMode == modelauth.WorkloadMode {
+		for _, authority := range []string{modelgateway.OpenAIAuthority, modelgateway.AnthropicAuthority} {
+			route := routes[authority]
+			route.ProviderCredential = true
+			routes[authority] = route
+		}
+	}
 	if cfg.enabled[sprooziv1alpha1.CapabilityNetworkEgress] {
 		for _, dest := range cfg.profiles.Destinations() {
 			authority := net.JoinHostPort(dest.Host, strconv.Itoa(dest.Port))
@@ -565,41 +624,9 @@ func main() {
 		MaxResponseBytes: 8 << 20,
 		AuditLogger:      auditLogger})
 	handlers := map[sprooziv1alpha1.CapabilityKind]http.Handler{sprooziv1alpha1.CapabilityKubernetesRead: kube}
-	var anthropicHandler http.Handler
-	if cfg.enabled[sprooziv1alpha1.CapabilityModelInference] && cfg.anthropicKey != "" {
-		anthropicHandler = modelgateway.NewAnthropicHandler(modelgateway.HandlerConfig{
-			Pricing: cfg.pricing, AuditLogger: auditLogger,
-			UpstreamURL:  cfg.anthropicUpstreamURL,
-			ProviderAuth: modelauth.AnthropicAPIKey{Key: cfg.anthropicKey}, HTTPClient: modelClient, Drain: drain,
-		})
-	}
-	openAIEnabled := cfg.openAIKey != "" || cfg.modelAuthMode == modelauth.ChatGPTMode
-	if cfg.enabled[sprooziv1alpha1.CapabilityModelInference] && openAIEnabled {
-		// The ChatGPT credential stays in sproozi-system, where the gateway's
-		// access to it is limited to the one named Secret.
-		credentialNamespace := envOrDefault("CREDENTIAL_NAMESPACE", "sproozi-system")
-		var providerAuth modelauth.Authenticator = modelauth.APIKey{Key: cfg.openAIKey}
-		if cfg.modelAuthMode == modelauth.ChatGPTMode {
-			store := modelauthkube.SessionStore{Client: runtimeClient, Namespace: credentialNamespace}
-			if err := checkChatGPTSession(context.Background(), store); err != nil {
-				log.Fatal(err)
-			}
-			oauthClient := newUpstreamClient(30 * time.Second)
-			providerAuth = modelauth.NewChatGPT(store, oauthClient)
-		}
-		model := &modelgateway.Handler{Config: modelgateway.HandlerConfig{
-			Pricing: cfg.pricing, AuditLogger: auditLogger,
-			UpstreamURL:  cfg.openAIUpstreamURL,
-			ProviderAuth: providerAuth, HTTPClient: modelClient, Drain: drain,
-		}}
-		if os.Getenv("MODEL_DIAGNOSTICS") == "true" {
-			// Administrator opt-in: bounded provider errors only, separate from audit.
-			// Never log prompts, model text, reasoning, raw bodies or auth headers.
-			model.Config.Diagnostics = func(d modelgateway.ResponseDiagnostic) {
-				_ = json.NewEncoder(os.Stderr).Encode(d)
-			}
-		}
-		handlers[sprooziv1alpha1.CapabilityModelInference] = model
+	openAIHandler, anthropicHandler := modelHandlers(cfg, auditLogger, modelClient, drain, runtimeClient)
+	if openAIHandler != nil {
+		handlers[sprooziv1alpha1.CapabilityModelInference] = openAIHandler
 	}
 	if cfg.enabled[sprooziv1alpha1.CapabilityGitHubPullRequest] {
 		tokenProvider, err := githubgateway.NewAppTokenProvider(cfg.appID, cfg.installationID, cfg.privateKey, httpClient)
@@ -644,18 +671,20 @@ func main() {
 		route.Budgets, route.AuditLogger = budgets, auditLogger
 		dispatcher[authority] = route
 	}
+	guard := gateway.NewLeakGuard(dispatcher, nil)
 	serving, err := startCertificateReloader(cfg, host)
 	if err != nil {
 		log.Fatal(err)
 	}
 	transport, err := proxytransport.New(proxytransport.Config{
-		Certificates:     cfg.certificates,
-		Serving:          serving,
-		Authenticate:     authenticator.Authenticate,
-		Revalidate:       authenticator.Revalidate,
-		Handler:          dispatcher,
-		AllowedAuthority: dispatcher.Allows,
-		AuditLogger:      auditLogger,
+		Certificates:       cfg.certificates,
+		Serving:            serving,
+		Authenticate:       authenticator.Authenticate,
+		Revalidate:         authenticator.Revalidate,
+		Handler:            guard,
+		AllowedAuthority:   guard.Allows,
+		ProviderCredential: guard.ForwardsCredential,
+		AuditLogger:        auditLogger,
 
 		MaxConnections:          cfg.admission.maxConnections,
 		MaxSessionsPerExecution: cfg.admission.maxSessionsPerExecution,

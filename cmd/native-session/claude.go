@@ -254,26 +254,25 @@ func (s *server) observeClaudeTurn() (string, string, error) {
 	return c.id, leaf, err
 }
 
-func prepareClaudeLaunch(c config, _ string, env []string) ([]string, []string, error) {
-	env = append(env, "CLAUDE_CONFIG_DIR="+claudeHome)
-	key := ""
-	for _, entry := range env {
-		if after, ok := strings.CutPrefix(entry, "ANTHROPIC_API_KEY="); ok {
-			key = after
-		}
-	}
-	if key == "" {
-		return nil, nil, errors.New("claude requires a fresh gateway API placeholder")
-	}
-	tail := key
-	if len(tail) > 20 {
-		tail = tail[len(tail)-20:]
-	}
+// claudePreferences approves the gateway placeholder key when there is one.
+// With none, Claude Code uses its own sign-in from the mounted
+// .credentials.json, which /login creates (ADR 0047).
+func claudePreferences(env []string) map[string]any {
 	preferences := map[string]any{"theme": "dark", "hasCompletedOnboarding": true,
 		"bypassPermissionsModeAccepted": true,
-		"customApiKeyResponses":         map[string]any{"approved": []string{tail}, "rejected": []string{}},
 		"projects":                      map[string]any{workspace: map[string]any{"hasTrustDialogAccepted": true}}}
-	if err := installClaudeJSON(filepath.Join(claudeHome, ".claude.json"), preferences); err != nil {
+	for _, entry := range env {
+		if key, ok := strings.CutPrefix(entry, "ANTHROPIC_API_KEY="); ok && key != "" {
+			tail := key[max(0, len(key)-20):]
+			preferences["customApiKeyResponses"] = map[string]any{"approved": []string{tail}, "rejected": []string{}}
+		}
+	}
+	return preferences
+}
+
+func prepareClaudeLaunch(c config, _ string, env []string) ([]string, []string, error) {
+	env = append(env, "CLAUDE_CONFIG_DIR="+claudeHome)
+	if err := installClaudeJSON(filepath.Join(claudeHome, ".claude.json"), claudePreferences(env)); err != nil {
 		return nil, nil, err
 	}
 	hooks := map[string]any{}

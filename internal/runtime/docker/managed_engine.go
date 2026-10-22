@@ -10,7 +10,9 @@ import (
 	"io"
 	"net/netip"
 	"os/exec"
+	"path"
 	"reflect"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -97,14 +99,74 @@ func (e *Engine) volume(ctx context.Context, v Volume) (Volume, error) {
 	return v, nil
 }
 
+// loginLabel names the harness whose own sign-in a login volume holds.
+const loginLabel = "sproozi.com/login"
+
+// LoginMount gives the agent one file of its harness's persistent login
+// volume (ADR 0047). The harness writes and refreshes the file itself; the
+// volume outlives every execution and never enters a checkpoint.
+type LoginMount struct {
+	Volume string `json:"volume"`
+	File   string `json:"file"`
+	Target string `json:"target"`
+}
+
+var loginFileName = regexp.MustCompile(`^\.?[a-z][a-z0-9.-]{0,63}$`)
+
+func (m LoginMount) valid() bool {
+	return resourceName.MatchString(m.Volume) && loginFileName.MatchString(m.File) &&
+		strings.HasPrefix(m.Target, "/workspace/session/") && path.Base(m.Target) == m.File && path.Clean(m.Target) == m.Target
+}
+
+// EnsureLoginVolume creates a harness's persistent login volume when it is
+// missing and has the helper image prepare its file for the native user. It
+// never reads the file.
+func (e *Engine) EnsureLoginVolume(ctx context.Context, m LoginMount, kind harness.NativeKind, helperImage string) error {
+	if !m.valid() || kind.Validate() != nil || !strings.HasPrefix(helperImage, "sha256:") {
+		return errors.New("invalid Docker login volume")
+	}
+	data, err := e.command(ctx, volumeCommand, "ls", "--quiet", "--filter", "name="+m.Volume)
+	if err != nil {
+		return err
+	}
+	if !slices.Contains(strings.Fields(string(data)), m.Volume) {
+		if _, err = e.command(ctx, volumeCommand, createCommand, "--name", m.Volume, "--driver", localVolumeDriver,
+			labelFlag, loginLabel+"="+string(kind)); err != nil {
+			return err
+		}
+	}
+	data, err = e.command(ctx, volumeCommand, "inspect", m.Volume)
+	if err != nil {
+		return err
+	}
+	var rows []struct {
+		Name, Driver string
+		Labels       map[string]string
+		Options      map[string]string
+	}
+	if json.Unmarshal(data, &rows) != nil || len(rows) != 1 || rows[0].Name != m.Volume ||
+		rows[0].Driver != localVolumeDriver || rows[0].Labels[loginLabel] != string(kind) || len(rows[0].Options) != 0 {
+		return errors.New("docker login volume identity changed")
+	}
+	// Root with only CAP_CHOWN can create the file in a new volume and hand it
+	// to the native user; it has no network and a read-only root.
+	_, err = e.command(ctx, "run", "--rm", "--network", "none", "--read-only", "--cap-drop", allCapabilities,
+		"--cap-add", "CHOWN", "--security-opt", "no-new-privileges", "--user", "0:0",
+		"--mount", "type=volume,source="+m.Volume+",target=/login",
+		"--entrypoint", checkpointCommandPath, helperImage, "init-login", "--file", "/login/"+m.File)
+	return err
+}
+
 type ManagedSpec struct {
 	Name, Execution, ImageID, Role, NetworkMode string
 	IntentDigest                                string
 	Volume                                      *Volume
-	MemoryBytes, CPUMilli, PIDs                 int64
-	Deadline                                    string
-	GatewayIPv4                                 string
-	GatewayPort                                 uint16
+	// Login is the agent's own sign-in file, when its harness signs in itself.
+	Login                       *LoginMount
+	MemoryBytes, CPUMilli, PIDs int64
+	Deadline                    string
+	GatewayIPv4                 string
+	GatewayPort                 uint16
 }
 
 func (s ManagedSpec) command() ([]string, error) {
@@ -157,6 +219,13 @@ func (e *Engine) EnsureManaged(ctx context.Context, s ManagedSpec) (Instance, er
 				return Instance{}, err
 			}
 			args = append(args, "--mount", "type=volume,source="+s.Volume.Name+",target=/workspace,volume-nocopy")
+		}
+		if s.Login != nil {
+			if s.Role != roleAgent || s.Volume == nil || !s.Login.valid() {
+				return Instance{}, errors.New("invalid Docker login mount")
+			}
+			args = append(args, "--mount", "type=volume,source="+s.Login.Volume+",target="+s.Login.Target+
+				",volume-subpath="+s.Login.File)
 		}
 		args = append(args, "--entrypoint", cmd[0], s.ImageID)
 		args = append(args, cmd[1:]...)
@@ -226,7 +295,7 @@ func (e *Engine) VerifyManaged(ctx context.Context, i Instance, s ManagedSpec) e
 			return errors.New("docker unexpected mount")
 		}
 	} else {
-		if len(r.Mounts) != 1 || r.Mounts[0].Type != volumeCommand || r.Mounts[0].Name != s.Volume.Name || r.Mounts[0].Destination != "/workspace" || !r.Mounts[0].RW {
+		if !matchesManagedMounts(r, s) {
 			return errors.New("docker workspace mount changed")
 		}
 		if _, err = e.volume(ctx, *s.Volume); err != nil {
@@ -337,7 +406,7 @@ func mutatesDocker(args []string) bool {
 		return false
 	}
 	switch args[0] {
-	case createCommand, execCommand:
+	case createCommand, execCommand, "run":
 		return true
 	case containerCommand:
 		return len(args) > 1 && (args[1] == "create" || args[1] == "start" || args[1] == "stop" || args[1] == "rm")
@@ -416,6 +485,24 @@ type managedInspection struct {
 		Type, Name, Destination string
 		RW                      bool
 	}
+}
+
+// matchesManagedMounts requires the workspace volume and, for an agent whose
+// harness signs in itself, exactly its login file.
+func matchesManagedMounts(r managedInspection, s ManagedSpec) bool {
+	want := map[string]string{"/workspace": s.Volume.Name}
+	if s.Login != nil {
+		want[s.Login.Target] = s.Login.Volume
+	}
+	if len(r.Mounts) != len(want) {
+		return false
+	}
+	for _, m := range r.Mounts {
+		if m.Type != volumeCommand || !m.RW || want[m.Destination] != m.Name {
+			return false
+		}
+	}
+	return true
 }
 
 func matchesManagedLaunch(r managedInspection, i Instance, s ManagedSpec, cmd []string) bool {

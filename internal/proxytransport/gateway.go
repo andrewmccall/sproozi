@@ -69,6 +69,10 @@ type Config struct {
 	Revalidate       func(context.Context, *gateway.ExecutionGrant) error
 	Handler          http.Handler
 	AllowedAuthority func(string) bool
+	// ProviderCredential reports an authority whose route forwards the
+	// harness's own provider credential (ADR 0047). Only there does a
+	// client's Authorization header survive; nil strips it everywhere.
+	ProviderCredential func(string) bool
 	// AuditLogger, when set, records authenticated destination denials.
 	AuditLogger audit.Writer
 	// RevocationInterval bounds idle/in-flight sessions after revocation.
@@ -360,8 +364,11 @@ func (g *Gateway) serveInspected(
 		return
 	}
 	// Client authentication is never provider authority, even when the local
-	// adapter has been replaced by attacker-controlled code.
-	request.Header.Del("Authorization")
+	// adapter has been replaced by attacker-controlled code, except the
+	// harness's own sign-in on a route that forwards it.
+	if g.config.ProviderCredential == nil || !g.config.ProviderCredential(net.JoinHostPort(host, port)) {
+		request.Header.Del("Authorization")
+	}
 	request.Header.Del(proxyAuthorizationHeader)
 	request.Header.Del("Cookie")
 	request.URL.Scheme, request.URL.Host = "https", net.JoinHostPort(host, port)

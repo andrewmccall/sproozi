@@ -24,6 +24,9 @@ type Route struct {
 	Handler     http.Handler
 	Budgets     *budget.Tracker
 	AuditLogger audit.Writer
+	// ProviderCredential marks a model route that forwards the workload's own
+	// provider credential. LeakGuard refuses that credential everywhere else.
+	ProviderCredential bool
 }
 
 type Dispatcher map[string]Route

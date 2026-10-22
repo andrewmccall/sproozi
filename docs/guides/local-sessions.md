@@ -5,8 +5,9 @@ restricted Docker container. You need a running Docker engine; you do not need
 a Sproozi checkout, Go, OpenSSL, Python, kubectl or a Kubernetes cluster.
 
 `sproozi init` sets up everything: the agent image, a private Docker network,
-a certificate authority, your provider key, the configuration and a background
-service. It reports ready only after a test container verifies the gateway's
+a certificate authority, the Codex provider key, the configuration and a
+background service. Claude Code needs no key from setup: you sign it in to
+your Claude account in its first session. It reports ready only after a test container verifies the gateway's
 identity and fails to reach the internet, the provider directly, other gateway
 ports, cloud metadata, direct DNS and IPv6.
 
@@ -19,8 +20,9 @@ the files, defaults, limits and supported platforms.
   containers. Setup has been verified on macOS with Docker Desktop; Docker
   Engine on Linux is supported but has no recorded acceptance run yet. Windows
   needs a [hand-written configuration](windows.md).
-- An OpenAI API key for Codex or an Anthropic API key for Claude Code. Setup
-  stores the key for the gateway; agents never receive it.
+- An OpenAI API key for Codex, which setup stores for the gateway, or a Claude
+  subscription or Claude Console account for Claude Code, which you sign in to
+  inside the agent.
 - The Sproozi CLI from [Homebrew or a release download](install.md).
 
 Sproozi is a preview. Read [what a container does not protect](#what-this-does-not-protect)
@@ -34,8 +36,8 @@ Run setup once. It asks for your API key without echoing it:
 sproozi init
 ```
 
-That sets up Codex. For Claude Code, run `sproozi init --harness claude-code`.
-The output ends with:
+That sets up Codex. For Claude Code, run `sproozi init --harness claude-code`;
+it asks for no key. The output ends with:
 
 ```text
 Ready. In a Git repository, start an agent with:
@@ -119,10 +121,35 @@ Each agent gets its own gateway port. `--port` sets only the first one, on the
 first `init`; a later agent takes the next free port after the existing ones,
 so `--port` on a later `init` has no effect.
 
-The second agent gets its own gateway port and provider key, so a Codex
-container cannot use the Anthropic key, or the reverse. If a session is
-running, setup saves the change and says to restart the service once the
-session stops.
+The second agent gets its own gateway port, so a Claude Code container cannot
+use the Codex key. If a session is running, setup saves the change and says to
+restart the service once the session stops.
+
+## Sign in to Claude Code
+
+Claude Code signs in to your own Claude account, as it does outside Sproozi
+([ADR 0047](../adr/0047-harnesses-sign-in-to-their-own-model-providers.md)).
+In the first session, type `/login`, open the link it shows in your browser,
+and paste the code back into the terminal. Claude Code keeps the sign-in in a
+Docker volume of its own, `sproozi-<installation>-local-claude-login`, which
+every later Claude Code session of this installation mounts. Claude Code
+refreshes the sign-in itself; `/logout` removes it.
+
+The gateway forwards that sign-in to Anthropic and still counts every model
+call against the session's budget. The sign-in never enters a checkpoint, so a
+session moved to Kubernetes signs in again there. Two things differ from a
+gateway-held key:
+
+- The agent can read its own sign-in. The gateway refuses any request that
+  carries it to another destination it inspects, but it can't see inside an
+  encoded or split copy.
+- Claude Code replaces its refresh token each time it refreshes. Two Claude
+  Code sessions running at once share one sign-in, and one may need `/login`
+  again if both refresh at the same moment.
+
+Updating an installation that stored an Anthropic key: run
+`sproozi init --harness claude-code` again. It drops the key file from the
+configuration, and the next Claude Code session asks you to `/login`.
 
 ## Add your instructions and skills
 
@@ -142,7 +169,7 @@ step for anything that fails.
 | --- | --- |
 | Check everything, including each stored key | `sproozi doctor --check-provider` |
 | See whether the service runs | `sproozi service status` |
-| Replace a provider key | `sproozi credentials set codex` (or `claude-code`) |
+| Replace the Codex provider key | `sproozi credentials set codex` |
 | See which keys are stored | `sproozi credentials list` |
 | Stop or start the service | `sproozi service stop`, `sproozi service start` |
 | See certificate expiry and renewal | `sproozi certificates status` |
@@ -170,6 +197,8 @@ has the details.
 | `registry: pull failed` | Check registry access, or build the image with `--build SOURCE_DIRECTORY` from a release source bundle or checkout. |
 | `image: … does not provide helper contract` | The image belongs to another Sproozi release. Use the release image or rebuild. |
 | `provider: the provider rejected the credential` | Replace the key with `sproozi credentials set`. |
+| `Not logged in · Please run /login` in Claude Code | Type `/login` in the session; see [Sign in to Claude Code](#sign-in-to-claude-code). |
+| `the harness sent no provider credential; sign the harness in to its model provider` | The agent has no sign-in yet. Type `/login` in the session. |
 | `workspace: the repository has no commits` | Make a first commit, then `sproozi run` again. |
 | `workspace: byte limit exceeded` | The repository's history is larger than one checkpoint. The message gives the size and how to raise `local.maxCheckpointBytes`, up to 64 MiB. |
 | `the Sproozi service is not running, so this machine's sessions can't be listed` | Run `sproozi service start`, or any session command. |

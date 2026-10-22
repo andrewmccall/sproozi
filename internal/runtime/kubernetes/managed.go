@@ -44,7 +44,7 @@ func addManagedNativeContract(ctx context.Context, kube client.Client, run *api.
 		// UUID is bound, so controller retries never rewrite immutable config.
 		thread = ""
 	}
-	env, err := harness.NativeBaseEnvironment(binding.Harness, string(run.UID))
+	env, err := harness.NativeBaseEnvironment(binding.Harness, string(run.UID), false)
 	if err != nil {
 		return err
 	}

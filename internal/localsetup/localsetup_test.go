@@ -28,6 +28,9 @@ import (
 
 const testImage = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
+// claudePlacement is the second harness's placement name.
+const claudePlacement = "local-claude"
+
 func testInstallation(t *testing.T) (Layout, Installation) {
 	t.Helper()
 	l := Layout{Root: filepath.Join(testutil.PrivateDir(t), "root")}
@@ -46,7 +49,7 @@ func testInstallation(t *testing.T) (Layout, Installation) {
 
 func TestRenderedConfigIsAcceptedByTheHomeService(t *testing.T) {
 	l, inst := testInstallation(t)
-	inst.Harnesses = append(inst.Harnesses, Harness{Harness: harness.NativeClaude, Name: "local-claude", Port: 18444,
+	inst.Harnesses = append(inst.Harnesses, Harness{Harness: harness.NativeClaude, Name: claudePlacement, Port: 18444,
 		Model: "claude-fixture", ProviderURL: anthropicURL, Credential: filepath.Join(l.Credentials(), "anthropic")})
 	c := renderConfig(l, inst, DefaultInstructions)
 	if err := writeConfig(l, c, false); err != nil {
@@ -86,7 +89,7 @@ func TestMergeKeepsUserEditsAddsHarnessesAndRefusesPlacementChanges(t *testing.T
 	existing := renderConfig(l, inst, DefaultInstructions)
 	existing.MaxDuration = "2h"
 	existing.Model = "edited-model"
-	inst.Harnesses = append(inst.Harnesses, Harness{Harness: harness.NativeClaude, Name: "local-claude", Port: 18444,
+	inst.Harnesses = append(inst.Harnesses, Harness{Harness: harness.NativeClaude, Name: claudePlacement, Port: 18444,
 		Model: "claude-fixture", ProviderURL: anthropicURL, Credential: "/x/anthropic"})
 	merged, changed, err := mergeConfig(existing, renderConfig(l, inst, DefaultInstructions))
 	if err != nil || !changed {
@@ -409,5 +412,33 @@ func TestRestartPendingIsRecordedInTheRoot(t *testing.T) {
 	}
 	if PendingRestart(l) != "1 session(s) are running" || l.checkRoot() != nil {
 		t.Fatalf("pending restart %q, root %v", PendingRestart(l), l.checkRoot())
+	}
+}
+
+// Claude Code signs in itself, so its harness stores no key and an existing
+// configuration's key file is dropped on the next init (ADR 0047).
+func TestClaudeStoresNoProviderKey(t *testing.T) {
+	l, inst := testInstallation(t)
+	keyed := inst
+	keyed.Harnesses = append(slices.Clone(inst.Harnesses), Harness{Harness: harness.NativeClaude, Name: claudePlacement, Port: 18444,
+		ProviderURL: anthropicURL, Credential: filepath.Join(l.Credentials(), "anthropic")})
+	existing := renderConfig(l, keyed, DefaultInstructions)
+	if existing.Harnesses[0].ProviderTokenFile == "" {
+		t.Fatal("fixture should start with a stored Claude key")
+	}
+	i := &installer{l: l, inst: inst, o: Options{Harness: harness.NativeClaude}}
+	if err := i.addHarness(); err != nil {
+		t.Fatal(err)
+	}
+	if i.selected.Credential != "" {
+		t.Fatalf("Claude got a key path: %s", i.selected.Credential)
+	}
+	merged, changed, err := mergeConfig(existing, renderConfig(l, i.inst, DefaultInstructions))
+	if err != nil || !changed || merged.Harnesses[0].ProviderTokenFile != "" || merged.Gateway.ProviderTokenFile == "" {
+		t.Fatalf("merge: changed=%v claude=%q codex=%q err=%v", changed, merged.Harnesses[0].ProviderTokenFile,
+			merged.Gateway.ProviderTokenFile, err)
+	}
+	if problems := slices.DeleteFunc(merged.ServeProblems(), func(p string) bool { return strings.HasPrefix(p, "directory (") }); len(problems) != 0 {
+		t.Fatalf("serve would refuse the signed-in configuration: %q", problems)
 	}
 }

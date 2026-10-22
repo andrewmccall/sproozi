@@ -283,6 +283,16 @@ func (i *installer) prepareHarness(ctx context.Context) error {
 		i.selected.ProviderCAFile, i.providerCA, i.credential = path, path, true
 		i.step("Stored the %s endpoint's CA bundle in %s", provider.Name, path)
 	}
+	if SignsIn(i.selected.Harness) {
+		// The harness signs in to its own provider in its first session; the
+		// gateway forwards that sign-in and stores no key (ADR 0047).
+		if o.Credential.File != "" || o.Credential.Stdin != nil {
+			return fail("credential", fmt.Errorf("%s signs in to its provider itself, so Sproozi stores no key for it", o.Harness),
+				"leave out the credential options, then run /login in its first session")
+		}
+		i.selected.Credential = ""
+		return i.save("harness:" + string(i.selected.Harness))
+	}
 	if !HasCredential(i.l, provider.Name) || o.Credential.File != "" || o.Credential.Stdin != nil {
 		if _, err := StoreCredential(i.l, provider.Name, o.Credential); err != nil {
 			return err
@@ -316,8 +326,10 @@ func (i *installer) addHarness() error {
 		directory, _ := harness.NativeDirectory(o.Harness)
 		name = "local-" + directory
 	}
-	h := Harness{Harness: o.Harness, Name: name, Port: port, Model: o.Model, ProviderURL: cmp.Or(o.ProviderURL, provider.URL),
-		Credential: filepath.Join(i.l.Credentials(), provider.Name)}
+	h := Harness{Harness: o.Harness, Name: name, Port: port, Model: o.Model, ProviderURL: cmp.Or(o.ProviderURL, provider.URL)}
+	if !SignsIn(o.Harness) {
+		h.Credential = filepath.Join(i.l.Credentials(), provider.Name)
+	}
 	i.inst.Harnesses = append(i.inst.Harnesses, h)
 	i.selected = &i.inst.Harnesses[len(i.inst.Harnesses)-1]
 	return nil
@@ -562,7 +574,22 @@ func mergeConfig(existing, rendered home.Config) (home.Config, bool, error) {
 			changed = true
 		}
 	}
-	return existing, changed, nil
+	return existing, clearSignInKeys(&existing) || changed, nil
+}
+
+// clearSignInKeys drops the provider key file of every harness that now
+// signs in itself, so an existing installation moves to its own sign-in.
+func clearSignInKeys(c *home.Config) bool {
+	changed := false
+	if SignsIn(c.Local.Harness) && c.Gateway.ProviderTokenFile != "" {
+		c.Gateway.ProviderTokenFile, changed = "", true
+	}
+	for i := range c.Harnesses {
+		if SignsIn(c.Harnesses[i].Harness) && c.Harnesses[i].ProviderTokenFile != "" {
+			c.Harnesses[i].ProviderTokenFile, changed = "", true
+		}
+	}
+	return changed
 }
 
 // setProviderCA points the harness's gateway at a stored CA bundle and

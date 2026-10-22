@@ -38,6 +38,9 @@ func run(args []string, input io.Reader, output io.Writer) error {
 	if len(args) == 1 && args[0] == "finish" {
 		return finish()
 	}
+	if len(args) == 3 && args[0] == "init-login" && args[1] == "--file" {
+		return initLogin(args[2], nativeUID, nativeGID)
+	}
 	if len(args) == 3 && args[0] == "hold" && args[1] == "--deadline" {
 		deadline, err := time.Parse(time.RFC3339Nano, args[2])
 		if err != nil {

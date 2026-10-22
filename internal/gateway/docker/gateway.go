@@ -20,6 +20,7 @@ import (
 	mcpgateway "github.com/andrewmccall/sproozi/internal/endpoints/mcp"
 	modelgateway "github.com/andrewmccall/sproozi/internal/endpoints/model"
 	"github.com/andrewmccall/sproozi/internal/gateway"
+	"github.com/andrewmccall/sproozi/internal/modelauth"
 	"github.com/andrewmccall/sproozi/internal/proxytransport"
 )
 
@@ -41,6 +42,9 @@ type GatewayConfig struct {
 	// MaxModelCall is the longest one model call may stream. Zero selects
 	// proxytransport.DefaultMaxModelCallDuration.
 	MaxModelCall time.Duration
+	// SignIn relays the harness's own OAuth sign-in and refresh on its
+	// SignInHost when the model route forwards the harness's credential.
+	SignIn http.Handler
 }
 
 func NewGateway(owner *Owner, config GatewayConfig) (*proxytransport.Gateway, error) {
@@ -63,7 +67,15 @@ func NewGateway(owner *Owner, config GatewayConfig) (*proxytransport.Gateway, er
 		authority = modelgateway.AnthropicAuthority
 		handler = modelgateway.NewAnthropicHandler(modelConfig)
 	}
-	dispatch := gateway.Dispatcher{authority: {Capability: string(api.CapabilityModelInference), Tier: audit.TierSemantic, Handler: handler, Budgets: tracker, AuditLogger: config.AuditLogger}}
+	workload := modelConfig.ProviderAuth != nil && modelConfig.ProviderAuth.Mode() == modelauth.WorkloadMode
+	dispatch := gateway.Dispatcher{authority: {Capability: string(api.CapabilityModelInference), Tier: audit.TierSemantic, Handler: handler, Budgets: tracker, AuditLogger: config.AuditLogger, ProviderCredential: workload}}
+	if config.SignIn != nil {
+		h, _ := harness.Managed(config.Harness)
+		if !workload || h.SignInHost == "" {
+			return nil, errors.New("docker gateway: a sign-in route needs a harness that signs in itself")
+		}
+		dispatch[net.JoinHostPort(h.SignInHost, "443")] = gateway.Route{Capability: string(api.CapabilityModelInference), Tier: audit.TierSemantic, Handler: config.SignIn, Budgets: tracker, AuditLogger: config.AuditLogger}
+	}
 	if err := addNativeRoutes(owner, config, dispatch, tracker); err != nil {
 		return nil, err
 	}
@@ -77,7 +89,8 @@ func NewGateway(owner *Owner, config GatewayConfig) (*proxytransport.Gateway, er
 		named = mcpgateway.NewHandler(mcpgateway.HandlerConfig{Registry: config.MCPRegistry, HTTPClient: config.MCPClient, Budgets: tracker, AuditLogger: journal})
 	}
 	dispatch[config.MCPAuthority] = gateway.Route{Tier: audit.TierProtocol, Handler: diagnose.NewControl(journal, named)}
-	return proxytransport.New(proxytransport.Config{Certificates: config.Certificates, Serving: config.Serving, Authenticate: owner.Authenticate, Revalidate: owner.Revalidate, Handler: dispatch, AllowedAuthority: dispatch.Allows, AuditLogger: journal, MaxModelCallDuration: config.MaxModelCall})
+	guard := gateway.NewLeakGuard(dispatch, nil)
+	return proxytransport.New(proxytransport.Config{Certificates: config.Certificates, Serving: config.Serving, Authenticate: owner.Authenticate, Revalidate: owner.Revalidate, Handler: guard, AllowedAuthority: guard.Allows, ProviderCredential: guard.ForwardsCredential, AuditLogger: journal, MaxModelCallDuration: config.MaxModelCall})
 }
 
 func addNativeRoutes(owner *Owner, config GatewayConfig, dispatch gateway.Dispatcher, tracker *budget.Tracker) error {

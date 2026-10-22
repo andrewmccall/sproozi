@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
+	"io"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -22,6 +23,7 @@ import (
 	k8stesting "k8s.io/client-go/testing"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
+	"github.com/andrewmccall/sproozi/internal/audit"
 	"github.com/andrewmccall/sproozi/internal/budget"
 	budgetkubernetes "github.com/andrewmccall/sproozi/internal/budget/kubernetes"
 	"github.com/andrewmccall/sproozi/internal/endpoints/destination"
@@ -487,6 +489,40 @@ func TestAnthropicStartupAndReservedRoute(t *testing.T) {
 		map[api.CapabilityKind]http.Handler{api.CapabilityNetworkEgress: http.NotFoundHandler()}, nil, nil)
 	if routes.Allows("api.anthropic.com:443") {
 		t.Fatal("disabled Anthropic fell back to egress")
+	}
+}
+
+func TestWorkloadModeForwardsEachHarnessSignIn(t *testing.T) {
+	validGatewayEnvironment(t)
+	t.Setenv("MODEL_AUTH_MODE", "workload")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	cfg, err := loadStartupConfig()
+	if err != nil {
+		t.Fatalf("workload mode needs no gateway key: %v", err)
+	}
+	for _, host := range []string{"api.openai.com", "api.anthropic.com"} {
+		if _, ok := cfg.certificates[host]; !ok {
+			t.Fatalf("%s is not inspected in workload mode", host)
+		}
+	}
+	openAI, anthropic := modelHandlers(cfg, audit.NewLogger(io.Discard), http.DefaultClient, nil, nil)
+	if openAI == nil || anthropic == nil {
+		t.Fatal("both provider routes are enabled in workload mode")
+	}
+	handlers := map[api.CapabilityKind]http.Handler{api.CapabilityModelInference: openAI}
+	routes := composeDispatcher(cfg, handlers, nil, anthropic)
+	for _, authority := range []string{"api.openai.com:443", "api.anthropic.com:443"} {
+		if !routes.Allows(authority) || !routes[authority].ProviderCredential {
+			t.Fatalf("%s does not forward the harness's own credential", authority)
+		}
+	}
+	if routes["api.github.com:443"].ProviderCredential {
+		t.Fatal("a non-model route was marked as carrying a provider credential")
+	}
+	t.Setenv("ANTHROPIC_API_KEY", "anthropic-fixture-key")
+	if _, err := loadStartupConfig(); err == nil || !strings.Contains(err.Error(), "workload") {
+		t.Fatalf("a gateway key in workload mode was accepted: %v", err)
 	}
 }
 
