@@ -132,7 +132,8 @@ var commands = []command{
 		about: "Set up Sproozi on this machine: the agent image, a private Docker network, certificates,\n" +
 			"your provider key and the background service. Run it again to add another agent with\n" +
 			"--harness, or to repair the installation.",
-		flags: []string{"harness", "model", "credential-file", "credential-stdin", "skip-credential-check", "sign-in",
+		flags: []string{"harness", "model", "credential-file", "credential-stdin", "skip-credential-check",
+			"token", "chatgpt", "sign-in",
 			"provider-url", "provider-ca-file", "instructions-file", "image", "build", "port", "no-service",
 			"timeout", "json", "root"}},
 	{name: cmdDoctor, group: groupSetup, summary: "Check the installation without changing it",
@@ -196,6 +197,8 @@ var flagSpecs = map[string]flagSpec{
 	"credential-stdin":      {help: "read the provider key from standard input"},
 	"skip-credential-check": {help: "do not ask the provider to check the key"},
 	"sign-in":               {help: "let the agent sign in to its own provider account instead of storing a key"},
+	"token":                 {help: "the stored credential is a sign-in token, such as from setup-token, not an API key"},
+	"chatgpt":               {help: "sign the gateway in to your ChatGPT plan in the browser, for an OpenAI agent"},
 	"provider-url":          {value: "URL", help: "address of a private provider endpoint (default: the public one)"},
 	"provider-ca-file":      {value: "FILE", help: "PEM CA bundle for a private provider endpoint"},
 	"instructions-file":     {value: "FILE", help: "approved instructions for every session, at most 16 KiB (first run)"},

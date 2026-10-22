@@ -56,6 +56,7 @@ type LocalHarness struct {
 	NativeOptions     []string           `json:"nativeOptions,omitempty"`
 	ProviderURL       string             `json:"providerURL"`
 	ProviderTokenFile string             `json:"providerTokenFile"`
+	ProviderTokenKind string             `json:"providerTokenKind,omitempty"`
 	ProviderCAFile    string             `json:"providerCAFile,omitempty"`
 	PricingFile       string             `json:"pricingFile,omitempty"`
 }
@@ -75,9 +76,12 @@ type GatewayConfig struct {
 	TrustBundleFile string `json:"trustBundleFile,omitempty"`
 	// PKIDirectory selects a home-owned private CA store instead of the three
 	// administrator files. The home renews its leaf and rotates the CA.
-	PKIDirectory            string                        `json:"pkiDirectory,omitempty"`
-	ProviderURL             string                        `json:"providerURL"`
-	ProviderTokenFile       string                        `json:"providerTokenFile"`
+	PKIDirectory      string `json:"pkiDirectory,omitempty"`
+	ProviderURL       string `json:"providerURL"`
+	ProviderTokenFile string `json:"providerTokenFile"`
+	// ProviderTokenKind is "token" when providerTokenFile holds a sign-in
+	// token rather than an API key (ADR 0047).
+	ProviderTokenKind       string                        `json:"providerTokenKind,omitempty"`
 	ProviderCAFile          string                        `json:"providerCAFile,omitempty"`
 	PricingFile             string                        `json:"pricingFile,omitempty"`
 	MCPAuthority            string                        `json:"mcpAuthority,omitempty"`

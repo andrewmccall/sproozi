@@ -94,6 +94,8 @@ type startupConfig struct {
 	pricing              *modelgateway.PricingTable
 	openAIKey            string
 	anthropicKey         string
+	openAIToken          string
+	anthropicToken       string
 	openAIUpstreamURL    string
 	anthropicUpstreamURL string
 	modelAuthMode        string
@@ -272,6 +274,7 @@ func loadStartupConfig() (*startupConfig, error) {
 	}
 	var pricing *modelgateway.PricingTable
 	openAIKey, anthropicKey, modelAuthMode := "", "", ""
+	openAIToken, anthropicToken := "", ""
 	openAIUpstreamURL := envOrDefault("OPENAI_UPSTREAM_URL", "https://api.openai.com")
 	anthropicUpstreamURL := envOrDefault("ANTHROPIC_UPSTREAM_URL", "https://api.anthropic.com")
 	if enabled[sprooziv1alpha1.CapabilityModelInference] {
@@ -289,6 +292,10 @@ func loadStartupConfig() (*startupConfig, error) {
 			return nil, fmt.Errorf("close model pricing: %w", closeErr)
 		}
 		openAIKey, anthropicKey, modelAuthMode, err = loadModelCredentials(openAIUpstreamURL)
+		if err != nil {
+			return nil, err
+		}
+		openAIToken, anthropicToken, err = loadSignInTokens(modelAuthMode, openAIKey, anthropicKey)
 		if err != nil {
 			return nil, err
 		}
@@ -314,12 +321,7 @@ func loadStartupConfig() (*startupConfig, error) {
 	}
 	hosts := inspectionHosts(host, enabled, profiles, mcpRegistry)
 	if enabled[sprooziv1alpha1.CapabilityModelInference] {
-		if anthropicKey == "" && modelAuthMode != modelauth.WorkloadMode {
-			delete(hosts, "api.anthropic.com")
-		}
-		if openAIKey == "" && modelAuthMode == modelauth.APIKeyMode {
-			delete(hosts, "api.openai.com")
-		}
+		pruneModelHosts(hosts, modelAuthMode, openAIKey+openAIToken != "", anthropicKey+anthropicToken != "")
 	}
 	for name := range hosts {
 		if err := leaf.VerifyHostname(name); err != nil {
@@ -332,11 +334,58 @@ func loadStartupConfig() (*startupConfig, error) {
 		enabled: enabled,
 		host:    host, listenerCert: certificate, certificates: certificates, certFile: certFile, keyFile: keyFile,
 		profiles: profiles, pricing: pricing, openAIKey: openAIKey, anthropicKey: anthropicKey, modelAuthMode: modelAuthMode,
+		openAIToken: openAIToken, anthropicToken: anthropicToken,
 		openAIUpstreamURL: openAIUpstreamURL, anthropicUpstreamURL: anthropicUpstreamURL,
 		appID: appID, installationID: installationID, privateKey: privateKey,
 		mcpRegistry: mcpRegistry, admission: admission, maxModelCall: maxModelCall,
 		ledgerRetention: ledgerRetention,
 	}, nil
+}
+
+// pruneModelHosts drops model hosts no route serves: a provider API with no
+// credential, and a signed-in client's hosts unless the provider forwards its
+// sign-in, so a gateway with keys needs no extra certificate names.
+func pruneModelHosts(hosts map[string]bool, mode string, openAIHeld, anthropicHeld bool) {
+	workload := mode == modelauth.WorkloadMode
+	if !anthropicHeld && !workload {
+		delete(hosts, "api.anthropic.com")
+	}
+	if !openAIHeld && mode == modelauth.APIKeyMode {
+		delete(hosts, "api.openai.com")
+	}
+	for name, forwards := range map[string]bool{modelgateway.ProviderOpenAI: workload && !openAIHeld,
+		modelgateway.ProviderAnthropic: workload && !anthropicHeld} {
+		provider, _ := modelgateway.ProviderFor(name)
+		if !forwards {
+			for _, extra := range provider.Hosts(true)[1:] {
+				delete(hosts, extra)
+			}
+		}
+	}
+}
+
+// loadSignInTokens reads gateway-held sign-in tokens, such as one from claude
+// setup-token, which a provider without an API key attaches (ADR 0047).
+func loadSignInTokens(mode, openAIKey, anthropicKey string) (string, string, error) {
+	openAI := strings.TrimSpace(os.Getenv("OPENAI_SIGN_IN_TOKEN"))
+	anthropic := strings.TrimSpace(os.Getenv("ANTHROPIC_SIGN_IN_TOKEN"))
+	for _, token := range []struct{ env, key, value, apiKey string }{
+		{"OPENAI_SIGN_IN_TOKEN", "openai-sign-in-token", openAI, openAIKey},
+		{"ANTHROPIC_SIGN_IN_TOKEN", "anthropic-sign-in-token", anthropic, anthropicKey},
+	} {
+		if strings.ContainsAny(token.value, "\r\n") {
+			return "", "", errors.New(token.env + " is invalid: key " + token.key + " in " +
+				modelCredentialsSource + " must be a single line")
+		}
+		if token.value != "" && token.apiKey != "" {
+			return "", "", errors.New(token.env + " and the provider's API key are both set in " + modelCredentialsSource +
+				": keep one")
+		}
+	}
+	if openAI != "" && mode == modelauth.ChatGPTMode {
+		return "", "", errors.New("OPENAI_SIGN_IN_TOKEN can't be used in chatgpt mode, which holds its own sign-in")
+	}
+	return openAI, anthropic, nil
 }
 
 func loadModelCredentials(openAIUpstreamURL string) (string, string, string, error) {
@@ -359,7 +408,8 @@ func loadModelCredentials(openAIUpstreamURL string) (string, string, string, err
 	if mode == modelauth.ChatGPTMode && openAIUpstreamURL != "https://api.openai.com" {
 		return "", "", "", errors.New("ChatGPT plan usage requires the public OpenAI API upstream")
 	}
-	if mode == modelauth.APIKeyMode && openAIKey == "" && anthropicKey == "" {
+	if mode == modelauth.APIKeyMode && openAIKey == "" && anthropicKey == "" &&
+		os.Getenv("OPENAI_SIGN_IN_TOKEN") == "" && os.Getenv("ANTHROPIC_SIGN_IN_TOKEN") == "" {
 		return "", "", "", errors.New("OPENAI_API_KEY or ANTHROPIC_API_KEY is required in api_key mode: " +
 			"set key openai-api-key or anthropic-api-key in " + modelCredentialsSource +
 			", or set key mode to chatgpt in " + modelAuthSource)
@@ -442,60 +492,82 @@ func githubAppInteger(key, secretKey string) (int64, error) {
 	return value, nil
 }
 
-// modelHandlers builds the OpenAI and Anthropic routes' handlers for the
-// administrator's MODEL_AUTH_MODE; either is nil when its route is disabled.
+// providerAuth chooses one provider's credential (ADR 0047): its gateway
+// API key, then its gateway-held sign-in token, then in workload mode the
+// harness's own sign-in. ok is false when the provider has none.
+func providerAuth(cfg *startupConfig, name string) (auth modelauth.Authenticator, ok bool) {
+	key, token := cfg.openAIKey, cfg.openAIToken
+	if name == modelgateway.ProviderAnthropic {
+		key, token = cfg.anthropicKey, cfg.anthropicToken
+	}
+	provider, _ := modelgateway.ProviderFor(name)
+	switch {
+	case key != "" && name == modelgateway.ProviderAnthropic:
+		return modelauth.AnthropicAPIKey{Key: key}, true
+	case key != "":
+		return modelauth.APIKey{Key: key}, true
+	case token != "":
+		return modelauth.Token{Value: token, Headers: provider.TokenHeaders}, true
+	case cfg.modelAuthMode == modelauth.WorkloadMode:
+		return modelauth.Workload{}, true
+	}
+	return nil, false
+}
+
+// modelHandlers builds the OpenAI and Anthropic API routes' handlers; either
+// is nil when its route is disabled. signedIn holds the extra routes of each
+// provider that forwards the harness's own sign-in: a subscription backend
+// such as chatgpt.com, and the provider's sign-in relay.
 func modelHandlers(cfg *startupConfig, auditLogger audit.Writer, modelClient *http.Client,
 	drain *modelgateway.Drain, runtimeClient client.Client,
-) (openAIHandler, anthropicHandler http.Handler) {
-	workload := cfg.modelAuthMode == modelauth.WorkloadMode
-	if cfg.enabled[sprooziv1alpha1.CapabilityModelInference] && (cfg.anthropicKey != "" || workload) {
-		var anthropicAuth modelauth.Authenticator = modelauth.AnthropicAPIKey{Key: cfg.anthropicKey}
-		if workload && cfg.anthropicKey == "" {
-			anthropicAuth = modelauth.Workload{}
-		}
-		anthropicHandler = modelgateway.NewAnthropicHandler(modelgateway.HandlerConfig{
-			Pricing: cfg.pricing, AuditLogger: auditLogger,
-			UpstreamURL:  cfg.anthropicUpstreamURL,
-			ProviderAuth: anthropicAuth, HTTPClient: modelClient, Drain: drain,
-		})
+) (openAIHandler, anthropicHandler http.Handler, signedIn map[string]http.Handler) {
+	signedIn = map[string]http.Handler{}
+	if !cfg.enabled[sprooziv1alpha1.CapabilityModelInference] {
+		return nil, nil, signedIn
 	}
-	openAIEnabled := cfg.openAIKey != "" || cfg.modelAuthMode == modelauth.ChatGPTMode || workload
-	if cfg.enabled[sprooziv1alpha1.CapabilityModelInference] && openAIEnabled {
-		// The ChatGPT credential stays in sproozi-system, where the gateway's
-		// access to it is limited to the one named Secret.
-		credentialNamespace := envOrDefault("CREDENTIAL_NAMESPACE", "sproozi-system")
-		var providerAuth modelauth.Authenticator = modelauth.APIKey{Key: cfg.openAIKey}
-		if workload && cfg.openAIKey == "" {
-			providerAuth = modelauth.Workload{}
-		}
-		if cfg.modelAuthMode == modelauth.ChatGPTMode {
-			store := modelauthkube.SessionStore{Client: runtimeClient, Namespace: credentialNamespace}
-			if err := checkChatGPTSession(context.Background(), store); err != nil {
-				log.Fatal(err)
-			}
-			oauthClient := newUpstreamClient(30 * time.Second)
-			providerAuth = modelauth.NewChatGPT(store, oauthClient)
-		}
-		model := &modelgateway.Handler{Config: modelgateway.HandlerConfig{
-			Pricing: cfg.pricing, AuditLogger: auditLogger,
-			UpstreamURL:  cfg.openAIUpstreamURL,
-			ProviderAuth: providerAuth, HTTPClient: modelClient, Drain: drain,
-		}}
+	config := func(upstream string, auth modelauth.Authenticator) modelgateway.HandlerConfig {
+		c := modelgateway.HandlerConfig{Pricing: cfg.pricing, AuditLogger: auditLogger, UpstreamURL: upstream,
+			ProviderAuth: auth, HTTPClient: modelClient, Drain: drain}
 		if os.Getenv("MODEL_DIAGNOSTICS") == "true" {
 			// Administrator opt-in: bounded provider errors only, separate from audit.
 			// Never log prompts, model text, reasoning, raw bodies or auth headers.
-			model.Config.Diagnostics = func(d modelgateway.ResponseDiagnostic) {
-				_ = json.NewEncoder(os.Stderr).Encode(d)
-			}
+			c.Diagnostics = func(d modelgateway.ResponseDiagnostic) { _ = json.NewEncoder(os.Stderr).Encode(d) }
 		}
-		openAIHandler = model
+		return c
 	}
-	return openAIHandler, anthropicHandler
+	if auth, ok := providerAuth(cfg, modelgateway.ProviderAnthropic); ok {
+		anthropicHandler = modelgateway.NewAnthropicHandler(config(cfg.anthropicUpstreamURL, auth))
+	}
+	auth, ok := providerAuth(cfg, modelgateway.ProviderOpenAI)
+	if cfg.modelAuthMode == modelauth.ChatGPTMode {
+		// The ChatGPT credential stays in sproozi-system, where the gateway's
+		// access to it is limited to the one named Secret.
+		store := modelauthkube.SessionStore{Client: runtimeClient,
+			Namespace: envOrDefault("CREDENTIAL_NAMESPACE", "sproozi-system")}
+		if err := checkChatGPTSession(context.Background(), store); err != nil {
+			log.Fatal(err)
+		}
+		auth, ok = modelauth.NewChatGPT(store, newUpstreamClient(30*time.Second)), true
+	}
+	if ok {
+		openAIHandler = &modelgateway.Handler{Config: config(cfg.openAIUpstreamURL, auth)}
+	}
+	for _, name := range []string{modelgateway.ProviderOpenAI, modelgateway.ProviderAnthropic} {
+		if auth, ok := providerAuth(cfg, name); !ok || auth.Mode() != modelauth.WorkloadMode {
+			continue
+		}
+		provider, _ := modelgateway.ProviderFor(name)
+		for _, m := range provider.Models[1:] {
+			signedIn[m.Authority] = m.New(config(m.UpstreamURL, modelauth.Workload{}))
+		}
+		signedIn[provider.SignInAuthority] = provider.SignInRelay(modelClient, auditLogger)
+	}
+	return openAIHandler, anthropicHandler, signedIn
 }
 
 func composeDispatcher(
 	cfg *startupConfig, handlers map[sprooziv1alpha1.CapabilityKind]http.Handler,
-	mcpHandler http.Handler, anthropicHandler http.Handler,
+	mcpHandler http.Handler, anthropicHandler http.Handler, signedIn ...map[string]http.Handler,
 ) gateway.Dispatcher {
 	routes := gateway.Dispatcher{}
 	host := cfg.host
@@ -527,13 +599,36 @@ func composeDispatcher(
 	anthropic := routes[modelgateway.AnthropicAuthority]
 	anthropic.Handler = anthropicHandler
 	routes[modelgateway.AnthropicAuthority] = anthropic
-	// In workload mode a provider with no gateway key forwards each harness's
-	// own sign-in; one with a key keeps it (ADR 0047).
-	if cfg.modelAuthMode == modelauth.WorkloadMode {
-		for authority, key := range map[string]string{modelgateway.OpenAIAuthority: cfg.openAIKey,
-			modelgateway.AnthropicAuthority: cfg.anthropicKey} {
+	// A provider that forwards each harness's own sign-in marks its model
+	// routes so the transport keeps the credential (ADR 0047).
+	apiRoutes := map[string]string{modelgateway.OpenAIAuthority: modelgateway.ProviderOpenAI,
+		modelgateway.AnthropicAuthority: modelgateway.ProviderAnthropic}
+	for authority, name := range apiRoutes {
+		if auth, ok := providerAuth(cfg, name); ok && auth.Mode() == modelauth.WorkloadMode {
 			route := routes[authority]
-			route.ProviderCredential = key == ""
+			route.ProviderCredential = true
+			routes[authority] = route
+		}
+	}
+	// The signed-in and sign-in authorities stay reserved but closed unless a
+	// provider forwards the harness's own sign-in.
+	for _, name := range []string{modelgateway.ProviderOpenAI, modelgateway.ProviderAnthropic} {
+		provider, _ := modelgateway.ProviderFor(name)
+		for _, m := range provider.Models[1:] {
+			route := routes[m.Authority]
+			route.Handler = nil
+			routes[m.Authority] = route
+		}
+		route := routes[provider.SignInAuthority]
+		route.Handler = nil
+		routes[provider.SignInAuthority] = route
+	}
+	for _, extra := range signedIn {
+		for authority, handler := range extra {
+			route := routes[authority]
+			route.Handler = handler
+			_, relay := handler.(*modelgateway.Relay)
+			route.ProviderCredential = !relay
 			routes[authority] = route
 		}
 	}
@@ -623,7 +718,7 @@ func main() {
 		MaxResponseBytes: 8 << 20,
 		AuditLogger:      auditLogger})
 	handlers := map[sprooziv1alpha1.CapabilityKind]http.Handler{sprooziv1alpha1.CapabilityKubernetesRead: kube}
-	openAIHandler, anthropicHandler := modelHandlers(cfg, auditLogger, modelClient, drain, runtimeClient)
+	openAIHandler, anthropicHandler, signedIn := modelHandlers(cfg, auditLogger, modelClient, drain, runtimeClient)
 	if openAIHandler != nil {
 		handlers[sprooziv1alpha1.CapabilityModelInference] = openAIHandler
 	}
@@ -665,7 +760,7 @@ func main() {
 	named := mcpgateway.NewHandler(mcpgateway.HandlerConfig{Registry: cfg.mcpRegistry,
 		Budgets: budgets, AuditLogger: auditLogger})
 	mcpHandler := diagnose.NewControl(auditLogger, named)
-	dispatcher := composeDispatcher(cfg, handlers, mcpHandler, anthropicHandler)
+	dispatcher := composeDispatcher(cfg, handlers, mcpHandler, anthropicHandler, signedIn)
 	for authority, route := range dispatcher {
 		route.Budgets, route.AuditLogger = budgets, auditLogger
 		dispatcher[authority] = route

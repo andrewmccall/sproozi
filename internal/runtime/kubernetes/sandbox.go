@@ -526,6 +526,12 @@ func BuildPodSpec(run *sprooziv1alpha1.AgentRun, rt *sprooziv1alpha1.AgentRuntim
 			}},
 		},
 	}
+	signIn := rt.Spec.ClientConfig.SignIn
+	if signIn != nil {
+		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{Name: "sign-in", VolumeSource: corev1.VolumeSource{
+			Secret: &corev1.SecretVolumeSource{SecretName: signIn.SecretName, DefaultMode: &defaultMode,
+				Items: []corev1.KeyToPath{{Key: signIn.Key, Path: signIn.Key}}}}})
+	}
 	injectedVolumes := pod.Spec.Volumes
 	pod.Spec = *rt.Spec.PodTemplate.Spec.DeepCopy()
 	pod.Spec.ServiceAccountName = saName
@@ -550,9 +556,19 @@ func BuildPodSpec(run *sprooziv1alpha1.AgentRun, rt *sprooziv1alpha1.AgentRuntim
 			continue
 		}
 		c := &pod.Spec.Containers[i]
+		c.Env = append(c.Env, corev1.EnvVar{Name: "SPROOZI_GATEWAY", Value: rt.Spec.GatewayEndpoint})
+		// A harness with its own sign-in gets no key placeholder, which most
+		// clients would prefer over that sign-in (ADR 0047).
+		if signIn == nil {
+			c.Env = append(c.Env, corev1.EnvVar{Name: openAIAPIKey, Value: clientAuthPlaceholder})
+		} else {
+			c.VolumeMounts = append(c.VolumeMounts, corev1.VolumeMount{Name: "sign-in", MountPath: sprooziv1alpha1.SignInDirectory, ReadOnly: true})
+			if signIn.Env != "" {
+				c.Env = append(c.Env, corev1.EnvVar{Name: signIn.Env, ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: signIn.SecretName}, Key: signIn.Key}}})
+			}
+		}
 		c.Env = append(c.Env,
-			corev1.EnvVar{Name: "SPROOZI_GATEWAY", Value: rt.Spec.GatewayEndpoint},
-			corev1.EnvVar{Name: openAIAPIKey, Value: clientAuthPlaceholder},
 			corev1.EnvVar{Name: "OPENAI_BASE_URL", Value: "https://api.openai.com/v1"},
 			corev1.EnvVar{Name: "SSL_CERT_FILE", Value: trustBundlePath},
 			corev1.EnvVar{Name: "GIT_SSL_CAINFO", Value: trustBundlePath},

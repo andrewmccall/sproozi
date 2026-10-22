@@ -96,7 +96,7 @@ anything is read or sent. `-d` is short for `--detach`.
 | `move` | `--local`, `--remote`, `--context`, `--namespace`, `--json`, `--root` |
 | `pull` | `--context`, `--namespace`, `--json`, `--root` |
 | `recover` | `--remote`, `--context`, `--namespace`, `--json`, `--root` |
-| `init` | `--harness`, `--model`, `--credential-file`, `--credential-stdin`, `--skip-credential-check`, `--sign-in`, `--provider-url`, `--provider-ca-file`, `--instructions-file`, `--image`, `--build`, `--port`, `--no-service`, `--timeout`, `--json`, `--root` |
+| `init` | `--harness`, `--model`, `--credential-file`, `--credential-stdin`, `--skip-credential-check`, `--token`, `--chatgpt`, `--sign-in`, `--provider-url`, `--provider-ca-file`, `--instructions-file`, `--image`, `--build`, `--port`, `--no-service`, `--timeout`, `--json`, `--root` |
 | `doctor` | `--check-provider`, `--json`, `--root` |
 | `service` | `--leave-running`, `--json`, `--root` |
 | `credentials` | `--credential-file`, `--credential-stdin`, `--skip-credential-check`, `--json`, `--root` |
@@ -119,7 +119,9 @@ anything is read or sent. `-d` is short for `--detach`.
 | `--model MODEL` | Model the agent added by `init` requests. Without it the agent uses its own default; `run -- --model NAME` chooses per session. |
 | `--credential-file FILE`, `--credential-stdin` | Read the provider key from a file only you can read, or from standard input, instead of a hidden prompt. A key is never a command-line value. |
 | `--skip-credential-check` | Do not ask the provider to check the key. |
-| `--sign-in` | Let the agent sign in to its own provider account instead of storing a key; Claude Code only, for now. Refused with `--credential-file` or `--credential-stdin`. |
+| `--sign-in` | Let the agent sign in to its own provider account instead of storing a key. Refused with `--credential-file`, `--credential-stdin` or `--token`. |
+| `--chatgpt` | Sign the gateway in to your ChatGPT plan in the browser, for an OpenAI agent such as Codex; the gateway keeps the sign-in in `credentials/chatgpt-session.json` and refreshes it. Reuses a valid stored sign-in. |
+| `--token` | The stored credential is a sign-in token the gateway attaches, such as one from `claude setup-token`, rather than an API key. Skips the credential check. |
 | `--provider-url URL`, `--provider-ca-file FILE` | A private provider endpoint and its PEM CA bundle, for the agent `init` adds. |
 | `--instructions-file FILE` | Approved instructions for every session, at most 16 KiB, on the first `init`. |
 | `--image REF`, `--build DIR` | Agent image as `REPOSITORY@sha256:DIGEST` or a local `sha256:` ID, or build it from a Sproozi source directory. |

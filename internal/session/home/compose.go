@@ -59,9 +59,12 @@ type authority struct {
 	signIn bool
 }
 
-func inspectionHostFor(kind harness.NativeKind) string {
-	h, _ := harness.Managed(kind)
-	return h.Protocol.InspectionHost()
+// providerHosts are the provider names a stack's gateway inspects: its API
+// host, and with the harness's own sign-in every model and sign-in host.
+func providerHosts(stack *localStack) []string {
+	h, _ := harness.Managed(stack.config.Harness)
+	p, _ := model.ProviderFor(string(h.Protocol))
+	return p.Hosts(stack.config.SignIn)
 }
 
 func (a *authority) InitializeAllocation(ctx context.Context, l session.Launch, i session.Incarnation) (runtimedocker.NativeAccess, error) {
@@ -142,6 +145,7 @@ func localConfigs(c Config) ([]*localStack, error) {
 		listener := c.Gateway
 		listener.Listen = net.JoinHostPort(host, fmt.Sprint(extra.GatewayPort))
 		listener.ProviderURL, listener.ProviderTokenFile = extra.ProviderURL, extra.ProviderTokenFile
+		listener.ProviderTokenKind = extra.ProviderTokenKind
 		listener.ProviderCAFile, listener.PricingFile = extra.ProviderCAFile, extra.PricingFile
 		stacks = append(stacks, &localStack{config: placement, model: extra.Model, options: extra.NativeOptions, gateway: listener})
 	}
@@ -188,10 +192,7 @@ func validListen(stack *localStack) error {
 func servingNames(c Config, stacks []*localStack) pki.Names {
 	names := pki.Names{IPs: []string{c.Local.GatewayIPv4}}
 	for _, stack := range stacks {
-		names.DNS = append(names.DNS, inspectionHostFor(stack.config.Harness))
-		if h, _ := harness.Managed(stack.config.Harness); stack.config.SignIn && h.SignInHost != "" {
-			names.DNS = append(names.DNS, h.SignInHost)
-		}
+		names.DNS = append(names.DNS, providerHosts(stack)...)
 	}
 	// The MCP authority always serves the Sproozi control connection.
 	if host, _, err := net.SplitHostPort(c.Gateway.MCPAuthority); err == nil {
@@ -393,11 +394,10 @@ func (s *Service) openStack(c Config, engine *runtimedocker.Engine, ledger *budg
 		return err
 	}
 	modelConfig.Drain = s.drain
-	gatewayConfig := gatewaydocker.GatewayConfig{Harness: stack.config.Harness, Certificates: map[string]tls.Certificate{inspectionHostFor(stack.config.Harness): certificate}, Serving: s.certs.serving, Model: modelConfig, AuditLogger: audit.NewLogger(log),
+	gatewayConfig := gatewaydocker.GatewayConfig{Harness: stack.config.Harness, Certificates: map[string]tls.Certificate{}, Serving: s.certs.serving, Model: modelConfig, AuditLogger: audit.NewLogger(log),
 		MaxModelCall: maxModelCall(c.Gateway)}
-	if h, _ := harness.Managed(stack.config.Harness); stack.config.SignIn {
-		gatewayConfig.Certificates[h.SignInHost] = certificate
-		gatewayConfig.SignIn = model.NewAnthropicSignInHandler("https://"+h.SignInHost, modelConfig.HTTPClient, gatewayConfig.AuditLogger)
+	for _, host := range providerHosts(stack) {
+		gatewayConfig.Certificates[host] = certificate
 	}
 	// The MCP authority also serves the Sproozi control connection, so every
 	// home gateway needs it, with or without registered MCP servers.
@@ -507,8 +507,17 @@ func provider(c GatewayConfig, kind harness.NativeKind) (model.HandlerConfig, er
 // providerAuth selects the gateway's provider credential: the API key in
 // providerTokenFile, or, with none configured, the harness's own sign-in.
 func providerAuth(result model.HandlerConfig, c GatewayConfig, kind harness.NativeKind) (model.HandlerConfig, error) {
+	if c.ProviderTokenKind == modelauth.ChatGPTMode {
+		// The gateway keeps a ChatGPT plan sign-in and refreshes it itself.
+		if _, err := modelauth.LoadFile(c.ProviderTokenFile); err != nil {
+			return result, fmt.Errorf("home: gateway.providerTokenFile %s: %w; run sproozi init --chatgpt", c.ProviderTokenFile, err)
+		}
+		result.ProviderAuth = modelauth.NewChatGPT(modelauth.NewFileSessionStore(c.ProviderTokenFile),
+			&http.Client{Timeout: 30 * time.Second})
+		return result, nil
+	}
 	if c.ProviderTokenFile == "" {
-		if h, _ := harness.Managed(kind); h.SignInHost == "" {
+		if h, _ := harness.Managed(kind); h.SignInFile == "" {
 			return result, fmt.Errorf("home: %s can't sign in itself yet; set gateway.providerTokenFile to its provider API key", kind)
 		}
 		result.ProviderAuth = modelauth.Workload{}
@@ -530,9 +539,14 @@ func providerAuth(result model.HandlerConfig, c GatewayConfig, kind harness.Nati
 		return result, fmt.Errorf("home: gateway.providerTokenFile %s has whitespace or NUL inside the key; "+
 			"it must hold only the provider API key", c.ProviderTokenFile)
 	}
-	if h, _ := harness.Managed(kind); h.Protocol == harness.ProtocolAnthropic {
+	h, _ := harness.Managed(kind)
+	switch {
+	case c.ProviderTokenKind == modelauth.TokenMode:
+		p, _ := model.ProviderFor(string(h.Protocol))
+		result.ProviderAuth = modelauth.Token{Value: token, Headers: p.TokenHeaders}
+	case h.Protocol == harness.ProtocolAnthropic:
 		result.ProviderAuth = modelauth.AnthropicAPIKey{Key: token}
-	} else {
+	default:
 		result.ProviderAuth = modelauth.APIKey{Key: token}
 	}
 	return result, nil

@@ -39,6 +39,21 @@ BUILD_MARKER = "SPROOZI_PACKAGE_TESTS_VERIFIED"
 ALL_PROMPTS = [*PROMPTS, TOOL_PROMPT, HOLD_PROMPT, HOMEOPS_PROMPT, BUILD_PROMPT]
 ANSWERS = [*TUI.ANSWERS, "TUI_TOOL_COMPLETE", "TUI_HELD_COMPLETE", "HOMEOPS_TASK_COMPLETE", "SPROOZI_BUILD_COMPLETE"]
 TOKEN = "tui-placeholder"
+# A Codex that signs in itself sends its ChatGPT access token instead of the
+# gateway's key, to the ChatGPT backend's paths (ADR 0047).
+CHATGPT_ACCOUNT = "acct-fixture"
+CHATGPT_ACCESS = ("eyJhbGciOiJub25lIn0." + __import__("base64").urlsafe_b64encode(__import__("json").dumps(
+    {"exp": 4102444800, "https://api.openai.com/auth": {"chatgpt_account_id": CHATGPT_ACCOUNT,
+     "chatgpt_plan_type": "plus"}}).encode()).decode().rstrip("=") + ".fixture")
+CHATGPT_METADATA = {
+    "/backend-api/wham/accounts/check": {"accounts": [{"id": CHATGPT_ACCOUNT, "plan_type": "plus", "structure": "personal",
+                                                       "account_user_role": "account-owner", "is_deactivated": False,
+                                                       "can_access_with_session": True, "workspace_backend_origin": "NO_CONSTRAINT",
+                                                       "account_routing_override": "NO_CONSTRAINT"}],
+                                         "account_ordering": [CHATGPT_ACCOUNT], "default_account_id": CHATGPT_ACCOUNT},
+    "/backend-api/wham/settings/user": {"user_id": "user-fixture", "custom_instructions": None},
+    "/backend-api/codex/models": {"models": []},
+}
 
 
 def private_directory(path):
@@ -314,13 +329,14 @@ def provider_class(args, out, stop):
             developer_text = [content.get("text", "") for item in body.get("input", [])
                               if item.get("role") == "developer" for content in item.get("content", [])]
             approved = any(args.instructions in text for text in developer_text)
-            authenticated = self.headers.get("Authorization") == "Bearer " + TOKEN
+            signed_in = self.headers.get("Authorization") == "Bearer " + CHATGPT_ACCESS
+            authenticated = self.headers.get("Authorization") == "Bearer " + TOKEN or signed_in
             if not authenticated or request["kind"] != "title" and not approved:
                 TUI.EVIDENCE["unexpectedProviderAuthority"] = True
                 TUI.persist()
                 self.send_error(403, "Fixture authority or approved instructions absent")
                 return
-            request.update(path=self.path, body=body, placeholderAuth=authenticated, completed=False)
+            request.update(path=self.path, body=body, placeholderAuth=authenticated, signedIn=signed_in, completed=False)
             with TUI.LOCK:
                 index = len(TUI.REQUESTS)
                 TUI.REQUESTS.append(request)
@@ -357,10 +373,19 @@ def provider_class(args, out, stop):
                     TUI.persist()
 
         def do_GET(self):
+            path = self.path.split("?", 1)[0]
+            if path in CHATGPT_METADATA and self.headers.get("Authorization") == "Bearer " + CHATGPT_ACCESS:
+                content = json.dumps(CHATGPT_METADATA[path]).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(content)))
+                self.end_headers()
+                self.wfile.write(content)
+                return
             if self.path != "/status":
                 self.send_error(404)
                 return
-            fields = ["kind", "turn", "phase", "completed", "missingHistory", "placeholderAuth",
+            fields = ["kind", "turn", "phase", "completed", "missingHistory", "placeholderAuth", "signedIn", "path",
                       "usage", "held", "holdID", "released", "streamError", "toolOutputSHA256",
                       "toolOutputValidated"]
             with TUI.LOCK:

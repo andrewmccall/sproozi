@@ -115,7 +115,7 @@ func (c PlacementConfig) validate() error {
 // the harness's sign-in and the profile folder.
 func (c PlacementConfig) validateHarnessFiles() error {
 	if h, _ := harness.Managed(c.Harness); c.SignIn && h.SignInFile == "" {
-		return fmt.Errorf("%s can't sign in itself yet; configure a provider key for it", c.Harness)
+		return fmt.Errorf("%s has no sign-in file to keep; configure a provider key for it", c.Harness)
 	}
 	if c.ProfileDirectory != "" && !filepath.IsAbs(c.ProfileDirectory) {
 		return errors.New("docker placement profile folder must be absolute")

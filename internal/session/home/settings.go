@@ -16,6 +16,7 @@ import (
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/harness"
+	"github.com/andrewmccall/sproozi/internal/modelauth"
 	"github.com/andrewmccall/sproozi/internal/nativeconfig"
 	"github.com/andrewmccall/sproozi/internal/privatefs"
 	"github.com/andrewmccall/sproozi/internal/proxytransport"
@@ -128,7 +129,11 @@ func (c Config) gatewayProblems() []string {
 			return
 		}
 		h, _ := harness.Managed(kind)
-		add(h.SignInHost == "", key, "absolute path; "+string(kind)+" can't sign in itself yet")
+		add(h.SignInFile == "", key, "absolute path; "+string(kind)+" can't sign in itself yet")
+	}
+	tokenKind := func(key, file, kind string) {
+		add(kind != "" && (kind != modelauth.TokenMode && kind != modelauth.ChatGPTMode || file == ""), key,
+			`"token" for a sign-in token or "chatgpt" for a ChatGPT plan sign-in in providerTokenFile, or omit it for an API key`)
 	}
 	blank := func(v string) bool { return strings.TrimSpace(v) == "" }
 	g := c.Gateway
@@ -145,6 +150,7 @@ func (c Config) gatewayProblems() []string {
 	u, err := url.Parse(g.ProviderURL)
 	add(err != nil || u.Host == "" || !approvedProviderURL(u), "gateway.providerURL", "HTTPS provider URL")
 	tokenFile("gateway.providerTokenFile", c.Local.Harness, g.ProviderTokenFile)
+	tokenKind("gateway.providerTokenKind", g.ProviderTokenFile, g.ProviderTokenKind)
 	// The MCP authority always serves the Sproozi control connection.
 	mcpHost, mcpPort, err := net.SplitHostPort(g.MCPAuthority)
 	add(err != nil || mcpHost == "" || net.ParseIP(mcpHost) != nil || mcpPort != "443", "gateway.mcpAuthority",
@@ -158,6 +164,7 @@ func (c Config) gatewayProblems() []string {
 		u, err := url.Parse(h.ProviderURL)
 		add(err != nil || u.Host == "" || !approvedProviderURL(u), key+"providerURL", "HTTPS provider URL")
 		tokenFile(key+"providerTokenFile", h.Harness, h.ProviderTokenFile)
+		tokenKind(key+"providerTokenKind", h.ProviderTokenFile, h.ProviderTokenKind)
 	}
 	// Compare the integer before any conversion, which would overflow.
 	add(g.MaxModelCallSeconds != nil && (*g.MaxModelCallSeconds < 1 ||

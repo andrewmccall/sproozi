@@ -70,6 +70,36 @@ func HasWorkloadCredential(header http.Header) bool {
 	return false
 }
 
+// TokenMode installs a gateway-held sign-in token (ADR 0047).
+const TokenMode = "token"
+
+// Token installs a gateway-held sign-in token, such as one from claude
+// setup-token, as a bearer credential, with any headers its provider requires
+// for one. Workload credentials and account headers never select the account.
+type Token struct {
+	Value   string
+	Headers map[string]string
+}
+
+func (Token) Mode() string { return TokenMode }
+func (t Token) Authorize(r *http.Request) error {
+	if strings.TrimSpace(t.Value) == "" || strings.ContainsAny(t.Value, "\r\n") {
+		return errors.New("provider sign-in token is unavailable")
+	}
+	removeOpenAIAccountHeaders(r.Header)
+	r.Header.Del("X-Api-Key")
+	r.Header.Set("Authorization", "Bearer "+t.Value)
+	for name, value := range t.Headers {
+		// Keep the client's other comma-separated values, such as betas.
+		values := strings.Split(r.Header.Get(name), ",")
+		if !slices.ContainsFunc(values, func(v string) bool { return strings.TrimSpace(v) == value }) {
+			values = append(slices.DeleteFunc(values, func(v string) bool { return strings.TrimSpace(v) == "" }), value)
+		}
+		r.Header.Set(name, strings.Join(values, ","))
+	}
+	return nil
+}
+
 type APIKey struct{ Key string }
 
 // AnthropicAPIKey installs a trusted Messages API credential. A workload's

@@ -34,7 +34,7 @@ type Provider struct {
 // local gateway forwards its sign-in and holds no key for it (ADR 0047).
 func SignsIn(kind harness.NativeKind) bool {
 	h, err := harness.Managed(kind)
-	return err == nil && h.SignInHost != ""
+	return err == nil && h.SignInFile != ""
 }
 
 func ProviderFor(kind harness.NativeKind) Provider {

@@ -51,6 +51,10 @@ const responsesPath = "/v1/responses"
 // HandlerConfig holds all dependencies for Handler.
 type HandlerConfig struct {
 
+	// UpstreamPath maps an accepted operation's path to the provider's, such
+	// as the ChatGPT backend's Responses path. Nil keeps the path.
+	UpstreamPath func(string) string
+
 	// Pricing is administrator-owned and is required whenever a cost cap is set.
 	Pricing *PricingTable
 
@@ -175,9 +179,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	e = gateway.AuditEvent(ctx, r.URL.Path)
-	e.Service = "openai"
+	e.Service = ProviderOpenAI
 	if h.protocol == anthropicProtocol {
-		e.Service = "anthropic"
+		e.Service = ProviderAnthropic
 	}
 
 	limits, _, limitErr := identity.BudgetLimits(sprooziv1alpha1.CapabilityModelInference)
@@ -346,7 +350,7 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, e audit.Event,
 		h.release(event, reservation)
 	}
 	upstreamReq, err := http.NewRequestWithContext(
-		ctx, r.Method, h.Config.UpstreamURL+r.URL.RequestURI(), bytes.NewReader(bodyBytes),
+		ctx, r.Method, h.Config.UpstreamURL+h.upstreamTarget(r), bytes.NewReader(bodyBytes),
 	)
 	if err != nil {
 		release()
@@ -655,6 +659,18 @@ func (h *Handler) prepareAnthropic(r *http.Request, body []byte, limits sprooziv
 	// only the administrator's standard pricing, never Priority Tier capacity.
 	request["service_tier"] = json.RawMessage(`"standard_only"`)
 	return json.Marshal(request)
+}
+
+// upstreamTarget is the provider's path and query for an accepted request.
+func (h *Handler) upstreamTarget(r *http.Request) string {
+	if h.Config.UpstreamPath == nil {
+		return r.URL.RequestURI()
+	}
+	target := h.Config.UpstreamPath(r.URL.Path)
+	if r.URL.RawQuery != "" {
+		target += "?" + r.URL.RawQuery
+	}
+	return target
 }
 
 // copyProviderHeaders never forwards cookies or the gateway credential. It

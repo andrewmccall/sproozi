@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"net/http"
 	"slices"
+	"strings"
 
 	"github.com/andrewmccall/sproozi/internal/audit"
 	"github.com/andrewmccall/sproozi/internal/gateway"
@@ -12,59 +13,77 @@ import (
 const (
 	// AnthropicSignInAuthority serves Claude Code's OAuth sign-in and refresh.
 	AnthropicSignInAuthority = "platform.claude.com:443"
-	anthropicTokenPath       = "/v1/oauth/token"
-	maxSignInBytes           = 64 << 10
+	// OpenAISignInAuthority serves Codex's ChatGPT device-code sign-in and refresh.
+	OpenAISignInAuthority = "auth.openai.com:443"
+	maxRelayRequestBytes  = 64 << 10
+	maxRelayResponseBytes = 8 << 20
 )
 
-// SignInHandler relays a harness's own OAuth sign-in and token refresh to its
-// provider unchanged (ADR 0047). It holds no credential, charges no budget and
-// never records a body: both directions carry the harness's tokens.
-type SignInHandler struct {
+// RelayRoute is one request a Relay passes on: an exact method and path,
+// and whether a query string is allowed.
+type RelayRoute struct {
+	Method, Path string
+	Query        bool
+}
+
+// Relay passes a harness's own sign-in, token refresh and account metadata
+// requests to its provider unchanged (ADR 0047). It holds no credential,
+// charges no budget and never records a body, because both directions carry
+// the harness's tokens. Every other request is refused.
+type Relay struct {
 	UpstreamURL string
-	Paths       []string
+	Routes      []RelayRoute
 	HTTPClient  *http.Client
 	AuditLogger audit.Writer
+	Service     string
 }
 
-// NewAnthropicSignInHandler relays only Claude Code's OAuth token endpoint.
-func NewAnthropicSignInHandler(upstreamURL string, client *http.Client, logger audit.Writer) *SignInHandler {
-	return &SignInHandler{UpstreamURL: upstreamURL, Paths: []string{anthropicTokenPath},
-		HTTPClient: client, AuditLogger: logger}
+// NewAnthropicSignInHandler relays Anthropic's sign-in routes to upstreamURL,
+// such as a fixture.
+func NewAnthropicSignInHandler(upstreamURL string, client *http.Client, logger audit.Writer) *Relay {
+	relay := providers[ProviderAnthropic].SignInRelay(client, logger)
+	relay.UpstreamURL = upstreamURL
+	return relay
 }
 
-func (h *SignInHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *Relay) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	e := gateway.AuditEvent(r.Context(), r.URL.Path)
-	e.Service = "sign-in"
-	if r.Method != http.MethodPost || !slices.Contains(h.Paths, r.URL.Path) || r.URL.RawQuery != "" {
-		h.refuse(w, e, http.StatusForbidden, "only the provider's sign-in token request is relayed")
+	e.Service = h.Service
+	allowed := slices.ContainsFunc(h.Routes, func(route RelayRoute) bool {
+		return route.Method == r.Method && route.Path == r.URL.Path && (route.Query || r.URL.RawQuery == "")
+	})
+	if !allowed {
+		h.refuse(w, e, http.StatusForbidden, "the gateway relays only the provider's sign-in and account requests")
 		return
 	}
-	body, err := readBounded(r.Body, maxSignInBytes)
+	body, err := readBounded(r.Body, maxRelayRequestBytes)
 	if err != nil {
-		h.refuse(w, e, http.StatusRequestEntityTooLarge, "sign-in request exceeds gateway limit")
+		h.refuse(w, e, http.StatusRequestEntityTooLarge, "relayed request exceeds gateway limit")
 		return
 	}
-	upstream, err := http.NewRequestWithContext(r.Context(), http.MethodPost, h.UpstreamURL+r.URL.Path, bytes.NewReader(body))
+	upstream, err := http.NewRequestWithContext(r.Context(), r.Method, h.UpstreamURL+r.URL.RequestURI(), bytes.NewReader(body))
 	if err != nil {
-		h.refuse(w, e, http.StatusInternalServerError, "failed to build sign-in request")
+		h.refuse(w, e, http.StatusInternalServerError, "failed to build relayed request")
 		return
 	}
-	for _, name := range []string{"Content-Type", "Accept", "User-Agent"} {
-		if value := r.Header.Get(name); value != "" {
-			upstream.Header.Set(name, value)
+	for name, values := range r.Header {
+		switch strings.ToLower(name) {
+		case "cookie", "proxy-authorization", "accept-encoding", "connection", "content-length":
+			continue
 		}
+		upstream.Header[name] = values
 	}
 	client := *h.HTTPClient
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	resp, err := client.Do(upstream)
 	if err != nil {
-		h.refuse(w, e, http.StatusBadGateway, "sign-in request failed")
+		h.refuse(w, e, http.StatusBadGateway, "relayed request failed")
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
-	reply, err := readBounded(resp.Body, maxSignInBytes)
+	reply, err := readBounded(resp.Body, maxRelayResponseBytes)
 	if err != nil {
-		h.refuse(w, e, http.StatusBadGateway, "sign-in response exceeds gateway limit")
+		h.refuse(w, e, http.StatusBadGateway, "relayed response exceeds gateway limit")
 		return
 	}
 	e.Allowed, e.UpstreamStatus = true, resp.StatusCode
@@ -77,13 +96,13 @@ func (h *SignInHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(reply)
 }
 
-func (h *SignInHandler) refuse(w http.ResponseWriter, e audit.Event, status int, reason string) {
+func (h *Relay) refuse(w http.ResponseWriter, e audit.Event, status int, reason string) {
 	e.DenyReason = reason
 	h.log(e)
 	http.Error(w, reason, status)
 }
 
-func (h *SignInHandler) log(e audit.Event) {
+func (h *Relay) log(e audit.Event) {
 	if h.AuditLogger != nil {
 		h.AuditLogger.Log(e)
 	}

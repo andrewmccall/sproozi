@@ -8,6 +8,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"errors"
+	"io"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -18,6 +19,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/andrewmccall/sproozi/internal/modelauth"
 
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/privatefs"
@@ -443,5 +446,28 @@ func TestSignInIsChosenPerHarness(t *testing.T) {
 	edited.Harnesses[0].ProviderTokenFile = "/elsewhere/anthropic-key"
 	if kept, _, _ := mergeConfig(edited, withKey); kept.Harnesses[0].ProviderTokenFile != "/elsewhere/anthropic-key" {
 		t.Fatal("an edited key path was replaced")
+	}
+}
+
+// A gateway-held ChatGPT sign-in is reused while valid, so a later init needs
+// no browser, and only an OpenAI harness can choose it (ADR 0047).
+func TestChatGPTSignInIsReusedForAnOpenAIHarness(t *testing.T) {
+	l, inst := testInstallation(t)
+	session := modelauth.Session{Issuer: modelauth.Issuer, Subject: "account", ClientID: "oaiapp_fixture",
+		HostID: "urn:uuid:fixture", AccessToken: "fixture-access", RefreshToken: "fixture-refresh", IDToken: "fixture-id",
+		TokenType: "Bearer", ExpiresIn: 3600, SavedAt: time.Now().UTC(), Scopes: []string{modelauth.PlanScope}}
+	if err := modelauth.WritePrivateJSON(filepath.Join(l.Credentials(), "chatgpt-session.json"), session); err != nil {
+		t.Fatal(err)
+	}
+	i := &installer{l: l, inst: inst, o: Options{Harness: harness.NativeCodex, ChatGPT: true, Progress: io.Discard}, selected: &inst.Harnesses[0]}
+	if err := i.signInChatGPT(t.Context(), ProviderFor(harness.NativeCodex)); err != nil {
+		t.Fatal(err)
+	}
+	if i.selected.Kind != modelauth.ChatGPTMode || tokenKind(*i.selected) != modelauth.ChatGPTMode {
+		t.Fatalf("harness %+v", *i.selected)
+	}
+	i.o.Harness = harness.NativeClaude
+	if err := i.signInChatGPT(t.Context(), ProviderFor(harness.NativeClaude)); err == nil {
+		t.Fatal("Claude Code was given a ChatGPT sign-in")
 	}
 }

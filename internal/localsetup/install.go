@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/harness"
+	"github.com/andrewmccall/sproozi/internal/modelauth"
 	"github.com/andrewmccall/sproozi/internal/pki"
 	"github.com/andrewmccall/sproozi/internal/privatefs"
 	runtimedocker "github.com/andrewmccall/sproozi/internal/runtime/docker"
@@ -38,6 +39,14 @@ type Options struct {
 	Credential     CredentialInput
 	// CheckCredential validates the key with the provider's model listing.
 	CheckCredential bool
+	// Token stores the credential as a sign-in token the gateway attaches,
+	// such as one from claude setup-token, instead of an API key.
+	Token bool
+	// ChatGPT signs the gateway in to a ChatGPT plan in the browser and keeps
+	// that sign-in, refreshing it itself, for an OpenAI harness.
+	ChatGPT bool
+	// OpenBrowser opens a sign-in page; nil prints nothing and fails.
+	OpenBrowser func(string) error
 	// SignIn lets the harness sign in to its own provider account instead of
 	// the gateway holding a key (ADR 0047). Without it or a key, a harness
 	// keeps the choice it already has.
@@ -288,6 +297,9 @@ func (i *installer) prepareHarness(ctx context.Context) error {
 		i.step("Stored the %s endpoint's CA bundle in %s", provider.Name, path)
 	}
 	keyGiven := o.Credential.File != "" || o.Credential.Stdin != nil
+	if o.ChatGPT {
+		return i.signInChatGPT(ctx, provider)
+	}
 	if o.SignIn && !SignsIn(i.selected.Harness) {
 		return fail("harness", fmt.Errorf("%s can't sign in to its provider itself yet", o.Harness),
 			"leave out --sign-in and give it a provider key")
@@ -298,10 +310,16 @@ func (i *installer) prepareHarness(ctx context.Context) error {
 		if i.selected.Credential != "" {
 			i.step("%s now signs in to %s itself; the stored key is no longer used", o.Harness, provider.Name)
 		}
-		i.selected.Credential = ""
+		i.selected.Credential, i.selected.Kind = "", ""
 		return i.save("harness:" + string(i.selected.Harness))
 	}
 	i.selected.Credential = filepath.Join(i.l.Credentials(), provider.Name)
+	if o.Token || keyGiven {
+		i.selected.Kind = ""
+		if o.Token {
+			i.selected.Kind = modelauth.TokenMode
+		}
+	}
 	if !HasCredential(i.l, provider.Name) || o.Credential.File != "" || o.Credential.Stdin != nil {
 		if _, err := StoreCredential(i.l, provider.Name, o.Credential); err != nil {
 			return err
@@ -309,13 +327,36 @@ func (i *installer) prepareHarness(ctx context.Context) error {
 		i.credential = true
 		i.step("Stored the %s credential in %s", provider.Name, i.l.Credentials())
 	}
-	if o.CheckCredential {
+	if o.CheckCredential && i.selected.Kind == "" {
 		h := i.selected
 		if err := CheckCredential(ctx, h.Harness, h.ProviderURL, h.ProviderCAFile, h.Credential); err != nil {
 			return err
 		}
 		i.step("The %s credential is accepted", provider.Name)
 	}
+	return i.save("harness:" + string(i.selected.Harness))
+}
+
+// signInChatGPT keeps a gateway-held ChatGPT plan sign-in for an OpenAI
+// harness (ADR 0047), reusing a valid stored one.
+func (i *installer) signInChatGPT(ctx context.Context, provider Provider) error {
+	if provider.Name != string(harness.ProtocolOpenAI) {
+		return fail("harness", fmt.Errorf("%s doesn't use OpenAI, so it can't use a ChatGPT plan sign-in", i.o.Harness),
+			"leave out --chatgpt")
+	}
+	stored := filepath.Join(i.l.Credentials(), "chatgpt-session.json")
+	if _, err := modelauth.LoadFile(stored); err != nil {
+		if i.o.OpenBrowser == nil {
+			return fail("credential", errors.New("a ChatGPT sign-in needs a browser on this machine"), "run sproozi init in a terminal")
+		}
+		i.step("Continue with ChatGPT: approve Sproozi's requested plan permissions in your browser")
+		if _, err = modelauth.Login(ctx, stored, filepath.Join(i.l.Credentials(), "chatgpt-host.json"), i.o.OpenBrowser); err != nil {
+			return fail("credential", err, "run sproozi init --chatgpt again to retry the sign-in")
+		}
+	}
+	i.selected.Credential, i.selected.Kind = stored, modelauth.ChatGPTMode
+	i.credential = true
+	i.step("The gateway keeps the ChatGPT sign-in in %s and refreshes it itself", stored)
 	return i.save("harness:" + string(i.selected.Harness))
 }
 
@@ -503,8 +544,13 @@ var codexOptions = []string{
 	`model_providers.sproozi.env_key="OPENAI_API_KEY"`,
 	`model_providers.sproozi.wire_api="responses"`,
 	`model_providers.sproozi.supports_websockets=false`,
-	`projects."/workspace/session/workspace".trust_level="trusted"`,
+	codexTrust,
 }
+
+// codexTrust trusts the session workspace. A Codex that signs in itself keeps
+// only this option and uses its built-in OpenAI provider, which reaches the
+// ChatGPT backend or the API to match its sign-in (ADR 0047).
+const codexTrust = `projects."/workspace/session/workspace".trust_level="trusted"`
 
 // MCPAuthority is the name workers use for the gateway's MCP endpoint, which
 // always serves the Sproozi control connection. The home's certificate
@@ -523,19 +569,32 @@ func renderConfig(l Layout, inst Installation, instructions string) home.Config 
 			AgentLimits: agentLimits, HelperLimits: helperLimits, AnchorLimits: anchorLimits,
 			VolumeBytes: 512 << 20, MaxCheckpointBytes: 32 << 20, RetainedBytes: 256 << 20},
 		Allowances:  map[string]session.Allowance{"model.inference": {Units: session.Limit{Bounded: true, Value: 200000}}},
-		MaxDuration: "30m", Model: primary.Model, NativeOptions: nativeOptions(primary.Harness),
+		MaxDuration: "30m", Model: primary.Model, NativeOptions: nativeOptions(primary.Harness, primary.Credential == ""),
 		Gateway: home.GatewayConfig{Listen: fmt.Sprintf("%s:%d", inst.Endpoint.ListenHost, primary.Port), PKIDirectory: l.PKI(),
-			ProviderURL: primary.ProviderURL, ProviderTokenFile: primary.Credential, ProviderCAFile: primary.ProviderCAFile,
-			MCPAuthority: MCPAuthority},
+			ProviderURL: primary.ProviderURL, ProviderTokenFile: primary.Credential, ProviderTokenKind: tokenKind(primary),
+			ProviderCAFile: primary.ProviderCAFile,
+			MCPAuthority:   MCPAuthority},
 	}
 	for _, h := range inst.Harnesses[1:] {
 		c.Harnesses = append(c.Harnesses, home.LocalHarness{Harness: h.Harness, Name: h.Name, GatewayPort: h.Port, Model: h.Model,
-			NativeOptions: nativeOptions(h.Harness), ProviderURL: h.ProviderURL, ProviderTokenFile: h.Credential, ProviderCAFile: h.ProviderCAFile})
+			NativeOptions: nativeOptions(h.Harness, h.Credential == ""), ProviderURL: h.ProviderURL, ProviderTokenFile: h.Credential,
+			ProviderTokenKind: tokenKind(h), ProviderCAFile: h.ProviderCAFile})
 	}
 	return c
 }
 
-func nativeOptions(kind harness.NativeKind) []string {
+// tokenKind marks a stored sign-in token for the gateway.
+func tokenKind(h Harness) string {
+	if h.Credential == "" {
+		return ""
+	}
+	return h.Kind
+}
+
+func nativeOptions(kind harness.NativeKind, signIn bool) []string {
+	if kind == harness.NativeCodex && signIn {
+		return []string{codexTrust}
+	}
 	if kind == harness.NativeCodex {
 		return slices.Clone(codexOptions)
 	}
@@ -594,10 +653,28 @@ func syncCredentialMode(c *home.Config, rendered home.Config) bool {
 			*current, changed = want, true
 		}
 	}
+	// Native options still at the previous mode's defaults switch with it.
+	switchOptions := func(kind harness.NativeKind, current *[]string, signIn bool) {
+		if previous := nativeOptions(kind, !signIn); slices.Equal(*current, previous) && !slices.Equal(previous, nativeOptions(kind, signIn)) {
+			*current, changed = nativeOptions(kind, signIn), true
+		}
+	}
+	if signIn := rendered.Gateway.ProviderTokenFile == ""; (c.Gateway.ProviderTokenFile == "") != signIn {
+		switchOptions(c.Local.Harness, &c.NativeOptions, signIn)
+	}
 	follow(&c.Gateway.ProviderTokenFile, rendered.Gateway.ProviderTokenFile)
+	if c.Gateway.ProviderTokenKind != rendered.Gateway.ProviderTokenKind {
+		c.Gateway.ProviderTokenKind, changed = rendered.Gateway.ProviderTokenKind, true
+	}
 	for _, r := range rendered.Harnesses {
 		if i := slices.IndexFunc(c.Harnesses, func(e home.LocalHarness) bool { return e.Harness == r.Harness }); i >= 0 {
+			if signIn := r.ProviderTokenFile == ""; (c.Harnesses[i].ProviderTokenFile == "") != signIn {
+				switchOptions(r.Harness, &c.Harnesses[i].NativeOptions, signIn)
+			}
 			follow(&c.Harnesses[i].ProviderTokenFile, r.ProviderTokenFile)
+			if c.Harnesses[i].ProviderTokenKind != r.ProviderTokenKind {
+				c.Harnesses[i].ProviderTokenKind, changed = r.ProviderTokenKind, true
+			}
 		}
 	}
 	return changed

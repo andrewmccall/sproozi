@@ -95,7 +95,7 @@ func Doctor(ctx context.Context, l Layout, checkProvider bool) (r Report) {
 			err = fail("credential", err, "sproozi credentials set "+string(h.Harness))
 		}
 		r.add("credential", err, fmt.Sprintf("%s credential for %s is stored privately", provider.Name, h.Harness))
-		if err == nil && checkProvider {
+		if err == nil && checkProvider && h.Kind == "" {
 			r.add("provider", CheckCredential(ctx, h.Harness, h.ProviderURL, h.ProviderCAFile, h.Credential), provider.Name+" accepted the credential")
 		}
 	}

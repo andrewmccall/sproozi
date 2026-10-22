@@ -74,6 +74,9 @@ func validGatewayEnvironment(t *testing.T) {
 				"kubernetes.default.svc",
 				"api.openai.com",
 				"api.anthropic.com",
+				"chatgpt.com",
+				"auth.openai.com",
+				"platform.claude.com",
 				"github.com",
 				"api.github.com",
 				"pypi.org",
@@ -506,15 +509,20 @@ func TestWorkloadModeForwardsEachHarnessSignIn(t *testing.T) {
 			t.Fatalf("%s is not inspected in workload mode", host)
 		}
 	}
-	openAI, anthropic := modelHandlers(cfg, audit.NewLogger(io.Discard), http.DefaultClient, nil, nil)
+	openAI, anthropic, signedIn := modelHandlers(cfg, audit.NewLogger(io.Discard), http.DefaultClient, nil, nil)
 	if openAI == nil || anthropic == nil {
 		t.Fatal("both provider routes are enabled in workload mode")
 	}
 	handlers := map[api.CapabilityKind]http.Handler{api.CapabilityModelInference: openAI}
-	routes := composeDispatcher(cfg, handlers, nil, anthropic)
-	for _, authority := range []string{"api.openai.com:443", "api.anthropic.com:443"} {
+	routes := composeDispatcher(cfg, handlers, nil, anthropic, signedIn)
+	for _, authority := range []string{"api.openai.com:443", "api.anthropic.com:443", "chatgpt.com:443"} {
 		if !routes.Allows(authority) || !routes[authority].ProviderCredential {
 			t.Fatalf("%s does not forward the harness's own credential", authority)
+		}
+	}
+	for _, authority := range []string{"auth.openai.com:443", "platform.claude.com:443"} {
+		if !routes.Allows(authority) || routes[authority].ProviderCredential {
+			t.Fatalf("%s is not a sign-in relay", authority)
 		}
 	}
 	if routes["api.github.com:443"].ProviderCredential {
@@ -527,11 +535,26 @@ func TestWorkloadModeForwardsEachHarnessSignIn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	openAI, anthropic = modelHandlers(cfg, audit.NewLogger(io.Discard), http.DefaultClient, nil, nil)
+	openAI, anthropic, signedIn = modelHandlers(cfg, audit.NewLogger(io.Discard), http.DefaultClient, nil, nil)
 	handlers = map[api.CapabilityKind]http.Handler{api.CapabilityModelInference: openAI}
-	routes = composeDispatcher(cfg, handlers, nil, anthropic)
-	if routes["api.openai.com:443"].ProviderCredential || !routes["api.anthropic.com:443"].ProviderCredential {
+	routes = composeDispatcher(cfg, handlers, nil, anthropic, signedIn)
+	if routes["api.openai.com:443"].ProviderCredential || !routes["api.anthropic.com:443"].ProviderCredential ||
+		routes.Allows("chatgpt.com:443") || !routes.Allows("platform.claude.com:443") {
 		t.Fatal("a mixed gateway forwarded the wrong provider's credential")
+	}
+	// A gateway-held sign-in token is attached for its provider.
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("OPENAI_SIGN_IN_TOKEN", "fixture-sign-in-token")
+	cfg, err = loadStartupConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if auth, _ := providerAuth(cfg, "openai"); auth.Mode() != modelauth.TokenMode {
+		t.Fatalf("openai uses %v", auth)
+	}
+	t.Setenv("OPENAI_API_KEY", "openai-fixture-key")
+	if _, err = loadStartupConfig(); err == nil {
+		t.Fatal("a key and a sign-in token for one provider were accepted")
 	}
 	if mode := openAI.(*modelgateway.Handler).Config.ProviderAuth.Mode(); mode != modelauth.APIKeyMode {
 		t.Fatalf("the OpenAI route with a gateway key uses %s", mode)

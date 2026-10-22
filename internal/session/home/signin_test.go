@@ -1,9 +1,11 @@
 package home
 
 import (
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/modelauth"
@@ -39,17 +41,67 @@ func TestClaudeWithoutAProviderKeySignsInItself(t *testing.T) {
 	}
 }
 
-func TestCodexStillNeedsAProviderKey(t *testing.T) {
+func TestCodexWithoutAProviderKeySignsInItself(t *testing.T) {
 	c := composedConfig(t)
 	c.Gateway.ProviderTokenFile = ""
-	if want := "gateway.providerTokenFile (absolute path; codex can't sign in itself yet)"; !slices.Contains(c.ServeProblems(), want) {
-		t.Fatalf("missing %q in %v", want, c.ServeProblems())
+	if problems := c.ServeProblems(); slices.ContainsFunc(problems, func(p string) bool {
+		return strings.HasPrefix(p, "gateway.providerTokenFile")
+	}) {
+		t.Fatalf("an omitted key file was reported for Codex: %v", problems)
 	}
-	if _, err := provider(c.Gateway, harness.NativeCodex); err == nil || !strings.Contains(err.Error(), "can't sign in itself") {
-		t.Fatalf("codex without a key: %v", err)
+	modelConfig, err := provider(c.Gateway, harness.NativeCodex)
+	if err != nil || modelConfig.ProviderAuth.Mode() != modelauth.WorkloadMode {
+		t.Fatalf("Codex's gateway doesn't forward its sign-in: %v", err)
 	}
-	stacks, err := localConfigs(composedConfig(t))
-	if err != nil || stacks[0].config.SignIn {
-		t.Fatalf("a configured key still mounted a sign-in: %v", err)
+	stacks, err := localConfigs(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, host := range []string{"api.openai.com", "chatgpt.com", "auth.openai.com"} {
+		if !slices.Contains(servingNames(c, stacks).DNS, host) {
+			t.Fatalf("the certificate doesn't cover %s", host)
+		}
+	}
+	keyed, err := localConfigs(composedConfig(t))
+	if err != nil || keyed[0].config.SignIn || slices.Contains(servingNames(composedConfig(t), keyed).DNS, "chatgpt.com") {
+		t.Fatalf("a configured key still signed in or covered the subscription host: %v", err)
+	}
+}
+
+// A sign-in token held by the gateway is attached as a bearer with the
+// provider's own token headers, for any harness of that provider.
+func TestGatewayHeldSignInTokenUsesTheProvidersHeaders(t *testing.T) {
+	c := composedConfig(t)
+	c.Local.Harness, c.Gateway.ProviderTokenKind = harness.NativeClaude, modelauth.TokenMode
+	modelConfig, err := provider(c.Gateway, harness.NativeClaude)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, ok := modelConfig.ProviderAuth.(modelauth.Token)
+	if !ok || token.Headers["Anthropic-Beta"] != "oauth-2025-04-20" {
+		t.Fatalf("auth = %#v", modelConfig.ProviderAuth)
+	}
+	c.Gateway.ProviderTokenKind = "oauth"
+	if !slices.ContainsFunc(c.ServeProblems(), func(p string) bool { return strings.HasPrefix(p, "gateway.providerTokenKind") }) {
+		t.Fatal("an unknown token kind was accepted")
+	}
+}
+
+func TestGatewayHeldChatGPTSignInRefreshesFromItsFile(t *testing.T) {
+	c := composedConfig(t)
+	session := modelauth.Session{Issuer: modelauth.Issuer, Subject: "account", ClientID: "oaiapp_fixture",
+		HostID: "urn:uuid:fixture", AccessToken: "fixture-access", RefreshToken: "fixture-refresh", IDToken: "fixture-id",
+		TokenType: "Bearer", ExpiresIn: 3600, SavedAt: time.Now().UTC(), Scopes: []string{modelauth.PlanScope}}
+	c.Gateway.ProviderTokenFile = filepath.Join(filepath.Dir(c.Gateway.ProviderTokenFile), "chatgpt-session.json")
+	c.Gateway.ProviderTokenKind = modelauth.ChatGPTMode
+	if err := modelauth.WritePrivateJSON(c.Gateway.ProviderTokenFile, session); err != nil {
+		t.Fatal(err)
+	}
+	modelConfig, err := provider(c.Gateway, harness.NativeCodex)
+	if err != nil || modelConfig.ProviderAuth.Mode() != modelauth.ChatGPTMode {
+		t.Fatalf("gateway auth: %v", err)
+	}
+	if slices.ContainsFunc(c.ServeProblems(), func(p string) bool { return strings.HasPrefix(p, "gateway.providerToken") }) {
+		t.Fatalf("problems: %v", c.ServeProblems())
 	}
 }

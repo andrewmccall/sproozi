@@ -77,21 +77,23 @@ func TestOnlyTheAgentMountsItsLoginFile(t *testing.T) {
 	}
 }
 
-func TestPlacementMountsTheLoginOnlyForAHarnessThatCanSignIn(t *testing.T) {
+func TestPlacementMountsEachHarnessesOwnSignInFile(t *testing.T) {
 	c := fixtureConfig()
 	c.SignIn = true
-	if err := c.validate(); err == nil || !strings.Contains(err.Error(), "can't sign in itself") {
-		t.Fatalf("codex sign-in accepted before it is supported: %v", err)
-	}
-	c.Harness = harness.NativeClaude
-	if err := c.validate(); err != nil {
-		t.Fatal(err)
+	for kind, want := range map[harness.NativeKind]string{
+		harness.NativeCodex:  "/workspace/session/codex/auth.json",
+		harness.NativeClaude: "/workspace/session/claude/.credentials.json",
+	} {
+		c.Harness = kind
+		if err := c.validate(); err != nil {
+			t.Fatal(err)
+		}
+		got := (&Placement{config: c}).login()
+		if got == nil || got.Target != want || got.Volume != c.NetworkName+"-"+c.Name+"-login" || !strings.HasSuffix(want, "/"+got.File) {
+			t.Fatalf("%s login mount: %+v", kind, got)
+		}
 	}
 	p := &Placement{config: c}
-	if got := p.login(); got == nil || *got != (LoginMount{Volume: c.NetworkName + "-" + c.Name + "-login", File: ".credentials.json",
-		Target: "/workspace/session/claude/.credentials.json"}) {
-		t.Fatalf("login mount: %+v", got)
-	}
 	if p.spec(placementRecord{}, roleHelper).Login != nil || p.spec(placementRecord{}, roleAgent).Login == nil {
 		t.Fatal("only the agent mounts the login file")
 	}
