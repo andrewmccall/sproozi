@@ -137,6 +137,36 @@ Only requested named MCP capabilities appear; credentials remain in the gateway.
 The [harness reference](harnesses.md) describes formats, trusted launch examples,
 model-provider setup and supported configurations.
 
+## Harness sign-in
+
+Optional `spec.clientConfig.signIn` gives the harness its own provider sign-in,
+for a gateway that forwards it (`MODEL_AUTH_MODE=workload` with no key or
+token for that provider; see
+[ADR 0047](../adr/0047-harnesses-sign-in-to-their-own-model-providers.md)).
+
+| Field | Meaning |
+| --- | --- |
+| `secretName` | A Secret in `sproozi-agents` holding the sign-in. You create it from a credential the provider issued you, such as the output of `claude setup-token`. |
+| `key` | The Secret key. The controller mounts it read-only at `/etc/sproozi/sign-in/<key>` in each workload container. |
+| `env` | Optional. Also sets the sign-in as this environment variable, such as `CLAUDE_CODE_OAUTH_TOKEN`. Variables the controller sets itself, such as `SSL_CERT_FILE` or `HTTPS_PROXY`, are refused. |
+
+With `signIn`, workload containers don't receive the `OPENAI_API_KEY`
+placeholder, which most clients would prefer over their own sign-in. A client
+that needs a writable credential file, such as Codex's `auth.json`, copies the
+mounted file into its home in the runtime's command. The gateway still
+inspects and counts every model call, and refuses the forwarded credential on
+any other inspected route. The agent can read its own sign-in.
+
+```yaml
+spec:
+  clientConfig:
+    harness: claude-code
+    signIn:
+      secretName: claude-sign-in
+      key: token
+      env: CLAUDE_CODE_OAUTH_TOKEN
+```
+
 ## Model selection
 
 Each AgentRuntime chooses its own model; there is no cluster-wide model

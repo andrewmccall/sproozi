@@ -84,14 +84,27 @@ The shared gateway writes newline-delimited, secret-free JSON audit events to
 container stdout. Operators should collect that stream from the shared gateway
 deployment; semantic gateway decisions are not silently discarded.
 
-`MODEL_AUTH_MODE` selects `api_key` (default), `chatgpt` or `workload`. Only the selected
-mode's credential Secret is required. In `workload` mode the gateway enables
-both the OpenAI and Anthropic routes. A provider whose key (`openai-api-key` or
-`anthropic-api-key`) is set keeps using it; a provider without one forwards the
-credential each harness signed in with and refuses a request that has none. It
-holds each run's forwarded credential in memory until the run's maximum
-duration has passed, and refuses that credential on any other inspected route ([ADR 0047](../adr/0047-harnesses-sign-in-to-their-own-model-providers.md)). ChatGPT credentials are created through the
-local consent helper, not by copying a Codex login cache. See
+`MODEL_AUTH_MODE` selects `api_key` (default), `chatgpt` or `workload`. Each
+provider uses one credential, in this order
+([ADR 0047](../adr/0047-harnesses-sign-in-to-their-own-model-providers.md)):
+
+1. Its API key, `openai-api-key` or `anthropic-api-key`.
+2. Its gateway-held sign-in token, `openai-sign-in-token` or
+   `anthropic-sign-in-token` (environment `OPENAI_SIGN_IN_TOKEN`,
+   `ANTHROPIC_SIGN_IN_TOKEN`), such as the output of `claude setup-token`. The
+   gateway sends it as a bearer, adding Anthropic's OAuth beta header. Setting
+   a key and a token for one provider is refused.
+3. In `workload` mode, the harness's own sign-in, which the gateway forwards.
+   That provider's signed-in hosts are then served too: `chatgpt.com` and
+   `auth.openai.com` for OpenAI, `platform.claude.com` for Anthropic. The
+   gateway certificate must cover them. A request with no credential is
+   refused. The gateway holds each run's forwarded credential in memory until
+   the run's maximum duration has passed, and refuses that credential on any
+   other inspected route.
+
+In `chatgpt` mode the OpenAI provider uses the gateway's ChatGPT plan sign-in.
+Only the selected mode's credential Secret is required. ChatGPT credentials are
+created through the local consent helper, not by copying a Codex login cache. See
 [Model provider authentication](../guides/model-provider-auth.md) for the Kind
 setup, token-only subscription budget and single-refresh-owner limitation. In
 ChatGPT mode the gateway reads the ChatGPT credential Secret again at most every 10

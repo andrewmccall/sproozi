@@ -6,8 +6,8 @@ a Sproozi checkout, Go, OpenSSL, Python, kubectl or a Kubernetes cluster.
 
 `sproozi init` sets up everything: the agent image, a private Docker network,
 a certificate authority, your provider key, the configuration and a background
-service. Claude Code can instead sign in to your own Claude account; see
-[Sign in to Claude Code](#sign-in-to-claude-code). It reports ready only after a test container verifies the gateway's
+service. An agent can instead use your own subscription; see
+[Choose how an agent signs in](#choose-how-an-agent-signs-in). It reports ready only after a test container verifies the gateway's
 identity and fails to reach the internet, the provider directly, other gateway
 ports, cloud metadata, direct DNS and IPv6.
 
@@ -20,9 +20,9 @@ the files, defaults, limits and supported platforms.
   containers. Setup has been verified on macOS with Docker Desktop; Docker
   Engine on Linux is supported but has no recorded acceptance run yet. Windows
   needs a [hand-written configuration](windows.md).
-- An OpenAI API key for Codex, or for Claude Code an Anthropic API key or a
-  Claude account to sign in with. Setup stores a key for the gateway; agents
-  never receive it.
+- An OpenAI API key for Codex or an Anthropic API key for Claude Code, or the
+  subscription you want an agent to sign in with. Setup stores a key for the
+  gateway; agents never receive it.
 - The Sproozi CLI from [Homebrew or a release download](install.md).
 
 Sproozi is a preview. Read [what a container does not protect](#what-this-does-not-protect)
@@ -36,9 +36,8 @@ Run setup once. It asks for your API key without echoing it:
 sproozi init
 ```
 
-That sets up Codex. For Claude Code, run `sproozi init --harness claude-code`,
-or add `--sign-in` to use your Claude account instead of a key. The output
-ends with:
+That sets up Codex. For Claude Code, run `sproozi init --harness claude-code`.
+The output ends with:
 
 ```text
 Ready. In a Git repository, start an agent with:
@@ -127,38 +126,48 @@ container cannot use the Anthropic key, or the reverse. If a session is
 running, setup saves the change and says to restart the service once the
 session stops.
 
-## Sign in to Claude Code
+## Choose how an agent signs in
 
-Instead of an API key, Claude Code can sign in to your own Claude account, as
-it does outside Sproozi
-([ADR 0047](../adr/0047-harnesses-sign-in-to-their-own-model-providers.md)):
+Each agent uses one of three ways to authenticate, chosen when you run setup
+for it ([ADR 0047](../adr/0047-harnesses-sign-in-to-their-own-model-providers.md)).
+Every agent offers all three; which your provider's terms allow is your call.
 
-```sh
-sproozi init --harness claude-code --sign-in
-```
+| Option | Setup | Who holds the credential |
+| --- | --- | --- |
+| API key | `sproozi init --harness NAME` (the default) | The gateway; the agent never sees it |
+| Sign-in token | `sproozi init --harness NAME --token --credential-file FILE`, with a token such as the output of `claude setup-token` | The gateway, which sends it as a bearer |
+| ChatGPT plan, held by the gateway | `sproozi init --harness codex --chatgpt`, which opens your browser | The gateway, which refreshes it |
+| The agent's own sign-in | `sproozi init --harness NAME --sign-in` | The agent, in a Docker volume of its own |
 
-In the first session, type `/login`, open the link it shows in your browser,
-and paste the code back into the terminal. Claude Code keeps the sign-in in a
-Docker volume of its own, `sproozi-<installation>-local-claude-login`, which
-every later Claude Code session of this installation mounts. Claude Code
-refreshes the sign-in itself; `/logout` removes it.
+### The agent's own sign-in
 
-The gateway forwards that sign-in to Anthropic and still counts every model
-call against the session's budget. The sign-in never enters a checkpoint, so a
-session moved to Kubernetes signs in again there. Two things differ from a
-gateway-held key:
+With `--sign-in`, sign in inside the agent's first session as you would
+outside Sproozi:
+
+- **Claude Code:** type `/login`, open the link it shows, and paste the code
+  back into the terminal.
+- **Codex:** choose to sign in with ChatGPT using a device code, open the page
+  it shows and enter the code. The browser sign-in that returns to
+  `localhost` can't reach the container.
+
+The agent keeps its sign-in in its own Docker volume,
+`sproozi-<installation>-<placement>-login`, which every later session of that
+agent mounts, and refreshes it itself. Signing out in the agent removes it.
+The gateway forwards the sign-in to the provider, still counts every model
+call against the session's budget, and refuses ChatGPT's own plugins and
+connectors. The sign-in never enters a checkpoint, so a session moved to
+Kubernetes signs in again there. Two things differ from a gateway-held key:
 
 - The agent can read its own sign-in. The gateway refuses any request that
   carries it to another destination it inspects, but it can't see inside an
   encoded or split copy.
-- Claude Code replaces its refresh token each time it refreshes. Two Claude
-  Code sessions running at once share one sign-in, and one may need `/login`
-  again if both refresh at the same moment.
+- Each refresh replaces the refresh token. Two sessions of one agent running
+  at once share one sign-in, and one may need to sign in again if both
+  refresh at the same moment.
 
-To switch an installation that stored an Anthropic key, run
-`sproozi init --harness claude-code --sign-in`; the next Claude Code session
-asks you to `/login`. To switch back, run `sproozi init --harness claude-code`
-with `--credential-file` or at the key prompt.
+To switch an agent, run setup again with the option you want: `--sign-in`,
+`--token`, `--chatgpt`, or a key through `--credential-file` or the prompt.
+Setup without any of them keeps the agent's current choice.
 
 ## Add your instructions and skills
 
@@ -206,8 +215,8 @@ has the details.
 | `registry: pull failed` | Check registry access, or build the image with `--build SOURCE_DIRECTORY` from a release source bundle or checkout. |
 | `image: … does not provide helper contract` | The image belongs to another Sproozi release. Use the release image or rebuild. |
 | `provider: the provider rejected the credential` | Replace the key with `sproozi credentials set`. |
-| `Not logged in · Please run /login` in Claude Code | Type `/login` in the session; see [Sign in to Claude Code](#sign-in-to-claude-code). |
-| `the harness sent no provider credential; sign the harness in to its model provider` | The agent has no sign-in yet. Type `/login` in the session. |
+| `Not logged in · Please run /login` in Claude Code | Type `/login` in the session; see [The agent's own sign-in](#the-agents-own-sign-in). |
+| `the harness sent no provider credential; sign the harness in to its model provider` | The agent has no sign-in yet. Sign in inside the session. |
 | `workspace: the repository has no commits` | Make a first commit, then `sproozi run` again. |
 | `workspace: byte limit exceeded` | The repository's history is larger than one checkpoint. The message gives the size and how to raise `local.maxCheckpointBytes`, up to 64 MiB. |
 | `the Sproozi service is not running, so this machine's sessions can't be listed` | Run `sproozi service start`, or any session command. |

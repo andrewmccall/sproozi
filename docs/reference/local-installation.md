@@ -104,8 +104,8 @@ network, gateway address, limits, allowances and certificate authority.
 
 | Harness | Placement | Provider | Provider credential |
 | --- | --- | --- | --- |
-| `codex` | `local` when first, otherwise `local-codex` | `https://api.openai.com` | Key file `credentials/openai`, which the gateway holds |
-| `claude-code` | `local` when first, otherwise `local-claude` | `https://api.anthropic.com` | Key file `credentials/anthropic`, or with `--sign-in` Claude Code's own sign-in in Docker volume `sproozi-<installation>-<placement>-login` |
+| `codex` | `local` when first, otherwise `local-codex` | `https://api.openai.com` | Key file `credentials/openai`; `--token` stores a sign-in token there; `--chatgpt` keeps a ChatGPT plan sign-in in `credentials/chatgpt-session.json`; `--sign-in` uses Codex's own sign-in in its login volume |
+| `claude-code` | `local` when first, otherwise `local-claude` | `https://api.anthropic.com` | Key file `credentials/anthropic`; `--token` stores a sign-in token there; `--sign-in` uses Claude Code's own sign-in in its login volume |
 
 `--provider-url` and `--provider-ca-file` select a private HTTPS provider
 endpoint for the harness being added. The CA bundle is public, so its source
@@ -113,18 +113,26 @@ may be readable by anyone, but setup refuses one every account can write. The
 gateway reads only the private copy. Codex receives `OPENAI_API_KEY` as a
 placeholder; the gateway replaces it with the stored key on approved requests.
 
-With `--sign-in`, Claude Code signs in itself with `/login`
+`providerTokenKind` says what `providerTokenFile` holds: omitted for an API
+key, `token` for a sign-in token the gateway sends as a bearer (with
+Anthropic's OAuth beta header for Claude Code), or `chatgpt` for a ChatGPT plan
+sign-in the gateway refreshes
 ([ADR 0047](../adr/0047-harnesses-sign-in-to-their-own-model-providers.md)).
-Its configuration has no `providerTokenFile`, and it receives no placeholder
-key. Its sign-in lives in a persistent Docker volume, created on the first
-Claude Code session and labelled `sproozi.com/login=claude-code`. The helper
-image prepares it as an empty mode-0600 file owned by the agent user, and
-every Claude Code agent of the installation mounts that one file at
-`/workspace/session/claude/.credentials.json`; no other container mounts it.
-Removing the installation leaves the volume; `docker volume rm` deletes the
-sign-in. The gateway forwards the sign-in to `api.anthropic.com`, relays
-Claude Code's token refresh on `platform.claude.com` (`POST /v1/oauth/token`
-only), and covers that host in its certificate. Setup again with a key
+
+With `--sign-in` the configuration has no `providerTokenFile`, and the agent
+receives no placeholder key. Its sign-in lives in a persistent Docker volume,
+created on its first session and labelled `sproozi.com/login=<harness>`. The
+helper image prepares it as an empty mode-0600 file owned by the agent user,
+and every session of that agent mounts that one file in its native home
+(`/workspace/session/claude/.credentials.json` or
+`/workspace/session/codex/auth.json`); no other container mounts it. Removing
+the installation leaves the volume; `docker volume rm` deletes the sign-in.
+The gateway forwards the sign-in on every host of the agent's provider
+(`api.anthropic.com`; `api.openai.com` and `chatgpt.com`), relays only its
+sign-in and refresh requests on `platform.claude.com` or `auth.openai.com`,
+and covers those hosts in its certificate. On `chatgpt.com` it relays only
+`codex/models`, `wham/accounts/check` and `wham/settings/user` besides model
+calls. Setup again with a key
 (`--credential-file`, `--credential-stdin` or the prompt) switches the harness
 back to a gateway-held key; setup without either keeps its current choice.
 

@@ -3,7 +3,8 @@
 Sproozi runs existing AI coding agents (Codex, Claude Code, OpenCode, Hermes,
 GitHub Copilot CLI) in
 isolated Docker containers or Kubernetes Pods. A trusted gateway holds provider
-credentials and checks every outside request against policy, and supported
+credentials, or forwards an agent's own sign-in, and checks every outside
+request against policy, and supported
 sessions can move between Docker and Kubernetes. It is a Kubebuilder operator
 plus a CLI and several trusted helper binaries, in one Go module.
 

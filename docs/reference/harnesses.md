@@ -184,6 +184,15 @@ records the transcript edge cases.
 
 ## Model providers
 
+Every harness can authenticate in any of three ways: a gateway-held API key, a
+gateway-held sign-in (a stored token, or OpenAI's ChatGPT plan mode), or its
+own sign-in, which the gateway forwards while still inspecting and counting
+each call. Provider hosts and sign-in requests come from one provider table;
+see [ADR 0047](../adr/0047-harnesses-sign-in-to-their-own-model-providers.md),
+[local setup](../guides/local-sessions.md#choose-how-an-agent-signs-in) and
+[AgentRuntime sign-in](agentruntime.md#harness-sign-in). The rest of this
+section describes gateway-held credentials.
+
 Codex, Hermes and the OpenCode and Copilot examples use the existing OpenAI
 Responses route. Copilot runs in its bring-your-own-key mode
 (`COPILOT_PROVIDER_BASE_URL`, `COPILOT_PROVIDER_WIRE_API=responses`), so it

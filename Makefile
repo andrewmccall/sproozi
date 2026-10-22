@@ -168,8 +168,8 @@ verify-mcp-kind: ## Prove configured MCP with stock Codex in an owned Kind clust
 	KIND_NODE_IMAGE='$(KIND_NODE_IMAGE)' bash hack/verify/mcp-kind.sh
 
 .PHONY: verify-local-onboarding
-verify-local-onboarding: ## Prove sproozi init, both harnesses, profile instructions and renewal on this Docker engine with local providers.
-	python3 hack/verify/local-onboarding.py
+verify-local-onboarding: ## Prove sproozi init, both harnesses, profile instructions and renewal on this Docker engine with local providers; SIGN_IN=1 uses each harness's own sign-in.
+	python3 hack/verify/local-onboarding.py $(if $(SIGN_IN),--sign-in)
 
 .PHONY: verify-kubernetes-release
 verify-kubernetes-release: ## Install the release Kubernetes assets in an owned Kind cluster; prove first check, renewal, rotation and RBAC.

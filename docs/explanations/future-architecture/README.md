@@ -14,6 +14,7 @@ See the [current architecture](../system-architecture.md), [Move a live session 
 | Direction | Question | Main constraint |
 | --- | --- | --- |
 | [DNS egress containment](dns-egress.md) | Sandboxes now resolve no names ([ADR 0040](../../adr/0040-sandboxes-reach-the-gateway-without-dns.md)). Remaining: how should a workload that must resolve other names do so? | Keep external-name queries inside gateway policy, audit and accounting |
+| [WebSocket model traffic](websocket-model-traffic.md) | How should the gateway inspect and count model calls a client makes over a WebSocket? | Per-call reservation, settlement and cut-off inside one connection |
 | [Managed MCP](managed-mcp-servers.md) | How should Sproozi own server lifecycle and upstream restrictions? | Separate server credentials and lifecycle |
 | [Managed harness configuration and trust](managed-harness-configuration-and-trust.md) | How should managed sessions receive protected integrations, approved skills and access diagnostics? | Preserve enforced authority across configuration layers and future access requests |
 | [Simplified local client onboarding](simplified-local-client-onboarding.md) | Largely implemented; see [ADR 0029](../../adr/0029-local-provisioning-and-lifecycle.md) and [ADR 0030](../../adr/0030-kubernetes-release-assets-and-certificates.md). Remaining: writable shared agent state, platform service managers, image migration, Linux and Windows acceptance | Preserve native harness UX and trusted credential boundaries; keep Kubernetes installation operator-owned |
