@@ -311,6 +311,7 @@ def inspect_versions():
         ("codex", "codex"),
         ("claude-code", "claude"),
         ("opencode", "opencode"),
+        ("copilot", "copilot"),
     ]:
         version = output(
             "docker",

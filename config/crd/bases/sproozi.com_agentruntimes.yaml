@@ -52,6 +52,7 @@ spec:
                     - claude-code
                     - opencode
                     - hermes
+                    - copilot
                     type: string
                   nativeSession:
                     description: |-

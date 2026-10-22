@@ -1,6 +1,6 @@
 # Stock CLI harness runtimes
 
-These administrator-owned runtime examples launch Claude Code, OpenCode or Hermes as the
+These administrator-owned runtime examples launch Claude Code, OpenCode, GitHub Copilot CLI or Hermes as the
 `agent` process in a disposable Sproozi Pod. Replace each `example/...@sha256:...`
 image with a reviewed, digest-pinned image containing `/bin/sh`, `cat` and the
 selected stock CLI. The OpenCode image also needs Python 3. Set `SPROOZI_MODEL` to a provider model available to your
@@ -27,6 +27,14 @@ export before exiting. OpenCode's raw exit code can report zero after an
 API error, so the adapter reports failure when terminal session evidence is
 missing or contains a native error. It requires fresh state and does not judge
 task quality.
+
+GitHub Copilot CLI uses OpenAI Responses through `api.openai.com` in its
+bring-your-own-key mode, so it needs no GitHub sign-in. Offline mode stops its
+GitHub sign-in, telemetry and update requests, and the example disables its
+built-in GitHub MCP server and remote control. Its exit status reports the
+outcome. It reads the trusted instructions from
+`$COPILOT_HOME/copilot-instructions.md`, which the example writes. Use only
+model identifiers available from your OpenAI account.
 
 Claude Code uses Anthropic Messages through `api.anthropic.com`, with API-key
 billing configured on the gateway. Claude subscription authentication, Bedrock,

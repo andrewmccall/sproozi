@@ -116,3 +116,4 @@ ADR 0024's statement that releases do not pin clients.
 | [0043](0043-remove-the-event-webhook.md) | The event webhook is removed until a supported sender exists; its design and gotchas move to a future-architecture note. |
 | [0044](0044-the-api-stays-alpha-with-a-written-policy.md) | The CRDs stay `v1alpha1` under a written compatibility policy, with criteria for moving to `v1beta1`; the 1.0 promise is dropped. |
 | [0045](0045-budget-ledgers-are-a-custom-resource.md) | Budget ledgers become `BudgetLedger` resources in `sproozi-system`; write access to them grants no ConfigMap writes, so the `sproozi-budget` namespace is removed. |
+| [0046](0046-github-copilot-cli-harness-in-byok-mode.md) | GitHub Copilot CLI is an AgentRun harness that loads its MCP file natively and calls the OpenAI route in bring-your-own-key mode, offline from GitHub. |

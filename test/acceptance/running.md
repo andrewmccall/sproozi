@@ -39,9 +39,9 @@ checks before cluster creation and cleanup after a setup failure. Stubs replace 
 | `make test-e2e` | The full stack works in an owned two-node Kind cluster with enforcing CNI, using the pinned clients and Hermes digest. See [Harnesses and Hermes in Kind](#harnesses-and-hermes-in-kind). | E2E | Docker, Kind, kubectl, Calico from `hack/verify/fetch-calico.sh` |
 | `make test-e2e-existing` | The same e2e suite passes against a Kind cluster you created (`KIND_CLUSTER`), then removes the controller, CRDs and test namespaces. `make test-e2e` skips that teardown because it deletes the whole cluster. | No | An existing dedicated Kind cluster |
 | `make verify-mcp-client` | Generated run-local MCP configuration loads in installed stock Codex. No model request. | No | Codex CLI |
-| `make verify-harness-clients` | Generated native MCP configuration loads in installed Codex, Claude Code and OpenCode. No model request. | No | All three CLIs |
+| `make verify-harness-clients` | Generated native MCP configuration loads in installed Codex, Claude Code, OpenCode and Copilot. No model request. | No | All four CLIs |
 | `make verify-native-session` | Installed stock Codex resumes through production checkpoint capture and restore against a local provider. | No | Codex CLI |
-| `make verify-harness-process` | Installed Claude Code and OpenCode complete model and tool loops through the inspected-TLS gateway with local providers, and call `sproozi` `diagnose` to explain a request the gateway refused. | No | Claude Code, OpenCode |
+| `make verify-harness-process` | Installed Claude Code, OpenCode and Copilot complete model and tool loops through the inspected-TLS gateway with local providers, and call `sproozi` `diagnose` to explain a request the gateway refused. | No | Claude Code, OpenCode, Copilot |
 | `make verify-mcp-kind` | Configured MCP providers work with stock Codex in an owned Kind cluster, including denials, budgets and revocation. Real model requests. | No | See [Configured MCP in Kind](#configured-mcp-in-kind) |
 | `make verify-local-onboarding` | On this computer's Docker engine, `init` provisions Codex and adds Claude Code, `doctor` passes, one stock terminal turn per harness completes through `attach`, both stops bind native UUIDs, each harness's profile instructions reach its provider, a renewed certificate reaches the running gateway, and a configured kubeconfig receives no calls. Deterministic local providers. See [Local onboarding](#local-onboarding). | No | Docker with Buildx, Go, Python 3, OpenSSL |
 | `make verify-kubernetes-release` | In an owned Kind cluster with enforcing CNI, the rendered release assets install as documented; the provider-free first check passes with permitted, denied and blocked paths; renewal reaches the running gateway; a CA rotation passes through new immutable trust objects; and the certificate controller lacks other rights. See [Kubernetes release assets](#kubernetes-release-assets). | No | Docker with Buildx, Kind, kubectl, Python 3 |
@@ -113,7 +113,7 @@ proof under `.local`; keep the skill and its feature map current with
 ## Harnesses and Hermes in Kind
 
 Install Docker, Python 3, Go 1.26.10, kubectl and Kind. Docker must be running;
-the cluster and four stock clients need several GiB of memory and disk. From
+the cluster and five stock clients need several GiB of memory and disk. From
 the repository root:
 
 ```sh
@@ -128,7 +128,7 @@ The command owns a dedicated two-node Kind cluster, builds and loads the release
 image, fixture providers and stock clients, and launches the complete
 controller, TLS gateway, task service and persistent Hermes coordinator. Native
 API chat and a native scheduled job delegate real AgentRuns. The suite checks
-all four stock worker loops, denials, budgets, cancellation, deadlines, UID-bound
+all five stock worker loops, denials, budgets, cancellation, deadlines, UID-bound
 replay, result retention, PVC restart and direct-network isolation. On the same
 stack it applies the shipped remote executor example
 (`examples/portable-workflows/kubernetes/`) with test-only substitutions: the

@@ -80,7 +80,7 @@ jobs:
           set -euo pipefail
           docker build --pull --no-cache -t sproozi-canary/clients:latest \
             -f hack/verify/orchestration-kind/clients.Dockerfile .
-          for binary in codex claude opencode; do
+          for binary in codex claude opencode copilot; do
             docker run --rm --network none --env HOME=/tmp \
               sproozi-canary/clients:latest "$binary" --version
           done

@@ -215,7 +215,7 @@ type RuntimeClientConfig struct {
 	// Harness selects supported run-local MCP configuration rendering. Empty
 	// leaves delivery to the administrator's own client launch command.
 	// +optional
-	// +kubebuilder:validation:Enum=codex;claude-code;opencode;hermes
+	// +kubebuilder:validation:Enum=codex;claude-code;opencode;hermes;copilot
 	Harness string `json:"harness,omitempty"`
 
 	// NativeSession supplies administrator-owned launch settings for managed

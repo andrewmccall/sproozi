@@ -1,6 +1,7 @@
 # sproozi - AI Agent Guide
 
-Sproozi runs existing AI coding agents (Codex, Claude Code, OpenCode, Hermes) in
+Sproozi runs existing AI coding agents (Codex, Claude Code, OpenCode, Hermes,
+GitHub Copilot CLI) in
 isolated Docker containers or Kubernetes Pods. A trusted gateway holds provider
 credentials and checks every outside request against policy, and supported
 sessions can move between Docker and Kubernetes. It is a Kubebuilder operator

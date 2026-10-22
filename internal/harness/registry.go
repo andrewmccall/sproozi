@@ -99,6 +99,10 @@ var registry = []Harness{
 		MCP: MCPFormat{File: "opencode-mcp.json", Field: "mcp", Entry: func(name, address string) (string, any) {
 			return name, map[string]any{connectionType: "remote", connectionURL: address, "enabled": true, "oauth": false}
 		}}},
+	{Selector: "copilot", RequestFiles: true, Loader: NativeMCP,
+		MCP: MCPFormat{File: "copilot-mcp.json", Field: mcpServersField, Entry: func(name, address string) (string, any) {
+			return name, map[string]any{connectionType: httpTransport, connectionURL: address, "tools": []string{"*"}}
+		}}},
 	{Selector: "hermes", RequestFiles: true, Loader: NativeMCP, LaunchFiles: launchFilesNamed("hermes-launch.py"),
 		MCP: MCPFormat{File: "hermes-mcp.json", Field: "mcp_servers", Entry: func(name, address string) (string, any) {
 			// Native toolset aliases must not collide with built-ins such as all or terminal.

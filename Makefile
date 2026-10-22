@@ -152,7 +152,7 @@ verify-mcp-client: ## Load generated MCP config in the installed stock Codex CLI
 	python3 hack/verify/mcp-client.py
 
 .PHONY: verify-harness-clients
-verify-harness-clients: ## Load generated MCP config in installed Codex, Claude Code and OpenCode; no model request.
+verify-harness-clients: ## Load generated MCP config in installed Codex, Claude Code, OpenCode and Copilot; no model request.
 	python3 hack/verify/harness-clients.py
 
 .PHONY: verify-native-session
@@ -160,7 +160,7 @@ verify-native-session: ## Resume installed stock Codex across checkpoint capture
 	python3 hack/verify/native-session.py --state rollout
 
 .PHONY: verify-harness-process
-verify-harness-process: ## Run installed Claude Code and OpenCode through the TLS gateway with local providers, including diagnose.
+verify-harness-process: ## Run installed Claude Code, OpenCode and Copilot through the TLS gateway with local providers, including diagnose.
 	go run ./hack/verify/harness-process --output .local/verification/harness-process.json
 
 .PHONY: verify-mcp-kind

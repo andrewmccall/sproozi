@@ -8,8 +8,8 @@ examples and a reading path, see [core concepts](docs/explanations/core-concepts
 
 ### Harness
 
-The existing agent program that Sproozi launches: Codex, Claude Code, OpenCode
-or Hermes. The harness runs the conversation and its tool calls; Sproozi
+The existing agent program that Sproozi launches: Codex, Claude Code, OpenCode,
+Hermes or GitHub Copilot CLI. The harness runs the conversation and its tool calls; Sproozi
 supplies the environment and access. Selected by `clientConfig.harness`.
 Also seen as: client, native client.
 

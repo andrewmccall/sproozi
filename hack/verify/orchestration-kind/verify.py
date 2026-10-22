@@ -614,7 +614,7 @@ request=$(python3 -c 'import json; d=json.load(open("/etc/sproozi/contract/input
     apply(
         runtime("kind-codex", images["clients"]["image"], "codex", codex, "gpt-6.1-sol")
     )
-    for harness in ["claude-code", "opencode", "hermes"]:
+    for harness in ["claude-code", "opencode", "copilot", "hermes"]:
         path = ROOT / "examples/harnesses" / ("agentruntime-" + harness + ".yaml")
         data = json.loads(
             k("create", "--dry-run=client", "-f", str(path), "-o", "json")
@@ -640,7 +640,7 @@ request=$(python3 -c 'import json; d=json.load(open("/etc/sproozi/contract/input
         # deadline still bounds an exhausted-budget client and cleans its sandbox.
         policy("kind-opencode-budget", 1, "20s"),
     )
-    for harness in ["codex", "claude-code", "opencode", "hermes"]:
+    for harness in ["codex", "claude-code", "opencode", "copilot", "hermes"]:
         for suffix, pol in [
             ("", "kind-workers"),
             ("-budget", "kind-budget"),
@@ -828,7 +828,7 @@ def ref(view):
 
 
 def stock_clients():
-    for harness in ["codex", "claude-code", "opencode", "hermes"]:
+    for harness in ["codex", "claude-code", "opencode", "copilot", "hermes"]:
         name = "kind-" + harness + "-success"
         agentrun(
             name,

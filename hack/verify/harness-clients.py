@@ -25,6 +25,7 @@ def isolated_env(directory):
            "XDG_CONFIG_HOME": str(home / "config"), "XDG_DATA_HOME": str(home / "data"),
            "XDG_CACHE_HOME": str(home / "cache"), "XDG_STATE_HOME": str(home / "state"),
            "CODEX_HOME": str(home / ".codex"), "CLAUDE_CONFIG_DIR": str(home / ".claude"),
+           "COPILOT_HOME": str(home / ".copilot"), "COPILOT_OFFLINE": "true", "COPILOT_AUTO_UPDATE": "false",
            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
            "OPENCODE_DISABLE_MODELS_FETCH": "true", "OPENCODE_DISABLE_AUTOUPDATE": "true",
            "OPENCODE_DISABLE_PROJECT_CONFIG": "true", "OPENCODE_DISABLE_CLAUDE_CODE": "true",
@@ -34,16 +35,16 @@ def isolated_env(directory):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--harness", action="append", choices=("codex", "claude-code", "opencode"))
+    parser.add_argument("--harness", action="append", choices=("codex", "claude-code", "opencode", "copilot"))
     args = parser.parse_args()
-    for selected in args.harness or ["codex", "claude-code", "opencode"]:
+    for selected in args.harness or ["codex", "claude-code", "opencode", "copilot"]:
         binary = "claude" if selected == "claude-code" else selected
         if not shutil.which(binary):
             raise SystemExit(f"Install stock {binary} before running this gate")
         config = subprocess.check_output(["go", "run", "./hack/verify/mcp-config", "--harness", selected], cwd=ROOT, text=True)
         with tempfile.TemporaryDirectory(prefix="sproozi-harness-") as directory:
             env = isolated_env(directory)
-            version = execute([binary, "--version"], env, directory).strip()
+            version = execute([binary, "--version"], env, directory).strip().splitlines()[0]
             if selected == "codex":
                 Path(env["CODEX_HOME"]).mkdir()
                 Path(env["CODEX_HOME"], "config.toml").write_text(config)
@@ -57,6 +58,13 @@ def main():
                     value = execute([binary, "mcp", "get", name], env, directory)
                     assert f"https://sproozi-gateway.sproozi-system.svc:8443/mcp/{name}" in value, value
                     assert "Type: http" in value, value
+            elif selected == "copilot":
+                Path(env["COPILOT_HOME"]).mkdir()
+                Path(env["COPILOT_HOME"], "mcp-config.json").write_text(config)
+                for name in ("docs", "inventory", "sproozi"):
+                    value = json.loads(execute([binary, "mcp", "get", name, "--json"], env, directory))[name]
+                    assert value["url"] == f"https://sproozi-gateway.sproozi-system.svc:8443/mcp/{name}", value
+                    assert value["type"] == "http" and value["enabled"] is True, value
             else:
                 path = Path(directory, "approved.json")
                 path.write_text(config)
