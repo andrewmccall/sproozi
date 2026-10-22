@@ -58,7 +58,7 @@ def verify(directory, version, native):
         output = subprocess.check_output([binary, "--version"], text=True)
         if not output.startswith("sproozi " + version + " (commit "):
             raise ValueError(f"wrong executable version: {output}")
-        if native_image and "native image " + native_image + "\n" not in output:
+        if native_image and "agent image " + native_image + "\n" not in output:
             raise ValueError(f"executable does not embed the published native image: {output}")
         output = subprocess.check_output([binary, "--help"], text=True)
         if "Usage: sproozi COMMAND" not in output:
