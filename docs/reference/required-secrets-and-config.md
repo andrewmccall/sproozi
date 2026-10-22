@@ -1,8 +1,10 @@
 # Required secrets and config
 
 This page lists credentials and configuration for the Kubernetes deployment.
-Provider credentials stay in trusted cluster objects. Sandbox Pods receive client
-configuration, public trust material and a gateway identity token for the run.
+Gateway-held provider credentials stay in trusted cluster objects. Sandbox Pods
+receive client configuration, public trust material and a gateway identity
+token for the run, and, only when their AgentRuntime names one in
+`clientConfig.signIn`, the harness's own sign-in.
 [Install on Kubernetes](../guides/install-kubernetes.md) installs a release; step 7 of
 [Install from a checkout](../guides/install-from-checkout.md#7-run-a-model-on-this-cluster)
 adds the provider and GitHub credentials.
@@ -11,7 +13,8 @@ adds the provider and GitHub credentials.
 
 | Name | Namespace | Kind | Used by | Required keys |
 | --- | --- | --- | --- | --- |
-| `model-gateway-credentials` | `sproozi-system` | `Secret` | model module in API-key mode | `openai-api-key`, `anthropic-api-key` or both, each a single line |
+| `model-gateway-credentials` | `sproozi-system` | `Secret` | model module in API-key or workload mode | Any of `openai-api-key`, `anthropic-api-key`, `openai-sign-in-token`, `anthropic-sign-in-token`, each a single line; at most one per provider. Optional in workload mode |
+| Harness sign-in Secret | `sproozi-agents` | `Secret` | sandboxes of an AgentRuntime with `clientConfig.signIn` | The key that runtime names, holding a credential the provider issued you |
 | `model-gateway-chatgpt` | `sproozi-system` | `Secret` | model module in ChatGPT mode | `session.json` |
 | `model-gateway-auth` | `sproozi-system` | `ConfigMap` | administrator auth selection (optional; default API-key mode) | `mode` |
 | `sproozi-model-gateway-pricing` | `sproozi-system` | `ConfigMap` | shared gateway model module | `pricing.json` |

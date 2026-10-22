@@ -33,7 +33,7 @@ usage, a short description and one line per flag. An unknown help topic fails.
 | Setup | `init` | Set up this machine: image, network, certificates, provider key and service. Run again to add an agent with `--harness` or to repair. |
 | Setup | `doctor` | Check the installation without changing it. |
 | Setup | `service status\|start\|stop` | Show, start or stop the background service. |
-| Setup | `credentials set AGENT\|PROVIDER`, `credentials list` | Store or replace a provider key (`codex` or `openai`, `claude-code` or `anthropic`), or list which keys are stored. Keys are never printed. |
+| Setup | `credentials set AGENT\|PROVIDER`, `credentials list` | Store or replace a gateway-held provider key (`codex` or `openai`, `claude-code` or `anthropic`), or list which keys are stored. An agent set up with `--sign-in` has no key to set. Keys are never printed. |
 | Setup | `images status\|prepare` | Show the installed and release agent images, or pull or build one. |
 | Setup | `certificates status\|renew\|rotate-ca\|replace-ca` | Show or maintain this machine's certificate authority. |
 | Setup | `version`, `-v`, `--version` | Show the version and the release's agent image. |

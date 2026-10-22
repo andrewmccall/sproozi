@@ -197,7 +197,7 @@ Codex, Hermes and the OpenCode and Copilot examples use the existing OpenAI
 Responses route. Copilot runs in its bring-your-own-key mode
 (`COPILOT_PROVIDER_BASE_URL`, `COPILOT_PROVIDER_WIRE_API=responses`), so it
 needs no GitHub account or Copilot subscription and never calls GitHub's
-Copilot model service; that service is outside this contract.
+Copilot model service. Copilot's own GitHub sign-in isn't routed yet.
 OpenCode uses a configured bundled OpenAI SDK provider rather than an external
 execution server. OpenAI API-key or ChatGPT authentication remains administrator
 configuration. ChatGPT compatibility is established for the recorded Codex
@@ -211,18 +211,20 @@ code `streaming_not_supported`). ChatGPT mode accepts only `GET /v1/models` and
 Claude Code uses Anthropic's native Messages API through the reserved
 `api.anthropic.com:443` route and `model.inference` grant. Set `ANTHROPIC_API_KEY`
 on the trusted gateway through the optional `anthropic-api-key` key of the
-`model-gateway-credentials` Secret. No key enters the sandbox; the example
-supplies only a harmless placeholder. `MODEL_AUTH_MODE` still selects OpenAI
-authentication. In API-key mode, at least one OpenAI or Anthropic key must be
-configured when model inference is enabled. Anthropic-only operation does not
-require an OpenAI key. Claude subscription, Bedrock, Vertex and remote-control
-integration are outside this contract.
+`model-gateway-credentials` Secret, or a gateway-held sign-in token through
+`anthropic-sign-in-token`. No key enters the sandbox; the example supplies only
+a harmless placeholder. A Claude subscription works either as that token or as
+Claude Code's own sign-in, described above. In API-key mode, at least one
+OpenAI or Anthropic key or token must be configured when model inference is
+enabled. Anthropic-only operation does not require an OpenAI key. Bedrock,
+Vertex and remote-control integration are outside this contract.
 
 The gateway certificate must cover `api.anthropic.com` when its handler is
 active. The sandbox trust bundle must include the inspection CA. A disabled
 Anthropic authority stays reserved, so generic destination egress cannot supply
-weaker access to the provider. Workload provider credentials and account headers
-do not select the account; the gateway replaces them and refuses redirects.
+weaker access to the provider. With a gateway-held credential, workload provider
+credentials and account headers don't select the account: the gateway replaces
+them and refuses redirects.
 
 Messages supports `POST /v1/messages`, optionally with `?beta=true`, JSON and
 SSE. The gateway streams SSE to the client as it arrives and settles the call

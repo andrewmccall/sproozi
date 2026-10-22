@@ -77,6 +77,7 @@ route; OpenCode
 uses the existing OpenAI route with completion normalization for its native
 session result. The [harness reference](harnesses.md) describes launch settings,
 provider configuration and managed-session compatibility. Anthropic Messages streaming is relayed as it
-arrives and settled from its reported usage, like the OpenAI Responses path. Bedrock, Vertex, Claude
-subscription auth, and Claude Code/OpenCode persistent services and managed
-loops are outside the supported configuration.
+arrives and settled from its reported usage, like the OpenAI Responses path. Claude and ChatGPT
+subscriptions work as a gateway-held sign-in or the harness's own sign-in
+([ADR 0047](../adr/0047-harnesses-sign-in-to-their-own-model-providers.md)). Bedrock, Vertex, and Claude Code/OpenCode
+persistent services and managed loops are outside the supported configuration.

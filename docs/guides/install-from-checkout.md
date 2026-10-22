@@ -606,9 +606,11 @@ kubectl create secret generic capability-proxy-github-app -n sproozi-system \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
 
-Then add the model credential for one of the two modes. The
+Then add the model credential for one of the two modes below. The
 `model-gateway-auth` ConfigMap selects the mode, and the gateway doesn't fall
-back from one to the other.
+back from one to the other. A gateway-held sign-in token, or harnesses that
+sign in themselves (`MODEL_AUTH_MODE=workload`), are configured the same way;
+see [model provider authentication](model-provider-auth.md).
 
 **With an OpenAI API key.** Type the key at the hidden prompt rather than
 pasting it into a command:

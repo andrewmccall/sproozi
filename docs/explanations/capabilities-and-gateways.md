@@ -3,7 +3,10 @@
 A run requests [capabilities](../../GLOSSARY.md#capability). Policy decides
 which requests are allowed and sets their limits. The
 [gateway](../../GLOSSARY.md#gateway) checks each service operation against the
-run and current policy. Provider credentials stay in the gateway.
+run and current policy. Service credentials stay in the gateway. A model
+provider credential is either held by the gateway or the harness's own
+sign-in, which the gateway forwards only to that provider while still checking
+and counting each call ([ADR 0047](../adr/0047-harnesses-sign-in-to-their-own-model-providers.md)).
 
 Read [core concepts](core-concepts.md) for an introduction to runs, templates,
 runtimes and policies. This page explains how their permission checks combine.
@@ -82,8 +85,8 @@ explicitly allow its tools. The gateway checks arguments against the discovered
 input schema and any additional policy restrictions.
 
 Each incoming request uses a private upstream session. Attempted tool calls
-count against the Run UID and named capability budget. Provider credentials stay
-in the gateway. Native Kubernetes MCP instead uses `kubernetes.read` and the
+count against the Run UID and named capability budget. MCP provider credentials
+stay in the gateway. Native Kubernetes MCP instead uses `kubernetes.read` and the
 same Semantic handler as Kubernetes REST reads.
 
 See [configured MCP](../reference/configured-mcp.md), [native Kubernetes

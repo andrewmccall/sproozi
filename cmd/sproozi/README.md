@@ -180,7 +180,11 @@ The listener can bind the exact IPv4, a loopback address the engine forwards or
 `0.0.0.0`, on the configured gateway port.
 Workers receive only the CA certificates, a fresh per-visit proxy token and
 a placeholder provider key. The provider key is read by the trusted gateway
-from `providerTokenFile`. The service refuses to start while that file still holds
+from `providerTokenFile`; `providerTokenKind` marks a sign-in token (`token`)
+or ChatGPT plan sign-in (`chatgpt`) there instead. With no `providerTokenFile`,
+the harness signs in itself: the worker gets no placeholder and mounts its
+login volume, and the gateway forwards its sign-in
+([ADR 0047](../../docs/adr/0047-harnesses-sign-in-to-their-own-model-providers.md)). The service refuses to start while that file still holds
 a setup placeholder such as `REPLACE_WITH_PROVIDER_API_KEY`.
 `providerURL` accepts HTTPS; HTTP is permitted only for a literal loopback IP used
 by a controlled, credential-free verification fixture. Upstream redirects and

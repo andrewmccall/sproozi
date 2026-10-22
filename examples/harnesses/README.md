@@ -36,14 +36,19 @@ outcome. It reads the trusted instructions from
 `$COPILOT_HOME/copilot-instructions.md`, which the example writes. Use only
 model identifiers available from your OpenAI account.
 
-Claude Code uses Anthropic Messages through `api.anthropic.com`, with API-key
-billing configured on the gateway. Claude subscription authentication, Bedrock,
-Vertex, managed loops and remote-control sessions are outside these examples.
+Claude Code uses Anthropic Messages through `api.anthropic.com`, with an API key
+or sign-in token configured on the gateway. Bedrock, Vertex, managed loops and
+remote-control sessions are outside these examples.
 `--setting-sources ''` and `--strict-mcp-config` restrict settings and MCP loading;
 hooks and slash-command discovery are disabled. No existing sessions are mounted.
 
-These CLIs receive harmless model-key placeholders. Provider keys belong only to
-the gateway. The gateway certificate must cover the selected provider authority,
+These CLIs receive harmless model-key placeholders, and the gateway holds the
+provider credential. To have a harness use its own sign-in instead, such as a
+Claude subscription token from `claude setup-token`, add
+[`clientConfig.signIn`](../../docs/reference/agentruntime.md#harness-sign-in) to
+its runtime and set `MODEL_AUTH_MODE=workload` on the gateway; the placeholder
+key is then left out. For Claude Code, name the Secret key with
+`env: CLAUDE_CODE_OAUTH_TOKEN`. The gateway certificate must cover the selected provider authority,
 and the mounted trust bundle must contain its inspection CA. Direct network
 access remains subject to the existing enforcing CNI requirement.
 

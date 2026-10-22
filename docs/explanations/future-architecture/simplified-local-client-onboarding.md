@@ -502,7 +502,7 @@ Proposed UX targets are at most two product commands after installation for a fi
 | Which component manages Kubernetes certificates? | A small replaceable trusted controller; a side helper is acceptable if it proves the same single-writer/RBAC contract. | Kubernetes/security leads, before M5. |
 | Are the one-year CA and 30-day leaf suitable? | Use them as initial configurable defaults and validate overlap against all admitted lifetimes. | Security lead, M4 design review. |
 | Should native Windows automatic setup be in the first supported matrix? | Gate on actual Linux-container networking, ACL, service and PTY acceptance; retain existing binary availability independently. | Platform/release leads, before M6. |
-| How broad is local subscription authentication? | API keys first for both harnesses; preserve existing documented gateway-owned OpenAI flows where proven. Never import personal native login stores. | Gateway lead, M0. |
+| How broad is local subscription authentication? | Resolved by [ADR 0047](../../adr/0047-harnesses-sign-in-to-their-own-model-providers.md): every harness offers a gateway-held key, a gateway-held sign-in or its own sign-in. Personal native login stores are still never imported. | Gateway lead, M0. |
 | What local credential protection ships beyond file permissions? | Existing private file storage initially; OS keychain support may follow without changing references. | Security/platform leads, M0. |
 | Does the first public preview include Kubernetes automated renewal? | Prefer yes; if deferred, label it operator-managed and do not claim M5 acceptance. | Release lead, before scope announcement. |
 
