@@ -456,7 +456,7 @@ func TestChatGPTSignInIsReusedForAnOpenAIHarness(t *testing.T) {
 	session := modelauth.Session{Issuer: modelauth.Issuer, Subject: "account", ClientID: "oaiapp_fixture",
 		HostID: "urn:uuid:fixture", AccessToken: "fixture-access", RefreshToken: "fixture-refresh", IDToken: "fixture-id",
 		TokenType: "Bearer", ExpiresIn: 3600, SavedAt: time.Now().UTC(), Scopes: []string{modelauth.PlanScope}}
-	if err := modelauth.WritePrivateJSON(filepath.Join(l.Credentials(), "chatgpt-session.json"), session); err != nil {
+	if err := modelauth.NewFileSessionStore(filepath.Join(l.Credentials(), "chatgpt-session.json")).Save(session); err != nil {
 		t.Fatal(err)
 	}
 	i := &installer{l: l, inst: inst, o: Options{Harness: harness.NativeCodex, ChatGPT: true, Progress: io.Discard}, selected: &inst.Harnesses[0]}

@@ -94,7 +94,7 @@ func TestGatewayHeldChatGPTSignInRefreshesFromItsFile(t *testing.T) {
 		TokenType: "Bearer", ExpiresIn: 3600, SavedAt: time.Now().UTC(), Scopes: []string{modelauth.PlanScope}}
 	c.Gateway.ProviderTokenFile = filepath.Join(filepath.Dir(c.Gateway.ProviderTokenFile), "chatgpt-session.json")
 	c.Gateway.ProviderTokenKind = modelauth.ChatGPTMode
-	if err := modelauth.WritePrivateJSON(c.Gateway.ProviderTokenFile, session); err != nil {
+	if err := modelauth.NewFileSessionStore(c.Gateway.ProviderTokenFile).Save(session); err != nil {
 		t.Fatal(err)
 	}
 	modelConfig, err := provider(c.Gateway, harness.NativeCodex)

@@ -345,7 +345,7 @@ func (i *installer) signInChatGPT(ctx context.Context, provider Provider) error 
 			"leave out --chatgpt")
 	}
 	stored := filepath.Join(i.l.Credentials(), "chatgpt-session.json")
-	if _, err := modelauth.LoadFile(stored); err != nil {
+	if _, err := modelauth.NewFileSessionStore(stored).Load(ctx); err != nil {
 		if i.o.OpenBrowser == nil {
 			return fail("credential", errors.New("a ChatGPT sign-in needs a browser on this machine"), "run sproozi init in a terminal")
 		}

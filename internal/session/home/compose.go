@@ -509,11 +509,11 @@ func provider(c GatewayConfig, kind harness.NativeKind) (model.HandlerConfig, er
 func providerAuth(result model.HandlerConfig, c GatewayConfig, kind harness.NativeKind) (model.HandlerConfig, error) {
 	if c.ProviderTokenKind == modelauth.ChatGPTMode {
 		// The gateway keeps a ChatGPT plan sign-in and refreshes it itself.
-		if _, err := modelauth.LoadFile(c.ProviderTokenFile); err != nil {
+		store := modelauth.NewFileSessionStore(c.ProviderTokenFile)
+		if _, err := store.Load(context.Background()); err != nil {
 			return result, fmt.Errorf("home: gateway.providerTokenFile %s: %w; run sproozi init --chatgpt", c.ProviderTokenFile, err)
 		}
-		result.ProviderAuth = modelauth.NewChatGPT(modelauth.NewFileSessionStore(c.ProviderTokenFile),
-			&http.Client{Timeout: 30 * time.Second})
+		result.ProviderAuth = modelauth.NewChatGPT(store, &http.Client{Timeout: 30 * time.Second})
 		return result, nil
 	}
 	if c.ProviderTokenFile == "" {

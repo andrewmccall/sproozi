@@ -342,12 +342,16 @@ func TestTokenInstallsTheGatewaySignInWithProviderHeaders(t *testing.T) {
 }
 
 func TestFileSessionStoreReplacesOnlyTheSessionItRead(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "chatgpt-session.json")
-	before := fixtureSession()
-	if err := WritePrivateJSON(path, before); err != nil {
+	dir := filepath.Join(t.TempDir(), "private")
+	if err := os.Mkdir(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	path := filepath.Join(dir, "chatgpt-session.json")
+	before := fixtureSession()
 	store := NewFileSessionStore(path)
+	if err := store.Save(before); err != nil {
+		t.Fatal(err)
+	}
 	after := before
 	after.AccessToken, after.RefreshToken = "rotated-access", "rotated-refresh"
 	if err := store.Replace(t.Context(), before, after); err != nil {
