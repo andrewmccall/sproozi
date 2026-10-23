@@ -149,6 +149,42 @@ func TestGatewayProxyTokenModes(t *testing.T) {
 	}
 }
 
+// Only a route that forwards the harness's own provider credential keeps the
+// client's Authorization header (ADR 0047); proxy credentials and cookies
+// never pass.
+func TestOnlyAProviderCredentialRouteKeepsAuthorization(t *testing.T) {
+	for _, forwards := range []bool{false, true} {
+		var authorization, proxyAuthorization, cookie string
+		g, err := New(Config{Certificates: map[string]tls.Certificate{testServiceHost: testCertificate(t)},
+			Authenticate: func(context.Context, string) (*gateway.ExecutionGrant, error) { return testIdentity(), nil },
+			Revalidate:   func(context.Context, *gateway.ExecutionGrant) error { return nil },
+			Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				authorization, proxyAuthorization, cookie = r.Header.Get("Authorization"), r.Header.Get(proxyAuthorizationHeader), r.Header.Get("Cookie")
+			}),
+			AllowedAuthority:   onlyTestService,
+			ProviderCredential: func(authority, _ string) bool { return forwards && authority == testServiceAuthority },
+			RevocationInterval: 20 * time.Millisecond, SessionLifetime: time.Second})
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := startProxySession(t, g, testProxyAuthorization)
+		if _, err = io.WriteString(s.client, "GET / HTTP/1.1\r\nHost: service.test\r\nAuthorization: Bearer harness-own\r\nProxy-Authorization: Basic leaked\r\nCookie: session=leaked\r\nConnection: close\r\n\r\n"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = http.ReadResponse(bufio.NewReader(s.client), nil); err != nil {
+			t.Fatal(err)
+		}
+		_ = s.client.Close()
+		want := ""
+		if forwards {
+			want = "Bearer harness-own"
+		}
+		if authorization != want || proxyAuthorization != "" || cookie != "" {
+			t.Fatalf("forwards=%v: authorization=%q proxy=%q cookie=%q", forwards, authorization, proxyAuthorization, cookie)
+		}
+	}
+}
+
 func TestStandardClientUsesTLSAuthenticatedProxyAndInspectedTLS(t *testing.T) {
 	for _, host := range []string{testServiceHost, "service.test:8443"} {
 		t.Run(host, func(t *testing.T) {

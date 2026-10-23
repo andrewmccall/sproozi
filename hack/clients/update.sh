@@ -9,7 +9,7 @@ set -euo pipefail
 #   hack/clients/update.sh --print     # print the current pins only
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 selector="${1:-latest}"
-for entry in codex:@openai/codex claude-code:@anthropic-ai/claude-code opencode:opencode-ai; do
+for entry in codex:@openai/codex claude-code:@anthropic-ai/claude-code opencode:opencode-ai copilot:@github/copilot; do
   dir="${entry%%:*}" package="${entry#*:}"
   if [[ "$selector" != --print ]]; then
     npm install --prefix "$root/$dir" --package-lock-only --ignore-scripts \

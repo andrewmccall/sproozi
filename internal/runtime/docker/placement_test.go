@@ -105,6 +105,8 @@ func (f *fakeDocker) run(ctx context.Context, input []byte, _ int, args []string
 		return f.containerCommand(args)
 	case execCommand:
 		return f.execCommand(ctx, args, input)
+	case "run":
+		return nil, nil
 	}
 	return nil, errors.New("unexpected Docker command")
 }
@@ -211,16 +213,19 @@ func (f *fakeDocker) createCommand(args []string) ([]byte, error) {
 			k, value, _ := strings.Cut(v, ":")
 			c.HostConfig.Tmpfs[k] = value
 		case "--mount":
-			var name string
+			var name, target string
 			for field := range strings.SplitSeq(v, ",") {
 				if source, ok := strings.CutPrefix(field, "source="); ok {
 					name = source
+				}
+				if destination, ok := strings.CutPrefix(field, "target="); ok {
+					target = destination
 				}
 			}
 			c.Mounts = append(c.Mounts, struct {
 				Type, Name, Destination string
 				RW                      bool
-			}{volumeCommand, name, "/workspace", true})
+			}{volumeCommand, name, target, true})
 		}
 	}
 	f.containers[c.ID] = c

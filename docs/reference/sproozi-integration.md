@@ -41,6 +41,8 @@ others:
   example disables skills with `--disable-slash-commands`.
 - **OpenCode** adds both files to `instructions`, because the example disables
   external skills.
+- **Copilot** writes both files after the approved instructions to
+  `$COPILOT_HOME/copilot-instructions.md`, which it adds to its system prompt.
 - **Hermes** needs no command change: `hermes-launch.py` appends both files to
   the approved instructions and fails if either is missing.
 
@@ -147,7 +149,7 @@ as a DNS name. Startup fails with `home: gateway mcpAuthority is required` or
   next launch restores them.
 - `diagnose` cannot yet say whether access can be requested; access requests
   are planned for M4.
-- Installed Claude Code and OpenCode call `diagnose` through the authenticated
+- Installed Claude Code, OpenCode and Copilot call `diagnose` through the authenticated
   gateway proxy after a refused request (`make verify-harness-process`). No
   Docker or Kind acceptance run covers it yet, and Codex is covered only by its
   configuration and tool listing.

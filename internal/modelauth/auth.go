@@ -44,6 +44,62 @@ type Authenticator interface {
 	Authorize(*http.Request) error
 }
 
+// WorkloadMode forwards the credential the harness signed in with (ADR 0047).
+const WorkloadMode = "workload"
+
+// Workload keeps the harness's own provider credential and account headers:
+// the harness, not the gateway, chose the account it signed in to.
+type Workload struct{}
+
+func (Workload) Mode() string { return WorkloadMode }
+func (Workload) Authorize(r *http.Request) error {
+	if !HasWorkloadCredential(r.Header) {
+		return errors.New("the harness sent no provider credential")
+	}
+	return nil
+}
+
+// HasWorkloadCredential reports whether the headers carry one well-formed
+// provider credential: an X-Api-Key or a bearer Authorization.
+func HasWorkloadCredential(header http.Header) bool {
+	for _, value := range []string{header.Get("X-Api-Key"), strings.TrimPrefix(header.Get("Authorization"), "Bearer ")} {
+		if strings.TrimSpace(value) != "" && !strings.ContainsAny(value, "\r\n") {
+			return true
+		}
+	}
+	return false
+}
+
+// TokenMode installs a gateway-held sign-in token (ADR 0047).
+const TokenMode = "token"
+
+// Token installs a gateway-held sign-in token, such as one from claude
+// setup-token, as a bearer credential, with any headers its provider requires
+// for one. Workload credentials and account headers never select the account.
+type Token struct {
+	Value   string
+	Headers map[string]string
+}
+
+func (Token) Mode() string { return TokenMode }
+func (t Token) Authorize(r *http.Request) error {
+	if strings.TrimSpace(t.Value) == "" || strings.ContainsAny(t.Value, "\r\n") {
+		return errors.New("provider sign-in token is unavailable")
+	}
+	removeOpenAIAccountHeaders(r.Header)
+	r.Header.Del("X-Api-Key")
+	r.Header.Set("Authorization", "Bearer "+t.Value)
+	for name, value := range t.Headers {
+		// Keep the client's other comma-separated values, such as betas.
+		values := strings.Split(r.Header.Get(name), ",")
+		if !slices.ContainsFunc(values, func(v string) bool { return strings.TrimSpace(v) == value }) {
+			values = append(slices.DeleteFunc(values, func(v string) bool { return strings.TrimSpace(v) == "" }), value)
+		}
+		r.Header.Set(name, strings.Join(values, ","))
+	}
+	return nil
+}
+
 type APIKey struct{ Key string }
 
 // AnthropicAPIKey installs a trusted Messages API credential. A workload's

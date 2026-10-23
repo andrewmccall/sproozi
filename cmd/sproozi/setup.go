@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"runtime"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -31,7 +33,7 @@ func (q *options) initLocal(ctx context.Context) error {
 		Image:       localsetup.ImageRequest{Reference: q.image, BuildSource: q.build},
 		ProviderURL: q.providerURL, ProviderCAFile: q.providerCA, CheckCredential: !q.skipCheck,
 		Port: q.port, StartService: !q.noService, Executable: executable, Timeout: q.timeout, Progress: os.Stderr,
-		Credential: q.credentialInput()}
+		Credential: q.credentialInput(), SignIn: q.signIn, Token: q.token, ChatGPT: q.chatgpt, OpenBrowser: openBrowser}
 	if q.instructionsFile != "" {
 		data, err := os.ReadFile(q.instructionsFile)
 		if err != nil || len(data) == 0 || len(data) > 16<<10 {
@@ -315,7 +317,7 @@ func (q *options) credentialsCommand(ctx context.Context, l localsetup.Layout,
 		for _, provider := range []string{providerOpenAI, providerAnthropic} {
 			e := credentialEntry{Provider: provider, Stored: localsetup.HasCredential(l, provider)}
 			for _, h := range inst.Harnesses {
-				if localsetup.ProviderFor(h.Harness).Name == provider {
+				if localsetup.ProviderFor(h.Harness).Name == provider && h.Credential != "" {
 					e.Harnesses = append(e.Harnesses, string(h.Harness))
 				}
 			}
@@ -329,9 +331,14 @@ func (q *options) credentialsCommand(ctx context.Context, l localsetup.Layout,
 	}
 	var selected *localsetup.Harness
 	for i := range inst.Harnesses {
-		if localsetup.ProviderFor(inst.Harnesses[i].Harness).Name == provider {
-			selected = &inst.Harnesses[i]
+		if localsetup.ProviderFor(inst.Harnesses[i].Harness).Name != provider {
+			continue
 		}
+		if inst.Harnesses[i].Credential == "" {
+			return nil, usagef("%s signs in to %s itself, so Sproozi stores no key for it; run /login in its session",
+				inst.Harnesses[i].Harness, provider)
+		}
+		selected = &inst.Harnesses[i]
 	}
 	path, err := localsetup.StoreCredential(l, provider, q.credentialInput())
 	if err != nil {
@@ -488,4 +495,14 @@ func (q *options) version() error {
 		_, err = fmt.Fprintf(q.out, "agent image %s\n", image)
 	}
 	return err
+}
+
+// openBrowser opens a sign-in page. It never prints the address, which can
+// carry an ID token on return.
+func openBrowser(url string) error {
+	command := "xdg-open"
+	if runtime.GOOS == "darwin" {
+		command = "open"
+	}
+	return exec.Command(command, url).Run()
 }

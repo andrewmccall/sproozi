@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"path"
 	"slices"
 	"strings"
 
@@ -24,6 +25,37 @@ type Route struct {
 	Handler     http.Handler
 	Budgets     *budget.Tracker
 	AuditLogger audit.Writer
+	// ProviderCredential marks a model route that forwards the workload's own
+	// provider credential. LeakGuard refuses that credential everywhere else.
+	ProviderCredential bool
+	// Paths serve path prefixes of the authority with their own capability
+	// and handler, such as Copilot's account requests on api.github.com,
+	// which the GitHub capability otherwise serves.
+	Paths []PathRoute
+}
+
+// PathRoute serves the requests under Prefix, a clean path ending in "/".
+type PathRoute struct {
+	Prefix string
+	Route  Route
+}
+
+// Select returns the route serving path on authority, and a key that names
+// it for LeakGuard. A path that isn't clean never selects a path route.
+func (d Dispatcher) Select(authority, requestPath string) (Route, string, bool) {
+	key := normalizeAuthority(authority)
+	route, ok := d[key]
+	if !ok {
+		return Route{}, "", false
+	}
+	if requestPath == path.Clean(requestPath) {
+		for _, p := range route.Paths {
+			if strings.HasPrefix(requestPath, p.Prefix) {
+				return p.Route, key + p.Prefix, true
+			}
+		}
+	}
+	return route, key, true
 }
 
 type Dispatcher map[string]Route
@@ -32,7 +64,7 @@ type routeContextKey struct{}
 
 func (d Dispatcher) Allows(authority string) bool {
 	route, ok := d[normalizeAuthority(authority)]
-	return ok && route.Handler != nil
+	return ok && (route.Handler != nil || slices.ContainsFunc(route.Paths, func(p PathRoute) bool { return p.Route.Handler != nil }))
 }
 
 // ServeHTTP preserves streaming, flushing and response lifetime. Buffering, when
@@ -44,7 +76,7 @@ func (d Dispatcher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"gateway identity required; connect through the gateway proxy with the run's token")
 		return
 	}
-	route, ok := d[normalizeAuthority(r.Host)]
+	route, _, ok := d.Select(r.Host, r.URL.Path)
 	if !ok || route.Handler == nil {
 		writeDenial(w, http.StatusForbidden, "permission_error", "destination_denied",
 			"destination "+r.Host+" is not enabled at this gateway")

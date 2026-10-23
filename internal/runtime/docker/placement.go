@@ -75,6 +75,9 @@ type PlacementConfig struct {
 	InstructionDigest                              string
 	AgentLimits, HelperLimits, AnchorLimits        ResourceLimits
 	VolumeBytes, MaxCheckpointBytes, RetainedBytes int64
+	// SignIn mounts the harness's own persistent sign-in file into every
+	// agent, because the gateway forwards that credential (ADR 0047).
+	SignIn bool
 	// ProfileDirectory is the user's profile folder, set by the home from the
 	// configuration file's location, never from its contents. Each launch
 	// sends the profile as it is then.
@@ -92,8 +95,8 @@ func (c PlacementConfig) validate() error {
 	if !resourceName.MatchString(c.Name) || !resourceName.MatchString(c.NetworkName) || err != nil || !ip.Is4() || ip.IsUnspecified() || ip.IsMulticast() || c.GatewayPort == 0 || c.Instructions == "" || fmt.Sprintf("%x", sha256.Sum256([]byte(c.Instructions))) != c.InstructionDigest || c.VolumeBytes < 16<<20 || c.VolumeBytes > 4<<30 || c.MaxCheckpointBytes <= 0 || c.MaxCheckpointBytes > 64<<20 || c.RetainedBytes < c.MaxCheckpointBytes*2 {
 		return errors.New("invalid Docker placement configuration")
 	}
-	if c.ProfileDirectory != "" && !filepath.IsAbs(c.ProfileDirectory) {
-		return errors.New("docker placement profile folder must be absolute")
+	if err := c.validateHarnessFiles(); err != nil {
+		return err
 	}
 	for _, image := range []string{c.NativeImageID, c.HelperImageID, c.AnchorImageID} {
 		if !strings.HasPrefix(image, "sha256:") || !objectID.MatchString(strings.TrimPrefix(image, "sha256:")) {
@@ -107,6 +110,19 @@ func (c PlacementConfig) validate() error {
 	}
 	return nil
 }
+
+// validateHarnessFiles checks the settings that place the user's own files:
+// the harness's sign-in and the profile folder.
+func (c PlacementConfig) validateHarnessFiles() error {
+	if h, _ := harness.Managed(c.Harness); c.SignIn && h.SignInFile == "" {
+		return fmt.Errorf("%s has no sign-in file to keep; configure a provider key for it", c.Harness)
+	}
+	if c.ProfileDirectory != "" && !filepath.IsAbs(c.ProfileDirectory) {
+		return errors.New("docker placement profile folder must be absolute")
+	}
+	return nil
+}
+
 func validUUID(s string) bool {
 	u, err := uuid.Parse(s)
 	return err == nil && u.String() == s && u != uuid.Nil
@@ -209,7 +225,22 @@ func (p *Placement) spec(r placementRecord, role string) ManagedSpec {
 	if role != roleAnchor {
 		spec.Volume = r.Volume
 	}
+	if role == roleAgent {
+		spec.Login = p.login()
+	}
 	return spec
+}
+
+// login is the agent's sign-in file mount, or nil when the gateway holds the
+// provider credential. The installation's own network name keeps two
+// installations on one engine from sharing a sign-in.
+func (p *Placement) login() *LoginMount {
+	h, err := harness.Managed(p.config.Harness)
+	if !p.config.SignIn || err != nil || h.SignInFile == "" {
+		return nil
+	}
+	return &LoginMount{Volume: p.config.NetworkName + "-" + p.config.Name + "-login", File: h.SignInFile,
+		Target: "/workspace/session/" + h.NativeDirectory + "/" + h.SignInFile}
 }
 func (p *Placement) resource(ctx context.Context, r *placementRecord, role string, target **Instance) error {
 	spec := p.spec(*r, role)
@@ -249,6 +280,11 @@ func (p *Placement) drivePrepare(ctx context.Context, r *placementRecord, data [
 	}
 	if err := p.engine.PrepareArtifact(ctx, *r.Helper, p.config.Harness, data, p.config.MaxCheckpointBytes, p.config.InstructionDigest, r.fresh()); err != nil {
 		return err
+	}
+	if login := p.login(); login != nil {
+		if err := p.engine.EnsureLoginVolume(ctx, *login, p.config.Harness, p.config.HelperImageID); err != nil {
+			return fmt.Errorf("docker login volume: %w", err)
+		}
 	}
 	if err := p.resource(ctx, r, roleAgent, &r.Agent); err != nil {
 		return err

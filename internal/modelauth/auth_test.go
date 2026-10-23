@@ -52,6 +52,27 @@ func (s *memoryStore) Replace(_ context.Context, before, after Session) error {
 	return nil
 }
 
+func TestWorkloadKeepsTheHarnessCredentialAndAccount(t *testing.T) {
+	r := httptest.NewRequest(http.MethodPost, Resource+"/responses", nil)
+	r.Header.Set("Authorization", "Bearer harness-own-key")
+	r.Header.Set(openAIProjectHeader, "harness-project")
+	if err := (Workload{}).Authorize(r); err != nil {
+		t.Fatal(err)
+	}
+	if r.Header.Get("Authorization") != "Bearer harness-own-key" || r.Header.Get(openAIProjectHeader) != "harness-project" {
+		t.Fatal("the harness's credential or account was changed")
+	}
+	for _, header := range []struct{ name, value string }{
+		{"Authorization", ""}, {"Authorization", "Bearer "}, {"X-Api-Key", "bad\r\nvalue"},
+	} {
+		r := httptest.NewRequest(http.MethodPost, Resource+"/responses", nil)
+		r.Header[header.name] = []string{header.value}
+		if err := (Workload{}).Authorize(r); err == nil {
+			t.Fatalf("missing or invalid %s accepted", header.name)
+		}
+	}
+}
+
 func TestAPIKeyReplacesWorkloadAuthorization(t *testing.T) {
 	r := httptest.NewRequest(http.MethodPost, Resource+"/responses", nil)
 	r.Header.Set("Authorization", "Bearer workload-placeholder")
@@ -299,5 +320,47 @@ func TestChatGPTReloadIntervalStartsBeforeTheSecretRead(t *testing.T) {
 	}
 	if loads := store.loads.Load(); loads != 2 {
 		t.Fatalf("Secret reads = %d, want 2: a read slower than the reload interval extended the cached session", loads)
+	}
+}
+
+func TestTokenInstallsTheGatewaySignInWithProviderHeaders(t *testing.T) {
+	r := httptest.NewRequest(http.MethodPost, "https://api.anthropic.com/v1/messages", nil)
+	r.Header.Set("X-Api-Key", "workload-placeholder")
+	r.Header.Set("Authorization", "Bearer workload-placeholder")
+	r.Header.Set("Anthropic-Beta", "context-management-2025-06-27")
+	token := Token{Value: "sk-ant-oat01-gateway-held", Headers: map[string]string{"Anthropic-Beta": "oauth-2025-04-20"}}
+	if err := token.Authorize(r); err != nil {
+		t.Fatal(err)
+	}
+	if r.Header.Get("Authorization") != "Bearer sk-ant-oat01-gateway-held" || r.Header.Get("X-Api-Key") != "" ||
+		r.Header.Get("Anthropic-Beta") != "context-management-2025-06-27,oauth-2025-04-20" {
+		t.Fatalf("headers: %v", r.Header)
+	}
+	if err := (Token{}).Authorize(r); err == nil {
+		t.Fatal("an empty token was accepted")
+	}
+}
+
+func TestFileSessionStoreReplacesOnlyTheSessionItRead(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "private")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "chatgpt-session.json")
+	before := fixtureSession()
+	store := NewFileSessionStore(path)
+	if err := store.Save(before); err != nil {
+		t.Fatal(err)
+	}
+	after := before
+	after.AccessToken, after.RefreshToken = "rotated-access", "rotated-refresh"
+	if err := store.Replace(t.Context(), before, after); err != nil {
+		t.Fatal(err)
+	}
+	if loaded, err := store.Load(t.Context()); err != nil || loaded.RefreshToken != "rotated-refresh" {
+		t.Fatalf("loaded %+v %v", loaded, err)
+	}
+	if err := store.Replace(t.Context(), before, after); err == nil {
+		t.Fatal("a stale refresh replaced the newer session")
 	}
 }

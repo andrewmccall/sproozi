@@ -1,17 +1,32 @@
 # Model provider authentication
 
-This guide covers OpenAI authentication for the Kubernetes gateway. An
-administrator selects one of two modes. For Anthropic configuration, see [model
-providers](../reference/harnesses.md#model-providers). `MODEL_AUTH_MODE=api_key`
-is the default and uses `OPENAI_API_KEY`. `MODEL_AUTH_MODE=chatgpt` uses an
+This guide covers model provider authentication for the Kubernetes gateway.
+Each provider uses one credential, chosen by the administrator
+([ADR 0047](../adr/0047-harnesses-sign-in-to-their-own-model-providers.md)):
+
+| Mechanism | Gateway configuration | Runtime |
+| --- | --- | --- |
+| Gateway-held API key | `openai-api-key` or `anthropic-api-key` in `model-gateway-credentials`, `MODEL_AUTH_MODE=api_key` (the default) | The stock example, with its placeholder key |
+| Gateway-held sign-in token | `openai-sign-in-token` or `anthropic-sign-in-token`, such as the output of `claude setup-token`, sent as a bearer | The stock example |
+| Gateway-held ChatGPT plan sign-in | `MODEL_AUTH_MODE=chatgpt`, set up below | The stock Codex example |
+| The harness's own sign-in | `MODEL_AUTH_MODE=workload`, with no key or token for that provider | An AgentRuntime with [`clientConfig.signIn`](../reference/agentruntime.md#harness-sign-in) |
+
+One gateway can mix them, for example an OpenAI key while Claude Code signs in
+itself. The [configuration reference](../reference/required-secrets-and-config.md)
+lists the order and the extra hosts the certificate must cover in workload
+mode. For local Docker sessions, see
+[choose how an agent signs in](local-sessions.md#choose-how-an-agent-signs-in).
+
+The rest of this guide covers OpenAI's two gateway-held modes.
+`MODEL_AUTH_MODE=api_key` uses `OPENAI_API_KEY`. `MODEL_AUTH_MODE=chatgpt` uses an
 independently authorized ChatGPT-plan OAuth sign-in, the ChatGPT credential. It does not read Codex's
 login cache and does not fall back to an API key if OAuth fails.
 
 This is separate from workload authentication. AgentRuns still authenticate to
 the shared gateway with their projected `sproozi-gateway` ServiceAccount token.
-The sandbox receives neither a provider API key nor OAuth credentials. The
-stock Codex client keeps its OpenAI-compatible provider configuration and its
-harmless API-key placeholder in either mode.
+In these two modes the sandbox receives neither a provider API key nor OAuth
+credentials. The stock Codex client keeps its OpenAI-compatible provider
+configuration and its harmless API-key placeholder in either mode.
 
 ## Existing cluster
 

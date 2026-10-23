@@ -175,3 +175,33 @@ func TestDispatcherDeliversFirstChunkBeforeHandlerCompletes(t *testing.T) {
 	// Release before httptest waits for the active handler.
 	release <- struct{}{}
 }
+
+func TestDispatcherServesAPathRouteWithItsOwnCapability(t *testing.T) {
+	served := ""
+	handler := func(name string) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { served = name; w.WriteHeader(http.StatusNoContent) })
+	}
+	d := gateway.Dispatcher{fixtureAuthority: {Capability: "github.pullRequest", Handler: handler("github"),
+		Paths: []gateway.PathRoute{{Prefix: "/copilot_internal/", Route: gateway.Route{Handler: handler("copilot")}}}}}
+	grant := &gateway.ExecutionGrant{Policy: gateway.PolicySnapshot{Name: fixturePolicyName},
+		Execution: gateway.Reference{Backend: gateway.BackendKubernetes, UID: fixtureExecutionUID},
+		Template:  gateway.TemplateSnapshot{Name: fixtureTemplateName}}
+	call := func(path string) int {
+		r := httptest.NewRequest(http.MethodGet, "https://service.test"+path, nil)
+		r = r.WithContext(gateway.WithIdentity(r.Context(), grant))
+		response := httptest.NewRecorder()
+		served = ""
+		d.ServeHTTP(response, r)
+		return response.Code
+	}
+	if code := call("/copilot_internal/user"); code != http.StatusNoContent || served != "copilot" {
+		t.Fatalf("path route: %d %q", code, served)
+	}
+	// The host's own route keeps its capability, which this run lacks.
+	if code := call("/repos/o/r/pulls"); code != http.StatusForbidden || served != "" {
+		t.Fatalf("host route: %d %q", code, served)
+	}
+	if !d.Allows(fixtureAuthority) {
+		t.Fatal("a host with only a path route isn't allowed")
+	}
+}

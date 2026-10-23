@@ -86,12 +86,16 @@ func Doctor(ctx context.Context, l Layout, checkProvider bool) (r Report) {
 	r.add("network", err, fmt.Sprintf("%s (%s) is owned by this installation", network.Name, network.Subnet))
 	for _, h := range inst.Harnesses {
 		provider := ProviderFor(h.Harness)
+		if h.Credential == "" {
+			r.add("credential", nil, fmt.Sprintf("%s signs in to %s itself; run /login in its session", h.Harness, provider.Name))
+			continue
+		}
 		_, err = privatefs.ReadFile(h.Credential, 16<<10)
 		if err != nil {
 			err = fail("credential", err, "sproozi credentials set "+string(h.Harness))
 		}
 		r.add("credential", err, fmt.Sprintf("%s credential for %s is stored privately", provider.Name, h.Harness))
-		if err == nil && checkProvider {
+		if err == nil && checkProvider && h.Kind == "" {
 			r.add("provider", CheckCredential(ctx, h.Harness, h.ProviderURL, h.ProviderCAFile, h.Credential), provider.Name+" accepted the credential")
 		}
 	}

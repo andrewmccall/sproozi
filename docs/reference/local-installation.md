@@ -54,7 +54,7 @@ certificate authority, credentials and configuration.
 | Image | Reuses the recorded image when `--image` names it again. Otherwise pulls the native image digest built into the CLI release, or uses `--image REPOSITORY@sha256:DIGEST` or a local `sha256:` content ID, or builds with `--build SOURCE_DIRECTORY`. The image must report helper contract `1`. |
 | Network | Creates or reuses the bridge network `sproozi-ID`, labelled `sproozi.com/installation=ID`. Docker chooses a subnet that does not overlap its other networks. A same-named network that this installation does not own is rejected. |
 | Gateway address | Serves a one-time value from the host and fetches it from a container on the network. It tries, in order: host loopback reached through the engine's host name, the bridge gateway address, then each of those on all interfaces. The first address that works is recorded. |
-| Credentials | Stores the provider key from a hidden prompt, `--credential-file` or `--credential-stdin`. With `--provider-ca-file`, copies that PEM bundle to `credentials/PROVIDER-ca.pem` and points the harness's gateway at the copy; a later run with the flag replaces it. It then lists the provider's models to check the key, unless `--skip-credential-check` is given. |
+| Credentials | With `--sign-in`, stores no key: the harness signs in to its own provider account in its first session. Otherwise stores the provider key from a hidden prompt, `--credential-file` or `--credential-stdin`. With `--provider-ca-file`, copies that PEM bundle to `credentials/PROVIDER-ca.pem` and points the harness's gateway at the copy; a later run with the flag replaces it. It then lists the provider's models to check the key, unless `--skip-credential-check` is given. |
 | Certificates | Creates the certificate authority and a serving leaf covering the gateway address and the enabled provider authorities. |
 | Configuration | Writes `config.json`. On a later run it adds a new harness and keeps every other value. It refuses when the existing configuration's image, network, gateway address or approved instructions differ from the installation. |
 | Service | Starts `sproozi service run` detached from the terminal. After a configuration or credential change it restarts the service only when no session is running; otherwise it saves the change, skips the readiness check and prints `Saved. N session(s) are running, so the service keeps its previous settings until they stop; ...`, exiting 0. |
@@ -98,21 +98,43 @@ sessions. Changing them in place is not supported; setup and
 ## Harnesses
 
 Each harness is a separate local placement with its own gateway port, grants
-and provider key. The first harness is the configuration's `local` placement;
+and provider credential. The first harness is the configuration's `local` placement;
 later ones are listed under `harnesses`. Every placement shares the image,
 network, gateway address, limits, allowances and certificate authority.
 
-| Harness | Placement | Provider | Key file |
+| Harness | Placement | Provider | Provider credential |
 | --- | --- | --- | --- |
-| `codex` | `local` when first, otherwise `local-codex` | `https://api.openai.com` | `credentials/openai` |
-| `claude-code` | `local` when first, otherwise `local-claude` | `https://api.anthropic.com` | `credentials/anthropic` |
+| `codex` | `local` when first, otherwise `local-codex` | `https://api.openai.com` | Key file `credentials/openai`; `--token` stores a sign-in token there; `--chatgpt` keeps a ChatGPT plan sign-in in `credentials/chatgpt-session.json`; `--sign-in` uses Codex's own sign-in in its login volume |
+| `claude-code` | `local` when first, otherwise `local-claude` | `https://api.anthropic.com` | Key file `credentials/anthropic`; `--token` stores a sign-in token there; `--sign-in` uses Claude Code's own sign-in in its login volume |
 
 `--provider-url` and `--provider-ca-file` select a private HTTPS provider
 endpoint for the harness being added. The CA bundle is public, so its source
 may be readable by anyone, but setup refuses one every account can write. The
-gateway reads only the private copy. Codex receives `OPENAI_API_KEY` and Claude
-Code `ANTHROPIC_API_KEY` as placeholders; the gateway replaces them with the
-stored key on approved requests.
+gateway reads only the private copy. Codex receives `OPENAI_API_KEY` as a
+placeholder; the gateway replaces it with the stored key on approved requests.
+
+`providerTokenKind` says what `providerTokenFile` holds: omitted for an API
+key, `token` for a sign-in token the gateway sends as a bearer (with
+Anthropic's OAuth beta header for Claude Code), or `chatgpt` for a ChatGPT plan
+sign-in the gateway refreshes
+([ADR 0047](../adr/0047-harnesses-sign-in-to-their-own-model-providers.md)).
+
+With `--sign-in` the configuration has no `providerTokenFile`, and the agent
+receives no placeholder key. Its sign-in lives in a persistent Docker volume,
+created on its first session and labelled `sproozi.com/login=<harness>`. The
+helper image prepares it as an empty mode-0600 file owned by the agent user,
+and every session of that agent mounts that one file in its native home
+(`/workspace/session/claude/.credentials.json` or
+`/workspace/session/codex/auth.json`); no other container mounts it. Removing
+the installation leaves the volume; `docker volume rm` deletes the sign-in.
+The gateway forwards the sign-in on every host of the agent's provider
+(`api.anthropic.com`; `api.openai.com` and `chatgpt.com`), relays only its
+sign-in and refresh requests on `platform.claude.com` or `auth.openai.com`,
+and covers those hosts in its certificate. On `chatgpt.com` it relays only
+`codex/models`, `wham/accounts/check` and `wham/settings/user` besides model
+calls. Setup again with a key
+(`--credential-file`, `--credential-stdin` or the prompt) switches the harness
+back to a gateway-held key; setup without either keeps its current choice.
 
 ## Profile
 

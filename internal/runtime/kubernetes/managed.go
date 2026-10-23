@@ -44,7 +44,8 @@ func addManagedNativeContract(ctx context.Context, kube client.Client, run *api.
 		// UUID is bound, so controller retries never rewrite immutable config.
 		thread = ""
 	}
-	env, err := harness.NativeBaseEnvironment(binding.Harness, string(run.UID))
+	signIn := runtime.Spec.ClientConfig.SignIn != nil
+	env, err := harness.NativeBaseEnvironment(binding.Harness, string(run.UID), signIn)
 	if err != nil {
 		return err
 	}
@@ -59,6 +60,9 @@ func addManagedNativeContract(ctx context.Context, kube client.Client, run *api.
 			TokenPath: harness.NativeGatewayTokenPath, TrustBundle: harness.NativeGatewayTrustBundle}}
 	if native := runtime.Spec.ClientConfig.NativeSession; native != nil {
 		launch.Model, launch.Options = native.Model, slices.Clone(native.Options)
+	}
+	if signIn {
+		launch.SignInDirectory = api.SignInDirectory
 	}
 	if err = launch.Validate(time.Now()); err != nil {
 		return err

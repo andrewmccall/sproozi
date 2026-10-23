@@ -52,6 +52,7 @@ spec:
                     - claude-code
                     - opencode
                     - hermes
+                    - copilot
                     type: string
                   nativeSession:
                     description: |-
@@ -73,6 +74,36 @@ spec:
                           type: string
                         maxItems: 32
                         type: array
+                    type: object
+                  signIn:
+                    description: |-
+                      SignIn delivers the harness's own provider sign-in to its workload
+                      containers, for a provider whose gateway forwards it (ADR 0047). The
+                      gateway's key placeholder is then left out.
+                    properties:
+                      claimName:
+                        description: |-
+                          ClaimName is a PersistentVolumeClaim that keeps the harness's own
+                          login file across managed sessions, such as Claude Code's
+                          .credentials.json or Codex's auth.json.
+                        maxLength: 253
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                        type: string
+                      env:
+                        description: |-
+                          Env names an environment variable for the sign-in, such as
+                          CLAUDE_CODE_OAUTH_TOKEN or COPILOT_GITHUB_TOKEN.
+                        maxLength: 128
+                        pattern: ^[A-Za-z_][A-Za-z0-9_]*$
+                        type: string
+                      key:
+                        maxLength: 253
+                        pattern: ^[-._a-zA-Z0-9]+$
+                        type: string
+                      secretName:
+                        maxLength: 253
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                        type: string
                     type: object
                   trustBundleConfigMap:
                     description: |-

@@ -8,6 +8,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"errors"
+	"io"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -19,6 +20,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/modelauth"
+
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/privatefs"
 	runtimedocker "github.com/andrewmccall/sproozi/internal/runtime/docker"
@@ -27,6 +30,9 @@ import (
 )
 
 const testImage = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+// claudePlacement is the second harness's placement name.
+const claudePlacement = "local-claude"
 
 func testInstallation(t *testing.T) (Layout, Installation) {
 	t.Helper()
@@ -46,7 +52,7 @@ func testInstallation(t *testing.T) (Layout, Installation) {
 
 func TestRenderedConfigIsAcceptedByTheHomeService(t *testing.T) {
 	l, inst := testInstallation(t)
-	inst.Harnesses = append(inst.Harnesses, Harness{Harness: harness.NativeClaude, Name: "local-claude", Port: 18444,
+	inst.Harnesses = append(inst.Harnesses, Harness{Harness: harness.NativeClaude, Name: claudePlacement, Port: 18444,
 		Model: "claude-fixture", ProviderURL: anthropicURL, Credential: filepath.Join(l.Credentials(), "anthropic")})
 	c := renderConfig(l, inst, DefaultInstructions)
 	if err := writeConfig(l, c, false); err != nil {
@@ -86,7 +92,7 @@ func TestMergeKeepsUserEditsAddsHarnessesAndRefusesPlacementChanges(t *testing.T
 	existing := renderConfig(l, inst, DefaultInstructions)
 	existing.MaxDuration = "2h"
 	existing.Model = "edited-model"
-	inst.Harnesses = append(inst.Harnesses, Harness{Harness: harness.NativeClaude, Name: "local-claude", Port: 18444,
+	inst.Harnesses = append(inst.Harnesses, Harness{Harness: harness.NativeClaude, Name: claudePlacement, Port: 18444,
 		Model: "claude-fixture", ProviderURL: anthropicURL, Credential: "/x/anthropic"})
 	merged, changed, err := mergeConfig(existing, renderConfig(l, inst, DefaultInstructions))
 	if err != nil || !changed {
@@ -409,5 +415,59 @@ func TestRestartPendingIsRecordedInTheRoot(t *testing.T) {
 	}
 	if PendingRestart(l) != "1 session(s) are running" || l.checkRoot() != nil {
 		t.Fatalf("pending restart %q, root %v", PendingRestart(l), l.checkRoot())
+	}
+}
+
+// Each harness keeps either a gateway-held key or its own sign-in, and setup
+// can switch it either way (ADR 0047).
+func TestSignInIsChosenPerHarness(t *testing.T) {
+	l, inst := testInstallation(t)
+	keyed := inst
+	keyed.Harnesses = append(slices.Clone(inst.Harnesses), Harness{Harness: harness.NativeClaude, Name: claudePlacement, Port: 18444,
+		ProviderURL: anthropicURL, Credential: filepath.Join(l.Credentials(), "anthropic")})
+	withKey := renderConfig(l, keyed, DefaultInstructions)
+	signedIn := keyed
+	signedIn.Harnesses = slices.Clone(keyed.Harnesses)
+	signedIn.Harnesses[1].Credential = ""
+	toSignIn, changed, err := mergeConfig(withKey, renderConfig(l, signedIn, DefaultInstructions))
+	if err != nil || !changed || toSignIn.Harnesses[0].ProviderTokenFile != "" || toSignIn.Gateway.ProviderTokenFile == "" {
+		t.Fatalf("switch to sign-in: changed=%v claude=%q codex=%q err=%v", changed, toSignIn.Harnesses[0].ProviderTokenFile,
+			toSignIn.Gateway.ProviderTokenFile, err)
+	}
+	if problems := slices.DeleteFunc(toSignIn.ServeProblems(), func(p string) bool { return strings.HasPrefix(p, "directory (") }); len(problems) != 0 {
+		t.Fatalf("serve would refuse the signed-in configuration: %q", problems)
+	}
+	back, changed, err := mergeConfig(toSignIn, withKey)
+	if err != nil || !changed || back.Harnesses[0].ProviderTokenFile == "" {
+		t.Fatalf("switch back to a key: changed=%v claude=%q err=%v", changed, back.Harnesses[0].ProviderTokenFile, err)
+	}
+	edited := withKey
+	edited.Harnesses = slices.Clone(withKey.Harnesses)
+	edited.Harnesses[0].ProviderTokenFile = "/elsewhere/anthropic-key"
+	if kept, _, _ := mergeConfig(edited, withKey); kept.Harnesses[0].ProviderTokenFile != "/elsewhere/anthropic-key" {
+		t.Fatal("an edited key path was replaced")
+	}
+}
+
+// A gateway-held ChatGPT sign-in is reused while valid, so a later init needs
+// no browser, and only an OpenAI harness can choose it (ADR 0047).
+func TestChatGPTSignInIsReusedForAnOpenAIHarness(t *testing.T) {
+	l, inst := testInstallation(t)
+	session := modelauth.Session{Issuer: modelauth.Issuer, Subject: "account", ClientID: "oaiapp_fixture",
+		HostID: "urn:uuid:fixture", AccessToken: "fixture-access", RefreshToken: "fixture-refresh", IDToken: "fixture-id",
+		TokenType: "Bearer", ExpiresIn: 3600, SavedAt: time.Now().UTC(), Scopes: []string{modelauth.PlanScope}}
+	if err := modelauth.NewFileSessionStore(filepath.Join(l.Credentials(), "chatgpt-session.json")).Save(session); err != nil {
+		t.Fatal(err)
+	}
+	i := &installer{l: l, inst: inst, o: Options{Harness: harness.NativeCodex, ChatGPT: true, Progress: io.Discard}, selected: &inst.Harnesses[0]}
+	if err := i.signInChatGPT(t.Context(), ProviderFor(harness.NativeCodex)); err != nil {
+		t.Fatal(err)
+	}
+	if i.selected.Kind != modelauth.ChatGPTMode || tokenKind(*i.selected) != modelauth.ChatGPTMode {
+		t.Fatalf("harness %+v", *i.selected)
+	}
+	i.o.Harness = harness.NativeClaude
+	if err := i.signInChatGPT(t.Context(), ProviderFor(harness.NativeClaude)); err == nil {
+		t.Fatal("Claude Code was given a ChatGPT sign-in")
 	}
 }

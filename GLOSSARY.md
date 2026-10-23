@@ -8,8 +8,8 @@ examples and a reading path, see [core concepts](docs/explanations/core-concepts
 
 ### Harness
 
-The existing agent program that Sproozi launches: Codex, Claude Code, OpenCode
-or Hermes. The harness runs the conversation and its tool calls; Sproozi
+The existing agent program that Sproozi launches: Codex, Claude Code, OpenCode,
+Hermes or GitHub Copilot CLI. The harness runs the conversation and its tool calls; Sproozi
 supplies the environment and access. Selected by `clientConfig.harness`.
 Also seen as: client, native client.
 
@@ -104,9 +104,33 @@ Also seen as: agent Pod (the Kubernetes form), worker Pod.
 ### Gateway
 
 The trusted proxy that every request from a sandbox to an outside service goes
-through. It holds provider credentials, identifies the run and checks each
+through. It holds service and gateway-held provider credentials, forwards a
+harness's own sign-in only to its provider, identifies the run and checks each
 request against current policy. See
 [capabilities and gateways](docs/explanations/capabilities-and-gateways.md).
+
+### Harness sign-in
+
+A harness's own credential for its model provider, such as a Claude or ChatGPT
+subscription sign-in or the person's own key, which the harness obtains and
+refreshes itself. The gateway forwards it to that provider's routes, still
+inspecting and counting each call, and refuses it elsewhere. The alternative is
+a gateway-held credential: an API key, a sign-in token or a ChatGPT plan
+sign-in that the gateway attaches itself. See
+[ADR 0047](docs/adr/0047-harnesses-sign-in-to-their-own-model-providers.md).
+Also seen as: harness-held credential, own sign-in, workload credential.
+
+### Login volume
+
+The persistent Docker volume, one per local installation and placement, whose
+single file holds a harness's own sign-in. Only that harness's agent containers
+mount it, and it never enters a checkpoint.
+
+### Sign-in relay
+
+The gateway route that passes a harness's own sign-in and token-refresh
+requests to its provider unchanged, without recording or charging them, such as
+`platform.claude.com` for Claude Code or `auth.openai.com` for Codex.
 
 ### Control connection
 

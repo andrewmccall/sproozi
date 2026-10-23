@@ -30,6 +30,9 @@ for client in "$@"; do
       name=claude
       ln -f "$modules/@anthropic-ai/claude-code-linux-$arch/claude" \
         "$modules/@anthropic-ai/claude-code/bin/claude.exe" ;;
+    copilot)
+      # npm-loader.js selects the platform binary at run time; no postinstall.
+      name=copilot ;;
     opencode)
       # Equivalent of postinstall.mjs for glibc Linux. The AVX2 build is used
       # on x64 so the image does not depend on the build host's CPU.

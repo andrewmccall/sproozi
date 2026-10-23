@@ -51,6 +51,15 @@ const responsesPath = "/v1/responses"
 // HandlerConfig holds all dependencies for Handler.
 type HandlerConfig struct {
 
+	// UpstreamPath maps an accepted operation's path to the provider's, such
+	// as the ChatGPT backend's Responses path. Nil keeps the path.
+	UpstreamPath func(string) string
+
+	// KeepClientHeaders forwards a Messages client's own non-credential
+	// headers, as a provider such as Copilot requires, instead of only the
+	// Anthropic protocol headers.
+	KeepClientHeaders bool
+
 	// Pricing is administrator-owned and is required whenever a cost cap is set.
 	Pricing *PricingTable
 
@@ -175,9 +184,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	e = gateway.AuditEvent(ctx, r.URL.Path)
-	e.Service = "openai"
+	e.Service = ProviderOpenAI
 	if h.protocol == anthropicProtocol {
-		e.Service = "anthropic"
+		e.Service = ProviderAnthropic
 	}
 
 	limits, _, limitErr := identity.BudgetLimits(sprooziv1alpha1.CapabilityModelInference)
@@ -196,12 +205,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Responses and Messages SSE are relayed as they arrive. Other streaming
 	// protocols are denied before reserving capacity.
-	bodyBytes, err := readBounded(r.Body, maxModelBodyBytes)
-	if err != nil {
-		h.deny(w, e, http.StatusRequestEntityTooLarge,
-			"request body exceeds gateway limit", "invalid_request_error", "request_too_large")
+	bodyBytes, ok := h.readBody(w, r, e)
+	if !ok {
 		return
 	}
+	var err error
 	if len(bodyBytes) != 0 {
 		if err := unambiguousJSON(bodyBytes); err != nil {
 			message, code := jsonRefusal(err)
@@ -238,6 +246,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	e.ProviderAuthMode = providerAuth.Mode()
+	if providerAuth.Mode() == modelauth.WorkloadMode && !modelauth.HasWorkloadCredential(r.Header) {
+		h.deny(w, e, http.StatusUnauthorized,
+			"the harness sent no provider credential; sign the harness in to its model provider",
+			"authentication_error", "provider_credential_missing")
+		return
+	}
 	if providerAuth.Mode() == modelauth.ChatGPTMode {
 		if err := validateChatGPTRequest(r, bodyBytes, limits.MaxCostMicros); err != nil {
 			h.deny(w, e, http.StatusForbidden, err.Error(), "permission_error", "chatgpt_request_not_supported")
@@ -340,7 +354,7 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, e audit.Event,
 		h.release(event, reservation)
 	}
 	upstreamReq, err := http.NewRequestWithContext(
-		ctx, r.Method, h.Config.UpstreamURL+r.URL.RequestURI(), bytes.NewReader(bodyBytes),
+		ctx, r.Method, h.Config.UpstreamURL+h.upstreamTarget(r), bytes.NewReader(bodyBytes),
 	)
 	if err != nil {
 		release()
@@ -348,7 +362,7 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, e audit.Event,
 			"failed to build upstream request", "server_error", "upstream_error")
 		return
 	}
-	h.copyProviderHeaders(upstreamReq.Header, r.Header)
+	h.copyProviderHeaders(upstreamReq.Header, r.Header, providerAuth.Mode() == modelauth.WorkloadMode)
 	if err = providerAuth.Authorize(upstreamReq); err != nil {
 		release()
 		h.deny(w, e, http.StatusServiceUnavailable, "provider authentication is unavailable", "server_error", "provider_auth_unavailable")
@@ -418,9 +432,9 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, e audit.Event,
 	defer func() { _ = resp.Body.Close() }()
 
 	var diagnostic *ResponseDiagnostic
-	credential := strings.TrimPrefix(upstreamReq.Header.Get("Authorization"), "Bearer ")
-	if h.protocol == anthropicProtocol {
-		credential = upstreamReq.Header.Get("X-Api-Key")
+	credential := upstreamReq.Header.Get("X-Api-Key")
+	if credential == "" {
+		credential = strings.TrimPrefix(upstreamReq.Header.Get("Authorization"), "Bearer ")
 	}
 	if h.Config.Diagnostics != nil {
 		described := describeResponse(resp, nil, credential)
@@ -651,12 +665,50 @@ func (h *Handler) prepareAnthropic(r *http.Request, body []byte, limits sprooziv
 	return json.Marshal(request)
 }
 
-func (h *Handler) copyProviderHeaders(target, source http.Header) {
+// readBody reads and decodes the request body, refusing an unsupported or
+// corrupt encoding and a body past the gateway limit.
+func (h *Handler) readBody(w http.ResponseWriter, r *http.Request, e audit.Event) ([]byte, bool) {
+	body, err := decodedBody(r, maxModelBodyBytes)
+	switch {
+	case errors.Is(err, errUnsupportedEncoding):
+		h.deny(w, e, http.StatusUnsupportedMediaType,
+			"request body uses an unsupported content encoding", "invalid_request_error", "unsupported_encoding")
+	case errors.Is(err, errUndecodableBody):
+		h.deny(w, e, http.StatusBadRequest, err.Error(), "invalid_request_error", "invalid_encoding")
+	case err != nil:
+		h.deny(w, e, http.StatusRequestEntityTooLarge,
+			"request body exceeds gateway limit", "invalid_request_error", "request_too_large")
+	default:
+		return body, true
+	}
+	return nil, false
+}
+
+// upstreamTarget is the provider's path and query for an accepted request.
+func (h *Handler) upstreamTarget(r *http.Request) string {
+	if h.Config.UpstreamPath == nil {
+		return r.URL.RequestURI()
+	}
+	target := h.Config.UpstreamPath(r.URL.Path)
+	if r.URL.RawQuery != "" {
+		target += "?" + r.URL.RawQuery
+	}
+	return target
+}
+
+// copyProviderHeaders never forwards cookies or the gateway credential. It
+// forwards the workload's own provider credential only in workload mode.
+func (h *Handler) copyProviderHeaders(target, source http.Header, workloadCredential bool) {
 	for k, vv := range source {
-		if slices.Contains([]string{"authorization", "x-api-key", "proxy-authorization", "cookie"}, strings.ToLower(k)) {
+		name := strings.ToLower(k)
+		credential := name == "authorization" || name == "x-api-key"
+		// The gateway forwards the body it decoded and inspected.
+		if name == "proxy-authorization" || name == "cookie" || name == "content-encoding" ||
+			credential && !workloadCredential {
 			continue
 		}
-		if h.protocol == anthropicProtocol && !slices.Contains([]string{"content-type", "accept", "anthropic-version", "anthropic-beta"}, strings.ToLower(k)) {
+		if h.protocol == anthropicProtocol && !credential && !h.Config.KeepClientHeaders &&
+			!slices.Contains([]string{"content-type", "accept", "anthropic-version", "anthropic-beta"}, name) {
 			continue
 		}
 		for _, v := range vv {

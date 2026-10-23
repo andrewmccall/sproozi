@@ -333,6 +333,23 @@ The Kubernetes route binds resources to core/v1 or apps/v1, removes the entire
 Impersonate-* header family and refuses upstream redirects in every composition.
 See [the resource scope](permissions-and-capabilities.md#kubernetes-read-scope).
 
+## Harness sign-in exposes the credential to the agent
+
+A harness that signs in itself ([ADR 0047](../adr/0047-harnesses-sign-in-to-their-own-model-providers.md)) can read its
+own provider credential, where a gateway-held key never enters the sandbox.
+
+- The gateway refuses that credential on any route other than its provider's,
+  in the URL, headers or body, but only for traffic it inspects. Opaque
+  egress destinations and an encoded or split copy get past it, so keep
+  egress profiles narrow for runs that use a harness sign-in.
+- A stolen sign-in works anywhere until you revoke it with the provider. Prefer
+  short-lived or narrowly scoped tokens, and revoke one you suspect.
+- On a forwarding route the workload's own headers choose the provider
+  account; budgets still apply to every call.
+- Locally, a harness's login volume outlives its sessions. `docker volume rm`
+  removes the sign-in.
+- Whether a provider's terms allow a mechanism is the administrator's call.
+
 ## Model budgets are not hard spending ceilings
 
 This section is the reference for how budget limits behave. Field syntax is in
@@ -563,10 +580,13 @@ and ConfigMaps across the cluster. It creates and deletes Pods, ServiceAccounts,
 NetworkPolicies and ConfigMaps only in `sproozi-agents`, through the Role in
 `config/agent-rbac`. It cannot read Secrets through the API, but a Pod it
 creates can mount any Secret in `sproozi-agents`, so keep Secrets out of that
-namespace. The optional metrics overlay adds TokenReviews and
+namespace except the harness sign-in Secrets and claims that AgentRuntimes name
+in `clientConfig.signIn`. Every run of such a runtime receives that sign-in, and
+a compromised controller could mount it, so use a token scoped to that use and
+one runtime and claim per person. The optional metrics overlay adds TokenReviews and
 SubjectAccessReviews. Restrict exec/debug access
-and reuse of trusted service accounts. The gateway holds provider credentials
-and may update its rotating ChatGPT credential Secret. ChatGPT refresh requires one active gateway process,
+and reuse of trusted service accounts. The gateway holds gateway-held provider
+credentials and may update its rotating ChatGPT credential Secret. ChatGPT refresh requires one active gateway process,
 even though budget state is shared. See
 [Model provider authentication](../guides/model-provider-auth.md).
 

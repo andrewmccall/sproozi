@@ -4,6 +4,14 @@ Sproozi separates agent execution from permission checks and provider
 credentials. The agent runs in a sandbox. A trusted gateway checks its service
 requests. A controller creates and cleans up Kubernetes runs.
 
+Model provider credentials come in three forms, chosen per harness or provider:
+a gateway-held API key, a gateway-held sign-in (a stored token or a ChatGPT
+plan sign-in), or the harness's own sign-in. The gateway attaches the first two
+itself. It forwards the third only to that provider's routes, still inspecting
+and counting each call, and refuses it on any other route. One provider table
+supplies each provider's hosts and sign-in requests for every harness
+([ADR 0047](../adr/0047-harnesses-sign-in-to-their-own-model-providers.md)).
+
 Read [core concepts](core-concepts.md) first if the resource and session names
 are new to you. This page explains where the components run and what they own.
 
@@ -62,7 +70,7 @@ graph LR
 
 The system uses separate namespaces:
 
-- `sproozi-system` holds the trusted controller, gateway and provider credentials, and the gateway's budget ledgers. Ledgers are [BudgetLedger](../reference/budgetledger.md) resources, so the gateway's write access to them never reaches the ConfigMaps that hold its configuration ([ADR 0045](../adr/0045-budget-ledgers-are-a-custom-resource.md)).
+- `sproozi-system` holds the trusted controller, gateway and gateway-held provider credentials, and the gateway's budget ledgers. Ledgers are [BudgetLedger](../reference/budgetledger.md) resources, so the gateway's write access to them never reaches the ConfigMaps that hold its configuration ([ADR 0045](../adr/0045-budget-ledgers-are-a-custom-resource.md)).
 - `sproozi-sessions` holds the remote executor, its managed runs and their registrations, so the executor's ConfigMap write access never reaches the gateway's configuration in `sproozi-system` ([ADR 0041](../adr/0041-gateway-state-namespace-and-retained-state-owners.md)).
 - `sproozi-agents` holds untrusted sandbox Pods and their run identities, network policies and input contracts.
 - Approved target namespaces, such as `sproozi-demo`, hold resources that an agent can inspect.

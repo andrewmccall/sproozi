@@ -1,8 +1,10 @@
 # Required secrets and config
 
 This page lists credentials and configuration for the Kubernetes deployment.
-Provider credentials stay in trusted cluster objects. Sandbox Pods receive client
-configuration, public trust material and a gateway identity token for the run.
+Gateway-held provider credentials stay in trusted cluster objects. Sandbox Pods
+receive client configuration, public trust material and a gateway identity
+token for the run, and, only when their AgentRuntime names one in
+`clientConfig.signIn`, the harness's own sign-in.
 [Install on Kubernetes](../guides/install-kubernetes.md) installs a release; step 7 of
 [Install from a checkout](../guides/install-from-checkout.md#7-run-a-model-on-this-cluster)
 adds the provider and GitHub credentials.
@@ -11,7 +13,8 @@ adds the provider and GitHub credentials.
 
 | Name | Namespace | Kind | Used by | Required keys |
 | --- | --- | --- | --- | --- |
-| `model-gateway-credentials` | `sproozi-system` | `Secret` | model module in API-key mode | `openai-api-key`, `anthropic-api-key` or both, each a single line |
+| `model-gateway-credentials` | `sproozi-system` | `Secret` | model module in API-key or workload mode | Any of `openai-api-key`, `anthropic-api-key`, `openai-sign-in-token`, `anthropic-sign-in-token`, `copilot-sign-in-token`, each a single line; at most one per provider. Optional in workload mode |
+| Harness sign-in Secret | `sproozi-agents` | `Secret` | sandboxes of an AgentRuntime with `clientConfig.signIn` | The key that runtime names, holding a credential the provider issued you |
 | `model-gateway-chatgpt` | `sproozi-system` | `Secret` | model module in ChatGPT mode | `session.json` |
 | `model-gateway-auth` | `sproozi-system` | `ConfigMap` | administrator auth selection (optional; default API-key mode) | `mode` |
 | `sproozi-model-gateway-pricing` | `sproozi-system` | `ConfigMap` | shared gateway model module | `pricing.json` |
@@ -84,9 +87,32 @@ The shared gateway writes newline-delimited, secret-free JSON audit events to
 container stdout. Operators should collect that stream from the shared gateway
 deployment; semantic gateway decisions are not silently discarded.
 
-`MODEL_AUTH_MODE` selects `api_key` (default) or `chatgpt`. Only the selected
-mode's credential Secret is required. ChatGPT credentials are created through the
-local consent helper, not by copying a Codex login cache. See
+`MODEL_AUTH_MODE` selects `api_key` (default), `chatgpt` or `workload`. Each
+provider uses one credential, in this order
+([ADR 0047](../adr/0047-harnesses-sign-in-to-their-own-model-providers.md)):
+
+1. Its API key, `openai-api-key` or `anthropic-api-key`.
+2. Its gateway-held sign-in token, `openai-sign-in-token` or
+   `anthropic-sign-in-token` (environment `OPENAI_SIGN_IN_TOKEN`,
+   `ANTHROPIC_SIGN_IN_TOKEN`), such as the output of `claude setup-token`. The
+   gateway sends it as a bearer, adding Anthropic's OAuth beta header. Setting
+   a key and a token for one provider is refused.
+3. In `workload` mode, the harness's own sign-in, which the gateway forwards.
+   That provider's signed-in hosts are then served too: `chatgpt.com` and
+   `auth.openai.com` for OpenAI, `platform.claude.com` for Anthropic, and
+   Copilot's `api.individual.githubcopilot.com`,
+   `api.business.githubcopilot.com` and `api.enterprise.githubcopilot.com`
+   with its `/copilot_internal/` account requests on `api.github.com`. The
+   gateway certificate must cover them. Copilot has no API key: its hosts open
+   in workload mode or with `copilot-sign-in-token`, a GitHub token the
+   gateway attaches. A request with no credential is
+   refused. The gateway holds each run's forwarded credential in memory until
+   the run's maximum duration has passed, and refuses that credential on any
+   other inspected route.
+
+In `chatgpt` mode the OpenAI provider uses the gateway's ChatGPT plan sign-in.
+Only the selected mode's credential Secret is required. ChatGPT credentials are
+created through the local consent helper, not by copying a Codex login cache. See
 [Model provider authentication](../guides/model-provider-auth.md) for the Kind
 setup, token-only subscription budget and single-refresh-owner limitation. In
 ChatGPT mode the gateway reads the ChatGPT credential Secret again at most every 10

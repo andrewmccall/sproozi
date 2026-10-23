@@ -44,6 +44,7 @@ Sproozi does not replace an agent's own reasoning or tools. It launches an exist
 
 - **Codex and Claude Code:** run locally in Docker or in Kubernetes Pods. Both support controlled session movement between Docker and Kubernetes, recorded with older client versions than the ones now pinned (see [what works today](#what-works-today)).
 - **OpenCode and Hermes:** supported for runs in Kubernetes Pods; portable sessions aren't yet supported for these agents.
+- **GitHub Copilot CLI:** supported for runs in Kubernetes Pods, using the OpenAI key on the gateway rather than a Copilot subscription; portable sessions aren't supported.
 
 [Agent support and details](docs/reference/harnesses.md)
 
@@ -64,7 +65,8 @@ sproozi run
 
 `init` asks for your API key and checks that the agent's container can't reach
 the internet directly; for scripts, pass `--credential-file FILE` or
-`--credential-stdin` instead. `run` copies the repository into a container and
+`--credential-stdin` instead, or `--sign-in` to let the agent use your own
+subscription ([how agents sign in](docs/guides/local-sessions.md#choose-how-an-agent-signs-in)). `run` copies the repository into a container and
 opens Codex there; your own directory isn't changed. Press Ctrl-] to detach.
 `sproozi ls` shows each session's ID; the first few characters are enough for
 `sproozi attach ID` to return and `sproozi stop ID` to stop. A stopped session
@@ -116,10 +118,11 @@ There's working code and recorded tests, but support varies by workflow:
 
 | Area | Current state |
 | --- | --- |
-| Agent runs in Kubernetes Pods | Tested with Codex, Claude Code, OpenCode and Hermes using deterministic providers, by [`make test-e2e`](test/acceptance/running.md#harnesses-and-hermes-in-kind). The [E2E workflow](https://github.com/andrewmccall/sproozi/actions/workflows/test-e2e.yml) runs it on pull requests and pushes to `main`; check there for the latest result, which isn't always green |
+| Agent runs in Kubernetes Pods | Tested with Codex, Claude Code, OpenCode, Copilot and Hermes using deterministic providers, by [`make test-e2e`](test/acceptance/running.md#harnesses-and-hermes-in-kind). The [E2E workflow](https://github.com/andrewmccall/sproozi/actions/workflows/test-e2e.yml) runs it on pull requests and pushes to `main`; check there for the latest result, which isn't always green |
 | Controlled access to Kubernetes and external tools | [Recorded tool-access acceptance](test/acceptance/reports/verified-mcp-demo.md) with a real model, including native Kubernetes reads, configured HTTPS test servers and denied operations. Recorded with Codex 0.154.0; not re-recorded with the current pins. The full redacted reports aren't published yet |
 | Local Docker sessions from `sproozi init` | Provisioning, per-session Codex or Claude Code selection, gateway containment probes and certificate renewal checked on macOS Docker Desktop with deterministic providers by [`make verify-local-onboarding`](test/acceptance/running.md#local-onboarding); no recorded report is published yet. See the [local sessions guide](docs/guides/local-sessions.md) |
-| Explaining refused access to the agent | Every harness receives Sproozi instructions, a `sproozi-access` skill and a `diagnose` tool for its own recent gateway refusals; tested with installed Codex, Claude Code and OpenCode clients, which call `diagnose` through the gateway after a refused request; not yet in a recorded Kind run. See [Sproozi integration](docs/reference/sproozi-integration.md) |
+| Using your own subscription | Every agent can use a gateway-held API key, a gateway-held sign-in token or ChatGPT plan sign-in, or its own sign-in, which the gateway forwards while still inspecting and counting each call ([ADR 0047](docs/adr/0047-harnesses-sign-in-to-their-own-model-providers.md)). Local Docker sessions with each harness's own sign-in are checked with deterministic providers by `make verify-local-onboarding SIGN_IN=1`; Copilot's own GitHub sign-in runs through the gateway with a fixture account in `make verify-harness-process`. No real subscription run through Sproozi is recorded |
+| Explaining refused access to the agent | Every harness receives Sproozi instructions, a `sproozi-access` skill and a `diagnose` tool for its own recent gateway refusals; tested with installed Codex, Claude Code, OpenCode and Copilot clients, which call `diagnose` through the gateway after a refused request; not yet in a recorded Kind run. See [Sproozi integration](docs/reference/sproozi-integration.md) |
 | Your own instructions and skills | One profile, `~/.sproozi/profile` in a local installation, reaches every managed Codex and Claude Code session with shared and per-harness instructions and skills. It is sent with each Docker launch and stored by digest for Kubernetes. Tested with installed clients and a Docker ↔ Kind session-mobility round trip. See [Profile](docs/reference/profile.md) |
 | Docker ↔ Kubernetes session movement | [Recorded round trips](test/acceptance/reports/verified-session-mobility.md) with Codex 0.161.0, Claude Code 2.1.27 and deterministic providers, including unfinished Git changes. The pinned clients are now Codex 0.163.0 and Claude Code 2.1.302; movement hasn't been re-recorded with them |
 | Concurrent AgentRuns | New. There's no cluster cap by default. An optional cluster cap (`--max-active-runs`) or per-policy cap (`maxActiveRuns`) keeps extra runs `Queued`. Checked with unit tests and envtest. The Kind verifier's `uncapped-policy-concurrent-runs` and `policy-cap-monotonic-cancel-cleanup` checks ([`verify.py`](hack/verify/orchestration-kind/verify.py)) run concurrent fixture runs in the [E2E workflow](https://github.com/andrewmccall/sproozi/actions/workflows/test-e2e.yml). Concurrent runs with a real model are not verified. Read the [concurrency warnings](docs/reference/security-hardening.md#concurrency-and-gateway-capacity) before sharing a cluster |

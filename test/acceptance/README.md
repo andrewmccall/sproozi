@@ -59,8 +59,13 @@ Tests must check:
   without falling back to destination access.
 - Failed upstream tool attempts consume the configured unit. Reconnection and
   policy changes do not reset usage; separate runs keep separate accounts.
-- Provider credentials stay in the gateway. Registration and credential changes
-  take effect after restart. Workload headers cannot select another account.
+- Gateway-held provider credentials stay in the gateway. Registration and
+  credential changes take effect after restart. With a gateway-held
+  credential, workload headers cannot select another account.
+- A harness's own sign-in reaches only its provider's routes: the gateway
+  refuses it in the URL, headers or body of any other inspected request, never
+  records it, and still checks and counts every model call. A request with no
+  credential is refused before budget is reserved.
 - Removing permission, cancellation and deadline expiry deny later requests and
   interrupt active requests. Test stale credentials from a separate contained
   client after the original Pod stops.

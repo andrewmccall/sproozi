@@ -1,7 +1,7 @@
 # Pinned agent clients
 
 The client images that CI and the documented verifiers build install Codex,
-Claude Code and OpenCode from the lockfiles in this directory, and run the
+Claude Code, OpenCode and Copilot from the lockfiles in this directory, and run the
 Hermes image by digest. [ADR 0021](../../docs/adr/0021-pinned-ci-inputs-and-latest-client-canary.md)
 explains why.
 
@@ -10,6 +10,7 @@ explains why.
 | Codex | `@openai/codex` | `codex/package-lock.json` | `hack/demo/codex.Dockerfile` (the base of the released native image), `hack/verify/orchestration-kind/clients.Dockerfile` |
 | Claude Code | `@anthropic-ai/claude-code` | `claude-code/package-lock.json` | `internal/runtime/docker/image/clients.Dockerfile` (the released native image), `hack/verify/orchestration-kind/clients.Dockerfile` |
 | OpenCode | `opencode-ai` | `opencode/package-lock.json` | `hack/verify/orchestration-kind/clients.Dockerfile` |
+| GitHub Copilot CLI | `@github/copilot` | `copilot/package-lock.json` | `hack/verify/orchestration-kind/clients.Dockerfile` |
 | Hermes | `docker.io/nousresearch/hermes-agent` | `HERMES_IMAGE` in `hack/verify/orchestration-kind/build.py` | `make test-e2e`, Hermes guides and `examples/orchestration/hermes-coordinator.yaml` |
 
 A new harness's client gets its own lockfile directory here. Add it to
@@ -34,7 +35,8 @@ client, so npm rejects any package whose content differs from the lockfile and
 no package lifecycle script runs. It then links each command into
 `/usr/local/bin`.
 
-Codex needs no install script. Claude Code and OpenCode each publish a
+Codex and Copilot need no install script: each wrapper selects its platform
+package at run time. Claude Code and OpenCode each publish a
 `postinstall` that copies the platform binary from an optional dependency over
 a placeholder `bin/*.exe`. Without it, the command prints an error and exits 1.
 `install.sh` does the same step itself for glibc Linux: it hard-links

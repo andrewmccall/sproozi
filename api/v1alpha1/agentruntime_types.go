@@ -42,6 +42,9 @@ func (s *AgentRuntimeSpec) ValidateRuntimeTemplate() error {
 	if err := s.ClientConfig.validateNativeSession(); err != nil {
 		return err
 	}
+	if err := s.ClientConfig.SignIn.validate(); err != nil {
+		return err
+	}
 	if len(s.PodTemplate.Spec.Containers) == 0 {
 		return fmt.Errorf("podTemplate must contain a container")
 	}
@@ -58,7 +61,7 @@ func (s *AgentRuntimeSpec) ValidateRuntimeTemplate() error {
 		return err
 	}
 	seen := map[string]bool{}
-	reserved := map[string]bool{"contract": true, "client-trust": true, "workspace": true, "tmp": true, "agent-home": true, "kubernetes-token": true, "gateway-token": true, "egress-token": true}
+	reserved := map[string]bool{"contract": true, "client-trust": true, "workspace": true, "tmp": true, "agent-home": true, "kubernetes-token": true, "gateway-token": true, "egress-token": true, "sign-in": true}
 	for _, c := range s.PodTemplate.Spec.Containers {
 		if c.Name == "" || seen[c.Name] {
 			return fmt.Errorf("podTemplate container names must be unique")
@@ -215,7 +218,7 @@ type RuntimeClientConfig struct {
 	// Harness selects supported run-local MCP configuration rendering. Empty
 	// leaves delivery to the administrator's own client launch command.
 	// +optional
-	// +kubebuilder:validation:Enum=codex;claude-code;opencode;hermes
+	// +kubebuilder:validation:Enum=codex;claude-code;opencode;hermes;copilot
 	Harness string `json:"harness,omitempty"`
 
 	// NativeSession supplies administrator-owned launch settings for managed
@@ -228,7 +231,71 @@ type RuntimeClientConfig struct {
 	// sproozi-agents namespace. The selected key contains public roots plus the
 	// dedicated inspection CA; private keys and provider credentials are forbidden.
 	TrustBundleConfigMap RuntimeConfigMapKeyReference `json:"trustBundleConfigMap"`
+
+	// SignIn delivers the harness's own provider sign-in to its workload
+	// containers, for a provider whose gateway forwards it (ADR 0047). The
+	// gateway's key placeholder is then left out.
+	// +optional
+	SignIn *RuntimeSignIn `json:"signIn,omitempty"`
 }
+
+// RuntimeSignIn holds a harness's own sign-in in the sproozi-agents namespace,
+// mounted at /etc/sproozi/sign-in. Set exactly one source. A Secret key, such
+// as a token from claude setup-token, is mounted read-only at
+// /etc/sproozi/sign-in/KEY and, with Env, also set as that environment
+// variable. A PersistentVolumeClaim is mounted read-write, so a managed
+// session's supervisor can restore the harness's login file from it before
+// launch and save the refreshed file after the harness exits.
+type RuntimeSignIn struct {
+	// +optional
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	// +kubebuilder:validation:MaxLength=253
+	SecretName string `json:"secretName,omitempty"`
+	// +optional
+	// +kubebuilder:validation:Pattern=`^[-._a-zA-Z0-9]+$`
+	// +kubebuilder:validation:MaxLength=253
+	Key string `json:"key,omitempty"`
+	// ClaimName is a PersistentVolumeClaim that keeps the harness's own
+	// login file across managed sessions, such as Claude Code's
+	// .credentials.json or Codex's auth.json.
+	// +optional
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	// +kubebuilder:validation:MaxLength=253
+	ClaimName string `json:"claimName,omitempty"`
+	// Env names an environment variable for the sign-in, such as
+	// CLAUDE_CODE_OAUTH_TOKEN or COPILOT_GITHUB_TOKEN.
+	// +optional
+	// +kubebuilder:validation:Pattern=`^[A-Za-z_][A-Za-z0-9_]*$`
+	// +kubebuilder:validation:MaxLength=128
+	Env string `json:"env,omitempty"`
+}
+
+func (in *RuntimeSignIn) validate() error {
+	switch {
+	case in == nil:
+		return nil
+	case (in.SecretName == "") == (in.ClaimName == ""):
+		return fmt.Errorf("clientConfig.signIn needs exactly one of secretName and claimName")
+	case in.SecretName != "" && in.Key == "":
+		return fmt.Errorf("clientConfig.signIn.key is required with secretName")
+	case in.ClaimName != "" && (in.Key != "" || in.Env != ""):
+		return fmt.Errorf("clientConfig.signIn.key and env apply only to a Secret")
+	case reservedSignInEnv[in.Env]:
+		return fmt.Errorf("clientConfig.signIn.env %q is set by the controller", in.Env)
+	}
+	return nil
+}
+
+// SignInDirectory is where the controller mounts a runtime's sign-in.
+const SignInDirectory = "/etc/sproozi/sign-in"
+
+// reservedSignInEnv are the variables the controller sets in every workload
+// container; a sign-in can't replace them.
+var reservedSignInEnv = map[string]bool{"SPROOZI_GATEWAY": true, "OPENAI_BASE_URL": true, "SSL_CERT_FILE": true,
+	"GIT_SSL_CAINFO": true, "NODE_EXTRA_CA_CERTS": true, "REQUESTS_CA_BUNDLE": true, "CURL_CA_BUNDLE": true,
+	"KUBECONFIG": true, "GH_HOST": true, "GH_PROMPT_DISABLED": true, "GH_NO_UPDATE_NOTIFIER": true,
+	"GIT_TERMINAL_PROMPT": true, "HTTP_PROXY": true, "HTTPS_PROXY": true, "NO_PROXY": true,
+	"http_proxy": true, "https_proxy": true, "no_proxy": true}
 
 // NativeSessionConfig configures an approved native terminal launch.
 type NativeSessionConfig struct {

@@ -145,6 +145,9 @@ type Harness struct {
 	ProviderURL    string             `json:"providerURL"`
 	ProviderCAFile string             `json:"providerCAFile,omitempty"`
 	Credential     string             `json:"credential"`
+	// Kind says what Credential holds for the gateway: an API key when empty,
+	// "token" for a sign-in token, "chatgpt" for a ChatGPT plan sign-in.
+	Kind string `json:"kind,omitempty"`
 }
 
 func (i *Installation) harness(kind harness.NativeKind) *Harness {

@@ -28,6 +28,7 @@ configuration. Unknown values fail validation and contract preparation.
 | `claude-code` | yes | `claude-mcp.json` | Claude Code `mcpServers`, HTTP transport |
 | `opencode` | no | `opencode-mcp.json` | OpenCode `mcp`, remote transport, OAuth disabled |
 | `hermes` | no | `hermes-mcp.json` | Hermes `mcp_servers`, Streamable HTTP |
+| `copilot` | no | `copilot-mcp.json` | GitHub Copilot CLI `mcpServers`, HTTP transport, all tools |
 
 Every harness needs an MCP client: there is no harness without the `sproozi`
 control connection ([ADR 0039](../adr/0039-one-harness-registry-and-the-mcp-requirement.md)).
@@ -39,7 +40,7 @@ The gateway continues to check the run and live policy on each call; rendered
 configuration cannot grant tools. Native `kubernetes.read` MCP configuration
 remains an explicit trusted launch setting, as in the [Kubernetes MCP reference](kubernetes-mcp.md).
 
-For Claude Code, OpenCode and Hermes, contract preparation also writes `instructions.txt`
+For Claude Code, OpenCode, Hermes and Copilot, contract preparation also writes `instructions.txt`
 from the template's trusted instructions and `request.json` from the run's
 untrusted task and event context. The original `input.json` remains available.
 The examples pass these separately through each harness's native input mechanism.
@@ -72,6 +73,17 @@ malformed or ambiguous result fails the container. It does not interpret the
 answer or decide whether the task was useful. Export inspection is bounded to
 8 MiB. The adapter checks completion without replacing the agent loop.
 
+GitHub Copilot CLI replaces the launch shell with one stock `copilot --prompt`
+invocation. Its exit status is trustworthy: it exits nonzero when the model
+call fails or the gateway refuses it, and zero only after its final `result`
+record. With `--output-format json` its standard output is one JSON event per
+line. Copilot has no system prompt flag, so the example writes the trusted
+instructions and both integration files to `$COPILOT_HOME/copilot-instructions.md`,
+which Copilot adds to its system prompt, and passes `request.json` as the
+prompt. Copilot also loads `AGENTS.md` and similar instruction files from the
+workspace; `--no-custom-instructions` would disable the Sproozi file too.
+Copilot names MCP tools `<connection>-<tool>`, such as `sproozi-diagnose`.
+
 Hermes uses `hermes-launch.py` around one native `chat --oneshot`
 invocation. The helper loads fresh native configuration, passes trusted template
 instructions as a temporary system prompt, and selects only configured MCP
@@ -97,12 +109,17 @@ user/project settings and hooks. OpenCode's custom config normally merges with
 other settings, so its example also disables project config and isolates global
 state. Its `--pure` mode disables external plugins; the example also disables
 discovered skills, sharing, auto-updates, catalog fetching and LSP downloads.
+Copilot's example loads the contract's MCP file with `--additional-mcp-config`,
+disables its built-in GitHub MCP server, sets `COPILOT_OFFLINE=true` so it makes
+no GitHub sign-in, telemetry or update requests, and disables remote control.
 These settings limit automatically loaded client features. The gateway and
 enforcing CNI remain responsible for permission checks and network restrictions.
 
 The native formats follow the official [Claude Code CLI reference](https://code.claude.com/docs/en/cli-reference),
 [OpenCode configuration](https://opencode.ai/docs/config/) and
-[OpenCode MCP reference](https://opencode.ai/docs/mcp-servers/).
+[OpenCode MCP reference](https://opencode.ai/docs/mcp-servers/), and
+`copilot help environment`, `copilot help providers` and `copilot mcp --help`
+for the GitHub Copilot CLI.
 
 ## Managed interactive sessions
 
@@ -111,7 +128,7 @@ TUI while moving its harness conversation and Git workspace from Docker to a
 fixed Kubernetes profile and back. Managed launches require an explicit
 immutable `codex` or `claude-code` selector. Both placements, the profile and
 the checkpoint must use the same selected harness. A move cannot switch harnesses.
-OpenCode and Hermes runs can't be moved.
+OpenCode, Hermes and Copilot runs can't be moved.
 
 The workflow in [Run a task remotely, then resume it locally](../guides/portable-workflows.md) supports remote tasks only for managed Codex. Its completion observer requires the
 submitted task text and a new completed turn. It then follows the usual stop,
@@ -167,7 +184,29 @@ records the transcript edge cases.
 
 ## Model providers
 
-Codex, Hermes and the OpenCode example use the existing OpenAI Responses route.
+Every harness can authenticate in any of three ways: a gateway-held API key, a
+gateway-held sign-in (a stored token, or OpenAI's ChatGPT plan mode), or its
+own sign-in, which the gateway forwards while still inspecting and counting
+each call. Provider hosts and sign-in requests come from one provider table;
+see [ADR 0047](../adr/0047-harnesses-sign-in-to-their-own-model-providers.md),
+[local setup](../guides/local-sessions.md#choose-how-an-agent-signs-in) and
+[AgentRuntime sign-in](agentruntime.md#harness-sign-in). The rest of this
+section describes gateway-held credentials.
+
+Codex, Hermes and the OpenCode and Copilot examples use the existing OpenAI
+Responses route. Copilot runs in its bring-your-own-key mode
+(`COPILOT_PROVIDER_BASE_URL`, `COPILOT_PROVIDER_WIRE_API=responses`), so it
+needs no GitHub account or Copilot subscription. With a Copilot plan instead,
+leave out the `COPILOT_PROVIDER_*` variables and give Copilot a GitHub token
+as `COPILOT_GITHUB_TOKEN`, through
+[`clientConfig.signIn`](agentruntime.md#harness-sign-in) (its own sign-in) or
+the gateway's `copilot-sign-in-token`. The gateway then serves Copilot's model
+API (`/responses`, `/v1/messages`, `/chat/completions`, `/models` and `/auto`)
+and its `/copilot_internal/` account requests on `api.github.com`, and refuses
+GitHub's built-in MCP server, agents, experiments and telemetry. Copilot loads
+MCP servers, including Sproozi's, only if its account allows them
+(`is_mcp_enabled`). Models that stream chat completions, such as Gemini, are
+refused.
 OpenCode uses a configured bundled OpenAI SDK provider rather than an external
 execution server. OpenAI API-key or ChatGPT authentication remains administrator
 configuration. ChatGPT compatibility is established for the recorded Codex
@@ -181,18 +220,20 @@ code `streaming_not_supported`). ChatGPT mode accepts only `GET /v1/models` and
 Claude Code uses Anthropic's native Messages API through the reserved
 `api.anthropic.com:443` route and `model.inference` grant. Set `ANTHROPIC_API_KEY`
 on the trusted gateway through the optional `anthropic-api-key` key of the
-`model-gateway-credentials` Secret. No key enters the sandbox; the example
-supplies only a harmless placeholder. `MODEL_AUTH_MODE` still selects OpenAI
-authentication. In API-key mode, at least one OpenAI or Anthropic key must be
-configured when model inference is enabled. Anthropic-only operation does not
-require an OpenAI key. Claude subscription, Bedrock, Vertex and remote-control
-integration are outside this contract.
+`model-gateway-credentials` Secret, or a gateway-held sign-in token through
+`anthropic-sign-in-token`. No key enters the sandbox; the example supplies only
+a harmless placeholder. A Claude subscription works either as that token or as
+Claude Code's own sign-in, described above. In API-key mode, at least one
+OpenAI or Anthropic key or token must be configured when model inference is
+enabled. Anthropic-only operation does not require an OpenAI key. Bedrock,
+Vertex and remote-control integration are outside this contract.
 
 The gateway certificate must cover `api.anthropic.com` when its handler is
 active. The sandbox trust bundle must include the inspection CA. A disabled
 Anthropic authority stays reserved, so generic destination egress cannot supply
-weaker access to the provider. Workload provider credentials and account headers
-do not select the account; the gateway replaces them and refuses redirects.
+weaker access to the provider. With a gateway-held credential, workload provider
+credentials and account headers don't select the account: the gateway replaces
+them and refuses redirects.
 
 Messages supports `POST /v1/messages`, optionally with `?beta=true`, JSON and
 SSE. The gateway streams SSE to the client as it arrives and settles the call

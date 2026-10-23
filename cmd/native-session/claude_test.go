@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -191,5 +192,16 @@ func TestClaudeJournalDiagnosticsExposeOnlyFixedCategories(t *testing.T) {
 		if got := claudeJournalDiagnostic(errors.New(tc.message)); got != tc.category {
 			t.Fatalf("fixed diagnostic category: got %s, want %s", got, tc.category)
 		}
+	}
+}
+
+func TestClaudeApprovesOnlyAGatewayPlaceholder(t *testing.T) {
+	placeholder := claudePreferences([]string{"ANTHROPIC_API_KEY=sproozi-worker-placeholder"})
+	approved, _ := placeholder["customApiKeyResponses"].(map[string]any)
+	if approved == nil || !reflect.DeepEqual(approved["approved"], []string{"sproozi-worker-placeholder"[6:]}) {
+		t.Fatalf("placeholder not approved: %v", placeholder)
+	}
+	if signedIn := claudePreferences([]string{"PATH=/usr/bin"}); signedIn["customApiKeyResponses"] != nil {
+		t.Fatalf("a harness signing in itself approved a key: %v", signedIn)
 	}
 }

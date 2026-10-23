@@ -128,8 +128,8 @@ fails, naming the file to change, unless:
 They don't prove that a stock client loads its MCP file or that a launch
 completes. Review those, and run the verifiers:
 `make verify-harness-clients` loads generated configuration in installed
-Codex, Claude Code and OpenCode (not Hermes, and not bridges);
-`make verify-harness-process` runs Claude Code and OpenCode through the
+Codex, Claude Code, OpenCode and Copilot (not Hermes, and not bridges);
+`make verify-harness-process` runs Claude Code, OpenCode and Copilot through the
 gateway, including `diagnose`. To verify a bridge-based harness, run the hook,
 then load the bridge in the real client with configuration rendered by
 a local fake MCP server:

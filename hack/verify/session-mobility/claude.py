@@ -41,6 +41,9 @@ BASE = module("claude_mobility_base", HERE / "verify.py")
 KUBE = module("claude_mobility_kube", HERE / "kubernetes.py")
 PROBES = module("claude_mobility_probes", HERE / "admin_probes.py")
 TOKEN = "claude-fixture-placeholder"
+# A harness that signs in itself sends its own OAuth access token as a bearer
+# instead of the gateway's key (ADR 0047).
+OAUTH_TOKEN = "sk-ant-oat01-claude-fixture-own-sign-in"
 MODEL = "claude-sonnet-4-5"
 INSTRUCTIONS = "Only this deterministic local fixture is approved. INITIAL_CLAUDE_111."
 TOOL_MARKER = "TOOL_FACT=ochre-mole-392"
@@ -197,7 +200,8 @@ def provider_class(args, out, stop, records, lock):
                     self.send_error(413)
                     return
                 body = json.loads(self.rfile.read(size))
-                if self.headers.get("x-api-key") != TOKEN:
+                signed_in = self.headers.get("Authorization") == "Bearer " + OAUTH_TOKEN
+                if self.headers.get("x-api-key") != TOKEN and not signed_in:
                     self.send_error(403, "Only the public fixture credential is accepted")
                     return
                 path = urlsplit(self.path).path
@@ -213,7 +217,7 @@ def provider_class(args, out, stop, records, lock):
                     self.send_error(404)
                     return
                 request = classify(body)
-                request.update(body=body, placeholderAuth=True, completed=False,
+                request.update(body=body, placeholderAuth=True, signedIn=signed_in, completed=False,
                                profileMarkers=BASE.profile_markers(json.dumps(body)),
                                profileSkill=("profile:" + BASE.PROFILE_SKILL) in json.dumps(body))
                 with lock:

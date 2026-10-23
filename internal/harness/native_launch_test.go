@@ -18,15 +18,19 @@ func TestNativeBaseEnvironmentSelectsOnlyTheApprovedHarnessPlaceholder(t *testin
 		{NativeCodex, nativeOpenAIKey, nativeAnthropicKey},
 		{NativeClaude, nativeAnthropicKey, nativeOpenAIKey},
 	} {
-		env, err := NativeBaseEnvironment(tc.kind, "exact-incarnation")
+		env, err := NativeBaseEnvironment(tc.kind, "exact-incarnation", false)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if !slices.Contains(env, tc.key+"=sproozi-worker-placeholder") || !slices.Contains(env, "SPROOZI_EXECUTION_UID=exact-incarnation") || slices.Contains(env, tc.other+"=sproozi-worker-placeholder") {
 			t.Fatalf("environment=%v", env)
 		}
+		signedIn, err := NativeBaseEnvironment(tc.kind, "exact-incarnation", true)
+		if err != nil || slices.ContainsFunc(signedIn, func(e string) bool { return strings.HasSuffix(e, "_API_KEY=sproozi-worker-placeholder") }) {
+			t.Fatalf("a harness that signs in itself got a placeholder key: %v %v", signedIn, err)
+		}
 	}
-	if _, err := NativeBaseEnvironment(NativeKind("unknown"), "exact-incarnation"); err == nil {
+	if _, err := NativeBaseEnvironment(NativeKind("unknown"), "exact-incarnation", false); err == nil {
 		t.Fatal("unknown harness admitted")
 	}
 }

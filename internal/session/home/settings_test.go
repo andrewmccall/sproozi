@@ -33,7 +33,7 @@ func TestServeProblemsAcceptComposedConfigAndNameEveryGap(t *testing.T) {
 		"local.helperImageID", "local.anchorImageID", "local.networkName", "local.gatewayIPv4", "local.gatewayPort",
 		"local.instructions", "local.agentLimits", "local.volumeBytes", "local.maxCheckpointBytes",
 		"gateway.listen", "gateway.certificateFile", "gateway.keyFile", "gateway.trustBundleFile",
-		"gateway.providerURL", "gateway.providerTokenFile"} {
+		"gateway.providerURL"} {
 		if !slices.Contains(keys, key) {
 			t.Errorf("starter configuration problems omit %s: %v", key, keys)
 		}

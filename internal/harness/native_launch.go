@@ -14,6 +14,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	api "github.com/andrewmccall/sproozi/api/v1alpha1"
+
 	"github.com/andrewmccall/sproozi/internal/agentcontract"
 
 	"github.com/andrewmccall/sproozi/internal/nativeconfig"
@@ -46,6 +48,11 @@ type NativeLaunch struct {
 	// ProfileArchive is the user's profile for a Docker launch. Kubernetes
 	// mounts the stored archive at NativeProfileArchive instead.
 	ProfileArchive []byte `json:"profileArchive,omitempty"`
+	// SignInDirectory holds the harness's own login file, outside the
+	// session, for a Kubernetes launch whose runtime names a sign-in. The
+	// supervisor restores the file into the native home before launch and,
+	// when the directory is writable, saves it after the harness exits.
+	SignInDirectory string `json:"signInDirectory,omitempty"`
 }
 
 // NativeUserInstructionsFile is the native user-level instruction file name
@@ -186,6 +193,9 @@ func (c NativeLaunch) Validate(now time.Time) error {
 		len(c.ProfileArchive) > NativeProfileArchiveMaxBytes {
 		return errors.New("invalid native launch contract")
 	}
+	if c.SignInDirectory != "" && c.SignInDirectory != api.SignInDirectory {
+		return errors.New("native sign-in must come from the controller's sign-in directory")
+	}
 	if utf8.RuneCountInString(c.Task) > agentcontract.MaxTaskRunes || strings.ContainsRune(c.Task, 0) ||
 		c.Task != "" && (strings.TrimSpace(c.Task) == "" || c.Harness != NativeCodex) {
 		return errors.New("native task requires bounded nonempty Codex input")
@@ -222,16 +232,23 @@ func (c NativeLaunch) Validate(now time.Time) error {
 }
 
 // NativeBaseEnvironment is the public, credential-free environment shared by
-// both backends. Each authority adds its own fresh proxy/token binding.
-func NativeBaseEnvironment(kind NativeKind, executionUID string) ([]string, error) {
+// both backends. Each authority adds its own fresh proxy/token binding. A
+// harness that signs in itself gets no provider key placeholder, which would
+// otherwise take precedence over its own sign-in (ADR 0047).
+func NativeBaseEnvironment(kind NativeKind, executionUID string, signIn bool) ([]string, error) {
 	if err := kind.Validate(); err != nil {
 		return nil, err
+	}
+	env := make([]string, 0, 8)
+	env = append(env, "PATH=/opt/git/bin:/usr/local/bin:/usr/bin:/bin", "TERM=xterm-256color", "LANG=C.UTF-8",
+		"GIT_TERMINAL_PROMPT=0", "GH_PROMPT_DISABLED=1", "GH_TOKEN=sproozi-worker-placeholder",
+		"SPROOZI_EXECUTION_UID="+executionUID)
+	if signIn {
+		return env, nil
 	}
 	apiKey := nativeOpenAIKey
 	if kind == NativeClaude {
 		apiKey = nativeAnthropicKey
 	}
-	return []string{"PATH=/opt/git/bin:/usr/local/bin:/usr/bin:/bin", "TERM=xterm-256color", "LANG=C.UTF-8",
-		"GIT_TERMINAL_PROMPT=0", "GH_PROMPT_DISABLED=1", "GH_TOKEN=sproozi-worker-placeholder",
-		"SPROOZI_EXECUTION_UID=" + executionUID, apiKey + "=sproozi-worker-placeholder"}, nil
+	return append(env, apiKey+"=sproozi-worker-placeholder"), nil
 }

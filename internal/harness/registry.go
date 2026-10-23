@@ -41,6 +41,11 @@ type Harness struct {
 	NativeDirectory string
 	// Protocol is the model API the managed kind speaks through the gateway.
 	Protocol ModelProtocol
+	// SignInFile is where the stock client keeps its own sign-in, relative to
+	// NativeDirectory (ADR 0047). The placement persists only this file when
+	// the harness signs in itself; the provider's routes are shared by every
+	// harness that uses it.
+	SignInFile string
 }
 
 // MCPFormat is a harness's MCP configuration file. A JSON file holds a map,
@@ -89,8 +94,10 @@ const mcpServersField = "mcpServers"
 
 var registry = []Harness{
 	{Selector: string(NativeCodex), Native: NativeCodex, NativeDirectory: string(NativeCodex), Protocol: ProtocolOpenAI,
-		MCP: MCPFormat{File: "codex-mcp.toml"}, Loader: NativeMCP},
+		SignInFile: "auth.json",
+		MCP:        MCPFormat{File: "codex-mcp.toml"}, Loader: NativeMCP},
 	{Selector: string(NativeClaude), Native: NativeClaude, NativeDirectory: "claude", Protocol: ProtocolAnthropic,
+		SignInFile:   ".credentials.json",
 		RequestFiles: true, Loader: NativeMCP,
 		MCP: MCPFormat{File: "claude-mcp.json", Field: mcpServersField, Entry: func(name, address string) (string, any) {
 			return name, map[string]any{connectionType: httpTransport, connectionURL: address}
@@ -98,6 +105,10 @@ var registry = []Harness{
 	{Selector: "opencode", RequestFiles: true, Loader: NativeMCP, LaunchFiles: launchFilesNamed("opencode-launch.py"),
 		MCP: MCPFormat{File: "opencode-mcp.json", Field: "mcp", Entry: func(name, address string) (string, any) {
 			return name, map[string]any{connectionType: "remote", connectionURL: address, "enabled": true, "oauth": false}
+		}}},
+	{Selector: "copilot", RequestFiles: true, Loader: NativeMCP,
+		MCP: MCPFormat{File: "copilot-mcp.json", Field: mcpServersField, Entry: func(name, address string) (string, any) {
+			return name, map[string]any{connectionType: httpTransport, connectionURL: address, "tools": []string{"*"}}
 		}}},
 	{Selector: "hermes", RequestFiles: true, Loader: NativeMCP, LaunchFiles: launchFilesNamed("hermes-launch.py"),
 		MCP: MCPFormat{File: "hermes-mcp.json", Field: "mcp_servers", Entry: func(name, address string) (string, any) {

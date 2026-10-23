@@ -85,6 +85,21 @@ func TestManagedLaunchProjectsFreshKindSpecificPlaceholderAndHarness(t *testing.
 					t.Fatal("launch inherited another provider's credential")
 				}
 			}
+			// A runtime with the harness's own sign-in gets no placeholder, and
+			// the supervisor restores the login from the sign-in directory.
+			rt.Spec.ClientConfig.SignIn = &api.RuntimeSignIn{ClaimName: "login"}
+			signedIn := map[string]string{}
+			if err = addManagedNativeContract(t.Context(), kube, run, template, rt, &corev1.ConfigMap{Data: signedIn}); err != nil {
+				t.Fatal(err)
+			}
+			launch = harness.NativeLaunch{}
+			if err = json.Unmarshal([]byte(signedIn[nativeConfigKey]), &launch); err != nil {
+				t.Fatal(err)
+			}
+			if launch.SignInDirectory != api.SignInDirectory || slices.Contains(launch.Env, key+"=sproozi-worker-placeholder") {
+				t.Fatalf("signed-in launch: directory=%q env=%v", launch.SignInDirectory, launch.Env)
+			}
+			rt.Spec.ClientConfig.SignIn = nil
 			rt.Spec.ClientConfig.Harness = "mismatched"
 			if err = addManagedNativeContract(t.Context(), kube, run, template, rt, &corev1.ConfigMap{Data: map[string]string{}}); err == nil {
 				t.Fatal("launch accepted client/registration mismatch")

@@ -43,7 +43,7 @@ func inspectionCertificate(t *testing.T) tls.Certificate {
 	if err != nil {
 		t.Fatal(err)
 	}
-	template := &x509.Certificate{SerialNumber: big.NewInt(1), DNSNames: []string{modelHostname, controlHost, "api.anthropic.com", "github.com", "api.github.com", "kubernetes.default.svc"}, NotBefore: time.Now().Add(-time.Minute), NotAfter: time.Now().Add(time.Hour)}
+	template := &x509.Certificate{SerialNumber: big.NewInt(1), DNSNames: []string{modelHostname, controlHost, anthropicHostname, "platform.claude.com", "github.com", "api.github.com", "kubernetes.default.svc"}, NotBefore: time.Now().Add(-time.Minute), NotAfter: time.Now().Add(time.Hour)}
 	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
 	if err != nil {
 		t.Fatal(err)
@@ -62,7 +62,7 @@ func testLocalGatewayAllocation(t *testing.T, kind harness.NativeKind) {
 	authority, requestBody, responseBody := modelHostname, `{"model":"fixture","input":"controlled turn","max_output_tokens":1}`, `{"usage":{"total_tokens":1}}`
 	auth := modelauth.Authenticator(modelauth.APIKey{Key: trustedProviderKey})
 	if kind == harness.NativeClaude {
-		authority = "api.anthropic.com"
+		authority = anthropicHostname
 		requestBody = `{"model":"fixture","messages":[{"role":"user","content":"controlled turn"}],"max_tokens":1}`
 		responseBody = `{"type":"message","id":"msg-local","model":"fixture","role":"assistant","content":[{"type":"text","text":"done"}],"stop_reason":"end_turn","usage":{"input_tokens":0,"output_tokens":1}}`
 		auth = modelauth.AnthropicAPIKey{Key: trustedProviderKey}

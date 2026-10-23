@@ -50,6 +50,9 @@ type options struct {
 	instructionsFile   string
 	credentialStdin    bool
 	skipCheck          bool
+	signIn             bool
+	token              bool
+	chatgpt            bool
 	noService          bool
 	json               bool
 	leaveRunning       bool
@@ -124,6 +127,7 @@ func parse(args []string) (options, error) {
 	q.operation, q.id = str("operation"), str("id")
 	q.local = boolean("local")
 	q.credentialStdin, q.skipCheck = boolean("credential-stdin"), boolean("skip-credential-check")
+	q.signIn, q.token, q.chatgpt = boolean("sign-in"), boolean("token"), boolean("chatgpt")
 	q.noService, q.json, q.leaveRunning = boolean("no-service"), boolean("json"), boolean("leave-running")
 	q.checkProvider, q.detach = boolean("check-provider"), boolean("detach")
 	q.remote = boolean("remote") || q.context != "" || q.namespace != ""
@@ -256,6 +260,9 @@ func (q *options) validate(str func(string) string) error {
 	if q.credentialStdin && q.credentialFile != "" {
 		return usagef("choose --credential-file or --credential-stdin")
 	}
+	if err := q.validateCredentialChoice(); err != nil {
+		return err
+	}
 	if c.name == cmdMove && q.local == q.remote {
 		return usagef("move needs --local (to this machine) or --remote (to a cluster)")
 	}
@@ -356,3 +363,19 @@ func validIDPrefix(id string) bool {
 }
 
 func isWindows() bool { return goos == "windows" }
+
+// validateCredentialChoice allows one way for the gateway or the harness to
+// authenticate (ADR 0047).
+func (q *options) validateCredentialChoice() error {
+	if btoi(q.signIn)+btoi(q.token)+btoi(q.chatgpt) > 1 {
+		return usagef("choose one of --sign-in, --token and --chatgpt")
+	}
+	keyInput := q.credentialStdin || q.credentialFile != ""
+	if q.chatgpt && keyInput {
+		return usagef("--chatgpt signs in in the browser; leave out --credential-file and --credential-stdin")
+	}
+	if q.signIn && keyInput {
+		return usagef("--sign-in stores no key; leave out --credential-file and --credential-stdin")
+	}
+	return nil
+}

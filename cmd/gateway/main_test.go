@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
+	"io"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -22,6 +23,7 @@ import (
 	k8stesting "k8s.io/client-go/testing"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
+	"github.com/andrewmccall/sproozi/internal/audit"
 	"github.com/andrewmccall/sproozi/internal/budget"
 	budgetkubernetes "github.com/andrewmccall/sproozi/internal/budget/kubernetes"
 	"github.com/andrewmccall/sproozi/internal/endpoints/destination"
@@ -72,6 +74,12 @@ func validGatewayEnvironment(t *testing.T) {
 				"kubernetes.default.svc",
 				"api.openai.com",
 				"api.anthropic.com",
+				"chatgpt.com",
+				"auth.openai.com",
+				"platform.claude.com",
+				"api.individual.githubcopilot.com",
+				"api.business.githubcopilot.com",
+				"api.enterprise.githubcopilot.com",
 				"github.com",
 				"api.github.com",
 				"pypi.org",
@@ -490,6 +498,72 @@ func TestAnthropicStartupAndReservedRoute(t *testing.T) {
 	}
 }
 
+func TestWorkloadModeForwardsEachHarnessSignIn(t *testing.T) {
+	validGatewayEnvironment(t)
+	t.Setenv("MODEL_AUTH_MODE", "workload")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	cfg, err := loadStartupConfig()
+	if err != nil {
+		t.Fatalf("workload mode needs no gateway key: %v", err)
+	}
+	for _, host := range []string{"api.openai.com", "api.anthropic.com"} {
+		if _, ok := cfg.certificates[host]; !ok {
+			t.Fatalf("%s is not inspected in workload mode", host)
+		}
+	}
+	openAI, anthropic, signedIn := modelHandlers(cfg, audit.NewLogger(io.Discard), http.DefaultClient, nil, nil)
+	if openAI == nil || anthropic == nil {
+		t.Fatal("both provider routes are enabled in workload mode")
+	}
+	handlers := map[api.CapabilityKind]http.Handler{api.CapabilityModelInference: openAI}
+	routes := composeDispatcher(cfg, handlers, nil, anthropic, signedIn)
+	for _, authority := range []string{"api.openai.com:443", "api.anthropic.com:443", "chatgpt.com:443"} {
+		if !routes.Allows(authority) || !routes[authority].ProviderCredential {
+			t.Fatalf("%s does not forward the harness's own credential", authority)
+		}
+	}
+	for _, authority := range []string{"auth.openai.com:443", "platform.claude.com:443"} {
+		if !routes.Allows(authority) || routes[authority].ProviderCredential {
+			t.Fatalf("%s is not a sign-in relay", authority)
+		}
+	}
+	if routes["api.github.com:443"].ProviderCredential {
+		t.Fatal("a non-model route was marked as carrying a provider credential")
+	}
+	// A provider with a gateway key keeps it; the other forwards each
+	// harness's own sign-in.
+	t.Setenv("OPENAI_API_KEY", "openai-fixture-key")
+	cfg, err = loadStartupConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	openAI, anthropic, signedIn = modelHandlers(cfg, audit.NewLogger(io.Discard), http.DefaultClient, nil, nil)
+	handlers = map[api.CapabilityKind]http.Handler{api.CapabilityModelInference: openAI}
+	routes = composeDispatcher(cfg, handlers, nil, anthropic, signedIn)
+	if routes["api.openai.com:443"].ProviderCredential || !routes["api.anthropic.com:443"].ProviderCredential ||
+		routes.Allows("chatgpt.com:443") || !routes.Allows("platform.claude.com:443") {
+		t.Fatal("a mixed gateway forwarded the wrong provider's credential")
+	}
+	// A gateway-held sign-in token is attached for its provider.
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("OPENAI_SIGN_IN_TOKEN", "fixture-sign-in-token")
+	cfg, err = loadStartupConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if auth, _ := providerAuth(cfg, "openai"); auth.Mode() != modelauth.TokenMode {
+		t.Fatalf("openai uses %v", auth)
+	}
+	t.Setenv("OPENAI_API_KEY", "openai-fixture-key")
+	if _, err = loadStartupConfig(); err == nil {
+		t.Fatal("a key and a sign-in token for one provider were accepted")
+	}
+	if mode := openAI.(*modelgateway.Handler).Config.ProviderAuth.Mode(); mode != modelauth.APIKeyMode {
+		t.Fatalf("the OpenAI route with a gateway key uses %s", mode)
+	}
+}
+
 func TestGitHubAppAcceptsPKCS8PrivateKey(t *testing.T) {
 	validGatewayEnvironment(t)
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -803,5 +877,48 @@ func TestGatewayWarnsAboutUpgradeResidue(t *testing.T) {
 		if strings.Contains(out.String(), "WARNING") != allowed {
 			t.Fatalf("allowed=%v: output %q", allowed, out.String())
 		}
+	}
+}
+
+// Copilot has no API-key host: its plan hosts serve a forwarded GitHub
+// sign-in in workload mode, or a gateway-held GitHub token (ADR 0047).
+func TestCopilotHostsServeAForwardedSignInOrAGatewayToken(t *testing.T) {
+	validGatewayEnvironment(t)
+	t.Setenv("OPENAI_API_KEY", "openai-fixture-key")
+	for _, tc := range []struct {
+		mode, token string
+		forwards    bool
+	}{{"workload", "", true}, {"api_key", "gho_gateway-held", false}} {
+		t.Setenv("MODEL_AUTH_MODE", tc.mode)
+		t.Setenv("COPILOT_SIGN_IN_TOKEN", tc.token)
+		cfg, err := loadStartupConfig()
+		if err != nil {
+			t.Fatal(err)
+		}
+		openAI, anthropic, signedIn := modelHandlers(cfg, audit.NewLogger(io.Discard), http.DefaultClient, nil, nil)
+		handlers := map[api.CapabilityKind]http.Handler{api.CapabilityModelInference: openAI}
+		routes := composeDispatcher(cfg, handlers, nil, anthropic, signedIn)
+		for _, authority := range []string{"api.individual.githubcopilot.com:443", "api.business.githubcopilot.com:443"} {
+			if !routes.Allows(authority) || routes[authority].ProviderCredential != tc.forwards {
+				t.Fatalf("%s mode: %s allowed=%v forwards=%v", tc.mode, authority, routes.Allows(authority),
+					routes[authority].ProviderCredential)
+			}
+		}
+		if account, _, _ := routes.Select("api.github.com:443", "/copilot_internal/user"); account.Handler == nil ||
+			account.ProviderCredential != tc.forwards {
+			t.Fatalf("%s mode: Copilot's account route %+v", tc.mode, account)
+		}
+	}
+	t.Setenv("MODEL_AUTH_MODE", "api_key")
+	t.Setenv("COPILOT_SIGN_IN_TOKEN", "")
+	cfg, err := loadStartupConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	openAI, anthropic, signedIn := modelHandlers(cfg, audit.NewLogger(io.Discard), http.DefaultClient, nil, nil)
+	handlers := map[api.CapabilityKind]http.Handler{api.CapabilityModelInference: openAI}
+	routes := composeDispatcher(cfg, handlers, nil, anthropic, signedIn)
+	if routes.Allows("api.individual.githubcopilot.com:443") {
+		t.Fatal("Copilot's host opened without a credential")
 	}
 }

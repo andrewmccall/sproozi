@@ -152,7 +152,7 @@ verify-mcp-client: ## Load generated MCP config in the installed stock Codex CLI
 	python3 hack/verify/mcp-client.py
 
 .PHONY: verify-harness-clients
-verify-harness-clients: ## Load generated MCP config in installed Codex, Claude Code and OpenCode; no model request.
+verify-harness-clients: ## Load generated MCP config in installed Codex, Claude Code, OpenCode and Copilot; no model request.
 	python3 hack/verify/harness-clients.py
 
 .PHONY: verify-native-session
@@ -160,7 +160,7 @@ verify-native-session: ## Resume installed stock Codex across checkpoint capture
 	python3 hack/verify/native-session.py --state rollout
 
 .PHONY: verify-harness-process
-verify-harness-process: ## Run installed Claude Code and OpenCode through the TLS gateway with local providers, including diagnose.
+verify-harness-process: ## Run installed Claude Code, OpenCode and Copilot through the TLS gateway with local providers, including diagnose.
 	go run ./hack/verify/harness-process --output .local/verification/harness-process.json
 
 .PHONY: verify-mcp-kind
@@ -168,8 +168,8 @@ verify-mcp-kind: ## Prove configured MCP with stock Codex in an owned Kind clust
 	KIND_NODE_IMAGE='$(KIND_NODE_IMAGE)' bash hack/verify/mcp-kind.sh
 
 .PHONY: verify-local-onboarding
-verify-local-onboarding: ## Prove sproozi init, both harnesses, profile instructions and renewal on this Docker engine with local providers.
-	python3 hack/verify/local-onboarding.py
+verify-local-onboarding: ## Prove sproozi init, both harnesses, profile instructions and renewal on this Docker engine with local providers; SIGN_IN=1 uses each harness's own sign-in.
+	python3 hack/verify/local-onboarding.py $(if $(SIGN_IN),--sign-in)
 
 .PHONY: verify-kubernetes-release
 verify-kubernetes-release: ## Install the release Kubernetes assets in an owned Kind cluster; prove first check, renewal, rotation and RBAC.

@@ -1,6 +1,6 @@
 # Stock CLI harness runtimes
 
-These administrator-owned runtime examples launch Claude Code, OpenCode or Hermes as the
+These administrator-owned runtime examples launch Claude Code, OpenCode, GitHub Copilot CLI or Hermes as the
 `agent` process in a disposable Sproozi Pod. Replace each `example/...@sha256:...`
 image with a reviewed, digest-pinned image containing `/bin/sh`, `cat` and the
 selected stock CLI. The OpenCode image also needs Python 3. Set `SPROOZI_MODEL` to a provider model available to your
@@ -28,14 +28,29 @@ API error, so the adapter reports failure when terminal session evidence is
 missing or contains a native error. It requires fresh state and does not judge
 task quality.
 
-Claude Code uses Anthropic Messages through `api.anthropic.com`, with API-key
-billing configured on the gateway. Claude subscription authentication, Bedrock,
-Vertex, managed loops and remote-control sessions are outside these examples.
+GitHub Copilot CLI uses OpenAI Responses through `api.openai.com` in its
+bring-your-own-key mode, so it needs no GitHub sign-in. Offline mode stops its
+GitHub sign-in, telemetry and update requests, and the example disables its
+built-in GitHub MCP server and remote control. Its exit status reports the
+outcome. It reads the trusted instructions from
+`$COPILOT_HOME/copilot-instructions.md`, which the example writes. Use only
+model identifiers available from your OpenAI account.
+
+Claude Code uses Anthropic Messages through `api.anthropic.com`, with an API key
+or sign-in token configured on the gateway. Bedrock, Vertex, managed loops and
+remote-control sessions are outside these examples.
 `--setting-sources ''` and `--strict-mcp-config` restrict settings and MCP loading;
 hooks and slash-command discovery are disabled. No existing sessions are mounted.
 
-These CLIs receive harmless model-key placeholders. Provider keys belong only to
-the gateway. The gateway certificate must cover the selected provider authority,
+These CLIs receive harmless model-key placeholders, and the gateway holds the
+provider credential. To have a harness use its own sign-in instead, such as a
+Claude subscription token from `claude setup-token`, add
+[`clientConfig.signIn`](../../docs/reference/agentruntime.md#harness-sign-in) to
+its runtime and set `MODEL_AUTH_MODE=workload` on the gateway; the placeholder
+key is then left out. For Claude Code, name the Secret key with
+`env: CLAUDE_CODE_OAUTH_TOKEN`. For Copilot on its own Copilot plan, remove the
+`COPILOT_PROVIDER_*` and `COPILOT_OFFLINE` lines and name the GitHub token with
+`env: COPILOT_GITHUB_TOKEN`. The gateway certificate must cover the selected provider authority,
 and the mounted trust bundle must contain its inspection CA. Direct network
 access remains subject to the existing enforcing CNI requirement.
 

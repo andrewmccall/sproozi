@@ -930,3 +930,67 @@ func TestDeleteForRunRefusesTamperedSandbox(t *testing.T) {
 		t.Fatalf("tampered Pod was deleted: %v", err)
 	}
 }
+
+// A runtime whose harness signs in itself gets its sign-in from the named
+// Secret and no gateway key placeholder (ADR 0047).
+const (
+	signInSecret   = "claude-sign-in"
+	signInVolume   = "sign-in"
+	claudeTokenEnv = "CLAUDE_CODE_OAUTH_TOKEN"
+)
+
+func TestBuildPodSpecDeliversTheHarnessSignIn(t *testing.T) {
+	rt := testRuntime()
+	rt.Spec.ClientConfig.SignIn = &sprooziv1alpha1.RuntimeSignIn{SecretName: signInSecret, Key: "token", Env: claudeTokenEnv}
+	run := testRunForSandbox("cccccccc-0000-0000-0000-000000000301")
+	pod := kubernetes.BuildPodSpec(run, rt, kubernetes.RunName(run.UID))
+	c := pod.Spec.Containers[0]
+	var fromSecret, placeholder bool
+	for _, env := range c.Env {
+		fromSecret = fromSecret || env.Name == claudeTokenEnv && env.ValueFrom != nil &&
+			env.ValueFrom.SecretKeyRef.Name == signInSecret && env.ValueFrom.SecretKeyRef.Key == "token"
+		placeholder = placeholder || env.Name == "OPENAI_API_KEY"
+	}
+	mounted := slices.ContainsFunc(c.VolumeMounts, func(m corev1.VolumeMount) bool {
+		return m.Name == signInVolume && m.MountPath == sprooziv1alpha1.SignInDirectory && m.ReadOnly
+	})
+	secret := slices.ContainsFunc(pod.Spec.Volumes, func(v corev1.Volume) bool {
+		return v.Name == signInVolume && v.Secret != nil && v.Secret.SecretName == signInSecret
+	})
+	if !fromSecret || placeholder || !mounted || !secret {
+		t.Fatalf("env from Secret=%v placeholder=%v mounted=%v volume=%v", fromSecret, placeholder, mounted, secret)
+	}
+	rt.Spec.ClientConfig.SignIn.Env = "SSL_CERT_FILE"
+	if err := rt.Spec.ValidateRuntimeTemplate(); err == nil {
+		t.Fatal("a sign-in replaced a controller variable")
+	}
+	for _, invalid := range []sprooziv1alpha1.RuntimeSignIn{{}, {SecretName: signInSecret}, {SecretName: signInSecret, Key: "k", ClaimName: "login"},
+		{ClaimName: "login", Env: claudeTokenEnv}} {
+		rt.Spec.ClientConfig.SignIn = &invalid
+		if err := rt.Spec.ValidateRuntimeTemplate(); err == nil {
+			t.Fatalf("invalid sign-in accepted: %+v", invalid)
+		}
+	}
+}
+
+// A claim keeps a managed harness's login across sessions, so it is mounted
+// read-write and never set as an environment variable.
+func TestBuildPodSpecMountsASignInClaimReadWrite(t *testing.T) {
+	rt := testRuntime()
+	rt.Spec.ClientConfig.SignIn = &sprooziv1alpha1.RuntimeSignIn{ClaimName: "claude-login"}
+	run := testRunForSandbox("cccccccc-0000-0000-0000-000000000302")
+	pod := kubernetes.BuildPodSpec(run, rt, kubernetes.RunName(run.UID))
+	c := pod.Spec.Containers[0]
+	writable := slices.ContainsFunc(c.VolumeMounts, func(m corev1.VolumeMount) bool {
+		return m.Name == signInVolume && m.MountPath == sprooziv1alpha1.SignInDirectory && !m.ReadOnly
+	})
+	claim := slices.ContainsFunc(pod.Spec.Volumes, func(v corev1.Volume) bool {
+		return v.Name == signInVolume && v.PersistentVolumeClaim != nil && v.PersistentVolumeClaim.ClaimName == "claude-login"
+	})
+	if !writable || !claim || slices.ContainsFunc(c.Env, func(e corev1.EnvVar) bool { return e.Name == "OPENAI_API_KEY" }) {
+		t.Fatalf("writable=%v claim=%v env=%v", writable, claim, c.Env)
+	}
+	if err := rt.Spec.ValidateRuntimeTemplate(); err != nil {
+		t.Fatal(err)
+	}
+}
