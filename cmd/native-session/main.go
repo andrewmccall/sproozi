@@ -289,6 +289,10 @@ func (s *server) activate() response {
 		r.Error = err.Error()
 		return r
 	}
+	if err = restoreSignIn(s.config); err != nil {
+		r.Error = "harness sign-in is unavailable: " + err.Error()
+		return r
+	}
 	n, err := nativepty.Start(nativepty.Launch{Executable: adapter.executable, Args: args, Env: env,
 		Dir: workspace, Deadline: s.config.Deadline, Size: nativepty.Size{Rows: 40, Columns: 140}})
 	if err != nil {
@@ -300,6 +304,9 @@ func (s *server) activate() response {
 	go func() {
 		<-n.Done()
 		exit, waitErr := n.Wait(context.Background())
+		if err := saveSignIn(s.config); err != nil {
+			fmt.Fprintln(os.Stderr, "native-session: the harness's refreshed sign-in wasn't saved:", err)
+		}
 		s.mu.Lock()
 		quiescing := s.state == harness.NativeStopping
 		if !quiescing {

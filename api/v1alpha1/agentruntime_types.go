@@ -42,8 +42,8 @@ func (s *AgentRuntimeSpec) ValidateRuntimeTemplate() error {
 	if err := s.ClientConfig.validateNativeSession(); err != nil {
 		return err
 	}
-	if in := s.ClientConfig.SignIn; in != nil && reservedSignInEnv[in.Env] {
-		return fmt.Errorf("clientConfig.signIn.env %q is set by the controller", in.Env)
+	if err := s.ClientConfig.SignIn.validate(); err != nil {
+		return err
 	}
 	if len(s.PodTemplate.Spec.Containers) == 0 {
 		return fmt.Errorf("podTemplate must contain a container")
@@ -239,23 +239,51 @@ type RuntimeClientConfig struct {
 	SignIn *RuntimeSignIn `json:"signIn,omitempty"`
 }
 
-// RuntimeSignIn names a Secret key in the sproozi-agents namespace that holds
-// a harness's own sign-in, such as a token from claude setup-token. The
-// controller mounts it read-only at /etc/sproozi/sign-in/KEY and, with Env,
-// also sets it as that environment variable.
+// RuntimeSignIn holds a harness's own sign-in in the sproozi-agents namespace,
+// mounted at /etc/sproozi/sign-in. Set exactly one source. A Secret key, such
+// as a token from claude setup-token, is mounted read-only at
+// /etc/sproozi/sign-in/KEY and, with Env, also set as that environment
+// variable. A PersistentVolumeClaim is mounted read-write, so a managed
+// session's supervisor can restore the harness's login file from it before
+// launch and save the refreshed file after the harness exits.
 type RuntimeSignIn struct {
+	// +optional
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	// +kubebuilder:validation:MaxLength=253
-	SecretName string `json:"secretName"`
+	SecretName string `json:"secretName,omitempty"`
+	// +optional
 	// +kubebuilder:validation:Pattern=`^[-._a-zA-Z0-9]+$`
 	// +kubebuilder:validation:MaxLength=253
-	Key string `json:"key"`
+	Key string `json:"key,omitempty"`
+	// ClaimName is a PersistentVolumeClaim that keeps the harness's own
+	// login file across managed sessions, such as Claude Code's
+	// .credentials.json or Codex's auth.json.
+	// +optional
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	// +kubebuilder:validation:MaxLength=253
+	ClaimName string `json:"claimName,omitempty"`
 	// Env names an environment variable for the sign-in, such as
 	// CLAUDE_CODE_OAUTH_TOKEN or COPILOT_GITHUB_TOKEN.
 	// +optional
 	// +kubebuilder:validation:Pattern=`^[A-Za-z_][A-Za-z0-9_]*$`
 	// +kubebuilder:validation:MaxLength=128
 	Env string `json:"env,omitempty"`
+}
+
+func (in *RuntimeSignIn) validate() error {
+	switch {
+	case in == nil:
+		return nil
+	case (in.SecretName == "") == (in.ClaimName == ""):
+		return fmt.Errorf("clientConfig.signIn needs exactly one of secretName and claimName")
+	case in.SecretName != "" && in.Key == "":
+		return fmt.Errorf("clientConfig.signIn.key is required with secretName")
+	case in.ClaimName != "" && (in.Key != "" || in.Env != ""):
+		return fmt.Errorf("clientConfig.signIn.key and env apply only to a Secret")
+	case reservedSignInEnv[in.Env]:
+		return fmt.Errorf("clientConfig.signIn.env %q is set by the controller", in.Env)
+	}
+	return nil
 }
 
 // SignInDirectory is where the controller mounts a runtime's sign-in.

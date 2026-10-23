@@ -528,9 +528,12 @@ func BuildPodSpec(run *sprooziv1alpha1.AgentRun, rt *sprooziv1alpha1.AgentRuntim
 	}
 	signIn := rt.Spec.ClientConfig.SignIn
 	if signIn != nil {
-		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{Name: "sign-in", VolumeSource: corev1.VolumeSource{
-			Secret: &corev1.SecretVolumeSource{SecretName: signIn.SecretName, DefaultMode: &defaultMode,
-				Items: []corev1.KeyToPath{{Key: signIn.Key, Path: signIn.Key}}}}})
+		source := corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: signIn.ClaimName}}
+		if signIn.SecretName != "" {
+			source = corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: signIn.SecretName, DefaultMode: &defaultMode,
+				Items: []corev1.KeyToPath{{Key: signIn.Key, Path: signIn.Key}}}}
+		}
+		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{Name: "sign-in", VolumeSource: source})
 	}
 	injectedVolumes := pod.Spec.Volumes
 	pod.Spec = *rt.Spec.PodTemplate.Spec.DeepCopy()
@@ -562,7 +565,8 @@ func BuildPodSpec(run *sprooziv1alpha1.AgentRun, rt *sprooziv1alpha1.AgentRuntim
 		if signIn == nil {
 			c.Env = append(c.Env, corev1.EnvVar{Name: openAIAPIKey, Value: clientAuthPlaceholder})
 		} else {
-			c.VolumeMounts = append(c.VolumeMounts, corev1.VolumeMount{Name: "sign-in", MountPath: sprooziv1alpha1.SignInDirectory, ReadOnly: true})
+			c.VolumeMounts = append(c.VolumeMounts, corev1.VolumeMount{Name: "sign-in", MountPath: sprooziv1alpha1.SignInDirectory,
+				ReadOnly: signIn.ClaimName == ""})
 			if signIn.Env != "" {
 				c.Env = append(c.Env, corev1.EnvVar{Name: signIn.Env, ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
 					LocalObjectReference: corev1.LocalObjectReference{Name: signIn.SecretName}, Key: signIn.Key}}})

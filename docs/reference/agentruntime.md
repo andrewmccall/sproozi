@@ -144,11 +144,25 @@ for a gateway that forwards it (`MODEL_AUTH_MODE=workload` with no key or
 token for that provider; see
 [ADR 0047](../adr/0047-harnesses-sign-in-to-their-own-model-providers.md)).
 
+Set exactly one source:
+
 | Field | Meaning |
 | --- | --- |
 | `secretName` | A Secret in `sproozi-agents` holding the sign-in. You create it from a credential the provider issued you, such as the output of `claude setup-token`. |
-| `key` | The Secret key. The controller mounts it read-only at `/etc/sproozi/sign-in/<key>` in each workload container. |
-| `env` | Optional. Also sets the sign-in as this environment variable, such as `CLAUDE_CODE_OAUTH_TOKEN`. Variables the controller sets itself, such as `SSL_CERT_FILE` or `HTTPS_PROXY`, are refused. |
+| `key` | Required with `secretName`. The controller mounts that key read-only at `/etc/sproozi/sign-in/<key>` in each workload container. For a managed session, name it after the harness's login file (`.credentials.json` or `auth.json`). |
+| `env` | Optional, with `secretName` only. Also sets the sign-in as this environment variable, such as `CLAUDE_CODE_OAUTH_TOKEN`. Variables the controller sets itself, such as `SSL_CERT_FILE` or `HTTPS_PROXY`, are refused. |
+| `claimName` | A PersistentVolumeClaim in `sproozi-agents` that keeps the harness's own login across managed sessions. The controller mounts it read-write at `/etc/sproozi/sign-in`. |
+
+In a managed session the supervisor copies the harness's login file
+(`.credentials.json` for Claude Code, `auth.json` for Codex) from
+`/etc/sproozi/sign-in` into its native home before launch. With no file there
+yet, sign in inside the session as you would locally (`/login`, or Codex's
+device-code sign-in). When the harness exits, the supervisor writes the
+refreshed file back to a claim; a Secret stays as it is, so a Secret suits a
+token that doesn't refresh. The login never enters a checkpoint. Give the claim
+a filesystem the agent user can write, for example through the Pod's
+`fsGroup`, and keep one claim per person: two sessions sharing one refreshing
+login can invalidate each other.
 
 With `signIn`, workload containers don't receive the `OPENAI_API_KEY`
 placeholder, which most clients would prefer over their own sign-in. A client
@@ -165,6 +179,16 @@ spec:
       secretName: claude-sign-in
       key: token
       env: CLAUDE_CODE_OAUTH_TOKEN
+```
+
+For a managed Codex or Claude Code session that keeps its own sign-in:
+
+```yaml
+spec:
+  clientConfig:
+    harness: codex
+    signIn:
+      claimName: alice-codex-login
 ```
 
 ## Model selection

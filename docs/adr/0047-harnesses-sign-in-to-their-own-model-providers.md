@@ -77,11 +77,17 @@ inspect it. The harness writes and refreshes the file itself; Sproozi never
 reads it. Checkpoints select only each harness's conversation, so a sign-in
 never moves with a session.
 
-On Kubernetes, `clientConfig.signIn` names a Secret in `sproozi-agents` that
-the person creates from a credential they obtained through the provider's own
-flow, such as `claude setup-token`. The controller mounts it read-only at
-`/etc/sproozi/sign-in/<key>` and, with `env`, sets it as that variable; the
-runtime's command copies it where a client needs a writable file.
+On Kubernetes, `clientConfig.signIn` names a Secret or a PersistentVolumeClaim
+in `sproozi-agents`. A Secret holds a credential the person obtained through
+the provider's own flow, such as `claude setup-token`; the controller mounts it
+read-only at `/etc/sproozi/sign-in/<key>` and, with `env`, sets it as that
+variable. A claim is mounted read-write there. For a managed session the
+supervisor copies the harness's `SignInFile` from that directory into its
+native home before launch, and writes the refreshed file back after the
+harness exits when the directory is writable. A Kubernetes pod can't mount the
+file into the session folder directly, as Docker does: the folder is restored
+after the pod starts, so a mount there would break the restore's ownership
+checks.
 
 ## Evidence
 
@@ -145,13 +151,14 @@ All with deterministic providers unless stated:
   `api.github.com`, which the GitHub pull-request capability already serves;
   it isn't routed yet, so Copilot uses a key or token in bring-your-own-key
   mode (ADR 0046).
-- Managed sessions on Kubernetes don't yet have a persistent login volume; a
-  moved session uses its placement's gateway-held credential.
+- On Kubernetes, a managed session's refreshed login is saved only when the
+  harness exits; a supervisor killed without that loses the refresh, and the
+  person signs in again.
 - Extends ADR 0002 and leaves ADR 0026 in place.
 
 Revisit if a provider offers scoped, short-lived tokens a harness can request
-per run, if the leak check proves too noisy or too weak, or when Copilot or
-managed Kubernetes sessions gain their own sign-in.
+per run, if the leak check proves too noisy or too weak, or when Copilot gains
+its own sign-in.
 
 ## Implementation
 
