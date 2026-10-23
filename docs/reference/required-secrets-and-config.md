@@ -13,7 +13,7 @@ adds the provider and GitHub credentials.
 
 | Name | Namespace | Kind | Used by | Required keys |
 | --- | --- | --- | --- | --- |
-| `model-gateway-credentials` | `sproozi-system` | `Secret` | model module in API-key or workload mode | Any of `openai-api-key`, `anthropic-api-key`, `openai-sign-in-token`, `anthropic-sign-in-token`, each a single line; at most one per provider. Optional in workload mode |
+| `model-gateway-credentials` | `sproozi-system` | `Secret` | model module in API-key or workload mode | Any of `openai-api-key`, `anthropic-api-key`, `openai-sign-in-token`, `anthropic-sign-in-token`, `copilot-sign-in-token`, each a single line; at most one per provider. Optional in workload mode |
 | Harness sign-in Secret | `sproozi-agents` | `Secret` | sandboxes of an AgentRuntime with `clientConfig.signIn` | The key that runtime names, holding a credential the provider issued you |
 | `model-gateway-chatgpt` | `sproozi-system` | `Secret` | model module in ChatGPT mode | `session.json` |
 | `model-gateway-auth` | `sproozi-system` | `ConfigMap` | administrator auth selection (optional; default API-key mode) | `mode` |
@@ -99,8 +99,13 @@ provider uses one credential, in this order
    a key and a token for one provider is refused.
 3. In `workload` mode, the harness's own sign-in, which the gateway forwards.
    That provider's signed-in hosts are then served too: `chatgpt.com` and
-   `auth.openai.com` for OpenAI, `platform.claude.com` for Anthropic. The
-   gateway certificate must cover them. A request with no credential is
+   `auth.openai.com` for OpenAI, `platform.claude.com` for Anthropic, and
+   Copilot's `api.individual.githubcopilot.com`,
+   `api.business.githubcopilot.com` and `api.enterprise.githubcopilot.com`
+   with its `/copilot_internal/` account requests on `api.github.com`. The
+   gateway certificate must cover them. Copilot has no API key: its hosts open
+   in workload mode or with `copilot-sign-in-token`, a GitHub token the
+   gateway attaches. A request with no credential is
    refused. The gateway holds each run's forwarded credential in memory until
    the run's maximum duration has passed, and refuses that credential on any
    other inspected route.

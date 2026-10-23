@@ -162,7 +162,7 @@ func TestOnlyAProviderCredentialRouteKeepsAuthorization(t *testing.T) {
 				authorization, proxyAuthorization, cookie = r.Header.Get("Authorization"), r.Header.Get(proxyAuthorizationHeader), r.Header.Get("Cookie")
 			}),
 			AllowedAuthority:   onlyTestService,
-			ProviderCredential: func(authority string) bool { return forwards && authority == testServiceAuthority },
+			ProviderCredential: func(authority, _ string) bool { return forwards && authority == testServiceAuthority },
 			RevocationInterval: 20 * time.Millisecond, SessionLifetime: time.Second})
 		if err != nil {
 			t.Fatal(err)

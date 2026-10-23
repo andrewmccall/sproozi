@@ -71,7 +71,10 @@ inspection CA; the `harness-process` fixture now does the same.
 
 ## Alternatives
 
-- **Copilot's own model service with a GitHub token.** It would use the
+- **Copilot's own model service with a GitHub token.** Since added by
+  [ADR 0047](0047-harnesses-sign-in-to-their-own-model-providers.md), which
+  routes Copilot's model hosts and its `api.github.com` account requests. At
+  the time, it would use the
   person's Copilot subscription and model catalogue, but would need a new
   gateway handler for GitHub's Copilot endpoints and their token exchange,
   and either a GitHub token in the sandbox or gateway-side token injection

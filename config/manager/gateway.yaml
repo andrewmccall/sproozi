@@ -97,6 +97,12 @@ spec:
               name: model-gateway-credentials
               key: anthropic-sign-in-token
               optional: true
+        - name: COPILOT_SIGN_IN_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: model-gateway-credentials
+              key: copilot-sign-in-token
+              optional: true
         - name: GITHUB_APP_ID
           valueFrom:
             secretKeyRef:

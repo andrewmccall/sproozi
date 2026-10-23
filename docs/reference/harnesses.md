@@ -196,8 +196,17 @@ section describes gateway-held credentials.
 Codex, Hermes and the OpenCode and Copilot examples use the existing OpenAI
 Responses route. Copilot runs in its bring-your-own-key mode
 (`COPILOT_PROVIDER_BASE_URL`, `COPILOT_PROVIDER_WIRE_API=responses`), so it
-needs no GitHub account or Copilot subscription and never calls GitHub's
-Copilot model service. Copilot's own GitHub sign-in isn't routed yet.
+needs no GitHub account or Copilot subscription. With a Copilot plan instead,
+leave out the `COPILOT_PROVIDER_*` variables and give Copilot a GitHub token
+as `COPILOT_GITHUB_TOKEN`, through
+[`clientConfig.signIn`](agentruntime.md#harness-sign-in) (its own sign-in) or
+the gateway's `copilot-sign-in-token`. The gateway then serves Copilot's model
+API (`/responses`, `/v1/messages`, `/chat/completions`, `/models` and `/auto`)
+and its `/copilot_internal/` account requests on `api.github.com`, and refuses
+GitHub's built-in MCP server, agents, experiments and telemetry. Copilot loads
+MCP servers, including Sproozi's, only if its account allows them
+(`is_mcp_enabled`). Models that stream chat completions, such as Gemini, are
+refused.
 OpenCode uses a configured bundled OpenAI SDK provider rather than an external
 execution server. OpenAI API-key or ChatGPT authentication remains administrator
 configuration. ChatGPT compatibility is established for the recorded Codex

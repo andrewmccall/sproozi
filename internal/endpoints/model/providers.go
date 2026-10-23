@@ -3,6 +3,8 @@ package model
 import (
 	"net/http"
 
+	"github.com/andrewmccall/sproozi/internal/modelauth"
+
 	"github.com/andrewmccall/sproozi/internal/audit"
 )
 
@@ -34,6 +36,11 @@ type Provider struct {
 	// TokenHeaders are set with a gateway-held sign-in token, such as the beta
 	// header Anthropic requires for an OAuth token.
 	TokenHeaders map[string]string
+	// AccountAuthority, AccountPrefix and AccountRoutes are the account and
+	// policy requests a signed-in client makes on a host another capability
+	// owns, such as Copilot's on api.github.com. Only these paths are served.
+	AccountAuthority, AccountPrefix string
+	AccountRoutes                   []RelayRoute
 }
 
 // Provider names, as harness model protocols spell them.
@@ -64,6 +71,23 @@ var providers = map[string]Provider{
 		SignInAuthority: AnthropicSignInAuthority,
 		SignInRoutes:    []RelayRoute{{Method: http.MethodPost, Path: "/v1/oauth/token"}},
 		TokenHeaders:    map[string]string{"Anthropic-Beta": "oauth-2025-04-20"}},
+	// Copilot has no API-key host: a client signs in to GitHub, and its
+	// sign-in or a gateway-held GitHub token reaches its plan's host.
+	ProviderCopilot: {Name: ProviderCopilot,
+		Models: []ModelRoute{
+			{Authority: CopilotIndividualAuthority, UpstreamURL: "https://api.individual.githubcopilot.com", SignedIn: true,
+				New: NewCopilotHandler},
+			{Authority: CopilotBusinessAuthority, UpstreamURL: "https://api.business.githubcopilot.com", SignedIn: true,
+				New: NewCopilotHandler},
+			{Authority: CopilotEnterpriseAuthority, UpstreamURL: "https://api.enterprise.githubcopilot.com", SignedIn: true,
+				New: NewCopilotHandler},
+		},
+		AccountAuthority: "api.github.com:443", AccountPrefix: "/copilot_internal/",
+		AccountRoutes: []RelayRoute{
+			{Method: http.MethodGet, Path: "/copilot_internal/user"},
+			{Method: http.MethodGet, Path: "/copilot_internal/managed_settings"},
+			{Method: http.MethodGet, Path: "/copilot_internal/team_customizations"},
+		}},
 }
 
 // ProviderFor returns a provider by its protocol name, such as "openai".
@@ -78,6 +102,13 @@ func (p Provider) SignInRelay(client *http.Client, logger audit.Writer) *Relay {
 		HTTPClient: client, AuditLogger: logger, Service: "sign-in"}
 }
 
+// AccountRelay serves the provider's account requests with auth: a
+// gateway-held credential, or the harness's own when auth forwards it.
+func (p Provider) AccountRelay(auth modelauth.Authenticator, client *http.Client, logger audit.Writer) *Relay {
+	return &Relay{UpstreamURL: "https://" + hostOf(p.AccountAuthority), Routes: p.AccountRoutes,
+		HTTPClient: client, AuditLogger: logger, Service: p.Name, Auth: auth}
+}
+
 // Hosts are the names the gateway's certificate must cover for the provider:
 // every model authority, and the sign-in authority when clients sign in.
 func (p Provider) Hosts(signIn bool) []string {
@@ -87,8 +118,11 @@ func (p Provider) Hosts(signIn bool) []string {
 			hosts = append(hosts, hostOf(m.Authority))
 		}
 	}
-	if signIn {
+	if signIn && p.SignInAuthority != "" {
 		hosts = append(hosts, hostOf(p.SignInAuthority))
+	}
+	if signIn && p.AccountAuthority != "" {
+		hosts = append(hosts, hostOf(p.AccountAuthority))
 	}
 	return hosts
 }

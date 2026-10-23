@@ -45,9 +45,17 @@ const opencodeHarness = "opencode"
 const modelFlag = "--model"
 const fixtureModel = "fixture-model"
 const jsonFormat = "json"
+const outputFormatFlag = "--output-format"
 const fixtureName = "fixture"
 const claudeHarness = "claude-code"
 const copilotHarness = "copilot"
+
+// copilotGitHub runs Copilot signed in to GitHub, with the gateway forwarding
+// its own GitHub token to Copilot's model API (ADR 0047).
+const copilotGitHub = "copilot-github"
+
+// copilotFixtureToken is the fixture's GitHub sign-in for copilotGitHub.
+const copilotFixtureToken = "gho_FixtureCopilotOwnSignIn0123456789ab"
 const successScenario = "success"
 const deniedScenario = "denied"
 const diagnoseScenario = "diagnose"
@@ -92,11 +100,11 @@ type fixture struct {
 }
 
 func main() {
-	selected := flag.String("harness", "all", "all, claude-code, opencode or copilot")
+	selected := flag.String("harness", "all", "all, claude-code, opencode, copilot or copilot-github")
 	output := flag.String("output", ".local/verification/harness-process.json", "evidence output path")
 	withTool := flag.Bool("tool", true, "require a generated native MCP configuration and actual tool call")
 	flag.Parse()
-	names := []string{claudeHarness, opencodeHarness, copilotHarness}
+	names := []string{claudeHarness, opencodeHarness, copilotHarness, copilotGitHub}
 	if *selected != "all" {
 		names = []string{*selected}
 	}
@@ -150,8 +158,11 @@ func run(selected, scenario string, withTool, supervised bool) (result, error) {
 		out.Mode = "supervised"
 	}
 	binary := selected
-	if selected == claudeHarness {
+	switch selected {
+	case claudeHarness:
 		binary = "claude"
+	case copilotGitHub:
+		binary = copilotHarness
 	}
 	path, err := exec.LookPath(binary)
 	if err != nil {
@@ -213,13 +224,7 @@ func run(selected, scenario string, withTool, supervised bool) (result, error) {
 		ProviderAuth: modelauth.APIKey{Key: providerKey},
 		HTTPClient:   upstream.Client(),
 		AuditLogger:  audit.NewLogger(io.Discard)}
-	var modelHandler http.Handler = &model.Handler{Config: config}
-	authority := "api.openai.com:443"
-	if selected == claudeHarness {
-		authority = "api.anthropic.com:443"
-		config.ProviderAuth = modelauth.AnthropicAPIKey{Key: providerKey}
-		modelHandler = model.NewAnthropicHandler(config)
-	}
+	authority, modelHandler := fixtureModelRoute(selected, config)
 	mcpServer := mcp.NewServer(&mcp.Implementation{Name: fixtureName, Version: "1"}, nil)
 	mcp.AddTool(mcpServer,
 		&mcp.Tool{Name: "verify",
@@ -260,9 +265,10 @@ func run(selected, scenario string, withTool, supervised bool) (result, error) {
 	// As in the gateway binaries, the MCP authority route carries no capability:
 	// the broker checks each named server's, and the control connection needs none.
 	routes := gateway.Dispatcher{authority: {Capability: string(api.CapabilityModelInference),
-		Tier:    audit.TierSemantic,
-		Handler: modelHandler,
-		Budgets: tracker},
+		Tier:               audit.TierSemantic,
+		Handler:            modelHandler,
+		ProviderCredential: selected == copilotGitHub,
+		Budgets:            tracker},
 		"gateway.fixture:443": {Tier: audit.TierProtocol,
 			Handler: diagnose.NewControl(journal, http.HandlerFunc(func(w http.ResponseWriter,
 				r *http.Request) {
@@ -279,10 +285,17 @@ func run(selected, scenario string, withTool, supervised bool) (result, error) {
 				}
 				broker.ServeHTTP(w, r)
 			}))}}
+	if selected == copilotGitHub {
+		authority, route := copilotAccountRoute(upstream, tracker)
+		routes[authority] = route
+	}
+	guard := gateway.NewLeakGuard(routes, nil)
 	transport,
 		err := proxytransport.New(proxytransport.Config{Certificates: map[string]tls.Certificate{"api.openai.com": cert,
-		"api.anthropic.com": cert,
-		"gateway.fixture":   cert},
+		"api.anthropic.com":                cert,
+		"gateway.fixture":                  cert,
+		"api.github.com":                   cert,
+		"api.individual.githubcopilot.com": cert},
 		Authenticate: func(_ context.Context,
 			token string) (*gateway.ExecutionGrant,
 			error) {
@@ -298,9 +311,10 @@ func run(selected, scenario string, withTool, supervised bool) (result, error) {
 			*gateway.ExecutionGrant) error {
 			return nil
 		},
-		AllowedAuthority: routes.Allows,
-		AuditLogger:      journal,
-		Handler:          routes})
+		AllowedAuthority:   guard.Allows,
+		AuditLogger:        journal,
+		ProviderCredential: guard.ForwardsCredential,
+		Handler:            guard})
 	if err != nil {
 		return out, err
 	}
@@ -417,6 +431,31 @@ func supervisorCommand(directory string, withTool bool) (string, []string, error
 	return path, []string{launch, modelFlag, fixtureModel, "--request", request}, nil
 }
 
+// fixtureModelRoute is the model authority and handler for a harness: a
+// gateway-held key for most, Copilot's own GitHub sign-in for copilotGitHub.
+func fixtureModelRoute(selected string, config model.HandlerConfig) (string, http.Handler) {
+	switch selected {
+	case claudeHarness:
+		config.ProviderAuth = modelauth.AnthropicAPIKey{Key: providerKey}
+		return "api.anthropic.com:443", model.NewAnthropicHandler(config)
+	case copilotGitHub:
+		config.ProviderAuth = modelauth.Workload{}
+		return model.CopilotIndividualAuthority, model.NewCopilotHandler(config)
+	}
+	return "api.openai.com:443", &model.Handler{Config: config}
+}
+
+// copilotAccountRoute serves Copilot's account requests on api.github.com as
+// the gateway does, beside the GitHub capability, from the fixture upstream.
+func copilotAccountRoute(upstream *httptest.Server, tracker *budget.Tracker) (string, gateway.Route) {
+	copilot, _ := model.ProviderFor(model.ProviderCopilot)
+	relay := copilot.AccountRelay(modelauth.Workload{}, upstream.Client(), audit.NewLogger(io.Discard))
+	relay.UpstreamURL = upstream.URL
+	return copilot.AccountAuthority, gateway.Route{Paths: []gateway.PathRoute{{Prefix: copilot.AccountPrefix,
+		Route: gateway.Route{Capability: string(api.CapabilityModelInference), Tier: audit.TierSemantic, Handler: relay,
+			Budgets: tracker, ProviderCredential: true}}}}
+}
+
 func connectStatus(proxyURL, authority, token string, ca []byte) int {
 	endpoint, _ := url.Parse(proxyURL)
 	roots := x509.NewCertPool()
@@ -456,7 +495,7 @@ func completion(selected string, r result) (bool, string) {
 		}
 		return !data.IsError && data.Subtype == successScenario, data.Result
 	}
-	if selected == copilotHarness {
+	if selected == copilotHarness || selected == copilotGitHub {
 		return copilotCompletion(r.Output)
 	}
 	var data struct {
@@ -558,7 +597,7 @@ func certificate() (tls.Certificate, []byte, error) {
 		NotAfter:    time.Now().Add(time.Hour),
 		KeyUsage:    x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		DNSNames: []string{"api.openai.com",
+		DNSNames: []string{"api.openai.com", "api.individual.githubcopilot.com", "api.github.com",
 			"api.anthropic.com",
 			"gateway.fixture"},
 		IPAddresses: []net.IP{net.ParseIP("127.0.0.1")}}
@@ -574,7 +613,11 @@ func certificate() (tls.Certificate, []byte, error) {
 }
 
 func clientCommand(directory, selected string, withTool bool, env []string) ([]string, []string, error) {
-	files, err := harness.MCPConfig(selected, []string{"mcp.fixture"}, "https://gateway.fixture")
+	registered := selected
+	if selected == copilotGitHub {
+		registered = copilotHarness
+	}
+	files, err := harness.MCPConfig(registered, []string{"mcp.fixture"}, "https://gateway.fixture")
 	if err != nil {
 		return nil, nil, err
 	}
@@ -594,7 +637,16 @@ func clientCommand(directory, selected string, withTool bool, env []string) ([]s
 			"COPILOT_PROVIDER_BASE_URL=https://api.openai.com/v1", "COPILOT_PROVIDER_TYPE=openai",
 			"COPILOT_PROVIDER_WIRE_API=responses", "COPILOT_PROVIDER_API_KEY=sproozi-local-placeholder",
 			"COPILOT_AUTO_UPDATE=false", "COPILOT_OFFLINE=true")
-		args = []string{"--prompt", prompt, modelFlag, fixtureModel, "--output-format", jsonFormat,
+		args = []string{"--prompt", prompt, modelFlag, fixtureModel, outputFormatFlag, jsonFormat,
+			"--additional-mcp-config", "@" + filepath.Join(directory, "copilot-mcp.json"),
+			"--disable-builtin-mcps", "--allow-all", "--no-ask-user",
+			"--no-auto-update", "--no-remote"}
+	case copilotGitHub:
+		// No bring-your-own-key provider: Copilot signs in to GitHub with its
+		// own token and calls Copilot's model API, which the gateway forwards.
+		env = append(env, "COPILOT_HOME="+filepath.Join(directory, "home", ".copilot"),
+			"COPILOT_GITHUB_TOKEN="+copilotFixtureToken, "COPILOT_AUTO_UPDATE=false")
+		args = []string{"--prompt", prompt, modelFlag, fixtureModel, outputFormatFlag, jsonFormat,
 			"--additional-mcp-config", "@" + filepath.Join(directory, "copilot-mcp.json"),
 			"--disable-builtin-mcps", "--allow-all", "--no-ask-user",
 			"--no-auto-update", "--no-remote"}
@@ -603,7 +655,7 @@ func clientCommand(directory, selected string, withTool bool, env []string) ([]s
 		args = []string{"--print",
 			modelFlag,
 			"claude-sonnet-4-5-20250929",
-			"--output-format",
+			outputFormatFlag,
 			jsonFormat,
 			"--setting-sources",
 			"",

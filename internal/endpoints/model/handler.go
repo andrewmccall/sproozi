@@ -55,6 +55,11 @@ type HandlerConfig struct {
 	// as the ChatGPT backend's Responses path. Nil keeps the path.
 	UpstreamPath func(string) string
 
+	// KeepClientHeaders forwards a Messages client's own non-credential
+	// headers, as a provider such as Copilot requires, instead of only the
+	// Anthropic protocol headers.
+	KeepClientHeaders bool
+
 	// Pricing is administrator-owned and is required whenever a cost cap is set.
 	Pricing *PricingTable
 
@@ -702,7 +707,7 @@ func (h *Handler) copyProviderHeaders(target, source http.Header, workloadCreden
 			credential && !workloadCredential {
 			continue
 		}
-		if h.protocol == anthropicProtocol && !credential &&
+		if h.protocol == anthropicProtocol && !credential && !h.Config.KeepClientHeaders &&
 			!slices.Contains([]string{"content-type", "accept", "anthropic-version", "anthropic-beta"}, name) {
 			continue
 		}

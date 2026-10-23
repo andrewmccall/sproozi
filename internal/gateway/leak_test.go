@@ -140,3 +140,31 @@ func TestLeakGuardIgnoresShortCredentials(t *testing.T) {
 		t.Fatal("a short value would refuse ordinary text")
 	}
 }
+
+// A path route keeps its own credential: Copilot's GitHub token on
+// /copilot_internal/ is refused on the same host's other paths, such as a pull
+// request body on api.github.com.
+func TestLeakGuardScopesACredentialToItsPathRoute(t *testing.T) {
+	var received bytes.Buffer
+	ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(&received, r.Body)
+		w.WriteHeader(http.StatusNoContent)
+	})
+	routes := gateway.Dispatcher{"api.github.test:443": {Handler: ok, Paths: []gateway.PathRoute{
+		{Prefix: "/copilot_internal/", Route: gateway.Route{Handler: ok, ProviderCredential: true}}}}}
+	guard := gateway.NewLeakGuard(routes, nil)
+	r := leakRequest(fixtureExecutionUID, "https://api.github.test/copilot_internal/user", nil)
+	r.Header.Set("Authorization", "Bearer "+leakedCredential)
+	guard.ServeHTTP(httptest.NewRecorder(), r)
+	if !guard.ForwardsCredential("api.github.test:443", "/copilot_internal/user") ||
+		guard.ForwardsCredential("api.github.test:443", "/repos/o/r/pulls") ||
+		guard.ForwardsCredential("api.github.test:443", "/copilot_internal/../repos/o/r/pulls") {
+		t.Fatal("credential forwarding isn't scoped to the clean path route")
+	}
+	response := httptest.NewRecorder()
+	guard.ServeHTTP(response, leakRequest(fixtureExecutionUID, "https://api.github.test/repos/o/r/pulls",
+		strings.NewReader(`{"body":"`+leakedCredential+`"}`)))
+	if strings.Contains(received.String(), leakedCredential) {
+		t.Fatal("the path route's credential reached the host's other route")
+	}
+}

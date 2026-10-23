@@ -48,7 +48,9 @@ Claude subscription token from `claude setup-token`, add
 [`clientConfig.signIn`](../../docs/reference/agentruntime.md#harness-sign-in) to
 its runtime and set `MODEL_AUTH_MODE=workload` on the gateway; the placeholder
 key is then left out. For Claude Code, name the Secret key with
-`env: CLAUDE_CODE_OAUTH_TOKEN`. The gateway certificate must cover the selected provider authority,
+`env: CLAUDE_CODE_OAUTH_TOKEN`. For Copilot on its own Copilot plan, remove the
+`COPILOT_PROVIDER_*` and `COPILOT_OFFLINE` lines and name the GitHub token with
+`env: COPILOT_GITHUB_TOKEN`. The gateway certificate must cover the selected provider authority,
 and the mounted trust bundle must contain its inspection CA. Direct network
 access remains subject to the existing enforcing CNI requirement.
 

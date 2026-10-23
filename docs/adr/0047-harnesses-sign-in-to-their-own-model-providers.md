@@ -28,11 +28,17 @@ would have to be repeated for each new harness.
   credential. Each harness offers every mechanism its provider's API accepts.
 - **Provider facts are data, not harness code.** One table in
   `internal/endpoints/model/providers.go` lists, for each provider, its model
-  authorities (an API host, and for OpenAI the `chatgpt.com` backend a
-  signed-in client calls), its sign-in relay routes, and the headers a
-  gateway-held token needs. Each harness registry entry adds only where its
+  authorities (an API host, the `chatgpt.com` backend a ChatGPT-signed-in
+  client calls, and Copilot's per-plan hosts), its sign-in relay routes, the
+  account requests it makes on a host another capability owns, and the
+  headers a gateway-held token needs. Each harness registry entry adds only where its
   stock client keeps its login file (`SignInFile`). The gateways build routes
   from these; nothing branches on the harness.
+- **A host can carry path routes.** A route may serve path prefixes with their
+  own capability and handler. Copilot's `/copilot_internal/` account requests
+  on `api.github.com` use this beside the GitHub pull-request capability, and
+  the leak check treats each path route as its own owner, so Copilot's GitHub
+  token is refused in a pull request on the same host.
 - **Compressed requests are decoded.** A model request with a gzip or zstd
   `Content-Encoding` is decoded before inspection and forwarded uncompressed,
   so every mechanism inspects the same JSON.
@@ -57,7 +63,7 @@ would have to be repeated for each new harness.
 | Mechanism | Local (`sproozi init`) | Kubernetes gateway | Kubernetes sandbox |
 | --- | --- | --- | --- |
 | Gateway-held API key | Default; `--credential-file`, `--credential-stdin` or the prompt | `openai-api-key`, `anthropic-api-key` | Placeholder key |
-| Gateway-held sign-in token | `--token` with a key input; `providerTokenKind: token` | `openai-sign-in-token`, `anthropic-sign-in-token` | Placeholder key |
+| Gateway-held sign-in token | `--token` with a key input; `providerTokenKind: token` | `openai-sign-in-token`, `anthropic-sign-in-token`, `copilot-sign-in-token` (a GitHub token) | Placeholder key |
 | Gateway-held ChatGPT plan sign-in | `--chatgpt`: browser sign-in, stored in `credentials/chatgpt-session.json` | `MODEL_AUTH_MODE=chatgpt` | Placeholder key |
 | The harness's own sign-in | `--sign-in`: a persistent login volume per installation and placement | `MODEL_AUTH_MODE=workload` and no key or token for the provider | `clientConfig.signIn`: a Secret delivered as a file and, optionally, an environment variable; no placeholder |
 
@@ -106,6 +112,18 @@ All with deterministic providers unless stated:
   falls back to HTTPS; it refreshes at `auth.openai.com/oauth/token` and
   writes a mounted `auth.json` in place; its terminal offers device-code
   sign-in. Account routing fields must be `NO_CONSTRAINT` in the fixture.
+- Copilot 1.0.102 signed in to GitHub (free plan), through a recording proxy
+  on the user's machine and in a Linux container with the GitHub CLI's token
+  (method, path and status; the account response's policy flags and endpoint
+  hosts): model calls go to `api.individual.githubcopilot.com` `/responses`,
+  `/v1/messages` or `/chat/completions` by model, with `/models` and `/auto`
+  beside them; Copilot completes with `api.github.com` limited to
+  `copilot_internal/user`, `managed_settings` and `team_customizations`, and
+  with GitHub's built-in MCP server, agents, experiments and telemetry
+  refused. Without a keychain, Copilot must fetch `copilot_internal/user`,
+  whose `is_mcp_enabled` flag decides whether it loads any MCP server. `make
+  verify-harness-process` runs Copilot with a fixture GitHub sign-in through
+  the gateway's Copilot routes: a tool call, a refusal and `diagnose` pass.
 - `make verify-local-onboarding` passed both ways with the stock clients:
   gateway-held keys for Codex and Claude Code, and with `SIGN_IN=1` each
   harness's own seeded sign-in, every model request carrying it. That run
@@ -147,18 +165,17 @@ All with deterministic providers unless stated:
   tokens rotate; a long-lived token avoids it.
 - Codex tries WebSockets first and falls back after the gateway refuses each
   upgrade; see [WebSocket model traffic](../explanations/future-architecture/websocket-model-traffic.md).
-- GitHub Copilot's own GitHub sign-in needs Copilot's model hosts and
-  `api.github.com`, which the GitHub pull-request capability already serves;
-  it isn't routed yet, so Copilot uses a key or token in bring-your-own-key
-  mode (ADR 0046).
+- Copilot models on `/chat/completions` (Gemini, Kimi and similar) stream,
+  which the gateway's chat-completions route refuses; Copilot's OpenAI and
+  Claude models work. Business and Enterprise hosts are routed but unverified.
 - On Kubernetes, a managed session's refreshed login is saved only when the
   harness exits; a supervisor killed without that loses the refresh, and the
   person signs in again.
 - Extends ADR 0002 and leaves ADR 0026 in place.
 
 Revisit if a provider offers scoped, short-lived tokens a harness can request
-per run, if the leak check proves too noisy or too weak, or when Copilot gains
-its own sign-in.
+per run, if the leak check proves too noisy or too weak, or when the gateway
+gains streaming chat completions.
 
 ## Implementation
 

@@ -96,6 +96,7 @@ type startupConfig struct {
 	anthropicKey         string
 	openAIToken          string
 	anthropicToken       string
+	copilotToken         string
 	openAIUpstreamURL    string
 	anthropicUpstreamURL string
 	modelAuthMode        string
@@ -274,7 +275,7 @@ func loadStartupConfig() (*startupConfig, error) {
 	}
 	var pricing *modelgateway.PricingTable
 	openAIKey, anthropicKey, modelAuthMode := "", "", ""
-	openAIToken, anthropicToken := "", ""
+	openAIToken, anthropicToken, copilotToken := "", "", ""
 	openAIUpstreamURL := envOrDefault("OPENAI_UPSTREAM_URL", "https://api.openai.com")
 	anthropicUpstreamURL := envOrDefault("ANTHROPIC_UPSTREAM_URL", "https://api.anthropic.com")
 	if enabled[sprooziv1alpha1.CapabilityModelInference] {
@@ -295,7 +296,7 @@ func loadStartupConfig() (*startupConfig, error) {
 		if err != nil {
 			return nil, err
 		}
-		openAIToken, anthropicToken, err = loadSignInTokens(modelAuthMode, openAIKey, anthropicKey)
+		openAIToken, anthropicToken, copilotToken, err = loadSignInTokens(modelAuthMode, openAIKey, anthropicKey)
 		if err != nil {
 			return nil, err
 		}
@@ -321,7 +322,8 @@ func loadStartupConfig() (*startupConfig, error) {
 	}
 	hosts := inspectionHosts(host, enabled, profiles, mcpRegistry)
 	if enabled[sprooziv1alpha1.CapabilityModelInference] {
-		pruneModelHosts(hosts, modelAuthMode, openAIKey+openAIToken != "", anthropicKey+anthropicToken != "")
+		pruneModelHosts(hosts, modelAuthMode, openAIKey+openAIToken != "", anthropicKey+anthropicToken != "",
+			copilotToken != "")
 	}
 	for name := range hosts {
 		if err := leaf.VerifyHostname(name); err != nil {
@@ -334,7 +336,7 @@ func loadStartupConfig() (*startupConfig, error) {
 		enabled: enabled,
 		host:    host, listenerCert: certificate, certificates: certificates, certFile: certFile, keyFile: keyFile,
 		profiles: profiles, pricing: pricing, openAIKey: openAIKey, anthropicKey: anthropicKey, modelAuthMode: modelAuthMode,
-		openAIToken: openAIToken, anthropicToken: anthropicToken,
+		openAIToken: openAIToken, anthropicToken: anthropicToken, copilotToken: copilotToken,
 		openAIUpstreamURL: openAIUpstreamURL, anthropicUpstreamURL: anthropicUpstreamURL,
 		appID: appID, installationID: installationID, privateKey: privateKey,
 		mcpRegistry: mcpRegistry, admission: admission, maxModelCall: maxModelCall,
@@ -345,7 +347,7 @@ func loadStartupConfig() (*startupConfig, error) {
 // pruneModelHosts drops model hosts no route serves: a provider API with no
 // credential, and a signed-in client's hosts unless the provider forwards its
 // sign-in, so a gateway with keys needs no extra certificate names.
-func pruneModelHosts(hosts map[string]bool, mode string, openAIHeld, anthropicHeld bool) {
+func pruneModelHosts(hosts map[string]bool, mode string, openAIHeld, anthropicHeld, copilotHeld bool) {
 	workload := mode == modelauth.WorkloadMode
 	if !anthropicHeld && !workload {
 		delete(hosts, "api.anthropic.com")
@@ -362,30 +364,42 @@ func pruneModelHosts(hosts map[string]bool, mode string, openAIHeld, anthropicHe
 			}
 		}
 	}
+	// Copilot has only signed-in hosts, served with a gateway-held GitHub
+	// token or the harness's own sign-in.
+	copilot, _ := modelgateway.ProviderFor(modelgateway.ProviderCopilot)
+	for _, host := range copilot.Hosts(true) {
+		if copilotHeld || workload {
+			hosts[host] = true
+		} else if host != "api.github.com" {
+			delete(hosts, host)
+		}
+	}
 }
 
 // loadSignInTokens reads gateway-held sign-in tokens, such as one from claude
 // setup-token, which a provider without an API key attaches (ADR 0047).
-func loadSignInTokens(mode, openAIKey, anthropicKey string) (string, string, error) {
+func loadSignInTokens(mode, openAIKey, anthropicKey string) (string, string, string, error) {
 	openAI := strings.TrimSpace(os.Getenv("OPENAI_SIGN_IN_TOKEN"))
 	anthropic := strings.TrimSpace(os.Getenv("ANTHROPIC_SIGN_IN_TOKEN"))
+	copilot := strings.TrimSpace(os.Getenv("COPILOT_SIGN_IN_TOKEN"))
 	for _, token := range []struct{ env, key, value, apiKey string }{
 		{"OPENAI_SIGN_IN_TOKEN", "openai-sign-in-token", openAI, openAIKey},
 		{"ANTHROPIC_SIGN_IN_TOKEN", "anthropic-sign-in-token", anthropic, anthropicKey},
+		{"COPILOT_SIGN_IN_TOKEN", "copilot-sign-in-token", copilot, ""},
 	} {
 		if strings.ContainsAny(token.value, "\r\n") {
-			return "", "", errors.New(token.env + " is invalid: key " + token.key + " in " +
+			return "", "", "", errors.New(token.env + " is invalid: key " + token.key + " in " +
 				modelCredentialsSource + " must be a single line")
 		}
 		if token.value != "" && token.apiKey != "" {
-			return "", "", errors.New(token.env + " and the provider's API key are both set in " + modelCredentialsSource +
+			return "", "", "", errors.New(token.env + " and the provider's API key are both set in " + modelCredentialsSource +
 				": keep one")
 		}
 	}
 	if openAI != "" && mode == modelauth.ChatGPTMode {
-		return "", "", errors.New("OPENAI_SIGN_IN_TOKEN can't be used in chatgpt mode, which holds its own sign-in")
+		return "", "", "", errors.New("OPENAI_SIGN_IN_TOKEN can't be used in chatgpt mode, which holds its own sign-in")
 	}
-	return openAI, anthropic, nil
+	return openAI, anthropic, copilot, nil
 }
 
 func loadModelCredentials(openAIUpstreamURL string) (string, string, string, error) {
@@ -497,8 +511,11 @@ func githubAppInteger(key, secretKey string) (int64, error) {
 // harness's own sign-in. ok is false when the provider has none.
 func providerAuth(cfg *startupConfig, name string) (auth modelauth.Authenticator, ok bool) {
 	key, token := cfg.openAIKey, cfg.openAIToken
-	if name == modelgateway.ProviderAnthropic {
+	switch name {
+	case modelgateway.ProviderAnthropic:
 		key, token = cfg.anthropicKey, cfg.anthropicToken
+	case modelgateway.ProviderCopilot:
+		key, token = "", cfg.copilotToken
 	}
 	provider, _ := modelgateway.ProviderFor(name)
 	switch {
@@ -514,14 +531,27 @@ func providerAuth(cfg *startupConfig, name string) (auth modelauth.Authenticator
 	return nil, false
 }
 
+// modelProviders are the providers the gateway composes routes for.
+var modelProviders = []string{modelgateway.ProviderOpenAI, modelgateway.ProviderAnthropic, modelgateway.ProviderCopilot}
+
+// signedInRoute is a provider route beyond its API host, and whether it
+// forwards the harness's own credential.
+type signedInRoute struct {
+	handler  http.Handler
+	forwards bool
+	// prefix makes the route a path route of a host another capability
+	// owns, such as Copilot's account requests on api.github.com.
+	prefix string
+}
+
 // modelHandlers builds the OpenAI and Anthropic API routes' handlers; either
 // is nil when its route is disabled. signedIn holds the extra routes of each
 // provider that forwards the harness's own sign-in: a subscription backend
 // such as chatgpt.com, and the provider's sign-in relay.
 func modelHandlers(cfg *startupConfig, auditLogger audit.Writer, modelClient *http.Client,
 	drain *modelgateway.Drain, runtimeClient client.Client,
-) (openAIHandler, anthropicHandler http.Handler, signedIn map[string]http.Handler) {
-	signedIn = map[string]http.Handler{}
+) (openAIHandler, anthropicHandler http.Handler, signedIn map[string]signedInRoute) {
+	signedIn = map[string]signedInRoute{}
 	if !cfg.enabled[sprooziv1alpha1.CapabilityModelInference] {
 		return nil, nil, signedIn
 	}
@@ -552,22 +582,37 @@ func modelHandlers(cfg *startupConfig, auditLogger audit.Writer, modelClient *ht
 	if ok {
 		openAIHandler = &modelgateway.Handler{Config: config(cfg.openAIUpstreamURL, auth)}
 	}
-	for _, name := range []string{modelgateway.ProviderOpenAI, modelgateway.ProviderAnthropic} {
-		if auth, ok := providerAuth(cfg, name); !ok || auth.Mode() != modelauth.WorkloadMode {
+	for _, name := range modelProviders {
+		auth, ok := providerAuth(cfg, name)
+		if !ok {
 			continue
 		}
+		forwards := auth.Mode() == modelauth.WorkloadMode
 		provider, _ := modelgateway.ProviderFor(name)
-		for _, m := range provider.Models[1:] {
-			signedIn[m.Authority] = m.New(config(m.UpstreamURL, modelauth.Workload{}))
+		apiRoute := !provider.Models[0].SignedIn
+		for _, m := range provider.Models {
+			// A provider's API route is composed above. Its signed-in routes
+			// serve a forwarded sign-in, or a gateway-held token for a provider
+			// with no API route, such as Copilot.
+			if !m.SignedIn || !forwards && apiRoute {
+				continue
+			}
+			signedIn[m.Authority] = signedInRoute{handler: m.New(config(m.UpstreamURL, auth)), forwards: forwards}
 		}
-		signedIn[provider.SignInAuthority] = provider.SignInRelay(modelClient, auditLogger)
+		if forwards && provider.SignInAuthority != "" {
+			signedIn[provider.SignInAuthority] = signedInRoute{handler: provider.SignInRelay(modelClient, auditLogger)}
+		}
+		if provider.AccountAuthority != "" {
+			signedIn[provider.AccountAuthority] = signedInRoute{handler: provider.AccountRelay(auth, modelClient, auditLogger),
+				forwards: forwards, prefix: provider.AccountPrefix}
+		}
 	}
 	return openAIHandler, anthropicHandler, signedIn
 }
 
 func composeDispatcher(
 	cfg *startupConfig, handlers map[sprooziv1alpha1.CapabilityKind]http.Handler,
-	mcpHandler http.Handler, anthropicHandler http.Handler, signedIn ...map[string]http.Handler,
+	mcpHandler http.Handler, anthropicHandler http.Handler, signedIn ...map[string]signedInRoute,
 ) gateway.Dispatcher {
 	routes := gateway.Dispatcher{}
 	host := cfg.host
@@ -611,24 +656,32 @@ func composeDispatcher(
 		}
 	}
 	// The signed-in and sign-in authorities stay reserved but closed unless a
-	// provider forwards the harness's own sign-in.
-	for _, name := range []string{modelgateway.ProviderOpenAI, modelgateway.ProviderAnthropic} {
+	// provider serves them.
+	for _, name := range modelProviders {
 		provider, _ := modelgateway.ProviderFor(name)
-		for _, m := range provider.Models[1:] {
-			route := routes[m.Authority]
-			route.Handler = nil
-			routes[m.Authority] = route
+		closed := []string{provider.SignInAuthority}
+		for _, m := range provider.Models {
+			if m.SignedIn {
+				closed = append(closed, m.Authority)
+			}
 		}
-		route := routes[provider.SignInAuthority]
-		route.Handler = nil
-		routes[provider.SignInAuthority] = route
+		for _, authority := range closed {
+			if route, reserved := routes[authority]; reserved {
+				route.Handler = nil
+				routes[authority] = route
+			}
+		}
 	}
 	for _, extra := range signedIn {
-		for authority, handler := range extra {
+		for authority, served := range extra {
 			route := routes[authority]
-			route.Handler = handler
-			_, relay := handler.(*modelgateway.Relay)
-			route.ProviderCredential = !relay
+			if served.prefix != "" {
+				route.Paths = append(route.Paths, gateway.PathRoute{Prefix: served.prefix, Route: gateway.Route{
+					Capability: string(sprooziv1alpha1.CapabilityModelInference), Tier: audit.TierSemantic,
+					Handler: served.handler, ProviderCredential: served.forwards}})
+			} else {
+				route.Handler, route.ProviderCredential = served.handler, served.forwards
+			}
 			routes[authority] = route
 		}
 	}
@@ -763,6 +816,9 @@ func main() {
 	dispatcher := composeDispatcher(cfg, handlers, mcpHandler, anthropicHandler, signedIn)
 	for authority, route := range dispatcher {
 		route.Budgets, route.AuditLogger = budgets, auditLogger
+		for i := range route.Paths {
+			route.Paths[i].Route.Budgets, route.Paths[i].Route.AuditLogger = budgets, auditLogger
+		}
 		dispatcher[authority] = route
 	}
 	guard := gateway.NewLeakGuard(dispatcher, nil)

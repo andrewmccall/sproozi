@@ -8,6 +8,7 @@ import (
 
 	"github.com/andrewmccall/sproozi/internal/audit"
 	"github.com/andrewmccall/sproozi/internal/gateway"
+	"github.com/andrewmccall/sproozi/internal/modelauth"
 )
 
 const (
@@ -36,6 +37,9 @@ type Relay struct {
 	HTTPClient  *http.Client
 	AuditLogger audit.Writer
 	Service     string
+	// Auth attaches a gateway-held credential; nil or workload mode forwards
+	// the harness's own.
+	Auth modelauth.Authenticator
 }
 
 // NewAnthropicSignInHandler relays Anthropic's sign-in routes to upstreamURL,
@@ -72,6 +76,12 @@ func (h *Relay) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		upstream.Header[name] = values
+	}
+	if h.Auth != nil && h.Auth.Mode() != modelauth.WorkloadMode {
+		if err = h.Auth.Authorize(upstream); err != nil {
+			h.refuse(w, e, http.StatusServiceUnavailable, "provider authentication is unavailable")
+			return
+		}
 	}
 	client := *h.HTTPClient
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }

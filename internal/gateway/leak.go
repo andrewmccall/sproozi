@@ -51,10 +51,11 @@ func NewLeakGuard(routes Dispatcher, now func() time.Time) *LeakGuard {
 // Allows reports whether the wrapped Dispatcher serves authority.
 func (g *LeakGuard) Allows(authority string) bool { return g.routes.Allows(authority) }
 
-// ForwardsCredential reports whether authority's route forwards the
-// harness's own provider credential.
-func (g *LeakGuard) ForwardsCredential(authority string) bool {
-	return g.routes[normalizeAuthority(authority)].ProviderCredential
+// ForwardsCredential reports whether the route serving path on authority
+// forwards the harness's own provider credential.
+func (g *LeakGuard) ForwardsCredential(authority, requestPath string) bool {
+	route, _, ok := g.routes.Select(authority, requestPath)
+	return ok && route.ProviderCredential
 }
 
 // Watched reports how many credentials the guard holds for an execution.
@@ -73,13 +74,15 @@ func (g *LeakGuard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		g.routes.ServeHTTP(w, r)
 		return
 	}
-	authority := normalizeAuthority(r.Host)
-	if g.routes[authority].ProviderCredential {
-		g.observe(identity, authority, r.Header)
+	// A credential belongs to the route it was sent to, so the same host's
+	// other routes, such as a pull request on api.github.com, refuse it.
+	route, key, _ := g.routes.Select(r.Host, r.URL.Path)
+	if route.ProviderCredential {
+		g.observe(identity, key, r.Header)
 		g.routes.ServeHTTP(w, r)
 		return
 	}
-	secrets := g.secrets(identity.Execution.UID, authority)
+	secrets := g.secrets(identity.Execution.UID, key)
 	if len(secrets) == 0 {
 		g.routes.ServeHTTP(w, r)
 		return

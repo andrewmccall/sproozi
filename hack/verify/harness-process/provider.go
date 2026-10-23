@@ -16,18 +16,30 @@ import (
 func (f *fixture) model(w http.ResponseWriter, r *http.Request, selected string) {
 	body, _ := io.ReadAll(io.LimitReader(r.Body, 2<<20))
 	f.mu.Lock()
-	f.requests++
+	// Copilot's model list, model choice and account requests aren't model
+	// calls; they are checked for the credential but not counted.
+	metadata := selected == copilotGitHub && (r.Method == http.MethodGet || r.URL.Path == "/auto")
+	if !metadata {
+		f.requests++
+	}
 	if r.Header.Get("Proxy-Authorization") != "" || strings.Contains(string(body), proxyToken) {
 		f.violations = append(f.violations, "projected token reached upstream")
 	}
-	credential := r.Header.Get("Authorization")
+	credential, expected := r.Header.Get("Authorization"), providerKey
 	if selected == "claude-code" {
 		credential = r.Header.Get("X-Api-Key")
 	}
-	if credential != providerKey && credential != "Bearer "+providerKey {
+	if selected == copilotGitHub {
+		// The gateway forwards Copilot's own GitHub sign-in.
+		expected = copilotFixtureToken
+	}
+	if credential != expected && credential != "Bearer "+expected {
 		f.violations = append(f.violations, "gateway provider credential missing")
 	}
 	f.mu.Unlock()
+	if selected == copilotGitHub && f.copilotMetadata(w, r) {
+		return
+	}
 	var request map[string]any
 	if json.Unmarshal(body, &request) != nil {
 		http.Error(w, "invalid request", 400)
@@ -221,4 +233,41 @@ func toolResults(value any) []string {
 		return found
 	}
 	return nil
+}
+
+// copilotMetadata answers the model list and automatic model choice a
+// GitHub-signed-in Copilot asks for before its model call.
+func (f *fixture) copilotMetadata(w http.ResponseWriter, r *http.Request) bool {
+	var body any
+	switch {
+	case r.Method == http.MethodGet && r.URL.Path == "/models":
+		body = map[string]any{"object": "list", "data": []any{map[string]any{
+			"id": fixtureModel, "name": "Fixture", "object": "model", "vendor": "OpenAI", "version": fixtureModel,
+			"preview": false, "model_picker_enabled": true, "is_chat_default": true, "is_chat_fallback": true,
+			"supported_endpoints": []string{"/responses"},
+			"policy":              map[string]any{"state": "enabled", "terms": ""},
+			"capabilities": map[string]any{"family": "gpt-5", "object": "model_capabilities", "type": "chat",
+				"tokenizer": "o200k_base",
+				"limits": map[string]any{"max_context_window_tokens": 200000, "max_prompt_tokens": 128000,
+					"max_output_tokens": 8192, "max_non_streaming_output_tokens": 8192},
+				"supports": map[string]any{"streaming": true, "tool_calls": true, "parallel_tool_calls": true,
+					"structured_outputs": true, "vision": false}}}}}
+	case r.Method == http.MethodPost && r.URL.Path == "/auto":
+		body = map[string]any{"model": fixtureModel}
+	case r.Method == http.MethodGet && r.URL.Path == "/copilot_internal/user":
+		// The fields Copilot reads, with the policy flags of a free plan.
+		body = map[string]any{"login": "fixture", "copilot_plan": "individual", "access_type_sku": "free_limited_copilot",
+			"chat_enabled": true, "cli_enabled": true, "is_mcp_enabled": true,
+			"endpoints": map[string]any{"api": "https://api.individual.githubcopilot.com",
+				"telemetry": "https://telemetry.individual.githubcopilot.com",
+				"proxy":     "https://proxy.individual.githubcopilot.com"}}
+	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/copilot_internal/"):
+		w.WriteHeader(http.StatusNotFound)
+		return true
+	default:
+		return false
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(body)
+	return true
 }

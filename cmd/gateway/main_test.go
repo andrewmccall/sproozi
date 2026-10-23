@@ -77,6 +77,9 @@ func validGatewayEnvironment(t *testing.T) {
 				"chatgpt.com",
 				"auth.openai.com",
 				"platform.claude.com",
+				"api.individual.githubcopilot.com",
+				"api.business.githubcopilot.com",
+				"api.enterprise.githubcopilot.com",
 				"github.com",
 				"api.github.com",
 				"pypi.org",
@@ -874,5 +877,48 @@ func TestGatewayWarnsAboutUpgradeResidue(t *testing.T) {
 		if strings.Contains(out.String(), "WARNING") != allowed {
 			t.Fatalf("allowed=%v: output %q", allowed, out.String())
 		}
+	}
+}
+
+// Copilot has no API-key host: its plan hosts serve a forwarded GitHub
+// sign-in in workload mode, or a gateway-held GitHub token (ADR 0047).
+func TestCopilotHostsServeAForwardedSignInOrAGatewayToken(t *testing.T) {
+	validGatewayEnvironment(t)
+	t.Setenv("OPENAI_API_KEY", "openai-fixture-key")
+	for _, tc := range []struct {
+		mode, token string
+		forwards    bool
+	}{{"workload", "", true}, {"api_key", "gho_gateway-held", false}} {
+		t.Setenv("MODEL_AUTH_MODE", tc.mode)
+		t.Setenv("COPILOT_SIGN_IN_TOKEN", tc.token)
+		cfg, err := loadStartupConfig()
+		if err != nil {
+			t.Fatal(err)
+		}
+		openAI, anthropic, signedIn := modelHandlers(cfg, audit.NewLogger(io.Discard), http.DefaultClient, nil, nil)
+		handlers := map[api.CapabilityKind]http.Handler{api.CapabilityModelInference: openAI}
+		routes := composeDispatcher(cfg, handlers, nil, anthropic, signedIn)
+		for _, authority := range []string{"api.individual.githubcopilot.com:443", "api.business.githubcopilot.com:443"} {
+			if !routes.Allows(authority) || routes[authority].ProviderCredential != tc.forwards {
+				t.Fatalf("%s mode: %s allowed=%v forwards=%v", tc.mode, authority, routes.Allows(authority),
+					routes[authority].ProviderCredential)
+			}
+		}
+		if account, _, _ := routes.Select("api.github.com:443", "/copilot_internal/user"); account.Handler == nil ||
+			account.ProviderCredential != tc.forwards {
+			t.Fatalf("%s mode: Copilot's account route %+v", tc.mode, account)
+		}
+	}
+	t.Setenv("MODEL_AUTH_MODE", "api_key")
+	t.Setenv("COPILOT_SIGN_IN_TOKEN", "")
+	cfg, err := loadStartupConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	openAI, anthropic, signedIn := modelHandlers(cfg, audit.NewLogger(io.Discard), http.DefaultClient, nil, nil)
+	handlers := map[api.CapabilityKind]http.Handler{api.CapabilityModelInference: openAI}
+	routes := composeDispatcher(cfg, handlers, nil, anthropic, signedIn)
+	if routes.Allows("api.individual.githubcopilot.com:443") {
+		t.Fatal("Copilot's host opened without a credential")
 	}
 }
