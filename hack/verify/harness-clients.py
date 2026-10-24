@@ -65,12 +65,16 @@ def main():
                     value = json.loads(execute([binary, "mcp", "get", name, "--json"], env, directory))[name]
                     assert value["url"] == f"https://sproozi-gateway.sproozi-system.svc:8443/mcp/{name}", value
                     assert value["type"] == "http" and value["enabled"] is True, value
-            else:
+            elif selected == "opencode":
                 path = Path(directory, "approved.json")
                 path.write_text(config)
                 env["OPENCODE_CONFIG"] = str(path)
                 value = json.loads(execute([binary, "--pure", "debug", "config"], env, directory))
                 assert value["mcp"] == json.loads(config)["mcp"], value["mcp"]
+            else:
+                # A new harness needs its own check of how its client reports
+                # loaded MCP servers; never fall back to another client's.
+                raise SystemExit(f"{selected} has no check here; add a branch that reads its client's MCP servers")
             print(f"PASS: {selected} {version} loaded the generated named and sproozi control connections in disposable state; no model request")
 
 

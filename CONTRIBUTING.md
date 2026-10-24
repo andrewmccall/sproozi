@@ -44,14 +44,15 @@ issues that are deferred or declined, with the reason for each.
 
 ## Common changes
 
-- **Add an MCP server.** Copy `examples/mcp` to a new directory under
-  `examples/` and rename the copied resources; keep its shared runtime by
-  deleting `agentruntime.yaml`. Read the server's tools and argument schemas
+- **Add an MCP server.** Copy `examples/mcp` to `examples/mcp-SERVER`, but not
+  its `agentruntime.yaml`: your template keeps `runtimeRef: mcp-research`, the
+  shared runtime. Rename the copied resources, and name the capability
+  `mcp.KEY` after the server's key in `servers.json`. Read the server's tools and argument schemas
   with `python3 hack/mcp-tools.py URL --json`, approve only tools that neither
   write nor fetch arbitrary URLs, then check your policy against the server
   with `python3 hack/mcp-tools.py URL --policy DIR/agentpolicy.yaml` and run
   `make verify-mcp`. The example is for review only: an installation registers
-  a server in its `sproozi-mcp-servers` ConfigMap, and a local Codex session in
+  a server in its `sproozi-mcp-servers` ConfigMap, and a local Codex or Copilot session in
   `config.json`'s `gateway.mcpRegistryFile` and `gateway.mcpPolicy`.
   [Configured MCP](docs/reference/configured-mcp.md) explains each file.
 - **Add a harness.** Follow [Add a harness](docs/contributing/add-a-harness.md):

@@ -133,9 +133,14 @@ func TestMCPExamplesAreConsistent(t *testing.T) {
 					t.Errorf("run asks for %s, which the policy does not allow", capability)
 				}
 			}
-			if e.run.Spec.TemplateRef.Name != e.template.Name || e.template.Spec.PolicyRef.Name != e.policy.Name ||
-				e.template.Spec.RuntimeRef.Name != e.runtime.Name {
-				t.Errorf("run, template, policy and runtime names do not connect")
+			for _, ref := range []struct{ from, kind, got, want string }{
+				{"run " + e.run.Name, "template", e.run.Spec.TemplateRef.Name, e.template.Name},
+				{"template " + e.template.Name, "policy", e.template.Spec.PolicyRef.Name, e.policy.Name},
+				{"template " + e.template.Name, "runtime", e.template.Spec.RuntimeRef.Name, e.runtime.Name},
+			} {
+				if ref.got != ref.want {
+					t.Errorf("%s refers to %s %q, but the example's %s is %q", ref.from, ref.kind, ref.got, ref.kind, ref.want)
+				}
 			}
 			if denial := policy.Evaluate(e.policy.Spec, e.template.Spec, e.run.Spec, e.runtime.Spec); denial != nil {
 				t.Errorf("admission denied the example run: %s", denial.Message)

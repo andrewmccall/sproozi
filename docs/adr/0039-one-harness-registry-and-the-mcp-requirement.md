@@ -14,10 +14,15 @@ servers and the `sproozi` control connection, and every test still passed.
 Adding it to the CRD enum alone also passed every test, although the renderer
 then refused it.
 
-Stock `pi` has no MCP client. Every harness receives the `sproozi` control
+Stock `pi` had no MCP client then (0.84). Every harness receives the `sproozi` control
 connection and its `diagnose` tool over MCP
 ([ADR 0025](0025-managed-harness-integration-and-diagnose.md)), and nothing said
 what a harness without MCP meant.
+
+Update, 24 October 2026: this decision was tested with pi 0.84. pi has had a
+built-in MCP client since 0.99.0 (29 September): `pi mcp list`, `--no-mcp` and
+`mcpServers` in its `mcp.json`. So a pi harness loads MCP itself and needs no
+bridge. The rule below is unchanged.
 
 ## Decision
 

@@ -233,9 +233,16 @@ func exampleProblem(h Harness, example string) string {
 	if rt.Spec.ClientConfig.Harness != h.Selector {
 		return fmt.Sprintf("%s must set spec.clientConfig.harness: %s", example, h.Selector)
 	}
+	if rt.Spec.ClientConfig.TrustBundleConfigMap.Name == "" {
+		return fmt.Sprintf("%s must set spec.clientConfig.trustBundleConfigMap, so the client trusts the gateway", example)
+	}
 	spec, err := json.Marshal(rt.Spec)
 	if err != nil {
 		return err.Error()
+	}
+	if !strings.Contains(string(spec), "HTTPS_PROXY") {
+		return fmt.Sprintf("%s's containers never set HTTPS_PROXY; build it from the gateway token as "+
+			"examples/harnesses/agentruntime-opencode.yaml does", example)
 	}
 	read := []string{h.MCP.File}
 	if h.Loader.Bridge != "" {
