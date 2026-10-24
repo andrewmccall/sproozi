@@ -267,6 +267,27 @@ func TestFreePortSkipsRecordedAndBoundPorts(t *testing.T) {
 	}
 }
 
+// A later agent takes the next port after the existing ones, unless --port
+// says where to start.
+func TestAddHarnessPortFollowsExistingOrFlag(t *testing.T) {
+	for _, tc := range []struct {
+		flag uint16
+		want uint16
+	}{{0, 18444}, {18600, 18600}} {
+		l, inst := testInstallation(t)
+		i := &installer{l: l, inst: inst, o: Options{Harness: harness.NativeClaude, Port: tc.flag, Progress: io.Discard}}
+		if !PortFree("127.0.0.1", tc.want) || !PortFree("0.0.0.0", tc.want) {
+			t.Skipf("port %d is in use on this host", tc.want)
+		}
+		if err := i.addHarness(); err != nil {
+			t.Fatal(err)
+		}
+		if got := i.selected.Port; got != tc.want {
+			t.Fatalf("--port %d: port %d, want %d", tc.flag, got, tc.want)
+		}
+	}
+}
+
 // Setup refuses a root it does not own, such as a Git checkout, and never asks
 // for its permissions to be changed; a new, empty or installed root is fine.
 func TestCheckRootRefusesForeignDirectories(t *testing.T) {

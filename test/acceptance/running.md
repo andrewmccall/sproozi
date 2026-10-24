@@ -47,7 +47,7 @@ checks before cluster creation and cleanup after a setup failure. Stubs replace 
 | `make verify-kubernetes-release` | In an owned Kind cluster with enforcing CNI, the rendered release assets install as documented; the provider-free first check passes with permitted, denied and blocked paths; renewal reaches the running gateway; a CA rotation passes through new immutable trust objects; and the certificate controller lacks other rights. See [Kubernetes release assets](#kubernetes-release-assets). | No | Docker with Buildx, Kind, kubectl, Python 3 |
 | `make verify-live` | One real AgentRun on a provisioned cluster opens a scoped PR in `SPROOZI_DEMO_REPO`. Denial probes run inside its sandbox and fail closed, and a second Pod using the run's identity is refused by the gateway. | No | Provisioned cluster and credentials; creates a PR |
 | `make verify-public-tree` | No private local material is tracked. | No | Git |
-| `make verify-release` | Release inputs are pinned, then `test`, `lint`, every `Tests` row, `test-e2e`, `verify-live` and `verify-public-tree` pass and the release image builds. A missing prerequisite fails. No push. | No | Everything above; `RELEASE_BUILD=1`, `SPROOZI_DEMO_REPO` |
+| `make verify-release` | Release inputs are pinned, then `test`, `lint`, every `Tests` row, `test-e2e`, `verify-kubernetes-release`, `verify-live` and `verify-public-tree` pass and the release image builds. A missing prerequisite fails. No push. | No | Everything above; `RELEASE_BUILD=1`, `SPROOZI_DEMO_REPO` |
 
 `make verify-release` does not run the installed-client targets or
 `verify-mcp-kind`; run those when changing client configuration or configured MCP.

@@ -1029,6 +1029,12 @@ for host in ['orchestration-provider.sproozi-system.svc','kubernetes.default.svc
  try:socket.getaddrinfo(host,443)
  except socket.gaierror:unresolved+=1
 check(unresolved==3,unresolved)
+# A proxy-aware client still reaches a host by name: it sends the name to the
+# gateway, which resolves it. httpx is the client Hermes itself uses.
+import httpx
+os.environ.update(HTTPS_PROXY='https://sproozi:'+token+'@sproozi-gateway.sproozi-system.svc:8443',NO_PROXY='')
+with httpx.Client(verify=ctx,timeout=10) as client:response=client.get('https://api.openai.com/v1/models')
+check(response.status_code==200 and 'data' in response.json(),response.status_code)
 # The CNI still blocks direct connections by address.
 blocked=0
 for host,port in [(PROVIDER_IP,8443),(os.environ['KUBERNETES_SERVICE_HOST'],443)]:
@@ -1036,7 +1042,7 @@ for host,port in [(PROVIDER_IP,8443),(os.environ['KUBERNETES_SERVICE_HOST'],443)
  except TimeoutError:blocked+=1
 check(blocked==2,blocked)
 check(not Path('/var/run/secrets/kubernetes.io/serviceaccount/token').exists())
-print(json.dumps({'gatewayAuthenticated':True,'missingIdentityDenied':True,'unknownAuthorityDenied':True,'namesUnresolved':True,'directProviderAndKubernetesBlocked':True,'noKubernetesCredential':True}))
+print(json.dumps({'gatewayAuthenticated':True,'missingIdentityDenied':True,'unknownAuthorityDenied':True,'namesUnresolved':True,'proxiedNameReached':True,'directProviderAndKubernetesBlocked':True,'noKubernetesCredential':True}))
 """
     provider_ip = k("get", "service", "orchestration-provider", "-n", SYSTEM, "-o", "jsonpath={.spec.clusterIP}").strip()
     check(provider_ip, "orchestration-provider has no cluster IP")

@@ -237,15 +237,23 @@ func attach(ctx context.Context, socket, id string) error {
 	})
 	restore()
 	if err == nil {
-		// The agent's screen hid the session ID; name it and the next commands.
+		// The agent is still running, so its screen modes and status bar are
+		// still in this terminal. Reset them, then name the session and the
+		// next commands below the cursor.
+		_, _ = fmt.Fprint(os.Stdout, detachReset)
 		_, _ = fmt.Fprintln(os.Stderr, detachedLine(id))
 	}
 	return err
 }
 
+// detachReset returns a terminal the agent drew on to a plain shell: default
+// colours, visible cursor, no bracketed paste, mouse reporting or enhanced
+// keyboard, and nothing left below the cursor to show through the hint.
+const detachReset = "\x1b[0m\x1b[?25h\x1b[?2004l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[<u\r\n\x1b[J"
+
 // detachedLine names the session and the next commands after its terminal closes.
 func detachedLine(id string) string {
 	short := shortID(id)
-	return fmt.Sprintf("\nLeft session %s. Back to it: sproozi attach %s   Stop it: sproozi stop %s   List: sproozi ls",
+	return fmt.Sprintf("Left session %s. Back to it: sproozi attach %s   Stop it: sproozi stop %s   List: sproozi ls",
 		id, short, short)
 }

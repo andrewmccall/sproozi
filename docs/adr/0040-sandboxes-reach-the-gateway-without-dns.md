@@ -81,7 +81,9 @@ Tests: `TestEnsureSandboxPinsGatewayAndRemovesDNS`,
   gateway serves inspection hosts by name only.
 - A workload that resolves names itself, for example a tool that ignores
   `HTTPS_PROXY`, now fails fast inside the sandbox. Such a tool could not reach
-  its target before either, since the NetworkPolicy allowed only the gateway.
+  its target before either, since the NetworkPolicy allowed only the gateway. The
+  `sproozi-access` skill tells the agent that a failed lookup means the tool
+  skipped `HTTPS_PROXY`, since `diagnose` sees no gateway record of it.
 - Tests and envtest inject a resolver, because the gateway Service name does
   not resolve outside a cluster.
 
@@ -100,5 +102,6 @@ Tests: `TestEnsureSandboxPinsGatewayAndRemovesDNS`,
   [system architecture](../explanations/system-architecture.md),
   [AgentRuntime reference](../reference/agentruntime.md),
   [DNS egress note](../explanations/future-architecture/dns-egress.md)
-- `hack/verify/orchestration-kind/verify.py` (`namesUnresolved` probe)
+- `hack/verify/orchestration-kind/verify.py` (`namesUnresolved` and
+  `proxiedNameReached` probes)
 - [ADR 0014](0014-review-boundaries-and-native-contracts.md)

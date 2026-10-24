@@ -139,9 +139,6 @@ func (o Options) withDefaults() Options {
 	if o.Harness == "" {
 		o.Harness = harness.NativeCodex
 	}
-	if o.Port == 0 {
-		o.Port = DefaultPort
-	}
 	if o.Instructions == "" {
 		o.Instructions = DefaultInstructions
 	}
@@ -254,7 +251,7 @@ func (i *installer) prepareNetwork(ctx context.Context) error {
 
 func (i *installer) findEndpoint(ctx context.Context) error {
 	if i.inst.Endpoint == nil {
-		port, err := freePort(i.o.Port, i.inst)
+		port, err := freePort(cmp.Or(i.o.Port, DefaultPort), i.inst)
 		if err != nil {
 			return err
 		}
@@ -362,8 +359,10 @@ func (i *installer) signInChatGPT(ctx context.Context, provider Provider) error 
 
 func (i *installer) addHarness() error {
 	o := i.o
-	start := o.Port
-	if len(i.inst.Harnesses) > 0 {
+	// --port picks where the search starts for this agent; without it, a
+	// later agent takes the next port after the existing ones.
+	start := cmp.Or(o.Port, DefaultPort)
+	if o.Port == 0 && len(i.inst.Harnesses) > 0 {
 		start = maxPort(i.inst) + 1
 	}
 	port, err := freePort(start, i.inst)

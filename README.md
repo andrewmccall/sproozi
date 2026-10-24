@@ -43,8 +43,7 @@ This is about giving an agent autonomy *within a defined boundary*. It does not 
 Sproozi does not replace an agent's own reasoning or tools. It launches an existing agent, provides an environment for it to work in, and enforces the access that you configure.
 
 - **Codex and Claude Code:** run locally in Docker or in Kubernetes Pods. Both support controlled session movement between Docker and Kubernetes, recorded with older client versions than the ones now pinned (see [what works today](#what-works-today)).
-- **OpenCode and Hermes:** supported for runs in Kubernetes Pods; portable sessions aren't yet supported for these agents.
-- **GitHub Copilot CLI:** supported for runs in Kubernetes Pods, using the OpenAI key on the gateway rather than a Copilot subscription; portable sessions aren't supported.
+- **OpenCode, Hermes and GitHub Copilot CLI:** run in Kubernetes Pods only, not in local Docker, and their sessions can't move. Hermes uses its official image; OpenCode and Copilot need an image you build with the stock CLI. Copilot can use the gateway's OpenAI key, a Copilot plan token held by the gateway, or its own GitHub sign-in.
 
 [Agent support and details](docs/reference/harnesses.md)
 
@@ -54,7 +53,7 @@ Sproozi does not replace an agent's own reasoning or tools. It launches an exist
 
 You need Docker running and an OpenAI API key (for Codex) or an Anthropic API
 key (for Claude Code). Install the CLI, set up once, then start a session in
-any Git repository:
+a Git repository with at least one commit:
 
 ```bash
 brew install andrewmccall/tap/sproozi
@@ -63,15 +62,23 @@ cd /path/to/your/repository
 sproozi run
 ```
 
-`init` asks for your API key and checks that the agent's container can't reach
-the internet directly; for scripts, pass `--credential-file FILE` or
-`--credential-stdin` instead, or `--sign-in` to let the agent use your own
-subscription ([how agents sign in](docs/guides/local-sessions.md#choose-how-an-agent-signs-in)). `run` copies the repository into a container and
-opens Codex there; your own directory isn't changed. Press Ctrl-] to detach.
-`sproozi ls` shows each session's ID; the first few characters are enough for
-`sproozi attach ID` to return and `sproozi stop ID` to stop. A stopped session
-shows as `retained` in `sproozi ls`; `sproozi resume ID` carries on and
-reconnects your terminal (`-d` skips that).
+`init` asks for your API key, then checks that the agent's container can't
+reach the internet directly. Instead of typing the key:
+
+- From a script, pass `--credential-stdin`, or `--credential-file FILE` with a
+  file only you can read (`chmod 600 FILE`).
+- To use your ChatGPT or Claude subscription instead of a key, run
+  `sproozi init --sign-in` ([how agents sign in](docs/guides/local-sessions.md#choose-how-an-agent-signs-in)).
+
+`run` copies the repository into a container and opens Codex there; your own
+directory isn't changed. To try it without a repository of your own, run
+`git init demo && cd demo && git commit --allow-empty -m init` first.
+
+- Ctrl-] detaches. Ctrl-C goes to the agent.
+- `sproozi ls` lists sessions. The first few characters of an ID are enough
+  for `sproozi attach ID` and `sproozi stop ID`.
+- A stopped session shows as `retained`. `sproozi resume ID` carries on and
+  reconnects your terminal (`-d` skips that).
 
 The agents show expected warnings because the gateway refuses their own
 services: Codex shows `⚠ 1 warning` (refused telemetry), Claude Code a 403 on
@@ -79,9 +86,9 @@ its remote settings. [Local sessions](docs/guides/local-sessions.md#run-an-agent
 explains them.
 
 For Claude Code, run `sproozi init --harness claude-code`, then `sproozi run
---harness claude-code`. Adding it restarts the background service if no
-session is running; otherwise `init` says so, and you restart it later with
-`sproozi service stop` and `sproozi service start`.
+--harness claude-code`. If a session is running, `init` saves the change and
+says so. To apply it without stopping your sessions, run
+`sproozi service stop --leave-running`, then `sproozi service start`.
 
 [Local sessions](docs/guides/local-sessions.md) explains each step.
 [Install the CLI](docs/guides/install.md) covers downloads for Linux and
@@ -118,10 +125,10 @@ There's working code and recorded tests, but support varies by workflow:
 
 | Area | Current state |
 | --- | --- |
-| Agent runs in Kubernetes Pods | Tested with Codex, Claude Code, OpenCode, Copilot and Hermes using deterministic providers, by [`make test-e2e`](test/acceptance/running.md#harnesses-and-hermes-in-kind). The [E2E workflow](https://github.com/andrewmccall/sproozi/actions/workflows/test-e2e.yml) runs it on pull requests and pushes to `main`; check there for the latest result, which isn't always green |
+| Agent runs in Kubernetes Pods | Tested with Codex, Claude Code, OpenCode, Copilot and Hermes using [deterministic providers](GLOSSARY.md#deterministic-provider), by [`make test-e2e`](test/acceptance/running.md#harnesses-and-hermes-in-kind). The [E2E workflow](https://github.com/andrewmccall/sproozi/actions/workflows/test-e2e.yml) runs it on pull requests and pushes to `main`; check there for the latest result, which isn't always green |
 | Controlled access to Kubernetes and external tools | [Recorded tool-access acceptance](test/acceptance/reports/verified-mcp-demo.md) with a real model, including native Kubernetes reads, configured HTTPS test servers and denied operations. Recorded with Codex 0.154.0; not re-recorded with the current pins. The full redacted reports aren't published yet |
 | Local Docker sessions from `sproozi init` | Provisioning, per-session Codex or Claude Code selection, gateway containment probes and certificate renewal checked on macOS Docker Desktop with deterministic providers by [`make verify-local-onboarding`](test/acceptance/running.md#local-onboarding); no recorded report is published yet. See the [local sessions guide](docs/guides/local-sessions.md) |
-| Using your own subscription | Every agent can use a gateway-held API key, a gateway-held sign-in token or ChatGPT plan sign-in, or its own sign-in, which the gateway forwards while still inspecting and counting each call ([ADR 0047](docs/adr/0047-harnesses-sign-in-to-their-own-model-providers.md)). Local Docker sessions with each harness's own sign-in are checked with deterministic providers by `make verify-local-onboarding SIGN_IN=1`; Copilot's own GitHub sign-in runs through the gateway with a fixture account in `make verify-harness-process`. No real subscription run through Sproozi is recorded |
+| Using your own subscription | Each agent can use a key or sign-in held by the gateway, or its own sign-in, which the gateway forwards while still inspecting and counting each call ([ADR 0047](docs/adr/0047-harnesses-sign-in-to-their-own-model-providers.md)). Local Docker sessions with each harness's own sign-in are checked with deterministic providers by `make verify-local-onboarding SIGN_IN=1`; Copilot's own GitHub sign-in runs through the gateway with a fixture account in `make verify-harness-process`. No real subscription run through Sproozi is recorded. Options differ by agent: ChatGPT plan sign-in is for Codex, and Copilot's plan uses a GitHub token ([model providers](docs/reference/harnesses.md#model-providers)) |
 | Explaining refused access to the agent | Every harness receives Sproozi instructions, a `sproozi-access` skill and a `diagnose` tool for its own recent gateway refusals; tested with installed Codex, Claude Code, OpenCode and Copilot clients, which call `diagnose` through the gateway after a refused request; not yet in a recorded Kind run. See [Sproozi integration](docs/reference/sproozi-integration.md) |
 | Your own instructions and skills | One profile, `~/.sproozi/profile` in a local installation, reaches every managed Codex and Claude Code session with shared and per-harness instructions and skills. It is sent with each Docker launch and stored by digest for Kubernetes. Tested with installed clients and a Docker ↔ Kind session-mobility round trip. See [Profile](docs/reference/profile.md) |
 | Docker ↔ Kubernetes session movement | [Recorded round trips](test/acceptance/reports/verified-session-mobility.md) with Codex 0.161.0, Claude Code 2.1.27 and deterministic providers, including unfinished Git changes. The pinned clients are now Codex 0.163.0 and Claude Code 2.1.302; movement hasn't been re-recorded with them |

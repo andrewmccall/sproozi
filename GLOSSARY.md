@@ -87,6 +87,13 @@ The per-kind code a [managed harness](#managed-harness) needs outside the
 registry: its supervisor adapter, checkpoint format and native configuration
 check. Guard tests require each one.
 
+### Deterministic provider
+
+A test model provider that returns scripted replies instead of running a
+model, so a test of a real client through the gateway gives the same result
+every time. Evidence recorded with one shows Sproozi's behaviour, not a real
+model's. Also seen as: fixture provider, stand-in provider.
+
 ### Envtest
 
 The controller-runtime test environment that runs a real Kubernetes API server

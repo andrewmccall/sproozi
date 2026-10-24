@@ -3,6 +3,8 @@
 This guide sets up Sproozi on one computer and runs Codex or Claude Code in a
 restricted Docker container. You need a running Docker engine; you do not need
 a Sproozi checkout, Go, OpenSSL, Python, kubectl or a Kubernetes cluster.
+OpenCode, Hermes and GitHub Copilot CLI run only on Kubernetes; see
+[harnesses](../reference/harnesses.md).
 
 `sproozi init` sets up everything: the agent image, a private Docker network,
 a certificate authority, your provider key, the configuration and a background
@@ -117,9 +119,8 @@ sproozi init --harness claude-code
 sproozi run --harness claude-code
 ```
 
-Each agent gets its own gateway port. `--port` sets only the first one, on the
-first `init`; a later agent takes the next free port after the existing ones,
-so `--port` on a later `init` has no effect.
+Each agent gets its own gateway port. The first takes 18443 and a later one
+the next free port after it; `--port` picks where that agent's search starts.
 
 The second agent gets its own gateway port and provider key, so a Codex
 container cannot use the Anthropic key, or the reverse. If a session is
@@ -128,9 +129,10 @@ session stops.
 
 ## Choose how an agent signs in
 
-Each agent uses one of three ways to authenticate, chosen when you run setup
+Each agent uses one of four ways to authenticate, chosen when you run setup
 for it ([ADR 0047](../adr/0047-harnesses-sign-in-to-their-own-model-providers.md)).
-Every agent offers all three; which your provider's terms allow is your call.
+Codex offers all four; Claude Code offers all but the ChatGPT plan. Which your
+provider's terms allow is your call.
 
 | Option | Setup | Who holds the credential |
 | --- | --- | --- |
@@ -151,7 +153,9 @@ outside Sproozi:
   `localhost` can't reach the container.
 
 The agent keeps its sign-in in its own Docker volume,
-`sproozi-<installation>-<placement>-login`, which every later session of that
+`sproozi-<installation>-<placement>-login` (see
+[installation](../../GLOSSARY.md#local-installation) and
+[placement](../../GLOSSARY.md#placement)), which every later session of that
 agent mounts, and refreshes it itself. Signing out in the agent removes it.
 The gateway forwards the sign-in to the provider, still counts every model
 call against the session's budget, and refuses ChatGPT's own plugins and
