@@ -15,6 +15,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/endpoints/model"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/modelauth"
 	"github.com/andrewmccall/sproozi/internal/pki"
@@ -50,7 +51,10 @@ type Options struct {
 	// SignIn lets the harness sign in to its own provider account instead of
 	// the gateway holding a key (ADR 0047). Without it or a key, a harness
 	// keeps the choice it already has.
-	SignIn       bool
+	SignIn bool
+	// Login names a login to set up for a harness that signs in itself, for
+	// a second account; empty is harness.DefaultLogin (ADR 0049).
+	Login        string
 	Port         uint16
 	StartService bool
 	Executable   string
@@ -138,9 +142,6 @@ func (o Options) withDefaults() Options {
 	}
 	if o.Harness == "" {
 		o.Harness = harness.NativeCodex
-	}
-	if o.Port == 0 {
-		o.Port = DefaultPort
 	}
 	if o.Instructions == "" {
 		o.Instructions = DefaultInstructions
@@ -254,7 +255,7 @@ func (i *installer) prepareNetwork(ctx context.Context) error {
 
 func (i *installer) findEndpoint(ctx context.Context) error {
 	if i.inst.Endpoint == nil {
-		port, err := freePort(i.o.Port, i.inst)
+		port, err := freePort(cmp.Or(i.o.Port, DefaultPort), i.inst)
 		if err != nil {
 			return err
 		}
@@ -286,7 +287,14 @@ func (i *installer) prepareHarness(ctx context.Context) error {
 		}
 		return fail("harness", fmt.Errorf("%s already uses %s", o.Harness, current), "edit the model in "+i.l.Config())
 	}
-	provider := ProviderFor(i.selected.Harness)
+	keyGiven := o.Credential.File != "" || o.Credential.Stdin != nil
+	if o.SignIn && !SignsIn(i.selected.Harness) {
+		return fail("harness", fmt.Errorf("%s can't sign in to its provider itself yet", o.Harness),
+			"leave out --sign-in and give it a provider key")
+	}
+	mechanism := chooseMechanism(o, *i.selected, keyGiven)
+	provider := ProviderFor(i.selected.Harness, mechanism)
+	i.selected.ProviderURL = providerURL(o.ProviderURL, i.selected.ProviderURL, provider)
 	// An explicit CA bundle replaces the stored one on every run.
 	if o.ProviderCAFile != "" {
 		path, err := StoreProviderCA(i.l, provider.Name, o.ProviderCAFile)
@@ -296,29 +304,33 @@ func (i *installer) prepareHarness(ctx context.Context) error {
 		i.selected.ProviderCAFile, i.providerCA, i.credential = path, path, true
 		i.step("Stored the %s endpoint's CA bundle in %s", provider.Name, path)
 	}
-	keyGiven := o.Credential.File != "" || o.Credential.Stdin != nil
 	if o.ChatGPT {
 		return i.signInChatGPT(ctx, provider)
 	}
-	if o.SignIn && !SignsIn(i.selected.Harness) {
-		return fail("harness", fmt.Errorf("%s can't sign in to its provider itself yet", o.Harness),
-			"leave out --sign-in and give it a provider key")
+	if o.Login != "" && mechanism != harness.CredentialSignIn {
+		return fail("harness", fmt.Errorf("--login names a login of a harness that signs in itself, but %s uses a "+
+			"credential the gateway holds", o.Harness), "add --sign-in")
 	}
-	if o.SignIn || (i.selected.Credential == "" && !keyGiven && SignsIn(i.selected.Harness)) {
+	if o.Login != "" && o.Login != harness.DefaultLogin && !slices.Contains(i.selected.Logins, o.Login) {
+		i.selected.Logins = append(i.selected.Logins, o.Login)
+		i.step("%s has a login %q; start a session on it with: sproozi run --harness %s --login %s",
+			o.Harness, o.Login, o.Harness, o.Login)
+	}
+	if mechanism == harness.CredentialSignIn {
 		// The harness signs in in its first session; the gateway forwards
 		// that sign-in and stores no key (ADR 0047).
-		if i.selected.Credential != "" {
+		if _, err := os.Stat(i.selected.Credential); i.selected.Credential != "" && err == nil {
 			i.step("%s now signs in to %s itself; the stored key is no longer used", o.Harness, provider.Name)
 		}
 		i.selected.Credential, i.selected.Kind = "", ""
 		return i.save("harness:" + string(i.selected.Harness))
 	}
 	i.selected.Credential = filepath.Join(i.l.Credentials(), provider.Name)
-	if o.Token || keyGiven {
+	switch {
+	case mechanism == harness.CredentialToken:
+		i.selected.Kind = modelauth.TokenMode
+	case keyGiven:
 		i.selected.Kind = ""
-		if o.Token {
-			i.selected.Kind = modelauth.TokenMode
-		}
 	}
 	if !HasCredential(i.l, provider.Name) || o.Credential.File != "" || o.Credential.Stdin != nil {
 		if _, err := StoreCredential(i.l, provider.Name, o.Credential); err != nil {
@@ -335,6 +347,38 @@ func (i *installer) prepareHarness(ctx context.Context) error {
 		i.step("The %s credential is accepted", provider.Name)
 	}
 	return i.save("harness:" + string(i.selected.Harness))
+}
+
+// chooseMechanism is how the harness will reach its provider after this run:
+// what the flags ask for, or what it already uses.
+func chooseMechanism(o Options, current Harness, keyGiven bool) harness.NativeCredential {
+	switch {
+	case o.ChatGPT:
+		return harness.CredentialKey
+	case o.SignIn || (current.Credential == "" && !keyGiven && !o.Token && SignsIn(current.Harness)):
+		return harness.CredentialSignIn
+	case o.Token:
+		return harness.CredentialToken
+	case keyGiven:
+		return harness.CredentialKey
+	}
+	if mechanism := current.Mechanism(); mechanism != harness.CredentialSignIn {
+		return mechanism
+	}
+	return harness.CredentialKey
+}
+
+// providerURL is the harness's provider URL: the flag's, or a default that
+// follows the mechanism, such as Copilot's plan host when it signs in. A
+// private endpoint stays as configured.
+func providerURL(flag, current string, provider Provider) string {
+	switch {
+	case flag != "":
+		return flag
+	case slices.Contains([]string{openAIURL, anthropicURL, copilotURL}, current):
+		return provider.URL
+	}
+	return current
 }
 
 // signInChatGPT keeps a gateway-held ChatGPT plan sign-in for an OpenAI
@@ -362,15 +406,17 @@ func (i *installer) signInChatGPT(ctx context.Context, provider Provider) error 
 
 func (i *installer) addHarness() error {
 	o := i.o
-	start := o.Port
-	if len(i.inst.Harnesses) > 0 {
+	// --port picks where the search starts for this agent; without it, a
+	// later agent takes the next port after the existing ones.
+	start := cmp.Or(o.Port, DefaultPort)
+	if o.Port == 0 && len(i.inst.Harnesses) > 0 {
 		start = maxPort(i.inst) + 1
 	}
 	port, err := freePort(start, i.inst)
 	if err != nil {
 		return err
 	}
-	provider := ProviderFor(o.Harness)
+	provider := ProviderFor(o.Harness, harness.CredentialKey)
 	name := "local"
 	if len(i.inst.Harnesses) > 0 {
 		directory, _ := harness.NativeDirectory(o.Harness)
@@ -390,7 +436,7 @@ func (i *installer) prepareCertificates(context.Context) error {
 	}
 	names := pki.Names{IPs: []string{i.inst.Endpoint.GatewayIPv4}}
 	for _, h := range i.inst.Harnesses {
-		names.DNS = append(names.DNS, inspectionHost(h.Harness))
+		names.DNS = append(names.DNS, inspectionHosts(h)...)
 	}
 	if _, err = store.State(); errors.Is(err, pki.ErrNotInitialized) {
 		// Create the authority only on the first run. A journal that already
@@ -495,9 +541,13 @@ func step(o Options, format string, args ...any) {
 	_, _ = fmt.Fprintf(o.Progress, "• "+format+"\n", args...)
 }
 
-func inspectionHost(kind harness.NativeKind) string {
-	h, _ := harness.Managed(kind)
-	return h.Protocol.InspectionHost()
+// inspectionHosts are the provider hosts a harness's gateway inspects for
+// its mechanism, such as Copilot's plan and GitHub hosts when it signs in.
+func inspectionHosts(h Harness) []string {
+	registered, _ := harness.Managed(h.Harness)
+	mechanism := h.Mechanism()
+	p, _ := model.ProviderFor(registered.Provider(mechanism != harness.CredentialKey))
+	return p.Hosts(mechanism == harness.CredentialSignIn || p.Models[0].SignedIn)
 }
 
 func maxPort(inst Installation) uint16 {
@@ -575,6 +625,14 @@ func renderConfig(l Layout, inst Installation, instructions string) home.Config 
 			ProviderCAFile: primary.ProviderCAFile,
 			MCPAuthority:   MCPAuthority},
 	}
+	for _, h := range inst.Harnesses {
+		if len(h.Logins) != 0 {
+			if c.Logins == nil {
+				c.Logins = map[harness.NativeKind][]string{}
+			}
+			c.Logins[h.Harness] = slices.Clone(h.Logins)
+		}
+	}
 	for _, h := range inst.Harnesses[1:] {
 		c.Harnesses = append(c.Harnesses, home.LocalHarness{Harness: h.Harness, Name: h.Name, GatewayPort: h.Port, Model: h.Model,
 			NativeOptions: nativeOptions(h.Harness, h.Credential == ""), ProviderURL: h.ProviderURL, ProviderTokenFile: h.Credential,
@@ -648,9 +706,30 @@ func mergeConfig(existing, rendered home.Config) (home.Config, bool, error) {
 func syncCredentialMode(c *home.Config, rendered home.Config) bool {
 	c.Harnesses = slices.Clone(c.Harnesses)
 	changed := false
+	// A switch between a key and a sign-in, or between two of the
+	// installation's own credential files, such as Copilot's key and its
+	// GitHub token, follows; an edited path elsewhere stays.
 	follow := func(current *string, want string) {
-		if (*current == "") != (want == "") {
+		if (*current == "") != (want == "") ||
+			*current != want && *current != "" && filepath.Dir(*current) == filepath.Dir(want) {
 			*current, changed = want, true
+		}
+	}
+	// A default provider URL follows the mechanism; a private one stays.
+	followURL := func(current *string, want string) {
+		if *current != want && slices.Contains([]string{openAIURL, anthropicURL, copilotURL}, *current) {
+			*current, changed = want, true
+		}
+	}
+	followURL(&c.Gateway.ProviderURL, rendered.Gateway.ProviderURL)
+	for kind, logins := range rendered.Logins {
+		for _, login := range logins {
+			if !slices.Contains(c.Logins[kind], login) {
+				if c.Logins == nil {
+					c.Logins = map[harness.NativeKind][]string{}
+				}
+				c.Logins[kind], changed = append(slices.Clone(c.Logins[kind]), login), true
+			}
 		}
 	}
 	// Native options still at the previous mode's defaults switch with it.
@@ -672,6 +751,7 @@ func syncCredentialMode(c *home.Config, rendered home.Config) bool {
 				switchOptions(r.Harness, &c.Harnesses[i].NativeOptions, signIn)
 			}
 			follow(&c.Harnesses[i].ProviderTokenFile, r.ProviderTokenFile)
+			followURL(&c.Harnesses[i].ProviderURL, r.ProviderURL)
 			if c.Harnesses[i].ProviderTokenKind != r.ProviderTokenKind {
 				c.Harnesses[i].ProviderTokenKind, changed = r.ProviderTokenKind, true
 			}

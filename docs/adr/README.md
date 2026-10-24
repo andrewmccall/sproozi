@@ -56,7 +56,9 @@ ADR 0027 replaces the single active-run slot from ADRs 0003 and 0017, and ADR
 model responses and response bound, narrows ADR 0009's full charge to calls
 that can't be estimated and budget cuts, limits ADR 0015's per-account serialization to
 unbounded calls, and settles ADR 0015's unknown reservations after a restart
-at their recovery charge, an estimate, once their leases expire.
+at their recovery charge, an estimate, once their leases expire. ADR 0048 makes
+Copilot, an AgentRun harness in ADR 0046, a managed one. ADR 0049 replaces ADR
+0047's login storage with a live store per named login.
 
 ADR 0040 removes ADR 0014's kube-dns exception: Kubernetes sandboxes resolve
 no names. ADR 0041 gives ADR 0020's failed Docker removals an owner, the local
@@ -118,3 +120,5 @@ ADR 0024's statement that releases do not pin clients.
 | [0045](0045-budget-ledgers-are-a-custom-resource.md) | Budget ledgers become `BudgetLedger` resources in `sproozi-system`; write access to them grants no ConfigMap writes, so the `sproozi-budget` namespace is removed. |
 | [0046](0046-github-copilot-cli-harness-in-byok-mode.md) | GitHub Copilot CLI is an AgentRun harness that loads its MCP file natively and calls the OpenAI route in bring-your-own-key mode, offline from GitHub. |
 | [0047](0047-harnesses-sign-in-to-their-own-model-providers.md) | Every harness offers every credential mechanism its provider accepts: a gateway-held key, a gateway-held sign-in, or its own sign-in forwarded and inspected by the gateway, from one provider table. |
+| [0048](0048-github-copilot-cli-is-a-managed-harness.md) | GitHub Copilot CLI is a managed harness: the supervisor names each session, observes completion in its events journal, checkpoints only that journal, and reaches OpenAI with a key or GitHub's Copilot service with a token or its own sign-in. |
+| [0049](0049-named-logins-share-a-live-store.md) | A harness's own sign-in lives in a named login store that the supervisor keeps in step with each running session, a Docker volume or a controller-created claim per harness and login. |

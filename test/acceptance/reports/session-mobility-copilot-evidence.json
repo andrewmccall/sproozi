@@ -1,0 +1,91 @@
+{
+  "date": "2026-10-24",
+  "source": "qa/launch-2 branch, around commit 039ae71; the exact tree was not recorded",
+  "nativeImage": "locally built from that tree",
+  "verifier": "hack/verify/session-mobility/copilot_mobility.py",
+  "passed": true,
+  "harness": "copilot",
+  "sessionId": "7801fc75-0c7d-4bbb-aef3-534ad0bf7723",
+  "steps": [
+    {
+      "turn": 0,
+      "attachmentDetached": true,
+      "nativeHistoryValidatedInRequest": true
+    },
+    {
+      "move": "remote",
+      "epoch": 2,
+      "checkpoint": {
+        "sha256": "f01774a86c4e6e0505b4fef893141aaecc55211a9c2527599ce61cdb95070479",
+        "bytes": 63422,
+        "turnId": "5ffdcfbc-8553-4a55-80fe-e4977716ad52",
+        "journalEvents": 9,
+        "copilotVersion": "1.0.102",
+        "gitWorkspaceMatches": true,
+        "portableNativeStateIsJournalOnly": true
+      }
+    },
+    {
+      "turn": 1,
+      "attachmentDetached": true,
+      "nativeHistoryValidatedInRequest": true
+    },
+    {
+      "move": "local",
+      "epoch": 3,
+      "checkpoint": {
+        "sha256": "f5705f9f97f0855c538ee8e930c6582c9364ff3a4a511f90c3d165fab0626f59",
+        "bytes": 117998,
+        "turnId": "a50498da-7e94-49a3-a433-2e1f2a2a2c41",
+        "journalEvents": 22,
+        "copilotVersion": "1.0.102",
+        "gitWorkspaceMatches": true,
+        "portableNativeStateIsJournalOnly": true
+      }
+    },
+    {
+      "turn": 2,
+      "attachmentDetached": true,
+      "nativeHistoryValidatedInRequest": true
+    },
+    {
+      "move": "remote",
+      "epoch": 4,
+      "checkpoint": {
+        "sha256": "e634fb87d93b1d58091ad48999ba01b5a11c54f7580b9499413b94be100c177e",
+        "bytes": 166094,
+        "turnId": "87e4f531-13cd-47ef-8b81-4ec063130280",
+        "journalEvents": 29,
+        "copilotVersion": "1.0.102",
+        "gitWorkspaceMatches": true,
+        "portableNativeStateIsJournalOnly": true
+      }
+    }
+  ],
+  "fixtureCredentialIsPublicPlaceholder": true,
+  "scope": "stock Copilot TUI and actual bash through production session placements",
+  "limitations": [
+    "Deterministic Responses provider; no paid OpenAI request",
+    "Containment controls require separate administrator evidence"
+  ],
+  "originalDeadline": "2026-10-24T10:10:25.45497Z",
+  "threadId": "24810258-ffce-430a-9c62-cf4309da4eb0",
+  "checkpoint": {
+    "sha256": "e634fb87d93b1d58091ad48999ba01b5a11c54f7580b9499413b94be100c177e",
+    "bytes": 166094,
+    "turnId": "87e4f531-13cd-47ef-8b81-4ec063130280",
+    "journalEvents": 29,
+    "copilotVersion": "1.0.102",
+    "gitWorkspaceMatches": true,
+    "portableNativeStateIsJournalOnly": true
+  },
+  "finalPhase": "cancelled",
+  "sameNativeUUID": true,
+  "sameOriginalDeadline": true,
+  "actualBashToolAndFileVerified": true,
+  "stoppedVisits": 4,
+  "accounting": {
+    "sealedUnits": 60,
+    "providerRequests": 4
+  }
+}

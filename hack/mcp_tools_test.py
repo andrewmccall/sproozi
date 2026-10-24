@@ -68,6 +68,8 @@ class McpToolsTest(unittest.TestCase):
         Handler.mode = mode
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         threading.Thread(target=server.serve_forever, daemon=True).start()
+        # Cleanups run last first: stop serving, then close the socket.
+        self.addCleanup(server.server_close)
         self.addCleanup(server.shutdown)
         out, err = io.StringIO(), io.StringIO()
         url = "http://127.0.0.1:%d/mcp" % server.server_address[1]
@@ -104,6 +106,18 @@ class PolicyCheckTest(unittest.TestCase):
             "so every call would fail",
             "tool 'ask_question' is not offered; the server offers ask"])
         self.assertEqual(TOOLS.check_policy(LISTED["tools"], {"ask": {"arguments": {"properties": {"q": {}}}}}), [])
+
+    def test_reports_an_argument_type_the_server_contradicts(self):
+        tools = [{"name": "search", "inputSchema": {"properties": {"page": {"type": "number"}}}}]
+        self.assertEqual(TOOLS.check_policy(tools, {"search": {"arguments": {"properties": {"page": {"type": "string"}}}}}),
+                         ["tool 'search' argument 'page' is number on the server, but the policy says string"])
+        self.assertEqual(TOOLS.check_policy(tools, {"search": {"arguments": {"properties": {"page": {"type": "number"}}}}}), [])
+
+    def test_warns_about_an_approved_url_argument(self):
+        tools = [{"name": "fetch", "inputSchema": {"properties": {"url": {}}}}, {"name": "ask", "inputSchema": {}}]
+        self.assertEqual(TOOLS.url_warnings(tools, {"fetch": {}, "ask": {}}),
+                         ["tool 'fetch' takes a 'url' argument; approve it only if it can't fetch an arbitrary URL"])
+        self.assertEqual(TOOLS.url_warnings(tools, {"ask": {}}), [])
 
     def test_policy_option_exits_non_zero_on_a_mismatch(self):
         directory = tempfile.TemporaryDirectory()

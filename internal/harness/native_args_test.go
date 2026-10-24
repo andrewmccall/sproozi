@@ -5,15 +5,25 @@ import (
 	"testing"
 )
 
+// fixtureModel is a model name the tests pass.
+const fixtureModel = "gpt-5.5"
+
+// addDirFlag is a flag every managed harness takes and Sproozi leaves alone.
+const addDirFlag = "--add-dir"
+
 func TestNativeArgsRefuseOnlyFlagsSprooziControls(t *testing.T) {
 	allowed := map[NativeKind][][]string{
 		NativeCodex: {
-			{nativeModelFlag, "gpt-5.5"}, {"-m", "gpt-5.5"}, {"--search"}, {"--add-dir", "/tmp/x"},
+			{nativeModelFlag, fixtureModel}, {"-m", fixtureModel}, {"--search"}, {addDirFlag, "/tmp/x"},
 			{"-c", "model_reasoning_effort=high"}, {"--config=model=gpt-5.5"}, {"--enable", "x"},
 		},
 		NativeClaude: {
-			{nativeModelFlag, "sonnet"}, {"--effort", "high"}, {"--add-dir", "/tmp"}, {"-d"}, {"--verbose"},
+			{nativeModelFlag, "sonnet"}, {"--effort", "high"}, {addDirFlag, "/tmp"}, {"-d"}, {"--verbose"},
 			{"--disallowedTools", "Edit"},
+		},
+		NativeCopilot: {
+			{nativeModelFlag, fixtureModel}, {"--reasoning-effort", "high"}, {addDirFlag, "/tmp"},
+			{"--deny-tool", "shell(rm)"}, {"--mode", "plan"}, {"--experimental"}, {"-n", "my session"},
 		},
 	}
 	for kind, cases := range allowed {
@@ -38,6 +48,12 @@ func TestNativeArgsRefuseOnlyFlagsSprooziControls(t *testing.T) {
 			{"--allowedTools=Edit"}, {"--mcp-config", "x.json"}, {"--settings", "{}"}, {"--bare"},
 			{"--system-prompt", "x"}, {"--append-system-prompt=x"}, {"-r", "id"}, {"--continue"}, {"-c"},
 			{"--session-id", "x"}, {"-p"}, {"--print"}, {"-w", "tree"}, {"--no-session-persistence"},
+		},
+		NativeCopilot: {
+			{"--allow-all"}, {"--yolo"}, {"--allow-all-urls"}, {"--additional-mcp-config", "@x"},
+			{"--disable-mcp-server=sproozi"}, {"--no-custom-instructions"}, {"--resume", "id"}, {"-r"}, {"--continue"},
+			{"--session-id=x"}, {"--connect", "x"}, {"-p", "hi"}, {"--prompt=hi"}, {"--acp"}, {"--remote"},
+			{"--bash-env=off"}, {"--no-bash-env"}, {"-s"},
 		},
 	}
 	for kind, cases := range refused {

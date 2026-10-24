@@ -103,6 +103,9 @@ type Registration struct {
 	// ProfileDigest names the stored profile archive copied into the run's
 	// agent contract.
 	ProfileDigest string `json:"profileDigest,omitempty"`
+	// Login is the named login a harness that signs in itself uses
+	// (ADR 0049); empty is harness.DefaultLogin.
+	Login string `json:"login,omitempty"`
 }
 
 // StopReceipt contains only trusted ledger seals and checkpoint identity.
@@ -575,6 +578,11 @@ func validateSeals(seals map[api.CapabilityKind]budget.TrustedUsage, ceilings ma
 }
 
 func validateNativeInput(r Registration) error {
+	if r.Login != "" {
+		if err := harness.ValidateLogin(r.Login); err != nil {
+			return err
+		}
+	}
 	if utf8.RuneCountInString(r.Task) > agentcontract.MaxTaskRunes || strings.ContainsRune(r.Task, 0) || r.Task != "" && (strings.TrimSpace(r.Task) == "" || r.Harness != harness.NativeCodex) {
 		return fmt.Errorf("invalid native task")
 	}

@@ -896,8 +896,20 @@ func TestCopilotHostsServeAForwardedSignInOrAGatewayToken(t *testing.T) {
 			t.Fatal(err)
 		}
 		openAI, anthropic, signedIn := modelHandlers(cfg, audit.NewLogger(io.Discard), http.DefaultClient, nil, nil)
-		handlers := map[api.CapabilityKind]http.Handler{api.CapabilityModelInference: openAI}
+		git := http.NotFoundHandler()
+		handlers := map[api.CapabilityKind]http.Handler{api.CapabilityModelInference: openAI,
+			api.CapabilityGitHubPullRequest: git}
 		routes := composeDispatcher(cfg, handlers, nil, anthropic, signedIn)
+		// Copilot's own sign-in runs GitHub's device flow on github.com as a
+		// path route; the rest of github.com stays the GitHub capability's.
+		login, _, _ := routes.Select("github.com:443", "/login/device/code")
+		if (login.Handler != nil && login.Capability == string(api.CapabilityModelInference)) != tc.forwards {
+			t.Fatalf("%s mode: Copilot's sign-in route %+v", tc.mode, login)
+		}
+		repository, _, _ := routes.Select("github.com:443", "/owner/repo.git/info/refs")
+		if routes["github.com:443"].Handler != nil && repository.Capability == string(api.CapabilityModelInference) {
+			t.Fatalf("%s mode: Copilot's sign-in took github.com's Git route", tc.mode)
+		}
 		for _, authority := range []string{"api.individual.githubcopilot.com:443", "api.business.githubcopilot.com:443"} {
 			if !routes.Allows(authority) || routes[authority].ProviderCredential != tc.forwards {
 				t.Fatalf("%s mode: %s allowed=%v forwards=%v", tc.mode, authority, routes.Allows(authority),

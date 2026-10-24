@@ -6,6 +6,8 @@ import (
 	"io"
 	"slices"
 	"strings"
+
+	"github.com/andrewmccall/sproozi/internal/harness"
 )
 
 // Command names.
@@ -90,7 +92,8 @@ var commands = []command{
 			"agent program unchanged, for example: sproozi run -- --model gpt-5.\n\n" +
 			deadlineHelp + "\n\n" +
 			"With --remote, submit a task to run in a Kubernetes cluster instead.",
-		flags: []string{"harness", "detach", "include-ignored", "remote", "context", "namespace", "task", "task-file",
+		flags: []string{"harness", "login", "detach", "include-ignored", "remote", "context", "namespace", "task",
+			"task-file",
 			"repository", "project", "json", "root"},
 		hiddenFlags: append([]string{"id", "operation", "workspace-from", "checkpoint-digest", "revision"},
 			locationFlags...)},
@@ -133,7 +136,7 @@ var commands = []command{
 			"your provider key and the background service. Run it again to add another agent with\n" +
 			"--harness, or to repair the installation.",
 		flags: []string{"harness", "model", "credential-file", "credential-stdin", "skip-credential-check",
-			"token", "chatgpt", "sign-in",
+			"token", "chatgpt", "sign-in", "login",
 			"provider-url", "provider-ca-file", "instructions-file", "image", "build", "port", "no-service",
 			"timeout", "json", "root"}},
 	{name: cmdDoctor, group: groupSetup, summary: "Check the installation without changing it",
@@ -179,7 +182,8 @@ type flagSpec struct {
 func (f flagSpec) boolean() bool { return f.value == "" }
 
 var flagSpecs = map[string]flagSpec{
-	"harness":               {value: "NAME", help: "agent to run: codex or claude-code (default: the first one set up)"},
+	"harness": {value: "NAME",
+		help: "agent to run: " + harness.ManagedKindList() + " (default: the first one set up)"},
 	"detach":                {short: "d", help: "start without connecting your terminal"},
 	"include-ignored":       {value: "PATH", help: "also copy this Git-ignored file into the session; repeatable"},
 	"remote":                {help: "run the task in a Kubernetes cluster instead of on this machine"},
@@ -197,18 +201,22 @@ var flagSpecs = map[string]flagSpec{
 	"credential-stdin":      {help: "read the provider key from standard input"},
 	"skip-credential-check": {help: "do not ask the provider to check the key"},
 	"sign-in":               {help: "let the agent sign in to its own provider account instead of storing a key"},
-	"token":                 {help: "the stored credential is a sign-in token, such as from setup-token, not an API key"},
-	"chatgpt":               {help: "sign the gateway in to your ChatGPT plan in the browser, for an OpenAI agent"},
-	"provider-url":          {value: "URL", help: "address of a private provider endpoint (default: the public one)"},
-	"provider-ca-file":      {value: "FILE", help: "PEM CA bundle for a private provider endpoint"},
-	"instructions-file":     {value: "FILE", help: "approved instructions for every session, at most 16 KiB (first run)"},
-	"image":                 {value: "REF", help: "agent image as REPOSITORY@sha256:DIGEST or a local sha256: ID"},
-	"build":                 {value: "DIR", help: "build the agent image from a Sproozi source directory"},
-	"port":                  {value: "PORT", help: "first port to try for the service (default: 18443)"},
-	"no-service":            {help: "write the configuration without starting the service"},
-	"timeout":               {value: "DURATION", help: "give up after this long (default: 30m)"},
-	"check-provider":        {help: "also ask each provider to check its key"},
-	"leave-running":         {help: "stop the service even while sessions run; they run on until their deadline"},
+	"login": {value: "NAME",
+		help: "named login of an agent that signs in itself, for several accounts (default: default)"},
+	"token": {
+		help: "the stored credential is a sign-in token, such as the one claude setup-token prints, not an API key"},
+	"chatgpt":           {help: "sign the gateway in to your ChatGPT plan in the browser, for an OpenAI agent"},
+	"provider-url":      {value: "URL", help: "address of a private provider endpoint (default: the public one)"},
+	"provider-ca-file":  {value: "FILE", help: "PEM CA bundle for a private provider endpoint"},
+	"instructions-file": {value: "FILE", help: "approved instructions for every session, at most 16 KiB (first run)"},
+	"image":             {value: "REF", help: "agent image as REPOSITORY@sha256:DIGEST or a local sha256: ID"},
+	"build":             {value: "DIR", help: "build the agent image from a Sproozi source directory"},
+	"port": {value: "PORT",
+		help: "first port to try for this agent's gateway (default 18443, or the next free one)"},
+	"no-service":     {help: "write the configuration without starting the service"},
+	"timeout":        {value: "DURATION", help: "give up after this long (default: 30m)"},
+	"check-provider": {help: "also ask each provider to check its key"},
+	"leave-running":  {help: "stop the service even while sessions run; they run on until their deadline"},
 	// Hidden plumbing for scripts and hand-written administrator setups.
 	"id":                {value: "UUID", help: "session ID"},
 	"operation":         {value: "UUID", help: "operation ID to repeat a request whose outcome is unknown"},

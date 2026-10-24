@@ -167,7 +167,7 @@ func TestUsageErrorsExitTwoBeforeReadingAnything(t *testing.T) {
 		`unknown command "stat"; did you mean "status"?`:            {"stat"},
 		`unknown command "start"`:                                   {"start"},
 		"sessions does not accept --jsn; did you mean --json?":      {"ls", "--jsn"},
-		"--harness must be codex or claude-code":                    {"run", "--harness", "bogus"},
+		"--harness must be codex, claude-code or copilot":           {"run", "--harness", "bogus"},
 		"status needs a session ID":                                 {"status"},
 		"--task applies only to a --remote run":                     {"run", "--task", "x"},
 		"give --repository NAME instead of PATH":                    {"run", "--remote", "repo", "--task", "x"},
@@ -184,6 +184,7 @@ func TestUsageErrorsExitTwoBeforeReadingAnything(t *testing.T) {
 		"choose --credential-file or --credential-stdin":            {"init", "--credential-file", "k", "--credential-stdin"},
 		"help takes one command name":                               {"help", "run", "stop"},
 		"attach does not accept --detach":                           {"attach", "abc", "--detach"},
+		"--login: login name \"\" must be":                          {"init", "--sign-in", "--login", ""},
 		"resume does not accept --model; put arguments for the age": {"resume", "abc", "--model", "x"},
 	} {
 		code, _, stderr := runCLI(args...)
@@ -286,7 +287,7 @@ func TestSessionsListsThisMachineAsLocal(t *testing.T) {
 	})
 	code, out, stderr := runCLI("ls", testSocketFlag, socket, "--project", "sproozi-dev")
 	if code != 0 || !strings.HasPrefix(out, "ID ") ||
-		!strings.Contains(out, shortID(id)+"  codex    retained  local      -") {
+		!strings.Contains(out, shortID(id)+"  codex    -      retained  local      -") {
 		t.Fatalf("table exited %d: %q %q", code, out, stderr)
 	}
 	if (*requests)[0].Project != "sproozi-dev" {

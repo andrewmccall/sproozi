@@ -8,7 +8,8 @@ RUN echo "Set --build-arg CODEX_CLIENTS_IMAGE to the Codex base image built with
 
 FROM ${CODEX_CLIENTS_IMAGE}
 USER root
-# Exact Claude Code from its committed lockfile, without install scripts.
+# Exact Claude Code and Copilot from their committed lockfiles, without
+# install scripts.
 COPY hack/clients/ /opt/sproozi-clients/
-RUN sh /opt/sproozi-clients/install.sh claude-code
+RUN sh /opt/sproozi-clients/install.sh claude-code copilot
 USER 1000:1000

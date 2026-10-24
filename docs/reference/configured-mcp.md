@@ -10,7 +10,7 @@ registration uses the shared gateway and named run grants.
 | Where | Harnesses that get the servers | Configured in |
 | --- | --- | --- |
 | Kubernetes AgentRuns | Every [harness selector](harnesses.md#harness-selectors) | The gateway's registry ConfigMap, the AgentPolicy and the AgentRun. |
-| Local sessions (`sproozi run`) | Codex. Claude Code sessions get no named MCP servers. | `config.json`; see [local sessions](#local-sessions). |
+| Local sessions (`sproozi run`) | Codex and Copilot. Claude Code sessions get no named MCP servers. | `config.json`; see [local sessions](#local-sessions). |
 | Sessions on a remote executor | Codex executors | The executor's allowances and the cluster's policy. |
 
 This path enforces the [Protocol tier](../../GLOSSARY.md#protocol-tier).
@@ -54,9 +54,11 @@ transport passes every offline check but fails at the gateway.
 `mcp-tools.py` tells you which one a URL speaks.
 
 Two live checks catch what the offline checks cannot. `--policy` compares your
-policy's tools and argument names with the server's, reports unknown tools,
-unknown arguments and required arguments the policy forbids, and exits 1 on
-any mismatch. The Go test lists the tools with the gateway's own MCP client and
+policy's tools and arguments with the server's, reports unknown tools,
+unknown arguments, argument types that differ and required arguments the
+policy forbids, and exits 1 on
+any mismatch. It also warns about an approved tool with a `url` argument (see
+below). The Go test lists the tools with the gateway's own MCP client and
 checks that the gateway accepts each tool's input schema:
 
 ```sh
@@ -64,6 +66,9 @@ python3 hack/mcp-tools.py https://mcp.deepwiki.com/mcp --policy examples/mcp/age
 SPROOZI_MCP_LIVE_URL=https://mcp.deepwiki.com/mcp \
   go test ./internal/endpoints/mcp -run TestLiveServerToolsCompile -v
 ```
+
+A 5xx from the server, such as `Internal Server Error` during `initialize`, is
+the server's own failure, not an incompatibility; run the check again.
 
 Approve only tools whose effect you would accept from any run. Leave out tools
 that write, and tools that fetch an arbitrary URL, such as GitMCP's
@@ -118,7 +123,10 @@ kubectl -n sproozi-system set env deployment/sproozi-gateway \
 [Required secrets and config](required-secrets-and-config.md) lists the model
 credentials and modes, and [gateway certificates](gateway-certificates.md#self-managed-ca)
 the certificate names. Then replace the registry and restart the gateway,
-which reads the registry and credentials only at startup:
+which reads the registry and credentials only at startup. The ConfigMap holds
+one `servers.json`, so it replaces every server registered before: put all the
+servers you want in one file first, and use it in place of
+`examples/mcp/servers.json` below.
 
 ```sh
 kubectl -n sproozi-system create configmap sproozi-mcp-servers \
@@ -167,7 +175,10 @@ capabilities: [mcp.deepwiki]
 ```
 
 `tools` is an explicit default-deny map. `search: {}` allows the discovered
-tool's input contract without an additional restriction. `arguments` adds JSON
+tool's input contract without an additional restriction; a tool with no
+arguments, including one whose schema is a bare `{"type": "object"}`, is
+approved the same way, as `{}`. Give every free-text argument at least a
+`maxLength`. `arguments` adds JSON
 Schema restrictions: `const`, `enum`, `pattern`, numeric bounds and object or
 array rules can restrict tenants, repositories, namespaces or other tool inputs.
 Use `required` when an argument must be present. These predicates constrain the
@@ -318,8 +329,8 @@ failures return fixed messages; successful tool output remains provider content.
 
 ## Local sessions
 
-A local Codex session can use the same registered servers through this
-machine's gateway. Add to the `gateway` object in `config.json`:
+A local Codex or Copilot session can use the same registered servers through
+this machine's gateway. Add to the `gateway` object in `config.json`:
 
 | Key | Value |
 | --- | --- |
@@ -328,14 +339,16 @@ machine's gateway. Add to the `gateway` object in `config.json`:
 | `mcpCredentialsDirectory` | Absolute private directory holding the files `bearerTokenFile` names, when a server needs a credential. |
 | `mcpPolicy` | The `mcpServers` map of an AgentPolicy: server name to approved `tools`. |
 
-Add a unit allowance for each server, such as
-`"mcp.deepwiki": {"units": {"bounded": true, "value": 10}}`, then restart the
-service with `sproozi service stop` and `sproozi service start`. Monetary MCP
+Add a unit allowance for each server to the top-level `allowances` object in
+`config.json`, such as
+`"allowances": {"mcp.deepwiki": {"units": {"bounded": true, "value": 10}}}`
+beside the allowances already there, then restart the service with
+`sproozi service stop --leave-running` and `sproozi service start`. Monetary MCP
 allowances are rejected because MCP has no trusted pricing. Sproozi generates
-the Codex client configuration for each session from these allowances.
+the client configuration for each Codex or Copilot session from these
+allowances.
 
-Claude Code sessions on the same machine get no named MCP servers: Sproozi
-generates named-server configuration only for Codex sessions, and says so when
-the service starts (`claude-code sessions get no configured MCP servers
-(mcp.deepwiki): …`). Start the session with `sproozi run --harness codex` to
-use them.
+Claude Code sessions on the same machine get no named MCP servers, and the
+service says so when it starts (`claude-code sessions get no configured MCP
+servers (mcp.deepwiki): …`). Start the session with `--harness codex` or
+`--harness copilot` to use them.

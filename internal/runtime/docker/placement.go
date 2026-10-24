@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	api "github.com/andrewmccall/sproozi/api/v1alpha1"
+
 	"github.com/andrewmccall/sproozi/internal/agentprofile"
 	"github.com/andrewmccall/sproozi/internal/budget"
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
@@ -226,21 +228,26 @@ func (p *Placement) spec(r placementRecord, role string) ManagedSpec {
 		spec.Volume = r.Volume
 	}
 	if role == roleAgent {
-		spec.Login = p.login()
+		spec.Login = p.login(r.Launch)
 	}
 	return spec
 }
 
-// login is the agent's sign-in file mount, or nil when the gateway holds the
-// provider credential. The installation's own network name keeps two
+// login is the launch's login store, or nil when the gateway holds the
+// provider credential: one volume per installation, harness placement and
+// login name (ADR 0049). The installation's own network name keeps two
 // installations on one engine from sharing a sign-in.
-func (p *Placement) login() *LoginMount {
+func (p *Placement) login(l session.Launch) *LoginMount {
 	h, err := harness.Managed(p.config.Harness)
 	if !p.config.SignIn || err != nil || h.SignInFile == "" {
 		return nil
 	}
-	return &LoginMount{Volume: p.config.NetworkName + "-" + p.config.Name + "-login", File: h.SignInFile,
-		Target: "/workspace/session/" + h.NativeDirectory + "/" + h.SignInFile}
+	return &LoginMount{Volume: LoginVolume(p.config.NetworkName, p.config.Name, l.Login), File: h.SignInFile}
+}
+
+// LoginVolume names a login's volume.
+func LoginVolume(network, placement, login string) string {
+	return network + "-" + placement + "-login-" + harness.LoginOrDefault(login)
 }
 func (p *Placement) resource(ctx context.Context, r *placementRecord, role string, target **Instance) error {
 	spec := p.spec(*r, role)
@@ -281,7 +288,7 @@ func (p *Placement) drivePrepare(ctx context.Context, r *placementRecord, data [
 	if err := p.engine.PrepareArtifact(ctx, *r.Helper, p.config.Harness, data, p.config.MaxCheckpointBytes, p.config.InstructionDigest, r.fresh()); err != nil {
 		return err
 	}
-	if login := p.login(); login != nil {
+	if login := p.login(r.Launch); login != nil {
 		if err := p.engine.EnsureLoginVolume(ctx, *login, p.config.Harness, p.config.HelperImageID); err != nil {
 			return fmt.Errorf("docker login volume: %w", err)
 		}
@@ -304,7 +311,11 @@ func (p *Placement) drivePrepare(ctx context.Context, r *placementRecord, data [
 	if err != nil {
 		return fmt.Errorf("profile: %w", err)
 	}
-	contract := harness.NativeLaunch{Harness: p.config.Harness, Deadline: r.Launch.Deadline, ThreadID: r.Launch.ThreadID, Task: r.Launch.Task, Instructions: p.config.Instructions, InstructionDigest: p.config.InstructionDigest, Env: access.Env, Model: access.Model, Options: access.Options, Args: r.Launch.HarnessArgs, ClientConfig: access.ClientConfig, TrustBundlePEM: access.TrustBundlePEM, RolloutMaxBytes: harness.NativeRolloutMaxBytes, ProfileArchive: profile}
+	signIn := ""
+	if p.login(r.Launch) != nil {
+		signIn = api.SignInDirectory
+	}
+	contract := harness.NativeLaunch{SignInDirectory: signIn, Harness: p.config.Harness, Deadline: r.Launch.Deadline, ThreadID: r.Launch.ThreadID, Task: r.Launch.Task, Instructions: p.config.Instructions, InstructionDigest: p.config.InstructionDigest, Env: access.Env, Model: access.Model, Options: access.Options, Args: r.Launch.HarnessArgs, ClientConfig: access.ClientConfig, TrustBundlePEM: access.TrustBundlePEM, RolloutMaxBytes: harness.NativeRolloutMaxBytes, ProfileArchive: profile}
 	if err := contract.Validate(time.Now()); err != nil {
 		return err
 	}
@@ -529,8 +540,8 @@ func (p *Placement) Stop(ctx context.Context, l session.Launch, i session.Incarn
 			return session.Stopped{}, err
 		}
 	}
-	if r.Launch.Harness == harness.NativeClaude && !r.NativeQuiet {
-		return session.Stopped{}, errors.New("claude graceful completion acknowledgement unavailable")
+	if !harness.ProvesCompletion(r.Launch.Harness) && !r.NativeQuiet {
+		return session.Stopped{}, fmt.Errorf("%s graceful completion acknowledgement unavailable", r.Launch.Harness)
 	}
 	if err = p.authority.Revoke(ctx, r.Launch, i); err != nil {
 		if stopErr := p.engine.Stop(ctx, *r.Agent); stopErr == nil {
@@ -558,9 +569,10 @@ func (p *Placement) Stop(ctx context.Context, l session.Launch, i session.Incarn
 	}
 	// A turnless visit had no conversation; its workspace is the one it
 	// started from, which the execution retains, so nothing is captured. An
-	// exited harness keeps a checkpoint only when Codex reported a completed
-	// conversation that validates; otherwise the session keeps its previous one.
-	exitedWithout := r.Exited != nil && (r.Launch.Harness == harness.NativeClaude || r.thread() == "")
+	// exited harness keeps a checkpoint only when a harness whose state proves
+	// completion, such as Codex, reported a completed conversation that
+	// validates; otherwise the session keeps its previous one.
+	exitedWithout := r.Exited != nil && (!harness.ProvesCompletion(r.Launch.Harness) || r.thread() == "")
 	if r.CheckpointDigest == "" && !r.Turnless && !exitedWithout {
 		if err = p.capture(ctx, &r); err != nil && r.Exited == nil {
 			return session.Stopped{}, err
@@ -877,7 +889,7 @@ func (p *Placement) quiesceNative(ctx context.Context, r *placementRecord, i ses
 		}
 		var thread string
 		thread, err = harness.QuiesceNative(ctx, control, r.thread(), r.Launch.Deadline, bind)
-		if errors.Is(err, harness.ErrQuiesceUnacknowledged) && r.Launch.Harness != harness.NativeClaude &&
+		if errors.Is(err, harness.ErrQuiesceUnacknowledged) && harness.ProvesCompletion(r.Launch.Harness) &&
 			p.agentStops(ctx, *r.Agent) {
 			// A lost Codex reply is resolved by the actual stopped container.
 			// The reply is usually lost because the container exited first.
@@ -896,16 +908,17 @@ func (p *Placement) quiesceNative(ctx context.Context, r *placementRecord, i ses
 }
 
 // recordExit keeps what the supervisor reported when its harness exited on its
-// own. A Codex first visit binds the thread of a completed turn it reported,
-// so the stop can still checkpoint that conversation; Claude needs its
-// graceful acknowledgement, so its exited visit keeps no new checkpoint.
+// own. A first visit of a harness whose state proves completion, such as
+// Codex, binds the thread of a completed turn it reported, so the stop can
+// still checkpoint that conversation; Claude needs its graceful
+// acknowledgement, so its exited visit keeps no new checkpoint.
 func (p *Placement) recordExit(ctx context.Context, r *placementRecord, i session.Incarnation, state Observation) error {
 	report, ok := p.engine.ExitReport(ctx, *r.Agent)
 	if !ok {
 		report = harness.NativeExitReport{Code: state.ExitCode}
 	}
 	r.Exited = &session.Exit{Code: report.Code, Output: report.Output}
-	if r.Launch.Harness == harness.NativeCodex && r.thread() == "" && report.Thread != "" {
+	if harness.ProvesCompletion(r.Launch.Harness) && r.thread() == "" && report.Thread != "" {
 		if err := p.authority.BindNative(ctx, r.Launch, i, report.Thread); err != nil {
 			return err
 		}

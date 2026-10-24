@@ -46,6 +46,31 @@ type Harness struct {
 	// the harness signs in itself; the provider's routes are shared by every
 	// harness that uses it.
 	SignInFile string
+	// SignInProvider is the model provider a gateway-held sign-in token or
+	// the harness's own sign-in reaches, when it isn't Protocol's: Copilot
+	// calls OpenAI with an API key but GitHub's Copilot service when signed
+	// in. Empty means Protocol.
+	SignInProvider string
+	// StateProvesCompletion: the native state a checkpoint captures proves
+	// its last turn completed, as Codex's rollout and Copilot's journal do,
+	// so a stopped or exited process is enough evidence. Without it, as for
+	// Claude Code, a stop needs the supervisor's acknowledgement.
+	StateProvesCompletion bool
+}
+
+// ProvesCompletion reports the kind's StateProvesCompletion.
+func ProvesCompletion(kind NativeKind) bool {
+	h, err := Managed(kind)
+	return err == nil && h.StateProvesCompletion
+}
+
+// Provider is the model provider this harness reaches with an API key
+// (signedIn false) or with a sign-in token or its own sign-in (signedIn true).
+func (h Harness) Provider(signedIn bool) string {
+	if signedIn && h.SignInProvider != "" {
+		return h.SignInProvider
+	}
+	return string(h.Protocol)
 }
 
 // MCPFormat is a harness's MCP configuration file. A JSON file holds a map,
@@ -94,8 +119,8 @@ const mcpServersField = "mcpServers"
 
 var registry = []Harness{
 	{Selector: string(NativeCodex), Native: NativeCodex, NativeDirectory: string(NativeCodex), Protocol: ProtocolOpenAI,
-		SignInFile: "auth.json",
-		MCP:        MCPFormat{File: "codex-mcp.toml"}, Loader: NativeMCP},
+		SignInFile: "auth.json", StateProvesCompletion: true,
+		MCP: MCPFormat{File: "codex-mcp.toml"}, Loader: NativeMCP},
 	{Selector: string(NativeClaude), Native: NativeClaude, NativeDirectory: "claude", Protocol: ProtocolAnthropic,
 		SignInFile:   ".credentials.json",
 		RequestFiles: true, Loader: NativeMCP,
@@ -104,9 +129,11 @@ var registry = []Harness{
 		}}},
 	{Selector: "opencode", RequestFiles: true, Loader: NativeMCP, LaunchFiles: launchFilesNamed("opencode-launch.py"),
 		MCP: MCPFormat{File: "opencode-mcp.json", Field: "mcp", Entry: func(name, address string) (string, any) {
-			return name, map[string]any{connectionType: "remote", connectionURL: address, "enabled": true, "oauth": false}
+			return name, map[string]any{connectionType: remoteName, connectionURL: address, "enabled": true, "oauth": false}
 		}}},
-	{Selector: "copilot", RequestFiles: true, Loader: NativeMCP,
+	{Selector: string(NativeCopilot), Native: NativeCopilot, NativeDirectory: string(NativeCopilot),
+		Protocol: ProtocolOpenAI, SignInProvider: "copilot", SignInFile: "config.json", StateProvesCompletion: true,
+		RequestFiles: true, Loader: NativeMCP,
 		MCP: MCPFormat{File: "copilot-mcp.json", Field: mcpServersField, Entry: func(name, address string) (string, any) {
 			return name, map[string]any{connectionType: httpTransport, connectionURL: address, "tools": []string{"*"}}
 		}}},
@@ -146,6 +173,25 @@ func ManagedKinds() []NativeKind {
 		}
 	}
 	return out
+}
+
+// ManagedKindNames lists the managed kinds as strings, in registry order.
+func ManagedKindNames() []string {
+	kinds := ManagedKinds()
+	out := make([]string, 0, len(kinds))
+	for _, kind := range kinds {
+		out = append(out, string(kind))
+	}
+	return out
+}
+
+// ManagedKindList names the managed kinds for a message: "a, b or c".
+func ManagedKindList() string {
+	names := ManagedKindNames()
+	if len(names) < 2 {
+		return strings.Join(names, "")
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " or " + names[len(names)-1]
 }
 
 // Managed returns the registered harness of a managed kind.

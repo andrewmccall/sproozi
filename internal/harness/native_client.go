@@ -39,8 +39,8 @@ func (c *NativeClientConfig) Validate(kind NativeKind) error {
 	if err != nil || u.Scheme != nativeHTTPScheme || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
 		return errors.New("native MCP requires exact broker HTTPS authority")
 	}
-	if len(c.MCPServers) != 0 && kind != NativeCodex {
-		return errors.New("managed native MCP currently requires Codex")
+	if len(c.MCPServers) != 0 && kind != NativeCodex && kind != NativeCopilot {
+		return errors.New("named MCP servers in managed sessions need Codex or Copilot")
 	}
 	seen := map[string]bool{}
 	for _, name := range c.MCPServers {
@@ -81,6 +81,23 @@ func (c *NativeClientConfig) ClaudeMCPConfig() string {
 	data, _ := json.Marshal(map[string]any{mcpServersField: map[string]any{
 		api.ControlMCPServer: map[string]string{connectionType: httpTransport, connectionURL: c.ControlURL()}}})
 	return string(data)
+}
+
+// CopilotMCPConfig is Copilot's --additional-mcp-config: the approved broker
+// connections, then the control connection, in its registry format.
+func (c *NativeClientConfig) CopilotMCPConfig() (string, error) {
+	h, err := Managed(NativeCopilot)
+	if err != nil {
+		return "", err
+	}
+	names := slices.Clone(c.MCPServers)
+	slices.Sort(names)
+	names = append(names, api.ControlMCPServer)
+	files, err := h.MCP.render(names, func(name string) string { return c.MCPGateway + "/mcp/" + name })
+	if err != nil {
+		return "", err
+	}
+	return files[h.MCP.File], nil
 }
 
 // NativeKubeconfig targets the inspected authority through the authenticated

@@ -10,6 +10,10 @@ Each provider uses one credential, chosen by the administrator
 | Gateway-held sign-in token | `openai-sign-in-token` or `anthropic-sign-in-token`, such as the output of `claude setup-token`, sent as a bearer | The stock example |
 | Gateway-held ChatGPT plan sign-in | `MODEL_AUTH_MODE=chatgpt`, set up below | The stock Codex example |
 | The harness's own sign-in | `MODEL_AUTH_MODE=workload`, with no key or token for that provider | An AgentRuntime with [`clientConfig.signIn`](../reference/agentruntime.md#harness-sign-in) |
+| Copilot plan, held by the gateway | `copilot-sign-in-token`, a GitHub token for a Copilot plan | The Copilot example without its `COPILOT_PROVIDER_*` variables ([harnesses](../reference/harnesses.md#model-providers)) |
+
+By default the Copilot example uses the gateway's OpenAI key in Copilot's
+bring-your-own-key mode, so it needs no Copilot plan.
 
 One gateway can mix them, for example an OpenAI key while Claude Code signs in
 itself. The [configuration reference](../reference/required-secrets-and-config.md)

@@ -87,7 +87,7 @@ func TestManagedLaunchProjectsFreshKindSpecificPlaceholderAndHarness(t *testing.
 			}
 			// A runtime with the harness's own sign-in gets no placeholder, and
 			// the supervisor restores the login from the sign-in directory.
-			rt.Spec.ClientConfig.SignIn = &api.RuntimeSignIn{ClaimName: "login"}
+			rt.Spec.ClientConfig.SignIn = &api.RuntimeSignIn{Claims: &api.RuntimeLoginClaims{}}
 			signedIn := map[string]string{}
 			if err = addManagedNativeContract(t.Context(), kube, run, template, rt, &corev1.ConfigMap{Data: signedIn}); err != nil {
 				t.Fatal(err)

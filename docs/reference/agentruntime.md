@@ -149,20 +149,31 @@ Set exactly one source:
 | Field | Meaning |
 | --- | --- |
 | `secretName` | A Secret in `sproozi-agents` holding the sign-in. You create it from a credential the provider issued you, such as the output of `claude setup-token`. |
-| `key` | Required with `secretName`. The controller mounts that key read-only at `/etc/sproozi/sign-in/<key>` in each workload container. For a managed session, name it after the harness's login file (`.credentials.json` or `auth.json`). |
+| `key` | Required with `secretName`. The controller mounts that key read-only at `/etc/sproozi/sign-in/<key>` in each workload container. For a managed session, name it after the harness's login file (`.credentials.json`, `auth.json` or `config.json`). |
 | `env` | Optional, with `secretName` only. Also sets the sign-in as this environment variable, such as `CLAUDE_CODE_OAUTH_TOKEN`. Variables the controller sets itself, such as `SSL_CERT_FILE` or `HTTPS_PROXY`, are refused. |
-| `claimName` | A PersistentVolumeClaim in `sproozi-agents` that keeps the harness's own login across managed sessions. The controller mounts it read-write at `/etc/sproozi/sign-in`. |
+| `claims` | Keep each named login in its own PersistentVolumeClaim, `sproozi-login-<harness>-<login>` in `sproozi-agents`. The controller creates a missing claim before the Pod and never deletes it, and mounts it read-write at `/etc/sproozi/sign-in`. Needs `clientConfig.harness`. |
+| `claims.storageClassName` | Optional. The claims' StorageClass; empty uses the cluster default. |
+| `claims.accessMode` | Optional, default `ReadWriteOnce`. Sessions of one login on different nodes need `ReadWriteMany` and a StorageClass that supports it. |
 
 In a managed session the supervisor copies the harness's login file
-(`.credentials.json` for Claude Code, `auth.json` for Codex) from
-`/etc/sproozi/sign-in` into its native home before launch. With no file there
-yet, sign in inside the session as you would locally (`/login`, or Codex's
-device-code sign-in). When the harness exits, the supervisor writes the
-refreshed file back to a claim; a Secret stays as it is, so a Secret suits a
-token that doesn't refresh. The login never enters a checkpoint. Give the claim
-a filesystem the agent user can write, for example through the Pod's
-`fsGroup`, and keep one claim per person: two sessions sharing one refreshing
-login can invalidate each other.
+(`.credentials.json` for Claude Code, `auth.json` for Codex, `config.json` for
+Copilot) from `/etc/sproozi/sign-in` into its native home before launch, then
+keeps the two in step while the harness runs: a sign-in, refresh or sign-out
+in one session reaches the other sessions of that login within about a second
+([ADR 0049](../adr/0049-named-logins-share-a-live-store.md)). With no login
+stored yet, sign in inside the session as you would on your own machine
+(`/login`, or Codex's device-code sign-in). Sproozi never copies a login from
+your machine, and the login never enters a checkpoint, so a session moved here
+signs in once with this cluster's store of its login.
+
+A session uses the login it was started with, `default` unless
+`sproozi run --login NAME` named another; an AgentRun has no session and uses
+`default`. A Secret stays as it is, so it suits a token that doesn't refresh,
+and gives every session the same token. A client that keeps its own copy of a
+refreshing token can still lose a refresh to another session of its login, as
+on one machine. Give the claims a filesystem the agent user (UID 1000) can
+write, for example through the Pod's `fsGroup`; the supervisor creates the
+login file in an empty claim.
 
 With `signIn`, workload containers don't receive the `OPENAI_API_KEY`
 placeholder, which most clients would prefer over their own sign-in. A client
@@ -181,14 +192,15 @@ spec:
       env: CLAUDE_CODE_OAUTH_TOKEN
 ```
 
-For a managed Codex or Claude Code session that keeps its own sign-in:
+For managed Codex, Claude Code or Copilot sessions that keep their own
+named logins:
 
 ```yaml
 spec:
   clientConfig:
     harness: codex
     signIn:
-      claimName: alice-codex-login
+      claims: {}
 ```
 
 ## Model selection
@@ -225,8 +237,13 @@ is bounded to 128 bytes without NUL or line breaks. Empty uses the stock default
 Codex also accepts `nativeSession.options`: at most 32 single-line
 `key=TOMLvalue` entries, each at most 4096 bytes. Keys use validated dotted bare
 or quoted segments; approved instructions and the update gate remain reserved.
-Claude rejects Codex options. These settings come from the approved current
-runtime, never a portable checkpoint. For example:
+Claude Code and Copilot reject Codex options. `nativeSession.signInToken: true`
+says the gateway holds a sign-in token for the harness's provider rather than
+an API key; only Copilot's launch changes, calling its plan's service with the
+gateway's `copilot-sign-in-token` instead of OpenAI in bring-your-own-key mode.
+Copilot with a key uses `gpt-6.1-sol` unless `model` names another. These
+settings come from the approved current runtime, never a portable checkpoint.
+For example:
 
 ```yaml
 spec:

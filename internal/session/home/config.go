@@ -42,6 +42,9 @@ type Config struct {
 	// Harnesses adds further native harnesses to the home. Each is its own local
 	// placement with its own gateway port, grants and provider credential.
 	Harnesses []LocalHarness `json:"harnesses,omitempty"`
+	// Logins lists each harness's named logins besides harness.DefaultLogin,
+	// for a harness that signs in itself (ADR 0049).
+	Logins map[harness.NativeKind][]string `json:"logins,omitempty"`
 }
 
 // LocalHarness is another native harness beside the primary local placement.

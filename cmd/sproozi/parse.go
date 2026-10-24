@@ -39,9 +39,11 @@ type options struct {
 	verb, operand      string
 	id, path           string
 	harnessArgs        []string
+	login              string
 	root, configPath   string
 	socket             string
 	socketGiven        bool
+	loginGiven         bool
 	harness, model     string
 	image, build       string
 	providerURL        string
@@ -118,13 +120,16 @@ func parse(args []string) (options, error) {
 		return ""
 	}
 	boolean := func(name string) bool { return bools[name] != nil && *bools[name] }
-	fs.Visit(func(f *flag.Flag) { q.socketGiven = q.socketGiven || f.Name == "socket" })
+	fs.Visit(func(f *flag.Flag) {
+		q.socketGiven = q.socketGiven || f.Name == "socket"
+		q.loginGiven = q.loginGiven || f.Name == "login"
+	})
 	q.root, q.configPath, q.socket = str("root"), str("config"), str("socket")
 	q.harness, q.model, q.image, q.build = str("harness"), str("model"), str("image"), str("build")
 	q.providerURL, q.providerCA, q.credentialFile = str("provider-url"), str("provider-ca-file"), str("credential-file")
 	q.instructionsFile, q.context, q.namespace = str("instructions-file"), str("context"), str("namespace")
 	q.task, q.repository, q.project = str("task"), str("repository"), project.ID(str("project"))
-	q.operation, q.id = str("operation"), str("id")
+	q.operation, q.id, q.login = str("operation"), str("id"), str("login")
 	q.local = boolean("local")
 	q.credentialStdin, q.skipCheck = boolean("credential-stdin"), boolean("skip-credential-check")
 	q.signIn, q.token, q.chatgpt = boolean("sign-in"), boolean("token"), boolean("chatgpt")
@@ -237,7 +242,12 @@ func (q *options) validate(str func(string) string) error {
 	}
 	if q.harness != "" {
 		if err := harness.NativeKind(q.harness).Validate(); err != nil {
-			return usagef("--harness must be codex or claude-code")
+			return usagef("--harness must be %s", harness.ManagedKindList())
+		}
+	}
+	if q.loginGiven {
+		if err := harness.ValidateLogin(q.login); err != nil {
+			return usagef("--login: %v", err)
 		}
 	}
 	if q.project != "" && !project.ValidID(q.project) {
@@ -305,6 +315,9 @@ func (q *options) validateRun(str func(string) string) error {
 			}
 		}
 		return nil
+	}
+	if q.login != "" {
+		return usagef("--login applies to a session on this machine; a session moved to a cluster keeps its login")
 	}
 	switch {
 	case q.path != "":

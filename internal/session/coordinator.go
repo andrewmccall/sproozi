@@ -53,8 +53,8 @@ func (c *Coordinator) Create(first Launch, input []byte, session string) (Record
 	r := Record{Version: journalVersion, ID: first.ExecutionID, Session: session, Harness: first.Harness,
 		ThreadID: first.ThreadID, InstructionDigest: first.InstructionDigest,
 		IncludeIgnored: append([]string(nil), first.IncludeIgnored...), HarnessArgs: append([]string(nil), first.HarnessArgs...),
-		Deadline: first.Deadline,
-		Ceiling:  cloneAllowances(first.Allowances), Remaining: cloneAllowances(first.Allowances),
+		Login: first.Login, Deadline: first.Deadline,
+		Ceiling: cloneAllowances(first.Allowances), Remaining: cloneAllowances(first.Allowances),
 		Phase: PhasePreparing, PendingOperation: first.OperationID,
 		Operations: []Operation{{ID: first.OperationID, Destination: first.Placement, Launch: &first, Stage: stagePrepare}}}
 	if first.CheckpointDigest == "" {
@@ -308,7 +308,7 @@ func (c *Coordinator) prepareDestination(ctx context.Context, r Record, index in
 			}
 			// Without a kept conversation the visit starts again from the
 			// retained workspace, with no thread or checkpoint.
-			launch := Launch{Harness: r.Harness, ExecutionID: r.ID, OperationID: op.ID, AllocationID: uuid.NewString(), Epoch: r.Epoch + 1, Placement: op.Destination, ThreadID: r.ThreadID, InstructionDigest: r.InstructionDigest, IncludeIgnored: append([]string(nil), r.IncludeIgnored...), HarnessArgs: append([]string(nil), r.HarnessArgs...), Deadline: r.Deadline, Allowances: cloneAllowances(r.Remaining), CheckpointDigest: r.Checkpoint.Metadata.SHA256}
+			launch := Launch{Harness: r.Harness, ExecutionID: r.ID, OperationID: op.ID, AllocationID: uuid.NewString(), Epoch: r.Epoch + 1, Placement: op.Destination, ThreadID: r.ThreadID, InstructionDigest: r.InstructionDigest, IncludeIgnored: append([]string(nil), r.IncludeIgnored...), HarnessArgs: append([]string(nil), r.HarnessArgs...), Login: r.Login, Deadline: r.Deadline, Allowances: cloneAllowances(r.Remaining), CheckpointDigest: r.Checkpoint.Metadata.SHA256}
 			digest, err := c.retainProfile()
 			if err != nil {
 				return r, fmt.Errorf("session: profile: %w", err)

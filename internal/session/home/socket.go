@@ -56,6 +56,9 @@ type Request struct {
 	// HarnessArgs are the user's own arguments for the stock harness of a
 	// start or resume, appended to the harness command line.
 	HarnessArgs []string `json:"harnessArgs,omitempty"`
+	// Login names the login a start signs in with, for a harness that signs
+	// in itself; empty is harness.DefaultLogin.
+	Login string `json:"login,omitempty"`
 	// Remote selects a remote executor through a kubeconfig context for move
 	// or pull. The service reaches it from its own environment and records it.
 	Remote *remote.Selection `json:"remote,omitempty"`
@@ -329,7 +332,7 @@ func (s *Service) handle(ctx context.Context, conn net.Conn) {
 	var sessions []Status
 	switch q.Action {
 	case ActionStart:
-		status, err = s.Start(ctx, q.ID, q.OperationID, q.Workspace, q.Harness, q.IncludeIgnored, q.HarnessArgs)
+		status, err = s.StartWithLogin(ctx, q.ID, q.OperationID, q.Workspace, q.Harness, q.IncludeIgnored, q.HarnessArgs, q.Login)
 	case ActionMove:
 		destination := q.Destination
 		if q.Remote != nil {
@@ -537,6 +540,9 @@ func validateCommonRequest(q Request) error {
 	}
 	if len(q.HarnessArgs) != 0 && q.Action != ActionStart && q.Action != ActionResume {
 		return errors.New("home: only start and resume take harness arguments")
+	}
+	if q.Login != "" && q.Action != ActionStart {
+		return errors.New("home: only start takes a login; a session keeps the one it started with")
 	}
 	return nil
 }

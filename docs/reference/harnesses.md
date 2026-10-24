@@ -26,9 +26,9 @@ configuration. Unknown values fail validation and contract preparation.
 | --- | --- | --- | --- |
 | `codex` | yes | `codex-mcp.toml` | Codex `mcp_servers` TOML |
 | `claude-code` | yes | `claude-mcp.json` | Claude Code `mcpServers`, HTTP transport |
+| `copilot` | yes | `copilot-mcp.json` | GitHub Copilot CLI `mcpServers`, HTTP transport, all tools |
 | `opencode` | no | `opencode-mcp.json` | OpenCode `mcp`, remote transport, OAuth disabled |
 | `hermes` | no | `hermes-mcp.json` | Hermes `mcp_servers`, Streamable HTTP |
-| `copilot` | no | `copilot-mcp.json` | GitHub Copilot CLI `mcpServers`, HTTP transport, all tools |
 
 Every harness needs an MCP client: there is no harness without the `sproozi`
 control connection ([ADR 0039](../adr/0039-one-harness-registry-and-the-mcp-requirement.md)).
@@ -126,9 +126,9 @@ for the GitHub Copilot CLI.
 The [session service](../../cmd/sproozi/README.md) preserves a selected stock
 TUI while moving its harness conversation and Git workspace from Docker to a
 fixed Kubernetes profile and back. Managed launches require an explicit
-immutable `codex` or `claude-code` selector. Both placements, the profile and
-the checkpoint must use the same selected harness. A move cannot switch harnesses.
-OpenCode, Hermes and Copilot runs can't be moved.
+immutable `codex`, `claude-code` or `copilot` selector. Both placements, the
+profile and the checkpoint must use the same selected harness. A move cannot
+switch harnesses. OpenCode and Hermes runs can't be moved.
 
 The workflow in [Run a task remotely, then resume it locally](../guides/portable-workflows.md) supports remote tasks only for managed Codex. Its completion observer requires the
 submitted task text and a new completed turn. It then follows the usual stop,
@@ -137,16 +137,21 @@ permissions.
 Managed launches also receive the user's [profile](profile.md): Codex in
 `$CODEX_HOME/AGENTS.md` and `$CODEX_HOME/skills`, and Claude Code as a section
 appended to its system prompt and a `profile` plugin, because its isolated
-settings sources exclude user memory. The profile stays outside the checkpoint
+settings sources exclude user memory, and Copilot in
+`$COPILOT_HOME/copilot-instructions.md` after the approved instructions and in
+`$COPILOT_HOME/skills`. The profile stays outside the checkpoint
 and never replaces the approved developer instructions.
 Managed Codex MCP connections and placeholder Kubernetes configuration are
 regenerated for each launch; portable history cannot select upstream credentials
-or server registrations. Managed Claude tasks and MCP are not supported.
+or server registrations. Managed Copilot loads the same connections with
+`--additional-mcp-config`. Managed Claude tasks and named MCP servers, and
+managed Copilot tasks, are not supported.
 
 | Managed selector | Selected native state | Completed-turn observation |
 | --- | --- | --- |
 | `codex` | One same-UUID rollout | Native completed turn, resolved supported tools and initial developer instruction digest |
 | `claude-code` | One same-UUID primary project transcript | Fresh prompt/tool/Stop hooks plus a settled transcript with paired foreground Bash tools |
+| `copilot` | One `session-state/<id>/events.jsonl` journal, for the ID the supervisor chose with `--session-id` | The main agent's last `assistant.turn_end` after an answer with no tool requests, every tool finished and no error or abort after it, once terminal input has settled ([ADR 0048](../adr/0048-github-copilot-cli-is-a-managed-harness.md)) |
 
 The supervisor owns the PTY across attachment disconnects. It uses the installed
 client without an exact-version check. The
@@ -163,15 +168,17 @@ approved digest. The destination still requires fresh admission.
 A move blocks new input and waits for the current turn and its tools to finish.
 It then revokes access and confirms that the container stopped before capturing
 the checkpoint.
-Claude uses controlled native process shutdown after its Stop observation; Codex
-uses native quit after its completed-turn observation. Hooks and journals run
+Claude Code and Copilot use controlled native process shutdown after their
+completion observation; Codex uses native quit after its completed-turn
+observation. Hooks and journals run
 inside the sandbox, so they are only hints. They can't grant gateway permission,
 record finalized usage or prove that the container stopped. Forced
 cancellation revokes first. See [ADR
 0011](../adr/0011-native-session-compatibility-and-completion.md).
 
 The managed Codex launch uses `--sandbox danger-full-access` to run tools within the outer container boundary. The restricted sandbox
-kernel does not support the inner bubblewrap sandbox. Claude uses fixed `bypassPermissions` and foreground Bash. Both
+kernel does not support the inner bubblewrap sandbox. Claude uses fixed `bypassPermissions` and foreground Bash.
+Copilot uses `--allow-all` with its built-in GitHub MCP server disabled. All
 rely on the outer non-root, read-only, capability-restricted container and
 enforced gateway network boundary. Portable history cannot select these settings.
 
@@ -200,7 +207,10 @@ needs no GitHub account or Copilot subscription. With a Copilot plan instead,
 leave out the `COPILOT_PROVIDER_*` variables and give Copilot a GitHub token
 as `COPILOT_GITHUB_TOKEN`, through
 [`clientConfig.signIn`](agentruntime.md#harness-sign-in) (its own sign-in) or
-the gateway's `copilot-sign-in-token`. The gateway then serves Copilot's model
+the gateway's `copilot-sign-in-token` (for a managed session, set
+`nativeSession.signInToken`). Its own `/login` in a managed session runs
+GitHub's device flow through a `/login/` path route on `github.com`, beside the
+GitHub capability's Git route. The gateway then serves Copilot's model
 API (`/responses`, `/v1/messages`, `/chat/completions`, `/models` and `/auto`)
 and its `/copilot_internal/` account requests on `api.github.com`, and refuses
 GitHub's built-in MCP server, agents, experiments and telemetry. Copilot loads

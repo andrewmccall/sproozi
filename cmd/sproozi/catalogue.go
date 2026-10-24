@@ -50,6 +50,8 @@ type catalogueRow struct {
 	Placement    string               `json:"placement,omitempty"`
 	ThreadID     string               `json:"threadId,omitempty"`
 	Deadline     time.Time            `json:"deadline"`
+	// Login is the named login of a harness that signs in itself.
+	Login string `json:"login,omitempty"`
 }
 type executorAvailability struct {
 	Executor string `json:"executor,omitempty"`
@@ -176,7 +178,7 @@ func (q *options) discoverLocal(ctx context.Context) discovered {
 			Association: status.Association, ID: status.ID, Executor: localName, Ownership: ownership,
 			Phase: status.Phase, Harness: status.Harness, ExecutionID: status.ExecutionID,
 			AllocationID: status.AllocationID, Incarnation: status.Incarnation, Placement: status.Placement,
-			ThreadID: status.ThreadID, Deadline: status.Deadline,
+			ThreadID: status.ThreadID, Deadline: status.Deadline, Login: status.Login,
 		})
 	}
 	return v
@@ -207,6 +209,7 @@ func (q *options) discoverRemote(ctx context.Context, target remoteTarget) disco
 			Association: view.Association, ID: view.ID, Executor: target.Name, Ownership: ownership, Phase: phase,
 			Harness: view.Harness, ExecutionID: view.ExecutionID, AllocationID: view.AllocationID,
 			Incarnation: view.Incarnation, Placement: view.Placement, ThreadID: view.ThreadID, Deadline: view.Deadline,
+			Login: view.Login,
 		})
 	}
 	return v

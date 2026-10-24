@@ -3,17 +3,19 @@
 
 Uses deterministic local providers, an isolated HOME and a short private root,
 so it neither spends provider credit nor touches your real installation. It
-provisions Codex, adds Claude Code, checks doctor, drives one stock terminal
-turn per harness through `sproozi attach`, stops both sessions, proves shared
-instructions reach both providers, renews the gateway certificate while
+provisions Codex, adds Claude Code and Copilot, checks doctor, drives one stock
+terminal turn per harness through `sproozi attach`, stops every session, proves
+shared instructions reach each provider, renews the gateway certificate while
 the home daemon runs, and records that a configured kubeconfig and kubectl on
 PATH received no calls. The report is written to
 .local/verification/local-onboarding/report.json.
 
-With --sign-in, both harnesses sign in themselves (ADR 0047): setup stores no
-key, each login volume is seeded with a fixture sign-in, and every model
-request must carry it. Without it, every request must carry the gateway's key.
-The report is then report-sign-in.json.
+With --sign-in, Codex and Claude Code sign in themselves (ADR 0047): setup
+stores no key, each default login volume is seeded with a fixture sign-in, and
+every model request must carry it. Copilot is left out then: its own sign-in
+reaches api.github.com, which a fixture provider can't stand in for; make
+verify-harness-process covers it. Without --sign-in, every request must carry
+the gateway's key. The report is then report-sign-in.json.
 
 Pass --image with a local sha256 content ID or a digest-pinned reference to
 skip the image build; otherwise the release bake recipe builds it first.
@@ -33,6 +35,8 @@ ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / ".local/verification/local-onboarding"
 FIXTURES = ROOT / "hack/verify/session-mobility"
 SHARED_MARKER, CODEX_MARKER, CLAUDE_MARKER = "SHARED_PREF_MARKER_42", "CODEX_PREF_MARKER_7", "CLAUDE_PREF_MARKER_9"
+COPILOT_MARKER = "COPILOT_PREF_MARKER_5"
+PLACEMENTS = ("local", "local-claude", "local-copilot")
 
 
 def load(name):
@@ -79,7 +83,8 @@ def main():
     try:
         for target, name in [("./cmd/sproozi", "sproozi"), ("./hack/verify/native-pty", "native-pty")]:
             subprocess.run(["go", "build", "-o", str(bin_dir / name), target], cwd=ROOT, check=True)
-        claude, codex_fixture = load("claude"), load("host")
+        claude, codex_fixture, copilot = load("claude"), load("host"), load("copilot")
+        harnesses = ["codex", "claude-code"] + ([] if args.sign_in else ["copilot"])
         instructions = claude.INSTRUCTIONS
         write_private(work / "instructions.txt", instructions)
         write_private(work / "codex-token", "tui-placeholder\n")
@@ -96,6 +101,9 @@ def main():
                                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
         providers.append(subprocess.Popen(["python3", str(FIXTURES / "claude.py"), "serve", "--output-directory", str(provider_dir),
                                            "--listen", "127.0.0.1", "--port", "18775"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
+        providers.append(subprocess.Popen(["python3", str(FIXTURES / "copilot.py"), "serve", "--output-directory",
+                                           str(work / "copilot-provider"), "--port", "18785"],
+                                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
         time.sleep(2)
         reference = args.image
         if not reference:
@@ -123,9 +131,17 @@ def main():
         both = json.loads(result.stdout)
         report["steps"]["addClaude"] = {"ready": both["ready"], "harnesses": [(h["harness"], h["port"]) for h in both["harnesses"]],
                                         "paths": both["paths"]}
+        if "copilot" in harnesses:
+            # Copilot with the gateway's OpenAI key, which it shares with Codex.
+            result = sproozi("init", "--root", str(root), "--harness", "copilot", "--model", copilot.MODEL,
+                             "--provider-url", "http://127.0.0.1:18785", *credential("codex-token"), "--json")
+            added = json.loads(result.stdout)
+            report["steps"]["addCopilot"] = {"ready": added["ready"], "paths": added["paths"],
+                                             "harnesses": [(h["harness"], h["port"]) for h in added["harnesses"]]}
         write_private(root / "profile/AGENTS.md", f"Shared preference {SHARED_MARKER}.\n")
         write_private(root / "profile/codex/AGENTS.md", f"Codex preference {CODEX_MARKER}.\n")
         write_private(root / "profile/claude/CLAUDE.md", f"Claude preference {CLAUDE_MARKER}.\n")
+        write_private(root / "profile/copilot/copilot-instructions.md", f"Copilot preference {COPILOT_MARKER}.\n")
         doctor = json.loads(sproozi("doctor", "--root", str(root), "--json").stdout)
         report["steps"]["doctor"] = {"ok": doctor["ok"], "failed": [c for c in doctor["checks"] if not c["ok"]]}
 
@@ -140,24 +156,26 @@ def main():
                                                            "scopes": ["user:inference"], "subscriptionType": "max"}})
             for placement, kind, file, data in (("local", "codex", "auth.json", codex_sign_in),
                                                 ("local-claude", "claude-code", ".credentials.json", claude_sign_in)):
-                volume = f"sproozi-{installation}-{placement}-login"
+                volume = f"sproozi-{installation}-{placement}-login-default"
                 subprocess.run(["docker", "volume", "create", "--label", f"sproozi.com/login={kind}", volume],
                                check=True, capture_output=True)
                 subprocess.run(["docker", "run", "--rm", "-i", "--network", "none", "--user", "0:0", "-v", f"{volume}:/login",
                                 "--entrypoint", "/bin/sh", reference, "-c",
-                                f"cat > /login/{file} && chmod 600 /login/{file} && chmod 700 /login && "
+                                f"cat > /login/{file} && chmod 600 /login/{file} && chmod 711 /login && "
                                 f"chown 1000:1000 /login/{file}"], input=data, text=True, check=True, capture_output=True)
         repo = work / "repo"
         repo.mkdir()
         for command in (["git", "init", "-q"], ["git", "-c", "user.email=v@e", "-c", "user.name=v", "commit", "-q", "--allow-empty", "-m", "init"]):
             subprocess.run(command, cwd=repo, check=True)
         sessions = {}
-        for kind in ("codex", "claude-code"):
+        for kind in harnesses:
             status = json.loads(sproozi("run", str(repo), "--root", str(root), "--harness", kind, "--detach", "--json").stdout)
             sessions[kind] = status["id"]
         socket = root / "state/control.sock"
         turns = {}
-        for kind, fixture in (("codex", "host.py"), ("claude-code", "claude.py")):
+        for kind, fixture in (("codex", "host.py"), ("claude-code", "claude.py"), ("copilot", "copilot.py")):
+            if kind not in harnesses:
+                continue
             drive = subprocess.run(["python3", str(FIXTURES / fixture), "terminal", "--session-binary", str(bin_dir / "sproozi"),
                                     "--pty-helper", str(bin_dir / "native-pty"), "--socket", str(socket),
                                     "--output-directory", str(work / f"terminal-{kind}"), "--session-id", sessions[kind],
@@ -181,6 +199,14 @@ def main():
                                        "credentials": bool(claude_records) and bool(codex_records) and all(
                                            bool(r.get("signedIn")) == args.sign_in for r in claude_records + codex_records),
                                        "consumersReleased": not any((root / "pki/consumers").glob("*.json"))}
+        if "copilot" in harnesses:
+            copilot_records = json.loads((work / "copilot-provider/requests.json").read_text())
+            seen = "".join(r["instructions"] for r in copilot_records)
+            report["steps"]["sessions"]["copilotInstructions"] = bool(copilot_records) and all(
+                m in seen for m in (SHARED_MARKER, COPILOT_MARKER, instructions)) and not any(
+                m in seen for m in (CODEX_MARKER, CLAUDE_MARKER))
+            report["steps"]["sessions"]["copilotGatewayKey"] = bool(copilot_records) and all(
+                r["gatewayKey"] and r["model"] == copilot.MODEL for r in copilot_records)
 
         log = root / "logs/service.log"
         pid = (root / "service.pid").read_text().strip()
@@ -196,8 +222,10 @@ def main():
         report["steps"]["serviceStop"] = {"running": stopped["running"]}
         report["steps"]["clusterIsolation"] = {"kubectlCalls": kube_calls.read_text() if kube_calls.exists() else ""}
         s = report["steps"]
+        copilot_ok = args.sign_in or (s["addCopilot"]["ready"] and len(s["addCopilot"]["paths"]) == 3 and
+                                      s["sessions"]["copilotInstructions"] and s["sessions"]["copilotGatewayKey"])
         report["passed"] = all([
-            s["initCodex"]["ready"], s["addClaude"]["ready"], len(s["addClaude"]["paths"]) == 2, s["doctor"]["ok"],
+            s["initCodex"]["ready"], s["addClaude"]["ready"], len(s["addClaude"]["paths"]) == 2, s["doctor"]["ok"], copilot_ok,
             all(s["sessions"]["turns"].values()), all(v["phase"] == "retained" and v["nativeUUID"] for v in s["sessions"]["stops"].values()),
             s["sessions"]["codexSharedInstructions"], s["sessions"]["claudeSharedInstructions"], s["sessions"]["credentials"],
             s["sessions"]["consumersReleased"],
@@ -206,15 +234,17 @@ def main():
         if installation is not None:
             subprocess.run([str(bin_dir / "sproozi"), "service", "stop", "--root", str(root), "--leave-running"], env=env, capture_output=True)
             subprocess.run(["docker", "network", "rm", "sproozi-" + installation], capture_output=True)
-            for placement in ("local", "local-claude"):
-                subprocess.run(["docker", "volume", "rm", f"sproozi-{installation}-{placement}-login"], capture_output=True)
+            for placement in PLACEMENTS:
+                subprocess.run(["docker", "volume", "rm", f"sproozi-{installation}-{placement}-login-default"],
+                               capture_output=True)
         for p in providers:
             p.terminate()
         if not report["passed"]:
             # Keep the terminal transcripts, provider records and service log.
             kept = OUT / ("failed-sign-in" if args.sign_in else "failed")
             shutil.rmtree(kept, ignore_errors=True)
-            for source in [*work.glob("terminal-*"), work / "codex-provider", work / "claude-provider", root / "logs"]:
+            for source in [*work.glob("terminal-*"), work / "codex-provider", work / "claude-provider",
+                           work / "copilot-provider", root / "logs"]:
                 if source.is_dir():
                     shutil.copytree(source, kept / source.name, ignore=shutil.ignore_patterns("*.key", "*-token"))
         report_file = OUT / ("report-sign-in.json" if args.sign_in else "report.json")

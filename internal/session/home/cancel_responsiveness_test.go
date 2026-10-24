@@ -146,7 +146,7 @@ func TestCancelPreventsInitialActivationAfterPreparedReply(t *testing.T) {
 	// Capture runs real Git subprocesses and is setup for this test's prepared
 	// reply boundary. Keep it outside the cancellation responsiveness guard;
 	// Start must recover the same durable preparing intent without recapturing.
-	if _, err := s.createWorkspaceExecution(ctx, id, operationID, repo, s.config.Local, nil, nil); err != nil {
+	if _, err := s.createWorkspaceExecution(ctx, id, operationID, repo, s.config.Local, nil, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	startDone := make(chan error, 1)

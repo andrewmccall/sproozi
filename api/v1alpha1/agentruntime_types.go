@@ -42,7 +42,7 @@ func (s *AgentRuntimeSpec) ValidateRuntimeTemplate() error {
 	if err := s.ClientConfig.validateNativeSession(); err != nil {
 		return err
 	}
-	if err := s.ClientConfig.SignIn.validate(); err != nil {
+	if err := s.ClientConfig.validateSignIn(); err != nil {
 		return err
 	}
 	if len(s.PodTemplate.Spec.Containers) == 0 {
@@ -243,9 +243,9 @@ type RuntimeClientConfig struct {
 // mounted at /etc/sproozi/sign-in. Set exactly one source. A Secret key, such
 // as a token from claude setup-token, is mounted read-only at
 // /etc/sproozi/sign-in/KEY and, with Env, also set as that environment
-// variable. A PersistentVolumeClaim is mounted read-write, so a managed
-// session's supervisor can restore the harness's login file from it before
-// launch and save the refreshed file after the harness exits.
+// variable. Claims gives each named login its own PersistentVolumeClaim,
+// mounted read-write, whose login file the supervisor keeps in step with the
+// harness's while it runs, so every session of one login shares it (ADR 0049).
 type RuntimeSignIn struct {
 	// +optional
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
@@ -255,13 +255,11 @@ type RuntimeSignIn struct {
 	// +kubebuilder:validation:Pattern=`^[-._a-zA-Z0-9]+$`
 	// +kubebuilder:validation:MaxLength=253
 	Key string `json:"key,omitempty"`
-	// ClaimName is a PersistentVolumeClaim that keeps the harness's own
-	// login file across managed sessions, such as Claude Code's
-	// .credentials.json or Codex's auth.json.
+	// Claims keeps each named login of the harness in its own
+	// PersistentVolumeClaim, sproozi-login-<harness>-<login>, which the
+	// controller creates in sproozi-agents on first use and never deletes.
 	// +optional
-	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
-	// +kubebuilder:validation:MaxLength=253
-	ClaimName string `json:"claimName,omitempty"`
+	Claims *RuntimeLoginClaims `json:"claims,omitempty"`
 	// Env names an environment variable for the sign-in, such as
 	// CLAUDE_CODE_OAUTH_TOKEN or COPILOT_GITHUB_TOKEN.
 	// +optional
@@ -270,20 +268,43 @@ type RuntimeSignIn struct {
 	Env string `json:"env,omitempty"`
 }
 
+// validateSignIn checks the sign-in, whose claims are named by the harness.
+func (c RuntimeClientConfig) validateSignIn() error {
+	if c.SignIn != nil && c.SignIn.Claims != nil && c.Harness == "" {
+		return fmt.Errorf("clientConfig.signIn.claims needs clientConfig.harness, which names each login's claim")
+	}
+	return c.SignIn.validate()
+}
+
 func (in *RuntimeSignIn) validate() error {
 	switch {
 	case in == nil:
 		return nil
-	case (in.SecretName == "") == (in.ClaimName == ""):
-		return fmt.Errorf("clientConfig.signIn needs exactly one of secretName and claimName")
+	case (in.SecretName == "") == (in.Claims == nil):
+		return fmt.Errorf("clientConfig.signIn needs exactly one of secretName and claims")
 	case in.SecretName != "" && in.Key == "":
 		return fmt.Errorf("clientConfig.signIn.key is required with secretName")
-	case in.ClaimName != "" && (in.Key != "" || in.Env != ""):
+	case in.Claims != nil && (in.Key != "" || in.Env != ""):
 		return fmt.Errorf("clientConfig.signIn.key and env apply only to a Secret")
 	case reservedSignInEnv[in.Env]:
 		return fmt.Errorf("clientConfig.signIn.env %q is set by the controller", in.Env)
 	}
 	return nil
+}
+
+// RuntimeLoginClaims sets up the claims of a harness's named logins.
+type RuntimeLoginClaims struct {
+	// StorageClassName selects the claims' StorageClass; empty uses the
+	// cluster default. Sessions of one login on different nodes need one
+	// that supports ReadWriteMany.
+	// +optional
+	// +kubebuilder:validation:MaxLength=253
+	StorageClassName string `json:"storageClassName,omitempty"`
+	// AccessMode is each claim's access mode.
+	// +optional
+	// +kubebuilder:default=ReadWriteOnce
+	// +kubebuilder:validation:Enum=ReadWriteOnce;ReadWriteMany;ReadWriteOncePod
+	AccessMode corev1.PersistentVolumeAccessMode `json:"accessMode,omitempty"`
 }
 
 // SignInDirectory is where the controller mounts a runtime's sign-in.
@@ -310,6 +331,13 @@ type NativeSessionConfig struct {
 	// +kubebuilder:validation:MaxItems=32
 	// +kubebuilder:validation:items:MaxLength=4096
 	Options []string `json:"options,omitempty"`
+
+	// SignInToken says the gateway holds a sign-in token for this harness's
+	// provider, such as copilot-sign-in-token, rather than an API key. Only
+	// Copilot's launch changes: it calls its plan's service instead of
+	// OpenAI in bring-your-own-key mode. Ignored with clientConfig.signIn.
+	// +optional
+	SignInToken bool `json:"signInToken,omitempty"`
 }
 
 func (c RuntimeClientConfig) validateNativeSession() error {

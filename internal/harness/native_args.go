@@ -19,8 +19,11 @@ const (
 	NativeArgsMax = 64
 	// NativeArgMaxBytes bounds one harness argument.
 	NativeArgMaxBytes = 4096
-	// nativeModelFlag is the model option both harnesses take.
+	// nativeModelFlag is the model option every managed harness takes.
 	nativeModelFlag = "--model"
+	// remoteName is Codex's and Copilot's remote-session flag and OpenCode's
+	// remote MCP transport.
+	remoteName = "remote"
 )
 
 // controlledFlag names one option a harness takes. value reports that it takes
@@ -53,7 +56,7 @@ var codexControlled = []controlledFlag{
 	{long: []string{"oss"}, why: whyProvider},
 	{long: []string{"local-provider"}, value: true, why: whyProvider},
 	{long: []string{"profile"}, short: "p", value: true, why: whyProvider},
-	{long: []string{"remote", "remote-auth-token-env"}, value: true, why: whyLifecycle},
+	{long: []string{remoteName, "remote-auth-token-env"}, value: true, why: whyLifecycle},
 	{long: []string{"no-alt-screen", "no-daemon"}, why: whySetting},
 }
 
@@ -85,6 +88,21 @@ var claudeControlled = []controlledFlag{
 	{long: []string{"worktree"}, short: "w", value: true, why: whyWorkspace},
 }
 
+var copilotControlled = []controlledFlag{
+	{long: []string{"allow-all", "yolo", "allow-all-tools", "allow-all-paths", "allow-all-urls"}, why: whyApproval},
+	{long: []string{"additional-mcp-config", "disable-mcp-server", "mcp-github-auth", "plugin-dir", "bash-env"},
+		value: true, why: whySetting},
+	{long: []string{"disable-builtin-mcps", "enable-all-github-mcp-tools", "no-custom-instructions", "no-auto-update",
+		"no-remote", "no-bash-env", "trust-folder"}, why: whySetting},
+	{long: []string{"add-github-mcp-tool", "add-github-mcp-toolset"}, value: true, why: whySetting},
+	{long: []string{"resume"}, short: "r", value: true, why: whyThread},
+	{long: []string{"continue"}, why: whyThread},
+	{long: []string{"session-id", "connect"}, value: true, why: whyThread},
+	{long: []string{"prompt"}, short: "p", value: true, why: whyLifecycle},
+	{long: []string{"output-format", "stream", "share"}, value: true, why: whyLifecycle},
+	{long: []string{"acp", remoteName, "remote-export", "silent", "share-gist"}, short: "s", why: whyLifecycle},
+}
+
 // ValidateNativeArgs refuses harness arguments that would replace a flag
 // Sproozi controls, with a message naming the flag and why. A refusal is
 // explicit; Sproozi never rewrites the user's arguments.
@@ -104,8 +122,11 @@ func ValidateNativeArgs(kind NativeKind, args []string) error {
 		}
 	}
 	controlled := codexControlled
-	if kind == NativeClaude {
+	switch kind {
+	case NativeClaude:
 		controlled = claudeControlled
+	case NativeCopilot:
+		controlled = copilotControlled
 	}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]

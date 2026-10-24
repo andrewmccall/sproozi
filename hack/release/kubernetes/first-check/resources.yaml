@@ -37,12 +37,21 @@ spec:
           *"kubernetes request denied"*) echo 'DENIED: Secret read is outside the policy' ;;
           *) echo "UNEXPECTED: Secret read failed, but not with the gateway's refusal: $refusal"; exit 1 ;;
           esac
+          # By address: sandboxes resolve no names (ADR 0040), so a name
+          # would fail at DNS and never test the network.
           status=0
-          env -u HTTPS_PROXY -u https_proxy curl -sk --max-time 5 https://kubernetes.default.svc/version >/dev/null 2>&1 || status=$?
+          env -u HTTPS_PROXY -u https_proxy curl -sk --max-time 5 "https://${KUBERNETES_SERVICE_HOST}:${KUBERNETES_SERVICE_PORT}/version" >/dev/null 2>&1 || status=$?
           case "$status" in
           0) echo 'UNEXPECTED: direct API server path was reachable'; exit 1 ;;
           7|28) echo 'DENIED: direct API server path is blocked' ;;
           *) echo "UNEXPECTED: direct API server path failed with curl exit $status, not a refused or timed-out connection"; exit 1 ;;
+          esac
+          status=0
+          env -u HTTPS_PROXY -u https_proxy curl -sk --max-time 5 https://1.1.1.1/ >/dev/null 2>&1 || status=$?
+          case "$status" in
+          0) echo 'UNEXPECTED: direct internet path was reachable'; exit 1 ;;
+          7|28) echo 'DENIED: direct internet path is blocked' ;;
+          *) echo "UNEXPECTED: direct internet path failed with curl exit $status, not a refused or timed-out connection"; exit 1 ;;
           esac
           echo 'First check passed. Keeping this Pod for inspection for 60 seconds'
           sleep 60

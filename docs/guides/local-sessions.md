@@ -1,8 +1,10 @@
-# Run Codex or Claude Code locally with Docker
+# Run Codex, Claude Code or Copilot locally with Docker
 
-This guide sets up Sproozi on one computer and runs Codex or Claude Code in a
-restricted Docker container. You need a running Docker engine; you do not need
-a Sproozi checkout, Go, OpenSSL, Python, kubectl or a Kubernetes cluster.
+This guide sets up Sproozi on one computer and runs Codex, Claude Code or
+GitHub Copilot CLI in a restricted Docker container. You need a running Docker
+engine; you do not need a Sproozi checkout, Go, OpenSSL, Python, kubectl or a
+Kubernetes cluster. OpenCode and Hermes run only on Kubernetes; see
+[harnesses](../reference/harnesses.md).
 
 `sproozi init` sets up everything: the agent image, a private Docker network,
 a certificate authority, your provider key, the configuration and a background
@@ -20,9 +22,9 @@ the files, defaults, limits and supported platforms.
   containers. Setup has been verified on macOS with Docker Desktop; Docker
   Engine on Linux is supported but has no recorded acceptance run yet. Windows
   needs a [hand-written configuration](windows.md).
-- An OpenAI API key for Codex or an Anthropic API key for Claude Code, or the
-  subscription you want an agent to sign in with. Setup stores a key for the
-  gateway; agents never receive it.
+- An OpenAI API key for Codex or Copilot, or an Anthropic API key for Claude
+  Code, or the subscription you want an agent to sign in with. Setup stores a
+  key for the gateway; agents never receive it.
 - The Sproozi CLI from [Homebrew or a release download](install.md).
 
 Sproozi is a preview. Read [what a container does not protect](#what-this-does-not-protect)
@@ -36,7 +38,8 @@ Run setup once. It asks for your API key without echoing it:
 sproozi init
 ```
 
-That sets up Codex. For Claude Code, run `sproozi init --harness claude-code`.
+That sets up Codex. For Claude Code, run `sproozi init --harness claude-code`;
+for Copilot, `sproozi init --harness copilot`.
 The output ends with:
 
 ```text
@@ -52,7 +55,8 @@ from a file only you can read, or from standard input, and print JSON:
 sproozi init --credential-file /absolute/path/to/openai-key --json
 ```
 
-A key is never accepted as a command-line value. Setup checks it by listing
+With `--json`, the result goes to standard output and the progress lines to
+standard error. A key is never accepted as a command-line value. Setup checks it by listing
 the provider's models, which makes no inference request; `--skip-credential-check`
 skips that.
 
@@ -86,7 +90,9 @@ sproozi rm 3f2b       # delete a stopped session and its saved work
 
 `cancel` stops a session at once, discarding the agent's current turn. The
 background service only needs to run while you use sessions. These commands
-start it if it is stopped; `ls` does not, and says how to start it.
+start it if it is stopped; `ls` does not, and says how to start it. In `ls`,
+`PLACEMENT` is where a session runs: `local` is Docker on this computer, and
+any other name is a Kubernetes cluster ([placement](../../GLOSSARY.md#placement)).
 
 Each agent uses its own default model and settings. To pass the agent's own
 flags, put them after `--`:
@@ -107,37 +113,43 @@ in a real terminal, F2 shows the warning.
 [Sproozi integration](../reference/sproozi-integration.md) explains how the
 agent can ask why a request was refused.
 
-## Add the other agent
+## Add another agent
 
-Each session keeps the agent it started with. To use both, run setup again for
-the other one, then choose it per session:
+Each session keeps the agent it started with. To use more than one, run setup
+again for each, then choose it per session:
 
 ```sh
 sproozi init --harness claude-code
 sproozi run --harness claude-code
 ```
 
-Each agent gets its own gateway port. `--port` sets only the first one, on the
-first `init`; a later agent takes the next free port after the existing ones,
-so `--port` on a later `init` has no effect.
+Each agent gets its own gateway port, so a Codex container cannot use the
+Anthropic key, or the reverse. The first takes 18443 and a later one the next
+free port after it; `--port` picks where that agent's search starts. Codex and
+Copilot can use the same OpenAI key file; setup stores a copy for each agent.
 
-The second agent gets its own gateway port and provider key, so a Codex
-container cannot use the Anthropic key, or the reverse. If a session is
-running, setup saves the change and says to restart the service once the
-session stops.
+If a session is running, setup saves the change and says so. To apply it
+without stopping your sessions, run `sproozi service stop --leave-running`,
+then `sproozi service start`.
 
 ## Choose how an agent signs in
 
 Each agent uses one of three ways to authenticate, chosen when you run setup
-for it ([ADR 0047](../adr/0047-harnesses-sign-in-to-their-own-model-providers.md)).
-Every agent offers all three; which your provider's terms allow is your call.
+for it: an API key, a sign-in token, or its own sign-in. Codex also offers a
+ChatGPT plan held by the gateway. [How credentials reach an agent](../explanations/credentials.md)
+explains who holds each credential, and why a token or plan sign-in held by
+the gateway may breach your provider's terms.
 
 | Option | Setup | Who holds the credential |
 | --- | --- | --- |
 | API key | `sproozi init --harness NAME` (the default) | The gateway; the agent never sees it |
-| Sign-in token | `sproozi init --harness NAME --token --credential-file FILE`, with a token such as the output of `claude setup-token` | The gateway, which sends it as a bearer |
+| Sign-in token | `sproozi init --harness NAME --token --credential-file FILE`, with a long-lived token from your provider, such as the one `claude setup-token` prints, or for Copilot a GitHub token with Copilot access | The gateway, which adds it to each request |
 | ChatGPT plan, held by the gateway | `sproozi init --harness codex --chatgpt`, which opens your browser | The gateway, which refreshes it |
-| The agent's own sign-in | `sproozi init --harness NAME --sign-in` | The agent, in a Docker volume of its own |
+| The agent's own sign-in | `sproozi init --harness NAME --sign-in`, then sign in inside the first session | The agent, in a login store of its own |
+
+Copilot with an API key calls OpenAI in its bring-your-own-key mode and needs
+no Copilot plan; it uses `gpt-6.1-sol` unless you choose another model. With a
+token or its own sign-in it calls GitHub's Copilot service with your plan.
 
 ### The agent's own sign-in
 
@@ -149,10 +161,13 @@ outside Sproozi:
 - **Codex:** choose to sign in with ChatGPT using a device code, open the page
   it shows and enter the code. The browser sign-in that returns to
   `localhost` can't reach the container.
+- **Copilot:** type `/login` and follow GitHub's device-code steps.
 
-The agent keeps its sign-in in its own Docker volume,
-`sproozi-<installation>-<placement>-login`, which every later session of that
-agent mounts, and refreshes it itself. Signing out in the agent removes it.
+The agent keeps its sign-in in a [login store](../../GLOSSARY.md#login-store),
+a Docker volume named after your installation, the agent and the login. Every
+session of that login shares it: a sign-in, refresh or sign-out in one session
+reaches the others within about a second. Sproozi never copies a sign-in from
+your own machine.
 The gateway forwards the sign-in to the provider, still counts every model
 call against the session's budget, and refuses ChatGPT's own plugins and
 connectors. The sign-in never enters a checkpoint, so a session moved to
@@ -161,9 +176,22 @@ Kubernetes signs in again there. Two things differ from a gateway-held key:
 - The agent can read its own sign-in. The gateway refuses any request that
   carries it to another destination it inspects, but it can't see inside an
   encoded or split copy.
-- Each refresh replaces the refresh token. Two sessions of one agent running
-  at once share one sign-in, and one may need to sign in again if both
-  refresh at the same moment.
+- Each refresh replaces the refresh token. If an agent keeps its own copy of
+  the token rather than reading the shared file again, a second session of
+  the login may need to sign in again after the first refreshed.
+
+### Several accounts
+
+Each agent can have several named logins, such as one for work. Set one up,
+then start sessions on it:
+
+```sh
+sproozi init --harness copilot --sign-in --login work
+sproozi run --harness copilot --login work
+```
+
+Without `--login`, a session uses the `default` login. `sproozi ls` shows each
+session's login. A session keeps its login when it resumes or moves.
 
 To switch an agent, run setup again with the option you want: `--sign-in`,
 `--token`, `--chatgpt`, or a key through `--credential-file` or the prompt.
@@ -173,7 +201,7 @@ Setup without any of them keeps the agent's current choice.
 
 Your [profile](../reference/profile.md) is `~/.sproozi/profile`. Put
 instructions for every session in `AGENTS.md` there, and agent-specific ones in
-`codex/AGENTS.md` or `claude/CLAUDE.md`. Add skills as `skills/<name>/SKILL.md`.
+`codex/AGENTS.md`, `claude/CLAUDE.md` or `copilot/copilot-instructions.md`. Add skills as `skills/<name>/SKILL.md`.
 Each launch gets a copy, so changes apply to the next session. Approved
 instructions from the configuration take precedence. `sproozi doctor` checks
 the profile and reports files no agent reads.
@@ -187,7 +215,7 @@ step for anything that fails.
 | --- | --- |
 | Check everything, including each stored key | `sproozi doctor --check-provider` |
 | See whether the service runs | `sproozi service status` |
-| Replace a provider key | `sproozi credentials set codex` (or `claude-code` when it uses a key) |
+| Replace a provider key | `sproozi credentials set codex` (or `claude-code` or `copilot` when it uses a key or token) |
 | See which keys are stored | `sproozi credentials list` |
 | Stop or start the service | `sproozi service stop`, `sproozi service start` |
 | See certificate expiry and renewal | `sproozi certificates status` |
@@ -243,15 +271,17 @@ has the details.
 ## Remove the installation
 
 Delete your sessions with `sproozi rm`, stop the service, then remove the
-installation's Docker network and directory (`~/.sproozi` unless you chose
-another with `--root`). `sproozi doctor` names the network, `sproozi-ID`:
+installation's Docker volumes, network and directory (`~/.sproozi` unless you
+chose another with `--root`). `sproozi doctor` names the network, `sproozi-ID`;
+the volumes, including each login store, start with the same name:
 
 ```sh
 sproozi service stop
+docker volume rm $(docker volume ls -q --filter name=sproozi-ID)
 docker network rm sproozi-ID
 rm -rf ~/.sproozi
 ```
 
-Removing the network never touches Docker resources Sproozi did not create.
-Deleting the directory removes saved sessions, provider keys and the
-certificate authority.
+These commands never touch Docker resources Sproozi did not create. Removing
+the volumes signs every agent out; deleting the directory removes saved
+sessions, provider keys and the certificate authority.

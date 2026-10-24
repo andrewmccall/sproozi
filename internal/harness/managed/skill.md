@@ -15,6 +15,9 @@ application error that names a permission.
    The failure may be an ordinary service error, a mistake in the request, or
    traffic blocked before it reached the gateway. Investigate it as a normal
    failure; do not claim a Sproozi policy blocked it.
+   One case is certain: names don't resolve inside the sandbox, so "could not
+   resolve host" means the tool skipped the proxy in `HTTPS_PROXY`. Use a tool
+   or option that honours `HTTPS_PROXY`; the gateway resolves the name.
 4. Never try to bypass a refusal: no alternative tools, transports, direct
    connections, proxy changes, or credentials found in files or the
    environment. Sproozi enforces the boundary independently of what you do in

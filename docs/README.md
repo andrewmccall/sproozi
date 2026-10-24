@@ -10,7 +10,8 @@ terms.
 
 | I want to… | Guide | Needs |
 | --- | --- | --- |
-| Run Codex or Claude Code locally in Docker | [Local sessions](guides/local-sessions.md) | The CLI and Docker |
+| Run Codex, Claude Code or Copilot locally in Docker | [Local sessions](guides/local-sessions.md) | The CLI and Docker |
+| Understand how an agent gets its provider credential | [How credentials reach an agent](explanations/credentials.md) | Nothing |
 | Install a release on Kubernetes, including Kind | [Install on Kubernetes](guides/install-kubernetes.md) | kubectl and a cluster |
 | Install the command-line tool | [Install the CLI](guides/install.md) | Homebrew or a download |
 | Have Codex investigate a broken workload and open a PR | [Investigation-to-PR demo on Kind](guides/pr-demo.md) | A checkout, Make, a model account and a GitHub App |
@@ -39,6 +40,7 @@ Read these explanations when you need more detail about the basic model.
 - [System architecture](explanations/system-architecture.md) describes components and trust boundaries.
 - [Capabilities and gateways](explanations/capabilities-and-gateways.md) explains how Sproozi checks service requests.
 - [Run lifecycle](explanations/run-lifecycle.md) explains admission, completion and cleanup.
+- [How credentials reach an agent](explanations/credentials.md) explains keys, sign-in tokens, the agent's own sign-in and named logins.
 
 ## Look up configuration
 

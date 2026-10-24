@@ -21,6 +21,7 @@ import (
 
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/nativepty"
+	"github.com/google/uuid"
 )
 
 const (
@@ -29,6 +30,7 @@ const (
 	nativeHome    = "/workspace/session/codex"
 	workspace     = "/workspace/session/workspace"
 	executable    = "/usr/local/bin/codex"
+	agentHome     = "/home/agent"
 	inactiveError = "native execution is not active"
 )
 
@@ -53,13 +55,18 @@ type request struct {
 type response = harness.NativeReply
 
 type server struct {
-	config          config
-	deadline        time.Time
-	mu              sync.Mutex
-	action          sync.Mutex
-	native          *nativepty.Supervisor
-	state           harness.NativeState
-	threadID        string
+	config   config
+	deadline time.Time
+	mu       sync.Mutex
+	action   sync.Mutex
+	native   *nativepty.Supervisor
+	state    harness.NativeState
+	threadID string
+	// launchID is the conversation a new visit's supervisor named itself,
+	// for a harness that takes its ID at launch (Copilot).
+	launchID string
+	// login keeps the harness's sign-in in step with its login store.
+	login           *loginSync
 	done            chan struct{}
 	stopOnce        sync.Once
 	exitCode        int
@@ -192,7 +199,7 @@ func serve(c config, bootstrap bool) error {
 }
 func (s *server) stop() {
 	s.mu.Lock()
-	n := s.native
+	n, login := s.native, s.login
 	s.state = harness.NativeStopped
 	s.exitCode = 1
 	s.mu.Unlock()
@@ -200,6 +207,7 @@ func (s *server) stop() {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		exit, _ := n.Stop(ctx)
+		login.stop()
 		s.mu.Lock()
 		s.exitCode = exit.Code
 		if s.exitCode == 0 {
@@ -275,7 +283,7 @@ func (s *server) activate() response {
 		r.Error = err.Error()
 		return r
 	}
-	env = append(env, "HOME=/home/agent")
+	env = append(env, "HOME="+agentHome)
 	if s.config.Task != "" && s.threadID != "" {
 		_, baseline, err := observeTurn(nativeHome, s.threadID, s.config.InstructionDigest, s.config.RolloutMaxBytes)
 		if err != nil {
@@ -284,18 +292,29 @@ func (s *server) activate() response {
 		}
 		s.taskBaseline = baseline
 	}
-	args, env, err := adapter.prepare(s.config, s.threadID, env)
+	// The sign-in comes first: a harness that keeps other settings in its
+	// login file, such as Copilot's config.json, has them merged in.
+	login, err := startLoginSync(s.config)
 	if err != nil {
-		r.Error = err.Error()
+		r.Error = "harness sign-in is unavailable: " + err.Error()
 		return r
 	}
-	if err = restoreSignIn(s.config); err != nil {
-		r.Error = "harness sign-in is unavailable: " + err.Error()
+	s.login = login
+	thread := s.threadID
+	if thread == "" && adapter.namesSession {
+		thread = uuid.NewString()
+		s.launchID = thread
+	}
+	args, env, err := adapter.prepare(s.config, thread, env)
+	if err != nil {
+		login.stop()
+		r.Error = err.Error()
 		return r
 	}
 	n, err := nativepty.Start(nativepty.Launch{Executable: adapter.executable, Args: args, Env: env,
 		Dir: workspace, Deadline: s.config.Deadline, Size: nativepty.Size{Rows: 40, Columns: 140}})
 	if err != nil {
+		login.stop()
 		r.Error = err.Error()
 		return r
 	}
@@ -304,9 +323,7 @@ func (s *server) activate() response {
 	go func() {
 		<-n.Done()
 		exit, waitErr := n.Wait(context.Background())
-		if err := saveSignIn(s.config); err != nil {
-			fmt.Fprintln(os.Stderr, "native-session: the harness's refreshed sign-in wasn't saved:", err)
-		}
+		login.stop()
 		s.mu.Lock()
 		quiescing := s.state == harness.NativeStopping
 		if !quiescing {
@@ -448,6 +465,11 @@ func (s *server) quiesce() response {
 		return response{Op: harness.NativeQuiesce, State: harness.NativeStopping, Error: err.Error()}
 	}
 	exit, err := adapter.finish(n, ctx)
+	s.mu.Lock()
+	login := s.login
+	s.mu.Unlock()
+	// Save the harness's last sign-in change before the supervisor exits.
+	login.stop()
 	if err != nil {
 		s.stop()
 		return response{Op: harness.NativeQuiesce, State: harness.NativeStopping, Error: err.Error()}
@@ -465,6 +487,12 @@ func (s *server) waitingFor() string {
 	s.mu.Lock()
 	kind := s.config.Harness
 	s.mu.Unlock()
+	if kind == harness.NativeCopilot {
+		if _, _, err := s.observeCopilotTurn(); errors.Is(err, os.ErrNotExist) {
+			return "Copilot to start its first turn"
+		}
+		return "the current Copilot turn to complete"
+	}
 	if kind != harness.NativeClaude {
 		if !codexJournalExists(nativeHome) {
 			return "Codex to start its first turn"
@@ -544,6 +572,10 @@ func (s *server) stopTurnless(ctx context.Context, n *nativepty.Supervisor) resp
 		s.stop()
 		return response{Op: harness.NativeQuiesce, State: harness.NativeStopping, Error: err.Error()}
 	}
+	s.mu.Lock()
+	login := s.login
+	s.mu.Unlock()
+	login.stop()
 	s.mu.Lock()
 	s.state, s.exitCode = harness.NativeStopped, 0
 	s.mu.Unlock()

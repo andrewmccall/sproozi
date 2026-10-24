@@ -134,6 +134,16 @@ func TestControllerWritesSandboxObjectsOnlyInAgentsNamespace(t *testing.T) {
 			t.Errorf("sandbox writer Role cannot create and delete %s", want.name)
 		}
 	}
+	// Named logins' claims are created on first use and never deleted.
+	claims := apiResource{"", "persistentvolumeclaims"}
+	if !grants(sandbox, claims.group, claims.name, verbCreate) || grants(sandbox, claims.group, claims.name, verbDelete) {
+		t.Error("sandbox writer Role must create, and never delete, login claims")
+	}
+	for _, verb := range []string{verbCreate, verbUpdate, verbPatch, verbDelete} {
+		if grants(cluster, claims.group, claims.name, verb) {
+			t.Errorf("controller ClusterRole grants %s on claims in every namespace", verb)
+		}
+	}
 	// Existing run NetworkPolicies are reconciled in place.
 	if !grants(sandbox, networkPolicies.group, networkPolicies.name, verbUpdate) {
 		t.Error("sandbox writer Role cannot update an existing run NetworkPolicy")

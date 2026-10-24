@@ -50,6 +50,8 @@ kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.30.4/
 kubectl rollout status -n kube-system daemonset/calico-node --timeout=300s
 ```
 
+The Calico manifest comes from Calico's own repository, not the release.
+
 Kind selects the new cluster for kubectl. On any cluster, check that
 kubectl points at the one you mean before installing:
 
@@ -60,7 +62,8 @@ kubectl get nodes
 
 ## Install
 
-Before applying, read `sproozi-release/install/install.yaml`. It creates the
+The list below summarises what `sproozi-release/install/install.yaml`
+creates; read the file itself if you need to audit it. It creates the
 namespaces `sproozi-system` and `sproozi-agents`; the
 controller and gateway Deployments in `sproozi-system`; and these cluster-wide permissions:
 
@@ -90,7 +93,7 @@ kubectl rollout status -n sproozi-system deployment/sproozi-controller-manager -
 
 The `quickstart-self-managed-ca` overlay applies `install/install.yaml` plus a
 small certificate controller that creates the gateway's private CA. The gateway
-may restart a few times while it waits for its first certificate. Apply the
+usually restarts once or twice while it waits for its first certificate. Apply the
 CRDs first, as above: if you apply the overlay before them, the controller and
 gateway restart until the CRDs exist. The gateway allows only Kubernetes reads (`kubernetes.read`) until
 you enable more.
@@ -103,7 +106,7 @@ for what to create first.
 ## Run the first check
 
 The first check starts a sandbox Pod that lists Sproozi's Pods through the
-gateway, tries two things its policy forbids, then waits 60 seconds so you can
+gateway, tries three things its policy forbids, then waits 60 seconds so you can
 inspect it.
 
 ```sh
@@ -120,8 +123,13 @@ The log lists Sproozi's Pods, then prints:
 PERMITTED: Pod read succeeded
 DENIED: Secret read is outside the policy
 DENIED: direct API server path is blocked
+DENIED: direct internet path is blocked
 First check passed. Keeping this Pod for inspection for 60 seconds
 ```
+
+The two network lines count a refused or timed-out connection as blocked. On a
+cluster with no internet access at all, the internet line passes without
+proving the policy works.
 
 The run then becomes `Succeeded`, and shortly after Sproozi removes its Pod,
 identity and NetworkPolicy:
@@ -133,7 +141,9 @@ kubectl get sa,pods,networkpolicy -n sproozi-agents
 ```
 
 The last command may list the run's ServiceAccount for up to half a minute;
-run it again to see it gone.
+run it again to see it gone. The `default` ServiceAccount and the
+`sproozi-sandbox-default-deny` NetworkPolicy stay: they belong to the
+namespace, not the run.
 
 To run it again, delete the finished run first:
 `kubectl delete agentrun first-check -n sproozi-system`.
@@ -168,7 +178,8 @@ To run it again, delete the finished run first:
 | The run stays `Queued` | Read its `Ready` condition. `WaitingForConcurrencyCap` means a concurrency cap is full. |
 | The run is `Failed` before a Pod appears | Run `kubectl describe agentrun first-check -n sproozi-system` and read the controller log: `kubectl logs -n sproozi-system deployment/sproozi-controller-manager`. |
 | `AlreadyExists` when you create the run | Delete the earlier run first. |
-| `UNEXPECTED: direct API server path was reachable` | The network plugin doesn't enforce NetworkPolicy from Pod start. Use Calico or Cilium; see [security hardening](../reference/security-hardening.md). |
+| The run is `Failed` with `TemplateNotFound` | The run was created before `first-check/resources.yaml`. Apply that file, then delete the run and create it again. |
+| `UNEXPECTED: direct API server path was reachable` or `direct internet path was reachable` | The network plugin doesn't enforce NetworkPolicy from Pod start. Use Calico or Cilium; see [security hardening](../reference/security-hardening.md). |
 
 ## Upgrade
 

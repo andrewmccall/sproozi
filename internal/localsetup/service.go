@@ -161,10 +161,18 @@ func readPID(l Layout) int {
 	return pid
 }
 
+// logTail is the service log's last line that isn't a JSON audit record,
+// which is where a startup failure names its cause, or else the log's end.
 func logTail(l Layout) string {
 	data, err := os.ReadFile(l.ServiceLog())
 	if err != nil {
 		return ""
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	for i := len(lines) - 1; i >= 0 && i >= len(lines)-200; i-- {
+		if line := strings.TrimSpace(lines[i]); line != "" && !strings.HasPrefix(line, "{") {
+			return line
+		}
 	}
 	if len(data) > 1024 {
 		data = data[len(data)-1024:]
@@ -177,8 +185,9 @@ func logTail(l Layout) string {
 type SessionsActiveError struct{ Count int }
 
 func (e *SessionsActiveError) Error() string {
-	return fmt.Sprintf("%d session(s) are running, so the service keeps its previous settings until they stop; "+
-		"then run \"sproozi service stop\" and \"sproozi service start\"", e.Count)
+	return fmt.Sprintf("%d session(s) are running, so the service keeps its previous settings; to apply the new "+
+		"ones and keep the sessions running, run \"sproozi service stop --leave-running\" and \"sproozi service start\"",
+		e.Count)
 }
 
 // RestartIdle restarts the home daemon so it reads changed configuration or

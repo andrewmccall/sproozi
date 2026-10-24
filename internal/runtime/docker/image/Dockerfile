@@ -27,7 +27,7 @@ USER 0:0
 RUN apt-get update && apt-get install -y --no-install-recommends iptables && \
     rm -rf /var/lib/apt/lists/* && \
     codex --version && \
-    claude --version && git --version && \
+    claude --version && copilot --version && git --version && \
     mkdir -p /workspace /home/agent && chown 1000:1000 /workspace /home/agent
 COPY --from=builder /native-session /usr/local/bin/native-session
 COPY --from=builder /checkpoint /usr/local/bin/checkpoint

@@ -92,7 +92,7 @@ func stoppedProblem(r localSession) error {
 			"see \"sproozi status %s\", then \"sproozi resume %s\" to continue it or \"sproozi rm %s\" to remove it",
 			r.ID, exit.Code, r.ID, r.ID, r.ID))
 	}
-	return rejectedError(fmt.Sprintf("home: session %s is stopped; \"sproozi resume %s\" continues it", r.ID, r.ID))
+	return rejectedError(fmt.Sprintf("home: session %s is retained (stopped, with its work kept); \"sproozi resume %s\" continues it", r.ID, r.ID))
 }
 
 // notStoppedProblem explains why a session whose current execution has not

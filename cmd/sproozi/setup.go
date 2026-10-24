@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"slices"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -33,7 +34,8 @@ func (q *options) initLocal(ctx context.Context) error {
 		Image:       localsetup.ImageRequest{Reference: q.image, BuildSource: q.build},
 		ProviderURL: q.providerURL, ProviderCAFile: q.providerCA, CheckCredential: !q.skipCheck,
 		Port: q.port, StartService: !q.noService, Executable: executable, Timeout: q.timeout, Progress: os.Stderr,
-		Credential: q.credentialInput(), SignIn: q.signIn, Token: q.token, ChatGPT: q.chatgpt, OpenBrowser: openBrowser}
+		Credential: q.credentialInput(),
+		SignIn:     q.signIn, Login: q.login, Token: q.token, ChatGPT: q.chatgpt, OpenBrowser: openBrowser}
 	if q.instructionsFile != "" {
 		data, err := os.ReadFile(q.instructionsFile)
 		if err != nil || len(data) == 0 || len(data) > 16<<10 {
@@ -61,8 +63,12 @@ func (q *options) initLocal(ctx context.Context) error {
 		_, err = fmt.Fprintf(q.out, "Saved the configuration in %s. Start the service with: sproozi service start\n",
 			result.Root)
 	default:
+		login := ""
+		if q.login != "" && q.login != harness.DefaultLogin {
+			login = " --login " + q.login
+		}
 		_, err = fmt.Fprintln(q.out, "Ready. In a Git repository, start an agent with:\n  sproozi run"+
-			harnessFlag(kind, result.Harnesses))
+			harnessFlag(kind, result.Harnesses)+login)
 	}
 	return err
 }
@@ -257,16 +263,27 @@ func (r doctorReport) text(w io.Writer) {
 	}
 }
 
-// providers maps each agent and provider name to the provider key it uses,
-// from the harness registry's model protocols.
-var providers = func() map[string]string {
-	out := map[string]string{providerOpenAI: providerOpenAI, providerAnthropic: providerAnthropic}
-	for _, kind := range harness.ManagedKinds() {
-		h, _ := harness.Managed(kind)
-		out[string(kind)] = string(h.Protocol)
+// credentialProviders are the providers whose credentials Sproozi can store.
+var credentialProviders = []string{providerOpenAI, providerAnthropic, localsetup.ProviderCopilot}
+
+// credentialProvider is the stored credential an agent or provider name
+// selects: an agent's follows how it signs in, such as Copilot's GitHub
+// token with --token.
+func credentialProvider(name string, inst localsetup.Installation) (string, bool) {
+	if slices.Contains(credentialProviders, name) {
+		return name, true
 	}
-	return out
-}()
+	kind := harness.NativeKind(name)
+	if kind.Validate() != nil {
+		return "", false
+	}
+	for _, h := range inst.Harnesses {
+		if h.Harness == kind {
+			return localsetup.ProviderFor(kind, h.Mechanism()).Name, true
+		}
+	}
+	return localsetup.ProviderFor(kind, harness.CredentialKey).Name, true
+}
 
 const (
 	providerOpenAI    = string(harness.ProtocolOpenAI)
@@ -314,10 +331,10 @@ func (q *options) credentialsCommand(ctx context.Context, l localsetup.Layout,
 	inst localsetup.Installation) (printer, error) {
 	if q.verb == verbList {
 		report := make(credentialReport, 0, 2)
-		for _, provider := range []string{providerOpenAI, providerAnthropic} {
+		for _, provider := range credentialProviders {
 			e := credentialEntry{Provider: provider, Stored: localsetup.HasCredential(l, provider)}
 			for _, h := range inst.Harnesses {
-				if localsetup.ProviderFor(h.Harness).Name == provider && h.Credential != "" {
+				if localsetup.ProviderFor(h.Harness, h.Mechanism()).Name == provider && h.Credential != "" {
 					e.Harnesses = append(e.Harnesses, string(h.Harness))
 				}
 			}
@@ -325,13 +342,14 @@ func (q *options) credentialsCommand(ctx context.Context, l localsetup.Layout,
 		}
 		return report, nil
 	}
-	provider, ok := providers[q.operand]
+	provider, ok := credentialProvider(q.operand, inst)
 	if !ok {
-		return nil, usagef("credentials set takes codex, claude-code, openai or anthropic")
+		names := append(harness.ManagedKindNames(), credentialProviders...)
+		return nil, usagef("credentials set takes %s", strings.Join(names, ", "))
 	}
 	var selected *localsetup.Harness
 	for i := range inst.Harnesses {
-		if localsetup.ProviderFor(inst.Harnesses[i].Harness).Name != provider {
+		if localsetup.ProviderFor(inst.Harnesses[i].Harness, inst.Harnesses[i].Mechanism()).Name != provider {
 			continue
 		}
 		if inst.Harnesses[i].Credential == "" {

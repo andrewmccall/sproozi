@@ -92,7 +92,7 @@ access at the destination. Before a move can start another agent, Sproozi must
 confirm that the source has stopped and record its finalized usage.
 
 Managed remote tasks currently use Codex. Controlled interactive moves support
-Codex and Claude Code. Support for a harness in ordinary
+Codex, Claude Code and Copilot. Support for a harness in ordinary
 Kubernetes runs does not imply support for session movement. See
 [harness support](../reference/harnesses.md) for the exact limits.
 
@@ -125,7 +125,7 @@ workflow you need.
 
 ## Choose a next step
 
-- [Local sessions](../guides/local-sessions.md) runs Codex or Claude Code in local Docker.
+- [Local sessions](../guides/local-sessions.md) runs Codex, Claude Code or Copilot in local Docker.
 - [Install on Kubernetes](../guides/install-kubernetes.md) installs a release and runs a provider-free first check.
 - [The investigation-to-PR demo](../guides/pr-demo.md) has Codex propose a fix as a pull request.
 - [Run a task remotely, then resume it locally](../guides/portable-workflows.md) starts a remote task that you can continue locally.

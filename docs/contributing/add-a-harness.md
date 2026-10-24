@@ -8,7 +8,9 @@ tiers; start with the first:
   immutable contract. Every harness is one.
 - **Managed harness**: also a native kind for `sproozi run`, `stop`, `resume`
   and `move`. Sproozi supervises its terminal, observes completed turns and
-  checkpoints its native conversation. Codex and Claude Code are the only ones.
+  checkpoints its native conversation. Codex, Claude Code and Copilot are
+  managed; Copilot ([ADR 0048](../adr/0048-github-copilot-cli-is-a-managed-harness.md))
+  is the most recent example to follow.
 
 The current selectors are listed in the
 [harness reference](../reference/harnesses.md#harness-selectors).
@@ -36,14 +38,32 @@ support upstream, or ship an MCP bridge as one of its launch files
 Each registry entry declares which in `Loader`: `NativeMCP` when the stock
 client reads its MCP file, or `Bridge` naming the launch file that does.
 
+For example, pi has had its own MCP client since 0.99.0. With 1.4.0,
+`pi mcp list --json` connected this file, read from
+`$PI_CODING_AGENT_DIR/mcp.json`, and listed the server's tools:
+
+```json
+{"mcpServers": {"gitmcp": {"type": "http", "url": "https://gitmcp.io/andrewmccall/sproozi", "exposure": "direct"}}}
+```
+
+Without `"exposure": "direct"`, pi offers MCP tools only through its
+`codemode` tool, so the model may never call `diagnose`. `pi --print` exited 1
+when it couldn't reach its provider; whether it does after a call the gateway
+refuses mid-turn is untested.
+
 ## AgentRun harness
 
-0. Write the ADR first. Adding a harness is architecturally significant
+0. Draft the ADR first, with status `proposed`, and fill in its evidence
+   before review; a reviewer accepts it. Name it
+   `docs/adr/NNNN-short-title.md` with the next free number, copy the headings
+   of a recent ADR such as 0048, and add a row to the index.
+   Adding a harness is architecturally significant
    (AGENTS.md): record the decision, the MCP route, alternatives and limits
    in a new ADR, using the format and next number in
    [`docs/adr/README.md`](../adr/README.md). Name the exact client package and
    version you pinned and tested; packages move (pi's moved to
-   `@earendil-works/pi-coding-agent`).
+   `@earendil-works/pi-coding-agent`). Check the current release for an MCP
+   client before you write a bridge: pi gained one in 0.99.0.
 1. Add a `Harness` entry to the registry in
    [`internal/harness/registry.go`](../../internal/harness/registry.go): the
    selector, its MCP file, field and the function that renders each
@@ -65,6 +85,8 @@ client reads its MCP file, or `Bridge` naming the launch file that does.
    hook below; one whose client loads MCP itself is checked only by the
    verifiers in step 6.
 4. Add the client's pinned install under [`hack/clients`](../../hack/clients/README.md).
+   This step and step 6 install the real client, so they need access to its
+   package registry, such as npm.
    Two Dockerfiles install clients: `internal/runtime/docker/image/clients.Dockerfile`
    builds the released native image for managed sessions, so only a managed
    harness belongs there; `hack/verify/orchestration-kind/clients.Dockerfile`
@@ -75,8 +97,8 @@ client reads its MCP file, or `Bridge` naming the launch file that does.
    It must be a valid AgentRuntime (the guard decodes it strictly) that sets
    `spec.clientConfig.harness` and the trust bundle ConfigMap, and its
    container must: build the proxy from the gateway token
-   (`HTTPS_PROXY` and friends); give the client a placeholder provider key,
-   never a real one; read the MCP file, bridge or launch file from
+   (`HTTPS_PROXY` and friends); give the client a placeholder provider key
+   such as `sproozi-local-placeholder`, never a real one; read the MCP file, bridge or launch file from
    `/etc/sproozi/contract/`; pass the Sproozi instructions and access skill;
    for a Node client or bridge, set `NODE_USE_ENV_PROXY=1`, which needs
    Node 22.21 or 24; and give a client that waits on an open standard input
@@ -85,7 +107,9 @@ client reads its MCP file, or `Bridge` naming the launch file that does.
    `hack/verify/harness-clients.py` (`make verify-harness-clients`) and
    `hack/verify/harness-process` (`make verify-harness-process`, including a
    `diagnose` call), and `hack/verify/orchestration-kind` if it runs delegated
-   work.
+   work. A client's list command may connect to each server and fail when one
+   is unreachable, as `pi mcp list` does; read its JSON output instead of its
+   exit status.
 7. Document the harness in the [harness reference](../reference/harnesses.md):
    add it to the selector table and describe its launch and completion. Add a
    glossary term only for a new concept. Add it to the harness lists in
@@ -107,7 +131,7 @@ described in [retained final answers](../reference/agent-contract.md#retained-fi
 
 ## What the guards check, and what they don't
 
-`go test ./internal/harness/ ./cmd/native-session/ ./internal/checkpoint/`
+`go test ./internal/harness/ ./cmd/native-session/ ./internal/checkpoint/ ./internal/runtime/kubernetes/`
 fails, naming the file to change, unless:
 
 - the registry, the `+kubebuilder:validation:Enum` marker and the generated
@@ -119,14 +143,17 @@ fails, naming the file to change, unless:
   `internal/harness/launchfiles`, which `.dockerignore` re-includes;
 - every bridge passes the bridge hook below, when its runtime is on `PATH`;
 - every harness has a stock runtime example that strictly decodes as an
-  AgentRuntime selecting it and whose container reads its MCP, bridge or
-  launch file from the contract, and a row in the reference's selector table
-  with the right Managed value;
+  AgentRuntime selecting it, sets the trust bundle ConfigMap, sets
+  `HTTPS_PROXY` and mentions its MCP, bridge or launch file under
+  `/etc/sproozi/contract/` (the guard can't tell whether the command really
+  reads it), and a row in the reference's selector table with the right
+  Managed value;
 - every managed kind has its own native directory and a protocol, is accepted
   by `nativeconfig`, and has a supervisor adapter and a checkpoint format.
 
-They don't prove that a stock client loads its MCP file or that a launch
-completes. Review those, and run the verifiers:
+They don't prove that a stock client loads its MCP file, that it shows the
+MCP tools to the model (pi, for example, hides them behind its `codemode`
+tool unless the file sets `exposure: direct`), or that a launch completes. Review those, and run the verifiers:
 `make verify-harness-clients` loads generated configuration in installed
 Codex, Claude Code, OpenCode and Copilot (not Hermes, and not bridges);
 `make verify-harness-process` runs Claude Code, OpenCode and Copilot through the
@@ -141,9 +168,11 @@ go run ./hack/verify/fake-mcp --harness NAME --dir /tmp/sproozi-mcp-check
 It writes `/tmp/sproozi-mcp-check/NAME-mcp.json` with a `github` and a
 `sproozi` connection on `127.0.0.1`, prints every request it receives, and runs
 until Ctrl-C. Start the real client with that file in place of the contract's,
-check that it lists `github__list_issues` and `sproozi__diagnose`, ask it to
-call `sproozi__diagnose`, and check that it refuses to start once you delete
-the `sproozi` entry. Record that evidence in the ADR. The same command checks
+check that it lists the `list_issues` and `diagnose` tools under its own
+naming (for example `github__list_issues`, or pi's `mcp__github__list_issues`)
+and ask it to call `diagnose`. For a bridge, also check that it refuses to
+start once you delete the `sproozi` entry; a client that loads MCP itself may
+skip a missing server, so record what it does instead. Record that evidence in the ADR. The same command checks
 a harness whose client loads MCP itself by hand; `hack/verify/mcp-config` renders the in-cluster
 gateway addresses instead, which only a sandbox can reach. Client lockfiles, Dockerfiles, verifier
 lists and documentation prose are reviewed by hand.

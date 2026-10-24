@@ -964,8 +964,9 @@ func TestBuildPodSpecDeliversTheHarnessSignIn(t *testing.T) {
 	if err := rt.Spec.ValidateRuntimeTemplate(); err == nil {
 		t.Fatal("a sign-in replaced a controller variable")
 	}
-	for _, invalid := range []sprooziv1alpha1.RuntimeSignIn{{}, {SecretName: signInSecret}, {SecretName: signInSecret, Key: "k", ClaimName: "login"},
-		{ClaimName: "login", Env: claudeTokenEnv}} {
+	claims := &sprooziv1alpha1.RuntimeLoginClaims{}
+	for _, invalid := range []sprooziv1alpha1.RuntimeSignIn{{}, {SecretName: signInSecret}, {SecretName: signInSecret, Key: "k", Claims: claims},
+		{Claims: claims, Env: claudeTokenEnv}} {
 		rt.Spec.ClientConfig.SignIn = &invalid
 		if err := rt.Spec.ValidateRuntimeTemplate(); err == nil {
 			t.Fatalf("invalid sign-in accepted: %+v", invalid)
@@ -973,11 +974,13 @@ func TestBuildPodSpecDeliversTheHarnessSignIn(t *testing.T) {
 	}
 }
 
-// A claim keeps a managed harness's login across sessions, so it is mounted
-// read-write and never set as an environment variable.
+// A claim keeps a harness's login across sessions, so it is mounted
+// read-write and never set as an environment variable. An AgentRun has no
+// session and signs in with the default login's claim (ADR 0049).
 func TestBuildPodSpecMountsASignInClaimReadWrite(t *testing.T) {
 	rt := testRuntime()
-	rt.Spec.ClientConfig.SignIn = &sprooziv1alpha1.RuntimeSignIn{ClaimName: "claude-login"}
+	rt.Spec.ClientConfig.Harness = "claude-code"
+	rt.Spec.ClientConfig.SignIn = &sprooziv1alpha1.RuntimeSignIn{Claims: &sprooziv1alpha1.RuntimeLoginClaims{}}
 	run := testRunForSandbox("cccccccc-0000-0000-0000-000000000302")
 	pod := kubernetes.BuildPodSpec(run, rt, kubernetes.RunName(run.UID))
 	c := pod.Spec.Containers[0]
@@ -985,12 +988,46 @@ func TestBuildPodSpecMountsASignInClaimReadWrite(t *testing.T) {
 		return m.Name == signInVolume && m.MountPath == sprooziv1alpha1.SignInDirectory && !m.ReadOnly
 	})
 	claim := slices.ContainsFunc(pod.Spec.Volumes, func(v corev1.Volume) bool {
-		return v.Name == signInVolume && v.PersistentVolumeClaim != nil && v.PersistentVolumeClaim.ClaimName == "claude-login"
+		return v.Name == signInVolume && v.PersistentVolumeClaim != nil &&
+			v.PersistentVolumeClaim.ClaimName == "sproozi-login-claude-code-default"
 	})
 	if !writable || !claim || slices.ContainsFunc(c.Env, func(e corev1.EnvVar) bool { return e.Name == "OPENAI_API_KEY" }) {
 		t.Fatalf("writable=%v claim=%v env=%v", writable, claim, c.Env)
 	}
 	if err := rt.Spec.ValidateRuntimeTemplate(); err != nil {
 		t.Fatal(err)
+	}
+	rt.Spec.ClientConfig.Harness = ""
+	if err := rt.Spec.ValidateRuntimeTemplate(); err == nil {
+		t.Fatal("claims without a harness to name them were accepted")
+	}
+}
+
+// The controller creates the login's claim on first use and uses an
+// existing one as it is: a later session signs in with what it stored.
+func TestEnsureSandboxCreatesTheLoginClaimOnce(t *testing.T) {
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(testTrustConfigMap(t)).Build()
+	rt := testRuntime()
+	rt.Spec.ClientConfig.Harness = "claude-code"
+	rt.Spec.ClientConfig.SignIn = &sprooziv1alpha1.RuntimeSignIn{Claims: &sprooziv1alpha1.RuntimeLoginClaims{
+		StorageClassName: "shared", AccessMode: corev1.ReadWriteMany}}
+	for _, uid := range []string{"cccccccc-0000-0000-0000-000000000303", "cccccccc-0000-0000-0000-000000000304"} {
+		if _, err := newSandboxClient(c).Ensure(context.Background(), testRunForSandbox(uid), rt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var claim corev1.PersistentVolumeClaim
+	key := client.ObjectKey{Namespace: kubernetes.AgentsNamespace, Name: "sproozi-login-claude-code-default"}
+	if err := c.Get(context.Background(), key, &claim); err != nil {
+		t.Fatal(err)
+	}
+	if claim.Spec.StorageClassName == nil || *claim.Spec.StorageClassName != "shared" ||
+		!slices.Equal(claim.Spec.AccessModes, []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany}) ||
+		claim.OwnerReferences != nil {
+		t.Fatalf("login claim %+v", claim)
+	}
+	if kubernetes.LoginClaim("copilot", "work") != "sproozi-login-copilot-work" ||
+		kubernetes.LoginClaim("copilot", "") != "sproozi-login-copilot-default" {
+		t.Fatal("login claim names")
 	}
 }

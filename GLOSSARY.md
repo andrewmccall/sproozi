@@ -87,6 +87,13 @@ The per-kind code a [managed harness](#managed-harness) needs outside the
 registry: its supervisor adapter, checkpoint format and native configuration
 check. Guard tests require each one.
 
+### Deterministic provider
+
+A test model provider that returns scripted replies instead of running a
+model, so a test of a real client through the gateway gives the same result
+every time. Evidence recorded with one shows Sproozi's behaviour, not a real
+model's. Also seen as: fixture provider, stand-in provider.
+
 ### Envtest
 
 The controller-runtime test environment that runs a real Kubernetes API server
@@ -120,11 +127,27 @@ sign-in that the gateway attaches itself. See
 [ADR 0047](docs/adr/0047-harnesses-sign-in-to-their-own-model-providers.md).
 Also seen as: harness-held credential, own sign-in, workload credential.
 
+### Login store
+
+Where a harness's own sign-in lives, outside every session: a Docker volume on
+your machine, or a PersistentVolumeClaim on Kubernetes. Each
+[named login](#named-login) has one. The supervisor keeps it and the harness's
+login file the same while the harness runs, so every session of the login
+shares it. It never enters a checkpoint. See
+[how credentials reach an agent](docs/explanations/credentials.md).
+
+### Named login
+
+One of a harness's own sign-ins, such as `work`, chosen with `--login`;
+`default` when none is chosen. Each has its own [login store](#login-store),
+and logins of different harnesses are separate. A session keeps its login when
+it resumes or moves.
+
 ### Login volume
 
-The persistent Docker volume, one per local installation and placement, whose
-single file holds a harness's own sign-in. Only that harness's agent containers
-mount it, and it never enters a checkpoint.
+The local [login store](#login-store): a persistent Docker volume for one
+installation, harness and [named login](#named-login). Only that harness's
+agent containers mount it.
 
 ### Sign-in relay
 

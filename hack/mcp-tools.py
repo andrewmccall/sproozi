@@ -133,12 +133,27 @@ def check_policy(tools, scope):
         for argument in sorted(named - known):
             problems.append("tool %r has no argument %r; its arguments are %s" %
                             (name, argument, ", ".join(sorted(known)) or "none"))
+        server_properties = offered[name].get("properties") or {}
+        for argument, rule in sorted((arguments.get("properties") or {}).items()):
+            want, have = (rule or {}).get("type"), (server_properties.get(argument) or {}).get("type")
+            if want and have and want != have:
+                problems.append("tool %r argument %r is %s on the server, but the policy says %s" %
+                                (name, argument, have, want))
         if arguments.get("additionalProperties") is False:
             allowed = set(arguments.get("properties") or {})
             for argument in sorted(set(offered[name].get("required") or []) - allowed):
                 problems.append("tool %r requires argument %r, which the policy's additionalProperties: false "
                                 "forbids, so every call would fail" % (name, argument))
     return problems
+
+
+def url_warnings(tools, scope):
+    """Name approved tools that take a URL argument: if such a tool fetches it,
+    the provider reaches a destination the gateway never checks."""
+    offered = {tool["name"]: tool.get("inputSchema") or {} for tool in tools}
+    return ["tool %r takes a %r argument; approve it only if it can't fetch an arbitrary URL" % (name, argument)
+            for name in sorted(scope) if name in offered
+            for argument in sorted(offered[name].get("properties") or {}) if argument.lower() in ("url", "uri")]
 
 
 def main():
@@ -170,6 +185,8 @@ def main():
             print("mcp-tools: %s: %s" % (name, problem), file=sys.stderr)
         if problems:
             sys.exit(1)
+        for warning in url_warnings(tools, scope):
+            print("mcp-tools: %s: warning: %s" % (name, warning), file=sys.stderr)
         print("The policy's %d %s tools match the server's tools and arguments." % (len(scope), name))
         return
     if args.json:

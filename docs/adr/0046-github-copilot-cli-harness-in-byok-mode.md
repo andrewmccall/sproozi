@@ -1,6 +1,7 @@
 # 0046: GitHub Copilot CLI is an AgentRun harness in bring-your-own-key mode
 
-Status: accepted
+Status: accepted; partly superseded by [ADR 0048](0048-github-copilot-cli-is-a-managed-harness.md),
+which makes Copilot a managed harness in the released image
 Date: 2026-10-22
 
 ## Problem and constraints

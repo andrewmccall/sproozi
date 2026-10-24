@@ -91,7 +91,9 @@ func addNativeRoutes(owner *Owner, config GatewayConfig, dispatch gateway.Dispat
 		githubConfig.AuditLogger = config.AuditLogger
 		githubHandler := &githubgateway.Handler{Config: githubConfig}
 		for _, host := range []string{githubgateway.GitAuthority, githubgateway.APIAuthority} {
-			dispatch[host] = gateway.Route{Capability: string(api.CapabilityGitHubPullRequest), Tier: audit.TierSemantic, Handler: githubHandler, Budgets: tracker, AuditLogger: config.AuditLogger}
+			// Keep a provider's path routes on the host, such as Copilot's.
+			dispatch[host] = gateway.Route{Capability: string(api.CapabilityGitHubPullRequest), Tier: audit.TierSemantic, Handler: githubHandler, Budgets: tracker, AuditLogger: config.AuditLogger,
+				Paths: dispatch[host].Paths}
 		}
 	}
 	if config.Kubernetes != nil {
@@ -110,24 +112,30 @@ func addNativeRoutes(owner *Owner, config GatewayConfig, dispatch gateway.Dispat
 	return nil
 }
 
-// modelRoutes serves the harness's provider (ADR 0047). With a gateway-held
-// credential only the provider's API authority is served. When the harness
-// signs in itself, every model authority forwards its credential and the
-// provider's sign-in relay serves its sign-in and refresh.
+// modelRoutes serves the harness's provider (ADR 0047): the one its
+// mechanism reaches, such as OpenAI for Copilot with a key and GitHub's
+// Copilot service when it signs in. With a gateway-held key only the
+// provider's API authority is served. A gateway-held token also serves a
+// provider with no API authority, such as Copilot. When the harness signs in
+// itself, every model authority forwards its credential and the provider's
+// sign-in relay serves its sign-in and refresh. A provider's account requests
+// on a host another capability owns are path routes there.
 func modelRoutes(config GatewayConfig, modelConfig modelgateway.HandlerConfig, tracker *budget.Tracker) (gateway.Dispatcher, error) {
 	h, _ := harness.Managed(config.Harness)
-	provider, ok := modelgateway.ProviderFor(string(h.Protocol))
+	mode := modelConfig.ProviderAuth.Mode()
+	workload := mode == modelauth.WorkloadMode
+	provider, ok := modelgateway.ProviderFor(h.Provider(workload || mode == modelauth.TokenMode))
 	if !ok {
 		return nil, errors.New("docker gateway: unknown model provider")
 	}
-	workload := modelConfig.ProviderAuth.Mode() == modelauth.WorkloadMode
 	route := func(handler http.Handler, forwards bool) gateway.Route {
 		return gateway.Route{Capability: string(api.CapabilityModelInference), Tier: audit.TierSemantic, Handler: handler,
 			Budgets: tracker, AuditLogger: config.AuditLogger, ProviderCredential: forwards}
 	}
+	apiRoute := !provider.Models[0].SignedIn
 	dispatch := gateway.Dispatcher{}
 	for _, m := range provider.Models {
-		if m.SignedIn && !workload {
+		if m.SignedIn && !workload && apiRoute {
 			continue
 		}
 		c := modelConfig
@@ -137,6 +145,10 @@ func modelRoutes(config GatewayConfig, modelConfig modelgateway.HandlerConfig, t
 			c.UpstreamURL = m.UpstreamURL
 		}
 		dispatch[m.Authority] = route(m.New(c), workload)
+	}
+	if provider.AccountAuthority != "" && (workload || !apiRoute) {
+		addPath(dispatch, provider.AccountAuthority, provider.AccountPrefix,
+			route(provider.AccountRelay(modelConfig.ProviderAuth, modelConfig.HTTPClient, config.AuditLogger), workload))
 	}
 	if !workload {
 		if config.SignIn != nil {
@@ -148,6 +160,18 @@ func modelRoutes(config GatewayConfig, modelConfig modelgateway.HandlerConfig, t
 	if relay == nil {
 		relay = provider.SignInRelay(modelConfig.HTTPClient, config.AuditLogger)
 	}
-	dispatch[provider.SignInAuthority] = route(relay, false)
+	if provider.SignInPrefix != "" {
+		addPath(dispatch, provider.SignInAuthority, provider.SignInPrefix, route(relay, false))
+	} else {
+		dispatch[provider.SignInAuthority] = route(relay, false)
+	}
 	return dispatch, nil
+}
+
+// addPath serves prefix on authority with r, beside the authority's own
+// route, which another capability may add later.
+func addPath(dispatch gateway.Dispatcher, authority, prefix string, r gateway.Route) {
+	owner := dispatch[authority]
+	owner.Paths = append(owner.Paths, gateway.PathRoute{Prefix: prefix, Route: r})
+	dispatch[authority] = owner
 }

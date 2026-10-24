@@ -150,7 +150,8 @@ def verify(args):
                      and cluster.json("get", "agentrun", "-n", SYSTEM, "first-check")["status"]["phase"], timeout=240)
         report["steps"]["firstCheck"] = {"phase": phase, "permitted": "PERMITTED: Pod read succeeded" in logs["first-check"],
                                          "deniedRead": "DENIED: Secret read" in logs["first-check"],
-                                         "deniedDirect": "DENIED: direct API server path" in logs["first-check"]}
+                                         "deniedDirect": "DENIED: direct API server path" in logs["first-check"],
+                                         "deniedInternet": "DENIED: direct internet path" in logs["first-check"]}
         wait("first-check cleanup", lambda: not cluster.json("get", "pods", "-n", AGENTS)["items"], timeout=180)
         report["steps"]["firstCheck"]["podsRemoved"] = True
 
@@ -211,7 +212,7 @@ def verify(args):
         report["passed"] = all([
             steps["bootstrap"]["servingSecretPopulated"], steps["bootstrap"]["trustImmutable"], not steps["bootstrap"]["trustHasPrivateKey"],
             steps["reapplyKeepsCertificates"], steps["firstCheck"]["phase"] == "Succeeded", steps["firstCheck"]["permitted"],
-            steps["firstCheck"]["deniedRead"], steps["firstCheck"]["deniedDirect"], all(steps["renewal"].values()),
+            steps["firstCheck"]["deniedRead"], steps["firstCheck"]["deniedDirect"], steps["firstCheck"]["deniedInternet"], all(steps["renewal"].values()),
             all(v for k, v in steps["rotation"].items() if k != "stage"), steps["rotation"]["stage"] == "none",
             lp["updateOwnSecret"], not any(v for k, v in lp.items() if k != "updateOwnSecret")])
         report["logs"] = logs

@@ -33,6 +33,9 @@ type Provider struct {
 	// refresh when it signs in itself.
 	SignInAuthority string
 	SignInRoutes    []RelayRoute
+	// SignInPrefix makes the sign-in relay a path route, for a sign-in host
+	// another capability owns, such as Copilot's on github.com.
+	SignInPrefix string
 	// TokenHeaders are set with a gateway-held sign-in token, such as the beta
 	// header Anthropic requires for an OAuth token.
 	TokenHeaders map[string]string
@@ -81,6 +84,13 @@ var providers = map[string]Provider{
 				New: NewCopilotHandler},
 			{Authority: CopilotEnterpriseAuthority, UpstreamURL: "https://api.enterprise.githubcopilot.com", SignedIn: true,
 				New: NewCopilotHandler},
+		},
+		// Copilot's /login runs GitHub's device flow on github.com, which
+		// the GitHub capability otherwise serves for Git.
+		SignInAuthority: "github.com:443", SignInPrefix: "/login/",
+		SignInRoutes: []RelayRoute{
+			{Method: http.MethodPost, Path: "/login/device/code"},
+			{Method: http.MethodPost, Path: "/login/oauth/access_token"},
 		},
 		AccountAuthority: "api.github.com:443", AccountPrefix: "/copilot_internal/",
 		AccountRoutes: []RelayRoute{

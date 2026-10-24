@@ -600,7 +600,8 @@ func modelHandlers(cfg *startupConfig, auditLogger audit.Writer, modelClient *ht
 			signedIn[m.Authority] = signedInRoute{handler: m.New(config(m.UpstreamURL, auth)), forwards: forwards}
 		}
 		if forwards && provider.SignInAuthority != "" {
-			signedIn[provider.SignInAuthority] = signedInRoute{handler: provider.SignInRelay(modelClient, auditLogger)}
+			signedIn[provider.SignInAuthority] = signedInRoute{handler: provider.SignInRelay(modelClient, auditLogger),
+				prefix: provider.SignInPrefix}
 		}
 		if provider.AccountAuthority != "" {
 			signedIn[provider.AccountAuthority] = signedInRoute{handler: provider.AccountRelay(auth, modelClient, auditLogger),
@@ -659,7 +660,12 @@ func composeDispatcher(
 	// provider serves them.
 	for _, name := range modelProviders {
 		provider, _ := modelgateway.ProviderFor(name)
-		closed := []string{provider.SignInAuthority}
+		var closed []string
+		if provider.SignInPrefix == "" {
+			// A sign-in path route shares its host with another owner,
+			// such as Copilot's on github.com, which stays open.
+			closed = append(closed, provider.SignInAuthority)
+		}
 		for _, m := range provider.Models {
 			if m.SignedIn {
 				closed = append(closed, m.Authority)
