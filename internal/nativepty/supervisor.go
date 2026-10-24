@@ -24,7 +24,7 @@ import (
 )
 
 var (
-	ErrAttached  = errors.New("native terminal already has an input attachment")
+	ErrAttached  = errors.New("another terminal is attached to this session; detach it with Ctrl-] first")
 	ErrDetached  = errors.New("native terminal attachment was detached")
 	ErrGated     = errors.New("native terminal input is gated")
 	ErrExited    = errors.New("native terminal process exited")

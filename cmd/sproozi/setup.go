@@ -63,8 +63,12 @@ func (q *options) initLocal(ctx context.Context) error {
 		_, err = fmt.Fprintf(q.out, "Saved the configuration in %s. Start the service with: sproozi service start\n",
 			result.Root)
 	default:
+		login := ""
+		if q.login != "" && q.login != harness.DefaultLogin {
+			login = " --login " + q.login
+		}
 		_, err = fmt.Fprintln(q.out, "Ready. In a Git repository, start an agent with:\n  sproozi run"+
-			harnessFlag(kind, result.Harnesses))
+			harnessFlag(kind, result.Harnesses)+login)
 	}
 	return err
 }

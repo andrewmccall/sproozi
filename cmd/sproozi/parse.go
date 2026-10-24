@@ -43,6 +43,7 @@ type options struct {
 	root, configPath   string
 	socket             string
 	socketGiven        bool
+	loginGiven         bool
 	harness, model     string
 	image, build       string
 	providerURL        string
@@ -119,7 +120,10 @@ func parse(args []string) (options, error) {
 		return ""
 	}
 	boolean := func(name string) bool { return bools[name] != nil && *bools[name] }
-	fs.Visit(func(f *flag.Flag) { q.socketGiven = q.socketGiven || f.Name == "socket" })
+	fs.Visit(func(f *flag.Flag) {
+		q.socketGiven = q.socketGiven || f.Name == "socket"
+		q.loginGiven = q.loginGiven || f.Name == "login"
+	})
 	q.root, q.configPath, q.socket = str("root"), str("config"), str("socket")
 	q.harness, q.model, q.image, q.build = str("harness"), str("model"), str("image"), str("build")
 	q.providerURL, q.providerCA, q.credentialFile = str("provider-url"), str("provider-ca-file"), str("credential-file")
@@ -241,7 +245,7 @@ func (q *options) validate(str func(string) string) error {
 			return usagef("--harness must be %s", harness.ManagedKindList())
 		}
 	}
-	if q.login != "" {
+	if q.loginGiven {
 		if err := harness.ValidateLogin(q.login); err != nil {
 			return usagef("--login: %v", err)
 		}

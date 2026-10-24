@@ -65,6 +65,9 @@ type Placement struct {
 	authority Authority
 }
 
+// placementConfigFile holds the settings a placement's records were prepared under.
+const placementConfigFile = "config.json"
+
 func OpenPlacement(dir string, engine *Engine, cfg PlacementConfig, authority Authority) (*Placement, error) {
 	if engine == nil || authority == nil {
 		return nil, errors.New("docker placement requires engine and trusted authority")
@@ -93,9 +96,9 @@ func OpenPlacement(dir string, engine *Engine, cfg PlacementConfig, authority Au
 		return nil, err
 	}
 	p := &Placement{dir: dir, lock: lock, engine: engine, config: cfg, authority: authority, digest: fmt.Sprintf("%x", sha256.Sum256(encoded))}
-	existing, err := p.read("config.json", maxRecordBytes)
+	existing, err := p.read(placementConfigFile, maxRecordBytes)
 	if os.IsNotExist(err) {
-		err = p.write("config.json", encoded)
+		err = p.write(placementConfigFile, encoded)
 	} else if err == nil && !bytes.Equal(existing, encoded) {
 		err = p.reconfigure(existing, encoded)
 	}
@@ -106,9 +109,10 @@ func OpenPlacement(dir string, engine *Engine, cfg PlacementConfig, authority Au
 	return p, nil
 }
 
-// reconfigure accepts changed settings only while no execution record exists.
-// Every record carries the digest of the settings it was prepared under and is
-// never deleted, so changing them afterwards would strand those executions.
+// reconfigure accepts changed settings only while no live execution record
+// exists. Every record carries the digest of the settings it was prepared
+// under and is never deleted, so changing them would strand a live execution.
+// A removed one has no containers or workspace left to strand.
 func (p *Placement) reconfigure(existing, encoded []byte) error {
 	changed := changedSettings(existing, encoded)
 	entries, err := os.ReadDir(p.dir)
@@ -117,20 +121,27 @@ func (p *Placement) reconfigure(existing, encoded []byte) error {
 	}
 	records := 0
 	for _, entry := range entries {
-		if filepath.Ext(entry.Name()) == ".json" && entry.Name() != "config.json" {
+		if filepath.Ext(entry.Name()) != ".json" || entry.Name() == placementConfigFile {
+			continue
+		}
+		var peek struct {
+			Removed bool `json:"removed"`
+		}
+		data, err := p.read(entry.Name(), maxRecordBytes)
+		if err != nil || json.Unmarshal(data, &peek) != nil || !peek.Removed {
 			records++
 		}
 	}
 	if records == 0 {
-		return p.write("config.json", encoded)
+		return p.write(placementConfigFile, encoded)
 	}
 	noun := "execution records in %s were"
 	if records == 1 {
 		noun = "execution record in %s was"
 	}
 	return fmt.Errorf("local placement settings changed (%s), but %d "+noun+" prepared "+
-		"under the earlier values; set them back to keep those sessions, or use a new home directory for the "+
-		"new values", strings.Join(changed, ", "), records, p.dir)
+		"under the earlier values; set them back, or remove those sessions first (\"sproozi cancel\" a running "+
+		"one, then \"sproozi rm\")", strings.Join(changed, ", "), records, p.dir)
 }
 
 // changedSettings names, as local.* settings, the fields that differ between

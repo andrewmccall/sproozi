@@ -35,7 +35,8 @@ Its login file lives in a login store, not in the session:
 - On Kubernetes, each login is a PersistentVolumeClaim, which the controller
   creates the first time a session uses it.
 
-Every session of one login shares its store. The supervisor keeps the store
+Every session of one login shares its store. Sproozi's supervisor, the
+program that runs the agent inside its sandbox, keeps the store
 and the agent's own login file the same while the agent runs, so a sign-in,
 refresh or sign-out in one session reaches the others' login files within
 about a second. Whether a running agent rereads its file at once is up to the

@@ -184,6 +184,7 @@ func TestUsageErrorsExitTwoBeforeReadingAnything(t *testing.T) {
 		"choose --credential-file or --credential-stdin":            {"init", "--credential-file", "k", "--credential-stdin"},
 		"help takes one command name":                               {"help", "run", "stop"},
 		"attach does not accept --detach":                           {"attach", "abc", "--detach"},
+		"--login: login name \"\" must be":                          {"init", "--sign-in", "--login", ""},
 		"resume does not accept --model; put arguments for the age": {"resume", "abc", "--model", "x"},
 	} {
 		code, _, stderr := runCLI(args...)

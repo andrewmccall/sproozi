@@ -319,7 +319,7 @@ func (i *installer) prepareHarness(ctx context.Context) error {
 	if mechanism == harness.CredentialSignIn {
 		// The harness signs in in its first session; the gateway forwards
 		// that sign-in and stores no key (ADR 0047).
-		if i.selected.Credential != "" {
+		if _, err := os.Stat(i.selected.Credential); i.selected.Credential != "" && err == nil {
 			i.step("%s now signs in to %s itself; the stored key is no longer used", o.Harness, provider.Name)
 		}
 		i.selected.Credential, i.selected.Kind = "", ""

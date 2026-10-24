@@ -203,7 +203,8 @@ var flagSpecs = map[string]flagSpec{
 	"sign-in":               {help: "let the agent sign in to its own provider account instead of storing a key"},
 	"login": {value: "NAME",
 		help: "named login of an agent that signs in itself, for several accounts (default: default)"},
-	"token":             {help: "the stored credential is a sign-in token, such as from setup-token, not an API key"},
+	"token": {
+		help: "the stored credential is a sign-in token, such as the one claude setup-token prints, not an API key"},
 	"chatgpt":           {help: "sign the gateway in to your ChatGPT plan in the browser, for an OpenAI agent"},
 	"provider-url":      {value: "URL", help: "address of a private provider endpoint (default: the public one)"},
 	"provider-ca-file":  {value: "FILE", help: "PEM CA bundle for a private provider endpoint"},

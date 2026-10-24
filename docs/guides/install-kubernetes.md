@@ -127,6 +127,10 @@ DENIED: direct internet path is blocked
 First check passed. Keeping this Pod for inspection for 60 seconds
 ```
 
+The two network lines count a refused or timed-out connection as blocked. On a
+cluster with no internet access at all, the internet line passes without
+proving the policy works.
+
 The run then becomes `Succeeded`, and shortly after Sproozi removes its Pod,
 identity and NetworkPolicy:
 

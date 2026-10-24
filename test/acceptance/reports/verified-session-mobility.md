@@ -18,6 +18,17 @@ since moved on to Codex 0.163.0 and Claude Code 2.1.302. These round trips have
 not been repeated with those versions, so this report doesn't show that
 movement works with the current pins.
 
+These runs predate [ADR 0040](../../../docs/adr/0040-sandboxes-reach-the-gateway-without-dns.md):
+sandboxes then had cluster DNS, and the cluster used `10.244.0.0/16` pools
+rather than the release's Kind configuration. They don't show today's DNS
+behaviour.
+
+On 24 October 2026, stock Copilot 1.0.102 made a Docker → Kind → Docker → Kind
+round trip with a bash tool call and deterministic providers; its
+[evidence](session-mobility-copilot-evidence.json) records each checkpoint
+and the accounting. It ran from a working tree whose exact commit wasn't
+recorded, and its containment checks need separate evidence.
+
 | Observable behavior | Codex | Claude Code |
 | --- | --- | --- |
 | Genuine native terminal and same UUID after both-direction moves | Passed, five completed turns | Passed, three completed turns |

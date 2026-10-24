@@ -672,10 +672,35 @@ func TestPlacementSettingsChangeOnlyWithoutExecutionRecords(t *testing.T) {
 	_, err = OpenPlacement(dir, &Engine{execute: f.run}, changed, a)
 	resolved, _ := filepath.EvalSymlinks(dir)
 	want := "local placement settings changed (local.gatewayPort 8844 -> 8845), but 1 execution record in " +
-		resolved + " was prepared under the earlier values; set them back to keep those sessions, or use a new " +
-		"home directory for the new values"
+		resolved + " was prepared under the earlier values; set them back, or remove those sessions first " +
+		"(\"sproozi cancel\" a running one, then \"sproozi rm\")"
 	if err == nil || err.Error() != want {
 		t.Fatalf("got %v, want %q", err, want)
+	}
+	// A removed record no longer blocks a settings change.
+	records, _ := filepath.Glob(filepath.Join(resolved, "*.json"))
+	for _, record := range records {
+		if filepath.Base(record) == placementConfigFile {
+			continue
+		}
+		var fields map[string]any
+		raw, err := os.ReadFile(record)
+		if err != nil || json.Unmarshal(raw, &fields) != nil {
+			t.Fatalf("read record %s: %v", record, err)
+		}
+		fields["removed"] = true
+		if raw, err = json.Marshal(fields); err != nil {
+			t.Fatal(err)
+		}
+		if err = testutil.WriteFile(record, raw, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if p, err = OpenPlacement(dir, &Engine{execute: f.run}, changed, a); err != nil {
+		t.Fatalf("removed record still blocks: %v", err)
+	}
+	if err = p.Close(); err != nil {
+		t.Fatal(err)
 	}
 	var nilPlacement *Placement
 	if err = nilPlacement.Close(); err != nil {

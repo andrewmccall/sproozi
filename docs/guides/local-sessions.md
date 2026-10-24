@@ -90,7 +90,9 @@ sproozi rm 3f2b       # delete a stopped session and its saved work
 
 `cancel` stops a session at once, discarding the agent's current turn. The
 background service only needs to run while you use sessions. These commands
-start it if it is stopped; `ls` does not, and says how to start it.
+start it if it is stopped; `ls` does not, and says how to start it. In `ls`,
+`PLACEMENT` is where a session runs: `local` is Docker on this computer, and
+any other name is a Kubernetes cluster ([placement](../../GLOSSARY.md#placement)).
 
 Each agent uses its own default model and settings. To pass the agent's own
 flags, put them after `--`:
@@ -121,28 +123,29 @@ sproozi init --harness claude-code
 sproozi run --harness claude-code
 ```
 
-Each agent gets its own gateway port. The first takes 18443 and a later one
-the next free port after it; `--port` picks where that agent's search starts.
-
 Each agent gets its own gateway port, so a Codex container cannot use the
-Anthropic key, or the reverse. If a session is
-running, setup saves the change and says to restart the service once the
-session stops.
+Anthropic key, or the reverse. The first takes 18443 and a later one the next
+free port after it; `--port` picks where that agent's search starts. Codex and
+Copilot can use the same OpenAI key file; setup stores a copy for each agent.
+
+If a session is running, setup saves the change and says so. To apply it
+without stopping your sessions, run `sproozi service stop --leave-running`,
+then `sproozi service start`.
 
 ## Choose how an agent signs in
 
-Each agent uses one of four ways to authenticate, chosen when you run setup
-for it. Codex offers all four; Claude Code and Copilot offer all but the
-ChatGPT plan. [How credentials reach an agent](../explanations/credentials.md)
+Each agent uses one of three ways to authenticate, chosen when you run setup
+for it: an API key, a sign-in token, or its own sign-in. Codex also offers a
+ChatGPT plan held by the gateway. [How credentials reach an agent](../explanations/credentials.md)
 explains who holds each credential, and why a token or plan sign-in held by
 the gateway may breach your provider's terms.
 
 | Option | Setup | Who holds the credential |
 | --- | --- | --- |
 | API key | `sproozi init --harness NAME` (the default) | The gateway; the agent never sees it |
-| Sign-in token | `sproozi init --harness NAME --token --credential-file FILE`, with a token such as the output of `claude setup-token`, or for Copilot a GitHub token with Copilot access | The gateway, which sends it as a bearer |
+| Sign-in token | `sproozi init --harness NAME --token --credential-file FILE`, with a long-lived token from your provider, such as the one `claude setup-token` prints, or for Copilot a GitHub token with Copilot access | The gateway, which adds it to each request |
 | ChatGPT plan, held by the gateway | `sproozi init --harness codex --chatgpt`, which opens your browser | The gateway, which refreshes it |
-| The agent's own sign-in | `sproozi init --harness NAME --sign-in` | The agent, in a login store of its own |
+| The agent's own sign-in | `sproozi init --harness NAME --sign-in`, then sign in inside the first session | The agent, in a login store of its own |
 
 Copilot with an API key calls OpenAI in its bring-your-own-key mode and needs
 no Copilot plan; it uses `gpt-6.1-sol` unless you choose another model. With a
@@ -268,15 +271,17 @@ has the details.
 ## Remove the installation
 
 Delete your sessions with `sproozi rm`, stop the service, then remove the
-installation's Docker network and directory (`~/.sproozi` unless you chose
-another with `--root`). `sproozi doctor` names the network, `sproozi-ID`:
+installation's Docker volumes, network and directory (`~/.sproozi` unless you
+chose another with `--root`). `sproozi doctor` names the network, `sproozi-ID`;
+the volumes, including each login store, start with the same name:
 
 ```sh
 sproozi service stop
+docker volume rm $(docker volume ls -q --filter name=sproozi-ID)
 docker network rm sproozi-ID
 rm -rf ~/.sproozi
 ```
 
-Removing the network never touches Docker resources Sproozi did not create.
-Deleting the directory removes saved sessions, provider keys and the
-certificate authority.
+These commands never touch Docker resources Sproozi did not create. Removing
+the volumes signs every agent out; deleting the directory removes saved
+sessions, provider keys and the certificate authority.
