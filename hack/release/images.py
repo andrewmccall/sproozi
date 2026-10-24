@@ -40,8 +40,16 @@ def recipe_hash():
 
 
 def clients():
+    """The pinned clients the image recipes install, read from their
+    install.sh lines so the record always matches the image."""
     out = {}
-    for name in ("codex", "claude-code"):
+    names = []
+    for recipe in RECIPE:
+        for match in re.finditer(r"install\.sh((?: [a-z][a-z0-9-]*)+)", (ROOT / recipe).read_text()):
+            names += match.group(1).split()
+    if not names:
+        raise ValueError("no recipe installs a client with hack/clients/install.sh")
+    for name in sorted(set(names)):
         manifest = json.loads((ROOT / "hack/clients" / name / "package.json").read_text())
         (package, version), = manifest["dependencies"].items()
         out[name] = {"package": package, "version": version}
