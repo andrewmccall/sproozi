@@ -8,7 +8,9 @@ tiers; start with the first:
   immutable contract. Every harness is one.
 - **Managed harness**: also a native kind for `sproozi run`, `stop`, `resume`
   and `move`. Sproozi supervises its terminal, observes completed turns and
-  checkpoints its native conversation. Codex and Claude Code are the only ones.
+  checkpoints its native conversation. Codex, Claude Code and Copilot are
+  managed; Copilot ([ADR 0048](../adr/0048-github-copilot-cli-is-a-managed-harness.md))
+  is the most recent example to follow.
 
 The current selectors are listed in the
 [harness reference](../reference/harnesses.md#harness-selectors).

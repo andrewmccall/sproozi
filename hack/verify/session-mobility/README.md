@@ -309,6 +309,19 @@ both gateway and native mounts. Changing fixture trust therefore creates a new
 gateway Pod with the matching certificate and outbound trust pool, without
 reusing a deleted immutable ConfigMap's cached mount.
 
+## Run the Copilot follow-up
+
+Copilot follows the Claude follow-up's steps with
+[`copilot_mobility.py`](copilot_mobility.py) in place of `claude.py`, ports
+18785 (provider) and 18463 (local gateway), and its own fresh private
+directory. It calls the OpenAI route with the gateway's key, so its renderer
+points the gateway's OpenAI upstream at its provider. Its proof drives three
+stock Copilot turns, one with an actual bash tool call, across Docker,
+Kubernetes and Docker, checks that each checkpoint holds only Copilot's events
+journal for the same session and its last turn, that each restore matches the
+Git workspace and the tool's file, and that each visit's turn carries the
+profile as it was when that visit began. It takes no administrator probes.
+
 ## Shut down only this fixture
 
 After a passing driver, stop the owned service and provider processes and

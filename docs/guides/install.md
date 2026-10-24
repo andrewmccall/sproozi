@@ -53,7 +53,7 @@ recommended macOS installation path.
 The CLI runs sessions on this machine through a background service, and in
 Kubernetes through a remote executor. These guides use it:
 
-- [Local sessions](local-sessions.md) runs Codex or Claude Code in local Docker
+- [Local sessions](local-sessions.md) runs Codex, Claude Code or Copilot in local Docker
   after `sproozi init`. It needs no cluster and no checkout.
 - [Move a live session between Docker and Kubernetes](session-mobility.md)
   configures the service by hand and starts a session in local Docker.
