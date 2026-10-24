@@ -85,7 +85,7 @@ func Doctor(ctx context.Context, l Layout, checkProvider bool) (r Report) {
 	network, err := inspectNetwork(ctx, docker, inst.Network.Name, inst.ID)
 	r.add("network", err, fmt.Sprintf("%s (%s) is owned by this installation", network.Name, network.Subnet))
 	for _, h := range inst.Harnesses {
-		provider := ProviderFor(h.Harness)
+		provider := ProviderFor(h.Harness, h.Mechanism())
 		if h.Credential == "" {
 			r.add("credential", nil, fmt.Sprintf("%s signs in to %s itself; run /login in its session", h.Harness, provider.Name))
 			continue

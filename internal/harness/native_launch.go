@@ -58,8 +58,11 @@ type NativeLaunch struct {
 // NativeUserInstructionsFile is the native user-level instruction file name
 // inside each harness's native home, and of its harness's profile instructions.
 func NativeUserInstructionsFile(kind NativeKind) string {
-	if kind == NativeClaude {
+	switch kind {
+	case NativeClaude:
 		return "CLAUDE.md"
+	case NativeCopilot:
+		return "copilot-instructions.md"
 	}
 	return "AGENTS.md"
 }
@@ -231,24 +234,53 @@ func (c NativeLaunch) Validate(now time.Time) error {
 	return nativeconfig.ValidateHarness(string(c.Harness), c.Model, c.Options)
 }
 
+// NativeCredential is how a managed harness reaches its model provider (ADR
+// 0047): a key or a sign-in token the gateway holds, or its own sign-in.
+type NativeCredential string
+
+const (
+	CredentialKey    NativeCredential = "key"
+	CredentialToken  NativeCredential = "token"
+	CredentialSignIn NativeCredential = "sign-in"
+)
+
+// nativePlaceholder is the public value a workload sends where the gateway
+// supplies, or forwards, the real credential.
+const nativePlaceholder = "sproozi-worker-placeholder"
+
+// NativeCopilotTokenPlaceholder stands in for a GitHub token the gateway holds:
+// Copilot needs one to call its plan's service, and the gateway replaces it.
+const NativeCopilotTokenPlaceholder = "gho_sprooziworkerplaceholder0000000000"
+
 // NativeBaseEnvironment is the public, credential-free environment shared by
 // both backends. Each authority adds its own fresh proxy/token binding. A
 // harness that signs in itself gets no provider key placeholder, which would
-// otherwise take precedence over its own sign-in (ADR 0047).
-func NativeBaseEnvironment(kind NativeKind, executionUID string, signIn bool) ([]string, error) {
+// otherwise take precedence over its own sign-in (ADR 0047). Copilot also
+// gets no GitHub placeholder then: it prefers GH_TOKEN to its own /login, so
+// its supervisor gives that placeholder to the agent's shell only.
+func NativeBaseEnvironment(kind NativeKind, executionUID string, credential NativeCredential) ([]string, error) {
 	if err := kind.Validate(); err != nil {
 		return nil, err
 	}
-	env := make([]string, 0, 8)
-	env = append(env, "PATH=/opt/git/bin:/usr/local/bin:/usr/bin:/bin", "TERM=xterm-256color", "LANG=C.UTF-8",
-		"GIT_TERMINAL_PROMPT=0", "GH_PROMPT_DISABLED=1", "GH_TOKEN=sproozi-worker-placeholder",
-		"SPROOZI_EXECUTION_UID="+executionUID)
-	if signIn {
+	switch credential {
+	case CredentialKey, CredentialToken, CredentialSignIn:
+	default:
+		return nil, fmt.Errorf("unknown native credential %q", credential)
+	}
+	env := []string{"PATH=/opt/git/bin:/usr/local/bin:/usr/bin:/bin", "TERM=xterm-256color", "LANG=C.UTF-8",
+		"GIT_TERMINAL_PROMPT=0", "GH_PROMPT_DISABLED=1", "SPROOZI_EXECUTION_UID=" + executionUID}
+	if kind != NativeCopilot || credential != CredentialSignIn {
+		env = append(env, "GH_TOKEN="+nativePlaceholder)
+	}
+	switch {
+	case credential == CredentialSignIn:
 		return env, nil
+	case kind == NativeCopilot && credential == CredentialToken:
+		return append(env, "COPILOT_GITHUB_TOKEN="+NativeCopilotTokenPlaceholder), nil
+	case kind == NativeCopilot:
+		return append(env, "COPILOT_PROVIDER_API_KEY="+nativePlaceholder), nil
+	case kind == NativeClaude:
+		return append(env, nativeAnthropicKey+"="+nativePlaceholder), nil
 	}
-	apiKey := nativeOpenAIKey
-	if kind == NativeClaude {
-		apiKey = nativeAnthropicKey
-	}
-	return append(env, apiKey+"=sproozi-worker-placeholder"), nil
+	return append(env, nativeOpenAIKey+"="+nativePlaceholder), nil
 }

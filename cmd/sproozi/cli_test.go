@@ -167,7 +167,7 @@ func TestUsageErrorsExitTwoBeforeReadingAnything(t *testing.T) {
 		`unknown command "stat"; did you mean "status"?`:            {"stat"},
 		`unknown command "start"`:                                   {"start"},
 		"sessions does not accept --jsn; did you mean --json?":      {"ls", "--jsn"},
-		"--harness must be codex or claude-code":                    {"run", "--harness", "bogus"},
+		"--harness must be codex, claude-code or copilot":           {"run", "--harness", "bogus"},
 		"status needs a session ID":                                 {"status"},
 		"--task applies only to a --remote run":                     {"run", "--task", "x"},
 		"give --repository NAME instead of PATH":                    {"run", "--remote", "repo", "--task", "x"},

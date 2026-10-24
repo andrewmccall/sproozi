@@ -45,7 +45,14 @@ func addManagedNativeContract(ctx context.Context, kube client.Client, run *api.
 		thread = ""
 	}
 	signIn := runtime.Spec.ClientConfig.SignIn != nil
-	env, err := harness.NativeBaseEnvironment(binding.Harness, string(run.UID), signIn)
+	credential := harness.CredentialKey
+	switch native := runtime.Spec.ClientConfig.NativeSession; {
+	case signIn:
+		credential = harness.CredentialSignIn
+	case native != nil && native.SignInToken:
+		credential = harness.CredentialToken
+	}
+	env, err := harness.NativeBaseEnvironment(binding.Harness, string(run.UID), credential)
 	if err != nil {
 		return err
 	}

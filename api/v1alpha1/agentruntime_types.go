@@ -310,6 +310,13 @@ type NativeSessionConfig struct {
 	// +kubebuilder:validation:MaxItems=32
 	// +kubebuilder:validation:items:MaxLength=4096
 	Options []string `json:"options,omitempty"`
+
+	// SignInToken says the gateway holds a sign-in token for this harness's
+	// provider, such as copilot-sign-in-token, rather than an API key. Only
+	// Copilot's launch changes: it calls its plan's service instead of
+	// OpenAI in bring-your-own-key mode. Ignored with clientConfig.signIn.
+	// +optional
+	SignInToken bool `json:"signInToken,omitempty"`
 }
 
 func (c RuntimeClientConfig) validateNativeSession() error {

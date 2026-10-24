@@ -401,8 +401,8 @@ func (p *Placement) quietSource(ctx context.Context, local retained, r registry.
 	if local.NativeQuiet {
 		return local, r, nil
 	}
-	if r.Harness == harness.NativeClaude && (terminated(pod) || r.Phase == registry.Stopping) {
-		return local, r, errors.New("placement: Claude graceful completion acknowledgement unavailable")
+	if !harness.ProvesCompletion(r.Harness) && (terminated(pod) || r.Phase == registry.Stopping) {
+		return local, r, fmt.Errorf("placement: %s graceful completion acknowledgement unavailable", r.Harness)
 	}
 	switch {
 	case terminated(pod):

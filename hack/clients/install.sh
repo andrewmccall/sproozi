@@ -45,5 +45,15 @@ for client in "$@"; do
   test -f "$target"
   chmod 0755 "$target"
   ln -sf "$modules/.bin/$name" "/usr/local/bin/$name"
+  if [ "$client" = copilot ]; then
+    # Copilot unpacks its app into ~/.cache/copilot/pkg on first run. A
+    # sandbox home is a small noexec tmpfs, so unpack it here once; the
+    # supervisor links ~/.cache/copilot/pkg to this copy at launch.
+    scratch="$(mktemp -d)"
+    HOME="$scratch" XDG_CACHE_HOME="$root/copilot-cache" COPILOT_HOME="$scratch/copilot" copilot --version
+    rm -rf "$scratch" "$root"/copilot-cache/copilot/*.json "$root"/copilot-cache/copilot/*.lock
+    test -d "$root/copilot-cache/copilot/pkg"
+    chmod -R a+rX "$root/copilot-cache"
+  fi
 done
 npm cache clean --force

@@ -481,14 +481,70 @@ func TestChatGPTSignInIsReusedForAnOpenAIHarness(t *testing.T) {
 		t.Fatal(err)
 	}
 	i := &installer{l: l, inst: inst, o: Options{Harness: harness.NativeCodex, ChatGPT: true, Progress: io.Discard}, selected: &inst.Harnesses[0]}
-	if err := i.signInChatGPT(t.Context(), ProviderFor(harness.NativeCodex)); err != nil {
+	if err := i.signInChatGPT(t.Context(), ProviderFor(harness.NativeCodex, harness.CredentialKey)); err != nil {
 		t.Fatal(err)
 	}
 	if i.selected.Kind != modelauth.ChatGPTMode || tokenKind(*i.selected) != modelauth.ChatGPTMode {
 		t.Fatalf("harness %+v", *i.selected)
 	}
 	i.o.Harness = harness.NativeClaude
-	if err := i.signInChatGPT(t.Context(), ProviderFor(harness.NativeClaude)); err == nil {
+	if err := i.signInChatGPT(t.Context(), ProviderFor(harness.NativeClaude, harness.CredentialKey)); err == nil {
 		t.Fatal("Claude Code was given a ChatGPT sign-in")
+	}
+}
+
+// Copilot reaches OpenAI with a key, in bring-your-own-key mode, and GitHub's
+// Copilot service with a plan token or its own sign-in. The stored
+// credential and default provider URL follow each change of mechanism.
+func TestCopilotProviderFollowsItsMechanism(t *testing.T) {
+	for credential, want := range map[harness.NativeCredential]Provider{
+		harness.CredentialKey:    {Name: "openai", URL: openAIURL},
+		harness.CredentialToken:  {Name: ProviderCopilot, URL: copilotURL},
+		harness.CredentialSignIn: {Name: ProviderCopilot, URL: copilotURL},
+	} {
+		if got := ProviderFor(harness.NativeCopilot, credential); got != want {
+			t.Fatalf("%s: %+v", credential, got)
+		}
+	}
+	if got := ProviderFor(harness.NativeCodex, harness.CredentialSignIn); got.Name != "openai" {
+		t.Fatalf("Codex signed in: %+v", got)
+	}
+	l, inst := testInstallation(t)
+	inst.Harnesses = append(inst.Harnesses, Harness{Harness: harness.NativeCopilot, Name: "local-copilot", Port: 18444,
+		ProviderURL: openAIURL, Credential: filepath.Join(l.Credentials(), "openai")})
+	i := &installer{l: l, inst: inst, o: Options{Harness: harness.NativeCopilot, Token: true, Progress: io.Discard,
+		Credential: CredentialInput{Stdin: strings.NewReader("github_pat_fixture")}}}
+	if err := i.prepareHarness(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	h := *i.selected
+	if h.Mechanism() != harness.CredentialToken || h.ProviderURL != copilotURL ||
+		h.Credential != filepath.Join(l.Credentials(), ProviderCopilot) || !HasCredential(l, ProviderCopilot) {
+		t.Fatalf("token: %+v", h)
+	}
+	i.o = Options{Harness: harness.NativeCopilot, SignIn: true, Progress: io.Discard}
+	if err := i.prepareHarness(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if h = *i.selected; h.Mechanism() != harness.CredentialSignIn || h.ProviderURL != copilotURL {
+		t.Fatalf("sign-in: %+v", h)
+	}
+	i.o = Options{Harness: harness.NativeCopilot, Progress: io.Discard,
+		Credential: CredentialInput{Stdin: strings.NewReader("sk-fixture")}}
+	if err := i.prepareHarness(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if h = *i.selected; h.Mechanism() != harness.CredentialKey || h.ProviderURL != openAIURL ||
+		h.Credential != filepath.Join(l.Credentials(), "openai") {
+		t.Fatalf("key: %+v", h)
+	}
+	// A private endpoint stays as configured.
+	i.o = Options{Harness: harness.NativeCopilot, Token: true, ProviderURL: "http://127.0.0.1:18800", Progress: io.Discard}
+	if err := i.prepareHarness(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	i.o = Options{Harness: harness.NativeCopilot, SignIn: true, Progress: io.Discard}
+	if err := i.prepareHarness(t.Context()); err != nil || i.selected.ProviderURL != "http://127.0.0.1:18800" {
+		t.Fatalf("private endpoint: %+v %v", *i.selected, err)
 	}
 }

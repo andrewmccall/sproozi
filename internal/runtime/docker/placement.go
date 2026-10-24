@@ -529,8 +529,8 @@ func (p *Placement) Stop(ctx context.Context, l session.Launch, i session.Incarn
 			return session.Stopped{}, err
 		}
 	}
-	if r.Launch.Harness == harness.NativeClaude && !r.NativeQuiet {
-		return session.Stopped{}, errors.New("claude graceful completion acknowledgement unavailable")
+	if !harness.ProvesCompletion(r.Launch.Harness) && !r.NativeQuiet {
+		return session.Stopped{}, fmt.Errorf("%s graceful completion acknowledgement unavailable", r.Launch.Harness)
 	}
 	if err = p.authority.Revoke(ctx, r.Launch, i); err != nil {
 		if stopErr := p.engine.Stop(ctx, *r.Agent); stopErr == nil {
@@ -558,9 +558,10 @@ func (p *Placement) Stop(ctx context.Context, l session.Launch, i session.Incarn
 	}
 	// A turnless visit had no conversation; its workspace is the one it
 	// started from, which the execution retains, so nothing is captured. An
-	// exited harness keeps a checkpoint only when Codex reported a completed
-	// conversation that validates; otherwise the session keeps its previous one.
-	exitedWithout := r.Exited != nil && (r.Launch.Harness == harness.NativeClaude || r.thread() == "")
+	// exited harness keeps a checkpoint only when a harness whose state proves
+	// completion, such as Codex, reported a completed conversation that
+	// validates; otherwise the session keeps its previous one.
+	exitedWithout := r.Exited != nil && (!harness.ProvesCompletion(r.Launch.Harness) || r.thread() == "")
 	if r.CheckpointDigest == "" && !r.Turnless && !exitedWithout {
 		if err = p.capture(ctx, &r); err != nil && r.Exited == nil {
 			return session.Stopped{}, err
@@ -877,7 +878,7 @@ func (p *Placement) quiesceNative(ctx context.Context, r *placementRecord, i ses
 		}
 		var thread string
 		thread, err = harness.QuiesceNative(ctx, control, r.thread(), r.Launch.Deadline, bind)
-		if errors.Is(err, harness.ErrQuiesceUnacknowledged) && r.Launch.Harness != harness.NativeClaude &&
+		if errors.Is(err, harness.ErrQuiesceUnacknowledged) && harness.ProvesCompletion(r.Launch.Harness) &&
 			p.agentStops(ctx, *r.Agent) {
 			// A lost Codex reply is resolved by the actual stopped container.
 			// The reply is usually lost because the container exited first.
@@ -896,16 +897,17 @@ func (p *Placement) quiesceNative(ctx context.Context, r *placementRecord, i ses
 }
 
 // recordExit keeps what the supervisor reported when its harness exited on its
-// own. A Codex first visit binds the thread of a completed turn it reported,
-// so the stop can still checkpoint that conversation; Claude needs its
-// graceful acknowledgement, so its exited visit keeps no new checkpoint.
+// own. A first visit of a harness whose state proves completion, such as
+// Codex, binds the thread of a completed turn it reported, so the stop can
+// still checkpoint that conversation; Claude needs its graceful
+// acknowledgement, so its exited visit keeps no new checkpoint.
 func (p *Placement) recordExit(ctx context.Context, r *placementRecord, i session.Incarnation, state Observation) error {
 	report, ok := p.engine.ExitReport(ctx, *r.Agent)
 	if !ok {
 		report = harness.NativeExitReport{Code: state.ExitCode}
 	}
 	r.Exited = &session.Exit{Code: report.Code, Output: report.Output}
-	if r.Launch.Harness == harness.NativeCodex && r.thread() == "" && report.Thread != "" {
+	if harness.ProvesCompletion(r.Launch.Harness) && r.thread() == "" && report.Thread != "" {
 		if err := p.authority.BindNative(ctx, r.Launch, i, report.Thread); err != nil {
 			return err
 		}

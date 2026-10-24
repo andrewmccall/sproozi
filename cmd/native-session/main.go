@@ -21,6 +21,7 @@ import (
 
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/nativepty"
+	"github.com/google/uuid"
 )
 
 const (
@@ -29,6 +30,7 @@ const (
 	nativeHome    = "/workspace/session/codex"
 	workspace     = "/workspace/session/workspace"
 	executable    = "/usr/local/bin/codex"
+	agentHome     = "/home/agent"
 	inactiveError = "native execution is not active"
 )
 
@@ -53,13 +55,16 @@ type request struct {
 type response = harness.NativeReply
 
 type server struct {
-	config          config
-	deadline        time.Time
-	mu              sync.Mutex
-	action          sync.Mutex
-	native          *nativepty.Supervisor
-	state           harness.NativeState
-	threadID        string
+	config   config
+	deadline time.Time
+	mu       sync.Mutex
+	action   sync.Mutex
+	native   *nativepty.Supervisor
+	state    harness.NativeState
+	threadID string
+	// launchID is the conversation a new visit's supervisor named itself,
+	// for a harness that takes its ID at launch (Copilot).
+	launchID        string
 	done            chan struct{}
 	stopOnce        sync.Once
 	exitCode        int
@@ -275,7 +280,7 @@ func (s *server) activate() response {
 		r.Error = err.Error()
 		return r
 	}
-	env = append(env, "HOME=/home/agent")
+	env = append(env, "HOME="+agentHome)
 	if s.config.Task != "" && s.threadID != "" {
 		_, baseline, err := observeTurn(nativeHome, s.threadID, s.config.InstructionDigest, s.config.RolloutMaxBytes)
 		if err != nil {
@@ -284,13 +289,20 @@ func (s *server) activate() response {
 		}
 		s.taskBaseline = baseline
 	}
-	args, env, err := adapter.prepare(s.config, s.threadID, env)
-	if err != nil {
-		r.Error = err.Error()
-		return r
-	}
+	// The sign-in comes first: a harness that keeps other settings in its
+	// login file, such as Copilot's config.json, has them merged in.
 	if err = restoreSignIn(s.config); err != nil {
 		r.Error = "harness sign-in is unavailable: " + err.Error()
+		return r
+	}
+	thread := s.threadID
+	if thread == "" && adapter.namesSession {
+		thread = uuid.NewString()
+		s.launchID = thread
+	}
+	args, env, err := adapter.prepare(s.config, thread, env)
+	if err != nil {
+		r.Error = err.Error()
 		return r
 	}
 	n, err := nativepty.Start(nativepty.Launch{Executable: adapter.executable, Args: args, Env: env,
@@ -465,6 +477,12 @@ func (s *server) waitingFor() string {
 	s.mu.Lock()
 	kind := s.config.Harness
 	s.mu.Unlock()
+	if kind == harness.NativeCopilot {
+		if _, _, err := s.observeCopilotTurn(); errors.Is(err, os.ErrNotExist) {
+			return "Copilot to start its first turn"
+		}
+		return "the current Copilot turn to complete"
+	}
 	if kind != harness.NativeClaude {
 		if !codexJournalExists(nativeHome) {
 			return "Codex to start its first turn"

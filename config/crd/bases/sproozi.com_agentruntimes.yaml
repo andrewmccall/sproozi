@@ -74,6 +74,13 @@ spec:
                           type: string
                         maxItems: 32
                         type: array
+                      signInToken:
+                        description: |-
+                          SignInToken says the gateway holds a sign-in token for this harness's
+                          provider, such as copilot-sign-in-token, rather than an API key. Only
+                          Copilot's launch changes: it calls its plan's service instead of
+                          OpenAI in bring-your-own-key mode. Ignored with clientConfig.signIn.
+                        type: boolean
                     type: object
                   signIn:
                     description: |-

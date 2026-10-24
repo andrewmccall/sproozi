@@ -21,6 +21,7 @@ import (
 const (
 	anthropicURL = "https://api.anthropic.com"
 	openAIURL    = "https://api.openai.com"
+	copilotURL   = "https://api.individual.githubcopilot.com"
 )
 
 // Provider describes the upstream model service for a native harness.
@@ -37,13 +38,24 @@ func SignsIn(kind harness.NativeKind) bool {
 	return err == nil && h.SignInFile != ""
 }
 
-func ProviderFor(kind harness.NativeKind) Provider {
+// ProviderFor is the provider a harness reaches with credential, by
+// default: OpenAI or Anthropic with a key, and for Copilot with a token or
+// its own sign-in, GitHub's Copilot service. Name also names the stored
+// credential file.
+func ProviderFor(kind harness.NativeKind, credential harness.NativeCredential) Provider {
 	h, _ := harness.Managed(kind)
-	if h.Protocol == harness.ProtocolAnthropic {
-		return Provider{Name: string(harness.ProtocolAnthropic), URL: anthropicURL}
+	switch name := h.Provider(credential != harness.CredentialKey); name {
+	case string(harness.ProtocolAnthropic):
+		return Provider{Name: name, URL: anthropicURL}
+	case ProviderCopilot:
+		return Provider{Name: name, URL: copilotURL}
 	}
 	return Provider{Name: string(harness.ProtocolOpenAI), URL: openAIURL}
 }
+
+// ProviderCopilot names GitHub Copilot's service and the GitHub token stored
+// for it.
+const ProviderCopilot = "copilot"
 
 // CredentialInput supplies a secret without a command-line value: a protected
 // file, standard input, or an interactive prompt that does not echo.

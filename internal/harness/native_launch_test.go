@@ -11,27 +11,51 @@ import (
 )
 
 func TestNativeBaseEnvironmentSelectsOnlyTheApprovedHarnessPlaceholder(t *testing.T) {
+	placeholder := func(key string) string { return key + "=sproozi-worker-placeholder" }
 	for _, tc := range []struct {
 		kind       NativeKind
-		key, other string
+		credential NativeCredential
+		want       []string
+		absent     []string
 	}{
-		{NativeCodex, nativeOpenAIKey, nativeAnthropicKey},
-		{NativeClaude, nativeAnthropicKey, nativeOpenAIKey},
+		{NativeCodex, CredentialKey, []string{placeholder(nativeOpenAIKey), placeholder("GH_TOKEN")}, []string{placeholder(nativeAnthropicKey)}},
+		{NativeCodex, CredentialToken, []string{placeholder(nativeOpenAIKey)}, nil},
+		{NativeClaude, CredentialKey, []string{placeholder(nativeAnthropicKey)}, []string{placeholder(nativeOpenAIKey)}},
+		{NativeClaude, CredentialToken, []string{placeholder(nativeAnthropicKey)}, nil},
+		{NativeCopilot, CredentialKey, []string{placeholder("COPILOT_PROVIDER_API_KEY"), placeholder("GH_TOKEN")},
+			[]string{"COPILOT_GITHUB_TOKEN=" + NativeCopilotTokenPlaceholder}},
+		// Copilot calls its plan's service with a GitHub token the gateway replaces.
+		{NativeCopilot, CredentialToken, []string{"COPILOT_GITHUB_TOKEN=" + NativeCopilotTokenPlaceholder},
+			[]string{placeholder("COPILOT_PROVIDER_API_KEY")}},
+		// Copilot prefers GH_TOKEN to its own /login, so it gets none.
+		{NativeCopilot, CredentialSignIn, nil, []string{placeholder("GH_TOKEN"), placeholder("COPILOT_PROVIDER_API_KEY")}},
 	} {
-		env, err := NativeBaseEnvironment(tc.kind, "exact-incarnation", false)
-		if err != nil {
-			t.Fatal(err)
+		env, err := NativeBaseEnvironment(tc.kind, "exact-incarnation", tc.credential)
+		if err != nil || !slices.Contains(env, "SPROOZI_EXECUTION_UID=exact-incarnation") {
+			t.Fatalf("%s %s: %v %v", tc.kind, tc.credential, env, err)
 		}
-		if !slices.Contains(env, tc.key+"=sproozi-worker-placeholder") || !slices.Contains(env, "SPROOZI_EXECUTION_UID=exact-incarnation") || slices.Contains(env, tc.other+"=sproozi-worker-placeholder") {
-			t.Fatalf("environment=%v", env)
+		for _, entry := range tc.want {
+			if !slices.Contains(env, entry) {
+				t.Fatalf("%s %s: missing %s in %v", tc.kind, tc.credential, entry, env)
+			}
 		}
-		signedIn, err := NativeBaseEnvironment(tc.kind, "exact-incarnation", true)
-		if err != nil || slices.ContainsFunc(signedIn, func(e string) bool { return strings.HasSuffix(e, "_API_KEY=sproozi-worker-placeholder") }) {
-			t.Fatalf("a harness that signs in itself got a placeholder key: %v %v", signedIn, err)
+		for _, entry := range tc.absent {
+			if slices.Contains(env, entry) {
+				t.Fatalf("%s %s: unexpected %s", tc.kind, tc.credential, entry)
+			}
 		}
 	}
-	if _, err := NativeBaseEnvironment(NativeKind("unknown"), "exact-incarnation", false); err == nil {
+	for _, kind := range ManagedKinds() {
+		signedIn, err := NativeBaseEnvironment(kind, "exact-incarnation", CredentialSignIn)
+		if err != nil || slices.ContainsFunc(signedIn, func(e string) bool { return strings.HasSuffix(e, "_API_KEY=sproozi-worker-placeholder") }) {
+			t.Fatalf("%s signs in itself but got a placeholder key: %v %v", kind, signedIn, err)
+		}
+	}
+	if _, err := NativeBaseEnvironment(NativeKind("unknown"), "exact-incarnation", CredentialKey); err == nil {
 		t.Fatal("unknown harness admitted")
+	}
+	if _, err := NativeBaseEnvironment(NativeCodex, "exact-incarnation", "keyring"); err == nil {
+		t.Fatal("unknown credential admitted")
 	}
 }
 

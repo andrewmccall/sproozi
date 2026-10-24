@@ -237,7 +237,7 @@ func (q *options) validate(str func(string) string) error {
 	}
 	if q.harness != "" {
 		if err := harness.NativeKind(q.harness).Validate(); err != nil {
-			return usagef("--harness must be codex or claude-code")
+			return usagef("--harness must be %s", harness.ManagedKindList())
 		}
 	}
 	if q.project != "" && !project.ValidID(q.project) {

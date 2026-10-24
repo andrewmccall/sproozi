@@ -26,9 +26,9 @@ configuration. Unknown values fail validation and contract preparation.
 | --- | --- | --- | --- |
 | `codex` | yes | `codex-mcp.toml` | Codex `mcp_servers` TOML |
 | `claude-code` | yes | `claude-mcp.json` | Claude Code `mcpServers`, HTTP transport |
+| `copilot` | yes | `copilot-mcp.json` | GitHub Copilot CLI `mcpServers`, HTTP transport, all tools |
 | `opencode` | no | `opencode-mcp.json` | OpenCode `mcp`, remote transport, OAuth disabled |
 | `hermes` | no | `hermes-mcp.json` | Hermes `mcp_servers`, Streamable HTTP |
-| `copilot` | no | `copilot-mcp.json` | GitHub Copilot CLI `mcpServers`, HTTP transport, all tools |
 
 Every harness needs an MCP client: there is no harness without the `sproozi`
 control connection ([ADR 0039](../adr/0039-one-harness-registry-and-the-mcp-requirement.md)).

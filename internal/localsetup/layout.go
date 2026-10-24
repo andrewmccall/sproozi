@@ -19,6 +19,7 @@ import (
 
 	"github.com/andrewmccall/sproozi/internal/agentprofile"
 	"github.com/andrewmccall/sproozi/internal/harness"
+	"github.com/andrewmccall/sproozi/internal/modelauth"
 	"github.com/andrewmccall/sproozi/internal/privatefs"
 	"github.com/andrewmccall/sproozi/internal/session/home"
 )
@@ -148,6 +149,19 @@ type Harness struct {
 	// Kind says what Credential holds for the gateway: an API key when empty,
 	// "token" for a sign-in token, "chatgpt" for a ChatGPT plan sign-in.
 	Kind string `json:"kind,omitempty"`
+}
+
+// Mechanism is how the harness reaches its provider: its own sign-in with no
+// stored credential, a gateway-held token, or otherwise a gateway-held key
+// (a ChatGPT plan sign-in also looks like a key to the harness).
+func (h Harness) Mechanism() harness.NativeCredential {
+	switch {
+	case h.Credential == "":
+		return harness.CredentialSignIn
+	case h.Kind == modelauth.TokenMode:
+		return harness.CredentialToken
+	}
+	return harness.CredentialKey
 }
 
 func (i *Installation) harness(kind harness.NativeKind) *Harness {

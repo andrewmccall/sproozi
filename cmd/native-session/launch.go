@@ -38,6 +38,9 @@ type nativeAdapter struct {
 	// settle maps that exit to the supervisor's exit code and, when the
 	// process did not stop as expected, a problem to report.
 	settle func(nativepty.Exit) (int, string)
+	// namesSession: the supervisor names a new conversation at launch
+	// rather than learning the harness's own choice.
+	namesSession bool
 }
 
 var nativeAdapters = map[harness.NativeKind]nativeAdapter{
@@ -67,6 +70,21 @@ var nativeAdapters = map[harness.NativeKind]nativeAdapter{
 		completion: (*server).claudeCompletion,
 		// The observed lifecycle hooks proved completion; the supervisor
 		// stops Claude itself.
+		finish: (*nativepty.Supervisor).Stop,
+		settle: func(exit nativepty.Exit) (int, string) {
+			if exit.Reason != nativepty.ForcedStop {
+				return 0, "native controlled stop did not finish"
+			}
+			return 0, ""
+		},
+	},
+	harness.NativeCopilot: {
+		executable:   copilotExecutable,
+		prepare:      prepareCopilotLaunch,
+		observe:      (*server).observeCopilotTurn,
+		turnless:     (*server).copilotTurnless,
+		namesSession: true,
+		// The journal proved completion; the supervisor stops Copilot itself.
 		finish: (*nativepty.Supervisor).Stop,
 		settle: func(exit nativepty.Exit) (int, string) {
 			if exit.Reason != nativepty.ForcedStop {

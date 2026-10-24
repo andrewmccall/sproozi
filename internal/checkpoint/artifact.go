@@ -28,11 +28,12 @@ type codexArtifact struct {
 }
 
 type nativeArtifact struct {
-	Version   int                  `json:"version"`
-	Harness   harness.NativeKind   `json:"harness"`
-	Codex     *harness.CodexState  `json:"codex,omitempty"`
-	Claude    *harness.ClaudeState `json:"claude,omitempty"`
-	Workspace []byte               `json:"workspace"`
+	Version   int                   `json:"version"`
+	Harness   harness.NativeKind    `json:"harness"`
+	Codex     *harness.CodexState   `json:"codex,omitempty"`
+	Claude    *harness.ClaudeState  `json:"claude,omitempty"`
+	Copilot   *harness.CopilotState `json:"copilot,omitempty"`
+	Workspace []byte                `json:"workspace"`
 }
 
 // Metadata describes continuity data, never a placement's stop or usage receipt.
@@ -64,6 +65,12 @@ func CaptureStopped(ctx context.Context, kind harness.NativeKind, home, reposito
 			return nil, Metadata{}, err
 		}
 		artifact.Claude = &native
+	case harness.NativeCopilot:
+		native, err := harness.CaptureCopilotState(home, threadID, maxBytes)
+		if err != nil {
+			return nil, Metadata{}, err
+		}
+		artifact.Copilot = &native
 	default:
 		return nil, Metadata{}, errors.New("checkpoint: unsupported native harness")
 	}
@@ -127,17 +134,23 @@ func ValidateContinuity(data []byte, kind harness.NativeKind, instructionDigest 
 func (a nativeArtifact) native(maxBytes int64) (string, string, int, error) {
 	switch a.Harness {
 	case harness.NativeCodex:
-		if a.Codex == nil || a.Claude != nil {
+		if a.Codex == nil || a.Claude != nil || a.Copilot != nil {
 			break
 		}
 		turn, err := harness.CompletedCodexTurn(*a.Codex, maxBytes)
 		return a.Codex.ThreadID, turn, len(a.Codex.Rollout), err
 	case harness.NativeClaude:
-		if a.Claude == nil || a.Codex != nil {
+		if a.Claude == nil || a.Codex != nil || a.Copilot != nil {
 			break
 		}
 		leaf, err := harness.ClaudeTranscriptLeaf(*a.Claude, maxBytes)
 		return a.Claude.ThreadID, leaf, len(a.Claude.Transcript), err
+	case harness.NativeCopilot:
+		if a.Copilot == nil || a.Codex != nil || a.Claude != nil {
+			break
+		}
+		turn, err := harness.CompletedCopilotTurn(*a.Copilot, maxBytes)
+		return a.Copilot.ThreadID, turn, len(a.Copilot.Events), err
 	}
 	return "", "", 0, errors.New("checkpoint: inconsistent native harness state")
 }
@@ -250,6 +263,8 @@ func Restore(ctx context.Context, data []byte, target string, maxBytes int64) (M
 		err = harness.RestoreCodexState(home, *artifact.Codex, maxBytes)
 	case harness.NativeClaude:
 		err = harness.RestoreClaudeState(home, filepath.Join(target, "workspace"), *artifact.Claude, maxBytes)
+	case harness.NativeCopilot:
+		err = harness.RestoreCopilotState(home, *artifact.Copilot, maxBytes)
 	default:
 		err = errors.New("checkpoint: unsupported native harness")
 	}

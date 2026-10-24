@@ -6,6 +6,8 @@ import (
 	"io"
 	"slices"
 	"strings"
+
+	"github.com/andrewmccall/sproozi/internal/harness"
 )
 
 // Command names.
@@ -179,7 +181,8 @@ type flagSpec struct {
 func (f flagSpec) boolean() bool { return f.value == "" }
 
 var flagSpecs = map[string]flagSpec{
-	"harness":               {value: "NAME", help: "agent to run: codex or claude-code (default: the first one set up)"},
+	"harness": {value: "NAME",
+		help: "agent to run: " + harness.ManagedKindList() + " (default: the first one set up)"},
 	"detach":                {short: "d", help: "start without connecting your terminal"},
 	"include-ignored":       {value: "PATH", help: "also copy this Git-ignored file into the session; repeatable"},
 	"remote":                {help: "run the task in a Kubernetes cluster instead of on this machine"},

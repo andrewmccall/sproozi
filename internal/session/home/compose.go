@@ -54,17 +54,30 @@ type authority struct {
 	options     []string
 	kind        harness.NativeKind
 	mcpEndpoint string
-	// signIn leaves out the provider key placeholder: the harness uses its
-	// own sign-in, which the gateway forwards (ADR 0047).
-	signIn bool
+	// credential is how the harness reaches its provider: a gateway-held
+	// key or token, or its own sign-in, which the gateway forwards (ADR 0047).
+	credential harness.NativeCredential
+}
+
+// credential is how a stack's harness reaches its provider.
+func (stack *localStack) credential() harness.NativeCredential {
+	switch {
+	case stack.config.SignIn:
+		return harness.CredentialSignIn
+	case stack.gateway.ProviderTokenKind == modelauth.TokenMode:
+		return harness.CredentialToken
+	}
+	return harness.CredentialKey
 }
 
 // providerHosts are the provider names a stack's gateway inspects: its API
-// host, and with the harness's own sign-in every model and sign-in host.
+// host, and with the harness's own sign-in, or a token for a provider with no
+// API host such as Copilot, every model, sign-in and account host.
 func providerHosts(stack *localStack) []string {
 	h, _ := harness.Managed(stack.config.Harness)
-	p, _ := model.ProviderFor(string(h.Protocol))
-	return p.Hosts(stack.config.SignIn)
+	credential := stack.credential()
+	p, _ := model.ProviderFor(h.Provider(credential != harness.CredentialKey))
+	return p.Hosts(credential == harness.CredentialSignIn || p.Models[0].SignedIn)
 }
 
 func (a *authority) InitializeAllocation(ctx context.Context, l session.Launch, i session.Incarnation) (runtimedocker.NativeAccess, error) {
@@ -74,7 +87,7 @@ func (a *authority) InitializeAllocation(ctx context.Context, l session.Launch, 
 	}
 	u, _ := url.Parse(a.endpoint)
 	u.User = url.UserPassword("sproozi", token)
-	env, err := harness.NativeBaseEnvironment(a.kind, i.ResourceUID, a.signIn)
+	env, err := harness.NativeBaseEnvironment(a.kind, i.ResourceUID, a.credential)
 	if err != nil {
 		return runtimedocker.NativeAccess{}, err
 	}
@@ -383,7 +396,7 @@ func (s *Service) openStack(c Config, engine *runtimedocker.Engine, ledger *budg
 		return err
 	}
 	endpoint := "https://" + net.JoinHostPort(stack.config.GatewayIPv4, fmt.Sprint(stack.config.GatewayPort))
-	auth := &authority{owner: stack.owner, endpoint: endpoint, certs: s.certs, model: stack.model, options: stack.options, kind: stack.config.Harness, mcpEndpoint: "https://" + c.Gateway.MCPAuthority, signIn: stack.config.SignIn}
+	auth := &authority{owner: stack.owner, endpoint: endpoint, certs: s.certs, model: stack.model, options: stack.options, kind: stack.config.Harness, mcpEndpoint: "https://" + c.Gateway.MCPAuthority, credential: stack.credential()}
 	stack.placement, err = runtimedocker.OpenPlacement(filepath.Join(c.Directory, stackDirectory("docker", index, stack.config.Name)), engine, stack.config, auth)
 	if err != nil {
 		return err
@@ -542,7 +555,7 @@ func providerAuth(result model.HandlerConfig, c GatewayConfig, kind harness.Nati
 	h, _ := harness.Managed(kind)
 	switch {
 	case c.ProviderTokenKind == modelauth.TokenMode:
-		p, _ := model.ProviderFor(string(h.Protocol))
+		p, _ := model.ProviderFor(h.Provider(true))
 		result.ProviderAuth = modelauth.Token{Value: token, Headers: p.TokenHeaders}
 	case h.Protocol == harness.ProtocolAnthropic:
 		result.ProviderAuth = modelauth.AnthropicAPIKey{Key: token}
@@ -591,8 +604,8 @@ func mcpNotice(kind harness.NativeKind, all map[string]session.Allowance) string
 		return ""
 	}
 	slices.Sort(names)
-	return fmt.Sprintf("%s sessions get no configured MCP servers (%s): named MCP servers currently need Codex; "+
-		"start a session with --harness codex to use them", kind, strings.Join(names, ", "))
+	return fmt.Sprintf("%s sessions get no configured MCP servers (%s): named MCP servers need Codex or Copilot; "+
+		"start a session with --harness codex or --harness copilot to use them", kind, strings.Join(names, ", "))
 }
 
 func approvedPolicy(c Config) (api.AgentPolicySpec, error) {

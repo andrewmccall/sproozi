@@ -5,8 +5,9 @@ package harness
 type NativeKind string
 
 const (
-	NativeCodex  NativeKind = "codex"
-	NativeClaude NativeKind = "claude-code"
+	NativeCodex   NativeKind = "codex"
+	NativeClaude  NativeKind = "claude-code"
+	NativeCopilot NativeKind = "copilot"
 )
 
 // Validate accepts only the registry's managed kinds.
