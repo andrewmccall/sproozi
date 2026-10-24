@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"io"
 	"net/netip"
 	"os"
@@ -226,21 +227,26 @@ func (p *Placement) spec(r placementRecord, role string) ManagedSpec {
 		spec.Volume = r.Volume
 	}
 	if role == roleAgent {
-		spec.Login = p.login()
+		spec.Login = p.login(r.Launch)
 	}
 	return spec
 }
 
-// login is the agent's sign-in file mount, or nil when the gateway holds the
-// provider credential. The installation's own network name keeps two
+// login is the launch's login store, or nil when the gateway holds the
+// provider credential: one volume per installation, harness placement and
+// login name (ADR 0049). The installation's own network name keeps two
 // installations on one engine from sharing a sign-in.
-func (p *Placement) login() *LoginMount {
+func (p *Placement) login(l session.Launch) *LoginMount {
 	h, err := harness.Managed(p.config.Harness)
 	if !p.config.SignIn || err != nil || h.SignInFile == "" {
 		return nil
 	}
-	return &LoginMount{Volume: p.config.NetworkName + "-" + p.config.Name + "-login", File: h.SignInFile,
-		Target: "/workspace/session/" + h.NativeDirectory + "/" + h.SignInFile}
+	return &LoginMount{Volume: LoginVolume(p.config.NetworkName, p.config.Name, l.Login), File: h.SignInFile}
+}
+
+// LoginVolume names a login's volume.
+func LoginVolume(network, placement, login string) string {
+	return network + "-" + placement + "-login-" + harness.LoginOrDefault(login)
 }
 func (p *Placement) resource(ctx context.Context, r *placementRecord, role string, target **Instance) error {
 	spec := p.spec(*r, role)
@@ -281,7 +287,7 @@ func (p *Placement) drivePrepare(ctx context.Context, r *placementRecord, data [
 	if err := p.engine.PrepareArtifact(ctx, *r.Helper, p.config.Harness, data, p.config.MaxCheckpointBytes, p.config.InstructionDigest, r.fresh()); err != nil {
 		return err
 	}
-	if login := p.login(); login != nil {
+	if login := p.login(r.Launch); login != nil {
 		if err := p.engine.EnsureLoginVolume(ctx, *login, p.config.Harness, p.config.HelperImageID); err != nil {
 			return fmt.Errorf("docker login volume: %w", err)
 		}
@@ -304,7 +310,11 @@ func (p *Placement) drivePrepare(ctx context.Context, r *placementRecord, data [
 	if err != nil {
 		return fmt.Errorf("profile: %w", err)
 	}
-	contract := harness.NativeLaunch{Harness: p.config.Harness, Deadline: r.Launch.Deadline, ThreadID: r.Launch.ThreadID, Task: r.Launch.Task, Instructions: p.config.Instructions, InstructionDigest: p.config.InstructionDigest, Env: access.Env, Model: access.Model, Options: access.Options, Args: r.Launch.HarnessArgs, ClientConfig: access.ClientConfig, TrustBundlePEM: access.TrustBundlePEM, RolloutMaxBytes: harness.NativeRolloutMaxBytes, ProfileArchive: profile}
+	signIn := ""
+	if p.login(r.Launch) != nil {
+		signIn = api.SignInDirectory
+	}
+	contract := harness.NativeLaunch{SignInDirectory: signIn, Harness: p.config.Harness, Deadline: r.Launch.Deadline, ThreadID: r.Launch.ThreadID, Task: r.Launch.Task, Instructions: p.config.Instructions, InstructionDigest: p.config.InstructionDigest, Env: access.Env, Model: access.Model, Options: access.Options, Args: r.Launch.HarnessArgs, ClientConfig: access.ClientConfig, TrustBundlePEM: access.TrustBundlePEM, RolloutMaxBytes: harness.NativeRolloutMaxBytes, ProfileArchive: profile}
 	if err := contract.Validate(time.Now()); err != nil {
 		return err
 	}

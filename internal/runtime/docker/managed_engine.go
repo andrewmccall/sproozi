@@ -7,10 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"io"
 	"net/netip"
 	"os/exec"
-	"path"
 	"reflect"
 	"regexp"
 	"slices"
@@ -102,20 +102,20 @@ func (e *Engine) volume(ctx context.Context, v Volume) (Volume, error) {
 // loginLabel names the harness whose own sign-in a login volume holds.
 const loginLabel = "sproozi.com/login"
 
-// LoginMount gives the agent one file of its harness's persistent login
-// volume (ADR 0047). The harness writes and refreshes the file itself; the
-// volume outlives every execution and never enters a checkpoint.
+// LoginMount gives the agent its login store: the persistent volume of one
+// harness's named login, at the sign-in directory (ADR 0049). It holds the
+// harness's login file, File, which the supervisor keeps in step with the
+// harness's own copy; the volume outlives every execution and never enters a
+// checkpoint.
 type LoginMount struct {
 	Volume string `json:"volume"`
 	File   string `json:"file"`
-	Target string `json:"target"`
 }
 
 var loginFileName = regexp.MustCompile(`^\.?[a-z][a-z0-9.-]{0,63}$`)
 
 func (m LoginMount) valid() bool {
-	return resourceName.MatchString(m.Volume) && loginFileName.MatchString(m.File) &&
-		strings.HasPrefix(m.Target, "/workspace/session/") && path.Base(m.Target) == m.File && path.Clean(m.Target) == m.Target
+	return resourceName.MatchString(m.Volume) && loginFileName.MatchString(m.File)
 }
 
 // EnsureLoginVolume creates a harness's persistent login volume when it is
@@ -224,8 +224,7 @@ func (e *Engine) EnsureManaged(ctx context.Context, s ManagedSpec) (Instance, er
 			if s.Role != roleAgent || s.Volume == nil || !s.Login.valid() {
 				return Instance{}, errors.New("invalid Docker login mount")
 			}
-			args = append(args, "--mount", "type=volume,source="+s.Login.Volume+",target="+s.Login.Target+
-				",volume-subpath="+s.Login.File)
+			args = append(args, "--mount", "type=volume,source="+s.Login.Volume+",target="+api.SignInDirectory)
 		}
 		args = append(args, "--entrypoint", cmd[0], s.ImageID)
 		args = append(args, cmd[1:]...)
@@ -492,7 +491,7 @@ type managedInspection struct {
 func matchesManagedMounts(r managedInspection, s ManagedSpec) bool {
 	want := map[string]string{"/workspace": s.Volume.Name}
 	if s.Login != nil {
-		want[s.Login.Target] = s.Login.Volume
+		want[api.SignInDirectory] = s.Login.Volume
 	}
 	if len(r.Mounts) != len(want) {
 		return false

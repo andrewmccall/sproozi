@@ -62,6 +62,9 @@ type Launch struct {
 	// ProfileDigest names the user's profile archive for this visit. Docker
 	// mounts the live folder instead; remote placements store the archive.
 	ProfileDigest string `json:"profileDigest,omitempty"`
+	// Login names the login store a harness that signs in itself uses, the
+	// same at every placement (ADR 0049). Empty is harness.DefaultLogin.
+	Login string `json:"login,omitempty"`
 }
 
 // Incarnation identifies exact resources, rather than a reusable execution name.
@@ -305,22 +308,24 @@ type Record struct {
 	Harness harness.NativeKind `json:"harness"`
 	Version int                `json:"version"`
 	// ID is the public executionId.
-	ID                string               `json:"id"`
-	Session           string               `json:"session,omitempty"`
-	ThreadID          string               `json:"threadId,omitempty"`
-	Workspace         string               `json:"workspace,omitempty"`
-	InstructionDigest string               `json:"instructionDigest"`
-	IncludeIgnored    []string             `json:"includeIgnored,omitempty"`
-	HarnessArgs       []string             `json:"harnessArgs,omitempty"`
-	Deadline          time.Time            `json:"deadline"`
-	Ceiling           map[string]Allowance `json:"ceiling"`
-	Remaining         map[string]Allowance `json:"remaining"`
-	Checkpoint        Checkpoint           `json:"checkpoint"`
-	Phase             Phase                `json:"phase"`
-	Epoch             uint64               `json:"epoch"`
-	Active            *Visit               `json:"active,omitempty"`
-	Visits            []Visit              `json:"visits"`
-	Operations        []Operation          `json:"operations"`
-	PendingOperation  string               `json:"pendingOperation,omitempty"`
-	CancelOperation   string               `json:"cancelOperation,omitempty"`
+	ID                string   `json:"id"`
+	Session           string   `json:"session,omitempty"`
+	ThreadID          string   `json:"threadId,omitempty"`
+	Workspace         string   `json:"workspace,omitempty"`
+	InstructionDigest string   `json:"instructionDigest"`
+	IncludeIgnored    []string `json:"includeIgnored,omitempty"`
+	HarnessArgs       []string `json:"harnessArgs,omitempty"`
+	// Login is the named login every visit signs in with (ADR 0049).
+	Login            string               `json:"login,omitempty"`
+	Deadline         time.Time            `json:"deadline"`
+	Ceiling          map[string]Allowance `json:"ceiling"`
+	Remaining        map[string]Allowance `json:"remaining"`
+	Checkpoint       Checkpoint           `json:"checkpoint"`
+	Phase            Phase                `json:"phase"`
+	Epoch            uint64               `json:"epoch"`
+	Active           *Visit               `json:"active,omitempty"`
+	Visits           []Visit              `json:"visits"`
+	Operations       []Operation          `json:"operations"`
+	PendingOperation string               `json:"pendingOperation,omitempty"`
+	CancelOperation  string               `json:"cancelOperation,omitempty"`
 }

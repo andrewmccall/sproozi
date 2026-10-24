@@ -63,6 +63,11 @@ func validateLaunch(l Launch) error {
 	if err := harness.ValidateNativeArgs(l.Harness, l.HarnessArgs); err != nil {
 		return err
 	}
+	if l.Login != "" {
+		if err := harness.ValidateLogin(l.Login); err != nil {
+			return err
+		}
+	}
 	return validateAllowance(l.Allowances)
 }
 
@@ -162,7 +167,8 @@ func stoppedThread(s Stopped) string { return cmp.Or(s.ThreadID, s.Launch.Thread
 // the thread; restoredBeforeThread checks it came before any kept checkpoint.
 func launchBelongs(r Record, l Launch) bool {
 	thread := l.ThreadID == r.ThreadID || l.ThreadID == "" && l.CheckpointDigest == "" && r.Workspace != ""
-	return thread && l.Harness == r.Harness && l.ExecutionID == r.ID && l.InstructionDigest == r.InstructionDigest && l.Deadline.Equal(r.Deadline) && slices.Equal(l.IncludeIgnored, r.IncludeIgnored) && slices.Equal(l.HarnessArgs, r.HarnessArgs)
+	return thread && l.Harness == r.Harness && l.ExecutionID == r.ID && l.InstructionDigest == r.InstructionDigest && l.Deadline.Equal(r.Deadline) && slices.Equal(l.IncludeIgnored, r.IncludeIgnored) && slices.Equal(l.HarnessArgs, r.HarnessArgs) &&
+		harness.LoginOrDefault(l.Login) == harness.LoginOrDefault(r.Login)
 }
 
 func (r Record) hasCheckpoint() bool { return r.Checkpoint.Path != "" }

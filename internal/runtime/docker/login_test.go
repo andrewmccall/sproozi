@@ -7,10 +7,11 @@ import (
 	"testing"
 
 	"github.com/andrewmccall/sproozi/internal/harness"
+	"github.com/andrewmccall/sproozi/internal/session"
 )
 
 func claudeLogin() LoginMount {
-	return LoginMount{Volume: "local-login", File: ".credentials.json", Target: "/workspace/session/claude/.credentials.json"}
+	return LoginMount{Volume: "local-login", File: ".credentials.json"}
 }
 
 func TestLoginVolumeIsCreatedOnceAndPreparedByTheHelper(t *testing.T) {
@@ -39,7 +40,7 @@ func TestLoginVolumeIsCreatedOnceAndPreparedByTheHelper(t *testing.T) {
 	}
 }
 
-func TestOnlyTheAgentMountsItsLoginFile(t *testing.T) {
+func TestOnlyTheAgentMountsItsLoginStore(t *testing.T) {
 	f := newFakeDocker()
 	e := &Engine{execute: f.run}
 	volume, err := e.EnsureVolume(context.Background(), "x-workspace", "allocation", 64<<20)
@@ -55,9 +56,9 @@ func TestOnlyTheAgentMountsItsLoginFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !slices.ContainsFunc(f.calls, func(c string) bool {
-		return strings.Contains(c, "--mount type=volume,source=local-login,target=/workspace/session/claude/.credentials.json,volume-subpath=.credentials.json")
+		return strings.Contains(c, "--mount type=volume,source=local-login,target=/etc/sproozi/sign-in ")
 	}) {
-		t.Fatalf("agent lacks its login file: %q", f.calls)
+		t.Fatalf("agent lacks its login store: %q", f.calls)
 	}
 	withoutLogin := spec
 	withoutLogin.Login = nil
@@ -70,35 +71,45 @@ func TestOnlyTheAgentMountsItsLoginFile(t *testing.T) {
 		t.Fatal("the helper was given the login file")
 	}
 	escaped := login
-	escaped.Target = "/home/agent/.credentials.json"
+	escaped.File = "../.credentials.json"
 	spec.Name, spec.Login = "x-other", &escaped
 	if _, err = e.EnsureManaged(context.Background(), spec); err == nil {
-		t.Fatal("a login file outside the session folder was mounted")
+		t.Fatal("a login file outside its store was named")
 	}
 }
 
-func TestPlacementMountsEachHarnessesOwnSignInFile(t *testing.T) {
+// Each harness's named login has its own store (ADR 0049): sessions of one
+// login share a volume, and different logins or harnesses never do.
+func TestPlacementMountsTheLaunchesNamedLoginStore(t *testing.T) {
 	c := fixtureConfig()
 	c.SignIn = true
-	for kind, want := range map[harness.NativeKind]string{
-		harness.NativeCodex:  "/workspace/session/codex/auth.json",
-		harness.NativeClaude: "/workspace/session/claude/.credentials.json",
+	for kind, file := range map[harness.NativeKind]string{
+		harness.NativeCodex:   "auth.json",
+		harness.NativeClaude:  ".credentials.json",
+		harness.NativeCopilot: "config.json",
 	} {
 		c.Harness = kind
 		if err := c.validate(); err != nil {
 			t.Fatal(err)
 		}
-		got := (&Placement{config: c}).login()
-		if got == nil || got.Target != want || got.Volume != c.NetworkName+"-"+c.Name+"-login" || !strings.HasSuffix(want, "/"+got.File) {
-			t.Fatalf("%s login mount: %+v", kind, got)
+		p := &Placement{config: c}
+		def, work := p.login(session.Launch{}), p.login(session.Launch{Login: "work"})
+		if def == nil || def.File != file || def.Volume != c.NetworkName+"-"+c.Name+"-login-default" {
+			t.Fatalf("%s default login store: %+v", kind, def)
+		}
+		if again := p.login(session.Launch{Login: "default"}); *again != *def {
+			t.Fatalf("%s: the named default login is another store", kind)
+		}
+		if work == nil || work.Volume == def.Volume || work.Volume != c.NetworkName+"-"+c.Name+"-login-work" {
+			t.Fatalf("%s work login store: %+v", kind, work)
 		}
 	}
 	p := &Placement{config: c}
 	if p.spec(placementRecord{}, roleHelper).Login != nil || p.spec(placementRecord{}, roleAgent).Login == nil {
-		t.Fatal("only the agent mounts the login file")
+		t.Fatal("only the agent mounts the login store")
 	}
 	c.SignIn = false
-	if (&Placement{config: c}).login() != nil {
-		t.Fatal("a gateway-held key still mounted a login file")
+	if (&Placement{config: c}).login(session.Launch{}) != nil {
+		t.Fatal("a gateway-held key still mounted a login store")
 	}
 }
