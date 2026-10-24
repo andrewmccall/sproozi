@@ -171,7 +171,9 @@ A session uses the login it was started with, `default` unless
 `default`. A Secret stays as it is, so it suits a token that doesn't refresh,
 and gives every session the same token. A client that keeps its own copy of a
 refreshing token can still lose a refresh to another session of its login, as
-on one machine.
+on one machine. Give the claims a filesystem the agent user (UID 1000) can
+write, for example through the Pod's `fsGroup`; the supervisor creates the
+login file in an empty claim.
 
 With `signIn`, workload containers don't receive the `OPENAI_API_KEY`
 placeholder, which most clients would prefer over their own sign-in. A client

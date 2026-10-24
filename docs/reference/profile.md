@@ -1,9 +1,10 @@
 # Profile
 
-Your profile is the instructions and skills that every managed Codex and Claude
-Code session receives, beside the [Sproozi integration](sproozi-integration.md).
-It is one folder you own and edit like your own home directory. Sproozi never
-reads your existing `~/.codex` or `~/.claude`.
+Your profile is the instructions and skills that every managed Codex, Claude
+Code and Copilot session receives, beside the
+[Sproozi integration](sproozi-integration.md). It is one folder you own and
+edit like your own home directory. Sproozi never reads your existing
+`~/.codex`, `~/.claude` or `~/.copilot`.
 
 Like the instructions, a profile is guidance. It grants no access: the gateway
 enforces policy whatever the profile says.
@@ -22,13 +23,15 @@ the folder beside its `config.json`. A missing folder is an empty profile.
     AGENTS.md                 optional instructions for every harness
     codex/AGENTS.md           optional instructions for Codex only
     claude/CLAUDE.md          optional instructions for Claude Code only
+    copilot/copilot-instructions.md   optional instructions for Copilot only
     skills/
       code-review/
         SKILL.md              required; the skill's name and description
         scripts/check.sh      optional supporting files
 ```
 
-Write each `SKILL.md` in the format both clients share:
+Write each `SKILL.md` in the format every client shares. Quote a
+description that contains `: `; Copilot refuses it unquoted:
 
 ```markdown
 ---
@@ -67,6 +70,7 @@ before them.
 | --- | --- | --- |
 | Codex | `$CODEX_HOME/AGENTS.md`, after the Sproozi instructions | `$CODEX_HOME/skills/<name>`, beside `sproozi-access` |
 | Claude Code | `--append-system-prompt`, after the Sproozi instructions | Plugin `profile`, listed as `profile:<name>` |
+| Copilot | `$COPILOT_HOME/copilot-instructions.md`, after the Sproozi instructions | `$COPILOT_HOME/skills/<name>`, beside `sproozi-access` |
 
 Claude Code runs with every settings source disabled, so that hooks, plugins
 and personal settings cannot change its managed launch, and in that mode it

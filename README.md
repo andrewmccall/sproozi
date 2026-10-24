@@ -42,8 +42,8 @@ This is about giving an agent autonomy *within a defined boundary*. It does not 
 
 Sproozi does not replace an agent's own reasoning or tools. It launches an existing agent, provides an environment for it to work in, and enforces the access that you configure.
 
-- **Codex and Claude Code:** run locally in Docker or in Kubernetes Pods. Both support controlled session movement between Docker and Kubernetes, recorded with older client versions than the ones now pinned (see [what works today](#what-works-today)).
-- **OpenCode, Hermes and GitHub Copilot CLI:** run in Kubernetes Pods only, not in local Docker, and their sessions can't move. Hermes uses its official image; OpenCode and Copilot need an image you build with the stock CLI. Copilot can use the gateway's OpenAI key, a Copilot plan token held by the gateway, or its own GitHub sign-in.
+- **Codex, Claude Code and GitHub Copilot CLI:** run locally in Docker or in Kubernetes Pods, with controlled session movement between the two (see [what works today](#what-works-today) for what is recorded). Copilot can use the gateway's OpenAI key, a Copilot plan token held by the gateway, or its own GitHub sign-in.
+- **OpenCode and Hermes:** run in Kubernetes Pods only, and their sessions can't move. Hermes uses its official image; OpenCode needs an image you build with the stock CLI.
 
 [Agent support and details](docs/reference/harnesses.md)
 
@@ -51,8 +51,8 @@ Sproozi does not replace an agent's own reasoning or tools. It launches an exist
 
 ### 1. Run an agent on your computer
 
-You need Docker running and an OpenAI API key (for Codex) or an Anthropic API
-key (for Claude Code). Install the CLI, set up once, then start a session in
+You need Docker running and an OpenAI API key (for Codex or Copilot) or an
+Anthropic API key (for Claude Code). Install the CLI, set up once, then start a session in
 a Git repository with at least one commit:
 
 ```bash
@@ -67,8 +67,10 @@ reach the internet directly. Instead of typing the key:
 
 - From a script, pass `--credential-stdin`, or `--credential-file FILE` with a
   file only you can read (`chmod 600 FILE`).
-- To use your ChatGPT or Claude subscription instead of a key, run
-  `sproozi init --sign-in` ([how agents sign in](docs/guides/local-sessions.md#choose-how-an-agent-signs-in)).
+- To use your ChatGPT, Claude or Copilot subscription instead of a key, run
+  `sproozi init --sign-in`. [How credentials reach an agent](docs/explanations/credentials.md)
+  explains each way, and why a plan sign-in held by the gateway may breach
+  your provider's terms.
 
 `run` copies the repository into a container and opens Codex there; your own
 directory isn't changed. To try it without a repository of your own, run
@@ -86,7 +88,7 @@ its remote settings. [Local sessions](docs/guides/local-sessions.md#run-an-agent
 explains them.
 
 For Claude Code, run `sproozi init --harness claude-code`, then `sproozi run
---harness claude-code`. If a session is running, `init` saves the change and
+--harness claude-code`; for Copilot, use `--harness copilot`. If a session is running, `init` saves the change and
 says so. To apply it without stopping your sessions, run
 `sproozi service stop --leave-running`, then `sproozi service start`.
 

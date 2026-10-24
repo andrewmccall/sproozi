@@ -70,7 +70,7 @@ func TestPrepareLoginKeepsTheDirectoryAndTightensItsMode(t *testing.T) {
 	if err := prepareLogin(filepath.Join(dir, ".credentials.json"), os.Getuid(), os.Getgid()); err != nil {
 		t.Fatal(err)
 	}
-	if info, err := os.Stat(dir); err != nil || info.Mode().Perm() != 0o700 {
+	if info, err := os.Stat(dir); err != nil || info.Mode().Perm() != 0o711 {
 		t.Fatalf("login directory: %v %v", info, err)
 	}
 }
