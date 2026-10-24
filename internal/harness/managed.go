@@ -2,6 +2,7 @@ package harness
 
 import (
 	_ "embed"
+	"encoding/json"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 )
@@ -25,7 +26,10 @@ var managedSkillBody string
 
 // ManagedSkill renders the access-recovery SKILL.md under name.
 func ManagedSkill(name string) []byte {
-	return []byte("---\nname: " + name + "\ndescription: " + managedSkillDescription + "\n---\n\n" + managedSkillBody)
+	// The description is quoted: it contains ": ", which a strict YAML parser,
+	// such as Copilot's, refuses in a plain value.
+	description, _ := json.Marshal(managedSkillDescription)
+	return []byte("---\nname: " + name + "\ndescription: " + string(description) + "\n---\n\n" + managedSkillBody)
 }
 
 // Contract keys for ordinary runs, whose administrator command places them.

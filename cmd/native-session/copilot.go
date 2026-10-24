@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -67,12 +68,15 @@ func prepareCopilotLaunch(c config, thread string, env []string) ([]string, []st
 	env = append(env, "COPILOT_HOME="+copilotHome, "COPILOT_AUTO_UPDATE=false")
 	args := []string{"--session-id", thread, "--allow-all", "--disable-builtin-mcps",
 		"--additional-mcp-config", "@" + copilotMCP, "--no-auto-update", "--no-remote"}
+	model := c.Model
 	switch {
 	case slices.ContainsFunc(env, func(e string) bool { return strings.HasPrefix(e, "COPILOT_PROVIDER_API_KEY=") }):
 		// A gateway-held key: bring-your-own-key mode on the OpenAI route,
 		// offline from GitHub.
 		env = append(env, "COPILOT_PROVIDER_BASE_URL=https://api.openai.com/v1", "COPILOT_PROVIDER_TYPE=openai",
 			"COPILOT_PROVIDER_WIRE_API=responses", "COPILOT_OFFLINE=true")
+		// Bring-your-own-key mode has no default model of its own.
+		model = cmp.Or(model, copilotKeyModel)
 	case !slices.ContainsFunc(env, func(e string) bool { return strings.HasPrefix(e, "COPILOT_GITHUB_TOKEN=") }):
 		// Its own sign-in: Copilot prefers GH_TOKEN, or gh's own token, to
 		// its /login, so only the agent's shell gets the gh placeholder.
@@ -82,8 +86,8 @@ func prepareCopilotLaunch(c config, thread string, env []string) ([]string, []st
 		env = append(env, "BASH_ENV="+copilotBashEnv)
 		args = append(args, "--bash-env=on")
 	}
-	if c.Model != "" && !harness.NativeArgsSelectModel(harness.NativeCopilot, c.Args) {
-		args = append(args, "--model", c.Model)
+	if model != "" && !harness.NativeArgsSelectModel(harness.NativeCopilot, c.Args) {
+		args = append(args, "--model", model)
 	}
 	return append(args, c.Args...), env, nil
 }
@@ -111,6 +115,11 @@ func linkCopilotApp() error {
 	}
 	return os.Symlink(copilotApp, link)
 }
+
+// copilotKeyModel is the OpenAI model Copilot uses with a gateway-held key
+// when none is configured, from the pinned Codex's model catalog; sproozi init
+// --model or a harness --model chooses another.
+const copilotKeyModel = "gpt-6.1-sol"
 
 // nativeGHPlaceholder is the gh token the gateway replaces on GitHub routes.
 const nativeGHPlaceholder = "sproozi-worker-placeholder"

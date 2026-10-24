@@ -1,6 +1,7 @@
 # 0047: Every credential mechanism for every harness
 
-Status: accepted
+Status: accepted; its login storage is replaced by
+[ADR 0049](0049-named-logins-share-a-live-store.md), a live store per named login
 Date: 2026-10-22
 
 ## Problem and constraints
