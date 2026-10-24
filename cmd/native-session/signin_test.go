@@ -28,6 +28,13 @@ func TestSignInPathsComeFromTheRegistry(t *testing.T) {
 	}
 }
 
+const (
+	// missing reads as no login file at all.
+	missing = "<missing>"
+	// refreshedR3 is a login after its third refresh.
+	refreshedR3 = `{"refresh":"r3"}`
+)
+
 // session is one supervisor's view: its harness's login file and the shared
 // store.
 func session(t *testing.T, store string) *loginSync {
@@ -50,7 +57,7 @@ func content(t *testing.T, name string) string {
 	t.Helper()
 	data, err := os.ReadFile(name)
 	if errors.Is(err, fs.ErrNotExist) {
-		return "<missing>"
+		return missing
 	}
 	if err != nil {
 		t.Fatal(err)
@@ -75,7 +82,7 @@ func TestTwoSessionsOfOneLoginBothSurviveARefreshByEither(t *testing.T) {
 	// Docker's init-login leaves an empty file for the native user.
 	write(t, filepath.Join(store, "auth.json"), "")
 	a, b := session(t, store), session(t, store)
-	if content(t, a.native) != "<missing>" || content(t, b.native) != "<missing>" {
+	if content(t, a.native) != missing || content(t, b.native) != missing {
 		t.Fatal("an empty store produced a sign-in")
 	}
 	write(t, a.native, `{"refresh":"r1"}`) // A signs in.
@@ -88,20 +95,20 @@ func TestTwoSessionsOfOneLoginBothSurviveARefreshByEither(t *testing.T) {
 	if got := content(t, a.native); got != `{"refresh":"r2"}` {
 		t.Fatalf("A kept the spent refresh token: %s", got)
 	}
-	write(t, a.native, `{"refresh":"r3"}`) // A refreshes with r2.
+	write(t, a.native, refreshedR3) // A refreshes with r2.
 	syncAll(t, a, b)
-	if content(t, b.native) != `{"refresh":"r3"}` || content(t, filepath.Join(store, "auth.json")) != `{"refresh":"r3"}` {
+	if content(t, b.native) != refreshedR3 || content(t, filepath.Join(store, "auth.json")) != refreshedR3 {
 		t.Fatal("A's refresh didn't reach B and the store")
 	}
 	// A third session started now gets the current sign-in.
-	if c := session(t, store); content(t, c.native) != `{"refresh":"r3"}` {
+	if c := session(t, store); content(t, c.native) != refreshedR3 {
 		t.Fatal("a new session didn't get the current sign-in")
 	}
 	if err := os.Remove(b.native); err != nil { // B signs out.
 		t.Fatal(err)
 	}
 	syncAll(t, b, a)
-	if content(t, a.native) != "<missing>" {
+	if content(t, a.native) != missing {
 		t.Fatal("B's sign-out didn't reach A")
 	}
 }
@@ -111,7 +118,7 @@ func TestDifferentLoginsKeepSeparateStores(t *testing.T) {
 	work, personal := session(t, t.TempDir()), session(t, t.TempDir())
 	write(t, work.native, `{"account":"work"}`)
 	syncAll(t, work, personal)
-	if content(t, personal.native) != "<missing>" || content(t, personal.stored) != "" {
+	if content(t, personal.native) != missing || content(t, personal.stored) != "" {
 		t.Fatal("one login's sign-in reached another")
 	}
 }

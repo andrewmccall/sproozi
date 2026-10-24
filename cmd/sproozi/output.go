@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -161,7 +162,7 @@ func writeCatalogueTable(w io.Writer, c catalogue) error {
 	// whenever rows come from more than one.
 	several := slices.ContainsFunc(c.Sessions, func(r catalogueRow) bool { return r.Executor != c.Sessions[0].Executor })
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	header := []string{"ID", "HARNESS", "PHASE", "PLACEMENT", "DEADLINE"}
+	header := []string{"ID", "HARNESS", "LOGIN", "PHASE", "PLACEMENT", "DEADLINE"}
 	if several {
 		header = append(header, "LISTED BY")
 	}
@@ -171,7 +172,8 @@ func writeCatalogueTable(w io.Writer, c catalogue) error {
 		if slices.Contains(livePhases, r.Phase) && !r.Deadline.IsZero() {
 			ends = formatTime(r.Deadline)
 		}
-		row := []string{shortID(r.ID), string(r.Harness), r.Phase, r.Placement, ends}
+		// A harness whose credential the gateway holds has no login.
+		row := []string{shortID(r.ID), string(r.Harness), cmp.Or(r.Login, "-"), r.Phase, r.Placement, ends}
 		if several {
 			row = append(row, r.Executor)
 		}

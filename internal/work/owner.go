@@ -117,15 +117,17 @@ type SessionQuery struct {
 
 type View struct {
 	project.Association
-	ID               string               `json:"id"`
-	ExecutionID      string               `json:"executionId"`
-	AllocationID     string               `json:"allocationId"`
-	Placement        string               `json:"placement"`
-	Incarnation      *session.Incarnation `json:"incarnation,omitempty"`
-	Harness          harness.NativeKind   `json:"harness"`
-	Phase            Phase                `json:"phase"`
-	ThreadID         string               `json:"threadId,omitempty"`
-	Deadline         time.Time            `json:"deadline"`
+	ID           string               `json:"id"`
+	ExecutionID  string               `json:"executionId"`
+	AllocationID string               `json:"allocationId"`
+	Placement    string               `json:"placement"`
+	Incarnation  *session.Incarnation `json:"incarnation,omitempty"`
+	Harness      harness.NativeKind   `json:"harness"`
+	Phase        Phase                `json:"phase"`
+	ThreadID     string               `json:"threadId,omitempty"`
+	Deadline     time.Time            `json:"deadline"`
+	// Login is the named login of a harness that signs in itself.
+	Login            string               `json:"login,omitempty"`
 	CheckpointDigest string               `json:"checkpointDigest,omitempty"`
 	Result           string               `json:"result,omitempty"`
 	ResultTruncated  bool                 `json:"resultTruncated,omitempty"`
@@ -376,7 +378,7 @@ func view(r record) View {
 	}
 	v := View{Association: association, ID: r.Launch.ExecutionID, ExecutionID: r.Launch.ExecutionID,
 		AllocationID: r.Launch.AllocationID, Placement: r.Launch.Placement, Incarnation: r.Incarnation,
-		Harness: r.Launch.Harness, Phase: r.Phase, Deadline: r.Launch.Deadline,
+		Harness: r.Launch.Harness, Phase: r.Phase, Deadline: r.Launch.Deadline, Login: r.Launch.Login,
 		Result: r.Result, ResultTruncated: r.ResultTruncated, Problem: r.Problem}
 	v.CheckpointInfo, v.WorkspaceFrom = r.CheckpointInfo, r.Intent.WorkspaceFrom
 	if r.Stopped != nil {

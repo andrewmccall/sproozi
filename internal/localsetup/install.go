@@ -51,7 +51,10 @@ type Options struct {
 	// SignIn lets the harness sign in to its own provider account instead of
 	// the gateway holding a key (ADR 0047). Without it or a key, a harness
 	// keeps the choice it already has.
-	SignIn       bool
+	SignIn bool
+	// Login names a login to set up for a harness that signs in itself, for
+	// a second account; empty is harness.DefaultLogin (ADR 0049).
+	Login        string
 	Port         uint16
 	StartService bool
 	Executable   string
@@ -303,6 +306,15 @@ func (i *installer) prepareHarness(ctx context.Context) error {
 	}
 	if o.ChatGPT {
 		return i.signInChatGPT(ctx, provider)
+	}
+	if o.Login != "" && mechanism != harness.CredentialSignIn {
+		return fail("harness", fmt.Errorf("--login names a login of a harness that signs in itself, but %s uses a "+
+			"credential the gateway holds", o.Harness), "add --sign-in")
+	}
+	if o.Login != "" && o.Login != harness.DefaultLogin && !slices.Contains(i.selected.Logins, o.Login) {
+		i.selected.Logins = append(i.selected.Logins, o.Login)
+		i.step("%s has a login %q; start a session on it with: sproozi run --harness %s --login %s",
+			o.Harness, o.Login, o.Harness, o.Login)
 	}
 	if mechanism == harness.CredentialSignIn {
 		// The harness signs in in its first session; the gateway forwards
@@ -613,6 +625,14 @@ func renderConfig(l Layout, inst Installation, instructions string) home.Config 
 			ProviderCAFile: primary.ProviderCAFile,
 			MCPAuthority:   MCPAuthority},
 	}
+	for _, h := range inst.Harnesses {
+		if len(h.Logins) != 0 {
+			if c.Logins == nil {
+				c.Logins = map[harness.NativeKind][]string{}
+			}
+			c.Logins[h.Harness] = slices.Clone(h.Logins)
+		}
+	}
 	for _, h := range inst.Harnesses[1:] {
 		c.Harnesses = append(c.Harnesses, home.LocalHarness{Harness: h.Harness, Name: h.Name, GatewayPort: h.Port, Model: h.Model,
 			NativeOptions: nativeOptions(h.Harness, h.Credential == ""), ProviderURL: h.ProviderURL, ProviderTokenFile: h.Credential,
@@ -686,9 +706,30 @@ func mergeConfig(existing, rendered home.Config) (home.Config, bool, error) {
 func syncCredentialMode(c *home.Config, rendered home.Config) bool {
 	c.Harnesses = slices.Clone(c.Harnesses)
 	changed := false
+	// A switch between a key and a sign-in, or between two of the
+	// installation's own credential files, such as Copilot's key and its
+	// GitHub token, follows; an edited path elsewhere stays.
 	follow := func(current *string, want string) {
-		if (*current == "") != (want == "") {
+		if (*current == "") != (want == "") ||
+			*current != want && *current != "" && filepath.Dir(*current) == filepath.Dir(want) {
 			*current, changed = want, true
+		}
+	}
+	// A default provider URL follows the mechanism; a private one stays.
+	followURL := func(current *string, want string) {
+		if *current != want && slices.Contains([]string{openAIURL, anthropicURL, copilotURL}, *current) {
+			*current, changed = want, true
+		}
+	}
+	followURL(&c.Gateway.ProviderURL, rendered.Gateway.ProviderURL)
+	for kind, logins := range rendered.Logins {
+		for _, login := range logins {
+			if !slices.Contains(c.Logins[kind], login) {
+				if c.Logins == nil {
+					c.Logins = map[harness.NativeKind][]string{}
+				}
+				c.Logins[kind], changed = append(slices.Clone(c.Logins[kind]), login), true
+			}
 		}
 	}
 	// Native options still at the previous mode's defaults switch with it.
@@ -710,6 +751,7 @@ func syncCredentialMode(c *home.Config, rendered home.Config) bool {
 				switchOptions(r.Harness, &c.Harnesses[i].NativeOptions, signIn)
 			}
 			follow(&c.Harnesses[i].ProviderTokenFile, r.ProviderTokenFile)
+			followURL(&c.Harnesses[i].ProviderURL, r.ProviderURL)
 			if c.Harnesses[i].ProviderTokenKind != r.ProviderTokenKind {
 				c.Harnesses[i].ProviderTokenKind, changed = r.ProviderTokenKind, true
 			}

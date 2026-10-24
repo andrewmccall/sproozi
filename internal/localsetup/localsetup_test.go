@@ -548,3 +548,31 @@ func TestCopilotProviderFollowsItsMechanism(t *testing.T) {
 		t.Fatalf("private endpoint: %+v %v", *i.selected, err)
 	}
 }
+
+// workLogin is a second login's name.
+const workLogin = "work"
+
+// init --sign-in --login NAME sets up a named login; the configuration lists
+// it for the service, and a gateway-held credential has none (ADR 0049).
+func TestInitSetsUpNamedLoginsForASignedInHarness(t *testing.T) {
+	l, inst := testInstallation(t)
+	i := &installer{l: l, inst: inst, o: Options{Harness: harness.NativeCodex, SignIn: true, Login: workLogin, Progress: io.Discard}}
+	if err := i.prepareHarness(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	i.o.Login = workLogin // again: recorded once
+	if err := i.prepareHarness(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(i.selected.Logins, []string{workLogin}) {
+		t.Fatalf("logins %v", i.selected.Logins)
+	}
+	if c := renderConfig(l, i.inst, DefaultInstructions); !slices.Equal(c.Logins[harness.NativeCodex], []string{workLogin}) {
+		t.Fatalf("configured logins %v", c.Logins)
+	}
+	i.o = Options{Harness: harness.NativeCodex, Login: "other", Progress: io.Discard,
+		Credential: CredentialInput{Stdin: strings.NewReader("sk-fixture")}}
+	if err := i.prepareHarness(t.Context()); err == nil || !strings.Contains(err.Error(), "--sign-in") {
+		t.Fatalf("a login for a gateway-held key: %v", err)
+	}
+}

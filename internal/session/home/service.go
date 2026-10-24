@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -93,6 +94,9 @@ type Status struct {
 	InitialStage string    `json:"initialStage"`
 	ThreadID     string    `json:"threadId,omitempty"`
 	Deadline     time.Time `json:"deadline"`
+	// Login is the named login a harness that signs in itself uses; empty
+	// when the gateway holds its credential.
+	Login string `json:"login,omitempty"`
 	// Exit describes a harness that exited on its own and stopped the session.
 	Exit    *session.Exit   `json:"exit,omitempty"`
 	Session *session.Record `json:"session,omitempty"`
@@ -117,7 +121,7 @@ func executionStatus(r session.Record) Status {
 	default:
 		launch, incarnation = r.Operations[0].Launch, r.Operations[0].Incarnation
 	}
-	out.Placement, out.AllocationID = launch.Placement, launch.AllocationID
+	out.Placement, out.AllocationID, out.Login = launch.Placement, launch.AllocationID, launch.Login
 	if incarnation != nil {
 		i := *incarnation
 		out.Incarnation = &i
@@ -178,6 +182,13 @@ func (s *Service) createExecution(first session.Launch, owner string, input func
 // harnessArgs are the user's own arguments for the stock harness, kept with
 // this execution and passed to each of its visits.
 func (s *Service) Start(ctx context.Context, id, operationID, path string, kind harness.NativeKind, includeIgnored, harnessArgs []string) (Status, error) {
+	return s.StartWithLogin(ctx, id, operationID, path, kind, includeIgnored, harnessArgs, "")
+}
+
+// StartWithLogin is Start with a named login for a harness that signs in
+// itself; empty uses harness.DefaultLogin (ADR 0049).
+func (s *Service) StartWithLogin(ctx context.Context, id, operationID, path string, kind harness.NativeKind,
+	includeIgnored, harnessArgs []string, login string) (Status, error) {
 	if err := workspace.ValidateIgnoredPaths(includeIgnored); err != nil {
 		return Status{}, err
 	}
@@ -191,6 +202,14 @@ func (s *Service) Start(ctx context.Context, id, operationID, path string, kind 
 	if err != nil {
 		return Status{}, err
 	}
+	if err = s.checkLogin(local, login); err != nil {
+		return Status{}, err
+	}
+	if local.SignIn {
+		// The session records its login, default included, so every visit
+		// and move signs in with the same one.
+		login = harness.LoginOrDefault(login)
+	}
 	if !work.CanonicalID(id) || !work.CanonicalID(operationID) || !filepath.IsAbs(path) {
 		return Status{}, errors.New("home: UUIDs and absolute stopped workspace required")
 	}
@@ -200,7 +219,7 @@ func (s *Service) Start(ctx context.Context, id, operationID, path string, kind 
 	}
 	r, err := s.coordinator.Inspect(id)
 	if os.IsNotExist(err) {
-		r, err = s.createWorkspaceExecution(ctx, id, operationID, path, local, includeIgnored, harnessArgs)
+		r, err = s.createWorkspaceExecution(ctx, id, operationID, path, local, includeIgnored, harnessArgs, login)
 	}
 	if err != nil {
 		return Status{}, err
@@ -215,7 +234,7 @@ func (s *Service) Start(ctx context.Context, id, operationID, path string, kind 
 			"started with harness %s: start a new session for %s", id, first.Harness, kind))
 	}
 	if first.OperationID != operationID || !slices.Equal(first.IncludeIgnored, includeIgnored) ||
-		!slices.Equal(first.HarnessArgs, harnessArgs) {
+		!slices.Equal(first.HarnessArgs, harnessArgs) || first.Login != login {
 		// A new operation conflicts again; only the retained one continues it.
 		return Status{}, rejectedError(fmt.Sprintf("home: start intent conflicts with retained launch; %s was "+
 			"started with operation %s: to continue it, repeat the original run command with --operation %s, "+
@@ -272,12 +291,12 @@ func (s *Service) catalogStartedLocked(r session.Record) error {
 	return s.saveCatalog(c)
 }
 
-func (s *Service) createWorkspaceExecution(ctx context.Context, id, operationID, path string, local runtimedocker.PlacementConfig, includeIgnored, harnessArgs []string) (session.Record, error) {
+func (s *Service) createWorkspaceExecution(ctx context.Context, id, operationID, path string, local runtimedocker.PlacementConfig, includeIgnored, harnessArgs []string, login string) (session.Record, error) {
 	first := session.Launch{Harness: local.Harness, ExecutionID: id, OperationID: operationID,
 		AllocationID: uuid.NewString(), Epoch: 1, Placement: local.Name,
 		InstructionDigest: local.InstructionDigest, IncludeIgnored: slices.Clone(includeIgnored),
-		HarnessArgs: slices.Clone(harnessArgs),
-		Deadline:    time.Now().Add(s.duration).UTC(), Allowances: harnessAllowances(local.Harness, s.config.Allowances)}
+		HarnessArgs: slices.Clone(harnessArgs), Login: login,
+		Deadline: time.Now().Add(s.duration).UTC(), Allowances: harnessAllowances(local.Harness, s.config.Allowances)}
 	return s.createExecution(first, "", func() ([]byte, error) {
 		limit := s.config.Local.MaxCheckpointBytes
 		data, err := workspace.CaptureLocal(ctx, path, includeIgnored, limit)
@@ -517,4 +536,26 @@ func (s *Service) sweepLedgerPeriodically() {
 			s.sweepLedger()
 		}
 	}
+}
+
+// checkLogin accepts a named login only for a harness that signs in itself,
+// and only one set up with sproozi init, naming the ones that are.
+func (s *Service) checkLogin(local runtimedocker.PlacementConfig, login string) error {
+	if login == "" || login == harness.DefaultLogin {
+		return nil
+	}
+	if err := harness.ValidateLogin(login); err != nil {
+		return rejectedError("home: " + err.Error())
+	}
+	if !local.SignIn {
+		return rejectedError(fmt.Sprintf("home: --login applies to a harness that signs in itself; %s uses a "+
+			"credential the gateway holds", local.Harness))
+	}
+	known := append([]string{harness.DefaultLogin}, s.config.Logins[local.Harness]...)
+	if !slices.Contains(known, login) {
+		return rejectedError(fmt.Sprintf("home: %s has no login %q; its logins are %s. Set one up with "+
+			"\"sproozi init --harness %s --sign-in --login %s\"", local.Harness, login, strings.Join(known, ", "),
+			local.Harness, login))
+	}
+	return nil
 }

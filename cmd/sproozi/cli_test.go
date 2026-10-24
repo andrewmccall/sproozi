@@ -286,7 +286,7 @@ func TestSessionsListsThisMachineAsLocal(t *testing.T) {
 	})
 	code, out, stderr := runCLI("ls", testSocketFlag, socket, "--project", "sproozi-dev")
 	if code != 0 || !strings.HasPrefix(out, "ID ") ||
-		!strings.Contains(out, shortID(id)+"  codex    retained  local      -") {
+		!strings.Contains(out, shortID(id)+"  codex    -      retained  local      -") {
 		t.Fatalf("table exited %d: %q %q", code, out, stderr)
 	}
 	if (*requests)[0].Project != "sproozi-dev" {

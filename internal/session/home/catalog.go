@@ -422,6 +422,7 @@ func (s *Service) Resume(ctx context.Context, id, operation string, harnessArgs 
 		AllocationID: uuid.NewString(), Epoch: 1, Placement: local.Name,
 		ThreadID: cmp.Or(r.Committed.ThreadID, r.Committed.Launch.ThreadID), InstructionDigest: local.InstructionDigest,
 		IncludeIgnored: slices.Clone(r.Committed.Launch.IncludeIgnored), HarnessArgs: slices.Clone(harnessArgs),
+		Login:    r.Committed.Launch.Login,
 		Deadline: time.Now().Add(s.duration).UTC(), Allowances: allowances, CheckpointDigest: r.Committed.CheckpointDigest}
 	if first.CheckpointDigest == "" {
 		// Stopped with no conversation: start one again from its workspace.
@@ -503,7 +504,7 @@ func (s *Service) catalogStatus(r localSession) (Status, error) {
 		AllocationID: r.Committed.Launch.AllocationID, Incarnation: &r.Committed.Incarnation,
 		Placement: r.Committed.Launch.Placement, Phase: stage, Harness: r.Committed.Launch.Harness,
 		InitialStage: stage, ThreadID: cmp.Or(r.Committed.ThreadID, r.Committed.Launch.ThreadID),
-		Deadline: r.Committed.Launch.Deadline, Exit: r.Committed.Exit}, nil
+		Deadline: r.Committed.Launch.Deadline, Login: r.Committed.Launch.Login, Exit: r.Committed.Exit}, nil
 }
 
 // resolveSession maps a session or execution ID to the execution to act on

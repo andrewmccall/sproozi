@@ -106,7 +106,7 @@ func (q *options) callError(ctx context.Context, err error) error {
 // without one: attach, or cancelling a session already cancelled.
 func (q *options) request(ctx context.Context) (home.Request, bool, error) {
 	request := home.Request{Action: homeActions[q.action()], ID: q.id, OperationID: q.operation,
-		IncludeIgnored: q.includeIgnored, Harness: harness.NativeKind(q.harness), HarnessArgs: q.harnessArgs}
+		IncludeIgnored: q.includeIgnored, Harness: harness.NativeKind(q.harness), HarnessArgs: q.harnessArgs, Login: q.login}
 	switch q.action() {
 	case cmdRun:
 		request.Workspace = q.path

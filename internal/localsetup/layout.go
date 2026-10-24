@@ -149,6 +149,8 @@ type Harness struct {
 	// Kind says what Credential holds for the gateway: an API key when empty,
 	// "token" for a sign-in token, "chatgpt" for a ChatGPT plan sign-in.
 	Kind string `json:"kind,omitempty"`
+	// Logins are the harness's named logins besides harness.DefaultLogin.
+	Logins []string `json:"logins,omitempty"`
 }
 
 // Mechanism is how the harness reaches its provider: its own sign-in with no

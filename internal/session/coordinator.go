@@ -54,7 +54,7 @@ func (c *Coordinator) Create(first Launch, input []byte, session string) (Record
 		ThreadID: first.ThreadID, InstructionDigest: first.InstructionDigest,
 		IncludeIgnored: append([]string(nil), first.IncludeIgnored...), HarnessArgs: append([]string(nil), first.HarnessArgs...),
 		Login: first.Login, Deadline: first.Deadline,
-		Ceiling:  cloneAllowances(first.Allowances), Remaining: cloneAllowances(first.Allowances),
+		Ceiling: cloneAllowances(first.Allowances), Remaining: cloneAllowances(first.Allowances),
 		Phase: PhasePreparing, PendingOperation: first.OperationID,
 		Operations: []Operation{{ID: first.OperationID, Destination: first.Placement, Launch: &first, Stage: stagePrepare}}}
 	if first.CheckpointDigest == "" {

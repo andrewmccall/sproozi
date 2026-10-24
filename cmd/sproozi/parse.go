@@ -39,6 +39,7 @@ type options struct {
 	verb, operand      string
 	id, path           string
 	harnessArgs        []string
+	login              string
 	root, configPath   string
 	socket             string
 	socketGiven        bool
@@ -124,7 +125,7 @@ func parse(args []string) (options, error) {
 	q.providerURL, q.providerCA, q.credentialFile = str("provider-url"), str("provider-ca-file"), str("credential-file")
 	q.instructionsFile, q.context, q.namespace = str("instructions-file"), str("context"), str("namespace")
 	q.task, q.repository, q.project = str("task"), str("repository"), project.ID(str("project"))
-	q.operation, q.id = str("operation"), str("id")
+	q.operation, q.id, q.login = str("operation"), str("id"), str("login")
 	q.local = boolean("local")
 	q.credentialStdin, q.skipCheck = boolean("credential-stdin"), boolean("skip-credential-check")
 	q.signIn, q.token, q.chatgpt = boolean("sign-in"), boolean("token"), boolean("chatgpt")
@@ -238,6 +239,11 @@ func (q *options) validate(str func(string) string) error {
 	if q.harness != "" {
 		if err := harness.NativeKind(q.harness).Validate(); err != nil {
 			return usagef("--harness must be %s", harness.ManagedKindList())
+		}
+	}
+	if q.login != "" {
+		if err := harness.ValidateLogin(q.login); err != nil {
+			return usagef("--login: %v", err)
 		}
 	}
 	if q.project != "" && !project.ValidID(q.project) {

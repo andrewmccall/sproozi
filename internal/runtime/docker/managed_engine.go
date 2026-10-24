@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"io"
 	"net/netip"
 	"os/exec"
@@ -16,6 +15,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 
 	"github.com/andrewmccall/sproozi/internal/harness"
 

@@ -148,6 +148,9 @@ func TestFirstVisitFromWorkspaceBindsGenuineThreadAtFirstStop(t *testing.T) {
 // A visit with no native conversation stops without a checkpoint; the
 // execution keeps its retained workspace, and the next visit starts again from
 // it with the same harness arguments until a later stop binds the thread.
+// workLogin is a named login a session keeps.
+const workLogin = "work"
+
 func TestTurnlessStopKeepsWorkspaceAndRestartsFromIt(t *testing.T) {
 	t.Parallel()
 	c, dir, local, remote, start := setup(t)
@@ -155,6 +158,7 @@ func TestTurnlessStopKeepsWorkspaceAndRestartsFromIt(t *testing.T) {
 	first.ExecutionID, first.OperationID, first.AllocationID = uuid.NewString(), uuid.NewString(), uuid.NewString()
 	first.ThreadID, first.CheckpointDigest = "", ""
 	first.HarnessArgs = []string{"--search"}
+	first.Login = workLogin
 	if _, err := c.Create(first, []byte("captured git workspace"), ""); err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +182,8 @@ func TestTurnlessStopKeepsWorkspaceAndRestartsFromIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	if r.Phase != PhaseActive || r.Active.Launch.ThreadID != "" || r.Active.Launch.CheckpointDigest != "" ||
-		r.Active.Launch.Epoch != 2 || !slices.Equal(r.Active.Launch.HarnessArgs, first.HarnessArgs) {
+		r.Active.Launch.Epoch != 2 || !slices.Equal(r.Active.Launch.HarnessArgs, first.HarnessArgs) ||
+		r.Active.Launch.Login != workLogin {
 		t.Fatalf("restart from workspace = %+v", r.Active)
 	}
 	local.turnless = false
@@ -187,6 +192,10 @@ func TestTurnlessStopKeepsWorkspaceAndRestartsFromIt(t *testing.T) {
 	}
 	if r.ThreadID != testThread || !r.hasCheckpoint() || remote.activated != 1 {
 		t.Fatalf("later stop did not bind the conversation: %+v", r)
+	}
+	// A move keeps the session's named login at the destination (ADR 0049).
+	if r.Active == nil || r.Active.Launch.Login != workLogin {
+		t.Fatalf("the move lost the session's login: %+v", r.Active)
 	}
 	if err = c.Close(); err != nil {
 		t.Fatal(err)

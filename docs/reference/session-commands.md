@@ -33,7 +33,7 @@ usage, a short description and one line per flag. An unknown help topic fails.
 | Setup | `init` | Set up this machine: image, network, certificates, provider key and service. Run again to add an agent with `--harness` or to repair. |
 | Setup | `doctor` | Check the installation without changing it. |
 | Setup | `service status\|start\|stop` | Show, start or stop the background service. |
-| Setup | `credentials set AGENT\|PROVIDER`, `credentials list` | Store or replace a gateway-held provider key (`codex` or `openai`, `claude-code` or `anthropic`), or list which keys are stored. An agent set up with `--sign-in` has no key to set. Keys are never printed. |
+| Setup | `credentials set AGENT\|PROVIDER`, `credentials list` | Store or replace a gateway-held provider key or token (`codex` or `openai`, `claude-code` or `anthropic`; for `copilot`, the OpenAI key or the GitHub token, whichever it uses), or list which are stored. An agent set up with `--sign-in` has no key to set. Keys are never printed. |
 | Setup | `images status\|prepare` | Show the installed and release agent images, or pull or build one. |
 | Setup | `certificates status\|renew\|rotate-ca\|replace-ca` | Show or maintain this machine's certificate authority. |
 | Setup | `version`, `-v`, `--version` | Show the version and the release's agent image. |
@@ -85,7 +85,7 @@ anything is read or sent. `-d` is short for `--detach`.
 
 | Command | Flags |
 | --- | --- |
-| `run` | `--harness`, `--detach`, `--include-ignored`, `--remote`, `--context`, `--namespace`, `--task`, `--task-file`, `--repository`, `--project`, `--json`, `--root` |
+| `run` | `--harness`, `--login`, `--detach`, `--include-ignored`, `--remote`, `--context`, `--namespace`, `--task`, `--task-file`, `--repository`, `--project`, `--json`, `--root` |
 | `sessions` | `--remote`, `--context`, `--namespace`, `--project`, `--json`, `--root` |
 | `status` | `--remote`, `--context`, `--namespace`, `--json`, `--root` |
 | `attach` | `--root` |
@@ -96,7 +96,7 @@ anything is read or sent. `-d` is short for `--detach`.
 | `move` | `--local`, `--remote`, `--context`, `--namespace`, `--json`, `--root` |
 | `pull` | `--context`, `--namespace`, `--json`, `--root` |
 | `recover` | `--remote`, `--context`, `--namespace`, `--json`, `--root` |
-| `init` | `--harness`, `--model`, `--credential-file`, `--credential-stdin`, `--skip-credential-check`, `--token`, `--chatgpt`, `--sign-in`, `--provider-url`, `--provider-ca-file`, `--instructions-file`, `--image`, `--build`, `--port`, `--no-service`, `--timeout`, `--json`, `--root` |
+| `init` | `--harness`, `--model`, `--credential-file`, `--credential-stdin`, `--skip-credential-check`, `--token`, `--chatgpt`, `--sign-in`, `--login`, `--provider-url`, `--provider-ca-file`, `--instructions-file`, `--image`, `--build`, `--port`, `--no-service`, `--timeout`, `--json`, `--root` |
 | `doctor` | `--check-provider`, `--json`, `--root` |
 | `service` | `--leave-running`, `--json`, `--root` |
 | `credentials` | `--credential-file`, `--credential-stdin`, `--skip-credential-check`, `--json`, `--root` |
@@ -107,7 +107,7 @@ anything is read or sent. `-d` is short for `--detach`.
 | Flag | Meaning |
 | --- | --- |
 | `--root PATH` | Installation directory. Without it: `$SPROOZI_ROOT`, else the root `init --root` recorded, else `~/.sproozi`. |
-| `--harness NAME` | `codex` or `claude-code`. For `run`, defaults to the first agent set up; for `init`, the agent to add, default `codex`. |
+| `--harness NAME` | `codex`, `claude-code` or `copilot`. For `run`, defaults to the first agent set up; for `init`, the agent to add, default `codex`. |
 | `-d`, `--detach` | Start or resume without connecting the terminal. Without a terminal on standard input, `run` and `resume` start the session and say they did not attach. |
 | `--include-ignored PATH` | Also copy this Git-ignored file into the session, on every visit. Repeatable. |
 | `--remote` | Work in a cluster: `run --remote` submits a task there (it needs `--task` or `--task-file` and takes no `PATH`, `--detach`, `--include-ignored` or agent arguments); `move --remote` sends the session there; `sessions`, `status`, `cancel` and `recover` with `--remote` read or act on the cluster's sessions only. Implied by `--context` or `--namespace`. |
@@ -120,6 +120,7 @@ anything is read or sent. `-d` is short for `--detach`.
 | `--credential-file FILE`, `--credential-stdin` | Read the provider key from a file only you can read, or from standard input, instead of a hidden prompt. A key is never a command-line value. |
 | `--skip-credential-check` | Do not ask the provider to check the key. |
 | `--sign-in` | Let the agent sign in to its own provider account instead of storing a key. Refused with `--credential-file`, `--credential-stdin` or `--token`. |
+| `--login NAME` | A named login of an agent that signs in itself, so one agent can use several accounts. `init --sign-in --login NAME` sets it up; `run --login NAME` starts a session on it. Default `default`. Lowercase letters, digits and hyphens, at most 24. A session keeps its login when it resumes or moves. |
 | `--chatgpt` | Sign the gateway in to your ChatGPT plan in the browser, for an OpenAI agent such as Codex; the gateway keeps the sign-in in `credentials/chatgpt-session.json` and refreshes it. Reuses a valid stored sign-in. |
 | `--token` | The stored credential is a sign-in token the gateway attaches, such as one from `claude setup-token`, rather than an API key. Skips the credential check. |
 | `--provider-url URL`, `--provider-ca-file FILE` | A private provider endpoint and its PEM CA bundle, for the agent `init` adds. |
