@@ -46,6 +46,13 @@ spec:
           7|28) echo 'DENIED: direct API server path is blocked' ;;
           *) echo "UNEXPECTED: direct API server path failed with curl exit $status, not a refused or timed-out connection"; exit 1 ;;
           esac
+          status=0
+          env -u HTTPS_PROXY -u https_proxy curl -sk --max-time 5 https://1.1.1.1/ >/dev/null 2>&1 || status=$?
+          case "$status" in
+          0) echo 'UNEXPECTED: direct internet path was reachable'; exit 1 ;;
+          7|28) echo 'DENIED: direct internet path is blocked' ;;
+          *) echo "UNEXPECTED: direct internet path failed with curl exit $status, not a refused or timed-out connection"; exit 1 ;;
+          esac
           echo 'First check passed. Keeping this Pod for inspection for 60 seconds'
           sleep 60
         resources:

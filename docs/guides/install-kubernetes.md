@@ -106,7 +106,7 @@ for what to create first.
 ## Run the first check
 
 The first check starts a sandbox Pod that lists Sproozi's Pods through the
-gateway, tries two things its policy forbids, then waits 60 seconds so you can
+gateway, tries three things its policy forbids, then waits 60 seconds so you can
 inspect it.
 
 ```sh
@@ -123,6 +123,7 @@ The log lists Sproozi's Pods, then prints:
 PERMITTED: Pod read succeeded
 DENIED: Secret read is outside the policy
 DENIED: direct API server path is blocked
+DENIED: direct internet path is blocked
 First check passed. Keeping this Pod for inspection for 60 seconds
 ```
 
@@ -174,7 +175,7 @@ To run it again, delete the finished run first:
 | The run is `Failed` before a Pod appears | Run `kubectl describe agentrun first-check -n sproozi-system` and read the controller log: `kubectl logs -n sproozi-system deployment/sproozi-controller-manager`. |
 | `AlreadyExists` when you create the run | Delete the earlier run first. |
 | The run is `Failed` with `TemplateNotFound` | The run was created before `first-check/resources.yaml`. Apply that file, then delete the run and create it again. |
-| `UNEXPECTED: direct API server path was reachable` | The network plugin doesn't enforce NetworkPolicy from Pod start. Use Calico or Cilium; see [security hardening](../reference/security-hardening.md). |
+| `UNEXPECTED: direct API server path was reachable` or `direct internet path was reachable` | The network plugin doesn't enforce NetworkPolicy from Pod start. Use Calico or Cilium; see [security hardening](../reference/security-hardening.md). |
 
 ## Upgrade
 

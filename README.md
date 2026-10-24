@@ -90,7 +90,8 @@ explains them.
 For Claude Code, run `sproozi init --harness claude-code`, then `sproozi run
 --harness claude-code`; for Copilot, use `--harness copilot`. If a session is running, `init` saves the change and
 says so. To apply it without stopping your sessions, run
-`sproozi service stop --leave-running`, then `sproozi service start`.
+`sproozi service stop --leave-running`, then `sproozi service start`;
+`sproozi doctor` then checks the new agent's containment.
 
 [Local sessions](docs/guides/local-sessions.md) explains each step.
 [Install the CLI](docs/guides/install.md) covers downloads for Linux and
@@ -99,8 +100,8 @@ Windows.
 ### 2. Try it on Kubernetes
 
 Install a release on a local Kind cluster and run a first check that shows one
-request allowed through the gateway and two refused: one at the gateway, one at
-the network. It needs Kind, kubectl and internet access (the guide installs
+request allowed through the gateway and three refused: one at the gateway and
+two at the network (the API server and the internet, reached directly). It needs Kind, kubectl and internet access (the guide installs
 Calico for network policy), but no accounts and no builds.
 
 **[Install on Kubernetes →](docs/guides/install-kubernetes.md)**

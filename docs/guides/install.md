@@ -45,7 +45,8 @@ Expand-Archive .\sproozi_VERSION_windows_amd64.zip -DestinationPath .\sproozi
 ```
 
 Replace `VERSION` with the release number. Put the extracted executable in a
-directory on your `PATH`. Standalone binaries are unsigned. Homebrew is the
+directory on your `PATH`. Standalone binaries are unsigned. `checksums.txt` comes from the same
+release, so it catches a damaged download, not a tampered release. Homebrew is the
 recommended macOS installation path.
 
 ## Choose the next step

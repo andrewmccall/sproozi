@@ -55,7 +55,8 @@ from a file only you can read, or from standard input, and print JSON:
 sproozi init --credential-file /absolute/path/to/openai-key --json
 ```
 
-A key is never accepted as a command-line value. Setup checks it by listing
+With `--json`, the result goes to standard output and the progress lines to
+standard error. A key is never accepted as a command-line value. Setup checks it by listing
 the provider's models, which makes no inference request; `--skip-credential-check`
 skips that.
 
