@@ -27,6 +27,9 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/andrewmccall/sproozi/internal/harness"
+	"k8s.io/apimachinery/pkg/api/resource"
+
 	corev1 "k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -144,10 +147,11 @@ func (p *PodSandboxClient) ValidateRuntime(ctx context.Context, rt *sprooziv1alp
 func (p *PodSandboxClient) Ensure(ctx context.Context, run *sprooziv1alpha1.AgentRun, rt *sprooziv1alpha1.AgentRuntime) (string, error) {
 	saName := run.Status.Identity.ServiceAccountName
 	pod := BuildPodSpec(run, rt, saName)
-	return p.ensurePod(ctx, pod, rt.Spec.GatewayEndpoint)
+	return p.ensurePod(ctx, pod, rt)
 }
 
-func (p *PodSandboxClient) ensurePod(ctx context.Context, pod *corev1.Pod, gatewayEndpoint string) (string, error) {
+func (p *PodSandboxClient) ensurePod(ctx context.Context, pod *corev1.Pod, rt *sprooziv1alpha1.AgentRuntime) (string, error) {
+	gatewayEndpoint := rt.Spec.GatewayEndpoint
 	// A sandbox that already exists keeps the gateway address it was created
 	// with, so re-checking it must not depend on the resolver: an outage would
 	// otherwise stop the controller from observing a running or finished Pod.
@@ -160,6 +164,9 @@ func (p *PodSandboxClient) ensurePod(ctx context.Context, pod *corev1.Pod, gatew
 		return "", err
 	}
 	if err := PinGateway(ctx, pod, gatewayEndpoint, p.resolveGateway); err != nil {
+		return "", err
+	}
+	if err := p.ensureLoginClaim(ctx, pod, rt.Spec.ClientConfig.SignIn); err != nil {
 		return "", err
 	}
 	if err := p.c.Create(ctx, pod); err != nil {
@@ -528,12 +535,14 @@ func BuildPodSpec(run *sprooziv1alpha1.AgentRun, rt *sprooziv1alpha1.AgentRuntim
 	}
 	signIn := rt.Spec.ClientConfig.SignIn
 	if signIn != nil {
-		source := corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: signIn.ClaimName}}
+		// An AgentRun has no session, so it signs in with the default login.
+		source := corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+			ClaimName: LoginClaim(rt.Spec.ClientConfig.Harness, harness.DefaultLogin)}}
 		if signIn.SecretName != "" {
 			source = corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: signIn.SecretName, DefaultMode: &defaultMode,
 				Items: []corev1.KeyToPath{{Key: signIn.Key, Path: signIn.Key}}}}
 		}
-		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{Name: "sign-in", VolumeSource: source})
+		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{Name: signInVolume, VolumeSource: source})
 	}
 	injectedVolumes := pod.Spec.Volumes
 	pod.Spec = *rt.Spec.PodTemplate.Spec.DeepCopy()
@@ -566,7 +575,7 @@ func BuildPodSpec(run *sprooziv1alpha1.AgentRun, rt *sprooziv1alpha1.AgentRuntim
 			c.Env = append(c.Env, corev1.EnvVar{Name: openAIAPIKey, Value: clientAuthPlaceholder})
 		} else {
 			c.VolumeMounts = append(c.VolumeMounts, corev1.VolumeMount{Name: "sign-in", MountPath: sprooziv1alpha1.SignInDirectory,
-				ReadOnly: signIn.ClaimName == ""})
+				ReadOnly: signIn.Claims == nil})
 			if signIn.Env != "" {
 				c.Env = append(c.Env, corev1.EnvVar{Name: signIn.Env, ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
 					LocalObjectReference: corev1.LocalObjectReference{Name: signIn.SecretName}, Key: signIn.Key}}})
@@ -673,4 +682,43 @@ func ptrToInt64(value int64) *int64 { return &value }
 
 func requestsCapability(run *sprooziv1alpha1.AgentRun, capability sprooziv1alpha1.CapabilityKind) bool {
 	return slices.Contains(run.Spec.Capabilities, capability)
+}
+
+// signInVolume is the sandbox volume of a runtime's sign-in.
+const signInVolume = "sign-in"
+
+// LoginClaim names the claim of one harness's named login (ADR 0049).
+func LoginClaim(kind, login string) string {
+	return "sproozi-login-" + kind + "-" + harness.LoginOrDefault(login)
+}
+
+// ensureLoginClaim creates the claim of the Pod's login when it is missing.
+// The claim outlives every run, so a later session of the login signs in with
+// what an earlier one stored; an existing claim is used as it is. Only the
+// controller writes in the sandbox namespace (ADR 0023).
+func (p *PodSandboxClient) ensureLoginClaim(ctx context.Context, pod *corev1.Pod, signIn *sprooziv1alpha1.RuntimeSignIn) error {
+	i := slices.IndexFunc(pod.Spec.Volumes, func(v corev1.Volume) bool {
+		return v.Name == signInVolume && v.PersistentVolumeClaim != nil
+	})
+	if i < 0 || signIn == nil || signIn.Claims == nil {
+		return nil
+	}
+	claims := signIn.Claims
+	mode := claims.AccessMode
+	if mode == "" {
+		mode = corev1.ReadWriteOnce
+	}
+	claim := &corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Namespace: pod.Namespace,
+		Name:   pod.Spec.Volumes[i].PersistentVolumeClaim.ClaimName,
+		Labels: map[string]string{"app.kubernetes.io/managed-by": "sproozi", "sproozi.com/login": "true"}},
+		Spec: corev1.PersistentVolumeClaimSpec{AccessModes: []corev1.PersistentVolumeAccessMode{mode},
+			Resources: corev1.VolumeResourceRequirements{Requests: corev1.ResourceList{
+				corev1.ResourceStorage: resource.MustParse("16Mi")}}}}
+	if claims.StorageClassName != "" {
+		claim.Spec.StorageClassName = &claims.StorageClassName
+	}
+	if err := p.c.Create(ctx, claim); err != nil && !apierrors.IsAlreadyExists(err) {
+		return fmt.Errorf("create login claim %s: %w", claim.Name, err)
+	}
+	return nil
 }

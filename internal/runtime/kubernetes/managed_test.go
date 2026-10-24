@@ -2,6 +2,7 @@ package kubernetes_test
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -139,5 +140,23 @@ func TestManagedPodMountsTheProfileArchiveOnlyWhenRegistered(t *testing.T) {
 	got := mounted()
 	if len(got) != 1 || got[0].MountPath != "/etc/sproozi/profile-archive/profile.tar.gz" || !got[0].ReadOnly {
 		t.Fatalf("profile mounts = %+v", got)
+	}
+}
+
+// A managed session signs in with its own named login's claim (ADR 0049).
+func TestManagedPodMountsItsSessionsNamedLogin(t *testing.T) {
+	run, runtime, binding := managedFixture()
+	runtime.Spec.ClientConfig.SignIn = &api.RuntimeSignIn{Claims: &api.RuntimeLoginClaims{}}
+	for login, want := range map[string]string{"": "sproozi-login-codex-default", "work": "sproozi-login-codex-work"} {
+		binding.Login = login
+		pod, err := kubernetes.BuildManagedPodSpec(run, runtime, binding)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.ContainsFunc(pod.Spec.Volumes, func(v corev1.Volume) bool {
+			return v.PersistentVolumeClaim != nil && v.PersistentVolumeClaim.ClaimName == want
+		}) {
+			t.Fatalf("login %q: no claim %s in %+v", login, want, pod.Spec.Volumes)
+		}
 	}
 }

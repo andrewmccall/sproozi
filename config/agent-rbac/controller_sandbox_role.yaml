@@ -21,6 +21,14 @@ rules:
   verbs:
   - create
   - delete
+# Each named login's claim is created on first use and outlives every run;
+# an existing claim is used as it is.
+- apiGroups:
+  - ""
+  resources:
+  - persistentvolumeclaims
+  verbs:
+  - create
 - apiGroups:
   - networking.k8s.io
   resources:

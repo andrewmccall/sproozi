@@ -312,6 +312,9 @@ func (q *options) validateRun(str func(string) string) error {
 		}
 		return nil
 	}
+	if q.login != "" {
+		return usagef("--login applies to a session on this machine; a session moved to a cluster keeps its login")
+	}
 	switch {
 	case q.path != "":
 		return usagef("a --remote run works in the cluster's approved repository; give --repository NAME instead of PATH")

@@ -105,7 +105,16 @@ func (p *PodSandboxClient) EnsureManaged(ctx context.Context, run *api.AgentRun,
 	if err != nil {
 		return "", err
 	}
-	return p.ensurePod(ctx, pod, rt.Spec.GatewayEndpoint)
+	return p.ensurePod(ctx, pod, rt)
+}
+
+// useSessionLogin mounts the session's own named login's claim.
+func useSessionLogin(pod *corev1.Pod, binding *registry.Record) {
+	for i := range pod.Spec.Volumes {
+		if v := &pod.Spec.Volumes[i]; v.Name == signInVolume && v.PersistentVolumeClaim != nil {
+			v.PersistentVolumeClaim.ClaimName = LoginClaim(string(binding.Harness), binding.Login)
+		}
+	}
 }
 
 func BuildManagedPodSpec(run *api.AgentRun, rt *api.AgentRuntime, binding *registry.Record) (*corev1.Pod, error) {
@@ -139,6 +148,7 @@ func BuildManagedPodSpec(run *api.AgentRun, rt *api.AgentRuntime, binding *regis
 		}
 	}
 	pod := BuildPodSpec(run, rt, run.Status.Identity.ServiceAccountName)
+	useSessionLogin(pod, binding)
 	pod.Finalizers = append(pod.Finalizers, ManagedWriterFenceFinalizer)
 	pod.Annotations = map[string]string{
 		"sessions.sproozi.com/registry-uid": binding.Reference.UID,

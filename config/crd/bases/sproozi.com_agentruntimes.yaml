@@ -88,14 +88,28 @@ spec:
                       containers, for a provider whose gateway forwards it (ADR 0047). The
                       gateway's key placeholder is then left out.
                     properties:
-                      claimName:
+                      claims:
                         description: |-
-                          ClaimName is a PersistentVolumeClaim that keeps the harness's own
-                          login file across managed sessions, such as Claude Code's
-                          .credentials.json or Codex's auth.json.
-                        maxLength: 253
-                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
-                        type: string
+                          Claims keeps each named login of the harness in its own
+                          PersistentVolumeClaim, sproozi-login-<harness>-<login>, which the
+                          controller creates in sproozi-agents on first use and never deletes.
+                        properties:
+                          accessMode:
+                            default: ReadWriteOnce
+                            description: AccessMode is each claim's access mode.
+                            enum:
+                            - ReadWriteOnce
+                            - ReadWriteMany
+                            - ReadWriteOncePod
+                            type: string
+                          storageClassName:
+                            description: |-
+                              StorageClassName selects the claims' StorageClass; empty uses the
+                              cluster default. Sessions of one login on different nodes need one
+                              that supports ReadWriteMany.
+                            maxLength: 253
+                            type: string
+                        type: object
                       env:
                         description: |-
                           Env names an environment variable for the sign-in, such as

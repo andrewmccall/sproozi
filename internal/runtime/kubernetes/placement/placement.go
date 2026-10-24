@@ -260,7 +260,7 @@ func (p *Placement) requireProfile(ctx context.Context, l session.Launch) error 
 }
 
 func (p *Placement) registration(l session.Launch, ceilings map[api.CapabilityKind]api.EndpointBudget) registry.Registration {
-	return registry.Registration{Harness: p.config.Harness, Principal: p.config.Principal, SessionID: l.ExecutionID, Epoch: l.Epoch, OperationID: l.OperationID, NativeUUID: l.ThreadID, InstructionDigest: l.InstructionDigest, OriginalDeadline: l.Deadline.UTC(), TemplateName: p.config.TemplateName, Ceilings: ceilings, Task: l.Task, CheckpointDigest: l.CheckpointDigest, IncludeIgnored: append([]string(nil), l.IncludeIgnored...), IntendedRunName: runName(l), ProfileDigest: l.ProfileDigest}
+	return registry.Registration{Harness: p.config.Harness, Principal: p.config.Principal, SessionID: l.ExecutionID, Epoch: l.Epoch, OperationID: l.OperationID, NativeUUID: l.ThreadID, InstructionDigest: l.InstructionDigest, OriginalDeadline: l.Deadline.UTC(), TemplateName: p.config.TemplateName, Ceilings: ceilings, Task: l.Task, CheckpointDigest: l.CheckpointDigest, IncludeIgnored: append([]string(nil), l.IncludeIgnored...), IntendedRunName: runName(l), ProfileDigest: l.ProfileDigest, Login: l.Login}
 }
 
 func (p *Placement) Prepare(ctx context.Context, l session.Launch, data []byte) (session.Incarnation, error) {
