@@ -54,7 +54,8 @@ issues that are deferred or declined, with the reason for each.
   `make verify-mcp`. The example is for review only: an installation registers
   a server in its `sproozi-mcp-servers` ConfigMap, and a local Codex or Copilot session in
   `config.json`'s `gateway.mcpRegistryFile` and `gateway.mcpPolicy`.
-  [Configured MCP](docs/reference/configured-mcp.md) explains each file.
+  [Configured MCP](docs/reference/configured-mcp.md) explains each file. A
+  review-only example needs no other doc change.
 - **Add a harness.** Follow [Add a harness](docs/contributing/add-a-harness.md):
   one registry entry, guard tests that name each missing piece, and the MCP
   requirement.

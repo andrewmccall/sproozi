@@ -67,6 +67,9 @@ SPROOZI_MCP_LIVE_URL=https://mcp.deepwiki.com/mcp \
   go test ./internal/endpoints/mcp -run TestLiveServerToolsCompile -v
 ```
 
+A 5xx from the server, such as `Internal Server Error` during `initialize`, is
+the server's own failure, not an incompatibility; run the check again.
+
 Approve only tools whose effect you would accept from any run. Leave out tools
 that write, and tools that fetch an arbitrary URL, such as GitMCP's
 `fetch_generic_url_content`: the provider fetches it, so the URL is outside
@@ -173,7 +176,9 @@ capabilities: [mcp.deepwiki]
 
 `tools` is an explicit default-deny map. `search: {}` allows the discovered
 tool's input contract without an additional restriction; a tool with no
-arguments is approved the same way, as `{}`. `arguments` adds JSON
+arguments, including one whose schema is a bare `{"type": "object"}`, is
+approved the same way, as `{}`. Give every free-text argument at least a
+`maxLength`. `arguments` adds JSON
 Schema restrictions: `const`, `enum`, `pattern`, numeric bounds and object or
 array rules can restrict tenants, repositories, namespaces or other tool inputs.
 Use `required` when an argument must be present. These predicates constrain the

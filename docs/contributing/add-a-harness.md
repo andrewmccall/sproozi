@@ -38,9 +38,25 @@ support upstream, or ship an MCP bridge as one of its launch files
 Each registry entry declares which in `Loader`: `NativeMCP` when the stock
 client reads its MCP file, or `Bridge` naming the launch file that does.
 
+For example, pi has had its own MCP client since 0.99.0. With 1.4.0,
+`pi mcp list --json` connected this file, read from
+`$PI_CODING_AGENT_DIR/mcp.json`, and listed the server's tools:
+
+```json
+{"mcpServers": {"gitmcp": {"type": "http", "url": "https://gitmcp.io/andrewmccall/sproozi", "exposure": "direct"}}}
+```
+
+Without `"exposure": "direct"`, pi offers MCP tools only through its
+`codemode` tool, so the model may never call `diagnose`. `pi --print` exited 1
+when it couldn't reach its provider; whether it does after a call the gateway
+refuses mid-turn is untested.
+
 ## AgentRun harness
 
-0. Write the ADR first, with status `proposed`; a reviewer accepts it.
+0. Draft the ADR first, with status `proposed`, and fill in its evidence
+   before review; a reviewer accepts it. Name it
+   `docs/adr/NNNN-short-title.md` with the next free number, copy the headings
+   of a recent ADR such as 0048, and add a row to the index.
    Adding a harness is architecturally significant
    (AGENTS.md): record the decision, the MCP route, alternatives and limits
    in a new ADR, using the format and next number in
@@ -69,6 +85,8 @@ client reads its MCP file, or `Bridge` naming the launch file that does.
    hook below; one whose client loads MCP itself is checked only by the
    verifiers in step 6.
 4. Add the client's pinned install under [`hack/clients`](../../hack/clients/README.md).
+   This step and step 6 install the real client, so they need access to its
+   package registry, such as npm.
    Two Dockerfiles install clients: `internal/runtime/docker/image/clients.Dockerfile`
    builds the released native image for managed sessions, so only a managed
    harness belongs there; `hack/verify/orchestration-kind/clients.Dockerfile`
@@ -89,7 +107,9 @@ client reads its MCP file, or `Bridge` naming the launch file that does.
    `hack/verify/harness-clients.py` (`make verify-harness-clients`) and
    `hack/verify/harness-process` (`make verify-harness-process`, including a
    `diagnose` call), and `hack/verify/orchestration-kind` if it runs delegated
-   work.
+   work. A client's list command may connect to each server and fail when one
+   is unreachable, as `pi mcp list` does; read its JSON output instead of its
+   exit status.
 7. Document the harness in the [harness reference](../reference/harnesses.md):
    add it to the selector table and describe its launch and completion. Add a
    glossary term only for a new concept. Add it to the harness lists in
