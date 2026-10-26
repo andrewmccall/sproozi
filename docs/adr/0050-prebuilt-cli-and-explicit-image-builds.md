@@ -13,7 +13,11 @@ both release images from source without first initializing local sessions.
 
 ## Decision
 
-Publish tested Homebrew bottles for macOS and Linux on ARM64 and x86-64.
+Publish tested Homebrew bottles for Apple silicon macOS and for Linux on ARM64
+and x86-64. Intel macOS is not bottled: Homebrew supports it only at Tier 3 and
+ships no Go bottle for it, so `brew install --build-bottle` cannot install the
+build dependency. Intel Mac users install from source or use the release
+archive.
 Keep the source formula and `--build-from-source`. The tap builds every bottle
 before publishing a new formula, verifies archive hashes, tests reinstalling
 the bottles, and records their checksums. Polling the same release preserves
@@ -44,7 +48,9 @@ existing sandbox/gateway enforcement. This resolves the removal noted in ADR
 
 A formula downloading raw release executables would avoid Go but lose the
 normal Homebrew source-build path. Bottles preserve both. Source-only installs
-remain possible on platforms without a compatible bottle.
+remain possible on platforms without a compatible bottle. Building Go from
+source in the Intel macOS job would keep that bottle, at 10 to 20 minutes per
+run on a configuration Homebrew may stop supporting without notice.
 
 Building automatically after pull failures would obscure registry problems and
 introduce unexpected build dependencies. Only the `images build` command builds;
@@ -58,7 +64,7 @@ Embedding the bundle's digest in the CLI would close that gap but requires the
 release to produce the bundle before the binaries. Local image builds still
 download base images and dependencies, and cluster delivery is a separate step.
 
-Revisit when additional host platforms need bottles, when the release can
+Revisit when additional host platforms need bottles, when Homebrew ships Go for Intel macOS again, when the release can
 embed the source bundle digest in the CLI, or when users need cluster loading
 integrated into the CLI.
 
