@@ -2,6 +2,6 @@
   "name": "sproozi-client-copilot",
   "private": true,
   "dependencies": {
-    "@github/copilot": "1.0.102"
+    "@github/copilot": "1.0.103"
   }
 }

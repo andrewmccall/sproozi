@@ -34,7 +34,7 @@ usage, a short description and one line per flag. An unknown help topic fails.
 | Setup | `doctor` | Check the installation without changing it. |
 | Setup | `service status\|start\|stop` | Show, start or stop the background service. |
 | Setup | `credentials set AGENT\|PROVIDER`, `credentials list` | Store or replace a gateway-held provider key or token (`codex` or `openai`, `claude-code` or `anthropic`; for `copilot`, the OpenAI key or the GitHub token, whichever it uses), or list which are stored. An agent set up with `--sign-in` has no key to set. Keys are never printed. |
-| Setup | `images status\|prepare` | Show the installed and release agent images, or pull or build one. |
+| Setup | `images status\|prepare\|build` | Show or prepare the installation’s agent image, or explicitly build native and control images from source. |
 | Setup | `certificates status\|renew\|rotate-ca\|replace-ca` | Show or maintain this machine's certificate authority. |
 | Setup | `version`, `-v`, `--version` | Show the version and the release's agent image. |
 
@@ -100,7 +100,7 @@ anything is read or sent. `-d` is short for `--detach`.
 | `doctor` | `--check-provider`, `--json`, `--root` |
 | `service` | `--leave-running`, `--json`, `--root` |
 | `credentials` | `--credential-file`, `--credential-stdin`, `--skip-credential-check`, `--json`, `--root` |
-| `images` | `--image`, `--build`, `--json`, `--root` |
+| `images` | `--image`, `--build`, `--image-prefix`, `--image-tag`, `--platform`, `--push`, `--json`, `--root` |
 | `certificates` | `--json`, `--root` |
 | `version` | `--json` |
 

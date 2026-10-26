@@ -13,8 +13,18 @@ brew install andrewmccall/tap/sproozi
 sproozi --version
 ```
 
-The formula builds from the release source bundle. Homebrew installs Go as a
-build dependency. To update:
+Homebrew installs a prebuilt bottle on supported macOS and Linux systems; Go
+is not needed to run Sproozi. To compile the CLI yourself instead:
+
+```sh
+brew install --build-from-source andrewmccall/tap/sproozi
+```
+
+A source installation needs Go, which Homebrew supplies as a build dependency.
+The formula also installs the release source in `$(brew --prefix)/share/sproozi`,
+which [`sproozi images build`](../reference/local-installation.md#build-container-images-explicitly)
+uses without downloading it.
+Platforms without a compatible bottle also build from source. To update:
 
 ```sh
 brew update

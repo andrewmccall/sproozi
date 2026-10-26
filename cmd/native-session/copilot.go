@@ -67,7 +67,7 @@ func prepareCopilotLaunch(c config, thread string, env []string) ([]string, []st
 	}
 	env = append(env, "COPILOT_HOME="+copilotHome, "COPILOT_AUTO_UPDATE=false")
 	args := []string{"--session-id", thread, "--allow-all", "--disable-builtin-mcps",
-		"--additional-mcp-config", "@" + copilotMCP, "--no-auto-update", "--no-remote"}
+		"--additional-mcp-config", "@" + copilotMCP, "--no-auto-update"}
 	model := c.Model
 	switch {
 	case slices.ContainsFunc(env, func(e string) bool { return strings.HasPrefix(e, "COPILOT_PROVIDER_API_KEY=") }):

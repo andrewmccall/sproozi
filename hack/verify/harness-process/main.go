@@ -640,7 +640,7 @@ func clientCommand(directory, selected string, withTool bool, env []string) ([]s
 		args = []string{"--prompt", prompt, modelFlag, fixtureModel, outputFormatFlag, jsonFormat,
 			"--additional-mcp-config", "@" + filepath.Join(directory, "copilot-mcp.json"),
 			"--disable-builtin-mcps", "--allow-all", "--no-ask-user",
-			"--no-auto-update", "--no-remote"}
+			"--no-auto-update"}
 	case copilotGitHub:
 		// No bring-your-own-key provider: Copilot signs in to GitHub with its
 		// own token and calls Copilot's model API, which the gateway forwards.
@@ -649,7 +649,7 @@ func clientCommand(directory, selected string, withTool bool, env []string) ([]s
 		args = []string{"--prompt", prompt, modelFlag, fixtureModel, outputFormatFlag, jsonFormat,
 			"--additional-mcp-config", "@" + filepath.Join(directory, "copilot-mcp.json"),
 			"--disable-builtin-mcps", "--allow-all", "--no-ask-user",
-			"--no-auto-update", "--no-remote"}
+			"--no-auto-update"}
 	case claudeHarness:
 		env = append(env, "ANTHROPIC_API_KEY=sproozi-local-placeholder", "ANTHROPIC_BASE_URL=https://api.anthropic.com")
 		args = []string{"--print",

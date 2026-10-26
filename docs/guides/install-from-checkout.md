@@ -50,6 +50,12 @@ for this walkthrough. Keep the chosen `KUBECONFIG` exported throughout it.
 
 ## 2. Build and publish the images
 
+For the standard native and control images, the CLI offers
+`sproozi images build --build .`, with `--image-prefix`, `--image-tag`,
+`--platform` and `--push` for registry publication. See
+[image build options](../reference/local-installation.md#build-container-images-explicitly).
+The walkthrough below also builds a separate demo tools image for its first Pod.
+
 One image built from the repository's root Dockerfile holds the controller,
 gateway, task service and certificate controller. The first Pod uses the demo tools image, but runs kubectl rather
 than Codex.
