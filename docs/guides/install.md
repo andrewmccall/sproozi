@@ -17,16 +17,19 @@ Homebrew installs a prebuilt bottle on Apple silicon macOS and on Linux (ARM64
 and x86-64); Go is not needed to run Sproozi. Intel macOS has no bottle, because
 Homebrew supports it only at Tier 3 and ships no Go bottle for it. There,
 Homebrew compiles Go and Sproozi, so the `darwin_amd64` [release
-archive](#download-a-binary) is usually the easier choice. To compile the CLI yourself instead:
+archive](#download-a-binary) is usually the easier choice.
+
+The formula also installs the release source in `$(brew --prefix)/share/sproozi`,
+which [`sproozi images build`](../reference/local-installation.md#build-container-images-explicitly)
+uses without downloading it.
+
+To compile the CLI yourself instead:
 
 ```sh
 brew install --build-from-source andrewmccall/tap/sproozi
 ```
 
 A source installation needs Go, which Homebrew supplies as a build dependency.
-The formula also installs the release source in `$(brew --prefix)/share/sproozi`,
-which [`sproozi images build`](../reference/local-installation.md#build-container-images-explicitly)
-uses without downloading it.
 Platforms without a compatible bottle also build from source. To update:
 
 ```sh
@@ -79,10 +82,12 @@ Kubernetes through a remote executor. These guides use it:
   service.
 
 `sproozi init` pulls the release's agent image and prepares the
-network, certificates and credentials. The other guides build images and the
-remote executor from a checkout of this repository. Use the checkout of the
+network, certificates and credentials. To build the native and control images
+yourself instead, `sproozi images build` uses the release source without a
+checkout. The other guides build images and the remote executor from a checkout
+of this repository. Use the checkout of the
 same release as your CLI: `sproozi --version` prints the version, and its tag
-is that version with a `v` prefix, for example `git checkout v0.1.0`. The CLI
+is that version with a `v` prefix, for example `git checkout v0.2.1`. The CLI
 archive does not contain sandbox images.
 
 The Kubernetes guides don't use the CLI. [Install on Kubernetes](install-kubernetes.md)

@@ -28,7 +28,7 @@ Work in a new, empty directory. Set `VERSION` to the
 then download the Kubernetes assets and check them:
 
 ```sh
-VERSION=0.1.0
+VERSION=0.2.1
 curl -fsSLO "https://github.com/andrewmccall/sproozi/releases/download/v$VERSION/sproozi_${VERSION}_kubernetes.tar.gz"
 curl -fsSLO "https://github.com/andrewmccall/sproozi/releases/download/v$VERSION/checksums.txt"
 grep "sproozi_${VERSION}_kubernetes.tar.gz" checksums.txt | shasum -a 256 -c -
