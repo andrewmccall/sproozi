@@ -13,8 +13,11 @@ brew install andrewmccall/tap/sproozi
 sproozi --version
 ```
 
-Homebrew installs a prebuilt bottle on supported macOS and Linux systems; Go
-is not needed to run Sproozi. To compile the CLI yourself instead:
+Homebrew installs a prebuilt bottle on Apple silicon macOS and on Linux (ARM64
+and x86-64); Go is not needed to run Sproozi. Intel macOS has no bottle, because
+Homebrew supports it only at Tier 3 and ships no Go bottle for it. There,
+Homebrew compiles Go and Sproozi, so the `darwin_amd64` [release
+archive](#download-a-binary) is usually the easier choice. To compile the CLI yourself instead:
 
 ```sh
 brew install --build-from-source andrewmccall/tap/sproozi
