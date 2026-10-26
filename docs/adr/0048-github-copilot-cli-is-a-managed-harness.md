@@ -118,8 +118,9 @@ With 1.0.102, against scripted providers:
   shell, which reads `BASH_ENV`.
 - `/login` through the gateway's device-flow relay is untested with a real
   GitHub account. Copilot's plan hosts are routed as ADR 0047 recorded.
-- Copilot releases often; 1.0.103 removed `--no-remote`, which the supervisor
-  and the AgentRun example pass, so the next pin bump must drop it.
+- Copilot releases often. 1.0.103 removed `--no-remote`; v0.2.1 pins 1.0.103
+  and drops the flag from the supervisor and the AgentRun example
+  ([ADR 0050](0050-prebuilt-cli-and-explicit-image-builds.md)).
 - Copilot models on `/chat/completions` stream, which the gateway refuses
   (ADR 0047).
 
