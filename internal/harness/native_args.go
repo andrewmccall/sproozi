@@ -93,7 +93,7 @@ var copilotControlled = []controlledFlag{
 	{long: []string{"additional-mcp-config", "disable-mcp-server", "mcp-github-auth", "plugin-dir", "bash-env"},
 		value: true, why: whySetting},
 	{long: []string{"disable-builtin-mcps", "enable-all-github-mcp-tools", "no-custom-instructions", "no-auto-update",
-		"no-remote", "no-bash-env", "trust-folder"}, why: whySetting},
+		"no-bash-env", "trust-folder"}, why: whySetting},
 	{long: []string{"add-github-mcp-tool", "add-github-mcp-toolset"}, value: true, why: whySetting},
 	{long: []string{"resume"}, short: "r", value: true, why: whyThread},
 	{long: []string{"continue"}, why: whyThread},

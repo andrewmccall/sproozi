@@ -142,7 +142,12 @@ func (q *options) dispatch(ctx context.Context) error {
 		return q.version()
 	case cmdInit:
 		return q.initLocal(ctx)
-	case cmdDoctor, cmdCredentials, cmdImages, cmdCertificates:
+	case cmdImages:
+		if q.verb == verbBuild {
+			return q.buildImages(ctx)
+		}
+		return q.maintain(ctx)
+	case cmdDoctor, cmdCredentials, cmdCertificates:
 		return q.maintain(ctx)
 	case cmdService:
 		if q.verb == verbRun {

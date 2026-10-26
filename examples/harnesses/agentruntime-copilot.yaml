@@ -44,7 +44,7 @@ spec:
           exec copilot --prompt "$(cat /etc/sproozi/contract/request.json)" \
             --model "$SPROOZI_MODEL" --output-format json \
             --additional-mcp-config @/etc/sproozi/contract/copilot-mcp.json \
-            --disable-builtin-mcps --allow-all --no-ask-user --no-auto-update --no-remote </dev/null
+            --disable-builtin-mcps --allow-all --no-ask-user --no-auto-update </dev/null
         command:
         - /bin/sh
         - -ec

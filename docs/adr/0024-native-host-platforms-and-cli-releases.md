@@ -1,6 +1,6 @@
 # 0024: Native host platforms and CLI releases
 
-Status: accepted; the client-version statement below is partly replaced by [ADR 0029](0029-local-provisioning-and-lifecycle.md)
+Status: accepted; the client-version statement below is partly replaced by [ADR 0029](0029-local-provisioning-and-lifecycle.md); the source-only Homebrew choice is replaced by [ADR 0050](0050-prebuilt-cli-and-explicit-image-builds.md)
 Date: 2026-10-18
 
 ## Context

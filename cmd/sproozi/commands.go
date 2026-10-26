@@ -42,6 +42,7 @@ const (
 	verbSet       = "set"
 	verbList      = "list"
 	verbPrepare   = "prepare"
+	verbBuild     = "build"
 	verbRenew     = "renew"
 	verbRotateCA  = "rotate-ca"
 	verbReplaceCA = "replace-ca"
@@ -151,8 +152,12 @@ var commands = []command{
 			"or list the stored keys. Keys stay outside the agent's container and are never printed.",
 		verbs: []string{verbSet, verbList}, operandVerbs: []string{verbSet},
 		flags: []string{"credential-file", "credential-stdin", "skip-credential-check", "json", "root"}},
-	{name: cmdImages, operands: "status|prepare", group: groupSetup, summary: "Show or prepare the agent image",
-		verbs: []string{verbStatus, verbPrepare}, flags: []string{"image", "build", "json", "root"}},
+	{name: cmdImages, operands: "status|prepare|build", group: groupSetup,
+		summary: "Show, prepare or build container images",
+		about: "Use build --build DIR to build native and control images without an installation.\n" +
+			"Builds load locally; add --push and --image-prefix to publish to your registry.",
+		verbs: []string{verbStatus, verbPrepare, verbBuild},
+		flags: []string{"image", "build", "image-prefix", "image-tag", "platform", "push", "json", "root"}},
 	{name: cmdCertificates, operands: "status|renew|rotate-ca|replace-ca", group: groupSetup,
 		summary: "Show or maintain this machine's certificate authority",
 		verbs:   []string{verbStatus, verbRenew, verbRotateCA, verbReplaceCA}, flags: []string{"json", "root"}},
@@ -210,7 +215,11 @@ var flagSpecs = map[string]flagSpec{
 	"provider-ca-file":  {value: "FILE", help: "PEM CA bundle for a private provider endpoint"},
 	"instructions-file": {value: "FILE", help: "approved instructions for every session, at most 16 KiB (first run)"},
 	"image":             {value: "REF", help: "agent image as REPOSITORY@sha256:DIGEST or a local sha256: ID"},
-	"build":             {value: "DIR", help: "build the agent image from a Sproozi source directory"},
+	"image-prefix":      {value: "PREFIX", help: "images build: output repository prefix (default: sproozi-local)"},
+	"image-tag":         {value: "TAG", help: "images build: output tag (default: CLI version, or dev)"},
+	"platform":          {value: "PLATFORMS", help: "images build: linux/amd64 or linux/arm64 (both with --push)"},
+	"push":              {help: "images build: publish to --image-prefix instead of loading locally"},
+	"build":             {value: "DIR", help: "build from a Sproozi source directory"},
 	"port": {value: "PORT",
 		help: "first port to try for this agent's gateway (default 18443, or the next free one)"},
 	"no-service":     {help: "write the configuration without starting the service"},

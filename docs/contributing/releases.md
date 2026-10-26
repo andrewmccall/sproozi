@@ -51,7 +51,10 @@ An interrupted draft can be retried.
 The public [Homebrew tap](https://github.com/andrewmccall/homebrew-tap) checks
 stable releases every hour. To update immediately, run its **Update Sproozi**
 workflow. That workflow checks the source checksum, builds and tests the
-formula, then commits it. Each repository uses its own workflow token. No tap
+formula on macOS and Linux (ARM64 and x86-64), bottles each build, tests each
+bottle after reinstalling it, publishes the archives in the tap repository,
+then commits the formula with the bottle checksums. A failed matrix leaves the
+previous formula in place. Repeated polling preserves existing bottle metadata. Each repository uses its own workflow token. No tap
 write token is stored in Sproozi.
 
 After publication, check the download links and run a fresh

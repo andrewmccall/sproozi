@@ -46,6 +46,10 @@ type options struct {
 	loginGiven         bool
 	harness, model     string
 	image, build       string
+	imagePrefix        string
+	imageTag           string
+	platform           string
+	push               bool
 	providerURL        string
 	providerCA         string
 	credentialFile     string
@@ -130,6 +134,8 @@ func parse(args []string) (options, error) {
 	q.instructionsFile, q.context, q.namespace = str("instructions-file"), str("context"), str("namespace")
 	q.task, q.repository, q.project = str("task"), str("repository"), project.ID(str("project"))
 	q.operation, q.id, q.login = str("operation"), str("id"), str("login")
+	q.imagePrefix, q.imageTag, q.platform = str("image-prefix"), str("image-tag"), str("platform")
+	q.push = boolean("push")
 	q.local = boolean("local")
 	q.credentialStdin, q.skipCheck = boolean("credential-stdin"), boolean("skip-credential-check")
 	q.signIn, q.token, q.chatgpt = boolean("sign-in"), boolean("token"), boolean("chatgpt")
@@ -140,6 +146,9 @@ func parse(args []string) (options, error) {
 		return options{}, err
 	}
 	if err = q.validate(str); err != nil {
+		return options{}, err
+	}
+	if err = q.validateImageBuild(); err != nil {
 		return options{}, err
 	}
 	return q, nil

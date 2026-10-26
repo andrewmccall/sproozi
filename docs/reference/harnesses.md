@@ -301,3 +301,12 @@ when creating the administrator table.
 Codex keeps its original developer instructions on `exec resume`. Restoring with
 different approved instructions is not supported. See
 [ADR 0008](../adr/0008-selected-native-and-git-checkpoints.md).
+
+
+Copilot is pinned to 1.0.103. Launches omit the removed `--no-remote` option;
+no replacement remote-session setting is imposed. `--disable-builtin-mcps`
+disables its automatic GitHub MCP integration, while the explicitly rendered
+MCP configuration still loads. `--no-auto-update` keeps the image's tested
+client version; `--allow-all` avoids permission prompts inside the approved
+sandbox. Batch AgentRuns also use `--no-ask-user`. Bring-your-own-key mode
+sets `COPILOT_OFFLINE=true`; GitHub-authenticated sessions do not.

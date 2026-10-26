@@ -185,3 +185,61 @@ digests, the installed Codex and Claude Code versions, the helper contract and a
 hash of the build recipe. `sproozi images status` shows the installed and
 release images. Development builds have no release image; use `--image` or
 `--build`.
+
+
+## Build container images explicitly
+
+Published images remain the default. Building is an administrator operation and
+requires Docker with Buildx, plus a Sproozi source directory. The host does not
+need Go or npm: those tools run in the image build stages. Base images and
+pinned dependencies still need network access on the first build.
+
+To build both the native agent image and the control image without setting up
+an installation:
+
+```sh
+sproozi images build --build /path/to/sproozi
+```
+
+This uses the same pinned Docker Bake recipe as release CI and loads the images
+into the selected Docker engine as `sproozi-local/sproozi-native:VERSION` and
+`sproozi-local/sproozi:VERSION`. `VERSION` is the CLI version, or `dev` for a
+source-built CLI. Use `--image-prefix PREFIX` and `--image-tag TAG` to select
+other names; use a distinct tag for modified source. `--platform linux/amd64`
+or `--platform linux/arm64` selects one architecture; otherwise Buildx uses its
+builder's default. A release source bundle's `release.json` must match the
+released CLI version. An explicit development checkout uses that checkout's
+recipes and pins; it may contain custom changes.
+
+Download `sproozi_VERSION_source.tar.gz` and `checksums.txt` from the same
+release as your CLI, verify the archive checksum, then extract it to obtain
+matching release source. No source is downloaded implicitly.
+
+For a registry your Kubernetes nodes can access, authenticate with `docker login`
+and explicitly publish:
+
+```sh
+sproozi images build --build /path/to/sproozi \
+  --image-prefix ghcr.io/YOUR-ACCOUNT --image-tag custom \
+  --platform linux/amd64,linux/arm64 --push
+```
+
+The command uses your selected Docker context, Buildx builder and registry login.
+Multiple platforms require `--push`. It reports the two image references; `--json`
+returns `native`, `control` and `pushed`, with build progress on standard error.
+A failed build returns an error and no success result. It never changes a running
+installation and never builds automatically after a failed pull.
+
+For local sessions, `sproozi init --build /path/to/sproozi` or
+`sproozi images prepare --build /path/to/sproozi` builds and selects only the
+native image. To use a native image built by `images build`, obtain its local
+content ID with `docker image inspect --format '{{.Id}}' IMAGE` and pass that
+`sha256:...` ID to `sproozi init --image`.
+
+For Kind, load each locally built image with `kind load docker-image IMAGE
+--name CLUSTER`. For other clusters, use `--push`, inspect the published images
+with `docker buildx imagetools inspect IMAGE`, and configure the installation
+with their digest-pinned references. Building does not deploy images or modify
+cluster manifests. The control image supplies the controller, gateway, task
+service and certificate controller; the native image supplies the managed
+agents, checkpoint helper and network anchor.
