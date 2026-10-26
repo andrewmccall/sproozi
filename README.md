@@ -118,7 +118,7 @@ Calico for network policy), but no accounts and no builds.
 | Run Codex remotely, then continue its work on my machine | [Run a task remotely, then resume it locally](docs/guides/portable-workflows.md) |
 | Have a persistent Hermes assistant delegate bounded tasks | [Persistent Hermes assistant on Kubernetes](docs/guides/hermes-orchestration.md) |
 | Connect persistent Hermes to remote Codex work | [Hermes with remote work](docs/guides/retained-work-kubernetes.md) |
-| Build native and control images with `sproozi images build --build DIR` | [Image build options](docs/reference/local-installation.md#build-container-images-explicitly) |
+| Build native and control images with `sproozi images build` | [Image build options](docs/reference/local-installation.md#build-container-images-explicitly) |
 | Build and install my own images | [Install from a checkout](docs/guides/install-from-checkout.md) |
 
 These guides need a clone of this repository, at the tag that matches your

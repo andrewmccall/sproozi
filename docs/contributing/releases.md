@@ -143,7 +143,7 @@ deprecation period that ADR sets.
 | Asset | Contents |
 | --- | --- |
 | CLI archives | `sproozi` and its license. `sproozi version` prints the embedded native image. |
-| Source bundle | The tagged source with vendored modules and the embedded native image, for Homebrew. |
+| Source bundle | The tagged source with vendored modules and the embedded native image, for Homebrew and `sproozi images build`. |
 | `images.json` | Native and control image references, per-platform digests, client versions, helper contract and recipe hash. |
 | `sproozi_VERSION_kubernetes.tar.gz` | Extracts to `sproozi-release/`: `crds.yaml`, the digest-pinned `install/`, the optional certificate controller in `self-managed-ca/`, the `quickstart-self-managed-ca/` and `quickstart-external-ca/` overlays, `first-check/`, the CLI's `cli-access/`, a `kind/` cluster configuration and a `README.md` that links the [Kubernetes guide](../guides/install-kubernetes.md) at the release's tag. |
 | `metadata.json` | GoReleaser's record of the version, commit and date the assets were built from. |
@@ -153,6 +153,6 @@ The archives install nothing by themselves. `sproozi init` pulls the
 native image; the [Kubernetes guide](../guides/install-kubernetes.md) applies
 the Kubernetes assets.
 
-Standalone binaries are unsigned. Homebrew builds the source formula locally;
-it does not remove macOS quarantine from a downloaded binary. Add signing and
-notarization before switching macOS Homebrew installation to prebuilt binaries.
+Standalone binaries are unsigned, and a browser download on macOS is
+quarantined. Homebrew pours bottles without quarantine. Add signing and
+notarization before distributing macOS binaries by other means.

@@ -21,6 +21,9 @@ brew install --build-from-source andrewmccall/tap/sproozi
 ```
 
 A source installation needs Go, which Homebrew supplies as a build dependency.
+The formula also installs the release source in `$(brew --prefix)/share/sproozi`,
+which [`sproozi images build`](../reference/local-installation.md#build-container-images-explicitly)
+uses without downloading it.
 Platforms without a compatible bottle also build from source. To update:
 
 ```sh

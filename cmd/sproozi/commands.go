@@ -154,7 +154,8 @@ var commands = []command{
 		flags: []string{"credential-file", "credential-stdin", "skip-credential-check", "json", "root"}},
 	{name: cmdImages, operands: "status|prepare|build", group: groupSetup,
 		summary: "Show, prepare or build container images",
-		about: "Use build --build DIR to build native and control images without an installation.\n" +
+		about: "Use build to build native and control images without an installation, from --build DIR,\n" +
+			"the release source installed with the CLI, or the matching release source bundle.\n" +
 			"Builds load locally; add --push and --image-prefix to publish to your registry.",
 		verbs: []string{verbStatus, verbPrepare, verbBuild},
 		flags: []string{"image", "build", "image-prefix", "image-tag", "platform", "push", "json", "root"}},

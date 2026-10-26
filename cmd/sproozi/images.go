@@ -28,10 +28,6 @@ func (q *options) validateImageBuild() error {
 		}
 		return nil
 	}
-	if q.build == "" {
-		return usagef("images build needs --build SOURCE_DIRECTORY; " +
-			"use the matching release source bundle or a development checkout")
-	}
 	if q.image != "" || q.root != "" {
 		return usagef("images build does not use --image or --root; it builds without changing an installation")
 	}
@@ -62,19 +58,19 @@ func (q *options) validateImageBuild() error {
 }
 
 // imageBuildArgs uses the release recipe, including its pinned client stages.
-// The source directory is explicit: no pull failure ever triggers a build.
-func (q *options) imageBuildArgs() ([]string, error) {
+// Only images build reaches here: no pull failure ever triggers a build.
+func (q *options) imageBuildArgs(dir string) ([]string, error) {
 	for _, name := range []string{"go.mod", imageBuildRecipe, "Dockerfile",
 		"hack/demo/codex.Dockerfile", "internal/runtime/docker/image/clients.Dockerfile",
 		"internal/runtime/docker/image/Dockerfile", "hack/clients/install.sh"} {
-		info, err := os.Stat(filepath.Join(q.build, name))
+		info, err := os.Stat(filepath.Join(dir, name))
 		if err != nil || info.IsDir() {
 			return nil, fmt.Errorf("not a Sproozi source tree: missing %s", name)
 		}
 	}
 	// A release bundle must match this CLI. A checkout is deliberately allowed
 	// for custom builds; its recipes and dependency pins are used as supplied.
-	metadata, err := os.ReadFile(filepath.Join(q.build, "release.json"))
+	metadata, err := os.ReadFile(filepath.Join(dir, "release.json"))
 	if err == nil {
 		var source struct{ Version string }
 		if err = json.Unmarshal(metadata, &source); err != nil || source.Version == "" {
@@ -102,14 +98,20 @@ func (q *options) imageBuildArgs() ([]string, error) {
 }
 
 func (q *options) buildImages(ctx context.Context) error {
-	args, err := q.imageBuildArgs()
+	dir, origin, cleanup, err := q.imageSource(ctx)
 	if err != nil {
 		return err
 	}
+	defer cleanup()
+	args, err := q.imageBuildArgs(dir)
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(os.Stderr, "Building from %s\n", origin)
 	// Building/publishing is an administrator operation, using their selected
 	// Docker context, Buildx builder and registry login, outside a sandbox.
 	cmd := exec.CommandContext(ctx, "docker", args...)
-	cmd.Dir = q.build
+	cmd.Dir = dir
 	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
 	if err = cmd.Run(); err != nil {
 		return fmt.Errorf("image build failed (Docker with Buildx is required): %w", err)

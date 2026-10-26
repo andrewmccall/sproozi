@@ -19,13 +19,19 @@ before publishing a new formula, verifies archive hashes, tests reinstalling
 the bottles, and records their checksums. Polling the same release preserves
 those checksums. Release archives remain another prebuilt installation option.
 
-Keep digest-pinned published images as the default. Add `images build --build
-DIR` using the release Docker Bake recipe for native and control images. Load
-locally unless the operator selects `--push` with a repository prefix. Release
-bundles must match the CLI version; explicitly supplied checkouts support custom
-builds. This operation uses the administrator's Docker context and registry
-credentials, outside agent execution. It changes no installation or cluster.
-The existing setup `--build DIR` continues to build and select the native image.
+Keep digest-pinned published images as the default. Add `images build`
+using the release Docker Bake recipe for native and control images. Load
+locally unless the operator selects `--push` with a repository prefix. The
+command builds from `--build DIR` when given, else from release source the
+package installed beside the CLI (`PREFIX/share/sproozi`, which the formula
+installs), else from the CLI's release source bundle, downloaded, checked
+against the release's `checksums.txt`, expanded into a temporary directory and
+removed afterwards. Release source must match the CLI version; explicitly
+supplied checkouts support custom builds. A development CLI has no release and
+needs `--build`. This operation uses the administrator's Docker context and
+registry credentials, outside agent execution. It changes no installation or
+cluster. The existing setup `--build DIR` continues to build and select the
+native image.
 
 Remove Copilot's obsolete `--no-remote` launch argument and pin 1.0.103. The
 original offline grouping in ADR 0046 did not establish a separate requirement
@@ -41,13 +47,20 @@ normal Homebrew source-build path. Bottles preserve both. Source-only installs
 remain possible on platforms without a compatible bottle.
 
 Building automatically after pull failures would obscure registry problems and
-introduce unexpected build dependencies. Source is therefore always explicit;
-no automatic download or fallback is added. Operators must fetch and verify the
-matching source bundle or choose a checkout. Local image builds still download
-base images and dependencies, and cluster delivery is a separate step.
+introduce unexpected build dependencies. Only the `images build` command builds;
+no pull failure falls back to it. Within that command, finding release source
+is automatic: requiring operators to fetch, verify and extract the bundle
+themselves added steps without adding trust, because they would check the same
+`checksums.txt`. That checksum shares the release with the bundle, so it detects
+corruption, not a replaced release. Packaged source is preferred: Homebrew has
+already checked it against the formula's SHA-256 and it needs no download.
+Embedding the bundle's digest in the CLI would close that gap but requires the
+release to produce the bundle before the binaries. Local image builds still
+download base images and dependencies, and cluster delivery is a separate step.
 
-Revisit when additional host platforms need bottles, or when users need source
-retrieval or cluster loading integrated into the CLI.
+Revisit when additional host platforms need bottles, when the release can
+embed the source bundle digest in the CLI, or when users need cluster loading
+integrated into the CLI.
 
 ## References
 
