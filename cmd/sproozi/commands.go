@@ -134,8 +134,9 @@ var commands = []command{
 		flags:   []string{"remote", "context", "namespace", "json", "root"}, hiddenFlags: sessionPlumbing(false)},
 	{name: cmdInit, group: groupSetup, summary: "Set up this machine to run agents in Docker",
 		about: "Set up Sproozi on this machine: the agent image, a private Docker network, certificates,\n" +
-			"your provider key and the background service. Run it again to add another agent with\n" +
-			"--harness, or to repair the installation.",
+			"your provider key and the background service. In a terminal it asks which agent to set up\n" +
+			"and how it signs in, unless --harness and a sign-in option answer that. Run it again to\n" +
+			"add another agent, or to repair the installation.",
 		flags: []string{"harness", "model", "credential-file", "credential-stdin", "skip-credential-check",
 			"token", "chatgpt", "sign-in", "login",
 			"provider-url", "provider-ca-file", "instructions-file", "image", "build", "port", "no-service",

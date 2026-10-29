@@ -50,6 +50,7 @@ certificate authority, credentials and configuration.
 
 | Step | Behaviour |
 | --- | --- |
+| Questions | Before any step, when standard input and standard error are terminals and `--json` is not given: without `--harness`, asks which agent to set up; without `--sign-in`, `--token`, `--chatgpt`, `--credential-file` or `--credential-stdin`, asks how it signs in, offering first to keep an agent's current choice. Enter picks the first choice. Without a terminal, a missing `--harness` means `codex`. |
 | Docker | Uses `docker` from `PATH` and the current context's local Unix socket. Remote TCP engines are rejected. The engine must run Linux containers. |
 | Image | Reuses the recorded image when `--image` names it again. Otherwise pulls the native image digest built into the CLI release, or uses `--image REPOSITORY@sha256:DIGEST` or a local `sha256:` content ID, or builds with `--build SOURCE_DIRECTORY`. The image must report helper contract `1`. |
 | Network | Creates or reuses the bridge network `sproozi-ID`, labelled `sproozi.com/installation=ID`. Docker chooses a subnet that does not overlap its other networks. A same-named network that this installation does not own is rejected. |
