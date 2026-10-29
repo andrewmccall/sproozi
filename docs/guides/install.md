@@ -87,7 +87,7 @@ yourself instead, `sproozi images build` uses the release source without a
 checkout. The other guides build images and the remote executor from a checkout
 of this repository. Use the checkout of the
 same release as your CLI: `sproozi --version` prints the version, and its tag
-is that version with a `v` prefix, for example `git checkout v0.2.1`. The CLI
+is that version with a `v` prefix, for example `git checkout v0.2.2`. The CLI
 archive does not contain sandbox images.
 
 The Kubernetes guides don't use the CLI. [Install on Kubernetes](install-kubernetes.md)

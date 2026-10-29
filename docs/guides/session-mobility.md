@@ -56,7 +56,7 @@ executor, as `ghcr.io/andrewmccall/sproozi-native`; `sproozi version` prints
 its digest as `agent image`. This guide builds both from a checkout of this
 repository that matches your CLI instead. Run `sproozi --version`. Release
 binaries print a version, so check out its tag, for example
-`git checkout v0.2.1`. A source build prints `dev` and a commit, so
+`git checkout v0.2.2`. A source build prints `dev` and a commit, so
 build the other components from that commit (`git checkout <commit>`). If it
 prints `source build`, use the checkout you built from. The service,
 remote executor and native supervisor reject messages they don't recognise, so
