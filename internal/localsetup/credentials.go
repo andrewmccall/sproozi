@@ -63,6 +63,9 @@ type CredentialInput struct {
 	File   string
 	Stdin  io.Reader
 	Prompt func(label string) (string, error)
+	// Label names the secret in the prompt, such as "openai API key for
+	// codex"; empty asks for the provider's API key.
+	Label string
 }
 
 // StoreCredential reads the provider credential and publishes it atomically
@@ -84,7 +87,11 @@ func StoreCredential(l Layout, name string, in CredentialInput) (string, error) 
 		value = string(data)
 	case in.Prompt != nil:
 		var err error
-		if value, err = in.Prompt(fmt.Sprintf("%s API key", name)); err != nil {
+		label := in.Label
+		if label == "" {
+			label = name + " API key"
+		}
+		if value, err = in.Prompt(label); err != nil {
 			return "", err
 		}
 	default:

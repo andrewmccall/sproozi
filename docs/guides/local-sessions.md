@@ -32,14 +32,25 @@ before using it with sensitive repositories.
 
 ## Set up
 
-Run setup once. It asks for your API key without echoing it:
+Run setup once:
 
 ```sh
 sproozi init
 ```
 
-That sets up Codex. For Claude Code, run `sproozi init --harness claude-code`;
-for Copilot, `sproozi init --harness copilot`.
+In a terminal it asks which agent to set up and how that agent signs in
+([the choices](#choose-how-an-agent-signs-in)), then asks for a key or token
+without echoing it if you chose one. Press Enter for the first choice. Flags
+answer the questions instead: `--harness codex`, `claude-code` or `copilot`
+chooses the agent, and `--sign-in`, `--token`, `--chatgpt`,
+`--credential-file` or `--credential-stdin` chooses how it signs in. With
+both, or without a terminal, setup asks nothing; without `--harness` there it
+sets up Codex. For Copilot with your Copilot plan:
+
+```sh
+sproozi init --harness copilot --sign-in
+```
+
 The output ends with:
 
 ```text
@@ -193,9 +204,10 @@ sproozi run --harness copilot --login work
 Without `--login`, a session uses the `default` login. `sproozi ls` shows each
 session's login. A session keeps its login when it resumes or moves.
 
-To switch an agent, run setup again with the option you want: `--sign-in`,
-`--token`, `--chatgpt`, or a key through `--credential-file` or the prompt.
-Setup without any of them keeps the agent's current choice.
+To switch an agent, run setup again and pick another choice, or give the
+option you want: `--sign-in`, `--token`, `--chatgpt`, or a key through
+`--credential-file`. In a terminal the first choice keeps what the agent uses
+now; without a terminal, setup without any of these options keeps it.
 
 ## Add your instructions and skills
 

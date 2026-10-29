@@ -116,7 +116,7 @@ func Init(ctx context.Context, o Options) (Result, error) {
 	}
 	o = o.withDefaults()
 	if err := o.Harness.Validate(); err != nil {
-		return Result{}, fail("harness", err, "use --harness codex or --harness claude-code")
+		return Result{}, fail("harness", err, "use --harness "+harness.ManagedKindList())
 	}
 	ctx, cancel := context.WithTimeout(ctx, o.Timeout)
 	defer cancel()
@@ -333,6 +333,10 @@ func (i *installer) prepareHarness(ctx context.Context) error {
 		i.selected.Kind = ""
 	}
 	if !HasCredential(i.l, provider.Name) || o.Credential.File != "" || o.Credential.Stdin != nil {
+		o.Credential.Label = fmt.Sprintf("%s API key for %s", provider.Name, o.Harness)
+		if mechanism == harness.CredentialToken {
+			o.Credential.Label = fmt.Sprintf("%s sign-in token for %s", provider.Name, o.Harness)
+		}
 		if _, err := StoreCredential(i.l, provider.Name, o.Credential); err != nil {
 			return err
 		}

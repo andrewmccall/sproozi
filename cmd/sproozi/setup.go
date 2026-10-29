@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -22,9 +23,14 @@ import (
 // initLocal sets up this machine. Progress goes to standard error; the result
 // goes to standard output.
 func (q *options) initLocal(ctx context.Context) error {
+	if err := q.askSetup(); err != nil {
+		return err
+	}
 	kind := harness.NativeKind(q.harness)
 	if kind == "" {
 		kind = harness.NativeCodex
+		_, _ = fmt.Fprintf(os.Stderr, "No --harness given, so setting up %s; choose another with --harness %s\n",
+			kind, harness.ManagedKindList())
 	}
 	executable, err := os.Executable()
 	if err != nil {
@@ -71,6 +77,19 @@ func (q *options) initLocal(ctx context.Context) error {
 			harnessFlag(kind, result.Harnesses)+login)
 	}
 	return err
+}
+
+// askSetup runs the setup wizard for a person at the terminal when a flag
+// leaves the agent or how it signs in open.
+func (q *options) askSetup() error {
+	if !q.interactive() || (q.harness != "" && q.credentialChosen()) {
+		return nil
+	}
+	var inst localsetup.Installation
+	if root, err := localsetup.ResolveRoot(q.root); err == nil {
+		inst, _ = localsetup.LoadInstallation(localsetup.Layout{Root: root})
+	}
+	return q.wizard(bufio.NewReader(os.Stdin), os.Stderr, inst)
 }
 
 // harnessFlag is the --harness a run needs to select kind, if any.

@@ -62,8 +62,11 @@ cd /path/to/your/repository
 sproozi run
 ```
 
-`init` asks for your API key, then checks that the agent's container can't
-reach the internet directly. Instead of typing the key:
+In a terminal, `init` asks which agent to set up (Codex, Claude Code or
+Copilot) and how it signs in: an API key, a sign-in token, or the agent's own
+sign-in to your subscription. It then checks that the agent's container can't
+reach the internet directly. The flags below answer those questions, and
+without a terminal setup asks nothing and sets up Codex with an API key:
 
 - From a script, pass `--credential-stdin`, or `--credential-file FILE` with a
   file only you can read (`chmod 600 FILE`).
