@@ -66,7 +66,7 @@ func (g *ExecutionGrant) Validate() error {
 	if g.Managed {
 		for _, cap := range g.Capabilities {
 			a, ok := g.Allocations[cap]
-			if !ok || a.AccountKey == "" || a.Ceiling.MaxUnits <= 0 || a.Ceiling.MaxCostMicros < 0 {
+			if !ok || a.AccountKey == "" || !CeilingValid(cap, a.Ceiling) {
 				return ErrTokenInvalid
 			}
 		}
@@ -123,12 +123,19 @@ func (g *ExecutionGrant) BudgetLimits(cap api.CapabilityKind) (api.EndpointBudge
 		return limits, configured, nil
 	}
 	a, ok := g.Allocations[cap]
-	if !ok || a.AccountKey == "" || a.Ceiling.MaxUnits <= 0 || a.Ceiling.MaxCostMicros < 0 || a.Exhausted {
+	if !ok || a.AccountKey == "" || !CeilingValid(cap, a.Ceiling) || a.Exhausted {
 		return api.EndpointBudget{}, false, fmt.Errorf("gateway: allocation denied")
 	}
 	limits.MaxUnits = tighter(limits.MaxUnits, a.Ceiling.MaxUnits)
 	limits.MaxCostMicros = tighter(limits.MaxCostMicros, a.Ceiling.MaxCostMicros)
 	return limits, true, nil
+}
+
+// CeilingValid reports a managed allocation's ceiling: positive units, or
+// for model inference no unit limit (zero), and a cost cap that is positive
+// or absent (ADR 0051).
+func CeilingValid(cap api.CapabilityKind, c api.EndpointBudget) bool {
+	return c.MaxCostMicros >= 0 && (c.MaxUnits > 0 || c.MaxUnits == 0 && cap == api.CapabilityModelInference)
 }
 
 func tighter(policy, allocation int64) int64 {

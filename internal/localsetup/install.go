@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -15,6 +16,7 @@ import (
 	"slices"
 	"time"
 
+	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/endpoints/model"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/modelauth"
@@ -622,7 +624,7 @@ func renderConfig(l Layout, inst Installation, instructions string) home.Config 
 			Instructions: instructions, InstructionDigest: digest,
 			AgentLimits: agentLimits, HelperLimits: helperLimits, AnchorLimits: anchorLimits,
 			VolumeBytes: 512 << 20, MaxCheckpointBytes: 32 << 20, RetainedBytes: 256 << 20},
-		Allowances:  map[string]session.Allowance{"model.inference": {Units: session.Limit{Bounded: true, Value: 200000}}},
+		Allowances:  map[string]session.Allowance{string(api.CapabilityModelInference): {}},
 		MaxDuration: "30m", Model: primary.Model, NativeOptions: nativeOptions(primary.Harness, primary.Credential == ""),
 		Gateway: home.GatewayConfig{Listen: fmt.Sprintf("%s:%d", inst.Endpoint.ListenHost, primary.Port), PKIDirectory: l.PKI(),
 			ProviderURL: primary.ProviderURL, ProviderTokenFile: primary.Credential, ProviderTokenKind: tokenKind(primary),
@@ -677,6 +679,10 @@ func readExistingConfig(l Layout) (home.Config, bool, error) {
 // mergeConfig keeps every user-tunable value in an existing configuration.
 // Setup only adds missing harnesses. Fields that bind retained placement
 // records must still match the installation; setup never rewrites them.
+// previousModelAllowance is the model budget setup wrote before sessions
+// could run without one.
+var previousModelAllowance = session.Allowance{Units: session.Limit{Bounded: true, Value: 200000}}
+
 func mergeConfig(existing, rendered home.Config) (home.Config, bool, error) {
 	pinned := func(c home.Config) []any {
 		return []any{c.Directory, c.Local.Harness, c.Local.Name, c.Local.NativeImageID, c.Local.HelperImageID,
@@ -695,6 +701,13 @@ func mergeConfig(existing, rendered home.Config) (home.Config, bool, error) {
 	changed := false
 	if existing.Gateway.MCPAuthority == "" {
 		existing.Gateway.MCPAuthority, changed = rendered.Gateway.MCPAuthority, true
+	}
+	// A model budget still at the earlier default becomes no limit (ADR
+	// 0051); an edited one stays.
+	inference := string(api.CapabilityModelInference)
+	if existing.Allowances[inference] == previousModelAllowance {
+		existing.Allowances = maps.Clone(existing.Allowances)
+		existing.Allowances[inference], changed = rendered.Allowances[inference], true
 	}
 	for _, h := range rendered.Harnesses {
 		if !slices.ContainsFunc(existing.Harnesses, func(e home.LocalHarness) bool { return e.Harness == h.Harness }) {

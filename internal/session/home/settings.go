@@ -197,15 +197,18 @@ func (c Config) AllowanceProblems() []string {
 	var p []string
 	for _, name := range slices.Sorted(maps.Keys(c.Allowances)) {
 		a, key := c.Allowances[name], "allowances."+name
-		if !a.Units.Bounded || a.Units.Value <= 0 {
-			p = append(p, key+`.units ("bounded": true with a positive "value")`)
-		}
 		capability := api.CapabilityKind(name)
 		_, mcp := capability.MCPServerName()
 		modelInference := capability == api.CapabilityModelInference
 		switch {
-		case a.CostMicros.Value < 0 || a.CostMicros.Bounded && a.CostMicros.Value == 0 ||
-			!a.CostMicros.Bounded && a.CostMicros.Value != 0:
+		case !a.Units.Valid() && modelInference:
+			p = append(p, key+`.units ("bounded": true with a positive "value", or "bounded": false with "value": 0 `+
+				`for no limit)`)
+		case !a.Units.Valid() || !a.Units.Bounded && !modelInference:
+			p = append(p, key+`.units ("bounded": true with a positive "value")`)
+		}
+		switch {
+		case !a.CostMicros.Valid():
 			p = append(p, key+`.costMicros ("bounded": false with "value": 0 for no cap, or "bounded": true `+
 				`with a positive "value")`)
 		case a.CostMicros.Bounded && !modelInference:

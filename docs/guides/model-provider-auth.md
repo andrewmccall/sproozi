@@ -533,7 +533,9 @@ that reserves everything that remains also runs alone: it waits for calls in
 flight to settle, and later calls wait for it. Bounded reservations overstate
 most calls, because request bytes overstate input tokens. That limits how many
 calls run at once, not how much a run can spend. Each account is separate, so
-calls from different runs never wait for each other.
+calls from different runs never wait for each other. A local session whose
+model allowance has neither a unit nor a cost limit reserves nothing, so all
+of its calls run in parallel.
 
 The ledger records every reservation as a [lease](../../GLOSSARY.md#lease)
 until its call settles, and an account holds at most 64 leases. So at most 64
