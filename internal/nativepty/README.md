@@ -19,6 +19,8 @@ completed turn and resolves pending tools before calling
 sends native `/quit` with a distinct Enter key event. It does not parse terminal
 text or native history and cannot establish the completed-turn precondition.
 Deadline expiry and explicit stop forcibly terminate the owned process group.
+The deadline is wall-clock time, read every second, so a host that slept past
+it ends the process within a second of waking (`AtDeadline`).
 
 The package controls the process it actually launches. If that process is
 `docker start --attach`, its exit describes the Docker client, not the agent

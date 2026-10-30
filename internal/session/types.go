@@ -108,6 +108,9 @@ type Stopped struct {
 type Exit struct {
 	Code   int    `json:"code"`
 	Output string `json:"output,omitempty"`
+	// Deadline records that the harness ended at or after the execution's
+	// deadline, which stops it, so its code is no failure of the agent.
+	Deadline bool `json:"deadline,omitempty"`
 }
 
 // ExitOutputMax bounds Exit.Output.

@@ -167,11 +167,9 @@ func serve(c config, bootstrap bool) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 	go func() {
-		timer := time.NewTimer(time.Until(c.Deadline))
-		defer timer.Stop()
 		select {
 		case <-ctx.Done():
-		case <-timer.C:
+		case <-nativepty.AtDeadline(c.Deadline, s.done):
 		case <-s.done:
 			return
 		}
