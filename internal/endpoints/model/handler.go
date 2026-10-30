@@ -869,10 +869,13 @@ func (h *Handler) auditModelSuccess(ctx context.Context, e audit.Event, upstream
 	e.Allowed = true
 	e.UpstreamStatus = upstreamStatus
 	e.TokensUsed = tokensUsed
-	if stateErr == nil {
+	switch {
+	case stateErr == nil && limits.MaxUnits > 0:
 		remaining := max(0, limits.MaxUnits-state.UnitsUsed)
 		e.TokensRemaining = &remaining
-	} else if h.Config.Diagnostics != nil {
+	case stateErr == nil:
+		// No unit limit leaves nothing remaining to report.
+	case h.Config.Diagnostics != nil:
 		// The response already succeeded and its trusted usage was settled.
 		// A failed subsequent observation means unknown remaining capacity,
 		// not erased usage or a new request allowance. Do not expose raw errors.

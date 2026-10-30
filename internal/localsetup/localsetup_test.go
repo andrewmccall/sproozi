@@ -25,6 +25,7 @@ import (
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/privatefs"
 	runtimedocker "github.com/andrewmccall/sproozi/internal/runtime/docker"
+	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/home"
 	"github.com/andrewmccall/sproozi/internal/testutil"
 )
@@ -74,7 +75,7 @@ func TestRenderedConfigIsAcceptedByTheHomeService(t *testing.T) {
 	if len(read.Harnesses) != 1 || read.Harnesses[0].GatewayPort != 18444 || read.Harnesses[0].NativeOptions != nil {
 		t.Fatalf("second harness %+v", read.Harnesses)
 	}
-	if read.MaxDuration != "30m" || read.Allowances["model.inference"].Units.Value != 200000 || read.Allowances["model.inference"].CostMicros.Bounded {
+	if read.MaxDuration != "30m" || read.Allowances["model.inference"] != (session.Allowance{}) {
 		t.Fatal("starter limits differ from the proposal")
 	}
 	if read.Local.AgentLimits != agentLimits || read.Local.VolumeBytes != 512<<20 || read.Local.MaxCheckpointBytes != 32<<20 || read.Local.RetainedBytes != 256<<20 {
@@ -84,6 +85,23 @@ func TestRenderedConfigIsAcceptedByTheHomeService(t *testing.T) {
 		if strings.HasPrefix(path, l.Profile()) {
 			t.Fatalf("trusted path %s is inside the profile", path)
 		}
+	}
+}
+
+// The earlier default model budget becomes no limit; an edited one stays.
+func TestMergeLiftsOnlyTheEarlierDefaultModelBudget(t *testing.T) {
+	l, inst := testInstallation(t)
+	older := renderConfig(l, inst, DefaultInstructions)
+	older.Allowances = map[string]session.Allowance{"model.inference": previousModelAllowance}
+	lifted, changed, err := mergeConfig(older, renderConfig(l, inst, DefaultInstructions))
+	if err != nil || !changed || lifted.Allowances["model.inference"] != (session.Allowance{}) {
+		t.Fatalf("lifted %+v changed %v err %v", lifted.Allowances, changed, err)
+	}
+	edited := session.Allowance{Units: session.Limit{Bounded: true, Value: 5000000}}
+	older.Allowances = map[string]session.Allowance{"model.inference": edited}
+	kept, _, err := mergeConfig(older, renderConfig(l, inst, DefaultInstructions))
+	if err != nil || kept.Allowances["model.inference"] != edited {
+		t.Fatalf("kept %+v err %v", kept.Allowances, err)
 	}
 }
 
@@ -474,10 +492,10 @@ func TestSignInIsChosenPerHarness(t *testing.T) {
 // no browser, and only an OpenAI harness can choose it (ADR 0047).
 func TestChatGPTSignInIsReusedForAnOpenAIHarness(t *testing.T) {
 	l, inst := testInstallation(t)
-	session := modelauth.Session{Issuer: modelauth.Issuer, Subject: "account", ClientID: "oaiapp_fixture",
+	signedIn := modelauth.Session{Issuer: modelauth.Issuer, Subject: "account", ClientID: "oaiapp_fixture",
 		HostID: "urn:uuid:fixture", AccessToken: "fixture-access", RefreshToken: "fixture-refresh", IDToken: "fixture-id",
 		TokenType: "Bearer", ExpiresIn: 3600, SavedAt: time.Now().UTC(), Scopes: []string{modelauth.PlanScope}}
-	if err := modelauth.NewFileSessionStore(filepath.Join(l.Credentials(), "chatgpt-session.json")).Save(session); err != nil {
+	if err := modelauth.NewFileSessionStore(filepath.Join(l.Credentials(), "chatgpt-session.json")).Save(signedIn); err != nil {
 		t.Fatal(err)
 	}
 	i := &installer{l: l, inst: inst, o: Options{Harness: harness.NativeCodex, ChatGPT: true, Progress: io.Discard}, selected: &inst.Harnesses[0]}

@@ -9,6 +9,7 @@ import (
 	"io"
 	"time"
 
+	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/harness"
 
 	"github.com/andrewmccall/sproozi/internal/budget"
@@ -31,6 +32,16 @@ type Limit struct {
 type Allowance struct {
 	Units      Limit `json:"units"`
 	CostMicros Limit `json:"costMicros"`
+}
+
+// Valid reports a positive bound, or no bound with a zero value.
+func (l Limit) Valid() bool { return l.Value >= 0 && l.Bounded == (l.Value > 0) }
+
+// Valid reports an allowance a session may receive for capability: each
+// limit is a positive bound or none. Only model inference may run without a
+// unit bound (ADR 0051); every other capability counts its calls against one.
+func (a Allowance) Valid(capability api.CapabilityKind) bool {
+	return a.Units.Valid() && a.CostMicros.Valid() && (a.Units.Bounded || capability == api.CapabilityModelInference)
 }
 
 // Launch is immutable trusted placement intent. Checkpoint contents grant none of it.

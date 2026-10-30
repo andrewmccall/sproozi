@@ -3,6 +3,7 @@ package home
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -103,6 +104,25 @@ func TestAllowanceProblemsNameEachKey(t *testing.T) {
 	}
 	if problems := composedConfig(t).AllowanceProblems(); len(problems) != 0 {
 		t.Fatalf("valid allowances rejected: %v", problems)
+	}
+}
+
+// Model inference may go without a unit limit; every other capability needs
+// one (ADR 0051).
+func TestOnlyModelInferenceMayRunWithoutAUnitLimit(t *testing.T) {
+	t.Parallel()
+	c := composedConfig(t)
+	c.Allowances = maps.Clone(c.Allowances)
+	c.Allowances[testCapability] = session.Allowance{}
+	if problems := c.AllowanceProblems(); len(problems) != 0 {
+		t.Fatalf("a model allowance without limits was rejected: %v", problems)
+	}
+	if _, err := approvedPolicy(c); err != nil {
+		t.Fatalf("policy without a model limit: %v", err)
+	}
+	c.Allowances["mcp.docs"] = session.Allowance{}
+	if problems := c.AllowanceProblems(); len(problems) == 0 || !strings.HasPrefix(problems[0], "allowances.mcp.docs.units") {
+		t.Fatalf("an MCP allowance without a unit limit: %v", problems)
 	}
 }
 

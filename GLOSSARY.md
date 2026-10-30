@@ -272,7 +272,8 @@ earlier storage).
 The total usage limit, per capability, granted to one execution and shared by
 all of its visits. For local executions it comes from the service's
 `allowances` configuration. A move doesn't refill it; a new execution gets a
-fresh one.
+fresh one. A local model allowance may have no limit, which still counts
+usage ([ADR 0051](docs/adr/0051-interactive-sessions-may-run-without-a-model-budget.md)).
 
 ### Reservation
 
@@ -301,9 +302,10 @@ A model call without a bounded reservation, because its request has no output
 bound, references input the gateway can't size or enables a provider-run tool.
 It reserves all remaining units and cost, runs alone and can meet a budget
 cut, unless its request references input the gateway can't size: such a call
-is never cut. Every Codex and ChatGPT-mode call is unbounded. Unrelated to the
+is never cut. Under an allowance with neither limit it reserves nothing and
+runs alongside other calls. Every Codex and ChatGPT-mode call is unbounded. Unrelated to the
 `bounded` field of a home allowance, such as `"units": {"bounded": true,
-"value": 200000}`, which says only whether that dimension has a limit.
+"value": 5000000}`, which says only whether that dimension has a limit.
 
 ### Estimated charge
 

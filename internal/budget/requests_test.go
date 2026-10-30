@@ -287,3 +287,18 @@ func TestRequestReservationsAreLeased(t *testing.T) {
 		t.Fatalf("an expired request lease was not recovered in full: %+v", state)
 	}
 }
+
+// Under no limit at all, an unbounded call reserves nothing, so it runs
+// beside other calls rather than alone, and its usage is still recorded.
+func TestUnboundedCallsRunTogetherWithoutLimits(t *testing.T) {
+	tracker := budget.NewTracker()
+	meter := tracker.Meter("run/model", api.EndpointBudget{})
+	first := admitted(t, admit(t.Context(), meter, 0, false))
+	second := admitted(t, admit(t.Context(), meter, 0, false))
+	finish(t, first, 300000)
+	finish(t, second, 400000)
+	state, err := tracker.State("run/model")
+	if err != nil || state.UnitsUsed != 700000 || state.ReservedUnits != 0 {
+		t.Fatalf("state=%+v err=%v", state, err)
+	}
+}

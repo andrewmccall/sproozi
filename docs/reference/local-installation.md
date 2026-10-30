@@ -81,7 +81,7 @@ service with `sproozi service stop` and `sproozi service start`.
 | Maximum checkpoint (`local.maxCheckpointBytes`) | 32 MiB; it also bounds the workspace's expanded Git objects at `run`. The highest value home accepts is 64 MiB. |
 | Retained checkpoint storage (`local.retainedBytes`) | 256 MiB; at least twice the maximum checkpoint |
 | Model | None: each harness uses its own default model unless `--model` names one |
-| Model allowance | 200,000 accounted tokens |
+| Model allowance | No limit; usage is still counted. Set `allowances.model.inference.units` to `{"bounded": true, "value": N}` for one |
 | Monetary allowance | Unbounded; a bound needs administrator pricing |
 | External services | Model inference only |
 | First gateway port | 18443; each further harness uses the next free port |
@@ -89,7 +89,11 @@ service with `sproozi service stop` and `sproozi service start`.
 
 Setup never rewrites these values in an existing `config.json`, so an
 existing installation keeps its checkpoint and retained limits until you
-raise them. When a workspace exceeds the
+raise them. One exception: a model allowance still at the earlier default of
+200,000 units becomes no limit
+([ADR 0051](../adr/0051-interactive-sessions-may-run-without-a-model-budget.md)).
+A session without a model limit can't move to a Kubernetes cluster, whose
+ceilings need one. When a workspace exceeds the
 limit, `run` names the size and `local.maxCheckpointBytes`.
 
 The image, network, gateway address and approved instructions bind retained

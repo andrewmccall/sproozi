@@ -24,7 +24,8 @@ type requestSlot struct {
 // it reserves all remaining capacity instead, as an unbounded call does, and
 // is refused only when nothing remains. An unbounded call reserves all
 // remaining capacity, so it waits for every call in flight to end, and calls
-// that arrive after it wait for it.
+// that arrive after it wait for it. Under no limit at all, every call runs
+// as a bounded one.
 //
 // The returned function ends the call; call it after the reservation settles.
 // The ledger remains authoritative, including after a gateway restart.
@@ -40,6 +41,9 @@ func (m *Meter) ReserveRequest(
 	if m == nil {
 		return nil, func() {}, nil
 	}
+	// Without either limit nothing is reserved, so no call needs to run
+	// alone (ADR 0051).
+	bounded = bounded || m.limits.MaxUnits == 0 && m.limits.MaxCostMicros == 0
 	slot := m.joinSlot()
 	defer m.leaveSlot(slot)
 	for bounded {
