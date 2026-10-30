@@ -136,11 +136,9 @@ func Start(launch Launch) (*Supervisor, error) {
 	go s.drain()
 	go s.reap()
 	go func() {
-		timer := time.NewTimer(time.Until(launch.Deadline))
-		defer timer.Stop()
 		select {
 		case <-s.done:
-		case <-timer.C:
+		case <-AtDeadline(launch.Deadline, s.done):
 			s.force(Deadline)
 		}
 	}()

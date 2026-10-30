@@ -78,6 +78,10 @@ func statusText(action string, s home.Status, detached bool) string {
 	id, short := s.ID, shortID(s.ID)
 	switch action {
 	case cmdStop:
+		if s.Exit != nil && s.Exit.Deadline {
+			return fmt.Sprintf("Session %s had already stopped at its deadline.\n"+
+				"Continue it with: sproozi resume %s", id, short)
+		}
 		if s.Exit != nil && s.Exit.Code != 0 {
 			return fmt.Sprintf("Session %s had already stopped: its agent exited with code %d.%s\n"+
 				"Continue it with: sproozi resume %s    Delete it with: sproozi rm %s",
@@ -105,6 +109,9 @@ func statusText(action string, s home.Status, detached bool) string {
 	}
 	text := describe(id, string(s.Harness), s.Phase, s.Placement, s.Deadline)
 	switch {
+	case s.Exit != nil && s.Exit.Deadline:
+		text += "\nStopped    at its deadline (maxDuration in config.json)"
+		text += fmt.Sprintf("\nContinue it with: sproozi resume %s", short)
 	case s.Exit != nil && s.Exit.Code != 0:
 		text += fmt.Sprintf("\nExited     code %d%s", s.Exit.Code, exitOutput(s.Exit))
 		text += fmt.Sprintf("\nContinue it with: sproozi resume %s    Delete it with: sproozi rm %s", short, short)
