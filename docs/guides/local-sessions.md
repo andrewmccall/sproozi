@@ -276,9 +276,11 @@ has the details.
   not isolation between untrusted users or agents.
 - The background service controls Docker. Anyone who controls your account or
   Docker engine controls Sproozi too.
-- Token allowances are accounting limits, not a guarantee against provider
-  spend. The monetary allowance is unbounded unless you configure pricing and a
-  bound.
+- Sessions have no model token limit by default: the gateway counts usage but
+  stops nothing, and the provider bills you directly. Set one in
+  `allowances.model.inference` ([defaults](../reference/local-installation.md#defaults)).
+  A limit is an accounting limit, not a guarantee against provider spend. The
+  monetary allowance is unbounded unless you configure pricing and a bound.
 
 ## Remove the installation
 

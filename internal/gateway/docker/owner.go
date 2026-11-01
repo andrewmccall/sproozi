@@ -89,8 +89,8 @@ func Open(config Config) (*Owner, error) {
 	}
 	for _, capability := range config.Policy.Spec.AllowedCapabilities {
 		ceiling, ok := config.Policy.Spec.Budgets[capability]
-		if !ok || ceiling.MaxUnits <= 0 || ceiling.MaxCostMicros < 0 {
-			return nil, errors.New("docker gateway: fixed finite capability ceilings required")
+		if !ok || !gateway.CeilingValid(capability, ceiling) {
+			return nil, errors.New("docker gateway: fixed capability ceilings required")
 		}
 	}
 	for _, capability := range config.NativeCapabilities {
@@ -151,11 +151,11 @@ func (o *Owner) validateAllocation(name string, a session.Allowance) error {
 	capability := api.CapabilityKind(name)
 	_, mcp := capability.MCPServerName()
 	native := slices.Contains(o.nativeCapabilities, capability)
-	if (capability != api.CapabilityModelInference && !mcp && !native) || !slices.Contains(o.policy.Spec.AllowedCapabilities, capability) || !a.Units.Bounded || a.Units.Value <= 0 || a.CostMicros.Value < 0 || (a.CostMicros.Bounded && a.CostMicros.Value == 0) || (!a.CostMicros.Bounded && a.CostMicros.Value != 0) {
-		return errors.New("docker gateway: launch capability or finite allocation denied")
+	if (capability != api.CapabilityModelInference && !mcp && !native) || !slices.Contains(o.policy.Spec.AllowedCapabilities, capability) || !a.Valid(capability) {
+		return errors.New("docker gateway: launch capability or allocation denied")
 	}
 	ceiling := o.policy.Spec.Budgets[capability]
-	if a.Units.Value > ceiling.MaxUnits || (ceiling.MaxCostMicros > 0 && (!a.CostMicros.Bounded || a.CostMicros.Value > ceiling.MaxCostMicros)) || ((mcp || native) && a.CostMicros.Bounded) {
+	if (ceiling.MaxUnits > 0 && (!a.Units.Bounded || a.Units.Value > ceiling.MaxUnits)) || (ceiling.MaxCostMicros > 0 && (!a.CostMicros.Bounded || a.CostMicros.Value > ceiling.MaxCostMicros)) || ((mcp || native) && a.CostMicros.Bounded) {
 		return errors.New("docker gateway: allocation exceeds approved profile or lacks trusted pricing")
 	}
 	return nil
@@ -210,7 +210,7 @@ func (o *Owner) load(id string) (record, error) {
 		}
 		for cap, a := range r.Launch.Allowances {
 			u, ok := r.Receipt[cap]
-			if !ok || u.Units < 0 || u.CostMicros < 0 || u.Units > a.Units.Value || (a.CostMicros.Bounded && u.CostMicros > a.CostMicros.Value) {
+			if !ok || u.Units < 0 || u.CostMicros < 0 || (a.Units.Bounded && u.Units > a.Units.Value) || (a.CostMicros.Bounded && u.CostMicros > a.CostMicros.Value) {
 				return record{}, errors.New("docker gateway: inconsistent retained receipt")
 			}
 		}

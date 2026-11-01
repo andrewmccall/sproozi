@@ -617,10 +617,10 @@ func approvedPolicy(c Config) (api.AgentPolicySpec, error) {
 		return api.AgentPolicySpec{}, err
 	}
 	for name, a := range harnessAllowances(c.Local.Harness, c.Allowances) {
-		if !a.Units.Bounded || a.Units.Value <= 0 || a.CostMicros.Value < 0 || a.CostMicros.Bounded && a.CostMicros.Value == 0 || !a.CostMicros.Bounded && a.CostMicros.Value != 0 {
-			return api.AgentPolicySpec{}, errors.New("home: finite positive unit ceilings required")
-		}
 		capability := api.CapabilityKind(name)
+		if !a.Valid(capability) {
+			return api.AgentPolicySpec{}, errors.New("home: positive unit ceilings required, except for model inference")
+		}
 		_, mcpCapability := capability.MCPServerName()
 		if capability != api.CapabilityModelInference && !mcpCapability && !slices.Contains(configuredNative(c), capability) {
 			return api.AgentPolicySpec{}, errors.New("home: capability lacks configured gateway")
