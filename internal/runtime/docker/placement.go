@@ -917,7 +917,7 @@ func (p *Placement) recordExit(ctx context.Context, r *placementRecord, i sessio
 	if !ok {
 		report = harness.NativeExitReport{Code: state.ExitCode}
 	}
-	r.Exited = &session.Exit{Code: report.Code, Output: report.Output}
+	r.Exited = &session.Exit{Code: report.Code, Output: report.Output, Deadline: !r.Launch.Deadline.After(time.Now())}
 	if harness.ProvesCompletion(r.Launch.Harness) && r.thread() == "" && report.Thread != "" {
 		if err := p.authority.BindNative(ctx, r.Launch, i, report.Thread); err != nil {
 			return err
@@ -972,7 +972,8 @@ func (p *Placement) capture(ctx context.Context, r *placementRecord) error {
 }
 
 // Exited reports whether an active visit's agent container has stopped
-// without a stop being requested: its harness exited on its own.
+// without a stop being requested: its harness exited on its own, or reached
+// its deadline, when Exited stops the container itself.
 func (p *Placement) Exited(ctx context.Context, l session.Launch, i session.Incarnation) (bool, error) {
 	unlock, err := p.lockOperation(l)
 	if err != nil {
@@ -989,6 +990,16 @@ func (p *Placement) Exited(ctx context.Context, l session.Launch, i session.Inca
 	state, err := p.engine.Observe(ctx, *r.Agent)
 	if err != nil {
 		return false, err
+	}
+	if state.Running && !r.Launch.Deadline.After(time.Now()) {
+		// The supervisor ends its harness at the deadline, but its timer can
+		// run late after the host slept; the host's clock decides.
+		if err = p.engine.Stop(ctx, *r.Agent); err != nil {
+			return false, err
+		}
+		if state, err = p.engine.Observe(ctx, *r.Agent); err != nil {
+			return false, err
+		}
 	}
 	return !state.Running && state.PID == 0, nil
 }

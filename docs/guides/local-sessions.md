@@ -88,7 +88,12 @@ its own copy.
 `run` prints the session ID and opens the agent's terminal. Press Ctrl-] to
 detach; Ctrl-C reaches the agent. Detaching prints the session ID and the next
 commands, and leaves the agent running until its deadline: 30 minutes by
-default, set by `maxDuration` in `~/.sproozi/config.json`. `run -d` starts
+default, set by `maxDuration` in `~/.sproozi/config.json`. The deadline is
+wall-clock time, so time the computer spends asleep counts. At the deadline the
+agent stops and the session is `retained`; `sproozi resume` continues it with a
+new deadline, from the last checkpoint. Codex and Copilot keep a turn they
+completed. Claude Code keeps only what a `sproozi stop` before the deadline
+saved, so stop it yourself to keep its latest conversation. `run -d` starts
 without opening the terminal.
 
 ```sh

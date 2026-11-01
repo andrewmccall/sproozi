@@ -781,6 +781,28 @@ func TestExitedHarnessFailsTheSessionWithItsOutput(t *testing.T) {
 	}
 }
 
+// A harness stopped at its deadline leaves the session retained, not failed,
+// although the supervisor reports a nonzero code.
+func TestDeadlineStopRetainsTheSession(t *testing.T) {
+	t.Parallel()
+	s, local, _, repo := testService(t)
+	id := uuid.NewString()
+	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	local.exited = &session.Exit{Code: 1, Deadline: true}
+	if settled, err := s.settleExit(t.Context(), id); err != nil || !settled {
+		t.Fatalf("deadline stop not settled: %v %v", settled, err)
+	}
+	status, err := s.Status(id)
+	if err != nil || status.Phase != stageRetained || status.Exit == nil || !status.Exit.Deadline {
+		t.Fatalf("deadline status: %+v %v", status, err)
+	}
+	if problem := s.attachProblem(t.Context(), id); problem == nil || !strings.Contains(problem.Error(), "is retained") {
+		t.Fatalf("attach after a deadline stop: %v", problem)
+	}
+}
+
 // A cancelled session cannot continue; every refusal points to rm.
 func TestCancelledSessionPointsToRemove(t *testing.T) {
 	t.Parallel()

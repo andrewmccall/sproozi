@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/privatefs"
+	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/home"
 	"github.com/andrewmccall/sproozi/internal/testutil"
 	"github.com/google/uuid"
@@ -275,6 +276,20 @@ func TestStatusTextNamesThisMachineLocal(t *testing.T) {
 	}
 	if text := statusText(cmdRun, s, true); !strings.Contains(text, "sproozi attach "+shortID(id)) {
 		t.Errorf("detached run: %q", text)
+	}
+}
+
+// A session stopped at its deadline reads as kept, not as a crashed agent.
+func TestStatusTextNamesADeadlineStop(t *testing.T) {
+	id := uuid.NewString()
+	s := home.Status{ID: id, Harness: "claude-code", Phase: "retained", Placement: localName,
+		Exit: &session.Exit{Code: 1, Deadline: true}}
+	for action, want := range map[string]string{
+		cmdStatus: "Stopped    at its deadline", cmdStop: "had already stopped at its deadline",
+	} {
+		if text := statusText(action, s, false); !strings.Contains(text, want) || strings.Contains(text, "code 1") {
+			t.Errorf("%s: %q lacks %q or names the exit code", action, text, want)
+		}
 	}
 }
 

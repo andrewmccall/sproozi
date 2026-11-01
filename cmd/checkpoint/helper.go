@@ -18,6 +18,7 @@ import (
 
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
 	"github.com/andrewmccall/sproozi/internal/harness"
+	"github.com/andrewmccall/sproozi/internal/nativepty"
 	"github.com/andrewmccall/sproozi/internal/workspace"
 )
 
@@ -48,14 +49,21 @@ func hold(deadline time.Time) error {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
-	ctx, expire := context.WithDeadline(ctx, deadline)
-	defer expire()
-	go func() { <-ctx.Done(); _ = listener.Close() }()
+	ctx, expire := context.WithCancelCause(ctx)
+	defer expire(nil)
+	go func() {
+		select {
+		case <-ctx.Done():
+		case <-nativepty.AtDeadline(deadline, ctx.Done()):
+			expire(context.DeadlineExceeded)
+		}
+		_ = listener.Close()
+	}()
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
 			if ctx.Err() != nil {
-				return ctx.Err()
+				return context.Cause(ctx)
 			}
 			return err
 		}

@@ -198,6 +198,12 @@ N; see "sproozi status ID", then "sproozi resume ID" to continue it or
 conversation of a completed turn it reported before exiting; otherwise the
 session keeps its previous checkpoint, or the workspace it started from.
 
+At its deadline the agent is stopped the same way, and the session is
+`retained`, not `failed`: `status` prints `Stopped    at its deadline`, and
+its JSON `exit` has `"deadline": true`. The deadline is wall-clock time. If the
+computer slept past it, the service stops the agent within about five seconds
+of waking.
+
 A stopped session's phase is `retained`, or `failed` after its agent exited
 with an error. `resume` continues either; `attach`, `move`, `cancel` and
 `recover` refuse it with `session ID is stopped; "sproozi resume ID" continues
