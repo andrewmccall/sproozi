@@ -314,9 +314,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // refuseReservation answers a call whose reservation failed: it ended while
 // it waited, too many calls are pending, or the budget is exhausted.
 func (h *Handler) refuseReservation(w http.ResponseWriter, e audit.Event, call *modelCall, err error) {
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	// Another draining call can settle first and exhaust the budget before
+	// this call's asynchronous shutdown cancellation reaches the meter.
+	stopping := h.Config.Drain.Stopping()
+	if stopping || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		// No policy refused the call: it ended while it waited. Audit how.
 		e.Allowed, e.EndReason = true, call.cancelReason()
+		if stopping {
+			e.EndReason = endGatewayRestart
+		}
 		h.Config.AuditLogger.Log(e)
 		if e.EndReason == endGatewayRestart {
 			h.writeError(w, http.StatusServiceUnavailable, gatewayStoppingMessage, "server_error", gatewayStoppingCode)
