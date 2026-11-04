@@ -75,6 +75,7 @@ type result struct {
 	ExitCode               int    `json:"exitCode"`
 	TimedOut               bool   `json:"timedOut"`
 	ModelRequests          int    `json:"modelRequests"`
+	PolicyRequests         int    `json:"policyRequests,omitempty"`
 	ToolCalls              int    `json:"toolCalls"`
 	ReceivedToolResult     bool   `json:"receivedToolResult"`
 	AuthenticatedSessions  int    `json:"authenticatedSessions"`
@@ -92,6 +93,7 @@ type result struct {
 type fixture struct {
 	mu                        sync.Mutex
 	requests, tools, sessions int
+	policyRequests            int
 	violations                []string
 	tool                      bool
 	scenario                  string
@@ -703,6 +705,7 @@ func inspectResult(out result,
 	error) {
 	f.mu.Lock()
 	out.ModelRequests = f.requests
+	out.PolicyRequests = f.policyRequests
 	out.ToolCalls = f.tools
 	out.ReceivedToolResult = f.receivedToolResult
 	out.Diagnosed = f.diagnosed
@@ -719,6 +722,9 @@ func inspectResult(out result,
 		out.AuthenticatedSessions > 0 && len(violations) == 0
 	out.Passed = accepted(out, scenario, withTool, answered, completed)
 	out.Passed = out.Passed && out.MissingIdentityDenied && out.UnknownAuthorityDenied
+	if selected == copilotGitHub && scenario != deniedScenario {
+		out.Passed = out.Passed && out.PolicyRequests > 0
+	}
 	if out.Mode == "supervised" {
 		if scenario != deniedScenario {
 			out.Passed = out.Passed && recoveredAnswer(out.Output) == answer

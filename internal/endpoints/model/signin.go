@@ -2,6 +2,7 @@ package model
 
 import (
 	"bytes"
+	"fmt"
 	"net/http"
 	"slices"
 	"strings"
@@ -57,7 +58,16 @@ func (h *Relay) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return route.Method == r.Method && route.Path == r.URL.Path && (route.Query || r.URL.RawQuery == "")
 	})
 	if !allowed {
-		h.refuse(w, e, http.StatusForbidden, "the gateway relays only the provider's sign-in and account requests")
+		// Record the request shape, never query names or values, which can
+		// contain credentials. An unrecognized method can carry one too.
+		method := "unrecognized"
+		if slices.Contains([]string{http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut,
+			http.MethodDelete, http.MethodConnect, http.MethodOptions, http.MethodTrace, http.MethodPatch}, r.Method) {
+			method = r.Method
+		}
+		h.refuse(w, e, http.StatusForbidden, fmt.Sprintf(
+			"the gateway relays only the provider's sign-in and account requests (method %s; query parameters present: %t)",
+			method, r.URL.RawQuery != ""))
 		return
 	}
 	body, err := readBounded(r.Body, maxRelayRequestBytes)
