@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import os
 import stat
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -109,6 +110,7 @@ class HermesNodePullTest(unittest.TestCase):
 
         def run(*args, **kw):
             calls.append(args)
+            return subprocess.CompletedProcess(args, 0, "", "")
 
         def output(*args):
             node = args[2]
@@ -122,6 +124,18 @@ class HermesNodePullTest(unittest.TestCase):
                 build.pull_on_nodes(PINNED)
         self.assertEqual(sorted(c[2] for c in calls), ["control", "worker"])
         self.assertTrue(all(c[3:] == ("crictl", "pull", PINNED) for c in calls))
+
+    def test_failed_pull_reports_the_node_and_registry_error(self):
+        failed = subprocess.CompletedProcess([], 1, "", "registry: too many requests")
+        with mock.patch.object(build, "kind_nodes", return_value=["worker"]), \
+                mock.patch.object(build, "run", return_value=failed), \
+                mock.patch.object(build, "output") as inspect:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Hermes pull failed on worker.*registry: too many requests",
+            ):
+                build.pull_on_nodes(PINNED)
+        inspect.assert_not_called()
 
     def test_record_for_other_nodes_is_not_reused(self):
         with tempfile.TemporaryDirectory() as tmp:
