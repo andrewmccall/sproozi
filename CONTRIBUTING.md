@@ -17,6 +17,12 @@ reached the upstream service.
 
 ## Workflow
 
+Use the [issue forms](https://github.com/andrewmccall/sproozi/issues/new/choose)
+for bugs, feature requests, documentation problems and questions. Bug reports
+ask for the Sproozi version, placement, harness and a reproduction; add redacted
+configuration and diagnostics where useful. Report vulnerabilities through the
+[security policy](SECURITY.md).
+
 1. **Open an issue first for anything larger than a fix.** Say what you want to
    change and why; a change to a trust boundary, an API field or a harness
    needs an ADR (see [`docs/adr/README.md`](docs/adr/README.md)).

@@ -2,6 +2,12 @@ name: Question
 description: Ask how to do something with Sproozi.
 labels: [question]
 body:
+  - type: markdown
+    attributes:
+      value: |
+        Remove credentials, sign-in URLs and private task content before posting.
+        Report suspected security vulnerabilities
+        [privately](https://github.com/andrewmccall/sproozi/security/advisories/new).
   - type: textarea
     id: question
     attributes:
@@ -14,3 +20,11 @@ body:
     attributes:
       label: Version
       description: Output of `sproozi --version`, if it applies.
+  - type: textarea
+    id: context
+    attributes:
+      label: Harness, placement and configuration
+      description: |
+        Name your harness and whether you use local Docker, Kubernetes or both.
+        Include relevant redacted commands or configuration. For a refused
+        request, include the error and what access you intended to grant.

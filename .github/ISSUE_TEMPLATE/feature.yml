@@ -1,7 +1,12 @@
 name: Feature request
-description: Propose a change to what Sproozi does.
+description: Propose a workflow, harness, gateway integration or policy change.
 labels: [enhancement]
 body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the workflow you need and the access the agent would require.
+        Remove credentials and private task content from examples.
   - type: textarea
     id: problem
     attributes:
@@ -10,7 +15,21 @@ body:
     validations:
       required: true
   - type: textarea
+    id: context
+    attributes:
+      label: Sproozi context
+      description: |
+        Which harness and placement would use this? Say whether it concerns
+        local Docker sessions, Kubernetes AgentRuns, session movement, remote
+        work, the gateway, MCP tools, budgets or profiles. Name any external
+        service the agent needs to reach.
+  - type: textarea
     id: proposal
     attributes:
       label: What you propose
-      description: Say whether it changes a trust boundary, an API field or a harness; those need an ADR.
+      description: Describe the desired commands or behaviour and how you would know it works. Include what access should be allowed or refused if relevant. A design or ADR is not required to submit this request.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Current workaround or alternatives
+      description: What can you do today, and why is it insufficient?
