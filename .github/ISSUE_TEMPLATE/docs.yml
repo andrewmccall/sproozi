@@ -19,14 +19,9 @@ body:
     id: problem
     attributes:
       label: What is wrong or missing?
-      description: Quote the step or claim and explain where it fails or becomes unclear. Include the command and redacted error if you tried it.
+      description: Quote the step or claim and explain where it fails or becomes unclear. Include your Sproozi version and redacted error if you tried it.
     validations:
       required: true
-  - type: textarea
-    id: context
-    attributes:
-      label: Version and workflow
-      description: Include your Sproozi version, harness and placement if relevant. Say whether you installed a release or built from a checkout.
   - type: textarea
     id: correction
     attributes:

@@ -5,15 +5,13 @@ body:
   - type: markdown
     attributes:
       value: |
-        Report suspected sandbox escapes, gateway bypasses or credential exposure
-        [privately](https://github.com/andrewmccall/sproozi/security/advisories/new).
-        Remove credentials, sign-in URLs, private repository content and sensitive
-        prompts from commands, configuration and logs before posting.
+        Remove credentials and private content from anything you share.
+        Report security vulnerabilities [privately](https://github.com/andrewmccall/sproozi/security/advisories/new).
   - type: input
     id: version
     attributes:
       label: Sproozi version
-      description: Output of `sproozi --version`, or the release or commit you installed. Note any different controller or gateway image versions.
+      description: Output of `sproozi --version`, or the release or commit you installed. Note different controller or gateway versions if relevant.
     validations:
       required: true
   - type: dropdown
@@ -28,34 +26,11 @@ body:
     attributes:
       label: Harness
       options: [Codex, Claude Code, GitHub Copilot CLI, OpenCode, Hermes, Multiple harnesses, Not applicable, Unsure]
-    validations:
-      required: true
-  - type: input
-    id: client
-    attributes:
-      label: Harness client version
-      description: For example the output of `codex --version` in the session, if you know it.
-  - type: dropdown
-    id: area
-    attributes:
-      label: What were you doing?
-      multiple: true
-      options:
-        - Installing or setting up with sproozi init
-        - Starting, attaching to or stopping a session
-        - Resuming or moving a session between placements
-        - Submitting or managing remote work
-        - Running an AgentRun or investigating its lifecycle
-        - Signing in or calling a model provider
-        - Accessing Kubernetes, GitHub, packages or MCP tools through the gateway
-        - Tracking budgets or usage
-        - Loading instructions or skills from a profile
-        - Something else
   - type: textarea
     id: what
     attributes:
       label: What happened, and what you expected
-      description: Include the command or resource that failed, the exact error, and the result you expected. For a regression, give the last working version if known.
+      description: Include the command or resource that failed, the exact error, and the result you expected.
     validations:
       required: true
   - type: textarea
@@ -72,30 +47,10 @@ body:
   - type: textarea
     id: environment
     attributes:
-      label: Environment and sign-in method
-      description: |
-        Include what applies: host OS and architecture, Docker version, Kubernetes
-        version and network plugin, and installation method such as Homebrew,
-        release binary or source. For model problems, name the provider and
-        whether the gateway holds an API key or sign-in token, or the harness
-        uses its own sign-in. Never include the credential itself.
-  - type: textarea
-    id: configuration
-    attributes:
-      label: Relevant configuration
-      description: |
-        Share only the redacted settings needed to reproduce it. For local
-        sessions, include relevant config.json fields. For Kubernetes, include
-        relevant AgentRun, AgentTemplate, AgentRuntime and AgentPolicy fields.
-        For a move, say which placement it started on and where it was going.
-      render: yaml
+      label: Environment, if relevant
+      description: Host OS, Docker or Kubernetes version, and harness client version if known. For model or sign-in problems, name the provider and sign-in method, never the credential.
   - type: textarea
     id: diagnostics
     attributes:
-      label: Logs and diagnostics
-      description: |
-        Include relevant redacted output, such as sproozi doctor for local setup,
-        the harness's diagnose tool for refused gateway requests, or AgentRun
-        status conditions and controller, gateway or agent logs for Kubernetes.
-        Review output before sharing; it can contain private task content.
-      render: text
+      label: Relevant logs or configuration
+      description: Optional. Share a small redacted excerpt, such as sproozi doctor output, an AgentRun status condition, a gateway error or the settings needed to reproduce it.
