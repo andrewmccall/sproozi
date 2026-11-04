@@ -1,46 +1,56 @@
 name: Bug report
-description: Something Sproozi does differs from its documentation.
+description: Report a failure in setup, sessions, AgentRuns or gateway access.
 labels: [bug]
 body:
   - type: markdown
     attributes:
-      value: Do not report security vulnerabilities here. See SECURITY.md.
+      value: |
+        Remove credentials and private content from anything you share.
+        Report security vulnerabilities [privately](https://github.com/andrewmccall/sproozi/security/advisories/new).
   - type: input
     id: version
     attributes:
-      label: Version
-      description: Output of `sproozi --version`, or the release or commit you installed.
+      label: Sproozi version
+      description: Output of `sproozi --version`, or the release or commit you installed. Note different controller or gateway versions if relevant.
     validations:
       required: true
   - type: dropdown
     id: backend
     attributes:
       label: Where it ran
-      options: [Local Docker, Kubernetes, Both, Not applicable]
+      options: [Local Docker, Kubernetes, Docker and Kubernetes, Not applicable, Unsure]
     validations:
       required: true
   - type: dropdown
     id: harness
     attributes:
       label: Harness
-      options: [Codex, Claude Code, OpenCode, Hermes, Not applicable]
-    validations:
-      required: true
-  - type: input
-    id: client
-    attributes:
-      label: Harness client version
-      description: For example the output of `codex --version` in the session, if you know it.
+      options: [Codex, Claude Code, GitHub Copilot CLI, OpenCode, Hermes, Multiple harnesses, Not applicable, Unsure]
   - type: textarea
     id: what
     attributes:
       label: What happened, and what you expected
-      description: Include the exact error text and the command or object that produced it. Remove credentials and private repository content.
+      description: Include the command or resource that failed, the exact error, and the result you expected.
     validations:
       required: true
   - type: textarea
     id: steps
     attributes:
       label: Steps to reproduce
+      description: Give the smallest sequence that reproduces the problem. A partial reproduction is useful if it is intermittent.
+      placeholder: |
+        1. Set up ...
+        2. Run ...
+        3. Observe ...
     validations:
       required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment, if relevant
+      description: Host OS, Docker or Kubernetes version, and harness client version if known. For model or sign-in problems, name the provider and sign-in method, never the credential.
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Relevant logs or configuration
+      description: Optional. Share a small redacted excerpt, such as sproozi doctor output, an AgentRun status condition, a gateway error or the settings needed to reproduce it.

@@ -2,6 +2,12 @@ name: Question
 description: Ask how to do something with Sproozi.
 labels: [question]
 body:
+  - type: markdown
+    attributes:
+      value: |
+        Remove credentials, sign-in URLs and private task content before posting.
+        Report suspected security vulnerabilities
+        [privately](https://github.com/andrewmccall/sproozi/security/advisories/new).
   - type: textarea
     id: question
     attributes:
@@ -9,8 +15,8 @@ body:
       description: Say what you are trying to do, what you tried, and which guide you followed.
     validations:
       required: true
-  - type: input
-    id: version
+  - type: textarea
+    id: context
     attributes:
-      label: Version
-      description: Output of `sproozi --version`, if it applies.
+      label: Version and setup, if relevant
+      description: Include your Sproozi version, harness and whether you use Docker or Kubernetes. Add a small redacted error or configuration excerpt if it helps explain the question.

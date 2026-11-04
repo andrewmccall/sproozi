@@ -1,0 +1,29 @@
+name: Documentation problem
+description: Report an incorrect guide, command, example or capability claim.
+labels: [documentation]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Remove credentials and private task content from examples and output.
+        Report suspected security vulnerabilities
+        [privately](https://github.com/andrewmccall/sproozi/security/advisories/new).
+  - type: input
+    id: page
+    attributes:
+      label: Page or example
+      description: Link to the guide, reference, README section or example file. Include its tag or branch if known.
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is wrong or missing?
+      description: Quote the step or claim and explain where it fails or becomes unclear. Include your Sproozi version and redacted error if you tried it.
+    validations:
+      required: true
+  - type: textarea
+    id: correction
+    attributes:
+      label: Suggested correction
+      description: What should the page say or show? Leave blank if you do not know yet.

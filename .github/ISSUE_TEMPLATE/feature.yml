@@ -1,16 +1,16 @@
 name: Feature request
-description: Propose a change to what Sproozi does.
+description: Propose a workflow, harness, gateway integration or policy change.
 labels: [enhancement]
 body:
   - type: textarea
     id: problem
     attributes:
       label: The problem
-      description: What are you trying to do, and what stops you today?
+      description: What are you trying to do with Sproozi, and what stops you today? Mention the harness and Docker or Kubernetes if relevant.
     validations:
       required: true
   - type: textarea
     id: proposal
     attributes:
       label: What you propose
-      description: Say whether it changes a trust boundary, an API field or a harness; those need an ADR.
+      description: What should Sproozi do? Include a workaround or alternative you have tried, if any.
