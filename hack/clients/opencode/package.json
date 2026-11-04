@@ -2,6 +2,6 @@
   "name": "sproozi-client-opencode",
   "private": true,
   "dependencies": {
-    "opencode-ai": "1.19.3"
+    "opencode-ai": "1.19.5"
   }
 }

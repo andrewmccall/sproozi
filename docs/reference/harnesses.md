@@ -157,7 +157,7 @@ The supervisor owns the PTY across attachment disconnects. It uses the installed
 client without an exact-version check. The
 [recorded round trips](../../test/acceptance/reports/verified-session-mobility.md)
 used Codex 0.161.0 and Claude Code 2.1.27; movement hasn't been re-recorded with
-the currently pinned Codex 0.163.0 and Claude Code 2.1.302. The selected state and workspace are
+the currently pinned Codex 0.166.0 and Claude Code 2.1.318. The selected state and workspace are
 published together under `/workspace/session`; personal homes, caches, provider
 credentials and previous launch settings are excluded. Every visit supplies
 fresh trusted configuration, gateway access and the same approved instructions.

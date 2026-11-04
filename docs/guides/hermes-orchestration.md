@@ -44,8 +44,8 @@ cp examples/harnesses/agentruntime-hermes.yaml .local/orchestration/agentruntime
 
 Replace `controller:latest` in the task service with the same reviewed published
 Sproozi image used by your controller. Pull the Hermes image that Sproozi's
-tests pin, Hermes 0.22.2, by digest:
-`docker pull docker.io/nousresearch/hermes-agent@sha256:36099926da316742423544e055d4734777105ffe6341873af5459b957d0c2919`.
+tests pin, Hermes 0.22.7, by digest:
+`docker pull docker.io/nousresearch/hermes-agent@sha256:e6d81ae52ebf6a43efa529701405509f20054ba818f179ddd748bed4f8af584c`.
 Use the same digest reference in your copy of the Hermes runtime. Review the
 model selection in both runtime and coordinator, target namespace, policy
 budgets and resources. The Hermes runtime enables the native Kubernetes
@@ -116,7 +116,7 @@ Combine the image's normal public roots with the task-service public CA. Use the
 same pinned Hermes image:
 
 ```sh
-HERMES_IMAGE=docker.io/nousresearch/hermes-agent@sha256:36099926da316742423544e055d4734777105ffe6341873af5459b957d0c2919
+HERMES_IMAGE=docker.io/nousresearch/hermes-agent@sha256:e6d81ae52ebf6a43efa529701405509f20054ba818f179ddd748bed4f8af584c
 docker run --rm --entrypoint /bin/cat "$HERMES_IMAGE" /etc/ssl/certs/ca-certificates.crt \
   > .local/orchestration/ca-bundle.pem
 cat .local/orchestration/task-ca.crt >> .local/orchestration/ca-bundle.pem

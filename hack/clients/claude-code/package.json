@@ -2,6 +2,6 @@
   "name": "sproozi-client-claude-code",
   "private": true,
   "dependencies": {
-    "@anthropic-ai/claude-code": "2.1.302"
+    "@anthropic-ai/claude-code": "2.1.318"
   }
 }
