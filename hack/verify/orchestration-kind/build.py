@@ -232,7 +232,15 @@ def pull_on_nodes(reference):
     nodes = kind_nodes()
 
     def pull(node):
-        run("docker", "exec", node, "crictl", "pull", reference, capture_output=True)
+        pulled = run(
+            "docker", "exec", node, "crictl", "pull", reference,
+            capture_output=True, check=False,
+        )
+        if pulled.returncode != 0:
+            raise RuntimeError(
+                "Hermes pull failed on " + node + " for " + reference + ": "
+                + pulled.stdout + pulled.stderr
+            )
         inspected = json.loads(
             output("docker", "exec", node, "crictl", "inspecti", reference)
         )
