@@ -95,7 +95,8 @@ var providers = map[string]Provider{
 		AccountAuthority: "api.github.com:443", AccountPrefix: "/copilot_internal/",
 		AccountRoutes: []RelayRoute{
 			{Method: http.MethodGet, Path: "/copilot_internal/user"},
-			{Method: http.MethodGet, Path: "/copilot_internal/managed_settings"},
+			// Copilot includes its client identity and versions in the query.
+			{Method: http.MethodGet, Path: "/copilot_internal/managed_settings", Query: true},
 			{Method: http.MethodGet, Path: "/copilot_internal/team_customizations"},
 		}},
 }

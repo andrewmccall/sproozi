@@ -33,7 +33,8 @@ func (f *fixture) model(w http.ResponseWriter, r *http.Request, selected string)
 		// The gateway forwards Copilot's own GitHub sign-in.
 		expected = copilotFixtureToken
 	}
-	if credential != expected && credential != "Bearer "+expected {
+	scheme, token, _ := strings.Cut(credential, " ")
+	if credential != expected && (!strings.EqualFold(scheme, "Bearer") || token != expected) {
 		f.violations = append(f.violations, "gateway provider credential missing")
 	}
 	f.mu.Unlock()
@@ -261,6 +262,12 @@ func (f *fixture) copilotMetadata(w http.ResponseWriter, r *http.Request) bool {
 			"endpoints": map[string]any{"api": "https://api.individual.githubcopilot.com",
 				"telemetry": "https://telemetry.individual.githubcopilot.com",
 				"proxy":     "https://proxy.individual.githubcopilot.com"}}
+	case r.Method == http.MethodGet && r.URL.Path == "/copilot_internal/managed_settings":
+		f.mu.Lock()
+		f.policyRequests++
+		f.mu.Unlock()
+		w.WriteHeader(http.StatusNotFound)
+		return true
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/copilot_internal/"):
 		w.WriteHeader(http.StatusNotFound)
 		return true

@@ -61,8 +61,8 @@ spec:
           type: RuntimeDefault
       containers:
       - name: hermes
-        # Hermes 0.22.2, pinned by digest like the acceptance tests.
-        image: docker.io/nousresearch/hermes-agent@sha256:36099926da316742423544e055d4734777105ffe6341873af5459b957d0c2919
+        # Hermes 0.22.7, pinned by digest like the acceptance tests.
+        image: docker.io/nousresearch/hermes-agent@sha256:e6d81ae52ebf6a43efa529701405509f20054ba818f179ddd748bed4f8af584c
         # Hermes's own s6 supervisor runs the Hermes gateway (not the Sproozi gateway);
         # a second foreground Hermes gateway conflicts with it on PVC restart.
         args: [sleep, infinity]

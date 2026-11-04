@@ -177,7 +177,9 @@ outside Sproozi:
 - **Codex:** choose to sign in with ChatGPT using a device code, open the page
   it shows and enter the code. The browser sign-in that returns to
   `localhost` can't reach the container.
-- **Copilot:** type `/login` and follow GitHub's device-code steps.
+- **Copilot:** type `/login` and choose **Sign in with a device code**. The
+  browser flow returns to `127.0.0.1` inside the container, which your host
+  browser cannot reach. If you selected it, cancel and choose device code.
 
 The agent keeps its sign-in in a [login store](../../GLOSSARY.md#login-store),
 a Docker volume named after your installation, the agent and the login. Every

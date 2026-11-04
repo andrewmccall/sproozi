@@ -13,9 +13,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 OUT = ROOT / ".local/verification/orchestration-kind"
-# Hermes 0.22.2. Bump with the steps in hack/clients/README.md; the weekly
+# Hermes 0.22.7. Bump with the steps in hack/clients/README.md; the weekly
 # latest-clients workflow sets SPROOZI_HERMES_IMAGE to test the newest image.
-HERMES_IMAGE = "docker.io/nousresearch/hermes-agent@sha256:36099926da316742423544e055d4734777105ffe6341873af5459b957d0c2919"  # noqa: E501
+HERMES_IMAGE = "docker.io/nousresearch/hermes-agent@sha256:e6d81ae52ebf6a43efa529701405509f20054ba818f179ddd748bed4f8af584c"  # noqa: E501
 
 
 def run(*args, **kw):

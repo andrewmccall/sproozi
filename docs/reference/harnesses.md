@@ -157,7 +157,7 @@ The supervisor owns the PTY across attachment disconnects. It uses the installed
 client without an exact-version check. The
 [recorded round trips](../../test/acceptance/reports/verified-session-mobility.md)
 used Codex 0.161.0 and Claude Code 2.1.27; movement hasn't been re-recorded with
-the currently pinned Codex 0.163.0 and Claude Code 2.1.302. The selected state and workspace are
+the currently pinned Codex 0.166.0 and Claude Code 2.1.318. The selected state and workspace are
 published together under `/workspace/session`; personal homes, caches, provider
 credentials and previous launch settings are excluded. Every visit supplies
 fresh trusted configuration, gateway access and the same approved instructions.
@@ -213,7 +213,12 @@ GitHub's device flow through a `/login/` path route on `github.com`, beside the
 GitHub capability's Git route. The gateway then serves Copilot's model
 API (`/responses`, `/v1/messages`, `/chat/completions`, `/models` and `/auto`)
 and its `/copilot_internal/` account requests on `api.github.com`, and refuses
-GitHub's built-in MCP server, agents, experiments and telemetry. Copilot loads
+GitHub's built-in MCP server, agents, experiments and telemetry. The exact
+`GET /copilot_internal/managed_settings` route accepts the client identity
+and version query parameters and returns GitHub's policy response unchanged.
+Other account routes still refuse queries. A refused relay request records
+its HTTP method and whether query parameters were present, without their
+names or values. Copilot loads
 MCP servers, including Sproozi's, only if its account allows them
 (`is_mcp_enabled`). Models that stream chat completions, such as Gemini, are
 refused.
