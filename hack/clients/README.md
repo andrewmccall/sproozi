@@ -36,10 +36,12 @@ no package lifecycle script runs. It then links each command into
 `/usr/local/bin`.
 
 Codex and Copilot need no install script: each wrapper selects its platform
-package at run time. Claude Code and OpenCode each publish a
-`postinstall` that copies the platform binary from an optional dependency over
-a placeholder `bin/*.exe`. Without it, the command prints an error and exits 1.
-`install.sh` does the same step itself for glibc Linux: it hard-links
+package at run time. Claude Code and OpenCode each publish a `postinstall`
+that selects a platform binary and replaces a placeholder `bin/*.exe`. Their
+scripts also detect the host platform; OpenCode can try a fallback download
+and runs the binary to check it. Without replacing the placeholder, the
+command prints an error and exits 1. `install.sh` selects the locked
+dependency itself for glibc Linux: it hard-links
 `@anthropic-ai/claude-code-linux-<arch>/claude` and
 `opencode-linux-<arch>/bin/opencode` over the placeholders. On x64 it always
 selects the AVX2 OpenCode build rather than probing the build host's CPU, so
@@ -68,10 +70,10 @@ releases differ from the pins or fail. To move the pins:
    ```
 
 2. Check that each new lockfile still has `linux-x64` and `linux-arm64`
-   entries with `integrity` values, and that the wrapper packages still ship
-   only the placeholder-copying `postinstall` described above. Read the new
-   install script if it changed; adjust `install.sh` rather than enabling
-   scripts.
+   entries with `integrity` values. Inspect the wrapper packages' install
+   scripts and confirm that `install.sh` still selects the correct locked
+   binary and command. Adjust `install.sh` when that contract changes rather
+   than enabling lifecycle scripts or fallback downloads.
 3. For Hermes, resolve the current index digest and replace the old digest
    everywhere it appears (`grep -rn hermes-agent@sha256` lists them):
 
