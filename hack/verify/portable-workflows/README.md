@@ -55,11 +55,11 @@ retries the original submission instead of manufacturing a replacement.
 
 Prepare the same dedicated mobility cluster, images, gateway and Codex fixture.
 Use a fresh fixture directory and do not start this machine's service. Pull the
-pinned Hermes 0.22.2 image (the same digest as
+pinned Hermes 0.22.7 image (the same digest as
 `hack/verify/orchestration-kind/build.py`) and include it when importing images:
 
 ```sh
-HERMES_IMAGE=docker.io/nousresearch/hermes-agent@sha256:36099926da316742423544e055d4734777105ffe6341873af5459b957d0c2919
+HERMES_IMAGE=docker.io/nousresearch/hermes-agent@sha256:e6d81ae52ebf6a43efa529701405509f20054ba818f179ddd748bed4f8af584c
 docker pull "$HERMES_IMAGE"
 docker tag "$HERMES_IMAGE" docker.io/sproozi-kind/hermes:acceptance
 python3 hack/verify/session-mobility/images.py \
