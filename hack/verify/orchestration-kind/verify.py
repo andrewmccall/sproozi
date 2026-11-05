@@ -1380,7 +1380,10 @@ def coordinator_proof(images):
         when = (
             (
                 datetime.datetime.now(datetime.timezone.utc)
-                + datetime.timedelta(seconds=20)
+                # The old Pod has a 30-second termination grace period. Its
+                # stock scheduler keeps running until the container stops, so
+                # the job must stay pending through shutdown and replacement.
+                + datetime.timedelta(seconds=120)
             )
             .replace(microsecond=0)
             .isoformat()
