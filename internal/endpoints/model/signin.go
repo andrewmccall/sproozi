@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"net/http"
+	"path"
 	"slices"
 	"strings"
 
@@ -21,11 +22,12 @@ const (
 	maxRelayResponseBytes = 8 << 20
 )
 
-// RelayRoute is one request a Relay passes on: an exact method and path,
-// and whether a query string is allowed.
+// RelayRoute is one request a Relay passes on: an exact method, an exact
+// path or clean path prefix, and whether a query string is allowed.
 type RelayRoute struct {
 	Method, Path string
 	Query        bool
+	Prefix       bool
 }
 
 // Relay passes a harness's own sign-in, token refresh and account metadata
@@ -55,7 +57,11 @@ func (h *Relay) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	e := gateway.AuditEvent(r.Context(), r.URL.Path)
 	e.Service = h.Service
 	allowed := slices.ContainsFunc(h.Routes, func(route RelayRoute) bool {
-		return route.Method == r.Method && route.Path == r.URL.Path && (route.Query || r.URL.RawQuery == "")
+		matches := route.Path == r.URL.Path
+		if route.Prefix {
+			matches = r.URL.Path == path.Clean(r.URL.Path) && strings.HasPrefix(r.URL.Path, route.Path)
+		}
+		return route.Method == r.Method && matches && (route.Query || r.URL.RawQuery == "")
 	})
 	if !allowed {
 		// Record the request shape, never query names or values, which can

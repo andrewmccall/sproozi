@@ -19,6 +19,9 @@ func (f *fixture) model(w http.ResponseWriter, r *http.Request, selected string)
 	// Copilot's model list, model choice and account requests aren't model
 	// calls; they are checked for the credential but not counted.
 	metadata := selected == copilotGitHub && (r.Method == http.MethodGet || r.URL.Path == "/auto")
+	if metadata {
+		f.accountRequests = append(f.accountRequests, r.Method+" "+r.URL.Path)
+	}
 	if !metadata {
 		f.requests++
 	}
@@ -268,7 +271,18 @@ func (f *fixture) copilotMetadata(w http.ResponseWriter, r *http.Request) bool {
 		f.mu.Unlock()
 		w.WriteHeader(http.StatusNotFound)
 		return true
-	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/copilot_internal/"):
+	case r.Method == http.MethodGet && r.URL.Path == "/copilot/mcp_registry":
+		f.mu.Lock()
+		f.registryRequests++
+		f.mu.Unlock()
+		body = map[string]any{"mcp_registries": []any{}, "registry_access": "allow_all"}
+	case r.Method == http.MethodGet && r.URL.Path == "/copilot_internal/team_customizations":
+		w.WriteHeader(http.StatusNotFound)
+		return true
+	case strings.HasPrefix(r.URL.Path, "/copilot/") || strings.HasPrefix(r.URL.Path, "/copilot_internal/"):
+		f.mu.Lock()
+		f.violations = append(f.violations, "unmodeled Copilot account request: "+r.Method+" "+r.URL.Path)
+		f.mu.Unlock()
 		w.WriteHeader(http.StatusNotFound)
 		return true
 	default:

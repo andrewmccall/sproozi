@@ -147,8 +147,10 @@ func modelRoutes(config GatewayConfig, modelConfig modelgateway.HandlerConfig, t
 		dispatch[m.Authority] = route(m.New(c), workload)
 	}
 	if provider.AccountAuthority != "" && (workload || !apiRoute) {
-		addPath(dispatch, provider.AccountAuthority, provider.AccountPrefix,
-			route(provider.AccountRelay(modelConfig.ProviderAuth, modelConfig.HTTPClient, config.AuditLogger), workload))
+		for _, prefix := range provider.AccountPrefixes {
+			addPath(dispatch, provider.AccountAuthority, prefix,
+				route(provider.AccountRelay(modelConfig.ProviderAuth, modelConfig.HTTPClient, config.AuditLogger), workload))
+		}
 	}
 	if !workload {
 		if config.SignIn != nil {

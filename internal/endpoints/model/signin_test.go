@@ -69,6 +69,8 @@ func TestCopilotAccountPolicyQueriesPreserveProviderDecision(t *testing.T) {
 }
 
 func TestCopilotAccountRelayKeepsMethodPathAndQueryRestrictions(t *testing.T) {
+	const registryPath = "/copilot/mcp_registry"
+	const noQuery = "method GET; query parameters present: false"
 	calls := 0
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls++
@@ -79,23 +81,33 @@ func TestCopilotAccountRelayKeepsMethodPathAndQueryRestrictions(t *testing.T) {
 	provider, _ := model.ProviderFor(model.ProviderCopilot)
 	h := provider.AccountRelay(modelauth.Workload{}, upstream.Client(), audit.NewLogger(&logs))
 	h.UpstreamURL = upstream.URL
-	allowed := httptest.NewRecorder()
-	h.ServeHTTP(allowed, signInRequest(http.MethodGet, "https://api.github.com/copilot_internal/managed_settings?client_id=github%2Fcli", ""))
-	if allowed.Code != http.StatusOK || allowed.Body.String() != "provider settings" || calls != 1 {
-		t.Fatal("allowed account request did not reach the provider")
+	for _, path := range []string{
+		"/copilot_internal/managed_settings?client_id=github%2Fcli",
+		registryPath,
+		"/copilot/future/account?client_version=fixture",
+		"/copilot_internal/user?client_version=fixture",
+	} {
+		allowed := httptest.NewRecorder()
+		h.ServeHTTP(allowed, signInRequest(http.MethodGet, "https://api.github.com"+path, ""))
+		if allowed.Code != http.StatusOK || allowed.Body.String() != "provider settings" {
+			t.Fatalf("allowed account request did not reach the provider: %s: %d %s", path, allowed.Code, allowed.Body.String())
+		}
 	}
+	allowedCalls := calls
 	for _, tc := range []struct{ method, path, diagnostic string }{
+		{http.MethodPost, registryPath, "method POST; query parameters present: false"},
+		{http.MethodDelete, registryPath, "method DELETE; query parameters present: false"},
+		{http.MethodGet, "/copilotish/user", noQuery},
+		{http.MethodGet, "/repos/owner/repo", noQuery},
+		{http.MethodGet, "/copilot/../repos", noQuery},
+		{http.MethodGet, "/copilot/%2e%2e/repos", noQuery},
 		{http.MethodPost, "/copilot_internal/managed_settings?secret-name=secret-value", "method POST; query parameters present: true"},
-		{http.MethodGet, "/copilot_internal/user?secret-name=secret-value", "method GET; query parameters present: true"},
-		{http.MethodGet, "/copilot_internal/team_customizations?secret-name=secret-value", "method GET; query parameters present: true"},
-		{http.MethodGet, "/copilot_internal/managed_settings/extra", "method GET; query parameters present: false"},
-		{http.MethodGet, "/copilot_internal/other", "method GET; query parameters present: false"},
 		{"secret-method", "/copilot_internal/managed_settings", "method unrecognized; query parameters present: false"},
 	} {
 		logs.Reset()
 		response := httptest.NewRecorder()
 		h.ServeHTTP(response, signInRequest(tc.method, "https://api.github.com"+tc.path, ""))
-		if response.Code != http.StatusForbidden || calls != 1 ||
+		if response.Code != http.StatusForbidden || calls != allowedCalls ||
 			!strings.Contains(response.Body.String(), tc.diagnostic) || !strings.Contains(logs.String(), tc.diagnostic) {
 			t.Fatalf("restriction or diagnostic failed: %s %s: %d %s calls=%d audit=%s",
 				tc.method, tc.path, response.Code, response.Body.String(), calls, logs.String())
@@ -104,6 +116,39 @@ func TestCopilotAccountRelayKeepsMethodPathAndQueryRestrictions(t *testing.T) {
 			if strings.Contains(logs.String()+response.Body.String(), secret) {
 				t.Fatal("refusal exposed query content or an unrecognized method")
 			}
+		}
+	}
+}
+
+func TestCopilotMCPRegistryPreservesProviderPolicy(t *testing.T) {
+	for _, policy := range []struct {
+		status int
+		body   string
+	}{
+		{http.StatusOK, `{"mcp_registries":[],"registry_access":"allow_all"}`},
+		{http.StatusForbidden, `{"message":"MCP servers are restricted by organization policy"}`},
+		{http.StatusNotFound, `{"message":"No registry policy for this account"}`},
+	} {
+		calls := 0
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			calls++
+			if r.Method != http.MethodGet || r.URL.RequestURI() != "/copilot/mcp_registry" ||
+				r.Header.Get("Authorization") != "Bearer "+copilotGitHubToken {
+				t.Errorf("registry request changed: %s %s", r.Method, r.URL.RequestURI())
+			}
+			w.WriteHeader(policy.status)
+			_, _ = io.WriteString(w, policy.body)
+		}))
+		provider, _ := model.ProviderFor(model.ProviderCopilot)
+		relay := provider.AccountRelay(modelauth.Workload{}, upstream.Client(), nil)
+		relay.UpstreamURL = upstream.URL
+		request := signInRequest(http.MethodGet, "https://api.github.com/copilot/mcp_registry", "")
+		request.Header.Set("Authorization", "Bearer "+copilotGitHubToken)
+		response := httptest.NewRecorder()
+		relay.ServeHTTP(response, request)
+		upstream.Close()
+		if response.Code != policy.status || response.Body.String() != policy.body || calls != 1 {
+			t.Fatalf("registry policy changed: status=%d body=%s calls=%d", response.Code, response.Body.String(), calls)
 		}
 	}
 }

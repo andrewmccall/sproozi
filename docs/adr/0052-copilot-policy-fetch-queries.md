@@ -3,6 +3,9 @@
 Status: accepted
 Date: 2026-11-04
 
+The account-route scope below is expanded by
+[ADR 0053](0053-copilot-account-namespaces-and-policy-verification.md).
+
 ## Problem and constraints
 
 Copilot 1.0.103 sends `client_id`, `client_version` and

@@ -12,6 +12,34 @@ concurrency:
 permissions: {}
 
 jobs:
+  copilot-sign-in:
+    permissions:
+      contents: read
+    name: Pinned Copilot GitHub account and MCP policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417
+        with:
+          go-version: '1.26.10'
+      - name: Install the locked Copilot client without lifecycle scripts
+        run: |
+          npm ci --prefix hack/clients/copilot --ignore-scripts --no-audit --no-fund
+          echo "$GITHUB_WORKSPACE/hack/clients/copilot/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Verify GitHub account startup, MCP policy, capability denial and diagnose
+        run: go run ./hack/verify/harness-process --harness copilot-github --output .local/verification/copilot-github.json
+      - name: Retain Copilot account verification evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: copilot-github-evidence
+          path: .local/verification/copilot-github.json
+          include-hidden-files: true
+          if-no-files-found: warn
+
   # The race run proves everything a plain run does, so CI runs the unit
   # packages once, under -race with coverage, split into two shards.
   race-1:

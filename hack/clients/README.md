@@ -94,7 +94,11 @@ releases differ from the pins or fail. To move the pins:
    done
    ```
 
-5. Open a pull request. PR CI then runs `make test-e2e` with the new pins.
+5. Open a pull request. PR CI then runs `make test-e2e` with the new pins
+   and verifies GitHub-authenticated Copilot through a local provider fixture.
+   The registry-policy URL has a separate authenticated gateway probe, because
+   the fixture individual account can skip registry discovery. The weekly
+   canary runs that verifier with its resolved latest Copilot too.
 
 Calico is pinned separately, by version and SHA-256, in
 [`hack/verify/fetch-calico.sh`](../verify/fetch-calico.sh).
