@@ -539,9 +539,9 @@ var modelProviders = []string{modelgateway.ProviderOpenAI, modelgateway.Provider
 type signedInRoute struct {
 	handler  http.Handler
 	forwards bool
-	// prefix makes the route a path route of a host another capability
+	// prefixes make the route a path route of a host another capability
 	// owns, such as Copilot's account requests on api.github.com.
-	prefix string
+	prefixes []string
 }
 
 // modelHandlers builds the OpenAI and Anthropic API routes' handlers; either
@@ -600,12 +600,15 @@ func modelHandlers(cfg *startupConfig, auditLogger audit.Writer, modelClient *ht
 			signedIn[m.Authority] = signedInRoute{handler: m.New(config(m.UpstreamURL, auth)), forwards: forwards}
 		}
 		if forwards && provider.SignInAuthority != "" {
-			signedIn[provider.SignInAuthority] = signedInRoute{handler: provider.SignInRelay(modelClient, auditLogger),
-				prefix: provider.SignInPrefix}
+			route := signedInRoute{handler: provider.SignInRelay(modelClient, auditLogger)}
+			if provider.SignInPrefix != "" {
+				route.prefixes = []string{provider.SignInPrefix}
+			}
+			signedIn[provider.SignInAuthority] = route
 		}
 		if provider.AccountAuthority != "" {
 			signedIn[provider.AccountAuthority] = signedInRoute{handler: provider.AccountRelay(auth, modelClient, auditLogger),
-				forwards: forwards, prefix: provider.AccountPrefix}
+				forwards: forwards, prefixes: provider.AccountPrefixes}
 		}
 	}
 	return openAIHandler, anthropicHandler, signedIn
@@ -681,10 +684,12 @@ func composeDispatcher(
 	for _, extra := range signedIn {
 		for authority, served := range extra {
 			route := routes[authority]
-			if served.prefix != "" {
-				route.Paths = append(route.Paths, gateway.PathRoute{Prefix: served.prefix, Route: gateway.Route{
-					Capability: string(sprooziv1alpha1.CapabilityModelInference), Tier: audit.TierSemantic,
-					Handler: served.handler, ProviderCredential: served.forwards}})
+			if len(served.prefixes) > 0 {
+				for _, prefix := range served.prefixes {
+					route.Paths = append(route.Paths, gateway.PathRoute{Prefix: prefix, Route: gateway.Route{
+						Capability: string(sprooziv1alpha1.CapabilityModelInference), Tier: audit.TierSemantic,
+						Handler: served.handler, ProviderCredential: served.forwards}})
+				}
 			} else {
 				route.Handler, route.ProviderCredential = served.handler, served.forwards
 			}

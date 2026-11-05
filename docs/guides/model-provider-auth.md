@@ -198,6 +198,15 @@ To switch back to API-key billing, select `api_key` in
 checks above and retains the documented reservation and settlement limits.
 An AgentRun cannot select the authentication mode.
 
+## Copilot account requests
+
+GitHub-backed Copilot can read `api.github.com/copilot/` and
+`api.github.com/copilot_internal/` through the gateway, including query
+parameters. GitHub applies the account's permissions and MCP policy; the
+response, including a refusal, reaches Copilot unchanged. These routes accept
+GET only and do not open unrelated GitHub API paths. Copilot in OpenAI-key
+mode does not enable them. See [ADR 0053](../adr/0053-copilot-account-namespaces-and-policy-verification.md).
+
 ## Current limits
 
 These sections describe how the gateway streams and charges model calls.

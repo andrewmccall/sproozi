@@ -68,32 +68,38 @@ const providerKey = "fixture-gateway-provider-key"
 const proxyToken = "fixture-projected-token"
 
 type result struct {
-	Harness                string `json:"harness"`
-	Mode                   string `json:"mode"`
-	Scenario               string `json:"scenario"`
-	Version                string `json:"version"`
-	ExitCode               int    `json:"exitCode"`
-	TimedOut               bool   `json:"timedOut"`
-	ModelRequests          int    `json:"modelRequests"`
-	PolicyRequests         int    `json:"policyRequests,omitempty"`
-	ToolCalls              int    `json:"toolCalls"`
-	ReceivedToolResult     bool   `json:"receivedToolResult"`
-	AuthenticatedSessions  int    `json:"authenticatedSessions"`
-	UnitsUsed              *int64 `json:"unitsUsed"`
-	ReservedUnits          *int64 `json:"reservedUnits"`
-	ToolUnitsUsed          *int64 `json:"toolUnitsUsed"`
-	JournaledDenial        bool   `json:"journaledDenial"`
-	Diagnosed              bool   `json:"diagnosed"`
-	MissingIdentityDenied  bool   `json:"missingIdentityDenied"`
-	UnknownAuthorityDenied bool   `json:"unknownAuthorityDenied"`
-	Output                 string `json:"output"`
-	SessionExport          string `json:"sessionExport,omitempty"`
-	Passed                 bool   `json:"passed"`
+	Harness                string   `json:"harness"`
+	Mode                   string   `json:"mode"`
+	Scenario               string   `json:"scenario"`
+	Version                string   `json:"version"`
+	ExitCode               int      `json:"exitCode"`
+	TimedOut               bool     `json:"timedOut"`
+	ModelRequests          int      `json:"modelRequests"`
+	PolicyRequests         int      `json:"policyRequests,omitempty"`
+	RegistryRequests       int      `json:"registryRequests,omitempty"`
+	RegistryProbePassed    bool     `json:"registryProbePassed,omitempty"`
+	AccountDenials         int      `json:"accountDenials,omitempty"`
+	AccountRequests        []string `json:"accountRequests,omitempty"`
+	ToolCalls              int      `json:"toolCalls"`
+	ReceivedToolResult     bool     `json:"receivedToolResult"`
+	AuthenticatedSessions  int      `json:"authenticatedSessions"`
+	UnitsUsed              *int64   `json:"unitsUsed"`
+	ReservedUnits          *int64   `json:"reservedUnits"`
+	ToolUnitsUsed          *int64   `json:"toolUnitsUsed"`
+	JournaledDenial        bool     `json:"journaledDenial"`
+	Diagnosed              bool     `json:"diagnosed"`
+	MissingIdentityDenied  bool     `json:"missingIdentityDenied"`
+	UnknownAuthorityDenied bool     `json:"unknownAuthorityDenied"`
+	Output                 string   `json:"output"`
+	SessionExport          string   `json:"sessionExport,omitempty"`
+	Passed                 bool     `json:"passed"`
 }
 type fixture struct {
 	mu                        sync.Mutex
 	requests, tools, sessions int
 	policyRequests            int
+	registryRequests          int
+	accountRequests           []string
 	violations                []string
 	tool                      bool
 	scenario                  string
@@ -139,6 +145,8 @@ func main() {
 	}
 	evidence := map[string]any{"results": results, "limitations": []string{
 		"Local mocked model providers; no paid provider inference or Kubernetes Pod/CNI proof",
+		"Copilot uses a fixture individual account; an explicit gateway probe verifies the registry URL, " +
+			"not a real organization's policy selection",
 		"In-memory ledger; persistent ledger, policy revocation and cancellation have separate existing verification",
 		"Stock OpenCode can exit zero on provider errors; evidence retains the actual process status",
 	}}
@@ -288,7 +296,7 @@ func run(selected, scenario string, withTool, supervised bool) (result, error) {
 				broker.ServeHTTP(w, r)
 			}))}}
 	if selected == copilotGitHub {
-		authority, route := copilotAccountRoute(upstream, tracker)
+		authority, route := copilotAccountRoute(upstream, tracker, journal)
 		routes[authority] = route
 	}
 	guard := gateway.NewLeakGuard(routes, nil)
@@ -409,7 +417,25 @@ func run(selected, scenario string, withTool, supervised bool) (result, error) {
 		out.ExitCode = process.ProcessState.ExitCode()
 	}
 	out.JournaledDenial = journaledDenial(journal, identity.Execution.UID)
+	out = observeCopilotAccount(out, selected, proxyURL, ca, journal, identity.Execution.UID)
 	return inspectResult(out, f, ledger, selected, scenario, withTool, processErr)
+}
+
+func observeCopilotAccount(out result, selected string, proxyURL *url.URL, ca []byte,
+	journal *diagnose.Journal, execution string) result {
+	if selected != copilotGitHub {
+		return out
+	}
+	if out.Scenario != deniedScenario {
+		out.RegistryProbePassed = probeCopilotRegistry(proxyURL, ca)
+	}
+	for _, entry := range journal.Denials(execution, time.Time{}, time.Now()) {
+		if strings.Contains(entry.Event.Operation, "/copilot/") ||
+			strings.Contains(entry.Event.Operation, "/copilot_internal/") {
+			out.AccountDenials++
+		}
+	}
+	return out
 }
 
 func supervisorCommand(directory string, withTool bool) (string, []string, error) {
@@ -449,13 +475,18 @@ func fixtureModelRoute(selected string, config model.HandlerConfig) (string, htt
 
 // copilotAccountRoute serves Copilot's account requests on api.github.com as
 // the gateway does, beside the GitHub capability, from the fixture upstream.
-func copilotAccountRoute(upstream *httptest.Server, tracker *budget.Tracker) (string, gateway.Route) {
+func copilotAccountRoute(upstream *httptest.Server, tracker *budget.Tracker,
+	logger audit.Writer) (string, gateway.Route) {
 	copilot, _ := model.ProviderFor(model.ProviderCopilot)
-	relay := copilot.AccountRelay(modelauth.Workload{}, upstream.Client(), audit.NewLogger(io.Discard))
+	relay := copilot.AccountRelay(modelauth.Workload{}, upstream.Client(), logger)
 	relay.UpstreamURL = upstream.URL
-	return copilot.AccountAuthority, gateway.Route{Paths: []gateway.PathRoute{{Prefix: copilot.AccountPrefix,
-		Route: gateway.Route{Capability: string(api.CapabilityModelInference), Tier: audit.TierSemantic, Handler: relay,
-			Budgets: tracker, ProviderCredential: true}}}}
+	paths := make([]gateway.PathRoute, 0, len(copilot.AccountPrefixes))
+	for _, prefix := range copilot.AccountPrefixes {
+		paths = append(paths, gateway.PathRoute{Prefix: prefix,
+			Route: gateway.Route{Capability: string(api.CapabilityModelInference), Tier: audit.TierSemantic, Handler: relay,
+				Budgets: tracker, AuditLogger: logger, ProviderCredential: true}})
+	}
+	return copilot.AccountAuthority, gateway.Route{Paths: paths}
 }
 
 func connectStatus(proxyURL, authority, token string, ca []byte) int {
@@ -706,6 +737,8 @@ func inspectResult(out result,
 	f.mu.Lock()
 	out.ModelRequests = f.requests
 	out.PolicyRequests = f.policyRequests
+	out.RegistryRequests = f.registryRequests
+	out.AccountRequests = append([]string(nil), f.accountRequests...)
 	out.ToolCalls = f.tools
 	out.ReceivedToolResult = f.receivedToolResult
 	out.Diagnosed = f.diagnosed
@@ -723,7 +756,8 @@ func inspectResult(out result,
 	out.Passed = accepted(out, scenario, withTool, answered, completed)
 	out.Passed = out.Passed && out.MissingIdentityDenied && out.UnknownAuthorityDenied
 	if selected == copilotGitHub && scenario != deniedScenario {
-		out.Passed = out.Passed && out.PolicyRequests > 0
+		out.Passed = out.Passed && out.PolicyRequests > 0 && out.RegistryRequests > 0 &&
+			out.RegistryProbePassed && out.AccountDenials == 0
 	}
 	if out.Mode == "supervised" {
 		if scenario != deniedScenario {
@@ -741,6 +775,31 @@ func inspectResult(out result,
 				out.Output)
 	}
 	return out, nil
+}
+
+// The individual fixture account can skip registry discovery. Probe this
+// independently observed URL through the authenticated TLS gateway as well;
+// model completion alone must not stand in for account-route coverage.
+func probeCopilotRegistry(proxyURL *url.URL, ca []byte) bool {
+	roots := x509.NewCertPool()
+	roots.AppendCertsFromPEM(ca)
+	transport := &http.Transport{Proxy: http.ProxyURL(proxyURL),
+		TLSClientConfig: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}}
+	defer transport.CloseIdleConnections()
+	client := &http.Client{Transport: transport, Timeout: 10 * time.Second}
+	request, err := http.NewRequest(http.MethodGet, "https://api.github.com/copilot/mcp_registry", nil)
+	if err != nil {
+		return false
+	}
+	request.Header.Set("Authorization", "Bearer "+copilotFixtureToken)
+	response, err := client.Do(request)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = response.Body.Close() }()
+	body, err := io.ReadAll(io.LimitReader(response.Body, 1024))
+	return err == nil && response.StatusCode == http.StatusOK &&
+		string(body) == "{\"mcp_registries\":[],\"registry_access\":\"allow_all\"}\n"
 }
 
 func accepted(out result, scenario string, withTool, answered, completed bool) bool {

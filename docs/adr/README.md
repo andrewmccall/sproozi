@@ -125,3 +125,4 @@ ADR 0024's statement that releases do not pin clients.
 | [0050](0050-prebuilt-cli-and-explicit-image-builds.md) | Prebuilt Homebrew bottles, explicit native/control image builds and removal of Copilot’s obsolete remote flag. |
 | [0051](0051-interactive-sessions-may-run-without-a-model-budget.md) | A local session's model allowance may have no limit, which setup now writes; every other capability keeps a unit bound and the Kubernetes placement keeps requiring one. |
 | [0052](0052-copilot-policy-fetch-queries.md) | Copilot's exact managed-settings route accepts its query and preserves the provider's policy response; relay refusals describe method and query presence without query content. |
+| [0053](0053-copilot-account-namespaces-and-policy-verification.md) | GitHub-backed Copilot relays GETs in both account namespaces; CI separately verifies the registry-policy URL through the authenticated gateway and the pinned client's model/MCP turn. |

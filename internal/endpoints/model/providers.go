@@ -39,11 +39,12 @@ type Provider struct {
 	// TokenHeaders are set with a gateway-held sign-in token, such as the beta
 	// header Anthropic requires for an OAuth token.
 	TokenHeaders map[string]string
-	// AccountAuthority, AccountPrefix and AccountRoutes are the account and
+	// AccountAuthority, AccountPrefixes and AccountRoutes are the account and
 	// policy requests a signed-in client makes on a host another capability
 	// owns, such as Copilot's on api.github.com. Only these paths are served.
-	AccountAuthority, AccountPrefix string
-	AccountRoutes                   []RelayRoute
+	AccountAuthority string
+	AccountPrefixes  []string
+	AccountRoutes    []RelayRoute
 }
 
 // Provider names, as harness model protocols spell them.
@@ -92,12 +93,12 @@ var providers = map[string]Provider{
 			{Method: http.MethodPost, Path: "/login/device/code"},
 			{Method: http.MethodPost, Path: "/login/oauth/access_token"},
 		},
-		AccountAuthority: "api.github.com:443", AccountPrefix: "/copilot_internal/",
+		AccountAuthority: "api.github.com:443", AccountPrefixes: []string{"/copilot_internal/", "/copilot/"},
 		AccountRoutes: []RelayRoute{
-			{Method: http.MethodGet, Path: "/copilot_internal/user"},
-			// Copilot includes its client identity and versions in the query.
-			{Method: http.MethodGet, Path: "/copilot_internal/managed_settings", Query: true},
-			{Method: http.MethodGet, Path: "/copilot_internal/team_customizations"},
+			// GitHub-backed Copilot owns these read-only account namespaces.
+			// The provider validates parameters and decides the account's policy.
+			{Method: http.MethodGet, Path: "/copilot_internal/", Prefix: true, Query: true},
+			{Method: http.MethodGet, Path: "/copilot/", Prefix: true, Query: true},
 		}},
 }
 

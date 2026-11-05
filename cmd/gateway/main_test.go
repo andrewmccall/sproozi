@@ -916,9 +916,41 @@ func TestCopilotHostsServeAForwardedSignInOrAGatewayToken(t *testing.T) {
 					routes[authority].ProviderCredential)
 			}
 		}
-		if account, _, _ := routes.Select("api.github.com:443", "/copilot_internal/user"); account.Handler == nil ||
-			account.ProviderCredential != tc.forwards {
-			t.Fatalf("%s mode: Copilot's account route %+v", tc.mode, account)
+		for _, path := range []string{"/copilot_internal/user", "/copilot/mcp_registry", "/copilot/future/account"} {
+			account, _, _ := routes.Select("api.github.com:443", path)
+			if account.Handler == nil || account.ProviderCredential != tc.forwards ||
+				account.Capability != string(api.CapabilityModelInference) {
+				t.Fatalf("%s mode: Copilot's account route %s: %+v", tc.mode, path, account)
+			}
+		}
+		const refusal = `{"message":"MCP is restricted by organization policy"}`
+		calls := 0
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			calls++
+			credential := tc.token
+			if tc.forwards {
+				credential = "gho_client"
+			}
+			if r.Method != http.MethodGet || r.URL.RequestURI() != "/copilot/mcp_registry" ||
+				r.Header.Get("Authorization") != "Bearer "+credential {
+				t.Errorf("registry request changed: %s %s", r.Method, r.URL.RequestURI())
+			}
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = io.WriteString(w, refusal)
+		}))
+		account, _, _ := routes.Select("api.github.com:443", "/copilot/mcp_registry")
+		relay, ok := account.Handler.(*modelgateway.Relay)
+		if !ok {
+			t.Fatalf("registry request selected a different handler: %+v", account)
+		}
+		relay.UpstreamURL, relay.HTTPClient = upstream.URL, upstream.Client()
+		request := httptest.NewRequest(http.MethodGet, "https://api.github.com/copilot/mcp_registry", nil)
+		request.Header.Set("Authorization", "Bearer gho_client")
+		response := httptest.NewRecorder()
+		account.Handler.ServeHTTP(response, request)
+		upstream.Close()
+		if response.Code != http.StatusForbidden || response.Body.String() != refusal || calls != 1 {
+			t.Fatalf("registry policy refusal changed: status=%d body=%s calls=%d", response.Code, response.Body.String(), calls)
 		}
 	}
 	t.Setenv("MODEL_AUTH_MODE", "api_key")
@@ -932,5 +964,9 @@ func TestCopilotHostsServeAForwardedSignInOrAGatewayToken(t *testing.T) {
 	routes := composeDispatcher(cfg, handlers, nil, anthropic, signedIn)
 	if routes.Allows("api.individual.githubcopilot.com:443") {
 		t.Fatal("Copilot's host opened without a credential")
+	}
+	account, _, _ := routes.Select("api.github.com:443", "/copilot/mcp_registry")
+	if account.Capability == string(api.CapabilityModelInference) && account.Handler != nil {
+		t.Fatal("Copilot account route opened without a GitHub credential mechanism")
 	}
 }
