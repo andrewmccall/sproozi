@@ -498,6 +498,46 @@ func TestAnthropicStartupAndReservedRoute(t *testing.T) {
 	}
 }
 
+const anthropicHost, openAIHost = "api.anthropic.com", "api.openai.com"
+
+// A gateway-held Anthropic key with no Copilot sign-in must still inspect
+// github.com, Copilot's sign-in host, for pull requests: git clones and pushes
+// there.
+func TestModelPruningKeepsHostsOtherCapabilitiesRoute(t *testing.T) {
+	validGatewayEnvironment(t)
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "anthropic-fixture-key")
+	t.Setenv("SPROOZI_ENABLED_CAPABILITIES", "kubernetes.read,model.inference,github.pull_request")
+	cfg, err := loadStartupConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, host := range []string{"github.com", "api.github.com", anthropicHost} {
+		if _, ok := cfg.certificates[host]; !ok {
+			t.Fatalf("%s is not inspected", host)
+		}
+	}
+	routes := composeDispatcher(cfg, map[api.CapabilityKind]http.Handler{
+		api.CapabilityGitHubPullRequest: http.NotFoundHandler()}, nil, http.NotFoundHandler())
+	if !routes.Allows("github.com:443") || !routes.Allows("api.github.com:443") {
+		t.Fatal("pull-request authorities are not routed")
+	}
+	for _, host := range []string{openAIHost, "api.individual.githubcopilot.com"} {
+		if _, ok := cfg.certificates[host]; ok {
+			t.Fatalf("%s is inspected without a credential or sign-in", host)
+		}
+	}
+
+	t.Setenv("SPROOZI_ENABLED_CAPABILITIES", "kubernetes.read,model.inference")
+	cfg, err = loadStartupConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := cfg.certificates["github.com"]; ok {
+		t.Fatal("github.com is inspected without pull requests or a Copilot sign-in")
+	}
+}
+
 func TestWorkloadModeForwardsEachHarnessSignIn(t *testing.T) {
 	validGatewayEnvironment(t)
 	t.Setenv("MODEL_AUTH_MODE", "workload")

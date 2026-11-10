@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"maps"
 	"math"
 	"net"
 	"net/http"
@@ -322,7 +323,12 @@ func loadStartupConfig() (*startupConfig, error) {
 	}
 	hosts := inspectionHosts(host, enabled, profiles, mcpRegistry)
 	if enabled[sprooziv1alpha1.CapabilityModelInference] {
-		pruneModelHosts(hosts, modelAuthMode, openAIKey+openAIToken != "", anthropicKey+anthropicToken != "",
+		// Hosts another capability or an egress profile routes stay, such as
+		// github.com and api.github.com for pull requests.
+		withoutModel := maps.Clone(enabled)
+		delete(withoutModel, sprooziv1alpha1.CapabilityModelInference)
+		owned := inspectionHosts(host, withoutModel, profiles, mcpRegistry)
+		pruneModelHosts(hosts, owned, modelAuthMode, openAIKey+openAIToken != "", anthropicKey+anthropicToken != "",
 			copilotToken != "")
 	}
 	for name := range hosts {
@@ -346,21 +352,27 @@ func loadStartupConfig() (*startupConfig, error) {
 
 // pruneModelHosts drops model hosts no route serves: a provider API with no
 // credential, and a signed-in client's hosts unless the provider forwards its
-// sign-in, so a gateway with keys needs no extra certificate names.
-func pruneModelHosts(hosts map[string]bool, mode string, openAIHeld, anthropicHeld, copilotHeld bool) {
+// sign-in, so a gateway with keys needs no extra certificate names. It never
+// drops a host in owned, which other capabilities and egress profiles route.
+func pruneModelHosts(hosts, owned map[string]bool, mode string, openAIHeld, anthropicHeld, copilotHeld bool) {
+	drop := func(host string) {
+		if !owned[host] {
+			delete(hosts, host)
+		}
+	}
 	workload := mode == modelauth.WorkloadMode
 	if !anthropicHeld && !workload {
-		delete(hosts, "api.anthropic.com")
+		drop("api.anthropic.com")
 	}
 	if !openAIHeld && mode == modelauth.APIKeyMode {
-		delete(hosts, "api.openai.com")
+		drop("api.openai.com")
 	}
 	for name, forwards := range map[string]bool{modelgateway.ProviderOpenAI: workload && !openAIHeld,
 		modelgateway.ProviderAnthropic: workload && !anthropicHeld} {
 		provider, _ := modelgateway.ProviderFor(name)
 		if !forwards {
 			for _, extra := range provider.Hosts(true)[1:] {
-				delete(hosts, extra)
+				drop(extra)
 			}
 		}
 	}
@@ -370,8 +382,8 @@ func pruneModelHosts(hosts map[string]bool, mode string, openAIHeld, anthropicHe
 	for _, host := range copilot.Hosts(true) {
 		if copilotHeld || workload {
 			hosts[host] = true
-		} else if host != "api.github.com" {
-			delete(hosts, host)
+		} else {
+			drop(host)
 		}
 	}
 }
