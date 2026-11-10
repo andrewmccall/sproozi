@@ -168,7 +168,20 @@ signs in once with this cluster's store of its login.
 
 A session uses the login it was started with, `default` unless
 `sproozi run --login NAME` named another; an AgentRun has no session and uses
-`default`. A Secret stays as it is, so it suits a token that doesn't refresh,
+`default`.
+
+An AgentRun has no supervisor. For Claude Code, `claude-launch.py` (the stock
+example's launch) does the same: it copies `.credentials.json` from the store
+into the run's fresh native home before launch, keeps the two in step every
+second under the store's lock, and saves the last change when Claude Code
+exits, so a token refreshed in one run reaches the next. To sign in a new
+Claude Code login once, start an AgentRun from a runtime with the same
+`signIn.claims` whose container waits instead of launching, for example
+`sleep 1800`, under a policy that grants `model.inference`. Then run
+`kubectl exec -it -n sproozi-agents POD -c agent -- python3
+/etc/sproozi/contract/claude-launch.py --login`, use `/login`, finish the
+browser step on your own machine and exit. Claude Code's sign-in and refresh
+reach the gateway's `platform.claude.com` route only in workload mode. A Secret stays as it is, so it suits a token that doesn't refresh,
 and gives every session the same token. A client that keeps its own copy of a
 refreshing token can still lose a refresh to another session of its login, as
 on one machine. Give the claims a filesystem the agent user (UID 1000) can

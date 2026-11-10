@@ -37,3 +37,8 @@ var OpenCodeLaunch = launchFile("opencode-launch.py")
 // HermesLaunch projects stock Hermes' terminal result into the bounded run result.
 // It leaves the native model/tool loop intact and needs Python 3 in the image.
 var HermesLaunch = launchFile("hermes-launch.py")
+
+// ClaudeLaunch runs one stock Claude Code task for an AgentRun, keeps its
+// login file in step with a mounted login store, and publishes the bounded run
+// result. It needs Python 3 in the image.
+var ClaudeLaunch = launchFile("claude-launch.py")

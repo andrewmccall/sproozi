@@ -846,7 +846,8 @@ def stock_clients():
                 "result": data["status"].get("result"),
             }
         )
-        if harness == "hermes":
+        if harness in ("hermes", "claude-code"):
+            # Their launch helpers publish the stock client's final answer.
             check(data["status"]["result"]["text"] == ANSWER, data)
         proof = worker_proof(name)
         record(
