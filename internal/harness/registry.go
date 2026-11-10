@@ -123,7 +123,7 @@ var registry = []Harness{
 		MCP: MCPFormat{File: "codex-mcp.toml"}, Loader: NativeMCP},
 	{Selector: string(NativeClaude), Native: NativeClaude, NativeDirectory: "claude", Protocol: ProtocolAnthropic,
 		SignInFile:   ".credentials.json",
-		RequestFiles: true, Loader: NativeMCP,
+		RequestFiles: true, Loader: NativeMCP, LaunchFiles: launchFilesNamed("claude-launch.py"),
 		MCP: MCPFormat{File: "claude-mcp.json", Field: mcpServersField, Entry: func(name, address string) (string, any) {
 			return name, map[string]any{connectionType: httpTransport, connectionURL: address}
 		}}},

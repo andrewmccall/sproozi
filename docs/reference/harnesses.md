@@ -62,8 +62,23 @@ Use the [stock runtime examples](../../examples/harnesses/README.md), supply rev
 digest-pinned images and select the runtime in `AgentTemplate.spec.runtimeRef`.
 The completion container is still named `agent`.
 
-Codex and Claude Code replace the launch shell with the stock process. OpenCode
-can exit zero on an API denial and lose terminal JSON stdout events.
+Codex replaces the launch shell with the stock process. Claude Code uses
+`claude-launch.py`, from its immutable contract: this Python 3 helper prepares a
+fresh native home (`$HOME/.claude`), runs one stock `claude --print` with the
+approved instructions appended to its system prompt and `request.json` as its
+prompt, and publishes Claude Code's final `--output-format json` `result` in the
+UID-bound termination-file envelope, truncated to the limit and marked when it
+is. An error record, a nonzero exit or a missing or malformed record fails the
+container with no result. Claude Code's output goes to a file, not a pipe, so a
+tool process left holding standard output can't delay completion. When the
+runtime has a sign-in (`clientConfig.signIn`), the helper gives Claude Code no
+key placeholder and keeps its `.credentials.json` in step with the mounted login
+store while it runs, as the managed-session supervisor does
+([ADR 0054](../adr/0054-claude-code-agentruns-launch-through-a-helper.md)).
+`claude-launch.py --login` runs Claude Code interactively with the same sync, to
+sign in once into a login store (see [AgentRuntime](agentruntime.md#harness-sign-in)).
+
+OpenCode can exit zero on an API denial and lose terminal JSON stdout events.
 Sproozi therefore supplies `opencode-launch.py` in its immutable contract. This
 small Python 3 adapter starts the stock CLI, forwards termination signals, and
 then reads the harness conversation through OpenCode's session list and
