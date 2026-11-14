@@ -90,7 +90,7 @@ func TestEnvironmentUsesTheLoopbackGatewayForwarder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"} {
+	for _, key := range nativeProxyEnvironment {
 		if !slices.Contains(env, key+"="+forwarder) {
 			t.Errorf("%s is not the forwarder in %q", key, env)
 		}

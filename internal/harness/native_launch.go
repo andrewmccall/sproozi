@@ -80,6 +80,8 @@ const (
 	nodeTrustEnvironment     = "NODE_EXTRA_CA_CERTS"
 	gitTrustEnvironment      = "GIT_SSL_CAINFO"
 	curlTrustEnvironment     = "CURL_CA_BUNDLE"
+	httpProxyEnvironment     = "HTTP_PROXY"
+	httpsProxyEnvironment    = "HTTPS_PROXY"
 	NativeLocalTrustBundle   = "/tmp/sproozi-native/ca.pem"
 	NativeGatewayTokenPath   = "/var/run/sproozi/tokens/gateway/token"
 	NativeGatewayTrustBundle = "/etc/sproozi/trust/ca-bundle.pem"
@@ -92,6 +94,10 @@ const (
 	NativeConfigureMaxBytes      = 256<<10 + ((NativeProfileArchiveMaxBytes+2)/3)*4
 )
 
+// nativeProxyEnvironment names every variable that points a harness at its
+// proxy, in both spellings that clients read.
+var nativeProxyEnvironment = []string{httpProxyEnvironment, httpsProxyEnvironment, "http_proxy", "https_proxy"}
+
 func (g NativeGateway) Validate(env []string) error {
 	endpoint, err := url.Parse(g.Endpoint)
 	if err != nil || endpoint.Scheme != nativeHTTPScheme || endpoint.Host == "" || endpoint.User != nil || endpoint.Path != "" || endpoint.RawQuery != "" || endpoint.Fragment != "" || endpoint.ForceQuery || g.TokenPath != NativeGatewayTokenPath || g.TrustBundle != NativeGatewayTrustBundle {
@@ -100,7 +106,7 @@ func (g NativeGateway) Validate(env []string) error {
 	for _, entry := range env {
 		key, _, _ := strings.Cut(entry, "=")
 		switch strings.ToUpper(key) {
-		case "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", sslTrustEnvironment, nodeTrustEnvironment, gitTrustEnvironment, requestsTrustEnvironment, curlTrustEnvironment:
+		case httpProxyEnvironment, httpsProxyEnvironment, "ALL_PROXY", "NO_PROXY", sslTrustEnvironment, nodeTrustEnvironment, gitTrustEnvironment, requestsTrustEnvironment, curlTrustEnvironment:
 			return errors.New("projected gateway conflicts with literal proxy environment")
 		}
 	}
@@ -138,7 +144,7 @@ func (c NativeLaunch) Environment(gatewayProxy string) ([]string, error) {
 	if err != nil || proxy.Scheme != "http" || proxy.Hostname() != "127.0.0.1" || proxy.Port() == "" || proxy.User == nil || proxy.Path != "" || proxy.RawQuery != "" {
 		return nil, errors.New("projected gateway requires the loopback gateway forwarder")
 	}
-	for _, key := range []string{"HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"} {
+	for _, key := range nativeProxyEnvironment {
 		env = append(env, key+"="+proxy.String())
 	}
 	env = append(env, "NO_PROXY=", "no_proxy=")
