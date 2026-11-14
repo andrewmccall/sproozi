@@ -34,16 +34,16 @@ func claudeToolsFixture(t *testing.T, name, id, sum string) ClaudeState {
 }
 
 func claudeMCPToolState(t *testing.T) ClaudeState {
-	return claudeToolsFixture(t, "claude-2.1.318-mcp-tool.jsonl", "06156ccc-e04a-4750-a9b0-0fdfaa381b46",
-		"ff7fc5199ed3917b6ce7b2ea8c28b000d5114b86d19347623a689d11975b59cf")
+	return claudeToolsFixture(t, "claude-2.1.318-mcp-tool.jsonl", "cf6ae474-842c-4783-bda0-f990d74ab132",
+		"2c3a7128a53f2141ae161120d016d580253b9d1494bc8aaf29f994aed6c0ef92")
 }
 
 // One turn ran a foreground Bash command and then an MCP tool; in this one,
 // the same turn had a Bash command that exited non-zero and an MCP tool that
 // reported an error.
 func claudeFailedToolsState(t *testing.T) ClaudeState {
-	return claudeToolsFixture(t, "claude-2.1.318-failed-tools.jsonl", "1ee13846-2aec-4e50-b2b5-ea96addc98ca",
-		"6d6f49e1cd4c9b3843dd31b3886f6a137638f74955ffb44324f741af7476ba62")
+	return claudeToolsFixture(t, "claude-2.1.318-failed-tools.jsonl", "75281fd0-77ab-49d0-9bd2-d95fe05aada4",
+		"d2836b3862a9f1ccea901d278904611ee80a8be446887c2a068cad6443c48d0c")
 }
 
 // One turn invoked a skill from the profile plugin with the Skill tool.
@@ -63,8 +63,8 @@ func TestClaudeStockTranscriptWithMCPAndFailedToolsSettles(t *testing.T) {
 		state ClaudeState
 		leaf  string
 	}{
-		"mcp tool":      {claudeMCPToolState(t), "35679228-da5b-4dc4-8b83-caab4177ee75"},
-		"failed tools":  {claudeFailedToolsState(t), "ad6eb5bc-8ae9-40c8-bd52-cfe0626431b6"},
+		"mcp tool":      {claudeMCPToolState(t), "dac98e00-b882-4a61-9e9e-705b18f68072"},
+		"failed tools":  {claudeFailedToolsState(t), "ae09b767-bc83-4298-8b06-b0266646f2e0"},
 		"profile skill": {claudeProfileSkillState(t), "063b90c1-48e7-4955-9c62-32cbec2f53e3"},
 		"sproozi skill": {claudeSproozSkillState(t), "7aa7a0c9-125b-4bbb-8f8b-d098c738684a"},
 	} {
