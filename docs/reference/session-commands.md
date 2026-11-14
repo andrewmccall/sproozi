@@ -293,9 +293,14 @@ on standard error. A remote `status` prints the session's phase, problem and its
 `status ID` prints the session, harness, phase, placement and, while the
 session runs, its deadline, or `none` when it has none. `sessions` prints a table with `ID` (the first 8
 characters), `HARNESS`, `PHASE`, `PLACEMENT` and `DEADLINE`, plus `LISTED BY`
-when rows come from more than one catalogue. A stopped or cancelled session
-shows `-` for the deadline, because its last execution's deadline no longer
-applies. A running session without a deadline shows `none`.
+when rows come from more than one catalogue. The deadline is shown while the
+session is starting, running or stopping gracefully: phases `preparing`,
+`activating`, `active` and `stopping`, and remote work's `pending` and
+`finalizing`. Any other phase shows `-`: a stopped or cancelled session,
+because its last execution's deadline no longer applies, and an interrupted
+stop or cancellation (`unknown-stop`, `unknown-usage`, `cancelling`), which
+`sproozi recover ID` finishes. A running session without a deadline shows
+`none`.
 
 With `--json`, `status` and the session commands print the session:
 

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/deadline"
+	"github.com/andrewmccall/sproozi/internal/work"
 )
 
 func TestMaxDurationFlag(t *testing.T) {
@@ -46,6 +47,13 @@ func TestDeadlineText(t *testing.T) {
 		{phaseActive, at, formatTime(at)},
 		{phaseCancelled, at, "-"},
 		{phaseCancelled, time.Time{}, "-"},
+		// Remote work's own live phases keep their deadline.
+		{"pending", at, formatTime(at)},
+		{"finalizing", at, formatTime(at)},
+		// No phase is called starting; unresolved and retained ones have none.
+		{"starting", at, "-"},
+		{"unknown-stop", at, "-"},
+		{string(work.PhasePulled), at, "-"},
 	} {
 		if got := deadlineText(tc.phase, tc.at); got != tc.want {
 			t.Errorf("%s %v: %q, want %q", tc.phase, tc.at, got, tc.want)

@@ -112,7 +112,7 @@ func (s *Service) notStoppedProblem(id, current string) error {
 	case r.Phase == session.PhaseActive:
 		return rejectedError(fmt.Sprintf("home: session %s is running; attach to it with \"sproozi attach %s\", or "+
 			"stop it with \"sproozi stop %s\" before resuming", id, id, id))
-	case r.Phase == session.PhaseStopping || r.Phase == session.PhaseUnknownStop || r.Phase == session.PhaseUnknownUsage:
+	case r.Phase.Stopping():
 		return rejectedError(fmt.Sprintf("home: session %s is still stopping; run \"sproozi stop %s\" to finish, "+
 			"or \"sproozi cancel %s\" to force-stop it", id, id, id))
 	}

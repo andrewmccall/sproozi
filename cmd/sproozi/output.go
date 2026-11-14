@@ -23,11 +23,23 @@ const localName = "local"
 // serviceOwnership is the service's own name for sessions this machine owns.
 const serviceOwnership = "home"
 
-// phaseCancelled is the phase of a session whose cancellation finished.
-const phaseCancelled = "cancelled"
+// phaseCancelled is the phase of a session whose cancellation finished. Remote
+// work reports the same word.
+const phaseCancelled = string(session.PhaseCancelled)
 
-// livePhases are the phases in which a session's deadline still applies.
-var livePhases = []string{"preparing", "activating", "active", "stopping", "starting"}
+// remoteWorkLivePhases are the phases of remote work (internal/work) in which
+// its deadline still applies. They are the remote counterparts of
+// session.Phase.Live; the rest of remote work's vocabulary needs no mapping.
+//
+// TODO(ADR 0057): remove once remote work runs through the coordinator and
+// reports session phases.
+var remoteWorkLivePhases = []string{"pending", "preparing", "active", "finalizing"}
+
+// livePhase reports a listed phase, from this machine or a remote executor,
+// in which the session's deadline still applies.
+func livePhase(phase string) bool {
+	return session.Phase(phase).Live() || slices.Contains(remoteWorkLivePhases, phase)
+}
 
 // writeJSON prints one indented JSON document.
 func writeJSON(w io.Writer, v any) error {
@@ -171,7 +183,7 @@ func formatTime(t time.Time) string { return t.Local().Format("2006-01-02 15:04 
 // live session without one, or "-" once it no longer applies.
 func deadlineText(phase string, until time.Time) string {
 	switch d := deadline.At(until); {
-	case !slices.Contains(livePhases, phase):
+	case !livePhase(phase):
 		return "-"
 	case !d.Set():
 		return deadline.NoneArg

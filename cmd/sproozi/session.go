@@ -350,7 +350,7 @@ func (q *options) remoteSession(ctx context.Context) error {
 	case cmdRecover:
 		view, err = client.Recover(ctx, q.id)
 	case cmdCancel:
-		if view, err = client.Info(ctx, q.id); err == nil && view.Phase == phaseCancelled {
+		if view, err = client.Info(ctx, q.id); err == nil && string(view.Phase) == phaseCancelled {
 			break
 		}
 		if q.operation == "" {
