@@ -419,3 +419,85 @@ func TestBlockedEngineObservationCannotDelayRevocation(t *testing.T) {
 		t.Fatal("stale observation authenticated after revocation")
 	}
 }
+
+// failingInitialization refuses to create accounts while fail is set, which
+// leaves a grant initializing.
+type failingInitialization struct {
+	budget.Ledger
+	fail bool
+}
+
+func (l *failingInitialization) Initialize(ctx context.Context, key budget.AccountKey) error {
+	if l.fail {
+		return errors.New("accounting unavailable")
+	}
+	return l.Ledger.Initialize(ctx, key)
+}
+
+// A grant revoked before all its accounts existed must still seal. Revoking
+// from initializing first finishes creating the accounts, so every revoked
+// grant can produce a receipt.
+func TestRevokeFromInitializingKeepsSealPossible(t *testing.T) {
+	f := newOwner(t)
+	ledger := &failingInitialization{Ledger: f.ledger, fail: true}
+	if err := f.owner.Close(); err != nil {
+		t.Fatal(err)
+	}
+	f.config.Ledger = ledger
+	owner, err := gatewaydocker.Open(f.config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.owner = owner
+	if _, err = f.owner.Initialize(t.Context(), f.launch, f.instance); err == nil {
+		t.Fatal("initialization succeeded without accounting")
+	}
+	// A revocation that cannot finish the accounts leaves the grant initializing.
+	if err = f.owner.Revoke(t.Context(), f.launch, f.instance); err == nil {
+		t.Fatal("revoked a grant whose accounts cannot exist")
+	}
+	ledger.fail = false
+	if err = f.owner.Revoke(t.Context(), f.launch, f.instance); err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := f.owner.Seal(t.Context(), f.launch, f.instance)
+	if err != nil || receipt[modelCapability] != (budget.TrustedUsage{}) {
+		t.Fatalf("revoked initializing grant cannot seal: %+v %v", receipt, err)
+	}
+	if _, err = f.owner.Initialize(t.Context(), f.launch, f.instance); err == nil {
+		t.Fatal("revoked grant initialized again")
+	}
+}
+
+// Revoking a grant that was never initialized reports it missing, so a
+// cancelled preparation can tell it had nothing to revoke.
+func TestRevokeMissingGrantReportsAbsence(t *testing.T) {
+	f := newOwner(t)
+	if err := f.owner.Revoke(t.Context(), f.launch, f.instance); !errors.Is(err, runtimedocker.ErrGrantMissing) {
+		t.Fatalf("revoke of missing grant: %v", err)
+	}
+}
+
+// Each operation is refused from the phases its table leaves out.
+func TestGrantOperationsRefusedOutsideTheirPhases(t *testing.T) {
+	f := newOwner(t)
+	if _, err := f.owner.Seal(t.Context(), f.launch, f.instance); err == nil {
+		t.Fatal("sealed a missing grant")
+	}
+	f.initialized(t)
+	if _, err := f.owner.Seal(t.Context(), f.launch, f.instance); err == nil {
+		t.Fatal("sealed an inactive grant")
+	}
+	if err := f.owner.Revoke(t.Context(), f.launch, f.instance); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.owner.Activate(t.Context(), f.launch, f.instance); err == nil {
+		t.Fatal("activated a revoked grant")
+	}
+	if _, err := f.owner.Initialize(t.Context(), f.launch, f.instance); err == nil {
+		t.Fatal("initialized a revoked grant")
+	}
+	if err := f.owner.Revoke(t.Context(), f.launch, f.instance); err != nil {
+		t.Fatalf("revoke replay: %v", err)
+	}
+}

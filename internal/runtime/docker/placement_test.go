@@ -361,7 +361,7 @@ type fakeAuthority struct {
 	active, revoked, bound bool
 	sealFail               bool
 	init, activate, seals  int
-	activateErr            error
+	activateErr, revokeErr error
 }
 
 func (a *fakeAuthority) InitializeAllocation(context.Context, session.Launch, session.Incarnation) (NativeAccess, error) {
@@ -380,6 +380,12 @@ func (a *fakeAuthority) Activate(context.Context, session.Launch, session.Incarn
 	return nil
 }
 func (a *fakeAuthority) Revoke(context.Context, session.Launch, session.Incarnation) error {
+	if a.init == 0 {
+		return ErrGrantMissing
+	}
+	if a.revokeErr != nil {
+		return a.revokeErr
+	}
 	a.revoked = true
 	a.active = false
 	return nil
