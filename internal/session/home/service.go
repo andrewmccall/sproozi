@@ -348,6 +348,13 @@ func repositoryAbove(path string) string {
 	return ""
 }
 
+// WorkspaceProblem explains why a workspace at path cannot be captured and
+// what would let it, as a local run does. A byte limit other than
+// local.maxCheckpointBytes needs its own explanation of workspace.ErrByteLimit.
+func WorkspaceProblem(path string, err error, limit int64) string {
+	return workspaceProblem(path, err, limit)
+}
+
 // workspaceProblem explains why start cannot capture a workspace and what
 // would let it.
 func workspaceProblem(path string, err error, limit int64) string {

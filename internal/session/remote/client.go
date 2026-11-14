@@ -224,3 +224,15 @@ var (
 	_ session.Placement         = (*Client)(nil)
 	_ session.TerminalPlacement = (*Client)(nil)
 )
+
+// OpenOwnerAttachment attaches to an interactive session the executor owns;
+// see work.Client.Attach.
+func (c *Client) OpenOwnerAttachment(ctx context.Context, id string, frames io.Reader) (io.ReadCloser, error) {
+	p, err := c.client(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", profile.OwnerOutcomeMessage(profile.CodeUnavailable),
+			&profile.RemoteError{Code: profile.CodeUnavailable, Transport: err})
+	}
+	output, err := p.OpenOwnerAttachment(ctx, id, frames)
+	return output, c.settle(p, err)
+}

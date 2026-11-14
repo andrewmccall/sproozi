@@ -294,6 +294,33 @@ Added after this record was accepted; it follows its direction.
   `Coordinator.Create` retains it, then deletes it. The intent records its
   digest, never its bytes.
 
+### 9. The CLI for interactive sessions
+
+Added with the CLI; it follows section 8.
+
+- **The CLI talks to the executor directly**, over the port-forwarded owner
+  transport `status`, `cancel` and `recover --remote` already use, not
+  through the local service. The laptop keeps no record of the session, so
+  any machine that reaches the cluster can attach, and no service needs to
+  run.
+- **`run --remote` without a task is interactive.** The intent says so in
+  `mode`; the CLI never infers it on the executor's behalf. `PATH` is the
+  local `run` operand: given, the CLI captures it with
+  `workspace.CaptureLocal`, the local run's capture and refusals, within the
+  executor's `maxCheckpointBytes`, and uploads it. Absent, the session starts
+  from the approved repository; it never defaults to the current directory.
+  `--repository` or `--project` is still required, for association.
+- **Attach reuses the local terminal code** through `home.AttachStream`, the
+  frame conversion with the transport factored out, and one
+  `attachTerminal` in the CLI for raw mode, resizing and the detach line.
+- **Stop repeats its operation** while the executor answers `stopping` or the
+  request times out, printing the waiting notice once. Each resume is a new
+  operation, since the executor binds operations to one action and execution.
+- **Commands for a cluster's session need `--remote`, `--context` or
+  `--namespace`.** The cluster's catalogue does not record which context
+  reaches it, and guessing from `sessions` would contact clusters for every
+  local command. The local "no session" error names the flags instead.
+
 ## Alternatives
 
 - **Keep work separate and fix it in place.** Check phase on read, take the
@@ -321,6 +348,15 @@ Added after this record was accepted; it follows its direction.
 - **One `maxDuration` for everyone, or a second executor for Hermes.** One cap
   cannot limit Hermes without limiting the owner; a second executor doubles
   the deployment. Rejected for `workTokenMaxDuration`.
+- **Route remote commands through the local service**, as `move` and `pull`
+  do. The service would remember the executor, so the flags could be
+  dropped, but the laptop's service would have to run for every attach.
+  Rejected for interactive sessions; revisit if remembering the executor
+  matters more than the laptop being optional.
+- **Resolve a session ID to its cluster without flags**, by asking the
+  default cluster when this machine does not know the ID. It covers only the
+  `sproozi` context, and makes every unknown local ID reach a cluster.
+  Rejected for now.
 - **Pull or discard before upgrading, instead of a version 1 reader.**
   Simpler code, but it makes the upgrade lose retained work the operator has
   not pulled yet. Rejected.

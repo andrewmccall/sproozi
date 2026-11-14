@@ -232,6 +232,15 @@ After a Codex task finishes, it stops the sandbox, finalizes usage and retains
 native and Git state. Hermes can submit and inspect tasks through authenticated
 MCP.
 
+The executor also owns interactive sessions that the CLI starts with `run
+--remote` and no task, from an approved repository or a workspace the CLI
+captures locally and uploads. The CLI talks to the executor directly over the
+same port-forwarded TLS connection, not through the local service: `attach`
+streams terminal frames to the executor, which finds the session's active
+visit itself, and `stop` and `resume` are owner actions bound to
+caller-chosen operations. The laptop keeps no record, so any machine with
+access to the cluster can attach, and `pull` brings the stopped session home.
+
 Pull transfers ownership to the local service without starting an agent. A
 later resume starts a new execution with current local approval and the same
 harness conversation ID. Old usage receipts remain unchanged. Retried operations

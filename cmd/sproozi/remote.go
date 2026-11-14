@@ -18,6 +18,9 @@ import (
 type remoteTarget struct {
 	Name   string
 	Client *work.Client
+	// MaxCheckpointBytes is the executor's checkpoint limit, which bounds an
+	// uploaded workspace.
+	MaxCheckpointBytes int64
 	// Err says why the cluster could not be reached; Context then names it,
 	// since its executor's name is unknown.
 	Err     error
@@ -48,8 +51,12 @@ func reachRemote(ctx context.Context, kubeContext, namespace string) (remoteTarg
 	if err != nil {
 		return remoteTarget{}, err
 	}
-	return remoteTarget{Name: executor.Name, Client: work.ClientFor(client)}, nil
+	return remoteTarget{Name: executor.Name, Client: work.ClientFor(client),
+		MaxCheckpointBytes: executor.MaxCheckpointBytes}, nil
 }
+
+// A cluster's client attaches to its interactive sessions.
+var _ work.OwnerTerminal = (*remote.Client)(nil)
 
 // defaultTargets are the clusters "sessions" lists besides this machine: the
 // one the sproozi context reaches, when that context exists.

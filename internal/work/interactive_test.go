@@ -4,7 +4,9 @@ package work
 import (
 	"archive/tar"
 	"bytes"
+	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"io"
 	"maps"
@@ -578,3 +580,42 @@ func TestRunBodyBoundsAnUpload(t *testing.T) {
 		t.Fatalf("a refused upload kept a session: %+v %v", list, err)
 	}
 }
+
+// The owner client attaches through its transport: the frames it sends reach
+// the visit, and the visit's output comes back.
+func TestClientAttachesThroughTheOwnerTransport(t *testing.T) {
+	t.Parallel()
+	c, _ := fixture(t)
+	o := openOwner(t, c)
+	v := startInteractive(t, o, interactiveRequest())
+	home := strings.Repeat("h", 32)
+	server := attachServer(t, o, home)
+	roots := x509.NewCertPool()
+	roots.AddCert(server.Certificate())
+	transport, err := profile.Connect(profile.Connection{Origin: server.URL, Token: home, Roots: roots,
+		MaxCheckpointBytes: 1 << 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := ClientFor(transport)
+	defer func() { _ = client.Close() }()
+	frames := `{"op":"write","data":"aGk="}` + "\n"
+	output, err := client.Attach(t.Context(), v.ID, strings.NewReader(frames))
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := io.ReadAll(output)
+	_ = output.Close()
+	if err != nil || string(data) != frames {
+		t.Fatalf("attachment: %q %v", data, err)
+	}
+	if _, err = ClientFor(noTerminal{}).Attach(t.Context(), v.ID, strings.NewReader("")); err == nil {
+		t.Fatal("a transport without attachments attached")
+	}
+}
+
+// noTerminal is an owner transport that cannot attach.
+type noTerminal struct{}
+
+func (noTerminal) CallOwner(context.Context, string, any, any) error { return nil }
+func (noTerminal) Close()                                            {}

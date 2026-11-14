@@ -1,6 +1,7 @@
 package home
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -46,9 +47,7 @@ func AttachTerminalNotify(ctx context.Context, path, id string, input io.Reader,
 		return err
 	}
 	defer func() { _ = conn.Close() }()
-	run, cancel := context.WithCancel(ctx)
-	defer cancel()
-	stop := context.AfterFunc(run, func() { _ = conn.Close() })
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
 	defer stop()
 	line, err := readLine(reader, controlLimit)
 	if err != nil {
@@ -64,6 +63,35 @@ func AttachTerminalNotify(ctx context.Context, path, id string, input io.Reader,
 	if attached != nil {
 		attached()
 	}
+	return runTerminal(ctx, id, "", conn, reader, input, output, sizes)
+}
+
+// TerminalStream is one attachment's frame transport: native terminal input
+// frames are written to it, its output frames are read from it, and closing
+// it ends the attachment, never the session.
+type TerminalStream interface {
+	io.ReadWriteCloser
+}
+
+// AttachStream is AttachTerminal over an attachment that is already open,
+// such as one to a remote executor: it converts input to terminal frames,
+// detaches on Ctrl-], writes the terminal's output and sends sizes. flags
+// follow the session ID in the commands its errors suggest, such as
+// "--remote".
+func AttachStream(ctx context.Context, id, flags string, stream TerminalStream, input io.Reader, output io.Writer,
+	sizes <-chan TerminalSize) error {
+	defer func() { _ = stream.Close() }()
+	return runTerminal(ctx, id, flags, stream, bufio.NewReader(stream), input, output, sizes)
+}
+
+// runTerminal carries one admitted attachment until input detaches or either
+// side ends it.
+func runTerminal(ctx context.Context, id, flags string, conn io.WriteCloser, reader *bufio.Reader, input io.Reader,
+	output io.Writer, sizes <-chan TerminalSize) error {
+	run, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stop := context.AfterFunc(run, func() { _ = conn.Close() })
+	defer stop()
 	var writer sync.Mutex
 	encoder := json.NewEncoder(conn)
 	emit := func(f terminalFrame) error { writer.Lock(); defer writer.Unlock(); return encoder.Encode(f) }
@@ -88,7 +116,7 @@ func AttachTerminalNotify(ctx context.Context, path, id string, input io.Reader,
 		}
 	}()
 	for {
-		line, err = readLine(reader, 256<<10)
+		line, err := readLine(reader, 256<<10)
 		if err != nil {
 			select {
 			case result := <-inputDone:
@@ -118,7 +146,7 @@ func AttachTerminalNotify(ctx context.Context, path, id string, input io.Reader,
 			continue
 		}
 		if f.Error != "" {
-			return terminalFailure(id, f)
+			return terminalFailure(id, flags, f)
 		}
 		if len(f.Data) > 0 {
 			if _, err = output.Write(f.Data); err != nil {
@@ -138,14 +166,18 @@ const inactiveNative = "native execution is not active"
 
 // terminalFailure names a failed native terminal frame and the next step. The
 // reason comes from inside the sandbox, so only printable ASCII is shown.
-func terminalFailure(id string, f terminalFrame) error {
+func terminalFailure(id, flags string, f terminalFrame) error {
+	cmd := id
+	if flags != "" {
+		cmd += " " + flags
+	}
 	if f.Error == inactiveNative {
 		return fmt.Errorf("home: session %s has no running native process to attach to; run \"sproozi status %s\" "+
 			"to see its phase: \"sproozi recover %s\" finishes an unfinished start or move, and "+
-			"\"sproozi resume %s\" continues a stopped session", id, id, id, id)
+			"\"sproozi resume %s\" continues a stopped session", id, cmd, cmd, cmd)
 	}
 	op := "operation"
-	if f.Op == "attach" || f.Op == terminalResize {
+	if f.Op == ActionAttach || f.Op == terminalResize {
 		op = f.Op
 	}
 	reason := strings.Map(func(r rune) rune {
@@ -159,10 +191,10 @@ func terminalFailure(id string, f terminalFrame) error {
 	}
 	if f.Op == "" {
 		// The home daemon's own frame already names itself.
-		return fmt.Errorf("%s; run \"sproozi status %s\" to see the session's phase", reason, id)
+		return fmt.Errorf("%s; run \"sproozi status %s\" to see the session's phase", reason, cmd)
 	}
 	return fmt.Errorf("home: native terminal %s failed: %s; run \"sproozi status %s\" to see the session's phase",
-		op, reason, id)
+		op, reason, cmd)
 }
 
 func terminalInput(ctx context.Context, input io.Reader, emit func(terminalFrame) error, acks <-chan terminalFrame) error {

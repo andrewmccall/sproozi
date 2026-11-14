@@ -183,7 +183,8 @@ func (q *options) homeError(err error) error {
 		}
 		return &serviceDown{err: err, command: command}
 	case errors.Is(err, home.ErrUnknownSession):
-		return fmt.Errorf("no session %s on this machine; \"sproozi ls\" lists sessions", q.id)
+		return fmt.Errorf("no session %s on this machine; \"sproozi ls\" lists sessions, and a session in a "+
+			"cluster needs --remote or --context", q.id)
 	case q.maxDuration != "" && strings.Contains(err.Error(), `unknown field "maxDuration"`):
 		// An older service refuses the field, so nothing was started.
 		return fmt.Errorf("the running Sproozi service is older than this command and does not accept "+
@@ -316,9 +317,18 @@ func waitNotice(q *options) func() {
 	return func() { timer.Stop() }
 }
 
-// remoteSession runs status, cancel or recover on a cluster.
+// remoteSession runs a session command on a cluster's session: status,
+// cancel and recover for any session, and attach, stop and resume for an
+// interactive one.
 func (q *options) remoteSession(ctx context.Context) error {
-	if q.action() != cmdStatus && q.action() != cmdCancel && q.action() != cmdRecover {
+	switch q.action() {
+	case cmdStatus, cmdCancel, cmdRecover, cmdStop, cmdResume:
+	case cmdAttach:
+		// Attaching needs a terminal; find out before reaching the cluster.
+		if !term.IsTerminal(int(os.Stdin.Fd())) {
+			return errNoTerminal
+		}
+	default:
 		return usagef("%s works on this machine's sessions; it does not take --context or --namespace", q.action())
 	}
 	if err := q.loadOptional(); err != nil {
@@ -359,6 +369,12 @@ func (q *options) remoteSession(ctx context.Context) error {
 		if view, err = client.Cancel(ctx, q.id, q.operation); err != nil {
 			return &retryError{err: err, id: q.id, operation: q.operation}
 		}
+	case cmdAttach:
+		return q.attachRemote(ctx, target, q.id)
+	case cmdStop:
+		return q.stopRemote(ctx, target)
+	case cmdResume:
+		return q.resumeRemote(ctx, target)
 	}
 	if err != nil {
 		return err
@@ -377,7 +393,9 @@ func (q *options) loadOptional() error {
 	return err
 }
 
-// submitRemote starts a task in a cluster.
+// submitRemote starts a task, or without one an interactive session, in a
+// cluster. An interactive session uploads PATH when given, and attaches unless
+// --detach.
 func (q *options) submitRemote(ctx context.Context) error {
 	if err := q.loadOptional(); err != nil {
 		return err
@@ -398,30 +416,58 @@ func (q *options) submitRemote(ctx context.Context) error {
 	if kind == "" {
 		kind = harness.NativeCodex
 	}
+	submission := work.Submit{RequestID: q.operation, Repository: q.repository, Harness: kind,
+		Executor: target.Name, Task: q.task, Project: q.project, WorkspaceFrom: q.workspaceFrom,
+		MaxDuration: q.maxDuration}
+	interactive := q.task == ""
+	if interactive {
+		submission.Mode = work.ModeInteractive
+		if q.path != "" {
+			submission.Workspace, err = captureUpload(ctx, q.path, q.includeIgnored, target.MaxCheckpointBytes)
+			if err != nil {
+				return err
+			}
+		}
+	}
 	// The run receives the profile as it is now; a profile over the
 	// cluster's limit refuses the run before anything is submitted.
-	archive, _, err := agentprofile.ArchiveDirectory(q.fixed.Local.ProfileDirectory)
-	if err != nil {
+	if submission.Profile, _, err = agentprofile.ArchiveDirectory(q.fixed.Local.ProfileDirectory); err != nil {
 		return fmt.Errorf("profile: %w", err)
 	}
-	v, err := client.Submit(ctx, work.Submit{RequestID: q.operation, Repository: q.repository, Harness: kind,
-		Executor: target.Name, Task: q.task, Project: q.project, WorkspaceFrom: q.workspaceFrom, Profile: archive,
-		MaxDuration: q.maxDuration})
+	v, err := client.Submit(ctx, submission)
+	if err != nil {
+		return q.submitError(err, target.Name, interactive)
+	}
+	if !interactive {
+		return q.printView(target.Name, v)
+	}
+	q.id = v.ID
+	return q.startedRemote(ctx, target, v, "Started")
+}
+
+// submitError explains a refused submission; only one whose outcome is
+// unknown names the operation that repeats it.
+func (q *options) submitError(err error, cluster string, interactive bool) error {
 	var remote *profile.RemoteError
-	if err != nil && q.maxDuration != "" && errors.As(err, &remote) {
-		switch remote.Code {
-		case profile.CodeDenied:
+	if errors.As(err, &remote) {
+		switch {
+		case q.maxDuration != "" && remote.Code == profile.CodeDenied:
 			return fmt.Errorf("%w: the cluster's maxDuration may not allow --max-duration %s; try a shorter "+
 				"duration, or leave it out for the cluster's limit", err, q.maxDuration)
-		case profile.CodeInvalid:
+		case interactive && remote.Code == profile.CodeInvalid:
+			// An executor older than interactive sessions refuses the mode.
+			return fmt.Errorf("%w: the cluster's remote executor %s refused an interactive session; an executor "+
+				"older than this release does not know them, so update the executor "+
+				"(docs/reference/remote-executors.md), or give --task to submit a task", err, cluster)
+		case interactive && remote.Code == profile.CodeUnsupported:
+			return fmt.Errorf("%w: the cluster's remote executor %s does not run interactive sessions for its "+
+				"agent; use an executor for codex, or give --task to submit a task", err, cluster)
+		case q.maxDuration != "" && remote.Code == profile.CodeInvalid:
 			// An executor older than --max-duration refuses the field.
 			return fmt.Errorf("%w: the cluster's remote executor may be too old for --max-duration; leave it out "+
 				"or update the executor", err)
 		}
 	}
-	if err != nil {
-		return fmt.Errorf("%w; the outcome is unknown: to try again, repeat the command with --operation %s",
-			err, q.operation)
-	}
-	return q.printView(target.Name, v)
+	return fmt.Errorf("%w; the outcome is unknown: to try again, repeat the command with --operation %s",
+		err, q.operation)
 }
