@@ -93,6 +93,10 @@ const (
 	// evStopUnproven: Stop, Abort, AbortPreparation or Inspect did not prove
 	// the writer stopped. A writer already proven stopped stays so.
 	evStopUnproven event = "stop-unproven"
+	// evTurnPending: Stop is still waiting for the native turn. The writer
+	// runs with input gated, which proves it reachable, and repeating the
+	// stop waits again.
+	evTurnPending event = "turn-pending"
 	// evUsageUnsealed: the writer is fenced but its usage is unsealed or its
 	// receipt is not valid.
 	evUsageUnsealed event = "usage-unsealed"
@@ -130,6 +134,7 @@ var transitions = map[event]rule{
 	evStopUnproven: {to: map[Phase]Phase{
 		PhaseStopping: PhaseUnknownStop, PhaseUnknownStop: PhaseUnknownStop, PhaseCancelling: PhaseUnknownStop,
 		PhaseUnknownUsage: PhaseUnknownUsage}},
+	evTurnPending: {to: map[Phase]Phase{PhaseStopping: PhaseStopping, PhaseUnknownStop: PhaseStopping}},
 	evUsageUnsealed: {to: map[Phase]Phase{
 		PhaseStopping: PhaseUnknownUsage, PhaseUnknownStop: PhaseUnknownUsage, PhaseUnknownUsage: PhaseUnknownUsage,
 		PhaseCancelling: PhaseUnknownUsage}},

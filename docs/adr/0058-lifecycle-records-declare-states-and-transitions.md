@@ -104,6 +104,7 @@ The table, in `internal/session/phase.go`:
 | `finalize` | `idle` → `idle`; `active` → `stopping` | no |
 | `stopped` | `stopping`, `unknown-stop`, `unknown-usage` → `preparing` | no |
 | `stop-unproven` | `stopping`, `unknown-stop`, `cancelling` → `unknown-stop`; `unknown-usage` → `unknown-usage` | no |
+| `turn-pending` | `stopping`, `unknown-stop` → `stopping` | no |
 | `usage-unsealed` | `stopping`, `unknown-stop`, `unknown-usage`, `cancelling` → `unknown-usage` | no |
 | `prepared` | `preparing` → `activating` | yes |
 | `activated` | `activating` → `active` | yes |

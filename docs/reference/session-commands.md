@@ -182,7 +182,8 @@ two minutes without a finished turn they fail with, for example, `the stop is
 still waiting for the current Claude Code turn to finish; the session keeps
 running with its terminal input paused: run "sproozi stop ID" to keep waiting,
 or "sproozi cancel ID" to force-stop it` (a stuck `move` names `sproozi
-recover ID` instead). The session stays `stopping`. Running `stop` again, with
+recover ID` instead). The session stays `stopping`, on this machine and on a
+remote executor alike. Running `stop` again, with
 any operation, continues the same stop, and `recover`, `attach` and `resume`
 name `sproozi stop ID` too, so there is one way on. A session with no
 conversation yet stops within a few seconds; `resume` then starts a new

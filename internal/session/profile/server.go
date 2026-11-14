@@ -329,6 +329,17 @@ func (h *handler) perform(r *http.Request, action string, input request) (respon
 	return output, nil
 }
 func (h *handler) fail(w http.ResponseWriter, err error) {
+	if errors.Is(err, harness.ErrNativeTurnPending) {
+		// Still waiting is not unavailable: the client keeps the stop pending.
+		var pending *harness.NativeTurnPending
+		waiting := ""
+		if errors.As(err, &pending) {
+			waiting = pending.Waiting
+		}
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(response{Version: protocolVersion, Error: CodeTurnPending, Waiting: waitingText(waiting)})
+		return
+	}
 	var refusal *Rejection
 	if errors.As(err, &refusal) {
 		switch refusal.Code {

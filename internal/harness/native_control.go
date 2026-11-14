@@ -76,6 +76,17 @@ const NativeQuiesceWait = 2 * time.Minute
 // repeating the stop waits again.
 var ErrNativeTurnPending = errors.New("the stop is still waiting")
 
+// NativeTurnPending is ErrNativeTurnPending naming what the stop waits for,
+// such as "the current Codex turn to complete".
+type NativeTurnPending struct{ Waiting string }
+
+func (e *NativeTurnPending) Error() string {
+	return fmt.Sprintf("%v for %s", ErrNativeTurnPending, e.Waiting)
+}
+
+// Is makes errors.Is(err, ErrNativeTurnPending) hold.
+func (e *NativeTurnPending) Is(target error) bool { return target == ErrNativeTurnPending }
+
 // NativeExit is the supervisor's process exit observation, not a container fence.
 type NativeExit struct {
 	Code   int
@@ -184,7 +195,7 @@ func QuiesceNative(ctx context.Context, control NativeControl, thread string, ex
 		return thread, fmt.Errorf("%w: %w", ErrQuiesceUnacknowledged, err)
 	}
 	if waiting, err := decodeNativeReply(output, NativeQuiesce, NativeStopping); err == nil && waiting.Waiting != "" {
-		return thread, fmt.Errorf("%w for %s", ErrNativeTurnPending, waiting.Waiting)
+		return thread, &NativeTurnPending{Waiting: waiting.Waiting}
 	}
 	reply, err := DecodeNativeReply(output, NativeQuiesce, NativeStopped, thread)
 	if err == nil && thread == "" && !reply.Turnless {
@@ -227,7 +238,7 @@ func observeNativeThread(ctx context.Context, control NativeControl, wait time.T
 				return "", errors.New("native UUID unavailable before deadline")
 			}
 			if !time.Now().Before(wait) {
-				return "", fmt.Errorf("%w for %s", ErrNativeTurnPending, waiting)
+				return "", &NativeTurnPending{Waiting: waiting}
 			}
 		}
 	}

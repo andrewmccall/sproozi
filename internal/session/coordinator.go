@@ -229,7 +229,10 @@ func (c *Coordinator) stopSource(ctx context.Context, r Record, index int) (Reco
 		if errors.Is(err, harness.ErrNativeTurnPending) {
 			// The writer still runs with input gated; the stop stays pending
 			// and repeating it waits again.
-			return r, err
+			if r.Phase == PhaseStopping {
+				return r, err
+			}
+			return r, errors.Join(err, c.commit(&r, evTurnPending))
 		}
 		fenced := fencedBy(source.Launch, source.Incarnation, stopped)
 		if err != nil && (!errors.Is(err, ErrUsageUnsealed) || !fenced) {

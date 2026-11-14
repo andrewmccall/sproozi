@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
 	"github.com/andrewmccall/sproozi/internal/work"
 )
@@ -112,5 +113,27 @@ func TestClientNeedsACompleteRecord(t *testing.T) {
 	e.MaxCheckpointBytes = 0
 	if _, err := NewClient(e); err == nil {
 		t.Fatal("client accepted a record without a checkpoint limit")
+	}
+}
+
+// A stop still waiting for the native turn is the executor's own answer: it
+// passes through unchanged, so the coordinator keeps the stop pending, and
+// the connection is kept.
+func TestClientPassesTurnPendingThrough(t *testing.T) {
+	c, err := NewClient(recorded())
+	if err != nil {
+		t.Fatal(err)
+	}
+	used, err := profile.Connect(profile.Connection{Origin: "https://executor.invalid", Token: testToken, MaxCheckpointBytes: 8 << 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.current = used
+	waiting := &profile.RemoteError{Code: profile.CodeTurnPending, Status: http.StatusServiceUnavailable, Waiting: "the current Codex turn to complete"}
+	if got := c.settle(used, waiting); got != error(waiting) || !errors.Is(got, harness.ErrNativeTurnPending) {
+		t.Fatalf("turn pending became %v", got)
+	}
+	if c.current != used {
+		t.Fatal("a stop still waiting for the turn dropped the connection")
 	}
 }

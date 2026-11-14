@@ -2,12 +2,14 @@ package session
 
 import (
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -87,6 +89,48 @@ func TestStopOutcomesProduceOnePhaseEach(t *testing.T) {
 				})
 			}
 		}
+	}
+}
+
+// A stop the placement reports still waiting for the native turn proves the
+// writer runs with input gated, so it is stopping whatever the previous
+// attempt said, and a later stop that seals finishes the same operation.
+func TestStopStillWaitingForTurnIsStopping(t *testing.T) {
+	t.Parallel()
+	for _, first := range []struct {
+		name string
+		set  func(*fakePlacement)
+		want Phase
+	}{
+		{"waiting", func(p *fakePlacement) { p.pendingTurn = true }, PhaseStopping},
+		{"unknown then waiting", func(p *fakePlacement) { p.unknownStop = true }, PhaseUnknownStop},
+	} {
+		t.Run(first.name, func(t *testing.T) {
+			t.Parallel()
+			c, _, _, remote, start := setup(t)
+			id := start.Source.ExecutionID
+			if r, err := c.Move(t.Context(), id, uuid.NewString(), testRemote); err != nil || r.Phase != PhaseActive {
+				t.Fatalf("move to remote: %s %v", r.Phase, err)
+			}
+			first.set(remote)
+			op := uuid.NewString()
+			if r, _ := c.Finalize(t.Context(), id, op); r.Phase != first.want {
+				t.Fatalf("first stop: phase %s, want %s", r.Phase, first.want)
+			}
+			remote.unknownStop, remote.pendingTurn = false, true
+			r, err := c.Recover(t.Context(), id)
+			if !errors.Is(err, harness.ErrNativeTurnPending) || r.Phase != PhaseStopping {
+				t.Fatalf("stop still waiting: phase %s %v, want %s", r.Phase, err, PhaseStopping)
+			}
+			if stored, err := c.Inspect(id); err != nil || stored.Phase != PhaseStopping {
+				t.Fatalf("stored phase %s %v", stored.Phase, err)
+			}
+			remote.pendingTurn = false
+			if r, err = c.Finalize(t.Context(), id, uuid.NewString()); err != nil || r.Phase != PhaseIdle ||
+				r.Operations[len(r.Operations)-1].ID != op {
+				t.Fatalf("finished stop: phase %s %v", r.Phase, err)
+			}
+		})
 	}
 }
 
