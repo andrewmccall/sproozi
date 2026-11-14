@@ -24,6 +24,23 @@ var claudeSessionID = regexp.MustCompile(`^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]
 var claudeProjectCharacters = regexp.MustCompile(`[^a-zA-Z0-9]`)
 var claudeCacheHash = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
+// claudeMCPTool is Claude Code's name for a tool of a configured MCP server:
+// mcp__<server>__<tool>. Sproozi server names have no underscore, so the
+// server part ends at the first double underscore.
+var claudeMCPTool = regexp.MustCompile(`^mcp__[A-Za-z0-9-]{1,63}__[A-Za-z0-9_-]{1,128}$`)
+
+// ClaudeBash is Claude Code's foreground shell tool.
+const ClaudeBash = "Bash"
+
+// ClaudeSupportedTool reports a tool the Claude lifecycle and transcript
+// adapter pair: foreground Bash, or a tool of a configured MCP server such as
+// the sproozi control connection's mcp__sproozi__diagnose (ADR 0011,
+// clarification of 2026-11-14). Subagents, background tasks and every other
+// native tool stay unsupported.
+func ClaudeSupportedTool(name string) bool {
+	return name == ClaudeBash || claudeMCPTool.MatchString(name)
+}
+
 // ClaudeState selects one primary conversation transcript, excluding credential
 // and settings files, indexes, shell snapshots and subagent state. Historical
 // permissionMode fields remain opaque; fresh trusted launch options must select
@@ -157,6 +174,7 @@ type claudeRecord struct {
 	LastPrompt     string          `json:"lastPrompt"`
 	LeafUUID       string          `json:"leafUuid"`
 	CacheHash      string          `json:"hash"`
+	Tools          []string        `json:"tools"`
 	ShapeHash      string          `json:"shapeHash"`
 	RequestID      string          `json:"id"`
 	Attachment     struct {
@@ -206,6 +224,63 @@ type claudeBlock struct {
 	Text      string          `json:"text"`
 	ToolUseID string          `json:"tool_use_id"`
 	IsError   bool            `json:"is_error"`
+	Content   json.RawMessage `json:"content"`
+}
+
+// claudeNoContent is the text Claude Code records for a reply with no content.
+const claudeNoContent = "(no content)"
+
+// ClaudeFinalText returns the reply that ends at the selected transcript leaf:
+// the text blocks of that final API message, in order, joined by newlines.
+// Claude Code writes each content block of one reply as its own row with the
+// same message ID. A reply Claude recorded as having no content is empty. The
+// text is untrusted workload output, never completion or accounting evidence.
+func ClaudeFinalText(state ClaudeState, maxBytes int64) (string, error) {
+	leaf, err := ClaudeTranscriptLeaf(state, maxBytes)
+	if err != nil {
+		return "", err
+	}
+	type reply struct {
+		message string
+		text    []string
+	}
+	var replies []reply
+	for line := range bytes.SplitSeq(state.Transcript, []byte{'\n'}) {
+		var row struct {
+			Type    string `json:"type"`
+			UUID    string `json:"uuid"`
+			Message struct {
+				ID      string          `json:"id"`
+				Content json.RawMessage `json:"content"`
+			} `json:"message"`
+		}
+		if len(line) == 0 || json.Unmarshal(line, &row) != nil || (row.Type != claudeUser && row.Type != claudeAssistant) {
+			continue
+		}
+		if row.Type == claudeUser {
+			replies = append(replies, reply{})
+			continue
+		}
+		var blocks []claudeBlock
+		_ = json.Unmarshal(row.Message.Content, &blocks)
+		if n := len(replies); n == 0 || replies[n-1].message != row.Message.ID || row.Message.ID == "" {
+			replies = append(replies, reply{message: row.Message.ID})
+		}
+		last := &replies[len(replies)-1]
+		for _, block := range blocks {
+			if block.Type == claudeText {
+				last.text = append(last.text, block.Text)
+			}
+		}
+		if row.UUID == leaf {
+			text := strings.Join(last.text, "\n")
+			if text == claudeNoContent {
+				text = ""
+			}
+			return text, nil
+		}
+	}
+	return "", errors.New("claude transcript has no settled final assistant leaf")
 }
 
 // ClaudeTranscriptLeaf returns a candidate settled assistant leaf UUID after
@@ -218,7 +293,7 @@ func ClaudeTranscriptLeaf(state ClaudeState, maxBytes int64) (string, error) {
 		int64(len(state.Transcript)) > maxBytes || !bytes.HasSuffix(state.Transcript, []byte{'\n'}) {
 		return "", errors.New("invalid or oversized Claude checkpoint")
 	}
-	chain := claudeChain{pending: map[string]string{}, tools: map[string]bool{}, stops: map[string]bool{}, seen: map[string]bool{}}
+	chain := claudeChain{pending: map[string]string{}, tools: map[string]string{}, stops: map[string]bool{}, seen: map[string]bool{}}
 	for line := range bytes.SplitSeq(state.Transcript, []byte{'\n'}) {
 		if len(line) == 0 {
 			continue
@@ -234,9 +309,11 @@ func ClaudeTranscriptLeaf(state ClaudeState, maxBytes int64) (string, error) {
 }
 
 type claudeChain struct {
-	pending            map[string]string
-	tools, stops, seen map[string]bool
-	previous, leaf     string
+	// pending maps a running tool's ID to the row that started it; tools maps
+	// every started tool's ID to its name.
+	pending, tools map[string]string
+	stops, seen    map[string]bool
+	previous, leaf string
 }
 
 func (c *claudeChain) accept(line []byte, id string) error {
@@ -325,6 +402,13 @@ func validateClaudeMetadata(row claudeRecord) (bool, error) {
 			(row.Message.Role == claudeUser || row.Message.Role == claudeAssistant || row.Message.Role == claudeSystem)
 	case "api-request":
 		valid = row.Version != "" && claudeSessionID.MatchString(row.RequestID) && claudeCacheHash.MatchString(row.ShapeHash)
+	case "tools-used":
+		// Claude Code 2.1.318 lists the tools a conversation has used so far.
+		// Each must be one the adapter supports.
+		valid = len(row.Tools) != 0
+		for _, name := range row.Tools {
+			valid = valid && ClaudeSupportedTool(name)
+		}
 	default:
 		return false, nil
 	}
@@ -393,7 +477,7 @@ func validateClaudeSnapshot(row claudeRecord) error {
 	return nil
 }
 
-func validateClaudeProgress(row claudeRecord, pending map[string]string, seen, stops map[string]bool, leaf string) error {
+func validateClaudeProgress(row claudeRecord, pending, tools map[string]string, stops map[string]bool, leaf string) error {
 	data := row.Data
 	if data.Type != "hook_progress" || data.Command == "" || row.ToolUseID == "" ||
 		row.ParentTool != row.ToolUseID {
@@ -406,11 +490,11 @@ func validateClaudeProgress(row claudeRecord, pending map[string]string, seen, s
 		}
 		stops[row.ToolUseID] = true
 	case "PreToolUse":
-		if data.Name != "PreToolUse:Bash" || pending[row.ToolUseID] == "" {
+		if data.Name != "PreToolUse:"+tools[row.ToolUseID] || pending[row.ToolUseID] == "" {
 			return errors.New("unmatched Claude pre-tool hook progress")
 		}
-	case "PostToolUse":
-		if data.Name != "PostToolUse:Bash" || !seen[row.ToolUseID] || pending[row.ToolUseID] != "" {
+	case "PostToolUse", "PostToolUseFailure":
+		if data.Name != data.Event+":"+tools[row.ToolUseID] || tools[row.ToolUseID] == "" || pending[row.ToolUseID] != "" {
 			return errors.New("unmatched Claude post-tool hook progress")
 		}
 	default:
@@ -479,7 +563,39 @@ func claudeContent(row claudeRecord) ([]claudeBlock, error) {
 	return blocks, nil
 }
 
-func validateClaudeBlock(row claudeRecord, block claudeBlock, pending map[string]string, seen map[string]bool) error {
+// claudeInterrupted marks a tool call the user interrupted; an interrupted
+// turn is outside the supported lifecycle.
+const claudeInterrupted = "[Request interrupted"
+
+// claudeSettledResult reports a supported tool's finished result. A successful
+// Bash result records that it was not interrupted; a successful MCP result
+// records the server's content. A failed call, such as a command that exited
+// non-zero or an MCP tool that reported an error, records Claude Code's
+// "Error: " text and is settled too, unless the user interrupted it.
+func claudeSettledResult(name string, block claudeBlock, raw json.RawMessage) bool {
+	if block.IsError {
+		var text string
+		return json.Unmarshal(raw, &text) == nil && strings.HasPrefix(text, "Error: ") &&
+			!strings.Contains(text, claudeInterrupted) && !bytes.Contains(block.Content, []byte(claudeInterrupted))
+	}
+	if name == ClaudeBash {
+		var result struct {
+			Interrupted *bool `json:"interrupted"`
+		}
+		return json.Unmarshal(raw, &result) == nil && result.Interrupted != nil && !*result.Interrupted
+	}
+	var content any
+	if json.Unmarshal(raw, &content) != nil {
+		return false
+	}
+	switch content.(type) {
+	case []any, string:
+		return true
+	}
+	return false
+}
+
+func validateClaudeBlock(row claudeRecord, block claudeBlock, pending, seen map[string]string) error {
 	switch block.Type {
 	case claudeText:
 		if block.Text == "" {
@@ -489,18 +605,14 @@ func validateClaudeBlock(row claudeRecord, block claudeBlock, pending map[string
 		var input struct {
 			Background bool `json:"run_in_background"`
 		}
-		if row.Type != claudeAssistant || block.ID == "" || seen[block.ID] || block.Name != "Bash" ||
-			json.Unmarshal(block.Input, &input) != nil || input.Background {
+		if row.Type != claudeAssistant || block.ID == "" || seen[block.ID] != "" || !ClaudeSupportedTool(block.Name) ||
+			json.Unmarshal(block.Input, &input) != nil || input.Background || !bytes.HasPrefix(block.Input, []byte{'{'}) {
 			return errors.New("unsupported Claude tool call")
 		}
-		pending[block.ID], seen[block.ID] = row.UUID, true
+		pending[block.ID], seen[block.ID] = row.UUID, block.Name
 	case "tool_result":
-		var result struct {
-			Interrupted *bool `json:"interrupted"`
-		}
-		if row.Type != claudeUser || pending[block.ToolUseID] == "" || block.IsError ||
-			row.SourceTool != pending[block.ToolUseID] || json.Unmarshal(row.ToolResult, &result) != nil ||
-			result.Interrupted == nil || *result.Interrupted {
+		if row.Type != claudeUser || pending[block.ToolUseID] == "" ||
+			row.SourceTool != pending[block.ToolUseID] || !claudeSettledResult(seen[block.ToolUseID], block, row.ToolResult) {
 			return errors.New("unmatched or unsupported Claude tool result")
 		}
 		delete(pending, block.ToolUseID)

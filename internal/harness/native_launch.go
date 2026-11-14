@@ -204,8 +204,8 @@ func (c NativeLaunch) Validate(now time.Time) error {
 		return errors.New("native sign-in must come from the controller's sign-in directory")
 	}
 	if utf8.RuneCountInString(c.Task) > agentcontract.MaxTaskRunes || strings.ContainsRune(c.Task, 0) ||
-		c.Task != "" && (strings.TrimSpace(c.Task) == "" || c.Harness != NativeCodex) {
-		return errors.New("native task requires bounded nonempty Codex input")
+		c.Task != "" && (strings.TrimSpace(c.Task) == "" || !c.Harness.TakesTask()) {
+		return errors.New("native task requires bounded nonempty Codex or Claude Code input")
 	}
 	if err := ValidateNativeArgs(c.Harness, c.Args); err != nil {
 		return err

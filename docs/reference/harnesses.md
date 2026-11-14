@@ -176,12 +176,14 @@ Managed Codex MCP connections and placeholder Kubernetes configuration are
 regenerated for each launch; portable history cannot select upstream credentials
 or server registrations. Managed Claude Code loads the same connections as
 `--strict-mcp-config` entries and managed Copilot with
-`--additional-mcp-config`. Managed Claude and Copilot tasks are not supported.
+`--additional-mcp-config`. Remote executors don't accept Claude Code or
+Copilot tasks yet. The Claude Code supervisor can already run one: it submits
+the task as the launch's prompt and counts only the turn that prompt started.
 
 | Managed selector | Selected native state | Completed-turn observation |
 | --- | --- | --- |
 | `codex` | One same-UUID rollout | Native completed turn, resolved supported tools and initial developer instruction digest |
-| `claude-code` | One same-UUID primary project transcript | Fresh prompt/tool/Stop hooks plus a settled transcript with paired foreground Bash tools |
+| `claude-code` | One same-UUID primary project transcript | Fresh prompt/tool/Stop hooks plus a settled transcript with paired foreground Bash and MCP tool calls, including calls that failed |
 | `copilot` | One `session-state/<id>/events.jsonl` journal, for the ID the supervisor chose with `--session-id` | The main agent's last `assistant.turn_end` after an answer with no tool requests, every tool finished and no error or abort after it, once terminal input has settled ([ADR 0048](../adr/0048-github-copilot-cli-is-a-managed-harness.md)) |
 
 The supervisor owns the PTY across attachment disconnects. It uses the installed
@@ -208,14 +210,17 @@ cancellation revokes first. See [ADR
 0011](../adr/0011-native-session-compatibility-and-completion.md).
 
 The managed Codex launch uses `--sandbox danger-full-access` to run tools within the outer container boundary. The restricted sandbox
-kernel does not support the inner bubblewrap sandbox. Claude uses fixed `bypassPermissions` and foreground Bash.
+kernel does not support the inner bubblewrap sandbox. Claude uses fixed `bypassPermissions`, foreground Bash and the tools of its MCP connections (`mcp__<server>__<tool>`, such as `mcp__sproozi__diagnose`).
 Copilot uses `--allow-all` with its built-in GitHub MCP server disabled. All
 rely on the outer non-root, read-only, capability-restricted container and
 enforced gateway network boundary. Portable history cannot select these settings.
 
 A Claude transcript that records a rate-limit (429) retry is supported once a
-later successful reply follows it. Other error records, background or parallel
-tasks, subagents, compaction and imported personal settings are not supported.
+later successful reply follows it. A Bash command that exits non-zero or an MCP
+tool that reports an error ends its call, as a successful call does; a call the
+user interrupts does not. A Bash or MCP call still running blocks the stop until
+it ends. Other error records, background or parallel tasks, subagents,
+compaction and imported personal settings are not supported.
 New input after a completed Claude turn means that turn's completion no longer
 counts. [ADR 0011](../adr/0011-native-session-compatibility-and-completion.md)
 records the transcript edge cases.
