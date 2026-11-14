@@ -1,7 +1,6 @@
 package harness_test
 
 import (
-	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -66,7 +65,7 @@ func launchFixture(t *testing.T, scenario string) (*exec.Cmd, string) {
 			t.Fatal(err)
 		}
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	ctx, cancel := helperProcessContext(t)
 	t.Cleanup(cancel)
 	cmd := exec.CommandContext(ctx, python, filepath.Join(directory, "launch.py"), "--model", "fixture-model")
 	state := filepath.Join(directory, "state")

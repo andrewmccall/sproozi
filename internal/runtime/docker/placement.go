@@ -18,6 +18,7 @@ import (
 	"github.com/andrewmccall/sproozi/internal/agentprofile"
 	"github.com/andrewmccall/sproozi/internal/budget"
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
+	"github.com/andrewmccall/sproozi/internal/deadline"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/workspace"
@@ -25,23 +26,14 @@ import (
 )
 
 const (
-	phaseCreating            = "creating"
-	phasePrepared            = "prepared"
-	phaseActivating          = "activating"
-	phaseActive              = "active"
-	phaseStopping            = "stopping"
-	phaseStopped             = "stopped"
-	phaseAborting            = "aborting"
-	phaseAborted             = "aborted"
-	phasePreparationAborting = "preparation-aborting"
-	roleAgent                = "agent"
-	roleHelper               = "helper"
-	roleAnchor               = "anchor"
-	nativeCommandPath        = "/usr/local/bin/native-session"
-	checkpointCommandPath    = "/usr/local/bin/checkpoint"
-	networkCommandPath       = "/usr/local/bin/sproozi-network"
-	launchLabel              = "sproozi.com/launch"
-	nativeUser               = "1000:1000"
+	roleAgent             = "agent"
+	roleHelper            = "helper"
+	roleAnchor            = "anchor"
+	nativeCommandPath     = "/usr/local/bin/native-session"
+	checkpointCommandPath = "/usr/local/bin/checkpoint"
+	networkCommandPath    = "/usr/local/bin/sproozi-network"
+	launchLabel           = "sproozi.com/launch"
+	nativeUser            = "1000:1000"
 )
 
 var _ session.Placement = (*Placement)(nil)
@@ -55,6 +47,10 @@ type NativeAccess struct {
 	Options        []string
 	ClientConfig   *harness.NativeClientConfig
 }
+
+// ErrGrantMissing is what an Authority returns when the visit has no grant:
+// its preparation stopped before InitializeAllocation recorded one.
+var ErrGrantMissing = errors.New("docker gateway: allocation record missing")
 
 // Authority is the trusted home gateway/accounting owner. It persists exact
 // allocation/container bindings; native diagnostics and checkpoint bytes never
@@ -137,7 +133,7 @@ func (p *Placement) validateLaunch(l session.Launch) error {
 	if err := workspace.ValidateIgnoredPaths(l.IncludeIgnored); err != nil {
 		return err
 	}
-	if l.Harness != p.config.Harness || !validUUID(l.ExecutionID) || !validUUID(l.OperationID) || !validUUID(l.AllocationID) || l.Epoch == 0 || l.Placement != p.config.Name || l.InstructionDigest != p.config.InstructionDigest || l.Deadline.IsZero() || len(l.Allowances) == 0 || len(l.Allowances) > 32 {
+	if l.Harness != p.config.Harness || !validUUID(l.ExecutionID) || !validUUID(l.OperationID) || !validUUID(l.AllocationID) || l.Epoch == 0 || l.Placement != p.config.Name || l.InstructionDigest != p.config.InstructionDigest || len(l.Allowances) == 0 || len(l.Allowances) > 32 {
 		return errors.New("invalid Docker launch binding")
 	}
 	if (!initial && !validUUID(l.ThreadID)) || (initial && l.ThreadID != "") {
@@ -181,7 +177,7 @@ func (p *Placement) Prepare(ctx context.Context, l session.Launch, data []byte) 
 func (p *Placement) prepare(ctx context.Context, l session.Launch, data []byte) (session.Incarnation, error) {
 	l.Deadline = l.Deadline.UTC()
 	l.IncludeIgnored = append([]string(nil), l.IncludeIgnored...)
-	if !l.Deadline.After(time.Now()) {
+	if deadline.At(l.Deadline).Passed(time.Now()) {
 		return session.Incarnation{}, errors.New("docker launch deadline expired")
 	}
 	r, err := p.load(l)
@@ -198,6 +194,9 @@ func (p *Placement) prepare(ctx context.Context, l session.Launch, data []byte) 
 	}
 	if r.InputDigest != fmt.Sprintf("%x", sha256.Sum256(data)) {
 		return session.Incarnation{}, errors.New("docker prepare input changed")
+	}
+	if err = r.permit(opPrepare); err != nil {
+		return session.Incarnation{}, err
 	}
 	if r.Phase == phaseCreating {
 		if err = p.drivePrepare(ctx, &r, data); err != nil {
@@ -221,7 +220,7 @@ func (p *Placement) spec(r placementRecord, role string) ManagedSpec {
 			network = "container:" + r.Anchor.ID
 		}
 	}
-	spec := ManagedSpec{Name: r.Execution + "-" + role, Execution: r.Launch.AllocationID, Role: role, ImageID: image, NetworkMode: network, MemoryBytes: limits.MemoryBytes, CPUMilli: limits.CPUMilli, PIDs: limits.PIDs, Deadline: r.Launch.Deadline.Format(time.RFC3339Nano), GatewayIPv4: p.config.GatewayIPv4, GatewayPort: p.config.GatewayPort}
+	spec := ManagedSpec{Name: r.Execution + "-" + role, Execution: r.Launch.AllocationID, Role: role, ImageID: image, NetworkMode: network, MemoryBytes: limits.MemoryBytes, CPUMilli: limits.CPUMilli, PIDs: limits.PIDs, Deadline: deadline.At(r.Launch.Deadline).String(), GatewayIPv4: p.config.GatewayIPv4, GatewayPort: p.config.GatewayPort}
 	encoded, _ := json.Marshal(r.Launch)
 	spec.IntentDigest = fmt.Sprintf("%x", sha256.Sum256(append(encoded, []byte(r.ConfigDigest+r.InputDigest)...)))
 	if role != roleAnchor {
@@ -266,7 +265,7 @@ func (p *Placement) resource(ctx context.Context, r *placementRecord, role strin
 	return p.engine.Start(ctx, **target)
 }
 func (p *Placement) drivePrepare(ctx context.Context, r *placementRecord, data []byte) error {
-	if !r.Launch.Deadline.After(time.Now()) {
+	if deadline.At(r.Launch.Deadline).Passed(time.Now()) {
 		return errors.New("docker preparation deadline expired")
 	}
 	if r.Volume == nil {
@@ -334,6 +333,11 @@ func (p *Placement) drivePrepare(ctx context.Context, r *placementRecord, data [
 	return p.save(*r)
 }
 func (p *Placement) incarnation(r placementRecord) (session.Incarnation, error) {
+	return r.incarnation()
+}
+
+// incarnation is the visit's native incarnation: its exact agent container.
+func (r placementRecord) incarnation() (session.Incarnation, error) {
 	if r.Agent == nil || !objectID.MatchString(r.Agent.ID) || r.Agent.Execution != r.Launch.AllocationID {
 		return session.Incarnation{}, errors.New("docker native incarnation unavailable")
 	}
@@ -388,10 +392,10 @@ func (p *Placement) Activate(ctx context.Context, l session.Launch, i session.In
 // activate retries only the exact retained intent. The same trusted authority
 // and fixed native launch gate are revalidated before recording activation.
 func (p *Placement) activate(ctx context.Context, r *placementRecord, i session.Incarnation) error {
-	if r.Phase != phasePrepared && r.Phase != phaseActivating && r.Phase != phaseActive {
-		return errors.New("docker activation cannot reopen stopped allocation")
+	if err := r.permit(opActivate); err != nil {
+		return err
 	}
-	if !r.Launch.Deadline.After(time.Now()) {
+	if deadline.At(r.Launch.Deadline).Passed(time.Now()) {
 		return errors.New("docker activation deadline expired")
 	}
 	if err := p.verify(ctx, *r); err != nil {
@@ -442,7 +446,9 @@ func (p *Placement) Inspect(ctx context.Context, l session.Launch) (session.Obse
 		return o, err
 	}
 	o.Launch, o.Incarnation = r.Launch, inc
-	if r.Phase == phaseActivating {
+	if r.permit(opRecoverActivation) == nil {
+		// An activation interrupted after its record was saved is completed
+		// from the same retained intent rather than reported as prepared.
 		if err = p.activate(ctx, &r, inc); err != nil {
 			return o, err
 		}
@@ -521,13 +527,15 @@ func (p *Placement) Stop(ctx context.Context, l session.Launch, i session.Incarn
 	if err != nil {
 		return session.Stopped{}, err
 	}
+	// An aborting or aborted visit has no new move checkpoint, and a
+	// preparation is cancelled rather than stopped.
+	if err = r.permit(opStop); err != nil {
+		return session.Stopped{}, err
+	}
 	if r.Phase == phaseStopped {
 		// The stop is durable; removal failure is retried by the next call.
 		_ = p.release(ctx, &r)
 		return p.stopped(r)
-	}
-	if r.Phase == phaseAborted {
-		return session.Stopped{}, errors.New("aborted Docker execution has no new move checkpoint")
 	}
 	r.Phase = phaseStopping
 	if err = p.save(r); err != nil {
@@ -560,7 +568,7 @@ func (p *Placement) Stop(ctx context.Context, l session.Launch, i session.Incarn
 		}
 	}
 
-	if !validUUID(r.thread()) && !r.Turnless && r.Exited == nil {
+	if !r.writerKnown() {
 		return session.Stopped{}, errors.New("initial native UUID remains unknown")
 	}
 	if err = p.seal(ctx, &r, i); err != nil {
@@ -572,8 +580,7 @@ func (p *Placement) Stop(ctx context.Context, l session.Launch, i session.Incarn
 	// exited harness keeps a checkpoint only when a harness whose state proves
 	// completion, such as Codex, reported a completed conversation that
 	// validates; otherwise the session keeps its previous one.
-	exitedWithout := r.Exited != nil && (!harness.ProvesCompletion(r.Launch.Harness) || r.thread() == "")
-	if r.CheckpointDigest == "" && !r.Turnless && !exitedWithout {
+	if r.needsCapture(harness.ProvesCompletion(r.Launch.Harness)) {
 		if err = p.capture(ctx, &r); err != nil && r.Exited == nil {
 			return session.Stopped{}, err
 		}
@@ -620,7 +627,11 @@ func (p *Placement) Abort(ctx context.Context, l session.Launch, i session.Incar
 
 func (p *Placement) abort(ctx context.Context, r placementRecord, i session.Incarnation) (session.Observation, error) {
 	o := session.Observation{Launch: r.Launch, Incarnation: i, State: session.PlacementUnknown}
-	var err error
+	// A preparation that never completed is cancelled by AbortPreparation.
+	err := r.permit(opAbort)
+	if err != nil {
+		return o, err
+	}
 	if r.Phase == phaseStopped || r.Phase == phaseAborted {
 		// A retained receipt cannot substitute for current exact writer evidence.
 		// Only this placement's own recorded removal replaces that evidence.
@@ -696,6 +707,9 @@ func (p *Placement) fenced(ctx context.Context, r placementRecord) error {
 // or a cancelled preparation that never granted authority. Usage that is still
 // unknown keeps the containers so a later Abort can retry sealing.
 func (r placementRecord) releasable() bool {
+	if r.permit(opRelease) != nil {
+		return false
+	}
 	switch r.Phase {
 	case phaseStopped, phaseAborted:
 		return r.ActualStopped && r.Receipt != nil
@@ -746,7 +760,9 @@ func (p *Placement) release(ctx context.Context, r *placementRecord) error {
 // AbortPreparation fences an allocation even when preparation failed before it
 // could return a native incarnation. Lookup resolves lost create replies but
 // never creates or starts resources. Records that never activated grant no
-// authority; this cancellation returns no accounting or native continuity receipt.
+// authority, but a grant initialized during preparation is revoked so that
+// every grant ends revoked; this cancellation returns no accounting or native
+// continuity receipt.
 func (p *Placement) AbortPreparation(ctx context.Context, l session.Launch) error {
 	unlock, err := p.lockOperation(l)
 	if err != nil {
@@ -758,6 +774,9 @@ func (p *Placement) AbortPreparation(ctx context.Context, l session.Launch) erro
 		return nil
 	}
 	if err != nil {
+		return err
+	}
+	if err = r.permit(opAbortPreparation); err != nil {
 		return err
 	}
 	if r.Phase == phaseCreating {
@@ -817,6 +836,17 @@ func (p *Placement) AbortPreparation(ctx context.Context, l session.Launch) erro
 			}
 		}
 	}
+	// A grant exists only once the agent container does. Revoke it before
+	// recording the stop, so a release never leaves a grant open.
+	if r.Agent != nil {
+		i, err := p.incarnation(r)
+		if err != nil {
+			return err
+		}
+		if err = p.authority.Revoke(ctx, r.Launch, i); err != nil && !errors.Is(err, ErrGrantMissing) {
+			return err
+		}
+	}
 	r.ActualStopped = true
 	if err = p.save(r); err != nil {
 		return err
@@ -850,7 +880,7 @@ func (p *Placement) Attach(ctx context.Context, l session.Launch, i session.Inca
 		unlock()
 		return err
 	}
-	if r.Phase != phaseActive || !r.Launch.Deadline.After(time.Now()) {
+	if r.Phase != phaseActive || deadline.At(r.Launch.Deadline).Passed(time.Now()) {
 		unlock()
 		return errors.New("docker attachment is not active")
 	}
@@ -860,9 +890,9 @@ func (p *Placement) Attach(ctx context.Context, l session.Launch, i session.Inca
 	}
 	agent := *r.Agent
 	unlock()
-	deadline, cancel := context.WithDeadline(ctx, r.Launch.Deadline)
+	attachCtx, cancel := deadline.At(r.Launch.Deadline).Context(ctx)
 	defer cancel()
-	return p.engine.AttachNative(deadline, agent, input, output)
+	return p.engine.AttachNative(attachCtx, agent, input, output)
 }
 
 func (p *Placement) quiesceNative(ctx context.Context, r *placementRecord, i session.Incarnation) error {
@@ -907,8 +937,11 @@ func (p *Placement) quiesceNative(ctx context.Context, r *placementRecord, i ses
 	return p.save(*r)
 }
 
-// recordExit keeps what the supervisor reported when its harness exited on its
-// own. A first visit of a harness whose state proves completion, such as
+// recordExit keeps what the supervisor reported when its harness ended
+// without a graceful stop, including why it ended. Only a harness the
+// supervisor did not stop itself, or one with no report, falls back to the
+// host's clock for the deadline: the host stops a late container itself. A
+// first visit of a harness whose state proves completion, such as
 // Codex, binds the thread of a completed turn it reported, so the stop can
 // still checkpoint that conversation; Claude needs its graceful
 // acknowledgement, so its exited visit keeps no new checkpoint.
@@ -917,7 +950,16 @@ func (p *Placement) recordExit(ctx context.Context, r *placementRecord, i sessio
 	if !ok {
 		report = harness.NativeExitReport{Code: state.ExitCode}
 	}
-	r.Exited = &session.Exit{Code: report.Code, Output: report.Output, Deadline: !r.Launch.Deadline.After(time.Now())}
+	r.Exited = &session.Exit{Code: report.Code, Output: report.Output, Cause: report.Cause}
+	switch report.Cause {
+	case harness.NativeExitDeadline:
+		r.Exited.Deadline = true
+	case harness.NativeExitSelf, harness.NativeExitFailed:
+	default:
+		// No report, or a supervisor told to stop: the host's own deadline
+		// stop sends that signal.
+		r.Exited.Deadline = deadline.At(r.Launch.Deadline).Passed(time.Now())
+	}
 	if harness.ProvesCompletion(r.Launch.Harness) && r.thread() == "" && report.Thread != "" {
 		if err := p.authority.BindNative(ctx, r.Launch, i, report.Thread); err != nil {
 			return err
@@ -991,7 +1033,7 @@ func (p *Placement) Exited(ctx context.Context, l session.Launch, i session.Inca
 	if err != nil {
 		return false, err
 	}
-	if state.Running && !r.Launch.Deadline.After(time.Now()) {
+	if state.Running && deadline.At(r.Launch.Deadline).Passed(time.Now()) {
 		// The supervisor ends its harness at the deadline, but its timer can
 		// run late after the host slept; the host's clock decides.
 		if err = p.engine.Stop(ctx, *r.Agent); err != nil {

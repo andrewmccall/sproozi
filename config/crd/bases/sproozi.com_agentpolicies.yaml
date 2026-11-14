@@ -167,12 +167,12 @@ spec:
                 minimum: 1
                 type: integer
               maxExecutionDuration:
-                default: 1h
-                description: MaxExecutionDuration is the longest an AgentRun may execute.
+                description: |-
+                  MaxExecutionDuration is the longest an AgentRun may execute. Omit it
+                  for no deadline from the policy: work the policy's users start runs
+                  until it finishes, is stopped or meets a session's own deadline.
                 type: string
                 x-kubernetes-validations:
-                - message: must not exceed one hour
-                  rule: duration(self) <= duration('1h')
                 - message: must be greater than zero
                   rule: duration(self) > duration('0s')
               maxModelCallSeconds:

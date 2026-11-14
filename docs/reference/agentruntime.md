@@ -4,6 +4,16 @@
 images, resources, commands and security settings in `podTemplate.spec`. Images
 must be pinned by digest.
 
+The release's native image (`ghcr.io/andrewmccall/sproozi-native`) runs as
+UID/GID 1000: it owns its home and workspace as 1000, managed sessions require
+it, and the Docker network anchor admits only that user's traffic to the
+gateway. Use `runAsUser: 1000` and `fsGroup: 1000` with it, for ordinary runs
+too. Runtimes that mount the same [login store](#harness-sign-in) must use the
+same user and group: Kubernetes applies each Pod's `fsGroup` to the claim when
+it mounts, so a different group would take the login from the others. Sproozi's
+own controller, gateway and certificate controller run as 65532; they share no
+files with agents.
+
 Ordinary runs use the configured command. For managed native sessions, the
 controller sets fixed supervisor and checkpoint-helper commands. Resources and
 security settings live in `podTemplate.spec`; there are no separate top-level
@@ -16,8 +26,8 @@ spec:
       automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
-        runAsUser: 65532
-        fsGroup: 65532
+        runAsUser: 1000
+        fsGroup: 1000
         seccompProfile:
           type: RuntimeDefault
       containers:

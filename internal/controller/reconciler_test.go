@@ -813,6 +813,41 @@ func TestReconcilerRunningRunTimedOut(t *testing.T) {
 	}
 }
 
+// A policy without maxExecutionDuration sets no deadline: a run started two
+// days ago keeps running, and the reconciler waits for Pod and policy events
+// rather than requeueing at once.
+func TestReconcilerRunWithoutPolicyDurationNeverTimesOut(t *testing.T) {
+	t.Parallel()
+
+	for _, phase := range []sprooziv1alpha1.AgentRunPhase{sprooziv1alpha1.AgentRunPhaseAdmitted, sprooziv1alpha1.AgentRunPhaseRunning} {
+		t.Run(string(phase), func(t *testing.T) {
+			t.Parallel()
+			objs := fixtures()
+			objs[1].(*sprooziv1alpha1.AgentPolicy).Spec.MaxExecutionDuration = metav1.Duration{}
+			run := newRun(runOne)
+			run.Status.Phase = phase
+			twoDaysAgo := metav1.NewTime(time.Now().Add(-48 * time.Hour))
+			run.Status.StartedAt = &twoDaysAgo
+			c := fake.NewClientBuilder().
+				WithScheme(newScheme()).
+				WithObjects(append(objs, run)...).
+				WithStatusSubresource(&sprooziv1alpha1.AgentRun{}).
+				Build()
+
+			result, err := reconcileRun(t, c, runOne)
+			if err != nil {
+				t.Fatalf("Reconcile() error = %v", err)
+			}
+			if got := getPhase(t, c, runOne); got == sprooziv1alpha1.AgentRunPhaseTimedOut {
+				t.Fatalf("phase = %q, want a run with no policy duration to keep going", got)
+			}
+			if result.RequeueAfter < 0 {
+				t.Errorf("RequeueAfter = %s, want no negative requeue", result.RequeueAfter)
+			}
+		})
+	}
+}
+
 func TestReconcilerRunningRunCancelledWhenCancelSet(t *testing.T) {
 	t.Parallel()
 

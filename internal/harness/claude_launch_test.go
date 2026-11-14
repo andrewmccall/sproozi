@@ -1,14 +1,12 @@
 package harness_test
 
 import (
-	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/andrewmccall/sproozi/internal/harness"
 )
@@ -85,7 +83,7 @@ func newClaudeFixture(t *testing.T, scenario string, extra ...string) claudeFixt
 	if err := os.Mkdir(workspace, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	ctx, cancel := helperProcessContext(t)
 	t.Cleanup(cancel)
 	args := append([]string{filepath.Join(dir, claudeLaunchScript), "--contract", dir, "--claude", filepath.Join(dir, "claude"),
 		"--result", f.result, "--sign-in", f.signIn, "--home", f.home, "--workspace", workspace}, extra...)

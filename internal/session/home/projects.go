@@ -3,6 +3,7 @@ package home
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 
 	"github.com/andrewmccall/sproozi/internal/project"
@@ -30,7 +31,7 @@ func validateProjectApprovals(c Config) error {
 }
 
 func (s *Service) projectAllowances(r localSession) (map[string]session.Allowance, error) {
-	base := harnessAllowances(r.Original.Harness, s.config.Allowances)
+	base := maps.Clone(s.config.Allowances)
 	if r.Original.Project == "" {
 		return base, nil
 	}

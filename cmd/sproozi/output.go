@@ -10,6 +10,8 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/deadline"
+	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/home"
 	"github.com/andrewmccall/sproozi/internal/work"
@@ -21,11 +23,23 @@ const localName = "local"
 // serviceOwnership is the service's own name for sessions this machine owns.
 const serviceOwnership = "home"
 
-// phaseCancelled is the phase of a session whose cancellation finished.
-const phaseCancelled = "cancelled"
+// phaseCancelled is the phase of a session whose cancellation finished. Remote
+// work reports the same word.
+const phaseCancelled = string(session.PhaseCancelled)
 
-// livePhases are the phases in which a session's deadline still applies.
-var livePhases = []string{"preparing", "activating", "active", "stopping", "starting"}
+// remoteWorkLivePhases are the phases of remote work (internal/work) in which
+// its deadline still applies. They are the remote counterparts of
+// session.Phase.Live; the rest of remote work's vocabulary needs no mapping.
+//
+// TODO(ADR 0057): remove once remote work runs through the coordinator and
+// reports session phases.
+var remoteWorkLivePhases = []string{"pending", "preparing", "active", "finalizing"}
+
+// livePhase reports a listed phase, from this machine or a remote executor,
+// in which the session's deadline still applies.
+func livePhase(phase string) bool {
+	return session.Phase(phase).Live() || slices.Contains(remoteWorkLivePhases, phase)
+}
 
 // writeJSON prints one indented JSON document.
 func writeJSON(w io.Writer, v any) error {
@@ -82,7 +96,7 @@ func statusText(action string, s home.Status, detached bool) string {
 			return fmt.Sprintf("Session %s had already stopped at its deadline.\n"+
 				"Continue it with: sproozi resume %s", id, short)
 		}
-		if s.Exit != nil && s.Exit.Code != 0 {
+		if s.Exit.Failed() {
 			return fmt.Sprintf("Session %s had already stopped: its agent exited with code %d.%s\n"+
 				"Continue it with: sproozi resume %s    Delete it with: sproozi rm %s",
 				id, s.Exit.Code, exitOutput(s.Exit), short, short)
@@ -110,11 +124,17 @@ func statusText(action string, s home.Status, detached bool) string {
 	text := describe(id, string(s.Harness), s.Phase, s.Placement, s.Deadline)
 	switch {
 	case s.Exit != nil && s.Exit.Deadline:
-		text += "\nStopped    at its deadline (maxDuration in config.json)"
+		text += "\nStopped    at its deadline (--max-duration, or maxDuration in config.json)"
 		text += fmt.Sprintf("\nContinue it with: sproozi resume %s", short)
-	case s.Exit != nil && s.Exit.Code != 0:
+	case s.Exit.Failed():
 		text += fmt.Sprintf("\nExited     code %d%s", s.Exit.Code, exitOutput(s.Exit))
 		text += fmt.Sprintf("\nContinue it with: sproozi resume %s    Delete it with: sproozi rm %s", short, short)
+	case s.Exit != nil && s.Exit.Cause == harness.NativeExitTerminated:
+		text += "\nStopped    its container was stopped before the agent finished"
+		text += fmt.Sprintf("\nContinue it with: sproozi resume %s", short)
+	case s.Exit != nil && s.Exit.Cause == harness.NativeExitFailed:
+		text += "\nStopped    forcibly, after a graceful stop failed"
+		text += fmt.Sprintf("\nContinue it with: sproozi resume %s", short)
 	case s.Exit != nil:
 		text += "\nExited     code 0: the agent quit by itself"
 	}
@@ -130,13 +150,13 @@ func exitOutput(e *session.Exit) string {
 }
 
 // describe is the status summary of a session.
-func describe(id, kind, phase, placement string, deadline time.Time) string {
+func describe(id, kind, phase, placement string, until time.Time) string {
 	lines := []string{"Session    " + id, "Harness    " + kind, "Phase      " + phase}
 	if placement != "" {
 		lines = append(lines, "Placement  "+placement)
 	}
-	if slices.Contains(livePhases, phase) && !deadline.IsZero() {
-		lines = append(lines, "Deadline   "+formatTime(deadline))
+	if ends := deadlineText(phase, until); ends != "-" {
+		lines = append(lines, "Deadline   "+ends)
 	}
 	return strings.Join(lines, "\n")
 }
@@ -159,6 +179,19 @@ func (q *options) printView(cluster string, v work.View) error {
 
 func formatTime(t time.Time) string { return t.Local().Format("2006-01-02 15:04 MST") }
 
+// deadlineText is a session's deadline as listed: its time, "none" for a
+// live session without one, or "-" once it no longer applies.
+func deadlineText(phase string, until time.Time) string {
+	switch d := deadline.At(until); {
+	case !livePhase(phase):
+		return "-"
+	case !d.Set():
+		return deadline.NoneArg
+	default:
+		return formatTime(d.Time())
+	}
+}
+
 // writeCatalogueTable prints the sessions as a table.
 func writeCatalogueTable(w io.Writer, c catalogue) error {
 	if len(c.Sessions) == 0 {
@@ -175,10 +208,7 @@ func writeCatalogueTable(w io.Writer, c catalogue) error {
 	}
 	_, _ = fmt.Fprintln(tw, strings.Join(header, "\t"))
 	for _, r := range c.Sessions {
-		ends := "-"
-		if slices.Contains(livePhases, r.Phase) && !r.Deadline.IsZero() {
-			ends = formatTime(r.Deadline)
-		}
+		ends := deadlineText(r.Phase, r.Deadline)
 		// A harness whose credential the gateway holds has no login.
 		row := []string{shortID(r.ID), string(r.Harness), cmp.Or(r.Login, "-"), r.Phase, r.Placement, ends}
 		if several {

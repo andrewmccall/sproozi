@@ -19,7 +19,7 @@ design and its tradeoffs.
 | Execution | Instructions | Skill | Control connection |
 | --- | --- | --- | --- |
 | Managed Codex session | `$CODEX_HOME/AGENTS.md` | `$CODEX_HOME/skills/sproozi-access` | `mcp_servers.sproozi`, required |
-| Managed Claude Code session | After the approved `--append-system-prompt` text | Plugin `sproozi`, listed as `sproozi:sproozi-access` | Only entry in `--strict-mcp-config` |
+| Managed Claude Code session | After the approved `--append-system-prompt` text | Plugin `sproozi`, listed as `sproozi:sproozi-access` | `sproozi` entry in `--strict-mcp-config`, beside granted named servers |
 | Ordinary run, any harness | Contract file `sproozi-instructions.md` | Contract file `sproozi-access.md` | Generated MCP config file |
 
 The supervisor installs the managed-session files at every launch and replaces

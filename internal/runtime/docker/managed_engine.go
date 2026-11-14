@@ -170,12 +170,15 @@ type ManagedSpec struct {
 	GatewayPort                 uint16
 }
 
+// deadlineFlag passes a container its execution deadline, or "none".
+const deadlineFlag = "--deadline"
+
 func (s ManagedSpec) command() ([]string, error) {
 	switch s.Role {
 	case roleAgent:
-		return []string{nativeCommandPath, "serve", "--bootstrap", "--deadline", s.Deadline}, nil
+		return []string{nativeCommandPath, "serve", "--bootstrap", deadlineFlag, s.Deadline}, nil
 	case roleHelper:
-		return []string{checkpointCommandPath, "hold", "--deadline", s.Deadline}, nil
+		return []string{checkpointCommandPath, "hold", deadlineFlag, s.Deadline}, nil
 	case roleAnchor:
 		ip, err := netip.ParseAddr(s.GatewayIPv4)
 		if err != nil || !ip.Is4() || ip.IsUnspecified() || ip.IsMulticast() || s.GatewayPort == 0 {

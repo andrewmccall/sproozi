@@ -71,6 +71,10 @@ replay records of ADR 0017.
 ADR 0029 extends those pinned clients to the published native image, replacing
 ADR 0024's statement that releases do not pin clients.
 
+ADR 0056 replaces the rule, in ADRs 0004, 0010, 0012 and 0034, that every
+execution has a deadline: whoever starts work sets it, and work its owner
+starts may have none. A set deadline still binds as those records describe.
+
 | Decision | Topic |
 | --- | --- |
 | [0001](0001-mcp-capabilities-through-shared-gateway.md) | MCP access through the shared gateway. |
@@ -127,3 +131,5 @@ ADR 0024's statement that releases do not pin clients.
 | [0052](0052-copilot-policy-fetch-queries.md) | Copilot's exact managed-settings route accepts its query and preserves the provider's policy response; relay refusals describe method and query presence without query content. |
 | [0053](0053-copilot-account-namespaces-and-policy-verification.md) | GitHub-backed Copilot relays GETs in both account namespaces; CI separately verifies the registry-policy URL through the authenticated gateway and the pinned client's model/MCP turn. |
 | [0054](0054-claude-code-agentruns-launch-through-a-helper.md) | Claude Code AgentRuns launch through `claude-launch.py`, which publishes the stock client's result and keeps its login in step with a mounted login store; `--login` signs a login in once. |
+| [0056](0056-whoever-starts-work-sets-its-deadline.md) | Whoever starts work sets its deadline: AgentPolicy `maxExecutionDuration`, the home's and the remote executor's `maxDuration` are optional, `run` and `resume` take `--max-duration DURATION\|none`, and one helper decides when a deadline has passed; managed Kubernetes sessions reach the gateway through a loopback forwarder that adds the current projected token to each CONNECT. |
+| [0058](0058-lifecycle-records-declare-states-and-transitions.md) | Lifecycle records declare a typed phase validated on load and save, a `(from, event) → to` table with a deadline column, and one apply function for live code and recovery; the execution journal derives its phase from its structure and adopts it first. |

@@ -378,8 +378,8 @@ Regenerate connection settings at each native launch. Registry configuration
 alone does not grant access. Each execution needs the named capability, matching
 tool and argument policy, an available budget and active run status. Restart the
 owning gateways to apply registry or credential changes; removing a grant must
-deny later calls. Codex sessions get the named servers; Claude Code sessions
-get none. No provider-specific
+deny later calls. Codex, Claude Code and Copilot sessions get the named
+servers. No provider-specific
 server code, catalogue, OAuth enrollment or stdio lifecycle is required for this
 HTTPS example.
 

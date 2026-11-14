@@ -87,10 +87,13 @@ its own copy.
 
 `run` prints the session ID and opens the agent's terminal. Press Ctrl-] to
 detach; Ctrl-C reaches the agent. Detaching prints the session ID and the next
-commands, and leaves the agent running until its deadline: 30 minutes by
-default, set by `maxDuration` in `~/.sproozi/config.json`. The deadline is
-wall-clock time, so time the computer spends asleep counts. At the deadline the
-agent stops and the session is `retained`; `sproozi resume` continues it with a
+commands, and leaves the agent running until you stop it. A session has no
+deadline unless you give it one: `run --max-duration 8h` for this session, or
+`maxDuration` in `~/.sproozi/config.json` for every session that does not
+choose. The session keeps its choice when resumed; `resume --max-duration`
+changes it, and `--max-duration none` removes it. A deadline is wall-clock
+time, so time the computer spends asleep counts. At the deadline the agent
+stops and the session is `retained`; `sproozi resume` continues it with a
 new deadline, from the last checkpoint. Codex and Copilot keep a turn they
 completed. Claude Code keeps only what a `sproozi stop` before the deadline
 saved, so stop it yourself to keep its latest conversation. `run -d` starts
@@ -100,7 +103,7 @@ without opening the terminal.
 sproozi ls            # list sessions
 sproozi attach 3f2b   # open its terminal again: the start of the ID is enough
 sproozi stop 3f2b     # stop after the current turn; ls then shows it as retained
-sproozi resume 3f2b   # carry on later and reconnect (-d skips that), with a new deadline
+sproozi resume 3f2b   # carry on later and reconnect (-d skips that); a deadline starts again
 sproozi rm 3f2b       # delete a stopped session and its saved work
 ```
 
@@ -243,7 +246,7 @@ The gateway reads keys only when it starts. `credentials set` restarts the
 service when no session is running; otherwise it says it keeps the previous key
 until the sessions stop. `service stop` refuses while sessions run; stop or
 cancel them first, or use `--leave-running` to let them run on until their
-deadlines.
+deadlines, or until stopped when they have none.
 
 The service renews its certificate and rotates its certificate authority by
 itself. `sproozi certificates replace-ca` is only for a lost or compromised

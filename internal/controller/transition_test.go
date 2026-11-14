@@ -23,34 +23,6 @@ import (
 	"github.com/andrewmccall/sproozi/internal/controller"
 )
 
-func TestIsTerminal(t *testing.T) {
-	t.Parallel()
-
-	terminalPhases := []sprooziv1alpha1.AgentRunPhase{
-		sprooziv1alpha1.AgentRunPhaseSucceeded,
-		sprooziv1alpha1.AgentRunPhaseFailed,
-		sprooziv1alpha1.AgentRunPhaseTimedOut,
-		sprooziv1alpha1.AgentRunPhaseCancelled,
-	}
-	activePhases := []sprooziv1alpha1.AgentRunPhase{
-		"",
-		sprooziv1alpha1.AgentRunPhaseQueued,
-		sprooziv1alpha1.AgentRunPhaseAdmitted,
-		sprooziv1alpha1.AgentRunPhaseRunning,
-	}
-
-	for _, phase := range terminalPhases {
-		if !controller.IsTerminal(phase) {
-			t.Errorf("IsTerminal(%q) = false, want true", phase)
-		}
-	}
-	for _, phase := range activePhases {
-		if controller.IsTerminal(phase) {
-			t.Errorf("IsTerminal(%q) = true, want false", phase)
-		}
-	}
-}
-
 func TestValidTransition(t *testing.T) {
 	t.Parallel()
 

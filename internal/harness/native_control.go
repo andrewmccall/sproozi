@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/andrewmccall/sproozi/internal/deadline"
 )
 
 // NativeOp names one fixed operation of the private native supervisor. The
@@ -73,6 +75,17 @@ const NativeQuiesceWait = 2 * time.Minute
 // native turn. Nothing changed: the writer still runs with input gated, and
 // repeating the stop waits again.
 var ErrNativeTurnPending = errors.New("the stop is still waiting")
+
+// NativeTurnPending is ErrNativeTurnPending naming what the stop waits for,
+// such as "the current Codex turn to complete".
+type NativeTurnPending struct{ Waiting string }
+
+func (e *NativeTurnPending) Error() string {
+	return fmt.Sprintf("%v for %s", ErrNativeTurnPending, e.Waiting)
+}
+
+// Is makes errors.Is(err, ErrNativeTurnPending) hold.
+func (e *NativeTurnPending) Is(target error) bool { return target == ErrNativeTurnPending }
 
 // NativeExit is the supervisor's process exit observation, not a container fence.
 type NativeExit struct {
@@ -155,7 +168,7 @@ var ErrQuiesceUnacknowledged = errors.New("native quiesce reply unavailable")
 //
 // Gateway access stays open throughout so the admitted turn and its tools can
 // finish. Revocation, physical fencing and accounting remain backend steps.
-func QuiesceNative(ctx context.Context, control NativeControl, thread string, deadline time.Time,
+func QuiesceNative(ctx context.Context, control NativeControl, thread string, executionDeadline time.Time,
 	bind func(context.Context, string) error) (string, error) {
 	output, err := control(ctx, NativeGate)
 	if err != nil {
@@ -165,11 +178,8 @@ func QuiesceNative(ctx context.Context, control NativeControl, thread string, de
 		return "", err
 	}
 	if thread == "" {
-		wait := deadline
-		if bound := time.Now().Add(NativeQuiesceWait); bound.Before(wait) {
-			wait = bound
-		}
-		observed, err := observeNativeThread(ctx, control, wait, deadline)
+		until := deadline.At(executionDeadline)
+		observed, err := observeNativeThread(ctx, control, until.Bound(time.Now(), NativeQuiesceWait), until)
 		if err != nil {
 			return "", err
 		}
@@ -185,7 +195,7 @@ func QuiesceNative(ctx context.Context, control NativeControl, thread string, de
 		return thread, fmt.Errorf("%w: %w", ErrQuiesceUnacknowledged, err)
 	}
 	if waiting, err := decodeNativeReply(output, NativeQuiesce, NativeStopping); err == nil && waiting.Waiting != "" {
-		return thread, fmt.Errorf("%w for %s", ErrNativeTurnPending, waiting.Waiting)
+		return thread, &NativeTurnPending{Waiting: waiting.Waiting}
 	}
 	reply, err := DecodeNativeReply(output, NativeQuiesce, NativeStopped, thread)
 	if err == nil && thread == "" && !reply.Turnless {
@@ -198,7 +208,7 @@ func QuiesceNative(ctx context.Context, control NativeControl, thread string, de
 // returns an empty UUID when the supervisor reports the visit turnless, and
 // ErrNativeTurnPending with what it waits for once wait passes before the
 // execution deadline.
-func observeNativeThread(ctx context.Context, control NativeControl, wait, deadline time.Time) (string, error) {
+func observeNativeThread(ctx context.Context, control NativeControl, wait time.Time, until deadline.Deadline) (string, error) {
 	waiting := "the native turn to complete"
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
@@ -224,24 +234,55 @@ func observeNativeThread(ctx context.Context, control NativeControl, wait, deadl
 		case <-ctx.Done():
 			return "", ctx.Err()
 		case <-ticker.C:
-			if !time.Now().Before(deadline) {
+			if until.Passed(time.Now()) {
 				return "", errors.New("native UUID unavailable before deadline")
 			}
 			if !time.Now().Before(wait) {
-				return "", fmt.Errorf("%w for %s", ErrNativeTurnPending, waiting)
+				return "", &NativeTurnPending{Waiting: waiting}
 			}
 		}
 	}
 }
 
+// NativeExitCause names why a harness ended without a graceful stop. The
+// supervisor decides it once, where the decision is made, and reports it so
+// the placement does not have to guess from its own clock.
+type NativeExitCause string
+
+const (
+	// NativeExitSelf is a harness that exited on its own, before any stop
+	// asked it to. Only this cause can make a nonzero code an agent failure.
+	NativeExitSelf NativeExitCause = "exited"
+	// NativeExitDeadline is a harness the supervisor stopped at the
+	// execution deadline.
+	NativeExitDeadline NativeExitCause = "deadline"
+	// NativeExitTerminated is a harness the supervisor stopped because it
+	// was itself told to stop (SIGTERM or SIGINT), as when its container is
+	// stopped.
+	NativeExitTerminated NativeExitCause = "terminated"
+	// NativeExitFailed is a harness the supervisor stopped after a graceful
+	// stop failed.
+	NativeExitFailed NativeExitCause = "failed"
+)
+
+func (c NativeExitCause) valid() bool {
+	switch c {
+	case NativeExitSelf, NativeExitDeadline, NativeExitTerminated, NativeExitFailed:
+		return true
+	}
+	return false
+}
+
 // NativeExitReport is what the supervisor writes to its standard output when
-// the harness exits on its own, before any stop asked it to. It is a workload
+// its harness ends without a graceful stop: by itself, at the deadline, or
+// stopped by the supervisor. A graceful stop writes none. It is a workload
 // observation: a diagnostic for the user, and the thread of a completed turn
 // the placement may checkpoint, never a writer fence or accounting fact.
 type NativeExitReport struct {
-	Code   int    `json:"code"`
-	Thread string `json:"thread,omitempty"`
-	Output string `json:"output,omitempty"`
+	Code   int             `json:"code"`
+	Cause  NativeExitCause `json:"cause"`
+	Thread string          `json:"thread,omitempty"`
+	Output string          `json:"output,omitempty"`
 }
 
 // NativeExitReportPrefix starts the supervisor's exit report line.
@@ -286,7 +327,8 @@ func NativeExitOutput(raw []byte, lines int) string {
 }
 
 // ParseNativeExitReport finds the last exit report in container output and
-// bounds what it may claim.
+// bounds what it may claim. A report without a known cause, such as one from
+// a supervisor older than the cause, is ignored.
 func ParseNativeExitReport(logs []byte) (NativeExitReport, bool) {
 	var found NativeExitReport
 	ok := false
@@ -296,7 +338,7 @@ func ParseNativeExitReport(logs []byte) (NativeExitReport, bool) {
 			continue
 		}
 		var r NativeExitReport
-		if json.Unmarshal(rest, &r) != nil || len(r.Output) > NativeExitOutputMax ||
+		if json.Unmarshal(rest, &r) != nil || len(r.Output) > NativeExitOutputMax || !r.Cause.valid() ||
 			r.Thread != "" && !codexThreadID.MatchString(r.Thread) {
 			continue
 		}

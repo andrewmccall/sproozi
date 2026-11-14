@@ -10,6 +10,7 @@ import (
 	"time"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
+	"github.com/andrewmccall/sproozi/internal/deadline"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -57,7 +58,7 @@ func ResolveRun(ctx context.Context, kube client.Client, run *api.AgentRun, temp
 	// its checkpoint and finalized usage are recorded, so it ends as stopped
 	// rather than timed out. Every caller still refuses ErrSessionStopped.
 	stopped := record.Phase == Stopped && record.RunUID == string(run.UID)
-	if !stopped && !record.OriginalDeadline.After(time.Now()) {
+	if !stopped && deadline.At(record.OriginalDeadline).Passed(time.Now()) {
 		return nil, ErrExpired
 	}
 	if record.Phase == Creating && record.RunUID == "" {
@@ -85,15 +86,18 @@ func ResolveRun(ctx context.Context, kube client.Client, run *api.AgentRun, temp
 
 // EffectiveDeadline never extends the session deadline after queueing, restore,
 // or a policy change. Ordinary Runs retain their current StartedAt calculation.
-func EffectiveDeadline(run *api.AgentRun, policy *api.AgentPolicy, record *Record) time.Time {
-	var deadline time.Time
-	if run.Status.StartedAt != nil {
-		deadline = run.Status.StartedAt.Add(policy.Spec.MaxExecutionDuration.Duration)
+// It is none when the policy sets no maxExecutionDuration and no session
+// deadline applies.
+func EffectiveDeadline(run *api.AgentRun, policy *api.AgentPolicy, record *Record) deadline.Deadline {
+	var fromPolicy, fromSession deadline.Deadline
+	if run.Status.StartedAt != nil && policy.Spec.MaxExecutionDuration.Duration > 0 {
+		fromPolicy = deadline.At(run.Status.StartedAt.Add(policy.Spec.MaxExecutionDuration.Duration))
 	}
-	if record != nil && (deadline.IsZero() || record.OriginalDeadline.Before(deadline)) {
-		deadline = record.OriginalDeadline
+	if record != nil {
+		fromSession = deadline.At(record.OriginalDeadline)
 	}
-	return deadline
+	// The earlier of the two wins; an absent deadline never wins.
+	return deadline.Earliest(fromPolicy, fromSession)
 }
 
 // AdmittedPolicyChanged reports whether an Admitted or Running run's template
@@ -120,7 +124,7 @@ func RequireActive(ctx context.Context, kube client.Client, run *api.AgentRun, r
 	if record == nil {
 		return nil
 	}
-	if record.Phase != Active || record.RunUID != string(run.UID) || !record.OriginalDeadline.After(time.Now()) ||
+	if record.Phase != Active || record.RunUID != string(run.UID) || deadline.At(record.OriginalDeadline).Passed(time.Now()) ||
 		run.Status.Identity.SandboxName == "" || record.PodUID == "" {
 		return ErrConflict
 	}

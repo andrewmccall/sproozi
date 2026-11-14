@@ -26,7 +26,10 @@ type retained struct {
 	Reference       registry.Reference `json:"reference"`
 	OutputDigest    string             `json:"outputDigest,omitempty"`
 	NativeQuiet     bool               `json:"nativeQuiet,omitempty"`
-	WriterFenced    bool               `json:"writerFenced,omitempty"`
+	// Turnless records that the supervisor quiesced a first visit with no
+	// native conversation (ADR 0032): its stop captures nothing.
+	Turnless     bool `json:"turnless,omitempty"`
+	WriterFenced bool `json:"writerFenced,omitempty"`
 }
 
 func privatePath(path string, dir bool) error {

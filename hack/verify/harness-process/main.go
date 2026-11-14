@@ -37,6 +37,7 @@ import (
 	"github.com/andrewmccall/sproozi/internal/gateway"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/modelauth"
+	"github.com/andrewmccall/sproozi/internal/nativeproxy"
 	"github.com/andrewmccall/sproozi/internal/proxytransport"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -70,6 +71,7 @@ const proxyToken = "fixture-projected-token"
 type result struct {
 	Harness                string   `json:"harness"`
 	Mode                   string   `json:"mode"`
+	Proxy                  string   `json:"proxy"`
 	Scenario               string   `json:"scenario"`
 	Version                string   `json:"version"`
 	ExitCode               int      `json:"exitCode"`
@@ -107,10 +109,17 @@ type fixture struct {
 	diagnosed                 bool
 }
 
+// viaForwarder routes each harness through the loopback forwarder that
+// managed Kubernetes sessions use, which adds the projected token itself.
+var viaForwarder bool
+
 func main() {
 	selected := flag.String("harness", "all", "all, claude-code, opencode, copilot or copilot-github")
 	output := flag.String("output", ".local/verification/harness-process.json", "evidence output path")
 	withTool := flag.Bool("tool", true, "require a generated native MCP configuration and actual tool call")
+	flag.BoolVar(&viaForwarder, "forwarder", false,
+		"reach the gateway through the managed session's loopback forwarder (internal/nativeproxy) "+
+			"instead of a token in the proxy URL")
 	flag.Parse()
 	names := []string{claudeHarness, opencodeHarness, copilotHarness, copilotGitHub}
 	if *selected != "all" {
@@ -132,8 +141,8 @@ func main() {
 				}
 				results = append(results, r)
 				passed = passed && r.Passed
-				fmt.Printf("%s %s %s: passed=%v exit=%d model_requests=%d tool_calls=%d units=%s\n",
-					name, r.Mode,
+				fmt.Printf("%s %s %s %s: passed=%v exit=%d model_requests=%d tool_calls=%d units=%s\n",
+					name, r.Mode, r.Proxy,
 					scenario,
 					r.Passed,
 					r.ExitCode,
@@ -163,7 +172,7 @@ func main() {
 }
 
 func run(selected, scenario string, withTool, supervised bool) (result, error) {
-	out := result{Harness: selected, Scenario: scenario, ExitCode: -1, Mode: "stock"}
+	out := result{Harness: selected, Scenario: scenario, ExitCode: -1, Mode: "stock", Proxy: "gateway"}
 	if supervised {
 		out.Mode = "supervised"
 	}
@@ -338,8 +347,12 @@ func run(selected, scenario string, withTool, supervised bool) (result, error) {
 		"unregistered.fixture:443",
 		proxyToken,
 		ca) == http.StatusForbidden
-	proxyURL, _ := url.Parse(proxy.URL)
-	proxyURL.User = url.UserPassword("sproozi", proxyToken)
+	proxyURL, closeProxy, mode, err := harnessProxy(proxy.URL, ca, directory)
+	if err != nil {
+		return out, err
+	}
+	defer closeProxy()
+	out.Proxy = mode
 	env := []string{"PATH=" + os.Getenv("PATH"),
 		"HOME=" + home,
 		"TMPDIR=" + directory,
@@ -371,24 +384,13 @@ func run(selected, scenario string, withTool, supervised bool) (result, error) {
 		"OPENCODE_DISABLE_DEFAULT_PLUGINS=true",
 		"OPENCODE_DISABLE_SHARE=true",
 		"OPENCODE_DISABLE_LSP_DOWNLOAD=true"}
-	v := exec.Command(path, "--version")
-	v.Dir = directory
-	v.Env = env
-	version, err := v.CombinedOutput()
+	out.Version, err = clientVersion(path, directory, env)
 	if err != nil {
 		return out, err
 	}
-	out.Version = strings.TrimSpace(string(version))
-	env, args, err := clientCommand(directory, selected, withTool, env)
+	commandPath, args, env, err := harnessCommand(path, directory, selected, withTool, supervised, env)
 	if err != nil {
 		return out, err
-	}
-	commandPath := path
-	if supervised {
-		commandPath, args, err = supervisorCommand(directory, withTool)
-		if err != nil {
-			return out, err
-		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -877,4 +879,62 @@ func recoveredAnswer(output string) string {
 		}
 	}
 	return ""
+}
+
+// harnessCommand is the stock client's command, or the supervisor's for a
+// supervised run, with the client's environment.
+func harnessCommand(path, directory, selected string, withTool, supervised bool,
+	env []string) (string, []string, []string, error) {
+	env, args, err := clientCommand(directory, selected, withTool, env)
+	if err != nil || !supervised {
+		return path, args, env, err
+	}
+	commandPath, args, err := supervisorCommand(directory, withTool)
+	return commandPath, args, env, err
+}
+
+func clientVersion(path, directory string, env []string) (string, error) {
+	v := exec.Command(path, "--version")
+	v.Dir = directory
+	v.Env = env
+	version, err := v.CombinedOutput()
+	return strings.TrimSpace(string(version)), err
+}
+
+// harnessProxy is the harness's proxy URL: the gateway with the token in it,
+// as ordinary AgentRuns use, or with -forwarder the managed session's
+// loopback forwarder.
+func harnessProxy(gatewayURL string, ca []byte, directory string) (*url.URL, func(), string, error) {
+	proxyURL, err := url.Parse(gatewayURL)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	if !viaForwarder {
+		proxyURL.User = url.UserPassword("sproozi", proxyToken)
+		return proxyURL, func() {}, "gateway", nil
+	}
+	forwarder, err := startForwarder(gatewayURL, ca, directory)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	proxyURL, err = url.Parse(forwarder.ProxyURL())
+	return proxyURL, func() { _ = forwarder.Close() }, "forwarder", err
+}
+
+// startForwarder writes the fixture token where a projected token would be
+// and starts the managed session's forwarder in front of the gateway.
+func startForwarder(gatewayURL string, ca []byte, directory string) (*nativeproxy.Forwarder, error) {
+	tokenPath := filepath.Join(directory, "gateway-token")
+	if err := os.WriteFile(tokenPath, []byte(proxyToken+"\n"), 0o600); err != nil {
+		return nil, err
+	}
+	trust := x509.NewCertPool()
+	if !trust.AppendCertsFromPEM(ca) {
+		return nil, fmt.Errorf("fixture CA has no certificates")
+	}
+	endpoint, err := url.Parse(gatewayURL)
+	if err != nil {
+		return nil, err
+	}
+	return nativeproxy.Start(nativeproxy.Config{Gateway: endpoint, TokenPath: tokenPath, Trust: trust})
 }

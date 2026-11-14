@@ -87,6 +87,8 @@ func OwnerOutcomeMessage(code Code) string {
 	}
 }
 
+// ownerErrorStatus accepts a work outcome; turn_pending is a placement stop's
+// answer only, so the owner never uses it.
 func ownerErrorStatus(code Code, status int) bool {
-	return errorResponse(response{Error: code}, status)
+	return code != CodeTurnPending && errorResponse(response{Error: code}, status)
 }

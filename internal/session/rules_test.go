@@ -35,6 +35,18 @@ func TestRecordRejectsPhaseThatContradictsItsStructure(t *testing.T) {
 			r.Phase = PhaseStopping
 		}},
 		{"unknown phase", func(r *Record) { r.Phase = "paused" }},
+		// A fenced writer stays proven stopped: only unknown usage describes it.
+		{"cancelling with a fenced writer", func(r *Record) {
+			fenced := *r.Active
+			fenced.ActualStopped = true
+			r.Active, r.CancelOperation, r.Phase = &fenced, uuid.NewString(), PhaseCancelling
+		}},
+		{"unknown stop with a fenced writer", func(r *Record) {
+			fenced := *r.Active
+			fenced.ActualStopped = true
+			r.Active, r.CancelOperation, r.Phase = &fenced, uuid.NewString(), PhaseUnknownStop
+		}},
+		{"unknown stop with nothing to stop", func(r *Record) { r.Phase = PhaseUnknownStop }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := active

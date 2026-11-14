@@ -39,6 +39,7 @@ import (
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/agentcontract"
+	"github.com/andrewmccall/sproozi/internal/deadline"
 	policy "github.com/andrewmccall/sproozi/internal/policy/kubernetes"
 	k8sresources "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
@@ -106,7 +107,7 @@ type admission struct {
 	policy   *sprooziv1alpha1.AgentPolicy
 	runtime  *sprooziv1alpha1.AgentRuntime
 	binding  *registry.Record
-	deadline time.Time
+	deadline deadline.Deadline
 }
 
 // Reconcile drives an AgentRun through its lifecycle phases.
@@ -118,7 +119,7 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if !run.DeletionTimestamp.IsZero() {
 		return r.finalizeDeletion(ctx, &run)
 	}
-	if !IsTerminal(run.Status.Phase) && controllerutil.AddFinalizer(&run, agentRunFinalizer) {
+	if !run.Status.Phase.IsTerminal() && controllerutil.AddFinalizer(&run, agentRunFinalizer) {
 		if err := r.Update(ctx, &run); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -131,7 +132,7 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	// Terminal runs are only subject to retention TTL deletion.
-	if IsTerminal(run.Status.Phase) {
+	if run.Status.Phase.IsTerminal() {
 		return r.handleTerminal(ctx, &run)
 	}
 
@@ -237,17 +238,17 @@ func (r *AgentRunReconciler) resolveAdmission(ctx context.Context, run *sprooziv
 		}
 		logger.Info("Recovered missing StartedAt on AgentRun", "name", run.Name, "phase", run.Status.Phase)
 	}
-	deadline := registry.EffectiveDeadline(run, pol, binding)
+	limit := registry.EffectiveDeadline(run, pol, binding)
 	// A completed session stop ends the run as stopped even past the deadline
 	// (ADR 0041); handleRunning waits for its sandbox to finish.
 	stopped := binding != nil && binding.Phase == registry.Stopped
-	if !stopped && time.Now().After(deadline) {
+	if !stopped && limit.Passed(time.Now()) {
 		logger.Info("AgentRun deadline exceeded", "name", run.Name, "phase", run.Status.Phase)
 		_, err := r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseTimedOut, "MaxExecutionDurationExceeded",
-			fmt.Sprintf("AgentRun passed its execution deadline %s", deadline.UTC().Format(time.RFC3339)))
+			fmt.Sprintf("AgentRun passed its execution deadline %s", limit.Time().UTC().Format(time.RFC3339)))
 		return nil, ctrl.Result{}, err
 	}
-	return &admission{template: tmpl, policy: pol, runtime: rt, binding: binding, deadline: deadline}, ctrl.Result{}, nil
+	return &admission{template: tmpl, policy: pol, runtime: rt, binding: binding, deadline: limit}, ctrl.Result{}, nil
 }
 
 // handleQueued admits the run if a first-in, first-out simulation of the
@@ -466,7 +467,12 @@ func (r *AgentRunReconciler) handleRunning(ctx context.Context, run *sprooziv1al
 	}
 
 	// Pending, Running or Unknown: wake at the deadline; Pod events wake sooner.
-	return ctrl.Result{RequeueAfter: time.Until(admitted.deadline)}, nil
+	// Without a deadline, Pod and policy events are the only wake-ups.
+	left, ok := admitted.deadline.Remaining(time.Now())
+	if !ok {
+		return ctrl.Result{}, nil
+	}
+	return ctrl.Result{RequeueAfter: max(left, time.Second)}, nil
 }
 
 // waitForQuota keeps a run whose sandbox Pod a ResourceQuota rejected active,
@@ -474,7 +480,7 @@ func (r *AgentRunReconciler) handleRunning(ctx context.Context, run *sprooziv1al
 // the time since the first rejection. The condition is written only when it
 // first appears, so the write does not trigger a reconcile per retry. The
 // run's deadline still applies on each reconcile.
-func (r *AgentRunReconciler) waitForQuota(ctx context.Context, run *sprooziv1alpha1.AgentRun, quotaErr error, deadline time.Time) (ctrl.Result, error) {
+func (r *AgentRunReconciler) waitForQuota(ctx context.Context, run *sprooziv1alpha1.AgentRun, quotaErr error, limit deadline.Deadline) (ctrl.Result, error) {
 	ready := apimeta.FindStatusCondition(run.Status.Conditions, readyCondition)
 	if ready == nil || ready.Reason != quotaExceededReason {
 		log.FromContext(ctx).Info("ResourceQuota rejected sandbox Pod", "name", run.Name, "error", quotaErr.Error())
@@ -483,7 +489,7 @@ func (r *AgentRunReconciler) waitForQuota(ctx context.Context, run *sprooziv1alp
 			Status:             metav1.ConditionFalse,
 			ObservedGeneration: run.Generation,
 			Reason:             quotaExceededReason,
-			Message:            fmt.Sprintf("A ResourceQuota rejected the sandbox Pod; retrying until the run deadline: %v", quotaErr),
+			Message:            fmt.Sprintf("A ResourceQuota rejected the sandbox Pod; retrying until it fits or the run ends: %v", quotaErr),
 		})
 		if err := r.Status().Update(ctx, run); err != nil {
 			return ctrl.Result{}, err
@@ -491,7 +497,9 @@ func (r *AgentRunReconciler) waitForQuota(ctx context.Context, run *sprooziv1alp
 		ready = apimeta.FindStatusCondition(run.Status.Conditions, readyCondition)
 	}
 	wait := min(max(time.Since(ready.LastTransitionTime.Time), quotaRetryMin), quotaRetryMax)
-	wait = min(wait, max(time.Until(deadline), time.Second))
+	if left, ok := limit.Remaining(time.Now()); ok {
+		wait = min(wait, max(left, time.Second))
+	}
 	return ctrl.Result{RequeueAfter: wait}, nil
 }
 
@@ -698,7 +706,7 @@ func (r *AgentRunReconciler) transitionPhase(
 	}
 
 	// Set CompletedAt when the run enters a terminal phase.
-	if IsTerminal(phase) && run.Status.CompletedAt == nil {
+	if phase.IsTerminal() && run.Status.CompletedAt == nil {
 		run.Status.CompletedAt = &now
 	}
 
@@ -754,7 +762,7 @@ func (r *AgentRunReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// with per-policy caps the run that can now be admitted need not be the
 	// queue head.
 	queuedOnRelease := handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
-		if !IsTerminal(obj.(*sprooziv1alpha1.AgentRun).Status.Phase) && obj.GetDeletionTimestamp().IsZero() {
+		if !obj.(*sprooziv1alpha1.AgentRun).Status.Phase.IsTerminal() && obj.GetDeletionTimestamp().IsZero() {
 			return nil
 		}
 		return r.queuedRequests(ctx)
@@ -859,7 +867,7 @@ func registerIndexes(mgr ctrl.Manager) error {
 func nonTerminalRequests(runs []sprooziv1alpha1.AgentRun) []reconcile.Request {
 	requests := make([]reconcile.Request, 0, len(runs))
 	for i := range runs {
-		if !IsTerminal(runs[i].Status.Phase) {
+		if !runs[i].Status.Phase.IsTerminal() {
 			requests = append(requests, reconcile.Request{NamespacedName: types.NamespacedName{Name: runs[i].Name, Namespace: runs[i].Namespace}})
 		}
 	}

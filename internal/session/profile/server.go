@@ -13,6 +13,7 @@ import (
 
 	"github.com/andrewmccall/sproozi/internal/agentprofile"
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
+	"github.com/andrewmccall/sproozi/internal/deadline"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/session"
 )
@@ -20,8 +21,10 @@ import (
 // Config fixes one authenticated principal, placement and immutable profile.
 // Backend must itself be configured for this principal and retain owner binding,
 // exact operation intent, actual writer stop, accounting seal and policy checks.
-// MaxDuration constrains original-deadline request horizon; backend also enforces
-// its stricter admission/runtime deadline without rewriting immutable Launch.
+// MaxDuration, when set, caps the original-deadline request horizon and denies
+// a launch with no deadline; zero admits any deadline, none included (ADR
+// 0056). The backend also enforces its stricter admission/runtime deadline
+// without rewriting immutable Launch.
 type Config struct {
 	Harness            harness.NativeKind
 	Principal          string
@@ -81,7 +84,7 @@ func NewHandler(config Config) (http.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
-	if config.Harness.Validate() != nil || !validName(config.Principal) || !validName(config.Placement) || !validDigest(config.InstructionDigest) || config.Backend == nil || config.MaxDuration <= 0 || len(config.Allowances) == 0 || len(config.Allowances) > 32 {
+	if config.Harness.Validate() != nil || !validName(config.Principal) || !validName(config.Placement) || !validDigest(config.InstructionDigest) || config.Backend == nil || config.MaxDuration < 0 || len(config.Allowances) == 0 || len(config.Allowances) > 32 {
 		return nil, errors.New("profile: invalid fixed configuration")
 	}
 	allowed := make(map[string]session.Allowance, len(config.Allowances))
@@ -257,7 +260,7 @@ func (h *handler) validateAdmission(action string, l session.Launch) error {
 		if err := ensureAlive(l.Deadline); err != nil {
 			return err
 		}
-		if l.InstructionDigest != h.config.InstructionDigest || l.Deadline.After(time.Now().Add(h.config.MaxDuration)) {
+		if l.InstructionDigest != h.config.InstructionDigest || !deadline.At(l.Deadline).Fits(time.Now(), h.config.MaxDuration) {
 			return &Rejection{Code: CodeDenied}
 		}
 		for name, want := range l.Allowances {
@@ -326,6 +329,17 @@ func (h *handler) perform(r *http.Request, action string, input request) (respon
 	return output, nil
 }
 func (h *handler) fail(w http.ResponseWriter, err error) {
+	if errors.Is(err, harness.ErrNativeTurnPending) {
+		// Still waiting is not unavailable: the client keeps the stop pending.
+		var pending *harness.NativeTurnPending
+		waiting := ""
+		if errors.As(err, &pending) {
+			waiting = pending.Waiting
+		}
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(response{Version: protocolVersion, Error: CodeTurnPending, Waiting: waitingText(waiting)})
+		return
+	}
 	var refusal *Rejection
 	if errors.As(err, &refusal) {
 		switch refusal.Code {

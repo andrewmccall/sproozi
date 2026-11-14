@@ -198,17 +198,37 @@ func PrepareImage(ctx context.Context, l Layout, request ImageRequest) (Image, b
 	if err != nil {
 		return Image{}, false, err
 	}
-	if inst.Image != nil && inst.Image.ID == image.ID {
+	return adoptImage(l, inst, image)
+}
+
+// adoptImage records image, resolved for installation resolvedFor, as the
+// installation's image when no local placement state depends on the current
+// one. It reports whether image is the installation's image. It reads the
+// journal again under the setup lock, so a sproozi init that wrote it while
+// the image was resolved keeps its changes.
+func adoptImage(l Layout, resolvedFor Installation, image Image) (Image, bool, error) {
+	if resolvedFor.Image != nil && resolvedFor.Image.ID == image.ID {
 		return image, true, nil
-	}
-	if placementExists(l) {
-		return image, false, nil
 	}
 	unlock, err := l.lock()
 	if err != nil {
 		return image, false, err
 	}
 	defer unlock()
+	inst, err := LoadInstallation(l)
+	if err != nil {
+		return image, false, err
+	}
+	if inst.ID != resolvedFor.ID {
+		return image, false, fail("image", fmt.Errorf("installation %s replaced %s while the image was prepared", inst.ID, resolvedFor.ID),
+			"run sproozi images prepare again")
+	}
+	if inst.Image != nil && inst.Image.ID == image.ID {
+		return image, true, nil
+	}
+	if placementExists(l) {
+		return image, false, nil
+	}
 	inst.Image = &image
 	if err = l.save(inst); err != nil {
 		return image, false, err

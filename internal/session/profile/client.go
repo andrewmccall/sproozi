@@ -184,13 +184,19 @@ func (c *Client) call(ctx context.Context, action string, input request) (respon
 	}
 	var output response
 	if err = strictDecode(data, &output); err != nil || output.Version != protocolVersion {
+		if answer := unrecognized(data, r.StatusCode); r.StatusCode != http.StatusOK && answer != nil {
+			return response{}, answer
+		}
 		return response{}, errors.New("profile: invalid response")
 	}
 	if r.StatusCode != http.StatusOK {
-		if !errorResponse(output, r.StatusCode) {
+		if answer := unrecognized(data, r.StatusCode); answer != nil {
+			return response{}, answer
+		}
+		if !errorResponse(output, r.StatusCode) || output.Error == CodeTurnPending && action != actionStop {
 			return response{}, errors.New("profile: invalid error response")
 		}
-		return response{}, &RemoteError{Code: output.Error, Status: r.StatusCode}
+		return response{}, &RemoteError{Code: output.Error, Status: r.StatusCode, Waiting: output.Waiting}
 	}
 	if err = validateResponse(action, input, output, c.maxCheckpoint); err != nil {
 		return response{}, err
@@ -220,7 +226,10 @@ func (c *Client) Describe(ctx context.Context) (Description, error) {
 		return Description{}, &RemoteError{Code: CodeUnavailable, Status: r.StatusCode}
 	}
 	if r.StatusCode != http.StatusOK {
-		if !errorResponse(output, r.StatusCode) {
+		if answer := unrecognized(data, r.StatusCode); answer != nil {
+			return Description{}, answer
+		}
+		if !errorResponse(output, r.StatusCode) || output.Error == CodeTurnPending {
 			return Description{}, errors.New("profile: invalid error response")
 		}
 		return Description{}, &RemoteError{Code: output.Error, Status: r.StatusCode}
@@ -240,6 +249,9 @@ func errorResponse(r response, status int) bool {
 	if r.Executor != nil || r.Incarnation != nil || r.Observation != nil || r.Stopped != nil || len(r.Checkpoint) > 0 {
 		return false
 	}
+	if (r.Error == CodeTurnPending) != (r.Waiting != "") || r.Waiting != "" && waitingText(r.Waiting) != r.Waiting {
+		return false
+	}
 	switch r.Error {
 	case CodeInvalid:
 		return status == http.StatusBadRequest || status == http.StatusNotFound || status == http.StatusRequestEntityTooLarge || status == http.StatusUnsupportedMediaType
@@ -251,7 +263,7 @@ func errorResponse(r response, status int) bool {
 		return status == http.StatusGone
 	case CodeUnsupported:
 		return status == http.StatusUnprocessableEntity
-	case CodeUnavailable:
+	case CodeUnavailable, CodeTurnPending:
 		return status == http.StatusServiceUnavailable
 	}
 	return false

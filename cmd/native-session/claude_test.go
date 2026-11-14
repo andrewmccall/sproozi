@@ -41,11 +41,51 @@ func TestClaudeLifecycleWaitsForForegroundToolsAndFreshInput(t *testing.T) {
 	if err := c.accept(claudeHook{Event: claudePromptSubmit}, 2); err != nil {
 		t.Fatal(err)
 	}
-	if c.completed {
+	if c.turn != turnRunning {
 		t.Fatal("submitted turn retained earlier completion")
 	}
 	if c.accept(claudeHook{Event: claudePreTool, ToolID: "task", ToolName: "Task"}, 2) == nil {
 		t.Fatal("unsupported delegation accepted")
+	}
+}
+
+// A failed turn has ended: tools and Stop belong to a running turn, so a
+// failure followed by a stray tool and Stop cannot leave a turn both failed
+// and completed. Only a new prompt starts another turn.
+func TestClaudeFailedTurnAcceptsNoToolOrStopUntilANewPrompt(t *testing.T) {
+	inactive := false
+	c := claudeLifecycle{}
+	if err := c.accept(claudeHook{Event: claudePromptSubmit}, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.accept(claudeHook{Event: claudeStopFailure}, 1); err != nil {
+		t.Fatal(err)
+	}
+	if c.accept(claudeHook{Event: claudePreTool, ToolID: "toolu_after", ToolName: claudeBash}, 1) == nil {
+		t.Fatal("tool start accepted after the turn failed")
+	}
+	if c.accept(claudeHook{Event: claudeStop, StopActive: &inactive}, 1) == nil {
+		t.Fatal("Stop accepted after the turn failed")
+	}
+	if c.turn != turnFailed || len(c.pending) != 0 || c.everCompleted {
+		t.Fatalf("failed turn changed by rejected events: %+v", c)
+	}
+	s := &server{claude: c}
+	if s.claudeTurnReady() || !s.claudeTurnless() {
+		t.Fatal("a failed only turn is ready or not turnless")
+	}
+	if d := (&server{claude: c}).claudeCompletion(); d.Completed || !d.Started {
+		t.Fatalf("failed turn diagnostics: %+v", d)
+	}
+	// A new prompt starts a turn that can complete.
+	if err := c.accept(claudeHook{Event: claudePromptSubmit}, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.accept(claudeHook{Event: claudeStop, StopActive: &inactive}, 2); err != nil {
+		t.Fatal(err)
+	}
+	if c.turn != turnCompleted {
+		t.Fatalf("turn after a new prompt and Stop: %v", c.turn)
 	}
 }
 

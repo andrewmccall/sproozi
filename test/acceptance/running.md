@@ -39,7 +39,7 @@ checks before cluster creation and cleanup after a setup failure. Stubs replace 
 | `make test-e2e` | The full stack works in an owned two-node Kind cluster with enforcing CNI, using the pinned clients and Hermes digest. See [Harnesses and Hermes in Kind](#harnesses-and-hermes-in-kind). | E2E | Docker, Kind, kubectl, Calico from `hack/verify/fetch-calico.sh` |
 | `make test-e2e-existing` | The same e2e suite passes against a Kind cluster you created (`KIND_CLUSTER`), then removes the controller, CRDs and test namespaces. `make test-e2e` skips that teardown because it deletes the whole cluster. | No | An existing dedicated Kind cluster |
 | `make verify-mcp-client` | Generated run-local MCP configuration loads in installed stock Codex. No model request. | No | Codex CLI |
-| `make verify-harness-clients` | Generated native MCP configuration loads in installed Codex, Claude Code, OpenCode and Copilot. No model request. | No | All four CLIs |
+| `make verify-harness-clients` | Generated native MCP configuration loads in installed Codex, Claude Code, OpenCode and Copilot, and a managed Claude Code session's strict configuration loads its named and `sproozi` servers. No model request: the managed Claude check's only model endpoint is a closed loopback port. | No | All four CLIs |
 | `make verify-native-session` | Installed stock Codex resumes through production checkpoint capture and restore against a local provider. | No | Codex CLI |
 | `make verify-harness-process` | Installed Claude Code, OpenCode and Copilot (in bring-your-own-key mode and signed in to GitHub) complete model and tool loops through the inspected-TLS gateway with local providers, and call `sproozi` `diagnose` to explain a refused request. A separate authenticated probe verifies Copilot's registry-policy URL; the fixture individual account can skip registry discovery. No live organization policy is claimed. | Copilot GitHub case only, using the lockfile client | Claude Code, OpenCode, Copilot |
 | `make verify-mcp-kind` | Configured MCP providers work with stock Codex in an owned Kind cluster, including denials, budgets and revocation. Real model requests. | No | See [Configured MCP in Kind](#configured-mcp-in-kind) |
@@ -112,13 +112,13 @@ proof under `.local`; keep the skill and its feature map current with
 
 ## Harnesses and Hermes in Kind
 
-Install Docker, Python 3, Go 1.26.10, kubectl and Kind. Docker must be running;
+Install Docker, Python 3, Go 1.26.11, kubectl and Kind. Docker must be running;
 the cluster and five stock clients need several GiB of memory and disk. From
 the repository root:
 
 ```sh
 bash hack/verify/fetch-calico.sh .local/verification/calico-v3.30.4.yaml
-GOTOOLCHAIN=go1.26.10 \
+GOTOOLCHAIN=go1.26.11 \
 SPROOZI_CNI_MANIFEST="$PWD/.local/verification/calico-v3.30.4.yaml" \
 SPROOZI_CNI_SELECTOR=k8s-app=calico-node \
 make test-e2e
@@ -291,7 +291,7 @@ to create a dedicated two-node Kind cluster with enforcing Calico, build the
 approved native/helper images, prepare TLS and install the controller/gateway.
 The [stock Hermes walkthrough](../../hack/verify/portable-workflows/README.md#stock-hermes-and-a-persistent-kubernetes-owner)
 then installs this owner and coordinator and runs the complete native round trip.
-It needs Docker, Kind, kubectl, Git, Go 1.26.10, OpenSSL, Python 3 and PyYAML from `hack/requirements.txt`.
+It needs Docker, Kind, kubectl, Git, Go 1.26.11, OpenSSL, Python 3 and PyYAML from `hack/requirements.txt`.
 It selects no personal credentials or home-network resources. The development
 fixture seeds only public Sproozi compiler sources. Follow the
 [Project dogfooding walkthrough](../../hack/verify/portable-workflows/README.md#development-and-governed-home-ops-projects)

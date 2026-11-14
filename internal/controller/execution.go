@@ -96,7 +96,7 @@ func (r *AgentRunReconciler) ensureSandbox(
 		if err := r.APIReader.Get(ctx, client.ObjectKeyFromObject(run), &latest); err != nil {
 			return err
 		}
-		if latest.UID != run.UID || IsTerminal(latest.Status.Phase) || !latest.DeletionTimestamp.IsZero() {
+		if latest.UID != run.UID || latest.Status.Phase.IsTerminal() || !latest.DeletionTimestamp.IsZero() {
 			return fmt.Errorf("AgentRun %s changed while its sandbox was recorded", run.Name)
 		}
 		*run = latest
@@ -125,7 +125,7 @@ func (r *AgentRunReconciler) processSandboxExit(
 	if err := r.Get(ctx, client.ObjectKeyFromObject(run), &latest); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	if latest.UID != run.UID || IsTerminal(latest.Status.Phase) || !latest.DeletionTimestamp.IsZero() {
+	if latest.UID != run.UID || latest.Status.Phase.IsTerminal() || !latest.DeletionTimestamp.IsZero() {
 		return ctrl.Result{}, nil
 	}
 	run = &latest

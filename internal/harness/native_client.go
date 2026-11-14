@@ -39,8 +39,10 @@ func (c *NativeClientConfig) Validate(kind NativeKind) error {
 	if err != nil || u.Scheme != nativeHTTPScheme || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
 		return errors.New("native MCP requires exact broker HTTPS authority")
 	}
-	if len(c.MCPServers) != 0 && kind != NativeCodex && kind != NativeCopilot {
-		return errors.New("named MCP servers in managed sessions need Codex or Copilot")
+	// Every managed kind renders named servers: Codex options, Claude Code's
+	// strict configuration and Copilot's additional configuration.
+	if err := kind.Validate(); err != nil {
+		return err
 	}
 	seen := map[string]bool{}
 	for _, name := range c.MCPServers {
@@ -76,10 +78,16 @@ func (c *NativeClientConfig) CodexOptions() []string {
 }
 
 // ClaudeMCPConfig is the complete strict MCP configuration for Claude: the
-// control connection only, since named MCP servers remain Codex-only.
+// approved broker connections and the control connection, each over HTTP on
+// the gateway. Validate rejects a named server that would replace the control
+// connection.
 func (c *NativeClientConfig) ClaudeMCPConfig() string {
-	data, _ := json.Marshal(map[string]any{mcpServersField: map[string]any{
-		api.ControlMCPServer: map[string]string{connectionType: httpTransport, connectionURL: c.ControlURL()}}})
+	servers := make(map[string]any, len(c.MCPServers)+1)
+	for _, name := range c.MCPServers {
+		servers[name] = map[string]string{connectionType: httpTransport, connectionURL: c.MCPGateway + "/mcp/" + name}
+	}
+	servers[api.ControlMCPServer] = map[string]string{connectionType: httpTransport, connectionURL: c.ControlURL()}
+	data, _ := json.Marshal(map[string]any{mcpServersField: servers})
 	return string(data)
 }
 

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
+	"github.com/andrewmccall/sproozi/internal/deadline"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
 	corev1 "k8s.io/api/core/v1"
@@ -125,7 +126,7 @@ func BuildManagedPodSpec(run *api.AgentRun, rt *api.AgentRuntime, binding *regis
 		return nil, fmt.Errorf("managed sandbox native harness mismatch")
 	}
 	if binding.RunUID != string(run.UID) || binding.IntendedRunName != run.Name ||
-		binding.TemplateName != run.Spec.TemplateRef.Name || !binding.OriginalDeadline.After(time.Now()) ||
+		binding.TemplateName != run.Spec.TemplateRef.Name || deadline.At(binding.OriginalDeadline).Passed(time.Now()) ||
 		binding.Phase == registry.Creating || binding.Phase == registry.Cancelled || binding.Phase == registry.Stopped {
 		return nil, fmt.Errorf("managed sandbox requires a current exact registration")
 	}
@@ -179,7 +180,7 @@ func BuildManagedPodSpec(run *api.AgentRun, rt *api.AgentRuntime, binding *regis
 			}
 		case CaptureContainer:
 			container.Command = []string{"/usr/local/bin/checkpoint"}
-			container.Args = []string{"hold", "--deadline", binding.OriginalDeadline.Format(time.RFC3339Nano)}
+			container.Args = []string{"hold", "--deadline", deadline.At(binding.OriginalDeadline).String()}
 			container.WorkingDir = workspaceDirectory
 			container.VolumeMounts = []corev1.VolumeMount{{Name: workspaceVolume, MountPath: workspaceDirectory},
 				{Name: checkpointTemporaryVolume, MountPath: "/tmp"}}

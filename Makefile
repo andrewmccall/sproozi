@@ -354,7 +354,7 @@ GOLANGCI_LINT_VERSION ?= v2.12.2
 # golangci-lint v2.12.2 reads compiler export data only from Go 1.26, so lint
 # loads packages with CI's toolchain whatever Go is installed; the go command
 # downloads it once if it is missing.
-LINT_TOOLCHAIN ?= go1.26.10
+LINT_TOOLCHAIN ?= go1.26.11
 GOVULNCHECK_VERSION ?= v1.8.0
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.

@@ -10,7 +10,7 @@ Personal infrastructure is never selected.
 First follow the [mobility setup](../session-mobility/README.md) through image
 resolution, Codex configuration, TLS Secrets, `sproozi` context and enforcing
 two-node Kind installation. Use its explicit private `work`, `codex` and
-`cluster` variables. Use `export GOTOOLCHAIN=go1.26.10` for the repository
+`cluster` variables. Use `export GOTOOLCHAIN=go1.26.11` for the repository
 checks and host builds. Start the provider, but leave this machine's service
 stopped. If you already started it, stop its saved PID gracefully and wait for
 exit. Check the saved PID command still belongs to this fixture before

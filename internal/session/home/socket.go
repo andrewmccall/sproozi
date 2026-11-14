@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/deadline"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/project"
 	"github.com/andrewmccall/sproozi/internal/proxytransport"
@@ -59,6 +60,10 @@ type Request struct {
 	// Login names the login a start signs in with, for a harness that signs
 	// in itself; empty is harness.DefaultLogin.
 	Login string `json:"login,omitempty"`
+	// MaxDuration is a start's or resume's choice of deadline: "none" or a
+	// positive Go duration. Empty keeps the session's choice, or the home's
+	// maxDuration. An older service refuses the field (ADR 0056).
+	MaxDuration string `json:"maxDuration,omitempty"`
 	// Remote selects a remote executor through a kubeconfig context for move
 	// or pull. The service reaches it from its own environment and records it.
 	Remote *remote.Selection `json:"remote,omitempty"`
@@ -332,7 +337,7 @@ func (s *Service) handle(ctx context.Context, conn net.Conn) {
 	var sessions []Status
 	switch q.Action {
 	case ActionStart:
-		status, err = s.StartWithLogin(ctx, q.ID, q.OperationID, q.Workspace, q.Harness, q.IncludeIgnored, q.HarnessArgs, q.Login)
+		status, err = s.StartWithMaxDuration(ctx, q.ID, q.OperationID, q.Workspace, q.Harness, q.IncludeIgnored, q.HarnessArgs, q.Login, q.MaxDuration)
 	case ActionMove:
 		destination := q.Destination
 		if q.Remote != nil {
@@ -356,7 +361,7 @@ func (s *Service) handle(ctx context.Context, conn net.Conn) {
 			status, err = s.Pull(ctx, q.ID, q.OperationID, source)
 		}
 	case ActionResume:
-		status, err = s.Resume(ctx, q.ID, q.OperationID, q.HarnessArgs)
+		status, err = s.ResumeWithMaxDuration(ctx, q.ID, q.OperationID, q.HarnessArgs, q.MaxDuration)
 	case ActionStop:
 		status, err = s.Stop(ctx, q.ID, q.OperationID)
 	case ActionSessions:
@@ -543,6 +548,14 @@ func validateCommonRequest(q Request) error {
 	}
 	if q.Login != "" && q.Action != ActionStart {
 		return errors.New("home: only start takes a login; a session keeps the one it started with")
+	}
+	if q.MaxDuration != "" {
+		if q.Action != ActionStart && q.Action != ActionResume {
+			return errors.New("home: only start and resume take a maximum duration")
+		}
+		if _, err := deadline.ParseMaxDuration(q.MaxDuration); err != nil {
+			return errors.New("home: maxDuration: " + err.Error())
+		}
 	}
 	return nil
 }

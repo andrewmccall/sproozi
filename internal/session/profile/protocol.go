@@ -11,8 +11,11 @@ import (
 	"io"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/andrewmccall/sproozi/internal/agentprofile"
+	"github.com/andrewmccall/sproozi/internal/deadline"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/workspace"
@@ -46,7 +49,32 @@ const (
 	CodeExpired     Code = "expired"
 	CodeUnsupported Code = "unsupported"
 	CodeUnavailable Code = "unavailable"
+	// CodeTurnPending is a stop still waiting for the native turn: nothing
+	// changed, the writer runs with input gated and repeating the stop waits
+	// again. Only a stop answers with it, together with what it waits for.
+	CodeTurnPending Code = "turn_pending"
 )
+
+// waitingMax bounds what a turn_pending answer says the stop waits for.
+const waitingMax = 160
+
+// genericWaiting stands in for a waiting description that is not plain,
+// bounded text.
+const genericWaiting = "the native turn to complete"
+
+// waitingText is s when it is plain printable text within waitingMax bytes,
+// and genericWaiting otherwise.
+func waitingText(s string) string {
+	if s == "" || len(s) > waitingMax || !utf8.ValidString(s) {
+		return genericWaiting
+	}
+	for _, r := range s {
+		if !unicode.IsPrint(r) {
+			return genericWaiting
+		}
+	}
+	return s
+}
 
 // Rejection marks a backend's known semantic refusal. Ordinary errors remain
 // unavailable/unknown; callers cannot mistake a timeout for rejected activation.
@@ -57,18 +85,62 @@ func (r *Rejection) Error() string { return "session profile: " + string(r.Code)
 // RemoteError preserves a server's explicit status and stable outcome.
 // Transport, when set, is the local client's own failure to reach the server.
 // It stays out of Error, which callers may relay, so only a trusted local
-// caller such as the CLI shows it.
+// caller such as the CLI shows it. Waiting is what a turn_pending stop waits
+// for. Unrecognized is a well-formed outcome code this client does not know,
+// reported as unavailable: the executor is probably newer than the client.
 type RemoteError struct {
-	Code      Code
-	Status    int
-	Transport error
+	Code         Code
+	Status       int
+	Transport    error
+	Waiting      string
+	Unrecognized Code
 }
 
 func (r *RemoteError) Error() string {
-	if r.Status == 0 {
+	switch {
+	case r.Code == CodeTurnPending:
+		return (&harness.NativeTurnPending{Waiting: r.Waiting}).Error()
+	case r.Status == 0:
 		return fmt.Sprintf("session profile: %s (no HTTP response)", r.Code)
+	case r.Unrecognized != "":
+		return fmt.Sprintf("session profile: %s (HTTP %d): the remote executor answered %q, an outcome this Sproozi "+
+			"does not recognise; the executor is probably newer than this Sproozi, so update Sproozi and restart its "+
+			"service (sproozi service stop, then sproozi service start)", r.Code, r.Status, r.Unrecognized)
 	}
 	return fmt.Sprintf("session profile: %s (HTTP %d)", r.Code, r.Status)
+}
+
+// Unwrap makes a turn_pending answer read as harness.ErrNativeTurnPending, so
+// the coordinator keeps the stop pending exactly as it does for a local one.
+func (r *RemoteError) Unwrap() error {
+	if r.Code == CodeTurnPending {
+		return &harness.NativeTurnPending{Waiting: r.Waiting}
+	}
+	return nil
+}
+
+// knownCode reports an outcome code this version of the protocol defines.
+func knownCode(c Code) bool {
+	switch c {
+	case CodeInvalid, CodeDenied, CodeConflict, CodeExpired, CodeUnsupported, CodeUnavailable, CodeTurnPending:
+		return true
+	}
+	return false
+}
+
+// unrecognized reads a failure answer whose outcome code this client does not
+// know. Only a well-formed code (at most 32 lowercase letters and
+// underscores) is reported, as unavailable; anything else returns nil.
+func unrecognized(data []byte, status int) *RemoteError {
+	var answer struct {
+		Version int  `json:"version"`
+		Error   Code `json:"error"`
+	}
+	if json.Unmarshal(data, &answer) != nil || answer.Version != protocolVersion || knownCode(answer.Error) ||
+		len(answer.Error) == 0 || len(answer.Error) > 32 || strings.Trim(string(answer.Error), "abcdefghijklmnopqrstuvwxyz_") != "" {
+		return nil
+	}
+	return &RemoteError{Code: CodeUnavailable, Status: status, Unrecognized: answer.Error}
 }
 
 type request struct {
@@ -102,6 +174,8 @@ type response struct {
 	Stopped     *session.Stopped     `json:"stopped,omitempty"`
 	Checkpoint  []byte               `json:"checkpoint,omitempty"`
 	Error       Code                 `json:"error,omitempty"`
+	// Waiting is what a turn_pending stop waits for, and nothing else.
+	Waiting string `json:"waiting,omitempty"`
 }
 
 func bodyLimit(max int64) (int64, error) {
@@ -187,7 +261,7 @@ func validateLaunch(l session.Launch) error {
 	if err := workspace.ValidateIgnoredPaths(l.IncludeIgnored); err != nil {
 		return err
 	}
-	if l.Harness.Validate() != nil || !validID(l.ExecutionID) || !validID(l.OperationID) || !validID(l.AllocationID) || !validID(l.ThreadID) || l.Epoch == 0 || !validName(l.Placement) || !validDigest(l.InstructionDigest) || !validDigest(l.CheckpointDigest) || l.Deadline.IsZero() || len(l.Allowances) == 0 || len(l.Allowances) > 32 ||
+	if l.Harness.Validate() != nil || !validID(l.ExecutionID) || !validID(l.OperationID) || !validID(l.AllocationID) || !validID(l.ThreadID) || l.Epoch == 0 || !validName(l.Placement) || !validDigest(l.InstructionDigest) || !validDigest(l.CheckpointDigest) || len(l.Allowances) == 0 || len(l.Allowances) > 32 ||
 		l.ProfileDigest != "" && !agentprofile.ValidDigest(l.ProfileDigest) {
 		return errors.New("profile: invalid launch")
 	}
@@ -216,8 +290,8 @@ func sameLaunch(a, b session.Launch) bool {
 func limitFits(want, ceiling session.Limit) bool {
 	return !ceiling.Bounded || want.Bounded && want.Value <= ceiling.Value
 }
-func ensureAlive(deadline time.Time) error {
-	if !time.Now().Before(deadline) {
+func ensureAlive(at time.Time) error {
+	if deadline.At(at).Passed(time.Now()) {
 		return &Rejection{Code: CodeExpired}
 	}
 	return nil

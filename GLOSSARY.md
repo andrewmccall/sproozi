@@ -116,6 +116,15 @@ harness's own sign-in only to its provider, identifies the run and checks each
 request against current policy. See
 [capabilities and gateways](docs/explanations/capabilities-and-gateways.md).
 
+### Gateway forwarder
+
+The loopback proxy a managed session's supervisor runs on Kubernetes. The
+harness's `HTTPS_PROXY` points at it with a secret made for that launch, and
+it opens each tunnel to the [gateway](#gateway) with the projected token read
+at that moment, so the token never enters the harness's environment and a
+session outlives any one token. See
+[ADR 0056](docs/adr/0056-whoever-starts-work-sets-its-deadline.md).
+
 ### Harness sign-in
 
 A harness's own credential for its model provider, such as a Claude or ChatGPT
@@ -500,8 +509,20 @@ Also seen as: ChatGPT session.
 ### Execution
 
 One approved period of work on a session, with its own permissions, allowance
-and deadline. `resume` starts a new execution; `move` keeps the current one.
-Its ID is `executionId`. Also seen as: Sproozi execution.
+and [execution deadline](#execution-deadline). `resume` starts a new execution;
+`move` keeps the current one. Its ID is `executionId`. Also seen as: Sproozi
+execution.
+
+### Execution deadline
+
+The wall-clock instant at which an execution stops, or none. Whoever starts the
+work sets it: `sproozi run` and `resume` take `--max-duration DURATION|none`,
+otherwise the session's earlier choice, otherwise the home's `maxDuration`,
+otherwise none. A remote executor's `maxDuration` and an AgentPolicy's
+`maxExecutionDuration` cap it when set and refuse an execution without one. A
+move keeps it. A set deadline is reached at its instant, not after it. See
+[ADR 0056](docs/adr/0056-whoever-starts-work-sets-its-deadline.md). Also seen
+as: original deadline, session deadline.
 
 ### Placement
 
@@ -515,6 +536,26 @@ starts another, with fresh admission, gateway access and a new sandbox. The
 execution's deadline and allowance carry across visits. Its ID is
 `allocationId`. Also seen as: allocation.
 
+### Execution journal
+
+The service's trusted record of one [execution](#execution): its visits,
+pending operation, cancellation intent, allowance and phase (`idle`,
+`preparing`, `activating`, `active`, `stopping`, `unknown-stop`,
+`unknown-usage`, `cancelling` or `cancelled`). Only declared transitions
+change the phase. See
+[ADR 0018](docs/adr/0018-coordinator-owns-every-visit.md) and
+[ADR 0058](docs/adr/0058-lifecycle-records-declare-states-and-transitions.md).
+Also seen as: coordinator journal, coordinator record, `session.Record`.
+
+### Lifecycle record
+
+A trusted record that steps a writer through declared phases: a typed phase
+validated on load and save, a `(from, event) → to` table that says which events
+the deadline refuses, and one apply function used by live code and recovery.
+The execution journal and the session registration are lifecycle records; the
+ADR lists the records still adopting the pattern. See
+[ADR 0058](docs/adr/0058-lifecycle-records-declare-states-and-transitions.md).
+
 ### Turnless visit
 
 A first visit whose harness never started a conversation: no prompt was
@@ -522,6 +563,14 @@ submitted, or, for Claude Code, every prompt ended on a provider error before
 any turn completed. `stop` ends it without waiting for a turn and keeps no
 checkpoint; the session keeps the workspace it started from. See
 [ADR 0032](docs/adr/0032-stopping-a-visit-with-no-native-conversation.md).
+
+### Exit cause
+
+Why a visit's harness ended without a graceful stop: `exited` (by itself),
+`deadline`, `terminated` (its supervisor was told to stop) or `failed` (a
+graceful stop failed and the supervisor stopped it). The supervisor decides it
+once and writes it in its exit report; only `exited` with a nonzero code makes
+a session `failed`. See [exit reports](docs/reference/native-control.md#exit-reports).
 
 ### Harness arguments
 

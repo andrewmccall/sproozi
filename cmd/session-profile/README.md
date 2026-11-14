@@ -70,10 +70,14 @@ cached mounted certificate; API contents alone do not prove a process loaded it.
 The template must have `sessions.sproozi.com/managed: "true"` and the exact same
 approved instruction bytes as the local placement. Compute their SHA-256 for
 `instructionDigest`. The policy allows the selected capabilities, finite positive
-unit budgets, compatible cost budgets, runtime resource limits and an execution
-duration covering the session's original deadline. Current Kubernetes policy
-duration is at most one hour. A destination rejects an incompatible allowance or
-deadline; it never silently rewrites immutable move intent.
+unit budgets, compatible cost budgets and runtime resource limits. The
+executor's `maxDuration` and the policy's `maxExecutionDuration` each cap a
+launch's deadline when set: under either, a launch must have a deadline within
+it, and one without a deadline is denied. With neither, the executor admits any
+deadline, none included, so a session its owner started without one runs until
+stopped ([ADR 0056](../../docs/adr/0056-whoever-starts-work-sets-its-deadline.md)).
+A destination rejects an incompatible allowance or deadline; it never silently
+rewrites immutable move intent.
 
 The source schemas are
 [AgentRuntime](../../api/v1alpha1/agentruntime_types.go),
@@ -187,9 +191,8 @@ Save the following strict JSON as `profile.json` in the immutable ConfigMap
 
 To change either, delete it, create it again the same way, and run
 `kubectl -n sproozi-sessions rollout restart deployment/sproozi-work`. Replace the example paths,
-template, instruction digest and approved ceilings. The 30-minute duration and
-unit ceiling match the [home example](../sproozi/README.md); cost is explicitly
-unbounded here. A bounded positive cost requires corresponding gateway pricing.
+template, instruction digest and approved ceilings. The unit ceiling matches the
+[home example](../sproozi/README.md); cost is explicitly unbounded here. A bounded positive cost requires corresponding gateway pricing.
 
 ```json
 {
@@ -216,6 +219,11 @@ unbounded here. A bounded positive cost requires corresponding gateway pricing.
 ```
 
 The executor checks each field at startup and names the one that is wrong.
+`maxDuration`, optional, caps the deadline of every launch and `run --remote`
+task: set, a launch needs a deadline within it, and a task without
+`--max-duration` gets it; omitted, launches and tasks may have any deadline or
+none. Set it, or the policy's `maxExecutionDuration`, on an executor that runs
+work for someone else, such as Hermes tasks.
 `budgetNamespace` defaults to `sproozi-system`, where the installed gateway
 keeps its BudgetLedger resources. `gatewayUser`, optional,
 is the shared gateway's ServiceAccount user name,

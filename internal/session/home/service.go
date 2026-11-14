@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -16,6 +17,7 @@ import (
 
 	budgetfile "github.com/andrewmccall/sproozi/internal/budget/file"
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
+	"github.com/andrewmccall/sproozi/internal/deadline"
 	"github.com/andrewmccall/sproozi/internal/endpoints/model"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/privatefs"
@@ -93,7 +95,7 @@ type Status struct {
 	// InitialStage repeats Phase for existing clients.
 	InitialStage string    `json:"initialStage"`
 	ThreadID     string    `json:"threadId,omitempty"`
-	Deadline     time.Time `json:"deadline"`
+	Deadline     time.Time `json:"deadline,omitzero"`
 	// Login is the named login a harness that signs in itself uses; empty
 	// when the gateway holds its credential.
 	Login string `json:"login,omitempty"`
@@ -189,13 +191,40 @@ func (s *Service) Start(ctx context.Context, id, operationID, path string, kind 
 // itself; empty uses harness.DefaultLogin (ADR 0049).
 func (s *Service) StartWithLogin(ctx context.Context, id, operationID, path string, kind harness.NativeKind,
 	includeIgnored, harnessArgs []string, login string) (Status, error) {
-	if err := workspace.ValidateIgnoredPaths(includeIgnored); err != nil {
+	return s.StartWithMaxDuration(ctx, id, operationID, path, kind, includeIgnored, harnessArgs, login, "")
+}
+
+// executionDeadline is the deadline of an execution starting now. choice is
+// a run's or session's own maxDuration: "none", a positive Go duration, or
+// empty for the home's maxDuration. It is the zero time for no deadline.
+func (s *Service) executionDeadline(choice string) (time.Time, error) {
+	d := s.duration
+	if choice != "" {
+		var err error
+		if d, err = deadline.ParseMaxDuration(choice); err != nil {
+			return time.Time{}, rejectedError("home: --max-duration " + err.Error())
+		}
+	}
+	return deadline.After(time.Now(), d).Time().UTC(), nil
+}
+
+// StartWithMaxDuration is StartWithLogin with the session's choice of
+// deadline (ADR 0056): "none" for no deadline, a positive Go duration, or
+// empty for the home's maxDuration. The session keeps the choice for later
+// resumes.
+func (s *Service) StartWithMaxDuration(ctx context.Context, id, operationID, path string, kind harness.NativeKind,
+	includeIgnored, harnessArgs []string, login, maxDuration string) (Status, error) {
+	until, err := s.executionDeadline(maxDuration)
+	if err != nil {
+		return Status{}, err
+	}
+	if err = workspace.ValidateIgnoredPaths(includeIgnored); err != nil {
 		return Status{}, err
 	}
 	if kind == "" {
 		kind = s.config.Local.Harness
 	}
-	if err := harness.ValidateNativeArgs(kind, harnessArgs); err != nil {
+	if err = harness.ValidateNativeArgs(kind, harnessArgs); err != nil {
 		return Status{}, rejectedError("home: " + err.Error())
 	}
 	local, err := s.localFor(kind)
@@ -219,7 +248,7 @@ func (s *Service) StartWithLogin(ctx context.Context, id, operationID, path stri
 	}
 	r, err := s.coordinator.Inspect(id)
 	if os.IsNotExist(err) {
-		r, err = s.createWorkspaceExecution(ctx, id, operationID, path, local, includeIgnored, harnessArgs, login)
+		r, err = s.createWorkspaceExecution(ctx, id, operationID, path, local, includeIgnored, harnessArgs, login, until)
 	}
 	if err != nil {
 		return Status{}, err
@@ -242,7 +271,7 @@ func (s *Service) StartWithLogin(ctx context.Context, id, operationID, path stri
 	}
 	// Catalogue the session before its first visit starts, so stop, cancel
 	// and resume address it like any other home session.
-	if err = s.catalogStarted(r); err != nil {
+	if err = s.catalogStarted(r, maxDuration); err != nil {
 		return Status{}, err
 	}
 	return s.startFirstVisit(ctx, r)
@@ -252,17 +281,18 @@ func (s *Service) StartWithLogin(ctx context.Context, id, operationID, path stri
 // once. Its first execution shares the session UUID. A started execution that
 // is already idle (catalogued late, after an interruption) is recorded as
 // stopped, ready to resume.
-func (s *Service) catalogStarted(r session.Record) error {
+func (s *Service) catalogStarted(r session.Record, maxDuration string) error {
 	unlock, err := s.lockSession(r.ID)
 	if err != nil {
 		return err
 	}
 	defer unlock()
-	return s.catalogStartedLocked(r)
+	return s.catalogStartedLocked(r, maxDuration)
 }
 
 // catalogStartedLocked is catalogStarted for a caller holding the session lock.
-func (s *Service) catalogStartedLocked(r session.Record) error {
+// maxDuration is the session's own choice of deadline, kept for resumes.
+func (s *Service) catalogStartedLocked(r session.Record, maxDuration string) error {
 	existing, err := s.readCatalog(r.ID)
 	if err == nil {
 		if existing.Source != ReservedHome {
@@ -276,7 +306,7 @@ func (s *Service) catalogStartedLocked(r session.Record) error {
 	first := r.Operations[0].Launch
 	c := localSession{Version: 1, ID: r.ID, Source: ReservedHome, Operation: first.OperationID, Claimed: true,
 		Original: work.Export{ID: r.ID, Harness: r.Harness, OperationID: first.OperationID, Claimed: true},
-		Current:  r.ID, Executions: []string{r.ID}}
+		Current:  r.ID, Executions: []string{r.ID}, MaxDuration: maxDuration}
 	if r.Phase == session.PhaseIdle && r.CancelOperation == "" {
 		if c.Committed, err = s.lastStop(r); err != nil {
 			return err
@@ -291,12 +321,12 @@ func (s *Service) catalogStartedLocked(r session.Record) error {
 	return s.saveCatalog(c)
 }
 
-func (s *Service) createWorkspaceExecution(ctx context.Context, id, operationID, path string, local runtimedocker.PlacementConfig, includeIgnored, harnessArgs []string, login string) (session.Record, error) {
+func (s *Service) createWorkspaceExecution(ctx context.Context, id, operationID, path string, local runtimedocker.PlacementConfig, includeIgnored, harnessArgs []string, login string, until time.Time) (session.Record, error) {
 	first := session.Launch{Harness: local.Harness, ExecutionID: id, OperationID: operationID,
 		AllocationID: uuid.NewString(), Epoch: 1, Placement: local.Name,
 		InstructionDigest: local.InstructionDigest, IncludeIgnored: slices.Clone(includeIgnored),
 		HarnessArgs: slices.Clone(harnessArgs), Login: login,
-		Deadline: time.Now().Add(s.duration).UTC(), Allowances: harnessAllowances(local.Harness, s.config.Allowances)}
+		Deadline: until, Allowances: maps.Clone(s.config.Allowances)}
 	return s.createExecution(first, "", func() ([]byte, error) {
 		limit := s.config.Local.MaxCheckpointBytes
 		data, err := workspace.CaptureLocal(ctx, path, includeIgnored, limit)

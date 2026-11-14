@@ -18,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/andrewmccall/sproozi/internal/agentcontract"
+	"github.com/andrewmccall/sproozi/internal/deadline"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/budget"
@@ -123,7 +124,7 @@ func Open(config Config) (*Placement, error) {
 	return &Placement{config: config, registry: store, ledger: budgetkube.NewLedger(config.Kube, config.BudgetNamespace), exec: executor, lock: lock}, nil
 }
 func validateConfig(config Config) error {
-	if config.Harness.Validate() != nil || config.Kube == nil || config.RESTConfig == nil || len(validation.IsDNS1123Label(config.Namespace)) != 0 || len(validation.IsDNS1123Label(config.BudgetNamespace)) != 0 || config.AgentNamespace != runtimekube.AgentsNamespace || len(validation.IsDNS1123Subdomain(config.TemplateName)) != 0 || config.Principal == "" || config.Name == "" || !digestValid(config.InstructionDigest) || config.MaxDuration <= 0 || config.MaxCheckpointBytes <= 0 || config.MaxCheckpointBytes > 256<<20 || !filepath.IsAbs(config.Directory) || len(config.Allowances) == 0 || len(config.Allowances) > 32 {
+	if config.Harness.Validate() != nil || config.Kube == nil || config.RESTConfig == nil || len(validation.IsDNS1123Label(config.Namespace)) != 0 || len(validation.IsDNS1123Label(config.BudgetNamespace)) != 0 || config.AgentNamespace != runtimekube.AgentsNamespace || len(validation.IsDNS1123Subdomain(config.TemplateName)) != 0 || config.Principal == "" || config.Name == "" || !digestValid(config.InstructionDigest) || config.MaxDuration < 0 || config.MaxCheckpointBytes <= 0 || config.MaxCheckpointBytes > 256<<20 || !filepath.IsAbs(config.Directory) || len(config.Allowances) == 0 || len(config.Allowances) > 32 {
 		return errors.New("placement: invalid fixed configuration")
 	}
 	for _, allowance := range config.Allowances {
@@ -187,7 +188,7 @@ func (p *Placement) liveProfileInput(ctx context.Context, l session.Launch, init
 	if err := p.validateInput(l, initial); err != nil {
 		return nil, err
 	}
-	if !time.Now().Before(l.Deadline) {
+	if deadline.At(l.Deadline).Passed(time.Now()) {
 		return nil, &profile.Rejection{Code: profile.CodeExpired}
 	}
 	var template api.AgentTemplate
@@ -215,8 +216,14 @@ func (p *Placement) liveProfileInput(ctx context.Context, l session.Launch, init
 	if policyengine.Evaluate(policy.Spec, template.Spec, api.AgentRunSpec{Capabilities: capabilities}, runtime.Spec) != nil {
 		return nil, &profile.Rejection{Code: profile.CodeDenied}
 	}
-	duration := min(p.config.MaxDuration, policy.Spec.MaxExecutionDuration.Duration)
-	if duration <= 0 || l.Deadline.After(time.Now().Add(duration)) {
+	// The executor's maxDuration and the policy's maxExecutionDuration each
+	// cap the deadline when set; under either cap a launch must have one.
+	// With neither, any deadline is admitted, none included (ADR 0056).
+	duration := p.config.MaxDuration
+	if limit := policy.Spec.MaxExecutionDuration.Duration; limit > 0 && (duration == 0 || limit < duration) {
+		duration = limit
+	}
+	if !deadline.At(l.Deadline).Fits(time.Now(), duration) {
 		return nil, &profile.Rejection{Code: profile.CodeDenied}
 	}
 	return p.ceilings(l, policy.Spec)
@@ -263,12 +270,19 @@ func (p *Placement) registration(l session.Launch, ceilings map[api.CapabilityKi
 	return registry.Registration{Harness: p.config.Harness, Principal: p.config.Principal, SessionID: l.ExecutionID, Epoch: l.Epoch, OperationID: l.OperationID, NativeUUID: l.ThreadID, InstructionDigest: l.InstructionDigest, OriginalDeadline: l.Deadline.UTC(), TemplateName: p.config.TemplateName, Ceilings: ceilings, Task: l.Task, CheckpointDigest: l.CheckpointDigest, IncludeIgnored: append([]string(nil), l.IncludeIgnored...), IntendedRunName: runName(l), ProfileDigest: l.ProfileDigest, Login: l.Login}
 }
 
+// Prepare restores the launch's input inertly: the checkpoint it names, or,
+// for a first visit with no thread and no checkpoint, a captured Git workspace
+// in a fresh native home. The client supplies no native UUID for a first
+// visit; the trusted placement binds the genuine one once it observes it.
 func (p *Placement) Prepare(ctx context.Context, l session.Launch, data []byte) (session.Incarnation, error) {
 	unlock, err := p.lockOperation(l)
 	if err != nil {
 		return session.Incarnation{}, err
 	}
 	defer unlock()
+	if l.ThreadID == "" && l.CheckpointDigest == "" {
+		return p.prepareWorkspace(ctx, l, data)
+	}
 	ceilings, err := p.liveProfile(ctx, l)
 	if err != nil {
 		return session.Incarnation{}, err
@@ -298,18 +312,19 @@ func (p *Placement) Prepare(ctx context.Context, l session.Launch, data []byte) 
 	return p.prepare(ctx, local, record)
 }
 
-// CreateInitial restores a stopped workspace into a fresh native home. Only this
-// explicit entry permits an empty native UUID/checkpoint; the client supplies
-// the genuine UUID and the trusted placement binds it after observation.
+// CreateInitial is Prepare limited to a first visit from a Git workspace: a
+// launch with a thread or a checkpoint is refused. The remote work owner still
+// calls it.
 func (p *Placement) CreateInitial(ctx context.Context, l session.Launch, data []byte) (session.Incarnation, error) {
-	unlock, err := p.lockOperation(l)
-	if err != nil {
-		return session.Incarnation{}, err
-	}
-	defer unlock()
 	if l.ThreadID != "" || l.CheckpointDigest != "" {
 		return session.Incarnation{}, &profile.Rejection{Code: profile.CodeInvalid}
 	}
+	return p.Prepare(ctx, l, data)
+}
+
+// prepareWorkspace restores a captured Git workspace into a fresh native home.
+// The caller holds the operation lock.
+func (p *Placement) prepareWorkspace(ctx context.Context, l session.Launch, data []byte) (session.Incarnation, error) {
 	if len(data) == 0 || int64(len(data)) > p.config.MaxCheckpointBytes {
 		return session.Incarnation{}, &profile.Rejection{Code: profile.CodeInvalid}
 	}

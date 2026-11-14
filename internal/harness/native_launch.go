@@ -7,7 +7,6 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"io"
 	"net/url"
 	"os"
 	"strings"
@@ -17,6 +16,7 @@ import (
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 
 	"github.com/andrewmccall/sproozi/internal/agentcontract"
+	"github.com/andrewmccall/sproozi/internal/deadline"
 
 	"github.com/andrewmccall/sproozi/internal/nativeconfig"
 )
@@ -29,7 +29,7 @@ const nativeAnthropicKey = "ANTHROPIC_API_KEY"
 // checkpoint contents do not supply these instructions, options or credentials.
 type NativeLaunch struct {
 	Harness           NativeKind          `json:"harness"`
-	Deadline          time.Time           `json:"deadline"`
+	Deadline          time.Time           `json:"deadline,omitzero"`
 	ThreadID          string              `json:"threadId"`
 	ClientConfig      *NativeClientConfig `json:"clientConfig,omitempty"`
 	Task              string              `json:"task,omitempty"`
@@ -81,6 +81,8 @@ const (
 	nodeTrustEnvironment     = "NODE_EXTRA_CA_CERTS"
 	gitTrustEnvironment      = "GIT_SSL_CAINFO"
 	curlTrustEnvironment     = "CURL_CA_BUNDLE"
+	httpProxyEnvironment     = "HTTP_PROXY"
+	httpsProxyEnvironment    = "HTTPS_PROXY"
 	NativeLocalTrustBundle   = "/tmp/sproozi-native/ca.pem"
 	NativeGatewayTokenPath   = "/var/run/sproozi/tokens/gateway/token"
 	NativeGatewayTrustBundle = "/etc/sproozi/trust/ca-bundle.pem"
@@ -93,6 +95,10 @@ const (
 	NativeConfigureMaxBytes      = 256<<10 + ((NativeProfileArchiveMaxBytes+2)/3)*4
 )
 
+// nativeProxyEnvironment names every variable that points a harness at its
+// proxy, in both spellings that clients read.
+var nativeProxyEnvironment = []string{httpProxyEnvironment, httpsProxyEnvironment, "http_proxy", "https_proxy"}
+
 func (g NativeGateway) Validate(env []string) error {
 	endpoint, err := url.Parse(g.Endpoint)
 	if err != nil || endpoint.Scheme != nativeHTTPScheme || endpoint.Host == "" || endpoint.User != nil || endpoint.Path != "" || endpoint.RawQuery != "" || endpoint.Fragment != "" || endpoint.ForceQuery || g.TokenPath != NativeGatewayTokenPath || g.TrustBundle != NativeGatewayTrustBundle {
@@ -101,13 +107,19 @@ func (g NativeGateway) Validate(env []string) error {
 	for _, entry := range env {
 		key, _, _ := strings.Cut(entry, "=")
 		switch strings.ToUpper(key) {
-		case "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", sslTrustEnvironment, nodeTrustEnvironment, gitTrustEnvironment, requestsTrustEnvironment, curlTrustEnvironment:
+		case httpProxyEnvironment, httpsProxyEnvironment, "ALL_PROXY", "NO_PROXY", sslTrustEnvironment, nodeTrustEnvironment, gitTrustEnvironment, requestsTrustEnvironment, curlTrustEnvironment:
 			return errors.New("projected gateway conflicts with literal proxy environment")
 		}
 	}
 	return nil
 }
-func (c NativeLaunch) Environment() ([]string, error) {
+
+// Environment is the harness's launch environment. With a projected gateway
+// binding, gatewayProxy is the supervisor's loopback forwarder
+// (internal/nativeproxy), which adds the current projected token to each
+// CONNECT, so a session outlives any one token; the token itself never
+// enters the harness's environment.
+func (c NativeLaunch) Environment(gatewayProxy string) ([]string, error) {
 	env := append([]string{}, c.Env...)
 	if len(c.TrustBundlePEM) > 0 {
 		if c.Gateway != nil {
@@ -121,27 +133,19 @@ func (c NativeLaunch) Environment() ([]string, error) {
 		}
 	}
 	if c.Gateway == nil {
+		if gatewayProxy != "" {
+			return nil, errors.New("gateway forwarder without a projected gateway binding")
+		}
 		return env, nil
 	}
 	if err := c.Gateway.Validate(env); err != nil {
 		return nil, err
 	}
-	f, err := os.Open(c.Gateway.TokenPath)
-	if err != nil {
-		return nil, errors.New("projected native token is unavailable")
+	proxy, err := url.Parse(gatewayProxy)
+	if err != nil || proxy.Scheme != "http" || proxy.Hostname() != "127.0.0.1" || proxy.Port() == "" || proxy.User == nil || proxy.Path != "" || proxy.RawQuery != "" {
+		return nil, errors.New("projected gateway requires the loopback gateway forwarder")
 	}
-	data, readErr := io.ReadAll(io.LimitReader(f, 16385))
-	closeErr := f.Close()
-	if readErr != nil || closeErr != nil || len(data) > 16384 {
-		return nil, errors.New("projected native token is unreadable or oversized")
-	}
-	token := strings.TrimSpace(string(data))
-	if token == "" || strings.ContainsAny(token, "\x00\r\n\t ") {
-		return nil, errors.New("invalid projected native token")
-	}
-	proxy, _ := url.Parse(c.Gateway.Endpoint)
-	proxy.User = url.UserPassword(nativeContextName, token)
-	for _, key := range []string{"HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"} {
+	for _, key := range nativeProxyEnvironment {
 		env = append(env, key+"="+proxy.String())
 	}
 	env = append(env, "NO_PROXY=", "no_proxy=")
@@ -191,7 +195,7 @@ func (c NativeLaunch) Validate(now time.Time) error {
 	if err := c.Harness.Validate(); err != nil {
 		return err
 	}
-	if !c.Deadline.After(now) || (c.ThreadID != "" && !codexThreadID.MatchString(c.ThreadID)) ||
+	if deadline.At(c.Deadline).Passed(now) || (c.ThreadID != "" && !codexThreadID.MatchString(c.ThreadID)) ||
 		c.Env == nil || c.RolloutMaxBytes <= 0 || c.RolloutMaxBytes > NativeRolloutMaxBytes ||
 		len(c.ProfileArchive) > NativeProfileArchiveMaxBytes {
 		return errors.New("invalid native launch contract")

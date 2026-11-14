@@ -18,10 +18,9 @@ var ErrBusy = errors.New("session: another operation is in progress; try again")
 
 // Removable reports whether an execution has stopped, settled its usage and
 // has nothing in progress, so deleting its journal loses no authority or
-// accounting evidence that is still needed.
-func Removable(r Record) bool {
-	return r.Active == nil && r.PendingOperation == "" && (r.Phase == PhaseIdle || r.Phase == PhaseCancelled)
-}
+// accounting evidence that is still needed. A loaded record's phase always
+// describes its structure, so its phase alone decides.
+func Removable(r Record) bool { return r.Phase.Settled() }
 
 // Remove deletes stopped executions' journals, then every retained workspace,
 // checkpoint and profile that no remaining journal and no text that release

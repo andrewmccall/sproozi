@@ -212,6 +212,7 @@ func (c *Coordinator) load(id string) (Record, error) {
 	if r.ID != id {
 		return r, errors.New("session: journal identity mismatch")
 	}
+	normalizeLegacyPhase(&r)
 	if err = validateRecord(r); err != nil {
 		return r, err
 	}

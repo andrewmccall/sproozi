@@ -48,6 +48,8 @@ type Ledger interface {
 	// Seal atomically prevents new reservations and retains the used plus
 	// outstanding reserved usage as an immutable receipt for this account.
 	// Pending unbounded usage and unknown legacy reservation history cannot seal.
+	// A reservation that settles after the seal is charged at most what it
+	// reserved, so settled usage never passes the receipt.
 	Seal(context.Context, AccountKey) (TrustedUsage, error)
 }
 
@@ -57,8 +59,9 @@ type State struct {
 }
 
 // ErrUsageExceeded reports that trusted usage exceeded its reservation or the
-// allowance. Settlement still recorded the usage, capped at the allowance, and
-// the reservation is settled; callers must not release or forfeit it.
+// allowance. Settlement still recorded the usage, capped at the allowance, or
+// at the reservation once the account is sealed, and the reservation is
+// settled; callers must not release or forfeit it.
 var ErrUsageExceeded = errors.New("budget: settled usage exceeds reservation or budget")
 
 type ErrExhausted struct{ UnitsUsed, MaxUnits int64 }

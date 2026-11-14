@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/deadline"
 	"golang.org/x/sys/unix"
 )
 
@@ -83,10 +84,13 @@ type Supervisor struct {
 	readerDone chan struct{}
 	active     *Attachment
 	gated      bool
-	quitting   bool
-	exited     bool
-	exit       Exit
-	exitErr    error
+	// forced is why the supervisor killed the group, recorded only while
+	// the leader was still running; reaped records that it no longer was.
+	forced  StopReason
+	reaped  bool
+	exited  bool
+	exit    Exit
+	exitErr error
 }
 
 // Attachment is the sole input lease. Closing it leaves the native process and
@@ -99,8 +103,8 @@ type Attachment struct {
 }
 
 func Start(launch Launch) (*Supervisor, error) {
-	if !filepath.IsAbs(launch.Executable) || !filepath.IsAbs(launch.Dir) || launch.Env == nil || !launch.Deadline.After(time.Now()) {
-		return nil, errors.New("native terminal requires an absolute executable/workspace, explicit environment and future deadline")
+	if !filepath.IsAbs(launch.Executable) || !filepath.IsAbs(launch.Dir) || launch.Env == nil || deadline.At(launch.Deadline).Passed(time.Now()) {
+		return nil, errors.New("native terminal requires an absolute executable/workspace, explicit environment and a deadline not yet passed")
 	}
 	if launch.Size.Rows == 0 || launch.Size.Columns == 0 {
 		return nil, errors.New("native terminal dimensions must be positive")
@@ -131,14 +135,13 @@ func Start(launch Launch) (*Supervisor, error) {
 	}
 	_ = slave.Close()
 	s := &Supervisor{master: master, cmd: cmd, limit: launch.ReplayBytes,
-		notify: make(chan struct{}), done: make(chan struct{}), readerDone: make(chan struct{}),
-		exit: Exit{Reason: NativeExit}}
+		notify: make(chan struct{}), done: make(chan struct{}), readerDone: make(chan struct{})}
 	go s.drain()
 	go s.reap()
 	go func() {
 		select {
 		case <-s.done:
-		case <-AtDeadline(launch.Deadline, s.done):
+		case <-deadline.At(launch.Deadline).Done(s.done):
 			s.force(Deadline)
 		}
 	}()
@@ -281,9 +284,6 @@ func (s *Supervisor) QuitAfterCompletedTurn(ctx context.Context) (Exit, error) {
 	s.input.Lock()
 	s.mu.Lock()
 	gated, exited := s.gated, s.exited
-	if gated && !exited {
-		s.quitting = true
-	}
 	s.mu.Unlock()
 	if !gated {
 		s.input.Unlock()
@@ -353,8 +353,23 @@ func (s *Supervisor) force(reason StopReason) {
 		return
 	}
 	s.gated = true
-	s.exit.Reason = reason
+	// A leader that already exited by itself keeps that reason; the kill
+	// still reaches any descendants left in its group.
+	if !s.reaped && s.forced == "" {
+		s.forced = reason
+	}
 	_ = unix.Kill(-s.PID(), unix.SIGKILL)
+}
+
+// reason names why the leader ended: a forced reason only when the
+// supervisor's kill came before the leader was reaped and the leader died
+// of a signal, so a natural exit that races a stop stays a native exit. The
+// caller holds s.mu.
+func (s *Supervisor) reason() StopReason {
+	if status, ok := s.cmd.ProcessState.Sys().(syscall.WaitStatus); ok && status.Signaled() && s.forced != "" {
+		return s.forced
+	}
+	return NativeExit
 }
 
 func (s *Supervisor) drain() {
@@ -381,6 +396,9 @@ func (s *Supervisor) drain() {
 
 func (s *Supervisor) reap() {
 	_ = s.cmd.Wait()
+	s.mu.Lock()
+	s.reaped = true
+	s.mu.Unlock()
 	// A native leader can exit with descendants still in its group. Terminate
 	// those before publishing stopped; an engine/cgroup adapter must separately
 	// confirm descendants that deliberately escaped this process group.
@@ -394,7 +412,7 @@ func (s *Supervisor) reap() {
 	s.input.Unlock()
 	<-s.readerDone
 	s.mu.Lock()
-	s.exit.Code = s.cmd.ProcessState.ExitCode()
+	s.exit = Exit{Code: s.cmd.ProcessState.ExitCode(), Reason: s.reason()}
 	s.exitErr, s.exited, s.gated = err, true, true
 	close(s.notify)
 	close(s.done)

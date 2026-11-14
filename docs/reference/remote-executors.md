@@ -71,6 +71,28 @@ client certificate. Whatever context you use, the executor sees the
 | `the remote executor is named "local", which is this machine's own name` | Ask the administrator to give the executor another `placementName`. |
 | `the Sproozi service does not know which cluster holds session …` | Pass `--context` to `pull`. |
 
+## Placement outcomes
+
+The service and the executor upgrade together. A placement request that fails
+answers with one of these codes; status and messages never carry the
+executor's own error text.
+
+| Code | HTTP status | Meaning |
+| --- | --- | --- |
+| `invalid_request` | 400, 404, 413, 415 | The request is malformed or names the wrong placement. |
+| `denied` | 401, 403, 426 | The token or the Kubernetes user was refused. |
+| `conflict` | 409 | The request conflicts with what the executor holds for that execution. |
+| `expired` | 410 | The execution's deadline has passed. |
+| `unsupported` | 422 | The executor cannot take this launch, such as a profile it does not keep. |
+| `unavailable` | 503 | The executor could not answer. A stop is then unproven: the session becomes `unknown-stop` until `recover` or another `stop` proves it. |
+| `turn_pending` | 503 | A stop is still waiting for the agent's turn, about two minutes after it asked. Its `waiting` field says what for, in at most 160 printable bytes. The session stays `stopping`, as on this machine, and `stop`, `move` or `recover` again keeps waiting. |
+
+A code this Sproozi does not know counts as `unavailable`, so a stop is never
+taken as proven. The message names the code and says `the executor is probably
+newer than this Sproozi, so update Sproozi and restart its service`. A service
+too old to know `turn_pending` reports `profile: invalid response` instead and
+records `unknown-stop`; update the service, then `recover` resumes the stop.
+
 ## What the executor publishes
 
 One remote executor per namespace. The administrator provides:
