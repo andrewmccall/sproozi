@@ -20,12 +20,12 @@ usage, a short description and one line per flag. An unknown help topic fails.
 
 | Group | Command | What it does |
 | --- | --- | --- |
-| Sessions | `run [PATH] [-- AGENT ARGS]` | Start an agent on a copy of the Git repository at `PATH` (default: the current directory) and connect the terminal to it. With `--remote`, submit a task to a cluster instead. |
+| Sessions | `run [PATH] [-- AGENT ARGS]` | Start an agent on a copy of the Git repository at `PATH` (default: the current directory) and connect the terminal to it. With `--remote`, start the session in a cluster instead, from an approved repository or an uploaded `PATH`; with `--task`, submit a task there. |
 | Sessions | `sessions`, `ls` | List sessions on this machine and in the cluster. Never starts the service. |
 | Sessions | `status ID` | Show one session. |
-| Sessions | `attach ID` | Connect the terminal to a running session; `Ctrl-]` detaches. |
-| Sessions | `stop ID` | Stop after the agent's current turn and keep the work. |
-| Sessions | `resume ID [-- AGENT ARGS]` | Continue a stopped session where it left off, with a new deadline and allowance. |
+| Sessions | `attach ID` | Connect the terminal to a running session; `Ctrl-]` detaches. With `--remote`, a session in a cluster. |
+| Sessions | `stop ID` | Stop after the agent's current turn and keep the work. With `--remote`, a session in a cluster. |
+| Sessions | `resume ID [-- AGENT ARGS]` | Continue a stopped session where it left off, with a new deadline and allowance. With `--remote`, a session in a cluster, which takes no agent arguments. |
 | Sessions | `cancel ID` | Stop now, discarding the agent's current turn. Cancelling a cancelled session succeeds. |
 | Sessions | `rm ID` | Delete a stopped or cancelled session and its saved work. |
 | Remote | `move ID --local\|--remote` | Move a running session after its current turn: `--local` brings it to this machine, `--remote` sends it to a cluster. |
@@ -88,9 +88,9 @@ anything is read or sent. `-d` is short for `--detach`.
 | `run` | `--harness`, `--login`, `--detach`, `--include-ignored`, `--max-duration`, `--remote`, `--context`, `--namespace`, `--task`, `--task-file`, `--repository`, `--project`, `--json`, `--root` |
 | `sessions` | `--remote`, `--context`, `--namespace`, `--project`, `--json`, `--root` |
 | `status` | `--remote`, `--context`, `--namespace`, `--json`, `--root` |
-| `attach` | `--root` |
-| `stop` | `--json`, `--root` |
-| `resume` | `--detach`, `--max-duration`, `--json`, `--root` |
+| `attach` | `--remote`, `--context`, `--namespace`, `--root` |
+| `stop` | `--remote`, `--context`, `--namespace`, `--json`, `--root` |
+| `resume` | `--detach`, `--max-duration`, `--remote`, `--context`, `--namespace`, `--json`, `--root` |
 | `cancel` | `--remote`, `--context`, `--namespace`, `--json`, `--root` |
 | `rm` | `--json`, `--root` |
 | `move` | `--local`, `--remote`, `--context`, `--namespace`, `--json`, `--root` |
@@ -108,14 +108,14 @@ anything is read or sent. `-d` is short for `--detach`.
 | --- | --- |
 | `--root PATH` | Installation directory. Without it: `$SPROOZI_ROOT`, else the root `init --root` recorded, else `~/.sproozi`. |
 | `--harness NAME` | `codex`, `claude-code` or `copilot`. For `run`, defaults to the first agent set up; for `init`, the agent to add, default `codex`. |
-| `-d`, `--detach` | Start or resume without connecting the terminal. Without a terminal on standard input, `run` and `resume` start the session and say they did not attach. |
-| `--include-ignored PATH` | Also copy this Git-ignored file into the session, on every visit. Repeatable. |
+| `-d`, `--detach` | Start or resume without connecting the terminal. Without a terminal on standard input, `run` and `resume` start the session and say they did not attach. A remote task always runs detached and refuses it. |
+| `--include-ignored PATH` | Also copy this Git-ignored file into the session, on every visit. Repeatable. With `--remote`, only for a `run` that uploads its `PATH`, and only into that upload. |
 | `--max-duration DURATION\|none` | How long this run or resume may last, such as `8h`, or `none` for no deadline. Without it, a session uses its own earlier choice, else `maxDuration` in `config.json`, else no deadline. A session keeps the choice for later resumes. For `run --remote`, the cluster's `maxDuration` caps it and refuses `none`; without it the cluster's `maxDuration` applies, or no deadline when the cluster sets none. A service or remote executor older than this flag refuses it and starts nothing. |
-| `--remote` | Work in a cluster: `run --remote` submits a task there (it needs `--task` or `--task-file` and takes no `PATH`, `--detach`, `--include-ignored` or agent arguments); `move --remote` sends the session there; `sessions`, `status`, `cancel` and `recover` with `--remote` read or act on the cluster's sessions only. Implied by `--context` or `--namespace`. |
+| `--remote` | Work in a cluster: `run --remote` starts an [interactive session](#interactive-sessions-in-a-cluster) there, or with `--task` or `--task-file` submits a task (a task takes no `PATH` or `--detach`); either needs `--repository` or `--project` and takes no `--login` or agent arguments. `move --remote` sends the session there; `sessions`, `status`, `attach`, `stop`, `resume`, `cancel` and `recover` with `--remote` read or act on the cluster's sessions only. Implied by `--context` or `--namespace`. |
 | `--context NAME` | The cluster, as a kubeconfig context name or a kubeconfig file. Default: the context named `sproozi`. See [Remote commands](#remote-commands). |
 | `--namespace NS` | Namespace of the remote executor. Default: the context's namespace, else `default`. |
-| `--task TEXT`, `--task-file FILE` | Task for a remote run, inline or from a UTF-8 file of at most 16 KiB. Choose one. |
-| `--repository NAME`, `--project ID` | Approved repository and [project](projects-and-revisions.md) for a remote run. `sessions --project` lists only that project's sessions. |
+| `--task TEXT`, `--task-file FILE` | Task for a remote run to complete, inline or from a UTF-8 file of at most 16 KiB. Choose one. Without either, a remote run is interactive. |
+| `--repository NAME`, `--project ID` | Approved repository and [project](projects-and-revisions.md) for a remote run; one is required. They set what the session belongs to and its allowances, and the workspace it starts from unless `run` uploads `PATH`. `sessions --project` lists only that project's sessions. |
 | `--local` | Move the session to this machine. `move` needs `--local` or `--remote`. |
 | `--model MODEL` | Model the agent added by `init` requests. Without it the agent uses its own default; `run -- --model NAME` chooses per session. |
 | `--credential-file FILE`, `--credential-stdin` | Read the provider key from a file only you can read, or from standard input, instead of a hidden prompt. A key is never a command-line value. |
@@ -288,6 +288,72 @@ began continues from the same executor when you repeat it.
 context exists, its cluster; an unreachable cluster is reported by its context
 on standard error. A remote `status` prints the session's phase, problem and its untrusted final text;
 `--json` prints the remote status document.
+
+`attach`, `stop`, `resume`, `status`, `cancel` and `recover` need `--remote`,
+`--context` or `--namespace` for a session the cluster owns: without one they
+look only on this machine, even when the ID appears in `sproozi ls`. The
+cluster's catalogue does not record which context reaches it, so the CLI
+never guesses one.
+
+### Interactive sessions in a cluster
+
+`run --remote` without `--task` or `--task-file` starts an interactive session
+that the cluster's [remote executor](remote-executors.md#interactive-sessions)
+owns, and connects the terminal to it once it runs, as `run` does on this
+machine. It needs `--repository NAME` or `--project ID`, which set what the
+session belongs to and its allowances. The workspace comes from one of two
+places:
+
+| Command | Workspace |
+| --- | --- |
+| `sproozi run --remote --repository NAME` | The approved repository's snapshot, as for a task. A repository approved only by URL starts empty; ask the agent to fetch it. |
+| `sproozi run --remote --repository NAME PATH` | A copy of the Git repository at `PATH`, made as a local `run` makes it and uploaded with the submission. Ignored files stay behind unless `--include-ignored` names them, and the [workspace problems](#workspace-problems) refuse it the same way before anything is sent. The upload is at most the executor's `maxCheckpointBytes`. |
+
+`PATH` is the same operand as a local `run`, but has no default: without it a
+remote session starts from the approved repository, never from the current
+directory. `--max-duration DURATION|none` applies as for a task, `-d` starts
+without attaching, and `--workspace-from` (instead of `PATH`) starts from a
+[recorded commit](projects-and-revisions.md).
+
+While the session starts, `run` and `attach` print `Waiting for session ID to
+start in cluster NAME; Ctrl-C stops waiting and leaves it starting`, then
+attach. `Ctrl-]` detaches and leaves the session running; the CLI prints
+`Left session ID. Back to it: sproozi attach ID --remote   Stop it: sproozi
+stop ID --remote   List: sproozi ls`. The suggested commands repeat
+`--context` and `--namespace` when you gave them. The terminal behaves as on
+this machine: raw mode, resizing and output replay after reconnecting, within
+the executor's per-attachment bounds of 8 MiB of input and 64 MiB of output.
+
+`stop ID --remote` waits for the agent's current turn. While the executor
+still waits, the CLI prints `Waiting for the agent's current turn in session
+ID to finish; run "sproozi cancel ID --remote" in another terminal to stop it
+now instead.` once and asks again with the same operation, also after a
+request that timed out, until the session stops. It then prints `Stopped
+session ID; its work is kept.` and the commands that continue it there
+(`sproozi resume ID --remote`) or bring it here (`sproozi pull ID`). Ctrl-C
+leaves the session `stopping` and ends with a retry hint naming the
+operation.
+
+`resume ID --remote` starts a new execution from the last checkpoint with a
+fresh deadline and allowance, and attaches unless `-d`. Each resume is a new
+operation; a resume whose outcome is unknown ends with a retry hint naming
+it. It takes no agent arguments after `--`.
+
+| Error | Cause | Run |
+| --- | --- | --- |
+| `a --remote run needs --repository NAME or --project ID: ...` | Neither was given. | Add the approved repository or project. |
+| `a --remote task works in the cluster's approved repository; leave out PATH, ...` | `PATH` with `--task`. | Leave out `PATH`, or `--task` for an interactive session. |
+| `--detach applies to an interactive --remote run; a task runs without a terminal` | `-d` with `--task`. | Leave out `-d`. |
+| `--include-ignored applies only to a PATH this command uploads; ...` | `--include-ignored` without `PATH`. | Give `PATH`, or leave the flag out. |
+| `workspace: byte limit exceeded ...; the cluster accepts uploads of at most N MiB (its maxCheckpointBytes): ...` | The copy of `PATH` is larger than the executor allows. | Ask the administrator to raise `maxCheckpointBytes`, or start from the approved repository without `PATH`. |
+| `... the cluster's remote executor NAME refused an interactive session; an executor older than this release does not know them, so update the executor ...` | The executor answered `invalid_request` to an interactive run. | Update the executor, or give `--task`. |
+| `... does not run interactive sessions for its agent; use an executor for codex, ...` | The executor answered `unsupported`: its harness has no remote terminal yet. | Use a Codex executor. |
+| `the cluster's remote executor NAME is older than remote stop; update the executor ...` | The executor has no `stop`, `resume` or `attach` route. | Update the executor, or `sproozi pull ID`. |
+| `session ID is a task, which stops by itself when it completes; ...` | `attach`, `stop` or `resume` of a task. | `sproozi status ID --remote`, or `cancel`. |
+| `session ID is running; attach to it with "sproozi attach ID --remote", or stop it ...` | `resume` of a running session. | `attach`, or `stop` then `resume`. |
+| `session ID is stopped; "sproozi resume ID --remote" continues it` | `attach` or `stop` of a `retained` session. | `sproozi resume ID --remote`. |
+| `session ID has unfinished work (PHASE); run "sproozi recover ID --remote" to finish it` | An interrupted stop or cancellation. | `sproozi recover ID --remote`. |
+| `session ID was pulled to a machine; continue it there with "sproozi resume ID"` | The session left the cluster. | `sproozi resume ID` on that machine. |
 
 ## Status and listing output
 

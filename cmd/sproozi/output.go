@@ -158,8 +158,14 @@ func (q *options) printView(cluster string, v work.View) error {
 		return writeJSON(q.out, v)
 	}
 	text := describe(v.ID, string(v.Harness), string(v.Phase), cluster, v.Deadline)
+	if v.Mode == work.ModeInteractive {
+		text += "\nMode       interactive"
+	}
 	if v.Problem != "" {
 		text += "\nProblem    " + v.Problem
+	}
+	if v.Exit.Failed() {
+		text += fmt.Sprintf("\nExited     code %d%s", v.Exit.Code, exitOutput(v.Exit))
 	}
 	if v.Result != "" {
 		text += "\n\n" + v.Result
