@@ -1,0 +1,10 @@
+# A second remote executor, for Claude Code interactive sessions, beside the
+# Codex one in the parent directory. One executor runs one harness, so each
+# has its own namespace and the CLI chooses with --namespace (ADR 0057). Apply
+# the parent example first: this one uses the same gateway and sandbox
+# namespace. Apply CLI access for this namespace from cli-access/.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- owner.yaml
+- runtime.yaml

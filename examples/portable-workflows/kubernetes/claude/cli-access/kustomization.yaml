@@ -1,0 +1,8 @@
+# The sproozi CLI's identity in the Claude Code executor's namespace
+# (config/cli-access). Create its "sproozi" context, or another context, as
+# docs/reference/remote-executors.md shows, with this namespace.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: sproozi-claude-sessions
+resources:
+- ../../../../../config/cli-access

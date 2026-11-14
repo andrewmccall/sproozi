@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/deadline"
+	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/home"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
@@ -472,6 +473,40 @@ func TestOldExecutorNamesTheUpdate(t *testing.T) {
 	if code != 1 || !strings.Contains(errOut, "older than remote stop") ||
 		!strings.Contains(errOut, "update the executor") {
 		t.Fatalf("old executor stop: %d %s", code, errOut)
+	}
+}
+
+// executorFor makes the fake executor describe itself as running kind.
+func executorFor(t *testing.T, kind harness.NativeKind) {
+	t.Helper()
+	previous := resolveRemote
+	resolveRemote = func(ctx context.Context, kubeContext, namespace string) (remoteTarget, error) {
+		target, err := previous(ctx, kubeContext, namespace)
+		target.Harness = kind
+		return target, err
+	}
+	t.Cleanup(func() { resolveRemote = previous })
+}
+
+// A refused harness names the executor's harness and the one requested, and
+// how to reach the other executor; a Claude executor's refused task says it
+// runs interactive sessions only.
+func TestRemoteRunNamesTheExecutorsHarness(t *testing.T) {
+	f := serveFakeExecutor(t, interactiveView(phaseRunning))
+	executorFor(t, harness.NativeClaude)
+	f.reply("run", answerStatus(http.StatusUnprocessableEntity, `{"error":"unsupported"}`))
+	code, _, errOut := runCLI("run", "--remote", "--repository", "sproozi", "--harness", "codex", "-d")
+	if code != 1 || !strings.Contains(errOut, "runs claude-code, not codex") ||
+		!strings.Contains(errOut, "--harness claude-code") || !strings.Contains(errOut, "--namespace") ||
+		strings.Contains(errOut, "--operation") {
+		t.Fatalf("mismatched interactive run: %d %s", code, errOut)
+	}
+	f.reply("run", answerStatus(http.StatusUnprocessableEntity, `{"error":"unsupported"}`))
+	code, _, errOut = runCLI("run", "--remote", "--repository", "sproozi", "--harness", "claude-code",
+		"--task", "fix it")
+	if code != 1 || !strings.Contains(errOut, "runs interactive sessions for claude-code but not tasks") ||
+		!strings.Contains(errOut, "leave out --task") || strings.Contains(errOut, "--operation") {
+		t.Fatalf("Claude task: %d %s", code, errOut)
 	}
 }
 

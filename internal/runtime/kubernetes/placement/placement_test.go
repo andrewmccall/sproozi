@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -1240,7 +1241,11 @@ func TestClaudePlacementRetainsKindPinAndUsesClaudeCheckpointHome(t *testing.T) 
 	}
 }
 
-func TestClaudeCannotRecoverUnacknowledgedQuiescenceFromTerminatedContainer(t *testing.T) {
+// A stopped container never proves a completed Claude turn (ADR 0011), so a
+// resumed Claude visit whose container ended without the graceful
+// acknowledgement captures nothing: its stop keeps the checkpoint the visit
+// started from, as the Docker placement does (ADR 0038).
+func TestExitedClaudeVisitKeepsItsPreviousCheckpoint(t *testing.T) {
 	t.Parallel()
 	for _, lostReply := range []bool{false, true} {
 		name := "already-terminated"
@@ -1272,18 +1277,26 @@ func TestClaudeCannotRecoverUnacknowledgedQuiescenceFromTerminatedContainer(t *t
 					t.Fatal(err)
 				}
 			}
-			for range 2 {
-				if _, err = p.Stop(t.Context(), l, i); err == nil {
-					t.Fatal("physical termination substituted for Claude completion")
+			stopped, err := p.Stop(t.Context(), l, i)
+			if lostReply {
+				// The lost reply leaves the stop unknown; the retry finds the
+				// container ended.
+				if err == nil {
+					t.Fatal("a lost Claude acknowledgement accepted as completion")
 				}
+				stopped, err = p.Stop(t.Context(), l, i)
 			}
-			local, r, err := p.retained(t.Context(), l)
-			if err != nil || local.NativeQuiet || local.OutputDigest != "" || r.Receipt != nil || len(e.captureArgs) != 0 {
-				t.Fatalf("unacknowledged turn captured or sealed: %+v %+v %v", local, r, err)
+			if err != nil {
+				t.Fatal(err)
 			}
-			o, err := p.Abort(t.Context(), l, i)
-			if err != nil || o.State != session.PlacementStopped || o.Stopped == nil || o.Stopped.Receipt == nil {
-				t.Fatalf("forced cancellation unavailable: %+v %v", o, err)
+			if len(e.captureArgs) != 0 || stopped.Exit == nil || stopped.ThreadID != fixtureThread ||
+				stopped.CheckpointDigest != l.CheckpointDigest || stopped.Receipt == nil ||
+				!bytes.Equal(stopped.Checkpoint, data) {
+				t.Fatalf("exited Claude visit: captured %v, stopped %+v", e.captureArgs, stopped)
+			}
+			again, err := p.Stop(t.Context(), l, i)
+			if err != nil || !reflect.DeepEqual(again, stopped) {
+				t.Fatalf("stop replay: %+v %v", again, err)
 			}
 		})
 	}

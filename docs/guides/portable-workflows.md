@@ -184,13 +184,30 @@ refund evidence.
 
 ## Start a session on the cluster and attach from anywhere
 
-Leave out `--task` and `run --remote` starts an interactive Codex session that
-the remote executor owns, then connects your terminal to it. The session runs
-in the cluster until you stop it or its deadline passes. Your laptop can sleep,
-change network or shut down; nothing on it needs to stay up. Any machine that
-reaches the cluster through a `sproozi` context (or `--context`) can attach.
-It needs an executor from this release with a Codex harness; an older one
+Leave out `--task` and `run --remote` starts an interactive Codex or Claude
+Code session that the remote executor owns, then connects your terminal to it.
+The session runs in the cluster until you stop it or its deadline passes. Your
+laptop can sleep, change network or shut down; nothing on it needs to stay up.
+Any machine that reaches the cluster through a `sproozi` context (or
+`--context`) can attach. It needs an executor from this release; an older one
 refuses with `update the executor`.
+
+Each executor runs one harness, so Codex and Claude Code on one cluster are
+two executors, each in its own namespace. The
+[Claude Code executor example](../../examples/portable-workflows/kubernetes/claude/kustomization.yaml)
+adds one in `sproozi-claude-sessions` beside the Codex one in
+`sproozi-sessions`; apply its `cli-access` overlay too, and create its
+configuration from its `profile.json` as for the Codex executor. Its runtime
+keeps Claude Code's own sign-in in a login claim, so the gateway runs in
+workload mode for Anthropic, and you sign in once with `/login` in a session.
+Choose the executor with `--namespace` and its harness with `--harness`:
+
+```sh
+sproozi run --remote --namespace sproozi-claude-sessions --harness claude-code --repository sproozi
+sproozi attach 3f2b8c1e --namespace sproozi-claude-sessions
+```
+
+A Claude Code executor runs no tasks yet; give `--task` to the Codex one.
 
 The session belongs to an approved repository or project, which sets its
 allowances. Start it from the approved snapshot:

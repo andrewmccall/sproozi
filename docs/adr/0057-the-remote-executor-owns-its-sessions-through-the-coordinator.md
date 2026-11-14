@@ -321,6 +321,33 @@ Added with the CLI; it follows section 8.
   reaches it, and guessing from `sessions` would contact clusters for every
   local command. The local "no session" error names the flags instead.
 
+### 10. Claude Code interactive sessions on the cluster
+
+Added with Claude Code executors; it follows section 7.
+
+- **An executor's harness is `codex` or `claude-code`.** A Claude Code
+  executor runs interactive sessions and answers a task `unsupported`, as it
+  answers a submission for another harness, until the supervisor binds a
+  Claude task's completion. One harness per executor stays, so the example
+  adds a second executor in its own namespace, `sproozi-claude-sessions`,
+  whose roles outside it are named `sproozi-claude-work`. The CLI names the
+  executor's harness, from its description, and the requested one when it
+  refuses.
+- **A first visit starts Claude Code fresh**, as a local Docker session
+  does: the supervisor writes onboarding as complete and the workspace as
+  trusted in the launch-generated `.claude.json`, so nothing waits at a
+  dialog. The placement binds the conversation Claude Code reported through
+  its hooks during the graceful stop (`BindNative`), as for a moved
+  checkpoint's later visit.
+- **An exited Claude Code visit stops.** The exit sweep stops a session
+  whose agent exited, and the Kubernetes placement refused every stop of a
+  Claude Code visit whose container had ended, so `/exit` would have left
+  the session `unknown-stop`. The placement now follows
+  [ADR 0038](0038-exited-agents-and-one-recovery-path.md) as Docker does: a
+  first visit stops turnless, keeping the workspace it started from, and a
+  resumed visit's stop names the checkpoint it started from. Neither claims a
+  conversation from a stopped container (ADR 0011).
+
 ## Alternatives
 
 - **Keep work separate and fix it in place.** Check phase on read, take the
@@ -413,8 +440,9 @@ Added with the CLI; it follows section 8.
 - Code: `internal/work/` (`catalogue.go`, `driver.go`, `interactive.go`, `export.go`,
   `legacy.go`, `phase.go`), `internal/session/cancel.go`,
   `internal/session/phase.go`, `cmd/session-profile/main.go`,
-  `internal/runtime/kubernetes/placement/placement.go`,
-  `cmd/sproozi/output.go`.
+  `internal/runtime/kubernetes/placement/placement.go` and `lifecycle.go`,
+  `cmd/sproozi/output.go` and `session.go`; the Claude Code executor
+  example in `examples/portable-workflows/kubernetes/claude/`.
 - Docs: [session commands](../reference/session-commands.md),
   [remote executors](../reference/remote-executors.md),
   [portable workflows](../guides/portable-workflows.md),

@@ -436,7 +436,7 @@ func (q *options) submitRemote(ctx context.Context) error {
 	}
 	v, err := client.Submit(ctx, submission)
 	if err != nil {
-		return q.submitError(err, target.Name, interactive)
+		return q.submitError(err, target, kind, interactive)
 	}
 	if !interactive {
 		return q.printView(target.Name, v)
@@ -447,7 +447,8 @@ func (q *options) submitRemote(ctx context.Context) error {
 
 // submitError explains a refused submission; only one whose outcome is
 // unknown names the operation that repeats it.
-func (q *options) submitError(err error, cluster string, interactive bool) error {
+func (q *options) submitError(err error, target remoteTarget, kind harness.NativeKind, interactive bool) error {
+	cluster := target.Name
 	var remote *profile.RemoteError
 	if errors.As(err, &remote) {
 		switch {
@@ -459,9 +460,8 @@ func (q *options) submitError(err error, cluster string, interactive bool) error
 			return fmt.Errorf("%w: the cluster's remote executor %s refused an interactive session; an executor "+
 				"older than this release does not know them, so update the executor "+
 				"(docs/reference/remote-executors.md), or give --task to submit a task", err, cluster)
-		case interactive && remote.Code == profile.CodeUnsupported:
-			return fmt.Errorf("%w: the cluster's remote executor %s does not run interactive sessions for its "+
-				"agent; use an executor for codex, or give --task to submit a task", err, cluster)
+		case remote.Code == profile.CodeUnsupported:
+			return harnessRefused(err, target, kind, interactive)
 		case q.maxDuration != "" && remote.Code == profile.CodeInvalid:
 			// An executor older than --max-duration refuses the field.
 			return fmt.Errorf("%w: the cluster's remote executor may be too old for --max-duration; leave it out "+
@@ -470,4 +470,21 @@ func (q *options) submitError(err error, cluster string, interactive bool) error
 	}
 	return fmt.Errorf("%w; the outcome is unknown: to try again, repeat the command with --operation %s",
 		err, q.operation)
+}
+
+// harnessRefused explains a submission an executor does not run: each
+// executor runs one harness, and Claude Code's runs interactive sessions only.
+func harnessRefused(err error, target remoteTarget, kind harness.NativeKind, interactive bool) error {
+	switch {
+	case target.Harness != "" && target.Harness != kind:
+		return fmt.Errorf("%w: the cluster's remote executor %s runs %s, not %s; give --harness %s, or choose "+
+			"the executor for %s with --namespace (docs/reference/remote-executors.md)",
+			err, target.Name, target.Harness, kind, target.Harness, kind)
+	case interactive:
+		return fmt.Errorf("%w: the cluster's remote executor %s does not run interactive sessions for %s; "+
+			"update the executor, or give --task to submit a task", err, target.Name, kind)
+	default:
+		return fmt.Errorf("%w: the cluster's remote executor %s runs interactive sessions for %s but not tasks; "+
+			"leave out --task to start an interactive session", err, target.Name, kind)
+	}
 }

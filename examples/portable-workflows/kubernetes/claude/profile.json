@@ -1,0 +1,29 @@
+{
+  "harness": "claude-code",
+  "listen": "0.0.0.0:8443",
+  "certificateFile": "/var/run/sproozi-work/tls.crt",
+  "keyFile": "/var/run/sproozi-work/tls.key",
+  "principal": "developer",
+  "placementName": "engineering-claude",
+  "namespace": "sproozi-claude-sessions",
+  "budgetNamespace": "sproozi-system",
+  "templateName": "portable-claude",
+  "directory": "/state/profile",
+  "instructionDigest": "5435e9ed40444349ee6dcfc667eafe2381d3a35e6e6c28800180bbab3c85c9d4",
+  "allowances": {
+    "model.inference": {
+      "units": {"bounded": true, "value": 200000},
+      "costMicros": {"bounded": false, "value": 0}
+    }
+  },
+  "maxDuration": "30m",
+  "maxCheckpointBytes": 8388608,
+  "workTokenFile": "/var/run/sproozi-work/work-token",
+  "workTokenMaxDuration": "30m",
+  "repositories": {
+    "sproozi": {
+      "url": "https://github.com/andrewmccall/sproozi",
+      "ref": "main"
+    }
+  }
+}

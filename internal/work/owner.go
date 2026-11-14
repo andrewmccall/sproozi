@@ -310,7 +310,7 @@ func (o *Owner) SubmitAs(ctx context.Context, caller Caller, q Submit) (View, er
 		return View{}, err
 	}
 	interactive := q.Mode == ModeInteractive
-	if q.Harness != o.config.Harness {
+	if q.Harness != o.config.Harness || !interactive && !runsTasks(q.Harness) {
 		return View{}, &profile.Rejection{Code: profile.CodeUnsupported}
 	}
 	if q.Executor != o.config.Placement {
@@ -622,8 +622,20 @@ func (c Config) validateLimits() error {
 	return nil
 }
 
+// executorHarness reports whether an executor may run kind: Codex runs tasks
+// and interactive sessions, Claude Code interactive sessions only.
+func executorHarness(kind harness.NativeKind) bool {
+	return kind == harness.NativeCodex || kind == harness.NativeClaude
+}
+
+// runsTasks reports whether an executor for kind runs tasks: only Codex,
+// until the supervisor binds a Claude task's completion (ADR 0057).
+func runsTasks(kind harness.NativeKind) bool {
+	return kind == harness.NativeCodex
+}
+
 func (c Config) validate() error {
-	if !filepath.IsAbs(c.Directory) || c.Principal == "" || c.Harness != harness.NativeCodex || c.Placement == "" || len(c.InstructionDigest) != 64 || c.MaxDuration < 0 || c.MaxCheckpointBytes <= 0 || c.MaxCheckpointBytes > 64<<20 || c.Coordinator == nil || c.Profiles == nil || len(c.Repositories)+len(c.Projects) == 0 || len(c.Allowances) == 0 {
+	if !filepath.IsAbs(c.Directory) || c.Principal == "" || !executorHarness(c.Harness) || c.Placement == "" || len(c.InstructionDigest) != 64 || c.MaxDuration < 0 || c.MaxCheckpointBytes <= 0 || c.MaxCheckpointBytes > 64<<20 || c.Coordinator == nil || c.Profiles == nil || len(c.Repositories)+len(c.Projects) == 0 || len(c.Allowances) == 0 {
 		return errors.New("work: fixed owner configuration required")
 	}
 	if err := c.validateLimits(); err != nil {

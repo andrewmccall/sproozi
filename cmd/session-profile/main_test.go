@@ -137,3 +137,16 @@ func TestReadConfigNamesTheMissingListenerField(t *testing.T) {
 		})
 	}
 }
+
+// The Claude Code executor example's configuration is one this executor
+// starts with.
+func TestClaudeExecutorExampleConfigurationIsValid(t *testing.T) {
+	path := filepath.Join("..", "..", "examples", "portable-workflows", "kubernetes", "claude", "profile.json")
+	c, err := readConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = validateConfig(c); err != nil || c.Harness != harness.NativeClaude || c.WorkTokenMaxDuration == "" {
+		t.Fatalf("example configuration %+v: %v", c, err)
+	}
+}
