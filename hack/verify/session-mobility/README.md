@@ -292,6 +292,11 @@ python3 hack/verify/session-mobility/claude.py verify \
 Wait for Claude's socket and provider as above, with port 18775, before the
 driver.
 
+For Claude Code sessions and tasks that the remote executor owns, with no
+service on this machine, use the
+[Claude remote-executor driver](../claude-remote-kind/README.md) instead: it
+creates its own cluster and runs the Claude Code executor example.
+
 The Claude driver changes the profile marker before each move in the same way.
 With `--admin-probes` it reads the rendered profile skill in each visit's exact
 container or Pod and requires that visit's marker. Claude Code resumes a
