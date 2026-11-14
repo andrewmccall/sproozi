@@ -347,3 +347,20 @@ func (c *Client) Resume(ctx context.Context, id, op, maxDuration string) (v View
 	e = c.transport.CallOwner(ctx, "resume", resumption{ID: id, OperationID: op, MaxDuration: maxDuration}, &v)
 	return
 }
+
+// OwnerTerminal is an owner transport that also attaches to an interactive
+// session; see profile.Client.OpenOwnerAttachment.
+type OwnerTerminal interface {
+	OpenOwnerAttachment(ctx context.Context, id string, frames io.Reader) (io.ReadCloser, error)
+}
+
+// Attach attaches to an interactive session: frames are native terminal
+// input frames, and the returned reader carries the terminal's output frames
+// until either side ends. Closing it ends only the attachment.
+func (c *Client) Attach(ctx context.Context, id string, frames io.Reader) (io.ReadCloser, error) {
+	t, ok := c.transport.(OwnerTerminal)
+	if !ok {
+		return nil, errors.New("work: this owner transport cannot attach to a session")
+	}
+	return t.OpenOwnerAttachment(ctx, id, frames)
+}
