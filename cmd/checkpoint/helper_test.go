@@ -186,15 +186,19 @@ func TestCaptureRequiresAnAcknowledgedRestore(t *testing.T) {
 	privateHelper(t)
 	c := command{kind: harness.NativeCodex, home: "/workspace/session/codex", repository: "/workspace/session/workspace",
 		thread: "01234567-89ab-cdef-0123-456789abcdef", limit: testLimit}
-	if err := c.capture(t.Context(), &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "acknowledged restore") {
-		t.Fatalf("capture without a restore: %v", err)
+	refused := func() bool {
+		err := c.capture(t.Context(), &bytes.Buffer{})
+		return err != nil && strings.Contains(err.Error(), "acknowledged restore")
+	}
+	if !refused() {
+		t.Fatal("capture ran without a restore")
 	}
 	meta := checkpoint.Metadata{Harness: harness.NativeCodex, SHA256: strings.Repeat("0", 64), Bytes: 1}
 	if err := writeReceipt(restoreReceipt{Stage: stageRestoring, Metadata: meta}); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.capture(t.Context(), &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "acknowledged restore") {
-		t.Fatalf("capture during a restore: %v", err)
+	if !refused() {
+		t.Fatal("capture ran during a restore")
 	}
 	if err := os.WriteFile(filepath.Join(helperDirectory, helperReceiptName), []byte(`{"sha256":"x"}`), 0600); err != nil {
 		t.Fatal(err)
