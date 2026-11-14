@@ -47,9 +47,10 @@ func TestDeadlineText(t *testing.T) {
 		{phaseActive, at, formatTime(at)},
 		{phaseCancelled, at, "-"},
 		{phaseCancelled, time.Time{}, "-"},
-		// Remote work's own live phases keep their deadline.
-		{"pending", at, formatTime(at)},
-		{"finalizing", at, formatTime(at)},
+		// Remote work reports the same phases.
+		{"preparing", at, formatTime(at)},
+		{"stopping", at, formatTime(at)},
+		{string(work.PhaseRetained), at, "-"},
 		// No phase is called starting; unresolved and retained ones have none.
 		{"starting", at, "-"},
 		{"unknown-stop", at, "-"},

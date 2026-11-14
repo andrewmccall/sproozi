@@ -157,7 +157,9 @@ func TestRevokedProjectStillFencesUnfinishedWriterAfterRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	waitPhase(t, o, v.ID, phaseUnknown)
+	if stalled := waitDriver(t, o, v.ID); stalled.Phase != phasePreparing {
+		t.Fatalf("lost preparation reply: %+v", stalled)
+	}
 	if err = o.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -170,14 +172,17 @@ func TestRevokedProjectStillFencesUnfinishedWriterAfterRestart(t *testing.T) {
 	// Public access is revoked, but owner cleanup must independently finish.
 	deadline := time.Now().Add(30 * time.Second)
 	for {
-		r, readErr := o.read(v.ID)
+		r, readErr := c.Coordinator.Inspect(v.ID)
 		if readErr != nil {
 			t.Fatal(readErr)
 		}
-		if r.Phase == phaseCancelled {
-			if r.Stopped == nil || !r.Stopped.ActualStopped || r.Stopped.Receipt == nil ||
-				r.Incarnation == nil || r.Incarnation.ResourceUID != "exact-resource" {
+		if r.Phase == session.PhaseCancelled {
+			if len(r.Visits) != 1 || !r.Visits[0].ActualStopped || r.Visits[0].Receipt == nil ||
+				r.Visits[0].Incarnation.ResourceUID != "exact-resource" {
 				t.Fatalf("Revocation lost fencing/accounting: %#v", r)
+			}
+			if w, err := o.read(v.ID); err != nil || w.Problem != problemRevoked {
+				t.Fatalf("Revocation not explained: %#v %v", w, err)
 			}
 			break
 		}

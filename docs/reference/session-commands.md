@@ -296,12 +296,29 @@ session runs, its deadline, or `none` when it has none. `sessions` prints a tabl
 characters), `HARNESS`, `PHASE`, `PLACEMENT` and `DEADLINE`, plus `LISTED BY`
 when rows come from more than one catalogue. The deadline is shown while the
 session is starting, running or stopping gracefully: phases `preparing`,
-`activating`, `active` and `stopping`, and remote work's `pending` and
-`finalizing`. Any other phase shows `-`: a stopped or cancelled session,
+`activating`, `active` and `stopping`. Any other phase shows `-`: a stopped or cancelled session,
 because its last execution's deadline no longer applies, and an interrupted
 stop or cancellation (`unknown-stop`, `unknown-usage`, `cancelling`), which
 `sproozi recover ID` finishes. A running session without a deadline shows
 `none`.
+
+A remote executor reports the same phases for the work it owns, derived from
+its execution journal, plus two for a pull
+([ADR 0057](../adr/0057-the-remote-executor-owns-its-sessions-through-the-coordinator.md)):
+
+| Remote phase | Meaning |
+| --- | --- |
+| `preparing` | The executor is capturing the task's input or preparing its first visit. A failed preparation keeps this phase with a problem; `recover ID --remote` retries it. |
+| `activating`, `active` | The sandbox is being admitted, or the task runs. |
+| `stopping` | The executor is waiting for the task's own turn to complete, then stops the sandbox. While the turn runs, the problem says what the stop waits for; it is not an error. |
+| `unknown-stop` | The placement has not proved the sandbox stopped. The executor retries by itself, waiting one second and doubling up to a minute; `recover ID --remote` retries now. |
+| `unknown-usage` | The sandbox stopped, but its usage is not finalized. The executor retries as for `unknown-stop`. |
+| `cancelling`, `cancelled` | A cancellation is in progress, or finished. A task whose deadline passed before it started is `cancelled` with the problem `the deadline passed before it started`. |
+| `retained` | The writer stopped, usage is finalized, the checkpoint is kept and the task's untrusted final answer is recorded. It can seed fresh work or be pulled. |
+| `failed` | The agent exited with a failure, or the task stopped with nothing to keep. |
+| `exporting`, `pulled` | A machine began to pull the session, or pulled it. |
+
+`cancel ID --remote` of a `retained` session is refused: its result is kept.
 
 With `--json`, `status` and the session commands print the session:
 

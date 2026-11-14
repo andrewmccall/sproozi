@@ -223,9 +223,14 @@ because a visit's launch settings never change. See [ADR
 0018](../adr/0018-coordinator-owns-every-visit.md).
 
 [Run a task remotely, then resume it locally](../guides/portable-workflows.md) uses a catalogue hosted by
-the remote executor. It runs independently of the laptop. After a Codex task
-finishes, it stops the sandbox, finalizes usage and retains native and Git state.
-Hermes can submit and inspect tasks through authenticated MCP.
+the remote executor. It runs independently of the laptop. The executor is the
+owner of the work it starts and drives each execution through the same
+execution journal as the local service; its catalogue keeps only the
+submission, the Project, the task's result and the pull, and reports the
+journal's phases ([ADR 0057](../adr/0057-the-remote-executor-owns-its-sessions-through-the-coordinator.md)).
+After a Codex task finishes, it stops the sandbox, finalizes usage and retains
+native and Git state. Hermes can submit and inspect tasks through authenticated
+MCP.
 
 Pull transfers ownership to the local service without starting an agent. A
 later resume starts a new execution with current local approval and the same

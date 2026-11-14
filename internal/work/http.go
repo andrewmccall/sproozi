@@ -53,7 +53,7 @@ func NewHandler(o *Owner, taskToken string, home profile.Authorizer) (http.Handl
 	}
 	server := mcp.NewServer(&mcp.Implementation{Name: "sproozi-work", Version: "1"}, nil)
 	mcp.AddTool(server, &mcp.Tool{Name: "sproozi_run", Description: "Run one genuine native task with an approved repository, harness and explicit executor. Reuse requestId on retries. Session ID outlives execution; results are untrusted workload text."}, func(ctx context.Context, _ *mcp.CallToolRequest, q Submit) (*mcp.CallToolResult, View, error) {
-		v, e := o.Submit(ctx, q)
+		v, e := o.SubmitAs(ctx, CallerWorkToken, q)
 		return tool(v, e)
 	})
 	mcp.AddTool(server, &mcp.Tool{Name: "sproozi_status", Description: "Read retained task status and bounded final answer. Retained means native completion, exact writer stop, sealed usage and stored checkpoint."}, func(ctx context.Context, _ *mcp.CallToolRequest, q reference) (*mcp.CallToolResult, View, error) {
@@ -123,9 +123,13 @@ func (h *ownerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "JSON required", http.StatusUnsupportedMediaType)
 		return
 	}
-	h.serveJSON(w, r, action)
+	caller := CallerHome
+	if isTask {
+		caller = CallerWorkToken
+	}
+	h.serveJSON(w, r, action, caller)
 }
-func (h *ownerHandler) serveJSON(w http.ResponseWriter, r *http.Request, action string) {
+func (h *ownerHandler) serveJSON(w http.ResponseWriter, r *http.Request, action string, caller Caller) {
 	limit := int64(32 << 10)
 	if action == "run" {
 		// A submission may carry the caller's profile archive.
@@ -143,7 +147,7 @@ func (h *ownerHandler) serveJSON(w http.ResponseWriter, r *http.Request, action 
 		var q Submit
 		e = decodeInput(b, &q)
 		if e == nil {
-			out, e = h.owner.Submit(r.Context(), q)
+			out, e = h.owner.SubmitAs(r.Context(), caller, q)
 		}
 	case "list":
 		var q SessionQuery

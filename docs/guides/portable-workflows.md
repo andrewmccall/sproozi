@@ -162,7 +162,11 @@ execution, visit and exact writer separately. The session ID outlives the Pod.
 Status returns the task phase and a size-limited final answer marked as
 untrusted output. The remote executor reports `retained` only after compatible native
 completion, confirmed sandbox stop, finalized usage accounting and checkpoint
-storage. An `unknown` status cannot be pulled or silently interpreted as stopped.
+storage. A task whose turn is still running shows `stopping`, with a problem
+naming what the stop waits for. `unknown-stop` and `unknown-usage` cannot be
+pulled or silently interpreted as stopped; the executor retries them by itself,
+and `recover` retries at once. The [command reference](../reference/session-commands.md#status-and-listing-output)
+lists every remote phase.
 
 `sessions --json` returns one labelled catalogue. Check `executors` for
 unavailable owners and `truncated` for omitted results; a stopped local service
@@ -170,7 +174,8 @@ does not hide the cluster's rows. The [command reference](../reference/session-c
 explains owner selection, JSON fields and safe error categories.
 
 For a known recoverable interruption, use `sproozi recover ID --remote`. Cancel uses a separate stable `--operation UUID` and
-revokes before forced stop. Keep the original owner journals and accounting
+revokes before forced stop; it never waits for the task's turn. A `retained`
+task cannot be cancelled: its result is kept. Keep the original owner journals and accounting
 records; deleting resources or replacing a failed Run does not establish stop or
 refund evidence.
 

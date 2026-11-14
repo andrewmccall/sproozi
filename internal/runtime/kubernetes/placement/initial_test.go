@@ -43,11 +43,11 @@ func TestFreshRemoteWorkspaceStopsWithActualUUIDAndImmutableReceipt(t *testing.T
 	p, kube, e, l, checkpointData := setup(t)
 	l.ThreadID, l.CheckpointDigest, l.Task = "", "", initialFixtureTask
 	e.initial = initialWorkspace(t, checkpointData)
-	i, err := p.CreateInitial(t.Context(), l, e.initial)
+	i, err := p.Prepare(t.Context(), l, e.initial)
 	if err != nil {
 		t.Fatal(err)
 	}
-	retry, err := p.CreateInitial(t.Context(), l, e.initial)
+	retry, err := p.Prepare(t.Context(), l, e.initial)
 	if err != nil || retry != i {
 		t.Fatal("prepared creation retry", retry, err)
 	}
@@ -82,7 +82,7 @@ func TestFreshRemoteWorkspaceStopsWithActualUUIDAndImmutableReceipt(t *testing.T
 	if !session.SameLaunch(stopped.Launch, l) || !session.SameLaunch(stopped.Receipt.Launch, l) {
 		t.Fatalf("binding rewrote the immutable launch: %+v", stopped.Launch)
 	}
-	retry, err = p.CreateInitial(t.Context(), l, e.initial)
+	retry, err = p.Prepare(t.Context(), l, e.initial)
 	if err != nil || retry != i {
 		t.Fatal("stopped creation retry", retry, err)
 	}
@@ -100,7 +100,7 @@ func TestFreshRemoteWorkspaceStopsWithActualUUIDAndImmutableReceipt(t *testing.T
 	if _, err = p.Inspect(t.Context(), changed); err == nil {
 		t.Fatal("changed initial task accepted")
 	}
-	if _, err = p.CreateInitial(t.Context(), l, append(e.initial, ' ')); err == nil {
+	if _, err = p.Prepare(t.Context(), l, append(e.initial, ' ')); err == nil {
 		t.Fatal("changed initial workspace accepted")
 	}
 }
@@ -110,7 +110,7 @@ func TestInitialUnknownTurnCannotSealOrCapture(t *testing.T) {
 	p, _, e, l, data := setup(t)
 	l.ThreadID, l.CheckpointDigest, l.Task = "", "", initialFixtureTask
 	e.initial = initialWorkspace(t, data)
-	i, err := p.CreateInitial(t.Context(), l, e.initial)
+	i, err := p.Prepare(t.Context(), l, e.initial)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,9 +136,6 @@ func TestInitialTaskRejectsUnsupportedHarness(t *testing.T) {
 		"Prepare": func(p *Placement) func(context.Context, session.Launch, []byte) (session.Incarnation, error) {
 			return p.Prepare
 		},
-		"CreateInitial": func(p *Placement) func(context.Context, session.Launch, []byte) (session.Incarnation, error) {
-			return p.CreateInitial
-		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -162,54 +159,28 @@ func freshLaunch(t *testing.T, e *protocolExecutor, l session.Launch, checkpoint
 	return l
 }
 
-func TestPrepareOfFreshLaunchMatchesCreateInitial(t *testing.T) {
+// Prepare of a fresh launch registers the workspace, replays the same
+// incarnation without a second Run, and refuses a different workspace for
+// the same launch.
+func TestPrepareOfFreshLaunchReplaysAndConflicts(t *testing.T) {
 	t.Parallel()
-	viaPrepare, prepareKube, prepareExec, l, data := setup(t)
-	l = freshLaunch(t, prepareExec, l, data, initialFixtureTask)
-	viaCreate, createKube, createExec, _, _ := setup(t)
-	createExec.initial = prepareExec.initial
-
-	i, err := viaPrepare.Prepare(t.Context(), l, prepareExec.initial)
+	p, kube, e, l, data := setup(t)
+	l = freshLaunch(t, e, l, data, initialFixtureTask)
+	i, err := p.Prepare(t.Context(), l, e.initial)
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := viaCreate.CreateInitial(t.Context(), l, createExec.initial)
-	if err != nil {
-		t.Fatal(err)
+	_, prepared, err := p.retained(t.Context(), l)
+	if err != nil || prepared.WorkspaceDigest == "" || prepared.Phase != registry.Prepared || !validIncarnation(i) {
+		t.Fatalf("fresh preparation: %+v %v %+v", prepared, err, i)
 	}
-	_, prepared, err := viaPrepare.retained(t.Context(), l)
-	if err != nil {
-		t.Fatal(err)
+	if again, err := p.Prepare(t.Context(), l, e.initial); err != nil || again != i || kube.runCreates != 1 {
+		t.Fatalf("fresh preparation replay: %+v %v runs %d", again, err, kube.runCreates)
 	}
-	_, initial, err := viaCreate.retained(t.Context(), l)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(prepared.Registration, initial.Registration) || prepared.WorkspaceDigest == "" || prepared.Phase != initial.Phase || prepared.Phase != registry.Prepared {
-		t.Fatalf("Prepare registered %+v, CreateInitial %+v", prepared, initial)
-	}
-	if !validIncarnation(i) || !validIncarnation(created) {
-		t.Fatal("invalid incarnation", i, created)
-	}
-
-	// Either entry replays the same incarnation without a second Run.
-	for _, replay := range []func(context.Context, session.Launch, []byte) (session.Incarnation, error){viaPrepare.Prepare, viaPrepare.CreateInitial} {
-		again, err := replay(t.Context(), l, prepareExec.initial)
-		if err != nil || again != i {
-			t.Fatal("fresh preparation replay", again, err)
-		}
-	}
-	if prepareKube.runCreates != 1 || createKube.runCreates != 1 {
-		t.Fatalf("Runs created: Prepare %d, CreateInitial %d", prepareKube.runCreates, createKube.runCreates)
-	}
-
-	// A different workspace for the same launch conflicts through either entry.
-	for _, conflicting := range []func(context.Context, session.Launch, []byte) (session.Incarnation, error){viaPrepare.Prepare, viaPrepare.CreateInitial} {
-		_, err = conflicting(t.Context(), l, append(append([]byte(nil), prepareExec.initial...), ' '))
-		var rejection *profile.Rejection
-		if !errors.As(err, &rejection) || rejection.Code != profile.CodeConflict {
-			t.Fatalf("changed initial workspace: %v", err)
-		}
+	_, err = p.Prepare(t.Context(), l, append(append([]byte(nil), e.initial...), ' '))
+	var rejection *profile.Rejection
+	if !errors.As(err, &rejection) || rejection.Code != profile.CodeConflict {
+		t.Fatalf("changed initial workspace: %v", err)
 	}
 }
 

@@ -1,3 +1,4 @@
+//nolint:goconst // Configuration durations stay literal test inputs.
 package main
 
 import (
@@ -68,6 +69,8 @@ func TestValidateConfigNamesTheBadField(t *testing.T) {
 		"workTokenFile": func(c *serverConfig) {
 			c.Repositories = map[string]work.Repository{"app": {URL: "https://github.com/example/app"}}
 		},
+		"workTokenMaxDuration": func(c *serverConfig) { c.WorkTokenFile = "/fixed/token" },
+		"retainedBytes":        func(c *serverConfig) { c.RetainedBytes = c.MaxCheckpointBytes },
 	} {
 		t.Run(field, func(t *testing.T) {
 			c := validServerConfig()
@@ -83,6 +86,28 @@ func TestValidateConfigNamesTheBadField(t *testing.T) {
 		CostMicros: session.Limit{Bounded: true, Value: 0}}
 	if err := validateConfig(c); err == nil || !strings.Contains(err.Error(), `"model.inference"`) {
 		t.Fatalf("validateConfig = %v, want the allowance named", err)
+	}
+}
+
+// The work token's cap is required with the work token, must fit the
+// executor's maxDuration, and is the only cap when maxDuration is omitted.
+func TestWorkTokenMaxDurationFitsTheExecutorCap(t *testing.T) {
+	for _, tc := range []struct {
+		max, work string
+		ok        bool
+	}{
+		{"30m", "20m", true},
+		{"30m", "30m", true},
+		{"30m", "1h", false},
+		{"", "8h", true},
+		{"", "", false},
+		{"", "forever", false},
+	} {
+		c := validServerConfig()
+		c.MaxDuration, c.WorkTokenFile, c.WorkTokenMaxDuration = tc.max, "/fixed/token", tc.work
+		if err := validateConfig(c); (err == nil) != tc.ok {
+			t.Errorf("maxDuration %q, workTokenMaxDuration %q: %v", tc.max, tc.work, err)
+		}
 	}
 }
 

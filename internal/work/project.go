@@ -8,8 +8,8 @@ import (
 	"github.com/andrewmccall/sproozi/internal/session/profile"
 )
 
-func (o *Owner) access(r record) error {
-	if !project.Member(o.config.Projects, r.Association.Project, o.config.Principal) {
+func (o *Owner) access(a project.Association) error {
+	if !project.Member(o.config.Projects, a.Project, o.config.Principal) {
 		return &profile.Rejection{Code: profile.CodeDenied}
 	}
 	return nil

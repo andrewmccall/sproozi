@@ -293,8 +293,13 @@ through the home journal. See the guide's
 
 ## Retained remote work
 
-To accept new Codex tasks independently of the local service, add `workTokenFile`
-and `repositories` to the configuration. The work token is the one static token:
+To accept new Codex tasks independently of the local service, add `workTokenFile`,
+`workTokenMaxDuration` and `repositories` to the configuration.
+`workTokenMaxDuration`, required with `workTokenFile`, caps the deadline of
+work submitted with the work token, which always has one; it must fit within
+`maxDuration` when that is set. `retainedBytes`, optional, bounds what remote
+work keeps on the volume: at least twice `maxCheckpointBytes`, by default 1 GiB
+or twice `maxCheckpointBytes` when that is larger. The work token is the one static token:
 at least 32 characters, stored privately and checked first, because Hermes has
 no Kubernetes identity of its own. Any other bearer token is reviewed as above.
 Repository entries
@@ -308,12 +313,24 @@ credential configuration.
 exclusive one-way claim; the work token cannot claim ownership. TLS and bearer
 validation happen before request decoding.
 
-The protected `directory/work` retains original request/execution identities,
-source receipts, bounded native/Git checkpoints and untrusted final text. Run one
+The executor owns the work it starts and drives each execution through an
+execution journal in the protected `directory/sessions`, the same one the local
+service keeps ([ADR 0057](../../docs/adr/0057-the-remote-executor-owns-its-sessions-through-the-coordinator.md)).
+That journal keeps every launch, visit, source receipt and the committed
+native/Git checkpoint. The catalogue in `directory/work` keeps original request
+identities, the Project, the untrusted final text and the pull. Run one
 remote executor per state directory, with durable storage. Restart with the same principal and directory;
-changing principals cannot reinterpret retained records. A lost preparation or
-stop reply requires recovery of that exact allocation. Missing stop/accounting
-evidence blocks export, and changing a request's intent on replay is rejected.
+changing principals cannot reinterpret retained records. A task's phases are
+the journal's: `stopping` while it waits for the task's turn, and
+`unknown-stop` or `unknown-usage` after a lost stop reply or missing accounting,
+which the executor retries by itself and `recover` retries at once. Missing
+stop/accounting evidence blocks export, and changing a request's intent on
+replay is rejected.
+
+An executor upgraded from a release that kept version 1 records in
+`directory/work` still lists, exports and claims the stopped ones. It refuses
+to start while any is unfinished, naming each: finish or cancel them with the
+previous release first.
 
 The native image includes `/usr/local/bin/session-profile` and Git for this
 trusted service; the scratch controller image does not. A trusted Pod deployment

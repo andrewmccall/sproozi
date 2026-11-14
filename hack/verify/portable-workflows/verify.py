@@ -128,7 +128,8 @@ def main():
     report["executionId"] = view["executionId"]
     report["allocationId"] = view["allocationId"]
     save()
-    if args.request_id and view["phase"] == "unknown":
+    if args.request_id and (view["phase"] in ("unknown-stop", "unknown-usage") or
+                            view["phase"] == "preparing" and view.get("problem")):
         recovered = subprocess.run([str(args.session_binary.resolve()), "recover", view["id"],
                                     *(context or ["--remote"]), "--config", str(args.home_config.resolve()), "--json"],
                                    cwd=ROOT, capture_output=True, text=True, timeout=120)
@@ -145,7 +146,8 @@ def main():
         number += 1
         if current["phase"] == "retained":
             break
-        check(current["phase"] not in ("unknown", "cancelled"), "Remote execution needs recovery")
+        check(current["phase"] not in ("unknown-stop", "unknown-usage", "cancelled", "failed"),
+              "Remote execution needs recovery")
         time.sleep(0.5)
     else:
         raise RuntimeError("Remote task did not retain its checkpoint before timeout")
@@ -233,7 +235,8 @@ def main():
                     number += 1
                     if fresh['phase'] == 'retained':
                         break
-                    check(fresh['phase'] not in ('unknown', 'cancelled'), "Recorded revision execution needs recovery")
+                    check(fresh['phase'] not in ('unknown-stop', 'unknown-usage', 'cancelled', 'failed'),
+                          "Recorded revision execution needs recovery")
                     time.sleep(0.5)
                 else:
                     raise RuntimeError("Recorded revision task did not finish")
