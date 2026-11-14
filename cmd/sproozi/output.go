@@ -10,6 +10,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/home"
 	"github.com/andrewmccall/sproozi/internal/work"
@@ -82,7 +83,7 @@ func statusText(action string, s home.Status, detached bool) string {
 			return fmt.Sprintf("Session %s had already stopped at its deadline.\n"+
 				"Continue it with: sproozi resume %s", id, short)
 		}
-		if s.Exit != nil && s.Exit.Code != 0 {
+		if s.Exit.Failed() {
 			return fmt.Sprintf("Session %s had already stopped: its agent exited with code %d.%s\n"+
 				"Continue it with: sproozi resume %s    Delete it with: sproozi rm %s",
 				id, s.Exit.Code, exitOutput(s.Exit), short, short)
@@ -112,9 +113,15 @@ func statusText(action string, s home.Status, detached bool) string {
 	case s.Exit != nil && s.Exit.Deadline:
 		text += "\nStopped    at its deadline (maxDuration in config.json)"
 		text += fmt.Sprintf("\nContinue it with: sproozi resume %s", short)
-	case s.Exit != nil && s.Exit.Code != 0:
+	case s.Exit.Failed():
 		text += fmt.Sprintf("\nExited     code %d%s", s.Exit.Code, exitOutput(s.Exit))
 		text += fmt.Sprintf("\nContinue it with: sproozi resume %s    Delete it with: sproozi rm %s", short, short)
+	case s.Exit != nil && s.Exit.Cause == harness.NativeExitTerminated:
+		text += "\nStopped    its container was stopped before the agent finished"
+		text += fmt.Sprintf("\nContinue it with: sproozi resume %s", short)
+	case s.Exit != nil && s.Exit.Cause == harness.NativeExitFailed:
+		text += "\nStopped    forcibly, after a graceful stop failed"
+		text += fmt.Sprintf("\nContinue it with: sproozi resume %s", short)
 	case s.Exit != nil:
 		text += "\nExited     code 0: the agent quit by itself"
 	}

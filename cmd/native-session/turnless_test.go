@@ -279,9 +279,9 @@ func TestClaudeResumedVisitWithoutPromptStopsAsRestored(t *testing.T) {
 func TestReportExitCarriesCodeOutputAndThread(t *testing.T) {
 	native := startIdleNative(t)
 	s := &server{native: native, threadID: selected, config: config{Harness: harness.NativeCodex}}
-	out := captureStdout(t, func() { s.reportExit(native, 2) })
+	out := captureStdout(t, func() { s.reportExit(native, harness.NativeExitSelf, 2) })
 	report, ok := harness.ParseNativeExitReport([]byte(out))
-	if !ok || report.Code != 2 || report.Thread != selected {
+	if !ok || report.Code != 2 || report.Cause != harness.NativeExitSelf || report.Thread != selected {
 		t.Fatalf("exit report %q: %+v %v", out, report, ok)
 	}
 }

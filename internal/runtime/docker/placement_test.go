@@ -65,6 +65,8 @@ type fakeContainer struct {
 	}
 	nativeState harness.NativeState
 	configured  []byte
+	// logs is the container's output, where the supervisor's exit report is.
+	logs []byte
 }
 type fakeDocker struct {
 	containers                               map[string]*fakeContainer
@@ -248,6 +250,8 @@ func (f *fakeDocker) containerCommand(args []string) ([]byte, error) {
 	switch args[1] {
 	case "inspect":
 		return json.Marshal([]any{c})
+	case "logs":
+		return c.logs, nil
 	case "start":
 		c.State.Running = true
 		c.State.Status = "running"

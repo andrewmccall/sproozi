@@ -126,7 +126,9 @@ mismatch fail closed. The first new session requires exactly one native journal.
 For Claude, it requires a matching native `Stop`, no pending foreground Bash
 tools, and a settled selected primary transcript. `UserPromptSubmit` clears
 earlier completion; accepted attachment writes after that prompt's generation
-prevent reuse of its Stop. The parser checks the exact UUID, primary
+prevent reuse of its Stop. A `StopFailure` ends the turn as failed: only a new
+`UserPromptSubmit` starts another, and a tool start or `Stop` before it is
+rejected, so a turn is never both failed and completed. The parser checks the exact UUID, primary
 chain and supported tool pairs. The observed bounded recovered 429 record clears
 the previous assistant leaf and needs a later successful assistant response.
 Other native error shapes, subagents, compaction and background/parallel work are
@@ -146,6 +148,9 @@ requires normal exit. Claude instead uses controlled process-group shutdown
 after its completed-turn gate; the `/quit` input was not a reliable native
 shutdown operation. The supervisor returns the selected UUID/turn and exit,
 then exits PID 1. Forced deadline/signal stops do not establish graceful completion.
+Every end other than a graceful stop writes one exit report naming its cause
+(`exited`, `deadline`, `terminated` or `failed`), decided once where it is
+decided; see [exit reports](../../docs/reference/native-control.md#exit-reports).
 The placement persists its accepted quiescence acknowledgement before revocation;
 the supervisor itself does not store a durable completion receipt. A lost Claude
 acknowledgement cannot be replaced by a terminated container or a settled

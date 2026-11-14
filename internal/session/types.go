@@ -114,14 +114,25 @@ type Stopped struct {
 	CheckpointDigest string      `json:"checkpointDigest"`
 }
 
-// Exit describes a harness that exited on its own: its exit code and the last
-// lines of its terminal, a bounded diagnostic from the workload.
+// Exit describes a harness that ended without a graceful stop: its exit code,
+// the last lines of its terminal, a bounded diagnostic from the workload, and
+// why it ended.
 type Exit struct {
 	Code   int    `json:"code"`
 	Output string `json:"output,omitempty"`
 	// Deadline records that the harness ended at or after the execution's
 	// deadline, which stops it, so its code is no failure of the agent.
 	Deadline bool `json:"deadline,omitempty"`
+	// Cause is why the supervisor reports the harness ended. Empty means no
+	// report was read, and the code alone describes the exit.
+	Cause harness.NativeExitCause `json:"cause,omitempty"`
+}
+
+// Failed reports an exit that is the agent's own failure: a nonzero code
+// from a harness that exited by itself before its deadline. A harness the
+// supervisor stopped is not one.
+func (e *Exit) Failed() bool {
+	return e != nil && e.Code != 0 && !e.Deadline && (e.Cause == "" || e.Cause == harness.NativeExitSelf)
 }
 
 // ExitOutputMax bounds Exit.Output.

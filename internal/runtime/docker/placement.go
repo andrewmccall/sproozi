@@ -907,8 +907,11 @@ func (p *Placement) quiesceNative(ctx context.Context, r *placementRecord, i ses
 	return p.save(*r)
 }
 
-// recordExit keeps what the supervisor reported when its harness exited on its
-// own. A first visit of a harness whose state proves completion, such as
+// recordExit keeps what the supervisor reported when its harness ended
+// without a graceful stop, including why it ended. Only a harness the
+// supervisor did not stop itself, or one with no report, falls back to the
+// host's clock for the deadline: the host stops a late container itself. A
+// first visit of a harness whose state proves completion, such as
 // Codex, binds the thread of a completed turn it reported, so the stop can
 // still checkpoint that conversation; Claude needs its graceful
 // acknowledgement, so its exited visit keeps no new checkpoint.
@@ -917,7 +920,16 @@ func (p *Placement) recordExit(ctx context.Context, r *placementRecord, i sessio
 	if !ok {
 		report = harness.NativeExitReport{Code: state.ExitCode}
 	}
-	r.Exited = &session.Exit{Code: report.Code, Output: report.Output, Deadline: !r.Launch.Deadline.After(time.Now())}
+	r.Exited = &session.Exit{Code: report.Code, Output: report.Output, Cause: report.Cause}
+	switch report.Cause {
+	case harness.NativeExitDeadline:
+		r.Exited.Deadline = true
+	case harness.NativeExitSelf, harness.NativeExitFailed:
+	default:
+		// No report, or a supervisor told to stop: the host's own deadline
+		// stop sends that signal.
+		r.Exited.Deadline = !r.Launch.Deadline.After(time.Now())
+	}
 	if harness.ProvesCompletion(r.Launch.Harness) && r.thread() == "" && report.Thread != "" {
 		if err := p.authority.BindNative(ctx, r.Launch, i, report.Thread); err != nil {
 			return err

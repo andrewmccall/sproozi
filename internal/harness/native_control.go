@@ -234,14 +234,45 @@ func observeNativeThread(ctx context.Context, control NativeControl, wait, deadl
 	}
 }
 
+// NativeExitCause names why a harness ended without a graceful stop. The
+// supervisor decides it once, where the decision is made, and reports it so
+// the placement does not have to guess from its own clock.
+type NativeExitCause string
+
+const (
+	// NativeExitSelf is a harness that exited on its own, before any stop
+	// asked it to. Only this cause can make a nonzero code an agent failure.
+	NativeExitSelf NativeExitCause = "exited"
+	// NativeExitDeadline is a harness the supervisor stopped at the
+	// execution deadline.
+	NativeExitDeadline NativeExitCause = "deadline"
+	// NativeExitTerminated is a harness the supervisor stopped because it
+	// was itself told to stop (SIGTERM or SIGINT), as when its container is
+	// stopped.
+	NativeExitTerminated NativeExitCause = "terminated"
+	// NativeExitFailed is a harness the supervisor stopped after a graceful
+	// stop failed.
+	NativeExitFailed NativeExitCause = "failed"
+)
+
+func (c NativeExitCause) valid() bool {
+	switch c {
+	case NativeExitSelf, NativeExitDeadline, NativeExitTerminated, NativeExitFailed:
+		return true
+	}
+	return false
+}
+
 // NativeExitReport is what the supervisor writes to its standard output when
-// the harness exits on its own, before any stop asked it to. It is a workload
+// its harness ends without a graceful stop: by itself, at the deadline, or
+// stopped by the supervisor. A graceful stop writes none. It is a workload
 // observation: a diagnostic for the user, and the thread of a completed turn
 // the placement may checkpoint, never a writer fence or accounting fact.
 type NativeExitReport struct {
-	Code   int    `json:"code"`
-	Thread string `json:"thread,omitempty"`
-	Output string `json:"output,omitempty"`
+	Code   int             `json:"code"`
+	Cause  NativeExitCause `json:"cause"`
+	Thread string          `json:"thread,omitempty"`
+	Output string          `json:"output,omitempty"`
 }
 
 // NativeExitReportPrefix starts the supervisor's exit report line.
@@ -286,7 +317,8 @@ func NativeExitOutput(raw []byte, lines int) string {
 }
 
 // ParseNativeExitReport finds the last exit report in container output and
-// bounds what it may claim.
+// bounds what it may claim. A report without a known cause, such as one from
+// a supervisor older than the cause, is ignored.
 func ParseNativeExitReport(logs []byte) (NativeExitReport, bool) {
 	var found NativeExitReport
 	ok := false
@@ -296,7 +328,7 @@ func ParseNativeExitReport(logs []byte) (NativeExitReport, bool) {
 			continue
 		}
 		var r NativeExitReport
-		if json.Unmarshal(rest, &r) != nil || len(r.Output) > NativeExitOutputMax ||
+		if json.Unmarshal(rest, &r) != nil || len(r.Output) > NativeExitOutputMax || !r.Cause.valid() ||
 			r.Thread != "" && !codexThreadID.MatchString(r.Thread) {
 			continue
 		}

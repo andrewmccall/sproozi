@@ -204,6 +204,14 @@ its JSON `exit` has `"deadline": true`. The deadline is wall-clock time. If the
 computer slept past it, the service stops the agent within about five seconds
 of waking.
 
+An agent whose container was stopped from outside, or which Sproozi stopped
+forcibly after a graceful stop failed, is also `retained`, whatever its code:
+`status` prints `Stopped    its container was stopped before the agent
+finished` or `Stopped    forcibly, after a graceful stop failed`. The JSON
+`exit` names why the agent ended in `cause`: `exited`, `deadline`,
+`terminated` or `failed` (see [native launch and
+control](native-control.md#exit-reports)).
+
 A stopped session's phase is `retained`, or `failed` after its agent exited
 with an error. `resume` continues either; `attach`, `move`, `cancel` and
 `recover` refuse it with `session ID is stopped; "sproozi resume ID" continues

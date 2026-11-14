@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/privatefs"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/home"
@@ -289,6 +290,22 @@ func TestStatusTextNamesADeadlineStop(t *testing.T) {
 	} {
 		if text := statusText(action, s, false); !strings.Contains(text, want) || strings.Contains(text, "code 1") {
 			t.Errorf("%s: %q lacks %q or names the exit code", action, text, want)
+		}
+	}
+}
+
+// A harness its supervisor stopped reads as kept, not as a crashed agent.
+func TestStatusTextNamesASupervisorStop(t *testing.T) {
+	for cause, want := range map[harness.NativeExitCause]string{
+		harness.NativeExitTerminated: "its container was stopped", harness.NativeExitFailed: "after a graceful stop failed",
+	} {
+		s := home.Status{ID: uuid.NewString(), Harness: "codex", Phase: "retained", Placement: localName,
+			Exit: &session.Exit{Code: 137, Cause: cause}}
+		if text := statusText(cmdStatus, s, false); !strings.Contains(text, want) || strings.Contains(text, "code 137") {
+			t.Errorf("%s: %q lacks %q or names the exit code", cause, text, want)
+		}
+		if text := statusText(cmdStop, s, false); strings.Contains(text, "code 137") {
+			t.Errorf("%s stop: %q names the exit code", cause, text)
 		}
 	}
 }

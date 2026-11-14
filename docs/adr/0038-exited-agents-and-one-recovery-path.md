@@ -83,3 +83,25 @@ Implementation: [supervisor](../../cmd/native-session/main.go),
 [exit watcher and messages](../../internal/session/home/exits.go),
 [stop continuation](../../internal/session/finalize.go) and
 [status output](../../cmd/sproozi/output.go).
+
+## Later clarification (2026-11-14)
+
+The decision said the supervisor reports a harness that exits "before any
+stop". The implementation also reported the supervisor's own forced stops (at
+the deadline, on `SIGTERM`, or after a failed graceful stop) as such exits,
+because the stop marked the supervisor `stopped` before killing the harness
+and the exit watcher took any exit it saw outside `stopping` as the harness's
+own. The host then labelled the session `failed` unless its own clock showed
+the deadline had passed, so a container stopped early was a "failed" agent.
+A harness that died after input was gated, with no graceful stop running,
+left the supervisor `stopping` forever.
+
+The supervisor now decides why the harness ended once, where the decision is
+made, and every exit report carries that `cause`: `exited`, `deadline`,
+`terminated` or `failed`. A graceful stop writes no report. Only `exited`
+with a nonzero code makes a session `failed`; the host uses its clock only
+when there is no report, or for `terminated`, because the host's own deadline
+stop sends that signal. The format is in [native launch and
+control](../reference/native-control.md#exit-reports). A report without a
+cause is ignored rather than guessed at, which is acceptable while the API is
+alpha ([ADR 0044](0044-the-api-stays-alpha-with-a-written-policy.md)).

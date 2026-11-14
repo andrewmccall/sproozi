@@ -77,9 +77,9 @@ const stageFailed = "failed"
 
 // committedStage names a stopped session's phase: failed when its last visit's
 // harness exited on its own with a nonzero code before its deadline,
-// otherwise retained.
+// otherwise retained. A harness its supervisor stopped is retained.
 func committedStage(r localSession) string {
-	if exit := r.Committed.Exit; exit != nil && exit.Code != 0 && !exit.Deadline {
+	if r.Committed.Exit.Failed() {
 		return stageFailed
 	}
 	return stageRetained
@@ -88,7 +88,7 @@ func committedStage(r localSession) string {
 // stoppedProblem explains a command that needs a running session, naming the
 // next command for a stopped one.
 func stoppedProblem(r localSession) error {
-	if exit := r.Committed.Exit; exit != nil && exit.Code != 0 && !exit.Deadline {
+	if exit := r.Committed.Exit; exit.Failed() {
 		return rejectedError(fmt.Sprintf("home: session %s stopped because its agent exited with code %d; "+
 			"see \"sproozi status %s\", then \"sproozi resume %s\" to continue it or \"sproozi rm %s\" to remove it",
 			r.ID, exit.Code, r.ID, r.ID, r.ID))

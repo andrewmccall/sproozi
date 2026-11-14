@@ -532,6 +532,14 @@ any turn completed. `stop` ends it without waiting for a turn and keeps no
 checkpoint; the session keeps the workspace it started from. See
 [ADR 0032](docs/adr/0032-stopping-a-visit-with-no-native-conversation.md).
 
+### Exit cause
+
+Why a visit's harness ended without a graceful stop: `exited` (by itself),
+`deadline`, `terminated` (its supervisor was told to stop) or `failed` (a
+graceful stop failed and the supervisor stopped it). The supervisor decides it
+once and writes it in its exit report; only `exited` with a nonzero code makes
+a session `failed`. See [exit reports](docs/reference/native-control.md#exit-reports).
+
 ### Harness arguments
 
 The user's own arguments for the stock harness, given after `--` on `run` or
