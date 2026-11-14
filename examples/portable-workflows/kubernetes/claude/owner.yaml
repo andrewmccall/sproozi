@@ -1,0 +1,256 @@
+# The remote executor for Claude Code interactive sessions: the Codex
+# executor of ../owner.yaml, which explains each object, in its own namespace
+# sproozi-claude-sessions. Objects outside that namespace take the name
+# sproozi-claude-work so they do not replace the Codex executor's.
+# The administrator creates the executor's configuration ConfigMap
+# sproozi-work-profile (from profile.json) and the CLI's trust anchor
+# sproozi-remote-executor in sproozi-claude-sessions with "immutable: true"
+# (cmd/session-profile/README.md), and the Secret sproozi-work-credentials
+# with tls.crt and tls.key for sproozi-work.sproozi-claude-sessions.svc and
+# work-token. The executor runs no Claude Code tasks yet, so Hermes has no use
+# for its work token and no ingress below.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sproozi-claude-sessions
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sproozi-work
+  namespace: sproozi-claude-sessions
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: sproozi-shared-gateway-registry
+  namespace: sproozi-claude-sessions
+rules:
+- apiGroups: ['']
+  resources: [configmaps]
+  verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sproozi-shared-gateway-registry
+  namespace: sproozi-claude-sessions
+subjects:
+- kind: ServiceAccount
+  name: sproozi-shared-gateway
+  namespace: sproozi-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: sproozi-shared-gateway-registry
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: sproozi-work
+  namespace: sproozi-claude-sessions
+rules:
+- apiGroups: [sproozi.com]
+  resources: [agenttemplates, agentpolicies, agentruntimes]
+  verbs: [get]
+- apiGroups: [sproozi.com]
+  resources: [agentruns]
+  verbs: [get, create, patch]
+# Registrations and stored profiles. This reaches sproozi-work-profile and
+# sproozi-remote-executor too; create both immutable.
+- apiGroups: ['']
+  resources: [configmaps]
+  verbs: [get, create, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sproozi-work
+  namespace: sproozi-claude-sessions
+subjects:
+- kind: ServiceAccount
+  name: sproozi-work
+  namespace: sproozi-claude-sessions
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: sproozi-work
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: sproozi-claude-work-budget
+  namespace: sproozi-system
+rules:
+- apiGroups: [sproozi.com]
+  resources: [budgetledgers]
+  verbs: [get, create, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sproozi-claude-work-budget
+  namespace: sproozi-system
+subjects:
+- kind: ServiceAccount
+  name: sproozi-work
+  namespace: sproozi-claude-sessions
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: sproozi-claude-work-budget
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: sproozi-claude-work
+  namespace: sproozi-agents
+rules:
+- apiGroups: ['']
+  resources: [pods]
+  verbs: [get, patch, delete]
+- apiGroups: ['']
+  resources: [pods/exec]
+  verbs: [create]
+- apiGroups: ['']
+  resources: [pods/log]
+  verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sproozi-claude-work
+  namespace: sproozi-agents
+subjects:
+- kind: ServiceAccount
+  name: sproozi-work
+  namespace: sproozi-claude-sessions
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: sproozi-claude-work
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: sproozi-claude-work-auth-delegator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator
+subjects:
+- kind: ServiceAccount
+  name: sproozi-work
+  namespace: sproozi-claude-sessions
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sproozi-work-state
+  namespace: sproozi-claude-sessions
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sproozi-work
+  namespace: sproozi-claude-sessions
+  labels:
+    sproozi.com/remote-executor: "true"
+spec:
+  selector:
+    app: sproozi-work
+  ports:
+  - name: https
+    port: 8443
+    targetPort: https
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sproozi-work
+  namespace: sproozi-claude-sessions
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: sproozi-work
+  template:
+    metadata:
+      labels:
+        app: sproozi-work
+    spec:
+      serviceAccountName: sproozi-work
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: owner
+        image: docker.io/sproozi-session/native:REPLACE_WITH_REVIEWED_DIGEST
+        command: [/usr/local/bin/session-profile]
+        args: [--config, /etc/sproozi-work/profile.json]
+        ports:
+        - name: https
+          containerPort: 8443
+        readinessProbe:
+          tcpSocket:
+            port: https
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: '1'
+            memory: 1Gi
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: [ALL]
+        volumeMounts:
+        - name: config
+          mountPath: /etc/sproozi-work
+          readOnly: true
+        - name: credentials
+          mountPath: /var/run/sproozi-work
+          readOnly: true
+        - name: state
+          mountPath: /state
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: config
+        configMap:
+          name: sproozi-work-profile
+      - name: credentials
+        secret:
+          secretName: sproozi-work-credentials
+          defaultMode: 0440
+      - name: state
+        persistentVolumeClaim:
+          claimName: sproozi-work-state
+      - name: tmp
+        emptyDir:
+          sizeLimit: 64Mi
+---
+# Only the CLI reaches this executor, through a port-forward; no workload does.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sproozi-work-private
+  namespace: sproozi-claude-sessions
+spec:
+  podSelector:
+    matchLabels:
+      app: sproozi-work
+  policyTypes: [Ingress]
