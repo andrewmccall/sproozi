@@ -149,6 +149,22 @@ The workflow in [Run a task remotely, then resume it locally](../guides/portable
 submitted task text and a new completed turn. It then follows the usual stop,
 finalized usage and checkpoint steps. A later local resume gets fresh
 permissions.
+
+A remote executor runs one harness. A Codex executor runs tasks and
+[interactive sessions the cluster owns](../guides/portable-workflows.md#start-a-session-on-the-cluster-and-attach-from-anywhere);
+a Claude Code executor runs interactive sessions only and answers a task
+`unsupported`. Codex and Claude Code on one cluster are two executors in two
+namespaces, which the CLI chooses with `--namespace`
+([Claude Code executor example](../../examples/portable-workflows/kubernetes/claude/kustomization.yaml)).
+A Claude Code session started on the cluster starts Claude Code fresh, as a
+local Docker session does: the supervisor writes onboarding as complete and
+the workspace as trusted before launch, so no first-run or folder-trust
+dialog waits for input. Its first stop after a completed turn binds the
+conversation Claude Code reported through its hooks. If Claude Code exits by
+itself, for example on `/exit`, the session keeps no turns from that visit:
+a first visit keeps the workspace it started from, and a resumed visit keeps
+its previous checkpoint
+([ADR 0038](../adr/0038-exited-agents-and-one-recovery-path.md)).
 Managed launches also receive the user's [profile](profile.md): Codex in
 `$CODEX_HOME/AGENTS.md` and `$CODEX_HOME/skills`, and Claude Code as a section
 appended to its system prompt and a `profile` plugin, because its isolated

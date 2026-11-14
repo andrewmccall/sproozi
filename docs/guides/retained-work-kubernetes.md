@@ -5,7 +5,9 @@ work endpoint of a [remote executor](../../GLOSSARY.md#remote-executor) at
 `/work/mcp`. Each Codex [remote work](../../GLOSSARY.md#remote-work) session runs
 in `sproozi-agents`; its conversation, supported Git workspace and bounded final
 answer survive the Pod. The developer can claim that stopped session and
-continue it in local Docker.
+continue it in local Docker. Hermes tasks need the Codex executor: a
+[Claude Code executor](portable-workflows.md#start-a-session-on-the-cluster-and-attach-from-anywhere)
+runs interactive sessions only and refuses tasks.
 [Run a persistent Hermes assistant on Kubernetes](hermes-orchestration.md)
 covers the separate [task service](../../GLOSSARY.md#task-service), which
 retains answers but not the conversation or workspace.

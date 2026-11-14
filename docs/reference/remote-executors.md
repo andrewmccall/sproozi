@@ -103,8 +103,12 @@ An interactive session runs until its owner stops it; nothing waits for a
 task to complete. Only the home principal (the `sproozi-cli` identity above)
 starts one, cancels it, or takes the owner actions below. The work token that
 Hermes holds keeps tasks only: these requests answer it `403`, and its MCP tool
-`sproozi_run` offers no mode or upload. Interactive sessions need a Codex
-executor for now.
+`sproozi_run` offers no mode or upload. A Codex executor runs tasks and
+interactive sessions; a Claude Code executor (`"harness": "claude-code"`)
+runs interactive sessions only, and answers a task `unsupported`. A
+submission for another harness than the executor's answers `unsupported`.
+Codex and Claude Code on one cluster are two executors, one per namespace
+([example](../../examples/portable-workflows/kubernetes/claude/kustomization.yaml)).
 
 Owner requests are `POST` to `/work/ACTION` with a JSON body, over the same
 TLS connection as the placement protocol, and answer JSON: the session's
@@ -181,7 +185,10 @@ Every 15 seconds the executor checks each active interactive session's Pod.
 When the agent's native container has ended, the executor stops the session
 through the ordinary stop, which reads the
 [exit report](native-control.md#exit-reports) and keeps the conversation of a
-completed turn. The session then shows `failed` with its `exit` (code, cause
+completed Codex turn. A stopped container never proves a completed Claude Code
+turn, so a Claude Code session keeps no turns from that visit: the workspace
+it started from after a first visit, its previous checkpoint after a resumed
+one. The session then shows `failed` with its `exit` (code, cause
 and last output lines) for a nonzero exit, or `retained`. An `attach` to such
 a session stops it the same way and answers `conflict`. The executor needs
 `get` on `pods/log` in `sproozi-agents` to read the report.
