@@ -294,8 +294,11 @@ through the home journal. See the guide's
 
 ## Retained remote work
 
-To accept new Codex tasks independently of the local service, add `workTokenFile`,
-`workTokenMaxDuration` and `repositories` to the configuration.
+To accept new Codex tasks, or Codex and Claude Code interactive sessions,
+independently of the local service, add `workTokenFile`,
+`workTokenMaxDuration` and `repositories` to the configuration. An executor
+with `"harness": "claude-code"` runs interactive sessions only and refuses
+tasks ([example configuration](../../examples/portable-workflows/kubernetes/claude/profile.json)).
 `workTokenMaxDuration`, required with `workTokenFile`, caps the deadline of
 work submitted with the work token, which always has one; it must fit within
 `maxDuration` when that is set. `retainedBytes`, optional, bounds what remote

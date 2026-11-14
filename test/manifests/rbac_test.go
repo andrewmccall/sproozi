@@ -207,7 +207,8 @@ func managedSessionDocs(t *testing.T) []map[string]any {
 // A write limited to named ConfigMaps still counts.
 func TestOnlyTheControllerWritesSystemConfigMaps(t *testing.T) {
 	docs := managedSessionDocs(t)
-	accounts := [][2]string{{systemNamespace, gatewayAccount}}
+	accounts := make([][2]string, 0, 1+2*len(executorNamespaces))
+	accounts = append(accounts, [2]string{systemNamespace, gatewayAccount})
 	for _, ns := range executorNamespaces {
 		accounts = append(accounts, [2]string{ns, "sproozi-work"}, [2]string{ns, "sproozi-cli"})
 	}
