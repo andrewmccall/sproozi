@@ -6,8 +6,10 @@ agent's native terminal throughout. The harness conversation ID (`threadId`) and
 workspace state stay the same, and the service on your machine stays the
 owner wherever the session runs.
 
-A move keeps the execution's original deadline and total usage allowance. Each
-destination gets fresh identity and access. To hand a task to Kubernetes, let it
+A move keeps the execution's original deadline, or its lack of one, and total
+usage allowance. A cluster whose executor or policy caps the deadline refuses a
+session that has none; start or resume it with `--max-duration` to move it
+there. Each destination gets fresh identity and access. To hand a task to Kubernetes, let it
 finish there, and later take it over on your machine with a new deadline and
 allowance, use
 [Run a task remotely, then resume it locally](portable-workflows.md) instead.
@@ -501,7 +503,7 @@ sproozi attach ID
 ```
 
 A graceful move blocks new terminal input and waits for the current turn and
-supported tools to finish within the original deadline. Source gateway access
+supported tools to finish, within the original deadline if it has one. Source gateway access
 remains available during that wait. After the turn and tools finish, the
 placement revokes access and confirms that the exact agent container has
 stopped. It finalizes usage accounting and saves the checkpoint before preparing
@@ -563,7 +565,7 @@ of absence or zero consumption. Keep the home and profile journals intact,
 restore backend connectivity, and recover the existing operation. Restart the
 service or remote executor with the same protected state and configuration; stopping those
 processes alone doesn't prove that the agent stopped. The native original
-deadline still applies.
+deadline, if any, still applies.
 
 Managed remote Pods keep a Sproozi finalizer until the remote executor records
 that their harness container stopped. A stopped helper or lost remote executor

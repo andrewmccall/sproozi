@@ -18,6 +18,7 @@ import (
 	"github.com/andrewmccall/sproozi/internal/agentprofile"
 	"github.com/andrewmccall/sproozi/internal/budget"
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
+	"github.com/andrewmccall/sproozi/internal/deadline"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/workspace"
@@ -137,7 +138,7 @@ func (p *Placement) validateLaunch(l session.Launch) error {
 	if err := workspace.ValidateIgnoredPaths(l.IncludeIgnored); err != nil {
 		return err
 	}
-	if l.Harness != p.config.Harness || !validUUID(l.ExecutionID) || !validUUID(l.OperationID) || !validUUID(l.AllocationID) || l.Epoch == 0 || l.Placement != p.config.Name || l.InstructionDigest != p.config.InstructionDigest || l.Deadline.IsZero() || len(l.Allowances) == 0 || len(l.Allowances) > 32 {
+	if l.Harness != p.config.Harness || !validUUID(l.ExecutionID) || !validUUID(l.OperationID) || !validUUID(l.AllocationID) || l.Epoch == 0 || l.Placement != p.config.Name || l.InstructionDigest != p.config.InstructionDigest || len(l.Allowances) == 0 || len(l.Allowances) > 32 {
 		return errors.New("invalid Docker launch binding")
 	}
 	if (!initial && !validUUID(l.ThreadID)) || (initial && l.ThreadID != "") {
@@ -181,7 +182,7 @@ func (p *Placement) Prepare(ctx context.Context, l session.Launch, data []byte) 
 func (p *Placement) prepare(ctx context.Context, l session.Launch, data []byte) (session.Incarnation, error) {
 	l.Deadline = l.Deadline.UTC()
 	l.IncludeIgnored = append([]string(nil), l.IncludeIgnored...)
-	if !l.Deadline.After(time.Now()) {
+	if deadline.At(l.Deadline).Passed(time.Now()) {
 		return session.Incarnation{}, errors.New("docker launch deadline expired")
 	}
 	r, err := p.load(l)
@@ -221,7 +222,7 @@ func (p *Placement) spec(r placementRecord, role string) ManagedSpec {
 			network = "container:" + r.Anchor.ID
 		}
 	}
-	spec := ManagedSpec{Name: r.Execution + "-" + role, Execution: r.Launch.AllocationID, Role: role, ImageID: image, NetworkMode: network, MemoryBytes: limits.MemoryBytes, CPUMilli: limits.CPUMilli, PIDs: limits.PIDs, Deadline: r.Launch.Deadline.Format(time.RFC3339Nano), GatewayIPv4: p.config.GatewayIPv4, GatewayPort: p.config.GatewayPort}
+	spec := ManagedSpec{Name: r.Execution + "-" + role, Execution: r.Launch.AllocationID, Role: role, ImageID: image, NetworkMode: network, MemoryBytes: limits.MemoryBytes, CPUMilli: limits.CPUMilli, PIDs: limits.PIDs, Deadline: deadline.At(r.Launch.Deadline).String(), GatewayIPv4: p.config.GatewayIPv4, GatewayPort: p.config.GatewayPort}
 	encoded, _ := json.Marshal(r.Launch)
 	spec.IntentDigest = fmt.Sprintf("%x", sha256.Sum256(append(encoded, []byte(r.ConfigDigest+r.InputDigest)...)))
 	if role != roleAnchor {
@@ -266,7 +267,7 @@ func (p *Placement) resource(ctx context.Context, r *placementRecord, role strin
 	return p.engine.Start(ctx, **target)
 }
 func (p *Placement) drivePrepare(ctx context.Context, r *placementRecord, data []byte) error {
-	if !r.Launch.Deadline.After(time.Now()) {
+	if deadline.At(r.Launch.Deadline).Passed(time.Now()) {
 		return errors.New("docker preparation deadline expired")
 	}
 	if r.Volume == nil {
@@ -391,7 +392,7 @@ func (p *Placement) activate(ctx context.Context, r *placementRecord, i session.
 	if r.Phase != phasePrepared && r.Phase != phaseActivating && r.Phase != phaseActive {
 		return errors.New("docker activation cannot reopen stopped allocation")
 	}
-	if !r.Launch.Deadline.After(time.Now()) {
+	if deadline.At(r.Launch.Deadline).Passed(time.Now()) {
 		return errors.New("docker activation deadline expired")
 	}
 	if err := p.verify(ctx, *r); err != nil {
@@ -850,7 +851,7 @@ func (p *Placement) Attach(ctx context.Context, l session.Launch, i session.Inca
 		unlock()
 		return err
 	}
-	if r.Phase != phaseActive || !r.Launch.Deadline.After(time.Now()) {
+	if r.Phase != phaseActive || deadline.At(r.Launch.Deadline).Passed(time.Now()) {
 		unlock()
 		return errors.New("docker attachment is not active")
 	}
@@ -860,9 +861,9 @@ func (p *Placement) Attach(ctx context.Context, l session.Launch, i session.Inca
 	}
 	agent := *r.Agent
 	unlock()
-	deadline, cancel := context.WithDeadline(ctx, r.Launch.Deadline)
+	attachCtx, cancel := deadline.At(r.Launch.Deadline).Context(ctx)
 	defer cancel()
-	return p.engine.AttachNative(deadline, agent, input, output)
+	return p.engine.AttachNative(attachCtx, agent, input, output)
 }
 
 func (p *Placement) quiesceNative(ctx context.Context, r *placementRecord, i session.Incarnation) error {
@@ -928,7 +929,7 @@ func (p *Placement) recordExit(ctx context.Context, r *placementRecord, i sessio
 	default:
 		// No report, or a supervisor told to stop: the host's own deadline
 		// stop sends that signal.
-		r.Exited.Deadline = !r.Launch.Deadline.After(time.Now())
+		r.Exited.Deadline = deadline.At(r.Launch.Deadline).Passed(time.Now())
 	}
 	if harness.ProvesCompletion(r.Launch.Harness) && r.thread() == "" && report.Thread != "" {
 		if err := p.authority.BindNative(ctx, r.Launch, i, report.Thread); err != nil {
@@ -1003,7 +1004,7 @@ func (p *Placement) Exited(ctx context.Context, l session.Launch, i session.Inca
 	if err != nil {
 		return false, err
 	}
-	if state.Running && !r.Launch.Deadline.After(time.Now()) {
+	if state.Running && deadline.At(r.Launch.Deadline).Passed(time.Now()) {
 		// The supervisor ends its harness at the deadline, but its timer can
 		// run late after the host slept; the host's clock decides.
 		if err = p.engine.Stop(ctx, *r.Agent); err != nil {

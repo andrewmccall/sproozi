@@ -10,6 +10,7 @@ import (
 	"mime"
 	"net/http"
 
+	"github.com/andrewmccall/sproozi/internal/deadline"
 	"github.com/andrewmccall/sproozi/internal/session"
 )
 
@@ -116,7 +117,7 @@ func (h *handler) attach(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	output := &terminalOutput{writer: w, controller: controller}
-	ctx, cancel := context.WithDeadline(r.Context(), input.Launch.Deadline)
+	ctx, cancel := deadline.At(input.Launch.Deadline).Context(r.Context())
 	defer cancel()
 	if err = backend.Attach(ctx, input.Launch, *input.Incarnation, newFrameReader(reader), output); err != nil {
 		_, _ = io.WriteString(output, "{\"op\":\"attach\",\"error\":\"attachment unavailable\"}\n")
@@ -161,7 +162,7 @@ func (c *Client) Attach(ctx context.Context, l session.Launch, i session.Incarna
 	if validateLaunch(l) != nil || !incarnationValid(i) || input == nil || output == nil {
 		return errors.New("profile: invalid attachment")
 	}
-	ctx, cancel := context.WithDeadline(ctx, l.Deadline)
+	ctx, cancel := deadline.At(l.Deadline).Context(ctx)
 	defer cancel()
 	envelope, err := json.Marshal(request{Version: protocolVersion, Launch: l, Incarnation: &i})
 	if err != nil || int64(len(envelope))+1 > metadataLimit {

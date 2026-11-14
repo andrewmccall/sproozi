@@ -10,6 +10,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/deadline"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/home"
@@ -111,7 +112,7 @@ func statusText(action string, s home.Status, detached bool) string {
 	text := describe(id, string(s.Harness), s.Phase, s.Placement, s.Deadline)
 	switch {
 	case s.Exit != nil && s.Exit.Deadline:
-		text += "\nStopped    at its deadline (maxDuration in config.json)"
+		text += "\nStopped    at its deadline (--max-duration, or maxDuration in config.json)"
 		text += fmt.Sprintf("\nContinue it with: sproozi resume %s", short)
 	case s.Exit.Failed():
 		text += fmt.Sprintf("\nExited     code %d%s", s.Exit.Code, exitOutput(s.Exit))
@@ -137,13 +138,13 @@ func exitOutput(e *session.Exit) string {
 }
 
 // describe is the status summary of a session.
-func describe(id, kind, phase, placement string, deadline time.Time) string {
+func describe(id, kind, phase, placement string, until time.Time) string {
 	lines := []string{"Session    " + id, "Harness    " + kind, "Phase      " + phase}
 	if placement != "" {
 		lines = append(lines, "Placement  "+placement)
 	}
-	if slices.Contains(livePhases, phase) && !deadline.IsZero() {
-		lines = append(lines, "Deadline   "+formatTime(deadline))
+	if ends := deadlineText(phase, until); ends != "-" {
+		lines = append(lines, "Deadline   "+ends)
 	}
 	return strings.Join(lines, "\n")
 }
@@ -166,6 +167,19 @@ func (q *options) printView(cluster string, v work.View) error {
 
 func formatTime(t time.Time) string { return t.Local().Format("2006-01-02 15:04 MST") }
 
+// deadlineText is a session's deadline as listed: its time, "none" for a
+// live session without one, or "-" once it no longer applies.
+func deadlineText(phase string, until time.Time) string {
+	switch d := deadline.At(until); {
+	case !slices.Contains(livePhases, phase):
+		return "-"
+	case !d.Set():
+		return deadline.NoneArg
+	default:
+		return formatTime(d.Time())
+	}
+}
+
 // writeCatalogueTable prints the sessions as a table.
 func writeCatalogueTable(w io.Writer, c catalogue) error {
 	if len(c.Sessions) == 0 {
@@ -182,10 +196,7 @@ func writeCatalogueTable(w io.Writer, c catalogue) error {
 	}
 	_, _ = fmt.Fprintln(tw, strings.Join(header, "\t"))
 	for _, r := range c.Sessions {
-		ends := "-"
-		if slices.Contains(livePhases, r.Phase) && !r.Deadline.IsZero() {
-			ends = formatTime(r.Deadline)
-		}
+		ends := deadlineText(r.Phase, r.Deadline)
 		// A harness whose credential the gateway holds has no login.
 		row := []string{shortID(r.ID), string(r.Harness), cmp.Or(r.Login, "-"), r.Phase, r.Placement, ends}
 		if several {

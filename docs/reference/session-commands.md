@@ -9,7 +9,7 @@ like this.
 A [session](../../GLOSSARY.md#session) is one agent conversation and its
 workspace. It keeps its ID while it stops, resumes and moves. Each start or
 resume is a new [execution](../../GLOSSARY.md#execution) with its own approval,
-deadline and usage allowance. Knowing a session ID gives no permission to run it.
+deadline, if it has one, and usage allowance. Knowing a session ID gives no permission to run it.
 
 ## Commands
 
@@ -85,12 +85,12 @@ anything is read or sent. `-d` is short for `--detach`.
 
 | Command | Flags |
 | --- | --- |
-| `run` | `--harness`, `--login`, `--detach`, `--include-ignored`, `--remote`, `--context`, `--namespace`, `--task`, `--task-file`, `--repository`, `--project`, `--json`, `--root` |
+| `run` | `--harness`, `--login`, `--detach`, `--include-ignored`, `--max-duration`, `--remote`, `--context`, `--namespace`, `--task`, `--task-file`, `--repository`, `--project`, `--json`, `--root` |
 | `sessions` | `--remote`, `--context`, `--namespace`, `--project`, `--json`, `--root` |
 | `status` | `--remote`, `--context`, `--namespace`, `--json`, `--root` |
 | `attach` | `--root` |
 | `stop` | `--json`, `--root` |
-| `resume` | `--detach`, `--json`, `--root` |
+| `resume` | `--detach`, `--max-duration`, `--json`, `--root` |
 | `cancel` | `--remote`, `--context`, `--namespace`, `--json`, `--root` |
 | `rm` | `--json`, `--root` |
 | `move` | `--local`, `--remote`, `--context`, `--namespace`, `--json`, `--root` |
@@ -110,6 +110,7 @@ anything is read or sent. `-d` is short for `--detach`.
 | `--harness NAME` | `codex`, `claude-code` or `copilot`. For `run`, defaults to the first agent set up; for `init`, the agent to add, default `codex`. |
 | `-d`, `--detach` | Start or resume without connecting the terminal. Without a terminal on standard input, `run` and `resume` start the session and say they did not attach. |
 | `--include-ignored PATH` | Also copy this Git-ignored file into the session, on every visit. Repeatable. |
+| `--max-duration DURATION\|none` | How long this run or resume may last, such as `8h`, or `none` for no deadline. Without it, a session uses its own earlier choice, else `maxDuration` in `config.json`, else no deadline. A session keeps the choice for later resumes. For `run --remote`, the cluster's `maxDuration` caps it and refuses `none`; without it the cluster's `maxDuration` applies, or no deadline when the cluster sets none. A service or remote executor older than this flag refuses it and starts nothing. |
 | `--remote` | Work in a cluster: `run --remote` submits a task there (it needs `--task` or `--task-file` and takes no `PATH`, `--detach`, `--include-ignored` or agent arguments); `move --remote` sends the session there; `sessions`, `status`, `cancel` and `recover` with `--remote` read or act on the cluster's sessions only. Implied by `--context` or `--namespace`. |
 | `--context NAME` | The cluster, as a kubeconfig context name or a kubeconfig file. Default: the context named `sproozi`. See [Remote commands](#remote-commands). |
 | `--namespace NS` | Namespace of the remote executor. Default: the context's namespace, else `default`. |
@@ -130,7 +131,7 @@ anything is read or sent. `-d` is short for `--detach`.
 | `--no-service` | Write the configuration without starting the service. |
 | `--timeout DURATION` | Limit for `init`; default 30 minutes. |
 | `--check-provider` | Make `doctor` ask each provider to check its key (lists models only). |
-| `--leave-running` | Stop the service even while sessions run; they keep running until their deadline. |
+| `--leave-running` | Stop the service even while sessions run; they keep running until their deadline, or until stopped when they have none. |
 | `--json` | Print JSON instead of text. |
 
 Scripts and hand-written administrator setups may also use flags that help
@@ -198,8 +199,9 @@ N; see "sproozi status ID", then "sproozi resume ID" to continue it or
 conversation of a completed turn it reported before exiting; otherwise the
 session keeps its previous checkpoint, or the workspace it started from.
 
-At its deadline the agent is stopped the same way, and the session is
-`retained`, not `failed`: `status` prints `Stopped    at its deadline`, and
+A session with a deadline (`--max-duration`, or `maxDuration` in
+`config.json`; none by default) is stopped the same way when it reaches it, and
+the session is `retained`, not `failed`: `status` prints `Stopped    at its deadline`, and
 its JSON `exit` has `"deadline": true`. The deadline is wall-clock time. If the
 computer slept past it, the service stops the agent within about five seconds
 of waking.
@@ -289,11 +291,11 @@ on standard error. A remote `status` prints the session's phase, problem and its
 ## Status and listing output
 
 `status ID` prints the session, harness, phase, placement and, while the
-session runs, its deadline. `sessions` prints a table with `ID` (the first 8
+session runs, its deadline, or `none` when it has none. `sessions` prints a table with `ID` (the first 8
 characters), `HARNESS`, `PHASE`, `PLACEMENT` and `DEADLINE`, plus `LISTED BY`
 when rows come from more than one catalogue. A stopped or cancelled session
 shows `-` for the deadline, because its last execution's deadline no longer
-applies.
+applies. A running session without a deadline shows `none`.
 
 With `--json`, `status` and the session commands print the session:
 
@@ -304,7 +306,7 @@ With `--json`, `status` and the session commands print the session:
 | `allocationId` | Current or last visit to a placement. |
 | `incarnation` | The backend's identity for the exact container or Pod. |
 | `threadId` | The harness conversation ID. It is not a command operand or a credential. |
-| `harness`, `phase`, `deadline` | Agent, lifecycle phase and the current execution's deadline. |
+| `harness`, `phase`, `deadline` | Agent, lifecycle phase and the current execution's deadline, absent when it has none. |
 | `placement` | Where it runs or last ran: `local` for this machine, or a cluster's placement name. |
 | `ownership` | Who owns it; see below. |
 | `session` | The full execution journal, for detailed inspection. `initialStage` repeats `phase`. |

@@ -68,7 +68,7 @@ tracks the agent conversation and Git workspace across executions.
 | Concept | Meaning |
 | --- | --- |
 | Session | The record tracking the conversation and workspace, with a stable session ID. |
-| Execution | One period of work with its own approved permissions, allowance and deadline. |
+| Execution | One period of work with its own approved permissions, allowance and deadline. Whoever starts it sets the deadline: work you start yourself may have none. |
 | Placement | Where an execution runs, such as local Docker or remote Kubernetes. |
 | Visit | One stay of an execution at one placement. A move starts a new visit with fresh access. |
 | Checkpoint | The saved conversation and Git workspace from a stopped agent. |
@@ -84,7 +84,7 @@ These operations serve different purposes:
 - `resume` starts a new execution with current approval. It restores the same
   supported harness conversation and unfinished workspace.
 - `move` transfers an active execution to another placement, as a new visit.
-  Its original deadline and total allowance still apply.
+  Its original deadline, if it has one, and total allowance still apply.
 - `stop` stops local work and saves supported state for a later resume.
 
 A checkpoint contains work, not permission to run it. Sproozi creates fresh

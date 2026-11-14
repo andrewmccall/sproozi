@@ -23,6 +23,7 @@ import (
 
 	"github.com/andrewmccall/sproozi/internal/agentprofile"
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
+	"github.com/andrewmccall/sproozi/internal/deadline"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/privatefs"
 	"github.com/andrewmccall/sproozi/internal/project"
@@ -104,6 +105,11 @@ type Submit struct {
 	Task          string             `json:"task"`
 	Project       project.ID         `json:"project,omitempty"`
 	WorkspaceFrom *RevisionSource    `json:"workspaceFrom,omitempty"`
+	// MaxDuration is how long the task may run: empty leaves it to the
+	// executor, whose maxDuration applies when set and otherwise none does;
+	// "none" asks for no deadline, which an executor with a maxDuration
+	// denies; otherwise a positive Go duration within that maxDuration.
+	MaxDuration string `json:"maxDuration,omitempty"`
 	// Profile is the caller's profile archive. The owner replaces it with
 	// ProfileDigest before retaining or comparing the submission; callers never
 	// set ProfileDigest themselves.
@@ -125,7 +131,7 @@ type View struct {
 	Harness      harness.NativeKind   `json:"harness"`
 	Phase        Phase                `json:"phase"`
 	ThreadID     string               `json:"threadId,omitempty"`
-	Deadline     time.Time            `json:"deadline"`
+	Deadline     time.Time            `json:"deadline,omitzero"`
 	// Login is the named login of a harness that signs in itself.
 	Login            string               `json:"login,omitempty"`
 	CheckpointDigest string               `json:"checkpointDigest,omitempty"`
@@ -295,6 +301,10 @@ func (o *Owner) Submit(ctx context.Context, q Submit) (View, error) {
 	if q.Executor != o.config.Placement {
 		return View{}, &profile.Rejection{Code: profile.CodeDenied}
 	}
+	until, err := o.taskDeadline(q.MaxDuration, time.Now())
+	if err != nil {
+		return View{}, err
+	}
 
 	archive := q.Profile
 	if q.ProfileDigest != "" {
@@ -344,13 +354,32 @@ func (o *Owner) Submit(ctx context.Context, q Submit) (View, error) {
 	r := record{Version: 1, Intent: q, IntentDigest: digest, Association: association, RepositorySource: &repository,
 		Phase: phasePending, Launch: session.Launch{Harness: q.Harness, ExecutionID: id, OperationID: q.RequestID,
 			AllocationID: uuid.NewString(), Epoch: 1, Placement: q.Executor, InstructionDigest: o.config.InstructionDigest,
-			Deadline: time.Now().Add(o.config.MaxDuration).UTC(), Allowances: allowances, Task: q.Task,
+			Deadline: until.Time(), Allowances: allowances, Task: q.Task,
 			ProfileDigest: q.ProfileDigest}}
 	if err = o.save(r); err != nil {
 		return View{}, err
 	}
 	o.dispatch(id)
 	return view(r), nil
+}
+
+// taskDeadline is the deadline a submission asks for (ADR 0056). Without a
+// choice the executor's maxDuration applies, or no deadline when it has
+// none. A chosen duration, or none, must fit that maxDuration.
+func (o *Owner) taskDeadline(choice string, now time.Time) (deadline.Deadline, error) {
+	limit := o.config.MaxDuration
+	if choice == "" {
+		return deadline.After(now, limit), nil
+	}
+	d, err := deadline.ParseMaxDuration(choice)
+	if err != nil {
+		return deadline.None(), &profile.Rejection{Code: profile.CodeInvalid}
+	}
+	until := deadline.After(now, d)
+	if !until.Fits(now, limit) {
+		return deadline.None(), &profile.Rejection{Code: profile.CodeDenied}
+	}
+	return until, nil
 }
 
 // replay answers a repeated submission from its retained session. replayed is
@@ -542,7 +571,7 @@ func (o *Owner) retainInput(r *record, b []byte) ([]byte, error) {
 }
 func (o *Owner) execute(ctx context.Context, r *record) error {
 	if r.Phase == phasePending || r.Phase == phasePreparing {
-		if !time.Now().Before(r.Launch.Deadline) {
+		if deadline.At(r.Launch.Deadline).Passed(time.Now()) {
 			return errors.New("work: unstarted task expired")
 		}
 		b, e := o.input(ctx, r)
@@ -862,7 +891,7 @@ func (o *Owner) Close() error {
 }
 
 func (c Config) validate() error {
-	if !filepath.IsAbs(c.Directory) || c.Principal == "" || c.Harness != harness.NativeCodex || c.Placement == "" || len(c.InstructionDigest) != 64 || c.MaxDuration <= 0 || c.MaxDuration > 24*time.Hour || c.MaxCheckpointBytes <= 0 || c.MaxCheckpointBytes > 64<<20 || c.Backend == nil || len(c.Repositories)+len(c.Projects) == 0 || len(c.Allowances) == 0 {
+	if !filepath.IsAbs(c.Directory) || c.Principal == "" || c.Harness != harness.NativeCodex || c.Placement == "" || len(c.InstructionDigest) != 64 || c.MaxDuration < 0 || c.MaxCheckpointBytes <= 0 || c.MaxCheckpointBytes > 64<<20 || c.Backend == nil || len(c.Repositories)+len(c.Projects) == 0 || len(c.Allowances) == 0 {
 		return errors.New("work: fixed owner configuration required")
 	}
 	for name, r := range c.Repositories {

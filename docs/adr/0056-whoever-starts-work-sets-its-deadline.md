@@ -24,7 +24,7 @@ Lifting the ceiling alone would not have achieved that:
   "The projected token lifetime is two hours; policy limits execution to one
   hour." A session past two hours would have lost the gateway.
 - **Every session carries its own deadline.** The home's `maxDuration`
-  (required, at most 24h), the executor's `maxDuration`, and the deadline that
+  (required, at most 24h before this decision), the executor's `maxDuration`, and the deadline that
   a move keeps all limit a session independently of the policy.
 - **ADR 0040 accepts a failure window bounded by the hour.** When the gateway
   Service is recreated with a new address, running sandboxes lose the gateway
@@ -70,20 +70,53 @@ Docker sessions keep the literal proxy:
 - Their network anchor admits only the gateway's address, so loopback traffic
   from the agent's UID is refused.
 
-**A session's own deadline becomes optional when its owner starts it.** This
-part is decided but not yet built. `sproozi run` will accept a request for no
-deadline, and an executor will need an explicit setting to admit such a launch.
-"No deadline" will be the zero `time.Time`, a value every current validator
-rejects, so a mixed-version system fails closed. The sites that check a
-deadline will share one helper. Three checks would wrongly pass a zero deadline
-and must be changed explicitly:
+**A session's own deadline is optional when its owner starts it.**
 
-- `internal/session/profile/server.go`'s horizon check;
-- `internal/runtime/kubernetes/placement`'s admission check;
-- `registry.EffectiveDeadline` (now fixed).
+- *Who decides.* The home's `maxDuration` is optional and has no ceiling.
+  Unset or `"none"`, a run or resume has no deadline; set, it is the default.
+  `sproozi run` and `resume` take `--max-duration DURATION|none` for one start.
+  The session keeps an explicit choice on its catalogue entry, and later
+  resumes reuse it unless they choose again. A session with no choice follows
+  the home's current default. `sproozi init` writes no `maxDuration`; an
+  existing configuration keeps its value.
+- *Who caps.* A remote executor's `maxDuration` is optional. Set, a launch's
+  deadline must fall within it and a launch with no deadline is denied. Unset,
+  the executor admits any deadline, none included. The policy's
+  `maxExecutionDuration` caps it the same way when set; with both, the shorter
+  applies. A `run --remote` task (`work.Submit.maxDuration`, part of the
+  submission's intent digest) without a choice gets the executor's
+  `maxDuration`, or none; a choice, `none` included, must fit that cap.
+- *One rule.* `internal/deadline` holds every check of whether an execution
+  deadline has passed. The zero value is no deadline and never passes. A set
+  deadline is reached at its instant (`!now.Before(at)`). The controller used to
+  time out strictly after the instant while the gateway refused at it; both now
+  use the helper. `Earliest` never picks "none" over a set deadline. `Context`
+  returns a cancel-only context when there is none. `Done` polls the wall clock
+  for a set deadline and never closes without one. It replaces
+  `nativepty.AtDeadline`.
+- *Wire format.* JSON keeps `time.Time` fields and RFC 3339 for a set deadline.
+  "None" is the field omitted (`omitzero`); the zero time also decodes as none.
+  The native supervisor and checkpoint helper take `--deadline none`.
 
-Until then, a session's deadline is at most 24 hours: the home's `maxDuration`
-limit.
+Every validator before this change rejected a zero deadline, so a mixed-version
+system fails closed. An older service, remote executor, supervisor or gateway
+refuses a launch, registration or journal without a deadline. An older service
+or executor refuses the new `maxDuration` request field: the control decoders
+are strict. The CLI explains both.
+
+Three checks would have passed a zero deadline through a cap and were changed
+explicitly: the remote executor's horizon check
+(`internal/session/profile/server.go`), the Kubernetes placement's admission
+(`internal/runtime/kubernetes/placement`), and `registry.EffectiveDeadline`.
+Sites that treated a zero deadline as already expired now use the helper.
+Examples: the Kubernetes placement's Pod wait, which bounded an interactive
+visit by `min(deadline, now+2m)`; `QuiesceNative`'s thread wait; and Docker's
+`Exited`, which would have stopped the agent on its first poll. Docker's exit
+record would also have marked every crash as a deadline stop.
+
+This replaces the statements in ADRs 0004, 0010, 0012 and 0034 that every
+execution has a deadline. Where an execution has one, those records still hold:
+a move keeps it, a resume starts a new one, and nothing extends it.
 
 ## Alternatives
 
@@ -103,11 +136,29 @@ limit.
 - **A loopback forwarder without a secret.** The checkpoint helper and any other
   container in the Pod share loopback, and the helper is deliberately given no
   credential.
+- **A very long default deadline** instead of none, such as 30 days. It keeps
+  every check unchanged, but it is a cap the owner did not choose, and a
+  long-lived session would still be cut off without warning.
+- **A `Deadline` type on every wire struct.** It would make "none" explicit in
+  each type, but it would change every launch, record and test. Wire structs
+  keep `time.Time` and convert at each check with `deadline.At`, so no
+  execution-deadline comparison remains outside the helper.
+- **"none" on the executor's `maxDuration`.** Omitting it already means no
+  cap; a second spelling for a cap would be ambiguous with the home's
+  `maxDuration`, where `"none"` means no default deadline.
 
 ## Consequences
 
 - Existing AgentPolicies that took the old `1h` default keep `1h` stored. Remove
   the field from a policy to make its runs unbounded.
+- New installations run sessions without a deadline. A forgotten session runs
+  and holds its sandbox until stopped; `sproozi ls` shows `none` for it.
+- A remote executor without `maxDuration` that serves Hermes or other work
+  started on someone's behalf lets that work ask for no deadline. Such
+  executors keep `maxDuration` set, or their policy sets
+  `maxExecutionDuration`.
+- A session without a deadline cannot move to a capped cluster; resume it with
+  `--max-duration` first.
 - A run with no deadline holds its admission slot and budget reservation until
   it ends or is cancelled. `maxActiveRuns` and budgets remain the bounds.
 - ADR 0040's window, in which sandboxes lose a recreated gateway Service until
@@ -137,17 +188,29 @@ limit.
   forwarder unnecessary.
 - Gateway address changes becoming routine, which would make ADR 0040's
   unbounded window matter.
+- Forgotten sessions without a deadline becoming a cost problem, which would
+  justify an idle timeout or a default deadline again.
 
 ## Links
 
 - Reference: [AgentPolicy](../reference/agentpolicy.md),
   [security hardening](../reference/security-hardening.md),
-  [remote executor](../../cmd/session-profile/README.md)
+  [remote executor](../../cmd/session-profile/README.md),
+  [session commands](../reference/session-commands.md),
+  [local installation](../reference/local-installation.md)
 - Implementation: `api/v1alpha1/agentpolicy_types.go`,
   `internal/runtime/kubernetes/registry/binding.go`,
   `internal/controller/reconciler.go`,
   `internal/runtime/kubernetes/placement/placement.go`,
   `internal/nativeproxy`, `cmd/native-session/gateway_forwarder.go`,
-  `internal/harness/native_launch.go`, `hack/verify/harness-process`
+  `internal/harness/native_launch.go`, `hack/verify/harness-process`,
+  `internal/deadline`, `internal/session/home/` (`config.go`, `service.go`,
+  `catalog.go`, `socket.go`), `internal/work/owner.go`,
+  `internal/session/profile/server.go`, `cmd/sproozi/` (`parse.go`,
+  `output.go`)
 - Related: [ADR 0040](0040-sandboxes-reach-the-gateway-without-dns.md),
-  [ADR 0031](0031-user-profile-for-managed-sessions.md)
+  [ADR 0031](0031-user-profile-for-managed-sessions.md); replaces part of
+  [ADR 0004](0004-portable-sessions-and-bounded-executions.md),
+  [ADR 0010](0010-managed-session-authority-and-admission.md),
+  [ADR 0012](0012-retained-work-and-fresh-session-continuations.md) and
+  [ADR 0034](0034-resume-continues-every-home-session.md)

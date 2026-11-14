@@ -8,7 +8,11 @@ launch settings or upstream addresses.
 ## Launch settings
 
 Task input, harness conversation ID, deadline, model options and trusted
-instructions have the same meaning in both placements. Native transcript
+instructions have the same meaning in both placements. A launch may have no
+deadline: its JSON omits `deadline`, and the supervisor and checkpoint helper
+take `--deadline none`, so the harness runs until stopped. A set deadline is
+reached at its instant on the wall clock, the same rule in every component
+(`internal/deadline`). Native transcript
 observation has a 64 MiB limit, separate from the total checkpoint size limit.
 Docker obtains gateway access through home. Kubernetes reads projected access
 from fixed runtime-owned paths.

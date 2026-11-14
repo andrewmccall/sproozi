@@ -75,7 +75,7 @@ func TestRenderedConfigIsAcceptedByTheHomeService(t *testing.T) {
 	if len(read.Harnesses) != 1 || read.Harnesses[0].GatewayPort != 18444 || read.Harnesses[0].NativeOptions != nil {
 		t.Fatalf("second harness %+v", read.Harnesses)
 	}
-	if read.MaxDuration != "30m" || read.Allowances["model.inference"] != (session.Allowance{}) {
+	if read.MaxDuration != "" || read.Allowances["model.inference"] != (session.Allowance{}) {
 		t.Fatal("starter limits differ from the proposal")
 	}
 	if read.Local.AgentLimits != agentLimits || read.Local.VolumeBytes != 512<<20 || read.Local.MaxCheckpointBytes != 32<<20 || read.Local.RetainedBytes != 256<<20 {
@@ -149,6 +149,7 @@ func TestMergeKeepsUserEditsAddsHarnessesAndRefusesPlacementChanges(t *testing.T
 func TestWriteConfigBacksUpTheExistingFile(t *testing.T) {
 	l, inst := testInstallation(t)
 	c := renderConfig(l, inst, DefaultInstructions)
+	c.MaxDuration = "30m"
 	if err := writeConfig(l, c, false); err != nil {
 		t.Fatal(err)
 	}

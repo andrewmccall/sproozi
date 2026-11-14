@@ -125,6 +125,12 @@ the approved repository/ref, principal, duration, byte limit and allowances:
 installation's `config.json`: 32 MiB for a new `sproozi init`
 installation, 8 MiB for one created before that default changed.
 
+`maxDuration` caps each task's deadline, and a task submitted without
+`--max-duration` gets it. This executor takes tasks from Hermes on someone's
+behalf, so keep it set. Omitted, tasks may run with no deadline unless the
+policy's `maxExecutionDuration` caps them; see
+[ADR 0056](../adr/0056-whoever-starts-work-sets-its-deadline.md).
+
 Apply namespaces from the installation before creating these objects. The
 remote executor, its profile and credentials, and its managed runs live in
 `sproozi-sessions`, apart from the gateway's configuration in `sproozi-system`:

@@ -93,8 +93,8 @@ var commands = []command{
 			"agent program unchanged, for example: sproozi run -- --model gpt-5.\n\n" +
 			deadlineHelp + "\n\n" +
 			"With --remote, submit a task to run in a Kubernetes cluster instead.",
-		flags: []string{"harness", "login", "detach", "include-ignored", "remote", "context", "namespace", "task",
-			"task-file",
+		flags: []string{"harness", "login", "detach", "include-ignored", "max-duration", "remote", "context", "namespace",
+			"task", "task-file",
 			"repository", "project", "json", "root"},
 		hiddenFlags: append([]string{"id", "operation", "workspace-from", "checkpoint-digest", "revision"},
 			locationFlags...)},
@@ -114,7 +114,7 @@ var commands = []command{
 		summary: "Continue a stopped session where it left off",
 		about: "Continue a stopped session where it left off and connect your terminal to it (-d skips that).\n" +
 			"Arguments after -- go to the agent program unchanged.\n\n" + deadlineHelp,
-		flags: []string{"detach", "json", "root"}, hiddenFlags: sessionPlumbing(true)},
+		flags: []string{"detach", "max-duration", "json", "root"}, hiddenFlags: sessionPlumbing(true)},
 	{name: cmdCancel, operands: "ID", group: groupSessions, session: true,
 		summary: "Stop a session now, discarding the agent's current turn",
 		flags:   []string{"remote", "context", "namespace", "json", "root"}, hiddenFlags: sessionPlumbing(true)},
@@ -167,9 +167,11 @@ var commands = []command{
 }
 
 // deadlineHelp says how long a session runs and where that is set.
-const deadlineHelp = "Each run or resume lasts until its deadline: 30 minutes by default. Change it with\n" +
-	"\"maxDuration\" in config.json in the installation directory, then restart the service.\n" +
-	"\"sproozi stop\" before then keeps the work; \"sproozi resume\" starts a new deadline."
+const deadlineHelp = "A session runs until you stop it, or until its deadline if it has one. --max-duration 8h\n" +
+	"sets one for this run or resume, and --max-duration none removes it; the session keeps\n" +
+	"that choice when resumed. Otherwise \"maxDuration\" in config.json in the installation\n" +
+	"directory sets the default (none when it is absent; restart the service after changing it).\n" +
+	"A cluster may cap a --remote run. \"sproozi stop\" keeps the work; \"sproozi resume\" starts a new deadline."
 
 // sessionPlumbing are the hidden flags of a session command: the full ID,
 // the retry operation and the location flags.
@@ -191,8 +193,10 @@ func (f flagSpec) boolean() bool { return f.value == "" }
 var flagSpecs = map[string]flagSpec{
 	"harness": {value: "NAME",
 		help: "agent to run: " + harness.ManagedKindList() + " (default: the first one set up)"},
-	"detach":                {short: "d", help: "start without connecting your terminal"},
-	"include-ignored":       {value: "PATH", help: "also copy this Git-ignored file into the session; repeatable"},
+	"detach":          {short: "d", help: "start without connecting your terminal"},
+	"include-ignored": {value: "PATH", help: "also copy this Git-ignored file into the session; repeatable"},
+	"max-duration": {value: "DURATION",
+		help: "how long this session may run, such as 8h, or none for no deadline (default: maxDuration in config.json)"},
 	"remote":                {help: "run the task in a Kubernetes cluster instead of on this machine"},
 	"context":               {value: "NAME", help: "kubeconfig context or file for the cluster (default: sproozi)"},
 	"namespace":             {value: "NS", help: "namespace of Sproozi in that cluster"},

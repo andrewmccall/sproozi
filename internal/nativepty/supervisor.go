@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/deadline"
 	"golang.org/x/sys/unix"
 )
 
@@ -102,8 +103,8 @@ type Attachment struct {
 }
 
 func Start(launch Launch) (*Supervisor, error) {
-	if !filepath.IsAbs(launch.Executable) || !filepath.IsAbs(launch.Dir) || launch.Env == nil || !launch.Deadline.After(time.Now()) {
-		return nil, errors.New("native terminal requires an absolute executable/workspace, explicit environment and future deadline")
+	if !filepath.IsAbs(launch.Executable) || !filepath.IsAbs(launch.Dir) || launch.Env == nil || deadline.At(launch.Deadline).Passed(time.Now()) {
+		return nil, errors.New("native terminal requires an absolute executable/workspace, explicit environment and a deadline not yet passed")
 	}
 	if launch.Size.Rows == 0 || launch.Size.Columns == 0 {
 		return nil, errors.New("native terminal dimensions must be positive")
@@ -140,7 +141,7 @@ func Start(launch Launch) (*Supervisor, error) {
 	go func() {
 		select {
 		case <-s.done:
-		case <-AtDeadline(launch.Deadline, s.done):
+		case <-deadline.At(launch.Deadline).Done(s.done):
 			s.force(Deadline)
 		}
 	}()

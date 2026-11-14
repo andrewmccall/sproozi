@@ -509,8 +509,20 @@ Also seen as: ChatGPT session.
 ### Execution
 
 One approved period of work on a session, with its own permissions, allowance
-and deadline. `resume` starts a new execution; `move` keeps the current one.
-Its ID is `executionId`. Also seen as: Sproozi execution.
+and [execution deadline](#execution-deadline). `resume` starts a new execution;
+`move` keeps the current one. Its ID is `executionId`. Also seen as: Sproozi
+execution.
+
+### Execution deadline
+
+The wall-clock instant at which an execution stops, or none. Whoever starts the
+work sets it: `sproozi run` and `resume` take `--max-duration DURATION|none`,
+otherwise the session's earlier choice, otherwise the home's `maxDuration`,
+otherwise none. A remote executor's `maxDuration` and an AgentPolicy's
+`maxExecutionDuration` cap it when set and refuse an execution without one. A
+move keeps it. A set deadline is reached at its instant, not after it. See
+[ADR 0056](docs/adr/0056-whoever-starts-work-sets-its-deadline.md). Also seen
+as: original deadline, session deadline.
 
 ### Placement
 

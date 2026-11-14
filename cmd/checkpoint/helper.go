@@ -17,8 +17,8 @@ import (
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
+	"github.com/andrewmccall/sproozi/internal/deadline"
 	"github.com/andrewmccall/sproozi/internal/harness"
-	"github.com/andrewmccall/sproozi/internal/nativepty"
 	"github.com/andrewmccall/sproozi/internal/privatefs"
 	"github.com/andrewmccall/sproozi/internal/workspace"
 )
@@ -104,8 +104,8 @@ func finishAllowed() error {
 
 // hold keeps the quota-backed volume mounted after the native container stops.
 // Its private socket and receipt are never mounted into the native container.
-func hold(deadline time.Time) error {
-	if !deadline.After(time.Now()) {
+func hold(until deadline.Deadline) error {
+	if until.Passed(time.Now()) {
 		return errors.New("checkpoint helper deadline expired")
 	}
 	if err := os.Mkdir(helperDirectory, 0700); err != nil {
@@ -129,7 +129,7 @@ func hold(deadline time.Time) error {
 	go func() {
 		select {
 		case <-ctx.Done():
-		case <-nativepty.AtDeadline(deadline, ctx.Done()):
+		case <-until.Done(ctx.Done()):
 			expire(context.DeadlineExceeded)
 		}
 		_ = listener.Close()

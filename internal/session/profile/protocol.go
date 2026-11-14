@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/agentprofile"
+	"github.com/andrewmccall/sproozi/internal/deadline"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/workspace"
@@ -187,7 +188,7 @@ func validateLaunch(l session.Launch) error {
 	if err := workspace.ValidateIgnoredPaths(l.IncludeIgnored); err != nil {
 		return err
 	}
-	if l.Harness.Validate() != nil || !validID(l.ExecutionID) || !validID(l.OperationID) || !validID(l.AllocationID) || !validID(l.ThreadID) || l.Epoch == 0 || !validName(l.Placement) || !validDigest(l.InstructionDigest) || !validDigest(l.CheckpointDigest) || l.Deadline.IsZero() || len(l.Allowances) == 0 || len(l.Allowances) > 32 ||
+	if l.Harness.Validate() != nil || !validID(l.ExecutionID) || !validID(l.OperationID) || !validID(l.AllocationID) || !validID(l.ThreadID) || l.Epoch == 0 || !validName(l.Placement) || !validDigest(l.InstructionDigest) || !validDigest(l.CheckpointDigest) || len(l.Allowances) == 0 || len(l.Allowances) > 32 ||
 		l.ProfileDigest != "" && !agentprofile.ValidDigest(l.ProfileDigest) {
 		return errors.New("profile: invalid launch")
 	}
@@ -216,8 +217,8 @@ func sameLaunch(a, b session.Launch) bool {
 func limitFits(want, ceiling session.Limit) bool {
 	return !ceiling.Bounded || want.Bounded && want.Value <= ceiling.Value
 }
-func ensureAlive(deadline time.Time) error {
-	if !time.Now().Before(deadline) {
+func ensureAlive(at time.Time) error {
+	if deadline.At(at).Passed(time.Now()) {
 		return &Rejection{Code: CodeExpired}
 	}
 	return nil

@@ -1369,3 +1369,57 @@ func TestPolicyWithoutDurationUsesExecutorLimit(t *testing.T) {
 		t.Fatalf("launch past the executor's limit: err = %v, want denied", err)
 	}
 }
+
+// clearPolicyDuration removes the fixture policy's maxExecutionDuration.
+func clearPolicyDuration(t *testing.T, kube client.Client) {
+	t.Helper()
+	var policy api.AgentPolicy
+	if err := kube.Get(t.Context(), client.ObjectKey{Namespace: fixtureNamespace, Name: fixturePolicy}, &policy); err != nil {
+		t.Fatal(err)
+	}
+	policy.Spec.MaxExecutionDuration = metav1.Duration{}
+	if err := kube.Update(t.Context(), &policy); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Either cap, the executor's maxDuration or the policy's
+// maxExecutionDuration, denies a launch with no deadline (ADR 0056).
+func TestCapDeniesLaunchWithoutDeadline(t *testing.T) {
+	t.Parallel()
+	for name, executorCap := range map[string]time.Duration{"executor": time.Hour, "policy": 0} {
+		t.Run(name, func(t *testing.T) {
+			p, kube, _, l, _ := setup(t)
+			p.config.MaxDuration = executorCap
+			if executorCap > 0 {
+				clearPolicyDuration(t, kube)
+			}
+			l.Deadline = time.Time{}
+			var rejection *profile.Rejection
+			if _, err := p.liveProfileInput(t.Context(), l, false); !errors.As(err, &rejection) || rejection.Code != profile.CodeDenied {
+				t.Fatalf("launch without deadline under a cap: err = %v, want denied", err)
+			}
+		})
+	}
+}
+
+// With neither cap, a launch without a deadline prepares, activates and
+// stops with its checkpoint and sealed usage like any other.
+func TestUncappedExecutorRunsLaunchWithoutDeadline(t *testing.T) {
+	t.Parallel()
+	p, kube, _, l, data := setup(t)
+	p.config.MaxDuration = 0
+	clearPolicyDuration(t, kube)
+	l.Deadline = time.Time{}
+	i, err := p.Prepare(t.Context(), l, data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = p.Activate(t.Context(), l, i); err != nil {
+		t.Fatal(err)
+	}
+	stopped, err := p.Stop(t.Context(), l, i)
+	if err != nil || !stopped.ActualStopped || stopped.Receipt == nil || !stopped.Launch.Deadline.IsZero() {
+		t.Fatalf("stop without deadline: %+v %v", stopped, err)
+	}
+}

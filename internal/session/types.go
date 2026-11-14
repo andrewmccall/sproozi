@@ -62,7 +62,7 @@ type Launch struct {
 	ThreadID          string               `json:"threadId"`
 	Task              string               `json:"task,omitempty"`
 	InstructionDigest string               `json:"instructionDigest"`
-	Deadline          time.Time            `json:"deadline"`
+	Deadline          time.Time            `json:"deadline,omitzero"`
 	Allowances        map[string]Allowance `json:"allowances"`
 	CheckpointDigest  string               `json:"checkpointDigest"`
 	IncludeIgnored    []string             `json:"includeIgnored,omitempty"`
@@ -342,7 +342,7 @@ type Record struct {
 	HarnessArgs       []string `json:"harnessArgs,omitempty"`
 	// Login is the named login every visit signs in with (ADR 0049).
 	Login            string               `json:"login,omitempty"`
-	Deadline         time.Time            `json:"deadline"`
+	Deadline         time.Time            `json:"deadline,omitzero"`
 	Ceiling          map[string]Allowance `json:"ceiling"`
 	Remaining        map[string]Allowance `json:"remaining"`
 	Checkpoint       Checkpoint           `json:"checkpoint"`

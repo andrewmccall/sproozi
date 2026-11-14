@@ -21,6 +21,7 @@ import (
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/budget"
+	"github.com/andrewmccall/sproozi/internal/deadline"
 	"github.com/andrewmccall/sproozi/internal/gateway"
 	runtimedocker "github.com/andrewmccall/sproozi/internal/runtime/docker"
 	"github.com/andrewmccall/sproozi/internal/session"
@@ -129,7 +130,7 @@ func (o *Owner) validateIntent(launch session.Launch, instance session.Incarnati
 			return errors.New("docker gateway: invalid launch name")
 		}
 	}
-	if launch.Epoch == 0 || launch.InstructionDigest != o.instructionDigest || launch.Deadline.IsZero() || instance.ExecutionID != launch.AllocationID || !hexDigest.MatchString(instance.ResourceUID) || len(launch.Allowances) == 0 || len(launch.Allowances) > 32 {
+	if launch.Epoch == 0 || launch.InstructionDigest != o.instructionDigest || instance.ExecutionID != launch.AllocationID || !hexDigest.MatchString(instance.ResourceUID) || len(launch.Allowances) == 0 || len(launch.Allowances) > 32 {
 		return errors.New("docker gateway: invalid immutable launch binding")
 	}
 	if initial {
@@ -250,7 +251,7 @@ func (o *Owner) Initialize(ctx context.Context, launch session.Launch, instance 
 	if err := o.validateIntent(launch, instance, launch.CheckpointDigest == ""); err != nil {
 		return "", err
 	}
-	if !launch.Deadline.After(time.Now()) {
+	if deadline.At(launch.Deadline).Passed(time.Now()) {
 		return "", errors.New("docker gateway: launch expired")
 	}
 	r, err := o.load(launch.AllocationID)
@@ -306,7 +307,7 @@ func (o *Owner) Activate(ctx context.Context, launch session.Launch, instance se
 	if err != nil {
 		return err
 	}
-	if (r.Phase != inactive && r.Phase != active) || !r.Launch.Deadline.After(time.Now()) {
+	if (r.Phase != inactive && r.Phase != active) || deadline.At(r.Launch.Deadline).Passed(time.Now()) {
 		return errors.New("docker gateway: allocation cannot activate")
 	}
 	if err = o.bound(ctx, r, true); err != nil {
@@ -449,7 +450,7 @@ func (o *Owner) activeRecord(id string) (record, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	r, err := o.load(id)
-	if err != nil || r.Phase != active || !r.Launch.Deadline.After(time.Now()) {
+	if err != nil || r.Phase != active || deadline.At(r.Launch.Deadline).Passed(time.Now()) {
 		return record{}, gateway.ErrGrantRevoked
 	}
 	return r, nil

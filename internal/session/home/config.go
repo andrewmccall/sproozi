@@ -20,6 +20,7 @@ import (
 	"time"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
+	"github.com/andrewmccall/sproozi/internal/deadline"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/privatefs"
 	"github.com/andrewmccall/sproozi/internal/project"
@@ -34,7 +35,7 @@ type Config struct {
 	DockerConfig     string                        `json:"dockerConfig"`
 	Local            runtimedocker.PlacementConfig `json:"local"`
 	Allowances       map[string]session.Allowance  `json:"allowances"`
-	MaxDuration      string                        `json:"maxDuration"`
+	MaxDuration      string                        `json:"maxDuration,omitempty"`
 	Model            string                        `json:"model,omitempty"`
 	NativeOptions    []string                      `json:"nativeOptions,omitempty"`
 	Gateway          GatewayConfig                 `json:"gateway"`
@@ -203,14 +204,23 @@ func parseConfig(b []byte) (Config, error) {
 	if err := requiredSettings(c); err != nil {
 		return c, err
 	}
-	duration, err := time.ParseDuration(c.MaxDuration)
-	if err != nil || duration <= 0 || duration > 24*time.Hour {
-		return c, errors.New("maxDuration: positive duration of at most 24h, such as \"30m\", required")
+	if _, err := defaultDuration(c.MaxDuration); err != nil {
+		return c, errors.New("maxDuration: " + err.Error() + "; omit it for no deadline")
 	}
-	if err = validateProjectApprovals(c); err != nil {
+	if err := validateProjectApprovals(c); err != nil {
 		return c, err
 	}
 	return c, nil
+}
+
+// defaultDuration reads the home's maxDuration, the deadline a run or resume
+// gets when it does not choose one (ADR 0056). Omitted or "none" is no
+// deadline, returned as 0.
+func defaultDuration(s string) (time.Duration, error) {
+	if s == "" {
+		return 0, nil
+	}
+	return deadline.ParseMaxDuration(s)
 }
 
 // ProfileFolder is the user's profile, beside the configuration file. Each

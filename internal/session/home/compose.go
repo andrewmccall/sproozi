@@ -247,8 +247,8 @@ func Open(c Config, log io.Writer) (_ *Service, err error) {
 		return nil, err
 	}
 
-	duration, err := time.ParseDuration(c.MaxDuration)
-	if err != nil || duration <= 0 || duration > 24*time.Hour {
+	duration, err := defaultDuration(c.MaxDuration)
+	if err != nil {
 		return nil, errors.New("home: invalid duration")
 	}
 	if err = privatefs.EnsureDir(c.DockerConfig); err != nil {

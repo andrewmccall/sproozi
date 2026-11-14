@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/andrewmccall/sproozi/internal/budget"
+	"github.com/andrewmccall/sproozi/internal/deadline"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/workspace"
 	"github.com/google/uuid"
@@ -54,7 +55,7 @@ func validateLaunch(l Launch) error {
 	// Only a first visit from a Git workspace lacks a thread, and it then has
 	// no checkpoint either; every other launch names both.
 	fresh := l.ThreadID == "" && l.CheckpointDigest == ""
-	if l.Harness.Validate() != nil || !validUUID(l.ExecutionID) || !validUUID(l.OperationID) || !validUUID(l.AllocationID) || !fresh && (!validUUID(l.ThreadID) || !validDigest(l.CheckpointDigest)) || !validName(l.Placement) || l.Epoch == 0 || !validDigest(l.InstructionDigest) || l.Deadline.IsZero() {
+	if l.Harness.Validate() != nil || !validUUID(l.ExecutionID) || !validUUID(l.OperationID) || !validUUID(l.AllocationID) || !fresh && (!validUUID(l.ThreadID) || !validDigest(l.CheckpointDigest)) || !validName(l.Placement) || l.Epoch == 0 || !validDigest(l.InstructionDigest) {
 		return errors.New("session: invalid launch identity")
 	}
 	if err := workspace.ValidateIgnoredPaths(l.IncludeIgnored); err != nil {
@@ -192,7 +193,7 @@ func validateJournalIdentity(r Record) error {
 	if err := workspace.ValidateIgnoredPaths(r.IncludeIgnored); err != nil {
 		return err
 	}
-	if r.Harness.Validate() != nil || r.Version != journalVersion || !validUUID(r.ID) || r.Session != "" && !validUUID(r.Session) || !validDigest(r.InstructionDigest) || r.Deadline.IsZero() || len(r.Operations) == 0 || len(r.Operations) > maxOperations {
+	if r.Harness.Validate() != nil || r.Version != journalVersion || !validUUID(r.ID) || r.Session != "" && !validUUID(r.Session) || !validDigest(r.InstructionDigest) || len(r.Operations) == 0 || len(r.Operations) > maxOperations {
 		return errors.New("session: invalid journal identity")
 	}
 	if r.Workspace != "" && !validDigest(r.Workspace) {
@@ -367,7 +368,7 @@ func validatePhase(r Record) error {
 	return nil
 }
 func (c *Coordinator) beforeDeadline(l Launch) error {
-	if !c.now().Before(l.Deadline) {
+	if deadline.At(l.Deadline).Passed(c.now()) {
 		return errors.New("session: original deadline expired")
 	}
 	return nil

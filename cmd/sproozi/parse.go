@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/deadline"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/project"
 	"github.com/andrewmccall/sproozi/internal/session/home"
@@ -40,6 +41,7 @@ type options struct {
 	id, path           string
 	harnessArgs        []string
 	login              string
+	maxDuration        string
 	root, configPath   string
 	socket             string
 	socketGiven        bool
@@ -134,6 +136,7 @@ func parse(args []string) (options, error) {
 	q.instructionsFile, q.context, q.namespace = str("instructions-file"), str("context"), str("namespace")
 	q.task, q.repository, q.project = str("task"), str("repository"), project.ID(str("project"))
 	q.operation, q.id, q.login = str("operation"), str("id"), str("login")
+	q.maxDuration = str("max-duration")
 	q.imagePrefix, q.imageTag, q.platform = str("image-prefix"), str("image-tag"), str("platform")
 	q.push = boolean("push")
 	q.local = boolean("local")
@@ -254,10 +257,8 @@ func (q *options) validate(str func(string) string) error {
 			return usagef("--harness must be %s", harness.ManagedKindList())
 		}
 	}
-	if q.loginGiven {
-		if err := harness.ValidateLogin(q.login); err != nil {
-			return usagef("--login: %v", err)
-		}
+	if err := q.validateSessionChoices(); err != nil {
+		return err
 	}
 	if q.project != "" && !project.ValidID(q.project) {
 		return usagef("--project %q is not a valid project ID", q.project)
@@ -307,6 +308,22 @@ func (q *options) validate(str func(string) string) error {
 			return err
 		}
 		q.socket = absolute
+	}
+	return nil
+}
+
+// validateSessionChoices checks the login and maximum duration a session
+// starts with.
+func (q *options) validateSessionChoices() error {
+	if q.loginGiven {
+		if err := harness.ValidateLogin(q.login); err != nil {
+			return usagef("--login: %v", err)
+		}
+	}
+	if q.maxDuration != "" {
+		if _, err := deadline.ParseMaxDuration(q.maxDuration); err != nil {
+			return usagef("--max-duration: %v", err)
+		}
 	}
 	return nil
 }

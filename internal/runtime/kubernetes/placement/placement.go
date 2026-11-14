@@ -18,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/andrewmccall/sproozi/internal/agentcontract"
+	"github.com/andrewmccall/sproozi/internal/deadline"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/budget"
@@ -123,7 +124,7 @@ func Open(config Config) (*Placement, error) {
 	return &Placement{config: config, registry: store, ledger: budgetkube.NewLedger(config.Kube, config.BudgetNamespace), exec: executor, lock: lock}, nil
 }
 func validateConfig(config Config) error {
-	if config.Harness.Validate() != nil || config.Kube == nil || config.RESTConfig == nil || len(validation.IsDNS1123Label(config.Namespace)) != 0 || len(validation.IsDNS1123Label(config.BudgetNamespace)) != 0 || config.AgentNamespace != runtimekube.AgentsNamespace || len(validation.IsDNS1123Subdomain(config.TemplateName)) != 0 || config.Principal == "" || config.Name == "" || !digestValid(config.InstructionDigest) || config.MaxDuration <= 0 || config.MaxCheckpointBytes <= 0 || config.MaxCheckpointBytes > 256<<20 || !filepath.IsAbs(config.Directory) || len(config.Allowances) == 0 || len(config.Allowances) > 32 {
+	if config.Harness.Validate() != nil || config.Kube == nil || config.RESTConfig == nil || len(validation.IsDNS1123Label(config.Namespace)) != 0 || len(validation.IsDNS1123Label(config.BudgetNamespace)) != 0 || config.AgentNamespace != runtimekube.AgentsNamespace || len(validation.IsDNS1123Subdomain(config.TemplateName)) != 0 || config.Principal == "" || config.Name == "" || !digestValid(config.InstructionDigest) || config.MaxDuration < 0 || config.MaxCheckpointBytes <= 0 || config.MaxCheckpointBytes > 256<<20 || !filepath.IsAbs(config.Directory) || len(config.Allowances) == 0 || len(config.Allowances) > 32 {
 		return errors.New("placement: invalid fixed configuration")
 	}
 	for _, allowance := range config.Allowances {
@@ -187,7 +188,7 @@ func (p *Placement) liveProfileInput(ctx context.Context, l session.Launch, init
 	if err := p.validateInput(l, initial); err != nil {
 		return nil, err
 	}
-	if !time.Now().Before(l.Deadline) {
+	if deadline.At(l.Deadline).Passed(time.Now()) {
 		return nil, &profile.Rejection{Code: profile.CodeExpired}
 	}
 	var template api.AgentTemplate
@@ -215,12 +216,14 @@ func (p *Placement) liveProfileInput(ctx context.Context, l session.Launch, init
 	if policyengine.Evaluate(policy.Spec, template.Spec, api.AgentRunSpec{Capabilities: capabilities}, runtime.Spec) != nil {
 		return nil, &profile.Rejection{Code: profile.CodeDenied}
 	}
-	// A policy without maxExecutionDuration leaves the executor's own limit.
+	// The executor's maxDuration and the policy's maxExecutionDuration each
+	// cap the deadline when set; under either cap a launch must have one.
+	// With neither, any deadline is admitted, none included (ADR 0056).
 	duration := p.config.MaxDuration
-	if limit := policy.Spec.MaxExecutionDuration.Duration; limit > 0 {
-		duration = min(duration, limit)
+	if limit := policy.Spec.MaxExecutionDuration.Duration; limit > 0 && (duration == 0 || limit < duration) {
+		duration = limit
 	}
-	if duration <= 0 || l.Deadline.After(time.Now().Add(duration)) {
+	if !deadline.At(l.Deadline).Fits(time.Now(), duration) {
 		return nil, &profile.Rejection{Code: profile.CodeDenied}
 	}
 	return p.ceilings(l, policy.Spec)

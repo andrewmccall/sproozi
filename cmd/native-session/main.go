@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/deadline"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/nativepty"
 	"github.com/google/uuid"
@@ -113,11 +114,11 @@ func run(args []string) error {
 		return serve(c, false)
 	}
 	if len(args) == 4 && args[0] == "serve" && args[1] == "--bootstrap" && args[2] == "--deadline" {
-		deadline, err := time.Parse(time.RFC3339Nano, args[3])
-		if err != nil || !deadline.After(time.Now()) {
-			return errors.New("bootstrap requires a future absolute deadline")
+		until, err := deadline.Parse(args[3])
+		if err != nil || until.Passed(time.Now()) {
+			return errors.New("bootstrap requires a future absolute deadline or none")
 		}
-		return serve(config{Deadline: deadline}, true)
+		return serve(config{Deadline: until.Time()}, true)
 	}
 	if len(args) != 1 {
 		return errors.New("use serve --config /etc/sproozi/native/config.json, activate, status, attach, or quiesce")
@@ -179,7 +180,7 @@ func serve(c config, bootstrap bool) error {
 		select {
 		case <-ctx.Done():
 			s.stop(causeTerminated)
-		case <-nativepty.AtDeadline(c.Deadline, s.done):
+		case <-deadline.At(c.Deadline).Done(s.done):
 			s.stop(causeDeadline)
 		case <-s.done:
 		}
@@ -369,7 +370,7 @@ func (s *server) activate() response {
 		r.Error = "native launch gate cannot reopen"
 		return r
 	}
-	if !s.config.Deadline.After(time.Now()) {
+	if deadline.At(s.config.Deadline).Passed(time.Now()) {
 		r.Error = "native deadline expired"
 		return r
 	}
@@ -537,7 +538,7 @@ func (s *server) quiesce() response {
 	s.markGated()
 	s.mu.Unlock()
 	n.GateInput()
-	ctx, cancel := context.WithDeadline(context.Background(), s.deadline)
+	ctx, cancel := deadline.At(s.deadline).Context(context.Background())
 	defer cancel()
 	timer := time.NewTicker(100 * time.Millisecond)
 	defer timer.Stop()
@@ -785,7 +786,7 @@ func (s *server) attach(conn net.Conn, scanner *bufio.Scanner, encoder *json.Enc
 	if emit(response{Op: harness.NativeAttach, PID: n.PID(), State: state}) != nil {
 		return
 	}
-	ctx, cancel := context.WithDeadline(context.Background(), s.deadline)
+	ctx, cancel := deadline.At(s.deadline).Context(context.Background())
 	defer cancel()
 	go func() {
 		defer cancel()

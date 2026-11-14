@@ -51,7 +51,7 @@ type serverConfig struct {
 	Directory          string                            `json:"directory"`
 	InstructionDigest  string                            `json:"instructionDigest"`
 	Allowances         map[string]session.Allowance      `json:"allowances"`
-	MaxDuration        string                            `json:"maxDuration"`
+	MaxDuration        string                            `json:"maxDuration,omitempty"`
 	MaxCheckpointBytes int64                             `json:"maxCheckpointBytes"`
 	WorkTokenFile      string                            `json:"workTokenFile,omitempty"`
 	Repositories       map[string]work.Repository        `json:"repositories,omitempty"`
@@ -151,8 +151,8 @@ func validateConfig(c serverConfig) error {
 				"or unbounded with value 0", name))
 		}
 	}
-	if duration, err := time.ParseDuration(c.MaxDuration); err != nil || duration <= 0 {
-		return invalid("maxDuration", "must be a positive Go duration such as \"30m\"")
+	if _, err := maxDuration(c.MaxDuration); err != nil {
+		return invalid("maxDuration", "must be a positive Go duration such as \"8h\", or omitted for no cap")
 	}
 	if c.MaxCheckpointBytes <= 0 || c.MaxCheckpointBytes > 256<<20 {
 		return invalid("maxCheckpointBytes", "must be between 1 and 268435456")
@@ -162,6 +162,21 @@ func validateConfig(c serverConfig) error {
 	}
 	return nil
 }
+
+// maxDuration reads the executor's cap on a launch's deadline. Omitted is no
+// cap: launches may have any deadline or none. Set, every launch must have a
+// deadline within it (ADR 0056).
+func maxDuration(s string) (time.Duration, error) {
+	if s == "" {
+		return 0, nil
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil || d <= 0 {
+		return 0, errors.New("maxDuration must be a positive duration")
+	}
+	return d, nil
+}
+
 func run(args []string) error {
 	flags := flag.NewFlagSet("session-profile", flag.ContinueOnError)
 	path := flags.String("config", "", "administrator configuration JSON file")
@@ -178,7 +193,7 @@ func run(args []string) error {
 	if err = validateConfig(fixed); err != nil {
 		return err
 	}
-	duration, err := time.ParseDuration(fixed.MaxDuration)
+	duration, err := maxDuration(fixed.MaxDuration)
 	if err != nil {
 		return err
 	}

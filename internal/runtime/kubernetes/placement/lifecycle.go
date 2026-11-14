@@ -13,6 +13,7 @@ import (
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/budget"
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
+	"github.com/andrewmccall/sproozi/internal/deadline"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	runtimekube "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
@@ -123,11 +124,13 @@ func terminated(pod *corev1.Pod) bool {
 	return false
 }
 func (p *Placement) waitPod(ctx context.Context, r registry.Record, wantRunning bool) (*corev1.Pod, error) {
-	deadline := r.OriginalDeadline
+	// An interactive visit must be running within two minutes; otherwise the
+	// wait lasts until the execution deadline, or the caller, when there is none.
+	until := deadline.At(r.OriginalDeadline)
 	if wantRunning && r.Task == "" {
-		deadline = minTime(deadline, time.Now().Add(2*time.Minute))
+		until = deadline.At(until.Bound(time.Now(), 2*time.Minute))
 	}
-	ctx, cancel := context.WithDeadline(ctx, deadline)
+	ctx, cancel := until.Context(ctx)
 	defer cancel()
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
@@ -150,12 +153,6 @@ func (p *Placement) waitPod(ctx context.Context, r registry.Record, wantRunning 
 		case <-ticker.C:
 		}
 	}
-}
-func minTime(a, b time.Time) time.Time {
-	if a.Before(b) {
-		return a
-	}
-	return b
 }
 func (p *Placement) Activate(ctx context.Context, l session.Launch, i session.Incarnation) error {
 	unlock, err := p.lockOperation(l)
@@ -704,7 +701,7 @@ func (p *Placement) Attach(ctx context.Context, l session.Launch, i session.Inca
 	if !running(pod, nativeContainer) || !pod.DeletionTimestamp.IsZero() {
 		return &profile.Rejection{Code: profile.CodeConflict}
 	}
-	ctx, cancel := context.WithDeadline(ctx, l.Deadline)
+	ctx, cancel := deadline.At(l.Deadline).Context(ctx)
 	defer cancel()
 	done := make(chan struct{})
 	defer close(done)

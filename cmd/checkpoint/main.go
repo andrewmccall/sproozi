@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
+	"github.com/andrewmccall/sproozi/internal/deadline"
 	"github.com/andrewmccall/sproozi/internal/harness"
 )
 
@@ -42,11 +43,11 @@ func run(args []string, input io.Reader, output io.Writer) error {
 		return initLogin(args[2], nativeUID, nativeGID)
 	}
 	if len(args) == 3 && args[0] == "hold" && args[1] == "--deadline" {
-		deadline, err := time.Parse(time.RFC3339Nano, args[2])
+		until, err := deadline.Parse(args[2])
 		if err != nil {
 			return err
 		}
-		return hold(deadline)
+		return hold(until)
 	}
 	c, err := parseCommand(args[0], args[1:])
 	if err != nil {

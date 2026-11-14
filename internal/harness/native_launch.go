@@ -16,6 +16,7 @@ import (
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 
 	"github.com/andrewmccall/sproozi/internal/agentcontract"
+	"github.com/andrewmccall/sproozi/internal/deadline"
 
 	"github.com/andrewmccall/sproozi/internal/nativeconfig"
 )
@@ -28,7 +29,7 @@ const nativeAnthropicKey = "ANTHROPIC_API_KEY"
 // checkpoint contents do not supply these instructions, options or credentials.
 type NativeLaunch struct {
 	Harness           NativeKind          `json:"harness"`
-	Deadline          time.Time           `json:"deadline"`
+	Deadline          time.Time           `json:"deadline,omitzero"`
 	ThreadID          string              `json:"threadId"`
 	ClientConfig      *NativeClientConfig `json:"clientConfig,omitempty"`
 	Task              string              `json:"task,omitempty"`
@@ -194,7 +195,7 @@ func (c NativeLaunch) Validate(now time.Time) error {
 	if err := c.Harness.Validate(); err != nil {
 		return err
 	}
-	if !c.Deadline.After(now) || (c.ThreadID != "" && !codexThreadID.MatchString(c.ThreadID)) ||
+	if deadline.At(c.Deadline).Passed(now) || (c.ThreadID != "" && !codexThreadID.MatchString(c.ThreadID)) ||
 		c.Env == nil || c.RolloutMaxBytes <= 0 || c.RolloutMaxBytes > NativeRolloutMaxBytes ||
 		len(c.ProfileArchive) > NativeProfileArchiveMaxBytes {
 		return errors.New("invalid native launch contract")

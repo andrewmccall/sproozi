@@ -73,7 +73,7 @@ service with `sproozi service stop` and `sproozi service start`.
 
 | Setting | Default |
 | --- | --- |
-| Execution deadline (`maxDuration`) | 30 minutes |
+| Execution deadline (`maxDuration`) | None: a session runs until you stop it. Set a Go duration such as `"8h"` for a default deadline on every run and resume; `run` and `resume` override it with `--max-duration`. There is no upper limit. Installations set up before this change keep the `"30m"` they were given. |
 | Worker CPU, memory, processes | 1 CPU, 1 GiB, 256 |
 | Checkpoint helper | 0.5 CPU, 512 MiB, 128 processes |
 | Network anchor | 0.1 CPU, 64 MiB, 32 processes |

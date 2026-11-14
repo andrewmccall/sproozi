@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/andrewmccall/sproozi/internal/deadline"
 )
 
 // NativeOp names one fixed operation of the private native supervisor. The
@@ -155,7 +157,7 @@ var ErrQuiesceUnacknowledged = errors.New("native quiesce reply unavailable")
 //
 // Gateway access stays open throughout so the admitted turn and its tools can
 // finish. Revocation, physical fencing and accounting remain backend steps.
-func QuiesceNative(ctx context.Context, control NativeControl, thread string, deadline time.Time,
+func QuiesceNative(ctx context.Context, control NativeControl, thread string, executionDeadline time.Time,
 	bind func(context.Context, string) error) (string, error) {
 	output, err := control(ctx, NativeGate)
 	if err != nil {
@@ -165,11 +167,8 @@ func QuiesceNative(ctx context.Context, control NativeControl, thread string, de
 		return "", err
 	}
 	if thread == "" {
-		wait := deadline
-		if bound := time.Now().Add(NativeQuiesceWait); bound.Before(wait) {
-			wait = bound
-		}
-		observed, err := observeNativeThread(ctx, control, wait, deadline)
+		until := deadline.At(executionDeadline)
+		observed, err := observeNativeThread(ctx, control, until.Bound(time.Now(), NativeQuiesceWait), until)
 		if err != nil {
 			return "", err
 		}
@@ -198,7 +197,7 @@ func QuiesceNative(ctx context.Context, control NativeControl, thread string, de
 // returns an empty UUID when the supervisor reports the visit turnless, and
 // ErrNativeTurnPending with what it waits for once wait passes before the
 // execution deadline.
-func observeNativeThread(ctx context.Context, control NativeControl, wait, deadline time.Time) (string, error) {
+func observeNativeThread(ctx context.Context, control NativeControl, wait time.Time, until deadline.Deadline) (string, error) {
 	waiting := "the native turn to complete"
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
@@ -224,7 +223,7 @@ func observeNativeThread(ctx context.Context, control NativeControl, wait, deadl
 		case <-ctx.Done():
 			return "", ctx.Err()
 		case <-ticker.C:
-			if !time.Now().Before(deadline) {
+			if until.Passed(time.Now()) {
 				return "", errors.New("native UUID unavailable before deadline")
 			}
 			if !time.Now().Before(wait) {

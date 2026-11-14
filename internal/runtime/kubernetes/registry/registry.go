@@ -20,6 +20,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/andrewmccall/sproozi/internal/agentcontract"
+	"github.com/andrewmccall/sproozi/internal/deadline"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/agentprofile"
@@ -92,7 +93,7 @@ type Registration struct {
 	OperationID       string                                    `json:"operationId"`
 	NativeUUID        string                                    `json:"nativeUuid"`
 	InstructionDigest string                                    `json:"instructionDigest"`
-	OriginalDeadline  time.Time                                 `json:"originalDeadline"`
+	OriginalDeadline  time.Time                                 `json:"originalDeadline,omitzero"`
 	TemplateName      string                                    `json:"templateName"`
 	Ceilings          map[api.CapabilityKind]api.EndpointBudget `json:"ceilings"`
 	WorkspaceDigest   string                                    `json:"workspaceDigest,omitempty"`
@@ -177,7 +178,7 @@ func (s *Store) Create(ctx context.Context, registration Registration) (Record, 
 	if !apierrors.IsNotFound(err) {
 		return Record{}, err
 	}
-	if !registration.OriginalDeadline.After(s.now()) {
+	if deadline.At(registration.OriginalDeadline).Passed(s.now()) {
 		return Record{}, ErrExpired
 	}
 	document, err := encode(stored{Version: 1, Registration: storedRegistration{Registration: registration}, Phase: Creating})
@@ -275,7 +276,7 @@ func (s *Store) Prepared(ctx context.Context, ref Reference, podUID string) (Rec
 
 func (s *Store) Activate(ctx context.Context, ref Reference) (Record, error) {
 	return s.change(ctx, ref, func(r *stored) error {
-		if !r.Registration.OriginalDeadline.After(s.now()) {
+		if deadline.At(r.Registration.OriginalDeadline).Passed(s.now()) {
 			return ErrExpired
 		}
 		if r.Phase == Active {
@@ -479,7 +480,7 @@ func validateRegistration(r Registration) error {
 	}
 	if !identifier.MatchString(r.Principal) || !identifier.MatchString(r.SessionID) || !identifier.MatchString(r.OperationID) || r.Epoch == 0 ||
 		!digestPattern.MatchString(r.InstructionDigest) ||
-		r.OriginalDeadline.IsZero() || r.OriginalDeadline.Location() != time.UTC || len(validation.IsDNS1123Subdomain(r.TemplateName)) != 0 ||
+		r.OriginalDeadline.Location() != time.UTC || len(validation.IsDNS1123Subdomain(r.TemplateName)) != 0 ||
 		len(validation.IsDNS1123Subdomain(r.IntendedRunName)) != 0 || len(r.Ceilings) == 0 || len(r.Ceilings) > 32 {
 		return fmt.Errorf("invalid mobility registration")
 	}

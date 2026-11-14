@@ -14,6 +14,7 @@ import (
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/localsetup"
 	"github.com/andrewmccall/sproozi/internal/session/home"
+	"github.com/andrewmccall/sproozi/internal/session/profile"
 	"github.com/andrewmccall/sproozi/internal/work"
 	"github.com/google/uuid"
 	"golang.org/x/term"
@@ -106,7 +107,8 @@ func (q *options) callError(ctx context.Context, err error) error {
 // without one: attach, or cancelling a session already cancelled.
 func (q *options) request(ctx context.Context) (home.Request, bool, error) {
 	request := home.Request{Action: homeActions[q.action()], ID: q.id, OperationID: q.operation,
-		IncludeIgnored: q.includeIgnored, Harness: harness.NativeKind(q.harness), HarnessArgs: q.harnessArgs, Login: q.login}
+		IncludeIgnored: q.includeIgnored, Harness: harness.NativeKind(q.harness), HarnessArgs: q.harnessArgs, Login: q.login,
+		MaxDuration: q.maxDuration}
 	switch q.action() {
 	case cmdRun:
 		request.Workspace = q.path
@@ -182,6 +184,11 @@ func (q *options) homeError(err error) error {
 		return &serviceDown{err: err, command: command}
 	case errors.Is(err, home.ErrUnknownSession):
 		return fmt.Errorf("no session %s on this machine; \"sproozi ls\" lists sessions", q.id)
+	case q.maxDuration != "" && strings.Contains(err.Error(), `unknown field "maxDuration"`):
+		// An older service refuses the field, so nothing was started.
+		return fmt.Errorf("the running Sproozi service is older than this command and does not accept "+
+			"--max-duration; nothing was started. Run \"sproozi service stop\" and %q to update it, "+
+			"or leave out --max-duration", startServiceCommand)
 	}
 	return err
 }
@@ -398,7 +405,20 @@ func (q *options) submitRemote(ctx context.Context) error {
 		return fmt.Errorf("profile: %w", err)
 	}
 	v, err := client.Submit(ctx, work.Submit{RequestID: q.operation, Repository: q.repository, Harness: kind,
-		Executor: target.Name, Task: q.task, Project: q.project, WorkspaceFrom: q.workspaceFrom, Profile: archive})
+		Executor: target.Name, Task: q.task, Project: q.project, WorkspaceFrom: q.workspaceFrom, Profile: archive,
+		MaxDuration: q.maxDuration})
+	var remote *profile.RemoteError
+	if err != nil && q.maxDuration != "" && errors.As(err, &remote) {
+		switch remote.Code {
+		case profile.CodeDenied:
+			return fmt.Errorf("%w: the cluster's maxDuration may not allow --max-duration %s; try a shorter "+
+				"duration, or leave it out for the cluster's limit", err, q.maxDuration)
+		case profile.CodeInvalid:
+			// An executor older than --max-duration refuses the field.
+			return fmt.Errorf("%w: the cluster's remote executor may be too old for --max-duration; leave it out "+
+				"or update the executor", err)
+		}
+	}
 	if err != nil {
 		return fmt.Errorf("%w; the outcome is unknown: to try again, repeat the command with --operation %s",
 			err, q.operation)
