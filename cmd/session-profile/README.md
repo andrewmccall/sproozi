@@ -311,8 +311,10 @@ credential configuration.
 
 `/work/mcp` exposes `sproozi_run`, `sproozi_status`, `sproozi_cancel` and
 `sproozi_sessions` to Hermes. Fixed JSON routes also support recovery. The home principal additionally permits checkpoint export and the
-exclusive one-way claim; the work token cannot claim ownership. TLS and bearer
-validation happen before request decoding.
+exclusive one-way claim, and starts, stops, resumes, attaches to and cancels
+[interactive sessions](../../docs/reference/remote-executors.md#interactive-sessions),
+including from an uploaded workspace; the work token can do none of these.
+TLS and bearer validation happen before request decoding.
 
 The executor owns the work it starts and drives each execution through an
 execution journal in the protected `directory/sessions`, the same one the local
