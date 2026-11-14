@@ -36,6 +36,14 @@ the genuine harness conversation ID (`threadId`) if the launch had none, then wa
 turn. The ID is recorded beside the launch; the launch itself never changes. Gateway access stays open until that point. Revoking access, confirming
 that the writer stopped and finalizing usage remain backend steps.
 
+A first visit with no task that the supervisor reports `turnless` records no
+ID: `quiesce` stops the harness and replies `stopped` with `turnless` and no
+`threadId`. Both placements then revoke access, confirm the writer stopped and
+finalize usage as for any stop, but capture no checkpoint; the session keeps
+the workspace the visit started from
+([ADR 0032](../adr/0032-stopping-a-visit-with-no-native-conversation.md)). Only
+that reply may end a stop without an ID.
+
 Malformed, oversized or incompatible replies, including trailing data, leave
 native state unconfirmed. A reply that says the client is quiet does not prove
 container termination, finalized accounting or a valid checkpoint. Those checks

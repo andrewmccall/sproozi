@@ -365,9 +365,14 @@ func (p *Placement) Stop(ctx context.Context, l session.Launch, i session.Incarn
 	if !terminated(pod) || !running(pod, runtimekube.CaptureContainer) {
 		return session.Stopped{}, errors.New("placement: exact stopped writer and capture helper unavailable")
 	}
-	local, err = p.capture(ctx, local, local.thread(r), pod)
-	if err != nil {
-		return session.Stopped{}, err
+	// A turnless visit started from the workspace the execution retains and
+	// had no conversation, so nothing is captured and its receipt names no
+	// checkpoint.
+	if !local.Turnless {
+		local, err = p.capture(ctx, local, local.thread(r), pod)
+		if err != nil {
+			return session.Stopped{}, err
+		}
 	}
 	r, err = p.registry.CompleteStop(ctx, r.Reference, local.OutputDigest, seals)
 	if err != nil {
@@ -411,9 +416,11 @@ func (p *Placement) quietSource(ctx context.Context, local retained, r registry.
 		if err != nil {
 			return local, r, err
 		}
-		if _, err := harness.DecodeNativeReply(data, harness.NativeStatus, harness.NativeStopped, local.thread(r)); err != nil {
+		reply, err := harness.DecodeNativeReply(data, harness.NativeStatus, harness.NativeStopped, local.thread(r))
+		if err != nil || local.thread(r) == "" && !reply.Turnless {
 			return local, r, errors.New("placement: revoked source quiescence remains unknown")
 		}
+		local.Turnless = local.thread(r) == ""
 	default:
 		bind := func(ctx context.Context, thread string) error {
 			bound, err := p.registry.BindNative(ctx, r.Reference, thread)
@@ -427,11 +434,9 @@ func (p *Placement) quietSource(ctx context.Context, local retained, r registry.
 		if err != nil {
 			return local, r, err
 		}
-		if thread == "" {
-			// Kubernetes visits carry a task or a checkpoint, so a turnless
-			// stop is unexpected here and has nothing to capture.
-			return local, r, errors.New("kubernetes native visit stopped with no native conversation")
-		}
+		// Only a turnless first visit quiesces without a bound thread; it
+		// has no conversation to capture (ADR 0032).
+		local.Turnless = thread == ""
 	}
 	local.NativeQuiet = true
 	return local, r, p.save(local)
@@ -478,6 +483,20 @@ func (p *Placement) stopped(local retained, r registry.Record) (session.Stopped,
 	if !local.WriterFenced || r.Receipt == nil || local.OutputDigest != r.Receipt.CheckpointDigest {
 		return session.Stopped{}, errors.New("placement: trusted checkpoint receipt unavailable")
 	}
+	usage := make(map[string]budget.TrustedUsage, len(r.Receipt.Seals))
+	for name, value := range r.Receipt.Seals {
+		usage[string(name)] = value
+	}
+	i := inc(r)
+	s := session.Stopped{Launch: local.Launch, Incarnation: i, ActualStopped: true, ThreadID: local.thread(r), Receipt: &session.Receipt{Launch: local.Launch, Incarnation: i, Usage: usage}}
+	// The registry keeps a receipt with no checkpoint only for a turnless
+	// first visit with no native identity: no thread and nothing to return.
+	if r.Receipt.CheckpointDigest == "" {
+		if s.ThreadID != "" {
+			return session.Stopped{}, errors.New("placement: stop without a checkpoint names a native thread")
+		}
+		return s, nil
+	}
 	data, err := p.readArtifact(local.Launch.AllocationID, "output")
 	if err != nil {
 		return session.Stopped{}, err
@@ -486,12 +505,8 @@ func (p *Placement) stopped(local retained, r registry.Record) (session.Stopped,
 	if err != nil || meta.SHA256 != local.OutputDigest || meta.Harness != local.Launch.Harness || meta.ThreadID != local.thread(r) {
 		return session.Stopped{}, errors.New("placement: retained checkpoint invalid")
 	}
-	usage := make(map[string]budget.TrustedUsage, len(r.Receipt.Seals))
-	for name, value := range r.Receipt.Seals {
-		usage[string(name)] = value
-	}
-	i := inc(r)
-	return session.Stopped{Launch: local.Launch, Incarnation: i, ActualStopped: true, ThreadID: local.thread(r), Checkpoint: data, CheckpointDigest: local.OutputDigest, Receipt: &session.Receipt{Launch: local.Launch, Incarnation: i, Usage: usage}}, nil
+	s.Checkpoint, s.CheckpointDigest = data, local.OutputDigest
+	return s, nil
 }
 func (p *Placement) physicalFence(ctx context.Context, local *retained, r registry.Record) (bool, error) {
 	if r.RunUID == "" {

@@ -340,7 +340,7 @@ func (s *Store) Cancel(ctx context.Context, ref Reference) (Record, error) {
 func (s *Store) CompleteStop(ctx context.Context, ref Reference, checkpointDigest string, seals map[api.CapabilityKind]budget.TrustedUsage) (Record, error) {
 	return s.change(ctx, ref, func(r *stored) error {
 		receipt := &StopReceipt{CheckpointDigest: checkpointDigest, Seals: seals}
-		if err := validateReceipt(receipt, r.Registration.Ceilings); err != nil {
+		if err := validateStopReceipt(receipt, r.Registration.Registration); err != nil {
 			return err
 		}
 		if r.Phase == Stopped {
@@ -530,10 +530,7 @@ func validateStored(r stored) error {
 		return fmt.Errorf("invalid mobility phase")
 	}
 	if r.Phase == Stopped {
-		if !uuidPattern.MatchString(r.Registration.NativeUUID) {
-			return fmt.Errorf("stopped execution has no native identity")
-		}
-		return validateReceipt(r.Receipt, r.Registration.Ceilings)
+		return validateStopReceipt(r.Receipt, r.Registration.Registration)
 	}
 	if r.Phase == Cancelled && r.Receipt != nil {
 		if r.RunUID == "" || r.PodUID == "" {
@@ -547,11 +544,25 @@ func validateStored(r stored) error {
 	return nil
 }
 
-func validateReceipt(r *StopReceipt, ceilings map[api.CapabilityKind]api.EndpointBudget) error {
-	if r == nil || !digestPattern.MatchString(r.CheckpointDigest) {
+// validateStopReceipt keeps a graceful stop's two outcomes explicit. A visit
+// with a native identity keeps a checkpoint of that conversation. Only a
+// turnless first visit, from a Git workspace and with no native identity bound,
+// stops without one (ADR 0032): it had no conversation to keep, and its
+// workspace input is the execution's state.
+func validateStopReceipt(r *StopReceipt, registration Registration) error {
+	if r == nil {
 		return fmt.Errorf("incomplete mobility stop receipt")
 	}
-	return validateSeals(r.Seals, ceilings)
+	turnless := registration.WorkspaceDigest != "" && registration.NativeUUID == ""
+	switch {
+	case turnless && r.CheckpointDigest != "":
+		return fmt.Errorf("turnless stop receipt names a checkpoint")
+	case !turnless && !uuidPattern.MatchString(registration.NativeUUID):
+		return fmt.Errorf("stopped execution has no native identity")
+	case !turnless && !digestPattern.MatchString(r.CheckpointDigest):
+		return fmt.Errorf("incomplete mobility stop receipt")
+	}
+	return validateSeals(r.Seals, registration.Ceilings)
 }
 
 func validateCancellationReceipt(r *StopReceipt, ceilings map[api.CapabilityKind]api.EndpointBudget) error {

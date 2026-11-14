@@ -270,12 +270,19 @@ func (p *Placement) registration(l session.Launch, ceilings map[api.CapabilityKi
 	return registry.Registration{Harness: p.config.Harness, Principal: p.config.Principal, SessionID: l.ExecutionID, Epoch: l.Epoch, OperationID: l.OperationID, NativeUUID: l.ThreadID, InstructionDigest: l.InstructionDigest, OriginalDeadline: l.Deadline.UTC(), TemplateName: p.config.TemplateName, Ceilings: ceilings, Task: l.Task, CheckpointDigest: l.CheckpointDigest, IncludeIgnored: append([]string(nil), l.IncludeIgnored...), IntendedRunName: runName(l), ProfileDigest: l.ProfileDigest, Login: l.Login}
 }
 
+// Prepare restores the launch's input inertly: the checkpoint it names, or,
+// for a first visit with no thread and no checkpoint, a captured Git workspace
+// in a fresh native home. The client supplies no native UUID for a first
+// visit; the trusted placement binds the genuine one once it observes it.
 func (p *Placement) Prepare(ctx context.Context, l session.Launch, data []byte) (session.Incarnation, error) {
 	unlock, err := p.lockOperation(l)
 	if err != nil {
 		return session.Incarnation{}, err
 	}
 	defer unlock()
+	if l.ThreadID == "" && l.CheckpointDigest == "" {
+		return p.prepareWorkspace(ctx, l, data)
+	}
 	ceilings, err := p.liveProfile(ctx, l)
 	if err != nil {
 		return session.Incarnation{}, err
@@ -305,18 +312,19 @@ func (p *Placement) Prepare(ctx context.Context, l session.Launch, data []byte) 
 	return p.prepare(ctx, local, record)
 }
 
-// CreateInitial restores a stopped workspace into a fresh native home. Only this
-// explicit entry permits an empty native UUID/checkpoint; the client supplies
-// the genuine UUID and the trusted placement binds it after observation.
+// CreateInitial is Prepare limited to a first visit from a Git workspace: a
+// launch with a thread or a checkpoint is refused. The remote work owner still
+// calls it.
 func (p *Placement) CreateInitial(ctx context.Context, l session.Launch, data []byte) (session.Incarnation, error) {
-	unlock, err := p.lockOperation(l)
-	if err != nil {
-		return session.Incarnation{}, err
-	}
-	defer unlock()
 	if l.ThreadID != "" || l.CheckpointDigest != "" {
 		return session.Incarnation{}, &profile.Rejection{Code: profile.CodeInvalid}
 	}
+	return p.Prepare(ctx, l, data)
+}
+
+// prepareWorkspace restores a captured Git workspace into a fresh native home.
+// The caller holds the operation lock.
+func (p *Placement) prepareWorkspace(ctx context.Context, l session.Launch, data []byte) (session.Incarnation, error) {
 	if len(data) == 0 || int64(len(data)) > p.config.MaxCheckpointBytes {
 		return session.Incarnation{}, &profile.Rejection{Code: profile.CodeInvalid}
 	}

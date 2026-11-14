@@ -207,7 +207,10 @@ type protocolExecutor struct {
 	onCommand                  func(string) error
 	failQuiesce                bool
 	lostQuiesce                bool
-	captureArgs                []string
+	// turnless makes the supervisor report a first visit with no native
+	// conversation once input is gated (ADR 0032).
+	turnless    bool
+	captureArgs []string
 }
 
 func (e *protocolExecutor) Execute(ctx context.Context, namespace, pod, container string, args []string, input io.Reader, output, _ io.Writer) error {
@@ -226,7 +229,7 @@ func (e *protocolExecutor) Execute(ctx context.Context, namespace, pod, containe
 			if err != nil || string(data) != string(e.initial) {
 				return errors.New("invalid initial input")
 			}
-			return json.NewEncoder(output).Encode(checkpoint.Metadata{Harness: harness.NativeCodex, SHA256: fmt.Sprintf("%x", sha256.Sum256(data)), Bytes: len(data)})
+			return json.NewEncoder(output).Encode(checkpoint.Metadata{Harness: e.meta.Harness, SHA256: fmt.Sprintf("%x", sha256.Sum256(data)), Bytes: len(data)})
 		case helperPrepare:
 			data, err := io.ReadAll(input)
 			if err != nil || string(data) != string(e.data) {
@@ -277,6 +280,13 @@ func (e *protocolExecutor) Execute(ctx context.Context, namespace, pod, containe
 	case string(harness.NativeStatus):
 	default:
 		return errors.New("unexpected command")
+	}
+	if e.turnless {
+		reply := map[string]any{"op": args[1], "state": e.state}
+		if e.state == harness.NativeStopping || e.state == harness.NativeStopped {
+			reply["turnless"] = true
+		}
+		return json.NewEncoder(output).Encode(reply)
 	}
 	thread := fixtureThread
 	if e.initial != nil && (e.state == harness.NativePrepared || args[1] == string(harness.NativeActivate)) {
