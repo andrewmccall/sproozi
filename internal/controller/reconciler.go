@@ -118,7 +118,7 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if !run.DeletionTimestamp.IsZero() {
 		return r.finalizeDeletion(ctx, &run)
 	}
-	if !IsTerminal(run.Status.Phase) && controllerutil.AddFinalizer(&run, agentRunFinalizer) {
+	if !run.Status.Phase.IsTerminal() && controllerutil.AddFinalizer(&run, agentRunFinalizer) {
 		if err := r.Update(ctx, &run); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -131,7 +131,7 @@ func (r *AgentRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	// Terminal runs are only subject to retention TTL deletion.
-	if IsTerminal(run.Status.Phase) {
+	if run.Status.Phase.IsTerminal() {
 		return r.handleTerminal(ctx, &run)
 	}
 
@@ -704,7 +704,7 @@ func (r *AgentRunReconciler) transitionPhase(
 	}
 
 	// Set CompletedAt when the run enters a terminal phase.
-	if IsTerminal(phase) && run.Status.CompletedAt == nil {
+	if phase.IsTerminal() && run.Status.CompletedAt == nil {
 		run.Status.CompletedAt = &now
 	}
 
@@ -760,7 +760,7 @@ func (r *AgentRunReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// with per-policy caps the run that can now be admitted need not be the
 	// queue head.
 	queuedOnRelease := handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
-		if !IsTerminal(obj.(*sprooziv1alpha1.AgentRun).Status.Phase) && obj.GetDeletionTimestamp().IsZero() {
+		if !obj.(*sprooziv1alpha1.AgentRun).Status.Phase.IsTerminal() && obj.GetDeletionTimestamp().IsZero() {
 			return nil
 		}
 		return r.queuedRequests(ctx)
@@ -865,7 +865,7 @@ func registerIndexes(mgr ctrl.Manager) error {
 func nonTerminalRequests(runs []sprooziv1alpha1.AgentRun) []reconcile.Request {
 	requests := make([]reconcile.Request, 0, len(runs))
 	for i := range runs {
-		if !IsTerminal(runs[i].Status.Phase) {
+		if !runs[i].Status.Phase.IsTerminal() {
 			requests = append(requests, reconcile.Request{NamespacedName: types.NamespacedName{Name: runs[i].Name, Namespace: runs[i].Namespace}})
 		}
 	}

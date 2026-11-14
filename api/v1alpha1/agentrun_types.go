@@ -78,6 +78,16 @@ const (
 	AgentRunPhaseCancelled AgentRunPhase = "Cancelled"
 )
 
+// IsTerminal reports whether phase is a terminal lifecycle state from which no
+// further transitions are permitted.
+func (phase AgentRunPhase) IsTerminal() bool {
+	switch phase {
+	case AgentRunPhaseSucceeded, AgentRunPhaseFailed, AgentRunPhaseTimedOut, AgentRunPhaseCancelled:
+		return true
+	}
+	return false
+}
+
 // AgentRunStatus defines the observed state of AgentRun.
 type AgentRunStatus struct {
 	// Phase is the current lifecycle state of the AgentRun.
