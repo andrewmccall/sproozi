@@ -210,7 +210,8 @@ cancellation revokes first. See [ADR
 0011](../adr/0011-native-session-compatibility-and-completion.md).
 
 The managed Codex launch uses `--sandbox danger-full-access` to run tools within the outer container boundary. The restricted sandbox
-kernel does not support the inner bubblewrap sandbox. Claude uses fixed `bypassPermissions`, foreground Bash, the tools of its MCP connections (`mcp__<server>__<tool>`, such as `mcp__sproozi__diagnose`) and the `Skill` tool for the profile's skills and `sproozi:sproozi-access`.
+kernel does not support the inner bubblewrap sandbox. Claude uses fixed `bypassPermissions`, with the client's confirmation of it
+already accepted in the launch's settings so a task starts unattended, foreground Bash, the tools of its MCP connections (`mcp__<server>__<tool>`, such as `mcp__sproozi__diagnose`) and the `Skill` tool for the profile's skills and `sproozi:sproozi-access`.
 Copilot uses `--allow-all` with its built-in GitHub MCP server disabled. All
 rely on the outer non-root, read-only, capability-restricted container and
 enforced gateway network boundary. Portable history cannot select these settings.

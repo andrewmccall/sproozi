@@ -33,6 +33,8 @@ const (
 	claudeSettings   = "/tmp/sproozi-native/claude-settings.json"
 	claudeHome       = "/workspace/session/claude"
 	claudeExecutable = "/usr/local/bin/claude"
+	// claudeHookCommand is what each lifecycle hook runs.
+	claudeHookCommand = "/usr/local/bin/native-session observe-claude"
 )
 
 const opClaudeHook harness.NativeOp = "observe-claude"
@@ -306,7 +308,10 @@ func (s *server) observeClaudeTurn() (string, string, error) {
 
 // claudePreferences approves the gateway placeholder key when there is one.
 // With none, Claude Code uses its own sign-in from the mounted
-// .credentials.json, which /login creates (ADR 0047).
+// .credentials.json, which /login creates (ADR 0047). Claude Code 2.1.318 and
+// later ignore and drop bypassPermissionsModeAccepted; the settings file's
+// skipDangerousModePermissionPrompt answers their confirmation instead. It
+// stays for the older clients the movement proofs recorded.
 func claudePreferences(env []string) map[string]any {
 	preferences := map[string]any{"theme": "dark", "hasCompletedOnboarding": true,
 		"bypassPermissionsModeAccepted": true,
@@ -325,13 +330,7 @@ func prepareClaudeLaunch(c config, _ string, env []string) ([]string, []string, 
 	if err := installClaudeJSON(filepath.Join(claudeHome, ".claude.json"), claudePreferences(env)); err != nil {
 		return nil, nil, err
 	}
-	hooks := map[string]any{}
-	for _, event := range []string{claudePromptSubmit, claudePreTool, claudePostTool, claudePostToolFailure,
-		claudeStop, claudeStopFailure} {
-		hooks[event] = []any{map[string]any{"matcher": "", claudeHooksKey: []any{map[string]any{
-			"type": "command", "command": "/usr/local/bin/native-session observe-claude", "timeout": 5}}}}
-	}
-	if err := installClaudeJSON(claudeSettings, map[string]any{claudeHooksKey: hooks}); err != nil {
+	if err := installClaudeJSON(claudeSettings, harness.ClaudeManagedSettings(claudeHookCommand)); err != nil {
 		return nil, nil, err
 	}
 	if err := installManagedClaudePlugin(claudePlugin); err != nil {

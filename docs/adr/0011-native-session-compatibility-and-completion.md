@@ -288,6 +288,22 @@ leaf, and replaying the hooks completes the task's turn only for the matching
 task. The supervisor has not yet run a Claude task end to end on a placement;
 remote executors still refuse Claude tasks.
 
+An unattended task also has to start. In a fresh home Claude Code 2.1.318 and
+2.1.325 show a confirmation of `bypassPermissions` mode before submitting the
+launch's prompt, and nobody answers it on a remote task. They ignore and drop
+the `bypassPermissionsModeAccepted` preference the supervisor writes; they read
+`skipDangerousModePermissionPrompt` from the `--settings` file. The managed
+settings now set it, beside the hooks. This accepts nothing the launch did not
+already choose: `bypassPermissions` is the fixed mode, and the outer container
+and gateway stay the confinement. `hack/verify/claude-transcripts/capture.py
+--check` types nothing into the terminal; before the change it stopped at the
+confirmation on both versions, and after it each scenario's task was
+submitted and its turn completed. The preference stays for the older clients
+the movement proofs recorded. The local Docker home runs the same supervisor.
+Ordinary Claude Code AgentRuns (ADR 0054) run `--print` with
+`--dangerously-skip-permissions`, which shows no confirmation:
+`make verify-harness-process` completes in a fresh home with both versions.
+
 We considered keeping MCP out of managed Claude sessions, which would break the
 control connection's `diagnose` and every granted server, removing `Skill`
 from the launch's tools, which would hide the profile's skills and

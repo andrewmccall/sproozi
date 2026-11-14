@@ -519,8 +519,8 @@ func validateClaudeProgress(row claudeRecord, pending, tools map[string]string, 
 		return errors.New("unsupported Claude progress record")
 	}
 	switch data.Event {
-	case "Stop":
-		if data.Name != "Stop" || leaf == "" || len(pending) != 0 || stops[row.ToolUseID] {
+	case claudeStopEvent:
+		if data.Name != claudeStopEvent || leaf == "" || len(pending) != 0 || stops[row.ToolUseID] {
 			return errors.New("unmatched Claude stop hook progress")
 		}
 		stops[row.ToolUseID] = true

@@ -7,13 +7,15 @@ fixed tools, strict MCP configuration, sproozi and profile plugins, hook
 events, setting sources, permission mode and onboarding preferences. A local
 provider scripts the model, a local stdio MCP server stands in for the
 gateway's connections, and the turn ends as the supervisor ends it: the
-process group is killed after Stop. No network, credentials or host
-configuration reach the client.
+process group is killed after Stop. Nothing is typed into the terminal, so the
+client must submit the task and complete the turn unattended in a fresh home.
+No network, credentials or host configuration reach the client.
 
 The transcript and hook payloads are then scrubbed (see README.md) and written
-to internal/harness/testdata and cmd/native-session/testdata.
+to internal/harness/testdata and cmd/native-session/testdata. With --check,
+the run only proves the unattended turn and writes nothing.
 
-usage: capture.py --claude PATH SCENARIO [SCENARIO ...]
+usage: capture.py --claude PATH [--check] SCENARIO [SCENARIO ...]
 """
 import argparse
 import json
@@ -145,10 +147,15 @@ def write(path, text, mode=0o600):
     path.chmod(mode)
 
 
+def managed(*args):
+    """A file the supervisor installs, rendered by the same Go code."""
+    return subprocess.check_output(["go", "run", "./hack/verify/claude-transcripts/managed", *args],
+                                   cwd=ROOT, text=True)
+
+
 def layout(root):
     """Write the managed launch's files as cmd/native-session does."""
-    skill = subprocess.check_output(["go", "run", "./hack/verify/claude-transcripts/managedskill"],
-                                    cwd=ROOT, text=True)
+    skill = managed("skill")
     write(root / "sproozi-plugin/.claude-plugin/plugin.json",
           json.dumps({"description": "Sproozi integration", "name": "sproozi"}), 0o400)
     write(root / "sproozi-plugin/skills/sproozi-access/SKILL.md", skill, 0o400)
@@ -157,11 +164,7 @@ def layout(root):
     write(root / "profile-plugin/skills" / FIXTURE_SKILL / "SKILL.md", FIXTURE_SKILL_MD, 0o400)
     write(root / "observe-claude", HOOK, 0o700)
     write(root / "mcp-server.py", MCP_SERVER)
-    hooks = {event: [{"matcher": "", "hooks": [{"type": "command", "command": str(root / "observe-claude"),
-                                                "timeout": 5}]}]
-             for event in ["UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure",
-                           "Stop", "StopFailure"]}
-    write(root / "settings.json", json.dumps({"hooks": hooks}))
+    write(root / "settings.json", managed("settings", str(root / "observe-claude")))
     workspace = root / "ws"
     workspace.mkdir()
     write(root / "home/.claude/.claude.json", json.dumps({
@@ -170,13 +173,23 @@ def layout(root):
         "customApiKeyResponses": {"approved": ["sproozi-local-placeholder"[-20:]], "rejected": []}}))
 
 
-def drive(binary, root, args, env):
-    """Run the client in a terminal until Stop, then kill its process group."""
+def screen(output):
+    """The terminal's text, without control sequences, for a failure report."""
+    text = re.sub(rb"\x1b\[[0-9;?<>=]*[A-Za-z]|\x1b[\]P][^\x07\x1b]*(\x07|\x1b\\)", b"", output)
+    return text.decode("utf-8", "replace")[-1500:]
+
+
+def drive(binary, root, args, env, task):
+    """Run the client in a terminal until Stop, then kill its process group.
+
+    Nothing is typed: the managed launch must submit its task and complete
+    the turn unattended, in a fresh home, as a remote task does.
+    """
     pid, fd = pty.fork()
     if pid == 0:
         os.chdir(root / "ws")
         os.execve(binary, [binary] + args, env)
-    output, accepted, deadline, stopped = b"", False, time.time() + 60, False
+    output, deadline, stopped = b"", time.time() + 60, False
     while time.time() < deadline:
         ready, _, _ = select.select([fd], [], [], 0.5)
         if ready:
@@ -187,13 +200,6 @@ def drive(binary, root, args, env):
             output += data
             if b"\x1b[6n" in data:
                 os.write(fd, b"\x1b[1;1R")
-            # The pinned client asks to accept bypassPermissions in a new home.
-            if not accepted and b"Iaccept" in re.sub(rb"\x1b\[[0-9;?]*[A-Za-z]|\s", b"", output):
-                accepted = True
-                time.sleep(0.5)
-                os.write(fd, b"\x1b[B")
-                time.sleep(0.3)
-                os.write(fd, b"\r")
         hooks = root / "hooks.jsonl"
         if hooks.exists() and '"hook_event_name":"Stop"' in hooks.read_text():
             stopped = True
@@ -207,8 +213,13 @@ def drive(binary, root, args, env):
     # terminal releases it.
     os.close(fd)
     os.waitpid(pid, 0)
+    hooks = root / "hooks.jsonl"
+    prompts = [json.loads(line).get("prompt") for line in (hooks.read_text() if hooks.exists() else "").splitlines()
+               if '"hook_event_name":"UserPromptSubmit"' in line]
+    if prompts != [task]:
+        sys.exit("the task was not submitted as the turn's prompt; the terminal shows:\n" + screen(output))
     if not stopped:
-        sys.exit("client never reported Stop:\n" + output.decode("utf-8", "replace")[-2000:])
+        sys.exit("the task's turn never reported Stop; the terminal shows:\n" + screen(output))
 
 
 def scrub(root, line):
@@ -242,7 +253,7 @@ def scrub(root, line):
     return text
 
 
-def capture(binary, scenario, version):
+def capture(binary, scenario, version, check):
     task, calls, mcp_error = SCENARIOS[scenario]
     Provider.calls = calls
     server = ThreadingHTTPServer(("127.0.0.1", 0), Provider)
@@ -266,13 +277,16 @@ def capture(binary, scenario, version):
                 "--setting-sources", "", "--settings", str(root / "settings.json"),
                 "--permission-mode", "bypassPermissions", "--append-system-prompt", "Fixture instructions.",
                 "--model", MODEL, "--", task]
-        drive(binary, root, args, env)
+        drive(binary, root, args, env, task)
         transcripts = list((root / "home/.claude/projects").glob("*/*.jsonl"))
         if len(transcripts) != 1:
             sys.exit("expected one transcript, found %d" % len(transcripts))
         name = "claude-%s-%s" % (version, scenario)
         rows = [scrub(root, line) for line in transcripts[0].read_text().splitlines() if line]
         hooks = [scrub(root, line) for line in (root / "hooks.jsonl").read_text().splitlines() if line.strip()]
+        if check:
+            print("%s: the task was submitted unattended and its turn completed" % name)
+            return
         (ROOT / "internal/harness/testdata" / (name + ".jsonl")).write_text("\n".join(rows) + "\n")
         (ROOT / "cmd/native-session/testdata" / (name + "-hooks.jsonl")).write_text("\n".join(hooks) + "\n")
         print("%s: session %s, %d transcript rows, %d hooks" % (name, transcripts[0].stem, len(rows), len(hooks)))
@@ -284,11 +298,12 @@ def capture(binary, scenario, version):
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--claude", required=True, help="stock Claude Code binary")
+    parser.add_argument("--check", action="store_true", help="prove the unattended turn; write no fixture")
     parser.add_argument("scenario", nargs="+", choices=sorted(SCENARIOS))
     options = parser.parse_args()
     version = subprocess.check_output([options.claude, "--version"], text=True).split()[0]
     for scenario in options.scenario:
-        capture(options.claude, scenario, version)
+        capture(options.claude, scenario, version, options.check)
 
 
 if __name__ == "__main__":

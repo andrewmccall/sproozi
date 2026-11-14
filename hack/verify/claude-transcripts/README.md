@@ -26,6 +26,10 @@ python3 hack/verify/claude-transcripts/capture.py --claude "$(command -v claude)
   mcp-tool failed-tools profile-skill sproozi-skill
 ```
 
+With `--check` the same runs prove only that each task is submitted and its
+turn completes unattended in a fresh home, and write no fixture. Use it to
+check another client version.
+
 The script needs Python 3, Go and a POSIX terminal. It makes no network
 request and uses no credentials: a local provider scripts the model and a
 local stdio MCP server stands in for the gateway's connections. Each run
@@ -36,17 +40,21 @@ session ID.
 ## What the capture matches
 
 The client runs in its interactive terminal with the arguments, plugins,
-hooks and preferences that `cmd/native-session` gives a managed session: the
+settings and preferences that `cmd/native-session` gives a managed session: the
 `Bash,Skill` tools, `--strict-mcp-config`, the sproozi plugin with the
 `sproozi-access` skill that `internal/harness` renders, a profile plugin with
-one fixture skill, every setting source disabled, the six lifecycle hooks,
-`bypassPermissions` and a task as the positional prompt. After `Stop` it kills
-the client's process group, as the supervisor's controlled stop does.
+one fixture skill, every setting source disabled, the `--settings` file that
+`internal/harness` renders (the lifecycle hooks and the accepted
+`bypassPermissions` confirmation), `bypassPermissions` and a task as the
+positional prompt. The script types nothing into the terminal: the task must
+be submitted and the turn completed unattended, or the run fails and prints
+the terminal. After `Stop` it kills the client's process group, as the
+supervisor's controlled stop does. The `managed` helper prints the skill and
+settings from the same Go code the supervisor uses.
 
-Two things differ from a managed session: the MCP server is a local stdio
+One thing differs from a managed session: the MCP server is a local stdio
 process rather than the gateway's HTTP connection, which records the same tool
-names and transcript rows; and the script accepts the client's
-`bypassPermissions` prompt, which a fresh home shows.
+names and transcript rows.
 
 ## What is scrubbed
 
