@@ -36,26 +36,48 @@ const maxRecordBytes = 256 << 10
 // execution; afterwards the coordinator keeps cancellation. Finished marks
 // the task's tail as written once the coordinator committed its stop.
 // Transfer is the pull operation, and Pulled records that a machine claimed
-// the session.
+// the session. Operations binds each owner stop and resume of an interactive
+// session to its action and execution, so a replay repeats the same intent.
 type record struct {
-	Version          int                  `json:"version"`
-	ID               string               `json:"id"`
-	Intent           Submit               `json:"intent"`
-	DeadlineChoice   string               `json:"deadlineChoice"`
-	IntentDigest     string               `json:"intentDigest"`
-	First            session.Launch       `json:"first"`
-	Association      project.Association  `json:"association,omitzero"`
-	RepositorySource *Repository          `json:"repositorySource,omitempty"`
-	Executions       []string             `json:"executions"`
-	Current          string               `json:"current"`
-	CancelOperation  string               `json:"cancelOperation,omitempty"`
-	Finished         bool                 `json:"finished,omitempty"`
-	Result           string               `json:"result,omitempty"`
-	ResultTruncated  bool                 `json:"resultTruncated,omitempty"`
-	CheckpointInfo   *checkpoint.Metadata `json:"checkpointInfo,omitempty"`
-	Transfer         string               `json:"transfer,omitempty"`
-	Pulled           bool                 `json:"pulled,omitempty"`
-	Problem          string               `json:"problem,omitempty"`
+	Version          int                       `json:"version"`
+	ID               string                    `json:"id"`
+	Intent           Submit                    `json:"intent"`
+	DeadlineChoice   string                    `json:"deadlineChoice"`
+	IntentDigest     string                    `json:"intentDigest"`
+	First            session.Launch            `json:"first"`
+	Association      project.Association       `json:"association,omitzero"`
+	RepositorySource *Repository               `json:"repositorySource,omitempty"`
+	Executions       []string                  `json:"executions"`
+	Current          string                    `json:"current"`
+	CancelOperation  string                    `json:"cancelOperation,omitempty"`
+	Finished         bool                      `json:"finished,omitempty"`
+	Result           string                    `json:"result,omitempty"`
+	ResultTruncated  bool                      `json:"resultTruncated,omitempty"`
+	CheckpointInfo   *checkpoint.Metadata      `json:"checkpointInfo,omitempty"`
+	Transfer         string                    `json:"transfer,omitempty"`
+	Pulled           bool                      `json:"pulled,omitempty"`
+	Problem          string                    `json:"problem,omitempty"`
+	Operations       map[string]boundOperation `json:"operations,omitempty"`
+}
+
+// Owner actions bound in record.Operations.
+const (
+	actionStop   = "stop"
+	actionResume = "resume"
+)
+
+// maxOperations bounds a session's bound owner operations, and
+// maxExecutions its executions, as home's catalogue does.
+const (
+	maxOperations = 1024
+	maxExecutions = 256
+)
+
+// boundOperation is one bound owner operation: its action and the execution it
+// acts on.
+type boundOperation struct {
+	Action    string `json:"action"`
+	Execution string `json:"execution"`
 }
 
 // intentDigest binds a submission and its effective deadline choice: a
@@ -158,10 +180,31 @@ func (o *Owner) decodeRecord(id string, b []byte) (record, error) {
 		r.Transfer != "" && !CanonicalID(r.Transfer) || r.Pulled && r.Transfer == "" {
 		return r, errors.New("work: retained session record is inconsistent")
 	}
+	if err := checkInteractive(r); err != nil {
+		return r, err
+	}
 	if err := o.checkAssociation(r.Association, r.Intent.Project); err != nil {
 		return r, err
 	}
 	return r, nil
+}
+
+// checkInteractive checks a record's mode, and that only an interactive
+// session has more than one execution and bound owner operations, each
+// naming one of its executions.
+func checkInteractive(r record) error {
+	if len(r.Executions) > maxExecutions || len(r.Operations) > maxOperations ||
+		r.Intent.Mode != "" && r.Intent.Mode != ModeInteractive || len(r.Intent.Workspace) > 0 ||
+		r.Intent.Mode != ModeInteractive && (len(r.Executions) > 1 || len(r.Operations) > 0) {
+		return errors.New("work: retained session record is inconsistent")
+	}
+	for op, bound := range r.Operations {
+		if !CanonicalID(op) || op == r.Intent.RequestID || bound.Action != actionStop && bound.Action != actionResume ||
+			!slices.Contains(r.Executions, bound.Execution) {
+			return errors.New("work: retained session operation is inconsistent")
+		}
+	}
+	return nil
 }
 
 func (o *Owner) checkAssociation(a project.Association, intended project.ID) error {
@@ -288,7 +331,7 @@ func (o *Owner) view(r record, rec *session.Record) View {
 	if association.Repository == "" {
 		association.Repository = r.Intent.Repository
 	}
-	v := View{Association: association, ID: r.ID, ExecutionID: r.Current, AllocationID: r.First.AllocationID,
+	v := View{Association: association, ID: r.ID, Mode: r.Intent.Mode, ExecutionID: r.Current, AllocationID: r.First.AllocationID,
 		Placement: r.First.Placement, Harness: r.First.Harness, Phase: derivePhase(r, rec),
 		Deadline: r.First.Deadline, Login: r.First.Login, Result: r.Result, ResultTruncated: r.ResultTruncated,
 		Problem: r.Problem, CheckpointInfo: r.CheckpointInfo, WorkspaceFrom: r.Intent.WorkspaceFrom}
@@ -301,6 +344,9 @@ func (o *Owner) view(r record, rec *session.Record) View {
 		v.AllocationID, v.Placement = launch.AllocationID, launch.Placement
 	}
 	v.Incarnation = incarnation
+	if rec.Phase == session.PhaseIdle {
+		v.Exit = lastExit(*rec)
+	}
 	if v.Problem == "" {
 		v.Problem = executionProblem(*rec)
 	}

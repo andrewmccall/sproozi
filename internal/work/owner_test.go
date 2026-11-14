@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -70,8 +71,43 @@ type fixturePlacement struct {
 	// stopReturning closes just before a stop returns success.
 	stopReturning chan struct{}
 	launches      []session.Launch
-	profiles      map[string][]byte
-	visits        map[string]fixtureVisit
+	// inputs is what each Prepare restored, by allocation.
+	inputs   map[string][]byte
+	profiles map[string][]byte
+	visits   map[string]fixtureVisit
+	// exited marks allocations whose harness ended on its own; exit is what
+	// their stop reports.
+	exited map[string]bool
+	exit   *session.Exit
+	// attached receives each attachment's input frames.
+	attached [][]byte
+}
+
+func (p *fixturePlacement) Exited(_ context.Context, l session.Launch, i session.Incarnation) (bool, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	v, ok := p.visits[l.AllocationID]
+	return ok && v.state == session.PlacementActive && v.incarnation == i && p.exited[l.AllocationID], nil
+}
+
+// Attach copies the attachment's frames to its output, as an echoing
+// terminal would, and keeps them.
+func (p *fixturePlacement) Attach(_ context.Context, l session.Launch, i session.Incarnation, input io.Reader, output io.Writer) error {
+	p.mu.Lock()
+	v, ok := p.visits[l.AllocationID]
+	p.mu.Unlock()
+	if !ok || v.state != session.PlacementActive || v.incarnation != i {
+		return errors.New("attachment needs the exact active visit")
+	}
+	data, err := io.ReadAll(input)
+	if err != nil {
+		return err
+	}
+	p.mu.Lock()
+	p.attached = append(p.attached, data)
+	p.mu.Unlock()
+	_, err = output.Write(data)
+	return err
 }
 
 func (p *fixturePlacement) StoreProfile(_ context.Context, digest string, archive []byte) error {
@@ -105,9 +141,15 @@ func (p *fixturePlacement) Prepare(_ context.Context, l session.Launch, data []b
 	defer p.mu.Unlock()
 	p.initial++
 	p.launches = append(p.launches, l)
-	if l.ThreadID != "" || l.CheckpointDigest != "" || l.Task == "" || len(data) == 0 {
+	resumed := l.ThreadID != "" && l.CheckpointDigest == p.meta.SHA256 && bytes.Equal(data, p.data)
+	fresh := l.ThreadID == "" && l.CheckpointDigest == "" && len(data) > 0
+	if !resumed && !fresh {
 		return session.Incarnation{}, errors.New("invalid initial intent")
 	}
+	if p.inputs == nil {
+		p.inputs = map[string][]byte{}
+	}
+	p.inputs[l.AllocationID] = bytes.Clone(data)
 	if p.refusePrepare != nil {
 		return session.Incarnation{}, p.refusePrepare
 	}
@@ -164,6 +206,10 @@ func (p *fixturePlacement) Stop(ctx context.Context, l session.Launch, i session
 		return session.Stopped{}, &harness.NativeTurnPending{Waiting: "the task's turn to complete"}
 	}
 	s := session.Stopped{Launch: l, Incarnation: i, ActualStopped: !p.missingFence, ThreadID: testThread, Checkpoint: p.data, CheckpointDigest: p.meta.SHA256}
+	if p.exited[l.AllocationID] && p.exit != nil {
+		exit := *p.exit
+		s.Exit = &exit
+	}
 	if !p.missingSeal {
 		s.Receipt = p.receipt(l, i)
 	}
@@ -269,7 +315,7 @@ func fixtureConfig(t *testing.T, repo string, p *fixturePlacement) Config {
 		Allowances:  map[string]session.Allowance{fixtureModel: {Units: session.Limit{Bounded: true, Value: 100}}},
 		MaxDuration: time.Minute, WorkTokenMaxDuration: time.Minute, MaxCheckpointBytes: testLimit,
 		Repositories: map[string]Repository{repositorySproozi: {Snapshot: repo}},
-		Coordinator:  coordinator, Profiles: p, Log: fixtureLog{t}, retry: backoff{first: time.Hour}}
+		Coordinator:  coordinator, Profiles: p, Terminal: p, Log: fixtureLog{t}, retry: backoff{first: time.Hour}}
 }
 
 type fixtureLog struct{ t *testing.T }

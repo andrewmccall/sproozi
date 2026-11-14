@@ -287,7 +287,7 @@ func run(args []string) error {
 			MaxDuration: duration, WorkTokenMaxDuration: workDuration, MaxCheckpointBytes: fixed.MaxCheckpointBytes,
 			RetainedBytes: fixed.RetainedBytes,
 			Repositories:  fixed.Repositories, TemplateName: fixed.TemplateName, Projects: fixed.Projects,
-			Coordinator: coordinator, Profiles: backend, Log: os.Stderr,
+			Coordinator: coordinator, Profiles: backend, Terminal: backend, Log: os.Stderr,
 		})
 		if openErr != nil {
 			return openErr

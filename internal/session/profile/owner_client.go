@@ -16,7 +16,7 @@ import (
 // remote work catalogue. It cannot select a different origin or arbitrary path.
 func (c *Client) CallOwner(ctx context.Context, action string, input, output any) error {
 	switch action {
-	case "run", "info", "list", "begin", "claim", "cancel", "recover":
+	case "run", "info", "list", "begin", "claim", "cancel", "recover", "stop", "resume":
 	default:
 		return errors.New("profile: unsupported owner action")
 	}

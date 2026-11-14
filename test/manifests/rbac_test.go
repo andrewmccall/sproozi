@@ -253,7 +253,7 @@ func TestManagedSessionPathIsAuthorized(t *testing.T) {
 		{whoExecutor, executor, agentsNamespace, "", "pods/exec", verbCreate},
 		// The exit sweep reads the supervisor's exit report from the native
 		// container's output.
-		{whoExecutor, executor, agentsNamespace, "", "pods/log", verbGet},
+		{whoExecutor, executor, agentsNamespace, "", resourcePodLogs, verbGet},
 		{whoExecutor, executor, "", "authentication.k8s.io", resourceTokenReviews, verbCreate},
 		{whoExecutor, executor, "", "authorization.k8s.io", "subjectaccessreviews", verbCreate},
 		{whoGateway, gateway, sessionsNamespace, "", resourceConfigMaps, verbGet},

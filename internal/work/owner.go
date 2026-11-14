@@ -77,12 +77,40 @@ type Config struct {
 	Projects      map[project.ID]project.Definition
 	Coordinator   *session.Coordinator
 	Profiles      ProfileStore
-	Log           io.Writer
+	// Terminal is the executor's in-process placement. The catalogue uses
+	// it only to attach to an active visit and to see that a harness
+	// exited; every lifecycle step goes through Coordinator. Without it the
+	// executor refuses interactive sessions.
+	Terminal Terminal
+	Log      io.Writer
 
 	// retry bounds the driver's automatic recovery of an unproven stop or
 	// unsealed usage; zero values take the defaults.
 	retry backoff
+	// exitInterval is how often the exit sweep looks for interactive
+	// sessions whose harness ended; zero takes exitWatchInterval.
+	exitInterval time.Duration
 }
+
+// Terminal attaches to an active visit's native terminal and reports a
+// harness that exited on its own. The Kubernetes placement implements it.
+type Terminal interface {
+	Attach(context.Context, session.Launch, session.Incarnation, io.Reader, io.Writer) error
+	Exited(context.Context, session.Launch, session.Incarnation) (bool, error)
+}
+
+// Mode is what a submission starts: a task the executor drives to its
+// completion, or an interactive session its owner attaches to, stops and
+// resumes.
+type Mode string
+
+const (
+	// ModeTask is a task; an empty mode means the same.
+	ModeTask Mode = "task"
+	// ModeInteractive is an interactive session, which only the home
+	// principal starts.
+	ModeInteractive Mode = "interactive"
+)
 
 // Caller is who submitted work: the home principal, or Hermes with the
 // work token.
@@ -96,13 +124,16 @@ const (
 )
 
 type Submit struct {
-	RequestID     string             `json:"requestId"`
-	Repository    string             `json:"repository"`
-	Harness       harness.NativeKind `json:"harness"`
-	Executor      string             `json:"executor"`
-	Task          string             `json:"task"`
-	Project       project.ID         `json:"project,omitempty"`
-	WorkspaceFrom *RevisionSource    `json:"workspaceFrom,omitempty"`
+	RequestID  string             `json:"requestId"`
+	Repository string             `json:"repository"`
+	Harness    harness.NativeKind `json:"harness"`
+	Executor   string             `json:"executor"`
+	// Mode is task (or empty) or interactive. An interactive session has
+	// no Task and comes only from the home principal.
+	Mode          Mode            `json:"mode,omitempty"`
+	Task          string          `json:"task"`
+	Project       project.ID      `json:"project,omitempty"`
+	WorkspaceFrom *RevisionSource `json:"workspaceFrom,omitempty"`
 	// MaxDuration is how long the task may run: empty leaves it to the
 	// executor, whose cap for the caller applies when set and otherwise none
 	// does; "none" asks for no deadline, which a cap denies; otherwise a
@@ -113,6 +144,13 @@ type Submit struct {
 	// set ProfileDigest themselves.
 	Profile       []byte `json:"profile,omitempty"`
 	ProfileDigest string `json:"profileDigest,omitempty"`
+	// Workspace is a captured workspace archive an interactive session
+	// starts from, uploaded by the home principal instead of an approved
+	// snapshot; Repository or Project still names what it belongs to. The
+	// owner validates it, keeps it until the coordinator retains it, and
+	// replaces it with WorkspaceDigest; callers never set WorkspaceDigest.
+	Workspace       []byte `json:"workspace,omitempty"`
+	WorkspaceDigest string `json:"workspaceDigest,omitempty"`
 }
 
 type SessionQuery struct {
@@ -122,6 +160,7 @@ type SessionQuery struct {
 type View struct {
 	project.Association
 	ID           string               `json:"id"`
+	Mode         Mode                 `json:"mode,omitempty"`
 	ExecutionID  string               `json:"executionId"`
 	AllocationID string               `json:"allocationId"`
 	Placement    string               `json:"placement"`
@@ -138,6 +177,9 @@ type View struct {
 	Problem          string               `json:"problem,omitempty"`
 	CheckpointInfo   *checkpoint.Metadata `json:"checkpointInfo,omitempty"`
 	WorkspaceFrom    *RevisionSource      `json:"workspaceFrom,omitempty"`
+	// Exit is how the current execution's last visit ended when its
+	// harness exited on its own.
+	Exit *session.Exit `json:"exit,omitempty"`
 }
 
 // Export is transferred over authenticated owner transport. Its source receipt
@@ -235,10 +277,14 @@ func Open(c Config) (*Owner, error) {
 			"run the previous release until each is retained or cancelled (\"sproozi cancel ID --remote\"), "+
 			"then start this release", strings.Join(live, ", "))
 	}
+	o.removeKeptUploads()
 	for _, id := range resume {
 		if v, err := o.info(id); err == nil && !v.Phase.Settled() {
 			o.dispatch(id)
 		}
+	}
+	if c.Terminal != nil {
+		o.wg.Go(func() { o.watchExits(ctx) })
 	}
 	return o, nil
 }
@@ -259,9 +305,11 @@ func (o *Owner) SubmitAs(ctx context.Context, caller Caller, q Submit) (View, er
 	if ctx.Err() != nil {
 		return View{}, ctx.Err()
 	}
-	if !CanonicalID(q.RequestID) || strings.TrimSpace(q.Task) == "" || len(q.Task) > 16<<10 || !utf8.ValidString(q.Task) || strings.ContainsRune(q.Task, '\x00') {
-		return View{}, &profile.Rejection{Code: profile.CodeInvalid}
+	upload, err := o.checkMode(caller, &q)
+	if err != nil {
+		return View{}, err
 	}
+	interactive := q.Mode == ModeInteractive
 	if q.Harness != o.config.Harness {
 		return View{}, &profile.Rejection{Code: profile.CodeUnsupported}
 	}
@@ -310,15 +358,26 @@ func (o *Owner) SubmitAs(ctx context.Context, caller Caller, q Submit) (View, er
 			return View{}, err
 		}
 	}
+	if len(upload) > 0 {
+		if err = o.validateUpload(ctx, upload); err != nil {
+			return View{}, err
+		}
+	}
 	o.retention.Lock()
 	defer o.retention.Unlock()
 	if err = o.admitRetention(); err != nil {
 		return View{}, err
 	}
+	if len(upload) > 0 {
+		// Kept until the coordinator retains it as the first visit's input.
+		if err = privatefs.Replace(o.config.Directory, id+uploadSuffix, upload); err != nil {
+			return View{}, err
+		}
+	}
 	// The task is data for the native agent; credentials and scope remain at
 	// the gateway. It is fixed here, because a launch never changes.
 	task := q.Task
-	if q.WorkspaceFrom == nil && repository.Snapshot == "" && repository.URL != "" {
+	if !interactive && q.WorkspaceFrom == nil && repository.Snapshot == "" && repository.URL != "" {
 		task = fmt.Sprintf("Work in the current controlled workspace. Fetch repository %s through the configured gateway and check out ref %q before performing this task. Do not copy host credentials.\n\n%s", repository.URL, repository.Ref, q.Task)
 	}
 	r := record{Version: recordVersion, ID: id, Intent: q, DeadlineChoice: choice, IntentDigest: digest,
@@ -331,6 +390,39 @@ func (o *Owner) SubmitAs(ctx context.Context, caller Caller, q Submit) (View, er
 	}
 	o.dispatch(id)
 	return o.view(r, nil), nil
+}
+
+// checkMode checks a submission's mode, task and upload for caller. It
+// normalizes the task mode to empty and replaces an upload with its digest,
+// returning the upload.
+func (o *Owner) checkMode(caller Caller, q *Submit) ([]byte, error) {
+	if q.Mode == ModeTask {
+		q.Mode = ""
+	}
+	interactive := q.Mode == ModeInteractive
+	if !CanonicalID(q.RequestID) || q.Mode != "" && !interactive {
+		return nil, &profile.Rejection{Code: profile.CodeInvalid}
+	}
+	if interactive && caller != CallerHome {
+		return nil, &profile.Rejection{Code: profile.CodeDenied}
+	}
+	if interactive && q.Task != "" || !interactive && (strings.TrimSpace(q.Task) == "" || len(q.Task) > 16<<10 ||
+		!utf8.ValidString(q.Task) || strings.ContainsRune(q.Task, '\x00')) {
+		return nil, &profile.Rejection{Code: profile.CodeInvalid}
+	}
+	if interactive && o.config.Terminal == nil {
+		return nil, &profile.Rejection{Code: profile.CodeUnsupported}
+	}
+	upload := q.Workspace
+	if q.WorkspaceDigest != "" || len(upload) > 0 && (!interactive || q.WorkspaceFrom != nil ||
+		int64(len(upload)) > o.config.MaxCheckpointBytes) {
+		return nil, &profile.Rejection{Code: profile.CodeInvalid}
+	}
+	if len(upload) > 0 {
+		sum := sha256.Sum256(upload)
+		q.Workspace, q.WorkspaceDigest = nil, "sha256:"+hex.EncodeToString(sum[:])
+	}
+	return upload, nil
 }
 
 // taskDeadline is the deadline a submission asks for (ADR 0056) and the
@@ -378,6 +470,9 @@ func (o *Owner) Recover(ctx context.Context, id string) (View, error) {
 	if err != nil {
 		return View{}, err
 	}
+	if e.legacy == nil && e.current.Intent.Mode == ModeInteractive {
+		return o.recoverInteractive(ctx, *e.current, v)
+	}
 	if e.legacy == nil && !v.Phase.Settled() {
 		o.wake(id)
 	}
@@ -393,6 +488,12 @@ var errCancelledBeforeStart = errors.New("work: cancelled before it started")
 // waits for a native turn. A session already stopped is refused: its result
 // is kept.
 func (o *Owner) Cancel(ctx context.Context, id, operation string) (View, error) {
+	return o.CancelAs(ctx, CallerHome, id, operation)
+}
+
+// CancelAs cancels for caller. Only the home principal cancels an
+// interactive session.
+func (o *Owner) CancelAs(ctx context.Context, caller Caller, id, operation string) (View, error) {
 	if !CanonicalID(operation) {
 		return View{}, &profile.Rejection{Code: profile.CodeInvalid}
 	}
@@ -402,6 +503,9 @@ func (o *Owner) Cancel(ctx context.Context, id, operation string) (View, error) 
 	}
 	if err = o.access(e.association()); err != nil {
 		return View{}, err
+	}
+	if e.current != nil && e.current.Intent.Mode == ModeInteractive && caller != CallerHome {
+		return View{}, &profile.Rejection{Code: profile.CodeDenied}
 	}
 	if e.legacy != nil {
 		return o.cancelLegacy(*e.legacy, operation)
@@ -442,6 +546,9 @@ func (o *Owner) cancelExecution(ctx context.Context, id, op, problem string) err
 		if _, err = o.config.Coordinator.Inspect(current.Current); os.IsNotExist(err) {
 			current.CancelOperation, current.Problem = op, problem
 			err = o.save(current)
+			if err == nil && current.Intent.WorkspaceDigest != "" {
+				o.removeUpload(id)
+			}
 			unlock()
 			if err != nil {
 				return nil, err

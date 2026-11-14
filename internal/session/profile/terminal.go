@@ -64,6 +64,7 @@ func (f *frameReader) Read(data []byte) (int, error) {
 	f.pending = f.pending[n:]
 	return n, nil
 }
+
 // EnvelopeLine reads an attachment's first line, its JSON envelope, within
 // the metadata bound. The terminal frames follow it in the same body.
 func EnvelopeLine(reader *bufio.Reader) ([]byte, error) {
