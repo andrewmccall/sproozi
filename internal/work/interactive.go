@@ -170,7 +170,7 @@ func (o *Owner) Resume(ctx context.Context, id, operation, maxDuration string) (
 		if bound.Action != actionResume || bound.Execution != r.Current {
 			return View{}, &profile.Rejection{Code: profile.CodeConflict}
 		}
-		o.dispatch(id)
+		o.wake(id)
 		return o.entryView(entry{current: &r})
 	}
 	rec, err := o.execution(r)
@@ -196,7 +196,8 @@ func (o *Owner) Resume(ctx context.Context, id, operation, maxDuration string) (
 	if err = o.save(r); err != nil {
 		return View{}, err
 	}
-	o.dispatch(id)
+	// A driver still finishing the stopped execution must start this one.
+	o.wake(id)
 	return o.view(r, &execution), nil
 }
 
