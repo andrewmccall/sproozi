@@ -75,6 +75,10 @@ ADR 0056 replaces the rule, in ADRs 0004, 0010, 0012 and 0034, that every
 execution has a deadline: whoever starts work sets it, and work its owner
 starts may have none. A set deadline still binds as those records describe.
 
+ADR 0057 extends ADR 0018 to the remote executor, which now runs its work
+through the coordinator, and replaces ADR 0032's consequence that Kubernetes
+visits are never turnless.
+
 | Decision | Topic |
 | --- | --- |
 | [0001](0001-mcp-capabilities-through-shared-gateway.md) | MCP access through the shared gateway. |
@@ -132,4 +136,5 @@ starts may have none. A set deadline still binds as those records describe.
 | [0053](0053-copilot-account-namespaces-and-policy-verification.md) | GitHub-backed Copilot relays GETs in both account namespaces; CI separately verifies the registry-policy URL through the authenticated gateway and the pinned client's model/MCP turn. |
 | [0054](0054-claude-code-agentruns-launch-through-a-helper.md) | Claude Code AgentRuns launch through `claude-launch.py`, which publishes the stock client's result and keeps its login in step with a mounted login store; `--login` signs a login in once. |
 | [0056](0056-whoever-starts-work-sets-its-deadline.md) | Whoever starts work sets its deadline: AgentPolicy `maxExecutionDuration`, the home's and the remote executor's `maxDuration` are optional, `run` and `resume` take `--max-duration DURATION\|none`, and one helper decides when a deadline has passed; managed Kubernetes sessions reach the gateway through a loopback forwarder that adds the current projected token to each CONNECT. |
+| [0057](0057-the-remote-executor-owns-its-sessions-through-the-coordinator.md) | The remote executor owns its sessions through the coordinator: the work catalogue keeps intent, project, executions, the task's result and the pull, and derives its phase from the coordinator's; work-token tasks take `workTokenMaxDuration`; `retainedBytes` bounds the executor's storage; stopped version 1 records stay readable. |
 | [0058](0058-lifecycle-records-declare-states-and-transitions.md) | Lifecycle records declare a typed phase validated on load and save, a `(from, event) → to` table with a deadline column, and one apply function for live code and recovery; the execution journal derives its phase from its structure and adopts it first. |
