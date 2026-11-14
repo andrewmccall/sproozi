@@ -24,6 +24,7 @@ import (
 	runtimekube "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
 	"github.com/andrewmccall/sproozi/internal/session"
+	"github.com/andrewmccall/sproozi/internal/session/profile"
 	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -47,6 +48,7 @@ const fixtureTypeKey = "type"
 
 // fixtureTemplate is the managed template the fixtures register against.
 const fixtureTemplate = "approved"
+const fixturePolicy = "policy"
 
 func fixtureTermination(containerID string, exitCode int32) corev1.ContainerState {
 	return corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
@@ -613,8 +615,8 @@ func setupKind(t *testing.T, kind harness.NativeKind) (*Placement, *admissionCli
 	if err := corev1.AddToScheme(scheme); err != nil {
 		t.Fatal(err)
 	}
-	template := &api.AgentTemplate{ObjectMeta: metav1.ObjectMeta{Namespace: fixtureNamespace, Name: fixtureTemplate, Annotations: map[string]string{registry.ManagedTemplateAnnotation: "true"}}, Spec: api.AgentTemplateSpec{Instructions: fixtureInstruction, PolicyRef: api.AgentPolicyReference{Name: "policy"}, RuntimeRef: api.AgentRuntimeReference{Name: fixtureRuntimeName}}}
-	policy := &api.AgentPolicy{ObjectMeta: metav1.ObjectMeta{Namespace: fixtureNamespace, Name: "policy"}, Spec: api.AgentPolicySpec{AllowedCapabilities: []api.CapabilityKind{api.CapabilityModelInference}, MaxExecutionDuration: metav1.Duration{Duration: time.Hour}}}
+	template := &api.AgentTemplate{ObjectMeta: metav1.ObjectMeta{Namespace: fixtureNamespace, Name: fixtureTemplate, Annotations: map[string]string{registry.ManagedTemplateAnnotation: "true"}}, Spec: api.AgentTemplateSpec{Instructions: fixtureInstruction, PolicyRef: api.AgentPolicyReference{Name: fixturePolicy}, RuntimeRef: api.AgentRuntimeReference{Name: fixtureRuntimeName}}}
+	policy := &api.AgentPolicy{ObjectMeta: metav1.ObjectMeta{Namespace: fixtureNamespace, Name: fixturePolicy}, Spec: api.AgentPolicySpec{AllowedCapabilities: []api.CapabilityKind{api.CapabilityModelInference}, MaxExecutionDuration: metav1.Duration{Duration: time.Hour}}}
 	nativeRuntime := approvedRuntime()
 	nativeRuntime.Spec.ClientConfig.Harness = string(kind)
 	kube := &admissionClient{Client: fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&api.AgentRun{}, &corev1.Pod{}).WithObjects(template, policy, nativeRuntime).Build()}
@@ -1342,5 +1344,28 @@ func TestEnsureRunNamesTheInvalidField(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "spec.task") || !strings.Contains(err.Error(), "AgentRun run-1") {
 		t.Fatalf("ensureRun error does not name the run and field: %v", err)
+	}
+}
+
+// A policy without maxExecutionDuration leaves the executor's own maxDuration
+// as the only limit on a launch's deadline.
+func TestPolicyWithoutDurationUsesExecutorLimit(t *testing.T) {
+	t.Parallel()
+	p, kube, _, l, _ := setup(t)
+	var policy api.AgentPolicy
+	if err := kube.Get(t.Context(), client.ObjectKey{Namespace: fixtureNamespace, Name: fixturePolicy}, &policy); err != nil {
+		t.Fatal(err)
+	}
+	policy.Spec.MaxExecutionDuration = metav1.Duration{}
+	if err := kube.Update(t.Context(), &policy); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.liveProfileInput(t.Context(), l, false); err != nil {
+		t.Fatalf("launch within the executor's limit refused: %v", err)
+	}
+	l.Deadline = time.Now().Add(2 * time.Hour).UTC()
+	var rejection *profile.Rejection
+	if _, err := p.liveProfileInput(t.Context(), l, false); !errors.As(err, &rejection) || rejection.Code != profile.CodeDenied {
+		t.Fatalf("launch past the executor's limit: err = %v, want denied", err)
 	}
 }

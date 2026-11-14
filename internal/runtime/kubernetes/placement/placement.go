@@ -215,7 +215,11 @@ func (p *Placement) liveProfileInput(ctx context.Context, l session.Launch, init
 	if policyengine.Evaluate(policy.Spec, template.Spec, api.AgentRunSpec{Capabilities: capabilities}, runtime.Spec) != nil {
 		return nil, &profile.Rejection{Code: profile.CodeDenied}
 	}
-	duration := min(p.config.MaxDuration, policy.Spec.MaxExecutionDuration.Duration)
+	// A policy without maxExecutionDuration leaves the executor's own limit.
+	duration := p.config.MaxDuration
+	if limit := policy.Spec.MaxExecutionDuration.Duration; limit > 0 {
+		duration = min(duration, limit)
+	}
 	if duration <= 0 || l.Deadline.After(time.Now().Add(duration)) {
 		return nil, &profile.Rejection{Code: profile.CodeDenied}
 	}

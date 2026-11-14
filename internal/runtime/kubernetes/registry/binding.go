@@ -85,12 +85,15 @@ func ResolveRun(ctx context.Context, kube client.Client, run *api.AgentRun, temp
 
 // EffectiveDeadline never extends the session deadline after queueing, restore,
 // or a policy change. Ordinary Runs retain their current StartedAt calculation.
+// The zero time means no deadline: the policy sets no maxExecutionDuration and
+// no session deadline applies.
 func EffectiveDeadline(run *api.AgentRun, policy *api.AgentPolicy, record *Record) time.Time {
 	var deadline time.Time
-	if run.Status.StartedAt != nil {
+	if run.Status.StartedAt != nil && policy.Spec.MaxExecutionDuration.Duration > 0 {
 		deadline = run.Status.StartedAt.Add(policy.Spec.MaxExecutionDuration.Duration)
 	}
-	if record != nil && (deadline.IsZero() || record.OriginalDeadline.Before(deadline)) {
+	// The earlier of the two wins; a zero (absent) deadline never wins.
+	if record != nil && !record.OriginalDeadline.IsZero() && (deadline.IsZero() || record.OriginalDeadline.Before(deadline)) {
 		deadline = record.OriginalDeadline
 	}
 	return deadline

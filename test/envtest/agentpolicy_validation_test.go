@@ -86,8 +86,9 @@ func TestAgentPolicyDefaultsDurations(t *testing.T) {
 	apiClient := testClient
 	ns := newNamespace(t)
 
-	// A typed client that leaves the durations unset must get the CRD
-	// defaults. With omitempty it sent "0s", and every run timed out at once.
+	// A typed client that leaves the durations unset must not send "0s"
+	// (with omitempty it did, and every run timed out at once). An unset
+	// maxExecutionDuration stays unset: the policy sets no deadline.
 	policy := validAgentPolicy(ns)
 	policy.Spec.MaxExecutionDuration = metav1.Duration{}
 	policy.Spec.RetentionTTL = metav1.Duration{}
@@ -100,8 +101,8 @@ func TestAgentPolicyDefaultsDurations(t *testing.T) {
 		t.Fatalf("Get() error = %v", err)
 	}
 
-	if got.Spec.MaxExecutionDuration.Duration != time.Hour {
-		t.Errorf("maxExecutionDuration = %s, want 1h", got.Spec.MaxExecutionDuration.Duration)
+	if got.Spec.MaxExecutionDuration.Duration != 0 {
+		t.Errorf("maxExecutionDuration = %s, want unset", got.Spec.MaxExecutionDuration.Duration)
 	}
 	if got.Spec.RetentionTTL.Duration != 30*24*time.Hour {
 		t.Errorf("retentionTTL = %s, want 720h", got.Spec.RetentionTTL.Duration)
@@ -130,16 +131,18 @@ func TestAgentPolicyRejectsZeroExecutionDuration(t *testing.T) {
 	}
 }
 
-func TestAgentPolicyRejectsExecutionDurationAboveOneHour(t *testing.T) {
+// Execution duration has no ceiling: an owner may let their own work run
+// for days.
+func TestAgentPolicyAcceptsLongExecutionDuration(t *testing.T) {
 	t.Parallel()
 
 	apiClient := testClient
 	ns := newNamespace(t)
 
 	policy := validAgentPolicy(ns)
-	policy.Spec.MaxExecutionDuration = metav1.Duration{Duration: time.Hour + time.Minute}
-	if err := apiClient.Create(t.Context(), policy); err == nil {
-		t.Fatal("Create() error = nil, want API server validation error")
+	policy.Spec.MaxExecutionDuration = metav1.Duration{Duration: 72 * time.Hour}
+	if err := apiClient.Create(t.Context(), policy); err != nil {
+		t.Fatalf("Create() error = %v, want a 72h policy accepted", err)
 	}
 }
 

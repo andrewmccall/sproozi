@@ -65,12 +65,12 @@ type AgentPolicySpec struct {
 	// ResourceBounds caps the resources selected by an AgentRuntime.
 	ResourceBounds ResourceBounds `json:"resourceBounds"`
 
-	// MaxExecutionDuration is the longest an AgentRun may execute.
+	// MaxExecutionDuration is the longest an AgentRun may execute. Omit it
+	// for no deadline from the policy: work the policy's users start runs
+	// until it finishes, is stopped or meets a session's own deadline.
 	// +optional
-	// +kubebuilder:default="1h"
-	// +kubebuilder:validation:XValidation:rule="duration(self) <= duration('1h')",message="must not exceed one hour"
 	// +kubebuilder:validation:XValidation:rule="duration(self) > duration('0s')",message="must be greater than zero"
-	MaxExecutionDuration metav1.Duration `json:"maxExecutionDuration,omitzero"` // omitzero, not omitempty: a typed client must omit it so the default applies
+	MaxExecutionDuration metav1.Duration `json:"maxExecutionDuration,omitzero"` // omitzero, not omitempty: "0s" is rejected, and unset means no deadline
 
 	// RetentionTTL is how long terminal AgentRuns are retained.
 	// +optional

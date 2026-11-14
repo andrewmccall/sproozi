@@ -241,7 +241,7 @@ func (r *AgentRunReconciler) resolveAdmission(ctx context.Context, run *sprooziv
 	// A completed session stop ends the run as stopped even past the deadline
 	// (ADR 0041); handleRunning waits for its sandbox to finish.
 	stopped := binding != nil && binding.Phase == registry.Stopped
-	if !stopped && time.Now().After(deadline) {
+	if !stopped && !deadline.IsZero() && time.Now().After(deadline) {
 		logger.Info("AgentRun deadline exceeded", "name", run.Name, "phase", run.Status.Phase)
 		_, err := r.transitionPhase(ctx, run, sprooziv1alpha1.AgentRunPhaseTimedOut, "MaxExecutionDurationExceeded",
 			fmt.Sprintf("AgentRun passed its execution deadline %s", deadline.UTC().Format(time.RFC3339)))
@@ -466,6 +466,10 @@ func (r *AgentRunReconciler) handleRunning(ctx context.Context, run *sprooziv1al
 	}
 
 	// Pending, Running or Unknown: wake at the deadline; Pod events wake sooner.
+	// Without a deadline, Pod and policy events are the only wake-ups.
+	if admitted.deadline.IsZero() {
+		return ctrl.Result{}, nil
+	}
 	return ctrl.Result{RequeueAfter: time.Until(admitted.deadline)}, nil
 }
 
@@ -483,7 +487,7 @@ func (r *AgentRunReconciler) waitForQuota(ctx context.Context, run *sprooziv1alp
 			Status:             metav1.ConditionFalse,
 			ObservedGeneration: run.Generation,
 			Reason:             quotaExceededReason,
-			Message:            fmt.Sprintf("A ResourceQuota rejected the sandbox Pod; retrying until the run deadline: %v", quotaErr),
+			Message:            fmt.Sprintf("A ResourceQuota rejected the sandbox Pod; retrying until it fits or the run ends: %v", quotaErr),
 		})
 		if err := r.Status().Update(ctx, run); err != nil {
 			return ctrl.Result{}, err
@@ -491,7 +495,9 @@ func (r *AgentRunReconciler) waitForQuota(ctx context.Context, run *sprooziv1alp
 		ready = apimeta.FindStatusCondition(run.Status.Conditions, readyCondition)
 	}
 	wait := min(max(time.Since(ready.LastTransitionTime.Time), quotaRetryMin), quotaRetryMax)
-	wait = min(wait, max(time.Until(deadline), time.Second))
+	if !deadline.IsZero() {
+		wait = min(wait, max(time.Until(deadline), time.Second))
+	}
 	return ctrl.Result{RequeueAfter: wait}, nil
 }
 
