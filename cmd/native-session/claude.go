@@ -45,13 +45,28 @@ type claudeHook struct {
 	ToolName       string `json:"tool_name"`
 	StopActive     *bool  `json:"stop_hook_active"`
 }
+
+// claudeTurn is where the current Claude turn stands. accept is its only
+// transition function.
+type claudeTurn int
+
+const (
+	// turnIdle: no prompt was submitted in this visit.
+	turnIdle claudeTurn = iota
+	// turnRunning: a prompt was submitted and the turn has not ended; only
+	// a running turn starts tools.
+	turnRunning
+	// turnCompleted: the turn ended with a safe Stop.
+	turnCompleted
+	// turnFailed: the turn ended on an API error (StopFailure). Only a new
+	// prompt starts another turn.
+	turnFailed
+)
+
 type claudeLifecycle struct {
-	id        string
-	started   bool
-	completed bool
-	// failed records a turn that ended on an API error (StopFailure);
+	id   string
+	turn claudeTurn
 	// everCompleted records that some turn of this conversation completed.
-	failed        bool
 	everCompleted bool
 	// lastHook is when the last lifecycle hook arrived.
 	lastHook  time.Time
@@ -68,7 +83,7 @@ type claudeCompletion = harness.NativeCompletion
 func (s *server) claudeCompletion() *claudeCompletion {
 	s.mu.Lock()
 	c := s.claude
-	d := &claudeCompletion{Started: c.started, Completed: c.completed, PendingTools: len(c.pending),
+	d := &claudeCompletion{Started: c.turn != turnIdle, Completed: c.turn == turnCompleted, PendingTools: len(c.pending),
 		PromptGeneration: c.input, InputGeneration: s.inputGeneration,
 		LastEvent: c.lastEvent, Rejected: c.rejected, Observation: "lifecycle_incomplete"}
 	selected := s.config.ThreadID
@@ -144,10 +159,10 @@ func (c *claudeLifecycle) accept(h claudeHook, input uint64) error {
 		if len(c.pending) != 0 {
 			return errors.New("claude prompt arrived with pending tools")
 		}
-		c.started, c.completed, c.failed, c.input = true, false, false, input
+		c.turn, c.input = turnRunning, input
 		c.pending = map[string]bool{}
 	case claudePreTool:
-		if !c.started || c.completed || !validClaudeTool(h) || c.pending[h.ToolID] {
+		if c.turn != turnRunning || !validClaudeTool(h) || c.pending[h.ToolID] {
 			return errors.New("unsupported Claude tool start")
 		}
 		c.pending[h.ToolID] = true
@@ -157,16 +172,17 @@ func (c *claudeLifecycle) accept(h claudeHook, input uint64) error {
 		}
 		delete(c.pending, h.ToolID)
 	case claudeStop:
-		if !c.started || len(c.pending) != 0 || h.StopActive == nil || *h.StopActive {
+		if c.turn != turnRunning || len(c.pending) != 0 || h.StopActive == nil || *h.StopActive {
 			return errors.New("claude turn has no safe Stop observation")
 		}
-		c.completed, c.everCompleted = true, true
+		c.turn, c.everCompleted = turnCompleted, true
 	case claudeStopFailure:
-		if !c.started || c.completed {
+		// A repeated failure report of the same turn is accepted.
+		if c.turn != turnRunning && c.turn != turnFailed {
 			return errors.New("claude turn failure has no started turn")
 		}
 		// An API error ends the turn; no tool can still be running.
-		c.failed, c.pending = true, map[string]bool{}
+		c.turn, c.pending = turnFailed, map[string]bool{}
 	default:
 		return errors.New("unsupported Claude lifecycle event")
 	}
@@ -185,10 +201,10 @@ func (s *server) claudeTurnless() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	c := s.claude
-	if !c.started {
+	if c.turn == turnIdle {
 		return c.id == ""
 	}
-	return c.failed && !c.everCompleted && len(c.pending) == 0
+	return c.turn == turnFailed && !c.everCompleted && len(c.pending) == 0
 }
 
 // claudeTurnReady reports a completed turn with no running tool and no
@@ -198,7 +214,7 @@ func (s *server) claudeTurnless() bool {
 // not. The caller holds s.mu.
 func (s *server) claudeTurnReady() bool {
 	c := s.claude
-	return c.completed && len(c.pending) == 0 && (c.input == s.inputGeneration || s.inputSettled())
+	return c.turn == turnCompleted && len(c.pending) == 0 && (c.input == s.inputGeneration || s.inputSettled())
 }
 
 // claudeRestoredUnchanged reports a resumed visit in which no prompt was
@@ -206,7 +222,7 @@ func (s *server) claudeTurnReady() bool {
 // new turn. Unsubmitted input must have settled. The caller holds s.mu.
 func (s *server) claudeRestoredUnchanged() bool {
 	c := s.claude
-	return !c.started && s.config.ThreadID != "" && len(c.pending) == 0 &&
+	return c.turn == turnIdle && s.config.ThreadID != "" && len(c.pending) == 0 &&
 		(s.inputGeneration == 0 || s.inputSettled())
 }
 
