@@ -264,7 +264,7 @@ func TestClaudeApprovesOnlyAGatewayPlaceholder(t *testing.T) {
 // releases it.
 func TestClaudeLifecyclePairsMCPToolsLikeForegroundBash(t *testing.T) {
 	inactive := false
-	for _, name := range []string{"mcp__sproozi__diagnose", fixtureMCPTool, "mcp__my-server__a_tool"} {
+	for _, name := range []string{"mcp__sproozi__diagnose", fixtureMCPTool, "mcp__my-server__a_tool", "Skill"} {
 		c := claudeLifecycle{}
 		if err := c.accept(claudeHook{Event: claudePromptSubmit}, 1); err != nil {
 			t.Fatal(err)

@@ -183,7 +183,7 @@ the task as the launch's prompt and counts only the turn that prompt started.
 | Managed selector | Selected native state | Completed-turn observation |
 | --- | --- | --- |
 | `codex` | One same-UUID rollout | Native completed turn, resolved supported tools and initial developer instruction digest |
-| `claude-code` | One same-UUID primary project transcript | Fresh prompt/tool/Stop hooks plus a settled transcript with paired foreground Bash and MCP tool calls, including calls that failed |
+| `claude-code` | One same-UUID primary project transcript | Fresh prompt/tool/Stop hooks plus a settled transcript with paired foreground Bash, MCP and `Skill` calls, including Bash and MCP calls that failed |
 | `copilot` | One `session-state/<id>/events.jsonl` journal, for the ID the supervisor chose with `--session-id` | The main agent's last `assistant.turn_end` after an answer with no tool requests, every tool finished and no error or abort after it, once terminal input has settled ([ADR 0048](../adr/0048-github-copilot-cli-is-a-managed-harness.md)) |
 
 The supervisor owns the PTY across attachment disconnects. It uses the installed
@@ -210,7 +210,7 @@ cancellation revokes first. See [ADR
 0011](../adr/0011-native-session-compatibility-and-completion.md).
 
 The managed Codex launch uses `--sandbox danger-full-access` to run tools within the outer container boundary. The restricted sandbox
-kernel does not support the inner bubblewrap sandbox. Claude uses fixed `bypassPermissions`, foreground Bash and the tools of its MCP connections (`mcp__<server>__<tool>`, such as `mcp__sproozi__diagnose`).
+kernel does not support the inner bubblewrap sandbox. Claude uses fixed `bypassPermissions`, foreground Bash, the tools of its MCP connections (`mcp__<server>__<tool>`, such as `mcp__sproozi__diagnose`) and the `Skill` tool for the profile's skills and `sproozi:sproozi-access`.
 Copilot uses `--allow-all` with its built-in GitHub MCP server disabled. All
 rely on the outer non-root, read-only, capability-restricted container and
 enforced gateway network boundary. Portable history cannot select these settings.

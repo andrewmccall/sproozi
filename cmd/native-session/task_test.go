@@ -216,11 +216,15 @@ func TestClaudeTaskLaunchIsNeverRestoredUnchangedOrTurnless(t *testing.T) {
 
 // The pinned stock client (2.1.318) wrote these hook payloads for one task
 // turn under the managed hooks: a foreground Bash call, then an MCP tool call,
-// then Stop. In the second, both calls failed. Paths are the managed ones.
+// then Stop; the same with both calls failing; and a Skill call loading a
+// profile skill and the sproozi-access skill. hack/verify/claude-transcripts
+// captures them; paths are the managed ones.
 func TestClaudeStockTaskHooksCompleteTheTaskTurn(t *testing.T) {
 	for _, tc := range []struct{ file, task string }{
 		{"claude-2.1.318-mcp-tool-hooks.jsonl", "--literal task: call the tool\n  then report.  "},
 		{"claude-2.1.318-failed-tools-hooks.jsonl", "--literal task: call the tool"},
+		{"claude-2.1.318-profile-skill-hooks.jsonl", "Use the fixture skill."},
+		{"claude-2.1.318-sproozi-skill-hooks.jsonl", "Use the sproozi access skill."},
 	} {
 		t.Run(tc.file, func(t *testing.T) {
 			data, err := os.ReadFile(filepath.Join("testdata", tc.file))

@@ -124,8 +124,9 @@ journal for a completed final turn, matching initial approved instructions and
 resolved function/custom-tool and native exec/MCP/patch activity. Partial rows,
 unknown tool calls, unresolved calls, incompatible metadata or instruction
 mismatch fail closed. The first new session requires exactly one native journal.
-For Claude, it requires a matching native `Stop`, no pending foreground Bash or
-MCP (`mcp__<server>__<tool>`) calls, and a settled selected primary transcript.
+For Claude, it requires a matching native `Stop`, no pending foreground Bash,
+MCP (`mcp__<server>__<tool>`) or `Skill` calls (a `Skill` call loads a profile
+skill or `sproozi:sproozi-access`), and a settled selected primary transcript.
 `PostToolUse` or, for a failed call, `PostToolUseFailure` ends a call; an
 interrupted call stays pending. A task launch passes its task as the one
 positional prompt and counts only a `Stop` after the `UserPromptSubmit` whose

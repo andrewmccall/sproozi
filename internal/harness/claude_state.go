@@ -38,8 +38,21 @@ const ClaudeBash = "Bash"
 // clarification of 2026-11-14). Subagents, background tasks and every other
 // native tool stay unsupported.
 func ClaudeSupportedTool(name string) bool {
-	return name == ClaudeBash || claudeMCPTool.MatchString(name)
+	return name == ClaudeBash || name == ClaudeSkill || claudeMCPTool.MatchString(name)
 }
+
+// ClaudeSkill is Claude Code's tool for loading a skill. Managed sessions load
+// skills only from the supervisor's plugins: the sproozi plugin's
+// sproozi-access and the profile plugin's skills.
+const ClaudeSkill = "Skill"
+
+// claudeManagedSkill is a skill name the Skill tool can load in a managed
+// session, as the plugin namespace and the skill's directory name.
+var claudeManagedSkill = regexp.MustCompile(`^(profile:[a-z0-9][a-z0-9-]{0,62}|sproozi:sproozi-access)$`)
+
+// claudeSkillContent begins the row in which Claude Code injects a loaded
+// skill's instructions after the Skill tool's result.
+const claudeSkillContent = "Base directory for this skill: "
 
 // ClaudeState selects one primary conversation transcript, excluding credential
 // and settings files, indexes, shell snapshots and subagent state. Historical
@@ -185,7 +198,11 @@ type claudeRecord struct {
 	MessageCount *int   `json:"messageCount"`
 	ToolUseID    string `json:"toolUseID"`
 	ParentTool   string `json:"parentToolUseID"`
-	Data         struct {
+	// IsMeta marks a row Claude Code adds rather than the user wrote, and
+	// SourceToolUseID names the tool call it belongs to.
+	IsMeta          *bool  `json:"isMeta"`
+	SourceToolUseID string `json:"sourceToolUseID"`
+	Data            struct {
 		Type    string `json:"type"`
 		Event   string `json:"hookEvent"`
 		Name    string `json:"hookName"`
@@ -293,7 +310,7 @@ func ClaudeTranscriptLeaf(state ClaudeState, maxBytes int64) (string, error) {
 		int64(len(state.Transcript)) > maxBytes || !bytes.HasSuffix(state.Transcript, []byte{'\n'}) {
 		return "", errors.New("invalid or oversized Claude checkpoint")
 	}
-	chain := claudeChain{pending: map[string]string{}, tools: map[string]string{}, stops: map[string]bool{}, seen: map[string]bool{}}
+	chain := claudeChain{pending: map[string]string{}, tools: map[string]string{}, skills: map[string]string{}, stops: map[string]bool{}, seen: map[string]bool{}}
 	for line := range bytes.SplitSeq(state.Transcript, []byte{'\n'}) {
 		if len(line) == 0 {
 			continue
@@ -312,6 +329,13 @@ type claudeChain struct {
 	// pending maps a running tool's ID to the row that started it; tools maps
 	// every started tool's ID to its name.
 	pending, tools map[string]string
+	// skills maps a Skill call's ID to the skill it loads. loading is the
+	// Skill call whose result arrived and whose instructions row has not;
+	// that call stays pending until the row arrives. permissions allows the
+	// one command_permissions attachment that follows those instructions.
+	skills         map[string]string
+	loading        string
+	permissions    bool
 	stops, seen    map[string]bool
 	previous, leaf string
 }
@@ -348,6 +372,14 @@ func (c *claudeChain) accept(line []byte, id string) error {
 	case "progress":
 		err = validateClaudeProgress(row, c.pending, c.tools, c.stops, c.leaf)
 	case "attachment":
+		if row.Attachment.Type == "command_permissions" {
+			// It follows a loaded skill's instructions, once.
+			if !c.permissions {
+				return errors.New("unsupported Claude context attachment")
+			}
+			c.permissions = false
+			row.Attachment.Type = "session_context"
+		}
 		err = validateClaudeAttachment(row)
 	case claudeSystem:
 		switch row.Subtype {
@@ -439,9 +471,12 @@ func (c *claudeChain) message(row claudeRecord) error {
 	if err != nil {
 		return err
 	}
-	c.leaf = ""
+	c.leaf, c.permissions = "", false
+	if (row.IsMeta != nil && *row.IsMeta) || row.SourceToolUseID != "" || c.loading != "" {
+		return c.skillContent(row, blocks)
+	}
 	for _, block := range blocks {
-		if err = validateClaudeBlock(row, block, c.pending, c.tools); err != nil {
+		if err = c.block(row, block); err != nil {
 			return err
 		}
 		if row.Type == claudeAssistant && block.Type == claudeText && block.Text != "" {
@@ -595,7 +630,50 @@ func claudeSettledResult(name string, block claudeBlock, raw json.RawMessage) bo
 	return false
 }
 
-func validateClaudeBlock(row claudeRecord, block claudeBlock, pending, seen map[string]string) error {
+// claudeSkillInput returns the skill a Skill call loads. The captured call
+// names only the skill; a managed session's skills come from the sproozi and
+// profile plugins.
+func claudeSkillInput(raw json.RawMessage) (string, bool) {
+	var input struct {
+		Skill string `json:"skill"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&input) != nil || !claudeManagedSkill.MatchString(input.Skill) {
+		return "", false
+	}
+	return input.Skill, true
+}
+
+// claudeSkillLaunched reports the Skill tool's successful result for skill:
+// Claude Code launches the skill and then injects its instructions.
+func claudeSkillLaunched(skill string, block claudeBlock, raw json.RawMessage) bool {
+	var content string
+	var result struct {
+		Success     bool   `json:"success"`
+		CommandName string `json:"commandName"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	return !block.IsError && json.Unmarshal(block.Content, &content) == nil && content == "Launching skill: "+skill &&
+		decoder.Decode(&result) == nil && result.Success && result.CommandName == skill
+}
+
+// skillContent accepts the row in which Claude Code injects the instructions
+// of the skill whose Skill call just returned, which settles that call. Any
+// other row Claude Code marks as its own stays unsupported.
+func (c *claudeChain) skillContent(row claudeRecord, blocks []claudeBlock) error {
+	if row.Type != claudeUser || row.IsMeta == nil || !*row.IsMeta || c.loading == "" ||
+		row.SourceToolUseID != c.loading || row.SourceTool != "" || len(blocks) != 1 ||
+		blocks[0].Type != claudeText || !strings.HasPrefix(blocks[0].Text, claudeSkillContent) {
+		return errors.New("unsupported Claude skill instructions")
+	}
+	delete(c.pending, c.loading)
+	c.loading, c.permissions = "", true
+	return nil
+}
+
+func (c *claudeChain) block(row claudeRecord, block claudeBlock) error {
 	switch block.Type {
 	case claudeText:
 		if block.Text == "" {
@@ -605,17 +683,35 @@ func validateClaudeBlock(row claudeRecord, block claudeBlock, pending, seen map[
 		var input struct {
 			Background bool `json:"run_in_background"`
 		}
-		if row.Type != claudeAssistant || block.ID == "" || seen[block.ID] != "" || !ClaudeSupportedTool(block.Name) ||
+		if row.Type != claudeAssistant || block.ID == "" || c.tools[block.ID] != "" || !ClaudeSupportedTool(block.Name) ||
 			json.Unmarshal(block.Input, &input) != nil || input.Background || !bytes.HasPrefix(block.Input, []byte{'{'}) {
 			return errors.New("unsupported Claude tool call")
 		}
-		pending[block.ID], seen[block.ID] = row.UUID, block.Name
+		if block.Name == ClaudeSkill {
+			skill, ok := claudeSkillInput(block.Input)
+			if !ok {
+				return errors.New("unsupported Claude tool call")
+			}
+			c.skills[block.ID] = skill
+		}
+		c.pending[block.ID], c.tools[block.ID] = row.UUID, block.Name
 	case "tool_result":
-		if row.Type != claudeUser || pending[block.ToolUseID] == "" ||
-			row.SourceTool != pending[block.ToolUseID] || !claudeSettledResult(seen[block.ToolUseID], block, row.ToolResult) {
+		name := c.tools[block.ToolUseID]
+		if row.Type != claudeUser || c.pending[block.ToolUseID] == "" || row.SourceTool != c.pending[block.ToolUseID] {
 			return errors.New("unmatched or unsupported Claude tool result")
 		}
-		delete(pending, block.ToolUseID)
+		if name == ClaudeSkill {
+			if !claudeSkillLaunched(c.skills[block.ToolUseID], block, row.ToolResult) {
+				return errors.New("unmatched or unsupported Claude tool result")
+			}
+			// The call settles when the skill's instructions arrive.
+			c.loading = block.ToolUseID
+			return nil
+		}
+		if !claudeSettledResult(name, block, row.ToolResult) {
+			return errors.New("unmatched or unsupported Claude tool result")
+		}
+		delete(c.pending, block.ToolUseID)
 	default:
 		return fmt.Errorf("unsupported Claude content block %q", block.Type)
 	}
