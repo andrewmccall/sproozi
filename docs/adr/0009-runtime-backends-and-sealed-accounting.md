@@ -111,3 +111,18 @@ Revisit conservative receipts when trusted provider settlement can resolve an
 unknown reservation without reopening spending. Add another storage adapter only
 when an actual deployment needs it. Revisit the package seams if backend types
 leak into the shared coordinator or callers have to orchestrate backend internals.
+
+## Later clarification (2026-11-14)
+
+"Later settlement can update ordinary observed counters but cannot change the
+retained receipt" now has an explicit rule. A sealed account settles each
+pending reservation at no more than that reservation, because the receipt
+already counts every pending reservation in full. Usage reported above the
+reservation is reported as exceeded (`budget.ErrUsageExceeded`, audit
+`endReason` `exceeded`) but not recorded. Before this, the open account's rule
+charged such usage up to the allowance; the result passed the receipt, the
+ledger refused the write as inconsistent, and the reservation stayed held
+until its lease expired and recovery charged at most the reservation anyway.
+The ledger's operations now decide by an explicit account phase: absent,
+legacy, open, open with unbounded pending usage, or sealed. The stored format
+is unchanged.

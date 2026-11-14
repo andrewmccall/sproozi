@@ -62,6 +62,9 @@ spec:
 `unitsUsed`, `costMicros` and `finalized` are for display. They are computed
 from `state` in the write that changes it, so they cannot disagree with it.
 They don't include reservations still pending.
+A reservation still pending at the seal settles afterwards at no more than it
+reserved, so `unitsUsed` and `costMicros` can still rise after `finalized`
+becomes `true`, but never past the sealed usage.
 
 ## Inspect ledgers
 

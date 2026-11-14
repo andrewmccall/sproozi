@@ -44,14 +44,15 @@ func reserveState(s *State, req UsageReservation) (*LedgerReservation, error) {
 	return &LedgerReservation{runID: AccountKey(""), units: units, costMicros: cost, maxUnits: req.MaxUnits, maxCostMicros: req.MaxCostMicros}, nil
 }
 
+// chargeRule returns the amount to record for used against one dimension,
+// and whether used exceeded the reservation.
+type chargeRule func(used, reserved, allowance, settled, otherReserved int64) (int64, bool)
+
 // settleState is shared by all storage adapters. Invalid usage cannot free
-// capacity that may already have been consumed by the provider.
-//
-// Trusted usage above the reservation or the allowance is still recorded,
-// capped at the allowance, and reported as exceeded. The provider has already
-// done that work, so keeping only the reservation would let a caller repeat
-// an oversized request indefinitely while each attempt charged a small bound.
-func settleState(s *State, r *LedgerReservation, usage TrustedUsage) (exceeded bool, err error) {
+// capacity that may already have been consumed by the provider. charge sets
+// what each dimension records: cappedCharge for an open account,
+// reservedCharge for a sealed one.
+func settleState(s *State, r *LedgerReservation, usage TrustedUsage, charge chargeRule) (exceeded bool, err error) {
 	if r.settled {
 		return false, ErrAlreadySettled
 	}
@@ -65,8 +66,8 @@ func settleState(s *State, r *LedgerReservation, usage TrustedUsage) (exceeded b
 		usage.CostMicros > math.MaxInt64-s.CostMicros-(s.ReservedCostMicros-r.costMicros) {
 		return false, fmt.Errorf("budget: settled accounting overflows")
 	}
-	units, unitsExceeded := cappedCharge(usage.Units, r.units, r.maxUnits, s.UnitsUsed, s.ReservedUnits-r.units)
-	cost, costExceeded := cappedCharge(usage.CostMicros, r.costMicros, r.maxCostMicros, s.CostMicros, s.ReservedCostMicros-r.costMicros)
+	units, unitsExceeded := charge(usage.Units, r.units, r.maxUnits, s.UnitsUsed, s.ReservedUnits-r.units)
+	cost, costExceeded := charge(usage.CostMicros, r.costMicros, r.maxCostMicros, s.CostMicros, s.ReservedCostMicros-r.costMicros)
 	s.ReservedUnits -= r.units
 	s.ReservedCostMicros -= r.costMicros
 	s.UnitsUsed += units
@@ -74,8 +75,12 @@ func settleState(s *State, r *LedgerReservation, usage TrustedUsage) (exceeded b
 	return unitsExceeded || costExceeded, nil
 }
 
-// cappedCharge returns the amount to record for used against one bounded
-// dimension, and whether used exceeded the reservation.
+// cappedCharge is the charge rule of an open account.
+//
+// Trusted usage above the reservation or the allowance is still recorded,
+// capped at the allowance, and reported as exceeded. The provider has already
+// done that work, so keeping only the reservation would let a caller repeat
+// an oversized request indefinitely while each attempt charged a small bound.
 //
 // Usage within the reservation is recorded as is and never exceeds: the
 // reservation was admitted within the allowance. Usage beyond it is recorded
@@ -91,4 +96,13 @@ func cappedCharge(used, reserved, allowance, settled, otherReserved int64) (int6
 		return used, false
 	}
 	return min(used, max(allowance-settled-otherReserved, reserved)), true
+}
+
+// reservedCharge is the charge rule of a sealed account: min(used, reserved).
+// The seal's receipt already holds every pending reservation in full and can
+// never change, so usage beyond a reservation cannot be recorded. It is
+// reported as exceeded instead. No reservation is admitted after a seal, so
+// there is nothing for a repeated oversized request to exploit.
+func reservedCharge(used, reserved, _, _, _ int64) (int64, bool) {
+	return min(used, reserved), used > reserved
 }

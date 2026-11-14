@@ -187,14 +187,11 @@ func (s *store) sweep(ctx context.Context, ledger *api.BudgetLedger, now time.Ti
 		return nil
 	}
 	var committed budget.Recovered
-	err = s.update(ctx, ledger.Name, budget.AccountKey(ledger.Spec.Account), func(record *budget.Record, exists bool) error {
-		if !exists {
-			return budget.ErrAccountNotFound
-		}
+	err = s.update(ctx, ledger.Name, budget.AccountKey(ledger.Spec.Account), budget.Existing(func(record *budget.Record) error {
 		var recoverErr error
 		committed, recoverErr = budget.RecoverExpired(record, ledger.Name, now, legacy)
 		return recoverErr
-	})
+	}))
 	if errors.Is(err, budget.ErrAccountNotFound) {
 		return nil
 	}
