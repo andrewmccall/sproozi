@@ -536,6 +536,26 @@ starts another, with fresh admission, gateway access and a new sandbox. The
 execution's deadline and allowance carry across visits. Its ID is
 `allocationId`. Also seen as: allocation.
 
+### Execution journal
+
+The service's trusted record of one [execution](#execution): its visits,
+pending operation, cancellation intent, allowance and phase (`idle`,
+`preparing`, `activating`, `active`, `stopping`, `unknown-stop`,
+`unknown-usage`, `cancelling` or `cancelled`). Only declared transitions
+change the phase. See
+[ADR 0018](docs/adr/0018-coordinator-owns-every-visit.md) and
+[ADR 0058](docs/adr/0058-lifecycle-records-declare-states-and-transitions.md).
+Also seen as: coordinator journal, coordinator record, `session.Record`.
+
+### Lifecycle record
+
+A trusted record that steps a writer through declared phases: a typed phase
+validated on load and save, a `(from, event) → to` table that says which events
+the deadline refuses, and one apply function used by live code and recovery.
+The execution journal and the session registration are lifecycle records; the
+ADR lists the records still adopting the pattern. See
+[ADR 0058](docs/adr/0058-lifecycle-records-declare-states-and-transitions.md).
+
 ### Turnless visit
 
 A first visit whose harness never started a conversation: no prompt was
