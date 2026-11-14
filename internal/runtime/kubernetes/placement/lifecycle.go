@@ -408,9 +408,13 @@ func (p *Placement) quietSource(ctx context.Context, local retained, r registry.
 	}
 	switch {
 	case terminated(pod):
-		if local.thread(r) == "" {
-			return local, r, errors.New("placement: initial native UUID remains unknown")
+		var err error
+		if local, r, err = p.recordExit(ctx, local, r, pod); err != nil {
+			return local, r, err
 		}
+		// A first visit that ended before any completed turn has no
+		// conversation to capture (ADR 0032).
+		local.Turnless = local.thread(r) == ""
 	case r.Phase == registry.Stopping:
 		data, err := p.native(pod)(ctx, harness.NativeStatus)
 		if err != nil {
@@ -440,6 +444,75 @@ func (p *Placement) quietSource(ctx context.Context, local retained, r registry.
 	}
 	local.NativeQuiet = true
 	return local, r, p.save(local)
+}
+
+// recordExit keeps what the supervisor reported when its harness ended
+// without a graceful stop, as the Docker placement does: the report in the
+// native container's last output lines, or the container's exit code when
+// there is none, with the deadline then decided by this host's clock. A
+// first Codex visit binds the thread of a completed turn it reported, so the
+// stop can still checkpoint that conversation.
+func (p *Placement) recordExit(ctx context.Context, local retained, r registry.Record, pod *corev1.Pod) (retained, registry.Record, error) {
+	if local.Exited == nil {
+		var code int32
+		for _, c := range pod.Status.ContainerStatuses {
+			if c.Name == nativeContainer && c.State.Terminated != nil {
+				code = c.State.Terminated.ExitCode
+			}
+		}
+		report := harness.NativeExitReport{Code: int(code)}
+		if logs, err := p.exec.Logs(ctx, pod.Namespace, pod.Name, nativeContainer); err == nil {
+			if reported, ok := harness.ParseNativeExitReport(logs); ok {
+				report = reported
+			}
+		}
+		exit := &session.Exit{Code: report.Code, Output: report.Output, Cause: report.Cause}
+		switch report.Cause {
+		case harness.NativeExitDeadline:
+			exit.Deadline = true
+		case harness.NativeExitSelf, harness.NativeExitFailed:
+		default:
+			exit.Deadline = deadline.At(local.Launch.Deadline).Passed(time.Now())
+		}
+		if harness.ProvesCompletion(r.Harness) && local.thread(r) == "" && report.Thread != "" {
+			bound, err := p.registry.BindNative(ctx, r.Reference, report.Thread)
+			if err != nil {
+				return local, r, semantic(err)
+			}
+			r = bound
+		}
+		local.Exited = exit
+		if err := p.save(local); err != nil {
+			return local, r, err
+		}
+	}
+	return local, r, nil
+}
+
+// Exited reports whether an active visit's native container ended without a
+// stop being requested: its harness exited on its own or at its deadline.
+// Stopping the visit then reports the exit.
+func (p *Placement) Exited(ctx context.Context, l session.Launch, i session.Incarnation) (bool, error) {
+	unlock, err := p.lockOperation(l)
+	if err != nil {
+		return false, err
+	}
+	defer unlock()
+	local, r, err := p.retained(ctx, l)
+	if err != nil {
+		return false, err
+	}
+	if inc(r) != i {
+		return false, &profile.Rejection{Code: profile.CodeConflict}
+	}
+	if r.Phase != registry.Active || local.NativeQuiet {
+		return false, nil
+	}
+	pod, err := p.pod(ctx, r)
+	if err != nil {
+		return false, err
+	}
+	return terminated(pod), nil
 }
 
 // native runs fixed supervisor operations on the exact admitted native container.
@@ -488,7 +561,7 @@ func (p *Placement) stopped(local retained, r registry.Record) (session.Stopped,
 		usage[string(name)] = value
 	}
 	i := inc(r)
-	s := session.Stopped{Launch: local.Launch, Incarnation: i, ActualStopped: true, ThreadID: local.thread(r), Receipt: &session.Receipt{Launch: local.Launch, Incarnation: i, Usage: usage}}
+	s := session.Stopped{Launch: local.Launch, Incarnation: i, ActualStopped: true, ThreadID: local.thread(r), Receipt: &session.Receipt{Launch: local.Launch, Incarnation: i, Usage: usage}, Exit: local.Exited}
 	// The registry keeps a receipt with no checkpoint only for a turnless
 	// first visit with no native identity: no thread and nothing to return.
 	if r.Receipt.CheckpointDigest == "" {

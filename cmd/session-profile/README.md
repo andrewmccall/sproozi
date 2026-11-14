@@ -112,6 +112,7 @@ configuration. Required backend permissions are:
 | `budgetNamespace` (default `sproozi-system`) | `sproozi.com/budgetledgers` for run accounts | `get`, `create`, `update` |
 | `sproozi-agents` | Core `pods` | `get`, `patch`, `delete` |
 | `sproozi-agents` | Core `pods/exec` | `create` |
+| `sproozi-agents` | Core `pods/log`, for the supervisor's exit report | `get` |
 
 Also bind the profile's identity to the `system:auth-delegator` ClusterRole, so
 it can create TokenReviews and SubjectAccessReviews.
