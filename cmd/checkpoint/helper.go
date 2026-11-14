@@ -19,13 +19,88 @@ import (
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/nativepty"
+	"github.com/andrewmccall/sproozi/internal/privatefs"
 	"github.com/andrewmccall/sproozi/internal/workspace"
 )
 
-const helperDirectory = "/tmp/sproozi-checkpoint"
-const helperSocket = helperDirectory + "/control.sock"
-const helperReceipt = helperDirectory + "/restore.json"
-const helperTarget = "/workspace/session"
+const helperSocket = "/tmp/sproozi-checkpoint/control.sock"
+const helperReceiptName = "restore.json"
+
+// The helper's private directory and the published pair. Tests point them
+// at temporary directories.
+var (
+	helperDirectory = "/tmp/sproozi-checkpoint"
+	helperTarget    = "/workspace/session"
+)
+
+// Receipt stages. A restore writes restoring before it publishes the target
+// and restored once the published pair is durable, so every interruption
+// leaves a receipt that names how far it got.
+const (
+	stageRestoring = "restoring"
+	stageRestored  = "restored"
+)
+
+// restoreReceipt is the helper's private record of the one artifact it
+// restores. It cannot be supplied by the native worker or the checkpoint.
+type restoreReceipt struct {
+	Stage    string              `json:"stage"`
+	Metadata checkpoint.Metadata `json:"metadata"`
+}
+
+// readReceipt reads the receipt; ok is false when there is none.
+func readReceipt() (restoreReceipt, bool, error) {
+	var r restoreReceipt
+	data, err := privatefs.ReadFile(filepath.Join(helperDirectory, helperReceiptName), 64<<10)
+	if os.IsNotExist(err) {
+		return r, false, nil
+	}
+	if err != nil {
+		return r, false, err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&r) != nil || decoder.More() || (r.Stage != stageRestoring && r.Stage != stageRestored) {
+		return r, false, errors.New("checkpoint helper restore receipt is unreadable")
+	}
+	return r, true, nil
+}
+
+// writeReceipt replaces the receipt atomically: a crash leaves the previous
+// receipt or the new one, never part of either.
+func writeReceipt(r restoreReceipt) error {
+	data, err := json.Marshal(r)
+	if err != nil {
+		return err
+	}
+	return privatefs.Replace(helperDirectory, helperReceiptName, data)
+}
+
+// requireRestored refuses capture before an acknowledged restore.
+func requireRestored() error {
+	r, ok, err := readReceipt()
+	if err != nil {
+		return err
+	}
+	if !ok || r.Stage != stageRestored {
+		return errors.New("checkpoint helper has no acknowledged restore to capture")
+	}
+	return nil
+}
+
+// finishAllowed refuses to end the helper while a restore it started is
+// unacknowledged; repeating prepare completes it. A helper that never
+// restored may finish.
+func finishAllowed() error {
+	r, ok, err := readReceipt()
+	if err != nil {
+		return err
+	}
+	if ok && r.Stage == stageRestoring {
+		return errors.New("checkpoint helper restore is unfinished; repeat prepare before finish")
+	}
+	return nil
+}
 
 // hold keeps the quota-backed volume mounted after the native container stops.
 // Its private socket and receipt are never mounted into the native container.
@@ -79,6 +154,9 @@ func hold(deadline time.Time) error {
 }
 
 func finish() error {
+	if err := finishAllowed(); err != nil {
+		return err
+	}
 	conn, err := net.DialTimeout("unix", helperSocket, time.Second)
 	if err != nil {
 		return err
@@ -105,51 +183,61 @@ func prepare(ctx context.Context, data []byte, maxBytes int64, output io.Writer)
 	if err != nil {
 		return err
 	}
-	existing, err := os.ReadFile(helperReceipt)
-	if err == nil {
-		var observed checkpoint.Metadata
-		if json.Unmarshal(existing, &observed) != nil || observed != meta {
-			return errors.New("checkpoint helper restore intent conflicts")
-		}
+	return restoreOnce(meta, "checkpoint helper restore intent conflicts", output, func() error {
+		_, err := checkpoint.Restore(ctx, data, helperTarget, maxBytes)
+		return err
+	})
+}
+
+// restoreOnce publishes the pair for meta through publish at most once per
+// helper, and writes meta to output once the pair is acknowledged. An
+// identical retry of an acknowledged restore returns the same metadata; a
+// different artifact conflicts. A retry of an unacknowledged one redoes it:
+// the agent stays inert until prepare succeeds, so whatever is at the target
+// is that restore's own unfinished work. A target with no receipt was not
+// published by this helper and is refused.
+func restoreOnce(meta checkpoint.Metadata, conflict string, output io.Writer, publish func() error) error {
+	r, ok, err := readReceipt()
+	if err != nil {
+		return err
+	}
+	if ok && r.Metadata != meta {
+		return errors.New(conflict)
+	}
+	switch {
+	case ok && r.Stage == stageRestored:
 		if err = validateRestoredPair(meta.Harness); err != nil {
 			return err
 		}
-		_, err = output.Write(existing)
+		return writeMetadata(meta, output)
+	case ok:
+		if err = os.RemoveAll(helperTarget); err != nil {
+			return err
+		}
+	default:
+		if _, err = os.Lstat(helperTarget); !os.IsNotExist(err) {
+			return errors.New("checkpoint helper target exists without a restore receipt")
+		}
+		if err = writeReceipt(restoreReceipt{Stage: stageRestoring, Metadata: meta}); err != nil {
+			return err
+		}
+	}
+	if err = publish(); err != nil {
 		return err
 	}
-	if !os.IsNotExist(err) {
+	if err = syncDirectory(filepath.Dir(helperTarget)); err != nil {
 		return err
 	}
-	if _, err = checkpoint.Restore(ctx, data, helperTarget, maxBytes); err != nil {
+	if err = writeReceipt(restoreReceipt{Stage: stageRestored, Metadata: meta}); err != nil {
 		return err
 	}
-	return persistReceipt(meta, output)
+	return writeMetadata(meta, output)
 }
 
-func persistReceipt(meta checkpoint.Metadata, output io.Writer) error {
-	if err := syncDirectory(filepath.Dir(helperTarget)); err != nil {
-		return err
-	}
+// writeMetadata writes the restore acknowledgement the placement reads.
+func writeMetadata(meta checkpoint.Metadata, output io.Writer) error {
 	document, err := json.Marshal(meta)
 	if err != nil {
-		return err
-	}
-	file, err := os.OpenFile(helperReceipt, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
-	if err != nil {
-		return err
-	}
-	_, writeErr := file.Write(document)
-	if writeErr == nil {
-		writeErr = file.Sync()
-	}
-	closeErr := file.Close()
-	if writeErr != nil {
-		return writeErr
-	}
-	if closeErr != nil {
-		return closeErr
-	}
-	if err = syncDirectory(filepath.Dir(helperReceipt)); err != nil {
 		return err
 	}
 	_, err = output.Write(document)
@@ -202,22 +290,14 @@ func prepareWorkspace(ctx context.Context, kind harness.NativeKind,
 		return err
 	}
 	meta := checkpoint.Metadata{Harness: kind, SHA256: artifactDigest(data), Bytes: len(data)}
-	if existing, err := os.ReadFile(helperReceipt); err == nil {
-		var observed checkpoint.Metadata
-		if json.Unmarshal(existing, &observed) != nil || observed != meta {
-			return errors.New("checkpoint helper initial workspace conflicts")
-		}
-		if err = validateRestoredPair(meta.Harness); err != nil {
-			return err
-		}
-		_, err = output.Write(existing)
-		return err
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-	if _, err := os.Lstat(helperTarget); !os.IsNotExist(err) {
-		return errors.New("initial workspace target already exists")
-	}
+	return restoreOnce(meta, "checkpoint helper initial workspace conflicts", output, func() error {
+		return publishWorkspace(ctx, directory, data, maxBytes)
+	})
+}
+
+// publishWorkspace stages the workspace beside an empty native home and
+// publishes both together at the absent target.
+func publishWorkspace(ctx context.Context, directory string, data []byte, maxBytes int64) error {
 	staging, err := os.MkdirTemp(filepath.Dir(helperTarget), ".initial-session-")
 	if err != nil {
 		return err
@@ -235,8 +315,5 @@ func prepareWorkspace(ctx context.Context, kind harness.NativeKind,
 	if err = os.Chmod(filepath.Join(staging, directory), 0700); err != nil {
 		return err
 	}
-	if err = os.Rename(staging, helperTarget); err != nil {
-		return err
-	}
-	return persistReceipt(meta, output)
+	return os.Rename(staging, helperTarget)
 }

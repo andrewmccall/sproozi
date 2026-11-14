@@ -132,6 +132,9 @@ func (c command) capture(ctx context.Context, output io.Writer) error {
 	if c.home == "" || c.repository == "" || c.thread == "" || c.target != "" || c.kind.Validate() != nil {
 		return fmt.Errorf("capture requires source home, workspace and thread")
 	}
+	if err := requireRestored(); err != nil {
+		return err
+	}
 	data, _, err := checkpoint.CaptureStopped(ctx, c.kind, c.home, c.repository, c.thread, c.ignored, c.limit)
 	if err != nil {
 		return err

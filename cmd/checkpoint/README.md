@@ -39,10 +39,18 @@ and supply Claude's approved instructions independently. The resulting pair is
 `workspace` plus `codex` or `claude`. Publication happens only after both staged
 components restore successfully.
 
-The helper persists an exact restore acknowledgement in its private directory.
-An identical retry returns the same metadata; a conflicting artifact or missing
-receipt after publication fails closed. It does not silently adopt an existing
-worker-supplied target. For an initial local conversation, stdin instead contains
+The helper persists an exact restore receipt, `restore.json`, in its private
+directory. Each write replaces it atomically (temporary file, `fsync`, rename).
+It holds the artifact metadata and a `stage`: `restoring` is written before the
+pair is published and `restored` once the published pair is durable, so an
+interrupted restore always leaves a receipt naming how far it got. An identical
+retry of a `restored` receipt returns the same metadata; a retry of a
+`restoring` one removes whatever the interrupted restore left at the target and
+restores again, which is safe because the agent stays inert until `prepare`
+succeeds. A conflicting artifact fails closed, and a target with no receipt is
+never adopted or removed. `capture-stopped` refuses to run without a `restored`
+receipt, and `finish` refuses while the receipt is `restoring`; repeating
+`prepare` completes that restore. For an initial local conversation, stdin instead contains
 the captured workspace artifact:
 
 ```sh
