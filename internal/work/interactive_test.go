@@ -12,6 +12,7 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -58,6 +59,56 @@ func code(err error) profile.Code {
 		return ""
 	}
 	return OutcomeCode(err)
+}
+
+// A Claude Code executor runs interactive sessions; its tasks stay refused
+// until the supervisor binds Claude task completion.
+func TestClaudeExecutorRunsInteractiveSessionsAndRefusesTasks(t *testing.T) {
+	t.Parallel()
+	c, p := fixture(t)
+	c.Harness = harness.NativeClaude
+	o := openOwner(t, c)
+
+	q := interactiveRequest()
+	q.Harness = harness.NativeClaude
+	v := startInteractive(t, o, q)
+	if v.Harness != harness.NativeClaude {
+		t.Fatalf("interactive session lost its harness: %+v", v)
+	}
+	p.mu.Lock()
+	launched := p.launches[0]
+	p.mu.Unlock()
+	if launched.Harness != harness.NativeClaude || launched.Task != "" || launched.ThreadID != "" {
+		t.Fatalf("Claude first visit launched as %+v", launched)
+	}
+
+	task := Submit{RequestID: uuid.NewString(), Repository: repositorySproozi, Harness: harness.NativeClaude,
+		Executor: executorKubernetes, Task: fixtureTask}
+	if _, err := o.Submit(t.Context(), task); code(err) != profile.CodeUnsupported {
+		t.Fatalf("Claude task accepted: %v", err)
+	}
+	if _, err := o.Submit(t.Context(), interactiveRequest()); code(err) != profile.CodeUnsupported {
+		t.Fatalf("Codex session accepted by a Claude executor: %v", err)
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.launches) != 1 {
+		t.Fatalf("refused submissions launched: %d", len(p.launches))
+	}
+}
+
+// Only executors for Codex and Claude Code are configurable.
+func TestConfigAcceptsCodexAndClaudeExecutorsOnly(t *testing.T) {
+	t.Parallel()
+	c := fixtureConfig(t, filepath.Join(t.TempDir(), "repository"), &fixturePlacement{})
+	c.RetainedBytes = 2 * c.MaxCheckpointBytes
+	for kind, valid := range map[harness.NativeKind]bool{harness.NativeCodex: true, harness.NativeClaude: true,
+		"opencode": false, harness.NativeCopilot: false, "": false} {
+		c.Harness = kind
+		if err := c.validate(); (err == nil) != valid {
+			t.Errorf("harness %q: %v", kind, err)
+		}
+	}
 }
 
 // An interactive session has no completion driver: it runs until its owner

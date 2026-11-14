@@ -368,7 +368,17 @@ func (p *Placement) Stop(ctx context.Context, l session.Launch, i session.Incarn
 	// A turnless visit started from the workspace the execution retains and
 	// had no conversation, so nothing is captured and its receipt names no
 	// checkpoint.
-	if !local.Turnless {
+	switch {
+	case local.Turnless:
+	case local.Exited != nil && !harness.ProvesCompletion(r.Harness) && !local.fresh():
+		// A stopped container never proves a completed turn of this
+		// harness, so a resumed visit keeps the checkpoint it started from,
+		// as the Docker placement does (ADR 0038).
+		local, err = p.keepInput(local)
+		if err != nil {
+			return session.Stopped{}, err
+		}
+	default:
 		local, err = p.capture(ctx, local, local.thread(r), pod)
 		if err != nil {
 			return session.Stopped{}, err
@@ -403,7 +413,7 @@ func (p *Placement) quietSource(ctx context.Context, local retained, r registry.
 	if local.NativeQuiet {
 		return local, r, nil
 	}
-	if !harness.ProvesCompletion(r.Harness) && (terminated(pod) || r.Phase == registry.Stopping) {
+	if !harness.ProvesCompletion(r.Harness) && r.Phase == registry.Stopping && !terminated(pod) {
 		return local, r, fmt.Errorf("placement: %s graceful completion acknowledgement unavailable", r.Harness)
 	}
 	switch {
@@ -413,7 +423,9 @@ func (p *Placement) quietSource(ctx context.Context, local retained, r registry.
 			return local, r, err
 		}
 		// A first visit that ended before any completed turn has no
-		// conversation to capture (ADR 0032).
+		// conversation to capture (ADR 0032). A stopped container never
+		// proves a completed turn of a harness such as Claude Code (ADR
+		// 0011), so its first visit binds none and is turnless too.
 		local.Turnless = local.thread(r) == ""
 	case r.Phase == registry.Stopping:
 		data, err := p.native(pod)(ctx, harness.NativeStatus)
@@ -552,6 +564,30 @@ func (p *Placement) capture(ctx context.Context, local retained, thread string, 
 	local.OutputDigest = meta.SHA256
 	return local, p.save(local)
 }
+
+// keepInput makes the checkpoint a resumed visit started from its output:
+// the visit's harness ended without proving a completed turn, so nothing it
+// did is kept.
+func (p *Placement) keepInput(local retained) (retained, error) {
+	if local.OutputDigest != "" {
+		return local, nil
+	}
+	l := local.Launch
+	data, err := p.readArtifact(l.AllocationID, "input")
+	if err != nil {
+		return local, err
+	}
+	meta, err := checkpoint.Inspect(data, p.config.MaxCheckpointBytes)
+	if err != nil || meta.SHA256 != l.CheckpointDigest || meta.Harness != l.Harness || meta.ThreadID != l.ThreadID {
+		return local, errors.New("placement: retained input checkpoint invalid")
+	}
+	if err = p.atomic(p.artifactPath(l.AllocationID, "output"), data); err != nil {
+		return local, err
+	}
+	local.OutputDigest = meta.SHA256
+	return local, p.save(local)
+}
+
 func (p *Placement) stopped(local retained, r registry.Record) (session.Stopped, error) {
 	if !local.WriterFenced || r.Receipt == nil || local.OutputDigest != r.Receipt.CheckpointDigest {
 		return session.Stopped{}, errors.New("placement: trusted checkpoint receipt unavailable")
