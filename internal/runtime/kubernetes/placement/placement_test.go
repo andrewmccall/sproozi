@@ -211,6 +211,16 @@ type protocolExecutor struct {
 	// conversation once input is gated (ADR 0032).
 	turnless    bool
 	captureArgs []string
+	// logs is the native container's output, where the supervisor writes
+	// its exit report.
+	logs []byte
+}
+
+func (e *protocolExecutor) Logs(_ context.Context, _, _, container string) ([]byte, error) {
+	if container != nativeContainer {
+		return nil, errors.New("unexpected container logs")
+	}
+	return e.logs, nil
 }
 
 func (e *protocolExecutor) Execute(ctx context.Context, namespace, pod, container string, args []string, input io.Reader, output, _ io.Writer) error {

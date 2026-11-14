@@ -57,6 +57,13 @@ func TestMCPDiscoveryAndSessionListingUseObjectSchemas(t *testing.T) {
 		if definition["outputSchema"].(map[string]any)["type"] != "object" {
 			t.Fatalf("MCP output schema rejects stock client discovery: %#v", definition)
 		}
+		// The work token runs tasks only: sproozi_run offers no mode or upload.
+		properties := definition["inputSchema"].(map[string]any)["properties"].(map[string]any)
+		for _, field := range []string{"mode", "workspace", "workspaceDigest"} {
+			if _, ok := properties[field]; ok && definition["name"] == "sproozi_run" {
+				t.Fatalf("sproozi_run offers %s: %#v", field, properties)
+			}
+		}
 	}
 	result := call(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"sproozi_sessions","arguments":{"project":"sproozi-dev"}}}`)
 	content := result["structuredContent"].(map[string]any)

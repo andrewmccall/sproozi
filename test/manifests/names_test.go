@@ -8,6 +8,7 @@ const (
 	keyName              = "name"
 	keyNamespace         = "namespace"
 	resourcePods         = "pods"
+	resourcePodLogs      = "pods/log"
 	resourceTokenReviews = "tokenreviews"
 	verbDelete           = "delete"
 	verbPatch            = "patch"

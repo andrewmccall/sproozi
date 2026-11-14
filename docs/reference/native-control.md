@@ -73,11 +73,19 @@ sproozi-native-exit {"code":2,"cause":"exited","thread":"<id>","output":"<last l
 | `failed` | A graceful stop failed and the supervisor stopped the harness itself. | `retained`. |
 
 A graceful stop writes no report. A forced stop leaves the supervisor's own exit
-code nonzero even when the harness exited 0. The Docker placement reads the
-last report from the container's last 50 output lines and ignores a report
-without a known `cause`, as from a supervisor built before the field existed;
-it then uses the container's exit code. The report is a workload diagnostic,
-never a writer fence or accounting fact.
+code nonzero even when the harness exited 0. Both placements read the last
+report from the agent's last 50 output lines and ignore a report without a
+known `cause`, as from a supervisor built before the field existed; they then
+use the container's exit code, and the host's clock decides `deadline`. The
+Docker placement reads the agent container's output. The Kubernetes placement
+reads the native container's output through `pods/log` (at most 64 KiB) when
+it stops a visit whose native container already ended. It reports the
+container as ended through `Exited` while the visit is still active, so the
+remote executor's exit sweep can stop it
+([remote executors](remote-executors.md#interactive-sessions)). A first Codex
+visit that ended before any completed turn stops turnless; one whose report
+names a completed turn's thread keeps that conversation. The report is a
+workload diagnostic, never a writer fence or accounting fact.
 
 ## Terminal attachment
 

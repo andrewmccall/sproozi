@@ -26,6 +26,11 @@ type frameReader struct {
 	total   int64
 }
 
+// NewFrameReader reads input as native terminal frames, one JSON object per
+// line, refusing any other frame and more than the attachment's input bound.
+// Every attachment, to a placement or to an owner, reads its input through it.
+func NewFrameReader(input io.Reader) io.Reader { return newFrameReader(input) }
+
 func newFrameReader(input io.Reader) *frameReader {
 	s := bufio.NewScanner(input)
 	s.Buffer(make([]byte, 4096), terminalFrameLimit)
@@ -59,7 +64,10 @@ func (f *frameReader) Read(data []byte) (int, error) {
 	f.pending = f.pending[n:]
 	return n, nil
 }
-func envelopeLine(reader *bufio.Reader) ([]byte, error) {
+
+// EnvelopeLine reads an attachment's first line, its JSON envelope, within
+// the metadata bound. The terminal frames follow it in the same body.
+func EnvelopeLine(reader *bufio.Reader) ([]byte, error) {
 	var data []byte
 	for {
 		part, err := reader.ReadSlice('\n')
@@ -88,7 +96,7 @@ func (h *handler) attach(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reader := bufio.NewReader(r.Body)
-	line, err := envelopeLine(reader)
+	line, err := EnvelopeLine(reader)
 	var input request
 	if err != nil || strictDecode(line, &input) != nil || input.Version != protocolVersion || validateLaunch(input.Launch) != nil || input.Launch.Placement != h.config.Placement || input.Incarnation == nil || !incarnationValid(*input.Incarnation) || len(input.Checkpoint) > 0 {
 		writeError(w, http.StatusBadRequest, CodeInvalid)
@@ -107,21 +115,44 @@ func (h *handler) attach(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, CodeConflict)
 		return
 	}
-	controller := http.NewResponseController(w)
-	if err = controller.EnableFullDuplex(); err != nil {
+	if !FullDuplex(w) {
 		writeError(w, http.StatusUnprocessableEntity, CodeUnsupported)
 		return
 	}
-	w.WriteHeader(http.StatusOK)
-	if err = controller.Flush(); err != nil {
+	output, err := OpenTerminalOutput(w)
+	if err != nil {
 		return
 	}
-	output := &terminalOutput{writer: w, controller: controller}
 	ctx, cancel := deadline.At(input.Launch.Deadline).Context(r.Context())
 	defer cancel()
 	if err = backend.Attach(ctx, input.Launch, *input.Incarnation, newFrameReader(reader), output); err != nil {
-		_, _ = io.WriteString(output, "{\"op\":\"attach\",\"error\":\"attachment unavailable\"}\n")
+		WriteAttachmentFailed(output)
 	}
+}
+
+// FullDuplex lets the handler write the terminal's output while it still
+// reads its input. It reports false when the server cannot.
+func FullDuplex(w http.ResponseWriter) bool {
+	return http.NewResponseController(w).EnableFullDuplex() == nil
+}
+
+// OpenTerminalOutput answers an admitted attachment: it sends 200 and
+// returns the writer for the native terminal's output frames, which flushes
+// each write and refuses more than the attachment's output bound. Call
+// FullDuplex first.
+func OpenTerminalOutput(w http.ResponseWriter) (io.Writer, error) {
+	controller := http.NewResponseController(w)
+	w.WriteHeader(http.StatusOK)
+	if err := controller.Flush(); err != nil {
+		return nil, err
+	}
+	return &terminalOutput{writer: w, controller: controller}, nil
+}
+
+// WriteAttachmentFailed ends an attachment's output with the frame that
+// says the attachment failed, without its private cause.
+func WriteAttachmentFailed(output io.Writer) {
+	_, _ = io.WriteString(output, "{\"op\":\"attach\",\"error\":\"attachment unavailable\"}\n")
 }
 
 type terminalOutput struct {
@@ -199,10 +230,13 @@ func (c *Client) Attach(ctx context.Context, l session.Launch, i session.Incarna
 		}
 		return &RemoteError{Code: r.Error, Status: resp.StatusCode}
 	}
-	return copyTerminalOutput(resp.Body, output)
+	return CopyTerminalOutput(resp.Body, output)
 }
 
-func copyTerminalOutput(input io.Reader, output io.Writer) error {
+// CopyTerminalOutput copies an attachment's output frames to output, within
+// the attachment's output bound, and fails on the frame that reports a
+// failed attachment.
+func CopyTerminalOutput(input io.Reader, output io.Writer) error {
 	scanner := bufio.NewScanner(io.LimitReader(input, terminalOutputLimit+1))
 	scanner.Buffer(make([]byte, 4096), terminalFrameLimit)
 	var total int64

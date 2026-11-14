@@ -15,7 +15,18 @@ import (
 
 type commandExecutor interface {
 	Execute(context.Context, string, string, string, []string, io.Reader, io.Writer, io.Writer) error
+	// Logs reads the last lines a container wrote, where the native
+	// supervisor writes its exit report.
+	Logs(ctx context.Context, namespace, pod, container string) ([]byte, error)
 }
+
+// exitLogLines and exitLogBytes bound the output read for an exit report,
+// as the Docker placement reads the last 50 lines.
+const (
+	exitLogLines = int64(50)
+	exitLogBytes = int64(64 << 10)
+)
+
 type executor struct {
 	config *rest.Config
 	client *kubernetes.Clientset
@@ -35,6 +46,11 @@ func (e *executor) Execute(ctx context.Context, namespace, pod, container string
 		return err
 	}
 	return x.StreamWithContext(ctx, remotecommand.StreamOptions{Stdin: input, Stdout: output, Stderr: errout})
+}
+
+func (e *executor) Logs(ctx context.Context, namespace, pod, container string) ([]byte, error) {
+	lines, limit := exitLogLines, exitLogBytes
+	return e.client.CoreV1().Pods(namespace).GetLogs(pod, &corev1.PodLogOptions{Container: container, TailLines: &lines, LimitBytes: &limit}).DoRaw(ctx)
 }
 
 // boundedOutput keeps at most max bytes of a command's output. It does not

@@ -88,9 +88,12 @@ The remote executor opens a coordinator over `<directory>/sessions`, whose
 only placement is its in-process Kubernetes placement under its
 `placementName`. It is the [owner](../../GLOSSARY.md#owner) of every session
 it starts. It drives each execution only through the coordinator's `Create`,
-`Recover`, `Finalize`, `CancelUnsettled`, `Inspect` and `Checkpoint`; nothing
-in `internal/work` calls a placement method any more, and the placement's
-`CreateInitial` is removed.
+`Recover`, `Finalize`, `CancelUnsettled`, `Inspect` and `Checkpoint`, plus
+`Workspace` for a resumed interactive session. No lifecycle step in
+`internal/work` calls a placement method any more, and the placement's
+`CreateInitial` is removed. The one exception changes no lifecycle state: an
+interactive session's `attach` and exit check call the placement's `Attach`
+and `Exited` on the visit the coordinator records as active (section 8).
 
 `internal/work` becomes the executor's **session catalogue**, the counterpart
 of home's catalogue. Each record (format version 2) keeps only what the
@@ -127,7 +130,7 @@ of the current execution, combined with the two tails:
 | `preparing`, `activating`, `active`, `stopping`, `unknown-stop`, `unknown-usage`, `cancelling` | The coordinator's phase, reported as it is. |
 | `stopping` | The coordinator is `idle` but the task tail is not written yet. |
 | `retained` | `idle`, the task tail written, a checkpoint committed and no failed exit. |
-| `failed` | `idle` and the harness exited with a failure, or nothing was kept. |
+| `failed` | `idle` and the harness exited with a failure, or, for a task, nothing was kept. An interactive session that kept no conversation is `retained`, since `resume` restarts it from its workspace. |
 
 This is home's vocabulary, so a row reads the same whichever owner lists it,
 and the CLI needs no separate list of remote live phases. `unknown`,
@@ -162,7 +165,7 @@ Failures:
   and the driver retries `Recover` with a capped backoff (one second doubling
   to a minute) while the executor runs. Recovery never makes up a stop or a
   refund, so this is safe, and Hermes is unattended. `recover` retries at once.
-  Interactive sessions, when they come, will wait for `recover`.
+  Interactive sessions wait for `recover`, also after a restart (section 8).
 - **A failed preparation or activation** records the outcome as the problem
   and waits for `recover`, as before.
 - **A revoked project** is cancelled through the coordinator with a
@@ -230,11 +233,9 @@ The work record format changes from version 1 to 2 in a minor release, with a
 
 Not built here, each with its own change:
 
-- **Interactive sessions owned by the executor** (`run --remote` without a
-  task; `stop`, `resume` and `attach` with `--remote`; an exit sweep), with
-  both an approved repository or project and an uploaded local `PATH` as
-  input. The catalogue's `executions`/`current` and the derived phase are the
-  seams; `resume` adds an operation map, as home's catalogue has.
+- **The CLI for interactive sessions** (`run --remote` without a task;
+  `stop`, `resume` and `attach` with `--remote`), and its capture of a local
+  `PATH` to upload. The executor's side is section 8.
 - **Claude Code on the cluster**: interactive first, then tasks, with
   completion bound to the task prompt and `FinalText` for Claude. Task
   submissions for any harness but Codex stay refused until then. One harness
@@ -248,6 +249,50 @@ Not built here, each with its own change:
   or laptop identifiers, name placements rather than address them, and store
   profiles by digest. Handing a running session's ownership from home to the
   executor, the mirror of `pull`, needs its own decision.
+
+### 8. Interactive sessions owned by the executor (server side)
+
+Added after this record was accepted; it follows its direction.
+
+- **Mode is part of the intent.** `Submit.mode` is `task` (or empty) or
+  `interactive`, and the intent digest covers it, so the executor never
+  infers interactivity from a missing task. Only the home principal submits
+  an interactive session, cancels one, or takes its owner actions; the work
+  token gets `403`, and its MCP `sproozi_run` keeps the task-only schema.
+- **The driver only starts an interactive session.** It captures the input,
+  creates and activates the first visit, and stops: there is no completion
+  driver, and an unsettled stop or cancellation waits for `recover`, which
+  retries it once. The task's backoff applies to tasks only.
+- **Owner actions bind operations.** The record gains `operations`, a map
+  from operation UUID to its action (`stop` or `resume`) and execution, as
+  home's catalogue has; `read` checks that each names one of the session's
+  executions and that only an interactive session has more than one
+  execution. `stop` is `Coordinator.Finalize` with the caller's operation on
+  its bound execution. `resume` creates a new execution with `Session = ID`,
+  from the last committed checkpoint (or the retained starting workspace
+  after a turnless stop), the stored profile digest, the full allowance and a
+  fresh deadline choice within the executor's cap; it refuses a session that
+  is running, cancelled or transferred. Its execution ID is derived from the
+  session and operation, so a resume interrupted between `Create` and the
+  catalogue's save adopts the execution it created instead of starting
+  another.
+- **Attach names the session.** `/work/attach` reads a JSON envelope with
+  only the session ID, then the placement protocol's terminal frames
+  (`profile.NewFrameReader`, `EnvelopeLine`), and calls the in-process
+  placement's `Attach` on the coordinator's active visit. The caller never
+  sends a launch or incarnation.
+- **An exit sweep** runs every 15 seconds, slower than home's 5 because each
+  check reads a registration, Run and Pod from the API server. The Kubernetes
+  placement gains `Exited`, and its stop of an ended native container reads
+  the supervisor's exit report through `pods/log`, binds a reported Codex
+  thread, or stops turnless. The sweep stops such a session with a
+  name-based operation; it then shows `failed` with its exit, or `retained`.
+- **An uploaded workspace** is a second input, decided by the owner. The
+  executor validates it as a placement validates a moved workspace (archive
+  entries, then a bounded restore that verifies Git objects and installs no
+  configuration), keeps it privately as `work/<id>.workspace` until
+  `Coordinator.Create` retains it, then deletes it. The intent records its
+  digest, never its bytes.
 
 ## Alternatives
 
@@ -329,7 +374,7 @@ Not built here, each with its own change:
   the executor runs for Hermes.
 - Keeps [ADR 0019](0019-pull-operations-and-work-owner-names.md) and
   [ADR 0036](0036-remote-executors-through-kubeconfig-contexts.md) unchanged.
-- Code: `internal/work/` (`catalogue.go`, `driver.go`, `export.go`,
+- Code: `internal/work/` (`catalogue.go`, `driver.go`, `interactive.go`, `export.go`,
   `legacy.go`, `phase.go`), `internal/session/cancel.go`,
   `internal/session/phase.go`, `cmd/session-profile/main.go`,
   `internal/runtime/kubernetes/placement/placement.go`,

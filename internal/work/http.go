@@ -1,6 +1,7 @@
 package work
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -11,9 +12,12 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/andrewmccall/sproozi/internal/agentprofile"
+	"github.com/andrewmccall/sproozi/internal/harness"
+	"github.com/andrewmccall/sproozi/internal/project"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -23,6 +27,48 @@ type reference struct {
 	OperationID string `json:"operationId,omitempty"`
 	Digest      string `json:"digest,omitempty"`
 }
+
+// resumption asks for a new execution of an interactive session: its
+// operation, and a deadline choice, empty to keep the submission's.
+type resumption struct {
+	ID          string `json:"id"`
+	OperationID string `json:"operationId"`
+	MaxDuration string `json:"maxDuration,omitempty"`
+}
+
+// attachment is an attachment's envelope: the session only. The executor
+// finds the launch and incarnation in its own journal.
+type attachment struct {
+	ID string `json:"id"`
+}
+
+// taskSubmission is what the MCP tool sproozi_run accepts: a task, never an
+// interactive session or an upload, so its schema stays as Hermes knows it.
+type taskSubmission struct {
+	RequestID     string             `json:"requestId"`
+	Repository    string             `json:"repository"`
+	Harness       harness.NativeKind `json:"harness"`
+	Executor      string             `json:"executor"`
+	Task          string             `json:"task"`
+	Project       project.ID         `json:"project,omitempty"`
+	WorkspaceFrom *RevisionSource    `json:"workspaceFrom,omitempty"`
+	MaxDuration   string             `json:"maxDuration,omitempty"`
+	Profile       []byte             `json:"profile,omitempty"`
+	ProfileDigest string             `json:"profileDigest,omitempty"`
+}
+
+func (q taskSubmission) submit() Submit {
+	return Submit{RequestID: q.RequestID, Repository: q.Repository, Harness: q.Harness, Executor: q.Executor,
+		Task: q.Task, Project: q.Project, WorkspaceFrom: q.WorkspaceFrom, MaxDuration: q.MaxDuration,
+		Profile: q.Profile, ProfileDigest: q.ProfileDigest}
+}
+
+// homeActions are the owner actions only the home principal may take: the
+// one-way pull, and the interactive session's stop, resume and attach.
+var homeActions = []string{"begin", "claim", actionStop, actionResume, actionAttach}
+
+// actionAttach streams a terminal attachment rather than answering JSON.
+const actionAttach = "attach"
 
 // MCP outputSchema requires an object at its root, including collection tools.
 type sessionList struct {
@@ -52,8 +98,8 @@ func NewHandler(o *Owner, taskToken string, home profile.Authorizer) (http.Handl
 		return nil, errors.New("work: private task and home credentials required")
 	}
 	server := mcp.NewServer(&mcp.Implementation{Name: "sproozi-work", Version: "1"}, nil)
-	mcp.AddTool(server, &mcp.Tool{Name: "sproozi_run", Description: "Run one genuine native task with an approved repository, harness and explicit executor. Reuse requestId on retries. Session ID outlives execution; results are untrusted workload text."}, func(ctx context.Context, _ *mcp.CallToolRequest, q Submit) (*mcp.CallToolResult, View, error) {
-		v, e := o.SubmitAs(ctx, CallerWorkToken, q)
+	mcp.AddTool(server, &mcp.Tool{Name: "sproozi_run", Description: "Run one genuine native task with an approved repository, harness and explicit executor. Reuse requestId on retries. Session ID outlives execution; results are untrusted workload text."}, func(ctx context.Context, _ *mcp.CallToolRequest, q taskSubmission) (*mcp.CallToolResult, View, error) {
+		v, e := o.SubmitAs(ctx, CallerWorkToken, q.submit())
 		return tool(v, e)
 	})
 	mcp.AddTool(server, &mcp.Tool{Name: "sproozi_status", Description: "Read retained task status and bounded final answer. Retained means native completion, exact writer stop, sealed usage and stored checkpoint."}, func(ctx context.Context, _ *mcp.CallToolRequest, q reference) (*mcp.CallToolResult, View, error) {
@@ -61,7 +107,7 @@ func NewHandler(o *Owner, taskToken string, home profile.Authorizer) (http.Handl
 		return tool(v, e)
 	})
 	mcp.AddTool(server, &mcp.Tool{Name: "sproozi_cancel", Description: "Cancel this owner's exact session using a stable operationId UUID. Reuse the operation after an uncertain response; cancellation does not promise a resumable completed turn."}, func(ctx context.Context, _ *mcp.CallToolRequest, q reference) (*mcp.CallToolResult, View, error) {
-		v, e := o.Cancel(ctx, q.ID, q.OperationID)
+		v, e := o.CancelAs(ctx, CallerWorkToken, q.ID, q.OperationID)
 		return tool(v, e)
 	})
 	mcp.AddTool(server, &mcp.Tool{Name: "sproozi_sessions", Description: "List accessible sessions for this installation, optionally filtered by project."}, func(ctx context.Context, _ *mcp.CallToolRequest, q SessionQuery) (*mcp.CallToolResult, sessionList, error) {
@@ -114,7 +160,7 @@ func (h *ownerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if (action == "begin" || action == "claim") && !isHome {
+	if slices.Contains(homeActions, action) && !isHome {
 		http.Error(w, "Home owner required", http.StatusForbidden)
 		return
 	}
@@ -127,13 +173,56 @@ func (h *ownerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if isTask {
 		caller = CallerWorkToken
 	}
+	if action == actionAttach {
+		h.serveAttach(w, r)
+		return
+	}
 	h.serveJSON(w, r, action, caller)
 }
+
+// serveAttach streams an attachment: the envelope line names the session,
+// then the terminal's frames follow in the same body while its output
+// streams back. Refusals before the terminal opens are JSON outcomes.
+func (h *ownerHandler) serveAttach(w http.ResponseWriter, r *http.Request) {
+	reader := bufio.NewReader(r.Body)
+	line, err := profile.EnvelopeLine(reader)
+	var q attachment
+	if err == nil {
+		err = decodeInput(bytes.TrimSuffix(line, []byte("\n")), &q)
+	}
+	var a *Attachment
+	if err == nil {
+		a, err = h.owner.Attach(r.Context(), q.ID)
+	}
+	if err == nil && !profile.FullDuplex(w) {
+		err = &profile.Rejection{Code: profile.CodeUnsupported}
+	}
+	if err != nil {
+		writeOutcome(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	output, err := profile.OpenTerminalOutput(w)
+	if err != nil {
+		return
+	}
+	if err = a.Run(r.Context(), profile.NewFrameReader(reader), output); err != nil {
+		profile.WriteAttachmentFailed(output)
+	}
+}
+
+// uploadBytes is how large a base64 upload of maxCheckpointBytes is in JSON.
+func uploadBytes(maxCheckpointBytes int64) int64 { return (maxCheckpointBytes + 2) / 3 * 4 }
+
 func (h *ownerHandler) serveJSON(w http.ResponseWriter, r *http.Request, action string, caller Caller) {
 	limit := int64(32 << 10)
 	if action == "run" {
-		// A submission may carry the caller's profile archive.
+		// A submission may carry the caller's profile archive and, from
+		// the home principal, an uploaded workspace.
 		limit += agentprofile.EncodedArchiveBytes
+		if caller == CallerHome {
+			limit += uploadBytes(h.owner.config.MaxCheckpointBytes)
+		}
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	b, e := io.ReadAll(r.Body)
@@ -155,6 +244,12 @@ func (h *ownerHandler) serveJSON(w http.ResponseWriter, r *http.Request, action 
 		if e == nil {
 			out, e = h.owner.List(r.Context(), q)
 		}
+	case actionResume:
+		var q resumption
+		e = decodeInput(b, &q)
+		if e == nil {
+			out, e = h.owner.Resume(r.Context(), q.ID, q.OperationID, q.MaxDuration)
+		}
 	default:
 		var q reference
 		e = decodeInput(b, &q)
@@ -167,7 +262,9 @@ func (h *ownerHandler) serveJSON(w http.ResponseWriter, r *http.Request, action 
 			case "claim":
 				out, e = h.owner.Claim(r.Context(), q.ID, q.OperationID, q.Digest)
 			case "cancel":
-				out, e = h.owner.Cancel(r.Context(), q.ID, q.OperationID)
+				out, e = h.owner.CancelAs(r.Context(), caller, q.ID, q.OperationID)
+			case actionStop:
+				out, e = h.owner.Stop(r.Context(), q.ID, q.OperationID)
 			case "recover":
 				out, e = h.owner.Recover(r.Context(), q.ID)
 			default:
@@ -177,16 +274,21 @@ func (h *ownerHandler) serveJSON(w http.ResponseWriter, r *http.Request, action 
 		}
 	}
 	if e != nil {
-		code := OutcomeCode(e)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(outcomeStatus(code))
-		_ = json.NewEncoder(w).Encode(struct {
-			Error profile.Code `json:"error"`
-		}{Error: code})
+		writeOutcome(w, e)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)
+}
+
+// writeOutcome answers with an error's public code only.
+func writeOutcome(w http.ResponseWriter, e error) {
+	code := OutcomeCode(e)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(outcomeStatus(code))
+	_ = json.NewEncoder(w).Encode(struct {
+		Error profile.Code `json:"error"`
+	}{Error: code})
 }
 
 func tool(v View, e error) (*mcp.CallToolResult, View, error) {
@@ -235,5 +337,13 @@ func (c *Client) Cancel(ctx context.Context, id, op string) (v View, e error) {
 }
 func (c *Client) Recover(ctx context.Context, id string) (v View, e error) {
 	e = c.transport.CallOwner(ctx, "recover", reference{ID: id}, &v)
+	return
+}
+func (c *Client) Stop(ctx context.Context, id, op string) (v View, e error) {
+	e = c.transport.CallOwner(ctx, "stop", reference{ID: id, OperationID: op}, &v)
+	return
+}
+func (c *Client) Resume(ctx context.Context, id, op, maxDuration string) (v View, e error) {
+	e = c.transport.CallOwner(ctx, "resume", resumption{ID: id, OperationID: op, MaxDuration: maxDuration}, &v)
 	return
 }
