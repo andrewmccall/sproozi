@@ -5,13 +5,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"maps"
 	"slices"
 	"strings"
 
 	"github.com/andrewmccall/sproozi/internal/budget"
-	"github.com/andrewmccall/sproozi/internal/deadline"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/workspace"
 	"github.com/google/uuid"
@@ -316,63 +314,6 @@ func validateOperations(r Record) error {
 	return nil
 }
 
-// pendingStage is the next step of the pending operation, or "" when none.
-func pendingStage(r Record) Stage {
-	if r.PendingOperation == "" {
-		return ""
-	}
-	return r.Operations[len(r.Operations)-1].Stage
-}
-
-// phaseFacts is the structure a phase summarises.
-type phaseFacts struct {
-	pending Stage // next step of the pending operation, or "" when none
-	writer  bool  // an active visit exists, running or fenced
-	running bool  // the active writer may still run
-	fenced  bool  // the active writer is proven stopped
-	cancel  bool  // cancellation was requested
-}
-
-// phaseRules says, for each phase, which structures it may describe.
-var phaseRules = map[Phase]func(phaseFacts) bool{
-	PhaseIdle:       func(f phaseFacts) bool { return !f.writer && f.pending == "" && !f.cancel },
-	PhasePreparing:  func(f phaseFacts) bool { return !f.writer && f.pending == stagePrepare && !f.cancel },
-	PhaseActivating: func(f phaseFacts) bool { return !f.writer && f.pending == stageActivate && !f.cancel },
-	PhaseActive:     func(f phaseFacts) bool { return f.running && f.pending == "" && !f.cancel },
-	PhaseStopping:   func(f phaseFacts) bool { return f.running && f.pending == stageStop && !f.cancel },
-	PhaseUnknownStop: func(f phaseFacts) bool {
-		return f.running && (f.pending == stageStop || f.cancel) || !f.writer && f.pending != "" && f.cancel
-	},
-	PhaseUnknownUsage: func(f phaseFacts) bool { return f.fenced && (f.pending == stageStop || f.cancel) },
-	PhaseCancelling:   func(f phaseFacts) bool { return f.cancel },
-	PhaseCancelled:    func(f phaseFacts) bool { return f.cancel && !f.writer && f.pending == "" },
-}
-
-// validatePhase checks that the phase describes the record's actual structure:
-// whether a writer may run (Active), whether it is fenced (ActualStopped),
-// which step is pending and whether cancellation was requested.
-func validatePhase(r Record) error {
-	if r.CancelOperation != "" && !validUUID(r.CancelOperation) {
-		return errors.New("session: invalid cancellation intent")
-	}
-	rule, ok := phaseRules[r.Phase]
-	if !ok {
-		return fmt.Errorf("session: invalid phase %q", r.Phase)
-	}
-	facts := phaseFacts{pending: pendingStage(r), writer: r.Active != nil, cancel: r.CancelOperation != ""}
-	facts.running = facts.writer && !r.Active.ActualStopped
-	facts.fenced = facts.writer && r.Active.ActualStopped
-	if !rule(facts) {
-		return fmt.Errorf("session: phase %q contradicts the retained execution", r.Phase)
-	}
-	return nil
-}
-func (c *Coordinator) beforeDeadline(l Launch) error {
-	if deadline.At(l.Deadline).Passed(c.now()) {
-		return errors.New("session: original deadline expired")
-	}
-	return nil
-}
 func spendable(a map[string]Allowance) error {
 	for _, v := range a {
 		if v.Units.Bounded && v.Units.Value == 0 || v.CostMicros.Bounded && v.CostMicros.Value == 0 {
