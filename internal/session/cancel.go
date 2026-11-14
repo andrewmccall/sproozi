@@ -15,6 +15,23 @@ import (
 // is persisted: an owner uses it to take its own lock and bind the request, and
 // the returned release runs when Cancel returns.
 func (c *Coordinator) Cancel(ctx context.Context, id, operationID string, admit func() (func(), error)) (Record, error) {
+	return c.cancel(ctx, id, operationID, admit, evCancel)
+}
+
+// ErrAlreadyStopped refuses CancelUnsettled for an execution that already
+// stopped, with its usage sealed, before the cancellation was retained.
+var ErrAlreadyStopped = errors.New("session: execution already stopped; nothing to cancel")
+
+// CancelUnsettled is Cancel for an owner that keeps a stopped execution's
+// result, such as a remote task's answer: it refuses an idle execution with
+// ErrAlreadyStopped. It decides under the execution's lock, so a stop that
+// commits while the cancellation waits for that lock wins, and the result is
+// kept.
+func (c *Coordinator) CancelUnsettled(ctx context.Context, id, operationID string, admit func() (func(), error)) (Record, error) {
+	return c.cancel(ctx, id, operationID, admit, evCancelUnsettled)
+}
+
+func (c *Coordinator) cancel(ctx context.Context, id, operationID string, admit func() (func(), error), ev event) (Record, error) {
 	if !validUUID(id) || !validUUID(operationID) {
 		return Record{}, errors.New("session: invalid session or cancellation ID")
 	}
@@ -47,8 +64,11 @@ func (c *Coordinator) Cancel(ctx context.Context, id, operationID string, admit 
 		return r, fmt.Errorf("session: cancellation %s was already requested: %w", r.CancelOperation, cancelled(r))
 	}
 	if r.CancelOperation == "" {
+		if ev == evCancelUnsettled && r.Phase == PhaseIdle {
+			return r, ErrAlreadyStopped
+		}
 		r.CancelOperation = operationID
-		if err = c.commit(&r, evCancel); err != nil {
+		if err = c.commit(&r, ev); err != nil {
 			return r, err
 		}
 	}
