@@ -119,6 +119,13 @@ class PolicyCheckTest(unittest.TestCase):
                          ["tool 'fetch' takes a 'url' argument; approve it only if it can't fetch an arbitrary URL"])
         self.assertEqual(TOOLS.url_warnings(tools, {"ask": {}}), [])
 
+    def test_warns_about_a_top_level_combinator(self):
+        tools = [{"name": "search", "inputSchema": {"type": "object", "allOf": [{"required": ["q"]}]}},
+                 {"name": "ask", "inputSchema": {"type": "object", "properties": {"q": {"allOf": [{"type": "string"}]}}}}]
+        self.assertEqual(TOOLS.combinator_warnings(tools, {"search": {}, "ask": {}}),
+                         ["tool 'search' has a top-level allOf in its input schema; Claude Code sessions won't list it"])
+        self.assertEqual(TOOLS.combinator_warnings(tools, {"ask": {}}), [])
+
     def test_policy_option_exits_non_zero_on_a_mismatch(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)

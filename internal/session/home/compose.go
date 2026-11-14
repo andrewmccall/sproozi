@@ -382,9 +382,6 @@ func stackDirectory(base string, index int, name string) string {
 
 func (s *Service) openStack(c Config, engine *runtimedocker.Engine, ledger *budgetfile.Ledger, stack *localStack, index int, certificate tls.Certificate, log io.Writer) (err error) {
 	s.stacks = append(s.stacks, stack)
-	if notice := mcpNotice(stack.config.Harness, c.Allowances); notice != "" && log != nil {
-		_, _ = fmt.Fprintln(log, "Notice:", notice)
-	}
 	policyConfig := c
 	policyConfig.Local = stack.config
 	policy, err := approvedPolicy(policyConfig)
@@ -565,58 +562,12 @@ func providerAuth(result model.HandlerConfig, c GatewayConfig, kind harness.Nati
 	return result, nil
 }
 
-// harnessAllowances are the allowances a session of this harness receives.
-// The configured MCP servers reach only harnesses whose native clients can
-// use them, so a home with MCP allowances can still run Claude Code: its
-// sessions simply have no named MCP servers.
-func harnessAllowances(kind harness.NativeKind, all map[string]session.Allowance) map[string]session.Allowance {
-	out := maps.Clone(all)
-	if supportsNamedMCP(kind) {
-		return out
-	}
-	for name := range out {
-		if _, named := api.CapabilityKind(name).MCPServerName(); named {
-			delete(out, name)
-		}
-	}
-	return out
-}
-
-// supportsNamedMCP asks the harness package whether kind can use configured
-// MCP servers, so home follows its rule instead of restating it.
-func supportsNamedMCP(kind harness.NativeKind) bool {
-	probe := harness.NativeClientConfig{MCPGateway: "https://sproozi-mcp.invalid", MCPServers: []string{"probe"}}
-	return probe.Validate(kind) == nil
-}
-
-// mcpNotice names the MCP allowances a harness's sessions do not receive, or "".
-func mcpNotice(kind harness.NativeKind, all map[string]session.Allowance) string {
-	if supportsNamedMCP(kind) {
-		return ""
-	}
-	var names []string
-	for name := range all {
-		if _, named := api.CapabilityKind(name).MCPServerName(); named {
-			names = append(names, name)
-		}
-	}
-	if len(names) == 0 {
-		return ""
-	}
-	slices.Sort(names)
-	return fmt.Sprintf("%s sessions get no configured MCP servers (%s): named MCP servers need Codex or Copilot; "+
-		"start a session with --harness codex or --harness copilot to use them", kind, strings.Join(names, ", "))
-}
-
 func approvedPolicy(c Config) (api.AgentPolicySpec, error) {
-	policy := api.AgentPolicySpec{Budgets: map[api.CapabilityKind]api.EndpointBudget{}}
-	if supportsNamedMCP(c.Local.Harness) {
-		policy.MCPServers = c.Gateway.MCPPolicy
-	}
+	policy := api.AgentPolicySpec{Budgets: map[api.CapabilityKind]api.EndpointBudget{}, MCPServers: c.Gateway.MCPPolicy}
 	if err := nativeScopes(c, &policy); err != nil {
 		return api.AgentPolicySpec{}, err
 	}
-	for name, a := range harnessAllowances(c.Local.Harness, c.Allowances) {
+	for name, a := range c.Allowances {
 		capability := api.CapabilityKind(name)
 		if !a.Valid(capability) {
 			return api.AgentPolicySpec{}, errors.New("home: positive unit ceilings required, except for model inference")

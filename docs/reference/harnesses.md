@@ -158,9 +158,9 @@ settings sources exclude user memory, and Copilot in
 and never replaces the approved developer instructions.
 Managed Codex MCP connections and placeholder Kubernetes configuration are
 regenerated for each launch; portable history cannot select upstream credentials
-or server registrations. Managed Copilot loads the same connections with
-`--additional-mcp-config`. Managed Claude tasks and named MCP servers, and
-managed Copilot tasks, are not supported.
+or server registrations. Managed Claude Code loads the same connections as
+`--strict-mcp-config` entries and managed Copilot with
+`--additional-mcp-config`. Managed Claude and Copilot tasks are not supported.
 
 | Managed selector | Selected native state | Completed-turn observation |
 | --- | --- | --- |

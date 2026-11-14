@@ -160,3 +160,27 @@ reaches the agent and the audit log, so the administrator can correct the
 policy; `hack/mcp-tools.py` lists a server's tools before writing one. Local
 sessions give named MCP servers only to Codex placements; Claude Code
 placements on the same home start without them instead of failing.
+
+## Later clarification (2026-11-14)
+
+Managed Claude Code sessions now receive named MCP servers on the Docker
+home and on remote executors, as Codex and Copilot sessions do. The launch
+renders each granted server as a `type: http` entry at
+`<gateway>/mcp/<name>` beside the `sproozi` control connection, still under
+`--strict-mcp-config`, so no other MCP source loads. The home no longer
+withholds MCP allowances or policy from Claude Code placements, and its
+start-up notice is gone. `make verify-harness-clients` starts stock Claude
+Code with that configuration and checks the servers it reports loading.
+
+The gateway still serves provider input schemas unchanged ([ADR
+0015](0015-default-clients-and-native-tool-schemas.md)). Claude Code 2.1.325
+omits, without an error, a tool whose schema has a top-level `allOf`, `anyOf`
+or `oneOf`, and keeps the rest of that server's tools; Kubernetes AgentRuns
+with Claude Code already behaved this way. We chose to document this and warn
+in `hack/mcp-tools.py --policy` rather than change the gateway. Failing
+preparation for such a tool would also break Codex and Copilot sessions that
+list it. Failing it only for Claude Code would make the gateway depend on the
+client, which ADR 0015 rejected. Rewriting the schema could change what it
+means. Revisit this if a provider that administrators need relies on
+top-level combinators, or if Claude Code starts rejecting the whole server
+instead of the one tool.

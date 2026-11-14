@@ -10,7 +10,9 @@ tools/list, following pagination) with the Python standard library, and prints
 each tool's name and argument names. --json prints the tools as the server sent
 them. --policy checks an AgentPolicy's tool scope for this server against the
 live tools: unknown tools, unknown arguments and required arguments the policy
-forbids are reported, and the command exits 1. A URL that serves only the legacy HTTP+SSE transport (often ending in
+forbids are reported, and the command exits 1; it warns about an approved
+tool that Claude Code can't list because its schema has a top-level allOf,
+anyOf or oneOf. A URL that serves only the legacy HTTP+SSE transport (often ending in
 /sse) is reported as such; the gateway needs the Streamable HTTP endpoint. Run
 it from a machine that may reach the server; the agent never does.
 The listing grants nothing: copy only the tools you approve into
@@ -156,6 +158,16 @@ def url_warnings(tools, scope):
             for argument in sorted(offered[name].get("properties") or {}) if argument.lower() in ("url", "uri")]
 
 
+def combinator_warnings(tools, scope):
+    """Name approved tools whose input schema has a top-level allOf, anyOf or
+    oneOf: the gateway serves the schema unchanged, and Claude Code leaves
+    such a tool out of the session without saying so."""
+    offered = {tool["name"]: tool.get("inputSchema") or {} for tool in tools}
+    return ["tool %r has a top-level %s in its input schema; Claude Code sessions won't list it" % (name, keyword)
+            for name in sorted(scope) if name in offered
+            for keyword in ("allOf", "anyOf", "oneOf") if keyword in offered[name]]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("url", help="the server's MCP endpoint, as in servers.json")
@@ -185,7 +197,7 @@ def main():
             print("mcp-tools: %s: %s" % (name, problem), file=sys.stderr)
         if problems:
             sys.exit(1)
-        for warning in url_warnings(tools, scope):
+        for warning in url_warnings(tools, scope) + combinator_warnings(tools, scope):
             print("mcp-tools: %s: warning: %s" % (name, warning), file=sys.stderr)
         print("The policy's %d %s tools match the server's tools and arguments." % (len(scope), name))
         return
