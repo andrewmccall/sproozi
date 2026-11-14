@@ -38,24 +38,29 @@ import (
 )
 
 type serverConfig struct {
-	Harness            harness.NativeKind                `json:"harness"`
-	Listen             string                            `json:"listen"`
-	CertificateFile    string                            `json:"certificateFile"`
-	KeyFile            string                            `json:"keyFile"`
-	Principal          string                            `json:"principal"`
-	PlacementName      string                            `json:"placementName"`
-	Namespace          string                            `json:"namespace"`
-	BudgetNamespace    string                            `json:"budgetNamespace,omitempty"`
-	GatewayUser        string                            `json:"gatewayUser,omitempty"`
-	TemplateName       string                            `json:"templateName"`
-	Directory          string                            `json:"directory"`
-	InstructionDigest  string                            `json:"instructionDigest"`
-	Allowances         map[string]session.Allowance      `json:"allowances"`
-	MaxDuration        string                            `json:"maxDuration,omitempty"`
-	MaxCheckpointBytes int64                             `json:"maxCheckpointBytes"`
-	WorkTokenFile      string                            `json:"workTokenFile,omitempty"`
-	Repositories       map[string]work.Repository        `json:"repositories,omitempty"`
-	Projects           map[project.ID]project.Definition `json:"projects,omitempty"`
+	Harness            harness.NativeKind           `json:"harness"`
+	Listen             string                       `json:"listen"`
+	CertificateFile    string                       `json:"certificateFile"`
+	KeyFile            string                       `json:"keyFile"`
+	Principal          string                       `json:"principal"`
+	PlacementName      string                       `json:"placementName"`
+	Namespace          string                       `json:"namespace"`
+	BudgetNamespace    string                       `json:"budgetNamespace,omitempty"`
+	GatewayUser        string                       `json:"gatewayUser,omitempty"`
+	TemplateName       string                       `json:"templateName"`
+	Directory          string                       `json:"directory"`
+	InstructionDigest  string                       `json:"instructionDigest"`
+	Allowances         map[string]session.Allowance `json:"allowances"`
+	MaxDuration        string                       `json:"maxDuration,omitempty"`
+	MaxCheckpointBytes int64                        `json:"maxCheckpointBytes"`
+	WorkTokenFile      string                       `json:"workTokenFile,omitempty"`
+	// WorkTokenMaxDuration caps work submitted with the work token. It is
+	// required with workTokenFile and fits within maxDuration when that is set.
+	WorkTokenMaxDuration string `json:"workTokenMaxDuration,omitempty"`
+	// RetainedBytes bounds what remote work keeps on the executor's volume.
+	RetainedBytes int64                             `json:"retainedBytes,omitempty"`
+	Repositories  map[string]work.Repository        `json:"repositories,omitempty"`
+	Projects      map[project.ID]project.Definition `json:"projects,omitempty"`
 }
 
 // Configuration field names, as errors name them.
@@ -157,8 +162,28 @@ func validateConfig(c serverConfig) error {
 	if c.MaxCheckpointBytes <= 0 || c.MaxCheckpointBytes > 256<<20 {
 		return invalid("maxCheckpointBytes", "must be between 1 and 268435456")
 	}
+	return validateWork(c, invalid)
+}
+
+// validateWork checks the settings for remote work: the work token, its cap
+// and the retention bound.
+func validateWork(c serverConfig, invalid func(field, rule string) error) error {
 	if len(c.Repositories)+len(c.Projects) > 0 && c.WorkTokenFile == "" {
 		return invalid("workTokenFile", "is required with repositories or projects")
+	}
+	if c.WorkTokenFile != "" {
+		limit, _ := maxDuration(c.MaxDuration)
+		d, err := maxDuration(c.WorkTokenMaxDuration)
+		if err != nil || d == 0 {
+			return invalid("workTokenMaxDuration", "is required with workTokenFile: a positive Go duration such as \"2h\" "+
+				"that caps work submitted with the work token")
+		}
+		if limit > 0 && d > limit {
+			return invalid("workTokenMaxDuration", "must not exceed maxDuration")
+		}
+	}
+	if c.RetainedBytes != 0 && c.RetainedBytes < 2*c.MaxCheckpointBytes {
+		return invalid("retainedBytes", "must be at least twice maxCheckpointBytes, or omitted for the default")
 	}
 	return nil
 }
@@ -245,13 +270,24 @@ func run(args []string) error {
 		return err
 	}
 	if len(fixed.Repositories)+len(fixed.Projects) > 0 {
+		workDuration, _ := maxDuration(fixed.WorkTokenMaxDuration)
+		// The executor owns its sessions through the coordinator (ADR 0057),
+		// whose only placement is this executor's own. Deferred calls close
+		// the owner first, then the coordinator, then the placement.
+		coordinator, openErr := session.Open(filepath.Join(fixed.Directory, "sessions"),
+			map[string]session.Placement{fixed.PlacementName: backend}, fixed.MaxCheckpointBytes)
+		if openErr != nil {
+			return openErr
+		}
+		defer func() { _ = coordinator.Close() }()
 		owner, openErr := work.Open(work.Config{
 			Directory: filepath.Join(fixed.Directory, "work"), Principal: fixed.Principal,
 			Harness: fixed.Harness, Placement: fixed.PlacementName,
 			InstructionDigest: fixed.InstructionDigest, Allowances: fixed.Allowances,
-			MaxDuration: duration, MaxCheckpointBytes: fixed.MaxCheckpointBytes,
-			Repositories: fixed.Repositories, TemplateName: fixed.TemplateName, Projects: fixed.Projects,
-			Backend: backend, Log: os.Stderr,
+			MaxDuration: duration, WorkTokenMaxDuration: workDuration, MaxCheckpointBytes: fixed.MaxCheckpointBytes,
+			RetainedBytes: fixed.RetainedBytes,
+			Repositories:  fixed.Repositories, TemplateName: fixed.TemplateName, Projects: fixed.Projects,
+			Coordinator: coordinator, Profiles: backend, Log: os.Stderr,
 		})
 		if openErr != nil {
 			return openErr

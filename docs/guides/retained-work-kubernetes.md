@@ -114,7 +114,9 @@ the approved repository/ref, principal, duration, byte limit and allowances:
     }
   },
   "maxDuration": "30m",
+  "workTokenMaxDuration": "30m",
   "maxCheckpointBytes": 33554432,
+  "retainedBytes": 2147483648,
   "repositories": {
     "sproozi": {"url": "https://github.com/andrewmccall/sproozi", "ref": "main"}
   }
@@ -125,11 +127,19 @@ the approved repository/ref, principal, duration, byte limit and allowances:
 installation's `config.json`: 32 MiB for a new `sproozi init`
 installation, 8 MiB for one created before that default changed.
 
-`maxDuration` caps each task's deadline, and a task submitted without
-`--max-duration` gets it. This executor takes tasks from Hermes on someone's
-behalf, so keep it set. Omitted, tasks may run with no deadline unless the
-policy's `maxExecutionDuration` caps them; see
-[ADR 0056](../adr/0056-whoever-starts-work-sets-its-deadline.md).
+`workTokenMaxDuration`, required with `workTokenFile`, caps each task Hermes
+submits with the work token: a task without a `maxDuration` gets it, and a
+longer one or `none` is refused. `maxDuration`, optional, caps every launch,
+yours included, and `workTokenMaxDuration` must fit within it. Omit
+`maxDuration` to let work you submit yourself run without a deadline; see
+[ADR 0056](../adr/0056-whoever-starts-work-sets-its-deadline.md) and
+[ADR 0057](../adr/0057-the-remote-executor-owns-its-sessions-through-the-coordinator.md).
+
+`retainedBytes`, optional, bounds what remote work keeps on the executor's
+volume, at least twice `maxCheckpointBytes`; it defaults to 1 GiB, or twice
+`maxCheckpointBytes` when that is larger. Keep it below the volume's size. A
+task is refused as unavailable while what is kept, plus one checkpoint for each
+unfinished task and the new one, would exceed it.
 
 Apply namespaces from the installation before creating these objects. The
 remote executor, its profile and credentials, and its managed runs live in
@@ -234,7 +244,9 @@ conversation. Cross-harness handoff is a separate deferred feature.
 | --- | --- |
 | Hermes cannot discover tools | Inspect its native logs and the remote executor's TLS, CA and work token. All MCP output schemas must have object roots. |
 | Remote executor is unready | Inspect its logs, PVC permissions, mounted config/credentials and namespace-scoped RBAC. |
-| Remote phase is `unknown` | Preserve the session/operation UUID and journals. Inspect the Pod and remote executor logs, then use `recover`; do not manufacture a new submission. |
+| Remote phase is `unknown-stop` or `unknown-usage` | The executor retries by itself. Preserve the session/operation UUID and journals. Inspect the Pod and remote executor logs, then use `recover` to retry at once; do not manufacture a new submission. |
+| Remote phase is `stopping` with a problem | The task's turn is still running; the executor keeps waiting. `cancel` stops it now instead. |
+| Remote phase is `preparing` with a problem | Preparation failed, for example a denied policy. Fix the cause, then `recover`. |
 | Native state is missing or incompatible | Retain the source evidence. Use the same harness and matching instructions. Check whether its saved state is supported. |
 | A deadline or cancellation stops work | Inspect status. Deadline/cancellation does not guarantee a resumable completed turn. Unknown stop or accounting prevents export. |
 | Home storage is full | Resolve capacity before pull/resume. A failed capacity check does not transfer ownership or start another writer. |

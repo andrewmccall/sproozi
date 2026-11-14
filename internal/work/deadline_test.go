@@ -15,23 +15,30 @@ func TestTaskDeadlineFollowsTheExecutorCap(t *testing.T) {
 	now := time.Date(2026, 11, 14, 12, 0, 0, 0, time.UTC)
 	for _, tc := range []struct {
 		name   string
+		caller Caller
 		limit  time.Duration
 		choice string
 		want   time.Time
+		effect string
 		code   profile.Code
 	}{
-		{"capped default", time.Hour, "", now.Add(time.Hour), ""},
-		{"capped shorter", time.Hour, "30m", now.Add(30 * time.Minute), ""},
-		{"capped longer denied", time.Hour, "2h", time.Time{}, profile.CodeDenied},
-		{"capped none denied", time.Hour, deadline.NoneArg, time.Time{}, profile.CodeDenied},
-		{"uncapped default is none", 0, "", time.Time{}, ""},
-		{"uncapped none", 0, deadline.NoneArg, time.Time{}, ""},
-		{"uncapped any", 0, "48h", now.Add(48 * time.Hour), ""},
-		{"invalid", 0, "forever", time.Time{}, profile.CodeInvalid},
+		{"capped default", CallerHome, time.Hour, "", now.Add(time.Hour), "1h0m0s", ""},
+		{"capped shorter", CallerHome, time.Hour, "30m", now.Add(30 * time.Minute), "30m0s", ""},
+		{"capped longer denied", CallerHome, time.Hour, "2h", time.Time{}, "", profile.CodeDenied},
+		{"capped none denied", CallerHome, time.Hour, deadline.NoneArg, time.Time{}, "", profile.CodeDenied},
+		{"uncapped default is none", CallerHome, 0, "", time.Time{}, deadline.NoneArg, ""},
+		{"uncapped none", CallerHome, 0, deadline.NoneArg, time.Time{}, deadline.NoneArg, ""},
+		{"uncapped any", CallerHome, 0, "48h", now.Add(48 * time.Hour), "48h0m0s", ""},
+		{"invalid", CallerHome, 0, "forever", time.Time{}, "", profile.CodeInvalid},
+		// The work token has its own cap, set even when the executor has none.
+		{"work token default", CallerWorkToken, 0, "", now.Add(20 * time.Minute), "20m0s", ""},
+		{"work token shorter", CallerWorkToken, 0, "5m", now.Add(5 * time.Minute), "5m0s", ""},
+		{"work token longer denied", CallerWorkToken, 0, "1h", time.Time{}, "", profile.CodeDenied},
+		{"work token none denied", CallerWorkToken, 0, deadline.NoneArg, time.Time{}, "", profile.CodeDenied},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			o := &Owner{config: Config{MaxDuration: tc.limit}}
-			got, err := o.taskDeadline(tc.choice, now)
+			o := &Owner{config: Config{MaxDuration: tc.limit, WorkTokenMaxDuration: 20 * time.Minute}}
+			effect, got, err := o.taskDeadline(tc.caller, tc.choice, now)
 			var rejection *profile.Rejection
 			if tc.code != "" {
 				if !errors.As(err, &rejection) || rejection.Code != tc.code {
@@ -39,8 +46,8 @@ func TestTaskDeadlineFollowsTheExecutorCap(t *testing.T) {
 				}
 				return
 			}
-			if err != nil || !got.Time().Equal(tc.want) {
-				t.Fatalf("deadline = %v, %v; want %v", got, err, tc.want)
+			if err != nil || !got.Time().Equal(tc.want) || effect != tc.effect {
+				t.Fatalf("deadline = %v (%s), %v; want %v (%s)", got, effect, err, tc.want, tc.effect)
 			}
 		})
 	}

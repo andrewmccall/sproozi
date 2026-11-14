@@ -27,19 +27,10 @@ const serviceOwnership = "home"
 // work reports the same word.
 const phaseCancelled = string(session.PhaseCancelled)
 
-// remoteWorkLivePhases are the phases of remote work (internal/work) in which
-// its deadline still applies. They are the remote counterparts of
-// session.Phase.Live; the rest of remote work's vocabulary needs no mapping.
-//
-// TODO(ADR 0057): remove once remote work runs through the coordinator and
-// reports session phases.
-var remoteWorkLivePhases = []string{"pending", "preparing", "active", "finalizing"}
-
 // livePhase reports a listed phase, from this machine or a remote executor,
-// in which the session's deadline still applies.
-func livePhase(phase string) bool {
-	return session.Phase(phase).Live() || slices.Contains(remoteWorkLivePhases, phase)
-}
+// in which the session's deadline still applies. Both owners report the
+// coordinator's phases (ADR 0057).
+func livePhase(phase string) bool { return session.Phase(phase).Live() }
 
 // writeJSON prints one indented JSON document.
 func writeJSON(w io.Writer, v any) error {

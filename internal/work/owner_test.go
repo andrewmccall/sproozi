@@ -41,6 +41,16 @@ const testInstructions = "Act only within the approved task"
 const testResult = "Verified the repository change"
 const testLimit = int64(8 << 20)
 
+// fixtureVisit is what the fixture placement holds for one allocation.
+type fixtureVisit struct {
+	state       session.PlacementState
+	incarnation session.Incarnation
+	stopped     *session.Stopped
+}
+
+// fixturePlacement is a Kubernetes placement double for the coordinator: it
+// keeps each allocation's state, so Inspect reports what Prepare, Activate,
+// Stop and Abort did.
 type fixturePlacement struct {
 	mu                     sync.Mutex
 	data                   []byte
@@ -51,10 +61,17 @@ type fixturePlacement struct {
 	missingSeal            bool
 	missingFence           bool
 	lostInitial            bool
+	refusePrepare          error
 	heldStop               <-chan struct{}
 	stopStarted            chan struct{}
-	launches               []session.Launch
-	profiles               map[string][]byte
+	// turnPending is how many stops report that the task's turn is still
+	// running before one succeeds.
+	turnPending int
+	// stopReturning closes just before a stop returns success.
+	stopReturning chan struct{}
+	launches      []session.Launch
+	profiles      map[string][]byte
+	visits        map[string]fixtureVisit
 }
 
 func (p *fixturePlacement) StoreProfile(_ context.Context, digest string, archive []byte) error {
@@ -67,32 +84,57 @@ func (p *fixturePlacement) StoreProfile(_ context.Context, digest string, archiv
 	return nil
 }
 
-func (p *fixturePlacement) CreateInitial(_ context.Context, l session.Launch, data []byte) (session.Incarnation, error) {
+func (p *fixturePlacement) set(l session.Launch, v fixtureVisit) {
+	if p.visits == nil {
+		p.visits = map[string]fixtureVisit{}
+	}
+	p.visits[l.AllocationID] = v
+}
+
+func (p *fixturePlacement) receipt(l session.Launch, i session.Incarnation) *session.Receipt {
+	usage := map[string]budget.TrustedUsage{}
+	for name := range l.Allowances {
+		usage[name] = budget.TrustedUsage{}
+	}
+	usage[fixtureModel] = budget.TrustedUsage{Units: 7}
+	return &session.Receipt{Launch: l, Incarnation: i, Usage: usage}
+}
+
+func (p *fixturePlacement) Prepare(_ context.Context, l session.Launch, data []byte) (session.Incarnation, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.initial++
 	p.launches = append(p.launches, l)
-	if l.ThreadID != "" || l.Task == "" || len(data) == 0 {
+	if l.ThreadID != "" || l.CheckpointDigest != "" || l.Task == "" || len(data) == 0 {
 		return session.Incarnation{}, errors.New("invalid initial intent")
 	}
+	if p.refusePrepare != nil {
+		return session.Incarnation{}, p.refusePrepare
+	}
+	i := session.Incarnation{ExecutionID: l.AllocationID, ResourceUID: fixtureResource}
 	if p.lostInitial {
 		p.lostInitial = false
+		p.set(l, fixtureVisit{state: session.PlacementPreparing, incarnation: i})
 		return session.Incarnation{}, errors.New("lost preparation reply")
 	}
-	return session.Incarnation{ExecutionID: l.AllocationID, ResourceUID: fixtureResource}, nil
+	p.set(l, fixtureVisit{state: session.PlacementPrepared, incarnation: i})
+	return i, nil
 }
-func (p *fixturePlacement) Prepare(context.Context, session.Launch, []byte) (session.Incarnation, error) {
-	return session.Incarnation{}, errors.New("unexpected resume")
-}
-func (p *fixturePlacement) Activate(_ context.Context, _ session.Launch, _ session.Incarnation) error {
+func (p *fixturePlacement) Activate(_ context.Context, l session.Launch, i session.Incarnation) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.active++
+	p.set(l, fixtureVisit{state: session.PlacementActive, incarnation: i})
 	return nil
 }
 func (p *fixturePlacement) Inspect(_ context.Context, l session.Launch) (session.Observation, error) {
-	return session.Observation{Launch: l, State: session.PlacementPreparing,
-		Incarnation: session.Incarnation{ExecutionID: l.AllocationID, ResourceUID: fixtureResource}}, nil
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	v, ok := p.visits[l.AllocationID]
+	if !ok {
+		return session.Observation{Launch: l, State: session.PlacementAbsent}, nil
+	}
+	return session.Observation{Launch: l, State: v.state, Incarnation: v.incarnation, Stopped: v.stopped}, nil
 }
 func (p *fixturePlacement) Abort(_ context.Context, l session.Launch, i session.Incarnation) (session.Observation, error) {
 	p.mu.Lock()
@@ -101,8 +143,8 @@ func (p *fixturePlacement) Abort(_ context.Context, l session.Launch, i session.
 	if i.ResourceUID != fixtureResource {
 		return session.Observation{}, errors.New("exact incarnation required")
 	}
-	stopped := &session.Stopped{Launch: l, Incarnation: i, ActualStopped: true,
-		Receipt: &session.Receipt{Launch: l, Incarnation: i, Usage: map[string]budget.TrustedUsage{fixtureModel: {Units: 7}}}}
+	stopped := &session.Stopped{Launch: l, Incarnation: i, ActualStopped: true, Receipt: p.receipt(l, i)}
+	p.set(l, fixtureVisit{state: session.PlacementStopped, incarnation: i, stopped: stopped})
 	return session.Observation{Launch: l, Incarnation: i, State: session.PlacementStopped, Stopped: stopped}, nil
 }
 func (p *fixturePlacement) Stop(ctx context.Context, l session.Launch, i session.Incarnation) (session.Stopped, error) {
@@ -117,18 +159,28 @@ func (p *fixturePlacement) Stop(ctx context.Context, l session.Launch, i session
 			return session.Stopped{}, ctx.Err()
 		}
 	}
+	if p.turnPending > 0 {
+		p.turnPending--
+		return session.Stopped{}, &harness.NativeTurnPending{Waiting: "the task's turn to complete"}
+	}
 	s := session.Stopped{Launch: l, Incarnation: i, ActualStopped: !p.missingFence, ThreadID: testThread, Checkpoint: p.data, CheckpointDigest: p.meta.SHA256}
 	if !p.missingSeal {
-		usage := map[string]budget.TrustedUsage{}
-		for name := range l.Allowances {
-			usage[name] = budget.TrustedUsage{}
-		}
-		usage[fixtureModel] = budget.TrustedUsage{Units: 7}
-		s.Receipt = &session.Receipt{Launch: l, Incarnation: i, Usage: usage}
+		s.Receipt = p.receipt(l, i)
 	}
 	if p.lostStop {
 		p.lostStop = false
 		return session.Stopped{}, errors.New("lost stopped reply")
+	}
+	if p.missingFence {
+		return s, nil
+	}
+	p.set(l, fixtureVisit{state: session.PlacementStopped, incarnation: i, stopped: &s})
+	if p.missingSeal {
+		return s, session.ErrUsageUnsealed
+	}
+	if p.stopReturning != nil {
+		close(p.stopReturning)
+		p.stopReturning = nil
 	}
 	return s, nil
 }
@@ -199,11 +251,25 @@ func fixture(t *testing.T) (Config, *fixturePlacement) {
 	return fixtureConfig(t, repo, p), p
 }
 
-// fixtureConfig is the owner configuration for a snapshot repository. It runs
-// no Git, so tests of configuration validation need no repository.
+// fixtureConfig is the owner configuration for a snapshot repository, with a
+// coordinator whose only placement is p. It runs no Git, so tests of
+// configuration validation need no repository. The driver's automatic
+// recovery waits an hour, so a test sees an unsettled phase until it
+// recovers; tests of automatic recovery shorten it.
 func fixtureConfig(t *testing.T, repo string, p *fixturePlacement) Config {
 	t.Helper()
-	return Config{Directory: filepath.Join(testutil.PrivateDir(t), "catalog"), Principal: "hermes", Harness: harness.NativeCodex, Placement: executorKubernetes, InstructionDigest: hash([]byte(testInstructions)), Allowances: map[string]session.Allowance{fixtureModel: {Units: session.Limit{Bounded: true, Value: 100}}}, MaxDuration: time.Minute, MaxCheckpointBytes: testLimit, Repositories: map[string]Repository{repositorySproozi: {Snapshot: repo}}, Backend: p, Log: fixtureLog{t}}
+	root := testutil.PrivateDir(t)
+	coordinator, err := session.Open(filepath.Join(root, "sessions"), map[string]session.Placement{executorKubernetes: p}, testLimit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = coordinator.Close() })
+	return Config{Directory: filepath.Join(root, "work"), Principal: "hermes", Harness: harness.NativeCodex,
+		Placement: executorKubernetes, InstructionDigest: hash([]byte(testInstructions)),
+		Allowances:  map[string]session.Allowance{fixtureModel: {Units: session.Limit{Bounded: true, Value: 100}}},
+		MaxDuration: time.Minute, WorkTokenMaxDuration: time.Minute, MaxCheckpointBytes: testLimit,
+		Repositories: map[string]Repository{repositorySproozi: {Snapshot: repo}},
+		Coordinator:  coordinator, Profiles: p, Log: fixtureLog{t}, retry: backoff{first: time.Hour}}
 }
 
 type fixtureLog struct{ t *testing.T }
@@ -233,6 +299,8 @@ func untilDeadline(t *testing.T) (context.Context, context.CancelFunc) {
 	return context.WithCancel(t.Context())
 }
 
+// waitPhase waits for the session to reach want. Reaching another settled
+// phase, from which it cannot move on its own, fails at once.
 func waitPhase(t *testing.T, o *Owner, id string, want Phase) View {
 	t.Helper()
 	ctx, cancel := untilDeadline(t)
@@ -245,7 +313,7 @@ func waitPhase(t *testing.T, o *Owner, id string, want Phase) View {
 		if v.Phase == want {
 			return v
 		}
-		if v.Phase == phaseUnknown {
+		if v.Phase.Settled() {
 			t.Fatalf("phase=%s want=%s problem=%s", v.Phase, want, v.Problem)
 		}
 		select {
@@ -296,6 +364,9 @@ func TestRemoteCatalogueRetainsCompletionAndExclusiveClaimAcrossRestart(t *testi
 	if export.Claimed || export.Stopped.Receipt.Usage[fixtureModel].Units != 7 {
 		t.Fatal("download altered ownership or receipt")
 	}
+	if listed, e := o.Info(t.Context(), v.ID); e != nil || listed.Phase != PhaseExporting {
+		t.Fatalf("export in progress: %+v %v", listed, e)
+	}
 	if _, e = o.Claim(t.Context(), v.ID, op, strings.Repeat("0", 64)); e == nil {
 		t.Fatal("wrong digest claimed ownership")
 	}
@@ -328,10 +399,14 @@ func TestRemoteCatalogueRetainsCompletionAndExclusiveClaimAcrossRestart(t *testi
 		t.Fatalf("task relaunched: initial=%d active=%d", p.initial, p.active)
 	}
 }
+
+// An unproven stop and unsealed usage are separate phases, and neither can
+// export.
 func TestUnknownStopOrAccountingCannotExport(t *testing.T) {
 	t.Parallel()
-	for _, name := range []string{"fence", "accounting"} {
+	for name, want := range map[string]Phase{"fence": phaseUnknownStop, "accounting": phaseUnknownUsage} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			c, p := fixture(t)
 			p.missingFence = name == "fence"
 			p.missingSeal = name == "accounting"
@@ -341,13 +416,17 @@ func TestUnknownStopOrAccountingCannotExport(t *testing.T) {
 			}
 			defer func() { _ = o.Close() }()
 			v := submit(t, o)
-			waitPhase(t, o, v.ID, phaseUnknown)
+			got := waitPhase(t, o, v.ID, want)
+			if got.Problem == "" {
+				t.Fatalf("%s without a problem", got.Phase)
+			}
 			if _, e = o.BeginExport(t.Context(), v.ID, uuid.NewString()); e == nil {
 				t.Fatal("unknown source exported")
 			}
 		})
 	}
 }
+
 func TestLostStopReplyRecoversWithoutReactivation(t *testing.T) {
 	t.Parallel()
 	c, p := fixture(t)
@@ -358,7 +437,8 @@ func TestLostStopReplyRecoversWithoutReactivation(t *testing.T) {
 	}
 	defer func() { _ = o.Close() }()
 	v := submit(t, o)
-	waitPhase(t, o, v.ID, phaseUnknown)
+	waitPhase(t, o, v.ID, phaseUnknownStop)
+	// The driver waits an hour before it retries; recover retries now.
 	if _, e = o.Recover(t.Context(), v.ID); e != nil {
 		t.Fatal(e)
 	}
@@ -369,6 +449,30 @@ func TestLostStopReplyRecoversWithoutReactivation(t *testing.T) {
 		t.Fatalf("recovery replayed launch: initial=%d active=%d stops=%d", p.initial, p.active, p.stops)
 	}
 }
+
+// The driver retries an unproven stop by itself, with a backoff, while the
+// executor runs.
+func TestDriverRecoversAnUnprovenStopByItself(t *testing.T) {
+	t.Parallel()
+	c, p := fixture(t)
+	c.retry = backoff{first: 5 * time.Millisecond, limit: 20 * time.Millisecond}
+	p.lostStop = true
+	o, e := Open(c)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer func() { _ = o.Close() }()
+	v := submit(t, o)
+	if done := waitPhase(t, o, v.ID, phaseRetained); done.Result != testResult || done.Problem != "" {
+		t.Fatalf("recovered task: %+v", done)
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.active != 1 || p.stops != 2 {
+		t.Fatalf("activations=%d stops=%d", p.active, p.stops)
+	}
+}
+
 func TestTaskCredentialCannotClaimHomeOwnership(t *testing.T) {
 	t.Parallel()
 	c, _ := fixture(t)
@@ -437,8 +541,9 @@ func TestSubmissionReplayDoesNotWaitForHeldNativeWork(t *testing.T) {
 	go func() { v, _ := o.Submit(t.Context(), q); done <- v }()
 	select {
 	case v := <-done:
-		if v.ID != initial.ID || v.ExecutionID != initial.ExecutionID || v.AllocationID != initial.AllocationID {
-			t.Fatal("replay changed identity")
+		if v.ID != initial.ID || v.ExecutionID != initial.ExecutionID || v.AllocationID != initial.AllocationID ||
+			v.Phase != phaseStopping {
+			t.Fatalf("replay changed identity or phase: %+v", v)
 		}
 		stillHeld("submission replay")
 	case <-wait.Done():
@@ -485,7 +590,9 @@ func TestCancellationObservesIncarnationAfterLostPreparationReply(t *testing.T) 
 	}
 	defer func() { _ = o.Close() }()
 	v := submit(t, o)
-	waitPhase(t, o, v.ID, phaseUnknown)
+	if stalled := waitDriver(t, o, v.ID); stalled.Phase != phasePreparing || !strings.Contains(stalled.Problem, "recover") {
+		t.Fatalf("lost preparation reply: %+v", stalled)
+	}
 	operation := uuid.NewString()
 	cancelled, err := o.Cancel(t.Context(), v.ID, operation)
 	if err != nil || cancelled.Phase != phaseCancelled {
@@ -497,9 +604,9 @@ func TestCancellationObservesIncarnationAfterLostPreparationReply(t *testing.T) 
 	if _, err := o.Cancel(t.Context(), v.ID, uuid.NewString()); OutcomeCode(err) != profile.CodeConflict {
 		t.Fatalf("another cancellation operation accepted: %v", err)
 	}
-	r, err := o.read(v.ID)
-	if err != nil || r.Incarnation == nil || r.Incarnation.ResourceUID != fixtureResource {
-		t.Fatalf("lost exact observed binding: %+v %v", r, err)
+	rec, err := c.Coordinator.Inspect(v.ID)
+	if err != nil || len(rec.Visits) != 1 || rec.Visits[0].Incarnation.ResourceUID != fixtureResource || rec.Visits[0].Receipt == nil {
+		t.Fatalf("lost exact observed binding: %+v %v", rec.Visits, err)
 	}
 	if p.active != 0 {
 		t.Fatal("cancellation activated unfinished preparation")
@@ -551,5 +658,30 @@ func TestSubmissionStoresItsProfileAndLaunchesWithItsDigest(t *testing.T) {
 		if bytes.Contains(data, []byte(base64.StdEncoding.EncodeToString(archive)[:32])) {
 			t.Fatalf("catalogue record %s retained the archive", entry.Name())
 		}
+	}
+}
+
+// A submission is refused once retained bytes, plus a checkpoint for each
+// unsettled session and the new one, would exceed the bound.
+func TestSubmissionRespectsRetainedBytes(t *testing.T) {
+	t.Parallel()
+	c, p := fixture(t)
+	c.RetainedBytes = 2 * c.MaxCheckpointBytes
+	release := make(chan struct{})
+	p.heldStop, p.stopStarted = release, make(chan struct{})
+	o, err := Open(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = o.Close() }()
+	defer close(release)
+	submit(t, o)
+	if _, err = o.Submit(t.Context(), Submit{RequestID: uuid.NewString(), Repository: repositorySproozi,
+		Harness: harness.NativeCodex, Executor: executorKubernetes, Task: fixtureTask}); OutcomeCode(err) != profile.CodeUnavailable {
+		t.Fatalf("second submission beyond retainedBytes: %v", err)
+	}
+	c.RetainedBytes = c.MaxCheckpointBytes
+	if err = c.validate(); err == nil {
+		t.Fatal("retainedBytes below twice the checkpoint limit accepted")
 	}
 }

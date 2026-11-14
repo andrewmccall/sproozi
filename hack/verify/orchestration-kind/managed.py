@@ -63,7 +63,7 @@ def profile():
         "budgetNamespace": "sproozi-system", "templateName": TEMPLATE, "directory": "/state/profile",
         "instructionDigest": hashlib.sha256(INSTRUCTIONS.encode()).hexdigest(),
         "allowances": ALLOWANCES, "maxDuration": "10m", "maxCheckpointBytes": 8 << 20,
-        "workTokenFile": "/var/run/sproozi-work/task-token",
+        "workTokenFile": "/var/run/sproozi-work/task-token", "workTokenMaxDuration": "10m",
         "repositories": {"sproozi": {"snapshot": "/state/source"}},
     }
 
@@ -244,7 +244,10 @@ def _run_case(v, image, clients, ca, cert, key, token):
         current = work.tool("sproozi_status", {"id": view["id"]})
         if current["phase"] == "retained":
             break
-        v.check(current["phase"] not in ("unknown", "cancelled") and not current.get("problem"), current)
+        # A stop still waiting for the task's turn is stopping, with a problem
+        # naming what it waits for; anything else with a problem is a failure.
+        v.check(current["phase"] not in ("unknown-stop", "unknown-usage", "cancelled", "failed") and
+                (current["phase"] == "stopping" or not current.get("problem")), current)
         v.check(time.monotonic() < deadline, current)
         time.sleep(2)
     v.check(v.ANSWER in current.get("result", ""), current)
