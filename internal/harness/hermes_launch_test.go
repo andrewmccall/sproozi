@@ -1,7 +1,6 @@
 package harness_test
 
 import (
-	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -65,7 +64,7 @@ func hermesFixture(t *testing.T, scenario string) (*exec.Cmd, string, string) {
 			t.Fatal(err)
 		}
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	ctx, cancel := helperProcessContext(t)
 	t.Cleanup(cancel)
 	output := filepath.Join(dir, "result")
 	cmd := exec.CommandContext(ctx, python, filepath.Join(dir, "launch.py"), "--model", "fixture-model", "--contract", dir, "--hermes", filepath.Join(dir, "hermes"), "--result", output)
