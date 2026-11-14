@@ -112,13 +112,13 @@ proof under `.local`; keep the skill and its feature map current with
 
 ## Harnesses and Hermes in Kind
 
-Install Docker, Python 3, Go 1.26.10, kubectl and Kind. Docker must be running;
+Install Docker, Python 3, Go 1.26.11, kubectl and Kind. Docker must be running;
 the cluster and five stock clients need several GiB of memory and disk. From
 the repository root:
 
 ```sh
 bash hack/verify/fetch-calico.sh .local/verification/calico-v3.30.4.yaml
-GOTOOLCHAIN=go1.26.10 \
+GOTOOLCHAIN=go1.26.11 \
 SPROOZI_CNI_MANIFEST="$PWD/.local/verification/calico-v3.30.4.yaml" \
 SPROOZI_CNI_SELECTOR=k8s-app=calico-node \
 make test-e2e
@@ -291,7 +291,7 @@ to create a dedicated two-node Kind cluster with enforcing Calico, build the
 approved native/helper images, prepare TLS and install the controller/gateway.
 The [stock Hermes walkthrough](../../hack/verify/portable-workflows/README.md#stock-hermes-and-a-persistent-kubernetes-owner)
 then installs this owner and coordinator and runs the complete native round trip.
-It needs Docker, Kind, kubectl, Git, Go 1.26.10, OpenSSL, Python 3 and PyYAML from `hack/requirements.txt`.
+It needs Docker, Kind, kubectl, Git, Go 1.26.11, OpenSSL, Python 3 and PyYAML from `hack/requirements.txt`.
 It selects no personal credentials or home-network resources. The development
 fixture seeds only public Sproozi compiler sources. Follow the
 [Project dogfooding walkthrough](../../hack/verify/portable-workflows/README.md#development-and-governed-home-ops-projects)

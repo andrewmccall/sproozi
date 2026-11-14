@@ -2,7 +2,7 @@
 
 Start with `AGENTS.md`: it maps the code and lists the checks each kind of
 change needs. You need Go 1.26 or later, Make and Python 3; some checks also
-need Docker. Lint runs with Go 1.26.10 whatever Go you have installed
+need Docker. Lint runs with Go 1.26.11 whatever Go you have installed
 (`LINT_TOOLCHAIN` in the Makefile); the go command downloads it once.
 
 Run the narrowest check that covers your change before opening it. The
