@@ -312,16 +312,6 @@ func (p *Placement) Prepare(ctx context.Context, l session.Launch, data []byte) 
 	return p.prepare(ctx, local, record)
 }
 
-// CreateInitial is Prepare limited to a first visit from a Git workspace: a
-// launch with a thread or a checkpoint is refused. The remote work owner still
-// calls it.
-func (p *Placement) CreateInitial(ctx context.Context, l session.Launch, data []byte) (session.Incarnation, error) {
-	if l.ThreadID != "" || l.CheckpointDigest != "" {
-		return session.Incarnation{}, &profile.Rejection{Code: profile.CodeInvalid}
-	}
-	return p.Prepare(ctx, l, data)
-}
-
 // prepareWorkspace restores a captured Git workspace into a fresh native home.
 // The caller holds the operation lock.
 func (p *Placement) prepareWorkspace(ctx context.Context, l session.Launch, data []byte) (session.Incarnation, error) {
