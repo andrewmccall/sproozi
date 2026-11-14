@@ -56,7 +56,7 @@ spec:
       cpu: "2"
       memory: 2Gi
       ephemeral-storage: 4Gi
-  maxExecutionDuration: 1h
+  maxExecutionDuration: 1h   # optional; omit for no deadline
   retentionTTL: 720h
   maxActiveRuns: 4
   maxModelCallSeconds: 900
@@ -122,7 +122,8 @@ bound below its runtime, or leaving a requested package or MCP capability
 without a valid scope. Narrowing a valid scope, such as removing one MCP tool,
 leaves the run running and only changes which of its later requests the gateway
 allows. Shortening `maxExecutionDuration` below a run's elapsed time times it
-out. See [policy edits](agentrun.md#policy-edits) in the AgentRun reference. Other
+out; adding it to a policy that had none gives its running runs a deadline
+counted from when each started. See [policy edits](agentrun.md#policy-edits) in the AgentRun reference. Other
 edits leave the run `Running` with `Ready` `True`: its open connections close and
 its new connections get the edited policy. The only trace is the gateway log
 line `Revoked inspected connection`. Read it with
@@ -200,7 +201,7 @@ See [Security hardening](security-hardening.md) for deployment controls.
 
 | Field | Default | Limits |
 | --- | --- | --- |
-| `spec.maxExecutionDuration` | `1h` | Greater than zero and at most `1h`. The API server rejects `2h` or `0s`. |
+| `spec.maxExecutionDuration` | None: no deadline | Optional. When set, greater than zero, with no upper limit; the API server rejects `0s`. Omit it for work its users start themselves and let run; set it on policies for work started on someone's behalf, such as Hermes workflows. A remote executor still applies its own `maxDuration`, and a session its own deadline. |
 | `spec.retentionTTL` | `720h` (30 days) | Greater than zero. A terminal AgentRun is deleted this long after it finished. |
 
 Omit a field to take its default. A Go client using the API types also omits

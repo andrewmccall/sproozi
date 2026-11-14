@@ -116,6 +116,15 @@ harness's own sign-in only to its provider, identifies the run and checks each
 request against current policy. See
 [capabilities and gateways](docs/explanations/capabilities-and-gateways.md).
 
+### Gateway forwarder
+
+The loopback proxy a managed session's supervisor runs on Kubernetes. The
+harness's `HTTPS_PROXY` points at it with a secret made for that launch, and
+it opens each tunnel to the [gateway](#gateway) with the projected token read
+at that moment, so the token never enters the harness's environment and a
+session outlives any one token. See
+[ADR 0056](docs/adr/0056-whoever-starts-work-sets-its-deadline.md).
+
 ### Harness sign-in
 
 A harness's own credential for its model provider, such as a Claude or ChatGPT

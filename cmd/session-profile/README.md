@@ -71,8 +71,8 @@ The template must have `sessions.sproozi.com/managed: "true"` and the exact same
 approved instruction bytes as the local placement. Compute their SHA-256 for
 `instructionDigest`. The policy allows the selected capabilities, finite positive
 unit budgets, compatible cost budgets, runtime resource limits and an execution
-duration covering the session's original deadline. Current Kubernetes policy
-duration is at most one hour. A destination rejects an incompatible allowance or
+duration covering the session's original deadline. A policy without
+`maxExecutionDuration` leaves the executor's own `maxDuration` as the limit. A destination rejects an incompatible allowance or
 deadline; it never silently rewrites immutable move intent.
 
 The source schemas are

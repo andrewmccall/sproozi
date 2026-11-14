@@ -7,7 +7,6 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"io"
 	"net/url"
 	"os"
 	"strings"
@@ -107,7 +106,13 @@ func (g NativeGateway) Validate(env []string) error {
 	}
 	return nil
 }
-func (c NativeLaunch) Environment() ([]string, error) {
+
+// Environment is the harness's launch environment. With a projected gateway
+// binding, gatewayProxy is the supervisor's loopback forwarder
+// (internal/nativeproxy), which adds the current projected token to each
+// CONNECT, so a session outlives any one token; the token itself never
+// enters the harness's environment.
+func (c NativeLaunch) Environment(gatewayProxy string) ([]string, error) {
 	env := append([]string{}, c.Env...)
 	if len(c.TrustBundlePEM) > 0 {
 		if c.Gateway != nil {
@@ -121,26 +126,18 @@ func (c NativeLaunch) Environment() ([]string, error) {
 		}
 	}
 	if c.Gateway == nil {
+		if gatewayProxy != "" {
+			return nil, errors.New("gateway forwarder without a projected gateway binding")
+		}
 		return env, nil
 	}
 	if err := c.Gateway.Validate(env); err != nil {
 		return nil, err
 	}
-	f, err := os.Open(c.Gateway.TokenPath)
-	if err != nil {
-		return nil, errors.New("projected native token is unavailable")
+	proxy, err := url.Parse(gatewayProxy)
+	if err != nil || proxy.Scheme != "http" || proxy.Hostname() != "127.0.0.1" || proxy.Port() == "" || proxy.User == nil || proxy.Path != "" || proxy.RawQuery != "" {
+		return nil, errors.New("projected gateway requires the loopback gateway forwarder")
 	}
-	data, readErr := io.ReadAll(io.LimitReader(f, 16385))
-	closeErr := f.Close()
-	if readErr != nil || closeErr != nil || len(data) > 16384 {
-		return nil, errors.New("projected native token is unreadable or oversized")
-	}
-	token := strings.TrimSpace(string(data))
-	if token == "" || strings.ContainsAny(token, "\x00\r\n\t ") {
-		return nil, errors.New("invalid projected native token")
-	}
-	proxy, _ := url.Parse(c.Gateway.Endpoint)
-	proxy.User = url.UserPassword(nativeContextName, token)
 	for _, key := range []string{"HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"} {
 		env = append(env, key+"="+proxy.String())
 	}

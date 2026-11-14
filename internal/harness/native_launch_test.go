@@ -78,3 +78,32 @@ func TestConfigureBoundFitsTheLargestProfile(t *testing.T) {
 		t.Fatal("oversized profile archive accepted")
 	}
 }
+
+// A projected gateway binding sends the harness to the supervisor's loopback
+// forwarder; the token is never in its environment, and no other proxy is
+// accepted in its place.
+func TestEnvironmentUsesTheLoopbackGatewayForwarder(t *testing.T) {
+	launch := NativeLaunch{Gateway: &NativeGateway{Endpoint: "https://sproozi-gateway.sproozi-system.svc:8443",
+		TokenPath: NativeGatewayTokenPath, TrustBundle: NativeGatewayTrustBundle}}
+	forwarder := "http://sproozi:launch-secret@127.0.0.1:41234"
+	env, err := launch.Environment(forwarder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"} {
+		if !slices.Contains(env, key+"="+forwarder) {
+			t.Errorf("%s is not the forwarder in %q", key, env)
+		}
+	}
+	if !slices.Contains(env, "SSL_CERT_FILE="+NativeGatewayTrustBundle) {
+		t.Errorf("inspection trust missing from %q", env)
+	}
+	for _, proxy := range []string{"", "https://sproozi:token@sproozi-gateway.sproozi-system.svc:8443", "http://sproozi:secret@10.0.0.1:41234", "http://127.0.0.1:41234"} {
+		if _, err := launch.Environment(proxy); err == nil {
+			t.Errorf("Environment(%q) error = nil, want only the loopback forwarder accepted", proxy)
+		}
+	}
+	if _, err := (NativeLaunch{}).Environment(forwarder); err == nil {
+		t.Error("a forwarder without a projected gateway binding was accepted")
+	}
+}

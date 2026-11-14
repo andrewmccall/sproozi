@@ -265,7 +265,20 @@ func (s *server) activate() response {
 		r.Error = "native deadline expired"
 		return r
 	}
-	env, err := s.config.Environment()
+	// The forwarder puts the current projected token on each gateway CONNECT,
+	// so the session outlives any one token (internal/nativeproxy).
+	forwarder, proxyURL, err := startGatewayForwarder(s.config.Gateway)
+	if err != nil {
+		r.Error = err.Error()
+		return r
+	}
+	launched := false
+	defer func() {
+		if !launched {
+			closeForwarder(forwarder)
+		}
+	}()
+	env, err := s.config.Environment(proxyURL)
 	if err != nil {
 		r.Error = err.Error()
 		return r
@@ -318,10 +331,12 @@ func (s *server) activate() response {
 	}
 	s.native, s.state = n, harness.NativeActive
 	r.PID, r.State = n.PID(), s.state
+	launched = true
 	go func() {
 		<-n.Done()
 		exit, waitErr := n.Wait(context.Background())
 		login.stop()
+		closeForwarder(forwarder)
 		s.mu.Lock()
 		quiescing := s.state == harness.NativeStopping
 		if !quiescing {
