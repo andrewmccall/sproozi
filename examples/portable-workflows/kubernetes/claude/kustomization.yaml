@@ -1,4 +1,4 @@
-# A second remote executor, for Claude Code interactive sessions, beside the
+# A second remote executor, for Claude Code tasks and interactive sessions, beside the
 # Codex one in the parent directory. One executor runs one harness, so each
 # has its own namespace and the CLI chooses with --namespace (ADR 0057). Apply
 # the parent example first: this one uses the same gateway and sandbox

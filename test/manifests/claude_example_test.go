@@ -138,6 +138,39 @@ func TestClaudeExecutorExampleAppliesBesideTheCodexOne(t *testing.T) {
 	}
 }
 
+// Hermes delegates Claude Code tasks to the Claude executor as it does Codex
+// tasks to the Codex one: the executor admits only the coordinators'
+// namespace, on the owner API's port.
+func TestClaudeExecutorExampleAdmitsHermesOnly(t *testing.T) {
+	var found bool
+	for _, doc := range objectsOfKind(renderKustomization(t, claudeExampleDir(t)), "NetworkPolicy") {
+		if metadataName(doc) != "sproozi-work-private" || metadataNamespace(doc) != claudeSessionsNamespace {
+			continue
+		}
+		found = true
+		ingress, _ := field(doc, "spec")["ingress"].([]any)
+		if len(ingress) != 1 {
+			t.Fatalf("executor ingress rules: %v", ingress)
+		}
+		rule, _ := ingress[0].(map[string]any)
+		from, _ := rule["from"].([]any)
+		ports, _ := rule["ports"].([]any)
+		if len(from) != 1 || len(ports) != 1 {
+			t.Fatalf("executor ingress rule: %v", rule)
+		}
+		peer, _ := from[0].(map[string]any)
+		labels := field(field(peer, "namespaceSelector"), "matchLabels")
+		port, _ := ports[0].(map[string]any)
+		if len(peer) != 1 || len(labels) != 1 || labels["kubernetes.io/metadata.name"] != "sproozi-coordinators" ||
+			fmt.Sprint(port["port"]) != "8443" {
+			t.Errorf("executor admits %v on %v, not Hermes's namespace on 8443", peer, port)
+		}
+	}
+	if !found {
+		t.Fatal("no NetworkPolicy sproozi-work-private for the Claude executor")
+	}
+}
+
 func field(doc map[string]any, name string) map[string]any {
 	value, _ := doc[name].(map[string]any)
 	return value

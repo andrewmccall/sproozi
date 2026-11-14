@@ -285,8 +285,8 @@ and hook payloads, with host paths replaced and opaque context elided, are
 fixtures in `internal/harness/testdata` and `cmd/native-session/testdata`;
 `hack/verify/claude-transcripts` regenerates them. The transcript adapter selects their final
 leaf, and replaying the hooks completes the task's turn only for the matching
-task. The supervisor has not yet run a Claude task end to end on a placement;
-remote executors still refuse Claude tasks.
+task. A Claude Code remote executor now accepts tasks (ADR 0057, "Claude
+tasks on the cluster"); a Kind run of one end to end is still to be recorded.
 
 An unattended task also has to start. In a fresh home Claude Code 2.1.318 and
 2.1.325 show a confirmation of `bypassPermissions` mode before submitting the

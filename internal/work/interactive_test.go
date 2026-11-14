@@ -61,9 +61,9 @@ func code(err error) profile.Code {
 	return OutcomeCode(err)
 }
 
-// A Claude Code executor runs interactive sessions; its tasks stay refused
-// until the supervisor binds Claude task completion.
-func TestClaudeExecutorRunsInteractiveSessionsAndRefusesTasks(t *testing.T) {
+// A Claude Code executor runs interactive sessions, and refuses another
+// harness's. Its tasks are in claude_task_test.go.
+func TestClaudeExecutorRunsInteractiveSessionsAndRefusesCodex(t *testing.T) {
 	t.Parallel()
 	c, p := fixture(t)
 	c.Harness = harness.NativeClaude
@@ -82,18 +82,13 @@ func TestClaudeExecutorRunsInteractiveSessionsAndRefusesTasks(t *testing.T) {
 		t.Fatalf("Claude first visit launched as %+v", launched)
 	}
 
-	task := Submit{RequestID: uuid.NewString(), Repository: repositorySproozi, Harness: harness.NativeClaude,
-		Executor: executorKubernetes, Task: fixtureTask}
-	if _, err := o.Submit(t.Context(), task); code(err) != profile.CodeUnsupported {
-		t.Fatalf("Claude task accepted: %v", err)
-	}
 	if _, err := o.Submit(t.Context(), interactiveRequest()); code(err) != profile.CodeUnsupported {
 		t.Fatalf("Codex session accepted by a Claude executor: %v", err)
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if len(p.launches) != 1 {
-		t.Fatalf("refused submissions launched: %d", len(p.launches))
+		t.Fatalf("refused submission launched: %d", len(p.launches))
 	}
 }
 

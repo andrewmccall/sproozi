@@ -145,15 +145,18 @@ immutable `codex`, `claude-code` or `copilot` selector. Both placements, the
 profile and the checkpoint must use the same selected harness. A move cannot
 switch harnesses. OpenCode and Hermes runs can't be moved.
 
-The workflow in [Run a task remotely, then resume it locally](../guides/portable-workflows.md) supports remote tasks only for managed Codex. Its completion observer requires the
-submitted task text and a new completed turn. It then follows the usual stop,
+The workflow in [Run a task remotely, then resume it locally](../guides/portable-workflows.md) supports remote tasks for managed Codex and Claude Code. Its completion
+observer requires a new completed turn of the submitted task: for Codex, the
+task text in its rollout; for Claude Code, the prompt its `UserPromptSubmit`
+hook reports. A Claude Code task's result is the reply at the checkpoint's
+selected transcript leaf. It then follows the usual stop,
 finalized usage and checkpoint steps. A later local resume gets fresh
 permissions.
 
-A remote executor runs one harness. A Codex executor runs tasks and
+A remote executor runs one harness. Codex and Claude Code executors each run
+tasks and
 [interactive sessions the cluster owns](../guides/portable-workflows.md#start-a-session-on-the-cluster-and-attach-from-anywhere);
-a Claude Code executor runs interactive sessions only and answers a task
-`unsupported`. Codex and Claude Code on one cluster are two executors in two
+an executor answers a task for another harness `unsupported`. Codex and Claude Code on one cluster are two executors in two
 namespaces, which the CLI chooses with `--namespace`
 ([Claude Code executor example](../../examples/portable-workflows/kubernetes/claude/kustomization.yaml)).
 A Claude Code session started on the cluster starts Claude Code fresh, as a
@@ -176,9 +179,9 @@ Managed Codex MCP connections and placeholder Kubernetes configuration are
 regenerated for each launch; portable history cannot select upstream credentials
 or server registrations. Managed Claude Code loads the same connections as
 `--strict-mcp-config` entries and managed Copilot with
-`--additional-mcp-config`. Remote executors don't accept Claude Code or
-Copilot tasks yet. The Claude Code supervisor can already run one: it submits
-the task as the launch's prompt and counts only the turn that prompt started.
+`--additional-mcp-config`. The Claude Code supervisor submits a task as the
+launch's prompt and counts only the turn that prompt started; remote executors
+don't accept Copilot tasks yet.
 
 | Managed selector | Selected native state | Completed-turn observation |
 | --- | --- | --- |
