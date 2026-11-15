@@ -1184,6 +1184,113 @@ func TestReconcilerStaleCacheDoesNotEnsureRecordedSandbox(t *testing.T) {
 	}
 }
 
+// A reconcile whose cached run predates a cancellation or a terminal phase
+// never creates the sandbox Pod: it checks the run live first. An executor
+// aborting a preparation relies on this, so that a run it has seen cancelled
+// and ended never gains a Pod afterwards.
+func TestReconcilerStaleCacheDoesNotCreateSandboxForEndedRun(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name string
+		live func(*sprooziv1alpha1.AgentRun) bool
+	}{
+		{"cancelled", func(run *sprooziv1alpha1.AgentRun) bool { run.Spec.Cancel = true; return false }},
+		{"terminal", func(run *sprooziv1alpha1.AgentRun) bool { run.Status.Phase = sprooziv1alpha1.AgentRunPhaseCancelled; return true }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			sc := &k8sresources.FakeSandboxClient{Status: k8sresources.SandboxStatusRunning}
+			run := newRun("run-ended-" + test.name)
+			r, c := newReconcilerWithSandbox(sc, append(fixtures(), run)...)
+			driveToRunning(t, r, run.Name)
+			key := types.NamespacedName{Name: run.Name, Namespace: testNS}
+			var stale sprooziv1alpha1.AgentRun
+			if err := c.Get(context.Background(), key, &stale); err != nil {
+				t.Fatal(err)
+			}
+			live := stale.DeepCopy()
+			if test.live(live) {
+				if err := c.Status().Update(context.Background(), live); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := c.Update(context.Background(), live); err != nil {
+				t.Fatal(err)
+			}
+			r.Client = interceptor.NewClient(c.(client.WithWatch), interceptor.Funcs{
+				Get: func(ctx context.Context, w client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+					if run, ok := obj.(*sprooziv1alpha1.AgentRun); ok && key.Name == stale.Name {
+						stale.DeepCopyInto(run)
+						return nil
+					}
+					return w.Get(ctx, key, obj, opts...)
+				},
+			})
+			if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key}); err != nil {
+				t.Fatalf("reconcile (stale cache) error: %v", err)
+			}
+			if len(sc.Ensured) != 0 {
+				t.Fatalf("Ensured = %v, want no sandbox for an ended run", sc.Ensured)
+			}
+		})
+	}
+}
+
+// A managed run whose registration was cancelled before any run was bound to
+// it ends Cancelled with reason SessionCancelled, not as a rejected binding.
+func TestReconcilerUnboundCancelledManagedSessionEndsAsCancelled(t *testing.T) {
+	t.Parallel()
+	objs := fixtures()
+	tmpl := objs[2].(*sprooziv1alpha1.AgentTemplate)
+	tmpl.Annotations = map[string]string{registry.ManagedTemplateAnnotation: managedValue}
+	run := newRun(runOne)
+	c := fake.NewClientBuilder().
+		WithScheme(newScheme()).
+		WithObjects(append(objs, run)...).
+		WithStatusSubresource(&sprooziv1alpha1.AgentRun{}).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+				if obj.GetUID() == "" {
+					obj.SetUID("registration-uid")
+				}
+				return c.Create(ctx, obj, opts...)
+			},
+		}).
+		Build()
+	store, err := registry.NewStore(c, testNS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := store.Create(context.Background(), registry.Registration{
+		Harness: harness.NativeCodex, Principal: testPrincipal, SessionID: testSessionID, Epoch: 1, OperationID: testOperationID,
+		InstructionDigest: registry.InstructionsDigest(tmpl.Spec.Instructions),
+		OriginalDeadline:  time.Now().Add(time.Hour), TemplateName: tmpl.Name,
+		Ceilings: map[sprooziv1alpha1.CapabilityKind]sprooziv1alpha1.EndpointBudget{
+			sprooziv1alpha1.CapabilityKubernetesRead: {MaxUnits: 10}},
+		NativeUUID: testNativeUUID, CheckpointDigest: strings.Repeat("b", 64), IntendedRunName: run.Name,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.Cancel(context.Background(), created.Reference); err != nil {
+		t.Fatal(err)
+	}
+	sandbox := &k8sresources.FakeSandboxClient{Status: k8sresources.SandboxStatusRunning}
+	r := &controller.AgentRunReconciler{Client: c, APIReader: c, SandboxClient: sandbox}
+	request := ctrl.Request{NamespacedName: types.NamespacedName{Name: runOne, Namespace: testNS}}
+	for range 3 {
+		if _, err := r.Reconcile(context.Background(), request); err != nil {
+			t.Fatalf("Reconcile() error = %v", err)
+		}
+	}
+	if phase := getPhase(t, c, runOne); phase != sprooziv1alpha1.AgentRunPhaseCancelled {
+		t.Fatalf("phase = %q, want Cancelled", phase)
+	}
+	assertReadyMessage(t, c, runOne, "SessionCancelled", "cancelled")
+	if len(sandbox.Ensured) != 0 {
+		t.Fatalf("Ensured = %v, want no sandbox", sandbox.Ensured)
+	}
+}
+
 // A managed run held in the queue past its session deadline must leave the
 // queue as TimedOut. Before the fix it stayed Queued forever and kept a
 // simulated admission slot ahead of later runs.
