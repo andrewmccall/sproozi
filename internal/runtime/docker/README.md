@@ -19,7 +19,9 @@ Repeated operations use the retained exact container identities and immutable
 contracts; exited native containers cannot reopen. An operation whose outcome
 the record already holds replays it, even after the deadline: `Prepare` of a
 prepared visit returns its incarnation and `Activate` of an active one returns
-without repeating activation. The record's phases and the events that move
+without repeating activation. A replay answers from the record alone: it does
+not re-verify the containers, so it succeeds even after they have died, and
+the next `Inspect`, which still verifies them, reports the loss. The record's phases and the events that move
 them are declared in `transitions.go` (ADR 0058). Inspection re-drives a
 retained activating intent through the same authority admission and native gate,
 so lost activation replies recover on the original allocation and incarnation.
@@ -35,7 +37,7 @@ The home gateway implements these hooks:
 | Hook | Required effect |
 | --- | --- |
 | `InitializeAllocation` | Retain exact launch/allocation/container binding and return fresh native access while inactive |
-| `Activate` | Admit only the retained current execution before its original deadline; a replay of an active grant is not refused |
+| `Activate` | Admit only the retained current execution before its original deadline; a replay of an active grant succeeds from the record without re-observing the container, which `Authenticate` checks on every request |
 | `Revoke` | Deny new capability work immediately; retries converge |
 | `BindNative` | Bind an initial empty thread exactly once to the observed genuine harness conversation ID |
 | `Seal` | Independently confirm actual stopped execution and return trusted usage for every allocated capability |

@@ -126,26 +126,67 @@ per-phase validation. Its guards may later move into a table without changing
 behaviour. Remote work keeps its own phases until it runs through the
 execution journal.
 
-> **Correction, 2026-11-15.** The parallel change did not bring the Docker
-> records to this pattern. Each kept a list of the phases every operation
-> accepted, assigned target phases inline and checked the deadline inline;
-> the grant validated only on load. Three of those checks ran before replay
-> detection, against rule 5: a Docker `Activate` or `Prepare` replay and a
-> grant `Initialize` or `Activate` replay were refused after the deadline.
-> The Kubernetes registration's `Activate` had the same fault. A Docker
-> `Activate` replay of an active visit also rewrote it to `activating` and
-> repeated the native activation, so a failed replay left it unattachable.
+> **Correction, 2026-11-15.** Two statements in this paragraph were not
+> true. Which records have a declared table today:
 >
-> Both Docker records now have rules 1 to 5. Each has an event type, a table
-> beside the record, an `admit` step before each side effect and one `apply`
-> function, the only place its phase changes. The grant validates on save as
-> well as on load. An operation whose outcome the record already holds
-> replays it before admission and applies no event: `Prepare` of `prepared`,
-> `Activate` of `active`, `Stop` of `stopped` and `Abort` of `stopped` or
-> `aborted`, and for the grant `Initialize` of `inactive` or `active`,
-> `Activate` of `active` and `Revoke` of `revoked`. Stored formats did not
-> change. The Kubernetes registration replays an active `Activate` before
-> its deadline check; it still has no table.
+> - **With a table:** the execution journal, the Docker placement record
+>   and the Docker gateway grant.
+> - **Typed phases and guards, but no table yet:** the Kubernetes session
+>   registration. It has from-phase checks, compare-and-swap and per-phase
+>   validation, but no `(from, event) → to` table or deadline column, so it
+>   does not yet follow the pattern.
+> - **Remote work** no longer keeps its own phases: it runs through the
+>   execution journal ([ADR 0057](0057-the-remote-executor-owns-its-sessions-through-the-coordinator.md)).
+>
+> The parallel change did not bring the Docker records to this pattern.
+> Each kept a list of the phases every operation accepted, assigned target
+> phases inline and checked the deadline inline; the grant validated only on
+> load. Four checks ran before replay detection, against rule 5, so these
+> replays were refused after the deadline: a Docker `Prepare` and `Activate`,
+> and a grant `Initialize` and `Activate`. A Docker `Activate` replay of an
+> active visit also rewrote it to `activating` and repeated the native
+> activation, so a failed replay left it unattachable.
+>
+> Both Docker records now have rules 1 to 5. Each has an event type, a
+> table beside the record, an `admit` step before each side effect and one
+> `apply` function, the only place its phase changes. The grant validates on
+> save as well as on load. Stored formats did not change.
+>
+> An operation whose outcome the record already holds replays it before
+> admission and applies no event: `Prepare` of `prepared`, `Activate` of
+> `active`, `Stop` of `stopped` and `Abort` of `stopped` or `aborted`, and
+> for the grant `Initialize` of `inactive` or `active`, `Activate` of
+> `active` and `Revoke` of `revoked`. A replay answers from the record
+> alone. An `Activate` replay of an active Docker visit no longer
+> re-verifies its containers or repeats the native activation, and one of an
+> active grant no longer re-observes the container, re-reads its accounts or
+> checks the deadline. A replay after the containers have died therefore
+> succeeds instead of failing. Three things keep that safe:
+>
+> - an active record is written only after its side effects completed;
+> - the placement reaches the grant's `Activate` only from `activating`,
+>   after its own verification;
+> - the placement's `Inspect` still verifies the containers, and the grant's
+>   `Authenticate` and `Revalidate` observe the container on every request.
+>
+> The deadline column is consulted only by `admit`, which runs before a
+> request's side effect. Outcome events (`activated`, `stopped`, `aborted`)
+> and `abort-preparation` are applied without `admit`. So the Docker
+> placement's `activated` row is not refused after the deadline: the
+> request, `activate`, was admitted before the side effect, and refusing the
+> outcome afterwards would refuse an activation that already happened. The
+> execution journal has a single `activated` event that serves as both. It
+> is admitted before the coordinator calls a placement's `Activate`, so its
+> row says yes. The coordinator still records it without `admit` when
+> `Inspect` reports the destination already active.
+>
+> The Kubernetes registration's `Store.Activate` checked the deadline
+> before replay detection. It now replays an active registration first. The
+> operation is still refused earlier after the deadline: the coordinator
+> does not admit `activated`, and the placement's `Activate` refuses in its
+> live-profile check before it reaches the store. Whether a late activation
+> that already happened should be recordable through `Activate` is left to
+> the execution journal's own work.
 >
 > The Docker placement record, in `internal/runtime/docker/transitions.go`.
 > Its terminal phases are `stopped`, `aborted` and `preparation-aborting`;
