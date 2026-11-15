@@ -53,7 +53,7 @@ Run the gates that match the change before declaring it done:
 | Change | Run |
 | --- | --- |
 | `*_types.go` or kubebuilder markers | `make manifests generate`, then `make test` |
-| Any Go code | `make lint-fix`, `make test`, `make verify-fast` |
+| Any Go code | `make lint-fix`, then `make check` (what CI runs) |
 | `go.mod`, `go.sum` or the Go toolchain pin | also `make verify-deps` (tidiness and `govulncheck`) |
 | Controller, gateway, network policy or install manifests | also `make test-e2e` (creates and removes its own Kind cluster) |
 | Documentation | `make verify-docs` |

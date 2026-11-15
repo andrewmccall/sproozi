@@ -133,6 +133,25 @@ verify-deps: ## Fail if go.mod is untidy or reachable code has a known vulnerabi
 	GOTOOLCHAIN=$(LINT_TOOLCHAIN) go mod tidy -diff
 	GOTOOLCHAIN=$(LINT_TOOLCHAIN) go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) ./...
 
+# The Tests and Lint workflows for a Go change, in their order, unsharded and
+# without rewriting the tree. Omitted: the Tests copilot-sign-in job, which
+# needs an npm-installed client (go run ./hack/verify/harness-process --harness
+# copilot-github) and covers no other Go change.
+.PHONY: check
+check: ## Run what CI's Tests and Lint workflows run for a Go change, without regenerating sources.
+	$(MAKE) --no-print-directory verify-generated
+	$(MAKE) --no-print-directory vet
+	$(MAKE) --no-print-directory verify-race
+	$(MAKE) --no-print-directory verify-protocol
+	python3 hack/verify/mcp-live-test.py
+	python3 hack/mcp_tools_test.py
+	$(MAKE) --no-print-directory verify-workflow-fixtures
+	$(MAKE) --no-print-directory verify-docs
+	$(MAKE) --no-print-directory lint-config
+	$(MAKE) --no-print-directory lint
+	$(MAKE) --no-print-directory verify-deps
+	python3 hack/verify/release.py
+
 .PHONY: verify-fast
 verify-fast: vet verify-race ## Vet and race-test every non-e2e package with coverage, without regenerating sources. CI.
 
@@ -289,6 +308,15 @@ build-installer: manifests generate kustomize ## Generate a consolidated YAML wi
 	mkdir -p dist
 	cd config/manager && "$(KUSTOMIZE)" edit set image controller=${IMG}
 	"$(KUSTOMIZE)" build config/install > dist/install.yaml
+
+# Build outputs only: root binaries from go build ./cmd/..., cover.out, dist/
+# and bin/manager. Never the pinned tools in bin/ or anything under .local/.
+CLEAN_ROOT_BINARIES = gateway manager session-profile tasks checkpoint certificates chatgpt-login sproozi-network sproozi native-session
+
+.PHONY: clean
+clean: ## Remove build outputs (root binaries, cover.out, dist/, bin/manager); keeps pinned tools in bin/.
+	rm -f $(CLEAN_ROOT_BINARIES) cover.out "$(LOCALBIN)/manager"
+	rm -rf dist
 
 ##@ Deployment
 

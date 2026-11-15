@@ -31,7 +31,7 @@ go.work.sum
 .DS_Store
 /.agents/skills/*
 !/.agents/skills/verify-sproozi/
-/.claude/skills/
+/.claude/
 /skills-lock.json
 /CONTEXT.md
 /docs/PRD.md

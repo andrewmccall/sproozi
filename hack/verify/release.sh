@@ -5,15 +5,11 @@ cd "$(git rev-parse --show-toplevel)"
 # Release verification is an aggregator, not a best-effort smoke test. Every
 # gate is required and a missing live/Kind prerequisite is a failure.
 python3 hack/verify/release.py
-make test lint
-make verify-fast
-make verify-protocol
+make check
 make verify-mcp
-make verify-workflow-fixtures
 make test-e2e
 make verify-kubernetes-release
 make verify-live SPROOZI_DEMO_REPO="${SPROOZI_DEMO_REPO:-}"
-make verify-docs
 make verify-public-tree
 test "${RELEASE_BUILD:-0}" = 1 || {
   echo 'Set RELEASE_BUILD=1 to execute both Docker release builds; static checks alone are not a release gate' >&2
