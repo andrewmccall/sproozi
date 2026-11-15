@@ -36,6 +36,10 @@ func (p *Placement) retained(ctx context.Context, l session.Launch) (retained, r
 		return local, registry.Record{}, err
 	}
 	if local.Reference.UID == "" {
+		if local.PreparationAborted {
+			// An aborted preparation never creates its registration.
+			return local, registry.Record{}, &profile.Rejection{Code: profile.CodeConflict}
+		}
 		ceilings, err := p.liveProfileInput(ctx, l, local.fresh())
 		if err != nil {
 			return local, registry.Record{}, err
@@ -652,7 +656,7 @@ func (p *Placement) releaseWriterFence(ctx context.Context, local retained, r re
 	if err != nil {
 		return err
 	}
-	if !terminated(pod) {
+	if !terminated(pod) && !neverScheduled(pod) {
 		return errors.New("placement: exact writer is not terminated")
 	}
 	if !slices.Contains(pod.Finalizers, runtimekube.ManagedWriterFenceFinalizer) {
@@ -729,29 +733,45 @@ func (p *Placement) Abort(ctx context.Context, l session.Launch, i session.Incar
 	} else if !apierrors.IsNotFound(err) {
 		return session.Observation{}, err
 	}
+	o := session.Observation{Launch: l, Incarnation: i, State: session.PlacementUnknown}
+	if r, err = p.fenceCancelled(ctx, &local, r); err != nil {
+		return o, err
+	}
+	stopped := cancelledStopped(local, r)
+	o.State, o.Stopped = session.PlacementStopped, &stopped
+	return o, nil
+}
+
+// fenceCancelled forcibly stops the exact Pod bound to a cancelled
+// registration and returns once its writer is fenced: its native container
+// was observed terminated, or the Pod was never scheduled. It then seals the
+// usage when it can and releases the writer-fence finalizer. A Pod gone
+// without retained fence evidence stays unknown (ADR 0010).
+func (p *Placement) fenceCancelled(ctx context.Context, local *retained, r registry.Record) (registry.Record, error) {
 	// The exact Pod is deleted with a UID precondition. A replacement at the same
 	// name is never killed or accepted as proof about this incarnation.
 	pod, err := p.exactPod(ctx, r)
 	if err == nil {
 		uid := pod.UID
 		if err = p.config.Kube.Delete(ctx, pod, &client.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &uid}}); err != nil && !apierrors.IsNotFound(err) {
-			return session.Observation{}, err
+			return r, err
 		}
 	} else if !apierrors.IsNotFound(err) {
-		return session.Observation{}, err
+		return r, err
 	} else if !local.WriterFenced {
-		return session.Observation{Launch: l, Incarnation: i, State: session.PlacementUnknown}, errors.New("placement: absent Pod has no retained writer fence")
+		return r, errors.New("placement: absent Pod has no retained writer fence")
 	}
-	o := session.Observation{Launch: l, Incarnation: i, State: session.PlacementUnknown}
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		fenced, err := p.physicalFence(ctx, &local, r)
+		fenced, err := p.physicalFence(ctx, local, r)
+		if err == nil && !fenced {
+			fenced, err = p.unscheduledFence(ctx, local, r)
+		}
 		if err != nil {
-			return o, err
+			return r, err
 		}
 		if fenced {
-			o.State = session.PlacementStopped
 			if r.Receipt == nil {
 				// Never initialize an absent account during cancellation. Failed or
 				// incomplete seals leave usage unknown despite a known writer fence.
@@ -759,19 +779,34 @@ func (p *Placement) Abort(ctx context.Context, l session.Launch, i session.Incar
 					r = sealed
 				}
 			}
-			if err = p.releaseWriterFence(ctx, local, r); err != nil {
-				return o, err
-			}
-			stopped := cancelledStopped(local, r)
-			o.Stopped = &stopped
-			return o, nil
+			return r, p.releaseWriterFence(ctx, *local, r)
 		}
 		select {
 		case <-ctx.Done():
-			return o, ctx.Err()
+			return r, ctx.Err()
 		case <-ticker.C:
 		}
 	}
+}
+
+// unscheduledFence records the fence of an exact Pod that is being deleted
+// and never ran on any node.
+func (p *Placement) unscheduledFence(ctx context.Context, local *retained, r registry.Record) (bool, error) {
+	pod, err := p.exactPod(ctx, r)
+	if apierrors.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil || !neverScheduled(pod) {
+		return false, err
+	}
+	if !local.WriterFenced {
+		local.WriterFenced = true
+		if err = p.save(*local); err != nil {
+			local.WriterFenced = false
+			return false, err
+		}
+	}
+	return true, nil
 }
 
 func (p *Placement) sealCancellation(ctx context.Context, r registry.Record) (registry.Record, error) {

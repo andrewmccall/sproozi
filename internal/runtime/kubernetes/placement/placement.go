@@ -280,6 +280,9 @@ func (p *Placement) Prepare(ctx context.Context, l session.Launch, data []byte) 
 		return session.Incarnation{}, err
 	}
 	defer unlock()
+	if local, err := p.load(l); err == nil && local.PreparationAborted {
+		return session.Incarnation{}, &profile.Rejection{Code: profile.CodeConflict}
+	}
 	if l.ThreadID == "" && l.CheckpointDigest == "" {
 		return p.prepareWorkspace(ctx, l, data)
 	}

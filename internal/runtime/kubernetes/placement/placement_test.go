@@ -128,6 +128,14 @@ type admissionClient struct {
 	client.Client
 	runCreates       int
 	deferTermination bool
+	// queued leaves a created run Queued with no Pod, as a run waiting
+	// under a concurrency cap is.
+	queued bool
+	// reconcile, when set, runs after each patch of a run, as the
+	// controller's next reconcile would.
+	reconcile func(context.Context, *api.AgentRun)
+	// patchErr fails the next patch once, as a crash before it would.
+	patchErr error
 }
 
 func (c *admissionClient) Create(ctx context.Context, obj client.Object, options ...client.CreateOption) error {
@@ -139,6 +147,13 @@ func (c *admissionClient) Create(ctx context.Context, obj client.Object, options
 		return c.Client.Create(ctx, obj, options...)
 	}
 	c.runCreates++
+	if c.queued {
+		if err := c.Client.Create(ctx, run, options...); err != nil {
+			return err
+		}
+		run.Status.Phase = api.AgentRunPhaseQueued
+		return c.Client.Status().Update(ctx, run)
+	}
 	run.Status.Phase = api.AgentRunPhaseRunning
 	run.Status.Identity = api.AgentRunIdentity{SandboxName: runtimekube.RunName(run.UID), ServiceAccountName: "approved-worker"}
 	if err := c.Client.Create(ctx, run, options...); err != nil {

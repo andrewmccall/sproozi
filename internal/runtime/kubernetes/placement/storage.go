@@ -34,6 +34,9 @@ type retained struct {
 	// supervisor's exit report or the container's exit code. It is a
 	// workload diagnostic, never a writer fence or accounting fact.
 	Exited *session.Exit `json:"exited,omitempty"`
+	// PreparationAborted records that AbortPreparation fenced this launch:
+	// Prepare refuses it and nothing creates its registration again.
+	PreparationAborted bool `json:"preparationAborted,omitempty"`
 }
 
 func privatePath(path string, dir bool) error {
