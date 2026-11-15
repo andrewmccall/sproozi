@@ -359,6 +359,52 @@ func TestAbortPreparationReplaysAfterCrashBetweenSteps(t *testing.T) {
 	}
 }
 
+// A crash after the run was created but before it was bound to the
+// registration leaves a run no registration names. Cancelling the
+// registration keeps it unbound for good, so the controller never admits that
+// run, and ends it as cancelled by the session.
+func TestAbortPreparationOfRunNeverBound(t *testing.T) {
+	t.Parallel()
+	p, kube, _, l, data := setup(t)
+	kube.queued = true
+	ctx := t.Context()
+	local, err := p.persistIntent(l, data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ceilings, err := p.liveProfile(ctx, l)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := p.registry.Create(ctx, p.registration(l, ceilings))
+	if err != nil {
+		t.Fatal(err)
+	}
+	local.Reference = r.Reference
+	if err = p.save(local); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = p.ensureRun(ctx, r); err != nil {
+		t.Fatal(err)
+	}
+	if err = p.AbortPreparation(ctx, l); err != nil {
+		t.Fatal(err)
+	}
+	r = registration(t, p, l)
+	run := agentRun(t, kube, l)
+	if r.Phase != registry.Cancelled || r.RunUID != "" || !run.Spec.Cancel {
+		t.Fatalf("unbound run after abort: %+v %+v", r, run.Spec)
+	}
+	var template api.AgentTemplate
+	if err = kube.Get(ctx, client.ObjectKey{Namespace: fixtureNamespace, Name: fixtureTemplate}, &template); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = registry.ResolveRun(ctx, kube, run, &template); !errors.Is(err, registry.ErrSessionCancelled) {
+		t.Fatalf("controller would resolve the unbound run as %v", err)
+	}
+	assertRefusesPreparation(t, p, kube, l, data)
+}
+
 // A preparation this executor never received leaves a tombstone, so a late
 // Prepare for that launch creates nothing.
 func TestAbortPreparationOfUnseenLaunchRefusesLatePrepare(t *testing.T) {
