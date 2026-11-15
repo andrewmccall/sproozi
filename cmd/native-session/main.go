@@ -79,7 +79,9 @@ type server struct {
 	harnessCode int
 	exitCode    int
 	// reports receives exit reports; nil is standard output.
-	reports         io.Writer
+	reports io.Writer
+	// diagnostics receives diagnostic lines; nil is standard error.
+	diagnostics     io.Writer
 	claude          claudeLifecycle
 	inputGeneration uint64
 	taskBaseline    string
@@ -105,8 +107,9 @@ var quiesceWait = harness.NativeQuiesceWait
 // client waits for the reply.
 var quitWait = 30 * time.Second
 
-// forcedStopWait bounds the wait for a harness the supervisor has killed.
-const forcedStopWait = 3 * time.Second
+// forcedStopWait bounds the wait for a harness the supervisor killed after
+// quitWait.
+var forcedStopWait = 3 * time.Second
 
 // turnlessSettle is how long gated input must stay quiet before a first visit
 // with no native conversation counts as turnless. It covers a prompt
@@ -592,7 +595,7 @@ func (s *server) quiesce() response {
 	}
 	s.setQuiescing(true)
 	exit, forced, err := s.finishTurn(adapter, n)
-	if err == nil && forced {
+	if err == nil && forced != "" {
 		// The harness state must still show the turn the stop observed.
 		again, turnAgain, observeErr := s.observeNativeTurn()
 		if observeErr != nil || again != id || turnAgain != turn {
@@ -614,13 +617,13 @@ func (s *server) quiesce() response {
 		return response{Op: harness.NativeQuiesce, State: harness.NativeStopping, Error: err.Error()}
 	}
 	code, problem := adapter.settle(exit)
-	if forced {
+	if forced != "" {
 		// Not a clean quit, but the turn completed and the harness is
 		// stopped, so the stop stands. The supervisor exits 0, as after
 		// Claude Code's kill: a placement that lost this reply and reads
 		// only the exit code must not take the stop for a failed agent.
 		code, problem = 0, ""
-		fmt.Fprintf(os.Stderr, "Forced the harness to stop after it did not exit within %s of its quit\n", quitWait)
+		s.diagnose("%s", forced)
 	}
 	s.endGracefully(exit, code, id)
 	return response{Op: harness.NativeQuiesce, State: harness.NativeStopped, ThreadID: id, TurnID: turn,
@@ -630,20 +633,50 @@ func (s *server) quiesce() response {
 // finishTurn ends a harness whose turn completed, with input gated. The wait
 // for it to exit ends at a set deadline and in any case after quitWait, so a
 // harness that ignores its quit cannot hold the action lock. One still running
-// at quitWait is killed: no work is in flight, so the stop stands, and forced
-// reports it. At the deadline the error stands, for the caller to report.
-func (s *server) finishTurn(adapter nativeAdapter, n *nativepty.Supervisor) (nativepty.Exit, bool, error) {
+// at quitWait, or whose full input buffer took no quit, is killed and waited
+// for at most forcedStopWait, within the deadline. No work is in flight, so
+// the stop stands. forced says why, only when the supervisor's kill ended the
+// harness rather than its own exit. At the deadline the error stands, for the
+// caller to report.
+func (s *server) finishTurn(adapter nativeAdapter, n *nativepty.Supervisor) (nativepty.Exit, string, error) {
 	until := deadline.At(s.deadline)
 	ctx, cancel := context.WithDeadline(context.Background(), until.Bound(time.Now(), quitWait))
 	defer cancel()
 	exit, err := adapter.finish(n, ctx)
-	if err == nil || ctx.Err() == nil || until.Passed(time.Now()) {
-		return exit, false, err
+	var forced string
+	switch {
+	case err == nil || until.Passed(time.Now()):
+		return exit, "", err
+	case errors.Is(err, nativepty.ErrInputBusy):
+		forced = "Forced the harness to stop after its terminal input was full when it was asked to quit"
+	case ctx.Err() == nil:
+		return exit, "", err
+	case adapter.quits:
+		forced = fmt.Sprintf("Forced the harness to stop after it did not exit within %s of its quit", quitWait)
+	default:
+		// The finish was a kill already; only its confirmation was late.
+		forced = fmt.Sprintf("Confirmed the harness stopped after its kill was not confirmed within %s", quitWait)
 	}
-	stopCtx, stopCancel := context.WithTimeout(context.Background(), forcedStopWait)
+	stopCtx, stopCancel := context.WithDeadline(context.Background(), until.Bound(time.Now(), forcedStopWait))
 	defer stopCancel()
-	exit, err = n.Stop(stopCtx)
-	return exit, err == nil, err
+	exit, err = forceStop(n, stopCtx)
+	if err != nil || exit.Reason != nativepty.ForcedStop {
+		return exit, "", err
+	}
+	return exit, forced, nil
+}
+
+// forceStop kills the harness and waits for its exit; tests replace it.
+var forceStop = (*nativepty.Supervisor).Stop
+
+// diagnose writes one line about the harness to the supervisor's standard
+// error, or to diagnostics when set.
+func (s *server) diagnose(format string, args ...any) {
+	out := s.diagnostics
+	if out == nil {
+		out = os.Stderr
+	}
+	_, _ = fmt.Fprintf(out, format+"\n", args...)
 }
 
 // abandon ends a graceful stop that could not finish by stopping the harness
@@ -763,7 +796,7 @@ func (s *server) stopTurnless(n *nativepty.Supervisor) response {
 	until := deadline.At(s.deadline)
 	ctx, cancel := context.WithDeadline(context.Background(), until.Bound(time.Now(), quitWait))
 	defer cancel()
-	exit, err := n.Stop(ctx)
+	exit, err := forceStop(n, ctx)
 	if err != nil {
 		cause := causeFailed
 		if until.Passed(time.Now()) {

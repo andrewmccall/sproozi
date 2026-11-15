@@ -20,11 +20,19 @@ const completedTurnID = "turn-1"
 // selected while keeping its real quit, so a test drives the stop after it.
 func completedCodexTurn(t *testing.T) {
 	t.Helper()
-	previous := nativeAdapters[harness.NativeCodex]
+	withAdapter(t, harness.NativeCodex, func(a *nativeAdapter) {
+		a.observe = func(*server) (string, string, error) { return selected, completedTurnID, nil }
+	})
+}
+
+// withAdapter changes kind's adapter for the test.
+func withAdapter(t *testing.T, kind harness.NativeKind, change func(*nativeAdapter)) {
+	t.Helper()
+	previous := nativeAdapters[kind]
 	adapter := previous
-	adapter.observe = func(*server) (string, string, error) { return selected, completedTurnID, nil }
-	nativeAdapters[harness.NativeCodex] = adapter
-	t.Cleanup(func() { nativeAdapters[harness.NativeCodex] = previous })
+	change(&adapter)
+	nativeAdapters[kind] = adapter
+	t.Cleanup(func() { nativeAdapters[kind] = previous })
 }
 
 func setQuitWait(t *testing.T, d time.Duration) {
