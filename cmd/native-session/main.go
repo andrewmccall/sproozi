@@ -98,6 +98,16 @@ var quiesceReplyGrace = 10 * time.Second
 // quiesceWait bounds one quiesce request's wait for a completed turn.
 var quiesceWait = harness.NativeQuiesceWait
 
+// quitWait bounds the wait for a harness to exit once a graceful stop has
+// asked it to, after its turn completed (ADR 0035). A set deadline that comes
+// sooner ends the wait instead. Codex exits within seconds of /quit; the
+// bound must fit, with quiesceWait, inside the five minutes the control
+// client waits for the reply.
+var quitWait = 30 * time.Second
+
+// forcedStopWait bounds the wait for a harness the supervisor has killed.
+const forcedStopWait = 3 * time.Second
+
 // turnlessSettle is how long gated input must stay quiet before a first visit
 // with no native conversation counts as turnless. It covers a prompt
 // submitted just before the gate whose native record has not appeared yet.
@@ -551,7 +561,7 @@ func (s *server) quiesce() response {
 	var id, turn string
 	for {
 		if s.isTurnless() {
-			return s.stopTurnless(ctx, n)
+			return s.stopTurnless(n)
 		}
 		var err error
 		id, turn, err = s.observeNativeTurn()
@@ -581,21 +591,68 @@ func (s *server) quiesce() response {
 		return response{Op: harness.NativeQuiesce, State: harness.NativeStopping, Error: err.Error()}
 	}
 	s.setQuiescing(true)
-	exit, err := adapter.finish(n, ctx)
+	exit, forced, err := s.finishTurn(adapter, n)
+	if err == nil && forced {
+		// The harness state must still show the turn the stop observed.
+		again, turnAgain, observeErr := s.observeNativeTurn()
+		if observeErr != nil || again != id || turnAgain != turn {
+			err = errors.New("native turn changed before the forced stop")
+		}
+	}
 	s.mu.Lock()
 	login := s.login
 	s.mu.Unlock()
 	// Save the harness's last sign-in change before the supervisor exits.
 	login.stop()
 	if err != nil {
-		s.setQuiescing(false)
-		s.stop(causeFailed)
+		if deadline.At(s.deadline).Passed(time.Now()) {
+			s.abandon(causeDeadline)
+			return response{Op: harness.NativeQuiesce, State: harness.NativeStopping,
+				Error: "native quit did not finish before deadline"}
+		}
+		s.abandon(causeFailed)
 		return response{Op: harness.NativeQuiesce, State: harness.NativeStopping, Error: err.Error()}
 	}
 	code, problem := adapter.settle(exit)
+	if forced {
+		// Not a clean quit, so not a clean supervisor exit; but the turn
+		// completed and the harness is stopped, so the stop stands.
+		code, problem = 1, ""
+		fmt.Fprintf(os.Stderr, "Forced the harness to stop after it did not exit within %s of its quit\n", quitWait)
+	}
 	s.endGracefully(exit, code, id)
 	return response{Op: harness.NativeQuiesce, State: harness.NativeStopped, ThreadID: id, TurnID: turn,
 		Exit: &harness.NativeExit{Code: exit.Code, Reason: string(exit.Reason)}, Error: problem}
+}
+
+// finishTurn ends a harness whose turn completed, with input gated. The wait
+// for it to exit ends at a set deadline and in any case after quitWait, so a
+// harness that ignores its quit cannot hold the action lock. One still running
+// at quitWait is killed: no work is in flight, so the stop stands, and forced
+// reports it. At the deadline the error stands, for the caller to report.
+func (s *server) finishTurn(adapter nativeAdapter, n *nativepty.Supervisor) (nativepty.Exit, bool, error) {
+	until := deadline.At(s.deadline)
+	ctx, cancel := context.WithDeadline(context.Background(), until.Bound(time.Now(), quitWait))
+	defer cancel()
+	exit, err := adapter.finish(n, ctx)
+	if err == nil || ctx.Err() == nil || until.Passed(time.Now()) {
+		return exit, false, err
+	}
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), forcedStopWait)
+	defer stopCancel()
+	exit, err = n.Stop(stopCtx)
+	return exit, err == nil, err
+}
+
+// abandon ends a graceful stop that could not finish by stopping the harness
+// for cause, decided before the stop releases the exit, so the exit watcher
+// never takes the exit for the harness's own.
+func (s *server) abandon(cause exitCause) {
+	s.mu.Lock()
+	s.decide(cause)
+	s.quiescing = false
+	s.mu.Unlock()
+	s.stop(cause)
 }
 
 // endGracefully settles a harness a graceful stop ended, with the
@@ -697,13 +754,20 @@ func (s *server) isTurnless() bool {
 
 // stopTurnless ends a turnless first visit. There is no native conversation
 // to preserve, so the supervisor stops the process group itself rather than
-// typing a quit command into whatever the harness shows.
-func (s *server) stopTurnless(ctx context.Context, n *nativepty.Supervisor) response {
+// typing a quit command into whatever the harness shows. The wait for it to
+// exit has finishTurn's bound.
+func (s *server) stopTurnless(n *nativepty.Supervisor) response {
 	s.setQuiescing(true)
+	until := deadline.At(s.deadline)
+	ctx, cancel := context.WithDeadline(context.Background(), until.Bound(time.Now(), quitWait))
+	defer cancel()
 	exit, err := n.Stop(ctx)
 	if err != nil {
-		s.setQuiescing(false)
-		s.stop(causeFailed)
+		cause := causeFailed
+		if until.Passed(time.Now()) {
+			cause = causeDeadline
+		}
+		s.abandon(cause)
 		return response{Op: harness.NativeQuiesce, State: harness.NativeStopping, Error: err.Error()}
 	}
 	s.mu.Lock()
