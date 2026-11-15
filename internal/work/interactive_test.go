@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"io"
 	"maps"
 	"net/http"
@@ -278,6 +279,49 @@ func TestResumeStartsAFreshExecutionOfTheSession(t *testing.T) {
 		stopped.ExecutionID != resumed.ExecutionID {
 		t.Fatalf("stop of the resumed execution: %+v %v", stopped, err)
 	}
+}
+
+// A resumed execution that has not started when its deadline passes is ended,
+// not cancelled: the session stays stopped with the checkpoint its earlier
+// execution committed, says why, and resumes (ADR 0060).
+func TestResumeThatMissedItsDeadlineLeavesTheSessionResumable(t *testing.T) {
+	t.Parallel()
+	c, p := fixture(t)
+	o := openOwner(t, c)
+	v := startInteractive(t, o, interactiveRequest())
+	if _, err := o.Stop(t.Context(), v.ID, uuid.NewString()); err != nil {
+		t.Fatal(err)
+	}
+	p.mu.Lock()
+	p.refusePrepare = errors.New("node unavailable")
+	p.mu.Unlock()
+	late, err := o.Resume(t.Context(), v.ID, uuid.NewString(), "2s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := waitDriver(t, o, v.ID); got.Phase != phasePreparing {
+		t.Fatalf("resume whose preparation failed: %s %q", got.Phase, got.Problem)
+	}
+	p.mu.Lock()
+	p.refusePrepare = nil
+	p.mu.Unlock()
+	time.Sleep(time.Until(late.Deadline) + 10*time.Millisecond)
+	if _, err = o.Recover(t.Context(), v.ID); err != nil {
+		t.Fatal(err)
+	}
+	ended := waitDriver(t, o, v.ID)
+	if ended.Phase != PhaseRetained || !strings.Contains(ended.Problem, "deadline") {
+		t.Fatalf("resume that missed its deadline: %s %q", ended.Phase, ended.Problem)
+	}
+	if execution, err := c.Coordinator.Inspect(late.ExecutionID); err != nil || execution.Phase != session.PhaseIdle ||
+		execution.CancelOperation != "" || execution.Checkpoint.Metadata.SHA256 != p.meta.SHA256 {
+		t.Fatalf("ended execution: %s %v", execution.Phase, err)
+	}
+	resumed, err := o.Resume(t.Context(), v.ID, uuid.NewString(), "")
+	if err != nil || resumed.Problem != "" {
+		t.Fatalf("resume after the deadline: %+v %v", resumed, err)
+	}
+	waitPhase(t, o, v.ID, phaseActive)
 }
 
 // Resume takes a new deadline choice within the executor's cap; the owner's

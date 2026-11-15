@@ -207,6 +207,30 @@ its JSON `exit` has `"deadline": true`. The deadline is wall-clock time. If the
 computer slept past it, the service stops the agent within about five seconds
 of waking.
 
+A deadline can also pass before the session starts at its destination: a
+`run` or `resume` interrupted before its agent started and retried later, or
+a `move` that begins after the deadline, such as `sproozi move ID --local` of
+a session on a cluster. Nothing starts after the deadline, but the session is
+not left waiting
+([ADR 0060](../adr/0060-no-state-waits-on-a-deadline-to-end.md)):
+
+- `resume` ends that start or move, then continues the session with a new
+  deadline.
+- `recover`, `move`, and a retried `run` or `resume` with the same operation,
+  end it and reply with `session ID reached its deadline before it started, so it is stopped with its work kept; continue it on this machine with "sproozi resume ID", which gives it a new deadline`.
+- `stop` ends it and reports the session stopped, as for any other stop.
+
+The session is then `retained` with what it had kept. That is the checkpoint
+the move's stop saved, the checkpoint from before an interrupted resume, or,
+for a run that never started, the workspace it captured, which `resume` starts
+a new conversation from. Before it ends the start, the service makes sure no
+agent runs at the destination. Until Docker or the cluster can show that, the
+session stays `preparing` or `activating` and the reply says what is unproven.
+Run the same command again once it is reachable. Until one of these commands
+runs, `status` prints `Overdue    its deadline passed before it started;
+resume stops it here with its work kept` and `Continue it with: sproozi resume
+ID`.
+
 An agent whose container was stopped from outside, or which Sproozi stopped
 forcibly after a graceful stop failed, is also `retained`, whatever its code:
 `status` prints `Stopped    its container was stopped before the agent
@@ -244,7 +268,8 @@ hint. `ID` is the session and `OP` an operation.
 
 | Reply | Cause | Run |
 | --- | --- | --- |
-| `session: previous KIND requires recovery; run "sproozi recover ID" to finish it, or "sproozi cancel ID" to stop it now` | A `move` or `stop` while an earlier `start`, `resume` or `move` is unfinished. | `sproozi recover ID`, or `sproozi cancel ID`. |
+| `session: previous KIND requires recovery; run "sproozi recover ID" to finish it, or "sproozi cancel ID" to stop it now` | A `move` or `stop` while an earlier `start`, `resume` or `move` is unfinished, before its deadline. After the deadline, `stop` and `move` end it instead. | `sproozi recover ID`, or `sproozi cancel ID`. |
+| `session ID reached its deadline before it started, so it is stopped with its work kept; continue it on this machine with "sproozi resume ID", which gives it a new deadline` | `recover`, `move`, or a retried `run` or `resume`, of a session whose start or move its deadline passed. The command ended it, and the session is `retained`. | `sproozi resume ID`. |
 | `session ID is still stopping; run "sproozi stop ID" to keep waiting, or "sproozi cancel ID" to force-stop it` | A `move` while a stop is unfinished. | `sproozi stop ID`, or `sproozi cancel ID`. |
 | `session: cancellation unfinished; run "sproozi recover ID" to finish the cancellation` | A `move` or `stop` while a cancellation hasn't yet proved the agent stopped and its usage settled. | `sproozi recover ID`. |
 | `session: the writer stopped, but its usage is not finalized yet; recover again once the placement can finalize it` | `recover` of a cancellation whose usage could not be settled yet. | `sproozi recover ID` again; the service log has the cause. |
@@ -427,7 +452,7 @@ its execution journal, plus two for a pull
 
 | Remote phase | Meaning |
 | --- | --- |
-| `preparing` | The executor is capturing the task's input or preparing its first visit. A failed preparation keeps this phase with a problem; `recover ID --remote` retries it. |
+| `preparing` | The executor is capturing the task's input or preparing its first visit. A failed preparation keeps this phase with a problem; `recover ID --remote` retries it. An interactive session still preparing when its deadline passes becomes `retained` with the problem `the deadline passed before it started`, keeping its last checkpoint; `resume ID --remote` continues it. |
 | `activating`, `active` | The sandbox is being admitted, or the session runs. A task stays `active`, with no problem, until its own turn completes. |
 | `stopping` | The session is stopping: a task's turn completed and the executor is stopping its sandbox and recording its answer, or an interactive session's stop waits for the agent's current turn, with a problem that says so. |
 | `unknown-stop` | The placement has not proved the sandbox stopped. The executor retries by itself, waiting one second and doubling up to a minute; `recover ID --remote` retries now. |

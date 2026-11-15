@@ -173,10 +173,17 @@ func (o *Owner) step(ctx context.Context, id string) next {
 	case rec == nil:
 		return o.start(ctx, r)
 	case rec.Phase.Starting():
-		if deadline.At(rec.Deadline).Passed(time.Now()) {
+		if !interactive && deadline.At(rec.Deadline).Passed(time.Now()) {
 			return o.end(ctx, r, "deadline-expired", problemExpired)
 		}
+		// Past its deadline, an interactive session's start ends instead
+		// of starting: it stays stopped with what its earlier execution
+		// committed, and resume continues it (ADR 0060).
 		_, err = coordinator.Recover(ctx, rec.ID)
+		if errors.Is(err, session.ErrDeadlinePassed) {
+			o.note(r.ID, problemExpired)
+			return nextAgain
+		}
 		return o.after(ctx, r, err, nextDone)
 	case interactive:
 		// Running: its owner attaches to it and stops it.
@@ -239,8 +246,9 @@ func (o *Owner) note(id, problem string) {
 }
 
 // end cancels a session the executor must not run: its project was revoked,
-// or its deadline passed before it started. A session that already stopped
-// keeps its result.
+// or its deadline passed before it started and it has nothing to keep: a
+// task, or a session the coordinator never received. A session that already
+// stopped keeps its result.
 func (o *Owner) end(ctx context.Context, r record, action, problem string) next {
 	err := o.cancelExecution(ctx, r.ID, derivedOperation(r.Current, action), problem)
 	if err == nil || OutcomeCode(err) == profile.CodeConflict {

@@ -650,3 +650,13 @@ with home's.
   [portable workflows](../guides/portable-workflows.md),
   [Hermes with remote work](../guides/retained-work-kubernetes.md) and the
   [executor README](../../cmd/session-profile/README.md).
+
+## Later correction (2026-11-15)
+
+"A deadline that passes before activation is final" now holds for tasks, and
+for sessions the coordinator never received. An interactive session's
+execution that is still starting when its deadline passes is recovered
+instead. The coordinator ends that start, and the session is `retained` with
+the problem `the deadline passed before it started`, keeping the checkpoint
+its earlier execution committed. `resume --remote` continues it. See
+[ADR 0060](0060-no-state-waits-on-a-deadline-to-end.md).

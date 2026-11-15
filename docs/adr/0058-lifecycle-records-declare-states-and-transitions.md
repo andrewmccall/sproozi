@@ -281,3 +281,23 @@ execution journal.
   [ADR 0038](0038-exited-agents-and-one-recovery-path.md),
   [ADR 0041](0041-gateway-state-namespace-and-retained-state-owners.md),
   [ADR 0056](0056-whoever-starts-work-sets-its-deadline.md)
+
+## Later correction (2026-11-15)
+
+The table had no exit from `preparing` or `activating` once the deadline
+refused `prepared` and `activated`. A move that began after the deadline, or a
+first visit interrupted before its activation and retried after it, could then
+only be cancelled. [ADR 0060](0060-no-state-waits-on-a-deadline-to-end.md)
+adds the row:
+
+| Event | From → to | Refused after the deadline |
+| --- | --- | --- |
+| `abandoned` | `preparing`, `activating` → `idle` | no |
+
+Recover, stop and move take it after the deadline, once nothing can run at the
+destination. The deadline check for `prepared` now runs before a move's launch
+is created, and the check for `activated` runs whenever the destination is not
+already active. A move of an idle execution after its deadline is refused
+before anything is recorded. One test now checks that every phase has an exit
+the deadline never refuses, and that every phase without cancellation intent
+can reach `idle` without cancelling.
