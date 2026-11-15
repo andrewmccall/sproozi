@@ -47,6 +47,9 @@ const fixtureMax = int64(8 << 20)
 const fixtureRuntimeName = "native"
 const fixtureTypeKey = "type"
 
+// fixtureWorker is the run's ServiceAccount the controller records.
+const fixtureWorker = "approved-worker"
+
 // fixtureTemplate is the managed template the fixtures register against.
 const fixtureTemplate = "approved"
 const fixturePolicy = "policy"
@@ -155,7 +158,7 @@ func (c *admissionClient) Create(ctx context.Context, obj client.Object, options
 		return c.Client.Status().Update(ctx, run)
 	}
 	run.Status.Phase = api.AgentRunPhaseRunning
-	run.Status.Identity = api.AgentRunIdentity{SandboxName: runtimekube.RunName(run.UID), ServiceAccountName: "approved-worker"}
+	run.Status.Identity = api.AgentRunIdentity{SandboxName: runtimekube.RunName(run.UID), ServiceAccountName: fixtureWorker}
 	if err := c.Client.Create(ctx, run, options...); err != nil {
 		return err
 	}
@@ -178,7 +181,7 @@ func admittedPod(run *api.AgentRun) *corev1.Pod {
 				runtimekube.RunNamespaceLabel: run.Namespace,
 			},
 		},
-		Spec: corev1.PodSpec{ServiceAccountName: "approved-worker"},
+		Spec: corev1.PodSpec{ServiceAccountName: fixtureWorker},
 		Status: corev1.PodStatus{
 			Phase: corev1.PodRunning,
 			ContainerStatuses: []corev1.ContainerStatus{

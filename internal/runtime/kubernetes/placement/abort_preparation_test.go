@@ -53,7 +53,7 @@ func cancelReconcile(t *testing.T, kube *admissionClient) func(context.Context, 
 // the Pod unscheduled, with no container ever started.
 func createSandbox(ctx context.Context, kube *admissionClient, run *api.AgentRun, pending bool) (*corev1.Pod, error) {
 	run.Status.Phase = api.AgentRunPhaseRunning
-	run.Status.Identity = api.AgentRunIdentity{SandboxName: runtimekube.RunName(run.UID), ServiceAccountName: "approved-worker"}
+	run.Status.Identity = api.AgentRunIdentity{SandboxName: runtimekube.RunName(run.UID), ServiceAccountName: fixtureWorker}
 	if err := kube.Client.Status().Update(ctx, run); err != nil {
 		return nil, err
 	}

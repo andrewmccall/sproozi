@@ -1195,7 +1195,10 @@ func TestReconcilerStaleCacheDoesNotCreateSandboxForEndedRun(t *testing.T) {
 		live func(*sprooziv1alpha1.AgentRun) bool
 	}{
 		{"cancelled", func(run *sprooziv1alpha1.AgentRun) bool { run.Spec.Cancel = true; return false }},
-		{"terminal", func(run *sprooziv1alpha1.AgentRun) bool { run.Status.Phase = sprooziv1alpha1.AgentRunPhaseCancelled; return true }},
+		{"terminal", func(run *sprooziv1alpha1.AgentRun) bool {
+			run.Status.Phase = sprooziv1alpha1.AgentRunPhaseCancelled
+			return true
+		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()

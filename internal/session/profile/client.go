@@ -143,6 +143,7 @@ func (c *Client) Abort(ctx context.Context, l session.Launch, i session.Incarnat
 	}
 	return decodedObservation(r), nil
 }
+
 // AbortPreparation asks the executor to fence a launch whose preparation never
 // reported an incarnation. An executor older than this action, or one whose
 // placement cannot, gets what a coordinator did before the action existed:
@@ -150,11 +151,21 @@ func (c *Client) Abort(ctx context.Context, l session.Launch, i session.Incarnat
 // still preparing stays unproven. The error then says why.
 func (c *Client) AbortPreparation(ctx context.Context, l session.Launch) error {
 	_, err := c.call(ctx, actionAbortPreparation, request{Launch: l})
-	var answer *RemoteError
-	if !errors.As(err, &answer) || !(answer.Code == CodeInvalid && answer.Status == http.StatusNotFound || answer.Code == CodeUnsupported) {
+	if !preparationAbortUnsupported(err) {
 		return err
 	}
 	return c.abortPreparationByInspection(ctx, l)
+}
+
+// preparationAbortUnsupported reports an executor that does not know the
+// action (404 invalid_request, as for any unknown action) or whose placement
+// cannot abort a preparation (unsupported).
+func preparationAbortUnsupported(err error) bool {
+	var answer *RemoteError
+	if !errors.As(err, &answer) {
+		return false
+	}
+	return answer.Code == CodeUnsupported || answer.Code == CodeInvalid && answer.Status == http.StatusNotFound
 }
 
 // errPreparationAbortUnsupported explains the fallback's unproven outcomes.
