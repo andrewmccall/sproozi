@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"strings"
+
+	"github.com/andrewmccall/sproozi/internal/harness"
 )
 
 // FinalText reads bounded untrusted workload output from a validated checkpoint.
@@ -48,9 +50,11 @@ func FinalText(data []byte, max int64) (string, bool, error) {
 			}
 		}
 	}
-	// Claude final-answer extraction stays separate from its completion observer.
 	if a.Claude != nil {
-		return "", false, nil
+		// The reply at the transcript leaf the checkpoint selected.
+		if text, err = harness.ClaudeFinalText(*a.Claude, max); err != nil {
+			return "", false, err
+		}
 	}
 	const limit = 32 << 10
 	if len(text) > limit {

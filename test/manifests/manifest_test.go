@@ -403,7 +403,7 @@ func TestSharedGatewayRBACOwnsOnlyBoundedKubernetesReads(t *testing.T) {
 	}
 	rules, _ := role["rules"].([]any)
 	allowed := map[string]bool{resourcePods: true,
-		"pods/log":        true,
+		resourcePodLogs:   true,
 		"events":          true,
 		"services":        true,
 		"deployments":     true,

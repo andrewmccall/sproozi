@@ -112,6 +112,7 @@ configuration. Required backend permissions are:
 | `budgetNamespace` (default `sproozi-system`) | `sproozi.com/budgetledgers` for run accounts | `get`, `create`, `update` |
 | `sproozi-agents` | Core `pods` | `get`, `patch`, `delete` |
 | `sproozi-agents` | Core `pods/exec` | `create` |
+| `sproozi-agents` | Core `pods/log`, for the supervisor's exit report | `get` |
 
 Also bind the profile's identity to the `system:auth-delegator` ClusterRole, so
 it can create TokenReviews and SubjectAccessReviews.
@@ -293,8 +294,11 @@ through the home journal. See the guide's
 
 ## Retained remote work
 
-To accept new Codex tasks independently of the local service, add `workTokenFile`,
-`workTokenMaxDuration` and `repositories` to the configuration.
+To accept new Codex or Claude Code tasks and interactive sessions
+independently of the local service, add `workTokenFile`,
+`workTokenMaxDuration` and `repositories` to the configuration. An executor
+runs the one harness its `harness` names, `codex` or `claude-code`
+([Claude Code example configuration](../../examples/portable-workflows/kubernetes/claude/profile.json)).
 `workTokenMaxDuration`, required with `workTokenFile`, caps the deadline of
 work submitted with the work token, which always has one; it must fit within
 `maxDuration` when that is set. `retainedBytes`, optional, bounds what remote
@@ -310,8 +314,10 @@ credential configuration.
 
 `/work/mcp` exposes `sproozi_run`, `sproozi_status`, `sproozi_cancel` and
 `sproozi_sessions` to Hermes. Fixed JSON routes also support recovery. The home principal additionally permits checkpoint export and the
-exclusive one-way claim; the work token cannot claim ownership. TLS and bearer
-validation happen before request decoding.
+exclusive one-way claim, and starts, stops, resumes, attaches to and cancels
+[interactive sessions](../../docs/reference/remote-executors.md#interactive-sessions),
+including from an uploaded workspace; the work token can do none of these.
+TLS and bearer validation happen before request decoding.
 
 The executor owns the work it starts and drives each execution through an
 execution journal in the protected `directory/sessions`, the same one the local
@@ -323,7 +329,8 @@ remote executor per state directory, with durable storage. Restart with the same
 changing principals cannot reinterpret retained records. A task's phases are
 the journal's: `stopping` while it waits for the task's turn, and
 `unknown-stop` or `unknown-usage` after a lost stop reply or missing accounting,
-which the executor retries by itself and `recover` retries at once. Missing
+which the executor retries by itself for a task and `recover` retries at once;
+an interactive session waits for `recover`. Missing
 stop/accounting evidence blocks export, and changing a request's intent on
 replay is rejected.
 

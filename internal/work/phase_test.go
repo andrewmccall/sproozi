@@ -13,6 +13,7 @@ import (
 func TestDerivedPhaseFollowsTheCoordinator(t *testing.T) {
 	kept := session.Checkpoint{Path: "checkpoints/kept.json"}
 	failed := []session.Visit{{Exit: &session.Exit{Code: 1}}}
+	interactiveRecord := record{Intent: Submit{Mode: ModeInteractive}}
 	for _, tc := range []struct {
 		name string
 		r    record
@@ -35,6 +36,11 @@ func TestDerivedPhaseFollowsTheCoordinator(t *testing.T) {
 		{"nothing kept", record{Finished: true}, &session.Record{Phase: session.PhaseIdle}, PhaseFailed},
 		{"exporting", record{Finished: true, Transfer: "op"}, &session.Record{Phase: session.PhaseIdle, Checkpoint: kept}, PhaseExporting},
 		{"pulled", record{Finished: true, Transfer: "op", Pulled: true}, &session.Record{Phase: session.PhaseIdle, Checkpoint: kept}, PhasePulled},
+		// An interactive session has no task tail.
+		{"interactive retained", interactiveRecord, &session.Record{Phase: session.PhaseIdle, Checkpoint: kept}, PhaseRetained},
+		{"interactive turnless", interactiveRecord, &session.Record{Phase: session.PhaseIdle}, PhaseRetained},
+		{"interactive failed exit", interactiveRecord, &session.Record{Phase: session.PhaseIdle, Checkpoint: kept, Visits: failed}, PhaseFailed},
+		{"interactive active", interactiveRecord, &session.Record{Phase: session.PhaseActive}, phaseActive},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := derivePhase(tc.r, tc.rec)

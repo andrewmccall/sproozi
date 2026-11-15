@@ -36,7 +36,8 @@ func (b backoff) orDefault() backoff {
 }
 
 // driver is the one background goroutine that carries a session's task
-// through the coordinator. wake asks it to retry now.
+// through the coordinator, or starts an interactive session's execution.
+// wake asks it to retry now.
 type driver struct {
 	stop context.CancelFunc
 	wake chan struct{}
@@ -126,7 +127,10 @@ func (o *Owner) drive(ctx context.Context, id string, wake <-chan struct{}) {
 	}
 }
 
-// step takes the session's next step through the coordinator.
+// step takes the session's next step through the coordinator. A task is
+// driven to its completion, retrying an unsettled stop with a backoff. An
+// interactive session is only started: its owner stops it, and an unsettled
+// stop or cancellation waits for "recover".
 func (o *Owner) step(ctx context.Context, id string) next {
 	r, err := o.read(id)
 	if err != nil {
@@ -143,11 +147,18 @@ func (o *Owner) step(ctx context.Context, id string) next {
 	}
 	coordinator := o.config.Coordinator
 	revoked := !project.Member(o.config.Projects, r.Association.Project, o.config.Principal)
+	interactive := r.Intent.Mode == ModeInteractive
 	switch {
 	case rec != nil && rec.Phase == session.PhaseCancelled:
 		return nextDone
+	case rec != nil && rec.Phase == session.PhaseIdle && interactive:
+		return nextDone
 	case rec != nil && rec.Phase == session.PhaseIdle:
 		return o.finish(r)
+	case interactive && rec != nil && (rec.CancelOperation != "" || !rec.Phase.Starting() && rec.Phase != session.PhaseActive):
+		// Only "recover" retries an interactive session's unsettled stop
+		// or cancellation.
+		return nextDone
 	case rec != nil && rec.CancelOperation != "":
 		// Recovery carries out the retained cancellation.
 		_, err = coordinator.Recover(ctx, rec.ID)
@@ -162,6 +173,9 @@ func (o *Owner) step(ctx context.Context, id string) next {
 		}
 		_, err = coordinator.Recover(ctx, rec.ID)
 		return o.after(ctx, r, err, nextDone)
+	case interactive:
+		// Running: its owner attaches to it and stops it.
+		return nextDone
 	case rec.Phase == session.PhaseActive || rec.Phase == session.PhaseStopping:
 		// The task's stop is its completion wait: the supervisor stops the
 		// writer only after the task's own turn completed. Until then the
@@ -249,7 +263,11 @@ func (o *Owner) start(ctx context.Context, r record) next {
 	if _, err = o.config.Coordinator.Inspect(r.Current); err == nil {
 		return nextAgain
 	}
-	if _, err = o.config.Coordinator.Create(r.First, input, ""); err != nil {
+	if _, err = o.config.Coordinator.Create(r.First, input, ""); err == nil && r.Intent.WorkspaceDigest != "" {
+		// The coordinator retains the upload now.
+		o.removeUpload(r.ID)
+	}
+	if err != nil {
 		if deadline.At(r.First.Deadline).Passed(time.Now()) {
 			// Create refuses a launch whose deadline passed; the next step
 			// cancels it.
@@ -270,6 +288,9 @@ func (o *Owner) start(ctx context.Context, r record) next {
 // repository. Nothing is kept until the coordinator retains it.
 func (o *Owner) capture(ctx context.Context, r record) ([]byte, error) {
 	limit := o.config.MaxCheckpointBytes
+	if r.Intent.WorkspaceDigest != "" {
+		return o.keptUpload(r)
+	}
 	if r.Intent.WorkspaceFrom != nil {
 		data, err := o.revisionSource(*r.Intent.WorkspaceFrom, r.Association)
 		if err != nil {

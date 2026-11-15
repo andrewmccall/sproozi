@@ -16,6 +16,13 @@ func (k NativeKind) Validate() error {
 	return err
 }
 
+// TakesTask reports a managed kind whose supervisor submits a task as the
+// launch's prompt and binds completion to that prompt's turn: Codex by the
+// task text in its rollout, Claude Code by its UserPromptSubmit hook.
+func (k NativeKind) TakesTask() bool {
+	return k == NativeCodex || k == NativeClaude
+}
+
 // NativeDirectory is the selected component of the atomic workspace/native
 // checkpoint pair, independent of fresh cache, credentials and launch settings.
 func NativeDirectory(k NativeKind) (string, error) {

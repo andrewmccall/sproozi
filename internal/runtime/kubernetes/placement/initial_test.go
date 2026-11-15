@@ -23,6 +23,7 @@ import (
 
 const (
 	initialFixtureTask = "Fix the fixture"
+	fixtureRemote      = "remote"
 )
 
 func initialWorkspace(t *testing.T, data []byte) []byte {
@@ -130,23 +131,38 @@ func TestInitialUnknownTurnCannotSealOrCapture(t *testing.T) {
 	}
 }
 
+// A Claude Code first visit carries its task to the AgentRun, as Codex does;
+// the supervisor binds completion to the task's prompt.
+func TestInitialClaudeTaskReachesTheRun(t *testing.T) {
+	t.Parallel()
+	p, kube, e, l, data := setupKind(t, harness.NativeClaude)
+	l = freshLaunch(t, e, l, data, initialFixtureTask)
+	if _, err := p.Prepare(context.Background(), l, e.initial); err != nil {
+		t.Fatal(err)
+	}
+	var run api.AgentRun
+	if err := kube.Get(t.Context(), client.ObjectKey{Namespace: fixtureNamespace, Name: runName(l)}, &run); err != nil {
+		t.Fatal(err)
+	}
+	if run.Spec.Task != initialFixtureTask {
+		t.Fatalf("submitted Claude task lost: %q", run.Spec.Task)
+	}
+}
+
 func TestInitialTaskRejectsUnsupportedHarness(t *testing.T) {
 	t.Parallel()
-	for name, create := range map[string]func(*Placement) func(context.Context, session.Launch, []byte) (session.Incarnation, error){
-		"Prepare": func(p *Placement) func(context.Context, session.Launch, []byte) (session.Incarnation, error) {
-			return p.Prepare
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			p, kube, _, l, data := setupKind(t, harness.NativeClaude)
-			l.ThreadID, l.CheckpointDigest, l.Task = "", "", "Task"
-			_, err := create(p)(context.Background(), l, initialWorkspace(t, data))
-			var rejection *profile.Rejection
-			if !errors.As(err, &rejection) || rejection.Code != profile.CodeDenied || kube.runCreates != 0 {
-				t.Fatalf("unproven task accepted: %v", err)
-			}
-		})
+	p := &Placement{config: Config{Harness: harness.NativeCopilot, Name: fixtureRemote, InstructionDigest: "digest"}}
+	l := session.Launch{Harness: harness.NativeCopilot, ExecutionID: "00000000-0000-4000-8000-000000000001",
+		OperationID: "00000000-0000-4000-8000-000000000002", AllocationID: "00000000-0000-4000-8000-000000000003",
+		Epoch: 1, Placement: fixtureRemote, InstructionDigest: "digest",
+		Allowances: map[string]session.Allowance{string(api.CapabilityModelInference): {}}}
+	if err := p.validateInput(l, true); err != nil {
+		t.Fatalf("fixture launch refused without a task: %v", err)
+	}
+	l.Task = "Task"
+	var rejection *profile.Rejection
+	if err := p.validateInput(l, true); !errors.As(err, &rejection) || rejection.Code != profile.CodeDenied {
+		t.Fatalf("unproven Copilot task accepted: %v", err)
 	}
 }
 

@@ -5,7 +5,9 @@ work endpoint of a [remote executor](../../GLOSSARY.md#remote-executor) at
 `/work/mcp`. Each Codex [remote work](../../GLOSSARY.md#remote-work) session runs
 in `sproozi-agents`; its conversation, supported Git workspace and bounded final
 answer survive the Pod. The developer can claim that stopped session and
-continue it in local Docker.
+continue it in local Docker. Hermes can also delegate to a
+[Claude Code executor](portable-workflows.md#start-a-session-on-the-cluster-and-attach-from-anywhere)
+with `"harness": "claude-code"`; each executor runs one harness.
 [Run a persistent Hermes assistant on Kubernetes](hermes-orchestration.md)
 covers the separate [task service](../../GLOSSARY.md#task-service), which
 retains answers but not the conversation or workspace.
@@ -210,6 +212,14 @@ saved JSON request containing a new UUID and the exact native-work fields:
   "task": "Investigate the specified Sproozi defect, propose the smallest fix, run the available checks, and report the changed files and limitations."
 }
 ```
+
+To delegate Claude Code tasks too, apply the
+[Claude Code executor example](../../examples/portable-workflows/kubernetes/claude/kustomization.yaml),
+which admits Hermes on port 8443, give it its own work token, and add a second
+entry under `mcp_servers` in Hermes's configuration with
+`url: https://sproozi-work.sproozi-claude-sessions.svc:8443/work/mcp` and that
+token. Its submissions name `"harness": "claude-code"` and its executor's
+`placementName`; the result is Claude's final reply.
 
 Ask Hermes to call `sproozi_run` with that exact object, then call
 `sproozi_status` for the returned `id` until the remote executor reports `retained` or an

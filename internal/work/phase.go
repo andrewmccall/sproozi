@@ -62,7 +62,9 @@ func (p Phase) stopped() bool {
 //     when the catalogue cancelled it there;
 //   - idle is retained once the task's tail is written, failed when the
 //     harness exited with a failure or nothing was kept, and stopping until
-//     the tail is written;
+//     the tail is written. An interactive session has no tail: idle is
+//     failed when its harness exited with a failure, otherwise retained,
+//     even with no conversation, since resume restarts from its workspace;
 //   - every other coordinator phase is reported as it is.
 func derivePhase(r record, rec *session.Record) Phase {
 	switch {
@@ -76,6 +78,10 @@ func derivePhase(r record, rec *session.Record) Phase {
 		return phasePreparing
 	case rec.Phase != session.PhaseIdle:
 		return Phase(rec.Phase)
+	case r.Intent.Mode == ModeInteractive && lastExit(*rec).Failed():
+		return PhaseFailed
+	case r.Intent.Mode == ModeInteractive:
+		return PhaseRetained
 	case !r.Finished:
 		return phaseStopping
 	case rec.Checkpoint.Path == "" || lastExit(*rec).Failed():

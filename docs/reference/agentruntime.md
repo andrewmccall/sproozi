@@ -296,7 +296,7 @@ The managed template carries `sessions.sproozi.com/managed: "true"`. Each visit
 gets fresh admission and gateway access. Trusted launch configuration supplies
 the approved instructions on every visit. Sproozi checks the initial developer
 instructions saved in the Codex conversation against the approved digest. Claude Code receives fresh
-instructions, foreground Bash, fixed completion hooks, permission mode and
+instructions, foreground Bash, its MCP connections, fixed completion hooks, permission mode and
 settings; its transcript cannot grant any of them. Both harnesses rely on the
 container and the enforced gateway network for isolation.
 

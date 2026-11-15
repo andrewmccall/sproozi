@@ -24,19 +24,22 @@ const (
 func TestExecutorConfigurationConfigMapsAreImmutable(t *testing.T) {
 	root := repoRoot(t)
 	names := []string{executorProfileConfigMap, executorTrustConfigMap}
-	example := filepath.Join(root, "examples", "portable-workflows", "kubernetes")
-	for _, doc := range objectsOfKind(renderKustomization(t, example), "ConfigMap") {
-		if slices.Contains(names, metadataName(doc)) && doc["immutable"] != true {
-			t.Errorf("the executor example defines ConfigMap %s without immutable: true", metadataName(doc))
+	for _, example := range []string{filepath.Join(root, "examples", "portable-workflows", "kubernetes"),
+		claudeExampleDir(t)} {
+		for _, doc := range objectsOfKind(renderKustomization(t, example), "ConfigMap") {
+			if slices.Contains(names, metadataName(doc)) && doc["immutable"] != true {
+				t.Errorf("the executor example defines ConfigMap %s without immutable: true", metadataName(doc))
+			}
 		}
-	}
-	owner, err := os.ReadFile(filepath.Join(example, "owner.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range names {
-		if !strings.Contains(string(owner), name) || !strings.Contains(string(owner), `"immutable: true"`) {
-			t.Errorf("owner.yaml does not tell the administrator to create %s immutable", name)
+		owner, err := os.ReadFile(filepath.Join(example, "owner.yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range names {
+			if !strings.Contains(string(owner), name) || !strings.Contains(string(owner), `"immutable: true"`) {
+				t.Errorf("%s does not tell the administrator to create %s immutable",
+					filepath.Join(example, "owner.yaml"), name)
+			}
 		}
 	}
 	created := map[string]bool{}

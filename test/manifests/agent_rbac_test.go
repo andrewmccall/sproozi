@@ -162,7 +162,7 @@ func TestControllerWritesSandboxObjectsOnlyInAgentsNamespace(t *testing.T) {
 			}
 		}
 	}
-	unused := []apiResource{{"", "pods/log"}, {"", "secrets"}, {rbacGroup, "roles"}, {rbacGroup, "rolebindings"}}
+	unused := []apiResource{{"", resourcePodLogs}, {"", "secrets"}, {rbacGroup, "roles"}, {rbacGroup, "rolebindings"}}
 	for _, resource := range unused {
 		for _, rule := range cluster {
 			if slices.Contains(rule.APIGroups, resource.group) && slices.Contains(rule.Resources, resource.name) {
