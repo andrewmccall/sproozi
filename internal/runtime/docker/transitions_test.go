@@ -3,9 +3,12 @@ package docker
 import (
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/andrewmccall/sproozi/internal/budget"
 	"github.com/andrewmccall/sproozi/internal/session"
@@ -114,25 +117,25 @@ func TestPlacementOperationsRefusedOutsideTheirPhases(t *testing.T) {
 	}
 	cases := []struct {
 		from dockerPhase
-		name placementOp
+		name placementEvent
 		op   op
 	}{
-		{phaseCreating, opStop, stop},
-		{phaseAborting, opStop, stop},
-		{phaseAborted, opStop, stop},
-		{phasePreparationAborting, opStop, stop},
-		{phaseCreating, opAbort, abort},
-		{phasePreparationAborting, opAbort, abort},
-		{phaseCreating, opActivate, activate},
-		{phaseStopping, opActivate, activate},
-		{phaseStopped, opActivate, activate},
-		{phaseAborting, opActivate, activate},
-		{phaseAborted, opActivate, activate},
-		{phasePreparationAborting, opActivate, activate},
-		{phaseActivating, opPrepare, prepare},
-		{phaseActive, opPrepare, prepare},
-		{phaseStopping, opPrepare, prepare},
-		{phaseAborted, opPrepare, prepare},
+		{phaseCreating, evStop, stop},
+		{phaseAborting, evStop, stop},
+		{phaseAborted, evStop, stop},
+		{phasePreparationAborting, evStop, stop},
+		{phaseCreating, evAbort, abort},
+		{phasePreparationAborting, evAbort, abort},
+		{phaseCreating, evActivate, activate},
+		{phaseStopping, evActivate, activate},
+		{phaseStopped, evActivate, activate},
+		{phaseAborting, evActivate, activate},
+		{phaseAborted, evActivate, activate},
+		{phasePreparationAborting, evActivate, activate},
+		{phaseActivating, evPrepared, prepare},
+		{phaseActive, evPrepared, prepare},
+		{phaseStopping, evPrepared, prepare},
+		{phaseAborted, evPrepared, prepare},
 	}
 	for _, c := range cases {
 		t.Run(string(c.from)+"/"+string(c.name), func(t *testing.T) {
@@ -203,4 +206,139 @@ func TestCancelledPreparationRevokesItsGrant(t *testing.T) {
 		t.Fatalf("grant after cancelled preparation: revoked=%v activate=%d seals=%d", a.revoked, a.activate, a.seals)
 	}
 	assertReleasedPreparation(t, p, f, l)
+}
+
+// Every declared transition names known phases, every phase is reachable from
+// no record, and exactly stopped, aborted and preparation-aborting have no way
+// on (their release is a sub-state, not a phase).
+func TestPlacementTransitionTableIsClosed(t *testing.T) {
+	t.Parallel()
+	reached := map[dockerPhase]bool{phaseNone: true}
+	for changed := true; changed; {
+		changed = false
+		for ev, rule := range placementTransitions {
+			for from, to := range rule.to {
+				if from != phaseNone && !slices.Contains(dockerPhases, from) || !slices.Contains(dockerPhases, to) {
+					t.Fatalf("%s: unknown phase in %q -> %q", ev, from, to)
+				}
+				if reached[from] && !reached[to] {
+					reached[to], changed = true, true
+				}
+			}
+		}
+	}
+	terminal := []dockerPhase{phaseStopped, phaseAborted, phasePreparationAborting}
+	for _, p := range dockerPhases {
+		if !reached[p] {
+			t.Errorf("phase %s is unreachable", p)
+		}
+		leaves := false
+		for _, rule := range placementTransitions {
+			if to, ok := rule.to[p]; ok && to != p {
+				leaves = true
+			}
+		}
+		if leaves == slices.Contains(terminal, p) {
+			t.Errorf("phase %s: has a way on = %v", p, leaves)
+		}
+	}
+}
+
+// apply refuses every transition the table does not declare and leaves the
+// record unchanged.
+func TestPlacementApplyRefusesUndeclaredTransitions(t *testing.T) {
+	t.Parallel()
+	for ev, rule := range placementTransitions {
+		for _, from := range append([]dockerPhase{phaseNone}, dockerPhases...) {
+			r := placementRecord{Phase: from}
+			err := r.apply(ev)
+			want, declared := rule.to[from]
+			switch {
+			case declared && (err != nil || r.Phase != want):
+				t.Errorf("%s from %q: %v, phase %s, want %s", ev, from, err, r.Phase, want)
+			case !declared && (err == nil || r.Phase != from || !strings.Contains(err.Error(), "refused")):
+				t.Errorf("undeclared %s from %q: %v, phase now %s", ev, from, err, r.Phase)
+			}
+		}
+	}
+}
+
+// Events that start or extend work are refused once the launch deadline has
+// passed; stopping and cancelling are not, nor is recording an activation
+// that happened. A launch without a deadline refuses nothing.
+func TestPlacementDeadlineRefusesOnlyEventsThatStartWork(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 11, 14, 12, 0, 0, 0, time.UTC)
+	starting := []placementEvent{evCreate, evPrepared, evActivate, evAttach}
+	for ev, rule := range placementTransitions {
+		if rule.refusedAfterDeadline != slices.Contains(starting, ev) {
+			t.Errorf("%s: refusedAfterDeadline = %v", ev, rule.refusedAfterDeadline)
+		}
+		for from := range rule.to {
+			r := placementRecord{Phase: from, Launch: session.Launch{Deadline: at}}
+			if err := r.admit(ev, at); (err != nil) != rule.refusedAfterDeadline {
+				t.Errorf("%s from %q past the deadline: %v", ev, from, err)
+			}
+			if err := r.admit(ev, at.Add(-time.Second)); err != nil {
+				t.Errorf("%s from %q before the deadline: %v", ev, from, err)
+			}
+			r.Launch.Deadline = time.Time{}
+			if err := r.admit(ev, at.Add(100*365*24*time.Hour)); err != nil {
+				t.Errorf("%s from %q without a deadline: %v", ev, from, err)
+			}
+		}
+	}
+	if err := (placementRecord{Phase: phaseStopped}).admit(evActivate, at); err == nil {
+		t.Fatal("admitted an undeclared event")
+	}
+}
+
+// Preparing a visit already prepared replays its incarnation after the
+// deadline, while a new visit is refused (ADR 0058).
+func TestPrepareReplayAfterDeadline(t *testing.T) {
+	t.Parallel()
+	data := fixtureArtifact(t)
+	l := fixtureLaunch(t, data)
+	f := newFakeDocker()
+	p := openFixture(t, testutil.PrivateDir(t), f, &fakeAuthority{engine: f})
+	i, err := p.Prepare(t.Context(), l, data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.now = func() time.Time { return l.Deadline.Add(time.Hour) }
+	if again, err := p.Prepare(t.Context(), l, data); err != nil || again != i {
+		t.Fatalf("prepare replay after the deadline: %+v %v", again, err)
+	}
+	fresh := fixtureLaunch(t, data)
+	fresh.Deadline = l.Deadline
+	if _, err = p.Prepare(t.Context(), fresh, data); err == nil {
+		t.Fatal("new visit prepared after its deadline")
+	}
+	if _, err = p.load(fresh); !os.IsNotExist(err) {
+		t.Fatalf("refused visit retained a record: %v", err)
+	}
+}
+
+// Activating a visit already recorded active replays the recorded outcome: it
+// is not refused once the deadline has passed (ADR 0058), and a replay whose
+// side effects would now fail leaves the visit active.
+func TestActivateReplayOfAnActiveVisit(t *testing.T) {
+	t.Parallel()
+	for name, set := range map[string]func(p *Placement, f *fakeDocker, l session.Launch){
+		"after the deadline": func(p *Placement, _ *fakeDocker, l session.Launch) {
+			p.now = func() time.Time { return l.Deadline.Add(time.Hour) }
+		},
+		"native activation now refused": func(_ *Placement, f *fakeDocker, _ session.Launch) { f.rejectNativeActivation = true },
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			p, f, _, l, i := activeFixture(t, testutil.PrivateDir(t))
+			set(p, f, l)
+			replayErr := p.Activate(t.Context(), l, i)
+			r, err := p.load(l)
+			if replayErr != nil || err != nil || r.Phase != phaseActive {
+				t.Fatalf("activation replay: %v; phase now %s %v", replayErr, r.Phase, err)
+			}
+		})
+	}
 }

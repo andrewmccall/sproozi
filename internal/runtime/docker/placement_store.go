@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/andrewmccall/sproozi/internal/privatefs"
 	"github.com/andrewmccall/sproozi/internal/session"
@@ -63,6 +64,8 @@ type Placement struct {
 	config    PlacementConfig
 	digest    string
 	authority Authority
+	// now is the clock deadlines are checked against.
+	now func() time.Time
 }
 
 // placementConfigFile holds the settings a placement's records were prepared under.
@@ -95,7 +98,7 @@ func OpenPlacement(dir string, engine *Engine, cfg PlacementConfig, authority Au
 		_ = lock.Close()
 		return nil, err
 	}
-	p := &Placement{dir: dir, lock: lock, engine: engine, config: cfg, authority: authority, digest: fmt.Sprintf("%x", sha256.Sum256(encoded))}
+	p := &Placement{dir: dir, lock: lock, engine: engine, config: cfg, authority: authority, now: time.Now, digest: fmt.Sprintf("%x", sha256.Sum256(encoded))}
 	existing, err := p.read(placementConfigFile, maxRecordBytes)
 	if os.IsNotExist(err) {
 		err = p.write(placementConfigFile, encoded)
