@@ -39,12 +39,18 @@ that the writer stopped and finalizing usage remain backend steps.
 `quiesce` waits at most two minutes for the completed turn; past that it
 replies `stopping` with `waiting`. Once the turn completed it asks the harness
 to quit and waits at most 30 seconds, or until a set deadline if sooner, for
-it to exit. A harness still running then is killed, and once the same
-completed turn is observed again `quiesce` replies `stopped` with the
-conversation and turn and an `exit` whose reason is `forced-stop`, writes no
-exit report and exits 0, as after any graceful stop
-([ADR 0035](../adr/0035-bounded-graceful-stops-and-settled-input.md)). At the
-deadline it replies with an error and reports the cause `deadline`.
+it to exit. A Codex still running then, or whose full terminal input took no
+quit, is killed and waited for at most 3 more seconds, within the deadline.
+When the kill ends it and the same completed turn is observed again,
+`quiesce` replies `stopped` with the conversation and turn and an `exit`
+whose reason is `forced-stop`, writes no exit report and exits 0, as after
+any graceful stop
+([ADR 0035](../adr/0035-bounded-graceful-stops-and-settled-input.md)). Claude
+Code and Copilot are always stopped by a kill; the same waits apply to its
+confirmation. A harness that exited by itself instead keeps its own exit code
+and reason. If the turn observed after the kill differs, or the kill is not
+confirmed, `quiesce` replies with an error and the supervisor reports the
+cause `failed`; if the deadline passes first, the cause `deadline`.
 
 A first visit with no task that the supervisor reports `turnless` records no
 ID: `quiesce` stops the harness and replies `stopped` with `turnless` and no
@@ -82,8 +88,9 @@ sproozi-native-exit {"code":2,"cause":"exited","thread":"<id>","output":"<last l
 | `terminated` | The supervisor received `SIGTERM` or `SIGINT`, as when its container is stopped. | `retained`; also `"deadline": true` when the host stopped it at the deadline. |
 | `failed` | A graceful stop failed and the supervisor stopped the harness itself. | `retained`. |
 
-A graceful stop writes no report. A forced stop leaves the supervisor's own exit
-code nonzero even when the harness exited 0. Both placements read the last
+A graceful stop writes no report. A stop that writes one (`deadline`,
+`terminated` or `failed`) leaves the supervisor's own exit code nonzero even
+when the harness exited 0. Both placements read the last
 report from the agent's last 50 output lines and ignore a report without a
 known `cause`, as from a supervisor built before the field existed; they then
 use the container's exit code, and the host's clock decides `deadline`. The
