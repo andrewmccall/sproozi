@@ -314,7 +314,7 @@ func (p *Placement) drivePrepare(ctx context.Context, r *placementRecord, data [
 		signIn = api.SignInDirectory
 	}
 	contract := harness.NativeLaunch{SignInDirectory: signIn, Harness: p.config.Harness, Deadline: r.Launch.Deadline, ThreadID: r.Launch.ThreadID, Task: r.Launch.Task, Instructions: p.config.Instructions, InstructionDigest: p.config.InstructionDigest, Env: access.Env, Model: access.Model, Options: access.Options, Args: r.Launch.HarnessArgs, ClientConfig: access.ClientConfig, TrustBundlePEM: access.TrustBundlePEM, RolloutMaxBytes: harness.NativeRolloutMaxBytes, ProfileArchive: profile}
-	if err := contract.Validate(time.Now()); err != nil {
+	if err := contract.Validate(p.now()); err != nil {
 		return err
 	}
 	input, err := json.Marshal(contract)
@@ -947,7 +947,7 @@ func (p *Placement) recordExit(ctx context.Context, r *placementRecord, i sessio
 	default:
 		// No report, or a supervisor told to stop: the host's own deadline
 		// stop sends that signal.
-		r.Exited.Deadline = deadline.At(r.Launch.Deadline).Passed(time.Now())
+		r.Exited.Deadline = deadline.At(r.Launch.Deadline).Passed(p.now())
 	}
 	if harness.ProvesCompletion(r.Launch.Harness) && r.thread() == "" && report.Thread != "" {
 		if err := p.authority.BindNative(ctx, r.Launch, i, report.Thread); err != nil {
@@ -1022,7 +1022,7 @@ func (p *Placement) Exited(ctx context.Context, l session.Launch, i session.Inca
 	if err != nil {
 		return false, err
 	}
-	if state.Running && deadline.At(r.Launch.Deadline).Passed(time.Now()) {
+	if state.Running && deadline.At(r.Launch.Deadline).Passed(p.now()) {
 		// The supervisor ends its harness at the deadline, but its timer can
 		// run late after the host slept; the host's clock decides.
 		if err = p.engine.Stop(ctx, *r.Agent); err != nil {
