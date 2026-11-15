@@ -64,7 +64,9 @@ func ResolveRun(ctx context.Context, kube client.Client, run *api.AgentRun, temp
 	if record.Phase == Creating && record.RunUID == "" {
 		return nil, ErrBindingPending
 	}
-	if record.RunUID == string(run.UID) && record.Phase == Cancelled {
+	// A registration cancelled before any run was bound to it was cancelled
+	// for the run of its intended name, whichever reconcile sees it first.
+	if record.Phase == Cancelled && (record.RunUID == string(run.UID) || record.RunUID == "") {
 		return nil, ErrSessionCancelled
 	}
 	if record.RunUID != string(run.UID) || record.Phase == Cancelled {

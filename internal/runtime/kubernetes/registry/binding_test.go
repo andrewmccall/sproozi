@@ -174,6 +174,26 @@ func TestCancelledRegistrationResolvesAsSessionCancelled(t *testing.T) {
 	}
 }
 
+// A registration cancelled before any run was bound to it was cancelled for
+// the run of its intended name: the controller ends that run as cancelled,
+// not as a rejected binding, and the gateway still refuses it.
+func TestCancelledUnboundRegistrationResolvesAsSessionCancelled(t *testing.T) {
+	store, kube := registry(t, nil)
+	ctx := context.Background()
+	run, template, intent := managedFixture()
+	r, err := store.Create(ctx, intent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.Cancel(ctx, r.Reference); err != nil {
+		t.Fatal(err)
+	}
+	_, err = ResolveRun(ctx, kube, run, template)
+	if !errors.Is(err, ErrSessionCancelled) || !errors.Is(err, ErrConflict) {
+		t.Fatalf("cancelled unbound registration resolved as %v", err)
+	}
+}
+
 // A session without its own deadline never removes the policy's.
 func TestEffectiveDeadlineKeepsPolicyDeadlineForSessionWithout(t *testing.T) {
 	run, _, intent := managedFixture()

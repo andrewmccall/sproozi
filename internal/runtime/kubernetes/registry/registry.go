@@ -222,6 +222,27 @@ func (s *Store) Get(ctx context.Context, ref Reference) (Record, error) {
 	return record, err
 }
 
+// Lookup reads the registration for an intended run by name, for a caller
+// that lost the reference its own Create returned. It returns ErrGone when
+// none exists. The caller must still check the record is the intent it holds.
+func (s *Store) Lookup(ctx context.Context, intendedRunName string) (Record, error) {
+	var cm corev1.ConfigMap
+	if err := s.kube.Get(ctx, client.ObjectKey{Namespace: s.namespace, Name: NameForRun(intendedRunName)}, &cm); err != nil {
+		if apierrors.IsNotFound(err) {
+			return Record{}, ErrGone
+		}
+		return Record{}, err
+	}
+	record, err := read(&cm)
+	if err != nil {
+		return Record{}, err
+	}
+	if record.IntendedRunName != intendedRunName {
+		return Record{}, ErrConflict
+	}
+	return record, nil
+}
+
 func (s *Store) BindRun(ctx context.Context, ref Reference, runUID string) (Record, error) {
 	if !validUID(runUID) {
 		return Record{}, fmt.Errorf("invalid run UID")
@@ -240,6 +261,9 @@ func (s *Store) BindRun(ctx context.Context, ref Reference, runUID string) (Reco
 
 // BindPod records an observed exact Pod before restore. Bound remains inert:
 // observation does not imply a successful checkpoint or enable gateway access.
+// A preparation cancelled before its Pod was bound also records a Pod that
+// appears afterwards, so the placement can fence that exact Pod; Cancelled
+// grants nothing either way.
 func (s *Store) BindPod(ctx context.Context, ref Reference, podUID string) (Record, error) {
 	if !validUID(podUID) {
 		return Record{}, fmt.Errorf("invalid pod UID")
@@ -248,7 +272,7 @@ func (s *Store) BindPod(ctx context.Context, ref Reference, podUID string) (Reco
 		if r.PodUID == podUID {
 			return nil
 		}
-		if r.Phase != Bound || r.PodUID != "" {
+		if r.Phase != Bound && (r.Phase != Cancelled || r.RunUID == "") || r.PodUID != "" {
 			return ErrConflict
 		}
 		r.PodUID = podUID
@@ -263,7 +287,9 @@ func (s *Store) Prepared(ctx context.Context, ref Reference, podUID string) (Rec
 		return Record{}, fmt.Errorf("invalid pod UID")
 	}
 	return s.change(ctx, ref, func(r *stored) error {
-		if r.PodUID == podUID && r.Phase != Bound {
+		// A replay after the restore succeeded. A cancelled record may carry a
+		// Pod it never restored into (BindPod), so it is never a replay.
+		if r.PodUID == podUID && r.Phase != Bound && r.Phase != Cancelled {
 			return nil
 		}
 		if r.Phase != Bound || r.PodUID != "" && r.PodUID != podUID {

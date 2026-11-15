@@ -221,6 +221,76 @@ func TestCancellationReceiptRequiresFencedBindingAndRetainsImmutableSeals(t *tes
 	}
 }
 
+// A preparation cancelled before its Pod was bound can still record a Pod
+// that appears afterwards, so the placement can fence it. Only a record with a
+// bound run accepts it, once, and the record stays cancelled.
+func TestCancelledPreparationBindsLatePodOnce(t *testing.T) {
+	s, _ := registry(t, nil)
+	ctx := context.Background()
+	r, err := s.Create(ctx, registration())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Cancel(ctx, r.Reference); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.BindPod(ctx, r.Reference, fixtureObservedPodUID); !errors.Is(err, ErrConflict) {
+		t.Fatalf("cancelled record without a run bound a Pod: %v", err)
+	}
+	if _, err = s.BindRun(ctx, r.Reference, fixtureRunUID); !errors.Is(err, ErrConflict) {
+		t.Fatalf("cancelled record bound a run: %v", err)
+	}
+	other := registration()
+	other.IntendedRunName = "visit-2"
+	r, err = s.Create(ctx, other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.BindRun(ctx, r.Reference, fixtureRunUID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Cancel(ctx, r.Reference); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		bound, err := s.BindPod(ctx, r.Reference, fixtureObservedPodUID)
+		if err != nil || bound.Phase != Cancelled || bound.PodUID != fixtureObservedPodUID {
+			t.Fatalf("late Pod binding: %+v %v", bound, err)
+		}
+	}
+	if _, err = s.BindPod(ctx, r.Reference, "replacement-pod"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("second late Pod bound: %v", err)
+	}
+	if _, err = s.Prepared(ctx, r.Reference, fixtureObservedPodUID); !errors.Is(err, ErrConflict) {
+		t.Fatalf("cancelled record became prepared: %v", err)
+	}
+	if _, err = s.Activate(ctx, r.Reference); !errors.Is(err, ErrConflict) {
+		t.Fatalf("cancelled record activated: %v", err)
+	}
+	sealed, err := s.CompleteCancel(ctx, r.Reference, map[api.CapabilityKind]budget.TrustedUsage{api.CapabilityModelInference: {}})
+	if err != nil || sealed.Receipt == nil {
+		t.Fatalf("fenced late Pod could not retain a cancellation receipt: %+v %v", sealed, err)
+	}
+}
+
+// Lookup finds a registration by its intended run name for a caller that
+// lost the reference, and reports absence as ErrGone.
+func TestLookupByIntendedRunName(t *testing.T) {
+	s, _ := registry(t, nil)
+	ctx := context.Background()
+	if _, err := s.Lookup(ctx, fixtureRunName); !errors.Is(err, ErrGone) {
+		t.Fatalf("absent registration: %v", err)
+	}
+	created, err := s.Create(ctx, registration())
+	if err != nil {
+		t.Fatal(err)
+	}
+	found, err := s.Lookup(ctx, fixtureRunName)
+	if err != nil || found.Reference != created.Reference || found.Phase != Creating {
+		t.Fatalf("lookup: %+v %v", found, err)
+	}
+}
+
 func TestRegistryReceiptReplayAndRestart(t *testing.T) {
 	s, kube := registry(t, nil)
 	ctx := context.Background()
