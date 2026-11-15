@@ -122,7 +122,7 @@ of a [full executor](#retention).
 | `stop` | `id`, `operationId` | The session after a graceful stop that waits for the current turn: `retained`, or `failed` when the agent exited with a failure. `stopping`, with a `problem`, while it still waits; repeat the request with the same operation, or `cancel`. |
 | `resume` | `id`, `operationId`, optional `maxDuration` | The session with a new execution (`executionId`) that continues from the last checkpoint, or from the starting workspace when it stopped before any conversation. |
 | `attach` | One line `{"id":"..."}`, then terminal frames | A stream of terminal frames (below). |
-| `remove` | `id` | `{"id":"..."}` once the executor keeps nothing of the session ([removing sessions](#removing-sessions)). Tasks too. |
+| `remove` | `id`, optional `pullFinished` | `{"id":"..."}` once the executor keeps nothing of the session ([removing sessions](#removing-sessions)). Tasks too. |
 | `cancel`, `recover`, `info`, `list` | as for tasks | as for tasks |
 
 Each `operationId` is a UUID the caller keeps for retries: repeating a `stop`
@@ -190,45 +190,65 @@ Admission reserves what the work may still come to keep, `maxCheckpointBytes`
 each: a submission its input workspace and its checkpoint, a resume its
 checkpoint, since it starts from one the executor already keeps. It is
 refused while what is kept, plus the reservations of every session not yet
-`retained`, `failed`, `cancelled`, `exporting` or `pulled`, plus its own,
-would exceed `retainedBytes`. A running interactive session therefore
-reserves a checkpoint until it stops. A stop, a cancellation and a task's
-completion are never refused for space: what they keep was reserved, and
-refusing them would lose work. At the smallest `retainedBytes`, twice
-`maxCheckpointBytes`, the executor admits one session at a time.
+`retained`, `failed`, `cancelled`, `exporting` or `pulled` (two for one whose
+first visit has not started, one after), plus its own, would exceed
+`retainedBytes`. A running interactive session therefore reserves a
+checkpoint until it stops. A stop, a cancellation and a task's completion are
+never refused for space: what they keep was reserved, and refusing them would
+lose work.
+
+Outside the bound: removal marks (below), and scratch space. Validating an
+upload before admission, and capturing a revision or an empty workspace for
+a task after it, each write up to `maxCheckpointBytes` under
+`directory/work` and delete it when done; a concurrent admission counts that
+as kept, but the volume may briefly hold that much beyond `retainedBytes`.
+
+At the smallest `retainedBytes`, twice `maxCheckpointBytes`, a submission is
+admitted only when the executor keeps nothing, so it keeps one session, and a
+resume only when that session's workspace, checkpoint and metadata fit in one
+`maxCheckpointBytes`: a larger session can be removed but not resumed there.
 
 | Code | HTTP status | Meaning |
 | --- | --- | --- |
 | `sessions_full` | 507 | The executor keeps 1024 sessions. Remove some, then retry. |
 | `retention_full` | 507 | What the executor keeps and has reserved leaves no room for this submission or resume. Remove sessions, stop running ones, or raise `retainedBytes`, then retry. |
+| `executions_full` | 507 | A `resume` of a session that has had 256 executions. Pull it, or start new work. |
+| `operations_full` | 507 | A `stop` or `resume` of a session with 1024 bound operations. Cancel it, or pull it once stopped. |
 
-Nothing changed when either answers, so a retry is a new request. Hermes
-reads the same text from `sproozi_run`. A Sproozi older than these codes
-reports them as `unavailable`.
+Nothing changed when any of these answers, and repeating the request does
+not help until something changes. Hermes reads the same text from
+`sproozi_run`. A Sproozi older than these codes reports them as
+`unavailable`.
 
 ### Removing sessions
 
 `remove` deletes a session the executor no longer needs: its record, its
 executions' journals, and the workspaces, checkpoints and profiles no other
 session names. Profiles the placement keeps by digest stay. Only the home
-principal removes; the work token gets `403`. The `id` is the session's.
+principal removes; the work token gets `403`. The body is `id`, the
+session's, and `pullFinished`, which a pulled session needs.
 
 | Phase | `remove` |
 | --- | --- |
 | `retained`, `failed`, `cancelled` | Removed. |
-| `pulled` | Removed. The machine that pulled it owns it; the executor then answers neither `info` nor `claim` for it, so remove it only after `sproozi pull` on that machine reported it pulled. |
-| `preparing`, `activating`, `active`, `stopping` | `conflict`: stop or cancel it first, or wait for it to start. |
+| `pulled` | Removed when `pullFinished` is `true`, otherwise `conflict`. Once removed, the executor answers neither `info` nor `claim` for it, so a home whose claim reply was lost could never finish its pull. `sproozi rm ID --remote` sends it only after this machine's service reports the session as its own. |
+| `preparing`, `activating`, `active`, `stopping` | `conflict`: stop or cancel it first, or wait for it to start or finish. |
 | `unknown-stop`, `unknown-usage`, `cancelling` | `conflict`: `recover` it first. |
 | `exporting` | `conflict`: finish the pull first. |
-| A version 1 record (`retained`, `cancelled`, `pulled`) | Removed with the checkpoint it kept; `exporting` answers `conflict`. |
+| Any, while a session whose first visit has not started names it in `workspaceFrom` | `conflict`: that session's start reads this one's checkpoint. Wait for it to start, or cancel it. |
+| A version 1 record (`retained`, `cancelled`, `pulled`) | Removed with the checkpoint it kept, `pulled` with `pullFinished`; `exporting` answers `conflict`. |
 
-A removed session leaves a mark of a few hundred bytes, outside
-`retainedBytes` and the session count, so its ID never starts again: a
-`run` that repeats its `requestId` answers `conflict`. Removing it again
-answers `{"id":"..."}`, and finishes a removal the executor was interrupted
-in. An ID the executor never held answers `invalid_request`. The coordinator
-waits at most five seconds for other operations, then the request answers
-`unavailable`; repeat it.
+A removed session leaves a mark of about 50 bytes, outside `retainedBytes`
+and the session count, so its ID never starts again: a `run` that repeats its
+`requestId` answers `conflict`, and so does a `run` whose `workspaceFrom`
+names it. Removing it again answers `{"id":"..."}`. An ID the executor never
+held answers `invalid_request`.
+
+Removal does not wait for other sessions: it takes only the removed
+session's executions, and waits at most five seconds for an operation on one
+of them before it answers `unavailable`; repeat it. The mark is written
+first, then the journals and the record go, and the mark shrinks last; after
+a crash the executor finishes the removal before it starts any session.
 
 ### Agents that exit by themselves
 

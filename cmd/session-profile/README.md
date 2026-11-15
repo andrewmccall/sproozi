@@ -320,8 +320,9 @@ credential configuration.
 exclusive one-way claim, starts, stops, resumes, attaches to and cancels
 [interactive sessions](../../docs/reference/remote-executors.md#interactive-sessions),
 including from an uploaded workspace, and
-[removes](../../docs/reference/remote-executors.md#removing-sessions) stopped,
-cancelled and pulled sessions (`sproozi rm ID --remote`); the work token can do
+[removes](../../docs/reference/remote-executors.md#removing-sessions)
+retained, failed and cancelled sessions, and pulled ones once the machine that
+pulled them holds the pull (`sproozi rm ID --remote`); the work token can do
 none of these.
 TLS and bearer validation happen before request decoding.
 

@@ -399,49 +399,107 @@ session's stops added checkpoints unchecked.
   a task's tail never check the bound: they write what was reserved, and
   refusing them would lose work. Records and journals are bounded metadata
   and are not reserved. Section 4 reserved one checkpoint for a submission,
-  so its input was never covered; it now reserves two. At the smallest bound,
-  twice `maxCheckpointBytes`, the executor admits one session at a time.
+  so its input was never covered; it now reserves two.
+- **What the bound does not cover.** Removal marks (below) are not counted.
+  Scratch space is not reserved: an upload's validation before admission, and
+  a task's capture of a revision or an empty workspace after it, each write
+  up to `maxCheckpointBytes` under `work/` and delete it when done. A
+  concurrent admission counts that scratch as kept, so it only refuses work
+  sooner, but the volume may briefly hold that much beyond `retainedBytes`.
+  Admitting before validating an upload would reserve room for input that may
+  be refused, and capture runs in the driver after admission by design, so
+  both stay as they are.
+- **The smallest bound.** At `retainedBytes` equal to twice
+  `maxCheckpointBytes`, the smallest allowed, a submission is admitted only
+  when the executor keeps nothing at all, so it keeps one session. A resume
+  there is admitted only when that session's workspace, checkpoint, journal
+  and record fit in one `maxCheckpointBytes`, so a large session can be
+  removed but never resumed. The minimum is unchanged, since raising it would
+  stop executors configured at it from starting; the owner decides.
 - **A full executor says so.** The owner protocol gains `sessions_full` and
   `retention_full`, both HTTP 507, whose fixed messages say which bound was
-  reached and name `sproozi rm ID --remote` and `retainedBytes`. The CLI
-  prints them without a retry hint, and Hermes reads the same text from
-  `sproozi_run`. The placement protocol does not use them.
+  reached and name `sproozi rm ID --remote` and `retainedBytes`. A session at
+  its cap of 256 executions or 1024 bound operations answers
+  `executions_full` or `operations_full`, also 507, where it answered
+  `unavailable`. The CLI prints them without a retry hint, and Hermes reads
+  the same text from `sproozi_run`. The placement protocol does not use them.
 - **The owner action `remove`**, home principal only, behind
   `sproozi rm ID --remote`. It applies home's rule, `session.Removable` on
   every execution through `Coordinator.Remove`, which also deletes the
   journals and the content no remaining journal names, plus the catalogue's
-  own tails: `exporting` is refused, since its claim is still to come. A
+  own: `exporting` is refused, since its claim is still to come, and so is a
+  session that an unstarted session starts from (`workspaceFrom`), whose
+  start reads its checkpoint; removal and submission are serialized under the
+  retention lock so one cannot slip between the other's check and save. A
   `retained`, `failed`, `cancelled` or `pulled` session is removed; a version
   1 record goes with its `.checkpoint` file. The owner protocol carries codes
   only, so the executor answers `conflict` and the CLI explains it from the
-  session's phase in local `rm`'s words, which `session.RemovalRefusal` now
-  holds for both.
-- **Removal leaves a mark**, `work/<id>.removed`, with the session's
-  executions. The mark makes `remove` replay-safe without an operation UUID,
-  since a session has only one removal: repeating it answers removed and
-  finishes deleting journals an interrupted removal left. It also keeps the ID
-  from starting again: a submission that repeats the removed session's
-  `requestId`, such as a late retry from Hermes, answers `conflict` instead of
-  running the task twice or, for a pulled session, creating a second owner of
-  an ID home owns. Marks count towards neither the 1024 records nor
-  `retainedBytes`, so an executor at the smallest bound can admit again after
-  a removal. The record format stays version 2.
-- **A pulled record is removable.** It is the one-way claim's tombstone: it
-  keeps the ID from running here again, which the mark now does, and it
-  answers a repeated `claim` for a home whose claim reply was lost. Home
-  saves the import before it claims and marks it claimed after the reply, so
-  only that repeat needs the record. Refusing removal would keep every pulled
-  session's journal and checkpoint, and its place in the count, for ever.
-  The executor cannot see whether home recorded the claim, so the reference
-  says to remove a pulled session only after `pull` reported it pulled; a
-  home that loses the reply and then finds the record removed keeps an
-  import it cannot activate.
+  session's phase in local `rm`'s words, which `session.RemovalRefusal` holds
+  for both; a running task is told to wait or cancel, since it takes no stop.
+- **Removal leaves a mark**, `work/<id>.removed`. The mark makes `remove`
+  replay-safe without an operation UUID, since a session has only one
+  removal: repeating it answers removed. It also keeps the ID from starting
+  again: a submission that repeats the removed session's `requestId`, such as
+  a late retry from Hermes, answers `conflict` instead of running the task
+  twice or, for a pulled session, creating a second owner of an ID home owns.
+  Marks count towards neither the 1024 records nor `retainedBytes`, so an
+  executor at the smallest bound can admit again after a removal. The record
+  format stays version 2.
+- **Removal survives a crash.** The mark is written durably first and lists
+  the session's executions; then the journals go (the coordinator syncs its
+  directory), then the record and any kept upload (the catalogue syncs its
+  directory), and last the mark shrinks to the session ID. `Open` finishes
+  every removal whose mark still lists executions, or whose record is still
+  there, before it starts any session, so a record whose journals are gone is
+  never started again and no unlisted journal keeps counting towards the
+  bound.
+- **A pulled record is removed only once home holds the pull.** The record is
+  the one-way claim's tombstone: it keeps the ID from running here again,
+  which the mark now does, and it answers a repeated `claim` for a home whose
+  claim reply was lost. Home saves the import before it claims and records
+  the claim after the reply, so only that repeat needs the record, and the
+  executor cannot see whether home recorded it. So `remove` of a pulled
+  session needs `pullFinished`, which the CLI sends only after this machine's
+  service reports the session as its own (ownership `home`); with the service
+  stopped, the session unknown here or its pull unfinished, `rm --remote`
+  refuses and says to start the service, run it on the machine that pulled
+  the session, or finish with `sproozi pull ID`. The executor refuses a
+  request without it, so no other CLI path skips the check. A pulled session
+  whose machine removed its own copy first cannot be removed from the
+  cluster; whether an override is wanted is the owner's decision.
+- **Removal does not wait for other sessions.** `Coordinator.Remove` took
+  the coordinator's lock exclusively. That lock kept its clean-up of
+  content stored once by digest (workspaces, checkpoints, profiles) from
+  deleting content an operation had written but not yet named in its saved
+  journal; it also kept journals from being deleted under an operation. But
+  every operation holds the coordinator's lock shared for its whole run,
+  including a graceful stop that waits up to two minutes for a native turn,
+  and a running task's driver repeats that stop at once, so removal answered
+  busy whenever any task ran: exactly when `retention_full` sends the user to
+  remove. Now removal takes only the removed executions' own locks, in ID
+  order, waiting at most five seconds for an operation on one of them. Each
+  operation records the content it writes, under a short shared content
+  lock, and forgets it when it releases its execution, after the journal
+  that names the content is saved or not; the clean-up takes the content
+  lock exclusively and treats recorded content as named. Neither lock is
+  held across a placement call. The order is the catalogue's session lock,
+  then the retention lock, then the coordinator's shared lock, then an
+  execution's lock, then the content lock; `CancelUnsettled` still runs
+  `admit`, which takes the catalogue's session lock, before it takes the
+  execution's lock (ADR 0018), so the order holds. Home's `rm` uses the same
+  `Coordinator.Remove` and gains the same behaviour.
 
 Alternatives rejected:
 
-- **Refuse to remove a pulled record.** Safe for a lost claim reply, but the
-  catalogue then still only grows for pulled work, which is the common end
-  of retained work.
+- **Release the coordinator's shared lock during the native stop wait.**
+  Smaller, but the lock then no longer means "no operation is in progress",
+  and every placement call that waits would need the same treatment, now and
+  in each future placement.
+- **Defer clean-up until the executor is idle.** Capacity would not be freed
+  while tasks run, which is when it is needed.
+- **Allow removing a pulled record on the user's word**, as the first draft
+  of this section did with a sentence in the reference. A lost claim reply
+  then strands home's import with nothing to activate it.
 - **Bind `remove` to an operation UUID**, as `stop` and `resume` are. The
   binding would have to outlive the record it binds to; the mark already
   answers a repeat, and a session has one removal, so an operation adds no
@@ -455,9 +513,10 @@ Alternatives rejected:
 - **Keep reporting `unavailable`.** It tells the user to restore
   connectivity and retry with the same operation, which never helps.
 
-Revisit when marks become numerous enough to matter (they grow by one small
-file per removal), when home can confirm a claim to the executor so a pulled
-record can be removed only after that, or when the executor's catalogue merges
+Revisit when marks become numerous enough to matter (each finished one is
+about 50 bytes), when home can confirm a claim to the executor so a pulled
+record can be removed without asking home's service, when the smallest bound
+should hold more than one session, or when the executor's catalogue merges
 with home's.
 
 ## Alternatives
@@ -522,7 +581,15 @@ with home's.
   prompts and skills that match the old words need updating in the same
   release. The MCP tool schemas do not change.
 - The executor keeps a second locked directory, `sessions/`, next to `work/`
-  on the same volume, bounded by `retainedBytes` as section 12 states it.
+  on the same volume, bounded by `retainedBytes` with the exceptions section
+  12 states: removal marks, and transient scratch space.
+- **Upgrade note (section 12).** A resume is now admission-checked, where it
+  was not, and a submission reserves two checkpoints instead of one, so an
+  executor near its bound can refuse work the previous release accepted. For
+  example, with the largest checkpoint limit, 64 MiB, and the default 1 GiB
+  bound, an empty executor admits eight concurrent unstarted submissions
+  instead of sixteen.
+  Make room with `sproozi rm ID --remote` or raise `retainedBytes`.
 - Executor configuration with `workTokenFile` now needs
   `workTokenMaxDuration`; the executor names the field at startup.
 - This replaces [ADR 0032](0032-stopping-a-visit-with-no-native-conversation.md)'s

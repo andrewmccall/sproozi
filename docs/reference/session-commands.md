@@ -236,7 +236,7 @@ each finished container. It refuses:
 | `session ID is running; stop it with "sproozi stop ID" or "sproozi cancel ID" first` | The session has a running agent. | `sproozi stop ID` or `sproozi cancel ID`, then `rm`. |
 | `session ID has unfinished work (PHASE); run "sproozi recover ID", then remove it` | A stop, move or cancellation was interrupted, or its usage is not settled. | `sproozi recover ID`. |
 | `session ID is still being pulled; finish with "sproozi pull ID" before removing it` | A pull has not finished. | The same `pull` command. |
-| `another operation is in progress; run the command again shortly` | Another command held the service's records for more than five seconds. | `rm` again. |
+| `another operation is in progress; run the command again shortly` | Another command on this session held it for more than five seconds. Operations on other sessions never delay `rm`. | `rm` again. |
 
 When an earlier operation blocks a command, the service refuses it and names
 the command that unblocks it. Nothing was recorded, so there is no retry
@@ -356,14 +356,31 @@ with `--remote`: `session ID is running; stop it with "sproozi stop ID
 --remote" or "sproozi cancel ID --remote" first`, `session ID has unfinished
 work (PHASE); run "sproozi recover ID --remote", then remove it`, `session ID
 is PHASE; wait for it to finish, then remove it` and `session ID is still
-being pulled; finish with "sproozi pull ID" before removing it`. Removing a
-removed session succeeds, so a removal whose outcome is unknown ends with
-`run "sproozi rm ID --remote" again`. Remove a pulled session only after
-`pull` on the machine that pulled it reported it pulled: the executor then no
-longer answers the pull.
+being pulled; finish with "sproozi pull ID" before removing it`. A running
+task takes no `stop`, so it gets `session ID is a task that is still running;
+wait for it to finish, or cancel it with "sproozi cancel ID --remote", then
+remove it`. A session another, unstarted session starts from (`run --remote
+--workspace-from`) is kept until that one starts: `session OTHER starts from
+session ID and has not started yet; wait for it to start, or cancel it with
+"sproozi cancel OTHER --remote", then remove session ID`. Removing a removed
+session succeeds, so a removal whose outcome is unknown ends with `run
+"sproozi rm ID --remote" again`. Removal does not wait for other sessions.
+
+A `pulled` session is removed from the cluster only when the Sproozi service
+on this machine holds it as pulled, because the cluster then no longer
+answers a claim the service repeats after a lost reply. Otherwise `rm
+--remote` refuses:
+
+| Reply | Cause | Run |
+| --- | --- | --- |
+| `session ID was pulled from the cluster, and the Sproozi service on this machine is not running, ...` | The command cannot ask the service. | `sproozi service start`, then `rm` again. |
+| `session ID was pulled from the cluster, but this machine does not hold session ID; run "sproozi rm ID --remote" on the machine that pulled it, ...` | Another machine pulled it, or this machine removed its copy. | `rm --remote` on the machine that pulled it. |
+| `session ID is still being pulled to this machine; finish with "sproozi pull ID", then remove it` | The pull's claim is not recorded here yet. | `sproozi pull ID`, then `rm` again. |
 
 When the executor is full it refuses `run --remote` and `resume ID --remote`
-and says which bound it reached; nothing started, so there is no retry hint.
+and says which bound it reached, and a session at its own cap of executions
+or operations refuses `resume` or `stop` the same way; nothing changed, so
+there is no retry hint.
 
 | Error | Cause | Run |
 | --- | --- | --- |
@@ -379,7 +396,9 @@ and says which bound it reached; nothing started, so there is no retry hint.
 | `the cluster's remote executor NAME is older than remote stop; update the executor ...` | The executor has no `stop`, `resume` or `attach` route. | Update the executor, or `sproozi pull ID`. |
 | `the cluster's remote executor NAME is older than remote rm; update the executor ...` | The executor has no `remove` route. | Update the executor. |
 | `Remote executor full: it keeps its maximum number of sessions; remove sessions you no longer need with "sproozi rm ID --remote", then retry: ...` | The executor keeps 1024 sessions. | `sproozi ls --remote`, then `sproozi rm ID --remote` for sessions you no longer need. |
-| `Remote executor full: its kept sessions, plus room for a checkpoint of each running session and of this one, would exceed its retainedBytes; ...` | What the executor keeps, plus what its running sessions and this one may still keep, exceeds [`retainedBytes`](remote-executors.md#retention). | `sproozi rm ID --remote`, stop running sessions, or ask the administrator to raise `retainedBytes`. |
+| `Remote executor full: what it keeps, plus the room its unfinished sessions and this request may still need, would exceed its retainedBytes; ...` | What the executor keeps, plus what its unfinished sessions and this request may still keep, exceeds [`retainedBytes`](remote-executors.md#retention). | `sproozi rm ID --remote`, stop running sessions, or ask the administrator to raise `retainedBytes`. |
+| `This session has run its maximum number of executions, so it cannot be resumed again there; ...` | `resume --remote` of a session resumed 255 times. | `sproozi pull ID`, or start new work. |
+| `This session has used its maximum number of stop and resume operations; ...` | `stop` or `resume --remote` of a session with 1024 of them. | `cancel`, or `sproozi pull ID` once it is stopped. |
 | `session ID is a task, which stops by itself when it completes; ...` | `attach`, `stop` or `resume` of a task. | `sproozi status ID --remote`, or `cancel`. |
 | `session ID is running; attach to it with "sproozi attach ID --remote", or stop it ...` | `resume` of a running session. | `attach`, or `stop` then `resume`. |
 | `session ID is stopped; "sproozi resume ID --remote" continues it` | `attach` or `stop` of a `retained` session. | `sproozi resume ID --remote`. |
