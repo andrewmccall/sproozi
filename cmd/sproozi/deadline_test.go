@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/deadline"
+	"github.com/andrewmccall/sproozi/internal/session/home"
 	"github.com/andrewmccall/sproozi/internal/work"
 )
 
@@ -67,6 +68,29 @@ func TestDeadlineText(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), deadline.NoneArg) {
 		t.Fatalf("live session without deadline listed as %q", out.String())
+	}
+}
+
+// A session still starting or moving after its deadline names resume, which
+// ends that start and continues the session (ADR 0060); one before its
+// deadline names nothing.
+func TestStatusOfAStartOverdueNamesResume(t *testing.T) {
+	id := "3f2b0000-0000-4000-8000-000000000000"
+	for _, tc := range []struct {
+		phase string
+		at    time.Time
+		want  bool
+	}{
+		{"preparing", time.Now().Add(-time.Minute), true},
+		{"activating", time.Now().Add(-time.Minute), true},
+		{"preparing", time.Now().Add(time.Hour), false},
+		{"preparing", time.Time{}, false},
+		{phaseActive, time.Now().Add(-time.Minute), false},
+	} {
+		text := statusText(cmdStatus, home.Status{ID: id, Phase: tc.phase, Deadline: tc.at}, false)
+		if got := strings.Contains(text, "Continue it with: sproozi resume "+shortID(id)); got != tc.want {
+			t.Errorf("%s %v: %q", tc.phase, tc.at, text)
+		}
 	}
 }
 

@@ -251,6 +251,18 @@ func abandoned(r Record, op Operation) bool {
 	return op.Stage == stageCancelled && r.CancelOperation == ""
 }
 
+// Abandoned reports that the deadline ended operation, a move or a first
+// visit, before its destination became active (ADR 0060). A replay of it
+// reports ErrDeadlinePassed.
+func (r Record) Abandoned(operation string) bool {
+	for _, op := range r.Operations {
+		if op.ID == operation {
+			return abandoned(r, op)
+		}
+	}
+	return false
+}
+
 // abandon ends a move or first visit whose deadline passed before its
 // destination became active (ADR 0060). It first establishes that no writer
 // exists or can come to exist at the destination. When the operation has no

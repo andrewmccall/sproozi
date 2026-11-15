@@ -44,6 +44,8 @@ type placementFixture struct {
 	digest                                         string
 	initials, prepares, activations, stops, aborts int
 	lostStop, lostActivate, unknownUsage           bool
+	// lostPrepare prepares the visit, then loses the reply once.
+	lostPrepare bool
 	// turnless stops a visit from a workspace with no conversation.
 	turnless                    bool
 	exited                      *session.Exit
@@ -86,6 +88,10 @@ func (p *placementFixture) Prepare(ctx context.Context, l session.Launch, data [
 		p.prepares++
 	}
 	i := p.prepare(l)
+	if p.lostPrepare {
+		p.lostPrepare = false
+		return session.Incarnation{}, errors.New("lost prepare reply")
+	}
 	if p.holdPrepare != nil {
 		close(p.holdPrepare)
 		<-ctx.Done()

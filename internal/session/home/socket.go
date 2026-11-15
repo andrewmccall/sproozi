@@ -403,8 +403,18 @@ func needsRecovery(err error, id, continueWith string) error {
 		return rejectedError(fmt.Sprintf("%v; run \"sproozi recover %s\" to finish the cancellation", err, id))
 	case errors.Is(err, session.ErrSessionCancelled):
 		return cancelledProblem(id)
+	case errors.Is(err, session.ErrDeadlinePassed):
+		return deadlineProblem(id)
 	}
 	return err
+}
+
+// deadlineProblem says a start or move reached its deadline first, so the
+// session stopped with its work kept, and names the one command that
+// continues it (ADR 0060).
+func deadlineProblem(id string) error {
+	return rejectedError(fmt.Sprintf("session %s reached its deadline before it started, so it is stopped with its "+
+		"work kept; continue it on this machine with \"sproozi resume %s\", which gives it a new deadline", id, id))
 }
 
 // cancelledProblem says a cancelled session cannot continue and how to remove it.

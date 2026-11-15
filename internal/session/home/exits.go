@@ -115,6 +115,13 @@ func (s *Service) notStoppedProblem(id, current string) error {
 	case r.Phase.Stopping():
 		return rejectedError(fmt.Sprintf("home: session %s is still stopping; run \"sproozi stop %s\" to finish, "+
 			"or \"sproozi cancel %s\" to force-stop it", id, id, id))
+	case r.Phase.Starting() && s.coordinator.PastDeadline(r):
+		// resume ends a start or move its deadline overtook, and continues.
+		return rejectedError(fmt.Sprintf("home: session %s reached its deadline before it started; "+
+			"\"sproozi resume %s\" continues it with a new deadline", id, id))
+	case r.Phase == session.PhaseIdle:
+		return rejectedError(fmt.Sprintf("home: session %s is stopped, with its work kept; \"sproozi resume %s\" "+
+			"continues it", id, id))
 	}
 	return rejectedError(fmt.Sprintf("home: session %s is still starting or moving; run \"sproozi recover %s\" "+
 		"to finish that first", id, id))

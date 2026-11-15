@@ -403,13 +403,24 @@ func (s *Service) ResumeWithMaxDuration(ctx context.Context, id, operation strin
 			return Status{}, inspectErr
 		}
 		if prior.Operations[0].ID == operation {
-			if r.Current != execution {
+			if r.Current != execution && !prior.Abandoned(operation) {
 				return Status{}, errors.New("home: resume operation belongs to an earlier execution")
 			}
-			if _, err = s.startFirstVisit(ctx, prior); err != nil {
+			if _, err = s.startFirstVisit(ctx, prior); errors.Is(err, session.ErrDeadlinePassed) {
+				// The deadline ended this resume before it started; a new
+				// resume continues the session from what it kept.
+				return Status{}, errors.Join(err, s.retireSettled(&r))
+			} else if err != nil {
 				return Status{}, err
 			}
 			return s.catalogStatus(r)
+		}
+	}
+	if r.Current != "" {
+		// A start or move whose deadline passed ends here, so this resume
+		// continues the session instead of being refused for it.
+		if err = s.endLate(ctx, &r); err != nil {
+			return Status{}, err
 		}
 	}
 	if r.Current != "" {
@@ -624,16 +635,49 @@ func (s *Service) Move(ctx context.Context, id, operation, destination string) (
 	if err = s.bindSessionOperation(sessionID, operation, ActionMove, execution, destination); err != nil {
 		return Status{}, err
 	}
-	return s.moveExecution(ctx, execution, operation, destination)
+	status, err := s.moveExecution(ctx, execution, operation, destination)
+	if errors.Is(err, session.ErrDeadlinePassed) {
+		// The deadline ended the move after its source stopped: the session
+		// is stopped with that stop's checkpoint (ADR 0060).
+		return s.settledStatus(sessionID, status, err)
+	}
+	return status, err
 }
 
+// Recover finishes the current execution's pending operation. A stop it
+// finishes, or a start or move its deadline ends, leaves the session stopped.
 func (s *Service) Recover(ctx context.Context, id string) (Status, error) {
-	execution, _, unlock, err := s.lockSessionExecution(id)
+	execution, sessionID, unlock, err := s.lockSessionExecution(id)
 	if err != nil {
 		return Status{}, err
 	}
 	defer unlock()
-	return s.recoverExecution(ctx, execution)
+	status, err := s.recoverExecution(ctx, execution)
+	if errors.Is(err, session.ErrDeadlinePassed) || err == nil && status.Phase == string(session.PhaseIdle) {
+		return s.settledStatus(sessionID, status, err)
+	}
+	return status, err
+}
+
+// settledStatus retires the locked session's current execution if it is idle
+// and reports the session's status with err. Without a session it reports
+// the execution's status.
+func (s *Service) settledStatus(sessionID string, status Status, err error) (Status, error) {
+	if sessionID == "" {
+		return status, err
+	}
+	r, readErr := s.readCatalog(sessionID)
+	if readErr == nil {
+		readErr = s.retireSettled(&r)
+	}
+	if readErr != nil {
+		return status, errors.Join(err, readErr)
+	}
+	settled, statusErr := s.catalogStatus(r)
+	if statusErr != nil {
+		return status, errors.Join(err, statusErr)
+	}
+	return settled, err
 }
 
 func (s *Service) Cancel(ctx context.Context, id, operation string) (Status, error) {
