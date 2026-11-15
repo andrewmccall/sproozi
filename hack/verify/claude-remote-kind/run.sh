@@ -99,11 +99,15 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj '/CN=Claude remote proof
   -addext basicConstraints=critical,CA:TRUE -keyout "$tls/ca.key" -out "$tls/ca.pem" >/dev/null 2>&1
 openssl req -newkey rsa:2048 -nodes -subj '/CN=sproozi-gateway.sproozi-system.svc' \
   -keyout "$tls/leaf.key" -out "$tls/leaf.csr" >/dev/null 2>&1
+# In workload mode the gateway inspects every provider's signed-in hosts
+# (cmd/gateway pruneModelHosts), so its certificate must cover them all.
+workload_names=
+[[ "$auth" != sign-in ]] || workload_names=,DNS:platform.claude.com,DNS:chatgpt.com,DNS:auth.openai.com,DNS:api.individual.githubcopilot.com,DNS:api.business.githubcopilot.com,DNS:api.enterprise.githubcopilot.com,DNS:github.com,DNS:api.github.com
 cat >"$tls/leaf.ext" <<EOF
 basicConstraints=critical,CA:FALSE
 keyUsage=critical,digitalSignature,keyEncipherment
 extendedKeyUsage=serverAuth
-subjectAltName=DNS:sproozi-gateway.sproozi-system.svc,DNS:sproozi-gateway.sproozi-system.svc.cluster.local,DNS:api.anthropic.com,DNS:api.openai.com,DNS:sproozi-work.$sessions.svc,DNS:claude-fixture.sproozi-fixture.svc
+subjectAltName=DNS:sproozi-gateway.sproozi-system.svc,DNS:sproozi-gateway.sproozi-system.svc.cluster.local,DNS:api.anthropic.com,DNS:api.openai.com,DNS:sproozi-work.$sessions.svc,DNS:claude-fixture.sproozi-fixture.svc${workload_names}
 EOF
 openssl x509 -req -sha256 -days 1 -in "$tls/leaf.csr" -CA "$tls/ca.pem" -CAkey "$tls/ca.key" \
   -CAcreateserial -CAserial "$tls/ca.srl" -extfile "$tls/leaf.ext" -out "$tls/leaf.crt" >/dev/null 2>&1
