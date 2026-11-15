@@ -65,7 +65,8 @@ func installManagedCodex(home string, p agentprofile.Profile) error {
 		return err
 	}
 	return errors.Join(
-		installManagedFile(filepath.Join(home, harness.NativeUserInstructionsFile(harness.NativeCodex)), []byte(profileInstructions(p, harness.NativeCodex)), 0400),
+		installManagedFile(filepath.Join(home, harness.NativeUserInstructionsFile(harness.NativeCodex)),
+			[]byte(profileInstructions(p, harness.NativeCodex)), 0400),
 		installManagedSkill(home),
 		installProfileSkills(home, p))
 }
