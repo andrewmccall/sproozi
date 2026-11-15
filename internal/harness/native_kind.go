@@ -24,6 +24,39 @@ func (k NativeKind) TakesTask() bool {
 	return err == nil && h.TakesTask
 }
 
+// NativeSessionRoot is the managed session's directory in its sandbox: the
+// workspace and every harness's native home are under it.
+const NativeSessionRoot = "/workspace/session"
+
+// NativeHomePath is the kind's native home in the sandbox. It is empty for a
+// kind that is not managed.
+func NativeHomePath(k NativeKind) string {
+	h, err := Managed(k)
+	if err != nil {
+		return ""
+	}
+	return NativeSessionRoot + "/" + h.NativeDirectory
+}
+
+// NativeExecutable is the stock client's path in the managed sandbox image,
+// empty for a kind that is not managed.
+func NativeExecutable(k NativeKind) string {
+	h, err := Managed(k)
+	if err != nil {
+		return ""
+	}
+	return h.Executable
+}
+
+// NativeDisplayName names the kind in messages, such as "Claude Code".
+func NativeDisplayName(k NativeKind) string {
+	h, err := Managed(k)
+	if err != nil {
+		return string(k)
+	}
+	return h.DisplayName
+}
+
 // NativeDirectory is the selected component of the atomic workspace/native
 // checkpoint pair, independent of fresh cache, credentials and launch settings.
 func NativeDirectory(k NativeKind) (string, error) {
