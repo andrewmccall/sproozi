@@ -311,8 +311,8 @@ func TestPrepareReplayAfterDeadline(t *testing.T) {
 	}
 	fresh := fixtureLaunch(t, data)
 	fresh.Deadline = l.Deadline
-	if _, err = p.Prepare(t.Context(), fresh, data); err == nil {
-		t.Fatal("new visit prepared after its deadline")
+	if _, err = p.Prepare(t.Context(), fresh, data); err == nil || !strings.Contains(err.Error(), "deadline") {
+		t.Fatalf("new visit after its deadline: %v", err)
 	}
 	if _, err = p.load(fresh); !os.IsNotExist(err) {
 		t.Fatalf("refused visit retained a record: %v", err)
