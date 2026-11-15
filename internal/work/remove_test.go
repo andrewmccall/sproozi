@@ -263,7 +263,7 @@ func TestRemoveRacesASubmissionFromIt(t *testing.T) {
 	t.Parallel()
 	c, _ := projectFixture(t)
 	o := openOwner(t, c)
-	var sources []View
+	sources := make([]View, 0, 4)
 	for range 4 {
 		v, err := o.Submit(t.Context(), projectRequest("sproozi-dev"))
 		if err != nil {
