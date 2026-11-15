@@ -185,6 +185,7 @@ verify-workflow-fixtures: ## Run offline Python and shell regressions for fixtur
 	python3 -m unittest discover -s hack/verify/orchestration-kind -p '*_test.py'
 	python3 -m unittest discover -s hack/verify/claude-remote-kind -p '*_test.py'
 	python3 hack/verify/quickstart_test.py
+	python3 hack/verify/docs_test.py
 	python3 hack/release/publish_test.py
 	bash hack/verify/kind-test.sh
 	bash hack/demo/setup-test.sh
