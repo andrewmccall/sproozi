@@ -14,7 +14,8 @@ func SetClock(o *Owner, now func() time.Time) {
 }
 
 // SaveRetained saves the retained grant id with its phase replaced and, when
-// receipt is set, an empty receipt, through the owner's validating save.
+// receipt is set, a well-formed zero receipt for every allowance (otherwise
+// none), through the owner's validating save.
 func SaveRetained(o *Owner, id, phase string, receipt bool) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -22,9 +23,12 @@ func SaveRetained(o *Owner, id, phase string, receipt bool) error {
 	if err != nil {
 		return err
 	}
-	r.Phase = grantPhase(phase)
+	r.Phase, r.Receipt = grantPhase(phase), nil
 	if receipt {
 		r.Receipt = map[string]budget.TrustedUsage{}
+		for capability := range r.Launch.Allowances {
+			r.Receipt[capability] = budget.TrustedUsage{}
+		}
 	}
 	return o.save(r)
 }

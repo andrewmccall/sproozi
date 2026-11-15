@@ -319,6 +319,25 @@ func TestPrepareReplayAfterDeadline(t *testing.T) {
 	}
 }
 
+// An Activate replay of an active visit answers from the record and no longer
+// re-verifies the containers, so it succeeds after they are gone; the next
+// Inspect, which still verifies them, reports the loss.
+func TestActivateReplayDoesNotReverifyAndInspectReportsTheLoss(t *testing.T) {
+	t.Parallel()
+	p, f, a, l, i := activeFixture(t, testutil.PrivateDir(t))
+	activations := a.activate
+	clear(f.containers)
+	if err := p.Activate(t.Context(), l, i); err != nil {
+		t.Fatalf("activation replay: %v", err)
+	}
+	if a.activate != activations {
+		t.Fatal("activation replay repeated the grant activation")
+	}
+	if o, err := p.Inspect(t.Context(), l); err == nil {
+		t.Fatalf("inspect accepted a visit whose containers are gone: %+v", o)
+	}
+}
+
 // Activating a visit already recorded active replays the recorded outcome: it
 // is not refused once the deadline has passed (ADR 0058), and a replay whose
 // side effects would now fail leaves the visit active.
