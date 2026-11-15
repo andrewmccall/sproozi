@@ -232,7 +232,7 @@ session's, and `pullFinished`, which a pulled session needs.
 | --- | --- |
 | `retained`, `failed`, `cancelled` | Removed. |
 | `pulled` | Removed when `pullFinished` is `true`, otherwise `conflict`. Once removed, the executor answers neither `info` nor `claim` for it, so a home whose claim reply was lost could never finish its pull. `sproozi rm ID --remote` sends it only after this machine's service reports the session as its own. |
-| `preparing`, `activating`, `active`, `stopping` | `conflict`: stop or cancel it first, or wait for it to start or finish. |
+| `preparing`, `activating`, `active`, `stopping` | `conflict`: wait for it to start or finish, or cancel it; an interactive session can also be stopped. A task is `active` while its turn runs and `stopping` only while its answer is recorded. |
 | `unknown-stop`, `unknown-usage`, `cancelling` | `conflict`: `recover` it first. |
 | `exporting` | `conflict`: finish the pull first. |
 | Any, while a session whose first visit has not started names it in `workspaceFrom` | `conflict`: that session's start reads this one's checkpoint. Wait for it to start, or cancel it. |

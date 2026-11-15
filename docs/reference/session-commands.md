@@ -356,8 +356,9 @@ with `--remote`: `session ID is running; stop it with "sproozi stop ID
 --remote" or "sproozi cancel ID --remote" first`, `session ID has unfinished
 work (PHASE); run "sproozi recover ID --remote", then remove it`, `session ID
 is PHASE; wait for it to finish, then remove it` and `session ID is still
-being pulled; finish with "sproozi pull ID" before removing it`. A running
-task takes no `stop`, so it gets `session ID is a task that is still running;
+being pulled; finish with "sproozi pull ID" before removing it`. A task takes
+no `stop`; one that is `active` while its turn runs, or `stopping` while its
+answer is recorded, gets `session ID is a task that is still running;
 wait for it to finish, or cancel it with "sproozi cancel ID --remote", then
 remove it`. A session another, unstarted session starts from (`run --remote
 --workspace-from`) is kept until that one starts: `session OTHER starts from

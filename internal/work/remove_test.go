@@ -56,7 +56,9 @@ func TestRemoveRefusesSessionsThatAreNotSafelyRemovable(t *testing.T) {
 		o := openOwner(t, c)
 		refuse(t, o, startInteractive(t, o, interactiveRequest()).ID, phaseActive)
 	})
-	t.Run("stopping", func(t *testing.T) {
+	// A task whose turn is still running reads active, though the journal
+	// holds its completion wait as stopping (completing).
+	t.Run("running task", func(t *testing.T) {
 		t.Parallel()
 		c, p := fixture(t)
 		release := make(chan struct{})
@@ -65,6 +67,21 @@ func TestRemoveRefusesSessionsThatAreNotSafelyRemovable(t *testing.T) {
 		defer close(release)
 		v := submit(t, o)
 		<-p.stopStarted
+		refuse(t, o, v.ID, phaseActive)
+	})
+	// An interactive session whose owner's stop waits for the agent's turn
+	// is stopping.
+	t.Run("stopping", func(t *testing.T) {
+		t.Parallel()
+		c, p := fixture(t)
+		o := openOwner(t, c)
+		v := startInteractive(t, o, interactiveRequest())
+		p.mu.Lock()
+		p.turnPending = 1
+		p.mu.Unlock()
+		if waiting, err := o.Stop(t.Context(), v.ID, uuid.NewString()); err != nil || waiting.Phase != phaseStopping {
+			t.Fatalf("stop waiting for the turn: %+v %v", waiting, err)
+		}
 		refuse(t, o, v.ID, phaseStopping)
 	})
 	t.Run("preparing", func(t *testing.T) {
@@ -190,7 +207,8 @@ func TestRemoveWhileAnotherSessionsStopWaits(t *testing.T) {
 	if _, err := o.Submit(t.Context(), refused); err != nil {
 		t.Fatalf("submission after removal while another session stops: %v", err)
 	}
-	if v, err := o.Info(t.Context(), running.ID); err != nil || v.Phase != phaseStopping {
+	// The task's turn still runs: its completion wait reads active.
+	if v, err := o.Info(t.Context(), running.ID); err != nil || v.Phase != phaseActive {
 		t.Fatalf("the waiting stop was disturbed: %+v %v", v, err)
 	}
 }

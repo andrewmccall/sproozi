@@ -584,8 +584,8 @@ func TestRemoteRemove(t *testing.T) {
 		}
 	}
 
-	// A task takes no stop: it is cancelled, or left to finish. A running task
-	// may show active or stopping.
+	// A task takes no stop: it is cancelled, or left to finish. It is active
+	// while its turn runs and stopping while its answer is recorded.
 	for _, phase := range []string{phaseRunning, phaseStopping} {
 		task := interactiveView(phase)
 		task.Mode = ""

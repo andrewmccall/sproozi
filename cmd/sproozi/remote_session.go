@@ -363,8 +363,9 @@ func (q *options) removeError(target remoteTarget, err error) error {
 
 // removalProblem says why a cluster's session cannot be removed in its
 // phase, or nil when its phase allows it. A task takes no stop, so a running
-// one is cancelled or left to finish; while it runs its phase may read active
-// or stopping.
+// one is cancelled or left to finish. A task reads active while its turn
+// runs and stopping while its answer is recorded; an executor older than
+// that reads stopping for the whole turn.
 func (q *options) removalProblem(v work.View) error {
 	switch v.Phase {
 	case work.PhaseRetained, work.PhaseFailed, work.PhasePulled, work.Phase(phaseCancelled):
