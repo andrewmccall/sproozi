@@ -121,13 +121,8 @@ func ValidateNativeArgs(kind NativeKind, args []string) error {
 			return fmt.Errorf("harness arguments: each must be at most %d bytes without NUL", NativeArgMaxBytes)
 		}
 	}
-	controlled := codexControlled
-	switch kind {
-	case NativeClaude:
-		controlled = claudeControlled
-	case NativeCopilot:
-		controlled = copilotControlled
-	}
+	h, _ := Managed(kind)
+	controlled := h.RefusedFlags
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if arg == "--" {
