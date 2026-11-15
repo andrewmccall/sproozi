@@ -1,3 +1,4 @@
+//nolint:goconst // Keep independently stated literal behavior expectations.
 package work
 
 import (

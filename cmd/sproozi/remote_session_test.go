@@ -580,7 +580,8 @@ func TestRemoteRemove(t *testing.T) {
 	}
 
 	f.reply("remove", answerStatus(http.StatusNotFound, "404 page not found"))
-	if code, _, errOut = runCLI("rm", remoteTestID, "--remote"); code != 1 || !strings.Contains(errOut, "older than remote rm") {
+	if code, _, errOut = runCLI("rm", remoteTestID, "--remote"); code != 1 ||
+		!strings.Contains(errOut, "older than remote rm") {
 		t.Fatalf("old executor rm: %d %s", code, errOut)
 	}
 	f.reply("remove", answerStatus(http.StatusServiceUnavailable, `{"error":"unavailable"}`))
