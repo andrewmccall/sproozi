@@ -217,3 +217,101 @@ The exact native transcript is retained as a regression fixture. Anthropic input
 and cache use are unknown before inference, so the gateway reserves remaining
 capacity conservatively; concurrent auxiliary calls can receive 429 and retry.
 This fix preserves that budget boundary rather than relaxing reservations.
+
+## Later clarification (2026-11-14)
+
+Managed Claude Code sessions now always have the `sproozi` control connection
+and receive named MCP servers ([ADR 0001](0001-mcp-capabilities-through-shared-gateway.md),
+clarification of the same date). The foreground Bash-only contract above made
+any MCP call fatal to completion: the `PreToolUse` hook for
+`mcp__sproozi__diagnose` was refused, and the transcript adapter rejected the
+`tool_use` row, so the session could neither stop gracefully nor move.
+
+The supported tool set is now foreground Bash plus tools of a configured MCP
+server, named `mcp__<server>__<tool>`. Sproozi server names contain no
+underscore, so the server part is unambiguous. The lifecycle pairs an MCP call's
+`PreToolUse` and `PostToolUse` by tool ID and name exactly as it pairs Bash, so
+an MCP call still running blocks `Stop` and the stop, and reports
+`pending_tools`. The transcript adapter pairs the `tool_use` row with its
+`tool_result` row as for Bash; an MCP result records the server's content
+rather than Bash's `interrupted` flag. Hook progress rows must name the tool
+that started.
+
+Capturing the stock client showed that a failed call never reports
+`PostToolUse`. A Bash command that exits non-zero, or an MCP tool that returns
+an error, reports `PostToolUseFailure`, and its transcript result has
+`is_error` and an `Error: ` text. The earlier contract therefore also left a
+failed Bash command pending for ever. The supervisor now hooks
+`PostToolUseFailure` and settles the call when `is_interrupt` is false, and the
+adapter accepts that failed result shape. An interrupted call stays pending and
+an interrupted result stays unsupported.
+
+The `Skill` tool is supported too, for the skills the supervisor installs: the
+profile plugin's skills (`profile:<name>`) and the sproozi plugin's
+`sproozi:sproozi-access`. A session that used a skill could otherwise neither
+stop nor move. Its hooks pair like any other call. In the transcript the call
+names only the skill, its result reads `Launching skill: <skill>` with a
+successful `commandName` of that skill, and Claude Code then adds a row marked
+`isMeta` whose `sourceToolUseID` is the call and whose text begins `Base
+directory for this skill: `, followed by one `command_permissions` attachment.
+The call settles only when that row arrives. A skill from anywhere else, a call
+with arguments, a failed call, any other `isMeta` row and a
+`command_permissions` attachment anywhere else stay unsupported, because none
+was captured. Background tasks, subagents, compaction and every other native
+tool remain unsupported.
+
+A Claude Code task launch passes the task as the one positional prompt, after
+`--`, so a task that starts with a dash stays text. The pinned client's
+`UserPromptSubmit` payload carries the submitted `prompt`. The supervisor
+compares it with the task and keeps only whether they matched. Completion then
+requires that the completed turn is the one the task's prompt started: a `Stop`
+after any other prompt does not count, a resumed conversation alone never
+completes a task launch, and a task launch is never turnless. This is the
+counterpart of Codex's check for the task text in its new completed turn. The
+hook is still a workload-accessible hint; the placement's fence, capture and
+finalized usage are unchanged. The task's result is the text of the reply at the
+transcript leaf the checkpoint selected; Claude Code's `(no content)` marker
+reads as an empty answer.
+
+The pinned client (2.1.318) also writes a `tools-used` metadata row once a
+conversation uses a tool, which the adapter had rejected, so any tool use made
+a pinned transcript uncapturable. The adapter accepts that row when it lists
+only supported tools. Evidence: the stock pinned client ran in its terminal
+with the managed tools, settings and hooks against a local provider and a
+local MCP server, and was stopped by killing its process group after `Stop`.
+One turn ran Bash and an MCP tool, a second had both calls fail, and two more
+loaded a profile skill and `sproozi:sproozi-access`. The captured transcripts
+and hook payloads, with host paths replaced and opaque context elided, are
+fixtures in `internal/harness/testdata` and `cmd/native-session/testdata`;
+`hack/verify/claude-transcripts` regenerates them. The transcript adapter selects their final
+leaf, and replaying the hooks completes the task's turn only for the matching
+task. A Claude Code remote executor now accepts tasks (ADR 0057, "Claude
+tasks on the cluster"); a Kind run of one end to end is still to be recorded.
+
+An unattended task also has to start. In a fresh home Claude Code 2.1.318 and
+2.1.325 show a confirmation of `bypassPermissions` mode before submitting the
+launch's prompt, and nobody answers it on a remote task. They ignore and drop
+the `bypassPermissionsModeAccepted` preference the supervisor writes; they read
+`skipDangerousModePermissionPrompt` from the `--settings` file. The managed
+settings now set it, beside the hooks. This accepts nothing the launch did not
+already choose: `bypassPermissions` is the fixed mode, and the outer container
+and gateway stay the confinement. `hack/verify/claude-transcripts/capture.py
+--check` types nothing into the terminal; before the change it stopped at the
+confirmation on both versions, and after it each scenario's task was
+submitted and its turn completed. The preference stays for the older clients
+the movement proofs recorded. The local Docker home runs the same supervisor.
+Ordinary Claude Code AgentRuns (ADR 0054) run `--print` with
+`--dangerously-skip-permissions`, which shows no confirmation:
+`make verify-harness-process` completes in a fresh home with both versions.
+
+We considered keeping MCP out of managed Claude sessions, which would break the
+control connection's `diagnose` and every granted server, removing `Skill`
+from the launch's tools, which would hide the profile's skills and
+`sproozi-access`, and accepting any
+tool name, which would admit subagents and background work whose state the
+checkpoint does not carry. We also considered binding the task to the first
+prompt of the visit without reading its text, which a stray earlier prompt
+could satisfy. Revisit if Claude Code changes its MCP tool naming, stops
+reporting failed calls through `PostToolUseFailure`, changes how a skill's
+instructions are recorded, or drops `prompt` from `UserPromptSubmit`; the unit tests and the captured fixture in
+`internal/harness/testdata` fail first.

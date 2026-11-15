@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/session/remote"
 	"github.com/andrewmccall/sproozi/internal/work"
 )
@@ -18,6 +19,9 @@ import (
 type remoteTarget struct {
 	Name   string
 	Client *work.Client
+	// Harness is the one harness the executor runs, which a refused
+	// submission names.
+	Harness harness.NativeKind
 	// MaxCheckpointBytes is the executor's checkpoint limit, which bounds an
 	// uploaded workspace.
 	MaxCheckpointBytes int64
@@ -51,7 +55,7 @@ func reachRemote(ctx context.Context, kubeContext, namespace string) (remoteTarg
 	if err != nil {
 		return remoteTarget{}, err
 	}
-	return remoteTarget{Name: executor.Name, Client: work.ClientFor(client),
+	return remoteTarget{Name: executor.Name, Client: work.ClientFor(client), Harness: executor.Harness,
 		MaxCheckpointBytes: executor.MaxCheckpointBytes}, nil
 }
 

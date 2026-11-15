@@ -348,7 +348,7 @@ func (o *Owner) view(r record, rec *session.Record) View {
 		v.Exit = lastExit(*rec)
 	}
 	if v.Problem == "" {
-		v.Problem = executionProblem(*rec)
+		v.Problem = executionProblem(*rec, r.Intent.Mode == ModeInteractive)
 	}
 	return v
 }
@@ -379,12 +379,18 @@ func latestVisit(rec session.Record) (*session.Launch, *session.Incarnation) {
 }
 
 // executionProblem explains an execution the coordinator could not settle.
-func executionProblem(rec session.Record) string {
+// The executor retries tasks by itself; an interactive session waits for
+// "recover".
+func executionProblem(rec session.Record, interactive bool) string {
+	retry := "the executor retries, and \"recover\" retries now"
+	if interactive {
+		retry = "run \"recover\" to retry"
+	}
 	switch rec.Phase {
 	case session.PhaseUnknownStop:
-		return "the placement has not proved the writer stopped; the executor retries, and \"recover\" retries now"
+		return "the placement has not proved the writer stopped; " + retry
 	case session.PhaseUnknownUsage:
-		return "the writer stopped, but its usage is not finalized; the executor retries, and \"recover\" retries now"
+		return "the writer stopped, but its usage is not finalized; " + retry
 	}
 	return ""
 }

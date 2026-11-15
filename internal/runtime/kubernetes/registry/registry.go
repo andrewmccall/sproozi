@@ -595,7 +595,7 @@ func validateNativeInput(r Registration) error {
 			return err
 		}
 	}
-	if utf8.RuneCountInString(r.Task) > agentcontract.MaxTaskRunes || strings.ContainsRune(r.Task, 0) || r.Task != "" && (strings.TrimSpace(r.Task) == "" || r.Harness != harness.NativeCodex) {
+	if utf8.RuneCountInString(r.Task) > agentcontract.MaxTaskRunes || strings.ContainsRune(r.Task, 0) || r.Task != "" && (strings.TrimSpace(r.Task) == "" || !r.Harness.TakesTask()) {
 		return fmt.Errorf("invalid native task")
 	}
 	if r.WorkspaceDigest != "" {

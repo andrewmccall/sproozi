@@ -84,7 +84,9 @@ container as ended through `Exited` while the visit is still active, so the
 remote executor's exit sweep can stop it
 ([remote executors](remote-executors.md#interactive-sessions)). A first Codex
 visit that ended before any completed turn stops turnless; one whose report
-names a completed turn's thread keeps that conversation. The report is a
+names a completed turn's thread keeps that conversation. A Claude Code visit
+binds no thread from a report: a first visit stops turnless, and a resumed
+visit's stop names the checkpoint it started from. The report is a
 workload diagnostic, never a writer fence or accounting fact.
 
 ## Terminal attachment
