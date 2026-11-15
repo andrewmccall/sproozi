@@ -113,7 +113,8 @@ Codex and Claude Code on one cluster are two executors, one per namespace
 Owner requests are `POST` to `/work/ACTION` with a JSON body, over the same
 TLS connection as the placement protocol, and answer JSON: the session's
 status, or `{"error":"CODE"}` with the codes and HTTP statuses
-[above](#placement-outcomes) (`turn_pending` excepted).
+[above](#placement-outcomes) (`turn_pending` excepted), or one of the codes
+of a [full executor](#retention).
 
 | Action | Body | Answer |
 | --- | --- | --- |
@@ -121,6 +122,7 @@ status, or `{"error":"CODE"}` with the codes and HTTP statuses
 | `stop` | `id`, `operationId` | The session after a graceful stop that waits for the current turn: `retained`, or `failed` when the agent exited with a failure. `stopping`, with a `problem`, while it still waits; repeat the request with the same operation, or `cancel`. |
 | `resume` | `id`, `operationId`, optional `maxDuration` | The session with a new execution (`executionId`) that continues from the last checkpoint, or from the starting workspace when it stopped before any conversation. |
 | `attach` | One line `{"id":"..."}`, then terminal frames | A stream of terminal frames (below). |
+| `remove` | `id` | `{"id":"..."}` once the executor keeps nothing of the session ([removing sessions](#removing-sessions)). Tasks too. |
 | `cancel`, `recover`, `info`, `list` | as for tasks | as for tasks |
 
 Each `operationId` is a UUID the caller keeps for retries: repeating a `stop`
@@ -178,6 +180,55 @@ before either. Ending an attachment never stops the session.
 
 `attach` answers `conflict` before streaming when the session is not
 `active`, and `unsupported` when the server cannot stream both ways.
+
+### Retention
+
+`retainedBytes` bounds what the executor keeps under `directory/work` and
+`directory/sessions`; 1024 bounds its sessions. Only admitting new work
+checks them: a submission (`run`, with or without an upload) and a `resume`.
+Admission reserves what the work may still come to keep, `maxCheckpointBytes`
+each: a submission its input workspace and its checkpoint, a resume its
+checkpoint, since it starts from one the executor already keeps. It is
+refused while what is kept, plus the reservations of every session not yet
+`retained`, `failed`, `cancelled`, `exporting` or `pulled`, plus its own,
+would exceed `retainedBytes`. A running interactive session therefore
+reserves a checkpoint until it stops. A stop, a cancellation and a task's
+completion are never refused for space: what they keep was reserved, and
+refusing them would lose work. At the smallest `retainedBytes`, twice
+`maxCheckpointBytes`, the executor admits one session at a time.
+
+| Code | HTTP status | Meaning |
+| --- | --- | --- |
+| `sessions_full` | 507 | The executor keeps 1024 sessions. Remove some, then retry. |
+| `retention_full` | 507 | What the executor keeps and has reserved leaves no room for this submission or resume. Remove sessions, stop running ones, or raise `retainedBytes`, then retry. |
+
+Nothing changed when either answers, so a retry is a new request. Hermes
+reads the same text from `sproozi_run`. A Sproozi older than these codes
+reports them as `unavailable`.
+
+### Removing sessions
+
+`remove` deletes a session the executor no longer needs: its record, its
+executions' journals, and the workspaces, checkpoints and profiles no other
+session names. Profiles the placement keeps by digest stay. Only the home
+principal removes; the work token gets `403`. The `id` is the session's.
+
+| Phase | `remove` |
+| --- | --- |
+| `retained`, `failed`, `cancelled` | Removed. |
+| `pulled` | Removed. The machine that pulled it owns it; the executor then answers neither `info` nor `claim` for it, so remove it only after `sproozi pull` on that machine reported it pulled. |
+| `preparing`, `activating`, `active`, `stopping` | `conflict`: stop or cancel it first, or wait for it to start. |
+| `unknown-stop`, `unknown-usage`, `cancelling` | `conflict`: `recover` it first. |
+| `exporting` | `conflict`: finish the pull first. |
+| A version 1 record (`retained`, `cancelled`, `pulled`) | Removed with the checkpoint it kept; `exporting` answers `conflict`. |
+
+A removed session leaves a mark of a few hundred bytes, outside
+`retainedBytes` and the session count, so its ID never starts again: a
+`run` that repeats its `requestId` answers `conflict`. Removing it again
+answers `{"id":"..."}`, and finishes a removal the executor was interrupted
+in. An ID the executor never held answers `invalid_request`. The coordinator
+waits at most five seconds for other operations, then the request answers
+`unavailable`; repeat it.
 
 ### Agents that exit by themselves
 

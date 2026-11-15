@@ -140,8 +140,10 @@ yours included, and `workTokenMaxDuration` must fit within it. Omit
 `retainedBytes`, optional, bounds what remote work keeps on the executor's
 volume, at least twice `maxCheckpointBytes`; it defaults to 1 GiB, or twice
 `maxCheckpointBytes` when that is larger. Keep it below the volume's size. A
-task is refused as unavailable while what is kept, plus one checkpoint for each
-unfinished task and the new one, would exceed it.
+task is refused with `retention_full` while what is kept, plus what each
+unfinished session and the new one may still keep, would exceed it, and with
+`sessions_full` at 1024 sessions. Make room with `sproozi rm ID --remote`
+([retention](../reference/remote-executors.md#retention)).
 
 Apply namespaces from the installation before creating these objects. The
 remote executor, its profile and credentials, and its managed runs live in

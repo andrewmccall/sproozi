@@ -303,7 +303,10 @@ runs the one harness its `harness` names, `codex` or `claude-code`
 work submitted with the work token, which always has one; it must fit within
 `maxDuration` when that is set. `retainedBytes`, optional, bounds what remote
 work keeps on the volume: at least twice `maxCheckpointBytes`, by default 1 GiB
-or twice `maxCheckpointBytes` when that is larger. The work token is the one static token:
+or twice `maxCheckpointBytes` when that is larger. Submissions and resumes
+reserve room within it and are refused with `retention_full`, or
+`sessions_full` at 1024 sessions, when there is none; stops never are
+([retention](../../docs/reference/remote-executors.md#retention)). The work token is the one static token:
 at least 32 characters, stored privately and checked first, because Hermes has
 no Kubernetes identity of its own. Any other bearer token is reviewed as above.
 Repository entries
@@ -314,9 +317,12 @@ credential configuration.
 
 `/work/mcp` exposes `sproozi_run`, `sproozi_status`, `sproozi_cancel` and
 `sproozi_sessions` to Hermes. Fixed JSON routes also support recovery. The home principal additionally permits checkpoint export and the
-exclusive one-way claim, and starts, stops, resumes, attaches to and cancels
+exclusive one-way claim, starts, stops, resumes, attaches to and cancels
 [interactive sessions](../../docs/reference/remote-executors.md#interactive-sessions),
-including from an uploaded workspace; the work token can do none of these.
+including from an uploaded workspace, and
+[removes](../../docs/reference/remote-executors.md#removing-sessions) stopped,
+cancelled and pulled sessions (`sproozi rm ID --remote`); the work token can do
+none of these.
 TLS and bearer validation happen before request decoding.
 
 The executor owns the work it starts and drives each execution through an

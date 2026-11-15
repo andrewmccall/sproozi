@@ -378,6 +378,88 @@ work token reaches it under the same `workTokenMaxDuration`.
   `make verify-claude-remote-kind` is the Kind proof and has not been
   recorded.
 
+### 12. Retention and removal
+
+Added after a review found that the executor's catalogue only grew. Nothing
+removed a session, so once it held 1024 records or `retainedBytes` was
+reached every submission failed as `unavailable` ("restore connectivity"),
+and the only remedy was deleting files on the volume. `retainedBytes`
+(section 4) was checked by a submission only: a `resume` and an interactive
+session's stops added checkpoints unchecked.
+
+- **The retention invariant.** Only admission checks the bound, and
+  admission reserves what the admitted execution may still come to keep, at
+  most `maxCheckpointBytes` each: a submission its input workspace (snapshot,
+  revision or upload, which the coordinator retains when it starts) and its
+  checkpoint; a resume its checkpoint, since its input is the session's own
+  checkpoint or workspace, which the coordinator keeps once by digest. An
+  admission is refused unless what is kept, plus the reservation of every
+  session not yet settled (two before the coordinator has its execution, one
+  after), plus its own, fits. A stop, a checkpoint commit, a cancellation and
+  a task's tail never check the bound: they write what was reserved, and
+  refusing them would lose work. Records and journals are bounded metadata
+  and are not reserved. Section 4 reserved one checkpoint for a submission,
+  so its input was never covered; it now reserves two. At the smallest bound,
+  twice `maxCheckpointBytes`, the executor admits one session at a time.
+- **A full executor says so.** The owner protocol gains `sessions_full` and
+  `retention_full`, both HTTP 507, whose fixed messages say which bound was
+  reached and name `sproozi rm ID --remote` and `retainedBytes`. The CLI
+  prints them without a retry hint, and Hermes reads the same text from
+  `sproozi_run`. The placement protocol does not use them.
+- **The owner action `remove`**, home principal only, behind
+  `sproozi rm ID --remote`. It applies home's rule, `session.Removable` on
+  every execution through `Coordinator.Remove`, which also deletes the
+  journals and the content no remaining journal names, plus the catalogue's
+  own tails: `exporting` is refused, since its claim is still to come. A
+  `retained`, `failed`, `cancelled` or `pulled` session is removed; a version
+  1 record goes with its `.checkpoint` file. The owner protocol carries codes
+  only, so the executor answers `conflict` and the CLI explains it from the
+  session's phase in local `rm`'s words, which `session.RemovalRefusal` now
+  holds for both.
+- **Removal leaves a mark**, `work/<id>.removed`, with the session's
+  executions. The mark makes `remove` replay-safe without an operation UUID,
+  since a session has only one removal: repeating it answers removed and
+  finishes deleting journals an interrupted removal left. It also keeps the ID
+  from starting again: a submission that repeats the removed session's
+  `requestId`, such as a late retry from Hermes, answers `conflict` instead of
+  running the task twice or, for a pulled session, creating a second owner of
+  an ID home owns. Marks count towards neither the 1024 records nor
+  `retainedBytes`, so an executor at the smallest bound can admit again after
+  a removal. The record format stays version 2.
+- **A pulled record is removable.** It is the one-way claim's tombstone: it
+  keeps the ID from running here again, which the mark now does, and it
+  answers a repeated `claim` for a home whose claim reply was lost. Home
+  saves the import before it claims and marks it claimed after the reply, so
+  only that repeat needs the record. Refusing removal would keep every pulled
+  session's journal and checkpoint, and its place in the count, for ever.
+  The executor cannot see whether home recorded the claim, so the reference
+  says to remove a pulled session only after `pull` reported it pulled; a
+  home that loses the reply and then finds the record removed keeps an
+  import it cannot activate.
+
+Alternatives rejected:
+
+- **Refuse to remove a pulled record.** Safe for a lost claim reply, but the
+  catalogue then still only grows for pulled work, which is the common end
+  of retained work.
+- **Bind `remove` to an operation UUID**, as `stop` and `resume` are. The
+  binding would have to outlive the record it binds to; the mark already
+  answers a repeat, and a session has one removal, so an operation adds no
+  distinction.
+- **Remove without a mark.** Simpler, and nothing grows, but a repeated
+  submission would start a removed task again and a repeated removal could
+  not tell "removed" from "never existed".
+- **Check `retainedBytes` at every commit**, including stops. A full volume
+  would then refuse a stop and lose the agent's work; the reservation keeps
+  the bound without that.
+- **Keep reporting `unavailable`.** It tells the user to restore
+  connectivity and retry with the same operation, which never helps.
+
+Revisit when marks become numerous enough to matter (they grow by one small
+file per removal), when home can confirm a claim to the executor so a pulled
+record can be removed only after that, or when the executor's catalogue merges
+with home's.
+
 ## Alternatives
 
 - **Keep work separate and fix it in place.** Check phase on read, take the
@@ -440,7 +522,7 @@ work token reaches it under the same `workTokenMaxDuration`.
   prompts and skills that match the old words need updating in the same
   release. The MCP tool schemas do not change.
 - The executor keeps a second locked directory, `sessions/`, next to `work/`
-  on the same volume, bounded by `retainedBytes`.
+  on the same volume, bounded by `retainedBytes` as section 12 states it.
 - Executor configuration with `workTokenFile` now needs
   `workTokenMaxDuration`; the executor names the field at startup.
 - This replaces [ADR 0032](0032-stopping-a-visit-with-no-native-conversation.md)'s
@@ -478,7 +560,7 @@ work token reaches it under the same `workTokenMaxDuration`.
 - Keeps [ADR 0019](0019-pull-operations-and-work-owner-names.md) and
   [ADR 0036](0036-remote-executors-through-kubeconfig-contexts.md) unchanged.
 - Code: `internal/work/` (`catalogue.go`, `driver.go`, `interactive.go`, `export.go`,
-  `legacy.go`, `phase.go`), `internal/session/cancel.go`,
+  `legacy.go`, `phase.go`, `remove.go`), `internal/session/cancel.go`, `internal/session/remove.go`,
   `internal/session/phase.go`, `cmd/session-profile/main.go`,
   `internal/runtime/kubernetes/placement/placement.go` and `lifecycle.go`,
   `cmd/sproozi/output.go` and `session.go`; the Claude Code executor
