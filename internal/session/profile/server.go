@@ -185,7 +185,7 @@ func (h *handler) requestAction(r *http.Request) (string, int, Code) {
 		return "", http.StatusNotFound, CodeInvalid
 	}
 	switch action {
-	case actionPrepare, actionActivate, actionStop, actionInspect, actionAbort, actionAttach, actionDescribe:
+	case actionPrepare, actionActivate, actionStop, actionInspect, actionAbort, actionAbortPreparation, actionAttach, actionDescribe:
 	default:
 		return "", http.StatusNotFound, CodeInvalid
 	}
@@ -243,7 +243,7 @@ func (h *handler) validatePayload(action string, input request) error {
 	} else if len(input.Checkpoint) > 0 || len(input.Profile) > 0 {
 		return &Rejection{Code: CodeInvalid}
 	}
-	if action == actionInspect {
+	if action == actionInspect || action == actionAbortPreparation {
 		if input.Incarnation != nil {
 			return &Rejection{Code: CodeInvalid}
 		}
@@ -295,6 +295,14 @@ func (h *handler) perform(r *http.Request, action string, input request) (respon
 		output.Incarnation = &i
 	case actionActivate:
 		if err := p.Activate(r.Context(), input.Launch, *input.Incarnation); err != nil {
+			return output, err
+		}
+	case actionAbortPreparation:
+		aborter, ok := p.(session.PreparationAborter)
+		if !ok {
+			return output, &Rejection{Code: CodeUnsupported}
+		}
+		if err := aborter.AbortPreparation(r.Context(), input.Launch); err != nil {
 			return output, err
 		}
 	case actionStop:

@@ -15,7 +15,7 @@ func validateResponse(action string, input request, r response, max int64) error
 		if r.Incarnation == nil || !incarnationValid(*r.Incarnation) || r.Stopped != nil || r.Observation != nil || len(r.Checkpoint) > 0 {
 			return errors.New("profile: invalid prepared response")
 		}
-	case actionActivate:
+	case actionActivate, actionAbortPreparation:
 		if r.Incarnation != nil || r.Stopped != nil || r.Observation != nil || len(r.Checkpoint) > 0 {
 			return errors.New("profile: invalid activation response")
 		}

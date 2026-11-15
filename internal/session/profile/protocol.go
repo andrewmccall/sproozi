@@ -37,6 +37,10 @@ const (
 	actionAbort    = "abort"
 	actionAttach   = "attach"
 	actionDescribe = "describe"
+	// actionAbortPreparation fences a launch whose preparation never
+	// reported an incarnation. An executor older than this action answers
+	// 404 invalid_request, as for any unknown action.
+	actionAbortPreparation = "abort-preparation"
 )
 
 // Code describes a stable transport outcome. Unavailable never means absence.

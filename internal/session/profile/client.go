@@ -143,6 +143,50 @@ func (c *Client) Abort(ctx context.Context, l session.Launch, i session.Incarnat
 	}
 	return decodedObservation(r), nil
 }
+// AbortPreparation asks the executor to fence a launch whose preparation never
+// reported an incarnation. An executor older than this action, or one whose
+// placement cannot, gets what a coordinator did before the action existed:
+// an absent launch is fenced, one with an incarnation is aborted, and one
+// still preparing stays unproven. The error then says why.
+func (c *Client) AbortPreparation(ctx context.Context, l session.Launch) error {
+	_, err := c.call(ctx, actionAbortPreparation, request{Launch: l})
+	var answer *RemoteError
+	if !errors.As(err, &answer) || !(answer.Code == CodeInvalid && answer.Status == http.StatusNotFound || answer.Code == CodeUnsupported) {
+		return err
+	}
+	return c.abortPreparationByInspection(ctx, l)
+}
+
+// errPreparationAbortUnsupported explains the fallback's unproven outcomes.
+var errPreparationAbortUnsupported = errors.New("the remote executor cannot abort a preparation that has not reported its Pod; " +
+	"it is older than this Sproozi. Update the executor, then run recover on the session")
+
+func (c *Client) abortPreparationByInspection(ctx context.Context, l session.Launch) error {
+	o, err := c.Inspect(ctx, l)
+	if err != nil {
+		return errors.Join(errPreparationAbortUnsupported, err)
+	}
+	if o.State == session.PlacementAbsent {
+		return nil
+	}
+	if !incarnationValid(o.Incarnation) {
+		return fmt.Errorf("%w; the cancelled preparation is still %s", errPreparationAbortUnsupported, o.State)
+	}
+	a, err := c.Abort(ctx, l, o.Incarnation)
+	if err != nil {
+		return errors.Join(errPreparationAbortUnsupported, err)
+	}
+	if a.State != session.PlacementStopped || a.Incarnation != o.Incarnation {
+		return fmt.Errorf("%w; aborting the prepared Pod did not prove it stopped", errPreparationAbortUnsupported)
+	}
+	// As for any abort, a stopped writer without a receipt has unknown usage,
+	// which a successful preparation abort could not report.
+	if a.Stopped == nil || a.Stopped.Receipt == nil {
+		return fmt.Errorf("%w; the prepared Pod stopped, but its usage is not finalized yet", errPreparationAbortUnsupported)
+	}
+	return nil
+}
+
 func decodedObservation(r response) session.Observation {
 	o := r.Observation
 	if o.Stopped != nil {
@@ -277,4 +321,7 @@ func validateCheckpoint(data []byte, l session.Launch, digest string, max int64)
 	return nil
 }
 
-var _ session.Placement = (*Client)(nil)
+var (
+	_ session.Placement          = (*Client)(nil)
+	_ session.PreparationAborter = (*Client)(nil)
+)
