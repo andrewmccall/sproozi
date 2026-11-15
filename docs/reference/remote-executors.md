@@ -95,6 +95,25 @@ newer than this Sproozi, so update Sproozi and restart its service`. A service
 too old to know `turn_pending` reports `profile: invalid response` instead and
 records `unknown-stop`; update the service, then `recover` resumes the stop.
 
+### Cancelling a preparation
+
+`abort-preparation` cancels a visit whose `prepare` never answered with an
+incarnation, for example because its run waits under a concurrency cap. The
+request carries only the launch, as `inspect` does; an incarnation or a
+checkpoint is `invalid_request`. It is authorized like every placement
+action and is never `expired`: cancelling is accepted after the deadline.
+Success means no agent for that launch runs or can start; the answer has no
+fields besides `version`. The executor answers `unavailable` while it cannot
+prove that yet, such as while the controller has not ended the cancelled
+run, and the session stays `unknown-stop` until `recover`
+([session commands](session-commands.md#status-and-listing-output)).
+
+| Service | Executor | What happens |
+| --- | --- | --- |
+| This release | This release | `abort-preparation`; the session ends `cancelled`. |
+| This release | Older | The executor answers `404 invalid_request`. The service inspects the visit as before: one never registered is `cancelled`, one already prepared is aborted, and one still preparing stays `unknown-stop` with `the remote executor cannot abort a preparation that has not reported its Pod; it is older than this Sproozi`. Update the executor, then `recover`. |
+| Older | This release | The service never sends `abort-preparation`; nothing changes. |
+
 ## Interactive sessions
 
 The executor owns the sessions it starts, tasks and interactive sessions alike

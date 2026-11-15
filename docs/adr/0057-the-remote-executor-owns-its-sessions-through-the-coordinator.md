@@ -532,6 +532,121 @@ record can be removed without asking home's service, when the smallest bound
 should hold more than one session, or when the executor's catalogue merges
 with home's.
 
+### 13. Aborting a Kubernetes preparation that has no Pod (2026-11-15)
+
+Added after a review of states that only a deadline used to end, under the
+principle recorded with the journal's exit for late preparations.
+
+**Problem.** Cancelling an execution whose pending visit never reported an
+incarnation asks its placement to fence the preparation
+(`session.PreparationAborter`), or else inspects it and needs an
+incarnation to `Abort`. The Kubernetes placement had no `AbortPreparation`,
+and its `Inspect` of a `creating` or `bound` registration has no Pod, so
+there was nothing to abort. A visit whose AgentRun waited under a
+concurrency cap ([ADR 0027](0027-configurable-concurrent-admission.md)),
+was admitted with no Pod yet, or failed before its Pod stayed
+`unknown-stop` and kept its registration. Before ADR 0056 the deadline ended
+it; work with no deadline kept it for ever. The same gap existed for a
+home-owned visit on a cluster, since the placement protocol had no such
+action.
+
+**Decision.** The Kubernetes placement implements `AbortPreparation`.
+Success means no writer for the launch exists and none can start, which is
+what the coordinator records as `cancelled` with no receipt. The steps, each
+idempotent so a retry after a crash finishes the same abort, and what each
+proves:
+
+1. **A local tombstone** (`preparationAborted` in the executor's record of
+   the launch, written first, even when the executor never saw the launch)
+   makes every later `Prepare` of the launch a conflict and stops the
+   placement creating its registration. Within the executor, `Prepare` and
+   `AbortPreparation` hold the same lock, so none is in flight.
+2. **The registration is cancelled by compare-and-swap.** A registration
+   lost between its creation and the executor's save is found by its run
+   name. Once `cancelled` it is never bound, prepared or activated, and the
+   gateway refuses its run (`ResolveRun` answers `ErrSessionCancelled`).
+3. **A run never bound to the registration never gets a Pod.** Every version
+   of the registration names no run, so the controller resolves any run of
+   that name as pending or cancelled and never admits it. The executor still
+   sets `spec.cancel` on it, and `ResolveRun` now reports such a registration
+   as `SessionCancelled` rather than a rejected binding.
+4. **A bound run is cancelled, then the executor waits for the controller.**
+   A reconcile that read the registration before step 2 may still create the
+   Pod, so an absent Pod is not yet proof. The executor waits until a live
+   read shows the run gone, terminal, or with its sandbox name recorded,
+   and only then reads the Pod. The controller now creates a sandbox Pod
+   only after a live read shows the run neither cancelled, terminal nor
+   deleted. Reconciles of one run never overlap. So a reconcile that could
+   still create the Pod either started after the run ended, and its live
+   read refuses, or finished before the executor's observation, and its Pod
+   already exists.
+5. **A Pod that exists is fenced as `Abort` fences one**
+   ([ADR 0010](0010-managed-session-authority-and-admission.md)). The
+   registration records it (`BindPod` now accepts a cancelled record with a
+   bound run and no Pod, see [ADR 0058](0058-lifecycle-records-declare-states-and-transitions.md)).
+   The Pod is deleted by UID, and the writer is fenced on an observed
+   real termination of the native container, never on
+   `ContainerStatusUnknown`. Accounts are sealed when they exist, then the
+   writer-fence finalizer is released. One new form of evidence: a Pod that
+   is being deleted, has no node and never started a container is fenced,
+   because the API server refuses to bind a Pod that is being deleted.
+
+Anything the executor cannot prove is an error, which the coordinator
+records as `unknown-stop` and `recover` retries: the controller has not
+ended the run yet, or a Pod's container was never seen to stop.
+
+**Protocol.** `/v1/abort-preparation` takes the launch alone, is authorized
+like the other placement actions
+([ADR 0036](0036-remote-executors-through-kubeconfig-contexts.md)) and is
+never refused after the deadline. The home-side client implements
+`PreparationAborter` always. An executor from before this action answers
+`404 invalid_request`, and a placement that cannot abort answers
+`unsupported`. In both cases the client does what the coordinator did
+before: an absent visit is fenced, a prepared one is aborted, and one still
+preparing is an error that says the executor is older. An older home never
+sends the action. See [remote executors](../reference/remote-executors.md#cancelling-a-preparation).
+
+**Alternatives rejected.**
+
+- *Treat an absent Pod as proof at once.* Simple, but a reconcile in flight
+  can create the Pod a moment later; that is the race step 4 closes.
+- *Delete the AgentRun as the fence.* Deletion runs through the
+  controller's finalizer and release, so it needs the same wait. It also
+  loses the run's truthful terminal reason.
+- *Trust a late Pod as inert*, because its harness waits for activation and
+  the gateway refuses its run. Probably true, but ADR 0010 asks for physical
+  evidence of every Pod a cancellation leaves behind, not an argument about
+  what the Pod may do.
+- *Advertise the action in `describe`.* An older home decodes the
+  description strictly and would refuse the new field, so this would break
+  older homes. Detecting `404` on the action breaks no one.
+
+**Tradeoffs.** A cancellation of a bound run without a Pod now waits for the
+controller to reconcile the run, normally under a second. With the
+controller down it stays `unknown-stop` until `recover`. The older-executor
+fallback reports a prepared visit whose usage could not be sealed as
+`unknown-stop` rather than `unknown-usage`, since `AbortPreparation` has no
+usage outcome; `recover` finishes it either way. An executor from before
+this change cannot read a launch record that has the tombstone. That
+matters only on a downgrade, and only for aborted launches.
+
+**Revisit when** the controller runs more than one active replica or
+overlapping reconciles of one run (step 4 assumes neither); a cluster-side
+admission rule can refuse a Pod for a cancelled registration, so the
+executor need not wait for the controller; or `PreparationAborter` gains a
+usage outcome.
+
+Code: `internal/runtime/kubernetes/placement/abort_preparation.go`,
+`lifecycle.go` (`fenceCancelled`), `internal/runtime/kubernetes/registry`
+(`Lookup`, `BindPod`, `ResolveRun`), `internal/controller/execution.go`
+(`ensureSandbox`), `internal/session/profile` (`client.go`, `server.go`) and
+`internal/session/remote/client.go`. Tests:
+`internal/runtime/kubernetes/placement/abort_preparation_test.go`, including
+the coordinator's cancel of a queued destination, which reached
+`unknown-stop` before this change; `internal/session/profile/abort_preparation_test.go`;
+`TestReconcilerStaleCacheDoesNotCreateSandboxForEndedRun` and
+`TestReconcilerUnboundCancelledManagedSessionEndsAsCancelled`.
+
 ## Alternatives
 
 - **Keep work separate and fix it in place.** Check phase on read, take the

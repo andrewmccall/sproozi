@@ -480,6 +480,22 @@ its execution journal, plus two for a pull
 
 `cancel ID --remote` of a `retained` session is refused: its result is kept.
 
+Cancelling a session whose cluster sandbox has not started yet ends it
+`cancelled`: its run may be waiting under a concurrency cap, admitted with
+no Pod, or failed before its Pod. The executor cancels the visit's
+registration and run and waits until the controller ends the run. A Pod that
+appears meanwhile is stopped and must be observed terminated first, as for
+any cancellation. The cancellation stays unfinished (`unknown-stop`), and
+`recover ID` (or `recover ID --remote`) finishes it, in these cases only. A
+session that moved there from this machine shows `session profile:
+unavailable (HTTP 503)` for the first two.
+
+| Problem contains | Cause | Run |
+| --- | --- | --- |
+| `the controller has not ended it, so its Pod may still be created` | The run is cancelled, but the Sproozi controller has not reconciled it yet. | Check the controller is running, then `recover`. |
+| `writer fence remains unknown`, or `absent Pod has no retained writer fence` | A Pod appeared and its agent container was never seen to stop, for example because its node is unreachable. | Restore the node, then `recover`. |
+| `the remote executor cannot abort a preparation that has not reported its Pod; it is older than this Sproozi` | A session moved from this machine to an executor from before this release. | Update the executor, then `recover ID`. |
+
 With `--json`, `status` and the session commands print the session:
 
 | Field | Meaning |

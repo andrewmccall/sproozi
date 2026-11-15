@@ -222,6 +222,17 @@ execution journal.
 > the grant refuses to authenticate after the deadline, and the placement's
 > `Exited` stops an agent still running past it.
 
+**Correction, 2026-11-15: two session registration guards changed.** Aborting
+a Kubernetes preparation ([ADR 0057](0057-the-remote-executor-owns-its-sessions-through-the-coordinator.md),
+section 13) can find a Pod the controller created after the registration
+was cancelled. `BindPod` now also records that Pod on a `cancelled`
+registration that has a bound run and no Pod, once, so the placement can
+fence and seal that exact Pod. The record stays `cancelled` and grants
+nothing. `Prepared` no longer treats a `cancelled` record that names the Pod
+as a replay: it is a conflict, since such a record may name a Pod it never
+restored into. Every other guard is unchanged. The registration's stored
+format is unchanged.
+
 ## Alternatives
 
 - **Check transitions in `save` by rereading the journal.** This catches an
