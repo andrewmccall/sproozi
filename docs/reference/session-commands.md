@@ -384,8 +384,8 @@ its execution journal, plus two for a pull
 | Remote phase | Meaning |
 | --- | --- |
 | `preparing` | The executor is capturing the task's input or preparing its first visit. A failed preparation keeps this phase with a problem; `recover ID --remote` retries it. |
-| `activating`, `active` | The sandbox is being admitted, or the task runs. |
-| `stopping` | The executor is waiting for the task's own turn to complete, then stops the sandbox. While the turn runs, the problem says what the stop waits for; it is not an error. |
+| `activating`, `active` | The sandbox is being admitted, or the session runs. A task stays `active`, with no problem, until its own turn completes. |
+| `stopping` | The session is stopping: a task's turn completed and the executor is stopping its sandbox and recording its answer, or an interactive session's stop waits for the agent's current turn, with a problem that says so. |
 | `unknown-stop` | The placement has not proved the sandbox stopped. The executor retries by itself, waiting one second and doubling up to a minute; `recover ID --remote` retries now. |
 | `unknown-usage` | The sandbox stopped, but its usage is not finalized. The executor retries as for `unknown-stop`. |
 | `cancelling`, `cancelled` | A cancellation is in progress, or finished. A task whose deadline passed before it started is `cancelled` with the problem `the deadline passed before it started`. |

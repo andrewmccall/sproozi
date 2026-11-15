@@ -127,7 +127,9 @@ of the current execution, combined with the two tails:
 | `pulled`, then `exporting` | The transfer tail is set; it wins over everything else. |
 | `preparing` | The coordinator has not received the execution yet: the input is being captured. |
 | `cancelled` | The coordinator's phase, or a cancellation the catalogue recorded before the coordinator received the execution. |
-| `preparing`, `activating`, `active`, `stopping`, `unknown-stop`, `unknown-usage`, `cancelling` | The coordinator's phase, reported as it is. |
+| `active` | A task's completion wait (step 4 below) that the coordinator holds as `stopping`: the task's turn is still running. |
+| `stopping` | A task's completion wait whose writer stopped, while the coordinator holds it as `preparing` and finishes it. |
+| `preparing`, `activating`, `active`, `stopping`, `unknown-stop`, `unknown-usage`, `cancelling` | Otherwise, the coordinator's phase, reported as it is. |
 | `stopping` | The coordinator is `idle` but the task tail is not written yet. |
 | `retained` | `idle`, the task tail written, a checkpoint committed and no failed exit. |
 | `failed` | `idle` and the harness exited with a failure, or, for a task, nothing was kept. An interactive session that kept no conversation is `retained`, since `resume` restarts it from its workspace. |
@@ -149,9 +151,15 @@ One background driver per session, in this order:
 4. **`Finalize(task-complete)`**, a name-based operation UUID, so restarts
    repeat the same operation. The stop's graceful handoff succeeds only once
    the supervisor has seen the task's own completed turn. On
-   `ErrNativeTurnPending` the stop stays pending, the phase stays `stopping`,
-   the problem names what it waits for, and the driver calls `Finalize`
-   again. Defect 3 is gone.
+   `ErrNativeTurnPending` the stop stays pending, the journal stays
+   `stopping`, and the driver calls `Finalize` again. Defect 3 is gone.
+   This stop is the driver's completion wait, not a stop anyone asked for,
+   so the public phase reports it as `active`, with no problem, until the
+   writer stops; then `stopping` until the task tail is written. Only the
+   view says so: the journal's `stopping` is true (a finalization is
+   pending, and repeating it continues it), and on the executor only the
+   driver and the coordinator read it. A caller cannot stop a task, so
+   every other stop or cancellation is reported as the journal holds it.
 5. **Write the task tail** from the committed checkpoint
    (`checkpoint.FinalText`). The phase is then `retained`.
 
@@ -394,6 +402,15 @@ work token reaches it under the same `workTokenMaxDuration`.
   execution, but it runs before the coordinator takes the execution's lock, so
   a stop committing in between would still be cancelled. Deciding under that
   lock needs the coordinator, hence the new event.
+- **A completion wait in the coordinator** that is not a stop: an event or
+  placement observation that keeps the journal `active` until the task's
+  turn completes, then stops. The journal would then say what the view says,
+  but it needs a new row in ADR 0058's table, a placement call that waits
+  without gating input, and a second path to the same graceful stop. The
+  driver's `Finalize` already waits correctly, and the journal's `stopping`
+  is true of it. Rejected for deriving the public phase; revisit if a caller
+  must stop a task, or a reader other than the driver and coordinator acts
+  on a task's journal phase.
 - **One `maxDuration` for everyone, or a second executor for Hermes.** One cap
   cannot limit Hermes without limiting the owner; a second executor doubles
   the deployment. Rejected for `workTokenMaxDuration`.
@@ -418,7 +435,8 @@ work token reaches it under the same `workTokenMaxDuration`.
   `unknown-stop` or `unknown-usage`, `finalizing` becomes `stopping`,
   `pending` becomes `preparing`, and `activating` and `failed` can appear.
   `retained`, `exporting`, `pulled`, `cancelling` and `cancelled` stay. A
-  stop still waiting for the task's turn is `stopping` with a problem. Hermes
+  task whose turn is running is `active` with no problem, and `stopping` once
+  its turn completed, so `stopping` always means a stop in progress. Hermes
   prompts and skills that match the old words need updating in the same
   release. The MCP tool schemas do not change.
 - The executor keeps a second locked directory, `sessions/`, next to `work/`

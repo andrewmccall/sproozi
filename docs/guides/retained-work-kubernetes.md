@@ -255,7 +255,7 @@ conversation. Cross-harness handoff is a separate deferred feature.
 | Hermes cannot discover tools | Inspect its native logs and the remote executor's TLS, CA and work token. All MCP output schemas must have object roots. |
 | Remote executor is unready | Inspect its logs, PVC permissions, mounted config/credentials and namespace-scoped RBAC. |
 | Remote phase is `unknown-stop` or `unknown-usage` | The executor retries by itself. Preserve the session/operation UUID and journals. Inspect the Pod and remote executor logs, then use `recover` to retry at once; do not manufacture a new submission. |
-| Remote phase is `stopping` with a problem | The task's turn is still running; the executor keeps waiting. `cancel` stops it now instead. |
+| Remote phase stays `active` | The task's turn is still running; the executor waits for it to complete. `cancel` stops it now instead. |
 | Remote phase is `preparing` with a problem | Preparation failed, for example a denied policy. Fix the cause, then `recover`. |
 | Native state is missing or incompatible | Retain the source evidence. Use the same harness and matching instructions. Check whether its saved state is supported. |
 | A deadline or cancellation stops work | Inspect status. Deadline/cancellation does not guarantee a resumable completed turn. Unknown stop or accounting prevents export. |

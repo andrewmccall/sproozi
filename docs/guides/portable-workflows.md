@@ -167,8 +167,8 @@ execution, visit and exact writer separately. The session ID outlives the Pod.
 Status returns the task phase and a size-limited final answer marked as
 untrusted output. The remote executor reports `retained` only after compatible native
 completion, confirmed sandbox stop, finalized usage accounting and checkpoint
-storage. A task whose turn is still running shows `stopping`, with a problem
-naming what the stop waits for. `unknown-stop` and `unknown-usage` cannot be
+storage. A task whose turn is still running shows `active`, with no problem,
+and `stopping` once its turn completed. `unknown-stop` and `unknown-usage` cannot be
 pulled or silently interpreted as stopped; the executor retries them by itself,
 and `recover` retries at once. The [command reference](../reference/session-commands.md#status-and-listing-output)
 lists every remote phase.

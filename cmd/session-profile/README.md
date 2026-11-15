@@ -327,7 +327,9 @@ native/Git checkpoint. The catalogue in `directory/work` keeps original request
 identities, the Project, the untrusted final text and the pull. Run one
 remote executor per state directory, with durable storage. Restart with the same principal and directory;
 changing principals cannot reinterpret retained records. A task's phases are
-the journal's: `stopping` while it waits for the task's turn, and
+the journal's, except that a task is `active`, with no problem, while the
+executor waits for its turn to complete (the journal holds that wait as a
+stop), and `stopping` once the turn completed. A task is
 `unknown-stop` or `unknown-usage` after a lost stop reply or missing accounting,
 which the executor retries by itself for a task and `recover` retries at once;
 an interactive session waits for `recover`. Missing
