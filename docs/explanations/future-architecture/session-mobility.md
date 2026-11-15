@@ -48,7 +48,7 @@ protocol. Background tasks, subagents and compaction are outside the current sup
 state. The current selected checkpoint does not transfer running memory or tools.
 
 Native GUI/IDE access remains a separate extension under
-[ADR 0006](../../adr/0006-native-cli-and-terminal-before-gui-mobility.md).
+[harness and client compatibility](harness-portability.md).
 A supported CLI resume command does not prove an official desktop client accepts
 an arbitrary Sproozi endpoint. Test each selected client, its authentication,
 session discovery, detach/reconnect and revocation separately. See

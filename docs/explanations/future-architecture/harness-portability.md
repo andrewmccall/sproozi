@@ -59,8 +59,9 @@ and Kubernetes environments. Recheck current official interfaces when
 implementing; do not rely on undocumented session-file manipulation.
 
 The accepted first client experience is native CLI locally and terminal attachment
-remotely, under [ADR 0006](../../adr/0006-native-cli-and-terminal-before-gui-mobility.md).
-GUI/IDE connection remains a future extension. The first complete round trips were Codex, then Claude Code.
+remotely, with the terminal transport in [ADR 0011](../../adr/0011-native-session-compatibility-and-completion.md).
+GUI/IDE connection remains a future extension, and a custom Sproozi chat UI is
+not planned: the native harness loop and conversation are retained. The first complete round trips were Codex, then Claude Code.
 [ADR 0039](../../adr/0039-one-harness-registry-and-the-mcp-requirement.md) holds
 the harness registry, and GitHub Copilot CLI is also a managed harness
 ([ADR 0048](../../adr/0048-github-copilot-cli-is-a-managed-harness.md)).

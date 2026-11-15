@@ -32,8 +32,11 @@ The user also accepted these independently revisitable scope decisions:
 - ADR 0005 ([removed](README.md#removed)): start through Sproozi in local
   Docker; defer existing-session adoption. Adoption is still deferred, under
   [session mobility](../explanations/future-architecture/session-mobility.md#adopt-directly-started-sessions).
-- [ADR 0006](0006-native-cli-and-terminal-before-gui-mobility.md): native CLI
-  locally and terminal attachment remotely; defer native GUI/IDE integration.
+- ADR 0006 ([removed](README.md#removed)): native CLI locally and terminal
+  attachment remotely; defer native GUI/IDE integration. The terminal
+  transport is held by [ADR 0011](0011-native-session-compatibility-and-completion.md),
+  and GUI/IDE access stays deferred, under
+  [harness portability](../explanations/future-architecture/harness-portability.md).
 - ADR 0007 ([removed](README.md#removed)): complete Codex's round trip first,
   then Claude Code before broader portability claims. Both are done, and
   [ADR 0039](0039-one-harness-registry-and-the-mcp-requirement.md) now holds
