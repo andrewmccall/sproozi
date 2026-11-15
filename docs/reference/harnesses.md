@@ -110,7 +110,7 @@ size and marks incomplete text explicitly. Missing or malformed native completio
 fails the container; output text does not determine task quality. The helper
 runs as PID 1, forwards signals to the native process group and reaps children.
 The official image's root/s6 startup is bypassed in bounded non-root sandboxes.
-The separate persistent coordinator uses stock image startup and native state.
+The separate persistent assistant uses stock image startup and native state.
 
 The Hermes runtime example opts into the gateway's native Kubernetes Pod-list
 MCP connection with `--kubernetes-mcp`. This is trusted configuration; calls

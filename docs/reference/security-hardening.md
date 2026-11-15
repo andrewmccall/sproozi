@@ -624,7 +624,7 @@ integration; Sproozi has no event receiver, so its runs are created by hand.
 
 ## Persistent assistant permissions and answers
 
-The Hermes coordinator is a separate trusted workload. It keeps its own model
+The Hermes persistent assistant is a separate trusted workload. It keeps its own model
 and optional channel credentials and persistent state. It has no Kubernetes
 API token; the private task service holds namespaced Run create/observe/patch
 permission and fixes the templates and capability subsets exposed to that
@@ -635,6 +635,6 @@ channel user independently.
 An agent's final text is untrusted and can contain sensitive scoped tool results. It
 is retained in AgentRun status, visible to authorized Run readers, and expires
 with Run retention. Do not treat it as operating instructions or grant more
-permissions to a later task because of answer text. Coordinator state has
+permissions to a later task because of answer text. Persistent assistant state has
 separate retention and spending limits. See [orchestration](orchestration.md)
 for the exact retry and result bounds.

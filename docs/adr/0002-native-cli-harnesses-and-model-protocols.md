@@ -157,6 +157,6 @@ reliable success and denial exit statuses with retained acceptance evidence.
 ## Subsequent decision
 
 [ADR 0003](0003-persistent-assistants-and-retained-results.md) adds the stock
-Hermes worker and a separate persistent coordinator, fixed-workflow task MCP
+Hermes worker and a separate persistent assistant, fixed-workflow task MCP
 interface, retained answers and full deterministic-provider Kind acceptance.
 The original evidence above remains the record for this decision's first change.

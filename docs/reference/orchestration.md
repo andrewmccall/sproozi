@@ -126,8 +126,8 @@ dependency-graph scheduler. The persistent assistant is not an AgentRun and does
 not count against either cap. Its model account, memory and
 channel credentials belong to the trusted assistant deployment. Sandbox inference
 uses Sproozi's projected Run identity, gateway-owned provider credentials and
-per-Run budgets. Coordinator inference is accounted for separately by its
-configured provider; run budgets do not cap the coordinator's spending.
+per-Run budgets. Persistent assistant inference is accounted for separately by its
+configured provider; run budgets do not cap the persistent assistant's spending.
 
 The [orchestration ADR](../adr/0003-persistent-assistants-and-retained-results.md)
 records the separation, alternatives, bounded replay and result tradeoffs.

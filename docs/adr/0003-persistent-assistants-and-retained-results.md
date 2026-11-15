@@ -5,7 +5,7 @@ Date: 2026-10-08
 
 Partly superseded: [ADR 0015](0015-default-clients-and-native-tool-schemas.md) replaces pinned native client versions. The verification record below describes the clients pinned at the time. Other decisions in this record remain in effect.
 
-Partly superseded: [ADR 0027](0027-configurable-concurrent-admission.md) replaces the one global active execution slot with optional cluster and policy concurrency caps. Delegated workers now run concurrently unless a cap applies, and the coordinator still does not count as an active run. The problem statement below describes the controller at the time.
+Partly superseded: [ADR 0027](0027-configurable-concurrent-admission.md) replaces the one global active execution slot with optional cluster and policy concurrency caps. Delegated workers now run concurrently unless a cap applies, and the persistent assistant still does not count as an active run. The problem statement below describes the controller at the time.
 
 ## Problem and constraints
 
@@ -24,7 +24,7 @@ administrator-owned runtime and stock agent loops established by ADRs 0001/0002.
 
 ## Decision
 
-Use Hermes as the first persistent coordinator, independently deployed with
+Use Hermes as the first persistent assistant, independently deployed with
 durable native state. Use its native MCP client to call a private TLS task service.
 No custom Hermes plugin or replacement native agent harness is required. The
 generic service accepts only submit/status/wait/cancel intent; administrator
@@ -120,7 +120,7 @@ and mixed progress/error/output parsing. A result-write gateway and artifact sto
 would support larger output, but adds an authority-bearing write API and durable
 storage ownership. Small termination-file answers reuse Kubernetes completion.
 
-Replacing the coordinator's native harness with Kubernetes execution could move
+Replacing the persistent assistant's native harness with Kubernetes execution could move
 complete turns remotely, but couples native transcripts, fallback, tools and
 session ownership to Sproozi. A terminal backend moves only shell operations.
 Neither is needed for explicit bounded task delegation. Keeping a persistent
@@ -183,11 +183,11 @@ remote-first managed Codex work with retained native conversation and Git state,
 an explicit one-way home claim and local resume with fresh permissions. This ADR
 continues to govern ordinary disposable delegated jobs and their bounded text
 answers. Those answers alone are not portable native sessions. Hermes remains a
-separately trusted persistent coordinator in both workflows.
+separately trusted persistent assistant in both workflows.
 
 ## Revisit conditions
 
-Revisit coordinator choice if community-interest evidence changes or native
+Revisit persistent assistant choice if community-interest evidence changes or native
 integration limitations appear in real operation. Add separate principals or
 authenticated sender attribution when multiple users require independent
 authority. Add receipts/artifact storage when requirements exceed Run retention

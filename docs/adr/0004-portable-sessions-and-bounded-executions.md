@@ -11,7 +11,7 @@ Developers should be able to continue a native coding conversation and workspace
 between local Docker and an approved Kubernetes environment. They should not
 need personal cloud accounts or a new agent UI. At the initial design, Docker,
 session checkpoints and relocation were absent. AgentRun intent is immutable, worker identity
-is disposable, and terminal Runs cannot resume. Persistent Hermes coordinator
+is disposable, and terminal Runs cannot resume. Persistent Hermes assistant
 state does not establish portable worker conversations.
 
 This decision extends the boundaries in ADRs [0001](0001-mcp-capabilities-through-shared-gateway.md),
@@ -142,7 +142,7 @@ The implementation now separates the [home service](../../internal/session/home/
 [Kubernetes placement](../../internal/runtime/kubernetes/placement/placement.go).
 Terminal Runs remain terminal. Managed remote visits use fresh ordinary Runs and
 independent service-owned registration. Hermes state still belongs to its separate
-coordinator and supplies no worker-session portability evidence.
+persistent assistant and supplies no worker-session portability evidence.
 
 The deterministic Codex 0.161.0 core proof completed three genuine terminal turns
 across Docker, Kubernetes and Docker. It retained the same native UUID, exact Git

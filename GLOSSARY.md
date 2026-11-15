@@ -548,7 +548,7 @@ pending operation, cancellation intent, allowance and phase (`idle`,
 change the phase. See
 [ADR 0018](docs/adr/0018-coordinator-owns-every-visit.md) and
 [ADR 0058](docs/adr/0058-lifecycle-records-declare-states-and-transitions.md).
-Also seen as: coordinator journal, coordinator record, `session.Record`.
+Also seen as: `session.Record`.
 
 ### Lifecycle record
 
@@ -613,7 +613,7 @@ commit with a clean checkout and a fresh conversation. See
 
 A session that a remote executor runs in a Kubernetes sandbox and keeps in its
 catalogue after the sandbox stops. It starts from `sproozi run --remote` or a
-coordinator's request. Once the writer has stopped, usage is finalized and the
+persistent assistant's request. Once the writer has stopped, usage is finalized and the
 checkpoint is stored, its phase is `retained`: it can seed fresh work at its
 workspace revision, or be pulled to this machine and resumed there. Its other
 phases are the same words this machine's sessions use, such as `stopping` and
@@ -724,28 +724,42 @@ The list of sessions that one owner holds. `sproozi sessions` combines this
 machine's catalogue with each cluster's. See
 [status and listing output](docs/reference/session-commands.md#status-and-listing-output).
 
+### Persistent assistant
+
+A long-running assistant outside Sproozi, currently Hermes, that starts
+delegated runs through the task service or a remote executor's remote work. It
+runs outside the sandboxes it starts and keeps its own model credential and
+state ([ADR 0003](docs/adr/0003-persistent-assistants-and-retained-results.md)).
+Also seen as: coordinator in older text (the word now means only the
+[coordinator](#coordinator) below), Hermes coordinator.
+
 ### Coordinator
 
-A persistent assistant, currently Hermes, that starts delegated runs through
-the task service or a remote executor's remote work. It runs outside the
-sandboxes it starts.
-Not `session.Coordinator` in the code, which is the owner's execution
-journal; documentation calls that the [owner](#owner).
+`session.Coordinator`: the trusted component that owns one protected directory
+of [execution journals](#execution-journal) and its placements. It creates an
+execution's first visit, prepares and activates each later visit, and handles
+stop, move, cancel and recovery through one path, so every
+[visit](#visit) goes through it ([ADR 0018](docs/adr/0018-coordinator-owns-every-visit.md)).
+The local service and the remote executor each open one, which is why both
+kinds of [owner](#owner) keep the same safety rules
+([ADR 0057](docs/adr/0057-the-remote-executor-owns-its-sessions-through-the-coordinator.md)).
+It is not the [persistent assistant](#persistent-assistant). Also seen as:
+home coordinator, move coordinator.
 
 ### Delegated run
 
-An AgentRun that a coordinator starts, one per unit of work it delegates.
+An AgentRun that a persistent assistant starts, one per unit of work it delegates.
 Delegated runs count against concurrency caps like any other run; the
-coordinator does not. The example policy and template they use are in
+persistent assistant does not. The example policy and template they use are in
 `examples/orchestration/worker.yaml`. Also seen as: delegated task, delegated
 job, job, disposable job, worker.
 
 ### Task service
 
-The `sproozi-tasks` program: a private MCP service that turns a coordinator's
-request into a delegated run of a fixed, approved workflow. It keeps the run's
+The `sproozi-tasks` program: a private MCP service that turns a persistent
+assistant's request into a delegated run of a fixed, approved workflow. It keeps the run's
 status and final answer, not its conversation or workspace. For a delegated run
-that keeps a checkpoint for later resume, the coordinator uses
+that keeps a checkpoint for later resume, the persistent assistant uses
 [remote work](#remote-work) instead. See
 [orchestration](docs/reference/orchestration.md). Also seen as: task API,
 bounded task API, disposable-job service, orchestration service.

@@ -41,7 +41,7 @@ repository, and changes to those pins are reviewed by a code owner.
   itself instead of enabling package scripts.
 - **Hermes.** `hack/verify/orchestration-kind/build.py` runs
   `nousresearch/hermes-agent` by index digest, and the guides and the
-  coordinator example use the same digest.
+  persistent assistant example use the same digest.
 - **Calico.** [`hack/verify/fetch-calico.sh`](../../hack/verify/fetch-calico.sh)
   holds the only copy of the expected SHA-256. CI, `make demo` and every
   documented fetch call it, and it verifies an existing file rather than

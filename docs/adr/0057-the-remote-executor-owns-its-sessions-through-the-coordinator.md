@@ -5,9 +5,10 @@ Date: 2026-11-14
 
 This record calls `session.Coordinator` **the coordinator**, as
 [ADR 0018](0018-coordinator-owns-every-visit.md) does. The glossary's
-[Coordinator](../../GLOSSARY.md#coordinator) is Hermes, a persistent assistant;
-public documentation keeps saying "owner" and "executor" and never uses
-"coordinator" for the execution journal.
+[Coordinator](../../GLOSSARY.md#coordinator) is the same component. Hermes, the
+delegating assistant, is a [persistent assistant](../../GLOSSARY.md#persistent-assistant).
+Public documentation keeps saying "owner" and "executor" for the services that
+use it.
 
 ## Problem and constraints
 
