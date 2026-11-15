@@ -2,7 +2,6 @@
 package work
 
 import (
-	"context"
 	"crypto/tls"
 	"encoding/json"
 	"net/http"
@@ -11,10 +10,43 @@ import (
 	"testing"
 
 	"github.com/andrewmccall/sproozi/internal/harness"
-	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
 	"github.com/google/uuid"
 )
+
+// Work submitted with the work token takes its own cap; the same request
+// from the home principal takes the executor's, here none.
+func TestWorkTokenSubmissionsTakeTheirOwnCap(t *testing.T) {
+	t.Parallel()
+	c, _ := fixture(t)
+	c.MaxDuration = 0
+	o, err := Open(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = o.Close() }()
+	taskToken, home := strings.Repeat("t", 32), strings.Repeat("h", 32)
+	h, err := NewHandler(o, taskToken, homeToken(home))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		token string
+		want  int
+	}{{taskToken, http.StatusForbidden}, {home, http.StatusOK}} {
+		b, _ := json.Marshal(Submit{RequestID: uuid.NewString(), Repository: repositorySproozi, Harness: c.Harness,
+			Executor: c.Placement, Task: fixtureTask, MaxDuration: "none"})
+		r := httptest.NewRequest(http.MethodPost, "/work/run", strings.NewReader(string(b)))
+		r.TLS = &tls.ConnectionState{Version: tls.VersionTLS13}
+		r.Header.Set("Authorization", "Bearer "+tc.token)
+		r.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != tc.want {
+			t.Fatalf("no deadline with token %q…: %d %s, want %d", tc.token[:1], w.Code, w.Body.String(), tc.want)
+		}
+	}
+}
 
 func TestWorkHTTPAndMCPShareActionableRejections(t *testing.T) {
 	t.Parallel()
@@ -66,23 +98,20 @@ func TestWorkHTTPAndMCPShareActionableRejections(t *testing.T) {
 	}
 }
 
-type refusedPlacement struct{ *fixturePlacement }
-
-func (p refusedPlacement) CreateInitial(context.Context, session.Launch, []byte) (session.Incarnation, error) {
-	return session.Incarnation{}, &profile.Rejection{Code: profile.CodeDenied}
-}
-
 func TestWorkStatusRetainsSafeAsyncRecoveryCategory(t *testing.T) {
 	t.Parallel()
 	c, p := fixture(t)
-	c.Backend = refusedPlacement{p}
+	p.refusePrepare = &profile.Rejection{Code: profile.CodeDenied}
 	o, err := Open(c)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = o.Close() }()
 	initial := submit(t, o)
-	status := waitPhase(t, o, initial.ID, phaseUnknown)
+	status := waitDriver(t, o, initial.ID)
+	if status.Phase != phasePreparing {
+		t.Fatalf("refused preparation: %+v", status)
+	}
 	if !strings.HasPrefix(status.Problem, "denied:") || !strings.Contains(status.Problem, "approved repository") || !strings.Contains(status.Problem, "recover this session") {
 		t.Fatalf("status lost actionable category: %+v", status)
 	}

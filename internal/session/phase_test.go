@@ -230,6 +230,7 @@ func TestApplyRefusesUndeclaredTransition(t *testing.T) {
 		{PhaseActive, evCreate},
 		{PhaseCancelled, evMove},
 		{PhaseCancelled, evCancel},
+		{PhaseIdle, evCancelUnsettled},
 		{PhasePreparing, evStopped},
 		{PhaseStopping, evPrepared},
 		{PhaseUnknownStop, evFinalized},
@@ -293,6 +294,29 @@ func TestLegacyCancellingJournalLoadsAsItsDerivedPhase(t *testing.T) {
 	}
 	if got, err := c.Inspect(id); err != nil || got.Phase != PhaseCancelled {
 		t.Fatalf("legacy journal: %s %v", got.Phase, err)
+	}
+}
+
+// CancelUnsettled refuses an execution that already stopped, deciding under
+// the execution's lock, so an owner's retained result is never cancelled; it
+// cancels a running execution as Cancel does.
+func TestCancelUnsettledRefusesAStoppedExecution(t *testing.T) {
+	t.Parallel()
+	c, _, local, remote, start := setup(t)
+	outcomeSealed.configure(remote)
+	id := start.Source.ExecutionID
+	r, err := c.CancelUnsettled(t.Context(), id, uuid.NewString(), nil)
+	if !errors.Is(err, ErrAlreadyStopped) || r.Phase != PhaseIdle || local.aborted != 0 {
+		t.Fatalf("cancel a stopped execution: %s %v aborts %d", r.Phase, err, local.aborted)
+	}
+	if stored, err := c.Inspect(id); err != nil || stored.Phase != PhaseIdle || stored.CancelOperation != "" {
+		t.Fatalf("refused cancellation was retained: %s %q %v", stored.Phase, stored.CancelOperation, err)
+	}
+	if r, err = c.Move(t.Context(), id, uuid.NewString(), testRemote); err != nil || r.Phase != PhaseActive {
+		t.Fatalf("move to remote: %s %v", r.Phase, err)
+	}
+	if r, err = c.CancelUnsettled(t.Context(), id, uuid.NewString(), nil); err != nil || r.Phase != PhaseCancelled {
+		t.Fatalf("cancel a running execution: %s %v", r.Phase, err)
 	}
 }
 

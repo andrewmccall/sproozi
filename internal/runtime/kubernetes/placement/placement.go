@@ -312,16 +312,6 @@ func (p *Placement) Prepare(ctx context.Context, l session.Launch, data []byte) 
 	return p.prepare(ctx, local, record)
 }
 
-// CreateInitial is Prepare limited to a first visit from a Git workspace: a
-// launch with a thread or a checkpoint is refused. The remote work owner still
-// calls it.
-func (p *Placement) CreateInitial(ctx context.Context, l session.Launch, data []byte) (session.Incarnation, error) {
-	if l.ThreadID != "" || l.CheckpointDigest != "" {
-		return session.Incarnation{}, &profile.Rejection{Code: profile.CodeInvalid}
-	}
-	return p.Prepare(ctx, l, data)
-}
-
 // prepareWorkspace restores a captured Git workspace into a fresh native home.
 // The caller holds the operation lock.
 func (p *Placement) prepareWorkspace(ctx context.Context, l session.Launch, data []byte) (session.Incarnation, error) {
@@ -512,7 +502,7 @@ func (p *Placement) validateInput(l session.Launch, initial bool) error {
 	if l.Harness != p.config.Harness || !idValid(l.ExecutionID) || !idValid(l.OperationID) || !idValid(l.AllocationID) || (!initial && !idValid(l.ThreadID) || initial && l.ThreadID != "") || l.Epoch == 0 || l.Placement != p.config.Name || (!initial && !digestValid(l.CheckpointDigest) || initial && l.CheckpointDigest != "") || l.InstructionDigest != p.config.InstructionDigest || len(l.Allowances) == 0 || len(l.Allowances) > 32 {
 		return &profile.Rejection{Code: profile.CodeDenied}
 	}
-	if utf8.RuneCountInString(l.Task) > agentcontract.MaxTaskRunes || strings.ContainsRune(l.Task, 0) || l.Task != "" && (strings.TrimSpace(l.Task) == "" || l.Harness != harness.NativeCodex) {
+	if utf8.RuneCountInString(l.Task) > agentcontract.MaxTaskRunes || strings.ContainsRune(l.Task, 0) || l.Task != "" && (strings.TrimSpace(l.Task) == "" || !l.Harness.TakesTask()) {
 		return &profile.Rejection{Code: profile.CodeDenied}
 	}
 	return nil

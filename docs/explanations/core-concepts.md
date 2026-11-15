@@ -91,7 +91,8 @@ A checkpoint contains work, not permission to run it. Sproozi creates fresh
 access at the destination. Before a move can start another agent, Sproozi must
 confirm that the source has stopped and record its finalized usage.
 
-Managed remote tasks currently use Codex. Controlled interactive moves support
+Managed remote tasks currently use Codex; interactive sessions a cluster owns
+use Codex or Claude Code. Controlled interactive moves support
 Codex, Claude Code and Copilot. Support for a harness in ordinary
 Kubernetes runs does not imply support for session movement. See
 [harness support](../reference/harnesses.md) for the exact limits.

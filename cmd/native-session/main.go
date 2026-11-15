@@ -91,6 +91,10 @@ type server struct {
 	lastInputAt time.Time
 }
 
+// quiesceReplyGrace bounds how long a stopped quiesce waits for its client
+// to finish reading the reply before the supervisor concludes and exits.
+var quiesceReplyGrace = 10 * time.Second
+
 // quiesceWait bounds one quiesce request's wait for a completed turn.
 var quiesceWait = harness.NativeQuiesceWait
 
@@ -741,6 +745,12 @@ func (s *server) handle(conn net.Conn) {
 		r := s.quiesce()
 		_ = encoder.Encode(r)
 		if r.State == harness.NativeStopped {
+			// Concluding exits the supervisor, which on Kubernetes ends the
+			// container and can cut the exec stream still carrying this reply.
+			// The client closes only after writing the reply out, so wait for
+			// that, within a bound.
+			_ = conn.SetReadDeadline(time.Now().Add(quiesceReplyGrace))
+			_, _ = io.Copy(io.Discard, conn)
 			s.conclude()
 		}
 	case harness.NativeAttach:

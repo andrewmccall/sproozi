@@ -108,6 +108,10 @@ const (
 	evFinalized event = "finalized"
 	// evCancel retains cancellation intent.
 	evCancel event = "cancel"
+	// evCancelUnsettled retains cancellation intent only while something can
+	// still run or settle: an idle execution already stopped, and an owner
+	// that keeps a stopped execution's result refuses to cancel it.
+	evCancelUnsettled event = "cancel-unsettled"
 	// evCancelled: no writer can run and its usage is sealed.
 	evCancelled event = "cancelled"
 )
@@ -143,6 +147,10 @@ var transitions = map[event]rule{
 	evFinalized: {to: map[Phase]Phase{PhasePreparing: PhaseIdle}},
 	evCancel: {to: map[Phase]Phase{
 		PhaseIdle: PhaseCancelled, PhasePreparing: PhaseCancelling, PhaseActivating: PhaseCancelling,
+		PhaseActive: PhaseCancelling, PhaseStopping: PhaseCancelling, PhaseUnknownStop: PhaseCancelling,
+		PhaseUnknownUsage: PhaseUnknownUsage}},
+	evCancelUnsettled: {to: map[Phase]Phase{
+		PhasePreparing: PhaseCancelling, PhaseActivating: PhaseCancelling,
 		PhaseActive: PhaseCancelling, PhaseStopping: PhaseCancelling, PhaseUnknownStop: PhaseCancelling,
 		PhaseUnknownUsage: PhaseUnknownUsage}},
 	evCancelled: {to: map[Phase]Phase{

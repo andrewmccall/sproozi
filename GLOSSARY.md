@@ -611,7 +611,9 @@ A session that a remote executor runs in a Kubernetes sandbox and keeps in its
 catalogue after the sandbox stops. It starts from `sproozi run --remote` or a
 coordinator's request. Once the writer has stopped, usage is finalized and the
 checkpoint is stored, its phase is `retained`: it can seed fresh work at its
-workspace revision, or be pulled to this machine and resumed there. See
+workspace revision, or be pulled to this machine and resumed there. Its other
+phases are the same words this machine's sessions use, such as `stopping` and
+`unknown-stop`, plus `exporting` and `pulled` while and after a pull. See
 [Run a task remotely, then resume it locally](docs/guides/portable-workflows.md).
 Also seen as: retained work, work session.
 
@@ -626,7 +628,9 @@ template, capability limits and explicit membership. See
 ### Owner
 
 This machine's service or a remote executor: whichever's catalogue holds a
-session. Only the owner starts, stops or hands over that session's executions.
+session. Only the owner starts, stops or hands over that session's executions,
+and both kinds of owner drive them through the same execution journal
+([ADR 0057](docs/adr/0057-the-remote-executor-owns-its-sessions-through-the-coordinator.md)).
 The owner is not the placement: this machine stays the owner when `move
 --remote` runs an execution in Kubernetes. A successful `pull` transfers
 ownership from a remote executor to this machine, one way. Catalogue rows
@@ -721,6 +725,8 @@ machine's catalogue with each cluster's. See
 A persistent assistant, currently Hermes, that starts delegated runs through
 the task service or a remote executor's remote work. It runs outside the
 sandboxes it starts.
+Not `session.Coordinator` in the code, which is the owner's execution
+journal; documentation calls that the [owner](#owner).
 
 ### Delegated run
 

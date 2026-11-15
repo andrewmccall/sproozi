@@ -105,3 +105,16 @@ stop sends that signal. The format is in [native launch and
 control](../reference/native-control.md#exit-reports). A report without a
 cause is ignored rather than guessed at, which is acceptable while the API is
 alpha ([ADR 0044](0044-the-api-stays-alpha-with-a-written-policy.md)).
+
+## Later clarification: Kubernetes (2026-11-14)
+
+Claude Code interactive sessions on a remote executor met this record's
+revisit condition: a remote placement needed the same exit handling. The
+Kubernetes placement refused every stop of a Claude Code visit whose native
+container had ended, so `/exit` left the session `unknown-stop`. It now
+records the exit and stops as Docker does: a first visit is turnless and
+keeps the workspace it started from, and a resumed visit's stop names the
+checkpoint it started from, because the trusted registry's receipt names a
+checkpoint for every visit with a native identity. No conversation is claimed
+from a stopped container. Implementation:
+[Kubernetes placement](../../internal/runtime/kubernetes/placement/lifecycle.go).

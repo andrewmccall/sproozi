@@ -101,6 +101,8 @@ def main():
         token.write_text(secrets.token_hex(32) + '\n')
         token.chmod(0o600)
     profile['workTokenFile'] = KUBE.CREDENTIALS + '/task-token'
+    # Work submitted with the work token always has a deadline (ADR 0057).
+    profile['workTokenMaxDuration'] = profile.get('maxDuration') or '30m'
     # The executor's init container seeds this administrator-owned snapshot.
     profile['repositories'] = {'sproozi': {'snapshot': '/state/source'}}
     documents = list(yaml.safe_load_all(args.manifest.read_text()))

@@ -175,10 +175,15 @@ verify-local-onboarding: ## Prove sproozi init, both harnesses, profile instruct
 verify-kubernetes-release: ## Install the release Kubernetes assets in an owned Kind cluster; prove first check, renewal, rotation and RBAC.
 	KIND_NODE_IMAGE='$(KIND_NODE_IMAGE)' python3 hack/verify/kubernetes-release.py
 
+.PHONY: verify-claude-remote-kind
+verify-claude-remote-kind: ## Prove Claude Code sessions and tasks on the Claude Code executor example in an owned Kind cluster with a deterministic provider.
+	KIND_NODE_IMAGE='$(KIND_NODE_IMAGE)' bash hack/verify/claude-remote-kind/run.sh
+
 .PHONY: verify-workflow-fixtures
 verify-workflow-fixtures: ## Run offline Python and shell regressions for fixtures, quickstart, Kind and demo scripts. CI.
 	python3 -m unittest discover -s hack/verify/session-mobility -p '*_test.py'
 	python3 -m unittest discover -s hack/verify/orchestration-kind -p '*_test.py'
+	python3 -m unittest discover -s hack/verify/claude-remote-kind -p '*_test.py'
 	python3 hack/verify/quickstart_test.py
 	python3 hack/release/publish_test.py
 	bash hack/verify/kind-test.sh

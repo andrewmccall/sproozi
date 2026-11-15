@@ -172,8 +172,6 @@ func TestUsageErrorsExitTwoBeforeReadingAnything(t *testing.T) {
 		"--harness must be codex, claude-code or copilot":           {"run", "--harness", "bogus"},
 		"status needs a session ID":                                 {"status"},
 		"--task applies only to a --remote run":                     {"run", "--task", "x"},
-		"give --repository NAME instead of PATH":                    {"run", "--remote", "repo", "--task", "x"},
-		"a --remote run needs --task TEXT or --task-file FILE":      {"run", "--remote"},
 		"a --remote run does not take agent arguments":              {"run", "--context", "c", "--task", "x", "--", "-x"},
 		"move needs --local (to this machine) or --remote":          {"move", "abc"},
 		"move needs --local (to this machine) or --remote (to a":    {"move", "abc", "--local", "--context", "c"},
@@ -378,7 +376,8 @@ func TestSessionPrefixesAndRetryHints(t *testing.T) {
 		retry    bool
 	}{
 		{home.Response{Error: "no session " + id + " on this machine", UnknownSession: true},
-			"no session " + id + ` on this machine; "sproozi ls" lists sessions`, false},
+			"no session " + id + ` on this machine; "sproozi ls" lists sessions, and a session in a cluster needs ` +
+				"--remote or --context", false},
 		{home.Response{Error: "home: session is not stopped", Rejected: true}, "session is not stopped", false},
 		{home.Response{Error: "home: docker fixed operation failed"}, "docker fixed operation failed", true},
 	} {
@@ -631,7 +630,7 @@ func TestDocumentationPathsBecomeLinks(t *testing.T) {
 		!strings.Contains(got, "("+docURL("docs/guides/install.md")+")") {
 		t.Fatalf("links: %s", got)
 	}
-	if line := detachedLine(uuid.Nil.String()); !strings.Contains(line, "sproozi attach 00000000") {
+	if line := detachedLine(uuid.Nil.String(), ""); !strings.Contains(line, "sproozi attach 00000000") {
 		t.Fatalf("detached line: %s", line)
 	}
 }

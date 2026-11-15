@@ -197,7 +197,7 @@ home-network diagnosis. Actual operator setup is in the
 [deployment guide](../../../docs/guides/retained-work-kubernetes.md) and
 [Project reference](../../../docs/reference/projects-and-revisions.md).
 
-A resource-policy denial before writer preparation retains `unknown` status.
+A resource-policy denial before writer preparation keeps `preparing` status with its problem.
 Inspect the exact cause, correct the reviewed policy, then pass the original
 `report.json` request UUID via `--request-id` into a **fresh** output directory.
 The verifier uses the public CLI recovery path when necessary and preserves the

@@ -23,6 +23,7 @@ func TestCoordinatorRunsFirstKubernetesVisitFromWorkspace(t *testing.T) {
 	}{
 		{"codex conversation", harness.NativeCodex, false},
 		{"codex turnless", harness.NativeCodex, true},
+		{"claude conversation", harness.NativeClaude, false},
 		{"claude turnless", harness.NativeClaude, true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -66,5 +67,72 @@ func TestCoordinatorRunsFirstKubernetesVisitFromWorkspace(t *testing.T) {
 				t.Fatalf("finalize replay: %+v %v", replay, err)
 			}
 		})
+	}
+}
+
+// A Claude visit resumed from a checkpoint whose agent exits by itself keeps
+// that checkpoint and records the exit.
+func TestCoordinatorKeepsCheckpointOfExitedResumedClaudeVisit(t *testing.T) {
+	t.Parallel()
+	p, kube, e, l, data := setupKind(t, harness.NativeClaude)
+	l.Epoch = 1
+	coordinator, err := session.Open(filepath.Join(t.TempDir(), "sessions"), map[string]session.Placement{l.Placement: p}, fixtureMax)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = coordinator.Close() })
+	if _, err = coordinator.Create(l, data, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = coordinator.Recover(t.Context(), l.ExecutionID); err != nil {
+		t.Fatal(err)
+	}
+	endNative(t, p, kube, l, 1)
+	r, err := coordinator.Finalize(t.Context(), l.ExecutionID, uuid.NewString())
+	if err != nil || r.Phase != session.PhaseIdle || len(r.Visits) != 1 {
+		t.Fatalf("finalize: %+v %v", r, err)
+	}
+	visit := r.Visits[0]
+	if visit.Exit == nil || !visit.Exit.Failed() || r.ThreadID != fixtureThread ||
+		r.Checkpoint.Metadata.SHA256 != e.meta.SHA256 || len(e.captureArgs) != 0 {
+		t.Fatalf("exited resumed Claude visit: %+v", r)
+	}
+}
+
+// A fresh Claude first visit whose agent exits by itself, such as on /exit,
+// is stopped through the ordinary stop. A stopped container never proves a
+// completed Claude turn, so the stop is turnless: the session keeps the
+// workspace it started from and the visit keeps the exit (ADR 0038).
+func TestCoordinatorStopsExitedFreshClaudeVisitTurnless(t *testing.T) {
+	t.Parallel()
+	p, kube, e, l, data := setupKind(t, harness.NativeClaude)
+	l = freshLaunch(t, e, l, data, "")
+	l.Epoch = 1
+	coordinator, err := session.Open(filepath.Join(t.TempDir(), "sessions"), map[string]session.Placement{l.Placement: p}, fixtureMax)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = coordinator.Close() })
+	if _, err = coordinator.Create(l, e.initial, ""); err != nil {
+		t.Fatal(err)
+	}
+	r, err := coordinator.Recover(t.Context(), l.ExecutionID)
+	if err != nil || r.Active == nil {
+		t.Fatalf("recover: %+v %v", r, err)
+	}
+	endNative(t, p, kube, l, 0)
+	// A Claude report never names a conversation the placement would keep.
+	e.logs = []byte(harness.NativeExitReportPrefix + `{"code":0,"cause":"exited","thread":"` + fixtureThread + `"}` + "\n")
+	if exited, err := p.Exited(t.Context(), r.Active.Launch, r.Active.Incarnation); err != nil || !exited {
+		t.Fatalf("exit not noticed: %v %v", exited, err)
+	}
+	r, err = coordinator.Finalize(t.Context(), l.ExecutionID, uuid.NewString())
+	if err != nil || r.Phase != session.PhaseIdle || len(r.Visits) != 1 {
+		t.Fatalf("finalize: %+v %v", r, err)
+	}
+	visit := r.Visits[0]
+	if visit.Exit == nil || visit.Exit.Failed() || r.ThreadID != "" || visit.CheckpointDigest != "" ||
+		r.Workspace == "" || len(e.captureArgs) != 0 {
+		t.Fatalf("exited Claude first visit: %+v", r)
 	}
 }

@@ -110,6 +110,7 @@ The table, in `internal/session/phase.go`:
 | `activated` | `activating` → `active` | yes |
 | `finalized` | `preparing` → `idle` | no |
 | `cancel` | `idle` → `cancelled`; `preparing`, `activating`, `active`, `stopping`, `unknown-stop` → `cancelling`; `unknown-usage` → `unknown-usage` | no |
+| `cancel-unsettled` | as `cancel`, but `idle` is refused: an owner that keeps a stopped execution's result ([ADR 0057](0057-the-remote-executor-owns-its-sessions-through-the-coordinator.md)) never cancels it | no |
 | `cancelled` | `cancelling`, `unknown-stop`, `unknown-usage` → `cancelled` | no |
 
 The exported predicates are `Live` (starting, running or stopping gracefully,
