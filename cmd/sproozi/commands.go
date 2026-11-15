@@ -92,9 +92,13 @@ var commands = []command{
 			"your terminal to it. PATH defaults to the current directory. Arguments after -- go to the\n" +
 			"agent program unchanged, for example: sproozi run -- --model gpt-5.\n\n" +
 			deadlineHelp + "\n\n" +
-			"With --remote, submit a task to run in a Kubernetes cluster instead.",
-		flags: []string{"harness", "login", "detach", "include-ignored", "remote", "context", "namespace", "task",
-			"task-file",
+			"With --remote, start the session in a Kubernetes cluster instead and connect to it. It\n" +
+			"belongs to --repository or --project and starts from that approved repository, or from\n" +
+			"PATH when given, which this command copies as it does here and uploads. Ctrl-] detaches\n" +
+			"and leaves it running; attach, stop, resume, status and cancel with --remote reach it.\n" +
+			"With --task or --task-file, submit a task the cluster runs to completion instead.",
+		flags: []string{"harness", "login", "detach", "include-ignored", "max-duration", "remote", "context", "namespace",
+			"task", "task-file",
 			"repository", "project", "json", "root"},
 		hiddenFlags: append([]string{"id", "operation", "workspace-from", "checkpoint-digest", "revision"},
 			locationFlags...)},
@@ -106,15 +110,17 @@ var commands = []command{
 		flags: []string{"remote", "context", "namespace", "json", "root"}, hiddenFlags: sessionPlumbing(false)},
 	{name: cmdAttach, operands: "ID", group: groupSessions, session: true,
 		summary: "Connect your terminal to a running session; Ctrl-] detaches",
-		flags:   []string{"root"}, hiddenFlags: sessionPlumbing(false)},
+		flags:   []string{"remote", "context", "namespace", "root"}, hiddenFlags: sessionPlumbing(false)},
 	{name: cmdStop, operands: "ID", group: groupSessions, session: true,
 		summary: "Stop a session after the agent's current turn and keep its work",
-		flags:   []string{"json", "root"}, hiddenFlags: sessionPlumbing(true)},
+		flags:   []string{"remote", "context", "namespace", "json", "root"}, hiddenFlags: sessionPlumbing(true)},
 	{name: cmdResume, operands: "ID [-- AGENT ARGS]", group: groupSessions, session: true, harnessArgs: true,
 		summary: "Continue a stopped session where it left off",
 		about: "Continue a stopped session where it left off and connect your terminal to it (-d skips that).\n" +
-			"Arguments after -- go to the agent program unchanged.\n\n" + deadlineHelp,
-		flags: []string{"detach", "json", "root"}, hiddenFlags: sessionPlumbing(true)},
+			"Arguments after -- go to the agent program unchanged; a session in a cluster takes none.\n\n" +
+			deadlineHelp,
+		flags:       []string{"detach", "max-duration", "remote", "context", "namespace", "json", "root"},
+		hiddenFlags: sessionPlumbing(true)},
 	{name: cmdCancel, operands: "ID", group: groupSessions, session: true,
 		summary: "Stop a session now, discarding the agent's current turn",
 		flags:   []string{"remote", "context", "namespace", "json", "root"}, hiddenFlags: sessionPlumbing(true)},
@@ -167,9 +173,11 @@ var commands = []command{
 }
 
 // deadlineHelp says how long a session runs and where that is set.
-const deadlineHelp = "Each run or resume lasts until its deadline: 30 minutes by default. Change it with\n" +
-	"\"maxDuration\" in config.json in the installation directory, then restart the service.\n" +
-	"\"sproozi stop\" before then keeps the work; \"sproozi resume\" starts a new deadline."
+const deadlineHelp = "A session runs until you stop it, or until its deadline if it has one. --max-duration 8h\n" +
+	"sets one for this run or resume, and --max-duration none removes it; the session keeps\n" +
+	"that choice when resumed. Otherwise \"maxDuration\" in config.json in the installation\n" +
+	"directory sets the default (none when it is absent; restart the service after changing it).\n" +
+	"A cluster may cap a --remote run. \"sproozi stop\" keeps the work; \"sproozi resume\" starts a new deadline."
 
 // sessionPlumbing are the hidden flags of a session command: the full ID,
 // the retry operation and the location flags.
@@ -191,12 +199,14 @@ func (f flagSpec) boolean() bool { return f.value == "" }
 var flagSpecs = map[string]flagSpec{
 	"harness": {value: "NAME",
 		help: "agent to run: " + harness.ManagedKindList() + " (default: the first one set up)"},
-	"detach":                {short: "d", help: "start without connecting your terminal"},
-	"include-ignored":       {value: "PATH", help: "also copy this Git-ignored file into the session; repeatable"},
-	"remote":                {help: "run the task in a Kubernetes cluster instead of on this machine"},
+	"detach":          {short: "d", help: "start without connecting your terminal"},
+	"include-ignored": {value: "PATH", help: "also copy this Git-ignored file into the session; repeatable"},
+	"max-duration": {value: "DURATION",
+		help: "how long this session may run, such as 8h, or none for no deadline (default: maxDuration in config.json)"},
+	"remote":                {help: "run the session in a Kubernetes cluster instead of on this machine"},
 	"context":               {value: "NAME", help: "kubeconfig context or file for the cluster (default: sproozi)"},
 	"namespace":             {value: "NS", help: "namespace of Sproozi in that cluster"},
-	"task":                  {value: "TEXT", help: "task for a --remote run"},
+	"task":                  {value: "TEXT", help: "task for a --remote run to complete (without one it is interactive)"},
 	"task-file":             {value: "FILE", help: "task for a --remote run, from a UTF-8 file of at most 16 KiB"},
 	"repository":            {value: "NAME", help: "approved repository for a --remote run"},
 	"project":               {value: "ID", help: "approved project for a --remote run"},
@@ -245,6 +255,12 @@ var commandFlagHelp = map[string]map[string]string{
 		"context": "list only this cluster's sessions: a kubeconfig context or file"},
 	cmdStatus: {"remote": "show a session in the cluster (the sproozi context unless --context)",
 		"context": "show a session in this cluster: a kubeconfig context or file"},
+	cmdAttach: {"remote": "attach to a session in the cluster (the sproozi context unless --context)",
+		"context": "attach to a session in this cluster: a kubeconfig context or file"},
+	cmdStop: {"remote": "stop a session in the cluster (the sproozi context unless --context)",
+		"context": "stop a session in this cluster: a kubeconfig context or file"},
+	cmdResume: {"remote": "resume a session in the cluster (the sproozi context unless --context)",
+		"context": "resume a session in this cluster: a kubeconfig context or file"},
 	cmdCancel: {"remote": "cancel a session in the cluster (the sproozi context unless --context)",
 		"context": "cancel a session in this cluster: a kubeconfig context or file"},
 	cmdRecover: {"remote": "recover a session in the cluster (the sproozi context unless --context)",

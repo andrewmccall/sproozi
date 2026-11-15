@@ -12,14 +12,19 @@ import (
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 )
 
-func TestNativeMCPConnectionsRejectClientAuthorityAndUnsupportedHarness(t *testing.T) {
+func TestNativeMCPConnectionsRejectClientAuthorityAndUnknownHarness(t *testing.T) {
 	for _, gateway := range []string{"https://user:credential@broker.example", "https://broker.example/mcp/other", "https://broker.example?token=secret", "http://broker.example"} {
 		if err := (&NativeClientConfig{MCPGateway: gateway, MCPServers: []string{fixtureMCPName}}).Validate(NativeCodex); err == nil {
 			t.Fatalf("accepted invalid broker binding %q", gateway)
 		}
 	}
-	if err := (&NativeClientConfig{MCPGateway: "https://broker.example", MCPServers: []string{fixtureMCPName}}).Validate(NativeClaude); err == nil {
-		t.Fatal("unproved native Claude MCP configuration admitted")
+	if err := (&NativeClientConfig{MCPGateway: "https://broker.example", MCPServers: []string{fixtureMCPName}}).Validate("opencode"); err == nil {
+		t.Fatal("named MCP servers admitted for an unmanaged harness")
+	}
+	for _, name := range []string{api.ControlMCPServer, "Not_A_Label"} {
+		if err := (&NativeClientConfig{MCPGateway: "https://broker.example", MCPServers: []string{name}}).Validate(NativeClaude); err == nil {
+			t.Fatalf("named MCP server %q admitted", name)
+		}
 	}
 }
 
@@ -79,8 +84,11 @@ func TestNativeClientsRendersDeclaredCapabilitiesInStableOrder(t *testing.T) {
 	if c == nil || !c.Kubernetes || c.MCPGateway != testGateway || strings.Join(c.MCPServers, ",") != "alpha,zeta" {
 		t.Fatalf("clients=%+v", c)
 	}
-	if _, err = NativeClients(NativeClaude, []api.CapabilityKind{nativeFixtureMCPCapability}, testGateway); err == nil {
-		t.Fatal("unsupported Claude MCP admitted")
+	for _, kind := range []NativeKind{NativeClaude, NativeCopilot} {
+		if c, err = NativeClients(kind, []api.CapabilityKind{"mcp.zeta", nativeFixtureMCPCapability}, testGateway); err != nil ||
+			strings.Join(c.MCPServers, ",") != "alpha,zeta" {
+			t.Fatalf("%s clients=%+v err=%v", kind, c, err)
+		}
 	}
 	if _, err = NativeClients(NativeCodex, []api.CapabilityKind{nativeFixtureMCPCapability, nativeFixtureMCPCapability}, testGateway); err == nil {
 		t.Fatal("duplicate MCP admitted")
@@ -107,11 +115,23 @@ func TestNativeClientsAlwaysCarryTheControlConnection(t *testing.T) {
 		`mcp_servers.sproozi.url="https://gateway.test/mcp/sproozi" mcp_servers.sproozi.required=true` {
 		t.Fatalf("codex options=%s", got)
 	}
-	var claude struct {
-		MCPServers map[string]struct{ Type, URL string } `json:"mcpServers"`
+	if got := (&NativeClientConfig{MCPGateway: testGateway}).ClaudeMCPConfig(); got !=
+		`{"mcpServers":{"sproozi":{"type":"http","url":"https://gateway.test/mcp/sproozi"}}}` {
+		t.Fatalf("claude control-only MCP config=%s", got)
 	}
-	if err := json.Unmarshal([]byte((&NativeClientConfig{MCPGateway: testGateway}).ClaudeMCPConfig()), &claude); err != nil ||
-		len(claude.MCPServers) != 1 || claude.MCPServers["sproozi"].Type != httpTransport || claude.MCPServers["sproozi"].URL != "https://gateway.test/mcp/sproozi" {
-		t.Fatalf("claude MCP config=%+v err=%v", claude, err)
+}
+
+// Claude Code's strict configuration carries the named servers beside the
+// control connection, each over HTTP on the gateway, in a stable order.
+func TestClaudeMCPConfigRendersNamedServers(t *testing.T) {
+	c := &NativeClientConfig{MCPGateway: testGateway, MCPServers: []string{"zeta", fixtureMCPName}}
+	if err := c.Validate(NativeClaude); err != nil {
+		t.Fatal(err)
+	}
+	want := `{"mcpServers":{"docs":{"type":"http","url":"https://gateway.test/mcp/docs"},` +
+		`"sproozi":{"type":"http","url":"https://gateway.test/mcp/sproozi"},` +
+		`"zeta":{"type":"http","url":"https://gateway.test/mcp/zeta"}}}`
+	if got := c.ClaudeMCPConfig(); got != want {
+		t.Fatalf("claude MCP config=%s", got)
 	}
 }

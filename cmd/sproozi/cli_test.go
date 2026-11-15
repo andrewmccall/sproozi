@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/privatefs"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/home"
@@ -171,8 +172,6 @@ func TestUsageErrorsExitTwoBeforeReadingAnything(t *testing.T) {
 		"--harness must be codex, claude-code or copilot":           {"run", "--harness", "bogus"},
 		"status needs a session ID":                                 {"status"},
 		"--task applies only to a --remote run":                     {"run", "--task", "x"},
-		"give --repository NAME instead of PATH":                    {"run", "--remote", "repo", "--task", "x"},
-		"a --remote run needs --task TEXT or --task-file FILE":      {"run", "--remote"},
 		"a --remote run does not take agent arguments":              {"run", "--context", "c", "--task", "x", "--", "-x"},
 		"move needs --local (to this machine) or --remote":          {"move", "abc"},
 		"move needs --local (to this machine) or --remote (to a":    {"move", "abc", "--local", "--context", "c"},
@@ -293,6 +292,22 @@ func TestStatusTextNamesADeadlineStop(t *testing.T) {
 	}
 }
 
+// A harness its supervisor stopped reads as kept, not as a crashed agent.
+func TestStatusTextNamesASupervisorStop(t *testing.T) {
+	for cause, want := range map[harness.NativeExitCause]string{
+		harness.NativeExitTerminated: "its container was stopped", harness.NativeExitFailed: "after a graceful stop failed",
+	} {
+		s := home.Status{ID: uuid.NewString(), Harness: "codex", Phase: "retained", Placement: localName,
+			Exit: &session.Exit{Code: 137, Cause: cause}}
+		if text := statusText(cmdStatus, s, false); !strings.Contains(text, want) || strings.Contains(text, "code 137") {
+			t.Errorf("%s: %q lacks %q or names the exit code", cause, text, want)
+		}
+		if text := statusText(cmdStop, s, false); strings.Contains(text, "code 137") {
+			t.Errorf("%s stop: %q names the exit code", cause, text)
+		}
+	}
+}
+
 // sessions prints a table, or one JSON document, naming this machine local.
 func TestSessionsListsThisMachineAsLocal(t *testing.T) {
 	id := uuid.NewString()
@@ -361,7 +376,8 @@ func TestSessionPrefixesAndRetryHints(t *testing.T) {
 		retry    bool
 	}{
 		{home.Response{Error: "no session " + id + " on this machine", UnknownSession: true},
-			"no session " + id + ` on this machine; "sproozi ls" lists sessions`, false},
+			"no session " + id + ` on this machine; "sproozi ls" lists sessions, and a session in a cluster needs ` +
+				"--remote or --context", false},
 		{home.Response{Error: "home: session is not stopped", Rejected: true}, "session is not stopped", false},
 		{home.Response{Error: "home: docker fixed operation failed"}, "docker fixed operation failed", true},
 	} {
@@ -614,7 +630,7 @@ func TestDocumentationPathsBecomeLinks(t *testing.T) {
 		!strings.Contains(got, "("+docURL("docs/guides/install.md")+")") {
 		t.Fatalf("links: %s", got)
 	}
-	if line := detachedLine(uuid.Nil.String()); !strings.Contains(line, "sproozi attach 00000000") {
+	if line := detachedLine(uuid.Nil.String(), ""); !strings.Contains(line, "sproozi attach 00000000") {
 		t.Fatalf("detached line: %s", line)
 	}
 }

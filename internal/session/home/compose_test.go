@@ -477,9 +477,9 @@ func mustServing(t *testing.T, store *pki.Store) *x509.Certificate {
 // inspectionHost is the OpenAI provider host the codex fixtures inspect.
 var inspectionHost = harness.ProtocolOpenAI.InspectionHost()
 
-// A home with MCP allowances still starts a Claude Code placement: its
-// sessions get no named MCP servers, and the service says so.
-func TestMCPAllowancesReachOnlyHarnessesThatUseThem(t *testing.T) {
+// A Claude Code placement receives the home's configured MCP servers, as Codex
+// and Copilot placements do, and the service starts without a notice.
+func TestMCPAllowancesReachClaudeCodePlacements(t *testing.T) {
 	c, store := managedConfig(t)
 	if err := store.Initialize(pki.Names{DNS: []string{inspectionHost}, IPs: []string{c.Local.GatewayIPv4}}); err != nil {
 		t.Fatal(err)
@@ -497,19 +497,15 @@ func TestMCPAllowancesReachOnlyHarnessesThatUseThem(t *testing.T) {
 		t.Fatalf("a Claude Code placement beside MCP allowances did not start: %v", err)
 	}
 	defer func() { _ = s.Close() }()
-	if !strings.Contains(log.String(), "claude-code sessions get no configured MCP servers (mcp.deepwiki)") {
-		t.Fatalf("no notice for Claude Code sessions: %q", log.String())
+	if strings.Contains(log.String(), "no configured MCP servers") {
+		t.Fatalf("notice withheld MCP servers from Claude Code sessions: %q", log.String())
 	}
-	if _, ok := harnessAllowances(harness.NativeClaude, c.Allowances)["mcp.deepwiki"]; ok {
-		t.Fatal("Claude Code session received an MCP allowance")
-	}
-	if _, ok := harnessAllowances(harness.NativeCodex, c.Allowances)["mcp.deepwiki"]; !ok {
-		t.Fatal("Codex session lost its MCP allowance")
-	}
-	claude := c
-	claude.Local.Harness = harness.NativeClaude
-	policy, err := approvedPolicy(claude)
-	if err != nil || slices.Contains(policy.AllowedCapabilities, "mcp.deepwiki") || policy.MCPServers != nil {
-		t.Fatalf("Claude Code policy %+v %v", policy, err)
+	for _, kind := range []harness.NativeKind{harness.NativeClaude, harness.NativeCodex, harness.NativeCopilot} {
+		placement := c
+		placement.Local.Harness = kind
+		policy, err := approvedPolicy(placement)
+		if err != nil || !slices.Contains(policy.AllowedCapabilities, "mcp.deepwiki") || policy.MCPServers["deepwiki"].Tools == nil {
+			t.Fatalf("%s policy %+v %v", kind, policy, err)
+		}
 	}
 }

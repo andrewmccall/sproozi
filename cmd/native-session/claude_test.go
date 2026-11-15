@@ -41,11 +41,51 @@ func TestClaudeLifecycleWaitsForForegroundToolsAndFreshInput(t *testing.T) {
 	if err := c.accept(claudeHook{Event: claudePromptSubmit}, 2); err != nil {
 		t.Fatal(err)
 	}
-	if c.completed {
+	if c.turn != turnRunning {
 		t.Fatal("submitted turn retained earlier completion")
 	}
 	if c.accept(claudeHook{Event: claudePreTool, ToolID: "task", ToolName: "Task"}, 2) == nil {
 		t.Fatal("unsupported delegation accepted")
+	}
+}
+
+// A failed turn has ended: tools and Stop belong to a running turn, so a
+// failure followed by a stray tool and Stop cannot leave a turn both failed
+// and completed. Only a new prompt starts another turn.
+func TestClaudeFailedTurnAcceptsNoToolOrStopUntilANewPrompt(t *testing.T) {
+	inactive := false
+	c := claudeLifecycle{}
+	if err := c.accept(claudeHook{Event: claudePromptSubmit}, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.accept(claudeHook{Event: claudeStopFailure}, 1); err != nil {
+		t.Fatal(err)
+	}
+	if c.accept(claudeHook{Event: claudePreTool, ToolID: "toolu_after", ToolName: claudeBash}, 1) == nil {
+		t.Fatal("tool start accepted after the turn failed")
+	}
+	if c.accept(claudeHook{Event: claudeStop, StopActive: &inactive}, 1) == nil {
+		t.Fatal("Stop accepted after the turn failed")
+	}
+	if c.turn != turnFailed || len(c.pending) != 0 || c.everCompleted {
+		t.Fatalf("failed turn changed by rejected events: %+v", c)
+	}
+	s := &server{claude: c}
+	if s.claudeTurnReady() || !s.claudeTurnless() {
+		t.Fatal("a failed only turn is ready or not turnless")
+	}
+	if d := (&server{claude: c}).claudeCompletion(); d.Completed || !d.Started {
+		t.Fatalf("failed turn diagnostics: %+v", d)
+	}
+	// A new prompt starts a turn that can complete.
+	if err := c.accept(claudeHook{Event: claudePromptSubmit}, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.accept(claudeHook{Event: claudeStop, StopActive: &inactive}, 2); err != nil {
+		t.Fatal(err)
+	}
+	if c.turn != turnCompleted {
+		t.Fatalf("turn after a new prompt and Stop: %v", c.turn)
 	}
 }
 
@@ -82,8 +122,21 @@ func TestClaudeHookBoundedPinnedPayload(t *testing.T) {
 	if _, err = readClaudeHook(strings.NewReader(raw + "{}")); err == nil {
 		t.Fatal("trailing hook JSON accepted")
 	}
-	if _, err = readClaudeHook(strings.NewReader(strings.Repeat(" ", 65537))); err == nil {
+	if _, err = readClaudeHook(strings.NewReader(strings.Repeat(" ", claudeHookMaxBytes+1))); err == nil {
 		t.Fatal("unbounded hook input accepted")
+	}
+	// A task's prompt and an MCP tool's output can each exceed 64 KiB.
+	task := strings.Repeat("😀", 32<<10)
+	prompt, _ := json.Marshal(map[string]any{"session_id": selected, "hook_event_name": claudePromptSubmit,
+		"prompt": task})
+	if h, err = readClaudeHook(strings.NewReader(string(prompt))); err != nil || h.Prompt != task {
+		t.Fatalf("largest task prompt: %v", err)
+	}
+	output, _ := json.Marshal(map[string]any{"session_id": selected, "hook_event_name": claudePostTool,
+		"tool_name": fixtureMCPTool, "tool_use_id": fixtureToolID,
+		"tool_response": []map[string]string{{"type": "text", "text": strings.Repeat("x", 512<<10)}}})
+	if h, err = readClaudeHook(strings.NewReader(string(output))); err != nil || h.ToolName != fixtureMCPTool {
+		t.Fatalf("large MCP output: %v", err)
 	}
 }
 func TestExplicitHarnessContractAndClaudeOptionBoundary(t *testing.T) {
@@ -203,5 +256,94 @@ func TestClaudeApprovesOnlyAGatewayPlaceholder(t *testing.T) {
 	}
 	if signedIn := claudePreferences([]string{"PATH=/usr/bin"}); signedIn["customApiKeyResponses"] != nil {
 		t.Fatalf("a harness signing in itself approved a key: %v", signedIn)
+	}
+}
+
+// MCP tool calls, including the sproozi control connection's diagnose, pair
+// like foreground Bash: an in-flight call blocks Stop, and its completion
+// releases it.
+func TestClaudeLifecyclePairsMCPToolsLikeForegroundBash(t *testing.T) {
+	inactive := false
+	for _, name := range []string{"mcp__sproozi__diagnose", fixtureMCPTool, "mcp__my-server__a_tool", "Skill"} {
+		c := claudeLifecycle{}
+		if err := c.accept(claudeHook{Event: claudePromptSubmit}, 1); err != nil {
+			t.Fatal(err)
+		}
+		tool := claudeHook{Event: claudePreTool, ToolID: "toolu_mcp", ToolName: name}
+		if err := c.accept(tool, 1); err != nil {
+			t.Fatalf("%s start: %v", name, err)
+		}
+		if c.accept(claudeHook{Event: claudeStop, StopActive: &inactive}, 1) == nil {
+			t.Fatalf("Stop with an in-flight %s call accepted", name)
+		}
+		if d := (&server{claude: c}).claudeCompletion(); d.Observation != pendingTools || d.PendingTools != 1 {
+			t.Fatalf("in-flight MCP call diagnostic: %+v", d)
+		}
+		tool.Event = claudePostTool
+		if err := c.accept(tool, 1); err != nil {
+			t.Fatalf("%s completion: %v", name, err)
+		}
+		if err := c.accept(claudeHook{Event: claudeStop, StopActive: &inactive}, 1); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestClaudeLifecycleRefusesMalformedMCPAndUnsupportedTools(t *testing.T) {
+	for _, name := range []string{"mcp__", "mcp__sproozi", "mcp__sproozi__", "mcp____diagnose",
+		"mcp__a b__c", "mcp__a__c\n", "Task", "Agent", "TodoWrite", "BashOutput",
+		"mcp__" + strings.Repeat("s", 300) + "__tool"} {
+		c := claudeLifecycle{}
+		if err := c.accept(claudeHook{Event: claudePromptSubmit}, 1); err != nil {
+			t.Fatal(err)
+		}
+		if c.accept(claudeHook{Event: claudePreTool, ToolID: fixtureToolID, ToolName: name}, 1) == nil {
+			t.Fatalf("unsupported tool %q accepted", name)
+		}
+	}
+	// A completion must name the tool that started.
+	c := claudeLifecycle{}
+	_ = c.accept(claudeHook{Event: claudePromptSubmit}, 1)
+	diagnose := claudeHook{Event: claudePreTool, ToolID: fixtureToolID, ToolName: "mcp__sproozi__diagnose"}
+	if err := c.accept(diagnose, 1); err != nil {
+		t.Fatal(err)
+	}
+	if c.accept(claudeHook{Event: claudePostTool, ToolID: fixtureToolID, ToolName: claudeBash}, 1) == nil {
+		t.Fatal("completion for a different tool accepted")
+	}
+}
+
+// A tool call that fails, such as a command that exits non-zero or an MCP
+// tool that reports an error, ends with PostToolUseFailure instead of
+// PostToolUse. It settles the call; an interrupted call does not.
+func TestClaudeLifecycleSettlesFailedToolsButNotInterruptedOnes(t *testing.T) {
+	inactive, interrupted := false, true
+	for _, name := range []string{claudeBash, fixtureMCPTool} {
+		c := claudeLifecycle{}
+		if err := c.accept(claudeHook{Event: claudePromptSubmit}, 1); err != nil {
+			t.Fatal(err)
+		}
+		tool := claudeHook{Event: claudePreTool, ToolID: "toolu_failed", ToolName: name}
+		if err := c.accept(tool, 1); err != nil {
+			t.Fatal(err)
+		}
+		tool.Event, tool.Interrupt = claudePostToolFailure, &interrupted
+		if c.accept(tool, 1) == nil {
+			t.Fatalf("interrupted %s call settled", name)
+		}
+		tool.Interrupt = nil
+		if c.accept(tool, 1) == nil {
+			t.Fatalf("%s failure without its interruption flag settled", name)
+		}
+		tool.Interrupt = &inactive
+		if err := c.accept(tool, 1); err != nil {
+			t.Fatalf("failed %s call: %v", name, err)
+		}
+		if c.accept(tool, 1) == nil {
+			t.Fatalf("repeated %s failure accepted", name)
+		}
+		if err := c.accept(claudeHook{Event: claudeStop, StopActive: &inactive}, 1); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

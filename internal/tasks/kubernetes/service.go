@@ -200,7 +200,7 @@ func (s *Service) Cancel(ctx context.Context, reference tasks.Reference) (tasks.
 	if err != nil {
 		return tasks.View{}, err
 	}
-	if run.Spec.Cancel || terminal(run.Status.Phase) {
+	if run.Spec.Cancel || run.Status.Phase.IsTerminal() {
 		return view(run), nil
 	}
 	patch, err := cancelPatch(run)
@@ -236,7 +236,7 @@ func (s *Service) Wait(ctx context.Context, reference tasks.Reference, timeout t
 			return tasks.View{}, err
 		}
 		latest = observation
-		if terminal(api.AgentRunPhase(observation.Phase)) {
+		if observation.Phase.IsTerminal() {
 			return observation, nil
 		}
 		select {
@@ -259,7 +259,7 @@ func view(run *api.AgentRun) tasks.View {
 	if run.Status.Result != nil {
 		result = &tasks.Result{Text: run.Status.Result.Text, Truncated: run.Status.Result.Truncated}
 	}
-	return tasks.View{Reference: tasks.Reference{ID: run.Name, UID: string(run.UID)}, Phase: tasks.Phase(phase), CancellationRequested: run.Spec.Cancel,
+	return tasks.View{Reference: tasks.Reference{ID: run.Name, UID: string(run.UID)}, Phase: phase, CancellationRequested: run.Spec.Cancel,
 		StartedAt: timestamp(run.Status.StartedAt), CompletedAt: timestamp(run.Status.CompletedAt), Result: result}
 }
 
@@ -268,10 +268,6 @@ func timestamp(value *metav1.Time) string {
 		return ""
 	}
 	return value.UTC().Format(time.RFC3339)
-}
-
-func terminal(phase api.AgentRunPhase) bool {
-	return slices.Contains([]api.AgentRunPhase{api.AgentRunPhaseSucceeded, api.AgentRunPhaseFailed, api.AgentRunPhaseTimedOut, api.AgentRunPhaseCancelled}, phase)
 }
 
 func digest(text string) string {

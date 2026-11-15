@@ -62,7 +62,7 @@ type Launch struct {
 	ThreadID          string               `json:"threadId"`
 	Task              string               `json:"task,omitempty"`
 	InstructionDigest string               `json:"instructionDigest"`
-	Deadline          time.Time            `json:"deadline"`
+	Deadline          time.Time            `json:"deadline,omitzero"`
 	Allowances        map[string]Allowance `json:"allowances"`
 	CheckpointDigest  string               `json:"checkpointDigest"`
 	IncludeIgnored    []string             `json:"includeIgnored,omitempty"`
@@ -114,14 +114,25 @@ type Stopped struct {
 	CheckpointDigest string      `json:"checkpointDigest"`
 }
 
-// Exit describes a harness that exited on its own: its exit code and the last
-// lines of its terminal, a bounded diagnostic from the workload.
+// Exit describes a harness that ended without a graceful stop: its exit code,
+// the last lines of its terminal, a bounded diagnostic from the workload, and
+// why it ended.
 type Exit struct {
 	Code   int    `json:"code"`
 	Output string `json:"output,omitempty"`
 	// Deadline records that the harness ended at or after the execution's
 	// deadline, which stops it, so its code is no failure of the agent.
 	Deadline bool `json:"deadline,omitempty"`
+	// Cause is why the supervisor reports the harness ended. Empty means no
+	// report was read, and the code alone describes the exit.
+	Cause harness.NativeExitCause `json:"cause,omitempty"`
+}
+
+// Failed reports an exit that is the agent's own failure: a nonzero code
+// from a harness that exited by itself before its deadline. A harness the
+// supervisor stopped is not one.
+func (e *Exit) Failed() bool {
+	return e != nil && e.Code != 0 && !e.Deadline && (e.Cause == "" || e.Cause == harness.NativeExitSelf)
 }
 
 // ExitOutputMax bounds Exit.Output.
@@ -257,33 +268,6 @@ type Visit struct {
 	Receipt          *Receipt    `json:"receipt,omitempty"`
 }
 
-// Phase summarises the execution for callers. Every save checks it against the
-// structure it describes (see validatePhase), so a phase never contradicts the
-// active visit, the pending operation or the cancellation intent.
-type Phase string
-
-const (
-	// PhaseIdle has no writer and nothing in progress.
-	PhaseIdle Phase = "idle"
-	// PhasePreparing and PhaseActivating have a pending operation whose
-	// destination is not yet active, and no other writer.
-	PhasePreparing  Phase = "preparing"
-	PhaseActivating Phase = "activating"
-	// PhaseActive has one admitted writer and nothing in progress.
-	PhaseActive Phase = "active"
-	// PhaseStopping is a graceful stop of the active writer in progress.
-	PhaseStopping Phase = "stopping"
-	// PhaseUnknownStop is a stop or cancellation that could not prove the
-	// writer stopped. The allocation stays encumbered.
-	PhaseUnknownStop Phase = "unknown-stop"
-	// PhaseUnknownUsage has a fenced writer whose usage is not sealed.
-	PhaseUnknownUsage Phase = "unknown-usage"
-	// PhaseCancelling has durable cancellation intent not yet carried out.
-	PhaseCancelling Phase = "cancelling"
-	// PhaseCancelled has carried out cancellation; nothing can start again.
-	PhaseCancelled Phase = "cancelled"
-)
-
 // Stage is the next step of an operation. Done stages are terminal.
 type Stage string
 
@@ -331,7 +315,7 @@ type Record struct {
 	HarnessArgs       []string `json:"harnessArgs,omitempty"`
 	// Login is the named login every visit signs in with (ADR 0049).
 	Login            string               `json:"login,omitempty"`
-	Deadline         time.Time            `json:"deadline"`
+	Deadline         time.Time            `json:"deadline,omitzero"`
 	Ceiling          map[string]Allowance `json:"ceiling"`
 	Remaining        map[string]Allowance `json:"remaining"`
 	Checkpoint       Checkpoint           `json:"checkpoint"`

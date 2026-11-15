@@ -1,7 +1,6 @@
 package harness_test
 
 import (
-	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -9,7 +8,6 @@ import (
 	"strconv"
 	"syscall"
 	"testing"
-	"time"
 
 	"github.com/andrewmccall/sproozi/internal/harness"
 )
@@ -44,7 +42,7 @@ if scenario == "error": record["error"]="failed"
 if scenario == "failed-result": record["exit_code"]=1
 if scenario == "long": record["text"]="🌳\""*5000
 if scenario == "detached-stdout":
- child = subprocess.Popen([sys.executable,"-c","import time; time.sleep(30)"],start_new_session=True)
+ child = subprocess.Popen([sys.executable,"-c","import time; time.sleep(3600)"],start_new_session=True)
  pending_pid = state.with_suffix(".child-pid.pending")
  pending_pid.write_text(str(child.pid))
  pending_pid.replace(state.with_suffix(".child-pid"))
@@ -65,7 +63,7 @@ func hermesFixture(t *testing.T, scenario string) (*exec.Cmd, string, string) {
 			t.Fatal(err)
 		}
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	ctx, cancel := helperProcessContext(t)
 	t.Cleanup(cancel)
 	output := filepath.Join(dir, "result")
 	cmd := exec.CommandContext(ctx, python, filepath.Join(dir, "launch.py"), "--model", "fixture-model", "--contract", dir, "--hermes", filepath.Join(dir, "hermes"), "--result", output)
@@ -178,19 +176,16 @@ func TestHermesLaunchCompletesWhenDetachedChildRetainsStdout(t *testing.T) {
 	// The host-side launcher is not PID 1, so it cannot adopt this detached
 	// descendant. The test owns its cleanup even if the assertion fails.
 	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
-	select {
-	case err = <-done:
-		if err != nil {
-			output, _ := os.ReadFile(state + ".output")
-			t.Fatalf("Completed native run failed: %v %s", err, output)
-		}
-	case <-time.After(3 * time.Second):
-		_ = syscall.Kill(pid, syscall.SIGKILL)
-		_ = cmd.Process.Kill()
-		<-done
-		t.Fatal("Native completion waited for detached child stdout EOF")
+	// The child outlives any test deadline, so a launcher that waited for its
+	// stdout EOF would still be waiting when the helper's context ends it, and
+	// one that returned while the child lives did not wait. A fixed bound here
+	// failed a correct launcher on a loaded machine.
+	if err = cmd.Wait(); err != nil {
+		output, _ := os.ReadFile(state + ".output")
+		t.Fatalf("Completed native run failed (or waited for detached child stdout EOF): %v %s", err, output)
+	}
+	if err = syscall.Kill(pid, 0); err != nil {
+		t.Fatalf("Native completion waited for the detached child to end: %v", err)
 	}
 	document, err := os.ReadFile(result)
 	if err != nil {

@@ -47,16 +47,16 @@ func (c *Coordinator) Create(first Launch, input []byte, session string) (Record
 	if !os.IsNotExist(err) {
 		return Record{}, err
 	}
-	if err = c.beforeDeadline(first); err != nil {
-		return Record{}, err
-	}
 	r := Record{Version: journalVersion, ID: first.ExecutionID, Session: session, Harness: first.Harness,
 		ThreadID: first.ThreadID, InstructionDigest: first.InstructionDigest,
 		IncludeIgnored: append([]string(nil), first.IncludeIgnored...), HarnessArgs: append([]string(nil), first.HarnessArgs...),
 		Login: first.Login, Deadline: first.Deadline,
 		Ceiling: cloneAllowances(first.Allowances), Remaining: cloneAllowances(first.Allowances),
-		Phase: PhasePreparing, PendingOperation: first.OperationID,
-		Operations: []Operation{{ID: first.OperationID, Destination: first.Placement, Launch: &first, Stage: stagePrepare}}}
+		PendingOperation: first.OperationID,
+		Operations:       []Operation{{ID: first.OperationID, Destination: first.Placement, Launch: &first, Stage: stagePrepare}}}
+	if err = c.admit(r, evCreate); err != nil {
+		return Record{}, err
+	}
 	if first.CheckpointDigest == "" {
 		r.Workspace, err = c.retainWorkspace(input)
 	} else {
@@ -65,7 +65,7 @@ func (c *Coordinator) Create(first Launch, input []byte, session string) (Record
 	if err != nil {
 		return Record{}, err
 	}
-	return r, c.save(r)
+	return r, c.commit(&r, evCreate)
 }
 
 // Inspect reads the last durable snapshot; it does not turn backend
@@ -131,14 +131,12 @@ func (c *Coordinator) Move(ctx context.Context, id, operationID, destination str
 		return r, errors.New("session: operation retention limit reached")
 	}
 	stage := stagePrepare
-	r.Phase = PhasePreparing
 	if r.Active != nil {
 		stage = stageStop
-		r.Phase = PhaseStopping
 	}
 	r.Operations = append(r.Operations, Operation{ID: operationID, Destination: destination, Stage: stage})
 	r.PendingOperation = operationID
-	if err = c.save(r); err != nil {
+	if err = c.commit(&r, evMove); err != nil {
 		return r, err
 	}
 	return c.drive(ctx, r, len(r.Operations)-1)
@@ -231,25 +229,24 @@ func (c *Coordinator) stopSource(ctx context.Context, r Record, index int) (Reco
 		if errors.Is(err, harness.ErrNativeTurnPending) {
 			// The writer still runs with input gated; the stop stays pending
 			// and repeating it waits again.
-			return r, err
+			if r.Phase == PhaseStopping {
+				return r, err
+			}
+			return r, errors.Join(err, c.commit(&r, evTurnPending))
 		}
 		fenced := fencedBy(source.Launch, source.Incarnation, stopped)
 		if err != nil && (!errors.Is(err, ErrUsageUnsealed) || !fenced) {
-			r.Phase = PhaseUnknownStop
-			return r, errors.Join(err, c.save(r))
+			return r, errors.Join(err, c.commit(&r, evStopUnproven))
 		}
 		if !fenced {
-			r.Phase = PhaseUnknownStop
-			return r, errors.Join(errors.New("session: source stop remains unknown"), c.save(r))
+			return r, errors.Join(errors.New("session: source stop remains unknown"), c.commit(&r, evStopUnproven))
 		}
 		source.ActualStopped = true
 		if err != nil {
-			r.Phase = PhaseUnknownUsage
-			return r, errors.Join(err, c.save(r))
+			return r, errors.Join(err, c.commit(&r, evUsageUnsealed))
 		}
 		if err = validateReceipt(source.Launch, source.Incarnation, stopped.Receipt); err != nil {
-			r.Phase = PhaseUnknownUsage
-			return r, errors.Join(err, c.save(r))
+			return r, errors.Join(err, c.commit(&r, evUsageUnsealed))
 		}
 		// A harness that exited on its own may leave no new checkpoint; the
 		// previous one, or the retained workspace, stays the session's state.
@@ -265,16 +262,14 @@ func (c *Coordinator) stopSource(ctx context.Context, r Record, index int) (Reco
 		}
 		remaining, err := subtract(r.Remaining, *stopped.Receipt)
 		if err != nil {
-			r.Phase = PhaseUnknownUsage
-			return r, errors.Join(err, c.save(r))
+			return r, errors.Join(err, c.commit(&r, evUsageUnsealed))
 		}
 		r.Visits = append(r.Visits, Visit{Launch: source.Launch, Incarnation: source.Incarnation, Receipt: stopped.Receipt, ActualStopped: true, CheckpointDigest: cp.Metadata.SHA256, Exit: stopped.Exit})
 		r.Remaining = remaining
 		r.ThreadID, r.Checkpoint = thread, cp
 		r.Active = nil
 		op.Stage = stagePrepare
-		r.Phase = PhasePreparing
-		if err = c.save(r); err != nil {
+		if err = c.commit(&r, evStopped); err != nil {
 			return r, err
 		}
 	}
@@ -319,7 +314,7 @@ func (c *Coordinator) prepareDestination(ctx context.Context, r Record, index in
 				return r, err
 			}
 		}
-		if err := c.beforeDeadline(*op.Launch); err != nil {
+		if err := c.admit(r, evPrepared); err != nil {
 			return r, err
 		}
 		if err := spendable(op.Launch.Allowances); err != nil {
@@ -363,8 +358,7 @@ func (c *Coordinator) prepareDestination(ctx context.Context, r Record, index in
 		}
 		op.Incarnation = &incarnation
 		op.Stage = stageActivate
-		r.Phase = PhaseActivating
-		if err = c.save(r); err != nil {
+		if err = c.commit(&r, evPrepared); err != nil {
 			return r, err
 		}
 	}
@@ -392,7 +386,7 @@ func (c *Coordinator) activateDestination(ctx context.Context, r Record, index i
 			if err = ctx.Err(); err != nil {
 				return r, err
 			}
-			if err = c.beforeDeadline(*op.Launch); err != nil {
+			if err = c.admit(r, evActivated); err != nil {
 				return r, err
 			}
 			if err = p.Activate(ctx, *op.Launch, *op.Incarnation); err != nil {
@@ -404,10 +398,9 @@ func (c *Coordinator) activateDestination(ctx context.Context, r Record, index i
 		}
 		r.Active = &Visit{Launch: *op.Launch, Incarnation: *op.Incarnation}
 		r.Epoch = op.Launch.Epoch
-		r.Phase = PhaseActive
 		op.Stage = stageComplete
 		r.PendingOperation = ""
-		return r, c.save(r)
+		return r, c.commit(&r, evActivated)
 	}
 	return r, nil
 }

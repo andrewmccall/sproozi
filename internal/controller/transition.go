@@ -26,19 +26,6 @@ import (
 // It indicates a controller bug, so it is returned rather than ignored.
 var ErrInvalidTransition = errors.New("invalid AgentRun phase transition")
 
-// IsTerminal reports whether phase is a terminal lifecycle state from which no
-// further transitions are permitted.
-func IsTerminal(phase sprooziv1alpha1.AgentRunPhase) bool {
-	switch phase {
-	case sprooziv1alpha1.AgentRunPhaseSucceeded,
-		sprooziv1alpha1.AgentRunPhaseFailed,
-		sprooziv1alpha1.AgentRunPhaseTimedOut,
-		sprooziv1alpha1.AgentRunPhaseCancelled:
-		return true
-	}
-	return false
-}
-
 // ValidTransition reports whether transitioning from the given phase to the
 // target phase is a permitted lifecycle step.
 func ValidTransition(from, to sprooziv1alpha1.AgentRunPhase) bool {

@@ -4,20 +4,26 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"testing"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
 	"github.com/andrewmccall/sproozi/internal/harness"
+	runtimekube "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
 	"github.com/andrewmccall/sproozi/internal/workspace"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
 	initialFixtureTask = "Fix the fixture"
+	fixtureRemote      = "remote"
 )
 
 func initialWorkspace(t *testing.T, data []byte) []byte {
@@ -38,14 +44,11 @@ func TestFreshRemoteWorkspaceStopsWithActualUUIDAndImmutableReceipt(t *testing.T
 	p, kube, e, l, checkpointData := setup(t)
 	l.ThreadID, l.CheckpointDigest, l.Task = "", "", initialFixtureTask
 	e.initial = initialWorkspace(t, checkpointData)
-	if _, err := p.Prepare(t.Context(), l, e.initial); err == nil {
-		t.Fatal("resume accepted absent native identity")
-	}
-	i, err := p.CreateInitial(t.Context(), l, e.initial)
+	i, err := p.Prepare(t.Context(), l, e.initial)
 	if err != nil {
 		t.Fatal(err)
 	}
-	retry, err := p.CreateInitial(t.Context(), l, e.initial)
+	retry, err := p.Prepare(t.Context(), l, e.initial)
 	if err != nil || retry != i {
 		t.Fatal("prepared creation retry", retry, err)
 	}
@@ -80,7 +83,7 @@ func TestFreshRemoteWorkspaceStopsWithActualUUIDAndImmutableReceipt(t *testing.T
 	if !session.SameLaunch(stopped.Launch, l) || !session.SameLaunch(stopped.Receipt.Launch, l) {
 		t.Fatalf("binding rewrote the immutable launch: %+v", stopped.Launch)
 	}
-	retry, err = p.CreateInitial(t.Context(), l, e.initial)
+	retry, err = p.Prepare(t.Context(), l, e.initial)
 	if err != nil || retry != i {
 		t.Fatal("stopped creation retry", retry, err)
 	}
@@ -98,7 +101,7 @@ func TestFreshRemoteWorkspaceStopsWithActualUUIDAndImmutableReceipt(t *testing.T
 	if _, err = p.Inspect(t.Context(), changed); err == nil {
 		t.Fatal("changed initial task accepted")
 	}
-	if _, err = p.CreateInitial(t.Context(), l, append(e.initial, ' ')); err == nil {
+	if _, err = p.Prepare(t.Context(), l, append(e.initial, ' ')); err == nil {
 		t.Fatal("changed initial workspace accepted")
 	}
 }
@@ -108,7 +111,7 @@ func TestInitialUnknownTurnCannotSealOrCapture(t *testing.T) {
 	p, _, e, l, data := setup(t)
 	l.ThreadID, l.CheckpointDigest, l.Task = "", "", initialFixtureTask
 	e.initial = initialWorkspace(t, data)
-	i, err := p.CreateInitial(t.Context(), l, e.initial)
+	i, err := p.Prepare(t.Context(), l, e.initial)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,13 +131,127 @@ func TestInitialUnknownTurnCannotSealOrCapture(t *testing.T) {
 	}
 }
 
+// A Claude Code first visit carries its task to the AgentRun, as Codex does;
+// the supervisor binds completion to the task's prompt.
+func TestInitialClaudeTaskReachesTheRun(t *testing.T) {
+	t.Parallel()
+	p, kube, e, l, data := setupKind(t, harness.NativeClaude)
+	l = freshLaunch(t, e, l, data, initialFixtureTask)
+	if _, err := p.Prepare(context.Background(), l, e.initial); err != nil {
+		t.Fatal(err)
+	}
+	var run api.AgentRun
+	if err := kube.Get(t.Context(), client.ObjectKey{Namespace: fixtureNamespace, Name: runName(l)}, &run); err != nil {
+		t.Fatal(err)
+	}
+	if run.Spec.Task != initialFixtureTask {
+		t.Fatalf("submitted Claude task lost: %q", run.Spec.Task)
+	}
+}
+
 func TestInitialTaskRejectsUnsupportedHarness(t *testing.T) {
 	t.Parallel()
-	p, _, _, l, data := setupKind(t, harness.NativeClaude)
-	l.ThreadID, l.CheckpointDigest, l.Task = "", "", "Task"
-	_, err := p.CreateInitial(context.Background(), l, initialWorkspace(t, data))
+	p := &Placement{config: Config{Harness: harness.NativeCopilot, Name: fixtureRemote, InstructionDigest: "digest"}}
+	l := session.Launch{Harness: harness.NativeCopilot, ExecutionID: "00000000-0000-4000-8000-000000000001",
+		OperationID: "00000000-0000-4000-8000-000000000002", AllocationID: "00000000-0000-4000-8000-000000000003",
+		Epoch: 1, Placement: fixtureRemote, InstructionDigest: "digest",
+		Allowances: map[string]session.Allowance{string(api.CapabilityModelInference): {}}}
+	if err := p.validateInput(l, true); err != nil {
+		t.Fatalf("fixture launch refused without a task: %v", err)
+	}
+	l.Task = "Task"
 	var rejection *profile.Rejection
-	if !errors.As(err, &rejection) || rejection.Code != profile.CodeDenied {
-		t.Fatalf("unproven task accepted: %v", err)
+	if err := p.validateInput(l, true); !errors.As(err, &rejection) || rejection.Code != profile.CodeDenied {
+		t.Fatalf("unproven Copilot task accepted: %v", err)
+	}
+}
+
+// freshLaunch is a first visit from a Git workspace: no thread and no
+// checkpoint, as the coordinator starts every first visit.
+func freshLaunch(t *testing.T, e *protocolExecutor, l session.Launch, checkpointData []byte, task string) session.Launch {
+	t.Helper()
+	l.ThreadID, l.CheckpointDigest, l.Task = "", "", task
+	e.initial = initialWorkspace(t, checkpointData)
+	return l
+}
+
+// Prepare of a fresh launch registers the workspace, replays the same
+// incarnation without a second Run, and refuses a different workspace for
+// the same launch.
+func TestPrepareOfFreshLaunchReplaysAndConflicts(t *testing.T) {
+	t.Parallel()
+	p, kube, e, l, data := setup(t)
+	l = freshLaunch(t, e, l, data, initialFixtureTask)
+	i, err := p.Prepare(t.Context(), l, e.initial)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, prepared, err := p.retained(t.Context(), l)
+	if err != nil || prepared.WorkspaceDigest == "" || prepared.Phase != registry.Prepared || !validIncarnation(i) {
+		t.Fatalf("fresh preparation: %+v %v %+v", prepared, err, i)
+	}
+	if again, err := p.Prepare(t.Context(), l, e.initial); err != nil || again != i || kube.runCreates != 1 {
+		t.Fatalf("fresh preparation replay: %+v %v runs %d", again, err, kube.runCreates)
+	}
+	_, err = p.Prepare(t.Context(), l, append(append([]byte(nil), e.initial...), ' '))
+	var rejection *profile.Rejection
+	if !errors.As(err, &rejection) || rejection.Code != profile.CodeConflict {
+		t.Fatalf("changed initial workspace: %v", err)
+	}
+}
+
+func validIncarnation(i session.Incarnation) bool {
+	return idValid(i.ExecutionID) && i.ResourceUID != ""
+}
+
+func TestTurnlessFirstVisitStopsWithoutCheckpoint(t *testing.T) {
+	t.Parallel()
+	for _, kind := range []harness.NativeKind{harness.NativeCodex, harness.NativeClaude} {
+		t.Run(string(kind), func(t *testing.T) {
+			t.Parallel()
+			p, kube, e, l, data := setupKind(t, kind)
+			l = freshLaunch(t, e, l, data, "")
+			i, err := p.Prepare(t.Context(), l, e.initial)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = p.Activate(t.Context(), l, i); err != nil {
+				t.Fatal(err)
+			}
+			e.turnless = true
+			stopped, err := p.Stop(t.Context(), l, i)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stopped.Receipt == nil {
+				t.Fatalf("turnless stop has no sealed receipt: %+v", stopped)
+			}
+			usage, ok := stopped.Receipt.Usage[string(api.CapabilityModelInference)]
+			if !stopped.ActualStopped || !ok || stopped.ThreadID != "" || stopped.Checkpoint != nil || stopped.CheckpointDigest != "" || stopped.Incarnation != i {
+				t.Fatalf("turnless stop: %+v", stopped)
+			}
+			if usage.Units != 0 || e.captureArgs != nil || e.finishes != 1 {
+				t.Fatalf("turnless stop usage %+v, capture %v, finishes %d", usage, e.captureArgs, e.finishes)
+			}
+			var pod corev1.Pod
+			if err = kube.Get(t.Context(), client.ObjectKey{Namespace: runtimekube.AgentsNamespace, Name: runtimekube.RunName(types.UID(i.ExecutionID))}, &pod); err != nil {
+				t.Fatal(err)
+			}
+			if slices.Contains(pod.Finalizers, runtimekube.ManagedWriterFenceFinalizer) {
+				t.Fatal("writer fence kept after the turnless stop")
+			}
+			repeated, err := p.Stop(t.Context(), l, i)
+			if err != nil || !reflect.DeepEqual(repeated, stopped) {
+				t.Fatalf("turnless stop replay: %+v %v", repeated, err)
+			}
+			observed, err := p.Inspect(t.Context(), l)
+			if err != nil || observed.State != session.PlacementStopped || observed.Stopped == nil || !reflect.DeepEqual(*observed.Stopped, stopped) {
+				t.Fatalf("turnless observation: %+v %v", observed, err)
+			}
+			aborted, err := p.Abort(t.Context(), l, i)
+			if err != nil || aborted.State != session.PlacementStopped || !reflect.DeepEqual(*aborted.Stopped, stopped) {
+				t.Fatalf("abort after turnless stop: %+v %v", aborted, err)
+			}
+		})
 	}
 }

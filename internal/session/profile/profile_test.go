@@ -43,6 +43,10 @@ type retainedBackend struct {
 	prepareCalls int
 	failure      error
 	unsealed     bool
+	// waiting, when set, makes Stop give up waiting for the native turn.
+	waiting string
+	// stopFailure, when set, makes Stop fail without proving anything.
+	stopFailure error
 }
 
 func (p *retainedBackend) Prepare(_ context.Context, l session.Launch, data []byte) (session.Incarnation, error) {
@@ -73,6 +77,12 @@ func (p *retainedBackend) Activate(_ context.Context, l session.Launch, i sessio
 func (p *retainedBackend) Stop(_ context.Context, l session.Launch, i session.Incarnation) (session.Stopped, error) {
 	if !sameLaunch(l, p.state.Launch) || i != p.state.Incarnation {
 		return session.Stopped{}, &Rejection{Code: CodeConflict}
+	}
+	if p.waiting != "" {
+		return session.Stopped{}, fmt.Errorf("kubernetes placement: %w", &harness.NativeTurnPending{Waiting: p.waiting})
+	}
+	if p.stopFailure != nil {
+		return session.Stopped{}, p.stopFailure
 	}
 	if p.unsealed {
 		return session.Stopped{Launch: l, Incarnation: i, ActualStopped: true}, fmt.Errorf("%w: ledger unavailable", session.ErrUsageUnsealed)
@@ -223,6 +233,13 @@ func serve(t *testing.T, h http.Handler) (*httptest.Server, string) {
 }
 func fixture(t *testing.T) (*Client, *retainedBackend, *httptest.Server, session.Launch, []byte) {
 	t.Helper()
+	return wrappedFixture(t, func(h http.Handler) http.Handler { return h })
+}
+
+// wrappedFixture serves the executor's handler through wrap, so a test can
+// stand in for a different executor version on chosen paths.
+func wrappedFixture(t *testing.T, wrap func(http.Handler) http.Handler) (*Client, *retainedBackend, *httptest.Server, session.Launch, []byte) {
+	t.Helper()
 	data, digest := artifact(t)
 	backend := &retainedBackend{data: data, digest: digest}
 	l := launch(digest)
@@ -230,7 +247,7 @@ func fixture(t *testing.T) (*Client, *retainedBackend, *httptest.Server, session
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, ca := serve(t, h)
+	s, ca := serve(t, wrap(h))
 	c, err := testClient(s.URL, ca)
 	if err != nil {
 		t.Fatal(err)

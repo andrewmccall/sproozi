@@ -15,9 +15,9 @@ import (
 	"reflect"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
+	"github.com/andrewmccall/sproozi/internal/deadline"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/privatefs"
 	"github.com/andrewmccall/sproozi/internal/project"
@@ -54,6 +54,9 @@ type localSession struct {
 	Current    string                      `json:"current,omitempty"`
 	Executions []string                    `json:"executions,omitempty"`
 	Operations map[string]catalogOperation `json:"operations,omitempty"`
+	// MaxDuration is the session's own choice of deadline for each execution:
+	// "none" or a Go duration. Empty follows the home's maxDuration (ADR 0056).
+	MaxDuration string `json:"maxDuration,omitempty"`
 }
 
 type catalogOperation struct {
@@ -353,6 +356,14 @@ func sameExportSource(a, b work.Export) bool {
 // harnessArgs are the user's own arguments for the stock harness, kept with
 // the new execution only.
 func (s *Service) Resume(ctx context.Context, id, operation string, harnessArgs []string) (Status, error) {
+	return s.ResumeWithMaxDuration(ctx, id, operation, harnessArgs, "")
+}
+
+// ResumeWithMaxDuration is Resume with a new choice of deadline for the session:
+// "none", a positive Go duration, or empty to keep the session's own choice,
+// or the home's maxDuration when it made none. A choice is kept for later
+// resumes.
+func (s *Service) ResumeWithMaxDuration(ctx context.Context, id, operation string, harnessArgs []string, maxDuration string) (Status, error) {
 	unlock, err := s.lockSession(id)
 	if err != nil {
 		return Status{}, err
@@ -368,7 +379,7 @@ func (s *Service) Resume(ctx context.Context, id, operation string, harnessArgs 
 			if execution.Session != "" || execution.Operations[0].Launch.CheckpointDigest != "" {
 				return Status{}, notResumable(id, execution)
 			}
-			if err = s.catalogStartedLocked(execution); err == nil {
+			if err = s.catalogStartedLocked(execution, startedChoice(execution)); err == nil {
 				r, err = s.readCatalog(id)
 			}
 		}
@@ -414,6 +425,13 @@ func (s *Service) Resume(ctx context.Context, id, operation string, harnessArgs 
 	if err = harness.ValidateNativeArgs(local.Harness, harnessArgs); err != nil {
 		return Status{}, rejectedError("home: " + err.Error())
 	}
+	if maxDuration != "" {
+		r.MaxDuration = maxDuration
+	}
+	until, err := s.executionDeadline(r.MaxDuration)
+	if err != nil {
+		return Status{}, err
+	}
 	data, err := s.resumeInput(r, local)
 	if err != nil {
 		return Status{}, err
@@ -423,7 +441,7 @@ func (s *Service) Resume(ctx context.Context, id, operation string, harnessArgs 
 		ThreadID: cmp.Or(r.Committed.ThreadID, r.Committed.Launch.ThreadID), InstructionDigest: local.InstructionDigest,
 		IncludeIgnored: slices.Clone(r.Committed.Launch.IncludeIgnored), HarnessArgs: slices.Clone(harnessArgs),
 		Login:    r.Committed.Launch.Login,
-		Deadline: time.Now().Add(s.duration).UTC(), Allowances: allowances, CheckpointDigest: r.Committed.CheckpointDigest}
+		Deadline: until, Allowances: allowances, CheckpointDigest: r.Committed.CheckpointDigest}
 	if first.CheckpointDigest == "" {
 		// Stopped with no conversation: start one again from its workspace.
 		first.ThreadID = ""
@@ -441,6 +459,16 @@ func (s *Service) Resume(ctx context.Context, id, operation string, harnessArgs 
 		return Status{}, err
 	}
 	return s.catalogStatus(r)
+}
+
+// startedChoice recovers the deadline choice of a start interrupted before
+// its catalogue entry: a first visit without a deadline asked for none; one
+// with a deadline is left to the home's maxDuration.
+func startedChoice(execution session.Record) string {
+	if !deadline.At(execution.Deadline).Set() {
+		return deadline.NoneArg
+	}
+	return ""
 }
 
 // notResumable explains a resume addressed to an execution rather than a

@@ -12,6 +12,8 @@ records why.
 `--namespace`. `run --remote`, `sessions --remote`, `status`, `cancel` and
 `recover` reach the cluster from the CLI. `move --remote` and `pull` send the
 selection to the service, which reaches the cluster from its own environment.
+The executor also runs [interactive sessions](#interactive-sessions) of its
+own.
 
 ## Selecting the context and namespace
 
@@ -70,6 +72,126 @@ client certificate. Whatever context you use, the executor sees the
 | `the remote executor … accepts checkpoints up to N bytes, but local.maxCheckpointBytes is M` | Make the two limits equal. |
 | `the remote executor is named "local", which is this machine's own name` | Ask the administrator to give the executor another `placementName`. |
 | `the Sproozi service does not know which cluster holds session …` | Pass `--context` to `pull`. |
+
+## Placement outcomes
+
+The service and the executor upgrade together. A placement request that fails
+answers with one of these codes; status and messages never carry the
+executor's own error text.
+
+| Code | HTTP status | Meaning |
+| --- | --- | --- |
+| `invalid_request` | 400, 404, 413, 415 | The request is malformed or names the wrong placement. |
+| `denied` | 401, 403, 426 | The token or the Kubernetes user was refused. |
+| `conflict` | 409 | The request conflicts with what the executor holds for that execution. |
+| `expired` | 410 | The execution's deadline has passed. |
+| `unsupported` | 422 | The executor cannot take this launch, such as a profile it does not keep. |
+| `unavailable` | 503 | The executor could not answer. A stop is then unproven: the session becomes `unknown-stop` until `recover` or another `stop` proves it. |
+| `turn_pending` | 503 | A stop is still waiting for the agent's turn, about two minutes after it asked. Its `waiting` field says what for, in at most 160 printable bytes. The session stays `stopping`, as on this machine, and `stop`, `move` or `recover` again keeps waiting. |
+
+A code this Sproozi does not know counts as `unavailable`, so a stop is never
+taken as proven. The message names the code and says `the executor is probably
+newer than this Sproozi, so update Sproozi and restart its service`. A service
+too old to know `turn_pending` reports `profile: invalid response` instead and
+records `unknown-stop`; update the service, then `recover` resumes the stop.
+
+## Interactive sessions
+
+The executor owns the sessions it starts, tasks and interactive sessions alike
+([ADR 0057](../adr/0057-the-remote-executor-owns-its-sessions-through-the-coordinator.md)).
+An interactive session runs until its owner stops it; nothing waits for a
+task to complete. Only the home principal (the `sproozi-cli` identity above)
+starts one, cancels it, or takes the owner actions below. The work token that
+Hermes holds keeps tasks only: these requests answer it `403`, and its MCP tool
+`sproozi_run` offers no mode or upload. A Codex executor and a Claude Code
+executor (`"harness": "claude-code"`) each run tasks and interactive
+sessions; a Claude Code task's result is Claude's final reply. A
+submission for another harness than the executor's answers `unsupported`.
+Codex and Claude Code on one cluster are two executors, one per namespace
+([example](../../examples/portable-workflows/kubernetes/claude/kustomization.yaml)).
+
+Owner requests are `POST` to `/work/ACTION` with a JSON body, over the same
+TLS connection as the placement protocol, and answer JSON: the session's
+status, or `{"error":"CODE"}` with the codes and HTTP statuses
+[above](#placement-outcomes) (`turn_pending` excepted).
+
+| Action | Body | Answer |
+| --- | --- | --- |
+| `run` | A submission with `"mode":"interactive"` and no `task`. | The session. It starts in the background: `preparing`, then `active`. |
+| `stop` | `id`, `operationId` | The session after a graceful stop that waits for the current turn: `retained`, or `failed` when the agent exited with a failure. `stopping`, with a `problem`, while it still waits; repeat the request with the same operation, or `cancel`. |
+| `resume` | `id`, `operationId`, optional `maxDuration` | The session with a new execution (`executionId`) that continues from the last checkpoint, or from the starting workspace when it stopped before any conversation. |
+| `attach` | One line `{"id":"..."}`, then terminal frames | A stream of terminal frames (below). |
+| `cancel`, `recover`, `info`, `list` | as for tasks | as for tasks |
+
+Each `operationId` is a UUID the caller keeps for retries: repeating a `stop`
+or `resume` with the same operation, also after the executor restarts, returns
+the same result and never stops or starts twice. An operation belongs to one
+action and one execution, and the submission's `requestId` is not one; reusing
+either answers `conflict`.
+
+`resume` answers `conflict` for a session that is running, stopping, being
+pulled, pulled or cancelled, and `unsupported` for a task, which takes no
+`stop`, `resume` or `attach`. The new execution has the executor's full
+allowance and its own deadline: `maxDuration` is `none` or a Go duration, and
+empty keeps the submission's choice. The executor's `maxDuration` caps it, so
+`none` needs an executor without one; a choice beyond the cap answers
+`denied`.
+
+An interactive session does not recover by itself. When the executor cannot
+prove a stop or seal usage, the session stays `unknown-stop` or
+`unknown-usage`, after a restart too, until `recover` retries it once.
+
+### Starting from an approved repository or an upload
+
+A submission names an approved `repository` or `project`, as a task does, and
+starts from its snapshot, from `workspaceFrom`, or from an uploaded
+`workspace`: a captured workspace archive, base64 in JSON, of at most the
+executor's `maxCheckpointBytes`. The repository or project still sets the
+session's association, allowances and reference. A repository approved only
+by URL starts an empty workspace; the agent fetches it when asked. The
+upload is home-only, interactive-only, and excludes `workspaceFrom`.
+
+The executor validates an upload before it keeps anything, as a placement
+validates a workspace that moves to it: it reads the archive's manifest and
+entries, then restores it in private scratch space within the byte limit and
+five minutes, which checks every Git object, the index and each file and
+installs no Git configuration, hooks or credentials. A malformed or truncated
+archive, a symbolic link or any entry other than a regular file, an
+unsupported Git layout, or a body over the limit answers `invalid_request`.
+The `run` body bound grows by the upload's base64 size for the home principal
+only. The executor keeps the upload privately until the session's first
+execution holds it, and then deletes it. Replaying the submission with the
+same upload returns the same session.
+
+### Attaching
+
+`attach` names the session only: the executor finds its active visit itself,
+so the caller never sends a launch or incarnation, and attaching works before
+the agent's first conversation exists. The body is the JSON line `{"id":"..."}`
+followed by [terminal frames](native-control.md#terminal-attachment), one JSON
+object per line: `write` with base64 `data`, or `resize` with `rows` and
+`columns`. Any other frame ends the attachment. The answer streams the
+terminal's output frames until either side ends, or the execution's deadline;
+a failed attachment ends with `{"op":"attach","error":"attachment unavailable"}`.
+Input is bounded at 8 MiB and output at 64 MiB per attachment, so reconnect
+before either. Ending an attachment never stops the session.
+
+`attach` answers `conflict` before streaming when the session is not
+`active`, and `unsupported` when the server cannot stream both ways.
+
+### Agents that exit by themselves
+
+Every 15 seconds the executor checks each active interactive session's Pod.
+When the agent's native container has ended, the executor stops the session
+through the ordinary stop, which reads the
+[exit report](native-control.md#exit-reports) and keeps the conversation of a
+completed Codex turn. A stopped container never proves a completed Claude Code
+turn, so a Claude Code session keeps no turns from that visit: the workspace
+it started from after a first visit, its previous checkpoint after a resumed
+one. The session then shows `failed` with its `exit` (code, cause
+and last output lines) for a nonzero exit, or `retained`. An `attach` to such
+a session stops it the same way and answers `conflict`. The executor needs
+`get` on `pods/log` in `sproozi-agents` to read the report.
 
 ## What the executor publishes
 

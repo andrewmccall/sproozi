@@ -48,6 +48,12 @@ Printed commands quote paths that contain spaces, so you can paste them.
 
 `model` is optional: without it, each harness uses its own default.
 
+`maxDuration` is optional: the deadline of a run or resume that does not choose
+one with `--max-duration`. Without it, or with `"none"`, such a session has no
+deadline and runs until stopped. A value is a positive Go duration such as
+`"8h"`, with no upper limit. A session keeps a `--max-duration` choice for its
+later resumes ([ADR 0056](../../docs/adr/0056-whoever-starts-work-sets-its-deadline.md)).
+
 On this machine, `move --local` brings a session back to the configured
 `local.name` placement, whatever it is called, and output calls it `local`.
 
@@ -385,8 +391,8 @@ When the outcome of a move or cancellation is unknown, the error names its
 operation. Retry `move ID --operation OP` or `cancel ID --operation OP` with
 the same intent, or use `recover`. Cancellation revokes authority and forcibly
 stops the active incarnation; it does not require a new completed turn. Native
-processes enforce their original absolute deadline even while the service is
-unavailable. Stopping the service releases its private ownership locks and socket;
+processes enforce their original absolute deadline, when they have one, even
+while the service is unavailable. Stopping the service releases its private ownership locks and socket;
 it is not a claim that an execution stopped. Restart with the same configuration
 and recover the retained operation.
 

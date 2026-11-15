@@ -78,15 +78,12 @@ func (l *ledger) recover(ctx context.Context, key AccountKey) error {
 		return err
 	}
 	var committed Recovered
-	err = l.store.Update(ctx, key, func(record *Record, exists bool) error {
-		if !exists {
-			// Deleted since the read: never recreate it as an empty record.
-			return ErrAccountNotFound
-		}
+	// Deleted since the read: Existing never recreates it as an empty record.
+	err = l.store.Update(ctx, key, Existing(func(record *Record) error {
 		var recoverErr error
 		committed, recoverErr = recoverExpired(&record.state, key, now)
 		return recoverErr
-	})
+	}))
 	if errors.Is(err, ErrAccountNotFound) {
 		return nil // the reservation or seal that follows decides
 	}
@@ -102,11 +99,12 @@ func (l *ledger) Reserve(ctx context.Context, runID AccountKey, req UsageReserva
 	}
 	var result *LedgerReservation
 	err := l.store.Update(ctx, runID, func(record *Record, exists bool) error {
-		if req.RequireExisting && !exists {
-			return fmt.Errorf("budget: initialized account is unavailable")
-		}
 		s := &record.state
-		if s.Sealed != nil {
+		phase := s.phase(exists)
+		switch {
+		case phase == accountAbsent && req.RequireExisting:
+			return fmt.Errorf("budget: initialized account is unavailable")
+		case phase == accountSealed:
 			return fmt.Errorf("budget: account is sealed")
 		}
 		reservation, err := reserveState(&s.State, req)
@@ -119,7 +117,7 @@ func (l *ledger) Reserve(ctx context.Context, runID AccountKey, req UsageReserva
 			}
 		}
 		result = reservation
-		if s.Pending != nil {
+		if phase != accountLegacy {
 			*s.Pending++
 			if reservation.unbounded() {
 				*s.Unbounded++
@@ -146,27 +144,16 @@ func (l *ledger) Settle(ctx context.Context, r *LedgerReservation, usage Trusted
 		return ErrAlreadySettled
 	}
 	var exceeded bool
-	err := l.store.Update(ctx, r.runID, func(record *Record, exists bool) error {
-		if !exists {
-			// A deleted account stays unavailable; never recreate it.
-			return ErrAccountNotFound
-		}
+	// A deleted account stays unavailable: Existing never recreates it.
+	err := l.store.Update(ctx, r.runID, Existing(func(record *Record) error {
 		s := &record.state
 		if err := takeLease(s, r); err != nil {
 			return err
 		}
 		var err error
-		if exceeded, err = settleState(&s.State, r, usage); err != nil {
-			return err
-		}
-		if s.Pending != nil {
-			*s.Pending--
-			if r.unbounded() {
-				*s.Unbounded--
-			}
-		}
-		return nil
-	})
+		exceeded, err = s.settle(r, usage)
+		return err
+	}))
 	if errors.Is(err, ErrReservationRecovered) {
 		r.settled = true
 		return err
@@ -194,15 +181,15 @@ func (l *ledger) State(ctx context.Context, runID AccountKey) (State, error) {
 }
 
 func (l *ledger) Initialize(ctx context.Context, key AccountKey) error {
-	return l.store.Update(ctx, key, func(record *Record, _ bool) error {
-		s := &record.state
-		if s.Pending == nil {
+	return l.store.Update(ctx, key, func(record *Record, exists bool) error {
+		switch record.state.phase(exists) {
+		case accountLegacy:
 			return fmt.Errorf("budget: legacy reservation history is unavailable")
-		}
-		if s.Sealed != nil {
+		case accountSealed:
 			return fmt.Errorf("budget: account is sealed")
+		default:
+			return nil
 		}
-		return nil
 	})
 }
 
@@ -213,16 +200,14 @@ func (l *ledger) Seal(ctx context.Context, runID AccountKey) (TrustedUsage, erro
 	var receipt TrustedUsage
 	err := l.store.Update(ctx, runID, func(record *Record, exists bool) error {
 		s := &record.state
-		if !exists {
+		switch s.phase(exists) {
+		case accountAbsent:
 			return fmt.Errorf("budget: initialized account is unavailable")
-		}
-		if s.Pending == nil {
+		case accountLegacy:
 			return fmt.Errorf("budget: legacy reservation history is unavailable for sealing")
-		}
-		if *s.Unbounded > 0 {
+		case accountUnbounded:
 			return fmt.Errorf("budget: pending usage has no finite bound")
-		}
-		if s.Sealed == nil {
+		case accountOpen:
 			value := TrustedUsage{Units: s.UnitsUsed + s.ReservedUnits, CostMicros: s.CostMicros + s.ReservedCostMicros}
 			s.Sealed = &value
 		}

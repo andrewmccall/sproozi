@@ -15,6 +15,23 @@ import (
 // is persisted: an owner uses it to take its own lock and bind the request, and
 // the returned release runs when Cancel returns.
 func (c *Coordinator) Cancel(ctx context.Context, id, operationID string, admit func() (func(), error)) (Record, error) {
+	return c.cancel(ctx, id, operationID, admit, evCancel)
+}
+
+// ErrAlreadyStopped refuses CancelUnsettled for an execution that already
+// stopped, with its usage sealed, before the cancellation was retained.
+var ErrAlreadyStopped = errors.New("session: execution already stopped; nothing to cancel")
+
+// CancelUnsettled is Cancel for an owner that keeps a stopped execution's
+// result, such as a remote task's answer: it refuses an idle execution with
+// ErrAlreadyStopped. It decides under the execution's lock, so a stop that
+// commits while the cancellation waits for that lock wins, and the result is
+// kept.
+func (c *Coordinator) CancelUnsettled(ctx context.Context, id, operationID string, admit func() (func(), error)) (Record, error) {
+	return c.cancel(ctx, id, operationID, admit, evCancelUnsettled)
+}
+
+func (c *Coordinator) cancel(ctx context.Context, id, operationID string, admit func() (func(), error), ev event) (Record, error) {
 	if !validUUID(id) || !validUUID(operationID) {
 		return Record{}, errors.New("session: invalid session or cancellation ID")
 	}
@@ -47,9 +64,11 @@ func (c *Coordinator) Cancel(ctx context.Context, id, operationID string, admit 
 		return r, fmt.Errorf("session: cancellation %s was already requested: %w", r.CancelOperation, cancelled(r))
 	}
 	if r.CancelOperation == "" {
+		if ev == evCancelUnsettled && r.Phase == PhaseIdle {
+			return r, ErrAlreadyStopped
+		}
 		r.CancelOperation = operationID
-		r.Phase = PhaseCancelling
-		if err = c.save(r); err != nil {
+		if err = c.commit(&r, ev); err != nil {
 			return r, err
 		}
 	}
@@ -81,8 +100,7 @@ func (c *Coordinator) abort(ctx context.Context, r Record) (Record, error) {
 		r.Operations[len(r.Operations)-1].Stage = stageCancelled
 		r.PendingOperation = ""
 	}
-	r.Phase = PhaseCancelled
-	return r, c.save(r)
+	return r, c.commit(&r, evCancelled)
 }
 
 // claimPendingWriter makes a pending destination the active visit so that it
@@ -106,18 +124,15 @@ func (c *Coordinator) claimPendingWriter(ctx context.Context, r Record) (Record,
 		incarnation = *op.Incarnation
 	case fencesPreparation:
 		if err := aborter.AbortPreparation(ctx, *op.Launch); err != nil {
-			r.Phase = PhaseUnknownStop
-			return r, false, errors.Join(err, c.save(r))
+			return r, false, errors.Join(err, c.commit(&r, evStopUnproven))
 		}
 		op.Stage = stageCancelled
 		r.PendingOperation = ""
-		r.Phase = PhaseCancelled
-		return r, true, c.save(r)
+		return r, true, c.commit(&r, evCancelled)
 	default:
 		o, err := p.Inspect(ctx, *op.Launch)
 		if err != nil {
-			r.Phase = PhaseUnknownStop
-			return r, false, errors.Join(err, c.save(r))
+			return r, false, errors.Join(err, c.commit(&r, evStopUnproven))
 		}
 		if err = checkObservation(*op.Launch, o); err != nil {
 			return r, false, err
@@ -125,12 +140,10 @@ func (c *Coordinator) claimPendingWriter(ctx context.Context, r Record) (Record,
 		if o.State == PlacementAbsent {
 			op.Stage = stageCancelled
 			r.PendingOperation = ""
-			r.Phase = PhaseCancelled
-			return r, true, c.save(r)
+			return r, true, c.commit(&r, evCancelled)
 		}
 		if !validIncarnation(o.Incarnation) {
-			r.Phase = PhaseUnknownStop
-			return r, false, errors.Join(errors.New("session: cancelled preparation remains unknown"), c.save(r))
+			return r, false, errors.Join(errors.New("session: cancelled preparation remains unknown"), c.commit(&r, evStopUnproven))
 		}
 		incarnation = o.Incarnation
 	}
@@ -149,20 +162,17 @@ func (c *Coordinator) abortActive(ctx context.Context, r Record) (Record, error)
 	}
 	o, err := p.Abort(ctx, active.Launch, active.Incarnation)
 	if err != nil {
-		r.Phase = PhaseUnknownStop
-		return r, errors.Join(err, c.save(r))
+		return r, errors.Join(err, c.commit(&r, evStopUnproven))
 	}
 	if err = checkObservation(active.Launch, o); err != nil {
 		return r, err
 	}
 	if o.Incarnation != active.Incarnation || o.State != PlacementStopped {
-		r.Phase = PhaseUnknownStop
-		return r, errors.Join(errors.New("session: abort did not prove the source stopped"), c.save(r))
+		return r, errors.Join(errors.New("session: abort did not prove the source stopped"), c.commit(&r, evStopUnproven))
 	}
 	active.ActualStopped = true
 	if o.Stopped == nil || !o.Stopped.ActualStopped || validateStop(active.Launch, active.Incarnation, *o.Stopped) != nil {
-		r.Phase = PhaseUnknownUsage
-		return r, c.save(r)
+		return r, c.commit(&r, evUsageUnsealed)
 	}
 	remaining, err := subtract(r.Remaining, *o.Stopped.Receipt)
 	if err != nil {

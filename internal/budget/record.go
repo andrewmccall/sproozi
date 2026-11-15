@@ -22,6 +22,90 @@ type ledgerState struct {
 	Leases map[string]lease `json:"leases,omitempty"`
 }
 
+// accountPhase is where an account is in its lifecycle. The ledger's
+// operations decide by phase rather than by reading the record's fields.
+type accountPhase int
+
+const (
+	// accountAbsent has no stored record. Only Initialize and a Reserve that
+	// does not require an existing account create one; nothing recreates a
+	// deleted account.
+	accountAbsent accountPhase = iota
+	// accountLegacy predates pending-reservation counts, so its reservation
+	// history is unknown, not zero. It keeps ordinary accounting but can
+	// never seal.
+	accountLegacy
+	// accountOpen admits reservations and can seal.
+	accountOpen
+	// accountUnbounded is open with a pending reservation that has no finite
+	// bound. It cannot seal until that reservation settles.
+	accountUnbounded
+	// accountSealed refuses reservations. Its receipt already holds every
+	// pending reservation in full, so each settles at most its reservation.
+	accountSealed
+)
+
+// phase reports the account's phase; exists is whether its record is stored.
+func (s ledgerState) phase(exists bool) accountPhase {
+	switch {
+	case !exists:
+		return accountAbsent
+	case s.Sealed != nil:
+		return accountSealed
+	case s.Pending == nil:
+		return accountLegacy
+	case *s.Unbounded > 0:
+		return accountUnbounded
+	default:
+		return accountOpen
+	}
+}
+
+// settled reports whether a stored account has no reservation outstanding:
+// no reserved units or cost, no pending count and no lease. A legacy account
+// is never settled, since its pending count is unknown.
+func (s ledgerState) settled() bool {
+	switch s.phase(true) {
+	case accountOpen, accountSealed:
+		return *s.Pending == 0 && s.ReservedUnits == 0 && s.ReservedCostMicros == 0 && len(s.Leases) == 0
+	default:
+		return false
+	}
+}
+
+// settle settles reservation r at usage under the account's phase, and
+// reports whether usage exceeded what could be charged. An open account
+// charges usage above the reservation up to the allowance; a sealed account
+// charges at most the reservation, which its immutable receipt already holds.
+func (s *ledgerState) settle(r *LedgerReservation, usage TrustedUsage) (exceeded bool, err error) {
+	charge := cappedCharge
+	if s.phase(true) == accountSealed {
+		charge = reservedCharge
+	}
+	if exceeded, err = settleState(&s.State, r, usage, charge); err != nil {
+		return false, err
+	}
+	if s.phase(true) != accountLegacy {
+		*s.Pending--
+		if r.unbounded() {
+			*s.Unbounded--
+		}
+	}
+	return exceeded, nil
+}
+
+// Existing adapts mutate to Store.Update for an operation on an account that
+// must already exist, such as a settlement or a recovery: an absent account
+// returns ErrAccountNotFound rather than being recreated as an empty record.
+func Existing(mutate func(*Record) error) func(*Record, bool) error {
+	return func(record *Record, exists bool) error {
+		if record.state.phase(exists) == accountAbsent {
+			return ErrAccountNotFound
+		}
+		return mutate(record)
+	}
+}
+
 // Record is the opaque durable accounting state passed between ledger rules and
 // atomic storage. Storage adapters serialize it; they do not change its counters.
 type Record struct{ state ledgerState }
@@ -42,7 +126,7 @@ func (r *Record) Encode() (string, error) {
 // Usage is the settled usage and whether the account is sealed, for display
 // beside the encoded record. It reads the record and changes nothing.
 func (r *Record) Usage() (units, costMicros int64, finalized bool) {
-	return r.state.UnitsUsed, r.state.CostMicros, r.state.Sealed != nil
+	return r.state.UnitsUsed, r.state.CostMicros, r.state.phase(true) == accountSealed
 }
 
 func DecodeRecord(data string) (*Record, error) {

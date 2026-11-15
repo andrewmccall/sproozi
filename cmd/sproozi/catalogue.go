@@ -49,7 +49,7 @@ type catalogueRow struct {
 	Incarnation  *session.Incarnation `json:"incarnation,omitempty"`
 	Placement    string               `json:"placement,omitempty"`
 	ThreadID     string               `json:"threadId,omitempty"`
-	Deadline     time.Time            `json:"deadline"`
+	Deadline     time.Time            `json:"deadline,omitzero"`
 	// Login is the named login of a harness that signs in itself.
 	Login string `json:"login,omitempty"`
 }

@@ -75,7 +75,7 @@ func TestRenderedConfigIsAcceptedByTheHomeService(t *testing.T) {
 	if len(read.Harnesses) != 1 || read.Harnesses[0].GatewayPort != 18444 || read.Harnesses[0].NativeOptions != nil {
 		t.Fatalf("second harness %+v", read.Harnesses)
 	}
-	if read.MaxDuration != "30m" || read.Allowances["model.inference"] != (session.Allowance{}) {
+	if read.MaxDuration != "" || read.Allowances["model.inference"] != (session.Allowance{}) {
 		t.Fatal("starter limits differ from the proposal")
 	}
 	if read.Local.AgentLimits != agentLimits || read.Local.VolumeBytes != 512<<20 || read.Local.MaxCheckpointBytes != 32<<20 || read.Local.RetainedBytes != 256<<20 {
@@ -149,6 +149,7 @@ func TestMergeKeepsUserEditsAddsHarnessesAndRefusesPlacementChanges(t *testing.T
 func TestWriteConfigBacksUpTheExistingFile(t *testing.T) {
 	l, inst := testInstallation(t)
 	c := renderConfig(l, inst, DefaultInstructions)
+	c.MaxDuration = "30m"
 	if err := writeConfig(l, c, false); err != nil {
 		t.Fatal(err)
 	}
@@ -216,6 +217,71 @@ func TestInstallationJournalRoundTripsAndRejectsCorruption(t *testing.T) {
 	}
 	if _, err = LoadInstallation(l); err == nil || !strings.Contains(err.Error(), "corrupt") {
 		t.Fatalf("corrupt journal accepted: %v", err)
+	}
+}
+
+// A sproozi init that writes the journal while an image is resolved keeps its
+// changes: the image is recorded in the journal as it stands under the lock,
+// not in the copy read before the image was resolved.
+func TestAdoptedImageKeepsConcurrentJournalChanges(t *testing.T) {
+	l, inst := testInstallation(t)
+	if err := l.save(inst); err != nil {
+		t.Fatal(err)
+	}
+	resolvedFor, err := LoadInstallation(l)
+	if err != nil {
+		t.Fatal(err)
+	}
+	concurrent := resolvedFor
+	concurrent.Harnesses = append(slices.Clone(concurrent.Harnesses), Harness{Harness: harness.NativeCodex,
+		Name: claudePlacement, Port: 18444, Model: "gpt-fixture", ProviderURL: openAIURL})
+	concurrent.done("pki")
+	if err = l.save(concurrent); err != nil {
+		t.Fatal(err)
+	}
+	const other = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	image := Image{Reference: other, ID: other, Source: SourceOverride, Contract: helperContract}
+	if _, active, err := adoptImage(l, resolvedFor, image); err != nil || !active {
+		t.Fatalf("adopt: active=%v err=%v", active, err)
+	}
+	got, err := LoadInstallation(l)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Image == nil || got.Image.ID != other {
+		t.Fatalf("image = %+v, want %s", got.Image, other)
+	}
+	if len(got.Harnesses) != 2 || got.Stages["pki"].Completed.IsZero() {
+		t.Fatalf("concurrent journal changes lost: harnesses=%+v stages=%+v", got.Harnesses, got.Stages)
+	}
+}
+
+// An image resolved for one installation is never recorded in another that
+// replaced its journal meanwhile, and a placement created meanwhile keeps the
+// current image.
+func TestAdoptedImageRechecksTheJournalUnderTheLock(t *testing.T) {
+	l, inst := testInstallation(t)
+	if err := l.save(inst); err != nil {
+		t.Fatal(err)
+	}
+	const other = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	image := Image{Reference: other, ID: other, Source: SourceOverride, Contract: helperContract}
+	resolvedFor := inst
+	resolvedFor.ID = "ffffffff"
+	if _, _, err := adoptImage(l, resolvedFor, image); err == nil {
+		t.Fatal("image resolved for another installation was adopted")
+	}
+	if err := os.MkdirAll(filepath.Join(l.State(), "docker"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(l.State(), "docker", "config.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, active, err := adoptImage(l, inst, image); err != nil || active {
+		t.Fatalf("adopt with a placement: active=%v err=%v", active, err)
+	}
+	if got, err := LoadInstallation(l); err != nil || got.Image.ID != testImage {
+		t.Fatalf("image changed under a placement: %+v %v", got.Image, err)
 	}
 }
 

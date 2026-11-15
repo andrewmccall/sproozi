@@ -26,7 +26,14 @@ type retained struct {
 	Reference       registry.Reference `json:"reference"`
 	OutputDigest    string             `json:"outputDigest,omitempty"`
 	NativeQuiet     bool               `json:"nativeQuiet,omitempty"`
-	WriterFenced    bool               `json:"writerFenced,omitempty"`
+	// Turnless records that the supervisor quiesced a first visit with no
+	// native conversation (ADR 0032): its stop captures nothing.
+	Turnless     bool `json:"turnless,omitempty"`
+	WriterFenced bool `json:"writerFenced,omitempty"`
+	// Exited records a harness that ended without a graceful stop, from the
+	// supervisor's exit report or the container's exit code. It is a
+	// workload diagnostic, never a writer fence or accounting fact.
+	Exited *session.Exit `json:"exited,omitempty"`
 }
 
 func privatePath(path string, dir bool) error {

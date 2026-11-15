@@ -6,6 +6,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 )
 
 var (
@@ -26,8 +28,9 @@ type Service interface {
 	Cancel(context.Context, Reference) (View, error)
 }
 
-// Phase is an observed execution lifecycle, independent of untrusted results.
-type Phase string
+// Phase is the observed AgentRun lifecycle phase, independent of untrusted
+// results. A Run not yet given a phase is reported as Queued.
+type Phase = api.AgentRunPhase
 
 // Result is bounded workload-controlled output; it never determines success.
 type Result struct {

@@ -2,7 +2,7 @@
 
 Start with `AGENTS.md`: it maps the code and lists the checks each kind of
 change needs. You need Go 1.26 or later, Make and Python 3; some checks also
-need Docker. Lint runs with Go 1.26.10 whatever Go you have installed
+need Docker. Lint runs with Go 1.26.11 whatever Go you have installed
 (`LINT_TOOLCHAIN` in the Makefile); the go command downloads it once.
 
 Run the narrowest check that covers your change before opening it. The
@@ -58,7 +58,7 @@ issues that are deferred or declined, with the reason for each.
   write nor fetch arbitrary URLs, then check your policy against the server
   with `python3 hack/mcp-tools.py URL --policy DIR/agentpolicy.yaml` and run
   `make verify-mcp`. The example is for review only: an installation registers
-  a server in its `sproozi-mcp-servers` ConfigMap, and a local Codex or Copilot session in
+  a server in its `sproozi-mcp-servers` ConfigMap, and a local session in
   `config.json`'s `gateway.mcpRegistryFile` and `gateway.mcpPolicy`.
   [Configured MCP](docs/reference/configured-mcp.md) explains each file. A
   review-only example needs no other doc change.

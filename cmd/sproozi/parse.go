@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/deadline"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/project"
 	"github.com/andrewmccall/sproozi/internal/session/home"
@@ -40,6 +41,7 @@ type options struct {
 	id, path           string
 	harnessArgs        []string
 	login              string
+	maxDuration        string
 	root, configPath   string
 	socket             string
 	socketGiven        bool
@@ -134,6 +136,7 @@ func parse(args []string) (options, error) {
 	q.instructionsFile, q.context, q.namespace = str("instructions-file"), str("context"), str("namespace")
 	q.task, q.repository, q.project = str("task"), str("repository"), project.ID(str("project"))
 	q.operation, q.id, q.login = str("operation"), str("id"), str("login")
+	q.maxDuration = str("max-duration")
 	q.imagePrefix, q.imageTag, q.platform = str("image-prefix"), str("image-tag"), str("platform")
 	q.push = boolean("push")
 	q.local = boolean("local")
@@ -242,7 +245,6 @@ func (q *options) takePositionals(positionals []string) error {
 
 // validate checks flag values and combinations before anything is read or sent.
 func (q *options) validate(str func(string) string) error {
-	c := q.cmd
 	if q.id != "" && !validIDPrefix(q.id) {
 		return usagef("%q is not a session ID; give the ID, or its first characters, as \"sproozi ls\" shows it", q.id)
 	}
@@ -254,10 +256,8 @@ func (q *options) validate(str func(string) string) error {
 			return usagef("--harness must be %s", harness.ManagedKindList())
 		}
 	}
-	if q.loginGiven {
-		if err := harness.ValidateLogin(q.login); err != nil {
-			return usagef("--login: %v", err)
-		}
+	if err := q.validateSessionChoices(); err != nil {
+		return err
 	}
 	if q.project != "" && !project.ValidID(q.project) {
 		return usagef("--project %q is not a valid project ID", q.project)
@@ -282,13 +282,8 @@ func (q *options) validate(str func(string) string) error {
 	if err := q.validateCredentialChoice(); err != nil {
 		return err
 	}
-	if c.name == cmdMove && q.local == q.remote {
-		return usagef("move needs --local (to this machine) or --remote (to a cluster)")
-	}
-	if c.name == cmdRun {
-		if err := q.validateRun(str); err != nil {
-			return err
-		}
+	if err := q.validatePlace(str); err != nil {
+		return err
 	}
 	for _, path := range []*string{&q.root, &q.configPath, &q.path, &q.credentialFile, &q.providerCA,
 		&q.instructionsFile, &q.build} {
@@ -311,6 +306,40 @@ func (q *options) validate(str func(string) string) error {
 	return nil
 }
 
+// validateSessionChoices checks the login and maximum duration a session
+// starts with.
+func (q *options) validateSessionChoices() error {
+	if q.loginGiven {
+		if err := harness.ValidateLogin(q.login); err != nil {
+			return usagef("--login: %v", err)
+		}
+	}
+	if q.maxDuration != "" {
+		if _, err := deadline.ParseMaxDuration(q.maxDuration); err != nil {
+			return usagef("--max-duration: %v", err)
+		}
+	}
+	return nil
+}
+
+// validatePlace checks the flags that choose where a command acts: this
+// machine or a cluster.
+func (q *options) validatePlace(str func(string) string) error {
+	switch q.cmd.name {
+	case cmdMove:
+		if q.local == q.remote {
+			return usagef("move needs --local (to this machine) or --remote (to a cluster)")
+		}
+	case cmdRun:
+		return q.validateRun(str)
+	case cmdResume:
+		if q.remote && len(q.harnessArgs) > 0 {
+			return usagef("a session in a cluster takes no agent arguments after --")
+		}
+	}
+	return nil
+}
+
 // validateRun checks that a run is either local or remote, not a mix.
 func (q *options) validateRun(str func(string) string) error {
 	taskFile := str("task-file")
@@ -328,17 +357,26 @@ func (q *options) validateRun(str func(string) string) error {
 	if q.login != "" {
 		return usagef("--login applies to a session on this machine; a session moved to a cluster keeps its login")
 	}
+	// Without a task, a remote run is an interactive session: from the
+	// approved repository or project, or from PATH, which it uploads.
+	interactive := q.task == "" && taskFile == ""
 	switch {
-	case q.path != "":
-		return usagef("a --remote run works in the cluster's approved repository; give --repository NAME instead of PATH")
 	case len(q.harnessArgs) > 0:
 		return usagef("a --remote run does not take agent arguments after --")
-	case q.detach || len(q.includeIgnored) > 0:
-		return usagef("--detach and --include-ignored apply only to a run on this machine")
 	case q.task != "" && taskFile != "":
 		return usagef("choose --task or --task-file")
-	case q.task == "" && taskFile == "":
-		return usagef("a --remote run needs --task TEXT or --task-file FILE")
+	case q.repository == "" && q.project == "":
+		return usagef("a --remote run needs --repository NAME or --project ID: the approved repository or project " +
+			"the session belongs to")
+	case !interactive && q.path != "":
+		return usagef("a --remote task works in the cluster's approved repository; leave out PATH, or leave out " +
+			"--task to start an interactive session from PATH")
+	case !interactive && q.detach:
+		return usagef("--detach applies to an interactive --remote run; a task runs without a terminal")
+	case len(q.includeIgnored) > 0 && q.path == "":
+		return usagef("--include-ignored applies only to a PATH this command uploads; give the repository's PATH")
+	case q.path != "" && source != "":
+		return usagef("choose PATH or --workspace-from")
 	}
 	if taskFile != "" {
 		text, err := readTaskFile(taskFile)

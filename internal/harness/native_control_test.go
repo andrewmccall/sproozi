@@ -159,11 +159,19 @@ func TestNativeExitReportIsBoundedPlainText(t *testing.T) {
 	if got := NativeExitOutput([]byte(raw), 2); got != "error: unexpected argument '--bad' found\nUsage: codex [OPTIONS]" {
 		t.Fatalf("output %q", got)
 	}
-	logs := "native container stopped\n" + NativeExitReportPrefix + `{"code":2,"output":"bad flag","thread":"not-a-thread"}` + "\n" +
-		NativeExitReportPrefix + `{"code":2,"output":"bad flag"}` + "\n"
+	logs := "native container stopped\n" +
+		NativeExitReportPrefix + `{"code":2,"cause":"exited","output":"bad flag","thread":"not-a-thread"}` + "\n" +
+		NativeExitReportPrefix + `{"code":2,"cause":"exited","output":"bad flag"}` + "\n"
 	report, ok := ParseNativeExitReport([]byte(logs))
-	if !ok || report.Code != 2 || report.Output != "bad flag" || report.Thread != "" {
+	if !ok || report.Code != 2 || report.Cause != NativeExitSelf || report.Output != "bad flag" || report.Thread != "" {
 		t.Fatalf("report %+v %v", report, ok)
+	}
+	// A report must say why the harness ended; one that does not is ignored.
+	for _, cause := range []string{``, `,"cause":"quiesced"`, `,"cause":"exploded"`} {
+		line := NativeExitReportPrefix + `{"code":2` + cause + `}` + "\n"
+		if r, ok := ParseNativeExitReport([]byte(line)); ok {
+			t.Fatalf("report without a known cause accepted: %q %+v", line, r)
+		}
 	}
 	if _, ok = ParseNativeExitReport([]byte("nothing here\n")); ok {
 		t.Fatal("report found in unrelated output")

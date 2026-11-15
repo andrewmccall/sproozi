@@ -65,6 +65,8 @@ type fakeContainer struct {
 	}
 	nativeState harness.NativeState
 	configured  []byte
+	// logs is the container's output, where the supervisor's exit report is.
+	logs []byte
 }
 type fakeDocker struct {
 	containers                               map[string]*fakeContainer
@@ -248,6 +250,8 @@ func (f *fakeDocker) containerCommand(args []string) ([]byte, error) {
 	switch args[1] {
 	case "inspect":
 		return json.Marshal([]any{c})
+	case "logs":
+		return c.logs, nil
 	case "start":
 		c.State.Running = true
 		c.State.Status = "running"
@@ -357,7 +361,7 @@ type fakeAuthority struct {
 	active, revoked, bound bool
 	sealFail               bool
 	init, activate, seals  int
-	activateErr            error
+	activateErr, revokeErr error
 }
 
 func (a *fakeAuthority) InitializeAllocation(context.Context, session.Launch, session.Incarnation) (NativeAccess, error) {
@@ -376,6 +380,12 @@ func (a *fakeAuthority) Activate(context.Context, session.Launch, session.Incarn
 	return nil
 }
 func (a *fakeAuthority) Revoke(context.Context, session.Launch, session.Incarnation) error {
+	if a.init == 0 {
+		return ErrGrantMissing
+	}
+	if a.revokeErr != nil {
+		return a.revokeErr
+	}
 	a.revoked = true
 	a.active = false
 	return nil

@@ -29,11 +29,11 @@ type placementRecord struct {
 	Launch       session.Launch `json:"launch"`
 	// Thread is the genuine native thread a first visit bound; resumed
 	// launches name theirs in Launch.ThreadID.
-	Thread                string  `json:"thread,omitempty"`
-	InputDigest           string  `json:"inputDigest"`
-	Execution             string  `json:"execution"`
-	Phase                 string  `json:"phase"`
-	Volume                *Volume `json:"volume,omitempty"`
+	Thread                string      `json:"thread,omitempty"`
+	InputDigest           string      `json:"inputDigest"`
+	Execution             string      `json:"execution"`
+	Phase                 dockerPhase `json:"phase"`
+	Volume                *Volume     `json:"volume,omitempty"`
 	Agent, Helper, Anchor *Instance
 	ActualStopped         bool `json:"actualStopped"`
 	NativeQuiet           bool `json:"nativeQuiet,omitempty"`
@@ -246,9 +246,12 @@ func (p *Placement) load(l session.Launch) (placementRecord, error) {
 	if r.Version != recordVersion || r.ConfigDigest != p.digest || r.Execution != "spz-"+operationKey(l)[:32] || !session.SameLaunch(r.Launch, l) {
 		return r, errors.New("docker placement immutable intent conflict")
 	}
-	return r, nil
+	return r, validateRecord(r)
 }
 func (p *Placement) save(r placementRecord) error {
+	if err := validateRecord(r); err != nil {
+		return err
+	}
 	data, err := json.Marshal(r)
 	if err != nil {
 		return err

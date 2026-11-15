@@ -1,7 +1,7 @@
 # Native terminal ownership
 
 `nativepty.Start` launches the trusted native executable with an explicit
-environment, absolute workspace, terminal size and absolute deadline. Linux and
+environment, absolute workspace, terminal size and absolute deadline, or none. Linux and
 macOS use a real controlling PTY and an independent native process group. The
 supervisor keeps draining output whether a client is connected or disconnected.
 
@@ -20,7 +20,8 @@ sends native `/quit` with a distinct Enter key event. It does not parse terminal
 text or native history and cannot establish the completed-turn precondition.
 Deadline expiry and explicit stop forcibly terminate the owned process group.
 The deadline is wall-clock time, read every second, so a host that slept past
-it ends the process within a second of waking (`AtDeadline`).
+it ends the process within a second of waking (`deadline.Deadline.Done`). A
+launch with no deadline runs until it exits or is stopped.
 
 The package controls the process it actually launches. If that process is
 `docker start --attach`, its exit describes the Docker client, not the agent

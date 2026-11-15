@@ -42,6 +42,32 @@ symbolic link, and never repair them.
 The Unix control socket path, `state/control.sock`, must be at most 103 bytes.
 Setup fails early with a `root` error when a long `--root` would exceed that.
 
+### Refused placement records
+
+The service checks each Docker placement record in `state/docker*/` every time
+it reads or writes one: the record's phase must be a known one, and the flags
+it carries must fit that phase (ADR 0058). A record that fails the check is
+refused rather than repaired, and each command that reaches that visit's
+placement fails with `docker placement record for execution NAME is invalid:
+REASON`. `stop`, `cancel` and `recover` cannot finish the session, and `rm`
+refuses it, because nothing can prove the agent stopped or its usage settled
+without the record.
+
+Sproozi is an unreleased preview, so earlier records are not migrated
+([ADR 0018](../adr/0018-coordinator-owns-every-visit.md#tradeoffs-and-consequences)).
+A refused record is not edited by hand. Either restore the file from a backup,
+or discard the local sessions:
+
+1. Stop the service with `sproozi service stop --leave-running`; a plain
+   `stop` refuses while the session counts as running.
+2. Remove the visit's containers and workspace volume. `NAME` is the value in
+   the error: `docker rm -f NAME-agent NAME-helper NAME-anchor`, then
+   `docker volume rm NAME-workspace`. Every session's containers carry the
+   label `sproozi.com/launch`; `docker ps -a --filter label=sproozi.com/launch`
+   lists any others to remove the same way.
+3. Delete `state/`. This discards every local session, its checkpoints,
+   accounting and grants; the service creates an empty `state/` when it starts.
+
 ## What setup does
 
 Each step records its result in `installation.json`. One `setup.lock` prevents
@@ -73,7 +99,7 @@ service with `sproozi service stop` and `sproozi service start`.
 
 | Setting | Default |
 | --- | --- |
-| Execution deadline (`maxDuration`) | 30 minutes |
+| Execution deadline (`maxDuration`) | None: a session runs until you stop it. Set a Go duration such as `"8h"` for a default deadline on every run and resume; `run` and `resume` override it with `--max-duration`. There is no upper limit. Installations set up before this change keep the `"30m"` they were given. |
 | Worker CPU, memory, processes | 1 CPU, 1 GiB, 256 |
 | Checkpoint helper | 0.5 CPU, 512 MiB, 128 processes |
 | Network anchor | 0.1 CPU, 64 MiB, 32 processes |

@@ -58,12 +58,11 @@ func (c *Coordinator) Finalize(ctx context.Context, id, operationID string) (Rec
 	if r.Active == nil {
 		// Nothing runs: retain the operation binding so a replay stays idle.
 		r.Operations = append(r.Operations, Operation{ID: operationID, Finalize: true, Stage: stageComplete})
-		return r, c.save(r)
+		return r, c.commit(&r, evFinalize)
 	}
 	r.Operations = append(r.Operations, Operation{ID: operationID, Finalize: true, Stage: stageStop})
 	r.PendingOperation = operationID
-	r.Phase = PhaseStopping
-	if err = c.save(r); err != nil {
+	if err = c.commit(&r, evFinalize); err != nil {
 		return r, err
 	}
 	return c.drive(ctx, r, len(r.Operations)-1)
@@ -75,6 +74,5 @@ func (c *Coordinator) finishFinalization(r Record, index int) (Record, error) {
 	}
 	r.Operations[index].Stage = stageComplete
 	r.PendingOperation = ""
-	r.Phase = PhaseIdle
-	return r, c.save(r)
+	return r, c.commit(&r, evFinalized)
 }

@@ -10,11 +10,14 @@ import (
 	"path/filepath"
 
 	"github.com/andrewmccall/sproozi/internal/privatefs"
+	runtimedocker "github.com/andrewmccall/sproozi/internal/runtime/docker"
 )
 
 const maxRecordBytes = 256 << 10
 
-var errRecordMissing = errors.New("docker gateway: allocation record missing")
+// errRecordMissing is the placement's ErrGrantMissing, so a cancelled
+// preparation can tell a grant it never initialized from one it must revoke.
+var errRecordMissing = runtimedocker.ErrGrantMissing
 
 type registry struct {
 	dir    string

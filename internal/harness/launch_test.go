@@ -1,7 +1,6 @@
 package harness_test
 
 import (
-	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -66,7 +65,7 @@ func launchFixture(t *testing.T, scenario string) (*exec.Cmd, string) {
 			t.Fatal(err)
 		}
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	ctx, cancel := helperProcessContext(t)
 	t.Cleanup(cancel)
 	cmd := exec.CommandContext(ctx, python, filepath.Join(directory, "launch.py"), "--model", "fixture-model")
 	state := filepath.Join(directory, "state")
@@ -113,16 +112,22 @@ func TestOpenCodeLaunchForwardsTermination(t *testing.T) {
 	waitForFile(t, state+".stopped")
 }
 
-// waitForFile allows the fixtures' full 10s command bound: under a loaded
-// parallel test run, starting the Python launcher and its child can exceed 3s.
+// waitForFile waits for a launch helper to create path, bounded like the
+// helper itself by the test binary's deadline (helperProcessContext): under a
+// loaded parallel test run, starting the Python launcher and its child has
+// exceeded both 3s and 10s.
 func waitForFile(t *testing.T, path string) {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
+	ctx, cancel := helperProcessContext(t)
+	defer cancel()
+	for {
 		if _, err := os.Stat(path); err == nil {
 			return
 		}
-		time.Sleep(10 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			t.Fatalf("native command did not create %s", path)
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
-	t.Fatalf("native command did not create %s", path)
 }

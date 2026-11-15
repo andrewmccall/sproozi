@@ -22,14 +22,19 @@ const (
 	claudePromptSubmit = "UserPromptSubmit"
 	claudePreTool      = "PreToolUse"
 	claudePostTool     = "PostToolUse"
-	claudeStop         = "Stop"
-	claudeStopFailure  = "StopFailure"
-	claudeBash         = "Bash"
-	claudeHooksKey     = "hooks"
+	// claudePostToolFailure ends a tool call that failed: a command that
+	// exited non-zero or an MCP tool that reported an error.
+	claudePostToolFailure = "PostToolUseFailure"
+	claudeStop            = "Stop"
+	claudeStopFailure     = "StopFailure"
+	claudeBash            = harness.ClaudeBash
+	claudeHooksKey        = "hooks"
 
 	claudeSettings   = "/tmp/sproozi-native/claude-settings.json"
 	claudeHome       = "/workspace/session/claude"
 	claudeExecutable = "/usr/local/bin/claude"
+	// claudeHookCommand is what each lifecycle hook runs.
+	claudeHookCommand = "/usr/local/bin/native-session observe-claude"
 )
 
 const opClaudeHook harness.NativeOp = "observe-claude"
@@ -44,22 +49,51 @@ type claudeHook struct {
 	ToolID         string `json:"tool_use_id"`
 	ToolName       string `json:"tool_name"`
 	StopActive     *bool  `json:"stop_hook_active"`
+	// Interrupt is PostToolUseFailure's report that the user interrupted
+	// the call rather than the call failing.
+	Interrupt *bool `json:"is_interrupt"`
+	// Prompt is UserPromptSubmit's submitted text. A task launch compares it
+	// with its task and keeps only the result.
+	Prompt string `json:"prompt"`
 }
+
+// claudeTurn is where the current Claude turn stands. accept is its only
+// transition function.
+type claudeTurn int
+
+const (
+	// turnIdle: no prompt was submitted in this visit.
+	turnIdle claudeTurn = iota
+	// turnRunning: a prompt was submitted and the turn has not ended; only
+	// a running turn starts tools.
+	turnRunning
+	// turnCompleted: the turn ended with a safe Stop.
+	turnCompleted
+	// turnFailed: the turn ended on an API error (StopFailure). Only a new
+	// prompt starts another turn.
+	turnFailed
+)
+
 type claudeLifecycle struct {
-	id        string
-	started   bool
-	completed bool
-	// failed records a turn that ended on an API error (StopFailure);
+	id   string
+	turn claudeTurn
 	// everCompleted records that some turn of this conversation completed.
-	failed        bool
 	everCompleted bool
 	// lastHook is when the last lifecycle hook arrived.
-	lastHook  time.Time
-	input     uint64
-	pending   map[string]bool
+	lastHook time.Time
+	input    uint64
+	// pending maps each running tool's ID to its name.
+	pending   map[string]string
 	lastEvent string
 	rejected  string
+	// taskTurn records that the current turn's prompt was the launch's task,
+	// the counterpart of Codex's task text in its new completed turn.
+	taskTurn bool
 }
+
+// taskPromptUnobserved: a task launch's completed turn did not follow its
+// task's prompt.
+const taskPromptUnobserved = "task_prompt_unobserved"
 
 // Completion diagnostics describe the observer's state without disclosing
 // prompts, tool arguments, native journal bytes or selected filesystem paths.
@@ -68,12 +102,13 @@ type claudeCompletion = harness.NativeCompletion
 func (s *server) claudeCompletion() *claudeCompletion {
 	s.mu.Lock()
 	c := s.claude
-	d := &claudeCompletion{Started: c.started, Completed: c.completed, PendingTools: len(c.pending),
+	d := &claudeCompletion{Started: c.turn != turnIdle, Completed: c.turn == turnCompleted, PendingTools: len(c.pending),
 		PromptGeneration: c.input, InputGeneration: s.inputGeneration,
 		LastEvent: c.lastEvent, Rejected: c.rejected, Observation: "lifecycle_incomplete"}
 	selected := s.config.ThreadID
 	settled := s.inputSettled()
 	restored := s.claudeRestoredUnchanged()
+	untasked := s.config.Task != "" && !c.taskTurn
 	s.mu.Unlock()
 	switch {
 	case d.PendingTools != 0:
@@ -82,6 +117,8 @@ func (s *server) claudeCompletion() *claudeCompletion {
 		d.Observation = inputChanged
 	case !restored && (c.id == "" || (selected != "" && c.id != selected)):
 		d.Observation = "identity_unavailable"
+	case d.Completed && untasked:
+		d.Observation = taskPromptUnobserved
 	case d.Completed || restored:
 		if _, _, err := s.observeClaudeTurn(); err != nil {
 			d.Observation = claudeJournalDiagnostic(err)
@@ -135,6 +172,10 @@ func (s *server) claudeHook(h *claudeHook) response {
 		s.claude.rejected = "invalid_lifecycle_transition"
 	} else {
 		s.claude.lastEvent, s.claude.rejected = h.Event, ""
+		if h.Event == claudePromptSubmit {
+			// Only the task's own turn can complete a task launch.
+			s.claude.taskTurn = s.config.Task != "" && h.Prompt == s.config.Task
+		}
 	}
 	return r
 }
@@ -144,36 +185,44 @@ func (c *claudeLifecycle) accept(h claudeHook, input uint64) error {
 		if len(c.pending) != 0 {
 			return errors.New("claude prompt arrived with pending tools")
 		}
-		c.started, c.completed, c.failed, c.input = true, false, false, input
-		c.pending = map[string]bool{}
+		c.turn, c.input = turnRunning, input
+		c.pending = map[string]string{}
 	case claudePreTool:
-		if !c.started || c.completed || !validClaudeTool(h) || c.pending[h.ToolID] {
+		if c.turn != turnRunning || !validClaudeTool(h) || c.pending[h.ToolID] != "" {
 			return errors.New("unsupported Claude tool start")
 		}
-		c.pending[h.ToolID] = true
+		c.pending[h.ToolID] = h.ToolName
 	case claudePostTool:
-		if !validClaudeTool(h) || !c.pending[h.ToolID] {
+		if !validClaudeTool(h) || c.pending[h.ToolID] != h.ToolName {
 			return errors.New("unmatched Claude tool completion")
 		}
 		delete(c.pending, h.ToolID)
+	case claudePostToolFailure:
+		// An interrupted call is outside the supported lifecycle and stays
+		// pending.
+		if !validClaudeTool(h) || c.pending[h.ToolID] != h.ToolName || h.Interrupt == nil || *h.Interrupt {
+			return errors.New("unmatched or interrupted Claude tool failure")
+		}
+		delete(c.pending, h.ToolID)
 	case claudeStop:
-		if !c.started || len(c.pending) != 0 || h.StopActive == nil || *h.StopActive {
+		if c.turn != turnRunning || len(c.pending) != 0 || h.StopActive == nil || *h.StopActive {
 			return errors.New("claude turn has no safe Stop observation")
 		}
-		c.completed, c.everCompleted = true, true
+		c.turn, c.everCompleted = turnCompleted, true
 	case claudeStopFailure:
-		if !c.started || c.completed {
+		// A repeated failure report of the same turn is accepted.
+		if c.turn != turnRunning && c.turn != turnFailed {
 			return errors.New("claude turn failure has no started turn")
 		}
 		// An API error ends the turn; no tool can still be running.
-		c.failed, c.pending = true, map[string]bool{}
+		c.turn, c.pending = turnFailed, map[string]string{}
 	default:
 		return errors.New("unsupported Claude lifecycle event")
 	}
 	return nil
 }
 func validClaudeTool(h claudeHook) bool {
-	return h.ToolName == claudeBash && h.ToolID != "" && len(h.ToolID) <= 256 &&
+	return harness.ClaudeSupportedTool(h.ToolName) && h.ToolID != "" && len(h.ToolID) <= 256 &&
 		!strings.ContainsAny(h.ToolID, "\x00\r\n")
 }
 
@@ -185,28 +234,31 @@ func (s *server) claudeTurnless() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	c := s.claude
-	if !c.started {
+	if c.turn == turnIdle {
 		return c.id == ""
 	}
-	return c.failed && !c.everCompleted && len(c.pending) == 0
+	return c.turn == turnFailed && !c.everCompleted && len(c.pending) == 0
 }
 
 // claudeTurnReady reports a completed turn with no running tool and no
 // unsettled input after it. Input after the completed turn blocks the stop
 // until it settles: a submitted or queued prompt reports UserPromptSubmit and
 // clears the completion, while terminal replies, focus reports and drafts do
-// not. The caller holds s.mu.
+// not. A task launch's completed turn must be the one its task's prompt
+// started. The caller holds s.mu.
 func (s *server) claudeTurnReady() bool {
 	c := s.claude
-	return c.completed && len(c.pending) == 0 && (c.input == s.inputGeneration || s.inputSettled())
+	return c.turn == turnCompleted && len(c.pending) == 0 && (c.input == s.inputGeneration || s.inputSettled()) &&
+		(s.config.Task == "" || c.taskTurn)
 }
 
 // claudeRestoredUnchanged reports a resumed visit in which no prompt was
 // submitted: its selected conversation is the restored one, so a stop needs no
-// new turn. Unsubmitted input must have settled. The caller holds s.mu.
+// new turn. Unsubmitted input must have settled. A task launch always needs
+// its task's new turn. The caller holds s.mu.
 func (s *server) claudeRestoredUnchanged() bool {
 	c := s.claude
-	return !c.started && s.config.ThreadID != "" && len(c.pending) == 0 &&
+	return c.turn == turnIdle && s.config.ThreadID != "" && s.config.Task == "" && len(c.pending) == 0 &&
 		(s.inputGeneration == 0 || s.inputSettled())
 }
 
@@ -256,7 +308,10 @@ func (s *server) observeClaudeTurn() (string, string, error) {
 
 // claudePreferences approves the gateway placeholder key when there is one.
 // With none, Claude Code uses its own sign-in from the mounted
-// .credentials.json, which /login creates (ADR 0047).
+// .credentials.json, which /login creates (ADR 0047). Claude Code 2.1.318 and
+// later ignore and drop bypassPermissionsModeAccepted; the settings file's
+// skipDangerousModePermissionPrompt answers their confirmation instead. It
+// stays for the older clients the movement proofs recorded.
 func claudePreferences(env []string) map[string]any {
 	preferences := map[string]any{"theme": "dark", "hasCompletedOnboarding": true,
 		"bypassPermissionsModeAccepted": true,
@@ -275,12 +330,7 @@ func prepareClaudeLaunch(c config, _ string, env []string) ([]string, []string, 
 	if err := installClaudeJSON(filepath.Join(claudeHome, ".claude.json"), claudePreferences(env)); err != nil {
 		return nil, nil, err
 	}
-	hooks := map[string]any{}
-	for _, event := range []string{claudePromptSubmit, claudePreTool, claudePostTool, claudeStop, claudeStopFailure} {
-		hooks[event] = []any{map[string]any{"matcher": "", claudeHooksKey: []any{map[string]any{
-			"type": "command", "command": "/usr/local/bin/native-session observe-claude", "timeout": 5}}}}
-	}
-	if err := installClaudeJSON(claudeSettings, map[string]any{claudeHooksKey: hooks}); err != nil {
+	if err := installClaudeJSON(claudeSettings, harness.ClaudeManagedSettings(claudeHookCommand)); err != nil {
 		return nil, nil, err
 	}
 	if err := installManagedClaudePlugin(claudePlugin); err != nil {
@@ -321,6 +371,11 @@ func claudeArguments(c config, profile agentprofile.Profile, withSkills bool) []
 	if c.ThreadID != "" {
 		args = append(args, "--resume", c.ThreadID)
 	}
+	if c.Task != "" {
+		// The task is the one positional prompt, which the interactive client
+		// submits at start. "--" keeps a task that starts with a dash literal.
+		args = append(args, "--", c.Task)
+	}
 	return args
 }
 
@@ -353,14 +408,22 @@ func installClaudeJSON(path string, value any) error {
 	return errors.Join(err, f.Close())
 }
 
+// claudeHookMaxBytes bounds one hook payload. PostToolUse carries the tool's
+// whole output, which Claude Code bounds (about 25,000 tokens for an MCP
+// tool), and UserPromptSubmit a task of up to 32,768 characters. A payload
+// past the bound fails the hook, which leaves the call pending and blocks
+// completion rather than settling it.
+const claudeHookMaxBytes = 4 << 20
+
 func readClaudeHook(input io.Reader) (*claudeHook, error) {
-	data, err := io.ReadAll(io.LimitReader(input, 65537))
-	if err != nil || len(data) > 65536 {
+	data, err := io.ReadAll(io.LimitReader(input, claudeHookMaxBytes+1))
+	if err != nil || len(data) > claudeHookMaxBytes {
 		return nil, errors.New("claude hook payload exceeds limit")
 	}
 	var h claudeHook
-	// Pinned hook payloads also contain prompt and tool-input fields. They are
-	// opaque; only the exact selected lifecycle identity is consumed here.
+	// Pinned hook payloads also contain tool-input and tool-output fields.
+	// They are opaque; only the selected lifecycle identity, the tool's name
+	// and ID, and a submitted prompt (compared with a task) are consumed here.
 	if err = json.Unmarshal(data, &h); err != nil {
 		return nil, err
 	}

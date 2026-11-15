@@ -120,12 +120,29 @@ func TestEffectiveDeadlineDoesNotResetOnAdmission(t *testing.T) {
 	policy := &api.AgentPolicy{Spec: api.AgentPolicySpec{MaxExecutionDuration: metav1.Duration{Duration: time.Hour}}}
 	record := &Record{Registration: intent}
 	record.OriginalDeadline = started.Add(time.Minute)
-	if got := EffectiveDeadline(run, policy, record); !got.Equal(record.OriginalDeadline) {
+	if got := EffectiveDeadline(run, policy, record); !got.Time().Equal(record.OriginalDeadline) {
 		t.Fatalf("session deadline extended: %v", got)
 	}
 	policy.Spec.MaxExecutionDuration.Duration = time.Second
-	if got := EffectiveDeadline(run, policy, record); !got.Equal(started.Add(time.Second)) {
+	if got := EffectiveDeadline(run, policy, record); !got.Time().Equal(started.Add(time.Second)) {
 		t.Fatalf("live policy tightening ignored: %v", got)
+	}
+}
+
+// A policy without maxExecutionDuration sets no deadline; a session's own
+// deadline still applies.
+func TestEffectiveDeadlineWithoutPolicyDuration(t *testing.T) {
+	run, _, intent := managedFixture()
+	started := metav1.NewTime(time.Now())
+	run.Status.StartedAt = &started
+	policy := &api.AgentPolicy{}
+	if got := EffectiveDeadline(run, policy, nil); got.Set() {
+		t.Fatalf("deadline = %v, want none", got)
+	}
+	record := &Record{Registration: intent}
+	record.OriginalDeadline = started.Add(time.Minute)
+	if got := EffectiveDeadline(run, policy, record); !got.Time().Equal(record.OriginalDeadline) {
+		t.Fatalf("deadline = %v, want the session's %v", got, record.OriginalDeadline)
 	}
 }
 
@@ -154,5 +171,18 @@ func TestCancelledRegistrationResolvesAsSessionCancelled(t *testing.T) {
 	other.UID = "replacement"
 	if _, err = ResolveRun(ctx, kube, other, template); !errors.Is(err, ErrConflict) || errors.Is(err, ErrSessionCancelled) {
 		t.Fatalf("another run's cancelled registration resolved as %v", err)
+	}
+}
+
+// A session without its own deadline never removes the policy's.
+func TestEffectiveDeadlineKeepsPolicyDeadlineForSessionWithout(t *testing.T) {
+	run, _, intent := managedFixture()
+	started := metav1.NewTime(time.Now())
+	run.Status.StartedAt = &started
+	policy := &api.AgentPolicy{Spec: api.AgentPolicySpec{MaxExecutionDuration: metav1.Duration{Duration: time.Hour}}}
+	record := &Record{Registration: intent}
+	record.OriginalDeadline = time.Time{}
+	if got := EffectiveDeadline(run, policy, record); !got.Time().Equal(started.Add(time.Hour)) {
+		t.Fatalf("deadline = %v, want the policy's %v", got, started.Add(time.Hour))
 	}
 }

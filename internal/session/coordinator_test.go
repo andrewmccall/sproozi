@@ -272,10 +272,12 @@ type fakePlacement struct {
 	unsealed                              bool
 	// turnless stops a visit from the retained workspace with no native
 	// conversation: no thread and no checkpoint.
-	turnless       bool
-	pendingTurn    bool
-	corruptReceipt func(*Receipt)
-	charge         budget.TrustedUsage
+	turnless    bool
+	pendingTurn bool
+	// abortUnreachable fails Abort; abortSealed makes it seal the usage.
+	abortUnreachable, abortSealed bool
+	corruptReceipt                func(*Receipt)
+	charge                        budget.TrustedUsage
 }
 
 func newPlacement(data []byte, digest string) *fakePlacement {
@@ -380,9 +382,16 @@ func (p *fakePlacement) Abort(_ context.Context, l Launch, i Incarnation) (Obser
 	if !ok || o.Incarnation != i || !SameLaunch(l, o.Launch) {
 		return Observation{}, errors.New("stale abort")
 	}
+	if p.abortUnreachable {
+		return Observation{}, errors.New("unreachable placement")
+	}
 	p.aborted++
 	o.State = PlacementStopped
 	o.Stopped = nil
+	if p.abortSealed {
+		receipt := &Receipt{Launch: l, Incarnation: i, Usage: map[string]budget.TrustedUsage{testCapability: p.charge}}
+		o.Stopped = &Stopped{Launch: l, Incarnation: i, ActualStopped: true, ThreadID: l.ThreadID, Receipt: receipt}
+	}
 	p.records[l.AllocationID] = o
 	return o, nil
 }

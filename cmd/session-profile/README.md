@@ -70,10 +70,14 @@ cached mounted certificate; API contents alone do not prove a process loaded it.
 The template must have `sessions.sproozi.com/managed: "true"` and the exact same
 approved instruction bytes as the local placement. Compute their SHA-256 for
 `instructionDigest`. The policy allows the selected capabilities, finite positive
-unit budgets, compatible cost budgets, runtime resource limits and an execution
-duration covering the session's original deadline. Current Kubernetes policy
-duration is at most one hour. A destination rejects an incompatible allowance or
-deadline; it never silently rewrites immutable move intent.
+unit budgets, compatible cost budgets and runtime resource limits. The
+executor's `maxDuration` and the policy's `maxExecutionDuration` each cap a
+launch's deadline when set: under either, a launch must have a deadline within
+it, and one without a deadline is denied. With neither, the executor admits any
+deadline, none included, so a session its owner started without one runs until
+stopped ([ADR 0056](../../docs/adr/0056-whoever-starts-work-sets-its-deadline.md)).
+A destination rejects an incompatible allowance or deadline; it never silently
+rewrites immutable move intent.
 
 The source schemas are
 [AgentRuntime](../../api/v1alpha1/agentruntime_types.go),
@@ -108,6 +112,7 @@ configuration. Required backend permissions are:
 | `budgetNamespace` (default `sproozi-system`) | `sproozi.com/budgetledgers` for run accounts | `get`, `create`, `update` |
 | `sproozi-agents` | Core `pods` | `get`, `patch`, `delete` |
 | `sproozi-agents` | Core `pods/exec` | `create` |
+| `sproozi-agents` | Core `pods/log`, for the supervisor's exit report | `get` |
 
 Also bind the profile's identity to the `system:auth-delegator` ClusterRole, so
 it can create TokenReviews and SubjectAccessReviews.
@@ -187,9 +192,8 @@ Save the following strict JSON as `profile.json` in the immutable ConfigMap
 
 To change either, delete it, create it again the same way, and run
 `kubectl -n sproozi-sessions rollout restart deployment/sproozi-work`. Replace the example paths,
-template, instruction digest and approved ceilings. The 30-minute duration and
-unit ceiling match the [home example](../sproozi/README.md); cost is explicitly
-unbounded here. A bounded positive cost requires corresponding gateway pricing.
+template, instruction digest and approved ceilings. The unit ceiling matches the
+[home example](../sproozi/README.md); cost is explicitly unbounded here. A bounded positive cost requires corresponding gateway pricing.
 
 ```json
 {
@@ -216,6 +220,11 @@ unbounded here. A bounded positive cost requires corresponding gateway pricing.
 ```
 
 The executor checks each field at startup and names the one that is wrong.
+`maxDuration`, optional, caps the deadline of every launch and `run --remote`
+task: set, a launch needs a deadline within it, and a task without
+`--max-duration` gets it; omitted, launches and tasks may have any deadline or
+none. Set it, or the policy's `maxExecutionDuration`, on an executor that runs
+work for someone else, such as Hermes tasks.
 `budgetNamespace` defaults to `sproozi-system`, where the installed gateway
 keeps its BudgetLedger resources. `gatewayUser`, optional,
 is the shared gateway's ServiceAccount user name,
@@ -285,8 +294,16 @@ through the home journal. See the guide's
 
 ## Retained remote work
 
-To accept new Codex tasks independently of the local service, add `workTokenFile`
-and `repositories` to the configuration. The work token is the one static token:
+To accept new Codex or Claude Code tasks and interactive sessions
+independently of the local service, add `workTokenFile`,
+`workTokenMaxDuration` and `repositories` to the configuration. An executor
+runs the one harness its `harness` names, `codex` or `claude-code`
+([Claude Code example configuration](../../examples/portable-workflows/kubernetes/claude/profile.json)).
+`workTokenMaxDuration`, required with `workTokenFile`, caps the deadline of
+work submitted with the work token, which always has one; it must fit within
+`maxDuration` when that is set. `retainedBytes`, optional, bounds what remote
+work keeps on the volume: at least twice `maxCheckpointBytes`, by default 1 GiB
+or twice `maxCheckpointBytes` when that is larger. The work token is the one static token:
 at least 32 characters, stored privately and checked first, because Hermes has
 no Kubernetes identity of its own. Any other bearer token is reviewed as above.
 Repository entries
@@ -297,15 +314,30 @@ credential configuration.
 
 `/work/mcp` exposes `sproozi_run`, `sproozi_status`, `sproozi_cancel` and
 `sproozi_sessions` to Hermes. Fixed JSON routes also support recovery. The home principal additionally permits checkpoint export and the
-exclusive one-way claim; the work token cannot claim ownership. TLS and bearer
-validation happen before request decoding.
+exclusive one-way claim, and starts, stops, resumes, attaches to and cancels
+[interactive sessions](../../docs/reference/remote-executors.md#interactive-sessions),
+including from an uploaded workspace; the work token can do none of these.
+TLS and bearer validation happen before request decoding.
 
-The protected `directory/work` retains original request/execution identities,
-source receipts, bounded native/Git checkpoints and untrusted final text. Run one
+The executor owns the work it starts and drives each execution through an
+execution journal in the protected `directory/sessions`, the same one the local
+service keeps ([ADR 0057](../../docs/adr/0057-the-remote-executor-owns-its-sessions-through-the-coordinator.md)).
+That journal keeps every launch, visit, source receipt and the committed
+native/Git checkpoint. The catalogue in `directory/work` keeps original request
+identities, the Project, the untrusted final text and the pull. Run one
 remote executor per state directory, with durable storage. Restart with the same principal and directory;
-changing principals cannot reinterpret retained records. A lost preparation or
-stop reply requires recovery of that exact allocation. Missing stop/accounting
-evidence blocks export, and changing a request's intent on replay is rejected.
+changing principals cannot reinterpret retained records. A task's phases are
+the journal's: `stopping` while it waits for the task's turn, and
+`unknown-stop` or `unknown-usage` after a lost stop reply or missing accounting,
+which the executor retries by itself for a task and `recover` retries at once;
+an interactive session waits for `recover`. Missing
+stop/accounting evidence blocks export, and changing a request's intent on
+replay is rejected.
+
+An executor upgraded from a release that kept version 1 records in
+`directory/work` still lists, exports and claims the stopped ones. It refuses
+to start while any is unfinished, naming each: finish or cancel them with the
+previous release first.
 
 The native image includes `/usr/local/bin/session-profile` and Git for this
 trusted service; the scratch controller image does not. A trusted Pod deployment

@@ -2,10 +2,10 @@
 # NATIVE_IMAGE's default names the native-image-required stage, which fails the
 # build with instructions, so a build without the argument stops with a clear error.
 ARG NATIVE_IMAGE=native-image-required
-FROM golang:1.26.10-bookworm@sha256:632dff7351799a5a9954a48dc06670ade72ee44e8c351cdc0e5a57af2fea21af AS native-image-required
+FROM golang:1.26.11-bookworm@sha256:dc40a13b61304647ed7e5d581d246b86413dfc29d63c6d018310feb93cd98fc0 AS native-image-required
 RUN echo "Set --build-arg NATIVE_IMAGE to the administrator-resolved native image: a local tag, or repository@sha256:digest for shared or Kubernetes builds" >&2 && exit 1
 
-FROM golang:1.26.10-bookworm@sha256:632dff7351799a5a9954a48dc06670ade72ee44e8c351cdc0e5a57af2fea21af AS toolchain
+FROM golang:1.26.11-bookworm@sha256:dc40a13b61304647ed7e5d581d246b86413dfc29d63c6d018310feb93cd98fc0 AS toolchain
 ENV GOTOOLCHAIN=local GOMODCACHE=/opt/sproozi-go-modules CGO_ENABLED=0
 WORKDIR /cache-source
 COPY go.mod go.sum ./

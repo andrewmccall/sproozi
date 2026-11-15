@@ -133,9 +133,17 @@ the home configuration's `gateway.maxModelCallSeconds` sets. See
 [concurrency and gateway capacity](#concurrency-and-gateway-capacity) before
 changing them.
 
-The projected token lifetime is two hours; policy limits execution to one hour.
-The demo reads the token once. Revocation depends on live gateway checks rather
-than waiting for token expiry.
+The projected token lifetime is two hours, and the kubelet refreshes the file
+before it expires. A managed session's supervisor never puts the token in the
+harness's environment: it runs a loopback forwarder that reads the current
+token for each gateway connection, so a session outlives any one token
+([ADR 0056](../adr/0056-whoever-starts-work-sets-its-deadline.md)). The
+forwarder accepts only connections carrying a secret made for that launch, so
+other containers in the Pod, such as the checkpoint helper, cannot use it. An
+ordinary AgentRun whose command reads the token once, as the demo does, loses
+the gateway when that token expires; give such runs a `maxExecutionDuration`
+under two hours, or re-read the token for each connection. Revocation depends
+on live gateway checks rather than waiting for token expiry.
 
 Keep `sproozi-agents` dedicated to managed sandboxes. Restrict who can create
 workloads, ServiceAccounts or runtimes. All containers in a Pod share one run

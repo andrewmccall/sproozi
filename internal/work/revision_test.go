@@ -2,7 +2,6 @@
 package work
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -38,10 +37,10 @@ func TestFreshNativeWorkStartsAtRecordedCommitAndKeepsSourceReceipt(t *testing.T
 	}
 	waitPhase(t, o, fresh.ID, phaseRetained)
 	r, err := o.read(fresh.ID)
-	if err != nil || r.Launch.ThreadID != "" || r.Launch.CheckpointDigest != "" {
-		t.Fatalf("Workspace source became native resume: %#v %v", r.Launch, err)
+	if err != nil || r.First.ThreadID != "" || r.First.CheckpointDigest != "" {
+		t.Fatalf("Workspace source became native resume: %#v %v", r.First, err)
 	}
-	data, err := os.ReadFile(o.path(fresh.ID, ".input"))
+	data, err := c.Coordinator.Workspace(fresh.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

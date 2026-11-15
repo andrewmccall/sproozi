@@ -10,8 +10,8 @@ registration uses the shared gateway and named run grants.
 | Where | Harnesses that get the servers | Configured in |
 | --- | --- | --- |
 | Kubernetes AgentRuns | Every [harness selector](harnesses.md#harness-selectors) | The gateway's registry ConfigMap, the AgentPolicy and the AgentRun. |
-| Local sessions (`sproozi run`) | Codex and Copilot. Claude Code sessions get no named MCP servers. | `config.json`; see [local sessions](#local-sessions). |
-| Sessions on a remote executor | Codex executors | The executor's allowances and the cluster's policy. |
+| Local sessions (`sproozi run`) | Codex, Claude Code and Copilot | `config.json`; see [local sessions](#local-sessions). |
+| Sessions on a remote executor | Codex, Claude Code and Copilot | The executor's allowances and the cluster's policy. |
 
 This path enforces the [Protocol tier](../../GLOSSARY.md#protocol-tier).
 Tool names, descriptions and schemas cannot establish read-only behaviour or
@@ -329,7 +329,7 @@ failures return fixed messages; successful tool output remains provider content.
 
 ## Local sessions
 
-A local Codex or Copilot session can use the same registered servers through
+A local Codex, Claude Code or Copilot session can use the same registered servers through
 this machine's gateway. Add to the `gateway` object in `config.json`:
 
 | Key | Value |
@@ -345,10 +345,14 @@ Add a unit allowance for each server to the top-level `allowances` object in
 beside the allowances already there, then restart the service with
 `sproozi service stop --leave-running` and `sproozi service start`. Monetary MCP
 allowances are rejected because MCP has no trusted pricing. Sproozi generates
-the client configuration for each Codex or Copilot session from these
-allowances.
+the client configuration for each session from these allowances: Codex
+`mcp_servers` options, Claude Code's `--strict-mcp-config` file and
+Copilot's `--additional-mcp-config`, each beside the `sproozi` control
+connection.
 
-Claude Code sessions on the same machine get no named MCP servers, and the
-service says so when it starts (`claude-code sessions get no configured MCP
-servers (mcp.deepwiki): …`). Start the session with `--harness codex` or
-`--harness copilot` to use them.
+The gateway serves each approved tool's input schema as the server sent it.
+Claude Code leaves out, without an error, any tool whose input schema has a
+top-level `allOf`, `anyOf` or `oneOf`, and keeps the server's other tools
+(observed with Claude Code 2.1.325). `python3 hack/mcp-tools.py URL --policy
+FILE` warns about such an approved tool. Ask the server's owner to move the
+combination inside a property.

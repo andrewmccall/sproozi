@@ -363,7 +363,7 @@ func (a *Authenticator) find(ctx context.Context, reader client.Client, serviceA
 	if err := registry.RequireActive(ctx, reader, &run, record, a.agentNamespace); err != nil {
 		return nil, err
 	}
-	if deadline := registry.EffectiveDeadline(&run, &pol, record); !deadline.IsZero() && !deadline.After(time.Now()) {
+	if registry.EffectiveDeadline(&run, &pol, record).Passed(time.Now()) {
 		return nil, ErrRunNotRunning
 	}
 

@@ -90,7 +90,7 @@ func (s *Service) Remove(id string) (Status, error) {
 // notRemovable says why a session cannot be removed yet and what would allow it.
 func notRemovable(id string, r session.Record) error {
 	switch {
-	case r.Phase == session.PhaseUnknownStop || r.Phase == session.PhaseUnknownUsage || r.Phase == session.PhaseCancelling:
+	case r.Phase.Unresolved():
 		return rejectedError(fmt.Sprintf("home: session %s has unfinished work (%s); run \"sproozi recover %s\", "+
 			"then remove it", id, r.Phase, id))
 	case r.Active != nil:

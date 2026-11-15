@@ -149,7 +149,7 @@ func controllerNamespace(t *testing.T) string {
 			}
 			for i := range runs.Items {
 				run := &runs.Items[i]
-				if controller.IsTerminal(run.Status.Phase) {
+				if run.Status.Phase.IsTerminal() {
 					continue
 				}
 				if !run.Spec.Cancel {

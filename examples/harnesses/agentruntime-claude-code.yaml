@@ -58,9 +58,11 @@ spec:
         terminationMessagePath: /dev/termination-log
         terminationMessagePolicy: File
       securityContext:
-        fsGroup: 65532
+        # The release's native image runs as UID/GID 1000; runtimes that
+        # share a login claim must agree, or fsGroup regroups the login.
+        fsGroup: 1000
         runAsNonRoot: true
-        runAsUser: 65532
+        runAsUser: 1000
         seccompProfile:
           type: RuntimeDefault
   workloadContainers:

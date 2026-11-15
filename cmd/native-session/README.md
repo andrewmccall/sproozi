@@ -49,8 +49,9 @@ rejected. Normalized top-level `developer_instructions` and
 `check_for_update_on_startup` remain reserved even when quoted or escaped.
 Sproozi validates this restricted key boundary; the selected client interprets the
 administrator-selected TOML values.
-Claude rejects these options and receives fixed foreground Bash tools, empty MCP
-configuration, explicit fresh completion hooks and `bypassPermissions`. User and
+Claude rejects these options and receives fixed foreground Bash tools, the
+launch's MCP connections under `--strict-mcp-config`, explicit fresh completion
+hooks and `bypassPermissions`. User and
 project settings sources are excluded. Fresh onboarding/preferences and hook
 settings are not selected by the transcript checkpoint. Background tasks and
 prompt suggestions are disabled. Codex uses `--sandbox danger-full-access
@@ -123,10 +124,17 @@ journal for a completed final turn, matching initial approved instructions and
 resolved function/custom-tool and native exec/MCP/patch activity. Partial rows,
 unknown tool calls, unresolved calls, incompatible metadata or instruction
 mismatch fail closed. The first new session requires exactly one native journal.
-For Claude, it requires a matching native `Stop`, no pending foreground Bash
-tools, and a settled selected primary transcript. `UserPromptSubmit` clears
+For Claude, it requires a matching native `Stop`, no pending foreground Bash,
+MCP (`mcp__<server>__<tool>`) or `Skill` calls (a `Skill` call loads a profile
+skill or `sproozi:sproozi-access`), and a settled selected primary transcript.
+`PostToolUse` or, for a failed call, `PostToolUseFailure` ends a call; an
+interrupted call stays pending. A task launch passes its task as the one
+positional prompt and counts only a `Stop` after the `UserPromptSubmit` whose
+prompt is that task. `UserPromptSubmit` clears
 earlier completion; accepted attachment writes after that prompt's generation
-prevent reuse of its Stop. The parser checks the exact UUID, primary
+prevent reuse of its Stop. A `StopFailure` ends the turn as failed: only a new
+`UserPromptSubmit` starts another, and a tool start or `Stop` before it is
+rejected, so a turn is never both failed and completed. The parser checks the exact UUID, primary
 chain and supported tool pairs. The observed bounded recovered 429 record clears
 the previous assistant leaf and needs a later successful assistant response.
 Other native error shapes, subagents, compaction and background/parallel work are
@@ -146,6 +154,9 @@ requires normal exit. Claude instead uses controlled process-group shutdown
 after its completed-turn gate; the `/quit` input was not a reliable native
 shutdown operation. The supervisor returns the selected UUID/turn and exit,
 then exits PID 1. Forced deadline/signal stops do not establish graceful completion.
+Every end other than a graceful stop writes one exit report naming its cause
+(`exited`, `deadline`, `terminated` or `failed`), decided once where it is
+decided; see [exit reports](../../docs/reference/native-control.md#exit-reports).
 The placement persists its accepted quiescence acknowledgement before revocation;
 the supervisor itself does not store a durable completion receipt. A lost Claude
 acknowledgement cannot be replaced by a terminated container or a settled

@@ -138,6 +138,13 @@ the native conversation ID while creating a new execution, allocation, deadline
 and current grant. Earlier usage records must remain unchanged. Delayed stop,
 move and cancel requests must not affect a later execution.
 
+An execution its owner starts without a deadline (`--max-duration none`, or a
+home without `maxDuration`) must run, attach, move, quiesce and stop like any
+other and never count as expired; an agent that crashes must not be recorded as
+a deadline stop. A remote executor with `maxDuration`, or a policy with
+`maxExecutionDuration`, must deny it. A set deadline must stop work at the same
+instant everywhere.
+
 Project tests must cover membership, filtering, capability narrowing and separate
 local approval tied to the source installation. Imported Project labels cannot
 grant access. Test removal of approval during resume recovery and movement.

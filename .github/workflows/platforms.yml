@@ -46,7 +46,7 @@ jobs:
           ref: ${{ inputs.ref || github.ref }}
       - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417
         with:
-          go-version: '1.26.10'
+          go-version: '1.26.11'
       - name: Test host boundaries and recovery
         run: go test -race -v -timeout=5m ./internal/privatefs ./internal/workspace ./internal/runtime/docker ./internal/session/home ./internal/budget/file ./internal/gateway/docker ./internal/session ./internal/work ./cmd/sproozi
       - name: Build and run CLI

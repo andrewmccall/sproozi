@@ -32,19 +32,20 @@ so CI does not run `make test`. `Lint` and `E2E` are separate workflows.
 | `make verify-deps` | `go.mod` and `go.sum` are tidy, and the pinned `govulncheck` finds no known vulnerability reachable from Sproozi code. | Lint (`verify-deps` step) | Go; network for the vulnerability database |
 | `make verify-protocol` | Pinned `gh` and `git` clients produce the GitHub protocol the gateway inspects. Zero matched or skipped tests fail. | Tests (`checks`) | Downloads the checksum-pinned `gh` |
 | `make verify-mcp` | MCP and gateway packages pass under race, every `examples/*/servers.json` example is consistent, the live MCP verifier's safety and failure reports pass offline, and `hack/mcp-tools.py` handles JSON, SSE and legacy-SSE servers. | Tests: `checks` runs the two Python checks, `hack/verify/mcp-live-test.py` and `hack/mcp_tools_test.py`; the race shards cover the Go tests | Go, Python 3 |
-| `make verify-workflow-fixtures` | Session-mobility protocol fixtures, quickstart ownership and CRD checks, Kind bootstrap readiness ordering, Kind image import and build cache selection, demo setup credential preservation and registry wiring, and `make demo` input
+| `make verify-workflow-fixtures` | Session-mobility and Claude remote-executor protocol fixtures, the Claude executor proof's rendering of the shipped example, quickstart ownership and CRD checks, Kind bootstrap readiness ordering, Kind image import and build cache selection, demo setup credential preservation and registry wiring, and `make demo` input
 checks before cluster creation and cleanup after a setup failure. Stubs replace Docker and Kind. | Tests (`checks`) | Python 3, Bash; fetches the pinned Calico manifest into `.local/cni` on first run |
 | `make verify-docs` | Local Markdown links resolve and no private-plan paths are referenced. It does not establish that documentation is current. | Tests (`checks`) | Python 3 |
 | `make lint` | golangci-lint reports no issues; `make lint-config` checks its configuration. | Lint | Go; downloads the checksum-pinned golangci-lint release |
 | `make test-e2e` | The full stack works in an owned two-node Kind cluster with enforcing CNI, using the pinned clients and Hermes digest. See [Harnesses and Hermes in Kind](#harnesses-and-hermes-in-kind). | E2E | Docker, Kind, kubectl, Calico from `hack/verify/fetch-calico.sh` |
 | `make test-e2e-existing` | The same e2e suite passes against a Kind cluster you created (`KIND_CLUSTER`), then removes the controller, CRDs and test namespaces. `make test-e2e` skips that teardown because it deletes the whole cluster. | No | An existing dedicated Kind cluster |
 | `make verify-mcp-client` | Generated run-local MCP configuration loads in installed stock Codex. No model request. | No | Codex CLI |
-| `make verify-harness-clients` | Generated native MCP configuration loads in installed Codex, Claude Code, OpenCode and Copilot. No model request. | No | All four CLIs |
+| `make verify-harness-clients` | Generated native MCP configuration loads in installed Codex, Claude Code, OpenCode and Copilot, and a managed Claude Code session's strict configuration loads its named and `sproozi` servers. No model request: the managed Claude check's only model endpoint is a closed loopback port. | No | All four CLIs |
 | `make verify-native-session` | Installed stock Codex resumes through production checkpoint capture and restore against a local provider. | No | Codex CLI |
 | `make verify-harness-process` | Installed Claude Code, OpenCode and Copilot (in bring-your-own-key mode and signed in to GitHub) complete model and tool loops through the inspected-TLS gateway with local providers, and call `sproozi` `diagnose` to explain a refused request. A separate authenticated probe verifies Copilot's registry-policy URL; the fixture individual account can skip registry discovery. No live organization policy is claimed. | Copilot GitHub case only, using the lockfile client | Claude Code, OpenCode, Copilot |
 | `make verify-mcp-kind` | Configured MCP providers work with stock Codex in an owned Kind cluster, including denials, budgets and revocation. Real model requests. | No | See [Configured MCP in Kind](#configured-mcp-in-kind) |
 | `make verify-local-onboarding` | On this computer's Docker engine, `init` provisions Codex and adds Claude Code and Copilot, `doctor` passes, one stock terminal turn per harness completes through `attach`, every stop binds its native UUID, each harness's profile instructions reach its provider, a renewed certificate reaches the running gateway, and a configured kubeconfig receives no calls. Every model request carries the gateway's key; with `SIGN_IN=1` Codex and Claude Code sign in themselves from fixture sign-ins seeded in their default login stores and every request carries those instead (Copilot's own sign-in is covered by `verify-harness-process`). Deterministic local providers. See [Local onboarding](#local-onboarding). | No | Docker with Buildx, Go, Python 3, OpenSSL |
 | `make verify-kubernetes-release` | In an owned Kind cluster with enforcing CNI, the rendered release assets install as documented; the provider-free first check passes with permitted, denied and blocked paths; renewal reaches the running gateway; a CA rotation passes through new immutable trust objects; and the certificate controller lacks other rights. See [Kubernetes release assets](#kubernetes-release-assets). | No | Docker with Buildx, Kind, kubectl, Python 3 |
+| `make verify-claude-remote-kind` | In an owned Kind cluster with enforcing CNI, the [Claude Code executor example](../../examples/portable-workflows/kubernetes/claude/kustomization.yaml) runs stock Claude Code through the public CLI and `sproozi-cli` context: a session from the approved repository and one from an uploaded `PATH` reach the prompt with no dialog; a turn, `stop` and `resume` keep one conversation in a retained Claude checkpoint; `/exit` before a turn, after one and in a resumed visit is retained without `unknown-stop`; a `--task` completes with Claude's final reply; and a turn calls `diagnose` and loads a profile skill. A deterministic in-cluster Anthropic fixture; the runtime's sign-in claim holds a fixture sign-in. Not yet run. See [Claude Code on the cluster](#claude-code-on-the-cluster). | No | Docker with Buildx, Kind, kubectl, Go, Python 3 with PyYAML, OpenSSL |
 | `make verify-live` | One real AgentRun on a provisioned cluster opens a scoped PR in `SPROOZI_DEMO_REPO`. Denial probes run inside its sandbox and fail closed, and a second Pod using the run's identity is refused by the gateway. | No | Provisioned cluster and credentials; creates a PR |
 | `make verify-public-tree` | No private local material is tracked. | No | Git |
 | `make verify-release` | Release inputs are pinned, then `test`, `lint`, every `Tests` row, `test-e2e`, `verify-kubernetes-release`, `verify-live` and `verify-public-tree` pass and the release image builds. A missing prerequisite fails. No push. | No | Everything above; `RELEASE_BUILD=1`, `SPROOZI_DEMO_REPO` |
@@ -112,13 +113,13 @@ proof under `.local`; keep the skill and its feature map current with
 
 ## Harnesses and Hermes in Kind
 
-Install Docker, Python 3, Go 1.26.10, kubectl and Kind. Docker must be running;
+Install Docker, Python 3, Go 1.26.11, kubectl and Kind. Docker must be running;
 the cluster and five stock clients need several GiB of memory and disk. From
 the repository root:
 
 ```sh
 bash hack/verify/fetch-calico.sh .local/verification/calico-v3.30.4.yaml
-GOTOOLCHAIN=go1.26.10 \
+GOTOOLCHAIN=go1.26.11 \
 SPROOZI_CNI_MANIFEST="$PWD/.local/verification/calico-v3.30.4.yaml" \
 SPROOZI_CNI_SELECTOR=k8s-app=calico-node \
 make test-e2e
@@ -284,6 +285,18 @@ It covers both selected clients and provides Codex held-turn and cancellation
 scenarios. Run the complete placement failure matrix for each client when changing
 movement or completion behaviour.
 
+## Claude Code on the cluster
+
+`make verify-claude-remote-kind` builds this checkout's images, creates a
+dedicated `sproozi-mobility-claude-*` Kind cluster with Calico, installs the
+controller, gateway and Claude Code executor example with a deterministic
+Anthropic fixture inside the cluster, and drives the public CLI through each
+scenario. It needs no host address reachable from Kind and no credentials. It
+deletes the cluster when it finishes; set `SPROOZI_PRESERVE_ON_FAILURE=1` to
+keep a failed one. Read
+`.local/verification/claude-remote-kind/<run>/proof/report.json`. See the
+[driver's README](../../hack/verify/claude-remote-kind/README.md).
+
 ## Retained work and Projects in Kind
 
 Use the [complete mobility setup](../../hack/verify/session-mobility/README.md)
@@ -291,7 +304,7 @@ to create a dedicated two-node Kind cluster with enforcing Calico, build the
 approved native/helper images, prepare TLS and install the controller/gateway.
 The [stock Hermes walkthrough](../../hack/verify/portable-workflows/README.md#stock-hermes-and-a-persistent-kubernetes-owner)
 then installs this owner and coordinator and runs the complete native round trip.
-It needs Docker, Kind, kubectl, Git, Go 1.26.10, OpenSSL, Python 3 and PyYAML from `hack/requirements.txt`.
+It needs Docker, Kind, kubectl, Git, Go 1.26.11, OpenSSL, Python 3 and PyYAML from `hack/requirements.txt`.
 It selects no personal credentials or home-network resources. The development
 fixture seeds only public Sproozi compiler sources. Follow the
 [Project dogfooding walkthrough](../../hack/verify/portable-workflows/README.md#development-and-governed-home-ops-projects)

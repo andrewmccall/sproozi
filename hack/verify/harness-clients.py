@@ -2,6 +2,9 @@
 """Load the production MCP renderer with stock CLIs in disposable client state.
 
 No model requests. No host configuration or credentials enter these processes.
+The managed Claude Code check starts a print-mode session whose only model
+endpoint is a closed loopback port, and reads the MCP servers Claude Code
+reports loading before its first request.
 """
 import argparse
 import json
@@ -33,6 +36,26 @@ def isolated_env(directory):
     return env
 
 
+def claude_managed(binary, directory):
+    """Launch stock Claude Code the way a managed session does: the strict
+    configuration on the command line, so no other MCP source is loaded."""
+    config = subprocess.check_output(["go", "run", "./hack/verify/mcp-config", "--harness", "claude-code", "--managed"],
+                                     cwd=ROOT, text=True).strip()
+    env = isolated_env(directory)
+    env.update({"ANTHROPIC_BASE_URL": "http://127.0.0.1:9", "ANTHROPIC_API_KEY": "sproozi-local-placeholder",
+                "CLAUDE_CODE_MAX_RETRIES": "0"})
+    output = subprocess.run([binary, "-p", "list your tools", "--verbose", "--output-format", "stream-json",
+                             "--strict-mcp-config", "--mcp-config", config],
+                            env=env, cwd=directory, text=True, capture_output=True, stdin=subprocess.DEVNULL, timeout=60).stdout
+    for line in output.splitlines():
+        event = json.loads(line)
+        if event.get("type") == "system" and event.get("subtype") == "init":
+            loaded = sorted(server["name"] for server in event.get("mcp_servers", []))
+            assert loaded == ["docs", "inventory", "sproozi"], event.get("mcp_servers")
+            return
+    raise SystemExit("claude-code reported no init event:\n" + output)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--harness", action="append", choices=("codex", "claude-code", "opencode", "copilot"))
@@ -58,6 +81,9 @@ def main():
                     value = execute([binary, "mcp", "get", name], env, directory)
                     assert f"https://sproozi-gateway.sproozi-system.svc:8443/mcp/{name}" in value, value
                     assert "Type: http" in value, value
+                with tempfile.TemporaryDirectory(prefix="sproozi-harness-") as managed:
+                    claude_managed(binary, managed)
+                print(f"PASS: claude-code {version} loaded a managed session's strict named and sproozi connections")
             elif selected == "copilot":
                 Path(env["COPILOT_HOME"]).mkdir()
                 Path(env["COPILOT_HOME"], "mcp-config.json").write_text(config)

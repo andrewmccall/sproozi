@@ -16,12 +16,17 @@ Pull does not start an agent. Resume starts a new execution with a new
 deadline and allowance. See [core concepts](../explanations/core-concepts.md)
 for the difference between a session and an execution.
 
-This workflow supports Codex. Here the remote executor owns the task until you
-pull it, and nobody attaches while it runs. To work interactively in a Codex or
+This walkthrough uses Codex; a
+[Claude Code executor](#start-a-session-on-the-cluster-and-attach-from-anywhere)
+runs tasks the same way. Here the remote executor owns the task until you
+pull it, and nobody attaches while it runs. To work interactively in a session
+the cluster owns, so it keeps running with your laptop closed, see
+[Start a session on the cluster and attach from anywhere](#start-a-session-on-the-cluster-and-attach-from-anywhere).
+To work interactively in a Codex or
 Claude Code session and move it between Docker and Kubernetes while the service on
 your machine stays the owner, use
-[Move a live session between Docker and Kubernetes](session-mobility.md). Automated
-Claude tasks, IDE/GUI attachment, background tools, multiplayer and existing
+[Move a live session between Docker and Kubernetes](session-mobility.md).
+IDE/GUI attachment, background tools, multiplayer and existing
 personal-session adoption are not part of this workflow.
 
 ## Prepare the installation
@@ -162,7 +167,11 @@ execution, visit and exact writer separately. The session ID outlives the Pod.
 Status returns the task phase and a size-limited final answer marked as
 untrusted output. The remote executor reports `retained` only after compatible native
 completion, confirmed sandbox stop, finalized usage accounting and checkpoint
-storage. An `unknown` status cannot be pulled or silently interpreted as stopped.
+storage. A task whose turn is still running shows `stopping`, with a problem
+naming what the stop waits for. `unknown-stop` and `unknown-usage` cannot be
+pulled or silently interpreted as stopped; the executor retries them by itself,
+and `recover` retries at once. The [command reference](../reference/session-commands.md#status-and-listing-output)
+lists every remote phase.
 
 `sessions --json` returns one labelled catalogue. Check `executors` for
 unavailable owners and `truncated` for omitted results; a stopped local service
@@ -170,9 +179,117 @@ does not hide the cluster's rows. The [command reference](../reference/session-c
 explains owner selection, JSON fields and safe error categories.
 
 For a known recoverable interruption, use `sproozi recover ID --remote`. Cancel uses a separate stable `--operation UUID` and
-revokes before forced stop. Keep the original owner journals and accounting
+revokes before forced stop; it never waits for the task's turn. A `retained`
+task cannot be cancelled: its result is kept. Keep the original owner journals and accounting
 records; deleting resources or replacing a failed Run does not establish stop or
 refund evidence.
+
+## Start a session on the cluster and attach from anywhere
+
+Leave out `--task` and `run --remote` starts an interactive Codex or Claude
+Code session that the remote executor owns, then connects your terminal to it.
+The session runs in the cluster until you stop it or its deadline passes. Your
+laptop can sleep, change network or shut down; nothing on it needs to stay up.
+Any machine that reaches the cluster through a `sproozi` context (or
+`--context`) can attach. It needs an executor from this release; an older one
+refuses with `update the executor`.
+
+Each executor runs one harness, so Codex and Claude Code on one cluster are
+two executors, each in its own namespace. The
+[Claude Code executor example](../../examples/portable-workflows/kubernetes/claude/kustomization.yaml)
+adds one in `sproozi-claude-sessions` beside the Codex one in
+`sproozi-sessions`; apply its `cli-access` overlay too, and create its
+configuration from its `profile.json` as for the Codex executor. Its runtime
+keeps Claude Code's own sign-in in a login claim, so the gateway runs in
+workload mode for Anthropic, and you sign in once with `/login` in a session.
+Choose the executor with `--namespace` and its harness with `--harness`:
+
+```sh
+sproozi run --remote --namespace sproozi-claude-sessions --harness claude-code --repository sproozi
+sproozi attach 3f2b8c1e --namespace sproozi-claude-sessions
+```
+
+Give `--task` to submit a task to either executor instead; a Claude Code
+task's result is Claude's final reply:
+
+```sh
+sproozi run --remote --namespace sproozi-claude-sessions --harness claude-code --repository sproozi \
+  --task "Explain the failing test"
+```
+
+The session belongs to an approved repository or project, which sets its
+allowances. Start it from the approved snapshot:
+
+```sh
+sproozi run --remote --repository sproozi
+```
+
+or upload your working copy instead, as `sproozi run` copies it on this
+machine:
+
+```sh
+sproozi run --remote --repository sproozi ~/src/sproozi --include-ignored .env
+```
+
+The upload carries the repository's history, index, staged and unstaged
+changes and untracked files, but not ignored files unless `--include-ignored`
+names them. It is refused, before anything is sent, for the same repositories
+a local `run` refuses (no commits, a conflicted or sparse index, a shallow or
+partial clone, a linked worktree or submodule, a nested repository), and when
+it is larger than the executor's `maxCheckpointBytes`. `PATH` has no default
+here: without it, the session starts from the approved repository.
+
+`--max-duration 8h` (or `none`, when the executor sets no cap) chooses the
+deadline, and `-d` starts without attaching. The CLI waits for the Pod to start,
+then attaches:
+
+```text
+Started session 3f2b8c1e-… (codex) in cluster engineering.
+Waiting for session 3f2b8c1e to start in cluster engineering; Ctrl-C stops waiting and leaves it starting
+Attached to the agent's terminal; Ctrl-] detaches
+```
+
+`Ctrl-]` detaches and leaves the agent running. Attach again from any machine
+with the same context:
+
+```sh
+sproozi attach 3f2b8c1e --remote
+sproozi sessions
+```
+
+Stop it after the agent's current turn; the executor keeps the conversation
+and workspace:
+
+```sh
+sproozi stop 3f2b8c1e --remote
+```
+
+If the turn is still running, `stop` says it is waiting and keeps asking with
+the same operation until the session stops. Run `sproozi cancel 3f2b8c1e
+--remote` in another terminal to stop it at once instead, discarding that
+turn. If the agent exits by itself, the executor notices within about 15
+seconds and stops the session; `status --remote` then shows its exit.
+
+Continue it later in the cluster, with a new deadline and allowance:
+
+```sh
+sproozi resume 3f2b8c1e --remote
+```
+
+or bring it back to your laptop and continue there:
+
+```sh
+sproozi pull 3f2b8c1e
+sproozi resume 3f2b8c1e
+```
+
+A pull works as for a task (below): after it, this machine owns the session
+and the cluster reports it `pulled`. Every command for a cluster's session
+needs `--remote`, `--context` or `--namespace`; without one, the CLI looks
+only on this machine. The [command reference](../reference/session-commands.md#interactive-sessions-in-a-cluster)
+lists the messages and their fixes, and
+[remote executor access](../reference/remote-executors.md#interactive-sessions)
+describes what the executor does.
 
 ## Connect Hermes
 
@@ -378,8 +495,8 @@ Regenerate connection settings at each native launch. Registry configuration
 alone does not grant access. Each execution needs the named capability, matching
 tool and argument policy, an available budget and active run status. Restart the
 owning gateways to apply registry or credential changes; removing a grant must
-deny later calls. Codex sessions get the named servers; Claude Code sessions
-get none. No provider-specific
+deny later calls. Codex, Claude Code and Copilot sessions get the named
+servers. No provider-specific
 server code, catalogue, OAuth enrollment or stdio lifecycle is required for this
 HTTPS example.
 

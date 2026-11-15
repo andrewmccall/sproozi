@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"io"
 	"os"
 	"path/filepath"
@@ -17,19 +16,7 @@ import (
 
 func startIdleNative(t *testing.T) *nativepty.Supervisor {
 	t.Helper()
-	native, err := nativepty.Start(nativepty.Launch{Executable: "/bin/sh",
-		Args: []string{"-c", "while :; do sleep 1; done"},
-		Env:  []string{testPathEnvironment, "TERM=xterm"}, Dir: t.TempDir(),
-		Deadline: time.Now().Add(time.Minute), Size: nativepty.Size{Rows: 24, Columns: 80}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		_, _ = native.Stop(ctx)
-	})
-	return native
+	return startNative(t, "while :; do sleep 1; done", time.Now().Add(time.Minute))
 }
 
 func setTurnlessSettle(t *testing.T, d time.Duration) {
@@ -279,9 +266,9 @@ func TestClaudeResumedVisitWithoutPromptStopsAsRestored(t *testing.T) {
 func TestReportExitCarriesCodeOutputAndThread(t *testing.T) {
 	native := startIdleNative(t)
 	s := &server{native: native, threadID: selected, config: config{Harness: harness.NativeCodex}}
-	out := captureStdout(t, func() { s.reportExit(native, 2) })
+	out := captureStdout(t, func() { s.reportExit(native, harness.NativeExitSelf, 2) })
 	report, ok := harness.ParseNativeExitReport([]byte(out))
-	if !ok || report.Code != 2 || report.Thread != selected {
+	if !ok || report.Code != 2 || report.Cause != harness.NativeExitSelf || report.Thread != selected {
 		t.Fatalf("exit report %q: %+v %v", out, report, ok)
 	}
 }

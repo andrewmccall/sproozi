@@ -153,14 +153,8 @@ func recoverExpired(s *ledgerState, key AccountKey, now time.Time) (Recovered, e
 		if l.MaxCostMicros > 0 {
 			cost = min(cost, l.CostMicros)
 		}
-		if _, err := settleState(&s.State, r, TrustedUsage{Units: units, CostMicros: cost}); err != nil {
+		if _, err := s.settle(r, TrustedUsage{Units: units, CostMicros: cost}); err != nil {
 			return nil, err
-		}
-		if s.Pending != nil {
-			*s.Pending--
-			if r.unbounded() {
-				*s.Unbounded--
-			}
 		}
 		delete(s.Leases, id)
 		message := "Settled abandoned budget reservation"
@@ -234,7 +228,7 @@ func unleased(s ledgerState) (units, cost, count int64) {
 		units -= l.Units
 		cost -= l.CostMicros
 	}
-	if s.Pending != nil {
+	if s.phase(true) != accountLegacy {
 		count = *s.Pending - int64(len(s.Leases))
 	}
 	return units, cost, count
@@ -251,7 +245,7 @@ func settleUnleased(s *ledgerState, account string) Recovered {
 	s.ReservedCostMicros -= cost
 	s.UnitsUsed += units
 	s.CostMicros += cost
-	if s.Pending != nil {
+	if s.phase(true) != accountLegacy {
 		*s.Pending -= count
 		var leasedUnbounded int64
 		for _, l := range s.Leases {
@@ -276,8 +270,5 @@ func Settled(data string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	s := r.state
-	// A missing pending count means legacy history is unknown, not zero.
-	noPending := s.Pending != nil && *s.Pending == 0 && (s.Unbounded == nil || *s.Unbounded == 0)
-	return noPending && s.ReservedUnits == 0 && s.ReservedCostMicros == 0 && len(s.Leases) == 0, nil
+	return r.state.settled(), nil
 }

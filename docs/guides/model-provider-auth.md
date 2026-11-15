@@ -604,6 +604,12 @@ was above the call's own reservation:
   reserved))`, where `settled` is the run's usage already settled,
   `otherReserved` is what other pending calls still hold, and `reserved` is
   this call's reservation. Cost is capped the same way.
+- Once the account is sealed, which happens when a managed session's
+  execution ends, usage beyond the reservation is charged only the
+  reservation. The seal's
+  [finalized usage](../../GLOSSARY.md#finalized-usage) already counts every
+  pending reservation in full and never changes. The call is still
+  `exceeded`.
 
 `budget` is the budget in force when the call reserved. So settled usage
 never passes the run's budget, calls still in flight keep their reservations,
