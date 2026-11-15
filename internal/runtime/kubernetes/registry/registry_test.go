@@ -358,6 +358,22 @@ func TestExpiryAndCancellation(t *testing.T) {
 	}
 }
 
+// Activating a registration already active replays the recorded outcome, so
+// the deadline does not refuse it (ADR 0058).
+func TestActivationReplayAfterDeadline(t *testing.T) {
+	s, _ := registry(t, nil)
+	ctx := context.Background()
+	ref := prepared(t, s)
+	if _, err := s.Activate(ctx, ref); err != nil {
+		t.Fatal(err)
+	}
+	s.now = func() time.Time { return testNow.Add(time.Hour) }
+	r, err := s.Activate(ctx, ref)
+	if err != nil || r.Phase != Active {
+		t.Fatalf("activation replay after the deadline: %+v %v", r, err)
+	}
+}
+
 func TestCancelRacingActivationWinsCAS(t *testing.T) {
 	var s *Store
 	var ref Reference

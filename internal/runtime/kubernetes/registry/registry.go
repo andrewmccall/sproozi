@@ -276,11 +276,13 @@ func (s *Store) Prepared(ctx context.Context, ref Reference, podUID string) (Rec
 
 func (s *Store) Activate(ctx context.Context, ref Reference) (Record, error) {
 	return s.change(ctx, ref, func(r *stored) error {
-		if deadline.At(r.Registration.OriginalDeadline).Passed(s.now()) {
-			return ErrExpired
-		}
+		// A replay records an outcome that already happened, so the deadline
+		// does not refuse it (ADR 0058).
 		if r.Phase == Active {
 			return nil
+		}
+		if deadline.At(r.Registration.OriginalDeadline).Passed(s.now()) {
+			return ErrExpired
 		}
 		if r.Phase != Prepared {
 			return ErrConflict
