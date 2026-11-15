@@ -543,6 +543,11 @@ func TestRemoteFullExecutorNamesTheRemedy(t *testing.T) {
 	if code != 1 || !strings.Contains(errOut, "retainedBytes") || strings.Contains(errOut, "--operation") {
 		t.Fatalf("full resume: %d %s", code, errOut)
 	}
+	f.reply("resume", answerStatus(http.StatusInsufficientStorage, `{"error":"executions_full"}`))
+	code, _, errOut = runCLI("resume", remoteTestID, "--remote", "-d")
+	if code != 1 || !strings.Contains(errOut, "maximum number of executions") || strings.Contains(errOut, "--operation") {
+		t.Fatalf("resume at the execution cap: %d %s", code, errOut)
+	}
 }
 
 // rm --remote removes a cluster's session; a refusal says why in local rm's
@@ -579,6 +584,37 @@ func TestRemoteRemove(t *testing.T) {
 		}
 	}
 
+	// A task takes no stop: it is cancelled, or left to finish. A running task
+	// may show active or stopping.
+	for _, phase := range []string{phaseRunning, phaseStopping} {
+		task := interactiveView(phase)
+		task.Mode = ""
+		f.reply("remove", answerStatus(http.StatusConflict, `{"error":"conflict"}`))
+		f.reply("info", f.answerView(task))
+		want := `session ` + remoteTestID + ` is a task that is still running; wait for it to finish, or cancel it ` +
+			`with "sproozi cancel 4215d7d1 --remote", then remove it`
+		if code, _, errOut = runCLI("rm", remoteTestID, "--remote"); code != 1 || !strings.Contains(errOut, want) ||
+			strings.Contains(errOut, "sproozi stop") {
+			t.Errorf("rm of a %s task exited %d: %s", phase, code, errOut)
+		}
+	}
+
+	// A session another, unstarted one starts from names that one.
+	dependant := interactiveView(phaseStarting)
+	dependant.ID = "9b7c4a8e-1d2f-4c3b-8a6e-5f4d3c2b1a09"
+	dependant.WorkspaceFrom = &work.RevisionSource{SessionID: remoteTestID}
+	f.reply("remove", answerStatus(http.StatusConflict, `{"error":"conflict"}`))
+	f.reply("info", f.answerView(interactiveView(work.PhaseRetained)))
+	f.reply("list", func(w http.ResponseWriter) {
+		_ = json.NewEncoder(w).Encode([]work.View{interactiveView(work.PhaseRetained), dependant})
+	})
+	want := `session 9b7c4a8e-1d2f-4c3b-8a6e-5f4d3c2b1a09 starts from session ` + remoteTestID + ` and has not ` +
+		`started yet; wait for it to start, or cancel it with "sproozi cancel 9b7c4a8e --remote", then remove ` +
+		`session ` + remoteTestID
+	if code, _, errOut = runCLI("rm", remoteTestID, "--remote"); code != 1 || !strings.Contains(errOut, want) {
+		t.Errorf("rm of a session another starts from exited %d: %s", code, errOut)
+	}
+
 	f.reply("remove", answerStatus(http.StatusNotFound, "404 page not found"))
 	if code, _, errOut = runCLI("rm", remoteTestID, "--remote"); code != 1 ||
 		!strings.Contains(errOut, "older than remote rm") {
@@ -588,6 +624,63 @@ func TestRemoteRemove(t *testing.T) {
 	if code, _, errOut = runCLI("rm", remoteTestID, "--remote"); code != 1 ||
 		!strings.Contains(errOut, `run "sproozi rm 4215d7d1 --remote" again`) || strings.Contains(errOut, "--operation") {
 		t.Fatalf("lost rm: %d %s", code, errOut)
+	}
+}
+
+// A pulled session is removed from the cluster only when this machine's
+// service holds its pull as finished: the cluster then no longer answers a
+// repeated claim.
+func TestRemoteRemoveOfAPulledSessionNeedsThePullFinishedHere(t *testing.T) {
+	f := serveFakeExecutor(t, interactiveView(work.PhasePulled))
+	conflict := answerStatus(http.StatusConflict, `{"error":"conflict"}`)
+
+	f.reply("remove", conflict)
+	code, _, errOut := runCLI("rm", remoteTestID, "--remote", "--socket",
+		"/sproozi-missing-"+uuid.NewString()+".sock")
+	if code != 1 || !strings.Contains(errOut, "the Sproozi service on this machine is not running") ||
+		!strings.Contains(errOut, "sproozi service start") {
+		t.Fatalf("pulled, no service: %d %s", code, errOut)
+	}
+
+	for ownership, want := range map[string]string{
+		"": `this machine does not hold session ` + remoteTestID + `; run "sproozi rm 4215d7d1 --remote" on the ` +
+			`machine that pulled it`,
+		"source": `session ` + remoteTestID + ` is still being pulled to this machine; finish with "sproozi pull ` +
+			`4215d7d1", then remove it`,
+	} {
+		socket, _ := fakeService(t, func(home.Request) home.Response {
+			if ownership == "" {
+				return home.Response{Error: "no session", UnknownSession: true}
+			}
+			return home.Response{Status: &home.Status{ID: remoteTestID, Ownership: ownership}}
+		})
+		f.reply("remove", conflict)
+		if code, _, errOut = runCLI("rm", remoteTestID, "--remote", "--socket", socket); code != 1 ||
+			!strings.Contains(errOut, want) {
+			t.Errorf("pulled, local ownership %q: %d %s", ownership, code, errOut)
+		}
+	}
+	for _, c := range f.recorded("remove") {
+		if strings.Contains(string(c.body), "pullFinished") {
+			t.Fatalf("claimed a finished pull it does not hold: %s", c.body)
+		}
+	}
+
+	socket, requests := fakeService(t, func(home.Request) home.Response {
+		return home.Response{Status: &home.Status{ID: remoteTestID, Ownership: "home"}}
+	})
+	f.reply("remove", conflict)
+	f.reply("remove", answerStatus(http.StatusOK, `{"id":"`+remoteTestID+`"}`))
+	if code, out, errOut := runCLI("rm", remoteTestID, "--remote", "--socket", socket); code != 0 ||
+		!strings.Contains(out, "Deleted session "+remoteTestID) {
+		t.Fatalf("pulled and held here: %d %s %s", code, out, errOut)
+	}
+	removes := f.recorded("remove")
+	if last := removes[len(removes)-1]; string(last.body) != `{"id":"`+remoteTestID+`","pullFinished":true}` {
+		t.Fatalf("executor received %s", last.body)
+	}
+	if len(*requests) != 1 || (*requests)[0].Action != home.ActionStatus || (*requests)[0].ID != remoteTestID {
+		t.Fatalf("service received %+v", *requests)
 	}
 }
 

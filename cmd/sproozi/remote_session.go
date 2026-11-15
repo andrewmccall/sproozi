@@ -277,10 +277,29 @@ func (q *options) resumeRemote(ctx context.Context, target remoteTarget) error {
 // removeRemote deletes a cluster's stopped, cancelled or pulled session and
 // everything its executor keeps for it. Removing again is safe: the executor
 // answers that a removed session is removed.
+//
+// The executor removes a pulled session only when the request says this
+// machine holds its pull as finished, which it says only after
+// pullFinishedHere checked this machine's service: once removed, the cluster
+// can no longer answer a claim the service repeats.
 func (q *options) removeRemote(ctx context.Context, target remoteTarget) error {
-	removal, err := target.Client.Remove(ctx, q.id)
+	removal, err := target.Client.Remove(ctx, q.id, false)
+	var remote *profile.RemoteError
+	if errors.As(err, &remote) && remote.Code == profile.CodeConflict {
+		v, infoErr := target.Client.Info(ctx, q.id)
+		switch {
+		case infoErr != nil:
+			return err
+		case v.Phase != work.PhasePulled:
+			return q.removalConflict(ctx, target, v, err)
+		}
+		if err = q.pullFinishedHere(ctx, v.ID); err != nil {
+			return err
+		}
+		removal, err = target.Client.Remove(ctx, q.id, true)
+	}
 	if err != nil {
-		return q.removeError(ctx, target, err)
+		return q.removeError(target, err)
 	}
 	if q.json {
 		return writeJSON(q.out, removal)
@@ -289,9 +308,45 @@ func (q *options) removeRemote(ctx context.Context, target remoteTarget) error {
 	return err
 }
 
-// removeError explains a refused removal in local rm's words, with the
-// commands that reach the cluster.
-func (q *options) removeError(ctx context.Context, target remoteTarget, err error) error {
+// pullFinishedHere checks that this machine's service holds session id as
+// pulled, its claim recorded, and says what to do when it does not.
+func (q *options) pullFinishedHere(ctx context.Context, id string) error {
+	callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	response, err := home.Call(callCtx, q.socket, home.Request{Action: home.ActionStatus, ID: id})
+	switch {
+	case errors.Is(err, home.ErrControlUnavailable):
+		return fmt.Errorf("session %s was pulled from the cluster, and the Sproozi service on this machine is not "+
+			"running, so this command cannot check that the pull finished here; start it with \"sproozi service "+
+			"start\", then run \"%s\" again", id, q.remoteCommand(cmdRemove, id))
+	case errors.Is(err, home.ErrUnknownSession):
+		return fmt.Errorf("session %s was pulled from the cluster, but this machine does not hold session %s; "+
+			"run \"%s\" on the machine that pulled it, once \"sproozi pull %s\" there reported it pulled", id, id,
+			q.remoteCommand(cmdRemove, id), shortID(id))
+	case err != nil:
+		return err
+	case response.Status == nil || response.Status.Ownership != "home":
+		return fmt.Errorf("session %s is still being pulled to this machine; finish with \"sproozi pull %s\", "+
+			"then remove it", id, shortID(id))
+	}
+	return nil
+}
+
+// removalConflict explains a removal the executor refused for the session's
+// state v, in local rm's words, with the commands that reach the cluster.
+func (q *options) removalConflict(ctx context.Context, target remoteTarget, v work.View, err error) error {
+	if problem := q.removalProblem(v); problem != nil {
+		return problem
+	}
+	if problem := q.dependantProblem(ctx, target, v.ID); problem != nil {
+		return problem
+	}
+	return err
+}
+
+// removeError explains a removal that failed for another reason than the
+// session's state.
+func (q *options) removeError(target remoteTarget, err error) error {
 	var remote *profile.RemoteError
 	if !errors.As(err, &remote) {
 		return err
@@ -300,12 +355,6 @@ func (q *options) removeError(ctx context.Context, target remoteTarget, err erro
 	case remote.Code == profile.CodeUnavailable && remote.Status == http.StatusNotFound:
 		return fmt.Errorf("the cluster's remote executor %s is older than remote rm; update the executor "+
 			"(docs/reference/remote-executors.md)", target.Name)
-	case remote.Code == profile.CodeConflict:
-		if v, infoErr := target.Client.Info(ctx, q.id); infoErr == nil {
-			if problem := q.removalProblem(v); problem != nil {
-				return problem
-			}
-		}
 	case remote.Code == profile.CodeUnavailable:
 		return fmt.Errorf("%w; the outcome is unknown: run \"%s\" again", err, q.remoteCommand(cmdRemove, q.id))
 	}
@@ -313,7 +362,9 @@ func (q *options) removeError(ctx context.Context, target remoteTarget, err erro
 }
 
 // removalProblem says why a cluster's session cannot be removed in its
-// phase, or nil when its phase allows it.
+// phase, or nil when its phase allows it. A task takes no stop, so a running
+// one is cancelled or left to finish; while it runs its phase may read active
+// or stopping.
 func (q *options) removalProblem(v work.View) error {
 	switch v.Phase {
 	case work.PhaseRetained, work.PhaseFailed, work.PhasePulled, work.Phase(phaseCancelled):
@@ -322,9 +373,29 @@ func (q *options) removalProblem(v work.View) error {
 		return fmt.Errorf("session %s is still being pulled; finish with \"%s\" before removing it", v.ID,
 			q.pullCommand(v.ID))
 	}
+	if v.Mode != work.ModeInteractive && (string(v.Phase) == phaseRunning || string(v.Phase) == phaseStopping) {
+		return fmt.Errorf("session %s is a task that is still running; wait for it to finish, or cancel it with "+
+			"\"%s\", then remove it", v.ID, q.remoteCommand(cmdCancel, v.ID))
+	}
 	return errors.New(session.RemovalRefusal(v.ID, session.Phase(v.Phase), func(name string) string {
 		return q.remoteCommand(name, v.ID)
 	}))
+}
+
+// dependantProblem names a session that starts from id and has not started
+// yet: the executor keeps id until it has.
+func (q *options) dependantProblem(ctx context.Context, target remoteTarget, id string) error {
+	views, err := target.Client.List(ctx, work.SessionQuery{})
+	if err != nil {
+		return nil
+	}
+	for _, v := range views {
+		if v.WorkspaceFrom != nil && v.WorkspaceFrom.SessionID == id && string(v.Phase) == phaseStarting {
+			return fmt.Errorf("session %s starts from session %s and has not started yet; wait for it to start, "+
+				"or cancel it with \"%s\", then remove session %s", v.ID, id, q.remoteCommand(cmdCancel, v.ID), id)
+		}
+	}
+	return nil
 }
 
 // remoteActionError explains a refused attach, stop or resume: an executor

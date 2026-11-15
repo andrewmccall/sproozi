@@ -7,8 +7,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/andrewmccall/sproozi/internal/session/profile"
 	"github.com/google/uuid"
@@ -40,7 +42,7 @@ func TestRemoveRefusesSessionsThatAreNotSafelyRemovable(t *testing.T) {
 		if v, err := o.Info(t.Context(), id); err != nil || v.Phase != phase {
 			t.Fatalf("set-up phase %s: %+v %v", phase, v, err)
 		}
-		if _, err := o.Remove(t.Context(), id); code(err) != profile.CodeConflict {
+		if _, err := o.Remove(t.Context(), id, false); code(err) != profile.CodeConflict {
 			t.Fatalf("removed a session that is %s: %v", phase, err)
 		}
 		if v, err := o.Info(t.Context(), id); err != nil || v.Phase != phase {
@@ -118,15 +120,15 @@ func TestRemoveFreesCapacityAndIsReplaySafe(t *testing.T) {
 		t.Fatalf("submission beyond retainedBytes: %v", err)
 	}
 
-	removed, err := o.Remove(t.Context(), v.ID)
+	removed, err := o.Remove(t.Context(), v.ID, false)
 	if err != nil || removed.ID != v.ID {
 		t.Fatalf("remove a retained task: %+v %v", removed, err)
 	}
 	assertRemoved(t, c, o, v.ID, v.ExecutionID)
-	if again, err := o.Remove(t.Context(), v.ID); err != nil || again.ID != v.ID {
+	if again, err := o.Remove(t.Context(), v.ID, false); err != nil || again.ID != v.ID {
 		t.Fatalf("repeated removal: %+v %v", again, err)
 	}
-	if _, err = o.Remove(t.Context(), uuid.NewString()); code(err) != profile.CodeInvalid {
+	if _, err = o.Remove(t.Context(), uuid.NewString(), false); code(err) != profile.CodeInvalid {
 		t.Fatalf("removed a session that never existed: %v", err)
 	}
 	if _, err = o.Submit(t.Context(), first); code(err) != profile.CodeConflict {
@@ -145,10 +147,165 @@ func TestRemoveFreesCapacityAndIsReplaySafe(t *testing.T) {
 	if err = os.Remove(o.path(next.ID, ".json")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = o.Remove(t.Context(), next.ID); err != nil {
+	if _, err = o.Remove(t.Context(), next.ID, false); err != nil {
 		t.Fatalf("repeat an interrupted removal: %v", err)
 	}
 	assertRemoved(t, c, o, next.ID, next.ExecutionID)
+}
+
+// A settled session is removed promptly while another session's stop waits
+// for its agent's turn, and the room it frees admits a submission the
+// executor refused as full.
+func TestRemoveWhileAnotherSessionsStopWaits(t *testing.T) {
+	t.Parallel()
+	c, p := fixture(t)
+	o := openOwner(t, c)
+	done := submit(t, o)
+	waitPhase(t, o, done.ID, phaseRetained)
+	release := make(chan struct{})
+	p.mu.Lock()
+	p.heldStop, p.stopStarted = release, make(chan struct{})
+	started := p.stopStarted
+	p.mu.Unlock()
+	defer close(release)
+	running := submit(t, o)
+	<-started
+
+	// Room for everything but the last byte of the running session's and the
+	// new submission's reservations: removing anything makes room.
+	o.config.RetainedBytes = keptBytes(t, c) + 3*c.MaxCheckpointBytes - 1
+	refused := taskRequest()
+	if _, err := o.Submit(t.Context(), refused); code(err) != profile.CodeRetentionFull {
+		t.Fatalf("submission to a full executor: %v", err)
+	}
+	began := time.Now()
+	if _, err := o.Remove(t.Context(), done.ID, false); err != nil {
+		t.Fatalf("remove while another session stops: %v", err)
+	}
+	if waited := time.Since(began); waited > 2*time.Second {
+		t.Fatalf("removal waited %s for another session's stop", waited)
+	}
+	assertRemoved(t, c, o, done.ID, done.ExecutionID)
+	if _, err := o.Submit(t.Context(), refused); err != nil {
+		t.Fatalf("submission after removal while another session stops: %v", err)
+	}
+	if v, err := o.Info(t.Context(), running.ID); err != nil || v.Phase != phaseStopping {
+		t.Fatalf("the waiting stop was disturbed: %+v %v", v, err)
+	}
+}
+
+// A session another, unstarted session starts from is kept until that one
+// has started or is cancelled: its start reads the first's checkpoint.
+func TestRemoveRefusesTheSourceOfAnUnstartedSession(t *testing.T) {
+	t.Parallel()
+	c, _ := projectFixture(t)
+	o := openOwner(t, c)
+	v, err := o.Submit(t.Context(), projectRequest("sproozi-dev"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := waitPhase(t, o, v.ID, phaseRetained)
+	// No driver starts what is submitted from here on.
+	o.stopAll()
+	q := projectRequest("sproozi-dev")
+	q.WorkspaceFrom = &RevisionSource{SessionID: source.ID, Digest: source.CheckpointDigest,
+		Revision: source.CheckpointInfo.Workspace.Revision}
+	fresh, err := o.Submit(t.Context(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = o.Remove(t.Context(), source.ID, false); code(err) != profile.CodeConflict {
+		t.Fatalf("removed the source of an unstarted session: %v", err)
+	}
+	if _, err = o.Info(t.Context(), source.ID); err != nil {
+		t.Fatalf("a refused removal removed the source: %v", err)
+	}
+	if _, err = o.Cancel(t.Context(), fresh.ID, uuid.NewString()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = o.Remove(t.Context(), source.ID, false); err != nil {
+		t.Fatalf("remove the source of a cancelled session: %v", err)
+	}
+	// A submission naming a removed session as its start is refused.
+	q.RequestID = uuid.NewString()
+	if _, err = o.Submit(t.Context(), q); code(err) != profile.CodeInvalid {
+		t.Fatalf("submission from a removed session: %v", err)
+	}
+}
+
+// A finished removal leaves only a small mark, with no executions.
+func TestRemoveLeavesASmallMark(t *testing.T) {
+	t.Parallel()
+	c, _ := fixture(t)
+	o := openOwner(t, c)
+	v := submit(t, o)
+	waitPhase(t, o, v.ID, phaseRetained)
+	if _, err := o.Remove(t.Context(), v.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	mark, marked, err := o.readRemoved(v.ID)
+	if err != nil || !marked || len(mark.Executions) != 0 {
+		t.Fatalf("mark after a finished removal: %+v %v %v", mark, marked, err)
+	}
+	if info, err := os.Stat(o.path(v.ID, removedSuffix)); err != nil || info.Size() > 128 {
+		t.Fatalf("mark size: %v %v", info, err)
+	}
+}
+
+// The executor finishes a removal a crash interrupted before it starts any
+// session, whichever of the record and the journals are left: it never
+// starts the removed session again, and nothing it kept stays.
+func TestOpenFinishesInterruptedRemovals(t *testing.T) {
+	t.Parallel()
+	for _, left := range []string{"record and journals", "journals", "record"} {
+		t.Run(left, func(t *testing.T) {
+			t.Parallel()
+			c, p := fixture(t)
+			o, err := Open(c)
+			if err != nil {
+				t.Fatal(err)
+			}
+			v := submit(t, o)
+			waitPhase(t, o, v.ID, phaseRetained)
+			if err = o.markRemoved(removedMark{ID: v.ID, Executions: []string{v.ExecutionID}}); err != nil {
+				t.Fatal(err)
+			}
+			if err = o.Close(); err != nil {
+				t.Fatal(err)
+			}
+			journal := filepath.Join(filepath.Dir(c.Directory), "sessions", v.ExecutionID+".json")
+			if !strings.Contains(left, "record") {
+				if err = os.Remove(o.path(v.ID, ".json")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if !strings.Contains(left, "journals") {
+				if err = os.Remove(journal); err != nil {
+					t.Fatal(err)
+				}
+			}
+			p.mu.Lock()
+			started := p.initial
+			p.mu.Unlock()
+			o = openOwner(t, c)
+			if _, err = os.Lstat(journal); !os.IsNotExist(err) {
+				t.Fatalf("journal kept after reopening: %v", err)
+			}
+			assertRemoved(t, c, o, v.ID, v.ExecutionID)
+			if mark, marked, err := o.readRemoved(v.ID); err != nil || !marked || len(mark.Executions) != 0 {
+				t.Fatalf("mark after reopening: %+v %v %v", mark, marked, err)
+			}
+			if listed, err := o.List(t.Context(), SessionQuery{}); err != nil || len(listed) != 0 {
+				t.Fatalf("listed after reopening: %+v %v", listed, err)
+			}
+			time.Sleep(50 * time.Millisecond)
+			p.mu.Lock()
+			defer p.mu.Unlock()
+			if p.initial != started {
+				t.Fatal("reopening started a removed session again")
+			}
+		})
+	}
 }
 
 // Every execution of an interactive session goes, and a cancelled session
@@ -170,7 +327,7 @@ func TestRemoveDeletesEveryExecutionAndAcceptsCancelledAndPulled(t *testing.T) {
 	if _, err = o.Stop(t.Context(), v.ID, uuid.NewString()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = o.Remove(t.Context(), v.ID); err != nil {
+	if _, err = o.Remove(t.Context(), v.ID, false); err != nil {
 		t.Fatal(err)
 	}
 	assertRemoved(t, c, o, v.ID, v.ExecutionID, resumed.ExecutionID)
@@ -180,7 +337,7 @@ func TestRemoveDeletesEveryExecutionAndAcceptsCancelledAndPulled(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitPhase(t, o, cancelled.ID, phaseCancelled)
-	if _, err = o.Remove(t.Context(), cancelled.ID); err != nil {
+	if _, err = o.Remove(t.Context(), cancelled.ID, false); err != nil {
 		t.Fatal(err)
 	}
 	assertRemoved(t, c, o, cancelled.ID, cancelled.ExecutionID)
@@ -194,7 +351,12 @@ func TestRemoveDeletesEveryExecutionAndAcceptsCancelledAndPulled(t *testing.T) {
 	if _, err = o.Claim(t.Context(), pulled.ID, op, p.meta.SHA256); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = o.Remove(t.Context(), pulled.ID); err != nil {
+	// A pulled session goes only for a caller whose machine holds the pull
+	// as finished: the executor no longer answers a repeated claim.
+	if _, err = o.Remove(t.Context(), pulled.ID, false); code(err) != profile.CodeConflict {
+		t.Fatalf("removed a pulled session for a caller that does not hold the pull: %v", err)
+	}
+	if _, err = o.Remove(t.Context(), pulled.ID, true); err != nil {
 		t.Fatal(err)
 	}
 	assertRemoved(t, c, o, pulled.ID, pulled.ExecutionID)
@@ -225,12 +387,12 @@ func TestRemoveVersionOneRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 	exporting := writeLegacy(t, c, o, legacyExporting, export)
-	if _, err = o.Remove(t.Context(), exporting); code(err) != profile.CodeConflict {
+	if _, err = o.Remove(t.Context(), exporting, false); code(err) != profile.CodeConflict {
 		t.Fatalf("removed a version 1 record being pulled: %v", err)
 	}
 	for _, phase := range []legacyPhase{legacyRetained, legacyCancelled, legacyPulled} {
 		id := writeLegacy(t, c, o, phase, export)
-		if _, err = o.Remove(t.Context(), id); err != nil {
+		if _, err = o.Remove(t.Context(), id, phase == legacyPulled); err != nil {
 			t.Fatalf("remove a %s version 1 record: %v", phase, err)
 		}
 		assertRemoved(t, c, o, id)

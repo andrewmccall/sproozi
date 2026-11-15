@@ -419,6 +419,14 @@ func executionProblem(rec session.Record, interactive bool) string {
 // and journals are bounded metadata and are not reserved; a kept upload is
 // counted twice, as kept and as its session's reserved input.
 //
+// Two things sit outside the bound. A removed session's mark is not counted
+// (see removedSuffix). Scratch space is not reserved: an upload's
+// validation before admission, and a driver's capture of a revision or an
+// empty workspace after it, each write up to MaxCheckpointBytes under the
+// catalogue's directory and delete it when done. While it exists a
+// concurrent admission counts it as kept, which only refuses work sooner,
+// but the volume may briefly hold that much beyond RetainedBytes.
+//
 // The catalogue's count, maxSessions, bounds records; a resume adds none.
 func (o *Owner) admitRetention(newSession bool) error {
 	ids, err := o.ids()

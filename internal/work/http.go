@@ -251,6 +251,12 @@ func (h *ownerHandler) serveJSON(w http.ResponseWriter, r *http.Request, action 
 		if e == nil {
 			out, e = h.owner.Resume(r.Context(), q.ID, q.OperationID, q.MaxDuration)
 		}
+	case actionRemove:
+		var q removal
+		e = decodeInput(b, &q)
+		if e == nil {
+			out, e = h.owner.Remove(r.Context(), q.ID, q.PullFinished)
+		}
 	default:
 		var q reference
 		e = decodeInput(b, &q)
@@ -268,8 +274,6 @@ func (h *ownerHandler) serveJSON(w http.ResponseWriter, r *http.Request, action 
 				out, e = h.owner.Stop(r.Context(), q.ID, q.OperationID)
 			case "recover":
 				out, e = h.owner.Recover(r.Context(), q.ID)
-			case actionRemove:
-				out, e = h.owner.Remove(r.Context(), q.ID)
 			default:
 				http.NotFound(w, r)
 				return
@@ -350,8 +354,12 @@ func (c *Client) Resume(ctx context.Context, id, op, maxDuration string) (v View
 	e = c.transport.CallOwner(ctx, "resume", resumption{ID: id, OperationID: op, MaxDuration: maxDuration}, &v)
 	return
 }
-func (c *Client) Remove(ctx context.Context, id string) (v Removal, e error) {
-	e = c.transport.CallOwner(ctx, actionRemove, reference{ID: id}, &v)
+
+// Remove removes a session. pullFinished states that this machine holds the
+// session's pull as finished; only then does the executor remove a pulled
+// session.
+func (c *Client) Remove(ctx context.Context, id string, pullFinished bool) (v Removal, e error) {
+	e = c.transport.CallOwner(ctx, actionRemove, removal{ID: id, PullFinished: pullFinished}, &v)
 	return
 }
 
