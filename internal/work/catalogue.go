@@ -395,22 +395,41 @@ func executionProblem(rec session.Record, interactive bool) string {
 	return ""
 }
 
-// admitRetention refuses a new session once the catalogue holds maxSessions
-// records, or once what is retained, plus one checkpoint for every unsettled
-// session and for the new one, would exceed RetainedBytes.
-func (o *Owner) admitRetention() error {
+// admitRetention admits a new session (newSession) or a new execution of a
+// kept one under the retention invariant; the caller holds o.retention until
+// it has saved what it admits.
+//
+// The invariant: RetainedBytes bounds what the executor keeps under work/
+// and sessions/ (ADR 0057). Only admission checks it, and admission reserves
+// everything the admitted execution may still come to keep, at most
+// MaxCheckpointBytes each: the input workspace the coordinator retains when
+// it starts (a submission's snapshot, revision or upload) and the checkpoint
+// its stop commits. A resume's input is the session's own kept checkpoint or
+// workspace, which the coordinator keeps once by digest, so it reserves only
+// its checkpoint. An admission is refused unless what is kept now, plus the
+// reservation of every admitted execution that may still add to it, plus the
+// new one's, fits. A stop, a checkpoint commit, a cancellation and a task's
+// tail write only what was reserved and never check the bound: refusing them
+// would lose work. A session stops reserving once it is settled, so an
+// interactive session reserves its checkpoint for as long as it runs. Records
+// and journals are bounded metadata and are not reserved; a kept upload is
+// counted twice, as kept and as its session's reserved input.
+//
+// The catalogue's count, maxSessions, bounds records; a resume adds none.
+func (o *Owner) admitRetention(newSession bool) error {
 	ids, err := o.ids()
 	if err != nil {
 		return err
 	}
-	if len(ids) >= maxSessions {
-		return &profile.Rejection{Code: profile.CodeUnavailable}
+	if newSession && len(ids) >= maxSessions {
+		return &profile.Rejection{Code: profile.CodeSessionsFull}
 	}
 	reserved := int64(1)
+	if newSession {
+		reserved = 2
+	}
 	for _, id := range ids {
-		if v, err := o.info(id); err == nil && !v.Phase.Settled() {
-			reserved++
-		}
+		reserved += o.reserved(id)
 	}
 	_, coordinated, err := o.config.Coordinator.Retained()
 	if err != nil {
@@ -431,9 +450,28 @@ func (o *Owner) admitRetention() error {
 		return err
 	}
 	if coordinated+own+reserved*o.config.MaxCheckpointBytes > o.config.RetainedBytes {
-		return &profile.Rejection{Code: profile.CodeUnavailable}
+		return &profile.Rejection{Code: profile.CodeRetentionFull}
 	}
 	return nil
+}
+
+// reserved is how many checkpoint-sized reservations session id holds: one
+// for the checkpoint an unsettled session may still commit, and one more for
+// the input the coordinator has not retained yet. A settled session, a
+// version 1 record and a record that cannot be read hold none.
+func (o *Owner) reserved(id string) int64 {
+	e, err := o.entry(id)
+	if err != nil || e.legacy != nil {
+		return 0
+	}
+	rec, err := o.execution(*e.current)
+	if err != nil || derivePhase(*e.current, rec).Settled() {
+		return 0
+	}
+	if rec == nil {
+		return 2
+	}
+	return 1
 }
 
 // lastExit is the exit of the execution's last stopped visit, if its harness

@@ -53,6 +53,12 @@ const (
 	// changed, the writer runs with input gated and repeating the stop waits
 	// again. Only a stop answers with it, together with what it waits for.
 	CodeTurnPending Code = "turn_pending"
+	// CodeSessionsFull and CodeRetentionFull are a remote executor's owner
+	// refusing to start or resume work because it keeps as many sessions,
+	// or as many bytes, as it may. Nothing changed; removing sessions or
+	// raising the bound makes room. Only the owner protocol uses them.
+	CodeSessionsFull  Code = "sessions_full"
+	CodeRetentionFull Code = "retention_full"
 )
 
 // waitingMax bounds what a turn_pending answer says the stop waits for.

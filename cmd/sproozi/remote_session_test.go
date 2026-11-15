@@ -523,6 +523,28 @@ func TestRemoteTaskRefusesInteractiveActions(t *testing.T) {
 	}
 }
 
+// A full executor's refusal says what is full and how to make room; nothing
+// started, so it names no operation to repeat.
+func TestRemoteFullExecutorNamesTheRemedy(t *testing.T) {
+	f := serveFakeExecutor(t, interactiveView(work.PhaseRetained))
+	f.reply("run", answerStatus(http.StatusInsufficientStorage, `{"error":"retention_full"}`))
+	code, _, errOut := runCLI("run", "--remote", "--repository", "sproozi", "--task", "fix it")
+	if code != 1 || !strings.Contains(errOut, "retainedBytes") || !strings.Contains(errOut, "sproozi rm ID --remote") ||
+		strings.Contains(errOut, "--operation") || strings.Contains(errOut, "unavailable") {
+		t.Fatalf("full run: %d %s", code, errOut)
+	}
+	f.reply("run", answerStatus(http.StatusInsufficientStorage, `{"error":"sessions_full"}`))
+	code, _, errOut = runCLI("run", "--remote", "--repository", "sproozi", "-d")
+	if code != 1 || !strings.Contains(errOut, "maximum number of sessions") || strings.Contains(errOut, "--operation") {
+		t.Fatalf("full interactive run: %d %s", code, errOut)
+	}
+	f.reply("resume", answerStatus(http.StatusInsufficientStorage, `{"error":"retention_full"}`))
+	code, _, errOut = runCLI("resume", remoteTestID, "--remote", "-d")
+	if code != 1 || !strings.Contains(errOut, "retainedBytes") || strings.Contains(errOut, "--operation") {
+		t.Fatalf("full resume: %d %s", code, errOut)
+	}
+}
+
 // A remote status names an interactive session and its agent's failed exit.
 func TestRemoteStatusShowsModeAndExit(t *testing.T) {
 	failed := interactiveView(work.PhaseFailed)

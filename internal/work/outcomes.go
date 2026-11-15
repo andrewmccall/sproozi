@@ -43,6 +43,8 @@ func outcomeStatus(code profile.Code) int {
 		return http.StatusGone
 	case profile.CodeUnsupported:
 		return http.StatusUnprocessableEntity
+	case profile.CodeSessionsFull, profile.CodeRetentionFull:
+		return http.StatusInsufficientStorage
 	default:
 		return http.StatusServiceUnavailable
 	}

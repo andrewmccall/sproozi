@@ -365,7 +365,7 @@ func (o *Owner) SubmitAs(ctx context.Context, caller Caller, q Submit) (View, er
 	}
 	o.retention.Lock()
 	defer o.retention.Unlock()
-	if err = o.admitRetention(); err != nil {
+	if err = o.admitRetention(true); err != nil {
 		return View{}, err
 	}
 	if len(upload) > 0 {

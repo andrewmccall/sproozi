@@ -26,6 +26,10 @@ func TestOwnerClientPreservesSafeOutcomes(t *testing.T) {
 		{503, `{"error":"unavailable"}`, CodeUnavailable},
 		{502, "upstream-private-secret", CodeUnavailable},
 		{409, `{"error":"unavailable"}`, CodeUnavailable},
+		{507, `{"error":"sessions_full"}`, CodeSessionsFull},
+		{507, `{"error":"retention_full"}`, CodeRetentionFull},
+		{503, `{"error":"retention_full"}`, CodeUnavailable},
+		{507, `{"error":"turn_pending"}`, CodeUnavailable},
 	} {
 		c := Client{base: "https://owner.invalid", maxBody: 1024, http: &http.Client{Transport: ownerRoundTripper(func(*http.Request) (*http.Response, error) {
 			return &http.Response{StatusCode: tc.status, Body: io.NopCloser(strings.NewReader(tc.body))}, nil

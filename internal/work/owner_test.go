@@ -747,7 +747,7 @@ func TestSubmissionRespectsRetainedBytes(t *testing.T) {
 	defer close(release)
 	submit(t, o)
 	if _, err = o.Submit(t.Context(), Submit{RequestID: uuid.NewString(), Repository: repositorySproozi,
-		Harness: harness.NativeCodex, Executor: executorKubernetes, Task: fixtureTask}); OutcomeCode(err) != profile.CodeUnavailable {
+		Harness: harness.NativeCodex, Executor: executorKubernetes, Task: fixtureTask}); OutcomeCode(err) != profile.CodeRetentionFull {
 		t.Fatalf("second submission beyond retainedBytes: %v", err)
 	}
 	c.RetainedBytes = c.MaxCheckpointBytes

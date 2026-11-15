@@ -16,7 +16,7 @@ import (
 // remote work catalogue. It cannot select a different origin or arbitrary path.
 func (c *Client) CallOwner(ctx context.Context, action string, input, output any) error {
 	switch action {
-	case "run", "info", "list", "begin", "claim", "cancel", "recover", "stop", "resume":
+	case "run", "info", "list", "begin", "claim", "cancel", "recover", "stop", "resume", "remove":
 	default:
 		return errors.New("profile: unsupported owner action")
 	}
@@ -154,13 +154,24 @@ func OwnerOutcomeMessage(code Code) string {
 		return "Work execution expired; inspect retained status before submitting fresh work"
 	case CodeUnsupported:
 		return "Work continuity is incompatible; check harness support and the retained checkpoint before retrying"
+	case CodeSessionsFull:
+		return "Remote executor full: it keeps its maximum number of sessions; remove sessions you no longer need " +
+			"with \"sproozi rm ID --remote\", then retry"
+	case CodeRetentionFull:
+		return "Remote executor full: its kept sessions, plus room for a checkpoint of each running session and of " +
+			"this one, would exceed its retainedBytes; remove sessions you no longer need with " +
+			"\"sproozi rm ID --remote\", stop running ones, or raise retainedBytes, then retry"
 	default:
 		return "Work owner unavailable; restore connectivity or owner storage, then inspect status and retry with the same operation UUID"
 	}
 }
 
 // ownerErrorStatus accepts a work outcome; turn_pending is a placement stop's
-// answer only, so the owner never uses it.
+// answer only, so the owner never uses it, and only the owner answers that
+// it is full.
 func ownerErrorStatus(code Code, status int) bool {
+	if code == CodeSessionsFull || code == CodeRetentionFull {
+		return status == http.StatusInsufficientStorage
+	}
 	return code != CodeTurnPending && errorResponse(response{Error: code}, status)
 }

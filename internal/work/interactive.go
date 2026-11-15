@@ -214,6 +214,14 @@ func (o *Owner) resumedExecution(r record, last session.Record, operation, choic
 	} else if !os.IsNotExist(err) {
 		return session.Record{}, err
 	}
+	// A new execution will commit another checkpoint: admit it as a
+	// submission is admitted (admitRetention). An adopted one above was
+	// admitted before it was created.
+	o.retention.Lock()
+	defer o.retention.Unlock()
+	if err := o.admitRetention(false); err != nil {
+		return session.Record{}, err
+	}
 	_, until, err := o.taskDeadline(CallerHome, choice, time.Now())
 	if err != nil {
 		return session.Record{}, err

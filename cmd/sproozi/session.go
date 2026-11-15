@@ -452,6 +452,9 @@ func (q *options) submitError(err error, target remoteTarget, kind harness.Nativ
 	var remote *profile.RemoteError
 	if errors.As(err, &remote) {
 		switch {
+		case remote.Code == profile.CodeSessionsFull || remote.Code == profile.CodeRetentionFull:
+			// Refused, and the message names the remedy: nothing to repeat.
+			return err
 		case q.maxDuration != "" && remote.Code == profile.CodeDenied:
 			return fmt.Errorf("%w: the cluster's maxDuration may not allow --max-duration %s; try a shorter "+
 				"duration, or leave it out for the cluster's limit", err, q.maxDuration)
