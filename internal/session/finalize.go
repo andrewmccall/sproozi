@@ -45,7 +45,15 @@ func (c *Coordinator) Finalize(ctx context.Context, id, operationID string) (Rec
 		if last := len(r.Operations) - 1; r.Operations[last].Finalize {
 			return c.drive(ctx, r, last)
 		}
-		return r, pendingRecovery(r)
+		// A move or first visit the deadline ended no longer blocks a stop:
+		// it ends first, and the stop then has an idle execution, or the
+		// destination that did become active, to finalize (ADR 0060).
+		if r, err = c.settleLate(ctx, r); err != nil && !errors.Is(err, ErrDeadlinePassed) {
+			return r, err
+		}
+		if r.PendingOperation != "" {
+			return r, pendingRecovery(r)
+		}
 	}
 	for _, visit := range r.Visits {
 		if visit.Launch.OperationID == operationID {

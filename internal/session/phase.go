@@ -106,7 +106,12 @@ const (
 	evActivated event = "activated"
 	// evFinalized: a finalization's stop committed; nothing starts.
 	evFinalized event = "finalized"
-	// evCancel retains cancellation intent.
+	// evAbandoned: the deadline passed before a move's or a first visit's
+	// destination became active, and no writer exists or can come to exist
+	// there. The operation ends without a new visit; the execution keeps its
+	// last checkpoint (ADR 0060).
+	evAbandoned event = "abandoned"
+	// evCancelretains cancellation intent.
 	evCancel event = "cancel"
 	// evCancelUnsettled retains cancellation intent only while something can
 	// still run or settle: an idle execution already stopped, and an owner
@@ -145,6 +150,7 @@ var transitions = map[event]rule{
 	evPrepared:  {refusedAfterDeadline: true, to: map[Phase]Phase{PhasePreparing: PhaseActivating}},
 	evActivated: {refusedAfterDeadline: true, to: map[Phase]Phase{PhaseActivating: PhaseActive}},
 	evFinalized: {to: map[Phase]Phase{PhasePreparing: PhaseIdle}},
+	evAbandoned: {to: map[Phase]Phase{PhasePreparing: PhaseIdle, PhaseActivating: PhaseIdle}},
 	evCancel: {to: map[Phase]Phase{
 		PhaseIdle: PhaseCancelled, PhasePreparing: PhaseCancelling, PhaseActivating: PhaseCancelling,
 		PhaseActive: PhaseCancelling, PhaseStopping: PhaseCancelling, PhaseUnknownStop: PhaseCancelling,
@@ -157,6 +163,10 @@ var transitions = map[event]rule{
 		PhaseCancelling: PhaseCancelled, PhaseUnknownStop: PhaseCancelled, PhaseUnknownUsage: PhaseCancelled}},
 }
 
+// errExpired is admit's refusal of an event that would start work after the
+// execution's deadline.
+var errExpired = errors.New("session: original deadline expired")
+
 // admit checks, before the coordinator attempts ev's side effect, that ev may
 // happen in r's phase and, for an event that starts work, that the
 // execution's deadline has not passed.
@@ -164,10 +174,17 @@ func (c *Coordinator) admit(r Record, ev event) error {
 	if _, ok := transitions[ev].to[r.Phase]; !ok {
 		return refused(r.Phase, ev)
 	}
-	if transitions[ev].refusedAfterDeadline && deadline.At(r.Deadline).Passed(c.now()) {
-		return errors.New("session: original deadline expired")
+	if transitions[ev].refusedAfterDeadline && c.PastDeadline(r) {
+		return errExpired
 	}
 	return nil
+}
+
+// PastDeadline reports that r's deadline has passed on the coordinator's
+// clock, so it starts no more work. An execution without a deadline never
+// passes it (ADR 0056).
+func (c *Coordinator) PastDeadline(r Record) bool {
+	return deadline.At(r.Deadline).Passed(c.now())
 }
 
 // apply records ev: it moves r to the phase the transitions table declares,

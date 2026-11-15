@@ -139,6 +139,11 @@ func Open(dir string, placements map[string]Placement, maxCheckpointBytes int64)
 // launch. Retries reuse the journaled launch and its retained archive.
 func (c *Coordinator) SetProfileSource(source func() ([]byte, string, error)) { c.profile = source }
 
+// SetClock replaces the clock that deadline checks read, before the
+// coordinator is shared. Owners' tests use it to pass a deadline without
+// waiting for it.
+func (c *Coordinator) SetClock(now func() time.Time) { c.now = now }
+
 // ProfileArchive returns a retained profile archive by digest.
 func (c *Coordinator) ProfileArchive(digest string) ([]byte, error) {
 	if !agentprofile.ValidDigest(digest) {

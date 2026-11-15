@@ -39,3 +39,28 @@ func TestExecutionWithoutDeadlineMovesAndStops(t *testing.T) {
 		t.Fatalf("reopened journal: %v %v", got.Deadline, err)
 	}
 }
+
+// An interrupted start without a deadline is never ended for lateness:
+// recovery, however late, prepares and activates it (ADR 0060).
+func TestInterruptedStartWithoutDeadlineIsNeverAbandoned(t *testing.T) {
+	t.Parallel()
+	c, _, local, _, start := setup(t)
+	first := start.Source
+	first.ExecutionID, first.OperationID, first.AllocationID = uuid.NewString(), uuid.NewString(), uuid.NewString()
+	first.Deadline = time.Time{}
+	if _, err := c.Create(first, start.Input, ""); err != nil {
+		t.Fatal(err)
+	}
+	local.lostPrepare = true
+	if _, err := c.Recover(t.Context(), first.ExecutionID); err == nil {
+		t.Fatal("fixture did not lose the prepare reply")
+	}
+	c.now = func() time.Time { return time.Now().Add(100 * 365 * 24 * time.Hour) }
+	if c.PastDeadline(Record{}) {
+		t.Fatal("no deadline passed")
+	}
+	r, err := c.Recover(t.Context(), first.ExecutionID)
+	if err != nil || r.Phase != PhaseActive || local.aborted != 0 {
+		t.Fatalf("late recovery without a deadline: %s %v", r.Phase, err)
+	}
+}

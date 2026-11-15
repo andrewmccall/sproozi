@@ -113,14 +113,24 @@ func (c *Coordinator) Move(ctx context.Context, id, operationID, destination str
 			if op.Finalize || op.Destination != destination {
 				return r, errors.New("session: operation intent conflict")
 			}
+			if abandoned(r, *op) {
+				return r, ErrDeadlinePassed
+			}
 			if op.done() {
 				return r, nil
 			}
 			return c.drive(ctx, r, i)
 		}
 	}
+	if r, err = c.settleLate(ctx, r); err != nil {
+		return r, err
+	}
 	if r.PendingOperation != "" {
 		return r, pendingRecovery(r)
+	}
+	if r.Active == nil && c.PastDeadline(r) {
+		// Nothing runs and nothing may start: refuse before recording intent.
+		return r, ErrDeadlinePassed
 	}
 	for _, v := range r.Visits {
 		if v.Launch.OperationID == operationID {
@@ -206,13 +216,106 @@ func (c *Coordinator) drive(ctx context.Context, r Record, index int) (Record, e
 		return r, err
 	}
 	r, err = c.prepareDestination(ctx, r, index)
+	if errors.Is(err, errExpired) {
+		return c.abandon(ctx, r, index)
+	}
 	if err != nil {
 		return r, err
 	}
 	if err = ctx.Err(); err != nil {
 		return r, err
 	}
-	return c.activateDestination(ctx, r, index)
+	r, err = c.activateDestination(ctx, r, index)
+	if errors.Is(err, errExpired) {
+		return c.abandon(ctx, r, index)
+	}
+	return r, err
+}
+
+// settleLate carries a pending move or first visit whose deadline passed to
+// its end before a new request is considered, so that request is never
+// refused for it: either the destination did become active, or the operation
+// is abandoned and the execution is idle (ADR 0060). It does nothing before
+// the deadline, or for a pending stop, which a stop request continues itself.
+func (c *Coordinator) settleLate(ctx context.Context, r Record) (Record, error) {
+	last := len(r.Operations) - 1
+	if r.PendingOperation == "" || r.Operations[last].Finalize || !c.PastDeadline(r) {
+		return r, nil
+	}
+	return c.drive(ctx, r, last)
+}
+
+// abandoned reports an operation the deadline ended without a new visit.
+// Only cancellation intent otherwise ends an operation as cancelled.
+func abandoned(r Record, op Operation) bool {
+	return op.Stage == stageCancelled && r.CancelOperation == ""
+}
+
+// abandon ends a move or first visit whose deadline passed before its
+// destination became active (ADR 0060). It first establishes that no writer
+// exists or can come to exist at the destination. When the operation has no
+// launch, Prepare was never called. Otherwise a placement that fences
+// unreported preparations does so; any other placement is inspected, and an
+// incarnation it reports is aborted and retired as a visit with its sealed
+// usage. Only then does the operation end, marked cancelled, and the
+// execution become idle with its last checkpoint. If that cannot be shown,
+// the record is unchanged and the error says why: the same request, or
+// recover, tries again. It never records a stop it did not observe or
+// refunds usage that is not sealed.
+func (c *Coordinator) abandon(ctx context.Context, r Record, index int) (Record, error) {
+	op := &r.Operations[index]
+	if op.Launch != nil {
+		launch := *op.Launch
+		p, ok := c.placement(op.Destination)
+		if !ok {
+			return r, errors.New("session: pending placement unavailable")
+		}
+		incarnation := op.Incarnation
+		if aborter, fences := p.(PreparationAborter); incarnation == nil && fences {
+			if err := aborter.AbortPreparation(ctx, launch); err != nil {
+				return r, fmt.Errorf("session: the deadline passed, but the destination's preparation is not yet fenced: %w", err)
+			}
+		} else if incarnation == nil {
+			o, err := p.Inspect(ctx, launch)
+			if err != nil {
+				return r, fmt.Errorf("session: the deadline passed, but the destination cannot be inspected: %w", err)
+			}
+			if err = checkObservation(launch, o); err != nil {
+				return r, err
+			}
+			if o.State != PlacementAbsent {
+				if !validIncarnation(o.Incarnation) {
+					return r, errors.New("session: the deadline passed, but the destination's preparation remains unknown")
+				}
+				incarnation = &o.Incarnation
+			}
+		}
+		if incarnation != nil {
+			o, err := p.Abort(ctx, launch, *incarnation)
+			if err != nil {
+				return r, fmt.Errorf("session: the deadline passed, but the destination is not yet proven stopped: %w", err)
+			}
+			if err = checkObservation(launch, o); err != nil {
+				return r, err
+			}
+			if o.Incarnation != *incarnation || o.State != PlacementStopped || o.Stopped == nil ||
+				validateStop(launch, *incarnation, *o.Stopped) != nil {
+				return r, errors.New("session: the deadline passed, but the destination's stop and usage are not yet " +
+					"proven; recover again once the placement can finalize them")
+			}
+			if r, err = c.retainStopped(r, launch, *incarnation, *o.Stopped); err != nil {
+				return r, err
+			}
+			r.Epoch = launch.Epoch
+		}
+	}
+	op = &r.Operations[index]
+	op.Stage = stageCancelled
+	r.PendingOperation = ""
+	if err := c.commit(&r, evAbandoned); err != nil {
+		return r, err
+	}
+	return r, ErrDeadlinePassed
 }
 func (c *Coordinator) stopSource(ctx context.Context, r Record, index int) (Record, error) {
 	op := &r.Operations[index]
@@ -294,6 +397,11 @@ func (c *Coordinator) commitStopped(r Record, s Stopped) (string, Checkpoint, er
 func (c *Coordinator) prepareDestination(ctx context.Context, r Record, index int) (Record, error) {
 	op := &r.Operations[index]
 	if op.Stage == stagePrepare {
+		// Before the launch is created, so an operation without one proves
+		// that Prepare was never called.
+		if err := c.admit(r, evPrepared); err != nil {
+			return r, err
+		}
 		if op.Launch == nil {
 			if r.Epoch == ^uint64(0) {
 				return r, errors.New("session: epoch exhausted")
@@ -313,9 +421,6 @@ func (c *Coordinator) prepareDestination(ctx context.Context, r Record, index in
 			if err := c.save(r); err != nil {
 				return r, err
 			}
-		}
-		if err := c.admit(r, evPrepared); err != nil {
-			return r, err
 		}
 		if err := spendable(op.Launch.Allowances); err != nil {
 			return r, err
@@ -381,12 +486,16 @@ func (c *Coordinator) activateDestination(ctx context.Context, r Record, index i
 		if observation.Incarnation != *op.Incarnation {
 			return r, errors.New("session: destination incarnation changed")
 		}
+		if observation.State != PlacementActive {
+			// Only an activation that already happened is recorded after the
+			// deadline; whatever else the destination reports, it ends.
+			if err = c.admit(r, evActivated); err != nil {
+				return r, err
+			}
+		}
 		switch observation.State {
 		case PlacementPrepared:
 			if err = ctx.Err(); err != nil {
-				return r, err
-			}
-			if err = c.admit(r, evActivated); err != nil {
 				return r, err
 			}
 			if err = p.Activate(ctx, *op.Launch, *op.Incarnation); err != nil {

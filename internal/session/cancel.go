@@ -174,17 +174,27 @@ func (c *Coordinator) abortActive(ctx context.Context, r Record) (Record, error)
 	if o.Stopped == nil || !o.Stopped.ActualStopped || validateStop(active.Launch, active.Incarnation, *o.Stopped) != nil {
 		return r, c.commit(&r, evUsageUnsealed)
 	}
-	remaining, err := subtract(r.Remaining, *o.Stopped.Receipt)
+	if r, err = c.retainStopped(r, active.Launch, active.Incarnation, *o.Stopped); err != nil {
+		return r, err
+	}
+	r.Active = nil
+	return r, nil
+}
+
+// retainStopped retires an aborted incarnation as a visit with its sealed
+// receipt and any checkpoint the abort captured. stopped must have passed
+// validateStop. On error r is returned unchanged.
+func (c *Coordinator) retainStopped(r Record, launch Launch, incarnation Incarnation, stopped Stopped) (Record, error) {
+	remaining, err := subtract(r.Remaining, *stopped.Receipt)
 	if err != nil {
 		return r, err
 	}
-	thread, cp, err := c.commitStopped(r, *o.Stopped)
+	thread, cp, err := c.commitStopped(r, stopped)
 	if err != nil {
 		return r, err
 	}
-	r.Visits = append(r.Visits, Visit{Launch: active.Launch, Incarnation: active.Incarnation, ActualStopped: true, Receipt: o.Stopped.Receipt, CheckpointDigest: cp.Metadata.SHA256})
+	r.Visits = append(r.Visits, Visit{Launch: launch, Incarnation: incarnation, ActualStopped: true, Receipt: stopped.Receipt, CheckpointDigest: cp.Metadata.SHA256})
 	r.Remaining = remaining
 	r.ThreadID, r.Checkpoint = thread, cp
-	r.Active = nil
 	return r, nil
 }
