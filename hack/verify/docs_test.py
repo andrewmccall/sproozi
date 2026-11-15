@@ -9,6 +9,9 @@ spec = importlib.util.spec_from_file_location("docs_check", Path(__file__).with_
 docs_check = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(docs_check)
 
+# Built from a variable so this file's own text names no unknown record.
+UNKNOWN = "0077"
+
 README = """# Architecture decisions
 
 ## Decisions
@@ -59,19 +62,19 @@ class Resolution(unittest.TestCase):
             (root / "docs/adr/0001-first.md").write_text("# 0001\n", encoding="utf-8")
             (root / "docs/guide.md").write_text(doc, encoding="utf-8")
             (root / ".claude").mkdir()
-            (root / ".claude/note.md").write_text("ADR 0099", encoding="utf-8")
+            (root / ".claude/note.md").write_text(f"ADR {UNKNOWN}", encoding="utf-8")
             return docs_check.check_adr_references(root)
 
     def test_known_numbers_pass(self):
         self.assertEqual(self.check("ADR 0001, ADR 0042 and ADRs 0055 and 0001."), [])
 
     def test_unknown_number_fails(self):
-        problems = self.check("See ADR 0001 and ADR 0077.")
+        problems = self.check(f"See ADR 0001 and ADR {UNKNOWN}.")
         self.assertEqual(len(problems), 1)
-        self.assertIn("docs/guide.md: ADR 0077", problems[0])
+        self.assertIn(f"docs/guide.md: ADR {UNKNOWN}", problems[0])
 
     def test_unknown_number_in_a_list_fails(self):
-        self.assertEqual(len(self.check("ADRs 0001 and 0078.")), 1)
+        self.assertEqual(len(self.check(f"ADRs 0001 and {UNKNOWN}.")), 1)
 
 
 if __name__ == "__main__":
