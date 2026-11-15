@@ -263,6 +263,7 @@ func (p *Placement) resource(ctx context.Context, r *placementRecord, role strin
 	}
 	return p.engine.Start(ctx, **target)
 }
+
 // drivePrepare creates and configures a creating visit's containers. The
 // caller has admitted evPrepared.
 func (p *Placement) drivePrepare(ctx context.Context, r *placementRecord, data []byte) error {

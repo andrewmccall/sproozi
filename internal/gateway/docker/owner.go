@@ -118,7 +118,7 @@ func (r *record) apply(ev grantEvent) error {
 
 func refused(from grantPhase, ev grantEvent) error {
 	if from == grantNone {
-		from = "none"
+		return fmt.Errorf("docker gateway: %s refused without a record", ev)
 	}
 	return fmt.Errorf("docker gateway: %s refused while the allocation is %s", ev, from)
 }

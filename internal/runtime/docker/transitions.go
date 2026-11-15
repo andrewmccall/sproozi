@@ -122,7 +122,7 @@ func (r *placementRecord) apply(ev placementEvent) error {
 
 func refused(from dockerPhase, ev placementEvent) error {
 	if from == phaseNone {
-		from = "none"
+		return fmt.Errorf("docker placement: %s refused without a record", ev)
 	}
 	return fmt.Errorf("docker placement: %s refused from phase %s", ev, from)
 }
