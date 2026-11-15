@@ -21,6 +21,11 @@ const (
 	problemRevoked = "its project no longer admits this installation"
 )
 
+// actionTaskComplete derives the operation of a task's completion wait: the
+// stop the driver asks for at once, which the supervisor carries out only
+// after the task's own turn completed.
+const actionTaskComplete = "task-complete"
+
 // backoff bounds the driver's automatic recovery of an execution the
 // coordinator could not settle.
 type backoff struct{ first, limit time.Duration }
@@ -179,10 +184,12 @@ func (o *Owner) step(ctx context.Context, id string) next {
 	case rec.Phase == session.PhaseActive || rec.Phase == session.PhaseStopping:
 		// The task's stop is its completion wait: the supervisor stops the
 		// writer only after the task's own turn completed. Until then the
-		// stop stays pending and is repeated.
-		_, err = coordinator.Finalize(ctx, rec.ID, derivedOperation(rec.ID, "task-complete"))
+		// stop stays pending and is repeated. The task is running, not
+		// stopping (see completing), and nothing is wrong with it, so the
+		// wait clears any earlier problem rather than recording one.
+		_, err = coordinator.Finalize(ctx, rec.ID, derivedOperation(rec.ID, actionTaskComplete))
 		if errors.Is(err, harness.ErrNativeTurnPending) {
-			o.note(r.ID, "the executor waits for the task's turn to complete: "+err.Error())
+			o.note(r.ID, "")
 			return nextAgain
 		}
 		return o.after(ctx, r, err, nextWait)

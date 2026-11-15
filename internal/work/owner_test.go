@@ -68,6 +68,10 @@ type fixturePlacement struct {
 	// turnPending is how many stops report that the task's turn is still
 	// running before one succeeds.
 	turnPending int
+	// turnPace is how long each stop takes before it answers, as the
+	// supervisor's quiesce wait does, so a driver waiting for a long turn
+	// does not spin.
+	turnPace time.Duration
 	// stopReturning closes just before a stop returns success.
 	stopReturning chan struct{}
 	launches      []session.Launch
@@ -193,6 +197,16 @@ func (p *fixturePlacement) Abort(_ context.Context, l session.Launch, i session.
 	return session.Observation{Launch: l, Incarnation: i, State: session.PlacementStopped, Stopped: stopped}, nil
 }
 func (p *fixturePlacement) Stop(ctx context.Context, l session.Launch, i session.Incarnation) (session.Stopped, error) {
+	p.mu.Lock()
+	pace := p.turnPace
+	p.mu.Unlock()
+	if pace > 0 {
+		select {
+		case <-time.After(pace):
+		case <-ctx.Done():
+			return session.Stopped{}, ctx.Err()
+		}
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.stops++
@@ -598,7 +612,7 @@ func TestSubmissionReplayDoesNotWaitForHeldNativeWork(t *testing.T) {
 	select {
 	case v := <-done:
 		if v.ID != initial.ID || v.ExecutionID != initial.ExecutionID || v.AllocationID != initial.AllocationID ||
-			v.Phase != phaseStopping {
+			v.Phase != phaseActive {
 			t.Fatalf("replay changed identity or phase: %+v", v)
 		}
 		stillHeld("submission replay")

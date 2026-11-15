@@ -14,6 +14,14 @@ func TestDerivedPhaseFollowsTheCoordinator(t *testing.T) {
 	kept := session.Checkpoint{Path: "checkpoints/kept.json"}
 	failed := []session.Visit{{Exit: &session.Exit{Code: 1}}}
 	interactiveRecord := record{Intent: Submit{Mode: ModeInteractive}}
+	// pending is an execution whose stop, finalizing op, is in phase.
+	const execution = "6f1d3c55-5c1b-4f55-9d0e-0d4b7b8f2a10"
+	pending := func(phase session.Phase, op string) *session.Record {
+		return &session.Record{ID: execution, Phase: phase, PendingOperation: op,
+			Operations: []session.Operation{{ID: op, Finalize: true}}}
+	}
+	completion := derivedOperation(execution, actionTaskComplete)
+	callerStop := "0b8e1f9c-58a4-4c3e-a3b6-2a3c9d1e7f42"
 	for _, tc := range []struct {
 		name string
 		r    record
@@ -41,6 +49,16 @@ func TestDerivedPhaseFollowsTheCoordinator(t *testing.T) {
 		{"interactive turnless", interactiveRecord, &session.Record{Phase: session.PhaseIdle}, PhaseRetained},
 		{"interactive failed exit", interactiveRecord, &session.Record{Phase: session.PhaseIdle, Checkpoint: kept, Visits: failed}, PhaseFailed},
 		{"interactive active", interactiveRecord, &session.Record{Phase: session.PhaseActive}, phaseActive},
+		// A task's own completion wait is not a stop: it runs until its
+		// turn completes, then stops.
+		{"task waiting for its turn", record{}, pending(session.PhaseStopping, completion), phaseActive},
+		{"task stopped after its turn", record{}, pending(session.PhasePreparing, completion), phaseStopping},
+		{"task completion unproven", record{}, pending(session.PhaseUnknownStop, completion), phaseUnknownStop},
+		{"task completion unsealed", record{}, pending(session.PhaseUnknownUsage, completion), phaseUnknownUsage},
+		// A stop a caller asked for is reported as one.
+		{"interactive stop by its owner", interactiveRecord, pending(session.PhaseStopping, callerStop), phaseStopping},
+		{"interactive completion name", interactiveRecord, pending(session.PhaseStopping, completion), phaseStopping},
+		{"task stop by another operation", record{}, pending(session.PhaseStopping, callerStop), phaseStopping},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := derivePhase(tc.r, tc.rec)
