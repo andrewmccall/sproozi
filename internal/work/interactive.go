@@ -122,7 +122,7 @@ func (o *Owner) bindStop(r *record, operation string) (string, error) {
 		return "", err
 	}
 	if len(r.Operations) >= maxOperations {
-		return "", &profile.Rejection{Code: profile.CodeUnavailable}
+		return "", &profile.Rejection{Code: profile.CodeOperationsFull}
 	}
 	if r.Operations == nil {
 		r.Operations = map[string]boundOperation{}
@@ -180,8 +180,11 @@ func (o *Owner) Resume(ctx context.Context, id, operation, maxDuration string) (
 	if rec == nil || rec.Phase != session.PhaseIdle || rec.PendingOperation != "" || rec.CancelOperation != "" {
 		return View{}, &profile.Rejection{Code: profile.CodeConflict}
 	}
-	if len(r.Executions) >= maxExecutions || len(r.Operations) >= maxOperations {
-		return View{}, &profile.Rejection{Code: profile.CodeUnavailable}
+	if len(r.Executions) >= maxExecutions {
+		return View{}, &profile.Rejection{Code: profile.CodeExecutionsFull}
+	}
+	if len(r.Operations) >= maxOperations {
+		return View{}, &profile.Rejection{Code: profile.CodeOperationsFull}
 	}
 	execution, err := o.resumedExecution(r, *rec, operation, cmp.Or(maxDuration, r.DeadlineChoice))
 	if err != nil {

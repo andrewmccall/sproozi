@@ -103,6 +103,57 @@ func TestFullExecutorReportsWhatIsFull(t *testing.T) {
 	}
 }
 
+// A session at its cap of executions or of bound operations says which cap,
+// instead of unavailable, which a retry never mends.
+func TestPerSessionCapsSayWhichCapIsReached(t *testing.T) {
+	t.Parallel()
+	c, _ := fixture(t)
+	o := openOwner(t, c)
+	v := startInteractive(t, o, interactiveRequest())
+	if _, err := o.Stop(t.Context(), v.ID, uuid.NewString()); err != nil {
+		t.Fatal(err)
+	}
+	fill := func(change func(r *record)) {
+		t.Helper()
+		unlock := o.jobs.Lock(v.ID)
+		defer unlock()
+		r, err := o.read(v.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		change(&r)
+		if err = o.save(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	saved, err := o.read(v.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fill(func(r *record) {
+		for len(r.Executions) < maxExecutions {
+			r.Executions = append(r.Executions[:1], append([]string{uuid.NewString()}, r.Executions[1:]...)...)
+		}
+	})
+	if _, err = o.Resume(t.Context(), v.ID, uuid.NewString(), ""); code(err) != profile.Code("executions_full") ||
+		!strings.Contains(outcomeMessage(err), "maximum number of executions") {
+		t.Fatalf("resume at the execution cap: %v", err)
+	}
+	fill(func(r *record) {
+		r.Executions = saved.Executions
+		for len(r.Operations) < maxOperations {
+			if r.Operations == nil {
+				r.Operations = map[string]boundOperation{}
+			}
+			r.Operations[uuid.NewString()] = boundOperation{Action: actionStop, Execution: r.Current}
+		}
+	})
+	if _, err = o.Resume(t.Context(), v.ID, uuid.NewString(), ""); code(err) != profile.Code("operations_full") ||
+		!strings.Contains(outcomeMessage(err), "stop and resume operations") {
+		t.Fatalf("resume at the operation cap: %v", err)
+	}
+}
+
 // A submission reserves what its session may come to keep: its input, which
 // the coordinator retains when it starts, and the checkpoint it commits when
 // it stops.

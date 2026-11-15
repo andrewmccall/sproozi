@@ -59,7 +59,20 @@ const (
 	// raising the bound makes room. Only the owner protocol uses them.
 	CodeSessionsFull  Code = "sessions_full"
 	CodeRetentionFull Code = "retention_full"
+	// CodeExecutionsFull and CodeOperationsFull are a remote executor's owner
+	// refusing a resume or stop because one session already has as many
+	// executions, or bound owner operations, as it may. Nothing changed, and
+	// repeating the request never helps.
+	CodeExecutionsFull Code = "executions_full"
+	CodeOperationsFull Code = "operations_full"
 )
+
+// OwnerFull reports a remote executor's owner refusing work because a bound
+// was reached: nothing changed, so the request is not repeated.
+func OwnerFull(code Code) bool {
+	return code == CodeSessionsFull || code == CodeRetentionFull || code == CodeExecutionsFull ||
+		code == CodeOperationsFull
+}
 
 // waitingMax bounds what a turn_pending answer says the stop waits for.
 const waitingMax = 160

@@ -454,7 +454,7 @@ func (q *options) submitError(err error, target remoteTarget, kind harness.Nativ
 	var remote *profile.RemoteError
 	if errors.As(err, &remote) {
 		switch {
-		case remote.Code == profile.CodeSessionsFull || remote.Code == profile.CodeRetentionFull:
+		case profile.OwnerFull(remote.Code):
 			// Refused, and the message names the remedy: nothing to repeat.
 			return err
 		case q.maxDuration != "" && remote.Code == profile.CodeDenied:

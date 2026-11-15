@@ -158,9 +158,15 @@ func OwnerOutcomeMessage(code Code) string {
 		return "Remote executor full: it keeps its maximum number of sessions; remove sessions you no longer need " +
 			"with \"sproozi rm ID --remote\", then retry"
 	case CodeRetentionFull:
-		return "Remote executor full: its kept sessions, plus room for a checkpoint of each running session and of " +
-			"this one, would exceed its retainedBytes; remove sessions you no longer need with " +
+		return "Remote executor full: what it keeps, plus the room its unfinished sessions and this request may " +
+			"still need, would exceed its retainedBytes; remove sessions you no longer need with " +
 			"\"sproozi rm ID --remote\", stop running ones, or raise retainedBytes, then retry"
+	case CodeExecutionsFull:
+		return "This session has run its maximum number of executions, so it cannot be resumed again there; " +
+			"bring it to this machine with \"sproozi pull ID\", or start new work"
+	case CodeOperationsFull:
+		return "This session has used its maximum number of stop and resume operations; cancel it, or bring it " +
+			"to this machine with \"sproozi pull ID\" once it is stopped"
 	default:
 		return "Work owner unavailable; restore connectivity or owner storage, then inspect status and retry with the same operation UUID"
 	}
@@ -170,7 +176,7 @@ func OwnerOutcomeMessage(code Code) string {
 // answer only, so the owner never uses it, and only the owner answers that
 // it is full.
 func ownerErrorStatus(code Code, status int) bool {
-	if code == CodeSessionsFull || code == CodeRetentionFull {
+	if OwnerFull(code) {
 		return status == http.StatusInsufficientStorage
 	}
 	return code != CodeTurnPending && errorResponse(response{Error: code}, status)

@@ -28,6 +28,8 @@ func TestOwnerClientPreservesSafeOutcomes(t *testing.T) {
 		{409, `{"error":"unavailable"}`, CodeUnavailable},
 		{507, `{"error":"sessions_full"}`, CodeSessionsFull},
 		{507, `{"error":"retention_full"}`, CodeRetentionFull},
+		{507, `{"error":"executions_full"}`, CodeExecutionsFull},
+		{507, `{"error":"operations_full"}`, CodeOperationsFull},
 		{503, `{"error":"retention_full"}`, CodeUnavailable},
 		{507, `{"error":"turn_pending"}`, CodeUnavailable},
 	} {
