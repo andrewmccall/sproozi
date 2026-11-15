@@ -91,8 +91,9 @@ Docker sessions keep the literal proxy:
   deadline is reached at its instant (`!now.Before(at)`). The controller used to
   time out strictly after the instant while the gateway refused at it; both now
   use the helper. `Earliest` never picks "none" over a set deadline. `Context`
-  returns a cancel-only context when there is none. `Done` polls the wall clock
-  for a set deadline and never closes without one. It replaces
+  returns a cancel-only context when there is none. `Done` and `Context` poll the
+  wall clock for a set deadline (a timer would end a session late after the host
+  slept), and `Done` never closes without one. It replaces
   `nativepty.AtDeadline`.
 - *Wire format.* JSON keeps `time.Time` fields and RFC 3339 for a set deadline.
   "None" is the field omitted (`omitzero`); the zero time also decodes as none.

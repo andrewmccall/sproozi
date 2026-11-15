@@ -85,13 +85,78 @@ func (d Deadline) Bound(now time.Time, limit time.Duration) time.Time {
 	return Earliest(d, At(now.Add(limit))).at
 }
 
-// Context is a child of parent that ends at a set deadline, or only with
-// parent when there is none.
+// Context is a child of parent that ends when the wall clock reaches a set
+// deadline, or only with parent when there is none. Like Done, it reads the
+// wall clock every second rather than using a timer, so a host that slept
+// does not end it late. It behaves as context.WithDeadline does: Err and
+// context.Cause are context.DeadlineExceeded once the deadline is reached,
+// context.Canceled (or the parent's cause) when cancel or the parent ended it
+// first, and Deadline reports the deadline. The cancel function must be
+// called; it stops the clock reading before returning.
 func (d Deadline) Context(parent context.Context) (context.Context, context.CancelFunc) {
-	if d.Set() {
-		return context.WithDeadline(parent, d.at)
+	return d.context(parent, time.Second, wallClock)
+}
+
+// context is Context reading clock every interval.
+func (d Deadline) context(parent context.Context, every time.Duration, clock func() time.Time) (context.Context, context.CancelFunc) {
+	if !d.Set() {
+		return context.WithCancel(parent)
 	}
-	return context.WithCancel(parent)
+	inner, stop := context.WithCancelCause(parent)
+	c := &wallContext{Context: inner, inner: inner, at: d.at, done: make(chan struct{})}
+	exited := make(chan struct{})
+	go func() {
+		defer close(exited)
+		defer close(c.done)
+		ticker := time.NewTicker(every)
+		defer ticker.Stop()
+		for {
+			if d.Passed(clock()) {
+				stop(context.DeadlineExceeded)
+			}
+			select {
+			case <-inner.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+	return c, func() {
+		stop(context.Canceled)
+		<-exited
+	}
+}
+
+// wallContext is a context that a wall-clock deadline ends. Its Done channel
+// is its own, not the inner context's, so that a context derived from it
+// copies its Err (DeadlineExceeded) instead of the inner Canceled.
+type wallContext struct {
+	context.Context // inner: Value and Cause
+	inner           context.Context
+	at              time.Time
+	done            chan struct{}
+}
+
+func (c *wallContext) Done() <-chan struct{} { return c.done }
+
+func (c *wallContext) Deadline() (time.Time, bool) {
+	if p, ok := c.inner.Deadline(); ok && p.Before(c.at) {
+		return p, true
+	}
+	return c.at, true
+}
+
+func (c *wallContext) Err() error {
+	select {
+	case <-c.done:
+	default:
+		return nil
+	}
+	err := c.inner.Err()
+	if errors.Is(err, context.Canceled) && context.Cause(c.inner) == context.DeadlineExceeded {
+		return context.DeadlineExceeded
+	}
+	return err
 }
 
 // String is the RFC 3339 instant, or "none".

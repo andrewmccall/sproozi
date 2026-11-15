@@ -3,6 +3,8 @@ package deadline
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"runtime"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -195,5 +197,80 @@ func TestDoneWithoutADeadlineNeverCloses(t *testing.T) {
 	case <-None().Done(nil):
 		t.Fatal("no deadline was reached")
 	case <-time.After(30 * time.Millisecond):
+	}
+}
+
+// A host that slept past the deadline ends the context at the next check,
+// although no monotonic time has elapsed: the deadline is an hour away on the
+// timer a plain context.WithDeadline would use.
+func TestContextFollowsTheWallClockAfterSleep(t *testing.T) {
+	start := time.Now().Round(0)
+	d := At(start.Add(time.Hour))
+	var slept atomic.Bool
+	clock := func() time.Time {
+		if slept.Load() {
+			return d.Time().Add(time.Minute)
+		}
+		return start
+	}
+	ctx, cancel := d.context(context.Background(), 10*time.Millisecond, clock)
+	defer cancel()
+	select {
+	case <-ctx.Done():
+		t.Fatal("ended before the deadline")
+	case <-time.After(50 * time.Millisecond):
+	}
+	if ctx.Err() != nil {
+		t.Fatalf("Err before the deadline = %v", ctx.Err())
+	}
+	slept.Store(true)
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("the deadline passed on the wall clock but the context did not end")
+	}
+	if !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		t.Fatalf("Err = %v, want DeadlineExceeded", ctx.Err())
+	}
+	if !errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
+		t.Fatalf("Cause = %v, want DeadlineExceeded", context.Cause(ctx))
+	}
+	if got, ok := ctx.Deadline(); !ok || !got.Equal(d.Time()) {
+		t.Fatalf("Deadline = %v, %v", got, ok)
+	}
+	child, stop := context.WithCancel(ctx)
+	defer stop()
+	if !errors.Is(child.Err(), context.DeadlineExceeded) {
+		t.Fatalf("a child reports %v, want DeadlineExceeded", child.Err())
+	}
+}
+
+// A cancellation stays distinguishable from a deadline, whether it comes from
+// the cancel function or the parent, and cancel releases the goroutine.
+func TestContextCancellationIsNotADeadline(t *testing.T) {
+	d := At(time.Now().Round(0).Add(time.Hour))
+	before := runtime.NumGoroutine()
+	ctx, cancel := d.Context(context.Background())
+	cancel()
+	<-ctx.Done()
+	if !errors.Is(ctx.Err(), context.Canceled) || !errors.Is(context.Cause(ctx), context.Canceled) {
+		t.Fatalf("Err = %v, Cause = %v, want Canceled", ctx.Err(), context.Cause(ctx))
+	}
+	parent, cancelParent := context.WithCancelCause(context.Background())
+	ctx, cancel = d.Context(parent)
+	defer cancel()
+	boom := errors.New("boom")
+	cancelParent(boom)
+	<-ctx.Done()
+	if !errors.Is(ctx.Err(), context.Canceled) || !errors.Is(context.Cause(ctx), boom) {
+		t.Fatalf("Err = %v, Cause = %v, want the parent's", ctx.Err(), context.Cause(ctx))
+	}
+	cancel()
+	deadlineAt := time.Now().Add(time.Second)
+	for runtime.NumGoroutine() > before && time.Now().Before(deadlineAt) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := runtime.NumGoroutine(); got > before {
+		t.Fatalf("goroutines = %d, want at most %d: cancel left one behind", got, before)
 	}
 }
