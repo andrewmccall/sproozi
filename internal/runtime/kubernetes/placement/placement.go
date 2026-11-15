@@ -502,7 +502,7 @@ func (p *Placement) validateInput(l session.Launch, initial bool) error {
 	if l.Harness != p.config.Harness || !idValid(l.ExecutionID) || !idValid(l.OperationID) || !idValid(l.AllocationID) || (!initial && !idValid(l.ThreadID) || initial && l.ThreadID != "") || l.Epoch == 0 || l.Placement != p.config.Name || (!initial && !digestValid(l.CheckpointDigest) || initial && l.CheckpointDigest != "") || l.InstructionDigest != p.config.InstructionDigest || len(l.Allowances) == 0 || len(l.Allowances) > 32 {
 		return &profile.Rejection{Code: profile.CodeDenied}
 	}
-	if utf8.RuneCountInString(l.Task) > agentcontract.MaxTaskRunes || strings.ContainsRune(l.Task, 0) || l.Task != "" && (strings.TrimSpace(l.Task) == "" || l.Harness != harness.NativeCodex) {
+	if utf8.RuneCountInString(l.Task) > agentcontract.MaxTaskRunes || strings.ContainsRune(l.Task, 0) || l.Task != "" && (strings.TrimSpace(l.Task) == "" || !l.Harness.TakesTask()) {
 		return &profile.Rejection{Code: profile.CodeDenied}
 	}
 	return nil

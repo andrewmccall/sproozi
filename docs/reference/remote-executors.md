@@ -103,9 +103,9 @@ An interactive session runs until its owner stops it; nothing waits for a
 task to complete. Only the home principal (the `sproozi-cli` identity above)
 starts one, cancels it, or takes the owner actions below. The work token that
 Hermes holds keeps tasks only: these requests answer it `403`, and its MCP tool
-`sproozi_run` offers no mode or upload. A Codex executor runs tasks and
-interactive sessions; a Claude Code executor (`"harness": "claude-code"`)
-runs interactive sessions only, and answers a task `unsupported`. A
+`sproozi_run` offers no mode or upload. A Codex executor and a Claude Code
+executor (`"harness": "claude-code"`) each run tasks and interactive
+sessions; a Claude Code task's result is Claude's final reply. A
 submission for another harness than the executor's answers `unsupported`.
 Codex and Claude Code on one cluster are two executors, one per namespace
 ([example](../../examples/portable-workflows/kubernetes/claude/kustomization.yaml)).

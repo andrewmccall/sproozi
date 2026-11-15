@@ -8,7 +8,24 @@ import (
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/budget"
+	"github.com/andrewmccall/sproozi/internal/harness"
 )
+
+// A first visit carries a task only for a harness whose supervisor binds
+// completion to it: Codex and Claude Code.
+func TestNativeTaskOnlyForTaskHarnesses(t *testing.T) {
+	r := Registration{Task: "Fix the fixture", WorkspaceDigest: strings.Repeat("c", 64)}
+	for _, kind := range []harness.NativeKind{harness.NativeCodex, harness.NativeClaude} {
+		r.Harness = kind
+		if err := validateNativeInput(r); err != nil {
+			t.Fatalf("%s task refused: %v", kind, err)
+		}
+	}
+	r.Harness = harness.NativeCopilot
+	if validateNativeInput(r) == nil {
+		t.Fatal("Copilot task accepted")
+	}
+}
 
 func TestInitialWorkspaceBindsObservedNativeIdentityOnce(t *testing.T) {
 	s, _ := registry(t, nil)

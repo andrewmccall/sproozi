@@ -309,8 +309,8 @@ places:
 | `sproozi run --remote --repository NAME` | The approved repository's snapshot, as for a task. A repository approved only by URL starts empty; ask the agent to fetch it. |
 | `sproozi run --remote --repository NAME PATH` | A copy of the Git repository at `PATH`, made as a local `run` makes it and uploaded with the submission. Ignored files stay behind unless `--include-ignored` names them, and the [workspace problems](#workspace-problems) refuse it the same way before anything is sent. The upload is at most the executor's `maxCheckpointBytes`. |
 
-Each executor runs one harness: a Codex executor runs tasks and interactive
-sessions, a Claude Code executor interactive sessions only. `--harness`
+Each executor runs one harness, and Codex and Claude Code executors each run
+tasks and interactive sessions. `--harness`
 defaults to the first agent set up on this machine, else `codex`, and must
 name the executor's harness; reach the executor for another harness with
 `--namespace`, for example `sproozi run --remote --namespace
@@ -355,7 +355,7 @@ it. It takes no agent arguments after `--`.
 | `workspace: byte limit exceeded ...; the cluster accepts uploads of at most N MiB (its maxCheckpointBytes): ...` | The copy of `PATH` is larger than the executor allows. | Ask the administrator to raise `maxCheckpointBytes`, or start from the approved repository without `PATH`. |
 | `... the cluster's remote executor NAME refused an interactive session; an executor older than this release does not know them, so update the executor ...` | The executor answered `invalid_request` to an interactive run. | Update the executor, or give `--task`. |
 | `... the cluster's remote executor NAME runs HARNESS, not REQUESTED; give --harness HARNESS, or choose the executor for REQUESTED with --namespace ...` | Each executor runs one harness, and `--harness`, or this machine's harness, names another. | Give `--harness HARNESS`, or `--namespace` with the namespace of the executor for `REQUESTED`. |
-| `... the cluster's remote executor NAME runs interactive sessions for claude-code but not tasks; ...` | A task for a Claude Code executor. | Leave out `--task`, or submit the task to a Codex executor. |
+| `... the cluster's remote executor NAME refused a HARNESS task; an executor older than this release may run no HARNESS tasks ...` | A task for an executor of the same harness that refused it, such as a Claude Code executor from before Claude Code tasks. | Update the executor, or leave out `--task`. |
 | `... does not run interactive sessions for HARNESS; update the executor, ...` | The executor answered `unsupported` to an interactive session of its own harness. | Update the executor, or give `--task`. |
 | `the cluster's remote executor NAME is older than remote stop; update the executor ...` | The executor has no `stop`, `resume` or `attach` route. | Update the executor, or `sproozi pull ID`. |
 | `session ID is a task, which stops by itself when it completes; ...` | `attach`, `stop` or `resume` of a task. | `sproozi status ID --remote`, or `cancel`. |

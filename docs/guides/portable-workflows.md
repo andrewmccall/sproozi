@@ -16,15 +16,17 @@ Pull does not start an agent. Resume starts a new execution with a new
 deadline and allowance. See [core concepts](../explanations/core-concepts.md)
 for the difference between a session and an execution.
 
-This workflow supports Codex. Here the remote executor owns the task until you
+This walkthrough uses Codex; a
+[Claude Code executor](#start-a-session-on-the-cluster-and-attach-from-anywhere)
+runs tasks the same way. Here the remote executor owns the task until you
 pull it, and nobody attaches while it runs. To work interactively in a session
 the cluster owns, so it keeps running with your laptop closed, see
 [Start a session on the cluster and attach from anywhere](#start-a-session-on-the-cluster-and-attach-from-anywhere).
 To work interactively in a Codex or
 Claude Code session and move it between Docker and Kubernetes while the service on
 your machine stays the owner, use
-[Move a live session between Docker and Kubernetes](session-mobility.md). Automated
-Claude tasks, IDE/GUI attachment, background tools, multiplayer and existing
+[Move a live session between Docker and Kubernetes](session-mobility.md).
+IDE/GUI attachment, background tools, multiplayer and existing
 personal-session adoption are not part of this workflow.
 
 ## Prepare the installation
@@ -207,7 +209,13 @@ sproozi run --remote --namespace sproozi-claude-sessions --harness claude-code -
 sproozi attach 3f2b8c1e --namespace sproozi-claude-sessions
 ```
 
-A Claude Code executor runs no tasks yet; give `--task` to the Codex one.
+Give `--task` to submit a task to either executor instead; a Claude Code
+task's result is Claude's final reply:
+
+```sh
+sproozi run --remote --namespace sproozi-claude-sessions --harness claude-code --repository sproozi \
+  --task "Explain the failing test"
+```
 
 The session belongs to an approved repository or project, which sets its
 allowances. Start it from the approved snapshot:

@@ -145,15 +145,18 @@ immutable `codex`, `claude-code` or `copilot` selector. Both placements, the
 profile and the checkpoint must use the same selected harness. A move cannot
 switch harnesses. OpenCode and Hermes runs can't be moved.
 
-The workflow in [Run a task remotely, then resume it locally](../guides/portable-workflows.md) supports remote tasks only for managed Codex. Its completion observer requires the
-submitted task text and a new completed turn. It then follows the usual stop,
+The workflow in [Run a task remotely, then resume it locally](../guides/portable-workflows.md) supports remote tasks for managed Codex and Claude Code. Its completion
+observer requires a new completed turn of the submitted task: for Codex, the
+task text in its rollout; for Claude Code, the prompt its `UserPromptSubmit`
+hook reports. A Claude Code task's result is the reply at the checkpoint's
+selected transcript leaf. It then follows the usual stop,
 finalized usage and checkpoint steps. A later local resume gets fresh
 permissions.
 
-A remote executor runs one harness. A Codex executor runs tasks and
+A remote executor runs one harness. Codex and Claude Code executors each run
+tasks and
 [interactive sessions the cluster owns](../guides/portable-workflows.md#start-a-session-on-the-cluster-and-attach-from-anywhere);
-a Claude Code executor runs interactive sessions only and answers a task
-`unsupported`. Codex and Claude Code on one cluster are two executors in two
+an executor answers a task for another harness `unsupported`. Codex and Claude Code on one cluster are two executors in two
 namespaces, which the CLI chooses with `--namespace`
 ([Claude Code executor example](../../examples/portable-workflows/kubernetes/claude/kustomization.yaml)).
 A Claude Code session started on the cluster starts Claude Code fresh, as a
@@ -176,12 +179,14 @@ Managed Codex MCP connections and placeholder Kubernetes configuration are
 regenerated for each launch; portable history cannot select upstream credentials
 or server registrations. Managed Claude Code loads the same connections as
 `--strict-mcp-config` entries and managed Copilot with
-`--additional-mcp-config`. Managed Claude and Copilot tasks are not supported.
+`--additional-mcp-config`. The Claude Code supervisor submits a task as the
+launch's prompt and counts only the turn that prompt started; remote executors
+don't accept Copilot tasks yet.
 
 | Managed selector | Selected native state | Completed-turn observation |
 | --- | --- | --- |
 | `codex` | One same-UUID rollout | Native completed turn, resolved supported tools and initial developer instruction digest |
-| `claude-code` | One same-UUID primary project transcript | Fresh prompt/tool/Stop hooks plus a settled transcript with paired foreground Bash tools |
+| `claude-code` | One same-UUID primary project transcript | Fresh prompt/tool/Stop hooks plus a settled transcript with paired foreground Bash, MCP and `Skill` calls, including Bash and MCP calls that failed |
 | `copilot` | One `session-state/<id>/events.jsonl` journal, for the ID the supervisor chose with `--session-id` | The main agent's last `assistant.turn_end` after an answer with no tool requests, every tool finished and no error or abort after it, once terminal input has settled ([ADR 0048](../adr/0048-github-copilot-cli-is-a-managed-harness.md)) |
 
 The supervisor owns the PTY across attachment disconnects. It uses the installed
@@ -208,14 +213,18 @@ cancellation revokes first. See [ADR
 0011](../adr/0011-native-session-compatibility-and-completion.md).
 
 The managed Codex launch uses `--sandbox danger-full-access` to run tools within the outer container boundary. The restricted sandbox
-kernel does not support the inner bubblewrap sandbox. Claude uses fixed `bypassPermissions` and foreground Bash.
+kernel does not support the inner bubblewrap sandbox. Claude uses fixed `bypassPermissions`, with the client's confirmation of it
+already accepted in the launch's settings so a task starts unattended, foreground Bash, the tools of its MCP connections (`mcp__<server>__<tool>`, such as `mcp__sproozi__diagnose`) and the `Skill` tool for the profile's skills and `sproozi:sproozi-access`.
 Copilot uses `--allow-all` with its built-in GitHub MCP server disabled. All
 rely on the outer non-root, read-only, capability-restricted container and
 enforced gateway network boundary. Portable history cannot select these settings.
 
 A Claude transcript that records a rate-limit (429) retry is supported once a
-later successful reply follows it. Other error records, background or parallel
-tasks, subagents, compaction and imported personal settings are not supported.
+later successful reply follows it. A Bash command that exits non-zero or an MCP
+tool that reports an error ends its call, as a successful call does; a call the
+user interrupts does not. A Bash or MCP call still running blocks the stop until
+it ends. Other error records, background or parallel tasks, subagents,
+compaction and imported personal settings are not supported.
 New input after a completed Claude turn means that turn's completion no longer
 counts. [ADR 0011](../adr/0011-native-session-compatibility-and-completion.md)
 records the transcript edge cases.

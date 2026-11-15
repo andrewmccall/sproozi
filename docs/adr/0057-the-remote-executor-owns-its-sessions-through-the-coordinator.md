@@ -184,7 +184,7 @@ the cancellation is refused as a conflict. Defect 1 is gone.
 
 **Completion stays the supervisor's to observe.** For Codex, the stop succeeds
 once the supervisor finds a completed turn of the submitted task. Claude tasks
-(a later step) bind completion to the task's own prompt in the same way.
+bind completion to the task's own prompt in the same way (section 11).
 
 ### 3. Deadlines
 
@@ -237,8 +237,8 @@ Not built here, each with its own change:
   `stop`, `resume` and `attach` with `--remote`), and its capture of a local
   `PATH` to upload. The executor's side is section 8.
 - **Claude Code on the cluster**: interactive first, then tasks, with
-  completion bound to the task prompt and `FinalText` for Claude. Task
-  submissions for any harness but Codex stay refused until then. One harness
+  completion bound to the task prompt and `FinalText` for Claude. Sections
+  10 and 11 record both. One harness
   per executor stays; Codex and Claude on one cluster means two executors.
 - **The coordinator on the cluster, the laptop service optional.** One
   coordinator implementation serves both hosts. Two protocols keep fixed
@@ -326,9 +326,8 @@ Added with the CLI; it follows section 8.
 Added with Claude Code executors; it follows section 7.
 
 - **An executor's harness is `codex` or `claude-code`.** A Claude Code
-  executor runs interactive sessions and answers a task `unsupported`, as it
-  answers a submission for another harness, until the supervisor binds a
-  Claude task's completion. One harness per executor stays, so the example
+  executor first ran interactive sessions only and answered a task
+  `unsupported`; section 11 turns its tasks on. One harness per executor stays, so the example
   adds a second executor in its own namespace, `sproozi-claude-sessions`,
   whose roles outside it are named `sproozi-claude-work`. The CLI names the
   executor's harness, from its description, and the requested one when it
@@ -347,6 +346,29 @@ Added with Claude Code executors; it follows section 7.
   first visit stops turnless, keeping the workspace it started from, and a
   resumed visit's stop names the checkpoint it started from. Neither claims a
   conversation from a stopped container (ADR 0011).
+
+### 11. Claude tasks on the cluster
+
+Added once the Claude Code supervisor ran tasks (ADR 0011, later
+clarification). A Claude Code executor now accepts a task as a Codex one
+does; it answers `unsupported` only for another harness's submission, and the
+work token reaches it under the same `workTokenMaxDuration`.
+
+- **Completion binds to the task's prompt.** The supervisor passes the task
+  as the launch's one positional prompt, and counts only the `Stop` of the
+  turn whose `UserPromptSubmit` prompt is the task. Until then the graceful
+  stop reports the turn pending and the driver repeats `Finalize`, as for
+  Codex. A task launch never resumes a conversation and is never turnless.
+- **The result is Claude's final reply**: the text of the reply at the
+  transcript leaf the checkpoint selected, bounded like Codex's, with Claude
+  Code's `(no content)` read as empty.
+- **Nothing else changes in the owner.** The same phases, deadlines,
+  retention and `pull` apply. The CLI's refusal of a task for the executor's
+  own harness now says an executor older than this release may run none.
+- **Not yet proven on a cluster.** Unit tests cover the owner with a fake
+  placement and the supervisor with captured hooks;
+  `make verify-claude-remote-kind` is the Kind proof and has not been
+  recorded.
 
 ## Alternatives
 

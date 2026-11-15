@@ -1,4 +1,4 @@
-# The remote executor for Claude Code interactive sessions: the Codex
+# The remote executor for Claude Code tasks and interactive sessions: the Codex
 # executor of ../owner.yaml, which explains each object, in its own namespace
 # sproozi-claude-sessions. Objects outside that namespace take the name
 # sproozi-claude-work so they do not replace the Codex executor's.
@@ -7,8 +7,9 @@
 # sproozi-remote-executor in sproozi-claude-sessions with "immutable: true"
 # (cmd/session-profile/README.md), and the Secret sproozi-work-credentials
 # with tls.crt and tls.key for sproozi-work.sproozi-claude-sessions.svc and
-# work-token. The executor runs no Claude Code tasks yet, so Hermes has no use
-# for its work token and no ingress below.
+# work-token. Hermes delegates Claude Code tasks with that work token through
+# its own MCP server entry for this executor
+# (docs/guides/retained-work-kubernetes.md).
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -243,7 +244,8 @@ spec:
         emptyDir:
           sizeLimit: 64Mi
 ---
-# Only the CLI reaches this executor, through a port-forward; no workload does.
+# The CLI reaches this executor through a port-forward; only Hermes, in
+# sproozi-coordinators, reaches it over the network, as for the Codex executor.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -254,3 +256,11 @@ spec:
     matchLabels:
       app: sproozi-work
   policyTypes: [Ingress]
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: sproozi-coordinators
+    ports:
+    - protocol: TCP
+      port: 8443

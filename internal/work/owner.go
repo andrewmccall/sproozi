@@ -310,7 +310,7 @@ func (o *Owner) SubmitAs(ctx context.Context, caller Caller, q Submit) (View, er
 		return View{}, err
 	}
 	interactive := q.Mode == ModeInteractive
-	if q.Harness != o.config.Harness || !interactive && !runsTasks(q.Harness) {
+	if q.Harness != o.config.Harness {
 		return View{}, &profile.Rejection{Code: profile.CodeUnsupported}
 	}
 	if q.Executor != o.config.Placement {
@@ -622,16 +622,12 @@ func (c Config) validateLimits() error {
 	return nil
 }
 
-// executorHarness reports whether an executor may run kind: Codex runs tasks
-// and interactive sessions, Claude Code interactive sessions only.
+// executorHarness reports whether an executor may run kind: Codex and Claude
+// Code each run tasks and interactive sessions. A Claude task's completion is
+// bound to its prompt's turn by the supervisor's UserPromptSubmit hook (ADR
+// 0057).
 func executorHarness(kind harness.NativeKind) bool {
 	return kind == harness.NativeCodex || kind == harness.NativeClaude
-}
-
-// runsTasks reports whether an executor for kind runs tasks: only Codex,
-// until the supervisor binds a Claude task's completion (ADR 0057).
-func runsTasks(kind harness.NativeKind) bool {
-	return kind == harness.NativeCodex
 }
 
 func (c Config) validate() error {

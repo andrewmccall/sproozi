@@ -473,7 +473,8 @@ func (q *options) submitError(err error, target remoteTarget, kind harness.Nativ
 }
 
 // harnessRefused explains a submission an executor does not run: each
-// executor runs one harness, and Claude Code's runs interactive sessions only.
+// executor runs one harness, and an executor older than this release may run
+// no interactive sessions, or, for Claude Code, no tasks.
 func harnessRefused(err error, target remoteTarget, kind harness.NativeKind, interactive bool) error {
 	switch {
 	case target.Harness != "" && target.Harness != kind:
@@ -484,7 +485,8 @@ func harnessRefused(err error, target remoteTarget, kind harness.NativeKind, int
 		return fmt.Errorf("%w: the cluster's remote executor %s does not run interactive sessions for %s; "+
 			"update the executor, or give --task to submit a task", err, target.Name, kind)
 	default:
-		return fmt.Errorf("%w: the cluster's remote executor %s runs interactive sessions for %s but not tasks; "+
-			"leave out --task to start an interactive session", err, target.Name, kind)
+		return fmt.Errorf("%w: the cluster's remote executor %s refused a %s task; an executor older than this "+
+			"release may run no %s tasks, so update the executor (docs/reference/remote-executors.md), or "+
+			"leave out --task to start an interactive session", err, target.Name, kind, kind)
 	}
 }

@@ -294,11 +294,11 @@ through the home journal. See the guide's
 
 ## Retained remote work
 
-To accept new Codex tasks, or Codex and Claude Code interactive sessions,
+To accept new Codex or Claude Code tasks and interactive sessions
 independently of the local service, add `workTokenFile`,
 `workTokenMaxDuration` and `repositories` to the configuration. An executor
-with `"harness": "claude-code"` runs interactive sessions only and refuses
-tasks ([example configuration](../../examples/portable-workflows/kubernetes/claude/profile.json)).
+runs the one harness its `harness` names, `codex` or `claude-code`
+([Claude Code example configuration](../../examples/portable-workflows/kubernetes/claude/profile.json)).
 `workTokenMaxDuration`, required with `workTokenFile`, caps the deadline of
 work submitted with the work token, which always has one; it must fit within
 `maxDuration` when that is set. `retainedBytes`, optional, bounds what remote
@@ -329,7 +329,8 @@ remote executor per state directory, with durable storage. Restart with the same
 changing principals cannot reinterpret retained records. A task's phases are
 the journal's: `stopping` while it waits for the task's turn, and
 `unknown-stop` or `unknown-usage` after a lost stop reply or missing accounting,
-which the executor retries by itself and `recover` retries at once. Missing
+which the executor retries by itself for a task and `recover` retries at once;
+an interactive session waits for `recover`. Missing
 stop/accounting evidence blocks export, and changing a request's intent on
 replay is rejected.
 

@@ -489,8 +489,8 @@ func executorFor(t *testing.T, kind harness.NativeKind) {
 }
 
 // A refused harness names the executor's harness and the one requested, and
-// how to reach the other executor; a Claude executor's refused task says it
-// runs interactive sessions only.
+// how to reach the other executor; a refused task for the executor's own
+// harness comes from an executor older than this release.
 func TestRemoteRunNamesTheExecutorsHarness(t *testing.T) {
 	f := serveFakeExecutor(t, interactiveView(phaseRunning))
 	executorFor(t, harness.NativeClaude)
@@ -504,8 +504,9 @@ func TestRemoteRunNamesTheExecutorsHarness(t *testing.T) {
 	f.reply("run", answerStatus(http.StatusUnprocessableEntity, `{"error":"unsupported"}`))
 	code, _, errOut = runCLI("run", "--remote", "--repository", "sproozi", "--harness", "claude-code",
 		"--task", "fix it")
-	if code != 1 || !strings.Contains(errOut, "runs interactive sessions for claude-code but not tasks") ||
-		!strings.Contains(errOut, "leave out --task") || strings.Contains(errOut, "--operation") {
+	if code != 1 || strings.Contains(errOut, "but not tasks") || !strings.Contains(errOut, "refused a claude-code task") ||
+		!strings.Contains(errOut, "update the executor") || !strings.Contains(errOut, "leave out --task") ||
+		strings.Contains(errOut, "--operation") {
 		t.Fatalf("Claude task: %d %s", code, errOut)
 	}
 }

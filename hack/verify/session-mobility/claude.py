@@ -508,11 +508,16 @@ class Proof(BASE.Proof):
             self.terminal(index)
             # Claude Code resumes a conversation with the system prompt and skill
             # listing it started with, so model requests keep the first visit's
-            # profile; each visit's own launch must still render its profile.
+            # profile. Clients from 2.1.3xx also announce a skill whose
+            # description changed, so a later visit's marker may follow; a
+            # marker from a visit that has not begun never may. Each visit's
+            # own launch must still render its profile.
             turns = [r for r in self.provider(quiet=True) if r["kind"] == "conversation" and r["turn"] == index]
-            BASE.check(turns and all(r["profileMarkers"] == [markers[0]] and r["profileSkill"] for r in turns),
+            BASE.check(turns and all(markers[0] in r["profileMarkers"] and set(r["profileMarkers"]) <= set(markers[:index + 1])
+                                     and r["profileSkill"] for r in turns),
                        "Turn %d model requests lost the conversation's profile" % index)
-            step = {"turn": index, "requestProfileMarker": markers[0], "profileSkill": True}
+            seen = sorted({m for r in turns for m in r["profileMarkers"]}, key=markers.index)
+            step = {"turn": index, "requestProfileMarker": markers[0], "requestProfileMarkers": seen, "profileSkill": True}
             if self.probes:
                 active = self.cli("status")["session"]["active"]
                 rendered = self.probes.read(active, "/tmp/sproozi-native/profile-plugin/skills/" + BASE.PROFILE_SKILL + "/SKILL.md")
