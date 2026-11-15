@@ -63,6 +63,10 @@ issue when the latest releases differ from the pins or fail.
 Pins move only by pull request, following
 [Bumping pinned clients](../../hack/clients/README.md#bumping-pinned-clients).
 
+*Note, 2026-11-15:* [ADR 0059](0059-renovate-proposes-pin-updates.md) has
+Renovate propose those pull requests, and the canary's issue no longer reports
+drift alone, only failures. People still review and merge every pin change.
+
 This replaces the package-selection part of ADR 0015: "install with
 unversioned package names", "pull Hermes without a release tag or digest" and
 "rebuild client images with fresh package resolution in acceptance tests". The

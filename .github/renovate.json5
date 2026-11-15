@@ -1,0 +1,140 @@
+// Renovate proposes pull requests that move the pins in this repository. It
+// never merges them: a code owner reviews each one, as for any pin change.
+// Scope and reasons: docs/adr/0059-renovate-proposes-pin-updates.md.
+// The file is JSON5 (not renovate.json) so each rule can say why it exists.
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+
+  extends: [
+    "helpers:pinGitHubActionDigests", // keep `uses: owner/repo@<sha> # vX.Y.Z`
+    "docker:pinDigests",              // keep `image:tag@sha256:...`
+    ":disableDependencyDashboard",    // see below
+  ],
+
+  // Only these managers run. Everything else is moved by hand and stays off:
+  // gomod (the Go modules and toolchain pin have their own gate, `make
+  // verify-deps`), pip_requirements, kustomize image tags, the devcontainer
+  // and every other manager. Listing the four here is the explicit disable.
+  enabledManagers: ["github-actions", "dockerfile", "npm", "custom.regex"],
+
+  // A single maintainer sees every Renovate pull request in the pull request
+  // list, and the weekly schedule and limits below keep that list short. The
+  // dashboard would add one more issue to read. Turn it on if the limits
+  // start to hide pending updates.
+  dependencyDashboard: false,
+
+  automerge: false,           // people merge pins; nothing merges itself
+  platformAutomerge: false,
+  // CODEOWNERS (.github/CODEOWNERS) requests the review; Renovate adds no
+  // reviewers or assignees of its own.
+  timezone: "UTC",
+  schedule: ["before 5am on monday"], // ahead of the canary at 06:17 UTC
+  prConcurrentLimit: 4,
+  prHourlyLimit: 4,
+  rebaseWhen: "conflicted",
+  labels: ["dependencies"],
+
+  // House commit style: a plain imperative sentence, no conventional prefix.
+  semanticCommits: "disabled",
+  commitMessageAction: "Update",
+  commitMessageTopic: "{{depName}}",
+
+  // Hold a branch until a release is three days old, so a release that
+  // upstream pulls within hours never reaches a pull request. Strict keeps a
+  // too-new release out of the branch instead of only marking the status.
+  minimumReleaseAge: "3 days",
+  internalChecksFilter: "strict",
+
+  // The four client packages. Each directory is its own package.json with an
+  // exact version and a lockfile. Renovate runs npm with install scripts off,
+  // which is what the pins require (ADR 0021); do not enable scripts here.
+  npm: {
+    managerFilePatterns: ["/^hack/clients/[^/]+/package\\.json$/"],
+  },
+
+  customManagers: [
+    {
+      // Hermes is pinned by the index digest of its `latest` tag, copied into
+      // the verifier, the guide, the example and a README. Renovate rewrites
+      // every file in the same pull request.
+      customType: "regex",
+      description: "Hermes image digest",
+      managerFilePatterns: [
+        "/^hack/verify/orchestration-kind/build\\.py$/",
+        "/^hack/verify/portable-workflows/README\\.md$/",
+        "/^docs/guides/hermes-orchestration\\.md$/",
+        "/^examples/orchestration/hermes-coordinator\\.yaml$/",
+      ],
+      matchStrings: [
+        "(?<depName>docker\\.io/nousresearch/hermes-agent)@(?<currentDigest>sha256:[a-f0-9]{64})",
+      ],
+      datasourceTemplate: "docker",
+      currentValueTemplate: "latest",
+    },
+    {
+      // buildx's BuildKit image in workflow `driver-opts`, which the
+      // github-actions manager does not read.
+      customType: "regex",
+      description: "BuildKit image digest",
+      managerFilePatterns: ["/^\\.github/workflows/[^/]+\\.ya?ml$/"],
+      matchStrings: [
+        "image=(?<depName>moby/buildkit):(?<currentValue>v[0-9.]+)@(?<currentDigest>sha256:[a-f0-9]{64})",
+      ],
+      datasourceTemplate: "docker",
+    },
+  ],
+
+  packageRules: [
+    {
+      // Image tags (the node major, the Debian release, the BuildKit
+      // release) are chosen by hand, so only digests move. Hermes is exempt
+      // because its tag is `latest`, which Renovate reports as a digest update.
+      matchDatasources: ["docker"],
+      matchUpdateTypes: ["major", "minor", "patch"],
+      enabled: false,
+    },
+    {
+      // The Go toolchain pin moves by hand with go.mod and the Makefile
+      // (`make verify-deps`), never by a base image digest alone.
+      matchDatasources: ["docker"],
+      matchPackageNames: ["golang", "docker.io/library/golang"],
+      enabled: false,
+    },
+    {
+      // One pull request for the four clients and their lockfiles.
+      groupName: "agent clients",
+      matchManagers: ["npm"],
+      rangeStrategy: "pin",
+      separateMajorMinor: false,
+      separateMultipleMajor: false,
+      commitMessageTopic: "agent clients",
+      addLabels: ["clients"],
+    },
+    {
+      // The Hermes image has its own pull request: a different artefact with
+      // its own digest, exercised by `make test-e2e`.
+      groupName: "Hermes image",
+      matchDepNames: ["docker.io/nousresearch/hermes-agent"],
+      commitMessageTopic: "Hermes image",
+      addLabels: ["clients"],
+    },
+    {
+      groupName: "GitHub Actions",
+      matchManagers: ["github-actions"],
+      commitMessageTopic: "GitHub Actions",
+      addLabels: ["ci"],
+    },
+    {
+      groupName: "container base images",
+      matchManagers: ["dockerfile"],
+      commitMessageTopic: "container base image digests",
+      addLabels: ["ci"],
+    },
+    {
+      groupName: "container base images",
+      matchDepNames: ["moby/buildkit"],
+      commitMessageTopic: "container base image digests",
+      addLabels: ["ci"],
+    },
+  ],
+}

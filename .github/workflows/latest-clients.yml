@@ -2,8 +2,10 @@ name: Latest Clients Canary
 
 # Pull request CI builds only the pinned clients in hack/clients and the pinned
 # Hermes digest. This scheduled run is the only place that installs the newest
-# upstream releases. It reports drift in one tracking issue and never changes
-# the pins. See docs/adr/0021-pinned-ci-inputs-and-latest-client-canary.md.
+# upstream releases. It opens one tracking issue when the latest clients fail
+# and never changes the pins; Renovate proposes the pin updates. See
+# docs/adr/0021-pinned-ci-inputs-and-latest-client-canary.md and
+# docs/adr/0059-renovate-proposes-pin-updates.md.
 on:
   schedule:
     - cron: '17 6 * * 1'
@@ -141,11 +143,11 @@ jobs:
     if: ${{ !cancelled() }}
     permissions:
       issues: write
-    name: Open or update the drift issue
+    name: Open or update the failure issue
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Report drift or failure
+      - name: Report a failure
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -166,15 +168,16 @@ jobs:
           [[ "$CANARY" =~ $outcome ]] || CANARY=unknown
           [[ "$CLIENTS" =~ $outcome ]] || CLIENTS=unknown
           [[ "$E2E" =~ $outcome ]] || E2E=unknown
-          if [[ "$DRIFT" == false && "$CANARY" == success && "$CLIENTS" == success && "$E2E" == success ]]; then
-            echo 'Pinned clients are current and pass; no issue update'
+          # Drift alone is Renovate's pull request, not an issue.
+          if [[ "$CANARY" == success && "$CLIENTS" == success && "$E2E" == success ]]; then
+            echo "Latest clients pass (differs from pins: $DRIFT); no issue update"
             exit 0
           fi
-          title='Latest clients canary: pins differ from upstream or fail'
+          title='Latest clients canary: the latest clients fail'
           run="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           body="$RUNNER_TEMP/body.md"
           {
-            echo "The weekly latest-clients canary found drift or a failure."
+            echo "The weekly latest-clients canary found a failure with the latest clients."
             echo
             echo "- Run: $run"
             echo "- Pinned: \`$PINNED\`"
@@ -184,7 +187,7 @@ jobs:
             echo "- E2E with latest clients and Hermes: $E2E"
             echo "- Canary job: $CANARY"
             echo
-            echo "To move the pins, follow hack/clients/README.md in a pull request."
+            echo "Pins move by Renovate pull request; see hack/clients/README.md."
           } >"$body"
           number="$(gh issue list --state open --search "in:title \"$title\"" \
             --json number,title --jq "map(select(.title == \"$title\")) | .[0].number // empty")"

@@ -34,3 +34,10 @@ not a compatibility claim for every Kubernetes version. The demo tools image
 uses kubectl 1.34.1; check the
 [kubectl version skew policy](https://kubernetes.io/releases/version-skew-policy/#kubectl)
 against your cluster.
+
+## Pinned test and build inputs
+
+Pull request CI runs only pinned agent clients, the Hermes image digest, GitHub
+Actions SHAs and base image digests. Renovate proposes the updates and a code
+owner reviews them; Calico's checksum-pinned manifest, Go modules and the Go
+toolchain are moved by hand. See [Pinned agent clients](../../hack/clients/README.md#bumping-pinned-clients).

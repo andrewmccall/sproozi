@@ -68,6 +68,8 @@ namespace with `BudgetLedger` resources in `sproozi-system`.
 ADR 0043 removes the event webhook, superseding ADRs 0022 and 0042 and the
 replay records of ADR 0017.
 
+ADR 0059 replaces ADR 0021's manual moving of pins and its drift-only canary issue.
+
 ADR 0029 extends those pinned clients to the published native image, replacing
 ADR 0024's statement that releases do not pin clients.
 
@@ -127,3 +129,4 @@ ADR 0024's statement that releases do not pin clients.
 | [0052](0052-copilot-policy-fetch-queries.md) | Copilot's exact managed-settings route accepts its query and preserves the provider's policy response; relay refusals describe method and query presence without query content. |
 | [0053](0053-copilot-account-namespaces-and-policy-verification.md) | GitHub-backed Copilot relays GETs in both account namespaces; CI separately verifies the registry-policy URL through the authenticated gateway and the pinned client's model/MCP turn. |
 | [0054](0054-claude-code-agentruns-launch-through-a-helper.md) | Claude Code AgentRuns launch through `claude-launch.py`, which publishes the stock client's result and keeps its login in step with a mounted login store; `--login` signs a login in once. |
+| [0059](0059-renovate-proposes-pin-updates.md) | Renovate proposes the pull requests that move pinned clients, the Hermes digest, actions and image digests; people review and merge them, and the canary reports only failures. |
