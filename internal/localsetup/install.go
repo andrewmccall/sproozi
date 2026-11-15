@@ -143,7 +143,7 @@ func (o Options) withDefaults() Options {
 		o.Progress = io.Discard
 	}
 	if o.Harness == "" {
-		o.Harness = harness.NativeCodex
+		o.Harness = harness.Default()
 	}
 	if o.Instructions == "" {
 		o.Instructions = DefaultInstructions
@@ -591,23 +591,6 @@ var (
 	anchorLimits = runtimedocker.ResourceLimits{MemoryBytes: 64 << 20, CPUMilli: 100, PIDs: 32}
 )
 
-// codexOptions point stock Codex at the OpenAI Responses API through the
-// gateway with the worker's placeholder key, and trust the managed workspace.
-var codexOptions = []string{
-	`model_provider="sproozi"`,
-	`model_providers.sproozi.name="OpenAI through Sproozi"`,
-	`model_providers.sproozi.base_url="https://api.openai.com/v1"`,
-	`model_providers.sproozi.env_key="OPENAI_API_KEY"`,
-	`model_providers.sproozi.wire_api="responses"`,
-	`model_providers.sproozi.supports_websockets=false`,
-	codexTrust,
-}
-
-// codexTrust trusts the session workspace. A Codex that signs in itself keeps
-// only this option and uses its built-in OpenAI provider, which reaches the
-// ChatGPT backend or the API to match its sign-in (ADR 0047).
-const codexTrust = `projects."/workspace/session/workspace".trust_level="trusted"`
-
 // MCPAuthority is the name workers use for the gateway's MCP endpoint, which
 // always serves the Sproozi control connection. The home's certificate
 // authority issues the gateway a certificate that covers it.
@@ -655,14 +638,14 @@ func tokenKind(h Harness) string {
 	return h.Kind
 }
 
+// nativeOptions are the registry's options for the harness: with its own
+// sign-in, or with a credential the gateway holds.
 func nativeOptions(kind harness.NativeKind, signIn bool) []string {
-	if kind == harness.NativeCodex && signIn {
-		return []string{codexTrust}
+	h, _ := harness.Managed(kind)
+	if signIn {
+		return slices.Clone(h.SignInOptions)
 	}
-	if kind == harness.NativeCodex {
-		return slices.Clone(codexOptions)
-	}
-	return nil
+	return slices.Clone(h.KeyOptions)
 }
 
 func readExistingConfig(l Layout) (home.Config, bool, error) {

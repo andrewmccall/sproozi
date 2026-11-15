@@ -68,3 +68,13 @@ func TestWizardStopsAtEndOfInput(t *testing.T) {
 		t.Fatalf("err = %v; want advice to give the flags", err)
 	}
 }
+
+// Every managed harness has sign-in choices; without them the wizard would
+// skip its question and leave the harness's credential unasked.
+func TestEveryManagedKindHasSignInChoices(t *testing.T) {
+	for _, kind := range harness.ManagedKinds() {
+		if len(signInChoices[kind]) == 0 {
+			t.Errorf("managed harness %q has no signInChoices in cmd/sproozi/wizard.go", kind)
+		}
+	}
+}

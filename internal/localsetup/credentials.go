@@ -172,7 +172,7 @@ func CheckCredential(ctx context.Context, kind harness.NativeKind, providerURL, 
 	if err != nil {
 		return err
 	}
-	if kind == harness.NativeClaude {
+	if h, err := harness.Managed(kind); err == nil && h.Protocol == harness.ProtocolAnthropic {
 		request.Header.Set("x-api-key", strings.TrimSpace(string(key)))
 		request.Header.Set("anthropic-version", "2023-06-01")
 	} else {
