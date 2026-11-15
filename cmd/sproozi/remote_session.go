@@ -325,7 +325,7 @@ func (q *options) pullFinishedHere(ctx context.Context, id string) error {
 			q.remoteCommand(cmdRemove, id), shortID(id))
 	case err != nil:
 		return err
-	case response.Status == nil || response.Status.Ownership != "home":
+	case response.Status == nil || response.Status.Ownership != serviceOwnership:
 		return fmt.Errorf("session %s is still being pulled to this machine; finish with \"sproozi pull %s\", "+
 			"then remove it", id, shortID(id))
 	}

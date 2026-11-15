@@ -164,8 +164,8 @@ func (c *Coordinator) lockJournals(ids []string, wait time.Duration) (func(), er
 	sorted = slices.Compact(sorted)
 	var unlocks []func()
 	unlock := func() {
-		for i := len(unlocks) - 1; i >= 0; i-- {
-			unlocks[i]()
+		for _, v := range slices.Backward(unlocks) {
+			v()
 		}
 	}
 	deadline := time.Now().Add(wait)
