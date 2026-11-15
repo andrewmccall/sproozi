@@ -93,6 +93,13 @@ func replaceFile(temp, target, dir string) error {
 	if err := os.Rename(temp, target); err != nil {
 		return err
 	}
+	return SyncDir(dir)
+}
+
+// SyncDir makes the directory's entries durable, such as a removal before a
+// later step that relies on it. It does not establish hardware power-loss
+// guarantees.
+func SyncDir(dir string) error {
 	f, err := os.Open(dir)
 	if err != nil {
 		return err

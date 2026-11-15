@@ -58,9 +58,9 @@ func (c *Coordinator) Create(first Launch, input []byte, session string) (Record
 		return Record{}, err
 	}
 	if first.CheckpointDigest == "" {
-		r.Workspace, err = c.retainWorkspace(input)
+		r.Workspace, err = c.retainWorkspace(first.ExecutionID, input)
 	} else {
-		r.Checkpoint, err = c.commitCheckpoint(input, first.Harness, first.ThreadID, first.CheckpointDigest)
+		r.Checkpoint, err = c.commitCheckpoint(first.ExecutionID, input, first.Harness, first.ThreadID, first.CheckpointDigest)
 	}
 	if err != nil {
 		return Record{}, err
@@ -288,7 +288,7 @@ func (c *Coordinator) commitStopped(r Record, s Stopped) (string, Checkpoint, er
 	if !validUUID(thread) || observed != thread {
 		return "", Checkpoint{}, errors.New("session: stopped native thread conflicts with the execution")
 	}
-	cp, err := c.commitCheckpoint(s.Checkpoint, r.Harness, thread, s.CheckpointDigest)
+	cp, err := c.commitCheckpoint(r.ID, s.Checkpoint, r.Harness, thread, s.CheckpointDigest)
 	return thread, cp, err
 }
 func (c *Coordinator) prepareDestination(ctx context.Context, r Record, index int) (Record, error) {
@@ -304,7 +304,7 @@ func (c *Coordinator) prepareDestination(ctx context.Context, r Record, index in
 			// Without a kept conversation the visit starts again from the
 			// retained workspace, with no thread or checkpoint.
 			launch := Launch{Harness: r.Harness, ExecutionID: r.ID, OperationID: op.ID, AllocationID: uuid.NewString(), Epoch: r.Epoch + 1, Placement: op.Destination, ThreadID: r.ThreadID, InstructionDigest: r.InstructionDigest, IncludeIgnored: append([]string(nil), r.IncludeIgnored...), HarnessArgs: append([]string(nil), r.HarnessArgs...), Login: r.Login, Deadline: r.Deadline, Allowances: cloneAllowances(r.Remaining), CheckpointDigest: r.Checkpoint.Metadata.SHA256}
-			digest, err := c.retainProfile()
+			digest, err := c.retainProfile(r.ID)
 			if err != nil {
 				return r, fmt.Errorf("session: profile: %w", err)
 			}
