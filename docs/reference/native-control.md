@@ -42,7 +42,7 @@ to quit and waits at most 30 seconds, or until a set deadline if sooner, for
 it to exit. A harness still running then is killed, and once the same
 completed turn is observed again `quiesce` replies `stopped` with the
 conversation and turn and an `exit` whose reason is `forced-stop`, writes no
-exit report and leaves the supervisor's exit code nonzero
+exit report and exits 0, as after any graceful stop
 ([ADR 0035](../adr/0035-bounded-graceful-stops-and-settled-input.md)). At the
 deadline it replies with an error and reports the cause `deadline`.
 

@@ -94,8 +94,9 @@ supervisor observes the same completed turn again before it accepts the
 stop. The reply is then `stopped` with the conversation and turn, its exit
 reason is `forced-stop`, and no exit report is written: the stop is neither
 a deadline nor the harness's own exit
-([ADR 0038](0038-exited-agents-and-one-recovery-path.md)). The supervisor's
-own exit code is nonzero. The placement still fences the container itself
+([ADR 0038](0038-exited-agents-and-one-recovery-path.md)). The supervisor
+exits 0, as after any graceful stop, so a placement that lost the reply and
+reads only the exit code does not take it for a failed agent. The placement still fences the container itself
 and validates the captured state. Claude Code and Copilot are already
 stopped by a kill after completion, so for them the bound only limits the
 wait for that kill to be confirmed; one not confirmed by then fails the stop

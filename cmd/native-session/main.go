@@ -615,9 +615,11 @@ func (s *server) quiesce() response {
 	}
 	code, problem := adapter.settle(exit)
 	if forced {
-		// Not a clean quit, so not a clean supervisor exit; but the turn
-		// completed and the harness is stopped, so the stop stands.
-		code, problem = 1, ""
+		// Not a clean quit, but the turn completed and the harness is
+		// stopped, so the stop stands. The supervisor exits 0, as after
+		// Claude Code's kill: a placement that lost this reply and reads
+		// only the exit code must not take the stop for a failed agent.
+		code, problem = 0, ""
 		fmt.Fprintf(os.Stderr, "Forced the harness to stop after it did not exit within %s of its quit\n", quitWait)
 	}
 	s.endGracefully(exit, code, id)
