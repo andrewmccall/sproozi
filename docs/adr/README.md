@@ -35,15 +35,32 @@ Look back over the work: the options you considered, the checks you ran and
 any review comments. Every important choice should either have an ADR or a
 sentence in the change description saying why it needs none. One ADR can cover
 several related choices. Say which options were chosen, which were rejected,
-and what was fixed or left for later. Do not rewrite earlier records to match.
+and what was fixed or left for later.
 
 Update affected explanations, references and examples. Update the main README
 when supported capabilities change. Compare claims with code and test evidence,
 then run `make verify-docs`. The command checks required documents and links. It
 does not check documentation accuracy or decision coverage.
 
-Preserve accepted decision history. To replace a decision, add a new ADR, mark
-the old record superseded and link both records.
+## Keeping the records current
+
+This folder holds only records that describe the system as it is. A record is
+current or it is removed.
+
+- **Replaced or gone.** A record whose decisions are all replaced, or whose
+  feature is gone, is marked deprecated and deleted in the change that replaces
+  it. Add a row for it to the Removed table, with the record or page that now
+  holds the decision and links to the change that removed it and to its last
+  text.
+- **Corrected.** A current record may receive a dated correction of fact in
+  place, for example `Corrected 2026-11-15: ...`.
+- **Changed.** A change to a decision needs a new record. The record it
+  replaces is removed in the same change.
+- **Numbers.** A number is never reused. Reserve one in the Reserved numbers
+  table when a record is in flight on another branch.
+
+`make verify-docs` fails when an `ADR NNNN` mention in the repository names a
+number that has no record, no reserved row and no removed row.
 
 ## Decisions
 
@@ -64,9 +81,6 @@ ADR 0040 removes ADR 0014's kube-dns exception: Kubernetes sandboxes resolve
 no names. ADR 0041 gives ADR 0020's failed Docker removals an owner, the local
 service's periodic retry. ADR 0045 replaces ADR 0041's `sproozi-budget`
 namespace with `BudgetLedger` resources in `sproozi-system`.
-
-ADR 0043 removes the event webhook, superseding ADRs 0022 and 0042 and the
-replay records of ADR 0017.
 
 ADR 0029 extends those pinned clients to the published native image, replacing
 ADR 0024's statement that releases do not pin clients.
@@ -90,9 +104,7 @@ kept.
 | [0002](0002-native-cli-harnesses-and-model-protocols.md) | Native CLI harnesses and model protocols. |
 | [0003](0003-persistent-assistants-and-retained-results.md) | Persistent assistants and retained job answers. |
 | [0004](0004-portable-sessions-and-bounded-executions.md) | Sessions across bounded executions. |
-| [0005](0005-controlled-docker-launch-before-session-adoption.md) | Controlled Docker launch before adopting existing sessions. |
 | [0006](0006-native-cli-and-terminal-before-gui-mobility.md) | Native CLI and terminal access before GUI integration. |
-| [0007](0007-codex-round-trip-before-harness-expansion.md) | Codex before additional session adapters. |
 | [0008](0008-selected-native-and-git-checkpoints.md) | Selected conversation and Git checkpoints. |
 | [0009](0009-runtime-backends-and-sealed-accounting.md) | Runtime backends and finalized usage accounting. |
 | [0010](0010-managed-session-authority-and-admission.md) | Managed-session permissions and destination admission. |
@@ -107,7 +119,6 @@ kept.
 | [0019](0019-pull-operations-and-work-owner-names.md) | Derived pull operations and one rule for resolving work owner names. |
 | [0020](0020-docker-placement-removes-stopped-visits.md) | The Docker placement removes a stopped visit's containers and volume after recording it. |
 | [0021](0021-pinned-ci-inputs-and-latest-client-canary.md) | Pull request CI runs only pinned clients, images and manifests; a weekly canary reports upstream drift. |
-| [0022](0022-webhook-hmac-secrets-in-own-namespace.md) | Superseded by 0043. Webhook HMAC Secrets live in their own namespace, away from provider credentials. |
 | [0023](0023-controller-writes-only-in-sproozi-agents.md) | The controller writes sandbox objects only in sproozi-agents; its cluster role keeps reads. |
 | [0024](0024-native-host-platforms-and-cli-releases.md) | Native host security and automated CLI releases with a Homebrew tap. |
 | [0025](0025-managed-harness-integration-and-diagnose.md) | Every harness receives the Sproozi integration, and the gateway explains an execution's own denials. |
@@ -127,7 +138,6 @@ kept.
 | [0039](0039-one-harness-registry-and-the-mcp-requirement.md) | One harness registry with guard tests; every harness needs an MCP client for the `sproozi` control connection. |
 | [0040](0040-sandboxes-reach-the-gateway-without-dns.md) | Sandboxes resolve no names: the controller pins the gateway address in each Pod, and the NetworkPolicy has no DNS rule. |
 | [0041](0041-gateway-state-namespace-and-retained-state-owners.md) | Budget ledgers move to `sproozi-budget` and the remote executor to `sproozi-sessions`, so neither the gateway nor the executor can write ConfigMaps in `sproozi-system`; the gateway prunes settled ledgers of deleted runs; the local service finishes Docker removals; registry records keep no expiry yet. |
-| [0042](0042-idempotent-webhook-delivery.md) | Superseded by 0043. Webhook runs are named from the event, replay records track delivery, and every failure before verification returns 401. |
 | [0043](0043-remove-the-event-webhook.md) | The event webhook is removed until a supported sender exists; its design and gotchas move to a future-architecture note. |
 | [0044](0044-the-api-stays-alpha-with-a-written-policy.md) | The CRDs stay `v1alpha1` under a written compatibility policy, with criteria for moving to `v1beta1`; the 1.0 promise is dropped. |
 | [0045](0045-budget-ledgers-are-a-custom-resource.md) | Budget ledgers become `BudgetLedger` resources in `sproozi-system`; write access to them grants no ConfigMap writes, so the `sproozi-budget` namespace is removed. |
@@ -144,3 +154,26 @@ kept.
 | [0057](0057-the-remote-executor-owns-its-sessions-through-the-coordinator.md) | The remote executor owns its sessions through the coordinator: the work catalogue keeps intent, project, executions, the task's result and the pull, and derives its phase from the coordinator's; work-token tasks take `workTokenMaxDuration`; `retainedBytes` bounds the executor's storage; stopped version 1 records stay readable. |
 | [0058](0058-lifecycle-records-declare-states-and-transitions.md) | Lifecycle records declare a typed phase validated on load and save, a `(from, event) → to` table with a deadline column, and one apply function for live code and recovery; the execution journal derives its phase from its structure and adopts it first. |
 | [0060](0060-no-state-waits-on-a-deadline-to-end.md) | No state waits on a deadline to end: a start or move that its deadline overtakes ends as `abandoned`, once nothing can run at its destination, and leaves the execution idle with its last checkpoint, so `resume` continues the session instead of `cancel` being the only way on. |
+
+## Reserved numbers
+
+These numbers belong to records that are not on `main` yet. Do not use them.
+
+| Number | Record |
+| --- | --- |
+| 0055 | Release Please, proposed on an unmerged branch. |
+| 0059 | Renovate proposes pin updates, in a change based on main. |
+
+## Removed
+
+These records were deleted because they no longer describe the system. Each row
+names the record or page that now holds anything still true. "Removed in" lists
+the history of the file, which ends at the removing commit once merged; "last
+text" is the file as it stood on `main` before removal.
+
+| Number | Title | Why removed | Now held by | Removed in | Last text |
+| --- | --- | --- | --- | --- | --- |
+| 0005 | Controlled Docker launch before adopting existing sessions | A sequencing decision, fulfilled: the controlled launch exists, and adoption of directly started sessions stays deferred. | [Session mobility](../explanations/future-architecture/session-mobility.md#adopt-directly-started-sessions), [execution runtimes](../explanations/future-architecture/execution-runtimes.md), and the no-host-bind rule in [ADR 0010](0010-managed-session-authority-and-admission.md) and [ADR 0011](0011-native-session-compatibility-and-completion.md). | [history](https://github.com/andrewmccall/sproozi/commits/main/docs/adr/0005-controlled-docker-launch-before-session-adoption.md) | [text](https://github.com/andrewmccall/sproozi/blob/944dfae70f49bf8c1965fcc9e235cf6dd201357f/docs/adr/0005-controlled-docker-launch-before-session-adoption.md) |
+| 0007 | Codex before additional session adapters | A sequencing decision, fulfilled; its "no generic harness registry" was replaced by ADR 0039. | [ADR 0011](0011-native-session-compatibility-and-completion.md), [ADR 0039](0039-one-harness-registry-and-the-mcp-requirement.md) and [ADR 0048](0048-github-copilot-cli-is-a-managed-harness.md). | [history](https://github.com/andrewmccall/sproozi/commits/main/docs/adr/0007-codex-round-trip-before-harness-expansion.md) | [text](https://github.com/andrewmccall/sproozi/blob/944dfae70f49bf8c1965fcc9e235cf6dd201357f/docs/adr/0007-codex-round-trip-before-harness-expansion.md) |
+| 0022 | Webhook HMAC Secrets live in their own namespace | The event webhook it governed was removed by ADR 0043. | [ADR 0043](0043-remove-the-event-webhook.md) and [event webhooks](../explanations/future-architecture/event-webhooks.md). | [history](https://github.com/andrewmccall/sproozi/commits/main/docs/adr/0022-webhook-hmac-secrets-in-own-namespace.md) | [text](https://github.com/andrewmccall/sproozi/blob/944dfae70f49bf8c1965fcc9e235cf6dd201357f/docs/adr/0022-webhook-hmac-secrets-in-own-namespace.md) |
+| 0042 | Idempotent webhook delivery and one response before verification | The event webhook it governed was removed by ADR 0043. | [ADR 0043](0043-remove-the-event-webhook.md) and [event webhooks](../explanations/future-architecture/event-webhooks.md). | [history](https://github.com/andrewmccall/sproozi/commits/main/docs/adr/0042-idempotent-webhook-delivery.md) | [text](https://github.com/andrewmccall/sproozi/blob/944dfae70f49bf8c1965fcc9e235cf6dd201357f/docs/adr/0042-idempotent-webhook-delivery.md) |

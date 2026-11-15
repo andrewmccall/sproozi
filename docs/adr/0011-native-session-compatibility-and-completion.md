@@ -18,8 +18,8 @@ each graceful wait, and accepts Claude's `system` request caches.
 
 ## Problem and constraints
 
-[ADR 0007](0007-codex-round-trip-before-harness-expansion.md) selected a complete
-Codex round trip followed by an independently verified Claude Code extension.
+ADR 0007 ([removed](README.md#removed)) selected a complete Codex round trip
+followed by an independently verified Claude Code extension.
 Both must preserve the stock interactive terminal and native UUID. A common
 summary format or a prompt interface around headless execution would change that
 experience. Each client also needs its own native state and completion checks.

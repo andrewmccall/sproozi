@@ -21,8 +21,8 @@ execution with fresh approval; it does not renew the old live-move ledger.
 
 ## Adopt directly started sessions
 
-The first supported entry is Sproozi's controlled Docker launch, selected in
-[ADR 0005](../../adr/0005-controlled-docker-launch-before-session-adoption.md).
+The first supported entry is Sproozi's controlled Docker launch, so that the
+source environment is known.
 Adopting an arbitrary local Codex or Claude conversation needs explicit
 selection, compatible native state, inspection of workspace dependencies and
 control of the original writer before a resumed agent starts. Imported
@@ -36,8 +36,8 @@ access. Keep refusal explicit when those guarantees cannot be established.
 
 ## Additional harnesses and clients
 
-[ADR 0007](../../adr/0007-codex-round-trip-before-harness-expansion.md) selects
-Claude Code after Codex. The current workflow supports those two selected clients.
+Codex and Claude Code completed the first round trips. GitHub Copilot CLI is also a
+managed harness ([ADR 0048](../../adr/0048-github-copilot-cli-is-a-managed-harness.md)).
 [ADR 0011](../../adr/0011-native-session-compatibility-and-completion.md) records
 the Claude transcript and completion contract. [ADR 0015](../../adr/0015-default-clients-and-native-tool-schemas.md)
 removes exact-version checks.

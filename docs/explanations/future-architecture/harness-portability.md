@@ -60,12 +60,13 @@ implementing; do not rely on undocumented session-file manipulation.
 
 The accepted first client experience is native CLI locally and terminal attachment
 remotely, under [ADR 0006](../../adr/0006-native-cli-and-terminal-before-gui-mobility.md).
-GUI/IDE connection remains a future extension. [ADR 0007](../../adr/0007-codex-round-trip-before-harness-expansion.md)
-selects the complete Codex round trip first, followed by Claude Code.
+GUI/IDE connection remains a future extension. The first complete round trips were Codex, then Claude Code.
+[ADR 0039](../../adr/0039-one-harness-registry-and-the-mcp-requirement.md) holds
+the harness registry, and GitHub Copilot CLI is also a managed harness
+([ADR 0048](../../adr/0048-github-copilot-cli-is-a-managed-harness.md)).
 
-The first session starts through Sproozi in local Docker, under
-[ADR 0005](../../adr/0005-controlled-docker-launch-before-session-adoption.md).
-Later adoption of a directly
+The first session starts through Sproozi in local Docker, so that the
+source environment is known. Later adoption of a directly
 started harness conversation requires explicit user selection, safe state import and
 control of the original writer. A copied session cannot import cached approvals
 as a Sproozi grant. If native GUI access is unsupported, retain the proved CLI or

@@ -29,12 +29,15 @@ within that destination; they do not replace it.
 
 The user also accepted these independently revisitable scope decisions:
 
-- [ADR 0005](0005-controlled-docker-launch-before-session-adoption.md): start
-  through Sproozi in local Docker; defer existing-session adoption.
+- ADR 0005 ([removed](README.md#removed)): start through Sproozi in local
+  Docker; defer existing-session adoption. Adoption is still deferred, under
+  [session mobility](../explanations/future-architecture/session-mobility.md#adopt-directly-started-sessions).
 - [ADR 0006](0006-native-cli-and-terminal-before-gui-mobility.md): native CLI
   locally and terminal attachment remotely; defer native GUI/IDE integration.
-- [ADR 0007](0007-codex-round-trip-before-harness-expansion.md): complete Codex's
-  round trip first, then Claude Code before broader portability claims.
+- ADR 0007 ([removed](README.md#removed)): complete Codex's round trip first,
+  then Claude Code before broader portability claims. Both are done, and
+  [ADR 0039](0039-one-harness-registry-and-the-mcp-requirement.md) now holds
+  the harness registry.
 
 The user also selected a completed-turn checkpoint boundary: wait for the current
 native turn and tools to finish rather than interrupting active work. Preserve

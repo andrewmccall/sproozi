@@ -121,7 +121,7 @@ The same review made three related contracts explicit:
   or a harness needs its launch changed after creation.
 - Status reads need a consistent view across several journals, which the
   lock-free `Inspect` does not provide.
-- Adopting existing native sessions ([ADR 0005](0005-controlled-docker-launch-before-session-adoption.md))
+- Adopting existing native sessions ([session mobility](../explanations/future-architecture/session-mobility.md#adopt-directly-started-sessions))
   needs a first visit that the coordinator does not prepare.
 
 ## Evidence

@@ -67,7 +67,7 @@ estimate, once its lease expires; it is still never refunded). Discovery request
 
 This replaces the version-pinning portions of ADRs 0008, 0010 and 0011, and the
 combined discovery-schema presentation in ADR 0001. It also replaces the pinned
-client versions described in ADRs 0002, 0003, 0007 and 0012. Their state, lifecycle,
+client versions described in ADRs 0002, 0003 and 0012. Their state, lifecycle,
 credential and authorization boundaries remain in effect.
 The shared native launch and reply checks in [ADR
 0014](0014-review-boundaries-and-native-contracts.md) also remain in effect.

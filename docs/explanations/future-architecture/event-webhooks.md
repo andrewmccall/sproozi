@@ -25,8 +25,10 @@ later idempotent-delivery rework described below was never released.
 - **Authentication.** `X-Sproozi-Signature: sha256=<hex>` over
   `timestamp || rawBody`, with `X-Sproozi-Timestamp` in Unix seconds within a
   five-minute window. The key was the `hmac-key` entry of a Secret of at least
-  32 bytes, read only from `sproozi-webhooks`
-  ([ADR 0022](../../adr/0022-webhook-hmac-secrets-in-own-namespace.md)).
+  32 bytes, read only from `sproozi-webhooks`. That
+  kept the keys out of `sproozi-system`, which holds the provider credentials
+  and the GitHub App key, so a flaw in the receiver, which was reachable before
+  authentication, could not read them.
 - **Body.** `{"id": "...", "eventContext": {"k": "v"}}`, at most 512 KiB.
 - **Result.** An AgentRun with the fixed task `Process incoming webhook event`,
   the template's runtime and policy, every capability the policy allowed, and
