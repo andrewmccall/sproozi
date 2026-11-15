@@ -240,8 +240,12 @@ func (o *Owner) execution(r record) (*session.Record, error) {
 }
 
 // replay answers a repeated submission from its retained session. replayed is
-// false only when no session exists yet.
+// false only when no session exists yet. A removed session's request is a
+// conflict, so it never starts again.
 func (o *Owner) replay(id, digest string) (View, bool, error) {
+	if o.wasRemoved(id) {
+		return View{}, true, &profile.Rejection{Code: profile.CodeConflict}
+	}
 	if _, err := os.Lstat(o.path(id, ".json")); os.IsNotExist(err) {
 		return View{}, false, nil
 	}
@@ -437,7 +441,10 @@ func (o *Owner) admitRetention(newSession bool) error {
 	}
 	var own int64
 	err = filepath.WalkDir(o.config.Directory, func(_ string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil || d.IsDir() {
+		// A removed session's mark is not counted: otherwise an executor at
+		// its smallest bound, room for one session, could never admit
+		// another after its first removal.
+		if walkErr != nil || d.IsDir() || strings.HasSuffix(d.Name(), removedSuffix) {
 			return walkErr
 		}
 		info, err := d.Info()

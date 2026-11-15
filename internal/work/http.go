@@ -64,8 +64,9 @@ func (q taskSubmission) submit() Submit {
 }
 
 // homeActions are the owner actions only the home principal may take: the
-// one-way pull, and the interactive session's stop, resume and attach.
-var homeActions = []string{"begin", "claim", actionStop, actionResume, actionAttach}
+// one-way pull, the interactive session's stop, resume and attach, and
+// removing a session.
+var homeActions = []string{"begin", "claim", actionStop, actionResume, actionAttach, actionRemove}
 
 // actionAttach streams a terminal attachment rather than answering JSON.
 const actionAttach = "attach"
@@ -267,6 +268,8 @@ func (h *ownerHandler) serveJSON(w http.ResponseWriter, r *http.Request, action 
 				out, e = h.owner.Stop(r.Context(), q.ID, q.OperationID)
 			case "recover":
 				out, e = h.owner.Recover(r.Context(), q.ID)
+			case actionRemove:
+				out, e = h.owner.Remove(r.Context(), q.ID)
 			default:
 				http.NotFound(w, r)
 				return
@@ -345,6 +348,10 @@ func (c *Client) Stop(ctx context.Context, id, op string) (v View, e error) {
 }
 func (c *Client) Resume(ctx context.Context, id, op, maxDuration string) (v View, e error) {
 	e = c.transport.CallOwner(ctx, "resume", resumption{ID: id, OperationID: op, MaxDuration: maxDuration}, &v)
+	return
+}
+func (c *Client) Remove(ctx context.Context, id string) (v Removal, e error) {
+	e = c.transport.CallOwner(ctx, actionRemove, reference{ID: id}, &v)
 	return
 }
 
