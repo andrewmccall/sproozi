@@ -545,6 +545,51 @@ func TestRemoteFullExecutorNamesTheRemedy(t *testing.T) {
 	}
 }
 
+// rm --remote removes a cluster's session; a refusal says why in local rm's
+// words, with the commands that reach the cluster.
+func TestRemoteRemove(t *testing.T) {
+	f := serveFakeExecutor(t, interactiveView(work.PhaseRetained))
+	f.reply("remove", answerStatus(http.StatusOK, `{"id":"`+remoteTestID+`"}`))
+	code, out, errOut := runCLI("rm", "4215", "--remote")
+	if code != 0 || !strings.Contains(out, "Deleted session "+remoteTestID+" from cluster "+testExecutor+".") {
+		t.Fatalf("rm exited %d: %s %s", code, out, errOut)
+	}
+	if removes := f.recorded("remove"); len(removes) != 1 || string(removes[0].body) != `{"id":"`+remoteTestID+`"}` {
+		t.Fatalf("executor received %+v", removes)
+	}
+	f.reply("remove", answerStatus(http.StatusOK, `{"id":"`+remoteTestID+`"}`))
+	if code, out, _ = runCLI("rm", remoteTestID, "--remote", "--json"); code != 0 ||
+		!strings.Contains(out, `"id"`) || !strings.Contains(out, remoteTestID) || strings.Contains(out, "Deleted") {
+		t.Fatalf("rm --json exited %d: %s", code, out)
+	}
+
+	for phase, want := range map[work.Phase]string{
+		work.Phase(phaseRunning): `session ` + remoteTestID + ` is running; stop it with "sproozi stop 4215d7d1 --remote" ` +
+			`or "sproozi cancel 4215d7d1 --remote" first`,
+		work.Phase(phaseUnknownStop): `session ` + remoteTestID + ` has unfinished work (unknown-stop); run ` +
+			`"sproozi recover 4215d7d1 --remote", then remove it`,
+		work.Phase(phaseStarting): `session ` + remoteTestID + ` is preparing; wait for it to finish, then remove it`,
+		work.PhaseExporting: `session ` + remoteTestID + ` is still being pulled; finish with "sproozi pull 4215d7d1" ` +
+			`before removing it`,
+	} {
+		f.reply("remove", answerStatus(http.StatusConflict, `{"error":"conflict"}`))
+		f.reply("info", f.answerView(interactiveView(phase)))
+		if code, _, errOut = runCLI("rm", remoteTestID, "--remote"); code != 1 || !strings.Contains(errOut, want) {
+			t.Errorf("rm of a %s session exited %d: %s", phase, code, errOut)
+		}
+	}
+
+	f.reply("remove", answerStatus(http.StatusNotFound, "404 page not found"))
+	if code, _, errOut = runCLI("rm", remoteTestID, "--remote"); code != 1 || !strings.Contains(errOut, "older than remote rm") {
+		t.Fatalf("old executor rm: %d %s", code, errOut)
+	}
+	f.reply("remove", answerStatus(http.StatusServiceUnavailable, `{"error":"unavailable"}`))
+	if code, _, errOut = runCLI("rm", remoteTestID, "--remote"); code != 1 ||
+		!strings.Contains(errOut, `run "sproozi rm 4215d7d1 --remote" again`) || strings.Contains(errOut, "--operation") {
+		t.Fatalf("lost rm: %d %s", code, errOut)
+	}
+}
+
 // A remote status names an interactive session and its agent's failed exit.
 func TestRemoteStatusShowsModeAndExit(t *testing.T) {
 	failed := interactiveView(work.PhaseFailed)

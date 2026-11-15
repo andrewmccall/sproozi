@@ -274,6 +274,59 @@ func (q *options) resumeRemote(ctx context.Context, target remoteTarget) error {
 	return q.startedRemote(ctx, target, v, "Resumed")
 }
 
+// removeRemote deletes a cluster's stopped, cancelled or pulled session and
+// everything its executor keeps for it. Removing again is safe: the executor
+// answers that a removed session is removed.
+func (q *options) removeRemote(ctx context.Context, target remoteTarget) error {
+	removal, err := target.Client.Remove(ctx, q.id)
+	if err != nil {
+		return q.removeError(ctx, target, err)
+	}
+	if q.json {
+		return writeJSON(q.out, removal)
+	}
+	_, err = fmt.Fprintf(q.out, "Deleted session %s from cluster %s.\n", removal.ID, target.Name)
+	return err
+}
+
+// removeError explains a refused removal in local rm's words, with the
+// commands that reach the cluster.
+func (q *options) removeError(ctx context.Context, target remoteTarget, err error) error {
+	var remote *profile.RemoteError
+	if !errors.As(err, &remote) {
+		return err
+	}
+	switch {
+	case remote.Code == profile.CodeUnavailable && remote.Status == http.StatusNotFound:
+		return fmt.Errorf("the cluster's remote executor %s is older than remote rm; update the executor "+
+			"(docs/reference/remote-executors.md)", target.Name)
+	case remote.Code == profile.CodeConflict:
+		if v, infoErr := target.Client.Info(ctx, q.id); infoErr == nil {
+			if problem := q.removalProblem(v); problem != nil {
+				return problem
+			}
+		}
+	case remote.Code == profile.CodeUnavailable:
+		return fmt.Errorf("%w; the outcome is unknown: run \"%s\" again", err, q.remoteCommand(cmdRemove, q.id))
+	}
+	return err
+}
+
+// removalProblem says why a cluster's session cannot be removed in its
+// phase, or nil when its phase allows it.
+func (q *options) removalProblem(v work.View) error {
+	switch v.Phase {
+	case work.PhaseRetained, work.PhaseFailed, work.PhasePulled, work.Phase(phaseCancelled):
+		return nil
+	case work.PhaseExporting:
+		return fmt.Errorf("session %s is still being pulled; finish with \"%s\" before removing it", v.ID,
+			q.pullCommand(v.ID))
+	}
+	return errors.New(session.RemovalRefusal(v.ID, session.Phase(v.Phase), func(name string) string {
+		return q.remoteCommand(name, v.ID)
+	}))
+}
+
 // remoteActionError explains a refused attach, stop or resume: an executor
 // too old for it, a task, or a session in a phase that does not allow it.
 // Only a request whose outcome is unknown names the operation to repeat.

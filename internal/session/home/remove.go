@@ -89,15 +89,9 @@ func (s *Service) Remove(id string) (Status, error) {
 
 // notRemovable says why a session cannot be removed yet and what would allow it.
 func notRemovable(id string, r session.Record) error {
-	switch {
-	case r.Phase.Unresolved():
-		return rejectedError(fmt.Sprintf("home: session %s has unfinished work (%s); run \"sproozi recover %s\", "+
-			"then remove it", id, r.Phase, id))
-	case r.Active != nil:
-		return rejectedError(fmt.Sprintf("home: session %s is running; stop it with \"sproozi stop %s\" "+
-			"or \"sproozi cancel %s\" first", id, id, id))
-	}
-	return rejectedError(fmt.Sprintf("home: session %s is %s; wait for it to finish, then remove it", id, r.Phase))
+	return rejectedError("home: " + session.RemovalRefusal(id, r.Phase, func(name string) string {
+		return "sproozi " + name + " " + id
+	}))
 }
 
 // removeCatalog deletes a session's catalogue entry.

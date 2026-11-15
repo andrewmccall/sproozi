@@ -22,6 +22,22 @@ var ErrBusy = errors.New("session: another operation is in progress; try again")
 // describes its structure, so its phase alone decides.
 func Removable(r Record) bool { return r.Phase.Settled() }
 
+// RemovalRefusal says why the session id, whose execution is in phase,
+// cannot be removed yet and which command allows it. command spells a
+// command, such as "recover", for this session wherever it is: home's
+// service and a remote executor's sessions share these words.
+func RemovalRefusal(id string, phase Phase, command func(name string) string) string {
+	switch {
+	case phase.Unresolved():
+		return fmt.Sprintf("session %s has unfinished work (%s); run \"%s\", then remove it", id, phase,
+			command("recover"))
+	case phase == PhaseActive || phase == PhaseStopping:
+		return fmt.Sprintf("session %s is running; stop it with \"%s\" or \"%s\" first", id, command("stop"),
+			command("cancel"))
+	}
+	return fmt.Sprintf("session %s is %s; wait for it to finish, then remove it", id, phase)
+}
+
 // Remove deletes stopped executions' journals, then every retained workspace,
 // checkpoint and profile that no remaining journal and no text that release
 // returns names. release runs once every execution is known to be removable,

@@ -27,7 +27,7 @@ usage, a short description and one line per flag. An unknown help topic fails.
 | Sessions | `stop ID` | Stop after the agent's current turn and keep the work. With `--remote`, a session in a cluster. |
 | Sessions | `resume ID [-- AGENT ARGS]` | Continue a stopped session where it left off, with a new deadline and allowance. With `--remote`, a session in a cluster, which takes no agent arguments. |
 | Sessions | `cancel ID` | Stop now, discarding the agent's current turn. Cancelling a cancelled session succeeds. |
-| Sessions | `rm ID` | Delete a stopped or cancelled session and its saved work. |
+| Sessions | `rm ID` | Delete a stopped or cancelled session and its saved work. With `--remote`, a session in a cluster, also a pulled one. |
 | Remote | `move ID --local\|--remote` | Move a running session after its current turn: `--local` brings it to this machine, `--remote` sends it to a cluster. |
 | Remote | `pull ID` | Bring a stopped session from a cluster to this machine; `resume` then continues it. |
 | Setup | `init` | Set up this machine: image, network, certificates, provider key and service. Run again to add an agent with `--harness` or to repair. |
@@ -92,7 +92,7 @@ anything is read or sent. `-d` is short for `--detach`.
 | `stop` | `--remote`, `--context`, `--namespace`, `--json`, `--root` |
 | `resume` | `--detach`, `--max-duration`, `--remote`, `--context`, `--namespace`, `--json`, `--root` |
 | `cancel` | `--remote`, `--context`, `--namespace`, `--json`, `--root` |
-| `rm` | `--json`, `--root` |
+| `rm` | `--remote`, `--context`, `--namespace`, `--json`, `--root` |
 | `move` | `--local`, `--remote`, `--context`, `--namespace`, `--json`, `--root` |
 | `pull` | `--context`, `--namespace`, `--json`, `--root` |
 | `recover` | `--remote`, `--context`, `--namespace`, `--json`, `--root` |
@@ -346,6 +346,25 @@ fresh deadline and allowance, and attaches unless `-d`. Each resume is a new
 operation; a resume whose outcome is unknown ends with a retry hint naming
 it. It takes no agent arguments after `--`.
 
+`rm ID --remote` deletes a cluster's `retained`, `failed`, `cancelled` or
+`pulled` session and everything its [remote
+executor](remote-executors.md#removing-sessions) keeps for it, and prints
+`Deleted session ID from cluster NAME.` It refuses a session that is
+starting, running, stopping, has unfinished work or is being pulled, with the
+replies [`rm`](#stopping-removing-and-recovering) gives on this machine, naming the commands
+with `--remote`: `session ID is running; stop it with "sproozi stop ID
+--remote" or "sproozi cancel ID --remote" first`, `session ID has unfinished
+work (PHASE); run "sproozi recover ID --remote", then remove it`, `session ID
+is PHASE; wait for it to finish, then remove it` and `session ID is still
+being pulled; finish with "sproozi pull ID" before removing it`. Removing a
+removed session succeeds, so a removal whose outcome is unknown ends with
+`run "sproozi rm ID --remote" again`. Remove a pulled session only after
+`pull` on the machine that pulled it reported it pulled: the executor then no
+longer answers the pull.
+
+When the executor is full it refuses `run --remote` and `resume ID --remote`
+and says which bound it reached; nothing started, so there is no retry hint.
+
 | Error | Cause | Run |
 | --- | --- | --- |
 | `a --remote run needs --repository NAME or --project ID: ...` | Neither was given. | Add the approved repository or project. |
@@ -358,6 +377,9 @@ it. It takes no agent arguments after `--`.
 | `... the cluster's remote executor NAME refused a HARNESS task; an executor older than this release may run no HARNESS tasks ...` | A task for an executor of the same harness that refused it, such as a Claude Code executor from before Claude Code tasks. | Update the executor, or leave out `--task`. |
 | `... does not run interactive sessions for HARNESS; update the executor, ...` | The executor answered `unsupported` to an interactive session of its own harness. | Update the executor, or give `--task`. |
 | `the cluster's remote executor NAME is older than remote stop; update the executor ...` | The executor has no `stop`, `resume` or `attach` route. | Update the executor, or `sproozi pull ID`. |
+| `the cluster's remote executor NAME is older than remote rm; update the executor ...` | The executor has no `remove` route. | Update the executor. |
+| `Remote executor full: it keeps its maximum number of sessions; remove sessions you no longer need with "sproozi rm ID --remote", then retry: ...` | The executor keeps 1024 sessions. | `sproozi ls --remote`, then `sproozi rm ID --remote` for sessions you no longer need. |
+| `Remote executor full: its kept sessions, plus room for a checkpoint of each running session and of this one, would exceed its retainedBytes; ...` | What the executor keeps, plus what its running sessions and this one may still keep, exceeds [`retainedBytes`](remote-executors.md#retention). | `sproozi rm ID --remote`, stop running sessions, or ask the administrator to raise `retainedBytes`. |
 | `session ID is a task, which stops by itself when it completes; ...` | `attach`, `stop` or `resume` of a task. | `sproozi status ID --remote`, or `cancel`. |
 | `session ID is running; attach to it with "sproozi attach ID --remote", or stop it ...` | `resume` of a running session. | `attach`, or `stop` then `resume`. |
 | `session ID is stopped; "sproozi resume ID --remote" continues it` | `attach` or `stop` of a `retained` session. | `sproozi resume ID --remote`. |
