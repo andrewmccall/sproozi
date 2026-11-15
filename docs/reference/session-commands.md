@@ -368,13 +368,15 @@ session succeeds, so a removal whose outcome is unknown ends with `run
 
 A `pulled` session is removed from the cluster only when the Sproozi service
 on this machine holds it as pulled, because the cluster then no longer
-answers a claim the service repeats after a lost reply. Otherwise `rm
---remote` refuses:
+answers a claim the service repeats after a lost reply. So remove the
+cluster's record (`rm ID --remote`) before the local one (`rm ID`): once the
+machine that pulled a session no longer holds it, the cluster's record cannot
+be removed. Otherwise `rm --remote` refuses:
 
 | Reply | Cause | Run |
 | --- | --- | --- |
 | `session ID was pulled from the cluster, and the Sproozi service on this machine is not running, ...` | The command cannot ask the service. | `sproozi service start`, then `rm` again. |
-| `session ID was pulled from the cluster, but this machine does not hold session ID; run "sproozi rm ID --remote" on the machine that pulled it, ...` | Another machine pulled it, or this machine removed its copy. | `rm --remote` on the machine that pulled it. |
+| `session ID was pulled from the cluster, but the Sproozi service on this machine does not hold it, so the cluster's record cannot be removed from here: ...` | Another machine pulled it, or this machine already removed its copy. | `rm --remote` on a machine that still holds it; if none does, the record stays. |
 | `session ID is still being pulled to this machine; finish with "sproozi pull ID", then remove it` | The pull's claim is not recorded here yet. | `sproozi pull ID`, then `rm` again. |
 
 When the executor is full it refuses `run --remote` and `resume ID --remote`

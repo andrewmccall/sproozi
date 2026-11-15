@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -230,6 +231,136 @@ func TestRemoveRefusesTheSourceOfAnUnstartedSession(t *testing.T) {
 	q.RequestID = uuid.NewString()
 	if _, err = o.Submit(t.Context(), q); code(err) != profile.CodeInvalid {
 		t.Fatalf("submission from a removed session: %v", err)
+	}
+}
+
+// A record that cannot be read might start from the session being removed,
+// so removal is refused rather than strand it.
+func TestRemoveRefusesWhileAnotherRecordCannotBeRead(t *testing.T) {
+	t.Parallel()
+	c, _ := fixture(t)
+	o := openOwner(t, c)
+	v := submit(t, o)
+	waitPhase(t, o, v.ID, phaseRetained)
+	unreadable := o.path(uuid.NewString(), ".json")
+	if err := os.WriteFile(unreadable, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := o.Remove(t.Context(), v.ID, false); code(err) != profile.CodeConflict {
+		t.Fatalf("removed while another record could not be read: %v", err)
+	}
+	if err := os.Remove(unreadable); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := o.Remove(t.Context(), v.ID, false); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A removal and a submission that starts from the removed session race:
+// exactly one wins, and the loser changes nothing.
+func TestRemoveRacesASubmissionFromIt(t *testing.T) {
+	t.Parallel()
+	c, _ := projectFixture(t)
+	o := openOwner(t, c)
+	var sources []View
+	for range 4 {
+		v, err := o.Submit(t.Context(), projectRequest("sproozi-dev"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		sources = append(sources, v)
+	}
+	for i, v := range sources {
+		sources[i] = waitPhase(t, o, v.ID, phaseRetained)
+	}
+	// No driver starts the dependants, so a winning one stays unstarted.
+	o.stopAll()
+	for _, source := range sources {
+		q := projectRequest("sproozi-dev")
+		q.WorkspaceFrom = &RevisionSource{SessionID: source.ID, Digest: source.CheckpointDigest,
+			Revision: source.CheckpointInfo.Workspace.Revision}
+		var removeErr, submitErr error
+		var dependant View
+		var wg sync.WaitGroup
+		wg.Go(func() { _, removeErr = o.Remove(t.Context(), source.ID, false) })
+		wg.Go(func() { dependant, submitErr = o.Submit(t.Context(), q) })
+		wg.Wait()
+		switch {
+		case removeErr == nil && submitErr != nil:
+			if code(submitErr) != profile.CodeInvalid {
+				t.Fatalf("submission after the removal: %v", submitErr)
+			}
+		case removeErr != nil && submitErr == nil:
+			if code(removeErr) != profile.CodeConflict {
+				t.Fatalf("removal after the submission: %v", removeErr)
+			}
+			if _, err := o.Info(t.Context(), source.ID); err != nil {
+				t.Fatalf("the dependant's source went: %v", err)
+			}
+			if _, err := o.Info(t.Context(), dependant.ID); err != nil {
+				t.Fatal(err)
+			}
+		default:
+			t.Fatalf("removal %v and submission %v both won or both lost", removeErr, submitErr)
+		}
+	}
+}
+
+// A removal Open cannot finish is logged, not fatal: the executor starts,
+// the session is neither listed nor started again, and a later remove
+// retries it.
+func TestOpenStartsWhenARemovalCannotFinish(t *testing.T) {
+	t.Parallel()
+	c, p := fixture(t)
+	o, err := Open(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := submit(t, o)
+	waitPhase(t, o, v.ID, phaseRetained)
+	if err = o.markRemoved(removedMark{ID: v.ID, Executions: []string{v.ExecutionID}}); err != nil {
+		t.Fatal(err)
+	}
+	if err = o.Close(); err != nil {
+		t.Fatal(err)
+	}
+	journal := filepath.Join(filepath.Dir(c.Directory), "sessions", v.ExecutionID+".json")
+	good, err := os.ReadFile(journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(journal, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p.mu.Lock()
+	started := p.initial
+	p.mu.Unlock()
+	o = openOwner(t, c)
+	if _, err = o.Info(t.Context(), v.ID); code(err) != profile.CodeInvalid {
+		t.Fatalf("a session being removed answers: %v", err)
+	}
+	if listed, err := o.List(t.Context(), SessionQuery{}); err != nil || len(listed) != 0 {
+		t.Fatalf("a session being removed is listed: %+v %v", listed, err)
+	}
+	if _, err = o.Recover(t.Context(), v.ID); code(err) != profile.CodeInvalid {
+		t.Fatalf("a session being removed recovers: %v", err)
+	}
+	if _, err = o.Remove(t.Context(), v.ID, false); err == nil {
+		t.Fatal("finished a removal whose journal cannot be read")
+	}
+	if err = os.WriteFile(journal, good, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = o.Remove(t.Context(), v.ID, false); err != nil {
+		t.Fatalf("a later remove did not finish the removal: %v", err)
+	}
+	assertRemoved(t, c, o, v.ID, v.ExecutionID)
+	time.Sleep(50 * time.Millisecond)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.initial != started {
+		t.Fatal("a session being removed was started again")
 	}
 }
 

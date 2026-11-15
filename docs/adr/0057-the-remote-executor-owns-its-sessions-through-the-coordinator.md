@@ -462,11 +462,19 @@ session's stops added checkpoints unchecked.
   session needs `pullFinished`, which the CLI sends only after this machine's
   service reports the session as its own (ownership `home`); with the service
   stopped, the session unknown here or its pull unfinished, `rm --remote`
-  refuses and says to start the service, run it on the machine that pulled
-  the session, or finish with `sproozi pull ID`. The executor refuses a
-  request without it, so no other CLI path skips the check. A pulled session
-  whose machine removed its own copy first cannot be removed from the
-  cluster; whether an override is wanted is the owner's decision.
+  refuses and says to start the service, that this machine does not hold the
+  session, or to finish with `sproozi pull ID`. The executor refuses a
+  request without it, so no other CLI path skips the check. **Limitation:** a
+  pulled session can be removed from the cluster only while the machine that
+  pulled it still holds it, so the reference says to remove the cluster's
+  record before the local one; once the local copy is gone the cluster's
+  record stays. Whether an override is wanted is the owner's decision.
+- **A removal `Open` cannot finish does not stop the executor.** `Open`
+  logs it and starts; `remove` retries it. A session with a mark, finished or
+  not, is left out of the catalogue's listing and reads as missing to every
+  action and driver, so it is never listed, driven or started again. A
+  record that cannot be read refuses every removal, since it might start
+  from the session being removed.
 - **Removal does not wait for other sessions.** `Coordinator.Remove` took
   the coordinator's lock exclusively. That lock kept its clean-up of
   content stored once by digest (workspaces, checkpoints, profiles) from
@@ -481,8 +489,13 @@ session's stops added checkpoints unchecked.
   operation records the content it writes, under a short shared content
   lock, and forgets it when it releases its execution, after the journal
   that names the content is saved or not; the clean-up takes the content
-  lock exclusively and treats recorded content as named. Neither lock is
-  held across a placement call. The order is the catalogue's session lock,
+  lock exclusively and treats recorded content as named. The content lock is
+  never held across a placement call. An execution's lock and the
+  coordinator's shared lock still are: `Finalize`, `Recover` and
+  cancellation hold them across the native-turn wait, which is why removal
+  waits up to five seconds for an operation on an execution it removes, and
+  answers busy after that; operations on other executions no longer matter.
+  The order is the catalogue's session lock,
   then the retention lock, then the coordinator's shared lock, then an
   execution's lock, then the content lock; `CancelUnsettled` still runs
   `admit`, which takes the catalogue's session lock, before it takes the

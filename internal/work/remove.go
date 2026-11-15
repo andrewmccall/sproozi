@@ -132,8 +132,22 @@ func (o *Owner) checkNoDependants(id string) error {
 		return err
 	}
 	for _, other := range ids {
-		r, err := o.read(other)
-		if err != nil || r.Intent.WorkspaceFrom == nil || r.Intent.WorkspaceFrom.SessionID != id ||
+		e, err := o.entry(other)
+		if code := (*profile.Rejection)(nil); errors.As(err, &code) && code.Code == profile.CodeInvalid {
+			// Removed since it was listed.
+			continue
+		}
+		if err != nil {
+			// It may start from id: keep id rather than strand it.
+			o.logf("Could not read work session %s while removing %s: %v", other, id, err)
+			return &profile.Rejection{Code: profile.CodeConflict}
+		}
+		if e.legacy != nil {
+			// A version 1 record is stopped or cancelled: it started long ago.
+			continue
+		}
+		r := *e.current
+		if r.Intent.WorkspaceFrom == nil || r.Intent.WorkspaceFrom.SessionID != id ||
 			r.CancelOperation != "" || r.Transfer != "" {
 			continue
 		}
@@ -180,7 +194,10 @@ func (o *Owner) finishRemoval(id string, executions []string) error {
 
 // finishRemovals finishes every removal a crash interrupted: a mark that
 // still lists executions, or whose record is still there. Open runs it
-// before it starts any session.
+// before it starts any session. A removal it cannot finish is logged and left
+// for a later remove to retry; its mark already keeps the session from being
+// listed, driven or started (ids, readRecord). Only failing to read the
+// catalogue's directory is an error.
 func (o *Owner) finishRemovals() error {
 	entries, err := os.ReadDir(o.config.Directory)
 	if err != nil {
@@ -193,13 +210,15 @@ func (o *Owner) finishRemovals() error {
 		}
 		mark, _, err := o.readRemoved(id)
 		if err != nil {
-			return err
+			o.logf("Could not read the removal mark of work session %s: %v", id, err)
+			continue
 		}
 		if _, err = os.Lstat(o.path(id, ".json")); len(mark.Executions) == 0 && os.IsNotExist(err) {
 			continue
 		}
 		if err = o.finishRemoval(id, mark.Executions); err != nil {
-			return err
+			o.logf("Could not finish removing work session %s; \"remove\" retries it: %v", id, err)
+			continue
 		}
 		o.logf("Finished removing work session %s", id)
 	}

@@ -320,9 +320,9 @@ func (q *options) pullFinishedHere(ctx context.Context, id string) error {
 			"running, so this command cannot check that the pull finished here; start it with \"sproozi service "+
 			"start\", then run \"%s\" again", id, q.remoteCommand(cmdRemove, id))
 	case errors.Is(err, home.ErrUnknownSession):
-		return fmt.Errorf("session %s was pulled from the cluster, but this machine does not hold session %s; "+
-			"run \"%s\" on the machine that pulled it, once \"sproozi pull %s\" there reported it pulled", id, id,
-			q.remoteCommand(cmdRemove, id), shortID(id))
+		return fmt.Errorf("session %s was pulled from the cluster, but the Sproozi service on this machine does "+
+			"not hold it, so the cluster's record cannot be removed from here: only a machine that still holds the "+
+			"pulled session can remove it, so remove the cluster's record before the local one", id)
 	case err != nil:
 		return err
 	case response.Status == nil || response.Status.Ownership != serviceOwnership:

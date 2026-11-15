@@ -248,7 +248,11 @@ Removal does not wait for other sessions: it takes only the removed
 session's executions, and waits at most five seconds for an operation on one
 of them before it answers `unavailable`; repeat it. The mark is written
 first, then the journals and the record go, and the mark shrinks last; after
-a crash the executor finishes the removal before it starts any session.
+a crash the executor finishes the removal before it starts any session. A
+removal it cannot finish is logged (`Could not finish removing work session
+ID`) and the executor starts anyway; the session is not listed or run, and
+`remove` retries it. A pulled session can be removed only while the machine
+that pulled it still holds it: remove the cluster's record first.
 
 ### Agents that exit by themselves
 

@@ -106,19 +106,37 @@ func (e entry) association() project.Association {
 
 func (o *Owner) path(id, suffix string) string { return filepath.Join(o.config.Directory, id+suffix) }
 
-// ids lists the catalogue's session IDs.
+// ids lists the catalogue's session IDs. A session with a removal mark is
+// left out, even while its record is still there because the removal is
+// unfinished: nothing lists, drives or counts a session being removed.
 func (o *Owner) ids() ([]string, error) {
 	entries, err := os.ReadDir(o.config.Directory)
 	if err != nil {
 		return nil, err
 	}
+	removed := map[string]bool{}
+	for _, e := range entries {
+		if id, ok := strings.CutSuffix(e.Name(), removedSuffix); ok {
+			removed[id] = true
+		}
+	}
 	var ids []string
 	for _, e := range entries {
-		if id, ok := strings.CutSuffix(e.Name(), ".json"); ok {
+		if id, ok := strings.CutSuffix(e.Name(), ".json"); ok && !removed[id] {
 			ids = append(ids, id)
 		}
 	}
 	return ids, nil
+}
+
+// readRecord reads id's record file. A session with a removal mark reads as
+// missing, finished or not, so no action and no driver takes it up again;
+// only Remove and Open's finishing of removals look past the mark.
+func (o *Owner) readRecord(id string) ([]byte, error) {
+	if o.wasRemoved(id) {
+		return nil, &fs.PathError{Op: "read", Path: o.path(id, ".json"), Err: fs.ErrNotExist}
+	}
+	return privatefs.ReadFile(o.path(id, ".json"), maxRecordBytes)
 }
 
 // entry reads id's record in either format.
@@ -126,7 +144,7 @@ func (o *Owner) entry(id string) (entry, error) {
 	if !CanonicalID(id) {
 		return entry{}, &profile.Rejection{Code: profile.CodeInvalid}
 	}
-	b, err := privatefs.ReadFile(o.path(id, ".json"), maxRecordBytes)
+	b, err := o.readRecord(id)
 	if os.IsNotExist(err) {
 		return entry{}, &profile.Rejection{Code: profile.CodeInvalid}
 	}
@@ -153,7 +171,7 @@ func (o *Owner) read(id string) (record, error) {
 	if !CanonicalID(id) {
 		return record{}, &profile.Rejection{Code: profile.CodeInvalid}
 	}
-	b, err := privatefs.ReadFile(o.path(id, ".json"), maxRecordBytes)
+	b, err := o.readRecord(id)
 	if err != nil {
 		return record{}, err
 	}

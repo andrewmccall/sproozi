@@ -6,8 +6,39 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/google/uuid"
 )
+
+// An operation that names content already kept under the same digest
+// writes nothing, but still counts as naming it: a removal of the only
+// journal that named it keeps it until the operation ends.
+func TestRemoveKeepsExistingContentAnOperationNames(t *testing.T) {
+	c, dir, _, _, s := setup(t)
+	other := uuid.NewString()
+	unlock, err := c.lockSession(other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := s.Stopped.CheckpointDigest
+	if _, err = c.commitCheckpoint(other, s.Input, harness.NativeCodex, testThread, digest); err != nil {
+		unlock()
+		t.Fatal(err)
+	}
+	err = c.Remove([]string{s.Source.ExecutionID}, func() ([]string, error) { return nil, nil })
+	path := filepath.Join(dir, checkpointPath(digest))
+	_, statErr := os.Stat(path)
+	unlock()
+	if err != nil || statErr != nil {
+		t.Fatalf("existing content an operation names was deleted: %v %v", err, statErr)
+	}
+	if err = c.Remove(nil, func() ([]string, error) { return nil, nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("content no journal names was kept after its operation ended: %v", err)
+	}
+}
 
 // Removing a settled execution neither waits for another execution's
 // operation nor deletes content that operation has written and not yet named

@@ -643,8 +643,8 @@ func TestRemoteRemoveOfAPulledSessionNeedsThePullFinishedHere(t *testing.T) {
 	}
 
 	for ownership, want := range map[string]string{
-		"": `this machine does not hold session ` + remoteTestID + `; run "sproozi rm 4215d7d1 --remote" on the ` +
-			`machine that pulled it`,
+		"": `the Sproozi service on this machine does not hold it, so the cluster's record cannot be removed from ` +
+			`here`,
 		"source": `session ` + remoteTestID + ` is still being pulled to this machine; finish with "sproozi pull ` +
 			`4215d7d1", then remove it`,
 	} {
