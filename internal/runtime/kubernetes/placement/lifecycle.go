@@ -807,7 +807,7 @@ func (p *Placement) Attach(ctx context.Context, l session.Launch, i session.Inca
 	if err != nil {
 		return err
 	}
-	_, r, err := p.retained(ctx, l)
+	local, r, err := p.retained(ctx, l)
 	unlock()
 	if err != nil {
 		return err
@@ -815,7 +815,13 @@ func (p *Placement) Attach(ctx context.Context, l session.Launch, i session.Inca
 	if inc(r) != i || r.Phase != registry.Active {
 		return &profile.Rejection{Code: profile.CodeConflict}
 	}
-	if _, err = p.liveProfile(ctx, l); err != nil {
+	// Check the retained launch the way stop and inspect do: a first visit
+	// from a workspace has no conversation ID or checkpoint yet.
+	live := func(ctx context.Context) error {
+		_, err := p.liveProfileInput(ctx, local.Launch, local.fresh())
+		return err
+	}
+	if err = live(ctx); err != nil {
 		return err
 	}
 	pod, err := p.activePod(ctx, r)
@@ -844,7 +850,7 @@ func (p *Placement) Attach(ctx context.Context, l session.Launch, i session.Inca
 					cancel()
 					return
 				}
-				if _, err = p.liveProfile(ctx, l); err != nil {
+				if err = live(ctx); err != nil {
 					cancel()
 					return
 				}
