@@ -83,7 +83,9 @@ type Harness struct {
 	// the guard test.
 	ReservedEnv []string
 	// RemoteExecutor reports that a remote executor may run this harness, for
-	// both tasks and interactive sessions.
+	// both tasks and interactive sessions. A Claude Code task's completion is
+	// bound to its prompt's turn by the supervisor's UserPromptSubmit hook (ADR
+	// 0057).
 	RemoteExecutor bool
 
 	// TakesTask: the supervisor submits a task as the launch's prompt and

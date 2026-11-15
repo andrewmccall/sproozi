@@ -416,7 +416,7 @@ func (q *options) submitRemote(ctx context.Context) error {
 		kind = q.fixed.Local.Harness
 	}
 	if kind == "" {
-		kind = harness.NativeCodex
+		kind = harness.Default()
 	}
 	submission := work.Submit{RequestID: q.operation, Repository: q.repository, Harness: kind,
 		Executor: target.Name, Task: q.task, Project: q.project, WorkspaceFrom: q.workspaceFrom,
