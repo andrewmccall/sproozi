@@ -36,6 +36,16 @@ the genuine harness conversation ID (`threadId`) if the launch had none, then wa
 turn. The ID is recorded beside the launch; the launch itself never changes. Gateway access stays open until that point. Revoking access, confirming
 that the writer stopped and finalizing usage remain backend steps.
 
+`quiesce` waits at most two minutes for the completed turn; past that it
+replies `stopping` with `waiting`. Once the turn completed it asks the harness
+to quit and waits at most 30 seconds, or until a set deadline if sooner, for
+it to exit. A harness still running then is killed, and once the same
+completed turn is observed again `quiesce` replies `stopped` with the
+conversation and turn and an `exit` whose reason is `forced-stop`, writes no
+exit report and leaves the supervisor's exit code nonzero
+([ADR 0035](../adr/0035-bounded-graceful-stops-and-settled-input.md)). At the
+deadline it replies with an error and reports the cause `deadline`.
+
 A first visit with no task that the supervisor reports `turnless` records no
 ID: `quiesce` stops the harness and replies `stopped` with `turnless` and no
 `threadId`. Both placements then revoke access, confirm the writer stopped and
