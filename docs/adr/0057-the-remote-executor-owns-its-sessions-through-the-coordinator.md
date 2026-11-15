@@ -66,7 +66,7 @@ coordinator itself on the cluster, with the laptop service optional.
 
 - Pull stays a one-way ownership transfer
   ([ADR 0012](0012-retained-work-and-fresh-session-continuations.md),
-  [0019](0019-pull-operations-and-work-owner-names.md)). One principal stands
+  [0036](0036-remote-executors-through-kubeconfig-contexts.md)). One principal stands
   for one home.
 - The executor stays one process with locked directories on a private volume,
   reached through a context and authorized by TokenReview and RBAC
@@ -828,8 +828,7 @@ would use.
   [ADR 0058](0058-lifecycle-records-declare-states-and-transitions.md)'s table.
 - Applies [ADR 0056](0056-whoever-starts-work-sets-its-deadline.md) to work
   the executor runs for Hermes.
-- Keeps [ADR 0019](0019-pull-operations-and-work-owner-names.md) and
-  [ADR 0036](0036-remote-executors-through-kubeconfig-contexts.md) unchanged.
+- Keeps [ADR 0036](0036-remote-executors-through-kubeconfig-contexts.md) unchanged.
 - Code: `internal/work/` (`catalogue.go`, `driver.go`, `interactive.go`, `export.go`,
   `legacy.go`, `phase.go`, `remove.go`), `internal/session/cancel.go`, `internal/session/remove.go`,
   `internal/session/phase.go`, `cmd/session-profile/main.go`,
