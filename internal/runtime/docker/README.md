@@ -16,7 +16,11 @@ anchor. After actual container registration, `InitializeAllocation` supplies
 fresh native environment, optional model/options and public gateway trust.
 `Activate` opens gateway authority before the fixed native activation operation.
 Repeated operations use the retained exact container identities and immutable
-contracts; exited native containers cannot reopen. Inspection re-drives a
+contracts; exited native containers cannot reopen. An operation whose outcome
+the record already holds replays it, even after the deadline: `Prepare` of a
+prepared visit returns its incarnation and `Activate` of an active one returns
+without repeating activation. The record's phases and the events that move
+them are declared in `transitions.go` (ADR 0058). Inspection re-drives a
 retained activating intent through the same authority admission and native gate,
 so lost activation replies recover on the original allocation and incarnation.
 Admission errors remain unknown and cannot become prepared or active.
@@ -31,7 +35,7 @@ The home gateway implements these hooks:
 | Hook | Required effect |
 | --- | --- |
 | `InitializeAllocation` | Retain exact launch/allocation/container binding and return fresh native access while inactive |
-| `Activate` | Admit only the retained current execution and original deadline |
+| `Activate` | Admit only the retained current execution before its original deadline; a replay of an active grant is not refused |
 | `Revoke` | Deny new capability work immediately; retries converge |
 | `BindNative` | Bind an initial empty thread exactly once to the observed genuine harness conversation ID |
 | `Seal` | Independently confirm actual stopped execution and return trusted usage for every allocated capability |

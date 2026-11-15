@@ -126,6 +126,61 @@ per-phase validation. Its guards may later move into a table without changing
 behaviour. Remote work keeps its own phases until it runs through the
 execution journal.
 
+> **Correction, 2026-11-15.** The parallel change did not bring the Docker
+> records to this pattern. Each kept a list of the phases every operation
+> accepted, assigned target phases inline and checked the deadline inline;
+> the grant validated only on load. Three of those checks ran before replay
+> detection, against rule 5: a Docker `Activate` or `Prepare` replay and a
+> grant `Initialize` or `Activate` replay were refused after the deadline.
+> The Kubernetes registration's `Activate` had the same fault. A Docker
+> `Activate` replay of an active visit also rewrote it to `activating` and
+> repeated the native activation, so a failed replay left it unattachable.
+>
+> Both Docker records now have rules 1 to 5. Each has an event type, a table
+> beside the record, an `admit` step before each side effect and one `apply`
+> function, the only place its phase changes. The grant validates on save as
+> well as on load. An operation whose outcome the record already holds
+> replays it before admission and applies no event: `Prepare` of `prepared`,
+> `Activate` of `active`, `Stop` of `stopped` and `Abort` of `stopped` or
+> `aborted`, and for the grant `Initialize` of `inactive` or `active`,
+> `Activate` of `active` and `Revoke` of `revoked`. Stored formats did not
+> change. The Kubernetes registration replays an active `Activate` before
+> its deadline check; it still has no table.
+>
+> The Docker placement record, in `internal/runtime/docker/transitions.go`.
+> Its terminal phases are `stopped`, `aborted` and `preparation-aborting`;
+> `Removing` and `Removed` are release flags on those, not phases. `Inspect`
+> resumes an interrupted activation with `activate` and `activated`.
+>
+> | Event | From → to | Refused after the deadline |
+> | --- | --- | --- |
+> | `create` | none → `creating` | yes |
+> | `prepared` | `creating` → `prepared` | yes |
+> | `activate` | `prepared`, `activating` → `activating` | yes |
+> | `activated` | `activating` → `active` | no |
+> | `attach` | `active` → `active` | yes |
+> | `stop` | `prepared`, `activating`, `active`, `stopping` → `stopping` | no |
+> | `stopped` | `stopping` → `stopped` | no |
+> | `abort` | `prepared`, `activating`, `active`, `stopping`, `aborting` → `aborting` | no |
+> | `aborted` | `aborting` → `aborted` | no |
+> | `abort-preparation` | `creating`, `preparation-aborting` → `preparation-aborting` | no |
+>
+> The Docker gateway grant, in `internal/gateway/docker/owner.go`. Its only
+> terminal phase is `revoked`.
+>
+> | Event | From → to | Refused after the deadline |
+> | --- | --- | --- |
+> | `initialize` | none → `initializing` | yes |
+> | `initialized` | `initializing` → `inactive` | yes |
+> | `activate` | `inactive` → `active` | yes |
+> | `revoke` | `initializing`, `inactive`, `active` → `revoked` | no |
+> | `seal` | `revoked` → `revoked` | no |
+> | `bind native` | `inactive`, `active`, `revoked` → unchanged | no |
+>
+> Two deadline checks stay outside the tables because they record no event:
+> the grant refuses to authenticate after the deadline, and the placement's
+> `Exited` stops an agent still running past it.
+
 ## Alternatives
 
 - **Check transitions in `save` by rereading the journal.** This catches an
@@ -175,9 +230,11 @@ execution journal.
   `internal/session/cancel.go`, `internal/session/finalize.go`,
   `internal/session/store.go`, `internal/session/remove.go`,
   `internal/session/home/exits.go`, `internal/session/home/remove.go`,
-  `cmd/sproozi/output.go`, `internal/deadline`
+  `cmd/sproozi/output.go`, `internal/deadline`,
+  `internal/runtime/docker/transitions.go`, `internal/gateway/docker/owner.go`
 - Tests: `internal/session/phase_test.go`, `internal/session/rules_test.go`,
-  `cmd/sproozi/deadline_test.go`
+  `cmd/sproozi/deadline_test.go`, `internal/runtime/docker/transitions_test.go`,
+  `internal/gateway/docker/transitions_test.go`
 - Reference: [status and listing output](../reference/session-commands.md#status-and-listing-output)
 - Related: [ADR 0018](0018-coordinator-owns-every-visit.md),
   [ADR 0038](0038-exited-agents-and-one-recovery-path.md),
