@@ -18,6 +18,9 @@ const terminalInputLimit = int64(8 << 20)
 const terminalOutputLimit = int64(64 << 20)
 const terminalFrameLimit = 256 << 10
 
+// frameWrite is a terminal input frame, and the acknowledgement of one.
+const frameWrite = "write"
+
 // frameReader admits only the native terminal's write/resize frames. It never
 // admits native control/configure commands or a user-selected executable.
 type frameReader struct {
@@ -55,7 +58,7 @@ func (f *frameReader) Read(data []byte) (int, error) {
 			Rows    uint16 `json:"rows,omitempty"`
 			Columns uint16 `json:"columns,omitempty"`
 		}
-		if strictDecode(line, &frame) != nil || frame.Op != "write" && frame.Op != "resize" || frame.Op == "write" && (frame.Rows != 0 || frame.Columns != 0) || frame.Op == "resize" && (len(frame.Data) > 0 || frame.Rows == 0 || frame.Columns == 0) {
+		if strictDecode(line, &frame) != nil || frame.Op != frameWrite && frame.Op != "resize" || frame.Op == frameWrite && (frame.Rows != 0 || frame.Columns != 0) || frame.Op == "resize" && (len(frame.Data) > 0 || frame.Rows == 0 || frame.Columns == 0) {
 			return 0, errors.New("profile: invalid terminal frame")
 		}
 		f.pending = append(bytes.Clone(line), '\n')
@@ -234,8 +237,8 @@ func (c *Client) Attach(ctx context.Context, l session.Launch, i session.Incarna
 }
 
 // CopyTerminalOutput copies an attachment's output frames to output, within
-// the attachment's output bound, and fails on the frame that reports a
-// failed attachment.
+// the attachment's output bound, and fails on a frame that reports a failure
+// other than a write's acknowledgement.
 func CopyTerminalOutput(input io.Reader, output io.Writer) error {
 	scanner := bufio.NewScanner(io.LimitReader(input, terminalOutputLimit+1))
 	scanner.Buffer(make([]byte, 4096), terminalFrameLimit)
@@ -247,6 +250,7 @@ func CopyTerminalOutput(input io.Reader, output io.Writer) error {
 			return errors.New("profile: terminal output exceeds attachment bound")
 		}
 		var frame struct {
+			Op    string `json:"op"`
 			Error string `json:"error"`
 		}
 		if json.Unmarshal(line, &frame) != nil {
@@ -255,7 +259,9 @@ func CopyTerminalOutput(input io.Reader, output io.Writer) error {
 		if _, err := output.Write(append(bytes.Clone(line), '\n')); err != nil {
 			return err
 		}
-		if frame.Error != "" {
+		// A write's acknowledgement may carry an error, such as a full input
+		// buffer, that the writer retries; it does not end the attachment.
+		if frame.Error != "" && frame.Op != frameWrite {
 			return errors.New("profile: native attachment failed")
 		}
 	}

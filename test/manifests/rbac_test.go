@@ -177,8 +177,12 @@ func allowsAny(grants []grant, namespace, resource, verb string) bool {
 
 var configMapWrites = []string{verbCreate, verbUpdate, verbPatch, verbDelete, "deletecollection"}
 
+// executorNamespaces are the example executors' namespaces: Codex's and
+// Claude Code's.
+var executorNamespaces = []string{sessionsNamespace, claudeSessionsNamespace}
+
 // The documented managed-session deployment: the install, the sandbox
-// namespace, the remote executor example and CLI access.
+// namespace, both remote executor examples and their CLI access.
 func managedSessionDocs(t *testing.T) []map[string]any {
 	t.Helper()
 	root := repoRoot(t)
@@ -187,6 +191,8 @@ func managedSessionDocs(t *testing.T) []map[string]any {
 		filepath.Join(root, "config", "agent-rbac"),
 		filepath.Join(root, "config", "cli-access"),
 		filepath.Join(root, "examples", "portable-workflows", "kubernetes"),
+		claudeExampleDir(t),
+		filepath.Join(claudeExampleDir(t), "cli-access"),
 	}
 	docs := make([]map[string]any, 0, 256)
 	for _, path := range paths {
@@ -201,11 +207,12 @@ func managedSessionDocs(t *testing.T) []map[string]any {
 // A write limited to named ConfigMaps still counts.
 func TestOnlyTheControllerWritesSystemConfigMaps(t *testing.T) {
 	docs := managedSessionDocs(t)
-	for _, sa := range [][2]string{
-		{systemNamespace, gatewayAccount},
-		{sessionsNamespace, "sproozi-work"},
-		{sessionsNamespace, "sproozi-cli"},
-	} {
+	accounts := make([][2]string, 0, 1+2*len(executorNamespaces))
+	accounts = append(accounts, [2]string{systemNamespace, gatewayAccount})
+	for _, ns := range executorNamespaces {
+		accounts = append(accounts, [2]string{ns, "sproozi-work"}, [2]string{ns, "sproozi-cli"})
+	}
+	for _, sa := range accounts {
 		grants := grantsFor(t, docs, sa[0], sa[1])
 		for _, verb := range configMapWrites {
 			if allowsAny(grants, systemNamespace, resourceConfigMaps, verb) {
@@ -225,9 +232,24 @@ func TestOnlyTheControllerWritesSystemConfigMaps(t *testing.T) {
 // accounts; the CLI discovers and reaches the executor.
 func TestManagedSessionPathIsAuthorized(t *testing.T) {
 	docs := managedSessionDocs(t)
+	for _, ns := range executorNamespaces {
+		t.Run(ns, func(t *testing.T) { checkManagedSessionPath(t, docs, ns) })
+	}
+}
+
+// checkManagedSessionPath checks the path of the executor in namespace ns,
+// and that it reaches no other executor's namespace.
+func checkManagedSessionPath(t *testing.T, docs []map[string]any, sessionsNamespace string) {
 	executor := grantsFor(t, docs, sessionsNamespace, "sproozi-work")
 	gateway := grantsFor(t, docs, systemNamespace, gatewayAccount)
 	cli := grantsFor(t, docs, sessionsNamespace, "sproozi-cli")
+	for _, other := range executorNamespaces {
+		if other != sessionsNamespace && (allowsAny(executor, other, resourceConfigMaps, verbGet) ||
+			allows(executor, other, groupSproozi, resourceAgentRuns, verbCreate) ||
+			allows(cli, other, "", "pods/portforward", verbCreate)) {
+			t.Errorf("the executor or CLI of %s reaches %s", sessionsNamespace, other)
+		}
+	}
 	for _, check := range []struct {
 		who                              string
 		grants                           []grant
@@ -274,11 +296,11 @@ func TestManagedSessionPathIsAuthorized(t *testing.T) {
 		t.Error("cli cannot read the executor's CA ConfigMap sproozi-remote-executor")
 	}
 	if allows(cli, sessionsNamespace, "", resourceConfigMaps, verbGet) {
-		t.Error("cli can read every ConfigMap in sproozi-sessions; it needs only sproozi-remote-executor")
+		t.Errorf("cli can read every ConfigMap in %s; it needs only sproozi-remote-executor", sessionsNamespace)
 	}
 	for _, verb := range []string{verbCreate, verbUpdate, verbPatch, verbDelete} {
 		if allowsAny(gateway, sessionsNamespace, resourceConfigMaps, verb) {
-			t.Errorf("gateway can %s registrations in sproozi-sessions; it only reads them", verb)
+			t.Errorf("gateway can %s registrations in %s; it only reads them", verb, sessionsNamespace)
 		}
 	}
 }

@@ -292,12 +292,19 @@ python3 hack/verify/session-mobility/claude.py verify \
 Wait for Claude's socket and provider as above, with port 18775, before the
 driver.
 
+For Claude Code sessions and tasks that the remote executor owns, with no
+service on this machine, use the
+[Claude remote-executor driver](../claude-remote-kind/README.md) instead: it
+creates its own cluster and runs the Claude Code executor example.
+
 The Claude driver changes the profile marker before each move in the same way.
 With `--admin-probes` it reads the rendered profile skill in each visit's exact
 container or Pod and requires that visit's marker. Claude Code resumes a
 conversation with the system prompt and skill listing it started with, so every
 model request must carry the first visit's marker and the
-`profile:mobility-check` skill.
+`profile:mobility-check` skill. Newer clients also announce a skill whose
+description changed, so a request may carry an earlier visit's marker too, but
+never the marker of a visit that has not begun.
 
 Claude's preparation generates a fresh certificate covering Anthropic as well
 as OpenAI, gateway, executor and host names. The TLS Secret

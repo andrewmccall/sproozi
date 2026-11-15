@@ -184,7 +184,7 @@ the cancellation is refused as a conflict. Defect 1 is gone.
 
 **Completion stays the supervisor's to observe.** For Codex, the stop succeeds
 once the supervisor finds a completed turn of the submitted task. Claude tasks
-(a later step) bind completion to the task's own prompt in the same way.
+bind completion to the task's own prompt in the same way (section 11).
 
 ### 3. Deadlines
 
@@ -237,8 +237,8 @@ Not built here, each with its own change:
   `stop`, `resume` and `attach` with `--remote`), and its capture of a local
   `PATH` to upload. The executor's side is section 8.
 - **Claude Code on the cluster**: interactive first, then tasks, with
-  completion bound to the task prompt and `FinalText` for Claude. Task
-  submissions for any harness but Codex stay refused until then. One harness
+  completion bound to the task prompt and `FinalText` for Claude. Sections
+  10 and 11 record both. One harness
   per executor stays; Codex and Claude on one cluster means two executors.
 - **The coordinator on the cluster, the laptop service optional.** One
   coordinator implementation serves both hosts. Two protocols keep fixed
@@ -294,6 +294,82 @@ Added after this record was accepted; it follows its direction.
   `Coordinator.Create` retains it, then deletes it. The intent records its
   digest, never its bytes.
 
+### 9. The CLI for interactive sessions
+
+Added with the CLI; it follows section 8.
+
+- **The CLI talks to the executor directly**, over the port-forwarded owner
+  transport `status`, `cancel` and `recover --remote` already use, not
+  through the local service. The laptop keeps no record of the session, so
+  any machine that reaches the cluster can attach, and no service needs to
+  run.
+- **`run --remote` without a task is interactive.** The intent says so in
+  `mode`; the CLI never infers it on the executor's behalf. `PATH` is the
+  local `run` operand: given, the CLI captures it with
+  `workspace.CaptureLocal`, the local run's capture and refusals, within the
+  executor's `maxCheckpointBytes`, and uploads it. Absent, the session starts
+  from the approved repository; it never defaults to the current directory.
+  `--repository` or `--project` is still required, for association.
+- **Attach reuses the local terminal code** through `home.AttachStream`, the
+  frame conversion with the transport factored out, and one
+  `attachTerminal` in the CLI for raw mode, resizing and the detach line.
+- **Stop repeats its operation** while the executor answers `stopping` or the
+  request times out, printing the waiting notice once. Each resume is a new
+  operation, since the executor binds operations to one action and execution.
+- **Commands for a cluster's session need `--remote`, `--context` or
+  `--namespace`.** The cluster's catalogue does not record which context
+  reaches it, and guessing from `sessions` would contact clusters for every
+  local command. The local "no session" error names the flags instead.
+
+### 10. Claude Code interactive sessions on the cluster
+
+Added with Claude Code executors; it follows section 7.
+
+- **An executor's harness is `codex` or `claude-code`.** A Claude Code
+  executor first ran interactive sessions only and answered a task
+  `unsupported`; section 11 turns its tasks on. One harness per executor stays, so the example
+  adds a second executor in its own namespace, `sproozi-claude-sessions`,
+  whose roles outside it are named `sproozi-claude-work`. The CLI names the
+  executor's harness, from its description, and the requested one when it
+  refuses.
+- **A first visit starts Claude Code fresh**, as a local Docker session
+  does: the supervisor writes onboarding as complete and the workspace as
+  trusted in the launch-generated `.claude.json`, so nothing waits at a
+  dialog. The placement binds the conversation Claude Code reported through
+  its hooks during the graceful stop (`BindNative`), as for a moved
+  checkpoint's later visit.
+- **An exited Claude Code visit stops.** The exit sweep stops a session
+  whose agent exited, and the Kubernetes placement refused every stop of a
+  Claude Code visit whose container had ended, so `/exit` would have left
+  the session `unknown-stop`. The placement now follows
+  [ADR 0038](0038-exited-agents-and-one-recovery-path.md) as Docker does: a
+  first visit stops turnless, keeping the workspace it started from, and a
+  resumed visit's stop names the checkpoint it started from. Neither claims a
+  conversation from a stopped container (ADR 0011).
+
+### 11. Claude tasks on the cluster
+
+Added once the Claude Code supervisor ran tasks (ADR 0011, later
+clarification). A Claude Code executor now accepts a task as a Codex one
+does; it answers `unsupported` only for another harness's submission, and the
+work token reaches it under the same `workTokenMaxDuration`.
+
+- **Completion binds to the task's prompt.** The supervisor passes the task
+  as the launch's one positional prompt, and counts only the `Stop` of the
+  turn whose `UserPromptSubmit` prompt is the task. Until then the graceful
+  stop reports the turn pending and the driver repeats `Finalize`, as for
+  Codex. A task launch never resumes a conversation and is never turnless.
+- **The result is Claude's final reply**: the text of the reply at the
+  transcript leaf the checkpoint selected, bounded like Codex's, with Claude
+  Code's `(no content)` read as empty.
+- **Nothing else changes in the owner.** The same phases, deadlines,
+  retention and `pull` apply. The CLI's refusal of a task for the executor's
+  own harness now says an executor older than this release may run none.
+- **Not yet proven on a cluster.** Unit tests cover the owner with a fake
+  placement and the supervisor with captured hooks;
+  `make verify-claude-remote-kind` is the Kind proof and has not been
+  recorded.
+
 ## Alternatives
 
 - **Keep work separate and fix it in place.** Check phase on read, take the
@@ -321,6 +397,15 @@ Added after this record was accepted; it follows its direction.
 - **One `maxDuration` for everyone, or a second executor for Hermes.** One cap
   cannot limit Hermes without limiting the owner; a second executor doubles
   the deployment. Rejected for `workTokenMaxDuration`.
+- **Route remote commands through the local service**, as `move` and `pull`
+  do. The service would remember the executor, so the flags could be
+  dropped, but the laptop's service would have to run for every attach.
+  Rejected for interactive sessions; revisit if remembering the executor
+  matters more than the laptop being optional.
+- **Resolve a session ID to its cluster without flags**, by asking the
+  default cluster when this machine does not know the ID. It covers only the
+  `sproozi` context, and makes every unknown local ID reach a cluster.
+  Rejected for now.
 - **Pull or discard before upgrading, instead of a version 1 reader.**
   Simpler code, but it makes the upgrade lose retained work the operator has
   not pulled yet. Rejected.
@@ -377,8 +462,9 @@ Added after this record was accepted; it follows its direction.
 - Code: `internal/work/` (`catalogue.go`, `driver.go`, `interactive.go`, `export.go`,
   `legacy.go`, `phase.go`), `internal/session/cancel.go`,
   `internal/session/phase.go`, `cmd/session-profile/main.go`,
-  `internal/runtime/kubernetes/placement/placement.go`,
-  `cmd/sproozi/output.go`.
+  `internal/runtime/kubernetes/placement/placement.go` and `lifecycle.go`,
+  `cmd/sproozi/output.go` and `session.go`; the Claude Code executor
+  example in `examples/portable-workflows/kubernetes/claude/`.
 - Docs: [session commands](../reference/session-commands.md),
   [remote executors](../reference/remote-executors.md),
   [portable workflows](../guides/portable-workflows.md),

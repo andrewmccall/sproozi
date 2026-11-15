@@ -201,6 +201,22 @@ var errNoTerminal = errors.New("attach needs an interactive terminal, and standa
 	"run it from a terminal, where Ctrl-] detaches")
 
 func attach(ctx context.Context, socket, id string) error {
+	return attachTerminal(ctx, id, "", func(ctx context.Context, input io.Reader, output io.Writer,
+		sizes <-chan home.TerminalSize, attached func()) error {
+		return home.AttachTerminalNotify(ctx, socket, id, input, output, sizes, attached)
+	})
+}
+
+// attachment carries the user's terminal to one session's agent until Ctrl-]
+// detaches or the attachment ends: this machine's service, or a cluster's
+// remote executor. It calls attached once the session accepted it.
+type attachment func(ctx context.Context, input io.Reader, output io.Writer, sizes <-chan home.TerminalSize,
+	attached func()) error
+
+// attachTerminal puts the user's terminal in raw mode, follows its size and
+// runs connect on it; afterwards it restores the terminal and names the
+// session's next commands, followed by flags, such as --remote.
+func attachTerminal(ctx context.Context, id, flags string, connect attachment) error {
 	sizes := make(chan home.TerminalSize, 1)
 	fd := int(os.Stdin.Fd())
 	if !term.IsTerminal(fd) {
@@ -237,7 +253,7 @@ func attach(ctx context.Context, socket, id string) error {
 	defer cancel()
 	stopResize := watchResize(run, update)
 	defer stopResize()
-	err = home.AttachTerminalNotify(run, socket, id, os.Stdin, os.Stdout, sizes, func() {
+	err = connect(run, os.Stdin, os.Stdout, sizes, func() {
 		_, _ = fmt.Fprint(os.Stderr, "Attached to the agent's terminal; Ctrl-] detaches\r\n")
 	})
 	restore()
@@ -246,7 +262,7 @@ func attach(ctx context.Context, socket, id string) error {
 		// still in this terminal. Reset them, then name the session and the
 		// next commands below the cursor.
 		_, _ = fmt.Fprint(os.Stdout, detachReset)
-		_, _ = fmt.Fprintln(os.Stderr, detachedLine(id))
+		_, _ = fmt.Fprintln(os.Stderr, detachedLine(id, flags))
 	}
 	return err
 }
@@ -256,9 +272,13 @@ func attach(ctx context.Context, socket, id string) error {
 // keyboard, and nothing left below the cursor to show through the hint.
 const detachReset = "\x1b[0m\x1b[?25h\x1b[?2004l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[<u\r\n\x1b[J"
 
-// detachedLine names the session and the next commands after its terminal closes.
-func detachedLine(id string) string {
+// detachedLine names the session and the next commands after its terminal
+// closes; flags, when set, follow the session in each command.
+func detachedLine(id, flags string) string {
 	short := shortID(id)
+	if flags != "" {
+		short += " " + flags
+	}
 	return fmt.Sprintf("Left session %s. Back to it: sproozi attach %s   Stop it: sproozi stop %s   List: sproozi ls",
 		id, short, short)
 }

@@ -4,12 +4,15 @@ package work
 import (
 	"archive/tar"
 	"bytes"
+	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"io"
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -56,6 +59,51 @@ func code(err error) profile.Code {
 		return ""
 	}
 	return OutcomeCode(err)
+}
+
+// A Claude Code executor runs interactive sessions, and refuses another
+// harness's. Its tasks are in claude_task_test.go.
+func TestClaudeExecutorRunsInteractiveSessionsAndRefusesCodex(t *testing.T) {
+	t.Parallel()
+	c, p := fixture(t)
+	c.Harness = harness.NativeClaude
+	o := openOwner(t, c)
+
+	q := interactiveRequest()
+	q.Harness = harness.NativeClaude
+	v := startInteractive(t, o, q)
+	if v.Harness != harness.NativeClaude {
+		t.Fatalf("interactive session lost its harness: %+v", v)
+	}
+	p.mu.Lock()
+	launched := p.launches[0]
+	p.mu.Unlock()
+	if launched.Harness != harness.NativeClaude || launched.Task != "" || launched.ThreadID != "" {
+		t.Fatalf("Claude first visit launched as %+v", launched)
+	}
+
+	if _, err := o.Submit(t.Context(), interactiveRequest()); code(err) != profile.CodeUnsupported {
+		t.Fatalf("Codex session accepted by a Claude executor: %v", err)
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.launches) != 1 {
+		t.Fatalf("refused submission launched: %d", len(p.launches))
+	}
+}
+
+// Only executors for Codex and Claude Code are configurable.
+func TestConfigAcceptsCodexAndClaudeExecutorsOnly(t *testing.T) {
+	t.Parallel()
+	c := fixtureConfig(t, filepath.Join(t.TempDir(), "repository"), &fixturePlacement{})
+	c.RetainedBytes = 2 * c.MaxCheckpointBytes
+	for kind, valid := range map[harness.NativeKind]bool{harness.NativeCodex: true, harness.NativeClaude: true,
+		"opencode": false, harness.NativeCopilot: false, "": false} {
+		c.Harness = kind
+		if err := c.validate(); (err == nil) != valid {
+			t.Errorf("harness %q: %v", kind, err)
+		}
+	}
 }
 
 // An interactive session has no completion driver: it runs until its owner
@@ -578,3 +626,42 @@ func TestRunBodyBoundsAnUpload(t *testing.T) {
 		t.Fatalf("a refused upload kept a session: %+v %v", list, err)
 	}
 }
+
+// The owner client attaches through its transport: the frames it sends reach
+// the visit, and the visit's output comes back.
+func TestClientAttachesThroughTheOwnerTransport(t *testing.T) {
+	t.Parallel()
+	c, _ := fixture(t)
+	o := openOwner(t, c)
+	v := startInteractive(t, o, interactiveRequest())
+	home := strings.Repeat("h", 32)
+	server := attachServer(t, o, home)
+	roots := x509.NewCertPool()
+	roots.AddCert(server.Certificate())
+	transport, err := profile.Connect(profile.Connection{Origin: server.URL, Token: home, Roots: roots,
+		MaxCheckpointBytes: 1 << 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := ClientFor(transport)
+	defer func() { _ = client.Close() }()
+	frames := `{"op":"write","data":"aGk="}` + "\n"
+	output, err := client.Attach(t.Context(), v.ID, strings.NewReader(frames))
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := io.ReadAll(output)
+	_ = output.Close()
+	if err != nil || string(data) != frames {
+		t.Fatalf("attachment: %q %v", data, err)
+	}
+	if _, err = ClientFor(noTerminal{}).Attach(t.Context(), v.ID, strings.NewReader("")); err == nil {
+		t.Fatal("a transport without attachments attached")
+	}
+}
+
+// noTerminal is an owner transport that cannot attach.
+type noTerminal struct{}
+
+func (noTerminal) CallOwner(context.Context, string, any, any) error { return nil }
+func (noTerminal) Close()                                            {}

@@ -22,7 +22,9 @@ func (c *Client) CallOwner(ctx context.Context, action string, input, output any
 	}
 	limit := metadataLimit
 	if action == "run" {
-		limit += agentprofile.EncodedArchiveBytes
+		// A submission carries the caller's profile and, from the home
+		// principal, may carry an uploaded workspace up to the checkpoint limit.
+		limit += agentprofile.EncodedArchiveBytes + (c.maxCheckpoint+2)/3*4
 	}
 	b, err := json.Marshal(input)
 	if err != nil || int64(len(b)) > limit {
@@ -63,6 +65,76 @@ func (c *Client) CallOwner(ctx context.Context, action string, input, output any
 		return ownerFailure(CodeUnavailable, response.StatusCode)
 	}
 	return nil
+}
+
+// OpenOwnerAttachment attaches to an interactive session the remote work
+// owner runs: it sends the envelope naming the session, then frames, which
+// must be native terminal input frames, and returns the terminal's output
+// frames once the owner admits the attachment. The owner finds the session's
+// visit itself, so the caller never sends a launch. Closing the returned
+// reader ends the attachment; the session keeps running.
+func (c *Client) OpenOwnerAttachment(ctx context.Context, id string, frames io.Reader) (io.ReadCloser, error) {
+	if frames == nil {
+		return nil, errors.New("profile: invalid attachment")
+	}
+	envelope, err := json.Marshal(struct {
+		ID string `json:"id"`
+	}{ID: id})
+	if err != nil || int64(len(envelope))+1 > metadataLimit {
+		return nil, errors.New("profile: invalid attachment envelope")
+	}
+	envelope = append(envelope, '\n')
+	body := &attachmentBody{Reader: io.MultiReader(bytes.NewReader(envelope), newFrameReader(frames))}
+	body.closer, _ = frames.(io.Closer)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/work/attach", body)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set(headerAuthorization, bearerPrefix+c.token)
+	req.Header.Set(headerContentType, jsonMedia)
+	// An attachment lasts as long as the user stays; the transport still
+	// bounds the wait for the owner's answer.
+	client := *c.http
+	client.Timeout = 0
+	resp, err := client.Do(req)
+	if err != nil {
+		_ = body.Close()
+		return nil, fmt.Errorf("%s: %w", OwnerOutcomeMessage(CodeUnavailable),
+			&RemoteError{Code: CodeUnavailable, Transport: err})
+	}
+	if resp.StatusCode != http.StatusOK {
+		defer func() { _ = resp.Body.Close(); _ = body.Close() }()
+		data, err := io.ReadAll(io.LimitReader(resp.Body, metadataLimit+1))
+		var failure struct {
+			Error Code `json:"error"`
+		}
+		if err == nil && int64(len(data)) <= metadataLimit && strictDecode(data, &failure) == nil &&
+			ownerErrorStatus(failure.Error, resp.StatusCode) {
+			return nil, ownerFailure(failure.Error, resp.StatusCode)
+		}
+		code := CodeUnavailable
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			code = CodeDenied
+		}
+		return nil, ownerFailure(code, resp.StatusCode)
+	}
+	output, write := io.Pipe()
+	go func() { _ = write.CloseWithError(CopyTerminalOutput(resp.Body, write)) }()
+	return &ownerAttachment{PipeReader: output, response: resp.Body, body: body}, nil
+}
+
+// ownerAttachment is an admitted attachment's output; closing it ends both
+// directions.
+type ownerAttachment struct {
+	*io.PipeReader
+	response io.Closer
+	body     io.Closer
+}
+
+func (a *ownerAttachment) Close() error {
+	_ = a.response.Close()
+	_ = a.body.Close()
+	return a.PipeReader.Close()
 }
 
 func ownerFailure(code Code, status int) error {

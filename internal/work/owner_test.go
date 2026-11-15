@@ -81,6 +81,9 @@ type fixturePlacement struct {
 	exit   *session.Exit
 	// attached receives each attachment's input frames.
 	attached [][]byte
+	// checkpointFor, when set, is the checkpoint and thread a stop returns
+	// for a launch, in place of the shared Codex template.
+	checkpointFor func(session.Launch) ([]byte, checkpoint.Metadata, string, error)
 }
 
 func (p *fixturePlacement) Exited(_ context.Context, l session.Launch, i session.Incarnation) (bool, error) {
@@ -206,6 +209,13 @@ func (p *fixturePlacement) Stop(ctx context.Context, l session.Launch, i session
 		return session.Stopped{}, &harness.NativeTurnPending{Waiting: "the task's turn to complete"}
 	}
 	s := session.Stopped{Launch: l, Incarnation: i, ActualStopped: !p.missingFence, ThreadID: testThread, Checkpoint: p.data, CheckpointDigest: p.meta.SHA256}
+	if p.checkpointFor != nil {
+		data, meta, thread, err := p.checkpointFor(l)
+		if err != nil {
+			return session.Stopped{}, err
+		}
+		s.Checkpoint, s.CheckpointDigest, s.ThreadID = data, meta.SHA256, thread
+	}
 	if p.exited[l.AllocationID] && p.exit != nil {
 		exit := *p.exit
 		s.Exit = &exit

@@ -398,15 +398,22 @@ func TestCheckListenNamesTheRunningHomeDaemon(t *testing.T) {
 // only printable text from inside the sandbox.
 func TestTerminalFailureNamesReasonAndNextStep(t *testing.T) {
 	id := controlTestID
-	err := terminalFailure(id, terminalFrame{Op: "attach", Error: "native execution is not active"})
+	err := terminalFailure(id, "", terminalFrame{Op: "attach", Error: "native execution is not active"})
 	want := "home: session " + id + " has no running native process to attach to; run \"sproozi status " + id +
 		"\" to see its phase: \"sproozi recover " + id + "\" finishes an unfinished start or move, and " +
 		"\"sproozi resume " + id + "\" continues a stopped session"
 	if err == nil || err.Error() != want {
 		t.Fatalf("got %v, want %q", err, want)
 	}
-	err = terminalFailure(id, terminalFrame{Op: terminalResize, Error: "bad\x1b[2Jsize"})
+	err = terminalFailure(id, "", terminalFrame{Op: terminalResize, Error: "bad\x1b[2Jsize"})
 	want = "home: native terminal resize failed: bad[2Jsize; run \"sproozi status " + id + "\" to see the session's phase"
+	if err == nil || err.Error() != want {
+		t.Fatalf("got %v, want %q", err, want)
+	}
+	// A remote attachment's hints name the cluster's flags.
+	err = terminalFailure(id, "--remote", terminalFrame{Op: "attach", Error: "attachment unavailable"})
+	want = "home: native terminal attach failed: attachment unavailable; run \"sproozi status " + id +
+		" --remote\" to see the session's phase"
 	if err == nil || err.Error() != want {
 		t.Fatalf("got %v, want %q", err, want)
 	}
