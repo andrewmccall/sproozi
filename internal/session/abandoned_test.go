@@ -68,7 +68,7 @@ func checkAbandoned(t *testing.T, c *Coordinator, r Record, err, want error) {
 
 // resumeFrom starts a new execution from id's last checkpoint, as resume
 // does, and activates it on the local placement.
-func resumeFrom(t *testing.T, c *Coordinator, id string, template Launch) Record {
+func resumeFrom(t *testing.T, c *Coordinator, id string, template Launch) {
 	t.Helper()
 	last, err := c.Inspect(id)
 	if err != nil {
@@ -89,7 +89,6 @@ func resumeFrom(t *testing.T, c *Coordinator, id string, template Launch) Record
 	if err != nil || r.Phase != PhaseActive {
 		t.Fatalf("resume from the kept checkpoint: %s %v", r.Phase, err)
 	}
-	return r
 }
 
 // A move that begins after the deadline stops its source, then ends instead

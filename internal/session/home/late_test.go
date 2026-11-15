@@ -58,13 +58,19 @@ func wantStoppedAndResumable(t *testing.T, s *Service, id, digest, thread string
 	}
 }
 
+// Late commands that have no action of their own.
+const (
+	lateResumeAgain = "resume again"
+	lateMoveLocal   = "move --local"
+)
+
 // A resume interrupted before its activation and retried after its deadline:
 // whichever command comes next ends that start, after fencing what it may
 // have prepared, and the session is stopped with the checkpoint it had, so
 // resume continues it. A new resume does all of that itself.
 func TestResumeInterruptedThenRetriedAfterItsDeadline(t *testing.T) {
 	t.Parallel()
-	for _, late := range []string{"resume", "resume again", "recover", "stop", "move --local"} {
+	for _, late := range []string{ActionResume, lateResumeAgain, ActionRecover, ActionStop, lateMoveLocal} {
 		t.Run(late, func(t *testing.T) {
 			t.Parallel()
 			s, local, _, repo := testService(t)
@@ -89,24 +95,24 @@ func TestResumeInterruptedThenRetriedAfterItsDeadline(t *testing.T) {
 			aborts := local.aborts
 			var r Response
 			switch late {
-			case "resume":
+			case ActionResume:
 				r = exchange(t, s, Request{Action: ActionResume, ID: id, OperationID: uuid.NewString()})
 				if r.Error != "" || r.Status == nil || r.Status.Phase != string(session.PhaseActive) {
 					t.Fatalf("late resume replied %+v", r)
 				}
-			case "resume again":
+			case lateResumeAgain:
 				r = exchange(t, s, Request{Action: ActionResume, ID: id, OperationID: interrupted})
-			case "recover":
+			case ActionRecover:
 				r = exchange(t, s, Request{Action: ActionRecover, ID: id})
-			case "stop":
+			case ActionStop:
 				r = exchange(t, s, Request{Action: ActionStop, ID: id, OperationID: uuid.NewString()})
 				if r.Error != "" || r.Status == nil || r.Status.Phase != stageRetained {
 					t.Fatalf("late stop replied %+v", r)
 				}
-			case "move --local":
+			case lateMoveLocal:
 				r = exchange(t, s, Request{Action: ActionMove, ID: id, OperationID: uuid.NewString(), Destination: LocalAlias})
 			}
-			if late != "resume" && late != "stop" {
+			if late != ActionResume && late != ActionStop {
 				wantDeadlineProblem(t, r, id)
 			}
 			ended, err := s.coordinator.Inspect(pending)
@@ -114,7 +120,7 @@ func TestResumeInterruptedThenRetriedAfterItsDeadline(t *testing.T) {
 				t.Fatalf("interrupted resume: %s abandoned %v aborts %d %v", ended.Phase, ended.Abandoned(interrupted),
 					local.aborts-aborts, err)
 			}
-			if late == "resume" {
+			if late == ActionResume {
 				return
 			}
 			wantStoppedAndResumable(t, s, id, local.digest, testNativeUUID)

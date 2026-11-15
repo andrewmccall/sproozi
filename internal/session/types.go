@@ -280,9 +280,9 @@ type Visit struct {
 type Stage string
 
 const (
-	stagePrepare   Stage = "prepare"
-	stageActivate  Stage = "activate"
-	stageStop      Stage = "stop"
+	stagePrepare  Stage = "prepare"
+	stageActivate Stage = "activate"
+	stageStop     Stage = "stop"
 	stageComplete Stage = "complete"
 	// stageCancelled ends an operation without its destination becoming
 	// active: cancellation intent carried it out, or, in a record without

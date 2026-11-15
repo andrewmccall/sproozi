@@ -397,31 +397,8 @@ func (s *Service) ResumeWithMaxDuration(ctx context.Context, id, operation strin
 	if previous, exists := r.Operations[operation]; operation == r.Operation || exists && previous.Action != ActionResume {
 		return Status{}, errors.New("home: resume operation intent conflicts")
 	}
-	for _, execution := range r.Executions {
-		prior, inspectErr := s.coordinator.Inspect(execution)
-		if inspectErr != nil {
-			return Status{}, inspectErr
-		}
-		if prior.Operations[0].ID == operation {
-			if r.Current != execution && !prior.Abandoned(operation) {
-				return Status{}, errors.New("home: resume operation belongs to an earlier execution")
-			}
-			if _, err = s.startFirstVisit(ctx, prior); errors.Is(err, session.ErrDeadlinePassed) {
-				// The deadline ended this resume before it started; a new
-				// resume continues the session from what it kept.
-				return Status{}, errors.Join(err, s.retireSettled(&r))
-			} else if err != nil {
-				return Status{}, err
-			}
-			return s.catalogStatus(r)
-		}
-	}
-	if r.Current != "" {
-		// A start or move whose deadline passed ends here, so this resume
-		// continues the session instead of being refused for it.
-		if err = s.endLate(ctx, &r); err != nil {
-			return Status{}, err
-		}
+	if status, replayed, err := s.replayResume(ctx, &r, operation); replayed || err != nil {
+		return status, err
 	}
 	if r.Current != "" {
 		return Status{}, s.notStoppedProblem(id, r.Current)
@@ -470,6 +447,38 @@ func (s *Service) ResumeWithMaxDuration(ctx context.Context, id, operation strin
 		return Status{}, err
 	}
 	return s.catalogStatus(r)
+}
+
+// replayResume continues a resume operation the session already bound to an
+// execution, reporting replayed. Otherwise it ends the current start or move
+// if its deadline passed (ADR 0060), so a new resume continues the session
+// instead of being refused for it. The caller holds the session's lock.
+func (s *Service) replayResume(ctx context.Context, r *localSession, operation string) (Status, bool, error) {
+	for _, execution := range r.Executions {
+		prior, err := s.coordinator.Inspect(execution)
+		if err != nil {
+			return Status{}, false, err
+		}
+		if prior.Operations[0].ID != operation {
+			continue
+		}
+		if r.Current != execution && !prior.Abandoned(operation) {
+			return Status{}, true, errors.New("home: resume operation belongs to an earlier execution")
+		}
+		if _, err = s.startFirstVisit(ctx, prior); errors.Is(err, session.ErrDeadlinePassed) {
+			// The deadline ended this resume before it started; a new
+			// resume continues the session from what it kept.
+			return Status{}, true, errors.Join(err, s.retireSettled(r))
+		} else if err != nil {
+			return Status{}, true, err
+		}
+		status, err := s.catalogStatus(*r)
+		return status, true, err
+	}
+	if r.Current == "" {
+		return Status{}, false, nil
+	}
+	return Status{}, false, s.endLate(ctx, r)
 }
 
 // startedChoice recovers the deadline choice of a start interrupted before

@@ -35,7 +35,10 @@ func TestMaxDurationFlag(t *testing.T) {
 	}
 }
 
-const phaseActive = "active"
+const (
+	phaseActive    = "active"
+	phasePreparing = "preparing"
+)
 
 func TestDeadlineText(t *testing.T) {
 	at := time.Date(2026, 11, 14, 12, 0, 0, 0, time.UTC)
@@ -49,7 +52,7 @@ func TestDeadlineText(t *testing.T) {
 		{phaseCancelled, at, "-"},
 		{phaseCancelled, time.Time{}, "-"},
 		// Remote work reports the same phases.
-		{"preparing", at, formatTime(at)},
+		{phasePreparing, at, formatTime(at)},
 		{"stopping", at, formatTime(at)},
 		{string(work.PhaseRetained), at, "-"},
 		// No phase is called starting; unresolved and retained ones have none.
@@ -81,10 +84,10 @@ func TestStatusOfAStartOverdueNamesResume(t *testing.T) {
 		at    time.Time
 		want  bool
 	}{
-		{"preparing", time.Now().Add(-time.Minute), true},
+		{phasePreparing, time.Now().Add(-time.Minute), true},
 		{"activating", time.Now().Add(-time.Minute), true},
-		{"preparing", time.Now().Add(time.Hour), false},
-		{"preparing", time.Time{}, false},
+		{phasePreparing, time.Now().Add(time.Hour), false},
+		{phasePreparing, time.Time{}, false},
 		{phaseActive, time.Now().Add(-time.Minute), false},
 	} {
 		text := statusText(cmdStatus, home.Status{ID: id, Phase: tc.phase, Deadline: tc.at}, false)

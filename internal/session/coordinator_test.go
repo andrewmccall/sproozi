@@ -270,9 +270,9 @@ type fakePlacement struct {
 	failActivate bool
 	// inspections counts Inspect calls.
 	prepareCalls, inspections int
-	unknownStop                           bool
-	missingUsage                          bool
-	unsealed                              bool
+	unknownStop               bool
+	missingUsage              bool
+	unsealed                  bool
 	// turnless stops a visit from the retained workspace with no native
 	// conversation: no thread and no checkpoint.
 	turnless    bool
