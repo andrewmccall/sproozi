@@ -39,6 +39,10 @@ A CONNECT connection is a transport lifetime, not an MCP conversation. The
 trusted Codex launch receives its public connection fragment in the existing
 immutable run contract, derived from requested names and the runtime's gateway.
 
+Corrected 2026-11-16: the registry now renders the public connection for every
+harness, not only the trusted Codex launch (ADR 0039,
+`internal/harness/registry.go`).
+
 ## Boundary and ownership choices
 
 Remote connections use `/mcp/<server>` on the gateway's existing authority.

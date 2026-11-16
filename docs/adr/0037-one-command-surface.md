@@ -24,6 +24,10 @@ in ADR 0036; no command
 returns work to the user's repository yet; and there is no CLI installer for
 Kubernetes.
 
+Corrected 2026-11-16: Sproozi has been released since v0.1.0 (2026-10-22), two days
+after this decision. The unreleased state is what the decision relied on to
+refuse aliases and shims.
+
 ## Decision
 
 ### Commands
