@@ -2,15 +2,16 @@
 
 Status: future extensions to the supported clients.
 
-Sproozi supports ordinary launches for Codex, Claude Code, OpenCode and Hermes.
-Managed session movement supports Codex and Claude Code. See the
+Sproozi supports ordinary launches for Codex, Claude Code, OpenCode, GitHub Copilot CLI and Hermes.
+Managed session movement supports Codex, Claude Code and GitHub Copilot CLI. See the
 [harness reference](../../reference/harnesses.md) for configuration and limits.
 This page covers additional state formats and client connections.
 
 A harness owns its agent loop, conversation semantics and user experience.
 Sproozi owns the bounded environment and external authority available there.
 Extend the current launch adapters only when a concrete resume or control requirement
-needs it; a generic harness registry is not a prerequisite.
+needs it. One harness registry exists already
+([ADR 0039](../../adr/0039-one-harness-registry-and-the-mcp-requirement.md)).
 
 ## Session adapters preserve native state
 
@@ -47,7 +48,7 @@ stop or trusted usage. See
 
 | Client connection | Purpose | Current support |
 | --- | --- | --- |
-| Native CLI resume | Resume through the client's own command. | Pinned Codex and Claude Code. |
+| Native CLI resume | Resume through the client's own command. | Pinned Codex, Claude Code and GitHub Copilot CLI. |
 | Remote terminal | Attach to the running CLI. | Managed Docker and Kubernetes sessions. |
 | Native protocol | Connect an IDE or GUI to a remote session. | Future extension. |
 

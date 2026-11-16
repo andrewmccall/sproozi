@@ -1,9 +1,9 @@
 # Session mobility extensions
 
-Status: future extensions to controlled Codex and Claude Code session movement.
+Status: future extensions to controlled Codex, Claude Code and GitHub Copilot CLI session movement.
 
 [Move a live session between Docker and Kubernetes](../../guides/session-mobility.md) describes managed
-Codex and Claude Code sessions. This page covers extensions to that workflow.
+Codex, Claude Code and GitHub Copilot CLI sessions. This page covers extensions to that workflow.
 
 [ADR 0004](../../adr/0004-portable-sessions-and-bounded-executions.md) records the
 accepted outcome. ADRs [0008](../../adr/0008-selected-native-and-git-checkpoints.md),
