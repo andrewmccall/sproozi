@@ -29,3 +29,16 @@ func TestRefusedSyncIsLoggedOncePerChange(t *testing.T) {
 		t.Fatalf("the store holds %q", content(t, l.stored))
 	}
 }
+
+// A periodic sync that a stop ends while it waits for the store's lock is not
+// a failure of syncing: the stop's own save follows and reports itself.
+func TestStopEndingAPeriodicSyncIsNotLogged(t *testing.T) {
+	l := signedInEvery(t, quietInterval)
+	lockedByPeer(t, l.stored)
+	ended, end := context.WithCancel(context.Background())
+	end()
+	l.tick(ended)
+	if said := l.diagnostics.(*lockedBuffer).String(); said != "" {
+		t.Fatalf("diagnostics: %q", said)
+	}
+}

@@ -251,6 +251,10 @@ func (l *loginSync) run() {
 // why the store stopped updating without repeating it.
 func (l *loginSync) tick(ctx context.Context) {
 	err := l.syncWithin(ctx)
+	if err != nil && ctx.Err() != nil {
+		// A stop ended this sync; its own save follows and reports itself.
+		return
+	}
 	switch {
 	case err != nil && err.Error() != l.problem:
 		l.diagnose("Stopped syncing the harness's sign-in with its login store: %v", err)
