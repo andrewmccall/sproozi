@@ -121,6 +121,27 @@ administrator deleted the visit's registration or replaced its run
 | This release | Older | The executor answers `404 invalid_request`. The service inspects the visit as before: one never registered is `cancelled`, one already prepared is aborted, one active or in an unknown state is refused as not a preparation, and one still preparing stays `unknown-stop` with `the remote executor cannot abort a preparation that has not reported its Pod; it is older than this Sproozi`. Update the executor, then `recover`. |
 | Older | This release | The service never sends `abort-preparation`; nothing changes. |
 
+### Noticing an exit
+
+`exited` asks whether the agent of an active visit that home moved to the
+cluster exited by itself or at its deadline. Home's service asks every five
+seconds for each such session, and before an `attach`; when the answer is yes
+it stops the session through the ordinary `stop`, which keeps what
+[native control](native-control.md#what-a-stopped-visit-keeps) describes and
+records the exit. The request carries the launch and its incarnation, as
+`stop` does; a checkpoint is `invalid_request`. It is authorized like every
+placement action and is never `expired`: an agent that exited at its deadline
+is still reported. The answer is `{"version":1,"exited":true}`, or no
+`exited` field when the agent still runs, or the visit is stopping, stopped
+or not yet active. It answers `409 conflict` for another incarnation, and
+`422 unsupported` when the executor's placement cannot observe exits.
+
+| Service | Executor | What happens |
+| --- | --- | --- |
+| This release | This release | `exited`; a session whose agent exited is stopped within about five seconds and shows `failed` or `retained` with its exit. |
+| This release | Older | The executor answers `404 invalid_request`. The service reads it, and `unsupported`, as no exit, logs nothing, and stops asking until it next connects to the executor: after a failed request, or before its executor token expires. The session stays `active` until `stop`, as before. |
+| Older | This release | The service never sends `exited`, and no other answer carries the field; nothing changes. |
+
 ## Request timeouts and dropped connections
 
 Each request waits as long as the executor may take over it, plus a minute for
@@ -133,7 +154,7 @@ the answer to arrive
 | Placement `prepare` | 2 minutes for an interactive visit's Pod to run, plus sending and restoring the checkpoint | 8 minutes |
 | Placement `abort`; owner `cancel` | The Pod's termination grace period, 30 seconds by default, and sealing usage | 2 minutes |
 | Placement `abort-preparation` | 30 seconds once no other operation on the same visit holds it ([cancelling a preparation](#cancelling-a-preparation)) | 2 minutes |
-| Everything else, and the wait for an `attach` to be admitted | A few API calls | 45 seconds |
+| Everything else, including placement `exited`, and the wait for an `attach` to be admitted | A few API calls | 45 seconds |
 
 A stop still waiting for the turn answers `turn_pending` about two minutes
 after it asked (four for a first visit), well inside the client's wait.
@@ -339,9 +360,13 @@ When the agent's native container has ended, the executor stops the session
 through the ordinary stop, which reads the
 [exit report](native-control.md#exit-reports) and keeps the conversation of a
 completed Codex turn. A stopped container never proves a completed Claude Code
-turn, so a Claude Code session keeps no turns from that visit: the workspace
-it started from after a first visit, its previous checkpoint after a resumed
-one. The session then shows `failed` with its `exit` (code, cause
+turn, so a Claude Code session keeps no turns from that visit, even one whose
+earlier stop bound its conversation and was waiting for its turn: the
+workspace it started from after a first visit, its previous checkpoint after a
+resumed one. A Codex conversation that cannot be captured, such as a turn the
+agent left unfinished, is kept the same way instead of failing the stop
+([what a stopped visit keeps](native-control.md#what-a-stopped-visit-keeps)).
+The session then shows `failed` with its `exit` (code, cause
 and last output lines) for a nonzero exit, or `retained`. An `attach` to such
 a session stops it the same way and answers `conflict`. The executor needs
 `get` on `pods/log` in `sproozi-agents` to read the report.

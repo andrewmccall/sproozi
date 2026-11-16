@@ -108,13 +108,31 @@ Docker placement reads the agent container's output. The Kubernetes placement
 reads the native container's output through `pods/log` (at most 64 KiB) when
 it stops a visit whose native container already ended. It reports the
 container as ended through `Exited` while the visit is still active, so the
-remote executor's exit sweep can stop it
-([remote executors](remote-executors.md#interactive-sessions)). A first Codex
-visit that ended before any completed turn stops turnless; one whose report
-names a completed turn's thread keeps that conversation. A Claude Code visit
-binds no thread from a report: a first visit stops turnless, and a resumed
-visit's stop names the checkpoint it started from. The report is a
-workload diagnostic, never a writer fence or accounting fact.
+remote executor's exit sweep, or home's exit watcher through the placement
+protocol's `exited` action, can stop it
+([remote executors](remote-executors.md#noticing-an-exit)). A first Codex
+visit binds the thread a report names. A Claude Code or Copilot visit binds no
+thread from a report. The report is a workload diagnostic, never a writer
+fence or accounting fact.
+
+### What a stopped visit keeps
+
+Once the writer is fenced and usage sealed, both placements decide what the
+stop keeps by one rule
+([ADR 0062](../adr/0062-one-exit-rule-and-exits-over-the-wire.md)). "Started
+from" is the checkpoint a resumed visit started from, or, for a first visit,
+no checkpoint: the session keeps the workspace the visit started from.
+
+| How the visit ended | Kept | If the capture fails |
+| --- | --- | --- |
+| Graceful stop, with a conversation | A new checkpoint | The stop fails; repeating it captures again. |
+| Turnless first visit | What it started from | Nothing is captured. |
+| Harness exited, its state proves completion (Codex, Copilot) and it has a conversation | A new checkpoint | What it started from; the stop finishes. |
+| Harness exited, and its state does not prove completion (Claude Code) | What it started from, even when the visit bound a conversation before it exited | Nothing is captured. |
+| Harness exited before any conversation | What it started from | Nothing is captured. |
+
+A stop that kept what the visit started from still reports the visit's
+`exit`.
 
 ## Terminal attachment
 

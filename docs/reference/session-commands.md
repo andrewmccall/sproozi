@@ -197,8 +197,13 @@ session through the same path. A nonzero exit code leaves it `failed`;
 `attach` refuses with `session ID stopped because its agent exited with code
 N; see "sproozi status ID", then "sproozi resume ID" to continue it or
 "sproozi rm ID" to remove it`. Code 0 leaves it `retained`. Codex keeps the
-conversation of a completed turn it reported before exiting; otherwise the
-session keeps its previous checkpoint, or the workspace it started from.
+conversation of a completed turn it reported before exiting; otherwise, or
+when that conversation cannot be captured, the session keeps its previous
+checkpoint, or the workspace it started from
+([what a stopped visit keeps](native-control.md#what-a-stopped-visit-keeps)).
+This holds on this machine and for a session moved to a cluster: the service
+asks the remote executor, and an executor older than this Sproozi reports no
+exits, so its sessions stay `active` until `stop`.
 
 A session with a deadline (`--max-duration`, or `maxDuration` in
 `config.json`; none by default) is stopped the same way when it reaches it, and
