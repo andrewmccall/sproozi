@@ -365,10 +365,11 @@ work token reaches it under the same `workTokenMaxDuration`.
 - **Nothing else changes in the owner.** The same phases, deadlines,
   retention and `pull` apply. The CLI's refusal of a task for the executor's
   own harness now says an executor older than this release may run none.
-- **Not yet proven on a cluster.** Unit tests cover the owner with a fake
+- **Proven on a Kind cluster.** Unit tests cover the owner with a fake
   placement and the supervisor with captured hooks;
-  `make verify-claude-remote-kind` is the Kind proof and has not been
-  recorded.
+  `make verify-claude-remote-kind`, the Kind proof against an in-cluster
+  Anthropic fixture, passed at `f5a7892` and runs in CI (E2E Tests). The real
+  Anthropic service and `/login` remain unproven.
 
 ## Alternatives
 
