@@ -69,6 +69,8 @@ type placementFixture struct {
 	unreachableAbort bool
 	// onStop, when non-nil, runs once as Stop is reached.
 	onStop func()
+	// stopErr, when set, fails every Stop before it reaches the visit.
+	stopErr error
 }
 
 func (p *placementFixture) prepare(l session.Launch) session.Incarnation {
@@ -152,6 +154,9 @@ func (p *placementFixture) Stop(ctx context.Context, l session.Launch, i session
 	if hook := p.onStop; hook != nil {
 		p.onStop = nil
 		hook()
+	}
+	if p.stopErr != nil {
+		return session.Stopped{}, p.stopErr
 	}
 	r := p.rows[l.AllocationID]
 	if r.Incarnation != i {
