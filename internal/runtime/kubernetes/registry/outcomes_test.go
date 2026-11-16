@@ -23,6 +23,9 @@ var updateOutcomes = flag.Bool("update-outcomes", false, "rewrite testdata/mutat
 
 const outcomesFile = "testdata/mutator-outcomes.txt"
 
+// outcomeNone names an absent record, receipt or deadline in the table.
+const outcomeNone = "none"
+
 const (
 	outcomeRun        = fixtureRunUID
 	outcomeOtherRun   = "other-run"
@@ -63,7 +66,7 @@ type outcomeClock struct {
 var outcomeClocks = []outcomeClock{
 	{"early", testNow.Add(time.Hour), testNow},
 	{"late", testNow.Add(time.Hour), testNow.Add(2 * time.Hour)},
-	{"none", time.Time{}, testNow.Add(100 * 365 * 24 * time.Hour)},
+	{outcomeNone, time.Time{}, testNow.Add(100 * 365 * 24 * time.Hour)},
 }
 
 func outcomeSeals(units int64) map[api.CapabilityKind]budget.TrustedUsage {
@@ -133,7 +136,7 @@ func outcomeOps() []outcomeOp {
 		{"bind-pod-other", func(ctx context.Context, s *Store, ref Reference, _ Registration) (Record, error) {
 			return s.BindPod(ctx, ref, outcomeOtherPod)
 		}},
-		{"prepared", func(ctx context.Context, s *Store, ref Reference, _ Registration) (Record, error) {
+		{string(Prepared), func(ctx context.Context, s *Store, ref Reference, _ Registration) (Record, error) {
 			return s.Prepared(ctx, ref, outcomePod)
 		}},
 		{"prepared-other", func(ctx context.Context, s *Store, ref Reference, _ Registration) (Record, error) {
@@ -173,9 +176,9 @@ func outcomeOps() []outcomeOp {
 
 func describeState(s *stored) string {
 	if s == nil {
-		return "none"
+		return outcomeNone
 	}
-	receipt := "none"
+	receipt := outcomeNone
 	if s.Receipt != nil {
 		receipt = fmt.Sprintf("units=%d", s.Receipt.Seals[api.CapabilityModelInference].Units)
 		if s.Receipt.CheckpointDigest != "" {
@@ -254,7 +257,7 @@ func outcome(t *testing.T, kind outcomeKind, clock outcomeClock, state *stored, 
 // before its transitions moved into a table (ADR 0058), so the table changed
 // no accepted phase, written phase or refusal.
 func TestMutatorOutcomesMatchTheRecordedTable(t *testing.T) {
-	var lines []string
+	lines := make([]string, 0, 2048)
 	for _, kind := range outcomeKinds() {
 		for _, clock := range outcomeClocks {
 			reg := kind.reg()
