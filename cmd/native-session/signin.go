@@ -153,11 +153,31 @@ func startLoginSync(c config) (*loginSync, error) {
 	}
 	l := &loginSync{stored: stored, native: native, deadline: c.Deadline,
 		quit: make(chan struct{}), stopped: make(chan struct{})}
-	if err := l.sync(); err != nil {
+	if err := l.begin(); err != nil {
 		return nil, err
 	}
-	go l.run()
 	return l, nil
+}
+
+// errStoreNotWhole is a store that holds no whole login: a writer stopped
+// part way, or it holds something else.
+var errStoreNotWhole = errors.New("the login store is not a whole login")
+
+// begin runs the first sync and starts the periodic one. A store that holds
+// no whole login starts the harness without one, rather than failing the
+// launch or giving it the store's bytes; its own sign-in then replaces it.
+func (l *loginSync) begin() error {
+	err := l.sync()
+	if errors.Is(err, errStoreNotWhole) {
+		l.diagnose("Started the harness without a sign-in: %v", err)
+		l.mu.Lock()
+		l.known = true
+		l.mu.Unlock()
+	} else if err != nil {
+		return err
+	}
+	go l.run()
+	return nil
 }
 
 func (l *loginSync) run() {
@@ -279,15 +299,21 @@ func (l *loginSync) syncWithin(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	unfinished := stored != nil && !wholeLogin(stored)
 	switch {
-	case !l.known && stored == nil && native != nil, changed:
-		// The harness signed in, refreshed or signed out.
+	case !l.known && (stored == nil || unfinished) && native != nil, changed:
+		// The harness signed in, refreshed or signed out. Its whole login
+		// also replaces a store another writer left unfinished.
 		if writable {
-			if err = writeStore(store, native); err != nil {
+			if err = writeStore(ctx, store, native); err != nil {
 				return err
 			}
 		}
 		l.agreed = native
+	case unfinished:
+		// Another writer stopped part way, or the store holds something
+		// else: the harness keeps its own login.
+		return fmt.Errorf("%w: %s", errStoreNotWhole, l.stored)
 	case !l.known || !bytes.Equal(stored, l.agreed):
 		// The first sync, or another session changed the store.
 		if err = writeLogin(l.native, stored); err != nil {
@@ -337,9 +363,13 @@ func openStore(ctx context.Context, name string) (*os.File, bool, error) {
 
 // lockStore takes the store's lock, trying again until ctx ends rather than
 // blocking: a peer that holds it on a stalled volume would otherwise hold
-// this supervisor for ever.
+// this supervisor for ever. A lock is never taken once ctx has ended, as
+// when an open returned only after the save's bound.
 func lockStore(ctx context.Context, f *os.File, how int) error {
 	for {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("sign-in file %s was not locked before the save's bound: %w", f.Name(), err)
+		}
 		err := syscall.Flock(int(f.Fd()), how|syscall.LOCK_NB)
 		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EINTR) {
 			return err
@@ -387,16 +417,53 @@ func readStore(f *os.File) ([]byte, error) {
 	return nonEmpty(data), nil
 }
 
-// writeStore replaces the store's content in place, under its lock: a
-// Docker volume's directory belongs to root, so the file can't be replaced.
-func writeStore(f *os.File, data []byte) error {
-	if err := f.Truncate(0); err != nil {
-		return err
+// storeFile is the store's open file as writeStore uses it.
+type storeFile interface {
+	WriteAt(data []byte, offset int64) (int, error)
+	Truncate(size int64) error
+	Sync() error
+}
+
+// storeMarker overwrites a store's first byte while it is rewritten. No
+// whole login starts with it, so a store left part way through is never a
+// login, and never empty.
+const storeMarker = '#'
+
+// writeStore replaces the store's content in place, under its lock. It
+// cannot rename a new file into place: the lock is the store file's own
+// flock, which a rename would leave on the old file while other sessions
+// opened the new one unlocked, and a Docker volume's directory belongs to
+// root. Truncating first would leave the store empty, a sign-out to every
+// other session, if the write then stopped: the supervisor exits once a stop
+// stops waiting for its save. So the first byte becomes storeMarker, the rest
+// is written and the file cut to length, and the first byte is written last;
+// the marker is synced before and the rest before its replacement. A write
+// that stops at any point leaves the old login, the new one, or a file that
+// is not a whole login, which readers leave alone. Nothing is written once
+// ctx has ended, when the save has been reported skipped. Empty data is a
+// sign-out, one truncate.
+func writeStore(ctx context.Context, f storeFile, data []byte) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("the save was given up before writing the login store: %w", err)
 	}
-	if _, err := f.WriteAt(data, 0); err != nil {
-		return err
+	if len(data) == 0 {
+		return errors.Join(f.Truncate(0), f.Sync())
 	}
-	return f.Sync()
+	steps := []func() error{
+		func() error { _, err := f.WriteAt([]byte{storeMarker}, 0); return err },
+		f.Sync,
+		func() error { _, err := f.WriteAt(data[1:], 1); return err },
+		func() error { return f.Truncate(int64(len(data))) },
+		f.Sync,
+		func() error { _, err := f.WriteAt(data[:1], 0); return err },
+		f.Sync,
+	}
+	for _, step := range steps {
+		if err := step(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // readLogin reads the harness's own login file; missing or empty is nil.
