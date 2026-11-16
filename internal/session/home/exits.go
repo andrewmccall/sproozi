@@ -2,7 +2,6 @@ package home
 
 import (
 	"context"
-	"errors"
 	"os"
 	"strings"
 	"sync"
@@ -156,11 +155,10 @@ func (s *Service) attachProblem(ctx context.Context, id string) error {
 	r, err := s.readCatalog(id)
 	if os.IsNotExist(err) {
 		// An execution's ID: its session's state decides, as for the
-		// session's own ID.
-		if _, _, err = s.resolveSession(id, ActionAttach); errors.Is(err, ErrRejected) {
-			return err
-		}
-		return nil
+		// session's own ID, and one the session no longer runs is refused
+		// before the terminal opens.
+		_, _, err = s.resolveSession(id, ActionAttach)
+		return err
 	}
 	if err != nil {
 		// Attach reports an unreadable session itself.

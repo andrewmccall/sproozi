@@ -767,7 +767,7 @@ func (s *Service) Cancel(ctx context.Context, id, operation string) (Status, err
 	// blocked resume, before admit waits on the durable session's lock.
 	admit := func() (func(), error) {
 		if sessionID == "" {
-			return func() {}, nil
+			return s.lockUnrecordedCancel(execution)
 		}
 		unlock, lockErr := s.lockSession(sessionID)
 		if lockErr != nil {
@@ -786,6 +786,34 @@ func (s *Service) Cancel(ctx context.Context, id, operation string) (Status, err
 	}
 	r, err := s.coordinator.Cancel(ctx, execution, operation, admit)
 	return executionStatus(r), err
+}
+
+// lockUnrecordedCancel admits the cancellation of an execution no session
+// records. For an execution of a session, it holds that session's lock and
+// checks again under it that the session does not record the execution: a
+// resume records its new execution under that lock, so a cancellation never
+// takes one a resume is about to start. An execution with no session needs
+// no lock.
+func (s *Service) lockUnrecordedCancel(id string) (func(), error) {
+	execution, err := s.coordinator.Inspect(id)
+	if err != nil {
+		return nil, err
+	}
+	if execution.Session == "" {
+		return func() {}, nil
+	}
+	unlock, recorded, err := s.lockUnrecorded(execution)
+	if err != nil {
+		return nil, err
+	}
+	if recorded {
+		// A resume recorded it meanwhile: a repeated cancel reaches it as
+		// the session's own execution.
+		unlock()
+		return nil, fmt.Errorf("home: session %s now records execution %s; run the cancellation again",
+			execution.Session, id)
+	}
+	return unlock, nil
 }
 
 func (s *Service) Attach(ctx context.Context, id string, input io.Reader, output io.Writer) error {
