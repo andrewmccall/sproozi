@@ -103,8 +103,10 @@ request carries only the launch, as `inspect` does; an incarnation or a
 checkpoint is `invalid_request`. It is authorized like every placement
 action and is never `expired`: cancelling is accepted after the deadline.
 Success means no agent for that launch runs or can start; the answer has no
-fields besides `version`. One request waits at most 30 seconds, under the
-service's 45-second request timeout. If the executor cannot prove the abort
+fields besides `version`. One request waits at most 30 seconds once no
+other operation on the same visit holds it, under the service's 45-second
+request timeout; a Pod that uses its whole termination grace is seen to
+stop only by a later request. If the executor cannot prove the abort
 by then, because the controller has not ended the cancelled run or a Pod's
 agent container has not been seen to stop, it answers `503 unavailable`.
 The session stays `unknown-stop`, and `recover` sends the same request

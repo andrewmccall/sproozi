@@ -558,17 +558,32 @@ proves:
 
 0. **Only a preparation is aborted.** Success reports no usage, so a
    registration that may have had gateway authority is a conflict:
-   `active`, `stopping`, `stopped`, or `cancelled` by something other than
-   this abort without sealed usage. `creating`, `bound` and `prepared` never
-   had authority. A registration that is gone is also a conflict, on both
-   lookup paths: nothing in Sproozi deletes one, so an administrator did,
-   and its run and Pod may remain with nothing to fence them by. Found by
-   run name, absence is ambiguous only when a run exists at that name,
-   because the executor creates the run after the registration.
+   `active`, `stopping`, `stopped`, or `cancelled` with a receipt that
+   sealed any usage, such as `Abort` leaves for an active visit. A
+   `cancelled` record is accepted only as this abort's own replay or with a
+   receipt whose every seal is zero, and the abort checks its own seal the
+   same way. `creating`, `bound` and `prepared` never had authority, and
+   once the tombstone (step 1) is written nothing activates the visit, so a
+   replay never meets one that ran in between. A registration that is gone
+   is also a conflict, on both lookup paths: nothing in Sproozi deletes
+   one, so an administrator did, and its run and Pod may remain with
+   nothing to fence them by. Found by run name, a gone registration counts
+   as never created only when no run exists at that name, because the
+   executor creates the run after the registration. That leaves one
+   accepted gap: if the executor crashed between creating the registration
+   and saving its reference, and an administrator then deleted both the
+   registration and the run, the run's Pod can remain, `Terminating` under
+   its writer-fence finalizer, and the abort reports success without
+   fencing it. Closing that needs a list of Pods by the run-name label
+   (`sproozi.com/agentrun`) in `sproozi-agents`. The executor's Role there
+   grants `get`, `patch` and `delete` on Pods but not `list`, and this
+   change adds no RBAC.
 1. **A local tombstone** (`preparationAborted` in the executor's record of
    the launch, written before anything in the cluster changes, even when
    the executor never saw the launch) makes every later `Prepare` of the
-   launch a conflict and stops the placement creating its registration. A
+   launch a conflict and stops the placement creating its registration.
+   `Activate`, `Stop`, `Abort`, `Attach` and `Inspect` of a tombstoned
+   launch are conflicts too, whatever reference it holds. A
    launch the executor never saw also claims its session epoch, as
    `Prepare` does, so no other allocation prepares that epoch afterwards.
    Within the executor, `Prepare` and `AbortPreparation` hold the same lock,
@@ -608,13 +623,25 @@ proves:
 Anything the executor cannot prove is an error, which the coordinator
 records as `unknown-stop` and `recover` retries: the controller has not
 ended the run yet, or a Pod's container was never seen to stop. One call
-waits at most 30 seconds (`abortPreparationWait`), measured from the
-request. That is under the home's 45-second request timeout
-(`profile.Connect`), so a home receives the executor's `unavailable` answer
-rather than its own timeout, and it covers a managed Pod's default
-30-second termination grace from the moment of deletion. A Pod that needs
-longer is fenced by the next `recover`, which finds it already deleted. The
-bound applies to this action only.
+spends at most 30 seconds (`abortPreparationWait`) after it takes the
+launch's lock. That is under the home's 45-second request timeout
+(`profile.Connect`), so a home normally receives the executor's
+`unavailable` answer rather than its own timeout. Two cases fall outside
+that:
+- The bound starts after the lock, so time spent waiting for another
+  operation on the same launch adds to it. Lock wait plus 30 seconds can
+  then exceed the home's 45, and the home sees its own timeout. The next
+  `recover` repeats the same request.
+- The bound does not cover a Pod's termination grace. It starts before the
+  Pod is deleted, and a container that uses its whole grace, by default 30
+  seconds from the deletion, is killed and reported after the bound has
+  run out. A template with a longer `terminationGracePeriodSeconds` always
+  takes more than one attempt. The next `recover` finds the tombstone, the
+  reference and the cancelled record, deletes the Pod again
+  (idempotently) and observes the termination. A healthy cancellation
+  finishes in seconds, because the supervisor handles `SIGTERM`.
+
+The bound applies to this action only.
 
 **Protocol.** `/v1/abort-preparation` takes the launch alone, is authorized
 like the other placement actions
@@ -627,7 +654,8 @@ before: an absent visit is fenced, a prepared or already stopped one is
 aborted, and one still preparing is an error that says the executor is
 older. An active visit, or one in an unknown state, as a stopping
 Kubernetes visit inspects, is refused before any abort, for the reason in
-step 0. An older home never
+step 0. So is an abort whose receipt sealed any usage, since a visit that
+inspects as prepared or stopped may still have run. An older home never
 sends the action. See [remote executors](../reference/remote-executors.md#cancelling-a-preparation).
 
 **Alternatives rejected.**

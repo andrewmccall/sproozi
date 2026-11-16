@@ -485,7 +485,8 @@ Cancelling a session whose cluster sandbox has not started yet ends it
 no Pod, or failed before its Pod. The executor cancels the visit's
 registration and run and waits until the controller ends the run. A Pod that
 appears meanwhile is stopped and must be observed terminated first, as for
-any cancellation. One attempt waits at most 30 seconds. The cancellation
+any cancellation. One attempt waits at most 30 seconds, so a Pod that takes
+its whole termination grace needs a second `recover`. The cancellation
 stays unfinished (`unknown-stop`), and `recover ID` (or `recover ID
 --remote`) resumes the same cancellation, in these cases only. A session the
 executor owns shows the executor's own problem; a session that moved there

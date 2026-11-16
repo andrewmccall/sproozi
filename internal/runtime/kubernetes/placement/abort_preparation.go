@@ -22,12 +22,16 @@ import (
 
 var _ session.PreparationAborter = (*Placement)(nil)
 
-// abortPreparationWait bounds one AbortPreparation, including its waits for
-// the controller to end a cancelled run and for a Pod to stop. It stays well
-// under the home's 45-second request timeout (profile.Connect), so a remote
-// caller receives the executor's unavailable answer rather than its own
-// timeout, and the next recover resumes the same abort. It also covers a
-// managed Pod's default 30-second termination grace period from deletion.
+// abortPreparationWait bounds one AbortPreparation after it takes the
+// launch's lock, including its waits for the controller to end a cancelled
+// run and for a Pod to stop. It stays under the home's 45-second request
+// timeout (profile.Connect), so a remote caller normally receives the
+// executor's unavailable answer rather than its own timeout, and the next
+// recover resumes the same abort. Time waiting for the lock is not counted,
+// so lock wait plus the bound can still exceed the home's timeout. The bound
+// does not cover a Pod's termination grace either: it starts before the
+// delete, so a container that uses its whole grace (30 seconds by default)
+// is seen to stop only by a later attempt.
 const abortPreparationWait = 30 * time.Second
 
 // AbortPreparation fences a launch whose preparation never reported an
@@ -167,9 +171,12 @@ func isConflict(err error) bool {
 // Nothing in Sproozi deletes a registration, so one that is gone was deleted
 // by an administrator, and its run and Pod may still exist with nothing left
 // to fence them by. Both paths answer that as unproven. With the retained
-// reference the registration is known to have existed. Found by name, its
-// absence is ambiguous only when a run exists at its intended name, since the
-// executor creates the run only after the registration.
+// reference the registration is known to have existed. Found by name, it
+// counts as never created only when no run exists at its intended name,
+// since the executor creates the run only after the registration. A Pod
+// whose run an administrator also deleted is missed: finding it needs a
+// list of Pods by run label, which the executor's Role does not grant (ADR
+// 0057, section 12).
 func (p *Placement) preparationRegistration(ctx context.Context, local retained) (registry.Record, bool, error) {
 	var r registry.Record
 	var err error
