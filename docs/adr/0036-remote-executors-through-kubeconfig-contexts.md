@@ -85,6 +85,11 @@ work. A context that signs in only with a client certificate, or impersonates
 another user, is refused with guidance, because the executor cannot review it.
 (Replaced by the amendment below: the client now sends only an
 audience-bound token it mints for `sproozi-cli`.)
+
+Corrected 2026-11-16: the paragraph above is dead. The client no longer sends
+the context's token, and no context is refused, since a certificate or
+impersonating context can mint the token too (`internal/session/remote/discover.go`).
+
 The executor runs a TokenReview and a SubjectAccessReview for `use` on `remoteexecutors` in its namespace, named by
 its placement name, on every request. An unknown token is 401, a known identity
 without the permission is 403, and a review that cannot complete is 503
@@ -338,6 +343,10 @@ better shape.
   `serviceaccounts/token` grant and a token request per connection. The
   executor is a trusted service with far broader rights in the namespace than
   `sproozi-cli`, so the narrow token gains it nothing.
+
+  Corrected 2026-11-16: the amendment of 2026-10-21 adopted this alternative,
+  for the reason it gives: the context's own credential never reaches the
+  executor.
 - **The kubeconfig's current context as the default.** That is kubectl's
   default, but it silently points remote work at whatever cluster the developer
   last used. A dedicated `sproozi` context names the cluster and identity
