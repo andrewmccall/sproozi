@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -46,11 +47,23 @@ type loginSync struct {
 	// quit ends run, which closes stopped; once makes stop idempotent.
 	quit, stopped chan struct{}
 	once          sync.Once
+	// diagnostics receives diagnostic lines; nil is standard error.
+	diagnostics io.Writer
+	// wait replaces loginSaveWait when set.
+	wait time.Duration
 }
 
 // loginInterval is how often a running harness's login is compared with its
 // store.
 var loginInterval = time.Second
+
+// loginSaveWait bounds each sync's wait for the store's lock, and stop's
+// whole save. A peer that holds the lock, as on a stalled volume, can then
+// never hold an activation, a stop or the supervisor's exit.
+var loginSaveWait = 5 * time.Second
+
+// loginLockPoll is how often a sync tries the store's lock again.
+const loginLockPoll = 20 * time.Millisecond
 
 // startLoginSync copies the stored login into the native home and keeps
 // the two in step until stop. It returns nil when the harness has no login
@@ -70,6 +83,13 @@ func startLoginSync(c config) (*loginSync, error) {
 
 func (l *loginSync) run() {
 	defer close(l.stopped)
+	// Stopping ends a periodic sync's wait for the lock at once.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		<-l.quit
+		cancel()
+	}()
 	ticker := time.NewTicker(loginInterval)
 	defer ticker.Stop()
 	for {
@@ -77,35 +97,75 @@ func (l *loginSync) run() {
 		case <-l.quit:
 			return
 		case <-ticker.C:
-			if err := l.sync(); err != nil {
-				fmt.Fprintln(os.Stderr, "native-session: the harness's sign-in isn't shared:", err)
+			if err := l.syncWithin(ctx); err != nil {
+				l.diagnose("Failed to sync the harness's sign-in with its login store: %v", err)
 			}
 		}
 	}
 }
 
 // stop ends the periodic sync and saves the harness's last change, once,
-// before the supervisor exits. A nil sync does nothing.
+// before the supervisor exits. The save waits at most loginSaveWait: the
+// harness is stopped and its checkpoint matters more, so a store that stays
+// locked or unavailable keeps what it had, and the missed save is logged. A
+// nil sync does nothing.
 func (l *loginSync) stop() {
 	if l == nil {
 		return
 	}
 	l.once.Do(func() {
 		close(l.quit)
-		<-l.stopped
-		if err := l.sync(); err != nil {
-			fmt.Fprintln(os.Stderr, "native-session: the harness's sign-in wasn't saved:", err)
+		ctx, cancel := context.WithTimeout(context.Background(), l.saveWait())
+		defer cancel()
+		saved := make(chan error, 1)
+		go func() {
+			<-l.stopped
+			saved <- l.syncWithin(ctx)
+		}()
+		select {
+		case err := <-saved:
+			if err != nil {
+				l.diagnose("Skipped saving the harness's sign-in to its login store: %v", err)
+			}
+		case <-ctx.Done():
+			l.diagnose("Skipped saving the harness's sign-in after its login store was unavailable for %s",
+				l.saveWait())
 		}
 	})
 }
 
-// sync compares both sides under the store's lock. A change in the native
-// file wins, as the latest write on one machine would; otherwise a change
-// in the store is copied in.
+// saveWait is the bound on this sync's wait for its store.
+func (l *loginSync) saveWait() time.Duration {
+	if l.wait > 0 {
+		return l.wait
+	}
+	return loginSaveWait
+}
+
+// diagnose writes one line to diagnostics, or to standard error.
+func (l *loginSync) diagnose(format string, args ...any) {
+	out := l.diagnostics
+	if out == nil {
+		out = os.Stderr
+	}
+	_, _ = fmt.Fprintf(out, format+"\n", args...)
+}
+
+// sync is syncWithin with no context but its own bound.
 func (l *loginSync) sync() error {
+	return l.syncWithin(context.Background())
+}
+
+// syncWithin compares both sides under the store's lock, waiting for the
+// lock at most loginSaveWait and never after ctx ends. A change in the
+// native file wins, as the latest write on one machine would; otherwise a
+// change in the store is copied in.
+func (l *loginSync) syncWithin(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, l.saveWait())
+	defer cancel()
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	store, writable, err := openStore(l.stored)
+	store, writable, err := openStore(ctx, l.stored)
 	if err != nil {
 		return err
 	}
@@ -144,8 +204,8 @@ func (l *loginSync) sync() error {
 // supervisor may write it, creating it in a writable claim, and shared when
 // it may only read it, as for a Secret. A store that is missing and can't be
 // created is nil. A link may only resolve inside the sign-in directory, as a
-// Secret's keys do.
-func openStore(name string) (*os.File, bool, error) {
+// Secret's keys do. The wait for the lock ends with ctx.
+func openStore(ctx context.Context, name string) (*os.File, bool, error) {
 	if err := storeInside(name); err != nil {
 		return nil, false, err
 	}
@@ -164,7 +224,7 @@ func openStore(name string) (*os.File, bool, error) {
 	if writable {
 		how = syscall.LOCK_EX
 	}
-	if err = syscall.Flock(int(f.Fd()), how); err != nil {
+	if err = lockStore(ctx, f, how); err != nil {
 		_ = f.Close()
 		return nil, false, err
 	}
@@ -174,6 +234,23 @@ func openStore(name string) (*os.File, bool, error) {
 		return nil, false, fmt.Errorf("sign-in file %s is not a bounded regular file", name)
 	}
 	return f, writable, nil
+}
+
+// lockStore takes the store's lock, trying again until ctx ends rather than
+// blocking: a peer that holds it on a stalled volume would otherwise hold
+// this supervisor for ever.
+func lockStore(ctx context.Context, f *os.File, how int) error {
+	for {
+		err := syscall.Flock(int(f.Fd()), how|syscall.LOCK_NB)
+		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EINTR) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("sign-in file %s stayed locked by another session: %w", f.Name(), ctx.Err())
+		case <-time.After(loginLockPoll):
+		}
+	}
 }
 
 // storeInside refuses a stored login that is a link leading out of its

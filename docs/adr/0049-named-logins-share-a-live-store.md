@@ -120,3 +120,28 @@ several gateway-held keys per harness.
 [local setup](../../internal/localsetup/install.go),
 [AgentRuntime reference](../reference/agentruntime.md#harness-sign-in),
 [local sessions](../guides/local-sessions.md).
+
+## Correction: a stop never waits on the login store (2026-11-16)
+
+Every sync took the store's `flock` blocking, with no bound. The final sync
+runs in the stop, while the supervisor holds its action lock, so a peer
+holding the lock on a stalled volume held the stop, every repeated stop and
+the supervisor's exit for ever, past the bounds of
+[ADR 0035](0035-bounded-graceful-stops-and-settled-input.md) and against
+[ADR 0060](0060-no-state-waits-on-a-deadline-to-end.md).
+
+Each sync now tries the lock without blocking and gives up after five
+seconds. The stop's save as a whole, including any periodic sync still in
+flight, waits at most those five seconds; then the stop goes on, because the
+harness is already stopped and its checkpoint matters more than the save.
+The store keeps what it had, and the supervisor writes `Skipped saving the
+harness's sign-in ...` to its standard error, which the container's output
+keeps. Nothing new is reported to the placement: the stop's outcome does not
+depend on the save, and a new reply field would need a change on the wire
+that older executors would refuse. A missed save can leave the store with a
+refresh token the stopped session has since spent, so the next session of
+that login may have to sign in again. The first sync, which runs under the
+action lock at activation, has the same bound and fails the activation with
+`harness sign-in is unavailable`, as any other store error does. With these
+five seconds a stop still fits inside the five minutes the control client
+waits for its reply.
