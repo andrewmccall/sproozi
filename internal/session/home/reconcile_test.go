@@ -40,28 +40,31 @@ func fillCatalogue(t *testing.T, s *Service) func() {
 
 // A stop whose catalogue write failed after the execution's journal recorded
 // it leaves the journal idle and the catalogue naming it as the current
-// execution. The session reads as stopped, with the stop's checkpoint: it is
-// listed as retained, refuses commands that need a running session instead
-// of cancelling or moving it, resumes from that checkpoint and can be removed.
+// execution. The session reads as stopped, with that stop's checkpoint rather
+// than the one it kept before: it is listed as retained, refuses commands
+// that need a running session instead of cancelling or moving it, resumes
+// from that stop's checkpoint and can be removed.
 func TestAStopWhoseCatalogueWriteFailedReadsAsStopped(t *testing.T) {
 	t.Parallel()
 	s, local, remote, repo := testService(t)
 	id := startedOn(t, s, repo, testLocal)
-	release := func() {}
-	local.onStop = func() { release = fillCatalogue(t, s) }
-	if _, err := s.Stop(t.Context(), id, uuid.NewString()); err == nil {
-		t.Fatal("stop saved its catalogue entry past the catalogue's limit")
+	kept := local.digest
+	execution := interruptedStopOfAResume(t, s, local, id, func() {
+		if err := os.WriteFile(filepath.Join(repo, "later.txt"), []byte("later work\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		local.artifact, local.digest = testArtifact(t, repo)
+	})
+	if local.digest == kept {
+		t.Fatal("the later stop's checkpoint is the one the session kept")
 	}
-	release()
-	if execution, err := s.coordinator.Inspect(id); err != nil || execution.Phase != session.PhaseIdle {
-		t.Fatalf("the stop did not reach the journal: %+v %v", execution.Phase, err)
-	}
-	if c, err := s.readCatalog(id); err != nil || c.Current != id {
-		t.Fatalf("the catalogue recorded the stop: %+v %v", c, err)
+	if x, err := s.coordinator.Inspect(execution); err != nil || x.Phase != session.PhaseIdle {
+		t.Fatalf("the stop did not reach the journal: %+v %v", x.Phase, err)
 	}
 	status, err := s.Status(id)
 	if err != nil || status.Phase != string(PhaseRetained) || status.InitialStage != status.Phase ||
-		status.CheckpointInfo == nil || status.ThreadID != testNativeUUID || status.Ownership != ownershipHome {
+		status.CheckpointInfo == nil || status.CheckpointInfo.SHA256 != local.digest ||
+		status.ExecutionID != execution || status.ThreadID != testNativeUUID || status.Ownership != ownershipHome {
 		t.Fatalf("status of the stopped session: %+v %v", status, err)
 	}
 	listed, err := s.Sessions(work.SessionQuery{})
@@ -78,10 +81,11 @@ func TestAStopWhoseCatalogueWriteFailedReadsAsStopped(t *testing.T) {
 			t.Errorf("%s of the stopped session replied %+v", q.Action, r)
 		}
 	}
-	if execution, err := s.coordinator.Inspect(id); err != nil || execution.Phase != session.PhaseIdle ||
+	if x, err := s.coordinator.Inspect(execution); err != nil || x.Phase != session.PhaseIdle ||
 		remote.prepares != 0 {
-		t.Fatalf("a refused command changed the stopped session: %+v %v", execution.Phase, err)
+		t.Fatalf("a refused command changed the stopped session: %+v %v", x.Phase, err)
 	}
+	// The fixture prepares only from its current checkpoint, the later one.
 	resumed, err := s.Resume(t.Context(), id, uuid.NewString(), nil)
 	if err != nil || resumed.Session == nil || resumed.Session.Active == nil ||
 		resumed.Session.Active.Launch.CheckpointDigest != local.digest {

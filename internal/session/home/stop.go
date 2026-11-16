@@ -41,8 +41,8 @@ func (s *Service) Stop(ctx context.Context, id, operation string) (Status, error
 	if err != nil {
 		return Status{}, err
 	}
-	if !r.Claimed {
-		return Status{}, refusal(id, state{phase: PhaseImporting}, ActionStop)
+	if err = s.refuseIn(r, ActionStop); err != nil {
+		return Status{}, err
 	}
 	// A stop the journal recorded but this entry did not is the stop asked
 	// for: retire it, and the request replays as for any stopped session.

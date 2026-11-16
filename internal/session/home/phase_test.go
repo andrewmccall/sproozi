@@ -41,29 +41,27 @@ func derivedStates(t *testing.T) map[string]state {
 		c       *localSession
 		current *session.Record
 	}{
-		"unclaimed":                        {c: &localSession{}},
-		"stopped":                          {c: claimed(nil)},
-		"stopped after a failure":          {c: claimed(failed)},
-		"stopped at the deadline":          {c: claimed(late)},
-		"idle current":                     {c: claimed(nil), current: record(session.PhaseIdle, visit(nil))},
-		"idle current after a failure":     {c: claimed(nil), current: record(session.PhaseIdle, visit(failed))},
-		"idle current, no visit, failed":   {c: claimed(failed), current: record(session.PhaseIdle)},
-		"idle execution with no session":   {current: record(session.PhaseIdle)},
-		"preparing":                        {c: claimed(nil), current: record(session.PhasePreparing)},
-		"preparing past the deadline":      {c: claimed(nil), current: record(session.PhasePreparing, expired)},
-		"activating":                       {c: claimed(nil), current: record(session.PhaseActivating)},
-		"activating past the deadline":     {c: claimed(nil), current: record(session.PhaseActivating, expired)},
-		"activating, cancel requested":     {c: claimed(nil), current: record(session.PhaseActivating, expired, cancelRequested)},
-		"active writer":                    {c: claimed(nil), current: record(session.PhaseActive)},
-		"stopping":                         {c: claimed(nil), current: record(session.PhaseStopping, finalizing)},
-		"stopping to move":                 {c: claimed(nil), current: record(session.PhaseStopping, moving)},
-		"unknown-stop":                     {c: claimed(nil), current: record(session.PhaseUnknownStop, finalizing)},
-		"unknown-stop, cancel requested":   {c: claimed(nil), current: record(session.PhaseUnknownStop, cancelRequested)},
-		"unknown-usage":                    {c: claimed(nil), current: record(session.PhaseUnknownUsage, moving)},
-		"unknown-usage, cancel requested":  {c: claimed(nil), current: record(session.PhaseUnknownUsage, cancelRequested)},
-		"cancelling":                       {c: claimed(nil), current: record(session.PhaseCancelling, cancelRequested)},
-		"cancelled":                        {c: claimed(nil), current: record(session.PhaseCancelled, cancelRequested)},
-		"unclaimed with a current, unseen": {c: &localSession{}, current: record(session.PhaseActive)},
+		"unclaimed":                       {c: &localSession{}},
+		"stopped":                         {c: claimed(nil)},
+		"stopped after a failure":         {c: claimed(failed)},
+		"stopped at the deadline":         {c: claimed(late)},
+		"idle current":                    {c: claimed(nil), current: record(session.PhaseIdle, visit(nil))},
+		"idle current after a failure":    {c: claimed(nil), current: record(session.PhaseIdle, visit(failed))},
+		"idle current, no visit, failed":  {c: claimed(failed), current: record(session.PhaseIdle)},
+		"idle execution with no session":  {current: record(session.PhaseIdle)},
+		"preparing":                       {c: claimed(nil), current: record(session.PhasePreparing)},
+		"preparing past the deadline":     {c: claimed(nil), current: record(session.PhasePreparing, expired)},
+		"activating":                      {c: claimed(nil), current: record(session.PhaseActivating)},
+		"activating past the deadline":    {c: claimed(nil), current: record(session.PhaseActivating, expired)},
+		"active writer":                   {c: claimed(nil), current: record(session.PhaseActive)},
+		"stopping":                        {c: claimed(nil), current: record(session.PhaseStopping, finalizing)},
+		"stopping to move":                {c: claimed(nil), current: record(session.PhaseStopping, moving)},
+		"unknown-stop":                    {c: claimed(nil), current: record(session.PhaseUnknownStop, finalizing)},
+		"unknown-stop, cancel requested":  {c: claimed(nil), current: record(session.PhaseUnknownStop, cancelRequested)},
+		"unknown-usage":                   {c: claimed(nil), current: record(session.PhaseUnknownUsage, moving)},
+		"unknown-usage, cancel requested": {c: claimed(nil), current: record(session.PhaseUnknownUsage, cancelRequested)},
+		"cancelling":                      {c: claimed(nil), current: record(session.PhaseCancelling, cancelRequested)},
+		"cancelled":                       {c: claimed(nil), current: record(session.PhaseCancelled, cancelRequested)},
 	}
 	states := map[string]state{}
 	for name, tc := range cases {
@@ -77,29 +75,27 @@ func derivedStates(t *testing.T) map[string]state {
 func TestDeriveReportsOnePhaseForEveryShape(t *testing.T) {
 	t.Parallel()
 	want := map[string]Phase{
-		"unclaimed":                        PhaseImporting,
-		"stopped":                          PhaseRetained,
-		"stopped after a failure":          PhaseFailed,
-		"stopped at the deadline":          PhaseRetained,
-		"idle current":                     PhaseRetained,
-		"idle current after a failure":     PhaseFailed,
-		"idle current, no visit, failed":   PhaseFailed,
-		"idle execution with no session":   PhaseRetained,
-		"preparing":                        Phase(session.PhasePreparing),
-		"preparing past the deadline":      Phase(session.PhasePreparing),
-		"activating":                       Phase(session.PhaseActivating),
-		"activating past the deadline":     Phase(session.PhaseActivating),
-		"activating, cancel requested":     Phase(session.PhaseActivating),
-		"active writer":                    Phase(session.PhaseActive),
-		"stopping":                         Phase(session.PhaseStopping),
-		"stopping to move":                 Phase(session.PhaseStopping),
-		"unknown-stop":                     Phase(session.PhaseUnknownStop),
-		"unknown-stop, cancel requested":   Phase(session.PhaseUnknownStop),
-		"unknown-usage":                    Phase(session.PhaseUnknownUsage),
-		"unknown-usage, cancel requested":  Phase(session.PhaseUnknownUsage),
-		"cancelling":                       Phase(session.PhaseCancelling),
-		"cancelled":                        Phase(session.PhaseCancelled),
-		"unclaimed with a current, unseen": PhaseImporting,
+		"unclaimed":                       PhaseImporting,
+		"stopped":                         PhaseRetained,
+		"stopped after a failure":         PhaseFailed,
+		"stopped at the deadline":         PhaseRetained,
+		"idle current":                    PhaseRetained,
+		"idle current after a failure":    PhaseFailed,
+		"idle current, no visit, failed":  PhaseFailed,
+		"idle execution with no session":  PhaseRetained,
+		"preparing":                       Phase(session.PhasePreparing),
+		"preparing past the deadline":     Phase(session.PhasePreparing),
+		"activating":                      Phase(session.PhaseActivating),
+		"activating past the deadline":    Phase(session.PhaseActivating),
+		"active writer":                   Phase(session.PhaseActive),
+		"stopping":                        Phase(session.PhaseStopping),
+		"stopping to move":                Phase(session.PhaseStopping),
+		"unknown-stop":                    Phase(session.PhaseUnknownStop),
+		"unknown-stop, cancel requested":  Phase(session.PhaseUnknownStop),
+		"unknown-usage":                   Phase(session.PhaseUnknownUsage),
+		"unknown-usage, cancel requested": Phase(session.PhaseUnknownUsage),
+		"cancelling":                      Phase(session.PhaseCancelling),
+		"cancelled":                       Phase(session.PhaseCancelled),
 	}
 	reached := map[Phase]bool{}
 	for name, st := range derivedStates(t) {
@@ -163,7 +159,7 @@ func TestNextStepsNameWhatEachStateAdmits(t *testing.T) {
 		stepCancelling: {refuses: []string{ActionResume, ActionAttach, ActionRemove},
 			names: []string{ActionRecover, ActionRemove}, afterwards: []string{ActionRemove}},
 		// "run" starts a new session; it is no command on this one.
-		stepCancelled: {refuses: []string{ActionResume, ActionAttach}, names: []string{ActionRemove, "run"}},
+		stepCancelled: {refuses: []string{ActionResume, ActionAttach, ActionStop}, names: []string{ActionRemove, "run"}},
 	}
 	if len(nextSteps) != len(want) {
 		t.Fatalf("the table has %d rows, the test %d", len(nextSteps), len(want))
@@ -201,62 +197,155 @@ func TestNextStepsNameWhatEachStateAdmits(t *testing.T) {
 	}
 }
 
-// The service refuses each command a session's state refuses with exactly
-// that state's advice, for sessions brought to those states by commands.
-func TestServiceRefusalsAreTheTablesAdvice(t *testing.T) {
-	t.Parallel()
-	s, local, source := importedFixture(t)
-	repo, _, _ := testWorkspace(t)
-	sessions := map[string]string{}
-	// importing: a claim the source refuses.
-	source.denyClaim = true
-	if _, err := s.Pull(t.Context(), source.export.ID, source.export.OperationID, testRemote); err == nil {
-		t.Fatal("a refused claim finished the pull")
-	}
-	sessions["importing"] = source.export.ID
-	running := startedOn(t, s, repo, testLocal)
-	sessions["running"] = running
-	retained := startedOn(t, s, repo, testLocal)
-	if _, err := s.Stop(t.Context(), retained, uuid.NewString()); err != nil {
-		t.Fatal(err)
-	}
-	sessions["retained"] = retained
-	cancelled := startedOn(t, s, repo, testLocal)
-	if _, err := s.Cancel(t.Context(), cancelled, uuid.NewString()); err != nil {
-		t.Fatal(err)
-	}
-	sessions["cancelled"] = cancelled
-	starting := uuid.NewString()
-	local.lostActivate = true
-	if _, err := s.Start(t.Context(), starting, uuid.NewString(), repo, "", nil, nil); err == nil {
-		t.Fatal("a lost activation reply started the session")
-	}
-	sessions["starting"] = starting
-	for name, id := range sessions {
-		c, err := s.readCatalog(id)
-		if err != nil {
+// stateFixtures brings a new service's session to each row of the
+// next-steps table through the service's own commands, with the placement
+// failing where a state needs it.
+var stateFixtures = map[step]func(t *testing.T) (*Service, string){
+	stepImporting: func(t *testing.T) (*Service, string) {
+		s, _, source := importedFixture(t)
+		source.denyClaim = true
+		if _, err := s.Pull(t.Context(), source.export.ID, source.export.OperationID, testRemote); err == nil {
+			t.Fatal("a refused claim finished the pull")
+		}
+		return s, source.export.ID
+	},
+	stepRetained: func(t *testing.T) (*Service, string) {
+		s, _, _, repo := testService(t)
+		id := startedOn(t, s, repo, testLocal)
+		if _, err := s.Stop(t.Context(), id, uuid.NewString()); err != nil {
 			t.Fatal(err)
 		}
-		st, _, err := s.sessionState(c)
-		if err != nil || string(st.step()) != name {
-			t.Fatalf("session %s is %+v, not %s: %v", id, st, name, err)
+		return s, id
+	},
+	stepFailed: func(t *testing.T) (*Service, string) {
+		s, local, _, repo := testService(t)
+		id := startedOn(t, s, repo, testLocal)
+		local.exited = &session.Exit{Code: 2}
+		if _, err := s.Stop(t.Context(), id, uuid.NewString()); err != nil {
+			t.Fatal(err)
 		}
+		return s, id
+	},
+	stepStarting: startingFixture,
+	stepOverdue: func(t *testing.T) (*Service, string) {
+		s, id := startingFixture(t)
+		passDeadline(t, s, id)
+		return s, id
+	},
+	stepRunning: func(t *testing.T) (*Service, string) {
+		s, _, _, repo := testService(t)
+		return s, startedOn(t, s, repo, testLocal)
+	},
+	stepStopping: func(t *testing.T) (*Service, string) {
+		s, local, _, repo := testService(t)
+		id := startedOn(t, s, repo, testLocal)
+		local.lostStop = true
+		if _, err := s.Stop(t.Context(), id, uuid.NewString()); err == nil {
+			t.Fatal("a lost stop reply stopped the session")
+		}
+		return s, id
+	},
+	stepMoving: func(t *testing.T) (*Service, string) {
+		s, local, _, repo := testService(t)
+		id := startedOn(t, s, repo, testLocal)
+		local.lostStop = true
+		if _, err := s.Move(t.Context(), id, uuid.NewString(), testRemote); err == nil {
+			t.Fatal("a lost stop reply moved the session")
+		}
+		return s, id
+	},
+	stepCancelling: func(t *testing.T) (*Service, string) {
+		s, local, _, repo := testService(t)
+		id := startedOn(t, s, repo, testLocal)
+		local.unreachableAbort = true
+		if _, err := s.Cancel(t.Context(), id, uuid.NewString()); err == nil {
+			t.Fatal("an unreachable abort finished the cancellation")
+		}
+		return s, id
+	},
+	stepCancelled: func(t *testing.T) (*Service, string) {
+		s, _, _, repo := testService(t)
+		id := startedOn(t, s, repo, testLocal)
+		if _, err := s.Cancel(t.Context(), id, uuid.NewString()); err != nil {
+			t.Fatal(err)
+		}
+		return s, id
+	},
+}
+
+// startingFixture starts a session whose activation reply is lost, so it
+// stays activating.
+func startingFixture(t *testing.T) (*Service, string) {
+	s, local, _, repo := testService(t)
+	id := uuid.NewString()
+	local.lostActivate = true
+	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err == nil {
+		t.Fatal("a lost activation reply started the session")
+	}
+	return s, id
+}
+
+// stepOf is the table row session id is in.
+func stepOf(t *testing.T, s *Service, id string) (step, state) {
+	t.Helper()
+	c, err := s.readCatalog(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, _, err := s.sessionState(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return st.step(), st
+}
+
+// For a session in every row of the next-steps table, each command the row
+// refuses is refused with the row's reply and changes nothing, and each
+// command it does not refuse is carried out: whatever its outcome, it is not
+// that refusal.
+func TestEachStateRefusesOrCarriesOutEachCommand(t *testing.T) {
+	t.Parallel()
+	if len(stateFixtures) != len(nextSteps) {
+		t.Fatalf("%d fixtures for %d rows", len(stateFixtures), len(nextSteps))
+	}
+	for row, fixture := range stateFixtures {
 		for _, command := range commands {
-			want := refusal(id, st, command)
-			if want == nil {
-				continue
-			}
-			q := Request{Action: command, ID: id}
-			switch command {
-			case ActionMove:
-				q.OperationID, q.Destination = uuid.NewString(), testRemote
-			case ActionPull, ActionResume, ActionStop, ActionCancel:
-				q.OperationID = uuid.NewString()
-			}
-			r := exchange(t, s, q)
-			if !r.Rejected || r.Error != want.Error() {
-				t.Errorf("%s (%s): %s replied %+v, want %q", name, st.phase, command, r, want)
-			}
+			t.Run(string(row)+"/"+command, func(t *testing.T) {
+				t.Parallel()
+				s, id := fixture(t)
+				before, st := stepOf(t, s, id)
+				if before != row {
+					t.Fatalf("the fixture reached %s, not %s", before, row)
+				}
+				q := Request{Action: command, ID: id}
+				switch command {
+				case ActionMove:
+					q.OperationID, q.Destination = uuid.NewString(), testRemote
+				case ActionPull, ActionResume, ActionStop:
+					q.OperationID = uuid.NewString()
+				case ActionCancel:
+					// A cancellation already recorded is repeated, not
+					// replaced: another is refused by the execution journal.
+					q.OperationID = uuid.NewString()
+					if x, err := s.coordinator.Inspect(id); err == nil && x.CancelOperation != "" {
+						q.OperationID = x.CancelOperation
+					}
+				}
+				r := exchange(t, s, q)
+				want := problem(id, st).Error()
+				if refusal(id, st, command) == nil {
+					if r.Rejected && r.Error == want {
+						t.Fatalf("%s was refused with the row's reply", command)
+					}
+					return
+				}
+				if !r.Rejected || r.Error != want {
+					t.Fatalf("%s replied %+v, want %q", command, r, want)
+				}
+				if after, _ := stepOf(t, s, id); after != row {
+					t.Fatalf("the refused %s moved the session from %s to %s", command, row, after)
+				}
+			})
 		}
 	}
 }

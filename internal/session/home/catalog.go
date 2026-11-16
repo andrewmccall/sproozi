@@ -385,8 +385,12 @@ func (s *Service) ResumeWithMaxDuration(ctx context.Context, id, operation strin
 	if err != nil {
 		return Status{}, err
 	}
-	if !r.Claimed {
-		return Status{}, refusal(id, state{phase: PhaseImporting}, ActionResume)
+	if r.Current == "" {
+		// Nothing below changes a session with no current execution, so its
+		// state decides now, before anything is released or bound.
+		if err = s.refuseIn(r, ActionResume); err != nil {
+			return Status{}, err
+		}
 	}
 	if err = s.retireSettled(&r); err != nil {
 		return Status{}, err
@@ -406,11 +410,12 @@ func (s *Service) ResumeWithMaxDuration(ctx context.Context, id, operation strin
 		return status, err
 	}
 	if r.Current != "" {
-		st, _, err := s.sessionState(r)
-		if err != nil {
+		if err = s.refuseIn(r, ActionResume); err != nil {
 			return Status{}, err
 		}
-		return Status{}, problem(id, st)
+		// The table admits resume only of a stopped session or a late start,
+		// which replayResume ends; one it could not end is still current.
+		return Status{}, fmt.Errorf("home: session %s still has a current execution; run \"sproozi status %s\"", id, id)
 	}
 	if len(r.Executions) >= 256 {
 		return Status{}, errors.New("home: execution retention limit reached")
@@ -584,29 +589,33 @@ func (s *Service) catalogStatus(r localSession) (Status, error) {
 }
 
 // resolveSession maps a session or execution ID to the execution to act on
-// and, when catalogued, its durable session. An execution belonging to a
-// catalogued session must still be that session's current writer. action is
-// the command, which the session's state may refuse (nextSteps).
+// and, when catalogued, its durable session. action is the command, which
+// the session's state may refuse (nextSteps), whichever ID names it. An
+// execution belonging to a catalogued session must still be that session's
+// current writer, except that cancel reaches one the session never recorded
+// (see unrecordedProblem); it then acts on that execution alone.
 func (s *Service) resolveSession(id, action string) (string, string, error) {
 	r, err := s.readCatalog(id)
 	if os.IsNotExist(err) {
 		execution, inspectErr := s.coordinator.Inspect(id)
-		if inspectErr == nil && execution.Session != "" {
-			owner, ownerErr := s.readCatalog(execution.Session)
-			if ownerErr != nil {
-				return "", "", ownerErr
-			}
-			if owner.Current != id {
-				return "", "", errors.New("home: execution is no longer the current session writer")
-			}
-			return id, execution.Session, nil
-		}
 		if inspectErr != nil && !os.IsNotExist(inspectErr) {
 			return "", "", inspectErr
 		}
-		return id, "", nil
-	}
-	if err != nil {
+		if inspectErr != nil || execution.Session == "" {
+			return id, "", nil
+		}
+		owner, ownerErr := s.readCatalog(execution.Session)
+		recorded := ownerErr == nil && (owner.Current == id || slices.Contains(owner.Executions, id))
+		switch {
+		case !recorded && action == ActionCancel && (ownerErr == nil || os.IsNotExist(ownerErr)):
+			return id, "", nil
+		case ownerErr != nil:
+			return "", "", ownerErr
+		case owner.Current != id:
+			return "", "", errors.New("home: execution is no longer the current session writer")
+		}
+		r, id = owner, execution.Session
+	} else if err != nil {
 		return "", "", err
 	}
 	st, _, err := s.sessionState(r)
@@ -616,9 +625,10 @@ func (s *Service) resolveSession(id, action string) (string, string, error) {
 	if err = refusal(id, st, action); err != nil {
 		return "", id, err
 	}
-	if r.Current == "" || st.stopped() {
-		// No command that acts on an execution is admitted here.
-		return "", id, problem(id, st)
+	if r.Current == "" {
+		// The table refuses every command that resolves a session to its
+		// execution once the session has none.
+		return "", id, fmt.Errorf("home: session %s has no current execution", id)
 	}
 	return r.Current, id, nil
 }

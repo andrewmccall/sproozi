@@ -57,8 +57,18 @@ func (s *Service) Remove(ctx context.Context, id string) (Status, error) {
 			return Status{}, inspectErr
 		}
 		if execution.Session != "" {
-			return Status{}, rejectedError(fmt.Sprintf("home: %s belongs to session %s; remove that session", id,
-				execution.Session))
+			unlockOwner, recorded, ownerErr := s.lockUnrecorded(execution)
+			if ownerErr != nil {
+				return Status{}, ownerErr
+			}
+			defer unlockOwner()
+			if recorded {
+				return Status{}, rejectedError(fmt.Sprintf("home: %s belongs to session %s; remove that session", id,
+					execution.Session))
+			}
+			if !session.Removable(execution) {
+				return Status{}, unrecordedProblem(execution.Session, id)
+			}
 		}
 		executions = []string{id}
 	default:
@@ -95,6 +105,25 @@ func (s *Service) Remove(ctx context.Context, id string) (Status, error) {
 		return Status{}, err
 	}
 	return status, s.collectCatalogArtifacts()
+}
+
+// lockUnrecorded holds the lock of execution's session, so the session's own
+// commands cannot release it meanwhile, and reports whether the session
+// records the execution. A session that is gone records nothing.
+func (s *Service) lockUnrecorded(execution session.Record) (func(), bool, error) {
+	unlock, err := s.lockSession(execution.Session)
+	if err != nil {
+		return nil, false, err
+	}
+	owner, err := s.readCatalog(execution.Session)
+	switch {
+	case os.IsNotExist(err):
+		return unlock, false, nil
+	case err != nil:
+		unlock()
+		return nil, false, err
+	}
+	return unlock, owner.Current == execution.ID || slices.Contains(owner.Executions, execution.ID), nil
 }
 
 // removeCatalog deletes a session's catalogue entry.

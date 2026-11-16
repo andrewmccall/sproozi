@@ -90,7 +90,9 @@ func derive(c *localSession, current *session.Record, pastDeadline func(session.
 		return stoppedState(exit)
 	}
 	st := state{phase: Phase(current.Phase), cancelRequested: current.CancelOperation != ""}
-	st.overdue = current.Phase.Starting() && !st.cancelRequested && pastDeadline(*current)
+	// A start or move with cancellation intent is cancelling, never preparing
+	// or activating, so overdue needs no check of it.
+	st.overdue = current.Phase.Starting() && pastDeadline(*current)
 	st.finalizing = current.PendingOperation != "" && current.Operations[len(current.Operations)-1].Finalize
 	return st
 }
@@ -145,13 +147,17 @@ func (st state) step() step {
 
 // next is a row of the next-steps table.
 type next struct {
-	// refuses lists the commands the service refuses in this state. Every
-	// other command goes on to the execution journal, which refuses by its
-	// own transitions table (internal/session/phase.go).
+	// refuses lists the commands the service refuses in this state, whether
+	// the command names the session or its current execution. Every other
+	// command is carried out: by the service itself where it acts on the
+	// catalogue (pull; stop of a stopped session repeats the stop, resume of
+	// one starts a new execution, rm removes it), or by the execution
+	// journal, which may still refuse by its own transitions table
+	// (internal/session/phase.go), in the words needsRecovery gives.
 	refuses []string
 	// problem says, after "session ID ", what state the session is in and
-	// which commands work from it. It is every refusal's text, and resume,
-	// attach and rm name it as the way on.
+	// which commands work from it. It is the text of every refusal this
+	// table makes.
 	problem func(id string, st state) string
 }
 
@@ -226,7 +232,7 @@ var nextSteps = map[step]next{
 		},
 	},
 	stepCancelled: {
-		refuses: []string{ActionResume, ActionAttach},
+		refuses: []string{ActionResume, ActionAttach, ActionStop},
 		problem: func(id string, _ state) string {
 			return fmt.Sprintf("was cancelled, so it cannot be stopped or resumed; remove it with \"sproozi rm %s\", "+
 				"and start new work with \"sproozi run\"", id)
@@ -245,6 +251,15 @@ func refusal(id string, st state, action string) error {
 		return problem(id, st)
 	}
 	return nil
+}
+
+// refuseIn is refusal of action in c's derived state.
+func (s *Service) refuseIn(c localSession, action string) error {
+	st, _, err := s.sessionState(c)
+	if err != nil {
+		return err
+	}
+	return refusal(c.ID, st, action)
 }
 
 // sessionState derives c's state from its current execution's journal

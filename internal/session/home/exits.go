@@ -2,6 +2,7 @@ package home
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 	"sync"
@@ -83,7 +84,7 @@ func (s *Service) sweepExits(ctx context.Context) <-chan struct{} {
 	}
 	// A session removed while its check was failing logs nothing more.
 	s.exitProblems.Range(func(id, _ any) bool {
-		if id != sweepProblem && !catalogued[id.(string)] {
+		if key := id.(string); key != sweepProblem && !strings.HasPrefix(key, journalProblem) && !catalogued[key] {
 			s.exitProblems.Delete(id)
 		}
 		return true
@@ -153,8 +154,16 @@ func (s *Service) settleExit(ctx context.Context, id string) (bool, error) {
 // that exited by itself is stopped first, so the refusal names the exit.
 func (s *Service) attachProblem(ctx context.Context, id string) error {
 	r, err := s.readCatalog(id)
+	if os.IsNotExist(err) {
+		// An execution's ID: its session's state decides, as for the
+		// session's own ID.
+		if _, _, err = s.resolveSession(id, ActionAttach); errors.Is(err, ErrRejected) {
+			return err
+		}
+		return nil
+	}
 	if err != nil {
-		// Attach reports an unknown or unreadable session itself.
+		// Attach reports an unreadable session itself.
 		return nil
 	}
 	st, _, err := s.sessionState(r)

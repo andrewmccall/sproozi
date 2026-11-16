@@ -50,15 +50,19 @@ func (s *Service) releaseOrphans(ctx context.Context, r localSession) error {
 			continue
 		}
 		if err != nil {
-			errs = append(errs, err)
+			// A journal this release cannot read, such as one a newer
+			// release wrote, cannot be shown to belong to r. Refusing would
+			// let it block every session's rm, so it is logged and kept.
+			s.noteProblem(journalProblem+id, err, "Failed to read execution "+id+"'s journal, so kept it: %v\n", "")
 			continue
 		}
 		if execution.Session != r.ID {
 			continue
 		}
 		if execution.Active != nil || len(execution.Visits) != 0 {
-			errs = append(errs, fmt.Errorf("home: execution %s of session %s ran, but the session never recorded "+
-				"it; it is kept", id, r.ID))
+			// It ran, so it may hold work: it is kept, and r's rm names the
+			// commands that reach it.
+			errs = append(errs, unrecordedProblem(r.ID, id))
 			continue
 		}
 		if !session.Removable(execution) {
@@ -79,6 +83,20 @@ func (s *Service) releaseOrphans(ctx context.Context, r localSession) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// journalProblem prefixes exitProblems' keys for unreadable journals, which
+// are logged once each.
+const journalProblem = "journal "
+
+// unrecordedProblem refuses rm of session id while it has an execution that
+// ran but that its catalogue entry never recorded, and names the commands
+// that reach that execution.
+func unrecordedProblem(id, execution string) error {
+	return rejectedError(fmt.Sprintf("home: session %s has execution %s, which ran but which the session never "+
+		"recorded; its work is kept until you remove it: see \"sproozi status %s\", run \"sproozi cancel %s\" if "+
+		"it still runs, then \"sproozi rm %s\", then remove the session", id, execution, execution, execution,
+		execution))
 }
 
 // logf writes an operator message to the service log, if it has one.
