@@ -1,6 +1,7 @@
 package placement
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -96,6 +97,44 @@ func TestCoordinatorKeepsCheckpointOfExitedResumedClaudeVisit(t *testing.T) {
 	if visit.Exit == nil || !visit.Exit.Failed() || r.ThreadID != fixtureThread ||
 		r.Checkpoint.Metadata.SHA256 != e.meta.SHA256 || len(e.captureArgs) != 0 {
 		t.Fatalf("exited resumed Claude visit: %+v", r)
+	}
+}
+
+// A fresh Claude first visit whose stop bound its conversation and answered
+// that a turn is pending, and whose agent then exits by itself, finishes the
+// pending stop with nothing claimed from the stopped container: the session
+// keeps the workspace it started from and the visit keeps the exit (ADR 0062).
+func TestCoordinatorFinishesTurnPendingClaudeFirstVisitThatExited(t *testing.T) {
+	t.Parallel()
+	p, kube, e, l, data := setupKind(t, harness.NativeClaude)
+	l = freshLaunch(t, e, l, data, "")
+	l.Epoch = 1
+	coordinator, err := session.Open(filepath.Join(t.TempDir(), "sessions"), map[string]session.Placement{l.Placement: p}, fixtureMax)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = coordinator.Close() })
+	if _, err = coordinator.Create(l, e.initial, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = coordinator.Recover(t.Context(), l.ExecutionID); err != nil {
+		t.Fatal(err)
+	}
+	e.pendingQuiesce = true
+	finalize := uuid.NewString()
+	if _, err = coordinator.Finalize(t.Context(), l.ExecutionID, finalize); !errors.Is(err, harness.ErrNativeTurnPending) {
+		t.Fatalf("finalize with a turn running: %v", err)
+	}
+	endNative(t, p, kube, l, 0)
+	e.logs = exitedReport(0, "")
+	r, err := coordinator.Finalize(t.Context(), l.ExecutionID, finalize)
+	if err != nil || r.Phase != session.PhaseIdle || len(r.Visits) != 1 {
+		t.Fatalf("finalize: %v %v", r.Phase, err)
+	}
+	visit := r.Visits[0]
+	if visit.Exit == nil || r.ThreadID != "" || visit.CheckpointDigest != "" || r.Workspace == "" || len(e.captureArgs) != 0 {
+		t.Fatalf("exited Claude first visit: exit %+v, thread %q, digest %q, captured %v",
+			visit.Exit, r.ThreadID, visit.CheckpointDigest, e.captureArgs)
 	}
 }
 

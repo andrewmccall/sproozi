@@ -382,24 +382,8 @@ func (p *Placement) Stop(ctx context.Context, l session.Launch, i session.Incarn
 	if !terminated(pod) || !running(pod, runtimekube.CaptureContainer) {
 		return session.Stopped{}, errors.New("placement: exact stopped writer and capture helper unavailable")
 	}
-	// A turnless visit started from the workspace the execution retains and
-	// had no conversation, so nothing is captured and its receipt names no
-	// checkpoint.
-	switch {
-	case local.Turnless:
-	case local.Exited != nil && !harness.ProvesCompletion(r.Harness) && !local.fresh():
-		// A stopped container never proves a completed turn of this
-		// harness, so a resumed visit keeps the checkpoint it started from,
-		// as the Docker placement does (ADR 0038).
-		local, err = p.keepInput(local)
-		if err != nil {
-			return session.Stopped{}, err
-		}
-	default:
-		local, err = p.capture(ctx, local, local.thread(r), pod)
-		if err != nil {
-			return session.Stopped{}, err
-		}
+	if local, err = p.keep(ctx, local, r, pod); err != nil {
+		return session.Stopped{}, err
 	}
 	r, err = p.registry.CompleteStop(ctx, r.Reference, local.OutputDigest, seals)
 	if err != nil {
@@ -442,7 +426,9 @@ func (p *Placement) quietSource(ctx context.Context, local retained, r registry.
 		// A first visit that ended before any completed turn has no
 		// conversation to capture (ADR 0032). A stopped container never
 		// proves a completed turn of a harness such as Claude Code (ADR
-		// 0011), so its first visit binds none and is turnless too.
+		// 0011), so its first visit binds none and is turnless too. One
+		// that bound a conversation before it exited keeps nothing of it
+		// (keep).
 		local.Turnless = local.thread(r) == ""
 	case r.Phase == registry.Stopping:
 		data, err := p.native(pod)(ctx, harness.NativeStatus)
@@ -582,6 +568,32 @@ func (p *Placement) capture(ctx context.Context, local retained, thread string, 
 	return local, p.save(local)
 }
 
+// keep retains what the fenced visit keeps, by the rule every placement
+// shares (session.StopKeeps, ADR 0062). A turnless first visit, or a first
+// visit whose harness exited without proving a completed turn, keeps no
+// checkpoint: the session keeps the workspace it started from. A resumed
+// visit that proved nothing keeps the checkpoint it started from. A capture
+// of an exited harness that fails keeps the same instead of failing the stop
+// on every retry; any other capture failure fails the stop.
+func (p *Placement) keep(ctx context.Context, local retained, r registry.Record, pod *corev1.Pod) (retained, error) {
+	keep, onFailure := session.StopKeeps(session.VisitEnd{First: local.fresh(), Turnless: local.Turnless,
+		Exited: local.Exited != nil, ProvesCompletion: harness.ProvesCompletion(r.Harness), Conversation: local.thread(r) != ""})
+	if keep == session.KeptCapture {
+		captured, err := p.capture(ctx, local, local.thread(r), pod)
+		if err == nil {
+			return captured, nil
+		}
+		if onFailure == 0 {
+			return local, err
+		}
+		keep = onFailure
+	}
+	if keep == session.KeptInput {
+		return p.keepInput(local)
+	}
+	return local, nil
+}
+
 // keepInput makes the checkpoint a resumed visit started from its output:
 // the visit's harness ended without proving a completed turn, so nothing it
 // did is kept.
@@ -615,10 +627,12 @@ func (p *Placement) stopped(local retained, r registry.Record) (session.Stopped,
 	}
 	i := inc(r)
 	s := session.Stopped{Launch: local.Launch, Incarnation: i, ActualStopped: true, ThreadID: local.thread(r), Receipt: &session.Receipt{Launch: local.Launch, Incarnation: i, Usage: usage}, Exit: local.Exited}
-	// The registry keeps a receipt with no checkpoint only for a turnless
-	// first visit with no native identity: no thread and nothing to return.
+	// The registry keeps a receipt with no checkpoint only for a first visit:
+	// a turnless one, with no thread, or one whose harness exited without
+	// proving its conversation, which reports that thread with its exit, as
+	// the Docker placement does. Neither has anything to return.
 	if r.Receipt.CheckpointDigest == "" {
-		if s.ThreadID != "" {
+		if s.ThreadID != "" && local.Exited == nil {
 			return session.Stopped{}, errors.New("placement: stop without a checkpoint names a native thread")
 		}
 		return s, nil

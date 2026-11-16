@@ -228,7 +228,12 @@ type protocolExecutor struct {
 	lostQuiesce                bool
 	// turnless makes the supervisor report a first visit with no native
 	// conversation once input is gated (ADR 0032).
-	turnless    bool
+	turnless bool
+	// pendingQuiesce makes the supervisor answer a quiesce with a turn
+	// still running: input stays gated and the harness keeps running.
+	pendingQuiesce bool
+	// captureErr makes the capture helper fail.
+	captureErr  error
 	captureArgs []string
 	// logs is the native container's output, where the supervisor writes
 	// its exit report.
@@ -267,6 +272,9 @@ func (e *protocolExecutor) Execute(ctx context.Context, namespace, pod, containe
 			return json.NewEncoder(output).Encode(e.meta)
 		case helperCapture:
 			e.captureArgs = append([]string(nil), args...)
+			if e.captureErr != nil {
+				return e.captureErr
+			}
 			_, err := output.Write(e.data)
 			return err
 		case helperFinish:
@@ -293,6 +301,10 @@ func (e *protocolExecutor) Execute(ctx context.Context, namespace, pod, containe
 	case string(harness.NativeQuiesce):
 		if e.failQuiesce {
 			return errors.New("native completed turn remains unavailable")
+		}
+		if e.pendingQuiesce {
+			return json.NewEncoder(output).Encode(map[string]any{"op": args[1], "state": e.state, "threadId": fixtureThread,
+				"waiting": "the native turn to complete"})
 		}
 		e.state = harness.NativeStopped
 		var actual corev1.Pod

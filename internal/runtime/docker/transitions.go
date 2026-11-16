@@ -146,13 +146,22 @@ func (r placementRecord) writerKnown() bool {
 	return validUUID(r.thread()) || r.Turnless || r.Exited != nil
 }
 
+// kept is what the stop keeps, by the rule every placement shares
+// (session.StopKeeps, ADR 0062). On Docker, keeping the input and keeping the
+// workspace both leave the record with no checkpoint: the session keeps the
+// one it had, or the workspace it started from.
+func (r placementRecord) kept(provesCompletion bool) (keep, onCaptureFailure session.Kept) {
+	return session.StopKeeps(session.VisitEnd{First: r.fresh(), Turnless: r.Turnless, Exited: r.Exited != nil,
+		ProvesCompletion: provesCompletion, Conversation: r.thread() != ""})
+}
+
 // needsCapture reports whether the stop must still capture a checkpoint. A
 // turnless visit keeps the workspace it started from. An exited harness keeps
 // a checkpoint only when its state proves completion and it reported a
 // thread; otherwise the session keeps its previous checkpoint.
 func (r placementRecord) needsCapture(provesCompletion bool) bool {
-	exitedWithout := r.Exited != nil && (!provesCompletion || r.thread() == "")
-	return r.CheckpointDigest == "" && !r.Turnless && !exitedWithout
+	keep, _ := r.kept(provesCompletion)
+	return r.CheckpointDigest == "" && keep == session.KeptCapture
 }
 
 // stoppingOrLater are the phases in which a stop or abort has begun.

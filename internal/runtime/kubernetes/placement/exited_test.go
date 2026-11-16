@@ -1,6 +1,8 @@
 package placement
 
 import (
+	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/andrewmccall/sproozi/internal/harness"
@@ -126,5 +128,94 @@ func TestExitedFirstVisitBindsTheReportedThread(t *testing.T) {
 	}
 	if stopped.ThreadID != fixtureThread || stopped.CheckpointDigest == "" {
 		t.Fatalf("the reported conversation was not kept: %+v", stopped)
+	}
+}
+
+// exitedReport is the supervisor's report of a harness that ended by itself,
+// naming thread when it is not empty.
+func exitedReport(code int, thread string) []byte {
+	report := fmt.Sprintf(`{"code":%d,"cause":"exited"`, code)
+	if thread != "" {
+		report += `,"thread":"` + thread + `"`
+	}
+	return []byte(harness.NativeExitReportPrefix + report + "}\n")
+}
+
+// A resumed visit whose harness exited and whose capture then fails keeps the
+// checkpoint it started from, as the Docker placement does, instead of
+// failing the stop on every retry.
+func TestExitedResumedVisitWhoseCaptureFailsKeepsItsInput(t *testing.T) {
+	t.Parallel()
+	p, kube, e, l, data := setup(t)
+	i := activeVisit(t, p, l, data)
+	endNative(t, p, kube, l, 1)
+	e.logs = exitedReport(1, "")
+	e.captureErr = errors.New("capture helper failed")
+	stopped, err := p.Stop(t.Context(), l, i)
+	if err != nil {
+		t.Fatalf("a failed capture after an exit failed the stop: %v", err)
+	}
+	if stopped.Exit == nil || stopped.ThreadID != fixtureThread || stopped.CheckpointDigest != l.CheckpointDigest ||
+		stopped.Receipt == nil || len(e.captureArgs) == 0 {
+		t.Fatalf("an exited visit whose capture failed did not keep its input: thread %q, digest %q, exit %+v",
+			stopped.ThreadID, stopped.CheckpointDigest, stopped.Exit)
+	}
+	if again, err := p.Stop(t.Context(), l, i); err != nil || again.CheckpointDigest != l.CheckpointDigest {
+		t.Fatalf("stop replay: digest %q: %v", again.CheckpointDigest, err)
+	}
+}
+
+// A first visit whose harness reported a conversation and exited, and whose
+// capture then fails, ends with no new checkpoint: the session keeps the
+// workspace it started from, as on Docker.
+func TestExitedFirstVisitWhoseCaptureFailsKeepsNoCheckpoint(t *testing.T) {
+	t.Parallel()
+	p, kube, e, l, data := setup(t)
+	l = freshLaunch(t, e, l, data, "")
+	i := activeVisit(t, p, l, e.initial)
+	endNative(t, p, kube, l, 0)
+	e.logs = exitedReport(0, fixtureThread)
+	e.captureErr = errors.New("capture helper failed")
+	stopped, err := p.Stop(t.Context(), l, i)
+	if err != nil {
+		t.Fatalf("a failed capture after an exit failed the stop: %v", err)
+	}
+	if stopped.Exit == nil || stopped.CheckpointDigest != "" || len(stopped.Checkpoint) != 0 || stopped.Receipt == nil {
+		t.Fatalf("an exited first visit whose capture failed: digest %q, exit %+v", stopped.CheckpointDigest, stopped.Exit)
+	}
+	if again, err := p.Stop(t.Context(), l, i); err != nil || again.CheckpointDigest != "" || again.Exit == nil {
+		t.Fatalf("stop replay: digest %q: %v", again.CheckpointDigest, err)
+	}
+}
+
+// A first Claude visit whose stop bound its conversation and answered that a
+// turn is pending, and whose harness then exited by itself, keeps no
+// conversation: a stopped container never proves a completed Claude turn
+// (ADR 0011), so nothing is captured from it.
+func TestExitedClaudeFirstVisitAfterTurnPendingCapturesNothing(t *testing.T) {
+	t.Parallel()
+	p, kube, e, l, data := setupKind(t, harness.NativeClaude)
+	l = freshLaunch(t, e, l, data, "")
+	i := activeVisit(t, p, l, e.initial)
+	e.pendingQuiesce = true
+	if _, err := p.Stop(t.Context(), l, i); !errors.Is(err, harness.ErrNativeTurnPending) {
+		t.Fatalf("stop with a turn running: %v", err)
+	}
+	endNative(t, p, kube, l, 0)
+	e.logs = exitedReport(0, "")
+	if exited, err := p.Exited(t.Context(), l, i); err != nil || !exited {
+		t.Fatalf("exit not noticed: %v %v", exited, err)
+	}
+	stopped, err := p.Stop(t.Context(), l, i)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(e.captureArgs) != 0 || stopped.CheckpointDigest != "" || len(stopped.Checkpoint) != 0 ||
+		stopped.Exit == nil || stopped.Receipt == nil {
+		t.Fatalf("a conversation was claimed from a stopped Claude container: captured %v, digest %q, exit %+v",
+			e.captureArgs, stopped.CheckpointDigest, stopped.Exit)
+	}
+	if again, err := p.Stop(t.Context(), l, i); err != nil || again.CheckpointDigest != "" || len(e.captureArgs) != 0 {
+		t.Fatalf("stop replay: digest %q: %v", again.CheckpointDigest, err)
 	}
 }

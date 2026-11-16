@@ -577,9 +577,13 @@ func (p *Placement) Stop(ctx context.Context, l session.Launch, i session.Incarn
 	// exited harness keeps a checkpoint only when a harness whose state proves
 	// completion, such as Codex, reported a completed conversation that
 	// validates; otherwise the session keeps its previous one.
-	if r.needsCapture(harness.ProvesCompletion(r.Launch.Harness)) {
-		if err = p.capture(ctx, &r); err != nil && r.Exited == nil {
-			return session.Stopped{}, err
+	if proves := harness.ProvesCompletion(r.Launch.Harness); r.needsCapture(proves) {
+		// A failed capture of an exited harness keeps what the visit started
+		// from; any other fails the stop, and its retry captures again.
+		if err = p.capture(ctx, &r); err != nil {
+			if _, onFailure := r.kept(proves); onFailure == 0 {
+				return session.Stopped{}, err
+			}
 		}
 	}
 	if err = p.commit(&r, evStopped); err != nil {

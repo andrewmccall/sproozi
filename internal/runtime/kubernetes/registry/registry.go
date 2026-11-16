@@ -580,22 +580,24 @@ func validateStored(r stored) error {
 	return nil
 }
 
-// validateStopReceipt keeps a graceful stop's two outcomes explicit. A visit
-// with a native identity keeps a checkpoint of that conversation. Only a
-// turnless first visit, from a Git workspace and with no native identity bound,
-// stops without one (ADR 0032): it had no conversation to keep, and its
-// workspace input is the execution's state.
+// validateStopReceipt keeps a graceful stop's outcomes explicit. A resumed
+// visit always keeps a checkpoint of its conversation, a new one or the one
+// it started from. Only a first visit, from a Git workspace, may stop without
+// one, and then its workspace input is the execution's state: a turnless one
+// with no native identity bound (ADR 0032), or one whose harness exited
+// without proving the conversation it bound (ADR 0062).
 func validateStopReceipt(r *StopReceipt, registration Registration) error {
 	if r == nil {
 		return fmt.Errorf("incomplete mobility stop receipt")
 	}
-	turnless := registration.WorkspaceDigest != "" && registration.NativeUUID == ""
+	first := registration.WorkspaceDigest != ""
+	turnless := first && registration.NativeUUID == ""
 	switch {
 	case turnless && r.CheckpointDigest != "":
 		return fmt.Errorf("turnless stop receipt names a checkpoint")
 	case !turnless && !uuidPattern.MatchString(registration.NativeUUID):
 		return fmt.Errorf("stopped execution has no native identity")
-	case !turnless && !digestPattern.MatchString(r.CheckpointDigest):
+	case r.CheckpointDigest == "" && !first, r.CheckpointDigest != "" && !digestPattern.MatchString(r.CheckpointDigest):
 		return fmt.Errorf("incomplete mobility stop receipt")
 	}
 	return validateSeals(r.Seals, registration.Ceilings)
