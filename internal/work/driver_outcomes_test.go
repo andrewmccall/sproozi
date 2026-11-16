@@ -1,3 +1,4 @@
+//nolint:goconst // Operation and project names stay literal, as the outcome table prints them.
 package work
 
 import (
@@ -456,11 +457,11 @@ func (c driverCase) String() string {
 	if c.interactive {
 		mode = "interactive"
 	}
-	project := "member"
+	membership := "member"
 	if c.revoked {
-		project = "revoked"
+		membership = "revoked"
 	}
-	return strings.Join([]string{c.state.name, mode, project, string(c.clock), string(c.tail), string(c.health)}, " ")
+	return strings.Join([]string{c.state.name, mode, membership, string(c.clock), string(c.tail), string(c.health)}, " ")
 }
 
 // driverCases is every starting combination: each journal state, mode,
@@ -469,7 +470,7 @@ func (c driverCase) String() string {
 // recorded with a reachable placement only. A state one mode or a session
 // without a deadline cannot hold is listed as unreachable.
 func driverCases() []driverCase {
-	var cases []driverCase
+	cases := make([]driverCase, 0, len(journalStates())*2*2*len(driverClocks)*5)
 	for _, state := range journalStates() {
 		for _, interactive := range []bool{false, true} {
 			for _, revoked := range []bool{false, true} {
