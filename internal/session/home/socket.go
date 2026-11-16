@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/fs"
 	"net"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -333,6 +334,11 @@ func (s *Service) handle(ctx context.Context, conn net.Conn) {
 		}
 		return
 	}
+	// Named before the command runs, which may retire the execution it names.
+	subject := q.ID
+	if q.Action != ActionSessions {
+		subject = s.sessionOf(q.ID)
+	}
 	var status Status
 	var sessions []Status
 	switch q.Action {
@@ -374,7 +380,7 @@ func (s *Service) handle(ctx context.Context, conn net.Conn) {
 		response.Status = &status
 	}
 	if err != nil {
-		err = needsRecovery(err, q.ID, s.continueCommand(q))
+		err = needsRecovery(err, subject, s.continueCommand(q))
 		response.Error = err.Error()
 		response.Rejected = errors.Is(err, ErrRejected)
 		if unknown, ok := s.unknownSession(q, err); ok {
@@ -432,6 +438,24 @@ func deadlineProblem(id string) error {
 // cancelledProblem says a cancelled session cannot continue and how to remove it.
 func cancelledProblem(id string) error {
 	return problem(id, state{phase: Phase(session.PhaseCancelled)})
+}
+
+// sessionOf is the session a refusal names for id: the session itself, or,
+// for the current execution of a catalogued session, that session, so a
+// command names the same session whichever ID it was given. An execution its
+// session no longer records, or that has none, is named as given.
+func (s *Service) sessionOf(id string) string {
+	if _, err := s.readCatalog(id); !os.IsNotExist(err) {
+		return id
+	}
+	execution, err := s.coordinator.Inspect(id)
+	if err != nil || execution.Session == "" {
+		return id
+	}
+	if owner, err := s.readCatalog(execution.Session); err == nil && owner.Current == id {
+		return execution.Session
+	}
+	return id
 }
 
 // continueCommand names the command that keeps waiting for a request's
