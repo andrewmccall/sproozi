@@ -16,7 +16,17 @@ Docker access and cluster administration are required. Use a fresh dedicated
 cluster, private fixture directories and unused ports; do not use an existing
 development or production cluster.
 
+`host.py prepare` picks a free local gateway port and writes it to the generated
+configuration (`listen`, `GatewayPort`) and to its JSON output as `gatewayPort`; 18443,
+the default of a real local Sproozi service, is never assumed. Pass `--gateway-port N` to
+force a port; `prepare` stops with an error if that port is already in use. The Claude and
+Copilot follow-ups keep their own fixed ports (18453 and 18463) and fail the same way.
+
 ## Prepare the host and enforcing cluster
+
+The cluster name must match `sproozi-mobility-*`: `images.py` refuses any other name so
+that it never exports into or loads images for a cluster this proof does not own. Keep
+the `cluster=` line below as it is.
 
 Install Docker, Kind, kubectl, Go, Git, OpenSSL, Python 3 and Python's PyYAML
 package. See the [investigation-to-PR demo guide](../../../docs/guides/pr-demo.md)

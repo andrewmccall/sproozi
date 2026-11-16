@@ -12,6 +12,7 @@ import importlib.util
 import json
 import os
 import re
+import socket
 from pathlib import Path
 import signal
 import shlex
@@ -77,8 +78,41 @@ def run(args, directory):
                    check=True, capture_output=True, timeout=30)
 
 
+def port_in_use(port):
+    """True when the host cannot bind the gateway port on loopback or all addresses."""
+    for address in ["127.0.0.1", "0.0.0.0"]:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            try:
+                probe.bind((address, port))
+            except OSError:
+                return True
+    return False
+
+
+def choose_gateway_port(requested):
+    """Return a port the local gateway can listen on.
+
+    A forced port must be free: the owner's own service commonly holds 18443, and Docker
+    Desktop would forward to that listener instead of the fixture's. Otherwise let the
+    kernel pick a free port, so no fixed value can collide.
+    """
+    if requested is not None:
+        if port_in_use(requested):
+            raise RuntimeError("Gateway port %d is already in use on this host; stop the process holding it "
+                               "or pass a free --gateway-port (omit it to choose one)" % requested)
+        return requested
+    for _ in range(10):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.bind(("0.0.0.0", 0))
+            port = probe.getsockname()[1]
+        if not port_in_use(port):
+            return port
+    raise RuntimeError("Could not find a free gateway port")
+
+
 def prepare(args):
     out = private_directory(args.output_directory)
+    args.gateway_port = choose_gateway_port(args.gateway_port)
     instructions = args.instructions
     digest = hashlib.sha256(instructions.encode()).hexdigest()
     ca, ca_key = out / "ca.pem", out / "ca.key"
@@ -146,7 +180,7 @@ def prepare(args):
           "extendedPrompts": ALL_PROMPTS, "extendedAnswers": ANSWERS,
           "limitations": ["Fixture HTTP provider binds the host for trusted gateway access; worker anchor must block its port",
                           "Short text-only native history; tool effects/compaction/GUI ownership are not proven"]})
-    print(json.dumps({"config": str(out / "home-config.json"), "socket": str(out / "home/control.sock"),
+    print(json.dumps({"gatewayPort": args.gateway_port, "config": str(out / "home-config.json"), "socket": str(out / "home/control.sock"),
                       "profileHints": str(out / "profile-hints.json")}))
 
 
@@ -482,7 +516,8 @@ def main():
     prep.add_argument("--docker-socket", type=Path, required=True)
     for name in ["native-image-id", "helper-image-id", "anchor-image-id", "network-name", "gateway-ip"]:
         prep.add_argument("--" + name, required=True)
-    prep.add_argument("--gateway-port", type=int, default=18443)
+    prep.add_argument("--gateway-port", type=int, default=None,
+                      help="force the local gateway port; default is a free port chosen at prepare time")
     prep.add_argument("--provider-port", type=int, default=18765)
     prep.add_argument("--provider-tls", action="store_true")
     prep.add_argument("--instructions", default=INSTRUCTIONS)
