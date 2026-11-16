@@ -204,6 +204,10 @@ the service logs `Discarded the captured state of stopped visit …`. A capture
 that fails for any other reason fails the stop; `sproozi stop ID` tries
 again, and `sproozi cancel ID` ends a stop that cannot finish
 ([what a stopped visit keeps](native-control.md#what-a-stopped-visit-keeps)).
+A stop that fails leaves the session `stopping` or `unknown-stop`. The
+service on this machine does not repeat it by itself, unlike a remote
+executor, which retries its own: run `sproozi stop ID` or `sproozi recover
+ID` to try again, or `sproozi cancel ID`.
 This holds on this machine and for a session moved to a cluster: the service
 asks the remote executor, and an executor older than this Sproozi reports no
 exits, so its sessions stay `active` until `stop`.
@@ -317,9 +321,14 @@ until the session's next `resume` or `rm`, which cancels and deletes it
 If that cancellation cannot finish, `resume` goes on and the service logs
 `Failed to release an execution session ID never recorded: …`, while `rm`
 refuses with `cancelling execution EXECUTION that session ID never recorded:
-…`; either tries again next time. A journal the service cannot read, such
-as one a newer release wrote, is kept, and the service logs `Failed to read
-execution EXECUTION's journal, so kept it: …` once.
+…`; either tries again next time, so repeat it once Docker or the cluster is
+reachable. A journal the service cannot read, such as one a newer release
+wrote, is kept, and the service logs `Failed to read execution EXECUTION's
+journal FILE, so kept it: …` once. Since the service cannot tell which
+session such a journal belongs to, `rm` of its session goes ahead and leaves
+it, still counting towards the 256; `status` and `rm` of its ID fail to read
+it too. Remove it with the release that wrote it, or delete `FILE` once you
+know nothing runs from it.
 
 `rm ID` deletes a `retained`, `failed` or `cancelled` session: its record, its executions'
 journals, and the saved workspaces, checkpoints and profiles no other session
@@ -329,7 +338,7 @@ each finished container. Besides the replies in the table above, it refuses:
 | Reply | Cause | Run |
 | --- | --- | --- |
 | `another operation is in progress; run the command again shortly` | Another command on this session held it for more than five seconds. Operations on other sessions never delay `rm`. | `rm` again. |
-| `session ID has execution EXECUTION, which ran but which the session never recorded; its work is kept until you remove it: see "sproozi status EXECUTION", run "sproozi cancel EXECUTION" if it still runs, then "sproozi rm EXECUTION", then remove the session` | The session has an execution it never recorded that ran. No command of this release leaves one. | The commands it names, then `rm ID`. `rm EXECUTION` of one still running replies the same. |
+| `session ID has execution EXECUTION, which the session never recorded and which may hold work; it is kept until you remove it: see "sproozi status EXECUTION", run "sproozi cancel EXECUTION" if it still runs, then "sproozi rm EXECUTION", then remove the session` | The session has an execution it never recorded that ran. No command of this release leaves one. | The commands it names, then `rm ID`. `rm EXECUTION` of an unrecorded execution that has not settled replies the same. |
 
 When an earlier operation blocks a command, the service refuses it and names
 the command that unblocks it. Nothing was recorded, so there is no retry

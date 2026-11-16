@@ -44,8 +44,10 @@ execution for the session also holds:
 - **One that ran** is kept, because it may hold work. No command of this
   release creates one. The session's `rm` refuses with a reply naming it;
   `cancel` of its ID stops it without touching the session's entry, and
-  `rm` of its ID deletes it once settled, under its session's lock. The
-  session's `rm` then works.
+  `rm` of its ID deletes it once settled. Both hold the session's lock and
+  check under it that the session still does not record the execution, so
+  neither takes one a resume is about to record. The session's `rm` then
+  works.
 - **A journal that cannot be read**, such as one a newer release wrote,
   cannot be shown to belong to the session. It is kept and logged once, so
   it never blocks another session's `rm`.
@@ -81,6 +83,15 @@ execution for the session also holds:
   launch. This is not yet proven against a real Docker engine.
 - `cancel` and `rm` accept the ID of an unrecorded execution; every other
   command on it but `status` is refused as before.
+- An unreadable journal that is in fact the session's own unrecorded
+  execution is not attributed to it: the session's `rm` succeeds and leaves
+  the journal holding a slot, and `status` and `rm` of its ID cannot read it.
+  Reading only its session field leniently would let the session's `rm`
+  name it, but this release still could not cancel or delete it, so the user
+  could not act on the refusal either. The log line names the file instead,
+  for the release that wrote it or for the user to delete once nothing runs
+  from it. It needs a newer release's journal, so only a downgrade reaches
+  it.
 
 ## Revisit conditions
 

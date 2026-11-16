@@ -717,6 +717,14 @@ any other name is a remote executor. Remote commands select one with
 are lowercase DNS labels of 1 to 63 characters. See
 [remote commands](docs/reference/session-commands.md#remote-commands).
 
+### Unrecorded execution
+
+An execution whose journal names a home session that the session's
+catalogue entry neither lists nor names as current. Only an interrupted
+`resume` leaves one, and the session's next `resume` or `rm` releases it
+([ADR 0063](docs/adr/0063-a-session-releases-executions-it-never-recorded.md)).
+Also seen as: orphan, orphaned execution.
+
 ### Catalogue
 
 The list of sessions that one owner holds. `sproozi sessions` combines this
