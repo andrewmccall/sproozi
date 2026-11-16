@@ -26,6 +26,13 @@ const (
 	ExitCaptureFailed = 74
 )
 
+// HelperFailurePrefix starts the line every release of the helper writes to
+// its standard error before it exits with a failure, since the helper
+// existed. A Docker exec's own failures, such as "Cannot connect to the Docker
+// daemon" or "Error response from daemon", also exit 1 but never carry it, so
+// the Docker placement tells an older helper's code 1 from the CLI's by it.
+const HelperFailurePrefix = "Checkpoint operation failed:"
+
 // ErrStateRefused marks a refusal of the stopped state (ExitStateRefused).
 var ErrStateRefused = harness.ErrStateRefused
 

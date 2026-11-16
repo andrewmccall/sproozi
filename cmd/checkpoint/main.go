@@ -27,7 +27,7 @@ func (s *selections) Set(value string) error {
 
 func main() {
 	if err := run(os.Args[1:], os.Stdin, os.Stdout); err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, "Checkpoint operation failed:", err)
+		_, _ = fmt.Fprintln(os.Stderr, checkpoint.HelperFailurePrefix, err)
 		os.Exit(exitCode(os.Args[1:], err))
 	}
 }

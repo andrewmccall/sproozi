@@ -15,14 +15,25 @@ import (
 	"github.com/andrewmccall/sproozi/internal/testutil"
 )
 
-// exitCoded is a docker exec whose command ended with that code, as
-// *exec.ExitError reports it.
+// exitCoded is a docker exec whose command, the helper, ended with that code
+// after writing its failure line, as the engine reports it: the
+// *exec.ExitError with the command's standard error.
 type exitCoded int
 
 func (e exitCoded) Error() string {
-	return fmt.Sprintf("docker fixed operation failed: exit status %d", int(e))
+	return fmt.Sprintf("docker fixed operation failed: exit status %d: %s fixture failure", int(e),
+		checkpoint.HelperFailurePrefix)
 }
 func (e exitCoded) ExitCode() int { return int(e) }
+
+// cliFailure is the docker CLI's own failure, which exits 1 without the
+// helper's failure line.
+type cliFailure struct{}
+
+func (cliFailure) Error() string {
+	return "docker fixed operation failed: exit status 1: Cannot connect to the Docker daemon at unix:///var/run/docker.sock"
+}
+func (cliFailure) ExitCode() int { return 1 }
 
 // unfinishedCodexCapture runs the helper's capture of a stopped Codex home
 // whose turn started and never completed, as the helper does in its container.
@@ -140,6 +151,25 @@ func TestDockerStopAfterALostQuiesceReplyIsGraceful(t *testing.T) {
 	stopped, err := p.Stop(t.Context(), l, i)
 	if err != nil || stopped.Exit != nil || !bytes.Equal(stopped.Checkpoint, data) {
 		t.Fatalf("lost reply: digest %q, exit %+v: %v", stopped.CheckpointDigest, stopped.Exit, err)
+	}
+}
+
+// The docker CLI's own failure, such as a daemon it cannot reach, also exits
+// 1 but without the helper's failure line: it is not an older helper's
+// refusal, so the stop fails and its retry captures the conversation.
+func TestDockerCLIFailureWithCodeOneIsNotALegacyRefusal(t *testing.T) {
+	t.Parallel()
+	p, f, l, i, data := exitedDockerVisit(t)
+	var log bytes.Buffer
+	p.SetLog(&log)
+	f.cliFails = true
+	if _, err := p.Stop(t.Context(), l, i); err == nil {
+		t.Fatal("a docker CLI failure kept what the visit started from")
+	}
+	f.cliFails = false
+	stopped, err := p.Stop(t.Context(), l, i)
+	if err != nil || !bytes.Equal(stopped.Checkpoint, data) || log.Len() != 0 {
+		t.Fatalf("retry: digest %q, log %q: %v", stopped.CheckpointDigest, log.String(), err)
 	}
 }
 

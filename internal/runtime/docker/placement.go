@@ -1015,11 +1015,15 @@ func (p *Placement) agentStops(ctx context.Context, agent Instance) bool {
 // image older than the codes returns for every failure, which cannot be told
 // apart: this placement keeps what it did before the codes and treats it as a
 // refusal, so an exited visit still finishes its stop keeping what it started
-// from, and a newer image says which it is. The legacy mapping goes once
-// images older than the codes are no longer supported.
+// from, and a newer image says which it is. The docker CLI also exits 1 for
+// its own failures, so code 1 counts as the helper's only when the error
+// carries the helper's own failure line from its standard error; any other
+// code 1 fails the stop. The legacy mapping goes once images older than the
+// codes are no longer supported.
 func captureFailure(err error) error {
 	code, exited := checkpoint.HelperExitCode(err)
-	if exited && (code == checkpoint.ExitStateRefused || code == 1) {
+	legacy := exited && code == 1 && strings.Contains(err.Error(), checkpoint.HelperFailurePrefix)
+	if exited && code == checkpoint.ExitStateRefused || legacy {
 		return fmt.Errorf("%w: %w", session.ErrUncapturable, err)
 	}
 	return err

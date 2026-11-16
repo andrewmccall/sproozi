@@ -76,7 +76,9 @@ type fakeDocker struct {
 	failStop, failCapture, failActivationAck bool
 	// captureExit makes the capture helper end with that code;
 	// captureFrom runs the helper's capture on a fixture state instead.
-	captureExit             int
+	captureExit int
+	// cliFails makes the docker CLI itself fail the capture with code 1.
+	cliFails                bool
 	captureFrom             func(context.Context) ([]byte, error)
 	failRemove              bool
 	rejectNativeActivation  bool
@@ -302,6 +304,9 @@ func (f *fakeDocker) execCommand(ctx context.Context, args []string, input []byt
 		case "capture-stopped":
 			if f.failCapture {
 				return nil, errors.New("capture failed")
+			}
+			if f.cliFails {
+				return nil, cliFailure{}
 			}
 			if f.captureExit != 0 {
 				return nil, exitCoded(f.captureExit)
