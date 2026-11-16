@@ -1,0 +1,1606 @@
+# The supervisor's lifecycle: 344 steps. Written by TestSupervisorLifecycleRecord.
+
+## resumed visit, no deadline
+
+bootstrapped: state unconfigured, no harness, input none
+
+configured: state prepared, thread 01234567-89ab-cdef-0123-456789abcdef, no harness, input none
+
+bootstrapped > configure
+  reply {"op":"configure","state":"prepared","threadId":"01234567-89ab-cdef-0123-456789abcdef"}
+  then state prepared, thread 01234567-89ab-cdef-0123-456789abcdef, no harness, input none
+
+bootstrapped > activate
+  reply {"op":"activate","error":"native launch gate cannot reopen","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > gate
+  reply {"op":"gate","error":"native execution is not active","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > status
+  reply {"op":"status","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > input
+  reply attach {"op":"attach","error":"native execution is not active"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > quiesce
+  reply {"op":"quiesce","error":"native execution is not active","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > quiesce, turn completed
+  reply {"op":"quiesce","error":"native execution is not active","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > quiesce, quit ignored
+  reply {"op":"quiesce","error":"native execution is not active","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > quiesce, quit ignored and kill never confirmed
+  reply {"op":"quiesce","error":"native execution is not active","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > quiesce, harness exits while waiting for its turn
+  reply {"op":"quiesce","error":"native execution is not active","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > quiesce, terminated while quitting
+  reply {"op":"quiesce","error":"native execution is not active","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > quiesce, harness exits while quitting
+  reply {"op":"quiesce","error":"native execution is not active","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > terminated
+  then state stopped, no harness, input none, supervisor exited 1
+
+configured > configure
+  reply {"op":"configure","state":"prepared","threadId":"01234567-89ab-cdef-0123-456789abcdef"}
+  then state prepared, thread 01234567-89ab-cdef-0123-456789abcdef, no harness, input none
+
+configured > activate
+  reply {"op":"activate","state":"active","pid":1,"threadId":"01234567-89ab-cdef-0123-456789abcdef"}
+  then state active, thread 01234567-89ab-cdef-0123-456789abcdef, harness running, input open
+
+configured > gate
+  reply {"op":"gate","error":"native execution is not active","state":"prepared"}
+  then state prepared, thread 01234567-89ab-cdef-0123-456789abcdef, no harness, input none
+
+configured > status
+  reply {"op":"status","state":"prepared","threadId":"01234567-89ab-cdef-0123-456789abcdef"}
+  then state prepared, thread 01234567-89ab-cdef-0123-456789abcdef, no harness, input none
+
+configured > input
+  reply attach {"op":"attach","error":"native execution is not active"}
+  then state prepared, thread 01234567-89ab-cdef-0123-456789abcdef, no harness, input none
+
+configured > quiesce
+  reply {"op":"quiesce","error":"native execution is not active","state":"prepared"}
+  then state prepared, thread 01234567-89ab-cdef-0123-456789abcdef, no harness, input none
+
+configured > quiesce, turn completed
+  reply {"op":"quiesce","error":"native execution is not active","state":"prepared"}
+  then state prepared, thread 01234567-89ab-cdef-0123-456789abcdef, no harness, input none
+
+configured > quiesce, quit ignored
+  reply {"op":"quiesce","error":"native execution is not active","state":"prepared"}
+  then state prepared, thread 01234567-89ab-cdef-0123-456789abcdef, no harness, input none
+
+configured > quiesce, quit ignored and kill never confirmed
+  reply {"op":"quiesce","error":"native execution is not active","state":"prepared"}
+  then state prepared, thread 01234567-89ab-cdef-0123-456789abcdef, no harness, input none
+
+configured > quiesce, harness exits while waiting for its turn
+  reply {"op":"quiesce","error":"native execution is not active","state":"prepared"}
+  then state prepared, thread 01234567-89ab-cdef-0123-456789abcdef, no harness, input none
+
+configured > quiesce, terminated while quitting
+  reply {"op":"quiesce","error":"native execution is not active","state":"prepared"}
+  then state prepared, thread 01234567-89ab-cdef-0123-456789abcdef, no harness, input none
+
+configured > quiesce, harness exits while quitting
+  reply {"op":"quiesce","error":"native execution is not active","state":"prepared"}
+  then state prepared, thread 01234567-89ab-cdef-0123-456789abcdef, no harness, input none
+
+configured > terminated
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, no harness, input none, supervisor exited 1
+
+configured > activate > configure
+  reply {"op":"configure","state":"active","threadId":"01234567-89ab-cdef-0123-456789abcdef"}
+  then state active, thread 01234567-89ab-cdef-0123-456789abcdef, harness running, input open
+
+configured > activate > activate
+  reply {"op":"activate","state":"active","pid":1,"threadId":"01234567-89ab-cdef-0123-456789abcdef"}
+  then state active, thread 01234567-89ab-cdef-0123-456789abcdef, harness running, input open
+
+configured > activate > gate
+  reply {"op":"gate","state":"stopping","threadId":"01234567-89ab-cdef-0123-456789abcdef"}
+  then state stopping, thread 01234567-89ab-cdef-0123-456789abcdef, harness running, input gated
+
+configured > activate > status
+  reply {"op":"status","state":"active","pid":1,"threadId":"01234567-89ab-cdef-0123-456789abcdef"}
+  then state active, thread 01234567-89ab-cdef-0123-456789abcdef, harness running, input open
+
+configured > activate > input
+  reply attach {"op":"attach","state":"active","pid":1}, write {"op":"write","written":1}
+  then state active, thread 01234567-89ab-cdef-0123-456789abcdef, harness running, input open
+
+configured > activate > quiesce
+  reply {"op":"quiesce","state":"stopping","waiting":"Codex to start its first turn"}
+  then state stopping, thread 01234567-89ab-cdef-0123-456789abcdef, harness running, input gated
+
+configured > activate > quiesce, turn completed
+  reply {"op":"quiesce","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":0,"Reason":"native-exit"}}
+  sent quit
+  harness ended 0 native-exit
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, quit ignored
+  reply {"op":"quiesce","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":-1,"Reason":"forced-stop"}}
+  sent quit, ignored, kill
+  killed 1
+  harness ended -1 forced-stop
+  log Forced the harness to stop after it did not exit within 600ms of its quit
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, quit ignored and kill never confirmed
+  reply {"op":"quiesce","error":"context deadline exceeded","state":"stopping"}
+  sent quit, ignored, kill, never confirmed
+  killed 1
+  harness ended -1 forced-stop
+  out sproozi-native-exit {"code":-1,"cause":"failed","thread":"01234567-89ab-cdef-0123-456789abcdef","output":"ready"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited -1
+
+configured > activate > quiesce, harness exits while waiting for its turn
+  reply {"op":"quiesce","error":"native process stopped before completed turn observation","state":"stopping"}
+  harness ended 3 native-exit
+  out sproozi-native-exit {"code":3,"cause":"exited","thread":"01234567-89ab-cdef-0123-456789abcdef","output":"ready"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited 3
+
+configured > activate > quiesce, terminated while quitting
+  reply {"op":"quiesce","error":"native quit did not exit normally","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":-1,"Reason":"forced-stop"}}
+  sent quit
+  killed 1
+  harness ended -1 forced-stop
+  out sproozi-native-exit {"code":-1,"cause":"terminated","thread":"01234567-89ab-cdef-0123-456789abcdef","output":"ready"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited -1
+
+configured > activate > quiesce, harness exits while quitting
+  reply {"op":"quiesce","error":"native quit did not exit normally","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":3,"Reason":"native-exit"}}
+  sent quit
+  harness ended 3 native-exit
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > harness exits
+  harness ended 3 native-exit
+  out sproozi-native-exit {"code":3,"cause":"exited","thread":"01234567-89ab-cdef-0123-456789abcdef","output":"ready"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited 3
+
+configured > activate > terminated
+  killed 1
+  harness ended -1 forced-stop
+  out sproozi-native-exit {"code":-1,"cause":"terminated","thread":"01234567-89ab-cdef-0123-456789abcdef","output":"ready"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited -1
+
+configured > activate > gate > configure
+  reply {"op":"configure","state":"stopping","threadId":"01234567-89ab-cdef-0123-456789abcdef"}
+  then state stopping, thread 01234567-89ab-cdef-0123-456789abcdef, harness running, input gated
+
+configured > activate > gate > activate
+  reply {"op":"activate","error":"native launch gate cannot reopen","state":"stopping","threadId":"01234567-89ab-cdef-0123-456789abcdef"}
+  then state stopping, thread 01234567-89ab-cdef-0123-456789abcdef, harness running, input gated
+
+configured > activate > gate > gate
+  reply {"op":"gate","state":"stopping","threadId":"01234567-89ab-cdef-0123-456789abcdef"}
+  then state stopping, thread 01234567-89ab-cdef-0123-456789abcdef, harness running, input gated
+
+configured > activate > gate > status
+  reply {"op":"status","state":"stopping","pid":1,"threadId":"01234567-89ab-cdef-0123-456789abcdef"}
+  then state stopping, thread 01234567-89ab-cdef-0123-456789abcdef, harness running, input gated
+
+configured > activate > gate > input
+  reply attach {"op":"attach","error":"native execution is not active"}
+  then state stopping, thread 01234567-89ab-cdef-0123-456789abcdef, harness running, input gated
+
+configured > activate > gate > quiesce
+  reply {"op":"quiesce","state":"stopping","waiting":"Codex to start its first turn"}
+  then state stopping, thread 01234567-89ab-cdef-0123-456789abcdef, harness running, input gated
+
+configured > activate > gate > quiesce, turn completed
+  reply {"op":"quiesce","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":0,"Reason":"native-exit"}}
+  sent quit
+  harness ended 0 native-exit
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > gate > quiesce, quit ignored
+  reply {"op":"quiesce","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":-1,"Reason":"forced-stop"}}
+  sent quit, ignored, kill
+  killed 1
+  harness ended -1 forced-stop
+  log Forced the harness to stop after it did not exit within 600ms of its quit
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > gate > quiesce, quit ignored and kill never confirmed
+  reply {"op":"quiesce","error":"context deadline exceeded","state":"stopping"}
+  sent quit, ignored, kill, never confirmed
+  killed 1
+  harness ended -1 forced-stop
+  out sproozi-native-exit {"code":-1,"cause":"failed","thread":"01234567-89ab-cdef-0123-456789abcdef","output":"ready"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited -1
+
+configured > activate > gate > quiesce, harness exits while waiting for its turn
+  reply {"op":"quiesce","error":"native process stopped before completed turn observation","state":"stopping"}
+  harness ended 3 native-exit
+  out sproozi-native-exit {"code":3,"cause":"exited","thread":"01234567-89ab-cdef-0123-456789abcdef","output":"ready"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited 3
+
+configured > activate > gate > quiesce, terminated while quitting
+  reply {"op":"quiesce","error":"native quit did not exit normally","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":-1,"Reason":"forced-stop"}}
+  sent quit
+  killed 1
+  harness ended -1 forced-stop
+  out sproozi-native-exit {"code":-1,"cause":"terminated","thread":"01234567-89ab-cdef-0123-456789abcdef","output":"ready"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited -1
+
+configured > activate > gate > quiesce, harness exits while quitting
+  reply {"op":"quiesce","error":"native quit did not exit normally","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":3,"Reason":"native-exit"}}
+  sent quit
+  harness ended 3 native-exit
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > gate > harness exits
+  harness ended 3 native-exit
+  out sproozi-native-exit {"code":3,"cause":"exited","thread":"01234567-89ab-cdef-0123-456789abcdef","output":"ready"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited 3
+
+configured > activate > gate > terminated
+  killed 1
+  harness ended -1 forced-stop
+  out sproozi-native-exit {"code":-1,"cause":"terminated","thread":"01234567-89ab-cdef-0123-456789abcdef","output":"ready"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited -1
+
+configured > activate > quiesce, turn completed > configure
+  reply {"op":"configure","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > activate
+  reply {"op":"activate","error":"native launch gate cannot reopen","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > gate
+  reply {"op":"gate","error":"native execution is not active","state":"stopped"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > status
+  reply {"op":"status","state":"stopped","pid":1,"threadId":"01234567-89ab-cdef-0123-456789abcdef"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > input
+  reply attach {"op":"attach","error":"native execution is not active"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > quiesce
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > quiesce, turn completed
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > quiesce, quit ignored
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > quiesce, quit ignored and kill never confirmed
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > quiesce, harness exits while waiting for its turn
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > quiesce, terminated while quitting
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > quiesce, harness exits while quitting
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > terminated
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited 0
+
+configured > activate > quiesce, turn completed > reply read
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited 0
+
+## resumed visit, a deadline
+
+bootstrapped: state unconfigured, no harness, input none
+
+configured: state prepared, thread 01234567-89ab-cdef-0123-456789abcdef, no harness, input none
+
+bootstrapped > configure
+  reply {"op":"configure","state":"prepared","threadId":"01234567-89ab-cdef-0123-456789abcdef"}
+  then state prepared, thread 01234567-89ab-cdef-0123-456789abcdef, no harness, input none
+
+bootstrapped > activate
+  reply {"op":"activate","error":"native launch gate cannot reopen","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > gate
+  reply {"op":"gate","error":"native execution is not active","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > status
+  reply {"op":"status","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > input
+  reply attach {"op":"attach","error":"native execution is not active"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > quiesce
+  reply {"op":"quiesce","error":"native execution is not active","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > quiesce, turn completed
+  reply {"op":"quiesce","error":"native execution is not active","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > quiesce, quit ignored
+  reply {"op":"quiesce","error":"native execution is not active","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > quiesce, quit ignored and kill never confirmed
+  reply {"op":"quiesce","error":"native execution is not active","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > quiesce, harness exits while waiting for its turn
+  reply {"op":"quiesce","error":"native execution is not active","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > quiesce, deadline passes while waiting for its turn
+  reply {"op":"quiesce","error":"native execution is not active","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > quiesce, deadline passes while waiting for the quit
+  reply {"op":"quiesce","error":"native execution is not active","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > quiesce, terminated while quitting
+  reply {"op":"quiesce","error":"native execution is not active","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > quiesce, harness exits while quitting
+  reply {"op":"quiesce","error":"native execution is not active","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > quiesce, deadline raised while quitting
+  reply {"op":"quiesce","error":"native execution is not active","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > terminated
+  then state stopped, no harness, input none, supervisor exited 1
+
+bootstrapped > deadline
+  then state stopped, no harness, input none, supervisor exited 1
+
+configured > configure
+  reply {"op":"configure","state":"prepared","threadId":"01234567-89ab-cdef-0123-456789abcdef"}
+  then state prepared, thread 01234567-89ab-cdef-0123-456789abcdef, no harness, input none
+
+configured > activate
+  reply {"op":"activate","state":"active","pid":1,"threadId":"01234567-89ab-cdef-0123-456789abcdef"}
+  then state active, thread 01234567-89ab-cdef-0123-456789abcdef, harness running, input open
+
+configured > gate
+  reply {"op":"gate","error":"native execution is not active","state":"prepared"}
+  then state prepared, thread 01234567-89ab-cdef-0123-456789abcdef, no harness, input none
+
+configured > status
+  reply {"op":"status","state":"prepared","threadId":"01234567-89ab-cdef-0123-456789abcdef"}
+  then state prepared, thread 01234567-89ab-cdef-0123-456789abcdef, no harness, input none
+
+configured > input
+  reply attach {"op":"attach","error":"native execution is not active"}
+  then state prepared, thread 01234567-89ab-cdef-0123-456789abcdef, no harness, input none
+
+configured > quiesce
+  reply {"op":"quiesce","error":"native execution is not active","state":"prepared"}
+  then state prepared, thread 01234567-89ab-cdef-0123-456789abcdef, no harness, input none
+
+configured > quiesce, turn completed
+  reply {"op":"quiesce","error":"native execution is not active","state":"prepared"}
+  then state prepared, thread 01234567-89ab-cdef-0123-456789abcdef, no harness, input none
+
+configured > quiesce, quit ignored
+  reply {"op":"quiesce","error":"native execution is not active","state":"prepared"}
+  then state prepared, thread 01234567-89ab-cdef-0123-456789abcdef, no harness, input none
+
+configured > quiesce, quit ignored and kill never confirmed
+  reply {"op":"quiesce","error":"native execution is not active","state":"prepared"}
+  then state prepared, thread 01234567-89ab-cdef-0123-456789abcdef, no harness, input none
+
+configured > quiesce, harness exits while waiting for its turn
+  reply {"op":"quiesce","error":"native execution is not active","state":"prepared"}
+  then state prepared, thread 01234567-89ab-cdef-0123-456789abcdef, no harness, input none
+
+configured > quiesce, deadline passes while waiting for its turn
+  reply {"op":"quiesce","error":"native execution is not active","state":"prepared"}
+  then state prepared, thread 01234567-89ab-cdef-0123-456789abcdef, no harness, input none
+
+configured > quiesce, deadline passes while waiting for the quit
+  reply {"op":"quiesce","error":"native execution is not active","state":"prepared"}
+  then state prepared, thread 01234567-89ab-cdef-0123-456789abcdef, no harness, input none
+
+configured > quiesce, terminated while quitting
+  reply {"op":"quiesce","error":"native execution is not active","state":"prepared"}
+  then state prepared, thread 01234567-89ab-cdef-0123-456789abcdef, no harness, input none
+
+configured > quiesce, harness exits while quitting
+  reply {"op":"quiesce","error":"native execution is not active","state":"prepared"}
+  then state prepared, thread 01234567-89ab-cdef-0123-456789abcdef, no harness, input none
+
+configured > quiesce, deadline raised while quitting
+  reply {"op":"quiesce","error":"native execution is not active","state":"prepared"}
+  then state prepared, thread 01234567-89ab-cdef-0123-456789abcdef, no harness, input none
+
+configured > terminated
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, no harness, input none, supervisor exited 1
+
+configured > deadline
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, no harness, input none, supervisor exited 1
+
+configured > activate > configure
+  reply {"op":"configure","state":"active","threadId":"01234567-89ab-cdef-0123-456789abcdef"}
+  then state active, thread 01234567-89ab-cdef-0123-456789abcdef, harness running, input open
+
+configured > activate > activate
+  reply {"op":"activate","state":"active","pid":1,"threadId":"01234567-89ab-cdef-0123-456789abcdef"}
+  then state active, thread 01234567-89ab-cdef-0123-456789abcdef, harness running, input open
+
+configured > activate > gate
+  reply {"op":"gate","state":"stopping","threadId":"01234567-89ab-cdef-0123-456789abcdef"}
+  then state stopping, thread 01234567-89ab-cdef-0123-456789abcdef, harness running, input gated
+
+configured > activate > status
+  reply {"op":"status","state":"active","pid":1,"threadId":"01234567-89ab-cdef-0123-456789abcdef"}
+  then state active, thread 01234567-89ab-cdef-0123-456789abcdef, harness running, input open
+
+configured > activate > input
+  reply attach {"op":"attach","state":"active","pid":1}, write {"op":"write","written":1}
+  then state active, thread 01234567-89ab-cdef-0123-456789abcdef, harness running, input open
+
+configured > activate > quiesce
+  reply {"op":"quiesce","state":"stopping","waiting":"Codex to start its first turn"}
+  then state stopping, thread 01234567-89ab-cdef-0123-456789abcdef, harness running, input gated
+
+configured > activate > quiesce, turn completed
+  reply {"op":"quiesce","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":0,"Reason":"native-exit"}}
+  sent quit
+  harness ended 0 native-exit
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, quit ignored
+  reply {"op":"quiesce","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":-1,"Reason":"forced-stop"}}
+  sent quit, ignored, kill
+  killed 1
+  harness ended -1 forced-stop
+  log Forced the harness to stop after it did not exit within 600ms of its quit
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, quit ignored and kill never confirmed
+  reply {"op":"quiesce","error":"context deadline exceeded","state":"stopping"}
+  sent quit, ignored, kill, never confirmed
+  killed 1
+  harness ended -1 forced-stop
+  out sproozi-native-exit {"code":-1,"cause":"failed","thread":"01234567-89ab-cdef-0123-456789abcdef","output":"ready"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited -1
+
+configured > activate > quiesce, harness exits while waiting for its turn
+  reply {"op":"quiesce","error":"native process stopped before completed turn observation","state":"stopping"}
+  harness ended 3 native-exit
+  out sproozi-native-exit {"code":3,"cause":"exited","thread":"01234567-89ab-cdef-0123-456789abcdef","output":"ready"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited 3
+
+configured > activate > quiesce, deadline passes while waiting for its turn
+  reply {"op":"quiesce","error":"no completed safe native turn before deadline","state":"stopping"}
+  killed 1
+  harness ended -1 forced-stop
+  out sproozi-native-exit {"code":-1,"cause":"deadline","thread":"01234567-89ab-cdef-0123-456789abcdef","output":"ready"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited -1
+
+configured > activate > quiesce, deadline passes while waiting for the quit
+  reply {"op":"quiesce","error":"native quit did not finish before deadline","state":"stopping"}
+  sent quit, ignored
+  killed 1
+  harness ended -1 forced-stop
+  out sproozi-native-exit {"code":-1,"cause":"deadline","thread":"01234567-89ab-cdef-0123-456789abcdef","output":"ready"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited -1
+
+configured > activate > quiesce, terminated while quitting
+  reply {"op":"quiesce","error":"native quit did not exit normally","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":-1,"Reason":"forced-stop"}}
+  sent quit
+  killed 1
+  harness ended -1 forced-stop
+  out sproozi-native-exit {"code":-1,"cause":"terminated","thread":"01234567-89ab-cdef-0123-456789abcdef","output":"ready"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited -1
+
+configured > activate > quiesce, harness exits while quitting
+  reply {"op":"quiesce","error":"native quit did not exit normally","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":3,"Reason":"native-exit"}}
+  sent quit
+  harness ended 3 native-exit
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, deadline raised while quitting
+  reply {"op":"quiesce","error":"native quit did not exit normally","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":-1,"Reason":"forced-stop"}}
+  sent quit
+  killed 1
+  harness ended -1 forced-stop
+  out sproozi-native-exit {"code":-1,"cause":"deadline","thread":"01234567-89ab-cdef-0123-456789abcdef","output":"ready"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited -1
+
+configured > activate > harness exits
+  harness ended 3 native-exit
+  out sproozi-native-exit {"code":3,"cause":"exited","thread":"01234567-89ab-cdef-0123-456789abcdef","output":"ready"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited 3
+
+configured > activate > terminated
+  killed 1
+  harness ended -1 forced-stop
+  out sproozi-native-exit {"code":-1,"cause":"terminated","thread":"01234567-89ab-cdef-0123-456789abcdef","output":"ready"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited -1
+
+configured > activate > deadline
+  killed 1
+  harness ended -1 forced-stop
+  out sproozi-native-exit {"code":-1,"cause":"deadline","thread":"01234567-89ab-cdef-0123-456789abcdef","output":"ready"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited -1
+
+configured > activate > gate > configure
+  reply {"op":"configure","state":"stopping","threadId":"01234567-89ab-cdef-0123-456789abcdef"}
+  then state stopping, thread 01234567-89ab-cdef-0123-456789abcdef, harness running, input gated
+
+configured > activate > gate > activate
+  reply {"op":"activate","error":"native launch gate cannot reopen","state":"stopping","threadId":"01234567-89ab-cdef-0123-456789abcdef"}
+  then state stopping, thread 01234567-89ab-cdef-0123-456789abcdef, harness running, input gated
+
+configured > activate > gate > gate
+  reply {"op":"gate","state":"stopping","threadId":"01234567-89ab-cdef-0123-456789abcdef"}
+  then state stopping, thread 01234567-89ab-cdef-0123-456789abcdef, harness running, input gated
+
+configured > activate > gate > status
+  reply {"op":"status","state":"stopping","pid":1,"threadId":"01234567-89ab-cdef-0123-456789abcdef"}
+  then state stopping, thread 01234567-89ab-cdef-0123-456789abcdef, harness running, input gated
+
+configured > activate > gate > input
+  reply attach {"op":"attach","error":"native execution is not active"}
+  then state stopping, thread 01234567-89ab-cdef-0123-456789abcdef, harness running, input gated
+
+configured > activate > gate > quiesce
+  reply {"op":"quiesce","state":"stopping","waiting":"Codex to start its first turn"}
+  then state stopping, thread 01234567-89ab-cdef-0123-456789abcdef, harness running, input gated
+
+configured > activate > gate > quiesce, turn completed
+  reply {"op":"quiesce","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":0,"Reason":"native-exit"}}
+  sent quit
+  harness ended 0 native-exit
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > gate > quiesce, quit ignored
+  reply {"op":"quiesce","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":-1,"Reason":"forced-stop"}}
+  sent quit, ignored, kill
+  killed 1
+  harness ended -1 forced-stop
+  log Forced the harness to stop after it did not exit within 600ms of its quit
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > gate > quiesce, quit ignored and kill never confirmed
+  reply {"op":"quiesce","error":"context deadline exceeded","state":"stopping"}
+  sent quit, ignored, kill, never confirmed
+  killed 1
+  harness ended -1 forced-stop
+  out sproozi-native-exit {"code":-1,"cause":"failed","thread":"01234567-89ab-cdef-0123-456789abcdef","output":"ready"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited -1
+
+configured > activate > gate > quiesce, harness exits while waiting for its turn
+  reply {"op":"quiesce","error":"native process stopped before completed turn observation","state":"stopping"}
+  harness ended 3 native-exit
+  out sproozi-native-exit {"code":3,"cause":"exited","thread":"01234567-89ab-cdef-0123-456789abcdef","output":"ready"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited 3
+
+configured > activate > gate > quiesce, deadline passes while waiting for its turn
+  reply {"op":"quiesce","error":"no completed safe native turn before deadline","state":"stopping"}
+  killed 1
+  harness ended -1 forced-stop
+  out sproozi-native-exit {"code":-1,"cause":"deadline","thread":"01234567-89ab-cdef-0123-456789abcdef","output":"ready"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited -1
+
+configured > activate > gate > quiesce, deadline passes while waiting for the quit
+  reply {"op":"quiesce","error":"native quit did not finish before deadline","state":"stopping"}
+  sent quit, ignored
+  killed 1
+  harness ended -1 forced-stop
+  out sproozi-native-exit {"code":-1,"cause":"deadline","thread":"01234567-89ab-cdef-0123-456789abcdef","output":"ready"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited -1
+
+configured > activate > gate > quiesce, terminated while quitting
+  reply {"op":"quiesce","error":"native quit did not exit normally","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":-1,"Reason":"forced-stop"}}
+  sent quit
+  killed 1
+  harness ended -1 forced-stop
+  out sproozi-native-exit {"code":-1,"cause":"terminated","thread":"01234567-89ab-cdef-0123-456789abcdef","output":"ready"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited -1
+
+configured > activate > gate > quiesce, harness exits while quitting
+  reply {"op":"quiesce","error":"native quit did not exit normally","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":3,"Reason":"native-exit"}}
+  sent quit
+  harness ended 3 native-exit
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > gate > quiesce, deadline raised while quitting
+  reply {"op":"quiesce","error":"native quit did not exit normally","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":-1,"Reason":"forced-stop"}}
+  sent quit
+  killed 1
+  harness ended -1 forced-stop
+  out sproozi-native-exit {"code":-1,"cause":"deadline","thread":"01234567-89ab-cdef-0123-456789abcdef","output":"ready"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited -1
+
+configured > activate > gate > harness exits
+  harness ended 3 native-exit
+  out sproozi-native-exit {"code":3,"cause":"exited","thread":"01234567-89ab-cdef-0123-456789abcdef","output":"ready"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited 3
+
+configured > activate > gate > terminated
+  killed 1
+  harness ended -1 forced-stop
+  out sproozi-native-exit {"code":-1,"cause":"terminated","thread":"01234567-89ab-cdef-0123-456789abcdef","output":"ready"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited -1
+
+configured > activate > gate > deadline
+  killed 1
+  harness ended -1 forced-stop
+  out sproozi-native-exit {"code":-1,"cause":"deadline","thread":"01234567-89ab-cdef-0123-456789abcdef","output":"ready"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited -1
+
+configured > activate > quiesce, turn completed > configure
+  reply {"op":"configure","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > activate
+  reply {"op":"activate","error":"native launch gate cannot reopen","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > gate
+  reply {"op":"gate","error":"native execution is not active","state":"stopped"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > status
+  reply {"op":"status","state":"stopped","pid":1,"threadId":"01234567-89ab-cdef-0123-456789abcdef"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > input
+  reply attach {"op":"attach","error":"native execution is not active"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > quiesce
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > quiesce, turn completed
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > quiesce, quit ignored
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > quiesce, quit ignored and kill never confirmed
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > quiesce, harness exits while waiting for its turn
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > quiesce, deadline passes while waiting for its turn
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > quiesce, deadline passes while waiting for the quit
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > quiesce, terminated while quitting
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > quiesce, harness exits while quitting
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > quiesce, deadline raised while quitting
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > terminated
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited 0
+
+configured > activate > quiesce, turn completed > deadline
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited 0
+
+configured > activate > quiesce, turn completed > reply read
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited 0
+
+## first visit, no deadline
+
+bootstrapped: state unconfigured, no harness, input none
+
+configured: state prepared, no harness, input none
+
+bootstrapped > configure
+  reply {"op":"configure","state":"prepared"}
+  then state prepared, no harness, input none
+
+bootstrapped > activate
+  reply {"op":"activate","error":"native launch gate cannot reopen","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > gate
+  reply {"op":"gate","error":"native execution is not active","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > status
+  reply {"op":"status","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > input
+  reply attach {"op":"attach","error":"native execution is not active"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > quiesce
+  reply {"op":"quiesce","error":"native execution is not active","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > quiesce, turn completed
+  reply {"op":"quiesce","error":"native execution is not active","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > quiesce, quit ignored
+  reply {"op":"quiesce","error":"native execution is not active","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > quiesce, quit ignored and kill never confirmed
+  reply {"op":"quiesce","error":"native execution is not active","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > quiesce, harness exits while waiting for its turn
+  reply {"op":"quiesce","error":"native execution is not active","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > quiesce, terminated while quitting
+  reply {"op":"quiesce","error":"native execution is not active","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > quiesce, harness exits while quitting
+  reply {"op":"quiesce","error":"native execution is not active","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > terminated
+  then state stopped, no harness, input none, supervisor exited 1
+
+configured > configure
+  reply {"op":"configure","state":"prepared"}
+  then state prepared, no harness, input none
+
+configured > activate
+  reply {"op":"activate","state":"active","pid":1}
+  then state active, harness running, input open
+
+configured > gate
+  reply {"op":"gate","error":"native execution is not active","state":"prepared"}
+  then state prepared, no harness, input none
+
+configured > status
+  reply {"op":"status","state":"prepared"}
+  then state prepared, no harness, input none
+
+configured > input
+  reply attach {"op":"attach","error":"native execution is not active"}
+  then state prepared, no harness, input none
+
+configured > quiesce
+  reply {"op":"quiesce","error":"native execution is not active","state":"prepared"}
+  then state prepared, no harness, input none
+
+configured > quiesce, turn completed
+  reply {"op":"quiesce","error":"native execution is not active","state":"prepared"}
+  then state prepared, no harness, input none
+
+configured > quiesce, quit ignored
+  reply {"op":"quiesce","error":"native execution is not active","state":"prepared"}
+  then state prepared, no harness, input none
+
+configured > quiesce, quit ignored and kill never confirmed
+  reply {"op":"quiesce","error":"native execution is not active","state":"prepared"}
+  then state prepared, no harness, input none
+
+configured > quiesce, harness exits while waiting for its turn
+  reply {"op":"quiesce","error":"native execution is not active","state":"prepared"}
+  then state prepared, no harness, input none
+
+configured > quiesce, terminated while quitting
+  reply {"op":"quiesce","error":"native execution is not active","state":"prepared"}
+  then state prepared, no harness, input none
+
+configured > quiesce, harness exits while quitting
+  reply {"op":"quiesce","error":"native execution is not active","state":"prepared"}
+  then state prepared, no harness, input none
+
+configured > terminated
+  then state stopped, no harness, input none, supervisor exited 1
+
+configured > activate > configure
+  reply {"op":"configure","state":"active"}
+  then state active, harness running, input open
+
+configured > activate > activate
+  reply {"op":"activate","state":"active","pid":1}
+  then state active, harness running, input open
+
+configured > activate > gate
+  reply {"op":"gate","state":"stopping"}
+  then state stopping, harness running, input gated
+
+configured > activate > status
+  reply {"op":"status","state":"active","pid":1}
+  then state active, harness running, input open
+
+configured > activate > input
+  reply attach {"op":"attach","state":"active","pid":1}, write {"op":"write","written":1}
+  then state active, harness running, input open
+
+configured > activate > quiesce
+  reply {"op":"quiesce","state":"stopped","exit":{"Code":-1,"Reason":"forced-stop"},"turnless":true}
+  sent kill
+  killed 1
+  harness ended -1 forced-stop
+  then state stopped, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed
+  reply {"op":"quiesce","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":0,"Reason":"native-exit"}}
+  sent quit
+  harness ended 0 native-exit
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, quit ignored
+  reply {"op":"quiesce","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":-1,"Reason":"forced-stop"}}
+  sent quit, ignored, kill
+  killed 1
+  harness ended -1 forced-stop
+  log Forced the harness to stop after it did not exit within 600ms of its quit
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, quit ignored and kill never confirmed
+  reply {"op":"quiesce","error":"context deadline exceeded","state":"stopping"}
+  sent quit, ignored, kill, never confirmed
+  killed 1
+  harness ended -1 forced-stop
+  out sproozi-native-exit {"code":-1,"cause":"failed","thread":"01234567-89ab-cdef-0123-456789abcdef","output":"ready"}
+  then state stopped, harness exited, input closed, supervisor exited -1
+
+configured > activate > quiesce, harness exits while waiting for its turn
+  reply {"op":"quiesce","error":"native process stopped before completed turn observation","state":"stopping"}
+  harness ended 3 native-exit
+  out sproozi-native-exit {"code":3,"cause":"exited","output":"ready"}
+  then state stopped, harness exited, input closed, supervisor exited 3
+
+configured > activate > quiesce, terminated while quitting
+  reply {"op":"quiesce","error":"native quit did not exit normally","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":-1,"Reason":"forced-stop"}}
+  sent quit
+  killed 1
+  harness ended -1 forced-stop
+  out sproozi-native-exit {"code":-1,"cause":"terminated","thread":"01234567-89ab-cdef-0123-456789abcdef","output":"ready"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited -1
+
+configured > activate > quiesce, harness exits while quitting
+  reply {"op":"quiesce","error":"native quit did not exit normally","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":3,"Reason":"native-exit"}}
+  sent quit
+  harness ended 3 native-exit
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > harness exits
+  harness ended 3 native-exit
+  out sproozi-native-exit {"code":3,"cause":"exited","output":"ready"}
+  then state stopped, harness exited, input closed, supervisor exited 3
+
+configured > activate > terminated
+  killed 1
+  harness ended -1 forced-stop
+  out sproozi-native-exit {"code":-1,"cause":"terminated","output":"ready"}
+  then state stopped, harness exited, input closed, supervisor exited -1
+
+configured > activate > gate > configure
+  reply {"op":"configure","state":"stopping"}
+  then state stopping, harness running, input gated
+
+configured > activate > gate > activate
+  reply {"op":"activate","error":"native launch gate cannot reopen","state":"stopping"}
+  then state stopping, harness running, input gated
+
+configured > activate > gate > gate
+  reply {"op":"gate","state":"stopping"}
+  then state stopping, harness running, input gated
+
+configured > activate > gate > status
+  reply {"op":"status","state":"stopping","pid":1,"turnless":true}
+  then state stopping, harness running, input gated
+
+configured > activate > gate > input
+  reply attach {"op":"attach","error":"native execution is not active"}
+  then state stopping, harness running, input gated
+
+configured > activate > gate > quiesce
+  reply {"op":"quiesce","state":"stopped","exit":{"Code":-1,"Reason":"forced-stop"},"turnless":true}
+  sent kill
+  killed 1
+  harness ended -1 forced-stop
+  then state stopped, harness exited, input closed, stopped reply unread
+
+configured > activate > gate > quiesce, turn completed
+  reply {"op":"quiesce","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":0,"Reason":"native-exit"}}
+  sent quit
+  harness ended 0 native-exit
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > gate > quiesce, quit ignored
+  reply {"op":"quiesce","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":-1,"Reason":"forced-stop"}}
+  sent quit, ignored, kill
+  killed 1
+  harness ended -1 forced-stop
+  log Forced the harness to stop after it did not exit within 600ms of its quit
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > gate > quiesce, quit ignored and kill never confirmed
+  reply {"op":"quiesce","error":"context deadline exceeded","state":"stopping"}
+  sent quit, ignored, kill, never confirmed
+  killed 1
+  harness ended -1 forced-stop
+  out sproozi-native-exit {"code":-1,"cause":"failed","thread":"01234567-89ab-cdef-0123-456789abcdef","output":"ready"}
+  then state stopped, harness exited, input closed, supervisor exited -1
+
+configured > activate > gate > quiesce, harness exits while waiting for its turn
+  reply {"op":"quiesce","error":"native process stopped before completed turn observation","state":"stopping"}
+  harness ended 3 native-exit
+  out sproozi-native-exit {"code":3,"cause":"exited","output":"ready"}
+  then state stopped, harness exited, input closed, supervisor exited 3
+
+configured > activate > gate > quiesce, terminated while quitting
+  reply {"op":"quiesce","error":"native quit did not exit normally","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":-1,"Reason":"forced-stop"}}
+  sent quit
+  killed 1
+  harness ended -1 forced-stop
+  out sproozi-native-exit {"code":-1,"cause":"terminated","thread":"01234567-89ab-cdef-0123-456789abcdef","output":"ready"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited -1
+
+configured > activate > gate > quiesce, harness exits while quitting
+  reply {"op":"quiesce","error":"native quit did not exit normally","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":3,"Reason":"native-exit"}}
+  sent quit
+  harness ended 3 native-exit
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > gate > harness exits
+  harness ended 3 native-exit
+  out sproozi-native-exit {"code":3,"cause":"exited","output":"ready"}
+  then state stopped, harness exited, input closed, supervisor exited 3
+
+configured > activate > gate > terminated
+  killed 1
+  harness ended -1 forced-stop
+  out sproozi-native-exit {"code":-1,"cause":"terminated","output":"ready"}
+  then state stopped, harness exited, input closed, supervisor exited -1
+
+configured > activate > quiesce > configure
+  reply {"op":"configure","state":"stopped"}
+  then state stopped, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce > activate
+  reply {"op":"activate","error":"native launch gate cannot reopen","state":"stopped"}
+  then state stopped, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce > gate
+  reply {"op":"gate","error":"native execution is not active","state":"stopped"}
+  then state stopped, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce > status
+  reply {"op":"status","state":"stopped","pid":1}
+  then state stopped, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce > input
+  reply attach {"op":"attach","error":"native execution is not active"}
+  then state stopped, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce > quiesce
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce > quiesce, turn completed
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce > quiesce, quit ignored
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce > quiesce, quit ignored and kill never confirmed
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce > quiesce, harness exits while waiting for its turn
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce > quiesce, terminated while quitting
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce > quiesce, harness exits while quitting
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce > terminated
+  then state stopped, harness exited, input closed, supervisor exited 0
+
+configured > activate > quiesce > reply read
+  then state stopped, harness exited, input closed, supervisor exited 0
+
+configured > activate > quiesce, turn completed > configure
+  reply {"op":"configure","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > activate
+  reply {"op":"activate","error":"native launch gate cannot reopen","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > gate
+  reply {"op":"gate","error":"native execution is not active","state":"stopped"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > status
+  reply {"op":"status","state":"stopped","pid":1,"threadId":"01234567-89ab-cdef-0123-456789abcdef"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > input
+  reply attach {"op":"attach","error":"native execution is not active"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > quiesce
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > quiesce, turn completed
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > quiesce, quit ignored
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > quiesce, quit ignored and kill never confirmed
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > quiesce, harness exits while waiting for its turn
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > quiesce, terminated while quitting
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > quiesce, harness exits while quitting
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > terminated
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited 0
+
+configured > activate > quiesce, turn completed > reply read
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited 0
+
+## first visit, a deadline
+
+bootstrapped: state unconfigured, no harness, input none
+
+configured: state prepared, no harness, input none
+
+bootstrapped > configure
+  reply {"op":"configure","state":"prepared"}
+  then state prepared, no harness, input none
+
+bootstrapped > activate
+  reply {"op":"activate","error":"native launch gate cannot reopen","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > gate
+  reply {"op":"gate","error":"native execution is not active","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > status
+  reply {"op":"status","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > input
+  reply attach {"op":"attach","error":"native execution is not active"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > quiesce
+  reply {"op":"quiesce","error":"native execution is not active","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > quiesce, turn completed
+  reply {"op":"quiesce","error":"native execution is not active","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > quiesce, quit ignored
+  reply {"op":"quiesce","error":"native execution is not active","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > quiesce, quit ignored and kill never confirmed
+  reply {"op":"quiesce","error":"native execution is not active","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > quiesce, harness exits while waiting for its turn
+  reply {"op":"quiesce","error":"native execution is not active","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > quiesce, deadline passes while waiting for its turn
+  reply {"op":"quiesce","error":"native execution is not active","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > quiesce, deadline passes while waiting for the quit
+  reply {"op":"quiesce","error":"native execution is not active","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > quiesce, terminated while quitting
+  reply {"op":"quiesce","error":"native execution is not active","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > quiesce, harness exits while quitting
+  reply {"op":"quiesce","error":"native execution is not active","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > quiesce, deadline raised while quitting
+  reply {"op":"quiesce","error":"native execution is not active","state":"unconfigured"}
+  then state unconfigured, no harness, input none
+
+bootstrapped > terminated
+  then state stopped, no harness, input none, supervisor exited 1
+
+bootstrapped > deadline
+  then state stopped, no harness, input none, supervisor exited 1
+
+configured > configure
+  reply {"op":"configure","state":"prepared"}
+  then state prepared, no harness, input none
+
+configured > activate
+  reply {"op":"activate","state":"active","pid":1}
+  then state active, harness running, input open
+
+configured > gate
+  reply {"op":"gate","error":"native execution is not active","state":"prepared"}
+  then state prepared, no harness, input none
+
+configured > status
+  reply {"op":"status","state":"prepared"}
+  then state prepared, no harness, input none
+
+configured > input
+  reply attach {"op":"attach","error":"native execution is not active"}
+  then state prepared, no harness, input none
+
+configured > quiesce
+  reply {"op":"quiesce","error":"native execution is not active","state":"prepared"}
+  then state prepared, no harness, input none
+
+configured > quiesce, turn completed
+  reply {"op":"quiesce","error":"native execution is not active","state":"prepared"}
+  then state prepared, no harness, input none
+
+configured > quiesce, quit ignored
+  reply {"op":"quiesce","error":"native execution is not active","state":"prepared"}
+  then state prepared, no harness, input none
+
+configured > quiesce, quit ignored and kill never confirmed
+  reply {"op":"quiesce","error":"native execution is not active","state":"prepared"}
+  then state prepared, no harness, input none
+
+configured > quiesce, harness exits while waiting for its turn
+  reply {"op":"quiesce","error":"native execution is not active","state":"prepared"}
+  then state prepared, no harness, input none
+
+configured > quiesce, deadline passes while waiting for its turn
+  reply {"op":"quiesce","error":"native execution is not active","state":"prepared"}
+  then state prepared, no harness, input none
+
+configured > quiesce, deadline passes while waiting for the quit
+  reply {"op":"quiesce","error":"native execution is not active","state":"prepared"}
+  then state prepared, no harness, input none
+
+configured > quiesce, terminated while quitting
+  reply {"op":"quiesce","error":"native execution is not active","state":"prepared"}
+  then state prepared, no harness, input none
+
+configured > quiesce, harness exits while quitting
+  reply {"op":"quiesce","error":"native execution is not active","state":"prepared"}
+  then state prepared, no harness, input none
+
+configured > quiesce, deadline raised while quitting
+  reply {"op":"quiesce","error":"native execution is not active","state":"prepared"}
+  then state prepared, no harness, input none
+
+configured > terminated
+  then state stopped, no harness, input none, supervisor exited 1
+
+configured > deadline
+  then state stopped, no harness, input none, supervisor exited 1
+
+configured > activate > configure
+  reply {"op":"configure","state":"active"}
+  then state active, harness running, input open
+
+configured > activate > activate
+  reply {"op":"activate","state":"active","pid":1}
+  then state active, harness running, input open
+
+configured > activate > gate
+  reply {"op":"gate","state":"stopping"}
+  then state stopping, harness running, input gated
+
+configured > activate > status
+  reply {"op":"status","state":"active","pid":1}
+  then state active, harness running, input open
+
+configured > activate > input
+  reply attach {"op":"attach","state":"active","pid":1}, write {"op":"write","written":1}
+  then state active, harness running, input open
+
+configured > activate > quiesce
+  reply {"op":"quiesce","state":"stopped","exit":{"Code":-1,"Reason":"forced-stop"},"turnless":true}
+  sent kill
+  killed 1
+  harness ended -1 forced-stop
+  then state stopped, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed
+  reply {"op":"quiesce","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":0,"Reason":"native-exit"}}
+  sent quit
+  harness ended 0 native-exit
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, quit ignored
+  reply {"op":"quiesce","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":-1,"Reason":"forced-stop"}}
+  sent quit, ignored, kill
+  killed 1
+  harness ended -1 forced-stop
+  log Forced the harness to stop after it did not exit within 600ms of its quit
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, quit ignored and kill never confirmed
+  reply {"op":"quiesce","error":"context deadline exceeded","state":"stopping"}
+  sent quit, ignored, kill, never confirmed
+  killed 1
+  harness ended -1 forced-stop
+  out sproozi-native-exit {"code":-1,"cause":"failed","thread":"01234567-89ab-cdef-0123-456789abcdef","output":"ready"}
+  then state stopped, harness exited, input closed, supervisor exited -1
+
+configured > activate > quiesce, harness exits while waiting for its turn
+  reply {"op":"quiesce","error":"native process stopped before completed turn observation","state":"stopping"}
+  harness ended 3 native-exit
+  out sproozi-native-exit {"code":3,"cause":"exited","output":"ready"}
+  then state stopped, harness exited, input closed, supervisor exited 3
+
+configured > activate > quiesce, deadline passes while waiting for its turn
+  reply {"op":"quiesce","error":"no completed safe native turn before deadline","state":"stopping"}
+  killed 1
+  harness ended -1 forced-stop
+  out sproozi-native-exit {"code":-1,"cause":"deadline","output":"ready"}
+  then state stopped, harness exited, input closed, supervisor exited -1
+
+configured > activate > quiesce, deadline passes while waiting for the quit
+  reply {"op":"quiesce","error":"native quit did not finish before deadline","state":"stopping"}
+  sent quit, ignored
+  killed 1
+  harness ended -1 forced-stop
+  out sproozi-native-exit {"code":-1,"cause":"deadline","thread":"01234567-89ab-cdef-0123-456789abcdef","output":"ready"}
+  then state stopped, harness exited, input closed, supervisor exited -1
+
+configured > activate > quiesce, terminated while quitting
+  reply {"op":"quiesce","error":"native quit did not exit normally","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":-1,"Reason":"forced-stop"}}
+  sent quit
+  killed 1
+  harness ended -1 forced-stop
+  out sproozi-native-exit {"code":-1,"cause":"terminated","thread":"01234567-89ab-cdef-0123-456789abcdef","output":"ready"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited -1
+
+configured > activate > quiesce, harness exits while quitting
+  reply {"op":"quiesce","error":"native quit did not exit normally","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":3,"Reason":"native-exit"}}
+  sent quit
+  harness ended 3 native-exit
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, deadline raised while quitting
+  reply {"op":"quiesce","error":"native quit did not exit normally","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":-1,"Reason":"forced-stop"}}
+  sent quit
+  killed 1
+  harness ended -1 forced-stop
+  out sproozi-native-exit {"code":-1,"cause":"deadline","thread":"01234567-89ab-cdef-0123-456789abcdef","output":"ready"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited -1
+
+configured > activate > harness exits
+  harness ended 3 native-exit
+  out sproozi-native-exit {"code":3,"cause":"exited","output":"ready"}
+  then state stopped, harness exited, input closed, supervisor exited 3
+
+configured > activate > terminated
+  killed 1
+  harness ended -1 forced-stop
+  out sproozi-native-exit {"code":-1,"cause":"terminated","output":"ready"}
+  then state stopped, harness exited, input closed, supervisor exited -1
+
+configured > activate > deadline
+  killed 1
+  harness ended -1 forced-stop
+  out sproozi-native-exit {"code":-1,"cause":"deadline","output":"ready"}
+  then state stopped, harness exited, input closed, supervisor exited -1
+
+configured > activate > gate > configure
+  reply {"op":"configure","state":"stopping"}
+  then state stopping, harness running, input gated
+
+configured > activate > gate > activate
+  reply {"op":"activate","error":"native launch gate cannot reopen","state":"stopping"}
+  then state stopping, harness running, input gated
+
+configured > activate > gate > gate
+  reply {"op":"gate","state":"stopping"}
+  then state stopping, harness running, input gated
+
+configured > activate > gate > status
+  reply {"op":"status","state":"stopping","pid":1,"turnless":true}
+  then state stopping, harness running, input gated
+
+configured > activate > gate > input
+  reply attach {"op":"attach","error":"native execution is not active"}
+  then state stopping, harness running, input gated
+
+configured > activate > gate > quiesce
+  reply {"op":"quiesce","state":"stopped","exit":{"Code":-1,"Reason":"forced-stop"},"turnless":true}
+  sent kill
+  killed 1
+  harness ended -1 forced-stop
+  then state stopped, harness exited, input closed, stopped reply unread
+
+configured > activate > gate > quiesce, turn completed
+  reply {"op":"quiesce","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":0,"Reason":"native-exit"}}
+  sent quit
+  harness ended 0 native-exit
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > gate > quiesce, quit ignored
+  reply {"op":"quiesce","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":-1,"Reason":"forced-stop"}}
+  sent quit, ignored, kill
+  killed 1
+  harness ended -1 forced-stop
+  log Forced the harness to stop after it did not exit within 600ms of its quit
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > gate > quiesce, quit ignored and kill never confirmed
+  reply {"op":"quiesce","error":"context deadline exceeded","state":"stopping"}
+  sent quit, ignored, kill, never confirmed
+  killed 1
+  harness ended -1 forced-stop
+  out sproozi-native-exit {"code":-1,"cause":"failed","thread":"01234567-89ab-cdef-0123-456789abcdef","output":"ready"}
+  then state stopped, harness exited, input closed, supervisor exited -1
+
+configured > activate > gate > quiesce, harness exits while waiting for its turn
+  reply {"op":"quiesce","error":"native process stopped before completed turn observation","state":"stopping"}
+  harness ended 3 native-exit
+  out sproozi-native-exit {"code":3,"cause":"exited","output":"ready"}
+  then state stopped, harness exited, input closed, supervisor exited 3
+
+configured > activate > gate > quiesce, deadline passes while waiting for its turn
+  reply {"op":"quiesce","error":"no completed safe native turn before deadline","state":"stopping"}
+  killed 1
+  harness ended -1 forced-stop
+  out sproozi-native-exit {"code":-1,"cause":"deadline","output":"ready"}
+  then state stopped, harness exited, input closed, supervisor exited -1
+
+configured > activate > gate > quiesce, deadline passes while waiting for the quit
+  reply {"op":"quiesce","error":"native quit did not finish before deadline","state":"stopping"}
+  sent quit, ignored
+  killed 1
+  harness ended -1 forced-stop
+  out sproozi-native-exit {"code":-1,"cause":"deadline","thread":"01234567-89ab-cdef-0123-456789abcdef","output":"ready"}
+  then state stopped, harness exited, input closed, supervisor exited -1
+
+configured > activate > gate > quiesce, terminated while quitting
+  reply {"op":"quiesce","error":"native quit did not exit normally","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":-1,"Reason":"forced-stop"}}
+  sent quit
+  killed 1
+  harness ended -1 forced-stop
+  out sproozi-native-exit {"code":-1,"cause":"terminated","thread":"01234567-89ab-cdef-0123-456789abcdef","output":"ready"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited -1
+
+configured > activate > gate > quiesce, harness exits while quitting
+  reply {"op":"quiesce","error":"native quit did not exit normally","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":3,"Reason":"native-exit"}}
+  sent quit
+  harness ended 3 native-exit
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > gate > quiesce, deadline raised while quitting
+  reply {"op":"quiesce","error":"native quit did not exit normally","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":-1,"Reason":"forced-stop"}}
+  sent quit
+  killed 1
+  harness ended -1 forced-stop
+  out sproozi-native-exit {"code":-1,"cause":"deadline","thread":"01234567-89ab-cdef-0123-456789abcdef","output":"ready"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited -1
+
+configured > activate > gate > harness exits
+  harness ended 3 native-exit
+  out sproozi-native-exit {"code":3,"cause":"exited","output":"ready"}
+  then state stopped, harness exited, input closed, supervisor exited 3
+
+configured > activate > gate > terminated
+  killed 1
+  harness ended -1 forced-stop
+  out sproozi-native-exit {"code":-1,"cause":"terminated","output":"ready"}
+  then state stopped, harness exited, input closed, supervisor exited -1
+
+configured > activate > gate > deadline
+  killed 1
+  harness ended -1 forced-stop
+  out sproozi-native-exit {"code":-1,"cause":"deadline","output":"ready"}
+  then state stopped, harness exited, input closed, supervisor exited -1
+
+configured > activate > quiesce > configure
+  reply {"op":"configure","state":"stopped"}
+  then state stopped, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce > activate
+  reply {"op":"activate","error":"native launch gate cannot reopen","state":"stopped"}
+  then state stopped, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce > gate
+  reply {"op":"gate","error":"native execution is not active","state":"stopped"}
+  then state stopped, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce > status
+  reply {"op":"status","state":"stopped","pid":1}
+  then state stopped, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce > input
+  reply attach {"op":"attach","error":"native execution is not active"}
+  then state stopped, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce > quiesce
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce > quiesce, turn completed
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce > quiesce, quit ignored
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce > quiesce, quit ignored and kill never confirmed
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce > quiesce, harness exits while waiting for its turn
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce > quiesce, deadline passes while waiting for its turn
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce > quiesce, deadline passes while waiting for the quit
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce > quiesce, terminated while quitting
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce > quiesce, harness exits while quitting
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce > quiesce, deadline raised while quitting
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce > terminated
+  then state stopped, harness exited, input closed, supervisor exited 0
+
+configured > activate > quiesce > deadline
+  then state stopped, harness exited, input closed, supervisor exited 0
+
+configured > activate > quiesce > reply read
+  then state stopped, harness exited, input closed, supervisor exited 0
+
+configured > activate > quiesce, turn completed > configure
+  reply {"op":"configure","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > activate
+  reply {"op":"activate","error":"native launch gate cannot reopen","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > gate
+  reply {"op":"gate","error":"native execution is not active","state":"stopped"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > status
+  reply {"op":"status","state":"stopped","pid":1,"threadId":"01234567-89ab-cdef-0123-456789abcdef"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > input
+  reply attach {"op":"attach","error":"native execution is not active"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > quiesce
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > quiesce, turn completed
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > quiesce, quit ignored
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > quiesce, quit ignored and kill never confirmed
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > quiesce, harness exits while waiting for its turn
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > quiesce, deadline passes while waiting for its turn
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > quiesce, deadline passes while waiting for the quit
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > quiesce, terminated while quitting
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > quiesce, harness exits while quitting
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > quiesce, deadline raised while quitting
+  reply {"op":"quiesce","error":"native execution is not active","state":"stopped"}
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, stopped reply unread
+
+configured > activate > quiesce, turn completed > terminated
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited 0
+
+configured > activate > quiesce, turn completed > deadline
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited 0
+
+configured > activate > quiesce, turn completed > reply read
+  then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, harness exited, input closed, supervisor exited 0
