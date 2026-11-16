@@ -238,8 +238,11 @@ past its deadline, with its launch saved, reads unchanged, and the next
   Behavioural tests drive each starting state past its deadline through every
   command.
 - On the executor, a task whose deadline passes while the driver is already
-  recovering it can be ended rather than cancelled. It then finishes with the
-  problem that it stopped before its conversation began, and nothing is kept.
+  recovering it can have its start ended by the coordinator rather than
+  cancelled by the driver. The driver then cancels the idle execution with
+  plain `Cancel`, which `CancelUnsettled` would refuse, because nothing ran and
+  there is no result to keep. The task is `cancelled` with "the deadline passed
+  before it started", as for any task whose deadline passes before it starts.
 - `Coordinator.PastDeadline` and `Coordinator.SetClock` are exported, so home
   decides with the coordinator's clock and owners' tests can pass a deadline
   without waiting.

@@ -158,6 +158,11 @@ func (o *Owner) step(ctx context.Context, id string) next {
 		return nextDone
 	case rec != nil && rec.Phase == session.PhaseIdle && interactive:
 		return nextDone
+	case rec != nil && rec.Phase == session.PhaseIdle && startEnded(*rec):
+		// The deadline overtook the task's start inside a recovery: it
+		// follows the rule for a task whose deadline passed before it
+		// started, and nothing ran, so there is no result to finish.
+		return o.end(ctx, r, "deadline-expired", problemExpired)
 	case rec != nil && rec.Phase == session.PhaseIdle:
 		return o.finish(r)
 	case interactive && rec != nil && (rec.CancelOperation != "" || !rec.Phase.Starting() && rec.Phase != session.PhaseActive):
@@ -206,6 +211,12 @@ func (o *Owner) step(ctx context.Context, id string) next {
 		_, err = coordinator.Recover(ctx, rec.ID)
 		return o.after(ctx, r, err, nextWait)
 	}
+}
+
+// startEnded reports an execution whose deadline ended its first visit
+// before it started (ADR 0060): nothing ran, so it holds no result.
+func startEnded(rec session.Record) bool {
+	return len(rec.Visits) == 0 && rec.Abandoned(rec.Operations[0].ID)
 }
 
 // after decides what follows a coordinator call. Success takes the next step.

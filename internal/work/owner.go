@@ -580,7 +580,14 @@ func (o *Owner) cancelExecution(ctx context.Context, id, op, problem string) err
 		}
 		return unlock, nil
 	}
-	_, err = o.config.Coordinator.CancelUnsettled(ctx, r.Current, op, admit)
+	cancel := o.config.Coordinator.CancelUnsettled
+	if rec, inspectErr := o.config.Coordinator.Inspect(r.Current); inspectErr == nil &&
+		r.Intent.Mode != ModeInteractive && startEnded(rec) {
+		// A task whose start the deadline ended is idle with nothing to
+		// keep, so the cancellation it is owed is not refused as a stop.
+		cancel = o.config.Coordinator.Cancel
+	}
+	_, err = cancel(ctx, r.Current, op, admit)
 	switch {
 	case errors.Is(err, errCancelledBeforeStart):
 		return nil
