@@ -30,6 +30,12 @@ var errWriterFenceUnknown = errors.New("placement: writer fence remains unknown"
 
 const containerStatusUnknown = "ContainerStatusUnknown"
 
+// podStopWait bounds a stop's wait for the native container to end after the
+// supervisor's graceful handoff, within the stop's settle allowance
+// (profile.StopBound). A container that has not ended by then leaves the stop
+// unproven, and its retry waits again.
+const podStopWait = time.Minute
+
 func (p *Placement) retained(ctx context.Context, l session.Launch) (retained, registry.Record, error) {
 	local, err := p.load(l)
 	if err != nil {
@@ -135,6 +141,11 @@ func (p *Placement) waitPod(ctx context.Context, r registry.Record, wantRunning 
 	until := deadline.At(r.OriginalDeadline)
 	if wantRunning && r.Task == "" {
 		until = deadline.At(until.Bound(time.Now(), 2*time.Minute))
+	}
+	if !wantRunning {
+		// A stop waits for a container whose supervisor has already ended
+		// its harness, so it ends within seconds, deadline or not.
+		until = deadline.At(until.Bound(time.Now(), podStopWait))
 	}
 	ctx, cancel := until.Context(ctx)
 	defer cancel()

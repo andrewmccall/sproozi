@@ -572,14 +572,21 @@ type builtArtifact struct {
 
 // fixtureArtifacts caches each native kind's fixture checkpoint. Its Git
 // capture is slow, so each kind is built once per test binary.
-var fixtureArtifacts sync.Map // harness.NativeKind -> *builtArtifact
+var fixtureArtifacts sync.Map // kind and note -> *builtArtifact
 
 func fixtureArtifactKind(t *testing.T, kind harness.NativeKind) ([]byte, checkpoint.Metadata) {
 	t.Helper()
-	value, _ := fixtureArtifacts.LoadOrStore(kind, &builtArtifact{})
+	return cachedFixtureArtifact(t, kind, "fixture\n")
+}
+
+// cachedFixtureArtifact builds, once per test binary, a kind's checkpoint
+// whose workspace note holds note, so a test can tell two checkpoints apart.
+func cachedFixtureArtifact(t *testing.T, kind harness.NativeKind, note string) ([]byte, checkpoint.Metadata) {
+	t.Helper()
+	value, _ := fixtureArtifacts.LoadOrStore(string(kind)+"/"+note, &builtArtifact{})
 	a := value.(*builtArtifact)
 	a.once.Do(func() {
-		a.data, a.meta = buildFixtureArtifactKind(t, kind)
+		a.data, a.meta = buildFixtureArtifactKind(t, kind, note)
 		a.built = true
 	})
 	if !a.built {
@@ -588,7 +595,7 @@ func fixtureArtifactKind(t *testing.T, kind harness.NativeKind) ([]byte, checkpo
 	return bytes.Clone(a.data), a.meta
 }
 
-func buildFixtureArtifactKind(t *testing.T, kind harness.NativeKind) ([]byte, checkpoint.Metadata) {
+func buildFixtureArtifactKind(t *testing.T, kind harness.NativeKind, note string) ([]byte, checkpoint.Metadata) {
 	t.Helper()
 	repo := t.TempDir()
 	git := func(args ...string) {
@@ -601,7 +608,7 @@ func buildFixtureArtifactKind(t *testing.T, kind harness.NativeKind) ([]byte, ch
 		}
 	}
 	git("init", "--quiet", "--template=", "-b", "main")
-	if err := os.WriteFile(filepath.Join(repo, "note"), []byte("fixture\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(repo, "note"), []byte(note), 0600); err != nil {
 		t.Fatal(err)
 	}
 	git("add", ".")
