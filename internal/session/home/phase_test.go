@@ -224,7 +224,7 @@ func startingFixture(t *testing.T) (*Service, string) {
 }
 
 // stepOf is the table row session id is in.
-func stepOf(t *testing.T, s *Service, id string) (step, state) {
+func stepOf(t *testing.T, s *Service, id string) step {
 	t.Helper()
 	c, err := s.readCatalog(id)
 	if err != nil {
@@ -234,7 +234,7 @@ func stepOf(t *testing.T, s *Service, id string) (step, state) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return st.step(), st
+	return st.step()
 }
 
 // Each row's reply, as the service gives it, with ID for the session.
@@ -371,7 +371,7 @@ func rowAfter(t *testing.T, s *Service, id string) step {
 	if _, err := s.readCatalog(id); os.IsNotExist(err) {
 		return ""
 	}
-	row, _ := stepOf(t, s, id)
+	row := stepOf(t, s, id)
 	return row
 }
 

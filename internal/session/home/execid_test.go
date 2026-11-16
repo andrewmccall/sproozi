@@ -134,7 +134,7 @@ func TestEveryCommandByExecutionIDMatchesTheSession(t *testing.T) {
 			for _, command := range commands {
 				if s == nil {
 					s, id, e = fixture(t)
-					if before, _ := stepOf(t, s, id); before != row {
+					if before := stepOf(t, s, id); before != row {
 						t.Fatalf("the fixture reached %s, not %s", before, row)
 					}
 				}
