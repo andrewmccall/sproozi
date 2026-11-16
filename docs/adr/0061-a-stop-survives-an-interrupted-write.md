@@ -205,7 +205,7 @@ reason changes, and once when syncing resumes.
 - On Kubernetes, a visit with a recorded exit whose capture still fails, for
   example because a Codex turn genuinely changed, fails on every retry. Docker
   keeps the visit's input instead. That fallback is not part of this decision.
-  Corrected 2026-11-16: [ADR 0062](0062-one-exit-rule-and-exits-over-the-wire.md) gives both placements one fallback, only for a captured state that does not validate; a capture the helper refuses still fails every retry, now on Docker too.
+  Corrected 2026-11-16: [ADR 0062](0062-one-exit-rule-and-exits-over-the-wire.md) gives both placements one fallback, for a stopped state the capture helper refuses, which it now reports with its own exit code; other capture failures are retried.
 
 ## Revisit conditions
 

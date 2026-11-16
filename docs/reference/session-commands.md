@@ -198,12 +198,11 @@ session through the same path. A nonzero exit code leaves it `failed`;
 N; see "sproozi status ID", then "sproozi resume ID" to continue it or
 "sproozi rm ID" to remove it`. Code 0 leaves it `retained`. Codex keeps the
 conversation of a completed turn it reported before exiting; otherwise, or
-when its captured checkpoint does not validate, the session keeps its previous
-checkpoint, or the workspace it started from, and the service logs
-`Discarded the captured state of stopped visit …`. A capture that fails for
-any other reason, including the capture helper refusing a Codex turn left
-unfinished, fails the stop; `sproozi stop ID` tries again, and
-`sproozi cancel ID` ends a stop that cannot finish
+when the capture helper refuses it, as for a turn it left unfinished, the
+session keeps its previous checkpoint, or the workspace it started from, and
+the service logs `Discarded the captured state of stopped visit …`. A capture
+that fails for any other reason fails the stop; `sproozi stop ID` tries
+again, and `sproozi cancel ID` ends a stop that cannot finish
 ([what a stopped visit keeps](native-control.md#what-a-stopped-visit-keeps)).
 This holds on this machine and for a session moved to a cluster: the service
 asks the remote executor, and an executor older than this Sproozi reports no

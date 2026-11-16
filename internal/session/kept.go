@@ -6,10 +6,10 @@ import (
 )
 
 // ErrUncapturable marks a capture failure that is the fenced visit's own
-// native state: what the capture helper returned is not a checkpoint of the
-// visit's conversation that validates. The writer is fenced, so capturing
-// again finds the same state. It is the only capture failure a stop may fall
-// back from (FallsBack).
+// native state: the capture helper refused it (checkpoint.ExitStateRefused),
+// or what it returned is not a checkpoint of the visit's conversation that
+// validates. The writer is fenced, so capturing again finds the same state.
+// It is the only capture failure a stop may fall back from (FallsBack).
 var ErrUncapturable = errors.New("session: the captured native state does not validate")
 
 // FallsBack reports whether a stop whose capture failed with err keeps
@@ -67,9 +67,9 @@ type VisitEnd struct {
 // stopping: its visit is captured only when its own state proves completion
 // and it had a conversation, and even then a captured state that does not
 // validate keeps what the visit started from rather than failing the stop for
-// ever. The capture helper's own refusal, such as of a turn the harness left
-// unfinished, reaches the placement only as a failed command, which it cannot
-// tell from a helper or exec failure, so that refusal fails the stop.
+// ever. The capture helper reports such a refusal, such as of a turn the
+// harness left unfinished, with its own exit code, which each placement maps
+// onto ErrUncapturable.
 func StopKeeps(e VisitEnd) (keep, onCaptureFailure Kept) {
 	start := KeptInput
 	if e.First {

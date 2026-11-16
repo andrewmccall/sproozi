@@ -366,10 +366,12 @@ completed Codex turn. A stopped container never proves a completed Claude Code
 turn, so a Claude Code session keeps no turns from that visit, even one whose
 earlier stop bound its conversation and was waiting for its turn: the
 workspace it started from after a first visit, its previous checkpoint after a
-resumed one. A Codex conversation whose captured checkpoint does not validate
-is kept the same way, and the executor logs the discard; a capture that fails
-otherwise, including the helper's refusal of a turn the agent left
-unfinished, fails the stop and the next sweep tries again
+resumed one. A Codex conversation the capture helper refuses, such as a turn
+the agent left unfinished, is kept the same way, and the executor logs the
+discard; a capture that fails otherwise fails the stop and the next sweep
+tries again. With a runtime image older than the helper's result codes, a
+refused Codex conversation fails the stop on every sweep instead, as before;
+update the image, or `cancel` the session
 ([what a stopped visit keeps](native-control.md#what-a-stopped-visit-keeps)).
 The session then shows `failed` with its `exit` (code, cause
 and last output lines) for a nonzero exit, or `retained`. An `attach` to such

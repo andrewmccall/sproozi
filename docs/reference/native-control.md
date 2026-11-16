@@ -118,8 +118,8 @@ never a writer fence or accounting fact.
 
 A stop whose quiesce reply was lost, of a harness whose state proves
 completion, is a graceful stop on both placements: the agent's container is
-seen to end within about ten seconds, or a later stop finds it ended, and on
-Kubernetes the supervisor exited 0 with no exit report in its output. No exit
+seen to end within about ten seconds, or a later stop finds it ended with
+the supervisor's exit code 0 and no exit report in its output. No exit
 is recorded, and the stop captures as any graceful stop does. A Claude Code
 stop whose reply was lost is an exit
 ([ADR 0062](../adr/0062-one-exit-rule-and-exits-over-the-wire.md)).
@@ -132,7 +132,7 @@ stop keeps by one rule
 from" is the checkpoint a resumed visit started from, or, for a first visit,
 no checkpoint: the session keeps the workspace the visit started from.
 
-| How the visit ended | Kept | If the captured state does not validate | If the capture fails otherwise |
+| How the visit ended | Kept | If the stopped state is refused | If the capture fails otherwise |
 | --- | --- | --- | --- |
 | Graceful stop, with a conversation | A new checkpoint | The stop fails | The stop fails |
 | Turnless first visit | What it started from | Nothing is captured | Nothing is captured |
@@ -140,17 +140,27 @@ no checkpoint: the session keeps the workspace the visit started from.
 | Harness exited, and its state does not prove completion (Claude Code) | What it started from, even when the visit bound a conversation before it exited | Nothing is captured | Nothing is captured |
 | Harness exited before any conversation | What it started from | Nothing is captured | Nothing is captured |
 
-"Does not validate" is what the helper returned not being a checkpoint of the
-visit's conversation, which capturing again would find the same. Everything
-else fails the stop, and repeating it captures again: the stop's bound or an
-abort cutting the capture off, an exec or helper failure, output over the
-checkpoint bound, a failed write. The helper's own refusal, such as of a Codex
-turn left unfinished, is a failed helper command too, so that stop fails on
-every repeat; `cancel` ends it. A stop that kept what the visit started from
-still reports the visit's `exit`, and the placement logs `Discarded the
-captured state of stopped visit ALLOCATION of execution EXECUTION and kept the
-checkpoint it started from: ...` (or `the workspace`) to the service's or the
-executor's log.
+The stopped state is refused when the checkpoint helper's `capture-stopped`
+exits 65, or when what it returned does not validate in the placement's own
+checks. The writer is fenced, so capturing again would be refused the same
+way. The helper's exit codes
+([checkpoint helper](../../cmd/checkpoint/README.md#capture-results)):
+
+| Code | Meaning | Docker | Kubernetes |
+| --- | --- | --- | --- |
+| 65 | The stopped state was refused: no completed turn, as when the agent left its turn unfinished; another conversation; a failed continuity check; a state over the checkpoint bound. | Refused | Refused |
+| 74 | The capture could not be carried out, such as a file it could not read. | The stop fails | The stop fails |
+| 1 | Any failure of a helper image older than these codes. | Refused, as before them | The stop fails, as before them |
+
+Everything else fails the stop too, and repeating it captures again: the
+stop's bound or an abort cutting the capture off, any other exit code or a
+killed helper, an exec or Docker failure, a failed write. A stop that kept
+what the visit started from still reports the visit's `exit`, and the
+placement logs `Discarded the captured state of stopped visit ALLOCATION of
+execution EXECUTION and kept the checkpoint it started from: ...` (or `the
+workspace`) to the service's or the executor's log. A stop that fails on
+every repeat, as a Kubernetes stop of a refused state with an older helper
+image does, ends with `cancel`, or with a newer image.
 
 ## Terminal attachment
 

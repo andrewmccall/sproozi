@@ -79,6 +79,21 @@ workspace state travel. `--include-ignored` repeats for explicitly selected
 individual ignored files. The placement retains that immutable selection through
 all visits and seals. Missing selected files or unsafe paths fail capture.
 
+### Capture results
+
+`capture-stopped` says why it failed with its exit code, defined in
+`internal/checkpoint` (`exit_codes.go`), which the placements import
+([ADR 0062](../../docs/adr/0062-one-exit-rule-and-exits-over-the-wire.md)):
+
+| Code | Meaning |
+| --- | --- |
+| 0 | The artifact is on stdout. |
+| 65 | The stopped state was refused: it is a property of the fenced bytes, so capturing again fails the same way. The conversation file has no completed turn, names another conversation, is not a plain file, or the state exceeds `--max-bytes`, or the continuity check against `--instruction-digest` fails. |
+| 74 | The capture could not be carried out: a file it cannot read, a Git failure, anything else. Repeating it may succeed. |
+
+Every other command exits 1 on any failure, as every command of a helper
+older than these codes does; the reason is on stderr either way.
+
 Once the placement has retained the artifact and finalized usage receipt:
 
 ```sh
