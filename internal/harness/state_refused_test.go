@@ -10,6 +10,11 @@ import (
 	"testing"
 )
 
+const (
+	opOpen      = "open"
+	rolloutName = "rollout"
+)
+
 // A failure to reach or read the agent's own file is the fenced state's, and
 // refused; an I/O error from the volume is the environment's, and not.
 func TestStateFileErrorDecidesByKind(t *testing.T) {
@@ -19,11 +24,11 @@ func TestStateFileErrorDecidesByKind(t *testing.T) {
 		err     error
 		refused bool
 	}{
-		{"absent", &fs.PathError{Op: "open", Path: "rollout", Err: fs.ErrNotExist}, true},
-		{"permission", &fs.PathError{Op: "open", Path: "rollout", Err: syscall.EACCES}, true},
+		{"absent", &fs.PathError{Op: opOpen, Path: rolloutName, Err: fs.ErrNotExist}, true},
+		{"permission", &fs.PathError{Op: opOpen, Path: rolloutName, Err: syscall.EACCES}, true},
 		{"not a directory", &fs.PathError{Op: "lstat", Path: "sessions/x", Err: syscall.ENOTDIR}, true},
-		{"link loop", &fs.PathError{Op: "open", Path: "rollout", Err: syscall.ELOOP}, true},
-		{"volume I/O error", &fs.PathError{Op: "read", Path: "rollout", Err: syscall.EIO}, false},
+		{"link loop", &fs.PathError{Op: opOpen, Path: rolloutName, Err: syscall.ELOOP}, true},
+		{"volume I/O error", &fs.PathError{Op: "read", Path: rolloutName, Err: syscall.EIO}, false},
 		{"other", fmt.Errorf("read: %w", syscall.ENOSPC), false},
 	} {
 		if got := errors.Is(stateFileError(test.err), ErrStateRefused); got != test.refused {
