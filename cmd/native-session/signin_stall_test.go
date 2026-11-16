@@ -54,8 +54,15 @@ func (b *lockedBuffer) String() string {
 // testSaveWait's bound. It is stopped when the test ends.
 func running(t *testing.T) *loginSync {
 	t.Helper()
+	return runningUntil(t, time.Time{})
+}
+
+// runningUntil is running with a launch deadline.
+func runningUntil(t *testing.T, until time.Time) *loginSync {
+	t.Helper()
 	l := &loginSync{stored: filepath.Join(t.TempDir(), "auth.json"), native: filepath.Join(t.TempDir(), "auth.json"),
-		quit: make(chan struct{}), stopped: make(chan struct{}), diagnostics: &lockedBuffer{}, wait: testSaveWait}
+		deadline: until, quit: make(chan struct{}), stopped: make(chan struct{}), diagnostics: &lockedBuffer{},
+		wait: testSaveWait}
 	if err := l.sync(); err != nil {
 		t.Fatal(err)
 	}

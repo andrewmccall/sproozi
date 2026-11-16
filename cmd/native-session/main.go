@@ -303,6 +303,7 @@ func (s *server) stop(cause exitCause) {
 	if n != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
+		login.forced()
 		exit, err = n.Stop(ctx)
 		login.stop()
 	}
@@ -318,6 +319,10 @@ func (s *server) stop(cause exitCause) {
 func (s *server) watch(n *nativepty.Supervisor, cleanup func()) {
 	<-n.Done()
 	exit, err := n.Wait(context.Background())
+	if exit.Reason != nativepty.NativeExit || exit.Code < 0 {
+		// A signal ended it, perhaps while it rewrote its login file.
+		s.killing()
+	}
 	cleanup()
 	s.mu.Lock()
 	if s.quiescing {
@@ -640,6 +645,9 @@ func (s *server) finishTurn(adapter nativeAdapter, n *nativepty.Supervisor) (nat
 	until := deadline.At(s.deadline)
 	ctx, cancel := context.WithDeadline(context.Background(), until.Bound(time.Now(), quitWait))
 	defer cancel()
+	if !adapter.quits {
+		s.killing()
+	}
 	exit, err := adapter.finish(n, ctx)
 	var forced string
 	switch {
@@ -657,6 +665,7 @@ func (s *server) finishTurn(adapter nativeAdapter, n *nativepty.Supervisor) (nat
 	}
 	stopCtx, stopCancel := context.WithDeadline(context.Background(), until.Bound(time.Now(), forcedStopWait))
 	defer stopCancel()
+	s.killing()
 	exit, err = forceStop(n, stopCtx)
 	if err != nil || exit.Reason != nativepty.ForcedStop {
 		return exit, "", err
@@ -666,6 +675,16 @@ func (s *server) finishTurn(adapter nativeAdapter, n *nativepty.Supervisor) (nat
 
 // forceStop kills the harness and waits for its exit; tests replace it.
 var forceStop = (*nativepty.Supervisor).Stop
+
+// killing records, before the supervisor kills its harness, that the
+// harness's login file may be left half written, so it is no longer copied
+// to the login store.
+func (s *server) killing() {
+	s.mu.Lock()
+	login := s.login
+	s.mu.Unlock()
+	login.forced()
+}
 
 // diagnose writes one line about the harness to the supervisor's standard
 // error, or to diagnostics when set.
@@ -753,8 +772,10 @@ func (s *server) inputSettled() bool {
 // UserPromptSubmit well within it.
 var inputSettle = 3 * time.Second
 
-// markGated records when input was first gated. The caller holds s.mu.
+// markGated records when input was first gated, and that a stop has begun
+// for the login sync. The caller holds s.mu.
 func (s *server) markGated() {
+	s.login.stopping()
 	if s.gatedAt.IsZero() {
 		s.gatedAt = time.Now()
 	}
@@ -795,6 +816,7 @@ func (s *server) stopTurnless(n *nativepty.Supervisor) response {
 	until := deadline.At(s.deadline)
 	ctx, cancel := context.WithDeadline(context.Background(), until.Bound(time.Now(), quitWait))
 	defer cancel()
+	s.killing()
 	exit, err := forceStop(n, ctx)
 	if err != nil {
 		cause := causeFailed

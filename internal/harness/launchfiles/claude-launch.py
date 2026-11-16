@@ -111,6 +111,22 @@ def non_empty(data):
     return data if data is not None and data.strip() else None
 
 
+def whole_login(data):
+    """Claude Code keeps its login as one JSON object; a file cut short isn't one."""
+    try:
+        return isinstance(json.loads(data), dict)
+    except ValueError:
+        return False
+
+
+# What the login file may be trusted for, as in the managed supervisor
+# (cmd/native-session/signin.go): while Claude Code runs an empty or missing
+# file is its sign-out; once it has exited or is being stopped it may be a
+# rewrite cut short, so it is not; once Claude Code was killed nothing is
+# copied out.
+LOGIN_RUNNING, LOGIN_STOPPING, LOGIN_FORCED = range(3)
+
+
 class LoginSync:
     """Keep Claude Code's login file and its login store the same (ADR 0049).
 
@@ -118,14 +134,22 @@ class LoginSync:
     written to the store under its exclusive lock; otherwise a change another
     run made to the store is copied in. A store this helper can't write, such
     as a Secret, only flows in. Missing and empty both mean "not signed in".
+    Only a whole login is copied out, a sign-out only while Claude Code runs,
+    and nothing once it was killed: the store is shared by every run and
+    session of the login.
     """
 
     def __init__(self, stored, native):
         self.stored, self.native = Path(stored), Path(native)
         self.agreed, self.known = None, False
+        self.level = LOGIN_RUNNING
         self.lock = threading.Lock()
         self.quit = threading.Event()
         self.thread = None
+
+    def forced(self):
+        """Record, before Claude Code is killed, that its login file may be left half written."""
+        self.level = LOGIN_FORCED
 
     def open_store(self):
         if self.stored.is_symlink():
@@ -171,6 +195,20 @@ class LoginSync:
 
     def sync(self):
         with self.lock:
+            native = self.read_native()
+            # Read after the file, so a kill recorded before it landed is seen.
+            level = self.level
+            if not self.known and native is not None and not whole_login(native):
+                native = None
+            changed = self.known and native != self.agreed
+            if level == LOGIN_FORCED:
+                if changed:
+                    raise ValueError("Claude Code was killed, which can cut short a rewrite of its login file")
+                return
+            if changed and native is not None and not whole_login(native):
+                raise ValueError("Native sign-in file is not a whole login")
+            if changed and native is None and level == LOGIN_STOPPING:
+                return
             descriptor, writable = self.open_store()
             try:
                 stored = None
@@ -179,9 +217,7 @@ class LoginSync:
                     stored = non_empty(os.read(descriptor, MAX_SIGN_IN_BYTES + 1))
                     if stored is not None and len(stored) > MAX_SIGN_IN_BYTES:
                         raise ValueError("Stored sign-in exceeds its limit")
-                native = self.read_native()
-                if (not self.known and stored is None and native is not None) or \
-                        (self.known and native != self.agreed):
+                if (not self.known and stored is None and native is not None) or changed:
                     if writable and descriptor is not None:
                         os.ftruncate(descriptor, 0)
                         os.pwrite(descriptor, native or b"", 0)
@@ -209,6 +245,7 @@ class LoginSync:
     def stop(self):
         if self.thread is None:
             return
+        self.level = max(self.level, LOGIN_STOPPING)
         self.quit.set()
         self.thread.join()
         self.thread = None
@@ -248,17 +285,24 @@ def native_environment(args):
     return env, login
 
 
-def run_child(command, env, cwd, stdout=None):
-    """Run the CLI; a batch run (stdout set) gets its own process group and signals."""
+def run_child(command, env, cwd, stdout=None, on_kill=lambda: None):
+    """Run the CLI; a batch run (stdout set) gets its own process group and signals.
+
+    on_kill runs before the helper signals the CLI, and when a signal ended it.
+    """
     if stdout is None:
         # Interactive: the terminal's signals reach Claude Code directly.
-        return subprocess.run(command, env=env, cwd=cwd, check=False).returncode, None
+        code = subprocess.run(command, env=env, cwd=cwd, check=False).returncode
+        if code < 0:
+            on_kill()
+        return code, None
     child = None
     received_signal = None
     def forward(sig, _frame):
         nonlocal received_signal
         received_signal = sig
         if child is not None:
+            on_kill()
             try:
                 os.killpg(child.pid, sig)
             except ProcessLookupError:
@@ -272,6 +316,8 @@ def run_child(command, env, cwd, stdout=None):
         code = child.wait()
     finally:
         cleanup_group(child.pid)
+    if code < 0:
+        on_kill()
     return code, received_signal
 
 
@@ -295,7 +341,8 @@ def launch(args):
         # A file, not a pipe: a tool grandchild that keeps stdout open can't
         # delay completion, and the answer is read once the CLI has exited.
         with tempfile.TemporaryFile() as output:
-            code, received_signal = run_child(command, env, args.workspace, stdout=output)
+            code, received_signal = run_child(command, env, args.workspace, stdout=output,
+                                              on_kill=login.forced if login is not None else lambda: None)
             output.seek(0)
             data = output.read(MAX_OUTPUT_BYTES + 1)
     finally:
@@ -324,7 +371,7 @@ def login(args):
         return 1
     sync.start()
     try:
-        code, _ = run_child([args.claude], env, args.workspace)
+        code, _ = run_child([args.claude], env, args.workspace, on_kill=sync.forced)
     finally:
         sync.stop()
     return code

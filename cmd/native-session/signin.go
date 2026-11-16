@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -11,9 +12,11 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/deadline"
 	"github.com/andrewmccall/sproozi/internal/harness"
 )
 
@@ -38,12 +41,23 @@ func signInPaths(c config) (stored, native string, ok bool) {
 // supervisor copies a change to the store, and a change another session made
 // to the store back into the file. A store this supervisor can't write, such
 // as a Secret, only flows in. Empty and missing both mean "not signed in".
+//
+// Only a whole login reaches the store: a harness killed while rewriting its
+// file can leave it cut short, or empty, and the store is every session's.
+// A file that is not a whole login is never copied out. Once a stop has
+// begun, an empty or missing file is not a sign-out; and once the supervisor
+// has killed the harness, or the deadline has passed, nothing is copied out.
 type loginSync struct {
 	stored, native string
 	mu             sync.Mutex
 	// agreed is the content both sides last held, once known.
 	agreed []byte
 	known  bool
+	// level is loginRunning, loginStopping or loginForced; it only rises.
+	level atomic.Int32
+	// deadline is the launch's; once it passes the harness may have been
+	// killed at it, as by loginForced.
+	deadline time.Time
 	// quit ends run, which closes stopped; once makes stop idempotent.
 	quit, stopped chan struct{}
 	once          sync.Once
@@ -65,6 +79,70 @@ var loginSaveWait = 5 * time.Second
 // loginLockPoll is how often a sync tries the store's lock again.
 const loginLockPoll = 20 * time.Millisecond
 
+// What the harness's login file may be trusted for.
+const (
+	// loginRunning: the harness runs, and an empty or missing file is its
+	// sign-out.
+	loginRunning int32 = iota
+	// loginStopping: a stop has begun, so an empty or missing file may be a
+	// rewrite the coming kill cuts short; a whole login is still copied out.
+	loginStopping
+	// loginForced: the supervisor kills or killed the harness, which can
+	// land while it rewrites its file; nothing is copied out.
+	loginForced
+)
+
+// stopping records that a stop has begun. A nil sync does nothing.
+func (l *loginSync) stopping() { l.raise(loginStopping) }
+
+// forced records, before the supervisor kills the harness, that its login
+// file may be left half written. A nil sync does nothing.
+func (l *loginSync) forced() { l.raise(loginForced) }
+
+func (l *loginSync) raise(level int32) {
+	if l == nil {
+		return
+	}
+	for {
+		current := l.level.Load()
+		if current >= level || l.level.CompareAndSwap(current, level) {
+			return
+		}
+	}
+}
+
+// trust is what the login file read just before may be trusted for. It is
+// read after the file, so a kill recorded before it landed is seen.
+func (l *loginSync) trust() int32 {
+	if deadline.At(l.deadline).Passed(time.Now()) {
+		return loginForced
+	}
+	return l.level.Load()
+}
+
+// wholeLogin reports whether data is a complete login file. Every managed
+// harness keeps its login as one JSON object: Codex's auth.json, Claude
+// Code's .credentials.json and Copilot's config.json, after the header of
+// comment lines Copilot writes. A file cut short, or one rewritten in place
+// over a longer one, does not parse as one.
+func wholeLogin(data []byte) bool {
+	body := bytes.TrimSpace(withoutCommentLines(data))
+	return len(body) > 0 && body[0] == '{' && json.Valid(body)
+}
+
+// withoutCommentLines drops the whole-line // comments Copilot writes at the
+// top of its config.json.
+func withoutCommentLines(data []byte) []byte {
+	var body []byte
+	for line := range bytes.SplitSeq(data, []byte{'\n'}) {
+		if !bytes.HasPrefix(bytes.TrimSpace(line), []byte("//")) {
+			body = append(body, line...)
+			body = append(body, '\n')
+		}
+	}
+	return body
+}
+
 // startLoginSync copies the stored login into the native home and keeps
 // the two in step until stop. It returns nil when the harness has no login
 // store.
@@ -73,7 +151,8 @@ func startLoginSync(c config) (*loginSync, error) {
 	if !ok {
 		return nil, nil
 	}
-	l := &loginSync{stored: stored, native: native, quit: make(chan struct{}), stopped: make(chan struct{})}
+	l := &loginSync{stored: stored, native: native, deadline: c.Deadline,
+		quit: make(chan struct{}), stopped: make(chan struct{})}
 	if err := l.sync(); err != nil {
 		return nil, err
 	}
@@ -114,6 +193,7 @@ func (l *loginSync) stop() {
 		return
 	}
 	l.once.Do(func() {
+		l.stopping()
 		close(l.quit)
 		ctx, cancel := context.WithTimeout(context.Background(), l.saveWait())
 		defer cancel()
@@ -159,12 +239,35 @@ func (l *loginSync) sync() error {
 // syncWithin compares both sides under the store's lock, waiting for the
 // lock at most loginSaveWait and never after ctx ends. A change in the
 // native file wins, as the latest write on one machine would; otherwise a
-// change in the store is copied in.
+// change in the store is copied in. A change that may be a cut-short write
+// is not copied out (loginSync); the store keeps what it had.
 func (l *loginSync) syncWithin(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, l.saveWait())
 	defer cancel()
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	native, err := readLogin(l.native)
+	if err != nil {
+		return err
+	}
+	trust := l.trust()
+	if !l.known && native != nil && !wholeLogin(native) {
+		// Left half written before this launch: the store's login replaces it.
+		native = nil
+	}
+	changed := l.known && !bytes.Equal(native, l.agreed)
+	switch {
+	case changed && trust == loginForced:
+		return errors.New("the harness was killed, which can cut short a rewrite of its login file")
+	case trust == loginForced:
+		return nil
+	case changed && native != nil && !wholeLogin(native):
+		return fmt.Errorf("sign-in file %s is not a whole login", l.native)
+	case changed && native == nil && trust != loginRunning:
+		// Not a sign-out made while the harness ran: the stop may cut a
+		// rewrite short. The store keeps the login.
+		return nil
+	}
 	store, writable, err := openStore(ctx, l.stored)
 	if err != nil {
 		return err
@@ -176,12 +279,8 @@ func (l *loginSync) syncWithin(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	native, err := readLogin(l.native)
-	if err != nil {
-		return err
-	}
 	switch {
-	case !l.known && stored == nil && native != nil, l.known && !bytes.Equal(native, l.agreed):
+	case !l.known && stored == nil && native != nil, changed:
 		// The harness signed in, refreshed or signed out.
 		if writable {
 			if err = writeStore(store, native); err != nil {

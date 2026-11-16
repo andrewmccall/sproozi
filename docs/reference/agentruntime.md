@@ -170,7 +170,12 @@ In a managed session the supervisor copies the harness's login file
 Copilot) from `/etc/sproozi/sign-in` into its native home before launch, then
 keeps the two in step while the harness runs: a sign-in, refresh or sign-out
 in one session reaches the other sessions of that login within about a second
-([ADR 0049](../adr/0049-named-logins-share-a-live-store.md)). With no login
+([ADR 0049](../adr/0049-named-logins-share-a-live-store.md)). Only a whole
+login file is shared: one that is not a JSON object (after Copilot's comment
+header) stays in its session. A sign-out is shared only while the harness
+runs, so a login file emptied or removed once a stop has begun leaves the
+store as it was, and nothing from the file is shared once the supervisor has
+killed the harness or its deadline has passed. With no login
 stored yet, sign in inside the session as you would on your own machine
 (`/login`, or Codex's device-code sign-in). Sproozi never copies a login from
 your machine, and the login never enters a checkpoint, so a session moved here
@@ -184,7 +189,9 @@ An AgentRun has no supervisor. For Claude Code, `claude-launch.py` (the stock
 example's launch) does the same: it copies `.credentials.json` from the store
 into the run's fresh native home before launch, keeps the two in step every
 second under the store's lock, and saves the last change when Claude Code
-exits, so a token refreshed in one run reaches the next. To sign in a new
+exits, so a token refreshed in one run reaches the next. It shares only a
+whole login, never a sign-out from the save at exit, and nothing once Claude
+Code was ended by a signal. To sign in a new
 Claude Code login once, start an AgentRun from a runtime with the same
 `signIn.claims` whose container waits instead of launching, for example
 `sleep 1800`, under a policy that grants `model.inference`. Then run
