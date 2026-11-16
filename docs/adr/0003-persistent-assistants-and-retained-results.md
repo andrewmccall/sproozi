@@ -37,6 +37,10 @@ owns native conversations, schedules and delivery; its provider credentials and
 inference accounting are separate from disposable Run identity and budgets.
 The existing serialized worker queue remains explicit.
 
+Corrected 2026-11-16: the queue is no longer serialized. ADR 0027's optional
+caps (`--max-active-runs` in `cmd/main.go`, and policy caps) replace the one
+global active execution slot; workers run concurrently unless a cap applies.
+
 Use the official image's native s6 profile supervisor as the sole owner of its
 gateway process. Kubernetes owns the Pod and persistent volume; the container
 main program remains idle. Seed running state only on a fresh volume with
@@ -127,6 +131,9 @@ Neither is needed for explicit bounded task delegation. Keeping a persistent
 assistant inside an AgentRun conflicts with the execution deadline, disposable
 state and single worker slot.
 
+Corrected 2026-11-16: there is no single worker slot now (ADR 0027). The
+conflict with the execution deadline and disposable state stands.
+
 ## Accepted costs and consequences
 
 The task service adds private TLS, a bearer Secret and namespaced permissions.
@@ -194,3 +201,5 @@ authority. Add receipts/artifact storage when requirements exceed Run retention
 or the small answer bound. Revisit worker concurrency when real queueing demands
 parallel admission. Simplify launch adapters when native clients provide
 reliable final-file output and completion semantics directly.
+
+Corrected 2026-11-16: the condition on worker concurrency was met by ADR 0027.
