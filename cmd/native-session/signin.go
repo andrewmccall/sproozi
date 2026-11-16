@@ -67,6 +67,9 @@ type loginSync struct {
 	// nativeOut and storeOut count consecutive syncs that saw the harness's
 	// file, or the store, newly signed out.
 	nativeOut, storeOut int
+	// problem is why periodic syncs last failed, as last logged; empty while
+	// they succeed. Only the periodic sync uses it, after begin.
+	problem string
 }
 
 // signOutSyncs is how many consecutive syncs must see a login file or the
@@ -175,6 +178,7 @@ func (l *loginSync) begin() error {
 	err := l.sync()
 	if errors.Is(err, errStoreNotWhole) {
 		l.diagnose("Started the harness without a sign-in: %v", err)
+		l.problem = err.Error()
 		l.mu.Lock()
 		l.known = true
 		l.mu.Unlock()
@@ -205,10 +209,24 @@ func (l *loginSync) run() {
 		case <-l.quit:
 			return
 		case <-ticker.C:
-			if err := l.syncWithin(ctx); err != nil {
-				l.diagnose("Failed to sync the harness's sign-in with its login store: %v", err)
-			}
+			l.tick(ctx)
 		}
+	}
+}
+
+// tick runs one periodic sync. A sync that keeps failing, or keeps refusing
+// a file, leaves the store as it was every second; it is logged once per
+// change of reason, and once more when syncs succeed again, so the log names
+// why the store stopped updating without repeating it.
+func (l *loginSync) tick(ctx context.Context) {
+	err := l.syncWithin(ctx)
+	switch {
+	case err != nil && err.Error() != l.problem:
+		l.diagnose("Stopped syncing the harness's sign-in with its login store: %v", err)
+		l.problem = err.Error()
+	case err == nil && l.problem != "":
+		l.diagnose("Resumed syncing the harness's sign-in with its login store")
+		l.problem = ""
 	}
 }
 
