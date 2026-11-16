@@ -2,7 +2,6 @@ package home
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -53,10 +52,14 @@ func (s *Service) sweepExits(ctx context.Context) <-chan struct{} {
 		}()
 	}()
 	dir, err := s.catalogDir()
-	if err != nil {
-		return done
+	var entries []os.DirEntry
+	if err == nil {
+		entries, err = os.ReadDir(dir)
 	}
-	entries, err := os.ReadDir(dir)
+	if ctx.Err() == nil {
+		s.noteProblem(sweepProblem, err, "Failed to list sessions to check for exited agents: %v\n",
+			"Listed sessions to check for exited agents again\n")
+	}
 	if err != nil {
 		return done
 	}
@@ -80,7 +83,7 @@ func (s *Service) sweepExits(ctx context.Context) <-chan struct{} {
 	}
 	// A session removed while its check was failing logs nothing more.
 	s.exitProblems.Range(func(id, _ any) bool {
-		if !catalogued[id.(string)] {
+		if id != sweepProblem && !catalogued[id.(string)] {
 			s.exitProblems.Delete(id)
 		}
 		return true
@@ -88,22 +91,34 @@ func (s *Service) sweepExits(ctx context.Context) <-chan struct{} {
 	return done
 }
 
+// sweepProblem keys exitProblems' entry for a sweep that could not list the
+// catalogue; session UUIDs key the rest.
+const sweepProblem = ""
+
 // noteExitCheck logs a session's failed exit check once each time its reason
 // changes, and once when checks succeed again, rather than on every sweep.
+// The check runs in the background, so the service log is where its errors
+// go; a stop it starts and cannot finish leaves the session in the phase its
+// journal records, which status reports.
 func (s *Service) noteExitCheck(id string, err error) {
+	s.noteProblem(id, err, "Failed to check session "+id+" for an exited agent: %v\n",
+		"Checked session "+id+" for an exited agent again\n")
+}
+
+// noteProblem logs failure, with err, once each time key's error changes,
+// and recovery once when key next succeeds.
+func (s *Service) noteProblem(key string, err error, failure, recovery string) {
 	if err == nil {
-		if _, failed := s.exitProblems.LoadAndDelete(id); failed && s.log != nil {
-			_, _ = fmt.Fprintf(s.log, "Checked session %s for an exited agent again\n", id)
+		if _, failed := s.exitProblems.LoadAndDelete(key); failed {
+			s.logf("%s", recovery)
 		}
 		return
 	}
 	reason := err.Error()
-	if previous, failed := s.exitProblems.Swap(id, reason); failed && previous == reason {
+	if previous, failed := s.exitProblems.Swap(key, reason); failed && previous == reason {
 		return
 	}
-	if s.log != nil {
-		_, _ = fmt.Fprintf(s.log, "Failed to check session %s for an exited agent: %v\n", id, err)
-	}
+	s.logf(failure, err)
 }
 
 // settleExit stops a catalogued session whose current active visit's harness
