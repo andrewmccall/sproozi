@@ -40,7 +40,7 @@ func CaptureCopilotState(home, threadID string, maxBytes int64) (CopilotState, e
 	}
 	state := CopilotState{ThreadID: threadID, Events: stoppedJournal(data)}
 	if _, err = CompletedCopilotTurn(state, maxBytes); err != nil {
-		return CopilotState{}, err
+		return CopilotState{}, refusedState(err)
 	}
 	return state, nil
 }
@@ -66,7 +66,7 @@ func readCopilotEvents(home, threadID string, maxBytes int64) ([]byte, error) {
 		return nil, err
 	}
 	if !info.Mode().IsRegular() || info.Size() > maxBytes {
-		return nil, errors.New("unsafe or oversized Copilot session journal")
+		return nil, refusedState(errors.New("unsafe or oversized Copilot session journal"))
 	}
 	f, err := os.Open(name)
 	if err != nil {
@@ -78,7 +78,7 @@ func readCopilotEvents(home, threadID string, maxBytes int64) ([]byte, error) {
 		return nil, errors.Join(readErr, closeErr)
 	}
 	if int64(len(data)) > maxBytes {
-		return nil, errors.New("unsafe or oversized Copilot session journal")
+		return nil, refusedState(errors.New("unsafe or oversized Copilot session journal"))
 	}
 	return data, nil
 }

@@ -617,7 +617,7 @@ func (p *Placement) capture(ctx context.Context, local retained, thread string, 
 	}
 	data, err := p.control(ctx, pod, runtimekube.CaptureContainer, args, nil, p.config.MaxCheckpointBytes)
 	if err != nil {
-		return local, err
+		return local, captureFailure(err)
 	}
 	// What came back is the fenced state's checkpoint: a failure of these
 	// checks is the state's, and capturing again finds the same.
@@ -633,6 +633,23 @@ func (p *Placement) capture(ctx context.Context, local retained, thread string, 
 	}
 	local.OutputDigest = meta.SHA256
 	return local, p.save(local)
+}
+
+// captureFailure maps a failed capture-stopped command onto the shared rule
+// (session.FallsBack, ADR 0062). The helper's checkpoint.ExitStateRefused is
+// a refusal of the fenced state, session.ErrUncapturable. Its
+// ExitCaptureFailed, an exec or stream failure, a killed helper and any other
+// code fail the stop, and its retry captures again. Code 1 is what a helper
+// image older than the codes returns for every failure, which cannot be told
+// apart: this placement fails the stop for it, as it did before the codes,
+// and a newer image says which it is. The legacy mapping goes once images
+// older than the codes are no longer supported.
+func captureFailure(err error) error {
+	var failed *commandFailed
+	if errors.As(err, &failed) && failed.exited && failed.code == checkpoint.ExitStateRefused {
+		return fmt.Errorf("%w: the capture helper refused the stopped state", session.ErrUncapturable)
+	}
+	return err
 }
 
 // keep retains what the fenced visit keeps, by the rule every placement

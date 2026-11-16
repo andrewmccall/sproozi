@@ -237,9 +237,13 @@ type protocolExecutor struct {
 	// are not a checkpoint, as a captured state that does not validate.
 	captureErr      error
 	captureFailures int
-	captureInvalid  bool
-	captures        int
-	captureArgs     []string
+	// captureExit makes the capture helper end with that code;
+	// captureFrom runs the helper's capture on a fixture state instead.
+	captureExit    int
+	captureFrom    func(context.Context) ([]byte, error)
+	captureInvalid bool
+	captures       int
+	captureArgs    []string
 	// logs is the native container's output, where the supervisor writes
 	// its exit report.
 	logs []byte
@@ -297,6 +301,17 @@ func (e *protocolExecutor) helper(ctx context.Context, namespace, pod string, ar
 		}
 		if e.captureInvalid {
 			_, err := output.Write([]byte(`{"version":2,"harness":"codex"}`))
+			return true, err
+		}
+		if e.captureExit != 0 {
+			return true, exitStatus(e.captureExit)
+		}
+		if e.captureFrom != nil {
+			data, err := e.captureFrom(ctx)
+			if err != nil {
+				return true, exitStatus(checkpoint.CaptureExitCode(err))
+			}
+			_, err = output.Write(data)
 			return true, err
 		}
 		_, err := output.Write(e.data)

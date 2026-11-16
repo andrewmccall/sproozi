@@ -98,7 +98,7 @@ func CaptureClaudeState(home, workspace, threadID string, maxBytes int64) (Claud
 		return ClaudeState{}, err
 	}
 	if !info.Mode().IsRegular() || info.Size() > maxBytes {
-		return ClaudeState{}, errors.New("unsafe or oversized Claude transcript")
+		return ClaudeState{}, refusedState(errors.New("unsafe or oversized Claude transcript"))
 	}
 	file, err := os.Open(name)
 	if err != nil {
@@ -111,7 +111,7 @@ func CaptureClaudeState(home, workspace, threadID string, maxBytes int64) (Claud
 	}
 	state := ClaudeState{ThreadID: threadID, Workspace: workspace, Path: path, Transcript: stoppedJournal(data)}
 	if _, err = ClaudeTranscriptLeaf(state, maxBytes); err != nil {
-		return ClaudeState{}, err
+		return ClaudeState{}, refusedState(err)
 	}
 	return state, nil
 }

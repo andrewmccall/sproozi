@@ -988,6 +988,24 @@ func (p *Placement) agentStops(ctx context.Context, agent Instance) bool {
 	return false
 }
 
+// captureFailure maps a failed capture-stopped command onto the shared rule
+// (session.FallsBack, ADR 0062). The helper's checkpoint.ExitStateRefused is
+// a refusal of the fenced state, session.ErrUncapturable. Its
+// ExitCaptureFailed, a Docker or exec failure, a killed helper and any other
+// code fail the stop, and its retry captures again. Code 1 is what a helper
+// image older than the codes returns for every failure, which cannot be told
+// apart: this placement keeps what it did before the codes and treats it as a
+// refusal, so an exited visit still finishes its stop keeping what it started
+// from, and a newer image says which it is. The legacy mapping goes once
+// images older than the codes are no longer supported.
+func captureFailure(err error) error {
+	code, exited := checkpoint.HelperExitCode(err)
+	if exited && (code == checkpoint.ExitStateRefused || code == 1) {
+		return fmt.Errorf("%w: %w", session.ErrUncapturable, err)
+	}
+	return err
+}
+
 // capture retains the stopped visit's checkpoint.
 func (p *Placement) capture(ctx context.Context, r *placementRecord) error {
 	if err := p.engine.VerifyManaged(ctx, *r.Helper, p.spec(*r, roleHelper)); err != nil {
@@ -995,7 +1013,7 @@ func (p *Placement) capture(ctx context.Context, r *placementRecord) error {
 	}
 	data, err := p.engine.CaptureCheckpoint(ctx, *r.Helper, p.config.Harness, r.thread(), r.Launch.IncludeIgnored, p.config.MaxCheckpointBytes)
 	if err != nil {
-		return err
+		return captureFailure(err)
 	}
 	// What came back is the fenced state's checkpoint: a failure of these
 	// checks is the state's, and capturing again finds the same.

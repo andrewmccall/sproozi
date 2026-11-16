@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 
+	"github.com/andrewmccall/sproozi/internal/checkpoint"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -85,7 +86,18 @@ func (p *Placement) control(ctx context.Context, pod *corev1.Pod, container stri
 	}
 	err := p.exec.Execute(ctx, pod.Namespace, pod.Name, container, args, reader, output, errout)
 	if err != nil {
-		return nil, errors.New("placement: fixed command unavailable")
+		code, ok := checkpoint.HelperExitCode(err)
+		return nil, &commandFailed{code: code, exited: ok}
 	}
 	return output.Bytes(), nil
 }
+
+// commandFailed is a fixed command that failed. exited reports that the
+// command ran and ended with code, as the exec reported it; otherwise the
+// exec or its stream failed. The command's own error text is not kept.
+type commandFailed struct {
+	code   int
+	exited bool
+}
+
+func (*commandFailed) Error() string { return "placement: fixed command unavailable" }

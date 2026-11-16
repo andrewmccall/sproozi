@@ -74,10 +74,14 @@ type fakeDocker struct {
 	next                                     int
 	capture                                  []byte
 	failStop, failCapture, failActivationAck bool
-	failRemove                               bool
-	rejectNativeActivation                   bool
-	quiesceAcknowledgesOnly                  bool
-	lostQuiesceAck                           bool
+	// captureExit makes the capture helper end with that code;
+	// captureFrom runs the helper's capture on a fixture state instead.
+	captureExit             int
+	captureFrom             func(context.Context) ([]byte, error)
+	failRemove              bool
+	rejectNativeActivation  bool
+	quiesceAcknowledgesOnly bool
+	lostQuiesceAck          bool
 	// turnless makes the supervisor report a first visit with no native
 	// conversation and stop it without one.
 	turnless       bool
@@ -293,6 +297,16 @@ func (f *fakeDocker) execCommand(ctx context.Context, args []string, input []byt
 		case "capture-stopped":
 			if f.failCapture {
 				return nil, errors.New("capture failed")
+			}
+			if f.captureExit != 0 {
+				return nil, exitCoded(f.captureExit)
+			}
+			if f.captureFrom != nil {
+				data, err := f.captureFrom(ctx)
+				if err != nil {
+					return nil, exitCoded(checkpoint.CaptureExitCode(err))
+				}
+				return data, nil
 			}
 			return f.capture, nil
 		case "finish":

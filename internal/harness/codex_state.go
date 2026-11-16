@@ -40,7 +40,7 @@ func CaptureCodexState(home, threadID string, maxBytes int64) (CodexState, error
 			return walkErr
 		}
 		if entry.Type()&os.ModeSymlink != 0 {
-			return fmt.Errorf("native session symlinks are unsupported")
+			return refusedState(fmt.Errorf("native session symlinks are unsupported"))
 		}
 		if entry.IsDir() || filepath.Ext(name) != ".jsonl" {
 			return nil
@@ -49,21 +49,21 @@ func CaptureCodexState(home, threadID string, maxBytes int64) (CodexState, error
 			return nil
 		}
 		if result.ThreadID != "" {
-			return fmt.Errorf("ambiguous native thread state")
+			return refusedState(fmt.Errorf("ambiguous native thread state"))
 		}
 		info, err := entry.Info()
 		if err != nil {
 			return err
 		}
 		if !info.Mode().IsRegular() || info.Size() > maxBytes {
-			return fmt.Errorf("native state exceeds checkpoint limit")
+			return refusedState(fmt.Errorf("native state exceeds checkpoint limit"))
 		}
 		data, err := os.ReadFile(name)
 		if err != nil {
 			return err
 		}
 		if int64(len(data)) > maxBytes {
-			return fmt.Errorf("native state exceeds checkpoint limit")
+			return refusedState(fmt.Errorf("native state exceeds checkpoint limit"))
 		}
 		relative, err := filepath.Rel(home, name)
 		if err != nil {
@@ -72,7 +72,7 @@ func CaptureCodexState(home, threadID string, maxBytes int64) (CodexState, error
 		result = CodexState{ThreadID: threadID, Path: filepath.ToSlash(relative), Rollout: stoppedJournal(data)}
 		workspace, _, err := inspectCodexState(result, maxBytes)
 		result.Workspace = workspace
-		return err
+		return refusedState(err)
 	})
 	if err != nil {
 		return CodexState{}, err
