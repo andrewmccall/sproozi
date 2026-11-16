@@ -9,7 +9,6 @@ import (
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
 	"github.com/andrewmccall/sproozi/internal/deadline"
 	"github.com/andrewmccall/sproozi/internal/harness"
-	"github.com/andrewmccall/sproozi/internal/project"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
 	"github.com/andrewmccall/sproozi/internal/workspace"
@@ -132,10 +131,10 @@ func (o *Owner) drive(ctx context.Context, id string, wake <-chan struct{}) {
 	}
 }
 
-// step takes the session's next step through the coordinator. A task is
-// driven to its completion, retrying an unsettled stop with a backoff. An
-// interactive session is only started: its owner stops it, and an unsettled
-// stop or cancellation waits for "recover".
+// step takes the session's next step through the coordinator: the one
+// action decisions maps its situation to. A session whose catalogue records
+// a transfer, or a cancellation before the coordinator received it, is no
+// longer the driver's, and is left before its execution is read.
 func (o *Owner) step(ctx context.Context, id string) next {
 	r, err := o.read(id)
 	if err != nil {
@@ -150,80 +149,61 @@ func (o *Owner) step(ctx context.Context, id string) next {
 		o.logf("Could not inspect work session %s: %v", id, err)
 		return nextWait
 	}
+	act, err := decide(o.situationOf(r, rec, time.Now()))
+	if err != nil {
+		o.logf("Could not decide the next step of work session %s: %v", id, err)
+		return nextDone
+	}
+	return o.carryOut(ctx, r, rec, act)
+}
+
+// carryOut takes action act for the session. rec is the coordinator's
+// record of its current execution; decisions maps only a session the
+// coordinator has not received to an action that does not read it.
+func (o *Owner) carryOut(ctx context.Context, r record, rec *session.Record, act action) next {
 	coordinator := o.config.Coordinator
-	revoked := !project.Member(o.config.Projects, r.Association.Project, o.config.Principal)
-	interactive := r.Intent.Mode == ModeInteractive
-	switch {
-	case rec != nil && rec.Phase == session.PhaseCancelled:
-		return nextDone
-	case rec != nil && rec.Phase == session.PhaseIdle:
-		return o.stepIdle(ctx, r, *rec, interactive)
-	case interactive && rec != nil && (rec.CancelOperation != "" || !rec.Phase.Starting() && rec.Phase != session.PhaseActive):
-		// Only "recover" retries an interactive session's unsettled stop
-		// or cancellation.
-		return nextDone
-	case rec != nil && rec.CancelOperation != "":
-		// Recovery carries out the retained cancellation.
-		_, err = coordinator.Recover(ctx, rec.ID)
-		return o.after(ctx, r, err, nextWait)
-	case revoked:
-		return o.end(ctx, r, "project-revoked", problemRevoked)
-	case rec == nil:
+	switch act {
+	case actStart:
 		return o.start(ctx, r)
-	case rec.Phase.Starting():
-		return o.stepStarting(ctx, r, *rec, interactive)
-	case interactive:
-		// Running: its owner attaches to it and stops it.
-		return nextDone
-	case rec.Phase == session.PhaseActive || rec.Phase == session.PhaseStopping:
+	case actRecoverStart:
+		// Past its deadline, an interactive session's start ends instead
+		// of starting: it stays stopped with what its earlier execution
+		// committed, and resume continues it (ADR 0060).
+		_, err := coordinator.Recover(ctx, rec.ID)
+		if errors.Is(err, session.ErrDeadlinePassed) {
+			o.note(r.ID, problemExpired)
+			return nextAgain
+		}
+		return o.after(ctx, r, err, nextDone)
+	case actComplete:
 		// The task's stop is its completion wait: the supervisor stops the
 		// writer only after the task's own turn completed. Until then the
 		// stop stays pending and is repeated. The task is running, not
 		// stopping (see completing), and nothing is wrong with it, so the
 		// wait clears any earlier problem rather than recording one.
-		_, err = coordinator.Finalize(ctx, rec.ID, derivedOperation(rec.ID, actionTaskComplete))
+		_, err := coordinator.Finalize(ctx, rec.ID, derivedOperation(rec.ID, actionTaskComplete))
 		if errors.Is(err, harness.ErrNativeTurnPending) {
 			o.note(r.ID, "")
 			return nextAgain
 		}
 		return o.after(ctx, r, err, nextWait)
-	default:
-		// An unproven stop or unsealed usage: recovery never makes up a
-		// stop or a refund, so retrying it is safe.
-		_, err = coordinator.Recover(ctx, rec.ID)
+	case actRecover:
+		// Recovery carries out a retained cancellation, or an unproven stop
+		// or unsealed usage: it never makes up a stop or a refund, so
+		// retrying it is safe.
+		_, err := coordinator.Recover(ctx, rec.ID)
 		return o.after(ctx, r, err, nextWait)
-	}
-}
-
-// stepIdle takes the next step of a session whose execution is idle. An
-// interactive session waits for its owner. A task whose start the deadline
-// overtook inside a recovery follows the rule for a task whose deadline
-// passed before it started: nothing ran, so there is no result to finish.
-// Any other task writes its tail.
-func (o *Owner) stepIdle(ctx context.Context, r record, rec session.Record, interactive bool) next {
-	switch {
-	case interactive:
-		return nextDone
-	case startEnded(rec):
+	case actFinish:
+		return o.finish(r)
+	case actEndExpired:
+		// A task whose start the deadline ended, even inside a recovery,
+		// has no result to finish: nothing ran.
 		return o.end(ctx, r, "deadline-expired", problemExpired)
+	case actEndRevoked:
+		return o.end(ctx, r, "project-revoked", problemRevoked)
+	case actNothing:
 	}
-	return o.finish(r)
-}
-
-// stepStarting continues a session whose execution is starting. A task past
-// its deadline is cancelled. Past its deadline, an interactive session's
-// start ends instead of starting: it stays stopped with what its earlier
-// execution committed, and resume continues it (ADR 0060).
-func (o *Owner) stepStarting(ctx context.Context, r record, rec session.Record, interactive bool) next {
-	if !interactive && deadline.At(rec.Deadline).Passed(time.Now()) {
-		return o.end(ctx, r, "deadline-expired", problemExpired)
-	}
-	_, err := o.config.Coordinator.Recover(ctx, rec.ID)
-	if errors.Is(err, session.ErrDeadlinePassed) {
-		o.note(r.ID, problemExpired)
-		return nextAgain
-	}
-	return o.after(ctx, r, err, nextDone)
+	return nextDone
 }
 
 // startEnded reports an execution whose deadline ended its first visit
@@ -291,11 +271,8 @@ func (o *Owner) end(ctx context.Context, r record, action, problem string) next 
 }
 
 // start captures the session's input and gives its first execution to the
-// coordinator.
+// coordinator. decisions ends a session whose deadline passed first.
 func (o *Owner) start(ctx context.Context, r record) next {
-	if deadline.At(r.First.Deadline).Passed(time.Now()) {
-		return o.end(ctx, r, "deadline-expired", problemExpired)
-	}
 	input, err := o.capture(ctx, r)
 	if err != nil {
 		return o.after(ctx, r, err, nextDone)
