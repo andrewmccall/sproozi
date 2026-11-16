@@ -629,14 +629,16 @@ Anything the executor cannot prove is an error, which the coordinator
 records as `unknown-stop` and `recover` retries: the controller has not
 ended the run yet, or a Pod's container was never seen to stop. One call
 spends at most 30 seconds (`abortPreparationWait`) after it takes the
-launch's lock. That is under the home's 45-second request timeout
-(`profile.Connect`), so a home normally receives the executor's
+launch's lock. That is under the home's 2-minute wait for the request
+(`abortWait`, the abort class of
+[ADR 0036's amendment of 2026-11-16](0036-remote-executors-through-kubeconfig-contexts.md#amendment-a-stop-outlives-its-request-2026-11-16);
+the request had the 45-second default before that amendment), so a home normally receives the executor's
 `unavailable` answer rather than its own timeout. Two cases fall outside
 that:
 - The bound starts after the lock, so time spent waiting for another
   operation on the same launch adds to it. Lock wait plus 30 seconds can
-  then exceed the home's 45, and the home sees its own timeout. The next
-  `recover` repeats the same request.
+  then exceed the home's 2 minutes, and the home sees its own timeout. The
+  next `recover` repeats the same request.
 - The bound does not cover a Pod's termination grace. It starts before the
   Pod is deleted, and a container that uses its whole grace, by default 30
   seconds from the deletion, is killed and reported after the bound has

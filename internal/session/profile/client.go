@@ -52,7 +52,7 @@ func (c *Client) SetProfileSource(source func(digest string) ([]byte, error)) { 
 // Dial, when set, replaces the network path to Origin with a byte stream the
 // caller opens, such as a Kubernetes port-forward; TLS still runs over it.
 // Timeout, 45 seconds when zero, bounds short requests; prepare, stop and
-// abort wait as long as the executor may take over them, and never less.
+// the aborts wait as long as the executor may take over them, and never less.
 type Connection struct {
 	Origin             string
 	Token              string
@@ -111,7 +111,7 @@ func (c *Client) wait(action string) time.Duration {
 		return prepareWait
 	case actionStop:
 		return stopWait
-	case actionAbort:
+	case actionAbort, actionAbortPreparation:
 		return abortWait
 	}
 	return 0

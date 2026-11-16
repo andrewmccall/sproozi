@@ -104,8 +104,8 @@ checkpoint is `invalid_request`. It is authorized like every placement
 action and is never `expired`: cancelling is accepted after the deadline.
 Success means no agent for that launch runs or can start; the answer has no
 fields besides `version`. One request waits at most 30 seconds once no
-other operation on the same visit holds it, under the service's 45-second
-request timeout; a Pod that uses its whole termination grace is seen to
+other operation on the same visit holds it, under the service's 2-minute
+wait for it ([request timeouts](#request-timeouts-and-dropped-connections)); a Pod that uses its whole termination grace is seen to
 stop only by a later request. If the executor cannot prove the abort
 by then, because the controller has not ended the cancelled run or a Pod's
 agent container has not been seen to stop, it answers `503 unavailable`.
@@ -132,6 +132,7 @@ the answer to arrive
 | Placement `stop`; owner `stop` and `recover` | 9 minutes 43 seconds: two 2-minute waits for a first visit's conversation and turn, the supervisor's 30-second wait for the agent to quit, 3 seconds after killing one that did not, and 10 seconds for its reply to be read ([native control](native-control.md)), then 5 minutes to end the container (at most 1 minute), seal usage and capture the checkpoint | 10 minutes 43 seconds |
 | Placement `prepare` | 2 minutes for an interactive visit's Pod to run, plus sending and restoring the checkpoint | 8 minutes |
 | Placement `abort`; owner `cancel` | The Pod's termination grace period, 30 seconds by default, and sealing usage | 2 minutes |
+| Placement `abort-preparation` | 30 seconds once no other operation on the same visit holds it ([cancelling a preparation](#cancelling-a-preparation)) | 2 minutes |
 | Everything else, and the wait for an `attach` to be admitted | A few API calls | 45 seconds |
 
 A stop still waiting for the turn answers `turn_pending` about two minutes

@@ -310,6 +310,9 @@ func (h *handler) perform(r *http.Request, action string, input request) (respon
 			return output, err
 		}
 	case actionAbortPreparation:
+		// Unlike abort, it interrupts no stop: a stop names an incarnation
+		// the preparation never reported, and a visit with a stop is
+		// refused as not a preparation once the stop lets go of its lock.
 		aborter, ok := p.(session.PreparationAborter)
 		if !ok {
 			return output, &Rejection{Code: CodeUnsupported}

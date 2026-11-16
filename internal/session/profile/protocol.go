@@ -69,7 +69,8 @@ const (
 	interactivePodWait = 2 * time.Minute
 	prepareWait        = interactivePodWait + 5*time.Minute + answerMargin
 	// abortWait covers the Pod's termination grace period, 30 seconds by
-	// default, and sealing usage.
+	// default, and sealing usage; for abort-preparation, the Kubernetes
+	// placement's 30-second bound once it holds the visit's lock.
 	abortWait = 2 * time.Minute
 	stopWait  = StopBound + answerMargin
 	// defaultTimeout bounds every other request, and the wait for an

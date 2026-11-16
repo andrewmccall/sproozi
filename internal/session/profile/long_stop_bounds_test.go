@@ -60,8 +60,10 @@ func TestClientWaitsCoverTheExecutorsBounds(t *testing.T) {
 	if latest := 2 * harness.NativeQuiesceWait; c.wait(actionStop)-latest < 5*time.Minute {
 		t.Fatalf("a turn-pending answer at %s leaves too little of the stop's %s wait", latest, c.wait(actionStop))
 	}
-	if c.wait(actionPrepare) < interactivePodWait+answerMargin || c.wait(actionAbort) <= defaultTimeout {
-		t.Fatalf("prepare waits %s and abort %s", c.wait(actionPrepare), c.wait(actionAbort))
+	if c.wait(actionPrepare) < interactivePodWait+answerMargin || c.wait(actionAbort) <= defaultTimeout ||
+		c.wait(actionAbortPreparation) != abortWait {
+		t.Fatalf("prepare waits %s, abort %s and abort-preparation %s", c.wait(actionPrepare), c.wait(actionAbort),
+			c.wait(actionAbortPreparation))
 	}
 	for _, action := range []string{actionActivate, actionInspect, actionDescribe, actionAttach} {
 		if c.wait(action) != 0 || c.http.Timeout != defaultTimeout {

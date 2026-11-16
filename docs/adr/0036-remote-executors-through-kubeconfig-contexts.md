@@ -229,8 +229,8 @@ Decision, in two parts:
   lost.
 - **Each request waits as long as its action may take.** The client derives
   each wait from the executor's bounds (`profile/protocol.go`) and adds a
-  minute: stop 10 minutes 43 seconds, prepare 8 minutes, abort 2 minutes,
-  everything else 45 seconds as before. The stop bound is derived in code
+  minute: stop 10 minutes 43 seconds, prepare 8 minutes, abort and
+  abort-preparation 2 minutes, everything else 45 seconds as before. The stop bound is derived in code
   from the supervisor's own bounds, which `internal/harness` publishes and a
   test holds the supervisor to: two `NativeQuiesceWait`s (2 minutes each),
   `NativeQuitWait` (30 seconds, [ADR 0035's correction of

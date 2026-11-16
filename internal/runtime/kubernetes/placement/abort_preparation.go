@@ -24,10 +24,10 @@ var _ session.PreparationAborter = (*Placement)(nil)
 
 // abortPreparationWait bounds one AbortPreparation after it takes the
 // launch's lock, including its waits for the controller to end a cancelled
-// run and for a Pod to stop. It stays under the home's 45-second request
-// timeout (profile.Connect), so a remote caller normally receives the
-// executor's unavailable answer rather than its own timeout, and the next
-// recover resumes the same abort. Time waiting for the lock is not counted,
+// run and for a Pod to stop. It stays under the home's 2-minute wait for an
+// abort-preparation request (abortWait in profile), so a remote caller
+// normally receives the executor's unavailable answer rather than its own
+// timeout, and the next recover resumes the same abort. Time waiting for the lock is not counted,
 // so lock wait plus the bound can still exceed the home's timeout. The bound
 // does not cover a Pod's termination grace either: it starts before the
 // delete, so a container that uses its whole grace (30 seconds by default)
