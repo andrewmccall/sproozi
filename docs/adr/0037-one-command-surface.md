@@ -49,8 +49,8 @@ Help groups the commands as Sessions (`run`, `sessions`/`ls`, `status`,
 Corrected 2026-11-16: the surface has grown. `run` takes `--login NAME` (ADR
 0054) and `--max-duration DURATION|none` (ADR 0056), and `resume` takes
 `--max-duration`. Remote verbs exist that this list does not show: `stop`,
-`resume` and `attach` with `--remote`, and `run --remote` without a task, which
-starts an interactive session (ADR 0057; `cmd/sproozi/commands.go`,
+`resume`, `attach` and `rm` with `--remote`, and `run --remote` without a task,
+which starts an interactive session (ADR 0057; `cmd/sproozi/commands.go`,
 `cmd/sproozi/remote_session.go`).
 
 ### Conventions
