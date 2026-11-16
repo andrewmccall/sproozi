@@ -169,6 +169,84 @@ client check with a SelfSubjectReview that the context already is the
 is a lockstep upgrade: an older client and a newer executor, or the reverse,
 get a 401 with an upgrade hint. Revisit if per-executor audiences are wanted.
 
+### Amendment: a stop outlives its request (2026-11-16)
+
+Every request had one 45-second client timeout, and the executor ran each
+action on its request's context. A graceful stop may take minutes: up to two
+for the turn ([ADR 0035](0035-bounded-graceful-stops-and-settled-input.md)),
+twice for a first visit, then the agent's quit, the container ending and the
+capture. A longer stop, or one whose home went away, was cancelled on the
+executor while the supervisor's quiesce was in flight. The supervisor finishes
+its quiesce whatever happens to the stream that asked, so the container ended
+with its reply unread. The retry saw an ended container with no graceful
+handoff recorded and stopped it as an exit
+([ADR 0038](0038-exited-agents-and-one-recovery-path.md)): a resumed Claude
+Code visit kept the checkpoint it started from, losing its turns, and a Codex
+visit kept its conversation but recorded an exit that never happened. The
+same held for the owner protocol's `stop` and `recover`
+([ADR 0057](0057-the-remote-executor-owns-its-sessions-through-the-coordinator.md)),
+which run the executor's coordinator on the request.
+
+Decision, in two parts:
+
+- **The executor carries a stop on after its request ends.** A placement
+  `stop`, and an owner `stop` or `recover`, runs on a context that keeps the
+  request's values but not its cancellation, bounded by `StopBound` (9
+  minutes 43 seconds). A placement `abort` for the same allocation interrupts
+  it first; owner cancellation already interrupts the coordinator's graceful
+  stop. A retry blocks on the placement's operation lock, or the
+  coordinator's session lock, until the stop in progress ends, then reads its
+  recorded outcome, so recovery is the live path.
+- **Each request waits as long as its action may take.** The client derives
+  each wait from the executor's bounds (`profile/protocol.go`) and adds a
+  minute: stop 10 minutes 43 seconds, prepare 8 minutes, abort 2 minutes,
+  everything else 45 seconds as before. The placement's wait for a stopped
+  container, unbounded without a deadline, now ends after a minute. The
+  [reference](../reference/remote-executors.md#request-timeouts-and-dropped-connections)
+  has the table.
+
+The invariant this relies on: once a stop has sent its quiesce, only
+cancellation, the stop's own bound or the executor's exit ends it before the
+reply is read; a caller leaving never does. Every later step is recorded
+before the next (`NativeQuiet`, the registry's `Stopping`, `WriterFenced`, the
+output digest, `Stopped`), so a stop interrupted after the reply resumes from
+the record and converges on the same checkpoint. Nothing new reports a writer
+stopped or captures before the fence: the same placement code runs, only
+longer. The wire format and stored records are unchanged.
+
+Compatibility. A newer home with an older executor waits longer for the same
+answers, so stops between 45 seconds and the old executor's own limits now
+succeed instead of timing out; a home that goes away still loses the reply as
+before. An older home with a newer executor still times out at 45 seconds and
+records `unknown-stop`, but the executor finishes the stop, and the next
+`stop` or `recover` returns its checkpoint.
+
+Alternatives rejected:
+
+- **Longer timeouts alone.** Smaller, but a laptop that closes or a
+  port-forward that drops still abandons the quiesce, and intermediaries in
+  front of the API server may cut a silent request well before ten minutes.
+- **An asynchronous stop**: answer at once with a new outcome such as
+  `stop_started`, and have home poll `inspect`. It survives any transport, but
+  changes the protocol and the coordinator's stop rules, needs a version
+  handshake, and the placement already records the progress a retry needs.
+- **Detaching inside the placement.** It would also cover in-process callers,
+  but the executor's coordinator holds the session lock through its stop and
+  interrupts it only by cancelling the context, so cancellation would wait
+  for the turn.
+- **Reading a graceful conclusion from the ended container**, such as the
+  absence of an exit report. Absence is not proof, and ADR 0011 forbids
+  claiming a Claude Code turn from a stopped container.
+
+Limits: an executor restart during a stop still loses the reply as before
+(it waits 10 seconds for requests at shutdown). The bound assumes the
+supervisor's wait after the quit is 30 seconds plus a 3-second kill; a
+harness that ignores its quit for longer reaches `StopBound` and loses the
+reply. Revisit when connections through the API server are cut while a stop
+is silent, when an executor restart during a stop matters, or when a stop's
+bounds change (`harness.NativeQuiesceWait`, the quit wait, checkpoint size):
+then the asynchronous stop above becomes the better shape.
+
 ## Alternatives
 
 - **API server service proxy** (`services/https:NAME:8443/proxy`). It can be

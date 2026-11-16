@@ -324,6 +324,11 @@ Added with the CLI; it follows section 8.
 - **Stop repeats its operation** while the executor answers `stopping` or the
   request times out, printing the waiting notice once. Each resume is a new
   operation, since the executor binds operations to one action and execution.
+  (Correction, 2026-11-16: the executor ran `stop` on the request, so a
+  request that timed out after 45 seconds cut the stop rather than leaving it
+  running. It now carries `stop` and `recover` on after the request ends, the
+  CLI waits as long as a stop may take and prints the notice after 30
+  seconds; see [ADR 0036's amendment](0036-remote-executors-through-kubeconfig-contexts.md#amendment-a-stop-outlives-its-request-2026-11-16).)
 - **Commands for a cluster's session need `--remote`, `--context` or
   `--namespace`.** The cluster's catalogue does not record which context
   reaches it, and guessing from `sessions` would contact clusters for every

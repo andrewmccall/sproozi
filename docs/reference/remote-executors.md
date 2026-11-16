@@ -121,6 +121,36 @@ administrator deleted the visit's registration or replaced its run
 | This release | Older | The executor answers `404 invalid_request`. The service inspects the visit as before: one never registered is `cancelled`, one already prepared is aborted, one active or in an unknown state is refused as not a preparation, and one still preparing stays `unknown-stop` with `the remote executor cannot abort a preparation that has not reported its Pod; it is older than this Sproozi`. Update the executor, then `recover`. |
 | Older | This release | The service never sends `abort-preparation`; nothing changes. |
 
+## Request timeouts and dropped connections
+
+Each request waits as long as the executor may take over it, plus a minute for
+the answer to arrive
+([ADR 0036](../adr/0036-remote-executors-through-kubeconfig-contexts.md#amendment-a-stop-outlives-its-request-2026-11-16)).
+
+| Request | The executor takes at most | The client waits |
+| --- | --- | --- |
+| Placement `stop`; owner `stop` and `recover` | 9 minutes 43 seconds: two 2-minute waits for a first visit's conversation and turn, 43 seconds for the agent to quit and its reply to be read, and 5 minutes to end the container (at most 1 minute), seal usage and capture the checkpoint | 10 minutes 43 seconds |
+| Placement `prepare` | 2 minutes for an interactive visit's Pod to run, plus sending and restoring the checkpoint | 8 minutes |
+| Placement `abort`; owner `cancel` | The Pod's termination grace period, 30 seconds by default, and sealing usage | 2 minutes |
+| Everything else, and the wait for an `attach` to be admitted | A few API calls | 45 seconds |
+
+A stop still waiting for the turn answers `turn_pending` about two minutes
+after it asked (four for a first visit), well inside the client's wait.
+
+When the connection drops or the client gives up during a stop, because the
+laptop closed, the port-forward broke or the user pressed Ctrl-C, the executor
+carries the stop on to its outcome, for at most the time in the table. The
+session meanwhile reads `unknown-stop` at home, or `stopping` on the
+executor. Repeat `stop`, or run `recover`, with the same operation: the retry
+waits for the stop in progress and returns its result, the same checkpoint an
+uninterrupted stop keeps. `cancel` still interrupts the stop at once. Other
+requests end with their connection and are retried the same way; none loses
+state.
+
+An executor that restarts during a stop loses it like a dropped connection
+did before: a Claude Code visit whose supervisor finished the stop meanwhile
+keeps the checkpoint it started from, and a Codex visit records an exit.
+
 ## Interactive sessions
 
 The executor owns the sessions it starts, tasks and interactive sessions alike

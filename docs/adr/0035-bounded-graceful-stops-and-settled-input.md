@@ -5,7 +5,9 @@ Date: 2026-10-20
 
 Extended: [ADR 0038](0038-exited-agents-and-one-recovery-path.md) makes a
 repeated stop continue the pending one and names `sproozi stop ID` in every
-message for a stuck stop.
+message for a stuck stop. [ADR 0036](0036-remote-executors-through-kubeconfig-contexts.md#amendment-a-stop-outlives-its-request-2026-11-16)
+(2026-11-16) sizes remote request timeouts from these bounds and has a remote
+executor finish a stop whose request ended.
 
 ## Problem and constraints
 
