@@ -1,6 +1,7 @@
 package home
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -118,7 +119,7 @@ func TestCancelOfAnUnrecordedExecutionHoldsItsSessionsLock(t *testing.T) {
 		t.Fatal(err)
 	}
 	unlock()
-	if err = <-done; err == nil || !strings.Contains(err.Error(), "now records execution "+orphan) {
+	if err = <-done; !errors.Is(err, ErrRejected) || !strings.Contains(err.Error(), "now records execution "+orphan) {
 		t.Fatalf("cancel after the resume recorded the execution: %v", err)
 	}
 	if x, err := s.coordinator.Inspect(orphan); err != nil || x.CancelOperation != "" {

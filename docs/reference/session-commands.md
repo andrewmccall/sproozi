@@ -354,6 +354,7 @@ hint. `ID` is the session and `OP` an operation.
 | `session: the writer stopped, but its usage is not finalized yet; recover again once the placement can finalize it` | `recover` of a cancellation whose usage could not be settled yet. | `sproozi recover ID` again; the service log has the cause. |
 | `session: the placement has not yet proved the writer stopped; recover again once it is reachable` | `recover` of a cancellation that could not confirm the agent stopped. | Restore Docker or the cluster, then `sproozi recover ID`. |
 | `session ID was cancelled, so it cannot be stopped or resumed; remove it with "sproozi rm ID", and start new work with "sproozi run"` | `stop`, `resume`, `move` or `attach` of a cancelled session. Nothing can continue it. | `sproozi rm ID`. |
+| `session ID now records execution EXECUTION; run the cancellation again` | `cancel EXECUTION` of an execution its session had not recorded, while a `resume` recorded it. Nothing was cancelled. | `sproozi cancel EXECUTION` again, or `sproozi cancel ID`. |
 
 When a Docker command the service runs fails, the error includes Docker's
 standard error, cut to its first 4096 bytes and marked ` [output truncated]`.

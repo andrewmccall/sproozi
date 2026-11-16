@@ -810,8 +810,8 @@ func (s *Service) lockUnrecordedCancel(id string) (func(), error) {
 		// A resume recorded it meanwhile: a repeated cancel reaches it as
 		// the session's own execution.
 		unlock()
-		return nil, fmt.Errorf("home: session %s now records execution %s; run the cancellation again",
-			execution.Session, id)
+		return nil, rejectedError(fmt.Sprintf("home: session %s now records execution %s; run the cancellation again",
+			execution.Session, id))
 	}
 	return unlock, nil
 }

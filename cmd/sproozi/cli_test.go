@@ -390,6 +390,21 @@ func TestSessionPrefixesAndRetryHints(t *testing.T) {
 	}
 }
 
+// A cancel the service refused because a resume recorded the execution
+// meanwhile did nothing, so the CLI gives no outcome-unknown hint.
+func TestRefusedCancelOfARecordedExecutionHasNoRetryHint(t *testing.T) {
+	id, execution := uuid.NewString(), uuid.NewString()
+	socket, _ := fakeService(t, func(r home.Request) home.Response {
+		return home.Response{Error: "home: session " + id + " now records execution " + execution +
+			"; run the cancellation again", Rejected: true}
+	})
+	code, _, stderr := runCLI("cancel", execution, testSocketFlag, socket)
+	if code != 1 || !strings.Contains(stderr, "now records execution "+execution) ||
+		strings.Contains(stderr, "outcome is unknown") || strings.Contains(stderr, "--operation") {
+		t.Fatalf("exited %d: %q", code, stderr)
+	}
+}
+
 // Cancelling a cancelled session succeeds without another request.
 func TestCancelIsIdempotent(t *testing.T) {
 	id := uuid.NewString()
