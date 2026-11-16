@@ -556,11 +556,23 @@ what the coordinator records as `cancelled` with no receipt. The steps, each
 idempotent so a retry after a crash finishes the same abort, and what each
 proves:
 
+0. **Only a preparation is aborted.** Success reports no usage, so a
+   registration that may have had gateway authority is a conflict:
+   `active`, `stopping`, `stopped`, or `cancelled` by something other than
+   this abort without sealed usage. `creating`, `bound` and `prepared` never
+   had authority. A registration that is gone is also a conflict, on both
+   lookup paths: nothing in Sproozi deletes one, so an administrator did,
+   and its run and Pod may remain with nothing to fence them by. Found by
+   run name, absence is ambiguous only when a run exists at that name,
+   because the executor creates the run after the registration.
 1. **A local tombstone** (`preparationAborted` in the executor's record of
-   the launch, written first, even when the executor never saw the launch)
-   makes every later `Prepare` of the launch a conflict and stops the
-   placement creating its registration. Within the executor, `Prepare` and
-   `AbortPreparation` hold the same lock, so none is in flight.
+   the launch, written before anything in the cluster changes, even when
+   the executor never saw the launch) makes every later `Prepare` of the
+   launch a conflict and stops the placement creating its registration. A
+   launch the executor never saw also claims its session epoch, as
+   `Prepare` does, so no other allocation prepares that epoch afterwards.
+   Within the executor, `Prepare` and `AbortPreparation` hold the same lock,
+   so none is in flight.
 2. **The registration is cancelled by compare-and-swap.** A registration
    lost between its creation and the executor's save is found by its run
    name. Once `cancelled` it is never bound, prepared or activated, and the
@@ -571,7 +583,9 @@ proves:
    sets `spec.cancel` on it, and `ResolveRun` now reports such a registration
    as `SessionCancelled` rather than a rejected binding.
 4. **A bound run is cancelled, then the executor waits for the controller.**
-   A reconcile that read the registration before step 2 may still create the
+   The `spec.cancel` patch is optimistic, so a controller status write in
+   between conflicts; the executor reads the run again and retries a few
+   times. A reconcile that read the registration before step 2 may still create the
    Pod, so an absent Pod is not yet proof. The executor waits until a live
    read shows the run gone, terminal, or with its sandbox name recorded,
    and only then reads the Pod. The controller now creates a sandbox Pod
@@ -593,7 +607,14 @@ proves:
 
 Anything the executor cannot prove is an error, which the coordinator
 records as `unknown-stop` and `recover` retries: the controller has not
-ended the run yet, or a Pod's container was never seen to stop.
+ended the run yet, or a Pod's container was never seen to stop. One call
+waits at most 30 seconds (`abortPreparationWait`), measured from the
+request. That is under the home's 45-second request timeout
+(`profile.Connect`), so a home receives the executor's `unavailable` answer
+rather than its own timeout, and it covers a managed Pod's default
+30-second termination grace from the moment of deletion. A Pod that needs
+longer is fenced by the next `recover`, which finds it already deleted. The
+bound applies to this action only.
 
 **Protocol.** `/v1/abort-preparation` takes the launch alone, is authorized
 like the other placement actions
@@ -602,8 +623,11 @@ never refused after the deadline. The home-side client implements
 `PreparationAborter` always. An executor from before this action answers
 `404 invalid_request`, and a placement that cannot abort answers
 `unsupported`. In both cases the client does what the coordinator did
-before: an absent visit is fenced, a prepared one is aborted, and one still
-preparing is an error that says the executor is older. An older home never
+before: an absent visit is fenced, a prepared or already stopped one is
+aborted, and one still preparing is an error that says the executor is
+older. An active visit, or one in an unknown state, as a stopping
+Kubernetes visit inspects, is refused before any abort, for the reason in
+step 0. An older home never
 sends the action. See [remote executors](../reference/remote-executors.md#cancelling-a-preparation).
 
 **Alternatives rejected.**
@@ -628,13 +652,24 @@ fallback reports a prepared visit whose usage could not be sealed as
 `unknown-stop` rather than `unknown-usage`, since `AbortPreparation` has no
 usage outcome; `recover` finishes it either way. An executor from before
 this change cannot read a launch record that has the tombstone. That
-matters only on a downgrade, and only for aborted launches.
+matters only on a downgrade, and only for aborted launches. A visit
+cancelled by an older executor's `Abort` whose usage was never sealed is
+refused by step 0 after an upgrade, and stays `unknown-stop`.
 
-**Revisit when** the controller runs more than one active replica or
-overlapping reconciles of one run (step 4 assumes neither); a cluster-side
-admission rule can refuse a Pod for a cancelled registration, so the
-executor need not wait for the controller; or `PreparationAborter` gains a
-usage outcome.
+**Accepted limit: leader election is a lease, not a fence.** Step 4 relies
+on reconciles of one run never overlapping. That holds within one
+controller process. Across a leader change it does not: a leader that
+passed its live read and then froze for longer than its lease could create
+the Pod after a new leader had ended the run and the executor had found no
+Pod. Such a Pod has no gateway authority, since the registration is
+cancelled. Its writer-fence finalizer holds it until the executor or an
+administrator removes it. `Abort` has the same hazard today.
+
+**Revisit when** the controller can create a Pod without that lease
+premise, for example from more than one active replica, or when a
+cluster-side admission rule can refuse a Pod for a cancelled registration,
+which would close the limit and spare the executor its wait; or when
+`PreparationAborter` gains a usage outcome.
 
 Code: `internal/runtime/kubernetes/placement/abort_preparation.go`,
 `lifecycle.go` (`fenceCancelled`), `internal/runtime/kubernetes/registry`
@@ -645,7 +680,12 @@ Code: `internal/runtime/kubernetes/placement/abort_preparation.go`,
 the coordinator's cancel of a queued destination, which reached
 `unknown-stop` before this change; `internal/session/profile/abort_preparation_test.go`;
 `TestReconcilerStaleCacheDoesNotCreateSandboxForEndedRun` and
-`TestReconcilerUnboundCancelledManagedSessionEndsAsCancelled`.
+`TestReconcilerUnboundCancelledManagedSessionEndsAsCancelled`. A reconcile
+that is past its live read when `spec.cancel` lands is simulated by a patch
+hook in the placement tests, not run against the real controller: envtest
+has no kubelet to report the late Pod's termination, and pausing a real
+reconcile at that point needs a hook in the controller that only a test
+would use.
 
 ## Alternatives
 

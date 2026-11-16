@@ -485,16 +485,19 @@ Cancelling a session whose cluster sandbox has not started yet ends it
 no Pod, or failed before its Pod. The executor cancels the visit's
 registration and run and waits until the controller ends the run. A Pod that
 appears meanwhile is stopped and must be observed terminated first, as for
-any cancellation. The cancellation stays unfinished (`unknown-stop`), and
-`recover ID` (or `recover ID --remote`) finishes it, in these cases only. A
-session that moved there from this machine shows `session profile:
-unavailable (HTTP 503)` for the first two.
+any cancellation. One attempt waits at most 30 seconds. The cancellation
+stays unfinished (`unknown-stop`), and `recover ID` (or `recover ID
+--remote`) resumes the same cancellation, in these cases only. A session the
+executor owns shows the executor's own problem; a session that moved there
+from this machine shows only the executor's answer.
 
-| Problem contains | Cause | Run |
-| --- | --- | --- |
-| `the controller has not ended it, so its Pod may still be created` | The run is cancelled, but the Sproozi controller has not reconciled it yet. | Check the controller is running, then `recover`. |
-| `writer fence remains unknown`, or `absent Pod has no retained writer fence` | A Pod appeared and its agent container was never seen to stop, for example because its node is unreachable. | Restore the node, then `recover`. |
-| `the remote executor cannot abort a preparation that has not reported its Pod; it is older than this Sproozi` | A session moved from this machine to an executor from before this release. | Update the executor, then `recover ID`. |
+| Problem of a session the executor owns contains | A session moved from this machine shows | Cause | Run |
+| --- | --- | --- | --- |
+| `the controller has not ended it, so its Pod may still be created` | `session profile: unavailable (HTTP 503)` | The run is cancelled, but the Sproozi controller has not reconciled it within the 30 seconds. | Check the controller is running, then `recover`. |
+| `writer fence remains unknown`, or `absent Pod has no retained writer fence` | `session profile: unavailable (HTTP 503)` | A Pod appeared and its agent container was not seen to stop within the 30 seconds, for example because its node is unreachable or the container never started. | Restore the node, then `recover`. |
+| `the session registration … was deleted, so its Pod cannot be fenced`, or `AgentRun … now has UID …; an administrator replaced it` | `session profile: conflict (HTTP 409)` | An administrator deleted the visit's registration or replaced its run. The message names the Pod label to check. | An administrator confirms no such Pod remains; the session cannot be recovered. |
+| `… is active, not a preparation` (or `stopping`, `stopped`, `cancelled`) | `session profile: conflict (HTTP 409)` | The visit may already have run, so it is not cancelled as a preparation. A coordinator never asks this; it points to a defect. | Report it. |
+| — | `the remote executor cannot abort a preparation that has not reported its Pod; it is older than this Sproozi` | The executor is from before this release. | Update the executor, then `recover ID`. |
 
 With `--json`, `status` and the session commands print the session:
 

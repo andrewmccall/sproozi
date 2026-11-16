@@ -103,15 +103,20 @@ request carries only the launch, as `inspect` does; an incarnation or a
 checkpoint is `invalid_request`. It is authorized like every placement
 action and is never `expired`: cancelling is accepted after the deadline.
 Success means no agent for that launch runs or can start; the answer has no
-fields besides `version`. The executor answers `unavailable` while it cannot
-prove that yet, such as while the controller has not ended the cancelled
-run, and the session stays `unknown-stop` until `recover`
+fields besides `version`. One request waits at most 30 seconds, under the
+service's 45-second request timeout. If the executor cannot prove the abort
+by then, because the controller has not ended the cancelled run or a Pod's
+agent container has not been seen to stop, it answers `503 unavailable`.
+The session stays `unknown-stop`, and `recover` sends the same request
+again, which resumes the abort. It answers `409 conflict` for a visit that
+may already have run (active, stopping or stopped), and when an
+administrator deleted the visit's registration or replaced its run
 ([session commands](session-commands.md#status-and-listing-output)).
 
 | Service | Executor | What happens |
 | --- | --- | --- |
 | This release | This release | `abort-preparation`; the session ends `cancelled`. |
-| This release | Older | The executor answers `404 invalid_request`. The service inspects the visit as before: one never registered is `cancelled`, one already prepared is aborted, and one still preparing stays `unknown-stop` with `the remote executor cannot abort a preparation that has not reported its Pod; it is older than this Sproozi`. Update the executor, then `recover`. |
+| This release | Older | The executor answers `404 invalid_request`. The service inspects the visit as before: one never registered is `cancelled`, one already prepared is aborted, one active or in an unknown state is refused as not a preparation, and one still preparing stays `unknown-stop` with `the remote executor cannot abort a preparation that has not reported its Pod; it is older than this Sproozi`. Update the executor, then `recover`. |
 | Older | This release | The service never sends `abort-preparation`; nothing changes. |
 
 ## Interactive sessions
