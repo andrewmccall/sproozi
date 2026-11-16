@@ -92,7 +92,7 @@ func (e *stageExecutor) Execute(ctx context.Context, namespace, pod, container s
 			// The supervisor answers; its container ends a little later.
 			e.state = harness.NativeStopped
 			defer close(e.entered)
-			return json.NewEncoder(output).Encode(map[string]any{"op": command, "state": harness.NativeStopped, "threadId": fixtureThread})
+			return json.NewEncoder(output).Encode(harness.NativeReply{Op: harness.NativeQuiesce, State: harness.NativeStopped, ThreadID: fixtureThread})
 		}
 	}
 	return e.protocolExecutor.Execute(ctx, namespace, pod, container, args, input, output, errout)

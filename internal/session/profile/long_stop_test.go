@@ -220,4 +220,3 @@ func TestAbortInterruptsAStopWhoseRequestEnded(t *testing.T) {
 		t.Fatalf("the interrupted stop ended with %v", ends)
 	}
 }
-
