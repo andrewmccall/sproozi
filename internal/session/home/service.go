@@ -69,6 +69,9 @@ type Service struct {
 	workSources map[string]WorkSource
 	// log receives the daemon's operator messages; nil discards them.
 	log io.Writer
+	// exitChecks holds the sessions whose exit check runs, and exitProblems
+	// the reason each failing one last logged (sweepExits).
+	exitChecks, exitProblems sync.Map
 	// images resolves Docker image IDs; CheckDocker uses it to reach the engine.
 	images imageResolver
 }

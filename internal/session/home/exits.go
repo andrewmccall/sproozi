@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/session"
@@ -14,6 +15,12 @@ import (
 // exitWatchInterval is how often the service looks for harnesses that exited
 // on their own.
 var exitWatchInterval = 5 * time.Second
+
+// exitCheckTimeout bounds one session's question to its placement, so an
+// executor that cannot be reached answers within it, and holds the remote
+// client's connection lock no longer, while the stop of an exited visit takes
+// as long as a stop takes.
+const exitCheckTimeout = 10 * time.Second
 
 // watchExits stops, through the ordinary stop path, every active session whose
 // harness exited on its own, so its status shows the exit instead of staying
@@ -27,19 +34,68 @@ func (s *Service) watchExits(ctx context.Context) {
 			return
 		case <-ticker.C:
 		}
-		dir, err := s.catalogDir()
-		if err != nil {
+		s.sweepExits(ctx)
+	}
+}
+
+// sweepExits checks every catalogued session for an exited agent, each in
+// its own goroutine, so one placement that is slow or unreachable delays no
+// other session's check. A session whose previous check still runs is
+// skipped. The returned channel closes once the checks this sweep started
+// have finished.
+func (s *Service) sweepExits(ctx context.Context) <-chan struct{} {
+	var checks sync.WaitGroup
+	done := make(chan struct{})
+	defer func() {
+		go func() {
+			checks.Wait()
+			close(done)
+		}()
+	}()
+	dir, err := s.catalogDir()
+	if err != nil {
+		return done
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return done
+	}
+	for _, entry := range entries {
+		id, ok := strings.CutSuffix(entry.Name(), ".json")
+		if !ok {
 			continue
 		}
-		entries, err := os.ReadDir(dir)
-		if err != nil {
+		if _, running := s.exitChecks.LoadOrStore(id, struct{}{}); running {
 			continue
 		}
-		for _, entry := range entries {
-			if id, ok := strings.CutSuffix(entry.Name(), ".json"); ok {
-				_, _ = s.settleExit(ctx, id)
+		checks.Add(1)
+		go func() {
+			defer checks.Done()
+			defer s.exitChecks.Delete(id)
+			_, err := s.settleExit(ctx, id)
+			if ctx.Err() == nil {
+				s.noteExitCheck(id, err)
 			}
+		}()
+	}
+	return done
+}
+
+// noteExitCheck logs a session's failed exit check once each time its reason
+// changes, and once when checks succeed again, rather than on every sweep.
+func (s *Service) noteExitCheck(id string, err error) {
+	if err == nil {
+		if _, failed := s.exitProblems.LoadAndDelete(id); failed && s.log != nil {
+			_, _ = fmt.Fprintf(s.log, "Checked session %s for an exited agent again\n", id)
 		}
+		return
+	}
+	reason := err.Error()
+	if previous, failed := s.exitProblems.Swap(id, reason); failed && previous == reason {
+		return
+	}
+	if s.log != nil {
+		_, _ = fmt.Fprintf(s.log, "Failed to check session %s for an exited agent: %v\n", id, err)
 	}
 }
 
@@ -60,7 +116,9 @@ func (s *Service) settleExit(ctx context.Context, id string) (bool, error) {
 	if !ok {
 		return false, nil
 	}
-	exited, err := observer.Exited(ctx, execution.Active.Launch, execution.Active.Incarnation)
+	check, cancel := context.WithTimeout(ctx, exitCheckTimeout)
+	exited, err := observer.Exited(check, execution.Active.Launch, execution.Active.Incarnation)
+	cancel()
 	if err != nil || !exited {
 		return false, err
 	}

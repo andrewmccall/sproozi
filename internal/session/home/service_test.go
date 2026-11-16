@@ -47,8 +47,12 @@ type placementFixture struct {
 	// lostPrepare prepares the visit, then loses the reply once.
 	lostPrepare bool
 	// turnless stops a visit from a workspace with no conversation.
-	turnless                    bool
-	exited                      *session.Exit
+	turnless bool
+	exited   *session.Exit
+	// exitedErr fails Exited; blockExited makes it wait for its context, as
+	// an executor that cannot be reached does.
+	exitedErr                   error
+	blockExited                 bool
 	rejectActivate, failInspect bool
 	// failInspectOf fails Inspect of one allocation, as Docker does once its
 	// prepared supervisor stopped itself at the deadline.
@@ -179,7 +183,14 @@ func (p *placementFixture) receipt(l session.Launch, i session.Incarnation) *ses
 
 // Abort fences the writer and seals its usage, as the Docker placement does
 // even when an earlier graceful stop could not seal it.
-func (p *placementFixture) Exited(_ context.Context, l session.Launch, i session.Incarnation) (bool, error) {
+func (p *placementFixture) Exited(ctx context.Context, l session.Launch, i session.Incarnation) (bool, error) {
+	if p.blockExited {
+		<-ctx.Done()
+		return false, ctx.Err()
+	}
+	if p.exitedErr != nil {
+		return false, p.exitedErr
+	}
 	r := p.rows[l.AllocationID]
 	return p.exited != nil && r.Incarnation == i && r.State == session.PlacementActive, nil
 }
