@@ -23,14 +23,17 @@ const (
 func stoppedCodex(t *testing.T, thread, rows string) (home, repository string) {
 	t.Helper()
 	privateHelper(t)
-	if err := writeReceipt(restoreReceipt{Stage: stageRestored, Metadata: checkpoint.Metadata{Harness: harness.NativeCodex}}); err != nil {
+	restored := restoreReceipt{Stage: stageRestored, Metadata: checkpoint.Metadata{Harness: harness.NativeCodex}}
+	if err := writeReceipt(restored); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	repository, home = t.TempDir(), t.TempDir()
-	for _, args := range [][]string{{"init", "-q", "-b", "main"}, {"add", "README.md"}, {"commit", "-q", "-m", "fixture"}} {
-		if args[0] == "add" {
+	const gitAdd = "add"
+	steps := [][]string{{"init", "-q", "-b", "main"}, {gitAdd, "README.md"}, {"commit", "-q", "-m", "fixture"}}
+	for _, args := range steps {
+		if args[0] == gitAdd {
 			if err := os.WriteFile(filepath.Join(repository, "README.md"), []byte("fixture\n"), 0600); err != nil {
 				t.Fatal(err)
 			}
@@ -47,14 +50,16 @@ func stoppedCodex(t *testing.T, thread, rows string) (home, repository string) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "rollout-2026-10-10T18-41-51-"+thread+".jsonl"), []byte(rows), 0600); err != nil {
+	name := filepath.Join(dir, "rollout-2026-10-10T18-41-51-"+thread+".jsonl")
+	if err := os.WriteFile(name, []byte(rows), 0600); err != nil {
 		t.Fatal(err)
 	}
 	return home, repository
 }
 
 const (
-	sessionMeta  = `{"type":"session_meta","payload":{"id":"` + resultThread + `","cli_version":"0.161.0","cwd":"/workspace"}}` + "\n"
+	sessionMeta = `{"type":"session_meta","payload":{"id":"` + resultThread +
+		`","cli_version":"0.161.0","cwd":"/workspace"}}` + "\n"
 	turnStarted  = `{"type":"event_msg","payload":{"type":"task_started","turn_id":"fixture-turn"}}` + "\n"
 	turnComplete = `{"type":"event_msg","payload":{"type":"task_complete","turn_id":"fixture-turn"}}` + "\n"
 )
@@ -63,15 +68,16 @@ const (
 // returns the exit code it would end with.
 func captureCode(t *testing.T, home, repository, thread string, limit int64) int {
 	t.Helper()
-	err := run([]string{"capture-stopped", "--harness", string(harness.NativeCodex), "--home", home, "--workspace", repository,
-		"--thread", thread, "--max-bytes", strconv.FormatInt(limit, 10)}, nil, io.Discard)
-	return exitCode([]string{"capture-stopped"}, err)
+	err := run([]string{captureStopped, "--harness", string(harness.NativeCodex), "--home", home,
+		"--workspace", repository, "--thread", thread, "--max-bytes", strconv.FormatInt(limit, 10)}, nil, io.Discard)
+	return exitCode([]string{captureStopped}, err)
 }
 
 // capture-stopped ends with a code that says why it failed: a stopped state
 // it refuses is the same on every capture, while a capture it could not
 // carry out may succeed when repeated.
 func TestCaptureStoppedSaysWhyItFailed(t *testing.T) {
+	completed := sessionMeta + turnStarted + turnComplete
 	for _, test := range []struct {
 		name   string
 		thread string
@@ -80,11 +86,11 @@ func TestCaptureStoppedSaysWhyItFailed(t *testing.T) {
 		setup  func(t *testing.T, home string)
 		want   int
 	}{
-		{"completed turn", resultThread, sessionMeta + turnStarted + turnComplete, testLimit, nil, 0},
+		{"completed turn", resultThread, completed, testLimit, nil, 0},
 		{"turn cut mid-way", resultThread, sessionMeta + turnStarted, testLimit, nil, checkpoint.ExitStateRefused},
-		{"rollout of another thread", otherThread, sessionMeta + turnStarted + turnComplete, testLimit, nil, checkpoint.ExitStateRefused},
-		{"state over the checkpoint bound", resultThread, sessionMeta + turnStarted + turnComplete, 64, nil, checkpoint.ExitStateRefused},
-		{"unreadable rollout", resultThread, sessionMeta + turnStarted + turnComplete, testLimit, func(t *testing.T, home string) {
+		{"rollout of another thread", otherThread, completed, testLimit, nil, checkpoint.ExitStateRefused},
+		{"state over the checkpoint bound", resultThread, completed, 64, nil, checkpoint.ExitStateRefused},
+		{"unreadable rollout", resultThread, completed, testLimit, func(t *testing.T, home string) {
 			t.Helper()
 			name := filepath.Join(home, "sessions", "2026", "10", "10", "rollout-2026-10-10T18-41-51-"+resultThread+".jsonl")
 			if err := os.Chmod(name, 0); err != nil {
@@ -115,7 +121,7 @@ func TestOtherCommandsKeepExitCodeOne(t *testing.T) {
 	if got := exitCode([]string{"prepare"}, refused); got != 1 {
 		t.Fatalf("prepare exit code %d", got)
 	}
-	if got := exitCode([]string{"capture-stopped"}, nil); got != 0 {
+	if got := exitCode([]string{captureStopped}, nil); got != 0 {
 		t.Fatalf("success exit code %d", got)
 	}
 }

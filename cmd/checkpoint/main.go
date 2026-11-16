@@ -32,6 +32,9 @@ func main() {
 	}
 }
 
+// captureStopped captures a fenced visit's checkpoint.
+const captureStopped = "capture-stopped"
+
 // exitCode is the code the helper ends with after err. Only capture-stopped
 // says why it failed (checkpoint.ExitStateRefused or ExitCaptureFailed),
 // because only its failure decides what a stop keeps; every other command
@@ -40,7 +43,7 @@ func exitCode(args []string, err error) int {
 	switch {
 	case err == nil:
 		return 0
-	case len(args) > 0 && args[0] == "capture-stopped":
+	case len(args) > 0 && args[0] == captureStopped:
 		return checkpoint.CaptureExitCode(err)
 	}
 	return 1
@@ -74,7 +77,7 @@ func run(args []string, input io.Reader, output io.Writer) error {
 		return c.prepare(ctx, input, output)
 	case "prepare-workspace":
 		return c.prepareWorkspace(ctx, input, output)
-	case "capture-stopped":
+	case captureStopped:
 		return c.capture(ctx, output)
 	case "restore":
 		return c.restore(ctx, input)

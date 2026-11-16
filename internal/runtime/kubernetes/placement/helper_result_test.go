@@ -28,7 +28,8 @@ func (e exitStatus) ExitStatus() int { return int(e) }
 func unfinishedCodexCapture(t *testing.T) func(context.Context) ([]byte, error) {
 	t.Helper()
 	repo, home := t.TempDir(), t.TempDir()
-	for _, args := range [][]string{{"init", "-q", "-b", "main"}, {"add", "fact.txt"}, {"commit", "-q", "-m", "fixture"}} {
+	const gitInit = "init"
+	for _, args := range [][]string{{gitInit, "-q", "-b", "main"}, {"add", "fact.txt"}, {"commit", "-q", "-m", "fixture"}} {
 		if args[0] == "add" {
 			if err := os.WriteFile(filepath.Join(repo, "fact.txt"), []byte("fixture fact\n"), 0600); err != nil {
 				t.Fatal(err)
