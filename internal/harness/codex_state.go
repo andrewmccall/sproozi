@@ -37,7 +37,7 @@ func CaptureCodexState(home, threadID string, maxBytes int64) (CodexState, error
 	var result CodexState
 	err := filepath.WalkDir(root, func(name string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
-			return walkErr
+			return stateFileError(walkErr)
 		}
 		if entry.Type()&os.ModeSymlink != 0 {
 			return refusedState(fmt.Errorf("native session symlinks are unsupported"))
@@ -53,14 +53,14 @@ func CaptureCodexState(home, threadID string, maxBytes int64) (CodexState, error
 		}
 		info, err := entry.Info()
 		if err != nil {
-			return err
+			return stateFileError(err)
 		}
 		if !info.Mode().IsRegular() || info.Size() > maxBytes {
 			return refusedState(fmt.Errorf("native state exceeds checkpoint limit"))
 		}
 		data, err := os.ReadFile(name)
 		if err != nil {
-			return err
+			return stateFileError(err)
 		}
 		if int64(len(data)) > maxBytes {
 			return refusedState(fmt.Errorf("native state exceeds checkpoint limit"))
@@ -78,7 +78,8 @@ func CaptureCodexState(home, threadID string, maxBytes int64) (CodexState, error
 		return CodexState{}, err
 	}
 	if result.ThreadID == "" {
-		return CodexState{}, fmt.Errorf("native thread state is unavailable")
+		// The agent can delete its own rollout before it exits.
+		return CodexState{}, refusedState(fmt.Errorf("native thread state is unavailable"))
 	}
 	return result, nil
 }

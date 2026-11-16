@@ -63,19 +63,19 @@ func readCopilotEvents(home, threadID string, maxBytes int64) ([]byte, error) {
 	name := filepath.Join(home, filepath.FromSlash(relative))
 	info, err := os.Lstat(name)
 	if err != nil {
-		return nil, err
+		return nil, stateFileError(err)
 	}
 	if !info.Mode().IsRegular() || info.Size() > maxBytes {
 		return nil, refusedState(errors.New("unsafe or oversized Copilot session journal"))
 	}
 	f, err := os.Open(name)
 	if err != nil {
-		return nil, err
+		return nil, stateFileError(err)
 	}
 	data, readErr := io.ReadAll(io.LimitReader(f, maxBytes+1))
 	closeErr := f.Close()
 	if readErr != nil || closeErr != nil {
-		return nil, errors.Join(readErr, closeErr)
+		return nil, stateFileError(errors.Join(readErr, closeErr))
 	}
 	if int64(len(data)) > maxBytes {
 		return nil, refusedState(errors.New("unsafe or oversized Copilot session journal"))
@@ -128,10 +128,10 @@ func copilotDirectories(home, relative string, create bool) error {
 		}
 		info, err := os.Lstat(dir)
 		if err != nil {
-			return err
+			return stateFileError(err)
 		}
 		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-			return errors.New("unsafe Copilot native directory")
+			return refusedState(errors.New("unsafe Copilot native directory"))
 		}
 	}
 	return nil

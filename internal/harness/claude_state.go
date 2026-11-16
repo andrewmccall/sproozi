@@ -95,19 +95,19 @@ func CaptureClaudeState(home, workspace, threadID string, maxBytes int64) (Claud
 	name := filepath.Join(home, filepath.FromSlash(path))
 	info, err := os.Lstat(name)
 	if err != nil {
-		return ClaudeState{}, err
+		return ClaudeState{}, stateFileError(err)
 	}
 	if !info.Mode().IsRegular() || info.Size() > maxBytes {
 		return ClaudeState{}, refusedState(errors.New("unsafe or oversized Claude transcript"))
 	}
 	file, err := os.Open(name)
 	if err != nil {
-		return ClaudeState{}, err
+		return ClaudeState{}, stateFileError(err)
 	}
 	data, readErr := io.ReadAll(io.LimitReader(file, maxBytes+1))
 	closeErr := file.Close()
 	if readErr != nil || closeErr != nil {
-		return ClaudeState{}, errors.Join(readErr, closeErr)
+		return ClaudeState{}, stateFileError(errors.Join(readErr, closeErr))
 	}
 	state := ClaudeState{ThreadID: threadID, Workspace: workspace, Path: path, Transcript: stoppedJournal(data)}
 	if _, err = ClaudeTranscriptLeaf(state, maxBytes); err != nil {
@@ -160,10 +160,10 @@ func claudeDirectories(home, relative string, create bool) error {
 		}
 		info, err := os.Lstat(dir)
 		if err != nil {
-			return err
+			return stateFileError(err)
 		}
 		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-			return errors.New("unsafe Claude native directory")
+			return refusedState(errors.New("unsafe Claude native directory"))
 		}
 	}
 	return nil

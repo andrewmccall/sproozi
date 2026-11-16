@@ -50,11 +50,15 @@ func stoppedCodex(t *testing.T, thread, rows string) (home, repository string) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	name := filepath.Join(dir, "rollout-2026-10-10T18-41-51-"+thread+".jsonl")
-	if err := os.WriteFile(name, []byte(rows), 0600); err != nil {
+	if err := os.WriteFile(rolloutPath(home, thread), []byte(rows), 0600); err != nil {
 		t.Fatal(err)
 	}
 	return home, repository
+}
+
+// rolloutPath is the stopped Codex home's rollout for thread.
+func rolloutPath(home, thread string) string {
+	return filepath.Join(home, "sessions", "2026", "10", "10", "rollout-2026-10-10T18-41-51-"+thread+".jsonl")
 }
 
 const (
@@ -83,29 +87,57 @@ func TestCaptureStoppedSaysWhyItFailed(t *testing.T) {
 		thread string
 		rows   string
 		limit  int64
-		setup  func(t *testing.T, home string)
+		setup  func(t *testing.T, home, repository string)
 		want   int
 	}{
 		{"completed turn", resultThread, completed, testLimit, nil, 0},
 		{"turn cut mid-way", resultThread, sessionMeta + turnStarted, testLimit, nil, checkpoint.ExitStateRefused},
 		{"rollout of another thread", otherThread, completed, testLimit, nil, checkpoint.ExitStateRefused},
 		{"state over the checkpoint bound", resultThread, completed, 64, nil, checkpoint.ExitStateRefused},
-		{"unreadable rollout", resultThread, completed, testLimit, func(t *testing.T, home string) {
+		// The agent can remove its own rollout's permissions before it
+		// exits; the fenced state stays so.
+		{"rollout its agent made unreadable", resultThread, completed, testLimit, func(t *testing.T, home, _ string) {
 			t.Helper()
-			name := filepath.Join(home, "sessions", "2026", "10", "10", "rollout-2026-10-10T18-41-51-"+resultThread+".jsonl")
+			if os.Geteuid() == 0 {
+				t.Skip("root reads a file with no permissions")
+			}
+			name := rolloutPath(home, resultThread)
 			if err := os.Chmod(name, 0); err != nil {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = os.Chmod(name, 0600) })
-			if os.Geteuid() == 0 {
-				t.Skip("root reads a file with no permissions")
+		}, checkpoint.ExitStateRefused},
+		{"rollout its agent deleted", resultThread, completed, testLimit, func(t *testing.T, home, _ string) {
+			t.Helper()
+			if err := os.Remove(rolloutPath(home, resultThread)); err != nil {
+				t.Fatal(err)
 			}
-		}, checkpoint.ExitCaptureFailed},
+		}, checkpoint.ExitStateRefused},
+		{"sessions directory its agent replaced with a link", resultThread, completed, testLimit,
+			func(t *testing.T, home, _ string) {
+				t.Helper()
+				sessions := filepath.Join(home, "sessions")
+				moved := filepath.Join(home, "moved")
+				if err := os.Rename(sessions, moved); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(moved, sessions); err != nil {
+					t.Fatal(err)
+				}
+			}, checkpoint.ExitStateRefused},
+		// Git refusing the workspace is not classified as the state's.
+		{"workspace that is not a Git repository", resultThread, completed, testLimit,
+			func(t *testing.T, _, repository string) {
+				t.Helper()
+				if err := os.RemoveAll(filepath.Join(repository, ".git")); err != nil {
+					t.Fatal(err)
+				}
+			}, checkpoint.ExitCaptureFailed},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			home, repository := stoppedCodex(t, test.thread, test.rows)
 			if test.setup != nil {
-				test.setup(t, home)
+				test.setup(t, home, repository)
 			}
 			if got := captureCode(t, home, repository, test.thread, test.limit); got != test.want {
 				t.Fatalf("exit code %d, want %d", got, test.want)
