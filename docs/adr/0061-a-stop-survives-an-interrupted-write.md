@@ -81,8 +81,10 @@ helper (`claude-launch.py`) apply the same rules in both directions:
   login file as it stands after the supervisor's own start-up writes is its
   starting point, not a change. That write is the workspace trust merged into
   Copilot's `config.json`, a whole object with no login; Codex and Claude Code
-  have none. Only a change the harness makes after that, such as a sign-in,
-  replaces the store. A session that starts with a whole or empty store
+  have none. The periodic sync starts only once those writes are done, so no
+  sync sees them first, however long the launch preparation takes. Only a
+  change the harness makes after that, such as a sign-in, replaces the
+  store. A session that starts with a whole or empty store
   shares the start-up write as before. A file left
   half written before launch is replaced by the store's login. No particular
   member is required: which members a client writes is the client's choice,
@@ -183,6 +185,10 @@ reason changes, and once when syncing resumes.
 - Activation's first sync is bounded only while another holder keeps the
   lock. An `open` or `read` on a stalled volume is not bounded, there or in
   the stop's save: the stop returns at its bound and leaves the save running.
+  Such a save never writes the store once its bound has passed, but it can
+  still copy the store into the harness's login file: neither the
+  supervisor's `writeLogin` nor the helper's `write_native` checks the bound.
+  By then the harness has stopped, so nothing reads that file.
 - A kill from outside the supervisor, such as the kernel's out-of-memory
   killer, is recorded only once the harness is reaped. A periodic sync in
   between still trusts the file. With the rules above, it shares neither an
