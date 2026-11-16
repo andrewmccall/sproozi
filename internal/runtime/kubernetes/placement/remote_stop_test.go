@@ -265,7 +265,7 @@ func TestStopWhoseContainerNeverEndsIsUnprovenAtTheBound(t *testing.T) {
 	t.Cleanup(func() { podStopWait = previous })
 	// The launch's deadline is 30 minutes away, so only the bound ends the wait.
 	p, _, inner, l, data := setup(t)
-	e :=&stageExecutor{protocolExecutor: inner, stage: stagePod, entered: make(chan struct{}), release: make(chan struct{})}
+	e := &stageExecutor{protocolExecutor: inner, stage: stagePod, entered: make(chan struct{}), release: make(chan struct{})}
 	p.exec = e
 	i, err := p.Prepare(t.Context(), l, data)
 	if err != nil {

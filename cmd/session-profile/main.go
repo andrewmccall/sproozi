@@ -352,7 +352,8 @@ func shutdown(server *http.Server, stops *profile.Stops, drain time.Duration, lo
 	ctx, cancel = context.WithTimeout(context.Background(), drain)
 	defer cancel()
 	if drainErr := stops.Drain(ctx); drainErr != nil {
-		_, _ = fmt.Fprintf(log, "Interrupted stops still running after %s at shutdown; repeat each stop to finish it\n", drain)
+		_, _ = fmt.Fprintf(log, "Interrupted stops still running after %s at shutdown; "+
+			"repeat each stop to finish it\n", drain)
 	}
 	return err
 }

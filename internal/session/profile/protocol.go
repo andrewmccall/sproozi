@@ -58,7 +58,7 @@ const (
 const (
 	stopHandoffBound = 2*harness.NativeQuiesceWait + harness.NativeQuitWait + harness.NativeForcedStopWait +
 		harness.NativeQuiesceReplyGrace
-	stopSettleBound  = 5 * time.Minute
+	stopSettleBound = 5 * time.Minute
 	// StopBound is how long an executor carries one stop on, whether or not
 	// its request is still there to read the answer.
 	StopBound    = stopHandoffBound + stopSettleBound
