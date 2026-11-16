@@ -72,6 +72,7 @@ func (p *Placement) persistIntent(l session.Launch, data []byte) (retained, erro
 	r := retained{Launch: l}
 	return r, p.save(r)
 }
+
 // claimEpoch records l as its session epoch's one allocation. One allocation
 // per principal/session epoch prevents alternative allocation IDs from
 // replaying the same epoch through another deterministic Run name; another
