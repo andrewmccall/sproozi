@@ -266,6 +266,13 @@ type PreparationAborter interface {
 	AbortPreparation(context.Context, Launch) error
 }
 
+// ExitObserver is implemented by placements that can tell when an active
+// visit's harness exited on its own or at its deadline, without a stop being
+// requested. Stopping such a visit reports the exit.
+type ExitObserver interface {
+	Exited(context.Context, Launch, Incarnation) (bool, error)
+}
+
 // Checkpoint identifies a committed private file within the coordinator directory.
 type Checkpoint struct {
 	Metadata checkpoint.Metadata `json:"metadata"`

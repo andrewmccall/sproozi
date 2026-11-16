@@ -51,6 +51,10 @@ func TestReachExecutorRecordsAndReopensIt(t *testing.T) {
 	if _, ok := s.placement(testExecutorName).(*remote.Client); !ok || s.workSource(testExecutorName) == nil {
 		t.Fatal("executor is not a placement and a work source")
 	}
+	// The exit watcher notices a visit on the executor whose harness exited.
+	if _, ok := s.placement(testExecutorName).(session.ExitObserver); !ok {
+		t.Fatal("the exit watcher cannot ask the executor about exits")
+	}
 	path := filepath.Join(s.config.Directory, executorsFile)
 	// The platform's own privacy rule: owner-only mode bits, or an owner-only ACL
 	// on Windows.

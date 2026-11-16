@@ -11,12 +11,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// exitObserver is implemented by placements that can tell when an active
-// visit's harness exited on its own.
-type exitObserver interface {
-	Exited(context.Context, session.Launch, session.Incarnation) (bool, error)
-}
-
 // exitWatchInterval is how often the service looks for harnesses that exited
 // on their own.
 var exitWatchInterval = 5 * time.Second
@@ -60,7 +54,9 @@ func (s *Service) settleExit(ctx context.Context, id string) (bool, error) {
 	if err != nil || execution.Phase != session.PhaseActive || execution.Active == nil {
 		return false, err
 	}
-	observer, ok := s.placement(execution.Active.Launch.Placement).(exitObserver)
+	// The Docker placement and a remote executor's client observe exits; a
+	// remote executor older than the exited action reports none.
+	observer, ok := s.placement(execution.Active.Launch.Placement).(session.ExitObserver)
 	if !ok {
 		return false, nil
 	}

@@ -7,10 +7,14 @@ import (
 )
 
 func validateResponse(action string, input request, r response, max int64) error {
-	if r.Version != protocolVersion || r.Error != "" || r.Waiting != "" || r.Executor != nil {
+	if r.Version != protocolVersion || r.Error != "" || r.Waiting != "" || r.Executor != nil || r.Exited && action != actionExited {
 		return errors.New("profile: invalid success response")
 	}
 	switch action {
+	case actionExited:
+		if r.Incarnation != nil || r.Stopped != nil || r.Observation != nil || len(r.Checkpoint) > 0 {
+			return errors.New("profile: invalid exited response")
+		}
 	case actionPrepare:
 		if r.Incarnation == nil || !incarnationValid(*r.Incarnation) || r.Stopped != nil || r.Observation != nil || len(r.Checkpoint) > 0 {
 			return errors.New("profile: invalid prepared response")

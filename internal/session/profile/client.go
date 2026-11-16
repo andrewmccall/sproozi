@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/agentprofile"
@@ -41,6 +42,9 @@ type Client struct {
 	maxCheckpoint int64
 	maxBody       int64
 	profiles      func(digest string) ([]byte, error)
+	// noExits records an executor that answered that it cannot report
+	// exits, so this connection stops asking.
+	noExits atomic.Bool
 }
 
 // SetProfileSource supplies retained profile archives for launches that name
@@ -204,10 +208,36 @@ func (c *Client) AbortPreparation(ctx context.Context, l session.Launch) error {
 	return c.abortPreparationByInspection(ctx, l)
 }
 
+// Exited reports whether an active visit's harness exited on its own or at
+// its deadline, as the executor's placement observes it. An executor older
+// than the action, or one whose placement cannot observe exits, reports none,
+// as home saw before the action existed: the connection then stops asking,
+// and a new connection, after a failure or before its token expires, asks
+// again, so an updated executor is noticed.
+func (c *Client) Exited(ctx context.Context, l session.Launch, i session.Incarnation) (bool, error) {
+	if c.noExits.Load() {
+		return false, nil
+	}
+	r, err := c.call(ctx, actionExited, request{Launch: l, Incarnation: &i})
+	if actionUnsupported(err) {
+		c.noExits.Store(true)
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return r.Exited, nil
+}
+
 // preparationAbortUnsupported reports an executor that does not know the
 // action (404 invalid_request, as for any unknown action) or whose placement
 // cannot abort a preparation (unsupported).
-func preparationAbortUnsupported(err error) bool {
+func preparationAbortUnsupported(err error) bool { return actionUnsupported(err) }
+
+// actionUnsupported reports an executor that does not know an action (404
+// invalid_request, as for any unknown action) or whose placement cannot
+// perform it (unsupported).
+func actionUnsupported(err error) bool {
 	var answer *RemoteError
 	if !errors.As(err, &answer) {
 		return false
@@ -354,7 +384,7 @@ func (c *Client) Describe(ctx context.Context) (Description, error) {
 		return Description{}, &RemoteError{Code: output.Error, Status: r.StatusCode}
 	}
 	d := output.Executor
-	if output.Error != "" || d == nil || output.Incarnation != nil || output.Observation != nil || output.Stopped != nil || len(output.Checkpoint) > 0 ||
+	if output.Error != "" || d == nil || output.Incarnation != nil || output.Observation != nil || output.Stopped != nil || len(output.Checkpoint) > 0 || output.Exited ||
 		!validName(d.Placement) || d.Harness.Validate() != nil {
 		return Description{}, errors.New("profile: invalid description")
 	}
@@ -365,7 +395,7 @@ func (c *Client) Describe(ctx context.Context) (Description, error) {
 }
 
 func errorResponse(r response, status int) bool {
-	if r.Executor != nil || r.Incarnation != nil || r.Observation != nil || r.Stopped != nil || len(r.Checkpoint) > 0 {
+	if r.Executor != nil || r.Incarnation != nil || r.Observation != nil || r.Stopped != nil || len(r.Checkpoint) > 0 || r.Exited {
 		return false
 	}
 	if (r.Error == CodeTurnPending) != (r.Waiting != "") || r.Waiting != "" && waitingText(r.Waiting) != r.Waiting {
@@ -399,4 +429,5 @@ func validateCheckpoint(data []byte, l session.Launch, digest string, max int64)
 var (
 	_ session.Placement          = (*Client)(nil)
 	_ session.PreparationAborter = (*Client)(nil)
+	_ session.ExitObserver       = (*Client)(nil)
 )

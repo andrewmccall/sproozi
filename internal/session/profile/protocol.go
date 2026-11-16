@@ -41,6 +41,10 @@ const (
 	// reported an incarnation. An executor older than this action answers
 	// 404 invalid_request, as for any unknown action.
 	actionAbortPreparation = "abort-preparation"
+	// actionExited asks whether an active visit's harness exited on its own
+	// or at its deadline. An executor older than this action answers 404
+	// invalid_request, and the client then reports no exit (ADR 0062).
+	actionExited = "exited"
 )
 
 // How long the executor and its client take over each placement action (ADR
@@ -74,7 +78,8 @@ const (
 	abortWait = 2 * time.Minute
 	stopWait  = StopBound + answerMargin
 	// defaultTimeout bounds every other request, and the wait for an
-	// attachment to be admitted.
+	// attachment to be admitted. Exited is one of them: it reads the visit's
+	// Pod.
 	defaultTimeout = 45 * time.Second
 	// ShutdownRequestGrace is how long an executor shutting down gives the
 	// requests in flight before it closes their connections and drains the
@@ -241,6 +246,9 @@ type response struct {
 	Stopped     *session.Stopped     `json:"stopped,omitempty"`
 	Checkpoint  []byte               `json:"checkpoint,omitempty"`
 	Error       Code                 `json:"error,omitempty"`
+	// Exited is an exited answer's report that the visit's harness ended
+	// without a stop, and nothing else.
+	Exited bool `json:"exited,omitempty"`
 	// Waiting is what a turn_pending stop waits for, and nothing else.
 	Waiting string `json:"waiting,omitempty"`
 }
