@@ -2,6 +2,7 @@ package home
 
 import (
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -22,8 +23,23 @@ func passDeadline(t *testing.T, s *Service, execution string) {
 		t.Fatal("fixture execution has no deadline")
 	}
 	late := r.Deadline.Add(time.Second)
-	s.coordinator.SetClock(func() time.Time { return late })
+	reopenWithClock(t, s, func() time.Time { return late })
 	s.duration = 2 * time.Hour
+}
+
+// reopenWithClock reopens the service's coordinator on the same journals with
+// another clock, as a restart would.
+func reopenWithClock(t *testing.T, s *Service, now func() time.Time) {
+	t.Helper()
+	if err := s.coordinator.Close(); err != nil {
+		t.Fatal(err)
+	}
+	coordinator, err := session.Open(filepath.Join(s.config.Directory, "journal"), s.placements, testLimit,
+		session.WithClock(now))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.coordinator = coordinator
 }
 
 // wantDeadlineProblem checks a reply that names resume as the one next command.

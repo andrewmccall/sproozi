@@ -91,10 +91,19 @@ func (c *Coordinator) placement(name string) (Placement, bool) {
 	return p, ok
 }
 
+// Option configures a coordinator when it opens.
+type Option func(*Coordinator)
+
+// WithClock replaces the wall clock that deadline checks read. It is for
+// tests that pass a deadline without waiting for it; production code opens
+// a coordinator without options, so deadlines are judged against time.Now
+// alone. It is fixed when Open returns.
+func WithClock(now func() time.Time) Option { return func(c *Coordinator) { c.now = now } }
+
 // Open takes a nonblocking owner lock. Existing directories/files must be private
 // and owned by this user. Destination names are configured here, never imported
 // from checkpoint contents or an untrusted HTTP request's resource options.
-func Open(dir string, placements map[string]Placement, maxCheckpointBytes int64) (*Coordinator, error) {
+func Open(dir string, placements map[string]Placement, maxCheckpointBytes int64, options ...Option) (*Coordinator, error) {
 	if maxCheckpointBytes <= 0 || len(placements) == 0 {
 		return nil, errors.New("session: checkpoint limit and placements required")
 	}
@@ -121,6 +130,9 @@ func Open(dir string, placements map[string]Placement, maxCheckpointBytes int64)
 		return nil, fmt.Errorf("session: coordinator already owned: %w", err)
 	}
 	c := &Coordinator{dir: dir, placements: configured, maxCheckpoint: maxCheckpointBytes, lock: lock, now: time.Now}
+	for _, option := range options {
+		option(c)
+	}
 	for _, name := range []string{checkpointsDir, workspacesDir, profilesDir} {
 		sub := filepath.Join(dir, name)
 		if err = privatefs.EnsureDir(sub); err != nil {
@@ -138,11 +150,6 @@ func Open(dir string, placements map[string]Placement, maxCheckpointBytes int64)
 // SetProfileSource archives the user's profile when each move creates its
 // launch. Retries reuse the journaled launch and its retained archive.
 func (c *Coordinator) SetProfileSource(source func() ([]byte, string, error)) { c.profile = source }
-
-// SetClock replaces the clock that deadline checks read, before the
-// coordinator is shared. Owners' tests use it to pass a deadline without
-// waiting for it.
-func (c *Coordinator) SetClock(now func() time.Time) { c.now = now }
 
 // ProfileArchive returns a retained profile archive by digest.
 func (c *Coordinator) ProfileArchive(digest string) ([]byte, error) {
