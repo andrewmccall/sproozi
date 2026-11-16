@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/deadline"
+	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/testutil"
 )
 
@@ -35,6 +36,8 @@ func TestVisitWithoutDeadline(t *testing.T) {
 		t.Fatalf("visit without deadline stopped: exited %v %v", exited, err)
 	}
 	agent.State.Running, agent.State.Pid, agent.State.Status = false, 0, exitedStatus
+	// The supervisor reports every ending but a graceful stop.
+	agent.logs = []byte(harness.NativeExitReportPrefix + `{"code":-1,"cause":"exited"}` + "\n")
 	if exited, err := p.Exited(t.Context(), l, i); err != nil || !exited {
 		t.Fatalf("crashed agent not reported: %v %v", exited, err)
 	}

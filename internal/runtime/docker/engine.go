@@ -282,12 +282,18 @@ func (e *Engine) command(ctx context.Context, args ...string) ([]byte, error) {
 // ExitReport reads the supervisor's exit report from a stopped agent's
 // output. It is a bounded workload diagnostic; ok is false when there is none.
 func (e *Engine) ExitReport(ctx context.Context, instance Instance) (harness.NativeExitReport, bool) {
-	if !objectID.MatchString(instance.ID) {
-		return harness.NativeExitReport{}, false
-	}
-	data, err := e.command(ctx, containerCommand, "logs", "--tail", "50", instance.ID)
+	data, err := e.ExitLogs(ctx, instance)
 	if err != nil {
 		return harness.NativeExitReport{}, false
 	}
 	return harness.ParseNativeExitReport(data)
+}
+
+// ExitLogs reads the agent container's last 50 output lines, where the
+// supervisor writes its exit report.
+func (e *Engine) ExitLogs(ctx context.Context, instance Instance) ([]byte, error) {
+	if !objectID.MatchString(instance.ID) {
+		return nil, errors.New("docker container ID invalid")
+	}
+	return e.command(ctx, containerCommand, "logs", "--tail", "50", instance.ID)
 }

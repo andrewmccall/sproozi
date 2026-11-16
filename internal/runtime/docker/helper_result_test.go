@@ -110,6 +110,39 @@ func TestDockerStopReadsTheCaptureHelpersExitCode(t *testing.T) {
 	}
 }
 
+// A stop that finds the agent container already stopped by its own quiesce,
+// as when the stop that sent it lost the reply and ended before it saw the
+// container stop, is a graceful stop of a harness whose state proves
+// completion: the supervisor exited 0 and wrote no exit report. No exit is
+// recorded, and a capture that fails is retried and keeps the conversation,
+// as on Kubernetes.
+func TestDockerStopAfterALostQuiesceReplyIsGraceful(t *testing.T) {
+	t.Parallel()
+	data := fixtureArtifact(t)
+	f := newFakeDocker()
+	f.capture = data
+	p := openFixture(t, testutil.PrivateDir(t), f, &fakeAuthority{engine: f})
+	l := fixtureLaunch(t, data)
+	i, err := p.Prepare(t.Context(), l, data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = p.Activate(t.Context(), l, i); err != nil {
+		t.Fatal(err)
+	}
+	c := f.containers[i.ResourceUID]
+	c.State.Running, c.State.Pid, c.State.Status = false, 0, exitedStatus
+	f.captureExit = checkpoint.ExitCaptureFailed
+	if _, err = p.Stop(t.Context(), l, i); err == nil {
+		t.Fatal("a failed capture after a lost reply was not retried")
+	}
+	f.captureExit = 0
+	stopped, err := p.Stop(t.Context(), l, i)
+	if err != nil || stopped.Exit != nil || !bytes.Equal(stopped.Checkpoint, data) {
+		t.Fatalf("lost reply: digest %q, exit %+v: %v", stopped.CheckpointDigest, stopped.Exit, err)
+	}
+}
+
 // The case ADR 0062 exists for: a Codex agent that exited by itself with its
 // turn unfinished. The helper refuses that state, and the stop finishes,
 // keeping what the visit started from and logging the discard.

@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -928,6 +929,10 @@ func (p *Placement) quiesceNative(ctx context.Context, r *placementRecord, i ses
 		}
 		// Only a turnless first visit quiesces without a bound thread.
 		r.Turnless = thread == ""
+	} else if p.endedGracefully(ctx, *r, state) {
+		// A stop whose quiesce reply was lost, and whose own call did not
+		// see the container stop, as the Kubernetes placement decides.
+		r.Turnless = r.thread() == ""
 	} else if err = p.recordExit(ctx, r, i, state); err != nil {
 		return err
 	}
@@ -965,6 +970,20 @@ func (p *Placement) recordExit(ctx context.Context, r *placementRecord, i sessio
 		r.Thread = report.Thread
 	}
 	return p.save(*r)
+}
+
+// endedGracefully reports, for a stop that finds the agent container already
+// stopped, that this placement's own quiesce stopped it and its reply was
+// lost: a harness whose state proves completion, a supervisor that exited 0
+// and output, read, that holds no exit report. The supervisor writes one for
+// every other ending (ADR 0038, ADR 0062). A Claude Code container never
+// proves its turn, so its ending is always an exit.
+func (p *Placement) endedGracefully(ctx context.Context, r placementRecord, state Observation) bool {
+	if !harness.ProvesCompletion(r.Launch.Harness) || state.ExitCode != 0 {
+		return false
+	}
+	logs, err := p.engine.ExitLogs(ctx, *r.Agent)
+	return err == nil && !bytes.Contains(logs, []byte(harness.NativeExitReportPrefix))
 }
 
 // agentStops reports whether the agent container is observed stopped within

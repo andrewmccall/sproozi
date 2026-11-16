@@ -265,6 +265,11 @@ func (f *fakeDocker) containerCommand(args []string) ([]byte, error) {
 		if f.failStop {
 			return nil, errors.New("engine stop failed")
 		}
+		if c.State.Running {
+			// A supervisor stopped from outside reports why, as the real
+			// one does on SIGTERM.
+			c.logs = append(c.logs, []byte(harness.NativeExitReportPrefix+`{"code":-1,"cause":"terminated"}`+"\n")...)
+		}
 		c.State.Running = false
 		c.State.Status = exitedStatus
 		c.State.Pid = 0
