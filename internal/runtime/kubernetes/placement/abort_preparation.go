@@ -176,7 +176,7 @@ func isConflict(err error) bool {
 // since the executor creates the run only after the registration. A Pod
 // whose run an administrator also deleted is missed: finding it needs a
 // list of Pods by run label, which the executor's Role does not grant (ADR
-// 0057, section 12).
+// 0057, section 13).
 func (p *Placement) preparationRegistration(ctx context.Context, local retained) (registry.Record, bool, error) {
 	var r registry.Record
 	var err error
