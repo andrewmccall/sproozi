@@ -175,7 +175,10 @@ login file is shared: one that is not a JSON object (after Copilot's comment
 header) stays in its session. A sign-out is shared only while the harness
 runs, so a login file emptied or removed once a stop has begun leaves the
 store as it was, and nothing from the file is shared once the supervisor has
-killed the harness or its deadline has passed. With no login
+killed the harness or its deadline has passed. Each sync waits at most five
+seconds for the store's lock; a stop whose save cannot take it in that time
+completes anyway, leaves the store as it was and logs the missed save on the
+supervisor's standard error. With no login
 stored yet, sign in inside the session as you would on your own machine
 (`/login`, or Codex's device-code sign-in). Sproozi never copies a login from
 your machine, and the login never enters a checkpoint, so a session moved here
