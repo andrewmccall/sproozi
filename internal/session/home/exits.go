@@ -68,15 +68,13 @@ func (s *Service) sweepExits(ctx context.Context) <-chan struct{} {
 		if _, running := s.exitChecks.LoadOrStore(id, struct{}{}); running {
 			continue
 		}
-		checks.Add(1)
-		go func() {
-			defer checks.Done()
+		checks.Go(func() {
 			defer s.exitChecks.Delete(id)
 			_, err := s.settleExit(ctx, id)
 			if ctx.Err() == nil {
 				s.noteExitCheck(id, err)
 			}
-		}()
+		})
 	}
 	return done
 }

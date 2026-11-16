@@ -175,6 +175,7 @@ func (p *Placement) lockOperation(l session.Launch) (func(), error) {
 	}
 	return unlock, nil
 }
+
 // tryLockOperation is lockOperation that reports busy instead of waiting
 // while another operation holds the launch's session or allocation.
 func (p *Placement) tryLockOperation(l session.Launch) (unlock func(), busy bool, err error) {
