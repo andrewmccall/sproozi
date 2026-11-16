@@ -82,7 +82,11 @@ func TestDrainInterruptsStopsPastItsBoundAndRefusesNewOnes(t *testing.T) {
 // home that keeps timing out do not queue stops behind the visit's lock.
 func TestStopsOfOneVisitShareOneFlight(t *testing.T) {
 	t.Parallel()
-	c, b, _, l, i, ended := heldFixture(t, 0)
+	c, b, h, l, i, ended := heldFixture(t, 0)
+	joined := make(chan struct{}, 2)
+	h.stops.mu.Lock()
+	h.stops.joined = func() { joined <- struct{}{} }
+	h.stops.mu.Unlock()
 	heldStop(t, c, b, l, i, ended)
 	retried := make(chan error, 2)
 	for range 2 {
@@ -94,7 +98,8 @@ func TestStopsOfOneVisitShareOneFlight(t *testing.T) {
 			retried <- err
 		}()
 	}
-	time.Sleep(100 * time.Millisecond)
+	awaitSignal(t, joined, "the first retry joining the stop")
+	awaitSignal(t, joined, "the second retry joining the stop")
 	close(b.release)
 	for range 2 {
 		select {

@@ -27,6 +27,8 @@ type Stops struct {
 	others  map[*stopFlight]struct{}
 	running sync.WaitGroup
 	closed  bool
+	// joined, when set, is told each time a stop joins a running one.
+	joined func()
 }
 
 // stopKey names one visit: its allocation and incarnation.
@@ -87,7 +89,11 @@ func (s *Stops) run(ctx context.Context, input request, bound time.Duration, sto
 	s.mu.Lock()
 	for _, f := range s.flights[key] {
 		if sameLaunch(f.launch, input.Launch) {
+			joined := s.joined
 			s.mu.Unlock()
+			if joined != nil {
+				joined()
+			}
 			select {
 			case <-f.done:
 				return f.output, f.err
