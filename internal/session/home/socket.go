@@ -367,7 +367,7 @@ func (s *Service) handle(ctx context.Context, conn net.Conn) {
 	case ActionSessions:
 		sessions, err = s.Sessions(work.SessionQuery{Project: q.Project})
 	case ActionRemove:
-		status, err = s.Remove(q.ID)
+		status, err = s.Remove(ctx, q.ID)
 	}
 	response := Response{Sessions: sessions}
 	if status.ID != "" {

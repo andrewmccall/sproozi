@@ -391,6 +391,10 @@ func (s *Service) ResumeWithMaxDuration(ctx context.Context, id, operation strin
 	if err = s.retireSettled(&r); err != nil {
 		return Status{}, err
 	}
+	// The resume does not need them gone; the next command tries again.
+	if err = s.releaseOrphans(ctx, r); err != nil {
+		s.logf("Failed to release an execution session %s never recorded: %v\n", id, err)
+	}
 	allowances, err := s.projectAllowances(r)
 	if err != nil {
 		return Status{}, err

@@ -1,6 +1,7 @@
 package home
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -16,8 +17,9 @@ import (
 // nothing else uses. It refuses a session that still has a writer, an
 // operation in progress, unsettled usage or an unfinished pull (nextSteps).
 // Accounting and grant records, and the placement's evidence of each
-// finished visit, are kept.
-func (s *Service) Remove(id string) (Status, error) {
+// finished visit, are kept. Executions of the session that its entry never
+// recorded are released first (releaseOrphans), so none outlives the session.
+func (s *Service) Remove(ctx context.Context, id string) (Status, error) {
 	unlock, err := s.lockSession(id)
 	if err != nil {
 		return Status{}, err
@@ -39,6 +41,9 @@ func (s *Service) Remove(id string) (Status, error) {
 			return Status{}, stateErr
 		}
 		if err = refusal(id, st, ActionRemove); err != nil {
+			return Status{}, err
+		}
+		if err = s.releaseOrphans(ctx, r); err != nil {
 			return Status{}, err
 		}
 		catalogued, c = true, &r

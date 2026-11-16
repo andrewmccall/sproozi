@@ -94,3 +94,78 @@ func TestAStopWhoseCatalogueWriteFailedReadsAsStopped(t *testing.T) {
 		t.Fatalf("remove replied %+v", r)
 	}
 }
+
+// interruptedResume stops a started session and resumes it while the
+// catalogue is full, so the resume retains its new execution but cannot
+// record it in the session's catalogue entry.
+func interruptedResume(t *testing.T, s *Service, id string) string {
+	t.Helper()
+	if _, err := s.Stop(t.Context(), id, uuid.NewString()); err != nil {
+		t.Fatal(err)
+	}
+	release := fillCatalogue(t, s)
+	operation := uuid.NewString()
+	if _, err := s.Resume(t.Context(), id, operation, nil); err == nil {
+		t.Fatal("resume recorded its execution past the catalogue's limit")
+	}
+	release()
+	ids, err := s.coordinator.List()
+	if err != nil || len(ids) != 2 {
+		t.Fatalf("the interrupted resume retained no execution: %v %v", ids, err)
+	}
+	return operation
+}
+
+// An interrupted resume's execution, which its session never recorded, is
+// removed with the session.
+func TestRemoveTakesAnInterruptedResumesExecution(t *testing.T) {
+	t.Parallel()
+	s, local, _, repo := testService(t)
+	id := startedOn(t, s, repo, testLocal)
+	interruptedResume(t, s, id)
+	if local.prepares != 0 {
+		t.Fatalf("the interrupted resume prepared its execution: %d", local.prepares)
+	}
+	if r := exchange(t, s, Request{Action: ActionRemove, ID: id}); r.Error != "" {
+		t.Fatalf("remove replied %+v", r)
+	}
+	if ids, err := s.coordinator.List(); err != nil || len(ids) != 0 {
+		t.Fatalf("remove left executions: %v %v", ids, err)
+	}
+	if count := countFiles(t, filepath.Join(s.config.Directory, "journal")); count != 0 {
+		t.Fatalf("remove left %d journal files", count)
+	}
+}
+
+// The session's next resume releases the retention slot an interrupted
+// resume's execution held, whether it repeats the interrupted operation or
+// starts another, and never starts that execution.
+func TestResumeReleasesAnInterruptedResumesExecution(t *testing.T) {
+	t.Parallel()
+	for _, repeat := range []bool{false, true} {
+		t.Run(fmt.Sprintf("repeat=%v", repeat), func(t *testing.T) {
+			t.Parallel()
+			s, local, _, repo := testService(t)
+			id := startedOn(t, s, repo, testLocal)
+			operation := interruptedResume(t, s, id)
+			if !repeat {
+				operation = uuid.NewString()
+			}
+			resumed, err := s.Resume(t.Context(), id, operation, nil)
+			if err != nil || resumed.Phase != string(session.PhaseActive) {
+				t.Fatalf("resume after the interruption: %+v %v", resumed, err)
+			}
+			ids, err := s.coordinator.List()
+			if err != nil || len(ids) != 2 {
+				t.Fatalf("executions after the resume: %v %v", ids, err)
+			}
+			c, err := s.readCatalog(id)
+			if err != nil || len(c.Executions) != 2 || c.Current != resumed.ExecutionID {
+				t.Fatalf("catalogue after the resume: %+v %v", c, err)
+			}
+			if local.prepares != 1 || local.activations != 2 {
+				t.Fatalf("prepares %d, activations %d", local.prepares, local.activations)
+			}
+		})
+	}
+}
