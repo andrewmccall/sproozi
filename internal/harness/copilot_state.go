@@ -31,13 +31,14 @@ func CopilotEventsPath(threadID string) (string, error) {
 }
 
 // CaptureCopilotState reads the session's journal after the caller has
-// stopped every native writer, and checks that its last turn completed.
+// stopped every native writer, and checks that its last turn completed. A
+// final row the stopped writer did not finish is left out (stoppedJournal).
 func CaptureCopilotState(home, threadID string, maxBytes int64) (CopilotState, error) {
 	data, err := readCopilotEvents(home, threadID, maxBytes)
 	if err != nil {
 		return CopilotState{}, err
 	}
-	state := CopilotState{ThreadID: threadID, Events: data}
+	state := CopilotState{ThreadID: threadID, Events: stoppedJournal(data)}
 	if _, err = CompletedCopilotTurn(state, maxBytes); err != nil {
 		return CopilotState{}, err
 	}

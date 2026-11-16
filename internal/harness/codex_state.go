@@ -28,6 +28,7 @@ type CodexState struct {
 // CaptureCodexState selects one native rollout after the supervisor has stopped
 // every native writer. A completed-turn marker alone does not prove process stop.
 // Only the selected native session file is selected; no home or index DB is copied.
+// A final row the stopped writer did not finish is left out (stoppedJournal).
 func CaptureCodexState(home, threadID string, maxBytes int64) (CodexState, error) {
 	if !codexThreadID.MatchString(threadID) || maxBytes <= 0 {
 		return CodexState{}, fmt.Errorf("invalid Codex checkpoint selection")
@@ -68,7 +69,7 @@ func CaptureCodexState(home, threadID string, maxBytes int64) (CodexState, error
 		if err != nil {
 			return err
 		}
-		result = CodexState{ThreadID: threadID, Path: filepath.ToSlash(relative), Rollout: data}
+		result = CodexState{ThreadID: threadID, Path: filepath.ToSlash(relative), Rollout: stoppedJournal(data)}
 		workspace, _, err := inspectCodexState(result, maxBytes)
 		result.Workspace = workspace
 		return err

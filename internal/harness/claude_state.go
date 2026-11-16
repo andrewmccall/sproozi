@@ -83,6 +83,7 @@ func ClaudeProjectPath(workspace, threadID string) (string, error) {
 // CaptureClaudeState selects exact bounded transcript bytes after the caller
 // has independently stopped every native/workspace writer. It verifies a settled
 // primary chain and resolved foreground Bash tools, not a live turn completion.
+// A final row the stopped writer did not finish is left out (stoppedJournal).
 func CaptureClaudeState(home, workspace, threadID string, maxBytes int64) (ClaudeState, error) {
 	path, err := ClaudeProjectPath(workspace, threadID)
 	if err != nil || maxBytes <= 0 {
@@ -108,7 +109,7 @@ func CaptureClaudeState(home, workspace, threadID string, maxBytes int64) (Claud
 	if readErr != nil || closeErr != nil {
 		return ClaudeState{}, errors.Join(readErr, closeErr)
 	}
-	state := ClaudeState{ThreadID: threadID, Workspace: workspace, Path: path, Transcript: data}
+	state := ClaudeState{ThreadID: threadID, Workspace: workspace, Path: path, Transcript: stoppedJournal(data)}
 	if _, err = ClaudeTranscriptLeaf(state, maxBytes); err != nil {
 		return ClaudeState{}, err
 	}
