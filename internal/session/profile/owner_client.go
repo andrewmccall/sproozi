@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/andrewmccall/sproozi/internal/agentprofile"
 )
@@ -36,11 +37,12 @@ func (c *Client) CallOwner(ctx context.Context, action string, input, output any
 	}
 	r.Header.Set(headerAuthorization, bearerPrefix+c.token)
 	r.Header.Set(headerContentType, jsonMedia)
-	response, err := c.http.Do(r)
+	response, release, err := c.do(r, ownerWait(action))
 	if err != nil {
 		return fmt.Errorf("%s: %w", OwnerOutcomeMessage(CodeUnavailable),
 			&RemoteError{Code: CodeUnavailable, Transport: err})
 	}
+	defer release()
 	defer func() { _ = response.Body.Close() }()
 	data, err := io.ReadAll(io.LimitReader(response.Body, c.maxBody+1))
 	if err != nil || int64(len(data)) > c.maxBody {
@@ -65,6 +67,19 @@ func (c *Client) CallOwner(ctx context.Context, action string, input, output any
 		return ownerFailure(CodeUnavailable, response.StatusCode)
 	}
 	return nil
+}
+
+// ownerWait is how long an owner action may take on the executor: a stop, or
+// a recovery that continues one, as long as a placement stop; a cancellation
+// as long as an abort. It is zero for a short action.
+func ownerWait(action string) time.Duration {
+	switch action {
+	case "stop", "recover":
+		return stopWait
+	case "cancel":
+		return abortWait
+	}
+	return 0
 }
 
 // OpenOwnerAttachment attaches to an interactive session the remote work

@@ -49,6 +49,10 @@ type handler struct {
 	config  Config
 	home    Authorizer
 	maxBody int64
+	// stops are the stops this executor carries on after their requests
+	// end, each for at most stopBound.
+	stops     stops
+	stopBound time.Duration
 }
 
 // ErrUnauthenticated means a bearer token identifies no caller at all.
@@ -100,7 +104,7 @@ func NewHandler(config Config) (http.Handler, error) {
 		return nil, errors.New("profile: home principal authorizer required")
 	}
 	config.Authorizer = nil
-	return &handler{config: config, home: home, maxBody: maxBody}, nil
+	return &handler{config: config, home: home, maxBody: maxBody, stopBound: StopBound}, nil
 }
 
 // validToken trims a bearer token and checks the length and characters every
@@ -306,7 +310,12 @@ func (h *handler) perform(r *http.Request, action string, input request) (respon
 			return output, err
 		}
 	case actionStop:
-		s, err := p.Stop(r.Context(), input.Launch, *input.Incarnation)
+		// The stop goes on to its outcome if home goes away or gives up, so
+		// a quiesce in flight is never abandoned; its retry, or an abort of
+		// the same visit, which interrupts it, waits for it.
+		ctx, done := h.stops.begin(r.Context(), input.Launch.AllocationID, h.stopBound)
+		defer done()
+		s, err := p.Stop(ctx, input.Launch, *input.Incarnation)
 		// A fenced writer with unsealed usage is a stop result, not a failure:
 		// its nil receipt tells the client to keep the allocation encumbered.
 		if errors.Is(err, session.ErrUsageUnsealed) && s.ActualStopped {
@@ -324,6 +333,7 @@ func (h *handler) perform(r *http.Request, action string, input request) (respon
 		if action == actionInspect {
 			o, err = p.Inspect(r.Context(), input.Launch)
 		} else {
+			h.stops.interrupt(input.Launch.AllocationID)
 			o, err = p.Abort(r.Context(), input.Launch, *input.Incarnation)
 		}
 		if err != nil {

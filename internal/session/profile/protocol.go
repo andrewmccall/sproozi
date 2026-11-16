@@ -43,6 +43,39 @@ const (
 	actionAbortPreparation = "abort-preparation"
 )
 
+// How long the executor and its client take over each placement action (ADR
+// 0036, amendment of 2026-11-16). A stop's graceful handoff lasts at most
+// stopHandoffBound: a first visit waits up to harness.NativeQuiesceWait for
+// its conversation ID and as long again for its turn (ADR 0035), then the
+// supervisor waits 30 seconds for the harness to exit after its quit, 3
+// seconds after killing it, and quiesceReplyRead for its reply to be read.
+// What follows (revoking the grant, the container ending, sealing usage,
+// capturing and recording the checkpoint) gets stopSettleBound. The executor
+// carries a stop on for StopBound after its request ends; the client waits
+// answerMargin longer than an executor may take, so even an answer at the
+// bound arrives.
+const (
+	quiesceReplyRead = 10 * time.Second
+	stopHandoffBound = 2*harness.NativeQuiesceWait + 30*time.Second + 3*time.Second + quiesceReplyRead
+	stopSettleBound  = 5 * time.Minute
+	// StopBound is how long an executor carries one stop on, whether or not
+	// its request is still there to read the answer.
+	StopBound    = stopHandoffBound + stopSettleBound
+	answerMargin = time.Minute
+	// interactivePodWait is how long a preparation waits for an interactive
+	// visit's Pod to run; sending and restoring its checkpoint gets five
+	// minutes more.
+	interactivePodWait = 2 * time.Minute
+	prepareWait        = interactivePodWait + 5*time.Minute + answerMargin
+	// abortWait covers the Pod's termination grace period, 30 seconds by
+	// default, and sealing usage.
+	abortWait = 2 * time.Minute
+	stopWait  = StopBound + answerMargin
+	// defaultTimeout bounds every other request, and the wait for an
+	// attachment to be admitted.
+	defaultTimeout = 45 * time.Second
+)
+
 // Code describes a stable transport outcome. Unavailable never means absence.
 type Code string
 

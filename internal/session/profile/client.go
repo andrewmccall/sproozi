@@ -31,9 +31,13 @@ func fixedOrigin(raw string) bool {
 
 // Client implements Placement without holding Kubernetes credentials.
 type Client struct {
-	base          string
-	token         string
+	base  string
+	token string
+	// http is bounded by the connection's timeout, for short requests and an
+	// attachment's admission. long has no bound of its own: each request it
+	// carries waits as long as its action may take (wait).
 	http          *http.Client
+	long          *http.Client
 	maxCheckpoint int64
 	maxBody       int64
 	profiles      func(digest string) ([]byte, error)
@@ -47,6 +51,8 @@ func (c *Client) SetProfileSource(source func(digest string) ([]byte, error)) { 
 // origin its certificate covers; Roots, when set, replace the system roots.
 // Dial, when set, replaces the network path to Origin with a byte stream the
 // caller opens, such as a Kubernetes port-forward; TLS still runs over it.
+// Timeout, 45 seconds when zero, bounds short requests; prepare, stop and
+// abort wait as long as the executor may take over them, and never less.
 type Connection struct {
 	Origin             string
 	Token              string
@@ -72,7 +78,7 @@ func Connect(config Connection) (*Client, error) {
 	u, _ := url.Parse(config.Origin)
 	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS13, RootCAs: config.Roots}
 	if config.Timeout == 0 {
-		config.Timeout = 45 * time.Second
+		config.Timeout = defaultTimeout
 	}
 	if config.Timeout < 0 || config.Timeout > time.Hour {
 		return nil, errors.New("profile: invalid timeout")
@@ -81,12 +87,52 @@ func Connect(config Connection) (*Client, error) {
 	if dial := config.Dial; dial != nil {
 		transport.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) { return dial(ctx) }
 	}
-	client := &http.Client{Transport: transport, Timeout: config.Timeout, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
-	return &Client{base: strings.TrimSuffix(u.String(), "/"), token: token, http: client, maxCheckpoint: config.MaxCheckpointBytes, maxBody: maxBody}, nil
+	// A long action answers only when it ends, so its headers wait as long.
+	longTransport := transport.Clone()
+	longTransport.ResponseHeaderTimeout = 0
+	noRedirect := func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
+	client := &http.Client{Transport: transport, Timeout: config.Timeout, CheckRedirect: noRedirect}
+	long := &http.Client{Transport: longTransport, CheckRedirect: noRedirect}
+	return &Client{base: strings.TrimSuffix(u.String(), "/"), token: token, http: client, long: long, maxCheckpoint: config.MaxCheckpointBytes, maxBody: maxBody}, nil
 }
 
 // Close releases idle transport connections; it does not revoke an allocation.
-func (c *Client) Close() { c.http.CloseIdleConnections() }
+func (c *Client) Close() {
+	c.http.CloseIdleConnections()
+	c.long.CloseIdleConnections()
+}
+
+// wait is how long a placement action may take on the executor, plus a
+// margin for its answer. It is zero for a short action, which the
+// connection's timeout bounds.
+func (c *Client) wait(action string) time.Duration {
+	switch action {
+	case actionPrepare:
+		return prepareWait
+	case actionStop:
+		return stopWait
+	case actionAbort:
+		return abortWait
+	}
+	return 0
+}
+
+// do sends req, bounded by wait, but never less than the connection's
+// timeout, when wait is set, and by the connection's timeout otherwise. The
+// caller reads the body before calling the returned release.
+func (c *Client) do(req *http.Request, wait time.Duration) (*http.Response, func(), error) {
+	if wait == 0 {
+		r, err := c.http.Do(req)
+		return r, func() {}, err
+	}
+	ctx, cancel := context.WithTimeout(req.Context(), max(wait, c.http.Timeout))
+	r, err := c.long.Do(req.WithContext(ctx))
+	if err != nil {
+		cancel()
+		return nil, func() {}, err
+	}
+	return r, cancel, nil
+}
 
 func (c *Client) Prepare(ctx context.Context, l session.Launch, data []byte) (session.Incarnation, error) {
 	if err := validateCheckpoint(data, l, l.CheckpointDigest, c.maxCheckpoint); err != nil {
@@ -241,10 +287,11 @@ func (c *Client) call(ctx context.Context, action string, input request) (respon
 	}
 	req.Header.Set(headerAuthorization, bearerPrefix+c.token)
 	req.Header.Set(headerContentType, jsonMedia)
-	r, err := c.http.Do(req)
+	r, release, err := c.do(req, c.wait(action))
 	if err != nil {
 		return response{}, err
 	}
+	defer release()
 	defer func() { _ = r.Body.Close() }()
 	media, _, mediaErr := mime.ParseMediaType(r.Header.Get(headerContentType))
 	if mediaErr != nil || media != jsonMedia {
