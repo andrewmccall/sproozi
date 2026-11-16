@@ -60,11 +60,13 @@ func (s *Service) sweepExits(ctx context.Context) <-chan struct{} {
 	if err != nil {
 		return done
 	}
+	catalogued := make(map[string]bool, len(entries))
 	for _, entry := range entries {
 		id, ok := strings.CutSuffix(entry.Name(), ".json")
 		if !ok {
 			continue
 		}
+		catalogued[id] = true
 		if _, running := s.exitChecks.LoadOrStore(id, struct{}{}); running {
 			continue
 		}
@@ -76,6 +78,13 @@ func (s *Service) sweepExits(ctx context.Context) <-chan struct{} {
 			}
 		})
 	}
+	// A session removed while its check was failing logs nothing more.
+	s.exitProblems.Range(func(id, _ any) bool {
+		if !catalogued[id.(string)] {
+			s.exitProblems.Delete(id)
+		}
+		return true
+	})
 	return done
 }
 

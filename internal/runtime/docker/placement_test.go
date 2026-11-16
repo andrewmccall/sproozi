@@ -78,7 +78,9 @@ type fakeDocker struct {
 	// captureFrom runs the helper's capture on a fixture state instead.
 	captureExit int
 	// cliFails makes the docker CLI itself fail the capture with code 1.
-	cliFails                bool
+	cliFails bool
+	// failLogs makes reading a container\'s output fail.
+	failLogs                bool
 	captureFrom             func(context.Context) ([]byte, error)
 	failRemove              bool
 	rejectNativeActivation  bool
@@ -257,6 +259,9 @@ func (f *fakeDocker) containerCommand(args []string) ([]byte, error) {
 	case "inspect":
 		return json.Marshal([]any{c})
 	case "logs":
+		if f.failLogs {
+			return nil, errors.New("docker logs unavailable")
+		}
 		return c.logs, nil
 	case "start":
 		c.State.Running = true

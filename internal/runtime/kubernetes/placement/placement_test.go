@@ -247,11 +247,16 @@ type protocolExecutor struct {
 	// logs is the native container's output, where the supervisor writes
 	// its exit report.
 	logs []byte
+	// logsErr makes reading the native container's output fail.
+	logsErr error
 }
 
 func (e *protocolExecutor) Logs(_ context.Context, _, _, container string) ([]byte, error) {
 	if container != nativeContainer {
 		return nil, errors.New("unexpected container logs")
+	}
+	if e.logsErr != nil {
+		return nil, e.logsErr
 	}
 	return e.logs, nil
 }

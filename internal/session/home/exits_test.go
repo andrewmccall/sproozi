@@ -60,6 +60,24 @@ func TestAnUnreachablePlacementDelaysNoOtherExitCheck(t *testing.T) {
 	cancel()
 }
 
+// A session removed while its exit check was failing leaves nothing behind.
+func TestRemovedSessionsExitProblemIsCleared(t *testing.T) {
+	t.Parallel()
+	s, _, _, repo := testService(t)
+	kept := startedOn(t, s, repo, testLocal)
+	removed := uuid.NewString()
+	s.exitProblems.Store(removed, "executor unreachable")
+	s.exitProblems.Store(kept, "executor unreachable")
+	select {
+	case <-s.sweepExits(t.Context()):
+	case <-time.After(5 * time.Second):
+		t.Fatal("sweep did not finish")
+	}
+	if _, found := s.exitProblems.Load(removed); found {
+		t.Fatal("a removed session's exit problem was kept")
+	}
+}
+
 // A failing exit check is logged once each time its reason changes and once
 // when checks succeed again, not on every sweep.
 func TestFailedExitCheckIsLoggedOncePerReason(t *testing.T) {
