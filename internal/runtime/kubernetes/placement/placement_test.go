@@ -254,39 +254,53 @@ func (e *protocolExecutor) Execute(ctx context.Context, namespace, pod, containe
 		}
 	}
 	if container == runtimekube.CaptureContainer {
-		switch args[1] {
-		case helperPrepareWorkspace:
-			if slices.Contains(args, "--instruction-digest") {
-				return errors.New("initial workspace restore cannot accept resume-only instructions")
-			}
-			data, err := io.ReadAll(input)
-			if err != nil || string(data) != string(e.initial) {
-				return errors.New("invalid initial input")
-			}
-			return json.NewEncoder(output).Encode(checkpoint.Metadata{Harness: e.meta.Harness, SHA256: fmt.Sprintf("%x", sha256.Sum256(data)), Bytes: len(data)})
-		case helperPrepare:
-			data, err := io.ReadAll(input)
-			if err != nil || string(data) != string(e.data) {
-				return errors.New("invalid input")
-			}
-			return json.NewEncoder(output).Encode(e.meta)
-		case helperCapture:
-			e.captureArgs = append([]string(nil), args...)
-			if e.captureErr != nil {
-				return e.captureErr
-			}
-			_, err := output.Write(e.data)
+		if handled, err := e.helper(ctx, namespace, pod, args, input, output); handled {
 			return err
-		case helperFinish:
-			e.finishes++
-			var actual corev1.Pod
-			if err := e.kube.Get(ctx, client.ObjectKey{Namespace: namespace, Name: pod}, &actual); err != nil {
-				return err
-			}
-			actual.Status.ContainerStatuses[1].State = fixtureTermination(actual.Status.ContainerStatuses[1].ContainerID, 0)
-			return e.kube.Status().Update(ctx, &actual)
 		}
 	}
+	return e.supervisor(ctx, namespace, pod, args, output)
+}
+
+// helper answers the fixed capture helper's commands, and reports false for
+// any other command.
+func (e *protocolExecutor) helper(ctx context.Context, namespace, pod string, args []string, input io.Reader, output io.Writer) (bool, error) {
+	switch args[1] {
+	case helperPrepareWorkspace:
+		if slices.Contains(args, "--instruction-digest") {
+			return true, errors.New("initial workspace restore cannot accept resume-only instructions")
+		}
+		data, err := io.ReadAll(input)
+		if err != nil || string(data) != string(e.initial) {
+			return true, errors.New("invalid initial input")
+		}
+		return true, json.NewEncoder(output).Encode(checkpoint.Metadata{Harness: e.meta.Harness, SHA256: fmt.Sprintf("%x", sha256.Sum256(data)), Bytes: len(data)})
+	case helperPrepare:
+		data, err := io.ReadAll(input)
+		if err != nil || string(data) != string(e.data) {
+			return true, errors.New("invalid input")
+		}
+		return true, json.NewEncoder(output).Encode(e.meta)
+	case helperCapture:
+		e.captureArgs = append([]string(nil), args...)
+		if e.captureErr != nil {
+			return true, e.captureErr
+		}
+		_, err := output.Write(e.data)
+		return true, err
+	case helperFinish:
+		e.finishes++
+		var actual corev1.Pod
+		if err := e.kube.Get(ctx, client.ObjectKey{Namespace: namespace, Name: pod}, &actual); err != nil {
+			return true, err
+		}
+		actual.Status.ContainerStatuses[1].State = fixtureTermination(actual.Status.ContainerStatuses[1].ContainerID, 0)
+		return true, e.kube.Status().Update(ctx, &actual)
+	}
+	return false, nil
+}
+
+// supervisor answers the native supervisor's commands.
+func (e *protocolExecutor) supervisor(ctx context.Context, namespace, pod string, args []string, output io.Writer) error {
 	switch args[1] {
 	case string(harness.NativeActivate):
 		if !e.skipActivate {
@@ -303,8 +317,8 @@ func (e *protocolExecutor) Execute(ctx context.Context, namespace, pod, containe
 			return errors.New("native completed turn remains unavailable")
 		}
 		if e.pendingQuiesce {
-			return json.NewEncoder(output).Encode(map[string]any{"op": args[1], "state": e.state, "threadId": fixtureThread,
-				"waiting": "the native turn to complete"})
+			return json.NewEncoder(output).Encode(harness.NativeReply{Op: harness.NativeQuiesce, State: e.state,
+				ThreadID: fixtureThread, Waiting: "the native turn to complete"})
 		}
 		e.state = harness.NativeStopped
 		var actual corev1.Pod
