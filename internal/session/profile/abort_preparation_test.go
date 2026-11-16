@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/budget"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/google/uuid"
 )
@@ -182,6 +183,81 @@ func TestAbortPreparationFallbackRefusesVisitThatMayHaveSpent(t *testing.T) {
 			}
 		})
 	}
+}
+
+// spendingBackend's abort reports a sealed receipt with the given usage, as
+// an older executor does for a visit that ran although it inspects as
+// prepared or stopped.
+type spendingBackend struct {
+	retainedBackend
+	usage budget.TrustedUsage
+}
+
+func (p *spendingBackend) Abort(_ context.Context, l session.Launch, i session.Incarnation) (session.Observation, error) {
+	if !sameLaunch(l, p.state.Launch) || i != p.state.Incarnation {
+		return session.Observation{}, &Rejection{Code: CodeConflict}
+	}
+	s := session.Stopped{Launch: l, Incarnation: i, ActualStopped: true,
+		Receipt: &session.Receipt{Launch: l, Incarnation: i, Usage: map[string]budget.TrustedUsage{testCapability: p.usage}}}
+	p.state.State, p.state.Stopped = session.PlacementStopped, &s
+	return p.state, nil
+}
+
+// The fallback on an older executor succeeds only for an abort that sealed
+// no usage: success reports none, so a receipt with usage is refused and the
+// coordinator's ordinary abort, which carries the receipt, deals with it.
+func TestAbortPreparationFallbackRefusesReceiptWithUsage(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name   string
+		state  session.PlacementState
+		usage  budget.TrustedUsage
+		refuse bool
+	}{
+		{"prepared, no usage", session.PlacementPrepared, budget.TrustedUsage{}, false},
+		{"prepared, usage", session.PlacementPrepared, budget.TrustedUsage{Units: 2, CostMicros: 3}, true},
+		{"stopped, usage", session.PlacementStopped, budget.TrustedUsage{Units: 1}, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			data, digest := artifact(t)
+			backend := &spendingBackend{retainedBackend: retainedBackend{data: data, digest: digest}, usage: test.usage}
+			c, l := backendFixture(t, backend, olderExecutor)
+			if _, err := c.Prepare(t.Context(), l, data); err != nil {
+				t.Fatal(err)
+			}
+			backend.state.State = test.state
+			err := c.AbortPreparation(t.Context(), l)
+			if !test.refuse {
+				if err != nil {
+					t.Fatalf("abort with no usage: %v", err)
+				}
+				return
+			}
+			if !errors.Is(err, errPreparationAbortUnsupported) || !strings.Contains(err.Error(), "recorded usage") {
+				t.Fatalf("fallback dropped usage: %v", err)
+			}
+		})
+	}
+}
+
+// backendFixture serves backend through wrap and returns a home's client.
+func backendFixture(t *testing.T, backend session.Placement, wrap func(http.Handler) http.Handler) (*Client, session.Launch) {
+	t.Helper()
+	_, digest := artifact(t)
+	l := launch(digest)
+	h, err := NewHandler(Config{Harness: l.Harness, Principal: testPrincipal, Authorizer: tokenAuthorizer(testToken), Placement: l.Placement,
+		InstructionDigest: l.InstructionDigest, Allowances: l.Allowances, MaxDuration: time.Hour, MaxCheckpointBytes: testMax, Backend: backend})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, ca := serve(t, wrap(h))
+	c, err := testClient(s.URL, ca)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(c.Close)
+	return c, l
 }
 
 // A home coordinator cancelling a destination whose preparation never

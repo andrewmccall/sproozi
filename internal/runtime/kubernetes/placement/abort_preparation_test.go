@@ -15,6 +15,7 @@ import (
 	"time"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
+	"github.com/andrewmccall/sproozi/internal/budget"
 	runtimekube "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
 	"github.com/andrewmccall/sproozi/internal/session"
@@ -494,6 +495,76 @@ func TestAbortPreparationRefusesVisitThatMayHaveSpent(t *testing.T) {
 				t.Fatalf("refused abort changed the visit: %+v %+v %v", r, local, err)
 			}
 		})
+	}
+}
+
+// An active visit that Abort cancelled carries a receipt with its usage.
+// Accepting it here would let the coordinator record the cancellation without
+// that usage, so it is a conflict.
+func TestAbortPreparationRefusesCancelledVisitWithUsage(t *testing.T) {
+	t.Parallel()
+	p, _, _, l, data := setup(t)
+	i, err := p.Prepare(t.Context(), l, data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = p.Activate(t.Context(), l, i); err != nil {
+		t.Fatal(err)
+	}
+	spend(t, p, l)
+	if o, err := p.Abort(t.Context(), l, i); err != nil || o.Stopped == nil || o.Stopped.Receipt == nil {
+		t.Fatalf("abort of the active visit: %+v %v", o, err)
+	}
+	err = p.AbortPreparation(t.Context(), l)
+	if !isConflict(err) || !strings.Contains(err.Error(), "not a preparation") {
+		t.Fatalf("abort of a cancelled visit with usage: %v", err)
+	}
+}
+
+// spend charges one unit and one micro to the visit's model account.
+func spend(t *testing.T, p *Placement, l session.Launch) {
+	t.Helper()
+	r := registration(t, p, l)
+	reservation, err := p.ledger.Reserve(t.Context(), account(r, api.CapabilityModelInference),
+		budget.UsageReservation{RequireExisting: true, MaxUnits: 100, MaxCostMicros: 1000, Units: 1, CostMicros: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = p.ledger.Settle(t.Context(), reservation, budget.TrustedUsage{Units: 1, CostMicros: 1}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// An abort that wrote its tombstone but ran out of time before cancelling
+// the registration leaves a prepared visit. Nothing may activate it after
+// that, or a replay of the abort would find it cancelled by a later Abort
+// and drop the usage it ran up.
+func TestTombstonedPreparationCannotActivate(t *testing.T) {
+	t.Parallel()
+	p, _, _, l, data := setup(t)
+	i, err := p.Prepare(t.Context(), l, data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	local, err := p.load(l)
+	if err != nil {
+		t.Fatal(err)
+	}
+	local.PreparationAborted = true
+	if err = p.save(local); err != nil {
+		t.Fatal(err)
+	}
+	if err = p.Activate(t.Context(), l, i); !isConflict(err) {
+		t.Fatalf("tombstoned preparation activated: %v", err)
+	}
+	if r := registration(t, p, l); r.Phase != registry.Prepared {
+		t.Fatalf("refused activation changed the registration: %+v", r)
+	}
+	if err = p.AbortPreparation(t.Context(), l); err != nil {
+		t.Fatalf("replayed abort: %v", err)
+	}
+	if r := registration(t, p, l); r.Phase != registry.Cancelled || !unspent(r.Receipt) {
+		t.Fatalf("replayed abort: %+v", r)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
+	"github.com/andrewmccall/sproozi/internal/budget"
 	runtimekube "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
 	"github.com/andrewmccall/sproozi/internal/session"
@@ -104,8 +105,33 @@ func (p *Placement) AbortPreparation(ctx context.Context, l session.Launch) erro
 			return semantic(err)
 		}
 	}
-	_, err = p.fenceCancelled(ctx, &local, r)
-	return err
+	if r, err = p.fenceCancelled(ctx, &local, r); err != nil {
+		return err
+	}
+	if !unspent(r.Receipt) {
+		return spentConflict(r)
+	}
+	return nil
+}
+
+// unspent reports a receipt that sealed no usage, or no receipt at all.
+// Success reports no usage, so it is the only receipt an abort of a
+// preparation may leave behind.
+func unspent(receipt *registry.StopReceipt) bool {
+	if receipt == nil {
+		return true
+	}
+	for _, seal := range receipt.Seals {
+		if seal != (budget.TrustedUsage{}) {
+			return false
+		}
+	}
+	return true
+}
+
+func spentConflict(r registry.Record) error {
+	return fmt.Errorf("placement: the session registration for AgentRun %s recorded usage, so it was not a preparation; "+
+		"only an abort with its incarnation can report that usage: %w", r.IntendedRunName, &profile.Rejection{Code: profile.CodeConflict})
 }
 
 // saveTombstone records the launch as aborted, with the registration found
@@ -175,9 +201,10 @@ func (p *Placement) preparationRegistration(ctx context.Context, local retained)
 	}
 	switch {
 	case r.Phase == registry.Creating, r.Phase == registry.Bound, r.Phase == registry.Prepared:
-	case r.Phase == registry.Cancelled && (local.PreparationAborted || r.Receipt != nil):
+	case r.Phase == registry.Cancelled && (local.PreparationAborted || r.Receipt != nil) && unspent(r.Receipt):
 		// This abort's own replay, or a cancellation that already fenced the
-		// writer and sealed its usage.
+		// writer and sealed no usage. A receipt with usage belongs to an
+		// abort with the incarnation, which reports it.
 	default:
 		return r, false, fmt.Errorf("placement: the session registration for AgentRun %s is %s, not a preparation; "+
 			"only a stop or an abort with its incarnation can end it: %w", name, r.Phase, &profile.Rejection{Code: profile.CodeConflict})

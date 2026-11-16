@@ -35,11 +35,13 @@ func (p *Placement) retained(ctx context.Context, l session.Launch) (retained, r
 	if err != nil {
 		return local, registry.Record{}, err
 	}
+	if local.PreparationAborted {
+		// An aborted preparation never creates its registration, and nothing
+		// activates, stops or attaches to it: only AbortPreparation, which
+		// does not come through here, may finish it.
+		return local, registry.Record{}, &profile.Rejection{Code: profile.CodeConflict}
+	}
 	if local.Reference.UID == "" {
-		if local.PreparationAborted {
-			// An aborted preparation never creates its registration.
-			return local, registry.Record{}, &profile.Rejection{Code: profile.CodeConflict}
-		}
 		ceilings, err := p.liveProfileInput(ctx, l, local.fresh())
 		if err != nil {
 			return local, registry.Record{}, err

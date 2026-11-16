@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/agentprofile"
+	"github.com/andrewmccall/sproozi/internal/budget"
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
 	"github.com/andrewmccall/sproozi/internal/session"
 )
@@ -202,6 +203,14 @@ func (c *Client) abortPreparationByInspection(ctx context.Context, l session.Lau
 	// which a successful preparation abort could not report.
 	if a.Stopped == nil || a.Stopped.Receipt == nil {
 		return fmt.Errorf("%w; the prepared Pod stopped, but its usage is not finalized yet", errPreparationAbortUnsupported)
+	}
+	// Success reports no usage, so only a receipt that sealed none is
+	// dropped. A visit that inspects as prepared or stopped may still have
+	// run; its usage is left for an abort that carries the receipt.
+	for _, usage := range a.Stopped.Receipt.Usage {
+		if usage != (budget.TrustedUsage{}) {
+			return fmt.Errorf("%w; the visit stopped but recorded usage, so it was not a preparation", errPreparationAbortUnsupported)
+		}
 	}
 	return nil
 }
