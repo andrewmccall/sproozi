@@ -356,6 +356,7 @@ func (h *handler) perform(r *http.Request, action string, input request) (respon
 	}
 	return output, nil
 }
+
 // abort interrupts the visit's stops, and keeps new ones from waiting for a
 // turn, while the placement aborts it.
 func (h *handler) abort(ctx context.Context, input request) (session.Observation, error) {
