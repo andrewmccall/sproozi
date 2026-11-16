@@ -195,6 +195,13 @@ var ErrCancellationUnfinished = errors.New("session: cancellation unfinished")
 var ErrDeadlinePassed = errors.New("session: the execution's deadline passed before it started at its destination; " +
 	"it is stopped with its last checkpoint")
 
+// ErrEndUnproven reports that the deadline passed before a move or first
+// visit made its destination active, but the placement has not yet shown
+// that nothing runs or can start there, so the operation was not ended and
+// nothing was recorded (ADR 0060). Repeating the request tries again once the
+// placement is reachable; cancellation ends the execution if it never can.
+var ErrEndUnproven = errors.New("session: the placement has not shown that nothing runs at the destination")
+
 // pendingRecovery is the refusal for a new move or stop while the record's
 // pending operation is unfinished. It names that operation: the first visit's
 // start (or resume), a move, or a stop.

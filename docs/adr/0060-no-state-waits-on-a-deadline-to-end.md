@@ -109,13 +109,24 @@ is `idle`, keeping its last checkpoint: the one the source's stop committed, or
 the one the first visit started from. A replay of that move, start or resume
 reports `ErrDeadlinePassed`.
 
-If the coordinator cannot establish this, it records nothing. The phase stays
-`preparing` or `activating` and the error says what is unproven. The pending
-destination is not active, and no other writer runs. `unknown-stop` is not
-used. The journal describes it only for a writer being stopped or cancelled,
-and stating "a pending destination may run" without cancellation intent would
-need a new field. The next command repeats the attempt: `recover` or `stop`,
-or, at home, `resume`.
+If the coordinator cannot establish this, it records nothing and returns
+`ErrEndUnproven`, naming what is missing and the placement's error. The phase
+stays `preparing` or `activating`, which is true: the pending destination is
+not active, and no other writer runs. `unknown-stop` is not used. The journal
+describes it only for a writer being stopped or cancelled, and stating "a
+pending destination may run" without cancellation intent would need a new
+field.
+
+Two ways on remain, and the reply names both in one sentence: repeat the
+command once the placement is reachable, which ends the start if the
+placement can then show that nothing runs; or `cancel`, which ends the
+session. Some placement states cannot be shown to hold no writer however
+often the command is repeated. On Kubernetes today these include a queued
+AgentRun with no sandbox yet, a bound registration with no Pod, and intent
+saved on the executor with no registry reference. For those `cancel` is the
+only way on. That is a limit of what the placement can prove, not a state
+the deadline created, and making such states provable is the placement's
+work.
 
 ### Who takes the exit
 
@@ -153,10 +164,17 @@ finishes a stop.
   resume ID", which gives it a new deadline`.
 - `stop` succeeds and stays idempotent.
 - `status` of a session still `preparing` or `activating` after its deadline
-  prints `Overdue` and names `sproozi resume ID`.
+  prints `Overdue`, names `sproozi resume ID`, and says that `sproozi cancel
+  ID` ends the session if the placement cannot show that nothing runs there.
+- While the placement cannot show that, every command replies `session ID
+  reached its deadline before it started, but the placement has not shown that
+  nothing runs at the destination: WHAT; repeat the command once Docker or the
+  cluster is reachable to end the start with the work kept, or end the session
+  with "sproozi cancel ID"`.
 
-One next command remains for each state: `recover` before the deadline, and
-`resume` after it.
+One next command remains for each state: `recover` before the deadline,
+`resume` after it, and, while the end is unproven, the same command or
+`cancel`, in one sentence of advice.
 
 ### The remote executor
 
@@ -209,10 +227,10 @@ past its deadline, with its launch saved, reads unchanged, and the next
 - Ending a start or move costs an `Inspect`, and an `Abort` when an
   incarnation exists, unless the operation has no launch or the placement
   fences preparations. The Kubernetes placement does not implement
-  `PreparationAborter` yet. Until it does, an absent launch is ended at once,
-  a reported incarnation must abort with sealed usage, and anything else stays
-  `preparing` with an error until a later `recover`, `stop` or `resume`
-  succeeds.
+  `PreparationAborter` on this branch. An absent launch is ended at once, a
+  reported incarnation must abort with sealed usage, and anything else is
+  refused with `ErrEndUnproven` until the placement can show it, or the user
+  cancels.
 - The transition table cannot tell a move's `preparing` from a stop's, which
   `finalized` leaves. Its principle test checks that every phase has an exit
   the deadline never refuses, and that every phase without cancellation intent

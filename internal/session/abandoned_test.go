@@ -251,7 +251,7 @@ func TestLateStartWaitsForProofThatNothingRuns(t *testing.T) {
 			}
 			c.now = func() time.Time { return first.Deadline }
 			r, err := c.Recover(t.Context(), first.ExecutionID)
-			if err == nil || errors.Is(err, ErrDeadlinePassed) || r.Phase != PhasePreparing {
+			if !errors.Is(err, ErrEndUnproven) || errors.Is(err, ErrDeadlinePassed) || r.Phase != PhasePreparing {
 				t.Fatalf("unproven late start: %s %v", r.Phase, err)
 			}
 			if stored, err := c.Inspect(first.ExecutionID); err != nil || stored.Phase != PhasePreparing ||

@@ -405,8 +405,19 @@ func needsRecovery(err error, id, continueWith string) error {
 		return cancelledProblem(id)
 	case errors.Is(err, session.ErrDeadlinePassed):
 		return deadlineProblem(id)
+	case errors.Is(err, session.ErrEndUnproven):
+		return unprovenProblem(id, err)
 	}
 	return err
+}
+
+// unprovenProblem says a start or move reached its deadline but could not
+// be ended yet, because the placement has not shown that nothing runs at the
+// destination, and how each way on works (ADR 0060).
+func unprovenProblem(id string, err error) error {
+	return rejectedError(fmt.Sprintf("session %s reached its deadline before it started, but %s; repeat the command "+
+		"once Docker or the cluster is reachable to end the start with the work kept, or end the session with "+
+		"\"sproozi cancel %s\"", id, strings.TrimPrefix(err.Error(), "session: "), id))
 }
 
 // deadlineProblem says a start or move reached its deadline first, so the

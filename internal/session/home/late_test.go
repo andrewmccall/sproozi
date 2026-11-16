@@ -166,6 +166,52 @@ func resumeInterruptedThenLate(t *testing.T, interruption, late string) {
 	wantStoppedAndResumable(t, s, id, local.digest, testNativeUUID)
 }
 
+// While the placement cannot show that nothing runs at the destination, a
+// late command says what is unproven, that repeating it retries, and that
+// cancel ends the session; status says the same, and nothing is recorded. A
+// repeat once the placement is reachable ends the start.
+func TestUnprovenLateStartNamesRetryAndCancel(t *testing.T) {
+	t.Parallel()
+	s, local, _, repo := testService(t)
+	id := uuid.NewString()
+	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Stop(t.Context(), id, uuid.NewString()); err != nil {
+		t.Fatal(err)
+	}
+	local.rejectActivate = true
+	if _, err := s.Resume(t.Context(), id, uuid.NewString(), nil); err == nil {
+		t.Fatal("fixture did not interrupt the resume")
+	}
+	local.rejectActivate, local.unreachableAbort = false, true
+	c, err := s.readCatalog(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	passDeadline(t, s, c.Current)
+	for _, q := range []Request{
+		{Action: ActionResume, ID: id, OperationID: uuid.NewString()},
+		{Action: ActionRecover, ID: id},
+		{Action: ActionStop, ID: id, OperationID: uuid.NewString()},
+	} {
+		r := exchange(t, s, q)
+		if !r.Rejected || !strings.Contains(r.Error, "reached its deadline before it started, but the placement has not shown") ||
+			!strings.Contains(r.Error, "docker unreachable") || !strings.Contains(r.Error, "repeat the command") ||
+			!strings.Contains(r.Error, `"sproozi cancel `+id+`"`) {
+			t.Fatalf("%s of an unproven late start replied %+v", q.Action, r)
+		}
+	}
+	if status, err := s.Status(id); err != nil || status.Phase != string(session.PhaseActivating) {
+		t.Fatalf("unproven late start was recorded: %+v %v", status, err)
+	}
+	local.unreachableAbort = false
+	if r := exchange(t, s, Request{Action: ActionResume, ID: id, OperationID: uuid.NewString()}); r.Error != "" ||
+		r.Status == nil || r.Status.Phase != string(session.PhaseActive) {
+		t.Fatalf("resume once the placement is reachable replied %+v", r)
+	}
+}
+
 // "sproozi move ID --local" of a session on a cluster after its deadline
 // stops the remote visit, keeps its checkpoint and says to resume, which
 // brings the session home with a new deadline.

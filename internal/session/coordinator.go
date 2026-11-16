@@ -280,24 +280,24 @@ func (c *Coordinator) abandon(ctx context.Context, r Record, index int) (Record,
 		launch := *op.Launch
 		p, ok := c.placement(op.Destination)
 		if !ok {
-			return r, errors.New("session: pending placement unavailable")
+			return r, unproven("its placement is not configured", nil)
 		}
 		incarnation := op.Incarnation
 		if aborter, fences := p.(PreparationAborter); incarnation == nil && fences {
 			if err := aborter.AbortPreparation(ctx, launch); err != nil {
-				return r, fmt.Errorf("session: the deadline passed, but the destination's preparation is not yet fenced: %w", err)
+				return r, unproven("its preparation is not fenced", err)
 			}
 		} else if incarnation == nil {
 			o, err := p.Inspect(ctx, launch)
 			if err != nil {
-				return r, fmt.Errorf("session: the deadline passed, but the destination cannot be inspected: %w", err)
+				return r, unproven("it cannot be inspected", err)
 			}
 			if err = checkObservation(launch, o); err != nil {
-				return r, err
+				return r, unproven("its observation is invalid", err)
 			}
 			if o.State != PlacementAbsent {
 				if !validIncarnation(o.Incarnation) {
-					return r, errors.New("session: the deadline passed, but the destination's preparation remains unknown")
+					return r, unproven("its preparation remains unknown", nil)
 				}
 				incarnation = &o.Incarnation
 			}
@@ -305,15 +305,14 @@ func (c *Coordinator) abandon(ctx context.Context, r Record, index int) (Record,
 		if incarnation != nil {
 			o, err := p.Abort(ctx, launch, *incarnation)
 			if err != nil {
-				return r, fmt.Errorf("session: the deadline passed, but the destination is not yet proven stopped: %w", err)
+				return r, unproven("it is not proven stopped", err)
 			}
 			if err = checkObservation(launch, o); err != nil {
-				return r, err
+				return r, unproven("its abort reported an invalid observation", err)
 			}
 			if o.Incarnation != *incarnation || o.State != PlacementStopped || o.Stopped == nil ||
 				validateStop(launch, *incarnation, *o.Stopped) != nil {
-				return r, errors.New("session: the deadline passed, but the destination's stop and usage are not yet " +
-					"proven; recover again once the placement can finalize them")
+				return r, unproven("its stop or usage is not yet finalized", nil)
 			}
 			if r, err = c.retainStopped(r, launch, *incarnation, *o.Stopped); err != nil {
 				return r, err
@@ -328,6 +327,14 @@ func (c *Coordinator) abandon(ctx context.Context, r Record, index int) (Record,
 		return r, err
 	}
 	return r, ErrDeadlinePassed
+}
+// unproven is abandon's refusal while the destination is not shown to hold
+// no writer: what is missing, and the placement's error when it gave one.
+func unproven(missing string, cause error) error {
+	if cause == nil {
+		return fmt.Errorf("%w: %s", ErrEndUnproven, missing)
+	}
+	return fmt.Errorf("%w: %s: %w", ErrEndUnproven, missing, cause)
 }
 func (c *Coordinator) stopSource(ctx context.Context, r Record, index int) (Record, error) {
 	op := &r.Operations[index]

@@ -61,6 +61,8 @@ type placementFixture struct {
 	holdPrepare, holdStop chan struct{}
 	// abortEntered, when non-nil, is closed by the first Abort.
 	abortEntered chan struct{}
+	// unreachableAbort fails Abort, as an unreachable Docker or cluster does.
+	unreachableAbort bool
 }
 
 func (p *placementFixture) prepare(l session.Launch) session.Incarnation {
@@ -186,6 +188,9 @@ func (p *placementFixture) Abort(_ context.Context, l session.Launch, i session.
 	if p.abortEntered != nil {
 		close(p.abortEntered)
 		p.abortEntered = nil
+	}
+	if p.unreachableAbort {
+		return session.Observation{}, errors.New("docker unreachable")
 	}
 	r := p.rows[l.AllocationID]
 	if r.Incarnation != i {

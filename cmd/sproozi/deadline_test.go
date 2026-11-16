@@ -91,7 +91,9 @@ func TestStatusOfAStartOverdueNamesResume(t *testing.T) {
 		{phaseActive, time.Now().Add(-time.Minute), false},
 	} {
 		text := statusText(cmdStatus, home.Status{ID: id, Phase: tc.phase, Deadline: tc.at}, false)
-		if got := strings.Contains(text, "Continue it with: sproozi resume "+shortID(id)); got != tc.want {
+		got := strings.Contains(text, "Continue it with: sproozi resume "+shortID(id)) &&
+			strings.Contains(text, "sproozi cancel "+shortID(id)+" ends the session")
+		if got != tc.want {
 			t.Errorf("%s %v: %q", tc.phase, tc.at, text)
 		}
 	}
