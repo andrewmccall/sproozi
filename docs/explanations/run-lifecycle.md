@@ -81,8 +81,8 @@ for ownership checks and retained state.
 
 ## Gateway revocation
 
-The projected gateway token lasts two hours; policy limits execution to one
-hour. The demo reads the token once. The gateway does not wait for token expiry
+The projected gateway token lasts two hours; an AgentPolicy's optional
+`maxExecutionDuration` can limit execution and has no default. The demo reads the token once. The gateway does not wait for token expiry
 to revoke access. It checks run identity and policy on every new connection and
 request, and rechecks open connections every second by default. On Kubernetes,
 the checks after the first read a watch cache, confirm any change live and run
@@ -94,4 +94,7 @@ request is charged an [estimated charge](../../GLOSSARY.md#estimated-charge),
 capped at its reservation, even if its response hadn't started; one cut off
 before the provider received the whole request is not charged. See the [transport
 limits](../reference/security-hardening.md#protect-transport-and-identities).
-The workload has no Sproozi proxy sidecar or local proxy process.
+The workload has no Sproozi proxy sidecar. A managed Kubernetes session runs a
+loopback forwarder inside its Pod that adds the current projected token to each
+CONNECT (`internal/nativeproxy`, ADR 0056); an ordinary AgentRun has no local
+proxy process.

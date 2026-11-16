@@ -142,8 +142,8 @@ it. Attempted calls count against the run's named capability budget.
 Reconnecting does not reset usage. Tool discovery supplies interface
 information, not permission.
 
-The controller generates native MCP settings for Codex, Claude Code, OpenCode or
-Hermes. The administrator's launch command loads these settings into fresh
+The controller generates native MCP settings for Codex, Claude Code, OpenCode,
+GitHub Copilot CLI or Hermes. The administrator's launch command loads these settings into fresh
 client state. The settings contain gateway addresses, not provider credentials.
 
 See [configured MCP](../reference/configured-mcp.md), [native Kubernetes
