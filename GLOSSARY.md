@@ -720,7 +720,11 @@ are lowercase DNS labels of 1 to 63 characters. See
 ### Catalogue
 
 The list of sessions that one owner holds. `sproozi sessions` combines this
-machine's catalogue with each cluster's. See
+machine's catalogue with each cluster's. On this machine each session has a
+catalogue entry: what the session keeps between its executions and which
+execution is current. The session's phase is derived from the entry and that
+execution's journal: `importing` until a pull's claim is recorded, `retained`
+or `failed` once stopped, and otherwise the execution's own phase. See
 [status and listing output](docs/reference/session-commands.md#status-and-listing-output).
 
 ### Persistent assistant

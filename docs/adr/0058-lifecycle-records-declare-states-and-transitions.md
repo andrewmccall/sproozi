@@ -292,6 +292,27 @@ Two deadline checks stay outside the table because they record no event:
 `ResolveRun` refuses an expired run unless its stop completed, and
 `RequireActive` refuses an expired registration on every gateway request.
 
+Corrected 2026-11-16: the home catalogue entry (`internal/session/home`) now
+follows rules 1 and 2. Before, each caller worked out a session's state from
+the entry's claim, current execution, last exit and source for itself, and
+status reported a word from one of three vocabularies: `importing`, the
+stopped words `retained` and `failed`, or the current execution's phase,
+including `idle`. The entry stores no phase, and its stored format is
+unchanged. `derive(entry, record)` in `internal/session/home/phase.go` is the
+one place its phase is worked out, from the entry and its current execution's
+journal record. The vocabulary is closed: `importing`, `retained`, `failed`
+and every execution phase except `idle`, which a session reports as
+`retained` or `failed`. An idle current execution, a stop whose catalogue
+write failed after the journal recorded it, therefore reads as stopped. Reads
+derive without writing. A command holding the session's lock first retires
+such an execution and cancels and deletes the executions of the session that
+the entry never recorded, which only an interrupted resume leaves and which
+never ran. The entry has no `(from, event) → to` table or deadline column of
+its own: nothing it records starts or stops work, which happens only through
+the execution journal's events. Instead, one table, `nextSteps`, maps each
+derived state to the commands the service refuses and the reply that names
+the commands that work, so a refusal and its advice cannot disagree.
+
 ## Alternatives
 
 - **Check transitions in `save` by rereading the journal.** This catches an
@@ -341,6 +362,7 @@ Two deadline checks stay outside the table because they record no event:
   `internal/session/cancel.go`, `internal/session/finalize.go`,
   `internal/session/store.go`, `internal/session/remove.go`,
   `internal/session/home/exits.go`, `internal/session/home/remove.go`,
+  `internal/session/home/phase.go`, `internal/session/home/reconcile.go`,
   `cmd/sproozi/output.go`, `internal/deadline`,
   `internal/runtime/docker/transitions.go`, `internal/gateway/docker/owner.go`,
   `internal/runtime/kubernetes/registry/transitions.go`
@@ -348,7 +370,9 @@ Two deadline checks stay outside the table because they record no event:
   `cmd/sproozi/deadline_test.go`, `internal/runtime/docker/transitions_test.go`,
   `internal/gateway/docker/transitions_test.go`,
   `internal/runtime/kubernetes/registry/transitions_test.go`,
-  `internal/runtime/kubernetes/registry/outcomes_test.go`
+  `internal/runtime/kubernetes/registry/outcomes_test.go`,
+  `internal/session/home/phase_test.go`, `internal/session/home/reconcile_test.go`
+  (Corrected 2026-11-16: the home catalogue entry's files added)
 - Reference: [status and listing output](../reference/session-commands.md#status-and-listing-output)
 - Related: [ADR 0018](0018-coordinator-owns-every-visit.md),
   [ADR 0038](0038-exited-agents-and-one-recovery-path.md),
