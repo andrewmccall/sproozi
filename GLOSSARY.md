@@ -24,8 +24,8 @@ into each run's contract. Every registered harness is one; see the
 
 An AgentRun harness that is also a native kind for managed sessions
 (`sproozi run`, `stop`, `resume`, `move`): Sproozi supervises its terminal,
-observes completed turns and checkpoints its conversation. Codex and Claude
-Code. Also seen as: native kind, native harness.
+observes completed turns and checkpoints its conversation. Codex, Claude
+Code and GitHub Copilot CLI. Also seen as: native kind, native harness.
 
 ### Run contract
 
@@ -186,7 +186,7 @@ authority. Also seen as: managed harness configuration.
 
 Your own instructions and skills, in the `profile` folder beside the home
 configuration (`~/.sproozi/profile` for a local installation), that every
-managed Codex and Claude Code session receives after the Sproozi integration.
+managed Codex, Claude Code and Copilot session receives after the Sproozi integration.
 Like the integration, it is guidance, not authority. See
 [Profile](docs/reference/profile.md). Also seen as: shared agent files, agents
 directory, user preferences.
