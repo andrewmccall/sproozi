@@ -52,6 +52,10 @@ revocation prompt: cancelling a run, changing its policy or template, stopping a
 managed worker or deleting its ServiceAccount closes inspected connections within
 the revalidation interval.
 
+Corrected 2026-11-16: revalidation reads from a watch cache on Kubernetes now
+(ADR 0027; `internal/gateway/kubernetes/auth.go`), so "without a cache" is no
+longer true. The cache confirms any change live before closing a session.
+
 ## Alternatives and tradeoffs
 
 Deleting `Route.Tier` and documenting that handlers own the tier would remove a
@@ -85,6 +89,12 @@ traffic adds to that.
 
 The selected design accepts the API server load in exchange for revocation
 within about one second plus the five-second lookup deadline.
+
+Corrected 2026-11-16: the figures of 128 connections, eight inspected
+connections per execution and about 770 GET requests per second describe the
+gateway when this record was written. The defaults are 2048 and 16 now, and a
+watch cache serves most of these reads (ADR 0027). The informer-cache
+alternative above was rejected then and adopted by ADR 0027.
 
 ## Revisit conditions
 
