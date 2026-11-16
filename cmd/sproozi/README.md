@@ -87,7 +87,9 @@ prefix)`. In `allowances`, `bounded` says whether a dimension has a limit at all
 is none. It is unrelated to a model call's
 [bounded reservation](../../GLOSSARY.md#bounded-reservation) or an
 [unbounded call](../../GLOSSARY.md#unbounded-call), which describe how one
-request reserves. Unit ceilings must be finite and positive. A
+request reserves. Unit ceilings must be finite and positive, except for
+`model.inference`, whose units may be unbounded (`bounded:false` with `value:0`;
+[ADR 0051](../../docs/adr/0051-interactive-sessions-may-run-without-a-model-budget.md)). A
 cost limit with `bounded:false` and `value:0` explicitly has no monetary cap;
 a bounded cost limit must be positive and requires administrator pricing. A value of the wrong JSON type is reported
 by its key, for example `local.gatewayPort: number -1 is not a whole number from
@@ -114,16 +116,15 @@ by its key, for example `local.gatewayPort: number -1 is not a whole number from
     "helperLimits": {"MemoryBytes": 536870912, "CPUMilli": 500, "PIDs": 128},
     "anchorLimits": {"MemoryBytes": 67108864, "CPUMilli": 100, "PIDs": 32},
     "volumeBytes": 536870912,
-    "maxCheckpointBytes": 8388608,
-    "retainedBytes": 67108864
+    "maxCheckpointBytes": 33554432,
+    "retainedBytes": 268435456
   },
   "allowances": {
     "model.inference": {
-      "units": {"bounded": true, "value": 200000},
+      "units": {"bounded": false, "value": 0},
       "costMicros": {"bounded": false, "value": 0}
     }
   },
-  "maxDuration": "30m",
   "nativeOptions": [],
   "gateway": {
     "listen": "0.0.0.0:18443",
@@ -180,8 +181,9 @@ These optional fields are what `init` writes:
 ## Gateway certificates and provider
 
 The configured TLS certificate must cover both the exact gateway IPv4 as an IP SAN
-and the selected model authority as a DNS SAN: `api.openai.com` for Codex or
-`api.anthropic.com` for Claude Code. The trusted CA bundle must verify that chain.
+and the selected model authority as a DNS SAN: `api.openai.com` for Codex, or for Copilot with a key;
+`api.anthropic.com` for Claude Code; and `api.individual.githubcopilot.com` for Copilot
+with a token or its own sign-in. The trusted CA bundle must verify that chain.
 The listener can bind the exact IPv4, a loopback address the engine forwards or
 `0.0.0.0`, on the configured gateway port.
 Workers receive only the CA certificates, a fresh per-visit proxy token and
@@ -221,7 +223,7 @@ estimate, because the provider already had the request. See
 
 ## Native clients
 
-Set `local.harness` explicitly to `codex` or `claude-code`; it must match every
+Set `local.harness` explicitly to `codex`, `claude-code` or `copilot`; it must match every
 remote executor and runtime used by this session. There is no default or client
 switch during a move. Sproozi checks no client version; the repository's client images install the
 releases pinned in `hack/clients`. For Claude, use an approved Anthropic model/provider URL, omit
