@@ -47,16 +47,17 @@ const (
 // 0036, amendment of 2026-11-16). A stop's graceful handoff lasts at most
 // stopHandoffBound: a first visit waits up to harness.NativeQuiesceWait for
 // its conversation ID and as long again for its turn (ADR 0035), then the
-// supervisor waits 30 seconds for the harness to exit after its quit, 3
-// seconds after killing it, and quiesceReplyRead for its reply to be read.
+// supervisor waits harness.NativeQuitWait for the harness to exit after its
+// quit, harness.NativeForcedStopWait after killing it, and
+// harness.NativeQuiesceReplyGrace for its reply to be read.
 // What follows (revoking the grant, the container ending, sealing usage,
 // capturing and recording the checkpoint) gets stopSettleBound. The executor
 // carries a stop on for StopBound after its request ends; the client waits
 // answerMargin longer than an executor may take, so even an answer at the
 // bound arrives.
 const (
-	quiesceReplyRead = 10 * time.Second
-	stopHandoffBound = 2*harness.NativeQuiesceWait + 30*time.Second + 3*time.Second + quiesceReplyRead
+	stopHandoffBound = 2*harness.NativeQuiesceWait + harness.NativeQuitWait + harness.NativeForcedStopWait +
+		harness.NativeQuiesceReplyGrace
 	stopSettleBound  = 5 * time.Minute
 	// StopBound is how long an executor carries one stop on, whether or not
 	// its request is still there to read the answer.

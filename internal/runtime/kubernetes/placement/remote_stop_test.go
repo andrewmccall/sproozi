@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andrewmccall/sproozi/internal/budget"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	runtimekube "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
@@ -250,6 +251,61 @@ func TestRemoteStopInterruptedAtEachStageKeepsTheVisitsCheckpoint(t *testing.T) 
 				keptVisit(t, r, work, e)
 			})
 		}
+	}
+}
+
+// A stop whose native container does not end after the supervisor's
+// graceful handoff gives up at podStopWait, even without a deadline, and
+// stays unproven: nothing is fenced, sealed or captured. A retry waits for the
+// container again, and once it ends the stop completes. Not parallel: it
+// shortens podStopWait for the package.
+func TestStopWhoseContainerNeverEndsIsUnprovenAtTheBound(t *testing.T) {
+	previous := podStopWait
+	podStopWait = 200 * time.Millisecond
+	t.Cleanup(func() { podStopWait = previous })
+	// The launch's deadline is 30 minutes away, so only the bound ends the wait.
+	p, _, inner, l, data := setup(t)
+	e :=&stageExecutor{protocolExecutor: inner, stage: stagePod, entered: make(chan struct{}), release: make(chan struct{})}
+	p.exec = e
+	i, err := p.Prepare(t.Context(), l, data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = p.Activate(t.Context(), l, i); err != nil {
+		t.Fatal(err)
+	}
+	sealed := 0
+	p.ledger = &observedLedger{Ledger: p.ledger, beforeSeal: func(context.Context, budget.AccountKey) error { sealed++; return nil }}
+	for attempt := range 2 {
+		// The caller would wait 3 seconds; the bound must end it first.
+		ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+		started := time.Now()
+		_, err = p.Stop(ctx, l, i)
+		cancel()
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("attempt %d: stop of a container that never ends: %v", attempt, err)
+		}
+		if waited := time.Since(started); waited < podStopWait || waited > 2*time.Second {
+			t.Fatalf("attempt %d waited %s for a bound of %s", attempt, waited, podStopWait)
+		}
+		local, err := p.load(l)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r, err := p.registry.Get(t.Context(), local.Reference)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !local.NativeQuiet || local.WriterFenced || local.OutputDigest != "" || r.Phase != registry.Stopping ||
+			r.Receipt != nil || sealed != 0 || e.captured() != 0 {
+			t.Fatalf("attempt %d proved too much: quiet %v fenced %v output %q phase %s seals %d captures %d", attempt,
+				local.NativeQuiet, local.WriterFenced, local.OutputDigest, r.Phase, sealed, e.captured())
+		}
+	}
+	endNativeContainer(t, p, l)
+	s, err := p.Stop(t.Context(), l, i)
+	if err != nil || s.Receipt == nil || sealed != 1 || e.captured() != 1 {
+		t.Fatalf("stop once the container ended: %+v %v seals %d captures %d", s, err, sealed, e.captured())
 	}
 }
 

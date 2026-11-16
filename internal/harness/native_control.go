@@ -71,6 +71,16 @@ type NativeReply struct {
 // passes the stop reports what it waits for instead of waiting silently.
 const NativeQuiesceWait = 2 * time.Minute
 
+// The supervisor's other bounds on a graceful stop, which a placement's own
+// bounds must cover (ADR 0035): the wait for the harness to exit after its
+// quit, the wait after killing one that did not, and how long a stopped
+// supervisor waits for its reply to be read before it exits.
+const (
+	NativeQuitWait          = 30 * time.Second
+	NativeForcedStopWait    = 3 * time.Second
+	NativeQuiesceReplyGrace = 10 * time.Second
+)
+
 // ErrNativeTurnPending reports a graceful stop that gave up waiting for the
 // native turn. Nothing changed: the writer still runs with input gated, and
 // repeating the stop waits again.

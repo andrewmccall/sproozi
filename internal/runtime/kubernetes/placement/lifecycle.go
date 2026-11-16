@@ -33,8 +33,8 @@ const containerStatusUnknown = "ContainerStatusUnknown"
 // podStopWait bounds a stop's wait for the native container to end after the
 // supervisor's graceful handoff, within the stop's settle allowance
 // (profile.StopBound). A container that has not ended by then leaves the stop
-// unproven, and its retry waits again.
-const podStopWait = time.Minute
+// unproven, and its retry waits again. Tests shorten it.
+var podStopWait = time.Minute
 
 func (p *Placement) retained(ctx context.Context, l session.Launch) (retained, registry.Record, error) {
 	local, err := p.load(l)
