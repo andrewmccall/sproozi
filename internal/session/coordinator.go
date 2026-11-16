@@ -328,6 +328,7 @@ func (c *Coordinator) abandon(ctx context.Context, r Record, index int) (Record,
 	}
 	return r, ErrDeadlinePassed
 }
+
 // unproven is abandon's refusal while the destination is not shown to hold
 // no writer: what is missing, and the placement's error when it gave one.
 func unproven(missing string, cause error) error {

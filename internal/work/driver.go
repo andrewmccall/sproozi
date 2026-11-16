@@ -156,15 +156,8 @@ func (o *Owner) step(ctx context.Context, id string) next {
 	switch {
 	case rec != nil && rec.Phase == session.PhaseCancelled:
 		return nextDone
-	case rec != nil && rec.Phase == session.PhaseIdle && interactive:
-		return nextDone
-	case rec != nil && rec.Phase == session.PhaseIdle && startEnded(*rec):
-		// The deadline overtook the task's start inside a recovery: it
-		// follows the rule for a task whose deadline passed before it
-		// started, and nothing ran, so there is no result to finish.
-		return o.end(ctx, r, "deadline-expired", problemExpired)
 	case rec != nil && rec.Phase == session.PhaseIdle:
-		return o.finish(r)
+		return o.stepIdle(ctx, r, *rec, interactive)
 	case interactive && rec != nil && (rec.CancelOperation != "" || !rec.Phase.Starting() && rec.Phase != session.PhaseActive):
 		// Only "recover" retries an interactive session's unsettled stop
 		// or cancellation.
@@ -178,18 +171,7 @@ func (o *Owner) step(ctx context.Context, id string) next {
 	case rec == nil:
 		return o.start(ctx, r)
 	case rec.Phase.Starting():
-		if !interactive && deadline.At(rec.Deadline).Passed(time.Now()) {
-			return o.end(ctx, r, "deadline-expired", problemExpired)
-		}
-		// Past its deadline, an interactive session's start ends instead
-		// of starting: it stays stopped with what its earlier execution
-		// committed, and resume continues it (ADR 0060).
-		_, err = coordinator.Recover(ctx, rec.ID)
-		if errors.Is(err, session.ErrDeadlinePassed) {
-			o.note(r.ID, problemExpired)
-			return nextAgain
-		}
-		return o.after(ctx, r, err, nextDone)
+		return o.stepStarting(ctx, r, *rec, interactive)
 	case interactive:
 		// Running: its owner attaches to it and stops it.
 		return nextDone
@@ -211,6 +193,37 @@ func (o *Owner) step(ctx context.Context, id string) next {
 		_, err = coordinator.Recover(ctx, rec.ID)
 		return o.after(ctx, r, err, nextWait)
 	}
+}
+
+// stepIdle takes the next step of a session whose execution is idle. An
+// interactive session waits for its owner. A task whose start the deadline
+// overtook inside a recovery follows the rule for a task whose deadline
+// passed before it started: nothing ran, so there is no result to finish.
+// Any other task writes its tail.
+func (o *Owner) stepIdle(ctx context.Context, r record, rec session.Record, interactive bool) next {
+	switch {
+	case interactive:
+		return nextDone
+	case startEnded(rec):
+		return o.end(ctx, r, "deadline-expired", problemExpired)
+	}
+	return o.finish(r)
+}
+
+// stepStarting continues a session whose execution is starting. A task past
+// its deadline is cancelled. Past its deadline, an interactive session's
+// start ends instead of starting: it stays stopped with what its earlier
+// execution committed, and resume continues it (ADR 0060).
+func (o *Owner) stepStarting(ctx context.Context, r record, rec session.Record, interactive bool) next {
+	if !interactive && deadline.At(rec.Deadline).Passed(time.Now()) {
+		return o.end(ctx, r, "deadline-expired", problemExpired)
+	}
+	_, err := o.config.Coordinator.Recover(ctx, rec.ID)
+	if errors.Is(err, session.ErrDeadlinePassed) {
+		o.note(r.ID, problemExpired)
+		return nextAgain
+	}
+	return o.after(ctx, r, err, nextDone)
 }
 
 // startEnded reports an execution whose deadline ended its first visit
