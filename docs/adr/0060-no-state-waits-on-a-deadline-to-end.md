@@ -125,14 +125,16 @@ field.
 
 Two ways on remain, and the reply names both in one sentence: repeat the
 command once the placement is reachable, which ends the start if the
-placement can then show that nothing runs; or `cancel`, which ends the
-session. Some placement states cannot be shown to hold no writer however
-often the command is repeated. On Kubernetes today these include a queued
-AgentRun with no sandbox yet, a bound registration with no Pod, and intent
-saved on the executor with no registry reference. For those `cancel` is the
-only way on. That is a limit of what the placement can prove, not a state
-the deadline created, and making such states provable is the placement's
-work.
+placement can then show that nothing runs; or `cancel`, which records the
+cancellation at once and finishes it once the placement can show the same.
+Some placement states cannot be shown to hold no writer however often the
+command is repeated. On Kubernetes today these include a queued AgentRun with
+no sandbox yet, a bound registration with no Pod, and intent saved on the
+executor with no registry reference. In those, `cancel` cannot finish either:
+its own check of the pending destination meets the same gap, so it leaves the
+execution `unknown-stop`, and `recover` repeats that check. That is a limit of
+what the placement can prove, not a state the deadline created, and making
+such states provable is the placement's work.
 
 ### Who takes the exit
 
@@ -170,13 +172,15 @@ finishes a stop.
   resume ID", which gives it a new deadline`.
 - `stop` succeeds and stays idempotent.
 - `status` of a session still `preparing` or `activating` after its deadline
-  prints `Overdue`, names `sproozi resume ID`, and says that `sproozi cancel
-  ID` ends the session if the placement cannot show that nothing runs there.
+  prints `Overdue`, names `sproozi resume ID`, and says that, if the
+  placement cannot show that nothing runs there, `sproozi cancel ID` records
+  the cancellation and finishes it once the placement can.
 - While the placement cannot show that, every command replies `session ID
   reached its deadline before it started, but the placement has not shown that
   nothing runs at the destination: WHAT; repeat the command once Docker or the
-  cluster is reachable to end the start with the work kept, or end the session
-  with "sproozi cancel ID"`.
+  cluster is reachable to end the start with the work kept, or run "sproozi
+  cancel ID", which records the cancellation now and finishes it once the
+  placement can show that nothing runs there`.
 
 One next command remains for each state: `recover` before the deadline,
 `resume` after it, and, while the end is unproven, the same command or
@@ -235,8 +239,19 @@ past its deadline, with its launch saved, reads unchanged, and the next
   fences preparations. The Kubernetes placement does not implement
   `PreparationAborter` on this branch. An absent launch is ended at once, a
   reported incarnation must abort with sealed usage, and anything else is
-  refused with `ErrEndUnproven` until the placement can show it, or the user
-  cancels.
+  refused with `ErrEndUnproven` until the placement can show it; a
+  cancellation meets the same gap and stays `unknown-stop` until then. The
+  companion change that makes the Kubernetes placement fence preparations
+  closes the first two Kubernetes states named above, a queued AgentRun with
+  no sandbox and a bound registration with no Pod, once it is merged. The
+  third, intent with no registry reference, needs the placement to report
+  `absent` when the registry refuses to create an expired registration.
+- When a destination had in fact been activated without the journal recording
+  it, and `Inspect` fails after the deadline, the end aborts it rather than
+  stopping it gracefully. No new checkpoint is captured and the visit's exit
+  report is dropped, so the session keeps its earlier checkpoint, and what the
+  harness did by itself in that visit is lost. No user input can be lost:
+  nothing can attach while the journal says `activating`.
 - The transition table cannot tell a move's `preparing` from a stop's, which
   `finalized` leaves. What its principle test proves: every phase but
   `cancelled` has an exit the deadline never refuses that is not a

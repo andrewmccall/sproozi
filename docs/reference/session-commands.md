@@ -223,7 +223,10 @@ not left waiting
 The session is then `retained` with what it had kept. That is the checkpoint
 the move's stop saved, the checkpoint from before an interrupted resume, or,
 for a run that never started, the workspace it captured, which `resume` starts
-a new conversation from.
+a new conversation from. If the destination had in fact started without the
+service recording it, it is stopped forcibly, so whatever the agent did there
+by itself is not kept; no input can be lost, because nothing could attach to
+it.
 
 Before it ends the start, the service makes sure no agent runs, or can start,
 at the destination. Until Docker or the cluster can show that, nothing is
@@ -231,15 +234,17 @@ recorded: the session stays `preparing` or `activating`, and the command
 replies `session ID reached its deadline before it started, but the placement
 has not shown that nothing runs at the destination: WHAT; repeat the command
 once Docker or the cluster is reachable to end the start with the work kept,
-or end the session with "sproozi cancel ID"`. `WHAT` names what is missing,
+or run "sproozi cancel ID", which records the cancellation now and finishes it once the placement can show that nothing runs there`. `WHAT` names what is missing,
 such as `it cannot be inspected` or `its preparation remains unknown`, with
 the placement's own error. Some cluster states cannot yet be shown to hold no
-agent, however often the command is repeated; `cancel` ends those sessions.
+agent, however often the command is repeated. In those, `cancel` records the
+cancellation but replies that the placement has not yet proved the agent
+stopped, and `recover ID` finishes it only once the placement can show that.
 
 Until one of these commands runs, `status` prints `Overdue    its deadline
 passed before it started` and `Continue it with: sproozi resume ID, which
 ends this start with the work kept; if the placement cannot show that nothing
-runs there, sproozi cancel ID ends the session`.
+runs there, sproozi cancel ID records the cancellation and finishes it once the placement can`.
 
 An agent whose container was stopped from outside, or which Sproozi stopped
 forcibly after a graceful stop failed, is also `retained`, whatever its code:
@@ -280,7 +285,7 @@ hint. `ID` is the session and `OP` an operation.
 | --- | --- | --- |
 | `session: previous KIND requires recovery; run "sproozi recover ID" to finish it, or "sproozi cancel ID" to stop it now` | A `move` or `stop` while an earlier `start`, `resume` or `move` is unfinished, before its deadline. After the deadline, `stop` and `move` end it instead. | `sproozi recover ID`, or `sproozi cancel ID`. |
 | `session ID reached its deadline before it started, so it is stopped with its work kept; continue it on this machine with "sproozi resume ID", which gives it a new deadline` | `recover`, `move`, or a retried `run` or `resume`, of a session whose start or move its deadline passed. The command ended it, and the session is `retained`. | `sproozi resume ID`. |
-| `session ID reached its deadline before it started, but the placement has not shown that nothing runs at the destination: WHAT; repeat the command once Docker or the cluster is reachable to end the start with the work kept, or end the session with "sproozi cancel ID"` | `resume`, `recover`, `stop` or `move` of such a session while Docker or the cluster cannot show that no agent runs there. Nothing was recorded. | The same command once it is reachable, or `sproozi cancel ID`. |
+| `session ID reached its deadline before it started, but the placement has not shown that nothing runs at the destination: WHAT; repeat the command once Docker or the cluster is reachable to end the start with the work kept, or run "sproozi cancel ID", which records the cancellation now and finishes it once the placement can show that nothing runs there` | `resume`, `recover`, `stop` or `move` of such a session while Docker or the cluster cannot show that no agent runs there. Nothing was recorded. | The same command once it is reachable, or `sproozi cancel ID`, then `sproozi recover ID` until it finishes. |
 | `session ID is still stopping; run "sproozi stop ID" to keep waiting, or "sproozi cancel ID" to force-stop it` | A `move` while a stop is unfinished. | `sproozi stop ID`, or `sproozi cancel ID`. |
 | `session: cancellation unfinished; run "sproozi recover ID" to finish the cancellation` | A `move` or `stop` while a cancellation hasn't yet proved the agent stopped and its usage settled. | `sproozi recover ID`. |
 | `session: the writer stopped, but its usage is not finalized yet; recover again once the placement can finalize it` | `recover` of a cancellation whose usage could not be settled yet. | `sproozi recover ID` again; the service log has the cause. |

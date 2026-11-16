@@ -416,8 +416,9 @@ func needsRecovery(err error, id, continueWith string) error {
 // destination, and how each way on works (ADR 0060).
 func unprovenProblem(id string, err error) error {
 	return rejectedError(fmt.Sprintf("session %s reached its deadline before it started, but %s; repeat the command "+
-		"once Docker or the cluster is reachable to end the start with the work kept, or end the session with "+
-		"\"sproozi cancel %s\"", id, strings.TrimPrefix(err.Error(), "session: "), id))
+		"once Docker or the cluster is reachable to end the start with the work kept, or run \"sproozi cancel %s\", "+
+		"which records the cancellation now and finishes it once the placement can show that nothing runs there",
+		id, strings.TrimPrefix(err.Error(), "session: "), id))
 }
 
 // deadlineProblem says a start or move reached its deadline first, so the

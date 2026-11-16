@@ -168,7 +168,7 @@ func resumeInterruptedThenLate(t *testing.T, interruption, late string) {
 
 // While the placement cannot show that nothing runs at the destination, a
 // late command says what is unproven, that repeating it retries, and that
-// cancel ends the session; status says the same, and nothing is recorded. A
+// cancel records the cancellation; status says the same, and nothing is recorded. A
 // repeat once the placement is reachable ends the start.
 func TestUnprovenLateStartNamesRetryAndCancel(t *testing.T) {
 	t.Parallel()
@@ -198,7 +198,7 @@ func TestUnprovenLateStartNamesRetryAndCancel(t *testing.T) {
 		r := exchange(t, s, q)
 		if !r.Rejected || !strings.Contains(r.Error, "reached its deadline before it started, but the placement has not shown") ||
 			!strings.Contains(r.Error, "docker unreachable") || !strings.Contains(r.Error, "repeat the command") ||
-			!strings.Contains(r.Error, `"sproozi cancel `+id+`"`) {
+			!strings.Contains(r.Error, `"sproozi cancel `+id+`", which records the cancellation now and finishes it once`) {
 			t.Fatalf("%s of an unproven late start replied %+v", q.Action, r)
 		}
 	}

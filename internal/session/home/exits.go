@@ -119,7 +119,8 @@ func (s *Service) notStoppedProblem(id, current string) error {
 		// resume ends a start or move its deadline overtook, and continues.
 		return rejectedError(fmt.Sprintf("home: session %s reached its deadline before it started; "+
 			"\"sproozi resume %s\" ends that start and continues the session with a new deadline, or, if the "+
-			"placement cannot show that nothing runs there, \"sproozi cancel %s\" ends the session", id, id, id))
+			"placement cannot show that nothing runs there, \"sproozi cancel %s\" records the cancellation and "+
+			"finishes it once the placement can show that", id, id, id))
 	case r.Phase == session.PhaseIdle:
 		return rejectedError(fmt.Sprintf("home: session %s is stopped, with its work kept; \"sproozi resume %s\" "+
 			"continues it", id, id))

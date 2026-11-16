@@ -92,7 +92,7 @@ func TestStatusOfAStartOverdueNamesResume(t *testing.T) {
 	} {
 		text := statusText(cmdStatus, home.Status{ID: id, Phase: tc.phase, Deadline: tc.at}, false)
 		got := strings.Contains(text, "Continue it with: sproozi resume "+shortID(id)) &&
-			strings.Contains(text, "sproozi cancel "+shortID(id)+" ends the session")
+			strings.Contains(text, "sproozi cancel "+shortID(id)+" records the cancellation")
 		if got != tc.want {
 			t.Errorf("%s %v: %q", tc.phase, tc.at, text)
 		}

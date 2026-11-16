@@ -118,7 +118,8 @@ func statusText(action string, s home.Status, detached bool) string {
 		// resume ends the start or move and continues the session (ADR 0060).
 		text += "\nOverdue    its deadline passed before it started"
 		text += fmt.Sprintf("\nContinue it with: sproozi resume %s, which ends this start with the work kept; "+
-			"if the placement cannot show that nothing runs there, sproozi cancel %s ends the session", short, short)
+			"if the placement cannot show that nothing runs there, sproozi cancel %s records the cancellation "+
+			"and finishes it once the placement can", short, short)
 	case s.Exit != nil && s.Exit.Deadline:
 		text += "\nStopped    at its deadline (--max-duration, or maxDuration in config.json)"
 		text += fmt.Sprintf("\nContinue it with: sproozi resume %s", short)
