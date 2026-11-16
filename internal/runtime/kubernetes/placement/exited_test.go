@@ -83,6 +83,36 @@ func TestExitedReportsANativeContainerThatEndedOnItsOwn(t *testing.T) {
 	}
 }
 
+// A visit another operation holds, such as a stop in progress, is being
+// acted on: Exited answers no exit at once rather than wait for it, so the
+// executor never leaves a request waiting behind a stop.
+func TestExitedAnswersNoExitForAVisitAnotherOperationHolds(t *testing.T) {
+	t.Parallel()
+	p, kube, _, l, data := setup(t)
+	i := activeVisit(t, p, l, data)
+	endNative(t, p, kube, l, 2)
+	unlock, err := p.lockOperation(l)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if exited, err := p.Exited(t.Context(), l, i); err != nil || exited {
+			t.Errorf("a held visit: %v %v", exited, err)
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Exited waited for the operation holding the visit")
+	}
+	unlock()
+	if exited, err := p.Exited(t.Context(), l, i); err != nil || !exited {
+		t.Fatalf("once released: %v %v", exited, err)
+	}
+}
+
 // Without a report, the container's own exit code is the exit.
 func TestExitedWithoutAReportUsesTheContainerExitCode(t *testing.T) {
 	t.Parallel()

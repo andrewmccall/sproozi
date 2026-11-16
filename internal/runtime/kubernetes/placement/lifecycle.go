@@ -569,10 +569,12 @@ func (p *Placement) recordExit(ctx context.Context, local retained, r registry.R
 
 // Exited reports whether an active visit's native container ended without a
 // stop being requested: its harness exited on its own or at its deadline.
-// Stopping the visit then reports the exit.
+// Stopping the visit then reports the exit. A visit another operation holds,
+// such as a stop in progress, is being acted on: Exited reports no exit
+// rather than wait for it.
 func (p *Placement) Exited(ctx context.Context, l session.Launch, i session.Incarnation) (bool, error) {
-	unlock, err := p.lockOperation(l)
-	if err != nil {
+	unlock, busy, err := p.tryLockOperation(l)
+	if err != nil || busy {
 		return false, err
 	}
 	defer unlock()

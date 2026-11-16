@@ -175,6 +175,32 @@ func (p *Placement) lockOperation(l session.Launch) (func(), error) {
 	}
 	return unlock, nil
 }
+// tryLockOperation is lockOperation that reports busy instead of waiting
+// while another operation holds the launch's session or allocation.
+func (p *Placement) tryLockOperation(l session.Launch) (unlock func(), busy bool, err error) {
+	if l.Harness != p.config.Harness || !idValid(l.ExecutionID) || !idValid(l.AllocationID) {
+		return nil, false, &profile.Rejection{Code: profile.CodeInvalid}
+	}
+	p.mu.RLock()
+	unlockSession, ok := p.journals.TryLock("session/" + l.ExecutionID)
+	if !ok {
+		p.mu.RUnlock()
+		return nil, true, nil
+	}
+	unlockAllocation, ok := p.journals.TryLock("allocation/" + l.AllocationID)
+	if !ok {
+		unlockSession()
+		p.mu.RUnlock()
+		return nil, true, nil
+	}
+	unlock = func() { unlockAllocation(); unlockSession(); p.mu.RUnlock() }
+	if p.lock == nil {
+		unlock()
+		return nil, false, errors.New("placement: closed")
+	}
+	return unlock, false, nil
+}
+
 func digestValid(s string) bool {
 	b, err := hex.DecodeString(s)
 	return err == nil && len(b) == 32 && hex.EncodeToString(b) == s
