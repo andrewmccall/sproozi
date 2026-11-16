@@ -303,7 +303,6 @@ func (s *server) stop(cause exitCause) {
 	if n != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		login.forced()
 		exit, err = n.Stop(ctx)
 		login.stop()
 	}
@@ -320,7 +319,9 @@ func (s *server) watch(n *nativepty.Supervisor, cleanup func()) {
 	<-n.Done()
 	exit, err := n.Wait(context.Background())
 	if exit.Reason != nativepty.NativeExit || exit.Code < 0 {
-		// A signal ended it, perhaps while it rewrote its login file.
+		// A signal ended it, perhaps while it rewrote its login file. The
+		// supervisor's own kills were recorded before they were sent
+		// (nativepty.Launch.BeforeKill); one from outside is seen only now.
 		s.killing()
 	}
 	cleanup()
@@ -451,8 +452,7 @@ func (s *server) activate() response {
 		r.Error = err.Error()
 		return r
 	}
-	n, err := nativepty.Start(nativepty.Launch{Executable: adapter.executable, Args: args, Env: env,
-		Dir: workspace, Deadline: s.config.Deadline, Size: nativepty.Size{Rows: 40, Columns: 140}})
+	n, err := nativepty.Start(terminalLaunch(adapter.executable, args, env, s.config.Deadline, login))
 	if err != nil {
 		login.stop()
 		r.Error = err.Error()
@@ -466,6 +466,14 @@ func (s *server) activate() response {
 		closeForwarder(forwarder)
 	})
 	return r
+}
+
+// terminalLaunch is the harness's terminal. Every kill its supervisor sends
+// is recorded in the login sync first, so the harness's login file is no
+// longer copied out once a kill may land (loginSync).
+func terminalLaunch(executable string, args, env []string, until time.Time, login *loginSync) nativepty.Launch {
+	return nativepty.Launch{Executable: executable, Args: args, Env: env, Dir: workspace, Deadline: until,
+		Size: nativepty.Size{Rows: 40, Columns: 140}, BeforeKill: login.forced}
 }
 
 // reportExit writes, for a harness that ended without a graceful stop, why it
@@ -651,9 +659,6 @@ func (s *server) finishTurn(adapter nativeAdapter, n *nativepty.Supervisor) (nat
 	until := deadline.At(s.deadline)
 	ctx, cancel := context.WithDeadline(context.Background(), until.Bound(time.Now(), quitWait))
 	defer cancel()
-	if !adapter.quits {
-		s.killing()
-	}
 	exit, err := adapter.finish(n, ctx)
 	var forced string
 	switch {
@@ -671,7 +676,6 @@ func (s *server) finishTurn(adapter nativeAdapter, n *nativepty.Supervisor) (nat
 	}
 	stopCtx, stopCancel := context.WithDeadline(context.Background(), until.Bound(time.Now(), forcedStopWait))
 	defer stopCancel()
-	s.killing()
 	exit, err = forceStop(n, stopCtx)
 	if err != nil || exit.Reason != nativepty.ForcedStop {
 		return exit, "", err
@@ -682,9 +686,10 @@ func (s *server) finishTurn(adapter nativeAdapter, n *nativepty.Supervisor) (nat
 // forceStop kills the harness and waits for its exit; tests replace it.
 var forceStop = (*nativepty.Supervisor).Stop
 
-// killing records, before the supervisor kills its harness, that the
-// harness's login file may be left half written, so it is no longer copied
-// to the login store.
+// killing records that a signal from outside the supervisor ended the
+// harness, so its login file, which may be left half written, is no longer
+// copied to the login store. The supervisor's own kills are recorded before
+// they are sent (nativepty.Launch.BeforeKill).
 func (s *server) killing() {
 	s.mu.Lock()
 	login := s.login
@@ -822,7 +827,6 @@ func (s *server) stopTurnless(n *nativepty.Supervisor) response {
 	until := deadline.At(s.deadline)
 	ctx, cancel := context.WithDeadline(context.Background(), until.Bound(time.Now(), quitWait))
 	defer cancel()
-	s.killing()
 	exit, err := forceStop(n, ctx)
 	if err != nil {
 		cause := causeFailed

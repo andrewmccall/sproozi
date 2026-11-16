@@ -16,7 +16,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/andrewmccall/sproozi/internal/deadline"
 	"github.com/andrewmccall/sproozi/internal/harness"
 )
 
@@ -45,8 +44,9 @@ func signInPaths(c config) (stored, native string, ok bool) {
 // Only a whole login reaches the store: a harness killed while rewriting its
 // file can leave it cut short, or empty, and the store is every session's.
 // A file that is not a whole login is never copied out. Once a stop has
-// begun, an empty or missing file is not a sign-out; and once the supervisor
-// has killed the harness, or the deadline has passed, nothing is copied out.
+// begun, an empty or missing file is not a sign-out; and once a kill may
+// land, nothing is copied out: the terminal supervisor records each of its
+// kills before sending it, and the exit watcher one from outside.
 type loginSync struct {
 	stored, native string
 	mu             sync.Mutex
@@ -55,9 +55,8 @@ type loginSync struct {
 	known  bool
 	// level is loginRunning, loginStopping or loginForced; it only rises.
 	level atomic.Int32
-	// deadline is the launch's; once it passes the harness may have been
-	// killed at it, as by loginForced.
-	deadline time.Time
+	// interval replaces loginInterval when set.
+	interval time.Duration
 	// quit ends run, which closes stopped; once makes stop idempotent.
 	quit, stopped chan struct{}
 	once          sync.Once
@@ -123,9 +122,6 @@ func (l *loginSync) raise(level int32) {
 // trust is what the login file read just before may be trusted for. It is
 // read after the file, so a kill recorded before it landed is seen.
 func (l *loginSync) trust() int32 {
-	if deadline.At(l.deadline).Passed(time.Now()) {
-		return loginForced
-	}
 	return l.level.Load()
 }
 
@@ -160,7 +156,7 @@ func startLoginSync(c config) (*loginSync, error) {
 	if !ok {
 		return nil, nil
 	}
-	l := &loginSync{stored: stored, native: native, deadline: c.Deadline,
+	l := &loginSync{stored: stored, native: native,
 		quit: make(chan struct{}), stopped: make(chan struct{})}
 	if err := l.begin(); err != nil {
 		return nil, err
@@ -198,7 +194,11 @@ func (l *loginSync) run() {
 		<-l.quit
 		cancel()
 	}()
-	ticker := time.NewTicker(loginInterval)
+	every := loginInterval
+	if l.interval > 0 {
+		every = l.interval
+	}
+	ticker := time.NewTicker(every)
 	defer ticker.Stop()
 	for {
 		select {

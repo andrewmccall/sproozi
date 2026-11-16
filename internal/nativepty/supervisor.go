@@ -43,6 +43,10 @@ type Launch struct {
 	Deadline    time.Time
 	Size        Size
 	ReplayBytes int
+	// BeforeKill, when set, runs before every kill the supervisor sends: a
+	// stop, a quit whose caller gave up, and the deadline. It must not block
+	// and must not call the supervisor.
+	BeforeKill func()
 }
 
 type Size struct{ Rows, Columns uint16 }
@@ -91,6 +95,8 @@ type Supervisor struct {
 	exited  bool
 	exit    Exit
 	exitErr error
+	// beforeKill is Launch.BeforeKill.
+	beforeKill func()
 }
 
 // Attachment is the sole input lease. Closing it leaves the native process and
@@ -134,7 +140,7 @@ func Start(launch Launch) (*Supervisor, error) {
 		return nil, fmt.Errorf("start native terminal: %w", err)
 	}
 	_ = slave.Close()
-	s := &Supervisor{master: master, cmd: cmd, limit: launch.ReplayBytes,
+	s := &Supervisor{master: master, cmd: cmd, limit: launch.ReplayBytes, beforeKill: launch.BeforeKill,
 		notify: make(chan struct{}), done: make(chan struct{}), readerDone: make(chan struct{})}
 	go s.drain()
 	go s.reap()
@@ -357,6 +363,9 @@ func (s *Supervisor) force(reason StopReason) {
 	// still reaches any descendants left in its group.
 	if !s.reaped && s.forced == "" {
 		s.forced = reason
+	}
+	if s.beforeKill != nil {
+		s.beforeKill()
 	}
 	_ = unix.Kill(-s.PID(), unix.SIGKILL)
 }
