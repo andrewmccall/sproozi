@@ -236,10 +236,19 @@ has not shown that nothing runs at the destination: WHAT; repeat the command
 once Docker or the cluster is reachable to end the start with the work kept,
 or run "sproozi cancel ID", which records the cancellation now and finishes it once the placement can show that nothing runs there`. `WHAT` names what is missing,
 such as `it cannot be inspected` or `its preparation remains unknown`, with
-the placement's own error. Some cluster states cannot yet be shown to hold no
-agent, however often the command is repeated. In those, `cancel` records the
-cancellation but replies that the placement has not yet proved the agent
-stopped, and `recover ID` finishes it only once the placement can show that.
+the placement's own error. On a cluster the executor shows it by aborting the
+preparation, as for a [cancelled session whose sandbox has not started
+yet](#status-and-listing-output): a run waiting under a concurrency cap, one
+admitted with no Pod, and one the executor recorded but never registered all
+end this way once the controller has ended the cancelled run and any Pod it
+created is seen to stop, and repeating the command finishes an attempt that
+could not show that yet. Two cluster cases cannot be shown to hold no agent,
+however often the command is repeated: an executor older than this release,
+which cannot abort a preparation that has not reported its Pod, and a visit
+whose registration an administrator deleted or whose run one replaced. In
+those, `cancel` records the cancellation but replies that the placement has
+not yet proved the agent stopped, and `recover ID` finishes it only once the
+placement can show that: for an older executor, once it is updated.
 
 Until one of these commands runs, `status` prints `Overdue    its deadline
 passed before it started` and `Continue it with: sproozi resume ID, which

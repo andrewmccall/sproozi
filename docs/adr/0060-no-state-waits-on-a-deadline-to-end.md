@@ -65,9 +65,11 @@ execution, its lifecycle declares another way on. The deadline never refuses
 that exit, and it keeps what the session has already committed.
 
 This record applies the principle to the execution journal, the home service
-and the remote executor's sessions. Two other applications of it are separate
-changes, not part of this one: cancelling a Kubernetes preparation that has no
-Pod, and bounding how long a stop waits for Codex to quit.
+and the remote executor's sessions. Two other applications of it have their
+own records: cancelling a Kubernetes preparation that has no Pod
+([ADR 0057, section 13](0057-the-remote-executor-owns-its-sessions-through-the-coordinator.md#13-aborting-a-kubernetes-preparation-that-has-no-pod-2026-11-15)),
+and bounding how long a stop waits for a harness to exit after its quit
+([ADR 0035's correction of 2026-11-15](0035-bounded-graceful-stops-and-settled-input.md#correction-the-wait-after-the-quit-2026-11-15)).
 
 ### The `abandoned` event
 
@@ -128,13 +130,20 @@ command once the placement is reachable, which ends the start if the
 placement can then show that nothing runs; or `cancel`, which records the
 cancellation at once and finishes it once the placement can show the same.
 Some placement states cannot be shown to hold no writer however often the
-command is repeated. On Kubernetes today these include a queued AgentRun with
-no sandbox yet, a bound registration with no Pod, and intent saved on the
-executor with no registry reference. In those, `cancel` cannot finish either:
-its own check of the pending destination meets the same gap, so it leaves the
-execution `unknown-stop`, and `recover` repeats that check. That is a limit of
-what the placement can prove, not a state the deadline created, and making
-such states provable is the placement's work.
+command is repeated. In those, `cancel` cannot finish either: its own check of
+the pending destination meets the same gap, so it leaves the execution
+`unknown-stop`, and `recover` repeats that check. That is a limit of what the
+placement can prove, not a state the deadline created, and making such states
+provable is the placement's work. The Kubernetes placement fences
+preparations (ADR 0057, section 13), so a queued AgentRun with no sandbox yet,
+a bound registration with no Pod, and intent saved on the executor with no
+registry reference are each ended by `AbortPreparation` once the controller
+has ended the cancelled run and any Pod it created is seen to stop; until
+then the attempt is unproven and is repeated. Two cluster cases remain that
+repetition does not end: an executor from before that change, against which
+the home's client falls back to inspecting the launch and cannot fence one
+still preparing, and a registration an administrator deleted, or a run one
+replaced, which the executor refuses as a conflict.
 
 ### Who takes the exit
 
@@ -236,16 +245,16 @@ past its deadline, with its launch saved, reads unchanged, and the next
   (ADR 0034), so continuing on a cluster means `resume`, then `move --remote`.
 - Ending a start or move costs an `Inspect`, and an `Abort` when an
   incarnation exists, unless the operation has no launch or the placement
-  fences preparations. The Kubernetes placement does not implement
-  `PreparationAborter` on this branch. An absent launch is ended at once, a
-  reported incarnation must abort with sealed usage, and anything else is
-  refused with `ErrEndUnproven` until the placement can show it; a
-  cancellation meets the same gap and stays `unknown-stop` until then. The
-  companion change that makes the Kubernetes placement fence preparations
-  closes the first two Kubernetes states named above, a queued AgentRun with
-  no sandbox and a bound registration with no Pod, once it is merged. The
-  third, intent with no registry reference, needs the placement to report
-  `absent` when the registry refuses to create an expired registration.
+  fences preparations. Docker and Kubernetes both fence preparations, the
+  latter through `/v1/abort-preparation` for a session home moved there
+  (ADR 0057, section 13). On a placement that does not, an absent launch is
+  ended at once, a reported incarnation must abort with sealed usage, and
+  anything else is refused with `ErrEndUnproven` until the placement can show
+  it; a cancellation meets the same gap and stays `unknown-stop` until then.
+  That is what the home's client does against an older executor. `Inspect`
+  of Kubernetes intent with no registry reference still reports `preparing`
+  rather than `absent` when the registry refused to create an expired
+  registration, so the fallback leaves that state unproven too.
 - When a destination had in fact been activated without the journal recording
   it, and `Inspect` fails after the deadline, the end aborts it rather than
   stopping it gracefully. No new checkpoint is captured and the visit's exit
@@ -332,6 +341,7 @@ past its deadline, with its launch saved, reads unchanged, and the next
   recovering](../reference/session-commands.md#stopping-removing-and-recovering)
 - Related: [ADR 0018](0018-coordinator-owns-every-visit.md),
   [ADR 0034](0034-resume-continues-every-home-session.md),
+  [ADR 0035](0035-bounded-graceful-stops-and-settled-input.md),
   [ADR 0038](0038-exited-agents-and-one-recovery-path.md),
   [ADR 0056](0056-whoever-starts-work-sets-its-deadline.md),
   [ADR 0057](0057-the-remote-executor-owns-its-sessions-through-the-coordinator.md),
