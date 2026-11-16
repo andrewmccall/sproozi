@@ -23,6 +23,9 @@ and release users must not have to build an image.
 
 Pinned and tested: `@github/copilot` 1.0.102.
 
+Corrected 2026-11-16: 1.0.102 was the pin when this record was written. The
+pinned version is in `hack/clients/copilot/package.json`.
+
 ## Decision
 
 - **A managed kind, `copilot`.** The registry entry sets `Native`,
@@ -79,7 +82,7 @@ adapter is `cmd/native-session/copilot.go`.
 
 - **The exit status is the outcome; an AgentRun has no launch helper.** Copilot
   exits 1 after a failed or refused model call and 0 after a completed turn, so
-  the example `exec`s it, as Claude Code's does, and no completion adapter or
+  the example `exec`s it, and no completion adapter or
   launch helper builds the instructions: four lines of shell write the file.
 - **Instructions through `$COPILOT_HOME/copilot-instructions.md`.** Copilot has
   no system prompt flag but adds that file to its system prompt. The example
@@ -108,6 +111,10 @@ adapter is `cmd/native-session/copilot.go`.
 
 Revisit the instructions rule if Copilot adds a system prompt flag or a way to
 disable workspace instructions alone.
+
+Corrected 2026-11-16: the example `exec`s Copilot directly, but Claude Code's
+does not, as this section first said. Claude Code AgentRuns launch through a
+helper (ADR 0054; `examples/harnesses/agentruntime-claude-code.yaml`).
 
 ## Evidence
 
@@ -158,9 +165,13 @@ With 1.0.102, against scripted providers:
   shell, which reads `BASH_ENV`.
 - `/login` through the gateway's device-flow relay is untested with a real
   GitHub account. Copilot's plan hosts are routed as ADR 0047 recorded.
-- Copilot releases often. 1.0.103 removed `--no-remote`; v0.2.1 pins 1.0.103
-  and drops the flag from the supervisor and the AgentRun example
+- Copilot releases often. 1.0.103 removed `--no-remote`; the pinned version
+  (`hack/clients/copilot/package.json`) is past it, so the supervisor and the
+  AgentRun example drop the flag
   ([ADR 0050](0050-prebuilt-cli-and-explicit-image-builds.md)).
+
+Corrected 2026-11-16: the bullet above named the release that pinned 1.0.103 and
+that pin. It now points at the pinned version rather than a number.
 - Copilot models on `/chat/completions` stream, which the gateway refuses
   (ADR 0047).
 
