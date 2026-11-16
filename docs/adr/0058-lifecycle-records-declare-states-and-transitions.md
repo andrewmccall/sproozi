@@ -292,26 +292,34 @@ Two deadline checks stay outside the table because they record no event:
 `ResolveRun` refuses an expired run unless its stop completed, and
 `RequireActive` refuses an expired registration on every gateway request.
 
-Corrected 2026-11-16: the home catalogue entry (`internal/session/home`) now
-follows rules 1 and 2. Before, each caller worked out a session's state from
-the entry's claim, current execution, last exit and source for itself, and
-status reported a word from one of three vocabularies: `importing`, the
-stopped words `retained` and `failed`, or the current execution's phase,
-including `idle`. The entry stores no phase, and its stored format is
-unchanged. `derive(entry, record)` in `internal/session/home/phase.go` is the
-one place its phase is worked out, from the entry and its current execution's
-journal record. The vocabulary is closed: `importing`, `retained`, `failed`
-and every execution phase except `idle`, which a session reports as
-`retained` or `failed`. An idle current execution, a stop whose catalogue
-write failed after the journal recorded it, therefore reads as stopped. Reads
-derive without writing. A command holding the session's lock first retires
-such an execution and cancels and deletes the executions of the session that
-the entry never recorded, which only an interrupted resume leaves and which
-never ran. The entry has no `(from, event) → to` table or deadline column of
-its own: nothing it records starts or stops work, which happens only through
-the execution journal's events. Instead, one table, `nextSteps`, maps each
-derived state to the commands the service refuses and the reply that names
-the commands that work, so a refusal and its advice cannot disagree.
+Corrected 2026-11-16: the home catalogue entry (`internal/session/home`)
+adopts rule 1 only. Before, each caller worked out a session's state from the
+entry's claim, current execution, last exit and source for itself, and status
+reported a word from one of three vocabularies: `importing`, the stopped
+words `retained` and `failed`, or the current execution's phase, including
+`idle`.
+
+- **Rule 1.** The phase is typed, with a closed vocabulary: `importing`,
+  `retained`, `failed` and every execution phase except `idle`, which a
+  session reports as `retained` or `failed`. One function,
+  `derive(entry, record, pastDeadline)` in `internal/session/home/phase.go`,
+  works it out from the entry and its current execution's journal record.
+  An idle current execution, left when a stop's catalogue write failed after
+  the journal recorded it, therefore reads as stopped.
+- **Rule 2.** The entry stores no phase, so there is nothing to validate on
+  load or save. Its stored format is unchanged.
+- **Rules 3 to 5** are not adopted: the entry has no `(from, event) → to`
+  table, no single apply function and no deadline column. In their place,
+  one table, `nextSteps`, maps each derived state to the commands the
+  service refuses and the one reply that names the commands that work, so a
+  refusal and its advice cannot disagree. Writes to the entry (a claim, a new
+  execution, retiring an idle one) are still made inline by the commands.
+
+Reads derive without writing. A command holding the session's lock retires
+an idle current execution, and releases the executions the entry never
+recorded ([ADR 0063](0063-a-session-releases-executions-it-never-recorded.md)).
+`cmd/sproozi/output.go` still works out for itself, against the CLI's wall
+clock, that a starting session is overdue, rather than from `derive`.
 
 ## Alternatives
 

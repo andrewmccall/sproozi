@@ -385,7 +385,8 @@ func (q *options) pullFinishedHere(ctx context.Context, id string) error {
 }
 
 // removalConflict explains a removal the executor refused for the session's
-// state v, in local rm's words, with the commands that reach the cluster.
+// state v, in session.RemovalRefusal's words, with the commands that reach
+// the cluster.
 func (q *options) removalConflict(ctx context.Context, target remoteTarget, v work.View, err error) error {
 	if problem := q.removalProblem(v); problem != nil {
 		return problem

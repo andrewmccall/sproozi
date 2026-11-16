@@ -442,6 +442,12 @@ session's stops added checkpoints unchecked.
   only, so the executor answers `conflict` and the CLI explains it from the
   session's phase in local `rm`'s words, which `session.RemovalRefusal` holds
   for both; a running task is told to wait or cancel, since it takes no stop.
+  Corrected 2026-11-16: only the remote path uses `session.RemovalRefusal`
+  now. Home's `rm` refuses with its next-steps table
+  (`internal/session/home/phase.go`, recorded in ADR 0058's correction of
+  that date), whose replies depend on whether a pending stop is a stop or a
+  move's, which a remote session's view does not carry. The two sets of
+  words differ, for example for a session that is starting.
 - **Removal leaves a mark**, `work/<id>.removed`. The mark makes `remove`
   replay-safe without an operation UUID, since a session has only one
   removal: repeating it answers removed. It also keeps the ID from starting

@@ -286,7 +286,8 @@ current execution's: `preparing`, `activating`, `active`, `stopping`,
 reports `idle`.
 
 A command the session's phase does not allow is refused with one reply per
-state, which names the commands that work from it:
+state, which names the commands that work from it. A command that names the
+session's current execution instead of the session gets the same reply:
 
 | State | Refused | Reply |
 | --- | --- | --- |
@@ -294,22 +295,31 @@ state, which names the commands that work from it:
 | `retained` | `attach`, `move`, `recover`, `cancel` | `session ID is retained (stopped, with its work kept); "sproozi resume ID" continues it` |
 | `failed` | `attach`, `move`, `recover`, `cancel` | `session ID stopped because its agent exited with code N; see "sproozi status ID", then "sproozi resume ID" to continue it or "sproozi rm ID" to remove it` |
 | `preparing` or `activating` | `resume`, `attach`, `rm` | `session ID is still starting or moving; run "sproozi recover ID" to finish that first, or "sproozi cancel ID" to stop it now` |
-| `preparing` or `activating` after its deadline | `attach`, `rm` | `session ID reached its deadline before it started; "sproozi resume ID" ends that start and continues the session with a new deadline, or, ...` (see above) |
+| `preparing` or `activating` after its deadline | `attach`, `rm` | `session ID reached its deadline before it started; "sproozi resume ID" ends that start and continues the session with a new deadline, or, if the placement cannot show that nothing runs there, "sproozi cancel ID" records the cancellation and finishes it once the placement can show that` |
 | `active` | `resume`, `rm` | `session ID is running; attach to it with "sproozi attach ID", stop it with "sproozi stop ID", or force-stop it with "sproozi cancel ID"` |
 | `stopping`, `unknown-stop` or `unknown-usage`, of a stop | `resume`, `attach`, `rm` | `session ID is still stopping; run "sproozi stop ID" to finish, or "sproozi cancel ID" to force-stop it` |
 | the same, of a move | `resume`, `attach`, `rm` | `session ID is still stopping to move; run "sproozi recover ID" to finish the move, or "sproozi cancel ID" to force-stop it` |
 | `cancelling`, or `unknown-stop` or `unknown-usage` of a cancellation | `resume`, `attach`, `rm` | `session ID is being cancelled; run "sproozi recover ID" to finish the cancellation, then "sproozi rm ID" to remove it` |
-| `cancelled` | `resume`, `attach` | `session ID was cancelled, so it cannot be stopped or resumed; remove it with "sproozi rm ID", and start new work with "sproozi run"` |
+| `cancelled` | `resume`, `attach`, `stop` | `session ID was cancelled, so it cannot be stopped or resumed; remove it with "sproozi rm ID", and start new work with "sproozi run"` |
 
-The commands a state does not refuse go on to the session's execution,
-which may still refuse them with one of the replies listed after `rm`.
-`attach` refuses before it prints `Attached`. Each `resume` is a new
-execution, so the `executionId` changes while `id` and `threadId` stay the
-same.
+The service carries out every command a state does not refuse. It handles
+some itself: `pull`, `stop` of a stopped session, which reports it stopped
+again, `resume` of one, which starts a new execution, and `rm`. The rest go
+to the session's execution, which may still refuse them with one of the
+replies listed after `rm`. `attach` refuses before it prints `Attached`.
+Each `resume` is a new execution, so the `executionId` changes while `id`
+and `threadId` stay the same.
 
 An interrupted `resume` can keep a new execution that the session never
-recorded. Nothing ran in it; the session's next `resume` or `rm` cancels and
-deletes it, so it does not count towards the service's 256 executions.
+recorded. Nothing ran in it. It counts towards the service's 256 executions
+until the session's next `resume` or `rm`, which cancels and deletes it
+([ADR 0063](../adr/0063-a-session-releases-executions-it-never-recorded.md)).
+If that cancellation cannot finish, `resume` goes on and the service logs
+`Failed to release an execution session ID never recorded: …`, while `rm`
+refuses with `cancelling execution EXECUTION that session ID never recorded:
+…`; either tries again next time. A journal the service cannot read, such
+as one a newer release wrote, is kept, and the service logs `Failed to read
+execution EXECUTION's journal, so kept it: …` once.
 
 `rm ID` deletes a `retained`, `failed` or `cancelled` session: its record, its executions'
 journals, and the saved workspaces, checkpoints and profiles no other session
@@ -319,6 +329,7 @@ each finished container. Besides the replies in the table above, it refuses:
 | Reply | Cause | Run |
 | --- | --- | --- |
 | `another operation is in progress; run the command again shortly` | Another command on this session held it for more than five seconds. Operations on other sessions never delay `rm`. | `rm` again. |
+| `session ID has execution EXECUTION, which ran but which the session never recorded; its work is kept until you remove it: see "sproozi status EXECUTION", run "sproozi cancel EXECUTION" if it still runs, then "sproozi rm EXECUTION", then remove the session` | The session has an execution it never recorded that ran. No command of this release leaves one. | The commands it names, then `rm ID`. `rm EXECUTION` of one still running replies the same. |
 
 When an earlier operation blocks a command, the service refuses it and names
 the command that unblocks it. Nothing was recorded, so there is no retry
@@ -436,9 +447,10 @@ it. It takes no agent arguments after `--`.
 `pulled` session and everything its [remote
 executor](remote-executors.md#removing-sessions) keeps for it, and prints
 `Deleted session ID from cluster NAME.` It refuses a session that is
-starting, running, stopping, has unfinished work or is being pulled, with the
-replies [`rm`](#stopping-removing-and-recovering) gives on this machine, naming the commands
-with `--remote`: `session ID is running; stop it with "sproozi stop ID
+starting, running, stopping, has unfinished work or is being pulled, with
+these replies, which name the commands with `--remote`. They are not the
+replies `rm` gives on this machine, which come from the table
+[above](#stopping-removing-and-recovering): `session ID is running; stop it with "sproozi stop ID
 --remote" or "sproozi cancel ID --remote" first`, `session ID has unfinished
 work (PHASE); run "sproozi recover ID --remote", then remove it`, `session ID
 is PHASE; wait for it to finish, then remove it` and `session ID is still
