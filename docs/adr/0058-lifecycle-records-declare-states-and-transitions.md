@@ -321,6 +321,79 @@ recorded ([ADR 0063](0063-a-session-releases-executions-it-never-recorded.md)).
 `cmd/sproozi/output.go` still works out for itself, against the CLI's wall
 clock, that a starting session is overdue, rather than from `derive`.
 
+Corrected 2026-11-16: the remote executor's driver (`internal/work`) declares
+its decision as a table, and adopts none of rules 1 to 5. It keeps no record
+of its own, so the rules have nothing to apply to. Before, its `step` was a
+switch whose cases decided only in order. Now one table, `decisions` in
+`internal/work/decision.go`, maps each situation to one action, `decide` looks
+the action up, and `carryOut` takes it.
+
+- **Rule 1** is not adopted. The driver adds no phase. It decides from the
+  execution journal's typed phase, or "not received" when the coordinator
+  does not hold the execution yet. Remote work's public phase is still
+  derived by `derivePhase` in `internal/work/phase.go`, which this change
+  did not touch.
+- **Rule 2** is not adopted. The driver stores nothing, and the catalogue
+  record stores no phase.
+- **Rule 3** is not adopted. The table maps situations to actions, not
+  phases to phases. Every phase change is still made by the execution
+  journal, under its own table.
+- **Rule 4** is not adopted, because there is no record to apply events to.
+  In its place, `decide` is the only lookup and `carryOut` the only place
+  the driver acts. `decide` refuses a situation that matches no row, or
+  more than one, and the driver then does nothing.
+- **Rule 5** is not adopted: there is no deadline column. The deadline is
+  one input, `lateStart`, which only the rows for not received, `preparing`,
+  `activating` and `idle` read. The journal's table still decides which
+  events the deadline refuses.
+
+A situation is the phase, the mode (task or interactive), whether the
+coordinator holds a cancellation, whether the project is revoked, and
+whether the deadline passed before the first visit started. Each of the 160
+combinations matches exactly one row, so the order of the rows means nothing.
+Some combinations cannot occur, such as a held cancellation of an execution
+the coordinator has not received. They still have rows, and the test names
+them. Two checks run before the table and stay outside it. A catalogue that
+records a transfer, or a cancellation made before the coordinator received
+the execution, ends the driver's work on the session at once. A journal that
+cannot be read is retried after the backoff.
+
+| Phase | Mode | Cancellation held | Project revoked | Late start | Action |
+| --- | --- | --- | --- | --- | --- |
+| `cancelled` | any | any | any | any | nothing |
+| `idle` | interactive | any | any | any | nothing |
+| `idle` | task | any | any | yes | end: deadline passed |
+| `idle` | task | any | any | no | finish (write the task's tail) |
+| `preparing`, `activating`, `active` | interactive | yes | any | any | nothing |
+| `stopping`, `unknown-stop`, `unknown-usage`, `cancelling` | interactive | any | any | any | nothing |
+| any started phase | task | yes | any | any | recover (with the backoff) |
+| not received | any | any | yes | any | end: project revoked |
+| `preparing`, `activating`, `active` | any | no | yes | any | end: project revoked |
+| `stopping`, `unknown-stop`, `unknown-usage`, `cancelling` | task | no | yes | any | end: project revoked |
+| not received | any | any | no | yes | end: deadline passed |
+| not received | any | any | no | no | start |
+| `preparing`, `activating` | task | no | no | yes | end: deadline passed |
+| `preparing`, `activating` | task | no | no | no | recover the start |
+| `preparing`, `activating` | interactive | no | no | any | recover the start |
+| `active` | interactive | no | no | any | nothing |
+| `active`, `stopping` | task | no | no | any | complete (the task's completion wait) |
+| `unknown-stop`, `unknown-usage`, `cancelling` | task | no | no | any | recover (with the backoff) |
+
+"Started phase" means every phase except not received, `idle` and
+`cancelled`. "Nothing" means the session is settled, or its owner or
+`recover` acts next (ADR 0057, section 8).
+
+No outcome changed. A test drives the real coordinator from 900 starting
+combinations: 15 states of the journal, counting no journal yet, both modes,
+a member or revoked project, a
+deadline that is ahead, passed or absent, and either three placement
+behaviours or two catalogue tails. Seventy of these combinations cannot occur
+and are recorded as unreachable. The test's recording,
+`internal/work/testdata/driver-outcomes.txt`, was made from the code before
+the change, and the code after the change reproduces it byte for byte. A
+second test stops and cancels a session from every journal phase, both with
+no deadline and with one that has passed, and checks that each settles.
+
 ## Alternatives
 
 - **Check transitions in `save` by rereading the journal.** This catches an
@@ -373,14 +446,17 @@ clock, that a starting session is overdue, rather than from `derive`.
   `internal/session/home/phase.go`, `internal/session/home/reconcile.go`,
   `cmd/sproozi/output.go`, `internal/deadline`,
   `internal/runtime/docker/transitions.go`, `internal/gateway/docker/owner.go`,
-  `internal/runtime/kubernetes/registry/transitions.go`
+  `internal/runtime/kubernetes/registry/transitions.go`,
+  `internal/work/decision.go`, `internal/work/driver.go`
 - Tests: `internal/session/phase_test.go`, `internal/session/rules_test.go`,
   `cmd/sproozi/deadline_test.go`, `internal/runtime/docker/transitions_test.go`,
   `internal/gateway/docker/transitions_test.go`,
   `internal/runtime/kubernetes/registry/transitions_test.go`,
   `internal/runtime/kubernetes/registry/outcomes_test.go`,
-  `internal/session/home/phase_test.go`, `internal/session/home/reconcile_test.go`
-  (Corrected 2026-11-16: the home catalogue entry's files added)
+  `internal/session/home/phase_test.go`, `internal/session/home/reconcile_test.go`,
+  `internal/work/decision_test.go`, `internal/work/driver_outcomes_test.go`
+  (Corrected 2026-11-16: the home catalogue entry's files added, then the
+  remote driver's)
 - Reference: [status and listing output](../reference/session-commands.md#status-and-listing-output)
 - Related: [ADR 0018](0018-coordinator-owns-every-visit.md),
   [ADR 0038](0038-exited-agents-and-one-recovery-path.md),
