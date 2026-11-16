@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"context"
 	"errors"
 	"os"
 	"testing"
@@ -11,13 +12,35 @@ import (
 	"github.com/google/uuid"
 )
 
-// A first visit whose activation failed, and whose prepared supervisor then
-// stopped itself at the deadline, is ended by the coordinator through this
-// placement: Inspect fails once the agent is gone, Abort fences and seals the
-// prepared incarnation, and the execution is idle with its checkpoint kept
-// and the sealed usage deducted once (ADR 0060).
+// unactivated is the Docker placement with Activate refused before it reaches
+// Docker, so the record stays prepared while the coordinator records the
+// activation as pending, as when the service stopped between the two.
+type unactivated struct{ *Placement }
+
+func (unactivated) Activate(context.Context, session.Launch, session.Incarnation) error {
+	return errors.New("service stopped before activation")
+}
+
+// A first visit that did not activate before its deadline is ended by the
+// coordinator through this placement, on either Docker route. If Docker's
+// activation was refused, its record stays activating and Inspect re-runs the
+// activation, which the deadline refuses. If activation never reached Docker,
+// its record stays prepared, the supervisor stops itself at the deadline, and
+// Inspect fails because the agent ended without a retained stop. Either way
+// Abort fences and seals the prepared incarnation, and the execution is idle
+// with its checkpoint kept and the sealed usage deducted once (ADR 0060).
 func TestCoordinatorEndsAnExpiredPreparedDockerVisit(t *testing.T) {
 	t.Parallel()
+	for name, refusedByDocker := range map[string]bool{"activation refused": true, "activation never sent": false} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			endExpiredPreparedDockerVisit(t, refusedByDocker)
+		})
+	}
+}
+
+func endExpiredPreparedDockerVisit(t *testing.T, refusedByDocker bool) {
+	t.Helper()
 	data := fixtureArtifact(t)
 	f := newFakeDocker()
 	f.capture = data
@@ -27,7 +50,11 @@ func TestCoordinatorEndsAnExpiredPreparedDockerVisit(t *testing.T) {
 	if err := os.Chmod(coordinatorDir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	c, err := session.Open(coordinatorDir, map[string]session.Placement{localVolumeDriver: p}, 1<<20)
+	var placement session.Placement = p
+	if !refusedByDocker {
+		placement = unactivated{p}
+	}
+	c, err := session.Open(coordinatorDir, map[string]session.Placement{localVolumeDriver: placement}, 1<<20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,8 +75,12 @@ func TestCoordinatorEndsAnExpiredPreparedDockerVisit(t *testing.T) {
 	// The prepared supervisor stops itself at its deadline.
 	f.containers[agent].State.Running, f.containers[agent].State.Pid = false, 0
 	f.containers[agent].State.Status = exitedStatus
-	if _, err = p.Inspect(t.Context(), l); err == nil {
-		t.Fatal("Inspect of a prepared visit whose supervisor stopped succeeded")
+	want := "docker native execution ended without retained stop"
+	if refusedByDocker {
+		want = "docker activation deadline expired"
+	}
+	if _, err = p.Inspect(t.Context(), l); err == nil || err.Error() != want {
+		t.Fatalf("Inspect of the expired visit: %v, want %q", err, want)
 	}
 	r, err := c.Recover(t.Context(), l.ExecutionID)
 	if !errors.Is(err, session.ErrDeadlinePassed) || r.Phase != session.PhaseIdle || len(r.Visits) != 1 ||
