@@ -168,14 +168,16 @@ Set exactly one source:
 In a managed session the supervisor copies the harness's login file
 (`.credentials.json` for Claude Code, `auth.json` for Codex, `config.json` for
 Copilot) from `/etc/sproozi/sign-in` into its native home before launch, then
-keeps the two in step while the harness runs: a sign-in, refresh or sign-out
-in one session reaches the other sessions of that login within about a second
+keeps the two in step while the harness runs, syncing every second. A sign-in
+or refresh in one session reaches the other sessions of that login within
+about two seconds, and a sign-out within about four
 ([ADR 0049](../adr/0049-named-logins-share-a-live-store.md),
 [ADR 0061](../adr/0061-a-stop-survives-an-interrupted-write.md)). The sync
 copies only a whole login, in either direction: one that is not a JSON object
 (after Copilot's comment header) stays where it is. Empty, missing and `{}`
-mean "not signed in". A sign-out is shared once two syncs a second apart see
-it, and from the harness's file only while the harness runs: a login file
+mean "not signed in". A sign-out is shared only once two consecutive syncs
+on each side have seen it, and from the harness's file only while the harness
+runs: a login file
 emptied or removed once a stop has begun leaves the store as it was. Nothing
 from the file is shared once the harness has been killed. Each sync waits at
 most five seconds for the store's lock, and a stop's save at most five

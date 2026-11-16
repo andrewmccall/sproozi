@@ -77,7 +77,13 @@ helper (`claude-launch.py`) apply the same rules in both directions:
   `config.json` after its `//` comment header. Anything that does not parse
   as one is not copied, out of the harness or into it. A harness keeps its own
   login while the store holds no whole login, and its next change replaces
-  the store. A session that starts then starts without a login. A file left
+  the store. A session that starts then starts without a login, and its
+  login file as it stands after the supervisor's own start-up writes is its
+  starting point, not a change. That write is the workspace trust merged into
+  Copilot's `config.json`, a whole object with no login; Codex and Claude Code
+  have none. Only a change the harness makes after that, such as a sign-in,
+  replaces the store. A session that starts with a whole or empty store
+  shares the start-up write as before. A file left
   half written before launch is replaced by the store's login. No particular
   member is required: which members a client writes is the client's choice,
   and a renamed field would otherwise silently stop the store updating.
@@ -97,9 +103,15 @@ helper (`claude-launch.py`) apply the same rules in both directions:
   login, and a sync with nothing to save does not open the store.
 - **No store write leaves a state a reader acts on.** The store is rewritten
   in place. Its first byte becomes `#`, the rest is written and cut to length,
-  and the first byte is written last, with a sync between. A write that stops
-  at any point leaves the old login, the new one, or a file that is not a
-  whole login, never an empty store. A sign-out is a single truncate.
+  and the first byte is written last, with a sync between. Every write puts
+  down all its bytes or fails: Go's `WriteAt` reports a short write as an
+  error, and the helper loops on `os.pwrite`'s count, which can fall short
+  without raising. A write that stops at any point leaves the old login, the
+  new one, or a file that is not a whole login, never an empty store. A
+  sign-out is a single truncate. The order of the last two steps, cutting to
+  length and then writing the first byte, is not needed for safety and no
+  test binds it: the reverse order leaves a whole new login followed by old
+  bytes for a moment, which does not parse.
 
 A sync that keeps failing or refusing, as for a client whose login format is
 not a JSON object or a store another holder keeps locked, leaves the store as
@@ -133,8 +145,13 @@ reason changes, and once when syncing resumes.
   when it rewrites its login, which has not been checked against the stock
   clients. One that overwrites in place could leave a whole login that is
   wrong.
-- **Share a sign-out on one read.** A real sign-out would arrive a second
-  sooner, but a rewrite caught after its truncate would sign every session out.
+- **Share a sign-out on one read.** A real sign-out would arrive up to two
+  seconds sooner, but a rewrite caught after its truncate would sign every
+  session out.
+- **Let only a change from a start-up baseline the harness itself settles
+  repair an unfinished store.** The end of the harness's own start-up writes
+  cannot be observed, and Copilot rewrites its settings later anyway. The
+  supervisor's own writes are known, so only they are excluded.
 
 ## Tradeoffs and limits
 
@@ -142,12 +159,27 @@ reason changes, and once when syncing resumes.
   is lost. The store keeps a refresh token the session has since spent, so
   the next session of the login may have to sign in again. The same holds for
   a save skipped at its bound.
-- A real sign-out reaches other sessions about a second later. A sign-out in
-  the second before a stop, or one followed by the harness's own exit within
-  the second, is not shared.
+- Syncs run every second (`loginInterval`, the helper's `LOGIN_INTERVAL`),
+  and a sign-out must be seen twice on each side: by two syncs of the session
+  that signed out before it writes the store, and by two syncs of each other
+  session before it copies it in. A real sign-out therefore reaches other
+  sessions two to four seconds after it is made, where a sign-in or refresh
+  takes up to two. A sign-out in the second before a stop, or one followed by
+  the harness's own exit within the second, is not shared.
 - A store left marked by a writer that died stays as it is until a session
   writes a whole login. Sessions keep their own login meanwhile, and a session
-  started then starts without one.
+  started then starts without one. One exception follows ADR 0049's
+  whole-file rule: Copilot's `config.json` also holds settings, so a Copilot
+  session with no login that changes a setting writes a whole config with no
+  login, which replaces the store as any change does. Whether stock Copilot
+  rewrites the file at start without a user action has not been checked.
+- A supervisor or launch helper from the previous release sharing the store
+  takes the same lock, but after an abandoned write it finds a marked store
+  and copies it into its harness unchecked. That harness then cannot parse
+  its login until a writer of this release replaces the store. That is what
+  the previous release did with an abandoned partial store, and no worse than
+  what it did with an abandoned empty one, which signed it out. It can only
+  follow an abandoned write.
 - Activation's first sync is bounded only while another holder keeps the
   lock. An `open` or `read` on a stalled volume is not bounded, there or in
   the stop's save: the stop returns at its bound and leaves the save running.
@@ -158,8 +190,12 @@ reason changes, and once when syncing resumes.
   wrong, which needs a client that overwrites in place without truncating.
   The helper's interactive `--login` mode has the same gap, because Claude
   Code takes the terminal's signals directly.
-- The helper's stop may wait up to twice its bound: once for the periodic
-  sync in flight, once for its own save. `--sign-in-wait` sets the bound.
+- The terminal supervisor's reap kills a process group left behind by its
+  leader without recording it, since it runs no `BeforeKill`. That happens
+  only after the harness exited by itself, so its own writes were complete.
+- The helper's stop, like the supervisor's, waits at most its bound for the
+  periodic sync in flight and its own save together, and leaves a save stuck
+  on a stalled volume running. `--sign-in-wait` sets the bound.
 - On Kubernetes, a visit with a recorded exit whose capture still fails, for
   example because a Codex turn genuinely changed, fails on every retry. Docker
   keeps the visit's input instead. That fallback is not part of this decision.
@@ -190,6 +226,7 @@ reason changes, and once when syncing resumes.
   `cmd/native-session/signin_stall_test.go`,
   `cmd/native-session/signin_forced_test.go`,
   `cmd/native-session/signin_log_test.go`,
+  `cmd/native-session/signin_unfinished_test.go`,
   `internal/nativepty/before_kill_test.go`,
   `internal/harness/claude_launch_test.go`,
   `internal/harness/claude_login_test.go`

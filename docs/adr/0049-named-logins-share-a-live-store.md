@@ -104,6 +104,8 @@ whether a provider's terms allow a mechanism stays the person's choice.
 ## Consequences and limits
 
 - A sign-in reaches the other sessions of its login within about a second.
+  Corrected 2026-11-16: within about two seconds, and a sign-out within
+  about four ([ADR 0061](0061-a-stop-survives-an-interrupted-write.md)).
 - Sessions of one login on different Kubernetes nodes need a storage class
   that supports `ReadWriteMany`; the default `ReadWriteOnce` shares a claim
   only on one node.
