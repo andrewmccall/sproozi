@@ -325,6 +325,72 @@ Corrected 2026-11-17: the remote executor's driver keeps no lifecycle record,
 so it adopts none of rules 1 to 5; its decision is a table of its own,
 described in [ADR 0057](0057-the-remote-executor-owns-its-sessions-through-the-coordinator.md).
 
+Corrected 2026-11-16: the [supervisor](../../GLOSSARY.md#supervisor)
+(`cmd/native-session`) adopts rules 1, 3, 4 and 5. Before, a typed state and
+separate fields (`cause`, `quiescing`, `ended`, `gatedAt`, `turnless` and the
+exit codes) together decided what each path could do.
+
+- **Rule 1.** `lifecycle.go` holds one `lifecycle`: a phase with a closed
+  vocabulary and the facts that belong to it (the cause, when input was first
+  gated, the turnless latch and the exit codes). The phases are
+  `unconfigured`, `prepared`, `active`, `gated`, `finishing`, `forcing` and
+  `ended`. `finishing` means a graceful stop owns the harness's exit.
+  `forcing` means the supervisor is killing the harness for a cause already
+  decided. In that window, up to three seconds, status already reports
+  `stopped`, and either the stop or the exit watcher may settle the exit.
+  Status and every control reply still report the protocol's five states,
+  derived by one function: `gated` and `finishing` report `stopping`;
+  `forcing` and `ended` report `stopped`.
+- **Rule 2** is not adopted: the supervisor stores nothing, so there is no
+  load or save to validate.
+- **Rules 3 and 4.** The table is below. One `apply`, called under the
+  supervisor's mutex, is the only place the lifecycle changes. Every path
+  that changes it calls `apply`: `configure`, `activate`, `gate` and
+  `quiesce`, the turnless observation, the exit watcher, the stops for
+  `SIGTERM`, the deadline and a failed graceful stop, and the graceful stop
+  itself. `apply` refuses an undeclared change and leaves the lifecycle as it
+  was. Two requests can answer as replays. `activate` of an active
+  supervisor returns its PID before admission. `configure`, which the table
+  admits only from `unconfigured`, compares the contracts in every other
+  phase.
+- **Rule 5.** Only `configure` and `activate` are refused after the deadline.
+  `activate` is checked before the launch. `configure` is refused first by
+  the launch contract's own validation. The deadline now has one owner,
+  `deadline.go`. Before, three mechanisms acted on it: `serve`'s wall-clock
+  watcher, the harness terminal's own kill (which the exit watcher reported
+  as the deadline), and `quiesce`'s own deadline context. Now the terminal
+  has no deadline of its own. One event, `deadline`, is raised once, either
+  by `serve`'s watcher or by a `quiesce` that finds the deadline passed: while
+  it waits for a turn, or when a quit or a turnless kill fails. Without a
+  deadline nothing raises it, and every phase but `ended` can still end
+  without it.
+
+| Event | From → to | Refused after the deadline |
+| --- | --- | --- |
+| `configure` | `unconfigured` → `prepared` | yes |
+| `activate` | `prepared` → `active` | yes |
+| `gate` | `active`, `gated` → `gated`; `finishing` → `finishing` | no |
+| `turnless` | `gated`, `finishing`, `forcing`, `ended` → unchanged | no |
+| `finish` | `gated` → `finishing`; `forcing`, `ended` → unchanged | no |
+| `finished` | `finishing`, `forcing`, `ended` → `ended` | no |
+| `terminate`, `deadline`, `fail` | every phase but `ended` → `forcing`; `ended` → `ended` | no |
+| `exited` | `active`, `gated`, `forcing`, `ended` → `ended`; `finishing` → `finishing` | no |
+
+The behaviour did not change. `TestSupervisorLifecycleRecord` drives every
+event through every state the supervisor reaches, for first and resumed
+visits, with and without a deadline. It records the replies, the states
+status reports, what reached the harness, the exit reports, the log lines
+and the exit codes: 344 steps, written before the change and identical after
+it. Four things now differ. A stopped `quiesce` reply's `exit.reason` is
+never `deadline`, because only the terminal's own kill gave that reason. A
+`quiesce` waiting for a turn sees a passed deadline at its next 100 ms poll,
+where before it read the clock once a second. When the deadline and the
+harness's exit are both ready, the reply now names the deadline; before, it
+could name either. And in `forcing` the exit watcher may settle the exit and
+conclude, where before a graceful stop that the forced stop overtook kept
+the watcher out and the stop settled it. The cause, codes and report are
+the same either way.
+
 ## Alternatives
 
 - **Check transitions in `save` by rereading the journal.** This catches an
@@ -377,14 +443,18 @@ described in [ADR 0057](0057-the-remote-executor-owns-its-sessions-through-the-c
   `internal/session/home/phase.go`, `internal/session/home/reconcile.go`,
   `cmd/sproozi/output.go`, `internal/deadline`,
   `internal/runtime/docker/transitions.go`, `internal/gateway/docker/owner.go`,
-  `internal/runtime/kubernetes/registry/transitions.go`
+  `internal/runtime/kubernetes/registry/transitions.go`,
+  `cmd/native-session/lifecycle.go`, `cmd/native-session/deadline.go`,
+  `cmd/native-session/main.go`
 - Tests: `internal/session/phase_test.go`, `internal/session/rules_test.go`,
   `cmd/sproozi/deadline_test.go`, `internal/runtime/docker/transitions_test.go`,
   `internal/gateway/docker/transitions_test.go`,
   `internal/runtime/kubernetes/registry/transitions_test.go`,
   `internal/runtime/kubernetes/registry/outcomes_test.go`,
-  `internal/session/home/phase_test.go`, `internal/session/home/reconcile_test.go`
-  (Corrected 2026-11-16: the home catalogue entry's files added)
+  `internal/session/home/phase_test.go`, `internal/session/home/reconcile_test.go`,
+  `cmd/native-session/lifecycle_test.go`, `cmd/native-session/lifecycle_record_test.go`
+  (Corrected 2026-11-16: the home catalogue entry's files added; the
+  supervisor's files added)
 - Reference: [status and listing output](../reference/session-commands.md#status-and-listing-output)
 - Related: [ADR 0018](0018-coordinator-owns-every-visit.md),
   [ADR 0038](0038-exited-agents-and-one-recovery-path.md),
