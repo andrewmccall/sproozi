@@ -65,7 +65,16 @@ type loginSync struct {
 	diagnostics io.Writer
 	// wait replaces loginSaveWait when set.
 	wait time.Duration
+	// nativeOut and storeOut count consecutive syncs that saw the harness's
+	// file, or the store, newly signed out.
+	nativeOut, storeOut int
 }
+
+// signOutSyncs is how many consecutive syncs must see a login file or the
+// store signed out before the sign-out is shared: Codex and Claude Code
+// rewrite their login by truncating it first, so one sync can catch it empty
+// while the harness runs normally, and the store can be caught the same way.
+const signOutSyncs = 2
 
 // loginInterval is how often a running harness's login is compared with its
 // store.
@@ -276,6 +285,11 @@ func (l *loginSync) syncWithin(ctx context.Context) error {
 		native = nil
 	}
 	changed := l.known && !bytes.Equal(native, l.agreed)
+	if changed && native == nil {
+		l.nativeOut++
+	} else {
+		l.nativeOut = 0
+	}
 	switch {
 	case changed && trust == loginForced:
 		return errors.New("the harness was killed, which can cut short a rewrite of its login file")
@@ -286,6 +300,9 @@ func (l *loginSync) syncWithin(ctx context.Context) error {
 	case changed && native == nil && trust != loginRunning:
 		// Not a sign-out made while the harness ran: the stop may cut a
 		// rewrite short. The store keeps the login.
+		return nil
+	case changed && native == nil && l.nativeOut < signOutSyncs:
+		// Perhaps a rewrite caught after its truncate; the next sync decides.
 		return nil
 	}
 	store, writable, err := openStore(ctx, l.stored)
@@ -300,7 +317,16 @@ func (l *loginSync) syncWithin(ctx context.Context) error {
 		return err
 	}
 	unfinished := stored != nil && !wholeLogin(stored)
+	if !changed && l.known && stored == nil && l.agreed != nil {
+		l.storeOut++
+	} else {
+		l.storeOut = 0
+	}
 	switch {
+	case l.storeOut > 0 && l.storeOut < signOutSyncs:
+		// Another session's sign-out, or its rewrite caught after a
+		// truncate; the next sync decides.
+		return nil
 	case !l.known && (stored == nil || unfinished) && native != nil, changed:
 		// The harness signed in, refreshed or signed out. Its whole login
 		// also replaces a store another writer left unfinished.
@@ -497,8 +523,14 @@ func writeLogin(name string, data []byte) error {
 	return writePrivate(name, data)
 }
 
+// nonEmpty is nil for a login file that says "not signed in": empty, or an
+// object with nothing in it, after Copilot's comment header. Every other
+// whole login has at least one member; which members a client writes is
+// left to the client, so a renamed field never stops the store updating.
 func nonEmpty(data []byte) []byte {
-	if len(bytes.TrimSpace(data)) == 0 {
+	body := bytes.TrimSpace(withoutCommentLines(data))
+	var object map[string]json.RawMessage
+	if len(body) == 0 || body[0] == '{' && json.Unmarshal(body, &object) == nil && len(object) == 0 {
 		return nil
 	}
 	return data

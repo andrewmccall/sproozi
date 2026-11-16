@@ -107,7 +107,8 @@ func TestTwoSessionsOfOneLoginBothSurviveARefreshByEither(t *testing.T) {
 	if err := os.Remove(b.native); err != nil { // B signs out.
 		t.Fatal(err)
 	}
-	syncAll(t, b, a)
+	// A sign-out is shared once two syncs on each side have seen it.
+	syncAll(t, b, a, b, a, a)
 	if content(t, a.native) != missing {
 		t.Fatal("B's sign-out didn't reach A")
 	}
