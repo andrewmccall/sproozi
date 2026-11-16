@@ -14,42 +14,36 @@ import (
 
 // newRecordedServer is the supervisor serve starts, bootstrapped or
 // configured.
-func newRecordedServer(c config, bootstrap bool) *server {
-	s := &server{config: c, deadline: c.Deadline, state: harness.NativePrepared, threadID: c.ThreadID,
-		done: make(chan struct{})}
-	if bootstrap {
-		s.state = harness.NativeUnconfigured
-	}
-	return s
-}
+func newRecordedServer(c config, bootstrap bool) *server { return newServer(c, bootstrap) }
 
 // launched leaves s as a successful activate leaves it with n running; the
 // record starts the exit watcher itself.
 func launched(s *server, n *nativepty.Supervisor) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.native, s.state = n, harness.NativeActive
+	s.native = n
+	s.apply(change{event: evActivate})
 }
 
 // wireState is the state status reports, read without status's side effects.
 func wireState(s *server) harness.NativeState {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.state
+	return s.life.phase.wire()
 }
 
 // supervisorExitCode is the code the supervisor exits with once concluded.
 func supervisorExitCode(s *server) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.exitCode
+	return s.life.exitCode
 }
 
 // terminate is serve's response to SIGTERM.
-func terminate(s *server) { s.stop(causeTerminated) }
+func terminate(s *server) { s.stop(evTerminate) }
 
 // raiseDeadline is serve's response to the execution's deadline passing.
-func raiseDeadline(s *server) { s.stop(causeDeadline) }
+func raiseDeadline(s *server) { s.expire() }
 
 // deadlineIn moves the execution's deadline to d from now, for a quiesce
 // that the deadline interrupts.

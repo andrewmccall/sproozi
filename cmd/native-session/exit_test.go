@@ -32,7 +32,7 @@ func startNative(t *testing.T, script string, deadline time.Time) *nativepty.Sup
 // watched is an active supervisor whose exit watcher runs, as activate
 // leaves it.
 func watched(native *nativepty.Supervisor) *server {
-	s := &server{native: native, state: harness.NativeActive, threadID: selected, done: make(chan struct{}),
+	s := &server{native: native, life: lifecycle{phase: phaseActive}, threadID: selected, done: make(chan struct{}),
 		config: config{Harness: harness.NativeCodex, ThreadID: selected}, reports: &bytes.Buffer{}}
 	go s.watch(native, func() {})
 	return s
@@ -64,35 +64,37 @@ func TestSelfExitIsReportedOnce(t *testing.T) {
 	if len(reports) != 1 || reports[0].Cause != harness.NativeExitSelf || reports[0].Code != 3 {
 		t.Fatalf("self exit reports: %+v", reports)
 	}
-	if s.state != harness.NativeStopped || s.exitCode != 3 {
-		t.Fatalf("self exit settled as %s with code %d", s.state, s.exitCode)
+	if s.life.phase.wire() != harness.NativeStopped || s.life.exitCode != 3 {
+		t.Fatalf("self exit settled as %s with code %d", s.life.phase.wire(), s.life.exitCode)
 	}
 }
 
 // A stop the supervisor makes is never reported as the harness's own exit,
 // whichever path settles the exit first.
 func TestSupervisorStopsAreNotReportedAsSelfExits(t *testing.T) {
-	for name, cause := range map[string]exitCause{"deadline": causeDeadline, "terminated": causeTerminated,
-		"failed": causeFailed} {
+	for name, stop := range map[string]event{"deadline": evDeadline, "terminated": evTerminate,
+		"failed": evFail} {
 		t.Run(name, func(t *testing.T) {
 			s := watched(startIdleNative(t))
-			reports := ended(t, s, func() { s.stop(cause) })
-			want, _ := cause.reported()
+			reports := ended(t, s, func() { s.stop(stop) })
+			want, _ := causeOf(stop).reported()
 			if len(reports) != 1 || reports[0].Cause != want {
 				t.Fatalf("stop reports: %+v, want one %q", reports, want)
 			}
-			if s.exitCode == 0 {
+			if s.life.exitCode == 0 {
 				t.Fatal("a forced stop exited the supervisor cleanly")
 			}
 		})
 	}
 }
 
-// The terminal supervisor's own deadline ends the harness as a deadline.
+// The execution's deadline ends the harness as a deadline. The harness's
+// terminal has no deadline of its own; the supervisor's stops it.
 func TestTerminalDeadlineIsReportedAsDeadline(t *testing.T) {
-	native := startNative(t, "exec sleep 30", time.Now().Add(300*time.Millisecond))
+	native := startNative(t, "exec sleep 30", time.Time{})
 	s := watched(native)
-	reports := ended(t, s, func() {})
+	s.deadline = time.Now().Add(300 * time.Millisecond)
+	reports := ended(t, s, func() { go s.watchDeadline() })
 	if len(reports) != 1 || reports[0].Cause != harness.NativeExitDeadline {
 		t.Fatalf("deadline reports: %+v", reports)
 	}
@@ -133,7 +135,7 @@ func TestTurnlessStopWritesNoReport(t *testing.T) {
 			s.conclude()
 		}
 	})
-	if r.Error != "" || !r.Turnless || len(reports) != 0 || s.exitCode != 0 {
-		t.Fatalf("turnless stop: %+v reports %+v code %d", r, reports, s.exitCode)
+	if r.Error != "" || !r.Turnless || len(reports) != 0 || s.life.exitCode != 0 {
+		t.Fatalf("turnless stop: %+v reports %+v code %d", r, reports, s.life.exitCode)
 	}
 }

@@ -177,8 +177,8 @@ func TestKillingHarnessesFinishWithinTheBound(t *testing.T) {
 					t.Fatal("the finish had no bound")
 				}
 				if r.Error != "" || r.State != harness.NativeStopped || r.Exit == nil ||
-					r.Exit.Reason != string(nativepty.ForcedStop) || len(reports) != 0 || s.exitCode != 0 {
-					t.Fatalf("stop: %+v exit %+v reports %+v code %d", r, r.Exit, reports, s.exitCode)
+					r.Exit.Reason != string(nativepty.ForcedStop) || len(reports) != 0 || s.life.exitCode != 0 {
+					t.Fatalf("stop: %+v exit %+v reports %+v code %d", r, r.Exit, reports, s.life.exitCode)
 				}
 				said := diagnostics.String()
 				if strings.Contains(said, "quit") || late != strings.Contains(said, "Confirmed the harness stopped") {
@@ -206,8 +206,8 @@ func TestExitAtTheBoundKeepsTheHarnessCode(t *testing.T) {
 	if r.Exit == nil || r.Exit.Code != 3 || r.Exit.Reason != string(nativepty.NativeExit) || r.Error == "" {
 		t.Fatalf("reply: %+v exit %+v", r, r.Exit)
 	}
-	if s.exitCode != 3 || strings.Contains(diagnostics.String(), "Forced") {
-		t.Fatalf("settled with code %d, diagnostics %q", s.exitCode, diagnostics.String())
+	if s.life.exitCode != 3 || strings.Contains(diagnostics.String(), "Forced") {
+		t.Fatalf("settled with code %d, diagnostics %q", s.life.exitCode, diagnostics.String())
 	}
 }
 
@@ -223,8 +223,8 @@ func TestFullInputBufferTakesTheForcedPath(t *testing.T) {
 	s, diagnostics := stopping(t, harness.NativeCodex, ignoresQuit, time.Time{})
 	r, reports := stopOnce(t, s)
 	if r.Error != "" || r.State != harness.NativeStopped || r.Exit == nil ||
-		r.Exit.Reason != string(nativepty.ForcedStop) || len(reports) != 0 || s.exitCode != 0 {
-		t.Fatalf("stop: %+v exit %+v reports %+v code %d", r, r.Exit, reports, s.exitCode)
+		r.Exit.Reason != string(nativepty.ForcedStop) || len(reports) != 0 || s.life.exitCode != 0 {
+		t.Fatalf("stop: %+v exit %+v reports %+v code %d", r, r.Exit, reports, s.life.exitCode)
 	}
 	if !strings.Contains(diagnostics.String(), "Forced the harness to stop") {
 		t.Fatalf("diagnostics: %q", diagnostics.String())

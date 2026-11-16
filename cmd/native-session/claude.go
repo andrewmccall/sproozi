@@ -148,9 +148,8 @@ func claudeJournalDiagnostic(err error) string {
 func (s *server) claudeHook(h *claudeHook) response {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	r := response{Op: opClaudeHook, State: s.state}
-	if h == nil || s.config.Harness != harness.NativeClaude ||
-		(s.state != harness.NativeActive && s.state != harness.NativeStopping) {
+	r := response{Op: opClaudeHook, State: s.life.phase.wire()}
+	if h == nil || s.config.Harness != harness.NativeClaude || !s.life.phase.running() {
 		r.Error = "Claude lifecycle observer is unavailable"
 		s.claude.rejected = "observer_unavailable"
 		return r

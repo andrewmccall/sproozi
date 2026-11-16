@@ -34,9 +34,17 @@ const lifecycleRecord = "testdata/supervisor-lifecycle.txt"
 // only "ready", once its terminal no longer echoes input.
 const recordedHarness = `stty -echo; trap 'exit 3' USR1; printf ready; read -r line </dev/tty & wait $!; exit 0`
 
-// recordedTurn is the error the recorded harness's observer gives while no
+// The recorded harness's shell, and the names of two events other tests also
+// name.
+const (
+	recordedShell      = "/bin/sh"
+	recordedTerminated = "terminated"
+	recordedDeadline   = "deadline"
+)
+
+// errRecordedTurn is the error the recorded harness's observer gives while no
 // turn has completed.
-var recordedTurn = errors.New("no completed native turn")
+var errRecordedTurn = errors.New("no completed native turn")
 
 // world is what stays fixed for a supervisor's whole life: whether its visit
 // is a first one (no selected conversation) and whether its execution has a
@@ -167,7 +175,7 @@ func (r *recording) note(what string) { r.sent = append(r.sent, what) }
 // the exit watcher runs. Activation itself needs a container, so the reply
 // is the one activate gives.
 func (r *recording) launch() response {
-	n, err := nativepty.Start(nativepty.Launch{Executable: "/bin/sh", Args: []string{"-c", recordedHarness},
+	n, err := nativepty.Start(nativepty.Launch{Executable: recordedShell, Args: []string{"-c", recordedHarness},
 		Env: []string{testPathEnvironment, testTerminalEnvironment}, Dir: r.t.TempDir(),
 		Size: nativepty.Size{Rows: 24, Columns: 80}, BeforeKill: func() { r.kills.Add(1) }})
 	if err != nil {
@@ -217,7 +225,7 @@ func (r *recording) observe() (string, string, error) {
 	if completed {
 		return selected, completedTurnID, nil
 	}
-	return "", "", recordedTurn
+	return "", "", errRecordedTurn
 }
 
 func (r *recording) finish(n *nativepty.Supervisor, ctx context.Context) (nativepty.Exit, error) {
@@ -435,11 +443,11 @@ var recordedEvents = []recordedEvent{
 		r.exits()
 		return said("")
 	}},
-	{"terminated", func(r *recording) *string {
+	{recordedTerminated, func(r *recording) *string {
 		terminate(r.s)
 		return said("")
 	}},
-	{"deadline", func(r *recording) *string {
+	{recordedDeadline, func(r *recording) *string {
 		if !r.w.deadline {
 			return nil
 		}
@@ -571,7 +579,8 @@ func (n node) describe() string {
 	if n.bootstrap {
 		start = "bootstrapped"
 	}
-	names := []string{start}
+	names := make([]string, 0, 1+len(n.path))
+	names = append(names, start)
 	for _, i := range n.path {
 		names = append(names, recordedEvents[i].name)
 	}
@@ -699,8 +708,9 @@ func TestSupervisorLifecycleRecord(t *testing.T) {
 	}
 	if string(want) != got {
 		gotLines, wantLines := strings.Split(got, "\n"), strings.Split(string(want), "\n")
+		// The first line counts the steps; a differing step says more.
 		for i := range min(len(gotLines), len(wantLines)) {
-			if gotLines[i] != wantLines[i] {
+			if i > 0 && gotLines[i] != wantLines[i] {
 				t.Fatalf("the supervisor's lifecycle differs from %s at line %d:\n got %s\nwant %s",
 					lifecycleRecord, i+1, gotLines[i], wantLines[i])
 			}

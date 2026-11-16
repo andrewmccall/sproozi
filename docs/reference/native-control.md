@@ -94,7 +94,7 @@ sproozi-native-exit {"code":2,"cause":"exited","thread":"<id>","output":"<last l
 | `cause` | Decided when | Session after the stop |
 | --- | --- | --- |
 | `exited` | The harness exited by itself, including after input was gated for a stop that had not yet asked it to quit. | `failed` for a nonzero code, otherwise `retained`. |
-| `deadline` | The supervisor or its terminal stopped the harness at the execution deadline. | `retained`, with `"deadline": true`. |
+| `deadline` | The supervisor stopped the harness at the execution deadline. | `retained`, with `"deadline": true`. |
 | `terminated` | The supervisor received `SIGTERM` or `SIGINT`, as when its container is stopped. | `retained`; also `"deadline": true` when the host stopped it at the deadline. |
 | `failed` | A graceful stop failed and the supervisor stopped the harness itself. | `retained`. |
 

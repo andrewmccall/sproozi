@@ -35,7 +35,7 @@ func TestTurnlessFirstVisitQuiescesWithoutConversation(t *testing.T) {
 	setTurnlessSettle(t, 100*time.Millisecond)
 	native := startIdleNative(t)
 	deadline := time.Now().Add(time.Minute)
-	s := &server{native: native, state: harness.NativeActive, done: make(chan struct{}),
+	s := &server{native: native, life: lifecycle{phase: phaseActive}, done: make(chan struct{}),
 		config: config{Harness: harness.NativeCodex, Deadline: deadline}, deadline: deadline}
 	if r := s.gate(); r.Error != "" {
 		t.Fatal(r.Error)
@@ -65,13 +65,13 @@ func TestTurnlessNeedsAnInteractiveFirstVisit(t *testing.T) {
 		"task":            {Harness: harness.NativeCodex, Task: "fix it"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			s := &server{config: c, state: harness.NativeStopping, gatedAt: time.Now().Add(-time.Second)}
+			s := &server{config: c, life: lifecycle{phase: phaseGated, gatedAt: time.Now().Add(-time.Second)}}
 			if s.isTurnless() {
 				t.Fatal("visit with a conversation counted as turnless")
 			}
 		})
 	}
-	s := &server{config: config{Harness: harness.NativeCodex}, state: harness.NativeActive}
+	s := &server{config: config{Harness: harness.NativeCodex}, life: lifecycle{phase: phaseActive}}
 	if s.isTurnless() {
 		t.Fatal("ungated visit counted as turnless")
 	}
@@ -191,11 +191,11 @@ func TestClaudeCompletedTurnSurvivesSettledTerminalInput(t *testing.T) {
 	}
 	quiet := time.Now().Add(-time.Minute)
 	c.lastHook = quiet
-	s := &server{claude: c, inputGeneration: 3, state: harness.NativeActive, lastInputAt: time.Now()}
+	s := &server{claude: c, inputGeneration: 3, life: lifecycle{phase: phaseActive}, lastInputAt: time.Now()}
 	if s.claudeTurnReady() {
 		t.Fatal("ungated fresh input accepted the earlier Stop")
 	}
-	s.state, s.gatedAt = harness.NativeStopping, time.Now()
+	s.life.phase, s.life.gatedAt = phaseGated, time.Now()
 	if s.claudeTurnReady() {
 		t.Fatal("unsettled input accepted the earlier Stop")
 	}
@@ -219,7 +219,7 @@ func TestQuiesceReportsWhatItWaitsForWithoutStopping(t *testing.T) {
 	t.Cleanup(func() { quiesceWait = previous })
 	native := startIdleNative(t)
 	deadline := time.Now().Add(time.Minute)
-	s := &server{native: native, state: harness.NativeActive, threadID: selected, done: make(chan struct{}),
+	s := &server{native: native, life: lifecycle{phase: phaseActive}, threadID: selected, done: make(chan struct{}),
 		config: config{Harness: harness.NativeCodex, ThreadID: selected, Deadline: deadline}, deadline: deadline}
 	r := s.quiesce()
 	if r.Error != "" || r.State != harness.NativeStopping || r.Waiting == "" {
@@ -238,8 +238,8 @@ func TestQuiesceReportsWhatItWaitsForWithoutStopping(t *testing.T) {
 // A resumed Claude visit with no new prompt keeps its restored conversation:
 // a stop needs no new turn once any terminal input has settled.
 func TestClaudeResumedVisitWithoutPromptStopsAsRestored(t *testing.T) {
-	s := &server{config: config{Harness: harness.NativeClaude, ThreadID: selected}, state: harness.NativeStopping,
-		gatedAt: time.Now()}
+	s := &server{config: config{Harness: harness.NativeClaude, ThreadID: selected},
+		life: lifecycle{phase: phaseGated, gatedAt: time.Now()}}
 	if !s.claudeRestoredUnchanged() {
 		t.Fatal("resumed visit without input is not its restored conversation")
 	}
@@ -257,7 +257,7 @@ func TestClaudeResumedVisitWithoutPromptStopsAsRestored(t *testing.T) {
 	if s.claudeRestoredUnchanged() {
 		t.Fatal("a submitted prompt still counts as the restored conversation")
 	}
-	first := &server{config: config{Harness: harness.NativeClaude}, state: harness.NativeStopping}
+	first := &server{config: config{Harness: harness.NativeClaude}, life: lifecycle{phase: phaseGated}}
 	if first.claudeRestoredUnchanged() {
 		t.Fatal("a first visit has no restored conversation")
 	}

@@ -92,8 +92,8 @@ func TestIgnoredQuitIsForcedAtTheQuitBound(t *testing.T) {
 			if len(reports) != 0 {
 				t.Fatalf("a graceful stop wrote exit reports: %+v", reports)
 			}
-			if s.cause != causeQuiesced || s.exitCode != 0 {
-				t.Fatalf("settled with cause %d and code %d", s.cause, s.exitCode)
+			if s.life.cause != causeQuiesced || s.life.exitCode != 0 {
+				t.Fatalf("settled with cause %d and code %d", s.life.cause, s.life.exitCode)
 			}
 			if err := unix.Kill(-native.PID(), 0); err == nil {
 				t.Fatal("the harness's process group is still running")
@@ -130,7 +130,7 @@ func TestDeadlineBeforeTheQuitBoundIsReportedAsDeadline(t *testing.T) {
 	if len(reports) != 1 || reports[0].Cause != harness.NativeExitDeadline {
 		t.Fatalf("deadline reports: %+v", reports)
 	}
-	if s.exitCode == 0 {
+	if s.life.exitCode == 0 {
 		t.Fatal("a stop at the deadline exited the supervisor cleanly")
 	}
 }

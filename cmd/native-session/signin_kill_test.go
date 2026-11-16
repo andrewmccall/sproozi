@@ -26,10 +26,10 @@ const unsavedLogin = `{"refresh":"r9"}`
 
 // ignoringTerminal is activate's terminal for a harness that ignores its
 // quit, run from the test's shell in a temporary workspace.
-func ignoringTerminal(t *testing.T, until time.Time, login *loginSync) nativepty.Launch {
+func ignoringTerminal(t *testing.T, login *loginSync) nativepty.Launch {
 	t.Helper()
 	launch := terminalLaunch("/bin/sh", []string{"-c", ignoresQuit},
-		[]string{testPathEnvironment, testTerminalEnvironment}, until, login)
+		[]string{testPathEnvironment, testTerminalEnvironment}, login)
 	launch.Dir = t.TempDir()
 	return launch
 }
@@ -43,7 +43,7 @@ func ignoringTerminal(t *testing.T, until time.Time, login *loginSync) nativepty
 func killable(t *testing.T, kind harness.NativeKind, until time.Time, watched bool) (*server, *loginSync) {
 	t.Helper()
 	l := signedInEvery(t, quietInterval)
-	native, err := nativepty.Start(ignoringTerminal(t, until, l))
+	native, err := nativepty.Start(ignoringTerminal(t, l))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func killable(t *testing.T, kind harness.NativeKind, until time.Time, watched bo
 		defer cancel()
 		_, _ = native.Stop(ctx)
 	})
-	s := &server{native: native, state: harness.NativeActive, threadID: selected, done: make(chan struct{}),
+	s := &server{native: native, life: lifecycle{phase: phaseActive}, threadID: selected, done: make(chan struct{}),
 		config: config{Harness: kind, ThreadID: selected, Deadline: until}, deadline: until,
 		reports: &bytes.Buffer{}, diagnostics: &bytes.Buffer{}, login: l}
 	if watched {
@@ -111,11 +111,10 @@ func TestEveryKillLeavesTheStoreAsItWas(t *testing.T) {
 			stopsGracefully(t, s)
 		}},
 		"terminated": {kind: harness.NativeCodex, drive: func(t *testing.T, s *server) {
-			ended(t, s, func() { s.stop(causeTerminated) })
+			ended(t, s, func() { s.stop(evTerminate) })
 		}},
 		"deadline": {kind: harness.NativeCodex, until: 500 * time.Millisecond, drive: func(t *testing.T, s *server) {
-			<-s.native.Done()
-			s.login.stop()
+			ended(t, s, func() { go s.watchDeadline() })
 		}},
 		"signal from outside": {kind: harness.NativeCodex, watched: true, drive: func(t *testing.T, s *server) {
 			ended(t, s, func() { _ = unix.Kill(-s.native.PID(), unix.SIGKILL) })
@@ -165,7 +164,7 @@ func TestUnchangedLoginAfterAKillLeavesTheStoreAlone(t *testing.T) {
 // activate's terminal records a kill in the login sync before sending it.
 func TestTheHarnessTerminalRecordsItsKills(t *testing.T) {
 	l := signedIn(t)
-	native, err := nativepty.Start(ignoringTerminal(t, time.Time{}, l))
+	native, err := nativepty.Start(ignoringTerminal(t, l))
 	if err != nil {
 		t.Fatal(err)
 	}

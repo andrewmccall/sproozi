@@ -54,12 +54,16 @@ type request struct {
 type response = harness.NativeReply
 
 type server struct {
-	config   config
+	config config
+	// deadline is the execution's deadline, owned by deadline.go.
 	deadline time.Time
-	mu       sync.Mutex
-	action   sync.Mutex
-	native   *nativepty.Supervisor
-	state    harness.NativeState
+	// expired raises the deadline once.
+	expired sync.Once
+	mu      sync.Mutex
+	action  sync.Mutex
+	native  *nativepty.Supervisor
+	// life is the supervisor's lifecycle; only apply changes it.
+	life     lifecycle
 	threadID string
 	// launchID is the conversation a new visit's supervisor named itself,
 	// for a harness that takes its ID at launch (Copilot).
@@ -68,14 +72,6 @@ type server struct {
 	login    *loginSync
 	done     chan struct{}
 	stopOnce sync.Once
-	// cause is why the harness ended, decided once (decide). quiescing marks
-	// a graceful stop that owns the harness's exit; ended records that the
-	// exit is settled, with the harness's code and the supervisor's own.
-	cause       exitCause
-	quiescing   bool
-	ended       bool
-	harnessCode int
-	exitCode    int
 	// reports receives exit reports; nil is standard output.
 	reports io.Writer
 	// diagnostics receives diagnostic lines; nil is standard error.
@@ -83,10 +79,6 @@ type server struct {
 	claude          claudeLifecycle
 	inputGeneration uint64
 	taskBaseline    string
-	// gatedAt is when input was first gated; turnless latches the decision
-	// that this first visit has no native conversation to keep.
-	gatedAt  time.Time
-	turnless bool
 	// lastInputAt is when the last terminal write was accepted.
 	lastInputAt time.Time
 }
@@ -184,22 +176,17 @@ func serve(c config, bootstrap bool) error {
 	if err = os.Chmod(socketPath, 0600); err != nil {
 		return err
 	}
-	s := &server{config: c, deadline: c.Deadline, state: harness.NativePrepared, threadID: c.ThreadID,
-		done: make(chan struct{})}
-	if bootstrap {
-		s.state = harness.NativeUnconfigured
-	}
+	s := newServer(c, bootstrap)
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 	go func() {
 		select {
 		case <-ctx.Done():
-			s.stop(causeTerminated)
-		case <-deadline.At(c.Deadline).Done(s.done):
-			s.stop(causeDeadline)
+			s.stop(evTerminate)
 		case <-s.done:
 		}
 	}()
+	go s.watchDeadline()
 	go func() { <-s.done; _ = listener.Close() }()
 	for {
 		conn, err := listener.Accept()
@@ -207,7 +194,7 @@ func serve(c config, bootstrap bool) error {
 			select {
 			case <-s.done:
 				s.mu.Lock()
-				code := s.exitCode
+				code := s.life.exitCode
 				s.mu.Unlock()
 				if code != 0 {
 					return fmt.Errorf("native container stopped with exit code %d", code)
@@ -221,9 +208,24 @@ func serve(c config, bootstrap bool) error {
 	}
 }
 
-// exitCause is why the harness ended. It is decided once, where the decision
-// is made: by the exit watcher for a harness that ended by itself, by stop for
-// one the supervisor ends, and by quiesce for a graceful stop.
+// newServer is a supervisor configured with c, or bootstrapped to wait for
+// its configuration.
+func newServer(c config, bootstrap bool) *server {
+	s := &server{config: c, deadline: c.Deadline, life: lifecycle{phase: phasePrepared}, threadID: c.ThreadID,
+		done: make(chan struct{})}
+	if bootstrap {
+		s.life.phase = phaseUnconfigured
+	}
+	return s
+}
+
+// apply changes the lifecycle (lifecycle.go). The caller holds s.mu.
+func (s *server) apply(c change) bool { return s.life.apply(c) }
+
+// exitCause is why the harness ended. It is decided once, by the lifecycle
+// event that forces or settles the end: the exit watcher's for a harness that
+// ended by itself, stop's for one the supervisor ends, and the graceful
+// stop's own.
 type exitCause int
 
 const (
@@ -255,34 +257,12 @@ func (c exitCause) forced() bool {
 	return c == causeDeadline || c == causeTerminated || c == causeFailed
 }
 
-// decide records why the harness ended unless that is already decided. The
-// caller holds s.mu.
-func (s *server) decide(c exitCause) {
-	if s.cause == causeNone {
-		s.cause = c
-	}
-}
-
-// end settles, once, that the harness has ended with code. The supervisor's
-// own exit code is the harness's, but never 0 after a forced stop or an
-// unconfirmed process-group stop. The caller holds s.mu and has decided the
-// cause.
-func (s *server) end(code int, waitErr error) {
-	if s.ended {
-		return
-	}
-	s.ended, s.state, s.harnessCode, s.exitCode = true, harness.NativeStopped, code, code
-	if code == 0 && (waitErr != nil || s.cause.forced()) {
-		s.exitCode = 1
-	}
-}
-
 // conclude writes the exit report, unless a graceful stop ended the harness,
 // and then closes done, after which the supervisor exits. It runs once.
 func (s *server) conclude() {
 	s.stopOnce.Do(func() {
 		s.mu.Lock()
-		n, cause, code := s.native, s.cause, s.harnessCode
+		n, cause, code := s.native, s.life.cause, s.life.harnessCode
 		s.mu.Unlock()
 		if reported, ok := cause.reported(); ok && n != nil {
 			s.reportExit(n, reported, code)
@@ -291,12 +271,12 @@ func (s *server) conclude() {
 	})
 }
 
-// stop ends the harness for cause, unless its end is already decided.
-func (s *server) stop(cause exitCause) {
+// stop ends the harness for e (terminate, deadline or fail), unless its end
+// is already decided.
+func (s *server) stop(e event) {
 	s.mu.Lock()
 	n, login := s.native, s.login
-	s.decide(cause)
-	s.state = harness.NativeStopped
+	s.apply(change{event: e})
 	s.mu.Unlock()
 	var exit nativepty.Exit
 	var err error
@@ -307,14 +287,13 @@ func (s *server) stop(cause exitCause) {
 		login.stop()
 	}
 	s.mu.Lock()
-	s.end(exit.Code, err)
+	s.apply(change{event: evExited, exit: exit, err: err})
 	s.mu.Unlock()
 	s.conclude()
 }
 
 // watch settles the harness's exit, unless a graceful stop in flight owns it.
-// An exit nobody decided is the harness's own, or the terminal supervisor's
-// deadline.
+// An exit nobody forced is the harness's own.
 func (s *server) watch(n *nativepty.Supervisor, cleanup func()) {
 	<-n.Done()
 	exit, err := n.Wait(context.Background())
@@ -326,23 +305,18 @@ func (s *server) watch(n *nativepty.Supervisor, cleanup func()) {
 	}
 	cleanup()
 	s.mu.Lock()
-	if s.quiescing {
-		s.mu.Unlock()
-		return
-	}
-	if exit.Reason == nativepty.Deadline {
-		s.decide(causeDeadline)
-	}
-	s.decide(causeSelf)
-	s.end(exit.Code, err)
+	s.apply(change{event: evExited, exit: exit, err: err})
+	ended := s.life.phase == phaseEnded
 	s.mu.Unlock()
-	s.conclude()
+	if ended {
+		s.conclude()
+	}
 }
 
-// setQuiescing marks whether a graceful stop owns the harness's exit.
-func (s *server) setQuiescing(on bool) {
+// finishing records that a graceful stop takes over the harness's exit.
+func (s *server) finishing() {
 	s.mu.Lock()
-	s.quiescing = on
+	s.apply(change{event: evFinish})
 	s.mu.Unlock()
 }
 func (s *server) configure(c *config) response {
@@ -350,7 +324,7 @@ func (s *server) configure(c *config) response {
 	defer s.action.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	r := response{Op: harness.NativeConfigure, State: s.state, ThreadID: s.threadID}
+	r := response{Op: harness.NativeConfigure, State: s.life.phase.wire(), ThreadID: s.threadID}
 	if c == nil {
 		r.Error = "configure requires trusted launch configuration"
 		return r
@@ -363,18 +337,24 @@ func (s *server) configure(c *config) response {
 		r.Error = err.Error()
 		return r
 	}
-	if s.state != harness.NativeUnconfigured {
+	// A configured supervisor answers a configure as a replay. The contract's
+	// own validation has already refused a deadline that passed.
+	switch err := s.life.admit(evConfigure, s.pastDeadline()); {
+	case errors.Is(err, errUndeclared):
 		old, _ := json.Marshal(s.config)
 		newConfig, _ := json.Marshal(c)
 		if string(old) != string(newConfig) {
 			r.Error = "native configuration is immutable"
 		}
 		return r
+	case err != nil:
+		r.Error = "native deadline expired"
+		return r
 	}
 	s.config = *c
 	s.threadID = c.ThreadID
-	s.state = harness.NativePrepared
-	r.State, r.ThreadID = s.state, s.threadID
+	s.apply(change{event: evConfigure})
+	r.State, r.ThreadID = s.life.phase.wire(), s.threadID
 	return r
 }
 func (s *server) activate() response {
@@ -382,16 +362,17 @@ func (s *server) activate() response {
 	defer s.action.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	r := response{Op: harness.NativeActivate, State: s.state, ThreadID: s.threadID}
-	if s.state == harness.NativeActive {
+	r := response{Op: harness.NativeActivate, State: s.life.phase.wire(), ThreadID: s.threadID}
+	if s.life.phase == phaseActive {
+		// A replay answers before admission.
 		r.PID = s.native.PID()
 		return r
 	}
-	if s.state != harness.NativePrepared {
+	switch err := s.life.admit(evActivate, s.pastDeadline()); {
+	case errors.Is(err, errUndeclared):
 		r.Error = "native launch gate cannot reopen"
 		return r
-	}
-	if deadline.At(s.config.Deadline).Passed(time.Now()) {
+	case err != nil:
 		r.Error = "native deadline expired"
 		return r
 	}
@@ -452,14 +433,15 @@ func (s *server) activate() response {
 		r.Error = err.Error()
 		return r
 	}
-	n, err := nativepty.Start(terminalLaunch(adapter.executable, args, env, s.config.Deadline, login))
+	n, err := nativepty.Start(terminalLaunch(adapter.executable, args, env, login))
 	if err != nil {
 		login.stop()
 		r.Error = err.Error()
 		return r
 	}
-	s.native, s.state = n, harness.NativeActive
-	r.PID, r.State = n.PID(), s.state
+	s.native = n
+	s.apply(change{event: evActivate})
+	r.PID, r.State = n.PID(), s.life.phase.wire()
 	launched = true
 	go s.watch(n, func() {
 		login.stop()
@@ -484,9 +466,10 @@ func prepareLaunch(adapter nativeAdapter, c config, thread string, env []string,
 
 // terminalLaunch is the harness's terminal. Every kill its supervisor sends
 // is recorded in the login sync first, so the harness's login file is no
-// longer copied out once a kill may land (loginSync).
-func terminalLaunch(executable string, args, env []string, until time.Time, login *loginSync) nativepty.Launch {
-	return nativepty.Launch{Executable: executable, Args: args, Env: env, Dir: workspace, Deadline: until,
+// longer copied out once a kill may land (loginSync). It has no deadline of
+// its own: the supervisor's deadline (deadline.go) stops it.
+func terminalLaunch(executable string, args, env []string, login *loginSync) nativepty.Launch {
+	return nativepty.Launch{Executable: executable, Args: args, Env: env, Dir: workspace,
 		Size: nativepty.Size{Rows: 40, Columns: 140}, BeforeKill: login.forced}
 }
 
@@ -516,12 +499,12 @@ func (s *server) reportExit(n *nativepty.Supervisor, cause harness.NativeExitCau
 }
 func (s *server) status() response {
 	s.mu.Lock()
-	state := s.state
+	p := s.life.phase
 	id := s.threadID
 	n := s.native
 	kind := s.config.Harness
 	s.mu.Unlock()
-	if id == "" && (state == harness.NativeActive || state == harness.NativeStopping) {
+	if id == "" && p.running() {
 		observed, _, err := s.observeNativeTurn()
 		if err == nil {
 			s.mu.Lock()
@@ -532,8 +515,8 @@ func (s *server) status() response {
 			s.mu.Unlock()
 		}
 	}
-	r := response{Op: harness.NativeStatus, State: state, ThreadID: id}
-	if id == "" && state == harness.NativeStopping {
+	r := response{Op: harness.NativeStatus, State: p.wire(), ThreadID: id}
+	if id == "" && p.stopping() {
 		r.Turnless = s.isTurnless()
 		if !r.Turnless {
 			r.Waiting = s.waitingFor()
@@ -552,14 +535,11 @@ func (s *server) gate() response {
 	defer s.action.Unlock()
 	s.mu.Lock()
 	n := s.native
-	if s.state != harness.NativeActive &&
-		s.state != harness.NativeStopping {
-		r := response{Op: harness.NativeGate, State: s.state, Error: inactiveError}
+	if !s.gateInput() {
+		r := response{Op: harness.NativeGate, State: s.life.phase.wire(), Error: inactiveError}
 		s.mu.Unlock()
 		return r
 	}
-	s.state = harness.NativeStopping
-	s.markGated()
 	thread := s.threadID
 	s.mu.Unlock()
 	n.GateInput()
@@ -570,18 +550,13 @@ func (s *server) quiesce() response {
 	defer s.action.Unlock()
 	s.mu.Lock()
 	n := s.native
-	if s.state != harness.NativeActive &&
-		s.state != harness.NativeStopping {
-		r := response{Op: harness.NativeQuiesce, State: s.state, Error: inactiveError}
+	if !s.gateInput() {
+		r := response{Op: harness.NativeQuiesce, State: s.life.phase.wire(), Error: inactiveError}
 		s.mu.Unlock()
 		return r
 	}
-	s.state = harness.NativeStopping
-	s.markGated()
 	s.mu.Unlock()
 	n.GateInput()
-	ctx, cancel := deadline.At(s.deadline).Context(context.Background())
-	defer cancel()
 	timer := time.NewTicker(100 * time.Millisecond)
 	defer timer.Stop()
 	bound := time.NewTimer(quiesceWait)
@@ -596,11 +571,11 @@ func (s *server) quiesce() response {
 		if err == nil {
 			break
 		}
-		select {
-		case <-ctx.Done():
-			s.stop(causeDeadline)
+		if s.expireIfPassed() {
 			return response{Op: harness.NativeQuiesce, State: harness.NativeStopping,
 				Error: "no completed safe native turn before deadline"}
+		}
+		select {
 		case <-n.Done():
 			// No graceful stop owns this exit, so the exit watcher settles
 			// and reports it as the harness's own.
@@ -615,10 +590,10 @@ func (s *server) quiesce() response {
 	}
 	adapter, err := adapterFor(s.config.Harness)
 	if err != nil {
-		s.stop(causeFailed)
+		s.stop(evFail)
 		return response{Op: harness.NativeQuiesce, State: harness.NativeStopping, Error: err.Error()}
 	}
-	s.setQuiescing(true)
+	s.finishing()
 	exit, forced, err := s.finishTurn(adapter, n)
 	if err == nil && forced != "" {
 		// The harness state must still show the turn the stop observed.
@@ -639,12 +614,11 @@ func (s *server) quiesce() response {
 	// Save the harness's last sign-in change before the supervisor exits.
 	login.stop()
 	if err != nil {
-		if deadline.At(s.deadline).Passed(time.Now()) {
-			s.abandon(causeDeadline)
+		if s.expireIfPassed() {
 			return response{Op: harness.NativeQuiesce, State: harness.NativeStopping,
 				Error: "native quit did not finish before deadline"}
 		}
-		s.abandon(causeFailed)
+		s.stop(evFail)
 		return response{Op: harness.NativeQuiesce, State: harness.NativeStopping, Error: err.Error()}
 	}
 	code, problem := adapter.settle(exit)
@@ -670,13 +644,13 @@ func (s *server) quiesce() response {
 // harness rather than its own exit. At the deadline the error stands, for the
 // caller to report.
 func (s *server) finishTurn(adapter nativeAdapter, n *nativepty.Supervisor) (nativepty.Exit, string, error) {
-	until := deadline.At(s.deadline)
+	until := s.until()
 	ctx, cancel := context.WithDeadline(context.Background(), until.Bound(time.Now(), quitWait))
 	defer cancel()
 	exit, err := adapter.finish(n, ctx)
 	var forced string
 	switch {
-	case err == nil || until.Passed(time.Now()):
+	case err == nil || s.pastDeadline():
 		return exit, "", err
 	case errors.Is(err, nativepty.ErrInputBusy):
 		forced = "Forced the harness to stop after its terminal input was full when it was asked to quit"
@@ -721,31 +695,16 @@ func (s *server) diagnose(format string, args ...any) {
 	_, _ = fmt.Fprintf(out, format+"\n", args...)
 }
 
-// abandon ends a graceful stop that could not finish by stopping the harness
-// for cause, decided before the stop releases the exit, so the exit watcher
-// never takes the exit for the harness's own.
-func (s *server) abandon(cause exitCause) {
-	s.mu.Lock()
-	s.decide(cause)
-	s.quiescing = false
-	s.mu.Unlock()
-	s.stop(cause)
-}
-
 // endGracefully settles a harness a graceful stop ended, with the
 // supervisor's own exit code and the conversation it kept. A cause decided
-// earlier, such as a SIGTERM that raced the stop, stays.
+// earlier, such as a SIGTERM that raced the stop, stays (evFinished).
 func (s *server) endGracefully(exit nativepty.Exit, code int, thread string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.quiescing = false
-	s.decide(causeQuiesced)
 	if thread != "" {
 		s.threadID = thread
 	}
-	if !s.ended {
-		s.ended, s.state, s.harnessCode, s.exitCode = true, harness.NativeStopped, exit.Code, code
-	}
+	s.apply(change{event: evFinished, exit: exit, code: code})
 }
 
 // waitingFor describes, in fixed words, what a graceful stop waits for.
@@ -788,7 +747,7 @@ func (s *server) inputSettled() bool {
 	if s.claude.lastHook.After(last) {
 		last = s.claude.lastHook
 	}
-	return s.state == harness.NativeStopping && !s.gatedAt.IsZero() && time.Since(last) >= inputSettle
+	return s.life.phase.stopping() && !s.life.gatedAt.IsZero() && time.Since(last) >= inputSettle
 }
 
 // inputSettle is how long gated input and lifecycle hooks must stay quiet
@@ -797,13 +756,15 @@ func (s *server) inputSettled() bool {
 // UserPromptSubmit well within it.
 var inputSettle = 3 * time.Second
 
-// markGated records when input was first gated, and that a stop has begun
-// for the login sync. The caller holds s.mu.
-func (s *server) markGated() {
-	s.login.stopping()
-	if s.gatedAt.IsZero() {
-		s.gatedAt = time.Now()
+// gateInput applies gate, recording for the login sync that a stop has
+// begun, unless the lifecycle refuses it. The caller holds s.mu and gates the
+// terminal itself.
+func (s *server) gateInput() bool {
+	if s.life.admit(evGate, s.pastDeadline()) != nil {
+		return false
 	}
+	s.login.stopping()
+	return s.apply(change{event: evGate, at: time.Now()})
 }
 
 // isTurnless reports, and latches, that a gated first interactive visit has
@@ -811,9 +772,9 @@ func (s *server) markGated() {
 // always has one, so it never qualifies.
 func (s *server) isTurnless() bool {
 	s.mu.Lock()
-	latched := s.turnless
-	eligible := s.state == harness.NativeStopping && s.config.ThreadID == "" && s.threadID == "" &&
-		s.config.Task == "" && !s.gatedAt.IsZero() && time.Since(s.gatedAt) >= turnlessSettle
+	latched := s.life.turnless
+	eligible := s.life.phase.stopping() && s.config.ThreadID == "" && s.threadID == "" &&
+		s.config.Task == "" && !s.life.gatedAt.IsZero() && time.Since(s.life.gatedAt) >= turnlessSettle
 	kind := s.config.Harness
 	s.mu.Unlock()
 	if latched || !eligible {
@@ -828,8 +789,7 @@ func (s *server) isTurnless() bool {
 	if s.threadID != "" {
 		return false
 	}
-	s.turnless = true
-	return true
+	return s.apply(change{event: evTurnless})
 }
 
 // stopTurnless ends a turnless first visit. There is no native conversation
@@ -837,17 +797,14 @@ func (s *server) isTurnless() bool {
 // typing a quit command into whatever the harness shows. The wait for it to
 // exit has finishTurn's bound.
 func (s *server) stopTurnless(n *nativepty.Supervisor) response {
-	s.setQuiescing(true)
-	until := deadline.At(s.deadline)
-	ctx, cancel := context.WithDeadline(context.Background(), until.Bound(time.Now(), quitWait))
+	s.finishing()
+	ctx, cancel := context.WithDeadline(context.Background(), s.until().Bound(time.Now(), quitWait))
 	defer cancel()
 	exit, err := forceStop(n, ctx)
 	if err != nil {
-		cause := causeFailed
-		if until.Passed(time.Now()) {
-			cause = causeDeadline
+		if !s.expireIfPassed() {
+			s.stop(evFail)
 		}
-		s.abandon(cause)
 		return response{Op: harness.NativeQuiesce, State: harness.NativeStopping, Error: err.Error()}
 	}
 	s.mu.Lock()
@@ -918,9 +875,9 @@ func strictRequest(data []byte, q *request) error {
 }
 func (s *server) attach(conn net.Conn, scanner *bufio.Scanner, encoder *json.Encoder, cursor uint64) {
 	s.mu.Lock()
-	n, state := s.native, s.state
+	n, p := s.native, s.life.phase
 	s.mu.Unlock()
-	if n == nil || state != harness.NativeActive {
+	if n == nil || !p.takesInput() {
 		_ = encoder.Encode(response{Op: harness.NativeAttach, Error: inactiveError})
 		return
 	}
@@ -937,10 +894,10 @@ func (s *server) attach(conn net.Conn, scanner *bufio.Scanner, encoder *json.Enc
 		_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 		return encoder.Encode(r)
 	}
-	if emit(response{Op: harness.NativeAttach, PID: n.PID(), State: state}) != nil {
+	if emit(response{Op: harness.NativeAttach, PID: n.PID(), State: p.wire()}) != nil {
 		return
 	}
-	ctx, cancel := deadline.At(s.deadline).Context(context.Background())
+	ctx, cancel := s.until().Context(context.Background())
 	defer cancel()
 	go func() {
 		defer cancel()

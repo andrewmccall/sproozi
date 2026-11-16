@@ -197,7 +197,7 @@ func (s *server) copilotSession() string {
 func (s *server) observeCopilotTurn() (string, string, error) {
 	id := s.copilotSession()
 	s.mu.Lock()
-	settled := s.inputGeneration == 0 || s.inputSettled() || s.state == harness.NativeStopped
+	settled := s.inputGeneration == 0 || s.inputSettled() || s.life.phase.over()
 	maxBytes := s.config.RolloutMaxBytes
 	s.mu.Unlock()
 	if id == "" || !settled {

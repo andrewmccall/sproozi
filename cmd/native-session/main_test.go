@@ -147,7 +147,7 @@ func TestFixedAttachmentReconnectAndGate(t *testing.T) {
 		defer cancel()
 		_, _ = native.Stop(ctx)
 	})
-	s := &server{native: native, state: harness.NativeActive, threadID: selected, done: make(chan struct{}),
+	s := &server{native: native, life: lifecycle{phase: phaseActive}, threadID: selected, done: make(chan struct{}),
 		config:   config{Harness: harness.NativeCodex, Deadline: time.Now().Add(15 * time.Second)},
 		deadline: time.Now().Add(15 * time.Second)}
 	connect := func() (net.Conn, *json.Decoder) {
@@ -225,7 +225,7 @@ func TestFixedAttachmentReconnectAndGate(t *testing.T) {
 func TestBootstrapConfigurationIsImmutable(t *testing.T) {
 	deadline := time.Now().UTC().Add(time.Minute)
 	s := &server{config: config{Harness: harness.NativeCodex, Deadline: deadline}, deadline: deadline,
-		state: harness.NativeUnconfigured, done: make(chan struct{})}
+		life: lifecycle{phase: phaseUnconfigured}, done: make(chan struct{})}
 	approved := config{Harness: harness.NativeCodex, Deadline: deadline, ThreadID: selected, Instructions: instructions,
 		InstructionDigest: digest(), ClientConfig: testClients,
 		Env: []string{}, RolloutMaxBytes: 8192}

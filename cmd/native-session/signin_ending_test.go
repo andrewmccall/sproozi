@@ -55,7 +55,7 @@ func TestOrdinaryEndingsDoNotWaitForTheLoginBound(t *testing.T) {
 			},
 			"the harness exits by itself": func(t *testing.T, l *loginSync) (time.Time, time.Time) {
 				native := startNative(t, "sleep 0.3; exit 0", time.Time{})
-				s := &server{native: native, state: harness.NativeActive, threadID: selected, done: make(chan struct{}),
+				s := &server{native: native, life: lifecycle{phase: phaseActive}, threadID: selected, done: make(chan struct{}),
 					config: config{Harness: harness.NativeCodex, ThreadID: selected}, reports: &bytes.Buffer{},
 					login: l}
 				go s.watch(native, l.stop)
