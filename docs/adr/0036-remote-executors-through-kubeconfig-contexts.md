@@ -192,16 +192,39 @@ Decision, in two parts:
 - **The executor carries a stop on after its request ends.** A placement
   `stop`, and an owner `stop` or `recover`, runs on a context that keeps the
   request's values but not its cancellation, bounded by `StopBound` (9
-  minutes 43 seconds). A placement `abort` for the same allocation interrupts
-  it first; owner cancellation already interrupts the coordinator's graceful
-  stop. A retry blocks on the placement's operation lock, or the
-  coordinator's session lock, until the stop in progress ends, then reads its
-  recorded outcome, so recovery is the live path.
+  minutes 43 seconds), and tracked in `profile.Stops`. Placement stops of
+  one visit (allocation and incarnation) asked while one runs join it and
+  return its answer, so retries never queue behind the visit's lock. A
+  placement `abort` of that visit interrupts its stop first, and a stop that
+  begins while the abort runs starts cancelled; an abort naming another
+  incarnation, which the placement refuses, leaves the stop alone. Owner
+  cancellation already interrupts the coordinator's graceful stop. A retry
+  after the stop ended, or an owner retry, which blocks on the coordinator's
+  session lock, reads the recorded outcome, so recovery is the live path.
+- **Shutdown drains them.** The executor stops accepting requests, gives
+  those in flight 10 seconds and closes their connections, then waits up to
+  `StopBound` for the stops it carries on. Any still running are then
+  interrupted and the executor waits for them to let go of the placement's
+  and coordinator's locks before it closes those, and logs that the stops
+  must be repeated. The Pod's `terminationGracePeriodSeconds` must exceed
+  10 seconds plus `StopBound` (593 seconds) for a stop in flight at a
+  rollout to finish; the example Deployments set 620. With less, the kubelet
+  kills the executor at the grace period: crash-safe, since output is
+  written before its record and the writer fence keeps the Pod for a
+  recapture, but the reply of a quiesce in flight is lost.
 - **Each request waits as long as its action may take.** The client derives
   each wait from the executor's bounds (`profile/protocol.go`) and adds a
   minute: stop 10 minutes 43 seconds, prepare 8 minutes, abort 2 minutes,
-  everything else 45 seconds as before. The placement's wait for a stopped
-  container, unbounded without a deadline, now ends after a minute. The
+  everything else 45 seconds as before. The stop bound is derived in code
+  from the supervisor's own bounds, which `internal/harness` publishes and a
+  test holds the supervisor to: two `NativeQuiesceWait`s (2 minutes each),
+  `NativeQuitWait` (30 seconds, [ADR 0035's correction of
+  2026-11-15](0035-bounded-graceful-stops-and-settled-input.md#correction-the-wait-after-the-quit-2026-11-15)),
+  `NativeForcedStopWait` (3 seconds) and `NativeQuiesceReplyGrace` (10
+  seconds), then 5 minutes to settle. The placement's wait for a stopped
+  container, unbounded without a deadline, now ends after a minute.
+  `stop --remote` asks again after a dropped connection, up to three in a
+  row, through a new connection. The
   [reference](../reference/remote-executors.md#request-timeouts-and-dropped-connections)
   has the table.
 
@@ -238,14 +261,34 @@ Alternatives rejected:
   absence of an exit report. Absence is not proof, and ADR 0011 forbids
   claiming a Claude Code turn from a stopped container.
 
-Limits: an executor restart during a stop still loses the reply as before
-(it waits 10 seconds for requests at shutdown). The bound assumes the
-supervisor's wait after the quit is 30 seconds plus a 3-second kill; a
-harness that ignores its quit for longer reaches `StopBound` and loses the
-reply. Revisit when connections through the API server are cut while a stop
-is silent, when an executor restart during a stop matters, or when a stop's
-bounds change (`harness.NativeQuiesceWait`, the quit wait, checkpoint size):
-then the asynchronous stop above becomes the better shape.
+Limits:
+
+- An executor killed during a stop, by a grace period shorter than the
+  drain or a crash, loses the reply of a quiesce in flight, as a dropped
+  connection did before.
+- The handoff bound holds because the supervisor bounds the wait after the
+  quit at `NativeQuitWait` and a kill's confirmation at
+  `NativeForcedStopWait`; a supervisor older than that correction can wait
+  for ever after a quit, so a stop on it reaches `StopBound` and loses the
+  reply. The capture's 5-minute share is an allowance, not a bound the
+  helper enforces: a capture past it is cut, which is safe, since the
+  output is recorded only once whole and the retry captures again.
+- Retries from a home older than this change time out after 45 seconds.
+  Concurrent ones join the running stop, but one that arrives after a stop
+  answered turn pending starts a new one, which nobody may read; each runs
+  at most `StopBound`, and any home the executor authenticates can start
+  one per visit at a time this way. Harmless and convergent.
+- Something in front of the API server that cuts idle connections, such as
+  a load balancer's four-minute idle timeout, can cut a stop's silent
+  request before it is answered. The stop still finishes on the executor
+  and the retry returns it: a spurious error, not a lost checkpoint.
+
+Revisit when connections through the API server are cut while a stop is
+silent, when an executor restart during a stop matters, when one home
+starting stops for many visits at once becomes a concern, or when a stop's
+bounds change (`harness.NativeQuiesceWait` and the supervisor's other
+bounds, checkpoint size): then the asynchronous stop above becomes the
+better shape.
 
 ## Alternatives
 

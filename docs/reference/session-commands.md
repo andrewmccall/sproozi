@@ -376,8 +376,9 @@ the executor's per-attachment bounds of 8 MiB of input and 64 MiB of output.
 when the executor answers that it still waits, the CLI prints `Waiting for the
 agent's current turn in session ID to finish; run "sproozi cancel ID --remote"
 in another terminal to stop it now instead.` once and asks again with the same
-operation, also after a request that timed out or a dropped connection, until
-the session stops. The executor carries the stop on while the CLI is away
+operation, also after a request that timed out or, up to three times in a
+row, a dropped connection, through a new one, until the session stops. More
+drops in a row end the command with a retry hint naming the operation. The executor carries the stop on while the CLI is away
 ([request timeouts](remote-executors.md#request-timeouts-and-dropped-connections)). It then prints `Stopped
 session ID; its work is kept.` and the commands that continue it there
 (`sproozi resume ID --remote`) or bring it here (`sproozi pull ID`). Ctrl-C

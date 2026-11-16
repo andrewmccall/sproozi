@@ -129,7 +129,7 @@ the answer to arrive
 
 | Request | The executor takes at most | The client waits |
 | --- | --- | --- |
-| Placement `stop`; owner `stop` and `recover` | 9 minutes 43 seconds: two 2-minute waits for a first visit's conversation and turn, 43 seconds for the agent to quit and its reply to be read, and 5 minutes to end the container (at most 1 minute), seal usage and capture the checkpoint | 10 minutes 43 seconds |
+| Placement `stop`; owner `stop` and `recover` | 9 minutes 43 seconds: two 2-minute waits for a first visit's conversation and turn, the supervisor's 30-second wait for the agent to quit, 3 seconds after killing one that did not, and 10 seconds for its reply to be read ([native control](native-control.md)), then 5 minutes to end the container (at most 1 minute), seal usage and capture the checkpoint | 10 minutes 43 seconds |
 | Placement `prepare` | 2 minutes for an interactive visit's Pod to run, plus sending and restoring the checkpoint | 8 minutes |
 | Placement `abort`; owner `cancel` | The Pod's termination grace period, 30 seconds by default, and sealing usage | 2 minutes |
 | Everything else, and the wait for an `attach` to be admitted | A few API calls | 45 seconds |
@@ -143,13 +143,27 @@ carries the stop on to its outcome, for at most the time in the table. The
 session meanwhile reads `unknown-stop` at home, or `stopping` on the
 executor. Repeat `stop`, or run `recover`, with the same operation: the retry
 waits for the stop in progress and returns its result, the same checkpoint an
-uninterrupted stop keeps. `cancel` still interrupts the stop at once. Other
-requests end with their connection and are retried the same way; none loses
-state.
+uninterrupted stop keeps. `stop --remote` does this by itself after up to
+three dropped connections in a row. `cancel` still interrupts the stop at
+once. Other requests end with their connection and are retried the same way;
+none loses state. A load balancer in front of the API server that cuts idle
+connections (often after four minutes) can end a stop's request early in the
+same way: the stop still finishes on the executor.
 
-An executor that restarts during a stop loses it like a dropped connection
-did before: a Claude Code visit whose supervisor finished the stop meanwhile
-keeps the checkpoint it started from, and a Codex visit records an exit.
+### Restarts and rollouts
+
+On `SIGTERM` the executor stops accepting requests, gives those in flight 10
+seconds and closes their connections, attachments included. It then waits up
+to 9 minutes 43 seconds for the stops it carries on, interrupts any still
+running, and exits. For a stop in flight at a rollout to finish, set the
+executor Pod's `terminationGracePeriodSeconds` above 593 seconds; the
+[examples](../../examples/portable-workflows/kubernetes/owner.yaml) set 620.
+With less, the kubelet kills the executor at the grace period. That is
+safe, since nothing half-written is kept, but like an interrupted stop it
+loses the reply of an agent's stop in flight: a Claude Code visit then keeps
+the checkpoint it started from, and a Codex visit records an exit. The
+executor logs `Interrupted stops still running after … at shutdown; repeat
+each stop to finish it` when it had to interrupt any.
 
 ## Interactive sessions
 
