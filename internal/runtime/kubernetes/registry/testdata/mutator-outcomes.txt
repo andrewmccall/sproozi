@@ -12,6 +12,7 @@ checkpoint early | none | bind-native-other -> gone
 checkpoint early | none | stop -> gone
 checkpoint early | none | complete-stop -> gone
 checkpoint early | none | complete-stop-other -> gone
+checkpoint early | none | complete-stop-without-checkpoint -> gone
 checkpoint early | none | cancel -> gone
 checkpoint early | none | complete-cancel -> gone
 checkpoint early | none | complete-cancel-other -> gone
@@ -29,6 +30,7 @@ checkpoint early | creating run="" pod="" native=bound receipt=none | bind-nativ
 checkpoint early | creating run="" pod="" native=bound receipt=none | stop -> conflict
 checkpoint early | creating run="" pod="" native=bound receipt=none | complete-stop -> conflict
 checkpoint early | creating run="" pod="" native=bound receipt=none | complete-stop-other -> conflict
+checkpoint early | creating run="" pod="" native=bound receipt=none | complete-stop-without-checkpoint -> error: incomplete mobility stop receipt
 checkpoint early | creating run="" pod="" native=bound receipt=none | cancel -> cancelled run="" pod="" native=bound receipt=none written
 checkpoint early | creating run="" pod="" native=bound receipt=none | complete-cancel -> conflict
 checkpoint early | creating run="" pod="" native=bound receipt=none | complete-cancel-other -> conflict
@@ -46,6 +48,7 @@ checkpoint early | bound run="run-uid" pod="" native=bound receipt=none | bind-n
 checkpoint early | bound run="run-uid" pod="" native=bound receipt=none | stop -> conflict
 checkpoint early | bound run="run-uid" pod="" native=bound receipt=none | complete-stop -> conflict
 checkpoint early | bound run="run-uid" pod="" native=bound receipt=none | complete-stop-other -> conflict
+checkpoint early | bound run="run-uid" pod="" native=bound receipt=none | complete-stop-without-checkpoint -> error: incomplete mobility stop receipt
 checkpoint early | bound run="run-uid" pod="" native=bound receipt=none | cancel -> cancelled run="run-uid" pod="" native=bound receipt=none written
 checkpoint early | bound run="run-uid" pod="" native=bound receipt=none | complete-cancel -> conflict
 checkpoint early | bound run="run-uid" pod="" native=bound receipt=none | complete-cancel-other -> conflict
@@ -63,6 +66,7 @@ checkpoint early | bound run="run-uid" pod="pod-a" native=bound receipt=none | b
 checkpoint early | bound run="run-uid" pod="pod-a" native=bound receipt=none | stop -> conflict
 checkpoint early | bound run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop -> conflict
 checkpoint early | bound run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-other -> conflict
+checkpoint early | bound run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-without-checkpoint -> error: incomplete mobility stop receipt
 checkpoint early | bound run="run-uid" pod="pod-a" native=bound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=none written
 checkpoint early | bound run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel -> conflict
 checkpoint early | bound run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel-other -> conflict
@@ -80,6 +84,7 @@ checkpoint early | prepared run="run-uid" pod="pod-a" native=bound receipt=none 
 checkpoint early | prepared run="run-uid" pod="pod-a" native=bound receipt=none | stop -> conflict
 checkpoint early | prepared run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop -> conflict
 checkpoint early | prepared run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-other -> conflict
+checkpoint early | prepared run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-without-checkpoint -> error: incomplete mobility stop receipt
 checkpoint early | prepared run="run-uid" pod="pod-a" native=bound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=none written
 checkpoint early | prepared run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel -> conflict
 checkpoint early | prepared run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel-other -> conflict
@@ -97,6 +102,7 @@ checkpoint early | active run="run-uid" pod="pod-a" native=bound receipt=none | 
 checkpoint early | active run="run-uid" pod="pod-a" native=bound receipt=none | stop -> stopping run="run-uid" pod="pod-a" native=bound receipt=none written
 checkpoint early | active run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop -> conflict
 checkpoint early | active run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-other -> conflict
+checkpoint early | active run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-without-checkpoint -> error: incomplete mobility stop receipt
 checkpoint early | active run="run-uid" pod="pod-a" native=bound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=none written
 checkpoint early | active run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel -> conflict
 checkpoint early | active run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel-other -> conflict
@@ -114,6 +120,7 @@ checkpoint early | stopping run="run-uid" pod="pod-a" native=bound receipt=none 
 checkpoint early | stopping run="run-uid" pod="pod-a" native=bound receipt=none | stop -> stopping run="run-uid" pod="pod-a" native=bound receipt=none unchanged
 checkpoint early | stopping run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint written
 checkpoint early | stopping run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-other -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=2+checkpoint written
+checkpoint early | stopping run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-without-checkpoint -> error: incomplete mobility stop receipt
 checkpoint early | stopping run="run-uid" pod="pod-a" native=bound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=none written
 checkpoint early | stopping run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel -> conflict
 checkpoint early | stopping run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel-other -> conflict
@@ -131,6 +138,7 @@ checkpoint early | stopped run="run-uid" pod="pod-a" native=bound receipt=units=
 checkpoint early | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint | stop -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint unchanged
 checkpoint early | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint | complete-stop -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint unchanged
 checkpoint early | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint | complete-stop-other -> conflict
+checkpoint early | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint | complete-stop-without-checkpoint -> error: incomplete mobility stop receipt
 checkpoint early | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint | cancel -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint unchanged
 checkpoint early | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint | complete-cancel -> conflict
 checkpoint early | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint | complete-cancel-other -> conflict
@@ -148,6 +156,7 @@ checkpoint early | cancelled run="" pod="" native=bound receipt=none | bind-nati
 checkpoint early | cancelled run="" pod="" native=bound receipt=none | stop -> conflict
 checkpoint early | cancelled run="" pod="" native=bound receipt=none | complete-stop -> conflict
 checkpoint early | cancelled run="" pod="" native=bound receipt=none | complete-stop-other -> conflict
+checkpoint early | cancelled run="" pod="" native=bound receipt=none | complete-stop-without-checkpoint -> error: incomplete mobility stop receipt
 checkpoint early | cancelled run="" pod="" native=bound receipt=none | cancel -> cancelled run="" pod="" native=bound receipt=none unchanged
 checkpoint early | cancelled run="" pod="" native=bound receipt=none | complete-cancel -> conflict
 checkpoint early | cancelled run="" pod="" native=bound receipt=none | complete-cancel-other -> conflict
@@ -165,6 +174,7 @@ checkpoint early | cancelled run="run-uid" pod="" native=bound receipt=none | bi
 checkpoint early | cancelled run="run-uid" pod="" native=bound receipt=none | stop -> conflict
 checkpoint early | cancelled run="run-uid" pod="" native=bound receipt=none | complete-stop -> conflict
 checkpoint early | cancelled run="run-uid" pod="" native=bound receipt=none | complete-stop-other -> conflict
+checkpoint early | cancelled run="run-uid" pod="" native=bound receipt=none | complete-stop-without-checkpoint -> error: incomplete mobility stop receipt
 checkpoint early | cancelled run="run-uid" pod="" native=bound receipt=none | cancel -> cancelled run="run-uid" pod="" native=bound receipt=none unchanged
 checkpoint early | cancelled run="run-uid" pod="" native=bound receipt=none | complete-cancel -> conflict
 checkpoint early | cancelled run="run-uid" pod="" native=bound receipt=none | complete-cancel-other -> conflict
@@ -182,6 +192,7 @@ checkpoint early | cancelled run="run-uid" pod="pod-a" native=bound receipt=none
 checkpoint early | cancelled run="run-uid" pod="pod-a" native=bound receipt=none | stop -> conflict
 checkpoint early | cancelled run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop -> conflict
 checkpoint early | cancelled run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-other -> conflict
+checkpoint early | cancelled run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-without-checkpoint -> error: incomplete mobility stop receipt
 checkpoint early | cancelled run="run-uid" pod="pod-a" native=bound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=none unchanged
 checkpoint early | cancelled run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 written
 checkpoint early | cancelled run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel-other -> cancelled run="run-uid" pod="pod-a" native=bound receipt=units=2 written
@@ -199,6 +210,7 @@ checkpoint early | cancelled run="run-uid" pod="pod-a" native=bound receipt=unit
 checkpoint early | cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 | stop -> conflict
 checkpoint early | cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-stop -> conflict
 checkpoint early | cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-stop-other -> conflict
+checkpoint early | cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-stop-without-checkpoint -> error: incomplete mobility stop receipt
 checkpoint early | cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 | cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 unchanged
 checkpoint early | cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 unchanged
 checkpoint early | cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-cancel-other -> conflict
@@ -216,6 +228,7 @@ checkpoint late | none | bind-native-other -> gone
 checkpoint late | none | stop -> gone
 checkpoint late | none | complete-stop -> gone
 checkpoint late | none | complete-stop-other -> gone
+checkpoint late | none | complete-stop-without-checkpoint -> gone
 checkpoint late | none | cancel -> gone
 checkpoint late | none | complete-cancel -> gone
 checkpoint late | none | complete-cancel-other -> gone
@@ -233,6 +246,7 @@ checkpoint late | creating run="" pod="" native=bound receipt=none | bind-native
 checkpoint late | creating run="" pod="" native=bound receipt=none | stop -> conflict
 checkpoint late | creating run="" pod="" native=bound receipt=none | complete-stop -> conflict
 checkpoint late | creating run="" pod="" native=bound receipt=none | complete-stop-other -> conflict
+checkpoint late | creating run="" pod="" native=bound receipt=none | complete-stop-without-checkpoint -> error: incomplete mobility stop receipt
 checkpoint late | creating run="" pod="" native=bound receipt=none | cancel -> cancelled run="" pod="" native=bound receipt=none written
 checkpoint late | creating run="" pod="" native=bound receipt=none | complete-cancel -> conflict
 checkpoint late | creating run="" pod="" native=bound receipt=none | complete-cancel-other -> conflict
@@ -250,6 +264,7 @@ checkpoint late | bound run="run-uid" pod="" native=bound receipt=none | bind-na
 checkpoint late | bound run="run-uid" pod="" native=bound receipt=none | stop -> conflict
 checkpoint late | bound run="run-uid" pod="" native=bound receipt=none | complete-stop -> conflict
 checkpoint late | bound run="run-uid" pod="" native=bound receipt=none | complete-stop-other -> conflict
+checkpoint late | bound run="run-uid" pod="" native=bound receipt=none | complete-stop-without-checkpoint -> error: incomplete mobility stop receipt
 checkpoint late | bound run="run-uid" pod="" native=bound receipt=none | cancel -> cancelled run="run-uid" pod="" native=bound receipt=none written
 checkpoint late | bound run="run-uid" pod="" native=bound receipt=none | complete-cancel -> conflict
 checkpoint late | bound run="run-uid" pod="" native=bound receipt=none | complete-cancel-other -> conflict
@@ -267,6 +282,7 @@ checkpoint late | bound run="run-uid" pod="pod-a" native=bound receipt=none | bi
 checkpoint late | bound run="run-uid" pod="pod-a" native=bound receipt=none | stop -> conflict
 checkpoint late | bound run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop -> conflict
 checkpoint late | bound run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-other -> conflict
+checkpoint late | bound run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-without-checkpoint -> error: incomplete mobility stop receipt
 checkpoint late | bound run="run-uid" pod="pod-a" native=bound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=none written
 checkpoint late | bound run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel -> conflict
 checkpoint late | bound run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel-other -> conflict
@@ -284,6 +300,7 @@ checkpoint late | prepared run="run-uid" pod="pod-a" native=bound receipt=none |
 checkpoint late | prepared run="run-uid" pod="pod-a" native=bound receipt=none | stop -> conflict
 checkpoint late | prepared run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop -> conflict
 checkpoint late | prepared run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-other -> conflict
+checkpoint late | prepared run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-without-checkpoint -> error: incomplete mobility stop receipt
 checkpoint late | prepared run="run-uid" pod="pod-a" native=bound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=none written
 checkpoint late | prepared run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel -> conflict
 checkpoint late | prepared run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel-other -> conflict
@@ -301,6 +318,7 @@ checkpoint late | active run="run-uid" pod="pod-a" native=bound receipt=none | b
 checkpoint late | active run="run-uid" pod="pod-a" native=bound receipt=none | stop -> stopping run="run-uid" pod="pod-a" native=bound receipt=none written
 checkpoint late | active run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop -> conflict
 checkpoint late | active run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-other -> conflict
+checkpoint late | active run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-without-checkpoint -> error: incomplete mobility stop receipt
 checkpoint late | active run="run-uid" pod="pod-a" native=bound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=none written
 checkpoint late | active run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel -> conflict
 checkpoint late | active run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel-other -> conflict
@@ -318,6 +336,7 @@ checkpoint late | stopping run="run-uid" pod="pod-a" native=bound receipt=none |
 checkpoint late | stopping run="run-uid" pod="pod-a" native=bound receipt=none | stop -> stopping run="run-uid" pod="pod-a" native=bound receipt=none unchanged
 checkpoint late | stopping run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint written
 checkpoint late | stopping run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-other -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=2+checkpoint written
+checkpoint late | stopping run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-without-checkpoint -> error: incomplete mobility stop receipt
 checkpoint late | stopping run="run-uid" pod="pod-a" native=bound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=none written
 checkpoint late | stopping run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel -> conflict
 checkpoint late | stopping run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel-other -> conflict
@@ -335,6 +354,7 @@ checkpoint late | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1
 checkpoint late | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint | stop -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint unchanged
 checkpoint late | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint | complete-stop -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint unchanged
 checkpoint late | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint | complete-stop-other -> conflict
+checkpoint late | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint | complete-stop-without-checkpoint -> error: incomplete mobility stop receipt
 checkpoint late | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint | cancel -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint unchanged
 checkpoint late | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint | complete-cancel -> conflict
 checkpoint late | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint | complete-cancel-other -> conflict
@@ -352,6 +372,7 @@ checkpoint late | cancelled run="" pod="" native=bound receipt=none | bind-nativ
 checkpoint late | cancelled run="" pod="" native=bound receipt=none | stop -> conflict
 checkpoint late | cancelled run="" pod="" native=bound receipt=none | complete-stop -> conflict
 checkpoint late | cancelled run="" pod="" native=bound receipt=none | complete-stop-other -> conflict
+checkpoint late | cancelled run="" pod="" native=bound receipt=none | complete-stop-without-checkpoint -> error: incomplete mobility stop receipt
 checkpoint late | cancelled run="" pod="" native=bound receipt=none | cancel -> cancelled run="" pod="" native=bound receipt=none unchanged
 checkpoint late | cancelled run="" pod="" native=bound receipt=none | complete-cancel -> conflict
 checkpoint late | cancelled run="" pod="" native=bound receipt=none | complete-cancel-other -> conflict
@@ -369,6 +390,7 @@ checkpoint late | cancelled run="run-uid" pod="" native=bound receipt=none | bin
 checkpoint late | cancelled run="run-uid" pod="" native=bound receipt=none | stop -> conflict
 checkpoint late | cancelled run="run-uid" pod="" native=bound receipt=none | complete-stop -> conflict
 checkpoint late | cancelled run="run-uid" pod="" native=bound receipt=none | complete-stop-other -> conflict
+checkpoint late | cancelled run="run-uid" pod="" native=bound receipt=none | complete-stop-without-checkpoint -> error: incomplete mobility stop receipt
 checkpoint late | cancelled run="run-uid" pod="" native=bound receipt=none | cancel -> cancelled run="run-uid" pod="" native=bound receipt=none unchanged
 checkpoint late | cancelled run="run-uid" pod="" native=bound receipt=none | complete-cancel -> conflict
 checkpoint late | cancelled run="run-uid" pod="" native=bound receipt=none | complete-cancel-other -> conflict
@@ -386,6 +408,7 @@ checkpoint late | cancelled run="run-uid" pod="pod-a" native=bound receipt=none 
 checkpoint late | cancelled run="run-uid" pod="pod-a" native=bound receipt=none | stop -> conflict
 checkpoint late | cancelled run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop -> conflict
 checkpoint late | cancelled run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-other -> conflict
+checkpoint late | cancelled run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-without-checkpoint -> error: incomplete mobility stop receipt
 checkpoint late | cancelled run="run-uid" pod="pod-a" native=bound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=none unchanged
 checkpoint late | cancelled run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 written
 checkpoint late | cancelled run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel-other -> cancelled run="run-uid" pod="pod-a" native=bound receipt=units=2 written
@@ -403,6 +426,7 @@ checkpoint late | cancelled run="run-uid" pod="pod-a" native=bound receipt=units
 checkpoint late | cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 | stop -> conflict
 checkpoint late | cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-stop -> conflict
 checkpoint late | cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-stop-other -> conflict
+checkpoint late | cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-stop-without-checkpoint -> error: incomplete mobility stop receipt
 checkpoint late | cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 | cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 unchanged
 checkpoint late | cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 unchanged
 checkpoint late | cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-cancel-other -> conflict
@@ -420,6 +444,7 @@ checkpoint none | none | bind-native-other -> gone
 checkpoint none | none | stop -> gone
 checkpoint none | none | complete-stop -> gone
 checkpoint none | none | complete-stop-other -> gone
+checkpoint none | none | complete-stop-without-checkpoint -> gone
 checkpoint none | none | cancel -> gone
 checkpoint none | none | complete-cancel -> gone
 checkpoint none | none | complete-cancel-other -> gone
@@ -437,6 +462,7 @@ checkpoint none | creating run="" pod="" native=bound receipt=none | bind-native
 checkpoint none | creating run="" pod="" native=bound receipt=none | stop -> conflict
 checkpoint none | creating run="" pod="" native=bound receipt=none | complete-stop -> conflict
 checkpoint none | creating run="" pod="" native=bound receipt=none | complete-stop-other -> conflict
+checkpoint none | creating run="" pod="" native=bound receipt=none | complete-stop-without-checkpoint -> error: incomplete mobility stop receipt
 checkpoint none | creating run="" pod="" native=bound receipt=none | cancel -> cancelled run="" pod="" native=bound receipt=none written
 checkpoint none | creating run="" pod="" native=bound receipt=none | complete-cancel -> conflict
 checkpoint none | creating run="" pod="" native=bound receipt=none | complete-cancel-other -> conflict
@@ -454,6 +480,7 @@ checkpoint none | bound run="run-uid" pod="" native=bound receipt=none | bind-na
 checkpoint none | bound run="run-uid" pod="" native=bound receipt=none | stop -> conflict
 checkpoint none | bound run="run-uid" pod="" native=bound receipt=none | complete-stop -> conflict
 checkpoint none | bound run="run-uid" pod="" native=bound receipt=none | complete-stop-other -> conflict
+checkpoint none | bound run="run-uid" pod="" native=bound receipt=none | complete-stop-without-checkpoint -> error: incomplete mobility stop receipt
 checkpoint none | bound run="run-uid" pod="" native=bound receipt=none | cancel -> cancelled run="run-uid" pod="" native=bound receipt=none written
 checkpoint none | bound run="run-uid" pod="" native=bound receipt=none | complete-cancel -> conflict
 checkpoint none | bound run="run-uid" pod="" native=bound receipt=none | complete-cancel-other -> conflict
@@ -471,6 +498,7 @@ checkpoint none | bound run="run-uid" pod="pod-a" native=bound receipt=none | bi
 checkpoint none | bound run="run-uid" pod="pod-a" native=bound receipt=none | stop -> conflict
 checkpoint none | bound run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop -> conflict
 checkpoint none | bound run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-other -> conflict
+checkpoint none | bound run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-without-checkpoint -> error: incomplete mobility stop receipt
 checkpoint none | bound run="run-uid" pod="pod-a" native=bound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=none written
 checkpoint none | bound run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel -> conflict
 checkpoint none | bound run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel-other -> conflict
@@ -488,6 +516,7 @@ checkpoint none | prepared run="run-uid" pod="pod-a" native=bound receipt=none |
 checkpoint none | prepared run="run-uid" pod="pod-a" native=bound receipt=none | stop -> conflict
 checkpoint none | prepared run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop -> conflict
 checkpoint none | prepared run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-other -> conflict
+checkpoint none | prepared run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-without-checkpoint -> error: incomplete mobility stop receipt
 checkpoint none | prepared run="run-uid" pod="pod-a" native=bound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=none written
 checkpoint none | prepared run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel -> conflict
 checkpoint none | prepared run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel-other -> conflict
@@ -505,6 +534,7 @@ checkpoint none | active run="run-uid" pod="pod-a" native=bound receipt=none | b
 checkpoint none | active run="run-uid" pod="pod-a" native=bound receipt=none | stop -> stopping run="run-uid" pod="pod-a" native=bound receipt=none written
 checkpoint none | active run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop -> conflict
 checkpoint none | active run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-other -> conflict
+checkpoint none | active run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-without-checkpoint -> error: incomplete mobility stop receipt
 checkpoint none | active run="run-uid" pod="pod-a" native=bound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=none written
 checkpoint none | active run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel -> conflict
 checkpoint none | active run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel-other -> conflict
@@ -522,6 +552,7 @@ checkpoint none | stopping run="run-uid" pod="pod-a" native=bound receipt=none |
 checkpoint none | stopping run="run-uid" pod="pod-a" native=bound receipt=none | stop -> stopping run="run-uid" pod="pod-a" native=bound receipt=none unchanged
 checkpoint none | stopping run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint written
 checkpoint none | stopping run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-other -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=2+checkpoint written
+checkpoint none | stopping run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-without-checkpoint -> error: incomplete mobility stop receipt
 checkpoint none | stopping run="run-uid" pod="pod-a" native=bound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=none written
 checkpoint none | stopping run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel -> conflict
 checkpoint none | stopping run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel-other -> conflict
@@ -539,6 +570,7 @@ checkpoint none | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1
 checkpoint none | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint | stop -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint unchanged
 checkpoint none | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint | complete-stop -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint unchanged
 checkpoint none | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint | complete-stop-other -> conflict
+checkpoint none | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint | complete-stop-without-checkpoint -> error: incomplete mobility stop receipt
 checkpoint none | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint | cancel -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint unchanged
 checkpoint none | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint | complete-cancel -> conflict
 checkpoint none | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint | complete-cancel-other -> conflict
@@ -556,6 +588,7 @@ checkpoint none | cancelled run="" pod="" native=bound receipt=none | bind-nativ
 checkpoint none | cancelled run="" pod="" native=bound receipt=none | stop -> conflict
 checkpoint none | cancelled run="" pod="" native=bound receipt=none | complete-stop -> conflict
 checkpoint none | cancelled run="" pod="" native=bound receipt=none | complete-stop-other -> conflict
+checkpoint none | cancelled run="" pod="" native=bound receipt=none | complete-stop-without-checkpoint -> error: incomplete mobility stop receipt
 checkpoint none | cancelled run="" pod="" native=bound receipt=none | cancel -> cancelled run="" pod="" native=bound receipt=none unchanged
 checkpoint none | cancelled run="" pod="" native=bound receipt=none | complete-cancel -> conflict
 checkpoint none | cancelled run="" pod="" native=bound receipt=none | complete-cancel-other -> conflict
@@ -573,6 +606,7 @@ checkpoint none | cancelled run="run-uid" pod="" native=bound receipt=none | bin
 checkpoint none | cancelled run="run-uid" pod="" native=bound receipt=none | stop -> conflict
 checkpoint none | cancelled run="run-uid" pod="" native=bound receipt=none | complete-stop -> conflict
 checkpoint none | cancelled run="run-uid" pod="" native=bound receipt=none | complete-stop-other -> conflict
+checkpoint none | cancelled run="run-uid" pod="" native=bound receipt=none | complete-stop-without-checkpoint -> error: incomplete mobility stop receipt
 checkpoint none | cancelled run="run-uid" pod="" native=bound receipt=none | cancel -> cancelled run="run-uid" pod="" native=bound receipt=none unchanged
 checkpoint none | cancelled run="run-uid" pod="" native=bound receipt=none | complete-cancel -> conflict
 checkpoint none | cancelled run="run-uid" pod="" native=bound receipt=none | complete-cancel-other -> conflict
@@ -590,6 +624,7 @@ checkpoint none | cancelled run="run-uid" pod="pod-a" native=bound receipt=none 
 checkpoint none | cancelled run="run-uid" pod="pod-a" native=bound receipt=none | stop -> conflict
 checkpoint none | cancelled run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop -> conflict
 checkpoint none | cancelled run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-other -> conflict
+checkpoint none | cancelled run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-without-checkpoint -> error: incomplete mobility stop receipt
 checkpoint none | cancelled run="run-uid" pod="pod-a" native=bound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=none unchanged
 checkpoint none | cancelled run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 written
 checkpoint none | cancelled run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel-other -> cancelled run="run-uid" pod="pod-a" native=bound receipt=units=2 written
@@ -607,6 +642,7 @@ checkpoint none | cancelled run="run-uid" pod="pod-a" native=bound receipt=units
 checkpoint none | cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 | stop -> conflict
 checkpoint none | cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-stop -> conflict
 checkpoint none | cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-stop-other -> conflict
+checkpoint none | cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-stop-without-checkpoint -> error: incomplete mobility stop receipt
 checkpoint none | cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 | cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 unchanged
 checkpoint none | cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 unchanged
 checkpoint none | cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-cancel-other -> conflict
@@ -624,6 +660,7 @@ initial early | none | bind-native-other -> gone
 initial early | none | stop -> gone
 initial early | none | complete-stop -> gone
 initial early | none | complete-stop-other -> gone
+initial early | none | complete-stop-without-checkpoint -> gone
 initial early | none | cancel -> gone
 initial early | none | complete-cancel -> gone
 initial early | none | complete-cancel-other -> gone
@@ -641,6 +678,7 @@ initial early | creating run="" pod="" native=unbound receipt=none | bind-native
 initial early | creating run="" pod="" native=unbound receipt=none | stop -> conflict
 initial early | creating run="" pod="" native=unbound receipt=none | complete-stop -> conflict
 initial early | creating run="" pod="" native=unbound receipt=none | complete-stop-other -> conflict
+initial early | creating run="" pod="" native=unbound receipt=none | complete-stop-without-checkpoint -> conflict
 initial early | creating run="" pod="" native=unbound receipt=none | cancel -> cancelled run="" pod="" native=unbound receipt=none written
 initial early | creating run="" pod="" native=unbound receipt=none | complete-cancel -> conflict
 initial early | creating run="" pod="" native=unbound receipt=none | complete-cancel-other -> conflict
@@ -658,6 +696,7 @@ initial early | bound run="run-uid" pod="" native=unbound receipt=none | bind-na
 initial early | bound run="run-uid" pod="" native=unbound receipt=none | stop -> conflict
 initial early | bound run="run-uid" pod="" native=unbound receipt=none | complete-stop -> conflict
 initial early | bound run="run-uid" pod="" native=unbound receipt=none | complete-stop-other -> conflict
+initial early | bound run="run-uid" pod="" native=unbound receipt=none | complete-stop-without-checkpoint -> conflict
 initial early | bound run="run-uid" pod="" native=unbound receipt=none | cancel -> cancelled run="run-uid" pod="" native=unbound receipt=none written
 initial early | bound run="run-uid" pod="" native=unbound receipt=none | complete-cancel -> conflict
 initial early | bound run="run-uid" pod="" native=unbound receipt=none | complete-cancel-other -> conflict
@@ -675,6 +714,7 @@ initial early | bound run="run-uid" pod="pod-a" native=unbound receipt=none | bi
 initial early | bound run="run-uid" pod="pod-a" native=unbound receipt=none | stop -> conflict
 initial early | bound run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop -> conflict
 initial early | bound run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop-other -> conflict
+initial early | bound run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop-without-checkpoint -> conflict
 initial early | bound run="run-uid" pod="pod-a" native=unbound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=unbound receipt=none written
 initial early | bound run="run-uid" pod="pod-a" native=unbound receipt=none | complete-cancel -> conflict
 initial early | bound run="run-uid" pod="pod-a" native=unbound receipt=none | complete-cancel-other -> conflict
@@ -692,6 +732,7 @@ initial early | prepared run="run-uid" pod="pod-a" native=unbound receipt=none |
 initial early | prepared run="run-uid" pod="pod-a" native=unbound receipt=none | stop -> conflict
 initial early | prepared run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop -> conflict
 initial early | prepared run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop-other -> conflict
+initial early | prepared run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop-without-checkpoint -> conflict
 initial early | prepared run="run-uid" pod="pod-a" native=unbound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=unbound receipt=none written
 initial early | prepared run="run-uid" pod="pod-a" native=unbound receipt=none | complete-cancel -> conflict
 initial early | prepared run="run-uid" pod="pod-a" native=unbound receipt=none | complete-cancel-other -> conflict
@@ -709,6 +750,7 @@ initial early | active run="run-uid" pod="pod-a" native=unbound receipt=none | b
 initial early | active run="run-uid" pod="pod-a" native=unbound receipt=none | stop -> stopping run="run-uid" pod="pod-a" native=unbound receipt=none written
 initial early | active run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop -> conflict
 initial early | active run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop-other -> conflict
+initial early | active run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop-without-checkpoint -> conflict
 initial early | active run="run-uid" pod="pod-a" native=unbound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=unbound receipt=none written
 initial early | active run="run-uid" pod="pod-a" native=unbound receipt=none | complete-cancel -> conflict
 initial early | active run="run-uid" pod="pod-a" native=unbound receipt=none | complete-cancel-other -> conflict
@@ -726,6 +768,7 @@ initial early | stopping run="run-uid" pod="pod-a" native=unbound receipt=none |
 initial early | stopping run="run-uid" pod="pod-a" native=unbound receipt=none | stop -> stopping run="run-uid" pod="pod-a" native=unbound receipt=none unchanged
 initial early | stopping run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop -> stopped run="run-uid" pod="pod-a" native=unbound receipt=units=1 written
 initial early | stopping run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop-other -> stopped run="run-uid" pod="pod-a" native=unbound receipt=units=2 written
+initial early | stopping run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop-without-checkpoint -> stopped run="run-uid" pod="pod-a" native=unbound receipt=units=1 written
 initial early | stopping run="run-uid" pod="pod-a" native=unbound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=unbound receipt=none written
 initial early | stopping run="run-uid" pod="pod-a" native=unbound receipt=none | complete-cancel -> conflict
 initial early | stopping run="run-uid" pod="pod-a" native=unbound receipt=none | complete-cancel-other -> conflict
@@ -743,6 +786,7 @@ initial early | stopped run="run-uid" pod="pod-a" native=unbound receipt=units=1
 initial early | stopped run="run-uid" pod="pod-a" native=unbound receipt=units=1 | stop -> stopped run="run-uid" pod="pod-a" native=unbound receipt=units=1 unchanged
 initial early | stopped run="run-uid" pod="pod-a" native=unbound receipt=units=1 | complete-stop -> stopped run="run-uid" pod="pod-a" native=unbound receipt=units=1 unchanged
 initial early | stopped run="run-uid" pod="pod-a" native=unbound receipt=units=1 | complete-stop-other -> conflict
+initial early | stopped run="run-uid" pod="pod-a" native=unbound receipt=units=1 | complete-stop-without-checkpoint -> stopped run="run-uid" pod="pod-a" native=unbound receipt=units=1 unchanged
 initial early | stopped run="run-uid" pod="pod-a" native=unbound receipt=units=1 | cancel -> stopped run="run-uid" pod="pod-a" native=unbound receipt=units=1 unchanged
 initial early | stopped run="run-uid" pod="pod-a" native=unbound receipt=units=1 | complete-cancel -> conflict
 initial early | stopped run="run-uid" pod="pod-a" native=unbound receipt=units=1 | complete-cancel-other -> conflict
@@ -760,6 +804,7 @@ initial early | cancelled run="" pod="" native=unbound receipt=none | bind-nativ
 initial early | cancelled run="" pod="" native=unbound receipt=none | stop -> conflict
 initial early | cancelled run="" pod="" native=unbound receipt=none | complete-stop -> conflict
 initial early | cancelled run="" pod="" native=unbound receipt=none | complete-stop-other -> conflict
+initial early | cancelled run="" pod="" native=unbound receipt=none | complete-stop-without-checkpoint -> conflict
 initial early | cancelled run="" pod="" native=unbound receipt=none | cancel -> cancelled run="" pod="" native=unbound receipt=none unchanged
 initial early | cancelled run="" pod="" native=unbound receipt=none | complete-cancel -> conflict
 initial early | cancelled run="" pod="" native=unbound receipt=none | complete-cancel-other -> conflict
@@ -777,6 +822,7 @@ initial early | cancelled run="run-uid" pod="" native=unbound receipt=none | bin
 initial early | cancelled run="run-uid" pod="" native=unbound receipt=none | stop -> conflict
 initial early | cancelled run="run-uid" pod="" native=unbound receipt=none | complete-stop -> conflict
 initial early | cancelled run="run-uid" pod="" native=unbound receipt=none | complete-stop-other -> conflict
+initial early | cancelled run="run-uid" pod="" native=unbound receipt=none | complete-stop-without-checkpoint -> conflict
 initial early | cancelled run="run-uid" pod="" native=unbound receipt=none | cancel -> cancelled run="run-uid" pod="" native=unbound receipt=none unchanged
 initial early | cancelled run="run-uid" pod="" native=unbound receipt=none | complete-cancel -> conflict
 initial early | cancelled run="run-uid" pod="" native=unbound receipt=none | complete-cancel-other -> conflict
@@ -794,6 +840,7 @@ initial early | cancelled run="run-uid" pod="pod-a" native=unbound receipt=none 
 initial early | cancelled run="run-uid" pod="pod-a" native=unbound receipt=none | stop -> conflict
 initial early | cancelled run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop -> conflict
 initial early | cancelled run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop-other -> conflict
+initial early | cancelled run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop-without-checkpoint -> conflict
 initial early | cancelled run="run-uid" pod="pod-a" native=unbound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=unbound receipt=none unchanged
 initial early | cancelled run="run-uid" pod="pod-a" native=unbound receipt=none | complete-cancel -> cancelled run="run-uid" pod="pod-a" native=unbound receipt=units=1 written
 initial early | cancelled run="run-uid" pod="pod-a" native=unbound receipt=none | complete-cancel-other -> cancelled run="run-uid" pod="pod-a" native=unbound receipt=units=2 written
@@ -811,6 +858,7 @@ initial early | cancelled run="run-uid" pod="pod-a" native=unbound receipt=units
 initial early | cancelled run="run-uid" pod="pod-a" native=unbound receipt=units=1 | stop -> conflict
 initial early | cancelled run="run-uid" pod="pod-a" native=unbound receipt=units=1 | complete-stop -> conflict
 initial early | cancelled run="run-uid" pod="pod-a" native=unbound receipt=units=1 | complete-stop-other -> conflict
+initial early | cancelled run="run-uid" pod="pod-a" native=unbound receipt=units=1 | complete-stop-without-checkpoint -> conflict
 initial early | cancelled run="run-uid" pod="pod-a" native=unbound receipt=units=1 | cancel -> cancelled run="run-uid" pod="pod-a" native=unbound receipt=units=1 unchanged
 initial early | cancelled run="run-uid" pod="pod-a" native=unbound receipt=units=1 | complete-cancel -> cancelled run="run-uid" pod="pod-a" native=unbound receipt=units=1 unchanged
 initial early | cancelled run="run-uid" pod="pod-a" native=unbound receipt=units=1 | complete-cancel-other -> conflict
@@ -828,6 +876,7 @@ initial late | none | bind-native-other -> gone
 initial late | none | stop -> gone
 initial late | none | complete-stop -> gone
 initial late | none | complete-stop-other -> gone
+initial late | none | complete-stop-without-checkpoint -> gone
 initial late | none | cancel -> gone
 initial late | none | complete-cancel -> gone
 initial late | none | complete-cancel-other -> gone
@@ -845,6 +894,7 @@ initial late | creating run="" pod="" native=unbound receipt=none | bind-native-
 initial late | creating run="" pod="" native=unbound receipt=none | stop -> conflict
 initial late | creating run="" pod="" native=unbound receipt=none | complete-stop -> conflict
 initial late | creating run="" pod="" native=unbound receipt=none | complete-stop-other -> conflict
+initial late | creating run="" pod="" native=unbound receipt=none | complete-stop-without-checkpoint -> conflict
 initial late | creating run="" pod="" native=unbound receipt=none | cancel -> cancelled run="" pod="" native=unbound receipt=none written
 initial late | creating run="" pod="" native=unbound receipt=none | complete-cancel -> conflict
 initial late | creating run="" pod="" native=unbound receipt=none | complete-cancel-other -> conflict
@@ -862,6 +912,7 @@ initial late | bound run="run-uid" pod="" native=unbound receipt=none | bind-nat
 initial late | bound run="run-uid" pod="" native=unbound receipt=none | stop -> conflict
 initial late | bound run="run-uid" pod="" native=unbound receipt=none | complete-stop -> conflict
 initial late | bound run="run-uid" pod="" native=unbound receipt=none | complete-stop-other -> conflict
+initial late | bound run="run-uid" pod="" native=unbound receipt=none | complete-stop-without-checkpoint -> conflict
 initial late | bound run="run-uid" pod="" native=unbound receipt=none | cancel -> cancelled run="run-uid" pod="" native=unbound receipt=none written
 initial late | bound run="run-uid" pod="" native=unbound receipt=none | complete-cancel -> conflict
 initial late | bound run="run-uid" pod="" native=unbound receipt=none | complete-cancel-other -> conflict
@@ -879,6 +930,7 @@ initial late | bound run="run-uid" pod="pod-a" native=unbound receipt=none | bin
 initial late | bound run="run-uid" pod="pod-a" native=unbound receipt=none | stop -> conflict
 initial late | bound run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop -> conflict
 initial late | bound run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop-other -> conflict
+initial late | bound run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop-without-checkpoint -> conflict
 initial late | bound run="run-uid" pod="pod-a" native=unbound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=unbound receipt=none written
 initial late | bound run="run-uid" pod="pod-a" native=unbound receipt=none | complete-cancel -> conflict
 initial late | bound run="run-uid" pod="pod-a" native=unbound receipt=none | complete-cancel-other -> conflict
@@ -896,6 +948,7 @@ initial late | prepared run="run-uid" pod="pod-a" native=unbound receipt=none | 
 initial late | prepared run="run-uid" pod="pod-a" native=unbound receipt=none | stop -> conflict
 initial late | prepared run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop -> conflict
 initial late | prepared run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop-other -> conflict
+initial late | prepared run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop-without-checkpoint -> conflict
 initial late | prepared run="run-uid" pod="pod-a" native=unbound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=unbound receipt=none written
 initial late | prepared run="run-uid" pod="pod-a" native=unbound receipt=none | complete-cancel -> conflict
 initial late | prepared run="run-uid" pod="pod-a" native=unbound receipt=none | complete-cancel-other -> conflict
@@ -913,6 +966,7 @@ initial late | active run="run-uid" pod="pod-a" native=unbound receipt=none | bi
 initial late | active run="run-uid" pod="pod-a" native=unbound receipt=none | stop -> stopping run="run-uid" pod="pod-a" native=unbound receipt=none written
 initial late | active run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop -> conflict
 initial late | active run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop-other -> conflict
+initial late | active run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop-without-checkpoint -> conflict
 initial late | active run="run-uid" pod="pod-a" native=unbound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=unbound receipt=none written
 initial late | active run="run-uid" pod="pod-a" native=unbound receipt=none | complete-cancel -> conflict
 initial late | active run="run-uid" pod="pod-a" native=unbound receipt=none | complete-cancel-other -> conflict
@@ -930,6 +984,7 @@ initial late | stopping run="run-uid" pod="pod-a" native=unbound receipt=none | 
 initial late | stopping run="run-uid" pod="pod-a" native=unbound receipt=none | stop -> stopping run="run-uid" pod="pod-a" native=unbound receipt=none unchanged
 initial late | stopping run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop -> stopped run="run-uid" pod="pod-a" native=unbound receipt=units=1 written
 initial late | stopping run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop-other -> stopped run="run-uid" pod="pod-a" native=unbound receipt=units=2 written
+initial late | stopping run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop-without-checkpoint -> stopped run="run-uid" pod="pod-a" native=unbound receipt=units=1 written
 initial late | stopping run="run-uid" pod="pod-a" native=unbound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=unbound receipt=none written
 initial late | stopping run="run-uid" pod="pod-a" native=unbound receipt=none | complete-cancel -> conflict
 initial late | stopping run="run-uid" pod="pod-a" native=unbound receipt=none | complete-cancel-other -> conflict
@@ -947,6 +1002,7 @@ initial late | stopped run="run-uid" pod="pod-a" native=unbound receipt=units=1 
 initial late | stopped run="run-uid" pod="pod-a" native=unbound receipt=units=1 | stop -> stopped run="run-uid" pod="pod-a" native=unbound receipt=units=1 unchanged
 initial late | stopped run="run-uid" pod="pod-a" native=unbound receipt=units=1 | complete-stop -> stopped run="run-uid" pod="pod-a" native=unbound receipt=units=1 unchanged
 initial late | stopped run="run-uid" pod="pod-a" native=unbound receipt=units=1 | complete-stop-other -> conflict
+initial late | stopped run="run-uid" pod="pod-a" native=unbound receipt=units=1 | complete-stop-without-checkpoint -> stopped run="run-uid" pod="pod-a" native=unbound receipt=units=1 unchanged
 initial late | stopped run="run-uid" pod="pod-a" native=unbound receipt=units=1 | cancel -> stopped run="run-uid" pod="pod-a" native=unbound receipt=units=1 unchanged
 initial late | stopped run="run-uid" pod="pod-a" native=unbound receipt=units=1 | complete-cancel -> conflict
 initial late | stopped run="run-uid" pod="pod-a" native=unbound receipt=units=1 | complete-cancel-other -> conflict
@@ -964,6 +1020,7 @@ initial late | cancelled run="" pod="" native=unbound receipt=none | bind-native
 initial late | cancelled run="" pod="" native=unbound receipt=none | stop -> conflict
 initial late | cancelled run="" pod="" native=unbound receipt=none | complete-stop -> conflict
 initial late | cancelled run="" pod="" native=unbound receipt=none | complete-stop-other -> conflict
+initial late | cancelled run="" pod="" native=unbound receipt=none | complete-stop-without-checkpoint -> conflict
 initial late | cancelled run="" pod="" native=unbound receipt=none | cancel -> cancelled run="" pod="" native=unbound receipt=none unchanged
 initial late | cancelled run="" pod="" native=unbound receipt=none | complete-cancel -> conflict
 initial late | cancelled run="" pod="" native=unbound receipt=none | complete-cancel-other -> conflict
@@ -981,6 +1038,7 @@ initial late | cancelled run="run-uid" pod="" native=unbound receipt=none | bind
 initial late | cancelled run="run-uid" pod="" native=unbound receipt=none | stop -> conflict
 initial late | cancelled run="run-uid" pod="" native=unbound receipt=none | complete-stop -> conflict
 initial late | cancelled run="run-uid" pod="" native=unbound receipt=none | complete-stop-other -> conflict
+initial late | cancelled run="run-uid" pod="" native=unbound receipt=none | complete-stop-without-checkpoint -> conflict
 initial late | cancelled run="run-uid" pod="" native=unbound receipt=none | cancel -> cancelled run="run-uid" pod="" native=unbound receipt=none unchanged
 initial late | cancelled run="run-uid" pod="" native=unbound receipt=none | complete-cancel -> conflict
 initial late | cancelled run="run-uid" pod="" native=unbound receipt=none | complete-cancel-other -> conflict
@@ -998,6 +1056,7 @@ initial late | cancelled run="run-uid" pod="pod-a" native=unbound receipt=none |
 initial late | cancelled run="run-uid" pod="pod-a" native=unbound receipt=none | stop -> conflict
 initial late | cancelled run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop -> conflict
 initial late | cancelled run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop-other -> conflict
+initial late | cancelled run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop-without-checkpoint -> conflict
 initial late | cancelled run="run-uid" pod="pod-a" native=unbound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=unbound receipt=none unchanged
 initial late | cancelled run="run-uid" pod="pod-a" native=unbound receipt=none | complete-cancel -> cancelled run="run-uid" pod="pod-a" native=unbound receipt=units=1 written
 initial late | cancelled run="run-uid" pod="pod-a" native=unbound receipt=none | complete-cancel-other -> cancelled run="run-uid" pod="pod-a" native=unbound receipt=units=2 written
@@ -1015,6 +1074,7 @@ initial late | cancelled run="run-uid" pod="pod-a" native=unbound receipt=units=
 initial late | cancelled run="run-uid" pod="pod-a" native=unbound receipt=units=1 | stop -> conflict
 initial late | cancelled run="run-uid" pod="pod-a" native=unbound receipt=units=1 | complete-stop -> conflict
 initial late | cancelled run="run-uid" pod="pod-a" native=unbound receipt=units=1 | complete-stop-other -> conflict
+initial late | cancelled run="run-uid" pod="pod-a" native=unbound receipt=units=1 | complete-stop-without-checkpoint -> conflict
 initial late | cancelled run="run-uid" pod="pod-a" native=unbound receipt=units=1 | cancel -> cancelled run="run-uid" pod="pod-a" native=unbound receipt=units=1 unchanged
 initial late | cancelled run="run-uid" pod="pod-a" native=unbound receipt=units=1 | complete-cancel -> cancelled run="run-uid" pod="pod-a" native=unbound receipt=units=1 unchanged
 initial late | cancelled run="run-uid" pod="pod-a" native=unbound receipt=units=1 | complete-cancel-other -> conflict
@@ -1032,6 +1092,7 @@ initial none | none | bind-native-other -> gone
 initial none | none | stop -> gone
 initial none | none | complete-stop -> gone
 initial none | none | complete-stop-other -> gone
+initial none | none | complete-stop-without-checkpoint -> gone
 initial none | none | cancel -> gone
 initial none | none | complete-cancel -> gone
 initial none | none | complete-cancel-other -> gone
@@ -1049,6 +1110,7 @@ initial none | creating run="" pod="" native=unbound receipt=none | bind-native-
 initial none | creating run="" pod="" native=unbound receipt=none | stop -> conflict
 initial none | creating run="" pod="" native=unbound receipt=none | complete-stop -> conflict
 initial none | creating run="" pod="" native=unbound receipt=none | complete-stop-other -> conflict
+initial none | creating run="" pod="" native=unbound receipt=none | complete-stop-without-checkpoint -> conflict
 initial none | creating run="" pod="" native=unbound receipt=none | cancel -> cancelled run="" pod="" native=unbound receipt=none written
 initial none | creating run="" pod="" native=unbound receipt=none | complete-cancel -> conflict
 initial none | creating run="" pod="" native=unbound receipt=none | complete-cancel-other -> conflict
@@ -1066,6 +1128,7 @@ initial none | bound run="run-uid" pod="" native=unbound receipt=none | bind-nat
 initial none | bound run="run-uid" pod="" native=unbound receipt=none | stop -> conflict
 initial none | bound run="run-uid" pod="" native=unbound receipt=none | complete-stop -> conflict
 initial none | bound run="run-uid" pod="" native=unbound receipt=none | complete-stop-other -> conflict
+initial none | bound run="run-uid" pod="" native=unbound receipt=none | complete-stop-without-checkpoint -> conflict
 initial none | bound run="run-uid" pod="" native=unbound receipt=none | cancel -> cancelled run="run-uid" pod="" native=unbound receipt=none written
 initial none | bound run="run-uid" pod="" native=unbound receipt=none | complete-cancel -> conflict
 initial none | bound run="run-uid" pod="" native=unbound receipt=none | complete-cancel-other -> conflict
@@ -1083,6 +1146,7 @@ initial none | bound run="run-uid" pod="pod-a" native=unbound receipt=none | bin
 initial none | bound run="run-uid" pod="pod-a" native=unbound receipt=none | stop -> conflict
 initial none | bound run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop -> conflict
 initial none | bound run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop-other -> conflict
+initial none | bound run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop-without-checkpoint -> conflict
 initial none | bound run="run-uid" pod="pod-a" native=unbound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=unbound receipt=none written
 initial none | bound run="run-uid" pod="pod-a" native=unbound receipt=none | complete-cancel -> conflict
 initial none | bound run="run-uid" pod="pod-a" native=unbound receipt=none | complete-cancel-other -> conflict
@@ -1100,6 +1164,7 @@ initial none | prepared run="run-uid" pod="pod-a" native=unbound receipt=none | 
 initial none | prepared run="run-uid" pod="pod-a" native=unbound receipt=none | stop -> conflict
 initial none | prepared run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop -> conflict
 initial none | prepared run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop-other -> conflict
+initial none | prepared run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop-without-checkpoint -> conflict
 initial none | prepared run="run-uid" pod="pod-a" native=unbound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=unbound receipt=none written
 initial none | prepared run="run-uid" pod="pod-a" native=unbound receipt=none | complete-cancel -> conflict
 initial none | prepared run="run-uid" pod="pod-a" native=unbound receipt=none | complete-cancel-other -> conflict
@@ -1117,6 +1182,7 @@ initial none | active run="run-uid" pod="pod-a" native=unbound receipt=none | bi
 initial none | active run="run-uid" pod="pod-a" native=unbound receipt=none | stop -> stopping run="run-uid" pod="pod-a" native=unbound receipt=none written
 initial none | active run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop -> conflict
 initial none | active run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop-other -> conflict
+initial none | active run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop-without-checkpoint -> conflict
 initial none | active run="run-uid" pod="pod-a" native=unbound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=unbound receipt=none written
 initial none | active run="run-uid" pod="pod-a" native=unbound receipt=none | complete-cancel -> conflict
 initial none | active run="run-uid" pod="pod-a" native=unbound receipt=none | complete-cancel-other -> conflict
@@ -1134,6 +1200,7 @@ initial none | stopping run="run-uid" pod="pod-a" native=unbound receipt=none | 
 initial none | stopping run="run-uid" pod="pod-a" native=unbound receipt=none | stop -> stopping run="run-uid" pod="pod-a" native=unbound receipt=none unchanged
 initial none | stopping run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop -> stopped run="run-uid" pod="pod-a" native=unbound receipt=units=1 written
 initial none | stopping run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop-other -> stopped run="run-uid" pod="pod-a" native=unbound receipt=units=2 written
+initial none | stopping run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop-without-checkpoint -> stopped run="run-uid" pod="pod-a" native=unbound receipt=units=1 written
 initial none | stopping run="run-uid" pod="pod-a" native=unbound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=unbound receipt=none written
 initial none | stopping run="run-uid" pod="pod-a" native=unbound receipt=none | complete-cancel -> conflict
 initial none | stopping run="run-uid" pod="pod-a" native=unbound receipt=none | complete-cancel-other -> conflict
@@ -1151,6 +1218,7 @@ initial none | stopped run="run-uid" pod="pod-a" native=unbound receipt=units=1 
 initial none | stopped run="run-uid" pod="pod-a" native=unbound receipt=units=1 | stop -> stopped run="run-uid" pod="pod-a" native=unbound receipt=units=1 unchanged
 initial none | stopped run="run-uid" pod="pod-a" native=unbound receipt=units=1 | complete-stop -> stopped run="run-uid" pod="pod-a" native=unbound receipt=units=1 unchanged
 initial none | stopped run="run-uid" pod="pod-a" native=unbound receipt=units=1 | complete-stop-other -> conflict
+initial none | stopped run="run-uid" pod="pod-a" native=unbound receipt=units=1 | complete-stop-without-checkpoint -> stopped run="run-uid" pod="pod-a" native=unbound receipt=units=1 unchanged
 initial none | stopped run="run-uid" pod="pod-a" native=unbound receipt=units=1 | cancel -> stopped run="run-uid" pod="pod-a" native=unbound receipt=units=1 unchanged
 initial none | stopped run="run-uid" pod="pod-a" native=unbound receipt=units=1 | complete-cancel -> conflict
 initial none | stopped run="run-uid" pod="pod-a" native=unbound receipt=units=1 | complete-cancel-other -> conflict
@@ -1168,6 +1236,7 @@ initial none | cancelled run="" pod="" native=unbound receipt=none | bind-native
 initial none | cancelled run="" pod="" native=unbound receipt=none | stop -> conflict
 initial none | cancelled run="" pod="" native=unbound receipt=none | complete-stop -> conflict
 initial none | cancelled run="" pod="" native=unbound receipt=none | complete-stop-other -> conflict
+initial none | cancelled run="" pod="" native=unbound receipt=none | complete-stop-without-checkpoint -> conflict
 initial none | cancelled run="" pod="" native=unbound receipt=none | cancel -> cancelled run="" pod="" native=unbound receipt=none unchanged
 initial none | cancelled run="" pod="" native=unbound receipt=none | complete-cancel -> conflict
 initial none | cancelled run="" pod="" native=unbound receipt=none | complete-cancel-other -> conflict
@@ -1185,6 +1254,7 @@ initial none | cancelled run="run-uid" pod="" native=unbound receipt=none | bind
 initial none | cancelled run="run-uid" pod="" native=unbound receipt=none | stop -> conflict
 initial none | cancelled run="run-uid" pod="" native=unbound receipt=none | complete-stop -> conflict
 initial none | cancelled run="run-uid" pod="" native=unbound receipt=none | complete-stop-other -> conflict
+initial none | cancelled run="run-uid" pod="" native=unbound receipt=none | complete-stop-without-checkpoint -> conflict
 initial none | cancelled run="run-uid" pod="" native=unbound receipt=none | cancel -> cancelled run="run-uid" pod="" native=unbound receipt=none unchanged
 initial none | cancelled run="run-uid" pod="" native=unbound receipt=none | complete-cancel -> conflict
 initial none | cancelled run="run-uid" pod="" native=unbound receipt=none | complete-cancel-other -> conflict
@@ -1202,6 +1272,7 @@ initial none | cancelled run="run-uid" pod="pod-a" native=unbound receipt=none |
 initial none | cancelled run="run-uid" pod="pod-a" native=unbound receipt=none | stop -> conflict
 initial none | cancelled run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop -> conflict
 initial none | cancelled run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop-other -> conflict
+initial none | cancelled run="run-uid" pod="pod-a" native=unbound receipt=none | complete-stop-without-checkpoint -> conflict
 initial none | cancelled run="run-uid" pod="pod-a" native=unbound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=unbound receipt=none unchanged
 initial none | cancelled run="run-uid" pod="pod-a" native=unbound receipt=none | complete-cancel -> cancelled run="run-uid" pod="pod-a" native=unbound receipt=units=1 written
 initial none | cancelled run="run-uid" pod="pod-a" native=unbound receipt=none | complete-cancel-other -> cancelled run="run-uid" pod="pod-a" native=unbound receipt=units=2 written
@@ -1219,6 +1290,7 @@ initial none | cancelled run="run-uid" pod="pod-a" native=unbound receipt=units=
 initial none | cancelled run="run-uid" pod="pod-a" native=unbound receipt=units=1 | stop -> conflict
 initial none | cancelled run="run-uid" pod="pod-a" native=unbound receipt=units=1 | complete-stop -> conflict
 initial none | cancelled run="run-uid" pod="pod-a" native=unbound receipt=units=1 | complete-stop-other -> conflict
+initial none | cancelled run="run-uid" pod="pod-a" native=unbound receipt=units=1 | complete-stop-without-checkpoint -> conflict
 initial none | cancelled run="run-uid" pod="pod-a" native=unbound receipt=units=1 | cancel -> cancelled run="run-uid" pod="pod-a" native=unbound receipt=units=1 unchanged
 initial none | cancelled run="run-uid" pod="pod-a" native=unbound receipt=units=1 | complete-cancel -> cancelled run="run-uid" pod="pod-a" native=unbound receipt=units=1 unchanged
 initial none | cancelled run="run-uid" pod="pod-a" native=unbound receipt=units=1 | complete-cancel-other -> conflict
@@ -1236,6 +1308,7 @@ initial-bound early | none | bind-native-other -> gone
 initial-bound early | none | stop -> gone
 initial-bound early | none | complete-stop -> gone
 initial-bound early | none | complete-stop-other -> gone
+initial-bound early | none | complete-stop-without-checkpoint -> gone
 initial-bound early | none | cancel -> gone
 initial-bound early | none | complete-cancel -> gone
 initial-bound early | none | complete-cancel-other -> gone
@@ -1253,6 +1326,7 @@ initial-bound early | creating run="" pod="" native=bound receipt=none | bind-na
 initial-bound early | creating run="" pod="" native=bound receipt=none | stop -> conflict
 initial-bound early | creating run="" pod="" native=bound receipt=none | complete-stop -> conflict
 initial-bound early | creating run="" pod="" native=bound receipt=none | complete-stop-other -> conflict
+initial-bound early | creating run="" pod="" native=bound receipt=none | complete-stop-without-checkpoint -> conflict
 initial-bound early | creating run="" pod="" native=bound receipt=none | cancel -> cancelled run="" pod="" native=bound receipt=none written
 initial-bound early | creating run="" pod="" native=bound receipt=none | complete-cancel -> conflict
 initial-bound early | creating run="" pod="" native=bound receipt=none | complete-cancel-other -> conflict
@@ -1270,6 +1344,7 @@ initial-bound early | bound run="run-uid" pod="" native=bound receipt=none | bin
 initial-bound early | bound run="run-uid" pod="" native=bound receipt=none | stop -> conflict
 initial-bound early | bound run="run-uid" pod="" native=bound receipt=none | complete-stop -> conflict
 initial-bound early | bound run="run-uid" pod="" native=bound receipt=none | complete-stop-other -> conflict
+initial-bound early | bound run="run-uid" pod="" native=bound receipt=none | complete-stop-without-checkpoint -> conflict
 initial-bound early | bound run="run-uid" pod="" native=bound receipt=none | cancel -> cancelled run="run-uid" pod="" native=bound receipt=none written
 initial-bound early | bound run="run-uid" pod="" native=bound receipt=none | complete-cancel -> conflict
 initial-bound early | bound run="run-uid" pod="" native=bound receipt=none | complete-cancel-other -> conflict
@@ -1287,6 +1362,7 @@ initial-bound early | bound run="run-uid" pod="pod-a" native=bound receipt=none 
 initial-bound early | bound run="run-uid" pod="pod-a" native=bound receipt=none | stop -> conflict
 initial-bound early | bound run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop -> conflict
 initial-bound early | bound run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-other -> conflict
+initial-bound early | bound run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-without-checkpoint -> conflict
 initial-bound early | bound run="run-uid" pod="pod-a" native=bound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=none written
 initial-bound early | bound run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel -> conflict
 initial-bound early | bound run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel-other -> conflict
@@ -1304,6 +1380,7 @@ initial-bound early | prepared run="run-uid" pod="pod-a" native=bound receipt=no
 initial-bound early | prepared run="run-uid" pod="pod-a" native=bound receipt=none | stop -> conflict
 initial-bound early | prepared run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop -> conflict
 initial-bound early | prepared run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-other -> conflict
+initial-bound early | prepared run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-without-checkpoint -> conflict
 initial-bound early | prepared run="run-uid" pod="pod-a" native=bound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=none written
 initial-bound early | prepared run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel -> conflict
 initial-bound early | prepared run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel-other -> conflict
@@ -1321,6 +1398,7 @@ initial-bound early | active run="run-uid" pod="pod-a" native=bound receipt=none
 initial-bound early | active run="run-uid" pod="pod-a" native=bound receipt=none | stop -> stopping run="run-uid" pod="pod-a" native=bound receipt=none written
 initial-bound early | active run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop -> conflict
 initial-bound early | active run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-other -> conflict
+initial-bound early | active run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-without-checkpoint -> conflict
 initial-bound early | active run="run-uid" pod="pod-a" native=bound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=none written
 initial-bound early | active run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel -> conflict
 initial-bound early | active run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel-other -> conflict
@@ -1338,6 +1416,7 @@ initial-bound early | stopping run="run-uid" pod="pod-a" native=bound receipt=no
 initial-bound early | stopping run="run-uid" pod="pod-a" native=bound receipt=none | stop -> stopping run="run-uid" pod="pod-a" native=bound receipt=none unchanged
 initial-bound early | stopping run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint written
 initial-bound early | stopping run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-other -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=2+checkpoint written
+initial-bound early | stopping run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-without-checkpoint -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 written
 initial-bound early | stopping run="run-uid" pod="pod-a" native=bound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=none written
 initial-bound early | stopping run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel -> conflict
 initial-bound early | stopping run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel-other -> conflict
@@ -1355,9 +1434,28 @@ initial-bound early | stopped run="run-uid" pod="pod-a" native=bound receipt=uni
 initial-bound early | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint | stop -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint unchanged
 initial-bound early | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint | complete-stop -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint unchanged
 initial-bound early | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint | complete-stop-other -> conflict
+initial-bound early | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint | complete-stop-without-checkpoint -> conflict
 initial-bound early | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint | cancel -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint unchanged
 initial-bound early | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint | complete-cancel -> conflict
 initial-bound early | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint | complete-cancel-other -> conflict
+initial-bound early | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | create -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 unchanged
+initial-bound early | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | create-changed -> conflict
+initial-bound early | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | bind-run -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 unchanged
+initial-bound early | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | bind-run-other -> conflict
+initial-bound early | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | bind-pod -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 unchanged
+initial-bound early | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | bind-pod-other -> conflict
+initial-bound early | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | prepared -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 unchanged
+initial-bound early | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | prepared-other -> conflict
+initial-bound early | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | activate -> conflict
+initial-bound early | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | bind-native -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 unchanged
+initial-bound early | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | bind-native-other -> conflict
+initial-bound early | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | stop -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 unchanged
+initial-bound early | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-stop -> conflict
+initial-bound early | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-stop-other -> conflict
+initial-bound early | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-stop-without-checkpoint -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 unchanged
+initial-bound early | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | cancel -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 unchanged
+initial-bound early | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-cancel -> conflict
+initial-bound early | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-cancel-other -> conflict
 initial-bound early | cancelled run="" pod="" native=bound receipt=none | create -> cancelled run="" pod="" native=bound receipt=none unchanged
 initial-bound early | cancelled run="" pod="" native=bound receipt=none | create-changed -> conflict
 initial-bound early | cancelled run="" pod="" native=bound receipt=none | bind-run -> conflict
@@ -1372,6 +1470,7 @@ initial-bound early | cancelled run="" pod="" native=bound receipt=none | bind-n
 initial-bound early | cancelled run="" pod="" native=bound receipt=none | stop -> conflict
 initial-bound early | cancelled run="" pod="" native=bound receipt=none | complete-stop -> conflict
 initial-bound early | cancelled run="" pod="" native=bound receipt=none | complete-stop-other -> conflict
+initial-bound early | cancelled run="" pod="" native=bound receipt=none | complete-stop-without-checkpoint -> conflict
 initial-bound early | cancelled run="" pod="" native=bound receipt=none | cancel -> cancelled run="" pod="" native=bound receipt=none unchanged
 initial-bound early | cancelled run="" pod="" native=bound receipt=none | complete-cancel -> conflict
 initial-bound early | cancelled run="" pod="" native=bound receipt=none | complete-cancel-other -> conflict
@@ -1389,6 +1488,7 @@ initial-bound early | cancelled run="run-uid" pod="" native=bound receipt=none |
 initial-bound early | cancelled run="run-uid" pod="" native=bound receipt=none | stop -> conflict
 initial-bound early | cancelled run="run-uid" pod="" native=bound receipt=none | complete-stop -> conflict
 initial-bound early | cancelled run="run-uid" pod="" native=bound receipt=none | complete-stop-other -> conflict
+initial-bound early | cancelled run="run-uid" pod="" native=bound receipt=none | complete-stop-without-checkpoint -> conflict
 initial-bound early | cancelled run="run-uid" pod="" native=bound receipt=none | cancel -> cancelled run="run-uid" pod="" native=bound receipt=none unchanged
 initial-bound early | cancelled run="run-uid" pod="" native=bound receipt=none | complete-cancel -> conflict
 initial-bound early | cancelled run="run-uid" pod="" native=bound receipt=none | complete-cancel-other -> conflict
@@ -1406,6 +1506,7 @@ initial-bound early | cancelled run="run-uid" pod="pod-a" native=bound receipt=n
 initial-bound early | cancelled run="run-uid" pod="pod-a" native=bound receipt=none | stop -> conflict
 initial-bound early | cancelled run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop -> conflict
 initial-bound early | cancelled run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-other -> conflict
+initial-bound early | cancelled run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-without-checkpoint -> conflict
 initial-bound early | cancelled run="run-uid" pod="pod-a" native=bound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=none unchanged
 initial-bound early | cancelled run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 written
 initial-bound early | cancelled run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel-other -> cancelled run="run-uid" pod="pod-a" native=bound receipt=units=2 written
@@ -1423,6 +1524,7 @@ initial-bound early | cancelled run="run-uid" pod="pod-a" native=bound receipt=u
 initial-bound early | cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 | stop -> conflict
 initial-bound early | cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-stop -> conflict
 initial-bound early | cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-stop-other -> conflict
+initial-bound early | cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-stop-without-checkpoint -> conflict
 initial-bound early | cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 | cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 unchanged
 initial-bound early | cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 unchanged
 initial-bound early | cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-cancel-other -> conflict
@@ -1440,6 +1542,7 @@ initial-bound late | none | bind-native-other -> gone
 initial-bound late | none | stop -> gone
 initial-bound late | none | complete-stop -> gone
 initial-bound late | none | complete-stop-other -> gone
+initial-bound late | none | complete-stop-without-checkpoint -> gone
 initial-bound late | none | cancel -> gone
 initial-bound late | none | complete-cancel -> gone
 initial-bound late | none | complete-cancel-other -> gone
@@ -1457,6 +1560,7 @@ initial-bound late | creating run="" pod="" native=bound receipt=none | bind-nat
 initial-bound late | creating run="" pod="" native=bound receipt=none | stop -> conflict
 initial-bound late | creating run="" pod="" native=bound receipt=none | complete-stop -> conflict
 initial-bound late | creating run="" pod="" native=bound receipt=none | complete-stop-other -> conflict
+initial-bound late | creating run="" pod="" native=bound receipt=none | complete-stop-without-checkpoint -> conflict
 initial-bound late | creating run="" pod="" native=bound receipt=none | cancel -> cancelled run="" pod="" native=bound receipt=none written
 initial-bound late | creating run="" pod="" native=bound receipt=none | complete-cancel -> conflict
 initial-bound late | creating run="" pod="" native=bound receipt=none | complete-cancel-other -> conflict
@@ -1474,6 +1578,7 @@ initial-bound late | bound run="run-uid" pod="" native=bound receipt=none | bind
 initial-bound late | bound run="run-uid" pod="" native=bound receipt=none | stop -> conflict
 initial-bound late | bound run="run-uid" pod="" native=bound receipt=none | complete-stop -> conflict
 initial-bound late | bound run="run-uid" pod="" native=bound receipt=none | complete-stop-other -> conflict
+initial-bound late | bound run="run-uid" pod="" native=bound receipt=none | complete-stop-without-checkpoint -> conflict
 initial-bound late | bound run="run-uid" pod="" native=bound receipt=none | cancel -> cancelled run="run-uid" pod="" native=bound receipt=none written
 initial-bound late | bound run="run-uid" pod="" native=bound receipt=none | complete-cancel -> conflict
 initial-bound late | bound run="run-uid" pod="" native=bound receipt=none | complete-cancel-other -> conflict
@@ -1491,6 +1596,7 @@ initial-bound late | bound run="run-uid" pod="pod-a" native=bound receipt=none |
 initial-bound late | bound run="run-uid" pod="pod-a" native=bound receipt=none | stop -> conflict
 initial-bound late | bound run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop -> conflict
 initial-bound late | bound run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-other -> conflict
+initial-bound late | bound run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-without-checkpoint -> conflict
 initial-bound late | bound run="run-uid" pod="pod-a" native=bound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=none written
 initial-bound late | bound run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel -> conflict
 initial-bound late | bound run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel-other -> conflict
@@ -1508,6 +1614,7 @@ initial-bound late | prepared run="run-uid" pod="pod-a" native=bound receipt=non
 initial-bound late | prepared run="run-uid" pod="pod-a" native=bound receipt=none | stop -> conflict
 initial-bound late | prepared run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop -> conflict
 initial-bound late | prepared run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-other -> conflict
+initial-bound late | prepared run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-without-checkpoint -> conflict
 initial-bound late | prepared run="run-uid" pod="pod-a" native=bound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=none written
 initial-bound late | prepared run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel -> conflict
 initial-bound late | prepared run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel-other -> conflict
@@ -1525,6 +1632,7 @@ initial-bound late | active run="run-uid" pod="pod-a" native=bound receipt=none 
 initial-bound late | active run="run-uid" pod="pod-a" native=bound receipt=none | stop -> stopping run="run-uid" pod="pod-a" native=bound receipt=none written
 initial-bound late | active run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop -> conflict
 initial-bound late | active run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-other -> conflict
+initial-bound late | active run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-without-checkpoint -> conflict
 initial-bound late | active run="run-uid" pod="pod-a" native=bound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=none written
 initial-bound late | active run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel -> conflict
 initial-bound late | active run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel-other -> conflict
@@ -1542,6 +1650,7 @@ initial-bound late | stopping run="run-uid" pod="pod-a" native=bound receipt=non
 initial-bound late | stopping run="run-uid" pod="pod-a" native=bound receipt=none | stop -> stopping run="run-uid" pod="pod-a" native=bound receipt=none unchanged
 initial-bound late | stopping run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint written
 initial-bound late | stopping run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-other -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=2+checkpoint written
+initial-bound late | stopping run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-without-checkpoint -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 written
 initial-bound late | stopping run="run-uid" pod="pod-a" native=bound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=none written
 initial-bound late | stopping run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel -> conflict
 initial-bound late | stopping run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel-other -> conflict
@@ -1559,9 +1668,28 @@ initial-bound late | stopped run="run-uid" pod="pod-a" native=bound receipt=unit
 initial-bound late | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint | stop -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint unchanged
 initial-bound late | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint | complete-stop -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint unchanged
 initial-bound late | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint | complete-stop-other -> conflict
+initial-bound late | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint | complete-stop-without-checkpoint -> conflict
 initial-bound late | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint | cancel -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint unchanged
 initial-bound late | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint | complete-cancel -> conflict
 initial-bound late | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint | complete-cancel-other -> conflict
+initial-bound late | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | create -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 unchanged
+initial-bound late | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | create-changed -> conflict
+initial-bound late | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | bind-run -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 unchanged
+initial-bound late | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | bind-run-other -> conflict
+initial-bound late | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | bind-pod -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 unchanged
+initial-bound late | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | bind-pod-other -> conflict
+initial-bound late | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | prepared -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 unchanged
+initial-bound late | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | prepared-other -> conflict
+initial-bound late | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | activate -> expired
+initial-bound late | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | bind-native -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 unchanged
+initial-bound late | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | bind-native-other -> conflict
+initial-bound late | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | stop -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 unchanged
+initial-bound late | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-stop -> conflict
+initial-bound late | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-stop-other -> conflict
+initial-bound late | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-stop-without-checkpoint -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 unchanged
+initial-bound late | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | cancel -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 unchanged
+initial-bound late | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-cancel -> conflict
+initial-bound late | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-cancel-other -> conflict
 initial-bound late | cancelled run="" pod="" native=bound receipt=none | create -> cancelled run="" pod="" native=bound receipt=none unchanged
 initial-bound late | cancelled run="" pod="" native=bound receipt=none | create-changed -> conflict
 initial-bound late | cancelled run="" pod="" native=bound receipt=none | bind-run -> conflict
@@ -1576,6 +1704,7 @@ initial-bound late | cancelled run="" pod="" native=bound receipt=none | bind-na
 initial-bound late | cancelled run="" pod="" native=bound receipt=none | stop -> conflict
 initial-bound late | cancelled run="" pod="" native=bound receipt=none | complete-stop -> conflict
 initial-bound late | cancelled run="" pod="" native=bound receipt=none | complete-stop-other -> conflict
+initial-bound late | cancelled run="" pod="" native=bound receipt=none | complete-stop-without-checkpoint -> conflict
 initial-bound late | cancelled run="" pod="" native=bound receipt=none | cancel -> cancelled run="" pod="" native=bound receipt=none unchanged
 initial-bound late | cancelled run="" pod="" native=bound receipt=none | complete-cancel -> conflict
 initial-bound late | cancelled run="" pod="" native=bound receipt=none | complete-cancel-other -> conflict
@@ -1593,6 +1722,7 @@ initial-bound late | cancelled run="run-uid" pod="" native=bound receipt=none | 
 initial-bound late | cancelled run="run-uid" pod="" native=bound receipt=none | stop -> conflict
 initial-bound late | cancelled run="run-uid" pod="" native=bound receipt=none | complete-stop -> conflict
 initial-bound late | cancelled run="run-uid" pod="" native=bound receipt=none | complete-stop-other -> conflict
+initial-bound late | cancelled run="run-uid" pod="" native=bound receipt=none | complete-stop-without-checkpoint -> conflict
 initial-bound late | cancelled run="run-uid" pod="" native=bound receipt=none | cancel -> cancelled run="run-uid" pod="" native=bound receipt=none unchanged
 initial-bound late | cancelled run="run-uid" pod="" native=bound receipt=none | complete-cancel -> conflict
 initial-bound late | cancelled run="run-uid" pod="" native=bound receipt=none | complete-cancel-other -> conflict
@@ -1610,6 +1740,7 @@ initial-bound late | cancelled run="run-uid" pod="pod-a" native=bound receipt=no
 initial-bound late | cancelled run="run-uid" pod="pod-a" native=bound receipt=none | stop -> conflict
 initial-bound late | cancelled run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop -> conflict
 initial-bound late | cancelled run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-other -> conflict
+initial-bound late | cancelled run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-without-checkpoint -> conflict
 initial-bound late | cancelled run="run-uid" pod="pod-a" native=bound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=none unchanged
 initial-bound late | cancelled run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 written
 initial-bound late | cancelled run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel-other -> cancelled run="run-uid" pod="pod-a" native=bound receipt=units=2 written
@@ -1627,6 +1758,7 @@ initial-bound late | cancelled run="run-uid" pod="pod-a" native=bound receipt=un
 initial-bound late | cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 | stop -> conflict
 initial-bound late | cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-stop -> conflict
 initial-bound late | cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-stop-other -> conflict
+initial-bound late | cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-stop-without-checkpoint -> conflict
 initial-bound late | cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 | cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 unchanged
 initial-bound late | cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 unchanged
 initial-bound late | cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-cancel-other -> conflict
@@ -1644,6 +1776,7 @@ initial-bound none | none | bind-native-other -> gone
 initial-bound none | none | stop -> gone
 initial-bound none | none | complete-stop -> gone
 initial-bound none | none | complete-stop-other -> gone
+initial-bound none | none | complete-stop-without-checkpoint -> gone
 initial-bound none | none | cancel -> gone
 initial-bound none | none | complete-cancel -> gone
 initial-bound none | none | complete-cancel-other -> gone
@@ -1661,6 +1794,7 @@ initial-bound none | creating run="" pod="" native=bound receipt=none | bind-nat
 initial-bound none | creating run="" pod="" native=bound receipt=none | stop -> conflict
 initial-bound none | creating run="" pod="" native=bound receipt=none | complete-stop -> conflict
 initial-bound none | creating run="" pod="" native=bound receipt=none | complete-stop-other -> conflict
+initial-bound none | creating run="" pod="" native=bound receipt=none | complete-stop-without-checkpoint -> conflict
 initial-bound none | creating run="" pod="" native=bound receipt=none | cancel -> cancelled run="" pod="" native=bound receipt=none written
 initial-bound none | creating run="" pod="" native=bound receipt=none | complete-cancel -> conflict
 initial-bound none | creating run="" pod="" native=bound receipt=none | complete-cancel-other -> conflict
@@ -1678,6 +1812,7 @@ initial-bound none | bound run="run-uid" pod="" native=bound receipt=none | bind
 initial-bound none | bound run="run-uid" pod="" native=bound receipt=none | stop -> conflict
 initial-bound none | bound run="run-uid" pod="" native=bound receipt=none | complete-stop -> conflict
 initial-bound none | bound run="run-uid" pod="" native=bound receipt=none | complete-stop-other -> conflict
+initial-bound none | bound run="run-uid" pod="" native=bound receipt=none | complete-stop-without-checkpoint -> conflict
 initial-bound none | bound run="run-uid" pod="" native=bound receipt=none | cancel -> cancelled run="run-uid" pod="" native=bound receipt=none written
 initial-bound none | bound run="run-uid" pod="" native=bound receipt=none | complete-cancel -> conflict
 initial-bound none | bound run="run-uid" pod="" native=bound receipt=none | complete-cancel-other -> conflict
@@ -1695,6 +1830,7 @@ initial-bound none | bound run="run-uid" pod="pod-a" native=bound receipt=none |
 initial-bound none | bound run="run-uid" pod="pod-a" native=bound receipt=none | stop -> conflict
 initial-bound none | bound run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop -> conflict
 initial-bound none | bound run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-other -> conflict
+initial-bound none | bound run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-without-checkpoint -> conflict
 initial-bound none | bound run="run-uid" pod="pod-a" native=bound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=none written
 initial-bound none | bound run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel -> conflict
 initial-bound none | bound run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel-other -> conflict
@@ -1712,6 +1848,7 @@ initial-bound none | prepared run="run-uid" pod="pod-a" native=bound receipt=non
 initial-bound none | prepared run="run-uid" pod="pod-a" native=bound receipt=none | stop -> conflict
 initial-bound none | prepared run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop -> conflict
 initial-bound none | prepared run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-other -> conflict
+initial-bound none | prepared run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-without-checkpoint -> conflict
 initial-bound none | prepared run="run-uid" pod="pod-a" native=bound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=none written
 initial-bound none | prepared run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel -> conflict
 initial-bound none | prepared run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel-other -> conflict
@@ -1729,6 +1866,7 @@ initial-bound none | active run="run-uid" pod="pod-a" native=bound receipt=none 
 initial-bound none | active run="run-uid" pod="pod-a" native=bound receipt=none | stop -> stopping run="run-uid" pod="pod-a" native=bound receipt=none written
 initial-bound none | active run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop -> conflict
 initial-bound none | active run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-other -> conflict
+initial-bound none | active run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-without-checkpoint -> conflict
 initial-bound none | active run="run-uid" pod="pod-a" native=bound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=none written
 initial-bound none | active run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel -> conflict
 initial-bound none | active run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel-other -> conflict
@@ -1746,6 +1884,7 @@ initial-bound none | stopping run="run-uid" pod="pod-a" native=bound receipt=non
 initial-bound none | stopping run="run-uid" pod="pod-a" native=bound receipt=none | stop -> stopping run="run-uid" pod="pod-a" native=bound receipt=none unchanged
 initial-bound none | stopping run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint written
 initial-bound none | stopping run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-other -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=2+checkpoint written
+initial-bound none | stopping run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-without-checkpoint -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 written
 initial-bound none | stopping run="run-uid" pod="pod-a" native=bound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=none written
 initial-bound none | stopping run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel -> conflict
 initial-bound none | stopping run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel-other -> conflict
@@ -1763,9 +1902,28 @@ initial-bound none | stopped run="run-uid" pod="pod-a" native=bound receipt=unit
 initial-bound none | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint | stop -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint unchanged
 initial-bound none | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint | complete-stop -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint unchanged
 initial-bound none | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint | complete-stop-other -> conflict
+initial-bound none | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint | complete-stop-without-checkpoint -> conflict
 initial-bound none | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint | cancel -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint unchanged
 initial-bound none | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint | complete-cancel -> conflict
 initial-bound none | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1+checkpoint | complete-cancel-other -> conflict
+initial-bound none | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | create -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 unchanged
+initial-bound none | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | create-changed -> conflict
+initial-bound none | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | bind-run -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 unchanged
+initial-bound none | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | bind-run-other -> conflict
+initial-bound none | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | bind-pod -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 unchanged
+initial-bound none | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | bind-pod-other -> conflict
+initial-bound none | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | prepared -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 unchanged
+initial-bound none | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | prepared-other -> conflict
+initial-bound none | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | activate -> conflict
+initial-bound none | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | bind-native -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 unchanged
+initial-bound none | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | bind-native-other -> conflict
+initial-bound none | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | stop -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 unchanged
+initial-bound none | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-stop -> conflict
+initial-bound none | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-stop-other -> conflict
+initial-bound none | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-stop-without-checkpoint -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 unchanged
+initial-bound none | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | cancel -> stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 unchanged
+initial-bound none | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-cancel -> conflict
+initial-bound none | stopped run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-cancel-other -> conflict
 initial-bound none | cancelled run="" pod="" native=bound receipt=none | create -> cancelled run="" pod="" native=bound receipt=none unchanged
 initial-bound none | cancelled run="" pod="" native=bound receipt=none | create-changed -> conflict
 initial-bound none | cancelled run="" pod="" native=bound receipt=none | bind-run -> conflict
@@ -1780,6 +1938,7 @@ initial-bound none | cancelled run="" pod="" native=bound receipt=none | bind-na
 initial-bound none | cancelled run="" pod="" native=bound receipt=none | stop -> conflict
 initial-bound none | cancelled run="" pod="" native=bound receipt=none | complete-stop -> conflict
 initial-bound none | cancelled run="" pod="" native=bound receipt=none | complete-stop-other -> conflict
+initial-bound none | cancelled run="" pod="" native=bound receipt=none | complete-stop-without-checkpoint -> conflict
 initial-bound none | cancelled run="" pod="" native=bound receipt=none | cancel -> cancelled run="" pod="" native=bound receipt=none unchanged
 initial-bound none | cancelled run="" pod="" native=bound receipt=none | complete-cancel -> conflict
 initial-bound none | cancelled run="" pod="" native=bound receipt=none | complete-cancel-other -> conflict
@@ -1797,6 +1956,7 @@ initial-bound none | cancelled run="run-uid" pod="" native=bound receipt=none | 
 initial-bound none | cancelled run="run-uid" pod="" native=bound receipt=none | stop -> conflict
 initial-bound none | cancelled run="run-uid" pod="" native=bound receipt=none | complete-stop -> conflict
 initial-bound none | cancelled run="run-uid" pod="" native=bound receipt=none | complete-stop-other -> conflict
+initial-bound none | cancelled run="run-uid" pod="" native=bound receipt=none | complete-stop-without-checkpoint -> conflict
 initial-bound none | cancelled run="run-uid" pod="" native=bound receipt=none | cancel -> cancelled run="run-uid" pod="" native=bound receipt=none unchanged
 initial-bound none | cancelled run="run-uid" pod="" native=bound receipt=none | complete-cancel -> conflict
 initial-bound none | cancelled run="run-uid" pod="" native=bound receipt=none | complete-cancel-other -> conflict
@@ -1814,6 +1974,7 @@ initial-bound none | cancelled run="run-uid" pod="pod-a" native=bound receipt=no
 initial-bound none | cancelled run="run-uid" pod="pod-a" native=bound receipt=none | stop -> conflict
 initial-bound none | cancelled run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop -> conflict
 initial-bound none | cancelled run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-other -> conflict
+initial-bound none | cancelled run="run-uid" pod="pod-a" native=bound receipt=none | complete-stop-without-checkpoint -> conflict
 initial-bound none | cancelled run="run-uid" pod="pod-a" native=bound receipt=none | cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=none unchanged
 initial-bound none | cancelled run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 written
 initial-bound none | cancelled run="run-uid" pod="pod-a" native=bound receipt=none | complete-cancel-other -> cancelled run="run-uid" pod="pod-a" native=bound receipt=units=2 written
@@ -1831,6 +1992,7 @@ initial-bound none | cancelled run="run-uid" pod="pod-a" native=bound receipt=un
 initial-bound none | cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 | stop -> conflict
 initial-bound none | cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-stop -> conflict
 initial-bound none | cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-stop-other -> conflict
+initial-bound none | cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-stop-without-checkpoint -> conflict
 initial-bound none | cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 | cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 unchanged
 initial-bound none | cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-cancel -> cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 unchanged
 initial-bound none | cancelled run="run-uid" pod="pod-a" native=bound receipt=units=1 | complete-cancel-other -> conflict

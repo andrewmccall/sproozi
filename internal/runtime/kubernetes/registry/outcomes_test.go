@@ -93,6 +93,11 @@ func outcomeStates(reg Registration) []stored {
 				receipts := []*StopReceipt{nil, {Seals: outcomeSeals(1)}}
 				if phase == Stopped {
 					receipts = []*StopReceipt{nil, outcomeStopReceipt(reg, 1)}
+					// A first visit that bound its conversation and kept
+					// none, after its harness exited (ADR 0062).
+					if outcomeStopReceipt(reg, 1).CheckpointDigest != "" {
+						receipts = append(receipts, &StopReceipt{Seals: outcomeSeals(1)})
+					}
 				}
 				for _, receipt := range receipts {
 					s := stored{Version: 1, Registration: storedRegistration{Registration: reg}, RunUID: run, PodUID: pod, Phase: phase, Receipt: receipt}
@@ -161,6 +166,9 @@ func outcomeOps() []outcomeOp {
 		{"complete-stop-other", func(ctx context.Context, s *Store, ref Reference, reg Registration) (Record, error) {
 			r := outcomeStopReceipt(reg, 2)
 			return s.CompleteStop(ctx, ref, r.CheckpointDigest, r.Seals)
+		}},
+		{"complete-stop-without-checkpoint", func(ctx context.Context, s *Store, ref Reference, _ Registration) (Record, error) {
+			return s.CompleteStop(ctx, ref, "", outcomeSeals(1))
 		}},
 		{"cancel", func(ctx context.Context, s *Store, ref Reference, _ Registration) (Record, error) {
 			return s.Cancel(ctx, ref)
