@@ -65,10 +65,9 @@ execution, its lifecycle declares another way on. The deadline never refuses
 that exit, and it keeps what the session has already committed.
 
 This record applies the principle to the execution journal, the home service
-and the remote executor's interactive sessions. Two other changes apply it and
-are recorded with dated notes in their own ADRs: cancelling a Kubernetes
-preparation that has no Pod, and bounding how long a stop waits for Codex to
-quit.
+and the remote executor's sessions. Two other applications of it are separate
+changes, not part of this one: cancelling a Kubernetes preparation that has no
+Pod, and bounding how long a stop waits for Codex to quit.
 
 ### The `abandoned` event
 
@@ -84,8 +83,10 @@ these hold:
   (`internal/deadline`; an execution without a deadline never takes it);
 - the pending operation is a move or a first visit, not a stop;
 - the record has no cancellation intent;
-- `prepared` or `activated` would now be refused. The placement did not report
-  the destination active.
+- `prepared` or `activated` would now be refused: the placement did not report
+  the destination active, or, for an operation at its activation, could not be
+  inspected at all. A placement may fail `Inspect` then precisely because the
+  prepared writer stopped itself at the deadline, as Docker's supervisor does.
 
 Before it records `abandoned`, the coordinator establishes that no writer exists
 or can come to exist at the destination:
@@ -96,12 +97,17 @@ or can come to exist at the destination:
 2. **A placement that fences preparations.** If the operation has no prepared
    incarnation and the placement implements `PreparationAborter`,
    `AbortPreparation` must succeed.
-3. **Any other placement.** The coordinator inspects the launch. `absent`
-   means nothing was prepared. An incarnation the placement reports, or the
-   prepared incarnation of an `activating` operation, is aborted. The abort
-   must prove that incarnation stopped and return a sealed receipt. The
-   incarnation is then retired as a visit with that receipt, its usage is
-   deducted and any checkpoint it captured is kept, as cancellation does.
+3. **A known prepared incarnation.** An `activating` operation records its
+   prepared incarnation. The coordinator aborts it, whatever `Inspect` said.
+4. **Any other placement.** The coordinator inspects the launch. `absent`
+   means nothing was prepared. An incarnation the placement reports is
+   aborted.
+
+An abort must prove that incarnation stopped and return a sealed receipt. The
+incarnation is then retired as a visit with that receipt, its usage is
+deducted and any checkpoint it captured is kept, as cancellation does. The
+receipt is the placement's retained one, so an abort repeated after a crash
+before the journal's save deducts the same usage once.
 
 The operation then ends with its existing `cancelled` stage and no new visit.
 The record has no cancellation intent, which separates the two. The execution
@@ -250,16 +256,38 @@ past its deadline, with its launch saved, reads unchanged, and the next
   plain `Cancel`, which `CancelUnsettled` would refuse, because nothing ran and
   there is no result to keep. The task is `cancelled` with "the deadline passed
   before it started", as for any task whose deadline passes before it starts.
-- `Coordinator.PastDeadline` and `Coordinator.SetClock` are exported, so home
-  decides with the coordinator's clock and owners' tests can pass a deadline
-  without waiting.
+- `Coordinator.PastDeadline` is exported, so home decides with the
+  coordinator's clock. Tests replace that clock only through the
+  `session.WithClock` option to `Open`, and a test checks that no production
+  code passes it, so production judges every deadline against the wall clock
+  through `internal/deadline`.
+- On a remote placement, "absent" is judged by the executor's clock, and the
+  deadline by the home's. If the home's clock runs ahead, a `Prepare` still in
+  flight when the home's deadline passes can create a sandbox that no journal
+  knows of. Such a sandbox is inert: it is never activated and uses nothing,
+  and the executor's own deadline check ends it. The same race already exists
+  for `cancel`.
+- Docker's `AbortPreparation` seals usage but returns only an error, so the
+  coordinator records no visit for a preparation that had completed. Its
+  usage is zero by construction, because nothing was activated.
+- The previous release reads a journal this one wrote: it has no new fields,
+  phases or stages. But a replayed `Move` of an abandoned operation reports
+  success there, because the older coordinator takes the `cancelled` stage as
+  done. And if home crashed between the coordinator's commit and retiring the
+  execution, the older home finds an idle current execution and advises
+  `recover`, which does nothing. Its `stop` retires an execution whose move
+  was ended, but refuses one whose resumed or first visit never ran ("home:
+  execution has no stopped visit"); this release's home, or `cancel`, ends
+  that one.
 
 ## Revisit conditions
 
 - Journal migrations become available. A structure for "a pending destination
   may run" without cancellation intent could then replace the error.
 - A placement can start a writer without `Activate`, so a prepared incarnation
-  is no longer inert.
+  is no longer inert, or a prepared sandbox can ever consume usage. A
+  preparation fenced by `AbortPreparation` would then need its receipt
+  recorded.
 - `resume` can run on a remote placement directly. A late `move --remote` could
   then continue there instead of stopping.
 - The home catalogue becomes a declared lifecycle. Retiring an idle execution
