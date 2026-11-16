@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/session"
@@ -211,22 +212,31 @@ func (q *options) stopRemote(ctx context.Context, target remoteTarget) error {
 	if q.operation == "" {
 		q.operation = uuid.NewString()
 	}
-	noticed := false
+	// The executor answers a stop when it ends or after about two minutes of
+	// waiting for the turn, so say why it waits after stopNoticeAfter, as a
+	// local stop does (ADR 0035).
+	var notice sync.Once
+	notify := func() {
+		notice.Do(func() {
+			_, _ = fmt.Fprintf(os.Stderr, "Waiting for the agent's current turn in session %s to finish; "+
+				"run \"%s\" in another terminal to stop it now instead.\n", shortID(q.id),
+				q.remoteCommand(cmdCancel, q.id))
+		})
+	}
+	timer := time.AfterFunc(stopNoticeAfter, notify)
+	defer timer.Stop()
 	for {
 		v, err := target.Client.Stop(ctx, q.id, q.operation)
 		waiting := err == nil && string(v.Phase) == phaseStopping || timedOut(err)
 		if err != nil && !waiting {
+			timer.Stop()
 			return q.remoteActionError(ctx, target, q.id, cmdStop, err)
 		}
 		if !waiting {
+			timer.Stop()
 			return q.printStopped(target.Name, v)
 		}
-		if !noticed {
-			noticed = true
-			_, _ = fmt.Fprintf(os.Stderr, "Waiting for the agent's current turn in session %s to finish; "+
-				"run \"%s\" in another terminal to stop it now instead.\n", shortID(q.id),
-				q.remoteCommand(cmdCancel, q.id))
-		}
+		notify()
 		select {
 		case <-ctx.Done():
 			return &retryError{err: errors.New("interrupted while the stop waited for the agent's current turn"),

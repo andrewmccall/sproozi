@@ -321,6 +321,31 @@ func TestRemoteStopShowsTheWaitingNoticeAndRepeatsTheSameOperation(t *testing.T)
 	}
 }
 
+// A stop request waits as long as the executor's stop may take, so the CLI
+// says why it waits after stopNoticeAfter, as a local stop does, even while
+// its one request has not been answered yet.
+func TestRemoteStopShowsTheWaitingNoticeWhileItsRequestWaits(t *testing.T) {
+	f := serveFakeExecutor(t, interactiveView(phaseRunning))
+	answer := f.answerView(interactiveView(work.PhaseRetained))
+	f.reply("stop", func(w http.ResponseWriter) {
+		time.Sleep(300 * time.Millisecond)
+		answer(w)
+	})
+	previous := stopNoticeAfter
+	stopNoticeAfter = 50 * time.Millisecond
+	t.Cleanup(func() { stopNoticeAfter = previous })
+	var code int
+	var out, errOut string
+	stderr := captureStderr(t, func() { code, out, errOut = runCLI("stop", "4215", "--remote") })
+	if code != 0 || !strings.Contains(out, "Stopped session "+remoteTestID+"; its work is kept.") {
+		t.Fatalf("stop exited %d: %s %s", code, out, errOut)
+	}
+	if strings.Count(stderr, "Waiting for the agent's current turn in session 4215d7d1 to finish;") != 1 ||
+		len(f.recorded("stop")) != 1 {
+		t.Fatalf("notice %q after %d requests", stderr, len(f.recorded("stop")))
+	}
+}
+
 // Each resume is a new operation; a repeated one names its operation.
 func TestRemoteResumeUsesANewOperation(t *testing.T) {
 	f := serveFakeExecutor(t, interactiveView(work.PhaseRetained))

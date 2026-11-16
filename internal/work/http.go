@@ -270,10 +270,17 @@ func (h *ownerHandler) serveJSON(w http.ResponseWriter, r *http.Request, action 
 				out, e = h.owner.Claim(r.Context(), q.ID, q.OperationID, q.Digest)
 			case "cancel":
 				out, e = h.owner.CancelAs(r.Context(), caller, q.ID, q.OperationID)
-			case actionStop:
-				out, e = h.owner.Stop(r.Context(), q.ID, q.OperationID)
-			case "recover":
-				out, e = h.owner.Recover(r.Context(), q.ID)
+			case actionStop, "recover":
+				// A stop, or a recovery that continues one, goes on to its
+				// outcome if the caller goes away or gives up; the retry waits
+				// for it. Cancellation interrupts it through the coordinator.
+				ctx, done := profile.DetachStop(r.Context())
+				if action == actionStop {
+					out, e = h.owner.Stop(ctx, q.ID, q.OperationID)
+				} else {
+					out, e = h.owner.Recover(ctx, q.ID)
+				}
+				done()
 			default:
 				http.NotFound(w, r)
 				return
