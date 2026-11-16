@@ -93,8 +93,8 @@ return `session.ErrUncapturable` in two cases:
   | Code | Name | Meaning |
   | --- | --- | --- |
   | 0 | | The checkpoint is on standard output. |
-  | 65 | `ExitStateRefused` (sysexits `EX_DATAERR`) | The fenced state does not make a checkpoint: no completed turn, as when the harness left its turn unfinished; another conversation; a failed continuity check; a state over the checkpoint bound; a conversation file that is not a plain file. The harness capture functions mark these with `harness.ErrStateRefused`. |
-  | 74 | `ExitCaptureFailed` (sysexits `EX_IOERR`) | The capture could not be carried out: a file it cannot read, a Git failure, anything environmental. Repeating it may succeed. |
+  | 65 | `ExitStateRefused` (sysexits `EX_DATAERR`) | The fenced state does not make a checkpoint: no completed turn, as when the harness left its turn unfinished; another conversation; a failed continuity check; a state over the checkpoint bound; a conversation file that is absent, not a plain file or unreadable because of its own permissions; a native directory that fails the safety checks. The harness capture functions mark these with `harness.ErrStateRefused`. |
+  | 74 | `ExitCaptureFailed` (sysexits `EX_IOERR`) | The capture could not be carried out: an I/O error from the volume, a Git failure, anything environmental. Repeating it may succeed. |
   | 1 | | Every failure of a helper older than the codes, and every failure of the helper's other commands. |
 
   The codes differ from 1, from a shell's 126 and 127, and from a signal's
@@ -113,9 +113,10 @@ How each placement reads a failed capture:
 | 74, could not be carried out | Stop fails; retry captures | Stop fails; retry captures |
 | Any other code, a signal or a killed helper (such as 137 or -1) | Stop fails | Stop fails |
 | Exec, Docker or transport error with no exit code | Stop fails | Stop fails |
+| 1 without the helper's failure line: the docker CLI's own failure, such as a daemon it cannot reach | Stop fails | Stop fails |
 | The stop's context ended (its bound, an abort) | Stop fails | Stop fails |
 | A failed write of the kept checkpoint | Stop fails | Stop fails |
-| 1, a helper older than the codes | Falls back, as Docker did before this record | Stop fails, as Kubernetes did before this record |
+| 1 with the helper's failure line, a helper older than the codes | Falls back, as Docker did before this record | Stop fails, as Kubernetes did before this record |
 
 "Falls back" applies only to an exited harness whose stop would otherwise
 capture (rule 1); a graceful stop fails on every capture failure.
@@ -126,8 +127,12 @@ image across CLI upgrades, and a cluster's runtime image is the operator's.
 So for code 1 each placement keeps what it did before this record, which is
 no worse than before on either: Docker keeps what the visit started from for
 an exited visit, and Kubernetes fails the stop, which a newer image fixes.
-Against a newer image, Docker now fails the stop for a capture the helper
-could not carry out, where it used to fall back.
+The docker CLI also exits 1 for its own failures, so Docker counts code 1 as
+the helper's only when the error carries the line every helper release writes
+to its standard error before it fails, `Checkpoint operation failed:`
+(`checkpoint.HelperFailurePrefix`); the engine's error includes the command's
+standard error. Kubernetes runs the helper with no shell in between and fails
+the stop for code 1 anyway.
 
 ### 3. A lost quiesce reply is a graceful stop
 
@@ -142,12 +147,23 @@ The Kubernetes stop now does the same. After an unacknowledged quiesce of a
 harness whose state proves completion, it waits up to ten seconds
 (`lostReplyWait`) for the native container to end. Then, and on any retry
 that finds the container ended, it treats the ending as this placement's own
-graceful stop when the supervisor exited 0 and its output, read in full
-through `pods/log`, holds no exit report. The supervisor writes a report for
-every other ending (ADR 0038). This needs no new stored field: the evidence is
-the supervisor's own ending. Nothing that marks the quiesce as sent is
-recorded, and the registration stays `active` until the stop is quiet. Output that
-cannot be read, a nonzero code, or any report, is an exit, as before.
+graceful stop when the supervisor exited 0 and its last output lines (the
+last 50 within 64 KiB, through `pods/log`) hold no exit report. The
+supervisor writes a report for every other ending (ADR 0038). This needs no
+new stored field: the evidence is the supervisor's own ending. Nothing that
+marks the quiesce as sent is recorded, and the registration stays `active`
+until the stop is quiet. Output that cannot be read, a nonzero code, or any
+report, is an exit, as before.
+
+The last lines are enough. The report is the last line the supervisor writes
+before it exits, and the harness's terminal output never reaches the
+container's log: it goes to the supervisor's terminal, which keeps it for the
+report's `output` field. If a report were still missed, a Codex visit that
+exited by itself with code 0 would be classed as a graceful stop, and that is
+saved. A completed turn is then captured, which its state allows; an
+unfinished one is refused, and since a graceful stop does not fall back, the
+stop fails on every retry until it is cancelled. A Claude Code ending is
+never classed as graceful.
 
 The Docker placement makes the same decision on a retry. Before, it decided
 only in the call that lost the reply, so a retry after that call ended first
@@ -263,19 +279,27 @@ An older home never sends the action, and no other answer carries the field.
   refused keeps what it started from, and a retry does not capture again. The
   state is fenced, so a capture would be refused the same way. The user sees
   only the exit; the log names the discard.
-- Against a newer helper, Docker now fails the stop for a capture the helper
-  could not carry out, where it used to keep what the visit started from; the
-  retry captures the conversation.
+- Before this record, Docker kept what an exited visit started from on any
+  capture failure. With a helper of this release it now fails the stop, and
+  its retry captures, for: code 74; a failed verification of the helper
+  container; a helper container that is not running; the docker CLI's own
+  failure, code 1 without the helper's line; codes 126 and 127; a killed
+  helper (137, or -1 when the stop's context killed the exec); an ended
+  context; and a failed retain of the captured checkpoint.
 - Against a helper image older than the result codes, nothing improves:
   Docker keeps what an exited visit started from for any helper failure, as
   before, and Kubernetes fails the stop of an exited visit whose state the
   helper refused on every retry, as before, until the image is updated; the
   session can be cancelled.
 - What the helper classifies as refused is a list: the conversation file's
-  own checks, a state over the bound and a failed continuity check. A
-  workspace that Git refuses for its own content (other than its size) is
-  reported as could not be carried out, so it fails the stop rather than
-  risk discarding a conversation.
+  own checks; a conversation file that is absent, not a plain file, or
+  unreadable because of its own permissions or type; a native directory that
+  fails the safety checks; a state over the bound; and a failed continuity
+  check. One read error can be either, so its kind decides: not found,
+  permission, not a directory and a link loop are the state; an I/O error
+  from the volume is the environment. A workspace that Git refuses for its
+  own content (other than its size) is reported as could not be carried out,
+  so it fails the stop rather than risk discarding a conversation.
 - A lost-reply stop is told from an exit by the supervisor's ending. If the
   supervisor's output cannot be read, as when `pods/log` is denied, the ending
   counts as an exit, as before.
@@ -298,8 +322,31 @@ An older home never sends the action, and no other answer carries the field.
 - Home moves only resumed visits to a cluster, so home's watcher never meets a
   first visit there; first visits on a cluster belong to the executor's own
   owner, whose sweep already used the placement's `Exited`.
+- Some capture failures are environmental but permanent: a workspace too
+  large for the helper container's memory, so the helper is killed (137) on
+  every attempt, or a workspace Git cannot bundle, which the helper reports
+  as 74. The stop of such an exited visit fails on every retry. The user sees
+  the session `unknown-stop` at home, or `stopping` on an executor, with the
+  stop's failure each time they run `stop` or `recover`. The only command that
+  ends it is `cancel`, which keeps no checkpoint from the visit and leaves the
+  session cancelled, so it cannot be resumed, although the checkpoint the
+  visit started from is still good. ADR 0060 says no state may have only an
+  exit that destroys the session; this one still does (revisit conditions).
 
 ## Revisit when
+
+- The owner decides how to end a stop that cannot capture, so that a session
+  whose capture fails for ever keeps what the visit started from instead of
+  being cancelled. The smallest decision: a stop option, such as
+  `sproozi stop ID --keep-start`, that the session's owner may give (the home
+  user for a home session, the executor's home principal for a remote one,
+  through the existing stop action with one more request field), only for a
+  visit whose writer is already fenced and whose usage is sealed. It records
+  the choice in the execution's journal and the placement's record before it
+  acts, finishes the stop with what the visit started from, logs it as a
+  discard naming who asked, and shows it in `status`. It needs the owner to
+  decide who may ask, whether a graceful stop may use it, and the wire and
+  stored field.
 
 - Images older than the capture helper's result codes are no longer
   supported: the legacy mapping of code 1 goes, and code 1 then fails the

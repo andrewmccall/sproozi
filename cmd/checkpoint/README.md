@@ -88,11 +88,13 @@ all visits and seals. Missing selected files or unsafe paths fail capture.
 | Code | Meaning |
 | --- | --- |
 | 0 | The artifact is on stdout. |
-| 65 | The stopped state was refused: it is a property of the fenced bytes, so capturing again fails the same way. The conversation file has no completed turn, names another conversation, is not a plain file, or the state exceeds `--max-bytes`, or the continuity check against `--instruction-digest` fails. |
-| 74 | The capture could not be carried out: a file it cannot read, a Git failure, anything else. Repeating it may succeed. |
+| 65 | The stopped state was refused: it is a property of the fenced bytes, so capturing again fails the same way. The conversation file has no completed turn, names another conversation, is not a plain file, is absent, or cannot be read because of its own permissions; a native directory fails the safety checks; the state exceeds `--max-bytes`; or the continuity check against `--instruction-digest` fails. |
+| 74 | The capture could not be carried out: an I/O error from the volume, a Git failure, anything else. Repeating it may succeed. |
 
 Every other command exits 1 on any failure, as every command of a helper
-older than these codes does; the reason is on stderr either way.
+older than these codes does. The reason is on stderr either way, after the
+line prefix `Checkpoint operation failed:`, which every release writes
+(`checkpoint.HelperFailurePrefix`).
 
 Once the placement has retained the artifact and finalized usage receipt:
 

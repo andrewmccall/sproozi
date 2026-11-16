@@ -17,11 +17,13 @@ import (
 const (
 	// ExitStateRefused (EX_DATAERR): the stopped state does not make a
 	// checkpoint, a property of the fenced bytes that capturing again finds
-	// the same: no completed turn, another conversation, a failed continuity
-	// check, or a state over the checkpoint bound.
+	// the same: no completed turn, another conversation, a conversation file
+	// the agent deleted, made unreadable or replaced, a native directory that
+	// fails the safety checks, a failed continuity check, or a state over the
+	// checkpoint bound (harness.ErrStateRefused).
 	ExitStateRefused = 65
 	// ExitCaptureFailed (EX_IOERR): the capture could not be carried out,
-	// such as a file that cannot be read or a Git failure. Repeating it may
+	// such as an I/O error from the volume or a Git failure. Repeating it may
 	// succeed.
 	ExitCaptureFailed = 74
 )

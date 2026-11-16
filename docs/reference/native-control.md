@@ -148,9 +148,9 @@ way. The helper's exit codes
 
 | Code | Meaning | Docker | Kubernetes |
 | --- | --- | --- | --- |
-| 65 | The stopped state was refused: no completed turn, as when the agent left its turn unfinished; another conversation; a failed continuity check; a state over the checkpoint bound. | Refused | Refused |
+| 65 | The stopped state was refused: no completed turn, as when the agent left its turn unfinished; another conversation; a conversation file the agent deleted, made unreadable or replaced, or a native directory that fails the safety checks; a failed continuity check; a state over the checkpoint bound. | Refused | Refused |
 | 74 | The capture could not be carried out, such as a file it could not read. | The stop fails | The stop fails |
-| 1 | Any failure of a helper image older than these codes. | Refused, as before them | The stop fails, as before them |
+| 1 | Any failure of a helper image older than these codes. Docker counts it only when the failure carries the helper's line `Checkpoint operation failed:`; the docker CLI's own code 1 fails the stop. | Refused, as before them | The stop fails, as before them |
 
 Everything else fails the stop too, and repeating it captures again: the
 stop's bound or an abort cutting the capture off, any other exit code or a
