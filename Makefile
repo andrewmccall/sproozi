@@ -360,6 +360,11 @@ GOLANGCI_LINT_VERSION ?= v2.12.2
 # loads packages with CI's toolchain whatever Go is installed; the go command
 # downloads it once if it is missing.
 LINT_TOOLCHAIN ?= go1.26.11
+# golangci-lint's default cache is shared by every checkout of this module, and
+# it replays a cached issue with the path of the checkout that found it, so
+# lint-fix in one worktree rewrote files in another. Keep one cache per checkout.
+GOLANGCI_LINT_CACHE ?= $(CURDIR)/.local/golangci-lint-cache
+export GOLANGCI_LINT_CACHE
 GOVULNCHECK_VERSION ?= v1.8.0
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
