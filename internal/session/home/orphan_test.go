@@ -148,9 +148,9 @@ func ranOrphan(t *testing.T, s *Service, id string, stop bool) string {
 func TestAnUnrecordedExecutionThatRanKeepsItsWorkUntilRemoved(t *testing.T) {
 	t.Parallel()
 	for _, running := range []bool{false, true} {
-		name := "stopped"
+		name := "ran then stopped"
 		if running {
-			name = "running"
+			name = "still running"
 		}
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()

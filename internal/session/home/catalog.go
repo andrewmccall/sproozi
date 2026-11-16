@@ -385,19 +385,8 @@ func (s *Service) ResumeWithMaxDuration(ctx context.Context, id, operation strin
 	if err != nil {
 		return Status{}, err
 	}
-	if r.Current == "" {
-		// Nothing below changes a session with no current execution, so its
-		// state decides now, before anything is released or bound.
-		if err = s.refuseIn(r, ActionResume); err != nil {
-			return Status{}, err
-		}
-	}
-	if err = s.retireSettled(&r); err != nil {
+	if err = s.reconcileForResume(ctx, &r); err != nil {
 		return Status{}, err
-	}
-	// The resume does not need them gone; the next command tries again.
-	if err = s.releaseOrphans(ctx, r); err != nil {
-		s.logf("Failed to release an execution session %s never recorded: %v\n", id, err)
 	}
 	allowances, err := s.projectAllowances(r)
 	if err != nil {
@@ -461,6 +450,27 @@ func (s *Service) ResumeWithMaxDuration(ctx context.Context, id, operation strin
 		return Status{}, err
 	}
 	return s.catalogStatus(r)
+}
+
+// reconcileForResume refuses a resume the session's state refuses before
+// anything is released or bound, when the session has no current execution,
+// since nothing resume does next changes it; then it retires an idle current
+// execution and releases the executions the session never recorded. The
+// resume does not need those gone: a failure is logged, and the next command
+// tries again. The caller holds the session's lock.
+func (s *Service) reconcileForResume(ctx context.Context, r *localSession) error {
+	if r.Current == "" {
+		if err := s.refuseIn(*r, ActionResume); err != nil {
+			return err
+		}
+	}
+	if err := s.retireSettled(r); err != nil {
+		return err
+	}
+	if err := s.releaseOrphans(ctx, *r); err != nil {
+		s.logf("Failed to release an execution session %s never recorded: %v\n", r.ID, err)
+	}
+	return nil
 }
 
 // replayResume continues a resume operation the session already bound to an
