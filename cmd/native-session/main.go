@@ -452,6 +452,8 @@ func (s *server) activate() response {
 		r.Error = err.Error()
 		return r
 	}
+	// The supervisor's own writes to the login file are done.
+	login.settled()
 	n, err := nativepty.Start(terminalLaunch(adapter.executable, args, env, s.config.Deadline, login))
 	if err != nil {
 		login.stop()

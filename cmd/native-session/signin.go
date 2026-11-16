@@ -70,6 +70,9 @@ type loginSync struct {
 	// problem is why periodic syncs last failed, as last logged; empty while
 	// they succeed. Only the periodic sync uses it, after begin.
 	problem string
+	// startedUnfinished records that the first sync found the store holding
+	// no whole login (settled).
+	startedUnfinished bool
 }
 
 // signOutSyncs is how many consecutive syncs must see a login file or the
@@ -167,6 +170,30 @@ func startLoginSync(c config) (*loginSync, error) {
 	return l, nil
 }
 
+// settled runs after the supervisor's own start-up writes to the harness's
+// login file, such as the workspace trust it merges into Copilot's
+// config.json, and before the harness starts. When the session started
+// against a store that held no whole login, the file as it now stands is its
+// starting point, not a change: otherwise the supervisor's own write, which
+// holds no login, would replace the unfinished store and every other session
+// would copy it in. A change the harness makes after this, such as a
+// sign-in, still replaces the store. With a whole or empty store at the
+// start nothing changes: the start-up write is shared as before. A nil sync
+// does nothing.
+func (l *loginSync) settled() {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if !l.startedUnfinished {
+		return
+	}
+	if native, err := readLogin(l.native); err == nil && (native == nil || wholeLogin(native)) {
+		l.agreed = native
+	}
+}
+
 // errStoreNotWhole is a store that holds no whole login: a writer stopped
 // part way, or it holds something else.
 var errStoreNotWhole = errors.New("the login store is not a whole login")
@@ -180,7 +207,7 @@ func (l *loginSync) begin() error {
 		l.diagnose("Started the harness without a sign-in: %v", err)
 		l.problem = err.Error()
 		l.mu.Lock()
-		l.known = true
+		l.known, l.startedUnfinished = true, true
 		l.mu.Unlock()
 	} else if err != nil {
 		return err
