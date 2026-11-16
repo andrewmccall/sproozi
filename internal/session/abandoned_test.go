@@ -304,6 +304,37 @@ func TestLateStartFencesThePreparationWhenThePlacementCan(t *testing.T) {
 	}
 }
 
+// A late activation the placement cannot inspect, as Docker cannot once the
+// prepared supervisor stopped itself at its deadline, still ends: the known
+// incarnation is aborted, and the abort proves it stopped whatever Inspect
+// said. Before the deadline the same Inspect failure is only reported.
+func TestLateActivationEndsWhenInspectFails(t *testing.T) {
+	t.Parallel()
+	for _, command := range lateCommands {
+		t.Run(command.name, func(t *testing.T) {
+			t.Parallel()
+			c, _, local, _, seeded := setup(t)
+			first := createResumed(t, c, seeded)
+			local.failActivate = true
+			recoverFails(t, c, first.ExecutionID)
+			local.failActivate = false
+			local.inspectErr = errors.New("docker native execution ended without retained stop")
+			if r, err := c.Recover(t.Context(), first.ExecutionID); err == nil || r.Phase != PhaseActivating || local.aborted != 0 {
+				t.Fatalf("Inspect failure before the deadline: %s %v aborts %d", r.Phase, err, local.aborted)
+			}
+			local.abortSealed = true
+			c.now = func() time.Time { return first.Deadline }
+			r, err := command.run(c, first.ExecutionID)
+			checkAbandoned(t, c, r, err, command.want)
+			if local.aborted != 1 || len(r.Visits) != 1 || local.activated != 0 {
+				t.Fatalf("late activation: aborted %d visits %d activated %d", local.aborted, len(r.Visits), local.activated)
+			}
+			local.inspectErr = nil
+			resumeFrom(t, c, first.ExecutionID, first)
+		})
+	}
+}
+
 // A late activation that really happened is not ended: recovery finds the
 // destination active and records it, as it would before the deadline.
 func TestLateRecoveryRecordsAnActivationThatHappened(t *testing.T) {

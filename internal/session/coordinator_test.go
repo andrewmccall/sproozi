@@ -268,6 +268,9 @@ type fakePlacement struct {
 	partialPrepare                        bool
 	// failActivate refuses activation, leaving the incarnation prepared.
 	failActivate bool
+	// inspectErr fails Inspect, as Docker does once a prepared supervisor
+	// stopped itself at its deadline.
+	inspectErr error
 	// inspections counts Inspect calls.
 	prepareCalls, inspections int
 	unknownStop               bool
@@ -341,6 +344,9 @@ func (p *fakePlacement) Activate(_ context.Context, l Launch, i Incarnation) err
 }
 func (p *fakePlacement) Inspect(_ context.Context, l Launch) (Observation, error) {
 	p.inspections++
+	if p.inspectErr != nil {
+		return Observation{}, p.inspectErr
+	}
 	if o, ok := p.records[l.AllocationID]; ok {
 		return o, nil
 	}

@@ -490,6 +490,13 @@ func (c *Coordinator) activateDestination(ctx context.Context, r Record, index i
 		}
 		observation, err := p.Inspect(ctx, *op.Launch)
 		if err != nil {
+			// Past the deadline an uninspectable destination ends: the
+			// prepared incarnation is known, and aborting it proves it
+			// stopped. A placement may fail Inspect then precisely because
+			// its prepared writer stopped itself at the deadline.
+			if admitErr := c.admit(r, evActivated); errors.Is(admitErr, errExpired) {
+				return r, admitErr
+			}
 			return r, err
 		}
 		if err = checkObservation(*op.Launch, observation); err != nil {

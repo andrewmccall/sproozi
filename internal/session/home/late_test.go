@@ -84,64 +84,86 @@ const (
 // whichever command comes next ends that start, after fencing what it may
 // have prepared, and the session is stopped with the checkpoint it had, so
 // resume continues it. A new resume does all of that itself.
+//
+// The resume is interrupted either by a lost Prepare reply, or, as on Docker,
+// by an activation that failed and an Inspect that fails after the deadline
+// because the prepared supervisor stopped itself.
 func TestResumeInterruptedThenRetriedAfterItsDeadline(t *testing.T) {
 	t.Parallel()
-	for _, late := range []string{ActionResume, lateResumeAgain, ActionRecover, ActionStop, lateMoveLocal} {
-		t.Run(late, func(t *testing.T) {
-			t.Parallel()
-			s, local, _, repo := testService(t)
-			id := uuid.NewString()
-			if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := s.Stop(t.Context(), id, uuid.NewString()); err != nil {
-				t.Fatal(err)
-			}
-			local.lostPrepare = true
-			interrupted := uuid.NewString()
-			if _, err := s.Resume(t.Context(), id, interrupted, nil); err == nil {
-				t.Fatal("fixture did not interrupt the resume")
-			}
-			c, err := s.readCatalog(id)
-			if err != nil {
-				t.Fatal(err)
-			}
-			pending := c.Current
-			passDeadline(t, s, pending)
-			aborts := local.aborts
-			var r Response
-			switch late {
-			case ActionResume:
-				r = exchange(t, s, Request{Action: ActionResume, ID: id, OperationID: uuid.NewString()})
-				if r.Error != "" || r.Status == nil || r.Status.Phase != string(session.PhaseActive) {
-					t.Fatalf("late resume replied %+v", r)
-				}
-			case lateResumeAgain:
-				r = exchange(t, s, Request{Action: ActionResume, ID: id, OperationID: interrupted})
-			case ActionRecover:
-				r = exchange(t, s, Request{Action: ActionRecover, ID: id})
-			case ActionStop:
-				r = exchange(t, s, Request{Action: ActionStop, ID: id, OperationID: uuid.NewString()})
-				if r.Error != "" || r.Status == nil || r.Status.Phase != stageRetained {
-					t.Fatalf("late stop replied %+v", r)
-				}
-			case lateMoveLocal:
-				r = exchange(t, s, Request{Action: ActionMove, ID: id, OperationID: uuid.NewString(), Destination: LocalAlias})
-			}
-			if late != ActionResume && late != ActionStop {
-				wantDeadlineProblem(t, r, id)
-			}
-			ended, err := s.coordinator.Inspect(pending)
-			if err != nil || ended.Phase != session.PhaseIdle || !ended.Abandoned(interrupted) || local.aborts != aborts+1 {
-				t.Fatalf("interrupted resume: %s abandoned %v aborts %d %v", ended.Phase, ended.Abandoned(interrupted),
-					local.aborts-aborts, err)
-			}
-			if late == ActionResume {
-				return
-			}
-			wantStoppedAndResumable(t, s, id, local.digest, testNativeUUID)
-		})
+	for _, interruption := range []string{"prepare reply lost", "activation failed, Inspect fails"} {
+		for _, late := range []string{ActionResume, lateResumeAgain, ActionRecover, ActionStop, lateMoveLocal} {
+			t.Run(interruption+"/"+late, func(t *testing.T) {
+				t.Parallel()
+				resumeInterruptedThenLate(t, interruption, late)
+			})
+		}
 	}
+}
+
+// resumeInterruptedThenLate interrupts a resume as interruption says, passes
+// its deadline and runs the late command.
+func resumeInterruptedThenLate(t *testing.T, interruption, late string) {
+	t.Helper()
+	s, local, _, repo := testService(t)
+	id := uuid.NewString()
+	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Stop(t.Context(), id, uuid.NewString()); err != nil {
+		t.Fatal(err)
+	}
+	activating := interruption != "prepare reply lost"
+	local.lostPrepare, local.rejectActivate = !activating, activating
+	interrupted := uuid.NewString()
+	if _, err := s.Resume(t.Context(), id, interrupted, nil); err == nil {
+		t.Fatal("fixture did not interrupt the resume")
+	}
+	local.rejectActivate = false
+	c, err := s.readCatalog(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending := c.Current
+	if activating {
+		execution, err := s.coordinator.Inspect(pending)
+		if err != nil || execution.Phase != session.PhaseActivating {
+			t.Fatalf("interrupted activation: %s %v", execution.Phase, err)
+		}
+		local.failInspectOf = execution.Operations[0].Launch.AllocationID
+	}
+	passDeadline(t, s, pending)
+	aborts := local.aborts
+	var r Response
+	switch late {
+	case ActionResume:
+		r = exchange(t, s, Request{Action: ActionResume, ID: id, OperationID: uuid.NewString()})
+		if r.Error != "" || r.Status == nil || r.Status.Phase != string(session.PhaseActive) {
+			t.Fatalf("late resume replied %+v", r)
+		}
+	case lateResumeAgain:
+		r = exchange(t, s, Request{Action: ActionResume, ID: id, OperationID: interrupted})
+	case ActionRecover:
+		r = exchange(t, s, Request{Action: ActionRecover, ID: id})
+	case ActionStop:
+		r = exchange(t, s, Request{Action: ActionStop, ID: id, OperationID: uuid.NewString()})
+		if r.Error != "" || r.Status == nil || r.Status.Phase != stageRetained {
+			t.Fatalf("late stop replied %+v", r)
+		}
+	case lateMoveLocal:
+		r = exchange(t, s, Request{Action: ActionMove, ID: id, OperationID: uuid.NewString(), Destination: LocalAlias})
+	}
+	if late != ActionResume && late != ActionStop {
+		wantDeadlineProblem(t, r, id)
+	}
+	ended, err := s.coordinator.Inspect(pending)
+	if err != nil || ended.Phase != session.PhaseIdle || !ended.Abandoned(interrupted) || local.aborts != aborts+1 {
+		t.Fatalf("interrupted resume: %s abandoned %v aborts %d %v", ended.Phase, ended.Abandoned(interrupted),
+			local.aborts-aborts, err)
+	}
+	if late == ActionResume {
+		return
+	}
+	wantStoppedAndResumable(t, s, id, local.digest, testNativeUUID)
 }
 
 // "sproozi move ID --local" of a session on a cluster after its deadline

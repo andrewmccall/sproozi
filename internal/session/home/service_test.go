@@ -50,9 +50,12 @@ type placementFixture struct {
 	turnless                    bool
 	exited                      *session.Exit
 	rejectActivate, failInspect bool
-	partialCreate               bool
-	inspections                 int
-	charge                      int64
+	// failInspectOf fails Inspect of one allocation, as Docker does once its
+	// prepared supervisor stopped itself at the deadline.
+	failInspectOf string
+	partialCreate bool
+	inspections   int
+	charge        int64
 	// Non-nil hold channels are closed when the call is reached; the call then
 	// waits for its context, as a native turn that has not completed would.
 	holdPrepare, holdStop chan struct{}
@@ -121,7 +124,7 @@ func (p *placementFixture) Activate(_ context.Context, l session.Launch, i sessi
 }
 func (p *placementFixture) Inspect(_ context.Context, l session.Launch) (session.Observation, error) {
 	p.inspections++
-	if p.failInspect {
+	if p.failInspect || l.AllocationID == p.failInspectOf {
 		return session.Observation{}, errors.New("activation recovery still fails")
 	}
 	if r, ok := p.rows[l.AllocationID]; ok {
