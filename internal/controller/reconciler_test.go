@@ -1190,14 +1190,32 @@ func TestReconcilerStaleCacheDoesNotEnsureRecordedSandbox(t *testing.T) {
 // and ended never gains a Pod afterwards.
 func TestReconcilerStaleCacheDoesNotCreateSandboxForEndedRun(t *testing.T) {
 	t.Parallel()
+	ctx := context.Background()
 	for _, test := range []struct {
 		name string
-		live func(*sprooziv1alpha1.AgentRun) bool
+		live func(client.Client, *sprooziv1alpha1.AgentRun) error
 	}{
-		{"cancelled", func(run *sprooziv1alpha1.AgentRun) bool { run.Spec.Cancel = true; return false }},
-		{"terminal", func(run *sprooziv1alpha1.AgentRun) bool {
+		{"cancelled", func(c client.Client, run *sprooziv1alpha1.AgentRun) error {
+			run.Spec.Cancel = true
+			return c.Update(ctx, run)
+		}},
+		{"terminal", func(c client.Client, run *sprooziv1alpha1.AgentRun) error {
 			run.Status.Phase = sprooziv1alpha1.AgentRunPhaseCancelled
-			return true
+			return c.Status().Update(ctx, run)
+		}},
+		// The run's finalizer holds it with a deletion timestamp.
+		{"deleted", func(c client.Client, run *sprooziv1alpha1.AgentRun) error { return c.Delete(ctx, run) }},
+		{"replaced", func(c client.Client, run *sprooziv1alpha1.AgentRun) error {
+			run.Finalizers = nil
+			if err := c.Update(ctx, run); err != nil {
+				return err
+			}
+			if err := c.Delete(ctx, run); err != nil {
+				return err
+			}
+			replacement := newRun(run.Name)
+			replacement.UID = "replacement-uid"
+			return c.Create(ctx, replacement)
 		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -1211,12 +1229,7 @@ func TestReconcilerStaleCacheDoesNotCreateSandboxForEndedRun(t *testing.T) {
 			if err := c.Get(context.Background(), key, &stale); err != nil {
 				t.Fatal(err)
 			}
-			live := stale.DeepCopy()
-			if test.live(live) {
-				if err := c.Status().Update(context.Background(), live); err != nil {
-					t.Fatal(err)
-				}
-			} else if err := c.Update(context.Background(), live); err != nil {
+			if err := test.live(c, stale.DeepCopy()); err != nil {
 				t.Fatal(err)
 			}
 			r.Client = interceptor.NewClient(c.(client.WithWatch), interceptor.Funcs{
