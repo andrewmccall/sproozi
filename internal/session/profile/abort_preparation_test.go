@@ -158,6 +158,32 @@ func TestAbortPreparationFallsBackOnOlderExecutor(t *testing.T) {
 	}
 }
 
+// On an older executor the fallback aborts only a visit still preparing or
+// already stopped. An active visit, or one whose state is unknown (as a
+// stopping Kubernetes visit inspects), may have spent, so it is refused and
+// left as it is.
+func TestAbortPreparationFallbackRefusesVisitThatMayHaveSpent(t *testing.T) {
+	t.Parallel()
+	for _, state := range []session.PlacementState{session.PlacementActive, session.PlacementUnknown} {
+		t.Run(string(state), func(t *testing.T) {
+			t.Parallel()
+			c, b, _, l, data := wrappedFixture(t, olderExecutor)
+			i, err := c.Prepare(t.Context(), l, data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			b.state.State = state
+			err = c.AbortPreparation(t.Context(), l)
+			if !errors.Is(err, errPreparationAbortUnsupported) || !strings.Contains(err.Error(), "not a preparation") {
+				t.Fatalf("fallback abort of a %s visit: %v", state, err)
+			}
+			if b.state.State != state || b.state.Incarnation != i {
+				t.Fatalf("refused fallback aborted the visit: %+v", b.state)
+			}
+		})
+	}
+}
+
 // A home coordinator cancelling a destination whose preparation never
 // reported an incarnation reaches cancelled on an executor that supports the
 // action, and stays unknown-stop, saying why, on an older one.

@@ -183,6 +183,14 @@ func (c *Client) abortPreparationByInspection(ctx context.Context, l session.Lau
 	if !incarnationValid(o.Incarnation) {
 		return fmt.Errorf("%w; the cancelled preparation is still %s", errPreparationAbortUnsupported, o.State)
 	}
+	// Only a visit still preparing, or one already stopped (whose receipt is
+	// checked below), is aborted here. An active visit, or one whose state is
+	// unknown, as a stopping Kubernetes visit inspects, may have spent: it is
+	// not a preparation, and success would report no usage.
+	if o.State != session.PlacementPreparing && o.State != session.PlacementPrepared && o.State != session.PlacementStopped {
+		return fmt.Errorf("%w; the visit is %s, not a preparation, so only a stop or an abort with its incarnation can end it",
+			errPreparationAbortUnsupported, o.State)
+	}
 	a, err := c.Abort(ctx, l, o.Incarnation)
 	if err != nil {
 		return errors.Join(errPreparationAbortUnsupported, err)

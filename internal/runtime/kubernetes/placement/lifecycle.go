@@ -783,7 +783,8 @@ func (p *Placement) fenceCancelled(ctx context.Context, local *retained, r regis
 		}
 		select {
 		case <-ctx.Done():
-			return r, ctx.Err()
+			return r, fmt.Errorf("%w: Pod %s/%s of AgentRun %s was deleted but its agent container has not been seen to stop: %w",
+				errWriterFenceUnknown, p.config.AgentNamespace, runtimekube.RunName(types.UID(r.RunUID)), r.IntendedRunName, ctx.Err())
 		case <-ticker.C:
 		}
 	}

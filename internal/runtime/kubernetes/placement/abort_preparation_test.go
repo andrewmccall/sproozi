@@ -2,9 +2,15 @@ package placement
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,6 +22,8 @@ import (
 	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -52,18 +60,62 @@ func cancelReconcile(t *testing.T, kube *admissionClient) func(context.Context, 
 // cancelled: it creates the run's Pod and records its name. pending leaves
 // the Pod unscheduled, with no container ever started.
 func createSandbox(ctx context.Context, kube *admissionClient, run *api.AgentRun, pending bool) (*corev1.Pod, error) {
+	return createSandboxWith(ctx, kube, run, func(pod *corev1.Pod) {
+		if pending {
+			pod.Status = corev1.PodStatus{Phase: corev1.PodPending}
+		} else {
+			pod.Spec.NodeName = fixtureNode
+		}
+	})
+}
+
+const fixtureNode = "node-a"
+
+// createSandboxWith is createSandbox with the Pod shaped by mutate.
+func createSandboxWith(ctx context.Context, kube *admissionClient, run *api.AgentRun, mutate func(*corev1.Pod)) (*corev1.Pod, error) {
 	run.Status.Phase = api.AgentRunPhaseRunning
 	run.Status.Identity = api.AgentRunIdentity{SandboxName: runtimekube.RunName(run.UID), ServiceAccountName: fixtureWorker}
 	if err := kube.Client.Status().Update(ctx, run); err != nil {
 		return nil, err
 	}
 	pod := admittedPod(run)
-	if pending {
-		pod.Status = corev1.PodStatus{Phase: corev1.PodPending}
-	} else {
-		pod.Spec.NodeName = "node-a"
-	}
+	mutate(pod)
 	return pod, kube.Client.Create(ctx, pod)
+}
+
+type fixtureAuthorizer struct{}
+
+const fixtureToken = "fixture-home-principal-token-of-32-bytes-or-more"
+
+func (fixtureAuthorizer) Authorize(_ context.Context, token string) error {
+	if token != fixtureToken {
+		return profile.ErrUnauthenticated
+	}
+	return nil
+}
+
+// serveProfile serves the placement over the placement protocol, as the
+// executor does, and returns a home's client with the given request timeout.
+func serveProfile(t *testing.T, p *Placement, l session.Launch, timeout time.Duration) *profile.Client {
+	t.Helper()
+	h, err := profile.NewHandler(profile.Config{Harness: l.Harness, Principal: p.config.Principal, Placement: l.Placement,
+		InstructionDigest: l.InstructionDigest, Allowances: l.Allowances, MaxDuration: time.Hour, MaxCheckpointBytes: fixtureMax,
+		Authorizer: fixtureAuthorizer{}, Backend: p})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := httptest.NewUnstartedServer(h)
+	s.TLS = &tls.Config{MinVersion: tls.VersionTLS13}
+	s.StartTLS()
+	t.Cleanup(s.Close)
+	roots := x509.NewCertPool()
+	roots.AddCert(s.Certificate())
+	c, err := profile.Connect(profile.Connection{Origin: s.URL, Token: fixtureToken, Roots: roots, MaxCheckpointBytes: fixtureMax, Timeout: timeout})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(c.Close)
+	return c
 }
 
 // queuedPreparation leaves a launch's preparation as a coordinator sees it
@@ -258,10 +310,9 @@ func TestAbortPreparationNeverTrustsUnknownTerminationOfLatePod(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
-	defer cancel()
-	if err = p.AbortPreparation(ctx, l); err == nil {
-		t.Fatal("running late Pod was reported fenced")
+	p.abortWait = 300 * time.Millisecond
+	if err = p.AbortPreparation(t.Context(), l); !errors.Is(err, errWriterFenceUnknown) || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("running late Pod: %v", err)
 	}
 	current, found := sandboxPod(t, kube, string(run.UID))
 	if !found || current.DeletionTimestamp.IsZero() {
@@ -274,10 +325,8 @@ func TestAbortPreparationNeverTrustsUnknownTerminationOfLatePod(t *testing.T) {
 	if err = kube.Client.Status().Update(t.Context(), current); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel = context.WithTimeout(t.Context(), 300*time.Millisecond)
-	defer cancel()
-	if err = p.AbortPreparation(ctx, l); err == nil {
-		t.Fatal("synthetic termination was reported fenced")
+	if err = p.AbortPreparation(t.Context(), l); !errors.Is(err, errWriterFenceUnknown) {
+		t.Fatalf("synthetic termination: %v", err)
 	}
 	if local, err := p.load(l); err != nil || local.WriterFenced {
 		t.Fatalf("synthetic termination retained a fence: %+v %v", local, err)
@@ -287,10 +336,257 @@ func TestAbortPreparationNeverTrustsUnknownTerminationOfLatePod(t *testing.T) {
 	if err = kube.Client.Status().Update(t.Context(), current); err != nil {
 		t.Fatal(err)
 	}
+	p.abortWait = abortPreparationWait
 	if err = p.AbortPreparation(t.Context(), l); err != nil {
 		t.Fatal(err)
 	}
 	assertFencedLatePod(t, p, kube, l, pod)
+}
+
+// The fence for a Pod that never ran needs all three facts: it is being
+// deleted, it has no node, and no container of any kind ever started.
+func TestNeverScheduledNeedsDeletionNoNodeAndNoContainer(t *testing.T) {
+	t.Parallel()
+	now := metav1.Now()
+	unscheduled := func() *corev1.Pod {
+		return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{DeletionTimestamp: &now}, Status: corev1.PodStatus{Phase: corev1.PodPending,
+			ContainerStatuses: []corev1.ContainerStatus{{Name: nativeContainer}, {Name: runtimekube.CaptureContainer}}}}
+	}
+	for _, test := range []struct {
+		name   string
+		mutate func(*corev1.Pod)
+		want   bool
+	}{
+		{"unscheduled and deleting", func(*corev1.Pod) {}, true},
+		{"not deleting", func(pod *corev1.Pod) { pod.DeletionTimestamp = nil }, false},
+		{"scheduled, no container yet", func(pod *corev1.Pod) { pod.Spec.NodeName = fixtureNode }, false},
+		{"container started", func(pod *corev1.Pod) { pod.Status.ContainerStatuses[0].ContainerID = "containerd://native" }, false},
+		{"init container started", func(pod *corev1.Pod) {
+			pod.Status.InitContainerStatuses = []corev1.ContainerStatus{{Name: "init", ContainerID: "containerd://init"}}
+		}, false},
+		{"ephemeral container started", func(pod *corev1.Pod) {
+			pod.Status.EphemeralContainerStatuses = []corev1.ContainerStatus{{Name: "debug", ContainerID: "containerd://debug"}}
+		}, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			pod := unscheduled()
+			test.mutate(pod)
+			if got := neverScheduled(pod); got != test.want {
+				t.Fatalf("neverScheduled = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
+// A late Pod that a node already took, or that started any container, may
+// run: it stays unproven until its agent container is seen to stop.
+func TestAbortPreparationKeepsScheduledLatePodUnproven(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name   string
+		mutate func(*corev1.Pod)
+	}{
+		{"scheduled, no container ID yet", func(pod *corev1.Pod) {
+			pod.Spec.NodeName = fixtureNode
+			pod.Status = corev1.PodStatus{Phase: corev1.PodPending}
+		}},
+		{"init container started", func(pod *corev1.Pod) {
+			pod.Status = corev1.PodStatus{Phase: corev1.PodPending,
+				InitContainerStatuses: []corev1.ContainerStatus{{Name: "init", ContainerID: "containerd://init"}}}
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			p, kube, l, _ := queuedPreparation(t)
+			kube.deferTermination = true
+			p.abortWait = 300 * time.Millisecond
+			if _, err := createSandboxWith(t.Context(), kube, agentRun(t, kube, l), test.mutate); err != nil {
+				t.Fatal(err)
+			}
+			if err := p.AbortPreparation(t.Context(), l); !errors.Is(err, errWriterFenceUnknown) {
+				t.Fatalf("possibly running late Pod: %v", err)
+			}
+			local, err := p.load(l)
+			if err != nil || local.WriterFenced {
+				t.Fatalf("possibly running late Pod was fenced: %+v %v", local, err)
+			}
+			if pod, found := sandboxPod(t, kube, registration(t, p, l).RunUID); !found ||
+				!slices.Contains(pod.Finalizers, runtimekube.ManagedWriterFenceFinalizer) {
+				t.Fatal("possibly running late Pod lost its writer fence")
+			}
+		})
+	}
+}
+
+// With the controller down, one abort gives up within its bound and names
+// what is unproven, rather than outliving the caller's request.
+func TestAbortPreparationIsBoundedWhileControllerIsDown(t *testing.T) {
+	t.Parallel()
+	p, _, l, _ := queuedPreparation(t)
+	p.abortWait = 300 * time.Millisecond
+	started := time.Now()
+	err := p.AbortPreparation(t.Context(), l)
+	if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "the controller has not ended it") {
+		t.Fatalf("abort with the controller down: %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > 5*time.Second {
+		t.Fatalf("abort outlived its bound: %v", elapsed)
+	}
+}
+
+// What a home sees when the executor cannot prove an abort within its bound:
+// the executor's own unavailable answer, before the home's request times
+// out, not a transport failure.
+func TestAbortPreparationAnswersUnavailableBeforeTheHomeTimesOut(t *testing.T) {
+	t.Parallel()
+	p, _, l, _ := queuedPreparation(t)
+	p.abortWait = 300 * time.Millisecond
+	c := serveProfile(t, p, l, 5*time.Second)
+	err := c.AbortPreparation(t.Context(), l)
+	var answer *profile.RemoteError
+	if !errors.As(err, &answer) || answer.Code != profile.CodeUnavailable || answer.Status != http.StatusServiceUnavailable || answer.Transport != nil {
+		t.Fatalf("home saw %v", err)
+	}
+	if err.Error() != "session profile: unavailable (HTTP 503)" {
+		t.Fatalf("home's problem text: %q", err.Error())
+	}
+}
+
+// A visit that may have had gateway authority is not a preparation: success
+// would report no usage, so the abort refuses it and leaves it as it is.
+func TestAbortPreparationRefusesVisitThatMayHaveSpent(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name  string
+		setup func(*testing.T, *Placement, session.Launch, session.Incarnation)
+		phase registry.Phase
+	}{
+		{"active", func(*testing.T, *Placement, session.Launch, session.Incarnation) {}, registry.Active},
+		{"stopped", func(t *testing.T, p *Placement, l session.Launch, i session.Incarnation) {
+			if _, err := p.Stop(t.Context(), l, i); err != nil {
+				t.Fatal(err)
+			}
+		}, registry.Stopped},
+		{"cancelled without sealed usage", func(t *testing.T, p *Placement, l session.Launch, _ session.Incarnation) {
+			if _, err := p.registry.Cancel(t.Context(), registration(t, p, l).Reference); err != nil {
+				t.Fatal(err)
+			}
+		}, registry.Cancelled},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			p, _, _, l, data := setup(t)
+			i, err := p.Prepare(t.Context(), l, data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = p.Activate(t.Context(), l, i); err != nil {
+				t.Fatal(err)
+			}
+			test.setup(t, p, l, i)
+			err = p.AbortPreparation(t.Context(), l)
+			if !isConflict(err) || !strings.Contains(err.Error(), "not a preparation") {
+				t.Fatalf("abort of a visit that may have spent: %v", err)
+			}
+			local, err := p.load(l)
+			if r := registration(t, p, l); err != nil || r.Phase != test.phase || local.PreparationAborted {
+				t.Fatalf("refused abort changed the visit: %+v %+v %v", r, local, err)
+			}
+		})
+	}
+}
+
+// A controller status write between the executor's read of the run and its
+// patch conflicts; the abort reads the run again rather than give up.
+func TestAbortPreparationRetriesConflictingRunPatch(t *testing.T) {
+	t.Parallel()
+	p, kube, l, _ := queuedPreparation(t)
+	kube.patchErr = apierrors.NewConflict(schema.GroupResource{Group: "sproozi.com", Resource: "agentruns"}, runName(l), errors.New("object was modified"))
+	kube.reconcile = cancelReconcile(t, kube)
+	if err := p.AbortPreparation(t.Context(), l); err != nil {
+		t.Fatal(err)
+	}
+	if run := agentRun(t, kube, l); !run.Spec.Cancel || run.Status.Phase != api.AgentRunPhaseCancelled {
+		t.Fatalf("run after a conflicting patch: %+v %+v", run.Spec, run.Status)
+	}
+}
+
+// A registration that is gone was deleted by an administrator, and its run
+// and Pod may remain: the abort is unproven whether the executor kept the
+// registration's reference or finds it by run name. Found by name, no
+// registration and no run means nothing was ever created.
+func TestAbortPreparationOfDeletedRegistrationIsUnproven(t *testing.T) {
+	t.Parallel()
+	for _, keepReference := range []bool{true, false} {
+		t.Run(fmt.Sprintf("reference kept %v", keepReference), func(t *testing.T) {
+			t.Parallel()
+			p, kube, l, _ := queuedPreparation(t)
+			local, err := p.load(l)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !keepReference {
+				local.Reference = registry.Reference{}
+				if err = p.save(local); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: fixtureNamespace, Name: registry.NameForRun(runName(l))}}
+			if err = kube.Client.Delete(t.Context(), cm); err != nil {
+				t.Fatal(err)
+			}
+			err = p.AbortPreparation(t.Context(), l)
+			if !isConflict(err) || !strings.Contains(err.Error(), "was deleted") {
+				t.Fatalf("abort of a deleted registration: %v", err)
+			}
+		})
+	}
+	t.Run("never created", func(t *testing.T) {
+		t.Parallel()
+		p, _, _, l, data := setup(t)
+		if _, err := p.persistIntent(l, data); err != nil {
+			t.Fatal(err)
+		}
+		if err := p.AbortPreparation(t.Context(), l); err != nil {
+			t.Fatalf("abort before any registration: %v", err)
+		}
+	})
+}
+
+// A run recreated at the registration's intended name is not the run it
+// bound: the abort is unproven and says what an administrator should check.
+func TestAbortPreparationOfReplacedRunNamesWhatToCheck(t *testing.T) {
+	t.Parallel()
+	p, kube, l, _ := queuedPreparation(t)
+	run := agentRun(t, kube, l)
+	if err := kube.Client.Delete(t.Context(), run); err != nil {
+		t.Fatal(err)
+	}
+	replacement := &api.AgentRun{ObjectMeta: metav1.ObjectMeta{Namespace: fixtureNamespace, Name: run.Name}, Spec: run.Spec}
+	if err := kube.Create(t.Context(), replacement); err != nil {
+		t.Fatal(err)
+	}
+	err := p.AbortPreparation(t.Context(), l)
+	if !isConflict(err) || !strings.Contains(err.Error(), "an administrator replaced it") || !strings.Contains(err.Error(), string(run.UID)) {
+		t.Fatalf("abort of a replaced run: %v", err)
+	}
+}
+
+// A launch the executor never saw claims its session epoch, so another
+// allocation cannot prepare that epoch afterwards.
+func TestAbortPreparationOfUnseenLaunchClaimsItsEpoch(t *testing.T) {
+	t.Parallel()
+	p, kube, _, l, data := setup(t)
+	if err := p.AbortPreparation(t.Context(), l); err != nil {
+		t.Fatal(err)
+	}
+	other := l
+	other.AllocationID, other.OperationID = uuid.NewString(), uuid.NewString()
+	_, err := p.Prepare(t.Context(), other, data)
+	if !isConflict(err) || kube.runCreates != 0 {
+		t.Fatalf("another allocation prepared the aborted epoch: %v, runs %d", err, kube.runCreates)
+	}
 }
 
 // A late Pod that was never scheduled ran nothing, and once it is being
