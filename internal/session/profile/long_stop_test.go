@@ -21,6 +21,8 @@ import (
 type heldBackend struct {
 	*retainedBackend
 	lock sync.Mutex
+	// abortPanics makes Abort panic.
+	abortPanics bool
 	// stopTakes is how long each stop lasts.
 	stopTakes time.Duration
 	// entered, when set, is closed as the first stop starts; that stop then
@@ -63,6 +65,9 @@ func (b *heldBackend) Stop(ctx context.Context, l session.Launch, i session.Inca
 func (b *heldBackend) Abort(ctx context.Context, l session.Launch, i session.Incarnation) (session.Observation, error) {
 	b.lock.Lock()
 	defer b.lock.Unlock()
+	if b.abortPanics {
+		panic("abort failed")
+	}
 	return b.retainedBackend.Abort(ctx, l, i)
 }
 

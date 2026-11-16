@@ -334,16 +334,20 @@ func run(args []string) error {
 	}
 }
 
-// shutdown stops accepting requests, gives those in flight 10 seconds and
-// then closes their connections, attachments included. Stops the executor
-// carries on after their requests ended survive that: shutdown waits up to
-// drain for them to reach their outcome, then interrupts any still running
-// and waits for them to let go of their locks, so the placement and
-// coordinator close cleanly. The Pod's terminationGracePeriodSeconds must
-// exceed drain plus those 10 seconds for a stop in flight to finish rather
-// than be killed.
+// shutdown stops accepting requests, gives those in flight
+// profile.ShutdownRequestGrace and then closes their connections,
+// attachments included. Stops the executor carries on after their requests
+// ended survive that: shutdown waits up to drain for them to reach their
+// outcome, then interrupts any still running and waits profile.DrainTail
+// for them to let go of their locks, so the placement and coordinator close
+// cleanly. A stop still holding one then, typically queued on a lock that
+// does not heed cancellation, would keep those closes waiting until the
+// kubelet's kill, so shutdown exits at once instead: the locks are file
+// locks the system releases, and every step a stop records is safe to stop
+// at. The Pod's terminationGracePeriodSeconds must exceed the sum for a stop
+// in flight to finish rather than be killed.
 func shutdown(server *http.Server, stops *profile.Stops, drain time.Duration, log io.Writer) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), profile.ShutdownRequestGrace)
 	err := server.Shutdown(ctx)
 	cancel()
 	if err != nil {
@@ -351,12 +355,20 @@ func shutdown(server *http.Server, stops *profile.Stops, drain time.Duration, lo
 	}
 	ctx, cancel = context.WithTimeout(context.Background(), drain)
 	defer cancel()
-	if drainErr := stops.Drain(ctx); drainErr != nil {
+	switch drainErr := stops.Drain(ctx); {
+	case errors.Is(drainErr, profile.ErrStopsLeftRunning):
+		_, _ = fmt.Fprintf(log, "Exited without closing the placement: %v after %s at shutdown; "+
+			"repeat each stop to finish it\n", drainErr, drain+profile.DrainTail)
+		exit(1)
+	case drainErr != nil:
 		_, _ = fmt.Fprintf(log, "Interrupted stops still running after %s at shutdown; "+
 			"repeat each stop to finish it\n", drain)
 	}
 	return err
 }
+
+// exit ends the process without running deferred closes; tests replace it.
+var exit = os.Exit
 
 // homeAuthorizer decides the home principal: a caller whose Kubernetes
 // identity a TokenReview authenticates and RBAC allows to use this executor.

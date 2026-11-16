@@ -75,6 +75,15 @@ const (
 	// defaultTimeout bounds every other request, and the wait for an
 	// attachment to be admitted.
 	defaultTimeout = 45 * time.Second
+	// ShutdownRequestGrace is how long an executor shutting down gives the
+	// requests in flight before it closes their connections and drains the
+	// stops it carries on, for up to StopBound and then DrainTail. An
+	// executor Pod's terminationGracePeriodSeconds must exceed their sum for
+	// a stop in flight at a rollout to finish.
+	ShutdownRequestGrace = 10 * time.Second
+	// DrainTail bounds the wait, after a drain interrupted the stops still
+	// running, for them to let go of their locks.
+	DrainTail = 15 * time.Second
 )
 
 // Code describes a stable transport outcome. Unavailable never means absence.

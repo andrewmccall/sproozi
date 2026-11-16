@@ -344,9 +344,7 @@ func (h *handler) perform(r *http.Request, action string, input request) (respon
 		if action == actionInspect {
 			o, err = p.Inspect(r.Context(), input.Launch)
 		} else {
-			release := h.stops.abort(input)
-			o, err = p.Abort(r.Context(), input.Launch, *input.Incarnation)
-			release()
+			o, err = h.abort(r.Context(), input)
 		}
 		if err != nil {
 			return output, err
@@ -358,6 +356,14 @@ func (h *handler) perform(r *http.Request, action string, input request) (respon
 	}
 	return output, nil
 }
+// abort interrupts the visit's stops, and keeps new ones from waiting for a
+// turn, while the placement aborts it.
+func (h *handler) abort(ctx context.Context, input request) (session.Observation, error) {
+	release := h.stops.abort(input)
+	defer release()
+	return h.config.Backend.Abort(ctx, input.Launch, *input.Incarnation)
+}
+
 func (h *handler) fail(w http.ResponseWriter, err error) {
 	if errors.Is(err, harness.ErrNativeTurnPending) {
 		// Still waiting is not unavailable: the client keeps the stop pending.

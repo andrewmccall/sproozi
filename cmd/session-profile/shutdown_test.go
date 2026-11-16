@@ -40,6 +40,31 @@ func TestShutdownWaitsForAStopInFlight(t *testing.T) {
 	}
 }
 
+// A stop that does not let go once interrupted, such as one queued on a lock
+// that ignores cancellation, would keep the deferred closes waiting until the
+// kubelet's kill; shutdown exits instead and says what it left.
+func TestShutdownExitsWhenAStopIgnoresItsInterruption(t *testing.T) {
+	previous := exit
+	code := -1
+	exit = func(c int) { code = c }
+	t.Cleanup(func() { exit = previous })
+	stops := profile.Stops{Tail: 100 * time.Millisecond}
+	_, done := stops.Detach(context.Background())
+	release := make(chan struct{})
+	go func() {
+		<-release
+		done()
+	}()
+	defer close(release)
+	var log bytes.Buffer
+	if err := shutdown(&http.Server{}, &stops, 50*time.Millisecond, &log); err != nil {
+		t.Fatal(err)
+	}
+	if code != 1 || !strings.Contains(log.String(), "Exited without closing the placement") {
+		t.Fatalf("shutdown exited %d and logged %q", code, log.String())
+	}
+}
+
 // Past its drain bound, shutdown interrupts the stop, waits for it to let go
 // and says so, so the deferred closes do not wait on its locks.
 func TestShutdownInterruptsAStopPastItsDrainBound(t *testing.T) {
