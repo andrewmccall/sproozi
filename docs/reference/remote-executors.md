@@ -132,7 +132,8 @@ records the exit. The request carries the launch and its incarnation, as
 `stop` does; a checkpoint is `invalid_request`. It is authorized like every
 placement action and is never `expired`: an agent that exited at its deadline
 is still reported. The answer is `{"version":1,"exited":true}`, or no
-`exited` field when the agent still runs, or the visit is stopping, stopped
+`exited` field when the agent still runs, another operation on the visit,
+such as a stop, is in progress, or the visit is stopping, stopped
 or not yet active. It answers `409 conflict` for another incarnation, and
 `422 unsupported` when the executor's placement cannot observe exits.
 
@@ -184,7 +185,9 @@ exits. For a stop in flight at a rollout to finish, set the executor Pod's
 With less, the kubelet kills the executor at the grace period. That is
 safe, since nothing half-written is kept, but like an interrupted stop it
 loses the reply of an agent's stop in flight: a Claude Code visit then keeps
-the checkpoint it started from, and a Codex visit records an exit. The
+the checkpoint it started from; a Codex visit whose supervisor finished the
+handoff is stopped gracefully by the retry, which captures its conversation
+([native control](native-control.md#exit-reports)). The
 executor logs `Interrupted stops still running after … at shutdown; repeat
 each stop to finish it` when it had to interrupt any, and `Exited without
 closing the placement: …` when one still ran 15 seconds later.
@@ -363,8 +366,10 @@ completed Codex turn. A stopped container never proves a completed Claude Code
 turn, so a Claude Code session keeps no turns from that visit, even one whose
 earlier stop bound its conversation and was waiting for its turn: the
 workspace it started from after a first visit, its previous checkpoint after a
-resumed one. A Codex conversation that cannot be captured, such as a turn the
-agent left unfinished, is kept the same way instead of failing the stop
+resumed one. A Codex conversation whose captured checkpoint does not validate
+is kept the same way, and the executor logs the discard; a capture that fails
+otherwise, including the helper's refusal of a turn the agent left
+unfinished, fails the stop and the next sweep tries again
 ([what a stopped visit keeps](native-control.md#what-a-stopped-visit-keeps)).
 The session then shows `failed` with its `exit` (code, cause
 and last output lines) for a nonzero exit, or `retained`. An `attach` to such

@@ -110,10 +110,19 @@ it stops a visit whose native container already ended. It reports the
 container as ended through `Exited` while the visit is still active, so the
 remote executor's exit sweep, or home's exit watcher through the placement
 protocol's `exited` action, can stop it
-([remote executors](remote-executors.md#noticing-an-exit)). A first Codex
-visit binds the thread a report names. A Claude Code or Copilot visit binds no
-thread from a report. The report is a workload diagnostic, never a writer
-fence or accounting fact.
+([remote executors](remote-executors.md#noticing-an-exit)). A first visit of a
+harness whose state proves completion (Codex, Copilot) binds the thread a
+report names; the supervisor reports one only for Codex today. A Claude Code
+visit binds no thread from a report. The report is a workload diagnostic,
+never a writer fence or accounting fact.
+
+A stop whose quiesce reply was lost, of a harness whose state proves
+completion, is a graceful stop on both placements: the agent's container is
+seen to end within about ten seconds, or a later stop finds it ended, and on
+Kubernetes the supervisor exited 0 with no exit report in its output. No exit
+is recorded, and the stop captures as any graceful stop does. A Claude Code
+stop whose reply was lost is an exit
+([ADR 0062](../adr/0062-one-exit-rule-and-exits-over-the-wire.md)).
 
 ### What a stopped visit keeps
 
@@ -123,16 +132,25 @@ stop keeps by one rule
 from" is the checkpoint a resumed visit started from, or, for a first visit,
 no checkpoint: the session keeps the workspace the visit started from.
 
-| How the visit ended | Kept | If the capture fails |
-| --- | --- | --- |
-| Graceful stop, with a conversation | A new checkpoint | The stop fails; repeating it captures again. |
-| Turnless first visit | What it started from | Nothing is captured. |
-| Harness exited, its state proves completion (Codex, Copilot) and it has a conversation | A new checkpoint | What it started from; the stop finishes. |
-| Harness exited, and its state does not prove completion (Claude Code) | What it started from, even when the visit bound a conversation before it exited | Nothing is captured. |
-| Harness exited before any conversation | What it started from | Nothing is captured. |
+| How the visit ended | Kept | If the captured state does not validate | If the capture fails otherwise |
+| --- | --- | --- | --- |
+| Graceful stop, with a conversation | A new checkpoint | The stop fails | The stop fails |
+| Turnless first visit | What it started from | Nothing is captured | Nothing is captured |
+| Harness exited, its state proves completion (Codex, Copilot) and it has a conversation | A new checkpoint | What it started from; the stop finishes | The stop fails |
+| Harness exited, and its state does not prove completion (Claude Code) | What it started from, even when the visit bound a conversation before it exited | Nothing is captured | Nothing is captured |
+| Harness exited before any conversation | What it started from | Nothing is captured | Nothing is captured |
 
-A stop that kept what the visit started from still reports the visit's
-`exit`.
+"Does not validate" is what the helper returned not being a checkpoint of the
+visit's conversation, which capturing again would find the same. Everything
+else fails the stop, and repeating it captures again: the stop's bound or an
+abort cutting the capture off, an exec or helper failure, output over the
+checkpoint bound, a failed write. The helper's own refusal, such as of a Codex
+turn left unfinished, is a failed helper command too, so that stop fails on
+every repeat; `cancel` ends it. A stop that kept what the visit started from
+still reports the visit's `exit`, and the placement logs `Discarded the
+captured state of stopped visit ALLOCATION of execution EXECUTION and kept the
+checkpoint it started from: ...` (or `the workspace`) to the service's or the
+executor's log.
 
 ## Terminal attachment
 
