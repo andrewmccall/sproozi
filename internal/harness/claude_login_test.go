@@ -112,7 +112,11 @@ spec.loader.exec_module(launch)
 class Stalled(Exception):
     pass
 
-def attempt(old, new, budget):
+def attempt(old, new, budget, short):
+    """Write new over old; after budget units every operation fails. With
+    short, only bytes spend the budget, as on a filling disk: a write past it
+    returns a short count instead of raising, as os.pwrite does, and truncates
+    and syncs go on succeeding."""
     content = bytearray(old)
     left = [budget]
     def spend():
@@ -121,32 +125,39 @@ def attempt(old, new, budget):
         left[0] -= 1
     def pwrite(_, data, offset):
         for i, b in enumerate(data):
+            if short and left[0] <= 0:
+                return i
             spend()
             while len(content) <= offset + i:
                 content.append(0)
             content[offset + i] = b
+        return len(data)
     def ftruncate(_, size):
-        spend()
+        if not short:
+            spend()
         del content[size:]
     def fsync(_):
-        spend()
+        if not short:
+            spend()
     try:
         launch.write_store(0, new, time.monotonic() + 60, pwrite, ftruncate, fsync)
         return bytes(content), True
-    except Stalled:
+    except (Stalled, OSError):
         return bytes(content), False
 
-for old, new in ((b'{"t":"aaaa"}', b'{"t":"bbbbbbbb"}'), (b'{"t":"bbbbbbbb"}', b'{"t":"aaaa"}'), (b"", b'{"t":"a"}')):
-    budget = 0
-    while True:
-        got, finished = attempt(old, new, budget)
-        acted = launch.non_empty(got) is None or launch.whole_login(got)
-        assert not (acted and got not in (old, new)), (old, new, budget, got)
-        assert not (launch.non_empty(got) is None and old), (old, new, budget, got)
-        if finished:
-            assert got == new, got
-            break
-        budget += 1
+for old, new in ((b'{"t":"aaaa"}', b'{"t":"bbbbbbbb"}'), (b'{"t":"bbbbbbbb"}', b'{"t":"aaaa"}'), (b"", b'{"t":"a"}'),
+                 (b'{"refreshToken":"AAAAAAAA"}', b'{"refreshToken":"BBBBBBBB"}')):
+    for short in (False, True):
+        budget = 0
+        while True:
+            got, finished = attempt(old, new, budget, short)
+            acted = launch.non_empty(got) is None or launch.whole_login(got)
+            assert not (acted and got not in (old, new)), (old, new, budget, short, got)
+            assert not (launch.non_empty(got) is None and old), (old, new, budget, short, got)
+            if finished:
+                assert got == new, (short, got)
+                break
+            budget += 1
 
 try:
     launch.write_store(0, b'{"t":"a"}', time.monotonic() - 1,
@@ -156,6 +167,46 @@ except ValueError:
     pass
 `
 	if output, err := exec.Command(python, "-I", "-c", check, script).CombinedOutput(); err != nil {
+		t.Fatalf("%v: %s", err, output)
+	}
+}
+
+// The helper's stop waits at most its bound, even for a periodic sync stuck
+// in open or read on a stalled volume, and reads a store os.read would
+// return in pieces whole.
+func TestClaudeLaunchStopIsBoundedAndReadsTheWholeStore(t *testing.T) {
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	script := filepath.Join(dir, "launch.py")
+	if err = os.WriteFile(script, []byte(harness.ClaudeLaunch), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	const check = `
+import importlib.util, os, sys, threading, time
+spec = importlib.util.spec_from_file_location("launch", sys.argv[1])
+launch = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(launch)
+directory = sys.argv[2]
+
+sync = launch.LoginSync(directory + "/store", directory + "/native", 0.2)
+sync.thread = threading.Thread(target=lambda: time.sleep(30), daemon=True)  # stuck in a read
+sync.thread.start()
+started = time.monotonic()
+sync.stop()
+assert time.monotonic() - started < 2, time.monotonic() - started
+
+store = directory + "/whole"
+with open(store, "wb") as handle:
+    handle.write(b'{"claudeAiOauth":{"refreshToken":"' + b"x" * 200000 + b'"}}')
+pread = os.pread
+os.pread = lambda fd, n, offset: pread(fd, min(n, 4096), offset)
+descriptor = os.open(store, os.O_RDONLY)
+assert launch.whole_login(launch.read_all(descriptor))
+`
+	if output, err := exec.Command(python, "-I", "-c", check, script, dir).CombinedOutput(); err != nil {
 		t.Fatalf("%v: %s", err, output)
 	}
 }

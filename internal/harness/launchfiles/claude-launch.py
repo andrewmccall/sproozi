@@ -153,10 +153,33 @@ def write_store(descriptor, data, deadline, pwrite=os.pwrite, ftruncate=os.ftrun
         ftruncate(descriptor, 0)
         fsync(descriptor)
         return
-    for step in (lambda: pwrite(descriptor, STORE_MARKER, 0), lambda: fsync(descriptor),
-                 lambda: pwrite(descriptor, data[1:], 1), lambda: ftruncate(descriptor, len(data)),
-                 lambda: fsync(descriptor), lambda: pwrite(descriptor, data[:1], 0), lambda: fsync(descriptor)):
+
+    def write_all(chunk, offset):
+        # os.pwrite can write fewer bytes than given without raising, as on a
+        # filling disk. Cutting the file to length after a short write would
+        # leave new bytes over old ones, which can parse as a login that is
+        # neither: write every byte or fail, leaving the marker in place.
+        while chunk:
+            written = pwrite(descriptor, chunk, offset)
+            if written <= 0:
+                raise OSError(errno.EIO, "The login store took no more bytes")
+            chunk, offset = chunk[written:], offset + written
+
+    for step in (lambda: write_all(STORE_MARKER, 0), lambda: fsync(descriptor),
+                 lambda: write_all(data[1:], 1), lambda: ftruncate(descriptor, len(data)),
+                 lambda: fsync(descriptor), lambda: write_all(data[:1], 0), lambda: fsync(descriptor)):
         step()
+
+
+def read_all(descriptor):
+    """The whole store, or one byte past the limit: os.read can return less."""
+    data, offset = b"", 0
+    while len(data) <= MAX_SIGN_IN_BYTES:
+        chunk = os.pread(descriptor, MAX_SIGN_IN_BYTES + 1 - len(data), offset)
+        if not chunk:
+            break
+        data, offset = data + chunk, offset + len(chunk)
+    return data
 
 
 class LoginSync:
@@ -236,14 +259,16 @@ class LoginSync:
             self.native.unlink(missing_ok=True)
             return
         self.native.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        # A buffered file writes every byte or raises, unlike os.pwrite.
         with tempfile.NamedTemporaryFile(dir=self.native.parent, delete=False) as handle:
             os.fchmod(handle.fileno(), 0o600)
             handle.write(data)
         os.replace(handle.name, self.native)
 
-    def sync(self):
-        with self.lock:
+    def sync(self, deadline=None):
+        if deadline is None:
             deadline = time.monotonic() + self.wait
+        with self.lock:
             native = self.read_native()
             # Read after the file, so a kill recorded before it landed is seen.
             killed, stopping = self.killed, self.stopping
@@ -263,8 +288,7 @@ class LoginSync:
             try:
                 stored = None
                 if descriptor is not None:
-                    os.lseek(descriptor, 0, os.SEEK_SET)
-                    stored = non_empty(os.read(descriptor, MAX_SIGN_IN_BYTES + 1))
+                    stored = non_empty(read_all(descriptor))
                     if stored is not None and len(stored) > MAX_SIGN_IN_BYTES:
                         raise ValueError("Stored sign-in exceeds its limit")
                 unfinished = stored is not None and not whole_login(stored)
@@ -315,12 +339,27 @@ class LoginSync:
             return
         self.stopping = True
         self.quit.set()
-        self.thread.join()
-        self.thread = None
-        try:
-            self.sync()
-        except (OSError, ValueError) as error:
-            print("claude-launch: the sign-in wasn't saved: " + str(error), file=sys.stderr)
+        # The whole save, including a periodic sync still in flight, waits at
+        # most self.wait, as the supervisor's does: a sync stuck in open or
+        # read on a stalled volume can't be cancelled, so it runs on in a
+        # daemon thread and the helper goes on without it.
+        deadline = time.monotonic() + self.wait
+        errors = []
+        periodic, self.thread = self.thread, None
+        def save():
+            periodic.join()
+            try:
+                self.sync(deadline)
+            except (OSError, ValueError) as error:
+                errors.append(error)
+        saver = threading.Thread(target=save, daemon=True)
+        saver.start()
+        saver.join(max(0.0, deadline - time.monotonic()))
+        if saver.is_alive():
+            print("claude-launch: the sign-in wasn't saved: the login store was unavailable for "
+                  + str(self.wait) + "s", file=sys.stderr)
+        elif errors:
+            print("claude-launch: the sign-in wasn't saved: " + str(errors[0]), file=sys.stderr)
 
 
 def native_environment(args):
