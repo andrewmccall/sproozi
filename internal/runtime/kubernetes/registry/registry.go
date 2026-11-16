@@ -1,4 +1,4 @@
-// Package session retains trusted remote execution registration and fencing.
+// Package registry retains trusted remote execution registration and fencing.
 // Only the remote executor may write this store. Native workers, checkpoints
 // and Run annotations do not supply authority. Callers confirm restoration,
 // native-container termination and ledger seals before recording those effects.
@@ -20,7 +20,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/andrewmccall/sproozi/internal/agentcontract"
-	"github.com/andrewmccall/sproozi/internal/deadline"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/agentprofile"
@@ -60,18 +59,6 @@ var (
 	identifier          = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$`)
 	digestPattern       = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	uuidPattern         = regexp.MustCompile(`^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$`)
-)
-
-type Phase string
-
-const (
-	Creating  Phase = "creating"
-	Bound     Phase = "bound"
-	Prepared  Phase = "prepared"
-	Active    Phase = "active"
-	Stopping  Phase = "stopping"
-	Stopped   Phase = "stopped"
-	Cancelled Phase = "cancelled"
 )
 
 // Reference identifies the registry incarnation as well as the session epoch.
@@ -178,10 +165,14 @@ func (s *Store) Create(ctx context.Context, registration Registration) (Record, 
 	if !apierrors.IsNotFound(err) {
 		return Record{}, err
 	}
-	if deadline.At(registration.OriginalDeadline).Passed(s.now()) {
-		return Record{}, ErrExpired
+	state := stored{Version: 1, Registration: storedRegistration{Registration: registration}, Phase: phaseNone}
+	if err = state.admit(evCreate, s.now()); err != nil {
+		return Record{}, err
 	}
-	document, err := encode(stored{Version: 1, Registration: storedRegistration{Registration: registration}, Phase: Creating})
+	if err = state.apply(evCreate); err != nil {
+		return Record{}, err
+	}
+	document, err := encode(state)
 	if err != nil {
 		return Record{}, err
 	}
@@ -251,11 +242,14 @@ func (s *Store) BindRun(ctx context.Context, ref Reference, runUID string) (Reco
 		if r.RunUID == runUID {
 			return nil
 		}
-		if r.Phase != Creating || r.RunUID != "" {
+		if err := r.admit(evBindRun, s.now()); err != nil {
+			return err
+		}
+		if r.RunUID != "" {
 			return ErrConflict
 		}
-		r.RunUID, r.Phase = runUID, Bound
-		return nil
+		r.RunUID = runUID
+		return r.apply(evBindRun)
 	})
 }
 
@@ -272,11 +266,14 @@ func (s *Store) BindPod(ctx context.Context, ref Reference, podUID string) (Reco
 		if r.PodUID == podUID {
 			return nil
 		}
-		if r.Phase != Bound && (r.Phase != Cancelled || r.RunUID == "") || r.PodUID != "" {
+		if err := r.admit(evBindPod, s.now()); err != nil {
+			return err
+		}
+		if r.PodUID != "" || r.Phase == Cancelled && r.RunUID == "" {
 			return ErrConflict
 		}
 		r.PodUID = podUID
-		return nil
+		return r.apply(evBindPod)
 	})
 }
 
@@ -292,11 +289,14 @@ func (s *Store) Prepared(ctx context.Context, ref Reference, podUID string) (Rec
 		if r.PodUID == podUID && r.Phase != Bound && r.Phase != Cancelled {
 			return nil
 		}
-		if r.Phase != Bound || r.PodUID != "" && r.PodUID != podUID {
+		if err := r.admit(evPrepared, s.now()); err != nil {
+			return err
+		}
+		if r.PodUID != "" && r.PodUID != podUID {
 			return ErrConflict
 		}
-		r.PodUID, r.Phase = podUID, Prepared
-		return nil
+		r.PodUID = podUID
+		return r.apply(evPrepared)
 	})
 }
 
@@ -307,14 +307,10 @@ func (s *Store) Activate(ctx context.Context, ref Reference) (Record, error) {
 		if r.Phase == Active {
 			return nil
 		}
-		if deadline.At(r.Registration.OriginalDeadline).Passed(s.now()) {
-			return ErrExpired
+		if err := r.admit(evActivate, s.now()); err != nil {
+			return err
 		}
-		if r.Phase != Prepared {
-			return ErrConflict
-		}
-		r.Phase = Active
-		return nil
+		return r.apply(evActivate)
 	})
 }
 
@@ -332,11 +328,14 @@ func (s *Store) BindNative(ctx context.Context, ref Reference, nativeUUID string
 		if r.Registration.NativeUUID == nativeUUID {
 			return nil
 		}
-		if r.Registration.NativeUUID != "" || r.Phase != Active {
+		if err := r.admit(evBindNative, s.now()); err != nil {
+			return err
+		}
+		if r.Registration.NativeUUID != "" {
 			return ErrConflict
 		}
 		r.Registration.NativeUUID = nativeUUID
-		return nil
+		return r.apply(evBindNative)
 	})
 }
 
@@ -345,21 +344,24 @@ func (s *Store) Stop(ctx context.Context, ref Reference) (Record, error) {
 		if r.Phase == Stopping || r.Phase == Stopped {
 			return nil
 		}
-		if r.Phase != Active {
-			return ErrConflict
+		if err := r.admit(evStop, s.now()); err != nil {
+			return err
 		}
-		r.Phase = Stopping
-		return nil
+		return r.apply(evStop)
 	})
 }
 
 func (s *Store) Cancel(ctx context.Context, ref Reference) (Record, error) {
 	return s.change(ctx, ref, func(r *stored) error {
+		// A stopped registration is settled: its stop already ended the
+		// execution and retained its receipt, so there is nothing to cancel.
 		if r.Phase == Cancelled || r.Phase == Stopped {
 			return nil
 		}
-		r.Phase = Cancelled
-		return nil
+		if err := r.admit(evCancel, s.now()); err != nil {
+			return err
+		}
+		return r.apply(evCancel)
 	})
 }
 
@@ -377,11 +379,11 @@ func (s *Store) CompleteStop(ctx context.Context, ref Reference, checkpointDiges
 			}
 			return nil
 		}
-		if r.Phase != Stopping {
-			return ErrConflict
+		if err := r.admit(evCompleteStop, s.now()); err != nil {
+			return err
 		}
-		r.Receipt, r.Phase = receipt, Stopped
-		return nil
+		r.Receipt = receipt
+		return r.apply(evCompleteStop)
 	})
 }
 
@@ -389,7 +391,13 @@ func (s *Store) CompleteStop(ctx context.Context, ref Reference, checkpointDiges
 // physically fenced the exact bound Pod. Cancellation requires no new checkpoint.
 func (s *Store) CompleteCancel(ctx context.Context, ref Reference, seals map[api.CapabilityKind]budget.TrustedUsage) (Record, error) {
 	return s.change(ctx, ref, func(r *stored) error {
-		if r.Phase != Cancelled || r.RunUID == "" || r.PodUID == "" {
+		// The receipt replay follows admission: only a cancelled record may
+		// hold a cancellation receipt, and a turnless stop's receipt would
+		// otherwise compare equal.
+		if err := r.admit(evCompleteCancel, s.now()); err != nil {
+			return err
+		}
+		if r.RunUID == "" || r.PodUID == "" {
 			return ErrConflict
 		}
 		receipt := &StopReceipt{Seals: seals}
@@ -403,7 +411,7 @@ func (s *Store) CompleteCancel(ctx context.Context, ref Reference, seals map[api
 			return nil
 		}
 		r.Receipt = receipt
-		return nil
+		return r.apply(evCompleteCancel)
 	})
 }
 
