@@ -133,7 +133,7 @@ func TestAnUnreadableJournalIsLoggedOnce(t *testing.T) {
 	s, _, _, repo := testService(t)
 	var log strings.Builder
 	s.log = &log
-	var ids []string
+	ids := make([]string, 0, 2)
 	for range 2 {
 		id := startedOn(t, s, repo, testLocal)
 		if _, err := s.Stop(t.Context(), id, uuid.NewString()); err != nil {
