@@ -67,7 +67,7 @@ func runningEvery(t *testing.T, interval time.Duration) *loginSync {
 	if err := l.sync(); err != nil {
 		t.Fatal(err)
 	}
-	go l.run()
+	l.settled()
 	t.Cleanup(func() {
 		l.stop()
 		<-l.stopped

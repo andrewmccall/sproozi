@@ -188,7 +188,7 @@ func TestStopSavesTheLastChange(t *testing.T) {
 	if err = l.sync(); err != nil {
 		t.Fatal(err)
 	}
-	go l.run()
+	l.settled()
 	write(t, l.native, `{"refresh":"last"}`)
 	l.stop()
 	l.stop()

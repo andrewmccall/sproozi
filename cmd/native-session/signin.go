@@ -60,6 +60,9 @@ type loginSync struct {
 	// quit ends run, which closes stopped; once makes stop idempotent.
 	quit, stopped chan struct{}
 	once          sync.Once
+	// started starts run once, from settled, or marks it never started
+	// from stop.
+	started sync.Once
 	// diagnostics receives diagnostic lines; nil is standard error.
 	diagnostics io.Writer
 	// wait replaces loginSaveWait when set.
@@ -178,29 +181,31 @@ func startLoginSync(c config) (*loginSync, error) {
 // holds no login, would replace the unfinished store and every other session
 // would copy it in. A change the harness makes after this, such as a
 // sign-in, still replaces the store. With a whole or empty store at the
-// start nothing changes: the start-up write is shared as before. A nil sync
-// does nothing.
+// start nothing changes: the start-up write is shared as before. settled
+// then starts the periodic sync, so no periodic sync runs before it, however
+// long the start-up writes take. A nil sync does nothing.
 func (l *loginSync) settled() {
 	if l == nil {
 		return
 	}
 	l.mu.Lock()
-	defer l.mu.Unlock()
-	if !l.startedUnfinished {
-		return
+	if l.startedUnfinished {
+		if native, err := readLogin(l.native); err == nil && (native == nil || wholeLogin(native)) {
+			l.agreed = native
+		}
 	}
-	if native, err := readLogin(l.native); err == nil && (native == nil || wholeLogin(native)) {
-		l.agreed = native
-	}
+	l.mu.Unlock()
+	l.started.Do(func() { go l.run() })
 }
 
 // errStoreNotWhole is a store that holds no whole login: a writer stopped
 // part way, or it holds something else.
 var errStoreNotWhole = errors.New("the login store is not a whole login")
 
-// begin runs the first sync and starts the periodic one. A store that holds
-// no whole login starts the harness without one, rather than failing the
-// launch or giving it the store's bytes; its own sign-in then replaces it.
+// begin runs the first sync; settled starts the periodic one. A store that
+// holds no whole login starts the harness without one, rather than failing
+// the launch or giving it the store's bytes; its own sign-in then replaces
+// it. A store that cannot be read fails the launch.
 func (l *loginSync) begin() error {
 	err := l.sync()
 	if errors.Is(err, errStoreNotWhole) {
@@ -212,7 +217,6 @@ func (l *loginSync) begin() error {
 	} else if err != nil {
 		return err
 	}
-	go l.run()
 	return nil
 }
 
@@ -269,6 +273,9 @@ func (l *loginSync) stop() {
 	l.once.Do(func() {
 		l.stopping()
 		close(l.quit)
+		// A launch that failed before settled never started the periodic
+		// sync; nothing will close stopped for it.
+		l.started.Do(func() { close(l.stopped) })
 		ctx, cancel := context.WithTimeout(context.Background(), l.saveWait())
 		defer cancel()
 		saved := make(chan error, 1)

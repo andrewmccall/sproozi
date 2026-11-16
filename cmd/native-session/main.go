@@ -446,14 +446,12 @@ func (s *server) activate() response {
 		thread = uuid.NewString()
 		s.launchID = thread
 	}
-	args, env, err := adapter.prepare(s.config, thread, env)
+	args, env, err := prepareLaunch(adapter, s.config, thread, env, login)
 	if err != nil {
 		login.stop()
 		r.Error = err.Error()
 		return r
 	}
-	// The supervisor's own writes to the login file are done.
-	login.settled()
 	n, err := nativepty.Start(terminalLaunch(adapter.executable, args, env, s.config.Deadline, login))
 	if err != nil {
 		login.stop()
@@ -468,6 +466,20 @@ func (s *server) activate() response {
 		closeForwarder(forwarder)
 	})
 	return r
+}
+
+// prepareLaunch runs the adapter's launch preparation, which may write the
+// harness's login file (Copilot's workspace trust), and then tells the login
+// sync that the supervisor's own writes are done, which starts its periodic
+// sync. Until then no periodic sync can take that write for the harness's.
+func prepareLaunch(adapter nativeAdapter, c config, thread string, env []string,
+	login *loginSync) ([]string, []string, error) {
+	args, env, err := adapter.prepare(c, thread, env)
+	if err != nil {
+		return nil, nil, err
+	}
+	login.settled()
+	return args, env, nil
 }
 
 // terminalLaunch is the harness's terminal. Every kill its supervisor sends
