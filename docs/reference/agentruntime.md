@@ -71,7 +71,10 @@ No additional egress token or local proxy process is injected.
 gateway's TLS certificate covers. Sandboxes resolve no names, so the controller
 resolves that host itself when it creates each Pod and writes the address into
 the Pod's hosts file. The host must therefore resolve from the controller, not
-only from Pods. Keep it a host name: managed harnesses also use it as the
+only from Pods. A lookup with no answer within one second is asked once more
+with the resolver's own timeout, so a lost DNS reply delays the Pod, and every
+other AgentRun the controller is reconciling, by about a second rather than the
+resolver's five. Keep it a host name: managed harnesses also use it as the
 authority of their control connection, which the gateway serves only by name.
 The address is fixed for the Pod's life; a gateway Service recreated with a new
 cluster IP reaches only new runs. See [ADR 0040](../adr/0040-sandboxes-reach-the-gateway-without-dns.md).
