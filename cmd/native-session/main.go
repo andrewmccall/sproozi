@@ -601,7 +601,13 @@ func (s *server) quiesce() response {
 	if err == nil && forced != "" {
 		// The harness state must still show the turn the stop observed.
 		again, turnAgain, observeErr := s.observeNativeTurn()
-		if observeErr != nil || again != id || turnAgain != turn {
+		switch {
+		case errors.Is(observeErr, errJournalRowIncomplete):
+			// Capture, after the placement fences the container, leaves
+			// the unfinished row out (ADR 0008's correction of 2026-11-16).
+			err = errors.New("the forced stop left a native journal row unfinished; " +
+				"repeat the stop to complete it with the completed turns kept")
+		case observeErr != nil || again != id || turnAgain != turn:
 			err = errors.New("native turn changed before the forced stop")
 		}
 	}

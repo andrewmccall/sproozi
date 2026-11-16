@@ -88,6 +88,29 @@ func TestChangedTurnAfterTheKillFailsTheStop(t *testing.T) {
 	}
 }
 
+// A kill that cut short a row Codex was appending is not a changed turn: the
+// stop fails with its own message, which says that repeating it completes it
+// (capture leaves the unfinished row out).
+func TestUnfinishedRowAfterTheKillFailsTheStopWithItsOwnMessage(t *testing.T) {
+	var calls atomic.Int32
+	withAdapter(t, harness.NativeCodex, func(a *nativeAdapter) {
+		a.observe = func(*server) (string, string, error) {
+			if calls.Add(1) == 1 {
+				return selected, completedTurnID, nil
+			}
+			return "", "", fmt.Errorf("observe: %w", errJournalRowIncomplete)
+		}
+	})
+	setQuitWait(t, 300*time.Millisecond)
+	s, _ := stopping(t, harness.NativeCodex, ignoresQuit, time.Time{})
+	r, reports := stopOnce(t, s)
+	failedOnce(t, r, reports, harness.NativeExitFailed)
+	if strings.Contains(r.Error, "changed") || !strings.Contains(r.Error, "unfinished") ||
+		!strings.Contains(r.Error, "repeat") {
+		t.Fatalf("reply error: %q", r.Error)
+	}
+}
+
 // A kill not confirmed within the forced-stop wait fails the stop: the
 // writer is not proven stopped.
 func TestUnconfirmedKillFailsTheStop(t *testing.T) {

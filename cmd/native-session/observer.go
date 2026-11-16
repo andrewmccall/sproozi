@@ -13,6 +13,10 @@ import (
 	"github.com/andrewmccall/sproozi/internal/harness"
 )
 
+// errJournalRowIncomplete reports a journal whose final row has no newline
+// yet: a writer is appending it, or a kill cut it short.
+var errJournalRowIncomplete = errors.New("native journal row is incomplete")
+
 // observeTurn reads a bounded native journal while input is gated. It is neither
 // capture nor a writer fence. The workload can modify this journal; a successful
 // observation only permits graceful quit before the runtime independently stops
@@ -55,7 +59,7 @@ func observeTaskTurn(home, selected, instructionDigest string, maxBytes int64,
 		}
 		// A writer may have appended a partial final row. Retry after the next poll.
 		if !bytes.HasSuffix(data, []byte{'\n'}) {
-			return errors.New("native journal row is incomplete")
+			return errJournalRowIncomplete
 		}
 		relative, err := filepath.Rel(home, name)
 		if err != nil {

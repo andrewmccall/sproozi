@@ -118,18 +118,22 @@ func TestCaptureLeavesOutTheRowAStoppedWriterDidNotFinish(t *testing.T) {
 	}
 }
 
-// The live observers never accept a journal whose final row is unfinished:
-// the writer may still be running, so they wait for the next poll.
+// The validators the live observers use refuse a final row cut short inside
+// its JSON: the writer may still be running, so they wait for the next poll.
+// Codex's validator does accept a final row that is complete JSON without its
+// newline; the supervisor's journal observer refuses that one before it
+// (cmd/native-session/observer.go), while Claude Code's and Copilot's
+// validators refuse any journal without a final newline.
 func TestValidatorsStillRefuseAnUnfinishedFinalRow(t *testing.T) {
+	const row = `{"type":"event_msg","payload":{"type":"token_count"}}`
 	for name, j := range journalFormats(t) {
-		if name == NativeCodex {
-			// The supervisor's journal observer refuses it before the
-			// validator (cmd/native-session/observer.go).
-			continue
+		cut := append(bytes.Clone(j.complete), row[:len(row)/2]...)
+		if err := j.validate(cut); err == nil {
+			t.Fatalf("%s: the validator accepted a row cut inside its JSON", name)
 		}
-		appended := append(bytes.Clone(j.complete), `{"type":"tok`...)
-		if err := j.validate(appended); err == nil {
-			t.Fatalf("%s: the validator accepted an unfinished final row", name)
+		unterminated := append(bytes.Clone(j.complete), row...)
+		if err := j.validate(unterminated); (err == nil) != (name == NativeCodex) {
+			t.Fatalf("%s: a complete final row without its newline: %v", name, err)
 		}
 	}
 }
