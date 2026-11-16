@@ -76,7 +76,8 @@ Tests: `TestEnsureSandboxPinsGatewayAndRemovesDNS`,
   the gateway's certificate bound what a wrong address could reach.
 - If the gateway Service is recreated
   with a new cluster IP, running sandboxes lose the gateway until their runs
-  end. Runs are at most an hour long. `gatewayEndpoint` must stay a host name:
+  end. A run has no ceiling on its length: `maxExecutionDuration` has no default
+  or maximum (ADR 0056). `gatewayEndpoint` must stay a host name:
   managed harnesses use it as their control connection's authority, and the
   gateway serves inspection hosts by name only.
 - A workload that resolves names itself, for example a tool that ignores
@@ -86,6 +87,9 @@ Tests: `TestEnsureSandboxPinsGatewayAndRemovesDNS`,
   skipped `HTTPS_PROXY`, since `diagnose` sees no gateway record of it.
 - Tests and envtest inject a resolver, because the gateway Service name does
   not resolve outside a cluster.
+
+Corrected 2026-11-16: "Runs are at most an hour long" became a statement that
+runs have no ceiling (`api/v1alpha1/agentpolicy_types.go`, ADR 0056).
 
 ## Revisit when
 
