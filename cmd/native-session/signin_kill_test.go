@@ -3,10 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -24,18 +24,26 @@ const quietInterval = time.Hour
 // of the store: the stop rules let a whole login through.
 const unsavedLogin = `{"refresh":"r9"}`
 
-// killable is a supervisor of kind whose harness ignores its quit and whose
-// terminal supervisor records every kill in the login sync before sending
-// it, as activate wires it. Only a watched one has its exit watcher, which
-// saves the sign-in and records a kill it sees after the fact; without it,
-// only the record made before the kill keeps unsavedLogin out of the store.
-// The store holds refreshedR3 and the harness's file unsavedLogin.
+// ignoringTerminal is activate's terminal for a harness that ignores its
+// quit, run from the test's shell in a temporary workspace.
+func ignoringTerminal(t *testing.T, until time.Time, login *loginSync) nativepty.Launch {
+	t.Helper()
+	launch := terminalLaunch("/bin/sh", []string{"-c", ignoresQuit},
+		[]string{testPathEnvironment, testTerminalEnvironment}, until, login)
+	launch.Dir = t.TempDir()
+	return launch
+}
+
+// killable is a supervisor of kind whose harness ignores its quit, on
+// activate's terminal, which records every kill in the login sync before
+// sending it. Only a watched one has its exit watcher, which saves the
+// sign-in and records a kill it sees after the fact; without it, only the
+// record made before the kill keeps unsavedLogin out of the store. The store
+// holds refreshedR3 and the harness's file unsavedLogin.
 func killable(t *testing.T, kind harness.NativeKind, until time.Time, watched bool) (*server, *loginSync) {
 	t.Helper()
 	l := signedInEvery(t, quietInterval)
-	native, err := nativepty.Start(nativepty.Launch{Executable: "/bin/sh", Args: []string{"-c", ignoresQuit},
-		Env: []string{testPathEnvironment, "TERM=xterm"}, Dir: t.TempDir(), Deadline: until,
-		Size: nativepty.Size{Rows: 24, Columns: 80}, BeforeKill: l.forced})
+	native, err := nativepty.Start(ignoringTerminal(t, until, l))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,11 +73,7 @@ func TestEveryKillLeavesTheStoreAsItWas(t *testing.T) {
 	}
 	stopsGracefully := func(t *testing.T, s *server) {
 		t.Helper()
-		ended(t, s, func() {
-			if r := quiesceWithin(t, s, 10*time.Second); r.State == harness.NativeStopped {
-				s.conclude()
-			}
-		})
+		stopOnce(t, s)
 	}
 	for name, c := range map[string]struct {
 		kind    harness.NativeKind
@@ -93,7 +97,7 @@ func TestEveryKillLeavesTheStoreAsItWas(t *testing.T) {
 				completed(a)
 				a.finish = func(*nativepty.Supervisor, context.Context) (nativepty.Exit, error) {
 					return nativepty.Exit{}, fmt.Errorf("send native quit: %w",
-						errorsJoin(nativepty.ErrInputBusy, io.ErrShortWrite))
+						errors.Join(nativepty.ErrInputBusy, io.ErrShortWrite))
 				}
 			})
 		}, drive: stopsGracefully},
@@ -161,10 +165,7 @@ func TestUnchangedLoginAfterAKillLeavesTheStoreAlone(t *testing.T) {
 // activate's terminal records a kill in the login sync before sending it.
 func TestTheHarnessTerminalRecordsItsKills(t *testing.T) {
 	l := signedIn(t)
-	launch := terminalLaunch("/bin/sh", []string{"-c", ignoresQuit}, []string{testPathEnvironment, "TERM=xterm"},
-		time.Time{}, l)
-	launch.Dir = t.TempDir()
-	native, err := nativepty.Start(launch)
+	native, err := nativepty.Start(ignoringTerminal(t, time.Time{}, l))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,13 +204,4 @@ func TestFirstSyncReplacesAHalfWrittenLogin(t *testing.T) {
 			}
 		})
 	}
-}
-
-// errorsJoin keeps the input-full error's shape as the terminal reports it.
-func errorsJoin(errs ...error) error {
-	var parts []string
-	for _, err := range errs {
-		parts = append(parts, err.Error())
-	}
-	return fmt.Errorf("%w: %s", errs[0], strings.Join(parts[1:], ": "))
 }

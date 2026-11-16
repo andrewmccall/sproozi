@@ -33,6 +33,8 @@ const (
 	missing = "<missing>"
 	// refreshedR3 is a login after its third refresh.
 	refreshedR3 = `{"refresh":"r3"}`
+	// refreshedR4 is the login after its fourth refresh.
+	refreshedR4 = `{"refresh":"r4"}`
 )
 
 // session is one supervisor's view: its harness's login file and the shared

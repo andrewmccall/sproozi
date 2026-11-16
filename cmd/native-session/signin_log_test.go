@@ -15,17 +15,17 @@ func TestRefusedSyncIsLoggedOncePerChange(t *testing.T) {
 	for range 3 {
 		l.tick(context.Background())
 	}
-	write(t, l.native, `{"refresh":"r4"}`)
+	write(t, l.native, refreshedR4)
 	for range 2 {
 		l.tick(context.Background())
 	}
 	said := l.diagnostics.(*lockedBuffer).String()
 	lines := strings.Split(strings.TrimSpace(said), "\n")
-	if len(lines) != 2 || !strings.Contains(lines[0], "Stopped syncing") || !strings.Contains(lines[0], "not a whole login") ||
-		!strings.Contains(lines[1], "Resumed syncing") {
+	if len(lines) != 2 || !strings.Contains(lines[0], "Stopped syncing") ||
+		!strings.Contains(lines[0], "not a whole login") || !strings.Contains(lines[1], "Resumed syncing") {
 		t.Fatalf("diagnostics: %q", said)
 	}
-	if content(t, l.stored) != `{"refresh":"r4"}` {
+	if content(t, l.stored) != refreshedR4 {
 		t.Fatalf("the store holds %q", content(t, l.stored))
 	}
 }

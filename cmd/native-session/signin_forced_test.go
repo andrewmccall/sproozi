@@ -100,9 +100,9 @@ func TestStopNeverSignsTheLoginOut(t *testing.T) {
 func TestRefreshWhileStoppingIsShared(t *testing.T) {
 	l := signedIn(t)
 	l.stopping()
-	write(t, l.native, `{"refresh":"r4"}`)
+	write(t, l.native, refreshedR4)
 	stopWithin(t, l)
-	if content(t, l.stored) != `{"refresh":"r4"}` {
+	if content(t, l.stored) != refreshedR4 {
 		t.Fatalf("the store holds %q", content(t, l.stored))
 	}
 }
@@ -112,7 +112,7 @@ func TestRefreshWhileStoppingIsShared(t *testing.T) {
 func TestForcedStopLeavesTheStoreAsItIs(t *testing.T) {
 	l := signedIn(t)
 	l.forced()
-	write(t, l.native, `{"refresh":"r4"}`)
+	write(t, l.native, refreshedR4)
 	if err := l.sync(); err == nil {
 		t.Fatal("a change the stop could not save synced without a word")
 	}

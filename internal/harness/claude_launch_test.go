@@ -19,6 +19,7 @@ const (
 	claudeErrorCase     = "error"
 	claudeAnswer        = "Fixture answer"
 	claudeMalformedCase = "malformed"
+	unfinishedStoreCase = "sign-in-unfinished-store"
 )
 
 // fakeClaude checks the stock launch, then behaves as FIXTURE_CASE asks.
@@ -169,7 +170,7 @@ func TestClaudeLaunchPublishesOnlyASuccessfulResult(t *testing.T) {
 func TestClaudeLaunchKeepsTheLoginStoreInStep(t *testing.T) {
 	const unfinishedStore = `{"claudeAiOauth":{"refre`
 	for _, scenario := range []string{"sign-in", "sign-in-refresh", "sign-in-half-written", "sign-in-removed",
-		"sign-in-empty-object", "sign-in-unfinished-store"} {
+		"sign-in-empty-object", unfinishedStoreCase} {
 		t.Run(scenario, func(t *testing.T) {
 			t.Parallel()
 			f := newClaudeFixture(t, scenario, "--model", "fixture-model")
@@ -181,11 +182,11 @@ func TestClaudeLaunchKeepsTheLoginStoreInStep(t *testing.T) {
 			switch scenario {
 			case "sign-in-refresh":
 				want = refreshedLogin
-			case "sign-in-unfinished-store":
+			case unfinishedStoreCase:
 				want = unfinishedStore
 			}
 			initial := storedLogin
-			if scenario == "sign-in-unfinished-store" {
+			if scenario == unfinishedStoreCase {
 				initial = unfinishedStore
 			}
 			if err := os.WriteFile(store, []byte(initial), 0o600); err != nil {

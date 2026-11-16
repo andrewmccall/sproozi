@@ -117,9 +117,9 @@ func TestUnfinishedStoreIsNeverCopiedIntoTheHarness(t *testing.T) {
 			if content(t, l.native) != refreshedR3 {
 				t.Fatalf("the harness's login became %q", content(t, l.native))
 			}
-			write(t, l.native, `{"refresh":"r4"}`)
+			write(t, l.native, refreshedR4)
 			syncAll(t, l)
-			if content(t, l.stored) != `{"refresh":"r4"}` {
+			if content(t, l.stored) != refreshedR4 {
 				t.Fatalf("the next change left the store %q", content(t, l.stored))
 			}
 		})
@@ -168,7 +168,7 @@ func TestNothingIsWrittenOnceTheSaveGaveUp(t *testing.T) {
 	if err = syscall.Flock(int(peer.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		t.Fatalf("the lock stayed taken: %v", err)
 	}
-	if err = writeStore(ended, f, []byte(`{"refresh":"r4"}`)); err == nil {
+	if err = writeStore(ended, f, []byte(refreshedR4)); err == nil {
 		t.Fatal("a save whose bound had passed wrote")
 	}
 	if content(t, stored) != refreshedR3 {

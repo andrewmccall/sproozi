@@ -16,7 +16,7 @@ import (
 func startNative(t *testing.T, script string, deadline time.Time) *nativepty.Supervisor {
 	t.Helper()
 	native, err := nativepty.Start(nativepty.Launch{Executable: "/bin/sh", Args: []string{"-c", script},
-		Env: []string{testPathEnvironment, "TERM=xterm"}, Dir: t.TempDir(), Deadline: deadline,
+		Env: []string{testPathEnvironment, testTerminalEnvironment}, Dir: t.TempDir(), Deadline: deadline,
 		Size: nativepty.Size{Rows: 24, Columns: 80}})
 	if err != nil {
 		t.Fatal(err)

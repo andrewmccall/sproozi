@@ -19,6 +19,9 @@ import (
 
 const testPathEnvironment = "PATH=/usr/bin:/bin"
 
+// testTerminalEnvironment is the terminal type test harnesses run under.
+const testTerminalEnvironment = "TERM=xterm"
+
 const selected = "01234567-89ab-cdef-0123-456789abcdef"
 const instructions = "Only the isolated fixture is approved."
 

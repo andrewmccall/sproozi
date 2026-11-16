@@ -297,12 +297,23 @@ func (l *loginSync) syncWithin(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	trust := l.trust()
 	if !l.known && native != nil && !wholeLogin(native) {
 		// Left half written before this launch: the store's login replaces it.
 		native = nil
 	}
 	changed := l.known && !bytes.Equal(native, l.agreed)
+	if open, err := l.mayOpenStore(native, changed); !open {
+		return err
+	}
+	return l.exchange(ctx, native, changed)
+}
+
+// mayOpenStore decides from the harness's file alone whether this sync goes
+// on to the store: not once the harness may have been killed, not with a
+// file that is not a whole login, and not for a sign-out that may be a
+// rewrite cut short. The caller holds l.mu.
+func (l *loginSync) mayOpenStore(native []byte, changed bool) (bool, error) {
+	trust := l.trust()
 	if changed && native == nil {
 		l.nativeOut++
 	} else {
@@ -310,19 +321,25 @@ func (l *loginSync) syncWithin(ctx context.Context) error {
 	}
 	switch {
 	case changed && trust == loginForced:
-		return errors.New("the harness was killed, which can cut short a rewrite of its login file")
+		return false, errors.New("the harness was killed, which can cut short a rewrite of its login file")
 	case trust == loginForced:
-		return nil
+		return false, nil
 	case changed && native != nil && !wholeLogin(native):
-		return fmt.Errorf("sign-in file %s is not a whole login", l.native)
+		return false, fmt.Errorf("sign-in file %s is not a whole login", l.native)
 	case changed && native == nil && trust != loginRunning:
 		// Not a sign-out made while the harness ran: the stop may cut a
 		// rewrite short. The store keeps the login.
-		return nil
+		return false, nil
 	case changed && native == nil && l.nativeOut < signOutSyncs:
 		// Perhaps a rewrite caught after its truncate; the next sync decides.
-		return nil
+		return false, nil
 	}
+	return true, nil
+}
+
+// exchange copies the harness's change to the store, or the store's into
+// the harness, under the store's lock. The caller holds l.mu.
+func (l *loginSync) exchange(ctx context.Context, native []byte, changed bool) error {
 	store, writable, err := openStore(ctx, l.stored)
 	if err != nil {
 		return err
