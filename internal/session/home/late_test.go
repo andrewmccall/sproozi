@@ -57,10 +57,10 @@ func wantDeadlineProblem(t *testing.T, r Response, id string) {
 func wantStoppedAndResumable(t *testing.T, s *Service, id, digest, thread string) {
 	t.Helper()
 	status, err := s.Status(id)
-	if err != nil || status.Phase != stageRetained || (digest != "") != (status.CheckpointInfo != nil) {
+	if err != nil || status.Phase != string(PhaseRetained) || (digest != "") != (status.CheckpointInfo != nil) {
 		t.Fatalf("status after the deadline: %+v %v", status, err)
 	}
-	if again, err := s.Stop(t.Context(), id, uuid.NewString()); err != nil || again.Phase != stageRetained {
+	if again, err := s.Stop(t.Context(), id, uuid.NewString()); err != nil || again.Phase != string(PhaseRetained) {
 		t.Fatalf("stop after the deadline: %+v %v", again, err)
 	}
 	resumed, err := s.Resume(t.Context(), id, uuid.NewString(), nil)
@@ -146,7 +146,7 @@ func resumeInterruptedThenLate(t *testing.T, interruption, late string) {
 		r = exchange(t, s, Request{Action: ActionRecover, ID: id})
 	case ActionStop:
 		r = exchange(t, s, Request{Action: ActionStop, ID: id, OperationID: uuid.NewString()})
-		if r.Error != "" || r.Status == nil || r.Status.Phase != stageRetained {
+		if r.Error != "" || r.Status == nil || r.Status.Phase != string(PhaseRetained) {
 			t.Fatalf("late stop replied %+v", r)
 		}
 	case lateMoveLocal:
@@ -229,7 +229,7 @@ func TestMoveLocalAfterTheDeadlineStopsTheRemoteVisit(t *testing.T) {
 	prepares := local.prepares
 	r := exchange(t, s, Request{Action: ActionMove, ID: id, OperationID: uuid.NewString(), Destination: LocalAlias})
 	wantDeadlineProblem(t, r, id)
-	if r.Status == nil || r.Status.Phase != stageRetained || r.Status.Placement != testRemote ||
+	if r.Status == nil || r.Status.Phase != string(PhaseRetained) || r.Status.Placement != testRemote ||
 		remote.stops != 1 || local.prepares != prepares {
 		t.Fatalf("late move: %+v, remote stops %d, local prepares %d", r.Status, remote.stops, local.prepares-prepares)
 	}
@@ -252,7 +252,7 @@ func TestStartRetriedAfterItsDeadlineKeepsItsWorkspace(t *testing.T) {
 		t.Fatalf("late start: %v", err)
 	}
 	status, err := s.Status(id)
-	if err != nil || status.Phase != stageRetained || status.ExecutionID != id || local.aborts != 1 {
+	if err != nil || status.Phase != string(PhaseRetained) || status.ExecutionID != id || local.aborts != 1 {
 		t.Fatalf("status of a start its deadline ended: %+v %v", status, err)
 	}
 	// A replay of the start reports the same.

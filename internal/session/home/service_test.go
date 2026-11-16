@@ -67,6 +67,8 @@ type placementFixture struct {
 	abortEntered chan struct{}
 	// unreachableAbort fails Abort, as an unreachable Docker or cluster does.
 	unreachableAbort bool
+	// onStop, when non-nil, runs once as Stop is reached.
+	onStop func()
 }
 
 func (p *placementFixture) prepare(l session.Launch) session.Incarnation {
@@ -146,6 +148,10 @@ func (p *placementFixture) Stop(ctx context.Context, l session.Launch, i session
 		close(hold)
 		<-ctx.Done()
 		return session.Stopped{}, ctx.Err()
+	}
+	if hook := p.onStop; hook != nil {
+		p.onStop = nil
+		hook()
 	}
 	r := p.rows[l.AllocationID]
 	if r.Incarnation != i {
@@ -792,11 +798,11 @@ func TestExitedHarnessFailsTheSessionWithItsOutput(t *testing.T) {
 		t.Fatalf("attach to an exited harness: %v", attach)
 	}
 	status, err := s.Status(id)
-	if err != nil || status.Phase != stageFailed || status.Exit == nil || status.Exit.Code != 2 ||
+	if err != nil || status.Phase != string(PhaseFailed) || status.Exit == nil || status.Exit.Code != 2 ||
 		!strings.Contains(status.Exit.Output, "--bad") {
 		t.Fatalf("failed status: %+v %v", status, err)
 	}
-	if stopped, err := s.Stop(t.Context(), id, uuid.NewString()); err != nil || stopped.Phase != stageFailed {
+	if stopped, err := s.Stop(t.Context(), id, uuid.NewString()); err != nil || stopped.Phase != string(PhaseFailed) {
 		t.Fatalf("stop of a failed session: %+v %v", stopped, err)
 	}
 	local.exited = nil
@@ -820,7 +826,7 @@ func TestDeadlineStopRetainsTheSession(t *testing.T) {
 		t.Fatalf("deadline stop not settled: %v %v", settled, err)
 	}
 	status, err := s.Status(id)
-	if err != nil || status.Phase != stageRetained || status.Exit == nil || !status.Exit.Deadline {
+	if err != nil || status.Phase != string(PhaseRetained) || status.Exit == nil || !status.Exit.Deadline {
 		t.Fatalf("deadline status: %+v %v", status, err)
 	}
 	if problem := s.attachProblem(t.Context(), id); problem == nil || !strings.Contains(problem.Error(), "is retained") {

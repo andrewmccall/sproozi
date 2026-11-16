@@ -43,7 +43,7 @@ func TestAnUnreachablePlacementDelaysNoOtherExitCheck(t *testing.T) {
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		status, err := s.Status(exited)
-		if err == nil && status.Phase == stageFailed {
+		if err == nil && status.Phase == string(PhaseFailed) {
 			break
 		}
 		if time.Now().After(deadline) {

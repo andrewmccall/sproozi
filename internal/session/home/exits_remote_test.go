@@ -81,7 +81,7 @@ func TestExitWatcherStopsAnExitedRemoteVisitOverTheProtocol(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("sweep did not finish")
 	}
-	if status, err := s.Status(id); err != nil || status.Phase == stageFailed {
+	if status, err := s.Status(id); err != nil || status.Phase == string(PhaseFailed) {
 		t.Fatalf("a running remote agent was settled: %+v %v", status, err)
 	}
 	stopsBefore := remote.stops
@@ -92,7 +92,7 @@ func TestExitWatcherStopsAnExitedRemoteVisitOverTheProtocol(t *testing.T) {
 		t.Fatal("sweep did not finish")
 	}
 	status, err := s.Status(id)
-	if err != nil || status.Phase != stageFailed || status.Exit == nil || status.Exit.Code != 2 || remote.stops != stopsBefore+1 {
+	if err != nil || status.Phase != string(PhaseFailed) || status.Exit == nil || status.Exit.Code != 2 || remote.stops != stopsBefore+1 {
 		t.Fatalf("exited remote session: %+v %v, %d stops", status, err, remote.stops-stopsBefore)
 	}
 }

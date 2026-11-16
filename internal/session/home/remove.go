@@ -14,8 +14,9 @@ import (
 // Remove deletes a stopped or cancelled session: its catalogue entry, its
 // executions' journals and the retained workspaces, checkpoints and profiles
 // nothing else uses. It refuses a session that still has a writer, an
-// operation in progress or unsettled usage. Accounting and grant records, and
-// the placement's evidence of each finished visit, are kept.
+// operation in progress, unsettled usage or an unfinished pull (nextSteps).
+// Accounting and grant records, and the placement's evidence of each
+// finished visit, are kept.
 func (s *Service) Remove(id string) (Status, error) {
 	unlock, err := s.lockSession(id)
 	if err != nil {
@@ -29,14 +30,18 @@ func (s *Service) Remove(id string) (Status, error) {
 	status.Session = nil
 	catalogued := false
 	var executions []string
+	var c *localSession
 	r, err := s.readCatalog(id)
 	switch {
 	case err == nil:
-		if !r.Claimed {
-			return Status{}, rejectedError(fmt.Sprintf("home: session %s is still being pulled; "+
-				"finish with \"sproozi pull %s\" before removing it", id, id))
+		st, _, stateErr := s.sessionState(r)
+		if stateErr != nil {
+			return Status{}, stateErr
 		}
-		catalogued = true
+		if err = refusal(id, st, ActionRemove); err != nil {
+			return Status{}, err
+		}
+		catalogued, c = true, &r
 		executions = slices.Clone(r.Executions)
 		if r.Current != "" && !slices.Contains(executions, r.Current) {
 			executions = append(executions, r.Current)
@@ -63,7 +68,7 @@ func (s *Service) Remove(id string) (Status, error) {
 			return Status{}, inspectErr
 		}
 		if !session.Removable(record) {
-			return Status{}, notRemovable(id, record)
+			return Status{}, problem(id, derive(c, &record, s.coordinator.PastDeadline))
 		}
 	}
 	err = s.coordinator.Remove(executions, func() ([]string, error) {
@@ -85,13 +90,6 @@ func (s *Service) Remove(id string) (Status, error) {
 		return Status{}, err
 	}
 	return status, s.collectCatalogArtifacts()
-}
-
-// notRemovable says why a session cannot be removed yet and what would allow it.
-func notRemovable(id string, r session.Record) error {
-	return rejectedError("home: " + session.RemovalRefusal(id, r.Phase, func(name string) string {
-		return "sproozi " + name + " " + id
-	}))
 }
 
 // removeCatalog deletes a session's catalogue entry.

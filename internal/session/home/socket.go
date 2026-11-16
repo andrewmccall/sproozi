@@ -431,8 +431,7 @@ func deadlineProblem(id string) error {
 
 // cancelledProblem says a cancelled session cannot continue and how to remove it.
 func cancelledProblem(id string) error {
-	return rejectedError(fmt.Sprintf("session %s was cancelled, so it cannot be stopped or resumed; remove it with "+
-		"\"sproozi rm %s\", and start new work with \"sproozi run\"", id, id))
+	return problem(id, state{phase: Phase(session.PhaseCancelled)})
 }
 
 // continueCommand names the command that keeps waiting for a request's
@@ -444,7 +443,7 @@ func (s *Service) continueCommand(q Request) string {
 	case ActionMove:
 		return ActionRecover
 	}
-	execution, _, err := s.resolveSession(q.ID)
+	execution, _, err := s.resolveSession(q.ID, q.Action)
 	if err != nil {
 		return ActionRecover
 	}
