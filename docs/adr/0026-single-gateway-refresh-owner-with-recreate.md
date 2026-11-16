@@ -61,8 +61,14 @@ cluster or run another refreshing client against it.
 Every gateway rollout, including a ConfigMap, Secret or image change, has a
 short window with no gateway. Workloads cannot reach model, GitHub, Kubernetes
 or MCP services until the new Pod is ready, and in-flight runs may fail and
-need to be retried. The gateway is a single point of failure in both
-authentication modes, because API-key mode uses the same Deployment.
+need to be retried. The gateway is a single point of failure in every
+authentication mode, because API-key mode and forwarded sign-ins use the same
+Deployment.
+
+Corrected 2026-11-16: "both authentication modes" became "every authentication
+mode". There are three mechanisms now: a gateway-held key, a gateway-held
+ChatGPT sign-in, which this record covers, and a harness's own sign-in
+forwarded by the gateway (ADR 0047, `internal/modelauth/auth.go`).
 
 A crash after the provider rotates but before the Secret is written can still
 lose the credential and require a new sign-in. The local bootstrap file is not
