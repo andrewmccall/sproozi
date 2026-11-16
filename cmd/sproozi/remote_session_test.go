@@ -346,6 +346,79 @@ func TestRemoteStopShowsTheWaitingNoticeWhileItsRequestWaits(t *testing.T) {
 	}
 }
 
+// dropConnection answers a request by closing its connection, as a broken
+// port-forward does.
+func dropConnection(t *testing.T) func(http.ResponseWriter) {
+	return func(w http.ResponseWriter) {
+		conn, _, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		_ = conn.Close()
+	}
+}
+
+// A dropped connection leaves the stop running on the executor, so stop
+// asks again with the same operation, through a new connection, and reports
+// the result.
+func TestRemoteStopRetriesADroppedConnection(t *testing.T) {
+	f := serveFakeExecutor(t, interactiveView(phaseRunning))
+	f.reply("stop", dropConnection(t))
+	f.reply("stop", dropConnection(t))
+	f.reply("stop", f.answerView(interactiveView(work.PhaseRetained)))
+	previous := remoteStopRetry
+	remoteStopRetry = time.Millisecond
+	t.Cleanup(func() { remoteStopRetry = previous })
+	var code int
+	var out, errOut string
+	captureStderr(t, func() { code, out, errOut = runCLI("stop", "4215", "--remote") })
+	if code != 0 || !strings.Contains(out, "Stopped session "+remoteTestID+"; its work is kept.") {
+		t.Fatalf("stop exited %d: %s %s", code, out, errOut)
+	}
+	stops := f.recorded("stop")
+	if len(stops) != 3 || string(stops[0].body) != string(stops[2].body) {
+		t.Fatalf("stop asked %d times, first %s, last %s", len(stops), stops[0].body, stops[len(stops)-1].body)
+	}
+}
+
+// Connections that keep failing are an unreachable executor, not a drop:
+// stop gives up after a few and names the operation to repeat.
+func TestRemoteStopGivesUpOnAConnectionThatKeepsFailing(t *testing.T) {
+	f := serveFakeExecutor(t, interactiveView(phaseRunning))
+	for range remoteStopDrops + 1 {
+		f.reply("stop", dropConnection(t))
+	}
+	previous := remoteStopRetry
+	remoteStopRetry = time.Millisecond
+	t.Cleanup(func() { remoteStopRetry = previous })
+	var code int
+	var errOut string
+	captureStderr(t, func() { code, _, errOut = runCLI("stop", "4215", "--remote") })
+	if code == 0 || len(f.recorded("stop")) != remoteStopDrops+1 {
+		t.Fatalf("stop exited %d after %d requests: %s", code, len(f.recorded("stop")), errOut)
+	}
+}
+
+// The waiting notice prints once, and never once the result is decided, even
+// from a timer that fired as the answer arrived.
+func TestRemoteStopNoticeNeverFollowsTheResult(t *testing.T) {
+	var out strings.Builder
+	n := &stopNotice{out: &out, text: "waiting\n"}
+	n.notify()
+	n.notify()
+	if out.String() != "waiting\n" {
+		t.Fatalf("notice printed %q", out.String())
+	}
+	out.Reset()
+	late := &stopNotice{out: &out, text: "waiting\n"}
+	late.finish()
+	late.notify()
+	if out.Len() != 0 {
+		t.Fatalf("notice after the result: %q", out.String())
+	}
+}
+
 // Each resume is a new operation; a repeated one names its operation.
 func TestRemoteResumeUsesANewOperation(t *testing.T) {
 	f := serveFakeExecutor(t, interactiveView(work.PhaseRetained))

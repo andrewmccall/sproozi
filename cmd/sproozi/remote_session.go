@@ -215,25 +215,30 @@ func (q *options) stopRemote(ctx context.Context, target remoteTarget) error {
 	// The executor answers a stop when it ends or after about two minutes of
 	// waiting for the turn, so say why it waits after stopNoticeAfter, as a
 	// local stop does (ADR 0035).
-	var notice sync.Once
-	notify := func() {
-		notice.Do(func() {
-			_, _ = fmt.Fprintf(os.Stderr, "Waiting for the agent's current turn in session %s to finish; "+
-				"run \"%s\" in another terminal to stop it now instead.\n", shortID(q.id),
-				q.remoteCommand(cmdCancel, q.id))
-		})
-	}
+	n := &stopNotice{out: os.Stderr, text: fmt.Sprintf("Waiting for the agent's current turn in session %s to "+
+		"finish; run \"%s\" in another terminal to stop it now instead.\n", shortID(q.id), q.remoteCommand(cmdCancel, q.id))}
+	notify, finish := n.notify, n.finish
 	timer := time.AfterFunc(stopNoticeAfter, notify)
 	defer timer.Stop()
+	dropped := 0
 	for {
 		v, err := target.Client.Stop(ctx, q.id, q.operation)
-		waiting := err == nil && string(v.Phase) == phaseStopping || timedOut(err)
+		// A dropped connection, such as a broken port-forward, leaves the
+		// stop running on the executor; the next request reconnects. Only a
+		// few in a row are taken for drops rather than an unreachable cluster.
+		if lostConnection(err) && !timedOut(err) && ctx.Err() == nil {
+			dropped++
+		} else {
+			dropped = 0
+		}
+		waiting := err == nil && string(v.Phase) == phaseStopping || timedOut(err) ||
+			dropped > 0 && dropped <= remoteStopDrops
 		if err != nil && !waiting {
-			timer.Stop()
+			finish()
 			return q.remoteActionError(ctx, target, q.id, cmdStop, err)
 		}
 		if !waiting {
-			timer.Stop()
+			finish()
 			return q.printStopped(target.Name, v)
 		}
 		notify()
@@ -244,6 +249,43 @@ func (q *options) stopRemote(ctx context.Context, target remoteTarget) error {
 		case <-time.After(remoteStopRetry):
 		}
 	}
+}
+
+// stopNotice prints a stop's waiting notice at most once, and never once the
+// stop's result was decided: a timer that already fired cannot print after it.
+type stopNotice struct {
+	out  io.Writer
+	text string
+
+	mu                sync.Mutex
+	noticed, finished bool
+}
+
+func (n *stopNotice) notify() {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.noticed || n.finished {
+		return
+	}
+	n.noticed = true
+	_, _ = io.WriteString(n.out, n.text)
+}
+
+// finish ends the notice before the result is printed.
+func (n *stopNotice) finish() {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.finished = true
+}
+
+// remoteStopDrops is how many lost connections in a row stop retries.
+const remoteStopDrops = 3
+
+// lostConnection reports a request that never got the executor's answer:
+// the connection failed, dropped or could not be opened.
+func lostConnection(err error) bool {
+	var remote *profile.RemoteError
+	return errors.As(err, &remote) && remote.Transport != nil
 }
 
 // timedOut reports a request the executor did not answer in time, as a stop
