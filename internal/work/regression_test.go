@@ -116,9 +116,21 @@ func TestExpiredUnstartedTaskIsCancelled(t *testing.T) {
 // A task whose deadline passes while the driver is already recovering its
 // start, so the coordinator ends that start, follows the rule for a task whose
 // deadline passed before it started: it is cancelled with that problem, not
-// failed (ADR 0057, ADR 0060).
+// failed (ADR 0057, ADR 0060). That holds whether nothing was prepared, or a
+// prepared incarnation was aborted on the way out: its visit keeps its sealed
+// usage, and the cancellation keeps that deduction.
 func TestTaskOvertakenInsideRecoveryIsCancelled(t *testing.T) {
 	t.Parallel()
+	for name, aborted := range map[string]bool{"nothing prepared": false, "prepared then aborted": true} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			taskOvertakenInsideRecovery(t, aborted)
+		})
+	}
+}
+
+func taskOvertakenInsideRecovery(t *testing.T, aborted bool) {
+	t.Helper()
 	c, p := fixture(t)
 	var late atomic.Bool
 	coordinator, err := session.Open(filepath.Join(testutil.PrivateDir(t), "sessions"),
@@ -134,7 +146,11 @@ func TestTaskOvertakenInsideRecoveryIsCancelled(t *testing.T) {
 	t.Cleanup(func() { _ = coordinator.Close() })
 	c.Coordinator = coordinator
 	p.mu.Lock()
-	p.refusePrepare = errors.New("node unavailable")
+	if aborted {
+		p.lostInitial = true
+	} else {
+		p.refusePrepare = errors.New("node unavailable")
+	}
 	p.mu.Unlock()
 	o := openOwner(t, c)
 	v := submit(t, o)
@@ -152,6 +168,18 @@ func TestTaskOvertakenInsideRecoveryIsCancelled(t *testing.T) {
 	got := waitDriver(t, o, v.ID)
 	if got.Phase != phaseCancelled || got.Problem != problemExpired {
 		t.Fatalf("task overtaken inside recovery: %s %q", got.Phase, got.Problem)
+	}
+	rec, err := coordinator.Inspect(got.ExecutionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	units := c.Allowances[fixtureModel].Units.Value
+	if aborted {
+		units -= 7
+	}
+	if (len(rec.Visits) == 1) != aborted || rec.Remaining[fixtureModel].Units.Value != units || rec.Checkpoint.Path != "" {
+		t.Fatalf("cancelled task: %d visits, %d units left, want %d", len(rec.Visits),
+			rec.Remaining[fixtureModel].Units.Value, units)
 	}
 }
 

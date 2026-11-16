@@ -227,9 +227,15 @@ func (o *Owner) stepStarting(ctx context.Context, r record, rec session.Record, 
 }
 
 // startEnded reports an execution whose deadline ended its first visit
-// before it started (ADR 0060): nothing ran, so it holds no result.
+// before it started (ADR 0060), so it holds no result. Once that visit is
+// ended the execution starts nothing again, so the only visit it can have is
+// the prepared incarnation the end aborted: that keeps its sealed usage, and
+// a checkpoint only if the abort captured one. A task's result is read from
+// its checkpoint, and its first visit starts from a workspace, so with no
+// checkpoint there is nothing a cancellation could discard. A cancellation
+// of the idle execution changes neither its visits nor its allowance.
 func startEnded(rec session.Record) bool {
-	return len(rec.Visits) == 0 && rec.Abandoned(rec.Operations[0].ID)
+	return rec.Abandoned(rec.Operations[0].ID) && rec.Checkpoint.Path == ""
 }
 
 // after decides what follows a coordinator call. Success takes the next step.

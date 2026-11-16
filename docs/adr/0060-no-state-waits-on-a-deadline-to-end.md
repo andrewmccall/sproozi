@@ -268,9 +268,15 @@ past its deadline, with its launch saved, reads unchanged, and the next
 - On the executor, a task whose deadline passes while the driver is already
   recovering it can have its start ended by the coordinator rather than
   cancelled by the driver. The driver then cancels the idle execution with
-  plain `Cancel`, which `CancelUnsettled` would refuse, because nothing ran and
-  there is no result to keep. The task is `cancelled` with "the deadline passed
-  before it started", as for any task whose deadline passes before it starts.
+  plain `Cancel`, which `CancelUnsettled` would refuse, because it holds no
+  result. Once its first visit is ended the execution starts nothing again,
+  so its only possible visit is the prepared incarnation the end aborted,
+  which keeps its sealed usage and has a checkpoint only if the abort
+  captured one. A task's result is read from its checkpoint, so the driver
+  does this only while the execution has none, and cancelling an idle
+  execution leaves its visits and allowance as they are. The task is
+  `cancelled` with "the deadline passed before it started", as for any task
+  whose deadline passes before it starts.
 - `Coordinator.PastDeadline` is exported, so home decides with the
   coordinator's clock. Tests replace that clock only through the
   `session.WithClock` option to `Open`, and a test checks that no production
