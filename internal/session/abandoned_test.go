@@ -335,6 +335,50 @@ func TestLateActivationEndsWhenInspectFails(t *testing.T) {
 	}
 }
 
+// A crash after the destination was aborted but before the journal saved the
+// end leaves the journal as it was; the retry aborts again, which the
+// placement answers with the same sealed receipt, and the usage is deducted
+// exactly once, however often the command is repeated.
+func TestLateEndAfterACrashDeductsUsageOnce(t *testing.T) {
+	t.Parallel()
+	c, dir, local, remote, seeded := setup(t)
+	first := createResumed(t, c, seeded)
+	local.failActivate = true
+	pending, err := c.Recover(t.Context(), first.ExecutionID)
+	if err == nil || pending.Phase != PhaseActivating {
+		t.Fatalf("refused activation: %s %v", pending.Phase, err)
+	}
+	local.failActivate, local.abortSealed = false, true
+	// The earlier attempt aborted the destination, then the process ended.
+	incarnation := *pending.Operations[0].Incarnation
+	if _, err = local.Abort(t.Context(), first, incarnation); err != nil {
+		t.Fatal(err)
+	}
+	if err = c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(dir, map[string]Placement{testLocal: local, testRemote: remote}, testMaxCheckpoint,
+		WithClock(func() time.Time { return first.Deadline }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = reopened.Close() })
+	if stored, err := reopened.Inspect(first.ExecutionID); err != nil || stored.Phase != PhaseActivating || len(stored.Visits) != 0 {
+		t.Fatalf("journal after the crash: %s %v", stored.Phase, err)
+	}
+	want := first.Allowances[testCapability].Units.Value - visitUnits
+	for range 3 {
+		r, err := reopened.Recover(t.Context(), first.ExecutionID)
+		if err != nil && !errors.Is(err, ErrDeadlinePassed) {
+			t.Fatal(err)
+		}
+		if r.Phase != PhaseIdle || len(r.Visits) != 1 || r.Remaining[testCapability].Units.Value != want {
+			t.Fatalf("retried end: %s, %d visits, %d units left, want %d", r.Phase, len(r.Visits),
+				r.Remaining[testCapability].Units.Value, want)
+		}
+	}
+}
+
 // A late activation that really happened is not ended: recovery finds the
 // destination active and records it, as it would before the deadline.
 func TestLateRecoveryRecordsAnActivationThatHappened(t *testing.T) {

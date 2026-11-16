@@ -232,11 +232,18 @@ past its deadline, with its launch saved, reads unchanged, and the next
   refused with `ErrEndUnproven` until the placement can show it, or the user
   cancels.
 - The transition table cannot tell a move's `preparing` from a stop's, which
-  `finalized` leaves. Its principle test checks that every phase has an exit
-  the deadline never refuses, and that every phase without cancellation intent
-  can reach `idle` without cancelling. That test caught `activating`.
-  Behavioural tests drive each starting state past its deadline through every
-  command.
+  `finalized` leaves. What its principle test proves: every phase but
+  `cancelled` has an exit the deadline never refuses that is not a
+  cancellation, and every phase without cancellation intent can reach `idle`
+  without cancelling. From `preparing` and `activating` it leaves `finalized`
+  out, because the deadline strands a pending move or first visit there, and
+  without `abandoned` both phases fail. What it cannot prove, that each real
+  starting state takes the exit through each command, the behavioural tests
+  do: `internal/session/abandoned_test.go` (no launch, a lost or partial
+  `Prepare`, a refused activation, an activation `Inspect` cannot see, a
+  journal already stuck, a crash between `Abort` and the save),
+  `internal/session/home/late_test.go`, and
+  `internal/runtime/docker/deadline_test.go` with the real Docker placement.
 - On the executor, a task whose deadline passes while the driver is already
   recovering it can have its start ended by the coordinator rather than
   cancelled by the driver. The driver then cancels the idle execution with

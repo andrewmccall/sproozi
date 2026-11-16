@@ -226,13 +226,20 @@ func TestTransitionTableIsClosed(t *testing.T) {
 // intent reaches idle, where the last checkpoint stands and a new execution
 // continues it, through such events alone.
 //
-// The table cannot tell a move's preparation from a finalization's, so
-// abandoned_test.go drives each starting state past its deadline too.
+// From preparing and activating, finalized is left out: it follows only a
+// pending stop, and the deadline strands a pending move or first visit there,
+// which cannot rely on it. From the other phases a stop may lead through
+// finalized. The table still cannot tell which operation is pending, so
+// abandoned_test.go drives each starting state through every command past
+// its deadline.
 func TestEveryPhaseHasAnExitAfterTheDeadline(t *testing.T) {
-	cancels := []event{evCancel, evCancelUnsettled, evCancelled}
 	for _, p := range phases {
 		if p == PhaseCancelled {
 			continue
+		}
+		cancels := []event{evCancel, evCancelUnsettled, evCancelled}
+		if p.Starting() {
+			cancels = append(cancels, evFinalized)
 		}
 		exit := false
 		for ev, rule := range transitions {
