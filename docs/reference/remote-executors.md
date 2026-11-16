@@ -154,16 +154,23 @@ same way: the stop still finishes on the executor.
 
 On `SIGTERM` the executor stops accepting requests, gives those in flight 10
 seconds and closes their connections, attachments included. It then waits up
-to 9 minutes 43 seconds for the stops it carries on, interrupts any still
-running, and exits. For a stop in flight at a rollout to finish, set the
-executor Pod's `terminationGracePeriodSeconds` above 593 seconds; the
+to 9 minutes 43 seconds for the stops it carries on and refuses new ones,
+interrupts any still running, waits up to 15 seconds for them to return, and
+exits. For a stop in flight at a rollout to finish, set the executor Pod's
+`terminationGracePeriodSeconds` above 608 seconds; the
 [examples](../../examples/portable-workflows/kubernetes/owner.yaml) set 620.
 With less, the kubelet kills the executor at the grace period. That is
 safe, since nothing half-written is kept, but like an interrupted stop it
 loses the reply of an agent's stop in flight: a Claude Code visit then keeps
 the checkpoint it started from, and a Codex visit records an exit. The
 executor logs `Interrupted stops still running after … at shutdown; repeat
-each stop to finish it` when it had to interrupt any.
+each stop to finish it` when it had to interrupt any, and `Exited without
+closing the placement: …` when one still ran 15 seconds later.
+
+Stops of one visit with the same launch and incarnation share one run: a
+repeated stop while one runs gets that one's answer. An abort that names
+another incarnation answers `conflict` only once the visit's stop ends, which
+can be after home's two-minute wait for an abort.
 
 ## Interactive sessions
 

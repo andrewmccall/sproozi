@@ -193,25 +193,40 @@ Decision, in two parts:
   `stop`, and an owner `stop` or `recover`, runs on a context that keeps the
   request's values but not its cancellation, bounded by `StopBound` (9
   minutes 43 seconds), and tracked in `profile.Stops`. Placement stops of
-  one visit (allocation and incarnation) asked while one runs join it and
-  return its answer, so retries never queue behind the visit's lock. A
-  placement `abort` of that visit interrupts its stop first, and a stop that
-  begins while the abort runs starts cancelled; an abort naming another
-  incarnation, which the placement refuses, leaves the stop alone. Owner
-  cancellation already interrupts the coordinator's graceful stop. A retry
-  after the stop ended, or an owner retry, which blocks on the coordinator's
-  session lock, reads the recorded outcome, so recovery is the live path.
+  one visit (allocation and incarnation) with an identical launch, asked
+  while one runs, join it and return its answer, so retries never queue
+  behind the visit's lock; a stop with a different launch, such as another
+  operation, starts its own. A stop that panics answers those who joined it
+  with an error, never an empty success. A placement `abort` of that visit
+  interrupts its stop first, and a stop that begins while the abort runs
+  starts cancelled. An abort naming another incarnation leaves the stop
+  alone, but still takes the visit's lock, so it answers `conflict` only once
+  the stop ends, which can be after home's two-minute abort wait (home then
+  records `unavailable`). Home's own aborts always name the active
+  incarnation, so this is not routine. Owner cancellation already interrupts
+  the coordinator's graceful stop. A retry after the stop ended, or an owner
+  retry, which blocks on the coordinator's session lock, reads the recorded
+  outcome, so recovery is the live path.
 - **Shutdown drains them.** The executor stops accepting requests, gives
-  those in flight 10 seconds and closes their connections, then waits up to
-  `StopBound` for the stops it carries on. Any still running are then
-  interrupted and the executor waits for them to let go of the placement's
-  and coordinator's locks before it closes those, and logs that the stops
-  must be repeated. The Pod's `terminationGracePeriodSeconds` must exceed
-  10 seconds plus `StopBound` (593 seconds) for a stop in flight at a
-  rollout to finish; the example Deployments set 620. With less, the kubelet
-  kills the executor at the grace period: crash-safe, since output is
-  written before its record and the writer fence keeps the Pod for a
-  recapture, but the reply of a quiesce in flight is lost.
+  those in flight `ShutdownRequestGrace` (10 seconds) and closes their
+  connections, then waits up to `StopBound` for the stops it carries on, and
+  refuses new ones. Any still running are then interrupted and the executor
+  waits `DrainTail` (15 seconds) for them to let go of the placement's and
+  coordinator's locks before it closes those, and logs that the stops must
+  be repeated. A stop still running after that is queued on a lock that does
+  not heed cancellation (the placement's journal lock, or the coordinator's
+  session lock held by one of the owner's task drivers, which stop only when
+  the owner closes); closing would wait for it until the kubelet's kill, so
+  the executor logs how many it left and exits without closing. The locks
+  are file locks the system releases. Stopping the drivers before the drain
+  was rejected: closing the owner also releases its catalogue lock while
+  owner stops may still write. The Pod's `terminationGracePeriodSeconds`
+  must exceed the sum (608 seconds) for a stop in flight at a rollout to
+  finish; the example Deployments set 620, and a manifest test holds them to
+  it. With less, the kubelet kills the executor at the grace period:
+  crash-safe, since output is written before its record and the writer fence
+  keeps the Pod for a recapture, but the reply of a quiesce in flight is
+  lost.
 - **Each request waits as long as its action may take.** The client derives
   each wait from the executor's bounds (`profile/protocol.go`) and adds a
   minute: stop 10 minutes 43 seconds, prepare 8 minutes, abort 2 minutes,
