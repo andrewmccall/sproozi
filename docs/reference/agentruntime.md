@@ -170,15 +170,28 @@ In a managed session the supervisor copies the harness's login file
 Copilot) from `/etc/sproozi/sign-in` into its native home before launch, then
 keeps the two in step while the harness runs: a sign-in, refresh or sign-out
 in one session reaches the other sessions of that login within about a second
-([ADR 0049](../adr/0049-named-logins-share-a-live-store.md)). Only a whole
-login file is shared: one that is not a JSON object (after Copilot's comment
-header) stays in its session. A sign-out is shared only while the harness
-runs, so a login file emptied or removed once a stop has begun leaves the
-store as it was, and nothing from the file is shared once the supervisor has
-killed the harness or its deadline has passed. Each sync waits at most five
-seconds for the store's lock; a stop whose save cannot take it in that time
-completes anyway, leaves the store as it was and logs the missed save on the
-supervisor's standard error. With no login
+([ADR 0049](../adr/0049-named-logins-share-a-live-store.md),
+[ADR 0061](../adr/0061-a-stop-survives-an-interrupted-write.md)). The sync
+copies only a whole login, in either direction: one that is not a JSON object
+(after Copilot's comment header) stays where it is. Empty, missing and `{}`
+mean "not signed in". A sign-out is shared once two syncs a second apart see
+it, and from the harness's file only while the harness runs: a login file
+emptied or removed once a stop has begun leaves the store as it was. Nothing
+from the file is shared once the harness has been killed. Each sync waits at
+most five seconds for the store's lock, and a stop's save at most five
+seconds in all; a stop whose save cannot finish in that time completes
+anyway, leaves the store as it was and logs the missed save. A session that
+starts while another holder keeps the lock fails to start after five
+seconds; one whose volume itself stalls is not bounded.
+
+A store that stops updating shows in the supervisor's standard error, which
+is the agent container's output (`docker logs`, or `kubectl logs -c agent`):
+`Stopped syncing the harness's sign-in with its login store: REASON` appears
+once when syncing stops, again only if the reason changes, and `Resumed
+syncing ...` when it recovers. Reasons include a login file that is not a
+whole login, as from a client whose login format changed, and a store that
+stayed locked by another session. Sessions of the login then ask to sign in
+again, or keep a token another session has rotated. With no login
 stored yet, sign in inside the session as you would on your own machine
 (`/login`, or Codex's device-code sign-in). Sproozi never copies a login from
 your machine, and the login never enters a checkpoint, so a session moved here
@@ -192,9 +205,11 @@ An AgentRun has no supervisor. For Claude Code, `claude-launch.py` (the stock
 example's launch) does the same: it copies `.credentials.json` from the store
 into the run's fresh native home before launch, keeps the two in step every
 second under the store's lock, and saves the last change when Claude Code
-exits, so a token refreshed in one run reaches the next. It shares only a
-whole login, never a sign-out from the save at exit, and nothing once Claude
-Code was ended by a signal. To sign in a new
+exits, so a token refreshed in one run reaches the next. It follows the same
+rules: a whole login only, a sign-out only once two syncs see it and never
+from the save at exit, nothing once Claude Code was killed, and a store that
+holds no whole login is never copied in. `--sign-in-wait SECONDS` (default 5)
+bounds each wait for the store's lock. To sign in a new
 Claude Code login once, start an AgentRun from a runtime with the same
 `signIn.claims` whose container waits instead of launching, for example
 `sleep 1800`, under a policy that grants `model.inference`. Then run

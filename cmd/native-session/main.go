@@ -612,7 +612,7 @@ func (s *server) quiesce() response {
 		switch {
 		case errors.Is(observeErr, errJournalRowIncomplete):
 			// Capture, after the placement fences the container, leaves
-			// the unfinished row out (ADR 0008's correction of 2026-11-16).
+			// the unfinished row out (ADR 0061).
 			err = errors.New("the forced stop left a native journal row unfinished; " +
 				"repeat the stop to complete it with the completed turns kept")
 		case observeErr != nil || again != id || turnAgain != turn:

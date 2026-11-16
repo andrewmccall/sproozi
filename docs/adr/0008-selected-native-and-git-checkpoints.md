@@ -45,6 +45,10 @@ separately. The placement must independently confirm all writers stopped.
 These client-specific mechanisms and their alternatives are recorded in
 [ADR 0011](0011-native-session-compatibility-and-completion.md).
 
+Corrected 2026-11-16: capture keeps the selected file's complete rows and
+leaves out a final row a fenced writer did not finish
+([ADR 0061](0061-a-stop-survives-an-interrupted-write.md)).
+
 A real three-home experiment using the stock CLI preserved the same native UUID
 and cumulative conversation under different absolute workspace paths, transferring
 one rollout file through the production adapter. Fresh provider ports and
@@ -145,50 +149,3 @@ instructions. Expand filesystem layouts only with observable unfinished-state
 round-trip tests. Replace the scratch/storage bound when a real runtime can
 supply a smaller, enforceable restore limit. Reconsider native ownership if long
 histories or safe-turn shutdown cannot preserve the accepted conversation.
-
-## Correction: a row the stopped writer did not finish (2026-11-16)
-
-Capture took the selected conversation file whole, and every adapter refused
-a file whose last line had no newline. A harness killed while it appended a
-row therefore left a file that no capture accepted. Since
-[ADR 0035's correction of 2026-11-15](0035-bounded-graceful-stops-and-settled-input.md#correction-the-wait-after-the-quit-2026-11-15)
-a Codex that ignores its quit is killed, and Claude Code and Copilot are always
-stopped by a kill, so the kill can land while the harness writes rows after its
-completed turn: Copilot's journal fixture ends with such a row. The stop then
-failed on every retry. On Kubernetes the capture after the recorded exit
-failed each time; on Docker a capture failure is tolerated only for a visit
-with a recorded exit, and a lost reply leaves the stop without one. The stop
-never finished, and the visit's last turns were lost although every complete
-row was valid.
-
-Every supported conversation file (Codex's rollout, Claude Code's transcript
-and Copilot's events journal) is append-only JSON lines. A newline ends each
-row, and JSON escapes any newline inside one, so a final line without a
-newline is an append that was cut short, and the rows before it are exactly
-the file at its last completed write. Capture runs only after the placement
-has proven every writer stopped, so that row can never be finished. Capture
-now keeps the complete rows and leaves the unfinished one out
-(`internal/harness/stopped_journal.go`). It changes nothing else: the same
-adapter validates the rows kept, so a cut inside the completed turn itself
-leaves no completed turn and is refused as before, and Codex's instruction
-continuity is checked as before. The live observers (the supervisor's
-journal observer and each adapter's completion check while the harness runs)
-still refuse an unfinished final row, because there the writer may still be
-running. The checkpoint holds the same bytes the source held up to that row,
-so the stored format is unchanged.
-
-A stop whose forced Codex kill cut a row still fails its first attempt: the
-supervisor observes the turn again after the kill, refuses the unfinished
-row and reports the cause `failed`. The next stop captures the complete rows
-on both placements and finishes, keeping the visit's turns. Claude Code and
-Copilot stops, which the supervisor does not observe again, now finish on
-their first attempt.
-
-We considered falling back to the visit's previous checkpoint whenever a
-capture after a stop fails, as an exited Claude Code visit does. It also
-converges, but it discards valid completed turns, and for a first visit there
-is no previous checkpoint to keep. Repairing the row was rejected: Sproozi
-does not write native history. Revisit if a supported harness rewrites its
-conversation file in place or writes a row across more than one line; the
-capture tests in `internal/harness/stopped_journal_test.go` cover every
-managed harness's format.

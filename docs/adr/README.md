@@ -150,6 +150,7 @@ kept.
 | [0057](0057-the-remote-executor-owns-its-sessions-through-the-coordinator.md) | The remote executor owns its sessions through the coordinator: the work catalogue keeps intent, project, executions, the task's result and the pull, and derives its phase from the coordinator's; work-token tasks take `workTokenMaxDuration`; `retainedBytes` bounds the executor's storage; stopped version 1 records stay readable. |
 | [0058](0058-lifecycle-records-declare-states-and-transitions.md) | Lifecycle records declare a typed phase validated on load and save, a `(from, event) → to` table with a deadline column, and one apply function for live code and recovery; the execution journal derives its phase from its structure and adopts it first. |
 | [0060](0060-no-state-waits-on-a-deadline-to-end.md) | No state waits on a deadline to end: a start or move that its deadline overtakes ends as `abandoned`, once nothing can run at its destination, and leaves the execution idle with its last checkpoint, so `resume` continues the session instead of `cancel` being the only way on. |
+| [0061](0061-a-stop-survives-an-interrupted-write.md) | A stop survives an interrupted write: capture keeps the rows a fenced writer finished; the login store's lock and a stop's save are bounded and a skipped save is logged; only a whole login, or a sign-out two syncs see while the harness runs, crosses between a login file and its store, nothing after a kill, and the store is rewritten so that a stopped write is never empty. |
 
 ## Reserved numbers
 

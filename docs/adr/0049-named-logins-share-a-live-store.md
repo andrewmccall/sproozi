@@ -43,6 +43,10 @@ whether a provider's terms allow a mechanism stays the person's choice.
   signed in". A store the supervisor can't write, such as a Secret, only flows
   in. A link may resolve only inside the sign-in directory, as a Secret's keys
   do, and the file is bounded at 1 MiB.
+  Corrected 2026-11-16: the lock's wait and the final sync are bounded, and
+  only a whole login, or a sign-out two syncs see while the harness runs,
+  is copied either way; nothing from a killed harness
+  ([ADR 0061](0061-a-stop-survives-an-interrupted-write.md)).
 - **Logins have names.** `--login NAME` names one of a harness's logins;
   `default` is used when none is named. Names are per harness, at most 24
   lowercase letters, digits and hyphens, since they become volume and claim
@@ -120,93 +124,3 @@ several gateway-held keys per harness.
 [local setup](../../internal/localsetup/install.go),
 [AgentRuntime reference](../reference/agentruntime.md#harness-sign-in),
 [local sessions](../guides/local-sessions.md).
-
-## Correction: a stop never waits on the login store (2026-11-16)
-
-Every sync took the store's `flock` blocking, with no bound. The final sync
-runs in the stop, while the supervisor holds its action lock, so a peer
-holding the lock on a stalled volume held the stop, every repeated stop and
-the supervisor's exit for ever, past the bounds of
-[ADR 0035](0035-bounded-graceful-stops-and-settled-input.md) and against
-[ADR 0060](0060-no-state-waits-on-a-deadline-to-end.md).
-
-Each sync now tries the lock without blocking and gives up after five
-seconds. The stop's save as a whole, including any periodic sync still in
-flight, waits at most those five seconds; then the stop goes on, because the
-harness is already stopped and its checkpoint matters more than the save.
-The store keeps what it had, and the supervisor writes `Skipped saving the
-harness's sign-in ...` to its standard error, which the container's output
-keeps. Nothing new is reported to the placement: the stop's outcome does not
-depend on the save, and a new reply field would need a change on the wire
-that older executors would refuse. A missed save can leave the store with a
-refresh token the stopped session has since spent, so the next session of
-that login may have to sign in again. The first sync, which runs under the
-action lock at activation, has the same bound and fails the activation with
-`harness sign-in is unavailable`, as any other store error does. With these
-five seconds a stop still fits inside the five minutes the control client
-waits for its reply.
-
-## Correction: only a whole login, and no sign-out from a stop (2026-11-16)
-
-The sync copied the harness's login file to the store byte for byte, and an
-empty file was a sign-out. Only Copilot is known to replace its file by
-rename ([ADR 0048](0048-github-copilot-cli-is-a-managed-harness.md)); a
-client that truncates and rewrites it leaves it empty and then cut short for
-a moment. A kill landing
-then, which Claude Code and Copilot meet on every stop and Codex at the quit
-bound or the deadline, left a half-written login that the stop's final sync
-pushed to every session of the login, or an empty one that signed them all
-out. The periodic sync could read the same moment while the harness ran.
-
-A login file is now copied to the store only when:
-
-- **It is a whole login.** Every managed harness keeps its login as one JSON
-  object: Codex's `auth.json`, Claude Code's `.credentials.json` and
-  Copilot's `config.json` after its header of `//` comment lines. A file cut
-  short does not parse; one rewritten in place over a longer file without
-  truncating leaves trailing bytes and does not parse either. Any other
-  content stays in the session, and the sync says so on standard error. A
-  file left half written before launch is replaced by the store's login, or
-  removed when the store has none.
-- **A sign-out is made while the harness runs.** Empty and missing still mean
-  "not signed in", and a sign-out the harness makes while it runs reaches the
-  other sessions as before. Once a stop has gated input, or at the final
-  sync, an empty or missing file is not copied out: a truncate-and-rewrite
-  cut short by the coming kill looks exactly like a sign-out, so no harness
-  lets the two be told apart, and the safe side is to keep the login. A
-  sign-out in the second before a stop, or one the harness makes and then
-  exits by itself within the second, therefore does not reach the other
-  sessions.
-- **The supervisor has not killed the harness.** It records the kill before
-  sending it: the kill that ends Claude Code and Copilot, Codex's forced stop
-  at the quit bound, a turnless stop, and a stop at the deadline, on `SIGTERM`
-  or after a failed stop. A passed deadline counts the same, and so does an
-  exit by a signal from anyone else once the supervisor sees it. From then on nothing from the file reaches the
-  store, not even a whole login. Each sync checks the record after reading
-  the file, so a read that saw what the kill left always sees the record. A
-  sync that had nothing to save is silent; one that leaves a change unsaved
-  logs `Skipped saving the harness's sign-in ...`. A refresh
-  in the last second before the kill, which the periodic sync had not yet
-  copied, is therefore lost, and the next session of the login may have to
-  sign in again. The alternative, saving a whole login after a kill, relies
-  on every client truncating or renaming when it rewrites, which has not been
-  checked against the stock clients.
-
-The AgentRun launch helper for Claude Code (`claude-launch.py`) applies the
-same three rules: it records a kill before it forwards a signal to Claude
-Code, and when a signal ended it. It still takes the store's lock without a
-bound; a stalled store holds an AgentRun until its Pod is deleted, not a
-supervisor's stop.
-
-A periodic sync can still read an empty file in the instant a running
-harness truncates it before rewriting, and share it as a sign-out for about
-a second, until the next sync shares the rewritten login. Telling those
-apart would need the empty file to persist over more than one sync. Revisit
-if a client is found to rewrite its login in place without truncating, or
-one signs out by writing an empty file during shutdown.
-
-Evidence: `cmd/native-session/signin_forced_test.go` (a half-written login,
-Copilot's commented `config.json`, a sign-out while stopping, a refresh while
-stopping, a kill and a deadline, and Claude Code and Copilot stops whose kill
-left an empty file) and `internal/harness/claude_launch_test.go` (a login
-left cut short or removed at exit).

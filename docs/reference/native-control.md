@@ -54,12 +54,13 @@ cause `failed`; if the deadline passes first, the cause `deadline`.
 
 A kill can cut short a row the harness was appending to its conversation
 file. The supervisor's observation refuses that file, so a Codex stop whose
-observation after the kill met it fails with the cause `failed`. Capture,
-which runs only after the placement has confirmed the writer stopped, keeps
-the complete rows and leaves the unfinished final one out, then validates
-them as usual. Repeating the stop therefore finishes and keeps the visit's
-completed turns
-([ADR 0008](../adr/0008-selected-native-and-git-checkpoints.md#correction-a-row-the-stopped-writer-did-not-finish-2026-11-16)).
+observation after the kill met it fails with the cause `failed` and the error
+`the forced stop left a native journal row unfinished; repeat the stop to
+complete it with the completed turns kept`. Capture, which runs only after the
+placement has confirmed the writer stopped, keeps the complete rows and leaves
+the unfinished final one out, then validates them as usual. Repeating the stop
+therefore finishes and keeps the visit's completed turns
+([ADR 0061](../adr/0061-a-stop-survives-an-interrupted-write.md)).
 
 A first visit with no task that the supervisor reports `turnless` records no
 ID: `quiesce` stops the harness and replies `stopped` with `turnless` and no
