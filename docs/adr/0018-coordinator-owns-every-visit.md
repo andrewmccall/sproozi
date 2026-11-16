@@ -87,6 +87,9 @@ The same review made three related contracts explicit:
   directory. Sproozi is an unreleased preview with no tags, so earlier records
   are not migrated. A session started before this change must be cancelled or
   discarded by the operator.
+
+  Corrected 2026-11-16: Sproozi has tags (v0.1.0 to v0.2.6), and ADR 0058 now
+  requires a change to read existing journals, with no migration step.
 - A move or stop on an execution whose first visit has not activated returns
   "requires recovery" instead of starting that visit implicitly. Run `recover`,
   or retry `start` or `resume` with the same operation.
