@@ -46,6 +46,13 @@ Help groups the commands as Sessions (`run`, `sessions`/`ls`, `status`,
 - `credentials set AGENT|PROVIDER` and `credentials list` accept `codex` and
   `claude-code` as well as `openai` and `anthropic`.
 
+Corrected 2026-11-16: the surface has grown. `run` takes `--login NAME` (ADR
+0054) and `--max-duration DURATION|none` (ADR 0056), and `resume` takes
+`--max-duration`. Remote verbs exist that this list does not show: `stop`,
+`resume` and `attach` with `--remote`, and `run --remote` without a task, which
+starts an interactive session (ADR 0057; `cmd/sproozi/commands.go`,
+`cmd/sproozi/remote_session.go`).
+
 ### Conventions
 
 - **IDs.** Any unique prefix of a session ID works; lists show 8 characters.
@@ -99,6 +106,9 @@ send the selection to the service. (An interim build mapped a context name to
 the configured `remote` or `workSources` entries; ADR 0036's wiring removed
 them.)
 
+Corrected 2026-11-16: the interim build is history. ADR 0036's wiring replaced
+it and `remote` and `workSources` no longer exist.
+
 ## Alternatives
 
 - **Keep `start` beside a remote-only `run`.** It matched the code's two
@@ -131,6 +141,9 @@ them.)
 
 - ADR 0036's context discovery lands: replace the seam's configured-entry
   lookup and accept kubeconfig files and `--namespace`.
+
+  Corrected 2026-11-16: this condition was met. ADR 0036's context discovery
+  has landed and the seam accepts `--context` and `--namespace`.
 - Users need placement inputs reclaimed: give placements a release contract
   and have `rm` call it.
 - A command returning work to the user's repository is designed; see
