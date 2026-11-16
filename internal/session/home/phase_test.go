@@ -1,8 +1,10 @@
 package home
 
 import (
+	"os"
 	"regexp"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -133,70 +135,6 @@ func named(text string) []string {
 	return out
 }
 
-// Every state has one row of the next-steps table. Its refusals and the
-// commands its advice names are as listed, and the advice names no command
-// the state refuses except one it says to run once the first has finished.
-func TestNextStepsNameWhatEachStateAdmits(t *testing.T) {
-	t.Parallel()
-	want := map[step]struct {
-		refuses, names, afterwards []string
-	}{
-		stepImporting: {refuses: []string{ActionResume, ActionAttach, ActionStop, ActionMove, ActionRecover, ActionCancel,
-			ActionRemove}, names: []string{ActionPull}},
-		stepRetained: {refuses: []string{ActionAttach, ActionMove, ActionRecover, ActionCancel},
-			names: []string{ActionResume}},
-		stepFailed: {refuses: []string{ActionAttach, ActionMove, ActionRecover, ActionCancel},
-			names: []string{ActionStatus, ActionResume, ActionRemove}},
-		stepStarting: {refuses: []string{ActionResume, ActionAttach, ActionRemove},
-			names: []string{ActionRecover, ActionCancel}},
-		stepOverdue: {refuses: []string{ActionAttach, ActionRemove}, names: []string{ActionResume, ActionCancel}},
-		stepRunning: {refuses: []string{ActionResume, ActionRemove},
-			names: []string{ActionAttach, ActionStop, ActionCancel}},
-		stepStopping: {refuses: []string{ActionResume, ActionAttach, ActionRemove},
-			names: []string{ActionStop, ActionCancel}},
-		stepMoving: {refuses: []string{ActionResume, ActionAttach, ActionRemove},
-			names: []string{ActionRecover, ActionCancel}},
-		stepCancelling: {refuses: []string{ActionResume, ActionAttach, ActionRemove},
-			names: []string{ActionRecover, ActionRemove}, afterwards: []string{ActionRemove}},
-		// "run" starts a new session; it is no command on this one.
-		stepCancelled: {refuses: []string{ActionResume, ActionAttach, ActionStop}, names: []string{ActionRemove, "run"}},
-	}
-	if len(nextSteps) != len(want) {
-		t.Fatalf("the table has %d rows, the test %d", len(nextSteps), len(want))
-	}
-	steps := map[step]string{}
-	for name, st := range derivedStates(t) {
-		steps[st.step()] = name
-		row, ok := nextSteps[st.step()]
-		if !ok {
-			t.Errorf("%s: no row for %q", name, st.step())
-			continue
-		}
-		if st.phase == PhaseFailed && st.exit == nil {
-			t.Errorf("%s: failed without an exit", name)
-		}
-		w := want[st.step()]
-		text := row.problem("ID", st)
-		if got := named(text); !slices.Equal(got, w.names) {
-			t.Errorf("%s (%s): advice %q names %v, want %v", name, st.step(), text, got, w.names)
-		}
-		for _, command := range commands {
-			refused := refusal("ID", st, command) != nil
-			if refused != slices.Contains(w.refuses, command) {
-				t.Errorf("%s (%s): %s refused %v", name, st.step(), command, refused)
-			}
-			if refused && slices.Contains(w.names, command) && !slices.Contains(w.afterwards, command) {
-				t.Errorf("%s (%s): advice names %s, which it refuses", name, st.step(), command)
-			}
-		}
-	}
-	for s := range want {
-		if _, ok := steps[s]; !ok {
-			t.Errorf("no derived state reaches %q", s)
-		}
-	}
-}
-
 // stateFixtures brings a new service's session to each row of the
 // next-steps table through the service's own commands, with the placement
 // failing where a state needs it.
@@ -299,22 +237,163 @@ func stepOf(t *testing.T, s *Service, id string) (step, state) {
 	return st.step(), st
 }
 
-// For a session in every row of the next-steps table, each command the row
-// refuses is refused with the row's reply and changes nothing, and each
-// command it does not refuse is carried out: whatever its outcome, it is not
-// that refusal.
+// Each row's reply, as the service gives it, with ID for the session.
+const (
+	replyImporting = `home: session ID is still being pulled; finish with "sproozi pull ID" first`
+	replyRetained  = `home: session ID is retained (stopped, with its work kept); "sproozi resume ID" continues it`
+	replyFailed    = `home: session ID stopped because its agent exited with code 2; see "sproozi status ID", ` +
+		`then "sproozi resume ID" to continue it or "sproozi rm ID" to remove it`
+	replyStarting = `home: session ID is still starting or moving; run "sproozi recover ID" to finish that ` +
+		`first, or "sproozi cancel ID" to stop it now`
+	replyOverdue = `home: session ID reached its deadline before it started; "sproozi resume ID" ends that ` +
+		`start and continues the session with a new deadline, or, if the placement cannot show that nothing ` +
+		`runs there, "sproozi cancel ID" records the cancellation and finishes it once the placement can show that`
+	replyRunning = `home: session ID is running; attach to it with "sproozi attach ID", stop it with ` +
+		`"sproozi stop ID", or force-stop it with "sproozi cancel ID"`
+	replyStopping = `home: session ID is still stopping; run "sproozi stop ID" to finish, or ` +
+		`"sproozi cancel ID" to force-stop it`
+	replyMoving = `home: session ID is still stopping to move; run "sproozi recover ID" to finish the move, ` +
+		`or "sproozi cancel ID" to force-stop it`
+	replyCancelling = `home: session ID is being cancelled; run "sproozi recover ID" to finish the ` +
+		`cancellation, then "sproozi rm ID" to remove it`
+	replyCancelled = `home: session ID was cancelled, so it cannot be stopped or resumed; remove it with ` +
+		`"sproozi rm ID", and start new work with "sproozi run"`
+
+	// Refusals that are not the table's: the execution journal's, mapped
+	// by needsRecovery, and a move with no conversation to move.
+	replyNoConversation = `home: ID has no saved conversation yet; finish a turn before moving it to remote, ` +
+		`or continue it at home`
+	replyStartUnfinished = `session: previous start requires recovery; run "sproozi recover ID" to finish it, ` +
+		`or "sproozi cancel ID" to stop it now`
+	replyMoveUnfinished = `session: previous move requires recovery; run "sproozi recover ID" to finish it, ` +
+		`or "sproozi cancel ID" to stop it now`
+	replyStopPending = `session ID is still stopping; run "sproozi stop ID" to keep waiting, or ` +
+		`"sproozi cancel ID" to force-stop it`
+	replyCancelUnfinished = `session: cancellation unfinished; run "sproozi recover ID" to finish the cancellation`
+)
+
+// outcome is what a command does: the reply, "" when it succeeds, whether
+// it is a rejection, and the row the session is in afterwards, "" when it is
+// removed.
+type outcome struct {
+	reply    string
+	rejected bool
+	after    step
+}
+
+func refused(reply string, row step) outcome {
+	return outcome{reply: reply, rejected: true, after: row}
+}
+func done(after step) outcome { return outcome{after: after} }
+
+// failedWith is a command carried out that failed for a reason outside the
+// session's state, here the fixture's unreachable placement.
+func failedWith(reply string, after step) outcome { return outcome{reply: reply, after: after} }
+
+// outcomes is what every command does in every row, written out here rather
+// than taken from nextSteps.
+var outcomes = map[step]map[string]outcome{
+	stepImporting: {
+		ActionPull: failedWith("claim denied", stepImporting), ActionResume: refused(replyImporting, stepImporting),
+		ActionAttach: refused(replyImporting, stepImporting), ActionStop: refused(replyImporting, stepImporting),
+		ActionMove: refused(replyImporting, stepImporting), ActionRecover: refused(replyImporting, stepImporting),
+		ActionCancel: refused(replyImporting, stepImporting), ActionRemove: refused(replyImporting, stepImporting),
+	},
+	stepRetained: {
+		ActionPull: done(stepRetained), ActionResume: done(stepRunning),
+		ActionAttach: refused(replyRetained, stepRetained), ActionStop: done(stepRetained),
+		ActionMove: refused(replyRetained, stepRetained), ActionRecover: refused(replyRetained, stepRetained),
+		ActionCancel: refused(replyRetained, stepRetained), ActionRemove: done(""),
+	},
+	stepFailed: {
+		ActionPull: done(stepFailed), ActionResume: done(stepRunning),
+		ActionAttach: refused(replyFailed, stepFailed), ActionStop: done(stepFailed),
+		ActionMove: refused(replyFailed, stepFailed), ActionRecover: refused(replyFailed, stepFailed),
+		ActionCancel: refused(replyFailed, stepFailed), ActionRemove: done(""),
+	},
+	stepStarting: {
+		ActionPull: done(stepStarting), ActionResume: refused(replyStarting, stepStarting),
+		ActionAttach: refused(replyStarting, stepStarting), ActionStop: refused(replyStartUnfinished, stepStarting),
+		ActionMove: refused(replyNoConversation, stepStarting), ActionRecover: done(stepRunning),
+		ActionCancel: done(stepCancelled), ActionRemove: refused(replyStarting, stepStarting),
+	},
+	// The fixture's destination did become active, so the commands that end
+	// a late start record it running instead (ADR 0060), and resume then
+	// refuses it as running.
+	stepOverdue: {
+		ActionPull: done(stepOverdue), ActionResume: refused(replyRunning, stepRunning),
+		ActionAttach: refused(replyOverdue, stepOverdue), ActionStop: done(stepRetained),
+		ActionMove: refused(replyNoConversation, stepOverdue), ActionRecover: done(stepRunning),
+		ActionCancel: done(stepCancelled), ActionRemove: refused(replyOverdue, stepOverdue),
+	},
+	stepRunning: {
+		ActionPull: done(stepRunning), ActionResume: refused(replyRunning, stepRunning),
+		ActionAttach: done(stepRunning), ActionStop: done(stepRetained),
+		ActionMove: done(stepRunning), ActionRecover: done(stepRunning),
+		ActionCancel: done(stepCancelled), ActionRemove: refused(replyRunning, stepRunning),
+	},
+	stepStopping: {
+		ActionPull: done(stepStopping), ActionResume: refused(replyStopping, stepStopping),
+		ActionAttach: refused(replyStopping, stepStopping), ActionStop: done(stepRetained),
+		ActionMove: refused(replyStopPending, stepStopping), ActionRecover: done(stepRetained),
+		ActionCancel: done(stepCancelled), ActionRemove: refused(replyStopping, stepStopping),
+	},
+	stepMoving: {
+		ActionPull: done(stepMoving), ActionResume: refused(replyMoving, stepMoving),
+		ActionAttach: refused(replyMoving, stepMoving), ActionStop: refused(replyMoveUnfinished, stepMoving),
+		ActionMove: refused(replyMoveUnfinished, stepMoving), ActionRecover: done(stepRunning),
+		ActionCancel: done(stepCancelled), ActionRemove: refused(replyMoving, stepMoving),
+	},
+	stepCancelling: {
+		ActionPull: done(stepCancelling), ActionResume: refused(replyCancelling, stepCancelling),
+		ActionAttach: refused(replyCancelling, stepCancelling), ActionStop: refused(replyCancelUnfinished, stepCancelling),
+		ActionMove:    refused(replyCancelUnfinished, stepCancelling),
+		ActionRecover: failedWith("docker unreachable", stepCancelling),
+		ActionCancel:  failedWith("docker unreachable", stepCancelling), ActionRemove: refused(replyCancelling, stepCancelling),
+	},
+	stepCancelled: {
+		ActionPull: done(stepCancelled), ActionResume: refused(replyCancelled, stepCancelled),
+		ActionAttach: refused(replyCancelled, stepCancelled), ActionStop: refused(replyCancelled, stepCancelled),
+		ActionMove: refused(replyNoConversation, stepCancelled), ActionRecover: done(stepCancelled),
+		ActionCancel: done(stepCancelled), ActionRemove: done(""),
+	},
+}
+
+// rowReplies are the table's own replies, by row.
+var rowReplies = map[step]string{stepImporting: replyImporting, stepRetained: replyRetained,
+	stepFailed: replyFailed, stepStarting: replyStarting, stepOverdue: replyOverdue, stepRunning: replyRunning,
+	stepStopping: replyStopping, stepMoving: replyMoving, stepCancelling: replyCancelling,
+	stepCancelled: replyCancelled}
+
+// rowAfter is the row session id is in, or "" once it is removed.
+func rowAfter(t *testing.T, s *Service, id string) step {
+	t.Helper()
+	if _, err := s.readCatalog(id); os.IsNotExist(err) {
+		return ""
+	}
+	row, _ := stepOf(t, s, id)
+	return row
+}
+
+// For a session in every row of the next-steps table, every command does
+// exactly what outcomes says: the reply, whether it is a rejection, and the
+// row the session is in afterwards.
 func TestEachStateRefusesOrCarriesOutEachCommand(t *testing.T) {
 	t.Parallel()
-	if len(stateFixtures) != len(nextSteps) {
-		t.Fatalf("%d fixtures for %d rows", len(stateFixtures), len(nextSteps))
+	if len(stateFixtures) != len(nextSteps) || len(outcomes) != len(nextSteps) {
+		t.Fatalf("%d fixtures and %d outcome rows for %d table rows", len(stateFixtures), len(outcomes),
+			len(nextSteps))
 	}
 	for row, fixture := range stateFixtures {
 		for _, command := range commands {
+			want, ok := outcomes[row][command]
+			if !ok {
+				t.Fatalf("no outcome for %s in %s", command, row)
+			}
 			t.Run(string(row)+"/"+command, func(t *testing.T) {
 				t.Parallel()
 				s, id := fixture(t)
-				before, st := stepOf(t, s, id)
-				if before != row {
+				if before := rowAfter(t, s, id); before != row {
 					t.Fatalf("the fixture reached %s, not %s", before, row)
 				}
 				q := Request{Action: command, ID: id}
@@ -332,20 +411,32 @@ func TestEachStateRefusesOrCarriesOutEachCommand(t *testing.T) {
 					}
 				}
 				r := exchange(t, s, q)
-				want := problem(id, st).Error()
-				if refusal(id, st, command) == nil {
-					if r.Rejected && r.Error == want {
-						t.Fatalf("%s was refused with the row's reply", command)
-					}
-					return
+				reply := strings.ReplaceAll(want.reply, "ID", id)
+				if r.Error != reply || r.Rejected != want.rejected {
+					t.Fatalf("%s replied rejected=%v %q, want rejected=%v %q", command, r.Rejected, r.Error,
+						want.rejected, reply)
 				}
-				if !r.Rejected || r.Error != want {
-					t.Fatalf("%s replied %+v, want %q", command, r, want)
-				}
-				if after, _ := stepOf(t, s, id); after != row {
-					t.Fatalf("the refused %s moved the session from %s to %s", command, row, after)
+				if after := rowAfter(t, s, id); after != want.after {
+					t.Fatalf("%s left the session in %q, want %q", command, after, want.after)
 				}
 			})
+		}
+	}
+}
+
+// A row's reply names only commands that its row does not refuse with that
+// reply, except rm after the cancellation recover finishes, so the advice
+// never names a command that is refused for the reason it gives.
+func TestEachRowsAdviceNamesCommandsItAdmits(t *testing.T) {
+	t.Parallel()
+	for row, reply := range rowReplies {
+		for _, command := range named(reply) {
+			if row == stepCancelling && command == ActionRemove {
+				continue
+			}
+			if o, ok := outcomes[row][command]; ok && o.rejected && o.reply == reply {
+				t.Errorf("%s's reply names %s, which it refuses", row, command)
+			}
 		}
 	}
 }
