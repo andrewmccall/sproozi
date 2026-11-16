@@ -198,6 +198,20 @@ started = time.monotonic()
 sync.stop()
 assert time.monotonic() - started < 2, time.monotonic() - started
 
+# An ordinary stop, uncontended and with a change to save, takes about a
+# millisecond: it never waits for its five-second bound.
+with open(directory + "/ordinary-store", "w") as handle:
+    handle.write('{"claudeAiOauth":{"refreshToken":"stored"}}')
+sync = launch.LoginSync(directory + "/ordinary-store", directory + "/ordinary-native")
+sync.start()
+with open(directory + "/ordinary-native", "w") as handle:
+    handle.write('{"claudeAiOauth":{"refreshToken":"refreshed"}}')
+started = time.monotonic()
+sync.stop()
+assert time.monotonic() - started < 2, time.monotonic() - started
+with open(directory + "/ordinary-store") as handle:
+    assert "refreshed" in handle.read()
+
 store = directory + "/whole"
 with open(store, "wb") as handle:
     handle.write(b'{"claudeAiOauth":{"refreshToken":"' + b"x" * 200000 + b'"}}')
