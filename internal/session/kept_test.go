@@ -1,6 +1,11 @@
 package session
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"fmt"
+	"testing"
+)
 
 // The exit rule both placements share (ADR 0062): what a stopped visit
 // keeps, and what it keeps when its capture fails.
@@ -32,6 +37,34 @@ func TestStopKeeps(t *testing.T) {
 				t.Fatalf("StopKeeps(%+v) = %v, %v; want %v, %v", test.end, keep, onFailure, test.keep, test.onFailure)
 			}
 		})
+	}
+}
+
+// Only a failure of the captured state itself falls back, and only while the
+// stop's context lives: a helper, exec or storage failure, or a capture cut
+// off by the stop's bound or an abort, fails the stop so its retry captures.
+func TestFallsBackOnlyOnAnInvalidStateWhileTheStopLives(t *testing.T) {
+	t.Parallel()
+	invalid := fmt.Errorf("%w: captured checkpoint invalid", ErrUncapturable)
+	ended, cancel := context.WithCancel(t.Context())
+	cancel()
+	for _, test := range []struct {
+		name      string
+		ctx       context.Context
+		err       error
+		onFailure Kept
+		want      bool
+	}{
+		{"invalid state after an exit", t.Context(), invalid, KeptInput, true},
+		{"invalid state of a first visit after an exit", t.Context(), invalid, KeptWorkspace, true},
+		{"invalid state of a graceful stop", t.Context(), invalid, 0, false},
+		{"helper or exec failure", t.Context(), errors.New("placement: fixed command unavailable"), KeptInput, false},
+		{"stop's context ended", ended, invalid, KeptInput, false},
+		{"capture cut off by the context", ended, context.Canceled, KeptInput, false},
+	} {
+		if got := FallsBack(test.ctx, test.err, test.onFailure); got != test.want {
+			t.Errorf("%s: FallsBack = %v, want %v", test.name, got, test.want)
+		}
 	}
 }
 

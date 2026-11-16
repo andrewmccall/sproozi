@@ -398,6 +398,7 @@ func (s *Service) openStack(c Config, engine *runtimedocker.Engine, ledger *budg
 	if err != nil {
 		return err
 	}
+	stack.placement.SetLog(log)
 	s.placements[stack.config.Name] = stack.placement
 	modelConfig, err := provider(stack.gateway, stack.config.Harness)
 	if err != nil {

@@ -251,7 +251,7 @@ func run(args []string) error {
 		BudgetNamespace: fixed.BudgetNamespace, TemplateName: fixed.TemplateName, Principal: fixed.Principal,
 		Directory: fixed.Directory, Name: fixed.PlacementName,
 		InstructionDigest: fixed.InstructionDigest, Allowances: fixed.Allowances,
-		MaxDuration: duration, MaxCheckpointBytes: fixed.MaxCheckpointBytes,
+		MaxDuration: duration, MaxCheckpointBytes: fixed.MaxCheckpointBytes, Log: os.Stderr,
 	})
 	if err != nil {
 		return err

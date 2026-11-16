@@ -1,6 +1,7 @@
 package placement
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -420,16 +421,9 @@ func (p *Placement) quietSource(ctx context.Context, local retained, r registry.
 	switch {
 	case terminated(pod):
 		var err error
-		if local, r, err = p.recordExit(ctx, local, r, pod); err != nil {
+		if local, r, err = p.ended(ctx, local, r, pod); err != nil {
 			return local, r, err
 		}
-		// A first visit that ended before any completed turn has no
-		// conversation to capture (ADR 0032). A stopped container never
-		// proves a completed turn of a harness such as Claude Code (ADR
-		// 0011), so its first visit binds none and is turnless too. One
-		// that bound a conversation before it exited keeps nothing of it
-		// (keep).
-		local.Turnless = local.thread(r) == ""
 	case r.Phase == registry.Stopping:
 		data, err := p.native(pod)(ctx, harness.NativeStatus)
 		if err != nil {
@@ -450,58 +444,127 @@ func (p *Placement) quietSource(ctx context.Context, local retained, r registry.
 			return nil
 		}
 		thread, err := harness.QuiesceNative(ctx, p.native(pod), local.thread(r), local.Launch.Deadline, bind)
-		if err != nil {
+		switch {
+		case err == nil:
+			// Only a turnless first visit quiesces without a bound thread;
+			// it has no conversation to capture (ADR 0032).
+			local.Turnless = thread == ""
+		case errors.Is(err, harness.ErrQuiesceUnacknowledged) && harness.ProvesCompletion(r.Harness) && ctx.Err() == nil:
+			// The reply is usually lost because the container ended first,
+			// as on Docker: the container's end decides.
+			ended, ok := p.endsWithin(ctx, r, lostReplyWait)
+			if !ok {
+				return local, r, err
+			}
+			if local, r, err = p.ended(ctx, local, r, ended); err != nil {
+				return local, r, err
+			}
+		default:
 			return local, r, err
 		}
-		// Only a turnless first visit quiesces without a bound thread; it
-		// has no conversation to capture (ADR 0032).
-		local.Turnless = thread == ""
 	}
 	local.NativeQuiet = true
 	return local, r, p.save(local)
+}
+
+// ended settles a stop of a visit whose native container already ended, once
+// a stop was requested. A harness whose state proves completion, whose
+// supervisor exited 0 and whose output, read in full, holds no exit report
+// was stopped by a graceful quiesce: this placement asked for it and lost the
+// reply, as the Docker placement treats a lost reply. The supervisor writes a
+// report for every other ending (ADR 0038). Anything else is an exit
+// (recordExit). A Claude Code container never proves its turn, so a lost
+// reply there is an exit, which keeps what the visit started from, as on
+// Docker (ADR 0011).
+//
+// A first visit that ended before any completed turn has no conversation to
+// capture (ADR 0032). A stopped container never proves a completed turn of a
+// harness such as Claude Code, so its first visit binds none and is turnless
+// too. One that bound a conversation before it exited keeps nothing of it
+// (keep).
+func (p *Placement) ended(ctx context.Context, local retained, r registry.Record, pod *corev1.Pod) (retained, registry.Record, error) {
+	if local.Exited == nil {
+		code := nativeExitCode(pod)
+		logs, logErr := p.exec.Logs(ctx, pod.Namespace, pod.Name, nativeContainer)
+		graceful := harness.ProvesCompletion(r.Harness) && code == 0 && logErr == nil &&
+			!bytes.Contains(logs, []byte(harness.NativeExitReportPrefix))
+		if !graceful {
+			var err error
+			if local, r, err = p.recordExit(ctx, local, r, code, logs, logErr); err != nil {
+				return local, r, err
+			}
+		}
+	}
+	local.Turnless = local.thread(r) == ""
+	return local, r, nil
+}
+
+// lostReplyWait bounds a stop's wait, after its quiesce reply was lost, for
+// the native container to be seen to end, as the Docker placement waits for
+// its agent container. Tests shorten it.
+var lostReplyWait = 10 * time.Second
+
+// endsWithin reports the visit's Pod once its native container is seen to
+// end within wait.
+func (p *Placement) endsWithin(ctx context.Context, r registry.Record, wait time.Duration) (*corev1.Pod, bool) {
+	ctx, cancel := context.WithTimeout(ctx, wait)
+	defer cancel()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if pod, err := p.pod(ctx, r); err == nil && terminated(pod) {
+			return pod, true
+		}
+		select {
+		case <-ctx.Done():
+			return nil, false
+		case <-ticker.C:
+		}
+	}
+}
+
+// nativeExitCode is the ended native container's exit code.
+func nativeExitCode(pod *corev1.Pod) int32 {
+	var code int32
+	for _, c := range pod.Status.ContainerStatuses {
+		if c.Name == nativeContainer && c.State.Terminated != nil {
+			code = c.State.Terminated.ExitCode
+		}
+	}
+	return code
 }
 
 // recordExit keeps what the supervisor reported when its harness ended
 // without a graceful stop, as the Docker placement does: the report in the
 // native container's last output lines, or the container's exit code when
 // there is none, with the deadline then decided by this host's clock. A
-// first Codex visit binds the thread of a completed turn it reported, so the
-// stop can still checkpoint that conversation.
-func (p *Placement) recordExit(ctx context.Context, local retained, r registry.Record, pod *corev1.Pod) (retained, registry.Record, error) {
-	if local.Exited == nil {
-		var code int32
-		for _, c := range pod.Status.ContainerStatuses {
-			if c.Name == nativeContainer && c.State.Terminated != nil {
-				code = c.State.Terminated.ExitCode
-			}
-		}
-		report := harness.NativeExitReport{Code: int(code)}
-		if logs, err := p.exec.Logs(ctx, pod.Namespace, pod.Name, nativeContainer); err == nil {
-			if reported, ok := harness.ParseNativeExitReport(logs); ok {
-				report = reported
-			}
-		}
-		exit := &session.Exit{Code: report.Code, Output: report.Output, Cause: report.Cause}
-		switch report.Cause {
-		case harness.NativeExitDeadline:
-			exit.Deadline = true
-		case harness.NativeExitSelf, harness.NativeExitFailed:
-		default:
-			exit.Deadline = deadline.At(local.Launch.Deadline).Passed(time.Now())
-		}
-		if harness.ProvesCompletion(r.Harness) && local.thread(r) == "" && report.Thread != "" {
-			bound, err := p.registry.BindNative(ctx, r.Reference, report.Thread)
-			if err != nil {
-				return local, r, semantic(err)
-			}
-			r = bound
-		}
-		local.Exited = exit
-		if err := p.save(local); err != nil {
-			return local, r, err
+// first visit of a harness whose state proves completion binds the thread of
+// a completed turn it reported, so the stop can still checkpoint that
+// conversation.
+func (p *Placement) recordExit(ctx context.Context, local retained, r registry.Record, code int32, logs []byte, logErr error) (retained, registry.Record, error) {
+	report := harness.NativeExitReport{Code: int(code)}
+	if logErr == nil {
+		if reported, ok := harness.ParseNativeExitReport(logs); ok {
+			report = reported
 		}
 	}
-	return local, r, nil
+	exit := &session.Exit{Code: report.Code, Output: report.Output, Cause: report.Cause}
+	switch report.Cause {
+	case harness.NativeExitDeadline:
+		exit.Deadline = true
+	case harness.NativeExitSelf, harness.NativeExitFailed:
+	default:
+		exit.Deadline = deadline.At(local.Launch.Deadline).Passed(time.Now())
+	}
+	if harness.ProvesCompletion(r.Harness) && local.thread(r) == "" && report.Thread != "" {
+		bound, err := p.registry.BindNative(ctx, r.Reference, report.Thread)
+		if err != nil {
+			return local, r, semantic(err)
+		}
+		r = bound
+	}
+	local.Exited = exit
+	return local, r, p.save(local)
 }
 
 // Exited reports whether an active visit's native container ended without a
@@ -554,12 +617,14 @@ func (p *Placement) capture(ctx context.Context, local retained, thread string, 
 	if err != nil {
 		return local, err
 	}
+	// What came back is the fenced state's checkpoint: a failure of these
+	// checks is the state's, and capturing again finds the same.
 	meta, err := checkpoint.Inspect(data, p.config.MaxCheckpointBytes)
 	if err != nil || meta.Harness != l.Harness || meta.ThreadID != thread {
-		return local, errors.New("placement: captured checkpoint invalid")
+		return local, fmt.Errorf("%w: placement: captured checkpoint invalid", session.ErrUncapturable)
 	}
 	if err = checkpoint.ValidateContinuity(data, l.Harness, l.InstructionDigest, p.config.MaxCheckpointBytes); err != nil {
-		return local, err
+		return local, fmt.Errorf("%w: %w", session.ErrUncapturable, err)
 	}
 	if err = p.atomic(p.artifactPath(l.AllocationID, "output"), data); err != nil {
 		return local, err
@@ -572,9 +637,13 @@ func (p *Placement) capture(ctx context.Context, local retained, thread string, 
 // shares (session.StopKeeps, ADR 0062). A turnless first visit, or a first
 // visit whose harness exited without proving a completed turn, keeps no
 // checkpoint: the session keeps the workspace it started from. A resumed
-// visit that proved nothing keeps the checkpoint it started from. A capture
-// of an exited harness that fails keeps the same instead of failing the stop
-// on every retry; any other capture failure fails the stop.
+// visit that proved nothing keeps the checkpoint it started from. An exited
+// harness whose captured state does not validate keeps the same instead of
+// failing the stop on every retry (session.FallsBack), and the discard is
+// logged; every other capture failure fails the stop, and its retry captures
+// again. A resumed visit's fallback is retained before the receipt is
+// recorded: only a failure of the fenced state reaches it, which a retry
+// would meet again.
 func (p *Placement) keep(ctx context.Context, local retained, r registry.Record, pod *corev1.Pod) (retained, error) {
 	keep, onFailure := session.StopKeeps(session.VisitEnd{First: local.fresh(), Turnless: local.Turnless,
 		Exited: local.Exited != nil, ProvesCompletion: harness.ProvesCompletion(r.Harness), Conversation: local.thread(r) != ""})
@@ -583,9 +652,12 @@ func (p *Placement) keep(ctx context.Context, local retained, r registry.Record,
 		if err == nil {
 			return captured, nil
 		}
-		if onFailure == 0 {
+		if !session.FallsBack(ctx, err, onFailure) {
 			return local, err
 		}
+		p.logf("Discarded the captured state of stopped visit %s of execution %s and kept the %s it started from: %v",
+			local.Launch.AllocationID, local.Launch.ExecutionID, map[session.Kept]string{session.KeptInput: "checkpoint",
+				session.KeptWorkspace: "workspace"}[onFailure], err)
 		keep = onFailure
 	}
 	if keep == session.KeptInput {

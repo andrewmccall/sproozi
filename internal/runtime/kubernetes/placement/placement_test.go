@@ -232,9 +232,14 @@ type protocolExecutor struct {
 	// pendingQuiesce makes the supervisor answer a quiesce with a turn
 	// still running: input stays gated and the harness keeps running.
 	pendingQuiesce bool
-	// captureErr makes the capture helper fail.
-	captureErr  error
-	captureArgs []string
+	// captureErr makes the capture helper fail; captureFailures makes it
+	// fail that many times first. captureInvalid makes it return bytes that
+	// are not a checkpoint, as a captured state that does not validate.
+	captureErr      error
+	captureFailures int
+	captureInvalid  bool
+	captures        int
+	captureArgs     []string
 	// logs is the native container's output, where the supervisor writes
 	// its exit report.
 	logs []byte
@@ -282,8 +287,17 @@ func (e *protocolExecutor) helper(ctx context.Context, namespace, pod string, ar
 		return true, json.NewEncoder(output).Encode(e.meta)
 	case helperCapture:
 		e.captureArgs = append([]string(nil), args...)
+		e.captures++
 		if e.captureErr != nil {
 			return true, e.captureErr
+		}
+		if e.captureFailures > 0 {
+			e.captureFailures--
+			return true, errors.New("capture helper failed")
+		}
+		if e.captureInvalid {
+			_, err := output.Write([]byte(`{"version":2,"harness":"codex"}`))
+			return true, err
 		}
 		_, err := output.Write(e.data)
 		return true, err

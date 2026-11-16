@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"path/filepath"
@@ -68,6 +69,16 @@ type Config struct {
 	Allowances         map[string]session.Allowance
 	MaxDuration        time.Duration
 	MaxCheckpointBytes int64
+	// Log, when set, receives a line for each stop that discards what its
+	// visit's harness did (ADR 0062).
+	Log io.Writer
+}
+
+// logf writes one line to the configured log.
+func (p *Placement) logf(format string, args ...any) {
+	if p.config.Log != nil {
+		_, _ = fmt.Fprintf(p.config.Log, format+"\n", args...)
+	}
 }
 
 type Placement struct {

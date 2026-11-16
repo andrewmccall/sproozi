@@ -1,7 +1,6 @@
 package placement
 
 import (
-	"errors"
 	"testing"
 
 	"github.com/andrewmccall/sproozi/internal/harness"
@@ -18,16 +17,16 @@ import (
 func TestHomeNoticesAndStopsARemoteVisitWhoseHarnessExited(t *testing.T) {
 	t.Parallel()
 	for _, test := range []struct {
-		name       string
-		kind       harness.NativeKind
-		captureErr error
+		name    string
+		kind    harness.NativeKind
+		invalid bool
 		// captured: the session keeps the checkpoint captured from the
 		// visit; otherwise the one the visit started from.
 		captured bool
 	}{
-		{"Codex visit keeps its conversation", harness.NativeCodex, nil, true},
-		{"Codex visit whose capture fails keeps its input", harness.NativeCodex, errors.New("capture failed"), false},
-		{"Claude visit keeps its input", harness.NativeClaude, nil, false},
+		{"Codex visit keeps its conversation", harness.NativeCodex, false, true},
+		{"Codex visit whose state is invalid keeps its input", harness.NativeCodex, true, false},
+		{"Claude visit keeps its input", harness.NativeClaude, false, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
@@ -46,7 +45,7 @@ func TestHomeNoticesAndStopsARemoteVisitWhoseHarnessExited(t *testing.T) {
 				t.Fatalf("a running harness reported as exited: %v %v", exited, err)
 			}
 			work, meta := cachedFixtureArtifact(t, test.kind, "work of this visit\n")
-			e.data, e.captureErr = work, test.captureErr
+			e.data, e.captureInvalid = work, test.invalid
 			endNative(t, p, kube, l, 0)
 			e.logs = exitedReport(0, "")
 			if exited, err := observer.Exited(t.Context(), r.Active.Launch, r.Active.Incarnation); err != nil || !exited {

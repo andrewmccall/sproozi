@@ -578,12 +578,17 @@ func (p *Placement) Stop(ctx context.Context, l session.Launch, i session.Incarn
 	// completion, such as Codex, reported a completed conversation that
 	// validates; otherwise the session keeps its previous one.
 	if proves := harness.ProvesCompletion(r.Launch.Harness); r.needsCapture(proves) {
-		// A failed capture of an exited harness keeps what the visit started
-		// from; any other fails the stop, and its retry captures again.
+		// An exited harness whose captured state does not validate keeps
+		// what the visit started from, and the discard is logged; any other
+		// failure fails the stop, and its retry captures again.
 		if err = p.capture(ctx, &r); err != nil {
-			if _, onFailure := r.kept(proves); onFailure == 0 {
+			_, onFailure := r.kept(proves)
+			if !session.FallsBack(ctx, err, onFailure) {
 				return session.Stopped{}, err
 			}
+			p.logf("Discarded the captured state of stopped visit %s of execution %s and kept the %s it started from: %v",
+				r.Launch.AllocationID, r.Launch.ExecutionID, map[session.Kept]string{session.KeptInput: "checkpoint",
+					session.KeptWorkspace: "workspace"}[onFailure], err)
 		}
 	}
 	if err = p.commit(&r, evStopped); err != nil {
@@ -992,12 +997,14 @@ func (p *Placement) capture(ctx context.Context, r *placementRecord) error {
 	if err != nil {
 		return err
 	}
+	// What came back is the fenced state's checkpoint: a failure of these
+	// checks is the state's, and capturing again finds the same.
 	if err = checkpoint.ValidateContinuity(data, p.config.Harness, p.config.InstructionDigest, p.config.MaxCheckpointBytes); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", session.ErrUncapturable, err)
 	}
 	meta, err := checkpoint.Inspect(data, p.config.MaxCheckpointBytes)
 	if err != nil || meta.Harness != r.Launch.Harness || meta.ThreadID != r.thread() {
-		return errors.New("docker capture identity mismatch")
+		return fmt.Errorf("%w: docker capture identity mismatch", session.ErrUncapturable)
 	}
 	if err = p.retain("out-"+meta.SHA256+".checkpoint", data); err != nil {
 		return err
