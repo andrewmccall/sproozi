@@ -555,9 +555,8 @@ Also seen as: `session.Record`.
 A trusted record that steps a writer through declared phases: a typed phase
 validated on load and save, a `(from, event) → to` table that says which events
 the deadline refuses, and one apply function used by live code and recovery.
-The execution journal, the Docker placement record and the Docker gateway
-grant are lifecycle records; the ADR lists the records still adopting the
-pattern. See
+The execution journal, the Docker placement record, the Docker gateway grant
+and the Kubernetes session registration are lifecycle records. See
 [ADR 0058](docs/adr/0058-lifecycle-records-declare-states-and-transitions.md).
 
 ### Turnless visit

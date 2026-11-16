@@ -233,6 +233,65 @@ as a replay: it is a conflict, since such a record may name a Pod it never
 restored into. Every other guard is unchanged. The registration's stored
 format is unchanged.
 
+**Correction, 2026-11-16: the session registration has a table.** The
+Kubernetes session registration moves from "typed phases and guards, no table
+yet" to "with a table", beside the execution journal and the two Docker
+records, and now follows rules 1 to 5. Each mutator in
+`internal/runtime/kubernetes/registry/registry.go` names an event, an `admit`
+step checks it before the record changes, and one `apply` function is the
+only place the phase changes. The inline deadline checks in `Create` and
+`Activate` are the deadline column. Compare-and-swap, the per-phase
+validation on read and write, the stored format and the exported API are
+unchanged. No mutator's accepted phases, written phase or refusal changed: a
+test runs every mutator from every stored state the registry accepts, before
+and after the deadline and without one, and compares the outcomes with a
+table recorded from the code before the change.
+
+The table, in `internal/runtime/kubernetes/registry/transitions.go`. Its
+terminal phases are `stopped` and `cancelled`.
+
+| Event | From → to | Refused after the deadline |
+| --- | --- | --- |
+| `create` | none → `creating` | yes |
+| `bind-run` | `creating` → `bound` | no |
+| `bind-pod` | `bound` → `bound`; `cancelled` → `cancelled` | no |
+| `prepared` | `bound` → `prepared` | no |
+| `activate` | `prepared` → `active` | yes |
+| `bind-native` | `active` → `active` | no |
+| `stop` | `active` → `stopping` | no |
+| `complete-stop` | `stopping` → `stopped` | no |
+| `cancel` | `creating`, `bound`, `prepared`, `active`, `stopping` → `cancelled` | no |
+| `complete-cancel` | `cancelled` → `cancelled` | no |
+
+`create` starts an execution and `activate` grants it the gateway's
+authority, so both start work. Every other event records an outcome the
+remote executor already observed (a run created, a Pod scheduled, a restore
+completed, a native UUID started), or stops, cancels or accounts for work.
+`prepared` is the restore's outcome, not a request: the restore has
+happened when it is recorded, and `prepared` grants nothing.
+
+Some guards depend on more than the phase and stay in the mutators: `bind-pod`
+needs no Pod yet and, on a `cancelled` registration, a bound run;
+`prepared` needs no Pod or the same one; `bind-native` needs a first visit
+from a Git workspace whose native UUID is unbound; `complete-cancel` needs a
+bound run and Pod. `admit` checks the deadline before the phase, so an
+`Activate` after the deadline reports the deadline from any phase except
+`active`, as before.
+
+These replay before admission and apply no event: `Create` of an existing
+registration with the same intent, `BindRun` of the bound run, `BindPod` of
+the bound Pod, `Prepared` of the Pod a `prepared` or later registration
+restored into, `Activate` of `active`, `BindNative` of the bound UUID, `Stop`
+of `stopping` or `stopped`, and `CompleteStop` of `stopped` with the same
+receipt. `Cancel` of `stopped` or `cancelled` changes nothing: a stopped
+registration is settled. `CompleteCancel` with the retained receipt replays
+after admission, because only `cancelled` holds a cancellation receipt, and a
+turnless stop's receipt would otherwise compare equal to one.
+
+Two deadline checks stay outside the table because they record no event:
+`ResolveRun` refuses an expired run unless its stop completed, and
+`RequireActive` refuses an expired registration on every gateway request.
+
 ## Alternatives
 
 - **Check transitions in `save` by rereading the journal.** This catches an
@@ -283,10 +342,13 @@ format is unchanged.
   `internal/session/store.go`, `internal/session/remove.go`,
   `internal/session/home/exits.go`, `internal/session/home/remove.go`,
   `cmd/sproozi/output.go`, `internal/deadline`,
-  `internal/runtime/docker/transitions.go`, `internal/gateway/docker/owner.go`
+  `internal/runtime/docker/transitions.go`, `internal/gateway/docker/owner.go`,
+  `internal/runtime/kubernetes/registry/transitions.go`
 - Tests: `internal/session/phase_test.go`, `internal/session/rules_test.go`,
   `cmd/sproozi/deadline_test.go`, `internal/runtime/docker/transitions_test.go`,
-  `internal/gateway/docker/transitions_test.go`
+  `internal/gateway/docker/transitions_test.go`,
+  `internal/runtime/kubernetes/registry/transitions_test.go`,
+  `internal/runtime/kubernetes/registry/outcomes_test.go`
 - Reference: [status and listing output](../reference/session-commands.md#status-and-listing-output)
 - Related: [ADR 0018](0018-coordinator-owns-every-visit.md),
   [ADR 0038](0038-exited-agents-and-one-recovery-path.md),
