@@ -77,7 +77,7 @@ func endExpiredPreparedDockerVisit(t *testing.T, refusedByDocker bool) {
 	f.containers[agent].State.Status = exitedStatus
 	want := "docker native execution ended without retained stop"
 	if refusedByDocker {
-		want = "docker activation deadline expired"
+		want = "docker placement: activate refused after the launch deadline"
 	}
 	if _, err = p.Inspect(t.Context(), l); err == nil || err.Error() != want {
 		t.Fatalf("Inspect of the expired visit: %v, want %q", err, want)
