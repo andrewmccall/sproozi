@@ -50,6 +50,10 @@ repository, and changes to those pins are reviewed by a code owner.
   maintainer as owner of workflows, `hack/`, `config/`, the Makefile,
   Dockerfiles, Go module files and package lockfiles.
 
+Corrected 2026-11-16: the clients are four, not three. GitHub Copilot CLI is
+pinned the same way in `hack/clients/copilot`, beside Codex, Claude Code and
+OpenCode.
+
 The [Latest Clients Canary](../../.github/workflows/latest-clients.yml) is the
 only channel that runs unreviewed upstream releases. It runs weekly and on
 manual dispatch, never on a pull request. Its first job, with `contents: read`,
@@ -157,3 +161,6 @@ need a separate client release policy.
   `make test-e2e` passed on linux/arm64 with the pinned clients, Hermes digest
   and verified Calico; `actionlint` passed on the workflows. The canary
   workflow itself has not yet run on GitHub.
+
+Corrected 2026-11-16: the canary workflow has run on GitHub on its weekly
+schedule since (`gh run list --workflow latest-clients.yml`).
