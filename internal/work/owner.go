@@ -83,6 +83,10 @@ type Config struct {
 	// executor refuses interactive sessions.
 	Terminal Terminal
 	Log      io.Writer
+	// Stops tracks the stops the owner's handler carries on after their
+	// requests end, so the executor can drain them at shutdown. Without it
+	// the handler keeps its own.
+	Stops *profile.Stops
 
 	// retry bounds the driver's automatic recovery of an unproven stop or
 	// unsealed usage; zero values take the defaults.

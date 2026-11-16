@@ -119,7 +119,11 @@ func NewHandler(o *Owner, taskToken string, home profile.Authorizer) (http.Handl
 		return nil, sessionList{Sessions: v}, nil
 	})
 	stream := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true, DisableLocalhostProtection: true})
-	return &ownerHandler{owner: o, taskHash: sha256.Sum256([]byte(taskToken)), home: home, stream: stream}, nil
+	stops := o.config.Stops
+	if stops == nil {
+		stops = &profile.Stops{}
+	}
+	return &ownerHandler{owner: o, taskHash: sha256.Sum256([]byte(taskToken)), home: home, stream: stream, stops: stops}, nil
 }
 
 type ownerHandler struct {
@@ -127,6 +131,7 @@ type ownerHandler struct {
 	taskHash [32]byte
 	home     profile.Authorizer
 	stream   http.Handler
+	stops    *profile.Stops
 }
 
 func (h *ownerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -274,13 +279,7 @@ func (h *ownerHandler) serveJSON(w http.ResponseWriter, r *http.Request, action 
 				// A stop, or a recovery that continues one, goes on to its
 				// outcome if the caller goes away or gives up; the retry waits
 				// for it. Cancellation interrupts it through the coordinator.
-				ctx, done := profile.DetachStop(r.Context())
-				if action == actionStop {
-					out, e = h.owner.Stop(ctx, q.ID, q.OperationID)
-				} else {
-					out, e = h.owner.Recover(ctx, q.ID)
-				}
-				done()
+				out, e = h.detachedStop(r.Context(), action, q)
 			default:
 				http.NotFound(w, r)
 				return
@@ -293,6 +292,19 @@ func (h *ownerHandler) serveJSON(w http.ResponseWriter, r *http.Request, action 
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)
+}
+
+// detachedStop runs a stop, or a recovery that continues one, so that it goes
+// on to its outcome if the caller goes away or gives up; the retry waits for
+// it, cancellation interrupts it through the coordinator, and the executor
+// drains it at shutdown.
+func (h *ownerHandler) detachedStop(ctx context.Context, action string, q reference) (View, error) {
+	ctx, done := h.stops.Detach(ctx)
+	defer done()
+	if action == actionStop {
+		return h.owner.Stop(ctx, q.ID, q.OperationID)
+	}
+	return h.owner.Recover(ctx, q.ID)
 }
 
 // writeOutcome answers with an error's public code only.

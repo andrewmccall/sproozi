@@ -39,6 +39,10 @@ type Config struct {
 	// Profiles retains profile archives that launches name. Without it, a
 	// launch with a profile is unsupported.
 	Profiles ProfileStore
+	// Stops tracks the stops the handler carries on after their requests
+	// end, so the executor can drain them at shutdown. Without it the handler
+	// keeps its own.
+	Stops *Stops
 }
 
 // ProfileStore retains a verified profile archive under its digest.
@@ -51,7 +55,7 @@ type handler struct {
 	maxBody int64
 	// stops are the stops this executor carries on after their requests
 	// end, each for at most stopBound.
-	stops     stops
+	stops     *Stops
 	stopBound time.Duration
 }
 
@@ -104,7 +108,11 @@ func NewHandler(config Config) (http.Handler, error) {
 		return nil, errors.New("profile: home principal authorizer required")
 	}
 	config.Authorizer = nil
-	return &handler{config: config, home: home, maxBody: maxBody, stopBound: StopBound}, nil
+	stops := config.Stops
+	if stops == nil {
+		stops = &Stops{}
+	}
+	return &handler{config: config, home: home, maxBody: maxBody, stops: stops, stopBound: StopBound}, nil
 }
 
 // validToken trims a bearer token and checks the length and characters every
@@ -311,30 +319,34 @@ func (h *handler) perform(r *http.Request, action string, input request) (respon
 		}
 	case actionStop:
 		// The stop goes on to its outcome if home goes away or gives up, so
-		// a quiesce in flight is never abandoned; its retry, or an abort of
-		// the same visit, which interrupts it, waits for it.
-		ctx, done := h.stops.begin(r.Context(), input.Launch.AllocationID, h.stopBound)
-		defer done()
-		s, err := p.Stop(ctx, input.Launch, *input.Incarnation)
-		// A fenced writer with unsealed usage is a stop result, not a failure:
-		// its nil receipt tells the client to keep the allocation encumbered.
-		if errors.Is(err, session.ErrUsageUnsealed) && s.ActualStopped {
-			s.Receipt, s.Checkpoint, s.CheckpointDigest = nil, nil, ""
-			err = nil
-		}
-		if err != nil {
-			return output, err
-		}
-		output.Stopped = &s
-		output.Checkpoint = s.Checkpoint
+		// a quiesce in flight is never abandoned; its retry joins it, and an
+		// abort of the same visit interrupts it.
+		return h.stops.run(r.Context(), input, h.stopBound, func(ctx context.Context) (response, error) {
+			output := response{Version: protocolVersion}
+			s, err := p.Stop(ctx, input.Launch, *input.Incarnation)
+			// A fenced writer with unsealed usage is a stop result, not a
+			// failure: its nil receipt tells the client to keep the allocation
+			// encumbered.
+			if errors.Is(err, session.ErrUsageUnsealed) && s.ActualStopped {
+				s.Receipt, s.Checkpoint, s.CheckpointDigest = nil, nil, ""
+				err = nil
+			}
+			if err != nil {
+				return output, err
+			}
+			output.Stopped = &s
+			output.Checkpoint = s.Checkpoint
+			return output, nil
+		})
 	case actionInspect, actionAbort:
 		var o session.Observation
 		var err error
 		if action == actionInspect {
 			o, err = p.Inspect(r.Context(), input.Launch)
 		} else {
-			h.stops.interrupt(input.Launch.AllocationID)
+			release := h.stops.abort(input)
 			o, err = p.Abort(r.Context(), input.Launch, *input.Incarnation)
+			release()
 		}
 		if err != nil {
 			return output, err

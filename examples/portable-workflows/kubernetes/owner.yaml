@@ -199,6 +199,9 @@ spec:
         app: sproozi-work
     spec:
       serviceAccountName: sproozi-work
+      # A stop in flight at a rollout finishes: 10 seconds of shutdown, then up
+      # to 9m43s for the stop (docs/reference/remote-executors.md).
+      terminationGracePeriodSeconds: 620
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000

@@ -261,10 +261,15 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
+	// Stops carried on after their requests end hold the placement's and the
+	// coordinator's locks, so shutdown drains them before the deferred
+	// closes run.
+	stops := &profile.Stops{}
 	handler, err := profile.NewHandler(profile.Config{
 		Harness: fixed.Harness, Principal: fixed.Principal, Authorizer: home, Placement: fixed.PlacementName,
 		InstructionDigest: fixed.InstructionDigest, Allowances: fixed.Allowances,
 		MaxDuration: duration, MaxCheckpointBytes: fixed.MaxCheckpointBytes, Backend: backend, Profiles: backend,
+		Stops: stops,
 	})
 	if err != nil {
 		return err
@@ -287,7 +292,7 @@ func run(args []string) error {
 			MaxDuration: duration, WorkTokenMaxDuration: workDuration, MaxCheckpointBytes: fixed.MaxCheckpointBytes,
 			RetainedBytes: fixed.RetainedBytes,
 			Repositories:  fixed.Repositories, TemplateName: fixed.TemplateName, Projects: fixed.Projects,
-			Coordinator: coordinator, Profiles: backend, Terminal: backend, Log: os.Stderr,
+			Coordinator: coordinator, Profiles: backend, Terminal: backend, Log: os.Stderr, Stops: stops,
 		})
 		if openErr != nil {
 			return openErr
@@ -325,13 +330,31 @@ func run(args []string) error {
 		}
 		return err
 	case <-ctx.Done():
-		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if err = server.Shutdown(shutdown); err != nil {
-			_ = server.Close()
-		}
-		return err
+		return shutdown(server, stops, profile.StopBound, os.Stderr)
 	}
+}
+
+// shutdown stops accepting requests, gives those in flight 10 seconds and
+// then closes their connections, attachments included. Stops the executor
+// carries on after their requests ended survive that: shutdown waits up to
+// drain for them to reach their outcome, then interrupts any still running
+// and waits for them to let go of their locks, so the placement and
+// coordinator close cleanly. The Pod's terminationGracePeriodSeconds must
+// exceed drain plus those 10 seconds for a stop in flight to finish rather
+// than be killed.
+func shutdown(server *http.Server, stops *profile.Stops, drain time.Duration, log io.Writer) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	err := server.Shutdown(ctx)
+	cancel()
+	if err != nil {
+		_ = server.Close()
+	}
+	ctx, cancel = context.WithTimeout(context.Background(), drain)
+	defer cancel()
+	if drainErr := stops.Drain(ctx); drainErr != nil {
+		_, _ = fmt.Fprintf(log, "Interrupted stops still running after %s at shutdown; repeat each stop to finish it\n", drain)
+	}
+	return err
 }
 
 // homeAuthorizer decides the home principal: a caller whose Kubernetes
