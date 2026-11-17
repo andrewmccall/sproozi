@@ -44,6 +44,18 @@ spec:
       # SIGTERM drains model calls for up to 30 s so each settles its
       # reservation (cmd/gateway drainTimeout); leave room for that.
       terminationGracePeriodSeconds: 45
+      # The gateway dials providers by name with Go's own resolver, which reads
+      # these options from resolv.conf. A lost DNS query or reply costs one
+      # timeout; Kubernetes' default of 5 s stalled model calls by 5 s on a
+      # loaded cluster. 1 s bounds that, and 3 attempts still let an answer
+      # that takes up to 3 s arrive. ndots and the search list stay as the
+      # cluster sets them, so every name resolves as before.
+      dnsConfig:
+        options:
+        - name: timeout
+          value: "1"
+        - name: attempts
+          value: "3"
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532

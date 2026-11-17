@@ -133,6 +133,22 @@ the home configuration's `gateway.maxModelCallSeconds` sets. See
 [concurrency and gateway capacity](#concurrency-and-gateway-capacity) before
 changing them.
 
+The Kubernetes gateway looks up a provider's host name itself, with Go's
+resolver and its Pod's `resolv.conf`, each time it opens a new connection to
+that provider. It keeps an idle provider connection for up to 90 seconds, so
+calls in between need no lookup. The install sets the gateway Pod's
+`dnsConfig` options `timeout: "1"` and `attempts: "3"` and leaves `ndots`, the
+search list and the nameserver to the cluster. A lost DNS query or reply then
+delays a call by about 1 second instead of Kubernetes' default 5. Each name
+the resolver asks may take up to 3 seconds. With the default `ndots:5` and
+three search domains, a lookup of a name with fewer than five dots, such as
+`api.anthropic.com`, asks up to four names in turn, so it takes at most 12
+seconds before it fails. Don't lower `ndots` on the gateway: a partly qualified
+in-cluster upstream, such as `models.ai` for Service `models` in namespace
+`ai`, would then be asked of public DNS first and could resolve there. The
+Docker gateway uses the host's resolver configuration, which Sproozi doesn't
+set.
+
 The projected token lifetime is two hours, and the kubelet refreshes the file
 before it expires. The controller mounts the token volume's directory,
 `/var/run/sproozi/tokens/gateway`, which holds only the token, at
