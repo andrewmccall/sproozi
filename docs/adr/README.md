@@ -159,6 +159,7 @@ driver settles it as it settles a task's.
 | [0063](0063-a-session-releases-executions-it-never-recorded.md) | A home session releases the executions it never recorded, which an interrupted `resume` leaves: one that never ran is cancelled and deleted at the session's next `resume` or `rm`, one that ran is kept and reached by `cancel` and `rm` of its own ID, and an unreadable journal is kept and logged. |
 | [0064](0064-the-supervisor-alone-stops-a-harness-at-its-deadline.md) | The supervisor alone acts on the execution's deadline: one `deadline` event, raised once by its watcher or a `quiesce` that finds it passed, unless the harness already exited by itself; `activate` checks it again just before the launch; the harness's terminal no longer has a deadline of its own. |
 | [0065](0065-a-revoked-project-settles-interactive-sessions.md) | A revoked project settles interactive sessions: the remote executor's driver carries out a held cancellation, or cancels for the revoked project, an interactive session whose stop or cancellation is unsettled, since its owner can no longer recover it. |
+| [0066](0066-a-contradicted-retained-record-refuses-work-and-never-blocks-an-end.md) | A contradicted retained record of a Kubernetes visit refuses work: `Prepare`, `Activate` and `Attach` answer `conflict`; `Inspect`, `Exited`, `Stop`, `Abort` and `AbortPreparation` continue from the facts that hold, take what the registration's phase proves from it, observe the rest again and never trust a forgotten fence. |
 
 ## Reserved numbers
 

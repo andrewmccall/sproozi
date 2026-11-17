@@ -509,9 +509,10 @@ The remote executor's private file for one Kubernetes visit, beside its
 [session registration](#session-registration): the exact launch, the
 registration's reference and what a stop or cancellation has established so
 far (a quiet source, an exit, a turnless visit, a fenced writer, the kept
-output) or an aborted preparation. It stores no phase. Each load and save
-checks its facts against each other and the registration; see
-[ADR 0058](docs/adr/0058-lifecycle-records-declare-states-and-transitions.md).
+output) or an aborted preparation. It stores no phase. Its facts are checked
+against each other on every load and save, and against the registration
+once it exists; see
+[ADR 0066](docs/adr/0066-a-contradicted-retained-record-refuses-work-and-never-blocks-an-end.md).
 Also seen as: `retained`.
 
 ### Harness conversation ID

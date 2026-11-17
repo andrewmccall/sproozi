@@ -47,8 +47,9 @@ func (p *Placement) retained(ctx context.Context, l session.Launch) (retained, r
 // Inspect and Exited. A contradiction must not keep a visit from being
 // listed, stopped, cancelled and removed, so these continue from the facts
 // that hold, observing a forgotten fact again or reporting it unknown. They
-// write nothing: the record keeps its contradiction until an operation that
-// ends the visit reads it.
+// do not save the record to correct it, so it keeps its contradiction until
+// an operation that ends the visit reads it; a save Inspect makes for its
+// own reason, such as a fence it observes, writes the corrected record.
 func (p *Placement) observing(ctx context.Context, l session.Launch) (retained, registry.Record, error) {
 	local, r, err := p.retainedRecord(ctx, l, false)
 	return local, r, forgiven(err)
