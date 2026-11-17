@@ -997,6 +997,17 @@ func (p *Placement) Abort(ctx context.Context, l session.Launch, i session.Incar
 	return o, nil
 }
 
+// fenceCancelledWait bounds fenceCancelled's wait for the agent container of
+// a deleted Pod to be seen to stop. It covers the Pod's default termination
+// grace of 30 seconds and the seal, and stays under the home's 2-minute wait
+// for an abort (abortWait in profile), so a remote caller receives the
+// executor's answer. A container never seen to stop, as on a lost node,
+// whose Pod the writer-fence finalizer keeps, would otherwise hold the
+// cancellation, and a caller with no deadline such as the executor's
+// driver, for ever: past the bound the fence is reported unknown, the
+// coordinator records unknown-stop and a recover waits again.
+const fenceCancelledWait = 90 * time.Second
+
 // fenceCancelled forcibly stops the exact Pod bound to a cancelled
 // registration and returns once its writer is fenced: its native container
 // was observed terminated, or the Pod was never scheduled. It then seals the
@@ -1016,6 +1027,8 @@ func (p *Placement) fenceCancelled(ctx context.Context, local *retained, r regis
 	} else if !local.WriterFenced {
 		return r, errors.New("placement: absent Pod has no retained writer fence")
 	}
+	ctx, cancel := context.WithTimeout(ctx, p.fenceWait)
+	defer cancel()
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	for {
