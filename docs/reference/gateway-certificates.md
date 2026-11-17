@@ -78,9 +78,10 @@ at the new bundle afterwards.
 ### A refused certificate record
 
 The controller refuses an authority Secret whose `state.json` describes no
-[rotation phase](../../GLOSSARY.md#rotation-phase), or whose trusted
-`ca-N.pem` or `ca-N.key` is not the one `state.json` records. Every reconcile
-then fails, and the controller logs, every five minutes:
+[rotation phase](../../GLOSSARY.md#rotation-phase), or one of whose
+`ca-N.pem` certificates, trusted or kept as history, is not the one
+`state.json` records. Every reconcile then fails, and the controller logs,
+every five minutes:
 
 ```text
 Failed to reconcile gateway certificates err="pki: corrupt state: <what is wrong>"
@@ -108,6 +109,43 @@ ConfigMap, `sproozi-sandbox-trust-N`, and its cost is the one above: every
 running Pod loses the gateway until it is restarted with the new bundle. Replace
 refuses only a `state.json` it cannot parse, or one written by a different
 record version; restore those from a backup.
+
+### Cleanup the controller reports
+
+Each reconcile also removes from the authority Secret what the record no
+longer needs: the key of every retired authority, serving-certificate files
+(`leaf-<hex>.pem` and `.key`) other than the one the record names, and the
+files of an authority a prepare wrote but never recorded. A trusted
+authority's key is read only by the step that uses it, and then checked. A
+problem with either does not stop the reconcile: it renews and publishes as
+usual, then fails with, for example:
+
+```text
+Failed to reconcile gateway certificates err="pki: destroy retired keys: <the removal that failed>"
+Failed to reconcile gateway certificates err="pki: certificate authority key: generation 2 key ca-2.key does not match its certificate: <cause>"
+```
+
+A key that cannot be read reports `is unreadable: <cause>` instead. Every
+reconcile retries, so the line repeats until the file is fixed or removed.
+Issuing a certificate from a broken serving key fails with `pki: serving CA
+key unavailable; recover it or replace the CA: <cause>`.
+
+### What validation does not protect
+
+These checks find damage and mistakes, such as a truncated restore, a stray
+file or a hand edit that contradicts itself. They cannot authenticate the
+record: whoever can write `state.json` can write every file beside it, and on
+Kubernetes editing one key of the authority Secret needs write access to the
+whole Secret. The controller's RBAC and who may update the authority Secret
+are what protect it. Two consequences of an edit to `state.json` alone:
+
+- From a replaced store (generation 1 retired, 2 serving), un-retiring
+  generation 1 and recording `switched 1 to 2` with both trusted loads; the
+  next reconcile puts the retired authority's certificate back in the trust
+  bundle. Its missing key is the accepted lost-key state.
+- Marking a generation retired makes the next reconcile destroy its key,
+  without a `retire` request and without the operator confirming that older
+  Pods stopped.
 
 ## Your own certificates
 

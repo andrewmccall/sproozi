@@ -206,9 +206,9 @@ interrupted command created but never recorded, are destroyed at the
 service's next start or check.
 
 A `pki/state.json` that no [rotation phase](../../GLOSSARY.md#rotation-phase)
-describes, or a trusted authority certificate or key that is not the one it
-records, is refused with an error that names what is wrong and begins
-`pki: corrupt state:` or `pki: certificate authority files do not match
+describes, or an authority certificate, trusted or kept as history, that is
+not the one it records, is refused with an error that names what is wrong and
+begins `pki: corrupt state:` or `pki: certificate authority files do not match
 state:`. `sproozi certificates status` and `sproozi doctor` print it; the
 service will not start, and a running service logs `Failed to maintain
 gateway certificate` with it every minute, keeps serving its current
@@ -219,6 +219,27 @@ replace-ca`: it numbers the new authority after every generation in the record
 or the directory, retires all of them, destroys every earlier authority and
 serving key and keeps earlier certificates as history. It refuses only a
 `state.json` it cannot parse, or one written by a different record version.
+
+A trusted authority's key is read only by the step that uses it. The service's
+check also reports, after renewing the certificate and writing the trust
+bundle, a trusted key that is unreadable (`pki: certificate authority key:
+generation N key ca-N.key is unreadable: <cause>`, for example a key other
+users can read) or does not match its certificate (`… does not match its
+certificate: <cause>`), and a retired key or stray file it could not remove
+(`pki: destroy retired keys: <cause>`). The service treats either report as a
+failed check: it will not start, and a running service logs `Failed to
+maintain gateway certificate` with it every minute and skips the rest of that
+check, including rotation and loading a renewed certificate, until the file is
+fixed or removed.
+
+These checks find damage and mistakes. They cannot authenticate the record:
+whoever can write `pki/state.json` can write every file beside it, and the
+directory's private permissions are what protect it. Two consequences of an
+edit to `state.json` alone: from a replaced store (generation 1 retired, 2
+serving), un-retiring generation 1 and recording a switched rotation from 1 to
+2 loads, and the next check puts the retired authority's certificate back in
+the trust bundle; and marking a generation retired makes the next check
+destroy its key, without a retirement or the service's consumer check.
 
 ## Supported platforms
 

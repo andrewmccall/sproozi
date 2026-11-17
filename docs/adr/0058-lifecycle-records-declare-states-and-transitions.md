@@ -433,13 +433,16 @@ assigned the serving generation, trust and stage inline.
   generations exist, which are retired, which are trusted and in what order,
   which serves, and the leaf's file name. Load and save require the stored
   stage to equal the derived phase, and refuse with an error naming what is
-  wrong. They also require each trusted generation's certificate to have the
-  recorded fingerprint and expiry, and its key, when present, to match it. A
-  missing key is the lost-key state ADR 0029 describes, and still loads.
-  `Initialize` and `ReplaceCA` read the record without the files, so replace
+  wrong. They also require each trusted generation's certificate, and each
+  retired generation's kept certificate, to have the recorded fingerprint and
+  expiry. They read no key: a key is checked by the step that uses it, and
+  by `Ensure` after its leaf and trust work, which reports an unreadable or
+  mismatched trusted key with its true cause. A missing key is the lost-key
+  state ADR 0029 describes. `Initialize` reads the record without the files,
+  and `ReplaceCA` without validating it, so replace
   still recovers an authority whose files were lost or changed. An explicit
-  replace is also the way out of a record no phase describes, as it was
-  before: it rebuilds the history as generations 1 to N, all retired, N the
+  replace is also the way out of a record no phase describes, or whose
+  certificates are not the ones it records, as it was before: it rebuilds the history as generations 1 to N, all retired, N the
   highest the record lists or a `ca-N` file belongs to, and moves from the
   `refused` pseudo-phase to `single` on generation N+1. Every other event
   refuses such a record and writes nothing. Replace refuses only a record it
@@ -447,7 +450,10 @@ assigned the serving generation, trust and stage inline.
 - **Rules 3 and 4.** The table, in `internal/pki/transitions.go`, is below.
   Each mutator admits its event before its side effect (creating a
   generation's files) and one `apply` is the only place the record's
-  generations, trust, serving generation and rotation change. Issuing a leaf
+  generations, trust, serving generation and rotation change. Two tests guard
+  it: one observes every `apply` and requires each operation to apply its own
+  event once, and one reads the package's source and refuses an assignment to
+  a structure field outside `apply`. Issuing a leaf
   is not an event: it changes only the leaf, in every phase.
 - **Rule 5** does not apply: the record has no deadline, and no event is
   refused because time passed. `RotationDue` only starts a rotation.
@@ -464,14 +470,28 @@ assigned the serving generation, trust and stage inline.
 One idempotent pass destroys the key of every retired generation, both files
 of a generation numbered after the record's last (an interrupted prepare's),
 and every leaf file the record does not name. It removes only names the store
-writes: `ca-<N>.pem`, `ca-<N>.key` and `leaf-<16 hex>` files. `Ensure` runs it, so the certificate
-controller runs it on every reconcile and the local service at start and every
+writes: `ca-<N>.pem`, `ca-<N>.key` and `leaf-<16 hex>` files. `Ensure`
+runs it, so the certificate controller runs it on every reconcile and the local service at start and every
 minute; `retire`, `replace` and every leaf issuance run it after their commit.
 Before, a crash or failed removal between committing a retirement and removing
 the key left the key for good, and the controller committed it to the
 authority Secret. The pass never removes a trusted generation's key or the
 named leaf. It runs under the store's lock, which every operation that writes
-a generation or leaf holds until its commit.
+a generation or leaf holds until its commit. A removal that fails does not
+stop `Ensure`: it renews the leaf and writes the trust bundle, then returns
+the failure, as it returns a broken trusted key, marked `ErrOutstanding`.
+The certificate controller commits and publishes that reconcile's work and
+then fails it, so the log reports it every interval.
+
+Validation finds damage and mistakes; it cannot authenticate the record.
+Whoever can write `state.json` can write every file beside it, and on
+Kubernetes a one-key edit needs write access to the whole authority Secret,
+so the store directory's permissions and the Secret's RBAC are what protect
+it. An edit of `state.json` alone can, from a replaced store, un-retire
+generation 1 and record `switched 1 to 2` with both trusted, after which
+`Ensure` puts the retired certificate back in the trust bundle (its missing
+key is the accepted lost-key state); and marking a generation retired makes
+the next `Ensure` destroy its key without a `retire` and its drained check.
 
 `testdata/store-outcomes.txt` and `testdata/reconcile-outcomes.txt`, recorded
 from the code before this change, hold the outcome of every operation and
@@ -481,8 +501,10 @@ undescribed records and mismatched files are refused by everything but
 replace; retired CA keys, uncommitted generations and unnamed leaf files are
 destroyed; and replace of seven corrupted records changed, each a fix (three
 it refused, two where it overwrote an existing CA's files, one where it left
-a key, and one where it removed files outside the store). Records the code
-wrote before still load.
+a key, and one where it removed files outside the store; commit `3396e12`'s
+message says six). A broken trusted key no longer refuses load: those rows
+are again those recorded before the change, except that `Ensure` reports the
+key. Records the code wrote before still load.
 
 ## Alternatives
 
