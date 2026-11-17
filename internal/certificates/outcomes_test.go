@@ -24,6 +24,13 @@ var updateOutcomes = flag.Bool("update-outcomes", false, "rewrite testdata/recon
 
 const outcomesFile = "testdata/reconcile-outcomes.txt"
 
+// Names of the built authority Secrets the tests share.
+const (
+	stateSingle   = "single"
+	statePrepared = "prepared"
+	stateSwitched = "switched"
+)
+
 // secretState is an authority Secret the recorded table starts from: one the
 // controller wrote, or one a hand edit, a truncated restore or an
 // interrupted write could leave.
@@ -88,25 +95,27 @@ func editStoredState(t *testing.T, client *fake.Clientset, edit func(st *pki.Sta
 
 func secretStates() []secretState {
 	return []secretState{
-		{"single", func(t *testing.T, c *Controller, client *fake.Clientset) { step(t, c, client) }},
-		{"prepared", func(t *testing.T, c *Controller, client *fake.Clientset) { step(t, c, client, "prepare") }},
-		{"switched", func(t *testing.T, c *Controller, client *fake.Clientset) { step(t, c, client, "prepare", "switch") }},
+		{stateSingle, func(t *testing.T, c *Controller, client *fake.Clientset) { step(t, c, client) }},
+		{statePrepared, func(t *testing.T, c *Controller, client *fake.Clientset) { step(t, c, client, requestPrepare) }},
+		{stateSwitched, func(t *testing.T, c *Controller, client *fake.Clientset) {
+			step(t, c, client, requestPrepare, requestSwitch)
+		}},
 		{"retired", func(t *testing.T, c *Controller, client *fake.Clientset) {
-			step(t, c, client, "prepare", "switch", "retire")
+			step(t, c, client, requestPrepare, requestSwitch, requestRetire)
 		}},
 		// RetireRotation committed in scratch space, the key's removal failed,
 		// and the controller then committed the scratch space to the Secret.
 		{"retired-key-left", func(t *testing.T, c *Controller, client *fake.Clientset) {
-			step(t, c, client, "prepare", "switch")
+			step(t, c, client, requestPrepare, requestSwitch)
 			key := authorityData(t, client)["ca-1.key"]
-			request(t, client, "retire")
+			request(t, client, requestRetire)
 			reconcileOK(t, c)
 			setAuthorityData(t, client, func(data map[string][]byte) { data["ca-1.key"] = key })
 		}},
 		{"replaced-key-left", func(t *testing.T, c *Controller, client *fake.Clientset) {
 			step(t, c, client)
 			key := authorityData(t, client)["ca-1.key"]
-			request(t, client, "replace")
+			request(t, client, requestReplace)
 			reconcileOK(t, c)
 			setAuthorityData(t, client, func(data map[string][]byte) { data["ca-1.key"] = key })
 		}},
@@ -117,27 +126,27 @@ func secretStates() []secretState {
 			})
 		}},
 		{"stage-unknown", func(t *testing.T, c *Controller, client *fake.Clientset) {
-			step(t, c, client, "prepare")
+			step(t, c, client, requestPrepare)
 			editStoredState(t, client, func(st *pki.State) { st.Rotation.Stage = "bogus" })
 		}},
 		{"rotation-dropped", func(t *testing.T, c *Controller, client *fake.Clientset) {
-			step(t, c, client, "prepare")
+			step(t, c, client, requestPrepare)
 			editStoredState(t, client, func(st *pki.State) { st.Rotation = nil })
 		}},
 		{"serving-not-trusted", func(t *testing.T, c *Controller, client *fake.Clientset) {
-			step(t, c, client, "prepare")
+			step(t, c, client, requestPrepare)
 			editStoredState(t, client, func(st *pki.State) { st.Trusted = []int{2} })
 		}},
 		{"prepared-serving-new", func(t *testing.T, c *Controller, client *fake.Clientset) {
-			step(t, c, client, "prepare")
+			step(t, c, client, requestPrepare)
 			editStoredState(t, client, func(st *pki.State) { st.Serving = 2 })
 		}},
 		{"prepared-trusted-one", func(t *testing.T, c *Controller, client *fake.Clientset) {
-			step(t, c, client, "prepare")
+			step(t, c, client, requestPrepare)
 			editStoredState(t, client, func(st *pki.State) { st.Trusted = []int{1} })
 		}},
 		{"generation-not-retired-untrusted", func(t *testing.T, c *Controller, client *fake.Clientset) {
-			step(t, c, client, "prepare")
+			step(t, c, client, requestPrepare)
 			editStoredState(t, client, func(st *pki.State) { st.Trusted, st.Rotation = []int{1}, nil })
 		}},
 		{"ca-pair-other", func(t *testing.T, c *Controller, client *fake.Clientset) {
@@ -217,7 +226,7 @@ func describeCluster(t *testing.T, client *fake.Clientset, servingBefore []byte)
 	stage := "unreadable"
 	var st pki.State
 	if json.Unmarshal(s.Data["state.json"], &st) == nil {
-		stage = "none"
+		stage = noRotation
 		if st.Rotation != nil {
 			stage = fmt.Sprintf("%s:%d>%d", st.Rotation.Stage, st.Rotation.From, st.Rotation.To)
 		}
@@ -235,7 +244,7 @@ func describeCluster(t *testing.T, client *fake.Clientset, servingBefore []byte)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var trust []string
+	trust := make([]string, 0, len(cms.Items))
 	for _, cm := range cms.Items {
 		trust = append(trust, cm.Name)
 	}
@@ -252,11 +261,11 @@ func describeCluster(t *testing.T, client *fake.Clientset, servingBefore []byte)
 // adopted ADR 0058's pattern; each later difference is a deliberate change
 // in its own commit.
 func TestReconcileOutcomesMatchTheRecordedTable(t *testing.T) {
-	var lines []string
+	lines := make([]string, 0, 128)
 	for _, state := range secretStates() {
 		c, built := setup(t)
 		state.build(t, c, built)
-		for _, req := range []string{"", "renew", "prepare", "switch", "rollback", "retire", "replace"} {
+		for _, req := range []string{"", requestRenew, requestPrepare, requestSwitch, requestRollback, requestRetire, requestReplace} {
 			client := cloneCluster(t, built)
 			if req != "" {
 				request(t, client, req)

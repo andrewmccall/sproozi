@@ -29,9 +29,9 @@ func keyFiles(t *testing.T, s *Store) []string {
 func TestEnsureDestroysARetiredKeyLeftBehind(t *testing.T) {
 	roots := buildStates(t)
 	for name, want := range map[string][]string{
-		"retired-key-left":           {"ca-2.key"},
-		"replaced-key-left":          {"ca-2.key"},
-		"replaced-key-left-prepared": {"ca-2.key", "ca-3.key"},
+		"retired-key-left":        {keyCA2},
+		"replaced-key-left":       {keyCA2},
+		stReplacedKeyLeftPrepared: {keyCA2, "ca-3.key"},
 	} {
 		s := outcomeStore(t, copyStore(t, filepath.Join(roots[name], "pki")))
 		if _, err := s.Ensure(testNames); err != nil {
@@ -49,7 +49,7 @@ func TestEnsureDestroysARetiredKeyLeftBehind(t *testing.T) {
 // destroyRetired.
 func TestEnsureKeepsEveryKeyAPhaseNeeds(t *testing.T) {
 	for name, root := range buildStates(t) {
-		if name == "empty" || name == "state-lost" {
+		if name == stEmpty || name == stStateLost {
 			continue
 		}
 		s := outcomeStore(t, copyStore(t, filepath.Join(root, "pki")))
@@ -103,7 +103,7 @@ func TestEnsureDestroysLeafFilesTheRecordDoesNotName(t *testing.T) {
 // Ensure.
 func TestAFailedRetiredKeyRemovalIsRetried(t *testing.T) {
 	roots := buildStates(t)
-	s := outcomeStore(t, copyStore(t, filepath.Join(roots["switched"], "pki")))
+	s := outcomeStore(t, copyStore(t, filepath.Join(roots[stSwitched], "pki")))
 	s.beforeWrite = func(op, name string) error {
 		if op == "remove" && name == "ca-1.key" {
 			return errStopped
@@ -120,7 +120,7 @@ func TestAFailedRetiredKeyRemovalIsRetried(t *testing.T) {
 	if _, err := s.Ensure(testNames); err != nil {
 		t.Fatal(err)
 	}
-	if got := keyFiles(t, s); !slices.Equal(got, []string{"ca-2.key"}) {
+	if got := keyFiles(t, s); !slices.Equal(got, []string{keyCA2}) {
 		t.Errorf("keys %v, want only ca-2.key", got)
 	}
 }

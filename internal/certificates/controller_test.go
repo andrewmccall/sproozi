@@ -105,7 +105,7 @@ func TestOperatorDrivenRotationCreatesNewTrustObjects(t *testing.T) {
 	}
 	trustA := trust(t, client, trustPrefix)
 	leafA := serving(t, client).Leaf
-	request(t, client, "prepare")
+	request(t, client, requestPrepare)
 	status, err := c.Reconcile(context.Background())
 	if err != nil || status.TrustConfigMap != "sproozi-sandbox-trust-1-2" || !serving(t, client).Leaf.Equal(leafA) {
 		t.Fatalf("prepare %+v %v", status, err)
@@ -114,7 +114,7 @@ func TestOperatorDrivenRotationCreatesNewTrustObjects(t *testing.T) {
 	if string(trust(t, client, trustPrefix)) != string(trustA) {
 		t.Fatal("existing trust object changed")
 	}
-	request(t, client, "switch")
+	request(t, client, requestSwitch)
 	if _, err = c.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestOperatorDrivenRotationCreatesNewTrustObjects(t *testing.T) {
 	if leafB.Equal(leafA) || pki.VerifyServing(leafB, trustAB, names, time.Now()) != nil || pki.VerifyServing(leafB, trustA, names, time.Now()) == nil {
 		t.Fatal("switch must serve a new-CA leaf trusted only by the combined bundle")
 	}
-	request(t, client, "retire")
+	request(t, client, requestRetire)
 	if status, err = c.Reconcile(context.Background()); err != nil || status.TrustConfigMap != "sproozi-sandbox-trust-2" {
 		t.Fatalf("retire %+v %v", status, err)
 	}
@@ -130,7 +130,7 @@ func TestOperatorDrivenRotationCreatesNewTrustObjects(t *testing.T) {
 		t.Fatal("retired bundle must still verify the B leaf")
 	}
 	s, _ := client.CoreV1().Secrets(systemNamespace).Get(context.Background(), "sproozi-certificate-authority", metav1.GetOptions{})
-	if _, ok := s.Data["ca-1.key"]; ok || s.Annotations[RotationRequest] != "" || s.Annotations[RotationStage] != "none" {
+	if _, ok := s.Data["ca-1.key"]; ok || s.Annotations[RotationRequest] != "" || s.Annotations[RotationStage] != noRotation {
 		t.Fatalf("retired key or request retained: %v", s.Annotations)
 	}
 }
@@ -140,7 +140,7 @@ func TestRefusedRequestIsReportedWithoutChangingTrust(t *testing.T) {
 	if _, err := c.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	request(t, client, "switch")
+	request(t, client, requestSwitch)
 	if _, err := c.Reconcile(context.Background()); err == nil {
 		t.Fatal("switch without prepare accepted")
 	}
@@ -166,7 +166,7 @@ func TestRenewRequestReplacesTheLeafUnderTheSameAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := serving(t, client).Leaf
-	request(t, client, "renew")
+	request(t, client, requestRenew)
 	status, err := c.Reconcile(context.Background())
 	if err != nil || status.TrustConfigMap != trustPrefix {
 		t.Fatalf("renew %+v %v", status, err)

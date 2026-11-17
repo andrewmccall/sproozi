@@ -58,50 +58,75 @@ func describe(st State) (Phase, error) {
 	if st.Version != 1 {
 		return "", fmt.Errorf("version %d is not 1", st.Version)
 	}
-	if len(st.Generations) == 0 {
-		return "", errors.New("no generations")
+	if err := checkGenerations(st); err != nil {
+		return "", err
 	}
-	for i, g := range st.Generations {
-		if g.ID != i+1 {
-			return "", fmt.Errorf("generation %d is listed where generation %d belongs", g.ID, i+1)
-		}
-		if !fingerprintPattern.MatchString(g.Fingerprint) {
-			return "", fmt.Errorf("generation %d has no SHA-256 fingerprint", g.ID)
-		}
-		if g.NotAfter.IsZero() {
-			return "", fmt.Errorf("generation %d has no expiry", g.ID)
-		}
-	}
-	serving := st.generation(st.Serving)
-	if serving == nil {
-		return "", fmt.Errorf("serving generation %d is not recorded", st.Serving)
-	}
-	if serving.Retired {
-		return "", fmt.Errorf("serving generation %d is retired", st.Serving)
-	}
-	if n := len(st.Trusted); n != 1 && n != 2 {
-		return "", fmt.Errorf("%d trusted generations; a record trusts one, or two during a rotation", n)
-	}
-	for i, id := range st.Trusted {
-		g := st.generation(id)
-		if g == nil {
-			return "", fmt.Errorf("trusted generation %d is not recorded", id)
-		}
-		if g.Retired {
-			return "", fmt.Errorf("trusted generation %d is retired", id)
-		}
-		if slices.Index(st.Trusted, id) != i {
-			return "", fmt.Errorf("generation %d is trusted twice", id)
-		}
-	}
-	for _, g := range st.Generations {
-		if !g.Retired && !slices.Contains(st.Trusted, g.ID) {
-			return "", fmt.Errorf("generation %d is neither trusted nor retired", g.ID)
-		}
+	if err := checkTrust(st); err != nil {
+		return "", err
 	}
 	if st.Leaf != "" && !leafNamePattern.MatchString(st.Leaf) {
 		return "", fmt.Errorf("leaf name %q is not a leaf file name", st.Leaf)
 	}
+	return describeRotation(st)
+}
+
+// checkGenerations requires generations numbered from 1 in order, each with
+// a fingerprint and an expiry.
+func checkGenerations(st State) error {
+	if len(st.Generations) == 0 {
+		return errors.New("no generations")
+	}
+	for i, g := range st.Generations {
+		if g.ID != i+1 {
+			return fmt.Errorf("generation %d is listed where generation %d belongs", g.ID, i+1)
+		}
+		if !fingerprintPattern.MatchString(g.Fingerprint) {
+			return fmt.Errorf("generation %d has no SHA-256 fingerprint", g.ID)
+		}
+		if g.NotAfter.IsZero() {
+			return fmt.Errorf("generation %d has no expiry", g.ID)
+		}
+	}
+	return nil
+}
+
+// checkTrust requires a serving generation that is not retired, one or two
+// distinct trusted generations that are not retired, and every other
+// generation retired.
+func checkTrust(st State) error {
+	serving := st.generation(st.Serving)
+	if serving == nil {
+		return fmt.Errorf("serving generation %d is not recorded", st.Serving)
+	}
+	if serving.Retired {
+		return fmt.Errorf("serving generation %d is retired", st.Serving)
+	}
+	if n := len(st.Trusted); n != 1 && n != 2 {
+		return fmt.Errorf("%d trusted generations; a record trusts one, or two during a rotation", n)
+	}
+	for i, id := range st.Trusted {
+		g := st.generation(id)
+		if g == nil {
+			return fmt.Errorf("trusted generation %d is not recorded", id)
+		}
+		if g.Retired {
+			return fmt.Errorf("trusted generation %d is retired", id)
+		}
+		if slices.Index(st.Trusted, id) != i {
+			return fmt.Errorf("generation %d is trusted twice", id)
+		}
+	}
+	for _, g := range st.Generations {
+		if !g.Retired && !slices.Contains(st.Trusted, g.ID) {
+			return fmt.Errorf("generation %d is neither trusted nor retired", g.ID)
+		}
+	}
+	return nil
+}
+
+// describeRotation derives the phase from the trusted generations, the
+// serving one and the rotation, once checkTrust has passed.
+func describeRotation(st State) (Phase, error) {
 	r := st.Rotation
 	if len(st.Trusted) == 1 {
 		if r != nil {

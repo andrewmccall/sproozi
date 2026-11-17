@@ -72,7 +72,7 @@ func TestLoadRefusesARecordNoPhaseDescribes(t *testing.T) {
 			must(t, err)
 			s := outcomeStore(t, root)
 			for _, ev := range outcomeEvents() {
-				if ev.name == "initialize" || ev.name == "replace" {
+				if ev.name == evNameInitialize || ev.name == evNameReplace {
 					continue
 				}
 				err := ev.run(s)
@@ -80,7 +80,7 @@ func TestLoadRefusesARecordNoPhaseDescribes(t *testing.T) {
 					t.Errorf("%s: got %v, want refusal %q", ev.name, err, want)
 				}
 			}
-			for _, ev := range []string{"initialize", "replace"} {
+			for _, ev := range []string{evNameInitialize, evNameReplace} {
 				err := outcomeEventNamed(ev).run(s)
 				if err == nil || !strings.Contains(err.Error(), want) {
 					t.Errorf("%s: got %v, want refusal %q", ev, err, want)
@@ -113,7 +113,7 @@ func outcomeEventNamed(name string) outcomeEvent {
 // leaves, is described by a phase and loads.
 func TestEveryWrittenRecordLoads(t *testing.T) {
 	for name, root := range buildStates(t) {
-		if name == "empty" || name == "state-lost" {
+		if name == stEmpty || name == stStateLost {
 			continue
 		}
 		s := outcomeStore(t, root)
@@ -130,17 +130,17 @@ func TestEveryWrittenRecordLoads(t *testing.T) {
 // recovers from every case here. Guards checkFiles in record.go.
 func TestLoadRefusesAuthorityFilesTheRecordDoesNotName(t *testing.T) {
 	refusals := map[string]string{
-		"fingerprint-other":   "generation 1 certificate ca-1.pem does not have the recorded fingerprint",
+		"fingerprint-other":   msgFingerprint1,
 		"ca-cert-missing":     "generation 1 certificate ca-1.pem is unreadable",
 		"new-ca-cert-missing": "generation 2 certificate ca-2.pem is unreadable",
-		"ca-cert-other":       "generation 1 certificate ca-1.pem does not have the recorded fingerprint",
-		"ca-pair-other":       "generation 1 certificate ca-1.pem does not have the recorded fingerprint",
+		"ca-cert-other":       msgFingerprint1,
+		"ca-pair-other":       msgFingerprint1,
 		"ca-key-other":        "generation 1 key ca-1.key does not match its certificate",
 		"new-ca-key-other":    "generation 2 key ca-2.key does not match its certificate",
 		"ca-key-garbage":      "generation 1 key ca-1.key does not match its certificate",
 		"not-after-other":     "generation 1 certificate ca-1.pem does not have the recorded expiry",
 	}
-	cases := append(corruptions(), corruption{"not-after-other", "single", editState(func(st *State) {
+	cases := append(corruptions(), corruption{"not-after-other", stSingle, editState(func(st *State) {
 		st.Generations[0].NotAfter = st.Generations[0].NotAfter.Add(-24 * time.Hour)
 	})})
 	roots := buildStates(t)
@@ -156,7 +156,7 @@ func TestLoadRefusesAuthorityFilesTheRecordDoesNotName(t *testing.T) {
 			c.apply(t, filepath.Join(root, "pki"))
 			s := outcomeStore(t, root)
 			for _, ev := range outcomeEvents() {
-				if ev.name == "initialize" || ev.name == "replace" {
+				if ev.name == evNameInitialize || ev.name == evNameReplace {
 					continue
 				}
 				err := ev.run(s)

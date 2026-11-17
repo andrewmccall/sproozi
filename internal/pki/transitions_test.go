@@ -44,7 +44,7 @@ func TestEveryPhaseIsReachableAndHasAnExit(t *testing.T) {
 }
 
 // phaseStates are a store state in each phase.
-var phaseStates = map[Phase]string{PhaseSingle: "single", PhasePrepared: "prepared", PhaseSwitched: "switched"}
+var phaseStates = map[Phase]string{PhaseSingle: stSingle, PhasePrepared: stPrepared, PhaseSwitched: stSwitched}
 
 // eventOperations runs each event through the store as its callers do.
 var eventOperations = map[event]func(s *Store) error{
@@ -63,7 +63,7 @@ func TestTheStoreMovesOnlyByTheTable(t *testing.T) {
 	roots := buildStates(t)
 	for ev, op := range eventOperations {
 		for _, from := range append([]Phase{phaseNone}, Phases...) {
-			name := "empty"
+			name := stEmpty
 			if from != phaseNone {
 				name = phaseStates[from]
 			}

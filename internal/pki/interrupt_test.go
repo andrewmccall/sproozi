@@ -50,15 +50,15 @@ func interruptedOperations() []interruptedOperation {
 	retired := func(_, after State) bool { return after.Rotation == nil }
 	replaced := func(before, after State) bool { return len(after.Generations) > len(before.Generations) }
 	return []interruptedOperation{
-		{"single", "renew", renew, renewed},
-		{"single", "prepare", prepare, stage(StagePrepared)},
-		{"single", "replace", replace, replaced},
-		{"prepared", "switch", switchOp, stage(StageSwitched)},
-		{"prepared", "replace", replace, replaced},
-		{"switched", "rollback", rollback, stage(StagePrepared)},
-		{"switched", "retire", retire, retired},
-		{"switched", "replace", replace, replaced},
-		{"replaced-key-left-prepared", "switch", switchOp, stage(StageSwitched)},
+		{stSingle, "renew", renew, renewed},
+		{stSingle, "prepare", prepare, stage(StagePrepared)},
+		{stSingle, evNameReplace, replace, replaced},
+		{stPrepared, evNameSwitch, switchOp, stage(StageSwitched)},
+		{stPrepared, evNameReplace, replace, replaced},
+		{stSwitched, "rollback", rollback, stage(StagePrepared)},
+		{stSwitched, "retire", retire, retired},
+		{stSwitched, evNameReplace, replace, replaced},
+		{stReplacedKeyLeftPrepared, evNameSwitch, switchOp, stage(StageSwitched)},
 	}
 }
 

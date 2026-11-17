@@ -235,6 +235,7 @@ func (s *Store) requireEmpty() error {
 // Ensure issues a new leaf when the current one is missing, invalid, due for
 // renewal, issued by a CA other than the serving one, or does not cover
 // names. It never creates or replaces a CA; an uninitialized store fails.
+// It first destroys any retired key an interrupted operation left behind.
 // It reports whether the serving leaf changed.
 func (s *Store) Ensure(names Names) (bool, error) {
 	names, err := names.normalized()

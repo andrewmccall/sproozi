@@ -53,13 +53,13 @@ func TestInterruptedReconcileConvergesAfterRestart(t *testing.T) {
 		requests []string
 		request  string
 	}{
-		{"single", nil, ""},
-		{"single", nil, "renew"},
-		{"single", nil, "prepare"},
-		{"prepared", []string{"prepare"}, "switch"},
-		{"switched", []string{"prepare", "switch"}, "rollback"},
-		{"switched", []string{"prepare", "switch"}, "retire"},
-		{"switched", []string{"prepare", "switch"}, "replace"},
+		{stateSingle, nil, ""},
+		{stateSingle, nil, requestRenew},
+		{stateSingle, nil, requestPrepare},
+		{statePrepared, []string{requestPrepare}, requestSwitch},
+		{stateSwitched, []string{requestPrepare, requestSwitch}, requestRollback},
+		{stateSwitched, []string{requestPrepare, requestSwitch}, requestRetire},
+		{stateSwitched, []string{requestPrepare, requestSwitch}, requestReplace},
 	} {
 		c, built := setup(t)
 		step(t, c, built, tc.requests...)
