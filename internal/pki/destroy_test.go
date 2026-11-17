@@ -64,7 +64,8 @@ func TestEnsureKeepsEveryKeyAPhaseNeeds(t *testing.T) {
 				needed = append(needed, key)
 			}
 		}
-		if _, err = s.Ensure(testNames); err != nil {
+		// A lost serving key is reported as outstanding; the pass still ran.
+		if _, err = s.Ensure(testNames); err != nil && !errors.Is(err, ErrOutstanding) {
 			t.Fatalf("%s: %v", name, err)
 		}
 		if got := keyFiles(t, s); !slices.Equal(got, needed) {

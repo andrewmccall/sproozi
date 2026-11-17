@@ -220,15 +220,22 @@ func (s *Store) checkFiles(st State) error {
 }
 
 // checkKeys reports every trusted generation's key that cannot be read, or
-// does not match its certificate, naming the true cause. A missing key is
-// the lost-key state: issuance from it fails, and replace recovers; it is not
-// reported here. Ensure runs it after its leaf and trust work.
+// does not match its certificate, naming the true cause, and a missing
+// serving key, which the next renewal needs. A missing key of a generation
+// that does not serve is the accepted lost-key state and is not reported;
+// switching to it fails, and replace recovers. Ensure runs it after its leaf
+// and trust work.
 func (s *Store) checkKeys(st State) error {
 	var errs []error
 	for _, id := range st.Trusted {
 		name := caName(id)
 		key, err := privatefs.ReadFile(filepath.Join(s.dir, name+".key"), maxPEM)
 		if os.IsNotExist(err) {
+			if id == st.Serving {
+				// The next renewal needs it: say so while the leaf is valid.
+				errs = append(errs, fmt.Errorf("pki: certificate authority key: generation %d key %s.key is missing; "+
+					"the next renewal will fail: recover it, or replace the CA", id, name))
+			}
 			continue
 		}
 		if err != nil {

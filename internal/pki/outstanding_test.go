@@ -62,6 +62,23 @@ func TestAKeyIsCheckedWhereItIsUsed(t *testing.T) {
 	}
 }
 
+// A missing serving key is reported while the leaf is still current, so the
+// operator hears before the next renewal fails; a missing key of a
+// generation that does not serve is the accepted lost-key state and stays
+// silent. Guards the serving case in checkKeys.
+func TestEnsureReportsAMissingServingKey(t *testing.T) {
+	roots := buildStates(t)
+	s := outcomeStore(t, copyStore(t, filepath.Join(roots["serving-key-lost"], "pki")))
+	if _, err := s.Ensure(testNames); !errors.Is(err, ErrOutstanding) ||
+		!strings.Contains(err.Error(), "pki: certificate authority key: generation 1 key ca-1.key is missing") {
+		t.Errorf("ensure with the serving key lost: %v", err)
+	}
+	s = outcomeStore(t, copyStore(t, filepath.Join(roots["prepared-new-key-lost"], "pki")))
+	if _, err := s.Ensure(testNames); err != nil {
+		t.Errorf("ensure with a non-serving key lost: %v", err)
+	}
+}
+
 // A renewal Ensure cannot make is its own error, not outstanding cleanup:
 // with the serving key lost and the leaf due, Ensure fails naming the key.
 // Guards the error Ensure keeps from issue and publishTrust.
