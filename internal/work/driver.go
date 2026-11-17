@@ -187,7 +187,7 @@ func (o *Owner) carryOut(ctx context.Context, r record, rec *session.Record, act
 		// stopping (see completing), and nothing is wrong with it, so the
 		// wait clears any earlier problem rather than recording one.
 		_, err := coordinator.Finalize(ctx, rec.ID, derivedOperation(rec.ID, actionTaskComplete))
-		if errors.Is(err, harness.ErrNativeTurnPending) {
+		if turnPendingAlone(err) {
 			o.note(r.ID, "")
 			return nextAgain
 		}
@@ -200,8 +200,8 @@ func (o *Owner) carryOut(ctx context.Context, r record, rec *session.Record, act
 		// then holds it as stopping again, and the next step is the
 		// completion wait. A held cancellation is carried out by aborting,
 		// which never waits for a turn.
-		recovered, err := coordinator.Recover(ctx, rec.ID)
-		if errors.Is(err, harness.ErrNativeTurnPending) && recovered.Phase == session.PhaseStopping {
+		_, err := coordinator.Recover(ctx, rec.ID)
+		if turnPendingAlone(err) {
 			o.note(r.ID, "")
 			return nextAgain
 		}
@@ -217,6 +217,18 @@ func (o *Owner) carryOut(ctx context.Context, r record, rec *session.Record, act
 	case actNothing:
 	}
 	return nextDone
+}
+
+// turnPendingAlone reports that err says only that the task's turn is still
+// running. A stop that found the turn pending but could not record that in
+// the journal, which joins the save's error to it, is a failure: the
+// journal still holds what it held before.
+func turnPendingAlone(err error) bool {
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		errs := joined.Unwrap()
+		return len(errs) == 1 && turnPendingAlone(errs[0])
+	}
+	return errors.Is(err, harness.ErrNativeTurnPending)
 }
 
 // startEnded reports an execution whose deadline ended its first visit

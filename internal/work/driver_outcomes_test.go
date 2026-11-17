@@ -178,6 +178,7 @@ type driverEnv struct {
 	tailOp   string
 	logs     *strings.Builder
 	logMu    *sync.Mutex
+	journals string
 }
 
 type lockedLog struct {
@@ -209,7 +210,8 @@ func newDriverEnv(t *testing.T, interactive bool, clock driverClock) *driverEnv 
 	c := withProjects(fixtureConfig(t, template.repo, fixture))
 	p := &stepPlacement{fixturePlacement: fixture, calls: map[string]int{}}
 	offset := new(atomic.Int64)
-	coordinator, err := session.Open(filepath.Join(testutil.PrivateDir(t), "sessions"),
+	journals := filepath.Join(testutil.PrivateDir(t), "sessions")
+	coordinator, err := session.Open(journals,
 		map[string]session.Placement{executorKubernetes: p}, testLimit, session.WithClock(func() time.Time {
 			return time.Now().Add(time.Duration(offset.Load()))
 		}))
@@ -250,7 +252,7 @@ func newDriverEnv(t *testing.T, interactive bool, clock driverClock) *driverEnv 
 	if err = o.save(r); err != nil {
 		t.Fatal(err)
 	}
-	e := &driverEnv{o: o, p: p, offset: offset, id: v.ID, request: q.RequestID,
+	e := &driverEnv{o: o, p: p, offset: offset, id: v.ID, request: q.RequestID, journals: journals,
 		stopOp: uuid.NewString(), cancelOp: uuid.NewString(), tailOp: uuid.NewString(), logs: logs, logMu: logMu}
 	if !interactive {
 		e.stopOp = derivedOperation(v.ID, actionTaskComplete)
