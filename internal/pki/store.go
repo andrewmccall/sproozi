@@ -243,8 +243,10 @@ func (s *Store) requireEmpty() error {
 // Ensure issues a new leaf when the current one is missing, invalid, due for
 // renewal, issued by a CA other than the serving one, or does not cover
 // names. It never creates or replaces a CA; an uninitialized store fails.
-// It first destroys any retired key an interrupted operation left behind.
-// It reports whether the serving leaf changed.
+// It then destroys any retired key or stray file an interrupted operation
+// left behind. A removal that fails does not stop the leaf and trust work:
+// Ensure completes it, then returns the failure marked ErrOutstanding, and
+// the next Ensure tries again. It reports whether the serving leaf changed.
 func (s *Store) Ensure(names Names) (bool, error) {
 	names, err := names.normalized()
 	if err != nil {
@@ -260,18 +262,40 @@ func (s *Store) Ensure(names Names) (bool, error) {
 		if err != nil {
 			return err
 		}
-		if err = s.destroyRetired(st); err != nil {
-			return err
-		}
 		same := slices.Equal(st.Names.DNS, names.DNS) && slices.Equal(st.Names.IPs, names.IPs)
 		st.Names = names
 		if leaf, err := s.loadLeaf(st); same && err == nil && s.leafCurrent(st, leaf.Leaf, now) {
-			return s.publishTrust(st)
+			err = s.publishTrust(st)
+		} else {
+			changed = true
+			err = s.issue(&st, now)
 		}
-		changed = true
-		return s.issue(&st, now)
+		cleanup := s.destroyRetired(st)
+		if err != nil {
+			return errors.Join(err, cleanup)
+		}
+		return outstanding(cleanup)
 	})
 	return changed, err
+}
+
+// ErrOutstanding marks an error Ensure returns only when it completed its
+// leaf and trust work: something it found could not be cleaned up, such as
+// a retired key it could not remove. The serving leaf and trust bundle are
+// current and committed; the error must still be reported, and the next
+// Ensure retries.
+var ErrOutstanding = errors.New("pki: outstanding certificate store cleanup")
+
+type outstandingError struct{ err error }
+
+func (e outstandingError) Error() string   { return e.err.Error() }
+func (e outstandingError) Unwrap() []error { return []error{ErrOutstanding, e.err} }
+
+func outstanding(err error) error {
+	if err == nil {
+		return nil
+	}
+	return outstandingError{err}
 }
 
 func (s *Store) leafCurrent(st State, leaf *x509.Certificate, now time.Time) bool {
