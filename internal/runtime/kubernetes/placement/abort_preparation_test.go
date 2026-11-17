@@ -193,9 +193,9 @@ func assertRefusesPreparation(t *testing.T, p *Placement, kube *admissionClient,
 	if !errors.As(err, &rejection) || rejection.Code != profile.CodeConflict || kube.runCreates != runs {
 		t.Fatalf("another launch of the aborted allocation: %v, runs %d then %d", err, runs, kube.runCreates)
 	}
-	// Every caller's abort succeeded: its run ended or never existed and no
-	// Pod is left, so the launch is absent, not a start still preparing.
-	if o, err := p.Inspect(t.Context(), l); err != nil || o.State != session.PlacementAbsent {
+	// Every caller's abort succeeded, yet Inspect still says preparing: only
+	// AbortPreparation proves the end (ADR 0067).
+	if o, err := p.Inspect(t.Context(), l); err != nil || o.State != session.PlacementPreparing {
 		t.Fatalf("Inspect of the settled aborted preparation: %+v %v", o, err)
 	}
 	if _, err = p.Inspect(t.Context(), other); !errors.As(err, &rejection) || rejection.Code != profile.CodeConflict {

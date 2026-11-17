@@ -93,8 +93,8 @@ func TestRecoverEndsARefusedStartWhoseFirstEndWasUnproven(t *testing.T) {
 	if kube.runCreates != creates {
 		t.Fatal("recover created a run for an aborted preparation")
 	}
-	// Settled: the run ended and no Pod exists, so nothing is left.
-	if o, err := p.Inspect(t.Context(), l); err != nil || o.State != session.PlacementAbsent {
+	// Settled, but Inspect claims no more than preparing (ADR 0067).
+	if o, err := p.Inspect(t.Context(), l); err != nil || o.State != session.PlacementPreparing {
 		t.Fatalf("Inspect of the settled aborted preparation: %+v %v", o.State, err)
 	}
 }

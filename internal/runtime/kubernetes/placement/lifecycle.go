@@ -383,15 +383,13 @@ func runEnded(run *api.AgentRun) string {
 }
 
 // abortedObservation is Inspect's observation of l when its preparation was
-// aborted, and false for any other launch. load refuses another launch of
-// the allocation. An aborted preparation is preparing, a start whose end is
-// not yet shown, while its registration has not been cancelled or cannot be
-// read, or is cancelled but its run has not yet ended or its Pod still
-// exists: its Prepare refuses it, and the coordinator's end replays the
-// abort (ADR 0067). Once the run has ended and no Pod exists, nothing was
-// left by the abort and the launch is absent, which a coordinator still
-// pending on it also ends through Prepare. A registration that may have
-// had authority is left to the existing path, which answers conflict.
+// aborted, and false for any other launch; load refuses another launch of
+// the allocation. An aborted preparation is always preparing, even once its
+// abort has settled: only AbortPreparation proves that nothing runs, which
+// a coordinator still pending on the launch reaches through Prepare's
+// refusal, so Inspect claims no more than that (ADR 0067). A registration
+// that may have had authority, not cancelled or cancelled with spent usage,
+// is left to the existing path, which answers conflict.
 func (p *Placement) abortedObservation(ctx context.Context, l session.Launch) (session.Observation, bool) {
 	local, err := p.load(l)
 	if err != nil || !local.PreparationAborted {
@@ -399,34 +397,15 @@ func (p *Placement) abortedObservation(ctx context.Context, l session.Launch) (s
 	}
 	o := session.Observation{Launch: local.Launch, State: session.PlacementPreparing}
 	if local.Reference.UID == "" {
-		// Aborted before its registration was known: absent once neither
-		// a registration nor a run exists at its name.
-		_, lookupErr := p.registry.Lookup(ctx, runName(local.Launch))
-		var run api.AgentRun
-		runErr := p.config.Kube.Get(ctx, client.ObjectKey{Namespace: p.config.Namespace, Name: runName(local.Launch)}, &run)
-		if errors.Is(lookupErr, registry.ErrGone) && apierrors.IsNotFound(runErr) {
-			o.State = session.PlacementAbsent
-		}
 		return o, true
 	}
 	r, err := p.registry.Get(ctx, local.Reference)
 	switch {
-	case err != nil, r.Phase == registry.Creating, r.Phase == registry.Bound, r.Phase == registry.Prepared:
+	case err != nil, r.Phase == registry.Creating, r.Phase == registry.Bound, r.Phase == registry.Prepared,
+		r.Phase == registry.Cancelled && unspent(r.Receipt):
 		return o, true
-	case r.Phase != registry.Cancelled || !unspent(r.Receipt):
-		return session.Observation{}, false
 	}
-	if r.RunUID != "" {
-		run, err := p.readRun(ctx, r)
-		if err != nil && !apierrors.IsNotFound(err) || err == nil && string(run.UID) == r.RunUID && !run.Status.Phase.IsTerminal() {
-			return o, true
-		}
-		if _, err = p.sandbox(ctx, r); !apierrors.IsNotFound(err) {
-			return o, true
-		}
-	}
-	o.State = session.PlacementAbsent
-	return o, true
+	return session.Observation{}, false
 }
 
 // readyCondition is the AgentRun condition that carries the controller's
