@@ -226,12 +226,30 @@ What remains:
   clock decides, and the problem says only "its placement refused it".
 - The journal keeps no reason, so a replay of an ended start reports the
   deadline once it has passed and a reasonless refusal before it. A recover
-  of a tombstoned launch whose run is no longer terminal, deleted or
-  replaced, says only that its preparation was aborted.
-- A run an administrator replaced is refused, but its preparation cannot be
-  shown to hold no Pod of the bound run, so the end stays unproven and the
-  session `preparing`, as ADR 0060 records for that case; `cancel` meets the
-  same gap.
+  of a tombstoned launch says again what became of the run the registration
+  bound (deleted, replaced, ended or cancelled), or that the registration
+  was deleted, read now; when it can read none of these, only that the
+  preparation was aborted. A run an administrator replaced is reported as
+  replaced, never by how the replacement ended.
+- For a run an administrator replaced, or a registration one deleted, the
+  start is refused but its end stays unproven: nothing proves that no Pod
+  of the bound run remains. The session stays `preparing`, as ADR 0060
+  records for those cases, and `cancel` meets the same gap. The placement
+  states the cause alone (`session.UnprovenEnd`): "AgentRun … now has UID …;
+  an administrator replaced it, so confirm no Pod labelled … remains", or
+  "the session registration … was deleted, so its Pod cannot be fenced; an
+  administrator must confirm no Pod labelled … remains". The driver's
+  problem carries it after the refusal, the executor logs it once per
+  session and cause, and the driver recovers a task again on its backoff,
+  capped at a minute, at about four API calls a try, until an administrator
+  acts; an interactive session waits for its owner's `recover`. A deleted
+  registration's tombstone is saved too, so each recover repeats the check.
+- `Inspect` of a launch whose preparation was aborted reports `preparing`
+  while its registration is not cancelled, cannot be read, or is cancelled
+  with its run not yet ended or its Pod still present; `absent` once the run
+  ended and no Pod remains, which is also what a coordinator whose commit of
+  the end was lost meets, and ends through `Prepare`; and conflict, as
+  before, for a registration that may have had authority.
 - A task whose deadline has passed before the driver steps it is ended as
   expired without asking the placement, as before.
 - The wait reads the run once per 100-millisecond poll, as it read it for the
@@ -239,8 +257,9 @@ What remains:
 - `driver-outcomes.txt` gained the `preparing-start-refused` and
   `idle-start-refused` states. Later, 24 lines of `idle-start-ended` task
   cases on the early clock changed from expired to refused: those states are
-  built past the deadline and stepped before it, which a coordinator clock
-  that never runs backwards cannot reach.
+  built past the deadline and stepped before it. A wall clock stepped back
+  across the deadline reaches them, and then mislabels only the end, its
+  cancel operation's name and its problem, never the end state.
 
 ## Revisit conditions
 

@@ -177,9 +177,10 @@ Failures:
   Interactive sessions wait for `recover`, also after a restart (section 8),
   unless their project is revoked ([ADR 0065](0065-a-revoked-project-settles-interactive-sessions.md)).
 - **A failed preparation or activation** records the outcome as the problem
-  and waits for `recover`, as before. Corrected 2026-11-17: a preparation
-  its placement refuses now ends instead; see
-  [ADR 0067](0067-a-start-ends-when-its-run-has-ended.md).
+  and waits for `recover`, as before. Corrected 2026-11-17: the previous
+  sentence no longer holds for a preparation its placement refuses for good;
+  [ADR 0067](0067-a-start-ends-when-its-run-has-ended.md) decides what the
+  driver does with it.
 - **A revoked project** is cancelled through the coordinator with a
   name-based operation, whether found at startup or while driving.
 
@@ -617,10 +618,10 @@ proves:
    launch a conflict and stops the placement creating its registration.
    `Activate`, `Stop`, `Abort`, `Attach` and `Inspect` of a tombstoned
    launch are conflicts too, whatever reference it holds. Corrected
-   2026-11-17: `Prepare` of the tombstoned launch itself now answers a
-   refusal and its `Inspect` reports `preparing`, so an unproven end is
-   repeated; another launch of the allocation is still a conflict; see
-   [ADR 0067](0067-a-start-ends-when-its-run-has-ended.md). A
+   2026-11-17: the previous two sentences no longer hold for `Prepare` and
+   `Inspect` of the launch's own aborted preparation;
+   [ADR 0067](0067-a-start-ends-when-its-run-has-ended.md) decides what they
+   answer. A
    launch the executor never saw also claims its session epoch, as
    `Prepare` does, so no other allocation prepares that epoch afterwards.
    Within the executor, `Prepare` and `AbortPreparation` hold the same lock,
