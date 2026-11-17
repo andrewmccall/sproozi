@@ -44,9 +44,10 @@ func TestEnsureDestroysARetiredKeyLeftBehind(t *testing.T) {
 }
 
 // Ensure never destroys a key some phase still needs: the key of every
-// trusted generation, and the files of a generation the record does not
-// name yet, survive it in every state. Guards the Retired test in
-// destroyRetired.
+// trusted generation survives it in every state, and only those keys do: a
+// retired generation's, and an uncommitted generation's that an interrupted
+// prepare or replace wrote, are destroyed. Guards the Retired test and the
+// uncommitted-generation loop in destroyRetired.
 func TestEnsureKeepsEveryKeyAPhaseNeeds(t *testing.T) {
 	for name, root := range buildStates(t) {
 		if name == stEmpty || name == stStateLost {
@@ -59,7 +60,7 @@ func TestEnsureKeepsEveryKeyAPhaseNeeds(t *testing.T) {
 		for _, key := range keyFiles(t, s) {
 			var id int
 			_, _ = fmt.Sscan(caFileRE.FindStringSubmatch(key)[1], &id)
-			if g := st.generation(id); g == nil || !g.Retired {
+			if g := st.generation(id); g != nil && !g.Retired {
 				needed = append(needed, key)
 			}
 		}
@@ -95,6 +96,33 @@ func TestEnsureDestroysLeafFilesTheRecordDoesNotName(t *testing.T) {
 	}
 	if want := []string{st.Leaf + ".key", st.Leaf + ".pem"}; !slices.Equal(leaves, want) {
 		t.Errorf("leaf files %v, want %v", leaves, want)
+	}
+}
+
+// The files of a generation a prepare or replace wrote and never committed
+// are destroyed by the next Ensure, certificate and key, so the controller
+// no longer copies them into the authority Secret. Names the store does not
+// write are left, whatever they look like. Guards the uncommitted-generation
+// loop in destroyRetired and caFilePattern.
+func TestEnsureDestroysAnUncommittedGeneration(t *testing.T) {
+	roots := buildStates(t)
+	s := outcomeStore(t, copyStore(t, filepath.Join(roots["uncommitted-generation"], "pki")))
+	for _, name := range foreignFiles {
+		must(t, os.WriteFile(filepath.Join(s.Dir(), name), []byte("not the store's\n"), 0o600))
+	}
+	if _, err := s.Ensure(testNames); err != nil {
+		t.Fatal(err)
+	}
+	files := storeFiles(t, s.Dir())
+	for _, name := range []string{"ca-2.key", "ca-2.pem"} {
+		if _, kept := files[name]; kept {
+			t.Errorf("%s survived Ensure", name)
+		}
+	}
+	for _, name := range append([]string{"ca-1.key", "ca-1.pem"}, foreignFiles...) {
+		if _, kept := files[name]; !kept {
+			t.Errorf("%s was removed", name)
+		}
 	}
 }
 

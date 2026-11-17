@@ -529,15 +529,21 @@ func (s *Store) createNext(st State, now time.Time) (Generation, error) {
 	return Generation{ID: id, Fingerprint: Fingerprint(cert), NotAfter: cert.NotAfter}, nil
 }
 
-// destroyRetired removes the private key of every retired generation, and
+// destroyRetired removes the private key of every retired generation; the
+// certificate and key of every generation numbered after the record's last,
+// which an interrupted prepare or replace wrote and never committed; and
 // every leaf file other than the leaf the record names: superseded leaves,
 // and an uncommitted one an interrupted issue wrote. It is idempotent: Ensure
 // runs it on every reconcile of the certificate controller and at every start
 // and maintenance pass of the local service, retire and replace run it after
 // their commit, and every issue after its own, so a destruction that a crash
 // or a failed removal left undone always finishes. It never removes the key
-// of a trusted generation, which every phase still needs, the named leaf, nor
-// files of a generation the record does not name.
+// of a trusted generation, which every phase still needs, nor the named
+// leaf. It removes only names the store writes: ca-<N>.key for a recorded N,
+// ca-<N>.pem and ca-<N>.key matching caFilePattern, and leaf-<16 hex>.pem
+// and .key. It runs under the store's lock, which every operation that
+// writes a generation or a leaf holds from its first file to its commit, so
+// it never sees another operation's files before their commit.
 func (s *Store) destroyRetired(st State) error {
 	var errs []error
 	for _, g := range st.Generations {
@@ -549,6 +555,12 @@ func (s *Store) destroyRetired(st State) error {
 	errs = append(errs, err)
 	for _, entry := range entries {
 		name := entry.Name()
+		if caFileGeneration(name) > len(st.Generations) {
+			if err = s.remove(name); !os.IsNotExist(err) {
+				errs = append(errs, err)
+			}
+			continue
+		}
 		base, ok := strings.CutSuffix(name, filepath.Ext(name))
 		if ok && leafNamePattern.MatchString(base) && (filepath.Ext(name) == ".key" || filepath.Ext(name) == ".pem") &&
 			base != st.Leaf {

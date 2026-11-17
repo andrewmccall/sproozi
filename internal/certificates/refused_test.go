@@ -60,6 +60,32 @@ func TestAReconcileOfARefusedRecordWritesNothing(t *testing.T) {
 	}
 }
 
+// A generation's files that a prepare wrote in scratch space and an earlier
+// controller committed to the authority Secret without its record are
+// removed from the Secret by the next reconcile. Guards the
+// uncommitted-generation loop in pki's destroy pass, through Reconcile.
+func TestAReconcileRemovesAnUncommittedGenerationFromTheSecret(t *testing.T) {
+	c, client := setup(t)
+	step(t, c, client)
+	ca, err := pki.NewCA("uncommitted", time.Now(), pki.DefaultPolicy.CAValidity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	setAuthorityData(t, client, func(data map[string][]byte) { data["ca-2.pem"], data["ca-2.key"] = ca.Certificate, ca.Key })
+	if _, err = controller(t, client).Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	data := authorityData(t, client)
+	for _, name := range []string{"ca-2.pem", "ca-2.key"} {
+		if _, kept := data[name]; kept {
+			t.Errorf("%s stayed in the authority Secret", name)
+		}
+	}
+	if _, kept := data["ca-1.key"]; !kept {
+		t.Error("the serving key was removed")
+	}
+}
+
 // The operator's way out of a refused record is the replace request, the
 // sproozi.com/rotation-request=replace annotation on the authority Secret.
 // It reaches the store, which leaves a single phase on a new generation:
