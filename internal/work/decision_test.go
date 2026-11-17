@@ -40,9 +40,10 @@ func allSituations() []situation {
 	return all
 }
 
-// Every situation matches exactly one row, so no decision depends on the
-// order of the rows or falls through to a default. Every row decides some
-// situation, and names a known phase and action.
+// Every situation that can occur matches exactly one row, so no decision
+// depends on the order of the rows or falls through to a default; one that
+// cannot occur matches at most one. Every row decides some situation that
+// can occur, and names a known phase and action.
 func TestDecisionTableDecidesEverySituationOnce(t *testing.T) {
 	used := make([]bool, len(decisions))
 	for _, s := range allSituations() {
@@ -50,11 +51,11 @@ func TestDecisionTableDecidesEverySituationOnce(t *testing.T) {
 		for i, row := range decisions {
 			if row.matches(s) {
 				rows = append(rows, i)
-				used[i] = true
+				used[i] = used[i] || possible(s)
 			}
 		}
-		if len(rows) != 1 {
-			t.Errorf("%+v matches rows %v", s, rows)
+		if possible(s) && len(rows) != 1 || len(rows) > 1 {
+			t.Errorf("%+v (possible %t) matches rows %v", s, possible(s), rows)
 		}
 		if _, err := decide(s); (err == nil) != (len(rows) == 1) {
 			t.Errorf("decide(%+v): %v", s, err)
@@ -62,7 +63,7 @@ func TestDecisionTableDecidesEverySituationOnce(t *testing.T) {
 	}
 	for i, row := range decisions {
 		if !used[i] {
-			t.Errorf("row %d decides nothing", i)
+			t.Errorf("row %d decides nothing that can occur", i)
 		}
 		if !slices.Contains(driverActions, row.action) {
 			t.Errorf("row %d: unknown action %q", i, row.action)
@@ -81,20 +82,19 @@ func TestDecisionTableDecidesEverySituationOnce(t *testing.T) {
 }
 
 // possible reports a situation the coordinator and situationOf can produce.
-// The coordinator holds no cancellation of an execution it has not
-// received, nor of an idle one (cancelling an idle execution cancels it at
-// once), and always holds one in cancelling and cancelled. situationOf sets
-// lateStart only before the first visit started or once it ended idle.
+// A cancellation the coordinator holds is carried out at once, so the
+// journal's structure (describe in internal/session/phase.go) holds one only
+// in cancelling, cancelled, unknown-stop and unknown-usage, and always in
+// cancelling and cancelled. situationOf sets lateStart only before the first
+// visit started or once it ended idle.
 func possible(s situation) bool {
-	switch s.phase {
-	case phaseNotReceived, session.PhaseIdle:
-		if s.cancel {
-			return false
-		}
-	case session.PhaseCancelling, session.PhaseCancelled:
-		if !s.cancel {
-			return false
-		}
+	held := []session.Phase{session.PhaseCancelling, session.PhaseCancelled, session.PhaseUnknownStop,
+		session.PhaseUnknownUsage}
+	switch {
+	case s.cancel && !slices.Contains(held, s.phase):
+		return false
+	case !s.cancel && (s.phase == session.PhaseCancelling || s.phase == session.PhaseCancelled):
+		return false
 	}
 	return !s.lateStart || s.phase == phaseNotReceived || s.phase.Starting() || s.phase == session.PhaseIdle
 }

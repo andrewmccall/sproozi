@@ -122,11 +122,16 @@ var (
 	phasesUnsettled = []session.Phase{session.PhaseStopping, session.PhaseUnknownStop, session.PhaseUnknownUsage,
 		session.PhaseCancelling}
 	phasesRunning = append(slices.Clone(phasesStarting), session.PhaseActive)
-	phasesStarted = append(slices.Clone(phasesRunning), phasesUnsettled...)
+	// phasesCancelHeld is every phase but cancelled in which the
+	// coordinator can hold a cancellation: carrying it out ends there, or
+	// leaves the stop or the usage unknown.
+	phasesCancelHeld = []session.Phase{session.PhaseUnknownStop, session.PhaseUnknownUsage, session.PhaseCancelling}
 )
 
-// decisions is the driver's whole decision: every situation matches exactly
-// one row, so the order of the rows means nothing. The driver only starts
+// decisions is the driver's whole decision: every situation that can occur
+// matches exactly one row, so the order of the rows means nothing. A
+// situation that cannot occur, such as a cancellation held in a phase the
+// coordinator never leaves a cancellation in, matches at most one row. The driver only starts
 // an interactive session: its owner stops and resumes it, and only
 // "recover" retries its unsettled stop or cancellation (ADR 0057, section
 // 8). A task is driven to its tail. The project and the deadline end a
@@ -140,9 +145,8 @@ var decisions = []decisionRow{
 	{phases: []session.Phase{session.PhaseIdle}, mode: taskOnly, lateStart: isTrue, action: actEndExpired},
 	{phases: []session.Phase{session.PhaseIdle}, mode: taskOnly, lateStart: isFalse, action: actFinish},
 
-	{phases: phasesRunning, mode: interactiveOnly, cancel: isTrue, action: actNothing},
 	{phases: phasesUnsettled, mode: interactiveOnly, action: actNothing},
-	{phases: phasesStarted, mode: taskOnly, cancel: isTrue, action: actRecover},
+	{phases: phasesCancelHeld, mode: taskOnly, cancel: isTrue, action: actRecover},
 
 	{phases: []session.Phase{phaseNotReceived}, revoked: isTrue, action: actEndRevoked},
 	{phases: phasesRunning, cancel: isFalse, revoked: isTrue, action: actEndRevoked},
@@ -156,8 +160,7 @@ var decisions = []decisionRow{
 	{phases: []session.Phase{session.PhaseActive}, mode: interactiveOnly, cancel: isFalse, revoked: isFalse, action: actNothing},
 	{phases: []session.Phase{session.PhaseActive, session.PhaseStopping}, mode: taskOnly, cancel: isFalse, revoked: isFalse,
 		action: actComplete},
-	{phases: []session.Phase{session.PhaseUnknownStop, session.PhaseUnknownUsage, session.PhaseCancelling},
-		mode: taskOnly, cancel: isFalse, revoked: isFalse, action: actRecover},
+	{phases: phasesCancelHeld, mode: taskOnly, cancel: isFalse, revoked: isFalse, action: actRecover},
 }
 
 // decide is the one action decisions maps s to. A situation that matches no
