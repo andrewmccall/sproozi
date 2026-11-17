@@ -114,7 +114,7 @@ func (c *Coordinator) Move(ctx context.Context, id, operationID, destination str
 				return r, errors.New("session: operation intent conflict")
 			}
 			if abandoned(r, *op) {
-				return r, ErrDeadlinePassed
+				return r, c.StartEnded(r)
 			}
 			if op.done() {
 				return r, nil
@@ -217,7 +217,13 @@ func (c *Coordinator) drive(ctx context.Context, r Record, index int) (Record, e
 	}
 	r, err = c.prepareDestination(ctx, r, index)
 	if errors.Is(err, errExpired) {
-		return c.abandon(ctx, r, index)
+		return c.abandon(ctx, r, index, nil)
+	}
+	var refused *StartRefused
+	if errors.As(err, &refused) {
+		// Repeating Prepare meets the same refusal: the start ends now,
+		// deadline or none (ADR 0067).
+		return c.abandon(ctx, r, index, refused)
 	}
 	if err != nil {
 		return r, err
@@ -227,7 +233,7 @@ func (c *Coordinator) drive(ctx context.Context, r Record, index int) (Record, e
 	}
 	r, err = c.activateDestination(ctx, r, index)
 	if errors.Is(err, errExpired) {
-		return c.abandon(ctx, r, index)
+		return c.abandon(ctx, r, index, nil)
 	}
 	return r, err
 }
@@ -245,15 +251,16 @@ func (c *Coordinator) settleLate(ctx context.Context, r Record) (Record, error) 
 	return c.drive(ctx, r, last)
 }
 
-// abandoned reports an operation the deadline ended without a new visit.
-// Only cancellation intent otherwise ends an operation as cancelled.
+// abandoned reports an operation the deadline, or its placement's refusal,
+// ended without a new visit. Only cancellation intent otherwise ends an
+// operation as cancelled.
 func abandoned(r Record, op Operation) bool {
 	return op.Stage == stageCancelled && r.CancelOperation == ""
 }
 
-// Abandoned reports that the deadline ended operation, a move or a first
-// visit, before its destination became active (ADR 0060). A replay of it
-// reports ErrDeadlinePassed.
+// Abandoned reports that the deadline, or its placement's refusal, ended
+// operation, a move or a first visit, before its destination became active
+// (ADRs 0060 and 0067). A replay of it reports StartEnded.
 func (r Record) Abandoned(operation string) bool {
 	for _, op := range r.Operations {
 		if op.ID == operation {
@@ -263,8 +270,20 @@ func (r Record) Abandoned(operation string) bool {
 	return false
 }
 
+// StartEnded is what a replay of an operation r ended without a new visit
+// reports. The journal does not keep why it ended: past the deadline it is
+// ErrDeadlinePassed, and before it, or with none, the placement refused it,
+// whose reason only the original request reported (ADR 0067).
+func (c *Coordinator) StartEnded(r Record) error {
+	if c.PastDeadline(r) {
+		return ErrDeadlinePassed
+	}
+	return &StartRefused{Ended: true}
+}
+
 // abandon ends a move or first visit whose deadline passed before its
-// destination became active (ADR 0060). It first establishes that no writer
+// destination became active (ADR 0060), or whose placement refused it for
+// good, refused (ADR 0067). It first establishes that no writer
 // exists or can come to exist at the destination. When the operation has no
 // launch, Prepare was never called. Otherwise a placement that fences
 // unreported preparations does so; any other placement is inspected, and an
@@ -274,7 +293,23 @@ func (r Record) Abandoned(operation string) bool {
 // the record is unchanged and the error says why: the same request, or
 // recover, tries again. It never records a stop it did not observe or
 // refunds usage that is not sealed.
-func (c *Coordinator) abandon(ctx context.Context, r Record, index int) (Record, error) {
+func (c *Coordinator) abandon(ctx context.Context, r Record, index int, refused *StartRefused) (Record, error) {
+	r, err := c.endStart(ctx, r, index)
+	if err != nil {
+		if refused != nil {
+			return r, fmt.Errorf("%w: %w", err, refused)
+		}
+		return r, err
+	}
+	if refused != nil {
+		return r, &StartRefused{Reason: refused.Reason, Ended: true}
+	}
+	return r, ErrDeadlinePassed
+}
+
+// endStart establishes that nothing runs at the destination of operation
+// index, and ends it without a new visit, as abandon describes.
+func (c *Coordinator) endStart(ctx context.Context, r Record, index int) (Record, error) {
 	op := &r.Operations[index]
 	if op.Launch != nil {
 		launch := *op.Launch
@@ -323,10 +358,7 @@ func (c *Coordinator) abandon(ctx context.Context, r Record, index int) (Record,
 	op = &r.Operations[index]
 	op.Stage = stageCancelled
 	r.PendingOperation = ""
-	if err := c.commit(&r, evAbandoned); err != nil {
-		return r, err
-	}
-	return r, ErrDeadlinePassed
+	return r, c.commit(&r, evAbandoned)
 }
 
 // unproven is abandon's refusal while the destination is not shown to hold
