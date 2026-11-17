@@ -100,9 +100,6 @@ type Placement struct {
 	// helperEndWait bounds a stop's wait, after its finish failed, for the
 	// Pod to show the checkpoint helper ended (helperEndWait).
 	helperEndWait time.Duration
-	// now is the clock the placement judges a launch's deadline against.
-	// Waits and polls, which run on contexts and timers, keep real time.
-	now func() time.Time
 }
 
 // Open holds one filesystem owner lock for the configured profile. Kubernetes
@@ -147,7 +144,7 @@ func Open(config Config) (*Placement, error) {
 		return nil, err
 	}
 	return &Placement{config: config, registry: store, ledger: budgetkube.NewLedger(config.Kube, config.BudgetNamespace), exec: executor, lock: lock, abortWait: abortPreparationWait,
-		fenceWait: fenceCancelledWait, helperEndWait: helperEndWait, now: time.Now}, nil
+		fenceWait: fenceCancelledWait, helperEndWait: helperEndWait}, nil
 }
 func validateConfig(config Config) error {
 	if config.Harness.Validate() != nil || config.Kube == nil || config.RESTConfig == nil || len(validation.IsDNS1123Label(config.Namespace)) != 0 || len(validation.IsDNS1123Label(config.BudgetNamespace)) != 0 || config.AgentNamespace != runtimekube.AgentsNamespace || len(validation.IsDNS1123Subdomain(config.TemplateName)) != 0 || config.Principal == "" || config.Name == "" || !digestValid(config.InstructionDigest) || config.MaxDuration < 0 || config.MaxCheckpointBytes <= 0 || config.MaxCheckpointBytes > 256<<20 || !filepath.IsAbs(config.Directory) || len(config.Allowances) == 0 || len(config.Allowances) > 32 {
@@ -241,7 +238,7 @@ func (p *Placement) liveProfileInput(ctx context.Context, l session.Launch, init
 	if err := p.validateInput(l, initial); err != nil {
 		return nil, err
 	}
-	if deadline.At(l.Deadline).Passed(p.now()) {
+	if deadline.At(l.Deadline).Passed(time.Now()) {
 		return nil, &profile.Rejection{Code: profile.CodeExpired}
 	}
 	var template api.AgentTemplate
@@ -276,7 +273,7 @@ func (p *Placement) liveProfileInput(ctx context.Context, l session.Launch, init
 	if limit := policy.Spec.MaxExecutionDuration.Duration; limit > 0 && (duration == 0 || limit < duration) {
 		duration = limit
 	}
-	if !deadline.At(l.Deadline).Fits(p.now(), duration) {
+	if !deadline.At(l.Deadline).Fits(time.Now(), duration) {
 		return nil, &profile.Rejection{Code: profile.CodeDenied}
 	}
 	return p.ceilings(l, policy.Spec)

@@ -798,7 +798,7 @@ func (p *Placement) recordExit(ctx context.Context, local retained, r registry.R
 		exit.Deadline = true
 	case harness.NativeExitSelf, harness.NativeExitFailed:
 	default:
-		exit.Deadline = deadline.At(local.Launch.Deadline).Passed(p.now())
+		exit.Deadline = deadline.At(local.Launch.Deadline).Passed(time.Now())
 	}
 	if harness.ProvesCompletion(r.Harness) && local.thread(r) == "" && report.Thread != "" {
 		bound, err := p.registry.BindNative(ctx, r.Reference, report.Thread)
