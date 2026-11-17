@@ -180,6 +180,20 @@ Failures:
 - **A revoked project** is cancelled through the coordinator with a
   name-based operation, whether found at startup or while driving.
 
+Corrected 2026-11-17: the driver's decision is declared as a table,
+`decisions` in `internal/work/decision.go`. It maps the execution's phase,
+the session's mode and the requests pending on it (a cancellation the
+coordinator holds, a revoked project, a deadline that passed before the
+first visit started) to one action, and every situation that can occur
+matches exactly one row, which `internal/work/decision_test.go` checks. A
+situation no row decides is reported as the session's problem and retried
+after the backoff. The table replaced an order-dependent switch without
+changing any outcome: the driver's steps from 900 starting combinations,
+recorded through the coordinator before the change in
+`internal/work/testdata/driver-outcomes.txt`, were reproduced byte for
+byte. Later changes to that file are deliberate and named in their
+commits.
+
 **Cancel goes through the coordinator** as
 `CancelUnsettled(ctx, execution, op, admit)`. The coordinator first
 interrupts the driver's graceful `Finalize`, so cancellation never waits for a
@@ -842,12 +856,16 @@ would use.
 - Applies [ADR 0056](0056-whoever-starts-work-sets-its-deadline.md) to work
   the executor runs for Hermes.
 - Keeps [ADR 0036](0036-remote-executors-through-kubeconfig-contexts.md) unchanged.
-- Code: `internal/work/` (`catalogue.go`, `driver.go`, `interactive.go`, `export.go`,
+- Code: `internal/work/` (`catalogue.go`, `driver.go`, `decision.go`, `interactive.go`, `export.go`,
   `legacy.go`, `phase.go`, `remove.go`), `internal/session/cancel.go`, `internal/session/remove.go`,
   `internal/session/phase.go`, `cmd/session-profile/main.go`,
   `internal/runtime/kubernetes/placement/placement.go` and `lifecycle.go`,
   `cmd/sproozi/output.go` and `session.go`; the Claude Code executor
   example in `examples/portable-workflows/kubernetes/claude/`.
+- Driver tests (corrected 2026-11-17): `internal/work/decision_test.go`,
+  `internal/work/driver_outcomes_test.go` and its
+  `testdata/driver-outcomes.txt`, `internal/work/revoked_test.go`,
+  `internal/work/recover_test.go`, `internal/work/clock_test.go`.
 - Docs: [session commands](../reference/session-commands.md),
   [remote executors](../reference/remote-executors.md),
   [portable workflows](../guides/portable-workflows.md),
