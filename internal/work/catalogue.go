@@ -372,6 +372,13 @@ func (o *Owner) view(r record, rec *session.Record) View {
 	if v.Problem == "" {
 		v.Problem = executionProblem(*rec, r.Intent.Mode == ModeInteractive)
 	}
+	if v.Problem == "" && rec.Phase == session.PhaseIdle && startEnded(*rec) {
+		// The driver did not record why the start ended (ADR 0067).
+		v.Problem = problemRefusedUnknown
+		if o.config.Coordinator.PastDeadline(*rec) {
+			v.Problem = problemExpired
+		}
+	}
 	return v
 }
 

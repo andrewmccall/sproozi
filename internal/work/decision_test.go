@@ -86,8 +86,8 @@ func TestDecisionTableDecidesEverySituationOnce(t *testing.T) {
 // journal's structure (describe in internal/session/phase.go) holds one only
 // in cancelling, cancelled, unknown-stop and unknown-usage, and always in
 // cancelling and cancelled. situationOf sets lateStart only before the first
-// visit started or once it ended idle, and refused only while it starts or
-// once it is idle.
+// visit started or once it ended idle, and refused only once it is idle,
+// never with lateStart: the deadline decides which of the two ended it.
 func possible(s situation) bool {
 	held := []session.Phase{session.PhaseCancelling, session.PhaseCancelled, session.PhaseUnknownStop,
 		session.PhaseUnknownUsage}
@@ -97,7 +97,7 @@ func possible(s situation) bool {
 	case !s.cancel && (s.phase == session.PhaseCancelling || s.phase == session.PhaseCancelled):
 		return false
 	}
-	if s.refused && !s.phase.Starting() && s.phase != session.PhaseIdle {
+	if s.refused && (s.phase != session.PhaseIdle || s.lateStart) {
 		return false
 	}
 	return !s.lateStart || s.phase == phaseNotReceived || s.phase.Starting() || s.phase == session.PhaseIdle
@@ -177,7 +177,7 @@ func checkRequestRules(t *testing.T, s situation, act action) {
 	if s.refused && act == actEndExpired {
 		t.Errorf("%+v: a refused start ends as expired", s)
 	}
-	if s.refused && !s.interactive && !s.cancel && !s.revoked && s.phase.Starting() && act != actEndRefused {
+	if s.refused && !s.interactive && !s.cancel && act != actEndRefused {
 		t.Errorf("%+v: a refused task's start is not ended: %s", s, act)
 	}
 }
@@ -264,7 +264,7 @@ func TestEveryDriverPhaseCanStillBeStoppedAndCancelled(t *testing.T) {
 							switch {
 							case !got.Settled():
 								t.Fatalf("from %s the session is left %s", before.Phase, got)
-							case stop && got == phaseCancelled && !s.cancel && !s.lateStart && !state.refuses &&
+							case stop && got == phaseCancelled && !s.cancel && !s.lateStart && !(state.refuses && !interactive) &&
 								s.phase != session.PhaseCancelled:
 								t.Fatalf("stopping from %s cancelled it", before.Phase)
 							case !stop && got != phaseCancelled && (code(cancelErr) != profile.CodeConflict || !got.stopped() && got != PhaseFailed):

@@ -1808,14 +1808,14 @@ idle-finished interactive revoked no-deadline - turn-pending | unreachable
 idle-finished interactive revoked no-deadline transfer reachable | unreachable
 idle-finished interactive revoked no-deadline catalogue-cancel reachable | unreachable
 idle-start-ended task member early - reachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{idle cancel=- pending=- visits=0} calls=prepare=1,inspect=2
-    again -> catalogue{finished=false cancel=- transfer=- problem="the deadline passed before it started"} journal{cancelled cancel=deadline-expired pending=- visits=0} calls=none
-    done -> catalogue{finished=false cancel=- transfer=- problem="the deadline passed before it started"} journal{cancelled cancel=deadline-expired pending=- visits=0} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem="it can never start: its placement refused it"} journal{cancelled cancel=start-refused pending=- visits=0} calls=none
+    done -> catalogue{finished=false cancel=- transfer=- problem="it can never start: its placement refused it"} journal{cancelled cancel=start-refused pending=- visits=0} calls=none
 idle-start-ended task member early - unreachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{idle cancel=- pending=- visits=0} calls=prepare=1,inspect=2
-    again -> catalogue{finished=false cancel=- transfer=- problem="the deadline passed before it started"} journal{cancelled cancel=deadline-expired pending=- visits=0} calls=none
-    done -> catalogue{finished=false cancel=- transfer=- problem="the deadline passed before it started"} journal{cancelled cancel=deadline-expired pending=- visits=0} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem="it can never start: its placement refused it"} journal{cancelled cancel=start-refused pending=- visits=0} calls=none
+    done -> catalogue{finished=false cancel=- transfer=- problem="it can never start: its placement refused it"} journal{cancelled cancel=start-refused pending=- visits=0} calls=none
 idle-start-ended task member early - turn-pending | catalogue{finished=false cancel=- transfer=- problem=""} journal{idle cancel=- pending=- visits=0} calls=prepare=1,inspect=2
-    again -> catalogue{finished=false cancel=- transfer=- problem="the deadline passed before it started"} journal{cancelled cancel=deadline-expired pending=- visits=0} calls=none
-    done -> catalogue{finished=false cancel=- transfer=- problem="the deadline passed before it started"} journal{cancelled cancel=deadline-expired pending=- visits=0} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem="it can never start: its placement refused it"} journal{cancelled cancel=start-refused pending=- visits=0} calls=none
+    done -> catalogue{finished=false cancel=- transfer=- problem="it can never start: its placement refused it"} journal{cancelled cancel=start-refused pending=- visits=0} calls=none
 idle-start-ended task member early transfer reachable | catalogue{finished=false cancel=- transfer=setup problem=""} journal{idle cancel=- pending=- visits=0} calls=prepare=1,inspect=2
     done -> catalogue{finished=false cancel=- transfer=setup problem=""} journal{idle cancel=- pending=- visits=0} calls=none
 idle-start-ended task member early catalogue-cancel reachable | catalogue{finished=false cancel=setup transfer=- problem=""} journal{idle cancel=- pending=- visits=0} calls=prepare=1,inspect=2
@@ -1839,14 +1839,14 @@ idle-start-ended task member no-deadline - turn-pending | unreachable
 idle-start-ended task member no-deadline transfer reachable | unreachable
 idle-start-ended task member no-deadline catalogue-cancel reachable | unreachable
 idle-start-ended task revoked early - reachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{idle cancel=- pending=- visits=0} calls=prepare=1,inspect=2
-    again -> catalogue{finished=false cancel=- transfer=- problem="the deadline passed before it started"} journal{cancelled cancel=deadline-expired pending=- visits=0} calls=none
-    done -> catalogue{finished=false cancel=- transfer=- problem="the deadline passed before it started"} journal{cancelled cancel=deadline-expired pending=- visits=0} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem="it can never start: its placement refused it"} journal{cancelled cancel=start-refused pending=- visits=0} calls=none
+    done -> catalogue{finished=false cancel=- transfer=- problem="it can never start: its placement refused it"} journal{cancelled cancel=start-refused pending=- visits=0} calls=none
 idle-start-ended task revoked early - unreachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{idle cancel=- pending=- visits=0} calls=prepare=1,inspect=2
-    again -> catalogue{finished=false cancel=- transfer=- problem="the deadline passed before it started"} journal{cancelled cancel=deadline-expired pending=- visits=0} calls=none
-    done -> catalogue{finished=false cancel=- transfer=- problem="the deadline passed before it started"} journal{cancelled cancel=deadline-expired pending=- visits=0} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem="it can never start: its placement refused it"} journal{cancelled cancel=start-refused pending=- visits=0} calls=none
+    done -> catalogue{finished=false cancel=- transfer=- problem="it can never start: its placement refused it"} journal{cancelled cancel=start-refused pending=- visits=0} calls=none
 idle-start-ended task revoked early - turn-pending | catalogue{finished=false cancel=- transfer=- problem=""} journal{idle cancel=- pending=- visits=0} calls=prepare=1,inspect=2
-    again -> catalogue{finished=false cancel=- transfer=- problem="the deadline passed before it started"} journal{cancelled cancel=deadline-expired pending=- visits=0} calls=none
-    done -> catalogue{finished=false cancel=- transfer=- problem="the deadline passed before it started"} journal{cancelled cancel=deadline-expired pending=- visits=0} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem="it can never start: its placement refused it"} journal{cancelled cancel=start-refused pending=- visits=0} calls=none
+    done -> catalogue{finished=false cancel=- transfer=- problem="it can never start: its placement refused it"} journal{cancelled cancel=start-refused pending=- visits=0} calls=none
 idle-start-ended task revoked early transfer reachable | catalogue{finished=false cancel=- transfer=setup problem=""} journal{idle cancel=- pending=- visits=0} calls=prepare=1,inspect=2
     done -> catalogue{finished=false cancel=- transfer=setup problem=""} journal{idle cancel=- pending=- visits=0} calls=none
 idle-start-ended task revoked early catalogue-cancel reachable | catalogue{finished=false cancel=setup transfer=- problem=""} journal{idle cancel=- pending=- visits=0} calls=prepare=1,inspect=2
@@ -1920,14 +1920,14 @@ idle-start-ended interactive revoked no-deadline - turn-pending | unreachable
 idle-start-ended interactive revoked no-deadline transfer reachable | unreachable
 idle-start-ended interactive revoked no-deadline catalogue-cancel reachable | unreachable
 idle-start-ended-aborted task member early - reachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{idle cancel=- pending=- visits=1} calls=prepare=1,abort=1,inspect=2
-    again -> catalogue{finished=false cancel=- transfer=- problem="the deadline passed before it started"} journal{cancelled cancel=deadline-expired pending=- visits=1} calls=none
-    done -> catalogue{finished=false cancel=- transfer=- problem="the deadline passed before it started"} journal{cancelled cancel=deadline-expired pending=- visits=1} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem="it can never start: its placement refused it"} journal{cancelled cancel=start-refused pending=- visits=1} calls=none
+    done -> catalogue{finished=false cancel=- transfer=- problem="it can never start: its placement refused it"} journal{cancelled cancel=start-refused pending=- visits=1} calls=none
 idle-start-ended-aborted task member early - unreachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{idle cancel=- pending=- visits=1} calls=prepare=1,abort=1,inspect=2
-    again -> catalogue{finished=false cancel=- transfer=- problem="the deadline passed before it started"} journal{cancelled cancel=deadline-expired pending=- visits=1} calls=none
-    done -> catalogue{finished=false cancel=- transfer=- problem="the deadline passed before it started"} journal{cancelled cancel=deadline-expired pending=- visits=1} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem="it can never start: its placement refused it"} journal{cancelled cancel=start-refused pending=- visits=1} calls=none
+    done -> catalogue{finished=false cancel=- transfer=- problem="it can never start: its placement refused it"} journal{cancelled cancel=start-refused pending=- visits=1} calls=none
 idle-start-ended-aborted task member early - turn-pending | catalogue{finished=false cancel=- transfer=- problem=""} journal{idle cancel=- pending=- visits=1} calls=prepare=1,abort=1,inspect=2
-    again -> catalogue{finished=false cancel=- transfer=- problem="the deadline passed before it started"} journal{cancelled cancel=deadline-expired pending=- visits=1} calls=none
-    done -> catalogue{finished=false cancel=- transfer=- problem="the deadline passed before it started"} journal{cancelled cancel=deadline-expired pending=- visits=1} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem="it can never start: its placement refused it"} journal{cancelled cancel=start-refused pending=- visits=1} calls=none
+    done -> catalogue{finished=false cancel=- transfer=- problem="it can never start: its placement refused it"} journal{cancelled cancel=start-refused pending=- visits=1} calls=none
 idle-start-ended-aborted task member early transfer reachable | catalogue{finished=false cancel=- transfer=setup problem=""} journal{idle cancel=- pending=- visits=1} calls=prepare=1,abort=1,inspect=2
     done -> catalogue{finished=false cancel=- transfer=setup problem=""} journal{idle cancel=- pending=- visits=1} calls=none
 idle-start-ended-aborted task member early catalogue-cancel reachable | catalogue{finished=false cancel=setup transfer=- problem=""} journal{idle cancel=- pending=- visits=1} calls=prepare=1,abort=1,inspect=2
@@ -1951,14 +1951,14 @@ idle-start-ended-aborted task member no-deadline - turn-pending | unreachable
 idle-start-ended-aborted task member no-deadline transfer reachable | unreachable
 idle-start-ended-aborted task member no-deadline catalogue-cancel reachable | unreachable
 idle-start-ended-aborted task revoked early - reachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{idle cancel=- pending=- visits=1} calls=prepare=1,abort=1,inspect=2
-    again -> catalogue{finished=false cancel=- transfer=- problem="the deadline passed before it started"} journal{cancelled cancel=deadline-expired pending=- visits=1} calls=none
-    done -> catalogue{finished=false cancel=- transfer=- problem="the deadline passed before it started"} journal{cancelled cancel=deadline-expired pending=- visits=1} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem="it can never start: its placement refused it"} journal{cancelled cancel=start-refused pending=- visits=1} calls=none
+    done -> catalogue{finished=false cancel=- transfer=- problem="it can never start: its placement refused it"} journal{cancelled cancel=start-refused pending=- visits=1} calls=none
 idle-start-ended-aborted task revoked early - unreachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{idle cancel=- pending=- visits=1} calls=prepare=1,abort=1,inspect=2
-    again -> catalogue{finished=false cancel=- transfer=- problem="the deadline passed before it started"} journal{cancelled cancel=deadline-expired pending=- visits=1} calls=none
-    done -> catalogue{finished=false cancel=- transfer=- problem="the deadline passed before it started"} journal{cancelled cancel=deadline-expired pending=- visits=1} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem="it can never start: its placement refused it"} journal{cancelled cancel=start-refused pending=- visits=1} calls=none
+    done -> catalogue{finished=false cancel=- transfer=- problem="it can never start: its placement refused it"} journal{cancelled cancel=start-refused pending=- visits=1} calls=none
 idle-start-ended-aborted task revoked early - turn-pending | catalogue{finished=false cancel=- transfer=- problem=""} journal{idle cancel=- pending=- visits=1} calls=prepare=1,abort=1,inspect=2
-    again -> catalogue{finished=false cancel=- transfer=- problem="the deadline passed before it started"} journal{cancelled cancel=deadline-expired pending=- visits=1} calls=none
-    done -> catalogue{finished=false cancel=- transfer=- problem="the deadline passed before it started"} journal{cancelled cancel=deadline-expired pending=- visits=1} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem="it can never start: its placement refused it"} journal{cancelled cancel=start-refused pending=- visits=1} calls=none
+    done -> catalogue{finished=false cancel=- transfer=- problem="it can never start: its placement refused it"} journal{cancelled cancel=start-refused pending=- visits=1} calls=none
 idle-start-ended-aborted task revoked early transfer reachable | catalogue{finished=false cancel=- transfer=setup problem=""} journal{idle cancel=- pending=- visits=1} calls=prepare=1,abort=1,inspect=2
     done -> catalogue{finished=false cancel=- transfer=setup problem=""} journal{idle cancel=- pending=- visits=1} calls=none
 idle-start-ended-aborted task revoked early catalogue-cancel reachable | catalogue{finished=false cancel=setup transfer=- problem=""} journal{idle cancel=- pending=- visits=1} calls=prepare=1,abort=1,inspect=2

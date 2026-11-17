@@ -28,20 +28,25 @@ const (
 	endTask = "cancel this session"
 )
 
+// problemRefusedUnknown is the problem of a start its placement refused
+// whose reason the driver did not record: the journal keeps none.
+const problemRefusedUnknown = problemRefused + ": its placement refused it"
+
 // refusedProblem is the problem the placement's refusal err records for
-// session r: its reason and, while the start is not yet ended, what to run.
+// session r: its reason and, while the start is not yet ended, what
+// happens next.
 func refusedProblem(r record, err error) string {
-	problem := problemRefused + ": its placement refused it"
+	problem := problemRefusedUnknown
 	var refused *session.StartRefused
 	if errors.As(err, &refused) && refused.Reason != "" {
 		problem = problemRefused + ": " + refused.Reason
 	}
 	if !errors.Is(err, session.ErrStartEnded) {
-		end := endTask
+		next := " and tries again"
 		if r.Intent.Mode == ModeInteractive {
-			end = "recover or cancel this session"
+			next = ", so recover or cancel this session"
 		}
-		problem += "; the executor has not yet shown that nothing runs there, so " + end
+		problem += "; the executor has not yet shown that nothing runs there" + next
 	}
 	return problem
 }
@@ -239,13 +244,18 @@ func (o *Owner) carryOut(ctx context.Context, r record, rec *session.Record, act
 			// The placement can never start it, so its start ends now with
 			// the reason, deadline or none (ADR 0067): an interactive
 			// session stays stopped with its work, and the next step
-			// cancels a task. A start not yet shown to have ended leaves
-			// an interactive session to its owner.
+			// cancels a task. A start not yet shown to have ended is
+			// recovered again, which refuses it again and repeats the
+			// proof: after the backoff for a task, and by its owner for an
+			// interactive session.
 			o.note(r.ID, refusedProblem(r, err))
-			if r.Intent.Mode == ModeInteractive && !errors.Is(err, session.ErrStartEnded) {
+			switch {
+			case errors.Is(err, session.ErrStartEnded):
+				return nextAgain
+			case r.Intent.Mode == ModeInteractive:
 				return nextDone
 			}
-			return nextAgain
+			return nextWait
 		}
 		return o.after(ctx, r, err, nextDone)
 	case actComplete:
@@ -284,8 +294,13 @@ func (o *Owner) carryOut(ctx context.Context, r record, rec *session.Record, act
 		return o.end(ctx, r, "project-revoked", problemRevoked)
 	case actEndRefused:
 		// A task its placement refused has no result: nothing ran. Its
-		// problem already names the refusal.
-		return o.end(ctx, r, "start-refused", r.Problem)
+		// problem names the refusal, unless the executor stopped before
+		// recording it.
+		problem := r.Problem
+		if !refusalProblem(problem) {
+			problem = problemRefusedUnknown
+		}
+		return o.end(ctx, r, "start-refused", problem)
 	case actNothing:
 	}
 	return nextDone
@@ -361,8 +376,7 @@ func (o *Owner) note(id, problem string) {
 	defer unlock()
 	r, err := o.read(id)
 	if err != nil || r.Problem == problem || r.Finished || r.CancelOperation != "" ||
-		r.Problem == problemExpired || r.Problem == problemRevoked ||
-		refusalProblem(r.Problem) && !refusalProblem(problem) {
+		r.Problem == problemExpired || r.Problem == problemRevoked {
 		return
 	}
 	r.Problem = problem

@@ -59,8 +59,11 @@ type situation struct {
 	// before it started (startEnded). Once a visit started, it is false.
 	lateStart bool
 	// refused: the placement refused the first visit's start for good
-	// (ADR 0067), which the session's problem records. Only a starting or
-	// idle execution has it.
+	// (ADR 0067). Only an idle execution whose first visit ended before it
+	// started has it, never with lateStart: the coordinator ends a start
+	// only for one or the other, and only for its deadline once that has
+	// passed. Before the deadline, or with none, the placement refused it;
+	// past it, the refusal problem the driver recorded says which.
 	refused bool
 }
 
@@ -77,11 +80,16 @@ func (o *Owner) situationOf(r record, rec *session.Record) situation {
 	case rec.Phase.Starting():
 		s.lateStart = o.config.Coordinator.PastDeadline(*rec)
 	case rec.Phase == session.PhaseIdle:
-		s.lateStart = startEnded(*rec)
+		// The coordinator ends a start for its deadline only once the
+		// deadline has passed, so before it, or with none, the placement
+		// refused it. Past it, the refusal problem the driver recorded when
+		// the coordinator reported it is the only record of which.
+		ended, past := startEnded(*rec), o.config.Coordinator.PastDeadline(*rec)
+		s.refused = ended && (!past || refusalProblem(r.Problem))
+		s.lateStart = ended && !s.refused
 	}
 	if rec != nil {
 		s.phase, s.cancel = rec.Phase, rec.CancelOperation != ""
-		s.refused = (rec.Phase.Starting() || rec.Phase == session.PhaseIdle) && refusalProblem(r.Problem)
 	}
 	return s
 }
@@ -165,8 +173,8 @@ var decisions = []decisionRow{
 	{phases: []session.Phase{session.PhaseCancelled}, action: actNothing},
 	{phases: []session.Phase{session.PhaseIdle}, mode: interactiveOnly, action: actNothing},
 	{phases: []session.Phase{session.PhaseIdle}, mode: taskOnly, lateStart: isTrue, refused: isFalse, action: actEndExpired},
-	{phases: []session.Phase{session.PhaseIdle}, mode: taskOnly, lateStart: isTrue, refused: isTrue, action: actEndRefused},
-	{phases: []session.Phase{session.PhaseIdle}, mode: taskOnly, lateStart: isFalse, action: actFinish},
+	{phases: []session.Phase{session.PhaseIdle}, mode: taskOnly, refused: isTrue, action: actEndRefused},
+	{phases: []session.Phase{session.PhaseIdle}, mode: taskOnly, lateStart: isFalse, refused: isFalse, action: actFinish},
 
 	{phases: phasesUnsettled, mode: interactiveOnly, revoked: isFalse, action: actNothing},
 	{phases: phasesCancelHeld, mode: taskOnly, cancel: isTrue, action: actRecover},
@@ -178,11 +186,8 @@ var decisions = []decisionRow{
 
 	{phases: []session.Phase{phaseNotReceived}, revoked: isFalse, lateStart: isTrue, action: actEndExpired},
 	{phases: []session.Phase{phaseNotReceived}, revoked: isFalse, lateStart: isFalse, action: actStart},
-	{phases: phasesStarting, mode: taskOnly, cancel: isFalse, revoked: isFalse, refused: isTrue, action: actEndRefused},
-	{phases: phasesStarting, mode: taskOnly, cancel: isFalse, revoked: isFalse, lateStart: isTrue, refused: isFalse,
-		action: actEndExpired},
-	{phases: phasesStarting, mode: taskOnly, cancel: isFalse, revoked: isFalse, lateStart: isFalse, refused: isFalse,
-		action: actRecoverStart},
+	{phases: phasesStarting, mode: taskOnly, cancel: isFalse, revoked: isFalse, lateStart: isTrue, action: actEndExpired},
+	{phases: phasesStarting, mode: taskOnly, cancel: isFalse, revoked: isFalse, lateStart: isFalse, action: actRecoverStart},
 	{phases: phasesStarting, mode: interactiveOnly, cancel: isFalse, revoked: isFalse, action: actRecoverStart},
 	{phases: []session.Phase{session.PhaseActive}, mode: interactiveOnly, cancel: isFalse, revoked: isFalse, action: actNothing},
 	{phases: []session.Phase{session.PhaseActive, session.PhaseStopping}, mode: taskOnly, cancel: isFalse, revoked: isFalse,

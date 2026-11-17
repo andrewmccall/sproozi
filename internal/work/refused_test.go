@@ -2,6 +2,7 @@ package work
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -83,9 +84,13 @@ func TestDriverEndsAStartItsPlacementRefuses(t *testing.T) {
 	}
 }
 
-// Until the refused start is shown to have ended, a task keeps being
-// cancelled after the backoff, and an interactive session waits for its
-// owner: neither retries Prepare at once, and the problem says what to run.
+// Until the refused start is shown to have ended, a task is recovered
+// again after the backoff, which refuses it again and repeats the proof,
+// and an interactive session waits for its owner's recover or cancel;
+// neither retries at once, and the problem says what happens next. Once the
+// proof holds, the start ends with the refusal's reason. (The fixture's
+// failure also fails the next recover's Inspect, which records that
+// failure instead, as any failed recovery does.)
 func TestDriverWaitsForProofThatARefusedStartEnded(t *testing.T) {
 	t.Parallel()
 	for _, interactive := range []bool{false, true} {
@@ -97,38 +102,69 @@ func TestDriverWaitsForProofThatARefusedStartEnded(t *testing.T) {
 			e.p.mu.Lock()
 			e.p.failInspectAfterPrepare = true
 			e.p.mu.Unlock()
+			then := map[bool]string{false: " and tries again", true: ", so recover or cancel this session"}[interactive]
+			want := "it can never start: " + fixtureRefusal + "; the executor has not yet shown that nothing runs there" + then
+			wantNext := map[bool]next{false: nextWait, true: nextDone}[interactive]
 			n := e.o.step(t.Context(), e.id)
 			r, err := e.o.read(e.id)
 			if err != nil {
 				t.Fatal(err)
 			}
-			end := map[bool]string{false: endTask, true: "recover or cancel this session"}[interactive]
-			want := "it can never start: " + fixtureRefusal + "; the executor has not yet shown that nothing runs there, so " + end
 			if r.Problem != want {
 				t.Fatalf("problem %q, want %q", r.Problem, want)
 			}
-			if interactive {
-				if n != nextDone {
-					t.Fatalf("unproven refused interactive start: %s, want done", nextNames[n])
-				}
-				return
+			if n != wantNext {
+				t.Fatalf("unproven refused start: %s, want %s", nextNames[n], nextNames[wantNext])
 			}
-			if n != nextAgain {
-				t.Fatalf("unproven refused task: %s, want again", nextNames[n])
-			}
-			if n = e.o.step(t.Context(), e.id); n != nextWait {
-				t.Fatalf("cancel of the unproven refused task: %s, want wait", nextNames[n])
-			}
-			if r, err = e.o.read(e.id); err != nil || r.Problem != want {
-				t.Fatalf("problem after the cancel %q %v", r.Problem, err)
+			if rec, err := e.o.config.Coordinator.Inspect(e.id); err != nil || rec.Phase != session.PhasePreparing {
+				t.Fatalf("unproven refused start was recorded: %s %v", rec.Phase, err)
 			}
 			e.p.mu.Lock()
 			e.p.failInspectAfterPrepare = false
 			e.p.mu.Unlock()
 			driveToEnd(t, e)
 			v, err := e.o.Info(t.Context(), e.id)
-			if err != nil || v.Phase != phaseCancelled || v.Problem != want {
-				t.Fatalf("refused task once its end is proven: %+v %v", v, err)
+			wantPhase := map[bool]Phase{false: phaseCancelled, true: PhaseRetained}[interactive]
+			if err != nil || v.Phase != wantPhase || v.Problem != "it can never start: "+fixtureRefusal {
+				t.Fatalf("refused start once its end is proven: %+v %v", v, err)
+			}
+		})
+	}
+}
+
+// If the executor stops after the coordinator ended a refused start but
+// before the driver recorded why, the execution is idle with no problem.
+// The driver still tells the refusal from the deadline by the coordinator's
+// clock, with no deadline as here: a task is cancelled as refused, and an
+// interactive session is retained and shown as refused, without the reason
+// the journal does not keep (ADR 0067).
+func TestDriverEndsARefusedStartWhoseProblemWasNotRecorded(t *testing.T) {
+	t.Parallel()
+	for _, interactive := range []bool{false, true} {
+		t.Run(map[bool]string{false: string(ModeTask), true: string(ModeInteractive)}[interactive], func(t *testing.T) {
+			t.Parallel()
+			e := newDriverEnv(t, interactive, clockNone)
+			e.create(t)
+			e.refuse()
+			if rec, err := e.o.config.Coordinator.Recover(t.Context(), e.id); !errors.Is(err, session.ErrStartEnded) ||
+				rec.Phase != session.PhaseIdle {
+				t.Fatalf("refused start: %s %v", rec.Phase, err)
+			}
+			driveToEnd(t, e)
+			v, err := e.o.Info(t.Context(), e.id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rec, err := e.o.config.Coordinator.Inspect(e.id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if v.Problem != "it can never start: its placement refused it" {
+				t.Fatalf("problem %q", v.Problem)
+			}
+			if interactive && (v.Phase != PhaseRetained || rec.CancelOperation != "") ||
+				!interactive && (v.Phase != phaseCancelled || rec.CancelOperation != derivedOperation(e.id, "start-refused")) {
+				t.Fatalf("refused start whose problem was not recorded: %s, cancel %s", v.Phase, e.opName(rec.CancelOperation))
 			}
 		})
 	}
