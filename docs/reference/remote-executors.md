@@ -250,6 +250,17 @@ An interactive session does not recover by itself. When the executor cannot
 prove a stop or seal usage, the session stays `unknown-stop` or
 `unknown-usage`, after a restart too, until `recover` retries it once.
 
+A stop's last step ends the sandbox's checkpoint helper. When that command's
+reply is lost but the Pod shows the helper's container terminated with code
+0, or the Pod is gone, the stop is complete, and the executor logs `Treated
+the finish of the checkpoint helper in Pod NAMESPACE/NAME as done, because
+…` with the lost command's error
+([ADR 0069](../adr/0069-a-lost-finish-is-proven-by-the-helpers-end.md)).
+Otherwise the session stays `unknown-stop`. A failed fixed command's error
+in the executor's log names the command, its container and what the exec
+reported, such as `placement: fixed command unavailable: checkpoint finish in
+container checkpoint: command terminated with exit code 137`.
+
 ### Starting from an approved repository or an upload
 
 A submission names an approved `repository` or `project`, as a task does, and

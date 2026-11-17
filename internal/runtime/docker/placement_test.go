@@ -86,6 +86,9 @@ type fakeDocker struct {
 	rejectNativeActivation  bool
 	quiesceAcknowledgesOnly bool
 	lostQuiesceAck          bool
+	// lostFinishAck makes the helper end on finish and the exec then fail,
+	// as a docker exec does when the container's main process exits first.
+	lostFinishAck bool
 	// turnless makes the supervisor report a first visit with no native
 	// conversation and stop it without one.
 	turnless       bool
@@ -293,6 +296,19 @@ func (f *fakeDocker) containerCommand(args []string) ([]byte, error) {
 	}
 	return nil, errors.New("unexpected fixture operation")
 }
+
+// finish ends the helper container c, as the helper does on finish, and
+// reports what the exec does.
+func (f *fakeDocker) finish(c *fakeContainer) error {
+	c.State.Running = false
+	c.State.Status = exitedStatus
+	c.State.Pid = 0
+	if f.lostFinishAck {
+		return exitCoded(137)
+	}
+	return nil
+}
+
 func (f *fakeDocker) execCommand(ctx context.Context, args []string, input []byte) ([]byte, error) {
 	c := f.containers[args[2]]
 	if c == nil || !c.State.Running {
@@ -325,10 +341,7 @@ func (f *fakeDocker) execCommand(ctx context.Context, args []string, input []byt
 			}
 			return f.capture, nil
 		case "finish":
-			c.State.Running = false
-			c.State.Status = exitedStatus
-			c.State.Pid = 0
-			return nil, nil
+			return nil, f.finish(c)
 		}
 	}
 	switch op {
@@ -563,6 +576,40 @@ func TestIgnoredSelectionBindsDockerVisitAndFixedCapture(t *testing.T) {
 	}
 	if strings.Join(stopped.Receipt.Launch.IncludeIgnored, ",") != "needed.bin,cache/chosen.bin" {
 		t.Fatal("trusted stop receipt dropped selection")
+	}
+}
+
+// The Docker stop runs the same helper's finish with a docker exec into a
+// container whose main process the finish ends, so its acknowledgement can be
+// lost the same way. The stop ignores that result: everything that proves it
+// is recorded before, and it then stops the helper container itself. A lost
+// finish therefore never leaves a Docker stop unproven. Guards: that the
+// Docker placement keeps not depending on finish's exit status.
+func TestDockerStopDoesNotDependOnFinishAcknowledgement(t *testing.T) {
+	t.Parallel()
+	data := fixtureArtifact(t)
+	l := fixtureLaunch(t, data)
+	f := newFakeDocker()
+	f.capture = data
+	f.lostFinishAck = true
+	p := openFixture(t, testutil.PrivateDir(t), f, &fakeAuthority{engine: f})
+	i, err := p.Prepare(t.Context(), l, data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = p.Activate(t.Context(), l, i); err != nil {
+		t.Fatal(err)
+	}
+	stopped, err := p.Stop(t.Context(), l, i)
+	if err != nil || !stopped.ActualStopped || stopped.Receipt == nil || stopped.CheckpointDigest != l.CheckpointDigest {
+		t.Fatalf("stop with a lost finish acknowledgement: %+v %v", stopped, err)
+	}
+	finished := false
+	for _, call := range f.calls {
+		finished = finished || strings.HasSuffix(call, checkpointCommandPath+" finish")
+	}
+	if !finished || len(f.containers) != 0 {
+		t.Fatalf("finish ran %v; %d containers left", finished, len(f.containers))
 	}
 }
 

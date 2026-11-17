@@ -639,7 +639,7 @@ func (p *Placement) Stop(ctx context.Context, l session.Launch, i session.Incarn
 	if err != nil {
 		return s, err
 	}
-	if _, err = p.control(ctx, pod, runtimekube.CaptureContainer, []string{helperPath, helperFinish}, nil, 64<<10); err != nil {
+	if err = p.finish(ctx, local, r, pod); err != nil {
 		return session.Stopped{}, err
 	}
 	if err = p.releaseWriterFence(ctx, local, r); err != nil {
@@ -1031,11 +1031,59 @@ func (p *Placement) finishStopped(ctx context.Context, local retained, r registr
 		return err
 	}
 	if sandboxpod.Observe(pod).Capture.Running {
-		if _, err = p.control(ctx, pod, runtimekube.CaptureContainer, []string{helperPath, helperFinish}, nil, 64<<10); err != nil {
+		if err = p.finish(ctx, local, r, pod); err != nil {
 			return err
 		}
 	}
 	return p.releaseWriterFence(ctx, local, r)
+}
+
+// finish ends the capture helper of pod, the Pod of the stopped
+// registration r, once local retains its fence, checkpoint and receipt: the
+// last fixed command of a stop. The helper is its container's main process,
+// so its own end can cut the exec that carries finish's exit status, and the
+// acknowledgement is lost although the finish happened. A failed finish is
+// therefore done when a fresh read proves it (helperFinished); otherwise it
+// fails as before, and the stop stays unproven (ADR 0069).
+func (p *Placement) finish(ctx context.Context, local retained, r registry.Record, pod *corev1.Pod) error {
+	_, err := p.control(ctx, pod, runtimekube.CaptureContainer, []string{helperPath, helperFinish}, nil, 64<<10)
+	if err == nil {
+		return nil
+	}
+	proof, ok := p.helperFinished(ctx, local, r)
+	if !ok {
+		return err
+	}
+	p.logf("Treated the finish of the checkpoint helper in Pod %s/%s as done, because %s: %v", pod.Namespace, pod.Name, proof, err)
+	return nil
+}
+
+// helperFinished reports what proves that the capture helper of r's exact
+// Pod has finished, read afresh, and whether anything does. The
+// registration must be stopped and local's writer fenced, which a stopped
+// registration's receipt proves (ADR 0066). Then either the helper's
+// container ended, by the runtime's own report, with code 0, which the
+// helper returns only from a finish it acknowledged; or the Pod is gone, so
+// no helper is left to finish, as the replay of a stopped visit takes it
+// (finishStopped). A helper still running, one that ended with another
+// code, a termination the runtime did not report for that container, a
+// replaced Pod or a read that fails prove nothing.
+func (p *Placement) helperFinished(ctx context.Context, local retained, r registry.Record) (string, bool) {
+	if r.Phase != registry.Stopped || r.Receipt == nil || !local.WriterFenced {
+		return "", false
+	}
+	pod, err := p.exactPod(ctx, r)
+	if apierrors.IsNotFound(err) {
+		return "the Pod is gone", true
+	}
+	if err != nil {
+		return "", false
+	}
+	helper := sandboxpod.Observe(pod).Capture
+	if !helper.Ended() || helper.Terminated.ExitCode != 0 {
+		return "", false
+	}
+	return "the helper ended with code 0", true
 }
 func (p *Placement) exactPod(ctx context.Context, r registry.Record) (*corev1.Pod, error) {
 	var pod corev1.Pod

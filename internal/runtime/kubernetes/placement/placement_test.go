@@ -285,6 +285,10 @@ type protocolExecutor struct {
 	captureInvalid bool
 	captures       int
 	captureArgs    []string
+	// finishOutcome, when set, carries out finish in place of the helper
+	// ending with code 0 and the exec reporting success: it changes the Pod
+	// as the helper's end would and returns what the exec reports.
+	finishOutcome func(ctx context.Context, namespace, pod string) error
 	// logs is the native container's output, where the supervisor writes
 	// its exit report.
 	logs []byte
@@ -364,6 +368,9 @@ func (e *protocolExecutor) helper(ctx context.Context, namespace, pod string, ar
 		return true, err
 	case helperFinish:
 		e.finishes++
+		if e.finishOutcome != nil {
+			return true, e.finishOutcome(ctx, namespace, pod)
+		}
 		var actual corev1.Pod
 		if err := e.kube.Get(ctx, client.ObjectKey{Namespace: namespace, Name: pod}, &actual); err != nil {
 			return true, err

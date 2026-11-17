@@ -23,13 +23,13 @@ import (
 	"github.com/andrewmccall/sproozi/internal/workspace"
 )
 
-const helperSocket = "/tmp/sproozi-checkpoint/control.sock"
 const helperReceiptName = "restore.json"
 
-// The helper's private directory and the published pair. Tests point them
-// at temporary directories.
+// The helper's private directory, its control socket and the published
+// pair. Tests point them at temporary directories.
 var (
 	helperDirectory = "/tmp/sproozi-checkpoint"
+	helperSocket    = "/tmp/sproozi-checkpoint/control.sock"
 	helperTarget    = "/workspace/session"
 )
 
@@ -102,6 +102,22 @@ func finishAllowed() error {
 	return nil
 }
 
+// The finish request and its reply on the helper's control socket. The
+// request is read by its length, not to the end of the stream, so the
+// client keeps its connection open until it has read the reply.
+const (
+	finishRequest = "finish\n"
+	finishReply   = "finished\n"
+)
+
+// finishReplyGrace bounds how long the helper, once it has acknowledged a
+// finish, waits for its client to close before it exits. Tests shorten it.
+var finishReplyGrace = 10 * time.Second
+
+// awaitingClient is called when the helper begins that wait. Tests use it to
+// see the wait begin without sleeping.
+var awaitingClient = func() {}
+
 // hold keeps the quota-backed volume mounted after the native container stops.
 // Its private socket and receipt are never mounted into the native container.
 func hold(until deadline.Deadline) error {
@@ -124,6 +140,12 @@ func hold(until deadline.Deadline) error {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
+	return serve(ctx, until, listener)
+}
+
+// serve answers connections on listener until one asks it to finish, which
+// it acknowledges, or until ctx ends or until passes. It closes listener.
+func serve(ctx context.Context, until deadline.Deadline, listener net.Listener) error {
 	ctx, expire := context.WithCancelCause(ctx)
 	defer expire(nil)
 	go func() {
@@ -143,9 +165,20 @@ func hold(until deadline.Deadline) error {
 			return err
 		}
 		_ = conn.SetDeadline(time.Now().Add(time.Second))
-		data, readErr := io.ReadAll(io.LimitReader(conn, 8))
-		if readErr == nil && bytes.Equal(data, []byte("finish\n")) {
-			_, _ = conn.Write([]byte("finished\n"))
+		request := make([]byte, len(finishRequest))
+		if _, err = io.ReadFull(conn, request); err == nil && string(request) == finishRequest {
+			_, _ = conn.Write([]byte(finishReply))
+			// Returning ends the helper, its container's main process, and so
+			// the container, which can kill the finish command before the
+			// placement receives its exit status. The command closes only
+			// once it has read the reply to its end, which the half-close
+			// marks, so wait for that, within a bound.
+			if unix, ok := conn.(*net.UnixConn); ok {
+				_ = unix.CloseWrite()
+			}
+			awaitingClient()
+			_ = conn.SetReadDeadline(time.Now().Add(finishReplyGrace))
+			_, _ = io.Copy(io.Discard, conn)
 			_ = conn.Close()
 			return nil
 		}
@@ -163,14 +196,13 @@ func finish() error {
 	}
 	defer func() { _ = conn.Close() }()
 	_ = conn.SetDeadline(time.Now().Add(time.Second))
-	if _, err = conn.Write([]byte("finish\n")); err != nil {
-		return err
-	}
-	if err = conn.(*net.UnixConn).CloseWrite(); err != nil {
+	// The connection stays open for writing: the helper waits for it to
+	// close, once this command has read the reply.
+	if _, err = conn.Write([]byte(finishRequest)); err != nil {
 		return err
 	}
 	data, err := io.ReadAll(io.LimitReader(conn, 16))
-	if err != nil || !bytes.Equal(data, []byte("finished\n")) {
+	if err != nil || string(data) != finishReply {
 		return fmt.Errorf("checkpoint helper finish was not acknowledged")
 	}
 	return nil
