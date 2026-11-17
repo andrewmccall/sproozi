@@ -90,6 +90,13 @@ these hold:
   inspected at all. A placement may fail `Inspect` then precisely because the
   prepared writer stopped itself at the deadline, as Docker's supervisor does.
 
+Corrected 2026-11-17: the coordinator also takes `abandoned`, with the same
+proof below, for a start whose placement refuses it for good
+(`session.StartRefused`), deadline or none, and then reports that refusal
+rather than `ErrDeadlinePassed`. An execution without a deadline can
+therefore take it. See
+[ADR 0067](0067-a-start-ends-when-its-run-has-ended.md).
+
 Before it records `abandoned`, the coordinator establishes that no writer exists
 or can come to exist at the destination:
 
@@ -203,6 +210,10 @@ coordinator takes `abandoned`. The session is `retained` with the problem `the
 deadline passed before it started`, and `resume --remote` continues it. Tasks
 are unchanged. A task was started on someone else's behalf and has nothing to
 resume, so the driver still cancels it.
+
+Corrected 2026-11-17: a start its placement refuses for good ends the same
+way before its deadline, or with none, with the problem `it can never start:
+REASON` instead ([ADR 0067](0067-a-start-ends-when-its-run-has-ended.md)).
 
 ### Stored format
 

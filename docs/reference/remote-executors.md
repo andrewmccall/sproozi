@@ -77,7 +77,8 @@ client certificate. Whatever context you use, the executor sees the
 
 The service and the executor upgrade together. A placement request that fails
 answers with one of these codes; status and messages never carry the
-executor's own error text.
+executor's own error text. The one exception is a `refused` answer's
+`reason`, which names the AgentRun and its `Ready` condition.
 
 | Code | HTTP status | Meaning |
 | --- | --- | --- |
@@ -87,6 +88,7 @@ executor's own error text.
 | `expired` | 410 | The execution's deadline has passed. |
 | `unsupported` | 422 | The executor cannot take this launch, such as a profile it does not keep. |
 | `unavailable` | 503 | The executor could not answer. A stop is then unproven: the session becomes `unknown-stop` until `recover` or another `stop` proves it. |
+| `refused` | 409 | Only `prepare`: the executor can never prepare this launch, because what it would start from has ended, such as an AgentRun that failed, was deleted or lost its registration before its Pod. Its `reason` field says why, in at most 512 printable bytes. Repeating it never helps: the service ends the start, keeping the session's work, and `resume` continues it ([ADR 0067](../adr/0067-a-start-ends-when-its-run-has-ended.md)). A service older than this code reports it as unavailable. |
 | `turn_pending` | 503 | A stop is still waiting for the agent's turn, about two minutes after it asked. Its `waiting` field says what for, in at most 160 printable bytes. The session stays `stopping`, as on this machine, and `stop`, `move` or `recover` again keeps waiting. |
 
 A code this Sproozi does not know counts as `unavailable`, so a stop is never
@@ -153,7 +155,7 @@ the answer to arrive
 | --- | --- | --- |
 | Placement `stop`; owner `stop` and `recover` | 9 minutes 43 seconds: two 2-minute waits for a first visit's conversation and turn, the supervisor's 30-second wait for the agent to quit, 3 seconds after killing one that did not, and 10 seconds for its reply to be read ([native control](native-control.md)), then 5 minutes to end the container (at most 1 minute), seal usage and capture the checkpoint | 10 minutes 43 seconds |
 | Placement `prepare` | 2 minutes for an interactive visit's Pod to run, plus sending and restoring the checkpoint | 8 minutes |
-| Placement `abort`; owner `cancel` | The Pod's termination grace period, 30 seconds by default, and sealing usage | 2 minutes |
+| Placement `abort`; owner `cancel` | The Pod's termination grace period, 30 seconds by default, and sealing usage. A wait for a deleted Pod's agent container to be seen to stop ends after 90 seconds, as on a lost node; the cancellation is then `unknown-stop`, and `recover` waits again ([ADR 0067](../adr/0067-a-start-ends-when-its-run-has-ended.md)) | 2 minutes |
 | Placement `abort-preparation` | 30 seconds once no other operation on the same visit holds it ([cancelling a preparation](#cancelling-a-preparation)) | 2 minutes |
 | Everything else, including placement `exited`, and the wait for an `attach` to be admitted | A few API calls | 45 seconds |
 

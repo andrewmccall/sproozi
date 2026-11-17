@@ -177,7 +177,11 @@ Failures:
   Interactive sessions wait for `recover`, also after a restart (section 8),
   unless their project is revoked ([ADR 0065](0065-a-revoked-project-settles-interactive-sessions.md)).
 - **A failed preparation or activation** records the outcome as the problem
-  and waits for `recover`, as before.
+  and waits for `recover`, as before. Corrected 2026-11-17: a preparation
+  the placement refuses for good, such as one whose AgentRun failed before
+  its sandbox started, ends instead: a task is cancelled and an interactive
+  session retained, with the problem `it can never start: REASON`
+  ([ADR 0067](0067-a-start-ends-when-its-run-has-ended.md)).
 - **A revoked project** is cancelled through the coordinator with a
   name-based operation, whether found at startup or while driving.
 

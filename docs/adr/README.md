@@ -98,6 +98,9 @@ also replaces ADR 0057's rule that an interactive session whose execution has
 not started by its deadline is cancelled: the session now stops with its work
 kept.
 
+ADR 0067 extends ADR 0060's `abandoned` event to a start its placement
+refuses for good, whether or not the execution has a deadline.
+
 ADR 0065 replaces ADR 0057's rule that an interactive session's unsettled stop
 or cancellation always waits for `recover`: once its project is revoked, the
 driver settles it as it settles a task's.
@@ -160,6 +163,7 @@ driver settles it as it settles a task's.
 | [0064](0064-the-supervisor-alone-stops-a-harness-at-its-deadline.md) | The supervisor alone acts on the execution's deadline: one `deadline` event, raised once by its watcher or a `quiesce` that finds it passed, unless the harness already exited by itself; `activate` checks it again just before the launch; the harness's terminal no longer has a deadline of its own. |
 | [0065](0065-a-revoked-project-settles-interactive-sessions.md) | A revoked project settles interactive sessions: the remote executor's driver carries out a held cancellation, or cancels for the revoked project, an interactive session whose stop or cancellation is unsettled, since its owner can no longer recover it. |
 | [0066](0066-a-contradicted-retained-record-refuses-work-and-never-blocks-an-end.md) | A contradicted retained record of a Kubernetes visit refuses work: `Prepare`, `Activate` and `Attach` answer `conflict`; `Inspect`, `Exited`, `Stop`, `Abort` and `AbortPreparation` continue from the facts that hold, take what the registration's phase proves from it, observe the rest again and never trust a forgotten fence. |
+| [0067](0067-a-start-ends-when-its-run-has-ended.md) | A start ends when what it would start from has ended: the Kubernetes placement refuses a start whose AgentRun ended, was deleted or lost its registration before its Pod, naming the run's reason; the coordinator ends it through `abandoned`, deadline or none; the driver cancels such a task with that problem and keeps such an interactive session; the placement protocol carries it as `refused` (409) with the reason; a cancellation's wait for its Pod to stop is bounded at 90 seconds. |
 
 ## Reserved numbers
 
