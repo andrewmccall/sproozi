@@ -6,10 +6,12 @@ import (
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
+	"github.com/andrewmccall/sproozi/internal/session"
 )
 
 // waitPast waits until the wall clock, which the placement reads, is past
-// deadline.
+// deadline. The placement has no clock to replace: it reads time.Now, and
+// the registry's clock is not reachable from here.
 func waitPast(deadline time.Time) { time.Sleep(time.Until(deadline) + 50*time.Millisecond) }
 
 // A preparation that never completed is aborted after its deadline. The
@@ -55,5 +57,24 @@ func TestStopAfterDeadline(t *testing.T) {
 	s, err := p.Stop(t.Context(), l, i)
 	if err != nil || !s.ActualStopped || s.Receipt == nil || string(s.Checkpoint) != string(data) {
 		t.Fatalf("stop after the deadline: %+v %v", s, err)
+	}
+}
+
+// A prepared visit is aborted after its deadline: that is how the execution
+// journal ends a move or first visit that never activated, and how one is
+// cancelled. The writer is proven stopped and its usage sealed.
+func TestAbortAfterDeadline(t *testing.T) {
+	t.Parallel()
+	p, _, _, l, data := setup(t)
+	l.Deadline = time.Now().Add(2 * time.Second).UTC()
+	i, err := p.Prepare(t.Context(), l, data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitPast(l.Deadline)
+	o, err := p.Abort(t.Context(), l, i)
+	if err != nil || o.State != session.PlacementStopped || o.Stopped == nil || !o.Stopped.ActualStopped ||
+		o.Stopped.Receipt == nil {
+		t.Fatalf("abort after the deadline: %+v %v", o, err)
 	}
 }
