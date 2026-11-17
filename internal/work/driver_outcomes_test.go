@@ -391,6 +391,15 @@ func journalStates() []journalState {
 
 var uuidPattern = regexp.MustCompile(`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)
 
+// revoke removes this installation from the session's project.
+func (e *driverEnv) revoke() {
+	projects := project.Clone(e.o.config.Projects)
+	d := projects["sproozi-dev"]
+	d.Members = []string{"another-installation"}
+	projects["sproozi-dev"] = d
+	e.o.config.Projects = projects
+}
+
 // opName names an operation the table can tell apart.
 func (e *driverEnv) opName(op string) string {
 	switch op {
@@ -517,11 +526,7 @@ func runDriverCase(t *testing.T, c driverCase) string {
 		t.Fatal(err)
 	}
 	if c.revoked {
-		projects := project.Clone(e.o.config.Projects)
-		d := projects["sproozi-dev"]
-		d.Members = []string{"another-installation"}
-		projects["sproozi-dev"] = d
-		e.o.config.Projects = projects
+		e.revoke()
 	}
 	switch c.health {
 	case healthUnreachable:

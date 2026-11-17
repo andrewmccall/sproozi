@@ -99,11 +99,14 @@ func possible(s situation) bool {
 }
 
 // The rules the table encodes, for every situation that can occur. The
-// driver only starts an interactive session (ADR 0057, section 8). It does
-// nothing only for a cancelled execution, or an interactive session whose
-// owner or "recover" acts next; every other phase has an action that makes
-// progress. A cancellation the coordinator holds wins over the project, and
-// the deadline matters only before the first visit started (ADR 0060).
+// driver only starts an interactive session (ADR 0057, section 8), unless
+// its project is revoked: then it settles it as a task's (section 2), but
+// never completes or finishes it. It does nothing only for a cancelled
+// execution, or an interactive session whose owner or "recover" acts next;
+// every other phase has an action that makes progress. A cancellation the
+// coordinator holds is carried out, never replaced by the project's, and
+// for a task the project does not change what happens to it. The deadline
+// matters only before the first visit started (ADR 0060).
 func TestDecisionTableRules(t *testing.T) {
 	for _, s := range allSituations() {
 		if !possible(s) {
@@ -113,7 +116,9 @@ func TestDecisionTableRules(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if s.interactive && !slices.Contains([]action{actNothing, actStart, actRecoverStart, actEndExpired, actEndRevoked}, act) {
+		ownerActs := []action{actNothing, actStart, actRecoverStart, actEndExpired, actEndRevoked}
+		if s.interactive && !s.revoked && !slices.Contains(ownerActs, act) ||
+			s.interactive && (act == actComplete || act == actFinish) {
 			t.Errorf("%+v: the driver takes %s for an interactive session", s, act)
 		}
 		if act == actNothing && s.phase != session.PhaseCancelled && !s.interactive {
@@ -122,11 +127,14 @@ func TestDecisionTableRules(t *testing.T) {
 		if s.phase == session.PhaseCancelled && act != actNothing {
 			t.Errorf("%+v: a cancelled execution is driven: %s", s, act)
 		}
-		if s.cancel {
+		if s.cancel && (act == actEndRevoked || act == actEndExpired) {
+			t.Errorf("%+v: a held cancellation is replaced: %s", s, act)
+		}
+		if s.cancel && !s.interactive {
 			other := s
 			other.revoked = !s.revoked
 			if again, _ := decide(other); again != act {
-				t.Errorf("%+v: the project overrides a held cancellation: %s, %s", s, act, again)
+				t.Errorf("%+v: the project changes a task's held cancellation: %s, %s", s, act, again)
 			}
 		}
 		if s.phase != phaseNotReceived && !s.phase.Starting() && s.phase != session.PhaseIdle {

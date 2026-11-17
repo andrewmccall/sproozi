@@ -743,31 +743,37 @@ stopping interactive member no-deadline transfer reachable | catalogue{finished=
 stopping interactive member no-deadline catalogue-cancel reachable | catalogue{finished=false cancel=setup transfer=- problem=""} journal{stopping cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
     done -> catalogue{finished=false cancel=setup transfer=- problem=""} journal{stopping cancel=- pending=stop visits=0} calls=none
 stopping interactive revoked early - reachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{stopping cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{stopping cancel=- pending=stop visits=0} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{cancelled cancel=project-revoked pending=- visits=1} calls=abort=1
+    done -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{cancelled cancel=project-revoked pending=- visits=1} calls=none
 stopping interactive revoked early - unreachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{stopping cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{stopping cancel=- pending=stop visits=0} calls=none
+    wait -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{unknown-stop cancel=project-revoked pending=stop visits=0} calls=abort=1 log="Could not cancel work session ID: placement unreachable"
 stopping interactive revoked early - turn-pending | catalogue{finished=false cancel=- transfer=- problem=""} journal{stopping cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{stopping cancel=- pending=stop visits=0} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{cancelled cancel=project-revoked pending=- visits=1} calls=abort=1
+    done -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{cancelled cancel=project-revoked pending=- visits=1} calls=none
 stopping interactive revoked early transfer reachable | catalogue{finished=false cancel=- transfer=setup problem=""} journal{stopping cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
     done -> catalogue{finished=false cancel=- transfer=setup problem=""} journal{stopping cancel=- pending=stop visits=0} calls=none
 stopping interactive revoked early catalogue-cancel reachable | catalogue{finished=false cancel=setup transfer=- problem=""} journal{stopping cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
     done -> catalogue{finished=false cancel=setup transfer=- problem=""} journal{stopping cancel=- pending=stop visits=0} calls=none
 stopping interactive revoked late - reachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{stopping cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{stopping cancel=- pending=stop visits=0} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{cancelled cancel=project-revoked pending=- visits=1} calls=abort=1
+    done -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{cancelled cancel=project-revoked pending=- visits=1} calls=none
 stopping interactive revoked late - unreachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{stopping cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{stopping cancel=- pending=stop visits=0} calls=none
+    wait -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{unknown-stop cancel=project-revoked pending=stop visits=0} calls=abort=1 log="Could not cancel work session ID: placement unreachable"
 stopping interactive revoked late - turn-pending | catalogue{finished=false cancel=- transfer=- problem=""} journal{stopping cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{stopping cancel=- pending=stop visits=0} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{cancelled cancel=project-revoked pending=- visits=1} calls=abort=1
+    done -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{cancelled cancel=project-revoked pending=- visits=1} calls=none
 stopping interactive revoked late transfer reachable | catalogue{finished=false cancel=- transfer=setup problem=""} journal{stopping cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
     done -> catalogue{finished=false cancel=- transfer=setup problem=""} journal{stopping cancel=- pending=stop visits=0} calls=none
 stopping interactive revoked late catalogue-cancel reachable | catalogue{finished=false cancel=setup transfer=- problem=""} journal{stopping cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
     done -> catalogue{finished=false cancel=setup transfer=- problem=""} journal{stopping cancel=- pending=stop visits=0} calls=none
 stopping interactive revoked no-deadline - reachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{stopping cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{stopping cancel=- pending=stop visits=0} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{cancelled cancel=project-revoked pending=- visits=1} calls=abort=1
+    done -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{cancelled cancel=project-revoked pending=- visits=1} calls=none
 stopping interactive revoked no-deadline - unreachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{stopping cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{stopping cancel=- pending=stop visits=0} calls=none
+    wait -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{unknown-stop cancel=project-revoked pending=stop visits=0} calls=abort=1 log="Could not cancel work session ID: placement unreachable"
 stopping interactive revoked no-deadline - turn-pending | catalogue{finished=false cancel=- transfer=- problem=""} journal{stopping cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{stopping cancel=- pending=stop visits=0} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{cancelled cancel=project-revoked pending=- visits=1} calls=abort=1
+    done -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{cancelled cancel=project-revoked pending=- visits=1} calls=none
 stopping interactive revoked no-deadline transfer reachable | catalogue{finished=false cancel=- transfer=setup problem=""} journal{stopping cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
     done -> catalogue{finished=false cancel=- transfer=setup problem=""} journal{stopping cancel=- pending=stop visits=0} calls=none
 stopping interactive revoked no-deadline catalogue-cancel reachable | catalogue{finished=false cancel=setup transfer=- problem=""} journal{stopping cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
@@ -872,31 +878,37 @@ unknown-stop interactive member no-deadline transfer reachable | catalogue{finis
 unknown-stop interactive member no-deadline catalogue-cancel reachable | catalogue{finished=false cancel=setup transfer=- problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
     done -> catalogue{finished=false cancel=setup transfer=- problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=none
 unknown-stop interactive revoked early - reachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{cancelled cancel=project-revoked pending=- visits=1} calls=abort=1
+    done -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{cancelled cancel=project-revoked pending=- visits=1} calls=none
 unknown-stop interactive revoked early - unreachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=none
+    wait -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{unknown-stop cancel=project-revoked pending=stop visits=0} calls=abort=1 log="Could not cancel work session ID: placement unreachable"
 unknown-stop interactive revoked early - turn-pending | catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{cancelled cancel=project-revoked pending=- visits=1} calls=abort=1
+    done -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{cancelled cancel=project-revoked pending=- visits=1} calls=none
 unknown-stop interactive revoked early transfer reachable | catalogue{finished=false cancel=- transfer=setup problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
     done -> catalogue{finished=false cancel=- transfer=setup problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=none
 unknown-stop interactive revoked early catalogue-cancel reachable | catalogue{finished=false cancel=setup transfer=- problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
     done -> catalogue{finished=false cancel=setup transfer=- problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=none
 unknown-stop interactive revoked late - reachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{cancelled cancel=project-revoked pending=- visits=1} calls=abort=1
+    done -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{cancelled cancel=project-revoked pending=- visits=1} calls=none
 unknown-stop interactive revoked late - unreachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=none
+    wait -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{unknown-stop cancel=project-revoked pending=stop visits=0} calls=abort=1 log="Could not cancel work session ID: placement unreachable"
 unknown-stop interactive revoked late - turn-pending | catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{cancelled cancel=project-revoked pending=- visits=1} calls=abort=1
+    done -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{cancelled cancel=project-revoked pending=- visits=1} calls=none
 unknown-stop interactive revoked late transfer reachable | catalogue{finished=false cancel=- transfer=setup problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
     done -> catalogue{finished=false cancel=- transfer=setup problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=none
 unknown-stop interactive revoked late catalogue-cancel reachable | catalogue{finished=false cancel=setup transfer=- problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
     done -> catalogue{finished=false cancel=setup transfer=- problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=none
 unknown-stop interactive revoked no-deadline - reachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{cancelled cancel=project-revoked pending=- visits=1} calls=abort=1
+    done -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{cancelled cancel=project-revoked pending=- visits=1} calls=none
 unknown-stop interactive revoked no-deadline - unreachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=none
+    wait -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{unknown-stop cancel=project-revoked pending=stop visits=0} calls=abort=1 log="Could not cancel work session ID: placement unreachable"
 unknown-stop interactive revoked no-deadline - turn-pending | catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{cancelled cancel=project-revoked pending=- visits=1} calls=abort=1
+    done -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{cancelled cancel=project-revoked pending=- visits=1} calls=none
 unknown-stop interactive revoked no-deadline transfer reachable | catalogue{finished=false cancel=- transfer=setup problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
     done -> catalogue{finished=false cancel=- transfer=setup problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=none
 unknown-stop interactive revoked no-deadline catalogue-cancel reachable | catalogue{finished=false cancel=setup transfer=- problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
@@ -1001,31 +1013,37 @@ unknown-usage interactive member no-deadline transfer reachable | catalogue{fini
 unknown-usage interactive member no-deadline catalogue-cancel reachable | catalogue{finished=false cancel=setup transfer=- problem=""} journal{unknown-usage cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
     done -> catalogue{finished=false cancel=setup transfer=- problem=""} journal{unknown-usage cancel=- pending=stop visits=0} calls=none
 unknown-usage interactive revoked early - reachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-usage cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-usage cancel=- pending=stop visits=0} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{cancelled cancel=project-revoked pending=- visits=1} calls=abort=1
+    done -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{cancelled cancel=project-revoked pending=- visits=1} calls=none
 unknown-usage interactive revoked early - unreachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-usage cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-usage cancel=- pending=stop visits=0} calls=none
+    wait -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{unknown-usage cancel=project-revoked pending=stop visits=0} calls=abort=1 log="Could not cancel work session ID: placement unreachable"
 unknown-usage interactive revoked early - turn-pending | catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-usage cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-usage cancel=- pending=stop visits=0} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{cancelled cancel=project-revoked pending=- visits=1} calls=abort=1
+    done -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{cancelled cancel=project-revoked pending=- visits=1} calls=none
 unknown-usage interactive revoked early transfer reachable | catalogue{finished=false cancel=- transfer=setup problem=""} journal{unknown-usage cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
     done -> catalogue{finished=false cancel=- transfer=setup problem=""} journal{unknown-usage cancel=- pending=stop visits=0} calls=none
 unknown-usage interactive revoked early catalogue-cancel reachable | catalogue{finished=false cancel=setup transfer=- problem=""} journal{unknown-usage cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
     done -> catalogue{finished=false cancel=setup transfer=- problem=""} journal{unknown-usage cancel=- pending=stop visits=0} calls=none
 unknown-usage interactive revoked late - reachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-usage cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-usage cancel=- pending=stop visits=0} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{cancelled cancel=project-revoked pending=- visits=1} calls=abort=1
+    done -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{cancelled cancel=project-revoked pending=- visits=1} calls=none
 unknown-usage interactive revoked late - unreachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-usage cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-usage cancel=- pending=stop visits=0} calls=none
+    wait -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{unknown-usage cancel=project-revoked pending=stop visits=0} calls=abort=1 log="Could not cancel work session ID: placement unreachable"
 unknown-usage interactive revoked late - turn-pending | catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-usage cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-usage cancel=- pending=stop visits=0} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{cancelled cancel=project-revoked pending=- visits=1} calls=abort=1
+    done -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{cancelled cancel=project-revoked pending=- visits=1} calls=none
 unknown-usage interactive revoked late transfer reachable | catalogue{finished=false cancel=- transfer=setup problem=""} journal{unknown-usage cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
     done -> catalogue{finished=false cancel=- transfer=setup problem=""} journal{unknown-usage cancel=- pending=stop visits=0} calls=none
 unknown-usage interactive revoked late catalogue-cancel reachable | catalogue{finished=false cancel=setup transfer=- problem=""} journal{unknown-usage cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
     done -> catalogue{finished=false cancel=setup transfer=- problem=""} journal{unknown-usage cancel=- pending=stop visits=0} calls=none
 unknown-usage interactive revoked no-deadline - reachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-usage cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-usage cancel=- pending=stop visits=0} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{cancelled cancel=project-revoked pending=- visits=1} calls=abort=1
+    done -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{cancelled cancel=project-revoked pending=- visits=1} calls=none
 unknown-usage interactive revoked no-deadline - unreachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-usage cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-usage cancel=- pending=stop visits=0} calls=none
+    wait -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{unknown-usage cancel=project-revoked pending=stop visits=0} calls=abort=1 log="Could not cancel work session ID: placement unreachable"
 unknown-usage interactive revoked no-deadline - turn-pending | catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-usage cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-usage cancel=- pending=stop visits=0} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{cancelled cancel=project-revoked pending=- visits=1} calls=abort=1
+    done -> catalogue{finished=false cancel=- transfer=- problem="its project no longer admits this installation"} journal{cancelled cancel=project-revoked pending=- visits=1} calls=none
 unknown-usage interactive revoked no-deadline transfer reachable | catalogue{finished=false cancel=- transfer=setup problem=""} journal{unknown-usage cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
     done -> catalogue{finished=false cancel=- transfer=setup problem=""} journal{unknown-usage cancel=- pending=stop visits=0} calls=none
 unknown-usage interactive revoked no-deadline catalogue-cancel reachable | catalogue{finished=false cancel=setup transfer=- problem=""} journal{unknown-usage cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
@@ -1133,31 +1151,37 @@ cancel-unknown-stop interactive member no-deadline transfer reachable | catalogu
 cancel-unknown-stop interactive member no-deadline catalogue-cancel reachable | catalogue{finished=false cancel=setup transfer=- problem=""} journal{unknown-stop cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
     done -> catalogue{finished=false cancel=setup transfer=- problem=""} journal{unknown-stop cancel=setup pending=- visits=0} calls=none
 cancel-unknown-stop interactive revoked early - reachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=setup pending=- visits=0} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelled cancel=setup pending=- visits=1} calls=abort=1
+    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelled cancel=setup pending=- visits=1} calls=none
 cancel-unknown-stop interactive revoked early - unreachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=setup pending=- visits=0} calls=none
+    wait -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=setup pending=- visits=0} calls=abort=1 log="Could not continue work session ID: placement unreachable"
 cancel-unknown-stop interactive revoked early - turn-pending | catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=setup pending=- visits=0} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelled cancel=setup pending=- visits=1} calls=abort=1
+    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelled cancel=setup pending=- visits=1} calls=none
 cancel-unknown-stop interactive revoked early transfer reachable | catalogue{finished=false cancel=- transfer=setup problem=""} journal{unknown-stop cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
     done -> catalogue{finished=false cancel=- transfer=setup problem=""} journal{unknown-stop cancel=setup pending=- visits=0} calls=none
 cancel-unknown-stop interactive revoked early catalogue-cancel reachable | catalogue{finished=false cancel=setup transfer=- problem=""} journal{unknown-stop cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
     done -> catalogue{finished=false cancel=setup transfer=- problem=""} journal{unknown-stop cancel=setup pending=- visits=0} calls=none
 cancel-unknown-stop interactive revoked late - reachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=setup pending=- visits=0} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelled cancel=setup pending=- visits=1} calls=abort=1
+    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelled cancel=setup pending=- visits=1} calls=none
 cancel-unknown-stop interactive revoked late - unreachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=setup pending=- visits=0} calls=none
+    wait -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=setup pending=- visits=0} calls=abort=1 log="Could not continue work session ID: placement unreachable"
 cancel-unknown-stop interactive revoked late - turn-pending | catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=setup pending=- visits=0} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelled cancel=setup pending=- visits=1} calls=abort=1
+    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelled cancel=setup pending=- visits=1} calls=none
 cancel-unknown-stop interactive revoked late transfer reachable | catalogue{finished=false cancel=- transfer=setup problem=""} journal{unknown-stop cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
     done -> catalogue{finished=false cancel=- transfer=setup problem=""} journal{unknown-stop cancel=setup pending=- visits=0} calls=none
 cancel-unknown-stop interactive revoked late catalogue-cancel reachable | catalogue{finished=false cancel=setup transfer=- problem=""} journal{unknown-stop cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
     done -> catalogue{finished=false cancel=setup transfer=- problem=""} journal{unknown-stop cancel=setup pending=- visits=0} calls=none
 cancel-unknown-stop interactive revoked no-deadline - reachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=setup pending=- visits=0} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelled cancel=setup pending=- visits=1} calls=abort=1
+    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelled cancel=setup pending=- visits=1} calls=none
 cancel-unknown-stop interactive revoked no-deadline - unreachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=setup pending=- visits=0} calls=none
+    wait -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=setup pending=- visits=0} calls=abort=1 log="Could not continue work session ID: placement unreachable"
 cancel-unknown-stop interactive revoked no-deadline - turn-pending | catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=setup pending=- visits=0} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelled cancel=setup pending=- visits=1} calls=abort=1
+    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelled cancel=setup pending=- visits=1} calls=none
 cancel-unknown-stop interactive revoked no-deadline transfer reachable | catalogue{finished=false cancel=- transfer=setup problem=""} journal{unknown-stop cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
     done -> catalogue{finished=false cancel=- transfer=setup problem=""} journal{unknown-stop cancel=setup pending=- visits=0} calls=none
 cancel-unknown-stop interactive revoked no-deadline catalogue-cancel reachable | catalogue{finished=false cancel=setup transfer=- problem=""} journal{unknown-stop cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
@@ -1265,31 +1289,37 @@ cancel-unknown-usage interactive member no-deadline transfer reachable | catalog
 cancel-unknown-usage interactive member no-deadline catalogue-cancel reachable | catalogue{finished=false cancel=setup transfer=- problem=""} journal{unknown-usage cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
     done -> catalogue{finished=false cancel=setup transfer=- problem=""} journal{unknown-usage cancel=setup pending=- visits=0} calls=none
 cancel-unknown-usage interactive revoked early - reachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-usage cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-usage cancel=setup pending=- visits=0} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelled cancel=setup pending=- visits=1} calls=abort=1
+    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelled cancel=setup pending=- visits=1} calls=none
 cancel-unknown-usage interactive revoked early - unreachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-usage cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-usage cancel=setup pending=- visits=0} calls=none
+    wait -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-usage cancel=setup pending=- visits=0} calls=abort=1 log="Could not continue work session ID: placement unreachable"
 cancel-unknown-usage interactive revoked early - turn-pending | catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-usage cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-usage cancel=setup pending=- visits=0} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelled cancel=setup pending=- visits=1} calls=abort=1
+    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelled cancel=setup pending=- visits=1} calls=none
 cancel-unknown-usage interactive revoked early transfer reachable | catalogue{finished=false cancel=- transfer=setup problem=""} journal{unknown-usage cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
     done -> catalogue{finished=false cancel=- transfer=setup problem=""} journal{unknown-usage cancel=setup pending=- visits=0} calls=none
 cancel-unknown-usage interactive revoked early catalogue-cancel reachable | catalogue{finished=false cancel=setup transfer=- problem=""} journal{unknown-usage cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
     done -> catalogue{finished=false cancel=setup transfer=- problem=""} journal{unknown-usage cancel=setup pending=- visits=0} calls=none
 cancel-unknown-usage interactive revoked late - reachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-usage cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-usage cancel=setup pending=- visits=0} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelled cancel=setup pending=- visits=1} calls=abort=1
+    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelled cancel=setup pending=- visits=1} calls=none
 cancel-unknown-usage interactive revoked late - unreachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-usage cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-usage cancel=setup pending=- visits=0} calls=none
+    wait -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-usage cancel=setup pending=- visits=0} calls=abort=1 log="Could not continue work session ID: placement unreachable"
 cancel-unknown-usage interactive revoked late - turn-pending | catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-usage cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-usage cancel=setup pending=- visits=0} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelled cancel=setup pending=- visits=1} calls=abort=1
+    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelled cancel=setup pending=- visits=1} calls=none
 cancel-unknown-usage interactive revoked late transfer reachable | catalogue{finished=false cancel=- transfer=setup problem=""} journal{unknown-usage cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
     done -> catalogue{finished=false cancel=- transfer=setup problem=""} journal{unknown-usage cancel=setup pending=- visits=0} calls=none
 cancel-unknown-usage interactive revoked late catalogue-cancel reachable | catalogue{finished=false cancel=setup transfer=- problem=""} journal{unknown-usage cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
     done -> catalogue{finished=false cancel=setup transfer=- problem=""} journal{unknown-usage cancel=setup pending=- visits=0} calls=none
 cancel-unknown-usage interactive revoked no-deadline - reachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-usage cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-usage cancel=setup pending=- visits=0} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelled cancel=setup pending=- visits=1} calls=abort=1
+    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelled cancel=setup pending=- visits=1} calls=none
 cancel-unknown-usage interactive revoked no-deadline - unreachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-usage cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-usage cancel=setup pending=- visits=0} calls=none
+    wait -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-usage cancel=setup pending=- visits=0} calls=abort=1 log="Could not continue work session ID: placement unreachable"
 cancel-unknown-usage interactive revoked no-deadline - turn-pending | catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-usage cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-usage cancel=setup pending=- visits=0} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelled cancel=setup pending=- visits=1} calls=abort=1
+    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelled cancel=setup pending=- visits=1} calls=none
 cancel-unknown-usage interactive revoked no-deadline transfer reachable | catalogue{finished=false cancel=- transfer=setup problem=""} journal{unknown-usage cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
     done -> catalogue{finished=false cancel=- transfer=setup problem=""} journal{unknown-usage cancel=setup pending=- visits=0} calls=none
 cancel-unknown-usage interactive revoked no-deadline catalogue-cancel reachable | catalogue{finished=false cancel=setup transfer=- problem=""} journal{unknown-usage cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
@@ -1397,31 +1427,37 @@ cancelling interactive member no-deadline transfer reachable | catalogue{finishe
 cancelling interactive member no-deadline catalogue-cancel reachable | catalogue{finished=false cancel=setup transfer=- problem=""} journal{cancelling cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
     done -> catalogue{finished=false cancel=setup transfer=- problem=""} journal{cancelling cancel=setup pending=- visits=0} calls=none
 cancelling interactive revoked early - reachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelling cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelling cancel=setup pending=- visits=0} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelled cancel=setup pending=- visits=1} calls=abort=1
+    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelled cancel=setup pending=- visits=1} calls=none
 cancelling interactive revoked early - unreachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelling cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelling cancel=setup pending=- visits=0} calls=none
+    wait -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=setup pending=- visits=0} calls=abort=1 log="Could not continue work session ID: placement unreachable"
 cancelling interactive revoked early - turn-pending | catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelling cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelling cancel=setup pending=- visits=0} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelled cancel=setup pending=- visits=1} calls=abort=1
+    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelled cancel=setup pending=- visits=1} calls=none
 cancelling interactive revoked early transfer reachable | catalogue{finished=false cancel=- transfer=setup problem=""} journal{cancelling cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
     done -> catalogue{finished=false cancel=- transfer=setup problem=""} journal{cancelling cancel=setup pending=- visits=0} calls=none
 cancelling interactive revoked early catalogue-cancel reachable | catalogue{finished=false cancel=setup transfer=- problem=""} journal{cancelling cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
     done -> catalogue{finished=false cancel=setup transfer=- problem=""} journal{cancelling cancel=setup pending=- visits=0} calls=none
 cancelling interactive revoked late - reachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelling cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelling cancel=setup pending=- visits=0} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelled cancel=setup pending=- visits=1} calls=abort=1
+    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelled cancel=setup pending=- visits=1} calls=none
 cancelling interactive revoked late - unreachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelling cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelling cancel=setup pending=- visits=0} calls=none
+    wait -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=setup pending=- visits=0} calls=abort=1 log="Could not continue work session ID: placement unreachable"
 cancelling interactive revoked late - turn-pending | catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelling cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelling cancel=setup pending=- visits=0} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelled cancel=setup pending=- visits=1} calls=abort=1
+    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelled cancel=setup pending=- visits=1} calls=none
 cancelling interactive revoked late transfer reachable | catalogue{finished=false cancel=- transfer=setup problem=""} journal{cancelling cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
     done -> catalogue{finished=false cancel=- transfer=setup problem=""} journal{cancelling cancel=setup pending=- visits=0} calls=none
 cancelling interactive revoked late catalogue-cancel reachable | catalogue{finished=false cancel=setup transfer=- problem=""} journal{cancelling cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
     done -> catalogue{finished=false cancel=setup transfer=- problem=""} journal{cancelling cancel=setup pending=- visits=0} calls=none
 cancelling interactive revoked no-deadline - reachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelling cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelling cancel=setup pending=- visits=0} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelled cancel=setup pending=- visits=1} calls=abort=1
+    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelled cancel=setup pending=- visits=1} calls=none
 cancelling interactive revoked no-deadline - unreachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelling cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelling cancel=setup pending=- visits=0} calls=none
+    wait -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=setup pending=- visits=0} calls=abort=1 log="Could not continue work session ID: placement unreachable"
 cancelling interactive revoked no-deadline - turn-pending | catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelling cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
-    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelling cancel=setup pending=- visits=0} calls=none
+    again -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelled cancel=setup pending=- visits=1} calls=abort=1
+    done -> catalogue{finished=false cancel=- transfer=- problem=""} journal{cancelled cancel=setup pending=- visits=1} calls=none
 cancelling interactive revoked no-deadline transfer reachable | catalogue{finished=false cancel=- transfer=setup problem=""} journal{cancelling cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2
     done -> catalogue{finished=false cancel=- transfer=setup problem=""} journal{cancelling cancel=setup pending=- visits=0} calls=none
 cancelling interactive revoked no-deadline catalogue-cancel reachable | catalogue{finished=false cancel=setup transfer=- problem=""} journal{cancelling cancel=setup pending=- visits=0} calls=prepare=1,activate=1,abort=1,inspect=2

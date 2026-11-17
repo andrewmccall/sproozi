@@ -131,26 +131,30 @@ var (
 // decisions is the driver's whole decision: every situation that can occur
 // matches exactly one row, so the order of the rows means nothing. A
 // situation that cannot occur, such as a cancellation held in a phase the
-// coordinator never leaves a cancellation in, matches at most one row. The driver only starts
-// an interactive session: its owner stops and resumes it, and only
-// "recover" retries its unsettled stop or cancellation (ADR 0057, section
-// 8). A task is driven to its tail. The project and the deadline end a
-// session only before it settles: a revoked project ends any session the
-// coordinator may still run that no cancellation already ends, and the
-// deadline ends a task, or any session not yet received, only before its
-// first visit started (ADR 0060).
+// coordinator never leaves a cancellation in, matches at most one row.
+//
+// The driver only starts an interactive session: its owner stops and
+// resumes it, and only "recover" retries its unsettled stop or cancellation
+// (ADR 0057, section 8). Once its project is revoked its owner can take no
+// action on it, "recover" included, so the driver settles it as it settles
+// a task's (section 2). A task is driven to its tail. The project and the
+// deadline end a session only before it settles: a revoked project ends any
+// session the coordinator may still run that no cancellation already ends,
+// and the deadline ends a task, or any session not yet received, only
+// before its first visit started (ADR 0060).
 var decisions = []decisionRow{
 	{phases: []session.Phase{session.PhaseCancelled}, action: actNothing},
 	{phases: []session.Phase{session.PhaseIdle}, mode: interactiveOnly, action: actNothing},
 	{phases: []session.Phase{session.PhaseIdle}, mode: taskOnly, lateStart: isTrue, action: actEndExpired},
 	{phases: []session.Phase{session.PhaseIdle}, mode: taskOnly, lateStart: isFalse, action: actFinish},
 
-	{phases: phasesUnsettled, mode: interactiveOnly, action: actNothing},
+	{phases: phasesUnsettled, mode: interactiveOnly, revoked: isFalse, action: actNothing},
 	{phases: phasesCancelHeld, mode: taskOnly, cancel: isTrue, action: actRecover},
+	{phases: phasesCancelHeld, mode: interactiveOnly, cancel: isTrue, revoked: isTrue, action: actRecover},
 
 	{phases: []session.Phase{phaseNotReceived}, revoked: isTrue, action: actEndRevoked},
 	{phases: phasesRunning, cancel: isFalse, revoked: isTrue, action: actEndRevoked},
-	{phases: phasesUnsettled, mode: taskOnly, cancel: isFalse, revoked: isTrue, action: actEndRevoked},
+	{phases: phasesUnsettled, cancel: isFalse, revoked: isTrue, action: actEndRevoked},
 
 	{phases: []session.Phase{phaseNotReceived}, revoked: isFalse, lateStart: isTrue, action: actEndExpired},
 	{phases: []session.Phase{phaseNotReceived}, revoked: isFalse, lateStart: isFalse, action: actStart},

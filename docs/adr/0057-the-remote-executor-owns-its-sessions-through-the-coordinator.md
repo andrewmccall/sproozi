@@ -272,6 +272,13 @@ Added after this record was accepted; it follows its direction.
   creates and activates the first visit, and stops: there is no completion
   driver, and an unsettled stop or cancellation waits for `recover`, which
   retries it once. The task's backoff applies to tasks only.
+
+  Corrected 2026-11-17: except once the session's project is revoked. Its
+  owner can then take no action on it, `recover` included, so an unsettled
+  stop or cancellation would never settle and a writer could keep running.
+  The driver settles it as section 2 settles a task's: it carries out a
+  cancellation the coordinator holds, or otherwise cancels the session for
+  the revoked project, both with the task's backoff.
 - **Owner actions bind operations.** The record gains `operations`, a map
   from operation UUID to its action (`stop` or `resume`) and execution, as
   home's catalogue has; `read` checks that each names one of the session's
