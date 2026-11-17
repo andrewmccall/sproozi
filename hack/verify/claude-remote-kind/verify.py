@@ -54,7 +54,11 @@ def module(name, path):
 
 P = module("claude_remote_provider", HERE / "provider.py")
 TUI = module("claude_remote_tui", ROOT / "hack/verify/native-tui.py")
+T = module("claude_remote_timing", HERE / "timing.py")
 S = P.SCENARIOS
+# The task's duration cap, which the executor adds to the submission time to
+# set the deadline the status view shows (timing.py).
+PROFILE = ROOT / "examples/portable-workflows/kubernetes/claude/profile.json"
 
 # Text that only a first-run, folder-trust, bypass-permissions or API-key
 # dialog shows. The footer's "bypass permissions on" is the normal prompt.
@@ -359,6 +363,7 @@ class Proof:
                     exitInResumedVisit={"phases": seen, "seconds": round(elapsed, 1)})
 
     def task(self):
+        began = time.monotonic()
         view = self.start("task-run", task=S["task"]["prompt"])
         session = view["id"]
         check(view.get("mode") in (None, "", "task"), "The task started as an interactive session")
@@ -370,7 +375,23 @@ class Proof:
         records = self.check_requests("task", "task")
         check(len(records) == 1, "The task's prompt was submitted %d times" % len(records))
         self.record("task", sessionId=session, passed=True, phases=seen, seconds=round(elapsed, 1),
-                    result=done["result"])
+                    result=done["result"], **self.task_timing(view, done, records[0], time.monotonic() - began))
+
+    def task_timing(self, started, done, request, waited):
+        """The task's timing from recorded timestamps (timing.py). It is
+        reported, never checked: a missing figure is not a failure."""
+        fields = {}
+        try:
+            duration = T.parse_duration(json.loads(PROFILE.read_text())["maxDuration"])
+            fields.update(T.server_timing(started["deadline"], duration, request["at"], waited))
+        except (KeyError, ValueError, OSError) as error:
+            fields["serverTimingNote"] = "No submission-to-first-request figure: " + str(error)
+        try:
+            runs = json.loads(self.kubectl("-n", self.args.namespace, "get", "agentruns", "-o", "json"))
+            fields.update(T.run_timing(runs, done["incarnation"]["executionId"]))
+        except (KeyError, ValueError, OSError, subprocess.SubprocessError) as error:
+            fields["runTimingNote"] = "No AgentRun times: " + type(error).__name__
+        return fields
 
     def tools(self):
         view = self.start("tools-run")

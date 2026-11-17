@@ -98,6 +98,34 @@ In the default `sign-in` mode every model request must carry the fixture
 sign-in's token, so the runtime's login claim, not a gateway key, signed
 Claude Code in.
 
+## The task's timing figures
+
+`proof/report.json` records these under `scenarios.task`:
+
+| Field | What it is | Precision |
+| --- | --- | --- |
+| `seconds` | From `sproozi run --remote --task` returning to the first `status` poll that shows `retained`. | The poll interval (about 1.1 s) plus the kubelet's roughly 1 s check for container exit. It has jumped by whole seconds (2.2 s to 4.8 s) with no change in the product. |
+| `secondsToFirstModelRequest` | From the executor accepting the task to the fixture provider's first model request for it. | Milliseconds, no polling. Both ends are the cluster's clocks. |
+| `submittedAt`, `firstModelRequestAt` | The two instants behind that figure. | Milliseconds. |
+| `runSeconds` | The task's `AgentRun`, from `status.startedAt` (admitted) to `status.completedAt` (terminal phase). | Whole seconds, so good to about a second. |
+| `runAdmittedAt`, `runCompletedAt` | The two instants behind that figure. | Whole seconds. |
+| `serverTimingNote`, `runTimingNote` | Present instead of a figure that could not be had. | |
+
+Compare `secondsToFirstModelRequest` between runs, and `runSeconds` when the
+whole task matters. Neither includes a polling interval, so a difference
+between runs is a difference in the system. `seconds` stays for continuity with
+records that quote it; a change of a few seconds in it alone is not evidence.
+
+The executor records no session creation or `retained` time that the CLI's
+`status` output, its log or the gateway log exposes with sub-second precision,
+so there is no figure that ends at `retained`. `secondsToFirstModelRequest`
+starts from the task's `deadline` (in the `run` output) less the profile's
+`maxDuration`: the executor sets the deadline to its own submission time plus
+that cap. That start is derived. The figure is kept only if it falls between
+zero and the polled wait, and otherwise `serverTimingNote` says so; neither
+note fails the proof. [`timing.py`](timing.py) computes them and
+[`timing_test.py`](timing_test.py) checks them against a recorded run.
+
 ## How the fixture differs from a real installation
 
 Only test inputs are substituted ([`render.py`](render.py)):
