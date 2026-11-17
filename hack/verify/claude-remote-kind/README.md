@@ -62,7 +62,9 @@ only `token`, `..data` and the timestamped directory `..data` names, takes a
 turn, waits by the Pod's clock until a minute after the first token's expiry,
 and takes a second turn that needs the first in its history. Both turns run in
 the same Pod. Only the token's `iat`, `exp` and `jti` claims and the
-directory's entries leave the Pod.
+directory's entries leave the Pod. It passed on 2026-11-17: the kubelet
+refreshed the token 49 minutes after it was issued, and the second turn began
+61 seconds after the first token expired.
 
 In the default `sign-in` mode every model request must carry the fixture
 sign-in's token, so the runtime's login claim, not a gateway key, signed
