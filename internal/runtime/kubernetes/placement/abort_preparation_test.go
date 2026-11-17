@@ -552,7 +552,7 @@ func TestTombstonedPreparationCannotActivate(t *testing.T) {
 		t.Fatal(err)
 	}
 	local.PreparationAborted = true
-	if err = p.save(local); err != nil {
+	if err = p.save(local, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err = p.Activate(t.Context(), l, i); !isConflict(err) {
@@ -600,7 +600,7 @@ func TestAbortPreparationOfDeletedRegistrationIsUnproven(t *testing.T) {
 			}
 			if !keepReference {
 				local.Reference = registry.Reference{}
-				if err = p.save(local); err != nil {
+				if err = p.save(local, nil); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -689,7 +689,7 @@ func TestAbortPreparationFindsRegistrationWhoseReferenceWasLost(t *testing.T) {
 	}
 	ref := local.Reference
 	local.Reference = registry.Reference{}
-	if err = p.save(local); err != nil {
+	if err = p.save(local, nil); err != nil {
 		t.Fatal(err)
 	}
 	kube.reconcile = cancelReconcile(t, kube)
@@ -749,7 +749,7 @@ func TestAbortPreparationOfRunNeverBound(t *testing.T) {
 		t.Fatal(err)
 	}
 	local.Reference = r.Reference
-	if err = p.save(local); err != nil {
+	if err = p.save(local, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = p.ensureRun(ctx, r); err != nil {

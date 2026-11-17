@@ -36,11 +36,60 @@ var errWriterFenceUnknown = errors.New("placement: writer fence remains unknown"
 // unproven, and its retry waits again. Tests shorten it.
 var podStopWait = time.Minute
 
+// retained reads l's retained record and its session registration for an
+// operation that starts or extends work. A record that contradicts itself or
+// its registration is refused: nothing gains authority from it.
 func (p *Placement) retained(ctx context.Context, l session.Launch) (retained, registry.Record, error) {
-	local, err := p.load(l)
-	if err != nil {
-		return local, registry.Record{}, err
+	return p.retainedRecord(ctx, l, true)
+}
+
+// settling reads them for an operation that observes or ends the visit:
+// Inspect, Exited, Stop and Abort. A contradiction must not keep a visit from
+// being stopped, cancelled and removed, so these continue from the facts
+// that hold. They observe a forgotten fact again (a quiet source, a fenced
+// writer, a kept checkpoint) or, when it can no longer be observed, report it
+// unknown. The contradiction is logged, and the next save writes the record
+// without it.
+func (p *Placement) settling(ctx context.Context, l session.Launch) (retained, registry.Record, error) {
+	local, r, err := p.retainedRecord(ctx, l, false)
+	return local, r, p.forgive(l, err)
+}
+
+// forgive logs a contradicted retained record of l, whose facts that hold an
+// operation that ends the visit continues from, and returns any other error.
+func (p *Placement) forgive(l session.Launch, err error) error {
+	var contradicted *contradiction
+	if !errors.As(err, &contradicted) {
+		return err
 	}
+	p.logf("Ignored facts of the retained record of visit %s of execution %s that contradict it or its session registration: %v",
+		l.AllocationID, l.ExecutionID, err)
+	return nil
+}
+
+// retainedRecord reads l's retained record and registration. With refuse, a
+// contradiction is returned before anything changes; without, the read
+// continues from the facts that hold and returns the contradiction last.
+func (p *Placement) retainedRecord(ctx context.Context, l session.Launch, refuse bool) (retained, registry.Record, error) {
+	local, loaded := p.load(l)
+	var contradicted *contradiction
+	if loaded != nil && (refuse || !errors.As(loaded, &contradicted)) {
+		return local, registry.Record{}, loaded
+	}
+	local, r, err := p.registered(ctx, l, local)
+	if err != nil {
+		return local, r, err
+	}
+	local, err = local.check(&r)
+	if err != nil && refuse {
+		return local, r, err
+	}
+	return local, r, errors.Join(loaded, err)
+}
+
+// registered reads, or creates, the registration local names, and checks
+// that it is the registration of l, local's launch.
+func (p *Placement) registered(ctx context.Context, l session.Launch, local retained) (retained, registry.Record, error) {
 	if local.PreparationAborted {
 		// An aborted preparation never creates its registration, and nothing
 		// activates, stops or attaches to it: only AbortPreparation, which
@@ -59,7 +108,7 @@ func (p *Placement) retained(ctx context.Context, l session.Launch) (retained, r
 			return local, r, semantic(err)
 		}
 		local.Reference = r.Reference
-		return local, r, p.save(local)
+		return local, r, p.save(local, &r)
 	}
 	r, err := p.registry.Get(ctx, local.Reference)
 	if err != nil {
@@ -200,7 +249,7 @@ func (p *Placement) Inspect(ctx context.Context, l session.Launch) (session.Obse
 		return session.Observation{}, err
 	}
 	defer unlock()
-	local, r, err := p.retained(ctx, l)
+	local, r, err := p.settling(ctx, l)
 	if os.IsNotExist(err) {
 		var cm corev1.ConfigMap
 		lookupErr := p.config.Kube.Get(ctx, client.ObjectKey{Namespace: p.config.Namespace, Name: registry.NameForRun(runName(l))}, &cm)
@@ -312,7 +361,7 @@ func (p *Placement) Stop(ctx context.Context, l session.Launch, i session.Incarn
 		return session.Stopped{}, err
 	}
 	defer unlock()
-	local, r, err := p.retained(ctx, l)
+	local, r, err := p.settling(ctx, l)
 	if err != nil {
 		return session.Stopped{}, err
 	}
@@ -445,7 +494,7 @@ func (p *Placement) quietSource(ctx context.Context, local retained, r registry.
 		}
 	}
 	local.NativeQuiet = true
-	return local, r, p.save(local)
+	return local, r, p.save(local, &r)
 }
 
 // ended settles a stop of a visit whose native container already ended, once
@@ -537,7 +586,7 @@ func (p *Placement) recordExit(ctx context.Context, local retained, r registry.R
 		r = bound
 	}
 	local.Exited = exit
-	return local, r, p.save(local)
+	return local, r, p.save(local, &r)
 }
 
 // Exited reports whether an active visit's native container ended without a
@@ -551,7 +600,7 @@ func (p *Placement) Exited(ctx context.Context, l session.Launch, i session.Inca
 		return false, err
 	}
 	defer unlock()
-	local, r, err := p.retained(ctx, l)
+	local, r, err := p.settling(ctx, l)
 	if err != nil {
 		return false, err
 	}
@@ -575,11 +624,11 @@ func (p *Placement) native(pod *corev1.Pod) harness.NativeControl {
 	}
 }
 
-func (p *Placement) capture(ctx context.Context, local retained, thread string, pod *corev1.Pod) (retained, error) {
+func (p *Placement) capture(ctx context.Context, local retained, r registry.Record, pod *corev1.Pod) (retained, error) {
 	if local.OutputDigest != "" {
 		return local, nil
 	}
-	l := local.Launch
+	l, thread := local.Launch, local.thread(r)
 	directory, err := harness.NativeDirectory(l.Harness)
 	if err != nil {
 		return local, err
@@ -605,7 +654,7 @@ func (p *Placement) capture(ctx context.Context, local retained, thread string, 
 		return local, err
 	}
 	local.OutputDigest = meta.SHA256
-	return local, p.save(local)
+	return local, p.save(local, &r)
 }
 
 // captureFailure maps a failed capture-stopped command onto the shared rule
@@ -640,7 +689,7 @@ func (p *Placement) keep(ctx context.Context, local retained, r registry.Record,
 	keep, onFailure := session.StopKeeps(session.VisitEnd{First: local.fresh(), Turnless: local.Turnless,
 		Exited: local.Exited != nil, ProvesCompletion: harness.ProvesCompletion(r.Harness), Conversation: local.thread(r) != ""})
 	if keep == session.KeptCapture {
-		captured, err := p.capture(ctx, local, local.thread(r), pod)
+		captured, err := p.capture(ctx, local, r, pod)
 		if err == nil {
 			return captured, nil
 		}
@@ -653,7 +702,7 @@ func (p *Placement) keep(ctx context.Context, local retained, r registry.Record,
 		keep = onFailure
 	}
 	if keep == session.KeptInput {
-		return p.keepInput(local)
+		return p.keepInput(local, r)
 	}
 	return local, nil
 }
@@ -661,7 +710,7 @@ func (p *Placement) keep(ctx context.Context, local retained, r registry.Record,
 // keepInput makes the checkpoint a resumed visit started from its output:
 // the visit's harness ended without proving a completed turn, so nothing it
 // did is kept.
-func (p *Placement) keepInput(local retained) (retained, error) {
+func (p *Placement) keepInput(local retained, r registry.Record) (retained, error) {
 	if local.OutputDigest != "" {
 		return local, nil
 	}
@@ -678,7 +727,7 @@ func (p *Placement) keepInput(local retained) (retained, error) {
 		return local, err
 	}
 	local.OutputDigest = meta.SHA256
-	return local, p.save(local)
+	return local, p.save(local, &r)
 }
 
 func (p *Placement) stopped(local retained, r registry.Record) (session.Stopped, error) {
@@ -728,7 +777,7 @@ func (p *Placement) physicalFence(ctx context.Context, local *retained, r regist
 	}
 	if !local.WriterFenced {
 		local.WriterFenced = true
-		if err = p.save(*local); err != nil {
+		if err = p.save(*local, &r); err != nil {
 			local.WriterFenced = false
 			return false, err
 		}
@@ -789,7 +838,7 @@ func (p *Placement) Abort(ctx context.Context, l session.Launch, i session.Incar
 		return session.Observation{}, err
 	}
 	defer unlock()
-	local, r, err := p.retained(ctx, l)
+	local, r, err := p.settling(ctx, l)
 	if err != nil {
 		return session.Observation{}, err
 	}
@@ -893,7 +942,7 @@ func (p *Placement) unscheduledFence(ctx context.Context, local *retained, r reg
 	}
 	if !local.WriterFenced {
 		local.WriterFenced = true
-		if err = p.save(*local); err != nil {
+		if err = p.save(*local, &r); err != nil {
 			local.WriterFenced = false
 			return false, err
 		}

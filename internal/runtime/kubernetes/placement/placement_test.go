@@ -1215,7 +1215,7 @@ func TestOldPartialPreparationObservesAndCancelsWithoutHelperOrAdmission(t *test
 		t.Fatal(err)
 	}
 	local.Reference = r.Reference
-	if err = p.save(local); err != nil {
+	if err = p.save(local, &r); err != nil {
 		t.Fatal(err)
 	}
 	run, err := p.ensureRun(t.Context(), r)

@@ -350,7 +350,7 @@ func (p *Placement) Prepare(ctx context.Context, l session.Launch, data []byte) 
 		return session.Incarnation{}, semantic(err)
 	}
 	local.Reference = record.Reference
-	if err = p.save(local); err != nil {
+	if err = p.save(local, &record); err != nil {
 		return session.Incarnation{}, err
 	}
 	return p.prepare(ctx, local, record)
@@ -402,7 +402,7 @@ func (p *Placement) prepareWorkspace(ctx context.Context, l session.Launch, data
 			return session.Incarnation{}, &profile.Rejection{Code: profile.CodeConflict}
 		}
 		local.WorkspaceDigest = digest
-		if err = p.save(local); err != nil {
+		if err = p.save(local, nil); err != nil {
 			return session.Incarnation{}, err
 		}
 	} else if local.WorkspaceDigest != digest {
@@ -418,7 +418,7 @@ func (p *Placement) prepareWorkspace(ctx context.Context, l session.Launch, data
 		return session.Incarnation{}, semantic(err)
 	}
 	local.Reference = r.Reference
-	if err = p.save(local); err != nil {
+	if err = p.save(local, &r); err != nil {
 		return session.Incarnation{}, err
 	}
 	return p.prepare(ctx, local, r)

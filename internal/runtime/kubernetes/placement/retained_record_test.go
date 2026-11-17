@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -56,6 +57,10 @@ func describeRetained(r retained) string {
 }
 
 func describeRecordError(err error) string {
+	var contradicted *contradiction
+	if errors.As(err, &contradicted) {
+		return "contradicts (" + strings.Join(contradicted.reasons, "; ") + ")"
+	}
 	var rejection *profile.Rejection
 	if errors.As(err, &rejection) {
 		return string(rejection.Code)
@@ -177,21 +182,60 @@ func recordedOutcome(t *testing.T, p *Placement, l session.Launch, facts retaine
 	}
 	loaded, loadErr := p.load(l)
 	load := "ok " + describeRetained(loaded)
-	if loadErr != nil {
+	var contradicted *contradiction
+	if errors.As(loadErr, &contradicted) {
+		load = describeRecordError(loadErr) + " keeps " + describeRetained(loaded)
+	} else if loadErr != nil {
 		load = describeRecordError(loadErr)
 	}
 	read := "ok"
-	local, r, err := p.retained(ctx, l)
-	if err != nil {
-		read = describeRecordError(err)
+	local, r, readErr := p.retained(ctx, l)
+	if readErr != nil {
+		read = describeRecordError(readErr)
 	} else {
 		read += " " + describeRetained(local) + " " + string(r.Phase)
 	}
 	save := "ok"
-	if err = p.save(loaded); err != nil {
+	if err := p.save(facts, registrationOf(t, p, facts)); err != nil {
 		save = describeRecordError(err)
 	}
+	settleCase(t, p, l, readErr == nil, local, r)
 	return fmt.Sprintf("load -> %s | read -> %s | save -> %s", load, read, save)
+}
+
+// registrationOf reads the registration r names, or nil.
+func registrationOf(t *testing.T, p *Placement, r retained) *registry.Record {
+	t.Helper()
+	if r.Reference.UID == "" {
+		return nil
+	}
+	record, err := p.registry.Get(context.Background(), r.Reference)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &record
+}
+
+// settleCase checks what an operation that ends the visit reads: never a
+// contradiction, only a record valid beside its registration, the very
+// record a refusing read returns when that read accepts it, and one whose
+// check is settled (checking it again forgets nothing).
+func settleCase(t *testing.T, p *Placement, l session.Launch, valid bool, strict retained, strictRecord registry.Record) {
+	t.Helper()
+	local, r, err := p.settling(context.Background(), l)
+	var contradicted *contradiction
+	if errors.As(err, &contradicted) {
+		t.Errorf("%s: settling read a contradiction: %v", l.AllocationID, err)
+	}
+	if err != nil {
+		return
+	}
+	if checked, err := local.check(&r); err != nil || !reflect.DeepEqual(checked, local) {
+		t.Errorf("settling read a record its registration contradicts: %+v %v", local, err)
+	}
+	if valid && strictRecord.Reference.UID != "" && !reflect.DeepEqual(local, strict) {
+		t.Errorf("settling read %+v of a valid record read as %+v", local, strict)
+	}
 }
 
 // Every combination of the retained record's facts, for a resumed and a

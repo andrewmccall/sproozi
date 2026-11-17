@@ -66,7 +66,10 @@ func (p *Placement) AbortPreparation(ctx context.Context, l session.Launch) erro
 	defer unlock()
 	ctx, cancel := context.WithTimeout(ctx, p.abortWait)
 	defer cancel()
+	// Like Abort, this ends a visit, so it continues from the facts of a
+	// contradicted record that hold (settling).
 	local, err := p.load(l)
+	err = p.forgive(l, err)
 	unseen := os.IsNotExist(err)
 	if unseen {
 		if err = p.validateInput(l, l.ThreadID == "" && l.CheckpointDigest == ""); err != nil {
@@ -81,6 +84,12 @@ func (p *Placement) AbortPreparation(ctx context.Context, l session.Launch) erro
 	r, found, err := p.preparationRegistration(ctx, local)
 	if err != nil {
 		return err
+	}
+	if found {
+		local, err = local.check(&r)
+		if err = p.forgive(l, err); err != nil {
+			return err
+		}
 	}
 	if err = p.saveTombstone(&local, unseen, r, found); err != nil || !found {
 		return err
@@ -153,10 +162,11 @@ func (p *Placement) saveTombstone(local *retained, unseen bool, r registry.Recor
 		return nil
 	}
 	local.PreparationAborted = true
-	if found {
-		local.Reference = r.Reference
+	if !found {
+		return p.save(*local, nil)
 	}
-	return p.save(*local)
+	local.Reference = r.Reference
+	return p.save(*local, &r)
 }
 
 func isConflict(err error) bool {

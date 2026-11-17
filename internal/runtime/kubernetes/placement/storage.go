@@ -5,10 +5,12 @@ import (
 	"cmp"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
@@ -70,7 +72,7 @@ func (p *Placement) persistIntent(l session.Launch, data []byte) (retained, erro
 		return retained{}, err
 	}
 	r := retained{Launch: l}
-	return r, p.save(r)
+	return r, p.save(r, nil)
 }
 
 // claimEpoch records l as its session epoch's one allocation. One allocation
@@ -97,6 +99,8 @@ func (p *Placement) claimEpoch(l session.Launch) error {
 	return p.atomic(epochPath, encoded)
 }
 
+// load reads l's retained record. A record whose facts contradict each other
+// is returned with those facts forgotten, and with a *contradiction error.
 func (p *Placement) load(l session.Launch) (retained, error) {
 	if !idValid(l.AllocationID) {
 		return retained{}, &profile.Rejection{Code: profile.CodeInvalid}
@@ -112,7 +116,101 @@ func (p *Placement) load(l session.Launch) (retained, error) {
 	if !session.SameLaunch(r.Launch, l) {
 		return retained{}, &profile.Rejection{Code: profile.CodeConflict}
 	}
-	return r, nil
+	return r.check(nil)
+}
+
+// A visit's facts are retained in the order they become true, and each
+// needs the facts before it. The record holds its registration's reference
+// once the registration exists. A stop that reached the active source then
+// records it quiet (nativeQuiet) and, while quieting it, a harness that had
+// exited (exited) and a first visit with no conversation (turnless). Once
+// the registration records a stop or a cancellation and the native
+// container is seen ended, the writer is fenced (writerFenced). Only then is
+// what the stop keeps retained (outputDigest). The tombstone of an aborted
+// preparation stands beside any of these.
+//
+// retainedRules lists each contradiction of that order, between the
+// record's own facts or with its session registration, and the fact it
+// makes untrustworthy. A rule that needs the registration holds whenever
+// there is none to compare with.
+var retainedRules = []struct {
+	contradiction string
+	broken        func(r retained, registration *registry.Record) bool
+	forget        func(*retained)
+}{
+	{"names a workspace, but the launch resumes a checkpoint",
+		func(r retained, _ *registry.Record) bool { return r.WorkspaceDigest != "" && !r.fresh() },
+		func(r *retained) { r.WorkspaceDigest = "" }},
+	{"records a stop, but has no session registration",
+		func(r retained, _ *registry.Record) bool { return r.Reference.UID == "" && r.stopRecorded() },
+		forgetStop},
+	{"records a stop, but its session registration was never active",
+		func(r retained, registration *registry.Record) bool {
+			return registration != nil && r.stopRecorded() &&
+				(registration.Phase == registry.Creating || registration.Phase == registry.Bound || registration.Phase == registry.Prepared)
+		},
+		forgetStop},
+	{"records the writer fenced, but its session registration is still active",
+		func(r retained, registration *registry.Record) bool {
+			return registration != nil && registration.Phase == registry.Active && r.WriterFenced
+		},
+		func(r *retained) { r.WriterFenced = false }},
+	{"keeps output before the source was quiet and its writer fenced",
+		func(r retained, _ *registry.Record) bool {
+			return r.OutputDigest != "" && (!r.NativeQuiet || !r.WriterFenced)
+		},
+		func(r *retained) { r.OutputDigest = "" }},
+	{"is turnless, but the launch resumes a checkpoint",
+		func(r retained, _ *registry.Record) bool { return r.Turnless && !r.fresh() },
+		func(r *retained) { r.Turnless = false }},
+	{"is turnless before the source was quiet",
+		func(r retained, _ *registry.Record) bool { return r.Turnless && !r.NativeQuiet },
+		func(r *retained) { r.Turnless = false }},
+	{"is turnless, but its session registration bound a conversation",
+		func(r retained, registration *registry.Record) bool {
+			return registration != nil && r.Turnless && registration.NativeUUID != ""
+		},
+		func(r *retained) { r.Turnless = false }},
+}
+
+// stopRecorded reports any fact a stop records.
+func (r retained) stopRecorded() bool {
+	return r.NativeQuiet || r.Turnless || r.Exited != nil || r.WriterFenced || r.OutputDigest != ""
+}
+
+func forgetStop(r *retained) {
+	r.NativeQuiet, r.Turnless, r.Exited, r.WriterFenced, r.OutputDigest = false, false, nil, false, ""
+}
+
+// contradiction is a retained record whose facts contradict each other or
+// the session registration it names.
+type contradiction struct {
+	allocation string
+	reasons    []string
+}
+
+func (c *contradiction) Error() string {
+	return fmt.Sprintf("placement: the retained record of visit %s %s", c.allocation, strings.Join(c.reasons, "; it "))
+}
+
+// check is the one rule for which retained records are valid, alone
+// (registration nil) or beside their session registration. It returns r
+// with every fact a contradiction makes untrustworthy forgotten, and the
+// contradictions, or r unchanged and nil. A rule's forgetting can break only
+// a rule later in retainedRules (forgetting the fence breaks the output's),
+// so one pass in order finds them all.
+func (r retained) check(registration *registry.Record) (retained, error) {
+	var reasons []string
+	for _, rule := range retainedRules {
+		if rule.broken(r, registration) {
+			reasons = append(reasons, rule.contradiction)
+			rule.forget(&r)
+		}
+	}
+	if reasons == nil {
+		return r, nil
+	}
+	return r, &contradiction{allocation: r.Launch.AllocationID, reasons: reasons}
 }
 
 // fresh reports a first visit started from a Git workspace rather than a checkpoint.
@@ -124,7 +222,12 @@ func (r retained) thread(record registry.Record) string {
 	return cmp.Or(r.Launch.ThreadID, record.NativeUUID)
 }
 
-func (p *Placement) save(r retained) error {
+// save retains r, which must be valid beside registration, the session
+// registration the caller holds, or nil before there is one.
+func (p *Placement) save(r retained, registration *registry.Record) error {
+	if _, err := r.check(registration); err != nil {
+		return err
+	}
 	data, err := json.Marshal(r)
 	if err != nil {
 		return err
