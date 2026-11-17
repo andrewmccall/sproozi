@@ -337,6 +337,27 @@ func TestAbortPreparationTrustsTheFenceACancellationReceiptProves(t *testing.T) 
 	}
 }
 
+// A repeated abort of a preparation whose tombstoned record was contradicted
+// since saves it corrected: the tombstone is already there, so nothing else
+// in the abort writes the record.
+func TestRepeatedAbortPreparationSavesTheCorrectedRecord(t *testing.T) {
+	t.Parallel()
+	p, _, _, l, data := setup(t)
+	if _, err := p.Prepare(t.Context(), l, data); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.AbortPreparation(t.Context(), l); err != nil {
+		t.Fatal(err)
+	}
+	contradict(t, p, l, func(r *retained) { r.Turnless = true })
+	if err := p.AbortPreparation(t.Context(), l); err != nil {
+		t.Fatalf("repeated abort of a contradicted preparation: %v", err)
+	}
+	if local := requireValidRecord(t, p, l); !local.PreparationAborted || local.Turnless {
+		t.Fatalf("repeated abort retained %+v", local)
+	}
+}
+
 // The exit sweep reads an active visit every few seconds, and Inspect and
 // Exited write nothing, so a contradiction is logged once per process, not
 // once per read. Refusing work logs it the same once.
