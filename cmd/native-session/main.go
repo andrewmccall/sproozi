@@ -57,11 +57,12 @@ type server struct {
 	config config
 	// deadline is the execution's deadline, owned by deadline.go.
 	deadline time.Time
-	// expired raises the deadline once.
-	expired sync.Once
-	mu      sync.Mutex
-	action  sync.Mutex
-	native  *nativepty.Supervisor
+	// expired raises the deadline once; deadlineRaised says it did.
+	expired        sync.Once
+	deadlineRaised bool
+	mu             sync.Mutex
+	action         sync.Mutex
+	native         *nativepty.Supervisor
 	// life is the supervisor's lifecycle; only apply changes it.
 	life     lifecycle
 	threadID string

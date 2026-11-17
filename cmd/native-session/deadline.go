@@ -31,16 +31,38 @@ func (s *server) watchDeadline() {
 }
 
 // expire raises the deadline event once, stopping the harness with the cause
-// deadline. A caller that finds it raised already waits until that stop has
-// finished.
-func (s *server) expire() { s.expired.Do(func() { s.stop(evDeadline) }) }
+// deadline, and reports whether it did. A harness that already ended by
+// itself, before anything forced it, keeps that exit as its own (ADR 0038):
+// the deadline is not raised and the exit watcher settles the exit. A caller
+// that finds the deadline being raised waits until that stop has finished.
+func (s *server) expire() bool {
+	s.expired.Do(func() {
+		if s.endedByItself() {
+			return
+		}
+		s.stop(evDeadline)
+		s.deadlineRaised = true
+	})
+	return s.deadlineRaised
+}
 
-// expireIfPassed raises the deadline if it has passed, and reports whether
-// it had.
-func (s *server) expireIfPassed() bool {
-	if !s.pastDeadline() {
+// endedByItself reports a harness that has exited while nothing was forcing
+// or finishing it, so its exit is its own.
+func (s *server) endedByItself() bool {
+	s.mu.Lock()
+	n, p := s.native, s.life.phase
+	s.mu.Unlock()
+	if n == nil || (p != phaseActive && p != phaseGated) {
 		return false
 	}
-	s.expire()
-	return true
+	select {
+	case <-n.Done():
+		return true
+	default:
+		return false
+	}
 }
+
+// expireIfPassed raises the deadline if it has passed, and reports whether
+// it did.
+func (s *server) expireIfPassed() bool { return s.pastDeadline() && s.expire() }
