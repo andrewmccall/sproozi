@@ -2,6 +2,7 @@ package modelauth
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -269,12 +270,17 @@ func TestChatGPTRefreshWhoseRequestLeavesKeepsTheRotatedToken(t *testing.T) {
 	// Let the reply go only after the request has given up on it, as a reply
 	// that crosses a disconnect does.
 	select {
-	case <-done:
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("the request that left got %v", err)
+		}
 		close(release)
-	case <-time.After(200 * time.Millisecond):
+	case <-time.After(5 * time.Second):
 		close(release)
 		<-done
+		t.Error("the request that left waited for the refresh")
 	}
+	settle(t, auth)
 
 	// The refresh and its save outlived the request: the stored sign-in holds
 	// the rotated token, and the next request uses it without a refresh.

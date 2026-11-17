@@ -181,17 +181,17 @@ const SessionReloadInterval = 10 * time.Second
 // refreshWindow is how close to expiry the access token is refreshed.
 const refreshWindow = time.Minute
 
-// refreshTimeout bounds a refresh, and separately its save, once started. It
-// matches the 30-second client both the cluster and the local gateway refresh
-// with, so it ends a refresh only where that client would.
+// refreshTimeout bounds each step of a reload or refresh once started: the
+// store read, the save of an unsaved refresh, the refresh and its save. It
+// matches the refresh client's timeout (NewRefreshClient).
 const refreshTimeout = 30 * time.Second
 
-// detached returns a context for a step that must finish once begun: the
-// provider spends the refresh token when it answers, so neither the refresh
-// nor the save of what it returned may end because the model request that
-// started it ended (its harness left, or its call deadline passed).
-func detached(ctx context.Context) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.WithoutCancel(ctx), refreshTimeout)
+// step returns the context for one step of a reload or refresh. It derives
+// from no model request: the provider spends the refresh token when it
+// answers, so neither the refresh nor the save of what it returned may end
+// because the request that started it ended.
+func step() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), refreshTimeout)
 }
 
 type ChatGPT struct {
@@ -202,9 +202,14 @@ type ChatGPT struct {
 	// than reloadInterval and its access token is outside the refresh window.
 	current        atomic.Pointer[loadedSession]
 	reloadInterval time.Duration
-	// mu serializes reloads and refreshes: this process is the session's one
-	// refresh owner (ADR 0026).
-	mu sync.Mutex
+	// mu guards inflight, the one reload or refresh running for this
+	// credential: this process is the session's one refresh owner (ADR
+	// 0026). It is never held across a store call or the refresh.
+	mu       sync.Mutex
+	inflight *attempt
+	// The fields below belong to the running attempt; attempts run one at a
+	// time, each started under mu after the last has ended.
+	//
 	// Keep an unsaved replacement so persistence retries never rotate the same
 	// refresh token twice. Do not expose it to inference until durably saved.
 	pending       *Session
@@ -215,6 +220,14 @@ type ChatGPT struct {
 	tokenEndpoint string
 	// now is the clock every expiry, reload and hold is measured against.
 	now func() time.Time
+}
+
+// attempt is one reload, and refresh when due, run by the authenticator in
+// its own goroutine. Every caller waits for done or its own context.
+type attempt struct {
+	done    chan struct{}
+	session Session
+	err     error
 }
 
 type loadedSession struct {
@@ -259,21 +272,53 @@ func (a *ChatGPT) usable() (Session, bool) {
 	return current.session, true
 }
 
-// reloadOrRefresh reads the stored session and refreshes it when due. It holds
-// the lock throughout, and always refreshes from the stored tokens, never the
-// in-memory copy, so the store's compare-before-write check sees what it read.
+// reloadOrRefresh joins the reload or refresh in flight, or starts one, and
+// waits for its result or for ctx, whichever comes first. A caller that
+// leaves does not stop it: it finishes on its own bounds and saves what the
+// provider issued.
 func (a *ChatGPT) reloadOrRefresh(ctx context.Context) (Session, error) {
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	// Another request may have reloaded or refreshed while this one waited.
 	if s, ok := a.usable(); ok {
+		a.mu.Unlock()
 		return s, nil
 	}
+	at := a.inflight
+	if at == nil {
+		at = &attempt{done: make(chan struct{})}
+		a.inflight = at
+		go a.run(at)
+	}
+	a.mu.Unlock()
+	select {
+	case <-at.done:
+		return at.session, at.err
+	case <-ctx.Done():
+		return Session{}, ctx.Err()
+	}
+}
+
+// run carries out one attempt and publishes its result.
+func (a *ChatGPT) run(at *attempt) {
+	s, err := a.reload()
+	a.mu.Lock()
+	at.session, at.err = s, err
+	a.inflight = nil
+	a.mu.Unlock()
+	close(at.done)
+}
+
+// reload reads the stored session and refreshes it when due. It always
+// refreshes from the stored tokens, never the in-memory copy, so the store's
+// compare-before-write check sees what it read.
+func (a *ChatGPT) reload() (Session, error) {
 	a.current.Store(nil)
 	// The reload interval runs from the start of the read, so a slow Secret
 	// read does not extend how long an older stored session is served.
 	loadedAt := a.now()
+	ctx, cancel := step()
 	s, err := a.store.Load(ctx)
+	cancel()
 	if err != nil {
 		return Session{}, errors.New("ChatGPT credentials are unavailable")
 	}
@@ -282,8 +327,8 @@ func (a *ChatGPT) reloadOrRefresh(ctx context.Context) (Session, error) {
 	}
 	if a.pending != nil {
 		if s.SameCredentials(a.pendingBefore) {
-			saveCtx, cancel := detached(ctx)
-			err = a.store.Replace(saveCtx, s, *a.pending)
+			ctx, cancel := step()
+			err = a.store.Replace(ctx, s, *a.pending)
 			cancel()
 			if err != nil {
 				return Session{}, errors.New("could not persist renewed ChatGPT credentials")
@@ -302,8 +347,8 @@ func (a *ChatGPT) reloadOrRefresh(ctx context.Context) (Session, error) {
 		if held := a.refresh.admit(now); held != nil {
 			return Session{}, held
 		}
-		refreshCtx, cancel := detached(ctx)
-		next, refreshErr := Exchange(refreshCtx, a.client, a.tokenEndpoint, url.Values{
+		ctx, cancel := step()
+		next, refreshErr := Exchange(ctx, a.client, a.tokenEndpoint, url.Values{
 			"grant_type": {refreshTokenField}, clientIDField: {s.ClientID},
 			refreshTokenField: {s.RefreshToken}, resourceField: {Resource},
 		})
@@ -327,8 +372,8 @@ func (a *ChatGPT) reloadOrRefresh(ctx context.Context) (Session, error) {
 			return Session{}, err
 		}
 		a.pending, a.pendingBefore = &renewed, s
-		saveCtx, cancel := detached(ctx)
-		err = a.store.Replace(saveCtx, s, renewed)
+		ctx, cancel = step()
+		err = a.store.Replace(ctx, s, renewed)
 		cancel()
 		if err != nil {
 			return Session{}, errors.New("could not persist renewed ChatGPT credentials")
