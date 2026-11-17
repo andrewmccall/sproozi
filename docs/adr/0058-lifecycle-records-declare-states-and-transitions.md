@@ -336,8 +336,10 @@ exit codes) together decided what each path could do.
   `unconfigured`, `prepared`, `active`, `gated`, `finishing`, `forcing` and
   `ended`. `finishing` means a graceful stop owns the harness's exit.
   `forcing` means the supervisor is killing the harness for a cause already
-  decided. In that window, up to three seconds, status already reports
-  `stopped`, and either the stop or the exit watcher may settle the exit.
+  decided. The window lasts from the kill until it is confirmed, at most
+  three seconds, and through the sign-in save that follows, at most five
+  more (`loginSaveWait`). In it status already reports `stopped`, and either
+  the stop or the exit watcher may settle the exit.
   Status and every control reply still report the protocol's five states,
   derived by one function: `gated` and `finishing` report `stopping`;
   `forcing` and `ended` report `stopped`.
@@ -354,16 +356,12 @@ exit codes) together decided what each path could do.
   admits only from `unconfigured`, compares the contracts in every other
   phase.
 - **Rule 5.** Only `configure` and `activate` are refused after the deadline.
-  `activate` is checked before the launch. `configure` is refused first by
-  the launch contract's own validation. The deadline now has one owner,
-  `deadline.go`. Before, three mechanisms acted on it: `serve`'s wall-clock
-  watcher, the harness terminal's own kill (which the exit watcher reported
-  as the deadline), and `quiesce`'s own deadline context. Now the terminal
-  has no deadline of its own. One event, `deadline`, is raised once, either
-  by `serve`'s watcher or by a `quiesce` that finds the deadline passed: while
-  it waits for a turn, or when a quit or a turnless kill fails. Without a
-  deadline nothing raises it, and every phase but `ended` can still end
-  without it.
+  `activate` is checked on entry and again just before the launch.
+  `configure` is refused first by the launch contract's own validation. One
+  owner, `deadline.go`, raises the `deadline` event once
+  ([ADR 0064](0064-the-supervisor-alone-stops-a-harness-at-its-deadline.md)).
+  Without a deadline nothing raises it, and every phase but `ended` can
+  still end without it.
 
 | Event | From → to | Refused after the deadline |
 | --- | --- | --- |
@@ -376,20 +374,36 @@ exit codes) together decided what each path could do.
 | `terminate`, `deadline`, `fail` | every phase but `ended` → `forcing`; `ended` → `ended` | no |
 | `exited` | `active`, `gated`, `forcing`, `ended` → `ended`; `finishing` → `finishing` | no |
 
-The behaviour did not change. `TestSupervisorLifecycleRecord` drives every
-event through every state the supervisor reaches, for first and resumed
-visits, with and without a deadline. It records the replies, the states
-status reports, what reached the harness, the exit reports, the log lines
-and the exit codes: 344 steps, written before the change and identical after
-it. Four things now differ. A stopped `quiesce` reply's `exit.reason` is
-never `deadline`, because only the terminal's own kill gave that reason. A
-`quiesce` waiting for a turn sees a passed deadline at its next 100 ms poll,
-where before it read the clock once a second. When the deadline and the
-harness's exit are both ready, the reply now names the deadline; before, it
-could name either. And in `forcing` the exit watcher may settle the exit and
-conclude, where before a graceful stop that the forced stop overtook kept
-the watcher out and the stop settled it. The cause, codes and report are
-the same either way.
+`TestSupervisorLifecycleRecord` drives every event through every state the
+supervisor reaches: for Codex, Claude Code and Copilot, first and resumed
+visits, with and without a deadline and with one that passes during the
+events, each with a real sign-in sync. A state includes its cause, whether
+input was gated and the turnless latch. The record holds the replies, the
+states status reports, what reached the harness and what the sign-in sync
+had recorded by then, the login store, the exit reports, the log lines and
+the exit codes. Its 1020 steps, written from the supervisor before this
+change, were identical after it. Outside the record, four things differ:
+
+- a stopped `quiesce` reply's `exit.reason` is never `deadline`, which only
+  the terminal's own kill gave;
+- a `quiesce` waiting for a turn sees a passed deadline at its next 100 ms
+  poll, where before it read the clock once a second;
+- when the deadline and the harness's own exit are both ready, the exit is
+  the harness's own (`exited`), where before it was either;
+- in `forcing` the exit watcher may settle the exit, where before, once a
+  graceful stop had been overtaken, only the stop did. Both settle the same
+  exit and wait result unless the stop's three-second wait ran out first,
+  in which case the stop settles it as before; whichever concludes does so
+  after the one sign-in save. The cause, codes, report and save are the
+  same.
+
+Four changes followed, each a fix with its own test. `activate` no longer
+starts a harness when the deadline passed while it prepared the launch. The
+exit watcher no longer concludes an exit that a graceful stop settled, which
+let the supervisor exit before the stopped reply was read. A forced stop that
+overtakes a graceful end leaves the supervisor's exit code nonzero. A
+`quiesce` that a forced stop overtook replies `stopping` with an error naming
+the cause, which changed 28 recorded steps.
 
 ## Alternatives
 
@@ -452,7 +466,8 @@ the same either way.
   `internal/runtime/kubernetes/registry/transitions_test.go`,
   `internal/runtime/kubernetes/registry/outcomes_test.go`,
   `internal/session/home/phase_test.go`, `internal/session/home/reconcile_test.go`,
-  `cmd/native-session/lifecycle_test.go`, `cmd/native-session/lifecycle_record_test.go`
+  `cmd/native-session/lifecycle_test.go`, `cmd/native-session/lifecycle_record_test.go`,
+  `cmd/native-session/lifecycle_paths_test.go`
   (Corrected 2026-11-16: the home catalogue entry's files added; the
   supervisor's files added)
 - Reference: [status and listing output](../reference/session-commands.md#status-and-listing-output)
