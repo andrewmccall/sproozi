@@ -58,6 +58,7 @@ func refusedRecordErrors() map[string]string {
 		"leaf-outside":                     `leaf name "../victim" is not a leaf file name`,
 		"trusted-three":                    "3 trusted generations; a record trusts one, or two during a rotation",
 		"rotation-target-not-newest":       "rotation target 2 is not the newest generation",
+		"retired-fingerprint-garbage":      "generation 1 has no SHA-256 fingerprint",
 	}
 }
 
@@ -74,6 +75,9 @@ func refusedRecordCases() []corruption {
 		})},
 		corruption{"rotation-target-not-newest", stPrepared, editState(func(st *State) {
 			st.Generations = append(st.Generations, third(true))
+		})},
+		corruption{"retired-fingerprint-garbage", stRetired, editState(func(st *State) {
+			st.Generations[0].Fingerprint = "zz"
 		})})
 }
 
@@ -172,10 +176,20 @@ func TestLoadRefusesAuthorityFilesTheRecordDoesNotName(t *testing.T) {
 		"ca-cert-other":       msgFingerprint1,
 		"ca-pair-other":       msgFingerprint1,
 		"not-after-other":     "generation 1 certificate ca-1.pem does not have the recorded expiry",
+		// A retired generation's kept certificate is compared too.
+		"retired-fingerprint-other": msgFingerprint1,
+		"retired-not-after-other":   "generation 1 certificate ca-1.pem does not have the recorded expiry",
 	}
-	cases := append(corruptions(), corruption{"not-after-other", stSingle, editState(func(st *State) {
-		st.Generations[0].NotAfter = st.Generations[0].NotAfter.Add(-24 * time.Hour)
-	})})
+	cases := append(corruptions(),
+		corruption{"not-after-other", stSingle, editState(func(st *State) {
+			st.Generations[0].NotAfter = st.Generations[0].NotAfter.Add(-24 * time.Hour)
+		})},
+		corruption{"retired-fingerprint-other", stRetired, editState(func(st *State) {
+			st.Generations[0].Fingerprint = strings.Repeat("ab", 32)
+		})},
+		corruption{"retired-not-after-other", stRetired, editState(func(st *State) {
+			st.Generations[0].NotAfter = st.Generations[0].NotAfter.Add(-24 * time.Hour)
+		})})
 	roots := buildStates(t)
 	seen := map[string]bool{}
 	for _, c := range cases {

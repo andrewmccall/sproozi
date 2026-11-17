@@ -408,10 +408,10 @@ func (s *Store) RetireRotation(drained bool) error {
 // ReplaceCA is the emergency path for a lost or compromised CA. It trusts only
 // a new generation, issues a new leaf and destroys every older private key.
 // Existing workers lose trust and must be cancelled or drained by the caller.
-// It is also the way out of a record no phase describes: it reads the record
-// without its authority files, and builds on a record no phase describes as
-// replaceable does. It refuses only a record it cannot read, or one of
-// another version.
+// It is also the way out of a record no phase describes, or whose
+// certificates are not the ones it names: it reads the record without that
+// check, and builds on such a record as replaceable does. It refuses only a
+// record it cannot read, or one of another version.
 func (s *Store) ReplaceCA() error {
 	return s.locked(func() error {
 		st, err := s.decode()
@@ -421,7 +421,7 @@ func (s *Store) ReplaceCA() error {
 		if st.Version != 1 {
 			return check(st)
 		}
-		if check(st) != nil {
+		if check(st) != nil || s.checkFiles(st) != nil {
 			if st, err = s.replaceable(st); err != nil {
 				return err
 			}

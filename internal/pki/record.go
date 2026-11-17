@@ -176,8 +176,26 @@ func check(st State) error {
 // not the ones it names: each must have the recorded fingerprint and expiry.
 // It reads no key, so a read of the serving leaf succeeds whenever the record
 // and its certificates are valid; checkKeys and the operation about to use a
-// key check it.
+// key check it. A retired generation's kept certificate, when it can be
+// read, must also have the recorded fingerprint and expiry; a retired
+// generation whose certificate is gone, or whose history replace could not
+// recover (no fingerprint and no expiry), is not compared.
 func (s *Store) checkFiles(st State) error {
+	for _, g := range st.Generations {
+		if !g.Retired || g.Fingerprint == "" && g.NotAfter.IsZero() {
+			continue
+		}
+		cert, err := s.caCertificate(g.ID)
+		if err != nil {
+			continue
+		}
+		if Fingerprint(cert) != g.Fingerprint {
+			return filesError("generation %d certificate %s.pem does not have the recorded fingerprint", g.ID, caName(g.ID))
+		}
+		if !cert.NotAfter.Equal(g.NotAfter) {
+			return filesError("generation %d certificate %s.pem does not have the recorded expiry", g.ID, caName(g.ID))
+		}
+	}
 	for _, id := range st.Trusted {
 		g, name := st.generation(id), caName(id)
 		data, err := privatefs.ReadFile(filepath.Join(s.dir, name+".pem"), maxPEM)
@@ -253,8 +271,8 @@ func caFileGeneration(name string) int {
 // It keeps st's names and lists generations 1 to N, every one retired, where
 // N is the highest generation st records or a ca-N file in the store
 // belongs to, so the new generation is numbered after all of them and no
-// existing CA file is overwritten. Each generation keeps its fingerprint and
-// expiry from st where st records them, else from its certificate file;
+// existing CA file is overwritten. Each generation takes its fingerprint and
+// expiry from its kept certificate file, else from st where st records them;
 // one found in neither keeps neither. Retiring them all lets the destroy
 // pass remove every one of their keys; their certificates stay as history.
 func (s *Store) replaceable(st State) (State, error) {
@@ -276,12 +294,12 @@ func (s *Store) replaceable(st State) (State, error) {
 	base := State{Version: 1, Names: st.Names}
 	for id := 1; id <= highest; id++ {
 		g := Generation{ID: id, Retired: true}
-		if i := slices.IndexFunc(st.Generations, func(r Generation) bool {
+		if cert, err := s.caCertificate(id); err == nil {
+			g.Fingerprint, g.NotAfter = Fingerprint(cert), cert.NotAfter
+		} else if i := slices.IndexFunc(st.Generations, func(r Generation) bool {
 			return r.ID == id && fingerprintPattern.MatchString(r.Fingerprint) && !r.NotAfter.IsZero()
 		}); i >= 0 {
 			g.Fingerprint, g.NotAfter = st.Generations[i].Fingerprint, st.Generations[i].NotAfter
-		} else if cert, err := s.caCertificate(id); err == nil {
-			g.Fingerprint, g.NotAfter = Fingerprint(cert), cert.NotAfter
 		}
 		base.Generations = append(base.Generations, g)
 	}
