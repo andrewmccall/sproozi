@@ -135,86 +135,191 @@ func named(text string) []string {
 	return out
 }
 
-// stateFixtures brings a new service's session to each row of the
-// next-steps table through the service's own commands, with the placement
-// failing where a state needs it.
-var stateFixtures = map[step]func(t *testing.T) (*Service, string){
-	stepImporting: func(t *testing.T) (*Service, string) {
-		s, _, source := importedFixture(t)
-		source.denyClaim = true
-		if _, err := s.Pull(t.Context(), source.export.ID, source.export.OperationID, testRemote); err == nil {
-			t.Fatal("a refused claim finished the pull")
-		}
-		return s, source.export.ID
-	},
-	stepRetained: func(t *testing.T) (*Service, string) {
-		s, _, _, repo := testService(t)
-		id := startedOn(t, s, repo, testLocal)
+// deadlineClock is where a fixture's execution deadline stands on the
+// coordinator's clock.
+type deadlineClock string
+
+const (
+	clockAhead  deadlineClock = "ahead"
+	clockPassed deadlineClock = "passed"
+	clockNone   deadlineClock = "none"
+)
+
+// rowFixture brings a new service's session to one row of the next-steps
+// table, through the service's own commands, under a clock. The exit it
+// returns removes the cause the fixture used to hold the session there, an
+// unreachable placement or a denied claim, and gives the request that then
+// leaves the row.
+type rowFixture struct {
+	// clocks are the clocks the row can be reached under. stateFixtures
+	// uses the first.
+	clocks []deadlineClock
+	build  func(t *testing.T, c deadlineClock) (s *Service, id string, exit func() Request)
+}
+
+// fixtureService is a new service whose executions get a deadline an hour
+// ahead, or none under clockNone.
+func fixtureService(t *testing.T, c deadlineClock) (*Service, *placementFixture, string) {
+	t.Helper()
+	s, local, _, repo := testService(t)
+	if c == clockNone {
+		s.duration = 0
+	}
+	return s, local, repo
+}
+
+// started is a session running on this machine under c.
+func started(t *testing.T, c deadlineClock) (*Service, *placementFixture, string) {
+	t.Helper()
+	s, local, repo := fixtureService(t, c)
+	return s, local, startedOn(t, s, repo, testLocal)
+}
+
+// passIfLate moves the coordinator's clock past every deadline the fixture
+// set when c is clockPassed, as a restart after the deadline would. A new
+// execution's deadline still lies ahead of it.
+func passIfLate(t *testing.T, s *Service, c deadlineClock) {
+	t.Helper()
+	if c != clockPassed {
+		return
+	}
+	late := time.Now().Add(s.duration + time.Minute)
+	reopenWithClock(t, s, func() time.Time { return late })
+	s.duration *= 2
+}
+
+// command is a request for action on session id, with a new operation for
+// the actions that take one.
+func command(action, id string) Request {
+	q := Request{Action: action, ID: id}
+	if slices.Contains([]string{ActionPull, ActionResume, ActionStop, ActionCancel}, action) {
+		q.OperationID = uuid.NewString()
+	}
+	return q
+}
+
+// leaveWith is an exit that needs no cause removed.
+func leaveWith(action, id string) func() Request {
+	return func() Request { return command(action, id) }
+}
+
+// stoppedFixture is a session started under c and stopped, by an agent that
+// exited with exit when it is non-nil.
+func stoppedFixture(exit *session.Exit) func(*testing.T, deadlineClock) (*Service, string, func() Request) {
+	return func(t *testing.T, c deadlineClock) (*Service, string, func() Request) {
+		s, local, id := started(t, c)
+		local.exited = exit
 		if _, err := s.Stop(t.Context(), id, uuid.NewString()); err != nil {
 			t.Fatal(err)
 		}
-		return s, id
-	},
-	stepFailed: func(t *testing.T) (*Service, string) {
-		s, local, _, repo := testService(t)
-		id := startedOn(t, s, repo, testLocal)
-		local.exited = &session.Exit{Code: 2}
-		if _, err := s.Stop(t.Context(), id, uuid.NewString()); err != nil {
-			t.Fatal(err)
-		}
-		return s, id
-	},
-	stepStarting: startingFixture,
-	stepOverdue: func(t *testing.T) (*Service, string) {
-		s, id := startingFixture(t)
-		passDeadline(t, s, id)
-		return s, id
-	},
-	stepRunning: func(t *testing.T) (*Service, string) {
-		s, _, _, repo := testService(t)
-		return s, startedOn(t, s, repo, testLocal)
-	},
-	stepStopping: func(t *testing.T) (*Service, string) {
-		s, local, _, repo := testService(t)
-		id := startedOn(t, s, repo, testLocal)
+		passIfLate(t, s, c)
+		return s, id, leaveWith(ActionResume, id)
+	}
+}
+
+// lostStopFixture is a session started under c whose stop, or move when move
+// is set, lost the placement's reply, so it stays stopping.
+func lostStopFixture(move bool, exit string) func(*testing.T, deadlineClock) (*Service, string, func() Request) {
+	return func(t *testing.T, c deadlineClock) (*Service, string, func() Request) {
+		s, local, id := started(t, c)
 		local.lostStop = true
-		if _, err := s.Stop(t.Context(), id, uuid.NewString()); err == nil {
-			t.Fatal("a lost stop reply stopped the session")
+		var err error
+		if move {
+			_, err = s.Move(t.Context(), id, uuid.NewString(), testRemote)
+		} else {
+			_, err = s.Stop(t.Context(), id, uuid.NewString())
 		}
-		return s, id
-	},
-	stepMoving: func(t *testing.T) (*Service, string) {
-		s, local, _, repo := testService(t)
-		id := startedOn(t, s, repo, testLocal)
-		local.lostStop = true
-		if _, err := s.Move(t.Context(), id, uuid.NewString(), testRemote); err == nil {
-			t.Fatal("a lost stop reply moved the session")
+		if err == nil {
+			t.Fatal("a lost stop reply finished the stop")
 		}
-		return s, id
-	},
-	stepCancelling: func(t *testing.T) (*Service, string) {
-		s, local, _, repo := testService(t)
-		id := startedOn(t, s, repo, testLocal)
+		passIfLate(t, s, c)
+		return s, id, leaveWith(exit, id)
+	}
+}
+
+var everyClock = []deadlineClock{clockAhead, clockPassed, clockNone}
+
+// rowFixtures has one fixture for each row of the next-steps table.
+var rowFixtures = map[step]rowFixture{
+	// The pulled execution's deadline passed an hour ago, or it has none.
+	stepImporting: {clocks: []deadlineClock{clockPassed, clockNone},
+		build: func(t *testing.T, c deadlineClock) (*Service, string, func() Request) {
+			s, _, source := importedFixture(t)
+			if c == clockNone {
+				source.export.Stopped.Launch.Deadline = time.Time{}
+				source.export.Stopped.Receipt.Launch.Deadline = time.Time{}
+			}
+			source.denyClaim = true
+			if _, err := s.Pull(t.Context(), source.export.ID, source.export.OperationID, testRemote); err == nil {
+				t.Fatal("a refused claim finished the pull")
+			}
+			return s, source.export.ID, func() Request {
+				source.denyClaim = false
+				return Request{Action: ActionPull, ID: source.export.ID, OperationID: source.export.OperationID}
+			}
+		}},
+	stepRetained: {clocks: everyClock, build: stoppedFixture(nil)},
+	stepFailed:   {clocks: everyClock, build: stoppedFixture(&session.Exit{Code: 2})},
+	// Past its deadline a starting session is overdue.
+	stepStarting: {clocks: []deadlineClock{clockAhead, clockNone},
+		build: func(t *testing.T, c deadlineClock) (*Service, string, func() Request) {
+			s, id := startingFixture(t, c)
+			return s, id, leaveWith(ActionRecover, id)
+		}},
+	// Without a deadline nothing is overdue.
+	stepOverdue: {clocks: []deadlineClock{clockPassed},
+		build: func(t *testing.T, _ deadlineClock) (*Service, string, func() Request) {
+			s, id := startingFixture(t, clockAhead)
+			passDeadline(t, s, id)
+			return s, id, leaveWith(ActionStop, id)
+		}},
+	stepRunning: {clocks: everyClock, build: func(t *testing.T, c deadlineClock) (*Service, string, func() Request) {
+		s, _, id := started(t, c)
+		passIfLate(t, s, c)
+		return s, id, leaveWith(ActionStop, id)
+	}},
+	stepStopping: {clocks: everyClock, build: lostStopFixture(false, ActionStop)},
+	stepMoving:   {clocks: everyClock, build: lostStopFixture(true, ActionRecover)},
+	stepCancelling: {clocks: everyClock, build: func(t *testing.T, c deadlineClock) (*Service, string, func() Request) {
+		s, local, id := started(t, c)
 		local.unreachableAbort = true
 		if _, err := s.Cancel(t.Context(), id, uuid.NewString()); err == nil {
 			t.Fatal("an unreachable abort finished the cancellation")
 		}
-		return s, id
-	},
-	stepCancelled: func(t *testing.T) (*Service, string) {
-		s, _, _, repo := testService(t)
-		id := startedOn(t, s, repo, testLocal)
+		passIfLate(t, s, c)
+		return s, id, func() Request {
+			local.unreachableAbort = false
+			return command(ActionRecover, id)
+		}
+	}},
+	stepCancelled: {clocks: everyClock, build: func(t *testing.T, c deadlineClock) (*Service, string, func() Request) {
+		s, _, id := started(t, c)
 		if _, err := s.Cancel(t.Context(), id, uuid.NewString()); err != nil {
 			t.Fatal(err)
 		}
-		return s, id
-	},
+		passIfLate(t, s, c)
+		return s, id, leaveWith(ActionRemove, id)
+	}},
 }
 
-// startingFixture starts a session whose activation reply is lost, so it
-// stays activating.
-func startingFixture(t *testing.T) (*Service, string) {
-	s, local, _, repo := testService(t)
+// stateFixtures brings a new service's session to each row of the
+// next-steps table, with the placement failing where a state needs it,
+// under the row's first clock.
+var stateFixtures = func() map[step]func(t *testing.T) (*Service, string) {
+	out := map[step]func(t *testing.T) (*Service, string){}
+	for row, f := range rowFixtures {
+		out[row] = func(t *testing.T) (*Service, string) {
+			s, id, _ := f.build(t, f.clocks[0])
+			return s, id
+		}
+	}
+	return out
+}()
+
+// startingFixture starts a session under c whose activation reply is lost,
+// so it stays activating.
+func startingFixture(t *testing.T, c deadlineClock) (*Service, string) {
+	s, local, repo := fixtureService(t, c)
 	id := uuid.NewString()
 	local.lostActivate = true
 	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err == nil {
@@ -441,34 +546,75 @@ func TestEachRowsAdviceNamesCommandsItAdmits(t *testing.T) {
 	}
 }
 
-// No state waits on the deadline to end (ADR 0060). The catalogue entry has
-// no deadline column: the execution journal's admit refuses the events that
-// start work, and here the deadline only turns a starting session overdue.
-// Nothing is terminal; a stopped or cancelled session's exit is a request
-// its owner makes. An exit is a command the next-steps table does not
-// refuse whose outcome, which TestEachStateRefusesOrCarriesOutEachCommand
-// pins to the service, is carried out and leaves the row, or fails only for
-// the fixture's placement. Every row, and every shape derive gives past the
-// deadline, has one.
-func TestEveryRowHasAnExitAfterTheDeadline(t *testing.T) {
+// No row waits on the deadline to end (ADR 0060), and none outlasts its
+// cause. The catalogue entry has no deadline column: the execution journal's
+// admit refuses the events that start work, and here the deadline only turns
+// a starting session overdue. Nothing is terminal; a stopped or cancelled
+// session's exit is a request its owner makes. An exit is a command the
+// next-steps table does not refuse that, once the fixture's cause is removed,
+// the service carries out and that leaves the row; a command that fails and
+// leaves the row as it was is not one. Every row's exit is driven with a
+// deadline that has passed and with none, except that a starting session
+// past its deadline is overdue, and nothing is overdue without one.
+func TestEveryRowsExitLeavesItPastTheDeadlineAndWithoutOne(t *testing.T) {
 	t.Parallel()
-	hasExit := func(row step) bool {
-		for _, command := range commands {
-			o := outcomes[row][command]
-			if !slices.Contains(nextSteps[row].refuses, command) && !o.rejected && (o.after != row || o.reply != "") {
-				return true
-			}
-		}
-		return false
-	}
-	for row := range nextSteps {
-		if !hasExit(row) {
-			t.Errorf("row %s has no exit after the deadline", row)
-		}
+	if len(rowFixtures) != len(nextSteps) {
+		t.Fatalf("%d fixtures for %d table rows", len(rowFixtures), len(nextSteps))
 	}
 	for name, st := range derivedStates(t) {
-		if !hasExit(st.step()) {
-			t.Errorf("%s (row %s) has no exit after the deadline", name, st.step())
+		if _, ok := rowFixtures[st.step()]; !ok {
+			t.Errorf("%s derives row %s, which has no fixture", name, st.step())
 		}
+	}
+	for row, f := range rowFixtures {
+		if !slices.Contains(f.clocks, clockPassed) && row != stepStarting ||
+			!slices.Contains(f.clocks, clockNone) && row != stepOverdue {
+			t.Errorf("row %s is not driven past the deadline and without one: %v", row, f.clocks)
+		}
+		for _, c := range f.clocks {
+			if c == clockAhead {
+				continue
+			}
+			t.Run(string(row)+"/"+string(c), func(t *testing.T) {
+				t.Parallel()
+				s, id, exit := f.build(t, c)
+				if before := rowAfter(t, s, id); before != row {
+					t.Fatalf("the fixture reached %s, not %s", before, row)
+				}
+				checkClock(t, s, id, c)
+				q := exit()
+				if slices.Contains(nextSteps[row].refuses, q.Action) {
+					t.Fatalf("row %s refuses its exit %s", row, q.Action)
+				}
+				r := exchange(t, s, q)
+				if after := rowAfter(t, s, id); after == row {
+					t.Fatalf("row %s has no exit with the deadline %s: %s left it there: %q", row, c, q.Action,
+						r.Error)
+				}
+			})
+		}
+	}
+}
+
+// checkClock checks that the deadline of session id's current execution, or
+// of its last stop when it has none, has passed under clockPassed and is
+// unset under clockNone.
+func checkClock(t *testing.T, s *Service, id string, c deadlineClock) {
+	t.Helper()
+	entry, err := s.readCatalog(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	until := entry.Committed.Launch.Deadline
+	if entry.Current != "" {
+		r, err := s.coordinator.Inspect(entry.Current)
+		if err != nil {
+			t.Fatal(err)
+		}
+		until = r.Deadline
+	}
+	passed := s.coordinator.PastDeadline(session.Record{Deadline: until})
+	if c == clockPassed && !passed || c == clockNone && !until.IsZero() {
+		t.Fatalf("deadline %v under clock %s", until, c)
 	}
 }
