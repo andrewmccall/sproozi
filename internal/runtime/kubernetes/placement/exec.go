@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"path"
+	"regexp"
 	"strings"
 
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
@@ -124,12 +126,28 @@ func operation(args []string) string {
 // maxCause bounds the exec error text a failed command keeps.
 const maxCause = 512
 
-// execCause is err's text on one line, at most maxCause bytes. It comes from
-// the exec client, the API server, the kubelet and the container runtime: an
-// exit code, a broken or reset stream, a container that is gone, a timeout,
-// never the command's own output, which travels on its own streams.
+// requestURL matches what the text of an exec error may hold of its request:
+// a URL, quoted or not, or any word with a query. The exec request's URL
+// carries every argument of the command in its query, such as the files a
+// capture selects, its thread and the instruction digest.
+var requestURL = regexp.MustCompile(`"?[A-Za-z][A-Za-z0-9+.-]*://[^\s"]*"?|[^\s"]*\?[^\s"]*=[^\s"]*`)
+
+// execCause is err's text on one line, at most maxCause bytes, without the
+// exec request's URL. It comes from the exec client, the API server, the
+// kubelet and the container runtime: an exit code, a broken or reset stream,
+// a refused connection, a container that is gone, a timeout, never the
+// command's own output, which travels on its own streams. A *url.Error in the
+// chain keeps its operation and inner error; client-go also folds one into
+// plain text (spdy.Negotiate's "error sending request: %v"), so any URL left
+// in the text is replaced as well.
 func execCause(err error) string {
-	cause := strings.ToValidUTF8(strings.Join(strings.Fields(err.Error()), " "), "?")
+	text := err.Error()
+	var request *url.Error
+	if errors.As(err, &request) {
+		text = request.Op + " request: " + request.Err.Error()
+	}
+	text = requestURL.ReplaceAllString(text, "request")
+	cause := strings.ToValidUTF8(strings.Join(strings.Fields(text), " "), "?")
 	if len(cause) > maxCause {
 		cause = strings.ToValidUTF8(cause[:maxCause], "") + "…"
 	}
