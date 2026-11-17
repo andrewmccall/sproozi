@@ -220,6 +220,12 @@ type contradiction struct {
 	reasons    []string
 }
 
+// Unwrap makes a contradiction session.ErrRecordContradicted and, over the
+// profile protocol, the permanent conflict a retry does not cure.
+func (c *contradiction) Unwrap() []error {
+	return []error{session.ErrRecordContradicted, &profile.Rejection{Code: profile.CodeConflict}}
+}
+
 func (c *contradiction) Error() string {
 	return fmt.Sprintf("placement: the retained record of visit %s %s", c.allocation, strings.Join(c.reasons, "; it "))
 }

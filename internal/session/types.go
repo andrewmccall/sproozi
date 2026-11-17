@@ -165,6 +165,12 @@ type Observation struct {
 // repeats only the seal and capture, never the native handoff.
 var ErrUsageUnsealed = errors.New("session: writer stopped but usage is not sealed")
 
+// ErrRecordContradicted matches a placement refusing to start or extend
+// work because what it retains about the visit contradicts itself or the
+// placement's other records (ADR 0066). Retrying never helps; stopping or
+// cancelling the session ends the visit.
+var ErrRecordContradicted = errors.New("session: the placement's record of the visit contradicts itself; stop or cancel the session")
+
 // ErrRecoveryRequired matches a refusal of a new move or stop because an
 // earlier one on the same execution must be recovered or cancelled first.
 var ErrRecoveryRequired = errors.New("session: recovery required")

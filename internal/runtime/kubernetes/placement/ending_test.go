@@ -3,6 +3,7 @@ package placement
 import (
 	"context"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	runtimekube "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
 	"github.com/andrewmccall/sproozi/internal/session"
+	"github.com/andrewmccall/sproozi/internal/session/profile"
 	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -352,6 +354,28 @@ func TestAContradictionIsLoggedOnce(t *testing.T) {
 	}
 	if lines := strings.Count(log.String(), "records the writer fenced, but its session registration is still active"); lines != 1 {
 		t.Fatalf("logged the contradiction %d times:\n%s", lines, log.String())
+	}
+}
+
+// Over the profile protocol a contradicted record is the permanent conflict,
+// not the unavailable a retry may cure, and it is
+// session.ErrRecordContradicted in process.
+func TestAContradictionIsAConflictOverTheProfileProtocol(t *testing.T) {
+	t.Parallel()
+	p, _, _, l, data := setup(t)
+	i, err := p.Prepare(t.Context(), l, data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contradict(t, p, l, func(r *retained) { r.NativeQuiet = true })
+	if err = p.Activate(t.Context(), l, i); !errors.Is(err, session.ErrRecordContradicted) {
+		t.Fatalf("activate in process: %v", err)
+	}
+	c := serveProfile(t, p, l, 10*time.Second)
+	err = c.Activate(t.Context(), l, i)
+	var remote *profile.RemoteError
+	if !errors.As(err, &remote) || remote.Code != profile.CodeConflict || remote.Status != http.StatusConflict {
+		t.Fatalf("activate over the protocol: %v", err)
 	}
 }
 

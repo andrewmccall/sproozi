@@ -4,12 +4,15 @@ package work
 import (
 	"crypto/tls"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/andrewmccall/sproozi/internal/harness"
+	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
 	"github.com/google/uuid"
 )
@@ -117,6 +120,26 @@ func TestWorkStatusRetainsSafeAsyncRecoveryCategory(t *testing.T) {
 	}
 	if status.CheckpointDigest != "" || status.ThreadID != "" {
 		t.Fatalf("refused preparation manufactured completion: %+v", status)
+	}
+}
+
+// A placement's contradicted record of the visit is permanent: the problem
+// names it and says to stop or cancel, not to recover.
+func TestWorkStatusNamesAContradictedPlacementRecord(t *testing.T) {
+	t.Parallel()
+	c, p := fixture(t)
+	p.refusePrepare = fmt.Errorf("placement: the retained record of visit V records a stop, but its session registration was never active: %w",
+		errors.Join(session.ErrRecordContradicted, &profile.Rejection{Code: profile.CodeConflict}))
+	o, err := Open(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = o.Close() }()
+	initial := submit(t, o)
+	status := waitDriver(t, o, initial.ID)
+	if !strings.HasPrefix(status.Problem, "conflict:") || !strings.Contains(status.Problem, "never active") ||
+		!strings.HasSuffix(status.Problem, "stop or cancel this session") || strings.Contains(status.Problem, "recover") {
+		t.Fatalf("problem of a contradicted placement record: %q", status.Problem)
 	}
 }
 

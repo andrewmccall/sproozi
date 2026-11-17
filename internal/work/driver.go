@@ -288,9 +288,20 @@ func (o *Owner) after(ctx context.Context, r record, err error, onError next) ne
 	}
 	o.logf("Could not continue work session %s: %v", r.ID, err)
 	if onError == nextDone {
-		o.note(r.ID, outcomeMessage(err)+"; inspect status and recover this session")
+		o.note(r.ID, failureProblem(err))
 	}
 	return onError
+}
+
+// failureProblem is the problem a failed step records. A placement's
+// contradicted record of the visit is permanent: recovering meets it again,
+// and only stopping or cancelling the session ends the visit, so the problem
+// names it and says so.
+func failureProblem(err error) string {
+	if errors.Is(err, session.ErrRecordContradicted) {
+		return fmt.Sprintf("%s: %v; stop or cancel this session", profile.CodeConflict, err)
+	}
+	return outcomeMessage(err) + "; inspect status and recover this session"
 }
 
 // note records the driver's latest problem with the session, or clears it.
