@@ -11,7 +11,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/andrewmccall/sproozi/internal/privatefs"
 )
@@ -276,30 +275,32 @@ func recordSize(st State) (int, error) {
 	return len(data) + 1, err
 }
 
-// sizeAfterGrowth is an upper bound on the size of st after prepare or
-// replace adds a generation: it measures a throwaway copy with one more
-// generation, a rotation and two trusted generations. It changes no record.
-func (s *Store) sizeAfterGrowth(st State) (int, error) {
-	next := st.clone()
-	id := len(next.Generations) + 1
-	next.Generations = append(next.Generations, Generation{ID: id, Fingerprint: strings.Repeat("0", 64),
-		NotAfter: s.now().Add(s.policy.CAValidity).UTC().Truncate(time.Second)})
-	next.Trusted = []int{max(id-1, 1), id}
-	next.Rotation = &Rotation{Stage: StageSwitched, From: max(id-1, 1), To: id, PreparedAt: s.now().UTC()}
-	next.Leaf = "leaf-" + strings.Repeat("0", 16)
-	return recordSize(next)
-}
+// growthReserve is the headroom below maxState that a move starting
+// something must find. The invariant: prepare, replace and a change of the
+// serving names happen only while the record is at most maxState -
+// growthReserve bytes, and everything that can then follow before the store
+// is single again - the new generation entry, the rotation, a second trusted
+// id, a serving id a digit longer, a full-precision preparation time, a
+// retired flag, a new leaf name of fixed length - adds at most about 360
+// bytes (a generation entry about 185 with its retired flag, the rotation
+// about 135 with a nanosecond timestamp, the trusted id and a longer serving
+// id about 20). So switch, rollback, retire and renewal with unchanged names
+// always commit. The reserve is 1024 bytes, nearly three times that, and
+// TestTheReserveCoversWhatFinishingAdds measures it. commit's own size check
+// stays as the last guard.
+const growthReserve = 1024
 
-// grows refuses an operation that adds a generation when the record it would
-// save is larger than load reads, before the operation writes anything.
-func (s *Store) grows(st State, ev event) error {
-	size, err := s.sizeAfterGrowth(st)
+// startsWithin refuses a move that starts something when the record st,
+// before the move, leaves less than growthReserve below what load reads. It
+// runs before the move writes anything.
+func startsWithin(st State, what string) error {
+	size, err := recordSize(st)
 	if err != nil {
 		return err
 	}
-	if size > maxState {
-		return fmt.Errorf("pki: refusing to %s: the record would be %d bytes, more than the %d bytes load reads; "+
-			"start a new authority directory and trust it everywhere", ev, size, maxState)
+	if size > maxState-growthReserve {
+		return fmt.Errorf("pki: refusing to %s: the record is %d bytes, and starting it needs %d bytes below the "+
+			"%d bytes load reads; start a new authority and trust it everywhere", what, size, growthReserve, maxState)
 	}
 	return nil
 }
@@ -347,11 +348,12 @@ func (s *Store) replaceable(st State) (State, error) {
 		if !strings.HasPrefix(source, "ca-") {
 			remedy = "correct that id, or restore state.json from a backup"
 		}
-		return fmt.Errorf("pki: replace would number the new authority after %s, and a record of %d generations "+
-			"is %s, more than the %d bytes load reads; %s, and replace again", source, highest+1, size, maxState, remedy)
+		return fmt.Errorf("pki: replace would number the new authority after %s, and the %d generations before it "+
+			"take %s, leaving less than the %d bytes a new authority needs below the %d bytes load reads; %s, "+
+			"and replace again", source, highest, size, growthReserve, maxState, remedy)
 	}
-	if highest+1 > maxState/minGenerationBytes {
-		return State{}, tooLarge(fmt.Sprintf("more than %d bytes", (highest+1)*minGenerationBytes))
+	if highest > maxState/minGenerationBytes {
+		return State{}, tooLarge(fmt.Sprintf("more than %d bytes", highest*minGenerationBytes))
 	}
 	base := State{Version: 1, Names: st.Names}
 	for id := 1; id <= highest; id++ {
@@ -365,11 +367,11 @@ func (s *Store) replaceable(st State) (State, error) {
 		}
 		base.Generations = append(base.Generations, g)
 	}
-	size, err := s.sizeAfterGrowth(base)
+	size, err := recordSize(base)
 	if err != nil {
 		return State{}, err
 	}
-	if size > maxState {
+	if size > maxState-growthReserve {
 		return State{}, tooLarge(fmt.Sprintf("%d bytes", size))
 	}
 	return base, nil

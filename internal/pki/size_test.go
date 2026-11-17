@@ -29,10 +29,10 @@ func TestReplaceIsNotDrivenPastWhatLoadReads(t *testing.T) {
 		// Beyond maxState/minGenerationBytes, refused before the history is
 		// built: a name like ca-999999999.pem must not build a billion
 		// entries.
-		{"stray ca-2000.pem, refused before building", "ca-2000.pem", "after ca-2000.pem, and a record of 2001 generations is more than",
+		{"stray ca-2000.pem, refused before building", "ca-2000.pem", "after ca-2000.pem, and the 2000 generations before it take more than",
 			func(st *State) { st.Serving = 9 }},
 		// Within it, refused by the measured size.
-		{"stray ca-900.pem, measured", "ca-900.pem", "after ca-900.pem, and a record of 901 generations is 1",
+		{"stray ca-900.pem, measured", "ca-900.pem", "after ca-900.pem, and the 900 generations before it take 10",
 			func(st *State) { st.Serving = 9 }},
 		{"generation id 5000 in the record", "", "after generation 5000 in state.json",
 			func(st *State) { st.Generations[0].ID = 5000 }},

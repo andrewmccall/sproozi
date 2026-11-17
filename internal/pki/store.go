@@ -332,7 +332,7 @@ func (s *Store) PrepareRotation() error {
 		if err = st.admit(evPrepare); err != nil {
 			return err
 		}
-		if err = s.grows(st, evPrepare); err != nil {
+		if err = startsWithin(st, string(evPrepare)); err != nil {
 			return err
 		}
 		now := s.now()
@@ -437,7 +437,7 @@ func (s *Store) ReplaceCA() error {
 		if err = st.admit(evReplace); err != nil {
 			return err
 		}
-		if err = s.grows(st, evReplace); err != nil {
+		if err = startsWithin(st, string(evReplace)); err != nil {
 			return err
 		}
 		now := s.now()
