@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	runtimekube "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
@@ -337,5 +338,72 @@ func TestCoordinatorStopWithALostFinish(t *testing.T) {
 				t.Fatalf("recover after an unproven finish: %s %v", r.Phase, err)
 			}
 		})
+	}
+}
+
+// laggingHelper is a finish whose exec reports lost while the Pod still
+// shows the helper running for the next behind reads, and ended with code
+// afterwards, as the kubelet reports a container's end only at its next
+// relist.
+func laggingHelper(kube *admissionClient, behind int, code int32, lost error) func(context.Context, string, string) error {
+	return func(context.Context, string, string) error {
+		reads := 0
+		read := func(pod *corev1.Pod) {
+			if reads++; reads > behind {
+				s := &pod.Status.ContainerStatuses[helperContainer]
+				s.State = fixtureTermination(s.ContainerID, code)
+			}
+		}
+		kube.podRead.Store(&read)
+		return lost
+	}
+}
+
+// failAfterPlacement bounds a wait that only a failure reaches.
+const failAfterPlacement = 30 * time.Second
+
+// The exec breaks when the helper's container ends, but the Pod reports
+// that end only after the kubelet's next relist, about a second later. A
+// stop whose finish failed waits for the helper's end within its bound, so
+// the lagging report proves the finish on the first attempt. Guards: the
+// wait in Placement.finish.
+func TestALostFinishWaitsForTheHelpersEndToBeReported(t *testing.T) {
+	t.Parallel()
+	p, kube, e, l, data := setup(t)
+	p.helperEndWait = time.Minute
+	i := activeVisit(t, p, l, data)
+	e.finishOutcome = laggingHelper(kube, 3, 0, errCutStream)
+	s, err := p.Stop(t.Context(), l, i)
+	if err != nil || !s.ActualStopped || s.CheckpointDigest != e.meta.SHA256 || e.finishes != 1 {
+		t.Fatalf("a stop whose helper's end was reported late: %+v %v", s, err)
+	}
+	kube.podRead.Store(nil)
+	if fenceHeld(t, p, l) {
+		t.Fatal("the writer-fence finalizer was kept after a proven finish")
+	}
+}
+
+// A helper reported ended with another code cannot end with 0 later, since
+// the Pod never restarts a container: the wait ends at once, unproven.
+// Guards: that the wait stops on a final reading rather than holding the
+// stop for its whole bound.
+func TestALostFinishStopsWaitingOnAHelperThatEndedOtherwise(t *testing.T) {
+	t.Parallel()
+	p, kube, e, l, data := setup(t)
+	p.helperEndWait = time.Hour
+	i := activeVisit(t, p, l, data)
+	e.finishOutcome = laggingHelper(kube, 1, 137, errCutStream)
+	stopped := make(chan error, 1)
+	go func() {
+		_, err := p.Stop(t.Context(), l, i)
+		stopped <- err
+	}()
+	select {
+	case err := <-stopped:
+		if err == nil {
+			t.Fatal("a helper that ended 137 proved a finish")
+		}
+	case <-time.After(failAfterPlacement):
+		t.Fatal("the stop kept waiting for a helper that had ended 137")
 	}
 }

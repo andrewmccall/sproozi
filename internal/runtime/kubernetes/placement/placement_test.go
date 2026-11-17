@@ -780,6 +780,8 @@ func setupKind(t *testing.T, kind harness.NativeKind) (*Placement, *admissionCli
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = p.Close() })
+	// A helper the fixture never ends is not waited for long.
+	p.helperEndWait = 300 * time.Millisecond
 	data, meta := fixtureArtifactKind(t, kind)
 	executor := &protocolExecutor{kube: kube, data: data, meta: meta, state: harness.NativePrepared}
 	p.exec = executor

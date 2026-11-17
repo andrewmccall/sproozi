@@ -747,6 +747,13 @@ func (p *Placement) ended(ctx context.Context, local retained, r registry.Record
 	return local, r, nil
 }
 
+// helperEndWait bounds a stop's wait, after its finish exec failed, for a
+// read of the Pod to show the checkpoint helper ended. The helper ends within
+// its own reply grace (finishReplyGrace in cmd/checkpoint, 10 seconds) of the
+// request, and the kubelet reports a container's end at its next relist,
+// about a second later; the caller's context still ends the wait sooner.
+const helperEndWait = 15 * time.Second
+
 // lostReplyWait bounds a stop's wait, after its quiesce reply was lost, for
 // the native container to be seen to end, as the Docker placement waits for
 // its agent container. Tests shorten it.
@@ -1059,31 +1066,62 @@ func (p *Placement) finish(ctx context.Context, local retained, r registry.Recor
 }
 
 // helperFinished reports what proves that the capture helper of r's exact
-// Pod has finished, read afresh, and whether anything does. The
-// registration must be stopped and local's writer fenced, which a stopped
-// registration's receipt proves (ADR 0066). Then either the helper's
-// container ended, by the runtime's own report, with code 0, which the
-// helper returns only from a finish it acknowledged; or the Pod is gone, so
-// no helper is left to finish, as the replay of a stopped visit takes it
-// (finishStopped). A helper still running, one that ended with another
-// code, a termination the runtime did not report for that container, a
-// replaced Pod or a read that fails prove nothing.
+// Pod has finished, and whether anything does. The registration must be
+// stopped with its receipt and local's writer fenced, which that receipt
+// proves (ADR 0066). Then it reads the Pod afresh, every 100 milliseconds
+// for at most p.helperEndWait, since the kubelet reports a container's end
+// only at its next relist, until either the Pod is gone, so no helper is
+// left to finish, as the replay of a stopped visit takes it (finishStopped),
+// or the reading proves the finish (finishReading). A reading that can no
+// longer become proof (a helper ended with another code, a replaced Pod)
+// ends the wait at once. A helper still running when the wait ends, a
+// termination the runtime did not report for that container, or reads that
+// fail prove nothing.
 func (p *Placement) helperFinished(ctx context.Context, local retained, r registry.Record) (string, bool) {
 	if r.Phase != registry.Stopped || r.Receipt == nil || !local.WriterFenced {
 		return "", false
 	}
-	pod, err := p.exactPod(ctx, r)
-	if apierrors.IsNotFound(err) {
-		return "the Pod is gone", true
+	ctx, cancel := context.WithTimeout(ctx, p.helperEndWait)
+	defer cancel()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		pod, err := p.exactPod(ctx, r)
+		var rejection *profile.Rejection
+		switch {
+		case apierrors.IsNotFound(err):
+			return "the Pod is gone", true
+		case errors.As(err, &rejection):
+			return "", false
+		case err == nil:
+			proven, final := finishReading(pod)
+			if proven {
+				return "the helper ended with code 0", true
+			}
+			if final {
+				return "", false
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return "", false
+		case <-ticker.C:
+		}
 	}
-	if err != nil {
-		return "", false
-	}
+}
+
+// finishReading reports whether one reading of a stopped visit's Pod proves
+// that its capture helper finished, and whether the reading is final: it can
+// never become proof. The helper's container ended, by the runtime's own
+// report, with code 0, which the helper returns only from a finish it
+// acknowledged: its deadline, SIGTERM and every error exit 1, and the Pod
+// never restarts a container. Ended with another code is final.
+func finishReading(pod *corev1.Pod) (proven, final bool) {
 	helper := sandboxpod.Observe(pod).Capture
-	if !helper.Ended() || helper.Terminated.ExitCode != 0 {
-		return "", false
+	if !helper.Ended() {
+		return false, false
 	}
-	return "the helper ended with code 0", true
+	return helper.Terminated.ExitCode == 0, true
 }
 func (p *Placement) exactPod(ctx context.Context, r registry.Record) (*corev1.Pod, error) {
 	var pod corev1.Pod
