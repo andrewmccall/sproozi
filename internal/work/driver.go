@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
@@ -19,7 +20,32 @@ const (
 	problemRevoked = "its project no longer admits this installation"
 	// problemUndecided: the driver has no rule for the session's state.
 	problemUndecided = "the executor has no rule for this session's state; it keeps retrying, and the executor's log names the state"
+	// problemRefused begins the problem of a session whose placement
+	// refused its first visit for good; the placement's reason follows
+	// (ADR 0067).
+	problemRefused = "it can never start"
 )
+
+// refusedProblem is the problem the placement's refusal err records for
+// session r: its reason and, while the start is not yet ended, what to run.
+func refusedProblem(r record, err error) string {
+	problem := problemRefused + ": its placement refused it"
+	var refused *session.StartRefused
+	if errors.As(err, &refused) && refused.Reason != "" {
+		problem = problemRefused + ": " + refused.Reason
+	}
+	if !errors.Is(err, session.ErrStartEnded) {
+		end := "cancel this session"
+		if r.Intent.Mode == ModeInteractive {
+			end = "recover or cancel this session"
+		}
+		problem += "; the executor has not yet shown that nothing runs there, so " + end
+	}
+	return problem
+}
+
+// refusalProblem reports a problem refusedProblem recorded.
+func refusalProblem(problem string) bool { return strings.HasPrefix(problem, problemRefused+": ") }
 
 // actionTaskComplete derives the operation of a task's completion wait: the
 // stop the driver asks for at once, which the supervisor carries out only
@@ -203,8 +229,20 @@ func (o *Owner) carryOut(ctx context.Context, r record, rec *session.Record, act
 		// of starting: it stays stopped with what its earlier execution
 		// committed, and resume continues it (ADR 0060).
 		_, err := coordinator.Recover(ctx, rec.ID)
-		if errors.Is(err, session.ErrDeadlinePassed) {
+		switch {
+		case errors.Is(err, session.ErrDeadlinePassed):
 			o.note(r.ID, problemExpired)
+			return nextAgain
+		case errors.Is(err, session.ErrStartRefused):
+			// The placement can never start it, so its start ends now with
+			// the reason, deadline or none (ADR 0067): an interactive
+			// session stays stopped with its work, and the next step
+			// cancels a task. A start not yet shown to have ended leaves
+			// an interactive session to its owner.
+			o.note(r.ID, refusedProblem(r, err))
+			if r.Intent.Mode == ModeInteractive && !errors.Is(err, session.ErrStartEnded) {
+				return nextDone
+			}
 			return nextAgain
 		}
 		return o.after(ctx, r, err, nextDone)
@@ -242,6 +280,10 @@ func (o *Owner) carryOut(ctx context.Context, r record, rec *session.Record, act
 		return o.end(ctx, r, "deadline-expired", problemExpired)
 	case actEndRevoked:
 		return o.end(ctx, r, "project-revoked", problemRevoked)
+	case actEndRefused:
+		// A task its placement refused has no result: nothing ran. Its
+		// problem already names the refusal.
+		return o.end(ctx, r, "start-refused", r.Problem)
 	case actNothing:
 	}
 	return nextDone
@@ -317,7 +359,8 @@ func (o *Owner) note(id, problem string) {
 	defer unlock()
 	r, err := o.read(id)
 	if err != nil || r.Problem == problem || r.Finished || r.CancelOperation != "" ||
-		r.Problem == problemExpired || r.Problem == problemRevoked {
+		r.Problem == problemExpired || r.Problem == problemRevoked ||
+		refusalProblem(r.Problem) && !refusalProblem(problem) {
 		return
 	}
 	r.Problem = problem

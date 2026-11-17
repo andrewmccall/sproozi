@@ -35,6 +35,9 @@ const (
 	// actEndRevoked cancels a session whose project no longer admits this
 	// installation, recording that problem.
 	actEndRevoked action = "end-revoked"
+	// actEndRefused cancels a task whose placement refused its start for
+	// good, keeping the problem that names why (ADR 0067).
+	actEndRefused action = "end-refused"
 )
 
 // phaseNotReceived is the driver's phase for an execution the coordinator
@@ -55,6 +58,10 @@ type situation struct {
 	// deadline has passed; once idle, the deadline ended its first visit
 	// before it started (startEnded). Once a visit started, it is false.
 	lateStart bool
+	// refused: the placement refused the first visit's start for good
+	// (ADR 0067), which the session's problem records. Only a starting or
+	// idle execution has it.
+	refused bool
 }
 
 // situationOf is the driver's situation for record r, whose current
@@ -74,6 +81,7 @@ func (o *Owner) situationOf(r record, rec *session.Record) situation {
 	}
 	if rec != nil {
 		s.phase, s.cancel = rec.Phase, rec.CancelOperation != ""
+		s.refused = (rec.Phase.Starting() || rec.Phase == session.PhaseIdle) && refusalProblem(r.Problem)
 	}
 	return s
 }
@@ -112,15 +120,16 @@ func (m rowMode) holds(interactive bool) bool {
 
 // decisionRow maps every situation it matches to one action.
 type decisionRow struct {
-	phases                     []session.Phase
-	mode                       rowMode
-	cancel, revoked, lateStart condition
-	action                     action
+	phases                              []session.Phase
+	mode                                rowMode
+	cancel, revoked, lateStart, refused condition
+	action                              action
 }
 
 func (row decisionRow) matches(s situation) bool {
 	return slices.Contains(row.phases, s.phase) && row.mode.holds(s.interactive) &&
-		row.cancel.holds(s.cancel) && row.revoked.holds(s.revoked) && row.lateStart.holds(s.lateStart)
+		row.cancel.holds(s.cancel) && row.revoked.holds(s.revoked) && row.lateStart.holds(s.lateStart) &&
+		row.refused.holds(s.refused)
 }
 
 // Phase groups the decision table names.
@@ -148,11 +157,15 @@ var (
 // deadline end a session only before it settles: a revoked project ends any
 // session the coordinator may still run that no cancellation already ends,
 // and the deadline ends a task, or any session not yet received, only
-// before its first visit started (ADR 0060).
+// before its first visit started (ADR 0060). A placement's refusal of the
+// first visit ends a task too, whatever the deadline, naming the refusal
+// rather than the deadline (ADR 0067); an interactive session it ended stays
+// stopped for its owner, as one the deadline ended does.
 var decisions = []decisionRow{
 	{phases: []session.Phase{session.PhaseCancelled}, action: actNothing},
 	{phases: []session.Phase{session.PhaseIdle}, mode: interactiveOnly, action: actNothing},
-	{phases: []session.Phase{session.PhaseIdle}, mode: taskOnly, lateStart: isTrue, action: actEndExpired},
+	{phases: []session.Phase{session.PhaseIdle}, mode: taskOnly, lateStart: isTrue, refused: isFalse, action: actEndExpired},
+	{phases: []session.Phase{session.PhaseIdle}, mode: taskOnly, lateStart: isTrue, refused: isTrue, action: actEndRefused},
 	{phases: []session.Phase{session.PhaseIdle}, mode: taskOnly, lateStart: isFalse, action: actFinish},
 
 	{phases: phasesUnsettled, mode: interactiveOnly, revoked: isFalse, action: actNothing},
@@ -165,8 +178,11 @@ var decisions = []decisionRow{
 
 	{phases: []session.Phase{phaseNotReceived}, revoked: isFalse, lateStart: isTrue, action: actEndExpired},
 	{phases: []session.Phase{phaseNotReceived}, revoked: isFalse, lateStart: isFalse, action: actStart},
-	{phases: phasesStarting, mode: taskOnly, cancel: isFalse, revoked: isFalse, lateStart: isTrue, action: actEndExpired},
-	{phases: phasesStarting, mode: taskOnly, cancel: isFalse, revoked: isFalse, lateStart: isFalse, action: actRecoverStart},
+	{phases: phasesStarting, mode: taskOnly, cancel: isFalse, revoked: isFalse, refused: isTrue, action: actEndRefused},
+	{phases: phasesStarting, mode: taskOnly, cancel: isFalse, revoked: isFalse, lateStart: isTrue, refused: isFalse,
+		action: actEndExpired},
+	{phases: phasesStarting, mode: taskOnly, cancel: isFalse, revoked: isFalse, lateStart: isFalse, refused: isFalse,
+		action: actRecoverStart},
 	{phases: phasesStarting, mode: interactiveOnly, cancel: isFalse, revoked: isFalse, action: actRecoverStart},
 	{phases: []session.Phase{session.PhaseActive}, mode: interactiveOnly, cancel: isFalse, revoked: isFalse, action: actNothing},
 	{phases: []session.Phase{session.PhaseActive, session.PhaseStopping}, mode: taskOnly, cancel: isFalse, revoked: isFalse,

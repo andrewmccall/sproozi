@@ -57,6 +57,9 @@ type stepPlacement struct {
 	refuseActivate bool
 	abort          abortOutcome
 	calls          map[string]int
+	// failInspectAfterPrepare fails every Inspect once Prepare was called,
+	// so a refused start cannot be shown to have ended.
+	failInspectAfterPrepare bool
 }
 
 func (p *stepPlacement) count(call string) (unreachable bool) {
@@ -92,6 +95,12 @@ func (p *stepPlacement) Stop(ctx context.Context, l session.Launch, i session.In
 
 func (p *stepPlacement) Inspect(ctx context.Context, l session.Launch) (session.Observation, error) {
 	if p.count("inspect") {
+		return session.Observation{}, errUnreachable
+	}
+	p.mu.Lock()
+	fail := p.failInspectAfterPrepare && p.calls["prepare"] > 0
+	p.mu.Unlock()
+	if fail {
 		return session.Observation{}, errUnreachable
 	}
 	return p.fixturePlacement.Inspect(ctx, l)
@@ -328,7 +337,18 @@ type journalState struct {
 	// task or interactive restricts a state one mode cannot hold.
 	taskOnly     bool
 	needDeadline bool
-	build        func(*testing.T, *driverEnv)
+	// refuses: the placement refuses the first visit's start for good.
+	refuses bool
+	build   func(*testing.T, *driverEnv)
+}
+
+// fixtureRefusal is the reason the fixture placement refuses a start with.
+const fixtureRefusal = "AgentRun session-0 failed before its sandbox started: RuntimeInvalid: image is required"
+
+// refuse makes the placement refuse every start from now on, as one whose
+// run ended before its sandbox started does (ADR 0067).
+func (e *driverEnv) refuse() {
+	e.fixture(func(p *fixturePlacement) { p.refusePrepare = &session.StartRefused{Reason: fixtureRefusal} })
 }
 
 // stateNotReceived names the state before the coordinator receives the
@@ -392,6 +412,17 @@ func journalStates() []journalState {
 		}},
 		{name: "idle-start-ended", needDeadline: true, build: func(t *testing.T, e *driverEnv) { e.abandon(t, false) }},
 		{name: "idle-start-ended-aborted", needDeadline: true, build: func(t *testing.T, e *driverEnv) { e.abandon(t, true) }},
+		{name: "preparing-start-refused", refuses: true, build: func(t *testing.T, e *driverEnv) {
+			e.create(t)
+			e.refuse()
+		}},
+		{name: "idle-start-refused", refuses: true, build: func(t *testing.T, e *driverEnv) {
+			e.create(t)
+			e.refuse()
+			if n := e.o.step(t.Context(), e.id); n != nextAgain {
+				t.Fatalf("refused start: %s", nextNames[n])
+			}
+		}},
 	}
 }
 
@@ -421,6 +452,8 @@ func (e *driverEnv) opName(op string) string {
 		return "deadline-expired"
 	case derivedOperation(e.id, "project-revoked"):
 		return "project-revoked"
+	case derivedOperation(e.id, "start-refused"):
+		return "start-refused"
 	}
 	return "other"
 }
