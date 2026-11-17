@@ -16,6 +16,7 @@ Two recorded sources, neither needing product code:
 """
 from datetime import datetime, timezone
 import re
+import time
 
 DURATION = re.compile(r"(\d+)([hms])")
 UNITS = {"h": 3600, "m": 60, "s": 1}
@@ -56,16 +57,61 @@ def server_timing(deadline, max_duration, first_request_at, waited):
             "secondsToFirstModelRequest": round(seconds, 3)}
 
 
+def server_timing_from(started, request, max_duration, waited):
+    """server_timing from the task's run output, the provider's first request
+    for it and the profile cap (seconds, or a string saying why it could not be
+    read). A figure that cannot be had comes back as serverTimingNote saying
+    which input was missing."""
+    note = "No submission-to-first-request figure: "
+    if isinstance(max_duration, str):
+        return {"serverTimingNote": note + max_duration}
+    if not started.get("deadline"):
+        return {"serverTimingNote": note + "the run output has no deadline"}
+    if not request or "at" not in request:
+        return {"serverTimingNote": note + "the provider recorded no first request time (at) for the task"}
+    return server_timing(started["deadline"], max_duration, request["at"], waited)
+
+
+# How long to wait for the controller to record completedAt. It sees the
+# sandbox end after the executor has already reported the task retained: about
+# 2 s later in the run that showed it (controller log 21:32:49, retained seen
+# about 21:32:47).
+RUN_COMPLETION_WAIT_SECONDS = 30
+
+
 def run_timing(agent_runs, uid):
     """The run's admission and completion times and the whole seconds between
-    them, from the AgentRun list's JSON, for the run with this UID. Empty if
-    there is no such run or it records neither time."""
-    for run in agent_runs.get("items", []):
+    them, from the AgentRun list's JSON, for the run with this UID. Returns
+    (fields, complete): fields hold the figure, or runTimingNote saying what
+    was missing; complete is False only when the run exists without
+    status.completedAt, which may yet be set."""
+    items = agent_runs.get("items", [])
+    for run in items:
         if run.get("metadata", {}).get("uid") != uid:
             continue
         status = run.get("status", {})
-        if not status.get("startedAt") or not status.get("completedAt"):
-            return {}
+        if not status.get("startedAt"):
+            return {"runTimingNote": "The AgentRun was found without status.startedAt"}, True
+        if not status.get("completedAt"):
+            return {"runTimingNote": "The AgentRun was found without status.completedAt"}, False
         return {"runAdmittedAt": status["startedAt"], "runCompletedAt": status["completedAt"],
-                "runSeconds": round(parse_time(status["completedAt"]) - parse_time(status["startedAt"]))}
-    return {}
+                "runSeconds": round(parse_time(status["completedAt"]) - parse_time(status["startedAt"]))}, True
+    return {"runTimingNote": "No AgentRun has UID %s among the %d listed" % (uid, len(items))}, True
+
+
+def await_run_timing(read, uid, limit=RUN_COMPLETION_WAIT_SECONDS, clock=None, sleep=None):
+    """run_timing, read again until status.completedAt is set or limit seconds
+    pass. read returns the AgentRun list's JSON. A failed read, or any other
+    absence, is final and noted."""
+    clock, sleep = clock or time.monotonic, sleep or time.sleep
+    end = clock() + limit
+    while True:
+        try:
+            fields, complete = run_timing(read(), uid)
+        except Exception as error:  # the list call or its output failed
+            return {"runTimingNote": "The AgentRun list call failed: %s: %s" % (type(error).__name__, error)}
+        if complete or clock() >= end:
+            if not complete:
+                fields["runTimingNote"] += " within %ds" % limit
+            return fields
+        sleep(1)
