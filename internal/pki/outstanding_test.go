@@ -28,15 +28,15 @@ func TestAKeyIsCheckedWhereItIsUsed(t *testing.T) {
 		ensure, use     string
 		use_            func(s *Store) error
 	}{
-		{"open to others", stPrepared, "ca-2.key", func(t *testing.T, path string) { must(t, os.Chmod(path, 0o644)) },
+		{"open to others", stPrepared, keyCA2, func(t *testing.T, path string) { must(t, os.Chmod(path, 0o644)) },
 			"generation 2 key ca-2.key is unreadable: privatefs: path must be owned, private and ordinary",
 			"pki: serving CA key unavailable; recover it or replace the CA: privatefs: path must be owned, private and ordinary",
 			func(s *Store) error { return s.SwitchRotation(true) }},
-		{"another key", stPrepared, "ca-2.key", func(t *testing.T, path string) { must(t, os.WriteFile(path, other(t), 0o600)) },
+		{"another key", stPrepared, keyCA2, func(t *testing.T, path string) { must(t, os.WriteFile(path, other(t), 0o600)) },
 			"generation 2 key ca-2.key does not match its certificate: pki: private key does not match certificate",
 			"pki: private key does not match certificate",
 			func(s *Store) error { return s.SwitchRotation(true) }},
-		{"garbage", stSingle, "ca-1.key", func(t *testing.T, path string) { must(t, os.WriteFile(path, []byte("not a key\n"), 0o600)) },
+		{"garbage", stSingle, keyCA1, func(t *testing.T, path string) { must(t, os.WriteFile(path, []byte("not a key\n"), 0o600)) },
 			"generation 1 key ca-1.key does not match its certificate: pki: one PKCS#8 private key required",
 			"pki: one PKCS#8 private key required",
 			func(s *Store) error { return s.Renew() }},
@@ -59,6 +59,23 @@ func TestAKeyIsCheckedWhereItIsUsed(t *testing.T) {
 				t.Errorf("use: %v, want %q", err, tc.use)
 			}
 		})
+	}
+}
+
+// A renewal Ensure cannot make is its own error, not outstanding cleanup:
+// with the serving key lost and the leaf due, Ensure fails naming the key.
+// Guards the error Ensure keeps from issue and publishTrust.
+func TestEnsureReportsARenewalItCannotMake(t *testing.T) {
+	roots := buildStates(t)
+	s := outcomeStore(t, copyStore(t, filepath.Join(roots["serving-key-lost"], "pki")))
+	st, err := s.State()
+	must(t, err)
+	cert, err := s.loadLeaf(st)
+	must(t, err)
+	s.now = (&clock{t: DefaultPolicy.RenewAt(cert.Leaf).Add(1)}).now
+	_, err = s.Ensure(testNames)
+	if err == nil || errors.Is(err, ErrOutstanding) || !strings.Contains(err.Error(), "pki: serving CA key unavailable") {
+		t.Errorf("ensure: %v", err)
 	}
 }
 

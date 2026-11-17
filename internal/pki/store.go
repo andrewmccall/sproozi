@@ -264,7 +264,7 @@ func (s *Store) Ensure(names Names) (bool, error) {
 		}
 		same := slices.Equal(st.Names.DNS, names.DNS) && slices.Equal(st.Names.IPs, names.IPs)
 		st.Names = names
-		if leaf, err := s.loadLeaf(st); same && err == nil && s.leafCurrent(st, leaf.Leaf, now) {
+		if leaf, loadErr := s.loadLeaf(st); same && loadErr == nil && s.leafCurrent(st, leaf.Leaf, now) {
 			err = s.publishTrust(st)
 		} else {
 			changed = true
