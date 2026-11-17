@@ -205,17 +205,26 @@ func TestAnEndedHelperProvesNoFinishBeforeTheStopCompleted(t *testing.T) {
 	if err = helperEnds(kube, 0, nil)(t.Context(), pod.Namespace, pod.Name); err != nil {
 		t.Fatal(err)
 	}
-	if proof, ok := p.helperFinished(t.Context(), local, r); ok {
-		t.Fatalf("an active registration's helper proved a finish: %s", proof)
-	}
-	stopped := r
-	stopped.Phase, stopped.Receipt = registry.Stopped, &registry.StopReceipt{}
-	if proof, ok := p.helperFinished(t.Context(), local, stopped); ok {
-		t.Fatalf("an unfenced writer's helper proved a finish: %s", proof)
-	}
-	local.WriterFenced = true
-	if _, ok := p.helperFinished(t.Context(), local, stopped); !ok {
-		t.Fatal("a stopped registration's helper that ended 0 proved nothing")
+	// Each condition alone withholds the proof; all three together give it.
+	for _, test := range []struct {
+		name            string
+		phase           registry.Phase
+		receipt, fenced bool
+		want            bool
+	}{
+		{"active registration with a receipt and a fence", registry.Active, true, true, false},
+		{"stopped registration without a receipt", registry.Stopped, false, true, false},
+		{"stopped registration without a fenced writer", registry.Stopped, true, false, false},
+		{"stopped registration with its receipt and a fenced writer", registry.Stopped, true, true, true},
+	} {
+		record, retained := r, local
+		record.Phase, record.Receipt, retained.WriterFenced = test.phase, nil, test.fenced
+		if test.receipt {
+			record.Receipt = &registry.StopReceipt{}
+		}
+		if proof, ok := p.helperFinished(t.Context(), retained, record); ok != test.want {
+			t.Errorf("%s: proof %q %v, want %v", test.name, proof, ok, test.want)
+		}
 	}
 }
 
@@ -338,6 +347,39 @@ func TestCoordinatorStopWithALostFinish(t *testing.T) {
 				t.Fatalf("recover after an unproven finish: %s %v", r.Phase, err)
 			}
 		})
+	}
+}
+
+// A Pod replaced at the same name after a failed finish says nothing of the
+// visit's helper and never will: the wait ends at once, unproven. Guards:
+// that a replaced Pod ends the wait rather than holding the stop for its
+// whole bound.
+func TestALostFinishStopsWaitingOnAReplacedPod(t *testing.T) {
+	t.Parallel()
+	p, kube, e, l, data := setup(t)
+	p.helperEndWait = time.Hour
+	i := activeVisit(t, p, l, data)
+	e.finishOutcome = func(context.Context, string, string) error {
+		replace := func(pod *corev1.Pod) {
+			pod.UID = "replacement"
+			s := &pod.Status.ContainerStatuses[helperContainer]
+			s.State = fixtureTermination(s.ContainerID, 0)
+		}
+		kube.podRead.Store(&replace)
+		return errCutStream
+	}
+	stopped := make(chan error, 1)
+	go func() {
+		_, err := p.Stop(t.Context(), l, i)
+		stopped <- err
+	}()
+	select {
+	case err := <-stopped:
+		if err == nil {
+			t.Fatal("a replaced Pod's helper proved a finish")
+		}
+	case <-time.After(failAfterPlacement):
+		t.Fatal("the stop kept waiting on a replaced Pod")
 	}
 }
 

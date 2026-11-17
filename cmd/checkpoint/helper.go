@@ -114,10 +114,6 @@ const (
 // finish, waits for its client to close before it exits. Tests shorten it.
 var finishReplyGrace = 10 * time.Second
 
-// awaitingClient is called when the helper begins that wait. Tests use it to
-// see the wait begin without sleeping.
-var awaitingClient = func() {}
-
 // hold keeps the quota-backed volume mounted after the native container stops.
 // Its private socket and receipt are never mounted into the native container.
 func hold(until deadline.Deadline) error {
@@ -173,10 +169,9 @@ func serve(ctx context.Context, until deadline.Deadline, listener net.Listener) 
 			// placement receives its exit status. The command closes only
 			// once it has read the reply to its end, which the half-close
 			// marks, so wait for that, within a bound.
-			if unix, ok := conn.(*net.UnixConn); ok {
-				_ = unix.CloseWrite()
+			if half, ok := conn.(interface{ CloseWrite() error }); ok {
+				_ = half.CloseWrite()
 			}
-			awaitingClient()
 			_ = conn.SetReadDeadline(time.Now().Add(finishReplyGrace))
 			_, _ = io.Copy(io.Discard, conn)
 			_ = conn.Close()

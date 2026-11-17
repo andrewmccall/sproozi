@@ -15,6 +15,19 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// The kept cause is one line of at most maxCause bytes, whatever the exec
+// reported. Guards: the bound and the joining of lines in execCause.
+func TestAFailedCommandKeepsOneBoundedLine(t *testing.T) {
+	t.Parallel()
+	long := execCause(errors.New(strings.Repeat("kubelet said ", 1000)))
+	if len(long) > maxCause+len("…") || !strings.HasSuffix(long, "…") {
+		t.Fatalf("a cause of %d bytes was kept: %q", len(long), long[:min(len(long), 80)])
+	}
+	if lines := execCause(errors.New("first line\nsecond\tline\r\nthird")); lines != "first line second line third" {
+		t.Fatalf("a cause on several lines was kept as %q", lines)
+	}
+}
+
 // failingExec fails every command with err(args, container).
 type failingExec struct {
 	err func(args []string, container string) error
