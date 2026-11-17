@@ -305,6 +305,28 @@ func startsWithin(st State, what string) error {
 	return nil
 }
 
+// namesFit refuses new serving names that would grow the record into the
+// growthReserve, before a leaf is issued for them. Names that shrink the
+// record, or keep it within the reserve, are allowed. Nothing in the
+// configuration bounds the names list, so this is checked, not reserved.
+func namesFit(st State, names Names) error {
+	before, err := recordSize(st)
+	if err != nil {
+		return err
+	}
+	st.Names = names
+	after, err := recordSize(st)
+	if err != nil {
+		return err
+	}
+	if after > before && after > maxState-growthReserve {
+		return fmt.Errorf("pki: refusing to change the serving names: the record would be %d bytes, within %d bytes "+
+			"of the %d bytes load reads; the serving names list does not fit, so shorten it or start a new authority",
+			after, growthReserve, maxState)
+	}
+	return nil
+}
+
 // caFileGeneration returns the generation a CA file name belongs to, or 0
 // for a name the store does not write.
 func caFileGeneration(name string) int {

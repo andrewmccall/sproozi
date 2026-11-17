@@ -263,6 +263,11 @@ func (s *Store) Ensure(names Names) (bool, error) {
 			return err
 		}
 		same := slices.Equal(st.Names.DNS, names.DNS) && slices.Equal(st.Names.IPs, names.IPs)
+		if !same {
+			if err = namesFit(st, names); err != nil {
+				return err
+			}
+		}
 		st.Names = names
 		if leaf, loadErr := s.loadLeaf(st); same && loadErr == nil && s.leafCurrent(st, leaf.Leaf, now) {
 			err = s.publishTrust(st)

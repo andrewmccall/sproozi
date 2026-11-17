@@ -199,6 +199,30 @@ func TestEveryFinishingMoveCommitsAtTheLargestStartedRecord(t *testing.T) {
 	}
 }
 
+// A names change that would leave the record without the headroom a
+// finishing move needs is refused before the leaf is issued, so nothing is
+// written, and the error names the names list; renewal with unchanged names
+// keeps working at the same size. Guards the names check in Ensure.
+func TestANamesChangeAtTheBoundIsRefusedFirst(t *testing.T) {
+	bases := boundBases(t)
+	s := boundStore(t, bases[PhaseSingle], maxState-5)
+	st, err := s.State()
+	must(t, err)
+	before := storeFiles(t, s.Dir())
+	wider := st.Names
+	wider.DNS = append(append([]string(nil), wider.DNS...), "z9999z.example.com")
+	_, err = s.Ensure(wider)
+	if err == nil || !strings.Contains(err.Error(), "serving names") {
+		t.Errorf("ensure with more names: %v, want a refusal naming the serving names", err)
+	}
+	if after := storeFiles(t, s.Dir()); !equalFiles(before, after) {
+		t.Error("a refused names change wrote the store")
+	}
+	if err = s.Renew(); err != nil {
+		t.Errorf("renew with unchanged names: %v", err)
+	}
+}
+
 // The reserve's own boundary: prepare and replace start at exactly
 // maxState - growthReserve bytes, and are refused one byte above, writing
 // nothing. Guards the comparison in startsWithin (reviewer's R09).
