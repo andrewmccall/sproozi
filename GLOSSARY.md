@@ -535,10 +535,12 @@ Also seen as: ChatGPT session.
 
 The 10 seconds after a transient failure to refresh the
 [ChatGPT credential](#chatgpt-credential) during which the gateway sends no
-further refresh for it; the first model request after the hold tries again.
-A refused refresh (the provider rejected the refresh token) is not held but
-remembered until an administrator signs in again. Neither waits on time: a new
-sign-in ends both at once. See
+further refresh for it; the first model request after the hold tries again,
+and until the access token expires requests still use it. A refused refresh
+(`invalid_grant`: the provider rejected the refresh token) is not held but
+remembered until an administrator signs in again or the gateway restarts.
+Neither waits on time: a new sign-in ends both within the 10-second reload
+interval. See
 [ADR 0069](docs/adr/0069-a-failed-chatgpt-refresh-is-remembered.md). Also
 seen as: refresh backoff, failed-until state.
 

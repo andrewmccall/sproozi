@@ -9,15 +9,15 @@ In `chatgpt` mode the gateway holds an administrator's ChatGPT sign-in and
 refreshes it itself ([ADR 0026](0026-single-gateway-refresh-owner-with-recreate.md),
 [ADR 0047](0047-harnesses-sign-in-to-their-own-model-providers.md)). The
 provider rotates the refresh token on every refresh. A refresh is due when the
-access token is within a minute of expiry; it runs under the gateway's lock,
-always from the stored session, and the result is saved before it is used.
+access token is within a minute of expiry. It always starts from the stored
+session, and its result is saved before it is used.
 
 A review found that a failed refresh left no state behind:
 
-- **An outage.** Every model request that found the token due took the lock
-  and sent its own refresh. Ten requests arriving together sent ten refreshes,
-  one after another, each waiting for those before it, up to 30 seconds each
-  when the endpoint did not answer.
+- **An outage.** Every model request that found the token due took the
+  authenticator's lock and sent its own refresh. Ten requests arriving
+  together sent ten refreshes, one after another, each waiting for those
+  before it, up to 30 seconds each when the endpoint did not answer.
 - **A refused sign-in.** After the provider refused the refresh token
   (`invalid_grant`, a 400 or 401), every model request sent the same spent
   token again, for as long as the gateway ran. Nothing ended that except an
@@ -31,8 +31,9 @@ A review found that a failed refresh left no state behind:
   token and was refused, so the sign-in was lost.
 
 The fix must not leak token material to callers or logs, must keep one refresh
-at a time per credential in a process, and must not leave any state waiting on
-time with no other exit ([ADR 0060](0060-no-state-waits-on-a-deadline-to-end.md)).
+at a time per credential in a process, must not hold any caller past its own
+deadline, and must not leave any state waiting on time with no other exit
+([ADR 0060](0060-no-state-waits-on-a-deadline-to-end.md)).
 
 ## Decision
 
@@ -46,7 +47,7 @@ There is no deadline column: no execution deadline applies.
 | State | Meaning | Refresh sent |
 | --- | --- | --- |
 | `ready` | No failure remembered | When due |
-| `held` | The last refresh failed transiently | When due and the hold has ended |
+| `held` | The last refresh failed, but not by a refusal | When due and the hold has ended |
 | `refused` | The provider refused the refresh token | Never for these credentials |
 
 | Event | From → to |
@@ -56,48 +57,84 @@ There is no deadline column: no execution deadline applies.
 | `refused` | `ready`, `held` → `refused` |
 | `signed-in` | `held`, `refused` → `ready` |
 
-- **Which failures refuse.** A token endpoint reply of 4xx other than 408 and
-  429 is a refusal: OAuth 2.0 returns `invalid_grant` and the other grant and
-  client errors as 400 or 401, and sending the same token again cannot change
-  the answer. No reply, a timeout, 408, 429, 5xx, a 200 that cannot be read
-  and a 200 whose credential is incomplete (for example, with no new refresh
-  token) are transient.
+- **Only `invalid_grant` refuses.** A refusal is a 400 or 401 whose JSON body
+  has `error` equal to an entry of `refusedGrantErrors`. The list holds
+  `invalid_grant`, the OAuth 2.0 code for a revoked, expired or spent grant
+  and the only one the repository records for this provider. The gateway
+  reads at most 4 KiB of an error reply, decodes only the `error` field, and
+  carries only the list's own string onward. Everything else is held: no
+  reply, a timeout, a redirect, every other status (a CDN's 403, a proxy's
+  407, a moved endpoint's 404, a 400 with another error, an empty or oversized
+  body), a 200 that cannot be read, and a 200 whose credential is incomplete,
+  for example with no new refresh token. Sending the request again may then
+  succeed, and none of these is the provider revoking the sign-in.
 - **The hold is 10 seconds** (`RefreshHold`), from the failure. It equals
   `SessionReloadInterval`, the documented bound on how old the gateway's view
   of the stored credential may be, so a remembered failure is never older than
   a remembered session. It is not a wait: the first model request after it
-  sends the refresh again. With the refresh client's 30-second timeout, a
-  provider that does not answer gets at most one refresh every 40 seconds from
-  the gateway, instead of one per model request.
-- **A new sign-in ends either state at once.** Every request in a hold or
-  after a refusal still reads the store, as before. When the stored
+  sends the refresh again.
+- **A still-valid access token is used during a hold.** While a transient
+  failure holds the refresh back and the access token has not expired,
+  requests are served with it. A refusal is never served, and once the token
+  expires inside a hold, requests fail until the next refresh.
+- **A failure is remembered as the session is.** Requests answer from the
+  in-memory copy and its refresh record for up to `SessionReloadInterval`
+  after the store was last read, then read it again. A hold or a refusal costs
+  one store read per 10 seconds, as a healthy session does.
+- **A new sign-in ends either state at that read.** When the stored
   credentials differ from those the failure was for, the record moves to
-  `ready` before anything else, so an administrator's new sign-in reaches the
-  next model request. `refused` has no exit by time: its only exit is the
-  event that fixes it.
-- **Requests that waited for the lock** see the failure the refresh before
-  them recorded, so a refresh failure costs one provider request however many
-  model requests were waiting. As before, no request uses the still-valid
-  access token during the refresh window once its refresh failed.
+  `ready` before anything else. An administrator's new sign-in reaches model
+  requests within `SessionReloadInterval`. `refused` has no exit by time: its
+  exits are a new sign-in and a gateway restart.
+- **The refresh runs in a goroutine the authenticator owns.** Each reload,
+  and refresh when due, is one attempt. At most one runs per credential; it is
+  started under the lock, which guards only which attempt is in flight and is
+  never held across a store call or the refresh. Every caller, including the
+  one that started it, waits for its result or for its own context, whichever
+  comes first, and a caller that leaves gets its context's error at once. A
+  caller that arrives while one is in flight joins it. Each step (the store
+  read, the save of an unsaved refresh, the refresh, and its save) runs under
+  its own 30-second bound and no caller's context, so the rotated token is
+  saved even if every caller has left, and the next request uses it without a
+  second refresh. An attempt ends within about 2 minutes in the worst case;
+  no model request, and so no budget reservation, waits longer than its own
+  deadline.
+- **No redirects.** Both gateways refresh with `NewRefreshClient`: no ambient
+  proxy, a 30-second timeout and no redirects, which would re-send the
+  refresh token to the redirect's target. `NewChatGPT` also refuses redirects
+  on any client it is given.
 - **What a caller sees.** The gateway's existing 503 with type `server_error`
   and code `provider_auth_unavailable`. Its message, and the audit record's
-  `denyReason`, add the cause, built from fixed phrases and an HTTP status
-  only: `provider authentication is unavailable: the ChatGPT sign-in could not
-  be renewed (token endpoint HTTP 503); the gateway tries again 10s after the
-  failure`, or `... the provider refused to renew the ChatGPT sign-in (token
-  endpoint HTTP 400); an administrator must sign in again`. Other provider
-  authentication failures keep the bare message.
-- **A refresh finishes once it has started.** The refresh, and each save of
-  its result, run under a context detached from the model request, bounded at
-  30 seconds, the timeout of the client both the cluster and the local gateway
-  refresh with. A harness that leaves no longer drops a rotated token.
+  `denyReason`, add the cause, built from fixed phrases, an HTTP status and
+  the matched list entry only: `provider authentication is unavailable: the
+  ChatGPT sign-in could not be renewed (token endpoint HTTP 503); the gateway
+  tries again 10s after the failure`, or `... the provider refused to renew
+  the ChatGPT sign-in (token endpoint HTTP 400 invalid_grant); an
+  administrator must sign in again`. Other provider authentication failures,
+  including a caller that left, keep the bare message.
 
 The record is held in memory by the one gateway process that owns the
 refresh. A gateway restart forgets it, and the first due request after the
-restart sends one refresh.
+restart sends one refresh. The attempt's goroutine is not tied to the
+gateway's drain: when the gateway stops, model calls end as before and the
+attempt keeps running on its own bounds until the process exits. If the
+process exits between the provider's reply and the save, the rotated token is
+lost, as ADR 0026 records for a crash.
 
 ## Alternatives
 
+- **Detach the refresh but keep it on the request's goroutine, under the
+  lock.** This was the first version of this change. A review measured it: a
+  request with a 50 ms deadline whose refresh took 1.5 s was held for the
+  1.5 s, and so was an already-cancelled request queued behind it on the lock,
+  each keeping its budget reservation, and up to 30 seconds for the refresh
+  plus 30 for each save in the worst case. Joining an owned attempt cost one
+  goroutine and one channel per attempt; the same test now returns at 51 ms
+  and at once.
+- **Refuse on any 4xx but 408 and 429.** Also the first version. A proxy's,
+  CDN's or moved endpoint's 4xx, or a 400 caused by this gateway, would have
+  ended a good sign-in with a false instruction to sign in again, where the
+  old code recovered as soon as the endpoint answered.
 - **Keep the record in the Secret or the private file.** It would survive a
   restart and reach any other reader, but it would add a field the login
   helper and `kubectl` users must preserve, and a store write on every
@@ -107,41 +144,48 @@ restart sends one refresh.
   provider recovers, and the repository records nothing about the provider's
   rate limits to size it from. A fixed hold tied to an existing interval is
   enough to stop the per-request storm.
-- **Serve the still-valid access token while a refresh is held.** During the
-  last minute before expiry the token still works. It would hide short
-  outages, but it changes what a request sees during a refresh, which this
-  change keeps.
-- **Let one request refresh in the background while others return at once.**
-  Waiters would not queue behind a slow refresh, but it needs a goroutine and
-  a result channel per refresh. With the hold, the queue is one refresh long.
+- **Read the store on every request while a failure is remembered.** An
+  administrator's new sign-in would be used on the next request instead of
+  within 10 seconds, at one Secret read per model request during an outage.
 
 ## Tradeoffs and consequences
 
-- A refresh failure in the last minute before expiry makes model requests fail
+- After the access token expires, a transient failure fails model requests
   for up to 10 seconds even if the provider recovers sooner.
-- A provider that wrongly answers 4xx to a good refresh token leaves the
-  sign-in `refused` until an administrator signs in again or the gateway
-  restarts.
-- A 200 without a new refresh token is still treated as a failed refresh, and
-  the new access token is dropped. If the provider had spent the old token,
-  the next refresh is refused.
-- A request whose harness left can still hold its handler for up to 30
-  seconds while its refresh finishes.
+- An administrator's new sign-in can take up to 10 seconds to reach model
+  requests after a failure, as it does when the sign-in is healthy.
+- A provider that wrongly answers `invalid_grant` to a good refresh token
+  leaves the sign-in `refused` until an administrator signs in again or the
+  gateway restarts.
+- A 200 without a new refresh token is still a failed refresh, and the new
+  access token is dropped. If the provider had spent the old token, the next
+  refresh is refused.
 - A timeout while the provider is answering still loses the rotated token, as
   does a crash before the save (ADR 0026).
+- An attempt can keep running for up to about 2 minutes after every caller
+  has left.
+
+Found and not fixed: on a local installation, `FileSessionStore.Replace`
+reads, compares and renames the credential file under a per-process lock
+only. A `sproozi init --chatgpt` sign-in written while the gateway saves a
+refresh can be overwritten by the refreshed old sign-in. A review measured
+the administrator's sign-in lost in 398 of 400 runs of that collision on this
+change and 382 of 400 before it, a 21 to 27 ms window this change did not
+widen. It needs its own fix.
 
 ## Revisit conditions
 
 Revisit if the gateway runs more than one replica that refreshes (then the
-record must be shared), if the provider documents a retry policy or a
-non-rotating refresh, if operators need an alert on a refused sign-in, or if
-refused sign-ins turn out to come from provider errors rather than revocation.
+record must be shared), if the provider documents a retry policy, other
+refusal codes or a non-rotating refresh, if operators need an alert on a
+refused sign-in, or if refused sign-ins turn out to come from provider errors
+rather than revocation.
 
 ## Links
 
 - [Model provider authentication](../guides/model-provider-auth.md#chatgpt-sign-in-failures)
 - [Required Secrets and configuration](../reference/required-secrets-and-config.md)
-- `internal/modelauth/refresh.go` (`refreshTransitions`, `RefreshHold`, `RefreshError`)
-- `internal/modelauth/auth.go` (`reloadOrRefresh`, `detached`)
+- `internal/modelauth/refresh.go` (`refreshTransitions`, `RefreshHold`, `RefreshError`, `refusedGrantErrors`, `NewRefreshClient`)
+- `internal/modelauth/auth.go` (`reloadOrRefresh`, `run`, `reload`, `served`)
 - `internal/endpoints/model/handler.go` (`forward`)
-- `internal/modelauth/refresh_test.go`, `internal/modelauth/refresh_state_test.go`
+- `internal/modelauth/refresh_test.go`, `refresh_state_test.go`, `refresh_attempt_test.go`, `refresh_classify_test.go`, `refresh_redirect_test.go`, `refresh_valid_test.go`
