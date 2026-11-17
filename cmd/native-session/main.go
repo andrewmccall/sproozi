@@ -308,10 +308,13 @@ func (s *server) watch(n *nativepty.Supervisor, cleanup func()) {
 	}
 	cleanup()
 	s.mu.Lock()
+	// The watcher concludes only an exit it settled itself. One a graceful
+	// stop settled is concluded by the stop, after its reply was read.
+	settled := s.life.phase != phaseEnded
 	s.apply(change{event: evExited, exit: exit, err: err})
-	ended := s.life.phase == phaseEnded
+	settled = settled && s.life.phase == phaseEnded
 	s.mu.Unlock()
-	if ended {
+	if settled {
 		s.conclude()
 	}
 }

@@ -126,3 +126,25 @@ func TestDeadlineRaisedAfterAnOwnExitLeavesItTheHarnessesOwn(t *testing.T) {
 		t.Fatalf("report %+v, exit code %d", report, supervisorExitCode(s))
 	}
 }
+
+// A graceful stop settles its harness's exit and concludes only after its
+// reply was read (handle's reply grace). An exit watcher that takes to its
+// lock after the stop settled the exit must not conclude: the supervisor
+// would exit and could cut the reply, which on Kubernetes counts as an exit
+// (ADR 0062).
+func TestExitWatcherDoesNotConcludeAGracefulStop(t *testing.T) {
+	completedCodexTurn(t)
+	for range 5 {
+		s, _, watched := slowlyWatched(t, readyHarness(t))
+		if r := s.quiesce(); r.State != harness.NativeStopped || r.Error != "" {
+			t.Fatalf("quiesce: %+v", r)
+		}
+		<-watched
+		select {
+		case <-s.done:
+			t.Fatal("the exit watcher concluded before the stopped reply was read")
+		case <-time.After(100 * time.Millisecond):
+		}
+		s.conclude()
+	}
+}
