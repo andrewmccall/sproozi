@@ -643,7 +643,9 @@ func (s *server) quiesce() response {
 		code, problem = 0, ""
 		s.diagnose("%s", forced)
 	}
-	s.endGracefully(exit, code, id)
+	if overtaken := s.endGracefully(exit, code, id); overtaken != "" {
+		return response{Op: harness.NativeQuiesce, State: harness.NativeStopping, Error: overtaken}
+	}
 	return response{Op: harness.NativeQuiesce, State: harness.NativeStopped, ThreadID: id, TurnID: turn,
 		Exit: &harness.NativeExit{Code: exit.Code, Reason: string(exit.Reason)}, Error: problem}
 }
@@ -719,14 +721,21 @@ func (s *server) diagnose(format string, args ...any) {
 
 // endGracefully settles a harness a graceful stop ended, with the
 // supervisor's own exit code and the conversation it kept. A cause decided
-// earlier, such as a SIGTERM that raced the stop, stays (evFinished).
-func (s *server) endGracefully(exit nativepty.Exit, code int, thread string) {
+// earlier, such as a SIGTERM that raced the stop, stays (evFinished). A stop
+// such a cause overtook did not end the harness gracefully: overtaken says
+// so, for the reply, which then agrees with the exit report and the
+// supervisor's nonzero exit code.
+func (s *server) endGracefully(exit nativepty.Exit, code int, thread string) (overtaken string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if thread != "" {
 		s.threadID = thread
 	}
 	s.apply(change{event: evFinished, exit: exit, code: code})
+	if reported, ok := s.life.cause.reported(); ok && s.life.cause.forced() {
+		return "native stop was overtaken: the supervisor stopped the harness with cause " + string(reported)
+	}
+	return ""
 }
 
 // waitingFor describes, in fixed words, what a graceful stop waits for.
@@ -833,7 +842,9 @@ func (s *server) stopTurnless(n *nativepty.Supervisor) response {
 	login := s.login
 	s.mu.Unlock()
 	login.stop()
-	s.endGracefully(exit, 0, "")
+	if overtaken := s.endGracefully(exit, 0, ""); overtaken != "" {
+		return response{Op: harness.NativeQuiesce, State: harness.NativeStopping, Error: overtaken}
+	}
 	return response{Op: harness.NativeQuiesce, State: harness.NativeStopped, Turnless: true,
 		Exit: &harness.NativeExit{Code: exit.Code, Reason: string(exit.Reason)}}
 }

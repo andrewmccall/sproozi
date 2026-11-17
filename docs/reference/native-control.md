@@ -50,7 +50,10 @@ Code and Copilot are always stopped by a kill; the same waits apply to its
 confirmation. A harness that exited by itself instead keeps its own exit code
 and reason. If the turn observed after the kill differs, or the kill is not
 confirmed, `quiesce` replies with an error and the supervisor reports the
-cause `failed`; if the deadline passes first, the cause `deadline`.
+cause `failed`; if the deadline passes first, the cause `deadline`. If a
+`SIGTERM` or the deadline stops the harness while `quiesce` is ending it,
+the reply is `stopping` with an error naming that cause, as the exit report
+does, and the supervisor exits nonzero.
 
 A kill can cut short a row the harness was appending to its conversation
 file. The supervisor's observation refuses that file, so a Codex stop whose
