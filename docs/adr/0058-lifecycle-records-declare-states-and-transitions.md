@@ -494,6 +494,30 @@ generation 1 and record `switched 1 to 2` with both trusted, after which
 `Ensure` puts the retired certificate back in the trust bundle (its missing
 key is the accepted lost-key state); and marking a generation retired makes
 the next `Ensure` destroy its key without a `retire` and its drained check.
+A blank retired entry (no fingerprint, no expiry), which replace writes only
+for history it cannot recover, is accepted only while that generation's
+certificate is gone or unreadable.
+
+Every step that destroys a key, or stops trusting a generation, first proves
+what it will depend on:
+
+| Step | Destroys or stops trusting | Proves first |
+| --- | --- | --- |
+| `retire` | the outgoing generation: trust and key | the phase is `switched`, the caller asserted drainage, and the serving key reads and matches its recorded certificate |
+| `replace` | trust in every earlier generation, every earlier key | it created the new authority, issued and committed a leaf signed by it; keys are destroyed only after that commit |
+| destroy pass (`Ensure`, after every commit) | keys of retired generations, files of a generation numbered after the record's last, leaf files the record does not name | only the committed record: it never touches a trusted generation's key or the named leaf |
+| issuing a leaf | the previous leaf | the new leaf was issued from the checked serving key and committed |
+
+`commit` refuses a record larger than the 64 KiB load reads, and `prepare`
+and `replace` check before writing anything, so a history that has grown
+too long refuses the next rotation instead of being written and then
+unreadable. Replace on a refused record refuses, naming the stray `ca-N` file
+or the generation id, when numbering after it would cross that bound. An
+interrupted replace of a refused record, run again, ends in a valid
+`single` store with every earlier key destroyed, but numbered one higher
+than an uninterrupted run, the interrupted attempt's certificate kept as a
+retired generation; on Kubernetes the scratch store is discarded, so a
+retried request gives the same number.
 
 `testdata/store-outcomes.txt` and `testdata/reconcile-outcomes.txt`, recorded
 from the code before this change, hold the outcome of every operation and
@@ -506,7 +530,9 @@ it refused, two where it overwrote an existing CA's files, one where it left
 a key, and one where it removed files outside the store; commit `3396e12`'s
 message says six). A broken trusted key no longer refuses load: those rows
 are again those recorded before the change, except that `Ensure` reports the
-key. Records the code wrote before still load.
+key. `Ensure` with the serving key lost now reports it, and five rows where a
+broken serving key fails a renewal or switch now name the generation and
+file. Records the code wrote before still load.
 
 ## Alternatives
 

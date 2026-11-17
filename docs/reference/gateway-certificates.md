@@ -127,8 +127,32 @@ Failed to reconcile gateway certificates err="pki: certificate authority key: ge
 
 A key that cannot be read reports `is unreadable: <cause>` instead. Every
 reconcile retries, so the line repeats until the file is fixed or removed.
-Issuing a certificate from a broken serving key fails with `pki: serving CA
-key unavailable; recover it or replace the CA: <cause>`.
+A missing serving key is reported the same way (`… is missing; the next
+renewal will fail`) while the certificate is still valid. A step that needs a
+broken serving key - renewing from it, switching to it, or retiring the
+authority before it, which would destroy the last key that works - fails
+with `pki: serving CA key unavailable; recover it or replace the CA:
+generation N key ca-N.key: <cause>`, where the cause is that it cannot be
+read, `pki: one PKCS#8 private key required`, or `pki: private key does not
+match certificate`. A refused `retire` request is reported in
+`sproozi.com/last-error`.
+
+### When the record outgrows what the controller reads
+
+The controller reads `state.json` up to 64 KiB. A `prepare` or `replace`
+whose record would be larger, after several hundred generations, is refused
+before it writes anything, with `pki: refusing to prepare: the record would
+be N bytes, more than the 65536 bytes load reads`. The history cannot be
+shortened in place. Back up the authority Secret, then remove all of its data
+and its `sproozi.com/trust-configmap` annotation: the controller then creates
+a new authority, generation 1, whose trust ConfigMap is
+`sproozi-sandbox-trust`. Delete the old ConfigMap of that name first, once no
+runtime references it, and move every runtime to the new bundle; as with
+`replace`, every running Pod loses the gateway. A `replace` on a refused
+record also refuses, naming the cause, when a stray `ca-N` key in the Secret
+or a generation id in `state.json` would number the new authority beyond that
+size: remove that key from the Secret, or correct or restore `state.json`,
+and request `replace` again.
 
 ### What validation does not protect
 

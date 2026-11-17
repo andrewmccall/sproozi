@@ -238,11 +238,32 @@ For a key report, fix the key file's owner and mode (owned by you, mode
 `0600`); if the key is lost or is not the authority's, run `sproozi
 certificates replace-ca`. For a removal report, remove the entry it names; it
 is not a file Sproozi wrote in that form, such as a directory with a key's
-name. A trusted key that is broken still fails the step that needs it, such
-as renewing from a broken serving key or switching to a broken new one, with
-`pki: serving CA key unavailable; recover it or replace the CA: <cause>`.
-`sproozi certificates status` and `sproozi doctor` do not show these reports
-yet; they appear only in the service log.
+name. A missing serving key is reported the same way (`… key ca-N.key is
+missing; the next renewal will fail: recover it, or replace the CA`), so you
+hear while the certificate is still valid. A trusted key that is broken
+still fails the step that needs it: renewing from it, switching to it, or
+retiring the authority before it, which would otherwise destroy the last key
+that works. Each fails with `pki: serving CA key unavailable; recover it or
+replace the CA: generation N key ca-N.key: <cause>`, where the cause is that
+it cannot be read, `pki: one PKCS#8 private key required`, or `pki: private
+key does not match certificate`. `sproozi certificates status` and `sproozi
+doctor` do not show these reports yet; they appear only in the service log.
+
+`pki/state.json` is read only up to 64 KiB. An operation whose record would
+be larger, such as a rotation after several hundred generations, is refused
+before it writes anything, with `pki: refusing to prepare: the record would be
+N bytes, more than the 65536 bytes load reads` (or `replace`, or `refusing to
+save`). The store keeps working with its current authority until that
+authority expires, but cannot rotate. The history cannot be shortened in
+place, and no command starts a new local authority yet: `sproozi init`
+refuses an installation whose authority state is missing. `replace-ca` on a
+refused record also refuses, naming
+the cause, when a stray `ca-N` file or a generation id in `state.json` would
+number the new authority beyond that size: remove the stray file, or correct
+or restore `state.json`, and run it again. An interrupted `replace-ca` on a
+refused record, run again, ends with a valid store and every earlier key
+destroyed, but numbered one higher than an uninterrupted run, keeping the
+interrupted attempt's certificate as a retired generation.
 
 These checks find damage and mistakes. They cannot authenticate the record:
 whoever can write `pki/state.json` can write every file beside it, and the
