@@ -6,7 +6,8 @@ runs stock Claude Code sessions and tasks that the remote executor owns
 ([ADR 0057](../../../docs/adr/0057-the-remote-executor-owns-its-sessions-through-the-coordinator.md),
 sections 10 and 11). It drives the public `sproozi` CLI through the
 `sproozi-cli` context only, with the stock client in its terminal through the
-production PTY. It has not been run yet; nothing here is recorded evidence.
+production PTY. Only the `refresh` scenario's run below is recorded here; the
+other scenarios have no recorded run in this document.
 
 ## Run it
 
@@ -76,6 +77,17 @@ its history, follows in the same Pod. It passes only if:
 Only the token's `iat`, `exp` and `jti` claims, the directory's entries and
 each TokenReview's time, result and `jti` leave the cluster; the audit log
 itself, which holds the tokens, stays on the control-plane node.
+
+It passed on 2026-11-17 (run `20261117120752-75011`). The kubelet refreshed the
+token 48 minutes after it was issued. The second turn's first model request
+arrived 433 seconds after the first token expired; the API server had
+authenticated the refreshed token's `jti` for the sandbox Pod 0.03 seconds
+before, and authenticated the first token no more after its expiry. Run once
+against a controller without the directory mount, the same scenario failed at
+that turn: the token was never refreshed, the API server refused it as
+`service account token has expired`, the gateway logged `Rejected inspected
+connection with invalid gateway identity`, and Claude Code reported `Couldn't
+connect through your proxy (ERR_PROXY_TUNNEL)` and kept retrying.
 
 The snapshot scenario, which runs by default, also checks the token directory's
 layout, so a sandbox whose gateway token would not be refreshed fails the
