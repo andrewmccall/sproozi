@@ -1051,7 +1051,7 @@ func (p *Placement) finishStopped(ctx context.Context, local retained, r registr
 // so its own end can cut the exec that carries finish's exit status, and the
 // acknowledgement is lost although the finish happened. A failed finish is
 // therefore done when a fresh read proves it (helperFinished); otherwise it
-// fails as before, and the stop stays unproven (ADR 0069).
+// fails as before, and the stop stays unproven (ADR 0068).
 func (p *Placement) finish(ctx context.Context, local retained, r registry.Record, pod *corev1.Pod) error {
 	_, err := p.control(ctx, pod, runtimekube.CaptureContainer, []string{helperPath, helperFinish}, nil, 64<<10)
 	if err == nil {

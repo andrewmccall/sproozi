@@ -1,4 +1,4 @@
-# 0069: A lost finish is proven by the helper's end
+# 0068: A lost finish is proven by the helper's end
 
 Status: accepted
 Date: 2026-11-17
@@ -51,7 +51,16 @@ taken as done only when the effect it acknowledges can be observed.
 2. **The placement proves a failed finish by observation.** When the exec of
    `finish` fails, in `Stop` or in the replay of a stopped registration
    (`finishStopped`, which `Stop` and `Abort` run), the placement reads the
-   exact Pod again. The finish is done when the registration is `stopped`
+   exact Pod again, every 100 milliseconds for at most 15 seconds
+   (`helperEndWait`). The exec breaks when the helper's container ends, but
+   the kubelet reports that end only at its next relist, about a second
+   later, so a single read at once would usually still see the helper
+   running. 15 seconds covers the helper's own 10-second reply grace and a
+   relist; the caller's context ends the wait sooner, and the wait applies
+   only after a failed finish, so a stop the owner waits on is held at most
+   that long once. A reading that can never become proof (the helper ended
+   with another code, which the Pod never restarts; a replaced Pod) ends the
+   wait at once. The finish is done when the registration is `stopped`
    with a receipt, the retained record holds the writer's fence (which a
    stopped registration's receipt proves,
    [ADR 0066](0066-a-contradicted-retained-record-refuses-work-and-never-blocks-an-end.md)),
@@ -69,21 +78,43 @@ taken as done only when the effect it acknowledges can be observed.
    The stop then releases the writer-fence finalizer and returns the stop it
    recorded, and the placement logs `Treated the finish of the checkpoint
    helper in Pod NAMESPACE/NAME as done, because …: ERROR`. A helper still
-   running, one that ended with another code, a termination the runtime did
-   not report for that container, a replaced Pod, or a Pod that cannot be
-   read proves nothing: the stop fails exactly as before.
-3. **A failed fixed command keeps the exec's error.** `commandFailed` keeps
-   the command's executable and operation, the container and the exec
-   error's text, on one line and at most 512 bytes, in its message:
-   `placement: fixed command unavailable: checkpoint finish in container
-   checkpoint: command terminated with exit code 137`. The text comes from
-   the exec client, the API server, the kubelet and the container runtime:
-   an exit code, a broken stream, a container that is gone, a timeout. The
-   command's arguments and its output, which the sandbox can write, are not
-   kept. The message reaches the executor's log through the driver; the
-   placement protocol and the work API still answer only a code
-   (`unavailable`). `commandFailed` does not wrap the exec error, so no
-   caller's `errors.Is` check changes.
+   running when the wait ends, one that ended with another code, a
+   termination the runtime did not report for that container, a replaced
+   Pod, or a Pod that cannot be read within the wait proves nothing: the
+   stop fails exactly as before.
+
+   **A first stop and its replay can decide differently for the same
+   reading.** For a helper that ended with code 137, 1 or 2 after a failed
+   finish, the first `Stop` is unproven and the coordinator records
+   `unknown-stop`; the replay of the now stopped registration
+   (`finishStopped`) skips `finish` because the helper is not running, and
+   ends the stop with the same digest, `finish` having run once. That is
+   harmless: the writer's fence is proven separately, from the native
+   container's end, before usage is sealed and the registration stopped, so
+   neither answer can report a writer stopped that was not; the difference
+   costs one `recover` for an interactive session or one backoff for a task.
+   The replay's looser rule is kept deliberately: tightening it would
+   strand, for good, a stop whose helper reached its deadline or was killed
+   before `recover`, since nothing could then ever finish it.
+3. **A failed fixed command keeps the exec's error, without its request.**
+   `commandFailed` keeps the command's executable and operation, the
+   container and the exec error's text, on one line and at most 512 bytes,
+   in its message: `placement: fixed command unavailable: checkpoint finish
+   in container checkpoint: command terminated with exit code 137`. The text
+   comes from the exec client, the API server, the kubelet and the container
+   runtime: an exit code, a broken stream, a refused connection with the API
+   server's address, a container that is gone, a timeout. When the exec
+   request itself fails, client-go reports the request's URL, whose query
+   holds every argument of the command (the files a capture selects, its
+   thread, the instruction digest); it folds that `*url.Error` into plain
+   text (`error sending request: %v`). So a `*url.Error` in the chain keeps
+   only its operation and inner error, and any URL or query left in the text
+   is replaced by `request`: `Post request: dial tcp 10.0.0.1:6443: connect:
+   connection refused`. The command's arguments and its output, which the
+   sandbox can write, are not kept. The message reaches the executor's log
+   through the driver; the placement protocol and the work API still answer
+   only a code (`unavailable`). `commandFailed` does not wrap the exec
+   error, so no caller's `errors.Is` check changes.
 
 Only `finish` gains a proof. The other fixed commands of `Stop`, `Abort` and
 `AbortPreparation` either have no observable effect or are retried safely:
@@ -130,11 +161,20 @@ command: they fence by deleting the Pod and observing its containers end.
 
 ## Tradeoffs and consequences
 
-- A stop whose finish acknowledgement is lost, and whose helper ended 0 or
-  whose Pod is gone, completes on the first attempt: the session shows its
-  stopped state (`retained` or `failed` on the executor, `idle` in the
-  execution journal) rather than `unknown-stop`, and the writer-fence
-  finalizer is released at once.
+- A stop whose finish acknowledgement is lost completes on the first
+  attempt when the Pod shows the helper ended with code 0, or is gone,
+  within the 15-second wait: the session shows its stopped state
+  (`retained` or `failed` on the executor, `idle` in the execution journal)
+  rather than `unknown-stop`, and the writer-fence finalizer is released at
+  once. A kubelet slower than that to report the helper's end, or an API
+  server that cannot be read meanwhile, leaves the first attempt unproven
+  as before; its replay then completes the stop.
+- Such a stop takes up to 15 seconds longer, once, while the Pod catches up.
+  That comes out of the stop's 5-minute settle allowance
+  (`stopSettleBound` in `internal/session/profile`), which also covers
+  ending the native container (at most a minute), sealing usage and
+  capturing the checkpoint; the stop's own context, bounded by
+  `StopBound`, still ends the wait.
 - A lost finish whose helper still runs, or whose Pod cannot be read, still
   leaves `unknown-stop`. An interactive session whose harness exited by
   itself then still waits for its owner's `recover`.
@@ -156,11 +196,14 @@ command: they fence by deleting the Pod and observing its containers end.
 
 - Implementation: `cmd/checkpoint/helper.go` (`serve`, `finish`,
   `finishReplyGrace`), `internal/runtime/kubernetes/placement/lifecycle.go`
-  (`finish`, `helperFinished`, `finishStopped`),
-  `internal/runtime/kubernetes/placement/exec.go` (`commandFailed`,
-  `execCause`)
+  (`finish`, `helperFinished`, `finishReading`, `helperEndWait`,
+  `finishStopped`), `internal/runtime/kubernetes/placement/exec.go`
+  (`commandFailed`, `execCause`)
 - Tests: `cmd/checkpoint/hold_test.go`,
   `internal/runtime/kubernetes/placement/finish_lost_test.go`,
+  `internal/runtime/kubernetes/placement/exec_cause_test.go`,
+  `internal/runtime/kubernetes/placement/pod_record_test.go` (the
+  `lost-finish` column of `testdata/pod-readings.txt`),
   `internal/runtime/docker/placement_test.go`
   (`TestDockerStopDoesNotDependOnFinishAcknowledgement`: the Docker stop
   ignores the result of the same `finish` and then stops the helper
