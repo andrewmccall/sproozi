@@ -196,8 +196,16 @@ func (o *Owner) carryOut(ctx context.Context, r record, rec *session.Record, act
 	case actRecover:
 		// Recovery carries out a retained cancellation, or an unproven stop
 		// or unsealed usage: it never makes up a stop or a refund, so
-		// retrying it is safe.
-		_, err := coordinator.Recover(ctx, rec.ID)
+		// retrying it is safe. A retried stop can find the writer reachable
+		// after all and still waiting for the task's turn: the coordinator
+		// then holds it as stopping again, and the next step is the
+		// completion wait. A held cancellation is carried out by aborting,
+		// which never waits for a turn.
+		recovered, err := coordinator.Recover(ctx, rec.ID)
+		if errors.Is(err, harness.ErrNativeTurnPending) && recovered.Phase == session.PhaseStopping {
+			o.note(r.ID, "")
+			return nextAgain
+		}
 		return o.after(ctx, r, err, nextWait)
 	case actFinish:
 		return o.finish(r)

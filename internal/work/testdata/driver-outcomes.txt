@@ -784,7 +784,12 @@ unknown-stop task member early - reachable | catalogue{finished=false cancel=- t
 unknown-stop task member early - unreachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
     wait -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=stop=1 log="Could not continue work session ID: placement unreachable"
 unknown-stop task member early - turn-pending | catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
-    wait -> catalogue{finished=false cancel=- transfer=- problem=""} journal{stopping cancel=- pending=stop visits=0} calls=stop=1 log="Could not continue work session ID: the stop is still waiting for the task's turn to complete"
+    again -> catalogue{finished=false cancel=- transfer=- problem=""} journal{stopping cancel=- pending=stop visits=0} calls=stop=1
+    again -> catalogue{finished=false cancel=- transfer=- problem=""} journal{stopping cancel=- pending=stop visits=0} calls=stop=1
+    again -> catalogue{finished=false cancel=- transfer=- problem=""} journal{stopping cancel=- pending=stop visits=0} calls=stop=1
+    again -> catalogue{finished=false cancel=- transfer=- problem=""} journal{stopping cancel=- pending=stop visits=0} calls=stop=1
+    again -> catalogue{finished=false cancel=- transfer=- problem=""} journal{stopping cancel=- pending=stop visits=0} calls=stop=1
+    (again after the limit)
 unknown-stop task member early transfer reachable | catalogue{finished=false cancel=- transfer=setup problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
     done -> catalogue{finished=false cancel=- transfer=setup problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=none
 unknown-stop task member early catalogue-cancel reachable | catalogue{finished=false cancel=setup transfer=- problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
@@ -795,7 +800,12 @@ unknown-stop task member late - reachable | catalogue{finished=false cancel=- tr
 unknown-stop task member late - unreachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
     wait -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=stop=1 log="Could not continue work session ID: placement unreachable"
 unknown-stop task member late - turn-pending | catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
-    wait -> catalogue{finished=false cancel=- transfer=- problem=""} journal{stopping cancel=- pending=stop visits=0} calls=stop=1 log="Could not continue work session ID: the stop is still waiting for the task's turn to complete"
+    again -> catalogue{finished=false cancel=- transfer=- problem=""} journal{stopping cancel=- pending=stop visits=0} calls=stop=1
+    again -> catalogue{finished=false cancel=- transfer=- problem=""} journal{stopping cancel=- pending=stop visits=0} calls=stop=1
+    again -> catalogue{finished=false cancel=- transfer=- problem=""} journal{stopping cancel=- pending=stop visits=0} calls=stop=1
+    again -> catalogue{finished=false cancel=- transfer=- problem=""} journal{stopping cancel=- pending=stop visits=0} calls=stop=1
+    again -> catalogue{finished=false cancel=- transfer=- problem=""} journal{stopping cancel=- pending=stop visits=0} calls=stop=1
+    (again after the limit)
 unknown-stop task member late transfer reachable | catalogue{finished=false cancel=- transfer=setup problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
     done -> catalogue{finished=false cancel=- transfer=setup problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=none
 unknown-stop task member late catalogue-cancel reachable | catalogue{finished=false cancel=setup transfer=- problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
@@ -806,7 +816,12 @@ unknown-stop task member no-deadline - reachable | catalogue{finished=false canc
 unknown-stop task member no-deadline - unreachable | catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
     wait -> catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=stop=1 log="Could not continue work session ID: placement unreachable"
 unknown-stop task member no-deadline - turn-pending | catalogue{finished=false cancel=- transfer=- problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
-    wait -> catalogue{finished=false cancel=- transfer=- problem=""} journal{stopping cancel=- pending=stop visits=0} calls=stop=1 log="Could not continue work session ID: the stop is still waiting for the task's turn to complete"
+    again -> catalogue{finished=false cancel=- transfer=- problem=""} journal{stopping cancel=- pending=stop visits=0} calls=stop=1
+    again -> catalogue{finished=false cancel=- transfer=- problem=""} journal{stopping cancel=- pending=stop visits=0} calls=stop=1
+    again -> catalogue{finished=false cancel=- transfer=- problem=""} journal{stopping cancel=- pending=stop visits=0} calls=stop=1
+    again -> catalogue{finished=false cancel=- transfer=- problem=""} journal{stopping cancel=- pending=stop visits=0} calls=stop=1
+    again -> catalogue{finished=false cancel=- transfer=- problem=""} journal{stopping cancel=- pending=stop visits=0} calls=stop=1
+    (again after the limit)
 unknown-stop task member no-deadline transfer reachable | catalogue{finished=false cancel=- transfer=setup problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
     done -> catalogue{finished=false cancel=- transfer=setup problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=none
 unknown-stop task member no-deadline catalogue-cancel reachable | catalogue{finished=false cancel=setup transfer=- problem=""} journal{unknown-stop cancel=- pending=stop visits=0} calls=prepare=1,activate=1,stop=1,inspect=2
