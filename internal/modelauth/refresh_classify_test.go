@@ -12,6 +12,11 @@ import (
 // invalidGrantBody is a token endpoint reply refusing the refresh token.
 const invalidGrantBody = `{"error":"invalid_grant"}`
 
+// padded returns body followed by spaces to size bytes, still one JSON value.
+func padded(body string, size int) string {
+	return body + strings.Repeat(" ", size-len(body))
+}
+
 // classifyEndpoint answers status and body until recovered, then issues a
 // new token.
 func classifyEndpoint(status int, body string, recovered *atomic.Bool, calls *atomic.Int32) http.HandlerFunc {
@@ -39,7 +44,7 @@ func TestChatGPTRefusesOnlyAnInvalidGrant(t *testing.T) {
 		body    string
 		refused bool
 	}
-	rows := make([]row, 0, 32)
+	rows := make([]row, 0, 36)
 	for _, status := range []int{400, 401, 403, 404, 405, 407, 408, 409, 410, 413, 415, 421, 422, 425, 429, 451} {
 		rows = append(rows, row{name: fmt.Sprintf("%d other error", status), status: status, body: other})
 	}
@@ -61,6 +66,10 @@ func TestChatGPTRefusesOnlyAnInvalidGrant(t *testing.T) {
 		row{name: "400 data after the object", status: 400, body: invalidGrantBody + `{}`},
 		row{name: "400 truncated object", status: 400, body: `{"error":"invalid_grant",`},
 		row{name: "400 not an object", status: 400, body: `["error","invalid_grant"]`},
+		row{name: "400 invalid_grant in exactly 4 KiB", status: 400, body: padded(invalidGrantBody, maxErrorBody), refused: true},
+		row{name: "400 invalid_grant in 4 KiB and 1 byte", status: 400, body: padded(invalidGrantBody, maxErrorBody+1)},
+		row{name: "400 invalid_client", status: 400, body: `{"error":"invalid_client"}`},
+		row{name: "401 invalid_client", status: 401, body: `{"error":"invalid_client"}`},
 	)
 	for _, tc := range rows {
 		t.Run(tc.name, func(t *testing.T) {
