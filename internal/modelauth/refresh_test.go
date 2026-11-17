@@ -19,6 +19,31 @@ func expiredStore() *memoryStore {
 	return store
 }
 
+// fakeClock is a clock the test moves; nothing in the package sleeps on it.
+type fakeClock struct {
+	mu sync.Mutex
+	t  time.Time
+}
+
+func (c *fakeClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.t
+}
+
+func (c *fakeClock) Advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.t = c.t.Add(d)
+}
+
+// withClock gives auth a fake clock that starts now.
+func withClock(auth *ChatGPT) *fakeClock {
+	clock := &fakeClock{t: time.Now()}
+	auth.now = clock.Now
+	return clock
+}
+
 func authorizeOnce(auth *ChatGPT) (string, error) {
 	req := httptest.NewRequest(http.MethodPost, Resource+"/responses", nil)
 	err := auth.Authorize(req)
@@ -100,6 +125,7 @@ func TestChatGPTRefreshFailureOutcomes(t *testing.T) {
 			store := expiredStore()
 			auth := NewChatGPT(store, client)
 			auth.tokenEndpoint = endpoint
+			clock := withClock(auth)
 			for i := range 3 {
 				header, err := authorizeOnce(auth)
 				if err == nil || header != "" {
@@ -119,7 +145,7 @@ func TestChatGPTRefreshFailureOutcomes(t *testing.T) {
 				t.Fatal("a failed refresh changed the stored sign-in")
 			}
 			// After the hold a transient failure is tried again; a refusal is not.
-			auth.refresh.until = time.Now().Add(-time.Millisecond)
+			clock.Advance(RefreshHold)
 			_, _ = authorizeOnce(auth)
 			wantAfter := tc.wantCalls
 			if !tc.refused && tc.wantCalls > 0 {

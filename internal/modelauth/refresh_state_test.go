@@ -14,36 +14,34 @@ const (
 )
 
 // TestChatGPTNewSignInEndsAHoldOrRefusalAtOnce: an administrator's new
-// sign-in reaches the next model request, within the hold or after a
-// refusal, without waiting. Guards: the signed-in event in reloadOrRefresh.
+// sign-in reaches the next model request that reads the store, within the
+// hold or after a refusal. Guards: the signed-in event in reloadOrRefresh.
 func TestChatGPTNewSignInEndsAHoldOrRefusalAtOnce(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		status int
+		body   string
 		want   refreshState
 	}{
 		{name: "held", status: http.StatusServiceUnavailable, want: refreshHeld},
-		{name: "refused", status: http.StatusBadRequest, want: refreshRefused},
+		{name: "refused", status: http.StatusBadRequest, body: `{"error":"invalid_grant"}`, want: refreshRefused},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var calls, status atomic.Int32
-			status.Store(int32(tc.status))
+			var calls atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				calls.Add(1)
-				if code := int(status.Load()); code != http.StatusOK {
-					w.WriteHeader(code)
-					return
-				}
-				_, _ = w.Write([]byte(renewedBody))
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
 			}))
 			defer server.Close()
 			store := expiredStore()
 			auth := NewChatGPT(store, server.Client())
 			auth.tokenEndpoint = server.URL
+			withClock(auth)
 			if _, err := authorizeOnce(auth); err == nil || auth.refresh.current() != tc.want {
 				t.Fatalf("state = %q, err = %v", auth.refresh.current(), err)
 			}
-			// A fresh new sign-in is used at once, with no refresh.
+			// A fresh new sign-in is used, with no refresh.
 			store.session = fixtureSession()
 			store.session.AccessToken, store.session.RefreshToken = "signed-in-access", "signed-in-refresh"
 			if header, err := authorizeOnce(auth); err != nil || header != "Bearer signed-in-access" {
@@ -52,21 +50,37 @@ func TestChatGPTNewSignInEndsAHoldOrRefusalAtOnce(t *testing.T) {
 			if auth.refresh.current() != refreshReady || calls.Load() != 1 {
 				t.Fatalf("state = %q, refresh requests = %d", auth.refresh.current(), calls.Load())
 			}
-			// A new sign-in that is already due is refreshed at once, even
-			// while a failure of the earlier one is remembered.
-			auth.current.Store(nil)
-			if err := auth.refresh.apply(eventFailed, store.session, &RefreshError{cause: "test"}, time.Now()); err != nil {
-				t.Fatal(err)
-			}
-			store.session.RefreshToken, store.session.SavedAt = "second-sign-in", time.Now().Add(-2*time.Hour)
-			status.Store(http.StatusOK)
-			if header, err := authorizeOnce(auth); err != nil || header != renewedBearer {
-				t.Fatalf("a due new sign-in = %q, %v", header, err)
-			}
-			if calls.Load() != 2 || store.session.RefreshToken != renewedRefresh {
-				t.Fatalf("refresh requests = %d, stored %q", calls.Load(), store.session.RefreshToken)
-			}
 		})
+	}
+}
+
+// TestChatGPTDueNewSignInIsRefreshedWithinAHold: a failure of one sign-in
+// does not hold the refresh of the next. Guards: signed-in before admit.
+func TestChatGPTDueNewSignInIsRefreshedWithinAHold(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		_ = r.ParseForm()
+		if r.Form.Get(refreshTokenField) == fixtureRefresh {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		_, _ = w.Write([]byte(renewedBody))
+	}))
+	defer server.Close()
+	store := expiredStore()
+	auth := NewChatGPT(store, server.Client())
+	auth.tokenEndpoint = server.URL
+	withClock(auth)
+	if _, err := authorizeOnce(auth); err == nil || auth.refresh.current() != refreshHeld {
+		t.Fatalf("state = %q, err = %v", auth.refresh.current(), err)
+	}
+	store.session.RefreshToken = "second-sign-in"
+	if header, err := authorizeOnce(auth); err != nil || header != renewedBearer {
+		t.Fatalf("a due new sign-in = %q, %v", header, err)
+	}
+	if calls.Load() != 2 || store.session.RefreshToken != renewedRefresh {
+		t.Fatalf("refresh requests = %d, stored %q", calls.Load(), store.session.RefreshToken)
 	}
 }
 
@@ -85,16 +99,15 @@ func TestChatGPTRecoversAfterTheHold(t *testing.T) {
 	defer server.Close()
 	auth := NewChatGPT(expiredStore(), server.Client())
 	auth.tokenEndpoint = server.URL
+	clock := withClock(auth)
 	if _, err := authorizeOnce(auth); err == nil {
 		t.Fatal("authorized during an outage")
 	}
-	if left := time.Until(auth.refresh.until); left > RefreshHold || left < RefreshHold-time.Second {
-		t.Fatalf("hold ends in %s, want about %s", left, RefreshHold)
-	}
+	clock.Advance(RefreshHold - time.Nanosecond)
 	if _, err := authorizeOnce(auth); err == nil || calls.Load() != 1 {
 		t.Fatalf("a request within the hold refreshed: %v, %d", err, calls.Load())
 	}
-	auth.refresh.until = time.Now()
+	clock.Advance(time.Nanosecond)
 	if header, err := authorizeOnce(auth); err != nil || header != renewedBearer {
 		t.Fatalf("after the hold = %q, %v", header, err)
 	}

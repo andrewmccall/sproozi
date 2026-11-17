@@ -213,6 +213,8 @@ type ChatGPT struct {
 	// outage or a refused sign-in does not send a refresh with every request.
 	refresh       refreshRecord
 	tokenEndpoint string
+	// now is the clock every expiry, reload and hold is measured against.
+	now func() time.Time
 }
 
 type loadedSession struct {
@@ -221,7 +223,8 @@ type loadedSession struct {
 }
 
 func NewChatGPT(store SessionStore, client *http.Client) *ChatGPT {
-	return &ChatGPT{store: store, client: client, tokenEndpoint: TokenEndpoint, reloadInterval: SessionReloadInterval}
+	return &ChatGPT{store: store, client: client, tokenEndpoint: TokenEndpoint, reloadInterval: SessionReloadInterval,
+		now: time.Now}
 }
 
 func (*ChatGPT) Mode() string { return ChatGPTMode }
@@ -244,8 +247,9 @@ func (a *ChatGPT) Authorize(r *http.Request) error {
 // usable returns the in-memory session when no Secret read or refresh is due.
 func (a *ChatGPT) usable() (Session, bool) {
 	current := a.current.Load()
-	if current == nil || time.Since(current.loadedAt) >= a.reloadInterval ||
-		time.Until(current.session.SavedAt.Add(time.Duration(current.session.ExpiresIn)*time.Second)) <= refreshWindow {
+	now := a.now()
+	if current == nil || now.Sub(current.loadedAt) >= a.reloadInterval ||
+		current.session.expiry().Sub(now) <= refreshWindow {
 		return Session{}, false
 	}
 	return current.session, true
@@ -264,7 +268,7 @@ func (a *ChatGPT) reloadOrRefresh(ctx context.Context) (Session, error) {
 	a.current.Store(nil)
 	// The reload interval runs from the start of the read, so a slow Secret
 	// read does not extend how long an older stored session is served.
-	loadedAt := time.Now()
+	loadedAt := a.now()
 	s, err := a.store.Load(ctx)
 	if err != nil {
 		return Session{}, errors.New("ChatGPT credentials are unavailable")
@@ -284,13 +288,13 @@ func (a *ChatGPT) reloadOrRefresh(ctx context.Context) (Session, error) {
 		}
 		a.pending = nil
 	}
-	now := time.Now()
+	now := a.now()
 	if a.refresh.current() != refreshReady && !s.SameCredentials(a.refresh.of) {
 		if err = a.refresh.apply(eventSignedIn, s, nil, now); err != nil {
 			return Session{}, err
 		}
 	}
-	if time.Until(s.SavedAt.Add(time.Duration(s.ExpiresIn)*time.Second)) <= refreshWindow {
+	if s.expiry().Sub(now) <= refreshWindow {
 		if held := a.refresh.admit(now); held != nil {
 			return Session{}, held
 		}
@@ -305,7 +309,7 @@ func (a *ChatGPT) reloadOrRefresh(ctx context.Context) (Session, error) {
 		}
 		renewed := s
 		renewed.AccessToken, renewed.RefreshToken = next.AccessToken, next.RefreshToken
-		renewed.TokenType, renewed.ExpiresIn, renewed.SavedAt = next.TokenType, next.ExpiresIn, time.Now().UTC()
+		renewed.TokenType, renewed.ExpiresIn, renewed.SavedAt = next.TokenType, next.ExpiresIn, a.now().UTC()
 		if next.IDToken != "" {
 			renewed.IDToken = next.IDToken
 		}
@@ -315,7 +319,7 @@ func (a *ChatGPT) reloadOrRefresh(ctx context.Context) (Session, error) {
 		if err = renewed.Validate(); err != nil {
 			return Session{}, a.failed(s, classify(err))
 		}
-		if err = a.refresh.apply(eventRefreshed, s, nil, time.Now()); err != nil {
+		if err = a.refresh.apply(eventRefreshed, s, nil, a.now()); err != nil {
 			return Session{}, err
 		}
 		a.pending, a.pendingBefore = &renewed, s
@@ -339,10 +343,15 @@ func (a *ChatGPT) failed(s Session, failure *RefreshError) error {
 	if failure.Refused {
 		event = eventRefused
 	}
-	if err := a.refresh.apply(event, s, failure, time.Now()); err != nil {
+	if err := a.refresh.apply(event, s, failure, a.now()); err != nil {
 		return err
 	}
 	return failure
+}
+
+// expiry is when the session's access token expires.
+func (s Session) expiry() time.Time {
+	return s.SavedAt.Add(time.Duration(s.ExpiresIn) * time.Second)
 }
 
 // SameCredentials compares the rotating credential identity used by store CAS.
