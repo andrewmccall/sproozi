@@ -18,7 +18,7 @@ func TestReplaceIsNotDrivenPastWhatLoadReads(t *testing.T) {
 	roots := buildStates(t)
 	for _, tc := range []struct {
 		name, stray, want string
-		edit                func(st *State)
+		edit              func(st *State)
 	}{
 		{"stray ca-900.pem, refused record", "ca-900.pem", "after ca-900.pem",
 			func(st *State) { st.Serving = 9 }},
