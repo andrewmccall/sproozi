@@ -176,6 +176,16 @@ var (
 	errPastDeadline = errors.New("the execution's deadline has passed")
 )
 
+// forcedCodes settles the codes of an exit nobody stopped gracefully: the
+// supervisor exits with the harness's code, but never 0 after a forced stop
+// or an unconfirmed process-group stop.
+func (l *lifecycle) forcedCodes(code int, waitErr error) {
+	l.harnessCode, l.exitCode = code, code
+	if code == 0 && (waitErr != nil || l.cause.forced()) {
+		l.exitCode = 1
+	}
+}
+
 // admit reports whether e may happen now, before its side effect: declared
 // from the current phase, and not refused by a deadline that has passed.
 func (l lifecycle) admit(e event, pastDeadline bool) error {
@@ -213,22 +223,19 @@ func (l *lifecycle) apply(c change) bool {
 			if from != phaseForcing {
 				l.cause = causeSelf
 			}
-			// The supervisor exits with the harness's code, but never 0
-			// after a forced stop or an unconfirmed process-group stop.
-			l.harnessCode, l.exitCode = c.exit.Code, c.exit.Code
-			if c.exit.Code == 0 && (c.err != nil || l.cause.forced()) {
-				l.exitCode = 1
-			}
+			l.forcedCodes(c.exit.Code, c.err)
 		}
 	case evFinished:
 		// A cause decided earlier, such as a SIGTERM that raced the stop,
-		// stays; the graceful stop's codes stand unless the exit was
-		// already settled.
-		if from == phaseFinishing {
+		// stays, and with it the forced stop's rule for the codes; otherwise
+		// the graceful stop's codes stand, unless the exit was already
+		// settled.
+		switch from {
+		case phaseFinishing:
 			l.cause = causeQuiesced
-		}
-		if from != phaseEnded {
 			l.harnessCode, l.exitCode = c.exit.Code, c.code
+		case phaseForcing:
+			l.forcedCodes(c.exit.Code, c.err)
 		}
 	}
 	l.phase = to
