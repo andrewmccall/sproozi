@@ -63,6 +63,11 @@ type Store struct {
 	dir    string
 	policy Policy
 	now    func() time.Time
+	// beforeWrite, when set, runs before every change to the directory's
+	// authority, leaf, trust and state files. A test returns an error from it
+	// to stop the store at one write, as a crash would. It is nil in
+	// production.
+	beforeWrite func(op, name string) error
 }
 
 const (
@@ -429,8 +434,8 @@ func (s *Store) issue(st *State, now time.Time) error {
 		return err
 	}
 	if previous != "" && previous != name {
-		_ = os.Remove(filepath.Join(s.dir, previous+".key"))
-		_ = os.Remove(filepath.Join(s.dir, previous+".pem"))
+		_ = s.remove(previous + ".key")
+		_ = s.remove(previous + ".pem")
 	}
 	return nil
 }
@@ -440,7 +445,7 @@ func (s *Store) commit(st State) error {
 	if err != nil {
 		return err
 	}
-	if err = privatefs.Replace(s.dir, stateFile, append(data, '\n')); err != nil {
+	if err = s.replace(stateFile, append(data, '\n')); err != nil {
 		return err
 	}
 	return s.publishTrust(st)
@@ -456,7 +461,7 @@ func (s *Store) publishTrust(st State) error {
 	if err == nil && bytes.Equal(current, trust) {
 		return nil
 	}
-	return privatefs.Replace(s.dir, trustFile, trust)
+	return s.replace(trustFile, trust)
 }
 
 func (s *Store) trustBundle(st State) ([]byte, error) {
@@ -484,8 +489,8 @@ func (s *Store) caCertificate(id int) (*x509.Certificate, error) {
 // attempt and may be replaced.
 func (s *Store) createGeneration(id int, now time.Time) error {
 	if _, err := os.Lstat(filepath.Join(s.dir, caName(id)+".pem")); err == nil {
-		_ = os.Remove(filepath.Join(s.dir, caName(id)+".pem"))
-		_ = os.Remove(filepath.Join(s.dir, caName(id)+".key"))
+		_ = s.remove(caName(id) + ".pem")
+		_ = s.remove(caName(id) + ".key")
 	}
 	ca, err := NewCA(fmt.Sprintf("Sproozi local inspection CA %d", id), now, s.policy.CAValidity)
 	if err != nil {
@@ -504,7 +509,7 @@ func (s *Store) generations(st State, added int) ([]Generation, error) {
 }
 
 func (s *Store) destroyKey(id int) error {
-	err := os.Remove(filepath.Join(s.dir, caName(id)+".key"))
+	err := s.remove(caName(id) + ".key")
 	if os.IsNotExist(err) {
 		return nil
 	}
@@ -524,7 +529,27 @@ func (s *Store) readPair(name string) (Pair, error) {
 }
 
 func (s *Store) writePair(name string, p Pair) error {
-	return errors.Join(privatefs.Replace(s.dir, name+".key", p.Key), privatefs.Replace(s.dir, name+".pem", p.Certificate))
+	return errors.Join(s.replace(name+".key", p.Key), s.replace(name+".pem", p.Certificate))
+}
+
+// replace writes one file in the store's directory.
+func (s *Store) replace(name string, data []byte) error {
+	if s.beforeWrite != nil {
+		if err := s.beforeWrite("write", name); err != nil {
+			return err
+		}
+	}
+	return privatefs.Replace(s.dir, name, data)
+}
+
+// remove deletes one file in the store's directory.
+func (s *Store) remove(name string) error {
+	if s.beforeWrite != nil {
+		if err := s.beforeWrite("remove", name); err != nil {
+			return err
+		}
+	}
+	return os.Remove(filepath.Join(s.dir, name))
 }
 
 func (s *Store) locked(fn func() error) error {
