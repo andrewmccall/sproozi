@@ -417,14 +417,20 @@ const claudeHookMaxBytes = 4 << 20
 // Code closes the hook's stdin. Input that never completes an object holds
 // the hook until Claude Code's hook timeout kills it; without an object there
 // is nothing to report sooner. Bytes already read after the object, other
-// than whitespace, refuse the payload.
+// than whitespace, refuse the payload. The bound counts every byte read: the
+// object and whatever was read with it.
 func readClaudeHook(input io.Reader) (*claudeHook, error) {
-	decoder := json.NewDecoder(io.LimitReader(input, claudeHookMaxBytes+1))
+	counted := &countingReader{r: io.LimitReader(input, claudeHookMaxBytes+1)}
+	decoder := json.NewDecoder(counted)
 	var raw json.RawMessage
-	if err := decoder.Decode(&raw); err != nil {
-		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-			return nil, errors.New("claude hook payload is incomplete or exceeds limit")
-		}
+	err := decoder.Decode(&raw)
+	if counted.n > claudeHookMaxBytes {
+		return nil, errors.New("claude hook payload exceeds limit")
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return nil, errors.New("claude hook payload is incomplete")
+	}
+	if err != nil {
 		return nil, err
 	}
 	trailing, _ := io.ReadAll(decoder.Buffered())
@@ -439,4 +445,16 @@ func readClaudeHook(input io.Reader) (*claudeHook, error) {
 		return nil, err
 	}
 	return &h, nil
+}
+
+// countingReader counts the bytes read through it.
+type countingReader struct {
+	r io.Reader
+	n int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += int64(n)
+	return n, err
 }

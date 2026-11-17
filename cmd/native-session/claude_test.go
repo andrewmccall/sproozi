@@ -176,6 +176,48 @@ func TestClaudeHookReportsACompletePayloadWithoutEndOfInput(t *testing.T) {
 	}
 }
 
+// sizedHook is a Stop payload of exactly size bytes.
+func sizedHook(size int) string {
+	head, tail := `{"hook_event_name":"Stop","pad":"`, `"}`
+	return head + strings.Repeat("x", size-len(head)-len(tail)) + tail
+}
+
+// The bound counts the object and any whitespace read with it, as the
+// reader that read to the end of input did; an incomplete payload and an
+// oversized one are told apart.
+func TestClaudeHookBoundIsExact(t *testing.T) {
+	if _, err := readClaudeHook(strings.NewReader(sizedHook(claudeHookMaxBytes))); err != nil {
+		t.Fatalf("payload of exactly the limit: %v", err)
+	}
+	for name, payload := range map[string]string{
+		"object one byte over":   sizedHook(claudeHookMaxBytes + 1),
+		"newline past the limit": sizedHook(claudeHookMaxBytes) + "\n",
+	} {
+		_, err := readClaudeHook(strings.NewReader(payload))
+		if err == nil || !strings.Contains(err.Error(), "exceeds limit") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if _, err := readClaudeHook(strings.NewReader(`{"hook_event_name":"Stop"`)); err == nil ||
+		!strings.Contains(err.Error(), "incomplete") {
+		t.Errorf("incomplete payload: %v", err)
+	}
+	// One byte over, with input that never ends: refused at once.
+	input, writer := io.Pipe()
+	defer func() { _ = writer.Close() }()
+	go func() { _, _ = io.WriteString(writer, sizedHook(claudeHookMaxBytes+1)) }()
+	read := make(chan error, 1)
+	go func() { _, err := readClaudeHook(input); read <- err }()
+	select {
+	case err := <-read:
+		if err == nil || !strings.Contains(err.Error(), "exceeds limit") {
+			t.Fatalf("oversized open payload: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("oversized payload waited for the end of its input")
+	}
+}
+
 func TestExplicitHarnessContractAndClaudeOptionBoundary(t *testing.T) {
 	c := config{Harness: harness.NativeClaude, Deadline: time.Now().Add(time.Minute), Instructions: instructions,
 		InstructionDigest: digest(), ClientConfig: testClients, Env: []string{testPathEnvironment},
