@@ -2,6 +2,7 @@ package pki
 
 import (
 	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -9,6 +10,8 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/andrewmccall/sproozi/internal/privatefs"
 )
@@ -249,9 +252,44 @@ func (s *Store) checkKeys(st State) error {
 // ca-<N>.pem and ca-<N>.key, N a positive number without leading zeros.
 var caFilePattern = regexp.MustCompile(`^ca-([1-9][0-9]{0,8})\.(pem|key)$`)
 
-// maxReplaceableGeneration bounds the history replace rebuilds. A yearly
-// rotation reaches it in ten thousand years; a higher number is a hand edit.
-const maxReplaceableGeneration = 10000
+// minGenerationBytes is less than any generation entry takes in a saved
+// record, so a history longer than maxState/minGenerationBytes can never be
+// read back, and replace refuses it before building it.
+const minGenerationBytes = 48
+
+// recordSize is the number of bytes commit writes for st.
+func recordSize(st State) (int, error) {
+	data, err := json.MarshalIndent(st, "", "  ")
+	return len(data) + 1, err
+}
+
+// sizeAfterGrowth is an upper bound on the size of st after prepare or
+// replace adds a generation: it measures a throwaway copy with one more
+// generation, a rotation and two trusted generations. It changes no record.
+func (s *Store) sizeAfterGrowth(st State) (int, error) {
+	next := st.clone()
+	id := len(next.Generations) + 1
+	next.Generations = append(next.Generations, Generation{ID: id, Fingerprint: strings.Repeat("0", 64),
+		NotAfter: s.now().Add(s.policy.CAValidity).UTC().Truncate(time.Second)})
+	next.Trusted = []int{max(id-1, 1), id}
+	next.Rotation = &Rotation{Stage: StageSwitched, From: max(id-1, 1), To: id, PreparedAt: s.now().UTC()}
+	next.Leaf = "leaf-" + strings.Repeat("0", 16)
+	return recordSize(next)
+}
+
+// grows refuses an operation that adds a generation when the record it would
+// save is larger than load reads, before the operation writes anything.
+func (s *Store) grows(st State, ev event) error {
+	size, err := s.sizeAfterGrowth(st)
+	if err != nil {
+		return err
+	}
+	if size > maxState {
+		return fmt.Errorf("pki: refusing to %s: the record would be %d bytes, more than the %d bytes load reads; "+
+			"start a new authority directory and trust it everywhere", ev, size, maxState)
+	}
+	return nil
+}
 
 // caFileGeneration returns the generation a CA file name belongs to, or 0
 // for a name the store does not write.
@@ -276,20 +314,31 @@ func caFileGeneration(name string) int {
 // one found in neither keeps neither. Retiring them all lets the destroy
 // pass remove every one of their keys; their certificates stay as history.
 func (s *Store) replaceable(st State) (State, error) {
-	highest := 0
+	highest, source := 0, ""
 	for _, g := range st.Generations {
-		highest = max(highest, g.ID)
+		if g.ID > highest {
+			highest, source = g.ID, fmt.Sprintf("generation %d in state.json", g.ID)
+		}
 	}
 	entries, err := os.ReadDir(s.dir)
 	if err != nil {
 		return State{}, err
 	}
 	for _, entry := range entries {
-		highest = max(highest, caFileGeneration(entry.Name()))
+		if id := caFileGeneration(entry.Name()); id > highest {
+			highest, source = id, entry.Name()
+		}
 	}
-	if highest > maxReplaceableGeneration {
-		return State{}, fmt.Errorf("pki: corrupt state: generation %d is beyond the %d replace can rebuild; "+
-			"restore state.json from a backup", highest, maxReplaceableGeneration)
+	tooLarge := func(size string) error {
+		remedy := "remove " + source + " if Sproozi did not write it"
+		if !strings.HasPrefix(source, "ca-") {
+			remedy = "correct that id, or restore state.json from a backup"
+		}
+		return fmt.Errorf("pki: replace would number the new authority after %s, and a record of %d generations "+
+			"is %s, more than the %d bytes load reads; %s, and replace again", source, highest+1, size, maxState, remedy)
+	}
+	if highest+1 > maxState/minGenerationBytes {
+		return State{}, tooLarge(fmt.Sprintf("more than %d bytes", (highest+1)*minGenerationBytes))
 	}
 	base := State{Version: 1, Names: st.Names}
 	for id := 1; id <= highest; id++ {
@@ -302,6 +351,13 @@ func (s *Store) replaceable(st State) (State, error) {
 			g.Fingerprint, g.NotAfter = st.Generations[i].Fingerprint, st.Generations[i].NotAfter
 		}
 		base.Generations = append(base.Generations, g)
+	}
+	size, err := s.sizeAfterGrowth(base)
+	if err != nil {
+		return State{}, err
+	}
+	if size > maxState {
+		return State{}, tooLarge(fmt.Sprintf("%d bytes", size))
 	}
 	return base, nil
 }

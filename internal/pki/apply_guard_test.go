@@ -17,8 +17,8 @@ var structureFields = []string{"Generations", "Serving", "Trusted", "Rotation", 
 
 // structureWriters are the only functions that may set them: apply moves a
 // record by the table; clone copies one; replaceable builds the base a
-// replace applies to.
-var structureWriters = []string{"apply", "clone", "replaceable"}
+// replace applies to; sizeAfterGrowth measures a throwaway copy.
+var structureWriters = []string{"apply", "clone", "replaceable", "sizeAfterGrowth"}
 
 // ADR 0058 rule 4, observed: every operation that moves the record does so
 // through apply, once, with its own event and the move the table declares,

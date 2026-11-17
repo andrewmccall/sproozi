@@ -332,6 +332,9 @@ func (s *Store) PrepareRotation() error {
 		if err = st.admit(evPrepare); err != nil {
 			return err
 		}
+		if err = s.grows(st, evPrepare); err != nil {
+			return err
+		}
 		now := s.now()
 		next, err := s.createNext(st, now)
 		if err != nil {
@@ -429,6 +432,9 @@ func (s *Store) ReplaceCA() error {
 		if err = st.admit(evReplace); err != nil {
 			return err
 		}
+		if err = s.grows(st, evReplace); err != nil {
+			return err
+		}
 		now := s.now()
 		next, err := s.createNext(st, now)
 		if err != nil {
@@ -484,6 +490,10 @@ func (s *Store) commit(st State) error {
 	data, err := json.MarshalIndent(st, "", "  ")
 	if err != nil {
 		return err
+	}
+	if len(data)+1 > maxState {
+		return fmt.Errorf("refusing to save: the record would be %d bytes, more than the %d bytes load reads",
+			len(data)+1, maxState)
 	}
 	if err = s.replace(stateFile, append(data, '\n')); err != nil {
 		return err
