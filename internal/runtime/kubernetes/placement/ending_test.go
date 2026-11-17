@@ -76,17 +76,17 @@ type endingFact struct {
 // endingFacts each change one retained fact the way a corrupt or foreign
 // write would: set it when it is clear, or clear it when it is set.
 var endingFacts = []endingFact{
-	{"quiet", func(r *retained) { r.NativeQuiet = !r.NativeQuiet }},
-	{"turnless", func(r *retained) { r.Turnless = !r.Turnless }},
-	{"exited", func(r *retained) {
+	{factQuiet, func(r *retained) { r.NativeQuiet = !r.NativeQuiet }},
+	{factTurnless, func(r *retained) { r.Turnless = !r.Turnless }},
+	{factExited, func(r *retained) {
 		if r.Exited == nil {
 			r.Exited = &session.Exit{Code: 1, Cause: harness.NativeExitSelf}
 		} else {
 			r.Exited = nil
 		}
 	}},
-	{"fenced", func(r *retained) { r.WriterFenced = !r.WriterFenced }},
-	{"output", func(r *retained) {
+	{factFenced, func(r *retained) { r.WriterFenced = !r.WriterFenced }},
+	{factOutput, func(r *retained) {
 		if r.OutputDigest == "" {
 			r.OutputDigest = recordedDigest
 		} else {
@@ -104,6 +104,9 @@ type endingOp struct {
 	name string
 	call func(ctx context.Context, p *Placement, l session.Launch, i session.Incarnation) error
 }
+
+// opAbortPreparation names the abort of a preparation among endingOps.
+const opAbortPreparation = "abort-preparation"
 
 // endingOps are the operations that observe or end a visit.
 var endingOps = []endingOp{
@@ -123,7 +126,7 @@ var endingOps = []endingOp{
 		_, err := p.Abort(ctx, l, i)
 		return err
 	}},
-	{"abort-preparation", func(ctx context.Context, p *Placement, l session.Launch, _ session.Incarnation) error {
+	{opAbortPreparation, func(ctx context.Context, p *Placement, l session.Launch, _ session.Incarnation) error {
 		return p.AbortPreparation(ctx, l)
 	}},
 }
@@ -215,18 +218,18 @@ func copyVisit(t *testing.T, v reachedVisit) *Placement {
 // resumed one only in its turnless fact.
 func TestEndingOperationsSettleAContradictedRecord(t *testing.T) {
 	t.Parallel()
-	for _, kind := range []string{"resumed", "first"} {
+	for _, kind := range []string{"resumed", kindFirst} {
 		for _, phase := range endingPhases {
 			t.Run(kind+"/"+phase.name, func(t *testing.T) {
 				t.Parallel()
-				v := reach(t, kind == "first", phase)
+				v := reach(t, kind == kindFirst, phase)
 				before := registration(t, v.p, v.l)
 				stored, err := v.p.load(v.l)
 				if err != nil {
 					t.Fatal(err)
 				}
 				facts := append([]endingFact{{"unchanged", func(*retained) {}}}, endingFacts...)
-				if kind == "first" {
+				if kind == kindFirst {
 					facts = endingFacts[1:2]
 				}
 				for _, fact := range facts {
@@ -260,10 +263,10 @@ func endingCase(t *testing.T, v reachedVisit, phase endingPhase, change func(*re
 		t.Fatalf("%s reported the contradiction: %v", op.name, err)
 	}
 	settled := phase.phase == registry.Stopped || phase.phase == registry.Cancelled
-	if settled && err != nil && op.name != "abort-preparation" && (op.name != "stop" || phase.phase == registry.Stopped) {
+	if settled && err != nil && op.name != opAbortPreparation && (op.name != "stop" || phase.phase == registry.Stopped) {
 		t.Fatalf("%s of a %s visit: %v", op.name, phase.phase, err)
 	}
-	if op.name == "abort-preparation" && err == nil {
+	if op.name == opAbortPreparation && err == nil {
 		if r := registration(t, p, l); r.Phase != registry.Cancelled && r.Phase != registry.Stopped {
 			t.Fatalf("aborted preparation left %s", r.Phase)
 		}

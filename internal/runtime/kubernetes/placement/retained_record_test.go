@@ -26,6 +26,16 @@ const recordedDigest = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddd
 // recordedWorkspace names the workspace fact.
 const recordedWorkspace = "workspace"
 
+// The names of the other facts, and of a first visit.
+const (
+	factQuiet    = "quiet"
+	factTurnless = "turnless"
+	factExited   = "exited"
+	factOutput   = "output"
+	factFenced   = "fenced"
+	kindFirst    = "first"
+)
+
 // recordedFacts are the retained record's facts beyond its launch and
 // reference, each set or not, in the order describeRetained names them.
 var recordedFacts = []struct {
@@ -33,11 +43,11 @@ var recordedFacts = []struct {
 	set  func(*retained)
 }{
 	{recordedWorkspace, func(r *retained) { r.WorkspaceDigest = recordedDigest }},
-	{"quiet", func(r *retained) { r.NativeQuiet = true }},
-	{"turnless", func(r *retained) { r.Turnless = true }},
-	{"exited", func(r *retained) { r.Exited = &session.Exit{Code: 1, Cause: harness.NativeExitSelf} }},
-	{"output", func(r *retained) { r.OutputDigest = recordedDigest }},
-	{"fenced", func(r *retained) { r.WriterFenced = true }},
+	{factQuiet, func(r *retained) { r.NativeQuiet = true }},
+	{factTurnless, func(r *retained) { r.Turnless = true }},
+	{factExited, func(r *retained) { r.Exited = &session.Exit{Code: 1, Cause: harness.NativeExitSelf} }},
+	{factOutput, func(r *retained) { r.OutputDigest = recordedDigest }},
+	{factFenced, func(r *retained) { r.WriterFenced = true }},
 	{"aborted", func(r *retained) { r.PreparationAborted = true }},
 }
 
@@ -46,9 +56,9 @@ func describeRetained(r retained) string {
 	for _, fact := range []struct {
 		name string
 		set  bool
-	}{{"reference", r.Reference.UID != ""}, {recordedWorkspace, r.WorkspaceDigest != ""}, {"quiet", r.NativeQuiet},
-		{"turnless", r.Turnless}, {"exited", r.Exited != nil}, {"output", r.OutputDigest != ""},
-		{"fenced", r.WriterFenced}, {"aborted", r.PreparationAborted}} {
+	}{{"reference", r.Reference.UID != ""}, {recordedWorkspace, r.WorkspaceDigest != ""}, {factQuiet, r.NativeQuiet},
+		{factTurnless, r.Turnless}, {factExited, r.Exited != nil}, {factOutput, r.OutputDigest != ""},
+		{factFenced, r.WriterFenced}, {"aborted", r.PreparationAborted}} {
 		if fact.set {
 			facts = append(facts, fact.name)
 		}
@@ -257,7 +267,7 @@ func TestRetainedRecordsMatchTheRecordedTable(t *testing.T) {
 	for _, launch := range []struct {
 		name string
 		l    session.Launch
-	}{{"resumed", resumed}, {"first", first}} {
+	}{{"resumed", resumed}, {kindFirst, first}} {
 		for mask := range 1 << len(recordedFacts) {
 			var facts retained
 			for i, fact := range recordedFacts {
