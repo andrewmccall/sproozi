@@ -3,6 +3,7 @@ package model_test
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -31,10 +32,16 @@ func TestUnavailableProviderAuthentication(t *testing.T) {
 		err     error
 		message string
 	}{
-		{name: "refresh failed", err: errors.New("ChatGPT token exchange failed (HTTP 503); sign in again if access was revoked"),
+		{name: "untyped error", err: errors.New("ChatGPT token exchange failed (HTTP 503); sign in again if access was revoked"),
 			message: "provider authentication is unavailable"},
 		{name: "store unreadable", err: errors.New("ChatGPT credentials are unavailable"),
 			message: "provider authentication is unavailable"},
+		{name: "refresh held", err: fmt.Errorf("wrapped: %w", &modelauth.RefreshError{}),
+			message: "provider authentication is unavailable: the ChatGPT sign-in could not be renewed (); " +
+				"the gateway tries again 10s after the failure"},
+		{name: "sign-in refused", err: &modelauth.RefreshError{Refused: true},
+			message: "provider authentication is unavailable: the provider refused to renew the ChatGPT sign-in (); " +
+				"an administrator must sign in again"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var calls atomic.Int32
