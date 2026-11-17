@@ -219,25 +219,26 @@ func registrationOf(t *testing.T, p *Placement, r retained) *registry.Record {
 	return &record
 }
 
-// settleCase checks what an operation that ends the visit reads: never a
+// settleCase checks what an operation that observes or ends the visit
+// reads (observing; settling then saves it): never a
 // contradiction, only a record valid beside its registration, the very
 // record a refusing read returns when that read accepts it, and one whose
 // check is settled (checking it again forgets nothing).
 func settleCase(t *testing.T, p *Placement, l session.Launch, valid bool, strict retained, strictRecord registry.Record) {
 	t.Helper()
-	local, r, err := p.settling(context.Background(), l)
+	local, r, err := p.observing(context.Background(), l)
 	var contradicted *contradiction
 	if errors.As(err, &contradicted) {
-		t.Errorf("%s: settling read a contradiction: %v", l.AllocationID, err)
+		t.Errorf("%s: observing read a contradiction: %v", l.AllocationID, err)
 	}
 	if err != nil {
 		return
 	}
 	if checked, err := local.check(&r); err != nil || !reflect.DeepEqual(checked, local) {
-		t.Errorf("settling read a record its registration contradicts: %+v %v", local, err)
+		t.Errorf("observing read a record its registration contradicts: %+v %v", local, err)
 	}
 	if valid && strictRecord.Reference.UID != "" && !reflect.DeepEqual(local, strict) {
-		t.Errorf("settling read %+v of a valid record read as %+v", local, strict)
+		t.Errorf("observing read %+v of a valid record read as %+v", local, strict)
 	}
 }
 
