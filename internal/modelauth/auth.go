@@ -181,6 +181,19 @@ const SessionReloadInterval = 10 * time.Second
 // refreshWindow is how close to expiry the access token is refreshed.
 const refreshWindow = time.Minute
 
+// refreshTimeout bounds a refresh, and separately its save, once started. It
+// matches the 30-second client both the cluster and the local gateway refresh
+// with, so it ends a refresh only where that client would.
+const refreshTimeout = 30 * time.Second
+
+// detached returns a context for a step that must finish once begun: the
+// provider spends the refresh token when it answers, so neither the refresh
+// nor the save of what it returned may end because the model request that
+// started it ended (its harness left, or its call deadline passed).
+func detached(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), refreshTimeout)
+}
+
 type ChatGPT struct {
 	store  SessionStore
 	client *http.Client
@@ -258,7 +271,10 @@ func (a *ChatGPT) reloadOrRefresh(ctx context.Context) (Session, error) {
 	}
 	if a.pending != nil {
 		if s.SameCredentials(a.pendingBefore) {
-			if err = a.store.Replace(ctx, s, *a.pending); err != nil {
+			saveCtx, cancel := detached(ctx)
+			err = a.store.Replace(saveCtx, s, *a.pending)
+			cancel()
+			if err != nil {
 				return Session{}, errors.New("could not persist renewed ChatGPT credentials")
 			}
 			s = *a.pending
@@ -266,10 +282,12 @@ func (a *ChatGPT) reloadOrRefresh(ctx context.Context) (Session, error) {
 		a.pending = nil
 	}
 	if time.Until(s.SavedAt.Add(time.Duration(s.ExpiresIn)*time.Second)) <= refreshWindow {
-		next, refreshErr := Exchange(ctx, a.client, a.tokenEndpoint, url.Values{
+		refreshCtx, cancel := detached(ctx)
+		next, refreshErr := Exchange(refreshCtx, a.client, a.tokenEndpoint, url.Values{
 			"grant_type": {refreshTokenField}, clientIDField: {s.ClientID},
 			refreshTokenField: {s.RefreshToken}, resourceField: {Resource},
 		})
+		cancel()
 		if refreshErr != nil {
 			return Session{}, refreshErr
 		}
@@ -286,7 +304,10 @@ func (a *ChatGPT) reloadOrRefresh(ctx context.Context) (Session, error) {
 			return Session{}, err
 		}
 		a.pending, a.pendingBefore = &renewed, s
-		if err = a.store.Replace(ctx, s, renewed); err != nil {
+		saveCtx, cancel := detached(ctx)
+		err = a.store.Replace(saveCtx, s, renewed)
+		cancel()
+		if err != nil {
 			return Session{}, errors.New("could not persist renewed ChatGPT credentials")
 		}
 		a.pending = nil

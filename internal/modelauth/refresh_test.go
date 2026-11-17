@@ -211,7 +211,7 @@ func (s ctxStore) Replace(ctx context.Context, before, after Session) error {
 // TestChatGPTRefreshWhoseRequestLeaves: a model request
 // whose harness leaves while the provider is rotating the refresh token.
 // Guards: the context a refresh and its save run under.
-func TestChatGPTRefreshWhoseRequestLeaves(t *testing.T) {
+func TestChatGPTRefreshWhoseRequestLeavesKeepsTheRotatedToken(t *testing.T) {
 	endpoint := newRotatingEndpoint(fixtureRefresh)
 	endpoint.rotated, endpoint.release = make(chan struct{}), make(chan struct{})
 	server := httptest.NewServer(endpoint)
@@ -238,15 +238,15 @@ func TestChatGPTRefreshWhoseRequestLeaves(t *testing.T) {
 		<-done
 	}
 
-	// Unchanged code: the rotated token was dropped, so the stored sign-in
-	// still names the spent token and the next request is refused for good.
-	if store.session.RefreshToken != fixtureRefresh {
-		t.Fatalf("stored refresh token = %q", store.session.RefreshToken)
+	// The refresh and its save outlived the request: the stored sign-in holds
+	// the rotated token, and the next request uses it without a refresh.
+	if store.session.RefreshToken != "rotated-refresh-1" {
+		t.Fatalf("stored refresh token = %q, want the rotated one", store.session.RefreshToken)
 	}
-	if header, err := authorizeOnce(auth); err == nil || header != "" {
-		t.Fatalf("next request authorized with %q", header)
+	if header, err := authorizeOnce(auth); err != nil || header != "Bearer rotated-access" {
+		t.Fatalf("next request = %q, %v", header, err)
 	}
-	if got := endpoint.calls.Load(); got != 2 {
-		t.Fatalf("refresh requests = %d, want 2", got)
+	if got := endpoint.calls.Load(); got != 1 {
+		t.Fatalf("refresh requests = %d, want 1", got)
 	}
 }
