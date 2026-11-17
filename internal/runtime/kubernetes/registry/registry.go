@@ -389,6 +389,13 @@ func (s *Store) CompleteStop(ctx context.Context, ref Reference, checkpointDiges
 
 // CompleteCancel retains trusted seals after the placement revoked access and
 // physically fenced the exact bound Pod. Cancellation requires no new checkpoint.
+//
+// Invariant: a cancellation receipt is sealed only after the writer was
+// proven fenced (the placement's fenceCancelled calls this only once it saw
+// the native container end, or the Pod never scheduled). The placement
+// relies on it: a cancelled registration with a receipt proves the fence
+// even when the executor's own record of it was lost (ADR 0066). Never call
+// this before the fence is proven.
 func (s *Store) CompleteCancel(ctx context.Context, ref Reference, seals map[api.CapabilityKind]budget.TrustedUsage) (Record, error) {
 	return s.change(ctx, ref, func(r *stored) error {
 		// The receipt replay follows admission: only a cancelled record may
