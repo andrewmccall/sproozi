@@ -59,6 +59,10 @@ func firstModelRequest(t *testing.T, binary string, args, env []string, dir stri
 	// test's directories are removed.
 	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	command.Cancel = func() error { return unix.Kill(-command.Process.Pid, unix.SIGKILL) }
+	// A helper that left the group (setsid) is not killed with it and may
+	// hold the output pipe; Wait closes the pipe this long after the client
+	// exits rather than wait for that helper.
+	command.WaitDelay = 5 * time.Second
 	if err := command.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +90,10 @@ func firstModelRequest(t *testing.T, binary string, args, env []string, dir stri
 
 // awaitGroupGone waits until process group pgid has no running member: a
 // killed member ends at once, but its end is asynchronous. Darwin answers a
-// group whose members are all zombies with EPERM rather than ESRCH.
+// group whose members are all zombies with EPERM rather than ESRCH. Linux
+// answers 0 while any member is a zombie, so there the wait ends only once
+// the orphaned members are reaped: in a container whose PID 1 does not reap,
+// it reports after 30 s.
 func awaitGroupGone(t *testing.T, pgid int) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
