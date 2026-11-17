@@ -97,6 +97,22 @@ class RenderTests(unittest.TestCase):
         self.assertEqual(env["MODEL_AUTH_MODE"]["value"], "api_key")
         self.assertEqual(env["ANTHROPIC_API_KEY"]["valueFrom"]["secretKeyRef"]["name"], "claude-remote-model-placeholder")
 
+    def test_the_refresh_scenario_raises_only_the_duration_caps(self):
+        shipped, shipped_profile = self.render("sign-in")
+        with patch.object(R.KUBE, "build", side_effect=build):
+            documents, profile = R.render(IMAGE, IMAGE, self.ca, "sign-in", "90m")
+        self.assertEqual(self.find(documents, "AgentPolicy")["spec"]["maxExecutionDuration"], "90m")
+        self.assertEqual(profile["maxDuration"], "90m")
+        self.assertEqual(json.loads(self.find(documents, "ConfigMap", "sproozi-work-profile")["data"]["profile.json"]),
+                         profile)
+        self.assertEqual({**profile, "maxDuration": shipped_profile["maxDuration"]}, shipped_profile)
+        self.find(shipped, "AgentPolicy")["spec"]["maxExecutionDuration"] = "90m"
+        self.find(shipped, "ConfigMap", "sproozi-work-profile")["data"]["profile.json"] = \
+            self.find(documents, "ConfigMap", "sproozi-work-profile")["data"]["profile.json"]
+        self.assertEqual(documents, shipped)
+        with patch.object(R.KUBE, "build", side_effect=build), self.assertRaises(ValueError):
+            R.render(IMAGE, IMAGE, self.ca, "sign-in", "none")
+
     def test_a_changed_example_template_is_refused(self):
         documents, profile = self.render("sign-in")
         template = self.find(documents, "AgentTemplate")

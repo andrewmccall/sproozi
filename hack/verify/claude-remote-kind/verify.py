@@ -16,6 +16,10 @@ production PTY. Each scenario is its own session:
   task       a --task completes and its result is Claude's final reply
   tools      a turn that calls the sproozi diagnose MCP tool and loads a
              profile skill, then stop
+  refresh    a turn, then another after the sandbox's first gateway token
+             has expired, in the same Pod (only when chosen; it needs a
+             cluster that caps token lifetimes, as run.sh makes with
+             SPROOZI_TOKEN_REFRESH=1)
 
 The administrator kubeconfig is used only to read the fixture provider's
 request log. report.json holds identities, phases and fixture facts.
@@ -54,6 +58,21 @@ DIALOGS = ["Do you trust the files", "Yes, I accept", "Choose the text style", "
 READY = ["? for shortcuts", "bypass permissions on", "for shortcuts"]
 DETACH = b"\x1d"
 UNSETTLED = {"unknown-stop", "unknown-usage", "failed", "cancelled"}
+GATEWAY_TOKEN = "/var/run/sproozi/tokens/gateway/token"
+# Run in the sandbox: prints the token's claims that say when it was issued
+# and expires, the Pod's clock, and the token directory's entries (a link's
+# target, or "" for anything else). The token itself is not printed.
+TOKEN_FACTS = """
+import base64, json, os, sys, time
+path = sys.argv[1]
+payload = open(path).read().strip().split(".")[1]
+claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+directory = os.path.dirname(path)
+layout = {name: os.readlink(os.path.join(directory, name)) if os.path.islink(os.path.join(directory, name)) else ""
+          for name in os.listdir(directory)}
+print(json.dumps({"iat": claims["iat"], "exp": claims["exp"], "jti": claims.get("jti", ""),
+                  "now": int(time.time()), "layout": layout}))
+"""
 
 
 class Failure(RuntimeError):
@@ -347,6 +366,80 @@ class Proof:
         self.record("tools", sessionId=session, passed=True, providerPhases=phases, stopPhases=seen,
                     threadId=stopped.get("threadId"))
 
+    # The sandbox's gateway token, read as the administrator. Only its claims
+    # and the volume's layout leave the Pod, never the token.
+
+    def kubectl(self, *args, timeout=60):
+        return subprocess.run([str(self.args.kubectl), "--kubeconfig", str(self.args.kubeconfig), *args],
+                              capture_output=True, check=True, timeout=timeout).stdout
+
+    def sandbox_pod(self):
+        pods = json.loads(self.kubectl("-n", "sproozi-agents", "get", "pods", "-l",
+                                       "sproozi.com/managed-by=sproozi-controller", "-o", "json"))["items"]
+        running = [p["metadata"]["name"] for p in pods
+                   if p["status"].get("phase") == "Running" and not p["metadata"].get("deletionTimestamp")]
+        check(len(running) == 1, "Expected one running sandbox Pod, found %d" % len(running))
+        return running[0]
+
+    def token_facts(self, pod):
+        """The token's issue and expiry times, the Pod's clock, and the token
+        directory's entries with their link targets."""
+        output = self.kubectl("-n", "sproozi-agents", "exec", pod, "-c", "agent", "--", "python3", "-c",
+                              TOKEN_FACTS, GATEWAY_TOKEN)
+        return json.loads(output)
+
+    def refresh(self):
+        """A session reaches the gateway after its Pod's first gateway token
+        has expired. The cluster caps token lifetimes (run.sh), so the first
+        token expires about an hour after the Pod starts."""
+        check(self.args.token_lifetime, "The refresh scenario needs --token-lifetime, the cluster's token cap")
+        view = self.start("refresh-run")
+        session = view["id"]
+        pod = self.sandbox_pod()
+        first = self.token_facts(pod)
+        lifetime = first["exp"] - first["iat"]
+        self.record("refresh", sessionId=session, pod=pod, firstToken=first)
+        check(lifetime <= self.args.token_lifetime, "The first token lasts %ds, longer than the cluster's cap" % lifetime)
+        layout = first["layout"]
+        check(layout.get("token") == "..data/token" and layout.get("..data", "").startswith("..") and
+              set(layout) == {"token", "..data", layout["..data"]},
+              "The token is not the kubelet's refreshable directory layout: %s" % layout)
+        terminal = self.attach(session, "refresh-attach")
+        self.wait_ready(terminal, "refresh first visit")
+        self.turn(terminal, "refresh-before", "turn before the first token expires")
+        self.detach(terminal, "refresh before expiry")
+        seen = [first]
+        while True:
+            facts = self.token_facts(pod)
+            if facts["iat"] != seen[-1]["iat"]:
+                seen.append(facts)
+                print("token refreshed: iat=%d exp=%d pod clock=%d" % (facts["iat"], facts["exp"], facts["now"]),
+                      flush=True)
+                self.record("refresh", tokens=[{k: f[k] for k in ("iat", "exp", "jti")} for f in seen])
+            if facts["now"] > first["exp"] + 60:
+                break
+            check(facts["now"] < first["exp"] + 600, "The wait for the first token's expiry overran")
+            time.sleep(min(60, max(1, first["exp"] + 61 - facts["now"])))
+        check(len(seen) > 1 and facts["exp"] > first["exp"], "The kubelet never refreshed the gateway token")
+        print("first token expired at %d; pod clock now %d; current token iat=%d exp=%d" %
+              (first["exp"], facts["now"], facts["iat"], facts["exp"]), flush=True)
+        terminal = self.attach(session, "refresh-expired-attach")
+        self.wait_ready(terminal, "refresh visit after expiry")
+        self.turn(terminal, "refresh-after", "turn after the first token expired")
+        after = self.token_facts(pod)
+        self.detach(terminal, "refresh after expiry")
+        check(self.sandbox_pod() == pod, "The session's sandbox Pod changed during the scenario")
+        before_records = self.check_requests("refresh-before", "turn before expiry")
+        after_records = self.check_requests("refresh-after", "turn after expiry")
+        print("turn after expiry answered: it began at pod clock %d, %ds past the first token's expiry; "
+              "answered by %d; %d provider requests" %
+              (facts["now"], facts["now"] - first["exp"], after["now"], len(after_records)), flush=True)
+        stopped, phases, _ = self.stop(session, "refresh-stop")
+        self.record("refresh", passed=True, firstTokenExpiry=first["exp"], turnBeganAt=facts["now"],
+                    secondsPastFirstExpiry=facts["now"] - first["exp"], answeredBy=after["now"],
+                    tokenAtAnswer={k: after[k] for k in ("iat", "exp", "jti")}, requestsBefore=len(before_records),
+                    requestsAfter=len(after_records), stopPhases=phases, threadId=stopped.get("threadId"))
+
     def execute(self):
         chosen = self.args.scenario or ["snapshot", "upload", "exit", "resumed", "task", "tools"]
         snapshot = None
@@ -364,6 +457,8 @@ class Proof:
                     self.task()
                 elif name == "tools":
                     self.tools()
+                elif name == "refresh":
+                    self.refresh()
             except Exception as error:
                 self.record(name, passed=False, failure={"type": type(error).__name__, "message": str(error)})
                 raise
@@ -395,7 +490,11 @@ def main():
     parser.add_argument("--namespace", default="sproozi-claude-sessions")
     parser.add_argument("--auth", choices=["sign-in", "gateway-key"], default="sign-in")
     parser.add_argument("--output-directory", type=Path, required=True)
-    parser.add_argument("--scenario", action="append", choices=["snapshot", "upload", "exit", "resumed", "task", "tools"])
+    parser.add_argument("--scenario", action="append",
+                        choices=["snapshot", "upload", "exit", "resumed", "task", "tools", "refresh"],
+                        help="run only these; refresh runs only when chosen, on a cluster that caps tokens")
+    parser.add_argument("--token-lifetime", type=int, default=0,
+                        help="seconds; the cluster's ServiceAccount token cap, for the refresh scenario")
     parser.add_argument("--operation-timeout", type=int, default=240)
     parser.add_argument("--turn-timeout", type=int, default=120)
     parser.add_argument("--task-timeout", type=int, default=300)

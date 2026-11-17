@@ -51,6 +51,16 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(record["missingHistory"], [])
         self.assertEqual(reply, ("text", P.SCENARIOS["resumed"]["answer"]))
 
+    def test_the_turn_after_token_expiry_needs_the_earlier_turn(self):
+        before, after = P.SCENARIOS["refresh-before"], P.SCENARIOS["refresh-after"]
+        record, reply = P.plan(body(before["prompt"]))
+        self.assertEqual((record["scenario"], reply), ("refresh-before", ("text", before["answer"])))
+        with self.assertRaises(P.Refused):
+            P.plan(body(after["prompt"]))
+        record, reply = P.plan(body(after["prompt"], history=(before["prompt"], before["answer"])))
+        self.assertEqual((record["scenario"], record["missingHistory"]), ("refresh-after", []))
+        self.assertEqual(reply, ("text", after["answer"]))
+
     def test_the_upload_turn_reads_the_uploaded_file_with_bash(self):
         prompt = P.SCENARIOS["upload"]["prompt"]
         record, reply = P.plan(body(prompt))

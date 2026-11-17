@@ -49,6 +49,12 @@ SCENARIOS = {
              "answer": "CLAUDE_REMOTE_TASK_RESULT cobalt-wren-517", "history": []},
     "tools": {"prompt": "Call the sproozi diagnose tool, then load the remote-check profile skill, then report.",
               "answer": "CLAUDE_REMOTE_TOOLS_COMPLETE", "history": []},
+    "refresh-before": {"prompt": "Answer while the sandbox still holds its first gateway token.",
+                       "answer": "CLAUDE_REMOTE_REFRESH_BEFORE_COMPLETE", "history": []},
+    "refresh-after": {"prompt": "Answer now that the sandbox's first gateway token has expired.",
+                      "answer": "CLAUDE_REMOTE_REFRESH_AFTER_COMPLETE",
+                      "history": ["Answer while the sandbox still holds its first gateway token.",
+                                  "CLAUDE_REMOTE_REFRESH_BEFORE_COMPLETE"]},
 }
 # Claude Code connects MCP servers after its first request, so the tools turn
 # waits with Bash until the diagnose tool is offered, at most this often.
