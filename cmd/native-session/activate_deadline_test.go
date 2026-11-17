@@ -36,6 +36,12 @@ func activatable(t *testing.T, prepare func()) *atomic.Bool {
 	return started
 }
 
+// passDeadline moves s's deadline a second into the past. A prepare hook
+// calls it on activate's own goroutine, between activate's two deadline
+// checks, so it stands for preparing that outlasts the deadline without
+// waiting for the clock.
+func passDeadline(s *server) { s.deadline = time.Now().Add(-time.Second) }
+
 // activation is a configured supervisor whose deadline is until.
 func activation(until time.Time) (*server, *lockedBuffer) {
 	s := newServer(config{Harness: harness.NativeCodex, ThreadID: selected, Instructions: instructions,
@@ -61,9 +67,14 @@ func TestActivateAfterTheDeadlineIsRefused(t *testing.T) {
 // harness. The reply is the one the terminal gave when it was handed the
 // deadline, and at the deadline the supervisor exits as a prepared one does,
 // with no exit report.
+//
+// The deadline is an hour ahead when activate checks it first, however
+// slow the machine; preparing then moves it into the past, as a slow
+// preparation would carry the clock past it.
 func TestDeadlineDuringActivationStartsNoHarness(t *testing.T) {
-	started := activatable(t, func() { time.Sleep(600 * time.Millisecond) })
-	s, reports := activation(time.Now().Add(300 * time.Millisecond))
+	var s *server
+	started := activatable(t, func() { passDeadline(s) })
+	s, reports := activation(time.Now().Add(time.Hour))
 	r := s.activate()
 	if r.Error != launchPastDeadline || r.State != harness.NativePrepared || started.Load() {
 		t.Fatalf("activation overtaken by the deadline: %+v, started %v", r, started.Load())
@@ -78,12 +89,13 @@ func TestDeadlineDuringActivationStartsNoHarness(t *testing.T) {
 // The refused activation stops the sign-in sync it started, so its final
 // save runs and nothing syncs for a harness that never ran.
 func TestDeadlineDuringActivationStopsTheSignInSync(t *testing.T) {
-	activatable(t, func() { time.Sleep(600 * time.Millisecond) })
+	var s *server
+	activatable(t, func() { passDeadline(s) })
 	l := recordedLogin(t)
 	previous := startLogin
 	startLogin = func(config) (*loginSync, error) { return l, nil }
 	t.Cleanup(func() { startLogin = previous })
-	s, _ := activation(time.Now().Add(300 * time.Millisecond))
+	s, _ = activation(time.Now().Add(time.Hour))
 	if r := s.activate(); r.Error != launchPastDeadline {
 		t.Fatalf("activate: %+v", r)
 	}
