@@ -3,6 +3,7 @@ package work
 import (
 	"context"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/session"
@@ -55,29 +56,85 @@ func TestCompletionPauseCountsTheRoundsOwnTime(t *testing.T) {
 // The pause never holds up a cancellation the owner asks for: it goes
 // through the coordinator, which interrupts the completion wait, not
 // through the paused driver.
+//
+// The driver runs in a synctest bubble, whose clock moves only while every
+// goroutine in it waits on the bubble. The test waits for the cancel on a
+// channel from outside the bubble, so the clock stands still and the pause
+// cannot end until the cancel returns: a cancel held by the pause never
+// returns, and is reported once cancelHangLimit of real time has passed.
 func TestCancellationIsNotHeldByTheCompletionPause(t *testing.T) {
 	t.Parallel()
-	e := newDriverEnv(t, false, clockNone)
-	namedJournalState(t, string(session.PhaseStopping)).build(t, e)
-	e.fixture(func(p *fixturePlacement) { p.turnPending = 1 << 30 })
-	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan struct{})
+	arm, expired := realTimeLimit(t, cancelHangLimit)
+	synctest.Test(t, func(t *testing.T) {
+		e := newDriverEnv(t, false, clockNone)
+		namedJournalState(t, string(session.PhaseStopping)).build(t, e)
+		e.fixture(func(p *fixturePlacement) { p.turnPending = 1 << 30 })
+		_ = e.p.counts()
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			e.o.drive(ctx, e.id, make(chan struct{}))
+		}()
+		defer func() {
+			cancel()
+			<-done
+		}()
+		// A round takes no time on the bubble's clock, so a quarter of the
+		// pace in, the driver has taken one round and waits out its pause.
+		time.Sleep(completionPace / 4)
+		e.p.mu.Lock()
+		rounds := e.p.calls["stop"]
+		e.p.mu.Unlock()
+		if rounds != 1 {
+			t.Fatalf("%d completion-wait rounds before the cancel, want 1", rounds)
+		}
+		type cancelled struct {
+			v   View
+			err error
+		}
+		result := make(chan cancelled, 1)
+		close(arm)
+		go func() {
+			v, err := e.o.Cancel(t.Context(), e.id, uuid.NewString())
+			result <- cancelled{v, err}
+		}()
+		select {
+		case r := <-result:
+			if r.err != nil || r.v.Phase != phaseCancelled {
+				t.Fatalf("cancel during the pause: %s %v", r.v.Phase, r.err)
+			}
+		case <-expired:
+			t.Fatalf("cancel during a pause of %s did not return in %s: it waits for the pause", completionPace, cancelHangLimit)
+		}
+	})
+}
+
+// cancelHangLimit is how long a test waits for a cancel that can only
+// return if it does not wait for the driver: a cancel takes well under two
+// seconds on a loaded machine.
+const cancelHangLimit = 30 * time.Second
+
+// realTimeLimit returns a channel to close, from inside a synctest bubble,
+// when d of real time starts, and a channel closed when it has passed. Both
+// belong to no bubble, so the bubble's clock neither drives the limit nor
+// moves while a test waits on it.
+func realTimeLimit(t *testing.T, d time.Duration) (arm chan<- struct{}, expired <-chan struct{}) {
+	armed, passed := make(chan struct{}), make(chan struct{})
+	done := t.Context().Done()
 	go func() {
-		defer close(done)
-		e.o.drive(ctx, e.id, make(chan struct{}))
+		select {
+		case <-armed:
+		case <-done:
+			return
+		}
+		timer := time.NewTimer(d)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+			close(passed)
+		case <-done:
+		}
 	}()
-	defer func() {
-		cancel()
-		<-done
-	}()
-	// Let the driver take a round and pause.
-	time.Sleep(completionPace / 4)
-	began := time.Now()
-	v, err := e.o.Cancel(t.Context(), e.id, uuid.NewString())
-	if err != nil || v.Phase != phaseCancelled {
-		t.Fatalf("cancel during the pause: %s %v", v.Phase, err)
-	}
-	if took := time.Since(began); took >= completionPace/2 {
-		t.Fatalf("cancel took %s during a pause of %s", took, completionPace)
-	}
+	return armed, passed
 }
