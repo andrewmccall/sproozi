@@ -20,6 +20,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// replacementUID is the UID of a run an administrator put in place of the
+// bound one.
+const replacementUID = "replacement-uid"
+
 // waitingTask is a first visit of a task with no deadline (ADR 0056) whose
 // run the controller leaves Queued with no Pod.
 func waitingTask(t *testing.T) (*Placement, *admissionClient, *protocolExecutor, session.Launch) {
@@ -201,7 +205,7 @@ func TestPrepareStopsWaitingWhenItsRunCanNoLongerGetAPod(t *testing.T) {
 			if err := kube.Client.Delete(t.Context(), old); err != nil {
 				t.Fatal(err)
 			}
-			replacement := &api.AgentRun{ObjectMeta: metav1.ObjectMeta{Namespace: old.Namespace, Name: old.Name, UID: "replacement-uid"},
+			replacement := &api.AgentRun{ObjectMeta: metav1.ObjectMeta{Namespace: old.Namespace, Name: old.Name, UID: replacementUID},
 				Spec: old.Spec}
 			if err := kube.Client.Create(t.Context(), replacement); err != nil {
 				t.Fatal(err)

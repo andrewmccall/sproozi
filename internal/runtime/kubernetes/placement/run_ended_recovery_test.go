@@ -157,7 +157,7 @@ func TestRecoverRefusesAStartWhoseRunWasDeletedWithoutCreatingAnother(t *testing
 			}
 			if test.replace {
 				replacement := &api.AgentRun{ObjectMeta: old.ObjectMeta, Spec: old.Spec}
-				replacement.ResourceVersion, replacement.UID = "", "replacement-uid"
+				replacement.ResourceVersion, replacement.UID = "", replacementUID
 				if err := kube.Client.Create(t.Context(), replacement); err != nil {
 					t.Fatal(err)
 				}
@@ -192,7 +192,7 @@ func TestRecoverRefusesAStartWhoseRunWasDeletedWithoutCreatingAnother(t *testing
 				t.Fatalf("recover created %d AgentRuns", kube.runCreates-creates)
 			case !test.replace && err == nil:
 				t.Fatalf("an AgentRun %s exists again with UID %s (old %s)", after.Name, after.UID, old.UID)
-			case test.replace && (err != nil || after.UID != "replacement-uid"):
+			case test.replace && (err != nil || after.UID != replacementUID):
 				t.Fatalf("the replacement run changed: %+v %v", after.ObjectMeta, err)
 			}
 		})

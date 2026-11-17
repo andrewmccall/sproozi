@@ -374,6 +374,18 @@ func runEnded(run *api.AgentRun) string {
 	return s
 }
 
+// abortedObservation is Inspect's observation of l when its preparation was
+// aborted. An aborted preparation still pending in its coordinator's
+// journal is a start whose end was not yet shown: it is preparing, its
+// Prepare refuses it, and the coordinator's end replays the abort (ADR 0067).
+func (p *Placement) abortedObservation(l session.Launch) (session.Observation, bool) {
+	local, err := p.load(l)
+	if err != nil || !local.PreparationAborted || !session.SameLaunch(l, local.Launch) {
+		return session.Observation{}, false
+	}
+	return session.Observation{Launch: local.Launch, State: session.PlacementPreparing}, true
+}
+
 // readyCondition is the AgentRun condition that carries the controller's
 // reason for the run's phase.
 const readyCondition = "Ready"
@@ -425,11 +437,8 @@ func (p *Placement) Inspect(ctx context.Context, l session.Launch) (session.Obse
 		return session.Observation{}, err
 	}
 	defer unlock()
-	if aborted, err := p.load(l); err == nil && aborted.PreparationAborted && session.SameLaunch(l, aborted.Launch) {
-		// An aborted preparation still pending in its coordinator's journal
-		// is a start whose end was not yet shown: its Prepare refuses it,
-		// and the coordinator's end replays the abort (ADR 0067).
-		return session.Observation{Launch: aborted.Launch, State: session.PlacementPreparing}, nil
+	if o, aborted := p.abortedObservation(l); aborted {
+		return o, nil
 	}
 	local, r, err := p.observing(ctx, l)
 	if os.IsNotExist(err) {

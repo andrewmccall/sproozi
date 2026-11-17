@@ -264,7 +264,7 @@ func TestEveryDriverPhaseCanStillBeStoppedAndCancelled(t *testing.T) {
 							switch {
 							case !got.Settled():
 								t.Fatalf("from %s the session is left %s", before.Phase, got)
-							case stop && got == phaseCancelled && !s.cancel && !s.lateStart && !(state.refuses && !interactive) &&
+							case stop && got == phaseCancelled && !s.cancel && !s.lateStart && (!state.refuses || interactive) &&
 								s.phase != session.PhaseCancelled:
 								t.Fatalf("stopping from %s cancelled it", before.Phase)
 							case !stop && got != phaseCancelled && (code(cancelErr) != profile.CodeConflict || !got.stopped() && got != PhaseFailed):
