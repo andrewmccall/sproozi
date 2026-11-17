@@ -29,6 +29,50 @@ func TestAFailedCommandKeepsOneBoundedLine(t *testing.T) {
 	}
 }
 
+// Each layer of execCause's redaction, with a case that only that layer
+// catches, and the runtime's own identifiers, which none removes. Guards:
+// the url.Error branch (a URL the pattern would not match), the pattern's
+// http(s)/ws(s) alternative (a URL with no exec query), its exec-query
+// alternative (a query with no scheme, plain or percent-encoded), and that
+// the pattern leaves containerd and socket addresses and other quoted text
+// alone.
+func TestEachLayerOfAFailedCommandsRedaction(t *testing.T) {
+	t.Parallel()
+	secret := "secret-notes.env"
+	for _, test := range []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"a url.Error in the chain keeps its operation and inner error",
+			fmt.Errorf("error sending request: %w", &url.Error{Op: "Post",
+				URL: "/api/v1/namespaces/sproozi-agents/pods/run-abc/exec", Err: io.EOF}),
+			"Post request: EOF"},
+		{"an http URL in the text is removed",
+			errors.New(`error sending request: Post "https://10.0.0.1:6443/api/v1/namespaces/a/pods/b/exec": EOF`),
+			"error sending request: Post request: EOF"},
+		{"a websocket URL in the text is removed",
+			errors.New(`dial wss://10.0.0.1:6443/api/v1/namespaces/a/pods/b/exec: EOF`),
+			"dial request EOF"},
+		{"an exec query without a scheme is removed",
+			errors.New("upgrade failed for /api/v1/namespaces/a/pods/b/exec?command=%2Fusr%2Flocal%2Fbin%2Fcheckpoint&command=" + secret + " EOF"),
+			"upgrade failed for request EOF"},
+		{"a percent-encoded exec query is removed",
+			errors.New("upgrade failed for /api/v1/namespaces/a/pods/b/exec%3Fcommand%3D%252Fusr%26command%3D" + secret + " EOF"),
+			"upgrade failed for request EOF"},
+		{"a runtime's container ID and socket are kept",
+			errors.New("failed to exec in container containerd://abc123: dial unix:///run/containerd/containerd.sock: connection refused"),
+			"failed to exec in container containerd://abc123: dial unix:///run/containerd/containerd.sock: connection refused"},
+		{"other quoted text is kept",
+			errors.New(`error stream protocol error: invalid exit code value "x?y=1"`),
+			`error stream protocol error: invalid exit code value "x?y=1"`},
+	} {
+		if got := execCause(test.err); got != test.want || strings.Contains(got, secret) {
+			t.Errorf("%s: kept %q, want %q", test.name, got, test.want)
+		}
+	}
+}
+
 // failingExec fails every command with err(args, container).
 type failingExec struct {
 	err func(args []string, container string) error

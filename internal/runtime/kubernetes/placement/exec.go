@@ -127,10 +127,13 @@ func operation(args []string) string {
 const maxCause = 512
 
 // requestURL matches what the text of an exec error may hold of its request:
-// a URL, quoted or not, or any word with a query. The exec request's URL
-// carries every argument of the command in its query, such as the files a
-// capture selects, its thread and the instruction digest.
-var requestURL = regexp.MustCompile(`"?[A-Za-z][A-Za-z0-9+.-]*://[^\s"]*"?|[^\s"]*\?[^\s"]*=[^\s"]*`)
+// an http, https, ws or wss URL, quoted or not, or any word with the exec
+// query's shape, command= or its percent-encoded command%3D. The exec
+// request's URL carries every argument of the command in its query, such as
+// the files a capture selects, its thread and the instruction digest. A
+// runtime's own identifiers, such as containerd:// container IDs and unix://
+// sockets, and other quoted text are left as they come.
+var requestURL = regexp.MustCompile(`"?(?i:https?|wss?)://[^\s"]*"?|[^\s"]*(?i:command(?:=|%3D))[^\s"]*`)
 
 // execCause is err's text on one line, at most maxCause bytes, without the
 // exec request's URL. It comes from the exec client, the API server, the
