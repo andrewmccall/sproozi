@@ -110,6 +110,30 @@ func TestABrokenUnusedKeyIsReportedAfterTheReconcile(t *testing.T) {
 	}
 }
 
+// A retire request with the new serving key broken is refused, and the
+// outgoing key, the last that works, stays in the authority Secret. Guards
+// the serving-key check in pki's RetireRotation, through Reconcile.
+func TestARetireRequestKeepsTheLastWorkingKey(t *testing.T) {
+	c, client := setup(t)
+	step(t, c, client, requestPrepare, requestSwitch)
+	setAuthorityData(t, client, func(data map[string][]byte) { data["ca-2.key"] = []byte("not a key\n") })
+	request(t, client, requestRetire)
+	_, err := controller(t, client).Reconcile(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "generation 2 key ca-2.key") {
+		t.Errorf("reconcile: %v", err)
+	}
+	s, err := client.CoreV1().Secrets(systemNamespace).Get(context.Background(), "sproozi-certificate-authority", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, kept := s.Data["ca-1.key"]; !kept {
+		t.Error("the outgoing key was destroyed")
+	}
+	if !strings.Contains(s.Annotations[LastError], `rotation request "retire" refused`) {
+		t.Errorf("last error %q", s.Annotations[LastError])
+	}
+}
+
 // The operator's way out of a refused record is the replace request, the
 // sproozi.com/rotation-request=replace annotation on the authority Secret.
 // It reaches the store, which leaves a single phase on a new generation:

@@ -168,6 +168,39 @@ func TestAnUnusedUnreadableKeyDoesNotStopTheServiceOrItsRotation(t *testing.T) {
 	})
 }
 
+// With the new serving key broken, maintain does not retire the previous
+// authority even when its evidence is present: the key report is logged,
+// the retire step fails naming the key, and the outgoing key, the last that
+// works, is kept. Guards the serving-key check in pki's RetireRotation.
+func TestMaintainDoesNotRetireTheLastWorkingKey(t *testing.T) {
+	c, store := managedConfig(t)
+	if err := store.Initialize(managedNames(c)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.PrepareRotation(); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SwitchRotation(true); err != nil {
+		t.Fatal(err)
+	}
+	certs, err := openCertificates(c, managedNames(c), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(c.Gateway.PKIDirectory, "ca-2.key"), []byte("not a key\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err = certs.maintain(); err == nil || !strings.Contains(err.Error(), "generation 2 key ca-2.key") {
+		t.Errorf("maintain: %v", err)
+	}
+	if _, err = os.Stat(filepath.Join(c.Gateway.PKIDirectory, "ca-1.key")); err != nil {
+		t.Errorf("the outgoing key: %v", err)
+	}
+	if st, _ := store.State(); st.Phase() != pki.PhaseSwitched {
+		t.Errorf("phase %s, want switched", st.Phase())
+	}
+}
+
 // A refused record still stops the service from opening, and fails
 // maintain. Unchanged by the outstanding handling: State refuses it first.
 func TestARefusedRecordStillStopsTheService(t *testing.T) {

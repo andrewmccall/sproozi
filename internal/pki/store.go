@@ -398,6 +398,11 @@ func (s *Store) RetireRotation(drained bool) error {
 		if !drained {
 			return errors.New("pki: a consumer may still require the retiring CA")
 		}
+		// Retiring destroys the outgoing key; first prove the serving key,
+		// which will then be the only one, works for its certificate.
+		if _, err = s.servingPair(st); err != nil {
+			return fmt.Errorf("pki: refusing to retire generation %d: %w", st.Rotation.From, err)
+		}
 		if err = st.apply(evRetire, nil, s.now()); err != nil {
 			return err
 		}
@@ -454,6 +459,22 @@ func (s *Store) ReplaceCA() error {
 func (s *Store) RotationDue(st State) bool {
 	g := st.generation(st.Serving)
 	return st.Rotation == nil && g != nil && !s.now().Before(g.NotAfter.Add(-s.policy.RotateBefore))
+}
+
+// servingPair reads the serving generation's certificate and key and proves
+// the key matches the certificate, naming the generation, the file and the
+// cause otherwise.
+func (s *Store) servingPair(st State) (Pair, error) {
+	name := caName(st.Serving)
+	pair, err := s.readPair(name)
+	if err == nil {
+		_, _, err = Parse(pair)
+	}
+	if err != nil {
+		return Pair{}, fmt.Errorf("pki: serving CA key unavailable; recover it or replace the CA: generation %d key %s.key: %w",
+			st.Serving, name, err)
+	}
+	return pair, nil
 }
 
 func (s *Store) issue(st *State, now time.Time) error {
