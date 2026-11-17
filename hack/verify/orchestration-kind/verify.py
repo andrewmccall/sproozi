@@ -17,6 +17,7 @@ import sys
 import time
 from build import build_source_hashes, kind_nodes
 from clock import check_node_clocks
+from serviceaccount import wait_for_default_service_account
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -1716,6 +1717,7 @@ def kubernetes_worker_proof(images):
     target_namespace = "sproozi-kubernetes-proof"
     case_id = "hermes-kubernetes"
     apply(obj("Namespace", target_namespace, namespace=None))
+    wait_for_default_service_account(k, target_namespace)
     pod = obj(
         "Pod",
         "orchestration-observed",
