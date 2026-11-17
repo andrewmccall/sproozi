@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/pki"
+	"github.com/andrewmccall/sproozi/internal/privatefs"
 	"github.com/andrewmccall/sproozi/internal/session"
 )
 
@@ -199,6 +200,67 @@ func TestMaintainDoesNotRetireTheLastWorkingKey(t *testing.T) {
 	if st, _ := store.State(); st.Phase() != pki.PhaseSwitched {
 		t.Errorf("phase %s, want switched", st.Phase())
 	}
+}
+
+// Failures State does not catch first are still failures, not outstanding
+// cleanup: a store lock another process holds, and a trust bundle that
+// cannot be written, each stop the service opening and fail maintain, and
+// neither is logged as outstanding. Guards the errors.Is test in ensure.
+func TestLockAndTrustFailuresAreNotOutstanding(t *testing.T) {
+	t.Run("lock busy", func(t *testing.T) {
+		c, store := managedConfig(t)
+		if err := store.Initialize(managedNames(c)); err != nil {
+			t.Fatal(err)
+		}
+		certs, err := openCertificates(c, managedNames(c), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lock, err := privatefs.Lock(filepath.Join(c.Gateway.PKIDirectory, "owner.lock"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = privatefs.UnlockClose(lock) }()
+		var log bytes.Buffer
+		certs.log = &log
+		if err = certs.maintain(); err == nil || !strings.Contains(err.Error(), "certificate store busy") {
+			t.Errorf("maintain: %v", err)
+		}
+		if _, err = openCertificates(c, managedNames(c), &log); err == nil || !strings.Contains(err.Error(), "certificate store busy") {
+			t.Errorf("open: %v", err)
+		}
+		if strings.Contains(log.String(), outstandingLog) {
+			t.Errorf("logged as outstanding: %q", log.String())
+		}
+	})
+	t.Run("trust bundle unwritable", func(t *testing.T) {
+		c, store := managedConfig(t)
+		if err := store.Initialize(managedNames(c)); err != nil {
+			t.Fatal(err)
+		}
+		certs, err := openCertificates(c, managedNames(c), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		trust := filepath.Join(c.Gateway.PKIDirectory, "trust.pem")
+		if err = os.Remove(trust); err != nil {
+			t.Fatal(err)
+		}
+		if err = os.Mkdir(trust, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		var log bytes.Buffer
+		certs.log = &log
+		if err = certs.maintain(); err == nil {
+			t.Error("maintain succeeded without a trust bundle")
+		}
+		if _, err = openCertificates(c, managedNames(c), &log); err == nil {
+			t.Error("the service opened without a trust bundle")
+		}
+		if strings.Contains(log.String(), outstandingLog) {
+			t.Errorf("logged as outstanding: %q", log.String())
+		}
+	})
 }
 
 // A refused record still stops the service from opening, and fails

@@ -10,7 +10,7 @@ import (
 )
 
 // Files a store never writes, and one outside it. Replace leaves them all.
-var foreignFiles = []string{"ca-1.key.bak", "ca-01.key", "ca-x.key", "leaf-zz.key", "leaf-0123.key", "notes.txt"}
+var foreignFiles = []string{"ca-1.key.bak", "ca-01.key", "ca-09.key", "ca-009.pem", "ca-x.key", "leaf-zz.key", "leaf-0123.key", "notes.txt"}
 
 var caNumber = regexp.MustCompile(`^ca-([1-9][0-9]*)\.(pem|key)$`)
 
