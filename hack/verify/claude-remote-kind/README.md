@@ -32,7 +32,7 @@ and provider logs. Private keys are removed at the end.
 | `SPROOZI_PRESERVE_ON_FAILURE=1` | Keeps a failed run's cluster; its kubeconfig is in the run directory. |
 | `SPROOZI_NO_CACHE=1` | Rebuilds the client layers without the Docker cache. |
 | `SPROOZI_CNI_MANIFEST` | A Calico manifest already fetched with `hack/verify/fetch-calico.sh`. |
-| `SPROOZI_TOKEN_REFRESH=1` | Runs only the `refresh` scenario, on a cluster whose API server caps ServiceAccount tokens at 3607 seconds (`--service-account-max-token-expiration`, its lowest allowed value). `run.sh` checks the cap is in force and raises the example's 30-minute executor and policy duration caps to 90 minutes. It takes about an hour longer. |
+| `SPROOZI_TOKEN_REFRESH=1` | Runs only the `refresh` scenario, on a cluster whose API server caps ServiceAccount tokens at 3607 seconds (`--service-account-max-token-expiration`; a lower value was not tried) and records TokenReviews in an audit log (`apiserver.py`). `run.sh` checks the cap is in force and raises the example's 30-minute executor and policy duration caps to 90 minutes. It takes about 70 minutes longer. |
 
 Arguments after the script name go to `verify.py`; for example
 `bash hack/verify/claude-remote-kind/run.sh --scenario task` runs one scenario
@@ -58,13 +58,28 @@ does. It proves a session keeps the gateway after the gateway token its
 sandbox Pod started with has expired: the kubelet's refreshed token reaches the
 mounted token directory, and the session's gateway forwarder sends it. It
 starts a session, checks the sandbox's `/var/run/sproozi/tokens/gateway` holds
-only `token`, `..data` and the timestamped directory `..data` names, takes a
-turn, waits by the Pod's clock until a minute after the first token's expiry,
-and takes a second turn that needs the first in its history. Both turns run in
-the same Pod. Only the token's `iat`, `exp` and `jti` claims and the
-directory's entries leave the Pod. It passed on 2026-11-17: the kubelet
-refreshed the token 49 minutes after it was issued, and the second turn began
-61 seconds after the first token expired.
+only `token`, `..data` and the timestamped directory `..data` names, and takes a
+turn. It then waits by the Pod's clock until every tunnel the first token could
+have opened has closed: its expiry, plus a minute for the API server's
+validation leeway, 10 seconds for its cached authentication, the gateway's
+5-minute inspected-tunnel lifetime (an open tunnel is revalidated by identity,
+not by token) and a minute's margin. A second turn, which needs the first in
+its history, follows in the same Pod. It passes only if:
+
+- the fixture provider received that turn's first request after the wait,
+  by the cluster's clock;
+- the API server's audit log shows a TokenReview that authenticated a
+  refreshed token (by `jti`) for this Pod between the turn's start and that
+  request; and
+- no TokenReview authenticated the first token after its expiry.
+
+Only the token's `iat`, `exp` and `jti` claims, the directory's entries and
+each TokenReview's time, result and `jti` leave the cluster; the audit log
+itself, which holds the tokens, stays on the control-plane node.
+
+The snapshot scenario, which runs by default, also checks the token directory's
+layout, so a sandbox whose gateway token would not be refreshed fails the
+default run in seconds. `make test-e2e` checks the same in its worker sandbox.
 
 In the default `sign-in` mode every model request must carry the fixture
 sign-in's token, so the runtime's login claim, not a gateway key, signed
@@ -87,7 +102,12 @@ Only test inputs are substituted ([`render.py`](render.py)):
   container seeds, instead of the example's GitHub URL.
 - **Trust and images.** A fresh CA signs one leaf for the gateway, inspected
   model hosts, the executor and the provider. The images are this checkout's,
-  imported by digest.
+  imported by digest. Each run tags them with its run ID, so another checkout
+  building at the same time cannot replace them before they are loaded; one
+  did, with the shared `:fixture` tags, and a run tested another checkout's
+  controller. `make test-e2e` (`example.com/sproozi:v0.0.1` and
+  `docker.io/sproozi-kind/*:acceptance`) and the manual session-mobility and
+  portable-workflows procedures (`:fixture`) still use shared tags.
 - The template, instructions, policy, roles, network policy, executor
   configuration otherwise and CLI access are the example's.
 

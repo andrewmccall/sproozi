@@ -6,9 +6,10 @@ the Claude Code executor example on a dedicated Kind cluster that run.sh
 prepares, with the stock Claude Code client in its terminal through the
 production PTY. Each scenario is its own session:
 
-  snapshot   run from the approved repository: the prompt with no dialog, one
-             turn, stop (conversation bound, retained, Claude checkpoint),
-             resume, the same conversation continues, stop
+  snapshot   run from the approved repository: the sandbox's gateway token
+             is the kubelet's refreshable ..data link, the prompt with no
+             dialog, one turn, stop (conversation bound, retained, Claude
+             checkpoint), resume, the same conversation continues, stop
   upload     run from an uploaded PATH: the prompt with no dialog, a Bash turn
              that reads the uploaded file, then /exit after the turn
   exit       /exit before any turn
@@ -16,15 +17,20 @@ production PTY. Each scenario is its own session:
   task       a --task completes and its result is Claude's final reply
   tools      a turn that calls the sproozi diagnose MCP tool and loads a
              profile skill, then stop
-  refresh    a turn, then another after the sandbox's first gateway token
-             has expired, in the same Pod (only when chosen; it needs a
-             cluster that caps token lifetimes, as run.sh makes with
-             SPROOZI_TOKEN_REFRESH=1)
+  refresh    a turn, then another once every tunnel the sandbox's first
+             gateway token could have opened has closed, in the same Pod; the
+             API server's audit log shows the second turn's tunnel admitted
+             with a refreshed token (only when chosen; it needs the cluster
+             run.sh makes with SPROOZI_TOKEN_REFRESH=1)
 
 The administrator kubeconfig is used only to read the fixture provider's
-request log. report.json holds identities, phases and fixture facts.
+request log and, in the sandbox, the gateway token's claims and directory
+layout, never the token. The refresh scenario also reads the API server's
+audit log from the control-plane container and keeps only each TokenReview's
+time, result and jti. report.json holds identities, phases and fixture facts.
 """
 import argparse
+from datetime import datetime
 import importlib.util
 import json
 import os
@@ -59,6 +65,16 @@ READY = ["? for shortcuts", "bypass permissions on", "for shortcuts"]
 DETACH = b"\x1d"
 UNSETTLED = {"unknown-stop", "unknown-usage", "failed", "cancelled"}
 GATEWAY_TOKEN = "/var/run/sproozi/tokens/gateway/token"
+# The API server's audit log of TokenReviews (run.sh), and the user extras a
+# TokenReview of a bound ServiceAccount token carries.
+AUDIT_LOG = "/var/log/kubernetes/sproozi-audit/audit.log"
+POD_NAME_EXTRA = "authentication.kubernetes.io/pod-name"
+CREDENTIAL_EXTRA = "authentication.kubernetes.io/credential-id"
+# Seconds: how long after exp the API server may still accept a token (its
+# JWT validation leeway), how long it caches a successful authentication, the
+# gateway's inspected-tunnel lifetime (proxytransport.MaxSessionLifetime, during
+# which an open tunnel is revalidated by identity, not token), and a margin.
+EXPIRY_LEEWAY, REVIEW_CACHE, MAX_TUNNEL, MARGIN = 60, 10, 300, 60
 # Run in the sandbox: prints the token's claims that say when it was issued
 # and expires, the Pod's clock, and the token directory's entries (a link's
 # target, or "" for anything else). The token itself is not printed.
@@ -77,6 +93,11 @@ print(json.dumps({"iat": claims["iat"], "exp": claims["exp"], "jti": claims.get(
 
 class Failure(RuntimeError):
     pass
+
+
+def epoch(timestamp):
+    """Seconds since the epoch of an RFC 3339 audit timestamp."""
+    return datetime.fromisoformat(timestamp.replace("Z", "+00:00")).timestamp()
 
 
 def check(condition, message):
@@ -265,6 +286,10 @@ class Proof:
         view = self.start("snapshot-run")
         session = view["id"]
         self.record("snapshot", sessionId=session, mode=view.get("mode"))
+        # A sandbox whose gateway token is not refreshable loses the gateway
+        # when its first token expires; the refresh scenario proves the rest.
+        self.check_token_layout(self.token_facts(self.sandbox_pod()))
+        self.record("snapshot", gatewayTokenRefreshable=True)
         terminal = self.attach(session, "snapshot-attach")
         self.wait_ready(terminal, "snapshot first visit")
         self.turn(terminal, "first", "snapshot first turn")
@@ -374,15 +399,17 @@ class Proof:
                               capture_output=True, check=True, timeout=timeout).stdout
 
     def sandbox_pod(self):
-        """The one sandbox Pod, once it runs. A detached run returns before
-        its Pod starts."""
+        """The one running sandbox Pod, once it runs. A detached run returns
+        before its Pod starts; an earlier scenario's Pod may still be ending."""
         end = time.monotonic() + self.args.operation_timeout
         while True:
             pods = json.loads(self.kubectl("-n", "sproozi-agents", "get", "pods", "-l",
                                            "sproozi.com/managed-by=sproozi-controller", "-o", "json"))["items"]
-            check(len(pods) <= 1, "Expected one sandbox Pod, found %d" % len(pods))
-            if pods and pods[0]["status"].get("phase") == "Running" and not pods[0]["metadata"].get("deletionTimestamp"):
-                return pods[0]["metadata"]["name"]
+            running = [p["metadata"]["name"] for p in pods
+                       if p["status"].get("phase") == "Running" and not p["metadata"].get("deletionTimestamp")]
+            check(len(running) <= 1, "Expected one running sandbox Pod, found %d" % len(running))
+            if running:
+                return running[0]
             check(time.monotonic() < end, "No sandbox Pod ran")
             time.sleep(2)
 
@@ -393,10 +420,41 @@ class Proof:
                               TOKEN_FACTS, GATEWAY_TOKEN)
         return json.loads(output)
 
+    def check_token_layout(self, facts):
+        """The kubelet refreshes the token only through a directory mount: the
+        token is a link through ..data, never a file mounted through subPath."""
+        layout = facts["layout"]
+        check(layout.get("token") == "..data/token" and layout.get("..data", "").startswith("..") and
+              set(layout) == {"token", "..data", layout["..data"]},
+              "The gateway token is not the kubelet's refreshable directory layout: %s" % layout)
+
+    def token_reviews(self, pod):
+        """The API server's TokenReviews of pod's tokens, from its audit log
+        (run.sh enables it for the refresh scenario): when each was decided,
+        whether it authenticated, and the token's jti. The log holds the tokens
+        themselves; only these fields are kept."""
+        check(self.args.audit_node, "Reading TokenReviews needs --audit-node")
+        log = subprocess.run(["docker", "exec", self.args.audit_node, "cat", AUDIT_LOG],
+                             capture_output=True, check=True, timeout=60).stdout.decode()
+        reviews = []
+        for line in log.splitlines():
+            event = json.loads(line)
+            status = (event.get("responseObject") or {}).get("status") or {}
+            extra = (status.get("user") or {}).get("extra") or {}
+            if event.get("stage") != "ResponseComplete" or event.get("objectRef", {}).get("resource") != "tokenreviews":
+                continue
+            if status.get("authenticated") and extra.get(POD_NAME_EXTRA) != [pod]:
+                continue
+            credential = (extra.get(CREDENTIAL_EXTRA) or [""])[0]
+            reviews.append({"at": epoch(event["stageTimestamp"]), "authenticated": bool(status.get("authenticated")),
+                            "jti": credential.removeprefix("JTI="), "error": str(status.get("error", ""))[:160]})
+        return reviews
+
     def refresh(self):
         """A session reaches the gateway after its Pod's first gateway token
-        has expired. The cluster caps token lifetimes (run.sh), so the first
-        token expires about an hour after the Pod starts."""
+        has expired, through a tunnel the gateway admitted with a refreshed
+        token. The cluster caps token lifetimes (run.sh), so the first token
+        expires about an hour after the Pod starts."""
         check(self.args.token_lifetime, "The refresh scenario needs --token-lifetime, the cluster's token cap")
         view = self.start("refresh-run")
         session = view["id"]
@@ -405,44 +463,62 @@ class Proof:
         lifetime = first["exp"] - first["iat"]
         self.record("refresh", sessionId=session, pod=pod, firstToken=first)
         check(lifetime <= self.args.token_lifetime, "The first token lasts %ds, longer than the cluster's cap" % lifetime)
-        layout = first["layout"]
-        check(layout.get("token") == "..data/token" and layout.get("..data", "").startswith("..") and
-              set(layout) == {"token", "..data", layout["..data"]},
-              "The token is not the kubelet's refreshable directory layout: %s" % layout)
+        self.check_token_layout(first)
         terminal = self.attach(session, "refresh-attach")
         self.wait_ready(terminal, "refresh first visit")
         self.turn(terminal, "refresh-before", "turn before the first token expires")
         self.detach(terminal, "refresh before expiry")
+        # The audit log must name each token, or the evidence below is empty.
+        early = self.token_reviews(pod)
+        check(any(r["authenticated"] and r["jti"] == first["jti"] for r in early),
+              "The audit log shows no TokenReview of the first token with its jti: %s" % early[-3:])
+        # A stale token can still authenticate until the API server's leeway
+        # after exp and its cached result lapses, and a tunnel opened then
+        # lives MAX_TUNNEL more seconds. Past settled, every open tunnel was
+        # admitted when the first token could no longer authenticate.
+        settled = first["exp"] + EXPIRY_LEEWAY + REVIEW_CACHE + MAX_TUNNEL + MARGIN
         seen = [first]
         while True:
             facts = self.token_facts(pod)
             if facts["iat"] != seen[-1]["iat"]:
                 seen.append(facts)
-                print("token refreshed: iat=%d exp=%d pod clock=%d" % (facts["iat"], facts["exp"], facts["now"]),
-                      flush=True)
+                print("token refreshed: iat=%d exp=%d jti=%s pod clock=%d" %
+                      (facts["iat"], facts["exp"], facts["jti"], facts["now"]), flush=True)
                 self.record("refresh", tokens=[{k: f[k] for k in ("iat", "exp", "jti")} for f in seen])
-            if facts["now"] > first["exp"] + 60:
+            if facts["now"] > settled:
                 break
-            check(facts["now"] < first["exp"] + 600, "The wait for the first token's expiry overran")
-            time.sleep(min(60, max(1, first["exp"] + 61 - facts["now"])))
-        check(len(seen) > 1 and facts["exp"] > first["exp"], "The kubelet never refreshed the gateway token")
-        print("first token expired at %d; pod clock now %d; current token iat=%d exp=%d" %
-              (first["exp"], facts["now"], facts["iat"], facts["exp"]), flush=True)
-        terminal = self.attach(session, "refresh-expired-attach")
-        self.wait_ready(terminal, "refresh visit after expiry")
-        self.turn(terminal, "refresh-after", "turn after the first token expired")
-        after = self.token_facts(pod)
-        self.detach(terminal, "refresh after expiry")
+            check(facts["now"] < settled + 600, "The wait past the first token's expiry overran")
+            time.sleep(min(60, max(1, settled + 1 - facts["now"])))
+        refreshed = {f["jti"] for f in seen[1:]}
+        print("first token expired at %d; waited to %d; pod clock now %d; current token iat=%d jti=%s" %
+              (first["exp"], settled, facts["now"], facts["iat"], facts["jti"]), flush=True)
+        self.record("refresh", firstTokenExpiry=first["exp"], settledAt=settled, turnStartedAt=facts["now"],
+                    refreshed=bool(refreshed))
+        try:
+            terminal = self.attach(session, "refresh-expired-attach")
+            self.wait_ready(terminal, "refresh visit after expiry")
+            self.turn(terminal, "refresh-after", "turn after the first token expired")
+            self.detach(terminal, "refresh after expiry")
+        finally:
+            reviews = [r for r in self.token_reviews(pod) if r["at"] >= first["exp"] - 120]
+            self.record("refresh", reviewsAroundExpiry=reviews)
+        check(refreshed, "The kubelet never refreshed the gateway token")
         check(self.sandbox_pod() == pod, "The session's sandbox Pod changed during the scenario")
         before_records = self.check_requests("refresh-before", "turn before expiry")
         after_records = self.check_requests("refresh-after", "turn after expiry")
-        print("turn after expiry answered: it began at pod clock %d, %ds past the first token's expiry; "
-              "answered by %d; %d provider requests" %
-              (facts["now"], facts["now"] - first["exp"], after["now"], len(after_records)), flush=True)
+        requested = min(r["at"] for r in after_records)
+        check(requested > settled, "The turn's first model request arrived at %.0f, before %d" % (requested, settled))
+        stale = [r for r in reviews if r["authenticated"] and r["jti"] == first["jti"] and r["at"] > first["exp"]]
+        check(not stale, "The first token authenticated after it expired: %s" % stale)
+        admitted = [r for r in reviews if r["authenticated"] and r["jti"] in refreshed
+                    and facts["now"] - 1 <= r["at"] <= requested + 1]
+        check(admitted, "No TokenReview admitted a refreshed token between the turn's start and its request")
+        print("turn after expiry answered: its first model request arrived at %.3f, %.0fs past the first token's "
+              "expiry; the API server authenticated refreshed token jti=%s for this Pod at %.3f" %
+              (requested, requested - first["exp"], admitted[0]["jti"], admitted[0]["at"]), flush=True)
         stopped, phases, _ = self.stop(session, "refresh-stop")
-        self.record("refresh", passed=True, firstTokenExpiry=first["exp"], turnBeganAt=facts["now"],
-                    secondsPastFirstExpiry=facts["now"] - first["exp"], answeredBy=after["now"],
-                    tokenAtAnswer={k: after[k] for k in ("iat", "exp", "jti")}, requestsBefore=len(before_records),
+        self.record("refresh", passed=True, requestedAt=requested, secondsPastFirstExpiry=round(requested - first["exp"]),
+                    admittedWithRefreshedToken=admitted, requestsBefore=len(before_records),
                     requestsAfter=len(after_records), stopPhases=phases, threadId=stopped.get("threadId"))
 
     def execute(self):
@@ -500,6 +576,7 @@ def main():
                         help="run only these; refresh runs only when chosen, on a cluster that caps tokens")
     parser.add_argument("--token-lifetime", type=int, default=0,
                         help="seconds; the cluster's ServiceAccount token cap, for the refresh scenario")
+    parser.add_argument("--audit-node", help="the Kind control-plane container holding the API server's audit log")
     parser.add_argument("--operation-timeout", type=int, default=240)
     parser.add_argument("--turn-timeout", type=int, default=120)
     parser.add_argument("--task-timeout", type=int, default=300)

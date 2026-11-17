@@ -22,9 +22,10 @@ auth="${SPROOZI_CLAUDE_AUTH:-sign-in}"
 [[ "$auth" == sign-in || "$auth" == gateway-key ]] || { echo 'SPROOZI_CLAUDE_AUTH must be sign-in or gateway-key' >&2; exit 1; }
 # The refresh scenario waits for a sandbox's first gateway token to expire.
 # The controller asks for two hours; the API server's own cap shortens that
-# to its lowest allowed value, 3607 seconds while it extends kubelet tokens,
-# so the proof needs no Sproozi setting. The example's 30-minute duration caps
-# are raised so the session outlives that token.
+# to 3607 seconds (a lower cap was not tried: the API server is expected to
+# refuse one under 3607 seconds while it extends kubelet tokens), so the proof
+# needs no Sproozi setting. The example's 30-minute duration caps are raised so
+# the session outlives that token.
 refresh="${SPROOZI_TOKEN_REFRESH:-0}"
 [[ "$refresh" == 0 || "$refresh" == 1 ]] || { echo 'SPROOZI_TOKEN_REFRESH must be 0 or 1' >&2; exit 1; }
 token_cap=3607
@@ -32,7 +33,6 @@ render_args=()
 verify_args=()
 if (( refresh )); then
   render_args=(--max-duration 90m)
-  verify_args=(--scenario refresh --token-lifetime "$token_cap")
 fi
 for tool in kind kubectl docker go python3 openssl git; do
   command -v "$tool" >/dev/null 2>&1 || { echo "Missing required tool: $tool" >&2; exit 1; }
@@ -43,6 +43,7 @@ umask 077
 run_id="$(date -u +%Y%m%d%H%M%S)-$$"
 # images.py loads only into clusters named for the mobility fixtures.
 cluster="sproozi-mobility-claude-${run_id}"
+(( ! refresh )) || verify_args=(--scenario refresh --token-lifetime "$token_cap" --audit-node "$cluster-control-plane")
 work="$root/.local/verification/claude-remote-kind/$run_id"
 mkdir -p "$work/bin" "$work/tls" "$work/cli"
 chmod 700 "$work" "$work/bin" "$work/tls" "$work/cli"
@@ -110,17 +111,20 @@ export SPROOZI_CNI_SELECTOR="${SPROOZI_CNI_SELECTOR:-k8s-app=calico-node}"
 SPROOZI_CNI_TIMEOUT="${SPROOZI_CNI_TIMEOUT:-300s}" kind_up "$cluster" "$kubeconfig"
 export KUBECONFIG="$kubeconfig"
 
-# cap_token_lifetime adds the API server's token cap to its static Pod
-# manifest. The edit is renamed into place from outside the manifest
-# directory, so the kubelet never reads a partial file. Only a token the
-# restarted API server issues shows the cap is in force.
-cap_token_lifetime() {
+# configure_api_server caps ServiceAccount token lifetimes and records
+# TokenReviews in an audit log (apiserver.py). The manifest is renamed into
+# place from outside the manifest directory, so the kubelet never reads a
+# partial file. Only a token the restarted API server issues shows the cap is
+# in force.
+configure_api_server() {
   local node="$cluster-control-plane" manifest=/etc/kubernetes/manifests/kube-apiserver.yaml lifetime
-  local staged=/etc/kubernetes/kube-apiserver.yaml.capped
-  docker exec "$node" sh -ec "cp $manifest $staged
-    sed -i 's|^    - kube-apiserver\$|&\n    - --service-account-max-token-expiration=${token_cap}s|' $staged
-    grep -q -- '--service-account-max-token-expiration=${token_cap}s' $staged
-    mv $staged $manifest"
+  python3 hack/verify/claude-remote-kind/apiserver.py policy |
+    docker exec -i "$node" sh -ec 'mkdir -p /etc/kubernetes/sproozi-audit; cat >/etc/kubernetes/sproozi-audit/policy.yaml'
+  docker exec "$node" cat "$manifest" >"$work/kube-apiserver.original.yaml"
+  python3 hack/verify/claude-remote-kind/apiserver.py manifest "$token_cap" \
+    <"$work/kube-apiserver.original.yaml" >"$work/kube-apiserver.yaml"
+  docker exec -i "$node" sh -ec "cat >/etc/kubernetes/kube-apiserver.yaml.new; mv /etc/kubernetes/kube-apiserver.yaml.new $manifest" \
+    <"$work/kube-apiserver.yaml"
   for _ in $(seq 1 120); do
     lifetime="$(kubectl -n default create token default --duration=2h 2>/dev/null | python3 -c '
 import base64, json, sys
@@ -137,8 +141,8 @@ print(claims["exp"] - claims["iat"])' 2>/dev/null)" || lifetime=
   return 1
 }
 if (( refresh )); then
-  step "Capping ServiceAccount token lifetimes at ${token_cap}s"
-  cap_token_lifetime
+  step "Capping ServiceAccount token lifetimes at ${token_cap}s and auditing TokenReviews"
+  configure_api_server
 fi
 
 step "Loading images"
