@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/audit"
 	"github.com/andrewmccall/sproozi/internal/budget"
 	model "github.com/andrewmccall/sproozi/internal/endpoints/model"
@@ -53,7 +54,7 @@ func TestUnavailableProviderAuthentication(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "https://api.openai.com/v1/models", nil)
 			req = req.WithContext(gateway.WithIdentity(req.Context(), testExecutionGrant()))
 			response := httptest.NewRecorder()
-			gateway.Dispatcher{model.OpenAIAuthority: {Capability: "model.inference", Handler: h,
+			gateway.Dispatcher{model.OpenAIAuthority: {Capability: string(api.CapabilityModelInference), Handler: h,
 				Budgets: budget.NewTracker()}}.ServeHTTP(response, req)
 			want := `{"error":{"message":"` + tc.message + `","type":"server_error","code":"provider_auth_unavailable"}}`
 			if response.Code != http.StatusServiceUnavailable || strings.TrimSpace(response.Body.String()) != want {

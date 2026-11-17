@@ -8,7 +8,10 @@ import (
 	"time"
 )
 
-const renewedBody = `{"access_token":"new-access","refresh_token":"new-refresh","token_type":"Bearer","expires_in":3600}`
+const (
+	renewedRefresh = "new-refresh"
+	renewedBody    = `{"access_token":"new-access","refresh_token":"` + renewedRefresh + `","token_type":"Bearer","expires_in":3600}`
+)
 
 // TestChatGPTNewSignInEndsAHoldOrRefusalAtOnce: an administrator's new
 // sign-in reaches the next model request, within the hold or after a
@@ -60,7 +63,7 @@ func TestChatGPTNewSignInEndsAHoldOrRefusalAtOnce(t *testing.T) {
 			if header, err := authorizeOnce(auth); err != nil || header != renewedBearer {
 				t.Fatalf("a due new sign-in = %q, %v", header, err)
 			}
-			if calls.Load() != 2 || store.session.RefreshToken != "new-refresh" {
+			if calls.Load() != 2 || store.session.RefreshToken != renewedRefresh {
 				t.Fatalf("refresh requests = %d, stored %q", calls.Load(), store.session.RefreshToken)
 			}
 		})
