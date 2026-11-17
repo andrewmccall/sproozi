@@ -287,11 +287,21 @@ func (p *heldPreparedInspect) Inspect(ctx context.Context, l Launch) (Observatio
 	return o, err
 }
 
+// hangLimit is how long these tests wait for a signal or a result before
+// reporting that it never came. Each awaited call returns once the code
+// under test makes progress, or never, because the held fixture call it
+// waits behind returns only when its context ends. The limit is far above
+// what the calls take on a loaded machine, where their journal writes each
+// wait for the disk, so a slow machine does not fail them. The price: a
+// cancellation that interrupts the held call late, by less than the limit,
+// is no longer caught; only one that never interrupts it is.
+const hangLimit = 30 * time.Second
+
 func awaitResponsivenessSignal(t *testing.T, signal <-chan struct{}) {
 	t.Helper()
 	select {
 	case <-signal:
-	case <-time.After(2 * time.Second):
+	case <-time.After(hangLimit):
 		t.Fatal("lifecycle test signal did not arrive")
 	}
 }
@@ -301,7 +311,7 @@ func awaitResponsivenessResult(t *testing.T, result <-chan error) error {
 	select {
 	case err := <-result:
 		return err
-	case <-time.After(2 * time.Second):
+	case <-time.After(hangLimit):
 		t.Fatal("lifecycle test operation did not return")
 		return nil
 	}
