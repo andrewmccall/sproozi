@@ -209,6 +209,9 @@ type ChatGPT struct {
 	// refresh token twice. Do not expose it to inference until durably saved.
 	pending       *Session
 	pendingBefore Session
+	// refresh remembers a failed refresh of the stored session, so a provider
+	// outage or a refused sign-in does not send a refresh with every request.
+	refresh       refreshRecord
 	tokenEndpoint string
 }
 
@@ -281,7 +284,16 @@ func (a *ChatGPT) reloadOrRefresh(ctx context.Context) (Session, error) {
 		}
 		a.pending = nil
 	}
+	now := time.Now()
+	if a.refresh.current() != refreshReady && !s.SameCredentials(a.refresh.of) {
+		if err = a.refresh.apply(eventSignedIn, s, nil, now); err != nil {
+			return Session{}, err
+		}
+	}
 	if time.Until(s.SavedAt.Add(time.Duration(s.ExpiresIn)*time.Second)) <= refreshWindow {
+		if held := a.refresh.admit(now); held != nil {
+			return Session{}, held
+		}
 		refreshCtx, cancel := detached(ctx)
 		next, refreshErr := Exchange(refreshCtx, a.client, a.tokenEndpoint, url.Values{
 			"grant_type": {refreshTokenField}, clientIDField: {s.ClientID},
@@ -289,7 +301,7 @@ func (a *ChatGPT) reloadOrRefresh(ctx context.Context) (Session, error) {
 		})
 		cancel()
 		if refreshErr != nil {
-			return Session{}, refreshErr
+			return Session{}, a.failed(s, classify(refreshErr))
 		}
 		renewed := s
 		renewed.AccessToken, renewed.RefreshToken = next.AccessToken, next.RefreshToken
@@ -301,6 +313,9 @@ func (a *ChatGPT) reloadOrRefresh(ctx context.Context) (Session, error) {
 			renewed.Scopes = strings.Fields(next.Scope)
 		}
 		if err = renewed.Validate(); err != nil {
+			return Session{}, a.failed(s, classify(err))
+		}
+		if err = a.refresh.apply(eventRefreshed, s, nil, time.Now()); err != nil {
 			return Session{}, err
 		}
 		a.pending, a.pendingBefore = &renewed, s
@@ -315,6 +330,19 @@ func (a *ChatGPT) reloadOrRefresh(ctx context.Context) (Session, error) {
 	}
 	a.current.Store(&loadedSession{session: s, loadedAt: loadedAt})
 	return s, nil
+}
+
+// failed remembers a refresh of s that failed and returns what the request
+// that sent it sees.
+func (a *ChatGPT) failed(s Session, failure *RefreshError) error {
+	event := eventFailed
+	if failure.Refused {
+		event = eventRefused
+	}
+	if err := a.refresh.apply(event, s, failure, time.Now()); err != nil {
+		return err
+	}
+	return failure
 }
 
 // SameCredentials compares the rotating credential identity used by store CAS.
@@ -344,15 +372,17 @@ func Exchange(ctx context.Context, client *http.Client, endpoint string, form ur
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := client.Do(req)
 	if err != nil {
-		return result, errors.New("ChatGPT token exchange was unavailable")
+		return result, &tokenEndpointError{message: "ChatGPT token exchange was unavailable"}
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return result, fmt.Errorf("ChatGPT token exchange failed (HTTP %d); sign in again if access was revoked", resp.StatusCode)
+		return result, &tokenEndpointError{status: resp.StatusCode,
+			message: fmt.Sprintf("ChatGPT token exchange failed (HTTP %d); sign in again if access was revoked", resp.StatusCode)}
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, (1<<20)+1))
 	if err != nil || len(data) > 1<<20 || json.Unmarshal(data, &result) != nil {
-		return TokenResponse{}, errors.New("ChatGPT token exchange returned invalid credentials")
+		return TokenResponse{}, &tokenEndpointError{status: http.StatusOK,
+			message: "ChatGPT token exchange returned invalid credentials"}
 	}
 	return result, nil
 }

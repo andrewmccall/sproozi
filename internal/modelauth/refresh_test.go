@@ -54,22 +54,24 @@ func TestChatGPTRefreshFailureOutcomes(t *testing.T) {
 		// wantCalls is how many refresh requests three model requests send.
 		wantCalls int32
 		wantErr   string
+		// refused: an administrator must sign in again; otherwise a hold.
+		refused bool
 	}{
-		{name: "network error", wantCalls: 0, wantErr: "ChatGPT token exchange was unavailable"},
-		{name: "timeout", slow: true, wantCalls: 3, wantErr: "ChatGPT token exchange was unavailable"},
+		{name: "network error", wantCalls: 0, wantErr: "the ChatGPT sign-in could not be renewed (the token endpoint was unreachable or did not answer in time); the gateway tries again 10s after the failure"},
+		{name: "timeout", slow: true, wantCalls: 1, wantErr: "the ChatGPT sign-in could not be renewed (the token endpoint was unreachable or did not answer in time); the gateway tries again 10s after the failure"},
 		{name: "5xx", handler: failingEndpoint(http.StatusServiceUnavailable, `{"error":"provider-secret"}`),
-			wantCalls: 3, wantErr: "ChatGPT token exchange failed (HTTP 503); sign in again if access was revoked"},
+			wantCalls: 1, wantErr: "the ChatGPT sign-in could not be renewed (token endpoint HTTP 503); the gateway tries again 10s after the failure"},
 		{name: "429", handler: failingEndpoint(http.StatusTooManyRequests, `{"error":"provider-secret"}`),
-			wantCalls: 3, wantErr: "ChatGPT token exchange failed (HTTP 429); sign in again if access was revoked"},
+			wantCalls: 1, wantErr: "the ChatGPT sign-in could not be renewed (token endpoint HTTP 429); the gateway tries again 10s after the failure"},
 		{name: "400 invalid_grant", handler: failingEndpoint(http.StatusBadRequest, grantRefused),
-			wantCalls: 3, wantErr: "ChatGPT token exchange failed (HTTP 400); sign in again if access was revoked"},
+			wantCalls: 1, wantErr: "the provider refused to renew the ChatGPT sign-in (token endpoint HTTP 400); an administrator must sign in again", refused: true},
 		{name: "401 invalid_grant", handler: failingEndpoint(http.StatusUnauthorized, grantRefused),
-			wantCalls: 3, wantErr: "ChatGPT token exchange failed (HTTP 401); sign in again if access was revoked"},
+			wantCalls: 1, wantErr: "the provider refused to renew the ChatGPT sign-in (token endpoint HTTP 401); an administrator must sign in again", refused: true},
 		{name: "malformed response", handler: failingEndpoint(http.StatusOK, `{"access_token":"provider-secret"`),
-			wantCalls: 3, wantErr: "ChatGPT token exchange returned invalid credentials"},
+			wantCalls: 1, wantErr: "the ChatGPT sign-in could not be renewed (the token endpoint returned an unreadable reply); the gateway tries again 10s after the failure"},
 		{name: "no new refresh token", handler: failingEndpoint(http.StatusOK,
 			`{"access_token":"provider-secret","token_type":"Bearer","expires_in":3600}`),
-			wantCalls: 3, wantErr: "ChatGPT credential is incomplete; sign in again"},
+			wantCalls: 1, wantErr: "the ChatGPT sign-in could not be renewed (the renewed credential was incomplete); the gateway tries again 10s after the failure"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var calls atomic.Int32
@@ -116,6 +118,16 @@ func TestChatGPTRefreshFailureOutcomes(t *testing.T) {
 			if store.session.RefreshToken != fixtureRefresh || store.session.AccessToken != fixtureAccess {
 				t.Fatal("a failed refresh changed the stored sign-in")
 			}
+			// After the hold a transient failure is tried again; a refusal is not.
+			auth.refresh.until = time.Now().Add(-time.Millisecond)
+			_, _ = authorizeOnce(auth)
+			wantAfter := tc.wantCalls
+			if !tc.refused && tc.wantCalls > 0 {
+				wantAfter++
+			}
+			if got := calls.Load(); got != wantAfter {
+				t.Fatalf("refresh requests after the hold = %d, want %d", got, wantAfter)
+			}
 		})
 	}
 }
@@ -143,8 +155,8 @@ func TestChatGPTParallelRequestsDuringAnOutage(t *testing.T) {
 		})
 	}
 	wg.Wait()
-	if got := calls.Load(); got != requests {
-		t.Fatalf("refresh requests = %d, want %d", got, requests)
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("refresh requests = %d, want 1", got)
 	}
 }
 
