@@ -167,8 +167,8 @@ type rotatingEndpoint struct {
 	valid  map[string]bool
 	issued int
 	calls  atomic.Int32
-	// rotated, when set, receives once the endpoint has spent the token,
-	// and the reply waits for release.
+	// rotated, when set, is closed once the endpoint has spent the first
+	// token, and that reply waits for release. Both are set before serving.
 	rotated chan struct{}
 	release chan struct{}
 }
@@ -191,12 +191,11 @@ func (e *rotatingEndpoint) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	e.issued++
 	next := "rotated-refresh-" + string(rune('0'+e.issued))
 	e.valid[next] = true
-	rotated, release := e.rotated, e.release
-	e.rotated = nil
+	first := e.issued == 1
 	e.mu.Unlock()
-	if rotated != nil {
-		close(rotated)
-		<-release
+	if first && e.rotated != nil {
+		close(e.rotated)
+		<-e.release
 	}
 	_, _ = w.Write([]byte(`{"access_token":"rotated-access","refresh_token":"` + next +
 		`","token_type":"Bearer","expires_in":3600}`))
@@ -220,12 +219,13 @@ func (s ctxStore) Replace(ctx context.Context, before, after Session) error {
 	return s.memoryStore.Replace(ctx, before, after)
 }
 
-// TestChatGPTRefreshWhoseRequestLeaves: a model request
+// TestChatGPTRefreshWhoseRequestLeavesKeepsTheRotatedToken: a model request
 // whose harness leaves while the provider is rotating the refresh token.
 // Guards: the context a refresh and its save run under.
 func TestChatGPTRefreshWhoseRequestLeavesKeepsTheRotatedToken(t *testing.T) {
+	rotated, release := make(chan struct{}), make(chan struct{})
 	endpoint := newRotatingEndpoint(fixtureRefresh)
-	endpoint.rotated, endpoint.release = make(chan struct{}), make(chan struct{})
+	endpoint.rotated, endpoint.release = rotated, release
 	server := httptest.NewServer(endpoint)
 	defer server.Close()
 	store := expiredStore()
@@ -238,15 +238,15 @@ func TestChatGPTRefreshWhoseRequestLeavesKeepsTheRotatedToken(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, Resource+"/responses", nil).WithContext(ctx)
 		done <- auth.Authorize(req)
 	}()
-	<-endpoint.rotated // the provider has spent fixtureRefresh
-	cancel()           // the harness leaves before the reply arrives
+	<-rotated // the provider has spent fixtureRefresh
+	cancel()  // the harness leaves before the reply arrives
 	// Let the reply go only after the request has given up on it, as a reply
 	// that crosses a disconnect does.
 	select {
 	case <-done:
-		close(endpoint.release)
+		close(release)
 	case <-time.After(200 * time.Millisecond):
-		close(endpoint.release)
+		close(release)
 		<-done
 	}
 
