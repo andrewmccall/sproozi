@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -316,6 +317,37 @@ func TestEveryPlacementPhaseHasAnExitAfterTheDeadline(t *testing.T) {
 			t.Errorf("phase %s has no exit after the deadline", p)
 		}
 	}
+}
+
+// A preparation that never completed is cancelled after its deadline: the
+// creating record's only exit, abort-preparation, is applied without admit,
+// so the table test cannot see a deadline check written into AbortPreparation
+// itself. The execution journal's abandon and cancel both end through it.
+func TestAbortPreparationOfCreatingRecordAfterDeadline(t *testing.T) {
+	t.Parallel()
+	f := newFakeDocker()
+	a := &fakeAuthority{engine: f}
+	p := openFixture(t, testutil.PrivateDir(t), f, a)
+	original := p.engine.execute
+	p.engine.execute = func(ctx context.Context, input []byte, max int, args []string) ([]byte, error) {
+		if args[0] == createCommand && strings.HasSuffix(args[2], "-"+roleAgent) {
+			return nil, errors.New("agent image unavailable")
+		}
+		return original(ctx, input, max, args)
+	}
+	l := fixtureLaunch(t, fixtureArtifact(t))
+	l.ThreadID, l.CheckpointDigest = "", ""
+	if _, err := p.Prepare(t.Context(), l, []byte("workspace-continuity")); err == nil {
+		t.Fatal("expected failed preparation")
+	}
+	if r, err := p.load(l); err != nil || r.Phase != phaseCreating {
+		t.Fatalf("fixture record: %+v %v", r, err)
+	}
+	p.now = func() time.Time { return l.Deadline.Add(time.Hour) }
+	if err := p.AbortPreparation(t.Context(), l); err != nil {
+		t.Fatalf("abort-preparation after the deadline: %v", err)
+	}
+	assertReleasedPreparation(t, p, f, l)
 }
 
 // Preparing a visit already prepared replays its incarnation after the
