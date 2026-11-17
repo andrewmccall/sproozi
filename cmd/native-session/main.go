@@ -25,8 +25,10 @@ import (
 	"github.com/google/uuid"
 )
 
+// socketPath is the supervisor's private control socket; tests replace it.
+var socketPath = "/tmp/sproozi-native/control.sock"
+
 const (
-	socketPath    = "/tmp/sproozi-native/control.sock"
 	configPath    = "/etc/sproozi/native/config.json"
 	workspace     = harness.NativeSessionRoot + "/workspace"
 	agentHome     = "/home/agent"
