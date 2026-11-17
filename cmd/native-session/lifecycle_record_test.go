@@ -350,15 +350,28 @@ func (r *recording) forceStop(n *nativepty.Supervisor, ctx context.Context) (nat
 
 // exits makes the harness exit by itself, with code 3.
 func (r *recording) exits() {
-	if err := unix.Kill(r.n.PID(), unix.SIGUSR1); err != nil {
-		r.t.Fatal(err)
-	}
-	select {
-	case <-r.n.Done():
-	case <-time.After(10 * time.Second):
-		r.t.Fatal("the harness did not exit")
-	}
+	untilExited(r.t, r.n)
 	r.settle()
+}
+
+// untilExited makes n's harness exit by itself, with code 3. The shell can
+// lose a SIGUSR1 that arrives before its trap or its wait, so the signal is
+// sent again every 50 ms until the harness has exited.
+func untilExited(t *testing.T, n *nativepty.Supervisor) {
+	t.Helper()
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	limit := time.After(10 * time.Second)
+	for {
+		_ = unix.Kill(n.PID(), unix.SIGUSR1)
+		select {
+		case <-n.Done():
+			return
+		case <-limit:
+			t.Fatal("the harness did not exit")
+		case <-ticker.C:
+		}
+	}
 }
 
 func (r *recording) alive() bool {

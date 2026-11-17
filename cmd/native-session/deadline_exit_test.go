@@ -7,7 +7,6 @@ import (
 
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/nativepty"
-	"golang.org/x/sys/unix"
 )
 
 // readyHarness runs the recorded harness, which exits by itself with code 3
@@ -49,14 +48,7 @@ func slowlyWatched(t *testing.T, n *nativepty.Supervisor) (s *server, reports *l
 // exitsByItself makes n exit with code 3 and waits for it.
 func exitsByItself(t *testing.T, n *nativepty.Supervisor) {
 	t.Helper()
-	if err := unix.Kill(n.PID(), unix.SIGUSR1); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case <-n.Done():
-	case <-time.After(10 * time.Second):
-		t.Fatal("the harness did not exit")
-	}
+	untilExited(t, n)
 }
 
 // onlyReport is the cause of the one exit report s wrote once concluded.
@@ -92,12 +84,7 @@ func TestQuiesceFindingAnOwnExitAndThePassedDeadlineReportsTheExit(t *testing.T)
 			s.mu.Lock()
 			n := s.native
 			s.mu.Unlock()
-			select {
-			case <-n.Done():
-			default:
-				_ = unix.Kill(n.PID(), unix.SIGUSR1)
-				<-n.Done()
-			}
+			untilExited(t, n)
 			return "", "", errRecordedTurn
 		}
 	})
