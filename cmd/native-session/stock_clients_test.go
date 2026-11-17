@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -9,12 +10,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/diagnose"
 	"github.com/andrewmccall/sproozi/internal/gateway"
 	"github.com/andrewmccall/sproozi/internal/harness"
+	"golang.org/x/sys/unix"
 )
 
 const managedHeading = "Sproozi managed environment"
@@ -50,12 +53,22 @@ func firstModelRequest(t *testing.T, binary string, args, env []string, dir stri
 	}
 	output := &strings.Builder{}
 	command.Stdout, command.Stderr = output, output
+	// The client starts helpers of its own, such as Codex's git sync of its
+	// plugin marketplace into its home's .tmp. They run in the client's
+	// process group, which is stopped whole, and waited for, before the
+	// test's directories are removed.
+	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	command.Cancel = func() error { return unix.Kill(-command.Process.Pid, unix.SIGKILL) }
 	if err := command.Start(); err != nil {
 		t.Fatal(err)
 	}
 	exited := make(chan struct{})
 	go func() { _ = command.Wait(); close(exited) }()
-	defer func() { _ = command.Process.Kill(); <-exited }()
+	defer func() {
+		_ = command.Cancel()
+		<-exited
+		awaitGroupGone(t, command.Process.Pid)
+	}()
 	select {
 	case body := <-captured:
 		return body
@@ -68,6 +81,27 @@ func firstModelRequest(t *testing.T, binary string, args, env []string, dir stri
 	default:
 		t.Fatalf("%s sent no model request: %s", filepath.Base(binary), output)
 		return ""
+	}
+}
+
+// awaitGroupGone waits until process group pgid has no running member: a
+// killed member ends at once, but its end is asynchronous. Darwin answers a
+// group whose members are all zombies with EPERM rather than ESRCH.
+func awaitGroupGone(t *testing.T, pgid int) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	for {
+		err := unix.Kill(-pgid, 0)
+		if errors.Is(err, unix.ESRCH) || errors.Is(err, unix.EPERM) {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Errorf("process group %d still runs after SIGKILL: %v", pgid, err)
+			return
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 }
 
