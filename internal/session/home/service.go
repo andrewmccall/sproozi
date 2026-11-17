@@ -278,9 +278,10 @@ func (s *Service) StartWithMaxDuration(ctx context.Context, id, operationID, pat
 		return Status{}, err
 	}
 	status, err := s.startFirstVisit(ctx, r)
-	if errors.Is(err, session.ErrDeadlinePassed) {
-		// The deadline ended the first visit: the session keeps the
-		// workspace it started from, and resume continues it.
+	if errors.Is(err, session.ErrStartEnded) {
+		// The deadline, or the placement's refusal, ended the first visit:
+		// the session keeps the workspace it started from, and resume
+		// continues it.
 		unlock, lockErr := s.lockSession(id)
 		if lockErr != nil {
 			return Status{}, lockErr
@@ -396,7 +397,7 @@ func workspaceProblem(path string, err error, limit int64) string {
 // started yet, after checking current Project approval.
 func (s *Service) startFirstVisit(ctx context.Context, r session.Record) (Status, error) {
 	if r.Abandoned(r.Operations[0].ID) {
-		return executionStatus(r), session.ErrDeadlinePassed
+		return executionStatus(r), s.coordinator.StartEnded(r)
 	}
 	if r.PendingOperation != r.Operations[0].ID || r.CancelOperation != "" {
 		return executionStatus(r), nil

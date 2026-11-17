@@ -489,9 +489,10 @@ func (s *Service) replayResume(ctx context.Context, r *localSession, operation s
 		if r.Current != execution && !prior.Abandoned(operation) {
 			return Status{}, true, errors.New("home: resume operation belongs to an earlier execution")
 		}
-		if _, err = s.startFirstVisit(ctx, prior); errors.Is(err, session.ErrDeadlinePassed) {
-			// The deadline ended this resume before it started; a new
-			// resume continues the session from what it kept.
+		if _, err = s.startFirstVisit(ctx, prior); errors.Is(err, session.ErrStartEnded) {
+			// The deadline, or the placement's refusal, ended this resume
+			// before it started; a new resume continues the session from
+			// what it kept.
 			return Status{}, true, errors.Join(err, s.retireSettled(r))
 		} else if err != nil {
 			return Status{}, true, err
@@ -702,9 +703,10 @@ func (s *Service) Move(ctx context.Context, id, operation, destination string) (
 		return Status{}, err
 	}
 	status, err := s.moveExecution(ctx, execution, operation, destination)
-	if errors.Is(err, session.ErrDeadlinePassed) {
-		// The deadline ended the move after its source stopped: the session
-		// is stopped with that stop's checkpoint (ADR 0060).
+	if errors.Is(err, session.ErrStartEnded) {
+		// The deadline, or the destination's refusal, ended the move after
+		// its source stopped: the session is stopped with that stop's
+		// checkpoint (ADRs 0060 and 0067).
 		return s.settledStatus(sessionID, status, err)
 	}
 	return status, err
@@ -719,7 +721,7 @@ func (s *Service) Recover(ctx context.Context, id string) (Status, error) {
 	}
 	defer unlock()
 	status, err := s.recoverExecution(ctx, execution)
-	if errors.Is(err, session.ErrDeadlinePassed) || err == nil && status.Phase == string(session.PhaseIdle) {
+	if errors.Is(err, session.ErrStartEnded) || err == nil && status.Phase == string(session.PhaseIdle) {
 		return s.settledStatus(sessionID, status, err)
 	}
 	return status, err

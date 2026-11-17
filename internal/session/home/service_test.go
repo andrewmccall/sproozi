@@ -71,6 +71,9 @@ type placementFixture struct {
 	onStop func()
 	// stopErr, when set, fails every Stop before it reaches the visit.
 	stopErr error
+	// refuse, when set, refuses every Prepare with it, as an executor whose
+	// run ended before its sandbox started does.
+	refuse error
 }
 
 func (p *placementFixture) prepare(l session.Launch) session.Incarnation {
@@ -85,6 +88,11 @@ func (p *placementFixture) prepare(l session.Launch) session.Incarnation {
 // Prepare restores a captured workspace for a first visit, which must not name
 // a native thread, or the retained checkpoint for any other visit.
 func (p *placementFixture) Prepare(ctx context.Context, l session.Launch, data []byte) (session.Incarnation, error) {
+	if p.refuse != nil {
+		// The refused preparation is known, so AbortPreparation fences it.
+		p.rows[l.AllocationID] = session.Observation{Launch: l, State: session.PlacementPreparing}
+		return session.Incarnation{}, p.refuse
+	}
 	if l.CheckpointDigest == "" {
 		if l.ThreadID != "" || len(data) == 0 {
 			return session.Incarnation{}, errors.New("initial session fabricated native state")
