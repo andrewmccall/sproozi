@@ -36,11 +36,41 @@ func activatable(t *testing.T, prepare func()) *atomic.Bool {
 	return started
 }
 
-// passDeadline moves s's deadline a second into the past. A prepare hook
-// calls it on activate's own goroutine, between activate's two deadline
-// checks, so it stands for preparing that outlasts the deadline without
-// waiting for the clock.
-func passDeadline(s *server) { s.deadline = time.Now().Add(-time.Second) }
+// acrossDeadline activates a fresh supervisor whose real deadline is ahead
+// when activate first checks it and has passed, on the machine's clock, when
+// preparing ends: prepare, the adapter's preparation, sleeps until then. The
+// deadline is never changed once configured, so the launch-time check is the
+// one that must refuse. If the first check already refused, preparing never
+// ran; the next attempt's deadline is twice as far ahead. The outcome never
+// depends on the machine's speed; only the number of attempts does.
+type acrossDeadline struct {
+	until atomic.Int64 // the current attempt's deadline, in Unix nanoseconds
+	ran   atomic.Bool
+}
+
+func (a *acrossDeadline) prepare() {
+	a.ran.Store(true)
+	time.Sleep(time.Until(time.Unix(0, a.until.Load())) + 10*time.Millisecond)
+}
+
+func (a *acrossDeadline) activate(t *testing.T) (*server, *lockedBuffer, response) {
+	t.Helper()
+	ahead := 100 * time.Millisecond
+	for attempt := 1; ; attempt++ {
+		until := time.Now().Add(ahead)
+		a.until.Store(until.UnixNano())
+		a.ran.Store(false)
+		s, reports := activation(until)
+		r := s.activate()
+		if a.ran.Load() {
+			return s, reports, r
+		}
+		if r.Error != deadlineExpired || attempt == 6 {
+			t.Fatalf("activation with a deadline %s ahead never prepared: %+v", ahead, r)
+		}
+		ahead *= 2
+	}
+}
 
 // activation is a configured supervisor whose deadline is until.
 func activation(until time.Time) (*server, *lockedBuffer) {
@@ -67,15 +97,10 @@ func TestActivateAfterTheDeadlineIsRefused(t *testing.T) {
 // harness. The reply is the one the terminal gave when it was handed the
 // deadline, and at the deadline the supervisor exits as a prepared one does,
 // with no exit report.
-//
-// The deadline is an hour ahead when activate checks it first, however
-// slow the machine; preparing then moves it into the past, as a slow
-// preparation would carry the clock past it.
 func TestDeadlineDuringActivationStartsNoHarness(t *testing.T) {
-	var s *server
-	started := activatable(t, func() { passDeadline(s) })
-	s, reports := activation(time.Now().Add(time.Hour))
-	r := s.activate()
+	across := &acrossDeadline{}
+	started := activatable(t, across.prepare)
+	s, reports, r := across.activate(t)
 	if r.Error != launchPastDeadline || r.State != harness.NativePrepared || started.Load() {
 		t.Fatalf("activation overtaken by the deadline: %+v, started %v", r, started.Load())
 	}
@@ -89,14 +114,13 @@ func TestDeadlineDuringActivationStartsNoHarness(t *testing.T) {
 // The refused activation stops the sign-in sync it started, so its final
 // save runs and nothing syncs for a harness that never ran.
 func TestDeadlineDuringActivationStopsTheSignInSync(t *testing.T) {
-	var s *server
-	activatable(t, func() { passDeadline(s) })
+	across := &acrossDeadline{}
+	activatable(t, across.prepare)
 	l := recordedLogin(t)
 	previous := startLogin
 	startLogin = func(config) (*loginSync, error) { return l, nil }
 	t.Cleanup(func() { startLogin = previous })
-	s, _ = activation(time.Now().Add(time.Hour))
-	if r := s.activate(); r.Error != launchPastDeadline {
+	if _, _, r := across.activate(t); r.Error != launchPastDeadline {
 		t.Fatalf("activate: %+v", r)
 	}
 	select {
