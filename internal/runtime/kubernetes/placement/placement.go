@@ -330,10 +330,8 @@ func (p *Placement) Prepare(ctx context.Context, l session.Launch, data []byte) 
 	if local, err := p.load(l); err == nil && local.PreparationAborted {
 		// An aborted preparation never starts. Its own launch is refused,
 		// so a coordinator whose end of it was unproven replays the abort
-		// (ADR 0067); any other launch for its allocation conflicts.
-		if !session.SameLaunch(l, local.Launch) {
-			return session.Incarnation{}, &profile.Rejection{Code: profile.CodeConflict}
-		}
+		// (ADR 0067). load answers conflict for any other launch of the
+		// allocation.
 		return session.Incarnation{}, p.abortedRefusal(ctx, local)
 	}
 	if l.ThreadID == "" && l.CheckpointDigest == "" {

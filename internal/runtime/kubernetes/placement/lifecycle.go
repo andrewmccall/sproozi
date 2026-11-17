@@ -346,15 +346,23 @@ func (p *Placement) registrationRefusal(ctx context.Context, r registry.Record) 
 }
 
 // abortedRefusal is the refusal of a launch whose preparation local's
-// tombstone records as aborted. It says how the run ended when it can still
-// read a terminal one, which is why the start was refused when the run
-// ended by itself; otherwise only that the preparation was aborted.
+// tombstone records as aborted. It says what became of the run the
+// registration bound, as a waiting Prepare would: deleted, replaced, ended
+// or cancelled, or that the registration was deleted; when none of these
+// can be read, only that the preparation was aborted.
 func (p *Placement) abortedRefusal(ctx context.Context, local retained) error {
 	name := runName(local.Launch)
-	var run api.AgentRun
-	if err := p.config.Kube.Get(ctx, client.ObjectKey{Namespace: p.config.Namespace, Name: name}, &run); err == nil &&
-		run.Status.Phase.IsTerminal() {
-		return refuse("%s", runEnded(&run))
+	if local.Reference.UID != "" {
+		r, err := p.registry.Get(ctx, local.Reference)
+		if errors.Is(err, registry.ErrGone) {
+			return refuse("the session registration for AgentRun %s was deleted before its sandbox started", name)
+		}
+		if err == nil && r.RunUID != "" {
+			run, err := p.readRun(ctx, r)
+			if refused := runRefusal(r, run, err); refused != nil {
+				return refused
+			}
+		}
 	}
 	return refuse("the preparation of AgentRun %s was aborted before its sandbox started", name)
 }
@@ -375,15 +383,50 @@ func runEnded(run *api.AgentRun) string {
 }
 
 // abortedObservation is Inspect's observation of l when its preparation was
-// aborted. An aborted preparation still pending in its coordinator's
-// journal is a start whose end was not yet shown: it is preparing, its
-// Prepare refuses it, and the coordinator's end replays the abort (ADR 0067).
-func (p *Placement) abortedObservation(l session.Launch) (session.Observation, bool) {
+// aborted, and false for any other launch. load refuses another launch of
+// the allocation. An aborted preparation is preparing, a start whose end is
+// not yet shown, while its registration has not been cancelled or cannot be
+// read, or is cancelled but its run has not yet ended or its Pod still
+// exists: its Prepare refuses it, and the coordinator's end replays the
+// abort (ADR 0067). Once the run has ended and no Pod exists, nothing was
+// left by the abort and the launch is absent, which a coordinator still
+// pending on it also ends through Prepare. A registration that may have
+// had authority is left to the existing path, which answers conflict.
+func (p *Placement) abortedObservation(ctx context.Context, l session.Launch) (session.Observation, bool) {
 	local, err := p.load(l)
-	if err != nil || !local.PreparationAborted || !session.SameLaunch(l, local.Launch) {
+	if err != nil || !local.PreparationAborted {
 		return session.Observation{}, false
 	}
-	return session.Observation{Launch: local.Launch, State: session.PlacementPreparing}, true
+	o := session.Observation{Launch: local.Launch, State: session.PlacementPreparing}
+	if local.Reference.UID == "" {
+		// Aborted before its registration was known: absent once neither
+		// a registration nor a run exists at its name.
+		_, lookupErr := p.registry.Lookup(ctx, runName(local.Launch))
+		var run api.AgentRun
+		runErr := p.config.Kube.Get(ctx, client.ObjectKey{Namespace: p.config.Namespace, Name: runName(local.Launch)}, &run)
+		if errors.Is(lookupErr, registry.ErrGone) && apierrors.IsNotFound(runErr) {
+			o.State = session.PlacementAbsent
+		}
+		return o, true
+	}
+	r, err := p.registry.Get(ctx, local.Reference)
+	switch {
+	case err != nil, r.Phase == registry.Creating, r.Phase == registry.Bound, r.Phase == registry.Prepared:
+		return o, true
+	case r.Phase != registry.Cancelled || !unspent(r.Receipt):
+		return session.Observation{}, false
+	}
+	if r.RunUID != "" {
+		run, err := p.readRun(ctx, r)
+		if err != nil && !apierrors.IsNotFound(err) || err == nil && string(run.UID) == r.RunUID && !run.Status.Phase.IsTerminal() {
+			return o, true
+		}
+		if _, err = p.sandbox(ctx, r); !apierrors.IsNotFound(err) {
+			return o, true
+		}
+	}
+	o.State = session.PlacementAbsent
+	return o, true
 }
 
 // readyCondition is the AgentRun condition that carries the controller's
@@ -437,7 +480,7 @@ func (p *Placement) Inspect(ctx context.Context, l session.Launch) (session.Obse
 		return session.Observation{}, err
 	}
 	defer unlock()
-	if o, aborted := p.abortedObservation(l); aborted {
+	if o, aborted := p.abortedObservation(ctx, l); aborted {
 		return o, nil
 	}
 	local, r, err := p.observing(ctx, l)

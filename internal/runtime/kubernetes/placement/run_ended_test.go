@@ -357,6 +357,11 @@ func TestHomeEndsAStartTheExecutorRefusesOverTheProtocol(t *testing.T) {
 // every read of the run and of the registration fails, as when the API
 // server cannot answer, Prepare keeps waiting, and once reads succeed again
 // it prepares the visit. A refusal here would end a start that could run.
+// The wait keeps no count of failed reads: each poll decides from that
+// poll's reads alone (runRefusal, registrationRefusal), and only the
+// registration's read has a cadence, so a few failed polls of each read
+// cover every number of them. A counter added later needs this test to run
+// past it.
 func TestPrepareKeepsWaitingThroughFailedReads(t *testing.T) {
 	t.Parallel()
 	p, kube, e, l := waitingTask(t)

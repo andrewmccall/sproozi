@@ -85,6 +85,15 @@ func (p *Placement) AbortPreparation(ctx context.Context, l session.Launch) erro
 		return err
 	}
 	r, found, err := p.preparationRegistration(ctx, local)
+	var unproven *unprovenEnd
+	if errors.As(err, &unproven) && !unseen {
+		// A deleted registration cannot be fenced, but the launch is still
+		// never prepared again: the tombstone makes its Prepare refuse it,
+		// so each recover repeats this check and says why (ADR 0067).
+		if saveErr := p.saveTombstone(&local, false, r, false); saveErr != nil {
+			return errors.Join(err, saveErr)
+		}
+	}
 	if err != nil {
 		return err
 	}
@@ -221,9 +230,9 @@ func (p *Placement) preparationRegistration(ctx context.Context, local retained)
 		}
 	}
 	if errors.Is(err, registry.ErrGone) {
-		return r, false, fmt.Errorf("placement: the session registration %s for AgentRun %s was deleted, so its Pod cannot be fenced; "+
-			"an administrator must confirm no Pod labelled %s remains for that run in %s: %w",
-			registry.NameForRun(name), name, runtimekube.RunUIDLabel, p.config.AgentNamespace, &profile.Rejection{Code: profile.CodeConflict})
+		return r, false, administratorCheck(fmt.Sprintf("the session registration %s for AgentRun %s was deleted, so its Pod cannot be fenced; "+
+			"an administrator must confirm no Pod labelled %s remains for that run in %s",
+			registry.NameForRun(name), name, runtimekube.RunUIDLabel, p.config.AgentNamespace))
 	}
 	if err != nil {
 		return r, false, semantic(err)
@@ -283,10 +292,26 @@ func (p *Placement) cancelRun(ctx context.Context, r registry.Record) error {
 // the run it bound: an administrator deleted and recreated it. The answer is
 // a conflict, never a fence.
 func replacedRun(r registry.Record, run api.AgentRun) error {
-	return fmt.Errorf("placement: AgentRun %s now has UID %s, but its session registration bound UID %s; "+
-		"an administrator replaced it, so confirm no Pod labelled %s=%s remains: %w",
-		r.IntendedRunName, run.UID, r.RunUID, runtimekube.RunUIDLabel, r.RunUID, &profile.Rejection{Code: profile.CodeConflict})
+	return administratorCheck(fmt.Sprintf("AgentRun %s now has UID %s, but its session registration bound UID %s; "+
+		"an administrator replaced it, so confirm no Pod labelled %s=%s remains",
+		r.IntendedRunName, run.UID, r.RunUID, runtimekube.RunUIDLabel, r.RunUID))
 }
+
+// unprovenEnd is a conflict that keeps a preparation's end unproven until an
+// administrator acts. It is a session.UnprovenEnd, so the executor's driver
+// can state its cause alone (ADR 0067).
+type unprovenEnd struct{ cause string }
+
+// administratorCheck is the conflict cause describes.
+func administratorCheck(cause string) error { return &unprovenEnd{cause: cause} }
+
+func (e *unprovenEnd) Error() string {
+	return "placement: " + e.cause + ": " + (&profile.Rejection{Code: profile.CodeConflict}).Error()
+}
+func (e *unprovenEnd) Unwrap() error       { return &profile.Rejection{Code: profile.CodeConflict} }
+func (e *unprovenEnd) UnprovenEnd() string { return e.cause }
+
+var _ session.UnprovenEnd = (*unprovenEnd)(nil)
 
 // awaitSandboxSettled waits until the controller can no longer create the
 // run's Pod: the run is gone, terminal, or has recorded its sandbox Pod. The

@@ -5,11 +5,16 @@ import (
 	"errors"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
+	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
 	"github.com/andrewmccall/sproozi/internal/session"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -72,6 +77,11 @@ func TestRecoverEndsARefusedStartWhoseFirstEndWasUnproven(t *testing.T) {
 	if local, err := p.load(l); err != nil || !local.PreparationAborted {
 		t.Fatalf("the unproven end left no tombstone: %+v %v", local, err)
 	}
+	// Its registration is cancelled, but the run has not ended: a start whose
+	// end is not yet shown.
+	if o, err := p.Inspect(t.Context(), l); err != nil || o.State != session.PlacementPreparing {
+		t.Fatalf("Inspect of the unproven aborted preparation: %+v %v", o.State, err)
+	}
 	setRun(t, kube, l, api.AgentRunPhaseCancelled, "CancelRequested", "spec.cancel was set to true")
 	creates := kube.runCreates
 	phase, err := recoverUntilIdle(t, coordinator, l.ExecutionID)
@@ -82,6 +92,10 @@ func TestRecoverEndsARefusedStartWhoseFirstEndWasUnproven(t *testing.T) {
 	}
 	if kube.runCreates != creates {
 		t.Fatal("recover created a run for an aborted preparation")
+	}
+	// Settled: the run ended and no Pod exists, so nothing is left.
+	if o, err := p.Inspect(t.Context(), l); err != nil || o.State != session.PlacementAbsent {
+		t.Fatalf("Inspect of the settled aborted preparation: %+v %v", o.State, err)
 	}
 }
 
@@ -161,6 +175,9 @@ func TestRecoverRefusesAStartWhoseRunWasDeletedWithoutCreatingAnother(t *testing
 				if err := kube.Client.Create(t.Context(), replacement); err != nil {
 					t.Fatal(err)
 				}
+				// The replacement ended too: a refusal must still say the
+				// bound run was replaced, not how the replacement ended.
+				setRun(t, kube, l, api.AgentRunPhaseSucceeded, "ExecutionSucceeded", "the replacement's own ending")
 			}
 			creates := kube.runCreates
 			r, err := coordinator.Recover(t.Context(), l.ExecutionID)
@@ -170,15 +187,19 @@ func TestRecoverRefusesAStartWhoseRunWasDeletedWithoutCreatingAnother(t *testing
 			}
 			// A deleted run's preparation is fenced and the start ends. A
 			// replaced run cannot be shown to hold no Pod of the bound one,
-			// so its end stays unproven, as ADR 0060 records for it, and a
-			// recover, which finds the launch's tombstone, says only that
-			// its preparation was aborted.
+			// so its end stays unproven, as ADR 0060 records for it. A
+			// recover, which finds the launch's tombstone, still says it was
+			// replaced, and why the end is unproven, alone.
 			phase := r.Phase
 			if phase != session.PhaseIdle {
 				phase, err = recoverUntilIdle(t, coordinator, l.ExecutionID)
 			}
+			var unproven session.UnprovenEnd
 			if test.replace && (!errors.As(err, &refused) ||
-				refused.Reason != "the preparation of AgentRun "+runName(l)+" was aborted before its sandbox started") {
+				!strings.HasPrefix(refused.Reason, "AgentRun "+runName(l)+" was replaced before its sandbox started: it now has UID "+replacementUID) ||
+				!errors.As(err, &unproven) || !strings.HasPrefix(unproven.UnprovenEnd(), "AgentRun "+runName(l)+" now has UID "+replacementUID) ||
+				!strings.Contains(unproven.UnprovenEnd(), "an administrator replaced it") ||
+				strings.Contains(unproven.UnprovenEnd(), "session profile")) {
 				t.Fatalf("recover of the replaced run's tombstoned start: %v", err)
 			}
 			if !test.replace && (phase != session.PhaseIdle || !errors.Is(err, session.ErrStartEnded)) ||
@@ -196,5 +217,74 @@ func TestRecoverRefusesAStartWhoseRunWasDeletedWithoutCreatingAnother(t *testing
 				t.Fatalf("the replacement run changed: %+v %v", after.ObjectMeta, err)
 			}
 		})
+	}
+}
+
+// A registration an administrator deleted while the start waited refuses
+// it, and its end stays unproven: nothing is left to fence its Pod by. The
+// error states that cause alone, what an administrator must confirm, and
+// later recovers, which find the tombstone, say the same.
+func TestRecoverOfAStartWhoseRegistrationWasDeletedNamesTheCheck(t *testing.T) {
+	t.Parallel()
+	p, kube, e, l := waitingTask(t)
+	l.Epoch = 1
+	coordinator := startCoordinator(t, p, l, e.initial)
+	w := inBackground(t, kube, func() error {
+		_, err := coordinator.Recover(t.Context(), l.ExecutionID)
+		return err
+	})
+	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: p.config.Namespace, Name: registry.NameForRun(runName(l))}}
+	if err := kube.Client.Delete(t.Context(), cm); err != nil {
+		t.Fatal(err)
+	}
+	check := func(err error) {
+		t.Helper()
+		var refused *session.StartRefused
+		var unproven session.UnprovenEnd
+		if !errors.Is(err, session.ErrEndUnproven) || !errors.As(err, &refused) ||
+			refused.Reason != "the session registration for AgentRun "+runName(l)+" was deleted before its sandbox started" ||
+			!errors.As(err, &unproven) || !strings.Contains(unproven.UnprovenEnd(), "was deleted, so its Pod cannot be fenced; an administrator must confirm") ||
+			strings.Contains(unproven.UnprovenEnd(), "session profile") {
+			t.Fatalf("refused start whose registration was deleted: %v", err)
+		}
+	}
+	check(w.ended(t))
+	_, err := coordinator.Recover(t.Context(), l.ExecutionID)
+	check(err)
+}
+
+// The check before ensureRun reads the bound run; when that read fails it
+// is no evidence, and the start goes on. Even then a registration that bound
+// a run never gets another: ensureRun only reads it, so a run deleted
+// meanwhile is not created again.
+func TestPrepareNeverCreatesASecondRunWhenItsCheckCannotReadTheFirst(t *testing.T) {
+	t.Parallel()
+	p, kube, e, l := waitingTask(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+	defer cancel()
+	if _, err := p.Prepare(ctx, l, e.initial); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("queued preparation: %v", err)
+	}
+	if err := kube.Client.Delete(t.Context(), agentRun(t, kube, l)); err != nil {
+		t.Fatal(err)
+	}
+	var failed atomic.Bool
+	fail := func(obj client.Object) error {
+		if _, ok := obj.(*api.AgentRun); ok && failed.CompareAndSwap(false, true) {
+			return apierrors.NewServiceUnavailable("the API server cannot answer")
+		}
+		return nil
+	}
+	kube.getErr.Store(&fail)
+	creates := kube.runCreates
+	ctx, cancel = context.WithTimeout(t.Context(), 300*time.Millisecond)
+	defer cancel()
+	_, err := p.Prepare(ctx, l, e.initial)
+	if !failed.Load() || err == nil || kube.runCreates != creates {
+		t.Fatalf("prepare after a failed check of a deleted run: %v, runs created %d", err, kube.runCreates-creates)
+	}
+	var run api.AgentRun
+	if err = kube.Client.Get(t.Context(), client.ObjectKey{Namespace: p.config.Namespace, Name: runName(l)}, &run); !apierrors.IsNotFound(err) {
+		t.Fatalf("an AgentRun exists again at the bound name: %+v %v", run.ObjectMeta, err)
 	}
 }
