@@ -12,7 +12,8 @@ import (
 
 // overtaken is a supervisor of kind whose turn completed and whose harness
 // force overtakes as the graceful stop starts to finish it.
-func overtaken(t *testing.T, kind harness.NativeKind, force func(s *server)) (response, harness.NativeExitReport, *server) {
+func overtaken(t *testing.T, kind harness.NativeKind,
+	force func(s *server)) (response, harness.NativeExitReport, *server) {
 	t.Helper()
 	var s *server
 	withAdapter(t, kind, func(a *nativeAdapter) {
@@ -47,8 +48,8 @@ func TestCodexStopOvertakenByAForcedStopIsNotAcknowledged(t *testing.T) {
 		force func(s *server)
 		cause harness.NativeExitCause
 	}{
-		"terminated":      {terminated, harness.NativeExitTerminated},
-		"at the deadline": {atTheDeadline, harness.NativeExitDeadline},
+		recordedTerminated: {terminated, harness.NativeExitTerminated},
+		"at the deadline":  {atTheDeadline, harness.NativeExitDeadline},
 	} {
 		t.Run(name, func(t *testing.T) {
 			r, report, s := overtaken(t, harness.NativeCodex, c.force)
@@ -70,8 +71,8 @@ func TestKilledHarnessStopOvertakenAfterItsTurnIsAcknowledged(t *testing.T) {
 			force func(s *server)
 			cause harness.NativeExitCause
 		}{
-			"terminated":      {terminated, harness.NativeExitTerminated},
-			"at the deadline": {atTheDeadline, harness.NativeExitDeadline},
+			recordedTerminated: {terminated, harness.NativeExitTerminated},
+			"at the deadline":  {atTheDeadline, harness.NativeExitDeadline},
 		} {
 			t.Run(string(kind)+" "+name, func(t *testing.T) {
 				r, report, _ := overtaken(t, kind, c.force)
@@ -102,7 +103,8 @@ func TestTurnlessStopOvertakenByAForcedStopIsNotAcknowledged(t *testing.T) {
 	t.Cleanup(func() { forceStop = previous })
 	r := s.quiesce()
 	report := onlyReport(t, s, reports, watched)
-	if r.State != harness.NativeStopping || r.Turnless || !strings.Contains(r.Error, "terminated") ||
+	if r.State != harness.NativeStopping || r.Turnless ||
+		!strings.Contains(r.Error, string(harness.NativeExitTerminated)) ||
 		report.Cause != harness.NativeExitTerminated {
 		t.Fatalf("reply %+v, report %+v", r, report)
 	}
