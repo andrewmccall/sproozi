@@ -123,10 +123,7 @@ func (s *Store) State() (State, error) {
 	if err = d.Decode(&st); err != nil {
 		return st, fmt.Errorf("pki: corrupt state: %w", err)
 	}
-	if st.Version != 1 || st.generation(st.Serving) == nil || len(st.Trusted) == 0 {
-		return st, errors.New("pki: corrupt state")
-	}
-	return st, nil
+	return st, check(st)
 }
 
 func (st State) generation(id int) *Generation {
@@ -441,6 +438,9 @@ func (s *Store) issue(st *State, now time.Time) error {
 }
 
 func (s *Store) commit(st State) error {
+	if err := check(st); err != nil {
+		return fmt.Errorf("refusing to save: %w", err)
+	}
 	data, err := json.MarshalIndent(st, "", "  ")
 	if err != nil {
 		return err
