@@ -62,7 +62,8 @@ func TestRemoveRunsBesideOtherOperationsAndKeepsTheirNewContent(t *testing.T) {
 	// Remove returns at once; one that waited for the other execution's lock
 	// would give up after a few seconds with ErrBusy, and one that waited on
 	// a lock the operation holds would never return. hangLimit only bounds
-	// how long that takes to report.
+	// how long that takes to report: a removal that waits for something
+	// else and returns late, by less than hangLimit, is no longer caught.
 	removed := make(chan error, 1)
 	go func() {
 		removed <- c.Remove([]string{s.Source.ExecutionID}, func() ([]string, error) { return nil, nil })
