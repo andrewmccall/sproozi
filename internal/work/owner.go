@@ -94,6 +94,10 @@ type Config struct {
 	// exitInterval is how often the exit sweep looks for interactive
 	// sessions whose harness ended; zero takes exitWatchInterval.
 	exitInterval time.Duration
+	// sourceRead, when set, runs between the steps of revisionSource's read
+	// of the session new work starts from (see sourceStep in revision.go).
+	// Only tests set it, to remove that session between two steps.
+	sourceRead func(step string)
 }
 
 // Terminal attaches to an active visit's native terminal and reports a

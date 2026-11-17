@@ -24,6 +24,7 @@ func (o *Owner) revisionSource(source RevisionSource, target project.Association
 	if err != nil {
 		return nil, err
 	}
+	o.sourceStep(stepSourceRecord)
 	if err = o.access(e.association()); err != nil {
 		return nil, err
 	}
@@ -42,6 +43,7 @@ func (o *Owner) revisionSource(source RevisionSource, target project.Association
 		if err != nil {
 			return nil, err
 		}
+		o.sourceStep(stepSourceExecution)
 		if !derivePhase(r, rec).stopped() {
 			return nil, &profile.Rejection{Code: profile.CodeConflict}
 		}
@@ -67,5 +69,23 @@ func (o *Owner) revisionSource(source RevisionSource, target project.Association
 	if source.Revision == "" || source.Revision != meta.Workspace.Revision {
 		return nil, &profile.Rejection{Code: profile.CodeInvalid}
 	}
+	o.sourceStep(stepSourceCheckpoint)
 	return data, nil
+}
+
+// The steps of revisionSource's read of a source session, after each of
+// which Config.sourceRead runs: its catalogue record was read, the
+// coordinator's record of its execution was read, and its checkpoint was
+// read and checked.
+const (
+	stepSourceRecord     = "record"
+	stepSourceExecution  = "execution"
+	stepSourceCheckpoint = "checkpoint"
+)
+
+// sourceStep runs the test hook Config.sourceRead, if set, after step.
+func (o *Owner) sourceStep(step string) {
+	if o.config.sourceRead != nil {
+		o.config.sourceRead(step)
+	}
 }
