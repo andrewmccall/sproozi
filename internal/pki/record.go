@@ -1,10 +1,15 @@
 package pki
 
 import (
+	"crypto/x509"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
+
+	"github.com/andrewmccall/sproozi/internal/privatefs"
 )
 
 // Phase is where the store's rotation record is in its lifecycle, as ADR
@@ -134,4 +139,44 @@ func check(st State) error {
 		return fmt.Errorf("pki: corrupt state: %w", err)
 	}
 	return nil
+}
+
+// checkFiles refuses a record whose trusted generations' files are not the
+// ones it names: each trusted generation's certificate must have the
+// recorded fingerprint and expiry, and its key, when present, must match it.
+// A missing key is the lost-key state: issuance from it fails, and replace
+// recovers. Retired generations are not read; their keys are destroyed.
+func (s *Store) checkFiles(st State) error {
+	for _, id := range st.Trusted {
+		g, name := st.generation(id), caName(id)
+		data, err := privatefs.ReadFile(filepath.Join(s.dir, name+".pem"), maxPEM)
+		var cert *x509.Certificate
+		if err == nil {
+			cert, err = ParseCertificate(data)
+		}
+		if err != nil {
+			return filesError("generation %d certificate %s.pem is unreadable: %v", id, name, err)
+		}
+		if Fingerprint(cert) != g.Fingerprint {
+			return filesError("generation %d certificate %s.pem does not have the recorded fingerprint", id, name)
+		}
+		if !cert.NotAfter.Equal(g.NotAfter) {
+			return filesError("generation %d certificate %s.pem does not have the recorded expiry", id, name)
+		}
+		key, err := privatefs.ReadFile(filepath.Join(s.dir, name+".key"), maxPEM)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err == nil {
+			_, _, err = Parse(Pair{Certificate: data, Key: key})
+		}
+		if err != nil {
+			return filesError("generation %d key %s.key does not match its certificate: %v", id, name, err)
+		}
+	}
+	return nil
+}
+
+func filesError(format string, args ...any) error {
+	return fmt.Errorf("pki: certificate authority files do not match state: "+format, args...)
 }

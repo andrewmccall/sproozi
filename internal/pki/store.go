@@ -108,8 +108,20 @@ func (s *Store) Policy() Policy { return s.policy }
 // TrustPath is the certificate-only worker bundle.
 func (s *Store) TrustPath() string { return filepath.Join(s.dir, trustFile) }
 
-// State reads the committed state.
+// State reads the committed state. It refuses a record no phase describes,
+// and one whose trusted generations' files are not the ones it names.
 func (s *Store) State() (State, error) {
+	st, err := s.load()
+	if err != nil {
+		return st, err
+	}
+	return st, s.checkFiles(st)
+}
+
+// load reads the committed record and refuses one no phase describes. It
+// does not read the authority files: Initialize and ReplaceCA use it, so
+// replace still recovers an authority whose files were lost or changed.
+func (s *Store) load() (State, error) {
 	var st State
 	data, err := privatefs.ReadFile(filepath.Join(s.dir, stateFile), maxState)
 	if os.IsNotExist(err) {
@@ -182,7 +194,7 @@ func (s *Store) Initialize(names Names) error {
 		return err
 	}
 	return s.locked(func() error {
-		if _, err := s.State(); !errors.Is(err, ErrNotInitialized) {
+		if _, err := s.load(); !errors.Is(err, ErrNotInitialized) {
 			if err == nil {
 				return errors.New("pki: certificate authority already initialized")
 			}
@@ -368,7 +380,7 @@ func (s *Store) RetireRotation(drained bool) error {
 // Existing workers lose trust and must be cancelled or drained by the caller.
 func (s *Store) ReplaceCA() error {
 	return s.locked(func() error {
-		st, err := s.State()
+		st, err := s.load()
 		if err != nil {
 			return err
 		}
@@ -438,7 +450,7 @@ func (s *Store) issue(st *State, now time.Time) error {
 }
 
 func (s *Store) commit(st State) error {
-	if err := check(st); err != nil {
+	if err := errors.Join(check(st), s.checkFiles(st)); err != nil {
 		return fmt.Errorf("refusing to save: %w", err)
 	}
 	data, err := json.MarshalIndent(st, "", "  ")
