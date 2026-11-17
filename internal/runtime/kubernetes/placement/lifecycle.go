@@ -31,6 +31,10 @@ import (
 
 var errWriterFenceUnknown = errors.New("placement: writer fence remains unknown")
 
+// errRunUnavailable is a read of a visit's Pod whose run is not the bound one
+// or has no sandbox: queued, or ended before its sandbox started.
+var errRunUnavailable = errors.New("placement: exact admitted run unavailable")
+
 // podStopWait bounds a stop's wait for the native container to end after the
 // supervisor's graceful handoff, within the stop's settle allowance
 // (profile.StopBound). A container that has not ended by then leaves the stop
@@ -182,7 +186,7 @@ func (p *Placement) pod(ctx context.Context, r registry.Record) (*corev1.Pod, er
 		return nil, err
 	}
 	if string(run.UID) != r.RunUID || run.Status.Identity.SandboxName == "" {
-		return nil, errors.New("placement: exact admitted run unavailable")
+		return nil, errRunUnavailable
 	}
 	var pod corev1.Pod
 	if err := p.config.Kube.Get(ctx, client.ObjectKey{Namespace: p.config.AgentNamespace, Name: run.Status.Identity.SandboxName}, &pod); err != nil {
@@ -385,7 +389,9 @@ func (p *Placement) Inspect(ctx context.Context, l session.Launch) (session.Obse
 			o.Incarnation = session.Incarnation{}
 		}
 		pod, err := p.pod(ctx, r)
-		if apierrors.IsNotFound(err) {
+		if apierrors.IsNotFound(err) || r.PodUID == "" && errors.Is(err, errRunUnavailable) {
+			// No Pod is bound yet: recovery calls Prepare again, which waits
+			// for one or refuses a run that can never get it (ADR 0067).
 			o.State = session.PlacementPreparing
 			return o, nil
 		}
