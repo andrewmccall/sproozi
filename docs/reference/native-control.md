@@ -51,9 +51,14 @@ confirmation. A harness that exited by itself instead keeps its own exit code
 and reason. If the turn observed after the kill differs, or the kill is not
 confirmed, `quiesce` replies with an error and the supervisor reports the
 cause `failed`; if the deadline passes first, the cause `deadline`. If a
-`SIGTERM` or the deadline stops the harness while `quiesce` is ending it,
-the reply is `stopping` with an error naming that cause, as the exit report
-does, and the supervisor exits nonzero.
+`SIGTERM` or the deadline kills Codex while `quiesce` is asking it to quit,
+or kills a turnless first visit, the reply is `stopping` with an error naming
+that cause, as the exit report does, and the supervisor exits nonzero.
+Claude Code and Copilot are ended by a kill once their turn is observed
+complete, so a forced stop's kill that lands first ends them the same way:
+the reply is `stopped` with the conversation and turn, which the placement
+keeps, while the exit report names the forced cause and the supervisor
+exits nonzero.
 
 A kill can cut short a row the harness was appending to its conversation
 file. The supervisor's observation refuses that file, so a Codex stop whose

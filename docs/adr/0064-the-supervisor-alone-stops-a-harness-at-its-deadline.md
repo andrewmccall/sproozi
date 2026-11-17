@@ -43,7 +43,9 @@ one event, `deadline`, once (`expire`, behind a `sync.Once`):
 Raising it stops the harness with the cause `deadline`, unless the harness
 already exited while nothing was forcing or finishing it: that exit is its
 own ([ADR 0038](0038-exited-agents-and-one-recovery-path.md)) and the exit
-watcher settles it.
+watcher settles it. "Already exited" means the terminal has reaped the exit.
+A harness that exits by itself in the instant before that, while the
+deadline is being raised, is still reported with the cause `deadline`.
 
 `activate` refuses after the deadline on entry, and checks again just
 before it starts the terminal, because preparing a launch can take seconds
@@ -72,7 +74,10 @@ unchanged and still supports one for other callers.
 The kill at the deadline now goes through the supervisor's `stop`, which
 takes its mutex briefly. `activate` holds that mutex while it prepares a
 launch, so a deadline passing then is acted on when `activate` returns; it
-then refuses the launch, so no harness runs past the deadline. A defect
+then refuses the launch. The deadline can still pass in the instant between
+that re-check and the terminal's start: a harness started then runs until
+the watcher's next clock reading, at most about a second, and is stopped
+with the cause `deadline`. A defect
 that held the mutex while the harness runs, or a `serve` that did not start
 the watcher, would leave the harness running past its deadline with no
 second enforcer to stop it.
@@ -95,10 +100,16 @@ second enforcer to stop it.
 ## Consequences
 
 - A stopped `quiesce` reply's `exit.reason` is never `deadline`.
-- A forced stop, the deadline's included, that overtakes a graceful one
-  makes `quiesce` reply `stopping` with an error naming the cause, as the
-  exit report does. For Claude Code and Copilot that is the outcome the
-  terminal's own kill gave when it landed first.
+- A forced stop, the deadline's included, that kills Codex while
+  `quiesce` is asking it to quit makes `quiesce` reply `stopping` with an
+  error naming the cause, as the exit report does.
+- Claude Code and Copilot keep more work. They are ended by a kill once
+  their turn is observed complete, and with the terminal's kill gone a
+  deadline that lands after the turn completed arrives through the
+  supervisor's stop, whose kill ends them as their own would: the stop is
+  acknowledged and the turn kept. When the terminal's own kill landed first,
+  its reason, `deadline`, made their stop fail and the turn was lost. This
+  is a change of behaviour, toward keeping work.
 - [ADR 0061](0061-a-stop-survives-an-interrupted-write.md)'s kill record
   still holds: the deadline's kill is now a stop, which runs the terminal's
   `BeforeKill` like any other.

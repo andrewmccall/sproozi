@@ -388,8 +388,10 @@ change, were identical after it. Outside the record, four things differ:
   the terminal's own kill gave;
 - a `quiesce` waiting for a turn sees a passed deadline at its next 100 ms
   poll, where before it read the clock once a second;
-- when the deadline and the harness's own exit are both ready, the exit is
-  the harness's own (`exited`), where before it was either;
+- when the deadline is raised after the terminal has reaped the harness's
+  own exit, the exit is the harness's own (`exited`), where before it was
+  either; an own exit the terminal has not yet reaped can still be reported
+  as `deadline`;
 - in `forcing` the exit watcher may settle the exit, where before, once a
   graceful stop had been overtaken, only the stop did. Both settle the same
   exit and wait result unless the stop's three-second wait ran out first,
@@ -402,8 +404,10 @@ starts a harness when the deadline passed while it prepared the launch. The
 exit watcher no longer concludes an exit that a graceful stop settled, which
 let the supervisor exit before the stopped reply was read. A forced stop that
 overtakes a graceful end leaves the supervisor's exit code nonzero. A
-`quiesce` that a forced stop overtook replies `stopping` with an error naming
-the cause, which changed 28 recorded steps.
+`quiesce` whose Codex quit, or turnless kill, a forced stop overtook replies
+`stopping` with an error naming the cause, which changed 12 recorded steps;
+Claude Code and Copilot, ended by a kill after their completed turn, still
+reply `stopped`.
 
 ## Alternatives
 

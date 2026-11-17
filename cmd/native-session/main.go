@@ -645,7 +645,11 @@ func (s *server) quiesce() response {
 		code, problem = 0, ""
 		s.diagnose("%s", forced)
 	}
-	if overtaken := s.endGracefully(exit, code, id); overtaken != "" {
+	// A harness that quits (Codex) and was killed by a forced stop before
+	// its quit ended it did not stop gracefully. One the supervisor ends
+	// with a kill after its completed turn (Claude Code, Copilot) did, whose
+	// kill landed first: its stop stands and its turn is kept.
+	if overtaken := s.endGracefully(exit, code, id); overtaken != "" && adapter.quits {
 		return response{Op: harness.NativeQuiesce, State: harness.NativeStopping, Error: overtaken}
 	}
 	return response{Op: harness.NativeQuiesce, State: harness.NativeStopped, ThreadID: id, TurnID: turn,

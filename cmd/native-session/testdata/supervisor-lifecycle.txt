@@ -2391,7 +2391,7 @@ configured > activate > quiesce, deadline passes while waiting for the finish
   then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, cause deadline, gated, harness exited, input closed, login forced, saved, store has the harness's login, supervisor exited -1
 
 configured > activate > quiesce, terminated while finishing
-  reply {"op":"quiesce","error":"native stop was overtaken: the supervisor stopped the harness with cause terminated","state":"stopping"}
+  reply {"op":"quiesce","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":-1,"Reason":"forced-stop"}}
   sent kill (login forced), finish (login forced, saved)
   killed 1
   harness ended -1 forced-stop
@@ -2405,7 +2405,7 @@ configured > activate > quiesce, harness exits while finishing
   then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, cause quiesced, gated, harness exited, input closed, login stopping, saved, store has the harness's login, stopped reply unread
 
 configured > activate > quiesce, deadline raised while finishing
-  reply {"op":"quiesce","error":"native stop was overtaken: the supervisor stopped the harness with cause deadline","state":"stopping"}
+  reply {"op":"quiesce","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":-1,"Reason":"forced-stop"}}
   sent kill (login forced), finish (login forced, saved)
   killed 1
   harness ended -1 forced-stop
@@ -2505,7 +2505,7 @@ configured > activate > gate > quiesce, deadline passes while waiting for the fi
   then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, cause deadline, gated, harness exited, input closed, login forced, saved, store has the harness's login, supervisor exited -1
 
 configured > activate > gate > quiesce, terminated while finishing
-  reply {"op":"quiesce","error":"native stop was overtaken: the supervisor stopped the harness with cause terminated","state":"stopping"}
+  reply {"op":"quiesce","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":-1,"Reason":"forced-stop"}}
   sent kill (login forced), finish (login forced, saved)
   killed 1
   harness ended -1 forced-stop
@@ -2519,7 +2519,7 @@ configured > activate > gate > quiesce, harness exits while finishing
   then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, cause quiesced, gated, harness exited, input closed, login stopping, saved, store has the harness's login, stopped reply unread
 
 configured > activate > gate > quiesce, deadline raised while finishing
-  reply {"op":"quiesce","error":"native stop was overtaken: the supervisor stopped the harness with cause deadline","state":"stopping"}
+  reply {"op":"quiesce","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":-1,"Reason":"forced-stop"}}
   sent kill (login forced), finish (login forced, saved)
   killed 1
   harness ended -1 forced-stop
@@ -2914,7 +2914,7 @@ configured > activate > quiesce, deadline passes while waiting for the finish
   then state stopped, cause deadline, gated, harness exited, input closed, login forced, saved, store has the harness's login, supervisor exited -1
 
 configured > activate > quiesce, terminated while finishing
-  reply {"op":"quiesce","error":"native stop was overtaken: the supervisor stopped the harness with cause terminated","state":"stopping"}
+  reply {"op":"quiesce","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":-1,"Reason":"forced-stop"}}
   sent kill (login forced), finish (login forced, saved)
   killed 1
   harness ended -1 forced-stop
@@ -2928,7 +2928,7 @@ configured > activate > quiesce, harness exits while finishing
   then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, cause quiesced, gated, harness exited, input closed, login stopping, saved, store has the harness's login, stopped reply unread
 
 configured > activate > quiesce, deadline raised while finishing
-  reply {"op":"quiesce","error":"native stop was overtaken: the supervisor stopped the harness with cause deadline","state":"stopping"}
+  reply {"op":"quiesce","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":-1,"Reason":"forced-stop"}}
   sent kill (login forced), finish (login forced, saved)
   killed 1
   harness ended -1 forced-stop
@@ -3031,7 +3031,7 @@ configured > activate > gate > quiesce, deadline passes while waiting for the fi
   then state stopped, cause deadline, gated, harness exited, input closed, login forced, saved, store has the harness's login, supervisor exited -1
 
 configured > activate > gate > quiesce, terminated while finishing
-  reply {"op":"quiesce","error":"native stop was overtaken: the supervisor stopped the harness with cause terminated","state":"stopping"}
+  reply {"op":"quiesce","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":-1,"Reason":"forced-stop"}}
   sent kill (login forced), finish (login forced, saved)
   killed 1
   harness ended -1 forced-stop
@@ -3045,7 +3045,7 @@ configured > activate > gate > quiesce, harness exits while finishing
   then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, cause quiesced, gated, harness exited, input closed, login stopping, saved, store has the harness's login, stopped reply unread
 
 configured > activate > gate > quiesce, deadline raised while finishing
-  reply {"op":"quiesce","error":"native stop was overtaken: the supervisor stopped the harness with cause deadline","state":"stopping"}
+  reply {"op":"quiesce","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":-1,"Reason":"forced-stop"}}
   sent kill (login forced), finish (login forced, saved)
   killed 1
   harness ended -1 forced-stop
@@ -3624,7 +3624,7 @@ configured > activate > quiesce, deadline passes while waiting for the finish
   then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, cause deadline, gated, harness exited, input closed, login forced, saved, store has the harness's login, supervisor exited -1
 
 configured > activate > quiesce, terminated while finishing
-  reply {"op":"quiesce","error":"native stop was overtaken: the supervisor stopped the harness with cause terminated","state":"stopping"}
+  reply {"op":"quiesce","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":-1,"Reason":"forced-stop"}}
   sent kill (login forced), finish (login forced, saved)
   killed 1
   harness ended -1 forced-stop
@@ -3638,7 +3638,7 @@ configured > activate > quiesce, harness exits while finishing
   then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, cause quiesced, gated, harness exited, input closed, login stopping, saved, store has the harness's login, stopped reply unread
 
 configured > activate > quiesce, deadline raised while finishing
-  reply {"op":"quiesce","error":"native stop was overtaken: the supervisor stopped the harness with cause deadline","state":"stopping"}
+  reply {"op":"quiesce","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":-1,"Reason":"forced-stop"}}
   sent kill (login forced), finish (login forced, saved)
   killed 1
   harness ended -1 forced-stop
@@ -3738,7 +3738,7 @@ configured > activate > gate > quiesce, deadline passes while waiting for the fi
   then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, cause deadline, gated, harness exited, input closed, login forced, saved, store has the harness's login, supervisor exited -1
 
 configured > activate > gate > quiesce, terminated while finishing
-  reply {"op":"quiesce","error":"native stop was overtaken: the supervisor stopped the harness with cause terminated","state":"stopping"}
+  reply {"op":"quiesce","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":-1,"Reason":"forced-stop"}}
   sent kill (login forced), finish (login forced, saved)
   killed 1
   harness ended -1 forced-stop
@@ -3752,7 +3752,7 @@ configured > activate > gate > quiesce, harness exits while finishing
   then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, cause quiesced, gated, harness exited, input closed, login stopping, saved, store has the harness's login, stopped reply unread
 
 configured > activate > gate > quiesce, deadline raised while finishing
-  reply {"op":"quiesce","error":"native stop was overtaken: the supervisor stopped the harness with cause deadline","state":"stopping"}
+  reply {"op":"quiesce","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":-1,"Reason":"forced-stop"}}
   sent kill (login forced), finish (login forced, saved)
   killed 1
   harness ended -1 forced-stop
@@ -4147,7 +4147,7 @@ configured > activate > quiesce, deadline passes while waiting for the finish
   then state stopped, cause deadline, gated, harness exited, input closed, login forced, saved, store has the harness's login, supervisor exited -1
 
 configured > activate > quiesce, terminated while finishing
-  reply {"op":"quiesce","error":"native stop was overtaken: the supervisor stopped the harness with cause terminated","state":"stopping"}
+  reply {"op":"quiesce","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":-1,"Reason":"forced-stop"}}
   sent kill (login forced), finish (login forced, saved)
   killed 1
   harness ended -1 forced-stop
@@ -4161,7 +4161,7 @@ configured > activate > quiesce, harness exits while finishing
   then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, cause quiesced, gated, harness exited, input closed, login stopping, saved, store has the harness's login, stopped reply unread
 
 configured > activate > quiesce, deadline raised while finishing
-  reply {"op":"quiesce","error":"native stop was overtaken: the supervisor stopped the harness with cause deadline","state":"stopping"}
+  reply {"op":"quiesce","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":-1,"Reason":"forced-stop"}}
   sent kill (login forced), finish (login forced, saved)
   killed 1
   harness ended -1 forced-stop
@@ -4264,7 +4264,7 @@ configured > activate > gate > quiesce, deadline passes while waiting for the fi
   then state stopped, cause deadline, gated, harness exited, input closed, login forced, saved, store has the harness's login, supervisor exited -1
 
 configured > activate > gate > quiesce, terminated while finishing
-  reply {"op":"quiesce","error":"native stop was overtaken: the supervisor stopped the harness with cause terminated","state":"stopping"}
+  reply {"op":"quiesce","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":-1,"Reason":"forced-stop"}}
   sent kill (login forced), finish (login forced, saved)
   killed 1
   harness ended -1 forced-stop
@@ -4278,7 +4278,7 @@ configured > activate > gate > quiesce, harness exits while finishing
   then state stopped, thread 01234567-89ab-cdef-0123-456789abcdef, cause quiesced, gated, harness exited, input closed, login stopping, saved, store has the harness's login, stopped reply unread
 
 configured > activate > gate > quiesce, deadline raised while finishing
-  reply {"op":"quiesce","error":"native stop was overtaken: the supervisor stopped the harness with cause deadline","state":"stopping"}
+  reply {"op":"quiesce","state":"stopped","threadId":"01234567-89ab-cdef-0123-456789abcdef","turnId":"turn-1","exit":{"Code":-1,"Reason":"forced-stop"}}
   sent kill (login forced), finish (login forced, saved)
   killed 1
   harness ended -1 forced-stop
