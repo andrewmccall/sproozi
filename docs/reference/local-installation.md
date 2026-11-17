@@ -226,11 +226,23 @@ bundle, a trusted key that is unreadable (`pki: certificate authority key:
 generation N key ca-N.key is unreadable: <cause>`, for example a key other
 users can read) or does not match its certificate (`… does not match its
 certificate: <cause>`), and a retired key or stray file it could not remove
-(`pki: destroy retired keys: <cause>`). The service treats either report as a
-failed check: it will not start, and a running service logs `Failed to
-maintain gateway certificate` with it every minute and skips the rest of that
-check, including rotation and loading a renewed certificate, until the file is
-fixed or removed.
+(`pki: destroy retired keys: <cause>`). Neither stops the service: it starts,
+or carries on, serving the renewed certificate and advancing a rotation as
+usual, and logs, at start and on every check until the cause is gone:
+
+```text
+Failed to finish gateway certificate store cleanup err="<report>"
+```
+
+For a key report, fix the key file's owner and mode (owned by you, mode
+`0600`); if the key is lost or is not the authority's, run `sproozi
+certificates replace-ca`. For a removal report, remove the entry it names; it
+is not a file Sproozi wrote in that form, such as a directory with a key's
+name. A trusted key that is broken still fails the step that needs it, such
+as renewing from a broken serving key or switching to a broken new one, with
+`pki: serving CA key unavailable; recover it or replace the CA: <cause>`.
+`sproozi certificates status` and `sproozi doctor` do not show these reports
+yet; they appear only in the service log.
 
 These checks find damage and mistakes. They cannot authenticate the record:
 whoever can write `pki/state.json` can write every file beside it, and the

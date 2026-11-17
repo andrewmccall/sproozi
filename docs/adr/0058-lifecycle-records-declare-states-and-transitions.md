@@ -481,7 +481,9 @@ a generation or leaf holds until its commit. A removal that fails does not
 stop `Ensure`: it renews the leaf and writes the trust bundle, then returns
 the failure, as it returns a broken trusted key, marked `ErrOutstanding`.
 The certificate controller commits and publishes that reconcile's work and
-then fails it, so the log reports it every interval.
+then fails it, so the log reports it every interval. The local service logs
+it at start and on every check and carries on: it starts, reloads the renewed
+leaf and advances a rotation.
 
 Validation finds damage and mistakes; it cannot authenticate the record.
 Whoever can write `state.json` can write every file beside it, and on
