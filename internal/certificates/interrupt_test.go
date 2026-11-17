@@ -1,12 +1,16 @@
 package certificates
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 	"testing"
 
+	"github.com/andrewmccall/sproozi/internal/pki"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -43,10 +47,59 @@ func settledCluster(t *testing.T, client *fake.Clientset) string {
 	return servingChange.ReplaceAllString(describeCluster(t, client, nil), "| ")
 }
 
+// consistent describes what is wrong between the published objects and the
+// authority's record: the serving Secret must hold the record's named leaf,
+// its ca.crt, the authority's trust.pem and the annotated trust ConfigMap
+// must all equal the record's trusted certificates in order, and no retired
+// generation's key may remain in the authority Secret. After the reviewer's
+// check.
+func consistent(t *testing.T, client *fake.Clientset) string {
+	t.Helper()
+	ctx := context.Background()
+	a, err := client.CoreV1().Secrets(systemNamespace).Get(ctx, "sproozi-certificate-authority", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var st pki.State
+	if err = json.Unmarshal(a.Data["state.json"], &st); err != nil {
+		t.Fatal(err)
+	}
+	s, err := client.CoreV1().Secrets(systemNamespace).Get(ctx, "sproozi-gateway-tls", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var problems []string
+	if len(s.Data[corev1.TLSCertKey]) == 0 || !bytes.Equal(s.Data[corev1.TLSCertKey], a.Data[st.Leaf+".pem"]) ||
+		!bytes.Equal(s.Data[corev1.TLSPrivateKeyKey], a.Data[st.Leaf+".key"]) {
+		problems = append(problems, "serving Secret does not hold the record's leaf")
+	}
+	var bundle []byte
+	for _, id := range st.Trusted {
+		bundle = append(bundle, a.Data[fmt.Sprintf("ca-%d.pem", id)]...)
+	}
+	if !bytes.Equal(a.Data["trust.pem"], bundle) {
+		problems = append(problems, "trust.pem is not the record's bundle")
+	}
+	if !bytes.Equal(s.Data[CABundleKey], bundle) {
+		problems = append(problems, "ca.crt is not the record's bundle")
+	}
+	cm, err := client.CoreV1().ConfigMaps("sproozi-agents").Get(ctx, a.Annotations[TrustAnnotation], metav1.GetOptions{})
+	if err != nil || cm.Data[trustBundleKey] != string(bundle) {
+		problems = append(problems, fmt.Sprintf("trust ConfigMap %q is not the record's bundle (%v)", a.Annotations[TrustAnnotation], err))
+	}
+	for _, g := range st.Generations {
+		if _, ok := a.Data[fmt.Sprintf("ca-%d.key", g.ID)]; ok && g.Retired {
+			problems = append(problems, fmt.Sprintf("retired key ca-%d.key remains", g.ID))
+		}
+	}
+	return strings.Join(problems, "; ")
+}
+
 // A controller stopped after any single API write of a rotation request's
 // reconcile, then restarted with fresh scratch space, ends with the same
 // authority Secret, status annotations and trust ConfigMaps as one that was
-// not stopped.
+// not stopped, and consistent: the published leaf and bundles are the
+// record's.
 func TestInterruptedReconcileConvergesAfterRestart(t *testing.T) {
 	for _, tc := range []struct {
 		from     string
@@ -72,6 +125,9 @@ func TestInterruptedReconcileConvergesAfterRestart(t *testing.T) {
 		writes := *counted
 		reconcileOK(t, controller(t, reference))
 		want := settledCluster(t, reference)
+		if problems := consistent(t, reference); problems != "" {
+			t.Errorf("%s from %s, uninterrupted: %s", tc.request, tc.from, problems)
+		}
 		for n := range writes {
 			t.Run(fmt.Sprintf("%s from %s stopped at write %d", tc.request, tc.from, n), func(t *testing.T) {
 				client := cloneCluster(t, built)
@@ -89,9 +145,8 @@ func TestInterruptedReconcileConvergesAfterRestart(t *testing.T) {
 				if got := settledCluster(t, client); got != want {
 					t.Errorf("did not converge:\n got %s\nwant %s", got, want)
 				}
-				serving, err := client.CoreV1().Secrets(systemNamespace).Get(context.Background(), "sproozi-gateway-tls", metav1.GetOptions{})
-				if err != nil || len(serving.Data[corev1.TLSCertKey]) == 0 {
-					t.Errorf("no serving certificate after restart: %v", err)
+				if problems := consistent(t, client); problems != "" {
+					t.Error(problems)
 				}
 			})
 		}
