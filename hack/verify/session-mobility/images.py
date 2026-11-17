@@ -13,6 +13,7 @@ def main():
     parser.add_argument("--cluster", required=True)
     parser.add_argument("--output-directory", type=Path, required=True)
     parser.add_argument("--hermes-tag", help="Also import a locally built/pulled stock Hermes tag, including registry prefix")
+    parser.add_argument("--tag", default="fixture", help="the native and control images' tag")
     args = parser.parse_args()
     if not re.fullmatch(r"sproozi-mobility-[a-z0-9-]+", args.cluster):
         raise ValueError("Use a dedicated mobility Kind cluster")
@@ -24,7 +25,9 @@ def main():
     spec.loader.exec_module(module)
     module.OUT = out
     os.environ["KIND_CLUSTER"] = args.cluster
-    images = {name: module.load("docker.io/sproozi-session/" + name + ":fixture") for name in ["native", "control"]}
+    if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}", args.tag):
+        raise ValueError("--tag must be a Docker tag")
+    images = {name: module.load("docker.io/sproozi-session/" + name + ":" + args.tag) for name in ["native", "control"]}
     if args.hermes_tag:
         images["hermes"] = module.load(args.hermes_tag)
     (out / "images.json").write_text(json.dumps(images, indent=2) + "\n")

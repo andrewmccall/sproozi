@@ -55,6 +55,10 @@ cleanup() {
   status=$?
   trap - EXIT
   rm -f "$work"/tls/*.key
+  # Only this run's tags; the layers stay in the build cache.
+  docker image rm "sproozi-session/clients:codex-$run_id" "sproozi-session/clients:claude-remote-$run_id" \
+    "docker.io/sproozi-session/native:fixture-$run_id" "docker.io/sproozi-session/control:fixture-$run_id" \
+    >/dev/null 2>&1 || true
   if (( kind_cluster_created )); then
     for target in "$sessions/sproozi-work" sproozi-system/sproozi-gateway sproozi-system/sproozi-controller-manager \
       sproozi-fixture/claude-fixture; do
@@ -82,17 +86,20 @@ go build -o "$work/bin/native-pty" ./hack/verify/native-pty
 step "Building the native and control images (logs in $work)"
 cache=()
 [[ "${SPROOZI_NO_CACHE:-0}" != 1 ]] || cache=(--no-cache)
+# Tags are this run's own: another checkout building the same fixture tags at
+# the same time would otherwise replace these images before they are loaded.
+tag="fixture-$run_id"
 docker build --pull ${cache[@]+"${cache[@]}"} -f hack/demo/codex.Dockerfile \
-  -t sproozi-session/clients:codex . >"$work/codex-build.log" 2>&1
+  -t "sproozi-session/clients:codex-$run_id" . >"$work/codex-build.log" 2>&1
 docker build ${cache[@]+"${cache[@]}"} -f internal/runtime/docker/image/clients.Dockerfile \
-  --build-arg CODEX_CLIENTS_IMAGE=sproozi-session/clients:codex \
-  -t sproozi-session/clients:claude-remote . >"$work/clients-build.log" 2>&1
+  --build-arg CODEX_CLIENTS_IMAGE="sproozi-session/clients:codex-$run_id" \
+  -t "sproozi-session/clients:claude-remote-$run_id" . >"$work/clients-build.log" 2>&1
 docker build -f internal/runtime/docker/image/Dockerfile \
-  --build-arg CLIENTS_IMAGE=sproozi-session/clients:claude-remote \
-  -t docker.io/sproozi-session/native:fixture . >"$work/native-build.log" 2>&1
-docker build -t docker.io/sproozi-session/control:fixture . >"$work/control-build.log" 2>&1
+  --build-arg CLIENTS_IMAGE="sproozi-session/clients:claude-remote-$run_id" \
+  -t "docker.io/sproozi-session/native:$tag" . >"$work/native-build.log" 2>&1
+docker build -t "docker.io/sproozi-session/control:$tag" . >"$work/control-build.log" 2>&1
 # The fixture provider runs on the native image's Python.
-docker run --rm --entrypoint python3 docker.io/sproozi-session/native:fixture --version >/dev/null
+docker run --rm --entrypoint python3 "docker.io/sproozi-session/native:$tag" --version >/dev/null
 
 step "Creating Kind cluster $cluster"
 if [[ -z "${SPROOZI_CNI_MANIFEST:-}" ]]; then
@@ -135,7 +142,7 @@ if (( refresh )); then
 fi
 
 step "Loading images"
-python3 hack/verify/session-mobility/images.py --cluster "$cluster" --output-directory "$work/images" >/dev/null
+python3 hack/verify/session-mobility/images.py --cluster "$cluster" --output-directory "$work/images" --tag "$tag" >/dev/null
 image() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]]["image"])' "$work/images/images.json" "$1"; }
 native_ref="$(image native)"
 control_ref="$(image control)"
