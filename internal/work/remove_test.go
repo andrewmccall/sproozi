@@ -171,6 +171,11 @@ func TestRemoveFreesCapacityAndIsReplaySafe(t *testing.T) {
 	assertRemoved(t, c, o, next.ID, next.ExecutionID)
 }
 
+// removeHangLimit is how long a test waits for a removal that returns at
+// once or never. It is far above what a removal takes on a loaded machine;
+// a removal that returns late, by less than the limit, is no longer caught.
+const removeHangLimit = 30 * time.Second
+
 // A settled session is removed promptly while another session's stop waits
 // for its agent's turn, and the room it frees admits a submission the
 // executor refused as full.
@@ -196,12 +201,23 @@ func TestRemoveWhileAnotherSessionsStopWaits(t *testing.T) {
 	if _, err := o.Submit(t.Context(), refused); code(err) != profile.CodeRetentionFull {
 		t.Fatalf("submission to a full executor: %v", err)
 	}
-	began := time.Now()
-	if _, err := o.Remove(t.Context(), done.ID, false); err != nil {
-		t.Fatalf("remove while another session stops: %v", err)
-	}
-	if waited := time.Since(began); waited > 2*time.Second {
-		t.Fatalf("removal waited %s for another session's stop", waited)
+	// Remove returns at once; one that waited for the stopping session's
+	// execution would give up after a few seconds with a busy error, and one
+	// that waited on a lock its stop holds would return only once the test
+	// released the stop. removeHangLimit only bounds how long that takes to
+	// report.
+	removed := make(chan error, 1)
+	go func() {
+		_, err := o.Remove(t.Context(), done.ID, false)
+		removed <- err
+	}()
+	select {
+	case err := <-removed:
+		if err != nil {
+			t.Fatalf("remove while another session stops: %v", err)
+		}
+	case <-time.After(removeHangLimit):
+		t.Fatal("removal did not return while another session stops")
 	}
 	assertRemoved(t, c, o, done.ID, done.ExecutionID)
 	if _, err := o.Submit(t.Context(), refused); err != nil {

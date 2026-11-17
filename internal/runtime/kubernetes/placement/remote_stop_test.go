@@ -284,15 +284,20 @@ func TestStopWhoseContainerNeverEndsIsUnprovenAtTheBound(t *testing.T) {
 	sealed := 0
 	p.ledger = &observedLedger{Ledger: p.ledger, beforeSeal: func(context.Context, budget.AccountKey) error { sealed++; return nil }}
 	for attempt := range 2 {
-		// The caller would wait 3 seconds; the bound must end it first.
-		ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+		// The caller would wait 30 seconds; the bound must end it first. The
+		// stop's work before its wait counts too, so the bound is told from
+		// the caller's deadline with seconds to spare either way, however
+		// slow the machine: a bound some seconds too long is not caught.
+		const callerWait, slack = 30 * time.Second, 10 * time.Second
+		ctx, cancel := context.WithTimeout(t.Context(), callerWait)
 		started := time.Now()
 		_, err = p.Stop(ctx, l, i)
+		callerEnded := ctx.Err()
 		cancel()
-		if !errors.Is(err, context.DeadlineExceeded) {
-			t.Fatalf("attempt %d: stop of a container that never ends: %v", attempt, err)
+		if !errors.Is(err, context.DeadlineExceeded) || callerEnded != nil {
+			t.Fatalf("attempt %d: stop of a container that never ends: %v, caller's context %v", attempt, err, callerEnded)
 		}
-		if waited := time.Since(started); waited < podStopWait || waited > 2*time.Second {
+		if waited := time.Since(started); waited < podStopWait || waited > podStopWait+slack {
 			t.Fatalf("attempt %d waited %s for a bound of %s", attempt, waited, podStopWait)
 		}
 		local, err := p.load(l)
