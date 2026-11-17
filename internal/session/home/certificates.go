@@ -172,13 +172,13 @@ func (c *certificates) maintain() error {
 			return err
 		}
 		switch {
-		case distributed && st.Rotation.Stage == pki.StagePrepared:
+		case distributed && st.Phase() == pki.PhasePrepared:
 			if err = c.store.SwitchRotation(true); err != nil {
 				return err
 			}
 			changed = true
 			c.logf("Switched gateway certificate to the new authority")
-		case distributed && st.Rotation.Stage == pki.StageSwitched:
+		case distributed && st.Phase() == pki.PhaseSwitched:
 			// Retire only after the gateway serves a leaf the new trust accepts.
 			if err = c.selfCheck(); err != nil {
 				return fmt.Errorf("switched gateway certificate failed its check; the previous authority stays trusted: %w", err)
