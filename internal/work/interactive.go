@@ -86,6 +86,7 @@ func (o *Owner) stop(ctx context.Context, id, operation string) (View, error) {
 	if err != nil {
 		return View{}, err
 	}
+	o.interleaveAt(stepStopBound, id)
 	_, err = o.config.Coordinator.Finalize(ctx, execution, operation)
 	switch {
 	case errors.Is(err, harness.ErrNativeTurnPending):

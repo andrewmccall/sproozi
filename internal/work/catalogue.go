@@ -151,6 +151,7 @@ func (o *Owner) entry(id string) (entry, error) {
 	if err != nil {
 		return entry{}, err
 	}
+	defer o.interleaveAt(stepEntry, id)
 	var probe struct {
 		Version int `json:"version"`
 	}

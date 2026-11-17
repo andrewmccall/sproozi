@@ -329,7 +329,7 @@ func TestRemoveRacesASubmissionFromIt(t *testing.T) {
 // it, at any step before the submission is retained, is answered as one
 // whose source was removed first: invalid, with the same message, never a
 // filesystem error or conflict, and nothing of it is kept. The removal runs
-// to completion inside Config.sourceRead after the named step, so the
+// to completion inside Config.interleave after the named step, so the
 // interleaving does not depend on timing:
 //
 //   - record: after the source's catalogue record, before Coordinator.Inspect,
@@ -349,9 +349,10 @@ func TestSubmissionFromASourceRemovedWhileItIsRead(t *testing.T) {
 			var source View
 			var removed bool
 			var removeErr error
-			// Called only from revisionSource, in this test's goroutine:
-			// sources start from nothing, and no driver runs a dependant.
-			c.sourceRead = func(at string) {
+			// The source steps run only in revisionSource, in this test's
+			// goroutine: sources start from nothing, and no driver runs a
+			// dependant. Every other step returns before reading anything.
+			c.interleave = func(at, _ string) {
 				if at != step || removed {
 					return
 				}
