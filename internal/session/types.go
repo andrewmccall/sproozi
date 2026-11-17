@@ -7,7 +7,10 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/harness"
@@ -201,13 +204,80 @@ var ErrSessionCancelled = errors.New("session: session cancelled")
 // Recover finishes it.
 var ErrCancellationUnfinished = errors.New("session: cancellation unfinished")
 
+// ErrStartEnded reports that the coordinator ended a move or first visit
+// before its destination became active, without a new visit: its deadline
+// passed (ErrDeadlinePassed), or its placement refused it for good
+// (ErrStartRefused). The execution is idle with its last checkpoint, and a
+// new execution continues it (ADRs 0060 and 0067).
+var ErrStartEnded = errors.New("session: the start ended before its destination became active; " +
+	"it is stopped with its last checkpoint")
+
+// startEnded is a reason ErrStartEnded matches.
+type startEnded string
+
+func (e startEnded) Error() string        { return string(e) }
+func (e startEnded) Is(target error) bool { return target == ErrStartEnded }
+
 // ErrDeadlinePassed reports that the execution's deadline passed before a
 // move or first visit made its destination active. The coordinator ended
 // that operation without a new visit, so the execution is idle with its last
 // checkpoint; a new execution continues it (ADR 0060). A move of an idle
 // execution whose deadline passed is refused with it too.
-var ErrDeadlinePassed = errors.New("session: the execution's deadline passed before it started at its destination; " +
+var ErrDeadlinePassed error = startEnded("session: the execution's deadline passed before it started at its destination; " +
 	"it is stopped with its last checkpoint")
+
+// ErrStartRefused reports that a placement can never prepare a launch: what
+// it would start from has ended, such as a Kubernetes AgentRun that failed
+// before its sandbox existed. Repeating Prepare meets the same refusal, so
+// the coordinator ends the start as it ends one its deadline overtook (ADR
+// 0067). StartRefused carries the placement's reason.
+var ErrStartRefused = errors.New("session: the placement can never start it")
+
+// reasonMax bounds a refusal's reason, which a placement takes from a
+// controller's status and which crosses the placement protocol.
+const reasonMax = 512
+
+// StartRefused is a placement's refusal of a launch it can never prepare,
+// with its reason in plain text. Ended marks the coordinator's report that
+// it then ended the start, which ErrStartEnded also matches.
+type StartRefused struct {
+	Reason string
+	Ended  bool
+}
+
+// RefusalReason is s as one bounded line of printable text: what a refusal
+// may carry.
+func RefusalReason(s string) string {
+	s = strings.Map(func(r rune) rune {
+		if !unicode.IsPrint(r) {
+			return ' '
+		}
+		return r
+	}, strings.ToValidUTF8(s, "?"))
+	if len(s) <= reasonMax {
+		return s
+	}
+	cut := reasonMax - len("…")
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "…"
+}
+
+func (e *StartRefused) Error() string {
+	message := ErrStartRefused.Error()
+	if e.Reason != "" {
+		message += ": " + e.Reason
+	}
+	if e.Ended {
+		message += "; it is stopped with its last checkpoint"
+	}
+	return message
+}
+
+func (e *StartRefused) Is(target error) bool {
+	return target == ErrStartRefused || e.Ended && target == ErrStartEnded
+}
 
 // ErrEndUnproven reports that the deadline passed before a move or first
 // visit made its destination active, but the placement has not yet shown

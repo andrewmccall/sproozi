@@ -151,6 +151,9 @@ type admissionClient struct {
 	// podRead, when set, changes each Pod a Get reads, as a Pod the
 	// kubelet or a deletion changed between reads would read.
 	podRead atomic.Pointer[func(*corev1.Pod)]
+	// runRead, when set, is called with each AgentRun a Get reads, so a
+	// test can count the reads of a wait.
+	runRead atomic.Pointer[func(*api.AgentRun)]
 }
 
 func (c *admissionClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, options ...client.GetOption) error {
@@ -160,6 +163,11 @@ func (c *admissionClient) Get(ctx context.Context, key client.ObjectKey, obj cli
 	if pod, ok := obj.(*corev1.Pod); ok {
 		if read := c.podRead.Load(); read != nil {
 			(*read)(pod)
+		}
+	}
+	if run, ok := obj.(*api.AgentRun); ok {
+		if read := c.runRead.Load(); read != nil {
+			(*read)(run)
 		}
 	}
 	return nil

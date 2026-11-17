@@ -23,6 +23,7 @@ import (
 	"github.com/andrewmccall/sproozi/internal/session/profile"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -235,6 +236,13 @@ func (p *Placement) waitPod(ctx context.Context, r registry.Record, wantRunning 
 		if err != nil && !apierrors.IsNotFound(err) && r.PodUID != "" {
 			return nil, err
 		}
+		if wantRunning {
+			// A start whose run can no longer get a Pod would otherwise wait
+			// for the deadline, or for ever without one (ADR 0067).
+			if refused := p.startRefused(ctx, r); refused != nil {
+				return nil, refused
+			}
+		}
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
@@ -242,6 +250,67 @@ func (p *Placement) waitPod(ctx context.Context, r registry.Record, wantRunning 
 		}
 	}
 }
+
+// startRefused is the refusal of a start whose bound run can no longer get
+// a running Pod, or nil while it still can. A run can no longer get one once
+// it is terminal, cancelled, deleted or replaced, or once its registration
+// has left Creating and Bound, which another operation's cancellation does:
+// the controller creates a Pod only for a live run that a bound registration
+// names. A run that is queued under a cap, admitted while a ResourceQuota
+// refuses its Pod, or that named a Pod not yet created, can still get one,
+// so it is not refused. A read that fails is no evidence either way: the
+// wait reads again.
+func (p *Placement) startRefused(ctx context.Context, r registry.Record) error {
+	refuse := func(format string, args ...any) error {
+		return &session.StartRefused{Reason: session.RefusalReason(fmt.Sprintf(format, args...))}
+	}
+	var run api.AgentRun
+	err := p.config.Kube.Get(ctx, client.ObjectKey{Namespace: p.config.Namespace, Name: r.IntendedRunName}, &run)
+	switch {
+	case apierrors.IsNotFound(err):
+		return refuse("AgentRun %s was deleted before its sandbox started", r.IntendedRunName)
+	case err != nil:
+		return nil
+	case string(run.UID) != r.RunUID:
+		return refuse("AgentRun %s was replaced before its sandbox started: it now has UID %s, not %s",
+			r.IntendedRunName, run.UID, r.RunUID)
+	case run.Status.Phase.IsTerminal():
+		return refuse("%s", runEnded(&run))
+	case run.Spec.Cancel:
+		return refuse("AgentRun %s was cancelled before its sandbox started", r.IntendedRunName)
+	}
+	current, err := p.registry.Get(ctx, r.Reference)
+	switch {
+	case errors.Is(err, registry.ErrGone):
+		return refuse("the session registration for AgentRun %s was deleted before its sandbox started", r.IntendedRunName)
+	case err != nil:
+		return nil
+	case current.Phase != registry.Creating && current.Phase != registry.Bound:
+		return refuse("the session registration for AgentRun %s is %s, so its sandbox can never start",
+			r.IntendedRunName, current.Phase)
+	}
+	return nil
+}
+
+// runEnded says how a terminal run ended before its sandbox started, with
+// the reason and message of its Ready condition when it has one.
+func runEnded(run *api.AgentRun) string {
+	how := map[api.AgentRunPhase]string{api.AgentRunPhaseFailed: "failed", api.AgentRunPhaseTimedOut: "timed out",
+		api.AgentRunPhaseCancelled: "was cancelled", api.AgentRunPhaseSucceeded: "succeeded"}[run.Status.Phase]
+	s := fmt.Sprintf("AgentRun %s %s before its sandbox started", run.Name, how)
+	if ready := apimeta.FindStatusCondition(run.Status.Conditions, readyCondition); ready != nil && ready.Reason != "" {
+		s += ": " + ready.Reason
+		if ready.Message != "" {
+			s += ": " + ready.Message
+		}
+	}
+	return s
+}
+
+// readyCondition is the AgentRun condition that carries the controller's
+// reason for the run's phase.
+const readyCondition = "Ready"
+
 func (p *Placement) Activate(ctx context.Context, l session.Launch, i session.Incarnation) error {
 	unlock, err := p.lockOperation(l)
 	if err != nil {
