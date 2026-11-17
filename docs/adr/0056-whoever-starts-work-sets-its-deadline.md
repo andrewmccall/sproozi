@@ -73,7 +73,10 @@ verification listed under Consequences ran the forwarder against a local file,
 not a sandbox Pod, so it could not show this. The controller now mounts
 `/var/run/sproozi/tokens/gateway`, and `make verify-claude-remote-kind` with
 `SPROOZI_TOKEN_REFRESH=1` takes a turn after a sandbox's first token has
-expired.
+expired. The harness runs in the same container, so it can now always read a
+currently valid token, where before the only token it could read stopped
+working two hours after its Pod started; read the comparison with "a much
+longer projected token" under Alternatives with that in mind.
 
 Docker sessions keep the literal proxy:
 
