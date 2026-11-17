@@ -230,8 +230,11 @@ func (p *Placement) preparationRegistration(ctx context.Context, local retained)
 		}
 	}
 	if errors.Is(err, registry.ErrGone) {
-		return r, false, administratorCheck(fmt.Sprintf("the session registration %s for AgentRun %s was deleted, so its Pod cannot be fenced; "+
-			"an administrator must confirm no Pod labelled %s remains for that run in %s",
+		// Nothing restores a deleted registration's reference, so this
+		// holds for good (ADR 0067).
+		return r, false, administratorCheck(fmt.Sprintf("the session registration %s for AgentRun %s was deleted, so its Pod cannot be "+
+			"fenced and the executor can never show that nothing runs for it; an administrator must confirm no Pod labelled %s "+
+			"remains for that run in %s; cancel leaves the session unknown-stop, and no owner command ends it",
 			registry.NameForRun(name), name, runtimekube.RunUIDLabel, p.config.AgentNamespace))
 	}
 	if err != nil {
@@ -293,8 +296,8 @@ func (p *Placement) cancelRun(ctx context.Context, r registry.Record) error {
 // a conflict, never a fence.
 func replacedRun(r registry.Record, run api.AgentRun) error {
 	return administratorCheck(fmt.Sprintf("AgentRun %s now has UID %s, but its session registration bound UID %s; "+
-		"an administrator replaced it, so confirm no Pod labelled %s=%s remains",
-		r.IntendedRunName, run.UID, r.RunUID, runtimekube.RunUIDLabel, r.RunUID))
+		"an administrator replaced it: confirm no Pod labelled %s=%s remains, then delete AgentRun %s and recover this session",
+		r.IntendedRunName, run.UID, r.RunUID, runtimekube.RunUIDLabel, r.RunUID, r.IntendedRunName))
 }
 
 // unprovenEnd is a conflict that keeps a preparation's end unproven until an

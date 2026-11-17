@@ -10,6 +10,7 @@ import (
 	"time"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
+	runtimekube "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
 	"github.com/andrewmccall/sproozi/internal/session"
 	corev1 "k8s.io/api/core/v1"
@@ -198,9 +199,22 @@ func TestRecoverRefusesAStartWhoseRunWasDeletedWithoutCreatingAnother(t *testing
 			if test.replace && (!errors.As(err, &refused) ||
 				!strings.HasPrefix(refused.Reason, "AgentRun "+runName(l)+" was replaced before its sandbox started: it now has UID "+replacementUID) ||
 				!errors.As(err, &unproven) || !strings.HasPrefix(unproven.UnprovenEnd(), "AgentRun "+runName(l)+" now has UID "+replacementUID) ||
-				!strings.Contains(unproven.UnprovenEnd(), "an administrator replaced it") ||
+				!strings.HasSuffix(unproven.UnprovenEnd(), "; an administrator replaced it: confirm no Pod labelled "+
+					runtimekube.RunUIDLabel+"="+string(old.UID)+" remains, then delete AgentRun "+runName(l)+" and recover this session") ||
 				strings.Contains(unproven.UnprovenEnd(), "session profile")) {
 				t.Fatalf("recover of the replaced run's tombstoned start: %v", err)
+			}
+			if test.replace {
+				// What the cause says clears it does: with the replacement
+				// deleted, a recover ends the start.
+				if err := kube.Client.Delete(t.Context(), agentRun(t, kube, l)); err != nil {
+					t.Fatal(err)
+				}
+				phase, err = recoverUntilIdle(t, coordinator, l.ExecutionID)
+				if phase != session.PhaseIdle || !errors.Is(err, session.ErrStartEnded) || kube.runCreates != creates {
+					t.Fatalf("recover once the replacement was deleted: %s %v, runs created %d", phase, err, kube.runCreates-creates)
+				}
+				return
 			}
 			if !test.replace && (phase != session.PhaseIdle || !errors.Is(err, session.ErrStartEnded)) ||
 				test.replace && (phase != session.PhasePreparing || !errors.Is(err, session.ErrEndUnproven)) {
@@ -243,7 +257,9 @@ func TestRecoverOfAStartWhoseRegistrationWasDeletedNamesTheCheck(t *testing.T) {
 		var unproven session.UnprovenEnd
 		if !errors.Is(err, session.ErrEndUnproven) || !errors.As(err, &refused) ||
 			refused.Reason != "the session registration for AgentRun "+runName(l)+" was deleted before its sandbox started" ||
-			!errors.As(err, &unproven) || !strings.Contains(unproven.UnprovenEnd(), "was deleted, so its Pod cannot be fenced; an administrator must confirm") ||
+			!errors.As(err, &unproven) || !strings.Contains(unproven.UnprovenEnd(), "was deleted, so its Pod cannot be fenced and the executor can "+
+			"never show that nothing runs for it; an administrator must confirm no Pod labelled") ||
+			!strings.HasSuffix(unproven.UnprovenEnd(), "; cancel leaves the session unknown-stop, and no owner command ends it") ||
 			strings.Contains(unproven.UnprovenEnd(), "session profile") {
 			t.Fatalf("refused start whose registration was deleted: %v", err)
 		}
