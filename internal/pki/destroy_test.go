@@ -72,6 +72,32 @@ func TestEnsureKeepsEveryKeyAPhaseNeeds(t *testing.T) {
 	}
 }
 
+// A leaf key the record does not name, left by a renewal that stopped after
+// its commit or before it, is destroyed by the next Ensure; the named leaf
+// is kept. Guards the leaf loop in destroyRetired.
+func TestEnsureDestroysLeafFilesTheRecordDoesNotName(t *testing.T) {
+	roots := buildStates(t)
+	s := outcomeStore(t, copyStore(t, filepath.Join(roots["superseded-leaf-left"], "pki")))
+	st, err := s.State()
+	must(t, err)
+	// An uncommitted renewal's key, written before its certificate.
+	must(t, os.WriteFile(filepath.Join(s.Dir(), "leaf-0123456789abcdef.key"), []byte("uncommitted\n"), 0o600))
+	if _, err = s.Ensure(testNames); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(s.Dir())
+	must(t, err)
+	var leaves []string
+	for _, e := range entries {
+		if leafFile.MatchString(e.Name()) {
+			leaves = append(leaves, e.Name())
+		}
+	}
+	if want := []string{st.Leaf + ".key", st.Leaf + ".pem"}; !slices.Equal(leaves, want) {
+		t.Errorf("leaf files %v, want %v", leaves, want)
+	}
+}
+
 // A retirement whose key removal fails reports it, and the next Ensure
 // destroys the key. Guards the destroyRetired call in RetireRotation and in
 // Ensure.

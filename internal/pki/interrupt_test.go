@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"regexp"
 	"testing"
 )
 
@@ -85,13 +84,10 @@ func restart(t *testing.T, root string, before State, op interruptedOperation) {
 	}
 }
 
-var leafFileCount = regexp.MustCompile(` leafFiles=\d+`)
-
 // settled describes a store's end state. The leaf's name is not compared: a
-// retried renewal issues a different leaf. Nor, yet, is the number of leaf
-// files.
+// retried renewal issues a different leaf. The number of leaf files is.
 func settled(root string) string {
-	return leafFileCount.ReplaceAllString(describeStore(root, leafOf(root)), "")
+	return describeStore(root, leafOf(root))
 }
 
 // An interruption after every single write of every rotation operation,

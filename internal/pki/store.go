@@ -422,15 +422,13 @@ func (s *Store) issue(st *State, now time.Time) error {
 	if err = s.writePair(name, leaf); err != nil {
 		return err
 	}
-	previous := st.Leaf
 	st.Leaf = name
 	if err = s.commit(*st); err != nil {
 		return err
 	}
-	if previous != "" && previous != name {
-		_ = s.remove(previous + ".key")
-		_ = s.remove(previous + ".pem")
-	}
+	// The leaf is committed; a removal that fails here is retried by the
+	// next Ensure.
+	_ = s.destroyRetired(*st)
 	return nil
 }
 
@@ -510,13 +508,15 @@ func (s *Store) createNext(st State, now time.Time) (Generation, error) {
 	return Generation{ID: id, Fingerprint: Fingerprint(cert), NotAfter: cert.NotAfter}, nil
 }
 
-// destroyRetired removes the private key of every retired generation. It is
-// idempotent: Ensure runs it on every reconcile of the certificate controller
-// and at every start and maintenance pass of the local service, and retire
-// and replace run it after their commit, so a destruction that a crash or a
-// failed removal left undone always finishes. It never removes the key of a
-// trusted generation, which every phase still needs, nor touches files of a
-// generation the record does not name.
+// destroyRetired removes the private key of every retired generation, and
+// every leaf file other than the leaf the record names: superseded leaves,
+// and an uncommitted one an interrupted issue wrote. It is idempotent: Ensure
+// runs it on every reconcile of the certificate controller and at every start
+// and maintenance pass of the local service, retire and replace run it after
+// their commit, and every issue after its own, so a destruction that a crash
+// or a failed removal left undone always finishes. It never removes the key
+// of a trusted generation, which every phase still needs, the named leaf, nor
+// files of a generation the record does not name.
 func (s *Store) destroyRetired(st State) error {
 	var errs []error
 	for _, g := range st.Generations {
@@ -524,8 +524,20 @@ func (s *Store) destroyRetired(st State) error {
 			errs = append(errs, s.destroyKey(g.ID))
 		}
 	}
+	entries, err := os.ReadDir(s.dir)
+	errs = append(errs, err)
+	for _, entry := range entries {
+		name := entry.Name()
+		base, ok := strings.CutSuffix(name, filepath.Ext(name))
+		if ok && leafNamePattern.MatchString(base) && (filepath.Ext(name) == ".key" || filepath.Ext(name) == ".pem") &&
+			base != st.Leaf {
+			if err = s.remove(name); !os.IsNotExist(err) {
+				errs = append(errs, err)
+			}
+		}
+	}
 	if err := errors.Join(errs...); err != nil {
-		return fmt.Errorf("pki: destroy retired certificate authority keys: %w", err)
+		return fmt.Errorf("pki: destroy retired keys: %w", err)
 	}
 	return nil
 }
