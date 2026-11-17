@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"crypto/x509"
 	"encoding/base64"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -209,5 +211,89 @@ func TestStartRequiresAReadableToken(t *testing.T) {
 			_ = f.Close()
 			t.Errorf("%s token: Start() error = nil", name)
 		}
+	}
+}
+
+// projectedVolume models the directory the kubelet keeps for a projected
+// volume mounted without subPath: each update is a new timestamped directory,
+// ..data is a symlink to the current one, and the token is a symlink through
+// ..data. The kubelet swaps ..data with an atomic rename and then removes
+// the old directory.
+type projectedVolume struct {
+	t       *testing.T
+	dir     string
+	current string
+	updates int
+}
+
+func newProjectedVolume(t *testing.T, token string) *projectedVolume {
+	t.Helper()
+	v := &projectedVolume{t: t, dir: t.TempDir()}
+	v.publish(token)
+	if err := os.Symlink(filepath.Join("..data", "token"), filepath.Join(v.dir, "token")); err != nil {
+		t.Fatal(err)
+	}
+	return v
+}
+
+func (v *projectedVolume) publish(token string) {
+	v.t.Helper()
+	v.updates++
+	data := fmt.Sprintf("..2026_11_17_07_00_%02d.%09d", v.updates, v.updates)
+	if err := os.Mkdir(filepath.Join(v.dir, data), 0o755); err != nil {
+		v.t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(v.dir, data, "token"), []byte(token), 0o444); err != nil {
+		v.t.Fatal(err)
+	}
+	if err := os.Symlink(data, filepath.Join(v.dir, "..data_tmp")); err != nil {
+		v.t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(v.dir, "..data_tmp"), filepath.Join(v.dir, "..data")); err != nil {
+		v.t.Fatal(err)
+	}
+	if v.current != "" {
+		if err := os.RemoveAll(filepath.Join(v.dir, v.current)); err != nil {
+			v.t.Fatal(err)
+		}
+	}
+	v.current = data
+}
+
+// A Kubernetes sandbox mounts the projected token's directory, so the
+// kubelet's refresh is a ..data swap rather than a rewrite of the file. Each
+// tunnel must carry the token current when it opens, never the one the
+// forwarder read before.
+func TestForwarderFollowsTheKubeletsTokenSwap(t *testing.T) {
+	t.Parallel()
+	g := newFakeGateway(t)
+	volume := newProjectedVolume(t, "first-token")
+	pool := x509.NewCertPool()
+	pool.AddCert(g.server.Certificate())
+	endpoint, err := url.Parse(g.server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := Start(Config{Gateway: endpoint, TokenPath: filepath.Join(volume.dir, "token"), Trust: pool, ServerName: "example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = f.Close() })
+	proxy, _ := url.Parse(f.ProxyURL())
+	secret, _ := proxy.User.Password()
+
+	want := []string{basic("first-token")}
+	if status, _ := connect(t, f, basic(secret), http.MethodConnect); status != http.StatusOK {
+		t.Fatalf("first CONNECT status = %d, want 200", status)
+	}
+	for _, token := range []string{"second-token", "third-token"} {
+		volume.publish(token)
+		want = append(want, basic(token))
+		if status, _ := connect(t, f, basic(secret), http.MethodConnect); status != http.StatusOK {
+			t.Fatalf("CONNECT after publishing %s: status = %d, want 200", token, status)
+		}
+	}
+	if got := g.authorizations(); !slices.Equal(got, want) {
+		t.Fatalf("gateway saw %q, want %q", got, want)
 	}
 }
