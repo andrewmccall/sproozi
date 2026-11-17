@@ -51,7 +51,7 @@ func TestActivateAfterTheDeadlineIsRefused(t *testing.T) {
 	started := activatable(t, func() {})
 	s, _ := activation(time.Now().Add(-time.Second))
 	r := s.activate()
-	if r.Error != "native deadline expired" || r.State != harness.NativePrepared || started.Load() {
+	if r.Error != deadlineExpired || r.State != harness.NativePrepared || started.Load() {
 		t.Fatalf("activate after the deadline: %+v, started %v", r, started.Load())
 	}
 }

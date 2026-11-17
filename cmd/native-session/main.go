@@ -33,6 +33,8 @@ const (
 	workspace     = harness.NativeSessionRoot + "/workspace"
 	agentHome     = "/home/agent"
 	inactiveError = "native execution is not active"
+	// deadlineExpired refuses configure or activate after the deadline.
+	deadlineExpired = "native deadline expired"
 )
 
 // Attachment frames and the Claude hook use the supervisor socket as well. The
@@ -354,7 +356,7 @@ func (s *server) configure(c *config) response {
 		}
 		return r
 	case err != nil:
-		r.Error = "native deadline expired"
+		r.Error = deadlineExpired
 		return r
 	}
 	s.config = *c
@@ -379,7 +381,7 @@ func (s *server) activate() response {
 		r.Error = "native launch gate cannot reopen"
 		return r
 	case err != nil:
-		r.Error = "native deadline expired"
+		r.Error = deadlineExpired
 		return r
 	}
 	// The forwarder puts the current projected token on each gateway CONNECT,
