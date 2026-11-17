@@ -116,7 +116,8 @@ func (p *Placement) load(l session.Launch) (retained, error) {
 	if !session.SameLaunch(r.Launch, l) {
 		return retained{}, &profile.Rejection{Code: profile.CodeConflict}
 	}
-	return r.check(nil)
+	r, err = r.check(nil)
+	return r, p.noted(err)
 }
 
 // A visit's facts are retained in the order they become true, and each
@@ -130,17 +131,39 @@ func (p *Placement) load(l session.Launch) (retained, error) {
 // preparation stands beside any of these.
 //
 // retainedRules lists each contradiction of that order, between the
-// record's own facts or with its session registration, and the fact it
-// makes untrustworthy. A rule that needs the registration holds whenever
-// there is none to compare with.
+// record's own facts or with its session registration, and its correction:
+// what the registration proves is taken from it, and any other fact the
+// contradiction makes untrustworthy is forgotten. A rule that needs the
+// registration holds whenever there is none to compare with.
+//
+// A registration past the point a fact proves is the authority for it: its
+// phase was recorded only after the executor retained the facts before it.
+// A stopped registration's receipt proves the source quiet, the writer
+// fenced and the output it names kept, so a record that lacks them takes
+// them from the receipt rather than forgetting what it keeps. A cancelled
+// registration with a receipt proves the writer fenced: it was sealed only
+// once the fence was seen. A record lacking that fence is not a
+// contradiction (an abort of a preparation this executor never saw writes
+// one), and check adds it. A stopping registration proves only that the
+// gateway's authority was revoked: Stop observes the source again for a
+// record that lacks its quiet marker. The other phases prove no fact of the
+// record.
 var retainedRules = []struct {
 	contradiction string
 	broken        func(r retained, registration *registry.Record) bool
-	forget        func(*retained)
+	correct       func(*retained, *registry.Record)
 }{
+	{"lacks what its stopped registration's receipt proves (a quiet source, a fenced writer and the output it names)",
+		func(r retained, registration *registry.Record) bool {
+			return stoppedReceipt(registration) != nil &&
+				(!r.NativeQuiet || !r.WriterFenced || r.OutputDigest != stoppedReceipt(registration).CheckpointDigest)
+		},
+		func(r *retained, registration *registry.Record) {
+			r.NativeQuiet, r.WriterFenced, r.OutputDigest = true, true, stoppedReceipt(registration).CheckpointDigest
+		}},
 	{"names a workspace, but the launch resumes a checkpoint",
 		func(r retained, _ *registry.Record) bool { return r.WorkspaceDigest != "" && !r.fresh() },
-		func(r *retained) { r.WorkspaceDigest = "" }},
+		func(r *retained, _ *registry.Record) { r.WorkspaceDigest = "" }},
 	{"records a stop, but has no session registration",
 		func(r retained, _ *registry.Record) bool { return r.Reference.UID == "" && r.stopRecorded() },
 		forgetStop},
@@ -154,23 +177,31 @@ var retainedRules = []struct {
 		func(r retained, registration *registry.Record) bool {
 			return registration != nil && registration.Phase == registry.Active && r.WriterFenced
 		},
-		func(r *retained) { r.WriterFenced = false }},
+		func(r *retained, _ *registry.Record) { r.WriterFenced = false }},
 	{"keeps output before the source was quiet and its writer fenced",
 		func(r retained, _ *registry.Record) bool {
 			return r.OutputDigest != "" && (!r.NativeQuiet || !r.WriterFenced)
 		},
-		func(r *retained) { r.OutputDigest = "" }},
+		func(r *retained, _ *registry.Record) { r.OutputDigest = "" }},
 	{"is turnless, but the launch resumes a checkpoint",
 		func(r retained, _ *registry.Record) bool { return r.Turnless && !r.fresh() },
-		func(r *retained) { r.Turnless = false }},
+		func(r *retained, _ *registry.Record) { r.Turnless = false }},
 	{"is turnless before the source was quiet",
 		func(r retained, _ *registry.Record) bool { return r.Turnless && !r.NativeQuiet },
-		func(r *retained) { r.Turnless = false }},
+		func(r *retained, _ *registry.Record) { r.Turnless = false }},
 	{"is turnless, but its session registration bound a conversation",
 		func(r retained, registration *registry.Record) bool {
 			return registration != nil && r.Turnless && registration.NativeUUID != ""
 		},
-		func(r *retained) { r.Turnless = false }},
+		func(r *retained, _ *registry.Record) { r.Turnless = false }},
+}
+
+// stoppedReceipt is the receipt of a stopped registration, or nil.
+func stoppedReceipt(registration *registry.Record) *registry.StopReceipt {
+	if registration == nil || registration.Phase != registry.Stopped {
+		return nil
+	}
+	return registration.Receipt
 }
 
 // stopRecorded reports any fact a stop records.
@@ -178,7 +209,7 @@ func (r retained) stopRecorded() bool {
 	return r.NativeQuiet || r.Turnless || r.Exited != nil || r.WriterFenced || r.OutputDigest != ""
 }
 
-func forgetStop(r *retained) {
+func forgetStop(r *retained, _ *registry.Record) {
 	r.NativeQuiet, r.Turnless, r.Exited, r.WriterFenced, r.OutputDigest = false, false, nil, false, ""
 }
 
@@ -195,16 +226,20 @@ func (c *contradiction) Error() string {
 
 // check is the one rule for which retained records are valid, alone
 // (registration nil) or beside their session registration. It returns r
-// with every fact a contradiction makes untrustworthy forgotten, and the
-// contradictions, or r unchanged and nil. A rule's forgetting can break only
-// a rule later in retainedRules (forgetting the fence breaks the output's),
-// so one pass in order finds them all.
+// with what the registration proves taken from it and every other fact a
+// contradiction makes untrustworthy forgotten, and the contradictions, or r
+// and nil. A rule's correction can break only a rule later in
+// retainedRules (forgetting the fence breaks the output's), so one pass in
+// order finds them all.
 func (r retained) check(registration *registry.Record) (retained, error) {
+	if registration != nil && registration.Phase == registry.Cancelled && registration.Receipt != nil {
+		r.WriterFenced = true
+	}
 	var reasons []string
 	for _, rule := range retainedRules {
 		if rule.broken(r, registration) {
 			reasons = append(reasons, rule.contradiction)
-			rule.forget(&r)
+			rule.correct(&r, registration)
 		}
 	}
 	if reasons == nil {

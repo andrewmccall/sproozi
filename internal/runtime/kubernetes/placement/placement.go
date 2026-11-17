@@ -89,7 +89,9 @@ type Placement struct {
 	exec     commandExecutor
 	mu       sync.RWMutex
 	journals session.JournalLocks
-	lock     *os.File
+	// contradictions holds each contradicted retained record already logged.
+	contradictions sync.Map
+	lock           *os.File
 	// abortWait bounds one AbortPreparation (abortPreparationWait).
 	abortWait time.Duration
 }

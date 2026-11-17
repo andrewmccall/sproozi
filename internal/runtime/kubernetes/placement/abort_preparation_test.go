@@ -142,7 +142,8 @@ func queuedPreparation(t *testing.T) (*Placement, *admissionClient, session.Laun
 func registration(t *testing.T, p *Placement, l session.Launch) registry.Record {
 	t.Helper()
 	local, err := p.load(l)
-	if err != nil {
+	var contradicted *contradiction
+	if err != nil && !errors.As(err, &contradicted) {
 		t.Fatal(err)
 	}
 	r, err := p.registry.Get(t.Context(), local.Reference)

@@ -43,28 +43,51 @@ func (p *Placement) retained(ctx context.Context, l session.Launch) (retained, r
 	return p.retainedRecord(ctx, l, true)
 }
 
-// settling reads them for an operation that observes or ends the visit:
-// Inspect, Exited, Stop and Abort. A contradiction must not keep a visit from
-// being stopped, cancelled and removed, so these continue from the facts
-// that hold. They observe a forgotten fact again (a quiet source, a fenced
-// writer, a kept checkpoint) or, when it can no longer be observed, report it
-// unknown. The contradiction is logged, and the next save writes the record
-// without it.
-func (p *Placement) settling(ctx context.Context, l session.Launch) (retained, registry.Record, error) {
+// observing reads them for an operation that only observes the visit:
+// Inspect and Exited. A contradiction must not keep a visit from being
+// listed, stopped, cancelled and removed, so these continue from the facts
+// that hold, observing a forgotten fact again or reporting it unknown. They
+// write nothing: the record keeps its contradiction until an operation that
+// ends the visit reads it.
+func (p *Placement) observing(ctx context.Context, l session.Launch) (retained, registry.Record, error) {
 	local, r, err := p.retainedRecord(ctx, l, false)
-	return local, r, p.forgive(l, err)
+	return local, r, forgiven(err)
 }
 
-// forgive logs a contradicted retained record of l, whose facts that hold an
-// operation that ends the visit continues from, and returns any other error.
-func (p *Placement) forgive(l session.Launch, err error) error {
+// settling reads them for an operation that ends the visit: Stop and
+// Abort. It continues as observing does, and first saves the record as
+// corrected (ADR 0066).
+func (p *Placement) settling(ctx context.Context, l session.Launch) (retained, registry.Record, error) {
+	local, r, err := p.retainedRecord(ctx, l, false)
+	var contradicted *contradiction
+	if errors.As(err, &contradicted) {
+		return local, r, p.save(local, &r)
+	}
+	return local, r, err
+}
+
+// forgiven is err unless it is only a contradiction, which an operation
+// that ends or observes the visit continues past.
+func forgiven(err error) error {
+	var contradicted *contradiction
+	if errors.As(err, &contradicted) {
+		return nil
+	}
+	return err
+}
+
+// noted logs a contradiction in err once per contradiction and process, and
+// returns err. The sweep for exited harnesses reads an active visit every
+// few seconds; logging each read would repeat the line until it stops.
+func (p *Placement) noted(err error) error {
 	var contradicted *contradiction
 	if !errors.As(err, &contradicted) {
 		return err
 	}
-	p.logf("Ignored facts of the retained record of visit %s of execution %s that contradict it or its session registration: %v",
-		l.AllocationID, l.ExecutionID, err)
-	return nil
+	if _, seen := p.contradictions.LoadOrStore(contradicted.Error(), struct{}{}); !seen {
+		p.logf("Found that %v; operations that start work refuse it until the visit is stopped or cancelled", contradicted)
+	}
+	return err
 }
 
 // retainedRecord reads l's retained record and registration. With refuse, a
@@ -81,7 +104,7 @@ func (p *Placement) retainedRecord(ctx context.Context, l session.Launch, refuse
 		return local, r, err
 	}
 	local, err = local.check(&r)
-	if err != nil && refuse {
+	if err = p.noted(err); err != nil && refuse {
 		return local, r, err
 	}
 	return local, r, errors.Join(loaded, err)
@@ -249,7 +272,7 @@ func (p *Placement) Inspect(ctx context.Context, l session.Launch) (session.Obse
 		return session.Observation{}, err
 	}
 	defer unlock()
-	local, r, err := p.settling(ctx, l)
+	local, r, err := p.observing(ctx, l)
 	if os.IsNotExist(err) {
 		var cm corev1.ConfigMap
 		lookupErr := p.config.Kube.Get(ctx, client.ObjectKey{Namespace: p.config.Namespace, Name: registry.NameForRun(runName(l))}, &cm)
@@ -600,7 +623,7 @@ func (p *Placement) Exited(ctx context.Context, l session.Launch, i session.Inca
 		return false, err
 	}
 	defer unlock()
-	local, r, err := p.settling(ctx, l)
+	local, r, err := p.observing(ctx, l)
 	if err != nil {
 		return false, err
 	}

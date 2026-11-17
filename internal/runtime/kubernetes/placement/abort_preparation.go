@@ -67,9 +67,12 @@ func (p *Placement) AbortPreparation(ctx context.Context, l session.Launch) erro
 	ctx, cancel := context.WithTimeout(ctx, p.abortWait)
 	defer cancel()
 	// Like Abort, this ends a visit, so it continues from the facts of a
-	// contradicted record that hold (settling).
+	// contradicted record that hold, and saves the record as corrected
+	// (settling).
 	local, err := p.load(l)
-	err = p.forgive(l, err)
+	var contradicted *contradiction
+	corrected := errors.As(err, &contradicted)
+	err = forgiven(err)
 	unseen := os.IsNotExist(err)
 	if unseen {
 		if err = p.validateInput(l, l.ThreadID == "" && l.CheckpointDigest == ""); err != nil {
@@ -85,9 +88,23 @@ func (p *Placement) AbortPreparation(ctx context.Context, l session.Launch) erro
 	if err != nil {
 		return err
 	}
+	var registration *registry.Record
 	if found {
-		local, err = local.check(&r)
-		if err = p.forgive(l, err); err != nil {
+		// The registration found is this launch's, even when a crash or an
+		// unseen launch left the record without its reference; the
+		// tombstone records the reference when it was lost.
+		registration = &r
+		checked := local
+		checked.Reference = r.Reference
+		checked, err = checked.check(registration)
+		corrected = corrected || p.noted(err) != nil
+		if !corrected {
+			checked.Reference = local.Reference
+		}
+		local = checked
+	}
+	if corrected {
+		if err = p.save(local, registration); err != nil {
 			return err
 		}
 	}
