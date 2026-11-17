@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/checkpoint"
-	"github.com/andrewmccall/sproozi/internal/deadline"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
@@ -151,7 +150,7 @@ func (o *Owner) step(ctx context.Context, id string) next {
 		o.logf("Could not inspect work session %s: %v", id, err)
 		return nextWait
 	}
-	act, err := decide(o.situationOf(r, rec, time.Now()))
+	act, err := decide(o.situationOf(r, rec))
 	if err != nil {
 		// A situation no row decides is a programming error. Say so where
 		// the owner sees it, and keep retrying: an executor that does
@@ -304,7 +303,7 @@ func (o *Owner) start(ctx context.Context, r record) next {
 		o.removeUpload(r.ID)
 	}
 	if err != nil {
-		if deadline.At(r.First.Deadline).Passed(time.Now()) {
+		if o.pastFirstDeadline(r) {
 			// Create refuses a launch whose deadline passed; the next step
 			// cancels it.
 			return nextAgain

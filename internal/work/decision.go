@@ -3,9 +3,7 @@ package work
 import (
 	"fmt"
 	"slices"
-	"time"
 
-	"github.com/andrewmccall/sproozi/internal/deadline"
 	"github.com/andrewmccall/sproozi/internal/project"
 	"github.com/andrewmccall/sproozi/internal/session"
 )
@@ -61,14 +59,16 @@ type situation struct {
 
 // situationOf is the driver's situation for record r, whose current
 // execution the coordinator holds as rec, nil when it has not received it.
-func (o *Owner) situationOf(r record, rec *session.Record, now time.Time) situation {
+// The deadline is read on the coordinator's clock, the one by which it
+// refuses to start work.
+func (o *Owner) situationOf(r record, rec *session.Record) situation {
 	s := situation{interactive: r.Intent.Mode == ModeInteractive,
 		revoked: !project.Member(o.config.Projects, r.Association.Project, o.config.Principal)}
 	switch {
 	case rec == nil:
-		s.phase, s.lateStart = phaseNotReceived, deadline.At(r.First.Deadline).Passed(now)
+		s.phase, s.lateStart = phaseNotReceived, o.pastFirstDeadline(r)
 	case rec.Phase.Starting():
-		s.lateStart = deadline.At(rec.Deadline).Passed(now)
+		s.lateStart = o.config.Coordinator.PastDeadline(*rec)
 	case rec.Phase == session.PhaseIdle:
 		s.lateStart = startEnded(*rec)
 	}
@@ -76,6 +76,13 @@ func (o *Owner) situationOf(r record, rec *session.Record, now time.Time) situat
 		s.phase, s.cancel = rec.Phase, rec.CancelOperation != ""
 	}
 	return s
+}
+
+// pastFirstDeadline reports, on the coordinator's clock, that the deadline
+// of r's first execution has passed, so the coordinator would refuse to
+// create it.
+func (o *Owner) pastFirstDeadline(r record) bool {
+	return o.config.Coordinator.PastDeadline(session.Record{Deadline: r.First.Deadline})
 }
 
 // condition is a decision row's requirement on one fact: either value, true

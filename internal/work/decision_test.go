@@ -5,7 +5,6 @@ import (
 	"slices"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
@@ -220,7 +219,7 @@ func TestEveryDriverPhaseCanStillBeStoppedAndCancelled(t *testing.T) {
 							if err != nil {
 								t.Fatal(err)
 							}
-							s := e.o.situationOf(r, rec, time.Now())
+							s := e.o.situationOf(r, rec)
 							mu.Lock()
 							reached[s.phase] = true
 							mu.Unlock()
