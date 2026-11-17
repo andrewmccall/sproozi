@@ -311,7 +311,7 @@ func TestUndecidedSituationIsReportedAndRetried(t *testing.T) {
 // task with no deadline is decided recover-start, and today Recover can wait
 // in the Kubernetes placement's waitPod for a Pod its failed run never gets.
 // The placement's test of that wait, scheduled separately as
-// TestPrepareOfTaskWithoutDeadlineEndsWhenItsRunFailedBeforePod, covers it.
+// TestPrepareOfTaskWithoutDeadlineEndsWhenItsRunFailedBeforePod, will cover it.
 func TestEveryDriverPhaseHasAnExitAfterTheDeadline(t *testing.T) {
 	refusedAfterDeadline := []action{actStart}
 	for _, s := range allSituations() {
