@@ -38,7 +38,7 @@ func neverConfirmed(t *testing.T) {
 // deadline and its diagnostics kept.
 func stopping(t *testing.T, kind harness.NativeKind, script string, until time.Time) (*server, *bytes.Buffer) {
 	t.Helper()
-	s := watched(startNative(t, script, until))
+	s := watched(startNative(t, script, time.Time{}))
 	s.config.Harness, s.config.Deadline, s.deadline = kind, until, until
 	diagnostics := &bytes.Buffer{}
 	s.diagnostics = diagnostics

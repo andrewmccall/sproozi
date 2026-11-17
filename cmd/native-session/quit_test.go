@@ -70,7 +70,7 @@ func TestIgnoredQuitIsForcedAtTheQuitBound(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			completedCodexTurn(t)
 			setQuitWait(t, 500*time.Millisecond)
-			native := startNative(t, ignoresQuit, until)
+			native := startNative(t, ignoresQuit, time.Time{})
 			s := watched(native)
 			s.config.Deadline, s.deadline = until, until
 			second := make(chan response, 1)
@@ -119,7 +119,7 @@ func TestDeadlineBeforeTheQuitBoundIsReportedAsDeadline(t *testing.T) {
 	completedCodexTurn(t)
 	setQuitWait(t, time.Hour)
 	until := time.Now().Add(700 * time.Millisecond)
-	native := startNative(t, ignoresQuit, until)
+	native := startNative(t, ignoresQuit, time.Time{})
 	s := watched(native)
 	s.config.Deadline, s.deadline = until, until
 	var r response

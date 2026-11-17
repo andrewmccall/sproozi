@@ -90,7 +90,7 @@ func TestSupervisorStopsAreNotReportedAsSelfExits(t *testing.T) {
 
 // The execution's deadline ends the harness as a deadline. The harness's
 // terminal has no deadline of its own; the supervisor's stops it.
-func TestTerminalDeadlineIsReportedAsDeadline(t *testing.T) {
+func TestExecutionDeadlineIsReportedAsDeadline(t *testing.T) {
 	native := startNative(t, "exec sleep 30", time.Time{})
 	s := watched(native)
 	s.deadline = time.Now().Add(300 * time.Millisecond)

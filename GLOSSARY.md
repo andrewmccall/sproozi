@@ -29,14 +29,16 @@ Code and GitHub Copilot CLI. Also seen as: native kind, native harness.
 
 ### Supervisor
 
-The trusted process (`native-session`) that runs a managed harness on a
+The trusted `native-session` command that runs a managed harness on a
 terminal inside its sandbox, as the agent container's PID 1. It takes the
 control actions (`configure`, `activate`, `gate`, `status`, `quiesce`,
 `attach`), stops the harness at the execution deadline, and writes an exit
 report when the harness ends without a graceful stop. Its lifecycle is one
 declared state, though it stores nothing; see
 [ADR 0058](docs/adr/0058-lifecycle-records-declare-states-and-transitions.md).
-Also seen as: native supervisor, native session.
+It is not the terminal it runs the harness on (`nativepty.Supervisor`, the
+"terminal supervisor" of ADR 0061), and not a managed session.
+Also seen as: native supervisor.
 
 ### Run contract
 
