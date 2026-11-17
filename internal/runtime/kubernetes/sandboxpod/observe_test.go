@@ -8,15 +8,17 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+const containerA = "containerd://a"
+
 // The placement's table (placement/testdata/pod-readings.txt) records every
 // site's reading of the native and capture containers, phase, deletion, node
 // and init containers. These are the facts it does not reach.
 
 func TestObserveCarriesTheTerminationMessageAndCode(t *testing.T) {
 	pod := &corev1.Pod{Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{
-		Name: AgentContainer, ContainerID: "containerd://a",
+		Name: AgentContainer, ContainerID: containerA,
 		State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
-			ContainerID: "containerd://a", ExitCode: 4, Message: "result", FinishedAt: metav1.Now(), Reason: "Error"}},
+			ContainerID: containerA, ExitCode: 4, Message: "result", FinishedAt: metav1.Now(), Reason: "Error"}},
 	}}}}
 	got := Observe(pod).Agent
 	if got.Terminated == nil || *got.Terminated != (Termination{ExitCode: 4, Message: "result", Proven: true}) || !got.Ended() || got.Running {
@@ -42,7 +44,7 @@ func TestAStartedEphemeralContainerMeansThePodRan(t *testing.T) {
 // The kubelet reports one status per container. Should two arrive, the
 // first is read, and a later proven end does not prove the first one's.
 func TestObserveReadsTheFirstStatusOfAContainer(t *testing.T) {
-	running := corev1.ContainerStatus{Name: AgentContainer, ContainerID: "containerd://a",
+	running := corev1.ContainerStatus{Name: AgentContainer, ContainerID: containerA,
 		State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}}
 	ended := corev1.ContainerStatus{Name: AgentContainer, ContainerID: "containerd://b",
 		State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ContainerID: "containerd://b", FinishedAt: metav1.Now()}}}

@@ -59,6 +59,9 @@ const fixturePolicy = "policy"
 // up for a container it could no longer find.
 const containerStatusUnknown = "ContainerStatusUnknown"
 
+// unknownTerminationMessage is the kubelet's message for that termination.
+const unknownTerminationMessage = "The container could not be located when the pod was terminated"
+
 func fixtureTermination(containerID string, exitCode int32) corev1.ContainerState {
 	return corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
 		ContainerID: containerID, ExitCode: exitCode, FinishedAt: metav1.Now(), Reason: "Completed",
@@ -84,7 +87,7 @@ func TestWriterFenceRejectsSyntheticUnknownContainerTermination(t *testing.T) {
 	// retained, but synthetic termination carries no runtime ID or finish time.
 	pod.Status.ContainerStatuses[0].State = corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
 		ExitCode: 137, Reason: "ContainerStatusUnknown",
-		Message: "The container could not be located when the pod was terminated",
+		Message: unknownTerminationMessage,
 	}}
 	if err = kube.Status().Update(t.Context(), pod); err != nil {
 		t.Fatal(err)

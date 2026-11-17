@@ -322,7 +322,7 @@ func TestAbortPreparationNeverTrustsUnknownTerminationOfLatePod(t *testing.T) {
 	}
 	current.Status.ContainerStatuses[0].State = corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
 		ExitCode: 137, Reason: containerStatusUnknown,
-		Message: "The container could not be located when the pod was terminated",
+		Message: unknownTerminationMessage,
 	}}
 	if err = kube.Client.Status().Update(t.Context(), current); err != nil {
 		t.Fatal(err)

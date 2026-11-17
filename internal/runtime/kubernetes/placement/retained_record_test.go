@@ -23,13 +23,16 @@ import (
 
 const recordedDigest = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
 
+// recordedWorkspace names the workspace fact.
+const recordedWorkspace = "workspace"
+
 // recordedFacts are the retained record's facts beyond its launch and
 // reference, each set or not, in the order describeRetained names them.
 var recordedFacts = []struct {
 	name string
 	set  func(*retained)
 }{
-	{"workspace", func(r *retained) { r.WorkspaceDigest = recordedDigest }},
+	{recordedWorkspace, func(r *retained) { r.WorkspaceDigest = recordedDigest }},
 	{"quiet", func(r *retained) { r.NativeQuiet = true }},
 	{"turnless", func(r *retained) { r.Turnless = true }},
 	{"exited", func(r *retained) { r.Exited = &session.Exit{Code: 1, Cause: harness.NativeExitSelf} }},
@@ -43,7 +46,7 @@ func describeRetained(r retained) string {
 	for _, fact := range []struct {
 		name string
 		set  bool
-	}{{"reference", r.Reference.UID != ""}, {"workspace", r.WorkspaceDigest != ""}, {"quiet", r.NativeQuiet},
+	}{{"reference", r.Reference.UID != ""}, {recordedWorkspace, r.WorkspaceDigest != ""}, {"quiet", r.NativeQuiet},
 		{"turnless", r.Turnless}, {"exited", r.Exited != nil}, {"output", r.OutputDigest != ""},
 		{"fenced", r.WriterFenced}, {"aborted", r.PreparationAborted}} {
 		if fact.set {

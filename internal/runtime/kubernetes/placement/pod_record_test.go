@@ -93,7 +93,7 @@ func readingContainers() []struct {
 		{"exited-3", ended(3, nil)},
 		{"unknown-synthetic", ended(137, func(s *corev1.ContainerStatus) {
 			s.State.Terminated = &corev1.ContainerStateTerminated{ExitCode: 137, Reason: containerStatusUnknown,
-				Message: "The container could not be located when the pod was terminated"}
+				Message: unknownTerminationMessage}
 		})},
 		{"unknown-with-fields", ended(137, func(s *corev1.ContainerStatus) { s.State.Terminated.Reason = containerStatusUnknown })},
 		{"without-finish", ended(0, func(s *corev1.ContainerStatus) { s.State.Terminated.FinishedAt = metav1.Time{} })},
@@ -131,7 +131,7 @@ func reading(t *testing.T, pod *corev1.Pod) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	completion := "none"
+	var completion string
 	if c, err := sandbox.GetCompletion(ctx, pod.Name, string(run.UID)); err != nil {
 		completion = "error: " + err.Error()
 	} else {
@@ -154,7 +154,7 @@ func reading(t *testing.T, pod *corev1.Pod) string {
 // reading of the Pod.
 func TestPodReadingsMatchTheRecordedTable(t *testing.T) {
 	t.Parallel()
-	var lines []string
+	lines := make([]string, 0, 2200)
 	containers := readingContainers()
 	for _, agent := range containers {
 		for _, capture := range containers[:5] {
