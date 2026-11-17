@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -139,6 +140,42 @@ func TestClaudeHookBoundedPinnedPayload(t *testing.T) {
 		t.Fatalf("large MCP output: %v", err)
 	}
 }
+
+// A hook reports as soon as its payload is complete. Claude Code ends a
+// hook's input after writing it, but the hook must not depend on that: one
+// that waits for the end of its input instead reports only when the input
+// closes, as late as Claude Code's hook timeout, or never once that timeout
+// kills it.
+func TestClaudeHookReportsACompletePayloadWithoutEndOfInput(t *testing.T) {
+	raw := `{"session_id":"` + selected + `","hook_event_name":"Stop","stop_hook_active":false}` + "\n"
+	// Whole, and in two writes.
+	for _, parts := range [][]string{{raw}, {raw[:20], raw[20:]}} {
+		input, writer := io.Pipe()
+		go func() {
+			for _, part := range parts {
+				_, _ = io.WriteString(writer, part)
+			}
+		}()
+		read := make(chan error, 1)
+		go func() {
+			h, err := readClaudeHook(input)
+			if err == nil && h.Event != claudeStop {
+				err = errors.New("wrong event " + h.Event)
+			}
+			read <- err
+		}()
+		select {
+		case err := <-read:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("hook waited for the end of its input after a complete payload")
+		}
+		_ = writer.Close()
+	}
+}
+
 func TestExplicitHarnessContractAndClaudeOptionBoundary(t *testing.T) {
 	c := config{Harness: harness.NativeClaude, Deadline: time.Now().Add(time.Minute), Instructions: instructions,
 		InstructionDigest: digest(), ClientConfig: testClients, Env: []string{testPathEnvironment},

@@ -109,7 +109,10 @@ fixed rejection category and selected-journal observation category. These fields
 contain no prompts, tool arguments or journal bytes and do not authorize a move.
 The fixed `observe-claude` command consumes a bounded native hook payload and is
 installed in the trusted fresh hook settings; successful hooks emit no unrelated
-stdout. It is not a developer-facing lifecycle operation.
+stdout. It reports as soon as one whole JSON object has arrived, without waiting
+for the end of its input; input that never completes an object holds it until
+Claude Code's five-second hook timeout ends it. It is not a developer-facing
+lifecycle operation.
 
 `attach` forwards newline-delimited JSON on stdin/stdout. It emits an initial
 `attach` response, then `output` messages with base64 `data`, monotonic `cursor`
