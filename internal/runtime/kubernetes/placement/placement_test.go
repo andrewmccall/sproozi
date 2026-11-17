@@ -24,6 +24,7 @@ import (
 	"github.com/andrewmccall/sproozi/internal/harness"
 	runtimekube "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
+	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/sandboxpod"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
 	"github.com/google/uuid"
@@ -53,6 +54,10 @@ const fixtureWorker = "approved-worker"
 // fixtureTemplate is the managed template the fixtures register against.
 const fixtureTemplate = "approved"
 const fixturePolicy = "policy"
+
+// containerStatusUnknown is the kubelet's reason for a termination it made
+// up for a container it could no longer find.
+const containerStatusUnknown = "ContainerStatusUnknown"
 
 func fixtureTermination(containerID string, exitCode int32) corev1.ContainerState {
 	return corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
@@ -117,7 +122,7 @@ func TestWriterFenceRejectsSyntheticUnknownContainerTermination(t *testing.T) {
 			candidate := pod.DeepCopy()
 			candidate.Status.ContainerStatuses[0].State = fixtureTermination(candidate.Status.ContainerStatuses[0].ContainerID, 0)
 			test.mutate(candidate.Status.ContainerStatuses[0].State.Terminated)
-			if got := terminated(candidate); got != test.want {
+			if got := sandboxpod.Observe(candidate).Agent.Ended(); got != test.want {
 				t.Fatalf("writer termination=%v, want %v", got, test.want)
 			}
 		})
@@ -458,7 +463,7 @@ func TestMoveStopWaitsForNativeTurnBeforeGatewayRevocationAndSeal(t *testing.T) 
 		if err != nil {
 			return err
 		}
-		if !terminated(pod) {
+		if !sandboxpod.Observe(pod).Agent.Ended() {
 			return errors.New("seal preceded actual writer stop")
 		}
 		events = append(events, "seal")
@@ -1064,7 +1069,7 @@ func TestDeleteRetainsPodUntilObservedTerminationAndPersistentFence(t *testing.T
 		t.Fatalf("early fence or seal: %+v %+v %v", local, r, err)
 	}
 	pod, err := p.exactPod(t.Context(), r)
-	if err != nil || pod.DeletionTimestamp.IsZero() || !running(pod, nativeContainer) ||
+	if err != nil || pod.DeletionTimestamp.IsZero() || !sandboxpod.Observe(pod).Agent.Running ||
 		!slices.Contains(pod.Finalizers, runtimekube.ManagedWriterFenceFinalizer) {
 		t.Fatalf("delete lost writer observation: %+v %v", pod, err)
 	}

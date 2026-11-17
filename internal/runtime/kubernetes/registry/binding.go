@@ -11,6 +11,7 @@ import (
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/deadline"
+	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/sandboxpod"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -134,14 +135,13 @@ func RequireActive(ctx context.Context, kube client.Client, run *api.AgentRun, r
 	if err := kube.Get(ctx, client.ObjectKey{Namespace: agentNamespace, Name: run.Status.Identity.SandboxName}, &pod); err != nil {
 		return err
 	}
-	if string(pod.UID) != record.PodUID || !pod.DeletionTimestamp.IsZero() || pod.Status.Phase != corev1.PodRunning ||
+	observed := sandboxpod.Observe(&pod)
+	if string(pod.UID) != record.PodUID || observed.Deleting || observed.Phase != corev1.PodRunning ||
 		pod.Spec.ServiceAccountName != run.Status.Identity.ServiceAccountName || pod.Labels["sproozi.com/agentrun-uid"] != record.RunUID {
 		return ErrConflict
 	}
-	for _, container := range pod.Status.ContainerStatuses {
-		if container.Name == "agent" && container.State.Running != nil && container.ContainerID != "" {
-			return nil
-		}
+	if !observed.Agent.Running {
+		return fmt.Errorf("session native container is not running")
 	}
-	return fmt.Errorf("session native container is not running")
+	return nil
 }

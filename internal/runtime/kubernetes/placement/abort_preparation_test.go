@@ -18,6 +18,7 @@ import (
 	"github.com/andrewmccall/sproozi/internal/budget"
 	runtimekube "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
+	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/sandboxpod"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
 	"github.com/google/uuid"
@@ -373,7 +374,7 @@ func TestNeverScheduledNeedsDeletionNoNodeAndNoContainer(t *testing.T) {
 			t.Parallel()
 			pod := unscheduled()
 			test.mutate(pod)
-			if got := neverScheduled(pod); got != test.want {
+			if got := sandboxpod.Observe(pod).NeverScheduled; got != test.want {
 				t.Fatalf("neverScheduled = %v, want %v", got, test.want)
 			}
 		})

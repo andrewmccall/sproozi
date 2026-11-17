@@ -14,6 +14,7 @@ import (
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	runtimekube "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
+	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/sandboxpod"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -102,9 +103,11 @@ func readingContainers() []struct {
 }
 
 // reading describes what each site that reads a sandbox Pod derives from pod:
-// the remote executor's placement (running, terminated, nativeExitCode,
-// neverScheduled), the gateway's and placement's registry.RequireActive, and
-// the controller's PodSandboxClient.GetStatus and GetCompletion.
+// the remote executor's placement (whether each container runs, whether the
+// native container's end is proven, its exit code and whether the Pod never
+// ran; recorded before the placement read them through sandboxpod.Observe),
+// the gateway's and placement's registry.RequireActive, and the controller's
+// PodSandboxClient.GetStatus and GetCompletion.
 func reading(t *testing.T, pod *corev1.Pod) string {
 	t.Helper()
 	scheme := runtime.NewScheme()
@@ -134,9 +137,14 @@ func reading(t *testing.T, pod *corev1.Pod) string {
 	} else {
 		completion = fmt.Sprintf("code=%d result=%t", c.ExitCode, c.Result != nil)
 	}
+	// The placement reads the exit code of a reported termination, or 0.
+	o := sandboxpod.Observe(pod)
+	var code int32
+	if o.Agent.Terminated != nil {
+		code = o.Agent.Terminated.ExitCode
+	}
 	return fmt.Sprintf("agent-running=%t capture-running=%t terminated=%t exit=%d never-scheduled=%t | require-active=%s | status=%s completion=%s",
-		running(pod, nativeContainer), running(pod, runtimekube.CaptureContainer), terminated(pod), nativeExitCode(pod), neverScheduled(pod),
-		active, status, completion)
+		o.Agent.Running, o.Capture.Running, o.Agent.Ended(), code, o.NeverScheduled, active, status, completion)
 }
 
 // Every site that reads a sandbox Pod, for every combination of the native

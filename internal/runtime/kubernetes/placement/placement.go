@@ -29,6 +29,7 @@ import (
 	policyengine "github.com/andrewmccall/sproozi/internal/policy/kubernetes"
 	runtimekube "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
+	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/sandboxpod"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
 	"github.com/andrewmccall/sproozi/internal/workspace"
@@ -42,7 +43,7 @@ import (
 )
 
 const fixedTask = "Continue the admitted native session"
-const nativeContainer = "agent"
+const nativeContainer = sandboxpod.AgentContainer
 const helperPath = "/usr/local/bin/checkpoint"
 const nativePath = "/usr/local/bin/native-session"
 const helperCapture = "capture-stopped"

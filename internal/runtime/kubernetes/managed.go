@@ -12,12 +12,14 @@ import (
 	"github.com/andrewmccall/sproozi/internal/deadline"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
+	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/sandboxpod"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-const CaptureContainer = "checkpoint"
+// CaptureContainer is a managed session's checkpoint helper.
+const CaptureContainer = sandboxpod.CaptureContainer
 
 // ManagedWriterFenceFinalizer retains kubelet termination evidence until the
 // trusted placement has persisted the exact native container's physical fence.

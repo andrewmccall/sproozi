@@ -38,10 +38,11 @@ import (
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/agentcontract"
+	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/sandboxpod"
 )
 
 const (
-	agentContainerName  = "agent"
+	agentContainerName  = sandboxpod.AgentContainer
 	gatewayTokenPath    = "/var/run/sproozi/tokens/gateway/token"
 	trustBundlePath     = "/etc/sproozi/trust/ca-bundle.pem"
 	kubeconfigPath      = "/etc/sproozi/kubeconfig"
@@ -402,7 +403,7 @@ func (p *PodSandboxClient) GetStatus(ctx context.Context, name string) (SandboxS
 		}
 		return SandboxStatusUnknown, err
 	}
-	switch pod.Status.Phase {
+	switch sandboxpod.Observe(&pod).Phase {
 	case corev1.PodPending:
 		return SandboxStatusPending, nil
 	case corev1.PodRunning:
@@ -434,20 +435,22 @@ func (p *PodSandboxClient) GetCompletion(ctx context.Context, name, runUID strin
 		}
 	}
 
-	for _, cs := range pod.Status.ContainerStatuses {
-		if cs.Name == agentContainerName && cs.State.Terminated != nil {
-			completion := SandboxCompletion{ExitCode: cs.State.Terminated.ExitCode}
-			if !resultFromFile {
-				return completion, nil
-			}
-			result, err := agentcontract.DecodeResult([]byte(cs.State.Terminated.Message), runUID)
-			if err == nil {
-				completion.Result = &sprooziv1alpha1.AgentRunResult{Text: result.Text, Truncated: result.Truncated}
-			}
-			return completion, nil
-		}
+	// Any reported termination is the run's outcome, the kubelet's
+	// placeholder for a lost container included: unlike a writer fence, a
+	// run's result needs no proof that the container ended.
+	ended := sandboxpod.Observe(&pod).Agent.Terminated
+	if ended == nil {
+		return SandboxCompletion{}, fmt.Errorf("agent container has not terminated")
 	}
-	return SandboxCompletion{}, fmt.Errorf("agent container has not terminated")
+	completion := SandboxCompletion{ExitCode: ended.ExitCode}
+	if !resultFromFile {
+		return completion, nil
+	}
+	result, err := agentcontract.DecodeResult([]byte(ended.Message), runUID)
+	if err == nil {
+		completion.Result = &sprooziv1alpha1.AgentRunResult{Text: result.Text, Truncated: result.Truncated}
+	}
+	return completion, nil
 }
 
 // ErrSandboxTampered reports a run-named Pod whose identity labels changed.

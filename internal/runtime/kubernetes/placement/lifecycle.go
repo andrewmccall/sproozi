@@ -18,6 +18,7 @@ import (
 	"github.com/andrewmccall/sproozi/internal/harness"
 	runtimekube "github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
+	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/sandboxpod"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
 	corev1 "k8s.io/api/core/v1"
@@ -28,8 +29,6 @@ import (
 )
 
 var errWriterFenceUnknown = errors.New("placement: writer fence remains unknown")
-
-const containerStatusUnknown = "ContainerStatusUnknown"
 
 // podStopWait bounds a stop's wait for the native container to end after the
 // supervisor's graceful handoff, within the stop's settle allowance
@@ -104,15 +103,6 @@ func (p *Placement) pod(ctx context.Context, r registry.Record) (*corev1.Pod, er
 	}
 	return &pod, nil
 }
-func running(pod *corev1.Pod, name string) bool {
-	for _, c := range pod.Status.ContainerStatuses {
-		if c.Name == name && c.State.Running != nil && c.ContainerID != "" {
-			return true
-		}
-	}
-	return false
-}
-
 func (p *Placement) activePod(ctx context.Context, r registry.Record) (*corev1.Pod, error) {
 	var run api.AgentRun
 	if err := p.config.Kube.Get(ctx, client.ObjectKey{Namespace: p.config.Namespace, Name: r.IntendedRunName}, &run); err != nil {
@@ -125,16 +115,6 @@ func (p *Placement) activePod(ctx context.Context, r registry.Record) (*corev1.P
 		return nil, semantic(err)
 	}
 	return p.pod(ctx, r)
-}
-func terminated(pod *corev1.Pod) bool {
-	for _, c := range pod.Status.ContainerStatuses {
-		state := c.State.Terminated
-		if c.Name == nativeContainer && state != nil && c.ContainerID != "" &&
-			state.ContainerID == c.ContainerID && !state.FinishedAt.IsZero() && state.Reason != containerStatusUnknown {
-			return true
-		}
-	}
-	return false
 }
 func (p *Placement) waitPod(ctx context.Context, r registry.Record, wantRunning bool) (*corev1.Pod, error) {
 	// An interactive visit must be running within two minutes; otherwise the
@@ -155,10 +135,11 @@ func (p *Placement) waitPod(ctx context.Context, r registry.Record, wantRunning 
 	for {
 		pod, err := p.pod(ctx, r)
 		if err == nil {
-			if wantRunning && running(pod, nativeContainer) && running(pod, runtimekube.CaptureContainer) && pod.DeletionTimestamp.IsZero() {
+			seen := sandboxpod.Observe(pod)
+			if wantRunning && seen.Agent.Running && seen.Capture.Running && !seen.Deleting {
 				return pod, nil
 			}
-			if !wantRunning && terminated(pod) {
+			if !wantRunning && seen.Agent.Ended() {
 				return pod, nil
 			}
 		}
@@ -195,7 +176,7 @@ func (p *Placement) Activate(ctx context.Context, l session.Launch, i session.In
 	if err != nil {
 		return err
 	}
-	if !running(pod, nativeContainer) || !pod.DeletionTimestamp.IsZero() {
+	if seen := sandboxpod.Observe(pod); !seen.Agent.Running || seen.Deleting {
 		return errors.New("placement: inert worker unavailable")
 	}
 	// This record change enables only the already bound worker, never a new Run.
@@ -263,7 +244,7 @@ func (p *Placement) Inspect(ctx context.Context, l session.Launch) (session.Obse
 		if err != nil {
 			return o, err
 		}
-		if !running(pod, nativeContainer) {
+		if !sandboxpod.Observe(pod).Agent.Running {
 			return o, nil
 		}
 		data, err := p.native(pod)(ctx, harness.NativeStatus)
@@ -278,7 +259,7 @@ func (p *Placement) Inspect(ctx context.Context, l session.Launch) (session.Obse
 		if err != nil {
 			return o, err
 		}
-		if !running(pod, nativeContainer) || !pod.DeletionTimestamp.IsZero() {
+		if seen := sandboxpod.Observe(pod); !seen.Agent.Running || seen.Deleting {
 			return o, nil
 		}
 		data, err := p.native(pod)(ctx, harness.NativeStatus)
@@ -360,7 +341,7 @@ func (p *Placement) Stop(ctx context.Context, l session.Launch, i session.Incarn
 	if err != nil {
 		return session.Stopped{}, semantic(err)
 	}
-	if !terminated(pod) {
+	if !sandboxpod.Observe(pod).Agent.Ended() {
 		pod, err = p.waitPod(ctx, r, false)
 		if err != nil {
 			return session.Stopped{}, err
@@ -380,7 +361,7 @@ func (p *Placement) Stop(ctx context.Context, l session.Launch, i session.Incarn
 		}
 		seals[name] = seal
 	}
-	if !terminated(pod) || !running(pod, runtimekube.CaptureContainer) {
+	if seen := sandboxpod.Observe(pod); !seen.Agent.Ended() || !seen.Capture.Running {
 		return session.Stopped{}, errors.New("placement: exact stopped writer and capture helper unavailable")
 	}
 	if local, err = p.keep(ctx, local, r, pod); err != nil {
@@ -415,11 +396,11 @@ func (p *Placement) quietSource(ctx context.Context, local retained, r registry.
 	if local.NativeQuiet {
 		return local, r, nil
 	}
-	if !harness.ProvesCompletion(r.Harness) && r.Phase == registry.Stopping && !terminated(pod) {
+	if !harness.ProvesCompletion(r.Harness) && r.Phase == registry.Stopping && !sandboxpod.Observe(pod).Agent.Ended() {
 		return local, r, fmt.Errorf("placement: %s graceful completion acknowledgement unavailable", r.Harness)
 	}
 	switch {
-	case terminated(pod):
+	case sandboxpod.Observe(pod).Agent.Ended():
 		var err error
 		if local, r, err = p.ended(ctx, local, r, pod); err != nil {
 			return local, r, err
@@ -484,7 +465,10 @@ func (p *Placement) quietSource(ctx context.Context, local retained, r registry.
 // (keep).
 func (p *Placement) ended(ctx context.Context, local retained, r registry.Record, pod *corev1.Pod) (retained, registry.Record, error) {
 	if local.Exited == nil {
-		code := nativeExitCode(pod)
+		var code int32 // the caller saw the native container end
+		if ended := sandboxpod.Observe(pod).Agent.Terminated; ended != nil {
+			code = ended.ExitCode
+		}
 		logs, logErr := p.exec.Logs(ctx, pod.Namespace, pod.Name, nativeContainer)
 		graceful := harness.ProvesCompletion(r.Harness) && code == 0 && logErr == nil &&
 			!bytes.Contains(logs, []byte(harness.NativeExitReportPrefix))
@@ -512,7 +496,7 @@ func (p *Placement) endsWithin(ctx context.Context, r registry.Record, wait time
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		if pod, err := p.pod(ctx, r); err == nil && terminated(pod) {
+		if pod, err := p.pod(ctx, r); err == nil && sandboxpod.Observe(pod).Agent.Ended() {
 			return pod, true
 		}
 		select {
@@ -521,17 +505,6 @@ func (p *Placement) endsWithin(ctx context.Context, r registry.Record, wait time
 		case <-ticker.C:
 		}
 	}
-}
-
-// nativeExitCode is the ended native container's exit code.
-func nativeExitCode(pod *corev1.Pod) int32 {
-	var code int32
-	for _, c := range pod.Status.ContainerStatuses {
-		if c.Name == nativeContainer && c.State.Terminated != nil {
-			code = c.State.Terminated.ExitCode
-		}
-	}
-	return code
 }
 
 // recordExit keeps what the supervisor reported when its harness ended
@@ -592,7 +565,7 @@ func (p *Placement) Exited(ctx context.Context, l session.Launch, i session.Inca
 	if err != nil {
 		return false, err
 	}
-	return terminated(pod), nil
+	return sandboxpod.Observe(pod).Agent.Ended(), nil
 }
 
 // native runs fixed supervisor operations on the exact admitted native container.
@@ -750,7 +723,7 @@ func (p *Placement) physicalFence(ctx context.Context, local *retained, r regist
 	if err != nil {
 		return false, err
 	}
-	if !terminated(pod) {
+	if !sandboxpod.Observe(pod).Agent.Ended() {
 		return false, nil
 	}
 	if !local.WriterFenced {
@@ -774,7 +747,7 @@ func (p *Placement) releaseWriterFence(ctx context.Context, local retained, r re
 	if err != nil {
 		return err
 	}
-	if !terminated(pod) && !neverScheduled(pod) {
+	if seen := sandboxpod.Observe(pod); !seen.Agent.Ended() && !seen.NeverScheduled {
 		return errors.New("placement: exact writer is not terminated")
 	}
 	if !slices.Contains(pod.Finalizers, runtimekube.ManagedWriterFenceFinalizer) {
@@ -793,7 +766,7 @@ func (p *Placement) finishStopped(ctx context.Context, local retained, r registr
 	if err != nil {
 		return err
 	}
-	if running(pod, runtimekube.CaptureContainer) {
+	if sandboxpod.Observe(pod).Capture.Running {
 		if _, err = p.control(ctx, pod, runtimekube.CaptureContainer, []string{helperPath, helperFinish}, nil, 64<<10); err != nil {
 			return err
 		}
@@ -915,7 +888,7 @@ func (p *Placement) unscheduledFence(ctx context.Context, local *retained, r reg
 	if apierrors.IsNotFound(err) {
 		return false, nil
 	}
-	if err != nil || !neverScheduled(pod) {
+	if err != nil || !sandboxpod.Observe(pod).NeverScheduled {
 		return false, err
 	}
 	if !local.WriterFenced {
@@ -982,7 +955,7 @@ func (p *Placement) Attach(ctx context.Context, l session.Launch, i session.Inca
 	if err != nil {
 		return err
 	}
-	if !running(pod, nativeContainer) || !pod.DeletionTimestamp.IsZero() {
+	if seen := sandboxpod.Observe(pod); !seen.Agent.Running || seen.Deleting {
 		return &profile.Rejection{Code: profile.CodeConflict}
 	}
 	ctx, cancel := deadline.At(l.Deadline).Context(ctx)
@@ -1009,7 +982,7 @@ func (p *Placement) Attach(ctx context.Context, l session.Launch, i session.Inca
 					return
 				}
 				currentPod, err := p.activePod(ctx, current)
-				if err != nil || !running(currentPod, nativeContainer) || !currentPod.DeletionTimestamp.IsZero() {
+				if err != nil || !sandboxpod.Observe(currentPod).Agent.Running || sandboxpod.Observe(currentPod).Deleting {
 					cancel()
 					return
 				}

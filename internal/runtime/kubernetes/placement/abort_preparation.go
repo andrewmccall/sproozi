@@ -295,20 +295,3 @@ func (p *Placement) sandbox(ctx context.Context, r registry.Record) (*corev1.Pod
 	}
 	return &pod, nil
 }
-
-// neverScheduled reports a Pod no kubelet ever ran: being deleted, assigned
-// to no node and with no container ever started. The API server refuses to
-// bind a Pod that is being deleted to a node, so it never will run.
-func neverScheduled(pod *corev1.Pod) bool {
-	if pod.Spec.NodeName != "" || pod.DeletionTimestamp.IsZero() {
-		return false
-	}
-	for _, statuses := range [][]corev1.ContainerStatus{pod.Status.InitContainerStatuses, pod.Status.ContainerStatuses, pod.Status.EphemeralContainerStatuses} {
-		for _, c := range statuses {
-			if c.ContainerID != "" {
-				return false
-			}
-		}
-	}
-	return true
-}
