@@ -293,6 +293,31 @@ func TestPlacementDeadlineRefusesOnlyEventsThatStartWork(t *testing.T) {
 	}
 }
 
+// No phase waits on the deadline to end (ADR 0060). Terminal means stopped,
+// aborted and preparation-aborting, whose release is a sub-state; an exit is
+// an event that admit accepts past the launch's deadline and that leads to a
+// different phase. Every other phase has one.
+func TestEveryPlacementPhaseHasAnExitAfterTheDeadline(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 11, 14, 12, 0, 0, 0, time.UTC)
+	terminal := []dockerPhase{phaseStopped, phaseAborted, phasePreparationAborting}
+	for _, p := range dockerPhases {
+		if slices.Contains(terminal, p) {
+			continue
+		}
+		r := placementRecord{Phase: p, Launch: session.Launch{Deadline: at}}
+		exit := false
+		for ev, rule := range placementTransitions {
+			if to, ok := rule.to[p]; ok && to != p && r.admit(ev, at) == nil {
+				exit = true
+			}
+		}
+		if !exit {
+			t.Errorf("phase %s has no exit after the deadline", p)
+		}
+	}
+}
+
 // Preparing a visit already prepared replays its incarnation after the
 // deadline, while a new visit is refused (ADR 0058).
 func TestPrepareReplayAfterDeadline(t *testing.T) {

@@ -92,3 +92,27 @@ func TestRegistrationDeadlineRefusesOnlyEventsThatStartWork(t *testing.T) {
 		t.Fatalf("admitted an undeclared event: %v", err)
 	}
 }
+
+// No phase waits on the deadline to end (ADR 0060). Terminal means stopped
+// and cancelled; an exit is an event that admit accepts past the
+// registration's deadline and that leads to a different phase, cancel
+// included: the session keeps its checkpoint in the execution journal, not
+// here. Every other phase has one.
+func TestEveryRegistrationPhaseHasAnExitAfterTheDeadline(t *testing.T) {
+	at := time.Date(2026, 11, 14, 12, 0, 0, 0, time.UTC)
+	for _, p := range phases {
+		if p == Stopped || p == Cancelled {
+			continue
+		}
+		r := stored{Phase: p, Registration: storedRegistration{Registration: Registration{OriginalDeadline: at}}}
+		exit := false
+		for ev, rule := range registrationTransitions {
+			if to, ok := rule.to[p]; ok && to != p && r.admit(ev, at) == nil {
+				exit = true
+			}
+		}
+		if !exit {
+			t.Errorf("phase %s has no exit after the deadline", p)
+		}
+	}
+}

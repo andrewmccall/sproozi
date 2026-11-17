@@ -205,7 +205,8 @@ func (r *AgentRunReconciler) resolveAdmission(ctx context.Context, run *sprooziv
 
 	// Reject input the agent contract will refuse before the run is admitted.
 	// Otherwise an admitted run would hold a slot under its cap while contract
-	// creation failed on every reconcile until its deadline.
+	// creation failed on every reconcile until its deadline, or indefinitely
+	// when it has none.
 	if _, err := k8sresources.BuildAgentContract(run, tmpl, rt); err != nil {
 		if !agentcontract.IsInvalid(err) {
 			return nil, ctrl.Result{}, err

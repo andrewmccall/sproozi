@@ -188,8 +188,9 @@ refund evidence.
 
 Leave out `--task` and `run --remote` starts an interactive Codex or Claude
 Code session that the remote executor owns, then connects your terminal to it.
-The session runs in the cluster until you stop it or its deadline passes. Your
-laptop can sleep, change network or shut down; nothing on it needs to stay up.
+The session runs in the cluster until you stop it, or until its deadline passes
+if it has one. Your laptop can sleep, change network or shut down; nothing on
+it needs to stay up.
 Any machine that reaches the cluster through a `sproozi` context (or
 `--context`) can attach. It needs an executor from this release; an older one
 refuses with `update the executor`.

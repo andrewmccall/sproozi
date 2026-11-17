@@ -440,3 +440,35 @@ func TestEachRowsAdviceNamesCommandsItAdmits(t *testing.T) {
 		}
 	}
 }
+
+// No state waits on the deadline to end (ADR 0060). The catalogue entry has
+// no deadline column: the execution journal's admit refuses the events that
+// start work, and here the deadline only turns a starting session overdue.
+// Nothing is terminal; a stopped or cancelled session's exit is a request
+// its owner makes. An exit is a command the next-steps table does not
+// refuse whose outcome, which TestEachStateRefusesOrCarriesOutEachCommand
+// pins to the service, is carried out and leaves the row, or fails only for
+// the fixture's placement. Every row, and every shape derive gives past the
+// deadline, has one.
+func TestEveryRowHasAnExitAfterTheDeadline(t *testing.T) {
+	t.Parallel()
+	hasExit := func(row step) bool {
+		for _, command := range commands {
+			o := outcomes[row][command]
+			if !slices.Contains(nextSteps[row].refuses, command) && !o.rejected && (o.after != row || o.reply != "") {
+				return true
+			}
+		}
+		return false
+	}
+	for row := range nextSteps {
+		if !hasExit(row) {
+			t.Errorf("row %s has no exit after the deadline", row)
+		}
+	}
+	for name, st := range derivedStates(t) {
+		if !hasExit(st.step()) {
+			t.Errorf("%s (row %s) has no exit after the deadline", name, st.step())
+		}
+	}
+}

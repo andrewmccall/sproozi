@@ -294,3 +294,39 @@ func TestUndecidedSituationIsReportedAndRetried(t *testing.T) {
 		t.Fatalf("undecided step called the placement: %s", calls)
 	}
 }
+
+// No phase waits on the deadline to end (ADR 0060). The driver keeps no
+// lifecycle record: its decision table is enumerated here, and the deadline
+// is enforced by the execution journal's admit, which refuses create, so the
+// driver's start, once the deadline has passed. Terminal means a cancelled
+// execution, or an idle interactive one, which its owner resumes with a new
+// deadline. An exit is an action other than nothing that the deadline does
+// not refuse; an interactive session whose project admits this installation
+// may instead wait for its owner's stop, cancel or "recover", which the
+// deadline never refuses. Every possible situation, past the deadline or
+// with none, has one.
+func TestEveryDriverPhaseHasAnExitAfterTheDeadline(t *testing.T) {
+	refusedAfterDeadline := []action{actStart}
+	for _, s := range allSituations() {
+		if !possible(s) {
+			continue
+		}
+		act, err := decide(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		name := string(s.phase)
+		if s.phase == phaseNotReceived {
+			name = "not received"
+		}
+		terminal := s.phase == session.PhaseCancelled || s.phase == session.PhaseIdle && s.interactive
+		ownerActs := s.interactive && !s.revoked && (s.phase == session.PhaseActive ||
+			slices.Contains(phasesUnsettled, s.phase))
+		switch {
+		case s.lateStart && slices.Contains(refusedAfterDeadline, act):
+			t.Errorf("phase %s %+v: %s is refused after the deadline", name, s, act)
+		case act == actNothing && !terminal && !ownerActs:
+			t.Errorf("phase %s %+v has no exit after the deadline", name, s)
+		}
+	}
+}

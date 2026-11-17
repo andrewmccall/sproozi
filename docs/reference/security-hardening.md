@@ -278,8 +278,9 @@ sandbox Pod. The run stays `Running` with `Ready` reason `QuotaExceeded` and
 keeps counting against the caps. The controller retries with a backoff from 5
 seconds up to one minute, and the wait counts toward the run's execution
 deadline. If the quota still rejects the Pod at the deadline, the run ends
-`TimedOut`. The controller recognises a quota rejection from the API server's
-error, a `Forbidden` response whose message contains `exceeded quota`; other
+`TimedOut`. A run without a deadline keeps retrying until the Pod fits or the
+run is cancelled. The controller recognises a quota rejection from the API
+server's error, a `Forbidden` response whose message contains `exceeded quota`; other
 Pod creation errors are retried without that condition. See the
 [AgentRun reasons](agentrun.md#ready-condition-reasons).
 
