@@ -86,7 +86,10 @@ the `model-gateway-auth` ConfigMap selecting `chatgpt`. Only the trusted gateway
 has get/update permission on that exact Secret. It serializes refreshes and
 persists rotating access/refresh tokens together before using them. A failed
 credential read or refresh fails closed; an unsaved refresh replacement is
-retried without performing a second rotation in the same process.
+retried without performing a second rotation in the same process. A refresh
+that has started finishes, and its result is saved, even if the model request
+that started it ends first. What a failed refresh does is in
+[ChatGPT sign-in failures](#chatgpt-sign-in-failures).
 
 Model requests use the gateway's in-memory copy of the ChatGPT credential. The gateway
 reads the Secret again at most every 10 seconds, and sooner when the access
@@ -106,6 +109,37 @@ another cluster. A crash after provider rotation but before persistence can
 require reauthorization. Coordinated multi-replica refresh is not implemented.
 Do not let a GitOps reconciler restore an old bootstrap credential record over
 the rotating live Secret.
+
+### ChatGPT sign-in failures
+
+The gateway refreshes the access token when a model request finds it within a
+minute of expiry. If that refresh fails, the request, and every model request
+that waited for it, gets a 503 with type `server_error`, code
+`provider_auth_unavailable` and a message that names the cause. The same
+message is the audit record's `denyReason`. It never contains a token or the
+provider's reply.
+
+| Refresh outcome | Message after `provider authentication is unavailable: ` | What happens next | What to do |
+| --- | --- | --- | --- |
+| No reply, a timeout, 408, 429 or 5xx from `auth.openai.com`, or a reply the gateway can't use | `the ChatGPT sign-in could not be renewed (CAUSE); the gateway tries again 10s after the failure` | No refresh is sent for 10 seconds; the first model request after that tries again | Usually nothing. If it lasts, check the gateway's route to `auth.openai.com` and the provider's status |
+| Any other 4xx, such as 400 or 401 `invalid_grant`: the refresh token was revoked, expired or already spent | `the provider refused to renew the ChatGPT sign-in (token endpoint HTTP STATUS); an administrator must sign in again` | No refresh is sent again for this sign-in; every model request gets this 503 | Sign in again (below) |
+
+`CAUSE` is `the token endpoint was unreachable or did not answer in time`,
+`token endpoint HTTP STATUS`, `the token endpoint returned an unreadable
+reply` or `the renewed credential was incomplete`.
+
+To sign in again, run `bash hack/demo/chatgpt-login.sh --reauthorize` and load
+the new `.local/chatgpt-session.json` into key `session.json` of the
+`model-gateway-chatgpt` Secret, or on a local installation run `sproozi init
+--chatgpt`. The gateway reads the stored sign-in on every model request while
+a refresh failure is remembered, so the next model request uses the new
+sign-in at once; no restart is needed. A gateway restart also forgets the
+failure and tries one refresh.
+
+The gateway keeps the failure in memory only and does not raise an alert;
+watch the audit log for `denyReason` values containing `an administrator must
+sign in again`. See
+[ADR 0069](../adr/0069-a-failed-chatgpt-refresh-is-remembered.md).
 These constraints follow the provider's
 [rotating-session requirements](https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions).
 
@@ -173,7 +207,8 @@ in this mode; model discovery is allowed. Account-selection headers supplied by
 the workload are discarded. If the saved ChatGPT credential can't be used, for
 example because it lacks the `chatgpt.tokens.use.direct` scope, each call gets
 a 503 with code `provider_auth_unavailable` and `provider authentication is
-unavailable`; sign in again.
+unavailable`; sign in again. A failed refresh adds its cause to that message;
+see [ChatGPT sign-in failures](#chatgpt-sign-in-failures).
 See the provider's
 [inference contract](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference)
 and [preview limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations).

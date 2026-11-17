@@ -134,6 +134,14 @@ registration on every read and every save once the registration exists. What a
 contradicted record does to the operations that read it is
 [ADR 0066](0066-a-contradicted-retained-record-refuses-work-and-never-blocks-an-end.md).
 
+The gateway's record of a failed ChatGPT refresh
+(`internal/modelauth/refresh.go`,
+[ADR 0069](0069-a-failed-chatgpt-refresh-is-remembered.md)) adopts rules 1, 3
+and 4: a typed state, a `(from, event) → to` table and one `apply` function.
+It is held in memory only, so rule 2's check runs on every move rather than
+on load and save, and it has no deadline column because no execution deadline
+applies to it.
+
 > **Correction, 2026-11-15.** Two statements in this paragraph were not
 > true. Which records have a declared table today:
 >

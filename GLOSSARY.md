@@ -531,6 +531,17 @@ held in a Kubernetes Secret. One active gateway owns it. It is not a
 [model provider authentication](docs/guides/model-provider-auth.md).
 Also seen as: ChatGPT session.
 
+### Refresh hold
+
+The 10 seconds after a transient failure to refresh the
+[ChatGPT credential](#chatgpt-credential) during which the gateway sends no
+further refresh for it; the first model request after the hold tries again.
+A refused refresh (the provider rejected the refresh token) is not held but
+remembered until an administrator signs in again. Neither waits on time: a new
+sign-in ends both at once. See
+[ADR 0069](docs/adr/0069-a-failed-chatgpt-refresh-is-remembered.md). Also
+seen as: refresh backoff, failed-until state.
+
 ### Execution
 
 One approved period of work on a session, with its own permissions, allowance

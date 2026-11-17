@@ -120,6 +120,14 @@ seconds, so an administrator's replacement or removal of the Secret reaches
 every model request that authorizes 10 seconds or more after it, without a
 restart.
 
+When a refresh of that sign-in fails, model requests get a 503
+`provider_auth_unavailable` whose message names the cause. A transient
+failure (no reply, timeout, 408, 429, 5xx) is tried again by the first model
+request 10 seconds after it. A refusal (any other 4xx, such as
+`invalid_grant`) is not tried again: an administrator must sign in again and
+load the new credential into the Secret, which the next model request uses.
+See [ChatGPT sign-in failures](../guides/model-provider-auth.md#chatgpt-sign-in-failures).
+
 ## Controller flags
 
 | Flag | Default | Effect |
