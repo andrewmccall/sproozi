@@ -144,8 +144,16 @@ func reading(t *testing.T, pod *corev1.Pod) string {
 	if o.Agent.Terminated != nil {
 		code = o.Agent.Terminated.ExitCode
 	}
-	return fmt.Sprintf("agent-running=%t capture-running=%t terminated=%t exit=%d never-scheduled=%t | require-active=%s | status=%s completion=%s",
-		o.Agent.Running, o.Capture.Running, o.Agent.Ended(), code, o.NeverScheduled, active, status, completion)
+	// What the reading says of a stopped visit's finish whose exec failed:
+	// proven, never to be proven (final), or wait for another reading.
+	finish := "wait"
+	if proven, final := finishReading(pod); proven {
+		finish = "proven"
+	} else if final {
+		finish = "final"
+	}
+	return fmt.Sprintf("agent-running=%t capture-running=%t terminated=%t exit=%d never-scheduled=%t | require-active=%s | status=%s completion=%s | lost-finish=%s",
+		o.Agent.Running, o.Capture.Running, o.Agent.Ended(), code, o.NeverScheduled, active, status, completion, finish)
 }
 
 // Every site that reads a sandbox Pod, for every combination of the native
