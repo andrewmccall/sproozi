@@ -141,11 +141,13 @@ mounted through `subPath`. A sandbox Pod created by a controller from before
 this mount, which mounted the token through `subPath`, keeps the token it
 started with and loses the gateway two hours after it started; stop and resume
 such a session to give it a new Pod. Upgrading the controller leaves these
-Pods running. When the upgraded controller compares one with its own build,
-which happens only for a run that has not yet recorded its sandbox's name, it
-accepts the `subPath` form of this one mount, refuses any other difference,
-and logs `Adopted sandbox Pod whose gateway token is never refreshed` once for
-the Pod. A managed session's supervisor never puts the token in the
+Pods running, because the controller does not compare a Pod again once its run
+has recorded it. A run whose Pod the earlier controller created but had not yet
+recorded when it was replaced is refused instead: the controller logs
+`Reconciler error` with `existing sandbox ... has unsafe Pod settings:
+containers` and retries. Cancel and resubmit such an AgentRun, or stop and
+resume such a session; the controller still removes the Pod.
+A managed session's supervisor never puts the token in the
 harness's environment: it runs a loopback forwarder that reads the current
 token for each gateway connection, so a session outlives any one token
 ([ADR 0056](../adr/0056-whoever-starts-work-sets-its-deadline.md)). The
