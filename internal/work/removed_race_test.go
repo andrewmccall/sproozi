@@ -5,8 +5,11 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/andrewmccall/sproozi/internal/session/profile"
 	"github.com/google/uuid"
@@ -300,42 +303,87 @@ func TestLegacyPullOfARecordRemovedWhileItRuns(t *testing.T) {
 // An interactive recover reads the execution and then asks the coordinator
 // to recover it. A cancellation and a removal in between leave no journal;
 // the recover answers as for a removed session (was a raw "no such file or
-// directory", unavailable).
+// directory", unavailable). A resumed session's current execution is not
+// the session: the removal is recognized by the session's mark.
 func TestInteractiveRecoverOfASessionRemovedBeforeTheCoordinatorRecovers(t *testing.T) {
 	t.Parallel()
-	c, p := fixture(t)
-	race := &interleaving{}
-	c.interleave = race.at
-	o := openOwner(t, c)
-	v := startInteractive(t, o, interactiveRequest())
+	for _, resumed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "first execution", true: "resumed"}[resumed], func(t *testing.T) {
+			t.Parallel()
+			c, p := fixture(t)
+			race := &interleaving{}
+			c.interleave = race.at
+			o := openOwner(t, c)
+			v := startInteractive(t, o, interactiveRequest())
+			if resumed {
+				if _, err := o.Stop(t.Context(), v.ID, uuid.NewString()); err != nil {
+					t.Fatal(err)
+				}
+				waitPhase(t, o, v.ID, phaseRetained)
+				if _, err := o.Resume(t.Context(), v.ID, uuid.NewString(), ""); err != nil {
+					t.Fatal(err)
+				}
+				if v = waitPhase(t, o, v.ID, phaseActive); v.ExecutionID == v.ID {
+					t.Fatalf("resume kept the session's execution: %+v", v)
+				}
+			}
+			loseStop(t, o, p, v.ID)
+			var cancelErr, removeErr error
+			race.arm(stepRecoverExecution, v.ID, func() {
+				_, cancelErr = o.Cancel(t.Context(), v.ID, uuid.NewString())
+				_, removeErr = o.Remove(t.Context(), v.ID, false)
+			})
+			_, during := o.Recover(t.Context(), v.ID)
+			if !race.fired() || cancelErr != nil || removeErr != nil {
+				t.Fatalf("removal: ran %t, cancel %v, remove %v", race.fired(), cancelErr, removeErr)
+			}
+			_, after := o.Recover(t.Context(), v.ID)
+			if code(during) != profile.CodeInvalid || errText(during) != errText(after) {
+				t.Fatalf("recover of a session removed before the coordinator recovered it: %v; of a removed session: %v",
+					during, after)
+			}
+		})
+	}
+}
+
+// loseStop stops active interactive session id with the placement's reply
+// lost, leaving it unknown-stop.
+func loseStop(t *testing.T, o *Owner, p *fixturePlacement, id string) {
+	t.Helper()
 	p.mu.Lock()
 	p.lostStop = true
 	p.mu.Unlock()
-	if _, err := o.Stop(t.Context(), v.ID, uuid.NewString()); err == nil {
+	if _, err := o.Stop(t.Context(), id, uuid.NewString()); err == nil {
 		t.Fatal("a stop whose reply was lost succeeded")
 	}
-	waitPhase(t, o, v.ID, phaseUnknownStop)
-	var cancelErr, removeErr error
-	race.arm(stepRecoverExecution, v.ID, func() {
-		_, cancelErr = o.Cancel(t.Context(), v.ID, uuid.NewString())
-		_, removeErr = o.Remove(t.Context(), v.ID, false)
-	})
-	_, during := o.Recover(t.Context(), v.ID)
-	if !race.fired() || cancelErr != nil || removeErr != nil {
-		t.Fatalf("removal: ran %t, cancel %v, remove %v", race.fired(), cancelErr, removeErr)
-	}
-	_, after := o.Recover(t.Context(), v.ID)
-	if code(during) != profile.CodeInvalid || errText(during) != errText(after) {
-		t.Fatalf("recover of a session removed before the coordinator recovered it: %v; of a removed session: %v",
-			during, after)
+	waitPhase(t, o, id, phaseUnknownStop)
+}
+
+// An interactive recover whose Coordinator.Recover fails for a session that
+// is not removed keeps that failure: only a removal is answered as one.
+func TestRecoverKeepsAFailureOfAKeptSession(t *testing.T) {
+	t.Parallel()
+	c, p := fixture(t)
+	o := openOwner(t, c)
+	v := startInteractive(t, o, interactiveRequest())
+	loseStop(t, o, p, v.ID)
+	p.mu.Lock()
+	p.lostStop = true
+	p.mu.Unlock()
+	if _, err := o.Recover(t.Context(), v.ID); code(err) != profile.CodeUnavailable ||
+		!strings.Contains(errText(err), "lost stopped reply") {
+		t.Fatalf("recover whose stop reply was lost again: %v (code %q)", err, code(err))
 	}
 }
 
 // The exit sweep says nothing about a session removed between its read of
-// the record and its read of the execution: nothing exited.
+// the record and its read of the execution: nothing exited. The test calls
+// settleExit itself; the background sweep waits an hour, so it never reaches
+// the step, and the removal's result is handed over a channel.
 func TestExitSweepSkipsASessionRemovedAfterItsRead(t *testing.T) {
 	t.Parallel()
 	c, _ := fixture(t)
+	c.exitInterval = time.Hour
 	race := &interleaving{}
 	c.interleave = race.at
 	o := openOwner(t, c)
@@ -344,14 +392,41 @@ func TestExitSweepSkipsASessionRemovedAfterItsRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitPhase(t, o, v.ID, phaseRetained)
-	var removeErr error
-	race.arm(stepExitRead, v.ID, func() { _, removeErr = o.Remove(t.Context(), v.ID, false) })
+	removal := make(chan error, 1)
+	race.arm(stepExitRead, v.ID, func() {
+		_, err := o.Remove(t.Context(), v.ID, false)
+		removal <- err
+	})
 	stopped, err := o.settleExit(t.Context(), v.ID)
-	if !race.fired() || removeErr != nil {
-		t.Fatalf("removal: ran %t, %v", race.fired(), removeErr)
+	if !race.fired() {
+		t.Fatal("the removal did not run at the exit sweep's read")
+	}
+	if removeErr := <-removal; removeErr != nil {
+		t.Fatalf("removal at the exit sweep's read: %v", removeErr)
 	}
 	if stopped || err != nil {
 		t.Fatalf("exit sweep of a session removed after its read: stopped %t, %v", stopped, err)
+	}
+}
+
+// The exit sweep still reports a failure to read the execution of a session
+// that is not removed: only a removal is passed over.
+func TestExitSweepReportsAnUnreadableExecution(t *testing.T) {
+	t.Parallel()
+	c, _ := fixture(t)
+	c.exitInterval = time.Hour
+	o := openOwner(t, c)
+	v := startInteractive(t, o, interactiveRequest())
+	if _, err := o.Stop(t.Context(), v.ID, uuid.NewString()); err != nil {
+		t.Fatal(err)
+	}
+	waitPhase(t, o, v.ID, phaseRetained)
+	journal := filepath.Join(filepath.Dir(c.Directory), "sessions", v.ExecutionID+".json")
+	if err := os.WriteFile(journal, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if stopped, err := o.settleExit(t.Context(), v.ID); stopped || err == nil {
+		t.Fatalf("exit sweep of a session whose journal cannot be read: stopped %t, %v", stopped, err)
 	}
 }
 
