@@ -288,18 +288,25 @@ func (o *Owner) after(ctx context.Context, r record, err error, onError next) ne
 	}
 	o.logf("Could not continue work session %s: %v", r.ID, err)
 	if onError == nextDone {
-		o.note(r.ID, failureProblem(err))
+		o.note(r.ID, failureProblem(r, err))
 	}
 	return onError
 }
 
-// failureProblem is the problem a failed step records. A placement's
-// contradicted record of the visit is permanent: recovering meets it again,
-// and only stopping or cancelling the session ends the visit, so the problem
-// names it and says so.
-func failureProblem(err error) string {
-	if errors.Is(err, session.ErrRecordContradicted) {
-		return fmt.Sprintf("%s: %v; stop or cancel this session", profile.CodeConflict, err)
+// failureProblem is the problem a failed step of session r records. A
+// placement's contradicted record of the visit is permanent: recovering meets
+// it again, and only ending the session ends the visit, so the problem
+// states the contradiction alone, without the errors around it, which the
+// executor's log keeps, and says how to end it: cancel a task, which cannot
+// be stopped, and stop or cancel an interactive session.
+func failureProblem(r record, err error) string {
+	var contradiction session.RecordContradiction
+	if errors.Is(err, session.ErrRecordContradicted) && errors.As(err, &contradiction) {
+		end := "cancel this session"
+		if r.Intent.Mode == ModeInteractive {
+			end = "stop or cancel this session"
+		}
+		return fmt.Sprintf("%s: %s; %s", profile.CodeConflict, contradiction.Contradiction(), end)
 	}
 	return outcomeMessage(err) + "; inspect status and recover this session"
 }

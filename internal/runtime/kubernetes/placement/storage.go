@@ -226,9 +226,16 @@ func (c *contradiction) Unwrap() []error {
 	return []error{session.ErrRecordContradicted, &profile.Rejection{Code: profile.CodeConflict}}
 }
 
-func (c *contradiction) Error() string {
-	return fmt.Sprintf("placement: the retained record of visit %s %s", c.allocation, strings.Join(c.reasons, "; it "))
+func (c *contradiction) Error() string { return "placement: " + c.Contradiction() }
+
+// Contradiction states the contradiction: the visit's allocation ID, which
+// its owner already knows, and the rules its record breaks. It holds no
+// path, configuration or cluster detail.
+func (c *contradiction) Contradiction() string {
+	return fmt.Sprintf("the retained record of visit %s %s", c.allocation, strings.Join(c.reasons, "; it "))
 }
+
+var _ session.RecordContradiction = (*contradiction)(nil)
 
 // check is the one rule for which retained records are valid, alone
 // (registration nil) or beside their session registration. It returns r

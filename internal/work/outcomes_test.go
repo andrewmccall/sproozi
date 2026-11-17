@@ -4,7 +4,6 @@ package work
 import (
 	"crypto/tls"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -123,23 +122,52 @@ func TestWorkStatusRetainsSafeAsyncRecoveryCategory(t *testing.T) {
 	}
 }
 
+// contradictedRecord is a placement's contradicted record of a visit.
+type contradictedRecord struct{}
+
+func (contradictedRecord) Error() string {
+	return "placement: the retained record of visit V records a stop, but its session registration was never active"
+}
+
+func (contradictedRecord) Contradiction() string {
+	return "the retained record of visit V records a stop, but its session registration was never active"
+}
+
+func (contradictedRecord) Unwrap() []error {
+	return []error{session.ErrRecordContradicted, &profile.Rejection{Code: profile.CodeConflict}}
+}
+
 // A placement's contradicted record of the visit is permanent: the problem
-// names it and says to stop or cancel, not to recover.
+// states the contradiction alone, without the errors the coordinator wraps
+// it in, and says how to end the session: cancel a task, which cannot be
+// stopped, and stop or cancel an interactive session; never recover it.
 func TestWorkStatusNamesAContradictedPlacementRecord(t *testing.T) {
 	t.Parallel()
-	c, p := fixture(t)
-	p.refusePrepare = fmt.Errorf("placement: the retained record of visit V records a stop, but its session registration was never active: %w",
-		errors.Join(session.ErrRecordContradicted, &profile.Rejection{Code: profile.CodeConflict}))
-	o, err := Open(c)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = o.Close() }()
-	initial := submit(t, o)
-	status := waitDriver(t, o, initial.ID)
-	if !strings.HasPrefix(status.Problem, "conflict:") || !strings.Contains(status.Problem, "never active") ||
-		!strings.HasSuffix(status.Problem, "stop or cancel this session") || strings.Contains(status.Problem, "recover") {
-		t.Fatalf("problem of a contradicted placement record: %q", status.Problem)
+	for _, mode := range []Mode{"task", ModeInteractive} {
+		t.Run(string(mode), func(t *testing.T) {
+			t.Parallel()
+			c, p := fixture(t)
+			p.refusePrepare = fmt.Errorf("session: preparing under /private/executor/state: %w", contradictedRecord{})
+			o, err := Open(c)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = o.Close() }()
+			want := "conflict: the retained record of visit V records a stop, but its session registration was never active; "
+			var id string
+			if mode == ModeInteractive {
+				v, err := o.Submit(t.Context(), interactiveRequest())
+				if err != nil {
+					t.Fatal(err)
+				}
+				id, want = v.ID, want+"stop or cancel this session"
+			} else {
+				id, want = submit(t, o).ID, want+"cancel this session"
+			}
+			if status := waitDriver(t, o, id); status.Problem != want {
+				t.Fatalf("problem of a contradicted placement record:\n got %q\nwant %q", status.Problem, want)
+			}
+		})
 	}
 }
 

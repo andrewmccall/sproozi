@@ -171,6 +171,14 @@ var ErrUsageUnsealed = errors.New("session: writer stopped but usage is not seal
 // cancelling the session ends the visit.
 var ErrRecordContradicted = errors.New("session: the placement's record of the visit contradicts itself; stop or cancel the session")
 
+// RecordContradiction is an ErrRecordContradicted error that can state the
+// contradiction alone, without the errors it is wrapped in, for a problem
+// its session's owner reads.
+type RecordContradiction interface {
+	error
+	Contradiction() string
+}
+
 // ErrRecoveryRequired matches a refusal of a new move or stop because an
 // earlier one on the same execution must be recovered or cancelled first.
 var ErrRecoveryRequired = errors.New("session: recovery required")
