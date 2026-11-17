@@ -240,9 +240,12 @@ func (p *Placement) preparationRegistration(ctx context.Context, local retained)
 		// writer and sealed no usage. A receipt with usage belongs to an
 		// abort with the incarnation, which reports it.
 	case r.Phase == registry.Cancelled && r.PodUID == "" && r.Receipt == nil:
-		// Cancelled by another operation before any Pod was bound to it, so
-		// before it was ever prepared or active: it never had authority,
-		// and this abort fences it as one of its own (ADR 0067).
+		// Cancelled before any Pod was bound to it, so before it was ever
+		// prepared or active: it never had authority, and this abort fences
+		// it as one of its own (ADR 0067). Nothing in this executor cancels
+		// a launch's registration while another operation holds its lock;
+		// an administrator, or another executor's abort of a launch whose
+		// local record was lost, can.
 	default:
 		return r, false, fmt.Errorf("placement: the session registration for AgentRun %s is %s, not a preparation; "+
 			"only a stop or an abort with its incarnation can end it: %w", name, r.Phase, &profile.Rejection{Code: profile.CodeConflict})

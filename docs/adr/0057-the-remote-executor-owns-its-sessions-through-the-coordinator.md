@@ -178,10 +178,8 @@ Failures:
   unless their project is revoked ([ADR 0065](0065-a-revoked-project-settles-interactive-sessions.md)).
 - **A failed preparation or activation** records the outcome as the problem
   and waits for `recover`, as before. Corrected 2026-11-17: a preparation
-  the placement refuses for good, such as one whose AgentRun failed before
-  its sandbox started, ends instead: a task is cancelled and an interactive
-  session retained, with the problem `it can never start: REASON`
-  ([ADR 0067](0067-a-start-ends-when-its-run-has-ended.md)).
+  its placement refuses now ends instead; see
+  [ADR 0067](0067-a-start-ends-when-its-run-has-ended.md).
 - **A revoked project** is cancelled through the coordinator with a
   name-based operation, whether found at startup or while driving.
 
@@ -618,7 +616,11 @@ proves:
    the executor never saw the launch) makes every later `Prepare` of the
    launch a conflict and stops the placement creating its registration.
    `Activate`, `Stop`, `Abort`, `Attach` and `Inspect` of a tombstoned
-   launch are conflicts too, whatever reference it holds. A
+   launch are conflicts too, whatever reference it holds. Corrected
+   2026-11-17: `Prepare` of the tombstoned launch itself now answers a
+   refusal and its `Inspect` reports `preparing`, so an unproven end is
+   repeated; another launch of the allocation is still a conflict; see
+   [ADR 0067](0067-a-start-ends-when-its-run-has-ended.md). A
    launch the executor never saw also claims its session epoch, as
    `Prepare` does, so no other allocation prepares that epoch afterwards.
    Within the executor, `Prepare` and `AbortPreparation` hold the same lock,

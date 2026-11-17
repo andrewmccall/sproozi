@@ -23,19 +23,31 @@ executor's driver calls the coordinator with no timeout. So:
 
 - a remote task with no deadline whose AgentRun failed before its Pod stayed
   `preparing` for ever, with no problem shown; only `cancel` ended it;
-- the same held when the run failed, was deleted, or had its registration
-  cancelled by another operation while `Prepare` already waited;
+- the same held when the run failed or was deleted while `Prepare` already
+  waited, or its registration was cancelled meanwhile, which nothing in the
+  executor does while `Prepare` holds the launch's lock: only an
+  administrator, or another executor's abort of a launch whose local record
+  was lost;
 - with a deadline, the same task waited until the deadline, showed "Work owner
   unavailable; … recover this session", and the next recover ended it "the
   deadline passed before it started": the right end, the wrong reason;
 - an interactive session showed the unavailable problem after 2 minutes, and
   every recover waited 2 more.
 
-Two related gaps made recovery worse. `Inspect` of a bound start whose run had
-no sandbox, queued or ended, failed with "exact admitted run unavailable", so a
-recover never called `Prepare` again. And `AbortPreparation` refused a
-registration that another operation had cancelled before any Pod was bound,
-as "not a preparation".
+Related gaps made recovery worse:
+
+- `Inspect` of a bound start whose run had no sandbox, queued or ended,
+  failed with "exact admitted run unavailable", so a recover never called
+  `Prepare` again.
+- `AbortPreparation` refused a registration cancelled, as above, before any
+  Pod was bound, as "not a preparation".
+- A recover after the bound run was deleted, as its retention TTL does, made
+  `ensureRun` create a second AgentRun at the same name, which `BindRun`
+  refused; every later recover answered `conflict`, and the orphan run could
+  later be admitted. This was older than this record.
+- Once `AbortPreparation` has saved the launch's tombstone, `Inspect` and
+  `Prepare` answered `conflict` for that launch, so an end the coordinator
+  could not prove the first time was never attempted again by `recover`.
 
 Retrying cannot help: the run name is fixed per launch (`runName`), so
 `ensureRun` returns the same ended run. Cancelling worked, because
@@ -74,11 +86,24 @@ the bound run:
 
 It keeps waiting for a run that is queued, admitted, or running with a sandbox
 named but no Pod yet; a read that fails is not evidence either way. Only the
-start's wait checks this; a stop's wait is unchanged. `Inspect` of a bound
-start whose run has no sandbox now reports `preparing`, so a recover calls
-`Prepare` and reaches the refusal. `AbortPreparation` fences a registration
-another operation cancelled with no Pod ever bound: it was never prepared or
-active, so it never had authority.
+start's wait checks this; a stop's wait is unchanged. The wait reads the run
+once per 100-millisecond poll, for the Pod and the refusal alike, and the
+registration once a second.
+
+So that every recover reaches the refusal:
+
+- `Inspect` of a bound start whose run has no sandbox reports `preparing`, so
+  a recover calls `Prepare`.
+- `Prepare` of a registration that already bound a run checks that run before
+  anything else, and only a registration with no run creates one: a bound run
+  that is gone refuses the start and is never created again.
+- A launch whose preparation `AbortPreparation` tombstoned is `preparing` to
+  `Inspect`, and its `Prepare` refuses it. The reason is how its run ended
+  when the run is still terminal, otherwise "the preparation of AgentRun NAME
+  was aborted before its sandbox started". Another launch for the same
+  allocation still answers `conflict`.
+- `AbortPreparation` fences a registration cancelled with no Pod ever bound:
+  it was never prepared or active, so it never had authority.
 
 ### The coordinator ends the start
 
@@ -87,9 +112,10 @@ When `Prepare` returns `StartRefused`, the coordinator takes ADR 0060's
 `AbortPreparation` where the placement fences preparations, otherwise
 `Inspect` and an abort of any incarnation reported. The execution is `idle`
 with its last checkpoint. The error is `StartRefused` marked ended, carrying
-the reason; it and `ErrDeadlinePassed` both match `ErrStartEnded`. If the
-proof fails, nothing is recorded and the error is `ErrEndUnproven` wrapping
-the refusal.
+the reason; it and `ErrDeadlinePassed` both match `ErrStartEnded`, which a
+stop that settles a pending start also accepts. If the proof fails, nothing
+is recorded and the error is `ErrEndUnproven` wrapping the refusal; the next
+recover is refused again and repeats the proof.
 
 Any other `Prepare` failure leaves the start `preparing` for recover, as
 before.
@@ -102,24 +128,32 @@ otherwise `StartRefused` with no reason.
 
 The driver records the problem `it can never start: REASON` when `Recover`
 reports a refusal, deadline or none. The decision table gains a situation bit,
-`refused`, read from that problem while the execution is starting or idle, and
-an action, `end-refused`:
+`refused`, and an action, `end-refused`. Only an idle execution whose first
+visit ended before it started has `refused`, and never with `lateStart`: the
+coordinator ends a start for its deadline only once the deadline has passed,
+so before it, or with none, the placement refused it, and past it the
+refusal problem the driver recorded decides.
 
 - a task whose start was refused is cancelled through `end()` with operation
   `start-refused`, keeping that problem, as `end-expired` and `end-revoked`
-  end one. The refusal wins over a deadline that has also passed.
+  end one. A task whose problem was not recorded gets `it can never start:
+  its placement refused it`.
 - an interactive session stays `retained` with the problem, and `resume
   --remote` continues it, as for a start its deadline ended.
 
 While the end is unproven, the problem adds "the executor has not yet shown
-that nothing runs there, so cancel this session" for a task, which the driver
-cancels after its backoff, and "recover or cancel this session" for an
-interactive session, which waits for its owner.
+that nothing runs there and tries again" for a task, which the driver
+recovers again after its backoff, and ", so recover or cancel this session"
+for an interactive session, which waits for its owner. A later failure of
+that recovery replaces the problem with its own, as any failed recovery's
+does. An interactive session whose ended start has no recorded problem shows
+`it can never start: its placement refused it`, or the deadline's problem
+once the deadline has passed.
 
 ### Over the placement protocol
 
 A refused `prepare` answers `refused` with HTTP 409 and a `reason` field,
-which only that code carries. The home's client reads it as `StartRefused`,
+which only that code carries; the executor answers it to no other action. The home's client reads it as `StartRefused`,
 so a session home coordinates on a cluster ends the same way. No existing code
 fitted:
 
@@ -182,19 +216,31 @@ records `unknown-stop`, nothing is sealed, and a recover waits again.
 - A start whose run was cancelled by a concurrent `cancel` is refused too, and
   ends the same way unless the cancellation intent is already recorded; the
   driver's table carries out a held cancellation first.
-- The driver reads `refused` from the problem text it wrote. If the executor
-  stops between the coordinator's commit and saving that problem, the task is
-  idle with an ended start and no refusal problem, which the table reads as
-  a start the deadline ended: it is cancelled as "the deadline passed before
-  it started", deadline or none. It ends; only the reason is wrong.
-- A replay of an ended start past its deadline reports the deadline, whatever
-  ended it.
+What remains:
+
+- Past its deadline, a start the placement refused is told from one the
+  deadline ended only by the refusal problem the driver recorded. If the
+  executor stopped between the coordinator's commit and saving it, and the
+  deadline has passed since, the session is ended as "the deadline passed
+  before it started". Before the deadline, or with none, the coordinator's
+  clock decides, and the problem says only "its placement refused it".
+- The journal keeps no reason, so a replay of an ended start reports the
+  deadline once it has passed and a reasonless refusal before it. A recover
+  of a tombstoned launch whose run is no longer terminal, deleted or
+  replaced, says only that its preparation was aborted.
+- A run an administrator replaced is refused, but its preparation cannot be
+  shown to hold no Pod of the bound run, so the end stays unproven and the
+  session `preparing`, as ADR 0060 records for that case; `cancel` meets the
+  same gap.
 - A task whose deadline has passed before the driver steps it is ended as
   expired without asking the placement, as before.
-- Each refusal check costs two more API reads per 100-millisecond poll of the
-  wait.
+- The wait reads the run once per 100-millisecond poll, as it read it for the
+  Pod before, and the registration once a second.
 - `driver-outcomes.txt` gained the `preparing-start-refused` and
-  `idle-start-refused` states; no earlier outcome changed.
+  `idle-start-refused` states. Later, 24 lines of `idle-start-ended` task
+  cases on the early clock changed from expired to refused: those states are
+  built past the deadline and stepped before it, which a coordinator clock
+  that never runs backwards cannot reach.
 
 ## Revisit conditions
 
