@@ -154,7 +154,10 @@ type rowFixture struct {
 	// clocks are the clocks the row can be reached under. stateFixtures
 	// uses the first.
 	clocks []deadlineClock
-	build  func(t *testing.T, c deadlineClock) (s *Service, id string, exit func() Request)
+	// to is the row the exit leaves the session in, "" once it is removed;
+	// toPast, when set, is that row once the deadline has passed.
+	to, toPast step
+	build      func(t *testing.T, c deadlineClock) (s *Service, id string, exit func() Request)
 }
 
 // fixtureService is a new service whose executions get a deadline an hour
@@ -242,7 +245,7 @@ var everyClock = []deadlineClock{clockAhead, clockPassed, clockNone}
 // rowFixtures has one fixture for each row of the next-steps table.
 var rowFixtures = map[step]rowFixture{
 	// The pulled execution's deadline passed an hour ago, or it has none.
-	stepImporting: {clocks: []deadlineClock{clockPassed, clockNone},
+	stepImporting: {clocks: []deadlineClock{clockPassed, clockNone}, to: stepRetained,
 		build: func(t *testing.T, c deadlineClock) (*Service, string, func() Request) {
 			s, _, source := importedFixture(t)
 			if c == clockNone {
@@ -258,29 +261,31 @@ var rowFixtures = map[step]rowFixture{
 				return Request{Action: ActionPull, ID: source.export.ID, OperationID: source.export.OperationID}
 			}
 		}},
-	stepRetained: {clocks: everyClock, build: stoppedFixture(nil)},
-	stepFailed:   {clocks: everyClock, build: stoppedFixture(&session.Exit{Code: 2})},
+	stepRetained: {clocks: everyClock, to: stepRunning, build: stoppedFixture(nil)},
+	stepFailed:   {clocks: everyClock, to: stepRunning, build: stoppedFixture(&session.Exit{Code: 2})},
 	// Past its deadline a starting session is overdue.
-	stepStarting: {clocks: []deadlineClock{clockAhead, clockNone},
+	stepStarting: {clocks: []deadlineClock{clockAhead, clockNone}, to: stepRunning,
 		build: func(t *testing.T, c deadlineClock) (*Service, string, func() Request) {
 			s, id := startingFixture(t, c)
 			return s, id, leaveWith(ActionRecover, id)
 		}},
 	// Without a deadline nothing is overdue.
-	stepOverdue: {clocks: []deadlineClock{clockPassed},
+	stepOverdue: {clocks: []deadlineClock{clockPassed}, to: stepRetained,
 		build: func(t *testing.T, _ deadlineClock) (*Service, string, func() Request) {
 			s, id := startingFixture(t, clockAhead)
 			passDeadline(t, s, id)
 			return s, id, leaveWith(ActionStop, id)
 		}},
-	stepRunning: {clocks: everyClock, build: func(t *testing.T, c deadlineClock) (*Service, string, func() Request) {
+	stepRunning: {clocks: everyClock, to: stepRetained, build: func(t *testing.T, c deadlineClock) (*Service, string, func() Request) {
 		s, _, id := started(t, c)
 		passIfLate(t, s, c)
 		return s, id, leaveWith(ActionStop, id)
 	}},
-	stepStopping: {clocks: everyClock, build: lostStopFixture(false, ActionStop)},
-	stepMoving:   {clocks: everyClock, build: lostStopFixture(true, ActionRecover)},
-	stepCancelling: {clocks: everyClock, build: func(t *testing.T, c deadlineClock) (*Service, string, func() Request) {
+	stepStopping: {clocks: everyClock, to: stepRetained, build: lostStopFixture(false, ActionStop)},
+	// Past the deadline the move cannot start at its destination: recover
+	// abandons it, and the session stays stopped with its work kept (ADR 0060).
+	stepMoving: {clocks: everyClock, to: stepRunning, toPast: stepRetained, build: lostStopFixture(true, ActionRecover)},
+	stepCancelling: {clocks: everyClock, to: stepCancelled, build: func(t *testing.T, c deadlineClock) (*Service, string, func() Request) {
 		s, local, id := started(t, c)
 		local.unreachableAbort = true
 		if _, err := s.Cancel(t.Context(), id, uuid.NewString()); err == nil {
@@ -292,7 +297,7 @@ var rowFixtures = map[step]rowFixture{
 			return command(ActionRecover, id)
 		}
 	}},
-	stepCancelled: {clocks: everyClock, build: func(t *testing.T, c deadlineClock) (*Service, string, func() Request) {
+	stepCancelled: {clocks: everyClock, to: "", build: func(t *testing.T, c deadlineClock) (*Service, string, func() Request) {
 		s, _, id := started(t, c)
 		if _, err := s.Cancel(t.Context(), id, uuid.NewString()); err != nil {
 			t.Fatal(err)
@@ -501,21 +506,7 @@ func TestEachStateRefusesOrCarriesOutEachCommand(t *testing.T) {
 				if before := rowAfter(t, s, id); before != row {
 					t.Fatalf("the fixture reached %s, not %s", before, row)
 				}
-				q := Request{Action: command, ID: id}
-				switch command {
-				case ActionMove:
-					q.OperationID, q.Destination = uuid.NewString(), testRemote
-				case ActionPull, ActionResume, ActionStop:
-					q.OperationID = uuid.NewString()
-				case ActionCancel:
-					// A cancellation already recorded is repeated, not
-					// replaced: another is refused by the execution journal.
-					q.OperationID = uuid.NewString()
-					if x, err := s.coordinator.Inspect(id); err == nil && x.CancelOperation != "" {
-						q.OperationID = x.CancelOperation
-					}
-				}
-				r := exchange(t, s, q)
+				r := exchange(t, s, commandFor(s, id, command))
 				reply := strings.ReplaceAll(want.reply, "ID", id)
 				if r.Error != reply || r.Rejected != want.rejected {
 					t.Fatalf("%s replied rejected=%v %q, want rejected=%v %q", command, r.Rejected, r.Error,
@@ -587,9 +578,18 @@ func TestEveryRowsExitLeavesItPastTheDeadlineAndWithoutOne(t *testing.T) {
 					t.Fatalf("row %s refuses its exit %s", row, q.Action)
 				}
 				r := exchange(t, s, q)
-				if after := rowAfter(t, s, id); after == row {
+				want := f.to
+				if c == clockPassed && f.toPast != "" {
+					want = f.toPast
+				}
+				switch after := rowAfter(t, s, id); after {
+				case row:
 					t.Fatalf("row %s has no exit with the deadline %s: %s left it there: %q", row, c, q.Action,
 						r.Error)
+				case want:
+				default:
+					t.Fatalf("row %s with the deadline %s: %s left it %q, want %q: %q", row, c, q.Action, after,
+						want, r.Error)
 				}
 			})
 		}
@@ -616,5 +616,57 @@ func checkClock(t *testing.T, s *Service, id string, c deadlineClock) {
 	passed := s.coordinator.PastDeadline(session.Record{Deadline: until})
 	if c == clockPassed && !passed || c == clockNone && !until.IsZero() {
 		t.Fatalf("deadline %v under clock %s", until, c)
+	}
+}
+
+// commandFor is a request for command on session id, as a user makes it: a
+// new operation where the command takes one, and a cancellation already
+// recorded repeated rather than replaced, since another is refused by the
+// execution journal.
+func commandFor(s *Service, id, command string) Request {
+	q := Request{Action: command, ID: id}
+	switch command {
+	case ActionMove:
+		q.OperationID, q.Destination = uuid.NewString(), testRemote
+	case ActionPull, ActionResume, ActionStop:
+		q.OperationID = uuid.NewString()
+	case ActionCancel:
+		q.OperationID = uuid.NewString()
+		if x, err := s.coordinator.Inspect(id); err == nil && x.CancelOperation != "" {
+			q.OperationID = x.CancelOperation
+		}
+	}
+	return q
+}
+
+// No command a row admits is refused because the deadline has passed, or
+// because there is none. Under each of those clocks, every command the
+// next-steps table does not refuse for the row is refused, a rejection that
+// leaves the row as it was, only where outcomes, measured with the deadline
+// ahead, says it is. A rejection that acts is not a refusal: past the
+// deadline a move, or the recovery of one, stops the writer and then ends
+// without a new visit, leaving the session stopped with its work kept (ADR
+// 0060), and says so.
+func TestNoAdmittedCommandIsRefusedForTheDeadline(t *testing.T) {
+	t.Parallel()
+	for row, f := range rowFixtures {
+		for _, c := range f.clocks {
+			if c == clockAhead {
+				continue
+			}
+			for _, command := range commands {
+				if slices.Contains(nextSteps[row].refuses, command) {
+					continue
+				}
+				t.Run(string(row)+"/"+string(c)+"/"+command, func(t *testing.T) {
+					t.Parallel()
+					s, id, _ := f.build(t, c)
+					r := exchange(t, s, commandFor(s, id, command))
+					if r.Rejected && !outcomes[row][command].rejected && rowAfter(t, s, id) == row {
+						t.Fatalf("row %s with the deadline %s refuses %s: %q", row, c, command, r.Error)
+					}
+				})
+			}
+		}
 	}
 }
