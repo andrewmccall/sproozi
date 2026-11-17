@@ -126,6 +126,29 @@ per-phase validation. Its guards may later move into a table without changing
 behaviour. Remote work keeps its own phases until it runs through the
 execution journal.
 
+The remote executor's retained record of a Kubernetes visit
+(`internal/runtime/kubernetes/placement/storage.go`), its own file beside the
+session registration, adopts rule 2 only. It stores no phase: the visit's
+phase is the registration's, which has the table. Its facts are written in a
+fixed order: the registration's reference, then, from a stop that reached the
+active source, a quiet source, an exit and a turnless first visit, then a
+fenced writer once the registration records a stop or cancellation, then the
+output the stop keeps. An aborted preparation's tombstone stands beside any of
+them. `retainedRules` lists each contradiction of that order, between the
+record's own facts or with the registration's phase and bound conversation,
+and one function, `check`, applies them on load and on save. Operations that
+start work (`Prepare`, `Activate`, `Attach`) refuse a contradicted record and
+name the contradiction. Operations that observe or end the visit (`Inspect`,
+`Exited`, `Stop`, `Abort`, `AbortPreparation`) forget the contradicted facts,
+observe them again, log the contradiction and save a valid record, so a loose
+record never keeps a session from being stopped, cancelled or removed. A
+forgotten fence is not trusted: with the Pod gone, the stop stays unproven.
+The stored format and unknown-field handling are unchanged. A test records
+every combination of the record's facts beside every registration phase, and
+another records what each reader of a sandbox Pod (the controller, the
+gateway's and placement's `RequireActive`, and the placement) derives from it;
+those readers share one pure reading, `sandboxpod.Observe`.
+
 > **Correction, 2026-11-15.** Two statements in this paragraph were not
 > true. Which records have a declared table today:
 >
@@ -463,7 +486,10 @@ reply `stopped`.
   `internal/runtime/docker/transitions.go`, `internal/gateway/docker/owner.go`,
   `internal/runtime/kubernetes/registry/transitions.go`,
   `cmd/native-session/lifecycle.go`, `cmd/native-session/deadline.go`,
-  `cmd/native-session/main.go`
+  `cmd/native-session/main.go`,
+  `internal/runtime/kubernetes/placement/storage.go`,
+  `internal/runtime/kubernetes/placement/lifecycle.go`,
+  `internal/runtime/kubernetes/sandboxpod/observe.go`
 - Tests: `internal/session/phase_test.go`, `internal/session/rules_test.go`,
   `cmd/sproozi/deadline_test.go`, `internal/runtime/docker/transitions_test.go`,
   `internal/gateway/docker/transitions_test.go`,
@@ -471,9 +497,13 @@ reply `stopped`.
   `internal/runtime/kubernetes/registry/outcomes_test.go`,
   `internal/session/home/phase_test.go`, `internal/session/home/reconcile_test.go`,
   `cmd/native-session/lifecycle_test.go`, `cmd/native-session/lifecycle_record_test.go`,
-  `cmd/native-session/lifecycle_paths_test.go`
+  `cmd/native-session/lifecycle_paths_test.go`,
+  `internal/runtime/kubernetes/placement/retained_record_test.go`,
+  `internal/runtime/kubernetes/placement/contradicted_test.go`,
+  `internal/runtime/kubernetes/placement/pod_record_test.go`
   (Corrected 2026-11-16: the home catalogue entry's files added; the
-  supervisor's files added)
+  supervisor's files added. 2026-11-17: the Kubernetes retained record's
+  and the sandbox Pod reading's files added)
 - Reference: [status and listing output](../reference/session-commands.md#status-and-listing-output)
 - Related: [ADR 0018](0018-coordinator-owns-every-visit.md),
   [ADR 0038](0038-exited-agents-and-one-recovery-path.md),

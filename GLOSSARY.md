@@ -503,6 +503,17 @@ that doesn't match it (`SessionBindingRejected`). It carries the label
 `sessions.sproozi.com/registry=true` and is not yet removed automatically.
 Also seen as: registry record, session registry record.
 
+### Retained record
+
+The remote executor's private file for one Kubernetes visit, beside its
+[session registration](#session-registration): the exact launch, the
+registration's reference and what a stop or cancellation has established so
+far (a quiet source, an exit, a turnless visit, a fenced writer, the kept
+output) or an aborted preparation. It stores no phase. Each load and save
+checks its facts against each other and the registration; see
+[ADR 0058](docs/adr/0058-lifecycle-records-declare-states-and-transitions.md).
+Also seen as: `retained`.
+
 ### Harness conversation ID
 
 The harness's own ID for its conversation, shown as `threadId` in session
