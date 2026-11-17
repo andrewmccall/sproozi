@@ -185,7 +185,7 @@ func TestPrepareStopsWaitingWhenItsRunCanNoLongerGetAPod(t *testing.T) {
 		{name: "cancel requested", change: func(t *testing.T, _ *Placement, kube *admissionClient, l session.Launch) {
 			run := agentRun(t, kube, l)
 			run.Spec.Cancel = true
-			if err := kube.Client.Update(t.Context(), run); err != nil {
+			if err := kube.Update(t.Context(), run); err != nil {
 				t.Fatal(err)
 			}
 		}, want: []string{"was cancelled before its sandbox started"}},

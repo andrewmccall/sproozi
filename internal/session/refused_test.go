@@ -15,7 +15,7 @@ const testRefusal = "AgentRun session-0 failed before its sandbox started: Runti
 
 // fencingSetup is setup with the local placement fencing preparations, as
 // the Kubernetes placement does.
-func fencingSetup(t *testing.T) (*Coordinator, *fencingPlacement, *fakePlacement, seed) {
+func fencingSetup(t *testing.T) (*Coordinator, *fencingPlacement, seed) {
 	t.Helper()
 	_, _, local, remote, seeded := setup(t)
 	fencing := &fencingPlacement{fakePlacement: local}
@@ -25,7 +25,7 @@ func fencingSetup(t *testing.T) (*Coordinator, *fencingPlacement, *fakePlacement
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = c.Close() })
-	return c, fencing, remote, seeded
+	return c, fencing, seeded
 }
 
 // requireEnded checks that err reports the start ended by the placement's
@@ -50,7 +50,7 @@ func TestFirstVisitRefusedByItsPlacementEndsIdle(t *testing.T) {
 	for _, deadline := range []string{"deadline ahead", "no deadline"} {
 		t.Run(deadline, func(t *testing.T) {
 			t.Parallel()
-			c, fencing, _, seeded := fencingSetup(t)
+			c, fencing, seeded := fencingSetup(t)
 			first := seeded.Source
 			first.ExecutionID, first.OperationID, first.AllocationID = uuid.NewString(), uuid.NewString(), uuid.NewString()
 			first.Deadline = time.Now().Add(time.Hour).UTC()
@@ -120,7 +120,7 @@ func TestMoveRefusedByItsDestinationKeepsTheStoppedCheckpoint(t *testing.T) {
 // ended yet; the next recover ends it.
 func TestRefusedStartWaitsForProofThatNothingRuns(t *testing.T) {
 	t.Parallel()
-	c, fencing, _, seeded := fencingSetup(t)
+	c, fencing, seeded := fencingSetup(t)
 	first := createResumed(t, c, seeded)
 	fencing.refuse = &StartRefused{Reason: testRefusal}
 	fencing.abortPreparationErr = errors.New("cluster unreachable")
@@ -142,7 +142,7 @@ func TestRefusedStartWaitsForProofThatNothingRuns(t *testing.T) {
 // preparing for recover, as before.
 func TestOtherPrepareFailuresDoNotEndTheStart(t *testing.T) {
 	t.Parallel()
-	c, fencing, _, seeded := fencingSetup(t)
+	c, fencing, seeded := fencingSetup(t)
 	first := createResumed(t, c, seeded)
 	fencing.refuse = errors.New("placement unreachable")
 	r, err := c.Recover(t.Context(), first.ExecutionID)

@@ -37,7 +37,7 @@ func TestDriverEndsAStartItsPlacementRefuses(t *testing.T) {
 	t.Parallel()
 	for _, interactive := range []bool{false, true} {
 		for _, clock := range []driverClock{clockEarly, clockNone} {
-			name := map[bool]string{false: "task", true: "interactive"}[interactive] + "/" + string(clock)
+			name := map[bool]string{false: string(ModeTask), true: string(ModeInteractive)}[interactive] + "/" + string(clock)
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 				e := newDriverEnv(t, interactive, clock)
@@ -89,7 +89,7 @@ func TestDriverEndsAStartItsPlacementRefuses(t *testing.T) {
 func TestDriverWaitsForProofThatARefusedStartEnded(t *testing.T) {
 	t.Parallel()
 	for _, interactive := range []bool{false, true} {
-		t.Run(map[bool]string{false: "task", true: "interactive"}[interactive], func(t *testing.T) {
+		t.Run(map[bool]string{false: string(ModeTask), true: string(ModeInteractive)}[interactive], func(t *testing.T) {
 			t.Parallel()
 			e := newDriverEnv(t, interactive, clockNone)
 			e.create(t)
@@ -102,7 +102,7 @@ func TestDriverWaitsForProofThatARefusedStartEnded(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			end := map[bool]string{false: "cancel this session", true: "recover or cancel this session"}[interactive]
+			end := map[bool]string{false: endTask, true: "recover or cancel this session"}[interactive]
 			want := "it can never start: " + fixtureRefusal + "; the executor has not yet shown that nothing runs there, so " + end
 			if r.Problem != want {
 				t.Fatalf("problem %q, want %q", r.Problem, want)

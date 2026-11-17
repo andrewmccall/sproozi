@@ -24,6 +24,8 @@ const (
 	// refused its first visit for good; the placement's reason follows
 	// (ADR 0067).
 	problemRefused = "it can never start"
+	// endTask is how a problem tells the owner to end a task.
+	endTask = "cancel this session"
 )
 
 // refusedProblem is the problem the placement's refusal err records for
@@ -35,7 +37,7 @@ func refusedProblem(r record, err error) string {
 		problem = problemRefused + ": " + refused.Reason
 	}
 	if !errors.Is(err, session.ErrStartEnded) {
-		end := "cancel this session"
+		end := endTask
 		if r.Intent.Mode == ModeInteractive {
 			end = "recover or cancel this session"
 		}
@@ -344,7 +346,7 @@ func (o *Owner) after(ctx context.Context, r record, err error, onError next) ne
 func failureProblem(r record, err error) string {
 	var contradiction session.RecordContradiction
 	if errors.Is(err, session.ErrRecordContradicted) && errors.As(err, &contradiction) {
-		end := "cancel this session"
+		end := endTask
 		if r.Intent.Mode == ModeInteractive {
 			end = "stop or cancel this session"
 		}

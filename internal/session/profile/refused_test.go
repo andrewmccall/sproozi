@@ -11,6 +11,9 @@ import (
 
 const testRefusal = "AgentRun session-0 failed before its sandbox started: RuntimeInvalid: image is required"
 
+// refusedAnswer is a well-formed refused answer.
+const refusedAnswer = `{"version":1,"error":"refused","reason":"Failed"}`
+
 // A preparation the executor can never make crosses the protocol as
 // refused (409) with its reason, bounded and printable, and reads as
 // session.StartRefused, so the home's coordinator ends the start (ADR 0067).
@@ -49,10 +52,10 @@ func TestRefusedOutcomeIsCheckedLikeAnyOther(t *testing.T) {
 		status       int
 		refused      bool
 	}{
-		"prepare":          {actionPrepare, `{"version":1,"error":"refused","reason":"Failed"}`, http.StatusConflict, true},
+		"prepare":          {actionPrepare, refusedAnswer, http.StatusConflict, true},
 		"no reason":        {actionPrepare, `{"version":1,"error":"refused"}`, http.StatusConflict, true},
-		"inspect":          {actionInspect, `{"version":1,"error":"refused","reason":"Failed"}`, http.StatusConflict, false},
-		"wrong status":     {actionPrepare, `{"version":1,"error":"refused","reason":"Failed"}`, http.StatusServiceUnavailable, false},
+		"inspect":          {actionInspect, refusedAnswer, http.StatusConflict, false},
+		"wrong status":     {actionPrepare, refusedAnswer, http.StatusServiceUnavailable, false},
 		"reason elsewhere": {actionPrepare, `{"version":1,"error":"conflict","reason":"Failed"}`, http.StatusConflict, false},
 		"control reason":   {actionPrepare, `{"version":1,"error":"refused","reason":"a\nb"}`, http.StatusConflict, false},
 	} {
