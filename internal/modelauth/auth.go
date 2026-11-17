@@ -385,7 +385,7 @@ func Exchange(ctx context.Context, client *http.Client, endpoint string, form ur
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return result, &tokenEndpointError{status: resp.StatusCode,
+		return result, &tokenEndpointError{status: resp.StatusCode, grantError: grantError(resp),
 			message: fmt.Sprintf("ChatGPT token exchange failed (HTTP %d); sign in again if access was revoked", resp.StatusCode)}
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, (1<<20)+1))

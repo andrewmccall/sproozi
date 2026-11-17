@@ -1,9 +1,12 @@
 package modelauth
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"slices"
 	"time"
 )
 
@@ -22,11 +25,12 @@ type refreshState string
 const (
 	// refreshReady: no failure is remembered; a due refresh is sent.
 	refreshReady refreshState = "ready"
-	// refreshHeld: the last refresh failed transiently (no reply, a timeout,
-	// 408, 429, 5xx, or an unusable 200). No refresh is sent before until.
+	// refreshHeld: the last refresh failed in any other way: no reply, a
+	// timeout, any other status, or an unusable 200. No refresh is sent
+	// before until.
 	refreshHeld refreshState = "held"
-	// refreshRefused: the provider refused the refresh token (any other 4xx,
-	// such as 400 or 401 invalid_grant). No refresh is sent again for these
+	// refreshRefused: the provider refused the refresh token: a 400 or 401
+	// naming a refusedGrantErrors code. No refresh is sent again for these
 	// credentials; an administrator must sign in again.
 	refreshRefused refreshState = "refused"
 )
@@ -150,9 +154,39 @@ func (e *RefreshError) Error() string {
 		e.cause, RefreshHold)
 }
 
-// classify turns a failed refresh into its outcome. A token endpoint's 4xx
-// other than 408 and 429 refuses the grant (OAuth 2.0 token errors such as
-// invalid_grant are 400 or 401); anything else may succeed if sent again.
+// refusedGrantErrors are the OAuth 2.0 token error codes that mean the
+// refresh token itself is revoked, expired or already spent. The repository
+// records no other code this provider uses for that.
+var refusedGrantErrors = []string{"invalid_grant"}
+
+// maxErrorBody bounds how much of a token endpoint's error reply is read.
+const maxErrorBody = 4 << 10
+
+// grantError returns the refusedGrantErrors entry an error reply names, or
+// "". It decodes only the error field of at most maxErrorBody bytes and
+// returns the list's own string, so nothing from the reply goes further.
+func grantError(resp *http.Response) string {
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody+1))
+	if err != nil || len(data) > maxErrorBody {
+		return ""
+	}
+	var body struct {
+		Error string `json:"error"`
+	}
+	if json.Unmarshal(data, &body) != nil {
+		return ""
+	}
+	if i := slices.Index(refusedGrantErrors, body.Error); i >= 0 {
+		return refusedGrantErrors[i]
+	}
+	return ""
+}
+
+// classify turns a failed refresh into its outcome. Only a 400 or 401 that
+// names a refusedGrantErrors code refuses the sign-in: OAuth 2.0 returns
+// those for a dead refresh token. Every other failure may succeed if sent
+// again: a proxy's or CDN's 4xx, a moved endpoint, or a request this gateway
+// got wrong are not the provider revoking the sign-in.
 func classify(err error) *RefreshError {
 	var endpoint *tokenEndpointError
 	if !errors.As(err, &endpoint) {
@@ -163,8 +197,8 @@ func classify(err error) *RefreshError {
 		return &RefreshError{cause: "the token endpoint was unreachable or did not answer in time"}
 	case status == http.StatusOK:
 		return &RefreshError{cause: "the token endpoint returned an unreadable reply"}
-	case status >= 400 && status < 500 && status != http.StatusRequestTimeout && status != http.StatusTooManyRequests:
-		return &RefreshError{Refused: true, cause: fmt.Sprintf("token endpoint HTTP %d", status)}
+	case (status == http.StatusBadRequest || status == http.StatusUnauthorized) && endpoint.grantError != "":
+		return &RefreshError{Refused: true, cause: fmt.Sprintf("token endpoint HTTP %d %s", status, endpoint.grantError)}
 	default:
 		return &RefreshError{cause: fmt.Sprintf("token endpoint HTTP %d", status)}
 	}
@@ -172,9 +206,11 @@ func classify(err error) *RefreshError {
 
 // tokenEndpointError is a failed token exchange. status is 0 when the
 // endpoint gave no reply, and 200 when its reply could not be read.
+// grantError is a refusedGrantErrors entry, or "".
 type tokenEndpointError struct {
-	status  int
-	message string
+	status     int
+	grantError string
+	message    string
 }
 
 func (e *tokenEndpointError) Error() string { return e.message }
