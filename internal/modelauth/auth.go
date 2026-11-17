@@ -276,17 +276,29 @@ func (a *ChatGPT) usable() (Session, bool, error) {
 }
 
 // answer is what a request sees for a session read at loadedAt: the session
-// while its access token is outside the refresh window, the remembered
-// failure while it holds a due refresh back, and nothing (a refresh is due
-// and may be sent) otherwise.
+// while its access token is outside the refresh window, what served says
+// while a remembered failure holds a due refresh back, and nothing (a
+// refresh is due and may be sent) otherwise.
 func (l *loadedSession) answer(now time.Time) (Session, bool, error) {
 	if l.session.expiry().Sub(now) > refreshWindow {
 		return l.session, true, nil
 	}
 	if held := l.refresh.admit(now); held != nil {
-		return Session{}, true, held
+		s, err := served(l.session, held, now)
+		return s, true, err
 	}
 	return Session{}, false, nil
+}
+
+// served is what a request sees while failure holds the refresh of s back:
+// s itself while the failure is transient and its access token has not yet
+// expired, and the failure otherwise. A refusal is never served: the grant
+// is dead.
+func served(s Session, failure *RefreshError, now time.Time) (Session, error) {
+	if !failure.Refused && now.Before(s.expiry()) {
+		return s, nil
+	}
+	return Session{}, failure
 }
 
 // reloadOrRefresh joins the reload or refresh in flight, or starts one, and
@@ -363,7 +375,7 @@ func (a *ChatGPT) reload() (Session, error) {
 	if s.expiry().Sub(now) <= refreshWindow {
 		if held := a.refresh.admit(now); held != nil {
 			a.publish(s, loadedAt)
-			return Session{}, held
+			return served(s, held, now)
 		}
 		ctx, cancel := step()
 		next, refreshErr := Exchange(ctx, a.client, a.tokenEndpoint, url.Values{
@@ -372,7 +384,7 @@ func (a *ChatGPT) reload() (Session, error) {
 		})
 		cancel()
 		if refreshErr != nil {
-			return Session{}, a.failed(s, loadedAt, classify(refreshErr))
+			return a.failed(s, loadedAt, classify(refreshErr))
 		}
 		renewed := s
 		renewed.AccessToken, renewed.RefreshToken = next.AccessToken, next.RefreshToken
@@ -384,7 +396,7 @@ func (a *ChatGPT) reload() (Session, error) {
 			renewed.Scopes = strings.Fields(next.Scope)
 		}
 		if err = renewed.Validate(); err != nil {
-			return Session{}, a.failed(s, loadedAt, classify(err))
+			return a.failed(s, loadedAt, classify(err))
 		}
 		if err = a.refresh.apply(eventRefreshed, s, nil, a.now()); err != nil {
 			return Session{}, err
@@ -411,16 +423,17 @@ func (a *ChatGPT) publish(s Session, loadedAt time.Time) {
 
 // failed remembers a refresh of s, read at loadedAt, that failed and returns
 // what the requests waiting for it see.
-func (a *ChatGPT) failed(s Session, loadedAt time.Time, failure *RefreshError) error {
+func (a *ChatGPT) failed(s Session, loadedAt time.Time, failure *RefreshError) (Session, error) {
 	event := eventFailed
 	if failure.Refused {
 		event = eventRefused
 	}
-	if err := a.refresh.apply(event, s, failure, a.now()); err != nil {
-		return err
+	now := a.now()
+	if err := a.refresh.apply(event, s, failure, now); err != nil {
+		return Session{}, err
 	}
 	a.publish(s, loadedAt)
-	return failure
+	return served(s, failure, now)
 }
 
 // expiry is when the session's access token expires.
