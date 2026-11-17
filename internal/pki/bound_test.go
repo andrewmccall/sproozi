@@ -36,13 +36,14 @@ func padNames(t *testing.T, st *State, target int) {
 	if missing < 0 {
 		t.Fatalf("record is %d bytes, beyond the target %d", size, target)
 	}
-	name := "z9999"
+	var name strings.Builder
+	name.WriteString("z9999")
 	for missing > 0 {
 		n := min(missing, 60)
-		name += "." + strings.Repeat("b", n-1)
+		name.WriteString("." + strings.Repeat("b", n-1))
 		missing -= n
 	}
-	st.Names.DNS[len(st.Names.DNS)-1] = name
+	st.Names.DNS[len(st.Names.DNS)-1] = name.String()
 	if size, _ = recordSize(*st); size != target {
 		t.Fatalf("padded to %d bytes, want %d", size, target)
 	}
@@ -65,7 +66,7 @@ func ninthGeneration(t *testing.T, dir string) {
 		st.Generations = append(st.Generations, live)
 		st.Serving, st.Trusted = 9, []int{9}
 	})(t, dir)
-	for _, ext := range []string{".pem", ".key"} {
+	for _, ext := range caFileExts {
 		must(t, os.Rename(filepath.Join(dir, "ca-1"+ext), filepath.Join(dir, "ca-9"+ext)))
 	}
 }
@@ -128,18 +129,21 @@ func boundBases(t *testing.T) map[Phase]string {
 	return bases
 }
 
+// caFileExts are a CA generation's two files.
+var caFileExts = []string{".pem", ".key"}
+
 type move struct {
 	name string
 	run  func(s *Store) error
 }
 
 var (
-	movePrepare  = move{"prepare", func(s *Store) error { return s.PrepareRotation() }}
-	moveReplace  = move{"replace", func(s *Store) error { return s.ReplaceCA() }}
-	moveSwitch   = move{"switch", func(s *Store) error { return s.SwitchRotation(true) }}
-	moveRollback = move{"rollback", func(s *Store) error { return s.RollbackRotation() }}
-	moveRetire   = move{"retire", func(s *Store) error { return s.RetireRotation(true) }}
-	moveRenew    = move{"renew", func(s *Store) error { return s.Renew() }}
+	movePrepare  = move{string(evPrepare), func(s *Store) error { return s.PrepareRotation() }}
+	moveReplace  = move{string(evReplace), func(s *Store) error { return s.ReplaceCA() }}
+	moveSwitch   = move{string(evSwitch), func(s *Store) error { return s.SwitchRotation(true) }}
+	moveRollback = move{string(evRollback), func(s *Store) error { return s.RollbackRotation() }}
+	moveRetire   = move{string(evRetire), func(s *Store) error { return s.RetireRotation(true) }}
+	moveRenew    = move{"renew the leaf", func(s *Store) error { return s.Renew() }}
 	moveEnsure   = move{"ensure with unchanged names", func(s *Store) error {
 		st, err := s.State()
 		if err != nil {

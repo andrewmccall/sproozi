@@ -101,7 +101,7 @@ func TestNoOperationWritesARecordLoadCannotRead(t *testing.T) {
 	}
 	// Rename ca-1 to the serving generation's files.
 	n := len(st.Generations)
-	for _, ext := range []string{".pem", ".key"} {
+	for _, ext := range caFileExts {
 		must(t, os.Rename(filepath.Join(dir, "ca-1"+ext), filepath.Join(dir, caName(n)+ext)))
 	}
 	if _, err = s.State(); err != nil {
