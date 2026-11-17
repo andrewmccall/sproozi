@@ -27,7 +27,7 @@ func driveRounds(t *testing.T, e *driverEnv) {
 	t.Helper()
 	for range 4 {
 		for range driverStepLimit {
-			if e.o.step(t.Context(), e.id) != nextAgain {
+			if !continues(e.o.step(t.Context(), e.id)) {
 				break
 			}
 		}
@@ -171,8 +171,8 @@ func TestCompletionWaitClearsAnEarlierProblem(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.fixture(func(p *fixturePlacement) { p.turnPending = 1 })
-	if n := e.o.step(t.Context(), e.id); n != nextAgain {
-		t.Fatalf("completion wait: %s, want again", nextNames[n])
+	if n := e.o.step(t.Context(), e.id); n != nextPaced {
+		t.Fatalf("completion wait: %s, want paced", nextNames[n])
 	}
 	if r, err = e.o.read(e.id); err != nil || r.Problem != "" {
 		t.Fatalf("problem after the completion wait: %q %v", r.Problem, err)

@@ -27,8 +27,8 @@ func TestRecoveredStopStillWaitingForTheTurnStepsAgain(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.fixture(func(p *fixturePlacement) { p.turnPending = 1 })
-	if n := e.o.step(t.Context(), e.id); n != nextAgain {
-		t.Fatalf("recovered stop waiting for the turn: %s, want again", nextNames[n])
+	if n := e.o.step(t.Context(), e.id); n != nextPaced {
+		t.Fatalf("recovered stop waiting for the turn: %s, want paced", nextNames[n])
 	}
 	if r, err = e.o.read(e.id); err != nil {
 		t.Fatal(err)
@@ -45,7 +45,7 @@ func TestRecoveredStopStillWaitingForTheTurnStepsAgain(t *testing.T) {
 	}
 	// The next step is the completion wait, which then finishes the task.
 	for range driverStepLimit {
-		if e.o.step(t.Context(), e.id) != nextAgain {
+		if !continues(e.o.step(t.Context(), e.id)) {
 			break
 		}
 	}

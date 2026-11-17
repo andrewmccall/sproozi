@@ -185,7 +185,7 @@ func settle(t *testing.T, e *driverEnv, interactive, stop bool) Phase {
 			_, _ = e.o.Stop(t.Context(), e.id, uuid.NewString())
 		}
 		for range driverStepLimit {
-			if e.o.step(t.Context(), e.id) != nextAgain {
+			if !continues(e.o.step(t.Context(), e.id)) {
 				break
 			}
 		}

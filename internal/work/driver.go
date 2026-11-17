@@ -96,6 +96,18 @@ func (o *Owner) wake(id string) {
 	}
 }
 
+// completionPace is the least time between two rounds of one task's
+// completion wait. A placement holds each round until the turn completes
+// or its quiesce wait passes, so a round is normally far longer; the pace
+// only keeps a placement that answers at once from making the driver spin.
+const completionPace = time.Second
+
+// completionPause is how long the driver waits after a completion-wait
+// round that took took before it starts the next: the rest of the pace.
+func completionPause(took time.Duration) time.Duration {
+	return max(0, completionPace-took)
+}
+
 // next is what the driver does after a step.
 type next int
 
@@ -106,6 +118,10 @@ const (
 	nextAgain
 	// nextWait: retry after the backoff, or sooner when woken.
 	nextWait
+	// nextPaced: a completion-wait round found the task's turn still
+	// running; take the next step once completionPace has passed since
+	// this one began, or sooner when woken.
+	nextPaced
 )
 
 // drive carries the session's task until it settles, or until a step fails
@@ -114,21 +130,33 @@ func (o *Owner) drive(ctx context.Context, id string, wake <-chan struct{}) {
 	retry := o.config.retry.orDefault()
 	wait := retry.first
 	for ctx.Err() == nil {
+		began := time.Now()
 		switch o.step(ctx, id) {
 		case nextDone:
 			return
 		case nextAgain:
 			wait = retry.first
+		case nextPaced:
+			wait = retry.first
+			pause(ctx, wake, completionPause(time.Since(began)))
 		case nextWait:
-			timer := time.NewTimer(wait)
-			select {
-			case <-ctx.Done():
-			case <-wake:
-			case <-timer.C:
-			}
-			timer.Stop()
+			pause(ctx, wake, wait)
 			wait = min(2*wait, retry.limit)
 		}
+	}
+}
+
+// pause waits for d, until ctx ends, or until the driver is woken.
+func pause(ctx context.Context, wake <-chan struct{}, d time.Duration) {
+	if d <= 0 {
+		return
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+	case <-wake:
+	case <-timer.C:
 	}
 }
 
@@ -189,7 +217,7 @@ func (o *Owner) carryOut(ctx context.Context, r record, rec *session.Record, act
 		_, err := coordinator.Finalize(ctx, rec.ID, derivedOperation(rec.ID, actionTaskComplete))
 		if turnPendingAlone(err) {
 			o.note(r.ID, "")
-			return nextAgain
+			return nextPaced
 		}
 		return o.after(ctx, r, err, nextWait)
 	case actRecover:
@@ -203,7 +231,7 @@ func (o *Owner) carryOut(ctx context.Context, r record, rec *session.Record, act
 		_, err := coordinator.Recover(ctx, rec.ID)
 		if turnPendingAlone(err) {
 			o.note(r.ID, "")
-			return nextAgain
+			return nextPaced
 		}
 		return o.after(ctx, r, err, nextWait)
 	case actFinish:

@@ -455,7 +455,11 @@ func (e *driverEnv) state() string {
 	return b.String()
 }
 
-var nextNames = map[next]string{nextDone: "done", nextAgain: "again", nextWait: "wait"}
+var nextNames = map[next]string{nextDone: "done", nextAgain: "again", nextWait: "wait", nextPaced: "paced"}
+
+// continues reports a step after which drive takes another without the
+// backoff: at once, or after the completion pace.
+func continues(n next) bool { return n == nextAgain || n == nextPaced }
 
 // driverCase is one starting combination of the outcome table.
 type driverCase struct {
@@ -547,7 +551,7 @@ func runDriverCase(t *testing.T, c driverCase) string {
 	for range driverStepLimit {
 		n := e.o.step(t.Context(), e.id)
 		fmt.Fprintf(&b, "\n    %s -> %s", nextNames[n], e.state())
-		if n != nextAgain {
+		if !continues(n) {
 			return b.String()
 		}
 	}
