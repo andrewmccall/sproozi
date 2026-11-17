@@ -133,7 +133,7 @@ func TestInspectOfAnAbortedPreparationIsPreparingUnlessItMayHaveHadAuthority(t *
 			}
 			return p, l
 		}},
-		{name: "active", conflict: true, build: func(t *testing.T) (*Placement, session.Launch) {
+		{name: "active visit", conflict: true, build: func(t *testing.T) (*Placement, session.Launch) {
 			p, _, _, l, data := setup(t)
 			i, err := p.Prepare(t.Context(), l, data)
 			if err != nil {

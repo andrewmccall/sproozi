@@ -186,38 +186,16 @@ func TestRecoverRefusesAStartWhoseRunWasDeletedWithoutCreatingAnother(t *testing
 			if !errors.As(err, &refused) || !strings.HasPrefix(refused.Reason, "AgentRun "+runName(l)+test.want) {
 				t.Fatalf("recover of a start whose run was %s: %s %v", test.name, r.Phase, err)
 			}
-			// A deleted run's preparation is fenced and the start ends. A
-			// replaced run cannot be shown to hold no Pod of the bound one,
-			// so its end stays unproven, as ADR 0060 records for it. A
-			// recover, which finds the launch's tombstone, still says it was
-			// replaced, and why the end is unproven, alone.
+			// A deleted run's preparation is fenced and the start ends.
 			phase := r.Phase
 			if phase != session.PhaseIdle {
 				phase, err = recoverUntilIdle(t, coordinator, l.ExecutionID)
 			}
-			var unproven session.UnprovenEnd
-			if test.replace && (!errors.As(err, &refused) ||
-				!strings.HasPrefix(refused.Reason, "AgentRun "+runName(l)+" was replaced before its sandbox started: it now has UID "+replacementUID) ||
-				!errors.As(err, &unproven) || !strings.HasPrefix(unproven.UnprovenEnd(), "AgentRun "+runName(l)+" now has UID "+replacementUID) ||
-				!strings.HasSuffix(unproven.UnprovenEnd(), "; an administrator replaced it: confirm no Pod labelled "+
-					runtimekube.RunUIDLabel+"="+string(old.UID)+" remains, then delete AgentRun "+runName(l)+" and recover this session") ||
-				strings.Contains(unproven.UnprovenEnd(), "session profile")) {
-				t.Fatalf("recover of the replaced run's tombstoned start: %v", err)
-			}
 			if test.replace {
-				// What the cause says clears it does: with the replacement
-				// deleted, a recover ends the start.
-				if err := kube.Client.Delete(t.Context(), agentRun(t, kube, l)); err != nil {
-					t.Fatal(err)
-				}
-				phase, err = recoverUntilIdle(t, coordinator, l.ExecutionID)
-				if phase != session.PhaseIdle || !errors.Is(err, session.ErrStartEnded) || kube.runCreates != creates {
-					t.Fatalf("recover once the replacement was deleted: %s %v, runs created %d", phase, err, kube.runCreates-creates)
-				}
+				checkReplacedRunRecovery(t, coordinator, kube, l, old, phase, err, creates)
 				return
 			}
-			if !test.replace && (phase != session.PhaseIdle || !errors.Is(err, session.ErrStartEnded)) ||
-				test.replace && (phase != session.PhasePreparing || !errors.Is(err, session.ErrEndUnproven)) {
+			if phase != session.PhaseIdle || !errors.Is(err, session.ErrStartEnded) {
 				t.Fatalf("recover of a start whose run was %s: %s %v", test.name, phase, err)
 			}
 			var after api.AgentRun
@@ -225,12 +203,42 @@ func TestRecoverRefusesAStartWhoseRunWasDeletedWithoutCreatingAnother(t *testing
 			switch {
 			case kube.runCreates != creates:
 				t.Fatalf("recover created %d AgentRuns", kube.runCreates-creates)
-			case !test.replace && err == nil:
+			case err == nil:
 				t.Fatalf("an AgentRun %s exists again with UID %s (old %s)", after.Name, after.UID, old.UID)
-			case test.replace && (err != nil || after.UID != replacementUID):
-				t.Fatalf("the replacement run changed: %+v %v", after.ObjectMeta, err)
 			}
 		})
+	}
+}
+
+// checkReplacedRunRecovery checks recovery of a start whose bound run old an
+// administrator replaced, after recovers that left it in phase with err: a
+// replaced run cannot be shown to hold no Pod of the bound one, so its end
+// stays unproven, as ADR 0060 records for it. A recover, which finds the
+// launch's tombstone, still says it was replaced, and why the end is
+// unproven, alone, naming what clears it; and that clears it: with the
+// replacement deleted, a recover ends the start. No run is ever created.
+func checkReplacedRunRecovery(t *testing.T, coordinator *session.Coordinator, kube *admissionClient, l session.Launch,
+	old *api.AgentRun, phase session.Phase, err error, creates int) {
+	t.Helper()
+	var refused *session.StartRefused
+	var unproven session.UnprovenEnd
+	if phase != session.PhasePreparing || !errors.Is(err, session.ErrEndUnproven) || !errors.As(err, &refused) ||
+		!strings.HasPrefix(refused.Reason, "AgentRun "+runName(l)+" was replaced before its sandbox started: it now has UID "+replacementUID) ||
+		!errors.As(err, &unproven) || !strings.HasPrefix(unproven.UnprovenEnd(), "AgentRun "+runName(l)+" now has UID "+replacementUID) ||
+		!strings.HasSuffix(unproven.UnprovenEnd(), "; an administrator replaced it: confirm no Pod labelled "+
+			runtimekube.RunUIDLabel+"="+string(old.UID)+" remains, then delete AgentRun "+runName(l)+" and recover this session") ||
+		strings.Contains(unproven.UnprovenEnd(), "session profile") {
+		t.Fatalf("recover of the replaced run's tombstoned start: %s %v", phase, err)
+	}
+	if run := agentRun(t, kube, l); run.UID != replacementUID || kube.runCreates != creates {
+		t.Fatalf("the replacement run changed: %+v, runs created %d", run.ObjectMeta, kube.runCreates-creates)
+	}
+	if err = kube.Client.Delete(t.Context(), agentRun(t, kube, l)); err != nil {
+		t.Fatal(err)
+	}
+	phase, err = recoverUntilIdle(t, coordinator, l.ExecutionID)
+	if phase != session.PhaseIdle || !errors.Is(err, session.ErrStartEnded) || kube.runCreates != creates {
+		t.Fatalf("recover once the replacement was deleted: %s %v, runs created %d", phase, err, kube.runCreates-creates)
 	}
 }
 
