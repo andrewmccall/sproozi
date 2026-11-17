@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/andrewmccall/sproozi/internal/testutil"
 	"github.com/google/uuid"
@@ -136,6 +137,25 @@ func TestRefusedStartWaitsForProofThatNothingRuns(t *testing.T) {
 	r, err = c.Recover(t.Context(), first.ExecutionID)
 	requireEnded(t, err, testRefusal)
 	checkAbandoned(t, c, r, nil, nil)
+}
+
+// A refusal's reason is cut to reasonMax bytes on a rune boundary, so a
+// controller message in any script stays valid UTF-8 within the bound, and
+// a reason at the bound is kept whole.
+func TestRefusalReasonIsCutOnARuneBoundary(t *testing.T) {
+	t.Parallel()
+	for _, prefix := range []string{"", "a", "aa"} {
+		long := prefix + strings.Repeat("ü", reasonMax) // two bytes each
+		got := RefusalReason(long)
+		if !utf8.ValidString(got) || len(got) > reasonMax || !strings.HasSuffix(got, "…") ||
+			len(got) < reasonMax-len("…")-utf8.UTFMax {
+			t.Errorf("prefix %q: cut to %d bytes, valid %t: %q", prefix, len(got), utf8.ValidString(got), got[len(got)-8:])
+		}
+	}
+	exact := strings.Repeat("a", reasonMax)
+	if got := RefusalReason(exact); got != exact {
+		t.Errorf("a reason at the bound was changed to %d bytes", len(got))
+	}
 }
 
 // Only a refusal ends the start: any other Prepare failure leaves it

@@ -13,6 +13,8 @@ import (
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
 	"github.com/andrewmccall/sproozi/internal/session"
 	"github.com/andrewmccall/sproozi/internal/session/profile"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -194,6 +196,23 @@ func TestPrepareStopsWaitingWhenItsRunCanNoLongerGetAPod(t *testing.T) {
 				t.Fatal(err)
 			}
 		}, want: []string{"AgentRun " + "%run" + " was deleted before its sandbox started"}},
+		{name: "replaced", change: func(t *testing.T, _ *Placement, kube *admissionClient, l session.Launch) {
+			old := agentRun(t, kube, l)
+			if err := kube.Client.Delete(t.Context(), old); err != nil {
+				t.Fatal(err)
+			}
+			replacement := &api.AgentRun{ObjectMeta: metav1.ObjectMeta{Namespace: old.Namespace, Name: old.Name, UID: "replacement-uid"},
+				Spec: old.Spec}
+			if err := kube.Client.Create(t.Context(), replacement); err != nil {
+				t.Fatal(err)
+			}
+		}, want: []string{"AgentRun %run was replaced before its sandbox started: it now has UID replacement-uid"}},
+		{name: "registration deleted", change: func(t *testing.T, p *Placement, kube *admissionClient, l session.Launch) {
+			cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: p.config.Namespace, Name: registry.NameForRun(runName(l))}}
+			if err := kube.Client.Delete(t.Context(), cm); err != nil {
+				t.Fatal(err)
+			}
+		}, want: []string{"the session registration for AgentRun %run was deleted before its sandbox started"}},
 		{name: "registration cancelled", change: func(t *testing.T, p *Placement, _ *admissionClient, l session.Launch) {
 			if _, err := p.registry.Cancel(t.Context(), registration(t, p, l).Reference); err != nil {
 				t.Fatal(err)
@@ -327,6 +346,57 @@ func TestHomeEndsAStartTheExecutorRefusesOverTheProtocol(t *testing.T) {
 	}
 	if local, err := p.load(l); err != nil || !local.PreparationAborted {
 		t.Fatalf("the refused remote preparation was not fenced: %+v %v", local, err)
+	}
+}
+
+// A read that fails is no evidence that a run can never get its Pod: while
+// every read of the run and of the registration fails, as when the API
+// server cannot answer, Prepare keeps waiting, and once reads succeed again
+// it prepares the visit. A refusal here would end a start that could run.
+func TestPrepareKeepsWaitingThroughFailedReads(t *testing.T) {
+	t.Parallel()
+	p, kube, e, l := waitingTask(t)
+	w := prepareInBackground(t, p, kube, l, e.initial)
+	failed := make(chan string, 64)
+	fail := func(obj client.Object) error {
+		var kind string
+		switch obj.(type) {
+		case *api.AgentRun:
+			kind = "run"
+		case *corev1.ConfigMap:
+			kind = "registration"
+		default:
+			return nil
+		}
+		select {
+		case failed <- kind:
+		default:
+		}
+		return apierrors.NewServiceUnavailable("the API server cannot answer")
+	}
+	kube.getErr.Store(&fail)
+	// Two failed reads of the registration, read once a second, span about
+	// twenty polls, each of which failed to read the run.
+	for runs, registrations := 0, 0; registrations < 2 || runs < 3; {
+		select {
+		case kind := <-failed:
+			if kind == "run" {
+				runs++
+			} else {
+				registrations++
+			}
+		case err := <-w.result:
+			t.Fatalf("Prepare returned while its reads failed: %v", err)
+		case <-time.After(10 * time.Second):
+			t.Fatal("Prepare's wait stopped reading")
+		}
+	}
+	kube.getErr.Store(nil)
+	if _, err := createSandbox(t.Context(), kube, agentRun(t, kube, l), false); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.ended(t); err != nil {
+		t.Fatalf("preparation once reads succeeded: %v", err)
 	}
 }
 

@@ -154,9 +154,18 @@ type admissionClient struct {
 	// runRead, when set, is called with each AgentRun a Get reads, so a
 	// test can count the reads of a wait.
 	runRead atomic.Pointer[func(*api.AgentRun)]
+	// getErr, when set, is called with each object a Get is about to read,
+	// and a non-nil result fails that Get, as an API server that cannot
+	// answer does.
+	getErr atomic.Pointer[func(client.Object) error]
 }
 
 func (c *admissionClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, options ...client.GetOption) error {
+	if fail := c.getErr.Load(); fail != nil {
+		if err := (*fail)(obj); err != nil {
+			return err
+		}
+	}
 	if err := c.Client.Get(ctx, key, obj, options...); err != nil {
 		return err
 	}
