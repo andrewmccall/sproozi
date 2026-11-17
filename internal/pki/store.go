@@ -194,21 +194,23 @@ func (s *Store) Initialize(names Names) error {
 		return err
 	}
 	return s.locked(func() error {
-		if _, err := s.load(); !errors.Is(err, ErrNotInitialized) {
-			if err == nil {
-				return errors.New("pki: certificate authority already initialized")
-			}
+		st, err := s.load()
+		if err == nil {
+			return st.admit(evInitialize)
+		}
+		if !errors.Is(err, ErrNotInitialized) {
 			return err
 		}
-		if err := s.requireEmpty(); err != nil {
+		if err = s.requireEmpty(); err != nil {
 			return err
 		}
+		st = State{Names: names}
 		now := s.now()
-		if err := s.createGeneration(1, now); err != nil {
+		first, err := s.createNext(st, now)
+		if err != nil {
 			return err
 		}
-		st := State{Version: 1, Serving: 1, Trusted: []int{1}, Names: names}
-		if st.Generations, err = s.generations(st, 1); err != nil {
+		if err = st.apply(evInitialize, &first, now); err != nil {
 			return err
 		}
 		return s.issue(&st, now)
@@ -291,21 +293,15 @@ func (s *Store) PrepareRotation() error {
 		if err != nil {
 			return err
 		}
-		if st.Rotation != nil {
-			return fmt.Errorf("pki: rotation already %s", st.Rotation.Stage)
-		}
-		next := 0
-		for _, g := range st.Generations {
-			next = max(next, g.ID)
-		}
-		next++
-		now := s.now()
-		if err = s.createGeneration(next, now); err != nil {
+		if err = st.admit(evPrepare); err != nil {
 			return err
 		}
-		st.Trusted = []int{st.Serving, next}
-		st.Rotation = &Rotation{Stage: StagePrepared, From: st.Serving, To: next, PreparedAt: now.UTC()}
-		if st.Generations, err = s.generations(st, next); err != nil {
+		now := s.now()
+		next, err := s.createNext(st, now)
+		if err != nil {
+			return err
+		}
+		if err = st.apply(evPrepare, &next, now); err != nil {
 			return err
 		}
 		return s.commit(st)
@@ -320,15 +316,17 @@ func (s *Store) SwitchRotation(distributed bool) error {
 		if err != nil {
 			return err
 		}
-		if st.Rotation == nil || st.Rotation.Stage != StagePrepared {
-			return errors.New("pki: no prepared rotation to switch")
+		if err = st.admit(evSwitch); err != nil {
+			return err
 		}
 		if !distributed {
 			return errors.New("pki: combined trust is not yet distributed to every current consumer")
 		}
-		st.Serving = st.Rotation.To
-		st.Rotation.Stage = StageSwitched
-		return s.issue(&st, s.now())
+		now := s.now()
+		if err = st.apply(evSwitch, nil, now); err != nil {
+			return err
+		}
+		return s.issue(&st, now)
 	})
 }
 
@@ -339,12 +337,11 @@ func (s *Store) RollbackRotation() error {
 		if err != nil {
 			return err
 		}
-		if st.Rotation == nil || st.Rotation.Stage != StageSwitched {
-			return errors.New("pki: no switched rotation to roll back")
+		now := s.now()
+		if err = st.apply(evRollback, nil, now); err != nil {
+			return err
 		}
-		st.Serving = st.Rotation.From
-		st.Rotation.Stage = StagePrepared
-		return s.issue(&st, s.now())
+		return s.issue(&st, now)
 	})
 }
 
@@ -356,17 +353,15 @@ func (s *Store) RetireRotation(drained bool) error {
 		if err != nil {
 			return err
 		}
-		if st.Rotation == nil || st.Rotation.Stage != StageSwitched {
-			return errors.New("pki: rotation must switch before retirement")
+		if err = st.admit(evRetire); err != nil {
+			return err
 		}
 		if !drained {
 			return errors.New("pki: a consumer may still require the retiring CA")
 		}
 		old := st.Rotation.From
-		st.Trusted = []int{st.Rotation.To}
-		st.Rotation = nil
-		if g := st.generation(old); g != nil {
-			g.Retired = true
+		if err = st.apply(evRetire, nil, s.now()); err != nil {
+			return err
 		}
 		if err = s.commit(st); err != nil {
 			return err
@@ -384,27 +379,22 @@ func (s *Store) ReplaceCA() error {
 		if err != nil {
 			return err
 		}
-		next := 0
-		for _, g := range st.Generations {
-			next = max(next, g.ID)
-		}
-		next++
-		now := s.now()
-		if err = s.createGeneration(next, now); err != nil {
+		if err = st.admit(evReplace); err != nil {
 			return err
 		}
-		for i := range st.Generations {
-			st.Generations[i].Retired = true
+		now := s.now()
+		next, err := s.createNext(st, now)
+		if err != nil {
+			return err
 		}
-		st.Serving, st.Trusted, st.Rotation = next, []int{next}, nil
-		if st.Generations, err = s.generations(st, next); err != nil {
+		if err = st.apply(evReplace, &next, now); err != nil {
 			return err
 		}
 		if err = s.issue(&st, now); err != nil {
 			return err
 		}
 		for _, g := range st.Generations {
-			if g.ID != next {
+			if g.ID != next.ID {
 				if err = s.destroyKey(g.ID); err != nil {
 					return err
 				}
@@ -511,13 +501,18 @@ func (s *Store) createGeneration(id int, now time.Time) error {
 	return s.writePair(caName(id), ca)
 }
 
-func (s *Store) generations(st State, added int) ([]Generation, error) {
-	cert, err := s.caCertificate(added)
-	if err != nil {
-		return nil, err
+// createNext writes the files of the generation after every recorded one
+// and returns its record entry.
+func (s *Store) createNext(st State, now time.Time) (Generation, error) {
+	id := len(st.Generations) + 1
+	if err := s.createGeneration(id, now); err != nil {
+		return Generation{}, err
 	}
-	out := slices.Clone(st.Generations)
-	return append(out, Generation{ID: added, Fingerprint: Fingerprint(cert), NotAfter: cert.NotAfter}), nil
+	cert, err := s.caCertificate(id)
+	if err != nil {
+		return Generation{}, err
+	}
+	return Generation{ID: id, Fingerprint: Fingerprint(cert), NotAfter: cert.NotAfter}, nil
 }
 
 func (s *Store) destroyKey(id int) error {
