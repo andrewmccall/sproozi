@@ -351,8 +351,7 @@ func (p *Placement) Prepare(ctx context.Context, l session.Launch, data []byte) 
 	if err != nil {
 		return session.Incarnation{}, semantic(err)
 	}
-	local.Reference = record.Reference
-	if err = p.save(local, &record); err != nil {
+	if local, err = p.adopt(local, record); err != nil {
 		return session.Incarnation{}, err
 	}
 	return p.prepare(ctx, local, record)
@@ -419,8 +418,7 @@ func (p *Placement) prepareWorkspace(ctx context.Context, l session.Launch, data
 	if err != nil {
 		return session.Incarnation{}, semantic(err)
 	}
-	local.Reference = r.Reference
-	if err = p.save(local, &r); err != nil {
+	if local, err = p.adopt(local, r); err != nil {
 		return session.Incarnation{}, err
 	}
 	return p.prepare(ctx, local, r)

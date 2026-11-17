@@ -101,14 +101,30 @@ func (p *Placement) retainedRecord(ctx context.Context, l session.Launch, refuse
 		return local, registry.Record{}, loaded
 	}
 	local, r, err := p.registered(ctx, l, local)
-	if err != nil {
+	if err != nil && (refuse || !errors.As(err, &contradicted)) {
 		return local, r, err
 	}
+	created := err
 	local, err = local.check(&r)
 	if err = p.noted(err); err != nil && refuse {
 		return local, r, err
 	}
-	return local, r, errors.Join(loaded, err)
+	return local, r, errors.Join(loaded, created, err)
+}
+
+// adopt records the registration r in local, the record of r's launch,
+// takes from r what its phase proves and saves the result, before anything
+// else reads it. Create replays a registration that already exists, which
+// may have moved on while this record was lost: saving the bare reference
+// beside a stopped registration would be refused, and every later read with
+// it. It returns the contradiction it corrected, if any, once saved.
+func (p *Placement) adopt(local retained, r registry.Record) (retained, error) {
+	local.Reference = r.Reference
+	local, checked := local.check(&r)
+	if err := p.save(local, &r); err != nil {
+		return local, err
+	}
+	return local, p.noted(checked)
 }
 
 // registered reads, or creates, the registration local names, and checks
@@ -131,8 +147,8 @@ func (p *Placement) registered(ctx context.Context, l session.Launch, local reta
 		if err != nil {
 			return local, r, semantic(err)
 		}
-		local.Reference = r.Reference
-		return local, r, p.save(local, &r)
+		local, err = p.adopt(local, r)
+		return local, r, err
 	}
 	r, err := p.registry.Get(ctx, local.Reference)
 	if err != nil {
