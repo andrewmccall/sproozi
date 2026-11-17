@@ -150,6 +150,10 @@ key, `token` for a sign-in token the gateway sends as a bearer (with
 Anthropic's OAuth beta header for Claude Code), or `chatgpt` for a ChatGPT plan
 sign-in the gateway refreshes
 ([ADR 0047](../adr/0047-harnesses-sign-in-to-their-own-model-providers.md)).
+The gateway refreshes a ChatGPT sign-in directly with `auth.openai.com`: it
+ignores `HTTPS_PROXY` and `HTTP_PROXY`, as its model calls do, never follows
+a redirect, and doesn't use `--provider-ca-file`
+([ADR 0069](../adr/0069-a-failed-chatgpt-refresh-is-remembered.md)).
 
 With `--sign-in` the configuration has no `providerTokenFile`, and the agent
 receives no placeholder key. Its sign-in lives in a persistent Docker volume,

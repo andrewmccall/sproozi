@@ -536,7 +536,8 @@ Also seen as: ChatGPT session.
 The 10 seconds after a transient failure to refresh the
 [ChatGPT credential](#chatgpt-credential) during which the gateway sends no
 further refresh for it; the first model request after the hold tries again,
-and until the access token expires requests still use it. A refused refresh
+and until 30 seconds before the access token expires requests still use
+it. A refused refresh
 (`invalid_grant`: the provider rejected the refresh token) is not held but
 remembered until an administrator signs in again or the gateway restarts.
 Neither waits on time: a new sign-in ends both within the 10-second reload

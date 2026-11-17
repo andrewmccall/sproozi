@@ -119,9 +119,9 @@ request that gives up gets a 503 `provider authentication is unavailable`,
 and the refresh still finishes and is saved. Each step (reading the stored
 sign-in, the refresh, saving its result) is bounded at 30 seconds.
 
-If the refresh fails, the gateway remembers the failure. While the access
-token has not expired, a transient failure doesn't fail model requests: they
-use the token they already have. Otherwise each model request gets a 503 with
+If the refresh fails, the gateway remembers the failure. Until 30 seconds
+before the access token's computed expiry, a transient failure doesn't fail
+model requests: they use the token they already have. Otherwise each model request gets a 503 with
 type `server_error`, code `provider_auth_unavailable` and a message that names
 the cause. The same message is the audit record's `denyReason`. It never
 contains a token, a URL or the provider's reply.
@@ -129,7 +129,7 @@ contains a token, a URL or the provider's reply.
 | Refresh outcome | Message after `provider authentication is unavailable: ` | What happens next | What to do |
 | --- | --- | --- | --- |
 | A 400 or 401 whose `error` is `invalid_grant`: the refresh token was revoked, expired or already spent | `the provider refused to renew the ChatGPT sign-in (token endpoint HTTP STATUS invalid_grant); an administrator must sign in again` | No refresh is sent again for this sign-in, and every model request gets this 503, even while the access token has not expired | Sign in again (below) |
-| Anything else from `auth.openai.com`: no reply, a timeout, a redirect, any other status (such as a proxy's 403 or 407, or a 400 with another error), or a 200 the gateway can't use | `the ChatGPT sign-in could not be renewed (CAUSE); the gateway tries again 10s after the failure` | No refresh is sent for 10 seconds; the first model request after that tries again. Until the access token expires, model requests still succeed | Usually nothing. If it lasts, check the gateway's route to `auth.openai.com` and the provider's status |
+| Anything else from `auth.openai.com`: no reply, a timeout, a redirect, any other status (such as a proxy's 403 or 407, or a 400 with another error), or a 200 the gateway can't use | `the ChatGPT sign-in could not be renewed (CAUSE); the gateway tries again 10s after the failure` | No refresh is sent for 10 seconds; the first model request after that tries again. Until 30 seconds before the access token expires, model requests still succeed | Usually nothing. If it lasts, check the gateway's route to `auth.openai.com` and the provider's status |
 
 `CAUSE` is `the token endpoint was unreachable or did not answer in time`,
 `token endpoint HTTP STATUS`, `the token endpoint returned an unreadable
@@ -149,6 +149,14 @@ the new `.local/chatgpt-session.json` into key `session.json` of the
 every 10 seconds, as it does when healthy, so model requests use the new
 sign-in within 10 seconds. A gateway restart also forgets the failure and
 tries one refresh.
+
+That 10-second interval covers a remembered refresh failure, not a failed
+read of the stored sign-in itself. While the Secret or file can't be read,
+every model request reads it again and gets `provider authentication is
+unavailable`.
+
+While a refresh is in flight, model requests wait for it, up to their own
+deadline, even if the stored access token still works.
 
 The gateway keeps the failure in memory only and does not raise an alert;
 watch the audit log for `denyReason` values containing `an administrator must

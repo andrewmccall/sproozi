@@ -74,13 +74,21 @@ There is no deadline column: no execution deadline applies.
   a remembered session. It is not a wait: the first model request after it
   sends the refresh again.
 - **A still-valid access token is used during a hold.** While a transient
-  failure holds the refresh back and the access token has not expired,
-  requests are served with it. A refusal is never served, and once the token
-  expires inside a hold, requests fail until the next refresh.
+  failure holds the refresh back, requests are served with the stored access
+  token until 30 seconds (`expiryMargin`) before its computed expiry. The
+  expiry is counted from when the refresh reply arrived, which the refresh
+  client's 30-second timeout puts at most 30 seconds after the provider issued
+  the token, so the margin keeps the gateway from sending a token the provider
+  may already treat as expired. A refusal is never served, and from the margin
+  on, requests fail until the next refresh.
 - **A failure is remembered as the session is.** Requests answer from the
   in-memory copy and its refresh record for up to `SessionReloadInterval`
   after the store was last read, then read it again. A hold or a refusal costs
-  one store read per 10 seconds, as a healthy session does.
+  one store read per 10 seconds, as a healthy session does. A failed store
+  read is not remembered: while the store itself fails (an unreadable Secret
+  or file), every model request reads it again, as before this change. A
+  review measured 1,000 reads for 1,000 sequential requests. Bounding that is
+  an open follow-up.
 - **A new sign-in ends either state at that read.** When the stored
   credentials differ from those the failure was for, the record moves to
   `ready` before anything else. An administrator's new sign-in reaches model
@@ -131,6 +139,12 @@ lost, as ADR 0026 records for a crash.
   plus 30 for each save in the worst case. Joining an owned attempt cost one
   goroutine and one channel per attempt; the same test now returns at 51 ms
   and at once.
+- **Match the error reply with `json.Unmarshal` into a struct.** It matches
+  the `error` key without regard to case and lets a later duplicate key
+  replace the first, so `{"ERROR":"invalid_grant"}` refused a sign-in. The
+  gateway walks the reply with `encoding/json`'s token decoder instead, takes
+  the first key spelled exactly `error`, and requires one object with nothing
+  after it.
 - **Refuse on any 4xx but 408 and 429.** Also the first version. A proxy's,
   CDN's or moved endpoint's 4xx, or a 400 caused by this gateway, would have
   ended a good sign-in with a false instruction to sign in again, where the
@@ -150,8 +164,12 @@ lost, as ADR 0026 records for a crash.
 
 ## Tradeoffs and consequences
 
-- After the access token expires, a transient failure fails model requests
-  for up to 10 seconds even if the provider recovers sooner.
+- From 30 seconds before the access token's computed expiry, a transient
+  failure fails model requests for up to 10 seconds even if the provider
+  recovers sooner.
+- The local gateway's refresh no longer uses an ambient `HTTPS_PROXY` or
+  `HTTP_PROXY`. The cluster gateway's never did, and the local gateway's model
+  calls already ignored them.
 - An administrator's new sign-in can take up to 10 seconds to reach model
   requests after a failure, as it does when the sign-in is healthy.
 - A provider that wrongly answers `invalid_grant` to a good refresh token
@@ -165,13 +183,24 @@ lost, as ADR 0026 records for a crash.
 - An attempt can keep running for up to about 2 minutes after every caller
   has left.
 
-Found and not fixed: on a local installation, `FileSessionStore.Replace`
-reads, compares and renames the credential file under a per-process lock
-only. A `sproozi init --chatgpt` sign-in written while the gateway saves a
-refresh can be overwritten by the refreshed old sign-in. A review measured
-the administrator's sign-in lost in 398 of 400 runs of that collision on this
-change and 382 of 400 before it, a 21 to 27 ms window this change did not
-widen. It needs its own fix.
+Found and not fixed, each a follow-up:
+
+- On a local installation, `FileSessionStore.Replace` reads, compares and
+  renames the credential file under a per-process lock only. A `sproozi init
+  --chatgpt` sign-in written while the gateway saves a refresh can be
+  overwritten by the refreshed old sign-in. A review measured the
+  administrator's sign-in lost in 398 of 400 runs of that collision on this
+  change and 382 of 400 before it, a 21 to 27 ms window this change did not
+  widen.
+- A failed store read is not cached, so a failing store is read once per
+  model request.
+- The refresh client ignores `providerCAFile`, although the local gateway's
+  model client honours it, so a local installation whose provider needs a
+  private CA cannot refresh a ChatGPT sign-in through it.
+- While a refresh is in flight in the last minute before expiry, model
+  requests wait for it, and fail at their own deadline if the provider is
+  slow, although the stored access token still works. Serving the previous
+  copy while an attempt is in flight would fix it.
 
 ## Revisit conditions
 
