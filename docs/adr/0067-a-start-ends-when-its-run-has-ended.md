@@ -143,8 +143,12 @@ refusal problem the driver recorded decides.
 
 While the end is unproven, the problem adds "the executor has not yet shown
 that nothing runs there and tries again" for a task, which the driver
-recovers again after its backoff, and ", so recover or cancel this session"
-for an interactive session, which waits for its owner. A later failure of
+recovers again after its backoff (one second, doubling to a minute), and ",
+so recover or cancel this session" for an interactive session, which waits
+for its owner. When the cause is one only an administrator can clear
+(`session.UnprovenEnd`), the problem adds "the executor cannot show that
+nothing runs there: CAUSE", where the cause says what clears it, and the
+driver stops for a task too: the owner's `recover` checks again. A later failure of
 that recovery replaces the problem with its own, as any failed recovery's
 does. An interactive session whose ended start has no recorded problem shows
 `it can never start: its placement refused it`, or the deadline's problem
@@ -233,23 +237,36 @@ What remains:
   replaced, never by how the replacement ended.
 - For a run an administrator replaced, or a registration one deleted, the
   start is refused but its end stays unproven: nothing proves that no Pod
-  of the bound run remains. The session stays `preparing`, as ADR 0060
-  records for those cases, and `cancel` meets the same gap. The placement
-  states the cause alone (`session.UnprovenEnd`): "AgentRun … now has UID …;
-  an administrator replaced it, so confirm no Pod labelled … remains", or
-  "the session registration … was deleted, so its Pod cannot be fenced; an
-  administrator must confirm no Pod labelled … remains". The driver's
-  problem carries it after the refusal, the executor logs it once per
-  session and cause, and the driver recovers a task again on its backoff,
-  capped at a minute, at a few API reads a try, until an administrator
-  acts; an interactive session waits for its owner's `recover`. A deleted
-  registration's tombstone is saved too, so each recover repeats the check.
-- `Inspect` of a launch whose preparation was aborted reports `preparing`
-  while its registration is not cancelled, cannot be read, or is cancelled
-  with its run not yet ended or its Pod still present; `absent` once the run
-  ended and no Pod remains, which is also what a coordinator whose commit of
-  the end was lost meets, and ends through `Prepare`; and conflict, as
-  before, for a registration that may have had authority.
+  of the bound run remains. The placement states the cause alone
+  (`session.UnprovenEnd`), the driver's problem carries it after the
+  refusal, the executor logs it once per session and cause (forgotten when
+  the start ends or the session is removed), and the driver stops until the
+  owner's `recover`.
+  - A replaced run: "AgentRun … now has UID …, but its session registration
+    bound UID …; an administrator replaced it: confirm no Pod labelled …
+    remains, then delete AgentRun … and recover this session". With the
+    replacement deleted, the next `recover` proves the end.
+  - A deleted registration: "… was deleted, so its Pod cannot be fenced and
+    the executor can never show that nothing runs for it; an administrator
+    must confirm no Pod labelled … remains …; cancel leaves the session
+    unknown-stop, and no owner command ends it". The saved reference never
+    reads again, so nothing an administrator does changes this: the session
+    stays `preparing`, or `unknown-stop` after a `cancel`, for good. Ending
+    it needs an owner decision this record does not make, such as a forced
+    removal after an administrator's confirmation.
+  - The cause is shown, and each recover repeats the check, only when a
+    waiting `Prepare` saw the deletion and its abort saved the launch's
+    tombstone. A registration deleted while no `Prepare` waits, for example
+    after a queued `Prepare` timed out, makes `recover` answer a bare
+    `conflict` from the read every operation makes first; routing that read
+    through the same cause touches every operation on the visit, and is
+    left for later.
+- `Inspect` of a launch whose preparation was aborted always reports
+  `preparing`, settled or not, because only `AbortPreparation` proves the
+  end; a coordinator still pending on the launch reaches it through
+  `Prepare`'s refusal. For a settled abort this deliberately claims less
+  than is true. A registration that may have had authority, not cancelled
+  or cancelled with spent usage, still answers conflict.
 - A task whose deadline has passed before the driver steps it is ended as
   expired without asking the placement, as before.
 - The wait reads the run once per 100-millisecond poll, as it read it for the

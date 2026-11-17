@@ -78,7 +78,10 @@ client certificate. Whatever context you use, the executor sees the
 The service and the executor upgrade together. A placement request that fails
 answers with one of these codes; status and messages never carry the
 executor's own error text. The one exception is a `refused` answer's
-`reason`, which names the AgentRun and its `Ready` condition.
+`reason`, which names the AgentRun and its `Ready` condition. A session the
+executor owns also shows its owner, in its problem, the cause of an end only
+an administrator can clear, which names the agent namespace and a Pod label;
+that is the session's own owner, so it is shown.
 
 | Code | HTTP status | Meaning |
 | --- | --- | --- |
