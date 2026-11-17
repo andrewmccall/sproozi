@@ -18,26 +18,37 @@ import (
 // make the driver spin: one session's completion-wait rounds are at least
 // completionPace apart, whether the wait began from stopping or from a
 // recovered unknown stop.
+//
+// The driver runs in a synctest bubble, where a round takes no time, so
+// the rounds fall at exactly 0, 1 and 2 paces of the bubble's clock; on
+// real time a slow round could push the third past the period. A driver
+// that spins never lets the bubble's clock reach the end of the period,
+// and the watch on real time reports it (see watchRealTime).
 func TestCompletionWaitIsPaced(t *testing.T) {
 	t.Parallel()
+	template.once.Do(func() { template.err = buildTemplate() })
 	for _, state := range []session.Phase{session.PhaseStopping, session.PhaseUnknownStop} {
 		t.Run(string(state), func(t *testing.T) {
 			t.Parallel()
-			e := newDriverEnv(t, false, clockNone)
-			namedJournalState(t, string(state)).build(t, e)
-			e.fixture(func(p *fixturePlacement) { p.turnPending = 1 << 30 })
-			_ = e.p.counts()
-			period := 2*completionPace + completionPace/2
-			ctx, cancel := context.WithTimeout(t.Context(), period)
-			defer cancel()
-			e.o.drive(ctx, e.id, make(chan struct{}))
-			e.p.mu.Lock()
-			stops := e.p.calls["stop"]
-			e.p.mu.Unlock()
-			// Rounds at 0, 1 and 2 paces, and one more for scheduling.
-			if stops < 2 || stops > 4 {
-				t.Fatalf("%d placement stops in %s, want 3 at a pace of %s", stops, period, completionPace)
-			}
+			watch := watchRealTime(t, cancelHangLimit, bubbleEndLimit)
+			defer watch.end()
+			synctest.Test(t, func(t *testing.T) {
+				e := newDriverEnv(t, false, clockNone)
+				namedJournalState(t, string(state)).build(t, e)
+				e.fixture(func(p *fixturePlacement) { p.turnPending = 1 << 30 })
+				_ = e.p.counts()
+				period := 2*completionPace + completionPace/2
+				ctx, cancel := context.WithTimeout(t.Context(), period)
+				defer cancel()
+				watch.waitFor("the driver did not stop at the end of the period on the bubble's clock")
+				e.o.drive(ctx, e.id, make(chan struct{}))
+				e.p.mu.Lock()
+				stops := e.p.calls["stop"]
+				e.p.mu.Unlock()
+				if stops != 3 {
+					t.Fatalf("%d placement stops in %s, want 3 at a pace of %s", stops, period, completionPace)
+				}
+			})
 		})
 	}
 }
