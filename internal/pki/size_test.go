@@ -109,8 +109,8 @@ func TestNoOperationWritesARecordLoadCannotRead(t *testing.T) {
 	}
 	before := storeFiles(t, dir)
 	for name, op := range map[string]func() error{
-		"prepare": s.PrepareRotation,
-		"replace": s.ReplaceCA,
+		string(evPrepare): s.PrepareRotation,
+		string(evReplace): s.ReplaceCA,
 	} {
 		err := op()
 		if err == nil || !strings.Contains(err.Error(), "load reads") {
