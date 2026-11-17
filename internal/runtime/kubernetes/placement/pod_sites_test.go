@@ -3,6 +3,7 @@ package placement
 import (
 	"context"
 	"io"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -25,18 +26,44 @@ func deleting(pod *corev1.Pod) {
 	pod.DeletionTimestamp = &now
 }
 
-// everySecondRead applies change to the second of each pair of Pod reads
-// from now on. An active visit's Pod is read twice: once by
-// registry.RequireActive and once more by the placement, so this models a
-// deletion that lands between the two.
-func everySecondRead(kube *admissionClient, change func(*corev1.Pod)) {
-	var reads atomic.Int64
+// afterActiveCheck applies change, from now on, to every Pod read except
+// registry.RequireActive's. An active visit's Pod is read by RequireActive
+// and once more by the placement, so this models a deletion that lands
+// between the two, however many reads there are. The returned counter is
+// how many reads RequireActive made, which a test requires to be nonzero.
+func afterActiveCheck(kube *admissionClient, change func(*corev1.Pod)) *atomic.Int64 {
+	var checks atomic.Int64
 	read := func(pod *corev1.Pod) {
-		if reads.Add(1)%2 == 0 {
-			change(pod)
+		if readByRequireActive() {
+			checks.Add(1)
+			return
 		}
+		change(pod)
 	}
 	kube.podRead.Store(&read)
+	return &checks
+}
+
+// readByRequireActive reports a Pod read made inside registry.RequireActive.
+func readByRequireActive() bool {
+	pcs := make([]uintptr, 64)
+	frames := runtime.CallersFrames(pcs[:runtime.Callers(2, pcs)])
+	for {
+		frame, more := frames.Next()
+		if strings.HasSuffix(frame.Function, "/registry.RequireActive") {
+			return true
+		}
+		if !more {
+			return false
+		}
+	}
+}
+
+func requireActiveChecked(t *testing.T, checks *atomic.Int64) {
+	t.Helper()
+	if checks.Load() == 0 {
+		t.Fatal("registry.RequireActive read no Pod: the test no longer models a deletion after it")
+	}
 }
 
 func everyRead(kube *admissionClient, change func(*corev1.Pod)) {
@@ -63,10 +90,11 @@ func TestAttachRefusesAPodDeletedAfterItsActiveCheck(t *testing.T) {
 	t.Parallel()
 	p, kube, _, l, data := setup(t)
 	i := activeVisit(t, p, l, data)
-	everySecondRead(kube, deleting)
+	checks := afterActiveCheck(kube, deleting)
 	if err := p.Attach(t.Context(), l, i, strings.NewReader(""), io.Discard); !isConflict(err) {
 		t.Fatalf("attached to a Pod being deleted: %v", err)
 	}
+	requireActiveChecked(t, checks)
 }
 
 // attachExecutor holds an attachment open until its context ends, and
@@ -89,7 +117,8 @@ func TestAttachEndsOnceThePodIsBeingDeleted(t *testing.T) {
 	t.Parallel()
 	p, kube, e, l, data := setup(t)
 	i := activeVisit(t, p, l, data)
-	p.exec = &attachExecutor{protocolExecutor: e, attached: func() { everySecondRead(kube, deleting) }}
+	var checks atomic.Pointer[atomic.Int64]
+	p.exec = &attachExecutor{protocolExecutor: e, attached: func() { checks.Store(afterActiveCheck(kube, deleting)) }}
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	done := make(chan error, 1)
@@ -99,16 +128,18 @@ func TestAttachEndsOnceThePodIsBeingDeleted(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("attachment outlived its Pod's deletion")
 	}
+	requireActiveChecked(t, checks.Load())
 }
 
 func TestInspectOfAnActiveVisitWhosePodIsBeingDeleted(t *testing.T) {
 	t.Parallel()
 	p, kube, _, l, data := setup(t)
 	activeVisit(t, p, l, data)
-	everySecondRead(kube, deleting)
+	checks := afterActiveCheck(kube, deleting)
 	if o, err := p.Inspect(t.Context(), l); err != nil || o.State != session.PlacementUnknown {
 		t.Fatalf("inspect of an active visit whose Pod is being deleted: %+v %v", o.State, err)
 	}
+	requireActiveChecked(t, checks)
 }
 
 // prepareWithin prepares l, giving the wait for a running Pod a short
