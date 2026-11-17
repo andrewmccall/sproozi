@@ -339,6 +339,9 @@ func TestUnknownSessionRepliesWithoutJournalPath(t *testing.T) {
 	}
 }
 
+// searchArg is the harness argument the resume tests pass through.
+const searchArg = "--search"
+
 // A session created by start resumes where it stopped: a new execution from
 // its last checkpoint, with the same conversation, fresh limits and a new
 // deadline, even after the first execution's deadline.
@@ -373,14 +376,14 @@ func TestResumeContinuesAStartedSessionAfterItsDeadline(t *testing.T) {
 		return stopped.Deadline, nil
 	})
 	s.duration = time.Hour
-	resumed, err := s.Resume(t.Context(), id, uuid.NewString(), []string{"--search"})
+	resumed, err := s.Resume(t.Context(), id, uuid.NewString(), []string{searchArg})
 	if err != nil {
 		t.Fatal(err)
 	}
 	active := resumed.Session.Active
 	if resumed.ID != id || resumed.ExecutionID == id || active == nil || active.Launch.ThreadID != testNativeUUID ||
 		active.Launch.CheckpointDigest != local.digest || !active.Launch.Deadline.After(time.Now().Add(time.Minute)) ||
-		!slices.Equal(active.Launch.HarnessArgs, []string{"--search"}) {
+		!slices.Equal(active.Launch.HarnessArgs, []string{searchArg}) {
 		t.Fatalf("resumed session: %+v", resumed)
 	}
 	if again, err := s.Stop(t.Context(), id, uuid.NewString()); err != nil || again.ThreadID != testNativeUUID {
@@ -414,14 +417,14 @@ func TestResumeFollowsTheCoordinatorsJudgementOfTheDeadline(t *testing.T) {
 		t.Fatalf("the first execution is not past its deadline at %s: %+v %v", late, first, err)
 	}
 	s.duration = 3 * time.Hour
-	resumed, err := s.Resume(t.Context(), id, uuid.NewString(), []string{"--search"})
+	resumed, err := s.Resume(t.Context(), id, uuid.NewString(), []string{searchArg})
 	if err != nil {
 		t.Fatal(err)
 	}
 	active := resumed.Session.Active
 	if resumed.ID != id || resumed.ExecutionID == id || active == nil || active.Launch.ThreadID != testNativeUUID ||
 		active.Launch.CheckpointDigest != local.digest || !active.Launch.Deadline.After(late.Add(time.Minute)) ||
-		!slices.Equal(active.Launch.HarnessArgs, []string{"--search"}) {
+		!slices.Equal(active.Launch.HarnessArgs, []string{searchArg}) {
 		t.Fatalf("resumed session: %+v", resumed)
 	}
 	if again, err := s.Stop(t.Context(), id, uuid.NewString()); err != nil || again.ThreadID != testNativeUUID {
