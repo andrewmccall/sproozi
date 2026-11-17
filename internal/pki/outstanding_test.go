@@ -30,7 +30,7 @@ func TestAKeyIsCheckedWhereItIsUsed(t *testing.T) {
 	}{
 		{"open to others", stPrepared, keyCA2, func(t *testing.T, path string) { must(t, os.Chmod(path, 0o644)) },
 			"generation 2 key ca-2.key is unreadable: privatefs: path must be owned, private and ordinary",
-			"pki: serving CA key unavailable; recover it or replace the CA: privatefs: path must be owned, private and ordinary",
+			"pki: serving CA key unavailable; recover it or replace the CA: generation 2 key ca-2.key: privatefs: path must be owned, private and ordinary",
 			func(s *Store) error { return s.SwitchRotation(true) }},
 		{"another key", stPrepared, keyCA2, func(t *testing.T, path string) { must(t, os.WriteFile(path, other(t), 0o600)) },
 			"generation 2 key ca-2.key does not match its certificate: pki: private key does not match certificate",

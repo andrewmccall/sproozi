@@ -478,9 +478,9 @@ func (s *Store) servingPair(st State) (Pair, error) {
 }
 
 func (s *Store) issue(st *State, now time.Time) error {
-	ca, err := s.readPair(caName(st.Serving))
+	ca, err := s.servingPair(*st)
 	if err != nil {
-		return fmt.Errorf("pki: serving CA key unavailable; recover it or replace the CA: %w", err)
+		return err
 	}
 	leaf, err := IssueLeaf(ca, st.Names, now, s.policy.LeafValidity)
 	if err != nil {

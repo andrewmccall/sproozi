@@ -7,6 +7,38 @@ import (
 	"testing"
 )
 
+// Every step that signs with the serving key reports a broken one the same
+// way, naming the generation, the file and the cause, whether the key
+// cannot be read, is not a key, or belongs to another authority. Guards
+// servingPair's use in issue.
+func TestABrokenServingKeyIsReportedTheSameWayEverywhere(t *testing.T) {
+	roots := buildStates(t)
+	other, err := NewCA("hand-made", outcomeStart, DefaultPolicy.CAValidity)
+	must(t, err)
+	const unavailable = "pki: serving CA key unavailable; recover it or replace the CA: "
+	for _, tc := range []struct {
+		name, from, key string
+		data            []byte
+		run             func(s *Store) error
+		want            string
+	}{
+		{"renew, garbage", stSingle, keyCA1, []byte("not a key\n"), func(s *Store) error { return s.Renew() },
+			unavailable + "generation 1 key ca-1.key: pki: one PKCS#8 private key required"},
+		{"renew, another key", stSingle, keyCA1, other.Key, func(s *Store) error { return s.Renew() },
+			unavailable + "generation 1 key ca-1.key: pki: private key does not match certificate"},
+		{"switch, garbage", stPrepared, keyCA2, []byte("not a key\n"), func(s *Store) error { return s.SwitchRotation(true) },
+			unavailable + "generation 2 key ca-2.key: pki: one PKCS#8 private key required"},
+		{"switch, another key", stPrepared, keyCA2, other.Key, func(s *Store) error { return s.SwitchRotation(true) },
+			unavailable + "generation 2 key ca-2.key: pki: private key does not match certificate"},
+	} {
+		root := copyStore(t, filepath.Join(roots[tc.from], "pki"))
+		must(t, os.WriteFile(filepath.Join(root, "pki", tc.key), tc.data, 0o600))
+		if err := tc.run(outcomeStore(t, root)); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: %v, want %q", tc.name, err, tc.want)
+		}
+	}
+}
+
 // Retire destroys the outgoing key only after proving the serving key works
 // for its recorded certificate. With the new serving key broken, retire is
 // refused naming it, the store stays switched and the outgoing key, the one
