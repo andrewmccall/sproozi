@@ -249,12 +249,18 @@ it cannot be read, `pki: one PKCS#8 private key required`, or `pki: private
 key does not match certificate`. `sproozi certificates status` and `sproozi
 doctor` do not show these reports yet; they appear only in the service log.
 
-`pki/state.json` is read only up to 64 KiB. An operation whose record would
-be larger, such as a rotation after several hundred generations, is refused
-before it writes anything, with `pki: refusing to prepare: the record would be
-N bytes, more than the 65536 bytes load reads` (or `replace`, or `refusing to
-save`). The store keeps working with its current authority until that
-authority expires, but cannot rotate. The history cannot be shortened in
+`pki/state.json` is read only up to 64 KiB. A rotation or `replace-ca` starts
+only while the record leaves 1024 bytes below that, so a rotation it starts
+can always finish or be undone. After several hundred generations one is
+refused, before anything is written, with `pki: refusing to prepare: the
+record is N bytes, and starting it needs 1024 bytes below the 65536 bytes
+load reads` (or `replace`). The store then keeps working with its current
+authority until that authority expires, renewing the certificate as usual,
+but cannot rotate. A change of harnesses or inspected hosts that would grow
+the record into those 1024 bytes is refused the same way, before a
+certificate is issued (`pki: refusing to change the serving names: … the
+serving names list does not fit`): the service keeps its current certificate,
+which is not renewed until the names list shrinks again. The history cannot be shortened in
 place, and no command starts a new local authority yet: `sproozi init`
 refuses an installation whose authority state is missing. `replace-ca` on a
 refused record also refuses, naming

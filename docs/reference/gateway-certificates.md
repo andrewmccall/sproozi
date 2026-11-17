@@ -140,10 +140,16 @@ match certificate`. A refused `retire` request is reported in
 ### When the record outgrows what the controller reads
 
 The controller reads `state.json` up to 64 KiB. A `prepare` or `replace`
-whose record would be larger, after several hundred generations, is refused
-before it writes anything, with `pki: refusing to prepare: the record would
-be N bytes, more than the 65536 bytes load reads`. The history cannot be
-shortened in place. Back up the authority Secret, then remove all of its data
+starts only while the record leaves 1024 bytes below that, so a rotation
+it starts can always be switched, rolled back and retired. After several
+hundred generations one is refused, before anything is written, with `pki:
+refusing to prepare: the record is N bytes, and starting it needs 1024 bytes
+below the 65536 bytes load reads`. A `--dns` change that would grow the record
+into those 1024 bytes is refused the same way before a certificate is issued
+(`pki: refusing to change the serving names: … the serving names list does
+not fit`): the gateway keeps its current certificate, which is not renewed
+until the names list is shortened again. Renewal with unchanged names
+continues. The history cannot be shortened in place. Back up the authority Secret, then remove all of its data
 and its `sproozi.com/trust-configmap` annotation: the controller then creates
 a new authority, generation 1, whose trust ConfigMap is
 `sproozi-sandbox-trust`. Delete the old ConfigMap of that name first, once no

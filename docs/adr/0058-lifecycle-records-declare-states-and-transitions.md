@@ -508,11 +508,19 @@ what it will depend on:
 | destroy pass (`Ensure`, after every commit) | keys of retired generations, files of a generation numbered after the record's last, leaf files the record does not name | only the committed record: it never touches a trusted generation's key or the named leaf |
 | issuing a leaf | the previous leaf | the new leaf was issued from the checked serving key and committed |
 
-`commit` refuses a record larger than the 64 KiB load reads, and `prepare`
-and `replace` check before writing anything, so a history that has grown
-too long refuses the next rotation instead of being written and then
-unreadable. Replace on a refused record refuses, naming the stray `ca-N` file
-or the generation id, when numbering after it would cross that bound. An
+`commit` refuses a record larger than the 64 KiB load reads. A move that
+starts something (`prepare`, `replace`, a change of serving names) is
+refused, before it writes anything, unless the record leaves a fixed reserve
+of 1024 bytes below that; everything that can follow before the store is
+`single` again adds at most about 360 bytes (294 measured), so `switch`,
+`rollback`, `retire` and renewal with unchanged names always commit. A
+history that has grown too long therefore refuses the next rotation instead
+of being written and then unreadable, or starting a rotation it cannot
+finish. Replace on a refused record refuses, naming the stray `ca-N` file
+or the generation id, when the history it would rebuild leaves less than
+the reserve. Open follow-up: at that bound, no local command starts a fresh
+authority; `sproozi init` refuses an installation whose authority state is
+missing. An
 interrupted replace of a refused record, run again, ends in a valid
 `single` store with every earlier key destroyed, but numbered one higher
 than an uninterrupted run, the interrupted attempt's certificate kept as a
