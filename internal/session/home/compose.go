@@ -524,7 +524,7 @@ func providerAuth(result model.HandlerConfig, c GatewayConfig, kind harness.Nati
 		if _, err := store.Load(context.Background()); err != nil {
 			return result, fmt.Errorf("home: gateway.providerTokenFile %s: %w; run sproozi init --chatgpt", c.ProviderTokenFile, err)
 		}
-		result.ProviderAuth = modelauth.NewChatGPT(store, &http.Client{Timeout: 30 * time.Second})
+		result.ProviderAuth = modelauth.NewChatGPT(store, modelauth.NewRefreshClient())
 		return result, nil
 	}
 	if c.ProviderTokenFile == "" {

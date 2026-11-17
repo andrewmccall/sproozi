@@ -214,3 +214,16 @@ type tokenEndpointError struct {
 }
 
 func (e *tokenEndpointError) Error() string { return e.message }
+
+// NewRefreshClient returns the client both the cluster and the local gateway
+// refresh their ChatGPT sign-in with: no ambient proxy, a refreshTimeout
+// bound and no redirects, which would re-send the refresh token to the
+// redirect's target.
+func NewRefreshClient() *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	return &http.Client{Timeout: refreshTimeout, Transport: transport, CheckRedirect: refuseRedirect}
+}
+
+// refuseRedirect returns a redirect to the caller as the reply it is.
+func refuseRedirect(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }

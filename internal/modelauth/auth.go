@@ -222,8 +222,12 @@ type loadedSession struct {
 	loadedAt time.Time
 }
 
+// NewChatGPT returns the authenticator for a stored sign-in. It never follows
+// a redirect from the token endpoint, whatever client it is given.
 func NewChatGPT(store SessionStore, client *http.Client) *ChatGPT {
-	return &ChatGPT{store: store, client: client, tokenEndpoint: TokenEndpoint, reloadInterval: SessionReloadInterval,
+	refreshing := *client
+	refreshing.CheckRedirect = refuseRedirect
+	return &ChatGPT{store: store, client: &refreshing, tokenEndpoint: TokenEndpoint, reloadInterval: SessionReloadInterval,
 		now: time.Now}
 }
 
