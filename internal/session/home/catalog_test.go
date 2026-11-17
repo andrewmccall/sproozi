@@ -341,13 +341,16 @@ func TestUnknownSessionRepliesWithoutJournalPath(t *testing.T) {
 // A session created by start resumes where it stopped: a new execution from
 // its last checkpoint, with the same conversation, fresh limits and a new
 // deadline, even after the first execution's deadline.
+//
+// The first execution's deadline is an hour ahead, so start, a refused
+// resume and the stop finish before it however slow the machine. The
+// coordinator, which judges deadlines, is then reopened on a clock past it,
+// as a restart after the deadline would be; resume sets the new deadline
+// from the machine's clock, so its duration grows to keep that ahead.
 func TestResumeContinuesAStartedSessionAfterItsDeadline(t *testing.T) {
 	t.Parallel()
 	s, local, _, repo := testService(t)
 	id := uuid.NewString()
-	// Long enough for start, a refused resume and the stop to finish before the
-	// deadline on a loaded machine; the test then waits for it to pass.
-	s.duration = 15 * time.Second
 	if _, err := s.Start(t.Context(), id, uuid.NewString(), repo, "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -359,15 +362,19 @@ func TestResumeContinuesAStartedSessionAfterItsDeadline(t *testing.T) {
 	if err != nil || stopped.Phase != string(PhaseRetained) || stopped.ThreadID != testNativeUUID {
 		t.Fatalf("stop of a started session: %+v %v", stopped, err)
 	}
-	time.Sleep(time.Until(stopped.Deadline) + 100*time.Millisecond)
-	s.duration = time.Hour
+	late := stopped.Deadline.Add(time.Minute)
+	reopenWithClock(t, s, func() time.Time { return late })
+	if first, err := s.coordinator.Inspect(id); err != nil || !s.coordinator.PastDeadline(first) {
+		t.Fatalf("the first execution is not past its deadline at %s: %+v %v", late, first, err)
+	}
+	s.duration = 3 * time.Hour
 	resumed, err := s.Resume(t.Context(), id, uuid.NewString(), []string{"--search"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	active := resumed.Session.Active
 	if resumed.ID != id || resumed.ExecutionID == id || active == nil || active.Launch.ThreadID != testNativeUUID ||
-		active.Launch.CheckpointDigest != local.digest || !active.Launch.Deadline.After(time.Now().Add(time.Minute)) ||
+		active.Launch.CheckpointDigest != local.digest || !active.Launch.Deadline.After(late.Add(time.Minute)) ||
 		!slices.Equal(active.Launch.HarnessArgs, []string{"--search"}) {
 		t.Fatalf("resumed session: %+v", resumed)
 	}

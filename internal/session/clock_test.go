@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/andrewmccall/sproozi/internal/testutil"
 )
 
 // Production code judges deadlines against the wall clock alone: only tests
@@ -40,5 +43,24 @@ func TestOnlyTestsReplaceTheCoordinatorClock(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Tests that pass a deadline replace the coordinator's clock; one opened
+// without options reads the machine's clock at the moment it judges a
+// deadline.
+func TestOpenJudgesDeadlinesOnTheMachineClock(t *testing.T) {
+	t.Parallel()
+	c, err := Open(filepath.Join(testutil.PrivateDir(t), "journal"),
+		map[string]Placement{testLocal: newPlacement(nil, "")}, testMaxCheckpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+	before := time.Now()
+	now := c.now()
+	after := time.Now()
+	if now.Before(before) || now.After(after) {
+		t.Fatalf("coordinator clock read %s, want between %s and %s", now, before, after)
 	}
 }
