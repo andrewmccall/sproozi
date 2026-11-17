@@ -3,6 +3,7 @@ package placement
 import (
 	"context"
 	"errors"
+	"net/http"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,6 +12,7 @@ import (
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
 	"github.com/andrewmccall/sproozi/internal/session"
+	"github.com/andrewmccall/sproozi/internal/session/profile"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -275,6 +277,56 @@ func TestInspectOfAStartWhoseRunHasNoSandboxIsPreparing(t *testing.T) {
 		if err != nil || o.State != session.PlacementPreparing || o.Incarnation != (session.Incarnation{}) {
 			t.Fatalf("Inspect of a %s run with no sandbox: %+v %v", phase, o, err)
 		}
+	}
+}
+
+// The refusal crosses the placement protocol with its reason, so a home
+// coordinating a session on the executor ends the start as the executor's
+// own coordinator would: the executor answers refused (409) with the
+// reason, the home fences the preparation through abort-preparation, and
+// the execution is idle with the reason in the error (ADR 0067). The home
+// moves a resumed conversation, which has a deadline here: it ends at once,
+// not at the deadline.
+func TestHomeEndsAStartTheExecutorRefusesOverTheProtocol(t *testing.T) {
+	t.Parallel()
+	p, kube, _, l, data := setup(t)
+	kube.queued = true
+	kube.reconcile = cancelReconcile(t, kube)
+	l.Epoch = 1
+	home := serveProfile(t, p, l, time.Minute)
+	coordinator, err := session.Open(filepath.Join(t.TempDir(), "sessions"), map[string]session.Placement{l.Placement: home}, fixtureMax)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = coordinator.Close() })
+	if _, err = coordinator.Create(l, data, ""); err != nil {
+		t.Fatal(err)
+	}
+	// The executor's answer to the home's own Prepare, while it waits.
+	w := inBackground(t, kube, func() error {
+		_, err := home.Prepare(t.Context(), l, data)
+		return err
+	})
+	setRun(t, kube, l, api.AgentRunPhaseFailed, "RuntimeInvalid", "AgentRuntime native is invalid: image is required")
+	const reason = "failed before its sandbox started: RuntimeInvalid: AgentRuntime native is invalid: image is required"
+	err = w.ended(t)
+	var refused *session.StartRefused
+	var remote *profile.RemoteError
+	if !errors.As(err, &remote) || remote.Code != profile.CodeRefused || remote.Status != http.StatusConflict ||
+		!errors.Is(err, session.ErrStartRefused) || !errors.As(err, &refused) || !strings.Contains(refused.Reason, reason) {
+		t.Fatalf("remote refused prepare: %v", err)
+	}
+	// The home's coordinator ends the start with that reason.
+	_, err = coordinator.Recover(t.Context(), l.ExecutionID)
+	if !errors.Is(err, session.ErrStartEnded) || !errors.As(err, &refused) || !strings.Contains(refused.Reason, reason) {
+		t.Fatalf("remote refused start: %v", err)
+	}
+	r, err := coordinator.Inspect(l.ExecutionID)
+	if err != nil || r.Phase != session.PhaseIdle || len(r.Visits) != 0 {
+		t.Fatalf("after the remote refused start: %+v %v", r, err)
+	}
+	if local, err := p.load(l); err != nil || !local.PreparationAborted {
+		t.Fatalf("the refused remote preparation was not fenced: %+v %v", local, err)
 	}
 }
 

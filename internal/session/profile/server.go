@@ -390,6 +390,14 @@ func (h *handler) fail(w http.ResponseWriter, err error) {
 		_ = json.NewEncoder(w).Encode(response{Version: protocolVersion, Error: CodeTurnPending, Waiting: waitingText(waiting)})
 		return
 	}
+	var refused *session.StartRefused
+	if errors.As(err, &refused) {
+		// The preparation can never be made: the home ends the start.
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(response{Version: protocolVersion, Error: CodeRefused,
+			Reason: session.RefusalReason(refused.Reason)})
+		return
+	}
 	var refusal *Rejection
 	if errors.As(err, &refusal) {
 		switch refusal.Code {

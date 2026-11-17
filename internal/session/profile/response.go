@@ -7,7 +7,7 @@ import (
 )
 
 func validateResponse(action string, input request, r response, max int64) error {
-	if r.Version != protocolVersion || r.Error != "" || r.Waiting != "" || r.Executor != nil || r.Exited && action != actionExited {
+	if r.Version != protocolVersion || r.Error != "" || r.Waiting != "" || r.Reason != "" || r.Executor != nil || r.Exited && action != actionExited {
 		return errors.New("profile: invalid success response")
 	}
 	switch action {
