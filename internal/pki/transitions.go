@@ -128,8 +128,15 @@ func (st *State) apply(ev event, added *Generation, now time.Time) error {
 		return fmt.Errorf("pki: %s from %s did not produce %s: %v", ev, from, to, err)
 	}
 	*st = next
+	if appliedHook != nil {
+		appliedHook(ev, from, to)
+	}
 	return nil
 }
+
+// appliedHook, when a test sets it, observes every move apply makes. It is
+// nil in production.
+var appliedHook func(ev event, from, to Phase)
 
 func (st State) clone() State {
 	out := st
