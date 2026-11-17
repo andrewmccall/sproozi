@@ -9,14 +9,18 @@ import (
 
 // Every phase is reachable from an empty store, and from every phase every
 // other phase is reachable, so no phase is a dead end and none waits on
-// anything but an event. Guards transitions in transitions.go.
+// anything but an event. A refused record is left only by replace, to
+// single. Guards transitions in transitions.go.
 func TestEveryPhaseIsReachableAndHasAnExit(t *testing.T) {
 	for ev, rows := range transitions {
 		for from, to := range rows {
 			if from == phaseNone && ev != evInitialize {
 				t.Errorf("%s starts from no record", ev)
 			}
-			if from != phaseNone && !slices.Contains(Phases, from) || !slices.Contains(Phases, to) {
+			if from == phaseRefused && (ev != evReplace || to != PhaseSingle) {
+				t.Errorf("%s leaves a refused record", ev)
+			}
+			if from != phaseNone && from != phaseRefused && !slices.Contains(Phases, from) || !slices.Contains(Phases, to) {
 				t.Errorf("%s: %q -> %q is outside the vocabulary", ev, from, to)
 			}
 		}
@@ -33,7 +37,10 @@ func TestEveryPhaseIsReachableAndHasAnExit(t *testing.T) {
 		}
 		return seen
 	}
-	for _, start := range append([]Phase{phaseNone}, Phases...) {
+	if transitions[evReplace][phaseRefused] != PhaseSingle {
+		t.Error("replace does not leave a refused record")
+	}
+	for _, start := range append([]Phase{phaseNone, phaseRefused}, Phases...) {
 		seen := reach(start)
 		for _, p := range Phases {
 			if !seen[p] {

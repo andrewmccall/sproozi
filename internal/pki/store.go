@@ -119,9 +119,17 @@ func (s *Store) State() (State, error) {
 }
 
 // load reads the committed record and refuses one no phase describes. It
-// does not read the authority files: Initialize and ReplaceCA use it, so
-// replace still recovers an authority whose files were lost or changed.
+// does not read the authority files: Initialize uses it.
 func (s *Store) load() (State, error) {
+	st, err := s.decode()
+	if err != nil {
+		return st, err
+	}
+	return st, check(st)
+}
+
+// decode reads the committed record without checking what it describes.
+func (s *Store) decode() (State, error) {
 	var st State
 	data, err := privatefs.ReadFile(filepath.Join(s.dir, stateFile), maxState)
 	if os.IsNotExist(err) {
@@ -135,7 +143,7 @@ func (s *Store) load() (State, error) {
 	if err = d.Decode(&st); err != nil {
 		return st, fmt.Errorf("pki: corrupt state: %w", err)
 	}
-	return st, check(st)
+	return st, nil
 }
 
 func (st State) generation(id int) *Generation {
@@ -376,11 +384,23 @@ func (s *Store) RetireRotation(drained bool) error {
 // ReplaceCA is the emergency path for a lost or compromised CA. It trusts only
 // a new generation, issues a new leaf and destroys every older private key.
 // Existing workers lose trust and must be cancelled or drained by the caller.
+// It is also the way out of a record no phase describes: it reads the record
+// without its authority files, and builds on a record no phase describes as
+// replaceable does. It refuses only a record it cannot read, or one of
+// another version.
 func (s *Store) ReplaceCA() error {
 	return s.locked(func() error {
-		st, err := s.load()
+		st, err := s.decode()
 		if err != nil {
 			return err
+		}
+		if st.Version != 1 {
+			return check(st)
+		}
+		if check(st) != nil {
+			if st, err = s.replaceable(st); err != nil {
+				return err
+			}
 		}
 		if err = st.admit(evReplace); err != nil {
 			return err

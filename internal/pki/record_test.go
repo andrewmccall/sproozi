@@ -1,6 +1,7 @@
 package pki
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,11 +22,10 @@ func buildStates(t *testing.T) map[string]string {
 	return roots
 }
 
-// A record whose structure no phase describes is refused on load with an
-// error naming what is wrong; it is never repaired and never a new
-// authority. Guards describe in record.go: each case below removes one rule.
-func TestLoadRefusesARecordNoPhaseDescribes(t *testing.T) {
-	refusals := map[string]string{
+// refusedRecordErrors maps each corruption no phase describes to the error
+// load names it with.
+func refusedRecordErrors() map[string]string {
+	return map[string]string{
 		"version-2":                        "version 2 is not 1",
 		"no-generations":                   "no generations",
 		"trusted-empty":                    "0 trusted generations",
@@ -59,21 +59,34 @@ func TestLoadRefusesARecordNoPhaseDescribes(t *testing.T) {
 		"trusted-three":                    "3 trusted generations; a record trusts one, or two during a rotation",
 		"rotation-target-not-newest":       "rotation target 2 is not the newest generation",
 	}
-	// A third generation, as a hand edit could add one; not in the recorded
-	// table, which was generated before these two cases were added.
+}
+
+// refusedRecordCases are corruptions() plus two hand edits that add a third
+// generation. The two are not in the recorded table, which was generated
+// before they were added.
+func refusedRecordCases() []corruption {
 	third := func(retired bool) Generation {
 		return Generation{ID: 3, Fingerprint: strings.Repeat("cd", 32), NotAfter: outcomeStart, Retired: retired}
 	}
-	cases := append(corruptions(),
+	return append(corruptions(),
 		corruption{"trusted-three", stPrepared, editState(func(st *State) {
 			st.Generations, st.Trusted = append(st.Generations, third(false)), []int{1, 2, 3}
 		})},
 		corruption{"rotation-target-not-newest", stPrepared, editState(func(st *State) {
 			st.Generations = append(st.Generations, third(true))
 		})})
+}
+
+// A record whose structure no phase describes is refused with an error
+// naming what is wrong by load and by every request but replace: it is never
+// repaired, never a new authority on its own, and nothing in the store
+// changes. Guards describe in record.go (each case removes one rule) and the
+// refusal of phaseRefused by every event but replace in transitions.go.
+func TestOnlyReplaceProceedsOnARefusedRecord(t *testing.T) {
+	refusals := refusedRecordErrors()
 	roots := buildStates(t)
 	seen := map[string]bool{}
-	for _, c := range cases {
+	for _, c := range refusedRecordCases() {
 		want, ok := refusals[c.name]
 		if !ok {
 			continue
@@ -82,28 +95,29 @@ func TestLoadRefusesARecordNoPhaseDescribes(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			root := copyStore(t, filepath.Join(roots[c.from], "pki"))
 			c.apply(t, filepath.Join(root, "pki"))
-			before, err := os.ReadFile(filepath.Join(root, "pki", stateFile))
-			must(t, err)
+			before := storeFiles(t, filepath.Join(root, "pki"))
 			s := outcomeStore(t, root)
 			for _, ev := range outcomeEvents() {
-				if ev.name == evNameInitialize || ev.name == evNameReplace {
+				if ev.name == evNameReplace {
 					continue
 				}
 				err := ev.run(s)
 				if err == nil || !strings.Contains(err.Error(), "pki: corrupt state: "+want) {
 					t.Errorf("%s: got %v, want refusal %q", ev.name, err, want)
 				}
-			}
-			for _, ev := range []string{evNameInitialize, evNameReplace} {
-				err := outcomeEventNamed(ev).run(s)
-				if err == nil || !strings.Contains(err.Error(), want) {
-					t.Errorf("%s: got %v, want refusal %q", ev, err, want)
+				if got := storeFiles(t, filepath.Join(root, "pki")); !maps.Equal(got, before) {
+					t.Errorf("refused %s changed the store", ev.name)
 				}
 			}
-			after, err := os.ReadFile(filepath.Join(root, "pki", stateFile))
-			must(t, err)
-			if string(after) != string(before) {
-				t.Error("a refused record was rewritten")
+			if c.name == "version-2" {
+				// A newer version's record: replace refuses it too.
+				if err := s.ReplaceCA(); err == nil || !strings.Contains(err.Error(), want) {
+					t.Errorf("replace of a version 2 record: %v", err)
+				}
+				return
+			}
+			if err := s.ReplaceCA(); err != nil {
+				t.Errorf("replace: %v", err)
 			}
 		})
 	}
@@ -114,13 +128,21 @@ func TestLoadRefusesARecordNoPhaseDescribes(t *testing.T) {
 	}
 }
 
-func outcomeEventNamed(name string) outcomeEvent {
-	for _, ev := range outcomeEvents() {
-		if ev.name == name {
-			return ev
+// storeFiles reads every file in dir by name.
+func storeFiles(t *testing.T, dir string) map[string]string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	must(t, err)
+	files := map[string]string{}
+	for _, e := range entries {
+		if e.IsDir() || e.Name() == lockFile {
+			continue
 		}
+		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		must(t, err)
+		files[e.Name()] = string(data)
 	}
-	panic("no event " + name)
+	return files
 }
 
 // Every record the code writes, and every record an interrupted write

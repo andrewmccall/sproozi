@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 
 	"github.com/andrewmccall/sproozi/internal/privatefs"
 )
@@ -79,6 +80,11 @@ func checkGenerations(st State) error {
 	for i, g := range st.Generations {
 		if g.ID != i+1 {
 			return fmt.Errorf("generation %d is listed where generation %d belongs", g.ID, i+1)
+		}
+		if g.Retired && g.Fingerprint == "" && g.NotAfter.IsZero() {
+			// A retired generation replace found neither in the refused
+			// record nor as a certificate file (replaceable).
+			continue
 		}
 		if !fingerprintPattern.MatchString(g.Fingerprint) {
 			return fmt.Errorf("generation %d has no SHA-256 fingerprint", g.ID)
@@ -200,6 +206,67 @@ func (s *Store) checkFiles(st State) error {
 		}
 	}
 	return nil
+}
+
+// caFilePattern is the only form of CA file name the store writes:
+// ca-<N>.pem and ca-<N>.key, N a positive number without leading zeros.
+var caFilePattern = regexp.MustCompile(`^ca-([1-9][0-9]{0,8})\.(pem|key)$`)
+
+// maxReplaceableGeneration bounds the history replace rebuilds. A yearly
+// rotation reaches it in ten thousand years; a higher number is a hand edit.
+const maxReplaceableGeneration = 10000
+
+// caFileGeneration returns the generation a CA file name belongs to, or 0
+// for a name the store does not write.
+func caFileGeneration(name string) int {
+	m := caFilePattern.FindStringSubmatch(name)
+	if m == nil {
+		return 0
+	}
+	id, err := strconv.Atoi(m[1])
+	if err != nil {
+		return 0
+	}
+	return id
+}
+
+// replaceable is the record ReplaceCA builds on when no phase describes st.
+// It keeps st's names and lists generations 1 to N, every one retired, where
+// N is the highest generation st records or a ca-N file in the store
+// belongs to, so the new generation is numbered after all of them and no
+// existing CA file is overwritten. Each generation keeps its fingerprint and
+// expiry from st where st records them, else from its certificate file;
+// one found in neither keeps neither. Retiring them all lets the destroy
+// pass remove every one of their keys; their certificates stay as history.
+func (s *Store) replaceable(st State) (State, error) {
+	highest := 0
+	for _, g := range st.Generations {
+		highest = max(highest, g.ID)
+	}
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
+		return State{}, err
+	}
+	for _, entry := range entries {
+		highest = max(highest, caFileGeneration(entry.Name()))
+	}
+	if highest > maxReplaceableGeneration {
+		return State{}, fmt.Errorf("pki: corrupt state: generation %d is beyond the %d replace can rebuild; "+
+			"restore state.json from a backup", highest, maxReplaceableGeneration)
+	}
+	base := State{Version: 1, Names: st.Names}
+	for id := 1; id <= highest; id++ {
+		g := Generation{ID: id, Retired: true}
+		if i := slices.IndexFunc(st.Generations, func(r Generation) bool {
+			return r.ID == id && fingerprintPattern.MatchString(r.Fingerprint) && !r.NotAfter.IsZero()
+		}); i >= 0 {
+			g.Fingerprint, g.NotAfter = st.Generations[i].Fingerprint, st.Generations[i].NotAfter
+		} else if cert, err := s.caCertificate(id); err == nil {
+			g.Fingerprint, g.NotAfter = Fingerprint(cert), cert.NotAfter
+		}
+		base.Generations = append(base.Generations, g)
+	}
+	return base, nil
 }
 
 func filesError(format string, args ...any) error {

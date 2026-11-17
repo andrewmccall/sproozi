@@ -1,0 +1,102 @@
+package certificates
+
+import (
+	"context"
+	"encoding/json"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/andrewmccall/sproozi/internal/pki"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
+)
+
+// clusterObjects is every object the controller reads or writes.
+func clusterObjects(t *testing.T, client *fake.Clientset) (*corev1.SecretList, *corev1.ConfigMapList) {
+	t.Helper()
+	secrets, err := client.CoreV1().Secrets(systemNamespace).List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cms, err := client.CoreV1().ConfigMaps("sproozi-agents").List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return secrets, cms
+}
+
+func refusedCluster(t *testing.T) *fake.Clientset {
+	t.Helper()
+	c, client := setup(t)
+	step(t, c, client, requestPrepare)
+	editStoredState(t, client, func(st *pki.State) { st.Rotation.Stage = "bogus" })
+	return client
+}
+
+// A reconcile that finds a record no phase describes, with no request or
+// with any request but replace, fails naming what is wrong and writes
+// nothing: the authority Secret, the serving Secret and the trust ConfigMaps
+// are byte-identical, resource versions included, and the request stays for
+// the operator to see. Guards the refusal in pki's load and the order in
+// Reconcile that commits nothing before Ensure succeeds.
+func TestAReconcileOfARefusedRecordWritesNothing(t *testing.T) {
+	for _, req := range []string{"", requestRenew, requestPrepare, requestSwitch, requestRollback, requestRetire} {
+		client := refusedCluster(t)
+		if req != "" {
+			request(t, client, req)
+		}
+		secrets, cms := clusterObjects(t, client)
+		_, err := controller(t, client).Reconcile(context.Background())
+		if err == nil || !strings.Contains(err.Error(), `pki: corrupt state: rotation stage "bogus" is not prepared or switched`) {
+			t.Errorf("request %q: %v", req, err)
+		}
+		afterSecrets, afterCMs := clusterObjects(t, client)
+		if !reflect.DeepEqual(secrets, afterSecrets) || !reflect.DeepEqual(cms, afterCMs) {
+			t.Errorf("request %q changed the cluster", req)
+		}
+	}
+}
+
+// The operator's way out of a refused record is the replace request, the
+// sproozi.com/rotation-request=replace annotation on the authority Secret.
+// It reaches the store, which leaves a single phase on a new generation:
+// the Secret keeps no earlier CA key or leaf, the request is cleared, and a
+// new trust ConfigMap names only the new generation. Guards the replace
+// path in Reconcile and apply, and pki's ReplaceCA on a refused record.
+func TestAReplaceRequestRecoversARefusedRecord(t *testing.T) {
+	client := refusedCluster(t)
+	before := authorityData(t, client)
+	request(t, client, requestReplace)
+	status, err := controller(t, client).Reconcile(context.Background())
+	if err != nil || status.TrustConfigMap != trustPrefix+"-3" {
+		t.Fatalf("replace: %+v %v", status, err)
+	}
+	s, err := client.CoreV1().Secrets(systemNamespace).Get(context.Background(), "sproozi-certificate-authority", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var st pki.State
+	if err = json.Unmarshal(s.Data["state.json"], &st); err != nil {
+		t.Fatal(err)
+	}
+	if st.Phase() != pki.PhaseSingle || st.Serving != 3 {
+		t.Errorf("replace left %+v", st)
+	}
+	for name := range before {
+		if strings.HasSuffix(name, ".key") {
+			if _, kept := s.Data[name]; kept {
+				t.Errorf("%s survived replace", name)
+			}
+		}
+	}
+	if s.Annotations[RotationRequest] != "" || s.Annotations[LastError] != "" {
+		t.Errorf("annotations %v", s.Annotations)
+	}
+	leaf := serving(t, client).Leaf
+	if err = pki.VerifyServing(leaf, trust(t, client, trustPrefix+"-3"), names, leaf.NotBefore.Add(time.Hour)); err != nil {
+		t.Error(err)
+	}
+}

@@ -10,6 +10,11 @@ import (
 // phaseNone is the phase before Initialize commits a record.
 const phaseNone Phase = ""
 
+// phaseRefused is a record no phase describes. Load refuses it, so only
+// ReplaceCA, which reads the record without that check, ever applies an event
+// to it, and the table lets only replace leave it.
+const phaseRefused Phase = "refused"
+
 // event is a request that moves the rotation record between phases.
 // Issuing a leaf (Ensure, Renew, and the leaf a switch or rollback issues)
 // is not an event: it changes the leaf only, in every phase.
@@ -34,23 +39,28 @@ const (
 // the phases it may happen in and the phase each leads to. The record has no
 // deadline (ADR 0058, rule 5): no event is refused because time passed, and
 // no phase waits on time to end. Every phase has an exit: replace from all of
-// them, and retire or rollback from the two rotation phases.
+// them and from a refused record, and retire or rollback from the two
+// rotation phases.
 var transitions = map[event]map[Phase]Phase{
 	evInitialize: {phaseNone: PhaseSingle},
 	evPrepare:    {PhaseSingle: PhasePrepared},
 	evSwitch:     {PhasePrepared: PhaseSwitched},
 	evRollback:   {PhaseSwitched: PhasePrepared},
 	evRetire:     {PhaseSwitched: PhaseSingle},
-	evReplace:    {PhaseSingle: PhaseSingle, PhasePrepared: PhaseSingle, PhaseSwitched: PhaseSingle},
+	evReplace: {PhaseSingle: PhaseSingle, PhasePrepared: PhaseSingle, PhaseSwitched: PhaseSingle,
+		phaseRefused: PhaseSingle},
 }
 
-// phase is the record's phase, or phaseNone before Initialize. A loaded
-// record has passed check, so its phase is one describe derives.
+// phase is the record's phase, phaseNone before Initialize, or phaseRefused
+// for a record no phase describes.
 func (st State) phase() Phase {
 	if st.Version == 0 {
 		return phaseNone
 	}
-	return st.Phase()
+	if p := st.Phase(); p != "" {
+		return p
+	}
+	return phaseRefused
 }
 
 // refused is the error for an event its table does not allow in phase.
