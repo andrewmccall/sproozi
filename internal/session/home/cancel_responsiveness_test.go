@@ -185,10 +185,11 @@ func holdStop(p *placementFixture) (entered, aborted <-chan struct{}) {
 // hangLimit is how long these tests wait for a signal or a result before
 // reporting that it never came. Each awaited call returns once the code
 // under test makes progress, or never, because the held fixture call it
-// waits behind returns only when its context ends. So the limit asserts no
-// duration: it is far above what the calls take on a loaded machine, where
-// their journal writes each wait for the disk, and only bounds how long a
-// hang takes to report.
+// waits behind returns only when its context ends. The limit is far above
+// what the calls take on a loaded machine, where their journal writes each
+// wait for the disk, so a slow machine does not fail them. The price: a
+// cancellation that interrupts the held call late, by less than the limit,
+// is no longer caught; only one that never interrupts it is.
 const hangLimit = 30 * time.Second
 
 func awaitHomeSignal(t *testing.T, signal <-chan struct{}) {
