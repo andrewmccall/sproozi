@@ -56,10 +56,24 @@ func TestLoadRefusesARecordNoPhaseDescribes(t *testing.T) {
 		"rotation-after-retire":            "rotation switched from 1 to 2 is recorded, but only generation 2 is trusted",
 		"retired-unmarked":                 "generation 1 is neither trusted nor retired",
 		"leaf-outside":                     `leaf name "../victim" is not a leaf file name`,
+		"trusted-three":                    "3 trusted generations; a record trusts one, or two during a rotation",
+		"rotation-target-not-newest":       "rotation target 2 is not the newest generation",
 	}
+	// A third generation, as a hand edit could add one; not in the recorded
+	// table, which was generated before these two cases were added.
+	third := func(retired bool) Generation {
+		return Generation{ID: 3, Fingerprint: strings.Repeat("cd", 32), NotAfter: outcomeStart, Retired: retired}
+	}
+	cases := append(corruptions(),
+		corruption{"trusted-three", stPrepared, editState(func(st *State) {
+			st.Generations, st.Trusted = append(st.Generations, third(false)), []int{1, 2, 3}
+		})},
+		corruption{"rotation-target-not-newest", stPrepared, editState(func(st *State) {
+			st.Generations = append(st.Generations, third(true))
+		})})
 	roots := buildStates(t)
 	seen := map[string]bool{}
-	for _, c := range corruptions() {
+	for _, c := range cases {
 		want, ok := refusals[c.name]
 		if !ok {
 			continue
