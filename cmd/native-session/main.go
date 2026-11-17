@@ -434,7 +434,14 @@ func (s *server) activate() response {
 		r.Error = err.Error()
 		return r
 	}
-	n, err := nativepty.Start(terminalLaunch(adapter.executable, args, env, login))
+	// Preparing can take seconds, so the deadline is checked again at the
+	// launch: the harness never starts after it.
+	if s.pastDeadline() {
+		login.stop()
+		r.Error = launchPastDeadline
+		return r
+	}
+	n, err := startTerminal(terminalLaunch(adapter.executable, args, env, login))
 	if err != nil {
 		login.stop()
 		r.Error = err.Error()
@@ -674,6 +681,15 @@ func (s *server) finishTurn(adapter nativeAdapter, n *nativepty.Supervisor) (nat
 
 // forceStop kills the harness and waits for its exit; tests replace it.
 var forceStop = (*nativepty.Supervisor).Stop
+
+// startTerminal starts the harness's terminal; tests replace it.
+var startTerminal = nativepty.Start
+
+// launchPastDeadline is activate's reply when the deadline passed while it
+// prepared the launch: the terminal's own refusal of a passed deadline,
+// which gave this reply while the terminal was handed the deadline.
+const launchPastDeadline = "native terminal requires an absolute executable/workspace, " +
+	"explicit environment and a deadline not yet passed"
 
 // killing records that a signal from outside the supervisor ended the
 // harness, so its login file, which may be left half written, is no longer
