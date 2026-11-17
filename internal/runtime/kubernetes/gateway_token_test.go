@@ -1,6 +1,7 @@
 package kubernetes_test
 
 import (
+	"bytes"
 	"context"
 	"path"
 	"reflect"
@@ -10,12 +11,19 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
+	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes"
+	"github.com/andrewmccall/sproozi/internal/runtime/kubernetes/registry"
 )
 
-const testGatewayTokenDirectory = "/var/run/sproozi/tokens/gateway"
+const (
+	testGatewayTokenDirectory = "/var/run/sproozi/tokens/gateway"
+	unrefreshedTokenMessage   = "gateway token is never refreshed"
+)
 
 // The mount every workload container gets: the projected volume's directory,
 // so the kubelet's refreshed token reaches the container.
@@ -26,24 +34,37 @@ var currentGatewayTokenMount = corev1.VolumeMount{Name: testGatewayTokenVolumeNa
 var earlierGatewayTokenMount = corev1.VolumeMount{Name: testGatewayTokenVolumeName,
 	MountPath: harness.NativeGatewayTokenPath, SubPath: "token", ReadOnly: true}
 
-// builtPods returns an ordinary and a managed sandbox Pod for the same run.
-func builtPods(t *testing.T) map[string]*corev1.Pod {
+// sandboxCase is one sandbox Pod as the controller builds it, with the inputs
+// Ensure builds it from.
+type sandboxCase struct {
+	run     *api.AgentRun
+	runtime *api.AgentRuntime
+	binding *registry.Record
+	pod     *corev1.Pod
+}
+
+// builtPods returns an ordinary and a managed sandbox Pod.
+func builtPods(t *testing.T) map[string]sandboxCase {
 	t.Helper()
 	run, runtime, binding := managedFixture()
 	managed, err := kubernetes.BuildManagedPodSpec(run, runtime, binding)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return map[string]*corev1.Pod{"ordinary": kubernetes.BuildPodSpec(run, testRuntime(), run.Status.Identity.ServiceAccountName),
-		"managed": managed}
+	ordinary := testRuntime()
+	return map[string]sandboxCase{
+		"ordinary": {run: run, runtime: ordinary, pod: kubernetes.BuildPodSpec(run, ordinary, run.Status.Identity.ServiceAccountName)},
+		"managed":  {run: run, runtime: runtime, binding: binding, pod: managed},
+	}
 }
 
 // The kubelet updates a projected volume only through a directory mount, so
 // the gateway token's directory is mounted, the token keeps the path every
 // reader uses, and the directory holds nothing but the token.
 func TestBuildPodSpecMountsTheGatewayTokenDirectory(t *testing.T) {
-	for name, pod := range builtPods(t) {
+	for name, built := range builtPods(t) {
 		t.Run(name, func(t *testing.T) {
+			pod := built.pod
 			var tokenVolume *corev1.Volume
 			for i := range pod.Spec.Volumes {
 				if pod.Spec.Volumes[i].Name == testGatewayTokenVolumeName {
@@ -103,26 +124,56 @@ func withEarlierTokenMount(t *testing.T, pod *corev1.Pod) *corev1.Pod {
 	return pod
 }
 
-func ensureExisting(ctx context.Context, t *testing.T, existing *corev1.Pod, managed bool) error {
+// earlierPod returns built's Pod as an earlier controller created it.
+func earlierPod(t *testing.T, built sandboxCase) *corev1.Pod {
 	t.Helper()
-	run, runtime, binding := managedFixture()
-	if !managed {
-		runtime = testRuntime()
-	}
+	return withEarlierTokenMount(t, pinnedPod(t, built.pod.DeepCopy(), built.runtime))
+}
+
+// ensureExisting stores existing and ensures built's sandbox twice with one
+// client, as repeated reconciliations do.
+func ensureExisting(ctx context.Context, t *testing.T, built sandboxCase, existing *corev1.Pod) error {
+	t.Helper()
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(testTrustConfigMap(t), existing).Build()
 	client := newSandboxClient(c)
 	for range 2 {
 		var err error
-		if managed {
-			_, err = client.EnsureManaged(ctx, run, runtime, binding)
+		if built.binding != nil {
+			_, err = client.EnsureManaged(ctx, built.run, built.runtime, built.binding)
 		} else {
-			_, err = client.Ensure(ctx, run, runtime)
+			_, err = client.Ensure(ctx, built.run, built.runtime)
 		}
 		if err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// A sandbox Pod an earlier controller created differs from the current build
+// only in the gateway token's subPath mount. Upgrading the controller adopts
+// it, and says once that its gateway token is never refreshed.
+func TestEnsureSandboxAdoptsAPodWithTheEarlierGatewayTokenMount(t *testing.T) {
+	for name, built := range builtPods(t) {
+		t.Run(name, func(t *testing.T) {
+			var logs bytes.Buffer
+			ctx := log.IntoContext(context.Background(), zap.New(zap.WriteTo(&logs)))
+			if err := ensureExisting(ctx, t, built, earlierPod(t, built)); err != nil {
+				t.Fatalf("Ensure refused a sandbox with the earlier gateway token mount: %v", err)
+			}
+			if got := strings.Count(logs.String(), unrefreshedTokenMessage); got != 1 {
+				t.Fatalf("adoption logged the unrefreshed token %d times, want once:\n%s", got, logs.String())
+			}
+
+			logs.Reset()
+			if err := ensureExisting(ctx, t, built, pinnedPod(t, built.pod.DeepCopy(), built.runtime)); err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(logs.String(), unrefreshedTokenMessage) {
+				t.Fatalf("adopting a current sandbox logged an unrefreshed token:\n%s", logs.String())
+			}
+		})
+	}
 }
 
 // Adoption accepts exactly the earlier gateway token mount and nothing near it:
@@ -153,7 +204,9 @@ func TestEnsureSandboxRefusesNearMissesOfTheEarlierGatewayTokenMount(t *testing.
 		{name: "other subPath", mutate: func(p *corev1.Pod) { tokenMount(p).SubPath = "..data/token" }},
 		{name: "subPathExpr", mutate: func(p *corev1.Pod) { m := tokenMount(p); m.SubPath, m.SubPathExpr = "", "token" }},
 		{name: "other path", mutate: func(p *corev1.Pod) { tokenMount(p).MountPath = "/home/agent/token" }},
-		{name: "propagation", mutate: func(p *corev1.Pod) { tokenMount(p).MountPropagation = ptr.To(corev1.MountPropagationHostToContainer) }},
+		{name: "propagation", mutate: func(p *corev1.Pod) {
+			tokenMount(p).MountPropagation = ptr.To(corev1.MountPropagationHostToContainer)
+		}},
 		{name: "recursive read-only", mutate: func(p *corev1.Pod) {
 			tokenMount(p).RecursiveReadOnly = ptr.To(corev1.RecursiveReadOnlyDisabled)
 		}},
@@ -161,6 +214,9 @@ func TestEnsureSandboxRefusesNearMissesOfTheEarlierGatewayTokenMount(t *testing.
 		{name: "directory with subPath", mutate: func(p *corev1.Pod) { tokenMount(p).MountPath = testGatewayTokenDirectory }},
 		{name: "both forms", mutate: func(p *corev1.Pod) {
 			p.Spec.Containers[0].VolumeMounts = append(p.Spec.Containers[0].VolumeMounts, currentGatewayTokenMount)
+		}},
+		{name: "earlier form twice", mutate: func(p *corev1.Pod) {
+			p.Spec.Containers[0].VolumeMounts = append(p.Spec.Containers[0].VolumeMounts, earlierGatewayTokenMount)
 		}},
 		{name: "longer token lifetime", mutate: func(p *corev1.Pod) {
 			for _, v := range p.Spec.Volumes {
@@ -177,17 +233,16 @@ func TestEnsureSandboxRefusesNearMissesOfTheEarlierGatewayTokenMount(t *testing.
 		{name: "token mounted into the helper", managed: true, mutate: func(p *corev1.Pod) {
 			p.Spec.Containers[1].VolumeMounts = append(p.Spec.Containers[1].VolumeMounts, earlierGatewayTokenMount)
 		}},
+		{name: "managed agent writable", managed: true, mutate: func(p *corev1.Pod) { tokenMount(p).ReadOnly = false }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			pods := builtPods(t)
-			pod := pods["ordinary"]
+			built := builtPods(t)["ordinary"]
 			if tc.managed {
-				pod = pods["managed"]
+				built = builtPods(t)["managed"]
 			}
-			_, runtime, _ := managedFixture()
-			existing := withEarlierTokenMount(t, pinnedPod(t, pod, runtime))
+			existing := earlierPod(t, built)
 			tc.mutate(existing)
-			err := ensureExisting(context.Background(), t, existing, tc.managed)
+			err := ensureExisting(context.Background(), t, built, existing)
 			if err == nil || !strings.Contains(err.Error(), "unsafe Pod settings") {
 				t.Fatalf("Ensure error = %v, want unsafe Pod settings", err)
 			}

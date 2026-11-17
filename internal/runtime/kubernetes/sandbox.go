@@ -26,6 +26,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/andrewmccall/sproozi/internal/harness"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -123,6 +124,9 @@ type PodSandboxClient struct {
 	// resolveGateway maps the runtime's gateway host to the address written
 	// into each sandbox's hosts file.
 	resolveGateway GatewayResolver
+	// unrefreshedTokens holds the adopted Pods already reported as keeping
+	// the gateway token they started with.
+	unrefreshedTokens sync.Map
 }
 
 // NewPodSandboxClient returns the Pod-backed execution adapter. live must read
@@ -180,7 +184,7 @@ func (p *PodSandboxClient) ensurePod(ctx context.Context, pod *corev1.Pod, rt *s
 		if getErr := p.c.Get(ctx, client.ObjectKeyFromObject(pod), &existing); getErr != nil {
 			return "", getErr
 		}
-		return pod.Name, validateExistingSandbox(&existing, pod)
+		return pod.Name, p.validateExisting(ctx, &existing, pod)
 	}
 	return pod.Name, nil
 }
@@ -202,15 +206,17 @@ func (p *PodSandboxClient) adoptExisting(ctx context.Context, wanted, existing *
 	if err := PinGateway(ctx, wanted, gatewayEndpoint, pinned); err != nil {
 		return err
 	}
-	return validateExistingSandbox(existing, wanted)
+	return p.validateExisting(ctx, existing, wanted)
 }
 
-func validateExistingSandbox(existing, wanted *corev1.Pod) error {
+// validateExistingSandbox reports whether existing is the sandbox wanted
+// describes, and whether it has the earlier gateway token mount.
+func validateExistingSandbox(existing, wanted *corev1.Pod) (earlierTokenMount bool, err error) {
 	if existing.Namespace != AgentsNamespace || existing.Name != wanted.Name || !existing.DeletionTimestamp.IsZero() {
-		return fmt.Errorf("existing sandbox %s is not an active run object", wanted.Name)
+		return false, fmt.Errorf("existing sandbox %s is not an active run object", wanted.Name)
 	}
 	if slices.Contains(wanted.Finalizers, ManagedWriterFenceFinalizer) && !slices.Contains(existing.Finalizers, ManagedWriterFenceFinalizer) {
-		return fmt.Errorf("existing managed sandbox %s lacks writer fence retention", wanted.Name)
+		return false, fmt.Errorf("existing managed sandbox %s lacks writer fence retention", wanted.Name)
 	}
 	for key, value := range map[string]string{
 		RunLabel:          wanted.Labels[RunLabel],
@@ -219,7 +225,7 @@ func validateExistingSandbox(existing, wanted *corev1.Pod) error {
 		ManagedByLabel:    ManagedByValue,
 	} {
 		if existing.Labels[key] != value {
-			return fmt.Errorf("existing sandbox %s has different run identity", wanted.Name)
+			return false, fmt.Errorf("existing sandbox %s has different run identity", wanted.Name)
 		}
 	}
 	// The API server fills unset fields with defaults, so compare both specs
@@ -229,6 +235,7 @@ func validateExistingSandbox(existing, wanted *corev1.Pod) error {
 	// when each copy was decoded or printed.
 	e, w := *withAPIDefaults(&existing.Spec), *withAPIDefaults(&wanted.Spec)
 	w.HostAliases = keepPinnedAddress(e.HostAliases, w.HostAliases)
+	earlierTokenMount = acceptEarlierGatewayTokenMount(&e, &w)
 	var differs []string
 	for field, same := range map[string]bool{
 		"serviceAccountName":           e.ServiceAccountName == w.ServiceAccountName,
@@ -252,9 +259,9 @@ func validateExistingSandbox(existing, wanted *corev1.Pod) error {
 	}
 	if len(differs) > 0 {
 		slices.Sort(differs)
-		return fmt.Errorf("existing sandbox %s has unsafe Pod settings: %s", wanted.Name, strings.Join(differs, ", "))
+		return false, fmt.Errorf("existing sandbox %s has unsafe Pod settings: %s", wanted.Name, strings.Join(differs, ", "))
 	}
-	return nil
+	return earlierTokenMount, nil
 }
 
 // keepPinnedAddress returns wanted with the existing Pod's gateway address
