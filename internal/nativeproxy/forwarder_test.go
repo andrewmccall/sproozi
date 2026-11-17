@@ -19,6 +19,9 @@ import (
 	"time"
 )
 
+// testServerName is the name in httptest's certificate.
+const testServerName = "example.com"
+
 // fakeGateway accepts CONNECT over TLS, records each Proxy-Authorization and
 // then echoes the tunnel's bytes.
 type fakeGateway struct {
@@ -72,7 +75,7 @@ func start(t *testing.T, g *fakeGateway, token string) (*Forwarder, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f, err := Start(Config{Gateway: endpoint, TokenPath: path, Trust: pool, ServerName: "example.com"})
+	f, err := Start(Config{Gateway: endpoint, TokenPath: path, Trust: pool, ServerName: testServerName})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +185,7 @@ func TestForwarderRefusesAnUntrustedGateway(t *testing.T) {
 		t.Fatal(err)
 	}
 	endpoint, _ := url.Parse(g.server.URL)
-	f, err := Start(Config{Gateway: endpoint, TokenPath: path, Trust: x509.NewCertPool(), ServerName: "example.com"})
+	f, err := Start(Config{Gateway: endpoint, TokenPath: path, Trust: x509.NewCertPool(), ServerName: testServerName})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,7 +277,7 @@ func TestForwarderFollowsTheKubeletsTokenSwap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f, err := Start(Config{Gateway: endpoint, TokenPath: filepath.Join(volume.dir, "token"), Trust: pool, ServerName: "example.com"})
+	f, err := Start(Config{Gateway: endpoint, TokenPath: filepath.Join(volume.dir, "token"), Trust: pool, ServerName: testServerName})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -282,7 +285,8 @@ func TestForwarderFollowsTheKubeletsTokenSwap(t *testing.T) {
 	proxy, _ := url.Parse(f.ProxyURL())
 	secret, _ := proxy.User.Password()
 
-	want := []string{basic("first-token")}
+	want := make([]string, 0, 3)
+	want = append(want, basic("first-token"))
 	if status, _ := connect(t, f, basic(secret), http.MethodConnect); status != http.StatusOK {
 		t.Fatalf("first CONNECT status = %d, want 200", status)
 	}

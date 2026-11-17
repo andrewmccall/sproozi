@@ -23,6 +23,7 @@ import (
 const (
 	testGatewayTokenDirectory = "/var/run/sproozi/tokens/gateway"
 	unrefreshedTokenMessage   = "gateway token is never refreshed"
+	testTokenFile             = "token"
 )
 
 // The mount every workload container gets: the projected volume's directory,
@@ -32,7 +33,7 @@ var currentGatewayTokenMount = corev1.VolumeMount{Name: testGatewayTokenVolumeNa
 // The mount a controller before this one built. Kubernetes never updates a
 // projected file mounted through subPath, so its token was never refreshed.
 var earlierGatewayTokenMount = corev1.VolumeMount{Name: testGatewayTokenVolumeName,
-	MountPath: harness.NativeGatewayTokenPath, SubPath: "token", ReadOnly: true}
+	MountPath: harness.NativeGatewayTokenPath, SubPath: testTokenFile, ReadOnly: true}
 
 // sandboxCase is one sandbox Pod as the controller builds it, with the inputs
 // Ensure builds it from.
@@ -202,7 +203,7 @@ func TestEnsureSandboxRefusesNearMissesOfTheEarlierGatewayTokenMount(t *testing.
 	}{
 		{name: "writable", mutate: func(p *corev1.Pod) { tokenMount(p).ReadOnly = false }},
 		{name: "other subPath", mutate: func(p *corev1.Pod) { tokenMount(p).SubPath = "..data/token" }},
-		{name: "subPathExpr", mutate: func(p *corev1.Pod) { m := tokenMount(p); m.SubPath, m.SubPathExpr = "", "token" }},
+		{name: "subPathExpr", mutate: func(p *corev1.Pod) { m := tokenMount(p); m.SubPath, m.SubPathExpr = "", testTokenFile }},
 		{name: "other path", mutate: func(p *corev1.Pod) { tokenMount(p).MountPath = "/home/agent/token" }},
 		{name: "propagation", mutate: func(p *corev1.Pod) {
 			tokenMount(p).MountPropagation = ptr.To(corev1.MountPropagationHostToContainer)
@@ -229,7 +230,7 @@ func TestEnsureSandboxRefusesNearMissesOfTheEarlierGatewayTokenMount(t *testing.
 			m := mountAt(p, "/etc/sproozi/trust")
 			m.MountPath, m.SubPath = "/etc/sproozi/trust/ca-bundle.pem", "ca-bundle.pem"
 		}},
-		{name: "subPath on the workspace mount", mutate: func(p *corev1.Pod) { mountAt(p, "/workspace").SubPath = "token" }},
+		{name: "subPath on the workspace mount", mutate: func(p *corev1.Pod) { mountAt(p, "/workspace").SubPath = testTokenFile }},
 		{name: "token mounted into the helper", managed: true, mutate: func(p *corev1.Pod) {
 			p.Spec.Containers[1].VolumeMounts = append(p.Spec.Containers[1].VolumeMounts, earlierGatewayTokenMount)
 		}},
