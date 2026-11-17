@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -41,7 +42,10 @@ func (failingExec) Logs(context.Context, string, string, string) ([]byte, error)
 // execURL is the exec request URL client-go builds for args: every
 // argument is a command parameter of its query.
 func execURL(args []string, container string) string {
-	query := url.Values{"command": args, "container": {container}, "stdout": {"true"}, "stderr": {"true"}}
+	query := url.Values{"command": args, "container": {container}}
+	for _, stream := range []string{"stdout", "stderr"} {
+		query.Set(stream, strconv.FormatBool(true))
+	}
 	return "https://10.0.0.1:6443/api/v1/namespaces/sproozi-agents/pods/run-abc/exec?" + query.Encode()
 }
 
@@ -54,13 +58,15 @@ func execURL(args []string, container string) string {
 // execCause's removal of URLs, and operation's omission of arguments.
 func TestAFailedCommandKeepsNoneOfItsArguments(t *testing.T) {
 	t.Parallel()
-	ignored, thread, digest := "secret-notes.env", "0190aaaa-thread", "deadbeefdigest"
+	// The arguments as the placement passes them, with a selected file, a
+	// thread and a digest that must not be kept.
+	restore := strings.Fields("--harness codex --instruction-digest deadbeefdigest --max-bytes 1024")
+	capture := append(strings.Fields("--home /workspace/session/codex --workspace /workspace/session/workspace "+
+		"--thread 0190aaaa-thread --include-ignored secret-notes.env"), restore...)
 	commands := map[string][]string{
-		"capture-stopped": {helperPath, helperCapture, "--harness", "codex", "--home", "/workspace/session/codex",
-			"--workspace", "/workspace/session/workspace", "--thread", thread, "--instruction-digest", digest,
-			"--max-bytes", "1024", "--include-ignored", ignored},
-		"prepare": {helperPath, helperPrepare, "--harness", "codex", "--instruction-digest", digest, "--max-bytes", "1024"},
-		"finish":  {helperPath, helperFinish},
+		"capture-stopped": append([]string{helperPath, helperCapture}, capture...),
+		"prepare":         append([]string{helperPath, helperPrepare}, restore...),
+		"finish":          {helperPath, helperFinish},
 	}
 	for _, op := range []harness.NativeOp{harness.NativeGate, harness.NativeStatus, harness.NativeQuiesce, harness.NativeActivate} {
 		commands[string(op)] = []string{nativePath, string(op)}
