@@ -25,7 +25,7 @@ func TestReplaceRecoversARefusedRecord(t *testing.T) {
 	refusals := refusedRecordErrors()
 	roots := buildStates(t)
 	for _, c := range refusedRecordCases() {
-		if _, ok := refusals[c.name]; !ok || c.name == "version-2" {
+		if _, ok := refusals[c.name]; !ok || c.name == corruptVersion2 {
 			continue
 		}
 		t.Run(c.name, func(t *testing.T) {
@@ -81,7 +81,7 @@ func TestReplaceRecoversARefusedRecord(t *testing.T) {
 					t.Errorf("%s is a leaf file the record does not name", name)
 				}
 			}
-			for _, name := range []string{"victim.key", "victim.pem"} {
+			for _, name := range victimFiles {
 				if _, err := os.Stat(filepath.Join(root, name)); err != nil {
 					t.Errorf("outside the store: %v", err)
 				}

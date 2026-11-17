@@ -34,7 +34,11 @@ const (
 	evNameReplace             = "replace"
 	keyCA2                    = "ca-2.key"
 	msgFingerprint1           = "generation 1 certificate ca-1.pem does not have the recorded fingerprint"
+	corruptVersion2           = "version-2"
 )
+
+// victimFiles sit beside the store's directory, outside it.
+var victimFiles = []string{"victim.key", "victim.pem"}
 
 // outcomeStart is the fixed clock every recorded outcome runs at.
 var outcomeStart = time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
@@ -48,7 +52,7 @@ func outcomeStore(t *testing.T, root string) *Store {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"victim.key", "victim.pem"} {
+	for _, name := range victimFiles {
 		if _, err = os.Stat(filepath.Join(root, name)); os.IsNotExist(err) {
 			if err = os.WriteFile(filepath.Join(root, name), []byte("outside the store\n"), 0o600); err != nil {
 				t.Fatal(err)
@@ -264,7 +268,7 @@ func corruptions() []corruption {
 			must(t, err)
 			return bytes.Replace(data, []byte(`"version": 1,`), []byte(`"version": 1, "extra": true,`), 1)
 		})},
-		{"version-2", stSingle, editState(func(st *State) { st.Version = 2 })},
+		{corruptVersion2, stSingle, editState(func(st *State) { st.Version = 2 })},
 		{"no-generations", stSingle, editState(func(st *State) { st.Generations = nil })},
 		{"trusted-empty", stSingle, editState(func(st *State) { st.Trusted = nil })},
 		{"serving-unknown", stSingle, editState(func(st *State) { st.Serving = 9 })},
@@ -432,7 +436,7 @@ func describeStore(root, leafBefore string) string {
 	} else {
 		parts = append(parts, "bundle=absent")
 	}
-	for _, name := range []string{"victim.key", "victim.pem"} {
+	for _, name := range victimFiles {
 		if _, err := os.Stat(filepath.Join(root, name)); os.IsNotExist(err) {
 			parts = append(parts, "outside:"+name+"=removed")
 		}

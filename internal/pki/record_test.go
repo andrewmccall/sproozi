@@ -26,7 +26,7 @@ func buildStates(t *testing.T) map[string]string {
 // load names it with.
 func refusedRecordErrors() map[string]string {
 	return map[string]string{
-		"version-2":                        "version 2 is not 1",
+		corruptVersion2:                    "version 2 is not 1",
 		"no-generations":                   "no generations",
 		"trusted-empty":                    "0 trusted generations",
 		"serving-unknown":                  "serving generation 9 is not recorded",
@@ -109,7 +109,7 @@ func TestOnlyReplaceProceedsOnARefusedRecord(t *testing.T) {
 					t.Errorf("refused %s changed the store", ev.name)
 				}
 			}
-			if c.name == "version-2" {
+			if c.name == corruptVersion2 {
 				// A newer version's record: replace refuses it too.
 				if err := s.ReplaceCA(); err == nil || !strings.Contains(err.Error(), want) {
 					t.Errorf("replace of a version 2 record: %v", err)
