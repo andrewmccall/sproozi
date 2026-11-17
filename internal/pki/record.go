@@ -180,17 +180,23 @@ func check(st State) error {
 // It reads no key, so a read of the serving leaf succeeds whenever the record
 // and its certificates are valid; checkKeys and the operation about to use a
 // key check it. A retired generation's kept certificate, when it can be
-// read, must also have the recorded fingerprint and expiry; a retired
-// generation whose certificate is gone, or whose history replace could not
-// recover (no fingerprint and no expiry), is not compared.
+// read, must also have the recorded fingerprint and expiry, so a blank entry
+// (no fingerprint and no expiry, which replace writes only for a generation
+// whose certificate it could not read) is accepted only while that
+// certificate is gone or unreadable. A retired generation whose certificate
+// is gone is not compared.
 func (s *Store) checkFiles(st State) error {
 	for _, g := range st.Generations {
-		if !g.Retired || g.Fingerprint == "" && g.NotAfter.IsZero() {
+		if !g.Retired {
 			continue
 		}
 		cert, err := s.caCertificate(g.ID)
 		if err != nil {
 			continue
+		}
+		if g.Fingerprint == "" && g.NotAfter.IsZero() {
+			return filesError("generation %d certificate %s.pem is kept, but the record has no fingerprint or expiry for it",
+				g.ID, caName(g.ID))
 		}
 		if Fingerprint(cert) != g.Fingerprint {
 			return filesError("generation %d certificate %s.pem does not have the recorded fingerprint", g.ID, caName(g.ID))

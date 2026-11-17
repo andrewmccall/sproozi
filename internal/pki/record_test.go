@@ -179,6 +179,8 @@ func TestLoadRefusesAuthorityFilesTheRecordDoesNotName(t *testing.T) {
 		// A retired generation's kept certificate is compared too.
 		"retired-fingerprint-other": msgFingerprint1,
 		"retired-not-after-other":   "generation 1 certificate ca-1.pem does not have the recorded expiry",
+		// A blank history entry is accepted only where its certificate is gone.
+		"retired-blank-with-cert": "generation 1 certificate ca-1.pem is kept, but the record has no fingerprint or expiry for it",
 	}
 	cases := append(corruptions(),
 		corruption{"not-after-other", stSingle, editState(func(st *State) {
@@ -189,6 +191,9 @@ func TestLoadRefusesAuthorityFilesTheRecordDoesNotName(t *testing.T) {
 		})},
 		corruption{"retired-not-after-other", stRetired, editState(func(st *State) {
 			st.Generations[0].NotAfter = st.Generations[0].NotAfter.Add(-24 * time.Hour)
+		})},
+		corruption{"retired-blank-with-cert", stRetired, editState(func(st *State) {
+			st.Generations[0].Fingerprint, st.Generations[0].NotAfter = "", time.Time{}
 		})})
 	roots := buildStates(t)
 	seen := map[string]bool{}
