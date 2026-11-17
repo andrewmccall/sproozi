@@ -4,6 +4,7 @@ import (
 	"errors"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -155,6 +156,30 @@ func TestRefusalReasonIsCutOnARuneBoundary(t *testing.T) {
 	exact := strings.Repeat("a", reasonMax)
 	if got := RefusalReason(exact); got != exact {
 		t.Errorf("a reason at the bound was changed to %d bytes", len(got))
+	}
+}
+
+// A stop that ends a pending start because its deadline passed, and finds
+// the placement refusing it instead, as when the coordinator's clock steps
+// back across the deadline mid-stop, still stops: the start ended either
+// way, and the stop finalizes the idle execution. With a clock that never
+// runs backwards a stop never prepares after the deadline, so this guards
+// the error the stop accepts rather than a path seen in use.
+func TestStopFinishesAStartEndedByARefusalAtTheDeadline(t *testing.T) {
+	t.Parallel()
+	c, fencing, seeded := fencingSetup(t)
+	first := createResumed(t, c, seeded)
+	fencing.refuse = &StartRefused{Reason: testRefusal}
+	var calls atomic.Int32
+	c.now = func() time.Time {
+		if calls.Add(1) == 1 {
+			return first.Deadline
+		}
+		return first.Deadline.Add(-time.Minute)
+	}
+	r, err := c.Finalize(t.Context(), first.ExecutionID, uuid.NewString())
+	if err != nil || r.Phase != PhaseIdle || fencing.prepareCalls != 1 {
+		t.Fatalf("stop of a start refused as its deadline passed: %s %v, prepared %d", r.Phase, err, fencing.prepareCalls)
 	}
 }
 

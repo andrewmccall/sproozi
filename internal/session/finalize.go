@@ -48,7 +48,7 @@ func (c *Coordinator) Finalize(ctx context.Context, id, operationID string) (Rec
 		// A move or first visit the deadline ended no longer blocks a stop:
 		// it ends first, and the stop then has an idle execution, or the
 		// destination that did become active, to finalize (ADR 0060).
-		if r, err = c.settleLate(ctx, r); err != nil && !errors.Is(err, ErrDeadlinePassed) {
+		if r, err = c.settleLate(ctx, r); err != nil && !errors.Is(err, ErrStartEnded) {
 			return r, err
 		}
 		if r.PendingOperation != "" {

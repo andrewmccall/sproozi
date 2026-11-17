@@ -42,6 +42,19 @@ func TestRefusedPreparationCrossesTheProtocolWithItsReason(t *testing.T) {
 	}
 }
 
+// The executor answers refused only to a prepare, which is all a client
+// accepts it for: a backend refusal from any other action is unavailable.
+func TestOnlyAPrepareIsAnsweredRefused(t *testing.T) {
+	t.Parallel()
+	c, b, _, l, _ := fixture(t)
+	b.failure = &session.StartRefused{Reason: testRefusal}
+	_, err := c.Inspect(t.Context(), l)
+	remoteCode(t, err, CodeUnavailable, http.StatusServiceUnavailable)
+	if errors.Is(err, session.ErrStartRefused) {
+		t.Fatalf("an inspect was refused: %v", err)
+	}
+}
+
 // Only a prepare may be refused, only with a 409, and only a refusal carries
 // a reason, which must already be bounded plain text: anything else is an
 // invalid response, never a refusal the home would end a start for.

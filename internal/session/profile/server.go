@@ -158,16 +158,16 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err = h.validateAction(action, input); err != nil {
-		h.fail(w, err)
+		h.fail(w, action, err)
 		return
 	}
 	output, err := h.perform(r, action, input)
 	if err != nil {
-		h.fail(w, err)
+		h.fail(w, action, err)
 		return
 	}
 	if err = validateResponse(action, input, output, h.config.MaxCheckpointBytes); err != nil {
-		h.fail(w, err)
+		h.fail(w, action, err)
 		return
 	}
 	encoded, err := json.Marshal(output)
@@ -378,7 +378,8 @@ func (h *handler) abort(ctx context.Context, input request) (session.Observation
 	return h.config.Backend.Abort(ctx, input.Launch, *input.Incarnation)
 }
 
-func (h *handler) fail(w http.ResponseWriter, err error) {
+// fail answers action's failure err with its outcome.
+func (h *handler) fail(w http.ResponseWriter, action string, err error) {
 	if errors.Is(err, harness.ErrNativeTurnPending) {
 		// Still waiting is not unavailable: the client keeps the stop pending.
 		var pending *harness.NativeTurnPending
@@ -391,8 +392,9 @@ func (h *handler) fail(w http.ResponseWriter, err error) {
 		return
 	}
 	var refused *session.StartRefused
-	if errors.As(err, &refused) {
-		// The preparation can never be made: the home ends the start.
+	if action == actionPrepare && errors.As(err, &refused) {
+		// The preparation can never be made: the home ends the start. A
+		// client accepts refused for a prepare only.
 		w.WriteHeader(http.StatusConflict)
 		_ = json.NewEncoder(w).Encode(response{Version: protocolVersion, Error: CodeRefused,
 			Reason: session.RefusalReason(refused.Reason)})
