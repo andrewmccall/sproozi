@@ -207,13 +207,16 @@ type Owner struct {
 	// native turn.
 	jobs session.JournalLocks
 	// retention serializes the retention check with the save it admits.
-	retention  sync.Mutex
-	lock       *os.File
-	ctx        context.Context
-	stopAll    context.CancelFunc
-	running    map[string]*driver
-	wg         sync.WaitGroup
-	closeOnce  sync.Once
+	retention sync.Mutex
+	lock      *os.File
+	ctx       context.Context
+	stopAll   context.CancelFunc
+	running   map[string]*driver
+	wg        sync.WaitGroup
+	closeOnce sync.Once
+	// unproven holds each session and cause of an unproven end of a
+	// refused start already logged.
+	unproven   sync.Map
 	closeError error
 }
 

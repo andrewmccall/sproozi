@@ -41,14 +41,34 @@ func refusedProblem(r record, err error) string {
 	if errors.As(err, &refused) && refused.Reason != "" {
 		problem = problemRefused + ": " + refused.Reason
 	}
-	if !errors.Is(err, session.ErrStartEnded) {
-		next := " and tries again"
-		if r.Intent.Mode == ModeInteractive {
-			next = ", so recover or cancel this session"
-		}
-		problem += "; the executor has not yet shown that nothing runs there" + next
+	if errors.Is(err, session.ErrStartEnded) {
+		return problem
 	}
-	return problem
+	interactive := r.Intent.Mode == ModeInteractive
+	if cause := unprovenCause(err); cause != "" {
+		// Only an administrator settles this, and a cancellation meets the
+		// same gap, so the problem names what to check.
+		then := "; the executor tries again"
+		if interactive {
+			then = "; recover this session once that is done"
+		}
+		return problem + "; the executor cannot show that nothing runs there: " + cause + then
+	}
+	next := " and tries again"
+	if interactive {
+		next = ", so recover or cancel this session"
+	}
+	return problem + "; the executor has not yet shown that nothing runs there" + next
+}
+
+// unprovenCause is the cause, stated alone, that keeps err's end unproven
+// when only an administrator can settle it, or "".
+func unprovenCause(err error) string {
+	var unproven session.UnprovenEnd
+	if errors.As(err, &unproven) {
+		return unproven.UnprovenEnd()
+	}
+	return ""
 }
 
 // refusalProblem reports a problem refusedProblem recorded.
@@ -249,6 +269,11 @@ func (o *Owner) carryOut(ctx context.Context, r record, rec *session.Record, act
 			// proof: after the backoff for a task, and by its owner for an
 			// interactive session.
 			o.note(r.ID, refusedProblem(r, err))
+			if cause := unprovenCause(err); cause != "" {
+				if _, seen := o.unproven.LoadOrStore(r.ID+"\x00"+cause, struct{}{}); !seen {
+					o.logf("Could not end the refused start of work session %s: %s", r.ID, cause)
+				}
+			}
 			switch {
 			case errors.Is(err, session.ErrStartEnded):
 				return nextAgain

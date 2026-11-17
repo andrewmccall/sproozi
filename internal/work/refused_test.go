@@ -169,3 +169,54 @@ func TestDriverEndsARefusedStartWhoseProblemWasNotRecorded(t *testing.T) {
 		})
 	}
 }
+
+// adminCheck is a placement's unproven end that only an administrator can
+// settle, as the Kubernetes placement's for a replaced run is: its message
+// wraps a chain, and UnprovenEnd states the cause alone.
+type adminCheck struct{ sentence string }
+
+func (e *adminCheck) Error() string {
+	return "placement: " + e.sentence + ": session profile: conflict"
+}
+func (e *adminCheck) UnprovenEnd() string { return e.sentence }
+
+const fixtureAdminCheck = "AgentRun session-0 now has UID b, but its session registration bound UID a; " +
+	"an administrator replaced it, so confirm no Pod labelled sproozi.com/agentrun-uid=a remains"
+
+// A refused start whose end stays unproven for a cause only an
+// administrator can settle says that cause in its problem, without the
+// errors it is wrapped in, and the executor logs it once however often the
+// driver tries again (ADR 0067).
+func TestDriverNamesWhyARefusedStartsEndIsUnproven(t *testing.T) {
+	t.Parallel()
+	for _, interactive := range []bool{false, true} {
+		t.Run(map[bool]string{false: string(ModeTask), true: string(ModeInteractive)}[interactive], func(t *testing.T) {
+			t.Parallel()
+			e := newDriverEnv(t, interactive, clockNone)
+			e.create(t)
+			e.refuse()
+			e.p.mu.Lock()
+			e.p.failInspectAfterPrepare, e.p.inspectErr = true, &adminCheck{fixtureAdminCheck}
+			e.p.mu.Unlock()
+			then := map[bool]string{false: "; the executor tries again", true: "; recover this session once that is done"}[interactive]
+			want := "it can never start: " + fixtureRefusal + "; the executor cannot show that nothing runs there: " +
+				fixtureAdminCheck + then
+			for range 3 {
+				e.o.step(t.Context(), e.id)
+				r, err := e.o.read(e.id)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if r.Problem != want {
+					t.Fatalf("problem %q, want %q", r.Problem, want)
+				}
+			}
+			e.logMu.Lock()
+			logged := e.logs.String()
+			e.logMu.Unlock()
+			if strings.Count(logged, fixtureAdminCheck) != 1 || strings.Contains(logged, "session profile: conflict") {
+				t.Fatalf("log %q: want the cause once, alone", logged)
+			}
+		})
+	}
+}

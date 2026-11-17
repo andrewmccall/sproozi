@@ -3,6 +3,7 @@ package work
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"flag"
@@ -57,9 +58,12 @@ type stepPlacement struct {
 	refuseActivate bool
 	abort          abortOutcome
 	calls          map[string]int
-	// failInspectAfterPrepare fails every Inspect once Prepare was called,
-	// so a refused start cannot be shown to have ended.
+	// failInspectAfterPrepare fails the first Inspect after each Prepare,
+	// the one that would show a refused start ended, with inspectErr, or
+	// errUnreachable when that is nil.
 	failInspectAfterPrepare bool
+	inspectErr              error
+	inspectFailures         int
 }
 
 func (p *stepPlacement) count(call string) (unreachable bool) {
@@ -98,10 +102,14 @@ func (p *stepPlacement) Inspect(ctx context.Context, l session.Launch) (session.
 		return session.Observation{}, errUnreachable
 	}
 	p.mu.Lock()
-	fail := p.failInspectAfterPrepare && p.calls["prepare"] > 0
+	fail := p.failInspectAfterPrepare && p.calls["prepare"] > p.inspectFailures
+	failure := cmp.Or(p.inspectErr, errUnreachable)
+	if fail {
+		p.inspectFailures++
+	}
 	p.mu.Unlock()
 	if fail {
-		return session.Observation{}, errUnreachable
+		return session.Observation{}, failure
 	}
 	return p.fixturePlacement.Inspect(ctx, l)
 }

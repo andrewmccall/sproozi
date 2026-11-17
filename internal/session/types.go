@@ -182,6 +182,16 @@ type RecordContradiction interface {
 	Contradiction() string
 }
 
+// UnprovenEnd is a placement's failure to show that nothing runs for a
+// launch whose cause only an administrator can settle, such as a run an
+// administrator replaced. UnprovenEnd states that cause, and what to check,
+// alone, without the errors it is wrapped in, for a problem its session's
+// owner reads (ADR 0067).
+type UnprovenEnd interface {
+	error
+	UnprovenEnd() string
+}
+
 // ErrRecoveryRequired matches a refusal of a new move or stop because an
 // earlier one on the same execution must be recovered or cancelled first.
 var ErrRecoveryRequired = errors.New("session: recovery required")
