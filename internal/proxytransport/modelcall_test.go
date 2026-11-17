@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/andrewmccall/sproozi/internal/gateway"
+	"github.com/andrewmccall/sproozi/internal/testutil"
 )
 
 type streamEnd struct {
@@ -68,8 +69,9 @@ func readStream(t *testing.T, s proxySession) chan time.Duration {
 // lifetime (1s), up to the gateway maximum or the policy's lower limit.
 //
 // Each case runs in a synctest bubble over net.Pipe, so the stream's
-// elapsed time is its clock's, not the machine's: the window around the
-// limit no longer has to absorb a slow handshake or a late timer.
+// elapsed time is its clock's, not the machine's, and the stream ends at
+// exactly its limit. A bubble that stops making progress is reported on
+// real time (testutil.WatchBubble).
 func TestModelCallOutlivesRequestDeadlineUpToItsMaximum(t *testing.T) {
 	certificate := testCertificate(t)
 	for _, tc := range []struct {
@@ -81,6 +83,8 @@ func TestModelCallOutlivesRequestDeadlineUpToItsMaximum(t *testing.T) {
 		{"policy limit", 1500 * time.Millisecond, 1500 * time.Millisecond},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			watch := testutil.WatchBubble(t, "the extended model call and its session did not end")
+			defer watch.End()
 			synctest.Test(t, func(t *testing.T) {
 				logs := &lockedBuffer{}
 				ended := make(chan streamEnd, 1)
@@ -98,11 +102,11 @@ func TestModelCallOutlivesRequestDeadlineUpToItsMaximum(t *testing.T) {
 				defer func() { _ = s.client.Close() }()
 				lasted := readStream(t, s)
 				end := <-ended
-				if !errors.Is(end.cause, ErrModelCallDeadline) || end.elapsed < tc.want-100*time.Millisecond || end.elapsed > tc.want+300*time.Millisecond {
+				if !errors.Is(end.cause, ErrModelCallDeadline) || end.elapsed != tc.want {
 					t.Fatalf("stream ended after %v with %v, want %v at its deadline", end.elapsed, end.cause, tc.want)
 				}
-				if got := <-lasted; got < tc.want-100*time.Millisecond {
-					t.Fatalf("client stream ended after %v", got)
+				if got := <-lasted; got != tc.want {
+					t.Fatalf("client stream ended after %v, want %v", got, tc.want)
 				}
 				select {
 				case <-s.serveDone:
@@ -119,11 +123,15 @@ func TestModelCallOutlivesRequestDeadlineUpToItsMaximum(t *testing.T) {
 
 // Revocation still ends a model stream that outlived the connection lifetime.
 //
-// The stream runs in a synctest bubble over net.Pipe, so the revocation
-// comes 200ms after the lifetime on its clock and the 2s bound is not spent
-// by a slow machine.
+// The stream runs in a synctest bubble over net.Pipe. The revocation comes
+// 200ms after the lifetime (1s) and past the request deadline (750ms) on its
+// clock, so the stream must have been extended to reach it, and it must end
+// by the monitor's next check, one revocation interval later. A bubble that
+// stops making progress is reported on real time (testutil.WatchBubble).
 func TestModelCallIsRevokedMidStream(t *testing.T) {
 	certificate := testCertificate(t)
+	watch := testutil.WatchBubble(t, "the revoked model call and its session did not end")
+	defer watch.End()
 	synctest.Test(t, func(t *testing.T) {
 		var mu sync.Mutex
 		revoked := false
@@ -147,16 +155,18 @@ func TestModelCallIsRevokedMidStream(t *testing.T) {
 		s := startProxySession(t, g, testProxyAuthorization)
 		defer func() { _ = s.client.Close() }()
 		lasted := readStream(t, s)
-		time.Sleep(1200 * time.Millisecond) // past the connection lifetime
+		const revokedAt, interval = 1200 * time.Millisecond, 20 * time.Millisecond
+		time.Sleep(revokedAt) // past the connection lifetime
 		mu.Lock()
 		revoked = true
 		mu.Unlock()
 		end := <-ended
-		if errors.Is(end.cause, ErrModelCallDeadline) || end.elapsed > 2*time.Second {
-			t.Fatalf("revoked stream ended after %v with %v", end.elapsed, end.cause)
+		if errors.Is(end.cause, ErrModelCallDeadline) || end.elapsed < revokedAt || end.elapsed > revokedAt+interval {
+			t.Fatalf("revoked stream ended after %v with %v, want within %v of the revocation at %v",
+				end.elapsed, end.cause, interval, revokedAt)
 		}
-		if got := <-lasted; got > 2*time.Second {
-			t.Fatalf("client stream lasted %v after revocation", got)
+		if got := <-lasted; got < revokedAt || got > revokedAt+interval {
+			t.Fatalf("client stream lasted %v, want within %v of the revocation at %v", got, interval, revokedAt)
 		}
 		select {
 		case <-s.serveDone:

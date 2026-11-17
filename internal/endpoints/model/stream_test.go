@@ -21,6 +21,7 @@ import (
 	model "github.com/andrewmccall/sproozi/internal/endpoints/model"
 	"github.com/andrewmccall/sproozi/internal/gateway"
 	"github.com/andrewmccall/sproozi/internal/modelauth"
+	"github.com/andrewmccall/sproozi/internal/testutil"
 )
 
 const (
@@ -510,9 +511,13 @@ func TestProviderFailureBeforeHeadersReleasesTheReservation(t *testing.T) {
 //
 // The relay runs in a synctest bubble, so each 1.1s sleep is known to
 // include the relay's one-second check; on real time a slow machine could
-// run it late and the test pass without it.
+// run it late and the test pass without it. A relay that spins or blocks
+// on a lock stops the bubble's clock; the watch reports it on real time
+// (testutil.WatchBubble).
 func TestLongQuietStreamIsNotCut(t *testing.T) {
 	events := fixtureEvents(t, "responses-reasoning.sse")
+	watch := testutil.WatchBubble(t, "the quiet stream was not relayed to its end")
+	defer watch.End()
 	synctest.Test(t, func(t *testing.T) {
 		provider, client := newPipeProvider()
 		clock := newManualClock()

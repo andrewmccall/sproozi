@@ -26,6 +26,7 @@ import (
 
 	"github.com/andrewmccall/sproozi/internal/audit"
 	"github.com/andrewmccall/sproozi/internal/gateway"
+	"github.com/andrewmccall/sproozi/internal/testutil"
 )
 
 const (
@@ -427,9 +428,12 @@ func TestGatewayRequestEndsBeforeConnectionLifetime(t *testing.T) {
 // The session runs in a synctest bubble over net.Pipe, so its clock moves
 // only while every goroutine waits: the request arrives 50ms after the
 // request deadline (750ms) and 200ms before the lifetime (1s) however slow
-// the machine, where a real sleep could overshoot the lifetime.
+// the machine, where a real sleep could overshoot the lifetime. A bubble
+// that stops making progress is reported on real time (testutil.WatchBubble).
 func TestGatewayRequestAfterDeadlineAsksForANewConnection(t *testing.T) {
 	certificate := testCertificate(t)
+	watch := testutil.WatchBubble(t, "the late request's reply and the session's end did not come")
+	defer watch.End()
 	synctest.Test(t, func(t *testing.T) {
 		identity := testIdentity()
 		g, err := New(Config{Certificates: map[string]tls.Certificate{testServiceHost: certificate}, Authenticate: func(context.Context, string) (*gateway.ExecutionGrant, error) { return identity, nil }, Revalidate: func(context.Context, *gateway.ExecutionGrant) error { return nil }, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -463,11 +467,14 @@ func TestGatewayRequestAfterDeadlineAsksForANewConnection(t *testing.T) {
 // lifetime, so the client's next request opens a new one.
 //
 // The session runs in a synctest bubble over net.Pipe, so the handshake and
-// the request take no time on its clock and the close is timed exactly; on
-// real time a slow handshake counted towards the 400ms between the request
-// deadline and the bound.
+// the request take no time on its clock and the close comes at exactly the
+// request deadline; on real time a slow handshake counted towards the 400ms
+// between the request deadline and the old bound. A bubble that stops making
+// progress is reported on real time (testutil.WatchBubble).
 func TestGatewayIdleConnectionClosesAtRequestDeadline(t *testing.T) {
 	certificate := testCertificate(t)
+	watch := testutil.WatchBubble(t, "the idle connection did not close and the session did not end")
+	defer watch.End()
 	synctest.Test(t, func(t *testing.T) {
 		identity := testIdentity()
 		g, err := New(Config{Certificates: map[string]tls.Certificate{testServiceHost: certificate}, Authenticate: func(context.Context, string) (*gateway.ExecutionGrant, error) { return identity, nil }, Revalidate: func(context.Context, *gateway.ExecutionGrant) error { return nil }, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -495,11 +502,11 @@ func TestGatewayIdleConnectionClosesAtRequestDeadline(t *testing.T) {
 		if _, err = reader.ReadByte(); err == nil {
 			t.Fatal("idle connection stayed open")
 		}
-		<-s.serveDone
 		// The request deadline is 1.5s; the connection lifetime is 2s.
-		if elapsed := time.Since(started); elapsed < 1500*time.Millisecond || elapsed >= 1900*time.Millisecond {
-			t.Fatalf("idle connection closed after %v, not at the request deadline", elapsed)
+		if closed := time.Since(started); closed != 1500*time.Millisecond {
+			t.Fatalf("idle connection closed after %v, not at the request deadline of 1.5s", closed)
 		}
+		<-s.serveDone
 	})
 }
 
