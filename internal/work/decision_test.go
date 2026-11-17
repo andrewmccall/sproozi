@@ -13,10 +13,9 @@ import (
 )
 
 // driverPhases is every phase the driver decides from: not received, then
-// each phase of the execution journal.
-var driverPhases = []session.Phase{phaseNotReceived, session.PhaseIdle, session.PhasePreparing,
-	session.PhaseActivating, session.PhaseActive, session.PhaseStopping, session.PhaseUnknownStop,
-	session.PhaseUnknownUsage, session.PhaseCancelling, session.PhaseCancelled}
+// each phase of the execution journal. A phase added to the journal is a
+// situation no row decides, so the table test fails until a row does.
+var driverPhases = append([]session.Phase{phaseNotReceived}, session.Phases()...)
 
 var driverActions = []action{actNothing, actStart, actRecoverStart, actComplete, actRecover, actFinish,
 	actEndExpired, actEndRevoked}
@@ -244,5 +243,33 @@ func TestEveryDriverPhaseCanStillBeStoppedAndCancelled(t *testing.T) {
 		if !reached[p] {
 			t.Errorf("phase %q is never reached", p)
 		}
+	}
+}
+
+// A situation no row decides is not left silently: the driver records a
+// problem the owner sees and retries after the backoff, and changes
+// nothing else. It runs alone, since it replaces the package's table.
+func TestUndecidedSituationIsReportedAndRetried(t *testing.T) {
+	e := newDriverEnv(t, false, clockNone)
+	e.activate(t)
+	table := decisions
+	decisions = nil
+	t.Cleanup(func() { decisions = table })
+	if n := e.o.step(t.Context(), e.id); n != nextWait {
+		t.Fatalf("undecided step: %s, want wait", nextNames[n])
+	}
+	r, err := e.o.read(e.id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := e.o.execution(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Problem != problemUndecided || rec.Phase != session.PhaseActive || r.Finished {
+		t.Fatalf("undecided session: problem %q, phase %s, finished %t", r.Problem, rec.Phase, r.Finished)
+	}
+	if calls := e.p.counts(); calls != "calls=prepare=1,activate=1,inspect=2" {
+		t.Fatalf("undecided step called the placement: %s", calls)
 	}
 }

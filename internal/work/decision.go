@@ -165,7 +165,7 @@ var decisions = []decisionRow{
 
 // decide is the one action decisions maps s to. A situation that matches no
 // row, or more than one, is a programming error: decide refuses it, and the
-// driver does nothing.
+// driver records a problem and retries after the backoff.
 func decide(s situation) (action, error) {
 	var found []action
 	for _, row := range decisions {

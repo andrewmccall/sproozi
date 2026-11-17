@@ -18,6 +18,8 @@ import (
 const (
 	problemExpired = "the deadline passed before it started"
 	problemRevoked = "its project no longer admits this installation"
+	// problemUndecided: the driver has no rule for the session's state.
+	problemUndecided = "the executor has no rule for this session's state; it keeps retrying, and the executor's log names the state"
 )
 
 // actionTaskComplete derives the operation of a task's completion wait: the
@@ -151,8 +153,12 @@ func (o *Owner) step(ctx context.Context, id string) next {
 	}
 	act, err := decide(o.situationOf(r, rec, time.Now()))
 	if err != nil {
+		// A situation no row decides is a programming error. Say so where
+		// the owner sees it, and keep retrying: an executor that does
+		// decide it may be running by the next attempt.
 		o.logf("Could not decide the next step of work session %s: %v", id, err)
-		return nextDone
+		o.note(id, problemUndecided)
+		return nextWait
 	}
 	return o.carryOut(ctx, r, rec, act)
 }
