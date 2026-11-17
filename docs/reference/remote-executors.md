@@ -347,9 +347,11 @@ session's, and `pullFinished`, which a pulled session needs.
 
 A removed session leaves a mark of about 50 bytes, outside `retainedBytes`
 and the session count, so its ID never starts again: a `run` that repeats its
-`requestId` answers `conflict`, and so does a `run` whose `workspaceFrom`
-names it. Removing it again answers `{"id":"..."}`. An ID the executor never
-held answers `invalid_request`.
+`requestId` answers `conflict`. A `run` whose `workspaceFrom` names it answers
+`invalid_request`, also when the removal lands while the `run` is still
+reading it; a `run` the executor kept before the removal began keeps the
+source instead (the `workspaceFrom` row above). Removing it again answers
+`{"id":"..."}`. An ID the executor never held answers `invalid_request`.
 
 Removal does not wait for other sessions: it takes only the removed
 session's executions, and waits at most five seconds for an operation on one

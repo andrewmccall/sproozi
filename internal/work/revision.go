@@ -73,6 +73,20 @@ func (o *Owner) revisionSource(source RevisionSource, target project.Association
 	return data, nil
 }
 
+// checkSource checks the session a submission starts from before the
+// submission is admitted. It reads the source without the locks Remove holds,
+// so a removal can delete the source part way through the read. Remove marks
+// the session removed before it deletes anything, and the mark stays, so a
+// read that failed while the source went is answered as one that found it
+// removed. The check under o.retention answers a removal after the read.
+func (o *Owner) checkSource(source RevisionSource, target project.Association) error {
+	_, err := o.revisionSource(source, target)
+	if err != nil && CanonicalID(source.SessionID) && o.wasRemoved(source.SessionID) {
+		return &profile.Rejection{Code: profile.CodeInvalid}
+	}
+	return err
+}
+
 // The steps of revisionSource's read of a source session, after each of
 // which Config.sourceRead runs: its catalogue record was read, the
 // coordinator's record of its execution was read, and its checkpoint was

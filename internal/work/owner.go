@@ -371,7 +371,7 @@ func (o *Owner) SubmitAs(ctx context.Context, caller Caller, q Submit) (View, er
 		}
 	}
 	if q.WorkspaceFrom != nil {
-		if _, err = o.revisionSource(*q.WorkspaceFrom, association); err != nil {
+		if err = o.checkSource(*q.WorkspaceFrom, association); err != nil {
 			return View{}, err
 		}
 	}
