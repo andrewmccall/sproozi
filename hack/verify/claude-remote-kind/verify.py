@@ -374,12 +374,17 @@ class Proof:
                               capture_output=True, check=True, timeout=timeout).stdout
 
     def sandbox_pod(self):
-        pods = json.loads(self.kubectl("-n", "sproozi-agents", "get", "pods", "-l",
-                                       "sproozi.com/managed-by=sproozi-controller", "-o", "json"))["items"]
-        running = [p["metadata"]["name"] for p in pods
-                   if p["status"].get("phase") == "Running" and not p["metadata"].get("deletionTimestamp")]
-        check(len(running) == 1, "Expected one running sandbox Pod, found %d" % len(running))
-        return running[0]
+        """The one sandbox Pod, once it runs. A detached run returns before
+        its Pod starts."""
+        end = time.monotonic() + self.args.operation_timeout
+        while True:
+            pods = json.loads(self.kubectl("-n", "sproozi-agents", "get", "pods", "-l",
+                                           "sproozi.com/managed-by=sproozi-controller", "-o", "json"))["items"]
+            check(len(pods) <= 1, "Expected one sandbox Pod, found %d" % len(pods))
+            if pods and pods[0]["status"].get("phase") == "Running" and not pods[0]["metadata"].get("deletionTimestamp"):
+                return pods[0]["metadata"]["name"]
+            check(time.monotonic() < end, "No sandbox Pod ran")
+            time.sleep(2)
 
     def token_facts(self, pod):
         """The token's issue and expiry times, the Pod's clock, and the token
