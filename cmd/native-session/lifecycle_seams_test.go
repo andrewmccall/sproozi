@@ -52,3 +52,19 @@ func deadlineIn(s *server, d time.Duration) {
 	defer s.mu.Unlock()
 	s.deadline = time.Now().Add(d)
 }
+
+// recordedTerminal is activate's terminal for the recorded harness.
+func recordedTerminal(_ *server, args, env []string, login *loginSync) nativepty.Launch {
+	return terminalLaunch(recordedShell, args, env, login)
+}
+
+// lifeFacts are the lifecycle's facts beyond its state: the cause, whether
+// input was gated, and the turnless latch.
+func lifeFacts(s *server) (exitCause, bool, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.life.cause, !s.life.gatedAt.IsZero(), s.life.turnless
+}
+
+// startWatcher is serve's deadline watcher.
+func startWatcher(s *server) { go s.watchDeadline() }
