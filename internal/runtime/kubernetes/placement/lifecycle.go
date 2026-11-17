@@ -181,10 +181,24 @@ func ceilingsMatch(l session.Launch, ceilings map[api.CapabilityKind]api.Endpoin
 	return true
 }
 func (p *Placement) pod(ctx context.Context, r registry.Record) (*corev1.Pod, error) {
+	run, err := p.readRun(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	return p.podOf(ctx, r, run)
+}
+
+// readRun reads the AgentRun r names.
+func (p *Placement) readRun(ctx context.Context, r registry.Record) (*api.AgentRun, error) {
 	var run api.AgentRun
 	if err := p.config.Kube.Get(ctx, client.ObjectKey{Namespace: p.config.Namespace, Name: r.IntendedRunName}, &run); err != nil {
 		return nil, err
 	}
+	return &run, nil
+}
+
+// podOf reads the exact Pod of run, the AgentRun r names.
+func (p *Placement) podOf(ctx context.Context, r registry.Record, run *api.AgentRun) (*corev1.Pod, error) {
 	if string(run.UID) != r.RunUID || run.Status.Identity.SandboxName == "" {
 		return nil, errRunUnavailable
 	}
@@ -226,8 +240,13 @@ func (p *Placement) waitPod(ctx context.Context, r registry.Record, wantRunning 
 	defer cancel()
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
-	for {
-		pod, err := p.pod(ctx, r)
+	for poll := 0; ; poll++ {
+		run, runErr := p.readRun(ctx, r)
+		var pod *corev1.Pod
+		err := runErr
+		if err == nil {
+			pod, err = p.podOf(ctx, r, run)
+		}
 		if err == nil {
 			seen := sandboxpod.Observe(pod)
 			if wantRunning && seen.Agent.Running && seen.Capture.Running && !seen.Deleting {
@@ -242,8 +261,15 @@ func (p *Placement) waitPod(ctx context.Context, r registry.Record, wantRunning 
 		}
 		if wantRunning {
 			// A start whose run can no longer get a Pod would otherwise wait
-			// for the deadline, or for ever without one (ADR 0067).
-			if refused := p.startRefused(ctx, r); refused != nil {
+			// for the deadline, or for ever without one (ADR 0067). The run
+			// read above serves; the registration, which only an
+			// administrator or a lost local record changes meanwhile, is read
+			// once a second.
+			refused := runRefusal(r, run, runErr)
+			if refused == nil && poll%registrationPolls == 0 {
+				refused = p.registrationRefusal(ctx, r)
+			}
+			if refused != nil {
 				return nil, refused
 			}
 		}
@@ -255,21 +281,35 @@ func (p *Placement) waitPod(ctx context.Context, r registry.Record, wantRunning 
 	}
 }
 
+// registrationPolls is how many of waitPod's 100-millisecond polls pass
+// between its reads of the registration.
+const registrationPolls = 10
+
+// refuse is a start refusal with the reason format describes.
+func refuse(format string, args ...any) error {
+	return &session.StartRefused{Reason: session.RefusalReason(fmt.Sprintf(format, args...))}
+}
+
 // startRefused is the refusal of a start whose bound run can no longer get
-// a running Pod, or nil while it still can. A run can no longer get one once
-// it is terminal, cancelled, deleted or replaced, or once its registration
-// has left Creating and Bound, which another operation's cancellation does:
-// the controller creates a Pod only for a live run that a bound registration
-// names. A run that is queued under a cap, admitted while a ResourceQuota
-// refuses its Pod, or that named a Pod not yet created, can still get one,
-// so it is not refused. A read that fails is no evidence either way: the
-// wait reads again.
+// a running Pod, or nil while it still can: runRefusal of the run read now,
+// then registrationRefusal.
 func (p *Placement) startRefused(ctx context.Context, r registry.Record) error {
-	refuse := func(format string, args ...any) error {
-		return &session.StartRefused{Reason: session.RefusalReason(fmt.Sprintf(format, args...))}
+	run, err := p.readRun(ctx, r)
+	if refused := runRefusal(r, run, err); refused != nil {
+		return refused
 	}
-	var run api.AgentRun
-	err := p.config.Kube.Get(ctx, client.ObjectKey{Namespace: p.config.Namespace, Name: r.IntendedRunName}, &run)
+	return p.registrationRefusal(ctx, r)
+}
+
+// runRefusal is the refusal of a start whose bound run, read as run or
+// failing with err, can no longer get a running Pod, or nil while it still
+// can. A run can no longer get one once it is terminal, cancelled, deleted
+// or replaced: the controller creates a Pod only for a live run that a bound
+// registration names. A run that is queued under a cap, admitted while a
+// ResourceQuota refuses its Pod, or that named a Pod not yet created, can
+// still get one, so it is not refused. A read that fails is no evidence
+// either way: the wait reads again.
+func runRefusal(r registry.Record, run *api.AgentRun, err error) error {
 	switch {
 	case apierrors.IsNotFound(err):
 		return refuse("AgentRun %s was deleted before its sandbox started", r.IntendedRunName)
@@ -279,10 +319,19 @@ func (p *Placement) startRefused(ctx context.Context, r registry.Record) error {
 		return refuse("AgentRun %s was replaced before its sandbox started: it now has UID %s, not %s",
 			r.IntendedRunName, run.UID, r.RunUID)
 	case run.Status.Phase.IsTerminal():
-		return refuse("%s", runEnded(&run))
+		return refuse("%s", runEnded(run))
 	case run.Spec.Cancel:
 		return refuse("AgentRun %s was cancelled before its sandbox started", r.IntendedRunName)
 	}
+	return nil
+}
+
+// registrationRefusal is the refusal of a start whose registration has left
+// Creating and Bound, or was deleted, or nil. While Prepare holds the
+// launch's lock nothing in the executor changes it: only an administrator,
+// or another executor's abort of a launch whose local record was lost,
+// does. A read that fails is no evidence either way.
+func (p *Placement) registrationRefusal(ctx context.Context, r registry.Record) error {
 	current, err := p.registry.Get(ctx, r.Reference)
 	switch {
 	case errors.Is(err, registry.ErrGone):
@@ -294,6 +343,20 @@ func (p *Placement) startRefused(ctx context.Context, r registry.Record) error {
 			r.IntendedRunName, current.Phase)
 	}
 	return nil
+}
+
+// abortedRefusal is the refusal of a launch whose preparation local's
+// tombstone records as aborted. It says how the run ended when it can still
+// read a terminal one, which is why the start was refused when the run
+// ended by itself; otherwise only that the preparation was aborted.
+func (p *Placement) abortedRefusal(ctx context.Context, local retained) error {
+	name := runName(local.Launch)
+	var run api.AgentRun
+	if err := p.config.Kube.Get(ctx, client.ObjectKey{Namespace: p.config.Namespace, Name: name}, &run); err == nil &&
+		run.Status.Phase.IsTerminal() {
+		return refuse("%s", runEnded(&run))
+	}
+	return refuse("the preparation of AgentRun %s was aborted before its sandbox started", name)
 }
 
 // runEnded says how a terminal run ended before its sandbox started, with
@@ -362,6 +425,12 @@ func (p *Placement) Inspect(ctx context.Context, l session.Launch) (session.Obse
 		return session.Observation{}, err
 	}
 	defer unlock()
+	if aborted, err := p.load(l); err == nil && aborted.PreparationAborted && session.SameLaunch(l, aborted.Launch) {
+		// An aborted preparation still pending in its coordinator's journal
+		// is a start whose end was not yet shown: its Prepare refuses it,
+		// and the coordinator's end replays the abort (ADR 0067).
+		return session.Observation{Launch: aborted.Launch, State: session.PlacementPreparing}, nil
+	}
 	local, r, err := p.observing(ctx, l)
 	if os.IsNotExist(err) {
 		var cm corev1.ConfigMap
