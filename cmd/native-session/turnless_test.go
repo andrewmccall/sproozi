@@ -235,6 +235,37 @@ func TestQuiesceReportsWhatItWaitsForWithoutStopping(t *testing.T) {
 	}
 }
 
+// The Stop hook is the only report that a Claude Code turn ended; the
+// transcript is read only after it. A Stop that never arrives, such as a hook
+// killed by Claude Code's hook timeout before it reported, leaves the turn
+// running: each stop waits its bound, reports what it waits for and leaves
+// the harness running. Only a later turn's Stop, a forced stop or the
+// execution deadline ends that.
+func TestClaudeMissedStopLeavesTheTurnRunning(t *testing.T) {
+	previous := quiesceWait
+	quiesceWait = 200 * time.Millisecond
+	t.Cleanup(func() { quiesceWait = previous })
+	native := startIdleNative(t)
+	deadline := time.Now().Add(time.Minute)
+	s := &server{native: native, life: lifecycle{phase: phaseActive}, done: make(chan struct{}),
+		config: config{Harness: harness.NativeClaude, ThreadID: selected, Deadline: deadline}, deadline: deadline}
+	s.claude.id = selected
+	if err := s.claude.accept(claudeHook{Event: claudePromptSubmit}, 0); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		r := s.quiesce()
+		if r.Error != "" || r.State != harness.NativeStopping || r.Waiting != "the current Claude Code turn to finish" {
+			t.Fatalf("stop after a missed Stop: %+v", r)
+		}
+	}
+	select {
+	case <-native.Done():
+		t.Fatal("a stop ended the harness without a completed turn")
+	default:
+	}
+}
+
 // A resumed Claude visit with no new prompt keeps its restored conversation:
 // a stop needs no new turn once any terminal input has settled.
 func TestClaudeResumedVisitWithoutPromptStopsAsRestored(t *testing.T) {
