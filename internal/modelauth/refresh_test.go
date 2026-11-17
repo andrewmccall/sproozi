@@ -211,7 +211,7 @@ func (e *rotatingEndpoint) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	token := r.Form.Get(refreshTokenField)
 	if !e.valid[token] {
 		e.mu.Unlock()
-		failingEndpoint(http.StatusBadRequest, `{"error":"invalid_grant"}`)(w, r)
+		failingEndpoint(http.StatusBadRequest, invalidGrantBody)(w, r)
 		return
 	}
 	delete(e.valid, token)

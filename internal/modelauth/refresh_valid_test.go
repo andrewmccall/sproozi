@@ -20,8 +20,8 @@ func TestChatGPTUsesAStillValidTokenWhileARefreshIsHeld(t *testing.T) {
 		status  int
 		refused bool
 	}{
-		{name: "held", status: http.StatusBadGateway},
-		{name: "refused", status: http.StatusBadRequest, body: `{"error":"invalid_grant"}`, refused: true},
+		{name: string(refreshHeld), status: http.StatusBadGateway},
+		{name: string(refreshRefused), status: http.StatusBadRequest, body: invalidGrantBody, refused: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var calls atomic.Int32

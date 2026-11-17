@@ -143,7 +143,7 @@ func TestChatGPTNoLockIsHeldAcrossARefresh(t *testing.T) {
 	}()
 	<-entered
 	locked := make(chan struct{})
-	go func() { auth.mu.Lock(); auth.mu.Unlock(); close(locked) }()
+	go func() { auth.mu.Lock(); close(locked); auth.mu.Unlock() }()
 	select {
 	case <-locked:
 	case <-time.After(5 * time.Second):

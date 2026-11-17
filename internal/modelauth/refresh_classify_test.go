@@ -9,6 +9,9 @@ import (
 	"testing"
 )
 
+// invalidGrantBody is a token endpoint reply refusing the refresh token.
+const invalidGrantBody = `{"error":"invalid_grant"}`
+
 // classifyEndpoint answers status and body until recovered, then issues a
 // new token.
 func classifyEndpoint(status int, body string, recovered *atomic.Bool, calls *atomic.Int32) http.HandlerFunc {
@@ -36,14 +39,14 @@ func TestChatGPTRefusesOnlyAnInvalidGrant(t *testing.T) {
 		body    string
 		refused bool
 	}
-	var rows []row
+	rows := make([]row, 0, 25)
 	for _, status := range []int{400, 401, 403, 404, 405, 407, 408, 409, 410, 413, 415, 421, 422, 425, 429, 451} {
 		rows = append(rows, row{name: fmt.Sprintf("%d other error", status), status: status, body: other})
 	}
 	rows = append(rows,
 		row{name: "400 invalid_grant", status: 400, body: `{"error":"invalid_grant","error_description":"provider-secret"}`, refused: true},
-		row{name: "401 invalid_grant", status: 401, body: `{"error":"invalid_grant"}`, refused: true},
-		row{name: "403 invalid_grant", status: 403, body: `{"error":"invalid_grant"}`},
+		row{name: "401 invalid_grant", status: 401, body: invalidGrantBody, refused: true},
+		row{name: "403 invalid_grant", status: 403, body: invalidGrantBody},
 		row{name: "400 invalid_request", status: 400, body: `{"error":"invalid_request"}`},
 		row{name: "400 empty body", status: 400},
 		row{name: "400 not JSON", status: 400, body: `invalid_grant`},

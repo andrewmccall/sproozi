@@ -25,8 +25,8 @@ func TestChatGPTNewSignInEndsAHoldOrRefusalWithinTheReloadInterval(t *testing.T)
 		body   string
 		want   refreshState
 	}{
-		{name: "held", status: http.StatusServiceUnavailable, want: refreshHeld},
-		{name: "refused", status: http.StatusBadRequest, body: `{"error":"invalid_grant"}`, want: refreshRefused},
+		{name: string(refreshHeld), status: http.StatusServiceUnavailable, want: refreshHeld},
+		{name: string(refreshRefused), status: http.StatusBadRequest, body: invalidGrantBody, want: refreshRefused},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var calls atomic.Int32
@@ -106,8 +106,8 @@ func TestChatGPTReadsTheStoreOncePerReloadIntervalWhileAFailureIsRemembered(t *t
 		status int
 		body   string
 	}{
-		{name: "held", status: http.StatusServiceUnavailable},
-		{name: "refused", status: http.StatusBadRequest, body: `{"error":"invalid_grant"}`},
+		{name: string(refreshHeld), status: http.StatusServiceUnavailable},
+		{name: string(refreshRefused), status: http.StatusBadRequest, body: invalidGrantBody},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(failingEndpoint(tc.status, tc.body))
