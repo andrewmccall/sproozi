@@ -137,6 +137,20 @@ func TestExitedStopsAnAgentPastItsDeadline(t *testing.T) {
 	}
 }
 
+// The deadline tests replace the placement's clock; an opened placement's
+// own clock is the machine's, read at the moment it judges a deadline.
+func TestPlacementJudgesDeadlinesOnTheMachineClock(t *testing.T) {
+	t.Parallel()
+	f := newFakeDocker()
+	p := openFixture(t, testutil.PrivateDir(t), f, &fakeAuthority{engine: f})
+	before := time.Now()
+	now := p.now()
+	after := time.Now()
+	if now.Before(before) || now.After(after) {
+		t.Fatalf("placement clock read %s, want between %s and %s", now, before, after)
+	}
+}
+
 // deadlineClock is a clock for launch l that reads an hour before its
 // deadline, which fixtureLaunch sets, until pastDeadline moves it a second
 // past the deadline. The test, not the machine's speed, decides when the
