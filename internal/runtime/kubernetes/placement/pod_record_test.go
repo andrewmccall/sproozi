@@ -99,6 +99,7 @@ func readingContainers() []struct {
 		{"without-finish", ended(0, func(s *corev1.ContainerStatus) { s.State.Terminated.FinishedAt = metav1.Time{} })},
 		{"other-runtime", ended(0, func(s *corev1.ContainerStatus) { s.State.Terminated.ContainerID = "containerd://replacement" })},
 		{"without-outer-id", ended(0, func(s *corev1.ContainerStatus) { s.ContainerID = "" })},
+		{"without-ids", ended(0, func(s *corev1.ContainerStatus) { s.ContainerID, s.State.Terminated.ContainerID = "", "" })},
 	}
 }
 
@@ -154,7 +155,7 @@ func reading(t *testing.T, pod *corev1.Pod) string {
 // reading of the Pod.
 func TestPodReadingsMatchTheRecordedTable(t *testing.T) {
 	t.Parallel()
-	lines := make([]string, 0, 2200)
+	lines := make([]string, 0, 2400)
 	containers := readingContainers()
 	for _, agent := range containers {
 		for _, capture := range containers[:5] {

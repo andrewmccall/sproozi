@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -147,6 +148,21 @@ type admissionClient struct {
 	reconcile func(context.Context, *api.AgentRun)
 	// patchErr fails the next patch once, as a crash before it would.
 	patchErr error
+	// podRead, when set, changes each Pod a Get reads, as a Pod the
+	// kubelet or a deletion changed between reads would read.
+	podRead atomic.Pointer[func(*corev1.Pod)]
+}
+
+func (c *admissionClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, options ...client.GetOption) error {
+	if err := c.Client.Get(ctx, key, obj, options...); err != nil {
+		return err
+	}
+	if pod, ok := obj.(*corev1.Pod); ok {
+		if read := c.podRead.Load(); read != nil {
+			(*read)(pod)
+		}
+	}
+	return nil
 }
 
 func (c *admissionClient) Create(ctx context.Context, obj client.Object, options ...client.CreateOption) error {
