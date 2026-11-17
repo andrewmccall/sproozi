@@ -241,7 +241,7 @@ What remains:
   administrator must confirm no Pod labelled … remains". The driver's
   problem carries it after the refusal, the executor logs it once per
   session and cause, and the driver recovers a task again on its backoff,
-  capped at a minute, at about four API calls a try, until an administrator
+  capped at a minute, at a few API reads a try, until an administrator
   acts; an interactive session waits for its owner's `recover`. A deleted
   registration's tombstone is saved too, so each recover repeats the check.
 - `Inspect` of a launch whose preparation was aborted reports `preparing`
