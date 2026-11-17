@@ -48,7 +48,7 @@ func TestAStoppedVisitWhoseRecordWasLostSettlesFromItsReceipt(t *testing.T) {
 			o, inspectErr := p.Inspect(t.Context(), l)
 			s, stopErr := p.Stop(t.Context(), l, i)
 			a, abortErr := p.Abort(t.Context(), l, i)
-			for name, err := range map[string]error{"inspect": inspectErr, "stop": stopErr, "abort": abortErr} {
+			for name, err := range map[string]error{"inspect": inspectErr, opStop: stopErr, "abort": abortErr} {
 				if errors.As(err, &contradicted) {
 					t.Errorf("%s reported the contradiction: %v", name, err)
 				}

@@ -108,6 +108,9 @@ type endingOp struct {
 // opAbortPreparation names the abort of a preparation among endingOps.
 const opAbortPreparation = "abort-preparation"
 
+// opStop names the stop among endingOps.
+const opStop = "stop"
+
 // endingOps are the operations that observe or end a visit.
 var endingOps = []endingOp{
 	{"inspect", func(ctx context.Context, p *Placement, l session.Launch, _ session.Incarnation) error {
@@ -118,7 +121,7 @@ var endingOps = []endingOp{
 		_, err := p.Exited(ctx, l, i)
 		return err
 	}},
-	{"stop", func(ctx context.Context, p *Placement, l session.Launch, i session.Incarnation) error {
+	{opStop, func(ctx context.Context, p *Placement, l session.Launch, i session.Incarnation) error {
 		_, err := p.Stop(ctx, l, i)
 		return err
 	}},
@@ -263,7 +266,7 @@ func endingCase(t *testing.T, v reachedVisit, phase endingPhase, change func(*re
 		t.Fatalf("%s reported the contradiction: %v", op.name, err)
 	}
 	settled := phase.phase == registry.Stopped || phase.phase == registry.Cancelled
-	if settled && err != nil && op.name != opAbortPreparation && (op.name != "stop" || phase.phase == registry.Stopped) {
+	if settled && err != nil && op.name != opAbortPreparation && (op.name != opStop || phase.phase == registry.Stopped) {
 		t.Fatalf("%s of a %s visit: %v", op.name, phase.phase, err)
 	}
 	if op.name == opAbortPreparation && err == nil {
