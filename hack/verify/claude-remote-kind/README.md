@@ -32,6 +32,7 @@ and provider logs. Private keys are removed at the end.
 | `SPROOZI_CLAUDE_AUTH=gateway-key` | Removes the example runtime's `signIn` and gives the gateway the fixture's Anthropic key, as the example's comment describes. Default `sign-in`. |
 | `SPROOZI_PRESERVE_ON_FAILURE=1` | Keeps a failed run's cluster; its kubeconfig is in the run directory. |
 | `SPROOZI_NO_CACHE=1` | Rebuilds the client layers without the Docker cache. |
+| `SERVICE_ACCOUNT_WAIT_SECONDS` | How long `run.sh` waits for each new namespace's `default` ServiceAccount before it applies anything (the login seed Pod is refused without it). Default 60; it fails naming the namespace if the ServiceAccount does not appear. |
 | `SPROOZI_CNI_MANIFEST` | A Calico manifest already fetched with `hack/verify/fetch-calico.sh`. |
 | `SPROOZI_TOKEN_REFRESH=1` | Runs only the `refresh` scenario, on a cluster whose API server caps ServiceAccount tokens at 3607 seconds (`--service-account-max-token-expiration`; a lower value was not tried) and records TokenReviews in an audit log (`apiserver.py`). `run.sh` checks the cap is in force and raises the example's 30-minute executor and policy duration caps to 90 minutes. It takes about 70 minutes longer. |
 

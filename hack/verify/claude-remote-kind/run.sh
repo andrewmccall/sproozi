@@ -9,7 +9,9 @@
 # SPROOZI_CNI_MANIFEST (default: the pinned Calico, fetched),
 # SPROOZI_CLAUDE_AUTH (sign-in, the default, or gateway-key),
 # SPROOZI_PRESERVE_ON_FAILURE=1 to keep a failed run's cluster,
-# SPROOZI_NO_CACHE=1 to rebuild the client layers from scratch, and
+# SPROOZI_NO_CACHE=1 to rebuild the client layers from scratch,
+# SERVICE_ACCOUNT_WAIT_SECONDS (default 60) to bound the wait for each new
+# namespace's default ServiceAccount, and
 # SPROOZI_TOKEN_REFRESH=1 to run only the refresh scenario on a cluster whose
 # API server caps ServiceAccount tokens at about an hour. Extra arguments go
 # to verify.py, for example --scenario task.
@@ -17,6 +19,7 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "$root"
 source hack/kind-up.sh
+source hack/verify/claude-remote-kind/service-account.sh
 : "${KIND_NODE_IMAGE:?Supply the pinned Kind node image; make verify-claude-remote-kind sets it}"
 auth="${SPROOZI_CLAUDE_AUTH:-sign-in}"
 [[ "$auth" == sign-in || "$auth" == gateway-key ]] || { echo 'SPROOZI_CLAUDE_AUTH must be sign-in or gateway-key' >&2; exit 1; }
@@ -177,6 +180,11 @@ kubectl wait --for=condition=Established --timeout=60s \
   crd/agentpolicies.sproozi.com crd/agentruns.sproozi.com crd/agentruntimes.sproozi.com crd/agenttemplates.sproozi.com >/dev/null
 for ns in sproozi-system sproozi-agents "$sessions" sproozi-fixture; do
   kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+done
+# The login seed Pod below is applied with the rest of the cluster's objects,
+# and a Pod needs its namespace's default ServiceAccount to exist.
+for ns in sproozi-system sproozi-agents "$sessions" sproozi-fixture; do
+  wait_for_default_service_account "$ns"
 done
 kubectl -n sproozi-system create secret tls sproozi-gateway-tls --cert="$tls/leaf.crt" --key="$tls/leaf.key" >/dev/null
 kubectl -n sproozi-fixture create secret tls claude-fixture-tls --cert="$tls/leaf.crt" --key="$tls/leaf.key" >/dev/null
