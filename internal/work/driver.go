@@ -46,19 +46,26 @@ func refusedProblem(r record, err error) string {
 	}
 	interactive := r.Intent.Mode == ModeInteractive
 	if cause := unprovenCause(err); cause != "" {
-		// Only an administrator settles this, and a cancellation meets the
-		// same gap, so the problem names what to check.
-		then := "; the executor tries again"
-		if interactive {
-			then = "; recover this session once that is done"
-		}
-		return problem + "; the executor cannot show that nothing runs there: " + cause + then
+		// Only an administrator clears this, and the cause says how and
+		// what follows; the driver waits for the owner's recover.
+		return problem + "; the executor cannot show that nothing runs there: " + cause
 	}
 	next := " and tries again"
 	if interactive {
 		next = ", so recover or cancel this session"
 	}
 	return problem + "; the executor has not yet shown that nothing runs there" + next
+}
+
+// forgetUnproven drops the causes logged for session id, once its start
+// ended or it is removed.
+func (o *Owner) forgetUnproven(id string) {
+	o.unproven.Range(func(key, _ any) bool {
+		if strings.HasPrefix(key.(string), id+"\x00") {
+			o.unproven.Delete(key)
+		}
+		return true
+	})
 }
 
 // unprovenCause is the cause, stated alone, that keeps err's end unproven
@@ -276,8 +283,11 @@ func (o *Owner) carryOut(ctx context.Context, r record, rec *session.Record, act
 			}
 			switch {
 			case errors.Is(err, session.ErrStartEnded):
+				o.forgetUnproven(r.ID)
 				return nextAgain
-			case r.Intent.Mode == ModeInteractive:
+			case r.Intent.Mode == ModeInteractive, unprovenCause(err) != "":
+				// An end only an administrator can clear is not retried:
+				// the owner's recover checks it again.
 				return nextDone
 			}
 			return nextWait

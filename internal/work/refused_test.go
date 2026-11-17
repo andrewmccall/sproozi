@@ -181,12 +181,16 @@ func (e *adminCheck) Error() string {
 func (e *adminCheck) UnprovenEnd() string { return e.sentence }
 
 const fixtureAdminCheck = "AgentRun session-0 now has UID b, but its session registration bound UID a; " +
-	"an administrator replaced it, so confirm no Pod labelled sproozi.com/agentrun-uid=a remains"
+	"an administrator replaced it: confirm no Pod labelled sproozi.com/agentrun-uid=a remains, " +
+	"then delete AgentRun session-0 and recover this session"
 
 // A refused start whose end stays unproven for a cause only an
-// administrator can settle says that cause in its problem, without the
-// errors it is wrapped in, and the executor logs it once however often the
-// driver tries again (ADR 0067).
+// administrator can clear says that cause, which names what clears it, in
+// its problem, without the errors it is wrapped in. The driver stops, task
+// or interactive, rather than retry what only an administrator can change;
+// each recover checks again, and the executor logs the cause once however
+// often it is checked. Once the cause is cleared, a recover ends the start
+// (ADR 0067).
 func TestDriverNamesWhyARefusedStartsEndIsUnproven(t *testing.T) {
 	t.Parallel()
 	for _, interactive := range []bool{false, true} {
@@ -198,11 +202,13 @@ func TestDriverNamesWhyARefusedStartsEndIsUnproven(t *testing.T) {
 			e.p.mu.Lock()
 			e.p.failInspectAfterPrepare, e.p.inspectErr = true, &adminCheck{fixtureAdminCheck}
 			e.p.mu.Unlock()
-			then := map[bool]string{false: "; the executor tries again", true: "; recover this session once that is done"}[interactive]
 			want := "it can never start: " + fixtureRefusal + "; the executor cannot show that nothing runs there: " +
-				fixtureAdminCheck + then
+				fixtureAdminCheck
+			// The driver's step, then two recovers, as the owner's would.
 			for range 3 {
-				e.o.step(t.Context(), e.id)
+				if n := e.o.step(t.Context(), e.id); n != nextDone {
+					t.Fatalf("unproven end only an administrator can clear: %s, want done", nextNames[n])
+				}
 				r, err := e.o.read(e.id)
 				if err != nil {
 					t.Fatal(err)
@@ -217,6 +223,58 @@ func TestDriverNamesWhyARefusedStartsEndIsUnproven(t *testing.T) {
 			if strings.Count(logged, fixtureAdminCheck) != 1 || strings.Contains(logged, "session profile: conflict") {
 				t.Fatalf("log %q: want the cause once, alone", logged)
 			}
+			e.p.mu.Lock()
+			e.p.failInspectAfterPrepare = false
+			e.p.mu.Unlock()
+			if _, err := e.o.Recover(t.Context(), e.id); err != nil {
+				t.Fatal(err)
+			}
+			driveToEnd(t, e)
+			v, err := e.o.Info(t.Context(), e.id)
+			wantPhase := map[bool]Phase{false: phaseCancelled, true: PhaseRetained}[interactive]
+			if err != nil || v.Phase != wantPhase || v.Problem != "it can never start: "+fixtureRefusal {
+				t.Fatalf("refused start once its cause was cleared: %+v %v", v, err)
+			}
+			if n := loggedCauses(e.o); n != 0 {
+				t.Fatalf("%d logged causes kept after the start ended", n)
+			}
 		})
+	}
+}
+
+// loggedCauses counts the unproven causes o remembers having logged.
+func loggedCauses(o *Owner) int {
+	n := 0
+	o.unproven.Range(func(any, any) bool { n++; return true })
+	return n
+}
+
+// Removing a session forgets the causes the executor logged for it.
+func TestRemovingASessionForgetsItsLoggedCauses(t *testing.T) {
+	t.Parallel()
+	e := newDriverEnv(t, true, clockNone)
+	e.create(t)
+	e.refuse()
+	e.p.mu.Lock()
+	e.p.failInspectAfterPrepare, e.p.inspectErr = true, &adminCheck{fixtureAdminCheck}
+	e.p.mu.Unlock()
+	e.o.step(t.Context(), e.id)
+	if n := loggedCauses(e.o); n != 1 {
+		t.Fatalf("%d logged causes, want 1", n)
+	}
+	if _, err := e.o.Cancel(t.Context(), e.id, uuid.NewString()); err != nil {
+		t.Logf("cancel of the unproven start: %v", err)
+	}
+	e.p.mu.Lock()
+	e.p.failInspectAfterPrepare = false
+	e.p.mu.Unlock()
+	if _, err := e.o.Recover(t.Context(), e.id); err != nil {
+		t.Logf("recover of the cancellation: %v", err)
+	}
+	if _, err := e.o.Remove(t.Context(), e.id, false); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if n := loggedCauses(e.o); n != 0 {
+		t.Fatalf("%d logged causes kept after the session was removed", n)
 	}
 }

@@ -163,6 +163,7 @@ func (o *Owner) checkNoDependants(id string) error {
 // shrinks the mark to the ID. Each step is idempotent, so a repeated or
 // reopened removal finishes from wherever it stopped.
 func (o *Owner) finishRemoval(id string, executions []string) error {
+	o.forgetUnproven(id)
 	if len(executions) > 0 {
 		// The only coordinator content a catalogue record names is the
 		// checkpoint of the session its workspaceFrom starts from, which that
