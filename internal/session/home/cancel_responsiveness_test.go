@@ -51,7 +51,7 @@ func TestCancelInterruptsDisconnectedInitialMove(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(hangLimit):
 		t.Fatal("forced cancellation did not interrupt the held first-visit move")
 	}
 	awaitHomeSignal(t, aborted)
@@ -158,7 +158,7 @@ func TestCancelPreventsInitialActivationAfterPreparedReply(t *testing.T) {
 	case <-local.holdPrepare:
 	case err := <-startDone:
 		t.Fatalf("Start returned before the held preparation boundary: %v", err)
-	case <-time.After(2 * time.Second):
+	case <-time.After(hangLimit):
 		t.Fatal("retained initial intent did not reach the preparation boundary")
 	}
 	cancelDone := make(chan error, 1)
@@ -182,11 +182,20 @@ func holdStop(p *placementFixture) (entered, aborted <-chan struct{}) {
 	return p.holdStop, p.abortEntered
 }
 
+// hangLimit is how long these tests wait for a signal or a result before
+// reporting that it never came. Each awaited call returns once the code
+// under test makes progress, or never, because the held fixture call it
+// waits behind returns only when its context ends. So the limit asserts no
+// duration: it is far above what the calls take on a loaded machine, where
+// their journal writes each wait for the disk, and only bounds how long a
+// hang takes to report.
+const hangLimit = 30 * time.Second
+
 func awaitHomeSignal(t *testing.T, signal <-chan struct{}) {
 	t.Helper()
 	select {
 	case <-signal:
-	case <-time.After(2 * time.Second):
+	case <-time.After(hangLimit):
 		t.Fatal("lifecycle test signal did not arrive")
 	}
 }
@@ -198,7 +207,7 @@ func awaitHomeResult(t *testing.T, result <-chan error, failed bool) {
 		if (err != nil) != failed {
 			t.Fatalf("unexpected lifecycle result: %v", err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(hangLimit):
 		t.Fatal("lifecycle operation did not return")
 	}
 }
