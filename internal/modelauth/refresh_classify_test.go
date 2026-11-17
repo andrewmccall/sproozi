@@ -39,7 +39,7 @@ func TestChatGPTRefusesOnlyAnInvalidGrant(t *testing.T) {
 		body    string
 		refused bool
 	}
-	rows := make([]row, 0, 25)
+	rows := make([]row, 0, 32)
 	for _, status := range []int{400, 401, 403, 404, 405, 407, 408, 409, 410, 413, 415, 421, 422, 425, 429, 451} {
 		rows = append(rows, row{name: fmt.Sprintf("%d other error", status), status: status, body: other})
 	}
@@ -54,6 +54,13 @@ func TestChatGPTRefusesOnlyAnInvalidGrant(t *testing.T) {
 			body: `{"error":"invalid_grant","pad":"` + strings.Repeat("x", 5<<10) + `"}`},
 		row{name: "400 token-like error", status: 400, body: `{"error":"invalid_grant fixture-refresh provider-secret"}`},
 		row{name: "400 error not a string", status: 400, body: `{"error":["invalid_grant"]}`},
+		row{name: "400 ERROR in another case", status: 400, body: `{"ERROR":"invalid_grant"}`},
+		row{name: "400 Error in another case", status: 400, body: `{"Error":"invalid_grant"}`},
+		row{name: "400 first error key wins, not a refusal", status: 400, body: `{"error":"invalid_request","error":"invalid_grant"}`},
+		row{name: "400 first error key wins, a refusal", status: 400, body: `{"error":"invalid_grant","error":"invalid_request"}`, refused: true},
+		row{name: "400 data after the object", status: 400, body: invalidGrantBody + `{}`},
+		row{name: "400 truncated object", status: 400, body: `{"error":"invalid_grant",`},
+		row{name: "400 not an object", status: 400, body: `["error","invalid_grant"]`},
 	)
 	for _, tc := range rows {
 		t.Run(tc.name, func(t *testing.T) {

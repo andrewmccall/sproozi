@@ -1,6 +1,7 @@
 package modelauth
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -163,23 +164,57 @@ var refusedGrantErrors = []string{"invalid_grant"}
 const maxErrorBody = 4 << 10
 
 // grantError returns the refusedGrantErrors entry an error reply names, or
-// "". It decodes only the error field of at most maxErrorBody bytes and
+// "". It reads at most maxErrorBody bytes, takes only the error field and
 // returns the list's own string, so nothing from the reply goes further.
 func grantError(resp *http.Response) string {
 	data, err := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody+1))
 	if err != nil || len(data) > maxErrorBody {
 		return ""
 	}
-	var body struct {
-		Error string `json:"error"`
-	}
-	if json.Unmarshal(data, &body) != nil {
+	code, ok := firstErrorCode(data)
+	if !ok {
 		return ""
 	}
-	if i := slices.Index(refusedGrantErrors, body.Error); i >= 0 {
+	if i := slices.Index(refusedGrantErrors, code); i >= 0 {
 		return refusedGrantErrors[i]
 	}
 	return ""
+}
+
+// firstErrorCode returns the string value of the first key spelled exactly
+// "error" in data, which must be one JSON object and nothing else. Unlike
+// json.Unmarshal into a struct, it neither matches the key without regard
+// to case nor lets a later duplicate key replace the first.
+func firstErrorCode(data []byte) (string, bool) {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	if open, err := dec.Token(); err != nil || open != json.Delim('{') {
+		return "", false
+	}
+	var code string
+	found := false
+	for dec.More() {
+		key, err := dec.Token()
+		if err != nil {
+			return "", false
+		}
+		var value json.RawMessage
+		if dec.Decode(&value) != nil {
+			return "", false
+		}
+		if key == errorField && !found {
+			if json.Unmarshal(value, &code) != nil {
+				return "", false
+			}
+			found = true
+		}
+	}
+	if end, err := dec.Token(); err != nil || end != json.Delim('}') {
+		return "", false
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return "", false
+	}
+	return code, found
 }
 
 // classify turns a failed refresh into its outcome. Only a 400 or 401 that
