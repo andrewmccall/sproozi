@@ -193,6 +193,12 @@ new release's CRDs and overlay as in [Install](#install), and reapply
 `kubectl apply` does not delete objects a new release no longer ships. The
 release notes' "Breaking changes" name any you must delete and how.
 
+Sandbox Pods that a controller from before the gateway token's directory
+mount created keep the token they started with, and lose the gateway two hours
+after they started. Upgrading leaves them running; stop and resume a session
+to give it a new Pod. See
+[security hardening](../reference/security-hardening.md#protect-transport-and-identities).
+
 ## Uninstall
 
 Delete the runs in every namespace first, while the controller is still

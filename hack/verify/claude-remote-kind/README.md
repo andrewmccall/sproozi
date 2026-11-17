@@ -32,6 +32,7 @@ and provider logs. Private keys are removed at the end.
 | `SPROOZI_PRESERVE_ON_FAILURE=1` | Keeps a failed run's cluster; its kubeconfig is in the run directory. |
 | `SPROOZI_NO_CACHE=1` | Rebuilds the client layers without the Docker cache. |
 | `SPROOZI_CNI_MANIFEST` | A Calico manifest already fetched with `hack/verify/fetch-calico.sh`. |
+| `SPROOZI_TOKEN_REFRESH=1` | Runs only the `refresh` scenario, on a cluster whose API server caps ServiceAccount tokens at 3607 seconds (`--service-account-max-token-expiration`, its lowest allowed value). `run.sh` checks the cap is in force and raises the example's 30-minute executor and policy duration caps to 90 minutes. It takes about an hour longer. |
 
 Arguments after the script name go to `verify.py`; for example
 `bash hack/verify/claude-remote-kind/run.sh --scenario task` runs one scenario
@@ -51,6 +52,17 @@ Each scenario is its own session in `sproozi-claude-sessions`, started with
 | `resumed` | `/exit` in a resumed visit is `retained` within the same bound, keeping the conversation and checkpoint the visit started from. |
 | `task` | `sproozi run --remote ... --task` completes unattended: `retained` with a Claude checkpoint, the prompt submitted once, and the result Claude's final reply. |
 | `tools` | A turn calls `mcp__sproozi__diagnose` through the gateway's control connection and loads the profile skill `profile:remote-check` with the `Skill` tool, then `stop` retains it. The diagnose result and the skill's body, which alone holds its marker, reach the model. |
+
+The `refresh` scenario runs only when chosen, as `SPROOZI_TOKEN_REFRESH=1`
+does. It proves a session keeps the gateway after the gateway token its
+sandbox Pod started with has expired: the kubelet's refreshed token reaches the
+mounted token directory, and the session's gateway forwarder sends it. It
+starts a session, checks the sandbox's `/var/run/sproozi/tokens/gateway` holds
+only `token`, `..data` and the timestamped directory `..data` names, takes a
+turn, waits by the Pod's clock until a minute after the first token's expiry,
+and takes a second turn that needs the first in its history. Both turns run in
+the same Pod. Only the token's `iat`, `exp` and `jti` claims and the
+directory's entries leave the Pod.
 
 In the default `sign-in` mode every model request must carry the fixture
 sign-in's token, so the runtime's login claim, not a gateway key, signed

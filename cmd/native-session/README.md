@@ -73,9 +73,11 @@ initialized:
 `configure` accepts the same bounded launch JSON on stdin exactly once, with a
 deadline equal to the original bootstrap deadline. An identical retry succeeds;
 a changed contract fails. Kubernetes continues using the read-only mounted
-contract. Local public CA certificates go to `/tmp/sproozi-native/ca.pem`, and
-projected gateway tokens are read at activation from
-`/var/run/sproozi/tokens/gateway/token`. Neither enters the portable state pair.
+contract. Local public CA certificates go to `/tmp/sproozi-native/ca.pem`. With
+a projected gateway binding, the supervisor checks at activation that
+`/var/run/sproozi/tokens/gateway/token` is readable, then its gateway forwarder
+reads that file again for each tunnel, so the kubelet's refreshed token is used
+(`internal/nativeproxy`). Neither enters the portable state pair.
 
 The server creates `/tmp/sproozi-native/control.sock` under a new 0700 directory.
 This path is in the agent's own tmpfs, never a volume shared with the trusted

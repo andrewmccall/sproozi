@@ -134,7 +134,18 @@ the home configuration's `gateway.maxModelCallSeconds` sets. See
 changing them.
 
 The projected token lifetime is two hours, and the kubelet refreshes the file
-before it expires. A managed session's supervisor never puts the token in the
+before it expires. The controller mounts the token volume's directory,
+`/var/run/sproozi/tokens/gateway`, which holds only the token, at
+`/var/run/sproozi/tokens/gateway/token`; Kubernetes never refreshes a file
+mounted through `subPath`. A sandbox Pod created by a controller from before
+this mount, which mounted the token through `subPath`, keeps the token it
+started with and loses the gateway two hours after it started; stop and resume
+such a session to give it a new Pod. Upgrading the controller leaves these
+Pods running. When the upgraded controller compares one with its own build,
+which happens only for a run that has not yet recorded its sandbox's name, it
+accepts the `subPath` form of this one mount, refuses any other difference,
+and logs `Adopted sandbox Pod whose gateway token is never refreshed` once for
+the Pod. A managed session's supervisor never puts the token in the
 harness's environment: it runs a loopback forwarder that reads the current
 token for each gateway connection, so a session outlives any one token
 ([ADR 0056](../adr/0056-whoever-starts-work-sets-its-deadline.md)). The
