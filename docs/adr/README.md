@@ -98,6 +98,10 @@ also replaces ADR 0057's rule that an interactive session whose execution has
 not started by its deadline is cancelled: the session now stops with its work
 kept.
 
+ADR 0065 replaces ADR 0057's rule that an interactive session's unsettled stop
+or cancellation always waits for `recover`: once its project is revoked, the
+driver settles it as it settles a task's.
+
 | Decision | Topic |
 | --- | --- |
 | [0001](0001-mcp-capabilities-through-shared-gateway.md) | MCP access through the shared gateway. |
@@ -153,6 +157,7 @@ kept.
 | [0061](0061-a-stop-survives-an-interrupted-write.md) | A stop survives an interrupted write: capture keeps the rows a fenced writer finished; the login store's lock and a stop's save are bounded and a skipped save is logged; only a whole login, or a sign-out two syncs see while the harness runs, crosses between a login file and its store, nothing after a kill, and the store is rewritten so that a stopped write is never empty. |
 | [0062](0062-one-exit-rule-and-exits-over-the-wire.md) | One rule decides what a stopped visit keeps on Docker and Kubernetes: an exited visit whose stopped state the capture helper refuses, by its own exit code, keeps what it started from, any other capture failure is retried, a helper older than the codes keeps each placement's earlier behaviour, a lost quiesce reply is a graceful stop, a discard is logged, and a stopped Claude Code container is never captured; a first Kubernetes visit may keep no checkpoint after binding a conversation; an `exited` placement action lets home's bounded exit watcher stop a visit on a cluster, and an older executor reports no exits. |
 | [0063](0063-a-session-releases-executions-it-never-recorded.md) | A home session releases the executions it never recorded, which an interrupted `resume` leaves: one that never ran is cancelled and deleted at the session's next `resume` or `rm`, one that ran is kept and reached by `cancel` and `rm` of its own ID, and an unreadable journal is kept and logged. |
+| [0065](0065-a-revoked-project-settles-interactive-sessions.md) | A revoked project settles interactive sessions: the remote executor's driver carries out a held cancellation, or cancels for the revoked project, an interactive session whose stop or cancellation is unsettled, since its owner can no longer recover it. |
 
 ## Reserved numbers
 

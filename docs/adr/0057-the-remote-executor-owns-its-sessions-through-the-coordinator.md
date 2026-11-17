@@ -174,7 +174,8 @@ Failures:
   and the driver retries `Recover` with a capped backoff (one second doubling
   to a minute) while the executor runs. Recovery never makes up a stop or a
   refund, so this is safe, and Hermes is unattended. `recover` retries at once.
-  Interactive sessions wait for `recover`, also after a restart (section 8).
+  Interactive sessions wait for `recover`, also after a restart (section 8),
+  unless their project is revoked ([ADR 0065](0065-a-revoked-project-settles-interactive-sessions.md)).
 - **A failed preparation or activation** records the outcome as the problem
   and waits for `recover`, as before.
 - **A revoked project** is cancelled through the coordinator with a
@@ -287,12 +288,9 @@ Added after this record was accepted; it follows its direction.
   driver, and an unsettled stop or cancellation waits for `recover`, which
   retries it once. The task's backoff applies to tasks only.
 
-  Corrected 2026-11-17: except once the session's project is revoked. Its
-  owner can then take no action on it, `recover` included, so an unsettled
-  stop or cancellation would never settle and a writer could keep running.
-  The driver settles it as section 2 settles a task's: it carries out a
-  cancellation the coordinator holds, or otherwise cancels the session for
-  the revoked project, both with the task's backoff.
+  Partly superseded by [ADR 0065](0065-a-revoked-project-settles-interactive-sessions.md):
+  once the session's project is revoked, the driver settles its unsettled
+  stop or cancellation as section 2 settles a task's.
 - **Owner actions bind operations.** The record gains `operations`, a map
   from operation UUID to its action (`stop` or `resume`) and execution, as
   home's catalogue has; `read` checks that each names one of the session's
