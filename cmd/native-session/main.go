@@ -842,7 +842,7 @@ func (s *server) handle(conn net.Conn) {
 	case harness.NativeStatus:
 		_ = encoder.Encode(s.status())
 	case harness.NativeQuiesce:
-		_ = conn.SetDeadline(s.deadline)
+		_ = conn.SetDeadline(s.until().Time())
 		r := s.quiesce()
 		_ = encoder.Encode(r)
 		if r.State == harness.NativeStopped {
@@ -855,7 +855,7 @@ func (s *server) handle(conn net.Conn) {
 			s.conclude()
 		}
 	case harness.NativeAttach:
-		_ = conn.SetDeadline(s.deadline)
+		_ = conn.SetDeadline(s.until().Time())
 		s.attach(conn, scanner, encoder, q.Cursor)
 	default:
 		_ = encoder.Encode(response{Error: "unknown fixed native operation"})
