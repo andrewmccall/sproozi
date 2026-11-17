@@ -22,13 +22,7 @@ kubectl get secret -n sproozi-system sproozi-certificate-authority \
 `sproozi.com/rotation-stage` report the current state. Start a rotation before
 `rotate-at`. If the authority Secret loses its data, the controller stops with
 an error instead of creating a new authority; restore the Secret from a backup.
-It also stops when the Secret's `state.json` describes no
-[rotation phase](../../GLOSSARY.md#rotation-phase), or a trusted authority's
-`ca-N.pem` or `ca-N.key` is not the one `state.json` records. The controller
-log names what is wrong, nothing is published, and the annotations keep their
-last values. Restore the Secret from a backup. A `replace` request still
-works when only the authority files are wrong, but not when `state.json`
-itself is refused. `sproozi.com/last-error` explains a refused request. If renewal
+`sproozi.com/last-error` explains a refused request. If renewal
 fails, the previous certificate stays in service and the controller log names
 the cause. Renew immediately with:
 
@@ -76,9 +70,44 @@ creates a new one; existing Pods keep the bundle they started with.
    Point the runtimes at the new bundle, and delete the old ConfigMaps once no
    runtime or Pod uses them.
 
-Use `replace` only for a lost or compromised authority. It trusts only a new
-authority at once, so every running Pod loses trust in the gateway. Cancel
-running work first, and point runtimes at the new bundle afterwards.
+Use `replace` only for a lost or compromised authority, or a refused
+certificate record. It trusts only a new authority at once, so every running
+Pod loses trust in the gateway. Cancel running work first, and point runtimes
+at the new bundle afterwards.
+
+### A refused certificate record
+
+The controller refuses an authority Secret whose `state.json` describes no
+[rotation phase](../../GLOSSARY.md#rotation-phase), or whose trusted
+`ca-N.pem` or `ca-N.key` is not the one `state.json` records. Every reconcile
+then fails, and the controller logs, every five minutes:
+
+```text
+Failed to reconcile gateway certificates err="pki: corrupt state: <what is wrong>"
+```
+
+or `err="pki: certificate authority files do not match state: <what is
+wrong>"`. That reconcile writes nothing: the authority Secret, the serving
+Secret and the trust ConfigMaps are unchanged, the annotations keep their last
+values, and any request annotation other than `replace` stays in place,
+refused. The gateway keeps serving its current certificate, across restarts,
+but nothing renews it, so it stops working when that certificate expires, at
+most 30 days after it was issued. Trust ConfigMaps for new Pods are unchanged.
+
+Restore the authority Secret from a backup, or replace the authority:
+
+```sh
+kubectl annotate secret -n sproozi-system sproozi-certificate-authority \
+  sproozi.com/rotation-request=replace --overwrite
+```
+
+Replace numbers the new authority after every generation in the record or the
+Secret, retires all of them, destroys every earlier authority key and serving
+key, and keeps earlier certificates as history. It publishes a new trust
+ConfigMap, `sproozi-sandbox-trust-N`, and its cost is the one above: every
+running Pod loses the gateway until it is restarted with the new bundle. Replace
+refuses only a `state.json` it cannot parse, or one written by a different
+record version; restore those from a backup.
 
 ## Your own certificates
 

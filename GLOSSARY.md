@@ -710,7 +710,8 @@ Where the gateway certificate store's rotation is: `single` (one trust
 generation, which serves), `prepared` (the old and new generations trusted,
 the old one serving) or `switched` (both trusted, the new one serving). It is
 derived from which generations are trusted and which serves, and a store whose
-record no phase describes is refused rather than repaired. The certificate
+record no phase describes is refused rather than repaired; only an explicit
+replace moves it on, to a new authority. The certificate
 controller's `sproozi.com/rotation-stage` annotation reports it as `none`,
 `prepared N to M` or `switched N to M`. Also seen as: rotation stage.
 

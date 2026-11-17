@@ -437,8 +437,13 @@ assigned the serving generation, trust and stage inline.
   recorded fingerprint and expiry, and its key, when present, to match it. A
   missing key is the lost-key state ADR 0029 describes, and still loads.
   `Initialize` and `ReplaceCA` read the record without the files, so replace
-  still recovers an authority whose files were lost or changed; it does not
-  run on a record that is itself refused.
+  still recovers an authority whose files were lost or changed. An explicit
+  replace is also the way out of a record no phase describes, as it was
+  before: it rebuilds the history as generations 1 to N, all retired, N the
+  highest the record lists or a `ca-N` file belongs to, and moves from the
+  `refused` pseudo-phase to `single` on generation N+1. Every other event
+  refuses such a record and writes nothing. Replace refuses only a record it
+  cannot parse, or one of another version.
 - **Rules 3 and 4.** The table, in `internal/pki/transitions.go`, is below.
   Each mutator admits its event before its side effect (creating a
   generation's files) and one `apply` is the only place the record's
@@ -454,23 +459,30 @@ assigned the serving generation, trust and stage inline.
 | `switch` | `prepared` → `switched` |
 | `rollback` | `switched` → `prepared` |
 | `retire` | `switched` → `single` |
-| `replace` | `single`, `prepared`, `switched` → `single` |
+| `replace` | `single`, `prepared`, `switched`, refused → `single` |
 
-One idempotent pass destroys the key of every retired generation and every
-leaf file the record does not name. `Ensure` runs it, so the certificate
+One idempotent pass destroys the key of every retired generation, both files
+of a generation numbered after the record's last (an interrupted prepare's),
+and every leaf file the record does not name. It removes only names the store
+writes: `ca-<N>.pem`, `ca-<N>.key` and `leaf-<16 hex>` files. `Ensure` runs it, so the certificate
 controller runs it on every reconcile and the local service at start and every
 minute; `retire`, `replace` and every leaf issuance run it after their commit.
 Before, a crash or failed removal between committing a retirement and removing
 the key left the key for good, and the controller committed it to the
-authority Secret. The pass never removes a trusted generation's key, the named
-leaf, or files of a generation the record does not name.
+authority Secret. The pass never removes a trusted generation's key or the
+named leaf. It runs under the store's lock, which every operation that writes
+a generation or leaf holds until its commit.
 
 `testdata/store-outcomes.txt` and `testdata/reconcile-outcomes.txt`, recorded
 from the code before this change, hold the outcome of every operation and
 rotation request from every written state, every state an interruption leaves
-and 45 corrupted records. The only differences are the four changes above:
-undescribed records and mismatched files are refused, and retired CA keys and
-unnamed leaf files are destroyed. Records the code wrote before still load.
+and 45 corrupted records. The only differences are the changes above:
+undescribed records and mismatched files are refused by everything but
+replace; retired CA keys, uncommitted generations and unnamed leaf files are
+destroyed; and replace of seven corrupted records changed, each a fix (three
+it refused, two where it overwrote an existing CA's files, one where it left
+a key, and one where it removed files outside the store). Records the code
+wrote before still load.
 
 ## Alternatives
 

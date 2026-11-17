@@ -195,17 +195,30 @@ never adds its authority to the host's trust store, and the authority never
 verifies upstream providers.
 
 A missing or unreadable authority key, or a lost `pki/state.json`, stops
-renewal and new launches; it never creates a replacement automatically. So
-does a `pki/state.json` that no [rotation phase](../../GLOSSARY.md#rotation-phase)
-describes, or a trusted authority certificate or key that is not the one it
-records; the error names what is wrong. Restore `pki` from a backup. After a
+renewal and new launches; it never creates a replacement automatically. After a
 switch, the service checks its own listeners against the new trust before it
 retires the previous authority. `certificates replace-ca` creates a new
-authority, trusts only it and destroys every older key. It works when only the
-authority files are wrong, but not when `state.json` itself is refused. A
-retired authority's key, or a superseded serving certificate's key, that an
-interrupted command left behind is destroyed at the service's next start or
-check.
+authority, trusts only it and destroys every older key. It refuses while a
+session is active or a container still runs on the installation's network,
+because those would lose trust in the gateway. A retired authority's key, a
+superseded serving certificate's key, or the files of an authority an
+interrupted command created but never recorded, are destroyed at the
+service's next start or check.
+
+A `pki/state.json` that no [rotation phase](../../GLOSSARY.md#rotation-phase)
+describes, or a trusted authority certificate or key that is not the one it
+records, is refused with an error that names what is wrong and begins
+`pki: corrupt state:` or `pki: certificate authority files do not match
+state:`. `sproozi certificates status` and `sproozi doctor` print it; the
+service will not start, and a running service logs `Failed to maintain
+gateway certificate` with it every minute, keeps serving its current
+certificate until it expires without renewing it, and refuses new launches.
+Every certificate command but `replace-ca` refuses the store and changes
+nothing. Restore `pki` from a backup, or run `sproozi certificates
+replace-ca`: it numbers the new authority after every generation in the record
+or the directory, retires all of them, destroys every earlier authority and
+serving key and keeps earlier certificates as history. It refuses only a
+`state.json` it cannot parse, or one written by a different record version.
 
 ## Supported platforms
 
