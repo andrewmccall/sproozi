@@ -198,8 +198,10 @@ type ChatGPT struct {
 	store  SessionStore
 	client *http.Client
 	// current is the last session read from or written to the store, with the
-	// time it was read. Requests use it without the lock while it is younger
-	// than reloadInterval and its access token is outside the refresh window.
+	// time it was read and the refresh record as the read left it. Requests
+	// use it without the lock while it is younger than reloadInterval, and
+	// its access token is outside the refresh window or a remembered failure
+	// answers for it.
 	current        atomic.Pointer[loadedSession]
 	reloadInterval time.Duration
 	// mu guards inflight, the one reload or refresh running for this
@@ -233,6 +235,7 @@ type attempt struct {
 type loadedSession struct {
 	session  Session
 	loadedAt time.Time
+	refresh  refreshRecord
 }
 
 // NewChatGPT returns the authenticator for a stored sign-in. It never follows
@@ -250,26 +253,40 @@ func (a *ChatGPT) Authorize(r *http.Request) error {
 	// The administrator's OAuth session selects the account, not a workload.
 	r.Header.Del("Authorization")
 	removeOpenAIAccountHeaders(r.Header)
-	s, ok := a.usable()
+	s, ok, err := a.usable()
 	if !ok {
-		var err error
-		if s, err = a.reloadOrRefresh(r.Context()); err != nil {
-			return err
-		}
+		s, err = a.reloadOrRefresh(r.Context())
+	}
+	if err != nil {
+		return err
 	}
 	r.Header.Set("Authorization", "Bearer "+s.AccessToken)
 	return nil
 }
 
-// usable returns the in-memory session when no Secret read or refresh is due.
-func (a *ChatGPT) usable() (Session, bool) {
+// usable answers from memory when no Secret read or refresh is due: with the
+// session, or with a remembered failure while it holds the refresh back.
+func (a *ChatGPT) usable() (Session, bool, error) {
 	current := a.current.Load()
 	now := a.now()
-	if current == nil || now.Sub(current.loadedAt) >= a.reloadInterval ||
-		current.session.expiry().Sub(now) <= refreshWindow {
-		return Session{}, false
+	if current == nil || now.Sub(current.loadedAt) >= a.reloadInterval {
+		return Session{}, false, nil
 	}
-	return current.session, true
+	return current.answer(now)
+}
+
+// answer is what a request sees for a session read at loadedAt: the session
+// while its access token is outside the refresh window, the remembered
+// failure while it holds a due refresh back, and nothing (a refresh is due
+// and may be sent) otherwise.
+func (l *loadedSession) answer(now time.Time) (Session, bool, error) {
+	if l.session.expiry().Sub(now) > refreshWindow {
+		return l.session, true, nil
+	}
+	if held := l.refresh.admit(now); held != nil {
+		return Session{}, true, held
+	}
+	return Session{}, false, nil
 }
 
 // reloadOrRefresh joins the reload or refresh in flight, or starts one, and
@@ -279,9 +296,9 @@ func (a *ChatGPT) usable() (Session, bool) {
 func (a *ChatGPT) reloadOrRefresh(ctx context.Context) (Session, error) {
 	a.mu.Lock()
 	// Another request may have reloaded or refreshed while this one waited.
-	if s, ok := a.usable(); ok {
+	if s, ok, err := a.usable(); ok {
 		a.mu.Unlock()
-		return s, nil
+		return s, err
 	}
 	at := a.inflight
 	if at == nil {
@@ -345,6 +362,7 @@ func (a *ChatGPT) reload() (Session, error) {
 	}
 	if s.expiry().Sub(now) <= refreshWindow {
 		if held := a.refresh.admit(now); held != nil {
+			a.publish(s, loadedAt)
 			return Session{}, held
 		}
 		ctx, cancel := step()
@@ -354,7 +372,7 @@ func (a *ChatGPT) reload() (Session, error) {
 		})
 		cancel()
 		if refreshErr != nil {
-			return Session{}, a.failed(s, classify(refreshErr))
+			return Session{}, a.failed(s, loadedAt, classify(refreshErr))
 		}
 		renewed := s
 		renewed.AccessToken, renewed.RefreshToken = next.AccessToken, next.RefreshToken
@@ -366,7 +384,7 @@ func (a *ChatGPT) reload() (Session, error) {
 			renewed.Scopes = strings.Fields(next.Scope)
 		}
 		if err = renewed.Validate(); err != nil {
-			return Session{}, a.failed(s, classify(err))
+			return Session{}, a.failed(s, loadedAt, classify(err))
 		}
 		if err = a.refresh.apply(eventRefreshed, s, nil, a.now()); err != nil {
 			return Session{}, err
@@ -381,13 +399,19 @@ func (a *ChatGPT) reload() (Session, error) {
 		a.pending = nil
 		s = renewed
 	}
-	a.current.Store(&loadedSession{session: s, loadedAt: loadedAt})
+	a.publish(s, loadedAt)
 	return s, nil
 }
 
-// failed remembers a refresh of s that failed and returns what the request
-// that sent it sees.
-func (a *ChatGPT) failed(s Session, failure *RefreshError) error {
+// publish makes s, read at loadedAt, and the refresh record what requests
+// answer from until the next read.
+func (a *ChatGPT) publish(s Session, loadedAt time.Time) {
+	a.current.Store(&loadedSession{session: s, loadedAt: loadedAt, refresh: a.refresh})
+}
+
+// failed remembers a refresh of s, read at loadedAt, that failed and returns
+// what the requests waiting for it see.
+func (a *ChatGPT) failed(s Session, loadedAt time.Time, failure *RefreshError) error {
 	event := eventFailed
 	if failure.Refused {
 		event = eventRefused
@@ -395,6 +419,7 @@ func (a *ChatGPT) failed(s Session, failure *RefreshError) error {
 	if err := a.refresh.apply(event, s, failure, a.now()); err != nil {
 		return err
 	}
+	a.publish(s, loadedAt)
 	return failure
 }
 

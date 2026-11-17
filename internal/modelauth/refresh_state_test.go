@@ -13,10 +13,12 @@ const (
 	renewedBody    = `{"access_token":"new-access","refresh_token":"` + renewedRefresh + `","token_type":"Bearer","expires_in":3600}`
 )
 
-// TestChatGPTNewSignInEndsAHoldOrRefusalAtOnce: an administrator's new
-// sign-in reaches the next model request that reads the store, within the
-// hold or after a refusal. Guards: the signed-in event in reloadOrRefresh.
-func TestChatGPTNewSignInEndsAHoldOrRefusalAtOnce(t *testing.T) {
+// TestChatGPTNewSignInEndsAHoldOrRefusalWithinTheReloadInterval: an
+// administrator's new sign-in reaches model requests once the stored
+// credential is read again, at most SessionReloadInterval after the last
+// read, within the hold or after a refusal. Guards: the signed-in event and
+// the reload interval while a failure is remembered.
+func TestChatGPTNewSignInEndsAHoldOrRefusalWithinTheReloadInterval(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		status int
@@ -37,13 +39,18 @@ func TestChatGPTNewSignInEndsAHoldOrRefusalAtOnce(t *testing.T) {
 			store := expiredStore()
 			auth := NewChatGPT(store, server.Client())
 			auth.tokenEndpoint = server.URL
-			withClock(auth)
+			clock := withClock(auth)
 			if _, err := authorizeOnce(auth); err == nil || auth.refresh.current() != tc.want {
 				t.Fatalf("state = %q, err = %v", auth.refresh.current(), err)
 			}
-			// A fresh new sign-in is used, with no refresh.
+			// A fresh new sign-in is used once the store is read again.
 			store.session = fixtureSession()
 			store.session.AccessToken, store.session.RefreshToken = "signed-in-access", "signed-in-refresh"
+			clock.Advance(SessionReloadInterval - time.Nanosecond)
+			if header, err := authorizeOnce(auth); err == nil || header != "" {
+				t.Fatalf("within the reload interval = %q, %v", header, err)
+			}
+			clock.Advance(time.Nanosecond)
 			if header, err := authorizeOnce(auth); err != nil || header != "Bearer signed-in-access" {
 				t.Fatalf("after a new sign-in = %q, %v", header, err)
 			}
@@ -55,13 +62,17 @@ func TestChatGPTNewSignInEndsAHoldOrRefusalAtOnce(t *testing.T) {
 }
 
 // TestChatGPTDueNewSignInIsRefreshedWithinAHold: a failure of one sign-in
-// does not hold the refresh of the next. Guards: signed-in before admit.
+// does not hold the refresh of the next. The failing refresh takes 2 s, so
+// the store is read again 2 s before the hold ends. Guards: signed-in
+// before admit.
 func TestChatGPTDueNewSignInIsRefreshedWithinAHold(t *testing.T) {
 	var calls atomic.Int32
+	var clock *fakeClock
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		_ = r.ParseForm()
 		if r.Form.Get(refreshTokenField) == fixtureRefresh {
+			clock.Advance(2 * time.Second)
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}
@@ -71,16 +82,56 @@ func TestChatGPTDueNewSignInIsRefreshedWithinAHold(t *testing.T) {
 	store := expiredStore()
 	auth := NewChatGPT(store, server.Client())
 	auth.tokenEndpoint = server.URL
-	withClock(auth)
+	clock = withClock(auth)
 	if _, err := authorizeOnce(auth); err == nil || auth.refresh.current() != refreshHeld {
 		t.Fatalf("state = %q, err = %v", auth.refresh.current(), err)
 	}
 	store.session.RefreshToken = "second-sign-in"
+	clock.Advance(SessionReloadInterval - 2*time.Second) // the hold has 2 s left
 	if header, err := authorizeOnce(auth); err != nil || header != renewedBearer {
 		t.Fatalf("a due new sign-in = %q, %v", header, err)
 	}
 	if calls.Load() != 2 || store.session.RefreshToken != renewedRefresh {
 		t.Fatalf("refresh requests = %d, stored %q", calls.Load(), store.session.RefreshToken)
+	}
+}
+
+// TestChatGPTReadsTheStoreOncePerReloadIntervalWhileAFailureIsRemembered:
+// a remembered failure is served from memory, as a healthy session is, so
+// a hold or a refusal costs one store read per SessionReloadInterval, not
+// one per model request. Guards: usable's use of the remembered failure.
+func TestChatGPTReadsTheStoreOncePerReloadIntervalWhileAFailureIsRemembered(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{name: "held", status: http.StatusServiceUnavailable},
+		{name: "refused", status: http.StatusBadRequest, body: `{"error":"invalid_grant"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(failingEndpoint(tc.status, tc.body))
+			defer server.Close()
+			store := expiredStore()
+			auth := NewChatGPT(store, server.Client())
+			auth.tokenEndpoint = server.URL
+			clock := withClock(auth)
+			for range 100 {
+				if _, err := authorizeOnce(auth); err == nil {
+					t.Fatal("authorized")
+				}
+			}
+			if loads := store.loads.Load(); loads != 1 {
+				t.Fatalf("store reads for 100 requests = %d, want 1", loads)
+			}
+			clock.Advance(SessionReloadInterval)
+			for range 100 {
+				_, _ = authorizeOnce(auth)
+			}
+			if loads := store.loads.Load(); loads != 2 {
+				t.Fatalf("store reads after one reload interval = %d, want 2", loads)
+			}
+		})
 	}
 }
 
