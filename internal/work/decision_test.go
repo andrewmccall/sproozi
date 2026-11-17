@@ -299,12 +299,19 @@ func TestUndecidedSituationIsReportedAndRetried(t *testing.T) {
 // lifecycle record: its decision table is enumerated here, and the deadline
 // is enforced by the execution journal's admit, which refuses create, so the
 // driver's start, once the deadline has passed. Terminal means a cancelled
-// execution, or an idle interactive one, which its owner resumes with a new
-// deadline. An exit is an action other than nothing that the deadline does
+// execution, or an idle interactive one, which is stopped: its owner resumes
+// it with a new deadline, unless its project was revoked, when nothing acts
+// on it again. An exit is an action other than nothing that the deadline does
 // not refuse; an interactive session whose project admits this installation
 // may instead wait for its owner's stop, cancel or "recover", which the
 // deadline never refuses. Every possible situation, past the deadline or
 // with none, has one.
+//
+// This checks the table, not that the action it names finishes: a preparing
+// task with no deadline is decided recover-start, and today Recover can wait
+// in the Kubernetes placement's waitPod for a Pod its failed run never gets.
+// The placement's test of that wait, scheduled separately as
+// TestPrepareOfTaskWithoutDeadlineEndsWhenItsRunFailedBeforePod, covers it.
 func TestEveryDriverPhaseHasAnExitAfterTheDeadline(t *testing.T) {
 	refusedAfterDeadline := []action{actStart}
 	for _, s := range allSituations() {
