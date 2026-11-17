@@ -73,7 +73,7 @@ func consistent(t *testing.T, client *fake.Clientset) string {
 		!bytes.Equal(s.Data[corev1.TLSPrivateKeyKey], a.Data[st.Leaf+".key"]) {
 		problems = append(problems, "serving Secret does not hold the record's leaf")
 	}
-	var bundle []byte
+	bundle := make([]byte, 0, 4096)
 	for _, id := range st.Trusted {
 		bundle = append(bundle, a.Data[fmt.Sprintf("ca-%d.pem", id)]...)
 	}

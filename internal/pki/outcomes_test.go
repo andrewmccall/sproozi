@@ -33,6 +33,7 @@ const (
 	evNameSwitch              = "switch"
 	evNameReplace             = "replace"
 	keyCA2                    = "ca-2.key"
+	keyCA1                    = "ca-1.key"
 	msgFingerprint1           = "generation 1 certificate ca-1.pem does not have the recorded fingerprint"
 	corruptVersion2           = "version-2"
 )

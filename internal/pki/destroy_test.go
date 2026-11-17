@@ -114,12 +114,12 @@ func TestEnsureDestroysAnUncommittedGeneration(t *testing.T) {
 		t.Fatal(err)
 	}
 	files := storeFiles(t, s.Dir())
-	for _, name := range []string{"ca-2.key", "ca-2.pem"} {
+	for _, name := range []string{keyCA2, "ca-2.pem"} {
 		if _, kept := files[name]; kept {
 			t.Errorf("%s survived Ensure", name)
 		}
 	}
-	for _, name := range append([]string{"ca-1.key", "ca-1.pem"}, foreignFiles...) {
+	for _, name := range append([]string{keyCA1, "ca-1.pem"}, foreignFiles...) {
 		if _, kept := files[name]; !kept {
 			t.Errorf("%s was removed", name)
 		}
@@ -133,7 +133,7 @@ func TestAFailedRetiredKeyRemovalIsRetried(t *testing.T) {
 	roots := buildStates(t)
 	s := outcomeStore(t, copyStore(t, filepath.Join(roots[stSwitched], "pki")))
 	s.beforeWrite = func(op, name string) error {
-		if op == "remove" && name == "ca-1.key" {
+		if op == "remove" && name == keyCA1 {
 			return errStopped
 		}
 		return nil
