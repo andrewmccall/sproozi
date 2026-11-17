@@ -329,13 +329,17 @@ type journalState struct {
 	build        func(*testing.T, *driverEnv)
 }
 
+// stateNotReceived names the state before the coordinator receives the
+// execution.
+const stateNotReceived = "none"
+
 func journalStates() []journalState {
 	finalize := func(t *testing.T, e *driverEnv) {
 		t.Helper()
 		_, _ = e.o.config.Coordinator.Finalize(t.Context(), e.id, e.stopOp)
 	}
 	return []journalState{
-		{name: "none", build: func(*testing.T, *driverEnv) {}},
+		{name: stateNotReceived, build: func(*testing.T, *driverEnv) {}},
 		{name: "preparing", build: func(t *testing.T, e *driverEnv) { e.create(t) }},
 		{name: "activating", build: func(t *testing.T, e *driverEnv) {
 			e.create(t)

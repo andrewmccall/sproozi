@@ -3,6 +3,8 @@ package work
 import (
 	"testing"
 	"time"
+
+	"github.com/andrewmccall/sproozi/internal/session"
 )
 
 // The driver decides a deadline on the coordinator's clock, the one the
@@ -12,7 +14,7 @@ import (
 // than recovered.
 func TestDriverDecidesTheDeadlineOnTheCoordinatorsClock(t *testing.T) {
 	t.Parallel()
-	for _, name := range []string{"none", "preparing"} {
+	for _, name := range []string{stateNotReceived, string(session.PhasePreparing)} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			e := newDriverEnv(t, false, clockEarly)

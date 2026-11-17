@@ -115,41 +115,55 @@ func TestDecisionTableRules(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		ownerActs := []action{actNothing, actStart, actRecoverStart, actEndExpired, actEndRevoked}
-		if s.interactive && !s.revoked && !slices.Contains(ownerActs, act) ||
-			s.interactive && (act == actComplete || act == actFinish) {
-			t.Errorf("%+v: the driver takes %s for an interactive session", s, act)
+		checkProgressRules(t, s, act)
+		checkRequestRules(t, s, act)
+	}
+}
+
+// checkProgressRules checks who acts on s: the driver for a task, its owner
+// for an interactive session whose project admits this installation.
+func checkProgressRules(t *testing.T, s situation, act action) {
+	t.Helper()
+	ownerActs := []action{actNothing, actStart, actRecoverStart, actEndExpired, actEndRevoked}
+	if s.interactive && !s.revoked && !slices.Contains(ownerActs, act) ||
+		s.interactive && (act == actComplete || act == actFinish) {
+		t.Errorf("%+v: the driver takes %s for an interactive session", s, act)
+	}
+	if act == actNothing && s.phase != session.PhaseCancelled && !s.interactive {
+		t.Errorf("%+v: a task makes no progress", s)
+	}
+	if s.phase == session.PhaseCancelled && act != actNothing {
+		t.Errorf("%+v: a cancelled execution is driven: %s", s, act)
+	}
+	// carryOut reads the coordinator's record for every other action.
+	if s.phase == phaseNotReceived && !slices.Contains([]action{actStart, actEndExpired, actEndRevoked}, act) {
+		t.Errorf("%+v: %s needs an execution the coordinator has not received", s, act)
+	}
+}
+
+// checkRequestRules checks how a held cancellation, a revoked project and a
+// late start decide s.
+func checkRequestRules(t *testing.T, s situation, act action) {
+	t.Helper()
+	if s.cancel && (act == actEndRevoked || act == actEndExpired) {
+		t.Errorf("%+v: a held cancellation is replaced: %s", s, act)
+	}
+	if s.cancel && !s.interactive {
+		other := s
+		other.revoked = !s.revoked
+		if again, _ := decide(other); again != act {
+			t.Errorf("%+v: the project changes a task's held cancellation: %s, %s", s, act, again)
 		}
-		if act == actNothing && s.phase != session.PhaseCancelled && !s.interactive {
-			t.Errorf("%+v: a task makes no progress", s)
+	}
+	if s.phase != phaseNotReceived && !s.phase.Starting() && s.phase != session.PhaseIdle {
+		other := s
+		other.lateStart = !s.lateStart
+		if again, _ := decide(other); again != act {
+			t.Errorf("%+v: the deadline decides after the start: %s, %s", s, act, again)
 		}
-		if s.phase == session.PhaseCancelled && act != actNothing {
-			t.Errorf("%+v: a cancelled execution is driven: %s", s, act)
-		}
-		if s.cancel && (act == actEndRevoked || act == actEndExpired) {
-			t.Errorf("%+v: a held cancellation is replaced: %s", s, act)
-		}
-		if s.cancel && !s.interactive {
-			other := s
-			other.revoked = !s.revoked
-			if again, _ := decide(other); again != act {
-				t.Errorf("%+v: the project changes a task's held cancellation: %s, %s", s, act, again)
-			}
-		}
-		if s.phase != phaseNotReceived && !s.phase.Starting() && s.phase != session.PhaseIdle {
-			other := s
-			other.lateStart = !s.lateStart
-			if again, _ := decide(other); again != act {
-				t.Errorf("%+v: the deadline decides after the start: %s, %s", s, act, again)
-			}
-		}
-		// carryOut reads the coordinator's record for every other action.
-		if s.phase == phaseNotReceived && !slices.Contains([]action{actStart, actEndExpired, actEndRevoked}, act) {
-			t.Errorf("%+v: %s needs an execution the coordinator has not received", s, act)
-		}
-		if act == actEndExpired && !s.lateStart || act == actEndRevoked && !s.revoked {
-			t.Errorf("%+v: ends without its reason: %s", s, act)
-		}
+	}
+	if act == actEndExpired && !s.lateStart || act == actEndRevoked && !s.revoked {
+		t.Errorf("%+v: ends without its reason: %s", s, act)
 	}
 }
 

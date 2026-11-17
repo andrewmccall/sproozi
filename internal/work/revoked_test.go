@@ -47,10 +47,10 @@ func TestRevokedUnsettledSessionIsSettled(t *testing.T) {
 		state string
 		held  bool
 	}{
-		{"stopping", false},
-		{"unknown-stop", false},
-		{"unknown-usage", false},
-		{"cancelling", true},
+		{string(session.PhaseStopping), false},
+		{string(session.PhaseUnknownStop), false},
+		{string(session.PhaseUnknownUsage), false},
+		{string(session.PhaseCancelling), true},
 		{"cancel-unknown-stop", true},
 		{"cancel-unknown-usage", true},
 	} {
