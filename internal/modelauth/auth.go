@@ -186,6 +186,13 @@ const refreshWindow = time.Minute
 // matches the refresh client's timeout (NewRefreshClient).
 const refreshTimeout = 30 * time.Second
 
+// expiryMargin is how long before its computed expiry a held refresh stops
+// serving the stored access token. SavedAt is stamped when the refresh reply
+// arrives, which the refresh client's timeout puts at most refreshTimeout
+// after the provider issued the token, so the computed expiry can be up to
+// that much later than the provider's.
+const expiryMargin = refreshTimeout
+
 // step returns the context for one step of a reload or refresh. It derives
 // from no model request: the provider spends the refresh token when it
 // answers, so neither the refresh nor the save of what it returned may end
@@ -291,11 +298,11 @@ func (l *loadedSession) answer(now time.Time) (Session, bool, error) {
 }
 
 // served is what a request sees while failure holds the refresh of s back:
-// s itself while the failure is transient and its access token has not yet
-// expired, and the failure otherwise. A refusal is never served: the grant
-// is dead.
+// s itself while the failure is transient and its access token is more than
+// expiryMargin from its computed expiry, and the failure otherwise. A refusal
+// is never served: the grant is dead.
 func served(s Session, failure *RefreshError, now time.Time) (Session, error) {
-	if !failure.Refused && now.Before(s.expiry()) {
+	if !failure.Refused && now.Before(s.expiry().Add(-expiryMargin)) {
 		return s, nil
 	}
 	return Session{}, failure

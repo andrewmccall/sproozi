@@ -38,8 +38,8 @@ func TestChatGPTUsesAStillValidTokenWhileARefreshIsHeld(t *testing.T) {
 			auth := NewChatGPT(store, server.Client())
 			auth.tokenEndpoint = server.URL
 			clock := withClock(auth)
-			// 30 s before expiry: inside the refresh window.
-			store.session.SavedAt = clock.Now().Add(-time.Duration(store.session.ExpiresIn)*time.Second + 30*time.Second)
+			// 45 s before expiry: inside the refresh window, outside the margin.
+			store.session.SavedAt = clock.Now().Add(-time.Duration(store.session.ExpiresIn)*time.Second + 45*time.Second)
 			for i := range 4 {
 				header, err := authorizeOnce(auth)
 				if tc.refused {
@@ -68,21 +68,28 @@ func TestChatGPTUsesAStillValidTokenWhileARefreshIsHeld(t *testing.T) {
 	}
 }
 
-// TestChatGPTHeldRefreshFailsOnceTheTokenHasExpired: a hold that outlasts
-// the access token fails requests until the refresh is sent again.
-func TestChatGPTHeldRefreshFailsOnceTheTokenHasExpired(t *testing.T) {
+// TestChatGPTStopsServingAHeldTokenAtTheExpiryMargin: a held refresh serves
+// the stored access token until expiryMargin before its computed expiry, and
+// fails requests from then on, so a token the provider may already consider
+// expired is not sent. Guards: served.
+func TestChatGPTStopsServingAHeldTokenAtTheExpiryMargin(t *testing.T) {
 	server := httptest.NewServer(failingEndpoint(http.StatusBadGateway, ""))
 	defer server.Close()
 	store := &memoryStore{session: fixtureSession()}
 	auth := NewChatGPT(store, server.Client())
 	auth.tokenEndpoint = server.URL
 	clock := withClock(auth)
-	store.session.SavedAt = clock.Now().Add(-time.Duration(store.session.ExpiresIn)*time.Second + 2*time.Second)
+	// The computed expiry is 31 s away: 1 s outside a 30 s margin.
+	store.session.SavedAt = clock.Now().Add(-time.Duration(store.session.ExpiresIn)*time.Second + 31*time.Second)
 	if header, err := authorizeOnce(auth); err != nil || header != "Bearer "+fixtureAccess {
-		t.Fatalf("2 s before expiry = %q, %v", header, err)
+		t.Fatalf("1 s outside the margin = %q, %v", header, err)
 	}
-	clock.Advance(2 * time.Second)
+	clock.Advance(time.Second - time.Nanosecond)
+	if header, err := authorizeOnce(auth); err != nil || header != "Bearer "+fixtureAccess {
+		t.Fatalf("1 ns outside the margin = %q, %v", header, err)
+	}
+	clock.Advance(time.Nanosecond)
 	if header, err := authorizeOnce(auth); err == nil || header != "" {
-		t.Fatalf("at expiry within the hold = %q, %v", header, err)
+		t.Fatalf("at the margin within the hold = %q, %v", header, err)
 	}
 }
