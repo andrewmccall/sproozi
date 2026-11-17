@@ -108,10 +108,20 @@ taken as done only when the effect it acknowledges can be observed.
    holds every argument of the command (the files a capture selects, its
    thread, the instruction digest); it folds that `*url.Error` into plain
    text (`error sending request: %v`). So a `*url.Error` in the chain keeps
-   only its operation and inner error, and any URL or query left in the text
-   is replaced by `request`: `Post request: dial tcp 10.0.0.1:6443: connect:
-   connection refused`. The command's arguments and its output, which the
-   sandbox can write, are not kept. The message reaches the executor's log
+   only its operation and inner error, and any `http`, `https`, `ws` or `wss`
+   URL, and any word with the exec query's shape (`command=`, or
+   percent-encoded `command%3D`), left in the text is replaced by `request`:
+   `Post request: dial tcp 10.0.0.1:6443: connect: connection refused`. A
+   runtime's own identifiers, such as `containerd://` container IDs and
+   `unix://` sockets, and other text are left as they come, since they say
+   what failed.
+
+   What is guaranteed: the exec request and its URL are never kept, nor the
+   command's output, which the sandbox can write. Text the API server, the
+   kubelet or the container runtime returns is kept as it comes, on one line
+   and bounded. It is not known to quote the command's arguments, but that
+   was not verified against a real kubelet or runtime: one that echoed the
+   command line would have it kept. The message reaches the executor's log
    through the driver; the placement protocol and the work API still answer
    only a code (`unavailable`). `commandFailed` does not wrap the exec
    error, so no caller's `errors.Is` check changes.
@@ -169,12 +179,19 @@ command: they fence by deleting the Pod and observing its containers end.
   once. A kubelet slower than that to report the helper's end, or an API
   server that cannot be read meanwhile, leaves the first attempt unproven
   as before; its replay then completes the stop.
-- Such a stop takes up to 15 seconds longer, once, while the Pod catches up.
-  That comes out of the stop's 5-minute settle allowance
-  (`stopSettleBound` in `internal/session/profile`), which also covers
-  ending the native container (at most a minute), sealing usage and
-  capturing the checkpoint; the stop's own context, bounded by
-  `StopBound`, still ends the wait.
+- The wait comes out of the caller's budget. A stop through the placement
+  protocol has the 5-minute settle allowance (`stopSettleBound` in
+  `internal/session/profile`), which also covers ending the native container
+  (at most a minute), sealing usage and capturing the checkpoint. The
+  remote executor's exit sweep has 30 seconds (`exitCheckTimeout` in
+  `internal/work/interactive.go`) for one session, which covers `Exited`,
+  the whole stop and this wait. When the budget runs out first, the wait
+  ends with it and the stop returns unproven, as before this change.
+- A lost finish whose helper keeps running now reports unproven up to 15
+  seconds later than before: 15.17 seconds measured in the placement's
+  tests. The stop holds the visit's lock meanwhile, so another command on
+  the same session (`Inspect`, `Exited`, a second `Stop` or `Abort`) waits
+  that long too.
 - A lost finish whose helper still runs, or whose Pod cannot be read, still
   leaves `unknown-stop`. An interactive session whose harness exited by
   itself then still waits for its owner's `recover`.

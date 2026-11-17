@@ -259,12 +259,17 @@ helper in Pod NAMESPACE/NAME as done, because …` with the lost command's
 error ([ADR 0068](../adr/0068-a-lost-finish-is-proven-by-the-helpers-end.md)).
 Otherwise the session stays `unknown-stop`, and `recover` (or, for a task,
 the executor's next retry) completes it once the helper has ended, whatever
-its exit code. A failed fixed command's error in the executor's log names the
-command, its container and what the exec reported, such as `placement: fixed
-command unavailable: checkpoint finish in container checkpoint: command
-terminated with exit code 137`. It never includes the command's arguments or
-output: a failed exec request is reported as `Post request: ` and the
-connection's error, without its URL.
+its exit code. The wait comes out of the stop's own time: the exit sweep
+gives one session 30 seconds for the check and the whole stop, and a stop
+that runs out of time stays unproven. While it waits, other commands on the
+same session wait too. A failed fixed command's error in the executor's log
+names the command, its container and what the exec reported, such as
+`placement: fixed command unavailable: checkpoint finish in container
+checkpoint: command terminated with exit code 137`, on one line of at most
+512 bytes. It never includes the exec request or its URL, which carries the
+command's arguments, or the command's output: a failed exec request is
+reported as `Post request: ` and the connection's error. Text the API server,
+kubelet or container runtime returned is kept as it comes.
 
 ### Starting from an approved repository or an upload
 
