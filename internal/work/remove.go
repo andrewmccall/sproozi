@@ -272,9 +272,24 @@ func (o *Owner) recorded(id string) bool {
 	return err == nil
 }
 
-// wasRemoved reports a session that was removed, so its ID is not used
-// again.
-func (o *Owner) wasRemoved(id string) bool {
+// removed reports whether session id carries a removal mark, so its ID is
+// not used again. An error means the mark could not be checked; a caller
+// that refuses or permits work by the mark refuses with that error.
+func (o *Owner) removed(id string) (bool, error) {
 	_, err := os.Lstat(o.path(id, removedSuffix))
-	return !os.IsNotExist(err)
+	switch {
+	case err == nil:
+		return true, nil
+	case os.IsNotExist(err):
+		return false, nil
+	}
+	return false, err
+}
+
+// wasRemoved reports a session whose removal mark is certainly there. It
+// only explains a failure as a removal: a mark that cannot be checked
+// explains nothing, so the failure stands.
+func (o *Owner) wasRemoved(id string) bool {
+	marked, err := o.removed(id)
+	return err == nil && marked
 }

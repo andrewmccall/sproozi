@@ -46,6 +46,14 @@ func (i *interleaving) fired() bool {
 	return i.ran
 }
 
+// The commands of the removal table that also run on a resumed session.
+const (
+	commandInfo    = "info"
+	commandList    = "list"
+	commandRecover = "recover"
+	commandAttach  = "attach"
+)
+
 // removedSession is a settled session a race test removes.
 type removedSession struct {
 	View
@@ -116,11 +124,11 @@ func TestCommandsOnASessionRemovedWhileTheyRun(t *testing.T) {
 		want        profile.Code
 		run         func(o *Owner, s removedSession) error
 	}{
-		{name: "info", step: stepEntry, want: profile.CodeInvalid, run: func(o *Owner, s removedSession) error {
+		{name: commandInfo, step: stepEntry, want: profile.CodeInvalid, run: func(o *Owner, s removedSession) error {
 			_, err := o.Info(ctx, s.ID)
 			return err
 		}},
-		{name: "list", step: stepEntry, run: func(o *Owner, s removedSession) error {
+		{name: commandList, step: stepEntry, run: func(o *Owner, s removedSession) error {
 			listed, err := o.List(ctx, SessionQuery{})
 			for _, v := range listed {
 				if v.ID == s.ID {
@@ -129,7 +137,7 @@ func TestCommandsOnASessionRemovedWhileTheyRun(t *testing.T) {
 			}
 			return err
 		}},
-		{name: "recover", step: stepEntry, want: profile.CodeInvalid, run: func(o *Owner, s removedSession) error {
+		{name: commandRecover, step: stepEntry, want: profile.CodeInvalid, run: func(o *Owner, s removedSession) error {
 			_, err := o.Recover(ctx, s.ID)
 			return err
 		}},
@@ -161,7 +169,7 @@ func TestCommandsOnASessionRemovedWhileTheyRun(t *testing.T) {
 			_, err := o.Stop(ctx, s.ID, uuid.NewString())
 			return err
 		}},
-		{name: "attach", interactive: true, step: stepEntry, want: profile.CodeInvalid, run: func(o *Owner, s removedSession) error {
+		{name: commandAttach, interactive: true, step: stepEntry, want: profile.CodeInvalid, run: func(o *Owner, s removedSession) error {
 			_, err := o.Attach(ctx, s.ID)
 			return err
 		}},
@@ -170,7 +178,7 @@ func TestCommandsOnASessionRemovedWhileTheyRun(t *testing.T) {
 	// a removal is recognized by the session's mark, not the execution's.
 	for _, tc := range cases {
 		switch tc.name {
-		case "info", "list", "recover", "attach":
+		case commandInfo, commandList, commandRecover, commandAttach:
 			tc.name, tc.interactive, tc.resumed = tc.name+" resumed", true, true
 			cases = append(cases, tc)
 		}
@@ -250,7 +258,7 @@ func resumeAndStop(t *testing.T, o *Owner, id string) View {
 func TestLegacyPullOfARecordRemovedWhileItRuns(t *testing.T) {
 	t.Parallel()
 	for _, claim := range []bool{false, true} {
-		t.Run(map[bool]string{false: "begin", true: "repeated claim"}[claim], func(t *testing.T) {
+		t.Run(map[bool]string{false: "pull", true: "repeated claim"}[claim], func(t *testing.T) {
 			t.Parallel()
 			c, _ := fixture(t)
 			race := &interleaving{}
@@ -402,13 +410,41 @@ func TestAnUncheckableRemovalMarkIsReported(t *testing.T) {
 		}
 	}
 	_, err := o.Info(t.Context(), v.ID)
-	reported("info", err)
+	reported("info command", err)
 	listed, err := o.List(t.Context(), SessionQuery{})
 	if err == nil {
 		t.Errorf("list with an uncheckable mark: %d sessions and no error", len(listed))
 	} else {
-		reported("list", err)
+		reported("list command", err)
 	}
 	_, err = o.Submit(t.Context(), taskRequest())
 	reported("a new submission", err)
+}
+
+// A missing journal whose session's mark cannot be checked proves neither a
+// removal nor an execution not received yet: Info reports the mark's error
+// rather than describing the session as preparing.
+func TestInfoReportsAnUncheckableMarkBehindAMissingJournal(t *testing.T) {
+	t.Parallel()
+	c, _ := fixture(t)
+	race := &interleaving{}
+	c.interleave = race.at
+	o := openOwner(t, c)
+	v := waitPhase(t, o, submit(t, o).ID, phaseRetained)
+	t.Cleanup(func() { _ = os.Chmod(c.Directory, 0o700) })
+	var removeErr, chmodErr error
+	race.arm(stepEntry, v.ID, func() {
+		_, removeErr = o.Remove(t.Context(), v.ID, false)
+		chmodErr = os.Chmod(c.Directory, 0o600)
+	})
+	_, err := o.Info(t.Context(), v.ID)
+	if !race.fired() || removeErr != nil || chmodErr != nil {
+		t.Fatalf("removal: ran %t, %v, %v", race.fired(), removeErr, chmodErr)
+	}
+	if _, lstatErr := os.Lstat(o.path(v.ID, removedSuffix)); !errors.Is(lstatErr, fs.ErrPermission) {
+		t.Skipf("the directory's mode does not deny the check here: %v", lstatErr)
+	}
+	if code(err) != profile.CodeUnavailable || !errors.Is(err, fs.ErrPermission) {
+		t.Fatalf("info with a missing journal and an uncheckable mark: %v (code %q)", err, code(err))
+	}
 }

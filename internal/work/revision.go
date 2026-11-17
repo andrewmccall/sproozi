@@ -87,6 +87,21 @@ func (o *Owner) checkSource(source RevisionSource, target project.Association) e
 	return err
 }
 
+// sourceKept checks, under o.retention, that the session a submission starts
+// from is still kept: not removed and still recorded. A mark that cannot be
+// checked refuses with that error, so a removed source is never taken as
+// kept.
+func (o *Owner) sourceKept(id string) error {
+	marked, err := o.removed(id)
+	if err != nil {
+		return err
+	}
+	if marked || !o.recorded(id) {
+		return &profile.Rejection{Code: profile.CodeInvalid}
+	}
+	return nil
+}
+
 // The steps at which Config.interleave runs, each with the ID of the
 // session the step read. revisionSource reads the session new work starts
 // from: its catalogue record, the coordinator's record of its execution, and

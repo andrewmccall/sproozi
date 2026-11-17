@@ -106,9 +106,10 @@ func (o *Owner) legacyStopped(r legacyRecord) (session.Stopped, []byte, error) {
 	return *r.Stopped, data, err
 }
 
-// exportLegacy is export for a version 1 record. The caller holds the lock.
+// exportLegacy is export for a version 1 record. The caller holds the lock
+// and read the record before it; recordBytes answers a removal since then.
 func (o *Owner) exportLegacy(id, operation, digest string, claim bool) (Export, error) {
-	b, err := privatefs.ReadFile(o.path(id, ".json"), maxRecordBytes)
+	b, err := o.recordBytes(id)
 	if err != nil {
 		return Export{}, err
 	}

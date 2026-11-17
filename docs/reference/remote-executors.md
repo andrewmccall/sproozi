@@ -354,8 +354,13 @@ source instead (the `workspaceFrom` row above). Removing it again answers
 `{"id":"..."}`. An ID the executor never held answers `invalid_request`, and
 so does every other command on a removed session (`info`, `recover`, `stop`,
 `resume`, `cancel`, `attach`, `begin`, `claim`); `list` leaves it out. A
-command that is running when the removal lands answers the same, never
-`unavailable`, `conflict` or a phase such as `preparing`.
+command that reads the session after its removal began answers the same,
+whatever it read before. One whose last read of the session came before the
+removal answers from that read: `recover` of a `retained` session that is
+then removed returns it `retained`. If the executor cannot check a session's
+mark, for example because its catalogue directory cannot be read, the
+command answers `unavailable` rather than treating the session as removed or
+kept.
 
 Removal does not wait for other sessions: it takes only the removed
 session's executions, and waits at most five seconds for an operation on one

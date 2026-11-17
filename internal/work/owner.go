@@ -393,9 +393,10 @@ func (o *Owner) SubmitAs(ctx context.Context, caller Caller, q Submit) (View, er
 	}
 	// Removal holds the same lock: the session this one starts from is
 	// still there, and is now kept until this one has started.
-	if q.WorkspaceFrom != nil && (o.wasRemoved(q.WorkspaceFrom.SessionID) ||
-		!o.recorded(q.WorkspaceFrom.SessionID)) {
-		return View{}, &profile.Rejection{Code: profile.CodeInvalid}
+	if q.WorkspaceFrom != nil {
+		if err = o.sourceKept(q.WorkspaceFrom.SessionID); err != nil {
+			return View{}, err
+		}
 	}
 	if len(upload) > 0 {
 		// Kept until the coordinator retains it as the first visit's input.
