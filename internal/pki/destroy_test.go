@@ -1,0 +1,100 @@
+package pki
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
+	"testing"
+)
+
+func keyFiles(t *testing.T, s *Store) []string {
+	t.Helper()
+	entries, err := os.ReadDir(s.Dir())
+	must(t, err)
+	var keys []string
+	for _, e := range entries {
+		if m := caFileRE.FindStringSubmatch(e.Name()); m != nil && m[2] == "key" {
+			keys = append(keys, e.Name())
+		}
+	}
+	return keys
+}
+
+// A retired generation's key that a crash or a failed removal left behind
+// is destroyed by the next Ensure, which the certificate controller runs on
+// every reconcile and the local service at start and every minute. Before,
+// nothing destroyed it again. Guards the destroyRetired call in Ensure.
+func TestEnsureDestroysARetiredKeyLeftBehind(t *testing.T) {
+	roots := buildStates(t)
+	for name, want := range map[string][]string{
+		"retired-key-left":           {"ca-2.key"},
+		"replaced-key-left":          {"ca-2.key"},
+		"replaced-key-left-prepared": {"ca-2.key", "ca-3.key"},
+	} {
+		s := outcomeStore(t, copyStore(t, filepath.Join(roots[name], "pki")))
+		if _, err := s.Ensure(testNames); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got := keyFiles(t, s); !slices.Equal(got, want) {
+			t.Errorf("%s: keys %v, want %v", name, got, want)
+		}
+	}
+}
+
+// Ensure never destroys a key some phase still needs: the key of every
+// trusted generation, and the files of a generation the record does not
+// name yet, survive it in every state. Guards the Retired test in
+// destroyRetired.
+func TestEnsureKeepsEveryKeyAPhaseNeeds(t *testing.T) {
+	for name, root := range buildStates(t) {
+		if name == "empty" || name == "state-lost" {
+			continue
+		}
+		s := outcomeStore(t, copyStore(t, filepath.Join(root, "pki")))
+		st, err := s.State()
+		must(t, err)
+		var needed []string
+		for _, key := range keyFiles(t, s) {
+			var id int
+			_, _ = fmt.Sscan(caFileRE.FindStringSubmatch(key)[1], &id)
+			if g := st.generation(id); g == nil || !g.Retired {
+				needed = append(needed, key)
+			}
+		}
+		if _, err = s.Ensure(testNames); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got := keyFiles(t, s); !slices.Equal(got, needed) {
+			t.Errorf("%s: keys %v after Ensure, want %v", name, got, needed)
+		}
+	}
+}
+
+// A retirement whose key removal fails reports it, and the next Ensure
+// destroys the key. Guards the destroyRetired call in RetireRotation and in
+// Ensure.
+func TestAFailedRetiredKeyRemovalIsRetried(t *testing.T) {
+	roots := buildStates(t)
+	s := outcomeStore(t, copyStore(t, filepath.Join(roots["switched"], "pki")))
+	s.beforeWrite = func(op, name string) error {
+		if op == "remove" && name == "ca-1.key" {
+			return errStopped
+		}
+		return nil
+	}
+	if err := s.RetireRotation(true); !errors.Is(err, errStopped) {
+		t.Fatalf("retire with a failing removal: %v", err)
+	}
+	if _, err := s.Ensure(testNames); !errors.Is(err, errStopped) {
+		t.Fatalf("ensure with a failing removal: %v", err)
+	}
+	s.beforeWrite = nil
+	if _, err := s.Ensure(testNames); err != nil {
+		t.Fatal(err)
+	}
+	if got := keyFiles(t, s); !slices.Equal(got, []string{"ca-2.key"}) {
+		t.Errorf("keys %v, want only ca-2.key", got)
+	}
+}

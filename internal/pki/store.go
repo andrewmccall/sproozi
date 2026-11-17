@@ -251,6 +251,9 @@ func (s *Store) Ensure(names Names) (bool, error) {
 		if err != nil {
 			return err
 		}
+		if err = s.destroyRetired(st); err != nil {
+			return err
+		}
 		same := slices.Equal(st.Names.DNS, names.DNS) && slices.Equal(st.Names.IPs, names.IPs)
 		st.Names = names
 		if leaf, err := s.loadLeaf(st); same && err == nil && s.leafCurrent(st, leaf.Leaf, now) {
@@ -359,14 +362,13 @@ func (s *Store) RetireRotation(drained bool) error {
 		if !drained {
 			return errors.New("pki: a consumer may still require the retiring CA")
 		}
-		old := st.Rotation.From
 		if err = st.apply(evRetire, nil, s.now()); err != nil {
 			return err
 		}
 		if err = s.commit(st); err != nil {
 			return err
 		}
-		return s.destroyKey(old)
+		return s.destroyRetired(st)
 	})
 }
 
@@ -393,14 +395,7 @@ func (s *Store) ReplaceCA() error {
 		if err = s.issue(&st, now); err != nil {
 			return err
 		}
-		for _, g := range st.Generations {
-			if g.ID != next.ID {
-				if err = s.destroyKey(g.ID); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
+		return s.destroyRetired(st)
 	})
 }
 
@@ -515,7 +510,30 @@ func (s *Store) createNext(st State, now time.Time) (Generation, error) {
 	return Generation{ID: id, Fingerprint: Fingerprint(cert), NotAfter: cert.NotAfter}, nil
 }
 
+// destroyRetired removes the private key of every retired generation. It is
+// idempotent: Ensure runs it on every reconcile of the certificate controller
+// and at every start and maintenance pass of the local service, and retire
+// and replace run it after their commit, so a destruction that a crash or a
+// failed removal left undone always finishes. It never removes the key of a
+// trusted generation, which every phase still needs, nor touches files of a
+// generation the record does not name.
+func (s *Store) destroyRetired(st State) error {
+	var errs []error
+	for _, g := range st.Generations {
+		if g.Retired {
+			errs = append(errs, s.destroyKey(g.ID))
+		}
+	}
+	if err := errors.Join(errs...); err != nil {
+		return fmt.Errorf("pki: destroy retired certificate authority keys: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) destroyKey(id int) error {
+	if _, err := os.Lstat(filepath.Join(s.dir, caName(id)+".key")); os.IsNotExist(err) {
+		return nil
+	}
 	err := s.remove(caName(id) + ".key")
 	if os.IsNotExist(err) {
 		return nil
