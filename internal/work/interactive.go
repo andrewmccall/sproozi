@@ -94,6 +94,9 @@ func (o *Owner) stop(ctx context.Context, id, operation string) (View, error) {
 		return o.Info(ctx, id)
 	case errors.Is(err, session.ErrSessionCancelled):
 		return View{}, &profile.Rejection{Code: profile.CodeConflict}
+	case err != nil && o.wasRemoved(id):
+		// Removed after the binding, which left the lock: its journal is gone.
+		return View{}, &profile.Rejection{Code: profile.CodeInvalid}
 	case err != nil:
 		o.logf("Could not stop work session %s: %v", id, err)
 		return View{}, err
@@ -458,7 +461,8 @@ func (o *Owner) removeKeptUploads() {
 			if _, err = o.config.Coordinator.Inspect(r.Current); os.IsNotExist(err) {
 				continue
 			}
-		} else if err != nil && !os.IsNotExist(err) {
+		} else if err != nil && !os.IsNotExist(err) && !o.wasRemoved(id) {
+			// A removed session's upload goes; read answers it invalid.
 			continue
 		}
 		o.removeUpload(id)

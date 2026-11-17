@@ -1,7 +1,9 @@
+//nolint:goconst // Keep independently stated literal behavior expectations.
 package work
 
 import (
 	"errors"
+	"os"
 	"sync"
 	"testing"
 
@@ -59,6 +61,31 @@ func errText(err error) string {
 	return err.Error()
 }
 
+// Open still deletes the upload of a removed session, which read now
+// answers as invalid rather than as a missing record.
+func TestOpenRemovesTheUploadOfARemovedSession(t *testing.T) {
+	t.Parallel()
+	c, _ := fixture(t)
+	o, err := Open(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := uuid.NewString()
+	if err = o.markRemoved(removedMark{ID: id}); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(o.path(id, uploadSuffix), []byte("upload"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err = o.Close(); err != nil {
+		t.Fatal(err)
+	}
+	o = openOwner(t, c)
+	if _, err = os.Lstat(o.path(id, uploadSuffix)); !os.IsNotExist(err) {
+		t.Fatalf("kept the upload of a removed session: %v", err)
+	}
+}
+
 // An owner command on a session removed while the command runs answers
 // exactly as the same command on a session removed before it started: the
 // same code and message, never a filesystem error (unavailable), conflict,
@@ -112,7 +139,7 @@ func TestCommandsOnASessionRemovedWhileTheyRun(t *testing.T) {
 			_, err := o.BeginExport(ctx, s.ID, uuid.NewString())
 			return err
 		}},
-		{name: "claim", pulled: true, step: stepEntry, want: profile.CodeInvalid, run: func(o *Owner, s removedSession) error {
+		{name: "repeated claim", pulled: true, step: stepEntry, want: profile.CodeInvalid, run: func(o *Owner, s removedSession) error {
 			_, err := o.Claim(ctx, s.ID, s.pull, s.digest)
 			return err
 		}},

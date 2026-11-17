@@ -351,7 +351,11 @@ and the session count, so its ID never starts again: a `run` that repeats its
 `invalid_request`, also when the removal lands while the `run` is still
 reading it; a `run` the executor kept before the removal began keeps the
 source instead (the `workspaceFrom` row above). Removing it again answers
-`{"id":"..."}`. An ID the executor never held answers `invalid_request`.
+`{"id":"..."}`. An ID the executor never held answers `invalid_request`, and
+so does every other command on a removed session (`info`, `recover`, `stop`,
+`resume`, `cancel`, `attach`, `begin`, `claim`); `list` leaves it out. A
+command that is running when the removal lands answers the same, never
+`unavailable`, `conflict` or a phase such as `preparing`.
 
 Removal does not wait for other sessions: it takes only the removed
 session's executions, and waits at most five seconds for an operation on one

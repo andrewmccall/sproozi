@@ -166,13 +166,20 @@ func (o *Owner) entry(id string) (entry, error) {
 	return entry{current: &r}, err
 }
 
-// read reads id's version 2 record. A missing record is os.ErrNotExist; a
-// version 1 record is refused, since nothing executes it any more.
+// read reads id's version 2 record. A removed session's record, gone or
+// being removed, is invalid, as entry answers; any other missing record is
+// os.ErrNotExist. A version 1 record is refused, since nothing executes it
+// any more. A command that read the session without the jobs lock and reads
+// it again under that lock thus answers a removal that came in between as
+// one that came first.
 func (o *Owner) read(id string) (record, error) {
 	if !CanonicalID(id) {
 		return record{}, &profile.Rejection{Code: profile.CodeInvalid}
 	}
 	b, err := o.readRecord(id)
+	if os.IsNotExist(err) && o.wasRemoved(id) {
+		return record{}, &profile.Rejection{Code: profile.CodeInvalid}
+	}
 	if err != nil {
 		return record{}, err
 	}
@@ -246,9 +253,16 @@ func (o *Owner) save(r record) error {
 }
 
 // execution reads the coordinator's record of the session's current
-// execution, or nil when the coordinator has not received it.
+// execution, or nil when the coordinator has not received it. When the
+// execution is missing because the session was removed after r was read, it
+// answers invalid, as entry does for a removed session, rather than nil,
+// which would describe the session as preparing. Remove marks the session
+// before it deletes any journal, and the mark stays.
 func (o *Owner) execution(r record) (*session.Record, error) {
 	rec, err := o.config.Coordinator.Inspect(r.Current)
+	if os.IsNotExist(err) && o.wasRemoved(r.ID) {
+		return nil, &profile.Rejection{Code: profile.CodeInvalid}
+	}
 	if os.IsNotExist(err) {
 		return nil, nil
 	}
@@ -275,11 +289,18 @@ func (o *Owner) replay(id, digest string) (View, bool, error) {
 	if err == nil && (e.legacy != nil || e.current.IntentDigest != digest) {
 		err = &profile.Rejection{Code: profile.CodeConflict}
 	}
+	var v View
+	if err == nil {
+		v, err = o.entryView(e)
+	}
+	if err != nil && o.wasRemoved(id) {
+		// Removed since the check above: answered as if removed first.
+		err = &profile.Rejection{Code: profile.CodeConflict}
+	}
 	if err != nil {
 		return View{}, true, err
 	}
-	v, err := o.entryView(e)
-	return v, true, err
+	return v, true, nil
 }
 
 func (o *Owner) entryView(e entry) (View, error) {
@@ -330,14 +351,18 @@ func (o *Owner) List(ctx context.Context, q SessionQuery) ([]View, error) {
 			return nil, ctx.Err()
 		}
 		e, err := o.entry(id)
-		if err != nil {
-			return nil, err
+		var v View
+		if err == nil {
+			a := e.association()
+			if o.access(a) != nil || q.Project != "" && a.Project != q.Project {
+				continue
+			}
+			v, err = o.entryView(e)
 		}
-		a := e.association()
-		if o.access(a) != nil || q.Project != "" && a.Project != q.Project {
+		if err != nil && o.wasRemoved(id) {
+			// Removed since it was listed: absent, as if removed first.
 			continue
 		}
-		v, err := o.entryView(e)
 		if err != nil {
 			return nil, err
 		}
