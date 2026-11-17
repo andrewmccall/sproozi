@@ -417,6 +417,61 @@ overtakes a graceful end leaves the supervisor's exit code nonzero. A
 Claude Code and Copilot, ended by a kill after their completed turn, still
 reply `stopped`.
 
+Corrected 2026-11-17: the gateway certificate store's rotation record
+(`internal/pki`, [ADR 0029](0029-local-provisioning-and-lifecycle.md) and
+[ADR 0030](0030-kubernetes-release-assets-and-certificates.md)) adopts rules 1
+to 4. The local service and the certificate controller share it. Before, its
+stage was an untyped string beside the record, load checked only the version,
+the serving generation and that something was trusted, and each mutator
+assigned the serving generation, trust and stage inline.
+
+- **Rule 1.** The [rotation phase](../../GLOSSARY.md#rotation-phase) is typed,
+  with a closed vocabulary: `single`, `prepared` and `switched`.
+- **Rule 2.** The record stores the phase as its rotation's stage, with no
+  rotation meaning `single`. One function, `describe` in
+  `internal/pki/record.go`, derives it from the record's structure: which
+  generations exist, which are retired, which are trusted and in what order,
+  which serves, and the leaf's file name. Load and save require the stored
+  stage to equal the derived phase, and refuse with an error naming what is
+  wrong. They also require each trusted generation's certificate to have the
+  recorded fingerprint and expiry, and its key, when present, to match it. A
+  missing key is the lost-key state ADR 0029 describes, and still loads.
+  `Initialize` and `ReplaceCA` read the record without the files, so replace
+  still recovers an authority whose files were lost or changed; it does not
+  run on a record that is itself refused.
+- **Rules 3 and 4.** The table, in `internal/pki/transitions.go`, is below.
+  Each mutator admits its event before its side effect (creating a
+  generation's files) and one `apply` is the only place the record's
+  generations, trust, serving generation and rotation change. Issuing a leaf
+  is not an event: it changes only the leaf, in every phase.
+- **Rule 5** does not apply: the record has no deadline, and no event is
+  refused because time passed. `RotationDue` only starts a rotation.
+
+| Event | From → to |
+| --- | --- |
+| `initialize` | none → `single` |
+| `prepare` | `single` → `prepared` |
+| `switch` | `prepared` → `switched` |
+| `rollback` | `switched` → `prepared` |
+| `retire` | `switched` → `single` |
+| `replace` | `single`, `prepared`, `switched` → `single` |
+
+One idempotent pass destroys the key of every retired generation and every
+leaf file the record does not name. `Ensure` runs it, so the certificate
+controller runs it on every reconcile and the local service at start and every
+minute; `retire`, `replace` and every leaf issuance run it after their commit.
+Before, a crash or failed removal between committing a retirement and removing
+the key left the key for good, and the controller committed it to the
+authority Secret. The pass never removes a trusted generation's key, the named
+leaf, or files of a generation the record does not name.
+
+`testdata/store-outcomes.txt` and `testdata/reconcile-outcomes.txt`, recorded
+from the code before this change, hold the outcome of every operation and
+rotation request from every written state, every state an interruption leaves
+and 45 corrupted records. The only differences are the four changes above:
+undescribed records and mismatched files are refused, and retired CA keys and
+unnamed leaf files are destroyed. Records the code wrote before still load.
+
 ## Alternatives
 
 - **Check transitions in `save` by rereading the journal.** This catches an
@@ -472,7 +527,9 @@ reply `stopped`.
   `internal/runtime/kubernetes/registry/transitions.go`,
   `cmd/native-session/lifecycle.go`, `cmd/native-session/deadline.go`,
   `cmd/native-session/main.go`,
-  `internal/runtime/kubernetes/placement/storage.go`
+  `internal/runtime/kubernetes/placement/storage.go`,
+  `internal/pki/record.go`, `internal/pki/transitions.go`,
+  `internal/pki/store.go`
 - Tests: `internal/session/phase_test.go`, `internal/session/rules_test.go`,
   `cmd/sproozi/deadline_test.go`, `internal/runtime/docker/transitions_test.go`,
   `internal/gateway/docker/transitions_test.go`,
@@ -481,10 +538,14 @@ reply `stopped`.
   `internal/session/home/phase_test.go`, `internal/session/home/reconcile_test.go`,
   `cmd/native-session/lifecycle_test.go`, `cmd/native-session/lifecycle_record_test.go`,
   `cmd/native-session/lifecycle_paths_test.go`,
-  `internal/runtime/kubernetes/placement/retained_record_test.go`
+  `internal/runtime/kubernetes/placement/retained_record_test.go`,
+  `internal/pki/record_test.go`, `internal/pki/transitions_test.go`,
+  `internal/pki/destroy_test.go`, `internal/pki/interrupt_test.go`,
+  `internal/pki/outcomes_test.go`, `internal/certificates/outcomes_test.go`,
+  `internal/certificates/interrupt_test.go`
   (Corrected 2026-11-16: the home catalogue entry's files added; the
   supervisor's files added. 2026-11-17: the Kubernetes retained record's
-  files added)
+  files added; the certificate store's files added)
 - Reference: [status and listing output](../reference/session-commands.md#status-and-listing-output)
 - Related: [ADR 0018](0018-coordinator-owns-every-visit.md),
   [ADR 0038](0038-exited-agents-and-one-recovery-path.md),

@@ -704,6 +704,16 @@ One certificate authority in the gateway's certificate store. A worker trusts
 the generations in the bundle it received at launch; rotation adds a new
 generation and retires the old one only after every consumer has the new one.
 
+### Rotation phase
+
+Where the gateway certificate store's rotation is: `single` (one trust
+generation, which serves), `prepared` (the old and new generations trusted,
+the old one serving) or `switched` (both trusted, the new one serving). It is
+derived from which generations are trusted and which serves, and a store whose
+record no phase describes is refused rather than repaired. The certificate
+controller's `sproozi.com/rotation-stage` annotation reports it as `none`,
+`prepared N to M` or `switched N to M`. Also seen as: rotation stage.
+
 ### Certificate controller
 
 The optional `/certificates` program in a Kubernetes installation. It keeps the

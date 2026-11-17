@@ -195,10 +195,17 @@ never adds its authority to the host's trust store, and the authority never
 verifies upstream providers.
 
 A missing or unreadable authority key, or a lost `pki/state.json`, stops
-renewal and new launches; it never creates a replacement automatically. After a
-switch, the service checks its own listeners against the new trust before
-it retires the previous authority. `certificates replace-ca` creates a new
-authority, trusts only it and destroys every older key.
+renewal and new launches; it never creates a replacement automatically. So
+does a `pki/state.json` that no [rotation phase](../../GLOSSARY.md#rotation-phase)
+describes, or a trusted authority certificate or key that is not the one it
+records; the error names what is wrong. Restore `pki` from a backup. After a
+switch, the service checks its own listeners against the new trust before it
+retires the previous authority. `certificates replace-ca` creates a new
+authority, trusts only it and destroys every older key. It works when only the
+authority files are wrong, but not when `state.json` itself is refused. A
+retired authority's key, or a superseded serving certificate's key, that an
+interrupted command left behind is destroyed at the service's next start or
+check.
 
 ## Supported platforms
 

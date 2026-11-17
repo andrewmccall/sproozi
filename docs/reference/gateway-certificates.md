@@ -21,7 +21,14 @@ kubectl get secret -n sproozi-system sproozi-certificate-authority \
 `sproozi.com/rotate-at`, `sproozi.com/trust-configmap` and
 `sproozi.com/rotation-stage` report the current state. Start a rotation before
 `rotate-at`. If the authority Secret loses its data, the controller stops with
-an error instead of creating a new authority; restore the Secret from a backup. `sproozi.com/last-error` explains a refused request. If renewal
+an error instead of creating a new authority; restore the Secret from a backup.
+It also stops when the Secret's `state.json` describes no
+[rotation phase](../../GLOSSARY.md#rotation-phase), or a trusted authority's
+`ca-N.pem` or `ca-N.key` is not the one `state.json` records. The controller
+log names what is wrong, nothing is published, and the annotations keep their
+last values. Restore the Secret from a backup. A `replace` request still
+works when only the authority files are wrong, but not when `state.json`
+itself is refused. `sproozi.com/last-error` explains a refused request. If renewal
 fails, the previous certificate stays in service and the controller log names
 the cause. Renew immediately with:
 
@@ -64,9 +71,10 @@ creates a new one; existing Pods keep the bundle they started with.
    undo the switch, use `rollback`.
 
 4. Retire the old authority with `sproozi.com/rotation-request=retire`. The
-   controller creates `sproozi-sandbox-trust-2` and destroys the old key. Point
-   the runtimes at the new bundle, and delete the old ConfigMaps once no runtime
-   or Pod uses them.
+   controller creates `sproozi-sandbox-trust-2` and destroys the old key. If
+   that is interrupted, every later reconcile destroys it until it is gone.
+   Point the runtimes at the new bundle, and delete the old ConfigMaps once no
+   runtime or Pod uses them.
 
 Use `replace` only for a lost or compromised authority. It trusts only a new
 authority at once, so every running Pod loses trust in the gateway. Cancel
