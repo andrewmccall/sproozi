@@ -75,6 +75,25 @@ func TestDeadlineDuringActivationStartsNoHarness(t *testing.T) {
 	}
 }
 
+// The refused activation stops the sign-in sync it started, so its final
+// save runs and nothing syncs for a harness that never ran.
+func TestDeadlineDuringActivationStopsTheSignInSync(t *testing.T) {
+	activatable(t, func() { time.Sleep(600 * time.Millisecond) })
+	l := recordedLogin(t)
+	previous := startLogin
+	startLogin = func(config) (*loginSync, error) { return l, nil }
+	t.Cleanup(func() { startLogin = previous })
+	s, _ := activation(time.Now().Add(300 * time.Millisecond))
+	if r := s.activate(); r.Error != launchPastDeadline {
+		t.Fatalf("activate: %+v", r)
+	}
+	select {
+	case <-l.quit:
+	default:
+		t.Fatal("the refused activation left its sign-in sync running")
+	}
+}
+
 // Without a deadline the same activation launches the harness.
 func TestActivationLaunchesTheHarness(t *testing.T) {
 	started := activatable(t, func() {})

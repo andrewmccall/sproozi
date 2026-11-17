@@ -424,7 +424,7 @@ func (s *server) activate() response {
 	}
 	// The sign-in comes first: a harness that keeps other settings in its
 	// login file, such as Copilot's config.json, has them merged in.
-	login, err := startLoginSync(s.config)
+	login, err := startLogin(s.config)
 	if err != nil {
 		r.Error = "harness sign-in is unavailable: " + err.Error()
 		return r
@@ -697,6 +697,9 @@ var forceStop = (*nativepty.Supervisor).Stop
 
 // startTerminal starts the harness's terminal; tests replace it.
 var startTerminal = nativepty.Start
+
+// startLogin starts the harness's sign-in sync; tests replace it.
+var startLogin = startLoginSync
 
 // launchPastDeadline is activate's reply when the deadline passed while it
 // prepared the launch: the terminal's own refusal of a passed deadline,

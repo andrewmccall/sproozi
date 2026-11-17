@@ -149,6 +149,21 @@ func TestGatedInputStopsSharingASignOut(t *testing.T) {
 	}
 }
 
+// A sign-out one sync saw while the harness ran does not cross when a stop
+// gates input before the second sync sees it, nor at the stop's final save:
+// the coming kill could have cut a rewrite short.
+func TestSignOutOvertakenByAStopIsNotShared(t *testing.T) {
+	s, l := killable(t, harness.NativeCodex, time.Time{}, true)
+	write(t, l.native, "")
+	syncAll(t, l)
+	s.gate()
+	syncAll(t, l)
+	ended(t, s, func() { s.stop(evTerminate) })
+	if got := content(t, l.stored); got != refreshedR3 {
+		t.Fatalf("the store holds %q", got)
+	}
+}
+
 // After a kill, a sync whose file did not change does not open the store at
 // all: a stop whose harness was killed never waits for a locked store.
 func TestUnchangedLoginAfterAKillLeavesTheStoreAlone(t *testing.T) {
