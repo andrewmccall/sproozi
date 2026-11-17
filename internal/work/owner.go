@@ -96,7 +96,13 @@ type Config struct {
 	exitInterval time.Duration
 	// interleave, when set, runs at each named step (the step constants in
 	// revision.go) with the ID of the session the step read. Only tests set
-	// it, to remove that session between two steps of a command.
+	// it, to remove that session between two steps of a command. stepEntry
+	// also runs with o.retention or a jobs lock held (admitRetention,
+	// checkNoDependants, Remove's own entry, the replay under the lock), so a
+	// hook must not call Remove there. The tests' interleaving fires once,
+	// for the one session it names, and is armed only when nothing else runs
+	// on the owner, so the step that fires it is the command's own, taken
+	// without either lock; it is disarmed before Remove's own entry.
 	interleave func(step, id string)
 }
 

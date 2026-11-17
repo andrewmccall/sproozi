@@ -3,6 +3,7 @@ package work
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"sync"
 	"testing"
@@ -109,6 +110,7 @@ func TestCommandsOnASessionRemovedWhileTheyRun(t *testing.T) {
 	cases := []struct {
 		name        string
 		interactive bool
+		resumed     bool
 		pulled      bool
 		step        string
 		want        profile.Code
@@ -164,6 +166,15 @@ func TestCommandsOnASessionRemovedWhileTheyRun(t *testing.T) {
 			return err
 		}},
 	}
+	// A resumed interactive session's current execution is not the session:
+	// a removal is recognized by the session's mark, not the execution's.
+	for _, tc := range cases {
+		switch tc.name {
+		case "info", "list", "recover", "attach":
+			tc.name, tc.interactive, tc.resumed = tc.name+" resumed", true, true
+			cases = append(cases, tc)
+		}
+	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -179,6 +190,9 @@ func TestCommandsOnASessionRemovedWhileTheyRun(t *testing.T) {
 					t.Fatal(err)
 				}
 				s.View = waitPhase(t, o, v.ID, phaseRetained)
+				if tc.resumed {
+					s.View = resumeAndStop(t, o, s.ID)
+				}
 			} else {
 				s.request = taskRequest()
 				v, err := o.Submit(t.Context(), s.request)
@@ -202,7 +216,7 @@ func TestCommandsOnASessionRemovedWhileTheyRun(t *testing.T) {
 			if !race.fired() || removeErr != nil {
 				t.Fatalf("removal at the %s step: ran %t, %v", tc.step, race.fired(), removeErr)
 			}
-			assertRemoved(t, c, o, s.ID, s.ExecutionID)
+			assertRemoved(t, c, o, s.ID, s.ID, s.ExecutionID)
 			after := tc.run(o, s)
 			if code(during) != tc.want || errText(during) != errText(after) {
 				t.Fatalf("%s on a session removed at its %s step: %v (code %q); on a removed session: %v",
@@ -210,4 +224,191 @@ func TestCommandsOnASessionRemovedWhileTheyRun(t *testing.T) {
 			}
 		})
 	}
+}
+
+// resumeAndStop resumes a stopped interactive session and stops it again, so
+// its current execution is no longer the session's own ID.
+func resumeAndStop(t *testing.T, o *Owner, id string) View {
+	t.Helper()
+	if _, err := o.Resume(t.Context(), id, uuid.NewString(), ""); err != nil {
+		t.Fatal(err)
+	}
+	waitPhase(t, o, id, phaseActive)
+	if _, err := o.Stop(t.Context(), id, uuid.NewString()); err != nil {
+		t.Fatal(err)
+	}
+	v := waitPhase(t, o, id, phaseRetained)
+	if v.ExecutionID == id {
+		t.Fatalf("resume kept the session's execution: %+v", v)
+	}
+	return v
+}
+
+// Pull and claim of a version 1 record read the record again under the jobs
+// lock; one removed after their first read answers as removed (was a raw
+// "no such file or directory", unavailable).
+func TestLegacyPullOfARecordRemovedWhileItRuns(t *testing.T) {
+	t.Parallel()
+	for _, claim := range []bool{false, true} {
+		t.Run(map[bool]string{false: "begin", true: "repeated claim"}[claim], func(t *testing.T) {
+			t.Parallel()
+			c, _ := fixture(t)
+			race := &interleaving{}
+			c.interleave = race.at
+			o := openOwner(t, c)
+			v := waitPhase(t, o, submit(t, o).ID, phaseRetained)
+			export, err := o.BeginExport(t.Context(), v.ID, uuid.NewString())
+			if err != nil {
+				t.Fatal(err)
+			}
+			phase := legacyRetained
+			if claim {
+				phase = legacyPulled
+			}
+			legacy := writeLegacy(t, c, o, phase, export)
+			op := uuid.NewString()
+			run := func() error {
+				if claim {
+					_, err := o.Claim(t.Context(), legacy, op, export.Stopped.CheckpointDigest)
+					return err
+				}
+				_, err := o.BeginExport(t.Context(), legacy, op)
+				return err
+			}
+			var removeErr error
+			race.arm(stepEntry, legacy, func() { _, removeErr = o.Remove(t.Context(), legacy, claim) })
+			during := run()
+			if !race.fired() || removeErr != nil {
+				t.Fatalf("removal: ran %t, %v", race.fired(), removeErr)
+			}
+			after := run()
+			if code(during) != profile.CodeInvalid || errText(during) != errText(after) {
+				t.Fatalf("version 1 pull of a record removed after its entry: %v; of a removed record: %v", during, after)
+			}
+		})
+	}
+}
+
+// An interactive recover reads the execution and then asks the coordinator
+// to recover it. A cancellation and a removal in between leave no journal;
+// the recover answers as for a removed session (was a raw "no such file or
+// directory", unavailable).
+func TestInteractiveRecoverOfASessionRemovedBeforeTheCoordinatorRecovers(t *testing.T) {
+	t.Parallel()
+	c, p := fixture(t)
+	race := &interleaving{}
+	c.interleave = race.at
+	o := openOwner(t, c)
+	v := startInteractive(t, o, interactiveRequest())
+	p.mu.Lock()
+	p.lostStop = true
+	p.mu.Unlock()
+	if _, err := o.Stop(t.Context(), v.ID, uuid.NewString()); err == nil {
+		t.Fatal("a stop whose reply was lost succeeded")
+	}
+	waitPhase(t, o, v.ID, phaseUnknownStop)
+	var cancelErr, removeErr error
+	race.arm(stepRecoverExecution, v.ID, func() {
+		_, cancelErr = o.Cancel(t.Context(), v.ID, uuid.NewString())
+		_, removeErr = o.Remove(t.Context(), v.ID, false)
+	})
+	_, during := o.Recover(t.Context(), v.ID)
+	if !race.fired() || cancelErr != nil || removeErr != nil {
+		t.Fatalf("removal: ran %t, cancel %v, remove %v", race.fired(), cancelErr, removeErr)
+	}
+	_, after := o.Recover(t.Context(), v.ID)
+	if code(during) != profile.CodeInvalid || errText(during) != errText(after) {
+		t.Fatalf("recover of a session removed before the coordinator recovered it: %v; of a removed session: %v",
+			during, after)
+	}
+}
+
+// The exit sweep says nothing about a session removed between its read of
+// the record and its read of the execution: nothing exited.
+func TestExitSweepSkipsASessionRemovedAfterItsRead(t *testing.T) {
+	t.Parallel()
+	c, _ := fixture(t)
+	race := &interleaving{}
+	c.interleave = race.at
+	o := openOwner(t, c)
+	v := startInteractive(t, o, interactiveRequest())
+	if _, err := o.Stop(t.Context(), v.ID, uuid.NewString()); err != nil {
+		t.Fatal(err)
+	}
+	waitPhase(t, o, v.ID, phaseRetained)
+	var removeErr error
+	race.arm(stepExitRead, v.ID, func() { _, removeErr = o.Remove(t.Context(), v.ID, false) })
+	stopped, err := o.settleExit(t.Context(), v.ID)
+	if !race.fired() || removeErr != nil {
+		t.Fatalf("removal: ran %t, %v", race.fired(), removeErr)
+	}
+	if stopped || err != nil {
+		t.Fatalf("exit sweep of a session removed after its read: stopped %t, %v", stopped, err)
+	}
+}
+
+// A stop whose Finalize fails for a session that is not removed keeps that
+// failure: only a removal is answered as one.
+func TestStopKeepsAFinalizeFailureOfAKeptSession(t *testing.T) {
+	t.Parallel()
+	c, p := fixture(t)
+	o := openOwner(t, c)
+	v := startInteractive(t, o, interactiveRequest())
+	p.mu.Lock()
+	p.lostStop = true
+	p.mu.Unlock()
+	if _, err := o.Stop(t.Context(), v.ID, uuid.NewString()); code(err) != profile.CodeUnavailable {
+		t.Fatalf("stop whose reply was lost: %v (code %q)", err, code(err))
+	}
+}
+
+// List reports a record it cannot read, of a session that is not removed,
+// rather than leaving it out.
+func TestListReportsAnUnreadableRecord(t *testing.T) {
+	t.Parallel()
+	c, _ := fixture(t)
+	o := openOwner(t, c)
+	waitPhase(t, o, submit(t, o).ID, phaseRetained)
+	if err := os.WriteFile(o.path(uuid.NewString(), ".json"), []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if listed, err := o.List(t.Context(), SessionQuery{}); err == nil {
+		t.Fatalf("listed %d sessions though a record cannot be read", len(listed))
+	}
+}
+
+// A removal mark that cannot be checked is not taken as a removal: a command
+// that relies on the mark to refuse, as a submission does, refuses with the
+// underlying error, and one that uses it to explain a failure keeps the
+// failure. With the catalogue's directory unsearchable, Info, List and a new
+// submission each report the permission error (unavailable), never invalid,
+// conflict or an empty list.
+func TestAnUncheckableRemovalMarkIsReported(t *testing.T) {
+	t.Parallel()
+	c, _ := fixture(t)
+	o := openOwner(t, c)
+	v := waitPhase(t, o, submit(t, o).ID, phaseRetained)
+	if err := os.Chmod(c.Directory, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(c.Directory, 0o700) })
+	if _, err := os.Lstat(o.path(v.ID, removedSuffix)); !errors.Is(err, fs.ErrPermission) {
+		t.Skipf("the directory's mode does not deny the check here: %v", err)
+	}
+	reported := func(what string, err error) {
+		t.Helper()
+		if code(err) != profile.CodeUnavailable || !errors.Is(err, fs.ErrPermission) {
+			t.Errorf("%s with an uncheckable mark: %v (code %q)", what, err, code(err))
+		}
+	}
+	_, err := o.Info(t.Context(), v.ID)
+	reported("info", err)
+	listed, err := o.List(t.Context(), SessionQuery{})
+	if err == nil {
+		t.Errorf("list with an uncheckable mark: %d sessions and no error", len(listed))
+	} else {
+		reported("list", err)
+	}
+	_, err = o.Submit(t.Context(), taskRequest())
+	reported("a new submission", err)
 }

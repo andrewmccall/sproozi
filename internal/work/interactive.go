@@ -280,6 +280,7 @@ func (o *Owner) recoverInteractive(ctx context.Context, r record, v View) (View,
 	if err != nil {
 		return View{}, err
 	}
+	o.interleaveAt(stepRecoverExecution, r.ID)
 	if rec == nil || rec.CancelOperation == "" && rec.Phase.Starting() {
 		o.wake(r.ID)
 		return v, nil
@@ -374,6 +375,7 @@ func (o *Owner) settleExit(ctx context.Context, id string) (bool, error) {
 	if err != nil || r.Intent.Mode != ModeInteractive || r.Transfer != "" {
 		return false, nil
 	}
+	o.interleaveAt(stepExitRead, id)
 	rec, err := o.execution(r)
 	if err != nil || rec == nil || rec.Phase != session.PhaseActive || rec.Active == nil || o.config.Terminal == nil {
 		return false, err

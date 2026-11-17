@@ -92,13 +92,18 @@ func (o *Owner) checkSource(source RevisionSource, target project.Association) e
 // from: its catalogue record, the coordinator's record of its execution, and
 // its checkpoint, read and checked. stepEntry follows every read of a
 // catalogue record by entry; stepStopBound follows the save of a stop's
-// binding, before the coordinator finalizes the execution.
+// binding, before the coordinator finalizes the execution;
+// stepRecoverExecution follows an interactive recover's read of the
+// execution, before the coordinator recovers it; stepExitRead follows the
+// exit sweep's read of a record, before it reads the execution.
 const (
 	stepSourceRecord     = "record"
 	stepSourceExecution  = "execution"
 	stepSourceCheckpoint = "checkpoint"
 	stepEntry            = "entry"
 	stepStopBound        = "stop-bound"
+	stepRecoverExecution = "recover-execution"
+	stepExitRead         = "exit-read"
 )
 
 // interleaveAt runs the test hook Config.interleave, if set, after step read
