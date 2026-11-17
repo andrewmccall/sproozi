@@ -132,8 +132,11 @@ func (c *Controller) Reconcile(ctx context.Context) (Status, error) {
 	}
 	request := authority.Annotations[RotationRequest]
 	requestErr := c.apply(store, request)
-	if _, err = store.Ensure(cfg.Names); err != nil {
-		return Status{}, err
+	// Outstanding cleanup leaves a current leaf and trust bundle: commit and
+	// publish them, then report it, so the next reconcile retries it.
+	_, outstanding := store.Ensure(cfg.Names)
+	if outstanding != nil && !errors.Is(outstanding, pki.ErrOutstanding) {
+		return Status{}, outstanding
 	}
 	data, err := readStore(dir)
 	if err != nil {
@@ -183,7 +186,7 @@ func (c *Controller) Reconcile(ctx context.Context) (Status, error) {
 	if err = c.publishServing(ctx, store, st, trust); err != nil {
 		return status, err
 	}
-	return status, requestErr
+	return status, errors.Join(requestErr, outstanding)
 }
 
 func (c *Controller) apply(store *pki.Store, request string) error {

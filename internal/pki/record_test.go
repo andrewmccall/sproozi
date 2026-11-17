@@ -159,11 +159,11 @@ func TestEveryWrittenRecordLoads(t *testing.T) {
 	}
 }
 
-// A record whose trusted generations' certificate or key files are not the
-// ones it names is refused on load, naming the file. A missing key is not
-// refused: it is the lost-key state, from which only issuance fails and
-// replace recovers. Replace itself reads only the record, so it still
-// recovers from every case here. Guards checkFiles in record.go.
+// A record whose trusted generations' certificates are not the ones it
+// names is refused on load, naming the file. Keys are not read on load:
+// see TestAKeyIsCheckedWhereItIsUsed. Replace itself reads only the record,
+// so it still recovers from every case here. Guards checkFiles in
+// record.go.
 func TestLoadRefusesAuthorityFilesTheRecordDoesNotName(t *testing.T) {
 	refusals := map[string]string{
 		"fingerprint-other":   msgFingerprint1,
@@ -171,9 +171,6 @@ func TestLoadRefusesAuthorityFilesTheRecordDoesNotName(t *testing.T) {
 		"new-ca-cert-missing": "generation 2 certificate ca-2.pem is unreadable",
 		"ca-cert-other":       msgFingerprint1,
 		"ca-pair-other":       msgFingerprint1,
-		"ca-key-other":        "generation 1 key ca-1.key does not match its certificate",
-		"new-ca-key-other":    "generation 2 key ca-2.key does not match its certificate",
-		"ca-key-garbage":      "generation 1 key ca-1.key does not match its certificate",
 		"not-after-other":     "generation 1 certificate ca-1.pem does not have the recorded expiry",
 	}
 	cases := append(corruptions(), corruption{"not-after-other", stSingle, editState(func(st *State) {

@@ -86,6 +86,30 @@ func TestAReconcileRemovesAnUncommittedGenerationFromTheSecret(t *testing.T) {
 	}
 }
 
+// A key the reconcile does not need does not stop it: with the new
+// generation's key broken while the old one serves, a renew request still
+// renews and publishes the leaf and clears the request, and the reconcile
+// then fails naming the key, so the log reports it every interval. Guards
+// the ErrOutstanding handling in Reconcile and pki's checkKeys.
+func TestABrokenUnusedKeyIsReportedAfterTheReconcile(t *testing.T) {
+	c, client := setup(t)
+	step(t, c, client, requestPrepare)
+	setAuthorityData(t, client, func(data map[string][]byte) { data["ca-2.key"] = []byte("not a key\n") })
+	request(t, client, requestRenew)
+	before := serving(t, client).Leaf
+	_, err := controller(t, client).Reconcile(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "generation 2 key ca-2.key does not match its certificate") {
+		t.Errorf("reconcile: %v", err)
+	}
+	if serving(t, client).Leaf.Equal(before) {
+		t.Error("the renew request did not renew the serving leaf")
+	}
+	s, err := client.CoreV1().Secrets(systemNamespace).Get(context.Background(), "sproozi-certificate-authority", metav1.GetOptions{})
+	if err != nil || s.Annotations[RotationRequest] != "" {
+		t.Errorf("request not cleared: %v %v", s.Annotations, err)
+	}
+}
+
 // The operator's way out of a refused record is the replace request, the
 // sproozi.com/rotation-request=replace annotation on the authority Secret.
 // It reaches the store, which leaves a single phase on a new generation:

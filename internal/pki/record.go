@@ -172,11 +172,11 @@ func check(st State) error {
 	return nil
 }
 
-// checkFiles refuses a record whose trusted generations' files are not the
-// ones it names: each trusted generation's certificate must have the
-// recorded fingerprint and expiry, and its key, when present, must match it.
-// A missing key is the lost-key state: issuance from it fails, and replace
-// recovers. Retired generations are not read; their keys are destroyed.
+// checkFiles refuses a record whose trusted generations' certificates are
+// not the ones it names: each must have the recorded fingerprint and expiry.
+// It reads no key, so a read of the serving leaf succeeds whenever the record
+// and its certificates are valid; checkKeys and the operation about to use a
+// key check it.
 func (s *Store) checkFiles(st State) error {
 	for _, id := range st.Trusted {
 		g, name := st.generation(id), caName(id)
@@ -194,18 +194,37 @@ func (s *Store) checkFiles(st State) error {
 		if !cert.NotAfter.Equal(g.NotAfter) {
 			return filesError("generation %d certificate %s.pem does not have the recorded expiry", id, name)
 		}
+	}
+	return nil
+}
+
+// checkKeys reports every trusted generation's key that cannot be read, or
+// does not match its certificate, naming the true cause. A missing key is
+// the lost-key state: issuance from it fails, and replace recovers; it is not
+// reported here. Ensure runs it after its leaf and trust work.
+func (s *Store) checkKeys(st State) error {
+	var errs []error
+	for _, id := range st.Trusted {
+		name := caName(id)
 		key, err := privatefs.ReadFile(filepath.Join(s.dir, name+".key"), maxPEM)
 		if os.IsNotExist(err) {
 			continue
 		}
+		if err != nil {
+			errs = append(errs, fmt.Errorf("pki: certificate authority key: generation %d key %s.key is unreadable: %w",
+				id, name, err))
+			continue
+		}
+		cert, err := privatefs.ReadFile(filepath.Join(s.dir, name+".pem"), maxPEM)
 		if err == nil {
-			_, _, err = Parse(Pair{Certificate: data, Key: key})
+			_, _, err = Parse(Pair{Certificate: cert, Key: key})
 		}
 		if err != nil {
-			return filesError("generation %d key %s.key does not match its certificate: %v", id, name, err)
+			errs = append(errs, fmt.Errorf("pki: certificate authority key: generation %d key %s.key does not match its "+
+				"certificate: %w", id, name, err))
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // caFilePattern is the only form of CA file name the store writes:

@@ -270,7 +270,7 @@ func (s *Store) Ensure(names Names) (bool, error) {
 			changed = true
 			err = s.issue(&st, now)
 		}
-		cleanup := s.destroyRetired(st)
+		cleanup := errors.Join(s.destroyRetired(st), s.checkKeys(st))
 		if err != nil {
 			return errors.Join(err, cleanup)
 		}
