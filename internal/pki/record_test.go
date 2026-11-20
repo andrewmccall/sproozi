@@ -1,25 +1,90 @@
 package pki
 
 import (
+	"fmt"
+	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
 
-// buildStates builds every state in outcomeStates once, keyed by name, each
-// in its own root.
+// sharedStates is every state in outcomeStates, built once per test binary
+// by the first test that asks. Tests read a state, or copy it with
+// copyStore and change the copy; TestMain fails the package if any test
+// changed a shared state. Building them takes 175 durable file
+// replacements, each a file and a directory fsync; building them again in
+// every test that uses them was most of the package's time. The tests that
+// still make the most such writes run in parallel, so their waits on the
+// disk overlap; none of them sets a package variable (appliedHook is set
+// only by TestEveryMoveGoesThroughApply, which is not parallel and so ends
+// before any parallel test resumes).
+var sharedStates struct {
+	once  sync.Once
+	dir   string
+	roots map[string]string
+	files map[string]string
+	err   error
+}
+
+// buildStates returns every state in outcomeStates, keyed by name, each in
+// its own root. The states are shared: copy one before changing it.
 func buildStates(t *testing.T) map[string]string {
 	t.Helper()
-	roots := map[string]string{}
-	for _, state := range outcomeStates() {
-		root := t.TempDir()
-		state.build(t, outcomeStore(t, root))
-		roots[state.name] = root
+	sharedStates.once.Do(func() {
+		// Stays set if a build step stops t, so every later caller fails too.
+		sharedStates.err = fmt.Errorf("building the shared states failed in %s", t.Name())
+		dir, err := os.MkdirTemp("", "pki-states-")
+		must(t, err)
+		sharedStates.dir = dir
+		roots := map[string]string{}
+		for _, state := range outcomeStates() {
+			root := filepath.Join(dir, state.name)
+			must(t, os.Mkdir(root, 0o700))
+			state.build(t, outcomeStore(t, root))
+			roots[state.name] = root
+		}
+		files, err := treeFiles(dir)
+		must(t, err)
+		sharedStates.roots, sharedStates.files, sharedStates.err = roots, files, nil
+	})
+	if sharedStates.err != nil {
+		t.Fatal(sharedStates.err)
 	}
-	return roots
+	return maps.Clone(sharedStates.roots)
+}
+
+// treeFiles reads every regular file under dir but the store's lock file,
+// by path.
+func treeFiles(dir string) (map[string]string, error) {
+	files := map[string]string{}
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || d.Name() == lockFile {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		files[path] = string(data)
+		return err
+	})
+	return files, err
+}
+
+// TestMain removes the shared states, and fails the package if a test
+// changed one.
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if sharedStates.dir != "" {
+		files, err := treeFiles(sharedStates.dir)
+		if sharedStates.err == nil && (err != nil || !maps.Equal(files, sharedStates.files)) {
+			fmt.Fprintf(os.Stderr, "a test changed the shared states in %s (%v)\n", sharedStates.dir, err)
+			code = 1
+		}
+		_ = os.RemoveAll(sharedStates.dir)
+	}
+	os.Exit(code)
 }
 
 // refusedRecordErrors maps each corruption no phase describes to the error
@@ -87,6 +152,7 @@ func refusedRecordCases() []corruption {
 // changes. Guards describe in record.go (each case removes one rule) and the
 // refusal of phaseRefused by every event but replace in transitions.go.
 func TestOnlyReplaceProceedsOnARefusedRecord(t *testing.T) {
+	t.Parallel() // its durable writes wait on the disk; see sharedStates
 	refusals := refusedRecordErrors()
 	roots := buildStates(t)
 	seen := map[string]bool{}
