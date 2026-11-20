@@ -221,7 +221,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if g.config.AuditLogger != nil {
 			event := gateway.AuditEvent(gateway.WithIdentity(r.Context(), identity), http.MethodConnect+" "+r.Host)
 			event.Capability, event.Service = string(api.CapabilityNetworkEgress), "network"
-			event.DenyReason = "destination " + r.Host + " is not enabled at this gateway"
+			event.DenyReason, event.Outcome = "destination "+r.Host+" is not enabled at this gateway", audit.RefusedPolicy
 			g.config.AuditLogger.Log(event)
 		}
 		http.Error(w, "unsupported destination", http.StatusForbidden)
