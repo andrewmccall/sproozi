@@ -84,6 +84,63 @@ func CaptureCodexState(home, threadID string, maxBytes int64) (CodexState, error
 	return result, nil
 }
 
+// captureCodex is Codex's Harness.CaptureState; Codex finds its rollout by
+// thread wherever the workspace was.
+func captureCodex(home, _, threadID string, maxBytes int64) (ConversationState, error) {
+	return capturedState(CaptureCodexState(home, threadID, maxBytes))
+}
+
+// Kind is NativeCodex.
+func (s CodexState) Kind() NativeKind { return NativeCodex }
+
+// Thread is the Codex thread ID.
+func (s CodexState) Thread() string { return s.ThreadID }
+
+// Size is the rollout's length.
+func (s CodexState) Size() int { return len(s.Rollout) }
+
+// CompletedTurn is CompletedCodexTurn.
+func (s CodexState) CompletedTurn(maxBytes int64) (string, error) {
+	return CompletedCodexTurn(s, maxBytes)
+}
+
+// Restore is RestoreCodexState; the rollout's path does not depend on the
+// workspace.
+func (s CodexState) Restore(home, _ string, maxBytes int64) error {
+	return RestoreCodexState(home, s, maxBytes)
+}
+
+// ValidateContinuity is ValidateCodexContinuity: Codex keeps the approved
+// instructions it started with in its rollout.
+func (s CodexState) ValidateContinuity(instructionDigest string, maxBytes int64) error {
+	return ValidateCodexContinuity(s, instructionDigest, maxBytes)
+}
+
+// codexEvent is the rollout row type of Codex's events.
+const codexEvent = "event_msg"
+
+// FinalText is the last_agent_message of the rollout's last task_complete
+// event.
+func (s CodexState) FinalText(maxBytes int64) (string, error) {
+	if _, err := CompletedCodexTurn(s, maxBytes); err != nil {
+		return "", err
+	}
+	var text string
+	for line := range bytes.SplitSeq(s.Rollout, []byte{'\n'}) {
+		var row struct {
+			Type    string `json:"type"`
+			Payload struct {
+				Type string `json:"type"`
+				Last string `json:"last_agent_message"`
+			} `json:"payload"`
+		}
+		if json.Unmarshal(line, &row) == nil && row.Type == codexEvent && row.Payload.Type == "task_complete" {
+			text = row.Payload.Last
+		}
+	}
+	return text, nil
+}
+
 // CompletedCodexTurn observes the native completion event. The supervisor
 // must separately block input and confirm native process/descendant termination.
 func CompletedCodexTurn(state CodexState, maxBytes int64) (string, error) {

@@ -323,6 +323,9 @@ func managedFactProblems(h Harness) []string {
 			h.TokenEnv != "" || h.KeyOptions != nil || h.SignInOptions != nil || h.SignInChoices != nil {
 			return []string{"has no Native kind, so it must not set the managed facts"}
 		}
+		if h.CaptureState != nil {
+			return []string{"has no Native kind, so it must not set CaptureState"}
+		}
 		return nil
 	}
 	var problems []string
@@ -333,6 +336,7 @@ func managedFactProblems(h Harness) []string {
 		{"DisplayName", h.DisplayName == ""},
 		{"Product", h.Product == ""},
 		{"Executable", !strings.HasPrefix(h.Executable, "/")},
+		{"CaptureState", h.CaptureState == nil},
 		{"InstructionsFile", h.InstructionsFile == ""},
 		{"KeyEnv", h.KeyEnv == ""},
 		{"RefusedFlags", len(h.RefusedFlags) == 0},

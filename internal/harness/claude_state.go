@@ -116,6 +116,41 @@ func CaptureClaudeState(home, workspace, threadID string, maxBytes int64) (Claud
 	return state, nil
 }
 
+// captureClaude is Claude Code's Harness.CaptureState: its transcript's path
+// encodes the workspace.
+func captureClaude(home, workspace, threadID string, maxBytes int64) (ConversationState, error) {
+	return capturedState(CaptureClaudeState(home, workspace, threadID, maxBytes))
+}
+
+// Kind is NativeClaude.
+func (s ClaudeState) Kind() NativeKind { return NativeClaude }
+
+// Thread is the Claude Code session ID.
+func (s ClaudeState) Thread() string { return s.ThreadID }
+
+// Size is the transcript's length.
+func (s ClaudeState) Size() int { return len(s.Transcript) }
+
+// CompletedTurn is ClaudeTranscriptLeaf: Claude Code writes no completion
+// event, so the settled leaf is the candidate turn.
+func (s ClaudeState) CompletedTurn(maxBytes int64) (string, error) {
+	return ClaudeTranscriptLeaf(s, maxBytes)
+}
+
+// Restore is RestoreClaudeState, at the destination workspace's project
+// path.
+func (s ClaudeState) Restore(home, workspace string, maxBytes int64) error {
+	return RestoreClaudeState(home, workspace, s, maxBytes)
+}
+
+// FinalText is ClaudeFinalText.
+func (s ClaudeState) FinalText(maxBytes int64) (string, error) { return ClaudeFinalText(s, maxBytes) }
+
+// ValidateContinuity finds no evidence to compare: Claude Code's transcript
+// is no proof of approved instructions, so the trusted launch supplies them
+// fresh and holds them invariant (ADR 0011).
+func (s ClaudeState) ValidateContinuity(string, int64) error { return nil }
+
 // RestoreClaudeState publishes the same transcript bytes at the destination's
 // exact native project path. Configuration and approved instructions are supplied
 // independently by the destination. Existing transcripts are never overwritten.

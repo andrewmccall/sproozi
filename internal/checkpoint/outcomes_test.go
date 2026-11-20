@@ -49,6 +49,9 @@ var fixtureDigest = func() string {
 	return hex.EncodeToString(sum[:])
 }()
 
+// fixtureReply is the final text of the Codex and Copilot fixtures.
+const fixtureReply = "Fixture reply."
+
 const copilotFixtureID = "0a7c5e1e-3b2d-4c4f-9a8b-1f2e3d4c5b6a"
 
 // codexInstructedRollout is a completed Codex turn that carries approved
@@ -66,11 +69,11 @@ const codexInstructedRollout = `{"type":"session_meta","payload":{"id":"01a126e8
 type stateFixture struct {
 	name  string
 	kind  harness.NativeKind
-	state func(t *testing.T, root string) any
+	state func(t *testing.T, root string) harness.ConversationState
 }
 
-func codexFixture(rollout string) func(*testing.T, string) any {
-	return func(*testing.T, string) any {
+func codexFixture(rollout string) func(*testing.T, string) harness.ConversationState {
+	return func(*testing.T, string) harness.ConversationState {
 		return harness.CodexState{ThreadID: fixtureThread,
 			Path:    "sessions/2026/10/10/rollout-2026-10-10T18-41-51-" + fixtureThread + ".jsonl",
 			Rollout: []byte(rollout)}
@@ -81,7 +84,7 @@ func stateFixtures() []stateFixture {
 	return []stateFixture{
 		{"codex", harness.NativeCodex, codexFixture(codexFixtureRollout)},
 		{"codex-instructed", harness.NativeCodex, codexFixture(codexInstructedRollout)},
-		{"claude-code", harness.NativeClaude, func(t *testing.T, root string) any {
+		{"claude-code", harness.NativeClaude, func(t *testing.T, root string) harness.ConversationState {
 			const id = "26386254-894d-4504-9bac-23ab929077cd"
 			path, err := harness.ClaudeProjectPath(root, id)
 			if err != nil {
@@ -89,7 +92,7 @@ func stateFixtures() []stateFixture {
 			}
 			return harness.ClaudeState{ThreadID: id, Workspace: root, Path: path, Transcript: []byte(claudeCheckpointTranscript)}
 		}},
-		{"copilot", harness.NativeCopilot, func(t *testing.T, _ string) any {
+		{"copilot", harness.NativeCopilot, func(t *testing.T, _ string) harness.ConversationState {
 			events, err := os.ReadFile(filepath.Join("..", "harness", "testdata", "copilot", "resumed-tool.jsonl"))
 			if err != nil {
 				t.Fatal(err)
@@ -101,38 +104,20 @@ func stateFixtures() []stateFixture {
 
 // fixtureArtifact builds the artifact CaptureStopped would encode for state
 // and the workspace archive.
-func fixtureArtifact(t *testing.T, kind harness.NativeKind, state any, archive []byte) nativeArtifact {
+func fixtureArtifact(t *testing.T, kind harness.NativeKind, state harness.ConversationState, archive []byte) nativeArtifact {
 	t.Helper()
 	a := nativeArtifact{Version: formatVersion, Harness: kind, Workspace: archive}
-	switch s := state.(type) {
-	case harness.CodexState:
-		a.Codex = &s
-	case harness.ClaudeState:
-		a.Claude = &s
-	case harness.CopilotState:
-		a.Copilot = &s
-	default:
-		t.Fatalf("no artifact field for %T", state)
+	if err := a.setState(state); err != nil {
+		t.Fatalf("no artifact field for %T: %v", state, err)
 	}
 	return a
 }
 
 // restoreHome publishes state in home, for a workspace at root, as the
 // harness would have written it.
-func restoreHome(t *testing.T, home, root string, state any) {
+func restoreHome(t *testing.T, home, root string, state harness.ConversationState) {
 	t.Helper()
-	var err error
-	switch s := state.(type) {
-	case harness.CodexState:
-		err = harness.RestoreCodexState(home, s, checkpointLimit)
-	case harness.ClaudeState:
-		err = harness.RestoreClaudeState(home, root, s, checkpointLimit)
-	case harness.CopilotState:
-		err = harness.RestoreCopilotState(home, s, checkpointLimit)
-	default:
-		t.Fatalf("no restore for %T", state)
-	}
-	if err != nil {
+	if err := state.Restore(home, root, checkpointLimit); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -310,7 +295,7 @@ func captureOutcomes(t *testing.T, repository string, f stateFixture) map[string
 	state := f.state(t, repository)
 	home := t.TempDir()
 	restoreHome(t, home, repository, state)
-	data, meta, err := CaptureStopped(t.Context(), f.kind, home, repository, threadOf(state), nil, checkpointLimit)
+	data, meta, err := CaptureStopped(t.Context(), f.kind, home, repository, state.Thread(), nil, checkpointLimit)
 	o := map[string]any{"harness": meta.Harness, "threadId": meta.ThreadID, "turnId": meta.TurnID, keyError: outcomeError(err)}
 	if err == nil {
 		var a nativeArtifact
@@ -320,18 +305,6 @@ func captureOutcomes(t *testing.T, repository string, f stateFixture) map[string
 		o["native"] = digestOf(journalOf(t, a))
 	}
 	return o
-}
-
-func threadOf(state any) string {
-	switch s := state.(type) {
-	case harness.CodexState:
-		return s.ThreadID
-	case harness.ClaudeState:
-		return s.ThreadID
-	case harness.CopilotState:
-		return s.ThreadID
-	}
-	return ""
 }
 
 // journalOf is the conversation bytes an artifact carries.

@@ -45,6 +45,60 @@ func CaptureCopilotState(home, threadID string, maxBytes int64) (CopilotState, e
 	return state, nil
 }
 
+// captureCopilot is Copilot's Harness.CaptureState; the journal's path does
+// not depend on the workspace.
+func captureCopilot(home, _, threadID string, maxBytes int64) (ConversationState, error) {
+	return capturedState(CaptureCopilotState(home, threadID, maxBytes))
+}
+
+// Kind is NativeCopilot.
+func (s CopilotState) Kind() NativeKind { return NativeCopilot }
+
+// Thread is the Copilot session ID.
+func (s CopilotState) Thread() string { return s.ThreadID }
+
+// Size is the journal's length.
+func (s CopilotState) Size() int { return len(s.Events) }
+
+// CompletedTurn is CompletedCopilotTurn.
+func (s CopilotState) CompletedTurn(maxBytes int64) (string, error) {
+	return CompletedCopilotTurn(s, maxBytes)
+}
+
+// Restore is RestoreCopilotState; the journal's path does not depend on the
+// workspace.
+func (s CopilotState) Restore(home, _ string, maxBytes int64) error {
+	return RestoreCopilotState(home, s, maxBytes)
+}
+
+// ValidateContinuity finds no evidence to compare: Copilot keeps no approved
+// instructions in its journal, and the supervisor writes
+// copilot-instructions.md afresh at each launch.
+func (s CopilotState) ValidateContinuity(string, int64) error { return nil }
+
+// FinalText is the main agent's last answer that requested no tools.
+func (s CopilotState) FinalText(maxBytes int64) (string, error) {
+	if _, err := CompletedCopilotTurn(s, maxBytes); err != nil {
+		return "", err
+	}
+	var text string
+	for line := range bytes.SplitSeq(s.Events, []byte{'\n'}) {
+		var row struct {
+			Type string `json:"type"`
+			Data struct {
+				Content      string            `json:"content"`
+				ToolRequests []json.RawMessage `json:"toolRequests"`
+				Parent       string            `json:"parentToolCallId"`
+			} `json:"data"`
+		}
+		if json.Unmarshal(line, &row) == nil && row.Type == "assistant.message" && row.Data.Parent == "" &&
+			len(row.Data.ToolRequests) == 0 {
+			text = row.Data.Content
+		}
+	}
+	return text, nil
+}
+
 // ReadCopilotState reads a live session's journal for observation, without
 // requiring a completed turn.
 func ReadCopilotState(home, threadID string, maxBytes int64) (CopilotState, error) {

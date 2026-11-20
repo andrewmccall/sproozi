@@ -52,33 +52,22 @@ type Metadata struct {
 func CaptureStopped(ctx context.Context, kind harness.NativeKind, home, repository, threadID string,
 	selectedIgnored []string, maxBytes int64) ([]byte, Metadata, error) {
 	artifact := nativeArtifact{Version: formatVersion, Harness: kind}
-	switch kind {
-	case harness.NativeCodex:
-		native, err := harness.CaptureCodexState(home, threadID, maxBytes)
-		if err != nil {
-			return nil, Metadata{}, err
-		}
-		artifact.Codex = &native
-	case harness.NativeClaude:
-		native, err := harness.CaptureClaudeState(home, repository, threadID, maxBytes)
-		if err != nil {
-			return nil, Metadata{}, err
-		}
-		artifact.Claude = &native
-	case harness.NativeCopilot:
-		native, err := harness.CaptureCopilotState(home, threadID, maxBytes)
-		if err != nil {
-			return nil, Metadata{}, err
-		}
-		artifact.Copilot = &native
-	default:
-		return nil, Metadata{}, errors.New("checkpoint: unsupported native harness")
+	h, err := harness.Managed(kind)
+	if err != nil || h.CaptureState == nil {
+		return nil, Metadata{}, errUnsupported
 	}
-	_, _, size, err := artifact.native(maxBytes)
+	state, err := h.CaptureState(home, repository, threadID, maxBytes)
+	if err != nil {
+		return nil, Metadata{}, err
+	}
+	if err = artifact.setState(state); err != nil {
+		return nil, Metadata{}, err
+	}
+	native, _, err := artifact.native(maxBytes)
 	if err != nil {
 		return nil, Metadata{}, RefuseState(err)
 	}
-	artifact.Workspace, err = workspace.Capture(ctx, repository, selectedIgnored, maxBytes-int64(size))
+	artifact.Workspace, err = workspace.Capture(ctx, repository, selectedIgnored, maxBytes-int64(native.Size()))
 	if errors.Is(err, workspace.ErrByteLimit) {
 		// The workspace with the conversation exceeds the bound.
 		return nil, Metadata{}, RefuseState(err)
@@ -111,9 +100,13 @@ func Workspace(data []byte, maxBytes int64) ([]byte, workspace.Metadata, error) 
 	return artifact.Workspace, meta.Workspace, nil
 }
 
-// ValidateContinuity checks the explicit selected native adapter. Codex also
-// compares native instruction evidence; Claude instructions remain an independent
-// trusted launch invariant. This supplies no writer fence or authority.
+// ValidateContinuity checks the explicit selected native adapter, then the
+// state's own evidence of approved instructions: Codex compares the
+// instructions its rollout started with; Claude Code and Copilot keep none, so
+// the trusted launch must independently hold approved instructions invariant
+// and supply them fresh, and this check reports continuity compatibility only.
+// The digest must be well formed either way. This supplies no writer fence or
+// authority.
 func ValidateContinuity(data []byte, kind harness.NativeKind, instructionDigest string, maxBytes int64) error {
 	_, artifact, err := inspect(data, maxBytes)
 	if err != nil {
@@ -122,12 +115,13 @@ func ValidateContinuity(data []byte, kind harness.NativeKind, instructionDigest 
 	if artifact.Harness != kind {
 		return errors.New("checkpoint: native harness conflicts with trusted launch")
 	}
-	if artifact.Codex != nil {
-		return harness.ValidateCodexContinuity(*artifact.Codex, instructionDigest, maxBytes)
+	state, err := artifact.state()
+	if err != nil {
+		return err
 	}
-	// Claude has no native instruction evidence. The source/destination trusted
-	// launch must independently hold approved instructions invariant and supply
-	// them fresh; this check reports continuity compatibility only.
+	if err = state.ValidateContinuity(instructionDigest, maxBytes); err != nil {
+		return err
+	}
 	digest, err := hex.DecodeString(instructionDigest)
 	if err != nil || len(digest) != sha256.Size {
 		return errors.New("checkpoint: invalid trusted instruction digest")
@@ -135,28 +129,53 @@ func ValidateContinuity(data []byte, kind harness.NativeKind, instructionDigest 
 	return nil
 }
 
-func (a nativeArtifact) native(maxBytes int64) (string, string, int, error) {
-	switch a.Harness {
-	case harness.NativeCodex:
-		if a.Codex == nil || a.Claude != nil || a.Copilot != nil {
-			break
-		}
-		turn, err := harness.CompletedCodexTurn(*a.Codex, maxBytes)
-		return a.Codex.ThreadID, turn, len(a.Codex.Rollout), err
-	case harness.NativeClaude:
-		if a.Claude == nil || a.Codex != nil || a.Copilot != nil {
-			break
-		}
-		leaf, err := harness.ClaudeTranscriptLeaf(*a.Claude, maxBytes)
-		return a.Claude.ThreadID, leaf, len(a.Claude.Transcript), err
-	case harness.NativeCopilot:
-		if a.Copilot == nil || a.Codex != nil || a.Claude != nil {
-			break
-		}
-		turn, err := harness.CompletedCopilotTurn(*a.Copilot, maxBytes)
-		return a.Copilot.ThreadID, turn, len(a.Copilot.Events), err
+// errUnsupported refuses a kind with no checkpoint format.
+var errUnsupported = errors.New("checkpoint: unsupported native harness")
+
+// setState stores a captured state in its kind's field. A new managed
+// harness's state type needs a field in nativeArtifact, a case here and a
+// line in state.
+func (a *nativeArtifact) setState(state harness.ConversationState) error {
+	switch s := state.(type) {
+	case harness.CodexState:
+		a.Codex = &s
+	case harness.ClaudeState:
+		a.Claude = &s
+	case harness.CopilotState:
+		a.Copilot = &s
+	default:
+		return errUnsupported
 	}
-	return "", "", 0, errors.New("checkpoint: inconsistent native harness state")
+	return nil
+}
+
+// state returns the artifact's one native state, refusing none, more than
+// one, or one of another kind than Harness.
+func (a nativeArtifact) state() (harness.ConversationState, error) {
+	var states []harness.ConversationState
+	if a.Codex != nil {
+		states = append(states, *a.Codex)
+	}
+	if a.Claude != nil {
+		states = append(states, *a.Claude)
+	}
+	if a.Copilot != nil {
+		states = append(states, *a.Copilot)
+	}
+	if len(states) != 1 || states[0].Kind() != a.Harness {
+		return nil, errors.New("checkpoint: inconsistent native harness state")
+	}
+	return states[0], nil
+}
+
+// native returns the artifact's state and its completed turn.
+func (a nativeArtifact) native(maxBytes int64) (harness.ConversationState, string, error) {
+	state, err := a.state()
+	if err != nil {
+		return nil, "", err
+	}
+	turn, err := state.CompletedTurn(maxBytes)
+	return state, turn, err
 }
 
 func decodeArtifact(data []byte) (nativeArtifact, error) {
@@ -200,7 +219,7 @@ func inspect(data []byte, maxBytes int64) (Metadata, nativeArtifact, error) {
 	if len(artifact.Workspace) == 0 {
 		return Metadata{}, artifact, errors.New("checkpoint: incomplete workspace")
 	}
-	id, turn, _, err := artifact.native(maxBytes)
+	state, turn, err := artifact.native(maxBytes)
 	if err != nil {
 		return Metadata{}, artifact, err
 	}
@@ -209,7 +228,7 @@ func inspect(data []byte, maxBytes int64) (Metadata, nativeArtifact, error) {
 	if err != nil {
 		return Metadata{}, artifact, err
 	}
-	return Metadata{Harness: artifact.Harness, ThreadID: id, TurnID: turn,
+	return Metadata{Harness: artifact.Harness, ThreadID: state.Thread(), TurnID: turn,
 		SHA256: hex.EncodeToString(digest[:]), Bytes: len(data), Workspace: workspaceMeta}, artifact, nil
 }
 
@@ -262,24 +281,14 @@ func Restore(ctx context.Context, data []byte, target string, maxBytes int64) (M
 	if err = os.Chmod(home, 0700); err != nil {
 		return Metadata{}, err
 	}
-	switch artifact.Harness {
-	case harness.NativeCodex:
-		err = harness.RestoreCodexState(home, *artifact.Codex, maxBytes)
-	case harness.NativeClaude:
-		err = harness.RestoreClaudeState(home, filepath.Join(target, "workspace"), *artifact.Claude, maxBytes)
-	case harness.NativeCopilot:
-		err = harness.RestoreCopilotState(home, *artifact.Copilot, maxBytes)
-	default:
-		err = errors.New("checkpoint: unsupported native harness")
-	}
+	state, err := artifact.state()
 	if err != nil {
 		return Metadata{}, err
 	}
-	_, _, nativeBytes, err := artifact.native(maxBytes)
-	if err != nil {
+	if err = state.Restore(home, filepath.Join(target, "workspace"), maxBytes); err != nil {
 		return Metadata{}, err
 	}
-	if err = workspace.Restore(ctx, artifact.Workspace, filepath.Join(staging, "workspace"), maxBytes-int64(nativeBytes)); err != nil {
+	if err = workspace.Restore(ctx, artifact.Workspace, filepath.Join(staging, "workspace"), maxBytes-int64(state.Size())); err != nil {
 		return Metadata{}, err
 	}
 	if _, err = os.Lstat(target); !os.IsNotExist(err) {

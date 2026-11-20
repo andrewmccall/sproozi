@@ -97,6 +97,10 @@ type Harness struct {
 	// task's completion is bound to its prompt's turn by the supervisor's
 	// UserPromptSubmit hook (ADR 0057).
 	RemoteExecutor bool
+	// CaptureState captures the kind's conversation from a stopped native
+	// home, for the workspace at workspace, as the ConversationState a checkpoint
+	// carries (internal/checkpoint).
+	CaptureState func(home, workspace, threadID string, maxBytes int64) (ConversationState, error)
 
 	// TakesTask: the supervisor submits a task as the launch's prompt and
 	// binds completion to that prompt's turn: Codex by the task text in its
@@ -243,6 +247,7 @@ var registry = []Harness{
 		DisplayName: "Codex", Product: "OpenAI Codex CLI", Executable: "/usr/local/bin/codex", InstructionsFile: "AGENTS.md",
 		KeyEnv: nativeOpenAIKey, RunKeyEnv: nativeOpenAIKey, RefusedFlags: codexControlled, ReservedEnv: []string{"CODEX_HOME"},
 		RemoteExecutor: true, TakesTask: true, Default: true, KeyOptions: codexKeyOptions, SignInOptions: []string{codexTrust},
+		CaptureState: captureCodex,
 		SignInChoices: []SignInChoice{
 			{Label: "An OpenAI API key, held by the gateway", Answer: AnswerKey},
 			{Label: "A ChatGPT plan, signed in now in your browser and held by the gateway",
@@ -261,6 +266,7 @@ var registry = []Harness{
 			{Label: `A sign-in token from "claude setup-token", held by the gateway`, Answer: AnswerToken},
 			{Label: "Claude Code signs in itself with /login in its first session", Answer: AnswerSignIn},
 		},
+		CaptureState: captureClaude,
 		RequestFiles: true, Loader: NativeMCP, LaunchFiles: launchFilesNamed("claude-launch.py"),
 		MCP: MCPFormat{File: "claude-mcp.json", Field: mcpServersField, Entry: func(name, address string) (string, any) {
 			return name, map[string]any{connectionType: httpTransport, connectionURL: address}
@@ -280,6 +286,7 @@ var registry = []Harness{
 			{Label: "A GitHub token with Copilot access, held by the gateway", Answer: AnswerToken},
 			{Label: "An OpenAI API key, held by the gateway (no Copilot plan needed)", Answer: AnswerKey},
 		},
+		CaptureState: captureCopilot,
 		RequestFiles: true, Loader: NativeMCP,
 		MCP: MCPFormat{File: "copilot-mcp.json", Field: mcpServersField, Entry: func(name, address string) (string, any) {
 			return name, map[string]any{connectionType: httpTransport, connectionURL: address, "tools": []string{"*"}}
