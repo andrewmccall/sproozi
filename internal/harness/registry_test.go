@@ -316,20 +316,33 @@ func managedFactProblems(h Harness) []string {
 	return append(problems, signInChoiceProblems(h)...)
 }
 
-// Every registered entry passes managedFactProblems, and exactly one managed
-// harness is the default.
-func TestManagedKindsSupplyEveryFact(t *testing.T) {
+// registryProblems runs managedFactProblems over entries and requires
+// exactly one managed harness to be the default.
+func registryProblems(entries []Harness) []string {
+	var problems []string
 	defaults := 0
-	for _, h := range registry {
+	for _, h := range entries {
 		for _, problem := range managedFactProblems(h) {
-			t.Errorf("harness %q %s in %s", h.Selector, problem, registryFile)
+			problems = append(problems, fmt.Sprintf("harness %q %s", h.Selector, problem))
 		}
 		if h.Native != "" && h.Default {
 			defaults++
 		}
 	}
-	if defaults != 1 || Default() == "" {
-		t.Errorf("exactly one managed harness must be the Default in %s; found %d", registryFile, defaults)
+	if defaults != 1 {
+		problems = append(problems, fmt.Sprintf("exactly one managed harness must be the Default; found %d", defaults))
+	}
+	return problems
+}
+
+// Every registered entry supplies every managed fact, and exactly one managed
+// harness is the default.
+func TestManagedKindsSupplyEveryFact(t *testing.T) {
+	for _, problem := range registryProblems(registry) {
+		t.Errorf("%s in %s", problem, registryFile)
+	}
+	if Default() == "" {
+		t.Errorf("Default() names no managed harness in %s", registryFile)
 	}
 }
 

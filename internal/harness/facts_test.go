@@ -67,3 +67,44 @@ func TestManagedFactProblemsNamesEachBrokenRule(t *testing.T) {
 			problems)
 	}
 }
+
+// Exactly one managed harness is the default: none and two are each refused,
+// and a default on an AgentRun-only entry does not count.
+func TestRegistryProblemsRequireOneDefault(t *testing.T) {
+	if problems := registryProblems(registry); len(problems) != 0 {
+		t.Fatalf("the registry has problems: %v", problems)
+	}
+	withDefaults := func(defaults ...bool) []Harness {
+		entries := slices.Clone(registry)
+		managed := 0
+		for i := range entries {
+			if entries[i].Native != "" {
+				entries[i].Default = managed < len(defaults) && defaults[managed]
+				managed++
+			}
+		}
+		return entries
+	}
+	for _, c := range []struct {
+		name    string
+		entries []Harness
+	}{
+		{"none", withDefaults()},
+		{"two", withDefaults(true, true)},
+	} {
+		problems := registryProblems(c.entries)
+		if len(problems) != 1 || !strings.Contains(problems[0], "exactly one managed harness must be the Default") {
+			t.Errorf("%s: problems %q; want one about the default", c.name, problems)
+		}
+	}
+	agentRunDefault := withDefaults()
+	for i := range agentRunDefault {
+		if agentRunDefault[i].Native == "" {
+			agentRunDefault[i].Default = true
+			break
+		}
+	}
+	if problems := registryProblems(agentRunDefault); len(problems) != 2 {
+		t.Errorf("a default AgentRun-only entry: problems %q; want its managed-fact problem and no default", problems)
+	}
+}
