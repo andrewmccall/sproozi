@@ -89,7 +89,7 @@ func CaptureClaudeState(home, workspace, threadID string, maxBytes int64) (Claud
 	if err != nil || maxBytes <= 0 {
 		return ClaudeState{}, errors.New("invalid Claude checkpoint selection")
 	}
-	if err = claudeDirectories(home, filepath.Dir(path), false); err != nil {
+	if err = stateDirectories(home, filepath.Dir(path), false, claudeUnsafeDirectory); err != nil {
 		return ClaudeState{}, err
 	}
 	name := filepath.Join(home, filepath.FromSlash(path))
@@ -162,47 +162,15 @@ func RestoreClaudeState(home, workspace string, state ClaudeState, maxBytes int6
 	if err != nil {
 		return err
 	}
-	if err = claudeDirectories(home, filepath.Dir(path), true); err != nil {
+	if err = stateDirectories(home, filepath.Dir(path), true, claudeUnsafeDirectory); err != nil {
 		return err
 	}
-	name := filepath.Join(home, filepath.FromSlash(path))
-	file, err := os.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
-	if err != nil {
-		return err
-	}
-	_, writeErr := file.Write(state.Transcript)
-	if writeErr == nil {
-		writeErr = file.Sync()
-	}
-	closeErr := file.Close()
-	if writeErr != nil || closeErr != nil {
-		_ = os.Remove(name)
-		return errors.Join(writeErr, closeErr)
-	}
-	return nil
+	return writeStateFile(filepath.Join(home, filepath.FromSlash(path)), state.Transcript)
 }
 
-func claudeDirectories(home, relative string, create bool) error {
-	dir := home
-	for _, part := range append([]string{""}, strings.Split(filepath.ToSlash(relative), "/")...) {
-		if part != "" {
-			dir = filepath.Join(dir, part)
-			if create {
-				if err := os.Mkdir(dir, 0700); err != nil && !os.IsExist(err) {
-					return err
-				}
-			}
-		}
-		info, err := os.Lstat(dir)
-		if err != nil {
-			return stateFileError(err)
-		}
-		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-			return refusedState(errors.New("unsafe Claude native directory"))
-		}
-	}
-	return nil
-}
+// claudeUnsafeDirectory refuses a link or non-directory on the transcript's
+// path.
+const claudeUnsafeDirectory = "unsafe Claude native directory"
 
 type claudeRecord struct {
 	Type           string          `json:"type"`

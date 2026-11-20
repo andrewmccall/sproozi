@@ -177,24 +177,7 @@ func RestoreCodexState(home string, state CodexState, maxBytes int64) error {
 			return fmt.Errorf("unsafe native restore directory")
 		}
 	}
-	name := filepath.Join(home, filepath.FromSlash(state.Path))
-	file, err := os.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
-	if err != nil {
-		return err
-	}
-	_, writeErr := file.Write(state.Rollout)
-	if writeErr == nil {
-		writeErr = file.Sync()
-	}
-	closeErr := file.Close()
-	if writeErr != nil || closeErr != nil {
-		_ = os.Remove(name)
-		if writeErr != nil {
-			return writeErr
-		}
-		return closeErr
-	}
-	return nil
+	return writeStateFile(filepath.Join(home, filepath.FromSlash(state.Path)), state.Rollout)
 }
 
 func inspectCodexState(state CodexState, maxBytes int64) (string, string, error) {
