@@ -278,7 +278,7 @@ const runKeyPlaceholder = "sproozi-local-placeholder"
 // must supply its own placeholder, or it fails only on a cluster.
 func TestExampleProblemRequiresAKeyPlaceholderWithoutRunKeyEnv(t *testing.T) {
 	// examples/mcp sets no key: Codex reads the Pod's OPENAI_API_KEY.
-	fake := Harness{Selector: "codex", MCP: MCPFormat{File: "codex-mcp.toml"}}
+	fake := Harness{Selector: string(NativeCodex), MCP: MCPFormat{File: "codex-mcp.toml"}}
 	const example = "examples/mcp/agentruntime.yaml"
 	if problem := exampleProblem(fake, example); !strings.Contains(problem, runKeyPlaceholder) {
 		t.Fatalf("a harness with neither RunKeyEnv nor its own placeholder passed: %q", problem)

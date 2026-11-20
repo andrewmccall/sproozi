@@ -22,7 +22,7 @@ func TestCredentialsSetNamesEachAcceptedNameOnce(t *testing.T) {
 		t.Fatalf("usage error names no accepted names: %q", message)
 	}
 	seen := map[string]bool{}
-	for _, name := range strings.Split(list, ", ") {
+	for name := range strings.SplitSeq(list, ", ") {
 		if seen[name] {
 			t.Errorf("usage error names %q twice: %q", name, message)
 		}
