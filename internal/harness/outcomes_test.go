@@ -51,6 +51,9 @@ func outcomeArgs() [][]string {
 			}
 			if f.short != "" {
 				add("-" + f.short)
+				if f.value {
+					add("-" + f.short + "x")
+				}
 			}
 		}
 	}
@@ -63,6 +66,31 @@ func outcomeArgs() [][]string {
 	add("--config", "projects.x=y")
 	add("--")
 	add("--harmless")
+	// Model selection: alone, after another argument, and inside a
+	// configuration override's value.
+	add("--model")
+	add("-m")
+	add("--harmless", "--model", "x")
+	add("--models")
+	add("-c", "-mx")
+	// Every spelling of a configuration override, its key quoting and
+	// nesting, and the argument it consumes.
+	add("--config=model=x")
+	add("-cmodel=x")
+	add("--config", "model=x")
+	add("-c")
+	add("--config")
+	add("-c", "--sandbox")
+	add("-c", "sandbox_mode")
+	add("--config=")
+	add("-c", `"model_provider"=x`)
+	add("-c", ` model_provider . x = y`)
+	add("-c", `mcp_servers."sproozi".url=x`)
+	add("-c", "mcp_servers.other.url=x")
+	add("-c", "model_providers_extra=x")
+	add("-c", "notice.x=y")
+	add("--harmless", "-c", "approval_policy=x")
+	add("-c", "x=y", "--sandbox", "x")
 	return out
 }
 
