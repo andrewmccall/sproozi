@@ -254,10 +254,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if providerAuth.Mode() == modelauth.ChatGPTMode {
 		if err := validateChatGPTRequest(r, bodyBytes, limits.MaxCostMicros); err != nil {
-			if limits.MaxCostMicros > 0 {
-				// A dollar cap cannot apply to plan usage, as pricing cannot.
-				e.Outcome = audit.RefusedBudget
-			}
+			e.Outcome = chatGPTRefusalOutcome(limits)
 			h.deny(r.Context(), w, e, http.StatusForbidden, err.Error(), "permission_error", "chatgpt_request_not_supported")
 			return
 		}
@@ -658,6 +655,16 @@ func (h *Handler) deny(ctx context.Context, w http.ResponseWriter, e audit.Event
 	}
 	gateway.Record(ctx, h.Config.AuditLogger, e)
 	h.writeError(w, status, message, errType, code)
+}
+
+// chatGPTRefusalOutcome is the outcome of a refused ChatGPT request: a dollar
+// cap cannot apply to plan usage, as pricing cannot, so it is a budget
+// refusal; anything else takes its outcome from the refusal code.
+func chatGPTRefusalOutcome(limits sprooziv1alpha1.EndpointBudget) audit.Outcome {
+	if limits.MaxCostMicros > 0 {
+		return audit.RefusedBudget
+	}
+	return ""
 }
 
 // refusalOutcome is the outcome of a refusal by its cause: an operation,

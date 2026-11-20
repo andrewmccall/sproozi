@@ -351,6 +351,11 @@ func refusedWithoutCapability(t *testing.T, name string, routes gateway.Dispatch
 	}
 }
 
+const (
+	notJSON           = "not json"
+	kubernetesMCPPath = "/mcp"
+)
+
 // edgeRequests are malformed or unusual requests a sandbox can send to any
 // route: none may leave the dispatcher to record an omission.
 var edgeRequests = []struct{ method, path, body string }{
@@ -358,14 +363,14 @@ var edgeRequests = []struct{ method, path, body string }{
 	{http.MethodPost, "/", "{"},
 	{http.MethodDelete, "/anything?x=1", ""},
 	{http.MethodPost, "/mcp/unregistered", `{"jsonrpc":"2.0","id":1,"method":"initialize"}`},
-	{http.MethodPost, "/mcp/" + MCPServer, "not json"},
+	{http.MethodPost, "/mcp/" + MCPServer, notJSON},
 	{http.MethodPost, "/mcp/" + MCPServer, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18",` +
 		`"capabilities":{},"clientInfo":{"name":"edges","version":"1"}}}`},
 	{http.MethodGet, "/mcp/" + MCPServer, ""},
-	{http.MethodPost, "/mcp/sproozi", "not json"},
-	{http.MethodPost, "/mcp", `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`},
-	{http.MethodPost, "/mcp", "not json"},
-	{http.MethodPost, "/mcp", `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"kubernetes_list_pods","arguments":{"namespace":"Bad_Name"}}}`},
+	{http.MethodPost, "/mcp/sproozi", notJSON},
+	{http.MethodPost, kubernetesMCPPath, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`},
+	{http.MethodPost, kubernetesMCPPath, notJSON},
+	{http.MethodPost, kubernetesMCPPath, `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"kubernetes_list_pods","arguments":{"namespace":"Bad_Name"}}}`},
 }
 
 // Edges sends edgeRequests, and a named MCP tool call without the Accept

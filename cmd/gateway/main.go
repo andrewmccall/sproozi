@@ -859,7 +859,8 @@ func main() {
 	}
 	var tokenProvider githubgateway.TokenProvider
 	if cfg.enabled[sprooziv1alpha1.CapabilityGitHubPullRequest] {
-		if tokenProvider, err = githubgateway.NewAppTokenProvider(cfg.appID, cfg.installationID, cfg.privateKey, httpClient); err != nil {
+		tokenProvider, err = githubgateway.NewAppTokenProvider(cfg.appID, cfg.installationID, cfg.privateKey, httpClient)
+		if err != nil {
 			log.Fatal(err)
 		}
 	}

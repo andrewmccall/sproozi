@@ -43,7 +43,7 @@ func TestEveryComposedRouteKeepsTheRouteContract(t *testing.T) {
 					nativeCapabilities: []api.CapabilityKind{api.CapabilityGitHubPullRequest, api.CapabilityKubernetesRead}}
 				events := &routetest.Recorder{}
 				config := GatewayConfig{Harness: kind, AuditLogger: events,
-					Certificates: map[string]tls.Certificate{"gateway.fixture": {}}, MCPAuthority: "gateway.fixture:443",
+					Certificates: map[string]tls.Certificate{gatewayFixtureHost: {}}, MCPAuthority: gatewayFixtureHost + ":443",
 					MCPRegistry: routetest.MCPRegistry(t), MCPClient: client,
 					GitHub: &githubgateway.HandlerConfig{TokenProvider: routetest.TokenProvider{}, HTTPClient: client,
 						GitBaseURL: "https://github.com", APIBaseURL: "https://api.github.com"},
@@ -77,7 +77,7 @@ func TestMinimalDockerRoutesRecordEveryEdgeRequest(t *testing.T) {
 			owner := &Owner{policy: gateway.PolicySnapshot{Spec: api.AgentPolicySpec{
 				AllowedCapabilities: []api.CapabilityKind{api.CapabilityModelInference}}}}
 			config := GatewayConfig{Harness: kind, AuditLogger: events,
-				Certificates: map[string]tls.Certificate{"gateway.fixture": {}}, MCPAuthority: "gateway.fixture:443",
+				Certificates: map[string]tls.Certificate{gatewayFixtureHost: {}}, MCPAuthority: gatewayFixtureHost + ":443",
 				Model: modelgateway.HandlerConfig{UpstreamURL: openAIOrigin, ProviderAuth: modelauth.Workload{},
 					HTTPClient: routetest.Client(t)}}
 			routes, err := composeRoutes(owner, config, budget.NewTracker(), diagnose.NewJournal(events, diagnose.Limits{}))

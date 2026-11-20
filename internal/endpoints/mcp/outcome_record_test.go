@@ -29,6 +29,13 @@ import (
 	"github.com/andrewmccall/sproozi/internal/gateway"
 )
 
+// The recorded executions' namespace, policy and template.
+const (
+	recordNamespace = "agents"
+	recordPolicy    = "test-policy"
+	recordTemplate  = "test-template"
+)
+
 var updateRecords = flag.Bool("update-records", false,
 	"rewrite testdata/outcomes.txt from the current code")
 
@@ -186,8 +193,8 @@ func recordedMCPUpstream(t *testing.T) (*remote.Registry, *http.Client) {
 		t.Fatal(err)
 	}
 	data, err := json.Marshal(map[string]any{"servers": map[string]any{
-		docsName: map[string]string{"url": upstream.URL + "/mcp", "bearerTokenFile": token},
-		"down":   map[string]string{"url": downURL + "/mcp"},
+		docsName: map[string]string{registryURLField: upstream.URL + "/mcp", "bearerTokenFile": token},
+		"down":   map[string]string{registryURLField: downURL + "/mcp"},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -219,14 +226,14 @@ func TestNamedMCPOutcomesAreRecorded(t *testing.T) {
 		return s
 	}
 	grant := func(change func(*gateway.ExecutionGrant)) *gateway.ExecutionGrant {
-		g := &gateway.ExecutionGrant{Execution: gateway.Reference{Backend: gateway.BackendKubernetes, Namespace: "agents", Name: "run", UID: "test-execution"},
-			Authority: gateway.Reference{Backend: gateway.BackendKubernetes, Namespace: "agents", Name: "runner", UID: "sa-uid"},
-			Policy: gateway.PolicySnapshot{Name: "test-policy", Generation: 7, Spec: api.AgentPolicySpec{
+		g := &gateway.ExecutionGrant{Execution: gateway.Reference{Backend: gateway.BackendKubernetes, Namespace: recordNamespace, Name: "run", UID: "test-execution"},
+			Authority: gateway.Reference{Backend: gateway.BackendKubernetes, Namespace: recordNamespace, Name: "runner", UID: "sa-uid"},
+			Policy: gateway.PolicySnapshot{Name: recordPolicy, Generation: 7, Spec: api.AgentPolicySpec{
 				AllowedCapabilities: []api.CapabilityKind{docs, down},
 				MCPServers:          map[string]api.MCPServerScope{docsName: scope(searchTool, "fail"), "down": scope(searchTool)},
 				Budgets:             map[api.CapabilityKind]api.EndpointBudget{docs: {MaxUnits: 5}},
 			}},
-			Template:     gateway.TemplateSnapshot{Name: "test-template"},
+			Template:     gateway.TemplateSnapshot{Name: recordTemplate},
 			Capabilities: []api.CapabilityKind{docs, down}}
 		if change != nil {
 			change(g)
@@ -359,7 +366,7 @@ func abandonedToolCall(t *testing.T) string {
 	upstream := httptest.NewTLSServer(sdk.NewStreamableHTTPHandler(func(*http.Request) *sdk.Server { return server },
 		&sdk.StreamableHTTPOptions{JSONResponse: true}))
 	t.Cleanup(upstream.Close)
-	data, err := json.Marshal(map[string]any{"servers": map[string]any{name: map[string]string{"url": upstream.URL + "/mcp"}}})
+	data, err := json.Marshal(map[string]any{"servers": map[string]any{name: map[string]string{registryURLField: upstream.URL + "/mcp"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -371,11 +378,11 @@ func abandonedToolCall(t *testing.T) string {
 	tracker := budget.NewTracker()
 	handler := remote.NewHandler(remote.HandlerConfig{Registry: registry, HTTPClient: upstream.Client(), Budgets: tracker, AuditLogger: events})
 	routes := gateway.Dispatcher{"gateway.test:443": {Admission: gateway.AdmitSelected, Tier: audit.TierProtocol, Handler: handler, Budgets: tracker, AuditLogger: events}}
-	grant := &gateway.ExecutionGrant{Execution: gateway.Reference{Backend: gateway.BackendKubernetes, Namespace: "agents", Name: "run", UID: "test-execution"},
-		Policy: gateway.PolicySnapshot{Name: "test-policy", Spec: api.AgentPolicySpec{AllowedCapabilities: []api.CapabilityKind{capability},
+	grant := &gateway.ExecutionGrant{Execution: gateway.Reference{Backend: gateway.BackendKubernetes, Namespace: recordNamespace, Name: "run", UID: "test-execution"},
+		Policy: gateway.PolicySnapshot{Name: recordPolicy, Spec: api.AgentPolicySpec{AllowedCapabilities: []api.CapabilityKind{capability},
 			MCPServers: map[string]api.MCPServerScope{name: {Tools: map[string]api.MCPToolScope{tool: {}}}},
 			Budgets:    map[api.CapabilityKind]api.EndpointBudget{capability: {MaxUnits: 5}}}},
-		Template:     gateway.TemplateSnapshot{Name: "test-template"},
+		Template:     gateway.TemplateSnapshot{Name: recordTemplate},
 		Capabilities: []api.CapabilityKind{capability}}
 	key := "test-execution/" + string(capability)
 	before := ledgerReading(tracker, key)

@@ -28,6 +28,9 @@ import (
 	"github.com/andrewmccall/sproozi/internal/modelauth"
 )
 
+// gatewayFixtureHost is the composed MCP authority's host.
+const gatewayFixtureHost = "gateway.fixture"
+
 var updateRecords = flag.Bool("update-records", false,
 	"rewrite testdata/routes.txt from the current code")
 
@@ -108,7 +111,7 @@ func recordedRoutes(kind harness.NativeKind, auth modelauth.Authenticator) (gate
 		api.CapabilityModelInference, api.CapabilityGitHubPullRequest, api.CapabilityKubernetesRead}}},
 		nativeCapabilities: []api.CapabilityKind{api.CapabilityGitHubPullRequest, api.CapabilityKubernetesRead}}
 	config := GatewayConfig{Harness: kind, AuditLogger: audit.NewLogger(io.Discard),
-		Certificates: map[string]tls.Certificate{"gateway.fixture": {}}, MCPAuthority: "gateway.fixture:443",
+		Certificates: map[string]tls.Certificate{gatewayFixtureHost: {}}, MCPAuthority: gatewayFixtureHost + ":443",
 		GitHub: &githubgateway.HandlerConfig{TokenProvider: fixtureTokens{}, HTTPClient: http.DefaultClient,
 			GitBaseURL: "https://github.com", APIBaseURL: "https://api.github.com"},
 		Kubernetes: &kubernetesgateway.HandlerConfig{Upstream: upstream, Client: http.DefaultClient},

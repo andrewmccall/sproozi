@@ -16,11 +16,20 @@ import (
 	"github.com/andrewmccall/sproozi/internal/modelauth"
 )
 
-const allModules = "kubernetes.read,model.inference,github.pull_request,packages.install,network.egress"
+const (
+	allModules          = "kubernetes.read,model.inference,github.pull_request,packages.install,network.egress"
+	copilotFixtureToken = "gho_fixture"
+	sweepAnthropic      = "anthropic"
+	sweepAll            = "all"
+	sweepBoth           = "both"
+	sweepOpenAI         = "openai"
+	registryJSON        = `{"servers":{"` + routetest.MCPServer + `":{"url":"https://docs.mcp.example/mcp"}}}`
+)
 
 // composeServing builds the dispatcher with main's composeGateway, every
 // handler reaching routetest.Client's upstreams and writing to events.
-func composeServing(t *testing.T, cfg *startupConfig, events *routetest.Recorder) (gateway.Dispatcher, *budget.Tracker) {
+func composeServing(t *testing.T, cfg *startupConfig,
+	events *routetest.Recorder) (gateway.Dispatcher, *budget.Tracker) {
 	t.Helper()
 	client := routetest.Client(t)
 	kubeURL, _ := url.Parse("https://kubernetes.default.svc")
@@ -43,8 +52,8 @@ var credentialModes = []struct {
 	{"openai-and-anthropic-keys", map[string]string{anthropicKeyEnv: anthropicFixtureKey}},
 	{"anthropic-key", map[string]string{openAIKeyEnv: "", anthropicKeyEnv: anthropicFixtureKey}},
 	{"sign-in-tokens", map[string]string{openAIKeyEnv: "", "OPENAI_SIGN_IN_TOKEN": "openai-token-fixture",
-		"ANTHROPIC_SIGN_IN_TOKEN": "anthropic-token-fixture", copilotTokenEnv: "gho_fixture"}},
-	{"copilot-token", map[string]string{copilotTokenEnv: "gho_fixture"}},
+		"ANTHROPIC_SIGN_IN_TOKEN": "anthropic-token-fixture", copilotTokenEnv: copilotFixtureToken}},
+	{"copilot-token", map[string]string{copilotTokenEnv: copilotFixtureToken}},
 	{modelauth.WorkloadMode, map[string]string{modelAuthModeEnv: modelauth.WorkloadMode, openAIKeyEnv: ""}},
 	{"workload-with-openai-key", map[string]string{modelAuthModeEnv: modelauth.WorkloadMode}},
 	{modelauth.ChatGPTMode, map[string]string{modelAuthModeEnv: modelauth.ChatGPTMode, openAIKeyEnv: ""}},
@@ -52,7 +61,8 @@ var credentialModes = []struct {
 
 // moduleSelections are installed module sets.
 var moduleSelections = []string{allModules, "kubernetes.read", "model.inference,network.egress",
-	"kubernetes.read,model.inference,packages.install", "kubernetes.read,github.pull_request,packages.install,network.egress"}
+	"kubernetes.read,model.inference,packages.install",
+	"kubernetes.read,github.pull_request,packages.install,network.egress"}
 
 func egressProfiles(t *testing.T) string {
 	t.Helper()
@@ -71,7 +81,7 @@ func TestEveryComposedRouteKeepsTheRouteContract(t *testing.T) {
 	validGatewayEnvironment(t)
 	t.Setenv("EGRESS_PROFILES_PATH", egressProfiles(t))
 	registry := filepath.Join(t.TempDir(), "servers.json")
-	if err := os.WriteFile(registry, []byte(`{"servers":{"`+routetest.MCPServer+`":{"url":"https://docs.mcp.example/mcp"}}}`), 0o600); err != nil {
+	if err := os.WriteFile(registry, []byte(registryJSON), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	for _, mode := range credentialModes {
@@ -114,7 +124,7 @@ func TestEveryStartupConfigurationDeclaresItsRoutes(t *testing.T) {
 	validGatewayEnvironment(t)
 	dir := t.TempDir()
 	registry := filepath.Join(dir, "servers.json")
-	if err := os.WriteFile(registry, []byte(`{"servers":{"docs":{"url":"https://docs.mcp.example/mcp"}}}`), 0o600); err != nil {
+	if err := os.WriteFile(registry, []byte(registryJSON), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("EGRESS_PROFILES_PATH", egressProfiles(t))
@@ -126,17 +136,18 @@ func TestEveryStartupConfigurationDeclaresItsRoutes(t *testing.T) {
 	}
 	composed := 0
 	for _, mode := range []string{modelauth.APIKeyMode, modelauth.ChatGPTMode, modelauth.WorkloadMode} {
-		for _, keys := range []string{"", "openai", "anthropic", "both"} {
-			for _, tokens := range []string{"", "openai", "anthropic", "copilot", "all"} {
+		for _, keys := range []string{"", sweepOpenAI, sweepAnthropic, sweepBoth} {
+			for _, tokens := range []string{"", sweepOpenAI, sweepAnthropic, "copilot", sweepAll} {
 				for _, modules := range append(moduleSelections, "network.egress", "kubernetes.read,model.inference") {
 					for _, mcp := range []bool{false, true} {
 						t.Run(fmt.Sprintf("%s/%s/%s/%s/mcp=%t", mode, keys, tokens, modules, mcp), func(t *testing.T) {
 							t.Setenv(modelAuthModeEnv, mode)
-							t.Setenv(openAIKeyEnv, set(keys == "openai" || keys == "both", "sk-openai-fixture"))
-							t.Setenv(anthropicKeyEnv, set(keys == "anthropic" || keys == "both", anthropicFixtureKey))
-							t.Setenv("OPENAI_SIGN_IN_TOKEN", set(tokens == "openai" || tokens == "all", "openai-token-fixture"))
-							t.Setenv("ANTHROPIC_SIGN_IN_TOKEN", set(tokens == "anthropic" || tokens == "all", "anthropic-token-fixture"))
-							t.Setenv(copilotTokenEnv, set(tokens == "copilot" || tokens == "all", "gho_fixture"))
+							t.Setenv(openAIKeyEnv, set(keys == sweepOpenAI || keys == sweepBoth, "sk-openai-fixture"))
+							t.Setenv(anthropicKeyEnv, set(keys == sweepAnthropic || keys == sweepBoth, anthropicFixtureKey))
+							t.Setenv("OPENAI_SIGN_IN_TOKEN", set(tokens == sweepOpenAI || tokens == sweepAll, "openai-token-fixture"))
+							t.Setenv("ANTHROPIC_SIGN_IN_TOKEN",
+								set(tokens == sweepAnthropic || tokens == sweepAll, "anthropic-token-fixture"))
+							t.Setenv(copilotTokenEnv, set(tokens == "copilot" || tokens == sweepAll, copilotFixtureToken))
 							t.Setenv("SPROOZI_ENABLED_CAPABILITIES", modules)
 							t.Setenv("MCP_SERVERS_PATH", set(mcp, registry))
 							cfg, err := loadStartupConfig()

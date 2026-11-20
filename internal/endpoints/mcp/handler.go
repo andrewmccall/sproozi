@@ -30,6 +30,9 @@ const maxResponseBytes = 8 << 20
 const discoverMethod = "server/discover"
 const toolsCallMethod = "tools/call"
 
+// toolsCallOperation is the audit operation of a named MCP tool call.
+const toolsCallOperation = "mcp.tools.call"
+
 type HandlerConfig struct {
 	Registry    *Registry
 	HTTPClient  *http.Client
@@ -121,7 +124,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if request.Method == toolsCallMethod {
 		if _, permitted := rules[params.Name]; !permitted {
-			event.Operation = "mcp.tools.call"
+			event.Operation = toolsCallOperation
 			h.deny(r.Context(), w, event, http.StatusForbidden, "MCP tool denied")
 			return
 		}
@@ -172,16 +175,20 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}).ServeHTTP(w, r.WithContext(ctx))
 	calls.Wait()
 	if request.Method == toolsCallMethod && !called.Load() {
-		// The protocol handler refused the call before any tool ran, such as
-		// a request without the Accept header it requires. Its reply stands;
-		// the refusal is recorded here.
-		event.Operation, event.Resource = "mcp.tools.call", params.Name
-		event.DenyReason, event.Outcome = "MCP tool call refused by the protocol handler", audit.RefusedRequest
-		if r.Context().Err() != nil {
-			event.Outcome = audit.Cancelled
-		}
-		gateway.Record(r.Context(), h.config.AuditLogger, event)
+		h.recordProtocolRefusal(r, event, params.Name)
 	}
+}
+
+// recordProtocolRefusal records a tool call the protocol handler refused
+// before any tool ran, such as a request without the Accept header it
+// requires. Its reply stands; the refusal is recorded here.
+func (h *Handler) recordProtocolRefusal(r *http.Request, event audit.Event, tool string) {
+	event.Operation, event.Resource = toolsCallOperation, tool
+	event.DenyReason, event.Outcome = "MCP tool call refused by the protocol handler", audit.RefusedRequest
+	if r.Context().Err() != nil {
+		event.Outcome = audit.Cancelled
+	}
+	gateway.Record(r.Context(), h.config.AuditLogger, event)
 }
 
 // The SDK still owns JSON-RPC decoding and dispatch. This request-local tool
@@ -245,7 +252,7 @@ func (h *Handler) prepare(ctx context.Context, upstream *sdk.ClientSession,
 					defer stop()
 					defer cancel()
 					callEvent := event
-					callEvent.Operation, callEvent.Resource = "mcp.tools.call", name
+					callEvent.Operation, callEvent.Resource = toolsCallOperation, name
 					defer func() {
 						if h.config.AuditLogger != nil {
 							gateway.Record(ctx, h.config.AuditLogger, callEvent)

@@ -91,7 +91,8 @@ func composedRoutes(t *testing.T) gateway.Dispatcher {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dispatcher, err := composeGateway(cfg, gatewayDeps{journal: diagnose.NewJournal(audit.NewLogger(io.Discard), diagnose.Limits{}),
+	journal := diagnose.NewJournal(audit.NewLogger(io.Discard), diagnose.Limits{})
+	dispatcher, err := composeGateway(cfg, gatewayDeps{journal: journal,
 		budgets: budget.NewTracker(), model: http.DefaultClient})
 	if err != nil {
 		t.Fatal(err)
@@ -121,7 +122,7 @@ func TestComposedRoutesAreRecorded(t *testing.T) {
 		{"openai-key", nil},
 		{"openai-and-anthropic-keys", map[string]string{anthropicKeyEnv: anthropicFixtureKey}},
 		{"anthropic-key-only", map[string]string{openAIKeyEnv: "", anthropicKeyEnv: anthropicFixtureKey}},
-		{"copilot-token", map[string]string{copilotTokenEnv: "gho_fixture"}},
+		{"copilot-token", map[string]string{copilotTokenEnv: copilotFixtureToken}},
 		{modelauth.WorkloadMode, map[string]string{modelAuthModeEnv: modelauth.WorkloadMode, openAIKeyEnv: ""}},
 		{"workload-with-openai-key", map[string]string{modelAuthModeEnv: modelauth.WorkloadMode}},
 		{"mcp-registry", map[string]string{"MCP_SERVERS_PATH": registry}},
