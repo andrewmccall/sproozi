@@ -833,7 +833,7 @@ var recordedWorlds = []world{
 // harness ended, the login store, the exit report and log lines, and the
 // supervisor's exit code.
 func TestSupervisorLifecycleRecord(t *testing.T) {
-	if codexJournalExists(nativeHome) {
+	if codexJournalExists(codexHome) {
 		t.Skip("a real Codex home is present")
 	}
 	for _, kind := range []harness.NativeKind{harness.NativeCodex, harness.NativeClaude, harness.NativeCopilot} {

@@ -102,7 +102,7 @@ func TestEveryKillLeavesTheStoreAsItWas(t *testing.T) {
 			})
 		}, drive: stopsGracefully},
 		"turnless stop": {kind: harness.NativeCodex, before: func(t *testing.T) {
-			if codexJournalExists(nativeHome) {
+			if codexJournalExists(codexHome) {
 				t.Skip("a real Codex home is present")
 			}
 			setTurnlessSettle(t, 0)

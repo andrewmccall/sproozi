@@ -29,7 +29,7 @@ func setTurnlessSettle(t *testing.T, d time.Duration) {
 // A first interactive Codex visit with no native journal stops promptly
 // instead of waiting until its deadline for a turn that never comes.
 func TestTurnlessFirstVisitQuiescesWithoutConversation(t *testing.T) {
-	if codexJournalExists(nativeHome) {
+	if codexJournalExists(codexHome) {
 		t.Skip("a real Codex home is present")
 	}
 	setTurnlessSettle(t, 100*time.Millisecond)

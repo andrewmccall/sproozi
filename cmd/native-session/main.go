@@ -415,7 +415,7 @@ func (s *server) activate() response {
 	}
 	env = append(env, "HOME="+agentHome)
 	if s.config.Task != "" && s.threadID != "" {
-		_, baseline, err := observeTurn(nativeHome, s.threadID, s.config.InstructionDigest, s.config.RolloutMaxBytes)
+		_, baseline, err := observeTurn(codexHome, s.threadID, s.config.InstructionDigest, s.config.RolloutMaxBytes)
 		if err != nil {
 			r.Error = "initial task baseline is unavailable: " + err.Error()
 			return r
@@ -760,7 +760,7 @@ func (s *server) waitingFor() string {
 		return "the current " + name + " turn to complete"
 	}
 	if kind != harness.NativeClaude {
-		if !codexJournalExists(nativeHome) {
+		if !codexJournalExists(codexHome) {
 			return name + " to start its first turn"
 		}
 		return "the current " + name + " turn to complete"

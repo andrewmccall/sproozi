@@ -47,10 +47,10 @@ type nativeAdapter struct {
 
 var nativeAdapters = map[harness.NativeKind]nativeAdapter{
 	harness.NativeCodex: {
-		executable: executable,
+		executable: codexExecutable,
 		prepare:    prepareCodexLaunch,
 		observe:    (*server).observeCodexTurn,
-		turnless:   func(*server) bool { return !codexJournalExists(nativeHome) },
+		turnless:   func(*server) bool { return !codexJournalExists(codexHome) },
 		// Codex quits itself after the completed turn and must exit cleanly.
 		finish: (*nativepty.Supervisor).QuitAfterCompletedTurn,
 		quits:  true,
@@ -107,17 +107,17 @@ func adapterFor(kind harness.NativeKind) (nativeAdapter, error) {
 }
 
 func prepareCodexLaunch(c config, thread string, env []string) ([]string, []string, error) {
-	if err := installCodexProjectTrust(nativeHome); err != nil {
+	if err := installCodexProjectTrust(codexHome); err != nil {
 		return nil, nil, err
 	}
 	profile, err := loadProfile(c)
 	if err != nil {
 		return nil, nil, fmt.Errorf("profile: %w", err)
 	}
-	if err := installManagedCodex(nativeHome, profile); err != nil {
+	if err := installManagedCodex(codexHome, profile); err != nil {
 		return nil, nil, err
 	}
-	env = append(env, "CODEX_HOME="+nativeHome)
+	env = append(env, "CODEX_HOME="+codexHome)
 	args := codexArguments(c, thread)
 	if notice := codexMigrationNotice(env); notice != "" {
 		args = append([]string{"-c", notice}, args...)
@@ -134,7 +134,7 @@ func prepareCodexLaunch(c config, thread string, env []string) ([]string, []stri
 func codexMigrationNotice(env []string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, executable, "debug", "models", "--bundled")
+	cmd := exec.CommandContext(ctx, codexExecutable, "debug", "models", "--bundled")
 	cmd.Env, cmd.Dir = env, workspace
 	var out bytes.Buffer
 	cmd.Stdout = &limitedWriter{w: &out, n: 8 << 20}
@@ -234,7 +234,7 @@ func (s *server) observeCodexTurn() (string, string, error) {
 	id := s.threadID
 	baseline := s.taskBaseline
 	s.mu.Unlock()
-	return observeTaskTurn(nativeHome, id, c.InstructionDigest, c.RolloutMaxBytes, c.Task, baseline)
+	return observeTaskTurn(codexHome, id, c.InstructionDigest, c.RolloutMaxBytes, c.Task, baseline)
 }
 func (s *server) writeInput(a *nativepty.Attachment, data []byte) (int, error) {
 	s.mu.Lock()

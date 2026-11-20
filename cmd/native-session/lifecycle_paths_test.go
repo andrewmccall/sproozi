@@ -12,7 +12,7 @@ import (
 // A turnless stop whose kill is not confirmed by the deadline ends as the
 // deadline, not as a failed stop.
 func TestTurnlessKillUnconfirmedAtTheDeadlineIsReportedAsDeadline(t *testing.T) {
-	if codexJournalExists(nativeHome) {
+	if codexJournalExists(codexHome) {
 		t.Skip("a real Codex home is present")
 	}
 	setTurnlessSettle(t, 0)

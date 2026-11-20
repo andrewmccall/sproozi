@@ -136,7 +136,7 @@ func TestDeadlineDuringTheForcedStopWaitIsReportedAsDeadline(t *testing.T) {
 
 // The turnless stop's wait for its kill has the quit bound.
 func TestTurnlessStopIsBounded(t *testing.T) {
-	if codexJournalExists(nativeHome) {
+	if codexJournalExists(codexHome) {
 		t.Skip("a real Codex home is present")
 	}
 	setTurnlessSettle(t, 0)

@@ -47,16 +47,16 @@ func outcomeKinds() []harness.NativeKind {
 func recordedHomes(t *testing.T) (codex, claude, copilot string) {
 	t.Helper()
 	dir := t.TempDir()
-	previousCodex, previousClaude, previousCopilot := nativeHome, claudeHome, copilotHome
-	nativeHome, claudeHome, copilotHome = filepath.Join(dir, "codex"), filepath.Join(dir, "claude"),
+	previousCodex, previousClaude, previousCopilot := codexHome, claudeHome, copilotHome
+	codexHome, claudeHome, copilotHome = filepath.Join(dir, "codex"), filepath.Join(dir, "claude"),
 		filepath.Join(dir, "copilot")
-	for _, home := range []string{nativeHome, claudeHome, copilotHome} {
+	for _, home := range []string{codexHome, claudeHome, copilotHome} {
 		if err := os.MkdirAll(home, 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
-	t.Cleanup(func() { nativeHome, claudeHome, copilotHome = previousCodex, previousClaude, previousCopilot })
-	return nativeHome, claudeHome, copilotHome
+	t.Cleanup(func() { codexHome, claudeHome, copilotHome = previousCodex, previousClaude, previousCopilot })
+	return codexHome, claudeHome, copilotHome
 }
 
 // copyFixture writes the fixture at from to path.
