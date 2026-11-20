@@ -393,6 +393,7 @@ type upstreamPullRequest struct {
 func (h *Handler) forwardPRCreate(w http.ResponseWriter, r *http.Request, e audit.Event, upstreamURL, token string, identity *gateway.ExecutionGrant, repo string) {
 	response, err := h.doUpstream(r, upstreamURL, token)
 	if err != nil {
+		e.Outcome = gateway.FailureOutcome(err)
 		h.deny(r.Context(), w, e, http.StatusBadGateway, "upstream request failed")
 		return
 	}
@@ -422,6 +423,9 @@ func (h *Handler) forwardPRCreate(w http.ResponseWriter, r *http.Request, e audi
 	if err != nil || readback.StatusCode != http.StatusOK {
 		if readback != nil {
 			_ = readback.Body.Close()
+		}
+		if err != nil {
+			e.Outcome = gateway.FailureOutcome(err)
 		}
 		h.deny(r.Context(), w, e, http.StatusBadGateway, "pull request read-back failed")
 		return
@@ -506,7 +510,7 @@ func (h *Handler) copyResponse(w http.ResponseWriter, response *http.Response, b
 	_, _ = w.Write(body)
 }
 func (h *Handler) auditAllowed(ctx context.Context, e audit.Event, status int) {
-	e.Allowed = true
+	e.Allowed, e.Outcome = true, audit.Served
 	e.UpstreamStatus = status
 	gateway.Record(ctx, h.Config.AuditLogger, e)
 }
@@ -536,6 +540,7 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, e audit.Event,
 
 	resp, err := h.doHTTP(upstream)
 	if err != nil {
+		e.Outcome = gateway.FailureOutcome(err)
 		h.deny(r.Context(), w, e, http.StatusBadGateway, "upstream request failed")
 		return
 	}
@@ -549,7 +554,7 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, e audit.Event,
 	w.WriteHeader(resp.StatusCode)
 	_, _ = io.Copy(w, resp.Body)
 
-	e.Allowed = true
+	e.Allowed, e.Outcome = true, audit.Served
 	e.UpstreamStatus = resp.StatusCode
 	gateway.Record(r.Context(), h.Config.AuditLogger, e)
 }
@@ -558,6 +563,9 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, e audit.Event,
 func (h *Handler) deny(ctx context.Context, w http.ResponseWriter, e audit.Event, status int, reason string) {
 	e.Allowed = false
 	e.DenyReason = reason
+	if e.Outcome == "" {
+		e.Outcome = gateway.RefusalOutcome(status)
+	}
 	gateway.Record(ctx, h.Config.AuditLogger, e)
 	http.Error(w, reason, status)
 }

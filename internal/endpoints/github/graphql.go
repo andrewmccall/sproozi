@@ -476,6 +476,9 @@ func (h *Handler) handleGraphQLPRCreate(w http.ResponseWriter, r *http.Request, 
 	repositoryID, _ := graphqlString(input[repositoryIDField])
 	repo, err := h.resolveGraphQLRepositoryID(r, token, repositoryID)
 	if err != nil || !slices.Contains(identity.Policy.Spec.GitHubPullRequest.Repositories, repo) {
+		if err != nil {
+			e.Outcome = gateway.FailureOutcome(err)
+		}
 		h.deny(r.Context(), w, e, http.StatusForbidden, "repository not permitted by policy")
 		return
 	}
@@ -495,6 +498,7 @@ func (h *Handler) handleGraphQLPRCreate(w http.ResponseWriter, r *http.Request, 
 	forwarded.Body = io.NopCloser(bytes.NewReader(payload))
 	response, err := h.doUpstream(forwarded, upstream, token)
 	if err != nil {
+		e.Outcome = gateway.FailureOutcome(err)
 		h.deny(r.Context(), w, e, http.StatusBadGateway, "upstream request failed")
 		return
 	}
@@ -520,6 +524,9 @@ func (h *Handler) handleGraphQLPRCreate(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	verified, err := h.readBackGraphQLPR(r, token, repo, number)
+	if err != nil {
+		e.Outcome = gateway.FailureOutcome(err)
+	}
 	if err != nil || verified.Repository != repo || verified.Number != number || verified.URL != created.Data.CreatePullRequest.PullRequest.URL || !runOwnedBranch(verified.HeadRef, identity.Execution.UID) || !policyBranch(verified.BaseRef, identity.Policy.Spec.GitHubPullRequest.AllowedBaseBranches) || !graphqlHexSHA.MatchString(verified.HeadOID) {
 		h.deny(r.Context(), w, e, http.StatusBadGateway, "pull request read-back was invalid")
 		return

@@ -113,7 +113,7 @@ func (h *Relay) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.refuse(r.Context(), w, e, http.StatusBadGateway, "relayed response exceeds gateway limit")
 		return
 	}
-	e.Allowed, e.UpstreamStatus = true, resp.StatusCode
+	e.Allowed, e.Outcome, e.UpstreamStatus = true, audit.Served, resp.StatusCode
 	h.log(r.Context(), e)
 	if contentType := resp.Header.Get("Content-Type"); contentType != "" {
 		w.Header().Set("Content-Type", contentType)
@@ -124,7 +124,7 @@ func (h *Relay) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Relay) refuse(ctx context.Context, w http.ResponseWriter, e audit.Event, status int, reason string) {
-	e.DenyReason = reason
+	e.DenyReason, e.Outcome = reason, gateway.RefusalOutcome(status)
 	h.log(ctx, e)
 	http.Error(w, reason, status)
 }

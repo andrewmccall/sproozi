@@ -7,12 +7,14 @@ import (
 	"slices"
 
 	api "github.com/andrewmccall/sproozi/api/v1alpha1"
+	"github.com/andrewmccall/sproozi/internal/audit"
 	"github.com/andrewmccall/sproozi/internal/budget"
 )
 
 // Refusal is the gateway's answer to a request it does not admit: a status
 // and the JSON body that both model SDK families parse (ADR 0016).
 type Refusal struct {
+	Outcome             audit.Outcome
 	Status              int
 	Type, Code, Message string
 	// recorded says whether Refuse writes an audit record.
@@ -32,17 +34,23 @@ func Admit(ctx context.Context, capability api.CapabilityKind) (context.Context,
 			reason = "policy " + identity.Policy.Name + " does not allow capability " + string(capability) +
 				"; add it to the policy's allowedCapabilities"
 		}
-		return ctx, &Refusal{Status: http.StatusForbidden, Type: "permission_error", Code: "capability_denied",
-			Message: reason, recorded: true}
+		return ctx, &Refusal{Outcome: audit.RefusedPolicy, Status: http.StatusForbidden, Type: "permission_error",
+			Code: "capability_denied", Message: reason, recorded: true}
 	}
 	meter, err := identity.Meter(ctx, route.Budgets, capability)
 	if errors.Is(err, ErrBudgetUnavailable) {
-		return ctx, &Refusal{Status: http.StatusServiceUnavailable, Type: "api_error", Code: "budget_unavailable",
-			Message: "budget accounting for " + string(capability) + " is unavailable; retry later"}
+		return ctx, &Refusal{Outcome: audit.Unavailable, Status: http.StatusServiceUnavailable, Type: "api_error",
+			Code: "budget_unavailable", Message: "budget accounting for " + string(capability) + " is unavailable; retry later"}
 	}
 	if err != nil {
-		return ctx, &Refusal{Status: http.StatusForbidden, Type: "permission_error", Code: "allocation_denied",
-			Message: "the " + string(capability) + " allocation for this run is missing or exhausted"}
+		// A missing or exhausted allocation refuses the request; a managed
+		// account that cannot be read is answered the same way.
+		outcome := audit.Unavailable
+		if _, _, limitErr := identity.BudgetLimits(capability); limitErr != nil {
+			outcome = audit.RefusedBudget
+		}
+		return ctx, &Refusal{Outcome: outcome, Status: http.StatusForbidden, Type: "permission_error",
+			Code: "allocation_denied", Message: "the " + string(capability) + " allocation for this run is missing or exhausted"}
 	}
 	return budget.WithMeter(ctx, meter), nil
 }
@@ -52,7 +60,7 @@ func Refuse(ctx context.Context, w http.ResponseWriter, r *Refusal) {
 	route, _ := ctx.Value(routeContextKey{}).(Route)
 	if r.recorded {
 		event := AuditEvent(ctx, string(route.Capability))
-		event.DenyReason = r.Message
+		event.DenyReason, event.Outcome = r.Message, r.Outcome
 		Record(ctx, route.AuditLogger, event)
 	}
 	writeDenial(w, r.Status, r.Type, r.Code, r.Message)

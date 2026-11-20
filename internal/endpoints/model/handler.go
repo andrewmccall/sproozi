@@ -319,9 +319,12 @@ func (h *Handler) refuseReservation(w http.ResponseWriter, e audit.Event, call *
 	stopping := h.Config.Drain.Stopping()
 	if stopping || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		// No policy refused the call: it ended while it waited. Audit how.
-		e.Allowed, e.EndReason = true, call.cancelReason()
+		e.Allowed, e.EndReason, e.Outcome = true, call.cancelReason(), audit.Cancelled
 		if stopping {
 			e.EndReason = endGatewayRestart
+		}
+		if e.EndReason == endGatewayRestart {
+			e.Outcome = audit.Unavailable
 		}
 		gateway.Record(call.r.Context(), h.Config.AuditLogger, e)
 		if e.EndReason == endGatewayRestart {
@@ -335,6 +338,12 @@ func (h *Handler) refuseReservation(w http.ResponseWriter, e audit.Event, call *
 	if errors.Is(err, budget.ErrTooManyPending) {
 		h.deny(call.r.Context(), w, e, http.StatusTooManyRequests, err.Error(), "rate_limit_error", "too_many_pending_calls")
 		return
+	}
+	// A ledger that cannot reserve is answered as exhaustion; the record
+	// says which.
+	e.Outcome = audit.RefusedBudget
+	if !budget.IsExhausted(err) {
+		e.Outcome = audit.Unavailable
 	}
 	h.deny(call.r.Context(), w, e, http.StatusTooManyRequests, err.Error(), "budget_error", "budget_exhausted")
 }
@@ -412,6 +421,7 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, e audit.Event,
 			call.settleInterrupted(reason)
 			if reason == endClientCancelled {
 				// The harness left; nothing failed and no one reads a reply.
+				call.e.Outcome = audit.Cancelled
 				call.finish()
 				return
 			}
@@ -428,7 +438,7 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, e audit.Event,
 		release()
 		if call != nil && call.cancelReason() == endClientCancelled && call.ctx.Err() != nil {
 			// The harness left while the request was written; nothing failed.
-			call.e.EndReason = endClientCancelled
+			call.e.EndReason, call.e.Outcome = endClientCancelled, audit.Cancelled
 			call.finish()
 			return
 		}
@@ -479,6 +489,8 @@ func (h *Handler) forward(w http.ResponseWriter, r *http.Request, e audit.Event,
 		return
 	}
 	if h.protocol == anthropicProtocol {
+		// The provider's error is replaced, not relayed.
+		e.Outcome = audit.UpstreamFailed
 		h.deny(r.Context(), w, e, resp.StatusCode, "provider rejected request", "api_error", "provider_rejected")
 		return
 	}
@@ -637,6 +649,9 @@ func readBounded(reader io.Reader, limit int64) ([]byte, error) {
 func (h *Handler) deny(ctx context.Context, w http.ResponseWriter, e audit.Event, status int, message, errType, code string) {
 	e.Allowed = false
 	e.DenyReason = message
+	if e.Outcome == "" {
+		e.Outcome = gateway.RefusalOutcome(status)
+	}
 	gateway.Record(ctx, h.Config.AuditLogger, e)
 	h.writeError(w, status, message, errType, code)
 }
@@ -879,6 +894,9 @@ func (h *Handler) auditModelSuccess(ctx context.Context, e audit.Event, upstream
 	state, stateErr := meter.State(ctx)
 	// Emit success audit event.
 	e.Allowed = true
+	if e.Outcome == "" {
+		e.Outcome = audit.Served
+	}
 	e.UpstreamStatus = upstreamStatus
 	e.TokensUsed = tokensUsed
 	switch {

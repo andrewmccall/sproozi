@@ -68,6 +68,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.URL.RawPath != "" || r.URL.RawQuery != "" || r.URL.ForceQuery || len(r.Header.Values("Origin")) != 0 {
 		// Do not audit unvalidated path data, which might contain a secret.
 		event.Capability = ""
+		event.Outcome = audit.RefusedRequest
 		h.deny(r.Context(), w, event, http.StatusForbidden, "unsupported MCP request")
 		return
 	}
@@ -127,10 +128,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	limits, _, err := identity.BudgetLimits(capability)
 	if err != nil {
+		event.Outcome = audit.RefusedBudget
 		h.deny(r.Context(), w, event, http.StatusForbidden, "MCP allocation denied")
 		return
 	}
 	if limits.MaxCostMicros > 0 {
+		// A monetary cap on an endpoint without pricing refuses the request,
+		// as gateway.Spend does.
+		event.Outcome = audit.RefusedBudget
 		h.deny(r.Context(), w, event, http.StatusServiceUnavailable, "MCP budget accounting unavailable")
 		return
 	}
@@ -226,25 +231,29 @@ func (h *Handler) prepare(ctx context.Context, upstream *sdk.ClientSession,
 					}
 					value, err := mcppolicy.DecodeObject(arguments)
 					if err != nil || resolved.Validate(value) != nil || (constraint != nil && constraint.Validate(value) != nil) {
-						callEvent.DenyReason = "MCP arguments denied"
+						callEvent.DenyReason, callEvent.Outcome = "MCP arguments denied", audit.RefusedPolicy
 						return nil, fmt.Errorf("MCP arguments denied")
 					}
-					if workCtx.Err() != nil || gateway.Spend(budget.WithMeter(workCtx, meter)) != nil {
-						callEvent.DenyReason = "MCP authority or budget unavailable"
+					if workCtx.Err() != nil {
+						callEvent.DenyReason, callEvent.Outcome = "MCP authority or budget unavailable", audit.Cancelled
+						return nil, fmt.Errorf("MCP authority or budget unavailable")
+					}
+					if err := gateway.Spend(budget.WithMeter(workCtx, meter)); err != nil {
+						callEvent.DenyReason, callEvent.Outcome = "MCP authority or budget unavailable", gateway.SpendOutcome(err)
 						return nil, fmt.Errorf("MCP authority or budget unavailable")
 					}
 					// Use the parsed, validated value, never raw request headers or
 					// metadata. Disable transport retries to avoid duplicate work.
 					result, err := upstream.CallTool(workCtx, &sdk.CallToolParams{Name: name, Arguments: value})
 					if err != nil {
-						callEvent.DenyReason = "MCP upstream call failed"
+						callEvent.DenyReason, callEvent.Outcome = "MCP upstream call failed", audit.UpstreamFailed
 						return nil, fmt.Errorf("MCP upstream call failed")
 					}
 					if result.IsError {
-						callEvent.DenyReason = "MCP upstream tool failed"
+						callEvent.DenyReason, callEvent.Outcome = "MCP upstream tool failed", audit.UpstreamFailed
 						return nil, fmt.Errorf("MCP upstream tool failed")
 					}
-					callEvent.Allowed = true
+					callEvent.Allowed, callEvent.Outcome = true, audit.Served
 					return &sdk.CallToolResult{Content: result.Content, StructuredContent: result.StructuredContent, IsError: result.IsError}, nil
 				})
 		}
@@ -383,6 +392,9 @@ func (b *boundedBody) Read(p []byte) (int, error) {
 
 func (h *Handler) deny(ctx context.Context, w http.ResponseWriter, event audit.Event, status int, reason string) {
 	event.DenyReason = reason
+	if event.Outcome == "" {
+		event.Outcome = gateway.RefusalOutcome(status)
+	}
 	if h.config.AuditLogger != nil {
 		gateway.Record(ctx, h.config.AuditLogger, event)
 	}

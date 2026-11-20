@@ -63,6 +63,7 @@ func (h *Handler) handlePackage(w http.ResponseWriter, r *http.Request, e audit.
 		return http.ErrUseLastResponse
 	}
 	if err := gateway.Spend(r.Context()); err != nil {
+		e.Outcome = gateway.SpendOutcome(err)
 		h.deny(r.Context(), w, e, http.StatusTooManyRequests, err.Error())
 		return
 	}
@@ -73,6 +74,7 @@ func (h *Handler) handlePackage(w http.ResponseWriter, r *http.Request, e audit.
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		e.Outcome = audit.RefusedPolicy
 		h.deny(r.Context(), w, e, http.StatusBadGateway, "package redirect requires explicit revalidation")
 		return
 	}
@@ -84,6 +86,7 @@ func (h *Handler) handlePackage(w http.ResponseWriter, r *http.Request, e audit.
 	if decision.Artifact != nil {
 		body, verifyErr := packagepolicy.VerifyArtifact(identity.Policy.Spec.PackagesInstall, decision.Artifact, resp.Body)
 		if verifyErr != nil {
+			e.Outcome = audit.RefusedPolicy
 			h.deny(r.Context(), w, e, http.StatusBadGateway, "package artifact verification failed")
 			return
 		}
@@ -96,6 +99,7 @@ func (h *Handler) handlePackage(w http.ResponseWriter, r *http.Request, e audit.
 	// where VerifyArtifact performs the byte-level digest check.
 	body, verifyErr := packagepolicy.VerifyMetadata(identity.Policy.Spec.PackagesInstall, resp.Body)
 	if verifyErr != nil {
+		e.Outcome = audit.RefusedPolicy
 		h.deny(r.Context(), w, e, http.StatusBadGateway, "package metadata is invalid")
 		return
 	}
@@ -132,7 +136,7 @@ func (h *Handler) copyResponse(w http.ResponseWriter, response *http.Response, b
 	_, _ = w.Write(body)
 }
 func (h *Handler) auditAllowed(ctx context.Context, e audit.Event, status int) {
-	e.Allowed = true
+	e.Allowed, e.Outcome = true, audit.Served
 	e.UpstreamStatus = status
 	gateway.Record(ctx, h.Config.AuditLogger, e)
 }
@@ -141,6 +145,9 @@ func (h *Handler) auditAllowed(ctx context.Context, e audit.Event, status int) {
 func (h *Handler) deny(ctx context.Context, w http.ResponseWriter, e audit.Event, status int, reason string) {
 	e.Allowed = false
 	e.DenyReason = reason
+	if e.Outcome == "" {
+		e.Outcome = gateway.RefusalOutcome(status)
+	}
 	gateway.Record(ctx, h.Config.AuditLogger, e)
 	http.Error(w, reason, status)
 }

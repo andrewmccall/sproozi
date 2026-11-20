@@ -118,6 +118,7 @@ func (h *Handler) handleHTTP(w http.ResponseWriter, r *http.Request, e audit.Eve
 		return http.ErrUseLastResponse
 	}
 	if err := gateway.Spend(r.Context()); err != nil {
+		e.Outcome = gateway.SpendOutcome(err)
 		h.deny(r.Context(), w, e, http.StatusTooManyRequests, err.Error())
 		return
 	}
@@ -136,7 +137,7 @@ func (h *Handler) handleHTTP(w http.ResponseWriter, r *http.Request, e audit.Eve
 	w.WriteHeader(resp.StatusCode)
 	_, _ = io.Copy(w, resp.Body)
 
-	e.Allowed = true
+	e.Allowed, e.Outcome = true, audit.Served
 	e.UpstreamStatus = resp.StatusCode
 	gateway.Record(r.Context(), h.Config.AuditLogger, e)
 }
@@ -164,6 +165,9 @@ func copyNonHopHeaders(dst, src http.Header) {
 func (h *Handler) deny(ctx context.Context, w http.ResponseWriter, e audit.Event, status int, reason string) {
 	e.Allowed = false
 	e.DenyReason = reason
+	if e.Outcome == "" {
+		e.Outcome = gateway.RefusalOutcome(status)
+	}
 	gateway.Record(ctx, h.Config.AuditLogger, e)
 	http.Error(w, reason, status)
 }
