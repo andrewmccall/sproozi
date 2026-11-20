@@ -272,45 +272,59 @@ func TestDockerignoreShipsLaunchFiles(t *testing.T) {
 	}
 }
 
-// Every managed harness supplies every per-harness fact, so a new one never
-// silently takes another's value, and an AgentRun-only harness supplies none.
-func TestManagedKindsSupplyEveryFact(t *testing.T) {
-	// reservedEnvExempt names the managed harnesses that declare no ReservedEnv
-	// and why.
-	reservedEnvExempt := map[NativeKind]string{
-		NativeCopilot: "its supervisor sets COPILOT_HOME and COPILOT_AUTO_UPDATE, but they have never been refused in a " +
-			"launch's explicit environment; kept as it was",
+// reservedEnvExempt names the managed harnesses that declare no ReservedEnv
+// and why.
+var reservedEnvExempt = map[NativeKind]string{
+	NativeCopilot: "its supervisor sets COPILOT_HOME and COPILOT_AUTO_UPDATE, but they have never been refused in a " +
+		"launch's explicit environment; kept as it was",
+}
+
+// managedFactProblems names each managed fact an entry is missing or gets
+// wrong: a managed harness supplies every one, so a new one never silently
+// takes another's value, and an AgentRun-only harness supplies none.
+func managedFactProblems(h Harness) []string {
+	if h.Native == "" {
+		if h.DisplayName != "" || h.Product != "" || h.Executable != "" || h.InstructionsFile != "" || h.KeyEnv != "" ||
+			h.RefusedFlags != nil || h.ReservedEnv != nil || h.RemoteExecutor || h.TakesTask || h.Default ||
+			h.TokenEnv != "" || h.KeyOptions != nil || h.SignInOptions != nil || h.SignInChoices != nil {
+			return []string{"has no Native kind, so it must not set the managed facts"}
+		}
+		return nil
 	}
+	var problems []string
+	for _, fact := range []struct {
+		name    string
+		missing bool
+	}{
+		{"DisplayName", h.DisplayName == ""},
+		{"Product", h.Product == ""},
+		{"Executable", !strings.HasPrefix(h.Executable, "/")},
+		{"InstructionsFile", h.InstructionsFile == ""},
+		{"KeyEnv", h.KeyEnv == ""},
+		{"RefusedFlags", len(h.RefusedFlags) == 0},
+		{"ReservedEnv", len(h.ReservedEnv) == 0 && reservedEnvExempt[h.Native] == ""},
+		{"SignInChoices", len(h.SignInChoices) == 0},
+	} {
+		if fact.missing {
+			problems = append(problems, "needs "+fact.name+"; a managed harness must supply every fact, "+
+				"see docs/contributing/add-a-harness.md")
+		}
+	}
+	if (h.TokenEnv == "") != (h.TokenPlaceholder == "") {
+		problems = append(problems, "must set TokenEnv and TokenPlaceholder together")
+	}
+	return append(problems, signInChoiceProblems(h)...)
+}
+
+// Every registered entry passes managedFactProblems, and exactly one managed
+// harness is the default.
+func TestManagedKindsSupplyEveryFact(t *testing.T) {
 	defaults := 0
 	for _, h := range registry {
-		if h.Native == "" {
-			if h.DisplayName != "" || h.Product != "" || h.Executable != "" || h.InstructionsFile != "" || h.KeyEnv != "" ||
-				h.RefusedFlags != nil || h.ReservedEnv != nil || h.RemoteExecutor || h.TakesTask || h.Default ||
-				h.TokenEnv != "" || h.KeyOptions != nil || h.SignInOptions != nil || h.SignInChoices != nil {
-				t.Errorf("harness %q has no Native kind, so %s must not set the managed facts", h.Selector, registryFile)
-			}
-			continue
+		for _, problem := range managedFactProblems(h) {
+			t.Errorf("harness %q %s in %s", h.Selector, problem, registryFile)
 		}
-		missing := map[string]bool{
-			"DisplayName": h.DisplayName == "", "Product": h.Product == "", "InstructionsFile": h.InstructionsFile == "",
-			"KeyEnv": h.KeyEnv == "", "RefusedFlags": len(h.RefusedFlags) == 0,
-			"Executable":    !strings.HasPrefix(h.Executable, "/"),
-			"ReservedEnv":   len(h.ReservedEnv) == 0 && reservedEnvExempt[h.Native] == "",
-			"SignInChoices": len(h.SignInChoices) == 0,
-		}
-		for fact, isMissing := range missing {
-			if isMissing {
-				t.Errorf("managed harness %q needs %s in %s; a managed harness must supply every fact, "+
-					"see docs/contributing/add-a-harness.md", h.Selector, fact, registryFile)
-			}
-		}
-		if (h.TokenEnv == "") != (h.TokenPlaceholder == "") {
-			t.Errorf("managed harness %q must set TokenEnv and TokenPlaceholder together in %s", h.Selector, registryFile)
-		}
-		for _, problem := range signInChoiceProblems(h) {
-			t.Errorf("managed harness %q: %s in %s", h.Selector, problem, registryFile)
-		}
-		if h.Default {
+		if h.Native != "" && h.Default {
 			defaults++
 		}
 	}
