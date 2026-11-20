@@ -27,7 +27,7 @@ func TestManagedFactProblemsNamesEachBrokenRule(t *testing.T) {
 	}{
 		{"no DisplayName", func(h *Harness) { h.DisplayName = "" }, "needs DisplayName"},
 		{"no Product", func(h *Harness) { h.Product = "" }, "needs Product"},
-		{"relative Executable", func(h *Harness) { h.Executable = "codex" }, "needs Executable"},
+		{"relative Executable", func(h *Harness) { h.Executable = "bin/agent" }, "needs Executable"},
 		{"no InstructionsFile", func(h *Harness) { h.InstructionsFile = "" }, "needs InstructionsFile"},
 		{"no KeyEnv", func(h *Harness) { h.KeyEnv = "" }, "needs KeyEnv"},
 		{"no RefusedFlags", func(h *Harness) { h.RefusedFlags = nil }, "needs RefusedFlags"},
