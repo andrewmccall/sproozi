@@ -211,7 +211,7 @@ func errText(err error) string {
 }
 
 func recordedWaitingOutcomes(t *testing.T) map[string]any {
-	var waiting []map[string]any
+	waiting := make([]map[string]any, 0, len(waitingSituations()))
 	for _, w := range waitingSituations() {
 		waitingHomes(t, w)
 		texts := map[string]string{}
@@ -222,7 +222,7 @@ func recordedWaitingOutcomes(t *testing.T) map[string]any {
 			"claudeObservation": waitingServer(harness.NativeClaude, w).claudeCompletion().Observation,
 			"waiting":           texts})
 	}
-	var activations []map[string]any
+	activations := make([]map[string]any, 0, 2*len(outcomeKinds()))
 	for _, kind := range outcomeKinds() {
 		for _, journals := range []bool{false, true} {
 			home := "empty Codex home"

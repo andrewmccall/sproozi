@@ -22,6 +22,8 @@ const (
 	// remoteName is Codex's and Copilot's remote-session flag and OpenCode's
 	// remote MCP transport.
 	remoteName = "remote"
+	// modelName is the model option's long name and Codex's model configuration key.
+	modelName = "model"
 )
 
 // controlledFlag names one option a harness takes. value reports that it takes
@@ -74,10 +76,10 @@ type ConfigOverride struct {
 }
 
 // modelFlag is the model option of a harness that spells it only --model.
-var modelFlag = controlledFlag{long: []string{"model"}, value: true}
+var modelFlag = controlledFlag{long: []string{modelName}, value: true}
 
 // codexModelFlag is Codex's model option, --model or -m.
-var codexModelFlag = controlledFlag{long: []string{"model"}, short: "m", value: true}
+var codexModelFlag = controlledFlag{long: []string{modelName}, short: "m", value: true}
 
 // codexConfigOverride is Codex's -c/--config override and the keys Sproozi
 // sets.
@@ -89,7 +91,7 @@ var codexConfigOverride = ConfigOverride{
 		"sandbox_workspace_write", "approval_policy", "approvals_reviewer", "check_for_update_on_startup",
 		"profile", "profiles", "notice",
 	},
-	ModelKey: "model",
+	ModelKey: modelName,
 }
 
 var claudeControlled = []controlledFlag{
