@@ -979,7 +979,7 @@ func TestBuildPodSpecDeliversTheHarnessSignIn(t *testing.T) {
 // session and signs in with the default login's claim (ADR 0049).
 func TestBuildPodSpecMountsASignInClaimReadWrite(t *testing.T) {
 	rt := testRuntime()
-	rt.Spec.ClientConfig.Harness = "claude-code"
+	rt.Spec.ClientConfig.Harness = testClaudeHarness
 	rt.Spec.ClientConfig.SignIn = &sprooziv1alpha1.RuntimeSignIn{Claims: &sprooziv1alpha1.RuntimeLoginClaims{}}
 	run := testRunForSandbox("cccccccc-0000-0000-0000-000000000302")
 	pod := kubernetes.BuildPodSpec(run, rt, kubernetes.RunName(run.UID))
@@ -1008,7 +1008,7 @@ func TestBuildPodSpecMountsASignInClaimReadWrite(t *testing.T) {
 func TestEnsureSandboxCreatesTheLoginClaimOnce(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(testTrustConfigMap(t)).Build()
 	rt := testRuntime()
-	rt.Spec.ClientConfig.Harness = "claude-code"
+	rt.Spec.ClientConfig.Harness = testClaudeHarness
 	rt.Spec.ClientConfig.SignIn = &sprooziv1alpha1.RuntimeSignIn{Claims: &sprooziv1alpha1.RuntimeLoginClaims{
 		StorageClassName: "shared", AccessMode: corev1.ReadWriteMany}}
 	for _, uid := range []string{"cccccccc-0000-0000-0000-000000000303", "cccccccc-0000-0000-0000-000000000304"} {

@@ -11,9 +11,10 @@ import (
 )
 
 const (
-	podOpenAIKey     = "OPENAI_API_KEY=" + testClientAuthPlaceholder
-	podOpenAIBaseURL = "OPENAI_BASE_URL=https://api.openai.com/v1"
-	podGitHubToken   = "GH_TOKEN=" + testClientAuthPlaceholder
+	podOpenAIKey      = "OPENAI_API_KEY=" + testClientAuthPlaceholder
+	podOpenAIBaseURL  = "OPENAI_BASE_URL=https://api.openai.com/v1"
+	podGitHubToken    = "GH_TOKEN=" + testClientAuthPlaceholder
+	testClaudeHarness = "claude-code"
 )
 
 // podCredentialEnvironment is what the controller gives an AgentRun Pod's
@@ -21,12 +22,12 @@ const (
 // selector ("" is a runtime that names none), when the gateway holds the
 // credential and when the harness signs in itself.
 var podCredentialEnvironment = map[string]struct{ key, signIn []string }{
-	"":            {key: []string{podOpenAIKey, podOpenAIBaseURL, podGitHubToken}, signIn: []string{podOpenAIBaseURL, podGitHubToken}},
-	"codex":       {key: []string{podOpenAIKey, podOpenAIBaseURL, podGitHubToken}, signIn: []string{podOpenAIBaseURL, podGitHubToken}},
-	"claude-code": {key: []string{podOpenAIBaseURL, podGitHubToken}, signIn: []string{podOpenAIBaseURL, podGitHubToken}},
-	"opencode":    {key: []string{podOpenAIBaseURL, podGitHubToken}, signIn: []string{podOpenAIBaseURL, podGitHubToken}},
-	"copilot":     {key: []string{podOpenAIBaseURL, podGitHubToken}, signIn: []string{podOpenAIBaseURL, podGitHubToken}},
-	"hermes":      {key: []string{podOpenAIBaseURL, podGitHubToken}, signIn: []string{podOpenAIBaseURL, podGitHubToken}},
+	"":                {key: []string{podOpenAIKey, podOpenAIBaseURL, podGitHubToken}, signIn: []string{podOpenAIBaseURL, podGitHubToken}},
+	testCodexHarness:  {key: []string{podOpenAIKey, podOpenAIBaseURL, podGitHubToken}, signIn: []string{podOpenAIBaseURL, podGitHubToken}},
+	testClaudeHarness: {key: []string{podOpenAIBaseURL, podGitHubToken}, signIn: []string{podOpenAIBaseURL, podGitHubToken}},
+	"opencode":        {key: []string{podOpenAIBaseURL, podGitHubToken}, signIn: []string{podOpenAIBaseURL, podGitHubToken}},
+	"copilot":         {key: []string{podOpenAIBaseURL, podGitHubToken}, signIn: []string{podOpenAIBaseURL, podGitHubToken}},
+	"hermes":          {key: []string{podOpenAIBaseURL, podGitHubToken}, signIn: []string{podOpenAIBaseURL, podGitHubToken}},
 }
 
 func TestBuildPodSpecCredentialEnvironmentPerHarness(t *testing.T) {
