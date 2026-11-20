@@ -67,15 +67,20 @@ func prepareCopilotLaunch(c config, thread string, env []string) ([]string, []st
 	args := []string{"--session-id", thread, "--allow-all", "--disable-builtin-mcps",
 		"--additional-mcp-config", "@" + copilotMCP, "--no-auto-update"}
 	model := c.Model
+	// The registry names the variables that carry each credential.
+	credentials, err := harness.Managed(harness.NativeCopilot)
+	if err != nil {
+		return nil, nil, err
+	}
 	switch {
-	case slices.ContainsFunc(env, func(e string) bool { return strings.HasPrefix(e, "COPILOT_PROVIDER_API_KEY=") }):
+	case slices.ContainsFunc(env, func(e string) bool { return strings.HasPrefix(e, credentials.KeyEnv+"=") }):
 		// A gateway-held key: bring-your-own-key mode on the OpenAI route,
 		// offline from GitHub.
 		env = append(env, "COPILOT_PROVIDER_BASE_URL=https://api.openai.com/v1", "COPILOT_PROVIDER_TYPE=openai",
 			"COPILOT_PROVIDER_WIRE_API=responses", "COPILOT_OFFLINE=true")
 		// Bring-your-own-key mode has no default model of its own.
 		model = cmp.Or(model, copilotKeyModel)
-	case !slices.ContainsFunc(env, func(e string) bool { return strings.HasPrefix(e, "COPILOT_GITHUB_TOKEN=") }):
+	case !slices.ContainsFunc(env, func(e string) bool { return strings.HasPrefix(e, credentials.TokenEnv+"=") }):
 		// Its own sign-in: Copilot prefers GH_TOKEN, or gh's own token, to
 		// its /login, so only the agent's shell gets the gh placeholder.
 		if err = installManagedFile(copilotBashEnv, []byte("export GH_TOKEN="+nativeGHPlaceholder+"\n"), 0400); err != nil {
