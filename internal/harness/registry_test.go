@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"regexp"
 	"slices"
@@ -244,6 +245,14 @@ func exampleProblem(h Harness, example string) string {
 		return fmt.Sprintf("%s's containers never set HTTPS_PROXY; build it from the gateway token as "+
 			"examples/harnesses/agentruntime-opencode.yaml does", example)
 	}
+	if h.RunKeyEnv == "" && !strings.Contains(string(spec), runKeyPlaceholder) &&
+		!slices.ContainsFunc(slices.Collect(maps.Values(h.LaunchFiles)), func(file string) bool {
+			return strings.Contains(file, runKeyPlaceholder)
+		}) {
+		return fmt.Sprintf("the Pod gives no key placeholder without RunKeyEnv, but neither %s nor a launch file "+
+			"sets %s; set the client's key to it, or set RunKeyEnv when the client reads it from the Pod",
+			example, runKeyPlaceholder)
+	}
 	read := []string{h.MCP.File}
 	if h.Loader.Bridge != "" {
 		read = append(read, h.Loader.Bridge)
@@ -258,6 +267,31 @@ func exampleProblem(h Harness, example string) string {
 	}
 	return fmt.Sprintf("%s's containers never read /etc/sproozi/contract/ for any of %v; its command must load "+
 		"the MCP file or the launch file that does", example, read)
+}
+
+// runKeyPlaceholder is the public key placeholder an AgentRun's client sends,
+// as internal/runtime/kubernetes/contract.go names it; that package imports
+// this one, so the guard can't reach its constant.
+const runKeyPlaceholder = "sproozi-local-placeholder"
+
+// A harness whose client doesn't read its key from the Pod (no RunKeyEnv)
+// must supply its own placeholder, or it fails only on a cluster.
+func TestExampleProblemRequiresAKeyPlaceholderWithoutRunKeyEnv(t *testing.T) {
+	// examples/mcp sets no key: Codex reads the Pod's OPENAI_API_KEY.
+	fake := Harness{Selector: "codex", MCP: MCPFormat{File: "codex-mcp.toml"}}
+	const example = "examples/mcp/agentruntime.yaml"
+	if problem := exampleProblem(fake, example); !strings.Contains(problem, runKeyPlaceholder) {
+		t.Fatalf("a harness with neither RunKeyEnv nor its own placeholder passed: %q", problem)
+	}
+	fake.RunKeyEnv = "OPENAI_API_KEY"
+	if problem := exampleProblem(fake, example); problem != "" {
+		t.Fatalf("a harness that reads the Pod's key failed: %s", problem)
+	}
+	fake.RunKeyEnv = ""
+	fake.LaunchFiles = map[string]string{"fake-launch.py": `env["KEY"] = "` + runKeyPlaceholder + `"`}
+	if problem := exampleProblem(fake, example); problem != "" {
+		t.Fatalf("a launch file's placeholder was not counted: %s", problem)
+	}
 }
 
 // The image build context must ship every launch file.
