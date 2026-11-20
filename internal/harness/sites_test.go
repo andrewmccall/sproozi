@@ -93,8 +93,9 @@ func declScope(decl ast.Decl) string {
 }
 
 // kindBranches reports where f compares a value with a kind constant (== or
-// !=), lists one as a case, or uses one as a composite literal key, such as a
-// map keyed by kind.
+// !=), lists one as a case, uses one as a composite literal key or a map
+// index, lists one in a []NativeKind literal, or converts a string literal to
+// a NativeKind.
 func kindBranches(fset *token.FileSet, f *ast.File, kinds []string) []harnessSite {
 	isKind := func(e ast.Expr) bool {
 		for {
@@ -112,12 +113,35 @@ func kindBranches(fset *token.FileSet, f *ast.File, kinds []string) []harnessSit
 		}
 		return false
 	}
+	isKindType := func(e ast.Expr) bool {
+		switch x := e.(type) {
+		case *ast.Ident:
+			return x.Name == "NativeKind"
+		case *ast.SelectorExpr:
+			return x.Sel.Name == "NativeKind"
+		}
+		return false
+	}
 	var sites []harnessSite
 	for _, decl := range f.Decls {
 		scope := declScope(decl)
 		ast.Inspect(decl, func(n ast.Node) bool {
 			var hit ast.Node
 			switch x := n.(type) {
+			case *ast.CompositeLit:
+				if a, ok := x.Type.(*ast.ArrayType); ok && isKindType(a.Elt) && slices.ContainsFunc(x.Elts, isKind) {
+					hit = x
+				}
+			case *ast.IndexExpr:
+				if isKind(x.Index) {
+					hit = x
+				}
+			case *ast.CallExpr:
+				if len(x.Args) == 1 && isKindType(x.Fun) {
+					if lit, ok := x.Args[0].(*ast.BasicLit); ok && lit.Kind == token.STRING {
+						hit = x
+					}
+				}
 			case *ast.BinaryExpr:
 				if (x.Op == token.EQL || x.Op == token.NEQ) && (isKind(x.X) || isKind(x.Y)) {
 					hit = x
@@ -223,12 +247,19 @@ func goFiles(t *testing.T, fset *token.FileSet, roots ...string) map[string]*ast
 // package, so a new harness's constant is covered once declared. Comments and
 // other strings are not code and are ignored.
 //
+// It also flags a kind constant used as a map index, one listed in a
+// []NativeKind literal, and a NativeKind conversion of a string literal, such
+// as NativeKind("copilot").
+//
 // It does not catch: a comparison with a converted string, such as
-// string(kind) == "copilot"; a map keyed by kind that is built or indexed
-// without a literal key; a switch on DisplayName, NativeDirectory or another
+// string(kind) == "copilot"; a local constant or variable aliasing a kind
+// constant and compared later; a map keyed by kind that is built or indexed
+// without a kind constant; a switch on DisplayName, NativeDirectory or another
 // registry value; prefix or suffix checks on kind names; registry values
-// repeated outside internal/harness and cmd/native-session; and verifiers
-// under hack/, which list harnesses by design.
+// repeated outside internal/harness and cmd/native-session; and files it does
+// not read: _test.go files (and their helpers), zz_generated* files, and
+// everything outside internal, cmd, api and test, including verifiers under
+// hack/, which list harnesses by design.
 func TestNoHarnessFactOutsideTheRegistry(t *testing.T) {
 	fset := token.NewFileSet()
 	var kinds []string
@@ -242,7 +273,7 @@ func TestNoHarnessFactOutsideTheRegistry(t *testing.T) {
 		t.Fatal("found no NativeKind constants in internal/harness")
 	}
 	seen := map[string]bool{}
-	for name, f := range goFiles(t, fset, "internal", "cmd", "api") {
+	for name, f := range goFiles(t, fset, "internal", "cmd", "api", "test") {
 		for _, site := range kindBranches(fset, f, kinds) {
 			key := name + ": " + site.scope
 			seen[key] = true
@@ -301,6 +332,14 @@ const notAKind = "copilot"
 		{"unqualified, inside the harness package", `if k == NativeAcme { return }`, 1, 0},
 		{"second case value", `switch k { case "x", harness.NativeAcme: }`, 1, 0},
 		{"map literal key", `_ = map[harness.NativeKind]int{harness.NativeAcme: 1}`, 1, 0},
+		{"map index assignment", `m := map[harness.NativeKind]int{}; m[harness.NativeAcme] = 1`, 1, 0},
+		{"kind list", `_ = slices.Contains([]harness.NativeKind{harness.NativeCodex, harness.NativeAcme}, k)`, 1, 0},
+		{"kind list in its own package", `_ = []NativeKind{NativeAcme}`, 1, 0},
+		{"kind from a string literal", `if k == harness.NativeKind("copilot") { return }`, 1, 0},
+		{"kind from a string literal alone", `_ = harness.NativeKind("acme")`, 1, 0},
+		{"converting a variable is not caught", `_ = harness.NativeKind(v)`, 0, 0},
+		{"an empty kind list", `_ = []harness.NativeKind{}`, 0, 0},
+		{"not caught: a local alias", `const c = harness.NativeAcme; _ = c`, 0, 0},
 		{"block comment", `/* if k == harness.NativeCodex {} */`, 0, 0},
 		{"line comment", `// k == harness.NativeAcme`, 0, 0},
 		{"plain log string", `fmt.Println("codex: k == harness.NativeCodex")`, 0, 0},
