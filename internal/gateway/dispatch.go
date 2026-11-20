@@ -24,12 +24,8 @@ const (
 	// route's Capability, which must be set.
 	AdmitCapability Admission = iota
 	// AdmitSelected: the handler selects a capability from the request and
-	// checks it before any other work, as named MCP does. Reason names the
-	// handler's check.
+	// checks it itself, as named MCP does. The route has no Capability.
 	AdmitSelected
-	// AdmitOpen: the route needs no capability by decision. Reason names the
-	// record that decided it.
-	AdmitOpen
 )
 
 // Route declares the guarantee and capability of an exact upstream authority.
@@ -40,9 +36,7 @@ type Route struct {
 	Capability sprooziv1alpha1.CapabilityKind
 	// Admission says who admits a request; Validate refuses a route with a
 	// handler and no valid declaration.
-	Admission Admission
-	// Reason names the check or record behind AdmitSelected or AdmitOpen.
-	Reason      string
+	Admission   Admission
 	Tier        audit.EnforcementTier
 	Handler     http.Handler
 	Budgets     *budget.Tracker
@@ -83,8 +77,7 @@ func (d Dispatcher) Select(authority, requestPath string) (Route, string, bool) 
 type Dispatcher map[string]Route
 
 // Validate refuses a route or path route that has a handler and no valid
-// admission: a capability for AdmitCapability, or no capability and a Reason
-// for AdmitSelected and AdmitOpen. A route without a handler is a reserved,
+// admission: a capability for AdmitCapability, or none for AdmitSelected. A route without a handler is a reserved,
 // closed authority. Compositions call it before serving.
 func (d Dispatcher) Validate() error {
 	var problems []string
@@ -112,14 +105,11 @@ func (r Route) validate() error {
 	switch r.Admission {
 	case AdmitCapability:
 		if r.Capability == "" {
-			return errors.New("serves without a capability; set Capability, or declare AdmitSelected or AdmitOpen with a Reason")
+			return errors.New("serves without a capability; set Capability, or declare AdmitSelected for a handler that selects its own")
 		}
-	case AdmitSelected, AdmitOpen:
+	case AdmitSelected:
 		if r.Capability != "" {
 			return fmt.Errorf("declares capability %s, which the dispatcher would not check", r.Capability)
-		}
-		if strings.TrimSpace(r.Reason) == "" {
-			return errors.New("needs a Reason naming who admits its requests")
 		}
 	default:
 		return fmt.Errorf("has unknown admission %d", r.Admission)

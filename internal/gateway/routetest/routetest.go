@@ -266,16 +266,18 @@ func Check(t *testing.T, routes gateway.Dispatcher, events *Recorder, selected *
 			if route.Admission == gateway.AdmitSelected {
 				capability = served.capability
 			}
-			if route.Admission == gateway.AdmitOpen {
-				t.Logf("%s: open by decision: %s", name, route.Reason)
-			} else {
-				refusedPath := served.path
-				if refusedPath == "" {
-					// A clean path under the prefix selects the path route.
-					refusedPath = prefix + "fixture"
-				}
-				refusedWithoutCapability(t, name, routes, authority, refusedPath, served, capability, uid, events)
+			if route.Admission == gateway.AdmitSelected && capability == "" {
+				// Only a handler that selects and checks a capability may be
+				// declared AdmitSelected; routetest must know how.
+				t.Errorf("%s: AdmitSelected route with handler %T has no selected request in routetest", name, route.Handler)
+				return
 			}
+			refusedPath := served.path
+			if refusedPath == "" {
+				// A clean path under the prefix selects the path route.
+				refusedPath = prefix + "fixture"
+			}
+			refusedWithoutCapability(t, name, routes, authority, refusedPath, served, capability, uid, events)
 			if isFree {
 				t.Logf("%s: free: %s", name, free)
 				return

@@ -82,7 +82,7 @@ func TestDispatcherRefusalsReachTheJournalAndOmissionsDoNot(t *testing.T) {
 	d := gateway.Dispatcher{
 		// A budget without its tracker cannot be accounted.
 		fixtureAuthority: {Capability: api.CapabilityKubernetesRead, Handler: silent, AuditLogger: journal},
-		"open.test:443":  {Admission: gateway.AdmitOpen, Reason: "fixture", Handler: silent, AuditLogger: journal},
+		"open.test:443":  {Admission: gateway.AdmitSelected, Handler: silent, AuditLogger: journal},
 	}
 	for _, target := range []string{"https://service.test/secret-path?token=abc", "https://open.test/secret-path?token=abc"} {
 		r := httptest.NewRequest(http.MethodGet, target, nil)

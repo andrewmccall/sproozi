@@ -218,13 +218,10 @@ func TestValidateRefusesRoutesWithoutAValidAdmission(t *testing.T) {
 		{"capability", gateway.Route{Capability: api.CapabilityKubernetesRead, Handler: h}, true},
 		{"reserved without a handler", gateway.Route{}, true},
 		{"zero route with a handler", gateway.Route{Handler: h}, false},
-		{"selected with a reason", gateway.Route{Admission: gateway.AdmitSelected, Reason: "handler selects", Handler: h}, true},
-		{"selected without a reason", gateway.Route{Admission: gateway.AdmitSelected, Handler: h}, false},
-		{"selected with a capability", gateway.Route{Admission: gateway.AdmitSelected, Reason: "x",
+		{"selected", gateway.Route{Admission: gateway.AdmitSelected, Handler: h}, true},
+		{"selected with a capability", gateway.Route{Admission: gateway.AdmitSelected,
 			Capability: api.CapabilityKubernetesRead, Handler: h}, false},
-		{"open with a record", gateway.Route{Admission: gateway.AdmitOpen, Reason: "ADR 0025", Handler: h}, true},
-		{"open without a record", gateway.Route{Admission: gateway.AdmitOpen, Handler: h}, false},
-		{"unknown admission", gateway.Route{Admission: 9, Reason: "x", Handler: h}, false},
+		{"unknown admission", gateway.Route{Admission: 9, Handler: h}, false},
 		{"undeclared path route", gateway.Route{Paths: []gateway.PathRoute{{Prefix: "/login/", Route: gateway.Route{Handler: h}}}}, false},
 	} {
 		err := gateway.Dispatcher{fixtureAuthority: tc.route}.Validate()

@@ -87,7 +87,7 @@ func composeRoutes(owner *Owner, config GatewayConfig, tracker *budget.Tracker, 
 	if config.MCPRegistry != nil {
 		named = mcpgateway.NewHandler(mcpgateway.HandlerConfig{Registry: config.MCPRegistry, HTTPClient: config.MCPClient, Budgets: tracker, AuditLogger: journal})
 	}
-	dispatch[config.MCPAuthority] = gateway.Route{Admission: gateway.AdmitSelected, Reason: diagnose.Admission,
+	dispatch[config.MCPAuthority] = gateway.Route{Admission: gateway.AdmitSelected,
 		Tier: audit.TierProtocol, Handler: diagnose.NewControl(journal, named), AuditLogger: journal}
 	if err := dispatch.Validate(); err != nil {
 		return nil, err

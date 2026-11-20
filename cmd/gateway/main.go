@@ -648,7 +648,7 @@ func composeDispatcher(
 	// authenticating the requested path.
 	for _, port := range []string{"443", "8443"} {
 		routes[net.JoinHostPort(host, port)] = gateway.Route{Admission: gateway.AdmitSelected,
-			Reason: diagnose.Admission, Tier: audit.TierProtocol, Handler: mcpHandler}
+			Tier: audit.TierProtocol, Handler: mcpHandler}
 	}
 	if cfg.mcpRegistry != nil {
 		for _, authority := range cfg.mcpRegistry.Authorities() {
