@@ -15,6 +15,14 @@ import (
 const fixtureThread = "01a126e8-288d-7350-9b52-627e16048343"
 const checkpointLimit = int64(8 << 20)
 
+// codexFixtureRollout is a completed Codex turn with no approved instructions
+// and no final answer.
+const codexFixtureRollout = `{"type":"session_meta","payload":{"id":"01a126e8-288d-7350-9b52-627e16048343","cli_version":"0.161.0","cwd":"/workspace"}}
+{"type":"event_msg","payload":{"type":"task_started","turn_id":"fixture-turn"}}
+{"type":"response_item","payload":{"role":"user","content":[{"type":"input_text","text":"opaque remembered fact"}]}}
+{"type":"event_msg","payload":{"type":"task_complete","turn_id":"fixture-turn"}}
+`
+
 func git(t *testing.T, root string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", args...)
@@ -50,11 +58,7 @@ func source(t *testing.T) (string, string, []byte) {
 	write(t, filepath.Join(repository, "ignored"), "explicit only\n")
 	state := harness.CodexState{
 		ThreadID: fixtureThread, Path: "sessions/2026/10/10/rollout-2026-10-10T18-41-51-" + fixtureThread + ".jsonl",
-		Rollout: []byte(`{"type":"session_meta","payload":{"id":"01a126e8-288d-7350-9b52-627e16048343","cli_version":"0.161.0","cwd":"/workspace"}}
-{"type":"event_msg","payload":{"type":"task_started","turn_id":"fixture-turn"}}
-{"type":"response_item","payload":{"role":"user","content":[{"type":"input_text","text":"opaque remembered fact"}]}}
-{"type":"event_msg","payload":{"type":"task_complete","turn_id":"fixture-turn"}}
-`),
+		Rollout: []byte(codexFixtureRollout),
 	}
 	if err := harness.RestoreCodexState(home, state, checkpointLimit); err != nil {
 		t.Fatal(err)
