@@ -34,3 +34,19 @@ func TestCredentialsSetNamesEachAcceptedNameOnce(t *testing.T) {
 		}
 	}
 }
+
+// The credentials help names every accepted name, from the same list.
+func TestCredentialsHelpNamesEachAcceptedName(t *testing.T) {
+	for _, c := range commands {
+		if c.name != cmdCredentials {
+			continue
+		}
+		for _, name := range credentialNames() {
+			if !strings.Contains(c.about, name) {
+				t.Errorf("credentials help leaves out %q: %q", name, c.about)
+			}
+		}
+		return
+	}
+	t.Fatal("no credentials command")
+}
