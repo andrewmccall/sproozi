@@ -77,7 +77,7 @@ refuses mid-turn is untested.
    `RuntimeClientConfig.Harness` in
    [`api/v1alpha1/agentruntime_types.go`](../../api/v1alpha1/agentruntime_types.go)
    and run `make manifests`.
-3. Run `go test ./internal/harness/ ./cmd/native-session/ ./internal/checkpoint/ ./internal/runtime/kubernetes/` while
+3. Run `go test ./internal/harness/ ./cmd/native-session/ ./internal/checkpoint/ ./cmd/sproozi/ ./internal/runtime/kubernetes/` while
    you iterate; `make test` runs everything. The guard tests fail, naming the
    file to change, until the CRD enum, the registry, the rendered `sproozi`
    control connection, the declared loader, the example and the reference row
@@ -131,7 +131,7 @@ described in [retained final answers](../reference/agent-contract.md#retained-fi
 
 ## What the guards check, and what they don't
 
-`go test ./internal/harness/ ./cmd/native-session/ ./internal/checkpoint/ ./internal/runtime/kubernetes/`
+`go test ./internal/harness/ ./cmd/native-session/ ./internal/checkpoint/ ./cmd/sproozi/ ./internal/runtime/kubernetes/`
 fails, naming the file to change, unless:
 
 - the registry, the `+kubebuilder:validation:Enum` marker and the generated
@@ -157,23 +157,35 @@ fails, naming the file to change, unless:
   the file names a Python launch file repeats equal the registry's
   (`TestManagedKindsSupplyEveryFact` and the tests beside it in
   `internal/harness/registry_test.go`);
-- no Go file under `internal`, `cmd` or `api` outside the registry branches on
-  a managed kind (`==`, `!=`, `case` or a map literal key), names a selector,
-  or repeats a registered credential variable, token placeholder,
-  instructions file or executable, except the behaviour files listed, with a
-  count and a reason, in `harnessSites` (`TestNoHarnessFactOutsideTheRegistry`
-  in `internal/harness/sites_test.go`). Read a new fact from the registry
-  entry, adding a field when it has none; only behaviour, such as a
-  supervisor adapter or a checkpoint format, belongs in that list. Verifiers
-  under `hack/` are not scanned;
-- the local session and remote executor rows of the
-  [configured MCP reference](../reference/configured-mcp.md) name the managed
-  harnesses and the `RemoteExecutor` ones;
+- a tripwire for the common form of a fact kept outside the registry
+  (`TestNoHarnessFactOutsideTheRegistry` in `internal/harness/sites_test.go`)
+  holds: Go code under `internal`, `cmd` and `api` compares nothing with a
+  `NativeKind` constant (`==` or `!=`), lists none in a `case` and keys no
+  composite literal by one, except in the behaviour scopes (file and
+  function) listed in `behaviourSites`, where a new harness adds its cases
+  without editing the list; and no string in `internal/harness` or
+  `cmd/native-session` outside the registry repeats a registered credential
+  variable, token placeholder, instructions file, executable, sign-in file or
+  MCP file name. It does not catch a comparison with a converted string such
+  as `string(kind) == "copilot"`, a map keyed by kind without a literal key, a
+  switch on another registry value such as `DisplayName`, prefix checks, or
+  values repeated in other packages; review those. Verifiers under `hack/`
+  are not scanned. Read a new fact from the registry entry, adding a field
+  when it has none;
+- the [configured MCP reference](../reference/configured-mcp.md) names every
+  managed harness in its local session and remote executor rows, and the
+  `RemoteExecutor` harnesses as those an executor starts tasks and
+  interactive sessions for;
 - what each fact's readers return, for every registered selector and an
   unregistered kind, is unchanged: `internal/harness/testdata/registry-outcomes.json`
   and `cmd/sproozi/testdata/wizard-outcomes.json` record it. A new harness
-  adds its rows: regenerate both with `SPROOZI_UPDATE_OUTCOMES=1` and review
-  the difference, which should be only the new harness.
+  changes both: regenerate them with `SPROOZI_UPDATE_OUTCOMES=1` and review
+  the difference. Expect the new harness's own rows; the top-level
+  `selectors`, `managedKinds` and `managedKindList` (and `taskKindList` or
+  `default` when it takes tasks or is the default); its refused flag
+  spellings and reserved variables, recorded for every kind; and the
+  empty-kind wizard rows, whose agent question lists every managed harness.
+  Any other change is an outcome the new harness altered for another.
 
 They don't prove that a stock client loads its MCP file, that it shows the
 MCP tools to the model (pi, for example, hides them behind its `codemode`
@@ -259,13 +271,15 @@ Do the AgentRun steps first, then:
    - `KeyOptions` and `SignInOptions`, any native options a local installation
      gives it; and `SignInFile` and `SignInProvider` when it signs in itself;
    - `SignInChoices`, the answers the setup wizard offers for how it reaches
-     its provider, most common first, each with its wording and the
-     `NativeCredential` it selects (`ChatGPT` for a ChatGPT plan the gateway
-     holds).
+     its provider, most common first, each with its wording and its
+     `SignInAnswer`: a key the gateway holds, a ChatGPT plan the gateway
+     holds (OpenAI harnesses only), a sign-in token the gateway holds, or its
+     own sign-in (which needs `SignInFile`).
 
    Every reader of these facts takes them from the registry, so this entry
-   is the only place to set them; `TestNoHarnessFactOutsideTheRegistry` fails
-   on code elsewhere that branches on a kind instead.
+   is the only place to set them; `TestNoHarnessFactOutsideTheRegistry`
+   trips on the common forms of code elsewhere that branches on a kind
+   instead (see the guard list below for what it misses).
 2. Accept it in `nativeconfig.ValidateHarness`
    ([`internal/nativeconfig/claude.go`](../../internal/nativeconfig/claude.go)).
 3. Add a supervisor adapter to `nativeAdapters` in
@@ -290,7 +304,7 @@ Do the AgentRun steps first, then:
    which otherwise returns no result for it.
 5. If its protocol is new, add the gateway model handler and the provider in
    `internal/localsetup`.
-6. Run `go test ./internal/harness/ ./cmd/native-session/ ./internal/checkpoint/`;
+6. Run `go test ./internal/harness/ ./cmd/native-session/ ./internal/checkpoint/ ./cmd/sproozi/`;
    the guards name each missing piece. Then prove a real round trip with
    `make verify-local-onboarding` and the session verifiers in
    [which command proves what](../../test/acceptance/running.md#which-command-proves-what).

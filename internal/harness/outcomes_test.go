@@ -31,8 +31,8 @@ func outcomeKinds() []NativeKind {
 }
 
 // outcomeArgs are harness arguments that exercise every harness's refused
-// flags and model selection: every spelling any harness controls, plus the
-// model spellings.
+// flags and model selection: every spelling any registered harness's
+// RefusedFlags controls, in registry order, plus the model spellings.
 func outcomeArgs() [][]string {
 	seen := map[string]bool{}
 	var out [][]string
@@ -43,8 +43,8 @@ func outcomeArgs() [][]string {
 			out = append(out, args)
 		}
 	}
-	for _, table := range [][]controlledFlag{codexControlled, claudeControlled, copilotControlled} {
-		for _, f := range table {
+	for _, h := range registry {
+		for _, f := range h.RefusedFlags {
 			for _, name := range f.long {
 				add("--" + name)
 				add("--" + name + "=x")
@@ -80,6 +80,9 @@ func recordedOutcomes() map[string]any {
 		"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "DISABLE_AUTOUPDATER", "CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION",
 		"CLAUDE_CODE_DISABLE_BACKGROUND_TASKS", "COPILOT_HOME", "COPILOT_AUTO_UPDATE", "OPENAI_API_KEY",
 		"ANTHROPIC_API_KEY", "COPILOT_PROVIDER_API_KEY", "COPILOT_GITHUB_TOKEN"}
+	for _, h := range registry {
+		reservedCandidates = append(reservedCandidates, h.ReservedEnv...)
+	}
 	reserved := map[string]bool{}
 	for _, key := range reservedCandidates {
 		reserved[key] = reservedEnvironment(key)
