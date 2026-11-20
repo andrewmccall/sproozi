@@ -30,6 +30,17 @@ func dispatchWith(t *testing.T, serve func(*http.Request)) (events []audit.Event
 	return writer.taken(), reason, declared, recorded
 }
 
+// A handler built without an audit writer records nothing, so its request
+// stays undecided and the dispatcher records the omission through the route.
+func TestRecordWithoutAWriterLeavesTheRequestToTheFallback(t *testing.T) {
+	events, _, _, recorded := dispatchWith(t, func(r *http.Request) {
+		gateway.Record(r.Context(), nil, gateway.AuditEvent(r.Context(), "fixture.read"))
+	})
+	if recorded || len(events) != 1 || events[0].Outcome != audit.Unrecorded {
+		t.Fatalf("a nil writer decided the request: recorded=%v events=%+v", recorded, events)
+	}
+}
+
 // Only the listed reasons declare a request unrecorded; the decision keeps
 // the reason, and a zero reason declares nothing.
 func TestOnlyListedReasonsDeclareARequestUnrecorded(t *testing.T) {
