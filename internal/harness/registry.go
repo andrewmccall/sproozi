@@ -110,6 +110,21 @@ type Harness struct {
 	// signs in itself. Both may be empty.
 	KeyOptions    []string
 	SignInOptions []string
+	// SignInChoices are the ways the setup wizard (cmd/sproozi/wizard.go)
+	// offers for the harness to reach its model provider, most common first
+	// (docs/guides/local-sessions.md#choose-how-an-agent-signs-in).
+	SignInChoices []SignInChoice
+}
+
+// SignInChoice is one answer to the setup wizard's sign-in question.
+type SignInChoice struct {
+	// Label is the answer's wording.
+	Label string
+	// Credential is how the harness then reaches its provider.
+	Credential NativeCredential
+	// ChatGPT: the gateway signs in to a ChatGPT plan during setup and holds
+	// that ChatGPT credential. Credential is then CredentialKey.
+	ChatGPT bool
 }
 
 // ProvesCompletion reports the kind's StateProvesCompletion.
@@ -194,6 +209,12 @@ var registry = []Harness{
 		DisplayName: "Codex", Product: "OpenAI Codex CLI", Executable: "/usr/local/bin/codex", InstructionsFile: "AGENTS.md",
 		KeyEnv: nativeOpenAIKey, RefusedFlags: codexControlled, ReservedEnv: []string{"CODEX_HOME"},
 		RemoteExecutor: true, TakesTask: true, Default: true, KeyOptions: codexKeyOptions, SignInOptions: []string{codexTrust},
+		SignInChoices: []SignInChoice{
+			{Label: "An OpenAI API key, held by the gateway", Credential: CredentialKey},
+			{Label: "A ChatGPT plan, signed in now in your browser and held by the gateway", Credential: CredentialKey,
+				ChatGPT: true},
+			{Label: "Codex signs in itself with ChatGPT in its first session", Credential: CredentialSignIn},
+		},
 		MCP: MCPFormat{File: "codex-mcp.toml"}, Loader: NativeMCP},
 	{Selector: string(NativeClaude), Native: NativeClaude, NativeDirectory: "claude", Protocol: ProtocolAnthropic,
 		SignInFile:  ".credentials.json",
@@ -201,6 +222,11 @@ var registry = []Harness{
 		KeyEnv: nativeAnthropicKey, RefusedFlags: claudeControlled, RemoteExecutor: true, TakesTask: true,
 		ReservedEnv: []string{"CLAUDE_CONFIG_DIR", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "DISABLE_AUTOUPDATER",
 			"CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION", "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS"},
+		SignInChoices: []SignInChoice{
+			{Label: "An Anthropic API key, held by the gateway", Credential: CredentialKey},
+			{Label: `A sign-in token from "claude setup-token", held by the gateway`, Credential: CredentialToken},
+			{Label: "Claude Code signs in itself with /login in its first session", Credential: CredentialSignIn},
+		},
 		RequestFiles: true, Loader: NativeMCP, LaunchFiles: launchFilesNamed("claude-launch.py"),
 		MCP: MCPFormat{File: "claude-mcp.json", Field: mcpServersField, Entry: func(name, address string) (string, any) {
 			return name, map[string]any{connectionType: httpTransport, connectionURL: address}
@@ -214,6 +240,12 @@ var registry = []Harness{
 		DisplayName: "Copilot", Product: "GitHub Copilot CLI", Executable: "/usr/local/bin/copilot",
 		InstructionsFile: "copilot-instructions.md", KeyEnv: "COPILOT_PROVIDER_API_KEY", RefusedFlags: copilotControlled,
 		TokenEnv: "COPILOT_GITHUB_TOKEN", TokenPlaceholder: NativeCopilotTokenPlaceholder, SignInYieldsGitHubToken: true,
+		SignInChoices: []SignInChoice{
+			{Label: "Copilot signs in itself with /login and your Copilot plan in its first session",
+				Credential: CredentialSignIn},
+			{Label: "A GitHub token with Copilot access, held by the gateway", Credential: CredentialToken},
+			{Label: "An OpenAI API key, held by the gateway (no Copilot plan needed)", Credential: CredentialKey},
+		},
 		RequestFiles: true, Loader: NativeMCP,
 		MCP: MCPFormat{File: "copilot-mcp.json", Field: mcpServersField, Entry: func(name, address string) (string, any) {
 			return name, map[string]any{connectionType: httpTransport, connectionURL: address, "tools": []string{"*"}}

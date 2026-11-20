@@ -286,7 +286,7 @@ func TestManagedKindsSupplyEveryFact(t *testing.T) {
 		if h.Native == "" {
 			if h.DisplayName != "" || h.Product != "" || h.Executable != "" || h.InstructionsFile != "" || h.KeyEnv != "" ||
 				h.RefusedFlags != nil || h.ReservedEnv != nil || h.RemoteExecutor || h.TakesTask || h.Default ||
-				h.TokenEnv != "" || h.KeyOptions != nil || h.SignInOptions != nil {
+				h.TokenEnv != "" || h.KeyOptions != nil || h.SignInOptions != nil || h.SignInChoices != nil {
 				t.Errorf("harness %q has no Native kind, so %s must not set the managed facts", h.Selector, registryFile)
 			}
 			continue
@@ -294,8 +294,9 @@ func TestManagedKindsSupplyEveryFact(t *testing.T) {
 		missing := map[string]bool{
 			"DisplayName": h.DisplayName == "", "Product": h.Product == "", "InstructionsFile": h.InstructionsFile == "",
 			"KeyEnv": h.KeyEnv == "", "RefusedFlags": len(h.RefusedFlags) == 0,
-			"Executable":  !strings.HasPrefix(h.Executable, "/"),
-			"ReservedEnv": len(h.ReservedEnv) == 0 && reservedEnvExempt[h.Native] == "",
+			"Executable":    !strings.HasPrefix(h.Executable, "/"),
+			"ReservedEnv":   len(h.ReservedEnv) == 0 && reservedEnvExempt[h.Native] == "",
+			"SignInChoices": len(h.SignInChoices) == 0,
 		}
 		for fact, isMissing := range missing {
 			if isMissing {
@@ -305,6 +306,9 @@ func TestManagedKindsSupplyEveryFact(t *testing.T) {
 		}
 		if (h.TokenEnv == "") != (h.TokenPlaceholder == "") {
 			t.Errorf("managed harness %q must set TokenEnv and TokenPlaceholder together in %s", h.Selector, registryFile)
+		}
+		for _, problem := range signInChoiceProblems(h) {
+			t.Errorf("managed harness %q: %s in %s", h.Selector, problem, registryFile)
 		}
 		if h.Default {
 			defaults++
@@ -336,4 +340,26 @@ func TestLaunchFilesAgreeWithTheirRegistryEntry(t *testing.T) {
 			}
 		}
 	}
+}
+
+// signInChoiceProblems checks each setup wizard answer: worded, naming a
+// mechanism the harness supports, and a ChatGPT plan only as a gateway-held
+// credential of an OpenAI harness.
+func signInChoiceProblems(h Harness) []string {
+	var problems []string
+	for i, c := range h.SignInChoices {
+		switch {
+		case strings.TrimSpace(c.Label) == "":
+			problems = append(problems, fmt.Sprintf("SignInChoices[%d] needs a Label", i))
+		case c.Credential != CredentialKey && c.Credential != CredentialToken && c.Credential != CredentialSignIn:
+			problems = append(problems, fmt.Sprintf("SignInChoices[%d] needs a Credential", i))
+		case c.ChatGPT && (c.Credential != CredentialKey || h.Protocol != ProtocolOpenAI):
+			problems = append(problems, fmt.Sprintf("SignInChoices[%d] offers a ChatGPT plan, which only an OpenAI "+
+				"harness's gateway-held credential (CredentialKey) can be", i))
+		case c.Credential == CredentialSignIn && h.SignInFile == "":
+			problems = append(problems, fmt.Sprintf("SignInChoices[%d] lets the harness sign in itself, which "+
+				"needs its SignInFile", i))
+		}
+	}
+	return problems
 }
