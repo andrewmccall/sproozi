@@ -415,8 +415,8 @@ func TestConfiguredMCPReferenceMatchesTheRegistry(t *testing.T) {
 		prefix := "| " + row.where + " | "
 		var got []string
 		for _, l := range lines {
-			if strings.HasPrefix(l, prefix) {
-				cell, _, _ := strings.Cut(strings.TrimPrefix(l, prefix), " |")
+			if after, ok := strings.CutPrefix(l, prefix); ok {
+				cell, _, _ := strings.Cut(after, " |")
 				got = append(got, cell)
 			}
 		}
