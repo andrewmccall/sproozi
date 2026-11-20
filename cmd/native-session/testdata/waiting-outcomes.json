@@ -17,7 +17,7 @@
       "validate": ""
     },
     {
-      "error": "initial task baseline is unavailable: lstat \u003ccodex home\u003e/sessions: no such file or directory",
+      "error": "the recorded terminal does not start",
       "home": "empty Codex home",
       "kind": "claude-code",
       "state": "prepared",
@@ -29,11 +29,11 @@
       "home": "Codex home with the resumed conversation",
       "kind": "claude-code",
       "state": "prepared",
-      "taskBaseline": "turn-one",
+      "taskBaseline": "",
       "validate": ""
     },
     {
-      "error": "initial task baseline is unavailable: lstat \u003ccodex home\u003e/sessions: no such file or directory",
+      "error": "the recorded terminal does not start",
       "home": "empty Codex home",
       "kind": "copilot",
       "state": "prepared",
@@ -45,7 +45,7 @@
       "home": "Codex home with the resumed conversation",
       "kind": "copilot",
       "state": "prepared",
-      "taskBaseline": "turn-one",
+      "taskBaseline": "",
       "validate": "native task requires bounded nonempty Codex or Claude Code input"
     },
     {

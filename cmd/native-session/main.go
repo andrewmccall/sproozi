@@ -414,14 +414,8 @@ func (s *server) activate() response {
 		return r
 	}
 	env = append(env, "HOME="+agentHome)
-	if s.config.Task != "" && s.threadID != "" {
-		taskBaseline := adapter.taskBaseline
-		if taskBaseline == nil {
-			// A kind without its own baseline takes Codex's, as it always
-			// has.
-			taskBaseline = (*server).codexTaskBaseline
-		}
-		baseline, err := taskBaseline(s)
+	if s.config.Task != "" && s.threadID != "" && adapter.taskBaseline != nil {
+		baseline, err := adapter.taskBaseline(s)
 		if err != nil {
 			r.Error = "initial task baseline is unavailable: " + err.Error()
 			return r
