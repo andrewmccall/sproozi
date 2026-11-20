@@ -20,6 +20,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -29,6 +30,7 @@ import (
 	mcpgateway "github.com/andrewmccall/sproozi/internal/endpoints/mcp"
 	modelgateway "github.com/andrewmccall/sproozi/internal/endpoints/model"
 	"github.com/andrewmccall/sproozi/internal/gateway"
+	"github.com/andrewmccall/sproozi/internal/modelauth"
 )
 
 // MCPServer is the named MCP server MCPRegistry registers, with one tool.
@@ -159,6 +161,18 @@ func MCPRegistry(t testing.TB) *mcpgateway.Registry {
 	return registry
 }
 
+// ChatGPTStore holds a stored ChatGPT sign-in that needs no refresh, for the
+// gateway's ChatGPT mechanism.
+type ChatGPTStore struct{}
+
+func (ChatGPTStore) Load(context.Context) (modelauth.Session, error) {
+	return modelauth.Session{Issuer: modelauth.Issuer, Subject: "account", ClientID: "oaiapp_fixture", HostID: "host",
+		AccessToken: "fixture-oauth-access", RefreshToken: "fixture-refresh", IDToken: "fixture-id", TokenType: "Bearer",
+		ExpiresIn: 3600, SavedAt: time.Now().UTC(), Scopes: []string{modelauth.PlanScope}}, nil
+}
+
+func (ChatGPTStore) Replace(context.Context, modelauth.Session, modelauth.Session) error { return nil }
+
 // TokenProvider is a GitHub App token provider for the composed GitHub handler.
 type TokenProvider struct{}
 
@@ -222,8 +236,10 @@ func servedRequest(authority string, route gateway.Route) (request, bool) {
 			return request{method: http.MethodPost, path: "/v1/messages", body: `{"model":"claude-fixture","max_tokens":1,` +
 				`"messages":[{"role":"user","content":[{"type":"image","source":{"type":"url","url":"https://example.test/a.png"}}]}]}`}, true
 		}
-		return request{method: http.MethodPost, path: "/v1/chat/completions",
-			body: `{"model":"gpt-5.3-codex","messages":[{"role":"user","content":"hi"}]}`}, true
+		// A streamed Responses request is one every OpenAI mechanism,
+		// ChatGPT's included, accepts.
+		return request{method: http.MethodPost, path: "/v1/responses",
+			body: `{"model":"gpt-5.3-codex","stream":true,"store":false,"input":[]}`}, true
 	case "*model.copilot":
 		return request{method: http.MethodPost, path: "/chat/completions",
 			body: `{"model":"gpt-fixture","messages":[{"role":"user","content":"hi"}]}`}, true

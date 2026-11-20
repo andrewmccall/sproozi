@@ -12,15 +12,9 @@ import (
 	"strings"
 	"testing"
 
-	api "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/audit"
 	"github.com/andrewmccall/sproozi/internal/budget"
 	"github.com/andrewmccall/sproozi/internal/diagnose"
-	"github.com/andrewmccall/sproozi/internal/endpoints/destination"
-	githubgateway "github.com/andrewmccall/sproozi/internal/endpoints/github"
-	kubernetesgateway "github.com/andrewmccall/sproozi/internal/endpoints/kubernetes"
-	mcpgateway "github.com/andrewmccall/sproozi/internal/endpoints/mcp"
-	packagesgateway "github.com/andrewmccall/sproozi/internal/endpoints/packages"
 	"github.com/andrewmccall/sproozi/internal/gateway"
 	"github.com/andrewmccall/sproozi/internal/modelauth"
 )
@@ -97,23 +91,9 @@ func composedRoutes(t *testing.T) gateway.Dispatcher {
 	if err != nil {
 		t.Fatal(err)
 	}
-	logger := audit.NewLogger(io.Discard)
-	journal := diagnose.NewJournal(logger, diagnose.Limits{})
-	handlers := map[api.CapabilityKind]http.Handler{
-		api.CapabilityKubernetesRead: kubernetesgateway.NewHandler(kubernetesgateway.HandlerConfig{AuditLogger: journal})}
-	openAI, anthropic, signedIn := modelHandlers(cfg, journal, http.DefaultClient, nil, nil)
-	if openAI != nil {
-		handlers[api.CapabilityModelInference] = openAI
-	}
-	if cfg.enabled[api.CapabilityGitHubPullRequest] {
-		handlers[api.CapabilityGitHubPullRequest] = &githubgateway.Handler{}
-	}
-	handlers[api.CapabilityPackagesInstall] = &packagesgateway.Handler{}
-	handlers[api.CapabilityNetworkEgress] = &destination.Handler{}
-	named := mcpgateway.NewHandler(mcpgateway.HandlerConfig{Registry: cfg.mcpRegistry, AuditLogger: journal})
-	dispatcher := composeDispatcher(cfg, handlers, diagnose.NewControl(journal, named), anthropic, signedIn)
-	attachAccounting(dispatcher, budget.NewTracker(), journal)
-	if err := dispatcher.Validate(); err != nil {
+	dispatcher, err := composeGateway(cfg, gatewayDeps{journal: diagnose.NewJournal(audit.NewLogger(io.Discard), diagnose.Limits{}),
+		budgets: budget.NewTracker(), model: http.DefaultClient})
+	if err != nil {
 		t.Fatal(err)
 	}
 	return dispatcher

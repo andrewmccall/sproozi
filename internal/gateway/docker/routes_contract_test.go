@@ -2,6 +2,7 @@ package docker
 
 import (
 	"crypto/tls"
+	"net/http"
 	"net/url"
 	"testing"
 
@@ -19,8 +20,7 @@ import (
 
 // TestEveryComposedRouteKeepsTheRouteContract checks every route the Docker
 // composition serves, for every managed harness and credential mechanism,
-// against ADR 0070's contract. The ChatGPT mechanism needs a stored sign-in
-// to serve a request; its routes are those of a key (routes.txt).
+// against ADR 0070's contract.
 func TestEveryComposedRouteKeepsTheRouteContract(t *testing.T) {
 	for _, kind := range harness.ManagedKinds() {
 		for _, mechanism := range []struct {
@@ -30,8 +30,12 @@ func TestEveryComposedRouteKeepsTheRouteContract(t *testing.T) {
 			{mechanismKey, modelauth.APIKey{Key: "sk-gateway-fixture"}},
 			{mechanismToken, modelauth.Token{Value: "gateway-token-fixture"}},
 			{mechanismSignIn, modelauth.Workload{}},
+			{modelauth.ChatGPTMode, modelauth.NewChatGPT(routetest.ChatGPTStore{}, &http.Client{})},
 		} {
 			t.Run(string(kind)+"/"+mechanism.name, func(t *testing.T) {
+				if h, _ := harness.Managed(kind); mechanism.name == modelauth.ChatGPTMode && h.Protocol == harness.ProtocolAnthropic {
+					t.Skip("a ChatGPT sign-in serves only OpenAI Responses; an Anthropic harness cannot use it")
+				}
 				client := routetest.Client(t)
 				upstream, _ := url.Parse("https://kubernetes.default.svc")
 				owner := &Owner{policy: gateway.PolicySnapshot{Spec: api.AgentPolicySpec{AllowedCapabilities: []api.CapabilityKind{

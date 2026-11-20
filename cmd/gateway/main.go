@@ -569,7 +569,7 @@ type signedInRoute struct {
 // provider that forwards the harness's own sign-in: a subscription backend
 // such as chatgpt.com, and the provider's sign-in relay.
 func modelHandlers(cfg *startupConfig, auditLogger audit.Writer, modelClient *http.Client,
-	drain *modelgateway.Drain, runtimeClient client.Client,
+	drain *modelgateway.Drain, chatGPT modelauth.SessionStore,
 ) (openAIHandler, anthropicHandler http.Handler, signedIn map[string]signedInRoute) {
 	signedIn = map[string]signedInRoute{}
 	if !cfg.enabled[sprooziv1alpha1.CapabilityModelInference] {
@@ -590,14 +590,7 @@ func modelHandlers(cfg *startupConfig, auditLogger audit.Writer, modelClient *ht
 	}
 	auth, ok := providerAuth(cfg, modelgateway.ProviderOpenAI)
 	if cfg.modelAuthMode == modelauth.ChatGPTMode {
-		// The ChatGPT credential stays in sproozi-system, where the gateway's
-		// access to it is limited to the one named Secret.
-		store := modelauthkube.SessionStore{Client: runtimeClient,
-			Namespace: envOrDefault("CREDENTIAL_NAMESPACE", "sproozi-system")}
-		if err := checkChatGPTSession(context.Background(), store); err != nil {
-			log.Fatal(err)
-		}
-		auth, ok = modelauth.NewChatGPT(store, modelauth.NewRefreshClient()), true
+		auth, ok = modelauth.NewChatGPT(chatGPT, modelauth.NewRefreshClient()), true
 	}
 	if ok {
 		openAIHandler = &modelgateway.Handler{Config: config(cfg.openAIUpstreamURL, auth)}
@@ -731,6 +724,60 @@ func composeDispatcher(
 	return routes
 }
 
+// gatewayDeps are what composeGateway builds the handlers from: the
+// gateway's own clients and credentials, or a test's in-process fakes.
+type gatewayDeps struct {
+	journal      *diagnose.Journal
+	budgets      *budget.Tracker
+	drain        *modelgateway.Drain
+	upstream     *http.Client
+	model        *http.Client
+	kubeURL      *url.URL
+	kube         *http.Client
+	githubTokens githubgateway.TokenProvider
+	chatGPT      modelauth.SessionStore
+	// mcp is the named MCP servers' client; nil uses the default transport.
+	mcp *http.Client
+}
+
+// composeGateway builds every handler, composes the dispatcher, attaches
+// the budget tracker and journal, and refuses a route without a valid
+// admission. main and the route contract test both call it.
+func composeGateway(cfg *startupConfig, deps gatewayDeps) (gateway.Dispatcher, error) {
+	kube := kubernetesgateway.NewHandler(kubernetesgateway.HandlerConfig{Upstream: deps.kubeURL,
+		Client:           deps.kube,
+		MaxResponseBytes: 8 << 20,
+		AuditLogger:      deps.journal})
+	handlers := map[sprooziv1alpha1.CapabilityKind]http.Handler{sprooziv1alpha1.CapabilityKubernetesRead: kube}
+	openAIHandler, anthropicHandler, signedIn := modelHandlers(cfg, deps.journal, deps.model, deps.drain, deps.chatGPT)
+	if openAIHandler != nil {
+		handlers[sprooziv1alpha1.CapabilityModelInference] = openAIHandler
+	}
+	if cfg.enabled[sprooziv1alpha1.CapabilityGitHubPullRequest] {
+		handlers[sprooziv1alpha1.CapabilityGitHubPullRequest] = &githubgateway.Handler{Config: githubgateway.HandlerConfig{
+			TokenProvider: deps.githubTokens,
+			AuditLogger:   deps.journal,
+			GitBaseURL:    envOrDefault("GIT_BASE_URL", "https://github.com"),
+			APIBaseURL:    envOrDefault("API_BASE_URL", "https://api.github.com"),
+			HTTPClient:    deps.upstream}}
+	}
+	handlers[sprooziv1alpha1.CapabilityPackagesInstall] = &packagesgateway.Handler{Config: packagesgateway.HandlerConfig{
+		HTTPClient:  deps.upstream,
+		AuditLogger: deps.journal}}
+	handlers[sprooziv1alpha1.CapabilityNetworkEgress] = &destination.Handler{Config: destination.HandlerConfig{
+		Profiles:    cfg.profiles,
+		AuditLogger: deps.journal,
+		HTTPClient:  deps.upstream}}
+	named := mcpgateway.NewHandler(mcpgateway.HandlerConfig{Registry: cfg.mcpRegistry, HTTPClient: deps.mcp,
+		Budgets: deps.budgets, AuditLogger: deps.journal})
+	dispatcher := composeDispatcher(cfg, handlers, diagnose.NewControl(deps.journal, named), anthropicHandler, signedIn)
+	attachAccounting(dispatcher, deps.budgets, deps.journal)
+	if err := dispatcher.Validate(); err != nil {
+		return nil, err
+	}
+	return dispatcher, nil
+}
+
 // attachAccounting gives every route and path route the shared budget tracker
 // and audit writer.
 func attachAccounting(dispatcher gateway.Dispatcher, budgets *budget.Tracker, auditLogger audit.Writer) {
@@ -810,35 +857,23 @@ func main() {
 	if err != nil || kubeURL.Scheme == "" || kubeURL.Host == "" {
 		log.Fatal("invalid in-cluster Kubernetes API host")
 	}
-	kube := kubernetesgateway.NewHandler(kubernetesgateway.HandlerConfig{Upstream: kubeURL,
-		Client:           kubeClient,
-		MaxResponseBytes: 8 << 20,
-		AuditLogger:      auditLogger})
-	handlers := map[sprooziv1alpha1.CapabilityKind]http.Handler{sprooziv1alpha1.CapabilityKubernetesRead: kube}
-	openAIHandler, anthropicHandler, signedIn := modelHandlers(cfg, auditLogger, modelClient, drain, runtimeClient)
-	if openAIHandler != nil {
-		handlers[sprooziv1alpha1.CapabilityModelInference] = openAIHandler
-	}
+	var tokenProvider githubgateway.TokenProvider
 	if cfg.enabled[sprooziv1alpha1.CapabilityGitHubPullRequest] {
-		tokenProvider, err := githubgateway.NewAppTokenProvider(cfg.appID, cfg.installationID, cfg.privateKey, httpClient)
-		if err != nil {
+		if tokenProvider, err = githubgateway.NewAppTokenProvider(cfg.appID, cfg.installationID, cfg.privateKey, httpClient); err != nil {
 			log.Fatal(err)
 		}
-		provider := &githubgateway.Handler{Config: githubgateway.HandlerConfig{TokenProvider: tokenProvider,
-			AuditLogger: auditLogger,
-			GitBaseURL:  envOrDefault("GIT_BASE_URL", "https://github.com"),
-			APIBaseURL:  envOrDefault("API_BASE_URL", "https://api.github.com"),
-			HTTPClient:  httpClient}}
-		handlers[sprooziv1alpha1.CapabilityGitHubPullRequest] = provider
 	}
-	handlers[sprooziv1alpha1.CapabilityPackagesInstall] = &packagesgateway.Handler{Config: packagesgateway.HandlerConfig{
-		HTTPClient:  httpClient,
-		AuditLogger: auditLogger}}
-	raw := &destination.Handler{Config: destination.HandlerConfig{Profiles: cfg.profiles,
-		AuditLogger: auditLogger,
-		HTTPClient:  httpClient}}
-
-	handlers[sprooziv1alpha1.CapabilityNetworkEgress] = raw
+	var chatGPT modelauth.SessionStore
+	if cfg.modelAuthMode == modelauth.ChatGPTMode && cfg.enabled[sprooziv1alpha1.CapabilityModelInference] {
+		// The ChatGPT credential stays in sproozi-system, where the gateway's
+		// access to it is limited to the one named Secret.
+		store := modelauthkube.SessionStore{Client: runtimeClient,
+			Namespace: envOrDefault("CREDENTIAL_NAMESPACE", "sproozi-system")}
+		if err := checkChatGPTSession(context.Background(), store); err != nil {
+			log.Fatal(err)
+		}
+		chatGPT = store
+	}
 
 	// Unknown authorities are absent and are denied before an upstream call.
 	budgetNamespace := envOrDefault("BUDGET_NAMESPACE", "sproozi-system")
@@ -854,12 +889,10 @@ func main() {
 	}
 	startLedgerMaintenance(runtimeClient, budgetNamespace, cfg.ledgerRetention)
 	warnSystemConfigWrites(context.Background(), clientset, os.Stderr)
-	named := mcpgateway.NewHandler(mcpgateway.HandlerConfig{Registry: cfg.mcpRegistry,
-		Budgets: budgets, AuditLogger: auditLogger})
-	mcpHandler := diagnose.NewControl(auditLogger, named)
-	dispatcher := composeDispatcher(cfg, handlers, mcpHandler, anthropicHandler, signedIn)
-	attachAccounting(dispatcher, budgets, auditLogger)
-	if err := dispatcher.Validate(); err != nil {
+	dispatcher, err := composeGateway(cfg, gatewayDeps{journal: auditLogger, budgets: budgets, drain: drain,
+		upstream: httpClient, model: modelClient, kubeURL: kubeURL, kube: kubeClient,
+		githubTokens: tokenProvider, chatGPT: chatGPT})
+	if err != nil {
 		log.Fatal(err)
 	}
 	guard := gateway.NewLeakGuard(dispatcher, nil)
