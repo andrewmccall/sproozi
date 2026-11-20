@@ -88,7 +88,7 @@ func composeRoutes(owner *Owner, config GatewayConfig, tracker *budget.Tracker, 
 		named = mcpgateway.NewHandler(mcpgateway.HandlerConfig{Registry: config.MCPRegistry, HTTPClient: config.MCPClient, Budgets: tracker, AuditLogger: journal})
 	}
 	dispatch[config.MCPAuthority] = gateway.Route{Admission: gateway.AdmitSelected, Reason: diagnose.Admission,
-		Tier: audit.TierProtocol, Handler: diagnose.NewControl(journal, named)}
+		Tier: audit.TierProtocol, Handler: diagnose.NewControl(journal, named), AuditLogger: journal}
 	if err := dispatch.Validate(); err != nil {
 		return nil, err
 	}
@@ -188,5 +188,10 @@ func modelRoutes(config GatewayConfig, modelConfig modelgateway.HandlerConfig, t
 func addPath(dispatch gateway.Dispatcher, authority, prefix string, r gateway.Route) {
 	owner := dispatch[authority]
 	owner.Paths = append(owner.Paths, gateway.PathRoute{Prefix: prefix, Route: r})
+	// The authority's other paths are refused through it until another
+	// capability serves them, and that refusal is recorded.
+	if owner.AuditLogger == nil {
+		owner.AuditLogger = r.AuditLogger
+	}
 	dispatch[authority] = owner
 }

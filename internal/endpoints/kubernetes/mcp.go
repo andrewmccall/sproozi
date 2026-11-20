@@ -57,6 +57,10 @@ func (h *Handler) newMCPHandler() http.Handler {
 }
 
 func (h *Handler) serveMCP(w http.ResponseWriter, r *http.Request) {
+	// Discovery, these shape refusals and a tool call refused before its pod
+	// list is authorized have no audit record, pending a decision (ADR 0070).
+	// A tool call that reaches authorizeAndForward records as REST does.
+	gateway.Unrecorded(r.Context(), gateway.UnrecordedKubernetesMCP)
 	// This CLI-only connection accepts no browser origins. Proxy authentication
 	// and per-request lifecycle revalidation remain outside the MCP protocol.
 	if len(r.Header.Values("Origin")) != 0 || r.URL.RawQuery != "" || r.URL.RawPath != "" {

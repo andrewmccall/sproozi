@@ -224,6 +224,12 @@ func TestDispatcherAndLeakGuardOutcomesAreRecorded(t *testing.T) {
 	}
 	recordingHandler := func(events *recordedEvents) http.Handler { return recording(events) }
 	silentHandler := func(*recordedEvents) http.Handler { return silent }
+	declaredHandler := func(*recordedEvents) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gateway.Unrecorded(r.Context(), gateway.UnrecordedControl)
+			silent.ServeHTTP(w, r)
+		})
+	}
 	initialized := func(tracker *budget.Tracker) {
 		if err := tracker.Initialize(accountKey); err != nil {
 			t.Fatal(err)
@@ -284,6 +290,8 @@ func TestDispatcherAndLeakGuardOutcomesAreRecorded(t *testing.T) {
 		{name: "dispatcher/no budget configured", routes: capabilityRoute(recordingHandler, true),
 			grant: baseGrant(granted, granted, 0), target: "https://service.test/x", tracker: budget.NewTracker()},
 		{name: "dispatcher/handler records nothing", routes: capabilityRoute(silentHandler, true),
+			grant: baseGrant(granted, granted, 0), target: "https://service.test/x"},
+		{name: "dispatcher/handler declares its request unrecorded", routes: capabilityRoute(declaredHandler, true),
 			grant: baseGrant(granted, granted, 0), target: "https://service.test/x"},
 		{name: "dispatcher/route without a capability, nothing granted", grant: baseGrant(nil, nil, 0),
 			target: "https://service.test/x", tracker: budget.NewTracker(),

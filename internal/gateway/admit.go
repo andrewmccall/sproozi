@@ -17,8 +17,6 @@ type Refusal struct {
 	Outcome             audit.Outcome
 	Status              int
 	Type, Code, Message string
-	// recorded says whether Refuse writes an audit record.
-	recorded bool
 }
 
 // Admit checks that the run and its live policy grant capability, then
@@ -35,7 +33,7 @@ func Admit(ctx context.Context, capability api.CapabilityKind) (context.Context,
 				"; add it to the policy's allowedCapabilities"
 		}
 		return ctx, &Refusal{Outcome: audit.RefusedPolicy, Status: http.StatusForbidden, Type: "permission_error",
-			Code: "capability_denied", Message: reason, recorded: true}
+			Code: "capability_denied", Message: reason}
 	}
 	meter, err := identity.Meter(ctx, route.Budgets, capability)
 	if errors.Is(err, ErrBudgetUnavailable) {
@@ -58,10 +56,8 @@ func Admit(ctx context.Context, capability api.CapabilityKind) (context.Context,
 // Refuse records r through the route in ctx and writes the JSON body.
 func Refuse(ctx context.Context, w http.ResponseWriter, r *Refusal) {
 	route, _ := ctx.Value(routeContextKey{}).(Route)
-	if r.recorded {
-		event := AuditEvent(ctx, string(route.Capability))
-		event.DenyReason, event.Outcome = r.Message, r.Outcome
-		Record(ctx, route.AuditLogger, event)
-	}
+	event := AuditEvent(ctx, string(route.Capability))
+	event.DenyReason, event.Outcome = r.Message, r.Outcome
+	Record(ctx, route.AuditLogger, event)
 	writeDenial(w, r.Status, r.Type, r.Code, r.Message)
 }

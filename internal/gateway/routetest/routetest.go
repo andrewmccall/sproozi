@@ -283,6 +283,16 @@ func Check(t *testing.T, routes gateway.Dispatcher, events *Recorder, selected *
 			tracker := route.Budgets
 			if route.Admission == gateway.AdmitSelected {
 				tracker = selected
+				// Discovery and the control connection are declared
+				// unrecorded, so the dispatcher records no omission for them.
+				for _, path := range append(slices.Sorted(maps.Keys(FreePaths)), "/mcp/"+MCPServer) {
+					discovery := request{method: http.MethodPost, path: path, body: `{"jsonrpc":"2.0","id":1,"method":"initialize",` +
+						`"params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"contract","version":"1"}}}`}
+					if response := serve(routes, authority, discovery, Grant(uid+"-discovery", "", "")); response.Code != http.StatusOK {
+						t.Errorf("%s%s: initialize got %d: %s", name, path, response.Code, response.Body)
+					}
+					noOmission(t, name+path, events.Take())
+				}
 			}
 			spends(t, name, routes, authority, served, capability, uid, tracker, events)
 		}
@@ -312,6 +322,7 @@ func refusedWithoutCapability(t *testing.T, name string, routes gateway.Dispatch
 	served.path = path
 	response := serve(routes, authority, served, Grant(uid+"-refused", capability, ""))
 	recorded := events.Take()
+	noOmission(t, name, recorded)
 	if response.Code != http.StatusForbidden {
 		t.Errorf("%s: a run without %s got %d, want 403: %s", name, capability, response.Code, response.Body)
 	}
@@ -322,13 +333,28 @@ func refusedWithoutCapability(t *testing.T, name string, routes gateway.Dispatch
 	}
 }
 
+// noOmission fails when the dispatcher had to record a request its handler
+// neither recorded nor declared unrecorded.
+func noOmission(t *testing.T, name string, recorded []audit.Event) {
+	t.Helper()
+	for _, e := range recorded {
+		if e.Outcome == audit.Unrecorded {
+			t.Errorf("%s: the handler wrote no record for %s; record it with gateway.Record, or declare it with "+
+				"gateway.Unrecorded", name, e.Operation)
+		}
+	}
+}
+
 func spends(t *testing.T, name string, routes gateway.Dispatcher, authority string, served request,
 	capability api.CapabilityKind, uid string, tracker *budget.Tracker, events *Recorder,
 ) {
 	t.Helper()
 	response := serve(routes, authority, served, Grant(uid, "", capability))
 	recorded := events.Take()
-	if !slices.ContainsFunc(recorded, func(e audit.Event) bool { return e.Allowed && e.Capability == string(capability) }) {
+	noOmission(t, name, recorded)
+	if !slices.ContainsFunc(recorded, func(e audit.Event) bool {
+		return e.Allowed && e.Outcome == audit.Served && e.Capability == string(capability)
+	}) {
 		t.Errorf("%s: served request recorded no allowed %s event (status %d, %s): %+v", name, capability,
 			response.Code, response.Body, recorded)
 	}

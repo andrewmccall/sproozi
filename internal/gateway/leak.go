@@ -2,12 +2,15 @@ package gateway
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/andrewmccall/sproozi/internal/audit"
 )
 
 // DefaultCredentialLifetime bounds how long the gateway holds a run's
@@ -88,6 +91,14 @@ func (g *LeakGuard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if containsAny(r.URL.String(), secrets) || headersContain(r.Header, secrets) {
+		// The record names the route, never the URL, the headers or the
+		// credential found in them.
+		ctx := context.WithValue(r.Context(), routeContextKey{}, route)
+		e := AuditEvent(ctx, key)
+		e.DenyReason = "the request to " + key + " carries this run's own provider credential; " +
+			"the gateway sends a provider credential only to its provider"
+		e.Outcome = audit.RefusedPolicy
+		Record(ctx, route.AuditLogger, e)
 		writeDenial(w, http.StatusForbidden, "permission_error", "credential_leak_denied",
 			"the request to "+r.Host+" carries this run's own provider credential; "+
 				"the gateway sends a provider credential only to its provider")

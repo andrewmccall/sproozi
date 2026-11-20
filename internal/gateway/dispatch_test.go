@@ -85,7 +85,7 @@ func TestDispatcherEnforcesRouteCapabilityAndAuditsRouteTier(t *testing.T) {
 					called = true
 					event := gateway.AuditEvent(r.Context(), "read")
 					event.Allowed = true
-					logger.Log(event)
+					gateway.Record(r.Context(), logger, event)
 					w.WriteHeader(http.StatusNoContent)
 				})}}
 			grant := &gateway.ExecutionGrant{Execution: gateway.Reference{Backend: gateway.BackendDocker, UID: fixtureExecutionUID},

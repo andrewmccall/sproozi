@@ -143,13 +143,21 @@ func (d Dispatcher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"gateway identity required; connect through the gateway proxy with the run's token")
 		return
 	}
-	route, _, ok := d.Select(r.Host, r.URL.Path)
+	route, key, ok := d.Select(r.Host, r.URL.Path)
+	ctx, decision := withDecision(context.WithValue(r.Context(), routeContextKey{}, route))
 	if !ok || route.Handler == nil {
-		writeDenial(w, http.StatusForbidden, "permission_error", "destination_denied",
-			"destination "+r.Host+" is not enabled at this gateway")
+		message := "destination " + r.Host + " is not enabled at this gateway"
+		if ok {
+			// A reserved authority, or one served only on other paths. An
+			// unknown authority has no route to record through; the proxy
+			// refuses and records it before dispatch.
+			e := AuditEvent(ctx, key)
+			e.DenyReason, e.Outcome = message, audit.RefusedPolicy
+			Record(ctx, route.AuditLogger, e)
+		}
+		writeDenial(w, http.StatusForbidden, "permission_error", "destination_denied", message)
 		return
 	}
-	ctx, _ := withDecision(context.WithValue(r.Context(), routeContextKey{}, route))
 	// Named MCP routes select their capability after parsing the server name
 	// and check it with the same Permits. A route that declares no capability
 	// is refused by Validate before the gateway serves.
@@ -161,6 +169,9 @@ func (d Dispatcher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	route.Handler.ServeHTTP(w, r.WithContext(ctx))
+	// A handler that neither recorded nor declared its request unrecorded
+	// left an omission; record it for the route.
+	recordOmission(ctx, decision, route, key)
 }
 
 // writeDenial writes the one error body that both the Anthropic and OpenAI
