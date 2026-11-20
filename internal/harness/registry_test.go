@@ -343,6 +343,7 @@ func managedFactProblems(h Harness) []string {
 		{"InstructionsFile", h.InstructionsFile == ""},
 		{"KeyEnv", h.KeyEnv == ""},
 		{"ModelFlag", !h.ModelFlag.declared() || !h.ModelFlag.value},
+		{"ConfigOverride", !h.ConfigOverride.Flag.declared() && configOverrideExempt[h.Native] == ""},
 		{"RefusedFlags", len(h.RefusedFlags) == 0},
 		{"ReservedEnv", len(h.ReservedEnv) == 0 && reservedEnvExempt[h.Native] == ""},
 		{"SignInChoices", len(h.SignInChoices) == 0},
