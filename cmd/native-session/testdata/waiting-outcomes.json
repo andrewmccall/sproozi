@@ -1,0 +1,210 @@
+{
+  "taskActivation": [
+    {
+      "error": "initial task baseline is unavailable: lstat \u003ccodex home\u003e/sessions: no such file or directory",
+      "home": "empty Codex home",
+      "kind": "codex",
+      "state": "prepared",
+      "taskBaseline": "",
+      "validate": ""
+    },
+    {
+      "error": "the recorded terminal does not start",
+      "home": "Codex home with the resumed conversation",
+      "kind": "codex",
+      "state": "prepared",
+      "taskBaseline": "turn-one",
+      "validate": ""
+    },
+    {
+      "error": "initial task baseline is unavailable: lstat \u003ccodex home\u003e/sessions: no such file or directory",
+      "home": "empty Codex home",
+      "kind": "claude-code",
+      "state": "prepared",
+      "taskBaseline": "",
+      "validate": ""
+    },
+    {
+      "error": "the recorded terminal does not start",
+      "home": "Codex home with the resumed conversation",
+      "kind": "claude-code",
+      "state": "prepared",
+      "taskBaseline": "turn-one",
+      "validate": ""
+    },
+    {
+      "error": "initial task baseline is unavailable: lstat \u003ccodex home\u003e/sessions: no such file or directory",
+      "home": "empty Codex home",
+      "kind": "copilot",
+      "state": "prepared",
+      "taskBaseline": "",
+      "validate": "native task requires bounded nonempty Codex or Claude Code input"
+    },
+    {
+      "error": "the recorded terminal does not start",
+      "home": "Codex home with the resumed conversation",
+      "kind": "copilot",
+      "state": "prepared",
+      "taskBaseline": "turn-one",
+      "validate": "native task requires bounded nonempty Codex or Claude Code input"
+    },
+    {
+      "error": "unsupported native harness",
+      "home": "empty Codex home",
+      "kind": "not-registered",
+      "state": "prepared",
+      "taskBaseline": "",
+      "validate": "unsupported native harness \"not-registered\""
+    },
+    {
+      "error": "unsupported native harness",
+      "home": "Codex home with the resumed conversation",
+      "kind": "not-registered",
+      "state": "prepared",
+      "taskBaseline": "",
+      "validate": "unsupported native harness \"not-registered\""
+    }
+  ],
+  "waitingFor": [
+    {
+      "claudeObservation": "identity_unavailable",
+      "situation": "empty homes, new conversation",
+      "waiting": {
+        "claude-code": "Claude Code to report its conversation",
+        "codex": "Codex to start its first turn",
+        "copilot": "the current Copilot turn to complete",
+        "not-registered": "not-registered to start its first turn"
+      }
+    },
+    {
+      "claudeObservation": "identity_unavailable",
+      "situation": "empty homes, conversation named at launch",
+      "waiting": {
+        "claude-code": "Claude Code to report its conversation",
+        "codex": "Codex to start its first turn",
+        "copilot": "Copilot to start its first turn",
+        "not-registered": "not-registered to start its first turn"
+      }
+    },
+    {
+      "claudeObservation": "identity_unavailable",
+      "situation": "journals, conversation named at launch",
+      "waiting": {
+        "claude-code": "Claude Code to report its conversation",
+        "codex": "the current Codex turn to complete",
+        "copilot": "the current Copilot turn to complete",
+        "not-registered": "the current not-registered turn to complete"
+      }
+    },
+    {
+      "claudeObservation": "input_changed",
+      "situation": "journals, conversation named at launch, unsettled input",
+      "waiting": {
+        "claude-code": "terminal input sent after the last Claude Code turn to settle",
+        "codex": "the current Codex turn to complete",
+        "copilot": "the current Copilot turn to complete",
+        "not-registered": "the current not-registered turn to complete"
+      }
+    },
+    {
+      "claudeObservation": "identity_unavailable",
+      "situation": "journals of another conversation, conversation named at launch",
+      "waiting": {
+        "claude-code": "Claude Code to report its conversation",
+        "codex": "the current Codex turn to complete",
+        "copilot": "Copilot to start its first turn",
+        "not-registered": "the current not-registered turn to complete"
+      }
+    },
+    {
+      "claudeObservation": "journal_unavailable_or_invalid",
+      "situation": "empty homes, restored conversation",
+      "waiting": {
+        "claude-code": "Claude Code's transcript to settle",
+        "codex": "Codex to start its first turn",
+        "copilot": "Copilot to start its first turn",
+        "not-registered": "not-registered to start its first turn"
+      }
+    },
+    {
+      "claudeObservation": "settled",
+      "situation": "journals, restored conversation",
+      "waiting": {
+        "claude-code": "Claude Code to stop",
+        "codex": "the current Codex turn to complete",
+        "copilot": "the current Copilot turn to complete",
+        "not-registered": "the current not-registered turn to complete"
+      }
+    },
+    {
+      "claudeObservation": "lifecycle_incomplete",
+      "situation": "journals, running turn",
+      "waiting": {
+        "claude-code": "the current Claude Code turn to finish",
+        "codex": "the current Codex turn to complete",
+        "copilot": "the current Copilot turn to complete",
+        "not-registered": "the current not-registered turn to complete"
+      }
+    },
+    {
+      "claudeObservation": "pending_tools",
+      "situation": "journals, running tool",
+      "waiting": {
+        "claude-code": "a running Claude Code tool to finish",
+        "codex": "the current Codex turn to complete",
+        "copilot": "the current Copilot turn to complete",
+        "not-registered": "the current not-registered turn to complete"
+      }
+    },
+    {
+      "claudeObservation": "lifecycle_incomplete",
+      "situation": "journals, failed turn",
+      "waiting": {
+        "claude-code": "the current Claude Code turn to finish",
+        "codex": "the current Codex turn to complete",
+        "copilot": "the current Copilot turn to complete",
+        "not-registered": "the current not-registered turn to complete"
+      }
+    },
+    {
+      "claudeObservation": "settled",
+      "situation": "journals, completed turn",
+      "waiting": {
+        "claude-code": "Claude Code to stop",
+        "codex": "the current Codex turn to complete",
+        "copilot": "the current Copilot turn to complete",
+        "not-registered": "the current not-registered turn to complete"
+      }
+    },
+    {
+      "claudeObservation": "journal_unavailable_or_invalid",
+      "situation": "empty homes, completed turn",
+      "waiting": {
+        "claude-code": "Claude Code's transcript to settle",
+        "codex": "Codex to start its first turn",
+        "copilot": "the current Copilot turn to complete",
+        "not-registered": "not-registered to start its first turn"
+      }
+    },
+    {
+      "claudeObservation": "input_changed",
+      "situation": "journals, completed turn, unsettled input",
+      "waiting": {
+        "claude-code": "terminal input sent after the last Claude Code turn to settle",
+        "codex": "the current Codex turn to complete",
+        "copilot": "the current Copilot turn to complete",
+        "not-registered": "the current not-registered turn to complete"
+      }
+    },
+    {
+      "claudeObservation": "task_prompt_unobserved",
+      "situation": "journals, completed turn of another prompt than the task",
+      "waiting": {
+        "claude-code": "Claude Code's transcript to settle",
+        "codex": "the current Codex turn to complete",
+        "copilot": "the current Copilot turn to complete",
+        "not-registered": "the current not-registered turn to complete"
+      }
+    }
+  ]
+}
