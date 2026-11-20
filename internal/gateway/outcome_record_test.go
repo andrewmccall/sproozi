@@ -122,14 +122,18 @@ type failingLedger struct{}
 
 var errLedgerUnavailable = errors.New("ledger store unavailable")
 
-func (failingLedger) Initialize(context.Context, budget.AccountKey) error { return errLedgerUnavailable }
+func (failingLedger) Initialize(context.Context, budget.AccountKey) error {
+	return errLedgerUnavailable
+}
 func (failingLedger) Reserve(context.Context, budget.AccountKey, budget.UsageReservation) (*budget.LedgerReservation, error) {
 	return nil, errLedgerUnavailable
 }
 func (failingLedger) Settle(context.Context, *budget.LedgerReservation, budget.TrustedUsage) error {
 	return errLedgerUnavailable
 }
-func (failingLedger) Release(context.Context, *budget.LedgerReservation) error { return errLedgerUnavailable }
+func (failingLedger) Release(context.Context, *budget.LedgerReservation) error {
+	return errLedgerUnavailable
+}
 func (failingLedger) State(context.Context, budget.AccountKey) (budget.State, error) {
 	return budget.State{}, errLedgerUnavailable
 }
