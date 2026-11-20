@@ -91,6 +91,14 @@ func outcomeArgs() [][]string {
 	add("-c", "notice.x=y")
 	add("--harmless", "-c", "approval_policy=x")
 	add("-c", "x=y", "--sandbox", "x")
+	// Every controlled key, and a key below it, so that dropping one from
+	// a ConfigOverride changes a row.
+	for _, h := range registry {
+		for _, key := range h.ConfigOverride.ControlledKeys {
+			add("-c", key+"=x")
+			add("-c", key+".x=y")
+		}
+	}
 	return out
 }
 
