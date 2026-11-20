@@ -35,6 +35,9 @@ var behaviourSites = map[string]string{
 // profile's AGENTS.md.
 var literalScanRoots = []string{"internal/harness", "cmd/native-session"}
 
+// kindTypeName is the name of the managed kind type the scan looks for.
+const kindTypeName = "NativeKind"
+
 // harnessSite is one line the scan reports.
 type harnessSite struct {
 	scope string
@@ -52,7 +55,7 @@ func kindConstants(f *ast.File) []string {
 		}
 		for _, spec := range g.Specs {
 			v := spec.(*ast.ValueSpec)
-			if t, ok := v.Type.(*ast.Ident); ok && t.Name == "NativeKind" {
+			if t, ok := v.Type.(*ast.Ident); ok && t.Name == kindTypeName {
 				for _, n := range v.Names {
 					names = append(names, n.Name)
 				}
@@ -116,9 +119,9 @@ func kindBranches(fset *token.FileSet, f *ast.File, kinds []string) []harnessSit
 	isKindType := func(e ast.Expr) bool {
 		switch x := e.(type) {
 		case *ast.Ident:
-			return x.Name == "NativeKind"
+			return x.Name == kindTypeName
 		case *ast.SelectorExpr:
-			return x.Sel.Name == "NativeKind"
+			return x.Sel.Name == kindTypeName
 		}
 		return false
 	}
