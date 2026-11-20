@@ -43,7 +43,7 @@ func assertDenial(t *testing.T, response *httptest.ResponseRecorder, status int,
 
 func TestDispatcherRequiresContextIdentity(t *testing.T) {
 	called := false
-	d := gateway.Dispatcher{fixtureAuthority: {Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	d := gateway.Dispatcher{fixtureAuthority: {Admission: gateway.AdmitSelected, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
 		w.WriteHeader(http.StatusNoContent)
 	})}}
@@ -142,7 +142,7 @@ func TestDispatcherDeniesUnknownDestinationAndUnavailableBudgetAsJSON(t *testing
 func TestDispatcherDeliversFirstChunkBeforeHandlerCompletes(t *testing.T) {
 	release := make(chan struct{})
 	defer close(release)
-	d := gateway.Dispatcher{fixtureAuthority: {Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	d := gateway.Dispatcher{fixtureAuthority: {Admission: gateway.AdmitSelected, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, "first\n")
 		w.(http.Flusher).Flush()
 		<-release
@@ -182,7 +182,7 @@ func TestDispatcherServesAPathRouteWithItsOwnCapability(t *testing.T) {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { served = name; w.WriteHeader(http.StatusNoContent) })
 	}
 	d := gateway.Dispatcher{fixtureAuthority: {Capability: "github.pullRequest", Handler: handler("github"),
-		Paths: []gateway.PathRoute{{Prefix: "/copilot_internal/", Route: gateway.Route{Handler: handler("copilot")}}}}}
+		Paths: []gateway.PathRoute{{Prefix: "/copilot_internal/", Route: gateway.Route{Admission: gateway.AdmitSelected, Handler: handler("copilot")}}}}}
 	grant := &gateway.ExecutionGrant{Policy: gateway.PolicySnapshot{Name: fixturePolicyName},
 		Execution: gateway.Reference{Backend: gateway.BackendKubernetes, UID: fixtureExecutionUID},
 		Template:  gateway.TemplateSnapshot{Name: fixtureTemplateName}}

@@ -315,7 +315,7 @@ func TestNamedMCPOutcomesAreRecorded(t *testing.T) {
 			handlerBudgets = nil
 		}
 		handler := remote.NewHandler(remote.HandlerConfig{Registry: registry, HTTPClient: upstreamClient, Budgets: handlerBudgets, AuditLogger: events})
-		routes := gateway.Dispatcher{authority: {Tier: audit.TierProtocol, Handler: handler, Budgets: tracker, AuditLogger: events}}
+		routes := gateway.Dispatcher{authority: {Admission: gateway.AdmitSelected, Tier: audit.TierProtocol, Handler: handler, Budgets: tracker, AuditLogger: events}}
 		ledgerKey := key
 		if tc.failing {
 			ledgerKey = ""
@@ -370,7 +370,7 @@ func abandonedToolCall(t *testing.T) string {
 	events := &recordedEvents{}
 	tracker := budget.NewTracker()
 	handler := remote.NewHandler(remote.HandlerConfig{Registry: registry, HTTPClient: upstream.Client(), Budgets: tracker, AuditLogger: events})
-	routes := gateway.Dispatcher{"gateway.test:443": {Tier: audit.TierProtocol, Handler: handler, Budgets: tracker, AuditLogger: events}}
+	routes := gateway.Dispatcher{"gateway.test:443": {Admission: gateway.AdmitSelected, Tier: audit.TierProtocol, Handler: handler, Budgets: tracker, AuditLogger: events}}
 	grant := &gateway.ExecutionGrant{Execution: gateway.Reference{Backend: gateway.BackendKubernetes, Namespace: "agents", Name: "run", UID: "test-execution"},
 		Policy: gateway.PolicySnapshot{Name: "test-policy", Spec: api.AgentPolicySpec{AllowedCapabilities: []api.CapabilityKind{capability},
 			MCPServers: map[string]api.MCPServerScope{name: {Tools: map[string]api.MCPToolScope{tool: {}}}},

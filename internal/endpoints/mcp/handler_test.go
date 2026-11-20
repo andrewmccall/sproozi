@@ -223,7 +223,7 @@ func newFixture(t *testing.T, change func(*gateway.ExecutionGrant)) *fixture {
 	t.Cleanup(upstreamTransport.CloseIdleConnections)
 	f.budgets = budget.NewTracker()
 	handler := remote.NewHandler(remote.HandlerConfig{Registry: registrations, HTTPClient: &http.Client{Transport: upstreamTransport}, Budgets: f.budgets, AuditLogger: &f.audit})
-	dispatch := gateway.Dispatcher{fixtureHost + ":8443": {Tier: audit.TierProtocol, Handler: handler}}
+	dispatch := gateway.Dispatcher{fixtureHost + ":8443": {Admission: gateway.AdmitSelected, Tier: audit.TierProtocol, Handler: handler}}
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)

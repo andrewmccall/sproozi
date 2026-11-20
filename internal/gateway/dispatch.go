@@ -147,10 +147,19 @@ func (d Dispatcher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeDenial(w, http.StatusForbidden, "permission_error", "destination_denied", message)
 		return
 	}
+	// A route without a valid declaration is refused here too, so a
+	// composition that never called Validate still cannot serve it unchecked.
+	if err := route.validate(); err != nil {
+		message := "the gateway route for " + key + " " + err.Error()
+		e := AuditEvent(ctx, key)
+		e.DenyReason, e.Outcome = message, audit.RefusedPolicy
+		Record(ctx, route.AuditLogger, e)
+		writeDenial(w, http.StatusForbidden, "permission_error", "route_undeclared", message)
+		return
+	}
 	// Named MCP routes select their capability after parsing the server name
-	// and check it with the same Permits. A route that declares no capability
-	// is refused by Validate before the gateway serves.
-	if route.Admission == AdmitCapability && route.Capability != "" {
+	// and check it with the same Permits.
+	if route.Admission == AdmitCapability {
 		var refusal *Refusal
 		if ctx, refusal = Admit(ctx, route.Capability); refusal != nil {
 			Refuse(ctx, w, refusal)

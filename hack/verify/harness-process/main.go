@@ -281,14 +281,15 @@ func run(selected, scenario string, withTool, supervised bool) (result, error) {
 		HTTPClient:  mcpUpstream.Client(),
 		Budgets:     tracker,
 		AuditLogger: journal})
-	// As in the gateway binaries, the MCP authority route carries no capability:
-	// the broker checks each named server's, and the control connection needs none.
+	// As in the gateway binaries, the MCP authority route is AdmitSelected:
+	// the broker checks each named server's capability, and the control
+	// connection needs none.
 	routes := gateway.Dispatcher{authority: {Capability: api.CapabilityModelInference,
 		Tier:               audit.TierSemantic,
 		Handler:            modelHandler,
 		ProviderCredential: selected == copilotGitHub,
 		Budgets:            tracker},
-		"gateway.fixture:443": {Tier: audit.TierProtocol,
+		"gateway.fixture:443": {Admission: gateway.AdmitSelected, Tier: audit.TierProtocol, AuditLogger: journal,
 			Handler: diagnose.NewControl(journal, http.HandlerFunc(func(w http.ResponseWriter,
 				r *http.Request) {
 				if _,
