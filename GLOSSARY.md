@@ -174,8 +174,9 @@ agent containers mount it.
 ### Sign-in relay
 
 The gateway route that passes a harness's own sign-in and token-refresh
-requests to its provider unchanged, without recording or charging them, such as
-`platform.claude.com` for Claude Code or `auth.openai.com` for Codex.
+requests to its provider unchanged, without charging them, such as
+`platform.claude.com` for Claude Code or `auth.openai.com` for Codex. It
+audits each request, never its body or tokens.
 
 ### Control connection
 
@@ -188,6 +189,24 @@ capability and grants none. See
 
 The gateway's bounded, in-memory record of each execution's recent refused
 requests, kept from its audit records. `diagnose` reads it.
+
+### Outcome
+
+How the gateway's audit record says one request ended: `served`,
+`refused_request`, `refused_policy`, `refused_budget`, `unavailable`,
+`upstream_failed`, `cancelled`, or `unrecorded` when the handler wrote no
+record and the dispatcher wrote one for the route. Recorded as `outcome`,
+beside `allowed`. See
+[audit records](docs/reference/gateway-certificates.md#audit-records).
+
+### Route admission
+
+What a gateway route declares about who admits its requests: the dispatcher
+for its capability (`AdmitCapability`), its handler for a capability it
+selects from the request (`AdmitSelected`, named MCP), or no one by recorded
+decision (`AdmitOpen`). The gateway refuses to start with a route that has a
+handler and no valid declaration. See
+[ADR 0070](docs/adr/0070-gateway-routes-declare-admission-and-requests-record-one-decision.md).
 
 ### Sproozi integration
 

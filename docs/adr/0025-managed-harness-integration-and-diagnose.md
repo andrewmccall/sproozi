@@ -83,6 +83,11 @@ in-memory journal that forwards every record unchanged and keeps recent
 hour. `diagnose` returns `denied` with those records, or `not_observed`. It
 never infers a cause it did not record.
 
+Corrected 2026-11-20: the journal does not keep `allowed: false` records whose
+`outcome` is `unrecorded`, which the dispatcher writes when a handler wrote no
+record
+([ADR 0070](0070-gateway-routes-declare-admission-and-requests-record-one-decision.md)).
+
 **Attributed destination denials.** The proxy authenticates and revalidates a
 CONNECT before checking the destination, then audits an unknown destination as
 a `network.egress` denial for that execution. Requests without a valid identity
@@ -123,6 +128,13 @@ still receive no record and no routing information.
 - The journal is lost on gateway restart. It records every refusal, including
   upstream failures the gateway reports as errors; the `reason` says which. It
   does not yet say whether access could be requested.
+
+  Corrected 2026-11-20: it did not record every refusal. The dispatcher's
+  `budget_unavailable`, `allocation_denied` and handler-less
+  `destination_denied` refusals and `LeakGuard`'s URL and header refusal had
+  no audit record; ADR 0070 records them. The Kubernetes `/mcp` shape
+  refusals and the control connection's own refusals still have none, by
+  declared decision pending review.
 - Traffic blocked before the gateway, by NetworkPolicy or a client that ignores
   the proxy, leaves no record; `diagnose` reports `not_observed`.
 - Docker home configurations must set `gateway.mcpAuthority`, and the

@@ -98,8 +98,13 @@ Decision fields come from the gateway audit record: `capability`,
 record never contains request bodies, headers, credentials or query strings.
 
 `decisions` includes every request the gateway refused, which also covers
-upstream failures it reports as errors, such as `upstream request failed`.
-Read `reason` before treating a decision as a policy refusal.
+upstream failures it reports as errors, such as `upstream request failed`, and
+the gateway's own refusals before a service handler runs: a missing
+capability, an unavailable or exhausted allocation, a destination with no
+handler for that path, and a request that carries the execution's own provider
+credential to another route. Read `reason` before treating a decision as a
+policy refusal. A credential refusal names the destination, never the
+credential or where it was found.
 
 ### What diagnose can see
 
@@ -108,7 +113,10 @@ Read `reason` before treating a decision as a policy refusal.
   Decision IDs from another execution return `not_observed`.
 - **Only the gateway's refusals.** NetworkPolicy, Docker network rules, and
   clients that bypass the proxy block traffic before it reaches the gateway, so
-  those failures return `not_observed`.
+  those failures return `not_observed`. Kubernetes `/mcp` and control
+  connection shape refusals are not recorded, so they return `not_observed`
+  too, and a record the gateway writes only because a handler wrote none
+  (`outcome` `unrecorded`) is not kept.
 - **Requests to unknown destinations.** The gateway authenticates a CONNECT
   before checking its destination, so a refused destination is recorded as a
   `network.egress` decision for that execution. Requests without a valid

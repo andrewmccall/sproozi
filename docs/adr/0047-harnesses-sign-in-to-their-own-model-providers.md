@@ -50,10 +50,18 @@ would have to be repeated for each new harness.
   and never record the credential. A request with no credential is refused
   before budget is reserved. The provider's sign-in relay passes only its
   sign-in and refresh requests, unrecorded and uncharged.
+
+  Corrected 2026-11-20: the relay is uncharged but not unrecorded. It audits
+  each request's path, status and refusal reason, never its body, query or
+  tokens (`internal/endpoints/model/signin.go`).
 - **The gateway refuses a forwarded credential elsewhere.** `LeakGuard` keeps
   each run's forwarded credentials in memory until the run's maximum duration
   has passed, and refuses any inspected request to another authority whose
   URL, headers or streamed body contain one.
+
+  Corrected 2026-11-20: a URL or header refusal is now audited, naming the
+  route and never the credential
+  ([ADR 0070](0070-gateway-routes-declare-admission-and-requests-record-one-decision.md)).
 - **Budgets keep counting tokens.** Reservations, settlement and the optional
   pricing table are unchanged for every mechanism.
 - **MCP, GitHub and destination credentials stay on the gateway.**
