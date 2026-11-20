@@ -158,38 +158,42 @@ Every route that has a handler declares how a request is admitted
 | `Route.Admission` | Who admits | Declare |
 | --- | --- | --- |
 | `AdmitCapability` (zero value) | The dispatcher checks and meters `Capability`. | `Capability` |
-| `AdmitSelected` | The handler selects a capability from the request and checks it itself, as named MCP does. | `Reason` naming the handler's check |
-| `AdmitOpen` | Nobody: the route needs no capability by decision. | `Reason` naming the record that decided it |
+| `AdmitSelected` | The handler selects a capability from the request and checks it itself, as named MCP does. | No `Capability` |
 
 `Dispatcher.Validate` refuses any other combination, and both compositions
 call it before serving, so the gateway does not start with an undeclared
-route. A route without a handler is a reserved, closed authority.
+route. The dispatcher also refuses, and records, a request to an undeclared
+route, so a composition that skipped `Validate` cannot serve one unchecked. A
+route without a handler is a reserved, closed authority.
 
 Each dispatched request records one decision. A handler builds its event with
 `gateway.AuditEvent`, sets `outcome` (see
 [audit records](../reference/gateway-certificates.md#audit-records)) and writes
 it with `gateway.Record`. A request that is unrecorded by design calls
-`gateway.Unrecorded` with one of its listed reasons. If a handler returns
-having done neither, the dispatcher writes an `unrecorded` event for the
-route. Per-request handlers charge with `gateway.Spend`, whose error says
+`gateway.Unrecorded` with one of its three listed reasons. If a handler
+returns having done neither, the dispatcher writes an `unrecorded` event for
+the route, so a handler built without an audit writer is visible rather than
+silent. A sandbox cannot cause an `unrecorded` record: one means a handler
+omitted a record. Per-request handlers charge with `gateway.Spend`, whose error says
 whether the budget refused the request (`gateway.ErrRefusedBudget`) or could
 not be read (`gateway.ErrBudgetUnavailable`).
 
 To add a route:
 
-1. Give it a capability, or declare `AdmitSelected` or `AdmitOpen` with a
-   `Reason`.
+1. Give it a capability, or declare `AdmitSelected` if its handler selects
+   and checks its own.
 2. Charge each authorized upstream request with `gateway.Spend` before
-   sending it, or list the route as free, with the record that decided it, in
-   `routetest.Free`, with the record that decided it.
-3. Record every reply with `gateway.Record` and its outcome, or mark a
-   deliberate omission with `gateway.Unrecorded`.
+   sending it, or list the handler in `routetest.Free` with the record that
+   decided it is free.
+3. Record every reply with `gateway.Record` and the outcome of its cause, or
+   mark a deliberate omission with `gateway.Unrecorded`.
 4. Serve a `model.inference` authority only from the provider table
    (`internal/endpoints/model/providers.go`).
 5. Add the handler's served request to `internal/gateway/routetest/routetest.go`,
    which both enumeration tests use; a handler it does not know fails them.
-   Then rerun the outcome records with `-update-records` and review the rows
-   that change.
+   The contract proves one served request spends; add outcome record rows for
+   each operation that charges differently, then rerun the records with
+   `-update-records` and review the rows that change.
 
 `internal/budget` defines shared accounting rules and memory and Kubernetes
 storage adapters. `Meter.Spend` charges known usage before forwarding.

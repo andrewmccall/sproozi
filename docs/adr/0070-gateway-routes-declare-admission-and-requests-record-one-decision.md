@@ -66,17 +66,18 @@ Constraints:
    - `AdmitCapability`, the zero value: the dispatcher checks and meters
      `Capability`, which must be set.
    - `AdmitSelected`: the handler selects a capability from the request and
-     checks it itself. The gateway's own authority is the one such route:
-     named MCP selects `mcp.<name>` from the path, and the control connection
-     beside it needs none (ADR 0025). `Route.Reason` names this.
-   - `AdmitOpen`: no capability by decision; `Route.Reason` names the record
-     that decided it. No composed route uses it today.
+     checks it itself; the route has no `Capability`. The gateway's own
+     authority is the one such route: named MCP selects `mcp.<name>` from the
+     path, and the control connection beside it needs none (ADR 0025).
 
    `Dispatcher.Validate` refuses a route or path route that has a handler and
    no valid declaration. Both compositions call it before serving, so a
    zero-valued `Route` with a handler stops the gateway at start-up instead of
-   serving unchecked. A route without a handler is a reserved, closed
-   authority and needs no declaration.
+   serving unchecked. The dispatcher also checks the declaration of every
+   request's route, and refuses (403 `route_undeclared`) and records an
+   undeclared one, so a composition that never called `Validate` still cannot
+   serve it. A route without a handler is a reserved, closed authority and
+   needs no declaration.
 
 2. **One admission function.** `gateway.Admit(ctx, capability)` runs
    `Permits` and selects the meter, returning the metered context or a
@@ -90,11 +91,18 @@ Constraints:
 3. **Each dispatched request records one decision.** The dispatcher puts a
    decision in the request context. A handler records its audit event with
    `gateway.Record(ctx, writer, event)`, which writes through the handler's
-   writer and marks the request decided. A request that is unrecorded by
-   design says so with `gateway.Unrecorded(ctx, reason)`, from a closed list
-   of reasons, without writing anything. When a handler returns without
-   either, the dispatcher writes the route's event with outcome `unrecorded`,
-   naming the route and nothing from the request. Handlers keep building
+   writer and marks the request decided. A nil writer writes nothing and
+   leaves the request undecided; a handler built without a writer, which used
+   to panic on `Log` in four handler families, now replies and gets the
+   dispatcher's record. A request that is unrecorded by design says so with
+   `gateway.Unrecorded(ctx, reason)`, without writing anything. The reasons
+   are a closed list: `UnrecordedReason` has only its three declared values,
+   and the decision keeps the reason so a test can see which site declared
+   what. When a handler returns without either, the dispatcher writes the
+   route's event with outcome `unrecorded`, naming the route and nothing from
+   the request. A sandbox cannot cause one: a named MCP tool call the protocol
+   handler refuses before the tool runs, and every path on a Docker MCP
+   authority without a registry, keep their replies and are recorded. Handlers keep building
    their own events with `gateway.AuditEvent` and keep writing their own
    replies. The dispatcher and `LeakGuard` record their own refusals:
    `budget_unavailable`, `allocation_denied`, the handler-less
@@ -121,6 +129,17 @@ Constraints:
    | `cancelled` | The workload left before a response was relayed. |
    | `unrecorded` | The handler recorded nothing; only the dispatcher writes it. |
 
+   The outcome follows the cause, not the status: an unsupported operation,
+   option, method or query is `refused_request` whatever status answers it, a
+   cost cap the endpoint cannot price is `refused_budget`, and a workload that
+   leaves a tool call is `cancelled`, as it is for a model call. Every audit
+   record carries one, including the proxy's refusal of a destination that is
+   not enabled. Left as they are, and open: the named MCP "invalid tool
+   scope" refusal (`refused_policy`, though it is the administrator's scope
+   that is invalid), model row 17, a first flush that fails after the
+   headers (`served`), and a provider's error, `served` and `allowed` on
+   OpenAI but `upstream_failed` and not `allowed` on Anthropic.
+
    `allowed` keeps its value on every path. Which outcomes `allowed` and the
    denial journal follow is decided separately. The journal does not retain
    `unrecorded` records: they are not refusals, and `diagnose` would show them
@@ -134,14 +153,33 @@ Constraints:
    messages; the error lets each record the right outcome, so a budget
    refusal is no longer recorded as an upstream failure.
 
-6. **One test enumerates the composed routes.** It builds the Kubernetes
-   composition for each credential mode and module selection and the Docker
-   composition for every harness and credential mechanism, and asserts for
-   each route: a valid declaration; a request without the capability is
-   refused and recorded; a served request with a one-unit budget spends it,
-   unless the route is listed as free with its record (the relays, ADR 0047;
-   the control connection, ADR 0025); and every `model.inference` authority is
-   served by its provider-table route or by none.
+6. **One test enumerates the composed routes.** It builds the routes with
+   the compositions' own construction (`composeGateway` in `cmd/gateway`,
+   which `main` calls, and `composeRoutes` in the Docker gateway) and serves:
+   - the Kubernetes composition for eight credential configurations (an
+     OpenAI key, both keys, an Anthropic key, gateway-held sign-in tokens, a
+     Copilot token, the harness's own sign-in with and without a gateway key,
+     and ChatGPT) against five module selections, always with an MCP
+     registry;
+   - the Docker composition for every managed harness with a key, a token,
+     its own sign-in and, for the OpenAI harnesses, ChatGPT, with GitHub and
+     Kubernetes, and every harness without a registry, GitHub or Kubernetes.
+
+   For each route it asserts: a valid declaration; a request without the
+   capability is refused and recorded; one served request with a one-unit
+   budget spends it, unless the handler is listed as free with its record
+   (the relays, ADR 0047; the control connection, ADR 0025); malformed and
+   unusual requests leave no `unrecorded` record; and every `model.inference`
+   authority is served by its provider-table route or by none. A separate
+   sweep composes and validates, without serving, every configuration the
+   loader accepts across auth mode, keys, tokens, eleven module selections
+   and the registry (632 today). ChatGPT is served with a stored-sign-in
+   fake; an Anthropic harness with ChatGPT is not a configuration.
+
+   The contract proves that each route's handler spends for one request. It
+   does not prove every operation spends: a GitHub pull request charges each
+   upstream request, and a Kubernetes watch is charged before it opens. The
+   per-operation outcome records are the guard for the rest.
 
 The model call's settlement (ADR 0028) may later be rewritten as one `end`
 step that derives the charge, end reason and audit fields from the call's
@@ -169,6 +207,10 @@ phase. That rewrite changes no outcome and is not part of this decision.
 - **A metering transport on the upstream clients.** Named MCP's discovery,
   which costs no units, uses the same client path, and a handler that builds a
   request without the context would escape it.
+- **An open admission with a reason.** `AdmitOpen` with a free-text
+  `Route.Reason` naming the record that decided a route needs no capability.
+  Removed: no route needs it, any non-blank reason passed, and a sign-in
+  relay declared open would have served runs without `model.inference`.
 - **`Record(ctx, event)` writing through the route's writer.** One writer per
   route, but handlers are built and tested with their own writer, and a route
   composed without one would silently drop every handler's records. The
@@ -181,7 +223,7 @@ phase. That rewrite changes no outcome and is not part of this decision.
 
 ## Tradeoffs and consequences
 
-- No refusal body, status, charge, `allowed` value or `endReason` changes.
+- No composed route's refusal body, status, charge, `allowed` value or `endReason` changes.
   The recorded outcomes of the unchanged code were committed as test data
   first (`testdata/outcomes.txt` beside each handler, `testdata/routes.txt`
   beside each composition), and each behaviour change shows its rows
@@ -190,6 +232,8 @@ phase. That rewrite changes no outcome and is not part of this decision.
   `LeakGuard`'s refusals. These reach the denial journal, so `diagnose` can
   now explain them.
 - Every audit line gains `outcome`. Readers of `allowed` are unaffected.
+- Spending is proven per route by the contract and per operation only by the
+  outcome records; a new operation needs its own record rows.
 - Handlers still choose their statuses and bodies, so the budget answers
   stay as they are until each is changed deliberately. The outcome makes the
   remaining differences visible.

@@ -202,10 +202,10 @@ beside `allowed`. See
 ### Route admission
 
 What a gateway route declares about who admits its requests: the dispatcher
-for its capability (`AdmitCapability`), its handler for a capability it
-selects from the request (`AdmitSelected`, named MCP), or no one by recorded
-decision (`AdmitOpen`). The gateway refuses to start with a route that has a
-handler and no valid declaration. See
+for its capability (`AdmitCapability`), or its handler for a capability it
+selects from the request (`AdmitSelected`, named MCP). The gateway refuses to
+start with a route that has a handler and no valid declaration, and refuses a
+request to one. See
 [ADR 0070](docs/adr/0070-gateway-routes-declare-admission-and-requests-record-one-decision.md).
 
 ### Sproozi integration

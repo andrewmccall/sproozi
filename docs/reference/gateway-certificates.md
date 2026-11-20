@@ -226,11 +226,15 @@ response bodies, headers, credentials or query strings.
 | `cancelled` | The workload left before a response was relayed. |
 | `unrecorded` | The handler wrote no record; the dispatcher wrote this one for the route. It names no request detail. |
 
-`allowed` is unchanged by `outcome` and not always its opposite: a model call
-that ends while it waits for its budget because the gateway is stopping is
-`allowed` `true` with `outcome` `unavailable`, and a provider's own error is
-`allowed` `true` on OpenAI routes. Read `outcome` to tell a budget refusal
-from a policy refusal or an upstream failure.
+`outcome` follows the cause, not the HTTP status: an unsupported operation,
+method or query answered 403 is `refused_request`, and a budget refusal a
+handler answers 502 is `refused_budget`. `allowed` is unchanged by `outcome`
+and not always its opposite: a model call that ends while it waits for its
+budget because the gateway is stopping is `allowed` `true` with `outcome`
+`unavailable`, and a provider's own error is `allowed` `true` on OpenAI
+routes. Read `outcome` to tell a budget refusal from a policy refusal or an
+upstream failure. Every gateway record carries `outcome`, including the
+proxy's refusal of a destination that is not enabled.
 
 These requests have no record by design while their auditing is undecided:
 named MCP discovery (`initialize`, `tools/list`, `ping`, `server/discover`
