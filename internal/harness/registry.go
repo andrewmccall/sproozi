@@ -124,12 +124,25 @@ type Harness struct {
 type SignInChoice struct {
 	// Label is the answer's wording.
 	Label string
-	// Credential is how the harness then reaches its provider.
-	Credential NativeCredential
-	// ChatGPT: the gateway signs in to a ChatGPT plan during setup and holds
-	// that ChatGPT credential. Credential is then CredentialKey.
-	ChatGPT bool
+	// Answer is how the harness then reaches its provider.
+	Answer SignInAnswer
 }
+
+// SignInAnswer is a way the setup wizard offers for a harness to reach its
+// model provider; each is one of its flags.
+type SignInAnswer string
+
+const (
+	// AnswerKey: an API key the gateway holds (no flag).
+	AnswerKey SignInAnswer = "key"
+	// AnswerChatGPT: the gateway signs in to a ChatGPT plan during setup and
+	// holds that ChatGPT credential (--chatgpt).
+	AnswerChatGPT SignInAnswer = "chatgpt"
+	// AnswerToken: a sign-in token the gateway holds (--token).
+	AnswerToken SignInAnswer = "token"
+	// AnswerSignIn: the harness signs in itself (--sign-in).
+	AnswerSignIn SignInAnswer = "sign-in"
+)
 
 // ProvesCompletion reports the kind's StateProvesCompletion.
 func ProvesCompletion(kind NativeKind) bool {
@@ -225,10 +238,10 @@ var registry = []Harness{
 		KeyEnv: nativeOpenAIKey, RefusedFlags: codexControlled, ReservedEnv: []string{"CODEX_HOME"},
 		RemoteExecutor: true, TakesTask: true, Default: true, KeyOptions: codexKeyOptions, SignInOptions: []string{codexTrust},
 		SignInChoices: []SignInChoice{
-			{Label: "An OpenAI API key, held by the gateway", Credential: CredentialKey},
-			{Label: "A ChatGPT plan, signed in now in your browser and held by the gateway", Credential: CredentialKey,
-				ChatGPT: true},
-			{Label: "Codex signs in itself with ChatGPT in its first session", Credential: CredentialSignIn},
+			{Label: "An OpenAI API key, held by the gateway", Answer: AnswerKey},
+			{Label: "A ChatGPT plan, signed in now in your browser and held by the gateway",
+				Answer: AnswerChatGPT},
+			{Label: "Codex signs in itself with ChatGPT in its first session", Answer: AnswerSignIn},
 		},
 		MCP: MCPFormat{File: "codex-mcp.toml"}, Loader: NativeMCP},
 	{Selector: string(NativeClaude), Native: NativeClaude, NativeDirectory: "claude", Protocol: ProtocolAnthropic,
@@ -238,9 +251,9 @@ var registry = []Harness{
 		ReservedEnv: []string{"CLAUDE_CONFIG_DIR", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "DISABLE_AUTOUPDATER",
 			"CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION", "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS"},
 		SignInChoices: []SignInChoice{
-			{Label: "An Anthropic API key, held by the gateway", Credential: CredentialKey},
-			{Label: `A sign-in token from "claude setup-token", held by the gateway`, Credential: CredentialToken},
-			{Label: "Claude Code signs in itself with /login in its first session", Credential: CredentialSignIn},
+			{Label: "An Anthropic API key, held by the gateway", Answer: AnswerKey},
+			{Label: `A sign-in token from "claude setup-token", held by the gateway`, Answer: AnswerToken},
+			{Label: "Claude Code signs in itself with /login in its first session", Answer: AnswerSignIn},
 		},
 		RequestFiles: true, Loader: NativeMCP, LaunchFiles: launchFilesNamed("claude-launch.py"),
 		MCP: MCPFormat{File: "claude-mcp.json", Field: mcpServersField, Entry: func(name, address string) (string, any) {
@@ -257,9 +270,9 @@ var registry = []Harness{
 		TokenEnv: "COPILOT_GITHUB_TOKEN", TokenPlaceholder: NativeCopilotTokenPlaceholder, SignInYieldsGitHubToken: true,
 		SignInChoices: []SignInChoice{
 			{Label: "Copilot signs in itself with /login and your Copilot plan in its first session",
-				Credential: CredentialSignIn},
-			{Label: "A GitHub token with Copilot access, held by the gateway", Credential: CredentialToken},
-			{Label: "An OpenAI API key, held by the gateway (no Copilot plan needed)", Credential: CredentialKey},
+				Answer: AnswerSignIn},
+			{Label: "A GitHub token with Copilot access, held by the gateway", Answer: AnswerToken},
+			{Label: "An OpenAI API key, held by the gateway (no Copilot plan needed)", Answer: AnswerKey},
 		},
 		RequestFiles: true, Loader: NativeMCP,
 		MCP: MCPFormat{File: "copilot-mcp.json", Field: mcpServersField, Entry: func(name, address string) (string, any) {

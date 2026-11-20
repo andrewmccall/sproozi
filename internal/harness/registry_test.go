@@ -342,24 +342,28 @@ func TestLaunchFilesAgreeWithTheirRegistryEntry(t *testing.T) {
 	}
 }
 
-// signInChoiceProblems checks each setup wizard answer: worded, naming a
-// mechanism the harness supports, and a ChatGPT plan only as a gateway-held
-// credential of an OpenAI harness.
+// signInChoiceProblems checks each setup wizard answer: worded, one of the
+// wizard's answers, given once, a ChatGPT plan only for an OpenAI harness and
+// the harness's own sign-in only when it has a sign-in file.
 func signInChoiceProblems(h Harness) []string {
 	var problems []string
+	labels, answers := map[string]bool{}, map[SignInAnswer]bool{}
 	for i, c := range h.SignInChoices {
 		switch {
 		case strings.TrimSpace(c.Label) == "":
 			problems = append(problems, fmt.Sprintf("SignInChoices[%d] needs a Label", i))
-		case c.Credential != CredentialKey && c.Credential != CredentialToken && c.Credential != CredentialSignIn:
-			problems = append(problems, fmt.Sprintf("SignInChoices[%d] needs a Credential", i))
-		case c.ChatGPT && (c.Credential != CredentialKey || h.Protocol != ProtocolOpenAI):
-			problems = append(problems, fmt.Sprintf("SignInChoices[%d] offers a ChatGPT plan, which only an OpenAI "+
-				"harness's gateway-held credential (CredentialKey) can be", i))
-		case c.Credential == CredentialSignIn && h.SignInFile == "":
+		case !slices.Contains([]SignInAnswer{AnswerKey, AnswerChatGPT, AnswerToken, AnswerSignIn}, c.Answer):
+			problems = append(problems, fmt.Sprintf("SignInChoices[%d] needs an Answer", i))
+		case labels[c.Label] || answers[c.Answer]:
+			problems = append(problems, fmt.Sprintf("SignInChoices[%d] repeats an earlier choice", i))
+		case c.Answer == AnswerChatGPT && h.Protocol != ProtocolOpenAI:
+			problems = append(problems, fmt.Sprintf("SignInChoices[%d] offers a ChatGPT plan, which only an "+
+				"OpenAI harness can use", i))
+		case c.Answer == AnswerSignIn && h.SignInFile == "":
 			problems = append(problems, fmt.Sprintf("SignInChoices[%d] lets the harness sign in itself, which "+
 				"needs its SignInFile", i))
 		}
+		labels[c.Label], answers[c.Answer] = true, true
 	}
 	return problems
 }

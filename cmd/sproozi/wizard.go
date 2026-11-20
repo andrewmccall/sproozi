@@ -72,6 +72,12 @@ func useToken(q *options)   { q.token = true }
 func apiKey(*options)       {}
 func useChatGPT(q *options) { q.chatgpt = true }
 
+// signInAnswers sets the flag each registry sign-in answer stands for.
+var signInAnswers = map[harness.SignInAnswer]func(*options){
+	harness.AnswerKey: apiKey, harness.AnswerChatGPT: useChatGPT, harness.AnswerToken: useToken,
+	harness.AnswerSignIn: signIn,
+}
+
 // signInChoices are the registry's sign-in answers for kind, most common
 // first; none for a kind that is not managed.
 func signInChoices(kind harness.NativeKind) []choice {
@@ -81,16 +87,7 @@ func signInChoices(kind harness.NativeKind) []choice {
 	}
 	choices := make([]choice, 0, len(h.SignInChoices))
 	for _, c := range h.SignInChoices {
-		apply := apiKey
-		switch {
-		case c.ChatGPT:
-			apply = useChatGPT
-		case c.Credential == harness.CredentialSignIn:
-			apply = signIn
-		case c.Credential == harness.CredentialToken:
-			apply = useToken
-		}
-		choices = append(choices, choice{c.Label, apply})
+		choices = append(choices, choice{c.Label, signInAnswers[c.Answer]})
 	}
 	return choices
 }

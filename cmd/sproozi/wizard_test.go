@@ -68,3 +68,15 @@ func TestWizardStopsAtEndOfInput(t *testing.T) {
 		t.Fatalf("err = %v; want advice to give the flags", err)
 	}
 }
+
+// Every sign-in answer the registry offers sets a flag the wizard knows.
+func TestEverySignInAnswerHasAFlag(t *testing.T) {
+	for _, kind := range harness.ManagedKinds() {
+		h, _ := harness.Managed(kind)
+		for _, c := range h.SignInChoices {
+			if signInAnswers[c.Answer] == nil {
+				t.Errorf("%s's sign-in answer %q has no entry in signInAnswers in cmd/sproozi/wizard.go", kind, c.Answer)
+			}
+		}
+	}
+}
