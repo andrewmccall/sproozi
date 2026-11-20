@@ -3,7 +3,6 @@ package budget
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 )
@@ -78,11 +77,15 @@ func (m *Meter) Spend(ctx context.Context, units, costMicros int64) error {
 	return r.Settle(units, costMicros)
 }
 
+// ErrNoMonetaryPricing refuses a request on an endpoint without trusted
+// pricing whose budget has a monetary ceiling.
+var ErrNoMonetaryPricing = errors.New("budget: endpoint has no trusted monetary pricing")
+
 // SpendRequest charges a single upstream request. These endpoints have no
 // trusted dollar pricing, so a monetary ceiling cannot be silently ignored.
 func (m *Meter) SpendRequest(ctx context.Context) error {
 	if m != nil && m.limits.MaxCostMicros > 0 {
-		return fmt.Errorf("budget: endpoint has no trusted monetary pricing")
+		return ErrNoMonetaryPricing
 	}
 	return m.Spend(ctx, 1, 0)
 }

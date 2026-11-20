@@ -229,7 +229,7 @@ func (h *Handler) prepare(ctx context.Context, upstream *sdk.ClientSession,
 						callEvent.DenyReason = "MCP arguments denied"
 						return nil, fmt.Errorf("MCP arguments denied")
 					}
-					if workCtx.Err() != nil || meter.SpendRequest(workCtx) != nil {
+					if workCtx.Err() != nil || gateway.Spend(budget.WithMeter(workCtx, meter)) != nil {
 						callEvent.DenyReason = "MCP authority or budget unavailable"
 						return nil, fmt.Errorf("MCP authority or budget unavailable")
 					}

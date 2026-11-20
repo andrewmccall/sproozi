@@ -28,8 +28,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/andrewmccall/sproozi/internal/budget"
-
 	"github.com/andrewmccall/sproozi/internal/audit"
 	"github.com/andrewmccall/sproozi/internal/gateway"
 )
@@ -119,7 +117,7 @@ func (h *Handler) handleHTTP(w http.ResponseWriter, r *http.Request, e audit.Eve
 	client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
 		return http.ErrUseLastResponse
 	}
-	if err := budget.FromContext(r.Context()).SpendRequest(r.Context()); err != nil {
+	if err := gateway.Spend(r.Context()); err != nil {
 		h.deny(r.Context(), w, e, http.StatusTooManyRequests, err.Error())
 		return
 	}

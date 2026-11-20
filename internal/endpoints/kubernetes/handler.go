@@ -12,8 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/andrewmccall/sproozi/internal/budget"
-
 	sprooziv1alpha1 "github.com/andrewmccall/sproozi/api/v1alpha1"
 	"github.com/andrewmccall/sproozi/internal/audit"
 	"github.com/andrewmccall/sproozi/internal/gateway"
@@ -156,7 +154,7 @@ func (h *Handler) authorizeAndForward(ctx context.Context, identity *gateway.Exe
 		// early; the deadline above bounds the watch instead.
 		upstreamClient.Timeout = 0
 	}
-	if err := budget.FromContext(ctx).SpendRequest(ctx); err != nil {
+	if err := gateway.Spend(ctx); err != nil {
 		cancel()
 		return nil, err
 	}
