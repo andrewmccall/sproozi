@@ -237,6 +237,35 @@ func recordedWaitingOutcomes(t *testing.T) map[string]any {
 	return map[string]any{"waitingFor": waiting, "taskActivation": activations}
 }
 
+// A kind the registry does not hold never reaches a graceful stop, so it
+// needs no wait text: the launch contract's validation refuses it, configure
+// and loading the contract run that validation, and a supervisor given one
+// anyway cannot activate it, so gate and quiesce, which begin every stop,
+// refuse.
+func TestAnUnregisteredKindNeverStops(t *testing.T) {
+	c := config{Harness: unregisteredKind, Instructions: instructions, InstructionDigest: digest(),
+		ClientConfig: testClients, Env: []string{}, RolloutMaxBytes: 8192}
+	if err := c.Validate(time.Now()); err == nil {
+		t.Fatal("the launch contract accepted an unregistered kind")
+	}
+	if r := newServer(config{}, true).configure(&c); r.Error == "" {
+		t.Fatalf("configure accepted an unregistered kind: %+v", r)
+	}
+	s := newServer(c, false)
+	if r := s.activate(); r.Error != "unsupported native harness" || r.State != harness.NativePrepared {
+		t.Fatalf("activate of an unregistered kind: %+v", r)
+	}
+	if r := s.gate(); r.Error != inactiveError {
+		t.Fatalf("gate of an unregistered kind: %+v", r)
+	}
+	if r := s.quiesce(); r.Error != inactiveError {
+		t.Fatalf("quiesce of an unregistered kind: %+v", r)
+	}
+	if r := s.status(); r.Waiting != "" || r.State != harness.NativePrepared {
+		t.Fatalf("status of an unregistered kind: %+v", r)
+	}
+}
+
 // What a graceful stop waits for, and how a task launch that resumes a
 // conversation activates, are the recorded ones for every kind.
 func TestWaitingOutcomesAreUnchanged(t *testing.T) {

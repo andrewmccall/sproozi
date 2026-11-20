@@ -73,7 +73,7 @@
         "claude-code": "Claude Code to report its conversation",
         "codex": "Codex to start its first turn",
         "copilot": "the current Copilot turn to complete",
-        "not-registered": "not-registered to start its first turn"
+        "not-registered": ""
       }
     },
     {
@@ -83,7 +83,7 @@
         "claude-code": "Claude Code to report its conversation",
         "codex": "Codex to start its first turn",
         "copilot": "Copilot to start its first turn",
-        "not-registered": "not-registered to start its first turn"
+        "not-registered": ""
       }
     },
     {
@@ -93,7 +93,7 @@
         "claude-code": "Claude Code to report its conversation",
         "codex": "the current Codex turn to complete",
         "copilot": "the current Copilot turn to complete",
-        "not-registered": "the current not-registered turn to complete"
+        "not-registered": ""
       }
     },
     {
@@ -103,7 +103,7 @@
         "claude-code": "terminal input sent after the last Claude Code turn to settle",
         "codex": "the current Codex turn to complete",
         "copilot": "the current Copilot turn to complete",
-        "not-registered": "the current not-registered turn to complete"
+        "not-registered": ""
       }
     },
     {
@@ -113,7 +113,7 @@
         "claude-code": "Claude Code to report its conversation",
         "codex": "the current Codex turn to complete",
         "copilot": "Copilot to start its first turn",
-        "not-registered": "the current not-registered turn to complete"
+        "not-registered": ""
       }
     },
     {
@@ -123,7 +123,7 @@
         "claude-code": "Claude Code's transcript to settle",
         "codex": "Codex to start its first turn",
         "copilot": "Copilot to start its first turn",
-        "not-registered": "not-registered to start its first turn"
+        "not-registered": ""
       }
     },
     {
@@ -133,7 +133,7 @@
         "claude-code": "Claude Code to stop",
         "codex": "the current Codex turn to complete",
         "copilot": "the current Copilot turn to complete",
-        "not-registered": "the current not-registered turn to complete"
+        "not-registered": ""
       }
     },
     {
@@ -143,7 +143,7 @@
         "claude-code": "the current Claude Code turn to finish",
         "codex": "the current Codex turn to complete",
         "copilot": "the current Copilot turn to complete",
-        "not-registered": "the current not-registered turn to complete"
+        "not-registered": ""
       }
     },
     {
@@ -153,7 +153,7 @@
         "claude-code": "a running Claude Code tool to finish",
         "codex": "the current Codex turn to complete",
         "copilot": "the current Copilot turn to complete",
-        "not-registered": "the current not-registered turn to complete"
+        "not-registered": ""
       }
     },
     {
@@ -163,7 +163,7 @@
         "claude-code": "the current Claude Code turn to finish",
         "codex": "the current Codex turn to complete",
         "copilot": "the current Copilot turn to complete",
-        "not-registered": "the current not-registered turn to complete"
+        "not-registered": ""
       }
     },
     {
@@ -173,7 +173,7 @@
         "claude-code": "Claude Code to stop",
         "codex": "the current Codex turn to complete",
         "copilot": "the current Copilot turn to complete",
-        "not-registered": "the current not-registered turn to complete"
+        "not-registered": ""
       }
     },
     {
@@ -183,7 +183,7 @@
         "claude-code": "Claude Code's transcript to settle",
         "codex": "Codex to start its first turn",
         "copilot": "the current Copilot turn to complete",
-        "not-registered": "not-registered to start its first turn"
+        "not-registered": ""
       }
     },
     {
@@ -193,7 +193,7 @@
         "claude-code": "terminal input sent after the last Claude Code turn to settle",
         "codex": "the current Codex turn to complete",
         "copilot": "the current Copilot turn to complete",
-        "not-registered": "the current not-registered turn to complete"
+        "not-registered": ""
       }
     },
     {
@@ -203,7 +203,7 @@
         "claude-code": "Claude Code's transcript to settle",
         "codex": "the current Codex turn to complete",
         "copilot": "the current Copilot turn to complete",
-        "not-registered": "the current not-registered turn to complete"
+        "not-registered": ""
       }
     }
   ]

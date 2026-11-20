@@ -754,16 +754,16 @@ func (s *server) endGracefully(exit nativepty.Exit, code int, thread string) (ov
 }
 
 // waitingFor describes, in fixed words, what a graceful stop waits for: its
-// harness adapter's wait text.
+// harness adapter's wait text. A kind without an adapter never stops
+// gracefully, since configure refuses it and activate cannot launch it, so it
+// has no wait text.
 func (s *server) waitingFor() string {
 	s.mu.Lock()
 	kind := s.config.Harness
 	s.mu.Unlock()
 	adapter, err := adapterFor(kind)
 	if err != nil {
-		// A kind without an adapter gets Codex's journal check, as it
-		// always has.
-		return turnWaiting(kind, codexJournalExists(codexHome))
+		return ""
 	}
 	return adapter.waiting(s)
 }
