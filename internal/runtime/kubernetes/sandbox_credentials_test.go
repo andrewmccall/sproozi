@@ -15,6 +15,9 @@ const (
 	podOpenAIBaseURL  = "OPENAI_BASE_URL=https://api.openai.com/v1"
 	podGitHubToken    = "GH_TOKEN=" + testClientAuthPlaceholder
 	testClaudeHarness = "claude-code"
+	// secondWorkloadContainer is a second container the runtime names a
+	// workload container.
+	secondWorkloadContainer = "second"
 )
 
 // podCredentialEnvironment is what the controller gives an AgentRun Pod's
@@ -45,17 +48,28 @@ func TestBuildPodSpecCredentialEnvironmentPerHarness(t *testing.T) {
 				rt.Spec.ClientConfig.SignIn = &sprooziv1alpha1.RuntimeSignIn{Claims: &sprooziv1alpha1.RuntimeLoginClaims{}}
 				expected = want.signIn
 			}
+			// Two workload containers: each gets the same environment.
+			second := *rt.Spec.PodTemplate.Spec.Containers[0].DeepCopy()
+			second.Name = secondWorkloadContainer
+			rt.Spec.PodTemplate.Spec.Containers = append(rt.Spec.PodTemplate.Spec.Containers, second)
+			rt.Spec.WorkloadContainers = append(rt.Spec.WorkloadContainers, secondWorkloadContainer)
 			run := testRunForSandbox("cccccccc-0000-0000-0000-000000000401")
 			pod := kubernetes.BuildPodSpec(run, rt, kubernetes.RunName(run.UID))
-			var got []string
-			for _, env := range pod.Spec.Containers[0].Env {
-				if strings.Contains(env.Name, "KEY") || strings.Contains(env.Name, "TOKEN") ||
-					strings.HasSuffix(env.Name, "_BASE_URL") {
-					got = append(got, env.Name+"="+env.Value)
-				}
+			if len(pod.Spec.Containers) != 2 {
+				t.Fatalf("Pod has %d containers, want both workload containers", len(pod.Spec.Containers))
 			}
-			if !slices.Equal(got, expected) {
-				t.Errorf("harness %q, sign-in %v: credential environment %v, want %v", selector, signIn, got, expected)
+			for _, c := range pod.Spec.Containers {
+				var got []string
+				for _, env := range c.Env {
+					if strings.Contains(env.Name, "KEY") || strings.Contains(env.Name, "TOKEN") ||
+						strings.HasSuffix(env.Name, "_BASE_URL") {
+						got = append(got, env.Name+"="+env.Value)
+					}
+				}
+				if !slices.Equal(got, expected) {
+					t.Errorf("harness %q, sign-in %v, container %s: credential environment %v, want %v",
+						selector, signIn, c.Name, got, expected)
+				}
 			}
 		}
 	}
