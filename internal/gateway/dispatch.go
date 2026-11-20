@@ -138,8 +138,7 @@ func (d Dispatcher) Allows(authority string) bool {
 // ServeHTTP preserves streaming, flushing and response lifetime. Buffering, when
 // required for validation, belongs to the individual capability implementation.
 func (d Dispatcher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	identity, ok := IdentityFromContext(r.Context())
-	if !ok {
+	if _, ok := IdentityFromContext(r.Context()); !ok {
 		writeDenial(w, http.StatusUnauthorized, "authentication_error", "identity_required",
 			"gateway identity required; connect through the gateway proxy with the run's token")
 		return
@@ -152,36 +151,14 @@ func (d Dispatcher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := context.WithValue(r.Context(), routeContextKey{}, route)
 	// Named MCP routes select their capability after parsing the server name
-	// and check it with the same Permits.
+	// and check it with the same Permits. A route that declares no capability
+	// is refused by Validate before the gateway serves.
 	if route.Admission == AdmitCapability && route.Capability != "" {
-		capability := route.Capability
-		if !identity.Permits(capability) {
-			reason := "the run does not request capability " + string(capability) +
-				"; add it to the run's capabilities"
-			if slices.Contains(identity.Capabilities, capability) {
-				reason = "policy " + identity.Policy.Name + " does not allow capability " + string(capability) +
-					"; add it to the policy's allowedCapabilities"
-			}
-			if route.AuditLogger != nil {
-				event := AuditEvent(ctx, string(capability))
-				event.DenyReason = reason
-				route.AuditLogger.Log(event)
-			}
-			writeDenial(w, http.StatusForbidden, "permission_error", "capability_denied", reason)
+		var refusal *Refusal
+		if ctx, refusal = Admit(ctx, route.Capability); refusal != nil {
+			Refuse(ctx, w, refusal)
 			return
 		}
-		meter, err := identity.Meter(ctx, route.Budgets, capability)
-		if errors.Is(err, ErrBudgetUnavailable) {
-			writeDenial(w, http.StatusServiceUnavailable, "api_error", "budget_unavailable",
-				"budget accounting for "+string(capability)+" is unavailable; retry later")
-			return
-		}
-		if err != nil {
-			writeDenial(w, http.StatusForbidden, "permission_error", "allocation_denied",
-				"the "+string(capability)+" allocation for this run is missing or exhausted")
-			return
-		}
-		ctx = budget.WithMeter(ctx, meter)
 	}
 	route.Handler.ServeHTTP(w, r.WithContext(ctx))
 }
